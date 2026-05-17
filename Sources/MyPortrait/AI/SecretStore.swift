@@ -131,11 +131,26 @@ final class SecretStore: @unchecked Sendable {
 
     // MARK: - Keychain master key
 
-    /// Fetch the 32-byte AES master key from Keychain, generating + storing one if missing.
+    /// Fetch the 32-byte AES master key from Keychain, generating + storing
+    /// one if missing. If the key is found in the LEGACY keychain but not in
+    /// the data-protection one, migrate it over so the per-build ACL prompts
+    /// stop firing on subsequent launches.
     private static func loadOrCreateMasterKey(service: String, account: String) -> SymmetricKey {
-        if let existing = readKeychain(service: service, account: account),
-           existing.count == 32 {
-            return SymmetricKey(data: existing)
+        if let fromDP = read(service: service, account: account, useDataProtection: true),
+           fromDP.count == 32 {
+            return SymmetricKey(data: fromDP)
+        }
+        if let legacy = read(service: service, account: account, useDataProtection: false),
+           legacy.count == 32 {
+            writeKeychain(service: service, account: account, data: legacy)
+            // Best-effort: drop the legacy copy so it stops triggering prompts.
+            let del: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ]
+            SecItemDelete(del as CFDictionary)
+            return SymmetricKey(data: legacy)
         }
         let new = SymmetricKey(size: .bits256)
         let data = new.withUnsafeBytes { Data($0) }
@@ -143,37 +158,64 @@ final class SecretStore: @unchecked Sendable {
         return new
     }
 
+    /// Read first via the data-protection keychain (no per-app ACL prompts).
+    /// Fall back to the legacy keychain so we can still find a master key
+    /// written by an older build.
     private static func readKeychain(service: String, account: String) -> Data? {
-        let q: [String: Any] = [
+        if let d = read(service: service, account: account, useDataProtection: true) { return d }
+        return read(service: service, account: account, useDataProtection: false)
+    }
+
+    private static func read(service: String, account: String, useDataProtection: Bool) -> Data? {
+        var q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
+        if useDataProtection {
+            q[kSecUseDataProtectionKeychain as String] = true
+        }
         var out: AnyObject?
         let status = SecItemCopyMatching(q as CFDictionary, &out)
         guard status == errSecSuccess, let data = out as? Data else { return nil }
         return data
     }
 
+    /// Write into the data-protection keychain when possible. Items there are
+    /// not gated by per-app ACL prompts that fire on every code-signature
+    /// change — which is what was making every rebuild pop a "MyPortrait
+    /// wants to access your keychain" dialog.
     private static func writeKeychain(service: String, account: String, data: Data) {
-        // Delete any stale entry first to avoid duplicate errors.
-        let del: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(del as CFDictionary)
+        // Delete from BOTH keychain backends to avoid duplicates / shadowing.
+        for useDP in [true, false] {
+            var del: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ]
+            if useDP { del[kSecUseDataProtectionKeychain as String] = true }
+            SecItemDelete(del as CFDictionary)
+        }
 
-        let add: [String: Any] = [
+        var add: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecUseDataProtectionKeychain as String: true
         ]
-        SecItemAdd(add as CFDictionary, nil)
+        var status = SecItemAdd(add as CFDictionary, nil)
+
+        // Some self-signed dev builds can't use the data-protection keychain
+        // (no entitlements). Fall back to the legacy one in that case.
+        if status != errSecSuccess {
+            add.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+            status = SecItemAdd(add as CFDictionary, nil)
+        }
+        _ = status
     }
 
     private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
