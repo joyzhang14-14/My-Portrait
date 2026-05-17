@@ -177,8 +177,8 @@ private struct TimelineControlsBar: View {
 
             Spacer()
         }
-        .controlSize(.large)
-        .font(.system(size: 18))
+        .controlSize(.extraLarge)
+        .font(.system(size: 22))
     }
 
     private var dateFmt: DateFormatter {
