@@ -10,7 +10,10 @@ struct ScreenpipeFrame: Identifiable, Hashable {
     let appName: String
     let windowName: String
     let browserUrl: String?       // set when the active app is a browser
-    let snapshotPath: String?
+    let snapshotPath: String?     // JPG for the small fraction of recent frames
+    let videoPath: String?        // MP4 file containing this frame (most cases)
+    let videoOffsetIndex: Int     // frame number inside the MP4
+    let videoFps: Double           // frames per second the MP4 was written at
 }
 
 /// Distinct app + window that was active within a small time window
@@ -85,13 +88,19 @@ struct ScreenpipeDB: Sendable {
         }
         defer { sqlite3_close(db) }
 
+        // screenpipe stores 99%+ of frames inside MP4 video chunks rather than
+        // as individual JPGs. We accept either, JOINing video_chunks to surface
+        // the file path + fps so an AVAssetImageGenerator can extract the
+        // specific frame on demand.
         let sql = """
-            SELECT id, timestamp, app_name, window_name, browser_url, snapshot_path
-            FROM frames
-            WHERE snapshot_path IS NOT NULL
-              AND timestamp >= ?
-              AND timestamp <  ?
-            ORDER BY timestamp ASC
+            SELECT f.id, f.timestamp, f.app_name, f.window_name, f.browser_url,
+                   f.snapshot_path, v.file_path, f.offset_index,
+                   COALESCE(v.fps, 0)
+            FROM frames f
+            LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
+            WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
+              AND f.timestamp >= ? AND f.timestamp < ?
+            ORDER BY f.timestamp ASC
             LIMIT ?
             """
 
@@ -116,10 +125,14 @@ struct ScreenpipeDB: Sendable {
             let win = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
             let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) }
             let snap = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
+            let vpath = sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) }
+            let offset = Int(sqlite3_column_int64(stmt, 7))
+            let fps = sqlite3_column_double(stmt, 8)
             let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
             results.append(.init(
                 id: id, timestamp: date, appName: app, windowName: win,
-                browserUrl: url, snapshotPath: snap
+                browserUrl: url, snapshotPath: snap,
+                videoPath: vpath, videoOffsetIndex: offset, videoFps: fps
             ))
         }
 

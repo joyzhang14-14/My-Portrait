@@ -324,6 +324,16 @@ private struct FramePreview: View {
                     AsyncDiskThumbnail(path: path, targetPixelSize: 1800)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                } else if let vpath = frame.videoPath {
+                    // 99%+ of frames live here — compacted into an MP4 chunk
+                    AsyncMP4FrameThumbnail(
+                        videoPath: vpath,
+                        offsetIndex: frame.videoOffsetIndex,
+                        fps: frame.videoFps,
+                        targetPixelSize: 1800
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
                 } else {
                     Rectangle().fill(Color.white.opacity(0.05))
                 }
