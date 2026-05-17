@@ -18,6 +18,7 @@ APP_NAME="MyPortrait"
 DISPLAY_NAME="My Portrait"
 BUNDLE_ID="com.joyzhang.MyPortrait"
 APP_DIR="${APP_NAME}.app"
+SIGN_IDENTITY="${CODESIGN_IDENTITY:-MyPortraitDev}"
 
 cd "$(dirname "$0")/.."
 
@@ -72,6 +73,14 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+
+if security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
+    echo "Signing with $SIGN_IDENTITY ..."
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+    codesign --verify --verbose "$APP_DIR"
+else
+    echo "Skip signing: identity '$SIGN_IDENTITY' not found in keychain."
+fi
 
 echo ""
 echo "Built: $APP_DIR"
