@@ -33,9 +33,7 @@ struct ContentView: View {
         case .pipes:         NativePlaceholder(title: "Pipes",
                                                systemImage: "puzzlepiece.extension.fill",
                                                subtitle: "Coming soon")
-        case .memories:      NativePlaceholder(title: "Memories",
-                                               systemImage: "sparkles",
-                                               subtitle: "Coming soon")
+        case .memories:      MemoriesView()
         }
     }
 }
