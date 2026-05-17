@@ -62,7 +62,6 @@ struct TimelineSidebar: View {
         }
         .background(Color(NSColor.windowBackgroundColor).opacity(0.92))
         .navigationTitle("")
-        .toolbar(.hidden, for: .windowToolbar)   // no top bar — date isn't covered
         .onAppear { reload() }
         .onChange(of: state.focusIndex) { reload() }
         .onChange(of: state.frames.count) { reload() }

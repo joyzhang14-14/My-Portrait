@@ -135,7 +135,7 @@ private struct TimelineControlsBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
             Spacer()
 
             Button {
@@ -148,7 +148,7 @@ private struct TimelineControlsBar: View {
             .buttonStyle(.borderless)
 
             Button { calendarOpen.toggle() } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: "calendar")
                     Text(dateFmt.string(from: currentDate))
                 }
@@ -177,8 +177,8 @@ private struct TimelineControlsBar: View {
 
             Spacer()
         }
-        .controlSize(.regular)
-        .font(.system(size: 13))
+        .controlSize(.large)
+        .font(.system(size: 18))
     }
 
     private var dateFmt: DateFormatter {

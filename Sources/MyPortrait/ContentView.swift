@@ -16,6 +16,9 @@ struct ContentView: View {
                 .frame(minWidth: 600, minHeight: 400)
         }
         .environment(appState)
+        // Hide at the top level so the toolbar can't reappear during nested
+        // view re-renders (e.g. when the calendar popover closes).
+        .toolbar(.hidden, for: .windowToolbar)
     }
 
     @ViewBuilder
