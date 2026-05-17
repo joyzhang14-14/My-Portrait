@@ -173,21 +173,14 @@ private struct ChatTranscript: View {
 private struct ChatBubble: View {
     let message: ChatMessage
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(message.role == .user ? Color.white.opacity(0.16) : Color.purple.opacity(0.35))
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Image(systemName: message.role == .user ? "person.fill" : "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                )
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: 14) {
+            BubbleAvatar(role: message.role)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(message.role == .user ? "You" : "Assistant")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Text(message.text)
-                    .font(.system(size: 13.5))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Text(.init(message.text))     // initializer with `LocalizedStringKey` parses basic markdown
+                    .font(.system(size: 14))
                     .foregroundStyle(.white.opacity(0.95))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -195,6 +188,30 @@ private struct ChatBubble: View {
             }
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 4)
+    }
+}
+
+/// Shared avatar used by user, assistant, and the streaming-dots placeholder.
+private struct BubbleAvatar: View {
+    let role: ChatRole
+    var body: some View {
+        ZStack {
+            if role == .assistant {
+                LinearGradient(
+                    colors: [Color(red: 0.55, green: 0.27, blue: 0.85),
+                             Color(red: 0.30, green: 0.15, blue: 0.65)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+                .clipShape(Circle())
+            } else {
+                Circle().fill(Color.white.opacity(0.14))
+            }
+            Image(systemName: role == .user ? "person.fill" : "sparkles")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+        .frame(width: 34, height: 34)
     }
 }
 
@@ -202,15 +219,12 @@ private struct ChatThinking: View {
     @State private var phase = 0
     private let dots = ["·  ·  ·", "•  ·  ·", "·  •  ·", "·  ·  •"]
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle().fill(Color.purple.opacity(0.35))
-                .frame(width: 28, height: 28)
-                .overlay(Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92)))
+        HStack(alignment: .top, spacing: 14) {
+            BubbleAvatar(role: .assistant)
             Text(dots[phase])
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 8)
                 .onAppear {
                     Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { _ in
                         Task { @MainActor in phase = (phase + 1) % dots.count }
@@ -218,6 +232,7 @@ private struct ChatThinking: View {
                 }
             Spacer()
         }
+        .padding(.horizontal, 4)
     }
 }
 
@@ -315,56 +330,43 @@ private struct ChatInputBar: View {
             }
             .padding(.horizontal, 16)
 
-            HStack(alignment: .bottom, spacing: 8) {
-                ZStack(alignment: .topLeading) {
-                    if prompt.isEmpty {
-                        Text("Ask about your screen…  (type @ for filters, paste images)")
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.32))
-                            .padding(.horizontal, 14)
-                            .padding(.top, 11)
-                            .allowsHitTesting(false)
-                    }
-                    TextEditor(text: $prompt)
-                        .scrollContentBackground(.hidden)
+            HStack(alignment: .center, spacing: 8) {
+                // Auto-growing single-line-by-default field. Up to ~6 lines, then scrolls.
+                TextField(
+                    "",
+                    text: $prompt,
+                    prompt: Text("Ask about your screen…  (type @ for filters, paste images)")
                         .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .frame(minHeight: 44, maxHeight: 120)
-                        .focused($focused)
-                        .onKeyPress(.return) {
-                            // Shift+Return inserts newline (default); plain Return sends.
-                            if NSEvent.modifierFlags.contains(.shift) { return .ignored }
-                            onSend()
-                            return .handled
-                        }
-                }
+                        .foregroundColor(.white.opacity(0.32)),
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .lineLimit(1...6)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color.white.opacity(0.03))
                         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10), lineWidth: 1))
                 )
-
-                HStack(spacing: 6) {
-                    Image(systemName: "shield").font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
-                    Image(systemName: "paperclip").font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
-                    Button(action: onSend) {
-                        Image(systemName: "paperplane.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.return, modifiers: [.command])
+                .focused($focused)
+                .onKeyPress(.return) {
+                    if NSEvent.modifierFlags.contains(.shift) { return .ignored }
+                    onSend()
+                    return .handled
                 }
-                .padding(.bottom, 6)
+
+                HStack(spacing: 4) {
+                    IconActionButton(icon: "shield") { /* TODO */ }
+                    IconActionButton(icon: "paperclip") { /* TODO */ }
+                    SendButton(action: onSend)
+                        .keyboardShortcut(.return, modifiers: [.command])
+                }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 14)
+            .padding(.bottom, 12)
         }
         .padding(.top, 10)
         .background(Color.black)
@@ -374,6 +376,66 @@ private struct ChatInputBar: View {
         .onAppear { focused = true }
         // keep onChipTap referenced for compiler; chips are wired via greeting buttons
         .onChange(of: prompt) { _ = onChipTap }
+    }
+}
+
+// MARK: - Input bar right-side actions
+
+/// Generic icon button (shield / paperclip). 18pt symbol, hover lifts to white,
+/// 6pt corner-rounded background on press.
+private struct IconActionButton: View {
+    let icon: String
+    let action: () -> Void
+    @State private var hover = false
+    @State private var pressed = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.white.opacity(hover ? 0.92 : 0.55))
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.white.opacity(pressed ? 0.10 : (hover ? 0.05 : 0)))
+                )
+                .scaleEffect(pressed ? 0.92 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { pressed = true } }
+                .onEnded   { _ in withAnimation(.easeOut(duration: 0.12)) { pressed = false } }
+        )
+        .animation(.easeOut(duration: 0.12), value: hover)
+    }
+}
+
+/// Primary send button — solid white background, hover brightens, click pops.
+private struct SendButton: View {
+    let action: () -> Void
+    @State private var hover = false
+    @State private var pressed = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "paperplane.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.black)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(pressed ? 0.85 : (hover ? 1.0 : 0.92)))
+                )
+                .scaleEffect(pressed ? 0.92 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { pressed = true } }
+                .onEnded   { _ in withAnimation(.easeOut(duration: 0.12)) { pressed = false } }
+        )
+        .animation(.easeOut(duration: 0.12), value: hover)
     }
 }
 

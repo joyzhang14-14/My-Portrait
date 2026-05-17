@@ -27,10 +27,14 @@ enum Storage {
     /// Reserved for future vector sidecar — empty until ~500 portrait files.
     static var embeddingsDir: URL { rootURL.appendingPathComponent(".embeddings", isDirectory: true) }
 
+    /// Append-only daily action logs from the Memory pipeline (merges,
+    /// archives, supersede decisions, weight passes). See design doc 6.6.
+    static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
+
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {
         let fm = FileManager.default
-        for url in [rootURL, portraitDir, audioQueueDir, dailyLogsDir] {
+        for url in [rootURL, portraitDir, audioQueueDir, dailyLogsDir, journalDir] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
