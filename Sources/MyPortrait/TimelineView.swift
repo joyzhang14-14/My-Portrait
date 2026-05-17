@@ -114,88 +114,75 @@ struct TimelineView: View {
 }
 
 // =============================================================================
-// MARK: - TimelineControls (date nav + calendar popover)
+// MARK: - TimelineControls (date nav + calendar popover) — native styling
 // =============================================================================
+//
+// Uses stock SwiftUI button styles so the bar looks like the rest of macOS:
+//   - chevrons / refresh: .borderless icon buttons (hover handled by system)
+//   - date trigger: .bordered button (the standard "pill" look used in
+//     Calendar, Reminders, the menu-bar clock, Finder's column-view header,
+//     etc.)
+//   - system font (SF Pro) on the date — monospaced was too "code-editor"
 
 private struct TimelineControlsBar: View {
     @Binding var currentDate: Date
     let onRefresh: () -> Void
     @State private var calendarOpen = false
 
+    private var canGoForward: Bool {
+        guard let next = Calendar.current.date(byAdding: .day, value: 1, to: currentDate) else { return false }
+        return next <= Date()
+    }
+
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
             Spacer()
-            HStack(spacing: 0) {
-                ControlIconButton(systemName: "chevron.left") {
-                    if let d = Calendar.current.date(byAdding: .day, value: -1, to: currentDate) {
-                        currentDate = d
-                    }
-                }
 
-                Button { calendarOpen.toggle() } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "calendar").font(.system(size: 12))
-                        Text(dateFmt.string(from: currentDate))
-                            .font(.system(size: 15, design: .monospaced))
-                    }
-                    .frame(minWidth: 140, minHeight: 32)
-                    .foregroundStyle(.white.opacity(0.92))
+            Button {
+                if let d = Calendar.current.date(byAdding: .day, value: -1, to: currentDate) {
+                    currentDate = d
                 }
-                .buttonStyle(InvertOnHoverButtonStyle())
-                .popover(isPresented: $calendarOpen, arrowEdge: .bottom) {
-                    CalendarPopover(selected: $currentDate, isPresented: $calendarOpen)
-                }
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.borderless)
 
-                ControlIconButton(systemName: "chevron.right") {
-                    if let d = Calendar.current.date(byAdding: .day, value: 1, to: currentDate),
-                       d <= Date() { currentDate = d }
-                }
-
-                ControlIconButton(systemName: "arrow.clockwise") {
-                    currentDate = Date()
-                    onRefresh()
+            Button { calendarOpen.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                    Text(dateFmt.string(from: currentDate))
                 }
             }
-            .background(Color.black)
-            .overlay(Rectangle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .buttonStyle(.bordered)
+            .popover(isPresented: $calendarOpen, arrowEdge: .bottom) {
+                CalendarPopover(selected: $currentDate, isPresented: $calendarOpen)
+            }
+
+            Button {
+                if let d = Calendar.current.date(byAdding: .day, value: 1, to: currentDate),
+                   d <= Date() { currentDate = d }
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canGoForward)
+
+            Button {
+                currentDate = Date()
+                onRefresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+
             Spacer()
         }
+        .controlSize(.regular)
+        .font(.system(size: 13))
     }
 
     private var dateFmt: DateFormatter {
-        let f = DateFormatter(); f.dateFormat = "d MMM yyyy"; return f
-    }
-}
-
-private struct ControlIconButton: View {
-    let systemName: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13))
-                .frame(width: 32, height: 32)
-                .foregroundStyle(.white.opacity(0.85))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(InvertOnHoverButtonStyle())
-    }
-}
-
-private struct InvertOnHoverButtonStyle: ButtonStyle {
-    @State private var hover = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(hover ? Color.white : Color.clear)
-            .colorInvert(if: hover)
-            .onHover { hover = $0 }
-            .animation(.easeOut(duration: 0.12), value: hover)
-    }
-}
-
-private extension View {
-    @ViewBuilder func colorInvert(if condition: Bool) -> some View {
-        if condition { self.colorInvert() } else { self }
+        let f = DateFormatter(); f.dateFormat = "MMM d, yyyy"; return f
     }
 }
 
