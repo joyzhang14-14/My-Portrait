@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
-import Network
 import AppKit
+import Darwin
 
 /// OAuth PKCE flow for ChatGPT (OpenAI Codex / ChatGPT subscriber login).
 ///
@@ -73,7 +73,7 @@ enum ChatGPTOAuth {
         let (verifier, challenge) = generatePKCE()
 
         // Bind listener (try port 1455 first; fall back to ephemeral).
-        let listener = try await CallbackListener.start(preferredPort: callbackPort)
+        let listener = try CallbackListener.start(preferredPort: callbackPort)
         let actualPort = listener.port
         let redirectURI = "http://localhost:\(actualPort)/auth/callback"
         let state = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -195,19 +195,6 @@ enum ChatGPTOAuth {
     }
 }
 
-/// One-shot atomic flag — `setOnce()` returns true exactly once.
-/// Used to guard a single `cont.resume(...)` across concurrent state callbacks.
-private final class AtomicFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var fired = false
-    func setOnce() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if fired { return false }
-        fired = true
-        return true
-    }
-}
-
 enum OAuthError: LocalizedError {
     case notLoggedIn
     case badRequest(String)
@@ -226,114 +213,105 @@ enum OAuthError: LocalizedError {
     }
 }
 
-// MARK: - Local HTTP listener for OAuth callback
+// MARK: - Local HTTP listener for OAuth callback (BSD sockets)
+//
+// Network.framework's NWListener returned EINVAL fallbacks in our test runs.
+// A POSIX socket is what Orphies' Rust implementation uses and is the most
+// predictable thing on macOS — bind, listen, accept, read one request,
+// respond, close. No frameworks in the way.
 
-/// Minimal one-shot HTTP listener bound to localhost. Accepts the first
-/// connection whose request line includes `?code=...`, responds with a
-/// success page, and yields the code.
 private final class CallbackListener: @unchecked Sendable {
     let port: UInt16
-    private let listener: NWListener
-    private var continuation: CheckedContinuation<String, Error>?
-    private let lock = NSLock()
+    private let fd: Int32
 
-    private init(listener: NWListener, port: UInt16) {
-        self.listener = listener
+    private init(fd: Int32, port: UInt16) {
+        self.fd = fd
         self.port = port
-        listener.newConnectionHandler = { [weak self] conn in
-            self?.handle(conn)
+    }
+
+    deinit { close(fd) }
+
+    static func start(preferredPort: UInt16) throws -> CallbackListener {
+        if let l = try? bind(port: preferredPort) { return l }
+        return try bind(port: 0)
+    }
+
+    private static func bind(port: UInt16) throws -> CallbackListener {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw OAuthError.listenerFailed("socket(): \(String(cString: strerror(errno)))")
         }
+
+        var yes: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian          // host → network byte order
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+
+        let bindRes = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindRes == 0 else {
+            let err = String(cString: strerror(errno))
+            close(fd)
+            throw OAuthError.listenerFailed("bind \(port): \(err)")
+        }
+        guard listen(fd, 1) == 0 else {
+            let err = String(cString: strerror(errno))
+            close(fd)
+            throw OAuthError.listenerFailed("listen: \(err)")
+        }
+
+        // Read back the assigned port (matters when port = 0 → ephemeral).
+        var bound = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        withUnsafeMutablePointer(to: &bound) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                _ = getsockname(fd, $0, &len)
+            }
+        }
+        let assigned = UInt16(bigEndian: bound.sin_port)
+        return CallbackListener(fd: fd, port: assigned)
     }
 
-    static func start(preferredPort: UInt16) async throws -> CallbackListener {
-        // Try preferred port first; on any failure (port busy, EADDRINUSE, etc.)
-        // fall back to an OS-assigned ephemeral port.
-        if let l = try? await makeListener(port: preferredPort) { return l }
-        return try await makeListener(port: 0)
-    }
-
-    private static func makeListener(port: UInt16) async throws -> CallbackListener {
-        let nwPort: NWEndpoint.Port = port == 0 ? .any : NWEndpoint.Port(rawValue: port)!
-        let listener = try NWListener(using: .tcp, on: nwPort)
-
-        // Await `.ready` via stateUpdateHandler — polling `listener.state`
-        // races the underlying nw_listener and can miss the transition.
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let resumed = AtomicFlag()
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if resumed.setOnce() { cont.resume() }
-                case .failed(let err):
-                    if resumed.setOnce() {
-                        listener.cancel()
-                        cont.resume(throwing: OAuthError.listenerFailed(err.localizedDescription))
-                    }
-                case .waiting(let err):
-                    if resumed.setOnce() {
-                        listener.cancel()
-                        cont.resume(throwing: OAuthError.listenerFailed(err.localizedDescription))
-                    }
-                case .cancelled:
-                    if resumed.setOnce() {
-                        cont.resume(throwing: OAuthError.listenerFailed("listener cancelled"))
-                    }
-                default:
-                    break
+    /// Accept one connection, parse the GET ?code=…, write 200 OK, return the code.
+    func waitForCode() async throws -> String {
+        try await Task.detached(priority: .userInitiated) { [fd] in
+            var clientAddr = sockaddr_in()
+            var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let client = withUnsafeMutablePointer(to: &clientAddr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    accept(fd, $0, &len)
                 }
             }
-            listener.start(queue: .global(qos: .userInitiated))
-        }
-
-        guard let actual = listener.port?.rawValue else {
-            listener.cancel()
-            throw OAuthError.listenerFailed("no port assigned")
-        }
-        return CallbackListener(listener: listener, port: actual)
-    }
-
-    func waitForCode() async throws -> String {
-        try await withCheckedThrowingContinuation { cont in
-            lock.lock()
-            self.continuation = cont
-            lock.unlock()
-        }
-    }
-
-    private func finish(_ result: Result<String, Error>) {
-        lock.lock()
-        let cont = continuation
-        continuation = nil
-        lock.unlock()
-        listener.cancel()
-        switch result {
-        case .success(let s): cont?.resume(returning: s)
-        case .failure(let e): cont?.resume(throwing: e)
-        }
-    }
-
-    private func handle(_ conn: NWConnection) {
-        conn.start(queue: .global(qos: .userInitiated))
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, _, _ in
-            guard let self else { conn.cancel(); return }
-            guard let data, let req = String(data: data, encoding: .utf8) else {
-                self.respond(conn, status: "404 Not Found", body: "")
-                return
+            guard client >= 0 else {
+                throw OAuthError.listenerFailed("accept: \(String(cString: strerror(errno)))")
             }
-            // First line: "GET /auth/callback?code=xxx&state=yyy HTTP/1.1"
-            let firstLine = req.split(separator: "\r\n").first.map(String.init) ?? ""
+            defer { close(client) }
+
+            // Read up to 4 KB — the OAuth redirect is far smaller.
+            var buf = [UInt8](repeating: 0, count: 4096)
+            let n = read(client, &buf, buf.count)
+            guard n > 0 else {
+                throw OAuthError.listenerFailed("read: empty request")
+            }
+            let request = String(decoding: buf[0..<n], as: UTF8.self)
+            // Request line: "GET /auth/callback?code=…&state=… HTTP/1.1"
+            let firstLine = request.split(separator: "\r\n").first.map(String.init) ?? ""
             let parts = firstLine.split(separator: " ")
-            guard parts.count >= 2 else {
-                self.respond(conn, status: "404 Not Found", body: "")
-                return
+            guard parts.count >= 2,
+                  let comps = URLComponents(string: "http://localhost" + parts[1]),
+                  let code = comps.queryItems?.first(where: { $0.name == "code" })?.value
+            else {
+                Self.respond(client: client, status: "404 Not Found", body: "")
+                throw OAuthError.listenerFailed("no code in callback")
             }
-            let path = String(parts[1])
-            let urlString = "http://localhost" + path
-            guard let comps = URLComponents(string: urlString),
-                  let code = comps.queryItems?.first(where: { $0.name == "code" })?.value else {
-                self.respond(conn, status: "404 Not Found", body: "")
-                return
-            }
+
             let html = """
             <html><body style="font-family:system-ui;text-align:center;padding:60px">
             <h2>Login successful!</h2>
@@ -341,19 +319,19 @@ private final class CallbackListener: @unchecked Sendable {
             <script>window.close()</script>
             </body></html>
             """
-            self.respond(conn, status: "200 OK", body: html, contentType: "text/html")
-            self.finish(.success(code))
-        }
+            Self.respond(client: client, status: "200 OK", body: html, contentType: "text/html")
+            return code
+        }.value
     }
 
-    private func respond(_ conn: NWConnection, status: String, body: String, contentType: String = "text/plain") {
+    private static func respond(client: Int32, status: String, body: String, contentType: String = "text/plain") {
         let bodyData = body.data(using: .utf8) ?? Data()
         let header = "HTTP/1.1 \(status)\r\nContent-Type: \(contentType)\r\nContent-Length: \(bodyData.count)\r\nConnection: close\r\n\r\n"
         var packet = header.data(using: .utf8) ?? Data()
         packet.append(bodyData)
-        conn.send(content: packet, completion: .contentProcessed { _ in
-            conn.cancel()
-        })
+        _ = packet.withUnsafeBytes { ptr in
+            write(client, ptr.baseAddress, packet.count)
+        }
     }
 }
 
