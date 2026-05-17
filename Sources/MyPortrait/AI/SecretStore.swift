@@ -130,93 +130,79 @@ final class SecretStore: @unchecked Sendable {
         """, nil, nil, nil)
     }
 
-    // MARK: - Keychain master key
+    // MARK: - Master key (file-backed)
+    //
+    // Stored at ~/Library/Application Support/MyPortrait/master.key with
+    // 0600 perms (owner read/write only). On a FileVault'd disk this is
+    // adequate for a dev tool; for a production release we'd switch to a
+    // properly-signed app + Keychain with kSecUseDataProtectionKeychain.
+    //
+    // One-time migration: if a master key exists in the legacy Keychain
+    // (from a previous build) and no on-disk key exists yet, we copy it to
+    // disk and drop the Keychain entry so the OS stops prompting.
 
-    /// Fetch the 32-byte AES master key from Keychain, generating + storing
-    /// one if missing. If the key is found in the LEGACY keychain but not in
-    /// the data-protection one, migrate it over so the per-build ACL prompts
-    /// stop firing on subsequent launches.
+    /// Fetch the 32-byte AES master key from disk (migrating from Keychain
+    /// the first time after this version ships). Generate a new key if
+    /// neither source has one.
     private static func loadOrCreateMasterKey(service: String, account: String) -> SymmetricKey {
-        if let fromDP = read(service: service, account: account, useDataProtection: true),
-           fromDP.count == 32 {
-            return SymmetricKey(data: fromDP)
+        let url = masterKeyURL()
+
+        if let data = try? Data(contentsOf: url), data.count == 32 {
+            return SymmetricKey(data: data)
         }
-        if let legacy = read(service: service, account: account, useDataProtection: false),
+
+        // Migration from a previous Keychain-backed build.
+        if let legacy = readLegacyKeychain(service: service, account: account),
            legacy.count == 32 {
-            writeKeychain(service: service, account: account, data: legacy)
-            // Best-effort: drop the legacy copy so it stops triggering prompts.
-            let del: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account
-            ]
-            SecItemDelete(del as CFDictionary)
+            writeMasterKey(legacy, to: url)
+            deleteLegacyKeychain(service: service, account: account)
             return SymmetricKey(data: legacy)
         }
+
         let new = SymmetricKey(size: .bits256)
         let data = new.withUnsafeBytes { Data($0) }
-        writeKeychain(service: service, account: account, data: data)
+        writeMasterKey(data, to: url)
         return new
     }
 
-    /// Read first via the data-protection keychain (no per-app ACL prompts).
-    /// Fall back to the legacy keychain so we can still find a master key
-    /// written by an older build.
-    private static func readKeychain(service: String, account: String) -> Data? {
-        if let d = read(service: service, account: account, useDataProtection: true) { return d }
-        return read(service: service, account: account, useDataProtection: false)
+    private static func masterKeyURL() -> URL {
+        try? AIPaths.ensureExists()
+        return AIPaths.supportDir.appendingPathComponent("master.key")
     }
 
-    private static func read(service: String, account: String, useDataProtection: Bool) -> Data? {
-        var q: [String: Any] = [
+    /// Write the key with 0600 perms (owner-only RW).
+    private static func writeMasterKey(_ data: Data, to url: URL) {
+        try? data.write(to: url, options: [.atomic])
+        // chmod 0600
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
+    }
+
+    // MARK: - Legacy Keychain (read-only, migration path)
+
+    private static func readLegacyKeychain(service: String, account: String) -> Data? {
+        let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-        if useDataProtection {
-            q[kSecUseDataProtectionKeychain as String] = true
-        }
         var out: AnyObject?
         let status = SecItemCopyMatching(q as CFDictionary, &out)
         guard status == errSecSuccess, let data = out as? Data else { return nil }
         return data
     }
 
-    /// Write into the data-protection keychain when possible. Items there are
-    /// not gated by per-app ACL prompts that fire on every code-signature
-    /// change — which is what was making every rebuild pop a "MyPortrait
-    /// wants to access your keychain" dialog.
-    private static func writeKeychain(service: String, account: String, data: Data) {
-        // Delete from BOTH keychain backends to avoid duplicates / shadowing.
-        for useDP in [true, false] {
-            var del: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account
-            ]
-            if useDP { del[kSecUseDataProtectionKeychain as String] = true }
-            SecItemDelete(del as CFDictionary)
-        }
-
-        var add: [String: Any] = [
+    private static func deleteLegacyKeychain(service: String, account: String) {
+        let del: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            kSecUseDataProtectionKeychain as String: true
+            kSecAttrAccount as String: account
         ]
-        var status = SecItemAdd(add as CFDictionary, nil)
-
-        // Some self-signed dev builds can't use the data-protection keychain
-        // (no entitlements). Fall back to the legacy one in that case.
-        if status != errSecSuccess {
-            add.removeValue(forKey: kSecUseDataProtectionKeychain as String)
-            status = SecItemAdd(add as CFDictionary, nil)
-        }
-        _ = status
+        SecItemDelete(del as CFDictionary)
     }
 
     private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
