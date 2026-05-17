@@ -47,11 +47,11 @@ private struct NativeSidebar: View {
             } header: {
                 HStack {
                     Text("My Portrait")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(.primary)
                     Spacer()
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
                 .textCase(nil)
             }
 

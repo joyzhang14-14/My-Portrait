@@ -132,12 +132,12 @@ private struct TimelineControlsBar: View {
                 }
 
                 Button { calendarOpen.toggle() } label: {
-                    HStack(spacing: 9) {
-                        Image(systemName: "calendar").font(.system(size: 17))
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar").font(.system(size: 12))
                         Text(dateFmt.string(from: currentDate))
-                            .font(.system(size: 20, design: .monospaced))
+                            .font(.system(size: 15, design: .monospaced))
                     }
-                    .frame(minWidth: 186, minHeight: 44)
+                    .frame(minWidth: 140, minHeight: 32)
                     .foregroundStyle(.white.opacity(0.92))
                 }
                 .buttonStyle(InvertOnHoverButtonStyle())
@@ -172,8 +172,8 @@ private struct ControlIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 18))
-                .frame(width: 44, height: 44)
+                .font(.system(size: 13))
+                .frame(width: 32, height: 32)
                 .foregroundStyle(.white.opacity(0.85))
                 .contentShape(Rectangle())
         }
