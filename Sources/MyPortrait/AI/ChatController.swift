@@ -15,8 +15,10 @@ final class ChatController {
     var lastError: String? = nil
 
     private var agent: PiAgent?
-    private var assistantBuffer: String = ""
     private var assistantMessageID: UUID? = nil
+    /// id of the trailing `.text` ContentPart that text_delta events should
+    /// accumulate into. Reset every time a tool block lands.
+    private var activeTextPartID: UUID? = nil
 
     private let model: String
 
@@ -55,11 +57,11 @@ final class ChatController {
             try await ensureAgent()
             try agent?.sendPrompt(text)
             isStreaming = true
-            // Prepare an empty assistant bubble we'll stream tokens into.
-            let placeholder = ChatMessage(role: .assistant, text: "", time: Date())
+            // Prepare an empty assistant bubble we'll stream parts into.
+            let placeholder = ChatMessage(role: .assistant, text: "", parts: [], time: Date())
             messages.append(placeholder)
             assistantMessageID = placeholder.id
-            assistantBuffer = ""
+            activeTextPartID = nil
         } catch {
             lastError = error.localizedDescription
             isStreaming = false
@@ -81,62 +83,101 @@ final class ChatController {
     private func handle(_ event: PiAgent.Event) async {
         switch event {
         case .textDelta(let delta):
-            assistantBuffer += delta
-            updateAssistantText(assistantBuffer)
+            appendText(delta)
         case .assistantFinalText(let text):
-            // Fallback path when the wire api doesn't stream deltas.
-            // Replace buffer (don't append) — message_end is the full text.
-            if assistantBuffer.isEmpty || text.count > assistantBuffer.count {
-                assistantBuffer = text
-                updateAssistantText(assistantBuffer)
-            }
+            // Fallback: only used when no streaming happened.
+            if currentTextLength() == 0 { appendText(text) }
         case .agentEnd:
             isStreaming = false
             assistantMessageID = nil
-            assistantBuffer = ""
+            activeTextPartID = nil
         case .error(let msg):
             lastError = msg
-            // Surface the error inside the assistant bubble so the user actually sees it.
-            updateAssistantText("⚠️ \(msg)")
+            appendText("⚠️ \(msg)")
             isStreaming = false
-        case .toolStart(_, let name, _):
-            // Inline a one-line marker so the user sees activity until we build
-            // a proper tool block. Will be replaced when toolEnd arrives.
-            appendInlineSystem("⏳ \(name)…")
-        case .toolEnd(_, let result, let isError):
-            let prefix = isError ? "❌" : "✅"
-            replaceLastSystemInline(with: "\(prefix) \(result.prefix(200))")
+        case .toolStart(let id, let name, let args):
+            startTool(callId: id, name: name, args: args)
+        case .toolEnd(let id, let result, let isError):
+            finishTool(callId: id, result: result, isError: isError)
         default:
             break
         }
     }
 
-    private func updateAssistantText(_ text: String) {
-        guard let id = assistantMessageID,
-              let idx = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[idx].text = text
-    }
+    // MARK: - Parts mutation
 
-    private func appendInlineSystem(_ text: String) {
-        // Reuse the assistant bubble: append a markdown-ish marker on its own line.
-        guard !assistantBuffer.isEmpty else {
-            assistantBuffer = text
-            return
-        }
-        assistantBuffer += "\n\n" + text
-        updateAssistantText(assistantBuffer)
-    }
+    private func appendText(_ delta: String) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
 
-    private func replaceLastSystemInline(with text: String) {
-        // Replace the last "⏳ …" line if present, else just append.
-        var lines = assistantBuffer.split(separator: "\n", omittingEmptySubsequences: false)
-        if let lastIdx = lines.lastIndex(where: { $0.hasPrefix("⏳") }) {
-            lines[lastIdx] = Substring(text)
-            assistantBuffer = lines.joined(separator: "\n")
+        // If the trailing part is the active text part, append to it.
+        // Otherwise create a new text part — happens after a tool block.
+        if let activeID = activeTextPartID,
+           let pIdx = messages[mIdx].parts.lastIndex(where: { $0.id == activeID }),
+           case .text(let id, let value) = messages[mIdx].parts[pIdx] {
+            messages[mIdx].parts[pIdx] = .text(id: id, value: value + delta)
         } else {
-            assistantBuffer += "\n" + text
+            let newID = UUID()
+            messages[mIdx].parts.append(.text(id: newID, value: delta))
+            activeTextPartID = newID
         }
-        updateAssistantText(assistantBuffer)
+        // Keep `text` mirror in sync — used for things like Recents preview.
+        messages[mIdx].text = messages[mIdx].parts.compactMap {
+            if case .text(_, let v) = $0 { return v } else { return nil }
+        }.joined(separator: "\n\n")
+    }
+
+    private func currentTextLength() -> Int {
+        guard let msgID = assistantMessageID,
+              let m = messages.first(where: { $0.id == msgID }) else { return 0 }
+        return m.parts.reduce(0) { acc, part in
+            if case .text(_, let v) = part { return acc + v.count }
+            return acc
+        }
+    }
+
+    private func startTool(callId: String, name: String, args: [String: Any]) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        let block = ToolBlock(
+            id: UUID(),
+            toolCallId: callId,
+            name: name,
+            command: Self.summarizeArgs(name: name, args: args),
+            output: "",
+            isRunning: true,
+            isError: false
+        )
+        messages[mIdx].parts.append(.tool(block))
+        // Next text_delta should start a fresh text part below the tool.
+        activeTextPartID = nil
+    }
+
+    private func finishTool(callId: String, result: String, isError: Bool) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        // Find the matching running block (latest one for this callId).
+        for pIdx in messages[mIdx].parts.indices.reversed() {
+            if case .tool(var b) = messages[mIdx].parts[pIdx], b.toolCallId == callId {
+                b.output = result
+                b.isRunning = false
+                b.isError = isError
+                messages[mIdx].parts[pIdx] = .tool(b)
+                return
+            }
+        }
+    }
+
+    /// Build a short human-readable summary of a tool's args. For bash that's
+    /// the command itself; for everything else we just JSON-encode.
+    private static func summarizeArgs(name: String, args: [String: Any]) -> String {
+        if name == "bash", let cmd = args["command"] as? String { return cmd }
+        if name == "read", let path = args["path"] as? String { return path }
+        if let json = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]),
+           let s = String(data: json, encoding: .utf8) {
+            return s
+        }
+        return ""
     }
 }
 

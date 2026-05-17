@@ -177,24 +177,25 @@ private struct ChatBubble: View {
     let message: ChatMessage
     let isStreaming: Bool
     @State private var appear = false
-    @State private var textRev = 0
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             BubbleAvatar(role: message.role, glowing: message.role == .assistant && isStreaming)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(message.role == .user ? "You" : "Assistant")
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.4)
                     .foregroundStyle(.white.opacity(0.45))
 
-                Text(.init(message.text))    // LocalizedStringKey ⇒ basic markdown
-                    .font(.system(size: 15, weight: .regular, design: .default))
-                    .foregroundStyle(.white.opacity(0.96))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(5)
-                    .id(textRev)
-                    .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .topLeading)))
+                if message.role == .user {
+                    Text(.init(message.text))
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.96))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(5)
+                } else {
+                    AssistantBody(parts: message.parts, fallbackText: message.text)
+                }
             }
             .padding(.vertical, message.role == .assistant ? 14 : 6)
             .padding(.horizontal, message.role == .assistant ? 18 : 6)
@@ -211,9 +212,147 @@ private struct ChatBubble: View {
         .onAppear {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
         }
-        .onChange(of: message.text) {
-            // Subtle wiggle each time the streaming token batch lands.
-            withAnimation(.easeOut(duration: 0.18)) { textRev &+= 1 }
+    }
+}
+
+/// Sequentially renders text + tool blocks for an assistant message.
+private struct AssistantBody: View {
+    let parts: [ContentPart]
+    let fallbackText: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if parts.isEmpty && !fallbackText.isEmpty {
+                Text(.init(fallbackText))
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.96))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(5)
+            }
+            ForEach(parts) { part in
+                switch part {
+                case .text(_, let value):
+                    Text(.init(value))
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.96))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(5)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                case .tool(let block):
+                    ToolCard(block: block)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+}
+
+/// Visual card for a single tool invocation. Header + command line; expand to
+/// show output. Running state shows a spinner + breathing accent.
+private struct ToolCard: View {
+    let block: ToolBlock
+    @State private var expanded: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: iconFor(block.name))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                Text(block.name)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .tracking(0.5)
+                    .foregroundStyle(.white.opacity(0.8))
+                Spacer()
+                statusBadge
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
+                } label: {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            // Command line (always visible — that IS the interesting bit)
+            if !block.command.isEmpty {
+                Divider().background(Color.white.opacity(0.08))
+                Text(block.command)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Output (collapsed by default once finished; auto-shown while running)
+            if (expanded || block.isRunning) && !block.output.isEmpty {
+                Divider().background(Color.white.opacity(0.08))
+                ScrollView {
+                    Text(block.output)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .opacity(0.85)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(accentStroke, lineWidth: 0.8)
+                )
+        )
+        .onAppear {
+            // Long running tools — auto-collapse a moment after they finish so
+            // the bubble doesn't get dominated by stale output.
+            if !block.isRunning && !block.output.isEmpty {
+                expanded = false
+            }
+        }
+    }
+
+    private var accentStroke: Color {
+        if block.isError    { return Color.red.opacity(0.40) }
+        if block.isRunning  { return Color.purple.opacity(0.45) }
+        return Color.white.opacity(0.14)
+    }
+
+    @ViewBuilder private var statusBadge: some View {
+        if block.isRunning {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+                .tint(.white.opacity(0.7))
+        } else if block.isError {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 13)).foregroundStyle(Color.red.opacity(0.85))
+        } else {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13)).foregroundStyle(Color.green.opacity(0.85))
+        }
+    }
+
+    private func iconFor(_ name: String) -> String {
+        switch name {
+        case "bash", "shell": return "terminal.fill"
+        case "read":          return "doc.text"
+        case "write", "edit": return "pencil"
+        case "grep", "rg":    return "magnifyingglass"
+        default:              return "wrench.and.screwdriver"
         }
     }
 }

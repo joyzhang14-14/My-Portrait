@@ -29,16 +29,48 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
 
 enum ChatRole: String, Codable { case user, assistant }
 
+/// One renderable piece of an assistant message. Messages are a sequence of
+/// these so text and tool-call cards can be interleaved in the order Pi
+/// emitted them.
+enum ContentPart: Identifiable, Hashable {
+    case text(id: UUID, value: String)
+    case tool(ToolBlock)
+
+    var id: UUID {
+        switch self {
+        case .text(let id, _): return id
+        case .tool(let b):     return b.id
+        }
+    }
+}
+
+/// One tool invocation. Streamed in two phases: created on
+/// `tool_execution_start`, output / status filled on `tool_execution_end`.
+struct ToolBlock: Identifiable, Hashable {
+    let id: UUID
+    let toolCallId: String
+    var name: String
+    var command: String        // human-readable summary of args (e.g. the bash command)
+    var output: String
+    var isRunning: Bool
+    var isError: Bool
+}
+
 struct ChatMessage: Identifiable, Hashable {
     let id: UUID
     let role: ChatRole
-    var text: String                // mutable so streaming tokens can append in place
+    /// User messages keep this as their single text body. Assistant messages
+    /// accumulate `parts` instead; `text` here remains a convenience for the
+    /// user-bubble path and tests.
+    var text: String
+    var parts: [ContentPart]
     let time: Date
 
-    init(id: UUID = UUID(), role: ChatRole, text: String, time: Date) {
+    init(id: UUID = UUID(), role: ChatRole, text: String, parts: [ContentPart] = [], time: Date) {
         self.id = id
         self.role = role
         self.text = text
+        self.parts = parts
         self.time = time
     }
 }
