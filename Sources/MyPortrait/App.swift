@@ -62,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Host the SwiftUI ContentView inside the AppKit window.
         let hosting = NSHostingView(rootView: ContentView().preferredColorScheme(.dark))
         hosting.autoresizingMask = [.width, .height]
+        // Default sizingOptions let SwiftUI's intrinsic size feed back into the
+        // window — when frames reload on a date switch the intrinsic size
+        // transiently changes and the visible content "shrinks" vertically.
+        // Empty options keeps the window size fixed regardless of content.
+        hosting.sizingOptions = []
         window.contentView = hosting
 
         window.center()
