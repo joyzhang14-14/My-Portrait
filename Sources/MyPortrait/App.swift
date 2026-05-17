@@ -33,13 +33,12 @@ struct MyPortraitApp: App {
 // events through NSEvent monitors. The delegate fixes all three.
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var chromeKeeper: Timer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)        // Show in Dock, can be key window
         NSApp.activate(ignoringOtherApps: true)    // Bring to front
 
-        // Force initial window to the target size + ensure resizable, and apply
-        // the chrome configuration (no title text, traffic lights kept, content
-        // extends under the title bar, no NSToolbar).
         DispatchQueue.main.async {
             for window in NSApp.windows {
                 window.styleMask.insert(.resizable)
@@ -50,23 +49,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // SwiftUI sometimes re-attaches an NSToolbar on navigation / sheet
-        // changes (the dark strip the user kept seeing at the top of the
-        // window after switching dates). Re-apply chrome whenever any window
-        // becomes key so the toolbar can't sneak back.
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { note in
-            if let w = note.object as? NSWindow { Self.applyChrome(to: w) }
-        }
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
-            object: nil,
-            queue: .main
-        ) { note in
-            if let w = note.object as? NSWindow { Self.applyChrome(to: w) }
+        // SwiftUI on macOS 26 quietly re-attaches an NSToolbar to the window on
+        // navigation / state changes (the dark strip the user saw after
+        // switching dates). Observers fire too late, so we poll every 0.4s
+        // and strip any toolbar that snuck back. Cheap — just a property set.
+        chromeKeeper = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
+            for w in NSApp.windows { Self.applyChrome(to: w) }
         }
     }
 
@@ -76,7 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
-        window.toolbar = nil
+        if window.toolbar != nil { window.toolbar = nil }
+
+        // Make sure the traffic lights actually render — SwiftUI's default
+        // chrome config on macOS 26 sometimes hides them when titleVisibility
+        // is set to .hidden.
+        window.standardWindowButton(.closeButton)?.isHidden = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isHidden = false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
