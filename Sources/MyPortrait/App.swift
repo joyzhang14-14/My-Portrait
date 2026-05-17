@@ -16,7 +16,12 @@ struct MyPortraitApp: App {
                 .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1200, height: 835)
-        .windowStyle(.hiddenTitleBar)
+        // NOTE: we deliberately do NOT use .windowStyle(.hiddenTitleBar) — on
+        // some macOS versions it collapses the title bar to 0pt and takes the
+        // traffic lights with it. Instead AppDelegate configures the NSWindow
+        // manually: keeps traffic lights, hides the title text, lets content
+        // extend under the title bar, and force-removes any NSToolbar that
+        // SwiftUI tries to re-add after navigation changes.
     }
 }
 
@@ -32,10 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)        // Show in Dock, can be key window
         NSApp.activate(ignoringOtherApps: true)    // Bring to front
 
-        // Intentionally NOT calling setContentSize / center / makeKeyAndOrderFront
-        // here — those were fighting with SwiftUI's .windowStyle(.hiddenTitleBar)
-        // configuration and caused the traffic-light buttons to disappear. The
-        // .defaultSize modifier on the WindowGroup handles initial sizing.
+        DispatchQueue.main.async {
+            for window in NSApp.windows {
+                window.styleMask.insert(.resizable)
+                window.setContentSize(NSSize(width: 1200, height: 835))
+                window.center()
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

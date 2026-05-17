@@ -11,7 +11,6 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             TimelineSidebar(state: timeline, selection: $selection)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
-                .toolbar(removing: .sidebarToggle)
         } detail: {
             mainPane
                 .frame(minWidth: 600, minHeight: 400)
