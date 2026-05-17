@@ -93,7 +93,7 @@ struct AsyncMP4FrameThumbnail: View {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.medium)
-                    .scaledToFit()
+                    .scaledToFill()
             } else {
                 Rectangle()
                     .fill(Color.white.opacity(0.04))

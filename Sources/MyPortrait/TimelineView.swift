@@ -57,12 +57,15 @@ struct TimelineView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()  // crop the now-filled image so it doesn't bleed sideways
 
-            if !state.frames.isEmpty {
-                TimelineSlider(state: state)
-                    .frame(height: 220)
-                    .clipped()           // prevent bars from bleeding past pane edge
-            }
+            // Slider always reserves 220pt so the screenshot area above doesn't
+            // expand/contract during loading transitions. Just hidden when
+            // there are no frames to render.
+            TimelineSlider(state: state)
+                .frame(height: 220)
+                .opacity(state.frames.isEmpty ? 0 : 1)
+                .clipped()
         }
         .background(Color.black)
         .clipped()                       // belt + suspenders — pane never overflows
