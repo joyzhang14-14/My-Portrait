@@ -46,6 +46,27 @@ struct ScreenpipeDB: Sendable {
         FileManager.default.fileExists(atPath: dbPath)
     }
 
+    /// SQLite stores timestamps as TEXT and compares lexicographically.
+    /// DB format is "2026-05-15T07:00:00.123456+00:00".
+    /// We format query bounds as "2026-05-15T07:00:00" (no fractional, no zone
+    /// suffix) — strictly a prefix of the DB format, so `>=` / `<` comparisons
+    /// work without missing boundary rows.
+    ///
+    /// (ISO8601DateFormatter with .withInternetDateTime emits "...Z" which
+    /// sorts AFTER ".XXX+00:00" lexicographically and was silently dropping
+    /// rows at midnight boundaries on past-day queries.)
+    private static let queryDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static func dbTimestamp(_ date: Date) -> String {
+        queryDateFormatter.string(from: date)
+    }
+
     /// Fetch frames for a given day window. Returns ordered ascending by timestamp.
     /// `limit` caps the result to keep the UI snappy; default 800 is roughly one frame per ~2 minutes for 24h.
     func frames(on day: Date, limit: Int = 800) -> [ScreenpipeFrame] {
@@ -55,11 +76,8 @@ struct ScreenpipeDB: Sendable {
         let dayStart = cal.startOfDay(for: day)
         let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
 
-        // Use simpler ISO without fractional seconds for DB compare (sqlite TEXT compare is lexicographic on ISO)
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        let startStr = plain.string(from: dayStart)
-        let endStr = plain.string(from: dayEnd)
+        let startStr = Self.dbTimestamp(dayStart)
+        let endStr = Self.dbTimestamp(dayEnd)
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
@@ -114,10 +132,8 @@ struct ScreenpipeDB: Sendable {
     func activeApps(around moment: Date, window: TimeInterval = 45) -> [ActiveAppEntry] {
         guard exists else { return [] }
 
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        let start = plain.string(from: moment.addingTimeInterval(-window))
-        let end = plain.string(from: moment.addingTimeInterval(window))
+        let start = Self.dbTimestamp(moment.addingTimeInterval(-window))
+        let end = Self.dbTimestamp(moment.addingTimeInterval(window))
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
@@ -175,10 +191,8 @@ struct ScreenpipeDB: Sendable {
     ) -> [AudioTranscriptEntry] {
         guard exists else { return [] }
 
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        let start = plain.string(from: moment.addingTimeInterval(-before))
-        let end = plain.string(from: moment.addingTimeInterval(after))
+        let start = Self.dbTimestamp(moment.addingTimeInterval(-before))
+        let end = Self.dbTimestamp(moment.addingTimeInterval(after))
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
