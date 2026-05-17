@@ -542,7 +542,7 @@ private struct OrbitingParticles: View {
     ]
 
     var body: some View {
-        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/60.0, paused: false)) { ctx in
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0, paused: false)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             Canvas { gctx, canvasSize in
                 draw(into: &gctx, size: canvasSize, t: t)

@@ -10,7 +10,9 @@ struct AmbientBackground: View {
 
             // Animated drifting color blobs. TimelineView gives us a per-frame
             // clock without driving SwiftUI state ⇒ no view-tree invalidation.
-            SwiftUI.TimelineView(.animation(minimumInterval: 1.0/60.0, paused: false)) { ctx in
+            // 30 fps — blobs drift on 40+s cycles, so the human eye can't
+            // tell, but the GPU saves half a heavy blur+screen pass per second.
+            SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0, paused: false)) { ctx in
                 let t = ctx.date.timeIntervalSinceReferenceDate
                 Canvas { gctx, size in
                     drawBlobs(into: &gctx, size: size, t: t)
@@ -98,6 +100,11 @@ private struct CursorHalo: View {
         GeometryReader { _ in
             ZStack {
                 if visible {
+                    // No `.animation(_:value:)` — animating the position of a
+                    // 400-pt blurred radial fill on every mouse pixel was the
+                    // single hottest path in the render loop. The halo now
+                    // simply snaps to the cursor; eye still reads "follows
+                    // smoothly" because the cursor itself moves smoothly.
                     RadialGradient(
                         colors: [Color.white.opacity(0.10), Color.white.opacity(0)],
                         center: .center, startRadius: 0, endRadius: 200
@@ -105,7 +112,7 @@ private struct CursorHalo: View {
                     .frame(width: 400, height: 400)
                     .position(location)
                     .blendMode(.plusLighter)
-                    .animation(.easeOut(duration: 0.12), value: location)
+                    .allowsHitTesting(false)
                 }
             }
         }
