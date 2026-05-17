@@ -29,7 +29,7 @@ struct HomeView: View {
                 }
             )
         }
-        .background(Color.black)
+        .background(AmbientBackground())
         .task { AISetup.shared.ensureInstalled() }
     }
 
@@ -146,8 +146,11 @@ private struct ChatTranscript: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    ForEach(messages) { msg in
-                        ChatBubble(message: msg)
+                    ForEach(Array(messages.enumerated()), id: \.element.id) { idx, msg in
+                        // The streaming assistant bubble is always the last
+                        // assistant message; only it should glow.
+                        let isLastAssistant = idx == messages.count - 1 && msg.role == .assistant
+                        ChatBubble(message: msg, isStreaming: isLastAssistant && isThinking)
                             .id(msg.id)
                     }
                     if isThinking {
@@ -172,46 +175,107 @@ private struct ChatTranscript: View {
 
 private struct ChatBubble: View {
     let message: ChatMessage
+    let isStreaming: Bool
+    @State private var appear = false
+    @State private var textRev = 0
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            BubbleAvatar(role: message.role)
-            VStack(alignment: .leading, spacing: 6) {
+            BubbleAvatar(role: message.role, glowing: message.role == .assistant && isStreaming)
+            VStack(alignment: .leading, spacing: 8) {
                 Text(message.role == .user ? "You" : "Assistant")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                Text(.init(message.text))     // initializer with `LocalizedStringKey` parses basic markdown
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(0.4)
+                    .foregroundStyle(.white.opacity(0.45))
+
+                Text(.init(message.text))    // LocalizedStringKey ⇒ basic markdown
+                    .font(.system(size: 15, weight: .regular, design: .default))
+                    .foregroundStyle(.white.opacity(0.96))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(3)
+                    .lineSpacing(5)
+                    .id(textRev)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .topLeading)))
+            }
+            .padding(.vertical, message.role == .assistant ? 14 : 6)
+            .padding(.horizontal, message.role == .assistant ? 18 : 6)
+            .background {
+                if message.role == .assistant {
+                    GlassPanel(tint: .purple, intensity: 0.04, strokeOpacity: 0.10, corner: 16)
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 4)
+        .opacity(appear ? 1 : 0)
+        .offset(y: appear ? 0 : 12)
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
+        }
+        .onChange(of: message.text) {
+            // Subtle wiggle each time the streaming token batch lands.
+            withAnimation(.easeOut(duration: 0.18)) { textRev &+= 1 }
+        }
     }
 }
 
-/// Shared avatar used by user, assistant, and the streaming-dots placeholder.
+/// Big gradient orb. Assistant version "breathes" continuously; while
+/// `glowing` is true (i.e. streaming) it also pulses an outer halo.
 private struct BubbleAvatar: View {
     let role: ChatRole
+    var glowing: Bool = false
+
     var body: some View {
-        ZStack {
-            if role == .assistant {
-                LinearGradient(
-                    colors: [Color(red: 0.55, green: 0.27, blue: 0.85),
-                             Color(red: 0.30, green: 0.15, blue: 0.65)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-                .clipShape(Circle())
-            } else {
-                Circle().fill(Color.white.opacity(0.14))
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/60.0, paused: false)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let breath = role == .assistant ? CGFloat(1 + 0.04 * sin(t * 1.6)) : 1.0
+            let pulse  = glowing ? CGFloat(0.55 + 0.35 * sin(t * 3.0)) : 0
+            ZStack {
+                // Pulse halo (only when streaming)
+                if glowing {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [Color.purple.opacity(0.55), Color.purple.opacity(0)],
+                                center: .center, startRadius: 0, endRadius: 32
+                            )
+                        )
+                        .frame(width: 70, height: 70)
+                        .opacity(Double(pulse))
+                        .blur(radius: 6)
+                }
+                // Orb
+                ZStack {
+                    if role == .assistant {
+                        AngularGradient(
+                            colors: [
+                                Color(red: 0.65, green: 0.35, blue: 1.0),
+                                Color(red: 0.30, green: 0.55, blue: 1.0),
+                                Color(red: 0.95, green: 0.40, blue: 0.85),
+                                Color(red: 0.65, green: 0.35, blue: 1.0)
+                            ],
+                            center: .center
+                        )
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle().fill(
+                                LinearGradient(colors: [Color.white.opacity(0.20), .clear],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                            )
+                        )
+                    } else {
+                        Circle().fill(.ultraThinMaterial)
+                        Circle().fill(Color.white.opacity(0.04))
+                    }
+                    Image(systemName: role == .user ? "person.fill" : "sparkles")
+                        .font(.system(size: 16, weight: role == .user ? .semibold : .medium))
+                        .foregroundStyle(.white.opacity(0.95))
+                }
+                .frame(width: 36, height: 36)
+                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.6))
+                .scaleEffect(breath)
             }
-            Image(systemName: role == .user ? "person.fill" : "sparkles")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.95))
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 40, height: 40)
     }
 }
 
@@ -220,11 +284,13 @@ private struct ChatThinking: View {
     private let dots = ["·  ·  ·", "•  ·  ·", "·  •  ·", "·  ·  •"]
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            BubbleAvatar(role: .assistant)
+            BubbleAvatar(role: .assistant, glowing: true)
             Text(dots[phase])
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.45))
-                .padding(.top, 8)
+                .padding(.vertical, 14)
+                .padding(.horizontal, 18)
+                .background(GlassPanel(tint: .purple, intensity: 0.04, strokeOpacity: 0.10, corner: 16))
                 .onAppear {
                     Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { _ in
                         Task { @MainActor in phase = (phase + 1) % dots.count }
@@ -233,6 +299,32 @@ private struct ChatThinking: View {
             Spacer()
         }
         .padding(.horizontal, 4)
+    }
+}
+
+/// Reusable frosted-glass panel used by bubbles and the input bar.
+struct GlassPanel: View {
+    var tint: Color = .white
+    var intensity: Double = 0.05      // base fill alpha
+    var strokeOpacity: Double = 0.12
+    var corner: CGFloat = 14
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .opacity(0.85)
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(tint.opacity(intensity))
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(strokeOpacity * 1.2),
+                                 Color.white.opacity(strokeOpacity * 0.3)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.8
+                )
+        }
     }
 }
 
@@ -314,43 +406,36 @@ private struct ChatInputBar: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
+            // Top chip row inside the glass panel
             HStack(spacing: 10) {
                 ChipButton(icon: "line.3.horizontal.decrease", label: "filter")
                 Text(providerName.uppercased())
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(isConnected ? .white.opacity(0.78) : .white.opacity(0.4))
+                    .tracking(0.5)
+                    .foregroundStyle(isConnected ? .white.opacity(0.80) : .white.opacity(0.40))
                 if !isConnected {
                     Text("(not connected)")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.red.opacity(0.75))
+                        .foregroundStyle(.red.opacity(0.80))
                 }
                 Spacer()
                 ModelPickerInline(slug: providerSlug)
             }
-            .padding(.horizontal, 16)
 
-            HStack(alignment: .center, spacing: 8) {
-                // Auto-growing single-line-by-default field. Up to ~6 lines, then scrolls.
+            HStack(alignment: .center, spacing: 10) {
                 TextField(
                     "",
                     text: $prompt,
                     prompt: Text("Ask about your screen…  (type @ for filters, paste images)")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.32)),
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.30)),
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 14))
                 .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white.opacity(0.03))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10), lineWidth: 1))
-                )
                 .focused($focused)
                 .onKeyPress(.return) {
                     if NSEvent.modifierFlags.contains(.shift) { return .ignored }
@@ -361,28 +446,29 @@ private struct ChatInputBar: View {
                 HStack(spacing: 4) {
                     IconActionButton(icon: "shield") { /* TODO */ }
                     IconActionButton(icon: "paperclip") { /* TODO */ }
-                    SendButton(action: onSend)
+                    SendButton(action: onSend, enabled: !prompt.trimmingCharacters(in: .whitespaces).isEmpty)
                         .keyboardShortcut(.return, modifiers: [.command])
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
-        .padding(.top, 10)
-        .background(Color.black)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            GlassPanel(tint: .white, intensity: 0.03, strokeOpacity: 0.10, corner: 18)
+                .shadow(color: Color.black.opacity(0.4), radius: 30, x: 0, y: 12)
+        )
+        .padding(.horizontal, 18)
+        .padding(.bottom, 14)
+        .padding(.top, 8)
         .onAppear { focused = true }
-        // keep onChipTap referenced for compiler; chips are wired via greeting buttons
         .onChange(of: prompt) { _ = onChipTap }
     }
 }
 
 // MARK: - Input bar right-side actions
 
-/// Generic icon button (shield / paperclip). 18pt symbol, hover lifts to white,
-/// 6pt corner-rounded background on press.
+/// Generic icon button (shield / paperclip). 17pt symbol, hover lifts +
+/// glass background appears, click pop.
 private struct IconActionButton: View {
     let icon: String
     let action: () -> Void
@@ -392,50 +478,88 @@ private struct IconActionButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(.white.opacity(hover ? 0.92 : 0.55))
-                .frame(width: 30, height: 30)
+                .foregroundStyle(.white.opacity(hover ? 0.95 : 0.55))
+                .frame(width: 32, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.white.opacity(pressed ? 0.10 : (hover ? 0.05 : 0)))
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .opacity(hover ? 0.80 : 0)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(Color.white.opacity(hover ? 0.18 : 0), lineWidth: 0.6)
+                        )
                 )
-                .scaleEffect(pressed ? 0.92 : 1.0)
+                .scaleEffect(pressed ? 0.90 : (hover ? 1.04 : 1.0))
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { pressed = true } }
-                .onEnded   { _ in withAnimation(.easeOut(duration: 0.12)) { pressed = false } }
+                .onEnded   { _ in withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { pressed = false } }
         )
-        .animation(.easeOut(duration: 0.12), value: hover)
+        .animation(.easeOut(duration: 0.18), value: hover)
     }
 }
 
-/// Primary send button — solid white background, hover brightens, click pops.
+/// Primary send button — purple→pink gradient orb with hover breathing,
+/// click ripple, and a disabled state that drops to monochrome.
 private struct SendButton: View {
     let action: () -> Void
+    var enabled: Bool = true
     @State private var hover = false
     @State private var pressed = false
+    @State private var ripple = false
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "paperplane.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.black)
-                .frame(width: 32, height: 32)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(pressed ? 0.85 : (hover ? 1.0 : 0.92)))
-                )
-                .scaleEffect(pressed ? 0.92 : 1.0)
+        Button(action: {
+            guard enabled else { return }
+            ripple = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { ripple = false }
+            action()
+        }) {
+            ZStack {
+                // Click ripple
+                if ripple {
+                    Circle()
+                        .stroke(Color.white.opacity(0.55), lineWidth: 2)
+                        .scaleEffect(ripple ? 2.0 : 0.5)
+                        .opacity(ripple ? 0 : 0.9)
+                        .animation(.easeOut(duration: 0.55), value: ripple)
+                        .frame(width: 32, height: 32)
+                }
+                // Background orb
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        enabled
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [Color(red: 0.65, green: 0.30, blue: 1.0),
+                                     Color(red: 0.95, green: 0.35, blue: 0.65)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        : AnyShapeStyle(Color.white.opacity(0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.7)
+                    )
+                    .shadow(color: enabled ? Color.purple.opacity(hover ? 0.55 : 0.30) : .clear,
+                            radius: hover ? 14 : 8, x: 0, y: 4)
+                    .frame(width: 34, height: 34)
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(enabled ? 0.97 : 0.45))
+                    .offset(x: pressed ? 1 : 0, y: pressed ? 1 : 0)
+            }
+            .scaleEffect(pressed ? 0.92 : (hover ? 1.04 : 1.0))
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .onHover { hover = $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { pressed = true } }
-                .onEnded   { _ in withAnimation(.easeOut(duration: 0.12)) { pressed = false } }
+                .onEnded   { _ in withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { pressed = false } }
         )
-        .animation(.easeOut(duration: 0.12), value: hover)
+        .animation(.easeOut(duration: 0.18), value: hover)
     }
 }
 
