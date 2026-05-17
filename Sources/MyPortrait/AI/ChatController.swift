@@ -14,17 +14,54 @@ final class ChatController {
     var isStreaming: Bool = false
     var lastError: String? = nil
 
+    /// Currently displayed conversation id. `nil` means "no conv yet" — a
+    /// new one is created lazily on the first `send`.
+    private(set) var currentConvId: UUID? = nil
+
     private var agent: PiAgent?
     private var assistantMessageID: UUID? = nil
     /// id of the trailing `.text` ContentPart that text_delta events should
     /// accumulate into. Reset every time a tool block lands.
     private var activeTextPartID: UUID? = nil
+    /// Set during `send` so we know whether the upcoming user message is
+    /// the first one (⇒ derive the conv title from it).
+    private var pendingTitleFromFirstMessage: Bool = false
 
     private let model: String
+    private let store = ChatStore.shared
 
     init(model: String = "gpt-5.4") { self.model = model }
 
-    /// Send a user prompt. Spawns the Pi agent on first call.
+    // MARK: - Conversation switching
+
+    /// Drop the live Pi agent and load `convId`'s messages from disk.
+    /// Use `nil` to clear the view (e.g. when "New chat" is pressed).
+    func switchTo(_ convId: UUID?) {
+        agent?.stop()
+        agent = nil
+        assistantMessageID = nil
+        activeTextPartID = nil
+        isStreaming = false
+        lastError = nil
+        currentConvId = convId
+        if let convId {
+            messages = store.loadMessages(for: convId)
+        } else {
+            messages = []
+        }
+    }
+
+    /// Start a fresh conversation row in the store. Returns the new id so the
+    /// sidebar can select it.
+    @discardableResult
+    func newConversation() -> UUID {
+        let conv = store.createConversation()
+        switchTo(conv.id)
+        return conv.id
+    }
+
+    /// Send a user prompt. Spawns the Pi agent on first call. Lazily creates
+    /// a conversation row if we're not in one yet.
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -38,10 +75,30 @@ final class ChatController {
             return
         }
 
+        // First send in a fresh state — create a new conv on the fly.
+        if currentConvId == nil {
+            _ = newConversation()
+            pendingTitleFromFirstMessage = true
+        } else if messages.isEmpty {
+            pendingTitleFromFirstMessage = true
+        }
+
         messages.append(.init(role: .user, text: trimmed, time: Date()))
         lastError = nil
 
+        if pendingTitleFromFirstMessage, let convId = currentConvId {
+            store.renameConversation(convId, to: Self.titleFromText(trimmed))
+            pendingTitleFromFirstMessage = false
+        }
+
         Task { await deliver(trimmed) }
+    }
+
+    private static func titleFromText(_ s: String) -> String {
+        let oneLine = s
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        return oneLine.count > 40 ? String(oneLine.prefix(40)) + "…" : oneLine
     }
 
     /// Tear down the Pi process when the user closes the conversation.
@@ -91,10 +148,12 @@ final class ChatController {
             isStreaming = false
             assistantMessageID = nil
             activeTextPartID = nil
+            persist()
         case .error(let msg):
             lastError = msg
             appendText("⚠️ \(msg)")
             isStreaming = false
+            persist()
         case .toolStart(let id, let name, let args):
             startTool(callId: id, name: name, args: args)
         case .toolEnd(let id, let result, let isError):
@@ -166,6 +225,12 @@ final class ChatController {
                 return
             }
         }
+    }
+
+    /// Flush the current message list to disk under `currentConvId`.
+    private func persist() {
+        guard let convId = currentConvId else { return }
+        store.saveMessages(messages, for: convId)
     }
 
     /// Build a short human-readable summary of a tool's args. For bash that's

@@ -32,7 +32,7 @@ enum ChatRole: String, Codable { case user, assistant }
 /// One renderable piece of an assistant message. Messages are a sequence of
 /// these so text and tool-call cards can be interleaved in the order Pi
 /// emitted them.
-enum ContentPart: Identifiable, Hashable {
+enum ContentPart: Identifiable, Hashable, Codable {
     case text(id: UUID, value: String)
     case tool(ToolBlock)
 
@@ -42,11 +42,38 @@ enum ContentPart: Identifiable, Hashable {
         case .tool(let b):     return b.id
         }
     }
+
+    // Custom Codable so the JSON layout is stable: `{"kind":"text"|"tool", ...}`
+    private enum CodingKeys: String, CodingKey { case kind, id, value, block }
+    private enum Kind: String, Codable { case text, tool }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .text:
+            self = .text(id: try c.decode(UUID.self, forKey: .id),
+                         value: try c.decode(String.self, forKey: .value))
+        case .tool:
+            self = .tool(try c.decode(ToolBlock.self, forKey: .block))
+        }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let id, let v):
+            try c.encode(Kind.text, forKey: .kind)
+            try c.encode(id, forKey: .id)
+            try c.encode(v,  forKey: .value)
+        case .tool(let b):
+            try c.encode(Kind.tool, forKey: .kind)
+            try c.encode(b, forKey: .block)
+        }
+    }
 }
 
 /// One tool invocation. Streamed in two phases: created on
 /// `tool_execution_start`, output / status filled on `tool_execution_end`.
-struct ToolBlock: Identifiable, Hashable {
+struct ToolBlock: Identifiable, Hashable, Codable {
     let id: UUID
     let toolCallId: String
     var name: String

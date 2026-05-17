@@ -4,15 +4,12 @@ struct ContentView: View {
     @State private var selection: SidebarSection? = .timeline
     @State private var appState = AppState()
     @State private var timeline = TimelineState()
+    @State private var chat = ChatController()
+    @State private var chatStore = ChatStore.shared
 
     var body: some View {
-        // Plain HStack — no NavigationSplitView. The previous
-        // NavigationSplitView kept computing a phantom toolbar safe-area
-        // inset that shifted the detail content vertically when state
-        // changed (e.g. switching dates). A fixed-width HStack has zero
-        // navigation magic so layout is fully deterministic.
         HStack(spacing: 0) {
-            TimelineSidebar(state: timeline, selection: $selection)
+            TimelineSidebar(state: timeline, selection: $selection, chat: chat)
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
 
@@ -22,6 +19,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .environment(appState)
+        .environment(chat)
+        .environment(chatStore)
     }
 
     @ViewBuilder

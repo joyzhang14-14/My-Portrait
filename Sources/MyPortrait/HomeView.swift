@@ -2,8 +2,8 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(AppState.self) private var appState
+    @Environment(ChatController.self) private var chat
     @State private var prompt: String = ""
-    @State private var chat = ChatController()
     @State private var setup = AISetup.shared
 
     var body: some View {

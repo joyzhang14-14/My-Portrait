@@ -12,6 +12,9 @@ import AppKit
 struct TimelineSidebar: View {
     let state: TimelineState
     @Binding var selection: SidebarSection?
+    let chat: ChatController
+
+    @Environment(ChatStore.self) private var chatStore
 
     private let db = ScreenpipeDB()
 
@@ -51,6 +54,8 @@ struct TimelineSidebar: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, 30)
                         }
+                    } else if selection == .home {
+                        recentsSection
                     } else {
                         otherSectionPlaceholder
                     }
@@ -126,6 +131,52 @@ struct TimelineSidebar: View {
                 VStack(spacing: 6) {
                     ForEach(audioItems) { entry in
                         AudioRow(entry: entry, focusTime: focusedTimestamp ?? Date())
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Recents (chat conversations)
+
+    private var recentsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                SectionHeader(title: "RECENTS", count: chatStore.conversations.count)
+                Spacer()
+                Button {
+                    chat.switchTo(nil)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("New chat")
+            }
+
+            if chatStore.conversations.isEmpty {
+                EmptyRow(text: "No chats yet — start typing below.")
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(chatStore.conversations) { conv in
+                        RecentRow(
+                            conv: conv,
+                            isActive: chat.currentConvId == conv.id,
+                            onTap: { chat.switchTo(conv.id) },
+                            onTogglePin: { chatStore.togglePinned(conv.id) },
+                            onDelete: {
+                                let wasActive = chat.currentConvId == conv.id
+                                chatStore.deleteConversation(conv.id)
+                                if wasActive { chat.switchTo(nil) }
+                            }
+                        )
                     }
                 }
             }
@@ -334,5 +385,64 @@ private struct AudioRow: View {
                       ? Color.accentColor.opacity(0.14)
                       : Color.secondary.opacity(0.05))
         )
+    }
+}
+
+// MARK: - Recents row
+
+/// One conversation row in the sidebar. Click the row body to switch, click
+/// the pin icon (on hover) to pin, ⌫ to delete.
+private struct RecentRow: View {
+    let conv: Conversation
+    let isActive: Bool
+    let onTap: () -> Void
+    let onTogglePin: () -> Void
+    let onDelete: () -> Void
+
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                if conv.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                Text(conv.title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                if hover {
+                    Button(action: onTogglePin) {
+                        Image(systemName: conv.pinned ? "pin.slash" : "pin")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                    .help(conv.pinned ? "Unpin" : "Pin")
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isActive ? Color.white.opacity(0.10)
+                          : hover ? Color.white.opacity(0.05)
+                          : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
