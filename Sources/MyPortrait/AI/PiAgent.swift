@@ -20,6 +20,9 @@ final class PiAgent: @unchecked Sendable {
 
     enum Event: @unchecked Sendable {
         case textDelta(String)
+        /// Final assistant text from a `message_end` event (used when the wire
+        /// API doesn't stream deltas, e.g. openai-codex-responses).
+        case assistantFinalText(String)
         case toolStart(id: String, name: String, args: [String: Any])
         case toolEnd(id: String, result: String, isError: Bool)
         case thinkingStart
@@ -106,9 +109,15 @@ final class PiAgent: @unchecked Sendable {
             let data = handle.availableData
             if data.isEmpty { return }
             self?.appendStdout(data)
+            // Mirror raw Pi traffic to a logfile so we can debug offline.
+            Self.appendLog(prefix: "[OUT]", data: data)
         }
-        // Drain stderr so the process doesn't block on a full pipe; log on demand.
-        stderrPipe.fileHandleForReading.readabilityHandler = { _ in /* swallow */ }
+        // Mirror stderr to the same logfile.
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { return }
+            Self.appendLog(prefix: "[ERR]", data: data)
+        }
 
         process.terminationHandler = { [weak self] _ in
             self?.eventContinuation?.finish()
@@ -190,6 +199,18 @@ final class PiAgent: @unchecked Sendable {
             let isError = obj["isError"]    as? Bool   ?? false
             let result  = Self.extractText(obj["result"]) ?? ""
             emit(.toolEnd(id: id, result: result, isError: isError))
+        case "message_end":
+            // Fallback path for providers that don't emit text_delta
+            // (notably openai-codex-responses). Extract assistant text from
+            // the final message.content array, or surface errorMessage.
+            guard let msg = obj["message"] as? [String: Any],
+                  (msg["role"] as? String) == "assistant" else { break }
+            if (msg["stopReason"] as? String) == "error" {
+                let err = (msg["errorMessage"] as? String) ?? "LLM error"
+                emit(.error(err))
+            } else if let text = Self.extractAssistantText(msg) {
+                emit(.assistantFinalText(text))
+            }
         case "response":
             // Command ack — surface only failures.
             if let success = obj["success"] as? Bool, !success {
@@ -213,6 +234,36 @@ final class PiAgent: @unchecked Sendable {
             return arr.compactMap { $0["text"] as? String }.joined(separator: "\n")
         }
         return nil
+    }
+
+    /// Same shape as a tool result but applied to a top-level message.
+    private static func extractAssistantText(_ msg: [String: Any]) -> String? {
+        guard let arr = msg["content"] as? [[String: Any]] else { return nil }
+        let parts = arr.compactMap { $0["text"] as? String }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+
+    // MARK: - Debug logfile
+
+    /// `~/Library/Application Support/MyPortrait/pi-rpc.log`
+    private static let logURL = AIPaths.supportDir.appendingPathComponent("pi-rpc.log")
+    private static let logQueue = DispatchQueue(label: "MyPortrait.PiAgent.log")
+
+    static func appendLog(prefix: String, data: Data) {
+        logQueue.async {
+            try? AIPaths.ensureExists()
+            let line = "\n--- \(prefix) " + ISO8601DateFormatter().string(from: Date()) + " ---\n"
+            let blob = (line.data(using: .utf8) ?? Data()) + data
+            if FileManager.default.fileExists(atPath: logURL.path) {
+                if let h = try? FileHandle(forWritingTo: logURL) {
+                    h.seekToEndOfFile()
+                    try? h.write(contentsOf: blob)
+                    try? h.close()
+                }
+            } else {
+                try? blob.write(to: logURL)
+            }
+        }
     }
 }
 

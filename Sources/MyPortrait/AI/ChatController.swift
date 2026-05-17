@@ -83,12 +83,21 @@ final class ChatController {
         case .textDelta(let delta):
             assistantBuffer += delta
             updateAssistantText(assistantBuffer)
+        case .assistantFinalText(let text):
+            // Fallback path when the wire api doesn't stream deltas.
+            // Replace buffer (don't append) — message_end is the full text.
+            if assistantBuffer.isEmpty || text.count > assistantBuffer.count {
+                assistantBuffer = text
+                updateAssistantText(assistantBuffer)
+            }
         case .agentEnd:
             isStreaming = false
             assistantMessageID = nil
             assistantBuffer = ""
         case .error(let msg):
             lastError = msg
+            // Surface the error inside the assistant bubble so the user actually sees it.
+            updateAssistantText("⚠️ \(msg)")
             isStreaming = false
         case .toolStart(_, let name, _):
             // Inline a one-line marker so the user sees activity until we build
