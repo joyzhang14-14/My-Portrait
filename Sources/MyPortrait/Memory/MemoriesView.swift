@@ -49,6 +49,14 @@ struct MemoriesView: View {
                 .help("Backfill from screenpipe (last 14 days)")
 
                 Button {
+                    Task { await runRescore() }
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+                .buttonStyle(.borderless)
+                .help("Rescore impact with LLM (gpt-5.4)")
+
+                Button {
                     Task { await reload() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -160,6 +168,23 @@ struct MemoriesView: View {
         }.value
         entries = loaded
         loading = false
+    }
+
+    @MainActor
+    private func runRescore() async {
+        backfillStatus = "Rescoring impact with LLM…"
+        let scorer = ImpactScorer()
+        do {
+            let r = try await scorer.rescoreAll { p in
+                Task { @MainActor in
+                    backfillStatus = "Rescoring batch \(p.batchIndex)/\(p.batchCount) — \(p.scoredCount)/\(p.totalCount) files"
+                }
+            }
+            backfillStatus = "Rescored \(r.scoredCount) (failed \(r.failedCount)) in \(String(format: "%.1f", r.elapsed))s"
+            await reload()
+        } catch {
+            backfillStatus = "Rescore failed: \(error.localizedDescription)"
+        }
     }
 
     @MainActor

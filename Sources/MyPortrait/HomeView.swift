@@ -249,62 +249,47 @@ private struct AssistantBody: View {
     }
 }
 
-/// Visual card for a single tool invocation. Header + command line; expand to
-/// show output. Running state shows a spinner + breathing accent.
+/// Compact tool card — mirrors Orphies behaviour:
+///   - Running: header + spinner + live command + live output
+///   - Finished: collapses after a short delay to a single-line friendly label
+///     ("Ran `pwd && ls`", "Read App.swift") that the user can click to expand.
 private struct ToolCard: View {
     let block: ToolBlock
-    @State private var expanded: Bool = false
+    @State private var expanded: Bool = true
+    /// Set to true once we've kicked off the auto-collapse so we don't run the
+    /// timer every time SwiftUI rebuilds the view.
+    @State private var didScheduleAutoCollapse: Bool = false
+
+    /// Delay between a tool finishing and the card collapsing to a one-liner.
+    private static let autoCollapseDelay: TimeInterval = 2.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: iconFor(block.name))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.75))
-                Text(block.name)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .tracking(0.5)
-                    .foregroundStyle(.white.opacity(0.8))
-                Spacer()
-                statusBadge
-                Button {
-                    withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
-                } label: {
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-
-            // Command line (always visible — that IS the interesting bit)
-            if !block.command.isEmpty {
-                Divider().background(Color.white.opacity(0.08))
-                Text(block.command)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.88))
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // Output (collapsed by default once finished; auto-shown while running)
-            if (expanded || block.isRunning) && !block.output.isEmpty {
-                Divider().background(Color.white.opacity(0.08))
-                ScrollView {
-                    Text(block.output)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.78))
+            header
+            if expanded {
+                if !block.command.isEmpty {
+                    Divider().background(Color.white.opacity(0.08))
+                    Text(block.command)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.88))
                         .textSelection(.enabled)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 220)
+                if !block.output.isEmpty {
+                    Divider().background(Color.white.opacity(0.08))
+                    ScrollView {
+                        Text(block.output)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.78))
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 220)
+                }
             }
         }
         .background(
@@ -316,19 +301,92 @@ private struct ToolCard: View {
                         .stroke(accentStroke, lineWidth: 0.8)
                 )
         )
-        .onAppear {
-            // Long running tools — auto-collapse a moment after they finish so
-            // the bubble doesn't get dominated by stale output.
-            if !block.isRunning && !block.output.isEmpty {
-                expanded = false
+        .onChange(of: block.isRunning) {
+            // Tool just finished — start the auto-collapse timer once.
+            if !block.isRunning, !didScheduleAutoCollapse {
+                didScheduleAutoCollapse = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoCollapseDelay) {
+                    withAnimation(.easeOut(duration: 0.25)) { expanded = false }
+                }
             }
         }
+        .onAppear {
+            // Card was inserted already-finished (e.g. message re-rendered):
+            // skip the live phase, jump straight to collapsed.
+            if !block.isRunning {
+                expanded = false
+                didScheduleAutoCollapse = true
+            }
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.20)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: iconFor(block.name))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                if expanded {
+                    Text(block.name)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .tracking(0.5)
+                        .foregroundStyle(.white.opacity(0.8))
+                } else {
+                    Text(friendlyLabel)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer()
+                statusBadge
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, expanded ? 9 : 10)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Friendly label (collapsed)
+
+    /// One-line human summary. Matches Orphies' `friendlyToolLabel`.
+    private var friendlyLabel: String {
+        switch block.name {
+        case "bash", "shell":
+            let cmd = block.command.replacingOccurrences(of: "\n", with: " ")
+            let head = cmd.count > 60 ? String(cmd.prefix(60)) + "…" : cmd
+            return cmd.isEmpty ? "Ran command" : "Ran `\(head)`"
+        case "read":
+            return "Read \(fileName(block.command))"
+        case "edit":
+            return "Edited \(fileName(block.command))"
+        case "write":
+            return "Wrote \(fileName(block.command))"
+        case "grep", "rg":
+            return "Searched for `\(block.command.prefix(40))`"
+        case "find", "ls":
+            return "Listed files"
+        default:
+            return block.name
+        }
+    }
+
+    private func fileName(_ path: String) -> String {
+        path.split(separator: "/").last.map(String.init) ?? path
     }
 
     private var accentStroke: Color {
         if block.isError    { return Color.red.opacity(0.40) }
         if block.isRunning  { return Color.purple.opacity(0.45) }
-        return Color.white.opacity(0.14)
+        return Color.white.opacity(0.12)
     }
 
     @ViewBuilder private var statusBadge: some View {

@@ -25,6 +25,7 @@ import Foundation
 struct PortraitFile: Equatable {
     var created: Date
     var impact: Double                  // 1-5; Double so LLM can micro-adjust
+    var impactSource: String            // "baseline_duration" / "llm:gpt-5.4" / "user_override"
     var weight: Double                  // computed, ≥0
     var accessCount: Int
     var accessHistory: [Date]           // most recent N=10, oldest → newest
@@ -51,6 +52,7 @@ struct PortraitFile: Equatable {
         let stamp = firstOccurrence ?? created
         self.created = created
         self.impact = impact
+        self.impactSource = "baseline_duration"
         self.weight = 0                  // weight pass fills this in
         self.accessCount = 0
         self.accessHistory = []
@@ -67,6 +69,7 @@ struct PortraitFile: Equatable {
     init(
         created: Date,
         impact: Double,
+        impactSource: String,
         weight: Double,
         accessCount: Int,
         accessHistory: [Date],
@@ -80,6 +83,7 @@ struct PortraitFile: Equatable {
     ) {
         self.created = created
         self.impact = impact
+        self.impactSource = impactSource
         self.weight = weight
         self.accessCount = accessCount
         self.accessHistory = accessHistory
