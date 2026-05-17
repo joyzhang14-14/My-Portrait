@@ -1,19 +1,25 @@
 import SwiftUI
 
 struct ContentView: View {
-    // Default to Timeline since that's now the primary view (sidebar shows its context).
     @State private var selection: SidebarSection? = .timeline
     @State private var appState = AppState()
     @State private var timeline = TimelineState()
-    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        // Plain HStack — no NavigationSplitView. The previous
+        // NavigationSplitView kept computing a phantom toolbar safe-area
+        // inset that shifted the detail content vertically when state
+        // changed (e.g. switching dates). A fixed-width HStack has zero
+        // navigation magic so layout is fully deterministic.
+        HStack(spacing: 0) {
             TimelineSidebar(state: timeline, selection: $selection)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
-        } detail: {
+                .frame(width: 300)
+                .frame(maxHeight: .infinity)
+
+            Divider()
+
             mainPane
-                .frame(minWidth: 600, minHeight: 400)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .environment(appState)
     }
@@ -31,79 +37,6 @@ struct ContentView: View {
                                                systemImage: "sparkles",
                                                subtitle: "Coming soon")
         }
-    }
-}
-
-// MARK: - Legacy sidebar (kept for reference; ContentView now uses TimelineSidebar)
-
-private struct NativeSidebar: View {
-    @Binding var selection: SidebarSection?
-
-    var body: some View {
-        List(selection: $selection) {
-            // Top: workspace identity
-            Section {
-                EmptyView()
-            } header: {
-                HStack {
-                    Text("My Portrait")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                }
-                .padding(.vertical, 8)
-                .textCase(nil)
-            }
-
-            // Quick actions
-            Section {
-                Label {
-                    Text("New chat").fontWeight(.medium)
-                } icon: {
-                    Image(systemName: "plus.bubble")
-                        .symbolRenderingMode(.hierarchical)
-                }
-            } header: {
-                Text("Quick")
-            }
-
-            // Navigation
-            Section {
-                ForEach([SidebarSection.timeline, .memories, .pipes, .connections], id: \.self) { item in
-                    NavigationLink(value: item) {
-                        Label(item.label, systemImage: item.symbol)
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                }
-            } header: {
-                Text("Library")
-            }
-
-            // Recents
-            Section {
-                ForEach(Mock.recents.prefix(8), id: \.self) { title in
-                    Label {
-                        Text(title)
-                            .font(.system(size: 12))
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
-                    } icon: {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 5))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            } header: {
-                Text("Recents")
-            }
-        }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
-        // Solid backing so the timeline / home content next door doesn't bleed
-        // through the Liquid Glass sidebar edge.
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.92))
-        .navigationTitle("")
-        .toolbar(.hidden, for: .windowToolbar)   // no top bar — date isn't covered
     }
 }
 
