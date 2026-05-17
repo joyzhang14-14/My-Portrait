@@ -70,13 +70,39 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <string>NSApplication</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
+
+    <!-- TCC usage strings: explain WHY we touch the privacy-protected folders.
+         macOS shows these in the consent prompt. They also make the grant
+         "stickier" because the system records the purpose alongside the
+         allow-list entry. -->
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>My Portrait's AI agent reads files from your Documents folder when you ask it to.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>My Portrait's AI agent reads files from your Desktop when you ask it to.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>My Portrait's AI agent reads files from your Downloads folder when you ask it to.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>My Portrait controls helper processes (Bun + Pi agent) to talk to ChatGPT.</string>
 </dict>
 </plist>
 EOF
 
 if security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
-    echo "Signing with $SIGN_IDENTITY ..."
-    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+    # Custom designated requirement: identify the app by its bundle id +
+    # signing certificate's Common Name only — NOT by the binary's cdhash.
+    # TCC (Documents/Desktop/Downloads), Firewall, and Keychain all use this
+    # requirement to decide "is this the same app as before?". Tying it to
+    # the cert CN means every rebuild signed with $SIGN_IDENTITY is the
+    # SAME app from the OS's perspective, so the user only grants access
+    # once and the grant survives all future rebuilds.
+    REQ='designated => identifier "'"$BUNDLE_ID"'" and anchor trusted and certificate leaf[subject.CN] = "'"$SIGN_IDENTITY"'"'
+
+    echo "Signing with $SIGN_IDENTITY (stable designated requirement)..."
+    codesign --force --deep \
+        --sign "$SIGN_IDENTITY" \
+        --identifier "$BUNDLE_ID" \
+        --requirements "=$REQ" \
+        "$APP_DIR"
     codesign --verify --verbose "$APP_DIR"
 else
     echo "Skip signing: identity '$SIGN_IDENTITY' not found in keychain."
