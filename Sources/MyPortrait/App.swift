@@ -33,8 +33,6 @@ struct MyPortraitApp: App {
 // events through NSEvent monitors. The delegate fixes all three.
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var chromeKeeper: Timer?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)        // Show in Dock, can be key window
         NSApp.activate(ignoringOtherApps: true)    // Bring to front
@@ -44,34 +42,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.styleMask.insert(.resizable)
                 window.setContentSize(NSSize(width: 1200, height: 835))
                 window.center()
-                Self.applyChrome(to: window)
+
+                // Standard title bar (with traffic lights), just hide the text.
+                // We deliberately do NOT use .fullSizeContentView — on macOS 26
+                // it appears to cover the traffic lights with the content view.
+                window.titleVisibility = .hidden
+                window.titlebarAppearsTransparent = false
+                window.styleMask.remove(.fullSizeContentView)
+                window.standardWindowButton(.closeButton)?.isHidden = false
+                window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+                window.standardWindowButton(.zoomButton)?.isHidden = false
+
                 window.makeKeyAndOrderFront(nil)
             }
         }
-
-        // SwiftUI on macOS 26 quietly re-attaches an NSToolbar to the window on
-        // navigation / state changes (the dark strip the user saw after
-        // switching dates). Observers fire too late, so we poll every 0.4s
-        // and strip any toolbar that snuck back. Cheap — just a property set.
-        chromeKeeper = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
-            for w in NSApp.windows { Self.applyChrome(to: w) }
-        }
-    }
-
-    /// Hide the title text, keep traffic lights, let content extend under the
-    /// title bar, and forcibly remove any NSToolbar SwiftUI tries to add.
-    static func applyChrome(to window: NSWindow) {
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.styleMask.insert(.fullSizeContentView)
-        if window.toolbar != nil { window.toolbar = nil }
-
-        // Make sure the traffic lights actually render — SwiftUI's default
-        // chrome config on macOS 26 sometimes hides them when titleVisibility
-        // is set to .hidden.
-        window.standardWindowButton(.closeButton)?.isHidden = false
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
-        window.standardWindowButton(.zoomButton)?.isHidden = false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
