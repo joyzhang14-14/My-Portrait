@@ -11,14 +11,21 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             TimelineSidebar(state: timeline, selection: $selection)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
+                // NavigationSplitView automatically inserts a sidebar-toggle
+                // toolbar item on macOS, which forces the NSToolbar to exist.
+                // Removing it lets .toolbarVisibility(.hidden) actually take
+                // effect; otherwise the bar keeps coming back on nav changes.
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             mainPane
                 .frame(minWidth: 600, minHeight: 400)
         }
         .environment(appState)
-        // Hide at the top level so the toolbar can't reappear during nested
-        // view re-renders (e.g. when the calendar popover closes).
-        .toolbar(.hidden, for: .windowToolbar)
+        // macOS 15+ proper API for killing the NSToolbar layer entirely.
+        // Combined with the transparent title bar + fullSizeContentView in
+        // AppDelegate, the top chrome collapses to 0 and the traffic lights
+        // float over the content.
+        .toolbarVisibility(.hidden, for: .windowToolbar)
     }
 
     @ViewBuilder

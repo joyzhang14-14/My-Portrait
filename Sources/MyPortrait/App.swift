@@ -43,12 +43,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.setContentSize(NSSize(width: 1200, height: 835))
                 window.center()
 
-                // Standard title bar (with traffic lights), just hide the text.
-                // We deliberately do NOT use .fullSizeContentView — on macOS 26
-                // it appears to cover the traffic lights with the content view.
+                // Per Apple's macOS 15+ pattern: transparent title bar + fullSize
+                // content view, then let SwiftUI's .toolbarVisibility(.hidden,
+                // for: .windowToolbar) kill the NSToolbar layer above it. This
+                // combination floats the traffic lights over the content
+                // without leaving a chrome strip.
                 window.titleVisibility = .hidden
-                window.titlebarAppearsTransparent = false
-                window.styleMask.remove(.fullSizeContentView)
+                window.titlebarAppearsTransparent = true
+                window.styleMask.insert(.fullSizeContentView)
+                window.isMovableByWindowBackground = true
                 window.standardWindowButton(.closeButton)?.isHidden = false
                 window.standardWindowButton(.miniaturizeButton)?.isHidden = false
                 window.standardWindowButton(.zoomButton)?.isHidden = false
