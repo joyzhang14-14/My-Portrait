@@ -477,25 +477,114 @@ private struct BubbleAvatar: View {
 }
 
 private struct ChatThinking: View {
-    @State private var phase = 0
-    private let dots = ["·  ·  ·", "•  ·  ·", "·  •  ·", "·  ·  •"]
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             BubbleAvatar(role: .assistant, glowing: true)
-            Text(dots[phase])
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.45))
-                .padding(.vertical, 14)
-                .padding(.horizontal, 18)
-                .background(GlassPanel(tint: .purple, intensity: 0.04, strokeOpacity: 0.10, corner: 16))
-                .onAppear {
-                    Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { _ in
-                        Task { @MainActor in phase = (phase + 1) % dots.count }
-                    }
-                }
+            HStack(spacing: 10) {
+                OrbitingParticles()
+                Text("thinking…")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .tracking(0.5)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(GlassPanel(tint: .purple, intensity: 0.04, strokeOpacity: 0.10, corner: 16))
             Spacer()
         }
         .padding(.horizontal, 4)
+    }
+}
+
+/// Three colored orbs revolving on the same orbital circle, 120° apart,
+/// each leaving a softly fading motion trail behind it. The whole rig
+/// breathes (orbit radius modulates by ±10% on a 3-second cycle).
+private struct OrbitingParticles: View {
+    /// Orbital period in seconds.
+    private let period: Double = 1.6
+    /// Visual canvas size — orbit fits comfortably inside.
+    private let size: CGFloat = 28
+    /// Base orbit radius.
+    private let radius: CGFloat = 9
+    /// Number of trail samples drawn per orb (older = dimmer + smaller).
+    private let trailSamples = 6
+    /// Three orb colors. Picked to riff on the assistant avatar gradient.
+    private let colors: [Color] = [
+        Color(red: 0.75, green: 0.40, blue: 1.00),    // violet
+        Color(red: 0.40, green: 0.85, blue: 1.00),    // cyan
+        Color(red: 1.00, green: 0.45, blue: 0.80)     // magenta
+    ]
+
+    var body: some View {
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/60.0, paused: false)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            Canvas { gctx, canvasSize in
+                draw(into: &gctx, size: canvasSize, t: t)
+            }
+            .frame(width: size, height: size)
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func draw(into ctx: inout GraphicsContext, size canvasSize: CGSize, t: Double) {
+        let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        let breath = 1 + 0.10 * sin(t * 2 * .pi / 3.0)
+        let r = radius * CGFloat(breath)
+        let baseAngle = (t / period) * .pi * 2
+
+        for (idx, color) in colors.enumerated() {
+            let phase = Double(idx) * (2 * .pi / 3.0)
+
+            // Trail samples — older positions, faded.
+            for s in (1...trailSamples).reversed() {
+                let lag = Double(s) * (period / 30.0)
+                let angle = baseAngle - lag + phase
+                let pos = CGPoint(
+                    x: center.x + cos(angle) * r,
+                    y: center.y + sin(angle) * r
+                )
+                let trailAlpha = (1.0 - Double(s) / Double(trailSamples)) * 0.4
+                let trailRadius = 1.6 - Double(s) * 0.18
+                let rect = CGRect(
+                    x: pos.x - CGFloat(trailRadius),
+                    y: pos.y - CGFloat(trailRadius),
+                    width: CGFloat(trailRadius * 2),
+                    height: CGFloat(trailRadius * 2)
+                )
+                ctx.fill(Path(ellipseIn: rect),
+                         with: .color(color.opacity(trailAlpha)))
+            }
+
+            // Head orb with a soft glow halo.
+            let headAngle = baseAngle + phase
+            let head = CGPoint(
+                x: center.x + cos(headAngle) * r,
+                y: center.y + sin(headAngle) * r
+            )
+
+            // Halo
+            let haloRadius: CGFloat = 4.5
+            let haloRect = CGRect(
+                x: head.x - haloRadius,
+                y: head.y - haloRadius,
+                width: haloRadius * 2,
+                height: haloRadius * 2
+            )
+            ctx.fill(
+                Path(ellipseIn: haloRect),
+                with: .radialGradient(
+                    Gradient(colors: [color.opacity(0.55), color.opacity(0)]),
+                    center: head, startRadius: 0, endRadius: haloRadius
+                )
+            )
+
+            // Solid head
+            let headRect = CGRect(
+                x: head.x - 1.8, y: head.y - 1.8,
+                width: 3.6, height: 3.6
+            )
+            ctx.fill(Path(ellipseIn: headRect), with: .color(color))
+        }
     }
 }
 
