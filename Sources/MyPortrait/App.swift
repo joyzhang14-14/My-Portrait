@@ -10,42 +10,63 @@ struct MyPortraitApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("") {
-            ContentView()
-                .frame(minWidth: 700, minHeight: 500)
-                .preferredColorScheme(.dark)
-        }
-        .defaultSize(width: 1200, height: 835)
-        // NOTE: we deliberately do NOT use .windowStyle(.hiddenTitleBar) — on
-        // some macOS versions it collapses the title bar to 0pt and takes the
-        // traffic lights with it. Instead AppDelegate configures the NSWindow
-        // manually: keeps traffic lights, hides the title text, lets content
-        // extend under the title bar, and force-removes any NSToolbar that
-        // SwiftUI tries to re-add after navigation changes.
+        // Deliberately no WindowGroup — the AppDelegate creates the window
+        // directly via AppKit so SwiftUI / NavigationSplitView can't insert
+        // any toolbar chrome of its own. Settings { EmptyView() } is just a
+        // valid placeholder scene; nothing visible attaches to it.
+        Settings { EmptyView() }
     }
 }
 
-// MARK: - AppDelegate — forces proper macOS app status for SwiftPM-built executables.
-//
-// `swift run` produces a bare binary, not a `.app` bundle. By default macOS
-// treats such processes as accessory apps that don't show in the Dock, can't
-// be activated, and (most importantly here) don't reliably receive keyboard
-// events through NSEvent monitors. The delegate fixes all three.
+// MARK: - NSWindow subclass that refuses to ever have an NSToolbar
+
+/// SwiftUI's NavigationSplitView keeps trying to install a sidebar-toggle
+/// toolbar item, which forces an NSToolbar layer on the window. Overriding
+/// the `toolbar` setter to no-op makes the window flat-out reject any
+/// attempt to attach one. Combined with `.fullSizeContentView` + transparent
+/// title bar, this leaves a single chrome layer: the title bar with the
+/// traffic-light buttons floating over the content.
+final class ChromelessWindow: NSWindow {
+    override var toolbar: NSToolbar? {
+        get { nil }
+        set { /* refuse — keep nil forever */ }
+    }
+}
+
+// MARK: - AppDelegate — owns the single app window
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)        // Show in Dock, can be key window
-        NSApp.activate(ignoringOtherApps: true)    // Bring to front
+    var window: ChromelessWindow!
 
-        DispatchQueue.main.async {
-            for window in NSApp.windows {
-                window.styleMask.insert(.resizable)
-                window.setContentSize(NSSize(width: 1200, height: 835))
-                window.center()
-                window.title = ""
-                window.makeKeyAndOrderFront(nil)
-            }
-        }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+
+        window = ChromelessWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 835),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = ""
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.minSize = NSSize(width: 700, height: 500)
+        window.backgroundColor = .black
+        // Explicit unhide — some macOS 26 chrome configurations hide these
+        // by default when the title bar is transparent.
+        window.standardWindowButton(.closeButton)?.isHidden = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isHidden = false
+
+        // Host the SwiftUI ContentView inside the AppKit window.
+        let hosting = NSHostingView(rootView: ContentView().preferredColorScheme(.dark))
+        hosting.autoresizingMask = [.width, .height]
+        window.contentView = hosting
+
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -58,12 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum AppKeyboard {
     static func install() {
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
-            // DIAGNOSTIC: prints to terminal — you should see this when pressing any key.
-            // If you don't see it, the app isn't receiving keyboard events (sandboxing /
-            // non-bundle status). If you DO see it, the rest of the chain is fine.
             print("[Keyboard] keyDown keyCode=\(event.keyCode) chars=\(event.charactersIgnoringModifiers ?? "")")
-
-            // Don't intercept while typing in a text field
             if NSApp.keyWindow?.firstResponder is NSText { return event }
 
             let isAlt = event.modifierFlags.contains(.option)

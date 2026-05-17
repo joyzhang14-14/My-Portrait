@@ -33,7 +33,9 @@ struct TimelineView: View {
                 ),
                 onRefresh: { reload() }
             )
-            .padding(.top, 16)
+            // 40pt reserves the strip where the traffic lights float (the
+            // title bar is transparent and content extends behind it).
+            .padding(.top, 40)
             .padding(.bottom, 10)
 
             // Browser URL bar — fixed-height slot so the screenshot below NEVER
