@@ -16,11 +16,12 @@ struct MyPortraitApp: App {
                 .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1200, height: 835)
-        // Kill the native macOS title bar (the strip with "My Portrait" + traffic
-        // lights). `.toolbar(.hidden)` alone doesn't remove this — it's a separate
-        // window chrome layer. Hiding it lets the date controls sit at the top
-        // without a duplicate header above them. Traffic lights still float.
-        .windowStyle(.hiddenTitleBar)
+        // NOTE: we deliberately do NOT use .windowStyle(.hiddenTitleBar) — on
+        // some macOS versions it collapses the title bar to 0pt and takes the
+        // traffic lights with it. Instead AppDelegate configures the NSWindow
+        // manually: keeps traffic lights, hides the title text, lets content
+        // extend under the title bar, and force-removes any NSToolbar that
+        // SwiftUI tries to re-add after navigation changes.
     }
 }
 
@@ -36,15 +37,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)        // Show in Dock, can be key window
         NSApp.activate(ignoringOtherApps: true)    // Bring to front
 
-        // Force initial window to the target size + ensure resizable.
+        // Force initial window to the target size + ensure resizable, and apply
+        // the chrome configuration (no title text, traffic lights kept, content
+        // extends under the title bar, no NSToolbar).
         DispatchQueue.main.async {
             for window in NSApp.windows {
                 window.styleMask.insert(.resizable)
                 window.setContentSize(NSSize(width: 1200, height: 835))
                 window.center()
+                Self.applyChrome(to: window)
                 window.makeKeyAndOrderFront(nil)
             }
         }
+
+        // SwiftUI sometimes re-attaches an NSToolbar on navigation / sheet
+        // changes (the dark strip the user kept seeing at the top of the
+        // window after switching dates). Re-apply chrome whenever any window
+        // becomes key so the toolbar can't sneak back.
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { note in
+            if let w = note.object as? NSWindow { Self.applyChrome(to: w) }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: nil,
+            queue: .main
+        ) { note in
+            if let w = note.object as? NSWindow { Self.applyChrome(to: w) }
+        }
+    }
+
+    /// Hide the title text, keep traffic lights, let content extend under the
+    /// title bar, and forcibly remove any NSToolbar SwiftUI tries to add.
+    static func applyChrome(to window: NSWindow) {
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.toolbar = nil
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
