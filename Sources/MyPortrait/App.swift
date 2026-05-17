@@ -16,6 +16,11 @@ struct MyPortraitApp: App {
                 .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1200, height: 835)
+        // Kill the native macOS title bar (the strip with "My Portrait" + traffic
+        // lights). `.toolbar(.hidden)` alone doesn't remove this — it's a separate
+        // window chrome layer. Hiding it lets the date controls sit at the top
+        // without a duplicate header above them. Traffic lights still float.
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
