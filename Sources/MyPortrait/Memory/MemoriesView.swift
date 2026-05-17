@@ -80,6 +80,7 @@ struct MemoriesView: View {
 
             if entries.isEmpty && !loading {
                 EmptyHint()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -91,8 +92,10 @@ struct MemoriesView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor).opacity(0.92))
     }
 

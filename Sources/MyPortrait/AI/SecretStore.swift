@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import Security
 import SQLite3
+import Darwin
 
 /// Encrypted key/value store. Mirrors the Rust `screenpipe_secrets::SecretStore`:
 ///   - 32-byte AES-256-GCM master key in macOS Keychain (one entry).
