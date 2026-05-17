@@ -11,11 +11,18 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             TimelineSidebar(state: timeline, selection: $selection)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
+                // NavigationSplitView auto-adds a sidebar toggle toolbar item;
+                // removing it lets the toolbar layer collapse so it stops
+                // covering the date controls.
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             mainPane
                 .frame(minWidth: 600, minHeight: 400)
         }
         .environment(appState)
+        // Kill the NSToolbar layer (separate from the title bar) so only the
+        // title bar with traffic lights remains.
+        .toolbar(.hidden, for: .windowToolbar)
     }
 
     @ViewBuilder
