@@ -1,23 +1,20 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var selection: SidebarSection? = .home
+    // Default to Timeline since that's now the primary view (sidebar shows its context).
+    @State private var selection: SidebarSection? = .timeline
     @State private var appState = AppState()
-    // Hoisted so the sidebar (next commit) can read currentFrame / focusIndex
-    // and show Active Apps + Audio Transcript context for the same moment.
     @State private var timeline = TimelineState()
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            NativeSidebar(selection: $selection)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
+            TimelineSidebar(state: timeline, selection: $selection)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
         } detail: {
             mainPane
                 .frame(minWidth: 600, minHeight: 400)
         }
-        // No custom black background — let macOS materials show through.
-        // Adapts to light/dark and respects the user's system tint.
         .environment(appState)
     }
 
@@ -37,7 +34,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Native sidebar (List + .sidebar style + Material)
+// MARK: - Legacy sidebar (kept for reference; ContentView now uses TimelineSidebar)
 
 private struct NativeSidebar: View {
     @Binding var selection: SidebarSection?
