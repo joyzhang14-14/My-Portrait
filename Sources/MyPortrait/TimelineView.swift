@@ -33,7 +33,11 @@ struct TimelineView: View {
                 ),
                 onRefresh: { reload() }
             )
-            .padding(.top, 16)
+            // 44pt = traffic-light strip (~28pt) + breathing room. Without this
+            // explicit padding, .hiddenTitleBar lets the date controls overlap
+            // the traffic lights on some launches (the layout inconsistency
+            // between past dates and today).
+            .padding(.top, 44)
             .padding(.bottom, 10)
 
             // Browser URL bar — fixed-height slot so the screenshot below NEVER
