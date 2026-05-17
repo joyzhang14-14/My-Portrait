@@ -17,12 +17,6 @@ struct ContentView: View {
                 .frame(minWidth: 600, minHeight: 400)
         }
         .environment(appState)
-        // Belt + suspenders: even with .windowStyle(.hiddenTitleBar) on the
-        // WindowGroup, SwiftUI sometimes re-attaches a toolbar layer when
-        // navigation state changes, which shifts the safe-area inset and
-        // makes the date bar jump between dates. Forcing toolbar visibility
-        // to .hidden at this level keeps the layout deterministic.
-        .toolbarVisibility(.hidden, for: .windowToolbar)
     }
 
     @ViewBuilder

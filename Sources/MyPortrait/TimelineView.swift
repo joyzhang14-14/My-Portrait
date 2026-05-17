@@ -68,10 +68,6 @@ struct TimelineView: View {
         }
         .background(Color.black)
         .clipped()                       // belt + suspenders — pane never overflows
-        // Pin the top of the pane to the window edge so the date-bar's top
-        // padding is the SOLE thing controlling its y position. Without this,
-        // SwiftUI's safe-area inset changes between dates and the bar jumps.
-        .ignoresSafeArea(.container, edges: .top)
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
             guard !state.frames.isEmpty else { return }
