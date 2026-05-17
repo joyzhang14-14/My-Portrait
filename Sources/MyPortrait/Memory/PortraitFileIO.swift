@@ -73,6 +73,7 @@ enum PortraitFileIO {
         // written before the EventBuilder pipeline existed.
         let eventTitle = (try? optionalString(fields, "event_title")) ?? nil ?? ""
         let eventSummary = (try? optionalString(fields, "event_summary")) ?? nil ?? ""
+        let category = (try? optionalString(fields, "category")) ?? nil ?? "habits"
         let memberFrameIds = (try? optionalInt64Array(fields, "member_frame_ids")) ?? []
 
         return PortraitFile(
@@ -85,6 +86,7 @@ enum PortraitFileIO {
             occurrences: occurrences,
             eventTitle: eventTitle,
             eventSummary: eventSummary,
+            category: category,
             memberFrameIds: memberFrameIds,
             source: source,
             tags: tags,
@@ -117,6 +119,7 @@ enum PortraitFileIO {
         lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: false))")
         lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")
         lines.append("event_summary: \(formatNullableString(f.eventSummary.isEmpty ? nil : f.eventSummary))")
+        lines.append("category: \(f.category)")
         lines.append("member_frame_ids: \(formatInt64Array(f.memberFrameIds))")
         lines.append("source: \(formatNullableString(f.source))")
         lines.append("tags: \(formatStringArray(f.tags))")

@@ -11,8 +11,16 @@ enum Storage {
             .appendingPathComponent(".portrait", isDirectory: true)
     }
 
-    /// Markdown portrait tree (`/personality`, `/skills`, `/emotions`, …).
+    /// Portrait layer — long-term "who is this person" distilled by
+    /// PortraitDistiller. Subdirs are the 9 seed categories
+    /// (personality / skills / emotions / …).
     static var portraitDir: URL { rootURL.appendingPathComponent("portrait", isDirectory: true) }
+
+    /// Event layer — raw activity records (one file per semantic event,
+    /// possibly spanning apps within a day). Source material the
+    /// PortraitDistiller reads to produce portrait entries.
+    /// Subdirs are dates (yyyy-MM-dd).
+    static var eventsDir: URL { rootURL.appendingPathComponent("events", isDirectory: true) }
 
     /// VAD-segmented raw audio + transcripts queue (P1 deferred transcription).
     static var audioQueueDir: URL { rootURL.appendingPathComponent("audio_queue", isDirectory: true) }
@@ -34,7 +42,7 @@ enum Storage {
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {
         let fm = FileManager.default
-        for url in [rootURL, portraitDir, audioQueueDir, dailyLogsDir, journalDir] {
+        for url in [rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir, journalDir] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }

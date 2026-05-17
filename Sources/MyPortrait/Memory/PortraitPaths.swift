@@ -15,6 +15,15 @@ enum PortraitPaths {
         Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
     }
 
+    /// Per-day events directory: ~/.portrait/events/yyyy-MM-dd/
+    static func eventsDayDir(for day: Date) -> URL {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return Storage.eventsDir.appendingPathComponent(f.string(from: day), isDirectory: true)
+    }
+
     /// Per-category archive (kept inside the category itself, NOT a global
     /// _archive/, so when you browse `habits/_archive/` you see the history
     /// of THAT category specifically).

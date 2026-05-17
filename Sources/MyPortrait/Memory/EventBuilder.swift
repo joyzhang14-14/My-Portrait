@@ -39,6 +39,7 @@ final class EventBuilder {
     enum Decision {
         case join(eventId: String)
         case new(title: String, summary: String, category: String, tags: [String])
+        case skip
     }
 
     /// Returned 1:1 with input sessions (same order).
@@ -143,9 +144,11 @@ final class EventBuilder {
         lines.append("Rules:")
         lines.append("- An EVENT is what the user was DOING (subject + intent), not which app was open.")
         lines.append("- Events span apps. Switching from Messages to a YouTube link sent in chat and back is ONE event.")
-        lines.append("- Each session below either JOINS an existing active event (if it's a continuation) or starts a NEW event.")
+        lines.append("- Each session below either JOINS an existing active event (if it's a continuation), STARTS a NEW event, or is SKIPPED if there's no meaningful content.")
         lines.append("- Prefer joining over creating when intent matches even if app differs.")
-        lines.append("- A NEW event gets a short title, 1-2 sentence summary, a category (one of: personality, social, background, experiences, interests, speech_style, habits, skills, emotions), and 1-5 lowercase tags.")
+        lines.append("- **The summary MUST be grounded in the OCR text below. Do NOT make up content from app/window names alone.** If you have no OCR to support a real summary, choose `skip` instead of `new`.")
+        lines.append("- `skip` is correct for sessions that are clearly idle/transient (app open in background, no real interaction).")
+        lines.append("- A NEW event gets a short title (≤60 chars, grounded in OCR), a 1-2 sentence summary (must cite specific things visible in OCR), a category (one of: personality, social, background, experiences, interests, speech_style, habits, skills, emotions), and 1-5 lowercase tags.")
         lines.append("")
         lines.append("Date being processed: \(dayStr)")
         lines.append("")
@@ -195,6 +198,7 @@ final class EventBuilder {
         lines.append("Each object:")
         lines.append("  - join an existing event:  {\"id\":1, \"decision\":\"join\", \"event_id\":\"<id from active list>\", \"reason\":\"...\"}")
         lines.append("  - start a new event:       {\"id\":1, \"decision\":\"new\", \"title\":\"...\", \"summary\":\"...\", \"category\":\"...\", \"tags\":[\"...\"], \"reason\":\"...\"}")
+        lines.append("  - skip (no real content):  {\"id\":1, \"decision\":\"skip\", \"reason\":\"no OCR / idle\"}")
         return lines.joined(separator: "\n")
     }
 
@@ -239,6 +243,8 @@ final class EventBuilder {
                 let category = (entry["category"] as? String) ?? "habits"
                 let tags = (entry["tags"] as? [String]) ?? []
                 out.append((.new(title: title, summary: summary, category: category, tags: tags), reason))
+            case "skip":
+                out.append((.skip, reason))
             default:
                 throw BuilderError.malformedJSON("entry \(idx + 1) unknown decision \(kind)")
             }

@@ -135,18 +135,35 @@ enum Backfill {
                 continue
             }
 
+            // Index OCR length per session for impact baseline.
+            var ocrLenByFrameId: [Int64: Int] = [:]
+            for e in enriched {
+                let key = e.session.sourceFrameIds.first ?? 0
+                ocrLenByFrameId[key] = e.ocrSnippet.count
+            }
+
             // Materialise.
             for a in assignments {
                 let sessionFrameIds = a.session.sourceFrameIds
                 switch a.decision {
+                case .skip:
+                    totals.emptySessionCount += 1
+                    continue
                 case .join(let eventId):
                     guard let entry = fileCache[eventId] else {
-                        // LLM hallucinated an event id — fall back to NEW with
-                        // a best-effort placeholder title.
+                        // LLM hallucinated an event id — fall back to NEW
+                        // ONLY if there's enough OCR substance; otherwise skip.
+                        let firstId = a.session.sourceFrameIds.first ?? 0
+                        let ocrLen = ocrLenByFrameId[firstId] ?? 0
+                        if ocrLen < 30 {
+                            totals.emptySessionCount += 1
+                            continue
+                        }
                         try createNewEvent(
                             from: a,
                             session: a.session,
                             day: day,
+                            ocrLen: ocrLen,
                             cache: &fileCache,
                             fallbackTitle: "\(a.session.appName) — \(a.session.windowName)"
                         )
@@ -168,10 +185,13 @@ enum Backfill {
                                                file: updated)
                     totals.joinedSessionCount += 1
                 case .new:
+                    let firstId = a.session.sourceFrameIds.first ?? 0
+                    let ocrLen = ocrLenByFrameId[firstId] ?? 0
                     try createNewEvent(
                         from: a,
                         session: a.session,
                         day: day,
+                        ocrLen: ocrLen,
                         cache: &fileCache
                     )
                     totals.newEventCount += 1
@@ -221,6 +241,7 @@ enum Backfill {
         from a: EventBuilder.Assignment,
         session: Tier1Merger.MergedEvent,
         day: Date,
+        ocrLen: Int,
         cache: inout [String: Entry],
         fallbackTitle: String? = nil
     ) throws {
@@ -231,7 +252,7 @@ enum Backfill {
             summary = s
             category = c
             tags = tg
-        case .join:
+        case .join, .skip:
             title = fallbackTitle ?? session.appName
             summary = ""
             category = "habits"
@@ -241,18 +262,25 @@ enum Backfill {
         let safeCategory = PortraitPaths.seedCategories.contains(category)
             ? category : "habits"
         let filename = makeFilename(title: title, day: day)
-        let url = PortraitPaths.categoryDir(safeCategory).appendingPathComponent(filename)
+        // Events live under events/<yyyy-MM-dd>/ (NOT portrait/<cat>/).
+        // The `category` field is still recorded in front-matter so the
+        // PortraitDistiller can route source events to the right
+        // portrait category later.
+        let url = PortraitPaths.eventsDayDir(for: day).appendingPathComponent(filename)
         let finalURL = uniqueURL(url)
 
+        // `created` should be the moment the event FIRST happened (its first
+        // session's first frame), not the time the file is written.
         var file = PortraitFile(
             created: session.firstSeen,
-            impact: baselineImpact(for: session),
+            impact: baselineImpact(for: session, ocrLen: ocrLen),
             body: renderBody(title: title, summary: summary, session: session),
             source: "screenpipe:event",
             tags: tags,
             firstOccurrence: day,
             eventTitle: title,
             eventSummary: summary,
+            category: safeCategory,
             memberFrameIds: session.sourceFrameIds
         )
         // Ensure occurrence is truncated to day.
@@ -261,7 +289,7 @@ enum Backfill {
         try PortraitFileIO.write(file, to: finalURL)
 
         let rel = finalURL.path
-            .replacingOccurrences(of: Storage.portraitDir.path + "/", with: "")
+            .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
         cache[rel] = Entry(url: finalURL, relativePath: rel, file: file)
     }
 
@@ -325,16 +353,25 @@ enum Backfill {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private static func baselineImpact(for s: Tier1Merger.MergedEvent) -> Double {
-        let dur = s.lastSeen.timeIntervalSince(s.firstSeen)
-        let minutes = dur / 60
-        switch minutes {
-        case ..<1:    return 1
-        case ..<5:    return 2
-        case ..<30:   return 3
-        case ..<120:  return 4
-        default:      return 5
+    /// Baseline impact = mostly OCR substance, lightly duration-modulated.
+    /// LLM rescore will override this; the baseline just avoids ranking
+    /// "long but empty" sessions above "short but content-rich" ones.
+    private static func baselineImpact(for s: Tier1Merger.MergedEvent,
+                                       ocrLen: Int) -> Double {
+        let minutes = s.lastSeen.timeIntervalSince(s.firstSeen) / 60
+        // Content score: 1 (almost nothing) → 5 (lots of OCR)
+        let contentBase: Double
+        switch ocrLen {
+        case ..<50:    contentBase = 1
+        case ..<200:   contentBase = 2
+        case ..<500:   contentBase = 3
+        case ..<1200:  contentBase = 4
+        default:       contentBase = 5
         }
+        // Long sessions with content nudge up slightly; long sessions
+        // without content stay at the content score (no duration bonus).
+        let durBoost: Double = (ocrLen >= 50 && minutes >= 30) ? 0.5 : 0
+        return min(5, contentBase + durBoost)
     }
 
     // MARK: - Tree I/O
@@ -348,7 +385,7 @@ enum Backfill {
     nonisolated private static func scanAllFilesSync() -> [String: Entry] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
-            at: Storage.portraitDir,
+            at: Storage.eventsDir,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else { return [:] }
@@ -360,7 +397,7 @@ enum Backfill {
             if url.pathComponents.contains("_archive") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             let rel = url.path
-                .replacingOccurrences(of: Storage.portraitDir.path + "/", with: "")
+                .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
             out[rel] = Entry(url: url, relativePath: rel, file: f)
         }
         return out
@@ -376,8 +413,16 @@ enum Backfill {
     /// under Swift 6 strict concurrency, so isolate it here.
     nonisolated private static func weightPassSync() {
         let fm = FileManager.default
+        // Recompute weights for BOTH layers — events and portrait entries.
+        for root in [Storage.eventsDir, Storage.portraitDir] {
+            weightPassDir(root)
+        }
+    }
+
+    nonisolated private static func weightPassDir(_ root: URL) {
+        let fm = FileManager.default
         guard let enumerator = fm.enumerator(
-            at: Storage.portraitDir,
+            at: root,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else { return }

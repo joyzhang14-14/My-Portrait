@@ -37,6 +37,8 @@ struct PortraitFile: Equatable {
                                         // "how many distinct days" boost.
     var eventTitle: String              // short human-readable event name (LLM)
     var eventSummary: String            // one-paragraph description (LLM)
+    var category: String                // portrait taxonomy bucket
+                                        // (personality / social / habits / ...)
     var memberFrameIds: [Int64]         // screenpipe frame IDs contributing
                                         // to this event (across days + apps)
     var source: String?                 // backward-compat origin reference
@@ -59,6 +61,7 @@ struct PortraitFile: Equatable {
         firstOccurrence: Date? = nil,
         eventTitle: String = "",
         eventSummary: String = "",
+        category: String = "habits",
         memberFrameIds: [Int64] = []
     ) {
         let stamp = Self.truncateToDay(firstOccurrence ?? created)
@@ -71,6 +74,7 @@ struct PortraitFile: Equatable {
         self.occurrences = [stamp]
         self.eventTitle = eventTitle
         self.eventSummary = eventSummary
+        self.category = category
         self.memberFrameIds = memberFrameIds
         self.source = source
         self.tags = tags
@@ -91,6 +95,7 @@ struct PortraitFile: Equatable {
         occurrences: [Date],
         eventTitle: String,
         eventSummary: String,
+        category: String,
         memberFrameIds: [Int64],
         source: String?,
         tags: [String],
@@ -110,6 +115,7 @@ struct PortraitFile: Equatable {
         self.occurrences = occurrences.map(Self.truncateToDay).uniqued()
         self.eventTitle = eventTitle
         self.eventSummary = eventSummary
+        self.category = category
         self.memberFrameIds = memberFrameIds
         self.source = source
         self.tags = tags
