@@ -15,7 +15,8 @@ final class TimelineState {
 }
 
 struct TimelineView: View {
-    @State private var state = TimelineState()
+    /// Hoisted to ContentView so the sidebar can share the same focus/frames.
+    let state: TimelineState
     private let db = ScreenpipeDB()
 
     private var currentFrame: ScreenpipeFrame? {

@@ -3,6 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @State private var selection: SidebarSection? = .home
     @State private var appState = AppState()
+    // Hoisted so the sidebar (next commit) can read currentFrame / focusIndex
+    // and show Active Apps + Audio Transcript context for the same moment.
+    @State private var timeline = TimelineState()
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     var body: some View {
@@ -22,7 +25,7 @@ struct ContentView: View {
     private var mainPane: some View {
         switch selection ?? .home {
         case .home:          HomeView()
-        case .timeline:      TimelineView()
+        case .timeline:      TimelineView(state: timeline)
         case .connections:   ConnectionsView()
         case .pipes:         NativePlaceholder(title: "Pipes",
                                                systemImage: "puzzlepiece.extension.fill",
