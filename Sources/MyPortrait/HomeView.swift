@@ -415,54 +415,53 @@ private struct ToolCard: View {
     }
 }
 
-/// Big gradient orb. Assistant version "breathes" continuously; while
-/// `glowing` is true (i.e. streaming) it also pulses an outer halo.
+/// Big gradient orb. The breathing + halo animations only run while
+/// `glowing == true` (i.e. the assistant is actively streaming). Static
+/// bubbles render a still orb — crucial because every message in the
+/// transcript renders an avatar; running 60fps Canvases for all of them
+/// melted the GPU during long sessions.
 private struct BubbleAvatar: View {
     let role: ChatRole
     var glowing: Bool = false
 
     var body: some View {
-        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/60.0, paused: false)) { ctx in
+        if glowing {
+            animatedOrb
+        } else {
+            staticOrb
+        }
+    }
+
+    @ViewBuilder private var staticOrb: some View {
+        ZStack {
+            orbFill
+            Image(systemName: role == .user ? "person.fill" : "sparkles")
+                .font(.system(size: 16, weight: role == .user ? .semibold : .medium))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+        .frame(width: 36, height: 36)
+        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.6))
+        .frame(width: 40, height: 40)
+    }
+
+    private var animatedOrb: some View {
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0, paused: false)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
-            let breath = role == .assistant ? CGFloat(1 + 0.04 * sin(t * 1.6)) : 1.0
-            let pulse  = glowing ? CGFloat(0.55 + 0.35 * sin(t * 3.0)) : 0
+            let breath = CGFloat(1 + 0.04 * sin(t * 1.6))
+            let pulse  = CGFloat(0.55 + 0.35 * sin(t * 3.0))
             ZStack {
-                // Pulse halo (only when streaming)
-                if glowing {
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [Color.purple.opacity(0.55), Color.purple.opacity(0)],
-                                center: .center, startRadius: 0, endRadius: 32
-                            )
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color.purple.opacity(0.55), Color.purple.opacity(0)],
+                            center: .center, startRadius: 0, endRadius: 32
                         )
-                        .frame(width: 70, height: 70)
-                        .opacity(Double(pulse))
-                        .blur(radius: 6)
-                }
-                // Orb
+                    )
+                    .frame(width: 70, height: 70)
+                    .opacity(Double(pulse))
+                    .blur(radius: 6)
                 ZStack {
-                    if role == .assistant {
-                        AngularGradient(
-                            colors: [
-                                Color(red: 0.65, green: 0.35, blue: 1.0),
-                                Color(red: 0.30, green: 0.55, blue: 1.0),
-                                Color(red: 0.95, green: 0.40, blue: 0.85),
-                                Color(red: 0.65, green: 0.35, blue: 1.0)
-                            ],
-                            center: .center
-                        )
-                        .clipShape(Circle())
-                        .overlay(
-                            Circle().fill(
-                                LinearGradient(colors: [Color.white.opacity(0.20), .clear],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                            )
-                        )
-                    } else {
-                        Circle().fill(.ultraThinMaterial)
-                        Circle().fill(Color.white.opacity(0.04))
-                    }
+                    orbFill
                     Image(systemName: role == .user ? "person.fill" : "sparkles")
                         .font(.system(size: 16, weight: role == .user ? .semibold : .medium))
                         .foregroundStyle(.white.opacity(0.95))
@@ -473,6 +472,33 @@ private struct BubbleAvatar: View {
             }
         }
         .frame(width: 40, height: 40)
+    }
+
+    /// Pure-color fill shared between the static + animated paths.
+    @ViewBuilder private var orbFill: some View {
+        if role == .assistant {
+            AngularGradient(
+                colors: [
+                    Color(red: 0.65, green: 0.35, blue: 1.0),
+                    Color(red: 0.30, green: 0.55, blue: 1.0),
+                    Color(red: 0.95, green: 0.40, blue: 0.85),
+                    Color(red: 0.65, green: 0.35, blue: 1.0)
+                ],
+                center: .center
+            )
+            .clipShape(Circle())
+            .overlay(
+                Circle().fill(
+                    LinearGradient(colors: [Color.white.opacity(0.20), .clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+            )
+        } else {
+            ZStack {
+                Circle().fill(.ultraThinMaterial)
+                Circle().fill(Color.white.opacity(0.04))
+            }
+        }
     }
 }
 

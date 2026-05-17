@@ -23,6 +23,13 @@ final class ChatController {
     /// id of the trailing `.text` ContentPart that text_delta events should
     /// accumulate into. Reset every time a tool block lands.
     private var activeTextPartID: UUID? = nil
+    /// Pending tokens, drained every `streamFlushInterval` to coalesce many
+    /// per-token mutations into one SwiftUI invalidation per frame.
+    private var pendingDelta: String = ""
+    private var flushTask: Task<Void, Never>? = nil
+    /// ~30 fps — fast enough to feel live, slow enough that material-backed
+    /// bubbles don't melt the GPU.
+    private let streamFlushInterval: UInt64 = 33_000_000  // ns
     /// Set during `send` so we know whether the upcoming user message is
     /// the first one (⇒ derive the conv title from it).
     private var pendingTitleFromFirstMessage: Bool = false
@@ -140,27 +147,53 @@ final class ChatController {
     private func handle(_ event: PiAgent.Event) async {
         switch event {
         case .textDelta(let delta):
-            appendText(delta)
+            // Buffer the delta; a single flush task drains the buffer at
+            // streamFlushInterval to coalesce N per-token writes into one
+            // mutation per frame.
+            pendingDelta += delta
+            scheduleFlush()
         case .assistantFinalText(let text):
             // Fallback: only used when no streaming happened.
+            flushPending()
             if currentTextLength() == 0 { appendText(text) }
         case .agentEnd:
+            flushPending()
             isStreaming = false
             assistantMessageID = nil
             activeTextPartID = nil
             persist()
         case .error(let msg):
+            flushPending()
             lastError = msg
             appendText("⚠️ \(msg)")
             isStreaming = false
             persist()
         case .toolStart(let id, let name, let args):
+            // Make sure any pending text lands BEFORE the tool block so order
+            // stays correct (text → tool → text).
+            flushPending()
             startTool(callId: id, name: name, args: args)
         case .toolEnd(let id, let result, let isError):
             finishTool(callId: id, result: result, isError: isError)
         default:
             break
         }
+    }
+
+    private func scheduleFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: self?.streamFlushInterval ?? 33_000_000)
+            await MainActor.run { self?.flushPending() }
+        }
+    }
+
+    private func flushPending() {
+        flushTask?.cancel()
+        flushTask = nil
+        let batch = pendingDelta
+        pendingDelta = ""
+        if !batch.isEmpty { appendText(batch) }
     }
 
     // MARK: - Parts mutation

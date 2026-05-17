@@ -69,6 +69,12 @@ enum PortraitFileIO {
         let supersededBy = try optionalString(fields, "superseded_by")
         let archivedAt = try optionalDate(fields, "archived_at")
 
+        // Event-level fields — default empty for backward compat with files
+        // written before the EventBuilder pipeline existed.
+        let eventTitle = (try? optionalString(fields, "event_title")) ?? nil ?? ""
+        let eventSummary = (try? optionalString(fields, "event_summary")) ?? nil ?? ""
+        let memberFrameIds = (try? optionalInt64Array(fields, "member_frame_ids")) ?? []
+
         return PortraitFile(
             created: created,
             impact: impact,
@@ -77,6 +83,9 @@ enum PortraitFileIO {
             accessCount: accessCount,
             accessHistory: accessHistory,
             occurrences: occurrences,
+            eventTitle: eventTitle,
+            eventSummary: eventSummary,
+            memberFrameIds: memberFrameIds,
             source: source,
             tags: tags,
             supersededBy: supersededBy,
@@ -106,6 +115,9 @@ enum PortraitFileIO {
         lines.append("access_count: \(f.accessCount)")
         lines.append("access_history: \(formatDateArray(f.accessHistory, dateOnly: true))")
         lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: false))")
+        lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")
+        lines.append("event_summary: \(formatNullableString(f.eventSummary.isEmpty ? nil : f.eventSummary))")
+        lines.append("member_frame_ids: \(formatInt64Array(f.memberFrameIds))")
         lines.append("source: \(formatNullableString(f.source))")
         lines.append("tags: \(formatStringArray(f.tags))")
         lines.append("superseded_by: \(formatNullableString(f.supersededBy))")
@@ -201,6 +213,25 @@ enum PortraitFileIO {
             }
             return token
         }
+    }
+
+    private static func optionalInt64Array(_ fs: [String: String], _ key: String) throws -> [Int64] {
+        guard let raw = fs[key] else { return [] }
+        let tokens = parseFlowArray(raw)
+        var out: [Int64] = []
+        out.reserveCapacity(tokens.count)
+        for t in tokens {
+            guard let v = Int64(t) else {
+                throw IOError.typeMismatch(field: key, expected: "[Int64]", got: t)
+            }
+            out.append(v)
+        }
+        return out
+    }
+
+    private static func formatInt64Array(_ ns: [Int64]) -> String {
+        let parts = ns.map { String($0) }
+        return "[\(parts.joined(separator: ", "))]"
     }
 
     private static func requireDateArray(_ fs: [String: String], _ key: String) throws -> [Date] {

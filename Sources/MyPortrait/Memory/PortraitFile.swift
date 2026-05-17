@@ -29,8 +29,17 @@ struct PortraitFile: Equatable {
     var weight: Double                  // computed, ≥0
     var accessCount: Int
     var accessHistory: [Date]           // most recent N=10, oldest → newest
-    var occurrences: [Date]             // all occurrence timestamps
-    var source: String?
+    var occurrences: [Date]             // **per-day** deduped occurrence dates.
+                                        // One date per day on which the event
+                                        // happened, regardless of how many times
+                                        // within that day. Used by the spacing
+                                        // effect: log(1 + count) gives the
+                                        // "how many distinct days" boost.
+    var eventTitle: String              // short human-readable event name (LLM)
+    var eventSummary: String            // one-paragraph description (LLM)
+    var memberFrameIds: [Int64]         // screenpipe frame IDs contributing
+                                        // to this event (across days + apps)
+    var source: String?                 // backward-compat origin reference
     var tags: [String]
     var supersededBy: String?           // relative path under portrait/
     var pinned: Bool
@@ -47,9 +56,12 @@ struct PortraitFile: Equatable {
         body: String,
         source: String? = nil,
         tags: [String] = [],
-        firstOccurrence: Date? = nil
+        firstOccurrence: Date? = nil,
+        eventTitle: String = "",
+        eventSummary: String = "",
+        memberFrameIds: [Int64] = []
     ) {
-        let stamp = firstOccurrence ?? created
+        let stamp = Self.truncateToDay(firstOccurrence ?? created)
         self.created = created
         self.impact = impact
         self.impactSource = "baseline_duration"
@@ -57,6 +69,9 @@ struct PortraitFile: Equatable {
         self.accessCount = 0
         self.accessHistory = []
         self.occurrences = [stamp]
+        self.eventTitle = eventTitle
+        self.eventSummary = eventSummary
+        self.memberFrameIds = memberFrameIds
         self.source = source
         self.tags = tags
         self.supersededBy = nil
@@ -74,6 +89,9 @@ struct PortraitFile: Equatable {
         accessCount: Int,
         accessHistory: [Date],
         occurrences: [Date],
+        eventTitle: String,
+        eventSummary: String,
+        memberFrameIds: [Int64],
         source: String?,
         tags: [String],
         supersededBy: String?,
@@ -87,13 +105,26 @@ struct PortraitFile: Equatable {
         self.weight = weight
         self.accessCount = accessCount
         self.accessHistory = accessHistory
-        self.occurrences = occurrences
+        // Defensive: collapse any datetime occurrences to startOfDay so
+        // legacy files migrate transparently.
+        self.occurrences = occurrences.map(Self.truncateToDay).uniqued()
+        self.eventTitle = eventTitle
+        self.eventSummary = eventSummary
+        self.memberFrameIds = memberFrameIds
         self.source = source
         self.tags = tags
         self.supersededBy = supersededBy
         self.pinned = pinned
         self.archivedAt = archivedAt
         self.body = body
+    }
+
+    /// Truncate any timestamp to the start of its UTC calendar day. Used to
+    /// enforce the per-day occurrence semantic.
+    static func truncateToDay(_ d: Date) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .current
+        return cal.startOfDay(for: d)
     }
 
     // MARK: - Derived helpers
@@ -118,8 +149,25 @@ struct PortraitFile: Equatable {
         }
     }
 
-    /// Append an occurrence (Tier 1 merge / repeat detection).
-    mutating func recordOccurrence(at when: Date) {
-        occurrences.append(when)
+    /// Append an occurrence date (Tier 1 merge / repeat detection). Idempotent
+    /// per day — calling twice on the same day is a no-op.
+    mutating func recordOccurrence(on when: Date) {
+        let day = Self.truncateToDay(when)
+        if !occurrences.contains(day) {
+            occurrences.append(day)
+        }
+    }
+}
+
+/// Tiny order-preserving dedup helper.
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        var out: [Element] = []
+        out.reserveCapacity(count)
+        for e in self where seen.insert(e).inserted {
+            out.append(e)
+        }
+        return out
     }
 }

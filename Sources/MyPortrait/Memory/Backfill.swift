@@ -1,28 +1,40 @@
 import Foundation
 
-/// Orchestrates the MVP memory pipeline against existing screenpipe data:
-///   1. Read raw frames from `~/.screenpipe/db.sqlite` for the last N days
-///   2. Convert to Tier1Merger events, merge into sessions
-///   3. Heuristically classify each session into a portrait category
-///   4. Write one .md file per session under `~/.portrait/portrait/<cat>/...`
-///   5. Run WeightCalculator across the tree
-///   6. Run Archiver (will be a no-op for fresh data — useful smoke test)
+/// Event-level backfill from existing screenpipe data.
 ///
-/// Designed to be idempotent-ish: re-running picks up new frames since the
-/// last run via the `source: "screenpipe_frame_<id>"` field to avoid
-/// re-writing files we already produced.
+/// Per-day loop:
+///   1. Read frames for this day from `~/.screenpipe/db.sqlite`
+///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions
+///   3. Enrich each session with OCR text from its member frames
+///   4. EventBuilder (LLM, one call per day): for each session, decide
+///      JOIN existing event or create NEW event
+///   5. Materialise:
+///      - JOIN  → load existing PortraitFile, append today's date to
+///                occurrences (deduped per day), append frame ids
+///      - NEW   → create a fresh PortraitFile with title + summary +
+///                category from the LLM, today as first occurrence
+///   6. After all days processed: WeightCalculator pass + Archiver
+///
+/// Notes:
+///   - "Active events" passed to EventBuilder are PortraitFiles whose
+///     last occurrence is within the last `activeWindowDays` (default 14).
+///   - Re-runs are safe: if a session's frames already appear in an
+///     existing file's `memberFrameIds`, it's skipped.
+@MainActor
 enum Backfill {
     struct Result {
         let daysScanned: Int
         let rawFrameCount: Int
-        let mergedSessionCount: Int
-        let writtenFileCount: Int
-        let skippedExisting: Int
+        let tier1SessionCount: Int
+        let llmFailedDays: Int
+        let newEventCount: Int
+        let joinedSessionCount: Int
+        let skippedSessionCount: Int
         let archiverResult: Archiver.Result
     }
 
-    /// Default: last 14 days (the user mentioned their screenpipe data covers ~2 weeks).
-    static func run(daysBack: Int = 14) throws -> Result {
+    /// Default: last 14 days.
+    static func run(daysBack: Int = 14, activeWindowDays: Int = 14) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
 
         let db = ScreenpipeDB()
@@ -33,133 +45,269 @@ enum Backfill {
             )
         }
 
-        // 1. Collect frames across N days, day by day (avoids one giant query).
+        var totals = Counters()
         let cal = Calendar(identifier: .gregorian)
-        var rawEvents: [Tier1Merger.RawEvent] = []
         let today = cal.startOfDay(for: Date())
-        for offset in 0..<daysBack {
+
+        // Pre-load existing files once; we'll mutate the in-memory cache as
+        // the day-loop creates / appends to events.
+        var fileCache = try await loadAllFiles()
+        let builder = EventBuilder()
+
+        // Iterate from oldest day to newest so EventBuilder always has the
+        // most relevant active events from prior days available.
+        for offset in stride(from: daysBack - 1, through: 0, by: -1) {
             guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
             let frames = db.frames(on: day, limit: 5000)
-            for f in frames {
-                rawEvents.append(.init(
+            totals.rawFrameCount += frames.count
+            if frames.isEmpty { continue }
+
+            // Tier 1 merge.
+            let rawEvents = frames.map { f in
+                Tier1Merger.RawEvent(
                     timestamp: f.timestamp,
                     appName: f.appName,
                     windowName: f.windowName,
                     browserURL: f.browserUrl,
                     frameId: f.id
-                ))
+                )
             }
-        }
+            let sessions = Tier1Merger.merge(rawEvents)
+            totals.tier1SessionCount += sessions.count
+            if sessions.isEmpty { continue }
 
-        // 2. Tier 1 merge.
-        let sessions = Tier1Merger.merge(rawEvents)
+            // Enrich each session with OCR text (LLM context).
+            let enriched: [EventBuilder.EnrichedSession] = sessions.map { s in
+                let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: 800)
+                // Audio omitted in MVP — schema does support it later.
+                return EventBuilder.EnrichedSession(
+                    session: s,
+                    ocrSnippet: ocr,
+                    transcriptSnippet: ""
+                )
+            }
 
-        // 3 + 4. Write per session.
-        var written = 0
-        var skipped = 0
-        let existingSources = try existingSourceTags()
+            // Build the active-events catalogue from the in-memory cache.
+            let activeCutoff = cal.date(byAdding: .day, value: -activeWindowDays, to: day) ?? day
+            let active: [EventBuilder.ActiveEvent] = fileCache.values.compactMap { entry in
+                guard !entry.file.eventTitle.isEmpty,
+                      let last = entry.file.occurrences.max(),
+                      last >= activeCutoff else { return nil }
+                let categoryPath = entry.relativePath
+                    .split(separator: "/").first.map(String.init) ?? "habits"
+                return EventBuilder.ActiveEvent(
+                    id: entry.relativePath,
+                    title: entry.file.eventTitle,
+                    summary: entry.file.eventSummary,
+                    category: categoryPath,
+                    lastOccurredOn: last
+                )
+            }
 
-        for session in sessions {
-            // Synthesise a stable source key so re-runs don't duplicate.
-            let firstId = session.sourceFrameIds.first ?? 0
-            let lastId = session.sourceFrameIds.last ?? 0
-            let sourceKey = "screenpipe:\(firstId)-\(lastId)"
-            if existingSources.contains(sourceKey) {
-                skipped += 1
+            // Ask LLM for assignments.
+            let assignments: [EventBuilder.Assignment]
+            do {
+                assignments = try await builder.assignDay(
+                    date: day,
+                    sessions: enriched,
+                    activeEvents: active
+                )
+            } catch {
+                totals.llmFailedDays += 1
                 continue
             }
 
-            let category = classify(appName: session.appName, url: session.browserURL)
-            let filename = makeFilename(for: session)
-            let dest = PortraitPaths.categoryDir(category).appendingPathComponent(filename)
-
-            // Avoid clobbering if filename collides with an existing file
-            // for a different source — append the firstId.
-            let finalDest: URL
-            if FileManager.default.fileExists(atPath: dest.path) {
-                finalDest = PortraitPaths.categoryDir(category)
-                    .appendingPathComponent(makeFilename(for: session, suffix: "_\(firstId)"))
-            } else {
-                finalDest = dest
+            // Materialise.
+            for a in assignments {
+                let sessionFrameIds = a.session.sourceFrameIds
+                switch a.decision {
+                case .join(let eventId):
+                    guard let entry = fileCache[eventId] else {
+                        // LLM hallucinated an event id — fall back to NEW with
+                        // a best-effort placeholder title.
+                        try createNewEvent(
+                            from: a,
+                            session: a.session,
+                            day: day,
+                            cache: &fileCache,
+                            fallbackTitle: "\(a.session.appName) — \(a.session.windowName)"
+                        )
+                        totals.newEventCount += 1
+                        continue
+                    }
+                    // Skip if frames already accounted for (re-run safety).
+                    if !sessionFrameIds.isEmpty,
+                       entry.file.memberFrameIds.contains(where: sessionFrameIds.contains) {
+                        totals.skippedSessionCount += 1
+                        continue
+                    }
+                    var updated = entry.file
+                    updated.recordOccurrence(on: day)
+                    updated.memberFrameIds.append(contentsOf: sessionFrameIds)
+                    try PortraitFileIO.write(updated, to: entry.url)
+                    fileCache[eventId] = .init(url: entry.url,
+                                               relativePath: entry.relativePath,
+                                               file: updated)
+                    totals.joinedSessionCount += 1
+                case .new:
+                    try createNewEvent(
+                        from: a,
+                        session: a.session,
+                        day: day,
+                        cache: &fileCache
+                    )
+                    totals.newEventCount += 1
+                }
             }
-
-            let body = renderBody(for: session)
-            let impact = baselineImpact(for: session)
-            var file = PortraitFile(
-                created: session.firstSeen,
-                impact: impact,
-                body: body,
-                source: sourceKey,
-                tags: tags(for: session, category: category),
-                firstOccurrence: session.firstSeen
-            )
-            // Backfill: the session's other timestamps are real "occurrences",
-            // so preload them (Tier 1's job, executed retroactively).
-            file.occurrences = session.occurrences
-
-            try PortraitFileIO.write(file, to: finalDest)
-            written += 1
         }
 
-        // 5. Weight pass over the whole tree.
-        try weightPass()
+        // Weight pass across the whole tree.
+        try await weightPass()
 
-        // 6. Archiver pass (likely 0 archives on fresh data — sanity check).
+        // Archiver pass.
         let archiveResult = try Archiver.run()
 
         return Result(
             daysScanned: daysBack,
-            rawFrameCount: rawEvents.count,
-            mergedSessionCount: sessions.count,
-            writtenFileCount: written,
-            skippedExisting: skipped,
+            rawFrameCount: totals.rawFrameCount,
+            tier1SessionCount: totals.tier1SessionCount,
+            llmFailedDays: totals.llmFailedDays,
+            newEventCount: totals.newEventCount,
+            joinedSessionCount: totals.joinedSessionCount,
+            skippedSessionCount: totals.skippedSessionCount,
             archiverResult: archiveResult
         )
     }
 
-    // MARK: - Classification (crude rule-based, MVP only)
+    // MARK: - File materialisation
 
-    private static func classify(appName: String, url: String?) -> String {
-        let lower = appName.lowercased()
-        // Code editors / dev tools → skills (programming sub-tree later)
-        if ["xcode", "cursor", "visual studio code", "code", "terminal",
-            "iterm", "iterm2", "myportrait"].contains(lower) {
-            return "skills"
-        }
-        // Communication → social
-        if ["messages", "imessage", "slack", "discord", "zoom", "wechat",
-            "telegram", "wework"].contains(lower) {
-            return "social"
-        }
-        // Browser / media / reading → interests
-        if ["safari", "chrome", "firefox", "arc", "edge",
-            "spotify", "music", "youtube", "bilibili"].contains(lower) {
-            return "interests"
-        }
-        // Notes / writing → habits (could be split later)
-        if ["obsidian", "notes", "notion", "bear", "craft"].contains(lower) {
-            return "habits"
-        }
-        // Default bucket.
-        return "habits"
+    private struct Entry {
+        let url: URL
+        let relativePath: String
+        var file: PortraitFile
     }
 
-    private static func tags(for session: Tier1Merger.MergedEvent, category: String) -> [String] {
-        var t = [session.appName]
-        if let u = session.browserURL, !u.isEmpty,
-           let host = URL(string: u)?.host {
-            t.append(host)
-        }
-        t.append(category)
-        return t
+    private struct Counters {
+        var rawFrameCount = 0
+        var tier1SessionCount = 0
+        var llmFailedDays = 0
+        var newEventCount = 0
+        var joinedSessionCount = 0
+        var skippedSessionCount = 0
     }
 
-    /// Cheap impact baseline for backfill — proportional to session length
-    /// capped at 5. The LLM-driven emotion Agent will refine this later.
+    /// Build and write a new PortraitFile from a NEW assignment.
+    private static func createNewEvent(
+        from a: EventBuilder.Assignment,
+        session: Tier1Merger.MergedEvent,
+        day: Date,
+        cache: inout [String: Entry],
+        fallbackTitle: String? = nil
+    ) throws {
+        let (title, summary, category, tags): (String, String, String, [String])
+        switch a.decision {
+        case .new(let t, let s, let c, let tg):
+            title = t.isEmpty ? (fallbackTitle ?? session.appName) : t
+            summary = s
+            category = c
+            tags = tg
+        case .join:
+            title = fallbackTitle ?? session.appName
+            summary = ""
+            category = "habits"
+            tags = [session.appName.lowercased()]
+        }
+
+        let safeCategory = PortraitPaths.seedCategories.contains(category)
+            ? category : "habits"
+        let filename = makeFilename(title: title, day: day)
+        let url = PortraitPaths.categoryDir(safeCategory).appendingPathComponent(filename)
+        let finalURL = uniqueURL(url)
+
+        var file = PortraitFile(
+            created: session.firstSeen,
+            impact: baselineImpact(for: session),
+            body: renderBody(title: title, summary: summary, session: session),
+            source: "screenpipe:event",
+            tags: tags,
+            firstOccurrence: day,
+            eventTitle: title,
+            eventSummary: summary,
+            memberFrameIds: session.sourceFrameIds
+        )
+        // Ensure occurrence is truncated to day.
+        file.occurrences = [PortraitFile.truncateToDay(day)]
+
+        try PortraitFileIO.write(file, to: finalURL)
+
+        let rel = finalURL.path
+            .replacingOccurrences(of: Storage.portraitDir.path + "/", with: "")
+        cache[rel] = Entry(url: finalURL, relativePath: rel, file: file)
+    }
+
+    // MARK: - Title/file helpers
+
+    private static func makeFilename(title: String, day: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "UTC")
+        let stamp = f.string(from: day)
+        let slug = slugify(title)
+        return "\(stamp)_\(slug).md"
+    }
+
+    private static func slugify(_ s: String) -> String {
+        let lower = s.lowercased()
+        var out = ""
+        var lastWasSep = false
+        for scalar in lower.unicodeScalars {
+            let c = Character(scalar)
+            if c.isLetter || c.isNumber {
+                out.append(c)
+                lastWasSep = false
+            } else if !lastWasSep {
+                out.append("_")
+                lastWasSep = true
+            }
+        }
+        let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        // Cap filename slug length to keep paths sane.
+        if trimmed.count > 60 { return String(trimmed.prefix(60)) }
+        return trimmed.isEmpty ? "event" : trimmed
+    }
+
+    private static func uniqueURL(_ url: URL) -> URL {
+        if !FileManager.default.fileExists(atPath: url.path) { return url }
+        let dir = url.deletingLastPathComponent()
+        let base = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        for n in 2...100 {
+            let candidate = dir.appendingPathComponent("\(base)_\(n).\(ext)")
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return url    // give up; will overwrite
+    }
+
+    private static func renderBody(title: String, summary: String, session: Tier1Merger.MergedEvent) -> String {
+        var lines: [String] = []
+        lines.append("# \(title)")
+        lines.append("")
+        if !summary.isEmpty {
+            lines.append(summary)
+            lines.append("")
+        }
+        let durMin = max(1, Int(session.lastSeen.timeIntervalSince(session.firstSeen) / 60))
+        lines.append("- First app: **\(session.appName)**")
+        if !session.windowName.isEmpty { lines.append("- First window: \(session.windowName)") }
+        if let u = session.browserURL, !u.isEmpty { lines.append("- URL: \(u)") }
+        lines.append("- Initial session duration: \(durMin) min")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     private static func baselineImpact(for s: Tier1Merger.MergedEvent) -> Double {
         let dur = s.lastSeen.timeIntervalSince(s.firstSeen)
         let minutes = dur / 60
-        // <1min → 1, 1-5 → 2, 5-30 → 3, 30-120 → 4, >120 → 5
         switch minutes {
         case ..<1:    return 1
         case ..<5:    return 2
@@ -169,69 +317,44 @@ enum Backfill {
         }
     }
 
-    private static func renderBody(for s: Tier1Merger.MergedEvent) -> String {
-        var lines: [String] = []
-        let title = s.windowName.isEmpty ? s.appName : "\(s.appName) — \(s.windowName)"
-        lines.append("# \(title)")
-        lines.append("")
-        let durationMin = max(1, Int(s.lastSeen.timeIntervalSince(s.firstSeen) / 60))
-        lines.append("- App: **\(s.appName)**")
-        if !s.windowName.isEmpty { lines.append("- Window: \(s.windowName)") }
-        if let u = s.browserURL, !u.isEmpty { lines.append("- URL: \(u)") }
-        lines.append("- Duration: \(durationMin) min")
-        lines.append("- Occurrences: \(s.occurrences.count)")
-        lines.append("")
-        lines.append("_(Backfilled from screenpipe — Agent-generated summary will replace this body.)_")
-        return lines.joined(separator: "\n") + "\n"
+    // MARK: - Tree I/O
+
+    nonisolated private static func loadAllFiles() async -> [String: Entry] {
+        await Task.detached(priority: .userInitiated) {
+            scanAllFilesSync()
+        }.value
     }
 
-    private static func makeFilename(for s: Tier1Merger.MergedEvent, suffix: String = "") -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd_HHmm"
-        f.timeZone = TimeZone(identifier: "UTC")
-        let stamp = f.string(from: s.firstSeen)
-        let appSlug = slug(s.appName)
-        return "\(stamp)_\(appSlug)\(suffix).md"
-    }
-
-    private static func slug(_ s: String) -> String {
-        let lower = s.lowercased()
-        let kept = lower.unicodeScalars.map { scalar -> Character in
-            let c = Character(scalar)
-            if c.isLetter || c.isNumber { return c }
-            return "_"
-        }
-        return String(kept).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-    }
-
-    // MARK: - Source dedup
-
-    /// Walk the portrait tree once and collect every existing file's `source`
-    /// field so we can skip re-writing them on subsequent backfill runs.
-    private static func existingSourceTags() throws -> Set<String> {
+    nonisolated private static func scanAllFilesSync() -> [String: Entry] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: Storage.portraitDir,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else { return [] }
+        ) else { return [:] }
 
-        var out: Set<String> = []
-        for case let url as URL in enumerator {
+        var out: [String: Entry] = [:]
+        while let url = enumerator.nextObject() as? URL {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
-            if let f = try? PortraitFileIO.read(from: url), let s = f.source {
-                out.insert(s)
-            }
+            if url.pathComponents.contains("_archive") { continue }
+            guard let f = try? PortraitFileIO.read(from: url) else { continue }
+            let rel = url.path
+                .replacingOccurrences(of: Storage.portraitDir.path + "/", with: "")
+            out[rel] = Entry(url: url, relativePath: rel, file: f)
         }
         return out
     }
 
-    // MARK: - Weight pass
+    nonisolated private static func weightPass() async throws {
+        await Task.detached(priority: .userInitiated) {
+            weightPassSync()
+        }.value
+    }
 
-    /// Recompute weights for every file in the tree.
-    private static func weightPass() throws {
+    /// Sync helper — NSEnumerator iteration isn't usable from `async` bodies
+    /// under Swift 6 strict concurrency, so isolate it here.
+    nonisolated private static func weightPassSync() {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: Storage.portraitDir,
@@ -239,7 +362,7 @@ enum Backfill {
             options: [.skipsHiddenFiles]
         ) else { return }
 
-        for case let url as URL in enumerator {
+        while let url = enumerator.nextObject() as? URL {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
             if url.pathComponents.contains("_archive") { continue }
@@ -248,7 +371,6 @@ enum Backfill {
                 WeightCalculator.recompute(&f)
                 try PortraitFileIO.write(f, to: url)
             } catch {
-                // skip malformed
                 continue
             }
         }

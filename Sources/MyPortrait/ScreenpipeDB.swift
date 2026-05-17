@@ -139,6 +139,61 @@ struct ScreenpipeDB: Sendable {
         return results
     }
 
+    /// Pull deduped OCR text for the given frame IDs. The same screen
+    /// content repeats across many adjacent frames, so we line-dedupe and
+    /// cap total chars to keep LLM context bounded.
+    func ocrText(forFrameIds frameIds: [Int64], maxChars: Int = 1500) -> String {
+        guard exists, !frameIds.isEmpty else { return "" }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return "" }
+        defer { sqlite3_close(db) }
+
+        // SQLite parameter binding limit is 999 by default — chunk if larger.
+        let chunks = stride(from: 0, to: frameIds.count, by: 500).map {
+            Array(frameIds[$0..<min($0 + 500, frameIds.count)])
+        }
+
+        var seenLines = Set<String>()
+        var orderedLines: [String] = []
+        var totalLen = 0
+
+        for chunk in chunks {
+            let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT text
+                FROM ocr_text
+                WHERE frame_id IN (\(placeholders))
+                  AND text IS NOT NULL AND length(text) > 4
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
+            defer { sqlite3_finalize(stmt) }
+
+            for (i, id) in chunk.enumerated() {
+                sqlite3_bind_int64(stmt, Int32(i + 1), id)
+            }
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let raw = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+                // Split into lines, dedupe, append until cap.
+                for line in raw.split(separator: "\n") {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.count >= 3 else { continue }
+                    if seenLines.contains(trimmed) { continue }
+                    seenLines.insert(trimmed)
+                    orderedLines.append(trimmed)
+                    totalLen += trimmed.count + 1
+                    if totalLen >= maxChars { break }
+                }
+                if totalLen >= maxChars { break }
+            }
+            if totalLen >= maxChars { break }
+        }
+
+        return orderedLines.joined(separator: "\n")
+    }
+
     /// Distinct app/window combinations active around the given moment.
     /// Used by the Timeline sidebar's "Active Apps" panel — shows what the
     /// user had open at this point in the day.

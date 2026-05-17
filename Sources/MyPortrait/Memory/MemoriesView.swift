@@ -189,17 +189,16 @@ struct MemoriesView: View {
 
     @MainActor
     private func runBackfill() async {
-        backfillStatus = "Backfilling from screenpipe…"
-        let result: Result<Backfill.Result, Error> = await Task.detached(priority: .userInitiated) {
-            do { return .success(try Backfill.run()) }
-            catch { return .failure(error) }
-        }.value
-        switch result {
-        case .success(let r):
-            backfillStatus = "\(r.rawFrameCount) frames → \(r.mergedSessionCount) sessions → wrote \(r.writtenFileCount) (skipped \(r.skippedExisting) existing, archived \(r.archiverResult.archivedCount))"
+        backfillStatus = "Backfilling from screenpipe (LLM-grouping events per day, can take a few minutes)…"
+        // Backfill itself is @MainActor (it owns the EventBuilder which talks
+        // to the LLM via PiAgent and prefers main-actor isolation); just await
+        // it directly rather than detaching.
+        do {
+            let r = try await Backfill.run()
+            backfillStatus = "\(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions → \(r.newEventCount) new events, \(r.joinedSessionCount) joined, \(r.skippedSessionCount) skipped, LLM-failed days: \(r.llmFailedDays), archived: \(r.archiverResult.archivedCount)"
             await reload()
-        case .failure(let e):
-            backfillStatus = "Backfill failed: \(e.localizedDescription)"
+        } catch {
+            backfillStatus = "Backfill failed: \(error.localizedDescription)"
         }
     }
 
