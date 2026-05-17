@@ -200,127 +200,33 @@ private extension View {
 }
 
 // =============================================================================
-// MARK: - Calendar Popover
+// MARK: - Calendar Popover — native SwiftUI DatePicker(.graphical)
 // =============================================================================
+//
+// Apple's stock graphical DatePicker, same one used in Date & Time settings,
+// Reminders, Calendar.app's quick picker. Drops ~150 lines of custom grid
+// code we no longer maintain — month nav, weekday header, day cells, future
+// disable, accent color, light/dark all handled by the system.
 
 private struct CalendarPopover: View {
     @Binding var selected: Date
     @Binding var isPresented: Bool
-    @State private var anchor: Date = Date()
-    private let cal = Calendar(identifier: .gregorian)
-
-    init(selected: Binding<Date>, isPresented: Binding<Bool>) {
-        self._selected = selected
-        self._isPresented = isPresented
-        self._anchor = State(initialValue: selected.wrappedValue)
-    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Button { shiftMonth(-1) } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 11))
-                        .frame(width: 26, height: 26)
-                        .background(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.18), lineWidth: 1))
-                }.buttonStyle(.plain)
-                Spacer()
-                Text(monthTitle(anchor)).font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Button { shiftMonth(1) } label: {
-                    Image(systemName: "chevron.right").font(.system(size: 11))
-                        .frame(width: 26, height: 26)
-                        .background(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.18), lineWidth: 1))
-                }.buttonStyle(.plain)
-            }
-
-            HStack(spacing: 0) {
-                ForEach(["Su","Mo","Tu","We","Th","Fr","Sa"], id: \.self) { d in
-                    Text(d).font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            let days = monthGrid(anchor)
-            VStack(spacing: 4) {
-                ForEach(0..<6) { row in
-                    HStack(spacing: 0) {
-                        ForEach(0..<7) { col in
-                            let idx = row * 7 + col
-                            if idx < days.count, let date = days[idx] {
-                                let inMonth = cal.isDate(date, equalTo: anchor, toGranularity: .month)
-                                let isSel = cal.isDate(date, inSameDayAs: selected)
-                                let isFuture = date > Date()
-                                DayCell(date: date, inMonth: inMonth, isSelected: isSel, isFuture: isFuture) {
-                                    if !isFuture {
-                                        selected = date
-                                        isPresented = false
-                                    }
-                                }
-                            } else { Color.clear.frame(maxWidth: .infinity, minHeight: 30) }
-                        }
-                    }
-                }
-            }
+        DatePicker(
+            "",
+            selection: $selected,
+            in: ...Date(),                  // future dates disabled
+            displayedComponents: .date
+        )
+        .datePickerStyle(.graphical)
+        .labelsHidden()
+        .padding(12)
+        .frame(width: 260)
+        .onChange(of: Calendar.current.startOfDay(for: selected)) { _, _ in
+            // Close the popover when user picks a different day.
+            isPresented = false
         }
-        .foregroundStyle(.white.opacity(0.9))
-        .padding(14)
-        .frame(width: 280)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.98))
-    }
-
-    private func shiftMonth(_ delta: Int) {
-        anchor = cal.date(byAdding: .month, value: delta, to: anchor) ?? anchor
-    }
-    private func monthTitle(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"; return f.string(from: d)
-    }
-    private func monthGrid(_ a: Date) -> [Date?] {
-        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: a)) else { return [] }
-        let weekday = cal.component(.weekday, from: monthStart)
-        let daysInMonth = cal.range(of: .day, in: .month, for: monthStart)?.count ?? 30
-        let prevLast = cal.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
-        let pre = weekday - 1
-        var cells: [Date?] = []
-        for i in stride(from: pre - 1, through: 0, by: -1) {
-            cells.append(cal.date(byAdding: .day, value: -i, to: prevLast))
-        }
-        for i in 0..<daysInMonth { cells.append(cal.date(byAdding: .day, value: i, to: monthStart)) }
-        while cells.count < 42 {
-            let last = cells.last?.flatMap { $0 } ?? monthStart
-            if let next = cal.date(byAdding: .day, value: 1, to: last) { cells.append(next) }
-            else { cells.append(nil) }
-        }
-        return Array(cells.prefix(42))
-    }
-}
-
-private struct DayCell: View {
-    let date: Date
-    let inMonth: Bool
-    let isSelected: Bool
-    let isFuture: Bool
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            let day = Calendar.current.component(.day, from: date)
-            Text("\(day)")
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                .frame(maxWidth: .infinity, minHeight: 30)
-                .foregroundStyle(
-                    isFuture ? Color.white.opacity(0.15)
-                    : isSelected ? Color.black
-                    : inMonth ? Color.white.opacity(0.88)
-                    : Color.white.opacity(0.28)
-                )
-                .background(
-                    isSelected
-                    ? AnyView(RoundedRectangle(cornerRadius: 5).fill(Color.white))
-                    : AnyView(Color.clear)
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(isFuture)
     }
 }
 
