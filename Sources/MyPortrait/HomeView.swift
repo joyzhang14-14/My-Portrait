@@ -5,6 +5,8 @@ struct HomeView: View {
     @Environment(ChatController.self) private var chat
     @State private var prompt: String = ""
     @State private var setup = AISetup.shared
+    @State private var contextChips: [ContextChip] = []
+    @State private var pickerOpen: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,7 +16,11 @@ struct HomeView: View {
             if chat.messages.isEmpty {
                 ScrollView { greetingContent }
             } else {
-                ChatTranscript(messages: chat.messages, isThinking: chat.isStreaming)
+                ChatTranscript(
+                    messages: chat.messages,
+                    isThinking: chat.isStreaming,
+                    chipsLookup: { chat.contextChipsByMessage[$0] ?? [] }
+                )
             }
 
             ChatInputBar(
@@ -22,6 +28,8 @@ struct HomeView: View {
                 providerName: appState.activeAI?.name ?? "ChatGPT",
                 providerSlug: appState.activeAI?.id.uppercased() ?? "OPENAI-CHATGPT",
                 isConnected: appState.activeAI != nil,
+                contextChips: $contextChips,
+                pickerOpen: $pickerOpen,
                 onSend: send,
                 onChipTap: { chipText in
                     prompt = chipText
@@ -113,8 +121,10 @@ struct HomeView: View {
     private func send() {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let chipsToSend = contextChips
         prompt = ""
-        chat.send(trimmed)
+        contextChips = []
+        chat.send(trimmed, chips: chipsToSend)
     }
 }
 
@@ -141,6 +151,7 @@ private struct SetupBanner: View {
 private struct ChatTranscript: View {
     let messages: [ChatMessage]
     let isThinking: Bool
+    var chipsLookup: ((UUID) -> [ContextChip])? = nil
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -150,8 +161,12 @@ private struct ChatTranscript: View {
                         // The streaming assistant bubble is always the last
                         // assistant message; only it should glow.
                         let isLastAssistant = idx == messages.count - 1 && msg.role == .assistant
-                        ChatBubble(message: msg, isStreaming: isLastAssistant && isThinking)
-                            .id(msg.id)
+                        ChatBubble(
+                            message: msg,
+                            isStreaming: isLastAssistant && isThinking,
+                            chips: chipsLookup?(msg.id) ?? []
+                        )
+                        .id(msg.id)
                     }
                     if isThinking {
                         ChatThinking()
@@ -176,6 +191,7 @@ private struct ChatTranscript: View {
 private struct ChatBubble: View {
     let message: ChatMessage
     let isStreaming: Bool
+    let chips: [ContextChip]
     @State private var appear = false
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -185,6 +201,15 @@ private struct ChatBubble: View {
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.4)
                     .foregroundStyle(.white.opacity(0.45))
+
+                if !chips.isEmpty {
+                    HStack(spacing: 5) {
+                        ForEach(chips) { chip in
+                            ContextChipView(chip: chip, compact: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
 
                 if message.role == .user {
                     Text(.init(message.text))
@@ -712,6 +737,8 @@ private struct ChatInputBar: View {
     let providerName: String
     let providerSlug: String
     let isConnected: Bool
+    @Binding var contextChips: [ContextChip]
+    @Binding var pickerOpen: Bool
     let onSend: () -> Void
     let onChipTap: (String) -> Void
 
@@ -735,6 +762,13 @@ private struct ChatInputBar: View {
                 ModelPickerInline(slug: providerSlug)
             }
 
+            // Context chips (only visible when user has picked at least one)
+            if !contextChips.isEmpty {
+                FlowChips(chips: contextChips) { id in
+                    contextChips.removeAll { $0.id == id }
+                }
+            }
+
             HStack(alignment: .center, spacing: 10) {
                 TextField(
                     "",
@@ -754,8 +788,35 @@ private struct ChatInputBar: View {
                     onSend()
                     return .handled
                 }
+                .onChange(of: prompt) { oldValue, newValue in
+                    // Strip the typed `@` and pop the picker so the input
+                    // doesn't carry a stray character.
+                    if newValue.count > oldValue.count,
+                       newValue.hasSuffix("@") {
+                        prompt = String(newValue.dropLast())
+                        withAnimation(.easeOut(duration: 0.15)) { pickerOpen = true }
+                    }
+                }
+                .popover(isPresented: $pickerOpen, attachmentAnchor: .point(.topLeading),
+                         arrowEdge: .bottom) {
+                    ContextPickerView(
+                        onPick: { chip in
+                            contextChips.append(chip)
+                            pickerOpen = false
+                            focused = true
+                        },
+                        onDismiss: {
+                            pickerOpen = false
+                            focused = true
+                        }
+                    )
+                    .padding(8)
+                }
 
                 HStack(spacing: 4) {
+                    IconActionButton(icon: "at") {
+                        withAnimation(.easeOut(duration: 0.15)) { pickerOpen.toggle() }
+                    }
                     IconActionButton(icon: "shield") { /* TODO */ }
                     IconActionButton(icon: "paperclip") { /* TODO */ }
                     SendButton(action: onSend, enabled: !prompt.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -773,7 +834,25 @@ private struct ChatInputBar: View {
         .padding(.bottom, 14)
         .padding(.top, 8)
         .onAppear { focused = true }
-        .onChange(of: prompt) { _ = onChipTap }
+    }
+}
+
+/// Wrapping row of `ContextChipView`s with a remove callback.
+private struct FlowChips: View {
+    let chips: [ContextChip]
+    let onRemove: (UUID) -> Void
+    var body: some View {
+        // SwiftUI's HStack with .wrap is iOS17+. Use a simple WrapHStack via
+        // Layout protocol — but for 1-6 chips a plain HStack with allowsTightening
+        // is fine. Almost no one stacks > 4 chips.
+        HStack(spacing: 6) {
+            ForEach(chips) { c in
+                ContextChipView(chip: c, onRemove: { onRemove(c.id) })
+                    .transition(.scale(scale: 0.7, anchor: .leading).combined(with: .opacity))
+            }
+            Spacer(minLength: 0)
+        }
+        .animation(.spring(response: 0.32, dampingFraction: 0.72), value: chips.count)
     }
 }
 

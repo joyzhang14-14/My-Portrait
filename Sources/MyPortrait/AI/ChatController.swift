@@ -13,6 +13,9 @@ final class ChatController {
     var messages: [ChatMessage] = []
     var isStreaming: Bool = false
     var lastError: String? = nil
+    /// Lookup so the user bubble can render its chips. Keyed by message id.
+    /// Not persisted; chips are an ephemeral UI artefact of the send action.
+    var contextChipsByMessage: [UUID: [ContextChip]] = [:]
 
     /// Currently displayed conversation id. `nil` means "no conv yet" — a
     /// new one is created lazily on the first `send`.
@@ -67,9 +70,11 @@ final class ChatController {
         return conv.id
     }
 
-    /// Send a user prompt. Spawns the Pi agent on first call. Lazily creates
-    /// a conversation row if we're not in one yet.
-    func send(_ text: String) {
+    /// Send a user prompt with optional screenpipe context chips. Each chip
+    /// is resolved into an OCR block that is prepended (as a `[Screen context]`
+    /// section) to the actual text sent to Pi. The user bubble visually
+    /// shows the chips so the user can verify what was injected.
+    func send(_ text: String, chips: [ContextChip] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -82,7 +87,6 @@ final class ChatController {
             return
         }
 
-        // First send in a fresh state — create a new conv on the fly.
         if currentConvId == nil {
             _ = newConversation()
             pendingTitleFromFirstMessage = true
@@ -90,15 +94,39 @@ final class ChatController {
             pendingTitleFromFirstMessage = true
         }
 
-        messages.append(.init(role: .user, text: trimmed, time: Date()))
-        lastError = nil
+        // Resolve chips → context block (heavy: SQLite read). Do it on a
+        // background hop and then deliver from the main actor.
+        Task { [weak self] in
+            guard let self else { return }
+            let context: ScreenpipeContext = await Task.detached(priority: .userInitiated) {
+                ScreenpipeContextBuilder.build(chips: chips)
+            }.value
 
-        if pendingTitleFromFirstMessage, let convId = currentConvId {
-            store.renameConversation(convId, to: Self.titleFromText(trimmed))
-            pendingTitleFromFirstMessage = false
+            await MainActor.run {
+                // User bubble carries display text + chips for visual receipt.
+                var msg = ChatMessage(role: .user, text: trimmed, time: Date())
+                if !chips.isEmpty {
+                    msg.parts = [.text(id: UUID(), value: trimmed)]
+                }
+                self.messages.append(msg)
+                self.contextChipsByMessage[msg.id] = chips
+                self.lastError = nil
+
+                if self.pendingTitleFromFirstMessage, let convId = self.currentConvId {
+                    self.store.renameConversation(convId, to: Self.titleFromText(trimmed))
+                    self.pendingTitleFromFirstMessage = false
+                }
+
+                // What Pi actually sees: context block ++ user question.
+                let pasted: String
+                if context.markdown.isEmpty {
+                    pasted = trimmed
+                } else {
+                    pasted = "\(context.markdown)\n\nUser question:\n\(trimmed)"
+                }
+                Task { await self.deliver(pasted) }
+            }
         }
-
-        Task { await deliver(trimmed) }
     }
 
     private static func titleFromText(_ s: String) -> String {
