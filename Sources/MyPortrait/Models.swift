@@ -30,10 +30,17 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
 enum ChatRole: String, Codable { case user, assistant }
 
 struct ChatMessage: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     let role: ChatRole
-    let text: String
+    var text: String                // mutable so streaming tokens can append in place
     let time: Date
+
+    init(id: UUID = UUID(), role: ChatRole, text: String, time: Date) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.time = time
+    }
 }
 
 // MARK: - Integrations

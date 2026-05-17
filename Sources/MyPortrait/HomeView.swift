@@ -3,15 +3,18 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppState.self) private var appState
     @State private var prompt: String = ""
-    @State private var messages: [ChatMessage] = []
-    @State private var isThinking = false
+    @State private var chat = ChatController()
+    @State private var setup = AISetup.shared
 
     var body: some View {
         VStack(spacing: 0) {
-            if messages.isEmpty {
+            if let banner = setupBannerText {
+                SetupBanner(text: banner, isError: setupIsError)
+            }
+            if chat.messages.isEmpty {
                 ScrollView { greetingContent }
             } else {
-                ChatTranscript(messages: messages, isThinking: isThinking)
+                ChatTranscript(messages: chat.messages, isThinking: chat.isStreaming)
             }
 
             ChatInputBar(
@@ -27,6 +30,22 @@ struct HomeView: View {
             )
         }
         .background(Color.black)
+        .task { AISetup.shared.ensureInstalled() }
+    }
+
+    private var setupBannerText: String? {
+        switch setup.state {
+        case .checking:                  return "Checking AI runtime…"
+        case .installingBun(let p):      return "Installing Bun runtime… \(Int(p * 100))%"
+        case .installingPi:              return "Installing Pi agent…"
+        case .error(let msg):            return "Setup failed: \(msg)"
+        case .idle, .ready:              return nil
+        }
+    }
+
+    private var setupIsError: Bool {
+        if case .error = setup.state { return true }
+        return false
     }
 
     // MARK: greeting (no messages yet)
@@ -95,17 +114,25 @@ struct HomeView: View {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         prompt = ""
-        messages.append(.init(role: .user, text: trimmed, time: Date()))
-        isThinking = true
-        // simulate AI response delay
-        Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            await MainActor.run {
-                isThinking = false
-                let reply = Mock.canned(for: trimmed)
-                messages.append(.init(role: .assistant, text: reply, time: Date()))
-            }
+        chat.send(trimmed)
+    }
+}
+
+/// Slim banner shown above the chat when AI setup is in progress or failed.
+private struct SetupBanner: View {
+    let text: String
+    let isError: Bool
+    var body: some View {
+        HStack(spacing: 8) {
+            if !isError { ProgressView().controlSize(.small).tint(.white.opacity(0.6)) }
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(isError ? Color.red.opacity(0.9) : Color.white.opacity(0.7))
+            Spacer()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(isError ? Color.red.opacity(0.10) : Color.white.opacity(0.04))
     }
 }
 
