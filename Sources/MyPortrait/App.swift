@@ -10,7 +10,7 @@ struct MyPortraitApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("My Portrait") {
+        WindowGroup("") {
             ContentView()
                 .frame(minWidth: 700, minHeight: 500)
                 .preferredColorScheme(.dark)
@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.styleMask.insert(.resizable)
                 window.setContentSize(NSSize(width: 1200, height: 835))
                 window.center()
+                window.title = ""
                 window.makeKeyAndOrderFront(nil)
             }
         }
