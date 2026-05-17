@@ -104,6 +104,12 @@ final class PiAgent: @unchecked Sendable {
         env["HOME"] = NSHomeDirectory()
         process.environment = env
 
+        // Anchor Pi's cwd to the user's home so bash / file tools have a
+        // meaningful working directory. Without this, the cwd inherits from
+        // the launching app — which for an Xcode-launched .app is the
+        // DerivedData "Build/Products/Debug" path.
+        process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
+
         // Stream stdout — line-delimited JSON.
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -178,9 +184,24 @@ final class PiAgent: @unchecked Sendable {
             return
         }
         let type = obj["type"] as? String ?? ""
+
+        // Pi wraps streaming events inside `message_update.assistantMessageEvent`
+        // for the openai-codex-responses wire. Peel one layer and dispatch
+        // the inner event through the same switch.
+        if type == "message_update", let inner = obj["assistantMessageEvent"] as? [String: Any] {
+            dispatchInner(inner)
+            return
+        }
+        dispatchInner(obj)
+    }
+
+    private func dispatchInner(_ obj: [String: Any]) {
+        let type = obj["type"] as? String ?? ""
         switch type {
         case "text_delta":
             if let d = obj["delta"] as? String { emit(.textDelta(d)) }
+        case "text_start", "text_end":
+            break  // boundary markers — already conveyed by deltas
         case "agent_start":
             emit(.agentStart)
         case "agent_end":
