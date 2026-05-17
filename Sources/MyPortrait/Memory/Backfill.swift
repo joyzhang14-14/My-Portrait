@@ -26,6 +26,7 @@ enum Backfill {
         let daysScanned: Int
         let rawFrameCount: Int
         let tier1SessionCount: Int
+        let emptySessionCount: Int   // dropped before reaching LLM
         let llmFailedDays: Int
         let newEventCount: Int
         let joinedSessionCount: Int
@@ -76,16 +77,33 @@ enum Backfill {
             totals.tier1SessionCount += sessions.count
             if sessions.isEmpty { continue }
 
-            // Enrich each session with OCR text (LLM context).
-            let enriched: [EventBuilder.EnrichedSession] = sessions.map { s in
+            // Enrich each session with OCR text + drop the ones with no
+            // semantic content (per user feedback: "如果什么内容都没有就别记
+            // 了"). A session is "empty" when:
+            //   - OCR text is shorter than `minOcrChars`, AND
+            //   - window_name is empty (no app-side hint either), AND
+            //   - duration is short (< 5 min — long sessions might still be
+            //     worth noting even without OCR e.g. video playback)
+            // Skipped sessions are counted but never reach the LLM.
+            let minOcrChars = 30
+            var enriched: [EventBuilder.EnrichedSession] = []
+            for s in sessions {
                 let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: 800)
-                // Audio omitted in MVP — schema does support it later.
-                return EventBuilder.EnrichedSession(
+                let durSec = s.lastSeen.timeIntervalSince(s.firstSeen)
+                let meaningless = ocr.count < minOcrChars
+                    && s.windowName.trimmingCharacters(in: .whitespaces).isEmpty
+                    && durSec < 5 * 60
+                if meaningless {
+                    totals.emptySessionCount += 1
+                    continue
+                }
+                enriched.append(EventBuilder.EnrichedSession(
                     session: s,
                     ocrSnippet: ocr,
                     transcriptSnippet: ""
-                )
+                ))
             }
+            if enriched.isEmpty { continue }
 
             // Build the active-events catalogue from the in-memory cache.
             let activeCutoff = cal.date(byAdding: .day, value: -activeWindowDays, to: day) ?? day
@@ -171,6 +189,7 @@ enum Backfill {
             daysScanned: daysBack,
             rawFrameCount: totals.rawFrameCount,
             tier1SessionCount: totals.tier1SessionCount,
+            emptySessionCount: totals.emptySessionCount,
             llmFailedDays: totals.llmFailedDays,
             newEventCount: totals.newEventCount,
             joinedSessionCount: totals.joinedSessionCount,
@@ -190,6 +209,7 @@ enum Backfill {
     private struct Counters {
         var rawFrameCount = 0
         var tier1SessionCount = 0
+        var emptySessionCount = 0
         var llmFailedDays = 0
         var newEventCount = 0
         var joinedSessionCount = 0

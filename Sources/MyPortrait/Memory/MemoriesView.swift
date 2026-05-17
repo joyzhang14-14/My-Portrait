@@ -198,7 +198,7 @@ struct MemoriesView: View {
         // it directly rather than detaching.
         do {
             let r = try await Backfill.run()
-            backfillStatus = "\(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions → \(r.newEventCount) new events, \(r.joinedSessionCount) joined, \(r.skippedSessionCount) skipped, LLM-failed days: \(r.llmFailedDays), archived: \(r.archiverResult.archivedCount)"
+            backfillStatus = "\(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions (\(r.emptySessionCount) empty skipped) → \(r.newEventCount) new events, \(r.joinedSessionCount) joined, LLM-failed days: \(r.llmFailedDays)"
             await reload()
         } catch {
             backfillStatus = "Backfill failed: \(error.localizedDescription)"
