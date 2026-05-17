@@ -13,6 +13,28 @@ struct ScreenpipeFrame: Identifiable, Hashable {
     let snapshotPath: String?
 }
 
+/// Distinct app + window that was active within a small time window
+/// around the focused frame. Used in the Timeline sidebar's "Active Apps" panel.
+struct ActiveAppEntry: Identifiable, Hashable {
+    let id = UUID()
+    let appName: String
+    let windowName: String
+    let browserUrl: String?
+    let lastSeen: Date
+}
+
+/// One audio transcription chunk near the focused frame's timestamp.
+/// Used in the Timeline sidebar's "Audio" panel.
+struct AudioTranscriptEntry: Identifiable, Hashable {
+    let id = UUID()
+    let timestamp: Date
+    let text: String
+    let device: String
+    let isInput: Bool
+    let speakerId: Int?
+    let speakerName: String?
+}
+
 struct ScreenpipeDB: Sendable {
     let dbPath: String
 
@@ -84,6 +106,135 @@ struct ScreenpipeDB: Sendable {
         }
 
         return results
+    }
+
+    /// Distinct app/window combinations active around the given moment.
+    /// Used by the Timeline sidebar's "Active Apps" panel — shows what the
+    /// user had open at this point in the day.
+    func activeApps(around moment: Date, window: TimeInterval = 45) -> [ActiveAppEntry] {
+        guard exists else { return [] }
+
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        let start = plain.string(from: moment.addingTimeInterval(-window))
+        let end = plain.string(from: moment.addingTimeInterval(window))
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT app_name,
+                   COALESCE(window_name, ''),
+                   COALESCE(browser_url, ''),
+                   MAX(timestamp) as latest
+            FROM frames
+            WHERE timestamp >= ? AND timestamp <= ?
+              AND app_name IS NOT NULL AND app_name != ''
+            GROUP BY app_name, window_name
+            ORDER BY latest DESC
+            LIMIT 30
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, start, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(stmt, 2, end,   -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
+        let fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime, .withTimeZone]
+
+        var out: [ActiveAppEntry] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let app = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+            let win = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
+            let url = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
+            let ts = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
+            let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
+            out.append(.init(
+                appName: app,
+                windowName: win,
+                browserUrl: url.isEmpty ? nil : url,
+                lastSeen: date
+            ))
+        }
+        return out
+    }
+
+    /// Audio transcriptions near the focused moment. Defaults span the conversation
+    /// that was actively happening (favors slightly before, since you usually look
+    /// back to read what was just said).
+    func audioTranscripts(
+        around moment: Date,
+        before: TimeInterval = 120,
+        after: TimeInterval = 30
+    ) -> [AudioTranscriptEntry] {
+        guard exists else { return [] }
+
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        let start = plain.string(from: moment.addingTimeInterval(-before))
+        let end = plain.string(from: moment.addingTimeInterval(after))
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT t.timestamp,
+                   t.transcription,
+                   t.device,
+                   t.is_input_device,
+                   t.speaker_id,
+                   s.name
+            FROM audio_transcriptions t
+            LEFT JOIN speakers s ON s.id = t.speaker_id
+            WHERE t.timestamp >= ? AND t.timestamp <= ?
+              AND t.transcription IS NOT NULL AND t.transcription != ''
+            ORDER BY t.timestamp ASC
+            LIMIT 60
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, start, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(stmt, 2, end,   -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
+        let fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime, .withTimeZone]
+
+        var out: [AudioTranscriptEntry] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+            let text = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
+            let device = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
+            let isInput = sqlite3_column_int(stmt, 3) != 0
+            let speakerIdRaw = sqlite3_column_int64(stmt, 4)
+            let speakerId: Int? = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : Int(speakerIdRaw)
+            let speakerName = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
+            let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
+
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            out.append(.init(
+                timestamp: date,
+                text: trimmed,
+                device: device,
+                isInput: isInput,
+                speakerId: speakerId,
+                speakerName: speakerName
+            ))
+        }
+        return out
     }
 
     /// Day-bounded set of distinct dates that have at least one frame. Used to gray-out empty days in the calendar.
