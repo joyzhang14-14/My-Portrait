@@ -12,6 +12,7 @@ struct ConnectionsView: View {
     @State private var search: String = ""
     @State private var selectedId: String? = nil
     @State private var connecting: String? = nil
+    @State private var loginError: String? = nil
 
     private var filteredTiles: [Integration] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -127,6 +128,13 @@ struct ConnectionsView: View {
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let loginError, selectedId == integration.id {
+                Text(loginError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.red.opacity(0.85))
+                    .padding(.bottom, 2)
+            }
+
             HStack(spacing: 8) {
                 if appState.isConnected(integration.id) {
                     if integration.category == .ai && appState.activeAIId != integration.id {
@@ -134,11 +142,12 @@ struct ConnectionsView: View {
                             .buttonStyle(SubtleButton())
                     }
                     Button("Disconnect", role: .destructive) {
+                        if integration.id == "chatgpt" { ChatGPTOAuth.logout() }
                         appState.toggleConnect(integration)
                     }
                     .buttonStyle(SubtleButton(destructive: true))
                 } else {
-                    Button(action: { mockConnect(integration) }) {
+                    Button(action: { startConnect(integration) }) {
                         HStack(spacing: 6) {
                             if connecting == integration.id {
                                 ProgressView().controlSize(.small).tint(.white)
@@ -165,6 +174,36 @@ struct ConnectionsView: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
         )
+    }
+
+    /// Branch by integration: ChatGPT does real OAuth, others fall back to mock.
+    private func startConnect(_ integration: Integration) {
+        loginError = nil
+        if integration.id == "chatgpt" {
+            connectChatGPT(integration)
+        } else {
+            mockConnect(integration)
+        }
+    }
+
+    private func connectChatGPT(_ integration: Integration) {
+        connecting = integration.id
+        Task {
+            do {
+                _ = try await ChatGPTOAuth.login()
+                await MainActor.run {
+                    if !appState.isConnected(integration.id) {
+                        appState.toggleConnect(integration)
+                    }
+                    connecting = nil
+                }
+            } catch {
+                await MainActor.run {
+                    loginError = error.localizedDescription
+                    connecting = nil
+                }
+            }
+        }
     }
 
     private func mockConnect(_ integration: Integration) {

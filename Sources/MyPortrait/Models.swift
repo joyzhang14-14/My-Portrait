@@ -92,6 +92,14 @@ final class AppState {
     var connectedIds: Set<String> = []
     var activeAIId: String? = nil
 
+    init() {
+        // Restore persisted connections from disk-backed secret stores.
+        if ChatGPTOAuth.isLoggedIn() {
+            connectedIds.insert("chatgpt")
+            if activeAIId == nil { activeAIId = "chatgpt" }
+        }
+    }
+
     func isConnected(_ id: String) -> Bool { connectedIds.contains(id) }
 
     func toggleConnect(_ integration: Integration) {
