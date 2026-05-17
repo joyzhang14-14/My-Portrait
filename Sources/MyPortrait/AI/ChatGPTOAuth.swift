@@ -195,6 +195,19 @@ enum ChatGPTOAuth {
     }
 }
 
+/// One-shot atomic flag — `setOnce()` returns true exactly once.
+/// Used to guard a single `cont.resume(...)` across concurrent state callbacks.
+private final class AtomicFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    func setOnce() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if fired { return false }
+        fired = true
+        return true
+    }
+}
+
 enum OAuthError: LocalizedError {
     case notLoggedIn
     case badRequest(String)
@@ -233,22 +246,48 @@ private final class CallbackListener: @unchecked Sendable {
     }
 
     static func start(preferredPort: UInt16) async throws -> CallbackListener {
-        if let l = try? makeListener(port: preferredPort) { return l }
-        return try makeListener(port: 0)
+        // Try preferred port first; on any failure (port busy, EADDRINUSE, etc.)
+        // fall back to an OS-assigned ephemeral port.
+        if let l = try? await makeListener(port: preferredPort) { return l }
+        return try await makeListener(port: 0)
     }
 
-    private static func makeListener(port: UInt16) throws -> CallbackListener {
+    private static func makeListener(port: UInt16) async throws -> CallbackListener {
         let nwPort: NWEndpoint.Port = port == 0 ? .any : NWEndpoint.Port(rawValue: port)!
         let listener = try NWListener(using: .tcp, on: nwPort)
-        listener.start(queue: .global(qos: .userInitiated))
 
-        let deadline = Date().addingTimeInterval(2.0)
-        while listener.state != .ready, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
+        // Await `.ready` via stateUpdateHandler — polling `listener.state`
+        // races the underlying nw_listener and can miss the transition.
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let resumed = AtomicFlag()
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    if resumed.setOnce() { cont.resume() }
+                case .failed(let err):
+                    if resumed.setOnce() {
+                        listener.cancel()
+                        cont.resume(throwing: OAuthError.listenerFailed(err.localizedDescription))
+                    }
+                case .waiting(let err):
+                    if resumed.setOnce() {
+                        listener.cancel()
+                        cont.resume(throwing: OAuthError.listenerFailed(err.localizedDescription))
+                    }
+                case .cancelled:
+                    if resumed.setOnce() {
+                        cont.resume(throwing: OAuthError.listenerFailed("listener cancelled"))
+                    }
+                default:
+                    break
+                }
+            }
+            listener.start(queue: .global(qos: .userInitiated))
         }
-        guard listener.state == .ready, let actual = listener.port?.rawValue else {
+
+        guard let actual = listener.port?.rawValue else {
             listener.cancel()
-            throw OAuthError.listenerFailed("listener not ready")
+            throw OAuthError.listenerFailed("no port assigned")
         }
         return CallbackListener(listener: listener, port: actual)
     }
