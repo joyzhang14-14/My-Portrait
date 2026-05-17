@@ -16,7 +16,6 @@ struct ContentView: View {
                 .frame(minWidth: 600, minHeight: 400)
         }
         .environment(appState)
-        .toolbar(.hidden, for: .windowToolbar)
     }
 
     @ViewBuilder

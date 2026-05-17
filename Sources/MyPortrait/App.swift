@@ -40,10 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             for window in NSApp.windows {
                 window.styleMask.insert(.resizable)
-                window.styleMask.insert(.fullSizeContentView)
-                window.titleVisibility = .hidden
-                window.titlebarAppearsTransparent = true
-                window.toolbar = nil
                 window.setContentSize(NSSize(width: 1200, height: 835))
                 window.center()
                 window.title = ""

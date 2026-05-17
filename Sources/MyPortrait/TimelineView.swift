@@ -33,7 +33,9 @@ struct TimelineView: View {
                 ),
                 onRefresh: { reload() }
             )
-            .padding(.top, 16)
+            // 44pt reserves room for the native title-bar strip so the date
+            // controls aren't covered by the chrome.
+            .padding(.top, 44)
             .padding(.bottom, 10)
 
             // Browser URL bar — fixed-height slot so the screenshot below NEVER
