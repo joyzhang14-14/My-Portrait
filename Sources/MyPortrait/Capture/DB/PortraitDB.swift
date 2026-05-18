@@ -8,7 +8,7 @@ import Foundation
 /// 这是"依赖倒置"：高层（采集）定义需求，低层（DB）满足。
 ///
 /// 见 memory: project-module-layout。
-public protocol PortraitDB: Sendable {
+protocol PortraitDB: Sendable {
 
     // MARK: - P1: 屏幕帧
 
@@ -67,22 +67,38 @@ public protocol PortraitDB: Sendable {
     /// - `.everything`：DELETE frames / video_chunks / audio_chunks 三表所有早于 ms 的行。
     ///   audio_chunks DELETE CASCADE 到 audio_transcriptions。
     func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats
+
+    // MARK: - 读 (UI 用)
+
+    /// 某天的全部帧（按 timestamp 升序），TimelineView 主体读这个。
+    /// 包含 video_chunks JOIN 出来的 MP4 文件路径 + fps，方便 AVAssetImageGenerator 抠帧。
+    func framesForDay(_ day: Date, limit: Int) async throws -> [ScreenpipeFrame]
+
+    /// 在某时刻附近活跃的 app 列表（按"最后出现时间"倒序），用于 Timeline 侧边栏。
+    func activeAppsAround(timestamp: Date, windowSeconds: TimeInterval) async throws -> [ActiveAppEntry]
+
+    /// 在某时刻附近的语音转录，用于 Timeline 侧边栏。
+    func audioTranscriptsAround(
+        timestamp: Date,
+        beforeSeconds: TimeInterval,
+        afterSeconds: TimeInterval
+    ) async throws -> [AudioTranscriptEntry]
 }
 
 // MARK: - Records
 
 /// 单帧元数据（写入时载体）。
-public struct FrameRecord: Sendable {
-    public let timestampMs: Int64       // UTC ms
-    public let appName: String
-    public let windowName: String?
-    public let browserUrl: String?
-    public let focused: Bool
-    public let deviceName: String       // monitor id，P1 = "main"
-    public let snapshotPath: String     // JPG 绝对路径
-    public let captureTrigger: String   // P1 = "timer"
+struct FrameRecord: Sendable {
+    let timestampMs: Int64       // UTC ms
+    let appName: String
+    let windowName: String?
+    let browserUrl: String?
+    let focused: Bool
+    let deviceName: String       // monitor id，P1 = "main"
+    let snapshotPath: String     // JPG 绝对路径
+    let captureTrigger: String   // P1 = "timer"
 
-    public init(
+    init(
         timestampMs: Int64, appName: String, windowName: String?,
         browserUrl: String?, focused: Bool, deviceName: String,
         snapshotPath: String, captureTrigger: String
@@ -99,13 +115,13 @@ public struct FrameRecord: Sendable {
 }
 
 /// CompactionWorker 查询返回。
-public struct FrameForCompaction: Sendable {
-    public let id: Int64
-    public let timestampMs: Int64
-    public let snapshotPath: String
-    public let deviceName: String
+struct FrameForCompaction: Sendable {
+    let id: Int64
+    let timestampMs: Int64
+    let snapshotPath: String
+    let deviceName: String
 
-    public init(id: Int64, timestampMs: Int64, snapshotPath: String, deviceName: String) {
+    init(id: Int64, timestampMs: Int64, snapshotPath: String, deviceName: String) {
         self.id = id
         self.timestampMs = timestampMs
         self.snapshotPath = snapshotPath
@@ -113,15 +129,15 @@ public struct FrameForCompaction: Sendable {
     }
 }
 
-public struct VideoChunkRecord: Sendable {
-    public let filePath: String
-    public let deviceName: String
-    public let fps: Double
-    public let startTsMs: Int64
-    public let endTsMs: Int64
-    public let frameCount: Int
+struct VideoChunkRecord: Sendable {
+    let filePath: String
+    let deviceName: String
+    let fps: Double
+    let startTsMs: Int64
+    let endTsMs: Int64
+    let frameCount: Int
 
-    public init(
+    init(
         filePath: String, deviceName: String, fps: Double,
         startTsMs: Int64, endTsMs: Int64, frameCount: Int
     ) {
@@ -134,16 +150,16 @@ public struct VideoChunkRecord: Sendable {
     }
 }
 
-public struct AudioChunkRecord: Sendable {
-    public let id: Int64?
-    public let filePath: String
-    public let recordedAtMs: Int64
-    public let durationS: Double
-    public let device: String
-    public let isInput: Bool
-    public let status: AudioChunkStatus
+struct AudioChunkRecord: Sendable {
+    let id: Int64?
+    let filePath: String
+    let recordedAtMs: Int64
+    let durationS: Double
+    let device: String
+    let isInput: Bool
+    let status: AudioChunkStatus
 
-    public init(
+    init(
         id: Int64?, filePath: String, recordedAtMs: Int64, durationS: Double,
         device: String, isInput: Bool, status: AudioChunkStatus
     ) {
@@ -157,7 +173,7 @@ public struct AudioChunkRecord: Sendable {
     }
 }
 
-public enum AudioChunkStatus: String, Sendable {
+enum AudioChunkStatus: String, Sendable {
     case pending
     case inProgress = "in_progress"
     case done
@@ -166,47 +182,47 @@ public enum AudioChunkStatus: String, Sendable {
 
 // MARK: - Retention 数据载体
 
-public enum RetentionMode: String, Sendable {
+enum RetentionMode: String, Sendable {
     /// 只删媒体文件 + 媒体 DB 引用，保留 frames 行（OCR 文本）和转录文本
     case mediaOnly
     /// 删媒体文件 + DB 行（一切）。CASCADE 到 transcriptions
     case everything
 }
 
-public struct RetentionFileList: Sendable {
-    public let snapshotPaths: [String]    // .jpg
-    public let videoChunkPaths: [String]  // .mp4
-    public let audioPaths: [String]       // .wav (+ 配套 .meta.json / .transcript.json 由 worker 推断)
+struct RetentionFileList: Sendable {
+    let snapshotPaths: [String]    // .jpg
+    let videoChunkPaths: [String]  // .mp4
+    let audioPaths: [String]       // .wav (+ 配套 .meta.json / .transcript.json 由 worker 推断)
 
-    public init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String]) {
+    init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String]) {
         self.snapshotPaths = snapshotPaths
         self.videoChunkPaths = videoChunkPaths
         self.audioPaths = audioPaths
     }
 }
 
-public struct RetentionStats: Sendable {
-    public let framesAffected: Int
-    public let videoChunksDeleted: Int
-    public let audioChunksDeleted: Int
+struct RetentionStats: Sendable {
+    let framesAffected: Int
+    let videoChunksDeleted: Int
+    let audioChunksDeleted: Int
 
-    public init(framesAffected: Int, videoChunksDeleted: Int, audioChunksDeleted: Int) {
+    init(framesAffected: Int, videoChunksDeleted: Int, audioChunksDeleted: Int) {
         self.framesAffected = framesAffected
         self.videoChunksDeleted = videoChunksDeleted
         self.audioChunksDeleted = audioChunksDeleted
     }
 }
 
-public struct TranscriptionRecord: Sendable {
-    public let audioChunkId: Int64
-    public let startS: Double
-    public let endS: Double
-    public let text: String
-    public let speakerId: Int?
-    public let engine: String
-    public let transcribedAtMs: Int64
+struct TranscriptionRecord: Sendable {
+    let audioChunkId: Int64
+    let startS: Double
+    let endS: Double
+    let text: String
+    let speakerId: Int?
+    let engine: String
+    let transcribedAtMs: Int64
 
-    public init(
+    init(
         audioChunkId: Int64, startS: Double, endS: Double, text: String,
         speakerId: Int?, engine: String, transcribedAtMs: Int64
     ) {

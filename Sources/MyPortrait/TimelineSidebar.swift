@@ -21,8 +21,7 @@ struct TimelineSidebar: View {
     @State private var editingPipe: PipeJob? = nil
 
     @Environment(ChatStore.self) private var chatStore
-
-    private let db = ScreenpipeDB()
+    @Environment(\.services) private var services
 
     @State private var activeApps: [ActiveAppEntry] = []
     @State private var audioItems: [AudioTranscriptEntry] = []
@@ -409,15 +408,19 @@ struct TimelineSidebar: View {
             audioItems = []
             return
         }
+        guard let db = services?.db else {
+            activeApps = []
+            audioItems = []
+            return
+        }
         loading = true
-        let dbRef = db
         Task {
-            let apps = await Task.detached(priority: .userInitiated) {
-                dbRef.activeApps(around: moment)
-            }.value
-            let audio = await Task.detached(priority: .userInitiated) {
-                dbRef.audioTranscripts(around: moment)
-            }.value
+            let apps = (try? await db.activeAppsAround(
+                timestamp: moment, windowSeconds: 45
+            )) ?? []
+            let audio = (try? await db.audioTranscriptsAround(
+                timestamp: moment, beforeSeconds: 120, afterSeconds: 30
+            )) ?? []
             await MainActor.run {
                 self.activeApps = apps
                 self.audioItems = audio

@@ -66,4 +66,20 @@ final class StubPortraitDB: PortraitDB, Sendable {
     func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats {
         throw reporter.notImplemented("StubPortraitDB.applyRetention")
     }
+
+    func framesForDay(_ day: Date, limit: Int) async throws -> [ScreenpipeFrame] {
+        throw reporter.notImplemented("StubPortraitDB.framesForDay")
+    }
+
+    func activeAppsAround(timestamp: Date, windowSeconds: TimeInterval) async throws -> [ActiveAppEntry] {
+        throw reporter.notImplemented("StubPortraitDB.activeAppsAround")
+    }
+
+    func audioTranscriptsAround(
+        timestamp: Date,
+        beforeSeconds: TimeInterval,
+        afterSeconds: TimeInterval
+    ) async throws -> [AudioTranscriptEntry] {
+        throw reporter.notImplemented("StubPortraitDB.audioTranscriptsAround")
+    }
 }

@@ -243,6 +243,137 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 读（UI 用）
+
+    func framesForDay(_ day: Date, limit: Int) async throws -> [ScreenpipeFrame] {
+        let cal = Calendar(identifier: .gregorian)
+        let dayStart = cal.startOfDay(for: day)
+        let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
+        let endMs = Int64(dayEnd.timeIntervalSince1970 * 1000)
+
+        return try await dbPool.read { db in
+            let sql = """
+            SELECT f.id, f.timestamp_ms, f.app_name, f.window_name, f.browser_url,
+                   f.snapshot_path, v.file_path AS video_path, f.offset_ms,
+                   COALESCE(v.fps, 1.0) AS fps
+            FROM frames f
+            LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
+            WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
+              AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
+            ORDER BY f.timestamp_ms ASC
+            LIMIT ?
+            """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs, limit])
+            return rows.map { row -> ScreenpipeFrame in
+                let id: Int64 = row["id"] ?? 0
+                let ts: Int64 = row["timestamp_ms"] ?? 0
+                let app: String = row["app_name"] ?? ""
+                let win: String = row["window_name"] ?? ""
+                let url: String? = row["browser_url"]
+                let snap: String? = row["snapshot_path"]
+                let vpath: String? = row["video_path"]
+                let offsetMs: Int = row["offset_ms"] ?? 0
+                let fps: Double = row["fps"] ?? 1.0
+
+                // ImageLoader 用 `seconds = offsetIndex / fps`；我们的 offset_ms / 1000
+                // 是真实秒数。反推 offsetIndex 让数学对得上：
+                //   seconds = offsetIndex / fps = (offset_ms * fps / 1000) / fps = offset_ms / 1000 ✓
+                let offsetIndex = Int(Double(offsetMs) * fps / 1000)
+
+                return ScreenpipeFrame(
+                    id: id,
+                    timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
+                    appName: app,
+                    windowName: win,
+                    browserUrl: url,
+                    snapshotPath: snap,
+                    videoPath: vpath,
+                    videoOffsetIndex: offsetIndex,
+                    videoFps: fps
+                )
+            }
+        }
+    }
+
+    func activeAppsAround(timestamp: Date, windowSeconds: TimeInterval) async throws -> [ActiveAppEntry] {
+        let ms = Int64(timestamp.timeIntervalSince1970 * 1000)
+        let startMs = ms - Int64(windowSeconds * 1000)
+        let endMs = ms + Int64(windowSeconds * 1000)
+
+        return try await dbPool.read { db in
+            let sql = """
+            SELECT app_name,
+                   COALESCE(window_name, '') AS window_name,
+                   COALESCE(browser_url, '') AS browser_url,
+                   MAX(timestamp_ms) AS latest
+            FROM frames
+            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
+              AND app_name IS NOT NULL AND app_name != ''
+            GROUP BY app_name, window_name
+            ORDER BY latest DESC
+            LIMIT 30
+            """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs])
+            return rows.map { row -> ActiveAppEntry in
+                let app: String = row["app_name"] ?? ""
+                let win: String = row["window_name"] ?? ""
+                let url: String = row["browser_url"] ?? ""
+                let latest: Int64 = row["latest"] ?? 0
+                return ActiveAppEntry(
+                    appName: app,
+                    windowName: win,
+                    browserUrl: url.isEmpty ? nil : url,
+                    lastSeen: Date(timeIntervalSince1970: TimeInterval(latest) / 1000)
+                )
+            }
+        }
+    }
+
+    func audioTranscriptsAround(
+        timestamp: Date,
+        beforeSeconds: TimeInterval,
+        afterSeconds: TimeInterval
+    ) async throws -> [AudioTranscriptEntry] {
+        let ms = Int64(timestamp.timeIntervalSince1970 * 1000)
+        let startMs = ms - Int64(beforeSeconds * 1000)
+        let endMs = ms + Int64(afterSeconds * 1000)
+
+        return try await dbPool.read { db in
+            // PortraitDB schema 还没有 speakers 表（NoopSpeakerDiarizer 永远 nil）。
+            // 直接 JOIN audio_chunks 拿 recorded_at_ms + device，speakerId/name 留 nil。
+            let sql = """
+            SELECT c.recorded_at_ms AS ts_ms,
+                   t.text,
+                   c.device,
+                   c.is_input,
+                   t.speaker_id
+            FROM audio_transcriptions t
+            JOIN audio_chunks c ON c.id = t.audio_chunk_id
+            WHERE c.recorded_at_ms >= ? AND c.recorded_at_ms <= ?
+              AND t.text IS NOT NULL AND t.text != ''
+            ORDER BY c.recorded_at_ms ASC
+            LIMIT 60
+            """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs])
+            return rows.map { row -> AudioTranscriptEntry in
+                let tsMs: Int64 = row["ts_ms"] ?? 0
+                let text: String = row["text"] ?? ""
+                let device: String = row["device"] ?? ""
+                let isInput: Bool = row["is_input"] ?? true
+                let speakerId: Int? = row["speaker_id"]
+                return AudioTranscriptEntry(
+                    timestamp: Date(timeIntervalSince1970: TimeInterval(tsMs) / 1000),
+                    text: text,
+                    device: device,
+                    isInput: isInput,
+                    speakerId: speakerId,
+                    speakerName: nil
+                )
+            }
+        }
+    }
+
     func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats {
         try await dbPool.write { db in
             switch mode {

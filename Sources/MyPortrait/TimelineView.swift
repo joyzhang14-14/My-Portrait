@@ -46,7 +46,9 @@ final class TimelineState {
 struct TimelineView: View {
     /// Hoisted to ContentView so the sidebar can share the same focus/frames.
     let state: TimelineState
-    private let db = ScreenpipeDB()
+    /// 切到真 DB（PortraitDB），不再读外部 ~/.screenpipe。
+    /// services 注入失败（理论上不应发生）→ 显示空状态。
+    @Environment(\.services) private var services
 
     private var currentFrame: ScreenpipeFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
@@ -80,7 +82,7 @@ struct TimelineView: View {
 
             ZStack {
                 if state.frames.isEmpty {
-                    EmptyState(loading: state.loading, hasDB: db.exists)
+                    EmptyState(loading: state.loading, hasDB: services != nil)
                 } else {
                     FramePreview(frame: state.frames[min(state.focusIndex, state.frames.count - 1)])
                 }
@@ -135,11 +137,13 @@ struct TimelineView: View {
     private func reload() {
         state.loading = true
         let day = state.selectedDay
-        let dbRef = db
+        guard let db = services?.db else {
+            state.frames = []
+            state.loading = false
+            return
+        }
         Task { @MainActor in
-            let fetched = await Task.detached(priority: .userInitiated) {
-                dbRef.frames(on: day, limit: 2000)
-            }.value
+            let fetched = (try? await db.framesForDay(day, limit: 2000)) ?? []
             state.frames = fetched
             state.focusIndex = max(fetched.count - 1, 0)
             state.loading = false
