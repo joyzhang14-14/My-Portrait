@@ -29,10 +29,16 @@ actor CaptureCoordinator {
     private let ocr: OCRService
     private let drm: DRMGate
     private let events: EventSources
+    private let drmWatcher: DRMWatcher
+    private let sleepWakeBox: SleepWakeBox
 
     // 状态
     private var captureTask: Task<Void, Never>?
+    private var drmTask: Task<Void, Never>?
+    private var sleepWakeTask: Task<Void, Never>?
     private var lastCaptureAt: Date?
+    /// DRM 命中时为 true —— captureOneFrame 全部跳过。
+    private var drmActive: Bool = false
     /// P1 期间 DB 是 stub，stub.insertFrameWithOCR 会 throw。
     /// 为了让 frameEvents 仍能流动，coordinator 自己维护一个递增的 fake id。
     /// 一旦真实 PortraitDB 接好，这个字段和相关 catch 都应该删除。
@@ -53,8 +59,12 @@ actor CaptureCoordinator {
         self.comparer = FrameComparer(config: config, reporter: reporter)
         self.snapshot = SnapshotWriter(config: config, reporter: reporter)
         self.ocr = OCRService(config: config, cache: cache, reporter: reporter)
-        self.drm = DRMGate()
+        let drmGate = DRMGate()
+        self.drm = drmGate
         self.events = EventSources()
+        let focusInstance = self.focus
+        self.drmWatcher = DRMWatcher(focus: focusInstance, gate: drmGate)
+        self.sleepWakeBox = SleepWakeBox()
 
         var c: AsyncStream<FrameEvent>.Continuation!
         self.frameEvents = AsyncStream<FrameEvent> { cont in
@@ -85,20 +95,43 @@ actor CaptureCoordinator {
         // 3. 启动事件源（@MainActor，自动 hop 过去）。
         await events.start()
 
-        // 4. 事件循环（detached：脱离当前 task tree，免被父 task cancel 牵连）。
+        // 4. DRM watcher（后台 3s 一次轮询；命中 → drmActive=true → 跳过所有帧）。
+        await drmWatcher.start()
+        let drmStates = drmWatcher.states
+        drmTask = Task.detached(priority: .background) { [weak self] in
+            for await blocked in drmStates {
+                await self?.handleDRMState(blocked)
+            }
+        }
+
+        // 5. Sleep/Wake 监听。睡眠 → invalidate stream + reset comparer。
+        let sleepStream = await sleepWakeBox.start()
+        sleepWakeTask = Task.detached(priority: .background) { [weak self] in
+            for await event in sleepStream {
+                await self?.handleSleepWake(event)
+            }
+        }
+
+        // 6. 事件循环（detached：脱离当前 task tree，免被父 task cancel 牵连）。
         let stream = events.stream
         captureTask = Task.detached(priority: .userInitiated) { [weak self] in
             await self?.runEventLoop(stream: stream)
         }
 
-        logger.info("CaptureCoordinator started (event-driven)")
+        logger.info("CaptureCoordinator started (event-driven, DRM + sleep-aware)")
     }
 
     /// 停止采集流水线。释放 SCStream 缓存、注销通知、关闭 events 流。
     func stop() async {
         captureTask?.cancel()
+        drmTask?.cancel()
+        sleepWakeTask?.cancel()
         captureTask = nil
+        drmTask = nil
+        sleepWakeTask = nil
 
+        await drmWatcher.stop()
+        await sleepWakeBox.stop()
         await events.stop()
         await focus.stop()
         await screen.invalidateStream()
@@ -107,6 +140,33 @@ actor CaptureCoordinator {
 
         _continuation.finish()
         logger.info("CaptureCoordinator stopped")
+    }
+
+    // MARK: - 状态变化处理
+
+    private func handleDRMState(_ blocked: Bool) async {
+        drmActive = blocked
+        if blocked {
+            // 命中 → 立即释放 SCStream，避免触发系统的录屏副作用。
+            await screen.invalidateStream()
+            logger.info("DRM active: capture pipeline paused, SCStream invalidated")
+        } else {
+            // 清除 → reset comparer 强制下一帧保留，下一次 trigger 自然恢复。
+            comparer.reset()
+            logger.info("DRM clear: capture pipeline resumed")
+        }
+    }
+
+    private func handleSleepWake(_ event: SleepWakeEvent) async {
+        switch event {
+        case .willSleep:
+            await screen.invalidateStream()
+            comparer.reset()
+        case .didWake:
+            // 睡前/睡后差异巨大，强制下一帧保留。
+            comparer.reset()
+            // SCStream 已 invalidate，下次 trigger 来时会懒重建。
+        }
     }
 
     /// 手动触发一帧。
@@ -131,6 +191,12 @@ actor CaptureCoordinator {
     private func captureOneFrame(trigger: CaptureTrigger, force: Bool) async throws {
         let now = Date()
 
+        // P5: DRM 命中 → 整个流水线暂停，SCStream 已 invalidate。
+        // 强制 force=true 也照样停（手动 captureOnce 在 DRM 期间会静默返回）。
+        if drmActive {
+            return
+        }
+
         // 防抖：两次实际入库的最小间隔。
         if !force, let last = lastCaptureAt {
             let elapsedMs = now.timeIntervalSince(last) * 1000
@@ -142,8 +208,10 @@ actor CaptureCoordinator {
         // 1. 焦点信息（actor，O(1) 读缓存）。
         let focusInfo = await focus.snapshot()
 
-        // 2. DRM 闸门（P1：仅跳帧不停 stream）。
+        // 2. DRM 即时检测兜底（DRMWatcher 3s 才轮询一次，可能错过短暂打开 Netflix 等场景）。
         if drm.isBlocked(focusInfo) {
+            drmActive = true
+            await screen.invalidateStream()
             return
         }
 
