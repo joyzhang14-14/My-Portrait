@@ -7,13 +7,16 @@ struct SettingsPane: View {
     @Binding var subsection: SettingsSubsection?
     var body: some View {
         Group {
-            switch subsection ?? .general {
-            case .general:       GeneralSettingsView()
+            switch subsection ?? .display {
             case .display:       DisplaySettingsView()
+            case .general:       GeneralSettingsView()
+            case .aiModels:      AIModelsSettingsView()
             case .recording:     RecordingSettingsView()
             case .notifications: NotificationsSettingsView()
             case .usage:         UsageSettingsView()
             case .privacy:       PrivacySettingsView()
+            case .storage:       StorageSettingsView()
+            case .speakers:      SpeakersSettingsView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -48,24 +51,28 @@ struct SettingsScene: View {
                 .foregroundStyle(.white.opacity(0.92))
                 .padding(.horizontal, 14)
                 .padding(.top, 18)
-            Text("SETTINGS")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.40))
-                .padding(.horizontal, 14)
-                .padding(.top, 2)
-                .padding(.bottom, 14)
+                .padding(.bottom, 16)
 
-            VStack(spacing: 2) {
-                ForEach(SettingsSubsection.allCases) { s in
-                    SettingsSidebarRow(
-                        subsection: s,
-                        isActive: subsection == s,
-                        onTap: { subsection = s }
-                    )
+            ForEach([SettingsSubsection.Group.app, .dataPrivacy], id: \.self) { grp in
+                Text(grp.rawValue)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.40))
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+
+                VStack(spacing: 2) {
+                    ForEach(SettingsSubsection.allCases.filter { $0.group == grp }) { s in
+                        SettingsSidebarRow(
+                            subsection: s,
+                            isActive: subsection == s,
+                            onTap: { subsection = s }
+                        )
+                    }
                 }
+                .padding(.horizontal, 8)
             }
-            .padding(.horizontal, 8)
             Spacer()
         }
     }
@@ -74,12 +81,15 @@ struct SettingsScene: View {
 
     @ViewBuilder private var detail: some View {
         switch subsection {
-        case .general:       GeneralSettingsView()
         case .display:       DisplaySettingsView()
+        case .general:       GeneralSettingsView()
+        case .aiModels:      AIModelsSettingsView()
         case .recording:     RecordingSettingsView()
         case .notifications: NotificationsSettingsView()
         case .usage:         UsageSettingsView()
         case .privacy:       PrivacySettingsView()
+        case .storage:       StorageSettingsView()
+        case .speakers:      SpeakersSettingsView()
         }
     }
 }

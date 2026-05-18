@@ -3,6 +3,7 @@ import SwiftUI
 struct NotificationsSettingsView: View {
     @AppStorage(SettingsKeys.notifyAppUpdates)      private var appUpdates = true
     @AppStorage(SettingsKeys.notifyPipeSuggestions) private var pipeSuggest = true
+    @AppStorage(SettingsKeys.pipeSuggestionInterval) private var pipeSuggestInterval = SuggestionInterval.h3.rawValue
     @AppStorage(SettingsKeys.notifyPipeAlerts)      private var pipeAlerts = true
     @AppStorage(SettingsKeys.notifyCaptureStalls)   private var captureStalls = false
 
@@ -21,14 +22,24 @@ struct NotificationsSettingsView: View {
             }
 
             SettingsCard(title: "AI") {
-                SettingsRow("Suggestion notifications",
-                            description: "AI automation ideas based on your activity.",
+                SettingsRow("Pipe suggestions",
+                            description: "AI automation ideas based on your data.",
                             icon: "sparkles") {
-                    Toggle("", isOn: $pipeSuggest).labelsHidden().toggleStyle(.switch)
+                    HStack(spacing: 6) {
+                        Picker("", selection: $pipeSuggestInterval) {
+                            ForEach(SuggestionInterval.allCases) { i in
+                                Text(i.label).tag(i.rawValue)
+                            }
+                        }
+                        .pickerStyle(.menu).labelsHidden()
+                        .disabled(!pipeSuggest)
+                        .frame(width: 110)
+                        Toggle("", isOn: $pipeSuggest).labelsHidden().toggleStyle(.switch)
+                    }
                 }
                 SettingsDivider()
-                SettingsRow("Pipe alerts",
-                            description: "Alerts from your installed pipes.",
+                SettingsRow("Pipe notifications",
+                            description: "Alerts from installed pipes.",
                             icon: "antenna.radiowaves.left.and.right") {
                     Toggle("", isOn: $pipeAlerts).labelsHidden().toggleStyle(.switch)
                 }

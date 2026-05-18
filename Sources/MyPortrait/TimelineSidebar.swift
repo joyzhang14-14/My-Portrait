@@ -363,15 +363,23 @@ struct TimelineSidebar: View {
     // MARK: Settings (6 subsections in the rail)
 
     private var settingsListSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "SETTINGS", count: SettingsSubsection.allCases.count)
-            VStack(spacing: 2) {
-                ForEach(SettingsSubsection.allCases) { s in
-                    SettingsSidebarRow(
-                        subsection: s,
-                        isActive: settingsSubsection == s,
-                        onTap: { settingsSubsection = s }
-                    )
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach([SettingsSubsection.Group.app, .dataPrivacy], id: \.self) { grp in
+                Text(grp.rawValue)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.leading, 4)
+                    .padding(.top, grp == .app ? 4 : 14)
+                    .padding(.bottom, 6)
+                VStack(spacing: 2) {
+                    ForEach(SettingsSubsection.allCases.filter { $0.group == grp }) { s in
+                        SettingsSidebarRow(
+                            subsection: s,
+                            isActive: settingsSubsection == s,
+                            onTap: { settingsSubsection = s }
+                        )
+                    }
                 }
             }
         }

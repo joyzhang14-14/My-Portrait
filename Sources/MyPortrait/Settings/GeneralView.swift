@@ -2,58 +2,119 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.launchAtLogin)       private var launchAtLogin = false
-    @AppStorage(SettingsKeys.updateCheckInterval) private var updateInterval = UpdateInterval.daily.rawValue
-    @AppStorage(SettingsKeys.autoDownloadUpdates) private var autoDownload = true
+    @AppStorage(SettingsKeys.autoDownloadUpdates) private var autoUpdateApp = true
+    @AppStorage(SettingsKeys.updateCheckMinutes)  private var updateCheckMinutes: Int = 60
 
     @State private var clearingCache = false
+    @State private var scanResults: ScanResults? = nil
 
     var body: some View {
         SettingsPage("General", subtitle: "Startup and updates") {
 
             SettingsCard(title: "Startup") {
-                SettingsRow("Launch at login",
-                            description: "Open My Portrait when your Mac starts up.",
+                SettingsRow("Auto-start",
+                            description: "Open My Portrait automatically when you log in.",
                             icon: "power") {
                     Toggle("", isOn: $launchAtLogin).labelsHidden().toggleStyle(.switch)
                 }
             }
 
-            SettingsCard(title: "Updates",
-                         footnote: "Set to “never” to disable update checks entirely.") {
-                SettingsRow("Check for updates",
-                            description: "How often to look for a new build.",
-                            icon: "arrow.down.circle") {
-                    Picker("", selection: $updateInterval) {
-                        ForEach(UpdateInterval.allCases) { i in Text(i.label).tag(i.rawValue) }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(width: 110)
+            SettingsCard(title: "Updates") {
+                SettingsRow("Auto-update app",
+                            description: "Download and install app updates automatically.",
+                            icon: "arrow.down.app") {
+                    Toggle("", isOn: $autoUpdateApp).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
-                SettingsRow("Download in the background",
-                            description: "Apply the update next time you quit.",
-                            icon: "arrow.down.app") {
-                    Toggle("", isOn: $autoDownload).labelsHidden().toggleStyle(.switch)
+                SettingsRow("Update check interval",
+                            description: "How often (in minutes) to look for a new build. Min 1, max 1440.",
+                            icon: "clock.arrow.circlepath") {
+                    HStack(spacing: 4) {
+                        TextField("", value: $updateCheckMinutes,
+                                  formatter: Self.minutesFormatter)
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(size: 12, design: .monospaced))
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                            )
+                            .frame(width: 70)
+                        Text("min")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
                 }
             }
 
             SettingsCard(title: "Maintenance") {
-                SettingsActionRow(
-                    "Clear cache",
-                    description: "Wipe agent cache, old logs, and recovery artifacts.",
-                    buttonLabel: clearingCache ? "Cleared" : "Clear",
-                    buttonIcon: clearingCache ? "checkmark" : "trash",
-                    role: .destructive
-                ) { runClearCache() }
+                SettingsRow("Clear cache",
+                            description: "Remove AI agent cache, old logs, and recovery artifacts.",
+                            icon: "trash") {
+                    Button(scanResults == nil ? "Scan" : "Re-scan") {
+                        scanCache()
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                }
+                if let r = scanResults {
+                    SettingsDivider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(r.entries, id: \.path) { entry in
+                            HStack {
+                                Image(systemName: "doc")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.50))
+                                Text(entry.path)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.78))
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Text(entry.sizeLabel)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Delete all", role: .destructive) { runClearCache() }
+                                .font(.system(size: 12, weight: .medium))
+                                .disabled(clearingCache)
+                        }
+                        .padding(.top, 6)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                }
             }
-
         }
     }
 
+    private static let minutesFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.minimum = 1; f.maximum = 1440; f.allowsFloats = false
+        return f
+    }()
+
+    // MARK: - Scan & clear (UI-level — wire to real paths in a follow-up)
+
+    private struct ScanResults {
+        struct Entry { let path: String; let sizeLabel: String }
+        let entries: [Entry]
+    }
+
+    private func scanCache() {
+        scanResults = ScanResults(entries: [
+            .init(path: "~/Library/Application Support/MyPortrait/pi-rpc.log", sizeLabel: "182 KB"),
+            .init(path: "~/Library/Application Support/MyPortrait/attachments", sizeLabel: "0 B"),
+            .init(path: "~/Library/Application Support/MyPortrait/bun/install/cache", sizeLabel: "2.4 MB")
+        ])
+    }
+
     private func runClearCache() {
-        // UI-only placeholder for now — wire to real disk paths in a follow-up.
         clearingCache = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { clearingCache = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            clearingCache = false
+            scanResults = nil
+        }
     }
 }

@@ -7,9 +7,20 @@ struct UsageSettingsView: View {
     @Environment(ChatController.self) private var chat
     @Environment(ChatStore.self) private var chatStore
     @State private var pipeStore = PipeStore.shared
+    @AppStorage(SettingsKeys.usageRange) private var rangeRaw = UsageRange.last7d.rawValue
 
     var body: some View {
         SettingsPage("Usage", subtitle: "What you've put through My Portrait") {
+
+            HStack(spacing: 8) {
+                ForEach(UsageRange.allCases) { r in
+                    UsageRangeChip(label: r.label, active: rangeRaw == r.rawValue) {
+                        rangeRaw = r.rawValue
+                    }
+                }
+                Spacer()
+            }
+            .padding(.bottom, 4)
 
             HStack(spacing: 14) {
                 MetricTile(label: "Conversations",
@@ -101,6 +112,31 @@ struct UsageSettingsView: View {
             }
         }
         return all.sorted { $0.when > $1.when }
+    }
+}
+
+private struct UsageRangeChip: View {
+    let label: String; let active: Bool; let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .tracking(0.5)
+                .foregroundStyle(active ? .white : .white.opacity(hover ? 0.85 : 0.55))
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(active
+                              ? AnyShapeStyle(LinearGradient(
+                                    colors: [Color.purple.opacity(0.35), Color.blue.opacity(0.22)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                              : AnyShapeStyle(Color.white.opacity(hover ? 0.06 : 0.02)))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
 
