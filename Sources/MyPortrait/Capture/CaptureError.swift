@@ -11,10 +11,17 @@ public enum CaptureError: Error, Sendable {
     /// helper，它会同时上报到 reporter（log / 状态栏 / 计数）。
     case notImplemented(component: String, file: String, line: Int)
 
-    // ── P1+ 待补 ──────────────────────────────────────────
-    // case screenRecordingPermissionDenied
+    /// 屏幕录制权限被用户拒绝（System Settings → Privacy → Screen Recording）。
+    case screenRecordingPermissionDenied
+
+    /// 找不到目标显示器（多显示器配置 P5 才支持，P1 必须有主显示器）。
+    case displayNotFound(monitorId: String)
+
+    /// ScreenCaptureKit 单帧采集失败（重试也无效）。
+    case captureFailed(underlying: Error)
+
+    // ── 后续阶段待补 ──────────────────────────────────────
     // case microphonePermissionDenied
-    // case displayNotFound(monitorId: String)
     // case drmBlocked(appName: String)
     // case diskFull(path: String)
     // case ocrFailed(underlying: Error)
@@ -27,6 +34,12 @@ extension CaptureError: CustomStringConvertible {
         switch self {
         case let .notImplemented(component, file, line):
             return "CaptureError.notImplemented(\(component) @ \(file):\(line))"
+        case .screenRecordingPermissionDenied:
+            return "CaptureError.screenRecordingPermissionDenied"
+        case let .displayNotFound(monitorId):
+            return "CaptureError.displayNotFound(monitorId: \(monitorId))"
+        case let .captureFailed(underlying):
+            return "CaptureError.captureFailed(\(underlying))"
         }
     }
 }
