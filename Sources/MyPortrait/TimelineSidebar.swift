@@ -22,6 +22,10 @@ struct TimelineSidebar: View {
     @State private var activeApps: [ActiveAppEntry] = []
     @State private var audioItems: [AudioTranscriptEntry] = []
     @State private var loading: Bool = false
+    @State private var recentsSearch: String = ""
+    @State private var recentsSearchOpen: Bool = false
+    @State private var renamingConvId: UUID? = nil
+    @State private var renameDraft: String = ""
 
     private var focusedFrame: ScreenpipeFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
@@ -145,8 +149,27 @@ struct TimelineSidebar: View {
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                SectionHeader(title: "RECENTS", count: chatStore.conversations.count)
+                SectionHeader(title: "RECENTS", count: filteredConversations.count)
                 Spacer()
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        recentsSearchOpen.toggle()
+                        if !recentsSearchOpen { recentsSearch = "" }
+                    }
+                } label: {
+                    Image(systemName: recentsSearchOpen ? "xmark" : "magnifyingglass")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(recentsSearchOpen ? 0.12 : 0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Search chats")
+
                 Button {
                     chat.switchTo(nil)
                 } label: {
@@ -164,15 +187,49 @@ struct TimelineSidebar: View {
                 .help("New chat")
             }
 
-            if chatStore.conversations.isEmpty {
-                EmptyRow(text: "No chats yet — start typing below.")
+            if recentsSearchOpen {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
+                    TextField("filter chats…", text: $recentsSearch)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.10), lineWidth: 0.7))
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if filteredConversations.isEmpty {
+                EmptyRow(text: recentsSearch.isEmpty
+                         ? "No chats yet — start typing below."
+                         : "No chats match \"\(recentsSearch)\".")
             } else {
                 VStack(spacing: 2) {
-                    ForEach(chatStore.conversations) { conv in
+                    ForEach(filteredConversations) { conv in
                         RecentRow(
                             conv: conv,
                             isActive: chat.currentConvId == conv.id,
-                            onTap: { chat.switchTo(conv.id) },
+                            isRenaming: renamingConvId == conv.id,
+                            renameDraft: $renameDraft,
+                            onTap: {
+                                if renamingConvId == nil { chat.switchTo(conv.id) }
+                            },
+                            onStartRename: {
+                                renameDraft = conv.title
+                                renamingConvId = conv.id
+                            },
+                            onCommitRename: {
+                                if !renameDraft.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    chatStore.renameConversation(conv.id, to: renameDraft.trimmingCharacters(in: .whitespaces))
+                                }
+                                renamingConvId = nil
+                            },
+                            onCancelRename: { renamingConvId = nil },
                             onTogglePin: { chatStore.togglePinned(conv.id) },
                             onDelete: {
                                 let wasActive = chat.currentConvId == conv.id
@@ -184,6 +241,12 @@ struct TimelineSidebar: View {
                 }
             }
         }
+    }
+
+    private var filteredConversations: [Conversation] {
+        let q = recentsSearch.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return chatStore.conversations }
+        return chatStore.conversations.filter { $0.title.lowercased().contains(q) }
     }
 
     // MARK: Memories scope picker (shown when selection == .memories)
@@ -441,59 +504,86 @@ private struct AudioRow: View {
 
 // MARK: - Recents row
 
-/// One conversation row in the sidebar. Click the row body to switch, click
-/// the pin icon (on hover) to pin, ⌫ to delete.
+/// One conversation row. Click the row body to switch; double-click the
+/// title (or right-click → Rename) to rename in place; hover surfaces
+/// pin + delete; pin button toggles pinned state.
 private struct RecentRow: View {
     let conv: Conversation
     let isActive: Bool
+    let isRenaming: Bool
+    @Binding var renameDraft: String
     let onTap: () -> Void
+    let onStartRename: () -> Void
+    let onCommitRename: () -> Void
+    let onCancelRename: () -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
 
     @State private var hover = false
+    @FocusState private var renameFocused: Bool
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 8) {
-                if conv.pinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
+        HStack(spacing: 8) {
+            if conv.pinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            if isRenaming {
+                TextField("", text: $renameDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+                    .focused($renameFocused)
+                    .onSubmit { onCommitRename() }
+                    .onExitCommand { onCancelRename() }
+                    .onAppear { renameFocused = true }
+            } else {
                 Text(conv.title)
                     .font(.system(size: 12))
                     .foregroundStyle(isActive ? .primary : .secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Spacer(minLength: 0)
-                if hover {
-                    Button(action: onTogglePin) {
-                        Image(systemName: conv.pinned ? "pin.slash" : "pin")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                    .buttonStyle(.plain)
-                    .help(conv.pinned ? "Unpin" : "Pin")
-                    Button(action: onDelete) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Delete")
-                }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? Color.white.opacity(0.10)
-                          : hover ? Color.white.opacity(0.05)
-                          : Color.clear)
-            )
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
+            if hover, !isRenaming {
+                Button(action: onTogglePin) {
+                    Image(systemName: conv.pinned ? "pin.slash" : "pin")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .help(conv.pinned ? "Unpin" : "Pin")
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .help("Delete")
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isActive ? Color.white.opacity(0.10)
+                      : hover ? Color.white.opacity(0.05)
+                      : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if !isRenaming { onStartRename() }
+        }
+        .onTapGesture(count: 1) {
+            if !isRenaming { onTap() }
+        }
         .onHover { hover = $0 }
+        .contextMenu {
+            Button("Rename", action: onStartRename)
+            Button(conv.pinned ? "Unpin" : "Pin", action: onTogglePin)
+            Divider()
+            Button("Delete", role: .destructive, action: onDelete)
+        }
     }
 }
