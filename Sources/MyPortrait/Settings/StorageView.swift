@@ -6,6 +6,8 @@ import AppKit
 /// we can read them (file system) and "—" otherwise.
 struct StorageSettingsView: View {
     @AppStorage(SettingsKeys.dataDirectory) private var dataDir: String = ""
+    @AppStorage(SettingsKeys.retentionDays) private var retention = RetentionDays.d30.rawValue
+    @AppStorage(SettingsKeys.autoDeleteMode) private var autoDelete = AutoDeleteMode.mediaOnly.rawValue
 
     @State private var stats = StorageStats.empty
     @State private var scanning = false
@@ -89,6 +91,8 @@ struct StorageSettingsView: View {
                 }
             }
 
+            autoDeleteCard
+
             SettingsCard(
                 title: "Delete recent data",
                 footnote: "Instantly purges every frame, OCR row, and audio chunk captured in the chosen window."
@@ -104,6 +108,30 @@ struct StorageSettingsView: View {
         }
         .task {
             if lastScannedAt == nil { await refresh() }
+        }
+    }
+
+    private var autoDeleteCard: some View {
+        SettingsCard(
+            title: "Auto-delete old data",
+            footnote: "Frees disk without you having to think about it. Recommended setting keeps your timeline searchable forever."
+        ) {
+            SettingsRow("Retention window",
+                        description: "Data older than this is eligible for auto-delete.",
+                        icon: "calendar.badge.clock") {
+                Picker("", selection: $retention) {
+                    ForEach(RetentionDays.allCases) { r in Text(r.label).tag(r.rawValue) }
+                }
+                .pickerStyle(.menu).labelsHidden().frame(width: 140)
+            }
+            ForEach(AutoDeleteMode.allCases) { mode in
+                SettingsDivider()
+                AutoDeleteModeRow(
+                    mode: mode,
+                    isActive: autoDelete == mode.rawValue,
+                    recommended: mode == .mediaOnly
+                ) { autoDelete = mode.rawValue }
+            }
         }
     }
 
@@ -308,6 +336,64 @@ private struct DeleteButton: View {
                         .overlay(RoundedRectangle(cornerRadius: 7)
                             .stroke(Color.red.opacity(0.45), lineWidth: 0.8))
                 )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
+
+// MARK: - Auto-delete mode row
+
+private struct AutoDeleteModeRow: View {
+    let mode: AutoDeleteMode
+    let isActive: Bool
+    let recommended: Bool
+    let onTap: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isActive
+                              ? AnyShapeStyle(LinearGradient(
+                                    colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.28)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                              : AnyShapeStyle(Color.white.opacity(0.06)))
+                    Image(systemName: mode.icon)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(isActive ? .white.opacity(0.95) : .white.opacity(0.75))
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(mode.label)
+                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                            .foregroundStyle(.white.opacity(0.95))
+                        if recommended {
+                            Text("RECOMMENDED")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .tracking(0.6)
+                                .foregroundStyle(Color.green.opacity(0.90))
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Capsule().stroke(Color.green.opacity(0.45), lineWidth: 0.8))
+                        }
+                    }
+                    Text(mode.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if isActive {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.purple.opacity(0.90))
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Color.white.opacity(isActive ? 0.04 : (hover ? 0.03 : 0)))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }

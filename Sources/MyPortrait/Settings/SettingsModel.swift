@@ -104,8 +104,21 @@ enum SettingsKeys {
     static let includedApps             = "Settings.includedApps"             // [String]
     static let ignoredURLs              = "Settings.ignoredURLs"              // [String]
 
+    // Recording (added per Orphies parity)
+    static let filterMusic              = "Settings.filterMusic"
+    static let batchTranscription       = "Settings.batchTranscription"
+    static let autoSelectAudioDevices   = "Settings.autoSelectAudioDevices"
+    static let powerMode                = "Settings.powerMode"                // PowerMode rawValue
+
+    // Display (App customize)
+    static let accentColor              = "Settings.accentColor"              // AccentColor rawValue
+    static let appIconVariant           = "Settings.appIconVariant"           // AppIconVariant rawValue
+    static let showInMenuBar            = "Settings.showInMenuBar"
+
     // Storage
     static let dataDirectory            = "Settings.dataDirectory"            // String path
+    static let retentionDays            = "Settings.retentionDays"            // String enum: 7/14/30/60/90/forever
+    static let autoDeleteMode           = "Settings.autoDeleteMode"           // AutoDeleteMode rawValue
 
     // Usage
     static let usageRange               = "Settings.usageRange"               // UsageRange rawValue
@@ -187,6 +200,100 @@ enum UsageRange: String, CaseIterable, Identifiable {
         switch self {
         case .last24h: return "24h"; case .last7d: return "7d"
         case .last30d: return "30d"; case .all: return "all"
+        }
+    }
+}
+
+enum PowerMode: String, CaseIterable, Identifiable {
+    case auto, performance, batterySaver
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .auto:         return "Auto"
+        case .performance:  return "Performance"
+        case .batterySaver: return "Battery saver"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .auto:         return "Adjusts based on battery state"
+        case .performance:  return "Full quality, ignore battery"
+        case .batterySaver: return "Maximum power saving"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .auto:         return "wand.and.stars"
+        case .performance:  return "bolt.fill"
+        case .batterySaver: return "leaf.fill"
+        }
+    }
+}
+
+enum RetentionDays: String, CaseIterable, Identifiable {
+    case d7, d14, d30, d60, d90, forever
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .d7: return "7 days"; case .d14: return "14 days"
+        case .d30: return "30 days"; case .d60: return "60 days"
+        case .d90: return "90 days"; case .forever: return "Keep forever"
+        }
+    }
+}
+
+enum AutoDeleteMode: String, CaseIterable, Identifiable {
+    case off, mediaOnly, everything
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .off:        return "Off"
+        case .mediaOnly:  return "Video + audio only"
+        case .everything: return "Everything (including OCR text + DB)"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .off:        return "Nothing gets deleted automatically."
+        case .mediaOnly:  return "Recommended. Drops the heavy MP4s + audio chunks; keeps OCR text + transcripts so the timeline stays searchable."
+        case .everything: return "Aggressive. Wipes everything older than the retention window."
+        }
+    }
+    var icon: String {
+        switch self {
+        case .off:        return "pause.circle"
+        case .mediaOnly:  return "film"
+        case .everything: return "trash"
+        }
+    }
+}
+
+enum AccentColor: String, CaseIterable, Identifiable {
+    case purple, blue, pink, green, orange, indigo, mint
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var color: Color {
+        switch self {
+        case .purple: return Color(red: 0.65, green: 0.30, blue: 1.0)
+        case .blue:   return Color(red: 0.25, green: 0.55, blue: 1.0)
+        case .pink:   return Color(red: 0.95, green: 0.35, blue: 0.65)
+        case .green:  return Color(red: 0.30, green: 0.78, blue: 0.55)
+        case .orange: return Color(red: 1.00, green: 0.55, blue: 0.25)
+        case .indigo: return Color(red: 0.40, green: 0.35, blue: 0.95)
+        case .mint:   return Color(red: 0.40, green: 0.85, blue: 0.75)
+        }
+    }
+}
+
+enum AppIconVariant: String, CaseIterable, Identifiable {
+    case `default`, dark, monochrome, gradient
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .default:    return "Default"
+        case .dark:       return "Dark"
+        case .monochrome: return "Monochrome"
+        case .gradient:   return "Gradient"
         }
     }
 }

@@ -1,13 +1,12 @@
 import SwiftUI
+import SQLite3
 
-/// Speakers — list of identified / unidentified voices from screenpipe.
-/// Mirrors Orphies' `speakers-section.tsx`: progress header, unidentified
-/// clusters with quick-name input, identified roster with inline edit /
-/// delete, plus a side-by-side merge suggestion banner.
+/// Speakers — voices captured from your microphone + system audio.
+/// Polished rewrite: progress header, attention banner for unidentified
+/// clusters, a dense identified roster with avatar + sample count + last
+/// heard + hover actions, search + "Organize w/ AI" button.
 ///
-/// We read names + counts directly from the screenpipe `speakers` table.
-/// Editing writes back through SQL (or stays as UI-only until the user
-/// connects a write path).
+/// Reads `speakers JOIN audio_transcriptions` live from screenpipe DB.
 struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
@@ -18,11 +17,12 @@ struct SpeakersSettingsView: View {
         guard !q.isEmpty else { return rows }
         return rows.filter { ($0.name ?? "").lowercased().contains(q) }
     }
-    private var identified: [SpeakerRow]   { filtered.filter { $0.name?.isEmpty == false } }
+    private var identified:   [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty == false } }
     private var unidentified: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
 
     var body: some View {
-        SettingsPage("Speakers", subtitle: "Voices captured from your microphone + system audio") {
+        SettingsPage("Speakers",
+                     subtitle: "Voices captured from your microphone and system audio") {
 
             ProgressHeader(identified: identified.count, total: rows.count)
 
@@ -30,52 +30,30 @@ struct SpeakersSettingsView: View {
                 AttentionBanner(count: unidentified.count)
             }
 
-            HStack(spacing: 8) {
-                searchField
-                Spacer()
-                Button {
-                    organizing = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { organizing = false }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: organizing ? "sparkles" : "wand.and.stars")
-                            .font(.system(size: 11))
-                            .rotationEffect(.degrees(organizing ? 360 : 0))
-                            .animation(organizing
-                                ? .linear(duration: 0.9).repeatForever(autoreverses: false)
-                                : .default, value: organizing)
-                        Text("Organize with AI")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                }
-            }
+            toolbar
 
             if !unidentified.isEmpty {
-                SettingsCard(title: "Unidentified clusters",
-                             footnote: "Give each cluster a name so it can be linked across recordings.") {
+                SectionLabel("UNIDENTIFIED CLUSTERS",
+                             subtitle: "Name these voice clusters so they're linked across recordings.")
+                VStack(spacing: 8) {
                     ForEach(unidentified) { r in
-                        SpeakerRowView(row: r,
-                                       editable: true,
-                                       onCommitName: { newName in commitRename(r, to: newName) },
-                                       onDelete: { delete(r) })
-                        if r.id != unidentified.last?.id { SettingsDivider() }
+                        UnidentifiedCard(row: r,
+                                         onName: { newName in rename(r, to: newName) },
+                                         onHallucination: { hide(r) })
                     }
                 }
             }
 
-            SettingsCard(title: "Identified speakers") {
-                if identified.isEmpty {
-                    Text("No identified speakers yet.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .padding(.horizontal, 14).padding(.vertical, 12)
-                } else {
+            SectionLabel("IDENTIFIED",
+                         subtitle: identified.isEmpty
+                            ? "None yet — name your first cluster above."
+                            : "\(identified.count) speaker\(identified.count == 1 ? "" : "s") recognised.")
+            if !identified.isEmpty {
+                VStack(spacing: 6) {
                     ForEach(identified) { r in
-                        SpeakerRowView(row: r,
-                                       editable: false,
-                                       onCommitName: { newName in commitRename(r, to: newName) },
-                                       onDelete: { delete(r) })
-                        if r.id != identified.last?.id { SettingsDivider() }
+                        IdentifiedRow(row: r,
+                                      onRename: { newName in rename(r, to: newName) },
+                                      onDelete: { hide(r) })
                     }
                 }
             }
@@ -83,44 +61,73 @@ struct SpeakersSettingsView: View {
         .task { reload() }
     }
 
-    // MARK: - Helpers
+    // MARK: - Toolbar
 
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
-            TextField("Search speakers…", text: $search)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
+    private var toolbar: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+                TextField("Search speakers…", text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: 280)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(.ultraThinMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+            )
+
+            Spacer()
+
+            Button {
+                organizing = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { organizing = false }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: organizing ? "wand.and.stars.inverse" : "wand.and.stars")
+                        .font(.system(size: 11, weight: .medium))
+                        .rotationEffect(.degrees(organizing ? 360 : 0))
+                        .animation(organizing
+                            ? .linear(duration: 1.0).repeatForever(autoreverses: false)
+                            : .default, value: organizing)
+                    Text("Organize with AI")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.white.opacity(0.95))
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(LinearGradient(
+                            colors: [Color.purple.opacity(0.35), Color.blue.opacity(0.22)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(unidentified.isEmpty)
+            .opacity(unidentified.isEmpty ? 0.45 : 1)
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(Color.white.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
-        )
-        .frame(maxWidth: 260)
     }
 
-    private func reload() {
-        rows = SpeakerLoader.loadAll()
+    // MARK: - Mutators
+
+    private func reload() { rows = SpeakerLoader.loadAll() }
+    private func rename(_ r: SpeakerRow, to newName: String) {
+        let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
+        rows[i].name = v
+        // TODO: persist back to screenpipe DB.
     }
-    private func commitRename(_ r: SpeakerRow, to newName: String) {
-        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if let i = rows.firstIndex(where: { $0.id == r.id }) {
-            rows[i].name = trimmed
-        }
-        // Persisting back into screenpipe's DB needs a writable connection
-        // — left for a follow-up. The UI keeps the new name optimistically.
-    }
-    private func delete(_ r: SpeakerRow) {
+    private func hide(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
     }
 }
 
-// MARK: - Banners
+// MARK: - Header banners
 
 private struct ProgressHeader: View {
     let identified: Int; let total: Int
@@ -129,23 +136,31 @@ private struct ProgressHeader: View {
         return Double(identified) / Double(total)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("\(identified) of \(total) speakers identified")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.92))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(identified) of \(total) speakers identified")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text("Identified speakers are searchable as \(token: "@speaker:<name>") in chat.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
                 Spacer()
                 Text("\(Int(pct * 100))%")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
             }
-            ProgressView(value: pct).tint(Color.purple).frame(maxWidth: .infinity)
+            ProgressView(value: pct)
+                .tint(LinearGradient(
+                    colors: [Color.purple, Color.blue],
+                    startPoint: .leading, endPoint: .trailing))
         }
-        .padding(14)
+        .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.ultraThinMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.white.opacity(0.12), lineWidth: 0.7))
         )
     }
@@ -154,17 +169,18 @@ private struct ProgressHeader: View {
 private struct AttentionBanner: View {
     let count: Int
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.orange.opacity(0.85))
+        HStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 18))
+                .foregroundStyle(Color.orange.opacity(0.90))
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(count) unidentified speakers")
+                Text("\(count) unidentified \(count == 1 ? "cluster" : "clusters")")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                Text("Name these voice clusters so they're linked across recordings.")
+                    .foregroundStyle(.white.opacity(0.95))
+                Text("Give each a name below, or click Organize with AI to group similar voices.")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.60))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
@@ -178,76 +194,250 @@ private struct AttentionBanner: View {
     }
 }
 
-// MARK: - Speaker row
+private struct SectionLabel: View {
+    let title: String
+    let subtitle: String
+    init(_ title: String, subtitle: String) {
+        self.title = title; self.subtitle = subtitle
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(.white.opacity(0.50))
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+}
 
-private struct SpeakerRowView: View {
+// MARK: - Unidentified cluster card
+
+private struct UnidentifiedCard: View {
     let row: SpeakerRow
-    let editable: Bool
-    let onCommitName: (String) -> Void
-    let onDelete: () -> Void
-
+    let onName: (String) -> Void
+    let onHallucination: () -> Void
     @State private var draft: String = ""
+    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 12) {
-            // Avatar — first-letter glyph if named, "?" otherwise
-            ZStack {
-                Circle().fill(.ultraThinMaterial)
-                Text(initial)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            SpeakerAvatar(letter: "?", color: Color.orange, animating: true)
+                .frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Cluster \(row.id.prefix(8))")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.95))
+                HStack(spacing: 6) {
+                    StatPill(icon: "waveform", text: "\(row.sampleCount) samples")
+                    if let last = row.lastHeard {
+                        StatPill(icon: "clock", text: relative(last))
+                    }
+                }
             }
-            .frame(width: 28, height: 28)
-            .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+            Spacer(minLength: 14)
 
-            if editable, (row.name ?? "").isEmpty {
-                TextField("name this speaker…", text: $draft)
+            TextField("Name this speaker…", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                )
+                .frame(maxWidth: 200)
+                .onSubmit { commit() }
+
+            Button(action: commit) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(LinearGradient(
+                                colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.28)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.20), lineWidth: 0.7))
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            Menu {
+                Button("Mark as hallucination", role: .destructive, action: onHallucination)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .frame(width: 24, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.orange.opacity(hover ? 0.10 : 0.06))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.orange.opacity(0.30), lineWidth: 0.7))
+        )
+        .onHover { hover = $0 }
+        .animation(.easeOut(duration: 0.15), value: hover)
+    }
+
+    private func commit() {
+        let v = draft.trimmingCharacters(in: .whitespaces)
+        guard !v.isEmpty else { return }
+        onName(v); draft = ""
+    }
+
+    private func relative(_ d: Date) -> String {
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .short
+        return f.localizedString(for: d, relativeTo: Date())
+    }
+}
+
+// MARK: - Identified row (compact)
+
+private struct IdentifiedRow: View {
+    let row: SpeakerRow
+    let onRename: (String) -> Void
+    let onDelete: () -> Void
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SpeakerAvatar(letter: initial, color: avatarColor, animating: false)
+                .frame(width: 32, height: 32)
+
+            if editing {
+                TextField("", text: $draft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(
                         RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.10), lineWidth: 1))
                     )
                     .frame(maxWidth: 220)
-                    .onSubmit { onCommitName(draft); draft = "" }
-                Spacer()
+                    .onSubmit {
+                        let v = draft.trimmingCharacters(in: .whitespaces)
+                        if !v.isEmpty { onRename(v) }
+                        editing = false
+                    }
+                    .onExitCommand { editing = false }
             } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(row.name ?? "Speaker \(row.id.prefix(8))")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.92))
-                    Text("\(row.sampleCount) samples\(lastHeardSuffix)")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.white.opacity(0.50))
-                }
-                Spacer()
+                Text(row.name ?? "Unknown")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.95))
             }
 
-            Button("Mark as hallucination", role: .destructive, action: onDelete)
-                .font(.system(size: 11))
+            HStack(spacing: 4) {
+                StatPill(icon: "waveform", text: "\(row.sampleCount)")
+                if let last = row.lastHeard {
+                    StatPill(icon: "clock", text: relative(last))
+                }
+            }
+
+            Spacer()
+
+            if hover, !editing {
+                Button {
+                    draft = row.name ?? ""; editing = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.70))
+                }
+                .buttonStyle(.plain)
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.70))
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.white.opacity(hover ? 0.05 : 0.025))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 0.7))
+        )
+        .onHover { hover = $0 }
     }
 
     private var initial: String {
         if let n = row.name, let first = n.first { return String(first).uppercased() }
         return "?"
     }
-    private var lastHeardSuffix: String {
-        guard let last = row.lastHeard else { return "" }
+    private var avatarColor: Color {
+        // Deterministic from name hash so each speaker gets a stable color.
+        let palette: [Color] = [.purple, .blue, .pink, .green, .orange, .cyan, .mint, .indigo]
+        guard let n = row.name else { return .gray }
+        return palette[abs(n.hashValue) % palette.count]
+    }
+    private func relative(_ d: Date) -> String {
         let f = RelativeDateTimeFormatter(); f.unitsStyle = .short
-        return " · " + f.localizedString(for: last, relativeTo: Date())
+        return f.localizedString(for: d, relativeTo: Date())
     }
 }
 
-// MARK: - Loader (reads screenpipe.speakers / audio_transcriptions)
+// MARK: - Bits
 
-import SQLite3
+private struct SpeakerAvatar: View {
+    let letter: String
+    let color: Color
+    let animating: Bool
+    @State private var pulse = false
+    var body: some View {
+        ZStack {
+            if animating {
+                Circle()
+                    .fill(color.opacity(0.20))
+                    .scaleEffect(pulse ? 1.25 : 1.0)
+                    .opacity(pulse ? 0 : 0.8)
+                    .animation(.easeOut(duration: 1.6).repeatForever(autoreverses: false), value: pulse)
+            }
+            Circle()
+                .fill(LinearGradient(
+                    colors: [color, color.opacity(0.55)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+            Text(letter)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+        .onAppear { if animating { pulse = true } }
+    }
+}
+
+private struct StatPill: View {
+    let icon: String; let text: String
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 8.5))
+            Text(text).font(.system(size: 10, design: .monospaced))
+        }
+        .foregroundStyle(.white.opacity(0.60))
+        .padding(.horizontal, 6).padding(.vertical, 2.5)
+        .background(Capsule().fill(Color.white.opacity(0.05)))
+    }
+}
+
+// MARK: - Loader
 
 private struct SpeakerRow: Identifiable, Hashable {
-    let id: String          // stringified integer id from the DB
+    let id: String
     var name: String?
     let sampleCount: Int
     let lastHeard: Date?
@@ -299,5 +489,13 @@ private enum SpeakerLoader {
             ))
         }
         return out
+    }
+}
+
+// Workaround for the inline string interpolation used in ProgressHeader
+// (Swift String interpolation doesn't take labelled args directly).
+private extension String.StringInterpolation {
+    mutating func appendInterpolation(token v: String) {
+        appendInterpolation("`\(v)`")
     }
 }

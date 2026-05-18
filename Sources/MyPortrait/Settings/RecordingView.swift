@@ -10,6 +10,9 @@ struct RecordingSettingsView: View {
     @AppStorage(SettingsKeys.useCoreAudioCapture)    private var coreAudio = true
     @AppStorage(SettingsKeys.captureSystemAudio)     private var systemAudio = true
     @AppStorage(SettingsKeys.speakerIdEnabled)       private var speakerId = true
+    @AppStorage(SettingsKeys.filterMusic)            private var filterMusic = false
+    @AppStorage(SettingsKeys.batchTranscription)     private var batchTranscription = true
+    @AppStorage(SettingsKeys.autoSelectAudioDevices) private var autoSelectAudio = true
 
     @AppStorage(SettingsKeys.screenRecordingEnabled) private var screenRec = true
     @AppStorage(SettingsKeys.ocrEngine)              private var ocrEngine = OCREngine.tesseract.rawValue
@@ -17,8 +20,9 @@ struct RecordingSettingsView: View {
     @AppStorage(SettingsKeys.recordingQuality)       private var quality = RecordingQuality.medium.rawValue
     @AppStorage(SettingsKeys.videoFormat)            private var format = VideoFormat.h264.rawValue
     @AppStorage(SettingsKeys.frameIntervalMs)        private var frameIntervalMs: Int = 1000
-    @AppStorage(SettingsKeys.activeMonitor)          private var activeMonitor = ""
     @AppStorage(SettingsKeys.chineseMirror)          private var chineseMirror = false
+
+    @AppStorage(SettingsKeys.powerMode)              private var powerMode = PowerMode.auto.rawValue
 
     @State private var languages:  [String] = StringArrayStorage(key: SettingsKeys.audioLanguages).get()
     @State private var microphones:[String] = StringArrayStorage(key: SettingsKeys.microphonesSelected).get()
@@ -27,12 +31,26 @@ struct RecordingSettingsView: View {
     var body: some View {
         SettingsPage("Recording", subtitle: "Audio + screen capture") {
 
-            // MARK: Audio
+            powerModeCard
             audioSection
-            // MARK: Screen
             screenSection
-            // MARK: System
             systemSection
+        }
+    }
+
+    // MARK: - Power mode
+
+    private var powerModeCard: some View {
+        SettingsCard(
+            title: "Power mode",
+            footnote: "Switches capture FPS, transcription cadence, and OCR aggressiveness based on the profile you pick."
+        ) {
+            ForEach(PowerMode.allCases) { mode in
+                PowerModeRow(mode: mode, isActive: powerMode == mode.rawValue) {
+                    powerMode = mode.rawValue
+                }
+                if mode != PowerMode.allCases.last { SettingsDivider() }
+            }
         }
     }
 
@@ -67,8 +85,14 @@ struct RecordingSettingsView: View {
 
             if audioRec {
                 SettingsCard(title: "Microphones") {
+                    SettingsRow("Auto-select audio devices",
+                                description: "Records all default devices. Turn off to exclude Bluetooth headphones or pick specific devices below.",
+                                icon: "speaker.wave.3") {
+                        Toggle("", isOn: $autoSelectAudio).labelsHidden().toggleStyle(.switch)
+                    }
+                    SettingsDivider()
                     SettingsRow("Microphones",
-                                description: "Devices to capture from. Empty = system default.",
+                                description: "Devices to capture from. Used when auto-select is off.",
                                 icon: "mic.fill") { EmptyView() }
                     VStack { TagListEditor(tags: $microphones, placeholder: "device name…") }
                         .padding(.horizontal, 48).padding(.bottom, 12)
@@ -131,6 +155,20 @@ struct RecordingSettingsView: View {
                         .onChange(of: languages) {
                             StringArrayStorage(key: SettingsKeys.audioLanguages).set(languages)
                         }
+                    if engine != AudioEngine.disabled.rawValue {
+                        SettingsDivider()
+                        SettingsRow("Filter music",
+                                    description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
+                                    icon: "music.note.list") {
+                            Toggle("", isOn: $filterMusic).labelsHidden().toggleStyle(.switch)
+                        }
+                        SettingsDivider()
+                        SettingsRow("Batch transcription",
+                                    description: "Process audio chunks together for higher throughput. Slight latency cost.",
+                                    icon: "tray.full") {
+                            Toggle("", isOn: $batchTranscription).labelsHidden().toggleStyle(.switch)
+                        }
+                    }
                 }
 
                 SettingsCard(
@@ -221,21 +259,6 @@ struct RecordingSettingsView: View {
                         }
                     }
                     SettingsDivider()
-                    SettingsRow("Monitor",
-                                description: "Which display to record. (Single-display only.)",
-                                icon: "display") {
-                        TextField("primary", text: $activeMonitor)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
-                                    .overlay(RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color.white.opacity(0.10), lineWidth: 1))
-                            )
-                            .frame(width: 160)
-                    }
-                    SettingsDivider()
                     SettingsRow("OCR engine",
                                 description: "Convert captured frames into searchable text.",
                                 icon: "doc.text.viewfinder") {
@@ -259,5 +282,53 @@ struct RecordingSettingsView: View {
                 Toggle("", isOn: $chineseMirror).labelsHidden().toggleStyle(.switch)
             }
         }
+    }
+}
+
+// MARK: - Power mode row (one per mode)
+
+private struct PowerModeRow: View {
+    let mode: PowerMode
+    let isActive: Bool
+    let onTap: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isActive
+                              ? AnyShapeStyle(LinearGradient(
+                                    colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.30)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                              : AnyShapeStyle(Color.white.opacity(0.06)))
+                    Image(systemName: mode.icon)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(isActive ? .white.opacity(0.95) : .white.opacity(0.75))
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.label)
+                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text(mode.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                Spacer()
+                if isActive {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.purple.opacity(0.90))
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(
+                Color.white.opacity(isActive ? 0.04 : (hover ? 0.03 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
