@@ -83,6 +83,10 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <string>My Portrait's AI agent reads files from your Downloads folder when you ask it to.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>My Portrait controls helper processes (Bun + Pi agent) to talk to ChatGPT.</string>
+
+    <!-- Capture layer permissions (P1-P4). All keep data local on disk. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>My Portrait listens to your microphone, segments it locally, and transcribes the audio on-device. Audio stays on this Mac.</string>
 </dict>
 </plist>
 EOF

@@ -100,14 +100,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // app 不崩。
         let coordinator = services.coordinator
         let compactor = services.compactor
+        let audio = services.audio
+        let transcriber = services.transcriber
         Task.detached(priority: .userInitiated) { [lifecycleLog] in
             do {
                 try await coordinator.start()
             } catch {
                 lifecycleLog.error("coordinator.start failed: \(String(describing: error), privacy: .public)")
             }
-            // CompactionWorker 独立启动；DB 是 stub 时只会循环空转，不影响 coordinator。
+            // 三个 worker 独立启动；DB 是 stub 时只会循环空转/失败，不影响 coordinator。
             await compactor.start()
+            await audio.start()
+            await transcriber.start()
         }
     }
 
@@ -116,14 +120,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 进程退出前尽量优雅停止采集（刷盘、关 SCStream、停 compaction）。
+        // 进程退出前尽量优雅停止采集（刷盘、关 SCStream、停 compaction、停录音）。
         // 同步等最多 ~1s，超时由系统 ~5s 后强制 kill 兜底。
         let sem = DispatchSemaphore(value: 0)
         let coordinator = services?.coordinator
         let compactor = services?.compactor
+        let audio = services?.audio
+        let transcriber = services?.transcriber
         Task.detached(priority: .userInitiated) {
             await coordinator?.stop()
             await compactor?.stop()
+            await audio?.stop()
+            await transcriber?.stop()
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 1.0)
