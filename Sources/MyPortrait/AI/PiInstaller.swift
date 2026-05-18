@@ -39,9 +39,9 @@ enum PiInstaller {
         try writeModelsJSON(providers: [.chatgpt])
     }
 
-    /// Re-write `~/.pi/agent/models.json`, registering ONE entry per supplied
-    /// provider with its default model. Pi looks up providers by their
-    /// `piName` at runtime. Existing unknown entries are preserved (merge).
+    /// Re-write `~/.pi/agent/models.json`, registering every available model
+    /// per supplied provider so the in-chat picker can switch freely without
+    /// rewriting this file each time. Existing unknown entries are preserved.
     static func writeModelsJSON(providers: [Provider]) throws {
         let configDir = piGlobalConfigDir()
         try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
@@ -54,7 +54,7 @@ enum PiInstaller {
         }
         var providerMap = (root["providers"] as? [String: Any]) ?? [:]
         for p in providers {
-            providerMap[p.piName] = providerEntry(for: p, model: p.defaultModel)
+            providerMap[p.piName] = providerEntry(for: p, models: p.availableModels)
         }
         root["providers"] = providerMap
 
@@ -75,25 +75,30 @@ enum PiInstaller {
 
     /// Build one provider entry for `models.json`. Mirrors the schema Pi
     /// expects: `{ baseUrl, api, apiKey (env var name), models: [...] }`.
-    private static func providerEntry(for p: Provider, model: String) -> [String: Any] {
-        // GPT-5 / o-series reject `max_tokens`; require `max_completion_tokens`.
-        let needsCompletionTokens = model.hasPrefix("gpt-5") || model.hasPrefix("o1")
-                                 || model.hasPrefix("o3") || model.hasPrefix("o4")
-        var modelDef: [String: Any] = [
-            "id": model,
-            "name": model,
-            "input": ["text", "image"],
-            "maxTokens": 16384,
-            "cost": ["input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0]
-        ]
-        if needsCompletionTokens && p.wireApi == "openai-completions" {
-            modelDef["compat"] = ["maxTokensField": "max_completion_tokens"]
+    /// Registers every model in `models` so the in-chat picker can flip
+    /// freely without rewriting the config.
+    private static func providerEntry(for p: Provider, models: [String]) -> [String: Any] {
+        let modelDefs: [[String: Any]] = models.map { model in
+            // GPT-5 / o-series reject `max_tokens`; require `max_completion_tokens`.
+            let needsCompletionTokens = model.hasPrefix("gpt-5") || model.hasPrefix("o1")
+                                     || model.hasPrefix("o3") || model.hasPrefix("o4")
+            var def: [String: Any] = [
+                "id": model,
+                "name": model,
+                "input": ["text", "image"],
+                "maxTokens": 16384,
+                "cost": ["input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0]
+            ]
+            if needsCompletionTokens && p.wireApi == "openai-completions" {
+                def["compat"] = ["maxTokensField": "max_completion_tokens"]
+            }
+            return def
         }
         return [
             "baseUrl": p.baseURL,
             "api": p.wireApi,
             "apiKey": p.apiKeyEnv,
-            "models": [modelDef]
+            "models": modelDefs
         ]
     }
 

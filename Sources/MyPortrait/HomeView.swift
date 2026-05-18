@@ -1184,23 +1184,19 @@ private struct ChatInputBar: View {
             // Top chip row inside the glass panel
             HStack(spacing: 10) {
                 ChipButton(icon: "line.3.horizontal.decrease", label: "filter")
-                Text(providerName.uppercased())
-                    .font(.system(size: 11, design: .monospaced))
-                    .tracking(0.5)
-                    .foregroundStyle(isConnected ? .white.opacity(0.80) : .white.opacity(0.40))
                 if !isConnected {
                     Text("(not connected)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.red.opacity(0.80))
                 }
                 if tokenTotal > 0 {
-                    Text("· \(formatTokens(tokenTotal)) tok")
+                    Text("\(formatTokens(tokenTotal)) tok")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.45))
                         .help("Estimated total tokens in this conversation")
                 }
                 Spacer()
-                ModelPickerInline(slug: providerSlug)
+                ProviderModelPicker()
             }
 
             // Context chips (only visible when user has picked at least one)
@@ -1591,22 +1587,159 @@ private struct ChipButton: View {
     }
 }
 
-private struct ModelPickerInline: View {
-    let slug: String
+/// Compact chip in the input bar: "PROVIDER · model ▾". Click → popover with
+/// two sections (Provider / Model) the user can flip without leaving the chat.
+private struct ProviderModelPicker: View {
+    @Environment(AppState.self) private var appState
+    @State private var open = false
+    @State private var hover = false
+
+    private var activeIntegration: Integration? { appState.activeAI }
+    private var activeProvider: Provider? {
+        activeIntegration.flatMap { Provider.from(integrationId: $0.id) }
+    }
+    private var activeModel: String {
+        guard let id = activeIntegration?.id else { return "" }
+        return appState.currentModel(forIntegrationId: id)
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            Text(slug)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.55))
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.05)))
-            HStack(spacing: 4) {
-                Text("GPT-5.4")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+        Button { open.toggle() } label: {
+            HStack(spacing: 6) {
+                Text(activeIntegration?.id.uppercased() ?? "—")
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
+                Text(activeModel.isEmpty ? "—" : activeModel)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.92))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(hover ? 0.85 : 0.50))
+            }
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(hover ? 0.05 : 0))
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            PickerPopover { open = false }
+                .environment(appState)
+        }
+    }
+}
+
+private struct PickerPopover: View {
+    @Environment(AppState.self) private var appState
+    let onDismiss: () -> Void
+
+    private var connectedProviders: [Integration] {
+        IntegrationRegistry.all.filter {
+            appState.isConnected($0.id) && Provider.from(integrationId: $0.id) != nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("PROVIDER")
+            if connectedProviders.isEmpty {
+                Text("No AI providers connected.\nGo to Connections to add one.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+            } else {
+                ForEach(connectedProviders) { i in
+                    pickerRow(
+                        title: i.name,
+                        subtitle: i.id,
+                        icon: "circle.fill",
+                        iconColor: i.accent,
+                        active: appState.activeAIId == i.id
+                    ) {
+                        appState.activeAIId = i.id
+                    }
+                }
+            }
+
+            if let activeId = appState.activeAIId,
+               let provider = Provider.from(integrationId: activeId) {
+                Divider().background(Color.white.opacity(0.08))
+                    .padding(.vertical, 4)
+                sectionHeader("MODEL")
+                ForEach(provider.availableModels, id: \.self) { m in
+                    pickerRow(
+                        title: m,
+                        subtitle: "",
+                        icon: nil,
+                        iconColor: nil,
+                        active: appState.currentModel(forIntegrationId: activeId) == m,
+                        mono: true
+                    ) {
+                        appState.setModel(m, forIntegrationId: activeId)
+                        onDismiss()
+                    }
+                }
             }
         }
+        .frame(width: 240)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.14), lineWidth: 0.8)
+                )
+        )
+    }
+
+    private func sectionHeader(_ s: String) -> some View {
+        Text(s)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(.white.opacity(0.45))
+            .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 4)
+    }
+
+    private func pickerRow(title: String, subtitle: String,
+                           icon: String?, iconColor: Color?,
+                           active: Bool, mono: Bool = false,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let icon, let iconColor {
+                    Image(systemName: icon)
+                        .font(.system(size: 8))
+                        .foregroundStyle(iconColor)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium,
+                                      design: mono ? .monospaced : .default))
+                        .foregroundStyle(.white.opacity(0.95))
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.40))
+                    }
+                }
+                Spacer()
+                if active {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.purple.opacity(0.9))
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(
+                Color.white.opacity(active ? 0.05 : 0)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

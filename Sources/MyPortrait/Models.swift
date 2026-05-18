@@ -265,6 +265,12 @@ enum IntegrationRegistry {
 final class AppState {
     var connectedIds: Set<String> = []
     var activeAIId: String? = nil
+    /// Last model picked per provider. Persists across launches via
+    /// `loadModelChoices()` / `saveModelChoices()`. Keyed by integration id
+    /// (e.g. "anthropic-api"), value is the model id (e.g. "claude-haiku-4-5").
+    var modelByIntegration: [String: String] = [:]
+
+    private let modelDefaultsKey = "MyPortrait.modelByIntegration.v1"
 
     init() {
         // Restore persisted connections from disk-backed secret stores.
@@ -272,6 +278,28 @@ final class AppState {
             connectedIds.insert("chatgpt")
             if activeAIId == nil { activeAIId = "chatgpt" }
         }
+        loadModelChoices()
+    }
+
+    /// The currently selected model for `integrationId`, falling back to the
+    /// provider's first available model.
+    func currentModel(forIntegrationId id: String) -> String {
+        if let m = modelByIntegration[id] { return m }
+        return Provider.from(integrationId: id)?.defaultModel ?? ""
+    }
+
+    func setModel(_ model: String, forIntegrationId id: String) {
+        modelByIntegration[id] = model
+        saveModelChoices()
+    }
+
+    private func loadModelChoices() {
+        if let stored = UserDefaults.standard.dictionary(forKey: modelDefaultsKey) as? [String: String] {
+            modelByIntegration = stored
+        }
+    }
+    private func saveModelChoices() {
+        UserDefaults.standard.set(modelByIntegration, forKey: modelDefaultsKey)
     }
 
     func isConnected(_ id: String) -> Bool { connectedIds.contains(id) }

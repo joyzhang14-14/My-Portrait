@@ -31,8 +31,9 @@ struct ContentView: View {
             // Connections.
             chat.providerResolver = {
                 guard let id = appState.activeAIId,
-                      let p = Provider.from(integrationId: id) else { return .chatgpt }
-                return p
+                      let p = Provider.from(integrationId: id)
+                else { return (.chatgpt, Provider.chatgpt.defaultModel) }
+                return (p, appState.currentModel(forIntegrationId: id))
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in

@@ -25,6 +25,9 @@ final class ChatController {
     private(set) var currentConvId: UUID? = nil
 
     private var agent: PiAgent?
+    /// What provider+model the live agent was spawned for. Used to detect
+    /// a mid-session change so we can kill and re-spawn on the next send.
+    private var agentSpec: (Provider, String)? = nil
     private var assistantMessageID: UUID? = nil
     /// id of the trailing `.text` ContentPart that text_delta events should
     /// accumulate into. Reset every time a tool block lands.
@@ -41,9 +44,10 @@ final class ChatController {
     private var pendingTitleFromFirstMessage: Bool = false
 
     private let store = ChatStore.shared
-    /// Closure resolving the currently-selected provider (driven by
-    /// `AppState.activeAIId`). Defaults to ChatGPT.
-    var providerResolver: () -> Provider = { .chatgpt }
+    /// Closure resolving the currently-selected provider + model (driven by
+    /// `AppState.activeAIId` / `AppState.modelByIntegration`). Defaults to
+    /// ChatGPT with its default model.
+    var providerResolver: () -> (Provider, String) = { (.chatgpt, Provider.chatgpt.defaultModel) }
 
     init() {}
 
@@ -235,11 +239,19 @@ final class ChatController {
     }
 
     private func ensureAgent() async throws {
+        let (provider, model) = providerResolver()
+        // If the live agent's provider/model no longer matches what the user
+        // picked, tear it down so the new pick takes effect.
+        if let agent, let spec = agentSpec, (spec.0 != provider || spec.1 != model) {
+            agent.stop()
+            self.agent = nil
+            self.agentSpec = nil
+        }
         if agent != nil { return }
-        let provider = providerResolver()
-        let a = try PiAgent(provider: provider)
+        let a = try PiAgent(provider: provider, model: model)
         try await a.start()
         agent = a
+        agentSpec = (provider, model)
         // Spawn a long-lived consumer for this agent's event stream.
         Task { [weak self] in
             guard let stream = self?.agent?.events else { return }

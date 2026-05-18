@@ -44,13 +44,18 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     }
 
     /// Default model id for the provider. User can override later via picker.
-    var defaultModel: String {
+    var defaultModel: String { availableModels.first ?? "" }
+
+    /// Models the picker offers per provider. First one is the default.
+    /// Curated rather than fetched live — keeps the picker snappy and works
+    /// offline. User can still type custom strings via the "other…" field.
+    var availableModels: [String] {
         switch self {
-        case .chatgpt:        return "gpt-5.4"
-        case .openaiBYOK:     return "gpt-4o"
-        case .anthropic:      return "claude-haiku-4-5"
-        case .ollama:         return "qwen2.5:14b-instruct"
-        case .gemini:         return "gemini-2.0-flash-exp"
+        case .chatgpt:    return ["gpt-5.4", "gpt-5", "gpt-5-mini", "gpt-5.3-codex", "gpt-5.2", "gpt-5.1", "gpt-4o"]
+        case .openaiBYOK: return ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini", "gpt-4-turbo"]
+        case .anthropic:  return ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1", "claude-3-7-sonnet"]
+        case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
+        case .gemini:     return ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
         }
     }
 
