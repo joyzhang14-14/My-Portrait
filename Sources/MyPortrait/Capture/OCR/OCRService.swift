@@ -34,8 +34,14 @@ struct OCRService: Sendable {
         self.reporter = reporter
     }
 
-    /// 对一张图做 OCR。
-    /// `focus` 用来构造缓存 key（appName::windowTitle）。
+    /// 对一张图做 OCR / 或直接用 AX text。
+    /// `focus` 用来构造缓存 key（appName::windowTitle）和决定是否走 AX 快路。
+    ///
+    /// 决策流程：
+    ///   1. 查缓存（不管 AX 还是 OCR 命中都返回）
+    ///   2. AX text 非空 && app 非终端 → 直接用 AX text（words=[]，bbox 缺失但
+    ///      内容更准 + 省 ~50ms Vision 开销）
+    ///   3. 否则走 Vision OCR（终端 / 无 AX 内容 / 无 AX 权限）
     func recognize(image: CGImage, focus: FocusInfo) async throws -> OCRResult {
         // 1. 缓存查询。
         let appTitle = "\(focus.appName)::\(focus.windowTitle ?? "")"
@@ -48,11 +54,26 @@ struct OCRService: Sendable {
             return cached
         }
 
-        // 2. 灰度（失败回退到原图）。
+        // 2. AX text 快路（非终端 + 文本足够丰富）。
+        //    My-Orphies 经验：编辑器/浏览器/聊天 app 上 AX 比 OCR 准且快。
+        if let axText = focus.axText,
+           axText.count >= Self.axMinChars,
+           let bundleId = focus.bundleId,
+           !FocusProbe.terminalBundleIds.contains(bundleId)
+        {
+            let result = OCRResult(
+                fullText: axText,
+                words: [],            // AX 不提供 bbox；timeline 词级高亮在 AX 帧上失效
+                avgConfidence: 1.0
+            )
+            cache.put(key: key, value: result)
+            return result
+        }
+
+        // 3. 灰度（失败回退到原图）。
         let imageToOCR = Self.toGrayscale(image) ?? image
 
-        // 3. 在全局并发队列跑同步 Vision。OCR 信号量（P1.7 在 Coordinator 加）
-        //    保证多帧不并发撞 CPU。
+        // 4. 在全局并发队列跑同步 Vision。
         let result = try await Self.performOCR(
             on: imageToOCR, config: config
         )
@@ -60,6 +81,10 @@ struct OCRService: Sendable {
         cache.put(key: key, value: result)
         return result
     }
+
+    /// AX text 走快路所需的最小字符数。少于这个就退回 Vision —
+    /// 防止 AX 偶尔只返回一两字 placeholder 时丢掉真正的屏幕内容。
+    private static let axMinChars: Int = 20
 
     // MARK: - 私有
 
