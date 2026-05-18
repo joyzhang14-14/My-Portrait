@@ -5,13 +5,14 @@ import os.log
 /// 采集层总调度。一个 app 一个实例，AppDelegate 持有。
 ///
 /// 职责：
-///   1. 持有 ScreenCaptureService / OCRService / FocusProbe / FrameComparer / SnapshotWriter
-///   2. 启停采集流水线（P1 定时 1fps，P2 改事件驱动）
+///   1. 持有 ScreenCaptureService / OCRService / FocusProbe / FrameComparer /
+///      SnapshotWriter / EventSources
+///   2. 启停采集流水线
 ///   3. 把每帧入库完成事件通过 `frameEvents` AsyncStream 推给订阅方
 ///
-/// P1 主循环：
-///   每 1s：
-///     抓帧 → 焦点信息 → DRM 闸门 → 去重 → JPG 异步落盘 + OCR → DB → 发事件
+/// P2 起改为事件驱动：
+///   订阅 EventSources.stream → 每个 trigger 触发一次抓帧。
+///   重复 / 高频事件由 minCaptureIntervalMs 防抖 + FrameComparer 去重吸收。
 actor CaptureCoordinator {
 
     private let db: PortraitDB
@@ -27,6 +28,7 @@ actor CaptureCoordinator {
     private let ocrCache: OCRCache
     private let ocr: OCRService
     private let drm: DRMGate
+    private let events: EventSources
 
     // 状态
     private var captureTask: Task<Void, Never>?
@@ -52,6 +54,7 @@ actor CaptureCoordinator {
         self.snapshot = SnapshotWriter(config: config, reporter: reporter)
         self.ocr = OCRService(config: config, cache: cache, reporter: reporter)
         self.drm = DRMGate()
+        self.events = EventSources()
 
         var c: AsyncStream<FrameEvent>.Continuation!
         self.frameEvents = AsyncStream<FrameEvent> { cont in
@@ -67,18 +70,28 @@ actor CaptureCoordinator {
     func start() async throws {
         guard captureTask == nil else { return }
 
-        // 1. 先起焦点监听（注册 NSWorkspace 通知 + 初次刷新）。
+        // 1. 焦点监听（NSWorkspace 通知 + 初次刷新）。
         await focus.start()
 
         // 2. 试抓一帧 —— 触发屏幕录制权限弹窗，及早暴露问题。
-        _ = try await screen.captureMainDisplay()
-
-        // 3. 主循环（detached：脱离当前 task tree，避免父 task cancel 时被牵连）。
-        captureTask = Task.detached(priority: .userInitiated) { [weak self] in
-            await self?.runLoop()
+        //    同时这一帧自身就作为首帧被抓住，触发后续 frameEvent。
+        do {
+            try await captureOneFrame(trigger: .manual, force: true)
+        } catch {
+            logger.error("initial capture failed: \(String(describing: error), privacy: .public)")
+            // 不抛 —— 让事件流仍能启动。状态栏会从其他错误路径冒红点。
         }
 
-        logger.info("CaptureCoordinator started (interval=\(self.config.captureIntervalMs)ms)")
+        // 3. 启动事件源（@MainActor，自动 hop 过去）。
+        await events.start()
+
+        // 4. 事件循环（detached：脱离当前 task tree，免被父 task cancel 牵连）。
+        let stream = events.stream
+        captureTask = Task.detached(priority: .userInitiated) { [weak self] in
+            await self?.runEventLoop(stream: stream)
+        }
+
+        logger.info("CaptureCoordinator started (event-driven)")
     }
 
     /// 停止采集流水线。释放 SCStream 缓存、注销通知、关闭 events 流。
@@ -86,6 +99,7 @@ actor CaptureCoordinator {
         captureTask?.cancel()
         captureTask = nil
 
+        await events.stop()
         await focus.stop()
         await screen.invalidateStream()
         comparer.reset()
@@ -97,31 +111,24 @@ actor CaptureCoordinator {
 
     /// 手动触发一帧。
     func captureOnce() async throws {
-        try await captureOneFrame(force: true)
+        try await captureOneFrame(trigger: .manual, force: true)
     }
 
-    // MARK: - 主循环
+    // MARK: - 事件循环
 
-    private func runLoop() async {
-        let intervalNs = UInt64(max(1, config.captureIntervalMs)) * 1_000_000
-
-        while !Task.isCancelled {
+    private func runEventLoop(stream: AsyncStream<CaptureTrigger>) async {
+        for await trigger in stream {
+            if Task.isCancelled { break }
             do {
-                try await captureOneFrame(force: false)
+                try await captureOneFrame(trigger: trigger, force: false)
             } catch {
-                logger.error("captureOneFrame failed: \(String(describing: error), privacy: .public)")
-                // 错误降级：sleep 后继续。权限错除外（短期内每帧都会再撞，靠 reporter 红点提示）。
-            }
-
-            do {
-                try await Task.sleep(nanoseconds: intervalNs)
-            } catch {
-                break  // cancellation
+                logger.error("captureOneFrame(\(trigger.rawValue, privacy: .public)) failed: \(String(describing: error), privacy: .public)")
+                // 错误降级：等下一个 trigger。权限错短期内每帧都会撞，靠 reporter 红点提示。
             }
         }
     }
 
-    private func captureOneFrame(force: Bool) async throws {
+    private func captureOneFrame(trigger: CaptureTrigger, force: Bool) async throws {
         let now = Date()
 
         // 防抖：两次实际入库的最小间隔。
@@ -182,7 +189,7 @@ actor CaptureCoordinator {
             focused: focusInfo.isFocused,
             deviceName: config.monitorId,
             snapshotPath: url.path,
-            captureTrigger: "timer"  // P2 改成事件名
+            captureTrigger: trigger.rawValue
         )
 
         let frameId: Int64

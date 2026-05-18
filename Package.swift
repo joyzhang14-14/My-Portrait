@@ -14,6 +14,13 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift")
             ],
             path: "Sources/MyPortrait",
+            exclude: [
+                "Capture/README.md",
+                "Capture/Audio/README.md",
+                "Capture/Compaction/README.md",
+                "Capture/Events/README.md",
+                "Capture/Power/README.md",
+            ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
