@@ -48,6 +48,7 @@ struct HomeView: View {
                 contextChips: $contextChips,
                 pickerOpen: $pickerOpen,
                 isStreaming: chat.isStreaming,
+                tokenTotal: chat.currentConvId.map { chat.tokenTotal(for: $0) } ?? 0,
                 onSend: send,
                 onStop: { chat.abort() },
                 onChipTap: { chipText in
@@ -150,6 +151,14 @@ struct HomeView: View {
             chat.send(trimmed, chips: chipsToSend)
         }
     }
+}
+
+/// "1.2K", "12K", "1.2M" — compact token counter shown in the chip row.
+private func formatTokens(_ n: Int) -> String {
+    if n < 1000 { return "\(n)" }
+    if n < 10_000 { return String(format: "%.1fK", Double(n) / 1000) }
+    if n < 1_000_000 { return "\(n / 1000)K" }
+    return String(format: "%.1fM", Double(n) / 1_000_000)
 }
 
 /// Flatten an assistant `ChatMessage`'s mixed parts (text + tool blocks +
@@ -1041,6 +1050,7 @@ private struct ChatInputBar: View {
     @Binding var contextChips: [ContextChip]
     @Binding var pickerOpen: Bool
     let isStreaming: Bool
+    let tokenTotal: Int
     let onSend: () -> Void
     let onStop: () -> Void
     let onChipTap: (String) -> Void
@@ -1060,6 +1070,12 @@ private struct ChatInputBar: View {
                     Text("(not connected)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.red.opacity(0.80))
+                }
+                if tokenTotal > 0 {
+                    Text("· \(formatTokens(tokenTotal)) tok")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .help("Estimated total tokens in this conversation")
                 }
                 Spacer()
                 ModelPickerInline(slug: providerSlug)

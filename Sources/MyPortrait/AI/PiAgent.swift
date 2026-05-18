@@ -31,6 +31,10 @@ final class PiAgent: @unchecked Sendable {
         case agentStart
         case agentEnd
         case error(String)
+        /// Token usage reported by Pi on `message_end`. Best-effort: 0s when
+        /// the provider doesn't report (e.g. ChatGPT OAuth often returns 0 on
+        /// the codex-responses wire, in which case we estimate from text length).
+        case usage(input: Int, output: Int)
         case raw([String: Any])     // anything we don't model yet
     }
 
@@ -236,6 +240,13 @@ final class PiAgent: @unchecked Sendable {
                 emit(.error(err))
             } else if let text = Self.extractAssistantText(msg) {
                 emit(.assistantFinalText(text))
+            }
+            if let usage = msg["usage"] as? [String: Any] {
+                let input  = (usage["input"]  as? Int) ?? 0
+                let output = (usage["output"] as? Int) ?? 0
+                if input > 0 || output > 0 {
+                    emit(.usage(input: input, output: output))
+                }
             }
         case "response":
             // Command ack — surface only failures.

@@ -16,6 +16,9 @@ final class ChatController {
     /// Lookup so the user bubble can render its chips. Keyed by message id.
     /// Not persisted; chips are an ephemeral UI artefact of the send action.
     var contextChipsByMessage: [UUID: [ContextChip]] = [:]
+    /// Cumulative token usage per conversation. Updated on every turn that
+    /// Pi reports usage for (and best-effort estimated otherwise).
+    var tokenUsageByConv: [UUID: (input: Int, output: Int)] = [:]
 
     /// Currently displayed conversation id. `nil` means "no conv yet" — a
     /// new one is created lazily on the first `send`.
@@ -258,9 +261,35 @@ final class ChatController {
             appendThinking(delta)
         case .thinkingEnd(let finalText, let durationMs):
             finishThinking(finalText: finalText, durationMs: durationMs)
+        case .usage(let input, let output):
+            addUsage(input: input, output: output)
         default:
             break
         }
+    }
+
+    // MARK: - Token usage
+
+    private func addUsage(input: Int, output: Int) {
+        guard let convId = currentConvId else { return }
+        let prev = tokenUsageByConv[convId] ?? (0, 0)
+        tokenUsageByConv[convId] = (prev.input + input, prev.output + output)
+    }
+
+    /// Public read for the UI. If Pi never reported usage for this conv but
+    /// messages exist, fall back to a rough chars/4 estimate so the badge
+    /// doesn't show 0 when there's clearly traffic.
+    func tokenTotal(for convId: UUID) -> Int {
+        if let u = tokenUsageByConv[convId] { return u.input + u.output }
+        let chars = messages.reduce(0) { $0 + $1.text.count + $1.parts.reduce(0) { acc, p in
+            switch p {
+            case .text(_, let v):    return acc + v.count
+            case .tool(let b):       return acc + b.command.count + b.output.count
+            case .thinking(let b):   return acc + b.text.count
+            case .error(let b):      return acc + b.message.count
+            }
+        } }
+        return chars / 4   // ~4 chars per token
     }
 
     private func scheduleFlush() {
