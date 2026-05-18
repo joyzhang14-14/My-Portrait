@@ -129,6 +129,11 @@ final class ChatController {
     /// shows the chips so the user can verify what was injected.
     /// Lookup so the user bubble can render attachments. Not persisted.
     var attachmentsByMessage: [UUID: [Attachment]] = [:]
+    /// Sources the AI may reference via `[1]`, `[2]` etc. Keyed by the
+    /// assistant message id. Populated when the user sends with chips.
+    var citationsByMessage: [UUID: [Citation]] = [:]
+    /// Pending citations to attach to the next assistant placeholder.
+    private var pendingCitations: [Citation] = []
 
     func send(_ text: String, chips: [ContextChip] = [], attachments: [Attachment] = [], redactPII: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -168,6 +173,7 @@ final class ChatController {
                 self.messages.append(msg)
                 self.contextChipsByMessage[msg.id] = chips
                 self.attachmentsByMessage[msg.id] = attachments
+                self.pendingCitations = context.citations
                 self.lastError = nil
 
                 if self.pendingTitleFromFirstMessage, let convId = self.currentConvId {
@@ -216,6 +222,12 @@ final class ChatController {
             messages.append(placeholder)
             assistantMessageID = placeholder.id
             activeTextPartID = nil
+            // Attach any citations seeded by the last `send(chips:)` call so
+            // the assistant bubble can render its footnote footer.
+            if !pendingCitations.isEmpty {
+                citationsByMessage[placeholder.id] = pendingCitations
+                pendingCitations = []
+            }
         } catch {
             lastError = error.localizedDescription
             isStreaming = false

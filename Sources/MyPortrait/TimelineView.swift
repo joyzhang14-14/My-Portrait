@@ -12,6 +12,35 @@ final class TimelineState {
     var frames: [ScreenpipeFrame] = []
     var loading: Bool = false
     var focusIndex: Int = 0
+    /// Set by `seek(to:)` when the requested moment falls on a day whose
+    /// frames haven't loaded yet. TimelineView's frame loader will pull
+    /// `focusIndex` to the closest frame once they arrive.
+    var pendingSeek: Date? = nil
+
+    /// Navigate the Timeline to the moment `t`. If we're already on the right
+    /// day, snap focusIndex to the nearest frame; otherwise switch days and
+    /// queue the snap via `pendingSeek`.
+    func seek(to t: Date) {
+        let cal = Calendar.current
+        if cal.isDate(t, inSameDayAs: selectedDay) {
+            snapFocus(to: t)
+        } else {
+            selectedDay = cal.startOfDay(for: t)
+            pendingSeek = t
+        }
+    }
+
+    /// Internal: pick the frame with timestamp nearest `t`.
+    func snapFocus(to t: Date) {
+        guard !frames.isEmpty else { return }
+        var bestIdx = 0
+        var bestDiff = abs(frames[0].timestamp.timeIntervalSince(t))
+        for (i, f) in frames.enumerated() {
+            let d = abs(f.timestamp.timeIntervalSince(t))
+            if d < bestDiff { bestDiff = d; bestIdx = i }
+        }
+        focusIndex = bestIdx
+    }
 }
 
 struct TimelineView: View {

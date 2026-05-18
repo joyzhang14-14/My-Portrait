@@ -59,8 +59,27 @@ struct ScreenpipeContext {
     let summary: String
     let frameCount: Int
     let truncated: Bool
+    /// Numbered sources Pi may cite back with `[N]` tags. Used by the
+    /// AssistantBody to render a "Sources" footer + clickable superscripts.
+    let citations: [Citation]
 
-    static let empty = ScreenpipeContext(markdown: "", summary: "", frameCount: 0, truncated: false)
+    static let empty = ScreenpipeContext(markdown: "", summary: "", frameCount: 0, truncated: false, citations: [])
+}
+
+/// One numbered source the assistant can refer to via `[N]` in its reply.
+struct Citation: Identifiable, Hashable, Codable {
+    let id: UUID
+    let number: Int
+    let label: String                   // "@last 5m" / "@xcode" / file basename
+    let detail: String                  // "10:00–10:05 · 42 frames" / "12 OCR matches" / file size
+    let action: Action
+
+    enum Action: Hashable, Codable {
+        case timeRange(start: Date, end: Date, app: String?)
+        case file(path: String)
+        case speaker(name: String)
+        case search(query: String)
+    }
 }
 
 // MARK: - Builder
@@ -77,35 +96,50 @@ enum ScreenpipeContextBuilder {
             return ScreenpipeContext(
                 markdown: "",
                 summary: "screenpipe DB not found",
-                frameCount: 0, truncated: false
+                frameCount: 0, truncated: false, citations: []
             )
         }
 
         var sections: [String] = []
+        var citations: [Citation] = []
         var totalFrames = 0
         var remaining = maxChars
         var truncated = false
+        var nextNumber = 1
 
         for chip in chips {
             guard remaining > 200 else { truncated = true; break }
+            let n = nextNumber
             switch chip.spec {
             case .file(let url):
                 if let text = readFile(url, cap: min(remaining, 8000)) {
-                    sections.append("## \(chip.label)\n\(text)")
+                    sections.append("## [\(n)] \(chip.label)\n\(text)")
+                    citations.append(Citation(id: UUID(), number: n, label: chip.label,
+                                              detail: "\(text.count) chars",
+                                              action: .file(path: url.path)))
                     remaining -= text.count
+                    nextNumber += 1
                 }
             case .search(let q):
                 let block = db.searchOCR(query: q, maxChars: min(remaining, 6000))
                 if !block.text.isEmpty {
-                    sections.append("## \(chip.label) — \(block.frameCount) matches\n\(block.text)")
+                    sections.append("## [\(n)] \(chip.label) — \(block.frameCount) matches\n\(block.text)")
+                    citations.append(Citation(id: UUID(), number: n, label: chip.label,
+                                              detail: "\(block.frameCount) OCR matches",
+                                              action: .search(query: q)))
                     remaining -= block.text.count
                     totalFrames += block.frameCount
+                    nextNumber += 1
                 }
             case .speaker(let name):
                 let block = db.speakerTranscripts(name: name, maxChars: min(remaining, 6000))
                 if !block.isEmpty {
-                    sections.append("## \(chip.label)\n\(block)")
+                    sections.append("## [\(n)] \(chip.label)\n\(block)")
+                    citations.append(Citation(id: UUID(), number: n, label: chip.label,
+                                              detail: "audio from \(name)",
+                                              action: .speaker(name: name)))
                     remaining -= block.count
+                    nextNumber += 1
                 }
             case .now, .lastMinutes, .today, .app:
                 let (start, end, app) = resolveTimeWindow(chip.spec)
@@ -114,8 +148,14 @@ enum ScreenpipeContextBuilder {
                 totalFrames += block.frameCount
                 remaining -= block.text.count
                 if block.truncated { truncated = true }
-                let header = sectionHeader(for: chip, frames: block.frameCount, apps: block.topApps)
+                let header = "## [\(n)] " + sectionHeader(for: chip, frames: block.frameCount, apps: block.topApps).dropFirst(3)
                 sections.append("\(header)\n\(block.text)")
+                citations.append(Citation(id: UUID(), number: n, label: chip.label,
+                                          detail: timeRangeLabel(start, end) +
+                                                  " · \(block.frameCount) frames" +
+                                                  (block.topApps.isEmpty ? "" : " (\(block.topApps.prefix(2).joined(separator: ", ")))"),
+                                          action: .timeRange(start: start, end: end, app: app)))
+                nextNumber += 1
             }
         }
 
@@ -123,13 +163,16 @@ enum ScreenpipeContextBuilder {
             return ScreenpipeContext(
                 markdown: "",
                 summary: "no screen activity found in those filters",
-                frameCount: 0, truncated: false
+                frameCount: 0, truncated: false, citations: []
             )
         }
 
         let header = "[Screen context follows — \(totalFrames) frames" +
                      (truncated ? " (truncated)" : "") +
-                     (redactPII ? " · PII redacted" : "") + "]"
+                     (redactPII ? " · PII redacted" : "") +
+                     "]\n\nWhen you cite information from these sections, " +
+                     "append a marker like `[1]` or `[2]` to that sentence so the " +
+                     "user can trace it back to the source."
         let body = sections.joined(separator: "\n\n")
         var md = "\(header)\n\n\(body)\n\n---"
         if redactPII { md = PIIRedactor.redact(md) }
@@ -137,7 +180,8 @@ enum ScreenpipeContextBuilder {
         let summary = "\(totalFrames) frames" +
                       (truncated ? " (truncated)" : "")
         return ScreenpipeContext(markdown: md, summary: summary,
-                                 frameCount: totalFrames, truncated: truncated)
+                                 frameCount: totalFrames, truncated: truncated,
+                                 citations: citations)
     }
 
     private static func sectionHeader(for chip: ContextChip,
@@ -158,6 +202,16 @@ enum ScreenpipeContextBuilder {
         case .app(let n):           return (now.addingTimeInterval(-3600), now, n)
         default:                    return (now, now, nil)
         }
+    }
+
+    nonisolated(unsafe) private static let hhmm: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private static func timeRangeLabel(_ start: Date, _ end: Date) -> String {
+        "\(hhmm.string(from: start))–\(hhmm.string(from: end))"
     }
 
     /// Read first `cap` chars of a file. Best-effort UTF-8; binary files

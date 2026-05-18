@@ -29,6 +29,7 @@ struct HomeView: View {
                     isThinking: chat.isStreaming,
                     chipsLookup: { chat.contextChipsByMessage[$0] ?? [] },
                     attachmentsLookup: { chat.attachmentsByMessage[$0] ?? [] },
+                    citationsLookup: { chat.citationsByMessage[$0] ?? [] },
                     onCopy: { msg in
                         let pb = NSPasteboard.general
                         pb.clearContents()
@@ -218,6 +219,7 @@ private struct ChatTranscript: View {
     let isThinking: Bool
     var chipsLookup: ((UUID) -> [ContextChip])? = nil
     var attachmentsLookup: ((UUID) -> [Attachment])? = nil
+    var citationsLookup: ((UUID) -> [Citation])? = nil
     var onCopy: (ChatMessage) -> Void = { _ in }
     var onRegenerate: (UUID) -> Void = { _ in }
     var onEdit: (ChatMessage) -> Void = { _ in }
@@ -235,6 +237,7 @@ private struct ChatTranscript: View {
                             isStreaming: isLastAssistant && isThinking,
                             chips: chipsLookup?(msg.id) ?? [],
                             attachments: attachmentsLookup?(msg.id) ?? [],
+                            citations: citationsLookup?(msg.id) ?? [],
                             onCopy: { onCopy(msg) },
                             onRegenerate: { onRegenerate(msg.id) },
                             onEdit: { onEdit(msg) }
@@ -266,6 +269,7 @@ private struct ChatBubble: View {
     let isStreaming: Bool
     let chips: [ContextChip]
     let attachments: [Attachment]
+    let citations: [Citation]
     let onCopy: () -> Void
     let onRegenerate: () -> Void
     let onEdit: () -> Void
@@ -319,6 +323,9 @@ private struct ChatBubble: View {
                         .lineSpacing(5)
                 } else {
                     AssistantBody(parts: message.parts, fallbackText: message.text)
+                    if !citations.isEmpty {
+                        CitationFooter(citations: citations)
+                    }
                 }
             }
             .padding(.vertical, message.role == .assistant ? 14 : 6)
@@ -340,6 +347,94 @@ private struct ChatBubble: View {
             withAnimation(.easeOut(duration: 0.18)) { hover = h }
         }
     }
+}
+
+/// Numbered source list under an assistant bubble. Each row shows the
+/// chip label + a brief detail (time range / match count / file size). The
+/// AI is asked, via the context prompt header, to cite as `[N]`.
+private struct CitationFooter: View {
+    let citations: [Citation]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("SOURCES")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(.white.opacity(0.40))
+            ForEach(citations) { c in
+                CitationRow(citation: c)
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
+private struct CitationRow: View {
+    let citation: Citation
+    @State private var hover = false
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("[\(citation.number)]")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.purple.opacity(0.85))
+                .frame(minWidth: 20, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(citation.label)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(citation.detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.white.opacity(0.50))
+            }
+            Spacer()
+            Image(systemName: actionIcon)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(hover ? 0.85 : 0.40))
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.white.opacity(hover ? 0.05 : 0.02))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { performAction() }
+        .onHover { hover = $0 }
+        .help(actionHelp)
+    }
+
+    private var actionIcon: String {
+        switch citation.action {
+        case .timeRange: return "clock.arrow.circlepath"
+        case .file:      return "arrow.up.right.square"
+        case .speaker:   return "person.wave.2"
+        case .search:    return "magnifyingglass"
+        }
+    }
+    private var actionHelp: String {
+        switch citation.action {
+        case .timeRange: return "Switch to Timeline at this moment"
+        case .file:      return "Reveal in Finder"
+        case .speaker:   return "Filter audio by this speaker"
+        case .search:    return "Re-run this OCR search"
+        }
+    }
+    private func performAction() {
+        switch citation.action {
+        case .timeRange(let start, _, _):
+            NotificationCenter.default.post(name: .navigateToTimelineAt, object: start)
+        case .file(let path):
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        case .speaker, .search:
+            // Re-running these inside the chat is the next iteration's job.
+            break
+        }
+    }
+}
+
+extension Notification.Name {
+    /// Posted by a citation row when the user wants to jump to the source's
+    /// moment in the Timeline view. ContentView observes this to switch the
+    /// sidebar selection + seek.
+    static let navigateToTimelineAt = Notification.Name("MyPortrait.NavigateToTimelineAt")
 }
 
 /// Hover toolbar on a chat bubble. User msgs show Copy + Edit; assistant

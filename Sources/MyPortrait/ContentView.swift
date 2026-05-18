@@ -35,6 +35,11 @@ struct ContentView: View {
                 return p
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
+            guard let date = notif.object as? Date else { return }
+            selection = .timeline
+            timeline.seek(to: date)
+        }
     }
 
     @ViewBuilder

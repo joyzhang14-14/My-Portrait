@@ -176,9 +176,9 @@ final class ImpactScorer {
         var lines: [String] = []
         lines.append("You score the long-term IMPORTANCE of each user activity event for the user's PERSONAL PROFILE. Scale: 0.0-5.0 (float).")
         lines.append("")
-        lines.append("ANCHORS — calibrate strictly. Most events should be 1-2.")
+        lines.append("ANCHORS — calibrate strictly. Most events should be 0-2.")
         lines.append("  0.0-0.9 - pointless. Examples: scrolling Finder, glancing at a dashboard, checking the time, idle background app,")
-        lines.append("  1.0-1.9 — trivial / passive. Examples: brief tab switching, listening to music in background.")
+        lines.append("  1.0-1.9 — trivial / passive. Examples: brief tab switching, the name of a specific music listening in background.")
         lines.append("  2.0-2.9 — routine engagement. Examples: checking and replying to a few messages, reading a short article, looking something up, normal browsing.")
         lines.append("  3.0-4.0 — focused activity worth noting later. Examples: an hour of real coding on a specific feature, a real conversation about something concrete, learning material on a topic the user actually cares about.")
         lines.append("  4.1-4.5 — a noteworthy, pivotal event the user might remember for a year. Examples: shipping a feature, deciding on a tech approach, an emotionally significant exchange, a meeting where a real decision was made, a breakthrough realization, a milestone.")
