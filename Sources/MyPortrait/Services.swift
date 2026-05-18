@@ -7,7 +7,8 @@ import SwiftUI
 /// 持有：
 ///   - `reporter`: notImplemented 上报中枢
 ///   - `db`: PortraitDB 实现（P0 是 stub，后续由 DB 层换成真实实现）
-///   - `coordinator`: CaptureCoordinator
+///   - `coordinator`: CaptureCoordinator（屏幕采集主流水线）
+///   - `compactor`: CompactionWorker（JPG → MP4 后台压缩，独立于 coordinator）
 ///
 /// 不持有窗口 —— AppDelegate 自己管。
 @MainActor
@@ -15,6 +16,7 @@ final class Services {
     let reporter: UnimplementedReporter
     let db: PortraitDB
     let coordinator: CaptureCoordinator
+    let compactor: CompactionWorker
 
     init() {
         let reporter = UnimplementedReporter()
@@ -22,6 +24,7 @@ final class Services {
         let stubDB = StubPortraitDB(reporter: reporter)
         self.db = stubDB
         self.coordinator = CaptureCoordinator(db: stubDB, reporter: reporter)
+        self.compactor = CompactionWorker(db: stubDB, reporter: reporter)
     }
 }
 
