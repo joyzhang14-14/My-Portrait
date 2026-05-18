@@ -34,6 +34,7 @@ final class Services {
     let transcriber: TranscriptionScheduler
     let powerWatcher: PowerWatcher
     let retentionWorker: RetentionWorker
+    let modelManager: BGEM3ModelManager
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -71,6 +72,7 @@ final class Services {
             db: dbImpl, audio: audioSvc, reporter: reporter, power: pw
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
+        self.modelManager = BGEM3ModelManager()
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
@@ -85,7 +87,7 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
-        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker] in
+        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, modelManager, logger] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
             do {
@@ -100,6 +102,14 @@ final class Services {
             await compactor.start()
             await transcriber.start()
             await retentionWorker.start()
+
+            // 后台下 bge-m3 模型（~2.5 GB），不阻塞任何东西。
+            // Phase 4 上线推理后这个 await 才有意义；当前只是把文件下到本地。
+            do {
+                try await modelManager.ensureDownloaded()
+            } catch {
+                logger.warning("bge-m3 model download failed (will retry next launch): \(String(describing: error), privacy: .public)")
+            }
         }
 
         // 屏幕采集订阅。effective = enabled && !paused。

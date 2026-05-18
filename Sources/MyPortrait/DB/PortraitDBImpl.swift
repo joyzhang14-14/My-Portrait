@@ -31,6 +31,10 @@ actor PortraitDBImpl: PortraitDB {
             try db.execute(sql: "PRAGMA synchronous = NORMAL")
             // 默认 SQLite 不强制外键，必须显式开
             try db.execute(sql: "PRAGMA foreign_keys = ON")
+            // 注册 Foundation 后端的 ICU 分词器，FTS5 表才能识别 tokenizer="foundation_icu"。
+            // 见 FoundationTokenizer.swift —— Foundation enumerateSubstrings(.byWords)
+            // 在 Darwin 上是 ICU-backed，等价于"直接用 ICU 分词器"。
+            db.add(tokenizer: FoundationTokenizer.self)
         }
 
         self.dbPool = try DatabasePool(path: path, configuration: config)

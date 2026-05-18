@@ -60,6 +60,10 @@ enum Storage {
     /// can evolve schemas independently.
     static var portraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
 
+    /// Local model cache (bge-m3 embeddings, future Whisper local cache, etc).
+    /// `~/.portrait/models/`.
+    static var modelsDir: URL { rootURL.appendingPathComponent("models", isDirectory: true) }
+
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {
         let fm = FileManager.default

@@ -71,9 +71,11 @@ enum DBSchema {
             // 后续若 ICU 编进了系统 sqlite3 可以 v3_fts_to_icu migration 升级。
             try db.create(virtualTable: "frames_fts", using: FTS5()) { t in
                 t.synchronize(withTable: "frames")
-                // 默认 unicode61：Unicode-aware，CJK 单字成 token（"力"/"矩" 各一个）
-                // 已支持中英混合搜索。后续 v3_fts_to_icu migration 可升级到 ICU。
-                t.tokenizer = .unicode61(diacritics: .remove)
+                // ICU-quality word segmentation via Foundation backend。
+                // 见 FoundationTokenizer.swift —— enumerateSubstrings(.byWords)
+                // 内部就是 ICU，CJK 词分（"力矩传感器" → 力矩 + 传感器）+ 英文
+                // lowercase。运行前必须在 PortraitDBImpl 注册此分词器。
+                t.tokenizer = FoundationTokenizer.tokenizerDescriptor()
                 t.column("app_name")
                 t.column("window_name")
                 t.column("browser_url")
@@ -122,7 +124,7 @@ enum DBSchema {
         m.registerMigration("v3_transcriptions_fts") { db in
             try db.create(virtualTable: "transcriptions_fts", using: FTS5()) { t in
                 t.synchronize(withTable: "audio_transcriptions")
-                t.tokenizer = .unicode61(diacritics: .remove)
+                t.tokenizer = FoundationTokenizer.tokenizerDescriptor()
                 t.column("text")
             }
         }
