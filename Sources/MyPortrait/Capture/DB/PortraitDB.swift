@@ -45,6 +45,15 @@ public protocol PortraitDB: Sendable {
     func updateAudioChunkStatus(chunkId: Int64, status: AudioChunkStatus) async throws
     func insertTranscription(_ record: TranscriptionRecord) async throws
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
+
+    /// 启动时崩溃恢复：把所有 `status = in_progress` 的 audio_chunks 回退到 `pending`，
+    /// 让 TranscriptionScheduler 下一轮拾起重跑。
+    ///
+    /// 触发场景：app 崩溃 / 强杀 / 系统休眠未唤醒等情况下，某个 chunk 被标
+    /// in_progress 但 WhisperKit 那一步从未完成。没这一步会永远卡住。
+    ///
+    /// 返回受影响的行数（log 出来方便观察）。
+    func resetInProgressAudioChunks() async throws -> Int
 }
 
 // MARK: - Records

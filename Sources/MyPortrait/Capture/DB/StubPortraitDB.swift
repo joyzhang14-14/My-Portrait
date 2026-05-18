@@ -53,4 +53,8 @@ final class StubPortraitDB: PortraitDB, Sendable {
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord] {
         throw reporter.notImplemented("StubPortraitDB.pendingAudioChunks")
     }
+
+    func resetInProgressAudioChunks() async throws -> Int {
+        throw reporter.notImplemented("StubPortraitDB.resetInProgressAudioChunks")
+    }
 }

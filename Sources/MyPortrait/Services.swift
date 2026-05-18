@@ -55,11 +55,26 @@ final class Services {
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
+    /// - 崩溃恢复：把所有卡在 in_progress 的 audio_chunks 回退到 pending
     /// - 启动 compactor / transcriber（始终运行，无开关）
     /// - 订阅 settings 变化 → 启停 coordinator / audio
     /// - 用初始 settings 值同步对齐一次状态（默认都 OFF，所以两者都不启）
     func startManagedLifecycle() {
+        // 崩溃恢复 + 启动后台 worker。
+        let db = self.db
+        let logger = self.logger
         Task.detached(priority: .utility) { [compactor, transcriber] in
+            // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
+            // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
+            do {
+                let reset = try await db.resetInProgressAudioChunks()
+                if reset > 0 {
+                    logger.info("crash recovery: reset \(reset, privacy: .public) audio chunks from in_progress to pending")
+                }
+            } catch {
+                logger.warning("resetInProgressAudioChunks failed (expected with stub DB): \(String(describing: error), privacy: .public)")
+            }
+
             await compactor.start()
             await transcriber.start()
         }
