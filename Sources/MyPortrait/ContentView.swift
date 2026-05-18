@@ -29,12 +29,14 @@ struct ContentView: View {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
             // Connections.
-            chat.providerResolver = {
+            let resolver: () -> (Provider, String) = {
                 guard let id = appState.activeAIId,
                       let p = Provider.from(integrationId: id)
                 else { return (.chatgpt, Provider.chatgpt.defaultModel) }
                 return (p, appState.currentModel(forIntegrationId: id))
             }
+            chat.providerResolver = resolver
+            SuggestionEngine.shared.providerResolver = resolver
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
             guard let date = notif.object as? Date else { return }

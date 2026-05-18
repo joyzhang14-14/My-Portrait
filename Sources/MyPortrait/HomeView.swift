@@ -11,6 +11,15 @@ struct HomeView: View {
     @State private var pickerOpen: Bool = false
     @AppStorage("MyPortrait.redactPII") private var redactPII: Bool = false
     @State private var attachments: [Attachment] = []
+    @State private var suggestions = SuggestionEngine.shared
+
+    /// AI-generated chips if we have any, else the seed list.
+    private var displayedActivityChips: [ActivityChip] {
+        if suggestions.items.isEmpty {
+            return Mock.activityChips
+        }
+        return suggestions.items.map { ActivityChip(text: $0, hint: nil) }
+    }
     /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
     /// a past user message. Send-on-Enter routes through editAndResend
     /// instead of send so the old turn is dropped, not duplicated.
@@ -66,7 +75,13 @@ struct HomeView: View {
             )
         }
         .background(AmbientBackground())
-        .task { AISetup.shared.ensureInstalled() }
+        .task {
+            AISetup.shared.ensureInstalled()
+            // Refresh on first show if cache is missing / stale.
+            if suggestions.items.isEmpty || suggestions.isStale {
+                suggestions.refresh()
+            }
+        }
     }
 
     private var setupBannerText: String? {
@@ -123,16 +138,27 @@ struct HomeView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.6)
                     .foregroundStyle(.white.opacity(0.5))
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.4))
+                Button { suggestions.refresh() } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .rotationEffect(.degrees(suggestions.state == .loading ? 360 : 0))
+                        .animation(
+                            suggestions.state == .loading
+                                ? .linear(duration: 1.0).repeatForever(autoreverses: false)
+                                : .default,
+                            value: suggestions.state
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Refresh suggestions")
                 Spacer()
             }
             .padding(.horizontal, 22)
             .padding(.top, 8)
 
             LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(Mock.activityChips) { chip in
+                ForEach(displayedActivityChips) { chip in
                     ActivityChipView(chip: chip) {
                         prompt = chip.text
                         send()
