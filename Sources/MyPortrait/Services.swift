@@ -112,6 +112,13 @@ final class Services {
                 coordinator.setIgnoredApps(apps)
             }
             .store(in: &settingsCancellables)
+
+        // 忽略 URL pattern 列表订阅。
+        settings.$ignoredUrlPatterns
+            .sink { patterns in
+                coordinator.setIgnoredUrlPatterns(patterns)
+            }
+            .store(in: &settingsCancellables)
     }
 
     /// AppDelegate 在 `applicationWillTerminate` 调，停所有子系统。

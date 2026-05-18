@@ -25,6 +25,7 @@ final class CaptureSettings: ObservableObject {
         static let screenCaptureEnabled = "MyPortrait.capture.screenEnabled.v1"
         static let audioCaptureEnabled = "MyPortrait.capture.audioEnabled.v1"
         static let ignoredAppNames = "MyPortrait.capture.ignoredAppNames.v1"
+        static let ignoredUrlPatterns = "MyPortrait.capture.ignoredUrlPatterns.v1"
         static let pauseUntil = "MyPortrait.capture.pauseUntil.v1"
     }
 
@@ -58,6 +59,17 @@ final class CaptureSettings: ObservableObject {
         didSet {
             guard !isLoading else { return }
             UserDefaults.standard.set(Array(ignoredAppNames), forKey: Keys.ignoredAppNames)
+        }
+    }
+
+    /// 用户配置的"屏蔽 URL 模式"。glob 通配，例：
+    ///   - `*.bank.com/*`  → secure.bank.com/login 等
+    ///   - `*mail*`        → 任何含 mail 的 URL
+    /// 走 NSPredicate LIKE[c]（不区分大小写）。
+    @Published var ignoredUrlPatterns: [String] {
+        didSet {
+            guard !isLoading else { return }
+            UserDefaults.standard.set(ignoredUrlPatterns, forKey: Keys.ignoredUrlPatterns)
         }
     }
 
@@ -111,6 +123,9 @@ final class CaptureSettings: ObservableObject {
         // 忽略列表：UserDefaults 存的是 Array，转 Set 以方便查找。
         let stored = defaults.stringArray(forKey: Keys.ignoredAppNames) ?? []
         self.ignoredAppNames = Set(stored)
+
+        // URL pattern 列表：保持 Array 顺序（用户在 UI 上能拖排序）。
+        self.ignoredUrlPatterns = defaults.stringArray(forKey: Keys.ignoredUrlPatterns) ?? []
 
         // 暂停到期：app 关后可能已经过期，下面 didSet 等价的检查代替。
         let storedPause = defaults.object(forKey: Keys.pauseUntil) as? Date

@@ -30,7 +30,15 @@ actor TranscriptionScheduler {
     private let whisper: WhisperKitWrapper
 
     private let queuePollSeconds: TimeInterval = 5
-    private let queueBatchLimit: Int = 4
+    /// 每轮 poll 从 DB 拉多少 chunk。设计文档要求"限并发数 1-2"。
+    ///
+    /// 注意：调用方 for 循环串行 await transcribeOne，**实际并发恒为 1**。
+    /// 这个 limit 控制的是"一次 poll 取多少个进行串行处理"。设为 2 让 scheduler
+    /// 有一个小 lookahead 窗口，但在 battery 切换时也只浪费 1 个尚未开始的段。
+    ///
+    /// 若未来要真正并发 2，必须先把 WhisperKitWrapper 从"@unchecked Sendable +
+    /// serial-call contract"改为 actor + 内部排队，否则会 data race。
+    private let queueBatchLimit: Int = 2
 
     private var ingestTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
@@ -150,8 +158,12 @@ actor TranscriptionScheduler {
             return
         }
 
-        // 3. 写转录行
+        // 3. 写 sidecar JSON 到文件系统（设计文档"真相在文件系统"）。
+        //    路径 = wav 同目录 + 同名 + .transcript.json
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        writeTranscriptSidecar(wavPath: chunk.filePath, text: text, chunk: chunk, transcribedAtMs: nowMs)
+
+        // 4. 写转录行到 DB（索引镜像）。
         let record = TranscriptionRecord(
             audioChunkId: chunkId,
             startS: 0,
@@ -167,6 +179,36 @@ actor TranscriptionScheduler {
         } catch {
             logger.error("DB insertTranscription failed: \(String(describing: error), privacy: .public)")
             try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .failed)
+        }
+    }
+
+    /// 写 `seg_<ts>.transcript.json` 到 wav 同目录。
+    /// 失败只 log（DB 已经记了真相镜像，sidecar 丢了无大碍但要警告）。
+    private func writeTranscriptSidecar(
+        wavPath: String,
+        text: String,
+        chunk: AudioChunkRecord,
+        transcribedAtMs: Int64
+    ) {
+        let wavURL = URL(fileURLWithPath: wavPath)
+        // 去掉 ".wav" 加 ".transcript.json"。
+        let base = wavURL.deletingPathExtension()
+        let sidecar = base.appendingPathExtension("transcript.json")
+
+        let payload: [String: Any] = [
+            "wav_path": wavPath,
+            "recorded_at_ms": chunk.recordedAtMs,
+            "duration_s": chunk.durationS,
+            "device": chunk.device,
+            "engine": "whisperkit",
+            "transcribed_at_ms": transcribedAtMs,
+            "text": text,
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+            try data.write(to: sidecar, options: .atomic)
+        } catch {
+            logger.warning("transcript sidecar write failed for \(sidecar.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
 

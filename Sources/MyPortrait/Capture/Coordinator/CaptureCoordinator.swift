@@ -83,6 +83,11 @@ actor CaptureCoordinator {
         ignore.setIgnoredApps(apps)
     }
 
+    /// Services 在 settings.ignoredUrlPatterns 变化时调。
+    nonisolated func setIgnoredUrlPatterns(_ patterns: [String]) {
+        ignore.setIgnoredUrlPatterns(patterns)
+    }
+
     /// 启动采集流水线。幂等。
     /// 失败抛错；调用方 catch 后状态栏会自动亮红点。
     func start() async throws {

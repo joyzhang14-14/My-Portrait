@@ -31,6 +31,9 @@ actor CompactionWorker {
 
     private let minAgeSeconds: TimeInterval = 600        // 10 分钟
     private let pollIntervalSeconds: TimeInterval = 300  // 5 分钟
+    /// MP4 块时长上限（毫秒）。设计文档要求 "60s/块"。
+    private let maxChunkDurationMs: Int64 = 60_000
+    /// 安全帽：万一时间戳异常（比如长 idle 后两帧间隔 > 60s），仍限制单块帧数。
     private let maxFramesPerChunk: Int = 100
     private let queryLimit: Int = 5000
 
@@ -97,10 +100,17 @@ actor CompactionWorker {
     // MARK: - 私有
 
     private func compactDevice(device: String, frames: [FrameForCompaction]) async {
-        // 切块。
+        // 按"时间窗 ≤ 60s 或帧数 ≤ 100"切块。
         var index = 0
         while index < frames.count {
-            let end = min(index + maxFramesPerChunk, frames.count)
+            let chunkStart = frames[index].timestampMs
+            var end = index + 1
+            while end < frames.count {
+                let durationOK = frames[end].timestampMs - chunkStart <= maxChunkDurationMs
+                let frameCountOK = (end - index) < maxFramesPerChunk
+                if !durationOK || !frameCountOK { break }
+                end += 1
+            }
             let chunk = Array(frames[index..<end])
             index = end
 

@@ -1,41 +1,72 @@
 import Foundation
 import os
 
-/// 用户配置的"屏蔽 app 名"闸门。
+/// 用户配置的"屏蔽"闸门：app 名 + URL pattern。
 ///
 /// 与 DRMGate 的区别：
 ///   - DRMGate：硬编码列表 + 系统级硬规则，命中 → 停整条流水线 + invalidate SCStream
-///   - IgnoreGate：用户偏好列表（Settings UI 配置），命中 → 只跳本帧的截图 / OCR
+///   - IgnoreGate：用户偏好（Settings UI 配置），命中 → 只跳本帧
 ///
-/// 实现：`final class @unchecked Sendable + OSAllocatedUnfairLock`，
-/// 因为 Coordinator (actor) 持有引用 + Services (MainActor) 设置规则，
-/// 跨 actor 共享可变状态用锁是性能最优解。
+/// URL 匹配：NSPredicate `LIKE[c]`，支持 `*` 通配。例：
+///   - `*.bank.com/*`  → 匹配 `https://secure.bank.com/login` 等
+///   - `*mail*`        → 匹配任何含 mail 的 URL
+///   - `https://x.com/*` → 匹配 x.com 任意路径
 final class IgnoreGate: @unchecked Sendable {
 
-    /// 当前忽略集合。所有匹配大小写不敏感、整名匹配（不做 substring 防误伤）。
-    /// 例：用户加 "Mail"，"MailMate" 不会被屏蔽。
-    private let state = OSAllocatedUnfairLock<Set<String>>(initialState: [])
-
-    init(initial: Set<String> = []) {
-        state.withLock { $0 = Set(initial.map { $0.lowercased() }) }
+    private struct State {
+        var appsLower: Set<String> = []
+        var urlPatterns: [String] = []   // 小写 + LIKE 格式
     }
 
-    /// 替换当前规则（Settings 变化时调）。
-    func setIgnoredApps(_ apps: Set<String>) {
-        let normalized = Set(apps.map { $0.lowercased() })
-        state.withLock { $0 = normalized }
-    }
+    private let state = OSAllocatedUnfairLock<State>(initialState: State())
 
-    /// 该帧是否应该跳过（仅按 app 名比对）。
-    /// 命中 → 调用方应该 return，但仍可记录焦点元数据。
-    func shouldSkip(_ focus: FocusInfo) -> Bool {
-        state.withLock { ignored in
-            ignored.contains(focus.appName.lowercased())
+    init(initialApps: Set<String> = [], initialUrlPatterns: [String] = []) {
+        state.withLock { s in
+            s.appsLower = Set(initialApps.map { $0.lowercased() })
+            s.urlPatterns = initialUrlPatterns.map { $0.lowercased() }
         }
     }
 
-    /// 当前忽略集合（拷贝，调用方可只读用）。主要供调试 / 单测。
-    var current: Set<String> {
-        state.withLock { $0 }
+    /// Settings 变化时调（两组规则一起替换以保持原子性）。
+    func setRules(apps: Set<String>, urlPatterns: [String]) {
+        let normalizedApps = Set(apps.map { $0.lowercased() })
+        let normalizedUrls = urlPatterns.map { $0.lowercased() }
+        state.withLock { s in
+            s.appsLower = normalizedApps
+            s.urlPatterns = normalizedUrls
+        }
+    }
+
+    func setIgnoredApps(_ apps: Set<String>) {
+        let normalized = Set(apps.map { $0.lowercased() })
+        state.withLock { $0.appsLower = normalized }
+    }
+
+    func setIgnoredUrlPatterns(_ patterns: [String]) {
+        let normalized = patterns.map { $0.lowercased() }
+        state.withLock { $0.urlPatterns = normalized }
+    }
+
+    /// 该帧是否应该跳过。app 匹配整名（不区分大小写），URL 走 glob。
+    /// 命中 → 调用方应 return，但仍可记录焦点元数据。
+    func shouldSkip(_ focus: FocusInfo) -> Bool {
+        let snap = state.withLock { $0 }
+
+        if snap.appsLower.contains(focus.appName.lowercased()) {
+            return true
+        }
+        if let url = focus.browserUrl?.lowercased(), !snap.urlPatterns.isEmpty {
+            for pattern in snap.urlPatterns {
+                let pred = NSPredicate(format: "SELF LIKE[c] %@", pattern)
+                if pred.evaluate(with: url) { return true }
+            }
+        }
+        return false
+    }
+
+    /// 当前规则快照（调试 / 单测 / Settings UI 显示用）。
+    var current: (apps: Set<String>, urlPatterns: [String]) {
+        let s = state.withLock { $0 }
+        return (s.appsLower, s.urlPatterns)
     }
 }
