@@ -76,11 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.zoomButton)?.isHidden = false
 
         // Host the SwiftUI ContentView inside the AppKit window.
-        // Inject the Services container into the environment so any descendant
-        // view can read \.services to access db / coordinator / reporter.
+        // Inject the Services container + captureSettings into the environment
+        // so any descendant view can read \.services (db / coordinator / reporter)
+        // or \.captureSettings (toggle bindings for the Settings UI).
         let hosting = NSHostingView(
             rootView: ContentView()
                 .environment(\.services, services)
+                .environment(\.captureSettings, services.settings)
+                .environmentObject(services.settings)
                 .preferredColorScheme(.dark)
         )
         hosting.autoresizingMask = [.width, .height]
@@ -95,24 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // 3. 启动采集流水线（异步，不阻塞 UI 显示）。
-        // P0 stub 会 throw notImplemented —— 由 reporter 上报、状态栏亮红点。
-        // app 不崩。
-        let coordinator = services.coordinator
-        let compactor = services.compactor
-        let audio = services.audio
-        let transcriber = services.transcriber
-        Task.detached(priority: .userInitiated) { [lifecycleLog] in
-            do {
-                try await coordinator.start()
-            } catch {
-                lifecycleLog.error("coordinator.start failed: \(String(describing: error), privacy: .public)")
-            }
-            // 三个 worker 独立启动；DB 是 stub 时只会循环空转/失败，不影响 coordinator。
-            await compactor.start()
-            await audio.start()
-            await transcriber.start()
-        }
+        // 3. 启动 services 生命周期管理。
+        //    - compactor / transcriber 立即开始（空转零成本）
+        //    - coordinator / audio **由 settings 驱动**：默认开关都 OFF →
+        //      首启不弹屏幕录制 / 麦克风权限。用户在 Settings 面板打开后才启。
+        services.startManagedLifecycle()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -120,18 +110,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 进程退出前尽量优雅停止采集（刷盘、关 SCStream、停 compaction、停录音）。
+        // 进程退出前尽量优雅停止所有子系统（刷盘、关 SCStream、停 compaction、停录音）。
         // 同步等最多 ~1s，超时由系统 ~5s 后强制 kill 兜底。
         let sem = DispatchSemaphore(value: 0)
-        let coordinator = services?.coordinator
-        let compactor = services?.compactor
-        let audio = services?.audio
-        let transcriber = services?.transcriber
+        let services = self.services
         Task.detached(priority: .userInitiated) {
-            await coordinator?.stop()
-            await compactor?.stop()
-            await audio?.stop()
-            await transcriber?.stop()
+            await services?.stopManagedLifecycle()
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 1.0)
