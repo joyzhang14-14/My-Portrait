@@ -39,10 +39,34 @@ enum Storage {
     /// archives, supersede decisions, weight passes). See design doc 6.6.
     static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
 
+    // MARK: - Capture layer (Capture/ module)
+
+    /// Raw data produced by the capture layer (screen frames + future MP4 chunks).
+    /// Owned by `Capture/`. Mirrors screenpipe's `data/` directory but lives
+    /// inside ~/.portrait so we never touch ~/.screenpipe.
+    static var rawDataDir: URL { rootURL.appendingPathComponent("raw_data", isDirectory: true) }
+
+    /// Per-day JPG snapshot directory. Path:
+    /// `~/.portrait/raw_data/frames/YYYY-MM-DD/{ts_ms}_m{monitor}.jpg`.
+    /// Hot-cache only — JPGs are compacted into MP4 chunks after ~10 minutes (P3).
+    static var framesDir: URL { rawDataDir.appendingPathComponent("frames", isDirectory: true) }
+
+    /// Per-day HEVC MP4 chunk directory (P3+). Path:
+    /// `~/.portrait/raw_data/video/YYYY-MM-DD/m{id}_{startTs}.mp4`.
+    static var videoDir: URL { rawDataDir.appendingPathComponent("video", isDirectory: true) }
+
+    /// SQLite written by the capture layer (frames / video_chunks / OCR / audio).
+    /// Separate file from `indexDBPath` so the capture layer and portrait layer
+    /// can evolve schemas independently.
+    static var portraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
+
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {
         let fm = FileManager.default
-        for url in [rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir, journalDir] {
+        for url in [
+            rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
+            journalDir, rawDataDir, framesDir, videoDir
+        ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }

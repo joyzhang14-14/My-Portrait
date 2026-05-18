@@ -37,6 +37,15 @@ struct ContentView: View {
             }
             chat.providerResolver = resolver
             SuggestionEngine.shared.providerResolver = resolver
+
+            // Wire the scheduler so it can fire templates into the chat
+            // when their cadence ticks. Each fire creates a new conv.
+            ScheduleRunner.shared.dispatch = { template in
+                chat.switchTo(nil)
+                let chips = [template.window.resolveChip()].compactMap { $0 }
+                chat.send(template.prompt, chips: chips)
+            }
+            ScheduleRunner.shared.start()
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
             guard let date = notif.object as? Date else { return }

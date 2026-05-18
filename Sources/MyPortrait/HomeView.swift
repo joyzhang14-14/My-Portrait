@@ -1162,6 +1162,12 @@ private struct TemplateCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Text(template.emoji).font(.system(size: 18))
+                    if template.schedule != .never {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.purple.opacity(0.8))
+                            .help("Auto-runs " + template.schedule.label)
+                    }
                     Spacer()
                     if hover {
                         Button(action: onEdit) {
@@ -1288,10 +1294,35 @@ private struct TemplateEditor: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
             }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock").font(.system(size: 10))
+                    Text("Schedule").font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(.secondary)
+                Picker("", selection: $initial.schedule) {
+                    ForEach(cadenceOptions, id: \.self) { c in
+                        Text(c.label).tag(c)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                Text("Fires while the app is open. Each run starts a new conversation.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(20)
         .frame(width: 420)
     }
+
+    private let cadenceOptions: [Cadence] = [
+        .never,
+        .everyMinutes(30), .everyMinutes(60), .everyMinutes(180),
+        .dailyAt(hour: 9), .dailyAt(hour: 17),
+        .weeklyOn(weekday: 2, hour: 9)   // Mon 09:00 (standup)
+    ]
 }
 
 private struct SuggestionCardView: View {

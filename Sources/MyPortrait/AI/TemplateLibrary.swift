@@ -90,7 +90,8 @@ final class TemplateLibrary {
     ]
 }
 
-/// A reusable prompt + optional context window.
+/// A reusable prompt + optional context window. `schedule` (optional) lets
+/// the template re-run itself on a cadence while the app is open.
 struct SummaryTemplate: Identifiable, Hashable, Codable {
     var id: UUID
     var emoji: String
@@ -98,11 +99,67 @@ struct SummaryTemplate: Identifiable, Hashable, Codable {
     var subtitle: String
     var prompt: String
     var window: ContextWindow
+    var schedule: Cadence = .never
+    /// Last time this template auto-ran (so the runner skips dupes).
+    var lastRunAt: Date? = nil
 
     init(id: UUID = UUID(), emoji: String, title: String, subtitle: String,
-         prompt: String, window: ContextWindow) {
+         prompt: String, window: ContextWindow,
+         schedule: Cadence = .never, lastRunAt: Date? = nil) {
         self.id = id; self.emoji = emoji; self.title = title; self.subtitle = subtitle
         self.prompt = prompt; self.window = window
+        self.schedule = schedule; self.lastRunAt = lastRunAt
+    }
+}
+
+/// How often a scheduled template auto-runs.
+enum Cadence: Hashable, Codable {
+    case never
+    case everyMinutes(Int)
+    /// Local time of day in 24h, e.g. 9 = 09:00. Fires once per day.
+    case dailyAt(hour: Int)
+    /// 1=Sun…7=Sat (Calendar.weekday convention). Fires once per week.
+    case weeklyOn(weekday: Int, hour: Int)
+
+    var label: String {
+        switch self {
+        case .never:                       return "never"
+        case .everyMinutes(let m):
+            if m % 60 == 0 { return "every \(m/60)h" }
+            return "every \(m)m"
+        case .dailyAt(let h):              return String(format: "daily at %02d:00", h)
+        case .weeklyOn(let d, let h):
+            let names = ["", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+            return "weekly \(names[d]) \(String(format: "%02d:00", h))"
+        }
+    }
+
+    /// Has `now` reached the next fire time after `lastRun`?
+    func isDue(lastRun: Date?, now: Date = Date()) -> Bool {
+        switch self {
+        case .never:
+            return false
+        case .everyMinutes(let m):
+            guard let last = lastRun else { return true }
+            return now.timeIntervalSince(last) >= Double(m * 60)
+        case .dailyAt(let h):
+            let cal = Calendar.current
+            var comps = cal.dateComponents([.year, .month, .day], from: now)
+            comps.hour = h; comps.minute = 0
+            guard let todayFire = cal.date(from: comps) else { return false }
+            guard now >= todayFire else { return false }
+            guard let last = lastRun else { return true }
+            return last < todayFire
+        case .weeklyOn(let d, let h):
+            let cal = Calendar.current
+            let wkday = cal.component(.weekday, from: now)
+            guard wkday == d else { return false }
+            var comps = cal.dateComponents([.year, .month, .day], from: now)
+            comps.hour = h; comps.minute = 0
+            guard let fire = cal.date(from: comps), now >= fire else { return false }
+            guard let last = lastRun else { return true }
+            return last < fire
+        }
     }
 }
 
