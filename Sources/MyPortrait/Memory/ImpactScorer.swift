@@ -174,26 +174,40 @@ final class ImpactScorer {
 
     private static func buildPrompt(for batch: [(URL, PortraitFile)]) -> String {
         var lines: [String] = []
-        lines.append("You score how IMPACTFUL each user activity session is on a 1.0-5.0 scale.")
+        lines.append("You score the long-term IMPORTANCE of each user activity event for the user's PERSONAL PROFILE. Scale: 1.0-5.0 (float).")
         lines.append("")
-        lines.append("Scale guide:")
-        lines.append("  1 = trivial passive activity (idle scrolling, momentary glances)")
-        lines.append("  2 = routine usage (checking messages, looking up minor info)")
-        lines.append("  3 = focused work / engaged interaction (writing a reply, reading an article)")
-        lines.append("  4 = significant productive effort or meaningful experience (coding session, deep conversation)")
-        lines.append("  5 = pivotal / formative event (milestone, breakthrough, life event)")
+        lines.append("ANCHORS — calibrate strictly. Most events should be 1-2. Scoring 4+ should feel like 'this is worth remembering in a year'.")
+        lines.append("  1.0 — trivial / passive. Examples: scrolling Finder, glancing at a dashboard, checking the time, idle background app, brief tab switching, listening to music in background.")
+        lines.append("  2.0 — routine engagement. Examples: checking and replying to a few messages, reading a short article, looking something up, normal browsing.")
+        lines.append("  3.0 — focused activity worth noting later. Examples: an hour of real coding on a specific feature, a real conversation about something concrete, learning material on a topic the user actually cares about.")
+        lines.append("  4.0 — a noteworthy event the user might recall later. Examples: shipping a feature, deciding on a tech approach, an emotionally significant exchange, a meeting where a real decision was made.")
+        lines.append("  5.0 — pivotal. Examples: starting/ending a relationship, a job change, a breakthrough realization, a milestone.")
         lines.append("")
-        lines.append("Score each session below. Output ONLY a JSON array (no prose, no markdown fences):")
-        lines.append("[{\"id\": 1, \"impact\": 3.2, \"reason\": \"short note\"}, ...]")
+        lines.append("RULES (read carefully):")
+        lines.append("- Score from the EVENT SUMMARY content, NOT from the app or duration. Long sessions in Finder/Code/Safari that did nothing memorable are 1.")
+        lines.append("- If summary describes a routine browsing/idle/glance pattern, ALWAYS 1-2 regardless of duration or app.")
+        lines.append("- 4+ requires a concrete outcome, decision, milestone, or emotional weight visible in the summary.")
+        lines.append("- Repeated days (high `occurrences_days`) only mildly raise the score (it's a habit, not necessarily important).")
+        lines.append("- The `reason` field MUST quote or paraphrase a SPECIFIC fragment from the summary that justifies the score. If you cannot point to specifics, the score is ≤2.")
         lines.append("")
-        lines.append("Sessions:")
+        lines.append("Output ONLY a JSON array. No prose, no markdown fences.")
+        lines.append("[{\"id\":1, \"impact\":1.5, \"reason\":\"cites concrete fragment\"}, ...]")
+        lines.append("")
+        lines.append("Events:")
         for (i, item) in batch.enumerated() {
             let (_, f) = item
             let id = i + 1
             let durationMin = max(1, Int((f.occurrences.last ?? f.created).timeIntervalSince(f.occurrences.first ?? f.created) / 60))
-            let title = f.body.split(separator: "\n").first.map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "# ")) } ?? "untitled"
+            let title = f.eventTitle.isEmpty
+                ? (f.body.split(separator: "\n").first.map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "# ")) } ?? "untitled")
+                : f.eventTitle
+            let summary = f.eventSummary.isEmpty ? "(no summary)" : f.eventSummary
+            let trimSummary = summary.count > 360
+                ? String(summary.prefix(360)) + "…" : summary
             let tags = f.tags.joined(separator: ", ")
-            lines.append("\(id). title=\(title) | tags=[\(tags)] | duration=\(durationMin)min | occurrences=\(f.occurrences.count)")
+            lines.append("\(id). title: \(title)")
+            lines.append("    summary: \(trimSummary.replacingOccurrences(of: "\n", with: " ⏎ "))")
+            lines.append("    meta: tags=[\(tags)] · duration≈\(durationMin)min · occurrences_days=\(f.occurrences.count) · category=\(f.category)")
         }
         return lines.joined(separator: "\n")
     }

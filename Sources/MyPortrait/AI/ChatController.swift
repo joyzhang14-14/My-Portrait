@@ -44,6 +44,43 @@ final class ChatController {
 
     // MARK: - Conversation switching
 
+    /// Re-run the user message immediately preceding `assistantMessageId`.
+    /// The old assistant message + anything after it is dropped.
+    func regenerate(_ assistantMessageId: UUID) {
+        guard let aIdx = messages.firstIndex(where: { $0.id == assistantMessageId }),
+              messages[aIdx].role == .assistant,
+              let uIdx = (0..<aIdx).reversed().first(where: { messages[$0].role == .user })
+        else { return }
+        let userText = messages[uIdx].text
+        let chips = contextChipsByMessage[messages[uIdx].id] ?? []
+
+        // Drop the user msg + everything after (we'll re-add via send()).
+        let removed = messages[uIdx...].map { $0.id }
+        removed.forEach { contextChipsByMessage.removeValue(forKey: $0) }
+        messages.removeSubrange(uIdx...)
+
+        // Tearing down the agent forces a fresh conversation on Pi's side —
+        // otherwise Pi has its own memory of the dropped turn.
+        agent?.stop()
+        agent = nil
+        send(userText, chips: chips)
+    }
+
+    /// Rewrite a previous user message and re-run. Drops every message at or
+    /// after its index, then re-sends with `newText`.
+    func editAndResend(_ messageId: UUID, newText: String) {
+        guard let uIdx = messages.firstIndex(where: { $0.id == messageId }),
+              messages[uIdx].role == .user else { return }
+        let chips = contextChipsByMessage[messageId] ?? []
+        let removed = messages[uIdx...].map { $0.id }
+        removed.forEach { contextChipsByMessage.removeValue(forKey: $0) }
+        messages.removeSubrange(uIdx...)
+
+        agent?.stop()
+        agent = nil
+        send(newText, chips: chips)
+    }
+
     /// Abort the current streaming response. Pi keeps the conversation alive
     /// so the next prompt still works.
     func abort() {

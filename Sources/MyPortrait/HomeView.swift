@@ -7,6 +7,10 @@ struct HomeView: View {
     @State private var setup = AISetup.shared
     @State private var contextChips: [ContextChip] = []
     @State private var pickerOpen: Bool = false
+    /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
+    /// a past user message. Send-on-Enter routes through editAndResend
+    /// instead of send so the old turn is dropped, not duplicated.
+    @State private var editingMessageId: UUID? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +23,20 @@ struct HomeView: View {
                 ChatTranscript(
                     messages: chat.messages,
                     isThinking: chat.isStreaming,
-                    chipsLookup: { chat.contextChipsByMessage[$0] ?? [] }
+                    chipsLookup: { chat.contextChipsByMessage[$0] ?? [] },
+                    onCopy: { msg in
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(plainTextOf(msg), forType: .string)
+                    },
+                    onRegenerate: { chat.regenerate($0) },
+                    onEdit: { msg in
+                        // Drop the user msg into the input and prep its chips
+                        // for re-send; user can tweak then press Enter.
+                        prompt = msg.text
+                        contextChips = chat.contextChipsByMessage[msg.id] ?? []
+                        editingMessageId = msg.id
+                    }
                 )
             }
 
@@ -126,8 +143,32 @@ struct HomeView: View {
         let chipsToSend = contextChips
         prompt = ""
         contextChips = []
-        chat.send(trimmed, chips: chipsToSend)
+        if let id = editingMessageId {
+            editingMessageId = nil
+            chat.editAndResend(id, newText: trimmed)
+        } else {
+            chat.send(trimmed, chips: chipsToSend)
+        }
     }
+}
+
+/// Flatten an assistant `ChatMessage`'s mixed parts (text + tool blocks +
+/// thinking) into one plain-text string suitable for the clipboard.
+private func plainTextOf(_ m: ChatMessage) -> String {
+    if m.role == .user || m.parts.isEmpty { return m.text }
+    var out: [String] = []
+    for part in m.parts {
+        switch part {
+        case .text(_, let v):
+            out.append(v)
+        case .tool(let b):
+            out.append("$ \(b.command)")
+            if !b.output.isEmpty { out.append(b.output) }
+        case .thinking(let b):
+            if !b.text.isEmpty { out.append("[thinking] \(b.text)") }
+        }
+    }
+    return out.joined(separator: "\n\n")
 }
 
 /// Slim banner shown above the chat when AI setup is in progress or failed.
@@ -154,6 +195,9 @@ private struct ChatTranscript: View {
     let messages: [ChatMessage]
     let isThinking: Bool
     var chipsLookup: ((UUID) -> [ContextChip])? = nil
+    var onCopy: (ChatMessage) -> Void = { _ in }
+    var onRegenerate: (UUID) -> Void = { _ in }
+    var onEdit: (ChatMessage) -> Void = { _ in }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -166,7 +210,10 @@ private struct ChatTranscript: View {
                         ChatBubble(
                             message: msg,
                             isStreaming: isLastAssistant && isThinking,
-                            chips: chipsLookup?(msg.id) ?? []
+                            chips: chipsLookup?(msg.id) ?? [],
+                            onCopy: { onCopy(msg) },
+                            onRegenerate: { onRegenerate(msg.id) },
+                            onEdit: { onEdit(msg) }
                         )
                         .id(msg.id)
                     }
@@ -194,15 +241,29 @@ private struct ChatBubble: View {
     let message: ChatMessage
     let isStreaming: Bool
     let chips: [ContextChip]
+    let onCopy: () -> Void
+    let onRegenerate: () -> Void
+    let onEdit: () -> Void
     @State private var appear = false
+    @State private var hover = false
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             BubbleAvatar(role: message.role, glowing: message.role == .assistant && isStreaming)
             VStack(alignment: .leading, spacing: 10) {
-                Text(message.role == .user ? "You" : "Assistant")
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.4)
-                    .foregroundStyle(.white.opacity(0.45))
+                HStack(spacing: 6) {
+                    Text(message.role == .user ? "You" : "Assistant")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.4)
+                        .foregroundStyle(.white.opacity(0.45))
+                    Spacer()
+                    if hover, !isStreaming {
+                        BubbleActions(role: message.role,
+                                      onCopy: onCopy,
+                                      onRegenerate: onRegenerate,
+                                      onEdit: onEdit)
+                            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .trailing)))
+                    }
+                }
 
                 if !chips.isEmpty {
                     HStack(spacing: 5) {
@@ -239,6 +300,49 @@ private struct ChatBubble: View {
         .onAppear {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
         }
+        .onHover { h in
+            withAnimation(.easeOut(duration: 0.18)) { hover = h }
+        }
+    }
+}
+
+/// Hover toolbar on a chat bubble. User msgs show Copy + Edit; assistant
+/// msgs show Copy + Regenerate. Compact glass pills.
+private struct BubbleActions: View {
+    let role: ChatRole
+    let onCopy: () -> Void
+    let onRegenerate: () -> Void
+    let onEdit: () -> Void
+    @State private var copied = false
+    var body: some View {
+        HStack(spacing: 4) {
+            actionButton(icon: copied ? "checkmark" : "doc.on.doc", help: "Copy") {
+                onCopy()
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { copied = false }
+            }
+            if role == .assistant {
+                actionButton(icon: "arrow.clockwise", help: "Regenerate", action: onRegenerate)
+            } else {
+                actionButton(icon: "pencil", help: "Edit", action: onEdit)
+            }
+        }
+        .padding(.horizontal, 5).padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+        )
+    }
+    private func actionButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 
