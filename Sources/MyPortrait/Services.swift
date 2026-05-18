@@ -30,6 +30,7 @@ final class Services {
     let compactor: CompactionWorker
     let audio: AudioCaptureService
     let transcriber: TranscriptionScheduler
+    let powerWatcher: PowerWatcher
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -49,8 +50,10 @@ final class Services {
         self.compactor = CompactionWorker(db: stubDB, reporter: reporter)
         let audioSvc = AudioCaptureService(reporter: reporter)
         self.audio = audioSvc
+        let pw = PowerWatcher()
+        self.powerWatcher = pw
         self.transcriber = TranscriptionScheduler(
-            db: stubDB, audio: audioSvc, reporter: reporter
+            db: stubDB, audio: audioSvc, reporter: reporter, power: pw
         )
     }
 
@@ -60,6 +63,9 @@ final class Services {
     /// - 订阅 settings 变化 → 启停 coordinator / audio
     /// - 用初始 settings 值同步对齐一次状态（默认都 OFF，所以两者都不启）
     func startManagedLifecycle() {
+        // PowerWatcher 必须在 main thread 注册 IOPS run loop source。
+        powerWatcher.start()
+
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
@@ -127,6 +133,7 @@ final class Services {
         await audio.stop()
         await compactor.stop()
         await transcriber.stop()
+        powerWatcher.stop()
         settingsCancellables.removeAll()
     }
 

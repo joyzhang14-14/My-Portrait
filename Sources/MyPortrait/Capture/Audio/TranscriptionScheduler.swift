@@ -28,8 +28,11 @@ actor TranscriptionScheduler {
 
     private let vad: VADSegmenter
     private let whisper: WhisperKitWrapper
+    private let power: PowerWatcher
 
-    private let queuePollSeconds: TimeInterval = 5
+    /// 后台兜底 poll 间隔。已有 PowerWatcher 事件驱动唤醒 +
+    /// 新段事件直接驱动，poll 仅作为"防漏"兜底，故拉长到 60s（vs 之前 5s）。
+    private let fallbackPollSeconds: TimeInterval = 60
     /// 每轮 poll 从 DB 拉多少 chunk。设计文档要求"限并发数 1-2"。
     ///
     /// 注意：调用方 for 循环串行 await transcribeOne，**实际并发恒为 1**。
@@ -42,17 +45,20 @@ actor TranscriptionScheduler {
 
     private var ingestTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
+    private var powerTask: Task<Void, Never>?
 
     init(
         db: PortraitDB,
         audio: AudioCaptureService,
         reporter: UnimplementedReporter,
+        power: PowerWatcher,
         vad: VADSegmenter = VADSegmenter(),
         whisper: WhisperKitWrapper = WhisperKitWrapper()
     ) {
         self.db = db
         self.audio = audio
         self.reporter = reporter
+        self.power = power
         self.vad = vad
         self.whisper = whisper
     }
@@ -67,23 +73,36 @@ actor TranscriptionScheduler {
             }
         }
 
+        // 兜底循环：每 fallbackPollSeconds 检查一次队列，防漏。
+        let fallbackNs = UInt64(fallbackPollSeconds * 1_000_000_000)
         transcribeTask = Task.detached(priority: .utility) { [weak self] in
             // 60s 冷启动延迟（与 CompactionWorker 错峰）。
             try? await Task.sleep(nanoseconds: 60_000_000_000)
             while !Task.isCancelled {
                 await self?.processQueueOnce()
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: fallbackNs)
             }
         }
 
-        logger.info("TranscriptionScheduler started")
+        // 事件驱动主路：power 状态变化（如 battery → AC）立刻唤起一轮处理。
+        let powerStream = power.states
+        powerTask = Task.detached(priority: .utility) { [weak self] in
+            for await _ in powerStream {
+                guard let self else { break }
+                await self.processQueueOnce()
+            }
+        }
+
+        logger.info("TranscriptionScheduler started (event-driven via PowerWatcher + 60s fallback)")
     }
 
     func stop() {
         ingestTask?.cancel()
         transcribeTask?.cancel()
+        powerTask?.cancel()
         ingestTask = nil
         transcribeTask = nil
+        powerTask = nil
         logger.info("TranscriptionScheduler stopped")
     }
 
