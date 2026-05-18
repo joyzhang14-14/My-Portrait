@@ -39,14 +39,14 @@ final class ChromelessWindow: NSWindow {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: ChromelessWindow!
     var services: Services!
-    var devModeIndicator: DevModeStatusItem!
+    var statusBarMenu: StatusBarMenu!
 
     private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
         services = Services()
-        devModeIndicator = DevModeStatusItem(reporter: services.reporter)
+        statusBarMenu = StatusBarMenu(settings: services.settings)
 
         // 确保磁盘目录结构存在
         do {

@@ -28,6 +28,7 @@ actor CaptureCoordinator {
     private let ocrCache: OCRCache
     private let ocr: OCRService
     private let drm: DRMGate
+    private let ignore: IgnoreGate
     private let events: EventSources
     private let drmWatcher: DRMWatcher
     private let sleepWakeBox: SleepWakeBox
@@ -61,6 +62,7 @@ actor CaptureCoordinator {
         self.ocr = OCRService(config: config, cache: cache, reporter: reporter)
         let drmGate = DRMGate()
         self.drm = drmGate
+        self.ignore = IgnoreGate()
         self.events = EventSources()
         let focusInstance = self.focus
         self.drmWatcher = DRMWatcher(focus: focusInstance, gate: drmGate)
@@ -74,6 +76,12 @@ actor CaptureCoordinator {
     }
 
     var isRunning: Bool { captureTask != nil }
+
+    /// Services 在 settings.ignoredAppNames 变化时调。
+    /// 直接传给 IgnoreGate（lock-protected，线程安全）。
+    nonisolated func setIgnoredApps(_ apps: Set<String>) {
+        ignore.setIgnoredApps(apps)
+    }
 
     /// 启动采集流水线。幂等。
     /// 失败抛错；调用方 catch 后状态栏会自动亮红点。
@@ -215,20 +223,26 @@ actor CaptureCoordinator {
             return
         }
 
-        // 3. 抓帧。
+        // 3. 用户隐私 ignore 列表。命中 → 静默跳过这一帧（不动 lastCaptureAt
+        //    以免影响 minCaptureIntervalMs 计数，让真正可采集的下一帧立刻能跑）。
+        if ignore.shouldSkip(focusInfo) {
+            return
+        }
+
+        // 4. 抓帧。
         let image = try await screen.captureMainDisplay()
 
-        // 4. 去重。
+        // 5. 去重。
         if !force, !comparer.shouldKeep(image, now: now) {
             return
         }
 
         lastCaptureAt = now
 
-        // 5. JPG 路径（同步纯计算，立即可用）。
+        // 6. JPG 路径（同步纯计算，立即可用）。
         let url = snapshot.predictURL(timestamp: now)
 
-        // 6. JPG 落盘（actor 串行；不等 IO 完成，与 OCR/DB 并行）。
+        // 7. JPG 落盘（actor 串行；不等 IO 完成，与 OCR/DB 并行）。
         let snapshotActor = snapshot
         let imageBox = SendableCGImage(image)
         let writeTask = Task.detached(priority: .utility) { [logger] in
@@ -239,7 +253,7 @@ actor CaptureCoordinator {
             }
         }
 
-        // 7. OCR（同步，主路径）。失败只 log，不阻塞入库。
+        // 8. OCR（同步，主路径）。失败只 log，不阻塞入库。
         var ocrResult: OCRResult?
         do {
             ocrResult = try await ocr.recognize(image: image, focus: focusInfo)
@@ -248,7 +262,7 @@ actor CaptureCoordinator {
             ocrResult = nil
         }
 
-        // 8. 入库。
+        // 9. 入库。
         let record = FrameRecord(
             timestampMs: Int64(now.timeIntervalSince1970 * 1000),
             appName: focusInfo.appName,
@@ -270,7 +284,7 @@ actor CaptureCoordinator {
             frameId = fakeFrameIdCounter
         }
 
-        // 9. 发事件。
+        // 10. 发事件。
         let event = FrameEvent(
             frameId: frameId,
             timestampMs: record.timestampMs,

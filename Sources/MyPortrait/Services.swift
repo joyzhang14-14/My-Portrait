@@ -79,19 +79,37 @@ final class Services {
             await transcriber.start()
         }
 
-        // 屏幕采集订阅。
-        settings.$screenCaptureEnabled
+        // 屏幕采集订阅。effective = enabled && !paused。
+        // CombineLatest 在任一上游变化时重算；pauseUntil 自动到期由 CaptureSettings
+        // 内的 Task 把 pauseUntil 置回 nil → 再次触发本 sink。
+        Publishers.CombineLatest(settings.$screenCaptureEnabled, settings.$pauseUntil)
+            .map { enabled, until in
+                if let until, until > Date() { return false }
+                return enabled
+            }
             .removeDuplicates()
-            .sink { [weak self] enabled in
-                self?.applyScreenCapture(enabled: enabled)
+            .sink { [weak self] effective in
+                self?.applyScreenCapture(enabled: effective)
             }
             .store(in: &settingsCancellables)
 
-        // 音频采集订阅。
-        settings.$audioCaptureEnabled
+        // 音频采集订阅。effective = enabled && !paused。
+        Publishers.CombineLatest(settings.$audioCaptureEnabled, settings.$pauseUntil)
+            .map { enabled, until in
+                if let until, until > Date() { return false }
+                return enabled
+            }
             .removeDuplicates()
-            .sink { [weak self] enabled in
-                self?.applyAudioCapture(enabled: enabled)
+            .sink { [weak self] effective in
+                self?.applyAudioCapture(enabled: effective)
+            }
+            .store(in: &settingsCancellables)
+
+        // 忽略 app 列表订阅。
+        let coordinator = self.coordinator
+        settings.$ignoredAppNames
+            .sink { apps in
+                coordinator.setIgnoredApps(apps)
             }
             .store(in: &settingsCancellables)
     }

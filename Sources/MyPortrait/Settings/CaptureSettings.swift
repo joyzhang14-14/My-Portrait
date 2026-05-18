@@ -24,6 +24,8 @@ final class CaptureSettings: ObservableObject {
     private enum Keys {
         static let screenCaptureEnabled = "MyPortrait.capture.screenEnabled.v1"
         static let audioCaptureEnabled = "MyPortrait.capture.audioEnabled.v1"
+        static let ignoredAppNames = "MyPortrait.capture.ignoredAppNames.v1"
+        static let pauseUntil = "MyPortrait.capture.pauseUntil.v1"
     }
 
     // MARK: - 用户可改字段
@@ -48,6 +50,41 @@ final class CaptureSettings: ObservableObject {
         }
     }
 
+    /// 用户配置的"屏蔽 app 名"。命中（不区分大小写）则该帧跳过截图 + OCR。
+    ///
+    /// 设计：保留焦点元数据（DB 里仍记一行"用户在用 Mail"），但不存内容。
+    /// 跟 DRMGate 的区别：DRM 是系统级硬规则停整条流水线；这里只跳单帧。
+    @Published var ignoredAppNames: Set<String> {
+        didSet {
+            guard !isLoading else { return }
+            UserDefaults.standard.set(Array(ignoredAppNames), forKey: Keys.ignoredAppNames)
+        }
+    }
+
+    /// "暂停到何时"。非 nil 且未过期 → 屏幕/音频采集都暂停。到期后自动清回 nil。
+    ///
+    /// 设置方式：状态栏菜单 "Pause for 10/30/60 min" 写入；用户手动取消写 nil。
+    @Published var pauseUntil: Date? {
+        didSet {
+            guard !isLoading else { return }
+            if let d = pauseUntil {
+                UserDefaults.standard.set(d, forKey: Keys.pauseUntil)
+                scheduleAutoResume(at: d)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.pauseUntil)
+                autoResumeTask?.cancel()
+                autoResumeTask = nil
+            }
+        }
+    }
+
+    /// 派生：当前是否处于"暂停"状态（即采集应该停止）。
+    /// View 可以直接读它，也可在 publisher 中 map(\.isPaused)。
+    var isPaused: Bool {
+        guard let d = pauseUntil else { return false }
+        return d > Date()
+    }
+
     // MARK: - 只读字段（运行时状态镜像，SwiftUI 一处订阅）
 
     /// 是否有 stub 路径被命中。镜像 UnimplementedReporter.hasUnimplementedStubs。
@@ -62,12 +99,55 @@ final class CaptureSettings: ObservableObject {
     /// reporter → hasUnimplementedStubs 镜像订阅。
     private var reporterSink: AnyCancellable?
 
+    /// pauseUntil 到期自动清空的任务。
+    private var autoResumeTask: Task<Void, Never>?
+
     init() {
         let defaults = UserDefaults.standard
         // 第一次启动两个 key 都不存在，bool(forKey:) 返回 false —— 正好就是我们要的默认值。
         self.screenCaptureEnabled = defaults.bool(forKey: Keys.screenCaptureEnabled)
         self.audioCaptureEnabled = defaults.bool(forKey: Keys.audioCaptureEnabled)
+
+        // 忽略列表：UserDefaults 存的是 Array，转 Set 以方便查找。
+        let stored = defaults.stringArray(forKey: Keys.ignoredAppNames) ?? []
+        self.ignoredAppNames = Set(stored)
+
+        // 暂停到期：app 关后可能已经过期，下面 didSet 等价的检查代替。
+        let storedPause = defaults.object(forKey: Keys.pauseUntil) as? Date
+        if let d = storedPause, d > Date() {
+            self.pauseUntil = d
+        } else {
+            self.pauseUntil = nil
+            if storedPause != nil {
+                // 过期 → 顺手清掉 UserDefaults 里那条。
+                defaults.removeObject(forKey: Keys.pauseUntil)
+            }
+        }
+
         self.isLoading = false
+
+        // isLoading=false 之后再调一次 scheduleAutoResume —— init 内 didSet 不触发。
+        if let d = pauseUntil {
+            scheduleAutoResume(at: d)
+        }
+    }
+
+    private func scheduleAutoResume(at expiration: Date) {
+        autoResumeTask?.cancel()
+        let delay = expiration.timeIntervalSinceNow
+        guard delay > 0 else {
+            // 已经过期，立刻清掉。
+            pauseUntil = nil
+            return
+        }
+        let ns = UInt64(delay * 1_000_000_000)
+        autoResumeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: ns)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.pauseUntil = nil
+            }
+        }
     }
 
     /// Services 在初始化后调一次，把 reporter 的状态镜像过来。
