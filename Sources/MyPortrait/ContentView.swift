@@ -6,10 +6,14 @@ struct ContentView: View {
     @State private var timeline = TimelineState()
     @State private var chat = ChatController()
     @State private var chatStore = ChatStore.shared
+    @State private var memoryScope: MemoryScope = .events
 
     var body: some View {
         HStack(spacing: 0) {
-            TimelineSidebar(state: timeline, selection: $selection, chat: chat)
+            TimelineSidebar(state: timeline,
+                            selection: $selection,
+                            chat: chat,
+                            memoryScope: $memoryScope)
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
 
@@ -32,7 +36,7 @@ struct ContentView: View {
         case .pipes:         NativePlaceholder(title: "Pipes",
                                                systemImage: "puzzlepiece.extension.fill",
                                                subtitle: "Coming soon")
-        case .memories:      MemoriesView()
+        case .memories:      MemoriesView(scope: $memoryScope)
         }
     }
 }

@@ -2,6 +2,42 @@ import Foundation
 import SwiftUI
 import Observation
 
+/// Shared selection state for the Memories tab. Lives in ContentView so the
+/// outer TimelineSidebar (left rail) and MemoriesView (detail) can both
+/// read/write the same selection.
+enum MemoryScope: Hashable, Identifiable {
+    case events
+    case portrait(category: String)
+
+    var id: String {
+        switch self {
+        case .events:              return "__events__"
+        case .portrait(let c):     return "portrait:\(c)"
+        }
+    }
+    var displayName: String {
+        switch self {
+        case .events:              return "Events"
+        case .portrait(let c):     return c.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .events:                   return "clock.arrow.circlepath"
+        case .portrait("personality"):  return "person.fill"
+        case .portrait("social"):       return "person.3.fill"
+        case .portrait("background"):   return "books.vertical.fill"
+        case .portrait("experiences"):  return "map.fill"
+        case .portrait("interests"):    return "sparkles"
+        case .portrait("speech_style"): return "text.bubble.fill"
+        case .portrait("habits"):       return "repeat"
+        case .portrait("skills"):       return "wrench.adjustable.fill"
+        case .portrait("emotions"):     return "heart.fill"
+        case .portrait:                 return "doc.text"
+        }
+    }
+}
+
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case home, pipes, timeline, memories, connections
     var id: String { rawValue }

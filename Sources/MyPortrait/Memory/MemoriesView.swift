@@ -12,127 +12,37 @@ import SwiftUI
 ///   ✨    Rescore event impacts with LLM
 ///   🪄    Distill portrait files from events
 struct MemoriesView: View {
+    @Binding var scope: MemoryScope
     @State private var entries: [Entry] = []
     @State private var loading: Bool = false
     @State private var actionStatus: String = ""
     @State private var selected: Entry.ID?
-    @State private var scope: Scope = .events
-
-    enum Scope: Hashable, Identifiable {
-        case events
-        case portrait(category: String)
-        var id: String {
-            switch self {
-            case .events: return "__events__"
-            case .portrait(let c): return "portrait:\(c)"
-            }
-        }
-        var displayName: String {
-            switch self {
-            case .events: return "Events"
-            case .portrait(let c): return c.replacingOccurrences(of: "_", with: " ").capitalized
-            }
-        }
-        var systemImage: String {
-            switch self {
-            case .events:               return "clock.arrow.circlepath"
-            case .portrait("personality"): return "person.fill"
-            case .portrait("social"):      return "person.3.fill"
-            case .portrait("background"):  return "books.vertical.fill"
-            case .portrait("experiences"): return "map.fill"
-            case .portrait("interests"):   return "sparkles"
-            case .portrait("speech_style"):return "text.bubble.fill"
-            case .portrait("habits"):      return "repeat"
-            case .portrait("skills"):      return "wrench.adjustable.fill"
-            case .portrait("emotions"):    return "heart.fill"
-            case .portrait:                return "doc.text"
-            }
-        }
-    }
 
     struct Entry: Identifiable {
         let id: URL
         let title: String
         let category: String
-        let scope: Scope          // events or which portrait category
+        let scope: MemoryScope
         let file: PortraitFile
         let modified: Date
     }
 
     var body: some View {
         HSplitView {
-            scopePicker
-                .frame(minWidth: 180, idealWidth: 200, maxWidth: 240)
-
             listColumn
-                .frame(minWidth: 320, idealWidth: 380, maxWidth: 480)
+                .frame(minWidth: 320, idealWidth: 400, maxWidth: 520)
 
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color.black)
-        .task(id: scope) { await reload() }
-    }
-
-    // MARK: - Scope picker (left)
-
-    private var scopePicker: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Memories")
-                .font(.system(size: 16, weight: .semibold))
-                .padding(.horizontal, 14)
-                .padding(.top, 44)
-                .padding(.bottom, 10)
-
-            scopeSectionHeader("PORTRAIT")
-            ForEach(PortraitPaths.seedCategories, id: \.self) { cat in
-                scopeRow(.portrait(category: cat))
-            }
-
-            Divider().padding(.vertical, 8)
-            scopeSectionHeader("EVENTS")
-            scopeRow(.events)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.85))
-    }
-
-    private func scopeSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 4)
-    }
-
-    private func scopeRow(_ s: Scope) -> some View {
-        Button {
-            scope = s
+        .task(id: scope) {
             selected = nil
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: s.systemImage)
-                    .font(.system(size: 11))
-                    .frame(width: 16)
-                    .foregroundStyle(scope == s ? .white : .secondary)
-                Text(s.displayName)
-                    .font(.system(size: 12, weight: scope == s ? .semibold : .regular))
-                    .foregroundStyle(scope == s ? .white : .primary)
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(
-                Rectangle()
-                    .fill(scope == s ? Color.accentColor.opacity(0.65) : .clear)
-            )
+            await reload()
         }
-        .buttonStyle(.plain)
     }
 
-    // MARK: - Middle column (toolbar + list)
+    // MARK: - List column (toolbar + list)
 
     private var listColumn: some View {
         VStack(spacing: 0) {
@@ -331,7 +241,7 @@ struct MemoriesView: View {
 
     /// Walks the appropriate root (events/ or portrait/<cat>/) for the
     /// current scope. Off the main actor.
-    nonisolated private static func scan(scope: Scope) -> [Entry] {
+    nonisolated private static func scan(scope: MemoryScope) -> [Entry] {
         let fm = FileManager.default
         let root: URL
         switch scope {
@@ -443,7 +353,7 @@ private struct EntryRow: View {
 }
 
 private struct EmptyHint: View {
-    let scope: MemoriesView.Scope
+    let scope: MemoryScope
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "tray")

@@ -13,6 +13,7 @@ struct TimelineSidebar: View {
     let state: TimelineState
     @Binding var selection: SidebarSection?
     let chat: ChatController
+    @Binding var memoryScope: MemoryScope
 
     @Environment(ChatStore.self) private var chatStore
 
@@ -56,6 +57,8 @@ struct TimelineSidebar: View {
                         }
                     } else if selection == .home {
                         recentsSection
+                    } else if selection == .memories {
+                        memoryScopeSection
                     } else {
                         otherSectionPlaceholder
                     }
@@ -181,6 +184,54 @@ struct TimelineSidebar: View {
                 }
             }
         }
+    }
+
+    // MARK: Memories scope picker (shown when selection == .memories)
+
+    private var memoryScopeSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            scopeHeader("PORTRAIT")
+            ForEach(PortraitPaths.seedCategories, id: \.self) { cat in
+                scopeRow(.portrait(category: cat))
+            }
+            Divider().padding(.vertical, 8)
+            scopeHeader("EVENTS")
+            scopeRow(.events)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func scopeHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 4)
+    }
+
+    private func scopeRow(_ s: MemoryScope) -> some View {
+        Button {
+            memoryScope = s
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: s.systemImage)
+                    .font(.system(size: 11))
+                    .frame(width: 16)
+                    .foregroundStyle(memoryScope == s ? .white : .secondary)
+                Text(s.displayName)
+                    .font(.system(size: 12, weight: memoryScope == s ? .semibold : .regular))
+                    .foregroundStyle(memoryScope == s ? .white : .primary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(memoryScope == s ? Color.accentColor.opacity(0.65) : .clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, -4)
     }
 
     // MARK: placeholder for non-Timeline sections
