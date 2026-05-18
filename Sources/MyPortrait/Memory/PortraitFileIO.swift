@@ -116,7 +116,7 @@ enum PortraitFileIO {
         lines.append("weight: \(formatDouble(f.weight))")
         lines.append("access_count: \(f.accessCount)")
         lines.append("access_history: \(formatDateArray(f.accessHistory, dateOnly: true))")
-        lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: false))")
+        lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: true))")
         lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")
         lines.append("event_summary: \(formatNullableString(f.eventSummary.isEmpty ? nil : f.eventSummary))")
         lines.append("category: \(f.category)")

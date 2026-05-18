@@ -44,6 +44,17 @@ final class ChatController {
 
     // MARK: - Conversation switching
 
+    /// Abort the current streaming response. Pi keeps the conversation alive
+    /// so the next prompt still works.
+    func abort() {
+        try? agent?.abort()
+        flushPending()
+        isStreaming = false
+        assistantMessageID = nil
+        activeTextPartID = nil
+        persist()
+    }
+
     /// Drop the live Pi agent and load `convId`'s messages from disk.
     /// Use `nil` to clear the view (e.g. when "New chat" is pressed).
     func switchTo(_ convId: UUID?) {
@@ -203,6 +214,13 @@ final class ChatController {
             startTool(callId: id, name: name, args: args)
         case .toolEnd(let id, let result, let isError):
             finishTool(callId: id, result: result, isError: isError)
+        case .thinkingStart:
+            flushPending()
+            startThinking()
+        case .thinkingDelta(let delta):
+            appendThinking(delta)
+        case .thinkingEnd(let finalText, let durationMs):
+            finishThinking(finalText: finalText, durationMs: durationMs)
         default:
             break
         }
@@ -283,6 +301,46 @@ final class ChatController {
                 b.isRunning = false
                 b.isError = isError
                 messages[mIdx].parts[pIdx] = .tool(b)
+                return
+            }
+        }
+    }
+
+    // MARK: - Thinking blocks
+
+    private func startThinking() {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        let block = ThinkingBlock(id: UUID(), text: "", isRunning: true, durationMs: nil)
+        messages[mIdx].parts.append(.thinking(block))
+        activeTextPartID = nil
+    }
+
+    private func appendThinking(_ delta: String) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        // Append to the latest thinking part if it's still running.
+        for pIdx in messages[mIdx].parts.indices.reversed() {
+            if case .thinking(var b) = messages[mIdx].parts[pIdx], b.isRunning {
+                b.text += delta
+                messages[mIdx].parts[pIdx] = .thinking(b)
+                return
+            }
+        }
+        // No running block — open a new one (some providers skip thinking_start).
+        startThinking()
+        appendThinking(delta)
+    }
+
+    private func finishThinking(finalText: String?, durationMs: Int?) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        for pIdx in messages[mIdx].parts.indices.reversed() {
+            if case .thinking(var b) = messages[mIdx].parts[pIdx], b.isRunning {
+                if let finalText, !finalText.isEmpty { b.text = finalText }
+                b.isRunning = false
+                b.durationMs = durationMs
+                messages[mIdx].parts[pIdx] = .thinking(b)
                 return
             }
         }

@@ -30,7 +30,9 @@ struct HomeView: View {
                 isConnected: appState.activeAI != nil,
                 contextChips: $contextChips,
                 pickerOpen: $pickerOpen,
+                isStreaming: chat.isStreaming,
                 onSend: send,
+                onStop: { chat.abort() },
                 onChipTap: { chipText in
                     prompt = chipText
                     send()
@@ -267,10 +269,101 @@ private struct AssistantBody: View {
                 case .tool(let block):
                     ToolCard(block: block)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                case .thinking(let block):
+                    ThinkingCard(block: block)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
                 }
             }
         }
         .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+}
+
+/// Reasoning / chain-of-thought card. Streams the thinking text while
+/// `isRunning`; collapses to a one-line "Thought for Ns" once done.
+private struct ThinkingCard: View {
+    let block: ThinkingBlock
+    @State private var expanded: Bool = true
+    @State private var didAutoCollapse: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if expanded, !block.text.isEmpty {
+                Divider().background(Color.white.opacity(0.08))
+                ScrollView {
+                    Text(block.text)
+                        .font(.system(size: 12, design: .default))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .italic()
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .opacity(0.85)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(accentStroke, lineWidth: 0.8)
+                )
+        )
+        .onChange(of: block.isRunning) {
+            if !block.isRunning, !didAutoCollapse {
+                didAutoCollapse = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation(.easeOut(duration: 0.25)) { expanded = false }
+                }
+            }
+        }
+        .onAppear {
+            if !block.isRunning { expanded = false; didAutoCollapse = true }
+        }
+    }
+
+    private var header: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.20)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                Text(label)
+                    .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                    .tracking(0.4)
+                    .foregroundStyle(.white.opacity(0.82))
+                Spacer()
+                if block.isRunning {
+                    ProgressView().controlSize(.small).tint(.white.opacity(0.7))
+                }
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var label: String {
+        if block.isRunning { return "Thinking…" }
+        if let ms = block.durationMs {
+            let secs = max(1, ms / 1000)
+            return "Thought for \(secs)s"
+        }
+        return "Thought"
+    }
+
+    private var accentStroke: Color {
+        block.isRunning ? Color.cyan.opacity(0.40) : Color.white.opacity(0.10)
     }
 }
 
@@ -739,7 +832,9 @@ private struct ChatInputBar: View {
     let isConnected: Bool
     @Binding var contextChips: [ContextChip]
     @Binding var pickerOpen: Bool
+    let isStreaming: Bool
     let onSend: () -> Void
+    let onStop: () -> Void
     let onChipTap: (String) -> Void
 
     @FocusState private var focused: Bool
@@ -819,8 +914,13 @@ private struct ChatInputBar: View {
                     }
                     IconActionButton(icon: "shield") { /* TODO */ }
                     IconActionButton(icon: "paperclip") { /* TODO */ }
-                    SendButton(action: onSend, enabled: !prompt.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .keyboardShortcut(.return, modifiers: [.command])
+                    if isStreaming {
+                        StopButton(action: onStop)
+                            .keyboardShortcut(.escape, modifiers: [])
+                    } else {
+                        SendButton(action: onSend, enabled: !prompt.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .keyboardShortcut(.return, modifiers: [.command])
+                    }
                 }
             }
         }
@@ -881,6 +981,48 @@ private struct IconActionButton: View {
                         )
                 )
                 .scaleEffect(pressed ? 0.90 : (hover ? 1.04 : 1.0))
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in withAnimation(.easeOut(duration: 0.08)) { pressed = true } }
+                .onEnded   { _ in withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { pressed = false } }
+        )
+        .animation(.easeOut(duration: 0.18), value: hover)
+    }
+}
+
+/// Stop button — replaces SendButton while a turn is streaming. Red-tinted
+/// gradient + breathing pulse to signal "interrupt".
+private struct StopButton: View {
+    let action: () -> Void
+    @State private var hover = false
+    @State private var pressed = false
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.95, green: 0.35, blue: 0.45),
+                                     Color(red: 0.70, green: 0.20, blue: 0.55)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.7)
+                    )
+                    .shadow(color: Color.red.opacity(hover ? 0.55 : 0.30),
+                            radius: hover ? 14 : 8, x: 0, y: 4)
+                    .frame(width: 34, height: 34)
+                // Filled square = "stop"
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(Color.white.opacity(0.95))
+                    .frame(width: 11, height: 11)
+            }
+            .scaleEffect(pressed ? 0.92 : (hover ? 1.04 : 1.0))
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }

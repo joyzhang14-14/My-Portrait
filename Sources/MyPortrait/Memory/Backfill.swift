@@ -34,8 +34,21 @@ enum Backfill {
         let archiverResult: Archiver.Result
     }
 
-    /// Default: last 14 days.
-    static func run(daysBack: Int = 14, activeWindowDays: Int = 14) async throws -> Result {
+    struct Progress {
+        let dayIndex: Int          // 1-based current day in the loop
+        let dayCount: Int
+        let day: Date              // which day is being processed
+        let phase: String          // e.g. "LLM grouping", "writing files"
+    }
+
+    /// Default: last 14 days. Idempotent + resumable — days whose
+    /// `events/<yyyy-MM-dd>/` directory already exists with files are
+    /// skipped (assumption: previous run finished that day).
+    static func run(
+        daysBack: Int = 14,
+        activeWindowDays: Int = 14,
+        progress: ((Progress) -> Void)? = nil
+    ) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
 
         let db = ScreenpipeDB()
@@ -78,22 +91,18 @@ enum Backfill {
             if sessions.isEmpty { continue }
 
             // Enrich each session with OCR text + drop the ones with no
-            // semantic content (per user feedback: "如果什么内容都没有就别记
-            // 了"). A session is "empty" when:
-            //   - OCR text is shorter than `minOcrChars`, AND
-            //   - window_name is empty (no app-side hint either), AND
-            //   - duration is short (< 5 min — long sessions might still be
-            //     worth noting even without OCR e.g. video playback)
-            // Skipped sessions are counted but never reach the LLM.
-            let minOcrChars = 30
+            // semantic content. The previous filter (OCR short AND window
+            // empty AND short duration) let long-running idle sessions
+            // through; now we just check OCR substance. No OCR = nothing
+            // for the LLM to summarise = no real event worth recording.
+            let minOcrChars = 60
+            // Up from 800 → 2000 so the LLM has real material to write
+            // a meaningful summary from.
+            let maxOcrChars = 2000
             var enriched: [EventBuilder.EnrichedSession] = []
             for s in sessions {
-                let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: 800)
-                let durSec = s.lastSeen.timeIntervalSince(s.firstSeen)
-                let meaningless = ocr.count < minOcrChars
-                    && s.windowName.trimmingCharacters(in: .whitespaces).isEmpty
-                    && durSec < 5 * 60
-                if meaningless {
+                let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: maxOcrChars)
+                if ocr.count < minOcrChars {
                     totals.emptySessionCount += 1
                     continue
                 }

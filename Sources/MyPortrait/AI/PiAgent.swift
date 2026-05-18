@@ -26,7 +26,8 @@ final class PiAgent: @unchecked Sendable {
         case toolStart(id: String, name: String, args: [String: Any])
         case toolEnd(id: String, result: String, isError: Bool)
         case thinkingStart
-        case thinkingEnd
+        case thinkingDelta(String)
+        case thinkingEnd(finalText: String?, durationMs: Int?)
         case agentStart
         case agentEnd
         case error(String)
@@ -208,8 +209,12 @@ final class PiAgent: @unchecked Sendable {
             emit(.agentEnd)
         case "thinking_start":
             emit(.thinkingStart)
+        case "thinking_delta":
+            if let d = obj["delta"] as? String { emit(.thinkingDelta(d)) }
         case "thinking_end":
-            emit(.thinkingEnd)
+            let finalText = obj["content"] as? String
+            let dur = obj["durationMs"] as? Int
+            emit(.thinkingEnd(finalText: finalText, durationMs: dur))
         case "tool_execution_start":
             let id   = obj["toolCallId"] as? String ?? ""
             let name = obj["toolName"]   as? String ?? "unknown"

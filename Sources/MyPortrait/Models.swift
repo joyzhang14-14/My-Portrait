@@ -71,17 +71,19 @@ enum ChatRole: String, Codable { case user, assistant }
 enum ContentPart: Identifiable, Hashable, Codable {
     case text(id: UUID, value: String)
     case tool(ToolBlock)
+    case thinking(ThinkingBlock)
 
     var id: UUID {
         switch self {
-        case .text(let id, _): return id
-        case .tool(let b):     return b.id
+        case .text(let id, _):   return id
+        case .tool(let b):       return b.id
+        case .thinking(let b):   return b.id
         }
     }
 
-    // Custom Codable so the JSON layout is stable: `{"kind":"text"|"tool", ...}`
+    // Custom Codable so the JSON layout is stable.
     private enum CodingKeys: String, CodingKey { case kind, id, value, block }
-    private enum Kind: String, Codable { case text, tool }
+    private enum Kind: String, Codable { case text, tool, thinking }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -91,6 +93,8 @@ enum ContentPart: Identifiable, Hashable, Codable {
                          value: try c.decode(String.self, forKey: .value))
         case .tool:
             self = .tool(try c.decode(ToolBlock.self, forKey: .block))
+        case .thinking:
+            self = .thinking(try c.decode(ThinkingBlock.self, forKey: .block))
         }
     }
     func encode(to encoder: Encoder) throws {
@@ -103,8 +107,21 @@ enum ContentPart: Identifiable, Hashable, Codable {
         case .tool(let b):
             try c.encode(Kind.tool, forKey: .kind)
             try c.encode(b, forKey: .block)
+        case .thinking(let b):
+            try c.encode(Kind.thinking, forKey: .kind)
+            try c.encode(b, forKey: .block)
         }
     }
+}
+
+/// Streamed chain-of-thought block (gpt-5, o1, claude reasoning models).
+/// Renders as a collapsible "Thinking" card under the assistant bubble.
+struct ThinkingBlock: Identifiable, Hashable, Codable {
+    let id: UUID
+    var text: String
+    var isRunning: Bool
+    /// How long the thinking phase took, set on `thinking_end`.
+    var durationMs: Int?
 }
 
 /// One tool invocation. Streamed in two phases: created on
