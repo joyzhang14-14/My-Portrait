@@ -12,7 +12,10 @@ import os.log
 actor PortraitDBImpl: PortraitDB {
 
     private let logger = Logger(subsystem: "com.myportrait.db", category: "impl")
-    private let dbPool: DatabasePool
+
+    /// 内部可见的 pool 引用。SearchEngine 实现共用此 pool（WAL 下多 reader 安全）。
+    /// `nonisolated let` —— DatabasePool 是 Sendable，跨 actor 边界传零成本。
+    nonisolated let dbPool: DatabasePool
 
     init(path: String = Storage.portraitDBPath) throws {
         // 确保父目录存在（首启时 ~/.portrait/ 可能还没建好）。
@@ -203,6 +206,87 @@ actor PortraitDBImpl: PortraitDB {
                 arguments: [AudioChunkStatus.pending.rawValue, AudioChunkStatus.inProgress.rawValue]
             )
             return db.changesCount
+        }
+    }
+
+    // MARK: - Retention
+
+    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
+        try await dbPool.read { db in
+            // 屏幕快照（.jpg）
+            let snapshotPaths = try String.fetchAll(db, sql: """
+                SELECT snapshot_path FROM frames
+                WHERE snapshot_path IS NOT NULL AND timestamp_ms < ?
+                """, arguments: [ms])
+
+            // MP4 视频块
+            let videoChunkPaths = try String.fetchAll(db, sql: """
+                SELECT file_path FROM video_chunks
+                WHERE end_ts_ms < ?
+                """, arguments: [ms])
+
+            // 音频 wav
+            let audioPaths = try String.fetchAll(db, sql: """
+                SELECT file_path FROM audio_chunks
+                WHERE recorded_at_ms < ?
+                """, arguments: [ms])
+
+            return RetentionFileList(
+                snapshotPaths: snapshotPaths,
+                videoChunkPaths: videoChunkPaths,
+                audioPaths: audioPaths
+            )
+        }
+    }
+
+    func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats {
+        try await dbPool.write { db in
+            switch mode {
+            case .mediaOnly:
+                // 1. NULL 掉 frames 的媒体引用（保留 OCR 文本）
+                try db.execute(sql: """
+                    UPDATE frames
+                    SET snapshot_path = NULL, video_chunk_id = NULL, offset_ms = NULL
+                    WHERE timestamp_ms < ?
+                    """, arguments: [beforeMs])
+                let framesAffected = db.changesCount
+
+                // 2. 删旧的 video_chunks 行（frames 已经 NULL 了 video_chunk_id 引用）
+                try db.execute(sql: """
+                    DELETE FROM video_chunks WHERE end_ts_ms < ?
+                    """, arguments: [beforeMs])
+                let videoChunksDeleted = db.changesCount
+
+                // mediaOnly：audio_chunks 保留（含 transcriptions 关联），文件由 worker 删。
+                return RetentionStats(
+                    framesAffected: framesAffected,
+                    videoChunksDeleted: videoChunksDeleted,
+                    audioChunksDeleted: 0
+                )
+
+            case .everything:
+                try db.execute(sql: """
+                    DELETE FROM frames WHERE timestamp_ms < ?
+                    """, arguments: [beforeMs])
+                let framesAffected = db.changesCount
+
+                try db.execute(sql: """
+                    DELETE FROM video_chunks WHERE end_ts_ms < ?
+                    """, arguments: [beforeMs])
+                let videoChunksDeleted = db.changesCount
+
+                // CASCADE 删 transcriptions
+                try db.execute(sql: """
+                    DELETE FROM audio_chunks WHERE recorded_at_ms < ?
+                    """, arguments: [beforeMs])
+                let audioChunksDeleted = db.changesCount
+
+                return RetentionStats(
+                    framesAffected: framesAffected,
+                    videoChunksDeleted: videoChunksDeleted,
+                    audioChunksDeleted: audioChunksDeleted
+                )
+            }
         }
     }
 

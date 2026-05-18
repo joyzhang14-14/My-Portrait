@@ -26,12 +26,14 @@ final class Services {
     let reporter: UnimplementedReporter
     let settings: CaptureSettings
     let db: PortraitDB
+    let searchEngine: SearchEngine
     let coordinator: CaptureCoordinator
     let compactor: CompactionWorker
     let audio: AudioCaptureService
     let systemAudio: SystemAudioCaptureService
     let transcriber: TranscriptionScheduler
     let powerWatcher: PowerWatcher
+    let retentionWorker: RetentionWorker
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -46,25 +48,29 @@ final class Services {
 
         // 真 DB —— 失败抛错冒到 AppDelegate，那边弹 alert 退出。
         // 失败常见原因：磁盘满 / 权限不对 / migration 失败。开发期罕见。
-        let realDB: PortraitDB
+        let dbImpl: PortraitDBImpl
         do {
-            realDB = try PortraitDBImpl()
+            dbImpl = try PortraitDBImpl()
         } catch {
             // 启动期 DB 打不开是致命的。直接 fatalError 比挂个 stub 上线更诚实。
             fatalError("PortraitDB failed to open: \(error)")
         }
-        self.db = realDB
+        self.db = dbImpl
+        // 共用同一个 DatabasePool（WAL 多 reader 安全）。Phase 4 换 HybridSearchEngine
+        // 时只改这一行，UI 调 services.searchEngine 不动。
+        self.searchEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
 
-        self.coordinator = CaptureCoordinator(db: realDB, reporter: reporter)
-        self.compactor = CompactionWorker(db: realDB, reporter: reporter)
+        self.coordinator = CaptureCoordinator(db: dbImpl, reporter: reporter)
+        self.compactor = CompactionWorker(db: dbImpl, reporter: reporter)
         let audioSvc = AudioCaptureService(reporter: reporter)
         self.audio = audioSvc
         self.systemAudio = SystemAudioCaptureService(reporter: reporter)
         let pw = PowerWatcher()
         self.powerWatcher = pw
         self.transcriber = TranscriptionScheduler(
-            db: realDB, audio: audioSvc, reporter: reporter, power: pw
+            db: dbImpl, audio: audioSvc, reporter: reporter, power: pw
         )
+        self.retentionWorker = RetentionWorker(db: dbImpl)
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
@@ -79,7 +85,7 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
-        Task.detached(priority: .utility) { [compactor, transcriber] in
+        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
             do {
@@ -93,6 +99,7 @@ final class Services {
 
             await compactor.start()
             await transcriber.start()
+            await retentionWorker.start()
         }
 
         // 屏幕采集订阅。effective = enabled && !paused。
@@ -156,6 +163,7 @@ final class Services {
         await systemAudio.stop()
         await compactor.stop()
         await transcriber.stop()
+        await retentionWorker.stop()
         powerWatcher.stop()
         settingsCancellables.removeAll()
     }

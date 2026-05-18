@@ -54,6 +54,19 @@ public protocol PortraitDB: Sendable {
     ///
     /// 返回受影响的行数（log 出来方便观察）。
     func resetInProgressAudioChunks() async throws -> Int
+
+    // MARK: - 保留期 / 自动删除（RetentionWorker 用）
+
+    /// 早于 `ms` 的所有媒体文件路径快照。
+    /// RetentionWorker 先用这个清单删盘上文件，再调 `applyRetention(...)` 清 DB。
+    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList
+
+    /// 按 `mode` 清 DB：
+    /// - `.mediaOnly`：NULL 掉 frames.snapshot_path / video_chunk_id；DELETE 旧 video_chunks。
+    ///   保留 frames 行（含 OCR 文本）和 audio_chunks 行（含转录）。
+    /// - `.everything`：DELETE frames / video_chunks / audio_chunks 三表所有早于 ms 的行。
+    ///   audio_chunks DELETE CASCADE 到 audio_transcriptions。
+    func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats
 }
 
 // MARK: - Records
@@ -149,6 +162,39 @@ public enum AudioChunkStatus: String, Sendable {
     case inProgress = "in_progress"
     case done
     case failed
+}
+
+// MARK: - Retention 数据载体
+
+public enum RetentionMode: String, Sendable {
+    /// 只删媒体文件 + 媒体 DB 引用，保留 frames 行（OCR 文本）和转录文本
+    case mediaOnly
+    /// 删媒体文件 + DB 行（一切）。CASCADE 到 transcriptions
+    case everything
+}
+
+public struct RetentionFileList: Sendable {
+    public let snapshotPaths: [String]    // .jpg
+    public let videoChunkPaths: [String]  // .mp4
+    public let audioPaths: [String]       // .wav (+ 配套 .meta.json / .transcript.json 由 worker 推断)
+
+    public init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String]) {
+        self.snapshotPaths = snapshotPaths
+        self.videoChunkPaths = videoChunkPaths
+        self.audioPaths = audioPaths
+    }
+}
+
+public struct RetentionStats: Sendable {
+    public let framesAffected: Int
+    public let videoChunksDeleted: Int
+    public let audioChunksDeleted: Int
+
+    public init(framesAffected: Int, videoChunksDeleted: Int, audioChunksDeleted: Int) {
+        self.framesAffected = framesAffected
+        self.videoChunksDeleted = videoChunksDeleted
+        self.audioChunksDeleted = audioChunksDeleted
+    }
 }
 
 public struct TranscriptionRecord: Sendable {

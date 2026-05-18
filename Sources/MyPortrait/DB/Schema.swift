@@ -116,6 +116,17 @@ enum DBSchema {
                           on: "audio_transcriptions", columns: ["audio_chunk_id"])
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v3 — transcriptions FTS5（用于全文搜索语音转录）
+        // ═══════════════════════════════════════════════════════════
+        m.registerMigration("v3_transcriptions_fts") { db in
+            try db.create(virtualTable: "transcriptions_fts", using: FTS5()) { t in
+                t.synchronize(withTable: "audio_transcriptions")
+                t.tokenizer = .unicode61(diacritics: .remove)
+                t.column("text")
+            }
+        }
+
         return m
     }
 }
