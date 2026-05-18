@@ -241,7 +241,7 @@ final class ChatController {
         case .error(let msg):
             flushPending()
             lastError = msg
-            appendText("⚠️ \(msg)")
+            appendErrorBlock(msg)
             isStreaming = false
             persist()
         case .toolStart(let id, let name, let args):
@@ -367,6 +367,14 @@ final class ChatController {
         // No running block — open a new one (some providers skip thinking_start).
         startThinking()
         appendThinking(delta)
+    }
+
+    private func appendErrorBlock(_ message: String) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        let block = ErrorBlock.classify(message)
+        messages[mIdx].parts.append(.error(block))
+        activeTextPartID = nil
     }
 
     private func finishThinking(finalText: String?, durationMs: Int?) {

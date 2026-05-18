@@ -166,6 +166,8 @@ private func plainTextOf(_ m: ChatMessage) -> String {
             if !b.output.isEmpty { out.append(b.output) }
         case .thinking(let b):
             if !b.text.isEmpty { out.append("[thinking] \(b.text)") }
+        case .error(let b):
+            out.append("[error] \(b.message)")
         }
     }
     return out.joined(separator: "\n\n")
@@ -366,10 +368,122 @@ private struct AssistantBody: View {
                 case .thinking(let block):
                     ThinkingCard(block: block)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                case .error(let block):
+                    ErrorCard(block: block)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
                 }
             }
         }
         .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+}
+
+/// Friendly error card for quota / rate / auth / network failures. Click to
+/// reveal the raw error message.
+private struct ErrorCard: View {
+    let block: ErrorBlock
+    @State private var showDetails = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { showDetails.toggle() }
+                } label: {
+                    Image(systemName: showDetails ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+
+            if showDetails {
+                Divider().background(Color.white.opacity(0.10))
+                ScrollView {
+                    Text(block.message)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 160)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tint.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(tint.opacity(0.45), lineWidth: 0.8)
+                )
+        )
+    }
+
+    private var tint: Color {
+        switch block.kind {
+        case .creditsExhausted, .dailyLimit, .rateLimit: return .orange
+        case .authExpired, .modelNotAllowed:             return .yellow
+        case .network:                                   return .blue
+        case .other:                                     return .red
+        }
+    }
+
+    private var icon: String {
+        switch block.kind {
+        case .rateLimit:         return "tortoise.fill"
+        case .dailyLimit:        return "calendar.badge.exclamationmark"
+        case .creditsExhausted:  return "creditcard.trianglebadge.exclamationmark"
+        case .modelNotAllowed:   return "lock.fill"
+        case .authExpired:       return "key.slash"
+        case .network:           return "wifi.exclamationmark"
+        case .other:             return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var title: String {
+        switch block.kind {
+        case .rateLimit:         return "Slow down"
+        case .dailyLimit:        return "Daily limit reached"
+        case .creditsExhausted:  return "Out of credits"
+        case .modelNotAllowed:   return "Model unavailable"
+        case .authExpired:       return "Sign-in expired"
+        case .network:           return "Network problem"
+        case .other:             return "Error"
+        }
+    }
+
+    private var subtitle: String {
+        switch block.kind {
+        case .rateLimit:
+            return "Too many requests — wait a moment and try again."
+        case .dailyLimit:
+            if let r = block.resetsAt { return "Resets at \(r). Try a smaller prompt or wait." }
+            return "You've used your ChatGPT daily quota. Wait or upgrade."
+        case .creditsExhausted:
+            return "Your account is out of credits. Top up your plan."
+        case .modelNotAllowed:
+            return "The selected model isn't on your plan. Switch in Connections."
+        case .authExpired:
+            return "Re-sign in to ChatGPT from Connections to continue."
+        case .network:
+            return "Couldn't reach OpenAI. Check your connection and retry."
+        case .other:
+            return "Something went wrong. Click below for details."
+        }
     }
 }
 

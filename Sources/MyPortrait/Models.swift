@@ -72,18 +72,20 @@ enum ContentPart: Identifiable, Hashable, Codable {
     case text(id: UUID, value: String)
     case tool(ToolBlock)
     case thinking(ThinkingBlock)
+    case error(ErrorBlock)
 
     var id: UUID {
         switch self {
         case .text(let id, _):   return id
         case .tool(let b):       return b.id
         case .thinking(let b):   return b.id
+        case .error(let b):      return b.id
         }
     }
 
     // Custom Codable so the JSON layout is stable.
     private enum CodingKeys: String, CodingKey { case kind, id, value, block }
-    private enum Kind: String, Codable { case text, tool, thinking }
+    private enum Kind: String, Codable { case text, tool, thinking, error }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -95,6 +97,8 @@ enum ContentPart: Identifiable, Hashable, Codable {
             self = .tool(try c.decode(ToolBlock.self, forKey: .block))
         case .thinking:
             self = .thinking(try c.decode(ThinkingBlock.self, forKey: .block))
+        case .error:
+            self = .error(try c.decode(ErrorBlock.self, forKey: .block))
         }
     }
     func encode(to encoder: Encoder) throws {
@@ -110,6 +114,9 @@ enum ContentPart: Identifiable, Hashable, Codable {
         case .thinking(let b):
             try c.encode(Kind.thinking, forKey: .kind)
             try c.encode(b, forKey: .block)
+        case .error(let b):
+            try c.encode(Kind.error, forKey: .kind)
+            try c.encode(b, forKey: .block)
         }
     }
 }
@@ -122,6 +129,54 @@ struct ThinkingBlock: Identifiable, Hashable, Codable {
     var isRunning: Bool
     /// How long the thinking phase took, set on `thinking_end`.
     var durationMs: Int?
+}
+
+/// LLM-level error surfaced through the chat — quota, rate limit, etc. Rendered
+/// as a card instead of plain text so the user can see the category at a glance.
+struct ErrorBlock: Identifiable, Hashable, Codable {
+    let id: UUID
+    var kind: Kind
+    var message: String       // raw error message from Pi (kept for "show details")
+    /// Optional ISO timestamp the limit resets at (parsed from message).
+    var resetsAt: String?
+
+    enum Kind: String, Codable, Hashable {
+        case rateLimit          // too many requests right now
+        case dailyLimit         // hit daily ChatGPT quota
+        case creditsExhausted   // BYOK / paid plan out of credits
+        case modelNotAllowed    // selected model not available on this plan
+        case authExpired        // token revoked / expired
+        case network            // connectivity / 5xx
+        case other
+    }
+
+    static func classify(_ message: String) -> ErrorBlock {
+        let m = message.lowercased()
+        var kind: Kind = .other
+        if m.contains("credits_exhausted") || m.contains("insufficient_quota") {
+            kind = .creditsExhausted
+        } else if m.contains("daily") && (m.contains("limit") || m.contains("quota")) {
+            kind = .dailyLimit
+        } else if m.contains("rate") && m.contains("limit") || m.contains("too many requests") {
+            kind = .rateLimit
+        } else if m.contains("model_not_found") || m.contains("model_not_allowed") || m.contains("not have access") {
+            kind = .modelNotAllowed
+        } else if m.contains("invalid_grant") || m.contains("unauthorized") || m.contains("accountid") {
+            kind = .authExpired
+        } else if m.contains("network") || m.contains("timeout") || m.contains("econnrefused") || m.contains("503") || m.contains("502") {
+            kind = .network
+        }
+        // Try to lift "resets_at": "..." or similar field out of the message.
+        var resetsAt: String?
+        if let r = message.range(of: #""resets_at"\s*:\s*"([^"]+)""#, options: .regularExpression) {
+            let snippet = message[r]
+            if let q = snippet.range(of: #""([^"]+)"$"#, options: .regularExpression) {
+                let inner = snippet[q].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                resetsAt = inner
+            }
+        }
+        return ErrorBlock(id: UUID(), kind: kind, message: message, resetsAt: resetsAt)
+    }
 }
 
 /// One tool invocation. Streamed in two phases: created on
