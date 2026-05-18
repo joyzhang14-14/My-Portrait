@@ -114,7 +114,10 @@ final class ImpactScorer {
                 guard idx >= 0, idx < batch.count else { continue }
                 let url = batch[idx].0
                 var file = batch[idx].1
-                file.impact = max(1.0, min(5.0, s.impact))
+                let clamped = max(1.0, min(5.0, s.impact))
+                file.impact = clamped
+                file.rawImpact = clamped         // preserve LLM's original
+                file.rebalanceCount = 0          // reset; MemoryBudget can re-touch
                 file.impactSource = "llm:\(model)"
                 WeightCalculator.recompute(&file)
                 do {

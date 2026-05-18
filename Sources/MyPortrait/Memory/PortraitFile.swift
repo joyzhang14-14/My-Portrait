@@ -24,7 +24,15 @@ import Foundation
 /// Schema matches design doc §6.1. `body` is everything after the closing `---`.
 struct PortraitFile: Equatable {
     var created: Date
-    var impact: Double                  // 1-5; Double so LLM can micro-adjust
+    var impact: Double                  // FINAL impact used by WeightCalculator.
+                                        // Initially equals rawImpact; the
+                                        // MemoryBudget weekly pass may scale
+                                        // it down when the week is overloaded.
+    var rawImpact: Double               // LLM's original score, never modified
+                                        // by the budget pass. Source of truth
+                                        // for any future re-rebalance.
+    var rebalanceCount: Int             // # of times the budget pass touched
+                                        // this file. Capped at 5 (then frozen).
     var impactSource: String            // "baseline_duration" / "llm:gpt-5.4" / "user_override"
     var weight: Double                  // computed, ≥0
     var accessCount: Int
@@ -75,6 +83,8 @@ struct PortraitFile: Equatable {
         let stamp = Self.truncateToDay(firstOccurrence ?? created)
         self.created = created
         self.impact = impact
+        self.rawImpact = impact
+        self.rebalanceCount = 0
         self.impactSource = "baseline_duration"
         self.weight = 0                  // weight pass fills this in
         self.accessCount = 0
@@ -98,6 +108,8 @@ struct PortraitFile: Equatable {
     init(
         created: Date,
         impact: Double,
+        rawImpact: Double,
+        rebalanceCount: Int,
         impactSource: String,
         weight: Double,
         accessCount: Int,
@@ -118,6 +130,8 @@ struct PortraitFile: Equatable {
     ) {
         self.created = created
         self.impact = impact
+        self.rawImpact = rawImpact
+        self.rebalanceCount = rebalanceCount
         self.impactSource = impactSource
         self.weight = weight
         self.accessCount = accessCount

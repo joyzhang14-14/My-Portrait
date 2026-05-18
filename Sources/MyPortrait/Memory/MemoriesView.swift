@@ -66,6 +66,12 @@ struct MemoriesView: View {
                 .help("Rescore event impacts with LLM")
 
                 Button {
+                    Task { await runRebalance() }
+                } label: { Image(systemName: "equal.circle") }
+                .buttonStyle(.borderless)
+                .help("Weekly memory budget — scale down impacts if the past 7 days exceed the consolidation budget")
+
+                Button {
                     Task { await runDistill() }
                 } label: { Image(systemName: "wand.and.stars") }
                 .buttonStyle(.borderless)
@@ -228,6 +234,16 @@ struct MemoriesView: View {
         } catch {
             actionStatus = "Backfill failed: \(error.localizedDescription)"
         }
+    }
+
+    @MainActor
+    private func runRebalance() async {
+        actionStatus = "Rebalancing weekly memory budget…"
+        let outcome = await Task.detached(priority: .userInitiated) {
+            return MemoryBudget_applyToDisk()
+        }.value
+        actionStatus = outcome
+        await reload()
     }
 
     @MainActor

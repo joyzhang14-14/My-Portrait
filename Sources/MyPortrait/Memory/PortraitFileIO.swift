@@ -56,6 +56,10 @@ enum PortraitFileIO {
         // occurrences, tags, pinned. Optional: source, superseded_by, archived_at.
         let created = try requireDate(fields, "created")
         let impact = try requireDouble(fields, "impact")
+        // raw_impact / rebalance_count default to mirror the current impact
+        // and 0 — so pre-budget-pass files migrate without losing data.
+        let rawImpact = (try? requireDouble(fields, "raw_impact")) ?? impact
+        let rebalanceCount = (try? requireInt(fields, "rebalance_count")) ?? 0
         // impact_source defaults to baseline_duration so older files (pre-LLM
         // scoring) read cleanly without a re-migration.
         let impactSource = (try? optionalString(fields, "impact_source")) ?? nil ?? "baseline_duration"
@@ -82,6 +86,8 @@ enum PortraitFileIO {
         return PortraitFile(
             created: created,
             impact: impact,
+            rawImpact: rawImpact,
+            rebalanceCount: rebalanceCount,
             impactSource: impactSource,
             weight: weight,
             accessCount: accessCount,
@@ -117,6 +123,8 @@ enum PortraitFileIO {
         var lines: [String] = ["---"]
         lines.append("created: \(formatDateOnly(f.created))")
         lines.append("impact: \(formatDouble(f.impact))")
+        lines.append("raw_impact: \(formatDouble(f.rawImpact))")
+        lines.append("rebalance_count: \(f.rebalanceCount)")
         lines.append("impact_source: \(f.impactSource)")
         lines.append("weight: \(formatDouble(f.weight))")
         lines.append("access_count: \(f.accessCount)")
