@@ -73,7 +73,10 @@ enum PortraitFileIO {
         // written before the EventBuilder pipeline existed.
         let eventTitle = (try? optionalString(fields, "event_title")) ?? nil ?? ""
         let eventSummary = (try? optionalString(fields, "event_summary")) ?? nil ?? ""
-        let category = (try? optionalString(fields, "category")) ?? nil ?? "habits"
+        let eventType = ((try? optionalString(fields, "type")) ?? nil ?? "experience").lowercased()
+        let portraitFacets = (try? facetArray(fields, "portrait_facets")) ?? []
+        // `category` is legacy. Default "" — Distiller no longer routes by it.
+        let category = (try? optionalString(fields, "category")) ?? nil ?? ""
         let memberFrameIds = (try? optionalInt64Array(fields, "member_frame_ids")) ?? []
 
         return PortraitFile(
@@ -86,6 +89,8 @@ enum PortraitFileIO {
             occurrences: occurrences,
             eventTitle: eventTitle,
             eventSummary: eventSummary,
+            eventType: eventType,
+            portraitFacets: portraitFacets,
             category: category,
             memberFrameIds: memberFrameIds,
             source: source,
@@ -119,7 +124,13 @@ enum PortraitFileIO {
         lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: true))")
         lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")
         lines.append("event_summary: \(formatNullableString(f.eventSummary.isEmpty ? nil : f.eventSummary))")
-        lines.append("category: \(f.category)")
+        lines.append("type: \(f.eventType.isEmpty ? "experience" : f.eventType)")
+        lines.append("portrait_facets: \(formatFacetArray(f.portraitFacets))")
+        if !f.category.isEmpty {
+            // Only emit legacy `category` if it was present on read — keeps
+            // brand-new files lean.
+            lines.append("category: \(f.category)")
+        }
         lines.append("member_frame_ids: \(formatInt64Array(f.memberFrameIds))")
         lines.append("source: \(formatNullableString(f.source))")
         lines.append("tags: \(formatStringArray(f.tags))")
@@ -216,6 +227,31 @@ enum PortraitFileIO {
             }
             return token
         }
+    }
+
+    /// portrait_facets serialised as YAML flow array of "facet:value" pairs:
+    ///   portrait_facets: ["interests:art-history", "skills:swift-ui"]
+    /// The colon triggers our `needsQuotes` so each pair is quoted. Parsing
+    /// strips the quotes, then splits on the first `:`.
+    private static func facetArray(_ fs: [String: String], _ key: String) throws -> [EventBuilder.PortraitFacet] {
+        guard let raw = fs[key] else { return [] }
+        let tokens = parseFlowArray(raw)
+        var out: [EventBuilder.PortraitFacet] = []
+        for raw in tokens {
+            let s: String = raw.hasPrefix("\"") && raw.hasSuffix("\"")
+                ? String(raw.dropFirst().dropLast()) : raw
+            guard let colon = s.firstIndex(of: ":") else { continue }
+            let facet = String(s[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(s[s.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            guard !facet.isEmpty, !value.isEmpty else { continue }
+            out.append(.init(facet: facet, value: value))
+        }
+        return out
+    }
+
+    private static func formatFacetArray(_ facets: [EventBuilder.PortraitFacet]) -> String {
+        let parts = facets.map { "\"\($0.facet):\($0.value)\"" }
+        return "[\(parts.joined(separator: ", "))]"
     }
 
     private static func optionalInt64Array(_ fs: [String: String], _ key: String) throws -> [Int64] {

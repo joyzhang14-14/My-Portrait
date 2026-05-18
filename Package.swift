@@ -22,10 +22,16 @@ let package = Package(
                 "Capture/Compaction/README.md",
                 "Capture/Events/README.md",
                 "Capture/Power/README.md",
+                "DB/README.md",
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
-        )
+        ),
+        .testTarget(
+            name: "MyPortraitTests",
+            dependencies: ["MyPortrait"],
+            path: "Tests/MyPortraitTests"
+        ),
     ]
 )

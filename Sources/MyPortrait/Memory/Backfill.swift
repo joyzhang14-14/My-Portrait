@@ -138,13 +138,12 @@ enum Backfill {
                 guard !entry.file.eventTitle.isEmpty,
                       let last = entry.file.occurrences.max(),
                       last >= activeCutoff else { return nil }
-                let categoryPath = entry.relativePath
-                    .split(separator: "/").first.map(String.init) ?? "habits"
                 return EventBuilder.ActiveEvent(
                     id: entry.relativePath,
                     title: entry.file.eventTitle,
                     summary: entry.file.eventSummary,
-                    category: categoryPath,
+                    type: entry.file.eventType.isEmpty ? "experience" : entry.file.eventType,
+                    tags: entry.file.tags,
                     lastOccurredOn: last
                 )
             }
@@ -274,27 +273,30 @@ enum Backfill {
         cache: inout [String: Entry],
         fallbackTitle: String? = nil
     ) throws {
-        let (title, summary, category, tags): (String, String, String, [String])
+        let title: String
+        let summary: String
+        let type: String
+        let facets: [EventBuilder.PortraitFacet]
+        let tags: [String]
         switch a.decision {
-        case .new(let t, let s, let c, let tg):
+        case .new(let t, let s, let ty, let f, let tg):
             title = t.isEmpty ? (fallbackTitle ?? session.appName) : t
             summary = s
-            category = c
+            type = ty
+            facets = f
             tags = tg
         case .join, .skip:
             title = fallbackTitle ?? session.appName
             summary = ""
-            category = "habits"
+            type = "experience"
+            facets = []
             tags = [session.appName.lowercased()]
         }
 
-        let safeCategory = PortraitPaths.seedCategories.contains(category)
-            ? category : "habits"
         let filename = makeFilename(title: title, day: day)
         // Events live under events/<yyyy-MM-dd>/ (NOT portrait/<cat>/).
-        // The `category` field is still recorded in front-matter so the
-        // PortraitDistiller can route source events to the right
-        // portrait category later.
+        // Routing into portrait subdirs is now the Distiller's job, based on
+        // event.type + event.portraitFacets.
         let url = PortraitPaths.eventsDayDir(for: day).appendingPathComponent(filename)
         let finalURL = uniqueURL(url)
 
@@ -309,7 +311,8 @@ enum Backfill {
             firstOccurrence: day,
             eventTitle: title,
             eventSummary: summary,
-            category: safeCategory,
+            eventType: type,
+            portraitFacets: facets,
             memberFrameIds: session.sourceFrameIds
         )
         // Ensure occurrence is truncated to day.

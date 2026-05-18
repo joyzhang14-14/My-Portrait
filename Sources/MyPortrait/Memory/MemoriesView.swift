@@ -150,8 +150,13 @@ struct MemoriesView: View {
 
     @ViewBuilder
     private func metadataBlock(_ f: PortraitFile, category: String) -> some View {
+        let facetStr = f.portraitFacets.isEmpty
+            ? "—"
+            : f.portraitFacets.map { "\($0.facet):\($0.value)" }.joined(separator: ", ")
         let rows: [(String, String)] = [
-            ("category", category),
+            ("type", f.eventType.isEmpty ? "experience" : f.eventType),
+            ("portrait_facets", facetStr),
+            ("category (legacy)", category.isEmpty ? "—" : category),
             ("weight", String(format: "%.4g", f.weight)),
             ("impact", String(format: "%.4g", f.impact)),
             ("impact_source", f.impactSource),

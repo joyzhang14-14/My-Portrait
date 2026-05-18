@@ -317,6 +317,11 @@ final class PortraitDistiller {
             _ = try updateExistingPortrait(category: category, decision: decision)
             return
         }
+        // Portrait files use `category` as the routing label (kept for human
+        // readability inside the file). For type, "experiences" / "emotions"
+        // map back to the underlying event types; other categories are
+        // facet-driven portrait entries (treated as `experience` by default).
+        let portraitType: String = (category == "emotions") ? "emotion" : "experience"
         var file = PortraitFile(
             created: Date(),
             impact: 3,                    // distilled-portrait baseline
@@ -326,6 +331,8 @@ final class PortraitDistiller {
             firstOccurrence: Date(),
             eventTitle: decision.title,
             eventSummary: decision.body,
+            eventType: portraitType,
+            portraitFacets: [],
             category: category,
             memberFrameIds: []
         )
@@ -416,7 +423,23 @@ final class PortraitDistiller {
                 impact: f.impact,
                 occurrenceDays: f.occurrences.count
             )
-            out[f.category, default: []].append(entry)
+
+            // New routing:
+            //   - type=experience → portrait/experiences/
+            //   - type=emotion    → portrait/emotions/
+            //   - every facet     → portrait/<facet name>/
+            // (Same event can feed multiple portrait categories.)
+            switch f.eventType.lowercased() {
+            case "emotion":     out["emotions", default: []].append(entry)
+            default:            out["experiences", default: []].append(entry)
+            }
+            for facet in f.portraitFacets {
+                let name = facet.facet.lowercased()
+                // Defensive — skip facets that look like routes already
+                // handled by type, or facets outside the 9 known buckets.
+                guard name != "experiences", name != "emotions" else { continue }
+                out[name, default: []].append(entry)
+            }
         }
         // Sort each category's events by impact desc; cap to prevent context bloat.
         for (k, v) in out {

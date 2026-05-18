@@ -37,8 +37,14 @@ struct PortraitFile: Equatable {
                                         // "how many distinct days" boost.
     var eventTitle: String              // short human-readable event name (LLM)
     var eventSummary: String            // one-paragraph description (LLM)
-    var category: String                // portrait taxonomy bucket
-                                        // (personality / social / habits / ...)
+    var eventType: String               // "experience" / "emotion" (LLM)
+    var portraitFacets: [EventBuilder.PortraitFacet]
+                                        // LLM-attached portrait signals
+                                        // (most events have []; only stable
+                                        // identity signals get a facet)
+    var category: String                // DEPRECATED. Kept for backward-compat
+                                        // file reads only. Distiller no longer
+                                        // routes by this field.
     var memberFrameIds: [Int64]         // screenpipe frame IDs contributing
                                         // to this event (across days + apps)
     var source: String?                 // backward-compat origin reference
@@ -61,7 +67,9 @@ struct PortraitFile: Equatable {
         firstOccurrence: Date? = nil,
         eventTitle: String = "",
         eventSummary: String = "",
-        category: String = "habits",
+        eventType: String = "experience",
+        portraitFacets: [EventBuilder.PortraitFacet] = [],
+        category: String = "",
         memberFrameIds: [Int64] = []
     ) {
         let stamp = Self.truncateToDay(firstOccurrence ?? created)
@@ -74,6 +82,8 @@ struct PortraitFile: Equatable {
         self.occurrences = [stamp]
         self.eventTitle = eventTitle
         self.eventSummary = eventSummary
+        self.eventType = eventType
+        self.portraitFacets = portraitFacets
         self.category = category
         self.memberFrameIds = memberFrameIds
         self.source = source
@@ -95,6 +105,8 @@ struct PortraitFile: Equatable {
         occurrences: [Date],
         eventTitle: String,
         eventSummary: String,
+        eventType: String,
+        portraitFacets: [EventBuilder.PortraitFacet],
         category: String,
         memberFrameIds: [Int64],
         source: String?,
@@ -115,6 +127,8 @@ struct PortraitFile: Equatable {
         self.occurrences = occurrences.map(Self.truncateToDay).uniqued()
         self.eventTitle = eventTitle
         self.eventSummary = eventSummary
+        self.eventType = eventType
+        self.portraitFacets = portraitFacets
         self.category = category
         self.memberFrameIds = memberFrameIds
         self.source = source
