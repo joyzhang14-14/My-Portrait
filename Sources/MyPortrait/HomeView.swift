@@ -7,6 +7,7 @@ struct HomeView: View {
     @State private var setup = AISetup.shared
     @State private var contextChips: [ContextChip] = []
     @State private var pickerOpen: Bool = false
+    @AppStorage("MyPortrait.redactPII") private var redactPII: Bool = false
     /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
     /// a past user message. Send-on-Enter routes through editAndResend
     /// instead of send so the old turn is dropped, not duplicated.
@@ -47,6 +48,7 @@ struct HomeView: View {
                 isConnected: appState.activeAI != nil,
                 contextChips: $contextChips,
                 pickerOpen: $pickerOpen,
+                redactPII: $redactPII,
                 isStreaming: chat.isStreaming,
                 tokenTotal: chat.currentConvId.map { chat.tokenTotal(for: $0) } ?? 0,
                 onSend: send,
@@ -142,13 +144,14 @@ struct HomeView: View {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let chipsToSend = contextChips
+        let redact = redactPII
         prompt = ""
         contextChips = []
         if let id = editingMessageId {
             editingMessageId = nil
             chat.editAndResend(id, newText: trimmed)
         } else {
-            chat.send(trimmed, chips: chipsToSend)
+            chat.send(trimmed, chips: chipsToSend, redactPII: redact)
         }
     }
 }
@@ -1049,6 +1052,7 @@ private struct ChatInputBar: View {
     let isConnected: Bool
     @Binding var contextChips: [ContextChip]
     @Binding var pickerOpen: Bool
+    @Binding var redactPII: Bool
     let isStreaming: Bool
     let tokenTotal: Int
     let onSend: () -> Void
@@ -1136,7 +1140,14 @@ private struct ChatInputBar: View {
                     IconActionButton(icon: "at") {
                         withAnimation(.easeOut(duration: 0.15)) { pickerOpen.toggle() }
                     }
-                    IconActionButton(icon: "shield") { /* TODO */ }
+                    IconActionButton(
+                        icon: redactPII ? "shield.lefthalf.filled" : "shield",
+                        tint: redactPII ? Color(red: 0.55, green: 0.95, blue: 0.65) : nil,
+                        help: redactPII ? "Privacy filter ON — emails / phones / keys redacted"
+                                        : "Privacy filter OFF — toggle to redact PII before sending"
+                    ) {
+                        withAnimation(.easeOut(duration: 0.18)) { redactPII.toggle() }
+                    }
                     IconActionButton(icon: "paperclip") { /* TODO */ }
                     if isStreaming {
                         StopButton(action: onStop)
@@ -1182,10 +1193,13 @@ private struct FlowChips: View {
 
 // MARK: - Input bar right-side actions
 
-/// Generic icon button (shield / paperclip). 17pt symbol, hover lifts +
-/// glass background appears, click pop.
+/// Generic icon button (shield / paperclip / @). 17pt symbol, hover lifts +
+/// glass background appears, click pops. Optional `tint` makes it persist a
+/// non-default color (used for "toggled on" states like the privacy shield).
 private struct IconActionButton: View {
     let icon: String
+    var tint: Color? = nil
+    var help: String? = nil
     let action: () -> Void
     @State private var hover = false
     @State private var pressed = false
@@ -1193,20 +1207,21 @@ private struct IconActionButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(.white.opacity(hover ? 0.95 : 0.55))
+                .foregroundStyle(tint ?? .white.opacity(hover ? 0.95 : 0.55))
                 .frame(width: 32, height: 32)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(.ultraThinMaterial)
-                        .opacity(hover ? 0.80 : 0)
+                        .opacity(tint != nil ? 0.80 : (hover ? 0.80 : 0))
                         .overlay(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .stroke(Color.white.opacity(hover ? 0.18 : 0), lineWidth: 0.6)
+                                .stroke((tint ?? Color.white).opacity(tint != nil ? 0.45 : (hover ? 0.18 : 0)), lineWidth: 0.6)
                         )
                 )
                 .scaleEffect(pressed ? 0.90 : (hover ? 1.04 : 1.0))
         }
         .buttonStyle(.plain)
+        .help(help ?? "")
         .onHover { hover = $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)

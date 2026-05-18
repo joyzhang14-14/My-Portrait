@@ -72,8 +72,9 @@ struct ScreenpipeContext {
 enum ScreenpipeContextBuilder {
     /// Build a prompt-ready context for a list of chips. Each chip contributes
     /// one section. Total OCR text is capped at `maxChars` (≈ maxChars/4 tokens)
-    /// so we don't blow Pi's context window.
-    static func build(chips: [ContextChip], maxChars: Int = 24_000) -> ScreenpipeContext {
+    /// so we don't blow Pi's context window. When `redactPII` is true, the
+    /// final text is run through `PIIRedactor` before being returned.
+    static func build(chips: [ContextChip], redactPII: Bool = false, maxChars: Int = 24_000) -> ScreenpipeContext {
         guard !chips.isEmpty else { return .empty }
         let db = ScreenpipeDB()
         guard db.exists else {
@@ -111,9 +112,11 @@ enum ScreenpipeContextBuilder {
         }
 
         let header = "[Screen context follows — \(totalFrames) frames" +
-                     (truncated ? " (truncated)" : "") + "]"
+                     (truncated ? " (truncated)" : "") +
+                     (redactPII ? " · PII redacted" : "") + "]"
         let body = sections.joined(separator: "\n\n")
-        let md = "\(header)\n\n\(body)\n\n---"
+        var md = "\(header)\n\n\(body)\n\n---"
+        if redactPII { md = PIIRedactor.redact(md) }
 
         let summary = "\(totalFrames) frames" +
                       (truncated ? " (truncated)" : "")

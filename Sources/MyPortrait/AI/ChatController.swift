@@ -125,7 +125,7 @@ final class ChatController {
     /// is resolved into an OCR block that is prepended (as a `[Screen context]`
     /// section) to the actual text sent to Pi. The user bubble visually
     /// shows the chips so the user can verify what was injected.
-    func send(_ text: String, chips: [ContextChip] = []) {
+    func send(_ text: String, chips: [ContextChip] = [], redactPII: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -150,7 +150,7 @@ final class ChatController {
         Task { [weak self] in
             guard let self else { return }
             let context: ScreenpipeContext = await Task.detached(priority: .userInitiated) {
-                ScreenpipeContextBuilder.build(chips: chips)
+                ScreenpipeContextBuilder.build(chips: chips, redactPII: redactPII)
             }.value
 
             await MainActor.run {
