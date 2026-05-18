@@ -129,6 +129,35 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v4 — 向量列（Phase 4 Hybrid 搜索）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // BLOB 列存 bge-m3 输出（1024 × Float32 = 4096 字节 / 行）。
+        // NULL 表示还没 embed —— EmbeddingWorker 后台拉 NULL 的批量回填。
+        //
+        // SQLite overflow page 机制让 BLOB 不读时 0 成本：SELECT 其他列时
+        // 这 ~4KB 不被加载进主行（只是 indirection 指针）。
+        //
+        // 不用 sqlite-vec：macOS 系统 sqlite3 关了 LOAD_EXTENSION。我们走
+        // "BLOB 列 + Swift 端暴力 cosine"，~7000 向量微秒级。
+        m.registerMigration("v4_embeddings") { db in
+            try db.alter(table: "frames") { t in
+                t.add(column: "embedding", .blob)
+            }
+            try db.alter(table: "audio_transcriptions") { t in
+                t.add(column: "embedding", .blob)
+            }
+            // 部分索引：NULL 索引零开销但 IS NULL 查询超快
+            // (EmbeddingWorker 频繁查"哪些行还没 embed")
+            try db.execute(sql: """
+                CREATE INDEX idx_frames_embedding_null ON frames(id) WHERE embedding IS NULL
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_transcriptions_embedding_null ON audio_transcriptions(id) WHERE embedding IS NULL
+                """)
+        }
+
         return m
     }
 }

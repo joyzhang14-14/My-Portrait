@@ -35,6 +35,8 @@ final class Services {
     let powerWatcher: PowerWatcher
     let retentionWorker: RetentionWorker
     let modelManager: BGEM3ModelManager
+    let embedder: any VectorEmbedder
+    let embeddingWorker: EmbeddingWorker
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -57,9 +59,17 @@ final class Services {
             fatalError("PortraitDB failed to open: \(error)")
         }
         self.db = dbImpl
-        // 共用同一个 DatabasePool（WAL 多 reader 安全）。Phase 4 换 HybridSearchEngine
-        // 时只改这一行，UI 调 services.searchEngine 不动。
-        self.searchEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
+        // 共用同一个 DatabasePool（WAL 多 reader 安全）。
+        let ftsEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
+        let manager = BGEM3ModelManager()
+        let bgeEmbedder = BGEM3VectorEmbedder(modelManager: manager, reporter: reporter)
+        self.modelManager = manager
+        self.embedder = bgeEmbedder
+        // Hybrid：FTS + 向量 + RRF。embedder 抛错时自动降级 FTS-only，
+        // 所以即使 bge-m3 推理还没接通（Phase 4 stub），UI 行为也跟纯 FTS 一致。
+        self.searchEngine = HybridSearchEngine(
+            db: dbImpl, fts: ftsEngine, embedder: bgeEmbedder
+        )
 
         self.coordinator = CaptureCoordinator(db: dbImpl, reporter: reporter)
         self.compactor = CompactionWorker(db: dbImpl, reporter: reporter)
@@ -76,7 +86,7 @@ final class Services {
             power: pw
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
-        self.modelManager = BGEM3ModelManager()
+        self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: bgeEmbedder)
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
@@ -91,7 +101,7 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
-        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, modelManager, logger] in
+        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, modelManager, embeddingWorker, logger] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
             do {
@@ -106,6 +116,7 @@ final class Services {
             await compactor.start()
             await transcriber.start()
             await retentionWorker.start()
+            await embeddingWorker.start()    // embedder 现在 stub，worker 空转直到模型接通
 
             // 后台下 bge-m3 模型（~2.5 GB），不阻塞任何东西。
             // Phase 4 上线推理后这个 await 才有意义；当前只是把文件下到本地。
@@ -178,6 +189,7 @@ final class Services {
         await compactor.stop()
         await transcriber.stop()
         await retentionWorker.stop()
+        await embeddingWorker.stop()
         powerWatcher.stop()
         settingsCancellables.removeAll()
     }

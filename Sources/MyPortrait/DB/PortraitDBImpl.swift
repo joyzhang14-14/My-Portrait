@@ -213,6 +213,80 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 向量（Phase 4）
+
+    func framesNeedingEmbedding(limit: Int) async throws -> [Int64] {
+        try await dbPool.read { db in
+            // Uses the partial index `idx_frames_embedding_null` for O(log n) lookup.
+            // 优先最新的帧（新数据用户更可能搜）。
+            try Int64.fetchAll(db, sql: """
+                SELECT id FROM frames
+                WHERE embedding IS NULL
+                  AND full_text IS NOT NULL AND length(full_text) > 4
+                ORDER BY timestamp_ms DESC
+                LIMIT ?
+                """, arguments: [limit])
+        }
+    }
+
+    func setFrameEmbedding(frameId: Int64, vector: [Float]) async throws {
+        let blob = Data(floats: vector)
+        try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE frames SET embedding = ? WHERE id = ?",
+                arguments: [blob, frameId]
+            )
+        }
+    }
+
+    func allFrameEmbeddings(limit: Int) async throws -> [(id: Int64, vector: [Float])] {
+        try await dbPool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, embedding FROM frames
+                WHERE embedding IS NOT NULL
+                ORDER BY timestamp_ms DESC
+                LIMIT ?
+                """, arguments: [limit])
+            return rows.compactMap { row -> (Int64, [Float])? in
+                guard let id: Int64 = row["id"],
+                      let blob: Data = row["embedding"],
+                      let vec = blob.asFloats else { return nil }
+                return (id, vec)
+            }
+        }
+    }
+
+    func framesByIds(_ ids: [Int64]) async throws -> [FrameMetadata] {
+        guard !ids.isEmpty else { return [] }
+        return try await dbPool.read { db in
+            // SQLite bind 上限 999；ids 列表理论不会到那么大但分块保险。
+            var out: [FrameMetadata] = []
+            for chunk in stride(from: 0, to: ids.count, by: 500).map({
+                Array(ids[$0..<min($0 + 500, ids.count)])
+            }) {
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                let sql = """
+                SELECT id, timestamp_ms, app_name, window_name, browser_url, full_text
+                FROM frames
+                WHERE id IN (\(placeholders))
+                """
+                let args = StatementArguments(chunk.map { DatabaseValue(value: $0) ?? .null })
+                let rows = try Row.fetchAll(db, sql: sql, arguments: args)
+                for row in rows {
+                    out.append(FrameMetadata(
+                        id: row["id"] ?? 0,
+                        timestampMs: row["timestamp_ms"] ?? 0,
+                        appName: row["app_name"] ?? "",
+                        windowName: row["window_name"],
+                        browserUrl: row["browser_url"],
+                        fullText: row["full_text"]
+                    ))
+                }
+            }
+            return out
+        }
+    }
+
     // MARK: - Retention
 
     func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {

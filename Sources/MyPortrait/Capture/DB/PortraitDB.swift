@@ -83,6 +83,23 @@ protocol PortraitDB: Sendable {
         beforeSeconds: TimeInterval,
         afterSeconds: TimeInterval
     ) async throws -> [AudioTranscriptEntry]
+
+    // MARK: - 向量（Phase 4 Hybrid 搜索）
+
+    /// 拉一批还没 embed 的 frame id（按时间倒序，新数据优先 embed）。
+    /// EmbeddingWorker 后台调，一次几百个一批避开内存峰值。
+    func framesNeedingEmbedding(limit: Int) async throws -> [Int64]
+
+    /// 写 frame 的向量。`vector` 应该已 L2 归一化（cosine == dot 的前提）。
+    func setFrameEmbedding(frameId: Int64, vector: [Float]) async throws
+
+    /// 拉所有已 embed 的 (id, vector)。HybridSearchEngine 做 brute-force cosine 用。
+    /// 数据量大时考虑分页或 sample；7000 行 × 1024 维 ≈ 28 MB，内存可承受。
+    func allFrameEmbeddings(limit: Int) async throws -> [(id: Int64, vector: [Float])]
+
+    /// 按 id 拉一批 frame 的元数据（HybridSearchEngine 拿到 RRF 结果后获取
+    /// 显示字段）。返回顺序与 ids 顺序无关；调用方按 id 自己 reorder。
+    func framesByIds(_ ids: [Int64]) async throws -> [FrameMetadata]
 }
 
 // MARK: - Records
@@ -210,6 +227,27 @@ struct RetentionStats: Sendable {
         self.framesAffected = framesAffected
         self.videoChunksDeleted = videoChunksDeleted
         self.audioChunksDeleted = audioChunksDeleted
+    }
+}
+
+/// HybridSearchEngine 拿 RRF 排序结果后查元数据用的最小字段集。
+/// 比 ScreenpipeFrame 轻量：不带 videoPath/offsetIndex/fps 那一套（搜索结果不需要抠帧）。
+struct FrameMetadata: Sendable {
+    let id: Int64
+    let timestampMs: Int64
+    let appName: String
+    let windowName: String?
+    let browserUrl: String?
+    let fullText: String?
+
+    init(id: Int64, timestampMs: Int64, appName: String,
+         windowName: String?, browserUrl: String?, fullText: String?) {
+        self.id = id
+        self.timestampMs = timestampMs
+        self.appName = appName
+        self.windowName = windowName
+        self.browserUrl = browserUrl
+        self.fullText = fullText
     }
 }
 
