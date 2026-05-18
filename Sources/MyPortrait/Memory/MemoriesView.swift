@@ -212,8 +212,13 @@ struct MemoriesView: View {
     private func runBackfill() async {
         actionStatus = "Backfilling events from screenpipe…"
         do {
-            let r = try await Backfill.run()
-            actionStatus = "\(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions (\(r.emptySessionCount) skipped) → \(r.newEventCount) new events, \(r.joinedSessionCount) joined, LLM-failed days: \(r.llmFailedDays)"
+            let r = try await Backfill.run { p in
+                Task { @MainActor in
+                    let dayStr = Self.dayString(p.day)
+                    actionStatus = "Day \(p.dayIndex)/\(p.dayCount) [\(dayStr)] — \(p.phase)"
+                }
+            }
+            actionStatus = "Done. \(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions (\(r.emptySessionCount) skipped) → \(r.newEventCount) new events, \(r.joinedSessionCount) joined, LLM-failed days: \(r.llmFailedDays)"
             await reload()
         } catch {
             actionStatus = "Backfill failed: \(error.localizedDescription)"

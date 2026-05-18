@@ -70,11 +70,29 @@ enum Backfill {
 
         // Iterate from oldest day to newest so EventBuilder always has the
         // most relevant active events from prior days available.
+        let dayCount = daysBack
+        var dayIndex = 0
         for offset in stride(from: daysBack - 1, through: 0, by: -1) {
+            dayIndex += 1
             guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
+
+            // Resumability: if events/<yyyy-MM-dd>/ already has files, skip
+            // — assume the day was processed in a prior run. Users can
+            // `rm -rf ~/.portrait/events/<day>` to force re-processing.
+            let dayDir = PortraitPaths.eventsDayDir(for: day)
+            if let existing = try? FileManager.default.contentsOfDirectory(atPath: dayDir.path),
+               existing.contains(where: { $0.hasSuffix(".md") }) {
+                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "skipped (already processed)"))
+                continue
+            }
+
+            progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "reading frames"))
             let frames = db.frames(on: day, limit: 5000)
             totals.rawFrameCount += frames.count
-            if frames.isEmpty { continue }
+            if frames.isEmpty {
+                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "no frames"))
+                continue
+            }
 
             // Tier 1 merge.
             let rawEvents = frames.map { f in
@@ -132,6 +150,7 @@ enum Backfill {
             }
 
             // Ask LLM for assignments.
+            progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM grouping \(enriched.count) sessions"))
             let assignments: [EventBuilder.Assignment]
             do {
                 assignments = try await builder.assignDay(
@@ -141,6 +160,7 @@ enum Backfill {
                 )
             } catch {
                 totals.llmFailedDays += 1
+                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM failed: \(error.localizedDescription)"))
                 continue
             }
 
