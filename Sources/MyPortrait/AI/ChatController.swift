@@ -127,7 +127,10 @@ final class ChatController {
     /// is resolved into an OCR block that is prepended (as a `[Screen context]`
     /// section) to the actual text sent to Pi. The user bubble visually
     /// shows the chips so the user can verify what was injected.
-    func send(_ text: String, chips: [ContextChip] = [], redactPII: Bool = false) {
+    /// Lookup so the user bubble can render attachments. Not persisted.
+    var attachmentsByMessage: [UUID: [Attachment]] = [:]
+
+    func send(_ text: String, chips: [ContextChip] = [], attachments: [Attachment] = [], redactPII: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -156,13 +159,15 @@ final class ChatController {
             }.value
 
             await MainActor.run {
-                // User bubble carries display text + chips for visual receipt.
+                // User bubble carries display text + chips + attachments
+                // for visual receipt.
                 var msg = ChatMessage(role: .user, text: trimmed, time: Date())
                 if !chips.isEmpty {
                     msg.parts = [.text(id: UUID(), value: trimmed)]
                 }
                 self.messages.append(msg)
                 self.contextChipsByMessage[msg.id] = chips
+                self.attachmentsByMessage[msg.id] = attachments
                 self.lastError = nil
 
                 if self.pendingTitleFromFirstMessage, let convId = self.currentConvId {
@@ -170,13 +175,17 @@ final class ChatController {
                     self.pendingTitleFromFirstMessage = false
                 }
 
-                // What Pi actually sees: context block ++ user question.
-                let pasted: String
-                if context.markdown.isEmpty {
-                    pasted = trimmed
-                } else {
-                    pasted = "\(context.markdown)\n\nUser question:\n\(trimmed)"
+                // What Pi actually sees: context block ++ attachment refs ++ user question.
+                var sections: [String] = []
+                if !context.markdown.isEmpty { sections.append(context.markdown) }
+                if !attachments.isEmpty {
+                    let lines = attachments.map { a in
+                        "- \(a.kind == .image ? "image" : "file"): `\(a.promptPath)`"
+                    }
+                    sections.append("[User attached files — use your read / bash tools to inspect them]\n" + lines.joined(separator: "\n"))
                 }
+                sections.append(sections.isEmpty ? trimmed : "User question:\n\(trimmed)")
+                let pasted = sections.joined(separator: "\n\n")
                 Task { await self.deliver(pasted) }
             }
         }

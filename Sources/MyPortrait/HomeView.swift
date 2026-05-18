@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct HomeView: View {
     @Environment(AppState.self) private var appState
@@ -8,6 +10,7 @@ struct HomeView: View {
     @State private var contextChips: [ContextChip] = []
     @State private var pickerOpen: Bool = false
     @AppStorage("MyPortrait.redactPII") private var redactPII: Bool = false
+    @State private var attachments: [Attachment] = []
     /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
     /// a past user message. Send-on-Enter routes through editAndResend
     /// instead of send so the old turn is dropped, not duplicated.
@@ -25,6 +28,7 @@ struct HomeView: View {
                     messages: chat.messages,
                     isThinking: chat.isStreaming,
                     chipsLookup: { chat.contextChipsByMessage[$0] ?? [] },
+                    attachmentsLookup: { chat.attachmentsByMessage[$0] ?? [] },
                     onCopy: { msg in
                         let pb = NSPasteboard.general
                         pb.clearContents()
@@ -49,6 +53,7 @@ struct HomeView: View {
                 contextChips: $contextChips,
                 pickerOpen: $pickerOpen,
                 redactPII: $redactPII,
+                attachments: $attachments,
                 isStreaming: chat.isStreaming,
                 tokenTotal: chat.currentConvId.map { chat.tokenTotal(for: $0) } ?? 0,
                 onSend: send,
@@ -142,16 +147,19 @@ struct HomeView: View {
 
     private func send() {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return }
         let chipsToSend = contextChips
+        let attachmentsToSend = attachments
         let redact = redactPII
         prompt = ""
         contextChips = []
+        attachments = []
         if let id = editingMessageId {
             editingMessageId = nil
-            chat.editAndResend(id, newText: trimmed)
+            chat.editAndResend(id, newText: trimmed.isEmpty ? "(attachments only)" : trimmed)
         } else {
-            chat.send(trimmed, chips: chipsToSend, redactPII: redact)
+            chat.send(trimmed.isEmpty ? "(see attachments)" : trimmed,
+                      chips: chipsToSend, attachments: attachmentsToSend, redactPII: redact)
         }
     }
 }
@@ -209,6 +217,7 @@ private struct ChatTranscript: View {
     let messages: [ChatMessage]
     let isThinking: Bool
     var chipsLookup: ((UUID) -> [ContextChip])? = nil
+    var attachmentsLookup: ((UUID) -> [Attachment])? = nil
     var onCopy: (ChatMessage) -> Void = { _ in }
     var onRegenerate: (UUID) -> Void = { _ in }
     var onEdit: (ChatMessage) -> Void = { _ in }
@@ -225,6 +234,7 @@ private struct ChatTranscript: View {
                             message: msg,
                             isStreaming: isLastAssistant && isThinking,
                             chips: chipsLookup?(msg.id) ?? [],
+                            attachments: attachmentsLookup?(msg.id) ?? [],
                             onCopy: { onCopy(msg) },
                             onRegenerate: { onRegenerate(msg.id) },
                             onEdit: { onEdit(msg) }
@@ -255,6 +265,7 @@ private struct ChatBubble: View {
     let message: ChatMessage
     let isStreaming: Bool
     let chips: [ContextChip]
+    let attachments: [Attachment]
     let onCopy: () -> Void
     let onRegenerate: () -> Void
     let onEdit: () -> Void
@@ -283,6 +294,17 @@ private struct ChatBubble: View {
                     HStack(spacing: 5) {
                         ForEach(chips) { chip in
                             ContextChipView(chip: chip, compact: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                if !attachments.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(attachments) { att in
+                            AttachmentThumb(attachment: att, onRemove: {})
+                                .scaleEffect(0.78, anchor: .leading)
+                                .frame(width: 42, height: 42)
+                                .allowsHitTesting(false)
                         }
                         Spacer(minLength: 0)
                     }
@@ -1053,6 +1075,7 @@ private struct ChatInputBar: View {
     @Binding var contextChips: [ContextChip]
     @Binding var pickerOpen: Bool
     @Binding var redactPII: Bool
+    @Binding var attachments: [Attachment]
     let isStreaming: Bool
     let tokenTotal: Int
     let onSend: () -> Void
@@ -1089,6 +1112,12 @@ private struct ChatInputBar: View {
             if !contextChips.isEmpty {
                 FlowChips(chips: contextChips) { id in
                     contextChips.removeAll { $0.id == id }
+                }
+            }
+            // Attachment thumbnails (visible when user pasted / dropped files)
+            if !attachments.isEmpty {
+                AttachmentStrip(attachments: attachments) { id in
+                    attachments.removeAll { $0.id == id }
                 }
             }
 
@@ -1148,7 +1177,9 @@ private struct ChatInputBar: View {
                     ) {
                         withAnimation(.easeOut(duration: 0.18)) { redactPII.toggle() }
                     }
-                    IconActionButton(icon: "paperclip") { /* TODO */ }
+                    IconActionButton(icon: "paperclip", help: "Attach files") {
+                        pickFiles()
+                    }
                     if isStreaming {
                         StopButton(action: onStop)
                             .keyboardShortcut(.escape, modifiers: [])
@@ -1169,6 +1200,122 @@ private struct ChatInputBar: View {
         .padding(.bottom, 14)
         .padding(.top, 8)
         .onAppear { focused = true }
+        .onDrop(of: [.fileURL, .image], isTargeted: nil) { providers in
+            handleDrop(providers)
+        }
+        .onPasteCommand(of: [.fileURL, .image, .png, .tiff]) { providers in
+            _ = handleDrop(providers)
+        }
+    }
+
+    private func pickFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                attachments.append(AttachmentStore.wrap(fileURL: url))
+            }
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var anyHandled = false
+        for provider in providers {
+            // Try a file URL first.
+            if provider.canLoadObject(ofClass: URL.self) {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    Task { @MainActor in
+                        attachments.append(AttachmentStore.wrap(fileURL: url))
+                    }
+                }
+                anyHandled = true
+                continue
+            }
+            // Image data (e.g. screenshot in clipboard with no file URL).
+            if provider.hasItemConformingToTypeIdentifier("public.image") {
+                provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, _ in
+                    guard let data else { return }
+                    Task { @MainActor in
+                        if let a = AttachmentStore.save(data: data, suggestedName: nil, isImage: true) {
+                            attachments.append(a)
+                        }
+                    }
+                }
+                anyHandled = true
+            }
+        }
+        return anyHandled
+    }
+}
+
+/// Horizontal scroll of attachment thumbnails above the input. Click × to remove.
+private struct AttachmentStrip: View {
+    let attachments: [Attachment]
+    let onRemove: (UUID) -> Void
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(attachments) { att in
+                    AttachmentThumb(attachment: att) { onRemove(att.id) }
+                        .transition(.scale(scale: 0.8, anchor: .leading).combined(with: .opacity))
+                }
+            }
+        }
+        .animation(.spring(response: 0.30, dampingFraction: 0.75), value: attachments.count)
+    }
+}
+
+private struct AttachmentThumb: View {
+    let attachment: Attachment
+    let onRemove: () -> Void
+    @State private var hover = false
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            content
+            if hover {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color.black.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+                .offset(x: 6, y: -6)
+            }
+        }
+        .onHover { hover = $0 }
+    }
+    @ViewBuilder private var content: some View {
+        if attachment.kind == .image, let img = NSImage(contentsOf: attachment.url) {
+            Image(nsImage: img)
+                .resizable().scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 0.7))
+        } else {
+            VStack(spacing: 4) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text(attachment.displayName)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: 50)
+            }
+            .frame(width: 56, height: 52)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 0.7))
+            )
+        }
     }
 }
 
