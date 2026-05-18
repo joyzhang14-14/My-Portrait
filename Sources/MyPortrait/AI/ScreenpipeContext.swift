@@ -15,6 +15,7 @@ struct ContextChip: Identifiable, Hashable {
         case file(URL)              // user-picked file (we include its text contents)
         case search(String)         // OCR full-text search
         case speaker(String)        // audio transcripts from this speaker, last 1h
+        case audio(Int)             // last N minutes of audio across all speakers
     }
     let id: UUID
     let spec: Spec
@@ -32,6 +33,7 @@ struct ContextChip: Identifiable, Hashable {
             let trimmed = q.count > 24 ? String(q.prefix(24)) + "…" : q
             return "@search:\(trimmed)"
         case .speaker(let name):    return "@speaker:\(name)"
+        case .audio(let m):         return "@audio last \(m)m"
         }
     }
 
@@ -44,6 +46,7 @@ struct ContextChip: Identifiable, Hashable {
         case .file:                 return "doc.text"
         case .search:               return "magnifyingglass"
         case .speaker:              return "person.wave.2"
+        case .audio:                return "waveform"
         }
     }
 }
@@ -139,6 +142,17 @@ enum ScreenpipeContextBuilder {
                                               detail: "audio from \(name)",
                                               action: .speaker(name: name)))
                     remaining -= block.count
+                    nextNumber += 1
+                }
+            case .audio(let minutes):
+                let start = Date().addingTimeInterval(TimeInterval(-minutes * 60))
+                let block = db.audioBlock(from: start, to: Date(), maxChars: min(remaining, 6000))
+                if !block.text.isEmpty {
+                    sections.append("## [\(n)] \(chip.label) — \(block.lineCount) lines, \(block.speakers.count) speakers\n\(block.text)")
+                    citations.append(Citation(id: UUID(), number: n, label: chip.label,
+                                              detail: "\(block.lineCount) audio lines · \(block.speakers.joined(separator: ", "))",
+                                              action: .timeRange(start: start, end: Date(), app: nil)))
+                    remaining -= block.text.count
                     nextNumber += 1
                 }
             case .now, .lastMinutes, .today, .app:
@@ -357,6 +371,72 @@ extension ScreenpipeDB {
         }
         return OCRBlock(text: lines.joined(separator: "\n"),
                         frameCount: frames, topApps: [], truncated: truncated)
+    }
+
+    /// Output of `audioBlock`. `text` is dialogue formatted as
+    /// `[HH:MM:SS] Name: utterance`, dedup'd line-wise.
+    struct AudioBlock {
+        let text: String
+        let lineCount: Int
+        let speakers: [String]
+    }
+
+    /// Pull audio transcripts from `from..to`, JOIN through speakers for
+    /// names, format as a per-line dialogue block.
+    func audioBlock(from: Date, to: Date, maxChars: Int = 6000) -> AudioBlock {
+        guard exists else { return AudioBlock(text: "", lineCount: 0, speakers: []) }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return AudioBlock(text: "", lineCount: 0, speakers: [])
+        }
+        defer { sqlite3_close(db) }
+
+        let fromTS = Self.fmt.string(from: from)
+        let toTS   = Self.fmt.string(from: to)
+        let sql = """
+            SELECT a.timestamp, COALESCE(s.name, 'Speaker ' || COALESCE(a.speaker_id, 0)),
+                   a.transcription, a.is_input_device
+            FROM audio_transcriptions a
+            LEFT JOIN speakers s ON s.id = a.speaker_id
+            WHERE a.timestamp BETWEEN ? AND ?
+            ORDER BY a.timestamp ASC
+            LIMIT 500
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return AudioBlock(text: "", lineCount: 0, speakers: [])
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, fromTS, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, toTS,   -1, SQLITE_TRANSIENT)
+
+        var lines: [String] = []
+        var seen = Set<String>()
+        var speakers: [String] = []
+        var seenSpeakers = Set<String>()
+        var total = 0
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts   = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+            let name = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? "?"
+            let text = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            let key = "\(ts)|\(name)|\(trimmed)"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+
+            // [HH:MM:SS]  pull last 8 chars of ISO timestamp.
+            let timeOnly = ts.split(separator: "T").last.map { String($0.prefix(8)) } ?? ts
+            let line = "[\(timeOnly)] \(name): \(trimmed)"
+            lines.append(line)
+            total += line.count + 1
+            if !seenSpeakers.contains(name) {
+                seenSpeakers.insert(name); speakers.append(name)
+            }
+            if total >= maxChars { break }
+        }
+        return AudioBlock(text: lines.joined(separator: "\n"),
+                          lineCount: lines.count, speakers: speakers)
     }
 
     /// Last hour of transcripts from a particular speaker.

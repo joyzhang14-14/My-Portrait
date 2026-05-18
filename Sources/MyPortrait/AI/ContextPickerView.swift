@@ -30,7 +30,9 @@ struct ContextPickerView: View {
             Row(spec: nil,              title: "app…",       hint: "pick an app",        icon: "app.dashed",   intent: .appPrompt),
             Row(spec: nil,              title: "file…",      hint: "pick a file from disk", icon: "doc.badge.plus", intent: .filePrompt),
             Row(spec: nil,              title: "search…",    hint: "search OCR history", icon: "magnifyingglass", intent: .searchPrompt),
-            Row(spec: nil,              title: "speaker…",   hint: "audio from a person",  icon: "person.wave.2", intent: .speakerPrompt)
+            Row(spec: nil,              title: "speaker…",   hint: "audio from a person",  icon: "person.wave.2", intent: .speakerPrompt),
+            Row(spec: .audio(15),       title: "audio last 15m", hint: "everyone, last 15 minutes", icon: "waveform"),
+            Row(spec: .audio(60),       title: "audio last 1h",  hint: "everyone, last hour",        icon: "waveform")
         ]
     }
 
