@@ -263,22 +263,96 @@ enum IntegrationRegistry {
 
 @Observable
 final class AppState {
-    var connectedIds: Set<String> = []
-    var activeAIId: String? = nil
+    var connectedIds: Set<String> = [] {
+        didSet { if !suppressSave { saveConnections() } }
+    }
+    var activeAIId: String? = nil {
+        didSet { if !suppressSave { saveConnections() } }
+    }
     /// Last model picked per provider. Persists across launches via
     /// `loadModelChoices()` / `saveModelChoices()`. Keyed by integration id
     /// (e.g. "anthropic-api"), value is the model id (e.g. "claude-haiku-4-5").
     var modelByIntegration: [String: String] = [:]
 
-    private let modelDefaultsKey = "MyPortrait.modelByIntegration.v1"
+    private let modelDefaultsKey      = "MyPortrait.modelByIntegration.v1"
+    private let connectedDefaultsKey  = "MyPortrait.connectedIds.v1"
+    private let activeAIDefaultsKey   = "MyPortrait.activeAIId.v1"
+
+    /// Guards the didSet writers while we're populating fields from disk so
+    /// `loadConnections()` doesn't re-save what it just read.
+    private var suppressSave = false
 
     init() {
-        // Restore persisted connections from disk-backed secret stores.
-        if ChatGPTOAuth.isLoggedIn() {
-            connectedIds.insert("chatgpt")
-            if activeAIId == nil { activeAIId = "chatgpt" }
-        }
+        suppressSave = true
+        loadConnections()
         loadModelChoices()
+        reconcileWithSecretStore()
+        suppressSave = false
+    }
+
+    /// Cross-check the persisted connection set against the actual on-disk
+    /// credentials. If the user revoked a token / deleted an API key
+    /// elsewhere, drop the now-stale connection so the picker doesn't show
+    /// a connected tile that can't actually authenticate.
+    private func reconcileWithSecretStore() {
+        var changed = false
+
+        // ChatGPT OAuth: tile only stays connected while a token still exists.
+        if connectedIds.contains("chatgpt"), !ChatGPTOAuth.isLoggedIn() {
+            connectedIds.remove("chatgpt")
+            changed = true
+        }
+        // BYOK providers: must still have a key in SecretStore.
+        for id in Array(connectedIds) {
+            guard let p = Provider.from(integrationId: id),
+                  let key = p.secretKey else { continue }      // .chatgpt + .ollama have no secretKey
+            if SecretStore.shared.get(key) == nil {
+                connectedIds.remove(id)
+                changed = true
+            }
+        }
+
+        // Inverse: if a credential exists but the cached connection is gone
+        // (e.g. user added a key in a prior session before this code shipped),
+        // light the tile back up.
+        if !connectedIds.contains("chatgpt"), ChatGPTOAuth.isLoggedIn() {
+            connectedIds.insert("chatgpt")
+            changed = true
+        }
+        for p in Provider.allCases {
+            guard let key = p.secretKey else { continue }
+            let intId = Self.integrationId(for: p)
+            if let intId, SecretStore.shared.get(key) != nil,
+               !connectedIds.contains(intId) {
+                connectedIds.insert(intId)
+                changed = true
+            }
+        }
+
+        // If activeAIId points at a connection we just dropped, fall back to
+        // whatever is still connected.
+        if let active = activeAIId, !connectedIds.contains(active) {
+            activeAIId = connectedIds.first(where: { Provider.from(integrationId: $0) != nil })
+            changed = true
+        }
+        if activeAIId == nil, let firstAI = connectedIds.first(where: { Provider.from(integrationId: $0) != nil }) {
+            activeAIId = firstAI
+            changed = true
+        }
+
+        if changed { saveConnections() }
+    }
+
+    /// Inverse of `Provider.from(integrationId:)`. Used by the reverse-sync
+    /// step above to find the tile id for a provider with a credential.
+    private static func integrationId(for p: Provider) -> String? {
+        switch p {
+        case .chatgpt:       return "chatgpt"
+        case .anthropic:     return "anthropic-api"
+        case .gemini:        return "gemini"
+        case .ollama:        return "ollama"
+        case .openaiBYOK:    return nil    // no dedicated tile yet
+        }
     }
 
     /// The currently selected model for `integrationId`, falling back to the
@@ -300,6 +374,21 @@ final class AppState {
     }
     private func saveModelChoices() {
         UserDefaults.standard.set(modelByIntegration, forKey: modelDefaultsKey)
+    }
+
+    // MARK: - Connection persistence
+
+    private func loadConnections() {
+        if let arr = UserDefaults.standard.stringArray(forKey: connectedDefaultsKey) {
+            connectedIds = Set(arr)
+        }
+        if let active = UserDefaults.standard.string(forKey: activeAIDefaultsKey) {
+            activeAIId = active
+        }
+    }
+    private func saveConnections() {
+        UserDefaults.standard.set(Array(connectedIds), forKey: connectedDefaultsKey)
+        UserDefaults.standard.set(activeAIId, forKey: activeAIDefaultsKey)
     }
 
     func isConnected(_ id: String) -> Bool { connectedIds.contains(id) }

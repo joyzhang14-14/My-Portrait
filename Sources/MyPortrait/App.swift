@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import os.log
 
 @main
 struct MyPortraitApp: App {
@@ -37,8 +38,23 @@ final class ChromelessWindow: NSWindow {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: ChromelessWindow!
+    var services: Services!
+    var devModeIndicator: DevModeStatusItem!
+
+    private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
+        services = Services()
+        devModeIndicator = DevModeStatusItem(reporter: services.reporter)
+
+        // 确保磁盘目录结构存在
+        do {
+            try Storage.ensureExists()
+        } catch {
+            lifecycleLog.error("Storage.ensureExists failed: \(error.localizedDescription, privacy: .public)")
+        }
+
         NSApp.setActivationPolicy(.regular)
 
         window = ChromelessWindow(
@@ -60,7 +76,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.zoomButton)?.isHidden = false
 
         // Host the SwiftUI ContentView inside the AppKit window.
-        let hosting = NSHostingView(rootView: ContentView().preferredColorScheme(.dark))
+        // Inject the Services container into the environment so any descendant
+        // view can read \.services to access db / coordinator / reporter.
+        let hosting = NSHostingView(
+            rootView: ContentView()
+                .environment(\.services, services)
+                .preferredColorScheme(.dark)
+        )
         hosting.autoresizingMask = [.width, .height]
         // Default sizingOptions let SwiftUI's intrinsic size feed back into the
         // window — when frames reload on a date switch the intrinsic size
@@ -72,10 +94,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // 3. 启动采集流水线（异步，不阻塞 UI 显示）。
+        // P0 stub 会 throw notImplemented —— 由 reporter 上报、状态栏亮红点。
+        // app 不崩。
+        let coordinator = services.coordinator
+        Task.detached(priority: .userInitiated) { [lifecycleLog] in
+            do {
+                try await coordinator.start()
+            } catch {
+                lifecycleLog.error("coordinator.start failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // 进程退出前尽量优雅停止采集（刷盘、关 SCStream）。
+        // 同步等最多 ~1s，超时由系统 ~5s 后强制 kill 兜底。
+        let sem = DispatchSemaphore(value: 0)
+        let coordinator = services?.coordinator
+        Task.detached(priority: .userInitiated) {
+            await coordinator?.stop()
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 1.0)
     }
 }
 
