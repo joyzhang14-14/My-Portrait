@@ -14,6 +14,10 @@ struct TimelineSidebar: View {
     @Binding var selection: SidebarSection?
     let chat: ChatController
     @Binding var memoryScope: MemoryScope
+    @Binding var pipeSelection: UUID?
+
+    @State private var pipeStore = PipeStore.shared
+    @State private var editingPipe: PipeJob? = nil
 
     @Environment(ChatStore.self) private var chatStore
 
@@ -63,6 +67,8 @@ struct TimelineSidebar: View {
                         recentsSection
                     } else if selection == .memories {
                         memoryScopeSection
+                    } else if selection == .pipes {
+                        pipesSection
                     } else {
                         otherSectionPlaceholder
                     }
@@ -295,6 +301,60 @@ struct TimelineSidebar: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, -4)
+    }
+
+    // MARK: Pipes (background AI workers)
+
+    private var pipesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                SectionHeader(title: "PIPES", count: pipeStore.pipes.count)
+                Spacer()
+                Button {
+                    editingPipe = PipesView.blankPipe()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("New pipe")
+            }
+
+            if pipeStore.pipes.isEmpty {
+                EmptyRow(text: "No pipes yet — click + to create one.")
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(pipeStore.pipes) { p in
+                        PipeSidebarRow(
+                            pipe: p,
+                            isActive: pipeSelection == p.id,
+                            onTap: { pipeSelection = p.id },
+                            onToggle: { pipeStore.toggleEnabled(p.id) }
+                        )
+                    }
+                }
+            }
+        }
+        .sheet(item: $editingPipe) { pipe in
+            // Inline edit sheet so user can create a pipe directly from the
+            // sidebar — same content the main pane uses.
+            PipeQuickEditor(initial: pipe) { saved in
+                if pipeStore.pipes.contains(where: { $0.id == saved.id }) {
+                    pipeStore.update(saved)
+                } else {
+                    pipeStore.add(saved)
+                }
+                editingPipe = nil
+                pipeSelection = saved.id
+            } onCancel: { editingPipe = nil }
+        }
     }
 
     // MARK: placeholder for non-Timeline sections

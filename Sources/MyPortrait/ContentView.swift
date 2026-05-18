@@ -7,13 +7,15 @@ struct ContentView: View {
     @State private var chat = ChatController()
     @State private var chatStore = ChatStore.shared
     @State private var memoryScope: MemoryScope = .events
+    @State private var pipeSelection: UUID? = nil
 
     var body: some View {
         HStack(spacing: 0) {
             TimelineSidebar(state: timeline,
                             selection: $selection,
                             chat: chat,
-                            memoryScope: $memoryScope)
+                            memoryScope: $memoryScope,
+                            pipeSelection: $pipeSelection)
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
 
@@ -67,7 +69,7 @@ struct ContentView: View {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
         case .connections:   ConnectionsView()
-        case .pipes:         PipesView()
+        case .pipes:         PipesView(selection: $pipeSelection)
         case .memories:      MemoriesView(scope: $memoryScope)
         }
     }

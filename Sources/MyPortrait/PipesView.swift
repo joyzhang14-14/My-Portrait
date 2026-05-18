@@ -1,26 +1,38 @@
 import SwiftUI
 
-/// "Pipes" — background AI workers that fire on a cadence and store their
-/// runs as conversations. List on the left, detail (runs of the selected
-/// pipe) on the right. Each run row opens its source conversation in Home.
+/// Main pane is the detail only. The pipe LIST + `+` action lives in the
+/// left sidebar (alongside Home's Recents + Memory scope) so Pipes feels
+/// like a first-class section instead of having a nested column.
 struct PipesView: View {
     @Environment(ChatController.self) private var chat
-    @Environment(\.dismiss) private var dismiss
+    @Binding var selection: UUID?
     @State private var store = PipeStore.shared
-    @State private var selection: UUID? = nil
     @State private var editing: PipeJob? = nil
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: 280)
-            Divider()
-            detail
-                .frame(maxWidth: .infinity)
+        Group {
+            if let pipe = currentPipe {
+                PipeDetailView(
+                    pipe: pipe,
+                    onEdit: { editing = pipe },
+                    onDelete: {
+                        store.delete(pipe.id)
+                        selection = nil
+                    },
+                    onRunNow: { PipeExecutor.run(pipe) },
+                    onOpenConv: { convId in
+                        chat.switchTo(convId)
+                        NotificationCenter.default.post(name: .navigateToHome, object: nil)
+                    }
+                )
+            } else {
+                emptyState
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .sheet(item: $editing) { pipe in
-            PipeEditor(initial: pipe) { saved in
+            PipeQuickEditor(initial: pipe) { saved in
                 if store.pipes.contains(where: { $0.id == saved.id }) {
                     store.update(saved)
                 } else {
@@ -30,93 +42,34 @@ struct PipesView: View {
                 selection = saved.id
             } onCancel: { editing = nil }
         }
+        .onAppear {
+            // Land on the first pipe if none picked yet.
+            if selection == nil, let first = store.pipes.first {
+                selection = first.id
+            }
+        }
     }
 
-    // MARK: - Left: list
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("PIPES")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.55))
-                Spacer()
-                Button { editing = blankPipe() } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.08))
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("New pipe")
-            }
-            .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 10)
-
-            Divider().background(Color.white.opacity(0.06))
-
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 44, weight: .light))
+                .foregroundStyle(.white.opacity(0.35))
+            Text(store.pipes.isEmpty ? "No pipes yet"
+                                     : "Select a pipe from the sidebar")
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.60))
             if store.pipes.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(.white.opacity(0.40))
-                    Text("No pipes yet.\nClick + to create one.")
-                        .font(.system(size: 11))
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.55))
+                Button {
+                    editing = Self.blankPipe()
+                } label: {
+                    Label("New pipe", systemImage: "plus")
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .padding(.top, 60)
-                .frame(maxWidth: .infinity)
-            } else {
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(store.pipes) { p in
-                            PipeRow(pipe: p, isActive: selection == p.id) {
-                                selection = p.id
-                            } onToggle: {
-                                store.toggleEnabled(p.id)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                }
+                .padding(.top, 4)
             }
         }
-    }
-
-    // MARK: - Right: detail
-
-    @ViewBuilder private var detail: some View {
-        if let pipe = currentPipe {
-            PipeDetailView(
-                pipe: pipe,
-                onEdit: { editing = pipe },
-                onDelete: {
-                    store.delete(pipe.id)
-                    selection = nil
-                },
-                onRunNow: { PipeExecutor.run(pipe) },
-                onOpenConv: { convId in
-                    chat.switchTo(convId)
-                    NotificationCenter.default.post(name: .navigateToHome, object: nil)
-                }
-            )
-        } else {
-            VStack(spacing: 10) {
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 40, weight: .light))
-                    .foregroundStyle(.white.opacity(0.30))
-                Text(store.pipes.isEmpty ? "Create a pipe to get started"
-                                         : "Select a pipe")
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var currentPipe: PipeJob? {
@@ -124,11 +77,11 @@ struct PipesView: View {
         return store.pipes.first { $0.id == id }
     }
 
-    private func blankPipe() -> PipeJob {
+    static func blankPipe() -> PipeJob {
         PipeJob(name: "New pipe",
-             prompt: "Summarize what changed since the last run.",
-             window: .lastHours(1),
-             schedule: .everyMinutes(60))
+                prompt: "Summarize what changed since the last run.",
+                window: .lastHours(1),
+                schedule: .everyMinutes(60))
     }
 }
 
@@ -138,9 +91,9 @@ extension Notification.Name {
     static let navigateToHome = Notification.Name("MyPortrait.NavigateToHome")
 }
 
-// MARK: - PipeJob row in sidebar
+// MARK: - PipeJob row in sidebar (also used by TimelineSidebar)
 
-private struct PipeRow: View {
+struct PipeSidebarRow: View {
     let pipe: PipeJob
     let isActive: Bool
     let onTap: () -> Void
@@ -318,7 +271,9 @@ private struct RunRow: View {
 
 // MARK: - PipeJob editor sheet
 
-private struct PipeEditor: View {
+/// Sheet for create/edit. Used by both PipesView (main pane) and
+/// TimelineSidebar's pipes section.
+struct PipeQuickEditor: View {
     @State var initial: PipeJob
     let onSave: (PipeJob) -> Void
     let onCancel: () -> Void
