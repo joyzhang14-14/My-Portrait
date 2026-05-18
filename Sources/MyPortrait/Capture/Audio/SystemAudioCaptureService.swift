@@ -1,4 +1,5 @@
-import AVFoundation
+@preconcurrency import AVFoundation
+import AudioToolbox
 import CoreAudio
 import Foundation
 import os.log
@@ -6,131 +7,172 @@ import os.log
 /// 系统音频 (loopback / output) 采集服务。捕获其他 app 的输出（如视频会议
 /// 另一方的声音、视频播放声等），与麦克风音频并列存在。
 ///
-/// **状态：架构在位 + Core Audio 半实现**。
+/// 链路：
+///   1. CATapDescription 描述要捕获什么（所有进程的 stereo 混合，排除自身）
+///   2. AudioHardwareCreateProcessTap → 拿到 tap AudioObjectID
+///   3. 用 tap UID 构造 aggregate device（让标准音频 API 能读它）
+///   4. **设 AVAudioEngine.inputNode 的 underlying AudioUnit 用 aggregateID
+///      作为 input device**（这一步是 macOS HAL 唯一支持的方式）
+///   5. inputNode tap → AVAudioConverter 转 16kHz mono Float32 → VADRecorder
 ///
-/// 完整的 process tap → aggregate device → AVAudioEngine 链路需要的代码量
-/// 远超本 session 可消化的，且需要 macOS 14.4+ 实际机器联调。当前实现：
-///   1. CATapDescription 创建 ✅
-///   2. AudioHardwareCreateProcessTap 调用 ✅
-///   3. Aggregate device 创建 ✅
-///   4. AVAudioEngine ↔ aggregate 绑定 ❌（marks `notImplemented`）
-///   5. VAD 状态机 ❌（待 #4 完成后复用 AudioCaptureService 的逻辑，建议抽公共类）
+/// VAD/写盘和 AudioCaptureService 共用 VADRecorder（设备标签 `system_loopback`）。
 ///
-/// 跑到 start() 时如果 #4/#5 未完成，会通过 reporter 报 `notImplemented`，
-/// **状态栏会冒红点**。Settings UI 仍可显示开关；用户切换不会崩。
+/// macOS 14.4+ 才有这个能力。
 ///
-/// 参考：
-///   - Apple 示例：https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps
-///   - macOS 14.4+ 才有 process tap API
+/// 失败模式：
+///   - tap 建不起来（macOS 版本太老 / 系统未开权限）→ log，service 不启
+///   - aggregate device 建不起来 → log + 释放 tap，不启
+///   - AVAudioEngine 设设备失败 → log + 释放资源，不启
 actor SystemAudioCaptureService {
 
     private let reporter: UnimplementedReporter
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "sysaudio")
     private let audioDir: URL
 
-    /// 创建出来的 process tap audio object ID。0 = 未创建。
+    // Core Audio 资源
     private var tapID: AudioObjectID = 0
-    /// 包含 tap 的 aggregate device ID。0 = 未创建。
     private var aggregateID: AudioDeviceID = 0
 
-    private var isRunning: Bool = false
+    // AVFoundation
+    private let engine = AVAudioEngine()
+    private var targetFormat: AVAudioFormat?
+    private var converter: AVAudioConverter?
 
-    /// 录段事件流。与 AudioCaptureService 并列；TranscriptionScheduler 同样
-    /// 订阅这里产出的 wav 段（音频内容会标 `device="system_loopback"`）。
-    nonisolated let segmentEvents: AsyncStream<AudioSegmentEvent>
-    private let _segCont: AsyncStream<AudioSegmentEvent>.Continuation
+    // VAD/写盘
+    private var vadRecorder: VADRecorder?
+
+    private var samplesContinuation: AsyncStream<[Float]>.Continuation?
+    private var samplesTask: Task<Void, Never>?
+
+    private var isRunning: Bool = false
 
     init(reporter: UnimplementedReporter, audioDir: URL = Storage.audioQueueDir) {
         self.reporter = reporter
         self.audioDir = audioDir
-        var c: AsyncStream<AudioSegmentEvent>.Continuation!
-        self.segmentEvents = AsyncStream<AudioSegmentEvent> { cont in c = cont }
-        self._segCont = c
     }
+
+    /// 当前 VADRecorder 的段事件流（`stop()` 后是空 finished stream）。
+    func segmentEvents() -> AsyncStream<AudioSegmentEvent> {
+        if let r = vadRecorder { return r.segmentEvents }
+        return AsyncStream { $0.finish() }
+    }
+
+    // MARK: - 生命周期
 
     func start() async {
         guard !isRunning else { return }
 
-        // 1. CATapDescription：捕获所有进程的 stereo 混合，排除自身避免回环。
-        let description = CATapDescription(stereoMixdownOfProcesses: [])
-        description.muteBehavior = .unmuted     // 不静音源
-        description.isPrivate = true             // 不向其他 app 暴露
-        description.isExclusive = false          // 多 tap 共存
+        do {
+            try FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
+        } catch {
+            logger.error("audio_queue dir create failed: \(String(describing: error), privacy: .public)")
+            return
+        }
 
-        // 2. 创建 process tap。
+        // 1. CATapDescription
+        let description = CATapDescription(stereoMixdownOfProcesses: [])
+        description.muteBehavior = .unmuted
+        description.isPrivate = true
+        description.isExclusive = false
+
+        // 2. Process tap
         var tap: AudioObjectID = 0
-        let status = AudioHardwareCreateProcessTap(description, &tap)
-        guard status == kAudioHardwareNoError else {
-            logger.error("AudioHardwareCreateProcessTap failed: status=\(status)")
+        let tapStatus = AudioHardwareCreateProcessTap(description, &tap)
+        guard tapStatus == kAudioHardwareNoError else {
+            logger.error("AudioHardwareCreateProcessTap failed: status=\(tapStatus)")
             return
         }
         tapID = tap
-        logger.info("process tap created: id=\(tap)")
 
-        // 3. 把 tap 包成 aggregate device，让标准音频 API 能读它。
-        let aggregateUID = "com.myportrait.aggregate.systemTap"
-        var tapUIDStr: CFString = "" as CFString
-        var tapUIDSize = UInt32(MemoryLayout<CFString>.size)
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let uidStatus = AudioObjectGetPropertyData(tap, &addr, 0, nil, &tapUIDSize, &tapUIDStr)
-        guard uidStatus == kAudioHardwareNoError else {
-            logger.error("failed to read tap UID: status=\(uidStatus)")
-            cleanup()
+        // 3. Aggregate device 包住 tap
+        let tapUIDStr = try? Self.readTapUID(tap: tap)
+        guard let uid = tapUIDStr else {
+            logger.error("could not read tap UID")
+            cleanupCoreAudio()
             return
         }
 
+        let aggregateUID = "com.myportrait.aggregate.systemTap.\(UUID().uuidString)"
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "MyPortraitSystemTapDevice",
             kAudioAggregateDeviceUIDKey: aggregateUID,
             kAudioAggregateDeviceIsPrivateKey: 1,
             kAudioAggregateDeviceTapListKey: [[
-                kAudioSubTapUIDKey: tapUIDStr,
+                kAudioSubTapUIDKey: uid,
                 kAudioSubTapDriftCompensationKey: 1,
             ]],
         ]
         var aggregate: AudioDeviceID = 0
-        let aggStatus = AudioHardwareCreateAggregateDevice(
-            aggregateDescription as CFDictionary, &aggregate
-        )
+        let aggStatus = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregate)
         guard aggStatus == kAudioHardwareNoError else {
             logger.error("AudioHardwareCreateAggregateDevice failed: status=\(aggStatus)")
-            cleanup()
+            cleanupCoreAudio()
             return
         }
         aggregateID = aggregate
-        logger.info("aggregate device created: id=\(aggregate)")
 
-        // 4. 把 AVAudioEngine 接到 aggregateID，跑跟 AudioCaptureService 同款的
-        //    VAD 状态机。这一步是剩余工作量最大的一段 —— AVAudioEngine 默认绑
-        //    系统输入设备，要切到自定义 aggregate 需要直接操作底层 AudioUnit。
-        //
-        //    建议实现时：
-        //      - 把 AudioCaptureService 的 VAD 状态机（processSamples + open/close）
-        //        抽到独立的 VADSegmentWriter 类
-        //      - 这里和 AudioCaptureService 都注入 VADSegmentWriter，传 device 名
-        //      - 段文件用 `device="system_loopback"` 区分
-        //
-        //    现在直接抛 notImplemented，状态栏红点提示用户：
-        //      "尚未接通采集，已分配资源但 0 个段"
-        throw_notImplemented_marker()  // 见下方实际抛错点
+        // 4. 把 AVAudioEngine 的 input device 切到 aggregate
+        do {
+            try bindAggregateToEngine(aggregateID: aggregate)
+        } catch {
+            logger.error("bind aggregate to engine failed: \(String(describing: error), privacy: .public)")
+            cleanupCoreAudio()
+            return
+        }
+
+        // 5. VADRecorder + tap + 转换 + start
+        vadRecorder = VADRecorder(deviceLabel: "system_loopback", audioDir: audioDir)
+
+        do {
+            try configureTapAndStart()
+        } catch {
+            logger.error("engine start failed: \(String(describing: error), privacy: .public)")
+            await vadRecorder?.flush()
+            vadRecorder = nil
+            cleanupCoreAudio()
+            return
+        }
 
         isRunning = true
+        logger.info("SystemAudioCaptureService started (tap=\(self.tapID), aggregate=\(self.aggregateID))")
     }
 
     func stop() async {
-        cleanup()
-        _segCont.finish()
+        engine.inputNode.removeTap(onBus: 0)
+        if engine.isRunning { engine.stop() }
+
+        samplesContinuation?.finish()
+        samplesContinuation = nil
+        samplesTask?.cancel()
+        samplesTask = nil
+
+        await vadRecorder?.flush()
+        vadRecorder = nil
+
+        cleanupCoreAudio()
         isRunning = false
+        logger.info("SystemAudioCaptureService stopped")
     }
 
-    // MARK: - 私有
+    // MARK: - 私有 — Core Audio
 
-    /// 释放 Core Audio 资源。
-    private func cleanup() {
+    /// 读 tap 的 UID 属性 —— aggregate device 的 sub-tap list 引用要的就是它。
+    private static func readTapUID(tap: AudioObjectID) throws -> String {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size = UInt32(MemoryLayout<CFString>.size)
+        var cfstr: Unmanaged<CFString>? = nil
+        let status = AudioObjectGetPropertyData(tap, &addr, 0, nil, &size, &cfstr)
+        guard status == kAudioHardwareNoError, let unmanaged = cfstr else {
+            throw NSError(domain: "SystemAudio", code: Int(status))
+        }
+        return unmanaged.takeRetainedValue() as String
+    }
+
+    private func cleanupCoreAudio() {
         if aggregateID != 0 {
             AudioHardwareDestroyAggregateDevice(aggregateID)
             aggregateID = 0
@@ -141,12 +183,104 @@ actor SystemAudioCaptureService {
         }
     }
 
-    /// 仅用来命中 reporter.notImplemented 的桥接 —— async actor 方法里直接
-    /// `throw reporter.notImplemented(...)` 会被 `start()` 的 `async`（无
-    /// `throws`）拒绝，所以走"主动调 reporter + 用 logger 报错"的方式。
-    private func throw_notImplemented_marker() {
-        _ = reporter.notImplemented("SystemAudioCaptureService.start[engine wiring]")
-        logger.error("SystemAudioCaptureService: resources allocated but engine wiring not yet implemented (P5.1). Tap + aggregate device exist but no segments will be produced.")
-        cleanup()
+    // MARK: - 私有 — AVAudioEngine
+
+    /// 把 engine.inputNode 的底层 AudioUnit 切到 aggregate device。
+    /// 必须在 engine.start() **之前**完成。
+    private func bindAggregateToEngine(aggregateID: AudioDeviceID) throws {
+        // 触发 audioUnit 懒构造：先 access inputNode.outputFormat 才能拿到 audioUnit。
+        _ = engine.inputNode.outputFormat(forBus: 0)
+        guard let au = engine.inputNode.audioUnit else {
+            throw NSError(domain: "SystemAudio", code: -10, userInfo: [
+                NSLocalizedDescriptionKey: "inputNode.audioUnit is nil"
+            ])
+        }
+        var devID: AudioDeviceID = aggregateID
+        let status = AudioUnitSetProperty(
+            au,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &devID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status != noErr {
+            throw NSError(domain: "SystemAudio", code: Int(status), userInfo: [
+                NSLocalizedDescriptionKey: "AudioUnitSetProperty(CurrentDevice) failed"
+            ])
+        }
+    }
+
+    private func configureTapAndStart() throws {
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        guard let target = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw NSError(domain: "SystemAudio", code: -20)
+        }
+        targetFormat = target
+
+        guard let conv = AVAudioConverter(from: inputFormat, to: target) else {
+            throw NSError(domain: "SystemAudio", code: -21)
+        }
+        converter = conv
+
+        var c: AsyncStream<[Float]>.Continuation!
+        let stream = AsyncStream<[Float]> { cont in c = cont }
+        samplesContinuation = c
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) {
+            [weak self] buffer, _ in
+            guard let self else { return }
+            Task { [weak self] in
+                await self?.performConversion(buffer: buffer)
+            }
+        }
+
+        try engine.start()
+
+        let recorder = vadRecorder
+        samplesTask = Task {
+            for await samples in stream {
+                await recorder?.feed(samples)
+            }
+        }
+    }
+
+    private func performConversion(buffer: AVAudioPCMBuffer) {
+        guard let converter, let targetFormat, let cont = samplesContinuation else { return }
+
+        let inputFrames = AVAudioFrameCount(buffer.frameLength)
+        let outputCapacity = AVAudioFrameCount(
+            Double(inputFrames) * 16_000 / buffer.format.sampleRate
+        ) + 256
+        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputCapacity) else {
+            return
+        }
+
+        var error: NSError?
+        var consumed = false
+        let status = converter.convert(to: output, error: &error) { _, statusPtr in
+            if consumed {
+                statusPtr.pointee = .endOfStream
+                return nil
+            }
+            consumed = true
+            statusPtr.pointee = .haveData
+            return buffer
+        }
+        guard status != .error, error == nil, output.frameLength > 0,
+              let channelData = output.floatChannelData
+        else {
+            return
+        }
+        let count = Int(output.frameLength)
+        let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
+        cont.yield(samples)
     }
 }

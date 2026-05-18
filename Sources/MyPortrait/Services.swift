@@ -69,7 +69,11 @@ final class Services {
         let pw = PowerWatcher()
         self.powerWatcher = pw
         self.transcriber = TranscriptionScheduler(
-            db: dbImpl, audio: audioSvc, reporter: reporter, power: pw
+            db: dbImpl,
+            audio: audioSvc,
+            systemAudio: self.systemAudio,
+            reporter: reporter,
+            power: pw
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
         self.modelManager = BGEM3ModelManager()

@@ -23,6 +23,7 @@ actor TranscriptionScheduler {
 
     private let db: PortraitDB
     private let audio: AudioCaptureService
+    private let systemAudio: SystemAudioCaptureService
     private let reporter: UnimplementedReporter
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "transcribe")
 
@@ -44,13 +45,15 @@ actor TranscriptionScheduler {
     /// serial-call contract"改为 actor + 内部排队，否则会 data race。
     private let queueBatchLimit: Int = 2
 
-    private var ingestTask: Task<Void, Never>?
+    private var ingestMicTask: Task<Void, Never>?
+    private var ingestSysTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
     private var powerTask: Task<Void, Never>?
 
     init(
         db: PortraitDB,
         audio: AudioCaptureService,
+        systemAudio: SystemAudioCaptureService,
         reporter: UnimplementedReporter,
         power: PowerWatcher,
         vad: VADSegmenter = VADSegmenter(),
@@ -59,6 +62,7 @@ actor TranscriptionScheduler {
     ) {
         self.db = db
         self.audio = audio
+        self.systemAudio = systemAudio
         self.reporter = reporter
         self.power = power
         self.vad = vad
@@ -66,12 +70,22 @@ actor TranscriptionScheduler {
         self.speaker = speaker
     }
 
-    func start() {
-        guard ingestTask == nil else { return }
+    func start() async {
+        guard ingestMicTask == nil else { return }
 
-        let stream = audio.segmentEvents
-        ingestTask = Task.detached(priority: .utility) { [weak self] in
-            for await segment in stream {
+        // 订阅麦克风段流。注意 segmentEvents() 是 async 方法（每个 service
+        // 在 start 后才有 VADRecorder；这里调一次拿当前实例的流）。
+        let micStream = await audio.segmentEvents()
+        ingestMicTask = Task.detached(priority: .utility) { [weak self] in
+            for await segment in micStream {
+                await self?.ingest(segment: segment)
+            }
+        }
+
+        // 订阅系统音频段流。两路独立，但走同一个 ingest（device 字段区分来源）。
+        let sysStream = await systemAudio.segmentEvents()
+        ingestSysTask = Task.detached(priority: .utility) { [weak self] in
+            for await segment in sysStream {
                 await self?.ingest(segment: segment)
             }
         }
@@ -100,10 +114,12 @@ actor TranscriptionScheduler {
     }
 
     func stop() {
-        ingestTask?.cancel()
+        ingestMicTask?.cancel()
+        ingestSysTask?.cancel()
         transcribeTask?.cancel()
         powerTask?.cancel()
-        ingestTask = nil
+        ingestMicTask = nil
+        ingestSysTask = nil
         transcribeTask = nil
         powerTask = nil
         logger.info("TranscriptionScheduler stopped")
@@ -127,8 +143,8 @@ actor TranscriptionScheduler {
             filePath: segment.wavPath,
             recordedAtMs: segment.recordedAtMs,
             durationS: segment.durationS,
-            device: defaultDeviceName(),
-            isInput: true,
+            device: segment.device,                              // 段自带的设备标签
+            isInput: segment.device == "default_microphone",
             status: .pending
         )
         do {
@@ -237,8 +253,4 @@ actor TranscriptionScheduler {
         }
     }
 
-    private func defaultDeviceName() -> String {
-        // P4：单设备占位。后续可读 AVCaptureDevice.default(for: .audio)?.localizedName
-        "default_microphone"
-    }
 }
