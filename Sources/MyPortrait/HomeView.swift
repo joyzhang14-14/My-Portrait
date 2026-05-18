@@ -12,6 +12,14 @@ struct HomeView: View {
     @AppStorage("MyPortrait.redactPII") private var redactPII: Bool = false
     @State private var attachments: [Attachment] = []
     @State private var suggestions = SuggestionEngine.shared
+    @State private var templates = TemplateLibrary.shared
+    @State private var editingTemplate: SummaryTemplate? = nil
+
+    private func runTemplate(_ t: SummaryTemplate) {
+        let chips = [t.window.resolveChip()].compactMap { $0 }
+        let redact = redactPII
+        chat.send(t.prompt, chips: chips, redactPII: redact)
+    }
 
     /// AI-generated chips if we have any, else the seed list.
     private var displayedActivityChips: [ActivityChip] {
@@ -124,14 +132,32 @@ struct HomeView: View {
                         GridItem(.flexible(), spacing: 10),
                         GridItem(.flexible(), spacing: 10)]
             LazyVGrid(columns: cols, spacing: 10) {
-                ForEach(Mock.suggestionCards) { card in
-                    SuggestionCardView(card: card) {
-                        prompt = card.title
-                        send()
-                    }
+                ForEach(templates.templates) { t in
+                    TemplateCardView(
+                        template: t,
+                        onTap: { runTemplate(t) },
+                        onEdit: { editingTemplate = t },
+                        onDelete: { templates.delete(t.id) }
+                    )
                 }
+                AddTemplateCard { editingTemplate = SummaryTemplate(
+                    emoji: "✨", title: "New shortcut", subtitle: "",
+                    prompt: "", window: .lastHours(1)
+                ) }
             }
             .padding(.horizontal, 20)
+            .sheet(item: $editingTemplate) { t in
+                TemplateEditor(initial: t) { edited in
+                    if templates.templates.contains(where: { $0.id == edited.id }) {
+                        templates.update(edited)
+                    } else {
+                        templates.add(edited)
+                    }
+                    editingTemplate = nil
+                } onCancel: {
+                    editingTemplate = nil
+                }
+            }
 
             HStack(spacing: 6) {
                 Text("BASED ON YOUR ACTIVITY")
@@ -1122,6 +1148,151 @@ struct GlassPanel: View {
 }
 
 // MARK: - Suggestion cards / chips
+
+/// Renders one user-editable template as a 1/3-width tile. Hover surfaces
+/// edit + delete; the tile body sends the prompt.
+private struct TemplateCardView: View {
+    let template: SummaryTemplate
+    let onTap: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(template.emoji).font(.system(size: 18))
+                    Spacer()
+                    if hover {
+                        Button(action: onEdit) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                        .buttonStyle(.plain)
+                        Button(action: onDelete) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(template.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .lineLimit(1)
+                    Text(template.subtitle.isEmpty ? template.window.label : template.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.white.opacity(hover ? 0.05 : 0.025))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .contextMenu {
+            Button("Edit", action: onEdit)
+            Divider()
+            Button("Delete", role: .destructive, action: onDelete)
+        }
+    }
+}
+
+/// Trailing tile that opens a fresh template editor.
+private struct AddTemplateCard: View {
+    let onTap: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(hover ? 0.85 : 0.45))
+                Text("New shortcut")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(hover ? 0.75 : 0.45))
+            }
+            .frame(maxWidth: .infinity, minHeight: 86)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(
+                        Color.white.opacity(hover ? 0.30 : 0.14),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 4])
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
+
+/// Modal editor for a SummaryTemplate. Lives in a .sheet — single text area
+/// for the prompt + light metadata controls.
+private struct TemplateEditor: View {
+    @State var initial: SummaryTemplate
+    let onSave: (SummaryTemplate) -> Void
+    let onCancel: () -> Void
+
+    private let windowOptions: [ContextWindow] = [
+        .none, .lastMinutes(5), .lastMinutes(30),
+        .lastHours(1), .lastHours(4), .lastHours(8), .today
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Shortcut").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                Button("Save")  { onSave(initial) }.keyboardShortcut(.defaultAction)
+                    .disabled(initial.title.isEmpty || initial.prompt.isEmpty)
+            }
+
+            HStack(spacing: 8) {
+                TextField("emoji", text: $initial.emoji).frame(width: 44)
+                TextField("title", text: $initial.title)
+            }
+            .textFieldStyle(.roundedBorder)
+
+            TextField("subtitle (optional)", text: $initial.subtitle)
+                .textFieldStyle(.roundedBorder)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Prompt").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $initial.prompt)
+                    .font(.system(size: 12))
+                    .frame(minHeight: 120)
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Context window").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: $initial.window) {
+                    ForEach(windowOptions, id: \.self) { w in
+                        Text(w.label).tag(w)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
 
 private struct SuggestionCardView: View {
     let card: SuggestionCard
