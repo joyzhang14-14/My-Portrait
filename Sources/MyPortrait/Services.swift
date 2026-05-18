@@ -29,6 +29,7 @@ final class Services {
     let coordinator: CaptureCoordinator
     let compactor: CompactionWorker
     let audio: AudioCaptureService
+    let systemAudio: SystemAudioCaptureService
     let transcriber: TranscriptionScheduler
     let powerWatcher: PowerWatcher
 
@@ -50,6 +51,7 @@ final class Services {
         self.compactor = CompactionWorker(db: stubDB, reporter: reporter)
         let audioSvc = AudioCaptureService(reporter: reporter)
         self.audio = audioSvc
+        self.systemAudio = SystemAudioCaptureService(reporter: reporter)
         let pw = PowerWatcher()
         self.powerWatcher = pw
         self.transcriber = TranscriptionScheduler(
@@ -111,6 +113,18 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
+        // 系统音频订阅。同样的暂停语义。
+        Publishers.CombineLatest(settings.$systemAudioCaptureEnabled, settings.$pauseUntil)
+            .map { enabled, until in
+                if let until, until > Date() { return false }
+                return enabled
+            }
+            .removeDuplicates()
+            .sink { [weak self] effective in
+                self?.applySystemAudioCapture(enabled: effective)
+            }
+            .store(in: &settingsCancellables)
+
         // 忽略 app 列表订阅。
         let coordinator = self.coordinator
         settings.$ignoredAppNames
@@ -131,6 +145,7 @@ final class Services {
     func stopManagedLifecycle() async {
         await coordinator.stop()
         await audio.stop()
+        await systemAudio.stop()
         await compactor.stop()
         await transcriber.stop()
         powerWatcher.stop()
@@ -162,6 +177,17 @@ final class Services {
                 await audio.start()
             } else {
                 await audio.stop()
+            }
+        }
+    }
+
+    private func applySystemAudioCapture(enabled: Bool) {
+        let sysAudio = self.systemAudio
+        Task.detached(priority: .userInitiated) {
+            if enabled {
+                await sysAudio.start()
+            } else {
+                await sysAudio.stop()
             }
         }
     }

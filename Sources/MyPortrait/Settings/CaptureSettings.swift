@@ -24,6 +24,7 @@ final class CaptureSettings: ObservableObject {
     private enum Keys {
         static let screenCaptureEnabled = "MyPortrait.capture.screenEnabled.v1"
         static let audioCaptureEnabled = "MyPortrait.capture.audioEnabled.v1"
+        static let systemAudioCaptureEnabled = "MyPortrait.capture.systemAudioEnabled.v1"
         static let ignoredAppNames = "MyPortrait.capture.ignoredAppNames.v1"
         static let ignoredUrlPatterns = "MyPortrait.capture.ignoredUrlPatterns.v1"
         static let pauseUntil = "MyPortrait.capture.pauseUntil.v1"
@@ -48,6 +49,17 @@ final class CaptureSettings: ObservableObject {
         didSet {
             guard !isLoading else { return }
             UserDefaults.standard.set(audioCaptureEnabled, forKey: Keys.audioCaptureEnabled)
+        }
+    }
+
+    /// 系统音频（loopback / process tap）采集开关。**目前仅架构在位**，
+    /// 启动后 Core Audio 资源会分配但 AVAudioEngine wiring 未完成，**不会产
+    /// 出段**，状态栏会冒红点提示。
+    /// macOS 14.4+ 才有这个能力（CATapDescription / AudioHardwareCreateProcessTap）。
+    @Published var systemAudioCaptureEnabled: Bool {
+        didSet {
+            guard !isLoading else { return }
+            UserDefaults.standard.set(systemAudioCaptureEnabled, forKey: Keys.systemAudioCaptureEnabled)
         }
     }
 
@@ -119,6 +131,7 @@ final class CaptureSettings: ObservableObject {
         // 第一次启动两个 key 都不存在，bool(forKey:) 返回 false —— 正好就是我们要的默认值。
         self.screenCaptureEnabled = defaults.bool(forKey: Keys.screenCaptureEnabled)
         self.audioCaptureEnabled = defaults.bool(forKey: Keys.audioCaptureEnabled)
+        self.systemAudioCaptureEnabled = defaults.bool(forKey: Keys.systemAudioCaptureEnabled)
 
         // 忽略列表：UserDefaults 存的是 Array，转 Set 以方便查找。
         let stored = defaults.stringArray(forKey: Keys.ignoredAppNames) ?? []
