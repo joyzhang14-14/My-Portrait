@@ -6,18 +6,18 @@ struct DisplaySettingsView: View {
     @AppStorage(SettingsKeys.translucentSidebar)     private var translucentSidebar = true
     @AppStorage(SettingsKeys.hideModelReasoning)     private var hideReasoning = false
     @AppStorage(SettingsKeys.showOverlayInRecording) private var showOverlayInRec = true
-    @AppStorage(SettingsKeys.accentColor)            private var accent = AccentColor.purple.rawValue
-    @AppStorage(SettingsKeys.appIconVariant)         private var iconVariant = AppIconVariant.default.rawValue
+    @AppStorage(SettingsKeys.appName)                private var appName = "My Portrait"
+    @AppStorage(SettingsKeys.customDockIcon)         private var dockIconPath = ""
+    @AppStorage(SettingsKeys.customTrayIcon)         private var trayIconPath = ""
     @AppStorage(SettingsKeys.showInMenuBar)          private var showInMenuBar = true
-
-    private var accentColor: Color { AccentColor(rawValue: accent)?.color ?? .purple }
 
     var body: some View {
         SettingsPage("Display", subtitle: "Theme, window behaviour, and personalization") {
 
             AppCustomizeCard(
-                accent: $accent,
-                iconVariant: $iconVariant,
+                appName: $appName,
+                dockIconPath: $dockIconPath,
+                trayIconPath: $trayIconPath,
                 showInMenuBar: $showInMenuBar
             )
 
@@ -65,65 +65,76 @@ struct DisplaySettingsView: View {
 
 // MARK: - App Customize card
 
-/// Polished hero card at the top of the Display page: live icon preview +
-/// accent picker (swatches) + icon variant + menu-bar toggle. Mirrors
-/// Orphies' `app-customize-card.tsx`.
+/// Hero card at the top of the Display page. Mirrors Orphies'
+/// `app-customize-card.tsx`:
+///   1. Editable app name (max 32 chars)
+///   2. Dock icon slot — Upload / Replace / Reset
+///   3. Menu bar icon slot — same controls
+///   4. Show-in-menu-bar toggle
+///
+/// Uploads write into `~/Library/Application Support/MyPortrait/customize/`
+/// so the icons survive app restarts. Reset deletes the file.
 private struct AppCustomizeCard: View {
-    @Binding var accent: String
-    @Binding var iconVariant: String
+    @Binding var appName: String
+    @Binding var dockIconPath: String
+    @Binding var trayIconPath: String
     @Binding var showInMenuBar: Bool
 
-    private var accentColor: Color { AccentColor(rawValue: accent)?.color ?? .purple }
-    private var variant: AppIconVariant { AppIconVariant(rawValue: iconVariant) ?? .default }
+    private let maxNameLength = 32
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 16) {
-                iconPreview
                 VStack(alignment: .leading, spacing: 4) {
                     Text("App customize")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.96))
-                    Text("Personalize how My Portrait looks in your dock and across the UI.")
+                    Text("Personalize the in-app display name and the Dock + menu bar icons.")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.55))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("APP NAME (MAX \(maxNameLength) CHARS)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.45))
+                TextField("My Portrait", text: Binding(
+                    get: { appName },
+                    set: { appName = String($0.prefix(maxNameLength)) }
+                ))
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                )
+                Text("macOS controls the name shown in the menu bar (next to the Apple logo). Changing it here updates the dock title + windows.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Divider().background(Color.white.opacity(0.08))
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("ACCENT COLOR")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.45))
-                HStack(spacing: 10) {
-                    ForEach(AccentColor.allCases) { c in
-                        AccentSwatch(color: c.color, isActive: accent == c.rawValue) {
-                            accent = c.rawValue
-                        }
-                    }
-                    Spacer()
-                }
-            }
+            IconSlot(
+                title: "Dock icon",
+                subtitle: "Shown in the Dock and the cmd-Tab switcher.",
+                path: $dockIconPath,
+                fileName: "dock.png"
+            )
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("ICON VARIANT")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.45))
-                HStack(spacing: 10) {
-                    ForEach(AppIconVariant.allCases) { v in
-                        IconVariantTile(
-                            variant: v,
-                            accent: accentColor,
-                            isActive: iconVariant == v.rawValue
-                        ) { iconVariant = v.rawValue }
-                    }
-                    Spacer()
-                }
-            }
+            IconSlot(
+                title: "Menu bar icon",
+                subtitle: "Used by the status item next to the clock.",
+                path: $trayIconPath,
+                fileName: "tray.png"
+            )
 
             Divider().background(Color.white.opacity(0.08))
 
@@ -151,124 +162,119 @@ private struct AppCustomizeCard: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(
                             LinearGradient(
-                                colors: [accentColor.opacity(0.40), accentColor.opacity(0.08)],
+                                colors: [Color.purple.opacity(0.40), Color.purple.opacity(0.06)],
                                 startPoint: .topLeading, endPoint: .bottomTrailing
                             ),
                             lineWidth: 1
                         )
                 )
-                .shadow(color: accentColor.opacity(0.15), radius: 16, x: 0, y: 6)
+                .shadow(color: Color.purple.opacity(0.12), radius: 16, x: 0, y: 6)
         )
     }
-
-    @ViewBuilder private var iconPreview: some View {
-        ZStack {
-            switch variant {
-            case .default:
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(LinearGradient(
-                        colors: [accentColor, accentColor.opacity(0.6)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-            case .dark:
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.black)
-                    .overlay(RoundedRectangle(cornerRadius: 14)
-                        .stroke(accentColor.opacity(0.6), lineWidth: 1.5))
-            case .monochrome:
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.08))
-            case .gradient:
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(AngularGradient(
-                        colors: [accentColor, .pink, .blue, accentColor],
-                        center: .center))
-            }
-            Image(systemName: "sparkles")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(variant == .monochrome ? accentColor : .white.opacity(0.95))
-        }
-        .frame(width: 64, height: 64)
-        .shadow(color: accentColor.opacity(0.25), radius: 8, x: 0, y: 4)
-    }
 }
 
-private struct AccentSwatch: View {
-    let color: Color
-    let isActive: Bool
-    let action: () -> Void
-    @State private var hover = false
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle().fill(color)
-                if isActive {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .frame(width: 22, height: 22)
-            .overlay(
-                Circle().stroke(
-                    isActive ? Color.white.opacity(0.95) : Color.white.opacity(hover ? 0.4 : 0),
-                    lineWidth: 1.5
-                )
-            )
-            .scaleEffect(hover ? 1.1 : 1)
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
-    }
-}
+// MARK: - Icon slot (Dock / Menu bar)
 
-private struct IconVariantTile: View {
-    let variant: AppIconVariant
-    let accent: Color
-    let isActive: Bool
-    let action: () -> Void
-    @State private var hover = false
+private struct IconSlot: View {
+    let title: String
+    let subtitle: String
+    @Binding var path: String
+    /// On-disk file name to use when copying the picked image into our
+    /// support dir (e.g. "dock.png" / "tray.png").
+    let fileName: String
+
+    @State private var preview: NSImage? = nil
+
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                ZStack {
-                    Group {
-                        switch variant {
-                        case .default:
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(LinearGradient(
-                                    colors: [accent, accent.opacity(0.6)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing))
-                        case .dark:
-                            RoundedRectangle(cornerRadius: 7).fill(Color.black)
-                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(accent.opacity(0.6), lineWidth: 1))
-                        case .monochrome:
-                            RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.10))
-                        case .gradient:
-                            RoundedRectangle(cornerRadius: 7).fill(AngularGradient(
-                                colors: [accent, .pink, .blue, accent], center: .center))
+        HStack(spacing: 14) {
+            preview64
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.92))
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+                HStack(spacing: 6) {
+                    Button(action: pickFile) {
+                        Label(path.isEmpty ? "Upload" : "Replace",
+                              systemImage: "arrow.up.doc")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    if !path.isEmpty {
+                        Button(action: reset) {
+                            Label("Reset", systemImage: "arrow.uturn.backward")
+                                .font(.system(size: 11))
                         }
                     }
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(variant == .monochrome ? accent : .white.opacity(0.95))
                 }
-                .frame(width: 38, height: 38)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(isActive ? Color.white.opacity(0.9) : Color.white.opacity(hover ? 0.3 : 0.10),
-                                lineWidth: isActive ? 1.5 : 0.8)
-                )
-
-                Text(variant.label)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .tracking(0.4)
-                    .foregroundStyle(isActive ? .white.opacity(0.92) : .white.opacity(0.55))
+                .padding(.top, 2)
             }
-            .scaleEffect(hover ? 1.04 : 1)
+            Spacer()
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
+        .padding(.vertical, 4)
+        .onAppear { loadPreview() }
+        .onChange(of: path) { loadPreview() }
+    }
+
+    @ViewBuilder private var preview64: some View {
+        Group {
+            if let img = preview {
+                Image(nsImage: img).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06))
+                    Text("default")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(Color.white.opacity(0.14), lineWidth: 0.7))
+    }
+
+    // MARK: - File ops
+
+    private func loadPreview() {
+        guard !path.isEmpty, let img = NSImage(contentsOfFile: path) else {
+            preview = nil; return
+        }
+        preview = img
+    }
+
+    private func pickFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .webP, .image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        if panel.runModal() != .OK, let _ = panel.url { return }
+        guard panel.runModal() == .OK || panel.url != nil, let src = panel.url else { return }
+        copyAndSet(src: src)
+    }
+
+    private func copyAndSet(src: URL) {
+        let dir = AIPaths.supportDir.appendingPathComponent("customize", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: dest)
+        do {
+            try FileManager.default.copyItem(at: src, to: dest)
+            path = dest.path
+        } catch {
+            // Surface in a console log only; the UI just reverts to "default".
+            path = ""
+        }
+    }
+
+    private func reset() {
+        if !path.isEmpty {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        path = ""
+        preview = nil
     }
 }

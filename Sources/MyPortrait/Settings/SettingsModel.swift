@@ -111,8 +111,9 @@ enum SettingsKeys {
     static let powerMode                = "Settings.powerMode"                // PowerMode rawValue
 
     // Display (App customize)
-    static let accentColor              = "Settings.accentColor"              // AccentColor rawValue
-    static let appIconVariant           = "Settings.appIconVariant"           // AppIconVariant rawValue
+    static let appName                  = "Settings.appName"                  // String
+    static let customDockIcon           = "Settings.customDockIcon"           // file path
+    static let customTrayIcon           = "Settings.customTrayIcon"           // file path
     static let showInMenuBar            = "Settings.showInMenuBar"
 
     // Storage
