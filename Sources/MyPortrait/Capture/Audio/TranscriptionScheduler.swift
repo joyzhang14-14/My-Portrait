@@ -29,6 +29,7 @@ actor TranscriptionScheduler {
     private let vad: VADSegmenter
     private let whisper: WhisperKitWrapper
     private let power: PowerWatcher
+    private let speaker: any SpeakerDiarizer
 
     /// 后台兜底 poll 间隔。已有 PowerWatcher 事件驱动唤醒 +
     /// 新段事件直接驱动，poll 仅作为"防漏"兜底，故拉长到 60s（vs 之前 5s）。
@@ -53,7 +54,8 @@ actor TranscriptionScheduler {
         reporter: UnimplementedReporter,
         power: PowerWatcher,
         vad: VADSegmenter = VADSegmenter(),
-        whisper: WhisperKitWrapper = WhisperKitWrapper()
+        whisper: WhisperKitWrapper = WhisperKitWrapper(),
+        speaker: any SpeakerDiarizer = NoopSpeakerDiarizer()
     ) {
         self.db = db
         self.audio = audio
@@ -61,6 +63,7 @@ actor TranscriptionScheduler {
         self.power = power
         self.vad = vad
         self.whisper = whisper
+        self.speaker = speaker
     }
 
     func start() {
@@ -177,18 +180,21 @@ actor TranscriptionScheduler {
             return
         }
 
-        // 3. 写 sidecar JSON 到文件系统（设计文档"真相在文件系统"）。
+        // 3. 说话人识别（stub 永远返回 nil；真实实现替换 SpeakerDiarizer 即可）。
+        let speakerId = await speaker.diarize(wavPath: chunk.filePath)
+
+        // 4. 写 sidecar JSON 到文件系统（设计文档"真相在文件系统"）。
         //    路径 = wav 同目录 + 同名 + .transcript.json
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         writeTranscriptSidecar(wavPath: chunk.filePath, text: text, chunk: chunk, transcribedAtMs: nowMs)
 
-        // 4. 写转录行到 DB（索引镜像）。
+        // 5. 写转录行到 DB（索引镜像）。
         let record = TranscriptionRecord(
             audioChunkId: chunkId,
             startS: 0,
             endS: chunk.durationS,
             text: text,
-            speakerId: nil,
+            speakerId: speakerId,
             engine: "whisperkit",
             transcribedAtMs: nowMs
         )
