@@ -268,6 +268,27 @@ public struct OCRResult: Sendable {
         self.words = words
         self.avgConfidence = avgConfidence
     }
+
+    /// 计算属性：DB 写入时用启发式判断这一帧的文本来源。
+    ///
+    /// 当前规则：
+    ///   - AX 快路返回 words=[] + avgConfidence=1.0 → `.ax`
+    ///   - Vision OCR 返回 words 非空 → `.ocr`
+    ///   - 边界（理论上不应该发生）→ `.unknown`
+    ///
+    /// 未来可能多更多 case（subtitle 解析 / 系统通知 / etc.），所以 `.unknown`
+    /// 留了口子，**别在 DB 那边用 SQL CHECK 限死 enum 集合**。
+    public var textSource: TextSource {
+        if words.isEmpty && avgConfidence == 1.0 { return .ax }
+        if !words.isEmpty { return .ocr }
+        return .unknown
+    }
+
+    public enum TextSource: String, Sendable {
+        case ax       // 从焦点窗口的 accessibility tree 取
+        case ocr      // Vision OCR
+        case unknown  // 兜底（words=[] 且 avgConfidence!=1.0）
+    }
 }
 
 /// 单词级 bbox。坐标已转换为**左上原点归一化** (0-1)。

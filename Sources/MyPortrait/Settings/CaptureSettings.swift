@@ -2,169 +2,197 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// 采集层用户开关。
+/// 采集层用户开关 — SwiftUI Settings UI 与后端 Services 之间的桥。
 ///
-/// 持久化通过 UserDefaults。SwiftUI Settings 面板直接 bind 到 `@Published` 字段：
-/// ```swift
-/// Toggle("屏幕采集", isOn: $settings.screenCaptureEnabled)
-/// ```
+/// **单一真相在 UserDefaults**。Settings UI 用 `@AppStorage(SettingsKeys.xxx)`
+/// 写，这里也用同样的 key 读写，外加监听 `UserDefaults.didChangeNotification`
+/// 把变化映射到 `@Published` 字段。Services 通过 Combine sink 订阅 @Published。
 ///
-/// Services 订阅本对象的 publishers，flag 变化时自动 start/stop 对应子系统。
-/// 调用方**不需要**直接调 coordinator.start/stop —— 改 setting，Services 接管。
+/// 双向同步流程：
+///   - UI 改 @AppStorage → UserDefaults 变 → 通知 → reloadFromDefaults → @Published → Services sink
+///   - 状态栏菜单改 settings.xxx → didSet 写 UserDefaults → 通知 → reloadFromDefaults (flag 抑制) → 仍触发 sink
 ///
-/// 默认值（**两个采集开关都 OFF**）：
-///   - 方便开发期反复重启调试
-///   - 第一次启动不弹屏幕录制 / 麦克风权限请求（用户主动开才弹）
-///   - 用户必须在 Settings 里显式启用
+/// 默认值（首次启动 UserDefaults 无值时）：
+///   - screen / audio / systemAudio 都 **OFF**（开发期测试方便；不弹权限）
+///   - SwiftUI 视图里的 `@AppStorage(...) private var xxx = true` 默认无效 ——
+///     init 里 force-write false 抢先注册（已经有值的不动）。
 @MainActor
 final class CaptureSettings: ObservableObject {
 
-    // MARK: - 持久化 keys（UserDefaults）
+    // MARK: - 用户可改字段（与 SettingsKeys / Settings UI 共享 UserDefaults key）
 
-    private enum Keys {
-        static let screenCaptureEnabled = "MyPortrait.capture.screenEnabled.v1"
-        static let audioCaptureEnabled = "MyPortrait.capture.audioEnabled.v1"
-        static let systemAudioCaptureEnabled = "MyPortrait.capture.systemAudioEnabled.v1"
-        static let ignoredAppNames = "MyPortrait.capture.ignoredAppNames.v1"
-        static let ignoredUrlPatterns = "MyPortrait.capture.ignoredUrlPatterns.v1"
-        static let pauseUntil = "MyPortrait.capture.pauseUntil.v1"
-    }
-
-    // MARK: - 用户可改字段
-
-    /// 屏幕采集总开关。改为 true → Services 启动 CaptureCoordinator
-    /// （此时才触发屏幕录制权限弹窗）。改为 false → 停止 coordinator + 释放 SCStream。
+    /// 屏幕采集总开关。对应 `SettingsKeys.screenRecordingEnabled`。
     @Published var screenCaptureEnabled: Bool {
-        didSet {
-            guard !isLoading else { return }
-            UserDefaults.standard.set(screenCaptureEnabled, forKey: Keys.screenCaptureEnabled)
-        }
+        didSet { writeIfNeeded(screenCaptureEnabled, forKey: SettingsKeys.screenRecordingEnabled) }
     }
 
-    /// 麦克风采集总开关。改为 true → Services 启动 AudioCaptureService
-    /// （此时才触发麦克风权限弹窗）。改为 false → 停止录音。
-    /// 转录调度器(TranscriptionScheduler)持续运行 —— 关掉录音后它只会查 DB
-    /// 看到没有 pending 段、空转。
+    /// 麦克风采集总开关。对应 `SettingsKeys.audioRecordingEnabled`。
     @Published var audioCaptureEnabled: Bool {
-        didSet {
-            guard !isLoading else { return }
-            UserDefaults.standard.set(audioCaptureEnabled, forKey: Keys.audioCaptureEnabled)
-        }
+        didSet { writeIfNeeded(audioCaptureEnabled, forKey: SettingsKeys.audioRecordingEnabled) }
     }
 
-    /// 系统音频（loopback / process tap）采集开关。**目前仅架构在位**，
-    /// 启动后 Core Audio 资源会分配但 AVAudioEngine wiring 未完成，**不会产
-    /// 出段**，状态栏会冒红点提示。
-    /// macOS 14.4+ 才有这个能力（CATapDescription / AudioHardwareCreateProcessTap）。
+    /// 系统音频采集开关。对应 `SettingsKeys.captureSystemAudio`。
     @Published var systemAudioCaptureEnabled: Bool {
-        didSet {
-            guard !isLoading else { return }
-            UserDefaults.standard.set(systemAudioCaptureEnabled, forKey: Keys.systemAudioCaptureEnabled)
-        }
+        didSet { writeIfNeeded(systemAudioCaptureEnabled, forKey: SettingsKeys.captureSystemAudio) }
     }
 
-    /// 用户配置的"屏蔽 app 名"。命中（不区分大小写）则该帧跳过截图 + OCR。
-    ///
-    /// 设计：保留焦点元数据（DB 里仍记一行"用户在用 Mail"），但不存内容。
-    /// 跟 DRMGate 的区别：DRM 是系统级硬规则停整条流水线；这里只跳单帧。
+    /// 屏蔽 app 名单（不区分大小写整名匹配）。对应 `SettingsKeys.ignoredApps`。
     @Published var ignoredAppNames: Set<String> {
         didSet {
-            guard !isLoading else { return }
-            UserDefaults.standard.set(Array(ignoredAppNames), forKey: Keys.ignoredAppNames)
+            guard !isLoading, !isReloadingFromDefaults else { return }
+            UserDefaults.standard.set(Array(ignoredAppNames), forKey: SettingsKeys.ignoredApps)
         }
     }
 
-    /// 用户配置的"屏蔽 URL 模式"。glob 通配，例：
-    ///   - `*.bank.com/*`  → secure.bank.com/login 等
-    ///   - `*mail*`        → 任何含 mail 的 URL
-    /// 走 NSPredicate LIKE[c]（不区分大小写）。
+    /// 屏蔽 URL pattern 列表（glob，NSPredicate LIKE[c]）。对应 `SettingsKeys.ignoredURLs`。
     @Published var ignoredUrlPatterns: [String] {
         didSet {
-            guard !isLoading else { return }
-            UserDefaults.standard.set(ignoredUrlPatterns, forKey: Keys.ignoredUrlPatterns)
+            guard !isLoading, !isReloadingFromDefaults else { return }
+            UserDefaults.standard.set(ignoredUrlPatterns, forKey: SettingsKeys.ignoredURLs)
         }
     }
 
-    /// "暂停到何时"。非 nil 且未过期 → 屏幕/音频采集都暂停。到期后自动清回 nil。
-    ///
-    /// 设置方式：状态栏菜单 "Pause for 10/30/60 min" 写入；用户手动取消写 nil。
+    // MARK: - 运行时状态（不在 SettingsKeys，仍走自家 key）
+
+    /// "暂停到何时"。非 nil 且未过期 → 屏幕/音频采集都暂停。到期后 Task 自动清回 nil。
+    /// 运行时状态，不属于"用户偏好"，UI 走状态栏菜单设置。
     @Published var pauseUntil: Date? {
         didSet {
             guard !isLoading else { return }
+            let defaults = UserDefaults.standard
             if let d = pauseUntil {
-                UserDefaults.standard.set(d, forKey: Keys.pauseUntil)
+                defaults.set(d, forKey: PrivateKeys.pauseUntil)
                 scheduleAutoResume(at: d)
             } else {
-                UserDefaults.standard.removeObject(forKey: Keys.pauseUntil)
+                defaults.removeObject(forKey: PrivateKeys.pauseUntil)
                 autoResumeTask?.cancel()
                 autoResumeTask = nil
             }
         }
     }
 
-    /// 派生：当前是否处于"暂停"状态（即采集应该停止）。
-    /// View 可以直接读它，也可在 publisher 中 map(\.isPaused)。
+    /// 派生：当前是否处于"暂停"状态。
     var isPaused: Bool {
         guard let d = pauseUntil else { return false }
         return d > Date()
     }
 
-    // MARK: - 只读字段（运行时状态镜像，SwiftUI 一处订阅）
-
     /// 是否有 stub 路径被命中。镜像 UnimplementedReporter.hasUnimplementedStubs。
-    /// 由 Services 在初始化时同步过来。
     @Published private(set) var hasUnimplementedStubs: Bool = false
 
-    // MARK: - 内部
+    // MARK: - 内部 key（不出现在 SettingsKeys）
+
+    private enum PrivateKeys {
+        static let pauseUntil = "MyPortrait.capture.pauseUntil.v1"
+    }
+
+    // MARK: - 私有状态
 
     /// init 期间临时为 true，防止 didSet 把 default 写回 UserDefaults。
     private var isLoading = true
 
-    /// reporter → hasUnimplementedStubs 镜像订阅。
-    private var reporterSink: AnyCancellable?
+    /// reloadFromDefaults 期间临时为 true，防止 didSet 触发 UserDefaults 写回循环。
+    private var isReloadingFromDefaults = false
 
-    /// pauseUntil 到期自动清空的任务。
+    private var reporterSink: AnyCancellable?
     private var autoResumeTask: Task<Void, Never>?
+    private var defaultsObserver: NSObjectProtocol?
 
     init() {
         let defaults = UserDefaults.standard
-        // 第一次启动两个 key 都不存在，bool(forKey:) 返回 false —— 正好就是我们要的默认值。
-        self.screenCaptureEnabled = defaults.bool(forKey: Keys.screenCaptureEnabled)
-        self.audioCaptureEnabled = defaults.bool(forKey: Keys.audioCaptureEnabled)
-        self.systemAudioCaptureEnabled = defaults.bool(forKey: Keys.systemAudioCaptureEnabled)
 
-        // 忽略列表：UserDefaults 存的是 Array，转 Set 以方便查找。
-        let stored = defaults.stringArray(forKey: Keys.ignoredAppNames) ?? []
-        self.ignoredAppNames = Set(stored)
+        // 首次启动：force-write false 覆盖 SwiftUI `@AppStorage(...) = true` 默认。
+        // 仅在 UserDefaults 完全没有该 key 时写入（已经有值的不动）。
+        for key in [
+            SettingsKeys.screenRecordingEnabled,
+            SettingsKeys.audioRecordingEnabled,
+            SettingsKeys.captureSystemAudio,
+        ] where defaults.object(forKey: key) == nil {
+            defaults.set(false, forKey: key)
+        }
 
-        // URL pattern 列表：保持 Array 顺序（用户在 UI 上能拖排序）。
-        self.ignoredUrlPatterns = defaults.stringArray(forKey: Keys.ignoredUrlPatterns) ?? []
+        // 读初值。
+        self.screenCaptureEnabled = defaults.bool(forKey: SettingsKeys.screenRecordingEnabled)
+        self.audioCaptureEnabled = defaults.bool(forKey: SettingsKeys.audioRecordingEnabled)
+        self.systemAudioCaptureEnabled = defaults.bool(forKey: SettingsKeys.captureSystemAudio)
+        self.ignoredAppNames = Set(defaults.stringArray(forKey: SettingsKeys.ignoredApps) ?? [])
+        self.ignoredUrlPatterns = defaults.stringArray(forKey: SettingsKeys.ignoredURLs) ?? []
 
-        // 暂停到期：app 关后可能已经过期，下面 didSet 等价的检查代替。
-        let storedPause = defaults.object(forKey: Keys.pauseUntil) as? Date
+        // 暂停到期：过期就清掉。
+        let storedPause = defaults.object(forKey: PrivateKeys.pauseUntil) as? Date
         if let d = storedPause, d > Date() {
             self.pauseUntil = d
         } else {
             self.pauseUntil = nil
             if storedPause != nil {
-                // 过期 → 顺手清掉 UserDefaults 里那条。
-                defaults.removeObject(forKey: Keys.pauseUntil)
+                defaults.removeObject(forKey: PrivateKeys.pauseUntil)
             }
         }
 
         self.isLoading = false
 
-        // isLoading=false 之后再调一次 scheduleAutoResume —— init 内 didSet 不触发。
         if let d = pauseUntil {
             scheduleAutoResume(at: d)
         }
+
+        // 监听 UserDefaults 变化（SwiftUI @AppStorage 写入会触发）。
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: defaults,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.reloadFromDefaults()
+            }
+        }
+    }
+
+    // 注：不写 deinit 移除 observer —— Swift 6 严格并发禁止 nonisolated deinit
+    // 访问 @MainActor 字段。Observer 闭包 [weak self] 在 self 释放后变 nil
+    // (block 体内 self?.xxx 啥也不做)，残留通知记录无害（NotificationCenter
+    // 用 weak 引用 observer token）。Services.stopManagedLifecycle 可显式断。
+
+    /// Services 在初始化后调一次，把 reporter 的状态镜像过来。
+    func bindUnimplementedFlag(from reporter: UnimplementedReporter) {
+        reporterSink = reporter.$callCount.sink { [weak self] count in
+            self?.hasUnimplementedStubs = count > 0
+        }
+    }
+
+    // MARK: - 私有
+
+    /// UserDefaults 变化 → @Published 字段。带 reentrancy guard 防回写循环；
+    /// 比较新旧值，只在变化时赋值。
+    private func reloadFromDefaults() {
+        let defaults = UserDefaults.standard
+        isReloadingFromDefaults = true
+        defer { isReloadingFromDefaults = false }
+
+        let newScreen = defaults.bool(forKey: SettingsKeys.screenRecordingEnabled)
+        if newScreen != screenCaptureEnabled { screenCaptureEnabled = newScreen }
+
+        let newAudio = defaults.bool(forKey: SettingsKeys.audioRecordingEnabled)
+        if newAudio != audioCaptureEnabled { audioCaptureEnabled = newAudio }
+
+        let newSys = defaults.bool(forKey: SettingsKeys.captureSystemAudio)
+        if newSys != systemAudioCaptureEnabled { systemAudioCaptureEnabled = newSys }
+
+        let newApps = Set(defaults.stringArray(forKey: SettingsKeys.ignoredApps) ?? [])
+        if newApps != ignoredAppNames { ignoredAppNames = newApps }
+
+        let newUrls = defaults.stringArray(forKey: SettingsKeys.ignoredURLs) ?? []
+        if newUrls != ignoredUrlPatterns { ignoredUrlPatterns = newUrls }
+    }
+
+    private func writeIfNeeded(_ value: Bool, forKey key: String) {
+        guard !isLoading, !isReloadingFromDefaults else { return }
+        UserDefaults.standard.set(value, forKey: key)
     }
 
     private func scheduleAutoResume(at expiration: Date) {
         autoResumeTask?.cancel()
         let delay = expiration.timeIntervalSinceNow
         guard delay > 0 else {
-            // 已经过期，立刻清掉。
             pauseUntil = nil
             return
         }
@@ -172,17 +200,7 @@ final class CaptureSettings: ObservableObject {
         autoResumeTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: ns)
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self?.pauseUntil = nil
-            }
-        }
-    }
-
-    /// Services 在初始化后调一次，把 reporter 的状态镜像过来。
-    /// reporter.$callCount → settings.hasUnimplementedStubs。
-    func bindUnimplementedFlag(from reporter: UnimplementedReporter) {
-        reporterSink = reporter.$callCount.sink { [weak self] count in
-            self?.hasUnimplementedStubs = count > 0
+            await MainActor.run { self?.pauseUntil = nil }
         }
     }
 }

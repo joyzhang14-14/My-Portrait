@@ -40,10 +40,6 @@ actor CaptureCoordinator {
     private var lastCaptureAt: Date?
     /// DRM 命中时为 true —— captureOneFrame 全部跳过。
     private var drmActive: Bool = false
-    /// P1 期间 DB 是 stub，stub.insertFrameWithOCR 会 throw。
-    /// 为了让 frameEvents 仍能流动，coordinator 自己维护一个递增的 fake id。
-    /// 一旦真实 PortraitDB 接好，这个字段和相关 catch 都应该删除。
-    private var fakeFrameIdCounter: Int64 = 0
 
     nonisolated let frameEvents: AsyncStream<FrameEvent>
     private let _continuation: AsyncStream<FrameEvent>.Continuation
@@ -283,10 +279,10 @@ actor CaptureCoordinator {
         do {
             frameId = try await db.insertFrameWithOCR(record, ocr: ocrResult)
         } catch {
-            // P1：stub DB throws notImplemented。降级用 fake id 让事件流继续。
-            // 真实 PortraitDB 接好后这段 catch 应被移除。
-            fakeFrameIdCounter += 1
-            frameId = fakeFrameIdCounter
+            // DB 写失败 → 静默丢弃这帧的事件（避免下游收到无效 frameId）。
+            // JPG 已经落盘了，可以通过 compactor / 手动 SQL 回补。
+            logger.error("DB insertFrameWithOCR failed: \(String(describing: error), privacy: .public)")
+            return
         }
 
         // 10. 发事件。

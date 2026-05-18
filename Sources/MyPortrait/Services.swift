@@ -44,18 +44,26 @@ final class Services {
         settings.bindUnimplementedFlag(from: reporter)
         self.settings = settings
 
-        let stubDB = StubPortraitDB(reporter: reporter)
-        self.db = stubDB
+        // 真 DB —— 失败抛错冒到 AppDelegate，那边弹 alert 退出。
+        // 失败常见原因：磁盘满 / 权限不对 / migration 失败。开发期罕见。
+        let realDB: PortraitDB
+        do {
+            realDB = try PortraitDBImpl()
+        } catch {
+            // 启动期 DB 打不开是致命的。直接 fatalError 比挂个 stub 上线更诚实。
+            fatalError("PortraitDB failed to open: \(error)")
+        }
+        self.db = realDB
 
-        self.coordinator = CaptureCoordinator(db: stubDB, reporter: reporter)
-        self.compactor = CompactionWorker(db: stubDB, reporter: reporter)
+        self.coordinator = CaptureCoordinator(db: realDB, reporter: reporter)
+        self.compactor = CompactionWorker(db: realDB, reporter: reporter)
         let audioSvc = AudioCaptureService(reporter: reporter)
         self.audio = audioSvc
         self.systemAudio = SystemAudioCaptureService(reporter: reporter)
         let pw = PowerWatcher()
         self.powerWatcher = pw
         self.transcriber = TranscriptionScheduler(
-            db: stubDB, audio: audioSvc, reporter: reporter, power: pw
+            db: realDB, audio: audioSvc, reporter: reporter, power: pw
         )
     }
 
