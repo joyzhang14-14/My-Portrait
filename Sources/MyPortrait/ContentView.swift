@@ -38,14 +38,21 @@ struct ContentView: View {
             chat.providerResolver = resolver
             SuggestionEngine.shared.providerResolver = resolver
 
-            // Wire the scheduler so it can fire templates into the chat
-            // when their cadence ticks. Each fire creates a new conv.
+            // Wire the scheduler so it can fire templates + pipes into the
+            // chat / pipe-store when their cadence ticks.
             ScheduleRunner.shared.dispatch = { template in
                 chat.switchTo(nil)
                 let chips = [template.window.resolveChip()].compactMap { $0 }
                 chat.send(template.prompt, chips: chips)
             }
+            ScheduleRunner.shared.dispatchPipe = { pipe in
+                PipeExecutor.run(pipe)
+            }
+            PipeExecutor.providerResolver = resolver
             ScheduleRunner.shared.start()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
+            selection = .home
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
             guard let date = notif.object as? Date else { return }
@@ -60,9 +67,7 @@ struct ContentView: View {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
         case .connections:   ConnectionsView()
-        case .pipes:         NativePlaceholder(title: "Pipes",
-                                               systemImage: "puzzlepiece.extension.fill",
-                                               subtitle: "Coming soon")
+        case .pipes:         PipesView()
         case .memories:      MemoriesView(scope: $memoryScope)
         }
     }
