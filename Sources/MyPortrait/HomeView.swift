@@ -249,22 +249,12 @@ private struct AssistantBody: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if parts.isEmpty && !fallbackText.isEmpty {
-                Text(.init(fallbackText))
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white.opacity(0.96))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(5)
+                MarkdownView(source: fallbackText)
             }
             ForEach(parts) { part in
                 switch part {
                 case .text(_, let value):
-                    Text(.init(value))
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.96))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .lineSpacing(5)
+                    MarkdownView(source: value)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 case .tool(let block):
                     ToolCard(block: block)
