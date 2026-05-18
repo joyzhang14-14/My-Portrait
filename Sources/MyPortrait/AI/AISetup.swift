@@ -61,11 +61,24 @@ final class AISetup {
                 return
             }
         } else {
-            // Re-write models.json each launch so a token rotation / model change
-            // takes effect without forcing a reinstall.
-            try? PiInstaller.writeModelsJSON(model: "gpt-5.4")
+            // Re-write models.json each launch with all currently-configured
+            // providers so credential rotation / new providers take effect
+            // without forcing a reinstall.
+            try? PiInstaller.writeModelsJSON(providers: configuredProviders())
         }
 
         state = .ready
+    }
+
+    /// All providers the user appears to have credentials for. Used to seed
+    /// `models.json` so Pi knows about every configured backend.
+    private func configuredProviders() -> [Provider] {
+        var out: [Provider] = []
+        if ChatGPTOAuth.isLoggedIn() { out.append(.chatgpt) }
+        for p in Provider.allCases {
+            guard let key = p.secretKey, SecretStore.shared.get(key) != nil else { continue }
+            if !out.contains(p) { out.append(p) }
+        }
+        return out
     }
 }

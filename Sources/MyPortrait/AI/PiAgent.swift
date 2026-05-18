@@ -57,6 +57,7 @@ final class PiAgent: @unchecked Sendable {
     private var stdin: FileHandle?            // assigned in start()
     private let stdoutPipe: Pipe
     private let stderrPipe: Pipe
+    private let provider: Provider
     private let model: String
     private var stdoutBuffer = Data()
     private let bufLock = NSLock()
@@ -67,11 +68,12 @@ final class PiAgent: @unchecked Sendable {
     /// Live event stream — call once after `start()`.
     let events: AsyncStream<Event>
 
-    init(model: String) throws {
+    init(provider: Provider = .chatgpt, model: String? = nil) throws {
         guard BunInstaller.isInstalled else { throw SpawnError.missingBun }
         guard PiInstaller.isInstalled else { throw SpawnError.missingPi }
 
-        self.model = model
+        self.provider = provider
+        self.model = model ?? provider.defaultModel
         self.process = Process()
         self.stdoutPipe = Pipe()
         self.stderrPipe = Pipe()
@@ -85,10 +87,12 @@ final class PiAgent: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    /// Spawn the Pi process with the ChatGPT OAuth token in the environment.
+    /// Spawn the Pi process. Resolves the right credential for `provider`
+    /// (OAuth token / API key / nothing) and injects it as the env var Pi
+    /// expects.
     func start() async throws {
-        let token: String
-        do { token = try await ChatGPTOAuth.validToken() }
+        let credential: String
+        do { credential = try await ProviderAuth.resolveEnvValue(for: provider) }
         catch { throw SpawnError.missingToken }
 
         let stdinPipe = Pipe()
@@ -96,7 +100,7 @@ final class PiAgent: @unchecked Sendable {
         process.arguments = [
             AIPaths.piCliJS.path,
             "--mode", "rpc",
-            "--provider", "openai-chatgpt",
+            "--provider", provider.piName,
             "--model", model
         ]
         process.standardInput = stdinPipe
@@ -104,7 +108,9 @@ final class PiAgent: @unchecked Sendable {
         process.standardError = stderrPipe
 
         var env = ProcessInfo.processInfo.environment
-        env["OPENAI_CHATGPT_TOKEN"] = token
+        if !provider.apiKeyEnv.isEmpty {
+            env[provider.apiKeyEnv] = credential
+        }
         env["BUN_INSTALL"] = AIPaths.bunDir.path
         env["HOME"] = NSHomeDirectory()
         process.environment = env

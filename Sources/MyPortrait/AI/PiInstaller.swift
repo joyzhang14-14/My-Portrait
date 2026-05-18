@@ -36,24 +36,27 @@ enum PiInstaller {
 
         guard isInstalled else { throw InstallError.cliMissing }
 
-        try writeModelsJSON(model: "gpt-5.4")
+        try writeModelsJSON(providers: [.chatgpt])
     }
 
-    /// Always re-write `models.json` (cheap; idempotent).
-    static func writeModelsJSON(model: String) throws {
+    /// Re-write `~/.pi/agent/models.json`, registering ONE entry per supplied
+    /// provider with its default model. Pi looks up providers by their
+    /// `piName` at runtime. Existing unknown entries are preserved (merge).
+    static func writeModelsJSON(providers: [Provider]) throws {
         let configDir = piGlobalConfigDir()
         try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
         let path = configDir.appendingPathComponent("models.json")
 
-        // Merge with any existing config so we don't clobber other providers.
         var root: [String: Any] = [:]
         if let data = try? Data(contentsOf: path),
            let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             root = parsed
         }
-        var providers = (root["providers"] as? [String: Any]) ?? [:]
-        providers["openai-chatgpt"] = chatgptProviderEntry(model: model)
-        root["providers"] = providers
+        var providerMap = (root["providers"] as? [String: Any]) ?? [:]
+        for p in providers {
+            providerMap[p.piName] = providerEntry(for: p, model: p.defaultModel)
+        }
+        root["providers"] = providerMap
 
         let data = try JSONSerialization.data(withJSONObject: root,
                                               options: [.prettyPrinted, .sortedKeys])
@@ -70,7 +73,9 @@ enum PiInstaller {
             .appendingPathComponent("agent", isDirectory: true)
     }
 
-    private static func chatgptProviderEntry(model: String) -> [String: Any] {
+    /// Build one provider entry for `models.json`. Mirrors the schema Pi
+    /// expects: `{ baseUrl, api, apiKey (env var name), models: [...] }`.
+    private static func providerEntry(for p: Provider, model: String) -> [String: Any] {
         // GPT-5 / o-series reject `max_tokens`; require `max_completion_tokens`.
         let needsCompletionTokens = model.hasPrefix("gpt-5") || model.hasPrefix("o1")
                                  || model.hasPrefix("o3") || model.hasPrefix("o4")
@@ -81,13 +86,13 @@ enum PiInstaller {
             "maxTokens": 16384,
             "cost": ["input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0]
         ]
-        if needsCompletionTokens {
+        if needsCompletionTokens && p.wireApi == "openai-completions" {
             modelDef["compat"] = ["maxTokensField": "max_completion_tokens"]
         }
         return [
-            "baseUrl": "https://chatgpt.com/backend-api",
-            "api": "openai-codex-responses",
-            "apiKey": "OPENAI_CHATGPT_TOKEN",
+            "baseUrl": p.baseURL,
+            "api": p.wireApi,
+            "apiKey": p.apiKeyEnv,
             "models": [modelDef]
         ]
     }

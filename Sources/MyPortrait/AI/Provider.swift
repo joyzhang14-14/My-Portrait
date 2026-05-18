@@ -1,0 +1,119 @@
+import Foundation
+
+/// One AI provider Pi can talk to. Translates the user-facing tile
+/// (`Integration.id`) into Pi's wire-protocol name + a default model.
+///
+/// The credential each one needs:
+///   - .chatgpt     : OAuth token via ChatGPTOAuth (already implemented)
+///   - .openaiBYOK  : API key stored in SecretStore under "apikey:openai"
+///   - .anthropic   : API key stored in SecretStore under "apikey:anthropic"
+///   - .ollama      : nothing — assumes a running localhost:11434
+///   - .gemini      : API key stored in SecretStore under "apikey:gemini"
+enum Provider: String, CaseIterable, Identifiable, Hashable {
+    case chatgpt
+    case openaiBYOK = "openai"
+    case anthropic
+    case ollama
+    case gemini
+
+    var id: String { rawValue }
+
+    /// Map from `Integration.id` (the Connections tile identifier).
+    static func from(integrationId: String) -> Provider? {
+        switch integrationId {
+        case "chatgpt":       return .chatgpt
+        case "anthropic-api": return .anthropic
+        case "gemini":        return .gemini
+        case "ollama":        return .ollama
+        // We don't have a separate "openai BYOK" tile yet; reuse chatgpt id
+        // if the user only has a raw OpenAI key (TODO when a tile exists).
+        default:              return nil
+        }
+    }
+
+    /// Pi's `--provider` CLI value for this provider. Must match the key Pi
+    /// reads from models.json.
+    var piName: String {
+        switch self {
+        case .chatgpt:        return "openai-chatgpt"
+        case .openaiBYOK:     return "openai-byok"
+        case .anthropic:      return "anthropic-byok"
+        case .ollama:         return "ollama"
+        case .gemini:         return "openai-byok"   // Gemini speaks an OpenAI-compatible API
+        }
+    }
+
+    /// Default model id for the provider. User can override later via picker.
+    var defaultModel: String {
+        switch self {
+        case .chatgpt:        return "gpt-5.4"
+        case .openaiBYOK:     return "gpt-4o"
+        case .anthropic:      return "claude-haiku-4-5"
+        case .ollama:         return "qwen2.5:14b-instruct"
+        case .gemini:         return "gemini-2.0-flash-exp"
+        }
+    }
+
+    /// Pi wire API for this provider. See pi-coding-agent's models.json schema.
+    var wireApi: String {
+        switch self {
+        case .chatgpt:        return "openai-codex-responses"
+        case .anthropic:      return "anthropic-messages"
+        default:              return "openai-completions"
+        }
+    }
+
+    var baseURL: String {
+        switch self {
+        case .chatgpt:        return "https://chatgpt.com/backend-api"
+        case .openaiBYOK:     return "https://api.openai.com/v1"
+        case .anthropic:      return "https://api.anthropic.com"
+        case .ollama:         return "http://localhost:11434/v1"
+        case .gemini:         return "https://generativelanguage.googleapis.com/v1beta/openai"
+        }
+    }
+
+    /// Env-var name Pi reads the credential from at runtime.
+    var apiKeyEnv: String {
+        switch self {
+        case .chatgpt:        return "OPENAI_CHATGPT_TOKEN"
+        case .openaiBYOK:     return "OPENAI_API_KEY"
+        case .anthropic:      return "ANTHROPIC_API_KEY"
+        case .ollama:         return ""         // none
+        case .gemini:         return "GEMINI_API_KEY"
+        }
+    }
+
+    /// SecretStore key for the BYOK API key (if any).
+    var secretKey: String? {
+        switch self {
+        case .anthropic:      return "apikey:anthropic"
+        case .openaiBYOK:     return "apikey:openai"
+        case .gemini:         return "apikey:gemini"
+        case .chatgpt, .ollama: return nil
+        }
+    }
+
+    /// Whether this provider needs no setup beyond detection.
+    var isLocal: Bool { self == .ollama }
+}
+
+/// Helper that resolves the credential (token / API key) for a provider.
+enum ProviderAuth {
+    /// Returns the value to set in Pi's env at spawn time. Throws if missing.
+    static func resolveEnvValue(for provider: Provider) async throws -> String {
+        switch provider {
+        case .chatgpt:
+            return try await ChatGPTOAuth.validToken()
+        case .ollama:
+            return ""   // ignored
+        default:
+            guard let key = provider.secretKey,
+                  let data = SecretStore.shared.get(key),
+                  let s = String(data: data, encoding: .utf8), !s.isEmpty else {
+                throw PiAgent.SpawnError.missingToken
+            }
+            return s
+        }
+    }
+}

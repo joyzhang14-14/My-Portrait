@@ -40,10 +40,12 @@ final class ChatController {
     /// the first one (⇒ derive the conv title from it).
     private var pendingTitleFromFirstMessage: Bool = false
 
-    private let model: String
     private let store = ChatStore.shared
+    /// Closure resolving the currently-selected provider (driven by
+    /// `AppState.activeAIId`). Defaults to ChatGPT.
+    var providerResolver: () -> Provider = { .chatgpt }
 
-    init(model: String = "gpt-5.4") { self.model = model }
+    init() {}
 
     // MARK: - Conversation switching
 
@@ -213,7 +215,8 @@ final class ChatController {
 
     private func ensureAgent() async throws {
         if agent != nil { return }
-        let a = try PiAgent(model: model)
+        let provider = providerResolver()
+        let a = try PiAgent(provider: provider)
         try await a.start()
         agent = a
         // Spawn a long-lived consumer for this agent's event stream.

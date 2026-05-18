@@ -13,6 +13,7 @@ struct ConnectionsView: View {
     @State private var selectedId: String? = nil
     @State private var connecting: String? = nil
     @State private var loginError: String? = nil
+    @State private var apiKeyDraft: String = ""
 
     private var filteredTiles: [Integration] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -135,6 +136,20 @@ struct ConnectionsView: View {
                     .padding(.bottom, 2)
             }
 
+            // API key input — appears for unconnected `.apiKey` integrations.
+            if !appState.isConnected(integration.id),
+               integration.signInMethod == .apiKey {
+                SecureField("paste API key…", text: $apiKeyDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    )
+            }
+
             HStack(spacing: 8) {
                 if appState.isConnected(integration.id) {
                     if integration.category == .ai && appState.activeAIId != integration.id {
@@ -142,8 +157,7 @@ struct ConnectionsView: View {
                             .buttonStyle(SubtleButton())
                     }
                     Button("Disconnect", role: .destructive) {
-                        if integration.id == "chatgpt" { ChatGPTOAuth.logout() }
-                        appState.toggleConnect(integration)
+                        disconnect(integration)
                     }
                     .buttonStyle(SubtleButton(destructive: true))
                 } else {
@@ -176,14 +190,96 @@ struct ConnectionsView: View {
         )
     }
 
-    /// Branch by integration: ChatGPT does real OAuth, others fall back to mock.
+    /// Route the connect button to the right backend:
+    ///   ChatGPT  → OAuth PKCE
+    ///   API-key  → save key to SecretStore
+    ///   Ollama   → probe localhost:11434
+    ///   anything else → mock (placeholder until we wire that backend)
     private func startConnect(_ integration: Integration) {
         loginError = nil
         if integration.id == "chatgpt" {
             connectChatGPT(integration)
+        } else if integration.id == "ollama" {
+            connectOllama(integration)
+        } else if integration.signInMethod == .apiKey {
+            connectAPIKey(integration)
         } else {
             mockConnect(integration)
         }
+    }
+
+    /// Wipe the credential on disconnect so the next connect starts clean.
+    private func disconnect(_ integration: Integration) {
+        if integration.id == "chatgpt" { ChatGPTOAuth.logout() }
+        if let p = Provider.from(integrationId: integration.id),
+           let key = p.secretKey {
+            SecretStore.shared.delete(key)
+        }
+        appState.toggleConnect(integration)
+        // Re-write models.json without this provider so Pi stops listing it.
+        try? PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
+    }
+
+    private func connectAPIKey(_ integration: Integration) {
+        let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            loginError = "Paste your API key first."
+            return
+        }
+        guard let provider = Provider.from(integrationId: integration.id),
+              let key = provider.secretKey else {
+            loginError = "Provider not supported yet."
+            return
+        }
+        do {
+            try SecretStore.shared.set(key, value: Data(trimmed.utf8))
+            apiKeyDraft = ""
+            if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
+            try PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
+        } catch {
+            loginError = error.localizedDescription
+        }
+    }
+
+    private func connectOllama(_ integration: Integration) {
+        connecting = integration.id
+        Task {
+            let ok = await probeOllama()
+            await MainActor.run {
+                connecting = nil
+                if ok {
+                    if !appState.isConnected(integration.id) {
+                        appState.toggleConnect(integration)
+                    }
+                    try? PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
+                } else {
+                    loginError = "Couldn't reach Ollama at http://localhost:11434. Is it running?"
+                }
+            }
+        }
+    }
+
+    private func probeOllama() async -> Bool {
+        guard let url = URL(string: "http://localhost:11434/api/tags") else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+        } catch { return false }
+    }
+
+    /// Snapshot of providers the user is currently connected to. Used to
+    /// rewrite models.json after a connect/disconnect.
+    private func stillConfiguredProviders() -> [Provider] {
+        var out: [Provider] = []
+        if ChatGPTOAuth.isLoggedIn() { out.append(.chatgpt) }
+        for id in appState.connectedIds {
+            if let p = Provider.from(integrationId: id), !out.contains(p) {
+                out.append(p)
+            }
+        }
+        return out
     }
 
     private func connectChatGPT(_ integration: Integration) {

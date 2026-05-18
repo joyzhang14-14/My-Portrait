@@ -25,6 +25,16 @@ struct ContentView: View {
         .environment(appState)
         .environment(chat)
         .environment(chatStore)
+        .onAppear {
+            // Bind chat.providerResolver to the live appState so each new
+            // PiAgent spawns against whichever provider the user picked in
+            // Connections.
+            chat.providerResolver = {
+                guard let id = appState.activeAIId,
+                      let p = Provider.from(integrationId: id) else { return .chatgpt }
+                return p
+            }
+        }
     }
 
     @ViewBuilder
