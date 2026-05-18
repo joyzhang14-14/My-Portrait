@@ -15,6 +15,7 @@ struct TimelineSidebar: View {
     let chat: ChatController
     @Binding var memoryScope: MemoryScope
     @Binding var pipeSelection: UUID?
+    @Binding var settingsSubsection: SettingsSubsection?
 
     @State private var pipeStore = PipeStore.shared
     @State private var editingPipe: PipeJob? = nil
@@ -69,6 +70,8 @@ struct TimelineSidebar: View {
                         memoryScopeSection
                     } else if selection == .pipes {
                         pipesSection
+                    } else if selection == .settings {
+                        settingsListSection
                     } else {
                         otherSectionPlaceholder
                     }
@@ -98,7 +101,7 @@ struct TimelineSidebar: View {
             }
 
             HStack(spacing: 4) {
-                ForEach([SidebarSection.timeline, .home, .connections, .memories, .pipes], id: \.self) { item in
+                ForEach([SidebarSection.timeline, .home, .connections, .memories, .pipes, .settings], id: \.self) { item in
                     NavIconButton(
                         section: item,
                         isSelected: selection == item
@@ -354,6 +357,23 @@ struct TimelineSidebar: View {
                 editingPipe = nil
                 pipeSelection = saved.id
             } onCancel: { editingPipe = nil }
+        }
+    }
+
+    // MARK: Settings (6 subsections in the rail)
+
+    private var settingsListSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "SETTINGS", count: SettingsSubsection.allCases.count)
+            VStack(spacing: 2) {
+                ForEach(SettingsSubsection.allCases) { s in
+                    SettingsSidebarRow(
+                        subsection: s,
+                        isActive: settingsSubsection == s,
+                        onTap: { settingsSubsection = s }
+                    )
+                }
+            }
         }
     }
 

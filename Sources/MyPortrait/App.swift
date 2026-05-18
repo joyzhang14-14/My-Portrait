@@ -11,11 +11,15 @@ struct MyPortraitApp: App {
     }
 
     var body: some Scene {
-        // Deliberately no WindowGroup — the AppDelegate creates the window
-        // directly via AppKit so SwiftUI / NavigationSplitView can't insert
-        // any toolbar chrome of its own. Settings { EmptyView() } is just a
-        // valid placeholder scene; nothing visible attaches to it.
-        Settings { EmptyView() }
+        // No WindowGroup — the AppDelegate creates the main window via
+        // AppKit so SwiftUI doesn't insert any toolbar chrome of its own.
+        // The `Settings` scene gives us the standard ⌘, → Settings flow
+        // via the App menu without polluting the main sidebar.
+        Settings {
+            SettingsScene()
+                .preferredColorScheme(.dark)
+                .frame(minWidth: 880, minHeight: 580)
+        }
     }
 }
 

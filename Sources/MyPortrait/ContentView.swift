@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var chatStore = ChatStore.shared
     @State private var memoryScope: MemoryScope = .events
     @State private var pipeSelection: UUID? = nil
+    @State private var settingsSubsection: SettingsSubsection? = .general
 
     var body: some View {
         HStack(spacing: 0) {
@@ -15,7 +16,8 @@ struct ContentView: View {
                             selection: $selection,
                             chat: chat,
                             memoryScope: $memoryScope,
-                            pipeSelection: $pipeSelection)
+                            pipeSelection: $pipeSelection,
+                            settingsSubsection: $settingsSubsection)
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
 
@@ -71,6 +73,7 @@ struct ContentView: View {
         case .connections:   ConnectionsView()
         case .pipes:         PipesView(selection: $pipeSelection)
         case .memories:      MemoriesView(scope: $memoryScope)
+        case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
     }
 }
