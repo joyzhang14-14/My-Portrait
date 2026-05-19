@@ -62,7 +62,7 @@ struct GeneralSettingsView: View {
                                 Image(systemName: "doc")
                                     .font(.system(size: 10))
                                     .foregroundStyle(.white.opacity(0.50))
-                                Text(entry.path)
+                                Text(entry.displayPath)
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.white.opacity(0.78))
                                     .lineLimit(1).truncationMode(.middle)
@@ -92,26 +92,91 @@ struct GeneralSettingsView: View {
         return f
     }()
 
-    // MARK: - Scan & clear (UI-level — wire to real paths in a follow-up)
+    // MARK: - Scan & clear (real filesystem)
 
     private struct ScanResults {
-        struct Entry { let path: String; let sizeLabel: String }
+        struct Entry { let path: String; let displayPath: String; let bytes: Int64; let sizeLabel: String; let isDir: Bool }
         let entries: [Entry]
     }
 
+    /// Scan the three known cache locations. Misses (file/dir doesn't
+    /// exist) still show with "—" so the user knows we looked.
     private func scanCache() {
-        scanResults = ScanResults(entries: [
-            .init(path: "~/Library/Application Support/MyPortrait/pi-rpc.log", sizeLabel: "182 KB"),
-            .init(path: "~/Library/Application Support/MyPortrait/attachments", sizeLabel: "0 B"),
-            .init(path: "~/Library/Application Support/MyPortrait/bun/install/cache", sizeLabel: "2.4 MB")
-        ])
+        let targets: [(path: String, isDir: Bool)] = [
+            (AIPaths.supportDir.appendingPathComponent("pi-rpc.log").path,          false),
+            (AIPaths.supportDir.appendingPathComponent("attachments").path,         true),
+            (AIPaths.supportDir.appendingPathComponent("bun/install/cache").path,   true),
+        ]
+        let home = NSHomeDirectory()
+        let entries: [ScanResults.Entry] = targets.map { t in
+            let bytes = CacheScanner.size(at: t.path, isDir: t.isDir)
+            let display = t.path.hasPrefix(home) ? "~" + t.path.dropFirst(home.count) : t.path
+            return .init(
+                path: t.path,
+                displayPath: String(display),
+                bytes: bytes,
+                sizeLabel: CacheScanner.format(bytes),
+                isDir: t.isDir
+            )
+        }
+        scanResults = ScanResults(entries: entries)
     }
 
+    /// Delete every scanned target. Files are removed outright; directories
+    /// are emptied but kept (so PiAgent / BunInstaller can still write into
+    /// them without recreating the dir).
     private func runClearCache() {
+        guard let r = scanResults else { return }
         clearingCache = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                for e in r.entries { CacheScanner.purge(path: e.path, isDir: e.isDir) }
+            }.value
             clearingCache = false
-            scanResults = nil
+            scanCache()      // refresh, every row should now read 0 B / —
         }
+    }
+}
+
+/// Shared file-system helpers — `nonisolated` so they can run off the main actor.
+enum CacheScanner {
+    static func size(at path: String, isDir: Bool) -> Int64 {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else { return -1 }
+        let url = URL(fileURLWithPath: path)
+        if !isDir {
+            let v = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
+            return Int64(v?.totalFileAllocatedSize ?? 0)
+        }
+        guard let it = fm.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
+                                     options: [.skipsHiddenFiles], errorHandler: nil) else { return 0 }
+        var total: Int64 = 0
+        for case let u as URL in it {
+            let v = try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
+            total += Int64(v?.totalFileAllocatedSize ?? 0)
+        }
+        return total
+    }
+
+    static func purge(path: String, isDir: Bool) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else { return }
+        if !isDir {
+            try? fm.removeItem(atPath: path)
+            return
+        }
+        // Empty the directory but keep the dir itself.
+        if let children = try? fm.contentsOfDirectory(atPath: path) {
+            for child in children {
+                try? fm.removeItem(atPath: (path as NSString).appendingPathComponent(child))
+            }
+        }
+    }
+
+    static func format(_ n: Int64) -> String {
+        if n < 0 { return "—" }
+        if n == 0 { return "0 B" }
+        let f = ByteCountFormatter(); f.allowedUnits = [.useAll]; f.countStyle = .file
+        return f.string(fromByteCount: n)
     }
 }
