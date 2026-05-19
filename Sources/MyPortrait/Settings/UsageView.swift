@@ -4,18 +4,18 @@ import SwiftUI
 /// in memory so the user can see how much they've used. No charts — just
 /// concrete numbers in glass cards.
 struct UsageSettingsView: View {
+    @State private var config = ConfigStore.shared
     @Environment(ChatController.self) private var chat
     @Environment(ChatStore.self) private var chatStore
     @State private var pipeStore = PipeStore.shared
-    @AppStorage(SettingsKeys.usageRange) private var rangeRaw = UsageRange.last7d.rawValue
 
     var body: some View {
         SettingsPage("Usage", subtitle: "What you've put through My Portrait") {
 
             HStack(spacing: 8) {
                 ForEach(UsageRange.allCases) { r in
-                    UsageRangeChip(label: r.label, active: rangeRaw == r.rawValue) {
-                        rangeRaw = r.rawValue
+                    UsageRangeChip(label: r.label, active: config.current.usage.range == r.rawValue) {
+                        config.mutate { $0.usage.range = r.rawValue }
                     }
                 }
                 Spacer()

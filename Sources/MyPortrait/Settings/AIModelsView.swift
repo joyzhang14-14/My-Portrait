@@ -4,8 +4,8 @@ import SwiftUI
 /// Orphies' `ai-presets.tsx` minus the in-house quota / share-to-team bits
 /// (those need a backend we don't have).
 struct AIModelsSettingsView: View {
-    @State private var presets: [AIPreset] = AIPresetStore.shared.all
-    @State private var editing: AIPreset? = nil
+    @State private var config = ConfigStore.shared
+    @State private var editing: AIPresetSpec? = nil
 
     var body: some View {
         SettingsPage("AI models",
@@ -13,13 +13,13 @@ struct AIModelsSettingsView: View {
 
             SettingsCard(title: "Presets",
                          footnote: "Default preset is the one the chat input picker resolves to when no provider is explicitly chosen.") {
-                if presets.isEmpty {
+                if config.current.aiModels.presets.isEmpty {
                     Text("No presets yet — click New preset below.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.55))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
-                    ForEach(presets) { p in
+                    ForEach(config.current.aiModels.presets) { p in
                         SettingsRow(
                             p.name,
                             description: "\(providerLabel(p.provider)) · \(p.model)\(p.maxTokens > 0 ? "  ·  \(p.maxTokens) tok" : "")",
@@ -53,7 +53,7 @@ struct AIModelsSettingsView: View {
                                 .fixedSize()
                             }
                         }
-                        if p.id != presets.last?.id { SettingsDivider() }
+                        if p.id != config.current.aiModels.presets.last?.id { SettingsDivider() }
                     }
                 }
             }
@@ -61,7 +61,7 @@ struct AIModelsSettingsView: View {
             HStack {
                 Spacer()
                 Button {
-                    editing = AIPreset.blank()
+                    editing = AIPresetSpec()
                 } label: {
                     Label("New preset", systemImage: "plus")
                         .font(.system(size: 12, weight: .medium))
@@ -70,34 +70,38 @@ struct AIModelsSettingsView: View {
         }
         .sheet(item: $editing) { preset in
             AIPresetEditor(initial: preset) { saved in
-                if presets.contains(where: { $0.id == saved.id }) {
-                    AIPresetStore.shared.update(saved)
+                if config.current.aiModels.presets.contains(where: { $0.id == saved.id }) {
+                    config.mutate {
+                        if let i = $0.aiModels.presets.firstIndex(where: { $0.id == saved.id }) {
+                            $0.aiModels.presets[i] = saved
+                        }
+                    }
                 } else {
-                    AIPresetStore.shared.add(saved)
+                    config.mutate { $0.aiModels.presets.append(saved) }
                 }
-                presets = AIPresetStore.shared.all
                 editing = nil
             } onCancel: { editing = nil }
         }
     }
 
-    // MARK: - Actions
-
-    private func setDefault(_ p: AIPreset) {
-        AIPresetStore.shared.setDefault(p.id)
-        presets = AIPresetStore.shared.all
+    
+    private func setDefault(_ p: AIPresetSpec) {
+        config.mutate {
+            for i in $0.aiModels.presets.indices {
+                $0.aiModels.presets[i].isDefault = ($0.aiModels.presets[i].id == p.id)
+            }
+        }
     }
-    private func duplicate(_ p: AIPreset) {
+    private func duplicate(_ p: AIPresetSpec) {
         var copy = p; copy.id = UUID(); copy.name = p.name + " copy"; copy.isDefault = false
-        AIPresetStore.shared.add(copy)
-        presets = AIPresetStore.shared.all
+        config.mutate { $0.aiModels.presets.append(copy) }
     }
-    private func delete(_ p: AIPreset) {
-        AIPresetStore.shared.delete(p.id)
-        presets = AIPresetStore.shared.all
+    private func delete(_ p: AIPresetSpec) {
+        config.mutate { $0.aiModels.presets.removeAll { $0.id == p.id } }
     }
 
     // MARK: - View helpers
+// MARK: - View helpers
 
     private func providerLabel(_ p: String) -> String {
         Provider(rawValue: p).map { $0.label } ?? p
@@ -129,10 +133,15 @@ private extension Provider {
 // MARK: - Editor sheet
 
 private struct AIPresetEditor: View {
-    @State var initial: AIPreset
-    let onSave: (AIPreset) -> Void
+    @State var initial: AIPresetSpec
+    let onSave: (AIPresetSpec) -> Void
     let onCancel: () -> Void
     @State private var revealKey = false
+    /// Plaintext entered in the API key field. Loaded from SecretStore via
+    /// `initial.apiKeyRef` on appear; on Save we write back to SecretStore
+    /// (auto-assigning a ref if `initial.apiKeyRef` was empty) — the TOML
+    /// only ever stores the ref string.
+    @State private var apiKeyText: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -140,7 +149,7 @@ private struct AIPresetEditor: View {
                 Text("AI preset").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-                Button("Save")   { onSave(initial) }
+                Button("Save")   { commit() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(initial.name.isEmpty || initial.model.isEmpty)
             }
@@ -182,9 +191,9 @@ private struct AIPresetEditor: View {
                 Text("API key (optional)").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                 HStack {
                     if revealKey {
-                        TextField("key", text: $initial.apiKey).textFieldStyle(.roundedBorder)
+                        TextField("key", text: $apiKeyText).textFieldStyle(.roundedBorder)
                     } else {
-                        SecureField("key", text: $initial.apiKey).textFieldStyle(.roundedBorder)
+                        SecureField("key", text: $apiKeyText).textFieldStyle(.roundedBorder)
                     }
                     Button { revealKey.toggle() } label: {
                         Image(systemName: revealKey ? "eye.slash" : "eye").font(.system(size: 11))
@@ -195,7 +204,7 @@ private struct AIPresetEditor: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Base URL (optional, for custom endpoints)")
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                TextField("https://…", text: $initial.baseURL).textFieldStyle(.roundedBorder)
+                TextField("https://…", text: $initial.baseUrl).textFieldStyle(.roundedBorder)
                     .font(.system(size: 12, design: .monospaced))
             }
 
@@ -230,63 +239,31 @@ private struct AIPresetEditor: View {
         }
         .padding(20)
         .frame(width: 520)
-    }
-}
-
-// MARK: - Store + model
-
-struct AIPreset: Identifiable, Hashable, Codable {
-    var id: UUID
-    var name: String
-    var provider: String       // Provider.rawValue
-    var model: String
-    var apiKey: String
-    var baseURL: String
-    var maxTokens: Int
-    var maxContext: Int
-    var systemPrompt: String
-    var isDefault: Bool
-
-    static func blank() -> AIPreset {
-        AIPreset(
-            id: UUID(), name: "New preset",
-            provider: Provider.chatgpt.rawValue,
-            model: Provider.chatgpt.defaultModel,
-            apiKey: "", baseURL: "",
-            maxTokens: 4096, maxContext: 16384,
-            systemPrompt: "", isDefault: false
-        )
-    }
-}
-
-@MainActor
-final class AIPresetStore {
-    static let shared = AIPresetStore()
-    private let key = "Settings.aiPresets.v1"
-
-    private(set) var all: [AIPreset] = []
-
-    private init() { load() }
-
-    func add(_ p: AIPreset) { all.append(p); save() }
-    func update(_ p: AIPreset) {
-        guard let i = all.firstIndex(where: { $0.id == p.id }) else { return }
-        all[i] = p; save()
-    }
-    func delete(_ id: UUID) { all.removeAll { $0.id == id }; save() }
-    func setDefault(_ id: UUID) {
-        for i in all.indices { all[i].isDefault = (all[i].id == id) }
-        save()
-    }
-
-    private func load() {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([AIPreset].self, from: data) else { return }
-        all = decoded
-    }
-    private func save() {
-        if let data = try? JSONEncoder().encode(all) {
-            UserDefaults.standard.set(data, forKey: key)
+        .onAppear {
+            if !initial.apiKeyRef.isEmpty,
+               let data = SecretStore.shared.get(initial.apiKeyRef),
+               let s = String(data: data, encoding: .utf8) {
+                apiKeyText = s
+            }
         }
     }
+
+    /// Persist the secret value to SecretStore + update the TOML-side ref
+    /// before handing the spec back to the parent's onSave.
+    private func commit() {
+        var spec = initial
+        let trimmed = apiKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if !spec.apiKeyRef.isEmpty { SecretStore.shared.delete(spec.apiKeyRef) }
+            spec.apiKeyRef = ""
+        } else {
+            let ref = spec.apiKeyRef.isEmpty
+                ? "apikey:preset:\(spec.id.uuidString)"
+                : spec.apiKeyRef
+            try? SecretStore.shared.set(ref, value: Data(trimmed.utf8))
+            spec.apiKeyRef = ref
+        }
+        onSave(spec)
+    }
 }
+

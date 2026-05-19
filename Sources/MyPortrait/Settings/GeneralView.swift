@@ -1,10 +1,7 @@
 import SwiftUI
 
 struct GeneralSettingsView: View {
-    @AppStorage(SettingsKeys.launchAtLogin)       private var launchAtLogin = false
-    @AppStorage(SettingsKeys.autoDownloadUpdates) private var autoUpdateApp = true
-    @AppStorage(SettingsKeys.updateCheckMinutes)  private var updateCheckMinutes: Int = 60
-
+    @State private var config = ConfigStore.shared
     @State private var clearingCache = false
     @State private var scanResults: ScanResults? = nil
 
@@ -15,7 +12,7 @@ struct GeneralSettingsView: View {
                 SettingsRow("Auto-start",
                             description: "Open My Portrait automatically when you log in.",
                             icon: "power") {
-                    Toggle("", isOn: $launchAtLogin).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.general.launchAtLogin)).labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -23,14 +20,14 @@ struct GeneralSettingsView: View {
                 SettingsRow("Auto-update app",
                             description: "Download and install app updates automatically.",
                             icon: "arrow.down.app") {
-                    Toggle("", isOn: $autoUpdateApp).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.general.autoDownloadUpdates)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Update check interval",
                             description: "How often (in minutes) to look for a new build. Min 1, max 1440.",
                             icon: "clock.arrow.circlepath") {
                     HStack(spacing: 4) {
-                        TextField("", value: $updateCheckMinutes,
+                        TextField("", value: config.binding(\.general.updateCheckMinutes),
                                   formatter: Self.minutesFormatter)
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)

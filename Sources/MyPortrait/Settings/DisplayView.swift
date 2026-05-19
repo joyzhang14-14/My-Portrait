@@ -1,31 +1,23 @@
 import SwiftUI
 
 struct DisplaySettingsView: View {
-    @AppStorage(SettingsKeys.theme)                  private var theme = AppTheme.system.rawValue
-    @AppStorage(SettingsKeys.chatAlwaysOnTop)        private var alwaysOnTop = false
-    @AppStorage(SettingsKeys.translucentSidebar)     private var translucentSidebar = true
-    @AppStorage(SettingsKeys.hideModelReasoning)     private var hideReasoning = false
-    @AppStorage(SettingsKeys.showOverlayInRecording) private var showOverlayInRec = true
-    @AppStorage(SettingsKeys.appName)                private var appName = "My Portrait"
-    @AppStorage(SettingsKeys.customDockIcon)         private var dockIconPath = ""
-    @AppStorage(SettingsKeys.customTrayIcon)         private var trayIconPath = ""
-    @AppStorage(SettingsKeys.showInMenuBar)          private var showInMenuBar = true
+    @State private var config = ConfigStore.shared
 
     var body: some View {
         SettingsPage("Display", subtitle: "Theme, window behaviour, and personalization") {
 
             AppCustomizeCard(
-                appName: $appName,
-                dockIconPath: $dockIconPath,
-                trayIconPath: $trayIconPath,
-                showInMenuBar: $showInMenuBar
+                appName:       config.binding(\.display.appName),
+                dockIconPath:  config.binding(\.display.customDockIcon),
+                trayIconPath:  config.binding(\.display.customTrayIcon),
+                showInMenuBar: config.binding(\.display.showInMenuBar)
             )
 
             SettingsCard(title: "Appearance") {
                 SettingsRow("Theme",
                             description: "Match the system or force light / dark.",
                             icon: "paintpalette") {
-                    Picker("", selection: $theme) {
+                    Picker("", selection: config.binding(\.display.theme)) {
                         ForEach(AppTheme.allCases) { t in Text(t.label).tag(t.rawValue) }
                     }
                     .pickerStyle(.menu).labelsHidden().frame(width: 110)
@@ -34,7 +26,8 @@ struct DisplaySettingsView: View {
                 SettingsRow("Translucent sidebar",
                             description: "Frosted glass effect on the left rail (macOS only).",
                             icon: "rectangle.lefthalf.inset.filled") {
-                    Toggle("", isOn: $translucentSidebar).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.display.translucentSidebar))
+                        .labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -42,13 +35,15 @@ struct DisplaySettingsView: View {
                 SettingsRow("Chat always on top",
                             description: "Keep the chat window floating above other apps.",
                             icon: "macwindow.on.rectangle") {
-                    Toggle("", isOn: $alwaysOnTop).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.display.chatAlwaysOnTop))
+                        .labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Hide thinking blocks",
                             description: "Don't show the model's reasoning trace in the transcript.",
                             icon: "brain") {
-                    Toggle("", isOn: $hideReasoning).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.display.hideModelReasoning))
+                        .labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -56,7 +51,8 @@ struct DisplaySettingsView: View {
                 SettingsRow("Show overlay in screen recording",
                             description: "Include the chat overlay in captured frames.",
                             icon: "rectangle.dashed") {
-                    Toggle("", isOn: $showOverlayInRec).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.display.showOverlayInRecording))
+                        .labelsHidden().toggleStyle(.switch)
                 }
             }
         }

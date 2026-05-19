@@ -5,16 +5,14 @@ import AppKit
 /// `storage-section.tsx` + `disk-usage-section.tsx`. Numbers are live where
 /// we can read them (file system) and "—" otherwise.
 struct StorageSettingsView: View {
-    @AppStorage(SettingsKeys.dataDirectory) private var dataDir: String = ""
-    @AppStorage(SettingsKeys.retentionDays) private var retention = RetentionDays.d30.rawValue
-    @AppStorage(SettingsKeys.autoDeleteMode) private var autoDelete = AutoDeleteMode.mediaOnly.rawValue
+    @State private var config = ConfigStore.shared
 
     @State private var stats = StorageStats.empty
     @State private var scanning = false
     @State private var lastScannedAt: Date? = nil
 
     private var resolvedDataDir: String {
-        if !dataDir.isEmpty { return dataDir }
+        if !config.current.storage.dataDirectory.isEmpty { return config.current.storage.dataDirectory }
         return NSString("~/.screenpipe").expandingTildeInPath
     }
 
@@ -24,7 +22,7 @@ struct StorageSettingsView: View {
             SettingsCard(title: "Local disk storage") {
                 SettingsRow(
                     "Data directory",
-                    description: dataDir.isEmpty
+                    description: config.current.storage.dataDirectory.isEmpty
                         ? "~/.screenpipe (default) · changing directory starts fresh recordings"
                         : resolvedDataDir,
                     icon: "folder"
@@ -32,8 +30,8 @@ struct StorageSettingsView: View {
                     HStack(spacing: 6) {
                         Button("Change") { pickDir() }
                             .font(.system(size: 12, weight: .medium))
-                        if !dataDir.isEmpty {
-                            Button("Reset") { dataDir = "" }
+                        if !config.current.storage.dataDirectory.isEmpty {
+                            Button("Reset") { config.mutate { $0.storage.dataDirectory = "" } }
                                 .font(.system(size: 11))
                         }
                     }
@@ -119,7 +117,7 @@ struct StorageSettingsView: View {
             SettingsRow("Retention window",
                         description: "Data older than this is eligible for auto-delete.",
                         icon: "calendar.badge.clock") {
-                Picker("", selection: $retention) {
+                Picker("", selection: config.binding(\.storage.retentionDays)) {
                     ForEach(RetentionDays.allCases) { r in Text(r.label).tag(r.rawValue) }
                 }
                 .pickerStyle(.menu).labelsHidden().frame(width: 140)
@@ -128,9 +126,9 @@ struct StorageSettingsView: View {
                 SettingsDivider()
                 AutoDeleteModeRow(
                     mode: mode,
-                    isActive: autoDelete == mode.rawValue,
+                    isActive: config.current.storage.autoDeleteMode == mode.rawValue,
                     recommended: mode == .mediaOnly
-                ) { autoDelete = mode.rawValue }
+                ) { config.mutate { $0.storage.autoDeleteMode = mode.rawValue } }
             }
         }
     }
@@ -155,7 +153,7 @@ struct StorageSettingsView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            dataDir = url.path
+            config.mutate { $0.storage.dataDirectory = url.path }
             Task { await refresh() }
         }
     }

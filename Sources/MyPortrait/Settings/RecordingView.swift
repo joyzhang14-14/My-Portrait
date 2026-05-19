@@ -3,30 +3,12 @@ import SwiftUI
 /// Mirrors Orphies' Recording section. User-vetoed fields are intentionally
 /// absent: Use all monitors, Auto-detect audio devices, Auto-detect meeting.
 struct RecordingSettingsView: View {
-    @AppStorage(SettingsKeys.audioRecordingEnabled)  private var audioRec = true
-    @AppStorage(SettingsKeys.userName)               private var userName = ""
-    @AppStorage(SettingsKeys.audioEngine)            private var engine = AudioEngine.whisper.rawValue
-    @AppStorage(SettingsKeys.deepgramAPIKey)         private var deepgramKey = ""
-    @AppStorage(SettingsKeys.useCoreAudioCapture)    private var coreAudio = true
-    @AppStorage(SettingsKeys.captureSystemAudio)     private var systemAudio = true
-    @AppStorage(SettingsKeys.speakerIdEnabled)       private var speakerId = true
-    @AppStorage(SettingsKeys.filterMusic)            private var filterMusic = false
-    @AppStorage(SettingsKeys.batchTranscription)     private var batchTranscription = true
-    @AppStorage(SettingsKeys.autoSelectAudioDevices) private var autoSelectAudio = true
+    @State private var config = ConfigStore.shared
 
-    @AppStorage(SettingsKeys.screenRecordingEnabled) private var screenRec = true
-    @AppStorage(SettingsKeys.ocrEngine)              private var ocrEngine = OCREngine.tesseract.rawValue
-    @AppStorage(SettingsKeys.videoFps)               private var fps: Int = 1
-    @AppStorage(SettingsKeys.recordingQuality)       private var quality = RecordingQuality.medium.rawValue
-    @AppStorage(SettingsKeys.videoFormat)            private var format = VideoFormat.h264.rawValue
-    @AppStorage(SettingsKeys.frameIntervalMs)        private var frameIntervalMs: Int = 1000
-    @AppStorage(SettingsKeys.chineseMirror)          private var chineseMirror = false
-
-    @AppStorage(SettingsKeys.powerMode)              private var powerMode = PowerMode.auto.rawValue
-
-    @State private var languages:  [String] = StringArrayStorage(key: SettingsKeys.audioLanguages).get()
-    @State private var microphones:[String] = StringArrayStorage(key: SettingsKeys.microphonesSelected).get()
-    @State private var vocabulary: [String] = StringArrayStorage(key: SettingsKeys.customVocabulary).get()
+    // Quick aliases so the giant view body reads cleaner.
+    private var audioRec: Bool      { config.current.recording.audio.enabled }
+    private var screenRec: Bool     { config.current.recording.screen.enabled }
+    private var engine: String      { config.current.recording.audio.engine }
 
     var body: some View {
         SettingsPage("Recording", subtitle: "Audio + screen capture") {
@@ -46,8 +28,9 @@ struct RecordingSettingsView: View {
             footnote: "Switches capture FPS, transcription cadence, and OCR aggressiveness based on the profile you pick."
         ) {
             ForEach(PowerMode.allCases) { mode in
-                PowerModeRow(mode: mode, isActive: powerMode == mode.rawValue) {
-                    powerMode = mode.rawValue
+                PowerModeRow(mode: mode,
+                             isActive: config.current.recording.system.powerMode == mode.rawValue) {
+                    config.mutate { $0.recording.system.powerMode = mode.rawValue }
                 }
                 if mode != PowerMode.allCases.last { SettingsDivider() }
             }
@@ -62,14 +45,14 @@ struct RecordingSettingsView: View {
                 SettingsRow("Audio recording",
                             description: "Capture from your microphone(s).",
                             icon: "mic") {
-                    Toggle("", isOn: $audioRec).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.recording.audio.enabled)).labelsHidden().toggleStyle(.switch)
                 }
                 if audioRec {
                     SettingsDivider()
                     SettingsRow("Your name",
                                 description: "Used so the assistant knows when you're the speaker.",
                                 icon: "person.text.rectangle") {
-                        TextField("e.g. Louis", text: $userName)
+                        TextField("e.g. Louis", text: config.binding(\.recording.audio.userName))
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
                             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -88,30 +71,27 @@ struct RecordingSettingsView: View {
                     SettingsRow("Auto-select audio devices",
                                 description: "Records all default devices. Turn off to exclude Bluetooth headphones or pick specific devices below.",
                                 icon: "speaker.wave.3") {
-                        Toggle("", isOn: $autoSelectAudio).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.recording.audio.autoSelectAudioDevices)).labelsHidden().toggleStyle(.switch)
                     }
                     SettingsDivider()
                     SettingsRow("Microphones",
                                 description: "Devices to capture from. Used when auto-select is off.",
                                 icon: "mic.fill") { EmptyView() }
-                    VStack { TagListEditor(tags: $microphones, placeholder: "device name…") }
+                    VStack { TagListEditor(tags: config.binding(\.recording.audio.microphonesSelected), placeholder: "device name…") }
                         .padding(.horizontal, 48).padding(.bottom, 12)
-                        .onChange(of: microphones) {
-                            StringArrayStorage(key: SettingsKeys.microphonesSelected).set(microphones)
-                        }
-                }
+                                        }
 
                 SettingsCard(title: "System audio") {
                     SettingsRow("Capture system audio",
                                 description: "What you hear (loopback).",
                                 icon: "speaker.wave.2") {
-                        Toggle("", isOn: $systemAudio).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.recording.audio.captureSystemAudio)).labelsHidden().toggleStyle(.switch)
                     }
                     SettingsDivider()
                     SettingsRow("CoreAudio system audio capture",
                                 description: "Lower-overhead path. Requires macOS 14+.",
                                 icon: "rectangle.connected.to.line.below") {
-                        Toggle("", isOn: $coreAudio).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.recording.audio.useCoreAudioCapture)).labelsHidden().toggleStyle(.switch)
                     }
                 }
 
@@ -124,7 +104,7 @@ struct RecordingSettingsView: View {
                             : "Pick an engine to enable speech-to-text.")
                 ) {
                     SettingsRow("Transcription engine", icon: "waveform.path") {
-                        Picker("", selection: $engine) {
+                        Picker("", selection: config.binding(\.recording.audio.engine)) {
                             ForEach(AudioEngine.allCases) { e in Text(e.label).tag(e.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 200)
@@ -134,7 +114,7 @@ struct RecordingSettingsView: View {
                         SettingsRow("Deepgram API key",
                                     description: "Required for cloud transcription.",
                                     icon: "key") {
-                            SecureField("paste key…", text: $deepgramKey)
+                            SecureField("paste key…", text: config.secretBinding(refKeyPath: \.recording.audio.deepgramApiKeyRef, defaultRef: "deepgram_key"))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
@@ -150,23 +130,20 @@ struct RecordingSettingsView: View {
                     SettingsRow("Languages",
                                 description: "Models to load for transcription.",
                                 icon: "character.bubble") { EmptyView() }
-                    VStack { TagListEditor(tags: $languages, placeholder: "e.g. en, zh, ja") }
+                    VStack { TagListEditor(tags: config.binding(\.recording.audio.languages), placeholder: "e.g. en, zh, ja") }
                         .padding(.horizontal, 48).padding(.bottom, 12)
-                        .onChange(of: languages) {
-                            StringArrayStorage(key: SettingsKeys.audioLanguages).set(languages)
-                        }
-                    if engine != AudioEngine.disabled.rawValue {
+                                            if engine != AudioEngine.disabled.rawValue {
                         SettingsDivider()
                         SettingsRow("Filter music",
                                     description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
                                     icon: "music.note.list") {
-                            Toggle("", isOn: $filterMusic).labelsHidden().toggleStyle(.switch)
+                            Toggle("", isOn: config.binding(\.recording.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                         }
                         SettingsDivider()
                         SettingsRow("Batch transcription",
                                     description: "Process audio chunks together for higher throughput. Slight latency cost.",
                                     icon: "tray.full") {
-                            Toggle("", isOn: $batchTranscription).labelsHidden().toggleStyle(.switch)
+                            Toggle("", isOn: config.binding(\.recording.audio.batchTranscription)).labelsHidden().toggleStyle(.switch)
                         }
                     }
                 }
@@ -176,19 +153,16 @@ struct RecordingSettingsView: View {
                     footnote: "Boost recognition of names, jargon, and brand terms."
                 ) {
                     VStack(alignment: .leading) {
-                        TagListEditor(tags: $vocabulary, placeholder: "term · optional replacement")
+                        TagListEditor(tags: config.binding(\.recording.audio.customVocabulary), placeholder: "term · optional replacement")
                             .padding(.horizontal, 14).padding(.vertical, 12)
                     }
-                    .onChange(of: vocabulary) {
-                        StringArrayStorage(key: SettingsKeys.customVocabulary).set(vocabulary)
-                    }
-                }
+                                    }
 
                 SettingsCard(title: "Speakers (Voice ID)") {
                     SettingsRow("Enable speaker identification",
                                 description: "Detect and cluster distinct voices.",
                                 icon: "person.wave.2") {
-                        Toggle("", isOn: $speakerId).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.recording.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
                     }
                 }
             }
@@ -203,21 +177,21 @@ struct RecordingSettingsView: View {
                 SettingsRow("Screen recording",
                             description: "Capture periodic snapshots of your screen.",
                             icon: "display") {
-                    Toggle("", isOn: $screenRec).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.recording.screen.enabled)).labelsHidden().toggleStyle(.switch)
                 }
                 if screenRec {
                     SettingsDivider()
                     SettingsRow("Recording quality",
                                 description: "Higher quality means larger snapshots.",
                                 icon: "rectangle.stack") {
-                        Picker("", selection: $quality) {
+                        Picker("", selection: config.binding(\.recording.screen.quality)) {
                             ForEach(RecordingQuality.allCases) { q in Text(q.label).tag(q.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 110)
                     }
                     SettingsDivider()
                     SettingsRow("Output video format", icon: "rectangle.compress.vertical") {
-                        Picker("", selection: $format) {
+                        Picker("", selection: config.binding(\.recording.screen.videoFormat)) {
                             ForEach(VideoFormat.allCases) { f in Text(f.label).tag(f.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 110)
@@ -228,10 +202,10 @@ struct RecordingSettingsView: View {
                                 icon: "speedometer") {
                         HStack(spacing: 8) {
                             Slider(value: Binding(
-                                get: { Double(fps) },
-                                set: { fps = Int($0) }
+                                get: { Double(config.current.recording.screen.videoFps) },
+                                set: { v in config.mutate { $0.recording.screen.videoFps = Int(v) } }
                             ), in: 1...30, step: 1).frame(width: 140)
-                            Text("\(fps) fps")
+                            Text("\(config.current.recording.screen.videoFps) fps")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.55))
                                 .frame(width: 50, alignment: .trailing)
@@ -242,7 +216,7 @@ struct RecordingSettingsView: View {
                                 description: "Milliseconds between standalone snapshots.",
                                 icon: "timer") {
                         HStack(spacing: 4) {
-                            TextField("", value: $frameIntervalMs, formatter: NumberFormatter())
+                            TextField("", value: config.binding(\.recording.screen.frameIntervalMs), formatter: NumberFormatter())
                                 .textFieldStyle(.plain)
                                 .multilineTextAlignment(.trailing)
                                 .font(.system(size: 12, design: .monospaced))
@@ -262,7 +236,7 @@ struct RecordingSettingsView: View {
                     SettingsRow("OCR engine",
                                 description: "Convert captured frames into searchable text.",
                                 icon: "doc.text.viewfinder") {
-                        Picker("", selection: $ocrEngine) {
+                        Picker("", selection: config.binding(\.recording.screen.ocrEngine)) {
                             ForEach(OCREngine.allCases) { o in Text(o.label).tag(o.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 160)
@@ -279,7 +253,7 @@ struct RecordingSettingsView: View {
             SettingsRow("Chinese mirror",
                         description: "Use a CN-region mirror for model downloads.",
                         icon: "globe.asia.australia") {
-                Toggle("", isOn: $chineseMirror).labelsHidden().toggleStyle(.switch)
+                Toggle("", isOn: config.binding(\.recording.system.chineseMirror)).labelsHidden().toggleStyle(.switch)
             }
         }
     }

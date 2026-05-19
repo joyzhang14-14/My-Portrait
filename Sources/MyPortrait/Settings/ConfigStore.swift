@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 import Observation
 import TOMLKit
 
@@ -69,6 +70,50 @@ final class ConfigStore {
             set: { new in self.mutate { $0[keyPath: kp] = new } }
         )
     }
+
+    /// Binding for an API-key / token slot: the TOML only stores a string
+    /// REFERENCE; the actual secret lives in SecretStore. Setting empty
+    /// clears both; setting a value writes through to SecretStore and
+    /// auto-assigns a ref if one wasn't there yet.
+    func secretBinding(refKeyPath: WritableKeyPath<MyPortraitConfig, String>,
+                       defaultRef: String) -> Binding<String> {
+        Binding(
+            get: {
+                let ref = self.current[keyPath: refKeyPath]
+                guard !ref.isEmpty,
+                      let data = SecretStore.shared.get(ref),
+                      let s = String(data: data, encoding: .utf8)
+                else { return "" }
+                return s
+            },
+            set: { newValue in
+                let trimmed = newValue
+                let ref = self.current[keyPath: refKeyPath]
+                if trimmed.isEmpty {
+                    if !ref.isEmpty { SecretStore.shared.delete(ref) }
+                    self.mutate { $0[keyPath: refKeyPath] = "" }
+                } else {
+                    let useRef = ref.isEmpty ? defaultRef : ref
+                    try? SecretStore.shared.set(useRef, value: Data(trimmed.utf8))
+                    if ref.isEmpty {
+                        self.mutate { $0[keyPath: refKeyPath] = useRef }
+                    }
+                }
+            }
+        )
+    }
+
+    /// Convenience: open `config.toml` in Finder (selected) so the user can
+    /// hand-edit it. Creates the file first if it doesn't exist yet.
+    func revealInFinder() {
+        if !FileManager.default.fileExists(atPath: path.path) {
+            Task { await writeNow() }
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([path])
+    }
+
+    /// Read-only accessor used by tests / utilities.
+    var fileURL: URL { path }
 
     /// Delete the on-disk file and revert to baked-in defaults.
     func resetToDefaults() {

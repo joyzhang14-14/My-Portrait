@@ -9,7 +9,13 @@ struct HomeView: View {
     @State private var setup = AISetup.shared
     @State private var contextChips: [ContextChip] = []
     @State private var pickerOpen: Bool = false
-    @AppStorage("MyPortrait.redactPII") private var redactPII: Bool = false
+    @State private var configStore = ConfigStore.shared
+    private var redactPII: Bool {
+        get { configStore.current.chat.redactPii }
+    }
+    private func setRedactPII(_ v: Bool) {
+        configStore.mutate { $0.chat.redactPii = v }
+    }
     @State private var attachments: [Attachment] = []
     @State private var suggestions = SuggestionEngine.shared
     @State private var templates = TemplateLibrary.shared
@@ -70,7 +76,7 @@ struct HomeView: View {
                 isConnected: appState.activeAI != nil,
                 contextChips: $contextChips,
                 pickerOpen: $pickerOpen,
-                redactPII: $redactPII,
+                redactPII: Binding(get: { redactPII }, set: { setRedactPII($0) }),
                 attachments: $attachments,
                 isStreaming: chat.isStreaming,
                 tokenTotal: chat.currentConvId.map { chat.tokenTotal(for: $0) } ?? 0,

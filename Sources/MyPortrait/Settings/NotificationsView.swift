@@ -1,13 +1,7 @@
 import SwiftUI
 
 struct NotificationsSettingsView: View {
-    @AppStorage(SettingsKeys.notifyAppUpdates)      private var appUpdates = true
-    @AppStorage(SettingsKeys.notifyPipeSuggestions) private var pipeSuggest = true
-    @AppStorage(SettingsKeys.pipeSuggestionInterval) private var pipeSuggestInterval = SuggestionInterval.h3.rawValue
-    @AppStorage(SettingsKeys.notifyPipeAlerts)      private var pipeAlerts = true
-    @AppStorage(SettingsKeys.notifyCaptureStalls)   private var captureStalls = false
-
-    @State private var muted: [String] = StringArrayStorage(key: SettingsKeys.mutedPipes).get()
+    @State private var config = ConfigStore.shared
 
     var body: some View {
         SettingsPage("Notifications",
@@ -17,7 +11,7 @@ struct NotificationsSettingsView: View {
                 SettingsRow("New version available",
                             description: "Notify when a new build is ready to install.",
                             icon: "bell.badge") {
-                    Toggle("", isOn: $appUpdates).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.notifications.appUpdates)).labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -26,22 +20,22 @@ struct NotificationsSettingsView: View {
                             description: "AI automation ideas based on your data.",
                             icon: "sparkles") {
                     HStack(spacing: 6) {
-                        Picker("", selection: $pipeSuggestInterval) {
+                        Picker("", selection: config.binding(\.notifications.pipeSuggestionInterval)) {
                             ForEach(SuggestionInterval.allCases) { i in
                                 Text(i.label).tag(i.rawValue)
                             }
                         }
                         .pickerStyle(.menu).labelsHidden()
-                        .disabled(!pipeSuggest)
+                        .disabled(!config.current.notifications.pipeSuggestions)
                         .frame(width: 110)
-                        Toggle("", isOn: $pipeSuggest).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.notifications.pipeSuggestions)).labelsHidden().toggleStyle(.switch)
                     }
                 }
                 SettingsDivider()
                 SettingsRow("Pipe notifications",
                             description: "Alerts from installed pipes.",
                             icon: "antenna.radiowaves.left.and.right") {
-                    Toggle("", isOn: $pipeAlerts).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.notifications.pipeAlerts)).labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -54,7 +48,7 @@ struct NotificationsSettingsView: View {
                             icon: "exclamationmark.triangle") {
                     HStack(spacing: 6) {
                         ExperimentalBadge()
-                        Toggle("", isOn: $captureStalls).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.notifications.captureStalls)).labelsHidden().toggleStyle(.switch)
                     }
                 }
             }
@@ -63,21 +57,21 @@ struct NotificationsSettingsView: View {
                 title: "Muted pipes",
                 footnote: "Pipes added here won't trigger any notifications, no matter their configuration."
             ) {
-                if muted.isEmpty {
+                if config.current.notifications.mutedPipes.isEmpty {
                     Text("No muted pipes.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.5))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
-                    ForEach(muted, id: \.self) { name in
+                    ForEach(config.current.notifications.mutedPipes, id: \.self) { name in
                         SettingsRow(name, icon: "speaker.slash") {
                             Button("Unmute") {
-                                muted.removeAll { $0 == name }
-                                StringArrayStorage(key: SettingsKeys.mutedPipes).set(muted)
+                                config.mutate { $0.notifications.mutedPipes.removeAll { $0 == name } }
+                                
                             }
                             .font(.system(size: 11))
                         }
-                        if name != muted.last { SettingsDivider() }
+                        if name != config.current.notifications.mutedPipes.last { SettingsDivider() }
                     }
                 }
             }
