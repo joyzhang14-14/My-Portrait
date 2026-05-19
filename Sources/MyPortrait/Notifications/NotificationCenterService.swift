@@ -28,9 +28,19 @@ final class NotificationCenterService {
 
     /// Called from AppDelegate. If the user hasn't been asked yet, prompt
     /// for banner + sound permission. Idempotent — re-calling is cheap.
+    ///
+    /// `UNUserNotificationCenter` requires the process to be inside a real
+    /// `.app` bundle; Xcode's "Run" path executes a loose binary inside
+    /// `DerivedData/.../Build/Products/Debug/` and the framework throws an
+    /// uncatchable Obj-C exception (`bundleProxyForCurrentProcess is nil`).
+    /// We skip the call in that case so dev builds don't crash.
     func requestAuthorizationOnce() {
         guard !didRequest else { return }
         didRequest = true
+        guard isBundledApp else {
+            log.notice("skipping notification authorization — not running inside a .app bundle")
+            return
+        }
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound]
         ) { [weak self] granted, error in
@@ -41,6 +51,13 @@ final class NotificationCenterService {
                 }
             }
         }
+    }
+
+    /// True when `Bundle.main` resolves to a real `.app` package. The
+    /// UserNotifications framework only works in that case — see comment
+    /// on `requestAuthorizationOnce` above.
+    private var isBundledApp: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
     }
 
     /// Post a notification iff the matching config toggle is on AND we have
@@ -74,6 +91,9 @@ final class NotificationCenterService {
     }
 
     private func deliver(title: String, body: String, categoryId: String) {
+        // Same guard as requestAuthorizationOnce — Xcode dev runs would
+        // otherwise crash inside UNUserNotificationCenter.add.
+        guard isBundledApp else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body  = body
