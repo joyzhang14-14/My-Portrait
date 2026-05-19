@@ -67,17 +67,16 @@ final class Services {
         let manager = BGEM3ModelManager()
         self.modelManager = manager
 
-        // **当前激活的 embedder**：Distiluse 多语言真推理（MLX，完全本地）。
-        // 首次启动会下 ~135 MB 模型到 HF cache（~/Documents/huggingface/），
+        // **当前激活的 embedder**：bge-m3 真推理（MLX，完全本地，1024 维）。
+        // 首次启动会下 ~1.13 GB 权重 + ~17 MB tokenizer 到 HF cache，
         // 之后直接读 cache。embedder 加载/推理失败时 HybridSearchEngine 自动降级
         // FTS-only —— UI 搜索仍工作。
         //
-        // 选型理由：bge-m3 / MiniLM-L12-v2 都用 XLMRobertaTokenizer (sentencepiece)，
-        // swift-transformers 0.1.24 不支持，加载即崩。
-        // distiluse-base-multilingual-cased-v2 是 DistilBert + 多语言 WordPiece，
-        // swift-transformers 把 DistilBertTokenizer alias 到 BertTokenizer 能直接跑。
-        // 50+ 语言对齐，512 维。
-        let activeEmbedder: any VectorEmbedder = MultilingualDistiluseEmbedder(reporter: reporter)
+        // 关键 trick：swift-transformers 0.1.24 没有 XLMRobertaTokenizer 路由，
+        // 但 bge-m3 的 tokenizer.json 是 Unigram model，跟 T5Tokenizer 走同一条
+        // UnigramTokenizer 代码路径。所以 BGEM3VectorEmbedder 加载时在内存里把
+        // tokenizer_class 从 "XLMRobertaTokenizer" 改成 "T5Tokenizer"，零新依赖。
+        let activeEmbedder: any VectorEmbedder = BGEM3VectorEmbedder(reporter: reporter)
         self.embedder = activeEmbedder
 
         // Hybrid：FTS + 向量 + RRF。embedder 抛错（NLEmbedding 对完全非英语
