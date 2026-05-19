@@ -483,54 +483,10 @@ private struct SpeakerRow: Identifiable, Hashable {
 
 private enum SpeakerLoader {
     static func loadAll() -> [SpeakerRow] {
-        // Speaker diarisation lands in Phase 2 — no `speakers` table yet.
-        // UI shows the empty-state placeholder until that pipeline ships.
+        // Speaker diarisation lands in Phase 2 — no `speakers` table in the
+        // capture schema yet. UI shows the empty-state placeholder until
+        // that pipeline ships.
         return []
-        // swiftlint:disable:next unreachable_code
-        let db = TimelineDB()
-        guard db.exists else { return [] }
-        var conn: OpaquePointer?
-        guard sqlite3_open_v2(db.dbPath, &conn, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_close(conn) }
-
-        let sql = """
-            SELECT s.id, s.name, COUNT(a.id), MAX(a.timestamp)
-            FROM speakers s
-            LEFT JOIN audio_transcriptions a ON a.speaker_id = s.id
-            WHERE COALESCE(s.hallucination, 0) = 0
-            GROUP BY s.id, s.name
-            ORDER BY (CASE WHEN s.name IS NULL OR s.name = '' THEN 1 ELSE 0 END),
-                     COUNT(a.id) DESC
-            LIMIT 200
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(conn, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        let iso = ISO8601DateFormatter()
-        let alt = DateFormatter()
-        alt.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        alt.timeZone = TimeZone(secondsFromGMT: 0)
-        alt.locale = Locale(identifier: "en_US_POSIX")
-
-        var out: [SpeakerRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let id = sqlite3_column_int64(stmt, 0)
-            let name = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) }
-            let count = Int(sqlite3_column_int64(stmt, 2))
-            var last: Date? = nil
-            if let cstr = sqlite3_column_text(stmt, 3) {
-                let s = String(cString: cstr)
-                last = iso.date(from: s) ?? alt.date(from: s)
-            }
-            out.append(SpeakerRow(
-                id: String(id),
-                name: name?.isEmpty == false ? name : nil,
-                sampleCount: count,
-                lastHeard: last
-            ))
-        }
-        return out
     }
 }
 

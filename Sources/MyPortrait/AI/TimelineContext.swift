@@ -1,5 +1,13 @@
 import Foundation
 import SQLite3
+import os.log
+
+private let ctxLog = Logger(subsystem: "com.myportrait.ai", category: "timeline-context")
+
+@inline(__always)
+private func ctxSqlErr(_ db: OpaquePointer?) -> String {
+    sqlite3_errmsg(db).flatMap { String(cString: $0) } ?? "unknown"
+}
 
 // MARK: - Chip model
 
@@ -262,27 +270,29 @@ extension TimelineDB {
         }
         defer { sqlite3_close(db) }
 
-        let fromTS = Self.fmt.string(from: from)
-        let toTS   = Self.fmt.string(from: to)
+        let fromMs = Int64(from.timeIntervalSince1970 * 1000)
+        let toMs   = Int64(to.timeIntervalSince1970 * 1000)
 
+        // OCR text is inlined into `frames.full_text` (no separate ocr_text
+        // table in the capture schema).
         var sql = """
-            SELECT f.app_name, o.text
+            SELECT f.app_name, f.full_text
             FROM frames f
-            JOIN ocr_text o ON o.frame_id = f.id
-            WHERE f.timestamp BETWEEN ? AND ?
-              AND o.text IS NOT NULL AND length(o.text) > 4
+            WHERE f.timestamp_ms BETWEEN ? AND ?
+              AND f.full_text IS NOT NULL AND length(f.full_text) > 4
             """
         if appFilter != nil { sql += " AND lower(f.app_name) LIKE ?" }
-        sql += " ORDER BY f.timestamp DESC LIMIT 600"
+        sql += " ORDER BY f.timestamp_ms DESC LIMIT 600"
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            ctxLog.error("ocrBlock prepare failed: \(ctxSqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
             return OCRBlock(text: "", frameCount: 0, topApps: [], truncated: false)
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, fromTS, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, toTS,   -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(stmt, 1, fromMs)
+        sqlite3_bind_int64(stmt, 2, toMs)
         if let a = appFilter {
             sqlite3_bind_text(stmt, 3, "%\(a.lowercased())%", -1, SQLITE_TRANSIENT)
         }
@@ -333,14 +343,15 @@ extension TimelineDB {
         defer { sqlite3_close(db) }
 
         let sql = """
-            SELECT f.timestamp, f.app_name, o.text
-            FROM frames f JOIN ocr_text o ON o.frame_id = f.id
-            WHERE o.text LIKE ?
-            ORDER BY f.timestamp DESC
+            SELECT f.timestamp_ms, f.app_name, f.full_text
+            FROM frames f
+            WHERE f.full_text LIKE ?
+            ORDER BY f.timestamp_ms DESC
             LIMIT 200
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            ctxLog.error("searchOCR prepare failed: \(ctxSqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
             return OCRBlock(text: "", frameCount: 0, topApps: [], truncated: false)
         }
         defer { sqlite3_finalize(stmt) }
@@ -352,7 +363,8 @@ extension TimelineDB {
         var truncated = false
         var frames = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let ts  = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+            let tsMs = sqlite3_column_int64(stmt, 0)
+            let ts = Self.fmt.string(from: Date(timeIntervalSince1970: TimeInterval(tsMs) / 1000))
             let app = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
             let raw = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             frames += 1
@@ -391,24 +403,30 @@ extension TimelineDB {
         }
         defer { sqlite3_close(db) }
 
-        let fromTS = Self.fmt.string(from: from)
-        let toTS   = Self.fmt.string(from: to)
+        let fromMs = Int64(from.timeIntervalSince1970 * 1000)
+        let toMs   = Int64(to.timeIntervalSince1970 * 1000)
+        // No `speakers` table yet (Phase 2). Display name falls back to
+        // "Speaker N". Window by recording time, not transcription time
+        // (WhisperKit lag would otherwise misalign the audio panel).
         let sql = """
-            SELECT a.timestamp, COALESCE(s.name, 'Speaker ' || COALESCE(a.speaker_id, 0)),
-                   a.transcription, a.is_input_device
-            FROM audio_transcriptions a
-            LEFT JOIN speakers s ON s.id = a.speaker_id
-            WHERE a.timestamp BETWEEN ? AND ?
-            ORDER BY a.timestamp ASC
+            SELECT ac.recorded_at_ms,
+                   'Speaker ' || COALESCE(t.speaker_id, 0),
+                   t.text,
+                   ac.is_input
+            FROM audio_transcriptions t
+            JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            WHERE ac.recorded_at_ms BETWEEN ? AND ?
+            ORDER BY ac.recorded_at_ms ASC
             LIMIT 500
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            ctxLog.error("audioBlock prepare failed: \(ctxSqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
             return AudioBlock(text: "", lineCount: 0, speakers: [])
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, fromTS, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, toTS,   -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(stmt, 1, fromMs)
+        sqlite3_bind_int64(stmt, 2, toMs)
 
         var lines: [String] = []
         var seen = Set<String>()
@@ -416,17 +434,17 @@ extension TimelineDB {
         var seenSpeakers = Set<String>()
         var total = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let ts   = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+            let tsMs = sqlite3_column_int64(stmt, 0)
             let name = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? "?"
             let text = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             let trimmed = text.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
-            let key = "\(ts)|\(name)|\(trimmed)"
+            let key = "\(tsMs)|\(name)|\(trimmed)"
             if seen.contains(key) { continue }
             seen.insert(key)
 
-            // [HH:MM:SS]  pull last 8 chars of ISO timestamp.
-            let timeOnly = ts.split(separator: "T").last.map { String($0.prefix(8)) } ?? ts
+            // [HH:MM:SS] formatted from ms timestamp.
+            let timeOnly = Self.timeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(tsMs) / 1000))
             let line = "[\(timeOnly)] \(name): \(trimmed)"
             lines.append(line)
             total += line.count + 1
@@ -440,46 +458,24 @@ extension TimelineDB {
     }
 
     /// Last hour of transcripts from a particular speaker.
+    /// Returns "" until speaker diarisation lands in Phase 2 — the capture
+    /// schema has no `speakers` table to look up names through.
     func speakerTranscripts(name: String, maxChars: Int = 6000) -> String {
-        guard exists else { return "" }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return "" }
-        defer { sqlite3_close(db) }
-
-        let since = Self.fmt.string(from: Date().addingTimeInterval(-3600))
-        // No speaker_name column on audio_transcriptions; JOIN through
-        // speakers.name to match by display name.
-        let sql = """
-            SELECT a.timestamp, a.transcription
-            FROM audio_transcriptions a
-            JOIN speakers s ON s.id = a.speaker_id
-            WHERE s.name = ? AND a.timestamp >= ?
-            ORDER BY a.timestamp ASC
-            LIMIT 400
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return "" }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, since, -1, SQLITE_TRANSIENT)
-
-        var lines: [String] = []
-        var total = 0
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let ts = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
-            let t  = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
-            let line = "[\(ts)] \(name): \(t)"
-            lines.append(line)
-            total += line.count + 1
-            if total >= maxChars { break }
-        }
-        return lines.joined(separator: "\n")
+        _ = (name, maxChars)
+        return ""
     }
 
     nonisolated(unsafe) static let fmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    nonisolated(unsafe) static let timeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
         f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()

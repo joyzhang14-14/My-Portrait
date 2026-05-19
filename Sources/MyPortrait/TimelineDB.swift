@@ -1,5 +1,13 @@
 import Foundation
 import SQLite3
+import os.log
+
+private let timelineLog = Logger(subsystem: "com.myportrait.db", category: "timeline-sql")
+
+@inline(__always)
+private func sqlErr(_ db: OpaquePointer?) -> String {
+    sqlite3_errmsg(db).flatMap { String(cString: $0) } ?? "unknown"
+}
 
 /// Read/write client for the unified timeline database
 /// (`~/.portrait/portrait.sqlite`). Same DB the capture layer writes to —
@@ -132,7 +140,10 @@ struct TimelineDB: Sendable {
             """
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_int64(stmt, 1, startMs)
@@ -242,7 +253,10 @@ struct TimelineDB: Sendable {
             """
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_int64(stmt, 1, startMs)
@@ -281,25 +295,29 @@ struct TimelineDB: Sendable {
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
-        // Speakers JOIN goes through audio_chunks → device/is_input + the
-        // optional speakers table (older migrated rows may not have a
-        // speakers table; LEFT JOIN keeps everything resilient).
+        // Window by **recording** time, not transcription time — WhisperKit
+        // may finish minutes after the audio was captured. The sidebar
+        // shows "what was being said around X", which means the user's
+        // wall-clock when they were talking, not when the worker drained.
         let sql = """
-            SELECT t.transcribed_at_ms,
+            SELECT ac.recorded_at_ms,
                    t.text,
                    COALESCE(ac.device, ''),
                    COALESCE(ac.is_input, 1),
                    t.speaker_id
             FROM audio_transcriptions t
-            LEFT JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
-            WHERE t.transcribed_at_ms >= ? AND t.transcribed_at_ms <= ?
+            JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            WHERE ac.recorded_at_ms >= ? AND ac.recorded_at_ms <= ?
               AND t.text IS NOT NULL AND t.text != ''
-            ORDER BY t.transcribed_at_ms ASC
+            ORDER BY ac.recorded_at_ms ASC
             LIMIT 60
             """
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_int64(stmt, 1, startMs)
@@ -347,7 +365,10 @@ struct TimelineDB: Sendable {
             WHERE timestamp_ms >= ?
             """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, cutoffMs)
 
@@ -441,16 +462,19 @@ struct TimelineDB: Sendable {
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
         let sql = """
-            SELECT transcription
+            SELECT text
             FROM audio_transcriptions
             WHERE speaker_id = ?
-              AND transcription IS NOT NULL
-              AND length(transcription) > 12
-            ORDER BY timestamp DESC
+              AND text IS NOT NULL
+              AND length(text) > 12
+            ORDER BY transcribed_at_ms DESC
             LIMIT ?
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, speakerId)
         sqlite3_bind_int(stmt, 2, Int32(limit))
@@ -471,7 +495,10 @@ struct TimelineDB: Sendable {
 
     private func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return nil
+        }
         return stmt
     }
 }
