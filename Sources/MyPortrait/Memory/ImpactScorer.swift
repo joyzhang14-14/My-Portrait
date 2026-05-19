@@ -233,7 +233,8 @@ final class ImpactScorer {
             let tags = f.tags.joined(separator: ", ")
             lines.append("\(id). title: \(title)")
             lines.append("    summary: \(trimSummary.replacingOccurrences(of: "\n", with: " ⏎ "))")
-            lines.append("    meta: tags=[\(tags)] · duration≈\(durationMin)min · occurrences_days=\(f.occurrences.count) · category=\(f.category)")
+            let facets = f.portraitFacets.map { "\($0.facet):\($0.value)" }.joined(separator: ", ")
+            lines.append("    meta: tags=[\(tags)] · duration≈\(durationMin)min · occurrences_days=\(f.occurrences.count) · portrait_facets=[\(facets)]")
         }
         return lines.joined(separator: "\n")
     }
