@@ -120,10 +120,17 @@ struct SpeakersSettingsView: View {
         let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
         rows[i].name = v
-        // TODO: persist back to screenpipe DB.
+        guard let sid = Int64(r.id) else { return }
+        Task.detached(priority: .userInitiated) {
+            _ = ScreenpipeDB().renameSpeaker(id: sid, to: v)
+        }
     }
     private func hide(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
+        guard let sid = Int64(r.id) else { return }
+        Task.detached(priority: .userInitiated) {
+            _ = ScreenpipeDB().markSpeakerHallucination(id: sid)
+        }
     }
 }
 

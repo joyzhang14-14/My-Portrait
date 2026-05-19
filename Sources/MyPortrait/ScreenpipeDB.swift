@@ -456,6 +456,36 @@ struct ScreenpipeDB: Sendable {
         return result
     }
 
+    /// Speakers: rename a clustered speaker. `speakerId` is the int64 from
+    /// `speakers.id`. Empty `name` clears it back to unidentified.
+    @discardableResult
+    func renameSpeaker(id speakerId: Int64, to name: String) -> Bool {
+        guard exists else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_close(db) }
+        guard let stmt = prepare(db, "UPDATE speakers SET name = ? WHERE id = ?") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        sqlite3_bind_text(stmt, 1, trimmed, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(stmt, 2, speakerId)
+        return sqlite3_step(stmt) == SQLITE_DONE
+    }
+
+    /// Speakers: mark a cluster as a hallucination so it stops surfacing.
+    /// `speakers.hallucination` must exist (screenpipe schema adds it).
+    @discardableResult
+    func markSpeakerHallucination(id speakerId: Int64) -> Bool {
+        guard exists else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_close(db) }
+        guard let stmt = prepare(db, "UPDATE speakers SET hallucination = 1 WHERE id = ?") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, speakerId)
+        return sqlite3_step(stmt) == SQLITE_DONE
+    }
+
     private func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
