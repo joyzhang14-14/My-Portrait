@@ -117,6 +117,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // changes (vim edits or in-app toggles both fire the trampoline).
         ConfigApplier.shared.install(window: window, statusBar: statusBarMenu)
         RetentionRunner.shared.start()
+        // 弹一次系统通知权限请求。用户拒绝后 ConfigStore 里的 toggle 仍可切，
+        // 但 NotificationCenterService.post 会因 authorized=false 静默放弃。
+        NotificationCenterService.shared.requestAuthorizationOnce()
 
         // 3. 启动 services 生命周期管理。
         //    - compactor / transcriber 立即开始（空转零成本）

@@ -298,8 +298,6 @@ final class ConfigStore {
 
         // — Notifications
         c.notifications.appUpdates       = bool(ud, "Settings.notifyAppUpdates",      default: c.notifications.appUpdates)
-        c.notifications.pipeSuggestions  = bool(ud, "Settings.notifyPipeSuggestions", default: c.notifications.pipeSuggestions)
-        if let v = ud.string(forKey: "Settings.pipeSuggestionInterval") { c.notifications.pipeSuggestionInterval = v }
         c.notifications.pipeAlerts       = bool(ud, "Settings.notifyPipeAlerts",      default: c.notifications.pipeAlerts)
         c.notifications.captureStalls    = bool(ud, "Settings.notifyCaptureStalls",   default: c.notifications.captureStalls)
         c.notifications.mutedPipes       = stringArray(ud, "Settings.mutedPipes")

@@ -341,16 +341,12 @@ struct SystemConfig: Codable, Equatable {
 
 struct NotificationsConfig: Codable, Equatable {
     var appUpdates:             Bool     = true
-    var pipeSuggestions:        Bool     = true
-    var pipeSuggestionInterval: String   = "h3"
     var pipeAlerts:             Bool     = true
     var captureStalls:          Bool     = false
     var mutedPipes:             [String] = []
     init() {}
     enum CodingKeys: String, CodingKey {
         case appUpdates             = "app_updates"
-        case pipeSuggestions        = "pipe_suggestions"
-        case pipeSuggestionInterval = "pipe_suggestion_interval"
         case pipeAlerts             = "pipe_alerts"
         case captureStalls          = "capture_stalls"
         case mutedPipes             = "muted_pipes"
@@ -359,8 +355,6 @@ struct NotificationsConfig: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         appUpdates             = c.dflt(Bool.self,     .appUpdates, appUpdates)
-        pipeSuggestions        = c.dflt(Bool.self,     .pipeSuggestions, pipeSuggestions)
-        pipeSuggestionInterval = c.dflt(String.self,   .pipeSuggestionInterval, pipeSuggestionInterval)
         pipeAlerts             = c.dflt(Bool.self,     .pipeAlerts, pipeAlerts)
         captureStalls          = c.dflt(Bool.self,     .captureStalls, captureStalls)
         mutedPipes             = c.dflt([String].self, .mutedPipes, mutedPipes)

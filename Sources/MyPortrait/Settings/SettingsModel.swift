@@ -98,7 +98,6 @@ enum SettingsKeys {
     // Notifications
     static let notifyAppUpdates         = "Settings.notifyAppUpdates"
     static let notifyPipeSuggestions    = "Settings.notifyPipeSuggestions"
-    static let pipeSuggestionInterval   = "Settings.pipeSuggestionInterval"   // SuggestionInterval rawValue
     static let notifyPipeAlerts         = "Settings.notifyPipeAlerts"
     static let notifyCaptureStalls      = "Settings.notifyCaptureStalls"
     static let mutedPipes               = "Settings.mutedPipes"               // [String]
@@ -186,31 +185,6 @@ enum VideoFormat: String, CaseIterable, Identifiable {
         case .h264:   return "H.264"
         case .h265:   return "H.265"
         case .prores: return "ProRes"
-        }
-    }
-}
-
-enum SuggestionInterval: String, CaseIterable, Identifiable {
-    case h1, h2, h3, h6, h12, daily, weekly
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .h1: return "every 1h";   case .h2: return "every 2h"
-        case .h3: return "every 3h";   case .h6: return "every 6h"
-        case .h12: return "every 12h"; case .daily: return "daily"; case .weekly: return "weekly"
-        }
-    }
-
-    /// Refresh cadence in seconds. Used by `SuggestionEngine.isStale`.
-    var seconds: TimeInterval {
-        switch self {
-        case .h1:    return 1 * 3600
-        case .h2:    return 2 * 3600
-        case .h3:    return 3 * 3600
-        case .h6:    return 6 * 3600
-        case .h12:   return 12 * 3600
-        case .daily: return 24 * 3600
-        case .weekly: return 7 * 24 * 3600
         }
     }
 }

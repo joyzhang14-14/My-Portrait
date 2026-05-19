@@ -49,7 +49,6 @@ struct ContentView: View {
                 return (p, appState.currentModel(forIntegrationId: id), nil)
             }
             chat.providerResolver = resolver
-            SuggestionEngine.shared.providerResolver = resolver
 
             // Wire the scheduler so it can fire templates + pipes into the
             // chat / pipe-store when their cadence ticks.

@@ -86,5 +86,10 @@ enum PipeExecutor {
             .replacingOccurrences(of: "\n", with: " ")
         let run = PipeRun(convId: conv.id, startedAt: startedAt, preview: preview)
         PipeStore.shared.appendRun(run, to: pipe.id)
+
+        // 5. Notify (respects notifications.pipeAlerts + mutedPipes).
+        NotificationCenterService.shared.post(
+            .pipeRun(pipeName: pipe.name, preview: preview)
+        )
     }
 }

@@ -171,6 +171,26 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         }
 
         weights = model.sanitize(weights: weights)
+
+        // **XLM-R position embedding shift workaround**：mzbac 的 BertModel
+        // 把 `positionIds` 参数丢了，只用 `arange(0..L)`。而 XLM-R 真正的语义
+        // 是 `[padding_idx+1, padding_idx+2, ...]`（pad_token_id=1，所以 = 2,3,4,...）。
+        // 把 position_embeddings 权重整体上移 2 行 —— 这样 model 内部用 arange
+        // 索引就等效于原始 XLM-R 用 [2,3,...] 索引。
+        // 只对**单句无 padding** 正确（batch with padding 仍错，padding 位置
+        // 该取 row[1] 但 shifted 后会取 row[3]）。回灌时 worker 默认 chunk=32
+        // 一组喂 → 含 padding → **会错**。这一步只用来验证 cosine 修正方向，
+        // 正式上线需要走 fork mlx.embeddings 或自己写 forward。
+        if let key = weights.keys.first(where: { $0.hasSuffix("position_embeddings.weight") }) {
+            let pe = weights[key]!
+            let total = pe.dim(0)
+            let dim = pe.dim(1)
+            let shifted = pe[2..<total]
+            // 用零行 pad 尾部凑回原长度（这两行不会被索引到 —— 我们截到 maxSeq=512 << 8194）
+            let padding = MLXArray.zeros([2, dim], dtype: pe.dtype)
+            weights[key] = concatenated([shifted, padding], axis: 0)
+        }
+
         let parameters = ModuleParameters.unflattened(weights)
         try model.update(parameters: parameters, verify: [.all])
         eval(model)
@@ -230,10 +250,22 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         // XLM-R type_vocab_size=1，token type 全 0 即可。
         let tokenTypeIds = MLXArray.zeros(like: padded)
 
+        // 3.5 **XLM-R position IDs**（不是 BERT 的 [0,1,2,..]）
+        //   HF XLMRobertaEmbeddings.create_position_ids_from_input_ids：
+        //     mask = input_ids != padding_idx
+        //     pos = (cumsum(mask, dim=1) * mask) + padding_idx
+        //   non-pad token 拿到 padding_idx+1, padding_idx+2, ...（即 2, 3, 4, ...）
+        //   pad token 拿到 padding_idx（即 1）
+        //   mzbac 的 BertModel 默认 positionIds=arange(0..L)，那是 BERT 的语义，
+        //   XLM-R 跑下来 position embedding 整行错位，cosine 直接掉到 ~0.1。
+        let nonPadMaskInt = attentionMask.asType(Int32.self)
+        let cum = nonPadMaskInt.cumsum(axis: -1)
+        let positionIds = (cum * nonPadMaskInt) + MLXArray(Int32(padId))
+
         // 4. forward
         let output = model(
             padded,
-            positionIds: nil,
+            positionIds: positionIds,
             tokenTypeIds: tokenTypeIds,
             attentionMask: attentionMask
         )
