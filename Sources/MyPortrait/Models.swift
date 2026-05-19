@@ -446,8 +446,8 @@ enum Mock {
     ]
 
     static let recents: [String] = [
-        "帮我看看我最近一个小时和终…", "todo-list-assistant #218", "search screenpipe for what …",
-        "go to x.com", "todo-list-assistant #195", "search screenpipe for what …",
+        "帮我看看我最近一个小时和终…", "todo-list-assistant #218", "search timeline for what …",
+        "go to x.com", "todo-list-assistant #195", "search timeline for what …",
         "todo-list-assistant #194", "todo-list-assistant #193", "what did I work on in the last…",
         "todo-list-assistant #111", "我这一个小时都在干什么?", "我这几天都在做什么?",
         "todo-list-assistant #109", "todo-list-assistant #106", "todo-list-assistant #105",
@@ -497,7 +497,7 @@ enum AppIconLoader {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
-    /// Resolve an app icon given just the localized app name from a screenpipe frame.
+    /// Resolve an app icon given just the localized app name from a timeline frame.
     /// Strategy:
     ///   1. Check currently-running apps (NSRunningApplication.localizedName)
     ///   2. Probe /Applications and ~/Applications for "<name>.app"

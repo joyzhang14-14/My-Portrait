@@ -130,7 +130,7 @@ final class ChatController {
         return conv.id
     }
 
-    /// Send a user prompt with optional screenpipe context chips. Each chip
+    /// Send a user prompt with optional timeline context chips. Each chip
     /// is resolved into an OCR block that is prepended (as a `[Screen context]`
     /// section) to the actual text sent to Pi. The user bubble visually
     /// shows the chips so the user can verify what was injected.
@@ -166,8 +166,8 @@ final class ChatController {
         // background hop and then deliver from the main actor.
         Task { [weak self] in
             guard let self else { return }
-            let context: ScreenpipeContext = await Task.detached(priority: .userInitiated) {
-                ScreenpipeContextBuilder.build(chips: chips, redactPII: redactPII)
+            let context: TimelineContext = await Task.detached(priority: .userInitiated) {
+                TimelineContextBuilder.build(chips: chips, redactPII: redactPII)
             }.value
 
             await MainActor.run {

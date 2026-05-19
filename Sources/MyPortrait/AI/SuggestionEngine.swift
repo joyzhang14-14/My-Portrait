@@ -62,7 +62,7 @@ final class SuggestionEngine {
         // Build a small context from the last 30 minutes — enough to give the
         // model something to riff on without blowing token budgets.
         let context = await Task.detached(priority: .userInitiated) {
-            ScreenpipeContextBuilder.build(
+            TimelineContextBuilder.build(
                 chips: [ContextChip(spec: .lastMinutes(30))],
                 maxChars: 6000
             )
@@ -70,7 +70,7 @@ final class SuggestionEngine {
 
         let prompt: String
         if context.markdown.isEmpty {
-            // Cold start (no screenpipe) — ask for generic productivity prompts.
+            // Cold start (no timeline data) — ask for generic productivity prompts.
             prompt = """
             Suggest 5 short prompts a user might type into an AI assistant \
             running on their Mac. Return ONLY a JSON array of 5 strings, no \

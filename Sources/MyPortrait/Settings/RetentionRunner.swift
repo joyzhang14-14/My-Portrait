@@ -1,7 +1,7 @@
 import Foundation
 
 /// Background sweeper: reads `storage.retentionDays` + `storage.autoDeleteMode`
-/// from ConfigStore and deletes ScreenpipeDB rows older than the window.
+/// from ConfigStore and deletes TimelineDB rows older than the window.
 /// Fires once on app launch (so a long-closed laptop catches up) and every
 /// 6 hours after that.
 ///
@@ -40,7 +40,7 @@ final class RetentionRunner {
         let mediaOnly = (mode == .mediaOnly)
 
         Task.detached(priority: .background) {
-            let res = ScreenpipeDB().deleteBefore(cutoff, mediaOnly: mediaOnly)
+            let res = TimelineDB().deleteBefore(cutoff, mediaOnly: mediaOnly)
             if res.frames + res.audio > 0 {
                 NSLog("[Retention] swept frames=\(res.frames) audio=\(res.audio) older than \(days)d (mode=\(mode.rawValue))")
             }

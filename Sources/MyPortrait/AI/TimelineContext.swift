@@ -5,7 +5,7 @@ import SQLite3
 
 /// A single context filter the user picked via the `@` popover. A chat send
 /// may carry zero or many chips; each contributes one section to the
-/// `ScreenpipeContext` we prepend to the prompt.
+/// `TimelineContext` we prepend to the prompt.
 struct ContextChip: Identifiable, Hashable {
     enum Spec: Hashable {
         case now                    // the single most recent OCR frame
@@ -53,8 +53,8 @@ struct ContextChip: Identifiable, Hashable {
 
 // MARK: - Built context
 
-/// Result of resolving a `[ContextChip]` against the screenpipe DB.
-struct ScreenpipeContext {
+/// Result of resolving a `[ContextChip]` against the timeline DB.
+struct TimelineContext {
     /// Markdown-formatted block ready to prepend to the user prompt. Empty
     /// if no chips resolved or no frames were found.
     let markdown: String
@@ -66,7 +66,7 @@ struct ScreenpipeContext {
     /// AssistantBody to render a "Sources" footer + clickable superscripts.
     let citations: [Citation]
 
-    static let empty = ScreenpipeContext(markdown: "", summary: "", frameCount: 0, truncated: false, citations: [])
+    static let empty = TimelineContext(markdown: "", summary: "", frameCount: 0, truncated: false, citations: [])
 }
 
 /// One numbered source the assistant can refer to via `[N]` in its reply.
@@ -87,18 +87,18 @@ struct Citation: Identifiable, Hashable, Codable {
 
 // MARK: - Builder
 
-enum ScreenpipeContextBuilder {
+enum TimelineContextBuilder {
     /// Build a prompt-ready context for a list of chips. Each chip contributes
     /// one section. Total OCR text is capped at `maxChars` (≈ maxChars/4 tokens)
     /// so we don't blow Pi's context window. When `redactPII` is true, the
     /// final text is run through `PIIRedactor` before being returned.
-    static func build(chips: [ContextChip], redactPII: Bool = false, maxChars: Int = 24_000) -> ScreenpipeContext {
+    static func build(chips: [ContextChip], redactPII: Bool = false, maxChars: Int = 24_000) -> TimelineContext {
         guard !chips.isEmpty else { return .empty }
-        let db = ScreenpipeDB()
+        let db = TimelineDB()
         guard db.exists else {
-            return ScreenpipeContext(
+            return TimelineContext(
                 markdown: "",
-                summary: "screenpipe DB not found",
+                summary: "timeline DB not found",
                 frameCount: 0, truncated: false, citations: []
             )
         }
@@ -174,7 +174,7 @@ enum ScreenpipeContextBuilder {
         }
 
         guard !sections.isEmpty else {
-            return ScreenpipeContext(
+            return TimelineContext(
                 markdown: "",
                 summary: "no screen activity found in those filters",
                 frameCount: 0, truncated: false, citations: []
@@ -193,7 +193,7 @@ enum ScreenpipeContextBuilder {
 
         let summary = "\(totalFrames) frames" +
                       (truncated ? " (truncated)" : "")
-        return ScreenpipeContext(markdown: md, summary: summary,
+        return TimelineContext(markdown: md, summary: summary,
                                  frameCount: totalFrames, truncated: truncated,
                                  citations: citations)
     }
@@ -240,9 +240,9 @@ enum ScreenpipeContextBuilder {
     }
 }
 
-// MARK: - ScreenpipeDB extension for time-range OCR
+// MARK: - TimelineDB extension for time-range OCR
 
-extension ScreenpipeDB {
+extension TimelineDB {
     /// Output of `ocrBlock`. `text` is dedup'd line-wise, capped at maxChars.
     struct OCRBlock {
         let text: String
@@ -318,7 +318,7 @@ extension ScreenpipeDB {
         )
     }
 
-    /// Full-text-ish search over OCR. Uses LIKE since the screenpipe schema
+    /// Full-text-ish search over OCR. Uses LIKE since the timeline DB schema
     /// doesn't ship FTS5. Returns matched lines + the count of distinct
     /// frames they came from.
     func searchOCR(query: String, maxChars: Int = 6000) -> OCRBlock {

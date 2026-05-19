@@ -1,10 +1,10 @@
 import Foundation
 
-/// Event-level backfill from existing screenpipe data.
+/// Event-level backfill from existing imported timeline data.
 ///
 /// Per-day loop:
 ///   1. Read frames for this day from the imported snapshot at
-///      `~/.portrait/imported/screenpipe/db.sqlite` (resolved by `ScreenpipeDB`).
+///      `~/.portrait/imported/timeline/db.sqlite` (resolved by `TimelineDB`).
 ///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions
 ///   3. Enrich each session with OCR text from its member frames
 ///   4. EventBuilder (LLM, one call per day): for each session, decide
@@ -52,11 +52,11 @@ enum Backfill {
     ) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
 
-        let db = ScreenpipeDB()
+        let db = TimelineDB()
         guard db.exists else {
             throw NSError(
                 domain: "Backfill", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "screenpipe DB not found at \(db.dbPath)"]
+                userInfo: [NSLocalizedDescriptionKey: "timeline DB not found at \(db.dbPath)"]
             )
         }
 
@@ -307,7 +307,7 @@ enum Backfill {
             created: session.firstSeen,
             impact: baselineImpact(for: session, ocrLen: ocrLen),
             body: renderBody(title: title, summary: summary, session: session),
-            source: "screenpipe:event",
+            source: "timeline:event",
             tags: tags,
             firstOccurrence: day,
             eventTitle: title,

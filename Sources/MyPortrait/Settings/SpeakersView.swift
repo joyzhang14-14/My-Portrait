@@ -6,7 +6,7 @@ import SQLite3
 /// clusters, a dense identified roster with avatar + sample count + last
 /// heard + hover actions, search + "Organize w/ AI" button.
 ///
-/// Reads `speakers JOIN audio_transcriptions` live from screenpipe DB.
+/// Reads `speakers JOIN audio_transcriptions` live from timeline DB.
 struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
@@ -122,14 +122,14 @@ struct SpeakersSettingsView: View {
         rows[i].name = v
         guard let sid = Int64(r.id) else { return }
         Task.detached(priority: .userInitiated) {
-            _ = ScreenpipeDB().renameSpeaker(id: sid, to: v)
+            _ = TimelineDB().renameSpeaker(id: sid, to: v)
         }
     }
     private func hide(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
         guard let sid = Int64(r.id) else { return }
         Task.detached(priority: .userInitiated) {
-            _ = ScreenpipeDB().markSpeakerHallucination(id: sid)
+            _ = TimelineDB().markSpeakerHallucination(id: sid)
         }
     }
 }
@@ -452,7 +452,7 @@ private struct SpeakerRow: Identifiable, Hashable {
 
 private enum SpeakerLoader {
     static func loadAll() -> [SpeakerRow] {
-        let db = ScreenpipeDB()
+        let db = TimelineDB()
         guard db.exists else { return [] }
         var conn: OpaquePointer?
         guard sqlite3_open_v2(db.dbPath, &conn, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }

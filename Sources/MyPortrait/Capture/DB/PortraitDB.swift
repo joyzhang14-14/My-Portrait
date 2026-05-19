@@ -72,7 +72,7 @@ protocol PortraitDB: Sendable {
 
     /// 某天的全部帧（按 timestamp 升序），TimelineView 主体读这个。
     /// 包含 video_chunks JOIN 出来的 MP4 文件路径 + fps，方便 AVAssetImageGenerator 抠帧。
-    func framesForDay(_ day: Date, limit: Int) async throws -> [ScreenpipeFrame]
+    func framesForDay(_ day: Date, limit: Int) async throws -> [TimelineFrame]
 
     /// 在某时刻附近活跃的 app 列表（按"最后出现时间"倒序），用于 Timeline 侧边栏。
     func activeAppsAround(timestamp: Date, windowSeconds: TimeInterval) async throws -> [ActiveAppEntry]
@@ -231,7 +231,7 @@ struct RetentionStats: Sendable {
 }
 
 /// HybridSearchEngine 拿 RRF 排序结果后查元数据用的最小字段集。
-/// 比 ScreenpipeFrame 轻量：不带 videoPath/offsetIndex/fps 那一套（搜索结果不需要抠帧）。
+/// 比 TimelineFrame 轻量：不带 videoPath/offsetIndex/fps 那一套（搜索结果不需要抠帧）。
 struct FrameMetadata: Sendable {
     let id: Int64
     let timestampMs: Int64

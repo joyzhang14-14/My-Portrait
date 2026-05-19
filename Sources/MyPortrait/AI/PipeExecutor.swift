@@ -25,10 +25,10 @@ enum PipeExecutor {
         let startedAt = Date()
 
         // 1. Build context.
-        let context: ScreenpipeContext
+        let context: TimelineContext
         if let chip = pipe.window.resolveChip() {
             context = await Task.detached(priority: .userInitiated) {
-                ScreenpipeContextBuilder.build(chips: [chip])
+                TimelineContextBuilder.build(chips: [chip])
             }.value
         } else {
             context = .empty

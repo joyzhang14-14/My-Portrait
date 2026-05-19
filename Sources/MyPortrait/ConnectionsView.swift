@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Matches screenpipe's Settings → Connections layout:
+/// Matches Orphies' Settings → Connections layout:
 ///   ┌───────────────────────────────────┐
 ///   │ Description text                  │
 ///   │ Search bar                        │

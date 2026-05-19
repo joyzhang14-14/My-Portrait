@@ -9,7 +9,7 @@ import Observation
 @Observable
 final class TimelineState {
     var selectedDay: Date = Date()
-    var frames: [ScreenpipeFrame] = []
+    var frames: [TimelineFrame] = []
     var loading: Bool = false
     var focusIndex: Int = 0
     /// Set by `seek(to:)` when the requested moment falls on a day whose
@@ -46,11 +46,11 @@ final class TimelineState {
 struct TimelineView: View {
     /// Hoisted to ContentView so the sidebar can share the same focus/frames.
     let state: TimelineState
-    /// 切到真 DB（PortraitDB），不再读外部 ~/.screenpipe。
+    /// 切到真 DB（PortraitDB），不再读外部数据源。
     /// services 注入失败（理论上不应发生）→ 显示空状态。
     @Environment(\.services) private var services
 
-    private var currentFrame: ScreenpipeFrame? {
+    private var currentFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
         return state.frames[state.focusIndex]
     }
@@ -118,7 +118,7 @@ struct TimelineView: View {
         .task(id: state.selectedDay) { reload() }
     }
 
-    static func previousAppBoundary(in frames: [ScreenpipeFrame], from idx: Int) -> Int {
+    static func previousAppBoundary(in frames: [TimelineFrame], from idx: Int) -> Int {
         guard frames.indices.contains(idx), idx > 0 else { return idx }
         let current = frames[idx].appName
         var i = idx - 1
@@ -126,7 +126,7 @@ struct TimelineView: View {
         return max(0, i)
     }
 
-    static func nextAppBoundary(in frames: [ScreenpipeFrame], from idx: Int) -> Int {
+    static func nextAppBoundary(in frames: [TimelineFrame], from idx: Int) -> Int {
         guard frames.indices.contains(idx), idx < frames.count - 1 else { return idx }
         let current = frames[idx].appName
         var i = idx + 1
@@ -354,7 +354,7 @@ private struct DayCell: View {
 // =============================================================================
 
 private struct FramePreview: View {
-    let frame: ScreenpipeFrame
+    let frame: TimelineFrame
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
@@ -418,7 +418,7 @@ struct RealAppIcon: View {
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else {
-                Circle().fill(ScreenpipeColor.barColor(for: appName))
+                Circle().fill(TimelineBarColor.barColor(for: appName))
                 Text(String(appName.prefix(1)).uppercased())
                     .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
                     .foregroundStyle(.black.opacity(0.7))
@@ -441,10 +441,10 @@ struct RealAppIcon: View {
 }
 
 // =============================================================================
-// MARK: - TimelineSlider — direct port of screenpipe's TimelineSlider
+// MARK: - TimelineSlider — original code lives in My-Orphies
 // =============================================================================
 //
-// Source: My-Orphies/apps/screenpipe-app-tauri/components/rewind/timeline/timeline.tsx
+// Source: My-Orphies/apps/orphies-tauri/components/rewind/timeline/timeline.tsx
 //
 // Original React structure (the canonical version we're replicating exactly):
 //
@@ -481,7 +481,7 @@ private struct TimelineSlider: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Bigger bars + bigger icons — matches original screenpipe scale.
+            // Bigger bars + bigger icons — matches the original Orphies scale.
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .bottom, spacing: 6) {
@@ -534,12 +534,12 @@ private struct TimelineSlider: View {
 /// colored bar on the bottom. Column locks to 130pt tall so all bars share
 /// a baseline and all icons share a top line.
 private struct FrameColumn: View {
-    let frame: ScreenpipeFrame
+    let frame: TimelineFrame
     let isCurrent: Bool
     let isAppStart: Bool
 
     var body: some View {
-        // Bigger column matching original screenpipe scale:
+        // Bigger column matching the original Orphies scale:
         //   - bar width: 12pt
         //   - icon size: 32pt (overflows 12pt column ±10pt on each side)
         //   - bar heights: 100 / 56
@@ -560,7 +560,7 @@ private struct FrameColumn: View {
                 topLeadingRadius: 5, bottomLeadingRadius: 0,
                 bottomTrailingRadius: 0, topTrailingRadius: 5
             )
-            .fill(ScreenpipeColor.barColor(for: frame.appName))
+            .fill(TimelineBarColor.barColor(for: frame.appName))
             .frame(width: 12, height: barH)
             .scaleEffect(isCurrent ? 1.12 : 1.0, anchor: .bottom)
             .shadow(color: isCurrent ? .white.opacity(0.6) : .clear, radius: 5)
@@ -571,10 +571,10 @@ private struct FrameColumn: View {
 }
 
 // =============================================================================
-// MARK: - Color helper (port of screenpipe's appNameToBarColor)
+// MARK: - Color helper (port of Orphies' appNameToBarColor)
 // =============================================================================
 
-enum ScreenpipeColor {
+enum TimelineBarColor {
     /// Brighter than the React original's `hsl(hue, 35%, 65%)` because
     /// SwiftUI uses HSB (not HSL) — at the same numeric values the colors
     /// come out much darker and basically invisible on a black background.
@@ -592,7 +592,7 @@ enum ScreenpipeColor {
 // MARK: - Browser URL bar — Safari-style address bar above the screenshot
 // =============================================================================
 //
-// Visual contract (mirrors screenpipe's URL bar):
+// Visual contract (mirrors Orphies' URL bar):
 //   ┌──────────────────────────────────────────────────────────┐
 //   │  🔒  developer.apple.com/design/…/designing-for-macos  ↗  │
 //   └──────────────────────────────────────────────────────────┘
@@ -669,7 +669,7 @@ private struct EmptyState: View {
             } else if !hasDB {
                 Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 32))
                     .foregroundStyle(.white.opacity(0.3))
-                Text("No ~/.portrait/imported/screenpipe/db.sqlite found")
+                Text("No ~/.portrait/imported/timeline/db.sqlite found")
                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
             } else {
                 Image(systemName: "moon.zzz").font(.system(size: 32))

@@ -3,7 +3,7 @@ import Observation
 
 /// User-editable "shortcut" prompts surfaced as the 6 cards at the top of
 /// Home. Each template carries an optional time window — when the user
-/// clicks the card, we resolve that window into a screenpipe ContextChip
+/// clicks the card, we resolve that window into a ContextChip
 /// and send the bundled prompt to chat.
 @MainActor
 @Observable

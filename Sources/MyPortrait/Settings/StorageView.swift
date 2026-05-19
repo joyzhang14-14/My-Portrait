@@ -13,7 +13,7 @@ struct StorageSettingsView: View {
 
     private var resolvedDataDir: String {
         if !config.current.storage.dataDirectory.isEmpty { return config.current.storage.dataDirectory }
-        return NSString("~/.portrait/imported/screenpipe").expandingTildeInPath
+        return NSString("~/.portrait/imported/timeline").expandingTildeInPath
     }
 
     var body: some View {
@@ -23,7 +23,7 @@ struct StorageSettingsView: View {
                 SettingsRow(
                     "Data directory",
                     description: config.current.storage.dataDirectory.isEmpty
-                        ? "~/.portrait/imported/screenpipe (default) · changing directory starts fresh recordings"
+                        ? "~/.portrait/imported/timeline (default) · changing directory starts fresh recordings"
                         : resolvedDataDir,
                     icon: "folder"
                 ) {
@@ -165,7 +165,7 @@ struct StorageSettingsView: View {
         let cutoff = Date().addingTimeInterval(-Double(seconds))
         Task {
             let res = await Task.detached(priority: .userInitiated) {
-                ScreenpipeDB().deleteAfter(cutoff)
+                TimelineDB().deleteAfter(cutoff)
             }.value
             _ = res
             await refresh()
@@ -196,7 +196,7 @@ private struct StorageStats {
         otherBreakdown: [], months: 0
     )
 
-    /// Walks the screenpipe data dir and adds up sizes. Best-effort:
+    /// Walks the data directory and adds up sizes. Best-effort:
     /// missing dirs just contribute 0.
     nonisolated static func scan(at path: String) -> StorageStats {
         let fm = FileManager.default

@@ -10,7 +10,7 @@ import Foundation
 /// Purpose: 70% of captured frames are "user switched to messaging, then back"
 /// noise. Tier 1 squashes that at the capture layer before any LLM runs.
 enum Tier1Merger {
-    /// What we feed in — minimal columns from the screenpipe `frames` table.
+    /// What we feed in — minimal columns from the timeline `frames` table.
     struct RawEvent {
         let timestamp: Date
         let appName: String

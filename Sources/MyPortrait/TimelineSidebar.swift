@@ -31,7 +31,7 @@ struct TimelineSidebar: View {
     @State private var renamingConvId: UUID? = nil
     @State private var renameDraft: String = ""
 
-    private var focusedFrame: ScreenpipeFrame? {
+    private var focusedFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
         return state.frames[state.focusIndex]
     }

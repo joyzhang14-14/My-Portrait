@@ -86,7 +86,7 @@ final class ConfigStore {
         Task { await writeNow() }
     }
 
-    /// Cross-actor read for non-MainActor callers (ScreenpipeDB, background
+    /// Cross-actor read for non-MainActor callers (TimelineDB, background
      /// scanners). Updated by `refreshSnapshot()` on every mutate / load.
      /// Keep small — only fields needed off the main actor go here.
      nonisolated static var snapshot: ConfigSnapshot { Self.snapshotLock.withLock { Self.snapshotValue } }

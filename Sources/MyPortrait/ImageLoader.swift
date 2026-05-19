@@ -77,7 +77,7 @@ struct AsyncDiskThumbnail: View {
 }
 
 /// Extracts a single frame from an MP4 video chunk using AVAssetImageGenerator.
-/// Cached the same way as JPG thumbnails. Used because screenpipe stores most
+/// Cached the same way as JPG thumbnails. Used because the daemon that produced this DB stores most
 /// frames packed inside compact_*.mp4 instead of writing per-frame JPGs.
 struct AsyncMP4FrameThumbnail: View {
     let videoPath: String
@@ -137,7 +137,7 @@ struct AsyncMP4FrameThumbnail: View {
         generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
 
         // offset_index is the frame number; convert to seconds via fps.
-        // Default to 0.5 fps (screenpipe's typical) if fps wasn't captured.
+        // Default to 0.5 fps (the daemon's typical) if fps wasn't captured.
         let effectiveFps = fps > 0 ? fps : 0.5
         let seconds = max(Double(offsetIndex) / effectiveFps, 0)
         let time = CMTime(seconds: seconds, preferredTimescale: 600)

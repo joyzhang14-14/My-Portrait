@@ -152,7 +152,7 @@ struct ContextPickerView: View {
     }
 
     private func recentlyHeardSpeakers() -> [String] {
-        let db = ScreenpipeDB()
+        let db = TimelineDB()
         guard db.exists else { return [] }
         let items = db.audioTranscripts(around: Date(), before: 60 * 60 * 24, after: 0)
         var seen = Set<String>()
@@ -166,10 +166,10 @@ struct ContextPickerView: View {
         return ordered
     }
 
-    /// Pull the union of app names seen in the last 24h from screenpipe so
+    /// Pull the union of app names seen in the last 24h from the timeline DB so
     /// the app picker offers real options the user actually uses.
     private func recentlyActiveApps() -> [String] {
-        let db = ScreenpipeDB()
+        let db = TimelineDB()
         guard db.exists else { return [] }
         let apps = db.activeApps(around: Date(), window: 60 * 60 * 24)
         let names = apps.map { $0.appName }.filter { !$0.isEmpty }

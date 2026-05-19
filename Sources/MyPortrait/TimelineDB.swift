@@ -1,10 +1,13 @@
 import Foundation
 import SQLite3
 
-/// Read-only reader for the on-disk screenpipe SQLite database. Used to pull
-/// real frame metadata into the timeline demo without depending on screenpipe
-/// being running.
-struct ScreenpipeFrame: Identifiable, Hashable {
+/// Read-only reader for the imported timeline SQLite database
+/// (`~/.portrait/imported/timeline/db.sqlite`). The schema was inherited
+/// verbatim from the upstream screenpipe project so the historical
+/// `frames` / `video_chunks` / `audio_transcriptions` tables apply
+/// — that's the only place in the codebase where the screenpipe name
+/// is still relevant.
+struct TimelineFrame: Identifiable, Hashable {
     let id: Int64
     let timestamp: Date           // UTC
     let appName: String
@@ -38,7 +41,7 @@ struct AudioTranscriptEntry: Identifiable, Hashable {
     let speakerName: String?
 }
 
-struct ScreenpipeDB: Sendable {
+struct TimelineDB: Sendable {
     let dbPath: String
 
     init(path: String? = nil) {
@@ -46,11 +49,10 @@ struct ScreenpipeDB: Sendable {
             self.dbPath = path
             return
         }
-        // Default order — never touches the original `~/.screenpipe` after
-        // the user did the one-shot copy into `~/.portrait/imported/screenpipe`.
+        // Default order:
         //   1. User-overridden directory in Settings → Storage → Data directory
         //      (lets people relocate to an external drive).
-        //   2. Imported snapshot at ~/.portrait/imported/screenpipe/db.sqlite.
+        //   2. Imported snapshot at ~/.portrait/imported/timeline/db.sqlite.
         //   3. Same snapshot path even if it doesn't exist yet — gives callers
         //      a stable string they can show in the UI ("file not found").
         let userDir = ConfigStore.snapshot.dataDirectory
@@ -62,24 +64,25 @@ struct ScreenpipeDB: Sendable {
                 return
             }
         }
-        self.dbPath = Storage.screenpipeImportedDBPath
+        self.dbPath = Storage.timelineImportedDBPath
     }
 
-    /// Root of whichever screenpipe snapshot we resolved. Used to rewrite
-    /// the absolute `~/.screenpipe/data/...` paths stored inside the DB
-    /// so they point at the imported copy under `~/.portrait/imported/screenpipe/`.
+    /// Root of the imported snapshot. Used to rewrite the absolute
+    /// `~/.screenpipe/data/...` paths that the upstream daemon baked into
+    /// the DB rows so they instead resolve to the imported copy under
+    /// `~/.portrait/imported/timeline/`.
     private var snapshotRoot: String {
         (dbPath as NSString).deletingLastPathComponent
     }
 
-    /// Legacy daemon root — every path written into the DB by screenpipe
-    /// starts with this. We substitute it with `snapshotRoot` so JPGs /
-    /// MP4s resolve to the imported copy instead of the original folder.
+    /// The daemon root that the imported DB rows still reference. Kept
+    /// here purely for the path-rewrite below — the app never reads from
+    /// or writes to this location.
     private static let legacyRoot: String = NSString(string: "~/.screenpipe").expandingTildeInPath
 
     /// Rewrite a DB-stored absolute path so it lands inside the imported
     /// snapshot. Pass-through if the file already exists at the original
-    /// path (covers the case where someone is still running live screenpipe).
+    /// path (covers the case where someone is still running the daemon).
     private func rewritePath(_ p: String?) -> String? {
         guard let p, !p.isEmpty else { return p }
         if FileManager.default.fileExists(atPath: p) { return p }
@@ -115,7 +118,7 @@ struct ScreenpipeDB: Sendable {
 
     /// Fetch frames for a given day window. Returns ordered ascending by timestamp.
     /// `limit` caps the result to keep the UI snappy; default 800 is roughly one frame per ~2 minutes for 24h.
-    func frames(on day: Date, limit: Int = 800) -> [ScreenpipeFrame] {
+    func frames(on day: Date, limit: Int = 800) -> [TimelineFrame] {
         guard exists else { return [] }
 
         let cal = Calendar(identifier: .gregorian)
@@ -131,7 +134,7 @@ struct ScreenpipeDB: Sendable {
         }
         defer { sqlite3_close(db) }
 
-        // screenpipe stores 99%+ of frames inside MP4 video chunks rather than
+        // 99%+ of frames are stored inside MP4 video chunks rather than
         // as individual JPGs. We accept either, JOINing video_chunks to surface
         // the file path + fps so an AVAssetImageGenerator can extract the
         // specific frame on demand.
@@ -155,7 +158,7 @@ struct ScreenpipeDB: Sendable {
         sqlite3_bind_text(stmt, 2, endStr,   -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
         sqlite3_bind_int(stmt, 3, Int32(limit))
 
-        var results: [ScreenpipeFrame] = []
+        var results: [TimelineFrame] = []
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
         let fallback = ISO8601DateFormatter()
@@ -491,7 +494,7 @@ struct ScreenpipeDB: Sendable {
     }
 
     /// Speakers: mark a cluster as a hallucination so it stops surfacing.
-    /// `speakers.hallucination` must exist (screenpipe schema adds it).
+    /// `speakers.hallucination` must exist (upstream schema adds it).
     @discardableResult
     func markSpeakerHallucination(id speakerId: Int64) -> Bool {
         guard exists else { return false }

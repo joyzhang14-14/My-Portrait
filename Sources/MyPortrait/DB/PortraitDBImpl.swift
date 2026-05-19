@@ -319,7 +319,7 @@ actor PortraitDBImpl: PortraitDB {
 
     // MARK: - 读（UI 用）
 
-    func framesForDay(_ day: Date, limit: Int) async throws -> [ScreenpipeFrame] {
+    func framesForDay(_ day: Date, limit: Int) async throws -> [TimelineFrame] {
         let cal = Calendar(identifier: .gregorian)
         let dayStart = cal.startOfDay(for: day)
         let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
@@ -339,7 +339,7 @@ actor PortraitDBImpl: PortraitDB {
             LIMIT ?
             """
             let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs, limit])
-            return rows.map { row -> ScreenpipeFrame in
+            return rows.map { row -> TimelineFrame in
                 let id: Int64 = row["id"] ?? 0
                 let ts: Int64 = row["timestamp_ms"] ?? 0
                 let app: String = row["app_name"] ?? ""
@@ -355,7 +355,7 @@ actor PortraitDBImpl: PortraitDB {
                 //   seconds = offsetIndex / fps = (offset_ms * fps / 1000) / fps = offset_ms / 1000 ✓
                 let offsetIndex = Int(Double(offsetMs) * fps / 1000)
 
-                return ScreenpipeFrame(
+                return TimelineFrame(
                     id: id,
                     timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
                     appName: app,
