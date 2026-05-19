@@ -3,10 +3,6 @@ import AppKit
 import ImageIO
 import AVFoundation
 import CoreMedia
-import os
-
-// TEMP timeline-debug: shared logger with TimelineDB.
-// Logger is itself defined in TimelineDB.swift (`timelineDebugLog`).
 
 /// Loads JPEG/PNG thumbnails from disk, downsampling to a target pixel size to keep
 /// memory and scroll FPS bounded. Backed by a single shared NSCache, off-main-thread.
@@ -53,26 +49,16 @@ struct AsyncDiskThumbnail: View {
     private func load() async {
         let key = "\(path)|\(Int(targetPixelSize))"
         if let cached = ImageThumbnailCache.shared.cached(key) {
-            // TEMP timeline-debug
-            timelineDebugLog.debug("AsyncDiskThumbnail CACHE_HIT path=\(self.path, privacy: .public)")
             self.image = cached
             return
         }
-        let exists = FileManager.default.fileExists(atPath: path)
-        // TEMP timeline-debug
-        timelineDebugLog.debug("AsyncDiskThumbnail BEGIN path=\(self.path, privacy: .public) exists=\(exists) target=\(Int(self.targetPixelSize))")
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
             Self.downsample(path: path, maxPixel: pixelSize)
         }.value
         if let loaded {
-            // TEMP timeline-debug
-            timelineDebugLog.debug("AsyncDiskThumbnail OK path=\(self.path, privacy: .public) size=\(Int(loaded.size.width))x\(Int(loaded.size.height))")
             ImageThumbnailCache.shared.store(loaded, for: key)
             self.image = loaded
-        } else {
-            // TEMP timeline-debug
-            timelineDebugLog.error("AsyncDiskThumbnail FAIL path=\(self.path, privacy: .public) (downsample returned nil)")
         }
     }
 
@@ -123,14 +109,9 @@ struct AsyncMP4FrameThumbnail: View {
     private func load() async {
         let key = "mp4:\(videoPath)#\(offsetMs)|\(Int(targetPixelSize))"
         if let cached = ImageThumbnailCache.shared.cached(key) {
-            // TEMP timeline-debug
-            timelineDebugLog.debug("AsyncMP4FrameThumbnail CACHE_HIT path=\(self.videoPath, privacy: .public) ms=\(self.offsetMs)")
             self.image = cached
             return
         }
-        let exists = FileManager.default.fileExists(atPath: videoPath)
-        // TEMP timeline-debug
-        timelineDebugLog.debug("AsyncMP4FrameThumbnail BEGIN path=\(self.videoPath, privacy: .public) exists=\(exists) ms=\(self.offsetMs) fps=\(self.fps)")
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         let path = videoPath
         let ms = offsetMs
@@ -139,13 +120,8 @@ struct AsyncMP4FrameThumbnail: View {
             await Self.extract(videoPath: path, offsetMs: ms, fps: f, maxPixel: pixelSize)
         }.value
         if let loaded {
-            // TEMP timeline-debug
-            timelineDebugLog.debug("AsyncMP4FrameThumbnail OK path=\(self.videoPath, privacy: .public) ms=\(self.offsetMs) size=\(Int(loaded.size.width))x\(Int(loaded.size.height))")
             ImageThumbnailCache.shared.store(loaded, for: key)
             self.image = loaded
-        } else {
-            // TEMP timeline-debug
-            timelineDebugLog.error("AsyncMP4FrameThumbnail FAIL path=\(self.videoPath, privacy: .public) ms=\(self.offsetMs) (extract returned nil — see CMTime/AVAssetImageGenerator)")
         }
     }
 
@@ -179,8 +155,6 @@ struct AsyncMP4FrameThumbnail: View {
             let (cgImage, _) = try await generator.image(at: time)
             return NSImage(cgImage: cgImage, size: .zero)
         } catch {
-            // TEMP timeline-debug
-            timelineDebugLog.error("AVAssetImageGenerator.image FAIL path=\(videoPath, privacy: .public) seek=\(seconds)s error=\(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

@@ -1,11 +1,5 @@
 import Foundation
 import SQLite3
-import os
-
-// TEMP: timeline image-loading diagnostics. Subsystem "MyPortrait",
-// category "timeline-debug". Remove these log lines once the
-// invisible-image bug is fixed.
-nonisolated(unsafe) let timelineDebugLog = Logger(subsystem: "MyPortrait", category: "timeline-debug")
 
 /// Read/write client for the unified timeline database
 /// (`~/.portrait/portrait.sqlite`). Same DB the capture layer writes to —
@@ -22,10 +16,17 @@ struct TimelineFrame: Identifiable, Hashable {
     let appName: String
     let windowName: String
     let browserUrl: String?       // set when the active app is a browser
-    let snapshotPath: String?     // JPG path (already resolved to absolute)
-    let videoPath: String?        // MP4 path (already resolved to absolute)
+    let snapshotPath: String?     // JPG path (already resolved to absolute, file exists)
+    let videoPath: String?        // MP4 path (already resolved to absolute, file exists)
     let videoOffsetMs: Int        // offset within the MP4, in milliseconds
     let videoFps: Double          // chunk's frames-per-second
+
+    /// True if the frame can actually paint pixels. `false` means the DB
+    /// recorded the frame's metadata (OCR / app / window) but neither the
+    /// JPG snapshot nor the MP4 chunk is loadable. FramePreview should
+    /// short-circuit to a "no image" placeholder for these instead of
+    /// repeatedly retrying loaders.
+    var hasViewableMedia: Bool { snapshotPath != nil || videoPath != nil }
 }
 
 /// Distinct app + window that was active within a small time window
@@ -74,28 +75,9 @@ struct TimelineDB: Sendable {
         self.dbPath = Storage.portraitDBPath
     }
 
-    /// Root of the assets tree. Relative file paths stored in the DB
-    /// (snapshot_path / video_chunks.file_path / audio_chunks.file_path)
-    /// are resolved against this. Equal to `~/.portrait/` so the data
-    /// tree is fully relocatable.
-    private var assetsRoot: String { Storage.rootURL.path }
-
-    /// Resolve a DB-stored file path. Relative paths are joined with the
-    /// assets root; absolute paths pass through unchanged. Returns `nil` if
-    /// the resolved file doesn't exist on disk — caller (TimelineView) uses
-    /// that signal to fall back to the alternate source (e.g. extract from
-    /// the MP4 chunk when a JPG snapshot file is missing).
-    private func resolvePath(_ p: String?) -> String? {
-        guard let p, !p.isEmpty else { return nil }
-        let isAbs = (p as NSString).isAbsolutePath
-        let resolved: String = isAbs
-            ? p
-            : (assetsRoot as NSString).appendingPathComponent(p)
-        let exists = FileManager.default.fileExists(atPath: resolved)
-        // TEMP timeline-debug
-        timelineDebugLog.debug("resolvePath input=\(p, privacy: .public) abs=\(isAbs) assetsRoot=\(self.assetsRoot, privacy: .public) resolved=\(resolved, privacy: .public) exists=\(exists)")
-        return exists ? resolved : nil
-    }
+    // Path resolution is centralised in `AssetPath.resolve` — see
+    // PortraitDBImpl + Sources/MyPortrait/AssetPath.swift. TimelineDB
+    // delegates so the two read paths agree.
 
     var exists: Bool {
         FileManager.default.fileExists(atPath: dbPath)
@@ -164,8 +146,8 @@ struct TimelineDB: Sendable {
             let app = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             let win = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
             let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) }
-            let snap  = resolvePath(sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) })
-            let vpath = resolvePath(sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) })
+            let snap  = AssetPath.resolve(sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) })
+            let vpath = AssetPath.resolve(sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) })
             let offsetMs = Int(sqlite3_column_int64(stmt, 7))
             let fps = sqlite3_column_double(stmt, 8)
             results.append(.init(

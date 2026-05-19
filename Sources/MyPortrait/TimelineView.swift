@@ -353,12 +353,41 @@ private struct DayCell: View {
 // MARK: - FramePreview
 // =============================================================================
 
+/// Shown when a TimelineFrame has neither a loadable JPG snapshot nor an
+/// MP4 chunk — the metadata is in the DB but the underlying pixels never
+/// landed on disk (capture failed or files were pruned).
+private struct NoMediaPlaceholder: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+            VStack(spacing: 8) {
+                Image(systemName: "eye.slash")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(.white.opacity(0.35))
+                Text("No image saved for this frame")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+        }
+    }
+}
+
 private struct FramePreview: View {
     let frame: TimelineFrame
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
-                if let path = frame.snapshotPath {
+                if !frame.hasViewableMedia {
+                    // Recorded but no on-disk pixels (capture didn't write
+                    // a JPG and the MP4 chunk is missing). Skip the
+                    // loaders entirely so we don't churn on failure retry.
+                    NoMediaPlaceholder()
+                } else if let path = frame.snapshotPath {
                     AsyncDiskThumbnail(path: path, targetPixelSize: 1800)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
@@ -372,8 +401,6 @@ private struct FramePreview: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
-                } else {
-                    Rectangle().fill(Color.white.opacity(0.05))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

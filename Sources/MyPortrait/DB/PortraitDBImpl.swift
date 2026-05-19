@@ -97,9 +97,13 @@ actor PortraitDBImpl: PortraitDB {
             return rows.compactMap { row -> FrameForCompaction? in
                 guard let id: Int64 = row["id"],
                       let ts: Int64 = row["timestamp_ms"],
-                      let path: String = row["snapshot_path"],
+                      let rawPath: String = row["snapshot_path"],
                       let device: String = row["device_name"]
                 else { return nil }
+                // resolve to absolute. Skip the frame if the file is
+                // missing on disk — compactor can't compact a JPG we can't
+                // read, and CompactionWorker no longer has its own resolve.
+                guard let path = AssetPath.resolve(rawPath) else { return nil }
                 return FrameForCompaction(
                     id: id, timestampMs: ts, snapshotPath: path, deviceName: device
                 )
@@ -113,7 +117,7 @@ actor PortraitDBImpl: PortraitDB {
     ) async throws -> Int64 {
         let chunkRow = VideoChunkRow(
             id: nil,
-            filePath: chunk.filePath,
+            filePath: AssetPath.normalize(chunk.filePath),
             deviceName: chunk.deviceName,
             fps: chunk.fps,
             startTsMs: chunk.startTsMs,
@@ -144,7 +148,7 @@ actor PortraitDBImpl: PortraitDB {
         try await dbPool.write { db in
             var row = AudioChunkRow(
                 id: nil,
-                filePath: record.filePath,
+                filePath: AssetPath.normalize(record.filePath),
                 recordedAtMs: record.recordedAtMs,
                 durationS: record.durationS,
                 device: record.device,
@@ -189,10 +193,13 @@ actor PortraitDBImpl: PortraitDB {
                 .order(Column("recorded_at_ms"))
                 .limit(limit)
                 .fetchAll(db)
-            return rows.map { row in
-                AudioChunkRecord(
+            return rows.compactMap { row -> AudioChunkRecord? in
+                // resolve filePath; skip if file is missing (worker can't
+                // transcribe / play what isn't on disk).
+                guard let resolved = AssetPath.resolve(row.filePath) else { return nil }
+                return AudioChunkRecord(
                     id: row.id,
-                    filePath: row.filePath,
+                    filePath: resolved,
                     recordedAtMs: row.recordedAtMs,
                     durationS: row.durationS,
                     device: row.device,
@@ -292,28 +299,26 @@ actor PortraitDBImpl: PortraitDB {
 
     func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
         try await dbPool.read { db in
-            // 屏幕快照（.jpg）
-            let snapshotPaths = try String.fetchAll(db, sql: """
+            // Pull raw paths from each table, then resolve. Files that
+            // already vanished off disk are dropped — retention has
+            // nothing to delete for them.
+            let rawSnapshots = try String.fetchAll(db, sql: """
                 SELECT snapshot_path FROM frames
                 WHERE snapshot_path IS NOT NULL AND timestamp_ms < ?
                 """, arguments: [ms])
-
-            // MP4 视频块
-            let videoChunkPaths = try String.fetchAll(db, sql: """
+            let rawVideoChunks = try String.fetchAll(db, sql: """
                 SELECT file_path FROM video_chunks
                 WHERE end_ts_ms < ?
                 """, arguments: [ms])
-
-            // 音频 wav
-            let audioPaths = try String.fetchAll(db, sql: """
+            let rawAudio = try String.fetchAll(db, sql: """
                 SELECT file_path FROM audio_chunks
                 WHERE recorded_at_ms < ?
                 """, arguments: [ms])
 
             return RetentionFileList(
-                snapshotPaths: snapshotPaths,
-                videoChunkPaths: videoChunkPaths,
-                audioPaths: audioPaths
+                snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
+                videoChunkPaths: rawVideoChunks.compactMap(AssetPath.resolve),
+                audioPaths: rawAudio.compactMap(AssetPath.resolve)
             )
         }
     }
@@ -346,12 +351,15 @@ actor PortraitDBImpl: PortraitDB {
                 let app: String = row["app_name"] ?? ""
                 let win: String = row["window_name"] ?? ""
                 let url: String? = row["browser_url"]
-                let snap: String? = row["snapshot_path"]
-                let vpath: String? = row["video_path"]
+                // Paths in DB are stored relative to Storage.rootURL.
+                // AssetPath.resolve gives back absolute paths + nil-out
+                // anything whose file is missing — so callers can treat the
+                // value as "ready to load or nothing's there".
+                let snap: String? = AssetPath.resolve(row["snapshot_path"])
+                let vpath: String? = AssetPath.resolve(row["video_path"])
                 let offsetMs: Int = row["offset_ms"] ?? 0
                 let fps: Double = row["fps"] ?? 1.0
 
-                // ImageLoader 用 `seconds = offsetIndex / fps`；我们的 offset_ms / 1000
                 return TimelineFrame(
                     id: id,
                     timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
@@ -542,7 +550,7 @@ private extension FrameRow {
             browserUrl: record.browserUrl,
             focused: record.focused,
             deviceName: record.deviceName,
-            snapshotPath: record.snapshotPath,
+            snapshotPath: AssetPath.normalize(record.snapshotPath),
             videoChunkId: nil,
             offsetMs: nil,
             captureTrigger: record.captureTrigger,
@@ -564,7 +572,7 @@ private extension FrameRow {
             browserUrl: record.browserUrl,
             focused: record.focused,
             deviceName: record.deviceName,
-            snapshotPath: record.snapshotPath,
+            snapshotPath: AssetPath.normalize(record.snapshotPath),
             videoChunkId: nil,
             offsetMs: nil,
             captureTrigger: record.captureTrigger,
