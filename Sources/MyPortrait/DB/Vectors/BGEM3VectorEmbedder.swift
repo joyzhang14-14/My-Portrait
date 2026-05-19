@@ -62,6 +62,12 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         // 在主线程（Services.init 是 @MainActor）先 touch 一下 MLX，
         // 让 scheduler 在"正常"线程上初始化。
         eval(MLXArray(0))
+
+        // **MLX Metal buffer cache 防御性上限**：默认 cacheLimit = memoryLimit ≈
+        // unified RAM 的 75%（24GB Mac 上 ~18GB），是为了 LLM 推理峰值用的。
+        // 我们这里只跑 bge-m3 forward 单步，稳态 cache ~200 MB。给 512 MB 上限
+        // 留一倍 buffer，防止超长 OCR + batch padding 撞高峰时 cache 起飞。
+        MLX.GPU.set(cacheLimit: 512 * 1024 * 1024)
     }
 
     // MARK: - VectorEmbedder

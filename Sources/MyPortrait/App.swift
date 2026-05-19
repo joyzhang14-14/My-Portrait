@@ -20,6 +20,41 @@ struct MyPortraitApp: App {
         if args.contains("--embed-batch-test") {
             EmbedDumpCLI.runBatchTest()
         }
+        if args.contains("--embed-profile") {
+            EmbedDumpCLI.runProfile()
+        }
+        // 真实路径 profile：跟正常 app 一样起 Services（DB + capture / compaction /
+        // transcribe / retention 都空载跑着），但不显示窗口。
+        if args.contains("--embed-profile-from-db") {
+            print("=== bootstrap baseline ===")
+            print("RSS before Services init: \(rssEarlyMB()) MB")
+            fflush(stdout)
+            let services = Services()
+            print("RSS after Services init: \(rssEarlyMB()) MB")
+            fflush(stdout)
+            services.startManagedLifecycle()
+            print("RSS after startManagedLifecycle: \(rssEarlyMB()) MB")
+            fflush(stdout)
+            EmbedDumpCLI.runProfileFromDB(services: services)
+            // exit inside
+        }
+        if let idx = args.firstIndex(of: "--capture-profile"), idx + 1 < args.count {
+            let scenario = args[idx + 1]
+            print("=== capture profile scenario \(scenario) ===")
+            fflush(stdout)
+            let services = Services()
+            services.startManagedLifecycle()
+            EmbedDumpCLI.runCaptureProfile(services: services, scenario: scenario)
+        }
+        if args.contains("--embed-backfill") {
+            print("=== backfill mode ===")
+            print("RSS: \(rssEarlyMB()) MB")
+            fflush(stdout)
+            let services = Services()
+            services.startManagedLifecycle()
+            EmbedDumpCLI.runBackfill(services: services)
+            // exit inside
+        }
         AppKeyboard.install()
     }
 
@@ -173,4 +208,17 @@ enum AppKeyboard {
 extension Notification.Name {
     static let leftArrowPressed = Notification.Name("MyPortrait.LeftArrow")
     static let rightArrowPressed = Notification.Name("MyPortrait.RightArrow")
+}
+
+/// 启动期快速读 RSS（不依赖 EmbedDumpCLI，免循环依赖）。
+private func rssEarlyMB() -> Int {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
+    let kr = withUnsafeMutablePointer(to: &info) { ptr -> kern_return_t in
+        ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), intPtr, &count)
+        }
+    }
+    guard kr == KERN_SUCCESS else { return -1 }
+    return Int(info.resident_size) / 1024 / 1024
 }

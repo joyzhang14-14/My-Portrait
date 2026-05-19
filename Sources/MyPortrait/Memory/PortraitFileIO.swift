@@ -108,6 +108,29 @@ enum PortraitFileIO {
         )
     }
 
+    // MARK: - Access logging
+
+    /// Record a retrieval event on the file at `url`: bump access_count
+    /// (subject to the dedup window), append timestamp to access_history,
+    /// recompute weight, write back. Returns the updated file so the
+    /// caller can sync in-memory state without a second disk read.
+    ///
+    /// Caller is responsible for triggering this — e.g. MemoriesView when
+    /// the user opens a detail pane. NOT called by the system when
+    /// internal workers (ImpactScorer, Distiller, Backfill) read the file:
+    /// those are housekeeping, not "the user / agent recalled this".
+    @discardableResult
+    static func recordAccess(at url: URL,
+                             when: Date = Date()) throws -> PortraitFile {
+        var file = try read(from: url)
+        let didCount = file.recordAccess(at: when)
+        if didCount {
+            WeightCalculator.recompute(&file)
+            try write(file, to: url)
+        }
+        return file
+    }
+
     // MARK: - Write
 
     static func write(_ file: PortraitFile, to url: URL) throws {

@@ -145,7 +145,7 @@ enum MemoryBudget {
                                    kind: .outsideWindow))
             case .protected:
                 // Force final = raw in case a prior pass had scaled it.
-                let target = b.file.rawImpact
+                let target = PortraitFile.clampImpact(b.file.rawImpact)
                 let needsWrite = abs(b.file.impact - target) > 0.0001
                 plans.append(.init(url: b.url,
                                    oldImpact: b.file.impact,
@@ -157,7 +157,7 @@ enum MemoryBudget {
                                    newImpact: b.file.impact,
                                    kind: .frozen))
             case .rebalancable:
-                let newImpact = b.file.rawImpact * scale
+                let newImpact = PortraitFile.clampImpact(b.file.rawImpact * scale)
                 let kind: Plan.Kind = (scale < 1.0) ? .rebalanced : .restored
                 plans.append(.init(url: b.url,
                                    oldImpact: b.file.impact,

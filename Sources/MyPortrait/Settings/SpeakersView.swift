@@ -483,6 +483,10 @@ private struct SpeakerRow: Identifiable, Hashable {
 
 private enum SpeakerLoader {
     static func loadAll() -> [SpeakerRow] {
+        // Speaker diarisation lands in Phase 2 — no `speakers` table yet.
+        // UI shows the empty-state placeholder until that pipeline ships.
+        return []
+        // swiftlint:disable:next unreachable_code
         let db = TimelineDB()
         guard db.exists else { return [] }
         var conn: OpaquePointer?

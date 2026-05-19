@@ -23,6 +23,16 @@ import Foundation
 ///
 /// Schema matches design doc §6.1. `body` is everything after the closing `---`.
 struct PortraitFile: Equatable {
+    /// Valid range for both `impact` and `rawImpact`. All writers (LLM
+    /// scoring, budget rebalance, future JOIN micro-bumps) MUST clamp
+    /// before assigning — see `clampImpact`. Schema-level invariant.
+    static let impactRange: ClosedRange<Double> = 1.0...5.0
+
+    /// Use at every write site instead of raw assignment.
+    static func clampImpact(_ v: Double) -> Double {
+        min(impactRange.upperBound, max(impactRange.lowerBound, v))
+    }
+
     var created: Date
     var impact: Double                  // FINAL impact used by WeightCalculator.
                                         // Initially equals rawImpact; the
@@ -174,13 +184,26 @@ struct PortraitFile: Equatable {
         return max(0, Int(secs / 86_400))
     }
 
-    /// Append an access timestamp (called at retrieval time) — trims to cap.
-    mutating func recordAccess(at when: Date = Date()) {
+    /// Window inside which repeat accesses don't double-count. Stops the
+    /// user from inflating their own access_count by clicking back and
+    /// forth across a few entries in MemoriesView.
+    static let accessDedupWindow: TimeInterval = 5 * 60   // 5 minutes
+
+    /// Append an access timestamp (called at retrieval time). No-ops if the
+    /// last access landed within `accessDedupWindow` seconds — same
+    /// retrieval session shouldn't keep boosting the count.
+    @discardableResult
+    mutating func recordAccess(at when: Date = Date()) -> Bool {
+        if let last = accessHistory.last,
+           when.timeIntervalSince(last) < Self.accessDedupWindow {
+            return false
+        }
         accessCount += 1
         accessHistory.append(when)
         if accessHistory.count > Self.accessHistoryCap {
             accessHistory.removeFirst(accessHistory.count - Self.accessHistoryCap)
         }
+        return true
     }
 
     /// Append an occurrence date (Tier 1 merge / repeat detection). Idempotent

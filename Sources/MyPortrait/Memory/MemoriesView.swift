@@ -108,7 +108,7 @@ struct MemoriesView: View {
                         ForEach(entries) { entry in
                             EntryRow(entry: entry, selected: selected == entry.id)
                                 .contentShape(Rectangle())
-                                .onTapGesture { selected = entry.id }
+                                .onTapGesture { handleSelect(entry: entry) }
                             Divider().background(Color.white.opacity(0.04))
                         }
                     }
@@ -190,6 +190,35 @@ struct MemoriesView: View {
     }
 
     // MARK: - Actions
+
+    /// Single user click on a list row. Drives both selection (so the
+    /// detail pane updates) and access tracking (so the weight formula's
+    /// `log(1 + access_count)` term actually moves). We intentionally do
+    /// NOT re-sort the list after a bump — that would make the row jump
+    /// out from under the cursor. List re-sorts only on explicit ↻.
+    private func handleSelect(entry: Entry) {
+        selected = entry.id
+        let url = entry.id    // Entry.ID is the file URL
+        Task { @MainActor in
+            let updated = await Task.detached(priority: .userInitiated) {
+                return try? PortraitFileIO.recordAccess(at: url)
+            }.value
+            guard let updated,
+                  let idx = entries.firstIndex(where: { $0.id == url })
+            else { return }
+            // Replace the in-memory Entry so the detail pane shows the
+            // new access_count / weight without a full reload.
+            let prev = entries[idx]
+            entries[idx] = Entry(
+                id: prev.id,
+                title: prev.title,
+                category: prev.category,
+                scope: prev.scope,
+                file: updated,
+                modified: Date()
+            )
+        }
+    }
 
     @MainActor
     private func reload() async {
