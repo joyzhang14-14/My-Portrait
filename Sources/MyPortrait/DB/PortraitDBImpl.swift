@@ -352,10 +352,6 @@ actor PortraitDBImpl: PortraitDB {
                 let fps: Double = row["fps"] ?? 1.0
 
                 // ImageLoader 用 `seconds = offsetIndex / fps`；我们的 offset_ms / 1000
-                // 是真实秒数。反推 offsetIndex 让数学对得上：
-                //   seconds = offsetIndex / fps = (offset_ms * fps / 1000) / fps = offset_ms / 1000 ✓
-                let offsetIndex = Int(Double(offsetMs) * fps / 1000)
-
                 return TimelineFrame(
                     id: id,
                     timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
@@ -364,7 +360,7 @@ actor PortraitDBImpl: PortraitDB {
                     browserUrl: url,
                     snapshotPath: snap,
                     videoPath: vpath,
-                    videoOffsetIndex: offsetIndex,
+                    videoOffsetMs: Int(offsetMs),
                     videoFps: fps
                 )
             }

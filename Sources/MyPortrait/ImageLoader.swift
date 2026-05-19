@@ -81,8 +81,8 @@ struct AsyncDiskThumbnail: View {
 /// frames packed inside compact_*.mp4 instead of writing per-frame JPGs.
 struct AsyncMP4FrameThumbnail: View {
     let videoPath: String
-    let offsetIndex: Int
-    let fps: Double
+    let offsetMs: Int             // offset into the MP4, in milliseconds
+    let fps: Double               // chunk fps (used as fallback only)
     let targetPixelSize: CGFloat
 
     @State private var image: NSImage?
@@ -103,21 +103,21 @@ struct AsyncMP4FrameThumbnail: View {
                     )
             }
         }
-        .task(id: "\(videoPath)#\(offsetIndex)") { await load() }
+        .task(id: "\(videoPath)#\(offsetMs)") { await load() }
     }
 
     private func load() async {
-        let key = "mp4:\(videoPath)#\(offsetIndex)|\(Int(targetPixelSize))"
+        let key = "mp4:\(videoPath)#\(offsetMs)|\(Int(targetPixelSize))"
         if let cached = ImageThumbnailCache.shared.cached(key) {
             self.image = cached
             return
         }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         let path = videoPath
-        let off = offsetIndex
+        let ms = offsetMs
         let f = fps
         let loaded = await Task.detached(priority: .userInitiated) {
-            await Self.extract(videoPath: path, offsetIndex: off, fps: f, maxPixel: pixelSize)
+            await Self.extract(videoPath: path, offsetMs: ms, fps: f, maxPixel: pixelSize)
         }.value
         if let loaded {
             ImageThumbnailCache.shared.store(loaded, for: key)
@@ -125,7 +125,7 @@ struct AsyncMP4FrameThumbnail: View {
         }
     }
 
-    nonisolated static func extract(videoPath: String, offsetIndex: Int, fps: Double, maxPixel: CGFloat) async -> NSImage? {
+    nonisolated static func extract(videoPath: String, offsetMs: Int, fps: Double, maxPixel: CGFloat) async -> NSImage? {
         guard FileManager.default.fileExists(atPath: videoPath) else { return nil }
         let url = URL(fileURLWithPath: videoPath)
 
@@ -136,10 +136,19 @@ struct AsyncMP4FrameThumbnail: View {
         generator.requestedTimeToleranceAfter = .zero
         generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
 
-        // offset_index is the frame number; convert to seconds via fps.
-        // Default to 0.5 fps (the daemon's typical) if fps wasn't captured.
-        let effectiveFps = fps > 0 ? fps : 0.5
-        let seconds = max(Double(offsetIndex) / effectiveFps, 0)
+        // offset_ms is the position into the MP4. If the migration didn't
+        // record one (offsetMs == 0 for legacy chunks before timestamp_ms
+        // alignment), fall back to fps-based reasoning so the first frame
+        // still renders.
+        let seconds: Double
+        if offsetMs > 0 {
+            seconds = Double(offsetMs) / 1000.0
+        } else {
+            // No offset recorded — assume frame 0. Used by legacy MP4 chunks
+            // where each chunk corresponds to one frame.
+            let effectiveFps = fps > 0 ? fps : 0.5
+            seconds = max(0.0 / effectiveFps, 0)
+        }
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
 
         do {

@@ -366,7 +366,7 @@ private struct FramePreview: View {
                     // 99%+ of frames live here — compacted into an MP4 chunk
                     AsyncMP4FrameThumbnail(
                         videoPath: vpath,
-                        offsetIndex: frame.videoOffsetIndex,
+                        offsetMs: frame.videoOffsetMs,
                         fps: frame.videoFps,
                         targetPixelSize: 1800
                     )

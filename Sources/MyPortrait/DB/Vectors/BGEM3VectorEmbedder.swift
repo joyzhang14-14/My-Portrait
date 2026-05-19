@@ -53,6 +53,13 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
 
     init(reporter: UnimplementedReporter) {
         self.reporter = reporter
+        // **MLX scheduler 预热**：第一次访问 `Device.defaultStream()` 会触发
+        // 一串 C++ 单例 + std::thread 构造；这串构造里有 `pthread_set_qos_class_self_np`
+        // 在 macOS 26 的 cooperative thread pool 里直接 terminate（C++ 异常，
+        // 不会被 Swift 抓住，整进程崩）。
+        // 解决：在主线程（Services.init 的调用栈是 @MainActor）先 touch 一下 MLX
+        // singleton，让 scheduler 在"正常"线程上初始化。之后再从任何 QoS 调都 OK。
+        _ = MLX.Device.defaultStream()
     }
 
     // MARK: - VectorEmbedder

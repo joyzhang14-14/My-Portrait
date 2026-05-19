@@ -40,7 +40,10 @@ actor EmbeddingWorker {
         guard task == nil else { return }
         let coldNs = UInt64(coldStartDelaySeconds * 1_000_000_000)
         let pollNs = UInt64(pollIntervalSeconds * 1_000_000_000)
-        task = Task.detached(priority: .background) { [weak self] in
+        // 注意：**不能用 `.background`**。MLX-Swift 的 scheduler thread 在 `.background`
+        // QoS context 下创建会 throw → libc++abi terminate（实测 macOS 26）。
+        // `.utility` 跟 `.background` 在 CPU 让度上区别极小，但 MLX 能正常起。
+        task = Task.detached(priority: .utility) { [weak self] in
             try? await Task.sleep(nanoseconds: coldNs)
             while !Task.isCancelled {
                 await self?.runOnce()
