@@ -24,7 +24,7 @@ struct UsageSettingsView: View {
 
             HStack(spacing: 14) {
                 MetricTile(label: "Conversations",
-                           value: "\(chatStore.conversations.count)",
+                           value: "\(filteredConvs.count)",
                            icon: "bubble.left.and.bubble.right",
                            accent: .purple)
                 MetricTile(label: "Pipes configured",
@@ -45,7 +45,7 @@ struct UsageSettingsView: View {
                         .foregroundStyle(.white.opacity(0.50))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
-                    ForEach(Array(chatStore.conversations.prefix(20))) { conv in
+                    ForEach(Array(filteredConvs.prefix(20))) { conv in
                         SettingsRow(conv.title,
                                     description: usageLine(for: conv.id),
                                     icon: "text.bubble") {
@@ -53,7 +53,7 @@ struct UsageSettingsView: View {
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.85))
                         }
-                        if conv.id != chatStore.conversations.prefix(20).last?.id {
+                        if conv.id != filteredConvs.prefix(20).last?.id {
                             SettingsDivider()
                         }
                     }
@@ -85,8 +85,29 @@ struct UsageSettingsView: View {
 
     // MARK: helpers
 
+    /// Convert the selected chip into an inclusive "since" date. `nil` = all-time.
+    private var rangeStart: Date? {
+        let raw = config.current.usage.range
+        guard let r = UsageRange(rawValue: raw) else { return nil }
+        switch r {
+        case .last24h: return Date().addingTimeInterval(-24 * 3600)
+        case .last7d:  return Date().addingTimeInterval(-7 * 86_400)
+        case .last30d: return Date().addingTimeInterval(-30 * 86_400)
+        case .all:     return nil
+        }
+    }
+
+    /// Conversations whose `updatedAt` is inside the selected window.
+    private var filteredConvs: [Conversation] {
+        guard let since = rangeStart else { return chatStore.conversations }
+        return chatStore.conversations.filter { $0.updatedAt >= since }
+    }
+
     private var pipeRunTotal: Int {
-        pipeStore.pipes.reduce(0) { $0 + $1.runs.count }
+        if let since = rangeStart {
+            return pipeStore.pipes.reduce(0) { $0 + $1.runs.filter { $0.startedAt >= since }.count }
+        }
+        return pipeStore.pipes.reduce(0) { $0 + $1.runs.count }
     }
 
     private func usageLine(for convId: UUID) -> String? {
@@ -99,9 +120,11 @@ struct UsageSettingsView: View {
     private struct RunRow { let pipeName: String; let subtitle: String; let timeAgo: String; let when: Date }
 
     private func recentPipeRuns() -> [RunRow] {
+        let since = rangeStart
         var all: [RunRow] = []
         for p in pipeStore.pipes {
             for r in p.runs {
+                if let since, r.startedAt < since { continue }
                 let df = RelativeDateTimeFormatter(); df.unitsStyle = .short
                 all.append(RunRow(
                     pipeName: p.name,
