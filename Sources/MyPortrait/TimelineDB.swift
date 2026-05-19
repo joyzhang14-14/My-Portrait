@@ -1,5 +1,11 @@
 import Foundation
 import SQLite3
+import os
+
+// TEMP: timeline image-loading diagnostics. Subsystem "MyPortrait",
+// category "timeline-debug". Remove these log lines once the
+// invisible-image bug is fixed.
+nonisolated(unsafe) let timelineDebugLog = Logger(subsystem: "MyPortrait", category: "timeline-debug")
 
 /// Read/write client for the unified timeline database
 /// (`~/.portrait/portrait.sqlite`). Same DB the capture layer writes to —
@@ -81,10 +87,14 @@ struct TimelineDB: Sendable {
     /// the MP4 chunk when a JPG snapshot file is missing).
     private func resolvePath(_ p: String?) -> String? {
         guard let p, !p.isEmpty else { return nil }
-        let resolved: String = (p as NSString).isAbsolutePath
+        let isAbs = (p as NSString).isAbsolutePath
+        let resolved: String = isAbs
             ? p
             : (assetsRoot as NSString).appendingPathComponent(p)
-        return FileManager.default.fileExists(atPath: resolved) ? resolved : nil
+        let exists = FileManager.default.fileExists(atPath: resolved)
+        // TEMP timeline-debug
+        timelineDebugLog.debug("resolvePath input=\(p, privacy: .public) abs=\(isAbs) assetsRoot=\(self.assetsRoot, privacy: .public) resolved=\(resolved, privacy: .public) exists=\(exists)")
+        return exists ? resolved : nil
     }
 
     var exists: Bool {
