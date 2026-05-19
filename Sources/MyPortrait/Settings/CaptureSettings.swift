@@ -101,19 +101,15 @@ final class CaptureSettings: ObservableObject {
     init() {
         let defaults = UserDefaults.standard
 
-        // 首次启动：force-write false 覆盖 SwiftUI `@AppStorage(...) = true` 默认。
-        // 仅在 UserDefaults 完全没有该 key 时写入（已经有值的不动）。
+        // **每次启动都把 3 个采集开关重写为 false**。理由：
+        //   1. SwiftUI 视图的 `@AppStorage(...) = true` 默认会让首次读到 true。
+        //   2. 用户测试期间 toggle 过的值会持久化，下次启动莫名其妙开始录音 +
+        //      duck 其他 app 音乐（"我一 build 就有麦克风干扰"）。
+        //   3. 设计原则（user 原话）："默认关闭，方便测试"。
+        //
+        // 用户想录就在 Settings UI 里手动 toggle；退出后状态不带走。
         for key in [
             SettingsKeys.screenRecordingEnabled,
-        ] where defaults.object(forKey: key) == nil {
-            defaults.set(false, forKey: key)
-        }
-
-        // **音频 kill switch（临时）**：与 Services.audioCaptureKillSwitchOn 配套，
-        // 每次启动都把音频 / 系统音频两个 key 重写为 false —— 强制 Settings UI
-        // 也显示 OFF，避免"显示 OFF 但 UserDefaults 残留 true 仍然录"的歧义。
-        // kill switch 移除时一并删此循环。
-        for key in [
             SettingsKeys.audioRecordingEnabled,
             SettingsKeys.captureSystemAudio,
         ] {
