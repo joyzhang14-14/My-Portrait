@@ -146,13 +146,15 @@ actor AudioCaptureService {
         }
 
         var error: NSError?
-        var consumed = false
+        // AVAudioConverter 流式 API 要"喂一次再喂 nil"，要求闭包内有状态。
+        // Swift 6 把 var 捕获算 data race，所以走 class 引用一层（@unchecked Sendable）。
+        let state = InputBlockState()
         let status = converter.convert(to: output, error: &error) { _, statusPtr in
-            if consumed {
+            if state.consumed {
                 statusPtr.pointee = .endOfStream
                 return nil
             }
-            consumed = true
+            state.consumed = true
             statusPtr.pointee = .haveData
             return buffer
         }
@@ -175,6 +177,14 @@ actor AudioCaptureService {
             }
         }
     }
+}
+
+/// `AVAudioConverter.convert(to:error:withInputFrom:)` 的闭包要在内部保持
+/// "first call return buffer, then return endOfStream" 状态。Swift 6 strict
+/// concurrency 不接受 var 捕获，所以借 class 引用作 token；调用是同步的所以
+/// `@unchecked Sendable` 安全。
+final class InputBlockState: @unchecked Sendable {
+    var consumed: Bool = false
 }
 
 /// 一个录完的音频段（已写盘）。变长，由 VAD 决定起止。

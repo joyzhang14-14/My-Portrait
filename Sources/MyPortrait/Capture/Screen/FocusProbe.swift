@@ -94,7 +94,7 @@ actor FocusProbe {
             Task { await self.refresh() }
         }
 
-        await refresh()
+        refresh()
     }
 
     func stop() async {

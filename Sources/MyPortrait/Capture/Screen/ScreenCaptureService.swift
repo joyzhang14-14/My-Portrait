@@ -22,7 +22,9 @@ final class ScreenCaptureService {
 
     private var cachedDisplay: SCDisplay?
 
-    init(config: CaptureConfig, reporter: UnimplementedReporter) {
+    /// `nonisolated` 让 CaptureCoordinator (actor) 的 init 不必是 @MainActor。
+    /// 实际的 SCK 调用方法仍然在 @MainActor 上跑（绕开 macOS 26 SCK XPC bug）。
+    nonisolated init(config: CaptureConfig, reporter: UnimplementedReporter) {
         self.config = config
         self.reporter = reporter
     }

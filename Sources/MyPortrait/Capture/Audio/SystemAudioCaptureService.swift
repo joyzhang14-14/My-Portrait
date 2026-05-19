@@ -264,13 +264,15 @@ actor SystemAudioCaptureService {
         }
 
         var error: NSError?
-        var consumed = false
+        // 见 AudioCaptureService.InputBlockState 注释 —— Swift 6 strict concurrency
+        // 不接受 var 捕获，class 引用做 token。
+        let state = InputBlockState()
         let status = converter.convert(to: output, error: &error) { _, statusPtr in
-            if consumed {
+            if state.consumed {
                 statusPtr.pointee = .endOfStream
                 return nil
             }
-            consumed = true
+            state.consumed = true
             statusPtr.pointee = .haveData
             return buffer
         }

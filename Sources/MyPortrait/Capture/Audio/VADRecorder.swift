@@ -239,7 +239,7 @@ actor VADRecorder {
         }
     }
 
-    nonisolated(unsafe) private static let tsFormatter: DateFormatter = {
+    private static let tsFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")

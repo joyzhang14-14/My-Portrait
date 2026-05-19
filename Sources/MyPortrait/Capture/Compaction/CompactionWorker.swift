@@ -200,7 +200,7 @@ actor CompactionWorker {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    nonisolated(unsafe) private static let dayFormatter: DateFormatter = {
+    private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
