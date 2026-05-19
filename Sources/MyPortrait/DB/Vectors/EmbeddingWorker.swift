@@ -51,9 +51,10 @@ actor EmbeddingWorker {
 
     /// 手动跑一轮（调试 / 测试用）。
     func runOnce() async {
+        let model = embedder.modelIdentifier
         let ids: [Int64]
         do {
-            ids = try await db.framesNeedingEmbedding(limit: batchSize)
+            ids = try await db.framesNeedingEmbedding(model: model, limit: batchSize)
         } catch {
             logger.warning("framesNeedingEmbedding failed: \(String(describing: error), privacy: .public)")
             return
@@ -83,7 +84,7 @@ actor EmbeddingWorker {
                 return
             }
             do {
-                try await db.setFrameEmbedding(frameId: meta.id, vector: vector)
+                try await db.setFrameEmbedding(frameId: meta.id, vector: vector, model: model)
             } catch {
                 logger.warning("setFrameEmbedding(\(meta.id)) failed: \(String(describing: error), privacy: .public)")
                 // 单行失败继续下一个，不放弃整轮（DB 错可能是临时的）。

@@ -10,6 +10,8 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.18.0"),
         // sentencepiece tokenizer，HuggingFace 出的 Swift 包
         .package(url: "https://github.com/huggingface/swift-transformers.git", from: "0.1.13"),
+        // bge-m3 / XLM-RoBERTa 真推理（MLX-Swift 端口；用 mlx-community/bge-m3-mlx-fp16）
+        .package(url: "https://github.com/mzbac/mlx.embeddings.git", from: "0.1.0"),
         // TOML 1.0 codec for the user-editable ~/.myportrait/config.toml
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0"),
     ],
@@ -23,6 +25,7 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "Transformers", package: "swift-transformers"),
+                .product(name: "mlx_embeddings", package: "mlx.embeddings"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
             ],
             path: "Sources/MyPortrait",

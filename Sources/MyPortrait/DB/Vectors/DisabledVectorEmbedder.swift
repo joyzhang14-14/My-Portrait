@@ -12,6 +12,9 @@ import Foundation
 /// 路由 Apple Intelligence 的 XPC，没 entitlement → `os_eligibility` lookup
 /// fail → libdispatch queue assert → crash。换 stub 临时绕开。
 struct DisabledVectorEmbedder: VectorEmbedder {
+    let dimensions: Int = 0
+    let modelIdentifier: String = "disabled-v1"
+
     func embed(_ text: String) async throws -> [Float] {
         throw DisabledEmbedderError.disabled
     }

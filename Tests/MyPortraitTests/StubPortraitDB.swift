@@ -67,7 +67,7 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.applyRetention")
     }
 
-    func framesForDay(_ day: Date, limit: Int) async throws -> [ScreenpipeFrame] {
+    func framesForDay(_ day: Date, limit: Int) async throws -> [TimelineFrame] {
         throw reporter.notImplemented("StubPortraitDB.framesForDay")
     }
 
@@ -83,15 +83,15 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.audioTranscriptsAround")
     }
 
-    func framesNeedingEmbedding(limit: Int) async throws -> [Int64] {
+    func framesNeedingEmbedding(model: String, limit: Int) async throws -> [Int64] {
         throw reporter.notImplemented("StubPortraitDB.framesNeedingEmbedding")
     }
 
-    func setFrameEmbedding(frameId: Int64, vector: [Float]) async throws {
+    func setFrameEmbedding(frameId: Int64, vector: [Float], model: String) async throws {
         throw reporter.notImplemented("StubPortraitDB.setFrameEmbedding")
     }
 
-    func allFrameEmbeddings(limit: Int) async throws -> [(id: Int64, vector: [Float])] {
+    func allFrameEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])] {
         throw reporter.notImplemented("StubPortraitDB.allFrameEmbeddings")
     }
 

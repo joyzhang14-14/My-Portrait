@@ -72,7 +72,7 @@ final class NLEmbeddingEndToEndTests: XCTestCase {
             let vec = try await embedder.embed(text)
             var norm = vec
             VectorMath.l2Normalize(&norm)
-            try await db.setFrameEmbedding(frameId: id, vector: norm)
+            try await db.setFrameEmbedding(frameId: id, vector: norm, model: embedder.modelIdentifier)
         }
 
         let fts = FTSSearchEngine(dbPool: db.dbPool)

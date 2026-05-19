@@ -67,15 +67,11 @@ final class Services {
         let manager = BGEM3ModelManager()
         self.modelManager = manager
 
-        // **当前激活的 embedder**：临时用"永远 throw"的 stub —— 详见
-        // startManagedLifecycle 里 EmbeddingWorker 那段的解释（NLEmbedding
-        // 在 macOS 26 上撞 Apple Intelligence entitlement，crash 一片）。
-        // HybridSearchEngine 看到 throw 自动降级 FTS-only，UI 搜索仍正常。
-        //
-        // 等下面任一条件满足就把这行换回：
-        //   - bge-m3 MLX 推理上线 → `BGEM3VectorEmbedder(modelManager:, reporter:)`
-        //   - 拿到 Apple Intelligence entitlement → `NLEmbeddingVectorEmbedder()`
-        let activeEmbedder: any VectorEmbedder = DisabledVectorEmbedder()
+        // **当前激活的 embedder**：bge-m3 真推理（MLX，完全本地，不走系统 XPC）。
+        // 首次启动会下 ~1.13 GB 模型到 HF cache（~/Library/Caches/huggingface/），
+        // 之后直接读 cache。embedder 加载/推理失败时 HybridSearchEngine 自动降级
+        // FTS-only —— UI 搜索仍工作。
+        let activeEmbedder: any VectorEmbedder = BGEM3VectorEmbedder(reporter: reporter)
         self.embedder = activeEmbedder
 
         // Hybrid：FTS + 向量 + RRF。embedder 抛错（NLEmbedding 对完全非英语
@@ -114,7 +110,7 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
-        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, modelManager, embeddingWorker, logger] in
+        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, embeddingWorker, logger] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
             do {
@@ -130,32 +126,10 @@ final class Services {
             await transcriber.start()
             await retentionWorker.start()
 
-            // EmbeddingWorker **暂时不启**。原因：
-            // macOS 26 上 `NLEmbedding.sentenceEmbedding(for:)` 内部走 Apple
-            // Intelligence 的 XPC 栈，要求 `os_eligibility` entitlement
-            // 我们 SPM 打的 app 没有 → 报 "AFIsDeviceGreymatterEligible
-            // Missing entitlements" 并紧接着 `_dispatch_assert_queue_fail`。
-            // 用户 log（2026-05-19）：
-            //   EmbeddingWorker started → bge-m3 config ready →
-            //   "Missing entitlements for os_eligibility lookup" → crash on
-            //   Thread 20 in libdispatch.
-            //
-            // 走出去的两条路（任选）：
-            //   A. 给 .app bundle 加 Apple Intelligence entitlement（要 Apple
-            //      Developer ID + 申请 entitlement profile，复杂）
-            //   B. 上 bge-m3 真推理（MLX，本地，不走系统 XPC），跟 Phase 4
-            //      原始计划一致
-            //
-            // 在那之前 HybridSearchEngine 自动降级 FTS-only —— 字面搜索仍正常。
-            // await embeddingWorker.start()  ← 暂停
-
-            // 后台下 bge-m3 模型（~2.5 GB），不阻塞任何东西。
-            // Phase 4 上线推理后这个 await 才有意义；当前只是把文件下到本地。
-            do {
-                try await modelManager.ensureDownloaded()
-            } catch {
-                logger.warning("bge-m3 model download failed (will retry next launch): \(String(describing: error), privacy: .public)")
-            }
+            // EmbeddingWorker 启。bge-m3 推理走 MLX 本地，不再撞 Apple Intelligence
+            // XPC 的 entitlement 坑。首次启动 BGEM3VectorEmbedder.loadedContainer
+            // 会下 ~1.13 GB 模型到 HF cache，之后秒级加载。
+            await embeddingWorker.start()
         }
 
         // 屏幕采集订阅。effective = enabled && !paused。

@@ -88,14 +88,18 @@ protocol PortraitDB: Sendable {
 
     /// 拉一批还没 embed 的 frame id（按时间倒序，新数据优先 embed）。
     /// EmbeddingWorker 后台调，一次几百个一批避开内存峰值。
-    func framesNeedingEmbedding(limit: Int) async throws -> [Int64]
+    /// `model` 是当前激活 embedder 的 `modelIdentifier`；
+    /// 返回 `embedding IS NULL OR embedding_model != model` 的行 —— 换模型时旧向量自动列入"待重算"。
+    func framesNeedingEmbedding(model: String, limit: Int) async throws -> [Int64]
 
     /// 写 frame 的向量。`vector` 应该已 L2 归一化（cosine == dot 的前提）。
-    func setFrameEmbedding(frameId: Int64, vector: [Float]) async throws
+    /// 同时把 `model` 写到 `embedding_model` 列，标记这条向量是哪个 embedder 生成的。
+    func setFrameEmbedding(frameId: Int64, vector: [Float], model: String) async throws
 
     /// 拉所有已 embed 的 (id, vector)。HybridSearchEngine 做 brute-force cosine 用。
     /// 数据量大时考虑分页或 sample；7000 行 × 1024 维 ≈ 28 MB，内存可承受。
-    func allFrameEmbeddings(limit: Int) async throws -> [(id: Int64, vector: [Float])]
+    /// `model` 过滤：只返回 `embedding_model = model` 的行，跨模型向量永远不混在一起算 cosine。
+    func allFrameEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])]
 
     /// 按 id 拉一批 frame 的元数据（HybridSearchEngine 拿到 RRF 结果后获取
     /// 显示字段）。返回顺序与 ids 顺序无关；调用方按 id 自己 reorder。

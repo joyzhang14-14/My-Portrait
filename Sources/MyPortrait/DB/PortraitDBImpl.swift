@@ -215,38 +215,39 @@ actor PortraitDBImpl: PortraitDB {
 
     // MARK: - 向量（Phase 4）
 
-    func framesNeedingEmbedding(limit: Int) async throws -> [Int64] {
+    func framesNeedingEmbedding(model: String, limit: Int) async throws -> [Int64] {
         try await dbPool.read { db in
-            // Uses the partial index `idx_frames_embedding_null` for O(log n) lookup.
-            // 优先最新的帧（新数据用户更可能搜）。
+            // `embedding IS NULL` 走 partial index `idx_frames_embedding_null` —— 冷数据零成本。
+            // `embedding_model != model` 走全表扫但只在换模型那阵子触发，
+            // 跑完一遍历史数据后所有行 model 都对齐，后续轮次几乎只命中第一支条件。
             try Int64.fetchAll(db, sql: """
                 SELECT id FROM frames
-                WHERE embedding IS NULL
+                WHERE (embedding IS NULL OR embedding_model IS NOT ?)
                   AND full_text IS NOT NULL AND length(full_text) > 4
                 ORDER BY timestamp_ms DESC
                 LIMIT ?
-                """, arguments: [limit])
+                """, arguments: [model, limit])
         }
     }
 
-    func setFrameEmbedding(frameId: Int64, vector: [Float]) async throws {
+    func setFrameEmbedding(frameId: Int64, vector: [Float], model: String) async throws {
         let blob = Data(floats: vector)
         try await dbPool.write { db in
             try db.execute(
-                sql: "UPDATE frames SET embedding = ? WHERE id = ?",
-                arguments: [blob, frameId]
+                sql: "UPDATE frames SET embedding = ?, embedding_model = ? WHERE id = ?",
+                arguments: [blob, model, frameId]
             )
         }
     }
 
-    func allFrameEmbeddings(limit: Int) async throws -> [(id: Int64, vector: [Float])] {
+    func allFrameEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])] {
         try await dbPool.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT id, embedding FROM frames
-                WHERE embedding IS NOT NULL
+                WHERE embedding IS NOT NULL AND embedding_model = ?
                 ORDER BY timestamp_ms DESC
                 LIMIT ?
-                """, arguments: [limit])
+                """, arguments: [model, limit])
             return rows.compactMap { row -> (Int64, [Float])? in
                 guard let id: Int64 = row["id"],
                       let blob: Data = row["embedding"],

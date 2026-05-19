@@ -158,6 +158,18 @@ enum DBSchema {
                 """)
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v5 — 向量来源标识（embedding_model 列）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 换 embedder（如 NLEmbedding-512 → bge-m3-1024）时，旧向量维度不同，
+        // cosine 没法跟新向量比。这一列让 EmbeddingWorker 看出"这行的向量是哪
+        // 个模型生成的"，model 不匹配就重算。SearchEngine 同理 filter。
+        m.registerMigration("v5_embedding_model") { db in
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN embedding_model TEXT")
+            try db.execute(sql: "ALTER TABLE audio_transcriptions ADD COLUMN embedding_model TEXT")
+        }
+
         return m
     }
 }

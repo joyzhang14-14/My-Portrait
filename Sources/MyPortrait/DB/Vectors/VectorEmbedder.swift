@@ -1,28 +1,32 @@
 import Foundation
 
-/// 文本 → 向量 的抽象。
+/// 文本 → 向量 的抽象。HybridSearchEngine 用 cosine 相似度做语义召回。
 ///
-/// **当前状态**：协议在位 + bge-m3 模型下载逻辑在位（`BGEM3ModelManager`），
-/// 但**推理还没接通** —— Phase 4 (Hybrid + RRF) 实现时再做。
-///
-/// Phase 4 实现方向（待选）：
-/// 1. Apple MLX-Swift（推荐）：mlx-community/bge-m3 已转 MLX 格式，纯 Swift API
-/// 2. CoreML：bge-m3 → coremltools 转换 → Core ML 跑
-/// 3. ONNX Runtime：onnxruntime-swift 库
-///
-/// 向量维度：bge-m3 = 1024。HybridSearchEngine 会算 cosine 相似度做语义召回。
+/// 实现按需要换：
+///   - `BGEM3VectorEmbedder` — bge-m3 真推理，跨语言、1024 维（**当前激活路径**）
+///   - `NLEmbeddingVectorEmbedder` — Apple NLEmbedding（注：macOS 26 Apple
+///     Intelligence entitlement 缺失会 crash，目前禁用）
+///   - `DisabledVectorEmbedder` — 永远 throw，FTS-only 降级路径
 protocol VectorEmbedder: Sendable {
 
-    /// 把文本编码成 dense 向量。
-    /// `bge-m3` 输出 1024 维 Float32。
+    /// 向量维度。HybridSearchEngine 在做 brute-force cosine 时要求 query 向量
+    /// 和 DB 内向量同维，否则崩。换模型 = 换 dim 时所有历史向量都要重算。
+    var dimensions: Int { get }
+
+    /// 模型标识（含版本号）。写入 DB 时打到 `frames.embedding_model` 列，
+    /// 用于"换模型时让 EmbeddingWorker 知道哪些行该重算"。
+    /// 例：`"bge-m3-v1"`, `"nl-en-512-v1"`。
+    var modelIdentifier: String { get }
+
+    /// 单条 embed。L2 归一化后输出（HybridSearchEngine 期望已归一）。
     func embed(_ text: String) async throws -> [Float]
 
-    /// 批量版（同样 1 调用 ≤ 32 段，模型 batch 上限）。Phase 4 实现。
+    /// 批量 embed（实现优先级最高 —— 7000 条历史回灌时 batch=32 比逐条快 ~10×）。
     func embedBatch(_ texts: [String]) async throws -> [[Float]]
 }
 
 extension VectorEmbedder {
-    /// 默认实现：批量退化为循环单个。Phase 4 可由具体 embedder 复写以走 model batch path。
+    /// 默认实现：批量退化为循环单个。具体 embedder **应当**复写以走真正的 batch path。
     func embedBatch(_ texts: [String]) async throws -> [[Float]] {
         var results: [[Float]] = []
         results.reserveCapacity(texts.count)

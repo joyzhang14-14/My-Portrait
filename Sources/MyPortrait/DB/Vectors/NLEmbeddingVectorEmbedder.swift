@@ -27,12 +27,23 @@ import os.log
 ///   - Apple 不提供多语言对齐的统一模型；要真正 cross-lingual 需要 bge-m3。
 public actor NLEmbeddingVectorEmbedder: VectorEmbedder {
 
+    nonisolated let dimensions: Int
+    nonisolated let modelIdentifier: String
+
     private let logger = Logger(subsystem: "com.myportrait.db", category: "embed")
     private let language: NLLanguage
     private var cached: NLEmbedding?
 
     public init(language: NLLanguage = .english) {
         self.language = language
+        // 注：实际维度从 NLEmbedding.dimension 拿；这里 hardcode 英文 512 维。
+        // 换语言时（中文 300、法文 ?）这个值也要换。
+        switch language {
+        case .english: self.dimensions = 512
+        case .simplifiedChinese: self.dimensions = 300
+        default: self.dimensions = 512
+        }
+        self.modelIdentifier = "nl-\(language.rawValue)-v1"
     }
 
     public func embed(_ text: String) async throws -> [Float] {

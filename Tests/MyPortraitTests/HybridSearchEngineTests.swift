@@ -107,6 +107,8 @@ final class HybridSearchEngineTests: XCTestCase {
 
 /// 测试用 embedder：永远 throw，模拟 Phase 4 推理未接通。
 private struct AlwaysFailingEmbedder: VectorEmbedder {
+    let dimensions: Int = 1024
+    let modelIdentifier: String = "test-failing-v1"
     func embed(_ text: String) async throws -> [Float] {
         throw NSError(domain: "Test", code: -1, userInfo: [
             NSLocalizedDescriptionKey: "stub"

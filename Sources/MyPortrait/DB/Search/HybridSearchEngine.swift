@@ -100,7 +100,7 @@ final class HybridSearchEngine: SearchEngine, @unchecked Sendable {
     // MARK: - 私有
 
     private func semanticTopFrames(queryVector: [Float]) async throws -> [Int64] {
-        let pairs = try await db.allFrameEmbeddings(limit: maxEmbeddingsScan)
+        let pairs = try await db.allFrameEmbeddings(model: embedder.modelIdentifier, limit: maxEmbeddingsScan)
         if pairs.isEmpty { return [] }
 
         // Cosine = dot（前提：bge-m3 输出已 L2 归一化；EmbeddingWorker 也会再保险归一）
