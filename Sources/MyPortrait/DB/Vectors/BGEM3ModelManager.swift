@@ -24,17 +24,23 @@ actor BGEM3ModelManager {
     /// HuggingFace 仓库根。`resolve/main/` 后接文件名。
     private static let repoBase = "https://huggingface.co/BAAI/bge-m3/resolve/main"
 
-    /// 必需文件列表（按依赖顺序）。
-    /// 用 safetensors（fp16 ~ 1.13 GB）—— PyTorch bin 我们不要。
+    /// 启动期必下的文件（**只下 tokenizer + 配置**，约 ~17 MB 总共）。
+    /// 重 ~2.27 GB 的权重文件 `pytorch_model.bin` **不在这里**——
+    /// 等 BGEM3VectorEmbedder.embed 的 MLX 推理实现时按需调 `ensureWeightsDownloaded()`。
+    ///
+    /// 之前列了 `model.safetensors` 是错的：BAAI/bge-m3 实际只发布
+    /// `pytorch_model.bin`，没有 safetensors 版本（用户日志: 404）。
     private static let requiredFiles: [String] = [
         "config.json",
         "tokenizer.json",
         "tokenizer_config.json",
         "sentencepiece.bpe.model",
         "special_tokens_map.json",
-        "model.safetensors",
         "1_Pooling/config.json",
     ]
+
+    /// 真权重文件（~2.27 GB），仅当 MLX 推理实际要跑时才下。
+    private static let weightsFile = "pytorch_model.bin"
 
     init(modelDir: URL = Storage.modelsDir.appendingPathComponent("bge-m3", isDirectory: true)) {
         self.modelDir = modelDir
@@ -59,7 +65,8 @@ actor BGEM3ModelManager {
         modelDir.appendingPathComponent(relative)
     }
 
-    /// 缺啥下啥。已经在的不动。
+    /// **轻量下载**：只拉 tokenizer + config 文件（~17 MB 共）。
+    /// 启动时跑这个就够——没有权重，无法推理，但 NLEmbedding 后端不需要。
     /// 抛错：某个文件下载失败 / 写盘失败。
     func ensureDownloaded() async throws {
         try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
@@ -71,7 +78,24 @@ actor BGEM3ModelManager {
             }
             try await downloadFile(relative: rel, to: dest)
         }
-        logger.info("bge-m3 model ready at \(self.modelDir.path, privacy: .public)")
+        logger.info("bge-m3 config + tokenizer ready at \(self.modelDir.path, privacy: .public) (~17 MB; weights not downloaded yet)")
+    }
+
+    /// **重量下载**：~2.27 GB 的 pytorch_model.bin。MLX 推理实现时第一次调用前
+    /// 主动 `await ensureWeightsDownloaded()`，UI 可显示进度条。
+    func ensureWeightsDownloaded() async throws {
+        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
+        let dest = modelDir.appendingPathComponent(Self.weightsFile)
+        guard !FileManager.default.fileExists(atPath: dest.path) else { return }
+        logger.info("downloading bge-m3 weights (~2.27 GB) — this may take a while...")
+        try await downloadFile(relative: Self.weightsFile, to: dest)
+    }
+
+    /// 检查是否权重文件就位（MLX 推理调用前的 fast path）。
+    var hasWeights: Bool {
+        FileManager.default.fileExists(
+            atPath: modelDir.appendingPathComponent(Self.weightsFile).path
+        )
     }
 
     // MARK: - 私有
