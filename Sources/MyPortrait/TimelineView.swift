@@ -116,6 +116,18 @@ struct TimelineView: View {
                 : min(state.frames.count - 1, state.focusIndex + 1)
         }
         .task(id: state.selectedDay) { reload() }
+        // Background workers (CompactionWorker, RetentionWorker, …) mutate
+        // the frames table and delete JPGs they've embedded into MP4s.
+        // If the change touches the day we're currently showing, refetch
+        // so the in-memory `state.frames` doesn't keep pointing at dead
+        // snapshot paths.
+        .onReceive(NotificationCenter.default.publisher(for: .timelineFramesChanged)) { note in
+            guard let changedDay = note.object as? Date else { reload(); return }
+            let cal = Calendar(identifier: .gregorian)
+            if cal.isDate(changedDay, inSameDayAs: state.selectedDay) {
+                reload()
+            }
+        }
     }
 
     static func previousAppBoundary(in frames: [TimelineFrame], from idx: Int) -> Int {

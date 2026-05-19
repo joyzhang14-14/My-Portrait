@@ -191,6 +191,12 @@ actor CompactionWorker {
         for frame in frames {
             try? FileManager.default.removeItem(atPath: frame.snapshotPath)
         }
+
+        // Tell any timeline view holding a stale `TimelineState.frames`
+        // array (with snapshotPath still pointing at JPGs we just deleted)
+        // to refetch from DB.
+        let affectedDay = Date(timeIntervalSince1970: TimeInterval(firstFrame.timestampMs) / 1000)
+        NotificationCenter.default.post(name: .timelineFramesChanged, object: affectedDay)
     }
 
     /// 读 JPG → CGImage。失败返回 nil。

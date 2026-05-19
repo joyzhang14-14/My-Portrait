@@ -12,6 +12,14 @@ import Foundation
 ///   - `nil` (file missing or input was empty)
 ///
 /// Callers must never load raw strings off the DB without going through here.
+extension Notification.Name {
+    /// Posted by background workers (CompactionWorker, RetentionWorker, …)
+    /// after they mutate the frames table or move JPG / MP4 files. `object`
+    /// is a `Date` indicating the day the change touched, so a TimelineView
+    /// can decide whether the change affects what it's currently showing.
+    static let timelineFramesChanged = Notification.Name("MyPortrait.TimelineFramesChanged")
+}
+
 enum AssetPath {
     /// Resolve a DB-stored file path.
     /// - Returns: absolute path if file exists, `nil` otherwise.

@@ -52,6 +52,11 @@ struct AsyncDiskThumbnail: View {
             self.image = cached
             return
         }
+        // Race-defensive: the file may have existed when the TimelineFrame
+        // was built but been deleted since (e.g. CompactionWorker embeds
+        // it into an MP4 chunk and rm's the JPG). Skip silently to avoid
+        // ImageIO logging "*** ERROR: can't open" to stderr.
+        guard FileManager.default.fileExists(atPath: path) else { return }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
             Self.downsample(path: path, maxPixel: pixelSize)
