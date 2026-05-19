@@ -44,6 +44,7 @@ actor CaptureCoordinator {
     nonisolated let frameEvents: AsyncStream<FrameEvent>
     private let _continuation: AsyncStream<FrameEvent>.Continuation
 
+    @MainActor
     init(db: PortraitDB, reporter: UnimplementedReporter, config: CaptureConfig = .default) {
         self.db = db
         self.reporter = reporter

@@ -25,6 +25,12 @@ enum WeightCalculator {
         var minWeight: Double = 0
 
         static let `default` = Params()
+
+        @MainActor
+        static var fromConfig: Params {
+            let m = ConfigStore.shared.current.memory
+            return Params(alpha: m.alpha, minWeight: m.minWeight)
+        }
     }
 
     /// Compute weight for a single PortraitFile. Reference clock can be

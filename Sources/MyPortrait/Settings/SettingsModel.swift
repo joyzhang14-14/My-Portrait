@@ -5,6 +5,7 @@ import SwiftUI
 /// list and the main pane router.
 enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
     case display, general, aiModels, recording, notifications
+    case memory
     case usage, privacy, storage, speakers
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .aiModels:      return "AI models"
         case .recording:     return "Recording"
         case .notifications: return "Notifications"
+        case .memory:        return "Memory"
         case .usage:         return "Usage"
         case .privacy:       return "Privacy"
         case .storage:       return "Storage"
@@ -29,6 +31,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .aiModels:      return "brain"
         case .recording:     return "record.circle"
         case .notifications: return "bell"
+        case .memory:        return "sparkles"
         case .usage:         return "chart.bar"
         case .privacy:       return "hand.raised"
         case .storage:       return "externaldrive"
@@ -36,11 +39,16 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    enum Group: String, Hashable { case app = "APP", dataPrivacy = "DATA & PRIVACY" }
+    enum Group: String, Hashable {
+        case app         = "APP"
+        case memory      = "MEMORY"
+        case dataPrivacy = "DATA & PRIVACY"
+    }
 
     var group: Group {
         switch self {
         case .display, .general, .aiModels, .recording, .notifications: return .app
+        case .memory:                                                   return .memory
         case .usage, .privacy, .storage, .speakers:                     return .dataPrivacy
         }
     }

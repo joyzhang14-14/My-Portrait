@@ -62,6 +62,37 @@ final class ConfigStore {
         scheduleWrite()
     }
 
+    // MARK: - Section passthroughs (so @Bindable works)
+    //
+    // @Bindable needs stored-property-shaped access, but our underlying truth
+    // is a single `current: MyPortraitConfig`. These computed get/set
+    // properties bridge the two: SwiftUI sees them as tracked properties
+    // (because `current` is @Observable-tracked), and write-through funnels
+    // back into mutate() for debounced persistence.
+    var display:       DisplayConfig       { get { current.display }       set { mutate { $0.display = newValue } } }
+    var general:       GeneralConfig       { get { current.general }       set { mutate { $0.general = newValue } } }
+    var aiModels:      AIModelsConfig      { get { current.aiModels }      set { mutate { $0.aiModels = newValue } } }
+    var recording:     RecordingConfig     { get { current.recording }     set { mutate { $0.recording = newValue } } }
+    var notifications: NotificationsConfig { get { current.notifications } set { mutate { $0.notifications = newValue } } }
+    var memory:        MemoryConfig        { get { current.memory }        set { mutate { $0.memory = newValue } } }
+    var usage:         UsageConfig         { get { current.usage }         set { mutate { $0.usage = newValue } } }
+    var privacy:       PrivacyConfig       { get { current.privacy }       set { mutate { $0.privacy = newValue } } }
+    var storage:       StorageConfig       { get { current.storage }       set { mutate { $0.storage = newValue } } }
+    var chat:          ChatConfig          { get { current.chat }          set { mutate { $0.chat = newValue } } }
+
+    /// Force-flush any pending debounced write immediately (caller awaits it).
+    func saveNow() {
+        Task { await writeNow() }
+    }
+
+    /// Static for callers that want the on-disk URL without going through
+    /// `.shared` first (e.g. footer of the Memory page).
+    static var path: URL {
+        FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent(".myportrait/config.toml")
+    }
+
     /// Convenience two-way Binding for any value in the config tree.
     /// Usage:  Toggle("", isOn: ConfigStore.shared.binding(\.display.chatAlwaysOnTop))
     func binding<V>(_ kp: WritableKeyPath<MyPortraitConfig, V>) -> Binding<V> {

@@ -43,6 +43,18 @@ enum MemoryBudget {
         var windowDays: Int = 7
 
         static let `default` = Params()
+
+        /// Pulled from the live ConfigStore, which the Settings UI mutates.
+        @MainActor
+        static var fromConfig: Params {
+            let m = ConfigStore.shared.current.memory
+            return Params(
+                weeklyBudget: m.weeklyBudget,
+                peakProtection: m.peakProtection,
+                maxRebalances: m.maxRebalances,
+                windowDays: m.windowDays
+            )
+        }
     }
 
     struct Plan {
@@ -187,8 +199,9 @@ enum MemoryBudget {
 /// Scan events on disk, rebalance the week, write changes back, recompute
 /// weights, and append a journal entry. Returns a one-line status string
 /// suitable for the UI.
+@MainActor
 func MemoryBudget_applyToDisk(
-    params: MemoryBudget.Params = .default,
+    params: MemoryBudget.Params = .fromConfig,
     now: Date = Date()
 ) -> String {
     let fm = FileManager.default

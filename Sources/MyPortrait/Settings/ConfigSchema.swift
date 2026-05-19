@@ -23,6 +23,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var aiModels:      AIModelsConfig      = .init()
     var recording:     RecordingConfig     = .init()
     var notifications: NotificationsConfig = .init()
+    var memory:        MemoryConfig        = .init()
     var usage:         UsageConfig         = .init()
     var privacy:       PrivacyConfig       = .init()
     var storage:       StorageConfig       = .init()
@@ -33,7 +34,7 @@ struct MyPortraitConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case display, general, aiModels = "ai_models", recording, notifications
-        case usage, privacy, storage, chat
+        case memory, usage, privacy, storage, chat
     }
 
     init(from decoder: Decoder) throws {
@@ -45,10 +46,64 @@ struct MyPortraitConfig: Codable, Equatable {
         aiModels      = c.dflt(AIModelsConfig.self, .aiModels, aiModels)
         recording     = c.dflt(RecordingConfig.self, .recording, recording)
         notifications = c.dflt(NotificationsConfig.self, .notifications, notifications)
+        memory        = c.dflt(MemoryConfig.self, .memory, memory)
         usage         = c.dflt(UsageConfig.self, .usage, usage)
         privacy       = c.dflt(PrivacyConfig.self, .privacy, privacy)
         storage       = c.dflt(StorageConfig.self, .storage, storage)
         chat          = c.dflt(ChatConfig.self, .chat, chat)
+    }
+}
+
+// MARK: - Memory
+
+struct MemoryConfig: Codable, Equatable {
+    // Capture-layer indexer (existing).
+    var indexerEnabled:        Bool   = true
+    var indexIntervalMinutes:  Int    = 15
+
+    // MemoryBudget — sleep-consolidation weekly pass.
+    var weeklyBudget:          Double = 50
+    var peakProtection:        Double = 4.5
+    var maxRebalances:         Int    = 5
+    var windowDays:            Int    = 7
+
+    // WeightCalculator — power-law decay + log access boost.
+    var alpha:                 Double = 0.3
+    var minWeight:             Double = 0
+
+    // Archiver — programmatic, no LLM.
+    var archiveMaxImpact:      Double = 2
+    var archiveMaxWeight:      Double = 0.05
+    var archiveMinDaysIdle:    Int    = 90
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case indexerEnabled       = "indexer_enabled"
+        case indexIntervalMinutes = "index_interval_minutes"
+        case weeklyBudget         = "weekly_budget"
+        case peakProtection       = "peak_protection"
+        case maxRebalances        = "max_rebalances"
+        case windowDays           = "window_days"
+        case alpha
+        case minWeight            = "min_weight"
+        case archiveMaxImpact     = "archive_max_impact"
+        case archiveMaxWeight     = "archive_max_weight"
+        case archiveMinDaysIdle   = "archive_min_days_idle"
+    }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        indexerEnabled       = c.dflt(Bool.self,   .indexerEnabled,       indexerEnabled)
+        indexIntervalMinutes = c.dflt(Int.self,    .indexIntervalMinutes, indexIntervalMinutes)
+        weeklyBudget         = c.dflt(Double.self, .weeklyBudget,         weeklyBudget)
+        peakProtection       = c.dflt(Double.self, .peakProtection,       peakProtection)
+        maxRebalances        = c.dflt(Int.self,    .maxRebalances,        maxRebalances)
+        windowDays           = c.dflt(Int.self,    .windowDays,           windowDays)
+        alpha                = c.dflt(Double.self, .alpha,                alpha)
+        minWeight            = c.dflt(Double.self, .minWeight,            minWeight)
+        archiveMaxImpact     = c.dflt(Double.self, .archiveMaxImpact,     archiveMaxImpact)
+        archiveMaxWeight     = c.dflt(Double.self, .archiveMaxWeight,     archiveMaxWeight)
+        archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
     }
 }
 

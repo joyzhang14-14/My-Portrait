@@ -13,6 +13,7 @@ struct SettingsPane: View {
             case .aiModels:      AIModelsSettingsView()
             case .recording:     RecordingSettingsView()
             case .notifications: NotificationsSettingsView()
+            case .memory:        MemorySettingsView()
             case .usage:         UsageSettingsView()
             case .privacy:       PrivacySettingsView()
             case .storage:       StorageSettingsView()
@@ -53,7 +54,7 @@ struct SettingsScene: View {
                 .padding(.top, 18)
                 .padding(.bottom, 16)
 
-            ForEach([SettingsSubsection.Group.app, .dataPrivacy], id: \.self) { grp in
+            ForEach([SettingsSubsection.Group.app, .memory, .dataPrivacy], id: \.self) { grp in
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
@@ -86,6 +87,7 @@ struct SettingsScene: View {
         case .aiModels:      AIModelsSettingsView()
         case .recording:     RecordingSettingsView()
         case .notifications: NotificationsSettingsView()
+        case .memory:        MemorySettingsView()
         case .usage:         UsageSettingsView()
         case .privacy:       PrivacySettingsView()
         case .storage:       StorageSettingsView()

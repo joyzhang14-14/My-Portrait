@@ -239,9 +239,12 @@ struct MemoriesView: View {
     @MainActor
     private func runRebalance() async {
         actionStatus = "Rebalancing weekly memory budget…"
-        let outcome = await Task.detached(priority: .userInitiated) {
-            return MemoryBudget_applyToDisk()
-        }.value
+        // MemoryBudget pulls params from ConfigStore (@MainActor), so the
+        // pass itself must run on the main actor. The heavy file I/O inside
+        // is synchronous but the volume is small (low hundreds of files);
+        // future optimization can split this into [main load params → off
+        // main scan → main write back].
+        let outcome = MemoryBudget_applyToDisk()
         actionStatus = outcome
         await reload()
     }

@@ -41,8 +41,22 @@ struct AudioTranscriptEntry: Identifiable, Hashable {
 struct ScreenpipeDB: Sendable {
     let dbPath: String
 
-    init(path: String = NSString(string: "~/.screenpipe/db.sqlite").expandingTildeInPath) {
-        self.dbPath = path
+    init(path: String? = nil) {
+        if let path {
+            self.dbPath = path
+            return
+        }
+        // Default order:
+        //   1. Imported snapshot at ~/.portrait/imported/screenpipe/db.sqlite
+        //      (frozen, reproducible — what the Memory pipeline reads).
+        //   2. Legacy ~/.screenpipe/db.sqlite (live daemon writes here),
+        //      used only when the snapshot doesn't exist yet.
+        let imported = Storage.screenpipeImportedDBPath
+        if FileManager.default.fileExists(atPath: imported) {
+            self.dbPath = imported
+        } else {
+            self.dbPath = NSString(string: "~/.screenpipe/db.sqlite").expandingTildeInPath
+        }
     }
 
     var exists: Bool {

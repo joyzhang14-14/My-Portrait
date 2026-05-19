@@ -25,6 +25,16 @@ enum Archiver {
         var protectedCategoryPrefixes: [String] = ["skills"]
 
         static let `default` = Rule()
+
+        @MainActor
+        static var fromConfig: Rule {
+            let m = ConfigStore.shared.current.memory
+            return Rule(
+                maxImpact: m.archiveMaxImpact,
+                maxWeight: m.archiveMaxWeight,
+                minDaysSinceAccess: m.archiveMinDaysIdle
+            )
+        }
     }
 
     struct Plan {

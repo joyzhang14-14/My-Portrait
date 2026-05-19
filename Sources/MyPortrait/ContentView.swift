@@ -29,6 +29,7 @@ struct ContentView: View {
         .environment(appState)
         .environment(chat)
         .environment(chatStore)
+        .environment(ConfigStore.shared)
         .onAppear {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in

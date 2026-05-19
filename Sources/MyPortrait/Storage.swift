@@ -39,6 +39,20 @@ enum Storage {
     /// archives, supersede decisions, weight passes). See design doc 6.6.
     static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
 
+    /// Frozen snapshot of the screenpipe data (~/.screenpipe → copied here
+    /// 2026-05-19). The screenpipe daemon keeps writing into its original
+    /// location; the Memory pipeline reads from this snapshot so backfills
+    /// are reproducible and the daemon can be retired any time without
+    /// pulling the rug out.
+    static var screenpipeImportedRoot: URL {
+        rootURL.appendingPathComponent("imported/screenpipe", isDirectory: true)
+    }
+
+    /// Convenience: full path to the imported screenpipe SQLite DB.
+    static var screenpipeImportedDBPath: String {
+        screenpipeImportedRoot.appendingPathComponent("db.sqlite").path
+    }
+
     // MARK: - Capture layer (Capture/ module)
 
     /// Raw data produced by the capture layer (screen frames + future MP4 chunks).
