@@ -17,26 +17,34 @@ final class ConfigApplier {
     /// the window is created so we can update `.level` / `.title`.
     weak var mainWindow: NSWindow?
 
+    /// Set by AppDelegate at launch so we can drive show/hide + custom icon.
+    weak var statusBar: StatusBarMenu?
+
     private var registered = false
     private var lastTheme: String = ""
     private var lastAlwaysOnTop: Bool = false
     private var lastDockIcon: String = ""
+    private var lastTrayIcon: String = ""
+    private var lastShowInMenuBar: Bool = true
     private var lastAppName: String = ""
     private var lastLaunchAtLogin: Bool = false
 
     private init() {}
 
     /// Set up the observation loop. Called once at app launch.
-    func install(window: NSWindow) {
+    func install(window: NSWindow, statusBar: StatusBarMenu? = nil) {
         guard !registered else { return }
         registered = true
         mainWindow = window
+        self.statusBar = statusBar
         // Snapshot current values so the first pass through the trampoline
         // doesn't fire onChange handlers for stuff that's already correct.
         let c = ConfigStore.shared.display
         lastTheme         = c.theme
         lastAlwaysOnTop   = c.chatAlwaysOnTop
         lastDockIcon      = c.customDockIcon
+        lastTrayIcon      = c.customTrayIcon
+        lastShowInMenuBar = c.showInMenuBar
         lastAppName       = c.appName
         lastLaunchAtLogin = ConfigStore.shared.general.launchAtLogin
         applyAll()
@@ -51,6 +59,8 @@ final class ConfigApplier {
             _ = ConfigStore.shared.display.theme
             _ = ConfigStore.shared.display.chatAlwaysOnTop
             _ = ConfigStore.shared.display.customDockIcon
+            _ = ConfigStore.shared.display.customTrayIcon
+            _ = ConfigStore.shared.display.showInMenuBar
             _ = ConfigStore.shared.display.appName
             _ = ConfigStore.shared.general.launchAtLogin
         } onChange: { [weak self] in
@@ -97,6 +107,18 @@ final class ConfigApplier {
             } else if let img = NSImage(contentsOfFile: display.customDockIcon) {
                 NSApp.applicationIconImage = img
             }
+        }
+
+        // Tray icon — user-supplied PNG path replaces the SF Symbol.
+        if display.customTrayIcon != lastTrayIcon {
+            lastTrayIcon = display.customTrayIcon
+            statusBar?.setCustomIconPath(display.customTrayIcon)
+        }
+
+        // Status-bar visibility
+        if display.showInMenuBar != lastShowInMenuBar {
+            lastShowInMenuBar = display.showInMenuBar
+            statusBar?.setVisible(display.showInMenuBar)
         }
 
         // Launch at login

@@ -105,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Wire config → window/app chrome. Theme / always-on-top / app name
         // / Dock icon / launch-at-login all flow through this once ConfigStore
         // changes (vim edits or in-app toggles both fire the trampoline).
-        ConfigApplier.shared.install(window: window)
+        ConfigApplier.shared.install(window: window, statusBar: statusBarMenu)
         RetentionRunner.shared.start()
 
         // 3. 启动 services 生命周期管理。

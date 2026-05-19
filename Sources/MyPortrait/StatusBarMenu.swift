@@ -24,6 +24,11 @@ final class StatusBarMenu: NSObject {
     private let menu: NSMenu
     private var cancellables: Set<AnyCancellable> = []
 
+    /// Path to a user-supplied tray icon (Settings → Display → Tray icon).
+    /// When non-empty, `refreshIcon` skips the state-driven SF Symbol and
+    /// uses this image instead.
+    private var customIconPath: String = ""
+
     // 菜单项缓存（要在状态变化时更新它们的 state / title）。
     private let screenToggle: NSMenuItem
     private let audioToggle: NSMenuItem
@@ -120,7 +125,29 @@ final class StatusBarMenu: NSObject {
 
     // MARK: - 状态刷新
 
+    /// Hide / show the entire status-bar item. Called by ConfigApplier
+    /// in response to `display.showInMenuBar`.
+    func setVisible(_ visible: Bool) {
+        statusItem.isVisible = visible
+    }
+
+    /// Apply a user-supplied PNG / icon path (Settings → Display → Tray icon).
+    /// Empty string reverts to the state-driven SF Symbol.
+    func setCustomIconPath(_ path: String) {
+        customIconPath = path
+        refreshIcon()
+    }
+
     private func refreshIcon() {
+        // User-supplied icon takes precedence over the state-driven symbol.
+        if !customIconPath.isEmpty,
+           let img = NSImage(contentsOfFile: customIconPath) {
+            img.size = NSSize(width: 18, height: 18)
+            img.isTemplate = true       // template auto-tints with menu-bar style
+            statusItem.button?.image = img
+            return
+        }
+
         let symbolName: String
         let tint: NSColor?
 
