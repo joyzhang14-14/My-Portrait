@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Matches Orphies' Settings → Connections layout:
 ///   ┌───────────────────────────────────┐
@@ -191,10 +192,12 @@ struct ConnectionsView: View {
     }
 
     /// Route the connect button to the right backend:
-    ///   ChatGPT  → OAuth PKCE
-    ///   API-key  → save key to SecretStore
-    ///   Ollama   → probe localhost:11434
-    ///   anything else → mock (placeholder until we wire that backend)
+    ///   ChatGPT       → OAuth PKCE
+    ///   Ollama        → probe localhost:11434
+    ///   API-key       → save key to SecretStore
+    ///   localApp      → NSWorkspace probe of the bundleId
+    ///   systemAccess  → open System Settings → Privacy
+    ///   other OAuth   → not wired yet; surfaces an inline error
     private func startConnect(_ integration: Integration) {
         loginError = nil
         if integration.id == "chatgpt" {
@@ -203,8 +206,15 @@ struct ConnectionsView: View {
             connectOllama(integration)
         } else if integration.signInMethod == .apiKey {
             connectAPIKey(integration)
+        } else if integration.signInMethod == .localApp {
+            connectLocalApp(integration)
+        } else if integration.signInMethod == .systemAccess {
+            connectSystemAccess(integration)
         } else {
-            mockConnect(integration)
+            // OAuth providers we haven't wired per-provider flows for yet
+            // (Notion, Linear, Spotify, Google Calendar…). Be honest about
+            // the gap instead of fake-toggling.
+            loginError = "\(integration.name) sign-in isn't available yet."
         }
     }
 
@@ -302,15 +312,37 @@ struct ConnectionsView: View {
         }
     }
 
-    private func mockConnect(_ integration: Integration) {
-        connecting = integration.id
-        Task {
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            await MainActor.run {
-                appState.toggleConnect(integration)
-                connecting = nil
-            }
+    /// LocalApp integrations (Claude Desktop, Cursor, Obsidian, …): check
+    /// that the app is actually installed by asking NSWorkspace for the
+    /// bundleId. No network, no fake delay.
+    private func connectLocalApp(_ integration: Integration) {
+        guard let bundleId = integration.bundleId else {
+            loginError = "\(integration.name) doesn't expose a bundle ID we can probe."
+            return
         }
+        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil {
+            appState.toggleConnect(integration)
+            return
+        }
+        loginError = "\(integration.name) isn't installed (bundle \(bundleId) not found)."
+    }
+
+    /// SystemAccess integrations (Apple Calendar, Voice Memos, Apple
+    /// Intelligence): TCC permission lives in System Settings → Privacy.
+    /// Open the right pane and mark connected — the actual permission grant
+    /// happens out of process; we trust the user's intent here.
+    private func connectSystemAccess(_ integration: Integration) {
+        let pane: String = {
+            switch integration.id {
+            case "apple-calendar":     return "Privacy_Calendars"
+            case "voice-memos":        return "Privacy_Microphone"
+            default:                   return "Privacy_AppleIntelligenceReport"
+            }
+        }()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
+        appState.toggleConnect(integration)
     }
 
     private func signInIcon(for i: Integration) -> String {
