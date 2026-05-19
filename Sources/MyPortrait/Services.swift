@@ -61,14 +61,22 @@ final class Services {
         self.db = dbImpl
         // 共用同一个 DatabasePool（WAL 多 reader 安全）。
         let ftsEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
+
+        // bge-m3 模型管理器保留：模型会下到 ~/.portrait/models/bge-m3/ 备用，
+        // 下个 session MLX 推理上线后从 NLEmbedding 切到 BGEM3VectorEmbedder。
         let manager = BGEM3ModelManager()
-        let bgeEmbedder = BGEM3VectorEmbedder(modelManager: manager, reporter: reporter)
         self.modelManager = manager
-        self.embedder = bgeEmbedder
-        // Hybrid：FTS + 向量 + RRF。embedder 抛错时自动降级 FTS-only，
-        // 所以即使 bge-m3 推理还没接通（Phase 4 stub），UI 行为也跟纯 FTS 一致。
+
+        // **当前激活的 embedder**：Apple NLEmbedding（英文 512 维，零依赖立即可用）。
+        // 升级到 bge-m3 只需把这一行换成 BGEM3VectorEmbedder(modelManager:reporter:)
+        // 并完成 BGEM3VectorEmbedder.embed 的 MLX 推理实现。
+        let activeEmbedder: any VectorEmbedder = NLEmbeddingVectorEmbedder()
+        self.embedder = activeEmbedder
+
+        // Hybrid：FTS + 向量 + RRF。embedder 抛错（NLEmbedding 对完全非英语
+        // 输入会 throw `.unsupportedInput`）时自动降级 FTS-only。
         self.searchEngine = HybridSearchEngine(
-            db: dbImpl, fts: ftsEngine, embedder: bgeEmbedder
+            db: dbImpl, fts: ftsEngine, embedder: activeEmbedder
         )
 
         self.coordinator = CaptureCoordinator(db: dbImpl, reporter: reporter)
@@ -86,7 +94,7 @@ final class Services {
             power: pw
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
-        self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: bgeEmbedder)
+        self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。

@@ -69,23 +69,33 @@ UI 调 `services.searchEngine.searchFrames(...)`。Phase 4 把 `searchEngine`
 |---|---|---|
 | 1 | 建库 + schema + GRDB 7 | ✅ |
 | 2 | FTSSearchEngine + UI 能搜 | ✅ |
-| 3 | sqlite-vec 集成 + bge-m3 下载 + 历史回灌 | 模型下载 ✅；推理 ❌；回灌 ❌ |
-| 4 | HybridSearchEngine + RRF 排序 | ❌ |
+| 3 | 向量后端 + 历史回灌 (EmbeddingWorker) | ✅（NLEmbedding，英文 512 维）；bge-m3 模型下载 ✅；MLX 推理 ⏸ |
+| 4 | HybridSearchEngine + RRF 排序 | ✅ |
 
-### Phase 3 注意事项
+### 向量后端 (Phase 3-4) 当前状态
 
-- **sqlite-vec 不可用**：系统 sqlite3 编进了 `OMIT_LOAD_EXTENSION`，不能 load
-  外部扩展。替代方案：
-  1. 直接在 SQLite 存 BLOB 列（Float32 packed），Swift 端读出来做 cosine
-  2. 用 Apple MLX-Swift 跑 bge-m3 推理
-  3. 7000 条向量 × 1024 维 ≈ 28 MB，全内存暴力 cosine 微秒级，**不需要专门的向量索引**
+**已激活的 embedder**：`NLEmbeddingVectorEmbedder` — Apple `NLEmbedding.sentenceEmbedding(for: .english)`。
+- 零依赖：macOS 自带，无需下载，无需 MLX
+- 英文 512 维 / 中文 300 维 / 等。**HybridSearchEngine 要求同维**，所以当前固定走 `.english`
+- 中文 OCR / 转录 → embedder throw → Hybrid 自动降级 FTS-only
 
-### Phase 4 注意事项
+**已 staged 但未激活**：`BGEM3VectorEmbedder` + `BGEM3ModelManager`
+- 模型 (~2.5 GB) 已实现自动下载到 `~/.portrait/models/bge-m3/`
+- `embed()` 方法仍是 stub（throws notImplemented），**MLX 推理待下个 session**
+- 升级路径：完成 `BGEM3VectorEmbedder.embed`（参考实现思路：用 `mlx-swift` 加载
+  safetensors → `swift-transformers` 的 `Tokenizers` 分词 → forward → mean pool
+  → L2 norm），然后在 `Services.init` 把 `activeEmbedder` 从 NLEmbedding
+  换成 BGEM3。**HybridSearchEngine / EmbeddingWorker / 协议 / schema 都不动**。
 
-- **RRF (Reciprocal Rank Fusion)** 公式：`RRF(d) = Σ 1 / (k + rank_i(d))`，
-  k=60 是经验值
-- 输入两个排好序的列表（FTS top-N 和向量 top-N），输出融合排名
-- HybridSearchEngine = FTSSearchEngine + BGEM3VectorEmbedder + RRF
+**为什么 sqlite-vec 不用**：系统 sqlite3 编进了 `OMIT_LOAD_EXTENSION`，不能 load。
+替代：BLOB 列存 packed Float32，Swift 端 Accelerate vDSP 暴力 cosine
+（7000 行 × 维度 ≈ 几十 MB，全内存几毫秒）。
+
+### Phase 4 RRF 融合
+
+公式：`RRF(d) = Σ 1 / (k + rank_i(d))`，k=60。两路排序列表（FTS bm25 + 向量
+cosine），分数无需可比。命中两路的文档自然排前。HybridSearchEngine =
+FTSSearchEngine + (NLEmbedding | BGEM3) embedder + RRF 融合。
 
 ## 几个非显然的约定
 

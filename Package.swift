@@ -7,6 +7,9 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
         .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.9.0"),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.18.0"),
+        // sentencepiece tokenizer，HuggingFace 出的 Swift 包
+        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "0.1.13"),
     ],
     targets: [
         .executableTarget(
@@ -14,6 +17,10 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "WhisperKit", package: "WhisperKit"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "MLXFast", package: "mlx-swift"),
+                .product(name: "Transformers", package: "swift-transformers"),
             ],
             path: "Sources/MyPortrait",
             exclude: [
