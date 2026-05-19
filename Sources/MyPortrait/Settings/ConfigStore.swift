@@ -97,7 +97,9 @@ final class ConfigStore {
      /// load + every mutate.
      func refreshSnapshot() {
          let next = ConfigSnapshot(
-             dataDirectory: current.storage.dataDirectory
+             dataDirectory: current.storage.dataDirectory,
+             retentionDays: current.storage.retentionDays,
+             autoDeleteMode: current.storage.autoDeleteMode
          )
          Self.snapshotLock.withLock { Self.snapshotValue = next }
      }

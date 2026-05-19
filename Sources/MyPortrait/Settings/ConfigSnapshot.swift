@@ -5,4 +5,6 @@ import Foundation
 /// Keep small — anything UI-bound stays inside the @MainActor ConfigStore.
 struct ConfigSnapshot: Sendable {
     var dataDirectory: String = ""
+    var retentionDays: String = "d30"
+    var autoDeleteMode: String = "mediaOnly"
 }

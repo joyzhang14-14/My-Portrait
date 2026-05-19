@@ -125,8 +125,10 @@ enum SettingsKeys {
 
     // Storage
     static let dataDirectory            = "Settings.dataDirectory"            // String path
-    static let retentionDays            = "Settings.retentionDays"            // String enum: 7/14/30/60/90/forever
-    static let autoDeleteMode           = "Settings.autoDeleteMode"           // AutoDeleteMode rawValue
+    // retentionDays / autoDeleteMode keys removed — single source moved to
+    // ConfigStore (`storage.retention_days` / `storage.auto_delete_mode`).
+    // ConfigStore.onceMigrationSeed still reads the legacy UserDefaults keys
+    // by string literal for migration; safe to fully remove after vNext.
 
     // Usage
     static let usageRange               = "Settings.usageRange"               // UsageRange rawValue

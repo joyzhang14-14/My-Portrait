@@ -3,7 +3,7 @@ import os.log
 
 /// 数据保留期 / 自动删除后台 worker。
 ///
-/// 每天跑一次（cold-start 后 5 分钟 + 24h 兜底 timer）。读 SettingsKeys：
+/// 每天跑一次（cold-start 后 5 分钟 + 24h 兜底 timer）。读 ConfigStore.snapshot：
 ///   - `retentionDays`: 7 / 14 / 30 / 60 / 90 / forever
 ///   - `autoDeleteMode`: off / mediaOnly / everything
 ///
@@ -94,10 +94,9 @@ actor RetentionWorker {
     // MARK: - 私有
 
     private func readSettings() -> (days: Int?, mode: AutoDeleteMode) {
-        let defaults = UserDefaults.standard
+        let s = ConfigStore.snapshot
 
-        let daysStr = defaults.string(forKey: SettingsKeys.retentionDays) ?? RetentionDays.d30.rawValue
-        let retention = RetentionDays(rawValue: daysStr) ?? .d30
+        let retention = RetentionDays(rawValue: s.retentionDays) ?? .d30
         let days: Int? = {
             switch retention {
             case .d7: return 7
@@ -109,8 +108,7 @@ actor RetentionWorker {
             }
         }()
 
-        let modeStr = defaults.string(forKey: SettingsKeys.autoDeleteMode) ?? AutoDeleteMode.off.rawValue
-        let mode = AutoDeleteMode(rawValue: modeStr) ?? .off
+        let mode = AutoDeleteMode(rawValue: s.autoDeleteMode) ?? .off
 
         return (days, mode)
     }
