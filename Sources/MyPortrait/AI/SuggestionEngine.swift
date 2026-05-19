@@ -31,7 +31,9 @@ final class SuggestionEngine {
 
     var isStale: Bool {
         guard let t = lastRefreshed else { return true }
-        return Date().timeIntervalSince(t) > 10 * 60   // 10 min
+        let raw = ConfigStore.shared.notifications.pipeSuggestionInterval
+        let window = SuggestionInterval(rawValue: raw)?.seconds ?? (3 * 3600)
+        return Date().timeIntervalSince(t) > window
     }
 
     /// Pull fresh suggestions. Cheap-fail: if Pi can't spawn / parse, we keep

@@ -200,6 +200,19 @@ enum SuggestionInterval: String, CaseIterable, Identifiable {
         case .h12: return "every 12h"; case .daily: return "daily"; case .weekly: return "weekly"
         }
     }
+
+    /// Refresh cadence in seconds. Used by `SuggestionEngine.isStale`.
+    var seconds: TimeInterval {
+        switch self {
+        case .h1:    return 1 * 3600
+        case .h2:    return 2 * 3600
+        case .h3:    return 3 * 3600
+        case .h6:    return 6 * 3600
+        case .h12:   return 12 * 3600
+        case .daily: return 24 * 3600
+        case .weekly: return 7 * 24 * 3600
+        }
+    }
 }
 
 enum UsageRange: String, CaseIterable, Identifiable {
@@ -247,6 +260,14 @@ enum RetentionDays: String, CaseIterable, Identifiable {
         case .d7: return "7 days"; case .d14: return "14 days"
         case .d30: return "30 days"; case .d60: return "60 days"
         case .d90: return "90 days"; case .forever: return "Keep forever"
+        }
+    }
+    /// nil → never auto-delete (Keep forever).
+    var days: Int? {
+        switch self {
+        case .d7: return 7; case .d14: return 14
+        case .d30: return 30; case .d60: return 60
+        case .d90: return 90; case .forever: return nil
         }
     }
 }

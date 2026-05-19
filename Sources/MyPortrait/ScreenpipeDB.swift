@@ -47,10 +47,21 @@ struct ScreenpipeDB: Sendable {
             return
         }
         // Default order:
-        //   1. Imported snapshot at ~/.portrait/imported/screenpipe/db.sqlite
+        //   1. User-overridden directory in Settings → Storage → Data directory
+        //      (lets people relocate ~/.screenpipe to an external drive).
+        //   2. Imported snapshot at ~/.portrait/imported/screenpipe/db.sqlite
         //      (frozen, reproducible — what the Memory pipeline reads).
-        //   2. Legacy ~/.screenpipe/db.sqlite (live daemon writes here),
+        //   3. Legacy ~/.screenpipe/db.sqlite (live daemon writes here),
         //      used only when the snapshot doesn't exist yet.
+        let userDir = ConfigStore.snapshot.dataDirectory
+        if !userDir.isEmpty {
+            let candidate = (userDir as NSString).expandingTildeInPath
+                + "/db.sqlite"
+            if FileManager.default.fileExists(atPath: candidate) {
+                self.dbPath = candidate
+                return
+            }
+        }
         let imported = Storage.screenpipeImportedDBPath
         if FileManager.default.fileExists(atPath: imported) {
             self.dbPath = imported
@@ -365,5 +376,89 @@ struct ScreenpipeDB: Sendable {
             }
         }
         return out
+    }
+
+    // MARK: - Write operations (auto-delete / manual purge)
+
+    /// Result of a delete pass. `frames`/`audio` are row counts removed.
+    struct DeleteResult: Sendable {
+        var frames: Int = 0
+        var audio: Int = 0
+        /// Non-nil when the DB couldn't be opened RW (e.g. another process
+        /// is writing). Caller can surface a toast.
+        var error: String? = nil
+    }
+
+    /// Delete frames + audio transcriptions strictly before `cutoff`.
+    /// Used by both manual "Delete last 15m / 30m / 1h" buttons and the
+    /// retention auto-delete runner.
+    ///
+    /// `mediaOnly == true` mirrors Orphies' "media only" mode: keep OCR text
+    /// + transcriptions intact, just zero out the underlying file paths so
+    /// the JPGs / MP4s on disk become orphaned (the next compaction sweep
+    /// will reclaim them). For now we treat it the same as a full row delete
+    /// of frames but preserve `audio_transcriptions` — text is the cheap part.
+    func deleteBefore(_ cutoff: Date, mediaOnly: Bool) -> DeleteResult {
+        guard exists else { return DeleteResult() }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
+        }
+        defer { sqlite3_close(db) }
+
+        let cutoffStr = Self.dbTimestamp(cutoff)
+        var result = DeleteResult()
+
+        // frames — delete rows captured before the cutoff.
+        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp < ?") {
+            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            if sqlite3_step(stmt) == SQLITE_DONE {
+                result.frames = Int(sqlite3_changes(db))
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        // audio_transcriptions — only when not media-only.
+        if !mediaOnly,
+           let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE timestamp < ?") {
+            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            if sqlite3_step(stmt) == SQLITE_DONE {
+                result.audio = Int(sqlite3_changes(db))
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        return result
+    }
+
+    /// Delete frames + audio transcriptions strictly *after* `cutoff`.
+    /// Used by manual "Delete last N minutes" buttons (cutoff = now − N).
+    @discardableResult
+    func deleteAfter(_ cutoff: Date) -> DeleteResult {
+        guard exists else { return DeleteResult() }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
+        }
+        defer { sqlite3_close(db) }
+        let cutoffStr = Self.dbTimestamp(cutoff)
+        var result = DeleteResult()
+        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp >= ?") {
+            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            if sqlite3_step(stmt) == SQLITE_DONE { result.frames = Int(sqlite3_changes(db)) }
+            sqlite3_finalize(stmt)
+        }
+        if let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE timestamp >= ?") {
+            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            if sqlite3_step(stmt) == SQLITE_DONE { result.audio = Int(sqlite3_changes(db)) }
+            sqlite3_finalize(stmt)
+        }
+        return result
+    }
+
+    private func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        return stmt
     }
 }

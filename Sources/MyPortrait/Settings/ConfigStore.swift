@@ -59,6 +59,7 @@ final class ConfigStore {
         block(&next)
         guard next != current else { return }
         current = next
+        refreshSnapshot()
         scheduleWrite()
     }
 
@@ -84,6 +85,22 @@ final class ConfigStore {
     func saveNow() {
         Task { await writeNow() }
     }
+
+    /// Cross-actor read for non-MainActor callers (ScreenpipeDB, background
+     /// scanners). Updated by `refreshSnapshot()` on every mutate / load.
+     /// Keep small — only fields needed off the main actor go here.
+     nonisolated static var snapshot: ConfigSnapshot { Self.snapshotLock.withLock { Self.snapshotValue } }
+     nonisolated private static let snapshotLock = NSLock()
+     nonisolated(unsafe) private static var snapshotValue = ConfigSnapshot()
+
+     /// Mirror current values into the cross-actor snapshot. Called from
+     /// load + every mutate.
+     func refreshSnapshot() {
+         let next = ConfigSnapshot(
+             dataDirectory: current.storage.dataDirectory
+         )
+         Self.snapshotLock.withLock { Self.snapshotValue = next }
+     }
 
     /// Static for callers that want the on-disk URL without going through
     /// `.shared` first (e.g. footer of the Memory page).
@@ -164,6 +181,7 @@ final class ConfigStore {
         guard FileManager.default.fileExists(atPath: path.path) else {
             // No file yet — keep defaults; the migration step will seed one.
             loadError = nil
+            refreshSnapshot()
             return
         }
         do {
@@ -175,6 +193,7 @@ final class ConfigStore {
             loadError = "Couldn't read config.toml: \(error.localizedDescription) — using defaults."
             // Keep `current` as whatever it was (defaults on fresh launch).
         }
+        refreshSnapshot()
     }
 
     /// Hook for future schema bumps. Today this is identity; once schema

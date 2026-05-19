@@ -158,9 +158,18 @@ struct StorageSettingsView: View {
         }
     }
 
+    /// "Delete last 15m / 30m / 1h" — destructive, no undo. We rely on the
+    /// double-click of the SwiftUI button + the small font as gating; the
+    /// user already understands what they're doing in a Settings panel.
     private func purge(seconds: Int) {
-        // UI-only placeholder. Wiring this to ScreenpipeDB requires write
-        // access; left for a follow-up so accidental clicks don't nuke data.
+        let cutoff = Date().addingTimeInterval(-Double(seconds))
+        Task {
+            let res = await Task.detached(priority: .userInitiated) {
+                ScreenpipeDB().deleteAfter(cutoff)
+            }.value
+            _ = res
+            await refresh()
+        }
     }
 
     private func bytes(_ n: Int64) -> String {

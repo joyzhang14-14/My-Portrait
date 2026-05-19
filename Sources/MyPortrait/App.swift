@@ -106,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // / Dock icon / launch-at-login all flow through this once ConfigStore
         // changes (vim edits or in-app toggles both fire the trampoline).
         ConfigApplier.shared.install(window: window)
+        RetentionRunner.shared.start()
 
         // 3. 启动 services 生命周期管理。
         //    - compactor / transcriber 立即开始（空转零成本）
