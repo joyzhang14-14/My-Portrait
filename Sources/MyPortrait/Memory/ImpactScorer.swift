@@ -268,8 +268,8 @@ final class ImpactScorer {
             if let d = entry["impact"] as? Double { impact = d }
             else if let i = entry["impact"] as? Int { impact = Double(i) }
             else { return nil }
-            let reason = entry["reason"] as? String
-            return LLMScore(id: id, impact: impact, reason: reason)
+            let evidence = entry["evidence"] as? String ?? entry["reason"] as? String
+            return LLMScore(id: id, impact: impact, reason: evidence)
         }
     }
 
