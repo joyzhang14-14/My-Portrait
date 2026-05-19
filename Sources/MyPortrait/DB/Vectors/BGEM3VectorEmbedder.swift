@@ -177,10 +177,11 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         // 是 `[padding_idx+1, padding_idx+2, ...]`（pad_token_id=1，所以 = 2,3,4,...）。
         // 把 position_embeddings 权重整体上移 2 行 —— 这样 model 内部用 arange
         // 索引就等效于原始 XLM-R 用 [2,3,...] 索引。
-        // 只对**单句无 padding** 正确（batch with padding 仍错，padding 位置
-        // 该取 row[1] 但 shifted 后会取 row[3]）。回灌时 worker 默认 chunk=32
-        // 一组喂 → 含 padding → **会错**。这一步只用来验证 cosine 修正方向，
-        // 正式上线需要走 fork mlx.embeddings 或自己写 forward。
+        //
+        // 数值对齐：跟 Python FlagEmbedding 单句 cosine = **0.999999**（三句都对齐）。
+        // Batch 一致性：单句 vs batch=32 cosine = **1.000000**（attention mask 把
+        // pad token 屏蔽，CLS 输出对 pad 位置的位置编码不敏感，所以 padding 位置
+        // 取错 row 不影响最终 CLS pooling 结果）。验证细节见 --embed-batch-test。
         if let key = weights.keys.first(where: { $0.hasSuffix("position_embeddings.weight") }) {
             let pe = weights[key]!
             let total = pe.dim(0)

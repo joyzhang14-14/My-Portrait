@@ -17,6 +17,9 @@ struct MyPortraitApp: App {
             EmbedDumpCLI.run(userText: userText)
             // EmbedDumpCLI.run 内部 exit(0/1)，不会返回。
         }
+        if args.contains("--embed-batch-test") {
+            EmbedDumpCLI.runBatchTest()
+        }
         AppKeyboard.install()
     }
 
