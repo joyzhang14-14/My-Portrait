@@ -102,6 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Wire config → window/app chrome. Theme / always-on-top / app name
+        // / Dock icon / launch-at-login all flow through this once ConfigStore
+        // changes (vim edits or in-app toggles both fire the trampoline).
+        ConfigApplier.shared.install(window: window)
+
         // 3. 启动 services 生命周期管理。
         //    - compactor / transcriber 立即开始（空转零成本）
         //    - coordinator / audio **由 settings 驱动**：默认开关都 OFF →

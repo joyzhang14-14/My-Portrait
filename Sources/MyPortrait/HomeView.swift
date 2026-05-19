@@ -553,8 +553,12 @@ private struct AssistantBody: View {
                     ToolCard(block: block)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
                 case .thinking(let block):
-                    ThinkingCard(block: block)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                    // Skip the chain-of-thought card entirely when the user
+                    // has flipped Display → "Hide thinking blocks".
+                    if !ConfigStore.shared.display.hideModelReasoning {
+                        ThinkingCard(block: block)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                    }
                 case .error(let block):
                     ErrorCard(block: block)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))

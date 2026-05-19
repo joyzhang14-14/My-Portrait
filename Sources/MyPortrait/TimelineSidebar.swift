@@ -38,6 +38,16 @@ struct TimelineSidebar: View {
 
     private var focusedTimestamp: Date? { focusedFrame?.timestamp }
 
+    /// Frosted glass vs solid window-bg, controlled by
+    /// `config.display.translucentSidebar`.
+    @ViewBuilder private var sidebarBackground: some View {
+        if ConfigStore.shared.display.translucentSidebar {
+            Rectangle().fill(.ultraThinMaterial).opacity(0.92)
+        } else {
+            Color(NSColor.windowBackgroundColor).opacity(0.92)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -80,7 +90,7 @@ struct TimelineSidebar: View {
                 .padding(.bottom, 24)
             }
         }
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.92))
+        .background(sidebarBackground)
         .navigationTitle("")
         .onAppear { reload() }
         .onChange(of: state.focusIndex) { reload() }
