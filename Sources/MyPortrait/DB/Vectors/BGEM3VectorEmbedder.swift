@@ -30,7 +30,13 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
 
     /// HuggingFace 上预转换的 MLX 版（fp16，~1.13 GB；非官方但官方推荐）。
     /// 跟 `BAAI/bge-m3` 原始 fp32 权重数值一致到 ~3 位小数（fp16 round-off 差异）。
+    /// **只有** config.json + model.safetensors，没有 tokenizer 文件。
     private static let huggingFaceRepo = "mlx-community/bge-m3-mlx-fp16"
+
+    /// 原始 bge-m3 repo —— 这里有 tokenizer.json / sentencepiece.bpe.model / special_tokens_map.json。
+    /// `mlx-community/*` 转换时只搬运了权重，没带 tokenizer，所以分两路下：
+    /// 权重走 mlx-community 拿 MLX 格式，tokenizer 走 BAAI 原仓库。
+    private static let tokenizerRepo = "BAAI/bge-m3"
 
     /// XLM-RoBERTa 的 pad_token_id = 1（**不是** 0）。tokenizer 通常不暴露这个，
     /// hardcode。
@@ -79,7 +85,7 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         logger.info("loading bge-m3 model: \(Self.huggingFaceRepo, privacy: .public) (first run downloads ~1.13 GB)")
         let started = Date()
         do {
-            let config = ModelConfiguration(id: Self.huggingFaceRepo)
+            let config = ModelConfiguration(id: Self.huggingFaceRepo, tokenizerId: Self.tokenizerRepo)
             let c = try await loadModelContainer(configuration: config) { progress in
                 // mzbac 走 HuggingFace HubApi 下载，progress 是文件级 fraction。
                 // 不抖屏只在 5% / 25% / 50% / 75% / 完成时打 log。

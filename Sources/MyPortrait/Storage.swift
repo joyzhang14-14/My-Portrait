@@ -39,10 +39,10 @@ enum Storage {
     /// archives, supersede decisions, weight passes). See design doc 6.6.
     static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
 
-    /// Imported timeline snapshot. Schema originally came from the
-    /// screenpipe project (kept verbatim so existing tables / queries
-    /// still apply) — the directory was copied here 2026-05-19 and the
-    /// app no longer touches the original `~/.screenpipe` folder.
+    /// Imported timeline snapshot — historical frames + OCR + audio +
+    /// MP4 chunks copied into a snapshot the app fully owns. Paths in
+    /// the snapshot's `db.sqlite` are stored RELATIVE to this root, so
+    /// the directory can be moved or shipped anywhere.
     static var timelineImportedRoot: URL {
         rootURL.appendingPathComponent("imported/timeline", isDirectory: true)
     }
@@ -54,9 +54,10 @@ enum Storage {
 
     // MARK: - Capture layer (Capture/ module)
 
-    /// Raw data produced by the capture layer (screen frames + future MP4 chunks).
-    /// Owned by `Capture/`. Mirrors screenpipe's `data/` directory but lives
-    /// inside ~/.portrait so we never touch ~/.screenpipe.
+    /// Raw data produced by the capture layer (screen frames + MP4 chunks).
+    /// Owned by `Capture/`. All paths inside this tree are stored RELATIVE
+    /// to `rootURL` so the whole `~/.portrait` folder can be moved or
+    /// shipped to a different user without rewriting any path.
     static var rawDataDir: URL { rootURL.appendingPathComponent("raw_data", isDirectory: true) }
 
     /// Per-day JPG snapshot directory. Path:

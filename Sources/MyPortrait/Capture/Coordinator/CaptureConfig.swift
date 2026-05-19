@@ -2,7 +2,7 @@ import Foundation
 
 /// 采集层全部阈值/参数集中地。修改任何参数都来这里改。
 ///
-/// 数值默认值直接抄 My-Orphies / screenpipe 的生产值。改之前要看 memory:
+/// 数值默认值参考通用屏幕捕获项目的生产值。改之前要看 memory:
 /// project-capture-storage-strategy 和 feedback-capture-performance-first。
 struct CaptureConfig: Sendable {
 
@@ -44,7 +44,7 @@ struct CaptureConfig: Sendable {
 
     // MARK: - JPG 写盘 (SnapshotWriter)
 
-    /// JPEG 压缩质量。0.80 ≈ screenpipe "balanced" 预设。
+    /// JPEG 压缩质量。0.80 ≈ "balanced" 档：肉眼无损但比 1.0 体积 ~40%。
     var jpegQuality: Double = 0.80
 
     /// 最大宽度（保比例）。1920 ≈ balanced 预设。0 = 原生分辨率。

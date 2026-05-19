@@ -104,7 +104,7 @@ FTSSearchEngine + (NLEmbedding | BGEM3) embedder + RRF 融合。
    SQLite overflow page 机制让"不读 = 0 成本"，明确列名拿到性能
 3. **`focused` 字段保留** —— 即使单显示器，它仍然区分"主动操作"和"背景常驻"
 4. **`StubPortraitDB` 已删** —— 仅在未来的 Tests target 中重建。Sources/ 永远是真 DB
-5. **不动 `~/.screenpipe/`** —— 那是外部 daemon 的数据，要复用只能 copy 不能 mv
+5. **`~/.portrait/imported/timeline/` 是只读 snapshot** —— 历史数据冻结在此，写盘只动 `portrait.sqlite` / `raw_data/`
 
 ## 调用方进入点
 

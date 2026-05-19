@@ -53,7 +53,7 @@ struct PortraitFile: Equatable {
     var category: String                // DEPRECATED. Kept for backward-compat
                                         // file reads only. Distiller no longer
                                         // routes by this field.
-    var memberFrameIds: [Int64]         // screenpipe frame IDs contributing
+    var memberFrameIds: [Int64]         // timeline frame IDs that contributed
                                         // to this event (across days + apps)
     var source: String?                 // backward-compat origin reference
     var tags: [String]

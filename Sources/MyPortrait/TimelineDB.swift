@@ -2,11 +2,16 @@ import Foundation
 import SQLite3
 
 /// Read-only reader for the imported timeline SQLite database
-/// (`~/.portrait/imported/timeline/db.sqlite`). The schema was inherited
-/// verbatim from the upstream screenpipe project so the historical
-/// `frames` / `video_chunks` / `audio_transcriptions` tables apply
-/// — that's the only place in the codebase where the screenpipe name
-/// is still relevant.
+/// (`~/.portrait/imported/timeline/db.sqlite`). The schema (frames /
+/// video_chunks / audio_transcriptions / ocr_text) was inherited from
+/// the upstream capture daemon and is kept verbatim so historical
+/// queries still work.
+///
+/// Path convention: file paths in the DB (`frames.snapshot_path`,
+/// `video_chunks.file_path`, `audio_chunks.file_path`) are stored
+/// **relative** to the snapshot root. `resolvePath` joins them with
+/// the live `snapshotRoot` so the snapshot directory can be moved or
+/// shipped to a different user without rewriting the DB.
 struct TimelineFrame: Identifiable, Hashable {
     let id: Int64
     let timestamp: Date           // UTC
@@ -67,28 +72,21 @@ struct TimelineDB: Sendable {
         self.dbPath = Storage.timelineImportedDBPath
     }
 
-    /// Root of the imported snapshot. Used to rewrite the absolute
-    /// `~/.screenpipe/data/...` paths that the upstream daemon baked into
-    /// the DB rows so they instead resolve to the imported copy under
-    /// `~/.portrait/imported/timeline/`.
+    /// Root of the imported snapshot — the directory containing `db.sqlite`.
+    /// `resolvePath` joins this with each relative DB path so the snapshot
+    /// folder can live anywhere on disk without touching the database.
     private var snapshotRoot: String {
         (dbPath as NSString).deletingLastPathComponent
     }
 
-    /// The daemon root that the imported DB rows still reference. Kept
-    /// here purely for the path-rewrite below — the app never reads from
-    /// or writes to this location.
-    private static let legacyRoot: String = NSString(string: "~/.screenpipe").expandingTildeInPath
-
-    /// Rewrite a DB-stored absolute path so it lands inside the imported
-    /// snapshot. Pass-through if the file already exists at the original
-    /// path (covers the case where someone is still running the daemon).
-    private func rewritePath(_ p: String?) -> String? {
+    /// Resolve a DB-stored file path. Relative paths are joined with
+    /// `snapshotRoot`. Absolute paths pass through unchanged — supports
+    /// any legacy rows that still contain an absolute path the migration
+    /// missed (or external paths the user pointed at).
+    private func resolvePath(_ p: String?) -> String? {
         guard let p, !p.isEmpty else { return p }
-        if FileManager.default.fileExists(atPath: p) { return p }
-        guard p.hasPrefix(Self.legacyRoot) else { return p }
-        let suffix = String(p.dropFirst(Self.legacyRoot.count))
-        return snapshotRoot + suffix
+        if (p as NSString).isAbsolutePath { return p }
+        return (snapshotRoot as NSString).appendingPathComponent(p)
     }
 
     var exists: Bool {
@@ -170,8 +168,8 @@ struct TimelineDB: Sendable {
             let app = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             let win = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
             let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) }
-            let snap  = rewritePath(sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) })
-            let vpath = rewritePath(sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) })
+            let snap  = resolvePath(sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) })
+            let vpath = resolvePath(sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) })
             let offset = Int(sqlite3_column_int64(stmt, 7))
             let fps = sqlite3_column_double(stmt, 8)
             let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
