@@ -75,12 +75,16 @@ struct TimelineDB: Sendable {
     private var assetsRoot: String { Storage.rootURL.path }
 
     /// Resolve a DB-stored file path. Relative paths are joined with the
-    /// assets root; absolute paths pass through unchanged (covers any
-    /// pre-migration rows that still have an absolute path).
+    /// assets root; absolute paths pass through unchanged. Returns `nil` if
+    /// the resolved file doesn't exist on disk — caller (TimelineView) uses
+    /// that signal to fall back to the alternate source (e.g. extract from
+    /// the MP4 chunk when a JPG snapshot file is missing).
     private func resolvePath(_ p: String?) -> String? {
-        guard let p, !p.isEmpty else { return p }
-        if (p as NSString).isAbsolutePath { return p }
-        return (assetsRoot as NSString).appendingPathComponent(p)
+        guard let p, !p.isEmpty else { return nil }
+        let resolved: String = (p as NSString).isAbsolutePath
+            ? p
+            : (assetsRoot as NSString).appendingPathComponent(p)
+        return FileManager.default.fileExists(atPath: resolved) ? resolved : nil
     }
 
     var exists: Bool {
