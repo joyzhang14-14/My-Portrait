@@ -4,14 +4,18 @@ import os.log
 /// 后台 worker：把 frames.full_text 没 embed 的行批量喂给 embedder → 存 BLOB。
 ///
 /// 触发：
-///   - 启动后 30s 跑一次（清积压）
-///   - 之后每 5 分钟一轮（捕新写入的帧 / 之前失败的）
+///   - 启动后 30s 跑一次（清积压；首次启动 bge-m3 模型还在下载，整轮放弃下次再来）
+///   - 之后每 60s 一轮，回灌期间持续吃积压；积压清完后基本空转（DB 索引 0 成本）
 ///
-/// embedder 抛错时（如当前 `BGEM3VectorEmbedder` 推理 stub），整轮放弃 + 下一轮再试。
+/// embedder 抛错时（首次模型未下完 / 推理 OOM）整轮放弃 + 下一轮再试。
 /// 不无限重试 —— 模型加载失败重试 100 次也救不回来，让 reporter 报红点提醒。
 ///
-/// 数据量预期：1000 帧 / 天，每个 bge-m3 推理 ~50ms（M 芯片），一轮 < 1 分钟。
-/// 触发时机错开 CompactionWorker / RetentionWorker 即可避免 CPU 撞车。
+/// 批量策略：一轮拉 `batchSize` 个 id，再 chunk 成 `embedChunkSize` 一组喂给
+/// `embedder.embedBatch`。bge-m3 一次 forward 32-64 句比逐句快 ~10×（GPU 利用率）。
+///
+/// 数据量预期：~7000 帧历史回灌 + 1000 帧/天增量。M 系芯片上 bge-m3 batch=32
+/// 约 100ms / batch，7000 / 32 ≈ 220 batch × 100ms ≈ 22 秒纯推理。加 DB 写入 / IO
+/// 实际 ~3-5 分钟回完整段历史。
 actor EmbeddingWorker {
 
     private let logger = Logger(subsystem: "com.myportrait.db", category: "embed")
@@ -19,8 +23,11 @@ actor EmbeddingWorker {
     private let embedder: any VectorEmbedder
 
     private let coldStartDelaySeconds: TimeInterval = 30
-    private let pollIntervalSeconds: TimeInterval = 300   // 5 分钟
-    private let batchSize = 50
+    private let pollIntervalSeconds: TimeInterval = 60     // 1 分钟一轮，回灌期紧凑
+    /// 单轮拉多少行：太大 DB 一次扫描慢；太小一轮干完空转过早。
+    private let batchSize = 256
+    /// 一次喂给 embedder.embedBatch 的子批：bge-m3 + M 系 GPU 的甜蜜区。
+    private let embedChunkSize = 32
 
     private var task: Task<Void, Never>?
 
@@ -40,7 +47,7 @@ actor EmbeddingWorker {
                 try? await Task.sleep(nanoseconds: pollNs)
             }
         }
-        logger.info("EmbeddingWorker started")
+        logger.info("EmbeddingWorker started (batch=\(self.batchSize), chunk=\(self.embedChunkSize))")
     }
 
     func stop() {
@@ -60,9 +67,7 @@ actor EmbeddingWorker {
             return
         }
         if ids.isEmpty { return }
-        logger.info("embedding \(ids.count) frames")
 
-        // 拿元数据（含 full_text）一次性，避免循环里反复查。
         let metas: [FrameMetadata]
         do {
             metas = try await db.framesByIds(ids)
@@ -71,24 +76,51 @@ actor EmbeddingWorker {
             return
         }
 
-        for meta in metas {
-            guard let text = meta.fullText, !text.isEmpty else { continue }
-            let vector: [Float]
+        // 过滤掉 full_text 空 / 太短的（framesNeedingEmbedding 已 length>4 过滤，这里防御）。
+        let work: [(id: Int64, text: String)] = metas.compactMap { m in
+            guard let t = m.fullText, !t.isEmpty else { return nil }
+            return (m.id, t)
+        }
+        if work.isEmpty { return }
+
+        let started = Date()
+        logger.info("embedding \(work.count) frames in chunks of \(self.embedChunkSize)")
+
+        var written: Int = 0
+        var index = 0
+        while index < work.count {
+            let end = min(index + embedChunkSize, work.count)
+            let chunk = Array(work[index..<end])
+
+            let vectors: [[Float]]
             do {
-                var v = try await embedder.embed(text)
-                VectorMath.l2Normalize(&v)               // 保险：cosine == dot 的前提
-                vector = v
+                vectors = try await embedder.embedBatch(chunk.map(\.text))
             } catch {
-                // Stub 永远走这里。整轮放弃，下一轮 5 分钟后再尝试。
-                logger.info("embedder failed for frame \(meta.id) — aborting round, will retry next interval: \(String(describing: error), privacy: .public)")
+                // 首次启动 bge-m3 模型还没下完 / 内存吃满都会走这里。
+                // 整轮放弃，下一分钟再试。
+                logger.info("embedder.embedBatch failed at offset \(index)/\(work.count) — aborting round: \(String(describing: error), privacy: .public)")
                 return
             }
-            do {
-                try await db.setFrameEmbedding(frameId: meta.id, vector: vector, model: model)
-            } catch {
-                logger.warning("setFrameEmbedding(\(meta.id)) failed: \(String(describing: error), privacy: .public)")
-                // 单行失败继续下一个，不放弃整轮（DB 错可能是临时的）。
+
+            // L2 兜底（BGEM3VectorEmbedder 内部已归一化，但接口允许 embedder 不归一）。
+            for (i, pair) in chunk.enumerated() {
+                guard i < vectors.count else { break }
+                var v = vectors[i]
+                VectorMath.l2Normalize(&v)
+                do {
+                    try await db.setFrameEmbedding(frameId: pair.id, vector: v, model: model)
+                    written += 1
+                } catch {
+                    logger.warning("setFrameEmbedding(\(pair.id)) failed: \(String(describing: error), privacy: .public)")
+                    // 单行失败继续下一个。
+                }
             }
+
+            index = end
+            if Task.isCancelled { break }
         }
+
+        let elapsed = Date().timeIntervalSince(started)
+        logger.info("embedded \(written)/\(work.count) frames in \(elapsed, format: .fixed(precision: 1))s (\(Double(written) / max(elapsed, 0.001), format: .fixed(precision: 1)) frames/s)")
     }
 }
