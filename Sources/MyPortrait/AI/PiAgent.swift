@@ -68,12 +68,20 @@ final class PiAgent: @unchecked Sendable {
     /// Live event stream — call once after `start()`.
     let events: AsyncStream<Event>
 
-    init(provider: Provider = .chatgpt, model: String? = nil) throws {
+    /// SecretStore key whose value should override the provider's default
+    /// credential. Set when the user spawned us through an AI preset that
+    /// carries its own `apiKeyRef`. `nil` falls back to ProviderAuth's
+    /// per-provider key (apikey:anthropic, apikey:openai, …).
+    private let apiKeyRefOverride: String?
+
+    init(provider: Provider = .chatgpt, model: String? = nil,
+         apiKeyRefOverride: String? = nil) throws {
         guard BunInstaller.isInstalled else { throw SpawnError.missingBun }
         guard PiInstaller.isInstalled else { throw SpawnError.missingPi }
 
         self.provider = provider
         self.model = model ?? provider.defaultModel
+        self.apiKeyRefOverride = apiKeyRefOverride
         self.process = Process()
         self.stdoutPipe = Pipe()
         self.stderrPipe = Pipe()
@@ -89,11 +97,19 @@ final class PiAgent: @unchecked Sendable {
 
     /// Spawn the Pi process. Resolves the right credential for `provider`
     /// (OAuth token / API key / nothing) and injects it as the env var Pi
-    /// expects.
+    /// expects. If `apiKeyRefOverride` was set (preset path), prefer the
+    /// value stored under that SecretStore key over the provider default.
     func start() async throws {
         let credential: String
-        do { credential = try await ProviderAuth.resolveEnvValue(for: provider) }
-        catch { throw SpawnError.missingToken }
+        do {
+            if let ref = apiKeyRefOverride,
+               let data = SecretStore.shared.get(ref),
+               let s = String(data: data, encoding: .utf8), !s.isEmpty {
+                credential = s
+            } else {
+                credential = try await ProviderAuth.resolveEnvValue(for: provider)
+            }
+        } catch { throw SpawnError.missingToken }
 
         let stdinPipe = Pipe()
         process.executableURL = AIPaths.bunBinary

@@ -34,11 +34,19 @@ struct ContentView: View {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
             // Connections.
-            let resolver: () -> (Provider, String) = {
+            let resolver: () -> (Provider, String, String?) = {
+                // If a default AI preset is configured, it wins — uses its own
+                // provider, model, and SecretStore-stored API key ref.
+                if let preset = ConfigStore.shared.aiModels.presets.first(where: { $0.isDefault }),
+                   let p = Provider(rawValue: preset.provider) {
+                    return (p, preset.model, preset.apiKeyRef.isEmpty ? nil : preset.apiKeyRef)
+                }
+                // Otherwise fall back to the per-tile connection chosen in
+                // Connections / the input-bar provider picker.
                 guard let id = appState.activeAIId,
                       let p = Provider.from(integrationId: id)
-                else { return (.chatgpt, Provider.chatgpt.defaultModel) }
-                return (p, appState.currentModel(forIntegrationId: id))
+                else { return (.chatgpt, Provider.chatgpt.defaultModel, nil) }
+                return (p, appState.currentModel(forIntegrationId: id), nil)
             }
             chat.providerResolver = resolver
             SuggestionEngine.shared.providerResolver = resolver

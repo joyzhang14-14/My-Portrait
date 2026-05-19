@@ -11,8 +11,8 @@ import Foundation
 @MainActor
 enum PipeExecutor {
     /// Override at boot — supplies the same provider+model as the chat.
-    static var providerResolver: () -> (Provider, String) = {
-        (.chatgpt, Provider.chatgpt.defaultModel)
+    static var providerResolver: () -> (Provider, String, String?) = {
+        (.chatgpt, Provider.chatgpt.defaultModel, nil)
     }
 
     static func run(_ pipe: PipeJob) {
@@ -48,9 +48,9 @@ enum PipeExecutor {
         var parts: [ContentPart] = []
         let assistantId = UUID()
 
-        let (provider, model) = providerResolver()
+        let (provider, model, refOverride) = providerResolver()
         do {
-            let agent = try PiAgent(provider: provider, model: model)
+            let agent = try PiAgent(provider: provider, model: model, apiKeyRefOverride: refOverride)
             try await agent.start()
             let pasted = context.markdown.isEmpty
                 ? pipe.prompt

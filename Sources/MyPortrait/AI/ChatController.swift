@@ -44,10 +44,13 @@ final class ChatController {
     private var pendingTitleFromFirstMessage: Bool = false
 
     private let store = ChatStore.shared
-    /// Closure resolving the currently-selected provider + model (driven by
-    /// `AppState.activeAIId` / `AppState.modelByIntegration`). Defaults to
-    /// ChatGPT with its default model.
-    var providerResolver: () -> (Provider, String) = { (.chatgpt, Provider.chatgpt.defaultModel) }
+    /// Closure resolving the currently-selected provider + model + optional
+    /// SecretStore key reference for that preset's API key (when the user
+    /// has marked an AI preset as default). When ref is nil, ProviderAuth
+    /// falls back to the standard per-provider keychain key.
+    var providerResolver: () -> (Provider, String, String?) = {
+        (.chatgpt, Provider.chatgpt.defaultModel, nil)
+    }
 
     init() {}
 
@@ -239,7 +242,7 @@ final class ChatController {
     }
 
     private func ensureAgent() async throws {
-        let (provider, model) = providerResolver()
+        let (provider, model, apiKeyRef) = providerResolver()
         // If the live agent's provider/model no longer matches what the user
         // picked, tear it down so the new pick takes effect.
         if let agent, let spec = agentSpec, (spec.0 != provider || spec.1 != model) {
@@ -248,7 +251,7 @@ final class ChatController {
             self.agentSpec = nil
         }
         if agent != nil { return }
-        let a = try PiAgent(provider: provider, model: model)
+        let a = try PiAgent(provider: provider, model: model, apiKeyRefOverride: apiKeyRef)
         try await a.start()
         agent = a
         agentSpec = (provider, model)

@@ -19,7 +19,9 @@ final class SuggestionEngine {
     private(set) var lastRefreshed: Date? = nil
 
     /// Override at app boot — supplies the same provider+model as the chat.
-    var providerResolver: () -> (Provider, String) = { (.chatgpt, Provider.chatgpt.defaultModel) }
+    var providerResolver: () -> (Provider, String, String?) = {
+        (.chatgpt, Provider.chatgpt.defaultModel, nil)
+    }
 
     private var inFlight: Task<Void, Never>?
 
@@ -83,9 +85,9 @@ final class SuggestionEngine {
             """
         }
 
-        let (provider, model) = providerResolver()
+        let (provider, model, refOverride) = providerResolver()
         do {
-            let agent = try PiAgent(provider: provider, model: model)
+            let agent = try PiAgent(provider: provider, model: model, apiKeyRefOverride: refOverride)
             try await agent.start()
             try agent.sendPrompt(prompt)
 
