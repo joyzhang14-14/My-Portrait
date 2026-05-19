@@ -105,9 +105,18 @@ final class CaptureSettings: ObservableObject {
         // 仅在 UserDefaults 完全没有该 key 时写入（已经有值的不动）。
         for key in [
             SettingsKeys.screenRecordingEnabled,
+        ] where defaults.object(forKey: key) == nil {
+            defaults.set(false, forKey: key)
+        }
+
+        // **音频 kill switch（临时）**：与 Services.audioCaptureKillSwitchOn 配套，
+        // 每次启动都把音频 / 系统音频两个 key 重写为 false —— 强制 Settings UI
+        // 也显示 OFF，避免"显示 OFF 但 UserDefaults 残留 true 仍然录"的歧义。
+        // kill switch 移除时一并删此循环。
+        for key in [
             SettingsKeys.audioRecordingEnabled,
             SettingsKeys.captureSystemAudio,
-        ] where defaults.object(forKey: key) == nil {
+        ] {
             defaults.set(false, forKey: key)
         }
 

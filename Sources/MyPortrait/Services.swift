@@ -212,9 +212,34 @@ final class Services {
         }
     }
 
+    // MARK: - Audio kill switch（临时）
+    //
+    // 调查"一 build 就音乐音量被压"现象期间，强制保持 AudioCaptureService +
+    // SystemAudioCaptureService **永远是 stop 状态**，无论 settings 切到什么。
+    //
+    // 怀疑路径（待确认）：
+    //   - SystemAudioCaptureService 启动时 CATapDescription + AVAudioEngine 一起跑，
+    //     macOS 对系统音频 tap 会自动套用 "voice processing" 音频策略，结果就是
+    //     其他 app 的 playback volume 被 duck（典型现象）
+    //   - 也可能是用户在 dev 期间手动 toggle 过 systemAudio=true 进 UserDefaults，
+    //     没改回来，每次启动都"持续录"
+    //
+    // 把 kill switch 翻成 false 即恢复 settings 控制。
+    private static let audioCaptureKillSwitchOn = true
+
     private func applyAudioCapture(enabled: Bool) {
         let audio = self.audio
+        let killed = Self.audioCaptureKillSwitchOn
+        let logger = self.logger
         Task.detached(priority: .userInitiated) {
+            if killed {
+                // 永远 stop，不管 enabled 是什么。
+                await audio.stop()
+                if enabled {
+                    logger.warning("audio kill-switch ON: ignored start request (settings.audioCaptureEnabled=true). Flip Services.audioCaptureKillSwitchOn = false to re-enable.")
+                }
+                return
+            }
             if enabled {
                 await audio.start()
             } else {
@@ -225,7 +250,16 @@ final class Services {
 
     private func applySystemAudioCapture(enabled: Bool) {
         let sysAudio = self.systemAudio
+        let killed = Self.audioCaptureKillSwitchOn
+        let logger = self.logger
         Task.detached(priority: .userInitiated) {
+            if killed {
+                await sysAudio.stop()
+                if enabled {
+                    logger.warning("audio kill-switch ON: ignored start request (settings.systemAudioCaptureEnabled=true). Flip Services.audioCaptureKillSwitchOn = false to re-enable.")
+                }
+                return
+            }
             if enabled {
                 await sysAudio.start()
             } else {
