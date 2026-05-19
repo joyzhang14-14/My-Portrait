@@ -46,13 +46,13 @@ struct ScreenpipeDB: Sendable {
             self.dbPath = path
             return
         }
-        // Default order:
+        // Default order — never touches the original `~/.screenpipe` after
+        // the user did the one-shot copy into `~/.portrait/imported/screenpipe`.
         //   1. User-overridden directory in Settings → Storage → Data directory
-        //      (lets people relocate ~/.screenpipe to an external drive).
-        //   2. Imported snapshot at ~/.portrait/imported/screenpipe/db.sqlite
-        //      (frozen, reproducible — what the Memory pipeline reads).
-        //   3. Legacy ~/.screenpipe/db.sqlite (live daemon writes here),
-        //      used only when the snapshot doesn't exist yet.
+        //      (lets people relocate to an external drive).
+        //   2. Imported snapshot at ~/.portrait/imported/screenpipe/db.sqlite.
+        //   3. Same snapshot path even if it doesn't exist yet — gives callers
+        //      a stable string they can show in the UI ("file not found").
         let userDir = ConfigStore.snapshot.dataDirectory
         if !userDir.isEmpty {
             let candidate = (userDir as NSString).expandingTildeInPath
@@ -62,12 +62,30 @@ struct ScreenpipeDB: Sendable {
                 return
             }
         }
-        let imported = Storage.screenpipeImportedDBPath
-        if FileManager.default.fileExists(atPath: imported) {
-            self.dbPath = imported
-        } else {
-            self.dbPath = NSString(string: "~/.screenpipe/db.sqlite").expandingTildeInPath
-        }
+        self.dbPath = Storage.screenpipeImportedDBPath
+    }
+
+    /// Root of whichever screenpipe snapshot we resolved. Used to rewrite
+    /// the absolute `~/.screenpipe/data/...` paths stored inside the DB
+    /// so they point at the imported copy under `~/.portrait/imported/screenpipe/`.
+    private var snapshotRoot: String {
+        (dbPath as NSString).deletingLastPathComponent
+    }
+
+    /// Legacy daemon root — every path written into the DB by screenpipe
+    /// starts with this. We substitute it with `snapshotRoot` so JPGs /
+    /// MP4s resolve to the imported copy instead of the original folder.
+    private static let legacyRoot: String = NSString(string: "~/.screenpipe").expandingTildeInPath
+
+    /// Rewrite a DB-stored absolute path so it lands inside the imported
+    /// snapshot. Pass-through if the file already exists at the original
+    /// path (covers the case where someone is still running live screenpipe).
+    private func rewritePath(_ p: String?) -> String? {
+        guard let p, !p.isEmpty else { return p }
+        if FileManager.default.fileExists(atPath: p) { return p }
+        guard p.hasPrefix(Self.legacyRoot) else { return p }
+        let suffix = String(p.dropFirst(Self.legacyRoot.count))
+        return snapshotRoot + suffix
     }
 
     var exists: Bool {
@@ -149,8 +167,8 @@ struct ScreenpipeDB: Sendable {
             let app = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             let win = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
             let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) }
-            let snap = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
-            let vpath = sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) }
+            let snap  = rewritePath(sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) })
+            let vpath = rewritePath(sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) })
             let offset = Int(sqlite3_column_int64(stmt, 7))
             let fps = sqlite3_column_double(stmt, 8)
             let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()

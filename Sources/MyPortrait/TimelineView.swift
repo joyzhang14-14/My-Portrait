@@ -669,7 +669,7 @@ private struct EmptyState: View {
             } else if !hasDB {
                 Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 32))
                     .foregroundStyle(.white.opacity(0.3))
-                Text("No ~/.screenpipe/db.sqlite found")
+                Text("No ~/.portrait/imported/screenpipe/db.sqlite found")
                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
             } else {
                 Image(systemName: "moon.zzz").font(.system(size: 32))

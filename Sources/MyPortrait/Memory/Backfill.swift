@@ -3,7 +3,8 @@ import Foundation
 /// Event-level backfill from existing screenpipe data.
 ///
 /// Per-day loop:
-///   1. Read frames for this day from `~/.screenpipe/db.sqlite`
+///   1. Read frames for this day from the imported snapshot at
+///      `~/.portrait/imported/screenpipe/db.sqlite` (resolved by `ScreenpipeDB`).
 ///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions
 ///   3. Enrich each session with OCR text from its member frames
 ///   4. EventBuilder (LLM, one call per day): for each session, decide
