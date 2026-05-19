@@ -11,6 +11,7 @@ struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
     @State private var organizing = false
+    @State private var organizeError: String? = nil
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -28,6 +29,12 @@ struct SpeakersSettingsView: View {
 
             if !unidentified.isEmpty {
                 AttentionBanner(count: unidentified.count)
+            }
+
+            if let err = organizeError {
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.red.opacity(0.85))
             }
 
             toolbar
@@ -84,8 +91,7 @@ struct SpeakersSettingsView: View {
             Spacer()
 
             Button {
-                organizing = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { organizing = false }
+                runOrganize()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: organizing ? "wand.and.stars.inverse" : "wand.and.stars")
@@ -116,6 +122,31 @@ struct SpeakersSettingsView: View {
     // MARK: - Mutators
 
     private func reload() { rows = SpeakerLoader.loadAll() }
+
+    /// Ask the LLM to propose names for every unidentified cluster, then
+    /// apply each suggested label through the existing `rename` path
+    /// (persistence is a no-op today — the speakers table is read-only
+    /// from `TimelineDB` — but the names show up in the UI right away).
+    private func runOrganize() {
+        guard !organizing else { return }
+        organizeError = nil
+        let ids = unidentified.map { $0.id }
+        guard !ids.isEmpty else { return }
+        organizing = true
+        Task {
+            defer { organizing = false }
+            do {
+                let proposals = try await SpeakerOrganizer.run(unidentifiedIds: ids)
+                for p in proposals where !p.label.isEmpty {
+                    if let row = rows.first(where: { $0.id == p.speakerId }) {
+                        rename(row, to: p.label)
+                    }
+                }
+            } catch {
+                organizeError = error.localizedDescription
+            }
+        }
+    }
     private func rename(_ r: SpeakerRow, to newName: String) {
         let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }

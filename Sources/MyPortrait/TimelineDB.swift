@@ -1,27 +1,25 @@
 import Foundation
 import SQLite3
 
-/// Read-only reader for the imported timeline SQLite database
-/// (`~/.portrait/imported/timeline/db.sqlite`). The schema (frames /
-/// video_chunks / audio_transcriptions / ocr_text) was inherited from
-/// the upstream capture daemon and is kept verbatim so historical
-/// queries still work.
+/// Read/write client for the unified timeline database
+/// (`~/.portrait/portrait.sqlite`). Same DB the capture layer writes to —
+/// the legacy snapshot was migrated into this schema 2026-05-19.
 ///
-/// Path convention: file paths in the DB (`frames.snapshot_path`,
-/// `video_chunks.file_path`, `audio_chunks.file_path`) are stored
-/// **relative** to the snapshot root. `resolvePath` joins them with
-/// the live `snapshotRoot` so the snapshot directory can be moved or
-/// shipped to a different user without rewriting the DB.
+/// Schema highlights (capture / GRDB):
+///   - `frames.timestamp_ms`  INTEGER  UTC milliseconds since epoch
+///   - `frames.full_text`     TEXT     OCR text inlined per frame
+///   - `video_chunks.file_path` / `frames.snapshot_path` are stored
+///     RELATIVE to `~/.portrait/` so the data tree is relocatable.
 struct TimelineFrame: Identifiable, Hashable {
     let id: Int64
     let timestamp: Date           // UTC
     let appName: String
     let windowName: String
     let browserUrl: String?       // set when the active app is a browser
-    let snapshotPath: String?     // JPG for the small fraction of recent frames
-    let videoPath: String?        // MP4 file containing this frame (most cases)
-    let videoOffsetIndex: Int     // frame number inside the MP4
-    let videoFps: Double           // frames per second the MP4 was written at
+    let snapshotPath: String?     // JPG path (already resolved to absolute)
+    let videoPath: String?        // MP4 path (already resolved to absolute)
+    let videoOffsetMs: Int        // offset within the MP4, in milliseconds
+    let videoFps: Double          // chunk's frames-per-second
 }
 
 /// Distinct app + window that was active within a small time window
@@ -57,65 +55,50 @@ struct TimelineDB: Sendable {
         // Default order:
         //   1. User-overridden directory in Settings → Storage → Data directory
         //      (lets people relocate to an external drive).
-        //   2. Imported snapshot at ~/.portrait/imported/timeline/db.sqlite.
-        //   3. Same snapshot path even if it doesn't exist yet — gives callers
-        //      a stable string they can show in the UI ("file not found").
+        //   2. The unified capture/timeline DB at ~/.portrait/portrait.sqlite.
         let userDir = ConfigStore.snapshot.dataDirectory
         if !userDir.isEmpty {
             let candidate = (userDir as NSString).expandingTildeInPath
-                + "/db.sqlite"
+                + "/portrait.sqlite"
             if FileManager.default.fileExists(atPath: candidate) {
                 self.dbPath = candidate
                 return
             }
         }
-        self.dbPath = Storage.timelineImportedDBPath
+        self.dbPath = Storage.portraitDBPath
     }
 
-    /// Root of the imported snapshot — the directory containing `db.sqlite`.
-    /// `resolvePath` joins this with each relative DB path so the snapshot
-    /// folder can live anywhere on disk without touching the database.
-    private var snapshotRoot: String {
-        (dbPath as NSString).deletingLastPathComponent
-    }
+    /// Root of the assets tree. Relative file paths stored in the DB
+    /// (snapshot_path / video_chunks.file_path / audio_chunks.file_path)
+    /// are resolved against this. Equal to `~/.portrait/` so the data
+    /// tree is fully relocatable.
+    private var assetsRoot: String { Storage.rootURL.path }
 
-    /// Resolve a DB-stored file path. Relative paths are joined with
-    /// `snapshotRoot`. Absolute paths pass through unchanged — supports
-    /// any legacy rows that still contain an absolute path the migration
-    /// missed (or external paths the user pointed at).
+    /// Resolve a DB-stored file path. Relative paths are joined with the
+    /// assets root; absolute paths pass through unchanged (covers any
+    /// pre-migration rows that still have an absolute path).
     private func resolvePath(_ p: String?) -> String? {
         guard let p, !p.isEmpty else { return p }
         if (p as NSString).isAbsolutePath { return p }
-        return (snapshotRoot as NSString).appendingPathComponent(p)
+        return (assetsRoot as NSString).appendingPathComponent(p)
     }
 
     var exists: Bool {
         FileManager.default.fileExists(atPath: dbPath)
     }
 
-    /// SQLite stores timestamps as TEXT and compares lexicographically.
-    /// DB format is "2026-05-15T07:00:00.123456+00:00".
-    /// We format query bounds as "2026-05-15T07:00:00" (no fractional, no zone
-    /// suffix) — strictly a prefix of the DB format, so `>=` / `<` comparisons
-    /// work without missing boundary rows.
-    ///
-    /// (ISO8601DateFormatter with .withInternetDateTime emits "...Z" which
-    /// sorts AFTER ".XXX+00:00" lexicographically and was silently dropping
-    /// rows at midnight boundaries on past-day queries.)
-    private static let queryDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
+    /// Convert a Swift Date to UTC milliseconds since 1970-01-01.
+    private static func dbMs(_ date: Date) -> Int64 {
+        Int64(date.timeIntervalSince1970 * 1000)
+    }
 
-    private static func dbTimestamp(_ date: Date) -> String {
-        queryDateFormatter.string(from: date)
+    private static func msToDate(_ ms: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(ms) / 1000.0)
     }
 
     /// Fetch frames for a given day window. Returns ordered ascending by timestamp.
-    /// `limit` caps the result to keep the UI snappy; default 800 is roughly one frame per ~2 minutes for 24h.
+    /// `limit` caps the result to keep the UI snappy; default 800 is roughly one
+    /// frame per ~2 minutes for 24h.
     func frames(on day: Date, limit: Int = 800) -> [TimelineFrame] {
         guard exists else { return [] }
 
@@ -123,8 +106,8 @@ struct TimelineDB: Sendable {
         let dayStart = cal.startOfDay(for: day)
         let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
 
-        let startStr = Self.dbTimestamp(dayStart)
-        let endStr = Self.dbTimestamp(dayEnd)
+        let startMs = Self.dbMs(dayStart)
+        let endMs = Self.dbMs(dayEnd)
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
@@ -132,19 +115,23 @@ struct TimelineDB: Sendable {
         }
         defer { sqlite3_close(db) }
 
-        // 99%+ of frames are stored inside MP4 video chunks rather than
-        // as individual JPGs. We accept either, JOINing video_chunks to surface
-        // the file path + fps so an AVAssetImageGenerator can extract the
-        // specific frame on demand.
+        // Most frames live inside an MP4 chunk; a handful have a standalone
+        // JPG snapshot. We accept either. video_chunks JOIN surfaces the
+        // chunk's file path + fps + start_ts_ms so we can compute the
+        // offset (in ms) into the MP4 for any extracted frame.
         let sql = """
-            SELECT f.id, f.timestamp, f.app_name, f.window_name, f.browser_url,
-                   f.snapshot_path, v.file_path, f.offset_index,
+            SELECT f.id, f.timestamp_ms, f.app_name,
+                   COALESCE(f.window_name, ''),
+                   f.browser_url,
+                   f.snapshot_path,
+                   v.file_path,
+                   COALESCE(f.offset_ms, MAX(0, f.timestamp_ms - COALESCE(v.start_ts_ms, f.timestamp_ms))),
                    COALESCE(v.fps, 0)
             FROM frames f
             LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
             WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
-              AND f.timestamp >= ? AND f.timestamp < ?
-            ORDER BY f.timestamp ASC
+              AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
+            ORDER BY f.timestamp_ms ASC
             LIMIT ?
             """
 
@@ -152,40 +139,36 @@ struct TimelineDB: Sendable {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, startStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 2, endStr,   -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(stmt, 1, startMs)
+        sqlite3_bind_int64(stmt, 2, endMs)
         sqlite3_bind_int(stmt, 3, Int32(limit))
 
         var results: [TimelineFrame] = []
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
-        let fallback = ISO8601DateFormatter()
-        fallback.formatOptions = [.withInternetDateTime, .withTimeZone]
-
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = sqlite3_column_int64(stmt, 0)
-            let ts = String(cString: sqlite3_column_text(stmt, 1))
+            let ts = sqlite3_column_int64(stmt, 1)
             let app = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             let win = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
             let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) }
             let snap  = resolvePath(sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) })
             let vpath = resolvePath(sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) })
-            let offset = Int(sqlite3_column_int64(stmt, 7))
+            let offsetMs = Int(sqlite3_column_int64(stmt, 7))
             let fps = sqlite3_column_double(stmt, 8)
-            let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
             results.append(.init(
-                id: id, timestamp: date, appName: app, windowName: win,
+                id: id, timestamp: Self.msToDate(ts), appName: app, windowName: win,
                 browserUrl: url, snapshotPath: snap,
-                videoPath: vpath, videoOffsetIndex: offset, videoFps: fps
+                videoPath: vpath, videoOffsetMs: offsetMs, videoFps: fps
             ))
         }
-
         return results
     }
 
-    /// Pull deduped OCR text for the given frame IDs. The same screen
-    /// content repeats across many adjacent frames, so we line-dedupe and
-    /// cap total chars to keep LLM context bounded.
+    /// Pull deduped OCR text for the given frame IDs. The same screen content
+    /// repeats across many adjacent frames, so we line-dedupe and cap total
+    /// chars to keep LLM context bounded.
+    ///
+    /// Reads `frames.full_text` directly (capture schema inlines OCR per
+    /// frame — no separate ocr_text table).
     func ocrText(forFrameIds frameIds: [Int64], maxChars: Int = 1500) -> String {
         guard exists, !frameIds.isEmpty else { return "" }
 
@@ -205,10 +188,10 @@ struct TimelineDB: Sendable {
         for chunk in chunks {
             let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
             let sql = """
-                SELECT text
-                FROM ocr_text
-                WHERE frame_id IN (\(placeholders))
-                  AND text IS NOT NULL AND length(text) > 4
+                SELECT full_text
+                FROM frames
+                WHERE id IN (\(placeholders))
+                  AND full_text IS NOT NULL AND length(full_text) > 4
                 """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
@@ -220,7 +203,6 @@ struct TimelineDB: Sendable {
 
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let raw = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
-                // Split into lines, dedupe, append until cap.
                 for line in raw.split(separator: "\n") {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
                     guard trimmed.count >= 3 else { continue }
@@ -239,13 +221,12 @@ struct TimelineDB: Sendable {
     }
 
     /// Distinct app/window combinations active around the given moment.
-    /// Used by the Timeline sidebar's "Active Apps" panel — shows what the
-    /// user had open at this point in the day.
+    /// Used by the Timeline sidebar's "Active Apps" panel.
     func activeApps(around moment: Date, window: TimeInterval = 45) -> [ActiveAppEntry] {
         guard exists else { return [] }
 
-        let start = Self.dbTimestamp(moment.addingTimeInterval(-window))
-        let end = Self.dbTimestamp(moment.addingTimeInterval(window))
+        let startMs = Self.dbMs(moment.addingTimeInterval(-window))
+        let endMs = Self.dbMs(moment.addingTimeInterval(window))
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
@@ -255,9 +236,9 @@ struct TimelineDB: Sendable {
             SELECT app_name,
                    COALESCE(window_name, ''),
                    COALESCE(browser_url, ''),
-                   MAX(timestamp) as latest
+                   MAX(timestamp_ms) as latest
             FROM frames
-            WHERE timestamp >= ? AND timestamp <= ?
+            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
               AND app_name IS NOT NULL AND app_name != ''
             GROUP BY app_name, window_name
             ORDER BY latest DESC
@@ -268,34 +249,28 @@ struct TimelineDB: Sendable {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, start, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 2, end,   -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
-        let fallback = ISO8601DateFormatter()
-        fallback.formatOptions = [.withInternetDateTime, .withTimeZone]
+        sqlite3_bind_int64(stmt, 1, startMs)
+        sqlite3_bind_int64(stmt, 2, endMs)
 
         var out: [ActiveAppEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let app = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
             let win = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
             let url = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
-            let ts = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
-            let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
+            let ts = sqlite3_column_int64(stmt, 3)
             out.append(.init(
                 appName: app,
                 windowName: win,
                 browserUrl: url.isEmpty ? nil : url,
-                lastSeen: date
+                lastSeen: Self.msToDate(ts)
             ))
         }
         return out
     }
 
-    /// Audio transcriptions near the focused moment. Defaults span the conversation
-    /// that was actively happening (favors slightly before, since you usually look
-    /// back to read what was just said).
+    /// Audio transcriptions near the focused moment. Defaults span the
+    /// conversation that was actively happening (favors slightly before,
+    /// since you usually look back to read what was just said).
     func audioTranscripts(
         around moment: Date,
         before: TimeInterval = 120,
@@ -303,25 +278,27 @@ struct TimelineDB: Sendable {
     ) -> [AudioTranscriptEntry] {
         guard exists else { return [] }
 
-        let start = Self.dbTimestamp(moment.addingTimeInterval(-before))
-        let end = Self.dbTimestamp(moment.addingTimeInterval(after))
+        let startMs = Self.dbMs(moment.addingTimeInterval(-before))
+        let endMs = Self.dbMs(moment.addingTimeInterval(after))
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
+        // Speakers JOIN goes through audio_chunks → device/is_input + the
+        // optional speakers table (older migrated rows may not have a
+        // speakers table; LEFT JOIN keeps everything resilient).
         let sql = """
-            SELECT t.timestamp,
-                   t.transcription,
-                   t.device,
-                   t.is_input_device,
-                   t.speaker_id,
-                   s.name
+            SELECT t.transcribed_at_ms,
+                   t.text,
+                   COALESCE(ac.device, ''),
+                   COALESCE(ac.is_input, 1),
+                   t.speaker_id
             FROM audio_transcriptions t
-            LEFT JOIN speakers s ON s.id = t.speaker_id
-            WHERE t.timestamp >= ? AND t.timestamp <= ?
-              AND t.transcription IS NOT NULL AND t.transcription != ''
-            ORDER BY t.timestamp ASC
+            LEFT JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            WHERE t.transcribed_at_ms >= ? AND t.transcribed_at_ms <= ?
+              AND t.text IS NOT NULL AND t.text != ''
+            ORDER BY t.transcribed_at_ms ASC
             LIMIT 60
             """
 
@@ -329,56 +306,54 @@ struct TimelineDB: Sendable {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, start, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 2, end,   -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
-        let fallback = ISO8601DateFormatter()
-        fallback.formatOptions = [.withInternetDateTime, .withTimeZone]
+        sqlite3_bind_int64(stmt, 1, startMs)
+        sqlite3_bind_int64(stmt, 2, endMs)
 
         var out: [AudioTranscriptEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let ts = sqlite3_column_text(stmt, 0).flatMap { String(cString: $0) } ?? ""
+            let ts = sqlite3_column_int64(stmt, 0)
             let text = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
             let device = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
             let isInput = sqlite3_column_int(stmt, 3) != 0
             let speakerIdRaw = sqlite3_column_int64(stmt, 4)
             let speakerId: Int? = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : Int(speakerIdRaw)
-            let speakerName = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
-            let date = parser.date(from: ts) ?? fallback.date(from: ts) ?? Date()
 
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
             out.append(.init(
-                timestamp: date,
+                timestamp: Self.msToDate(ts),
                 text: trimmed,
                 device: device,
                 isInput: isInput,
                 speakerId: speakerId,
-                speakerName: speakerName
+                speakerName: nil    // capture schema doesn't have a speakers table yet
             ))
         }
         return out
     }
 
-    /// Day-bounded set of distinct dates that have at least one frame. Used to gray-out empty days in the calendar.
+    /// Day-bounded set of distinct dates that have at least one frame.
+    /// Used to gray-out empty days in the calendar.
     func availableDays(monthsBack: Int = 3) -> Set<DateComponents> {
         guard exists else { return [] }
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
+        let cutoffMs = Self.dbMs(
+            Calendar(identifier: .gregorian)
+                .date(byAdding: .month, value: -monthsBack, to: Date()) ?? Date()
+        )
         let sql = """
-            SELECT DISTINCT substr(timestamp, 1, 10) AS day
+            SELECT DISTINCT DATE(timestamp_ms/1000, 'unixepoch') AS day
             FROM frames
-            WHERE snapshot_path IS NOT NULL
-              AND timestamp >= datetime('now', '-\(monthsBack) months')
+            WHERE timestamp_ms >= ?
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, cutoffMs)
 
         var out: Set<DateComponents> = []
         let cal = Calendar(identifier: .gregorian)
@@ -399,24 +374,13 @@ struct TimelineDB: Sendable {
 
     // MARK: - Write operations (auto-delete / manual purge)
 
-    /// Result of a delete pass. `frames`/`audio` are row counts removed.
     struct DeleteResult: Sendable {
         var frames: Int = 0
         var audio: Int = 0
-        /// Non-nil when the DB couldn't be opened RW (e.g. another process
-        /// is writing). Caller can surface a toast.
         var error: String? = nil
     }
 
     /// Delete frames + audio transcriptions strictly before `cutoff`.
-    /// Used by both manual "Delete last 15m / 30m / 1h" buttons and the
-    /// retention auto-delete runner.
-    ///
-    /// `mediaOnly == true` mirrors Orphies' "media only" mode: keep OCR text
-    /// + transcriptions intact, just zero out the underlying file paths so
-    /// the JPGs / MP4s on disk become orphaned (the next compaction sweep
-    /// will reclaim them). For now we treat it the same as a full row delete
-    /// of frames but preserve `audio_transcriptions` — text is the cheap part.
     func deleteBefore(_ cutoff: Date, mediaOnly: Bool) -> DeleteResult {
         guard exists else { return DeleteResult() }
         var db: OpaquePointer?
@@ -425,22 +389,20 @@ struct TimelineDB: Sendable {
         }
         defer { sqlite3_close(db) }
 
-        let cutoffStr = Self.dbTimestamp(cutoff)
+        let cutoffMs = Self.dbMs(cutoff)
         var result = DeleteResult()
 
-        // frames — delete rows captured before the cutoff.
-        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp < ?") {
-            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp_ms < ?") {
+            sqlite3_bind_int64(stmt, 1, cutoffMs)
             if sqlite3_step(stmt) == SQLITE_DONE {
                 result.frames = Int(sqlite3_changes(db))
             }
             sqlite3_finalize(stmt)
         }
 
-        // audio_transcriptions — only when not media-only.
         if !mediaOnly,
-           let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE timestamp < ?") {
-            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+           let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE transcribed_at_ms < ?") {
+            sqlite3_bind_int64(stmt, 1, cutoffMs)
             if sqlite3_step(stmt) == SQLITE_DONE {
                 result.audio = Int(sqlite3_changes(db))
             }
@@ -451,7 +413,6 @@ struct TimelineDB: Sendable {
     }
 
     /// Delete frames + audio transcriptions strictly *after* `cutoff`.
-    /// Used by manual "Delete last N minutes" buttons (cutoff = now − N).
     @discardableResult
     func deleteAfter(_ cutoff: Date) -> DeleteResult {
         guard exists else { return DeleteResult() }
@@ -460,50 +421,57 @@ struct TimelineDB: Sendable {
             return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
         }
         defer { sqlite3_close(db) }
-        let cutoffStr = Self.dbTimestamp(cutoff)
+        let cutoffMs = Self.dbMs(cutoff)
         var result = DeleteResult()
-        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp >= ?") {
-            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp_ms >= ?") {
+            sqlite3_bind_int64(stmt, 1, cutoffMs)
             if sqlite3_step(stmt) == SQLITE_DONE { result.frames = Int(sqlite3_changes(db)) }
             sqlite3_finalize(stmt)
         }
-        if let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE timestamp >= ?") {
-            sqlite3_bind_text(stmt, 1, cutoffStr, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        if let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE transcribed_at_ms >= ?") {
+            sqlite3_bind_int64(stmt, 1, cutoffMs)
             if sqlite3_step(stmt) == SQLITE_DONE { result.audio = Int(sqlite3_changes(db)) }
             sqlite3_finalize(stmt)
         }
         return result
     }
 
-    /// Speakers: rename a clustered speaker. `speakerId` is the int64 from
-    /// `speakers.id`. Empty `name` clears it back to unidentified.
-    @discardableResult
-    func renameSpeaker(id speakerId: Int64, to name: String) -> Bool {
-        guard exists else { return false }
+    /// Speakers: pull a few representative transcripts so the LLM-driven
+    /// organiser can guess a name. Filters out short / one-word lines.
+    /// Read-only — works against the imported snapshot DB.
+    func sampleTranscripts(forSpeakerId speakerId: Int64, limit: Int = 5) -> [String] {
+        guard exists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
-        guard let stmt = prepare(db, "UPDATE speakers SET name = ? WHERE id = ?") else { return false }
-        defer { sqlite3_finalize(stmt) }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        sqlite3_bind_text(stmt, 1, trimmed, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_int64(stmt, 2, speakerId)
-        return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    /// Speakers: mark a cluster as a hallucination so it stops surfacing.
-    /// `speakers.hallucination` must exist (upstream schema adds it).
-    @discardableResult
-    func markSpeakerHallucination(id speakerId: Int64) -> Bool {
-        guard exists else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_close(db) }
-        guard let stmt = prepare(db, "UPDATE speakers SET hallucination = 1 WHERE id = ?") else { return false }
+        let sql = """
+            SELECT transcription
+            FROM audio_transcriptions
+            WHERE speaker_id = ?
+              AND transcription IS NOT NULL
+              AND length(transcription) > 12
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, speakerId)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        sqlite3_bind_int(stmt, 2, Int32(limit))
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { out.append(String(cString: c)) }
+        }
+        return out
     }
+
+    /// Speakers table not part of the capture schema yet — these are
+    /// no-ops until a speakers/diarisation pipeline is added.
+    @discardableResult
+    func renameSpeaker(id speakerId: Int64, to name: String) -> Bool { false }
+
+    @discardableResult
+    func markSpeakerHallucination(id speakerId: Int64) -> Bool { false }
 
     private func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {
         var stmt: OpaquePointer?
