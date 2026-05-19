@@ -10,6 +10,8 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.18.0"),
         // sentencepiece tokenizer，HuggingFace 出的 Swift 包
         .package(url: "https://github.com/huggingface/swift-transformers.git", from: "0.1.13"),
+        // TOML 1.0 codec for the user-editable ~/.myportrait/config.toml
+        .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0"),
     ],
     targets: [
         .executableTarget(
@@ -21,6 +23,7 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "Transformers", package: "swift-transformers"),
+                .product(name: "TOMLKit", package: "TOMLKit"),
             ],
             path: "Sources/MyPortrait",
             exclude: [
