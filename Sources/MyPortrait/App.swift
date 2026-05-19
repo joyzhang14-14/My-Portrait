@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import MLX
 import os.log
 
 @main
@@ -7,6 +8,15 @@ struct MyPortraitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     init() {
+        // CLI 模式：`--embed-dump <text>` 跑 bge-m3 推理 → stdout 拷向量 → exit。
+        // 用于跟 Python FlagEmbedding 数值对齐（要求 cosine ≥ 0.999）。
+        // 必须在任何 SwiftUI / AppDelegate 设置之前拦截，否则会被窗口初始化拖慢。
+        let args = ProcessInfo.processInfo.arguments
+        if let idx = args.firstIndex(of: "--embed-dump") {
+            let userText: String? = (idx + 1 < args.count) ? args[idx + 1] : nil
+            EmbedDumpCLI.run(userText: userText)
+            // EmbedDumpCLI.run 内部 exit(0/1)，不会返回。
+        }
         AppKeyboard.install()
     }
 

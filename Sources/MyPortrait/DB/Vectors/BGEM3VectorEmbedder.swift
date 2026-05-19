@@ -74,6 +74,17 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         return v
     }
 
+    /// 调试用：返回单句的 token id 序列，跟 Python FlagEmbedding 的
+    /// `tokenizer.encode(text, add_special_tokens=True)` 应该 **完全一致**。
+    /// 如果不一致 → 说明 normalizer / pre_tokenizer / post_processor 有差异。
+    func debugTokenize(_ text: String) async throws -> [Int] {
+        let c = try await loadedContainer()
+        return await c.perform { (_, tokenizer) -> [Int] in
+            let tokens = tokenizer.encode(text: text, addSpecialTokens: true)
+            return Array(tokens.prefix(Self.maxSequenceLength))
+        }
+    }
+
     func embedBatch(_ texts: [String]) async throws -> [[Float]] {
         guard !texts.isEmpty else { return [] }
         if loadFailed {
