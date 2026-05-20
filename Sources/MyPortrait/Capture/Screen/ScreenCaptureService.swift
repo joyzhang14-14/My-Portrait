@@ -31,6 +31,17 @@ final class ScreenCaptureService {
 
     /// 抓主显示器一帧。失败重试 3 次。
     func captureMainDisplay() async throws -> CGImage {
+        // **Preflight 权限检查**：CGPreflightScreenCaptureAccess() 不触发 SCK XPC
+        // 调用，纯本地查 TCC database。如果没授权，**根本不调 SCScreenshotManager**。
+        //
+        // 为什么不能省：SCK 一旦发起 XPC 请求（即使紧接着抛 permission denied），
+        // 后续仍会通过 caulk.messenger 投递若干 reply 回调。我们 coordinator.stop()
+        // 后这些 reply 落到已经 invalidated 的 dispatch queue → dispatch_assert
+        // → 整进程崩。避免发请求是唯一稳的法子。
+        if !CGPreflightScreenCaptureAccess() {
+            throw CaptureError.screenRecordingPermissionDenied
+        }
+
         var lastError: Error?
 
         for attempt in 0..<3 {
