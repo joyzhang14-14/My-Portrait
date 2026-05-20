@@ -318,10 +318,14 @@ struct RecordingConfig: Codable, Equatable {
     /// Typing 采集「键盘活动关联判据」时间窗（毫秒）：value 变化前若
     /// 这段时间内没有物理按键，则判定非用户打字、丢弃。
     var typingKeyCorrelationWindowMs: Int = 1000
+    /// Typing 采集暂停开关。true → TypingObserver 丢弃所有 value 变化（不快照、
+    /// 不 diff、不写库）。持久化到 TOML，跨重启保留。菜单栏一键切换。
+    var typingCapturePaused: Bool = false
     init() {}
     enum CodingKeys: String, CodingKey {
         case audio, screen, system
         case typingKeyCorrelationWindowMs = "typing_key_correlation_window_ms"
+        case typingCapturePaused = "typing_capture_paused"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -330,6 +334,7 @@ struct RecordingConfig: Codable, Equatable {
         screen = c.dflt(ScreenConfig.self, .screen, screen)
         system = c.dflt(SystemConfig.self, .system, system)
         typingKeyCorrelationWindowMs = c.dflt(Int.self, .typingKeyCorrelationWindowMs, typingKeyCorrelationWindowMs)
+        typingCapturePaused = c.dflt(Bool.self, .typingCapturePaused, typingCapturePaused)
     }
 }
 

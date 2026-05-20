@@ -392,6 +392,10 @@ final class TypingObserver {
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
 
+        // 暂停闸门：菜单栏暂停开关打开时，整体丢弃 value 变化 —— 不快照、不 diff、
+        // 不写库、不 print。AX 订阅保持不动，恢复后下一次 value 变化立即生效。
+        if ConfigStore.shared.recording.typingCapturePaused { return }
+
         // 键盘活动关联判据：value 变化前若 correlationWindow 内没有物理按键，
         // 判定非用户打字（终端输出 / 别人的聊天消息 / AI 补全 ghost text 等）
         // —— 丢弃，不 snapshot 不 diff。窗口值每次现读，支持运行中改配置生效。
