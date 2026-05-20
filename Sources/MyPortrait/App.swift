@@ -130,6 +130,12 @@ struct MyPortraitApp: App {
             DistillCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--repair-portrait` re-reads + re-writes every portrait /
+        // event .md to fix stale on-disk frontmatter formatting.
+        if args.contains("--repair-portrait") {
+            RepairPortraitCLI.run()
+            // run() exits the process internally.
+        }
         // `--import-default-pipes` seeds the two built-in pipes into
         // PipeStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {

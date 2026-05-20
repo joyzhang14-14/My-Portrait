@@ -531,6 +531,40 @@ enum BackfillDaysCLI {
     }
 }
 
+/// `--repair-portrait` — DEV-ONLY. 把 events/ 与 portrait/ 下每个 .md 读出来
+/// 再写回，用更新后的 PortraitFileIO 修复格式（如旧的多行 frontmatter）。
+/// 报告读取成功 / 失败数。Disposable.
+enum RepairPortraitCLI {
+    static func run() {
+        print("=== repair-portrait ===")
+        let fm = FileManager.default
+        var ok = 0, failed = 0
+        for root in [Storage.eventsDir, Storage.portraitDir] {
+            guard let en = fm.enumerator(
+                at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+            ) else { continue }
+            while let url = en.nextObject() as? URL {
+                guard url.pathExtension == "md",
+                      url.lastPathComponent != "INDEX.md" else { continue }
+                do {
+                    let f = try PortraitFileIO.read(from: url)
+                    try PortraitFileIO.write(f, to: url)
+                    ok += 1
+                } catch {
+                    failed += 1
+                    let rel = url.path.replacingOccurrences(
+                        of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
+                    FileHandle.standardError.write(Data("FAIL \(rel): \(error)\n".utf8))
+                }
+            }
+        }
+        print("=== repair done ===")
+        print("read OK + rewritten: \(ok)")
+        print("failed: \(failed)")
+        exit(failed == 0 ? 0 : 1)
+    }
+}
+
 /// `--distill` — DEV-ONLY entry point that runs the full PortraitDistiller
 /// pass over all categories. Disposable.
 enum DistillCLI {
