@@ -105,6 +105,12 @@ struct MyPortraitApp: App {
             RescoreCLI.run()
             // run() exits the process internally.
         }
+        // `--import-default-pipes` seeds the two built-in pipes into
+        // PipeStore. Idempotent (matches by name). Exits when done.
+        if args.contains("--import-default-pipes") {
+            DefaultPipesImportCLI.run()
+            // run() exits the process internally.
+        }
         AppKeyboard.install()
     }
 
