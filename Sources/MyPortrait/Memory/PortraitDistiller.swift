@@ -214,29 +214,36 @@ final class PortraitDistiller {
         lines.append(MemoryPrompts.distillDefinition(for: category))
         lines.append("")
 
-        // Existing entries.
+        let dayFmt = DateFormatter()
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+        dayFmt.dateFormat = "yyyy-MM-dd"
+
+        // Existing entries — FULL body (weighted merge needs the whole text,
+        // not an excerpt) + last-updated date so the LLM can tell which source
+        // events post-date the settled entry.
         if existing.isEmpty {
             lines.append("Existing portrait entries in this category: (none)")
         } else {
-            lines.append("Existing portrait entries you may UPDATE (slug | title | current body excerpt):")
+            lines.append("Existing portrait entries you may UPDATE — these are SETTLED knowledge (slug | title | last updated):")
             for p in existing {
-                let trim = p.bodyExcerpt.count > 240
-                    ? String(p.bodyExcerpt.prefix(240)) + "…" : p.bodyExcerpt
-                lines.append("  - \(p.slug) | \(p.title)")
-                lines.append("    body: \(trim.replacingOccurrences(of: "\n", with: " ⏎ "))")
+                let full = p.body.count > 1200
+                    ? String(p.body.prefix(1200)) + "…" : p.body
+                lines.append("  - \(p.slug) | \(p.title) | last updated \(dayFmt.string(from: p.lastUpdated))")
+                lines.append("    body: \(full.replacingOccurrences(of: "\n", with: " ⏎ "))")
             }
         }
         lines.append("")
 
-        // Source events.
+        // Source events — impact + weight + created date. `created` lets the
+        // LLM judge which events are NEW relative to a settled entry.
         if events.isEmpty {
             lines.append("No new events tagged with this category were captured.")
         } else {
-            lines.append("Source events (id | title | summary | day-occurrences | impact):")
+            lines.append("Source events (id | title | impact | weight | created | day-occurrences):")
             for e in events {
                 let summary = e.summary.isEmpty ? "(no summary)" : e.summary
                 let trim = summary.count > 180 ? String(summary.prefix(180)) + "…" : summary
-                lines.append("  - [\(e.id)] \(e.title)  | impact=\(String(format: "%.1f", e.impact)), days=\(e.occurrenceDays)")
+                lines.append("  - [\(e.id)] \(e.title)  | impact=\(String(format: "%.1f", e.impact)), weight=\(String(format: "%.2f", e.weight)), created=\(dayFmt.string(from: e.created)), days=\(e.occurrenceDays)")
                 lines.append("    summary: \(trim.replacingOccurrences(of: "\n", with: " ⏎ "))")
             }
         }
@@ -362,13 +369,16 @@ final class PortraitDistiller {
         let title: String
         let summary: String
         let impact: Double
+        let weight: Double              // decayed importance — recency-aware
+        let created: Date               // 用于让 LLM 判断"新证据"
         let occurrenceDays: Int
     }
 
     private struct PortraitEntry: Sendable {
         let slug: String
         let title: String
-        let bodyExcerpt: String
+        let body: String                // 完整 body（加权合并需要看全文，不是摘要）
+        let lastUpdated: Date           // 上次蒸馏更新 —— 判定"此后的新事件"基准
         let category: String
     }
 
@@ -406,6 +416,8 @@ final class PortraitDistiller {
                 title: f.eventTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : f.eventTitle,
                 summary: f.eventSummary,
                 impact: f.impact,
+                weight: f.weight,
+                created: f.created,
                 occurrenceDays: f.occurrences.count
             )
 
@@ -452,7 +464,8 @@ final class PortraitDistiller {
             let entry = PortraitEntry(
                 slug: slug,
                 title: title,
-                bodyExcerpt: f.body,
+                body: f.body,
+                lastUpdated: f.lastOccurrence ?? f.created,
                 category: f.category
             )
             out[f.category, default: []].append(entry)

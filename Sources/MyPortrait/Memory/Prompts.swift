@@ -147,6 +147,22 @@ enum MemoryPrompts {
         "derived_from": ["<event id>", "<event id>"]
       }
 
+    WEIGHTED MERGE — how to UPDATE a settled entry:
+    An existing portrait entry is SETTLED knowledge built from earlier events.
+    When you UPDATE one, MERGE — do not rewrite from scratch:
+    - Preserve what is still true. Fold new evidence into the existing text
+      rather than replacing it.
+    - A SUBSTANTIAL rewrite (overturning or significantly reframing the settled
+      content) is justified ONLY when at least 3 source events created AFTER the
+      entry's "last updated" date, each with meaningful weight, support the
+      change.
+    - A single new event — or a handful of low-weight ones — refines wording or
+      appends at most one sentence. It does NOT overturn settled content.
+    - `weight` is decayed importance; `created` tells you which events are new
+      relative to the entry. Events created on/before "last updated" are already
+      reflected — treat them as context, not new evidence.
+    - If the new events add nothing the entry doesn't already say, return "noop".
+
     Rules:
     - ONLY return entries the evidence actually supports. If nothing strong enough, return [].
     - Prefer UPDATE over duplicate CREATE if an existing slug covers the same trait.
