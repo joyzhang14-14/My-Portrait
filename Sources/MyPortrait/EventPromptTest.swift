@@ -622,7 +622,6 @@ enum MaterializeDayCLI {
             FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
             exit(1)
         }
-        let iso = ISO8601DateFormatter()
 
         // Load dump (sessions by id).
         guard let dumpData = FileManager.default.contents(atPath: "/tmp/dump_\(dayStr).json"),
@@ -656,16 +655,15 @@ enum MaterializeDayCLI {
             let members = ids.compactMap { sessionById[$0] }
             if members.isEmpty { continue }
             var frameIds: [Int64] = []
-            var firstSeens: [Date] = []
-            var lastSeens: [Date] = []
             for m in members {
                 if let fids = m["frameIds"] as? [Int64] { frameIds.append(contentsOf: fids) }
                 else if let fids = m["frameIds"] as? [Int] { frameIds.append(contentsOf: fids.map(Int64.init)) }
-                if let fs = m["firstSeen"] as? String, let d = iso.date(from: fs) { firstSeens.append(d) }
-                if let ls = m["lastSeen"] as? String, let d = iso.date(from: ls) { lastSeens.append(d) }
             }
             frameIds.sort()
-            let firstSeen = firstSeens.min() ?? day
+            // `created` = the event's day (UTC startOfDay), NOT a raw session
+            // timestamp — a session's UTC instant can land on the next
+            // calendar day and make created > occurrences.
+            let createdDay = PortraitFile.truncateToDay(day)
             let type = ((ev["type"] as? String) ?? "experience").lowercased() == "emotion"
                 ? "emotion" : "experience"
             let tags = (ev["tags"] as? [String]) ?? []
@@ -678,7 +676,7 @@ enum MaterializeDayCLI {
             let impact = PortraitFile.clampImpact(impactRaw)
 
             var file = PortraitFile(
-                created: firstSeen,
+                created: createdDay,
                 impact: impact,
                 body: "# \(title)\n\n\(summary)\n",
                 source: "timeline:event",
