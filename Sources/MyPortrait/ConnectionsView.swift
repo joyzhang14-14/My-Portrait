@@ -20,6 +20,8 @@ struct ConnectionsView: View {
     @State private var smtpPort: String = "587"
     @State private var smtpUser: String = ""
     @State private var smtpPass: String = ""
+    // Currently-selected Obsidian vault path, mirrored from SecretStore.
+    @State private var obsidianVaultPath: String? = ObsidianConfig.vaultPath
 
     private var filteredTiles: [Integration] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -164,6 +166,27 @@ struct ConnectionsView: View {
                     smtpField("Port (e.g. 587)", text: $smtpPort)
                     smtpField("Username / email", text: $smtpUser)
                     smtpSecureField("Password / app password", text: $smtpPass)
+                }
+            }
+
+            // Obsidian vault path — pipes need the git repo location, which
+            // the `.localApp` probe alone doesn't tell us.
+            if integration.id == "obsidian" {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("OBSIDIAN VAULT PATH")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .tracking(0.6)
+                        .foregroundStyle(.white.opacity(0.45))
+                    HStack(spacing: 8) {
+                        Text(obsidianVaultPath ?? "No vault selected")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(obsidianVaultPath == nil ? 0.4 : 0.85))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button("Choose…") { pickObsidianVault() }
+                            .buttonStyle(SubtleButton())
+                    }
                 }
             }
 
@@ -315,6 +338,24 @@ struct ConnectionsView: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
             )
+    }
+
+    /// Open an NSOpenPanel to pick the Obsidian vault directory and save its
+    /// path to SecretStore. Independent of the `.localApp` install probe.
+    private func pickObsidianVault() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use as vault"
+        panel.message = "Select your Obsidian vault folder"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try ObsidianConfig.setVaultPath(url.path)
+            obsidianVaultPath = url.path
+        } catch {
+            loginError = error.localizedDescription
+        }
     }
 
     private func connectOllama(_ integration: Integration) {
