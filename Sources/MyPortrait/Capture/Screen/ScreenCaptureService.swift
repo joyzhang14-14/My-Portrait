@@ -49,11 +49,18 @@ final class ScreenCaptureService {
                     configuration: cfg
                 )
                 return cgImage
+            } catch CaptureError.screenRecordingPermissionDenied {
+                // **快速抛出，绝对不重试**：getOrFetchMainDisplay 已经把 NSError
+                // 转成了我们自己的 enum，外层别再 wrap 一次也别 retry。
+                // 重试只会让 SCK 多投递几个失败回调到 caulk，挤崩 dispatch queue。
+                logger.warning("captureMainDisplay: screen recording permission denied — bailing without retry")
+                throw CaptureError.screenRecordingPermissionDenied
             } catch {
                 lastError = error
                 logger.warning("captureMainDisplay attempt \(attempt + 1) failed: \(String(describing: error), privacy: .public)")
 
-                // 权限拒绝不重试，立刻抛。
+                // 防御性：NSError 形式的权限错也不重试（理论上 getOrFetchMainDisplay
+                // 已经转过了，但 SCScreenshotManager.captureImage 也可能直接抛）。
                 if Self.isPermissionDenied(error) {
                     throw CaptureError.screenRecordingPermissionDenied
                 }

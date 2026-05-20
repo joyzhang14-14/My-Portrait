@@ -190,9 +190,16 @@ actor CaptureCoordinator {
             if Task.isCancelled { break }
             do {
                 try await captureOneFrame(trigger: trigger, force: false)
+            } catch CaptureError.screenRecordingPermissionDenied,
+                    CaptureError.captureFailed(CaptureError.screenRecordingPermissionDenied) {
+                // **权限没给**：再 trigger 也只是反复撞 SCK XPC，每次都让 caulk
+                // 多投递一个失败回调，最终可能撞 dispatch_assert_queue_fail 整进程崩。
+                // 直接断了事件循环，等用户重新 toggle 才会重启。
+                logger.error("screen recording permission denied — pausing capture loop. User needs to grant permission in System Settings and re-toggle screen capture.")
+                break
             } catch {
                 logger.error("captureOneFrame(\(trigger.rawValue, privacy: .public)) failed: \(String(describing: error), privacy: .public)")
-                // 错误降级：等下一个 trigger。权限错短期内每帧都会撞，靠 reporter 红点提示。
+                // 其他错误降级：等下一个 trigger（短暂的网络 / display unplug 类型恢复得过来）。
             }
         }
     }
