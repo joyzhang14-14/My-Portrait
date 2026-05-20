@@ -31,25 +31,39 @@ final class WhisperKitWrapper: @unchecked Sendable {
         self.modelName = modelName
     }
 
-    /// 转录一个 wav 文件，返回纯文本。
-    func transcribe(wavPath: String) async throws -> String {
-        if pipe == nil {
-            logger.info("loading WhisperKit model: \(self.modelName, privacy: .public) (first run may download ~150 MB)")
-            do {
-                pipe = try await WhisperKit(model: modelName)
-            } catch {
-                logger.error("WhisperKit model load failed: \(String(describing: error), privacy: .public)")
-                throw WhisperError.loadFailed(underlying: error)
-            }
-            logger.info("WhisperKit model loaded")
+    /// 懒加载 WhisperKit pipeline（首跑下载模型）。
+    private func ensurePipe() async throws {
+        guard pipe == nil else { return }
+        logger.info("loading WhisperKit model: \(self.modelName, privacy: .public) (first run may download ~150 MB)")
+        do {
+            pipe = try await WhisperKit(model: modelName)
+        } catch {
+            logger.error("WhisperKit model load failed: \(String(describing: error), privacy: .public)")
+            throw WhisperError.loadFailed(underlying: error)
         }
+        logger.info("WhisperKit model loaded")
+    }
 
-        let results = try await pipe!.transcribe(audioPath: wavPath)
-        let text = results
+    private static func joinText(_ results: [TranscriptionResult]) -> String {
+        results
             .map { $0.text }
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text
+    }
+
+    /// 转录一个 wav 文件，返回纯文本。
+    func transcribe(wavPath: String) async throws -> String {
+        try await ensurePipe()
+        let results = try await pipe!.transcribe(audioPath: wavPath)
+        return Self.joinText(results)
+    }
+
+    /// 转录一段 16kHz mono float 样本，返回纯文本。
+    /// 说话人分离后逐段转录走这条路（避免落临时 wav 文件）。
+    func transcribe(samples: [Float]) async throws -> String {
+        try await ensurePipe()
+        let results = try await pipe!.transcribe(audioArray: samples)
+        return Self.joinText(results)
     }
 }
 

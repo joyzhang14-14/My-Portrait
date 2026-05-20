@@ -186,36 +186,61 @@ actor TranscriptionScheduler {
         // 1. 标 in_progress
         try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .inProgress)
 
-        // 2. 转录
-        let text: String
-        do {
-            text = try await whisper.transcribe(wavPath: chunk.filePath)
-        } catch {
-            logger.error("whisper transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
-            try? await db.recordAudioChunkFailure(chunkId: chunkId)
+        // 2. 说话人分离：把 chunk 切成若干说话人语音段（未启用 / 模型未就绪 → 空）。
+        let segments = await speaker.diarize(wavPath: chunk.filePath, isInput: chunk.isInput)
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        var records: [TranscriptionRecord] = []
+
+        if segments.isEmpty {
+            // 退化路径：整段一次转录，无说话人归属。
+            let text: String
+            do {
+                text = try await whisper.transcribe(wavPath: chunk.filePath)
+            } catch {
+                logger.error("whisper transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
+                try? await db.recordAudioChunkFailure(chunkId: chunkId)
+                return
+            }
+            records.append(TranscriptionRecord(
+                audioChunkId: chunkId, startS: 0, endS: chunk.durationS,
+                text: text, speakerId: nil, engine: "whisperkit", transcribedAtMs: nowMs
+            ))
+        } else {
+            // 完整路径：逐说话人段单独转录，每段一行。
+            for seg in segments {
+                let text: String
+                do {
+                    text = try await whisper.transcribe(samples: seg.samples)
+                } catch {
+                    logger.error("whisper transcribe (segment) failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
+                    try? await db.recordAudioChunkFailure(chunkId: chunkId)
+                    return
+                }
+                guard !text.isEmpty else { continue }
+                records.append(TranscriptionRecord(
+                    audioChunkId: chunkId, startS: seg.startS, endS: seg.endS,
+                    text: text, speakerId: seg.speakerId.map { Int($0) },
+                    engine: "whisperkit", transcribedAtMs: nowMs
+                ))
+            }
+        }
+
+        // 全静音 / 无文本 → 仍标 done，避免反复重试。
+        guard !records.isEmpty else {
+            try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
             return
         }
 
-        // 3. 说话人识别（stub 永远返回 nil；真实实现替换 SpeakerDiarizer 即可）。
-        let speakerId = await speaker.diarize(wavPath: chunk.filePath)
+        // 3. 写 sidecar JSON（多段时合并成一份全文）。
+        let fullText = records.map(\.text).joined(separator: " ")
+        writeTranscriptSidecar(wavPath: chunk.filePath, text: fullText, chunk: chunk, transcribedAtMs: nowMs)
 
-        // 4. 写 sidecar JSON 到文件系统（设计文档"真相在文件系统"）。
-        //    路径 = wav 同目录 + 同名 + .transcript.json
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        writeTranscriptSidecar(wavPath: chunk.filePath, text: text, chunk: chunk, transcribedAtMs: nowMs)
-
-        // 5. 写转录行到 DB（索引镜像）。
-        let record = TranscriptionRecord(
-            audioChunkId: chunkId,
-            startS: 0,
-            endS: chunk.durationS,
-            text: text,
-            speakerId: speakerId,
-            engine: "whisperkit",
-            transcribedAtMs: nowMs
-        )
+        // 4. 写转录行到 DB（每段一行）。
         do {
-            try await db.insertTranscription(record)
+            for record in records {
+                try await db.insertTranscription(record)
+            }
             try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
         } catch {
             logger.error("DB insertTranscription failed: \(String(describing: error), privacy: .public)")

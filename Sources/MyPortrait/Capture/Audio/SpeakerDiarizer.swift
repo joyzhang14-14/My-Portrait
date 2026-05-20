@@ -1,31 +1,33 @@
 import Foundation
 
-/// 说话人识别接口（speaker diarization）。
-///
-/// **当前状态：stub**。返回 nil，DB 的 speaker_id 列永远 nil。
-///
-/// 设计文档点名要的功能（"Whisper 转录 + 主人识别 (speaker ID)"），
-/// 但真实实现需要嵌 ONNX Runtime + pyannote 蒸馏模型，是个独立的大工程
-/// (~300 行 + 模型权重)。schema 字段 + 接口在这里把位置占好，未来直接换实现。
-///
-/// 接入位置：TranscriptionScheduler.transcribeOne 在 whisper.transcribe 完成后
-/// 调一次 diarizer.diarize，把结果写入 TranscriptionRecord.speakerId。
-public protocol SpeakerDiarizer: Sendable {
-
-    /// 给一个 wav 段做说话人识别，返回主说话人 id（小整数）或 nil。
-    /// nil = 无法识别 / 未实现 / 多人无法定主。
-    func diarize(wavPath: String) async -> Int?
+/// 说话人分离的结果片段：一段连续语音 + 它所属的持久说话人 id + 该段音频样本。
+struct DiarizedSegment: Sendable {
+    /// 段在 chunk 内的起止时间（秒）。
+    let startS: Double
+    let endS: Double
+    /// DB `speakers.id`。nil = 解析失败（极少见）。
+    let speakerId: Int64?
+    /// 该段的 16kHz mono 样本，调用方拿去逐段转录。
+    let samples: [Float]
 }
 
-/// 默认 stub —— 始终返回 nil。
+/// 说话人分离接口（speaker diarization）。
 ///
-/// 真实实现替换此 type 时：
-///   1. 嵌入 ONNX Runtime（Swift package：onnxruntime-swift 或自己 bridge）
-///   2. 下载 pyannote 蒸馏的 speaker_embeddings 模型（~80MB）
-///   3. 提取 wav 的 embedding，跟用户"主人 embedding"（首次注册时录的样本）
-///      算余弦相似度
-///   4. 高于阈值 → 返回主人 id (0)；低于 → 返回 nil 或递增的 guest id
-public struct NoopSpeakerDiarizer: SpeakerDiarizer {
-    public init() {}
-    public func diarize(wavPath: String) async -> Int? { nil }
+/// 复刻 screenpipe：pyannote 分离模型找语音段 + wespeaker CAM++ 抽音色向量 +
+/// 余弦聚类匹配持久说话人。实现见 [[OnnxSpeakerDiarizer]]。
+///
+/// 接入位置：TranscriptionScheduler.transcribeOne 先 diarize，再对每个返回段
+/// 单独跑 WhisperKit 转录，每段写一行 audio_transcriptions（带 speaker_id）。
+protocol SpeakerDiarizer: Sendable {
+
+    /// 给一个 wav 段做说话人分离，返回按时间序的语音段。
+    /// 空数组 = 未启用 / 模型未就绪 / 无语音 → 调用方退化为「整段一行、无说话人」。
+    ///
+    /// `isInput`：该段是否来自麦克风输入设备（用于把单一说话人自动命名为用户）。
+    func diarize(wavPath: String, isInput: Bool) async -> [DiarizedSegment]
+}
+
+/// 默认 stub —— 始终返回空数组（说话人分离未启用时用）。
+struct NoopSpeakerDiarizer: SpeakerDiarizer {
+    func diarize(wavPath: String, isInput: Bool) async -> [DiarizedSegment] { [] }
 }

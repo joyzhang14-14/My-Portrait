@@ -240,6 +240,121 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 说话人识别（speaker diarization）
+
+    /// 余弦相似度阈值。> 此值判定同一说话人（对齐 screenpipe 的 0.45）。
+    private static let speakerMatchThreshold: Float = 0.45
+    /// 每个说话人最多保留的样本向量数。
+    private static let maxEmbeddingsPerSpeaker = 10
+    /// centroid 指数移动平均的有效计数上限——防止老说话人 centroid 僵化。
+    private static let centroidEMACap = 50
+
+    func matchSpeaker(embedding: [Float]) async throws -> Int64? {
+        try await dbPool.read { db in
+            var best: (id: Int64, sim: Float)?
+            // 1. 先比对每个说话人的样本向量。
+            let embRows = try Row.fetchAll(db, sql: """
+                SELECT se.speaker_id AS sid, se.embedding AS emb
+                FROM speaker_embeddings se
+                JOIN speakers s ON s.id = se.speaker_id
+                WHERE s.hidden = 0
+                """)
+            for row in embRows {
+                guard let blob: Data = row["emb"], let vec = blob.asFloats,
+                      vec.count == embedding.count else { continue }
+                let sim = VectorMath.cosineSimilarity(embedding, vec)
+                if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
+                    best = (row["sid"], sim)
+                }
+            }
+            if let b = best { return b.id }
+            // 2. 样本没命中再比对 centroid（运行平均向量）。
+            let cRows = try Row.fetchAll(db, sql: """
+                SELECT id, centroid FROM speakers WHERE hidden = 0 AND centroid IS NOT NULL
+                """)
+            for row in cRows {
+                guard let blob: Data = row["centroid"], let vec = blob.asFloats,
+                      vec.count == embedding.count else { continue }
+                let sim = VectorMath.cosineSimilarity(embedding, vec)
+                if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
+                    best = (row["id"], sim)
+                }
+            }
+            return best?.id
+        }
+    }
+
+    func enrollSpeaker(embedding: [Float]) async throws -> Int64 {
+        let blob = Data(floats: embedding)
+        let now = Self.nowMs()
+        return try await dbPool.write { db in
+            try db.execute(sql: """
+                INSERT INTO speakers (name, centroid, embedding_count, hidden, created_at_ms, updated_at_ms)
+                VALUES (NULL, ?, 1, 0, ?, ?)
+                """, arguments: [blob, now, now])
+            let sid = db.lastInsertedRowID
+            try db.execute(sql: """
+                INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (?, ?, ?)
+                """, arguments: [sid, blob, now])
+            return sid
+        }
+    }
+
+    func addEmbeddingToSpeaker(speakerId: Int64, embedding: [Float]) async throws {
+        let now = Self.nowMs()
+        try await dbPool.write { db in
+            guard let row = try Row.fetchOne(db, sql:
+                "SELECT centroid, embedding_count FROM speakers WHERE id = ?", arguments: [speakerId])
+            else { return }
+            let count: Int = row["embedding_count"] ?? 0
+            let centroid: [Float]
+            if let blob: Data = row["centroid"], let c = blob.asFloats, c.count == embedding.count {
+                centroid = c
+            } else {
+                centroid = embedding
+            }
+            // centroid 指数移动平均，有效计数上限 centroidEMACap。
+            let eff = Float(min(count, Self.centroidEMACap))
+            var next = [Float](repeating: 0, count: embedding.count)
+            for i in 0..<embedding.count {
+                next[i] = (centroid[i] * eff + embedding[i]) / (eff + 1)
+            }
+            VectorMath.l2Normalize(&next)
+            try db.execute(sql: """
+                UPDATE speakers SET centroid = ?, embedding_count = embedding_count + 1, updated_at_ms = ?
+                WHERE id = ?
+                """, arguments: [Data(floats: next), now, speakerId])
+            try db.execute(sql:
+                "INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (?, ?, ?)",
+                arguments: [speakerId, Data(floats: embedding), now])
+            // 样本超上限 → 删掉最接近 centroid 的（最冗余）。
+            let embRows = try Row.fetchAll(db, sql:
+                "SELECT id, embedding FROM speaker_embeddings WHERE speaker_id = ?", arguments: [speakerId])
+            if embRows.count > Self.maxEmbeddingsPerSpeaker {
+                var closest: (id: Int64, sim: Float)?
+                for r in embRows {
+                    guard let blob: Data = r["embedding"], let v = blob.asFloats,
+                          v.count == next.count else { continue }
+                    let sim = VectorMath.cosineSimilarity(next, v)
+                    if sim > (closest?.sim ?? -2) { closest = (r["id"], sim) }
+                }
+                if let c = closest {
+                    try db.execute(sql: "DELETE FROM speaker_embeddings WHERE id = ?", arguments: [c.id])
+                }
+            }
+        }
+    }
+
+    func nameSpeakerIfUnnamed(speakerId: Int64, name: String) async throws {
+        let now = Self.nowMs()
+        try await dbPool.write { db in
+            try db.execute(sql: """
+                UPDATE speakers SET name = ?, updated_at_ms = ?
+                WHERE id = ? AND (name IS NULL OR name = '')
+                """, arguments: [name, now, speakerId])
+        }
+    }
+
     // MARK: - 向量（Phase 4）
 
     func framesNeedingEmbedding(model: String, limit: Int) async throws -> [Int64] {

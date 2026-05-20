@@ -187,6 +187,39 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v7 — 说话人识别（speakers + speaker_embeddings）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 复刻 screenpipe：CAM++ 音色向量（512 维）+ 余弦聚类。
+        //   - speakers：每个说话人一行，centroid = 运行平均向量（L2 归一化）。
+        //   - speaker_embeddings：每个说话人最多保留 10 个样本向量，满了轮换掉
+        //     最接近 centroid 的（保多样性）。
+        //
+        // 向量都存 BLOB（512 × Float32 = 2048 字节），跟 frames.embedding 一样
+        // 走 Swift 端暴力 cosine，不依赖 sqlite-vec。
+        // audio_transcriptions.speaker_id（v2 已有列）写入这里的 speakers.id。
+        m.registerMigration("v7_speakers") { db in
+            try db.create(table: "speakers") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("name", .text)                                  // NULL = 未命名簇
+                t.column("centroid", .blob)                              // 512 float32，NULL 直到首个样本
+                t.column("embedding_count", .integer).notNull().defaults(to: 0)
+                t.column("hidden", .boolean).notNull().defaults(to: false) // 1 = 标记为幻听
+                t.column("created_at_ms", .integer).notNull()
+                t.column("updated_at_ms", .integer).notNull()
+            }
+            try db.create(table: "speaker_embeddings") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("speaker_id", .integer).notNull()
+                    .references("speakers", onDelete: .cascade)
+                t.column("embedding", .blob).notNull()                   // 512 float32
+                t.column("created_at_ms", .integer).notNull()
+            }
+            try db.create(index: "idx_speaker_embeddings_speaker",
+                          on: "speaker_embeddings", columns: ["speaker_id"])
+        }
+
         return m
     }
 }

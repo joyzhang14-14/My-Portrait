@@ -93,12 +93,15 @@ final class Services {
         self.systemAudio = SystemAudioCaptureService(reporter: reporter)
         let pw = PowerWatcher()
         self.powerWatcher = pw
+        // 说话人分离：ONNX 实现。运行时由 recording.audio.speakerIdEnabled 开关
+        // 控制（关掉时 diarize 直接返回空，退化为整段一行无说话人）。
         self.transcriber = TranscriptionScheduler(
             db: dbImpl,
             audio: audioSvc,
             systemAudio: self.systemAudio,
             reporter: reporter,
-            power: pw
+            power: pw,
+            speaker: OnnxSpeakerDiarizer(db: dbImpl)
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
         self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)

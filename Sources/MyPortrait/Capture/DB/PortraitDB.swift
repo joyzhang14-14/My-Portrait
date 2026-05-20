@@ -66,6 +66,23 @@ protocol PortraitDB: Sendable {
     /// 返回受影响的行数。
     func resetRetryableFailedAudioChunks() async throws -> Int
 
+    // MARK: - 说话人识别（speaker diarization）
+
+    /// 找匹配的说话人：`embedding`（须已 L2 归一化）与已有 speaker 的样本 / centroid
+    /// 余弦相似度 > 0.45 → 返回其 id。无匹配返回 nil。
+    func matchSpeaker(embedding: [Float]) async throws -> Int64?
+
+    /// 新建说话人：centroid = `embedding`，写入首个样本，返回新 speaker id。
+    func enrollSpeaker(embedding: [Float]) async throws -> Int64
+
+    /// 给已有说话人追加一个样本：更新 centroid（指数移动平均，有效计数上限 50），
+    /// 样本数超 10 时轮换掉最接近 centroid 的（保多样性）。
+    func addEmbeddingToSpeaker(speakerId: Int64, embedding: [Float]) async throws
+
+    /// 给说话人命名，但仅当它当前还没名字（name 为 NULL 或空）。
+    /// 用于把麦克风里的单一说话人自动标成用户本人。
+    func nameSpeakerIfUnnamed(speakerId: Int64, name: String) async throws
+
     // MARK: - 保留期 / 自动删除（RetentionWorker 用）
 
     /// 早于 `ms` 的所有媒体文件路径快照。
