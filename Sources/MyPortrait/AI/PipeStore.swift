@@ -70,13 +70,17 @@ struct PipeJob: Identifiable, Hashable, Codable {
     var isEnabled: Bool
     var runs: [PipeRun]
     var lastRunAt: Date?
+    /// Integration ids (see `IntegrationRegistry`) this pipe uses. At run
+    /// time their credentials are injected into the agent process as env
+    /// vars. Old stored pipes without this key decode to `[]`.
+    var connections: [String] = []
 
     init(id: UUID = UUID(), name: String, prompt: String, window: ContextWindow,
          schedule: Cadence = .everyMinutes(60), isEnabled: Bool = true,
-         runs: [PipeRun] = [], lastRunAt: Date? = nil) {
+         runs: [PipeRun] = [], lastRunAt: Date? = nil, connections: [String] = []) {
         self.id = id; self.name = name; self.prompt = prompt; self.window = window
         self.schedule = schedule; self.isEnabled = isEnabled
-        self.runs = runs; self.lastRunAt = lastRunAt
+        self.runs = runs; self.lastRunAt = lastRunAt; self.connections = connections
     }
 }
 
