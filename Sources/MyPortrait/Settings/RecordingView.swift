@@ -109,6 +109,20 @@ struct RecordingSettingsView: View {
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 200)
                     }
+                    if engine == AudioEngine.whisper.rawValue {
+                        SettingsDivider()
+                        SettingsRow("Whisper model",
+                                    description: "Larger models are more accurate but slower and bigger to download.",
+                                    icon: "cpu") {
+                            Picker("", selection: config.binding(\.recording.audio.whisperModel)) {
+                                Text("Tiny (~75 MB)").tag("openai_whisper-tiny")
+                                Text("Base (~150 MB)").tag("openai_whisper-base")
+                                Text("Small (~500 MB)").tag("openai_whisper-small")
+                                Text("Large v3 Turbo (~1.5 GB)").tag("openai_whisper-large-v3-v20240930")
+                            }
+                            .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                        }
+                    }
                     if engine == AudioEngine.deepgram.rawValue {
                         SettingsDivider()
                         SettingsRow("Deepgram API key",

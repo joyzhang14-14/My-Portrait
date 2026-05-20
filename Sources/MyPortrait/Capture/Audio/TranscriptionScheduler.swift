@@ -180,11 +180,23 @@ actor TranscriptionScheduler {
         }
     }
 
+    /// 读设置里的转录配置：语言提示（取语言列表首项，空 → nil 自动检测）+ 自定义词汇。
+    private static func transcriptionConfig() async -> (language: String?, vocabulary: [String]) {
+        await MainActor.run {
+            let a = ConfigStore.shared.current.recording.audio
+            let lang = a.languages.first.flatMap { $0.isEmpty ? nil : $0 }
+            return (lang, a.customVocabulary)
+        }
+    }
+
     private func transcribeOne(chunk: AudioChunkRecord) async {
         guard let chunkId = chunk.id else { return }
 
         // 1. 标 in_progress
         try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .inProgress)
+
+        // 转录配置：语言提示 + 自定义词汇（来自设置）。
+        let (language, vocabulary) = await Self.transcriptionConfig()
 
         // 2. 说话人分离：把 chunk 切成若干说话人语音段（未启用 / 模型未就绪 → 空）。
         let segments = await speaker.diarize(wavPath: chunk.filePath, isInput: chunk.isInput)
@@ -196,7 +208,7 @@ actor TranscriptionScheduler {
             // 退化路径：整段一次转录，无说话人归属。
             let text: String
             do {
-                text = try await whisper.transcribe(wavPath: chunk.filePath)
+                text = try await whisper.transcribe(wavPath: chunk.filePath, language: language)
             } catch {
                 logger.error("whisper transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
                 try? await db.recordAudioChunkFailure(chunkId: chunkId)
@@ -211,7 +223,9 @@ actor TranscriptionScheduler {
             for seg in segments {
                 let text: String
                 do {
-                    text = try await whisper.transcribe(samples: seg.samples)
+                    text = try await whisper.transcribe(
+                        samples: seg.samples, language: language, vocabulary: vocabulary
+                    )
                 } catch {
                     logger.error("whisper transcribe (segment) failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
                     try? await db.recordAudioChunkFailure(chunkId: chunkId)

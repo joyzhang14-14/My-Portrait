@@ -282,6 +282,7 @@ struct AudioConfig: Codable, Equatable {
     var enabled:                 Bool     = true
     var userName:                String   = ""
     var engine:                  String   = "whisper"
+    var whisperModel:            String   = "openai_whisper-base"
     var deepgramApiKeyRef:       String   = ""
     var languages:               [String] = []
     var microphonesSelected:     [String] = []
@@ -297,6 +298,7 @@ struct AudioConfig: Codable, Equatable {
         case enabled
         case userName                = "user_name"
         case engine
+        case whisperModel            = "whisper_model"
         case deepgramApiKeyRef       = "deepgram_api_key_ref"
         case languages
         case microphonesSelected     = "microphones_selected"
@@ -314,6 +316,7 @@ struct AudioConfig: Codable, Equatable {
         enabled                = c.dflt(Bool.self,     .enabled, enabled)
         userName               = c.dflt(String.self,   .userName, userName)
         engine                 = c.dflt(String.self,   .engine, engine)
+        whisperModel           = c.dflt(String.self,   .whisperModel, whisperModel)
         deepgramApiKeyRef      = c.dflt(String.self,   .deepgramApiKeyRef, deepgramApiKeyRef)
         languages              = c.dflt([String].self, .languages, languages)
         microphonesSelected    = c.dflt([String].self, .microphonesSelected, microphonesSelected)

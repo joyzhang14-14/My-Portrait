@@ -101,6 +101,9 @@ final class Services {
             systemAudio: self.systemAudio,
             reporter: reporter,
             power: pw,
+            whisper: WhisperKitWrapper(
+                modelName: ConfigStore.shared.current.recording.audio.whisperModel
+            ),
             speaker: OnnxSpeakerDiarizer(db: dbImpl)
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
