@@ -61,6 +61,11 @@ struct PortraitFile: Equatable {
                                         // routes by this field.
     var memberFrameIds: [Int64]         // timeline frame IDs that contributed
                                         // to this event (across days + apps)
+    var distilledInto: [String]         // portrait slugs this event has already
+                                        // been distilled into — set by the
+                                        // distiller, lets later runs skip an
+                                        // already-consumed event + supports
+                                        // provenance. Empty for un-distilled.
     var source: String?                 // backward-compat origin reference
     var tags: [String]
     var supersededBy: String?           // relative path under portrait/
@@ -97,6 +102,7 @@ struct PortraitFile: Equatable {
         self.portraitFacets = portraitFacets
         self.category = category
         self.memberFrameIds = memberFrameIds
+        self.distilledInto = []          // a brand-new event is un-distilled
         self.source = source
         self.tags = tags
         self.supersededBy = nil
@@ -120,6 +126,7 @@ struct PortraitFile: Equatable {
         portraitFacets: [EventBuilder.PortraitFacet],
         category: String,
         memberFrameIds: [Int64],
+        distilledInto: [String] = [],
         source: String?,
         tags: [String],
         supersededBy: String?,
@@ -142,6 +149,7 @@ struct PortraitFile: Equatable {
         self.portraitFacets = portraitFacets
         self.category = category
         self.memberFrameIds = memberFrameIds
+        self.distilledInto = distilledInto
         self.source = source
         self.tags = tags
         self.supersededBy = supersededBy

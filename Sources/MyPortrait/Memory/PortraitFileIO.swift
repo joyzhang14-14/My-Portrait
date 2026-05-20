@@ -80,6 +80,9 @@ enum PortraitFileIO {
         // `category` is legacy. Default "" — Distiller no longer routes by it.
         let category = (try? optionalString(fields, "category")) ?? nil ?? ""
         let memberFrameIds = (try? optionalInt64Array(fields, "member_frame_ids")) ?? []
+        // distilled_into — portrait slugs already consumed from this event.
+        // Default [] for files written before the field existed.
+        let distilledInto = (try? requireStringArray(fields, "distilled_into")) ?? []
 
         return PortraitFile(
             created: created,
@@ -95,6 +98,7 @@ enum PortraitFileIO {
             portraitFacets: portraitFacets,
             category: category,
             memberFrameIds: memberFrameIds,
+            distilledInto: distilledInto,
             source: source,
             tags: tags,
             supersededBy: supersededBy,
@@ -134,6 +138,7 @@ enum PortraitFileIO {
             lines.append("category: \(f.category)")
         }
         lines.append("member_frame_ids: \(formatInt64Array(f.memberFrameIds))")
+        lines.append("distilled_into: \(formatStringArray(f.distilledInto))")
         lines.append("source: \(formatNullableString(f.source))")
         lines.append("tags: \(formatStringArray(f.tags))")
         lines.append("superseded_by: \(formatNullableString(f.supersededBy))")
