@@ -4,31 +4,59 @@ import os.log
 private let schedLog = Logger(subsystem: "com.myportrait.memory", category: "scheduler")
 
 /// 记忆流水线的调度器。两个 job：
-///   - daily   ：跑当天及之前未处理日的 event 聚类 + impact 评分
-///   - weekly  ：跑 distill（事件 → 画像蒸馏）
+///   - daily   ：跑当天及之前未处理日的 event 聚类 + impact 评分（per-day）。
+///   - weekly  ：跑 distill（事件 → 画像蒸馏），用 `_weekly` 哨兵行记状态。
 ///
-/// 每次触发最多处理 7 个数据日（`dayCap`），从最旧的未处理日开始。失败的日
-/// 下次触发会被重新捡起。
+/// 每次触发最多处理 7 个数据日（`dayCap`），从最旧的未处理日开始。
 ///
-/// 状态全部落在 `processing_log` 表（见 ProcessingLog.swift）。`active_processor`
-/// + `heartbeat_ms` 做崩溃保护：启动时把心跳过期的 in_progress 行回收。
+/// 失败语义（见 ProcessingStatus）：
+///   - 真实失败 → status=failed，retry_count +1；retry_count ≥ 3 → dead_letter。
+///   - 撞 LLM 额度 → status=budget_deferred，retry_count 不变，自动重试。
+///   - dead_letter 的日 / 阶段被排除出自动处理，等用户在 Settings 手动重置。
 ///
-/// 进程内并发由 `@MainActor` + `isRunning` 标志保证，同一时刻只有一个 job 在跑。
+/// 状态全部落在 `processing_log` 表。`active_processor` + `heartbeat_ms` 做崩溃
+/// 保护：每个 LLM 步（event / impact / distill）持锁并每 30s 续心跳；启动时
+/// `recoverStaleLocks` 把心跳过期的 in_progress 行当一次失败回收（retry +1）。
+///
+/// 进程内并发由 `@MainActor` + `isRunning` 保证。
 @MainActor
 final class MemoryScheduler {
 
     static let shared = MemoryScheduler()
 
+    /// 失败 / 撞额度 / dead_letter 的日，给 Settings 的 "Needs attention" 用。
+    struct AttentionItem: Identifiable, Sendable {
+        var id: String { date }
+        let date: String
+        let retryCount: Int
+        /// 出问题的阶段及其状态。
+        let problems: [(stage: ProcessingStage, status: ProcessingStatus)]
+    }
+
+    private enum StepOutcome { case success, failed, budgetExhausted }
+
     private let store = ProcessingLogStore()
 
     /// 每次触发处理的数据日上限。
     private let dayCap = 7
+    /// 失败重试上限：retry_count ≥ 此值转 dead_letter。
+    private let maxRetries = 3
     /// 原始数据"收齐"判定：数据日结束（UTC 次日 0 点）后再等这么久。
     private let rawGraceSeconds: TimeInterval = 2 * 3600
-    /// 心跳超过这个时长视为死锁（处理器崩溃）。
-    private let staleLockMs: Int64 = 10 * 60 * 1000
     /// tick 周期。
     private let tickInterval: TimeInterval = 15 * 60
+    /// weekly distill 状态记在这个哨兵行（不是真实日期，不会与 yyyy-MM-dd 冲突）。
+    private let weeklyAnchor = "_weekly"
+
+    /// 心跳超过这个时长视为死锁。默认 10min（单日 Backfill 多轮 LLM 可能 >5min
+    /// 仍在正常跑）。可经 env `MYPORTRAIT_SCHEDULER_STALE_MS` 覆盖（测试用）。
+    private let staleLockMs: Int64 = {
+        if let s = ProcessInfo.processInfo.environment["MYPORTRAIT_SCHEDULER_STALE_MS"],
+           let v = Int64(s) {
+            return v
+        }
+        return 10 * 60 * 1000
+    }()
 
     private var isRunning = false
     private var timer: Timer?
@@ -65,32 +93,38 @@ final class MemoryScheduler {
         let cfg = ConfigStore.shared.current.scheduler
         let now = Date()
 
+        var ranDaily = false
         if cfg.dailyEnabled, isDailyDue(now: now, cfg: cfg) {
             setLastRun(kLastDaily, now)
             await runDailyJob()
+            ranDaily = true
         }
-        if cfg.weeklyEnabled, isWeeklyDue(now: now, cfg: cfg) {
-            setLastRun(kLastWeekly, now)
-            await runWeeklyJob()
+        if cfg.weeklyEnabled {
+            if isWeeklyDue(now: now, cfg: cfg) {
+                setLastRun(kLastWeekly, now)
+                await runWeeklyJob()
+            } else if ranDaily, weeklyNeedsRetry() {
+                // distill 之前被 defer / failed —— 借 daily 触发的 24h 节流顺带重试。
+                await runWeeklyJob()
+            }
         }
     }
 
-    // MARK: - daily job：event 聚类 + impact 评分
+    // MARK: - daily job：event 聚类 + impact 评分（per-day）
 
-    /// 处理至多 `dayCap` 个未完成 event 处理的数据日（旧 → 新），再统一评分。
+    /// 处理至多 `dayCap` 个未完成的数据日（旧 → 新）。每天 event → impact
+    /// 顺序跑，各自持锁 + 心跳。
     func runDailyJob() async {
         guard !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
 
-        let days = pendingEventDays(cap: dayCap)
+        let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
             schedLog.info("daily job: no pending days")
             return
         }
         print("[Scheduler] daily job — \(days.count) day(s) to process")
-
-        var succeededDays: [String] = []
 
         for day in days {
             let ds = ProcessingLogStore.dayString(day)
@@ -103,87 +137,117 @@ final class MemoryScheduler {
             }
             store.setStatus(date: ds, stage: .raw, status: .complete)
 
-            // event 步：跑 Backfill 单日。
-            store.setStatus(date: ds, stage: .event, status: .inProgress)
-            store.acquireLock(date: ds, processor: "event")
-            let hb = startHeartbeat(for: ds)
-
-            let nb = daysBackToCover(day)
-            var ok = false
-            do {
-                let r = try await Backfill.run(daysBack: nb, onlyDay: day)
-                ok = r.llmFailedDays == 0
-            } catch {
-                schedLog.error("daily job: Backfill threw for \(ds, privacy: .public) — \(error.localizedDescription, privacy: .public)")
-                ok = false
+            // event 步。
+            var row = store.row(for: ds) ?? ProcessingLogRow(date: ds)
+            if row.event.needsWork {
+                await runStep(date: ds, stage: .event, processor: "event", rollbackDay: day) {
+                    let nb = self.daysBackToCover(day)
+                    let r = try await Backfill.run(daysBack: nb, onlyDay: day)
+                    return r.llmFailedDays == 0 ? .success : .failed
+                }
+                row = store.row(for: ds) ?? row
             }
-            hb.cancel()
 
-            if ok {
-                store.setStatus(date: ds, stage: .event, status: .complete)
-                succeededDays.append(ds)
-                print("[Scheduler] \(ds): event clustering OK")
-            } else {
-                // 失败：清掉当天产生的 event，标 failed，下次触发重跑不会污染数据。
-                deleteEvents(on: day)
-                store.setStatus(date: ds, stage: .event, status: .failed)
-                store.setStatus(date: ds, stage: .impact, status: .idle)
-                print("[Scheduler] \(ds): event clustering FAILED — events purged")
-            }
-            store.releaseLock(date: ds)
-        }
-
-        guard !succeededDays.isEmpty else { return }
-
-        // impact 步：ImpactScorer 扫描所有 `unscored` 事件统一评分。处理顺序
-        // 旧→新，跑到这里时盘上唯一 unscored 的就是本轮新建的事件。
-        for ds in succeededDays {
-            store.setStatus(date: ds, stage: .impact, status: .inProgress)
-        }
-        do {
-            let r = try await ImpactScorer(model: model).rescoreAll()
-            print("[Scheduler] impact scoring — \(r.scoredCount) scored, \(r.failedCount) failed")
-            for ds in succeededDays {
-                store.setStatus(date: ds, stage: .impact,
-                                status: r.failedCount == 0 ? .complete : .partial)
-            }
-        } catch {
-            schedLog.error("daily job: impact scoring failed — \(error.localizedDescription, privacy: .public)")
-            for ds in succeededDays {
-                store.setStatus(date: ds, stage: .impact, status: .failed)
+            // impact 步：仅当 event 已 complete。按日扫 events/<day>/ 下的 unscored。
+            if row.event == .complete, row.impact.needsWork {
+                await runStep(date: ds, stage: .impact, processor: "impact", rollbackDay: nil) {
+                    let dir = PortraitPaths.eventsDayDir(for: day)
+                    let r = try await ImpactScorer(model: self.model).rescoreAll(root: dir)
+                    return r.failedCount == 0 ? .success : .failed
+                }
             }
         }
     }
 
     // MARK: - weekly job：distill
 
-    /// 跑一次完整 distill。distiller 扫盘上所有非归档事件 —— 失败日的事件已被
-    /// daily job 清除，所以盘上事件天然只来自 event 处理成功的日。
+    /// 跑一次完整 distill，状态记在 `_weekly` 哨兵行（持锁 + 心跳，崩溃可恢复）。
+    /// distiller 扫盘上所有非归档事件 —— 失败日的事件已被 daily job 清除，
+    /// 所以盘上事件天然只来自 event 处理成功的日。
     func runWeeklyJob() async {
         guard !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
 
-        // 标记所有 event 完成的日 distill in_progress。
-        let completeDays = store.allRows()
-            .filter { $0.event == .complete }
-            .map { $0.date }
-        for ds in completeDays {
-            store.setStatus(date: ds, stage: .distill, status: .inProgress)
+        _ = store.ensureRow(for: weeklyAnchor)
+        let distill = store.row(for: weeklyAnchor)?.distill ?? .idle
+        guard distill.needsWork else {
+            schedLog.info("weekly job: distill is \(distill.rawValue, privacy: .public) — skip")
+            return
         }
-        print("[Scheduler] weekly job — distilling (\(completeDays.count) source day(s))")
+        print("[Scheduler] weekly job — distilling")
 
+        await runStep(date: weeklyAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
+            let r = try await PortraitDistiller(model: self.model).distill()
+            return r.llmFailedCategories == 0 ? .success : .failed
+        }
+    }
+
+    // MARK: - 单步执行（持锁 + 心跳 + 结果落库）
+
+    /// 跑一个 LLM 步：先持锁起心跳，跑 `work`，再按结果落库、释放锁。
+    /// `work` 返回 `.success` / `.failed`，撞额度时抛 `BudgetExhaustedError`。
+    private func runStep(
+        date: String,
+        stage: ProcessingStage,
+        processor: String,
+        rollbackDay: Date?,
+        _ work: () async throws -> StepOutcome
+    ) async {
+        // 先持锁（写 active_processor + 初始心跳），再标 in_progress。
+        // 这个顺序下，若在两步之间崩溃，recoverStaleLocks 仍能凭 active_processor
+        // 发现并释放锁。
+        store.acquireLock(date: date, processor: processor)
+        store.setStatus(date: date, stage: stage, status: .inProgress)
+        let hb = startHeartbeat(for: date)
+
+        let outcome: StepOutcome
         do {
-            let r = try await PortraitDistiller(model: model).distill()
-            print("[Scheduler] distill — \(r.portraitFilesWritten) written, \(r.portraitFilesUpdated) updated, \(r.llmFailedCategories) failed categories")
-            let status: ProcessingStatus = r.llmFailedCategories == 0 ? .complete : .partial
-            for ds in completeDays {
-                store.setStatus(date: ds, stage: .distill, status: status)
-            }
+            outcome = try await work()
+        } catch let e as BudgetExhaustedError {
+            schedLog.notice("\(date)/\(processor): budget exhausted — \(e.message, privacy: .public)")
+            outcome = .budgetExhausted
         } catch {
-            schedLog.error("weekly job: distill failed — \(error.localizedDescription, privacy: .public)")
-            for ds in completeDays {
-                store.setStatus(date: ds, stage: .distill, status: .failed)
+            schedLog.error("\(date)/\(processor): \(error.localizedDescription, privacy: .public)")
+            outcome = .failed
+        }
+        hb.cancel()
+
+        applyOutcome(date: date, stage: stage, outcome: outcome, rollbackDay: rollbackDay)
+        store.releaseLock(date: date)
+    }
+
+    /// 把一个步的结果落库：成功 → complete；撞额度 → budget_deferred（不计
+    /// retry）；失败 → retry +1，回滚（event 步删当天 event），retry ≥ 上限转
+    /// dead_letter。
+    private func applyOutcome(
+        date: String,
+        stage: ProcessingStage,
+        outcome: StepOutcome,
+        rollbackDay: Date?
+    ) {
+        switch outcome {
+        case .success:
+            store.setStatus(date: date, stage: stage, status: .complete)
+            print("[Scheduler] \(date)/\(stage.rawValue): complete")
+
+        case .budgetExhausted:
+            store.setStatus(date: date, stage: stage, status: .budgetDeferred)
+            print("[Scheduler] \(date)/\(stage.rawValue): budget_deferred (retry_count unchanged)")
+
+        case .failed:
+            // 回滚：event 步失败删当天 event 目录，重跑不污染数据。
+            // impact / distill 幂等（重扫 unscored / 整体重蒸馏），无需显式回滚。
+            if let day = rollbackDay {
+                deleteEvents(on: day)
+            }
+            let n = store.bumpRetry(date: date)
+            if n >= maxRetries {
+                store.setStatus(date: date, stage: stage, status: .deadLetter)
+                print("[Scheduler] \(date)/\(stage.rawValue): dead_letter (retry_count=\(n))")
+            } else {
+                store.setStatus(date: date, stage: stage, status: .failed)
+                print("[Scheduler] \(date)/\(stage.rawValue): failed (retry_count=\(n))")
             }
         }
     }
@@ -191,53 +255,133 @@ final class MemoryScheduler {
     // MARK: - 崩溃恢复
 
     /// 启动时回收死锁：心跳过期的 in_progress 行 —— 处理器在持锁期间崩了。
-    private func recoverStaleLocks() {
+    /// 当一次失败处理（retry +1、event 回滚），跟显式失败一致，这样反复崩溃
+    /// 最终也会到 dead_letter。
+    func recoverStaleLocks() {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         for row in store.allRows() {
             guard row.activeProcessor != nil else { continue }
             let hb = row.heartbeatMs ?? 0
             guard now - hb > staleLockMs else { continue }
 
-            schedLog.notice("recovering stale lock on \(row.date, privacy: .public) (processor=\(row.activeProcessor ?? "?", privacy: .public))")
+            schedLog.notice("recovering stale lock on \(row.date, privacy: .public) (processor=\(row.activeProcessor ?? "?", privacy: .public), heartbeat age=\(now - hb)ms)")
+            print("[Scheduler] crash recovery: \(row.date) had stale lock (processor=\(row.activeProcessor ?? "?"))")
             store.releaseLock(date: row.date)
 
-            // event 在 in_progress 时崩 → 当天数据可能半成品，清除并标 failed。
+            let day = ProcessingLogStore.day(from: row.date)
             if row.event == .inProgress {
-                if let day = ProcessingLogStore.day(from: row.date) {
-                    deleteEvents(on: day)
-                }
-                store.setStatus(date: row.date, stage: .event, status: .failed)
-                store.setStatus(date: row.date, stage: .impact, status: .idle)
+                applyOutcome(date: row.date, stage: .event, outcome: .failed, rollbackDay: day)
             }
-            // impact / distill 幂等（重扫 unscored / 重蒸馏），回退 idle 即可。
             if row.impact == .inProgress {
-                store.setStatus(date: row.date, stage: .impact, status: .idle)
+                applyOutcome(date: row.date, stage: .impact, outcome: .failed, rollbackDay: nil)
             }
             if row.distill == .inProgress {
-                store.setStatus(date: row.date, stage: .distill, status: .idle)
+                applyOutcome(date: row.date, stage: .distill, outcome: .failed, rollbackDay: nil)
+            }
+        }
+    }
+
+    // MARK: - UI 支持：重置 / 待处理列表
+
+    /// 手动重置某天 / `_weekly`：把 failed / dead_letter / budget_deferred 的
+    /// 阶段回退 pending，retry_count 归零，释放锁。下次 tick 会重新尝试。
+    func resetDay(_ date: String) {
+        guard let row = store.row(for: date) else { return }
+        for stage in ProcessingStage.allCases {
+            switch row.status(of: stage) {
+            case .failed, .deadLetter, .budgetDeferred:
+                store.setStatus(date: date, stage: stage, status: .pending)
+            default:
+                break
+            }
+        }
+        store.setRetryCount(date: date, count: 0)
+        store.releaseLock(date: date)
+        print("[Scheduler] reset \(date) → pending, retry_count=0")
+    }
+
+    /// 需要用户关注的日：任一阶段处于 failed / dead_letter / budget_deferred。
+    func attentionDays() -> [AttentionItem] {
+        store.allRows().compactMap { row in
+            let problems = ProcessingStage.allCases.compactMap {
+                stage -> (stage: ProcessingStage, status: ProcessingStatus)? in
+                let s = row.status(of: stage)
+                switch s {
+                case .failed, .deadLetter, .budgetDeferred: return (stage, s)
+                default: return nil
+                }
+            }
+            guard !problems.isEmpty else { return nil }
+            return AttentionItem(date: row.date, retryCount: row.retryCount, problems: problems)
+        }
+    }
+
+    // MARK: - 测试钩子（dev-only，被 SchedulerTestCLI 调用）
+
+    /// 注入结果跑真实的 `runStep` —— 验证 applyOutcome 的 success / failed /
+    /// budget_deferred 三个分支走的是生产代码路径。
+    enum InjectedResult { case success, failure, budget }
+
+    func runInjectedStep(date: String, stage: ProcessingStage, result: InjectedResult) async {
+        await runStep(
+            date: date, stage: stage, processor: stage.rawValue,
+            rollbackDay: ProcessingLogStore.day(from: date)
+        ) {
+            switch result {
+            case .success: return .success
+            case .failure: return .failed
+            case .budget:
+                throw BudgetExhaustedError(processor: "injected-test",
+                                           message: "simulated 429 quota exceeded")
             }
         }
     }
 
     // MARK: - 候选日筛选
 
-    /// 待 event 处理的数据日：有采集帧、raw 已收齐、event_status ≠ complete。
-    /// 按日期升序、上限 `cap`。failed 日不是 complete，会被自动重新捡起。
-    private func pendingEventDays(cap: Int) -> [Date] {
+    /// 待处理的数据日：有采集帧、raw 已收齐、且 event 或 impact 阶段还需处理。
+    /// 按日期升序、上限 `cap`。
+    ///
+    /// 纳入：event/impact 处于 idle / pending / failed / budget_deferred。
+    /// 排除：complete（已完成）、in_progress（在跑或待恢复）、dead_letter（放弃）。
+    func pendingDays(cap: Int) -> [Date] {
         let cal = utcCalendar()
-        let dayComps = TimelineDB().availableDays(monthsBack: 3)
-        var days: [Date] = dayComps.compactMap { cal.date(from: $0) }
+        var days: [Date] = TimelineDB().availableDays(monthsBack: 3)
+            .compactMap { cal.date(from: $0) }
         days.sort()
 
         var out: [Date] = []
         for day in days {
             guard isRawReady(day) else { continue }
-            let ds = ProcessingLogStore.dayString(day)
-            if store.row(for: ds)?.event == .complete { continue }
-            out.append(day)
-            if out.count >= cap { break }
+            let row = store.row(for: ProcessingLogStore.dayString(day))
+            if isDailyCandidate(row) {
+                out.append(day)
+                if out.count >= cap { break }
+            }
         }
         return out
+    }
+
+    /// tick / daily job 是否还会处理某天 —— 与 pendingDays 用的是同一谓词。
+    /// dead_letter / 全 complete → false。测试 / UI 可查。
+    func wouldProcessInDailyJob(date: String) -> Bool {
+        isDailyCandidate(store.row(for: date))
+    }
+
+    /// 一天是否需要 daily job 处理（event 或 impact 阶段还有活）。
+    private func isDailyCandidate(_ row: ProcessingLogRow?) -> Bool {
+        guard let row else { return true }              // 无行 = idle = 需 event
+        if row.event.needsWork { return true }          // event 待处理
+        if row.event == .complete, row.impact.needsWork { return true }  // 待 impact
+        return false                                    // complete / in_progress / dead_letter
+    }
+
+    /// weekly distill 是否处于待重试态（failed / budget_deferred）。
+    private func weeklyNeedsRetry() -> Bool {
+        switch store.row(for: weeklyAnchor)?.distill {
+        case .failed, .budgetDeferred: return true
+        default: return false
+        }
     }
 
     /// 原始数据"收齐"：数据日 UTC 结束后再过 `rawGraceSeconds`。
@@ -256,19 +400,27 @@ final class MemoryScheduler {
         return max(1, d + 1)
     }
 
-    /// 删某个数据日产生的全部 event 文件（失败日清理）。
+    /// 删某个数据日产生的全部 event 文件（失败日回滚）。
     private func deleteEvents(on day: Date) {
         let dir = PortraitPaths.eventsDayDir(for: day)
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        var removed = 0
         for name in items where name.hasSuffix(".md") {
-            try? fm.removeItem(at: dir.appendingPathComponent(name))
+            if (try? fm.removeItem(at: dir.appendingPathComponent(name))) != nil {
+                removed += 1
+            }
+        }
+        if removed > 0 {
+            print("[Scheduler] rollback: purged \(removed) event file(s) from \(dir.lastPathComponent)/")
         }
     }
 
     // MARK: - 心跳
 
-    /// 起一个后台 Task，每 30s 刷新某天的心跳，直到被 cancel。
+    /// 起一个独立 Task，每 30s 刷新某行的心跳，直到被 cancel。
+    /// `Task.detached` —— 与 LLM 调用的 async context 完全独立：即使
+    /// `await` 在等网络挂起，这个循环照跑，stale detection 不会误杀在跑的步。
     private func startHeartbeat(for date: String) -> Task<Void, Never> {
         let store = self.store
         return Task.detached {
