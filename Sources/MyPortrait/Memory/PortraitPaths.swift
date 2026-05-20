@@ -2,13 +2,13 @@ import Foundation
 
 /// Path helpers for the portrait tree. Storage.swift defines the top-level
 /// directories; this layer knows about the subfolder taxonomy described in
-/// design doc 五（personality / social / habits / skills / …）.
+/// design doc 五（personality / social / skills / …）.
 enum PortraitPaths {
-    /// The 9 top-level categories we ship with. New ones can appear later via
+    /// The top-level categories we ship with. New ones can appear later via
     /// the classification Agent.
     static let seedCategories: [String] = [
         "personality", "social", "background", "experiences",
-        "interests", "speech_style", "habits", "skills", "emotions"
+        "interests", "speech_style", "skills", "emotions"
     ]
 
     static func categoryDir(_ name: String) -> URL {
@@ -25,7 +25,7 @@ enum PortraitPaths {
     }
 
     /// Per-category archive (kept inside the category itself, NOT a global
-    /// _archive/, so when you browse `habits/_archive/` you see the history
+    /// _archive/, so when you browse `skills/_archive/` you see the history
     /// of THAT category specifically).
     static func archiveDir(under category: String) -> URL {
         categoryDir(category).appendingPathComponent("_archive", isDirectory: true)

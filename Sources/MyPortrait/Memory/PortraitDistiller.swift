@@ -209,7 +209,6 @@ final class PortraitDistiller {
         case "experiences":  lines.append("- experiences = significant past events that shaped the user.")
         case "interests":    lines.append("- interests = topics/domains the user repeatedly engages with by choice.")
         case "speech_style": lines.append("- speech_style = how the user talks/writes (formality, language mix, idioms).")
-        case "habits":       lines.append("- habits = recurring behavioural patterns (when, where, how often).")
         case "skills":       lines.append("- skills = capabilities the user has demonstrated, with evidence.")
         case "emotions":     lines.append("- emotions = recurring emotional patterns and triggers.")
         default:             lines.append("- generic personal-portrait entry.")

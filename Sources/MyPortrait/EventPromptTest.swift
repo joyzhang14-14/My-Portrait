@@ -307,7 +307,7 @@ enum EventPromptTestCLI {
         portrait_facets — optional, default []. Only attach when the event reflects a
         STABLE signal about who the user is. Each facet: {"facet": "<name>", "value": "<short>"}.
           personality / background (demographic facts only) / social (named people) /
-          speech_style / habits (3+ days recurring) / interests / skills.
+          speech_style / interests / skills.
 
         WRITING THE SUMMARY — be concrete:
           ❌ "The user was chatting on WeChat."
@@ -482,6 +482,42 @@ enum RescoreCLI {
                 print("scored:  \(r.scoredCount)")
                 print("failed:  \(r.failedCount)")
                 print("elapsed: \(String(format: "%.1f", r.elapsed))s")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
+/// `--backfill-days <N>` — DEV-ONLY entry point that runs the real Backfill
+/// over the last N days in one process. Disposable.
+enum BackfillDaysCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run(daysBack: Int) {
+        print("=== backfill-days \(daysBack) ===")
+        let state = State()
+        Task.detached {
+            do {
+                let r = try await Backfill.run(daysBack: daysBack)
+                print("=== backfill done ===")
+                print("days scanned:         \(r.daysScanned)")
+                print("new events:           \(r.newEventCount)")
+                print("joined (cross-day):   \(r.joinedSessionCount)")
+                print("tier1 sessions:       \(r.tier1SessionCount)")
+                print("dropped (no OCR):     \(r.emptySessionCount)")
+                print("LLM-skipped sessions: \(r.skippedSessionCount)")
+                print("LLM-failed days:      \(r.llmFailedDays)")
+                print("archived:             \(r.archiverResult.archivedCount)")
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
                 state.code = 1

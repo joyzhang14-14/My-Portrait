@@ -401,7 +401,6 @@ final class EventBuilder {
                           education, family, occupation). NOT "background app".
           social        — specific named people in the user's life.
           speech_style  — vocabulary, tone, language preference.
-          habits        — recurring behaviour seen across 3+ days. NOT a single day.
           interests     — topics/domains the user repeatedly engages with by choice.
           skills        — a capability the user is practicing, with evidence.
 
