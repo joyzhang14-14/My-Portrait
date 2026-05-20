@@ -34,6 +34,9 @@ packages:
   TOMLKit:
     url: https://github.com/LebJe/TOMLKit.git
     from: 0.6.0
+  onnxruntime:
+    url: https://github.com/microsoft/onnxruntime-swift-package-manager
+    from: 1.24.0
 
 targets:
   MyPortrait:
@@ -60,6 +63,8 @@ targets:
         product: mlx_embeddings
       - package: TOMLKit
         product: TOMLKit
+      - package: onnxruntime
+        product: onnxruntime
       - sdk: libsqlite3.tbd
     info:
       path: Support/Info.plist

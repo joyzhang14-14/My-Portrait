@@ -14,6 +14,8 @@ let package = Package(
         .package(url: "https://github.com/mzbac/mlx.embeddings.git", from: "0.1.0"),
         // TOML 1.0 codec for the user-editable ~/.myportrait/config.toml
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0"),
+        // ONNX Runtime（说话人识别：pyannote 分离 + wespeaker CAM++ 嵌入）
+        .package(url: "https://github.com/microsoft/onnxruntime-swift-package-manager", from: "1.24.0"),
     ],
     targets: [
         .executableTarget(
@@ -27,6 +29,7 @@ let package = Package(
                 .product(name: "Transformers", package: "swift-transformers"),
                 .product(name: "mlx_embeddings", package: "mlx.embeddings"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
+                .product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
             ],
             path: "Sources/MyPortrait",
             exclude: [
