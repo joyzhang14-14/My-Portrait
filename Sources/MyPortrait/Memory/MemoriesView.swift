@@ -376,6 +376,14 @@ private struct EntryRow: View {
     let entry: MemoriesView.Entry
     let selected: Bool
 
+    nonisolated(unsafe) private static let dayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(spacing: 0) {
@@ -403,6 +411,9 @@ private struct EntryRow: View {
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                     Text("×\(entry.file.occurrences.count)d")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Text(Self.dayFmt.string(from: entry.file.created))
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                     Spacer()
