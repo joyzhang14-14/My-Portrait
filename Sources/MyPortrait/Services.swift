@@ -170,17 +170,17 @@ final class Services {
             .dropFirst()
             .sink { [weak self] enabled in
                 guard let self, enabled else { return }
-                let perm = self.permissions.screenRecording
-                if perm == .granted { return }
-                self.logger.info("screen toggle ON, permission=\(String(describing: perm), privacy: .public)")
-                if perm == .notDetermined {
-                    // 没问过 → CGRequestScreenCaptureAccess 弹系统标准对话框。
-                    self.permissions.requestScreenRecording()
-                } else {
-                    // denied → 系统对话框不会再弹，先问用户再开设置。
+                if self.permissions.screenRecording == .granted { return }
+                self.logger.info("screen toggle ON, permission not granted — requesting")
+                // **必须先调 CGRequestScreenCaptureAccess**：屏幕录制权限没有
+                // "notDetermined" 状态可查（CGPreflight 只给 bool），所以无条件
+                // 调一次。首次会弹系统对话框 + 把 app 注册进 TCC 列表；已拒过则
+                // 静默返回 false。返回 false 才引导去系统设置。
+                let granted = self.permissions.requestScreenRecording()
+                if !granted {
                     self.confirmThenOpenSettings(
                         title: "需要「屏幕录制」权限",
-                        body: "My Portrait 需要屏幕录制权限才能截屏。是否打开系统设置授权？",
+                        body: "在系统设置里勾选 My Portrait 后，**退出并重新打开 app** —— 屏幕录制权限需要重启 app 才生效。是否现在打开系统设置？",
                         perm: .screen
                     )
                 }

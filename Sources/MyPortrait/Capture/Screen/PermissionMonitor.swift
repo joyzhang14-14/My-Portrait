@@ -87,9 +87,16 @@ final class PermissionMonitor: ObservableObject {
     /// 如果是 Denied 状态（用户之前主动拒过），CGRequestScreenCaptureAccess()
     /// 不会再弹，只能跳到 System Settings。
     /// 调用后立刻 refresh 一次拿到最新状态（用户可能秒授权）。
-    func requestScreenRecording() {
-        _ = CGRequestScreenCaptureAccess()
+    /// 返回 `CGRequestScreenCaptureAccess()` 的结果（true = 已授权）。
+    ///
+    /// **必须调它而不是只 openSettings**：首次调用会弹系统标准对话框 **并把
+    /// app 注册进 TCC 的"屏幕录制"列表**。从没调过的话，app 可能根本不在那个
+    /// 列表里 / 状态不对，用户在系统设置里怎么勾都没用。
+    @discardableResult
+    func requestScreenRecording() -> Bool {
+        let granted = CGRequestScreenCaptureAccess()
         refresh()
+        return granted
     }
 
     /// 请求 microphone。NotDetermined 状态会弹标准对话框；Denied 状态系统对话框
