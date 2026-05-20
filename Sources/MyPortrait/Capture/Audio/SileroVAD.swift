@@ -11,6 +11,8 @@ final class SileroVAD {
 
     /// Silero v5 固定帧长：512 样本 @16kHz（约 32ms）。
     static let frameSize = 512
+    /// 帧间 context 样本数：模型实际窗口 = contextSize + frameSize = 576。
+    static let contextSize = 64
     /// LSTM 状态张量元素数：[2, 1, 128]。
     private static let stateCount = 2 * 1 * 128
 
@@ -21,6 +23,8 @@ final class SileroVAD {
     private let probOutputName: String
     private let stateOutputName: String
     private var state: [Float]
+    /// 上一帧尾部样本,拼到下一帧前面 —— silero v5 的窗口连续性靠它。
+    private var context: [Float]
 
     init(modelPath: String) throws {
         guard let env = SpeakerOnnxEnv.shared else {
@@ -40,19 +44,23 @@ final class SileroVAD {
         probOutputName = outs.first { $0 == "output" } ?? (outs.first ?? "output")
         stateOutputName = outs.first { $0 == "stateN" } ?? (outs.last ?? "stateN")
         state = [Float](repeating: 0, count: SileroVAD.stateCount)
+        context = [Float](repeating: 0, count: SileroVAD.contextSize)
     }
 
-    /// 清空 LSTM 状态（段与段之间互不影响时调）。
+    /// 清空 LSTM 状态 + context（段与段之间互不影响时调）。
     func reset() {
         state = [Float](repeating: 0, count: SileroVAD.stateCount)
+        context = [Float](repeating: 0, count: SileroVAD.contextSize)
     }
 
     /// 512 个 16kHz 样本 → 语音概率。任何一步失败返回 nil（调用方退化为 RMS）。
     func probability(_ frame: [Float]) -> Float? {
         guard frame.count == SileroVAD.frameSize else { return nil }
         do {
+            // silero v5 实际窗口 = 上一帧尾部 64 样本 context + 本帧 512 样本。
+            let windowed = context + frame
             var inputs: [String: ORTValue] = [
-                inputName: try floatTensor(frame, shape: [1, SileroVAD.frameSize]),
+                inputName: try floatTensor(windowed, shape: [1, windowed.count]),
                 stateName: try floatTensor(state, shape: [2, 1, 128]),
             ]
             if let srName {
@@ -71,6 +79,7 @@ final class SileroVAD {
                newState.count == SileroVAD.stateCount {
                 state = newState
             }
+            context = Array(windowed.suffix(SileroVAD.contextSize))
             return prob
         } catch {
             return nil
