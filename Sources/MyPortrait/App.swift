@@ -131,6 +131,29 @@ struct MyPortraitApp: App {
             DefaultPipesImportCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: MemoryScheduler 崩溃恢复 / retry / dead_letter 测试入口。
+        // 见 SchedulerTestCLI.swift。各子命令内部 exit；--sched-lock 永久挂起。
+        if args.contains("--sched-dump") {
+            SchedulerTestCLI.dump()
+        }
+        if let idx = args.firstIndex(of: "--sched-lock"), idx + 2 < args.count {
+            SchedulerTestCLI.lock(date: args[idx + 1], stageStr: args[idx + 2])
+        }
+        if args.contains("--sched-recover") {
+            SchedulerTestCLI.recover()
+        }
+        if let idx = args.firstIndex(of: "--sched-reset"), idx + 1 < args.count {
+            SchedulerTestCLI.reset(date: args[idx + 1])
+        }
+        if let idx = args.firstIndex(of: "--sched-inject"), idx + 3 < args.count {
+            SchedulerTestCLI.inject(date: args[idx + 1], stageStr: args[idx + 2], kindStr: args[idx + 3])
+        }
+        if args.contains("--sched-budget-strings") {
+            SchedulerTestCLI.budgetStrings()
+        }
+        if let idx = args.firstIndex(of: "--sched-would-process"), idx + 1 < args.count {
+            SchedulerTestCLI.wouldProcess(date: args[idx + 1])
+        }
         AppKeyboard.install()
     }
 
