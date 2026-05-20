@@ -7,23 +7,27 @@ import Observation
 /// read/write the same selection.
 enum MemoryScope: Hashable, Identifiable {
     case events
+    case input
     case portrait(category: String)
 
     var id: String {
         switch self {
         case .events:              return "__events__"
+        case .input:               return "__input__"
         case .portrait(let c):     return "portrait:\(c)"
         }
     }
     var displayName: String {
         switch self {
         case .events:              return "Events"
+        case .input:               return "Input"
         case .portrait(let c):     return c.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
     var systemImage: String {
         switch self {
         case .events:                   return "clock.arrow.circlepath"
+        case .input:                    return "keyboard"
         case .portrait("personality"):  return "person.fill"
         case .portrait("social"):       return "person.3.fill"
         case .portrait("background"):   return "books.vertical.fill"

@@ -279,8 +279,11 @@ struct TimelineSidebar: View {
                 }
             }
             Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
-            scopeHeader("EVENTS")
-            scopeRow(.events)
+            scopeHeader("DATA")
+            VStack(spacing: 2) {
+                scopeRow(.events)
+                scopeRow(.input)
+            }
         }
     }
 

@@ -316,6 +316,9 @@ struct MemoriesView: View {
         switch scope {
         case .events:
             root = Storage.eventsDir
+        case .input:
+            // AX 输入采集的数据源尚未接入 —— 暂无可扫描的目录。
+            return []
         case .portrait(let cat):
             root = Storage.portraitDir.appendingPathComponent(cat, isDirectory: true)
         }
@@ -453,6 +456,8 @@ private struct EmptyHint: View {
         switch scope {
         case .events:
             return "No events yet.\nClick ↓ to backfill from the timeline."
+        case .input:
+            return "Input capture is not set up yet."
         case .portrait:
             return "No portrait entries in this category yet.\nRun events backfill first, then 🪄 to distill."
         }
