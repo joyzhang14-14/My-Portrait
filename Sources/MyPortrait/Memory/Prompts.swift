@@ -55,7 +55,6 @@ enum MemoryPrompts {
 
     portrait_facets — optional, default []. Only attach when the event reflects a
     STABLE signal about who the user is. Each facet: {"facet": "<name>", "value": "<short>"}.
-      personality   — character trait visible in tone/decisions. RARE.
       background    — STRICTLY demographic / biographical facts (age, location,
                       education, family, occupation). NOT "background app".
       social        — specific named people in the user's life.
