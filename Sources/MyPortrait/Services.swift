@@ -134,7 +134,14 @@ final class Services {
             // EmbeddingWorker 启。bge-m3 推理走 MLX 本地，不再撞 Apple Intelligence
             // XPC 的 entitlement 坑。首次启动 BGEM3VectorEmbedder.loadedContainer
             // 会下 ~1.13 GB 模型到 HF cache，之后秒级加载。
-            await embeddingWorker.start()
+            //
+            // 调试开关：env `MYPORTRAIT_NO_EMBED_WORKER=1` 时跳过 worker 启动。
+            // 用于二分定位 capture toggle 崩溃是否跟 MLX/embedding 路径有关。
+            if ProcessInfo.processInfo.environment["MYPORTRAIT_NO_EMBED_WORKER"] != "1" {
+                await embeddingWorker.start()
+            } else {
+                logger.info("EmbeddingWorker SKIPPED (MYPORTRAIT_NO_EMBED_WORKER=1)")
+            }
         }
 
         // 屏幕采集订阅。effective = enabled && !paused。
