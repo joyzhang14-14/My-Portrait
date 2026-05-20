@@ -1,14 +1,15 @@
 import SwiftUI
 import AppKit
 
-/// The app's left sidebar — replaces the original navigation-only sidebar.
-/// Top: "My Portrait" title + compact section nav icons.
-/// Body: live context for the currently focused timeline frame:
+/// The app's left sidebar.
+/// Top: "My Portrait" title + section nav.
+/// Body: floating glass cards holding live context for the current section:
 ///   - Active Apps: every distinct app/window seen within ±45s
 ///   - Audio: transcript chunks within the recent window (favours -120s..+30s)
 ///
-/// When the user is not on the Timeline section, body shows a friendly
-/// placeholder (AI / Connections / etc. don't have per-moment context).
+/// When the user is not on the Timeline section, body shows the relevant
+/// list (Recents / Memories scope / Pipes / Settings) or a friendly
+/// placeholder.
 struct TimelineSidebar: View {
     let state: TimelineState
     @Binding var selection: SidebarSection?
@@ -38,13 +39,17 @@ struct TimelineSidebar: View {
 
     private var focusedTimestamp: Date? { focusedFrame?.timestamp }
 
-    /// Frosted glass vs solid window-bg, controlled by
-    /// `config.display.translucentSidebar`.
+    /// Frosted glass vs solid dark backdrop, controlled by
+    /// `config.display.translucentSidebar`. Either way the glass cards float
+    /// over it.
     @ViewBuilder private var sidebarBackground: some View {
         if ConfigStore.shared.display.translucentSidebar {
-            Rectangle().fill(.ultraThinMaterial).opacity(0.92)
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                SidebarBackdrop().opacity(0.55)
+            }
         } else {
-            Color(NSColor.windowBackgroundColor).opacity(0.92)
+            SidebarBackdrop()
         }
     }
 
@@ -52,26 +57,16 @@ struct TimelineSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            Divider().padding(.horizontal, 0)
-
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: Theme.Space.md) {
                     if selection == .timeline {
-                        if let _ = focusedTimestamp {
+                        if focusedTimestamp != nil {
                             activeAppsSection
                             audioSection
                         } else {
-                            VStack(spacing: 6) {
-                                Image(systemName: "clock")
-                                    .font(.system(size: 22, weight: .light))
-                                    .foregroundStyle(.tertiary)
-                                Text("Pick a moment in the timeline\nto see context.")
-                                    .font(.system(size: 11))
-                                    .multilineTextAlignment(.center)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 30)
+                            placeholderCard(
+                                symbol: "clock",
+                                text: "Pick a moment in the timeline\nto see context.")
                         }
                     } else if selection == .home {
                         recentsSection
@@ -82,15 +77,17 @@ struct TimelineSidebar: View {
                     } else if selection == .settings {
                         settingsListSection
                     } else {
-                        otherSectionPlaceholder
+                        placeholderCard(
+                            symbol: (selection ?? .timeline).symbol,
+                            text: "Switch to Timeline\nfor live context.")
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 14)
-                .padding(.bottom, 24)
+                .padding(.horizontal, Theme.Space.md)
+                .padding(.top, Theme.Space.md)
+                .padding(.bottom, Theme.Space.xl)
             }
         }
-        .background(sidebarBackground)
+        .background(sidebarBackground.ignoresSafeArea())
         .navigationTitle("")
         .onAppear { reload() }
         .onChange(of: state.focusIndex) { reload() }
@@ -98,44 +95,65 @@ struct TimelineSidebar: View {
         .onChange(of: selection) { reload() }
     }
 
-    // MARK: header (title + compact nav icons)
+    // MARK: header (title + nav rail)
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("My Portrait")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            Text("My Portrait")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.textPrimary)
 
-            HStack(spacing: 4) {
+            HStack(spacing: Theme.Space.xs) {
                 ForEach([SidebarSection.timeline, .home, .connections, .memories, .pipes, .settings], id: \.self) { item in
-                    NavIconButton(
-                        section: item,
-                        isSelected: selection == item
-                    ) {
+                    NavIconButton(section: item, isSelected: selection == item) {
                         selection = item
                     }
                 }
                 Spacer()
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
+        .padding(.horizontal, Theme.Space.lg)
+        .padding(.top, Theme.Space.md)
+        .padding(.bottom, Theme.Space.md)
+    }
+
+    // MARK: section card wrapper
+
+    /// Wraps a section's header + rows in a floating glass card.
+    @ViewBuilder
+    private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            content()
+        }
+        .padding(Theme.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard()
+    }
+
+    private func placeholderCard(symbol: String, text: String) -> some View {
+        VStack(spacing: Theme.Space.sm) {
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .light))
+                .foregroundStyle(Theme.textTertiary)
+            Text(text)
+                .font(.system(size: 11))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.xl)
+        .glassCard()
     }
 
     // MARK: Active Apps
 
     private var activeAppsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        sectionCard {
             SectionHeader(title: "ACTIVE APPS", count: activeApps.count)
-
             if activeApps.isEmpty && !loading {
                 EmptyRow(text: "No apps captured at this moment.")
             } else {
-                VStack(spacing: 4) {
+                VStack(spacing: Theme.Space.xs) {
                     ForEach(activeApps) { entry in
                         ActiveAppRow(entry: entry)
                     }
@@ -147,13 +165,12 @@ struct TimelineSidebar: View {
     // MARK: Audio
 
     private var audioSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        sectionCard {
             SectionHeader(title: "AUDIO", count: audioItems.count)
-
             if audioItems.isEmpty && !loading {
                 EmptyRow(text: "No audio in the surrounding window.")
             } else {
-                VStack(spacing: 6) {
+                VStack(spacing: Theme.Space.xs) {
                     ForEach(audioItems) { entry in
                         AudioRow(entry: entry, focusTime: focusedTimestamp ?? Date())
                     }
@@ -165,59 +182,39 @@ struct TimelineSidebar: View {
     // MARK: Recents (chat conversations)
 
     private var recentsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
+        sectionCard {
+            HStack(spacing: Theme.Space.sm) {
                 SectionHeader(title: "RECENTS", count: filteredConversations.count)
-                Spacer()
-                Button {
+                SidebarIconButton(
+                    systemName: recentsSearchOpen ? "xmark" : "magnifyingglass",
+                    help: "Search chats"
+                ) {
                     withAnimation(.easeOut(duration: 0.15)) {
                         recentsSearchOpen.toggle()
                         if !recentsSearchOpen { recentsSearch = "" }
                     }
-                } label: {
-                    Image(systemName: recentsSearchOpen ? "xmark" : "magnifyingglass")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.65))
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(recentsSearchOpen ? 0.12 : 0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
-                        )
                 }
-                .buttonStyle(.plain)
-                .help("Search chats")
-
-                Button {
+                SidebarIconButton(systemName: "plus", help: "New chat") {
                     chat.switchTo(nil)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
-                        )
                 }
-                .buttonStyle(.plain)
-                .help("New chat")
             }
 
             if recentsSearchOpen {
-                HStack(spacing: 6) {
+                HStack(spacing: Theme.Space.xs) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textSecondary)
                     TextField("filter chats…", text: $recentsSearch)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                 }
-                .padding(.horizontal, 8).padding(.vertical, 6)
+                .padding(.horizontal, Theme.Space.sm)
+                .padding(.vertical, 6)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
                         .fill(Color.white.opacity(0.04))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.10), lineWidth: 0.7))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                            .strokeBorder(Theme.stroke, lineWidth: 0.7))
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -270,73 +267,63 @@ struct TimelineSidebar: View {
     // MARK: Memories scope picker (shown when selection == .memories)
 
     private var memoryScopeSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        sectionCard {
             scopeHeader("PORTRAIT")
-            ForEach(PortraitPaths.seedCategories, id: \.self) { cat in
-                scopeRow(.portrait(category: cat))
+            VStack(spacing: 2) {
+                ForEach(PortraitPaths.seedCategories, id: \.self) { cat in
+                    scopeRow(.portrait(category: cat))
+                }
             }
-            Divider().padding(.vertical, 8)
+            Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
             scopeHeader("EVENTS")
             scopeRow(.events)
         }
-        .padding(.bottom, 8)
     }
 
     private func scopeHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 4)
-            .padding(.bottom, 4)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.bottom, 2)
     }
 
     private func scopeRow(_ s: MemoryScope) -> some View {
-        Button {
+        let isOn = memoryScope == s
+        return Button {
             memoryScope = s
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.sm) {
                 Image(systemName: s.systemImage)
                     .font(.system(size: 11))
                     .frame(width: 16)
-                    .foregroundStyle(memoryScope == s ? .white : .secondary)
+                    .foregroundStyle(isOn ? Theme.accent : Theme.textSecondary)
                 Text(s.displayName)
-                    .font(.system(size: 12, weight: memoryScope == s ? .semibold : .regular))
-                    .foregroundStyle(memoryScope == s ? .white : .primary)
+                    .font(.system(size: 12, weight: isOn ? .semibold : .regular))
+                    .foregroundStyle(isOn ? Theme.textPrimary : Theme.textSecondary)
                 Spacer()
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Theme.Space.sm)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(memoryScope == s ? Color.accentColor.opacity(0.65) : .clear)
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .fill(isOn ? Theme.accent.opacity(0.16) : .clear)
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                        .strokeBorder(isOn ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
             )
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, -4)
     }
 
     // MARK: Pipes (background AI workers)
 
     private var pipesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
+        sectionCard {
+            HStack(spacing: Theme.Space.sm) {
                 SectionHeader(title: "PIPES", count: pipeStore.pipes.count)
-                Spacer()
-                Button {
+                SidebarIconButton(systemName: "plus", help: "New pipe") {
                     editingPipe = PipesView.blankPipe()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .frame(width: 22, height: 22)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
-                        )
                 }
-                .buttonStyle(.plain)
-                .help("New pipe")
             }
 
             if pipeStore.pipes.isEmpty {
@@ -369,18 +356,17 @@ struct TimelineSidebar: View {
         }
     }
 
-    // MARK: Settings (6 subsections in the rail)
+    // MARK: Settings (subsections grouped in the rail)
 
     private var settingsListSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        sectionCard {
             ForEach([SettingsSubsection.Group.app, .memory, .dataPrivacy], id: \.self) { grp in
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.leading, 4)
-                    .padding(.top, grp == .app ? 4 : 14)
-                    .padding(.bottom, 6)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.top, grp == .app ? 0 : Theme.Space.sm)
+                    .padding(.bottom, 2)
                 VStack(spacing: 2) {
                     ForEach(SettingsSubsection.allCases.filter { $0.group == grp }) { s in
                         SettingsSidebarRow(
@@ -392,22 +378,6 @@ struct TimelineSidebar: View {
                 }
             }
         }
-    }
-
-    // MARK: placeholder for non-Timeline sections
-
-    private var otherSectionPlaceholder: some View {
-        VStack(spacing: 8) {
-            Image(systemName: (selection ?? .timeline).symbol)
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("Switch to Timeline\nfor live context.")
-                .font(.system(size: 11))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 36)
     }
 
     // MARK: reload
@@ -449,16 +419,18 @@ private struct SectionHeader: View {
         HStack(spacing: 6) {
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
-                .tracking(0.6)
-                .foregroundStyle(.secondary)
+                .tracking(0.8)
+                .foregroundStyle(Theme.textSecondary)
             if count > 0 {
                 Text("\(count)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Theme.accent.opacity(0.16)))
             }
             Spacer()
         }
-        .padding(.horizontal, 4)
     }
 }
 
@@ -467,9 +439,34 @@ private struct EmptyRow: View {
     var body: some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 6)
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.vertical, Theme.Space.xs)
+    }
+}
+
+/// Compact glass icon button used for the +/search affordances inside cards.
+private struct SidebarIconButton: View {
+    let systemName: String
+    var help: String = ""
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                        .fill(hover ? Theme.active : Theme.hover)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                            .strokeBorder(Theme.stroke, lineWidth: 0.8))
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help)
     }
 }
 
@@ -485,12 +482,16 @@ private struct NavIconButton: View {
             Image(systemName: section.symbol)
                 .font(.system(size: 13, weight: .medium))
                 .symbolRenderingMode(.hierarchical)
-                .frame(width: 26, height: 26)
-                .foregroundStyle(isSelected ? Color.white : .secondary)
+                .frame(width: 30, height: 30)
+                .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isSelected ? Color.accentColor :
-                              hover ? Color.secondary.opacity(0.15) : .clear)
+                    RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                        .fill(isSelected ? Theme.accent.opacity(0.16)
+                              : hover ? Theme.hover : .clear)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                                .strokeBorder(isSelected ? Theme.accent.opacity(0.40) : .clear,
+                                              lineWidth: 1))
                 )
         }
         .buttonStyle(.plain)
@@ -512,18 +513,18 @@ private struct ActiveAppRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: Theme.Space.sm) {
             RealAppIcon(appName: entry.appName, size: 22)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.appName)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 if !entry.windowName.isEmpty {
                     Text(entry.windowName)
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -531,10 +532,10 @@ private struct ActiveAppRow: View {
                     HStack(spacing: 3) {
                         Image(systemName: "link")
                             .font(.system(size: 8))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.textTertiary)
                         Text(displayURL(url))
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -545,8 +546,8 @@ private struct ActiveAppRow: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.06))
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                .fill(Color.white.opacity(0.04))
         )
     }
 }
@@ -576,29 +577,31 @@ private struct AudioRow: View {
             HStack(spacing: 6) {
                 Text(Self.timeFmt.string(from: entry.timestamp))
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
                 Text(displaySpeaker)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 Image(systemName: entry.isInput ? "mic.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 8))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
                 Spacer()
             }
             Text(entry.text)
                 .font(.system(size: 11))
-                .foregroundStyle(isNearFocus ? .primary : .secondary)
+                .foregroundStyle(isNearFocus ? Theme.textPrimary : Theme.textSecondary)
                 .lineSpacing(2)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Theme.Space.sm)
         .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
                 .fill(isNearFocus
-                      ? Color.accentColor.opacity(0.14)
-                      : Color.secondary.opacity(0.05))
+                      ? Theme.accent.opacity(0.16)
+                      : Color.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .strokeBorder(isNearFocus ? Theme.accent.opacity(0.30) : .clear, lineWidth: 1))
         )
     }
 }
@@ -624,25 +627,25 @@ private struct RecentRow: View {
     @FocusState private var renameFocused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Space.sm) {
             if conv.pinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.accent)
             }
             if isRenaming {
                 TextField("", text: $renameDraft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Theme.textPrimary)
                     .focused($renameFocused)
                     .onSubmit { onCommitRename() }
                     .onExitCommand { onCancelRename() }
                     .onAppear { renameFocused = true }
             } else {
                 Text(conv.title)
-                    .font(.system(size: 12))
-                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -651,26 +654,28 @@ private struct RecentRow: View {
                 Button(action: onTogglePin) {
                     Image(systemName: conv.pinned ? "pin.slash" : "pin")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
                 .help(conv.pinned ? "Unpin" : "Pin")
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
                 .help("Delete")
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Theme.Space.sm)
         .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isActive ? Color.white.opacity(0.10)
-                      : hover ? Color.white.opacity(0.05)
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                .fill(isActive ? Theme.accent.opacity(0.16)
+                      : hover ? Theme.hover
                       : Color.clear)
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .strokeBorder(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
