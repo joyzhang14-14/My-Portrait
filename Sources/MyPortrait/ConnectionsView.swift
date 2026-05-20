@@ -55,7 +55,7 @@ struct ConnectionsView: View {
             .frame(maxWidth: 920)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color.black)
+        .background(SidebarBackdrop().ignoresSafeArea())
     }
 
     // search
@@ -184,11 +184,7 @@ struct ConnectionsView: View {
             }
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        )
+        .glassCard()
     }
 
     /// Route the connect button to the right backend:
@@ -410,13 +406,13 @@ private struct IntegrationTile: View {
             .padding(.vertical, 14)
             .padding(.horizontal, 8)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Color.white.opacity(0.10)
-                         : hover ? Color.white.opacity(0.05)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Theme.accent.opacity(0.16)
+                         : hover ? Theme.hover
                          : Color.white.opacity(0.025))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10).stroke(
-                            isSelected ? Color.white.opacity(0.4) : Color.white.opacity(0.10),
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(
+                            isSelected ? Theme.accent.opacity(0.45) : Theme.stroke,
                             lineWidth: 1
                         )
                     )

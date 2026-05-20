@@ -35,7 +35,7 @@ struct MemoriesView: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color.black)
+        .background(SidebarBackdrop().ignoresSafeArea())
         .task(id: scope) {
             selected = nil
             await reload()
@@ -117,7 +117,7 @@ struct MemoriesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.92))
+        .background(Color.black.opacity(0.28))
     }
 
     // MARK: - Detail (right)
@@ -400,7 +400,7 @@ private struct EntryRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(selected ? Color.accentColor.opacity(0.18) : .clear)
+        .background(selected ? Theme.accent.opacity(0.18) : .clear)
     }
 
     private var barColor: Color {

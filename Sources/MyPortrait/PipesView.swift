@@ -30,7 +30,7 @@ struct PipesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(SidebarBackdrop().ignoresSafeArea())
         .sheet(item: $editing) { pipe in
             PipeQuickEditor(initial: pipe) { saved in
                 if store.pipes.contains(where: { $0.id == saved.id }) {
@@ -120,9 +120,11 @@ struct PipeSidebarRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isActive ? Color.white.opacity(0.10)
-                      : hover ? Color.white.opacity(0.05) : .clear)
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                .fill(isActive ? Theme.accent.opacity(0.16)
+                      : hover ? Theme.hover : .clear)
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .strokeBorder(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
