@@ -162,6 +162,13 @@ struct MyPortraitApp: App {
         if let idx = args.firstIndex(of: "--sched-would-process"), idx + 1 < args.count {
             SchedulerTestCLI.wouldProcess(date: args[idx + 1])
         }
+        // `--typing-observe` 只跑 TypingObserver（AX 订阅 + print 日志），
+        // 不启动 capture / Memory pipeline / 不开窗口。AX 回调靠主 run loop，
+        // 所以这里**不 exit()**：只置一个标志，AppDelegate 据此跳过
+        // Services / 窗口创建，让 NSApplication run loop 继续活着。
+        if args.contains("--typing-observe") {
+            AppDelegate.typingObserveOnly = true
+        }
         AppKeyboard.install()
     }
 
@@ -207,9 +214,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var services: Services!
     var statusBarMenu: StatusBarMenu!
 
+    /// `--typing-observe` CLI 模式标志。init() 里置位，launching 时分支。
+    /// 仅在 App init（启动早期，单线程）写一次，之后只读 —— nonisolated(unsafe) 安全。
+    nonisolated(unsafe) static var typingObserveOnly = false
+
+    /// `--typing-observe` 模式下持有的 observer（持有它以保证存活 + 退出时 stop）。
+    private var typingObserver: TypingObserver?
+
+    /// SIGINT dispatch source —— 静态引用顶住生命周期，否则会被立即释放。
+    /// 仅在 launching（MainActor）写一次 —— nonisolated(unsafe) 安全。
+    nonisolated(unsafe) private static var sigintSource: DispatchSourceSignal?
+
     private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // CLI 模式：只跑 TypingObserver，跳过 Services / 窗口创建。
+        // 主 run loop 仍需活着（AX 回调靠它），所以不开窗口但不退出。
+        if Self.typingObserveOnly {
+            NSApp.setActivationPolicy(.accessory)
+            let observer = TypingObserver()
+            observer.start()
+            typingObserver = observer
+            // Ctrl+C → 走 stop() 清理路径再退出。SIGINT 在 main queue 上回调。
+            let src = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+            src.setEventHandler { [weak self] in
+                self?.typingObserver?.stop()
+                exit(0)
+            }
+            src.resume()
+            signal(SIGINT, SIG_IGN)  // 默认 handler 终止进程，先忽略让 dispatch source 接管
+            // 防 src 被释放：用 associated 静态引用顶住其生命周期。
+            Self.sigintSource = src
+            print("[TypingObserver] --typing-observe mode — press Ctrl+C to stop")
+            return
+        }
+
         // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
         services = Services()
         statusBarMenu = StatusBarMenu(settings: services.settings, permissions: services.permissions)
@@ -284,6 +323,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // --typing-observe 模式：只需停 observer（走三步清理路径）。
+        if Self.typingObserveOnly {
+            typingObserver?.stop()
+            return
+        }
         // 进程退出前尽量优雅停止所有子系统（刷盘、关 SCStream、停 compaction、停录音）。
         // 同步等最多 ~1s，超时由系统 ~5s 后强制 kill 兜底。
         let sem = DispatchSemaphore(value: 0)
