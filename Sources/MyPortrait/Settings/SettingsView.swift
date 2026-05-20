@@ -107,8 +107,8 @@ struct SettingsScene: View {
     }
 }
 
-/// Row used in `SettingsScene`'s left rail. Hover lift + purple-tinted
-/// background when active.
+/// Settings rail row. Active state matches the rest of the app's sidebars
+/// (`scopeRow` etc.): blue accent fill + hairline accent border.
 struct SettingsSidebarRow: View {
     let subsection: SettingsSubsection
     let isActive: Bool
@@ -119,32 +119,25 @@ struct SettingsSidebarRow: View {
             HStack(spacing: 10) {
                 Image(systemName: subsection.icon)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(isActive ? .white.opacity(0.95) : .white.opacity(0.70))
+                    .foregroundStyle(isActive ? Theme.accent : Theme.textSecondary)
                     .frame(width: 20)
                 Text(subsection.label)
                     .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(activeFill)
+                RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                    .fill(isActive ? Theme.accent.opacity(0.16)
+                          : hover ? Theme.hover : .clear)
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                        .strokeBorder(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
-    }
-
-    private var activeFill: AnyShapeStyle {
-        if isActive {
-            return AnyShapeStyle(
-                LinearGradient(colors: [Color.purple.opacity(0.30), Color.blue.opacity(0.18)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-        }
-        return AnyShapeStyle(Color.white.opacity(hover ? 0.05 : 0))
     }
 }
