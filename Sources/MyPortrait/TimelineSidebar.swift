@@ -44,10 +44,14 @@ struct TimelineSidebar: View {
     /// over it.
     @ViewBuilder private var sidebarBackground: some View {
         if ConfigStore.shared.display.translucentSidebar {
+            // `.ignoresSafeArea()` must be inside this branch — the bare
+            // Rectangle would otherwise stop at the title-bar inset and leave
+            // a black strip across the top of the sidebar.
             ZStack {
                 Rectangle().fill(.ultraThinMaterial)
                 SidebarBackdrop().opacity(0.55)
             }
+            .ignoresSafeArea()
         } else {
             SidebarBackdrop()
         }
