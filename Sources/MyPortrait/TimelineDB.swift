@@ -15,6 +15,13 @@ struct SpeakerListRow: Sendable {
     let lastHeardMs: Int64?
 }
 
+/// 声音相似的说话人候选（用于建议合并）。
+struct SimilarSpeaker: Sendable, Identifiable {
+    let id: Int64
+    let name: String?
+    let similarity: Float
+}
+
 @inline(__always)
 private func sqlErr(_ db: OpaquePointer?) -> String {
     sqlite3_errmsg(db).flatMap { String(cString: $0) } ?? "unknown"
@@ -614,6 +621,65 @@ struct TimelineDB: Sendable {
             out.append(sqlite3_column_int64(stmt, 0))
         }
         return out
+    }
+
+    /// 找声音相似的说话人（centroid 余弦相似度 > 0.25，按相似度降序取前 limit）。
+    /// 用于在 Speakers 页建议「这俩是不是同一个人 → 合并」。
+    func similarSpeakers(to speakerId: Int64, limit: Int = 5) -> [SimilarSpeaker] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = "SELECT id, name, centroid FROM speakers WHERE hidden = 0 AND centroid IS NOT NULL"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var target: [Float]?
+        var others: [(id: Int64, name: String?, vec: [Float])] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let name = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            guard let blob = sqlite3_column_blob(stmt, 2) else { continue }
+            let len = Int(sqlite3_column_bytes(stmt, 2))
+            guard let vec = Data(bytes: blob, count: len).asFloats else { continue }
+            if id == speakerId { target = vec } else { others.append((id, name, vec)) }
+        }
+        guard let t = target else { return [] }
+
+        let scored = others.compactMap { item -> SimilarSpeaker? in
+            guard item.vec.count == t.count else { return nil }
+            let sim = VectorMath.cosineSimilarity(t, item.vec)
+            guard sim > 0.25 else { return nil }
+            return SimilarSpeaker(id: item.id, name: item.name, similarity: sim)
+        }.sorted { $0.similarity > $1.similarity }
+        return Array(scored.prefix(limit))
+    }
+
+    /// 合并两个说话人：把 `merge` 的转录 + 声纹样本全部改挂到 `keep`，再删掉 `merge`。
+    /// 事务执行。keep 的 centroid 不重算 —— matchSpeaker 主要比对样本向量，已够用。
+    @discardableResult
+    func mergeSpeakers(keep keepId: Int64, merge mergeId: Int64) -> Bool {
+        guard exists, keepId != mergeId else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_close(db) }
+        func exec(_ sql: String) -> Bool { sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK }
+
+        guard exec("BEGIN") else { return false }
+        let ok = exec("UPDATE audio_transcriptions SET speaker_id = \(keepId) WHERE speaker_id = \(mergeId)")
+            && exec("UPDATE speaker_embeddings SET speaker_id = \(keepId) WHERE speaker_id = \(mergeId)")
+            && exec("DELETE FROM speakers WHERE id = \(mergeId)")
+        if ok {
+            return exec("COMMIT")
+        } else {
+            _ = exec("ROLLBACK")
+            timelineLog.error("mergeSpeakers failed: \(sqlErr(db), privacy: .public)")
+            return false
+        }
     }
 
     /// speakers 表的单语句写入小工具。

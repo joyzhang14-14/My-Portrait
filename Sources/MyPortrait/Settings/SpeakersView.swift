@@ -66,7 +66,8 @@ struct SpeakersSettingsView: View {
                     ForEach(identified) { r in
                         IdentifiedRow(row: r,
                                       onRename: { newName in rename(r, to: newName) },
-                                      onDelete: { hide(r) })
+                                      onDelete: { hide(r) },
+                                      onMerge: { similarId in merge(r, with: similarId) })
                     }
                 }
             }
@@ -178,6 +179,16 @@ struct SpeakersSettingsView: View {
         guard let sid = Int64(r.id) else { return }
         Task.detached(priority: .userInitiated) {
             _ = TimelineDB().markSpeakerHallucination(id: sid)
+        }
+    }
+    /// 把相似说话人 `similarId` 合并进 `keep`。
+    private func merge(_ keep: SpeakerRow, with similarId: Int64) {
+        guard let keepId = Int64(keep.id) else { return }
+        Task {
+            _ = await Task.detached(priority: .userInitiated) {
+                TimelineDB().mergeSpeakers(keep: keepId, merge: similarId)
+            }.value
+            reload()
         }
     }
 }
@@ -364,9 +375,14 @@ private struct IdentifiedRow: View {
     let row: SpeakerRow
     let onRename: (String) -> Void
     let onDelete: () -> Void
+    /// 把参数指定的相似说话人合并进本行说话人。
+    let onMerge: (Int64) -> Void
     @State private var editing = false
     @State private var draft = ""
     @State private var hover = false
+    @State private var showMerge = false
+    @State private var similar: [SimilarSpeaker] = []
+    @State private var loadingSimilar = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -413,6 +429,16 @@ private struct IdentifiedRow: View {
                         .foregroundStyle(.white.opacity(0.70))
                 }
                 .buttonStyle(.bouncyIcon)
+                Button {
+                    showMerge = true
+                    loadSimilar()
+                } label: {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.70))
+                }
+                .buttonStyle(.bouncyIcon)
+                .popover(isPresented: $showMerge, arrowEdge: .bottom) { mergePopover }
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
@@ -429,6 +455,53 @@ private struct IdentifiedRow: View {
                     .stroke(Color.white.opacity(0.10), lineWidth: 0.7))
         )
         .onHover { hover = $0 }
+    }
+
+    @ViewBuilder private var mergePopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Sounds similar — same person?")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            if loadingSimilar {
+                Text("Searching…")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else if similar.isEmpty {
+                Text("No similar speakers found.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                ForEach(similar) { s in
+                    HStack(spacing: 8) {
+                        Text(s.name ?? "Cluster \(s.id)")
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                        Text("\(Int(s.similarity * 100))%")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Merge") {
+                            onMerge(s.id)
+                            showMerge = false
+                        }
+                        .font(.system(size: 11))
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 280)
+    }
+
+    private func loadSimilar() {
+        guard let sid = Int64(row.id) else { return }
+        loadingSimilar = true
+        similar = []
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                TimelineDB().similarSpeakers(to: sid)
+            }.value
+            similar = result
+            loadingSimilar = false
+        }
     }
 
     private var initial: String {
