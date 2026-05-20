@@ -12,6 +12,7 @@ struct MemorySettingsView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
+                schedulerSection
                 budgetSection
                 decaySection
                 archiveSection
@@ -61,6 +62,31 @@ struct MemorySettingsView: View {
     }
 
     // MARK: - Sections
+
+    private static let weekdayNames = [
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    ]
+
+    private var schedulerSection: some View {
+        section(
+            title: "Automatic processing",
+            blurb: "The daily job clusters events and scores their impact; the weekly job distills events into portrait entries. Times are local. Each trigger handles up to 7 unprocessed days, oldest first; failed days retry on the next run."
+        ) {
+            toggleRow("Daily job (event clustering + impact scoring)",
+                      value: cfg.binding(\.scheduler.dailyEnabled))
+            hourRow("Run daily at",
+                    value: cfg.binding(\.scheduler.dailyHour))
+
+            Divider().padding(.vertical, 2)
+
+            toggleRow("Weekly job (portrait distillation)",
+                      value: cfg.binding(\.scheduler.weeklyEnabled))
+            weekdayRow("Run weekly on",
+                       value: cfg.binding(\.scheduler.weeklyWeekday))
+            hourRow("Run weekly at",
+                    value: cfg.binding(\.scheduler.weeklyHour))
+        }
+    }
 
     private var budgetSection: some View {
         section(
@@ -156,6 +182,48 @@ struct MemorySettingsView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 70)
                 .font(.system(size: 11, design: .monospaced))
+        }
+    }
+
+    private func toggleRow(_ label: String, value: Binding<Bool>) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Toggle("", isOn: value)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+    }
+
+    private func hourRow(_ label: String, value: Binding<Int>) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Picker("", selection: value) {
+                ForEach(0..<24, id: \.self) { h in
+                    Text(String(format: "%02d:00", h)).tag(h)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 110)
+        }
+    }
+
+    private func weekdayRow(_ label: String, value: Binding<Int>) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Picker("", selection: value) {
+                ForEach(1...7, id: \.self) { wd in
+                    Text(Self.weekdayNames[wd - 1]).tag(wd)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 130)
         }
     }
 
