@@ -151,6 +151,9 @@ struct MyPortraitApp: App {
         if args.contains("--sched-budget-strings") {
             SchedulerTestCLI.budgetStrings()
         }
+        if args.contains("--sched-trigger-test") {
+            SchedulerTestCLI.triggerTest()
+        }
         if let idx = args.firstIndex(of: "--sched-would-process"), idx + 1 < args.count {
             SchedulerTestCLI.wouldProcess(date: args[idx + 1])
         }

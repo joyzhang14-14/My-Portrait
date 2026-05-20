@@ -5,10 +5,10 @@ import Foundation
 ///
 /// 子命令（经 App.swift 的 args 分发）：
 ///   --sched-dump                       打印 processing_log 全表
-///   --sched-lock <date|_weekly> <stage>  持锁 + 标 in_progress + 起心跳，
+///   --sched-lock <date|_distill_anchor> <stage>  持锁 + 标 in_progress + 起心跳，
 ///                                       然后永久 sleep（供 kill -9）
 ///   --sched-recover                    跑 recoverStaleLocks，再打印全表
-///   --sched-reset <date|_weekly>        手动重置该行，再打印
+///   --sched-reset <date|_distill_anchor>        手动重置该行，再打印
 ///   --sched-inject <date> <stage> <success|fail|budget>
 ///                                       注入结果跑真实 runStep（验 applyOutcome）
 ///   --sched-budget-strings             验 BudgetSignal.isExhausted 分类
@@ -150,9 +150,53 @@ enum SchedulerTestCLI {
 
     static func wouldProcess(date: String) {
         ensureMigrated()
-        let yes = MemoryScheduler.shared.wouldProcessInDailyJob(date: date)
-        print("wouldProcessInDailyJob(\(date)) = \(yes)")
+        let yes = MemoryScheduler.shared.wouldProcessInEventJob(date: date)
+        print("wouldProcessInEventJob(\(date)) = \(yes)")
         exit(0)
+    }
+
+    // MARK: - shouldTriggerNow 频率矩阵（case G/H）
+
+    static func triggerTest() {
+        print("=== shouldTriggerNow 频率矩阵 ===")
+        let cal = Calendar.current
+        func mk(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
+            cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
+        }
+        func cfg(_ f: SchedulerFrequency, _ t: String, dow: Int = 0, dom: Int = 1) -> SchedulerConfig {
+            SchedulerConfig(frequency: f, timeOfDay: t, dayOfWeek: dow, dayOfMonth: dom)
+        }
+        var pass = true
+        func check(_ desc: String, _ c: SchedulerConfig, _ now: Date, _ expect: Bool) {
+            let got = MemoryScheduler.shouldTriggerNow(config: c, now: now)
+            let ok = got == expect
+            if !ok { pass = false }
+            print("  [\(ok ? "PASS" : "FAIL")] \(desc) → \(got) (expect \(expect))")
+        }
+
+        // off —— case H：永不触发。
+        check("off / 任意时刻", cfg(.off, "03:00"), mk(2026, 4, 15, 12, 0), false)
+
+        // daily —— case G：portrait 切 daily 后每天到点触发。
+        check("daily 03:00 / now 02:00 未到点", cfg(.daily, "03:00"), mk(2026, 4, 15, 2, 0), false)
+        check("daily 03:00 / now 03:30 到点",   cfg(.daily, "03:00"), mk(2026, 4, 15, 3, 30), true)
+
+        // weekly —— 按当天星期动态构造匹配 / 不匹配。
+        let wed = mk(2026, 4, 15, 5, 0)
+        let wd = cal.component(.weekday, from: wed) - 1
+        check("weekly 匹配星期+到点",   cfg(.weekly, "04:00", dow: wd),           wed, true)
+        check("weekly 不匹配星期",     cfg(.weekly, "04:00", dow: (wd + 1) % 7), wed, false)
+        check("weekly 匹配星期未到点", cfg(.weekly, "04:00", dow: wd), mk(2026, 4, 15, 3, 0), false)
+
+        // monthly + day-of-month edge case。
+        check("monthly 15号 / 当天到点", cfg(.monthly, "06:00", dom: 15), mk(2026, 4, 15, 7, 0), true)
+        check("monthly 15号 / 非当天",   cfg(.monthly, "06:00", dom: 15), mk(2026, 4, 14, 7, 0), false)
+        check("monthly 31号 / 4月只有30天→落到30号", cfg(.monthly, "06:00", dom: 31), mk(2026, 4, 30, 7, 0), true)
+        check("monthly 31号 / 4月29号不触发",        cfg(.monthly, "06:00", dom: 31), mk(2026, 4, 29, 7, 0), false)
+
+        print(pass ? "RESULT: PASS — 所有频率分支判定正确"
+                   : "RESULT: FAIL — 上面有误判")
+        exit(pass ? 0 : 1)
     }
 
     // MARK: - budget 字符串分类
