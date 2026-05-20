@@ -4,6 +4,17 @@ import os.log
 
 private let timelineLog = Logger(subsystem: "com.myportrait.db", category: "timeline-sql")
 
+/// 让 SQLite 在 bind 时立即拷贝字符串（Swift 临时 C 字符串只在调用期有效）。
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/// 说话人列表行（SpeakersView 用）。
+struct SpeakerListRow: Sendable {
+    let id: Int64
+    let name: String?
+    let sampleCount: Int
+    let lastHeardMs: Int64?
+}
+
 @inline(__always)
 private func sqlErr(_ db: OpaquePointer?) -> String {
     sqlite3_errmsg(db).flatMap { String(cString: $0) } ?? "unknown"
@@ -516,13 +527,80 @@ struct TimelineDB: Sendable {
         return out
     }
 
-    /// Speakers table not part of the capture schema yet — these are
-    /// no-ops until a speakers/diarisation pipeline is added.
-    @discardableResult
-    func renameSpeaker(id speakerId: Int64, to name: String) -> Bool { false }
+    /// 所有未隐藏的说话人 + 转录条数 + 最后听到时间。SpeakersView 列表用。
+    func loadSpeakers() -> [SpeakerListRow] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT s.id, s.name,
+                   COUNT(t.id) AS sample_count,
+                   MAX(t.transcribed_at_ms) AS last_heard
+            FROM speakers s
+            LEFT JOIN audio_transcriptions t ON t.speaker_id = s.id
+            WHERE s.hidden = 0
+            GROUP BY s.id
+            ORDER BY last_heard DESC NULLS LAST, s.id DESC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        var out: [SpeakerListRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let name = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            let count = Int(sqlite3_column_int(stmt, 2))
+            let lastHeard: Int64? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
+                ? nil : sqlite3_column_int64(stmt, 3)
+            out.append(SpeakerListRow(id: id, name: name, sampleCount: count, lastHeardMs: lastHeard))
+        }
+        return out
+    }
 
+    /// 给说话人改名。
     @discardableResult
-    func markSpeakerHallucination(id speakerId: Int64) -> Bool { false }
+    func renameSpeaker(id speakerId: Int64, to name: String) -> Bool {
+        runSpeakerWrite(
+            sql: "UPDATE speakers SET name = ?, updated_at_ms = ? WHERE id = ?",
+            bind: { stmt in
+                sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 2, Int64(Date().timeIntervalSince1970 * 1000))
+                sqlite3_bind_int64(stmt, 3, speakerId)
+            }
+        )
+    }
+
+    /// 把说话人标记为幻听（hidden=1），列表不再显示。
+    @discardableResult
+    func markSpeakerHallucination(id speakerId: Int64) -> Bool {
+        runSpeakerWrite(
+            sql: "UPDATE speakers SET hidden = 1, updated_at_ms = ? WHERE id = ?",
+            bind: { stmt in
+                sqlite3_bind_int64(stmt, 1, Int64(Date().timeIntervalSince1970 * 1000))
+                sqlite3_bind_int64(stmt, 2, speakerId)
+            }
+        )
+    }
+
+    /// speakers 表的单语句写入小工具。
+    private func runSpeakerWrite(sql: String, bind: (OpaquePointer?) -> Void) -> Bool {
+        guard exists else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
+    }
 
     private func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {
         var stmt: OpaquePointer?

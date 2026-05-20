@@ -483,10 +483,14 @@ private struct SpeakerRow: Identifiable, Hashable {
 
 private enum SpeakerLoader {
     static func loadAll() -> [SpeakerRow] {
-        // Speaker diarisation lands in Phase 2 — no `speakers` table in the
-        // capture schema yet. UI shows the empty-state placeholder until
-        // that pipeline ships.
-        return []
+        TimelineDB().loadSpeakers().map { r in
+            SpeakerRow(
+                id: String(r.id),
+                name: r.name,
+                sampleCount: r.sampleCount,
+                lastHeard: r.lastHeardMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+            )
+        }
     }
 }
 
