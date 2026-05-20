@@ -169,7 +169,8 @@ final class PortraitDistiller {
         let prompt = Self.buildPrompt(
             category: category,
             events: events,
-            existing: existing
+            existing: existing,
+            evidenceThreshold: ConfigStore.shared.current.memory.distillEvidenceThreshold
         )
 
         do { try agent.sendPrompt(prompt, id: requestID) }
@@ -204,7 +205,8 @@ final class PortraitDistiller {
     nonisolated private static func buildPrompt(
         category: String,
         events: [EventEntry],
-        existing: [PortraitEntry]
+        existing: [PortraitEntry],
+        evidenceThreshold: Int
     ) -> String {
         var lines: [String] = []
         lines.append(MemoryPrompts.distillIntro)
@@ -253,7 +255,7 @@ final class PortraitDistiller {
         lines.append("")
 
         // Output spec.
-        lines.append(MemoryPrompts.distillOutputSpec)
+        lines.append(MemoryPrompts.distillOutputSpec(evidenceThreshold: evidenceThreshold))
         return lines.joined(separator: "\n")
     }
 

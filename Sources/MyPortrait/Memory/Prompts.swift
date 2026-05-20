@@ -137,37 +137,41 @@ enum MemoryPrompts {
     }
 
     /// Output spec + rules — appended after the existing/source-events blocks.
-    static let distillOutputSpec = #"""
-    Decide what portrait entries should exist for this category. Respond with ONLY a JSON array (no prose, no markdown fences).
-    Each object is one decision:
-      { "action": "create" | "update" | "noop",
-        "slug": "snake_case_short",   // for update, must match an existing slug
-        "title": "Human-readable title",
-        "body": "Markdown body, multiple sentences, third person about the user. Cite specific evidence from events. Use \n for newlines.",
-        "derived_from": ["<event id>", "<event id>"]
-      }
+    /// `evidenceThreshold` 是配置可调的"改写一个已沉淀条目所需的新事件数"
+    /// （Memory 设置里的 Portrait evidence threshold）。
+    static func distillOutputSpec(evidenceThreshold: Int) -> String {
+        #"""
+        Decide what portrait entries should exist for this category. Respond with ONLY a JSON array (no prose, no markdown fences).
+        Each object is one decision:
+          { "action": "create" | "update" | "noop",
+            "slug": "snake_case_short",   // for update, must match an existing slug
+            "title": "Human-readable title",
+            "body": "Markdown body, multiple sentences, third person about the user. Cite specific evidence from events. Use \n for newlines.",
+            "derived_from": ["<event id>", "<event id>"]
+          }
 
-    WEIGHTED MERGE — how to UPDATE a settled entry:
-    An existing portrait entry is SETTLED knowledge built from earlier events.
-    When you UPDATE one, MERGE — do not rewrite from scratch:
-    - Preserve what is still true. Fold new evidence into the existing text
-      rather than replacing it.
-    - A SUBSTANTIAL rewrite (overturning or significantly reframing the settled
-      content) is justified ONLY when at least 3 source events created AFTER the
-      entry's "last updated" date, each with meaningful weight, support the
-      change.
-    - A single new event — or a handful of low-weight ones — refines wording or
-      appends at most one sentence. It does NOT overturn settled content.
-    - `weight` is decayed importance; `created` tells you which events are new
-      relative to the entry. Events created on/before "last updated" are already
-      reflected — treat them as context, not new evidence.
-    - If the new events add nothing the entry doesn't already say, return "noop".
+        WEIGHTED MERGE — how to UPDATE a settled entry:
+        An existing portrait entry is SETTLED knowledge built from earlier events.
+        When you UPDATE one, MERGE — do not rewrite from scratch:
+        - Preserve what is still true. Fold new evidence into the existing text
+          rather than replacing it.
+        - A SUBSTANTIAL rewrite (overturning or significantly reframing the settled
+          content) is justified ONLY when at least \#(evidenceThreshold) source
+          events created AFTER the entry's "last updated" date, each with
+          meaningful weight, support the change.
+        - A single new event — or a handful of low-weight ones — refines wording or
+          appends at most one sentence. It does NOT overturn settled content.
+        - `weight` is decayed importance; `created` tells you which events are new
+          relative to the entry. Events created on/before "last updated" are already
+          reflected — treat them as context, not new evidence.
+        - If the new events add nothing the entry doesn't already say, return "noop".
 
-    Rules:
-    - ONLY return entries the evidence actually supports. If nothing strong enough, return [].
-    - Prefer UPDATE over duplicate CREATE if an existing slug covers the same trait.
-    - Multiple distinct portrait entries per category are fine.
-    - Slugs use snake_case and ≤40 chars (e.g. swift_ui_development, personal_ai_research, late_night_focus).
-    - Each body should be a real summary citing concrete signals — not 'the user used X app'.
-    """#
+        Rules:
+        - ONLY return entries the evidence actually supports. If nothing strong enough, return [].
+        - Prefer UPDATE over duplicate CREATE if an existing slug covers the same trait.
+        - Multiple distinct portrait entries per category are fine.
+        - Slugs use snake_case and ≤40 chars (e.g. swift_ui_development, personal_ai_research, late_night_focus).
+        - Each body should be a real summary citing concrete signals — not 'the user used X app'.
+        """#
+    }
 }

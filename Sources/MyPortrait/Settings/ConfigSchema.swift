@@ -78,6 +78,10 @@ struct MemoryConfig: Codable, Equatable {
     var archiveMaxWeight:      Double = 0.05
     var archiveMinDaysIdle:    Int    = 90
 
+    // PortraitDistiller — weighted-merge evidence threshold. How many new
+    // events must support a change before a settled portrait body is rewritten.
+    var distillEvidenceThreshold: Int = 3
+
     init() {}
     enum CodingKeys: String, CodingKey {
         case indexerEnabled       = "indexer_enabled"
@@ -91,6 +95,7 @@ struct MemoryConfig: Codable, Equatable {
         case archiveMaxImpact     = "archive_max_impact"
         case archiveMaxWeight     = "archive_max_weight"
         case archiveMinDaysIdle   = "archive_min_days_idle"
+        case distillEvidenceThreshold = "distill_evidence_threshold"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -106,6 +111,7 @@ struct MemoryConfig: Codable, Equatable {
         archiveMaxImpact     = c.dflt(Double.self, .archiveMaxImpact,     archiveMaxImpact)
         archiveMaxWeight     = c.dflt(Double.self, .archiveMaxWeight,     archiveMaxWeight)
         archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
+        distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)
     }
 }
 

@@ -20,6 +20,7 @@ struct MemorySettingsView: View {
                 budgetSection
                 decaySection
                 archiveSection
+                distillationSection
                 changelogSection
 
                 footer
@@ -226,6 +227,17 @@ struct MemorySettingsView: View {
             intRow("Min days idle",
                    value: cfg.binding(\.memory.archiveMinDaysIdle),
                    range: 7...365)
+        }
+    }
+
+    private var distillationSection: some View {
+        section(
+            title: "Distillation",
+            blurb: "How much new evidence is needed before a portrait section is updated. Lower = more responsive. Higher = more stable."
+        ) {
+            intRow("Portrait evidence threshold",
+                   value: cfg.binding(\.memory.distillEvidenceThreshold),
+                   range: 1...10)
         }
     }
 
