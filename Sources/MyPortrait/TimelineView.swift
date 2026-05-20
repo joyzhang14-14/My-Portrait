@@ -155,7 +155,7 @@ struct TimelineView: View {
             return
         }
         Task { @MainActor in
-            let fetched = (try? await db.framesForDay(day, limit: 2000)) ?? []
+            let fetched = (try? await db.framesForDay(day, limit: 20000)) ?? []
             state.frames = fetched
             state.focusIndex = max(fetched.count - 1, 0)
             state.loading = false

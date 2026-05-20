@@ -546,11 +546,13 @@ actor PortraitDBImpl: PortraitDB {
             LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
             WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
               AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
-            ORDER BY f.timestamp_ms ASC
+            ORDER BY f.timestamp_ms DESC
             LIMIT ?
             """
+            // DESC + limit：超出上限时丢最旧的、保留最近的（不会让刚拍的帧落到
+            // 截断区外）。结果再 reverse 回时间正序给时间线用。
             let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs, limit])
-            return rows.map { row -> TimelineFrame in
+            return rows.reversed().map { row -> TimelineFrame in
                 let id: Int64 = row["id"] ?? 0
                 let ts: Int64 = row["timestamp_ms"] ?? 0
                 let app: String = row["app_name"] ?? ""
