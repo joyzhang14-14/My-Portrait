@@ -16,7 +16,7 @@ final class IgnoreGate: @unchecked Sendable {
     private static let builtinIgnored: Set<String> = ["loginwindow", "logonui"]
 
     private struct State {
-        var appsLower: Set<String> = []           // 整名精确匹配
+        var appsLower: Set<String> = []           // 小写,子串匹配（app 名 / 标题）
         var windowTitleSubstrings: [String] = []  // 小写,窗口标题子串
         var urlSubstrings: [String] = []          // 小写,URL / 标题子串
         var maskingEnabled: Bool = true
@@ -62,7 +62,9 @@ final class IgnoreGate: @unchecked Sendable {
     /// 一个窗口是否应该从截图里抹掉。仿 screenpipe `is_valid` 取反：
     ///   - builtin 系统进程永远抹
     ///   - masking 关 → 永不抹
-    ///   - app 名精确命中 ignoredApps → 抹
+    ///   - ignoredApps 子串命中窗口 app 名**或**标题 → 抹
+    ///     （子串匹配是关键：`"WallpaperAgent".contains("wallpaper")` 才能让
+    ///      "Wallpaper" 这条命中真实的壁纸进程）
     ///   - 窗口标题子串命中 ignoredWindowTitles / ignoredUrls → 抹
     func shouldMaskWindow(appName: String, title: String?) -> Bool {
         let app = appName.lowercased()
@@ -71,9 +73,14 @@ final class IgnoreGate: @unchecked Sendable {
         let snap = state.withLock { $0 }
         guard snap.maskingEnabled else { return false }
 
-        if snap.appsLower.contains(app) { return true }
+        let t = (title ?? "").lowercased()
 
-        if let t = title?.lowercased(), !t.isEmpty {
+        // ignoredApps：子串匹配窗口 app 名 OR 标题（screenpipe is_valid 同款）。
+        for term in snap.appsLower where !term.isEmpty {
+            if app.contains(term) || t.contains(term) { return true }
+        }
+        // ignoredWindowTitles / ignoredUrls：子串匹配窗口标题。
+        if !t.isEmpty {
             for sub in snap.windowTitleSubstrings where !sub.isEmpty && t.contains(sub) {
                 return true
             }

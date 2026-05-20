@@ -48,7 +48,7 @@ struct PrivacySettingsView: View {
 
             SettingsCard(
                 title: "Ignored apps",
-                footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Exact app-name match."
+                footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Case-insensitive substring match against the window's app name or title."
             ) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Pick from apps you've captured, or type a custom name…")

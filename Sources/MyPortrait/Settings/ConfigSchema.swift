@@ -381,11 +381,13 @@ struct PrivacyConfig: Codable, Equatable {
     var captureClipboard:       Bool     = false
     var recordAudioWhileLocked: Bool     = false
     var piiRemoval:             Bool     = true
-    /// Default blacklist: password managers / sensitive tools. Matched by
-    /// exact app name (case-insensitive) in IgnoreGate.
+    /// Default blacklist: password managers / sensitive tools + desktop
+    /// wallpaper. Case-insensitive **substring** match against a window's
+    /// app name or title in IgnoreGate (so "Wallpaper" catches the
+    /// "WallpaperAgent" process).
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
-        "My Portrait",
+        "My Portrait", "Wallpaper",
     ]
     /// Reserved, not enforced yet. Schema / UI / TOML round-trip work, but
     /// IgnoreGate has no allowlist logic — setting this currently does nothing.
