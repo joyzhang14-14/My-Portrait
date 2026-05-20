@@ -3,7 +3,9 @@ import Observation
 
 /// A background AI worker. The user defines a name + prompt + cadence; the
 /// PipeRunner schedules it, and each fire creates a fresh conversation +
-/// records a `PipeRun` entry. Pipes survive across launches via UserDefaults.
+/// records a `PipeRun` entry. Pipes survive across launches as one
+/// directory per pipe under `~/.portrait/pipes/` (screenpipe-style):
+/// `<slug>/pipe.md` (frontmatter + prompt) + `<slug>/runs.json` (history).
 @MainActor
 @Observable
 final class PipeStore {
@@ -11,7 +13,8 @@ final class PipeStore {
 
     private(set) var pipes: [PipeJob] = []
 
-    private let key = "MyPortrait.pipes.v1"
+    /// Legacy UserDefaults key — only read once for the one-time migration.
+    private let legacyKey = "MyPortrait.pipes.v1"
     private let runsCap = 50
 
     private init() { load() }
@@ -48,15 +51,95 @@ final class PipeStore {
 
     // MARK: - Persistence
 
-    private func load() {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([PipeJob].self, from: data) else { return }
-        pipes = decoded
+    /// Run history sidecar (`runs.json`) — runtime data kept out of pipe.md.
+    private struct RunsSidecar: Codable {
+        var runs: [PipeRun]
+        var lastRunAt: Date?
     }
 
+    /// Load all pipes from `~/.portrait/pipes/`. If that directory has no
+    /// pipe sub-directories, attempt a one-time migration from the legacy
+    /// UserDefaults JSON blob.
+    private func load() {
+        let fm = FileManager.default
+        let dir = Storage.pipesDir
+
+        let subdirs = (try? fm.contentsOfDirectory(at: dir,
+            includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]))?
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true } ?? []
+
+        let withPipeMd = subdirs.filter { fm.fileExists(atPath: $0.appendingPathComponent("pipe.md").path) }
+
+        guard !withPipeMd.isEmpty else {
+            migrateFromUserDefaults()
+            return
+        }
+
+        var loaded: [PipeJob] = []
+        for sub in withPipeMd {
+            let mdURL = sub.appendingPathComponent("pipe.md")
+            guard let text = try? String(contentsOf: mdURL, encoding: .utf8),
+                  var job = PipeFile.parseMarkdown(text, fallbackName: sub.lastPathComponent) else { continue }
+            if let rData = try? Data(contentsOf: sub.appendingPathComponent("runs.json")),
+               let sidecar = try? JSONDecoder().decode(RunsSidecar.self, from: rData) {
+                job.runs = sidecar.runs
+                job.lastRunAt = sidecar.lastRunAt
+            }
+            loaded.append(job)
+        }
+        pipes = loaded
+    }
+
+    /// One-time migration: decode the legacy `[PipeJob]` JSON, write it out
+    /// in the new directory format, then drop the UserDefaults key.
+    private func migrateFromUserDefaults() {
+        guard let data = UserDefaults.standard.data(forKey: legacyKey),
+              let decoded = try? JSONDecoder().decode([PipeJob].self, from: data) else { return }
+        pipes = decoded
+        save()
+        UserDefaults.standard.removeObject(forKey: legacyKey)
+    }
+
+    /// Full rewrite of `~/.portrait/pipes/` (pipe count is tiny). Each pipe
+    /// gets `<slug>/pipe.md` + `<slug>/runs.json`; slug collisions get a
+    /// numeric suffix; directories for deleted pipes are removed.
     private func save() {
-        if let data = try? JSONEncoder().encode(pipes) {
-            UserDefaults.standard.set(data, forKey: key)
+        let fm = FileManager.default
+        let root = Storage.pipesDir
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var usedSlugs: Set<String> = []
+        var keepDirs: Set<String> = []
+
+        for pipe in pipes {
+            var slug = PipeFile.slug(pipe.name)
+            var n = 2
+            while usedSlugs.contains(slug) { slug = "\(PipeFile.slug(pipe.name))-\(n)"; n += 1 }
+            usedSlugs.insert(slug)
+            keepDirs.insert(slug)
+
+            let dir = root.appendingPathComponent(slug, isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+            let md = PipeFile.renderMarkdown(pipe)
+            try? md.write(to: dir.appendingPathComponent("pipe.md"), atomically: true, encoding: .utf8)
+
+            let sidecar = RunsSidecar(runs: pipe.runs, lastRunAt: pipe.lastRunAt)
+            let enc = JSONEncoder()
+            enc.outputFormatting = .prettyPrinted
+            if let rData = try? enc.encode(sidecar) {
+                try? rData.write(to: dir.appendingPathComponent("runs.json"), options: .atomic)
+            }
+        }
+
+        // Drop directories that no longer correspond to a live pipe.
+        let existing = (try? fm.contentsOfDirectory(at: root,
+            includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        for sub in existing {
+            let isDir = (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+            if isDir, !keepDirs.contains(sub.lastPathComponent) {
+                try? fm.removeItem(at: sub)
+            }
         }
     }
 }

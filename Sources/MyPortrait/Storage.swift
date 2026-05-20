@@ -56,6 +56,10 @@ enum Storage {
     /// `~/.portrait/models/`.
     static var modelsDir: URL { rootURL.appendingPathComponent("models", isDirectory: true) }
 
+    /// AI pipes — one directory per pipe (`<slug>/pipe.md` + `runs.json`).
+    /// `~/.portrait/pipes/`.
+    static var pipesDir: URL { rootURL.appendingPathComponent("pipes", isDirectory: true) }
+
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {
         let fm = FileManager.default
