@@ -38,6 +38,8 @@ final class Services {
     let embedder: any VectorEmbedder
     let embeddingWorker: EmbeddingWorker
     let permissions: PermissionMonitor
+    /// 音乐播放监测 —— 开启 pauseOnMusicApp 后,音乐类 app 出声时暂停音频采集。
+    let musicMonitor: MusicPlaybackMonitor
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -109,6 +111,7 @@ final class Services {
         self.retentionWorker = RetentionWorker(db: dbImpl)
         self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)
         self.permissions = PermissionMonitor()
+        self.musicMonitor = MusicPlaybackMonitor()
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
@@ -123,6 +126,9 @@ final class Services {
         // 权限轮询启动。3 秒一次查 TCC / AX / AVCapture，状态变化会触发
         // 下面的 Combine sink 重新评估 capture toggle 是否能 effective。
         permissions.start()
+
+        // 音乐播放监测（每 5s 轮询；pauseOnMusicApp 关闭时空转）。
+        musicMonitor.start()
 
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
@@ -258,13 +264,16 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 音频采集订阅。effective = enabled && !paused && microphone granted。
-        Publishers.CombineLatest3(
+        // 音频采集订阅。effective = enabled && !paused && microphone granted && !music。
+        // music 在播 → 整体暂停采集（pauseOnMusicApp；关闭时 musicDetected 恒 false）。
+        Publishers.CombineLatest4(
             settings.$audioCaptureEnabled,
             settings.$pauseUntil,
-            permissions.$microphone
+            permissions.$microphone,
+            musicMonitor.$musicDetected
         )
-            .map { enabled, until, perm in
+            .map { enabled, until, perm, music in
+                if music { return false }
                 if let until, until > Date() { return false }
                 guard perm.isGranted else { return false }
                 return enabled
@@ -276,12 +285,14 @@ final class Services {
             .store(in: &settingsCancellables)
 
         // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
-        Publishers.CombineLatest3(
+        Publishers.CombineLatest4(
             settings.$systemAudioCaptureEnabled,
             settings.$pauseUntil,
-            permissions.$microphone
+            permissions.$microphone,
+            musicMonitor.$musicDetected
         )
-            .map { enabled, until, perm in
+            .map { enabled, until, perm, music in
+                if music { return false }
                 if let until, until > Date() { return false }
                 guard perm.isGranted else { return false }
                 return enabled

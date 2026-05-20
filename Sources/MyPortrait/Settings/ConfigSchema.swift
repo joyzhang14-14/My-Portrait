@@ -338,6 +338,9 @@ struct AudioConfig: Codable, Equatable {
     var useCoreAudioCapture:     Bool     = true
     var speakerIdEnabled:        Bool     = true
     var filterMusic:             Bool     = false
+    /// 检测到「音乐类」app 在输出音频时,整体暂停音频采集（比 filterMusic 更彻底,
+    /// 从源头不录。两者都开时此项优先）。
+    var pauseOnMusicApp:         Bool     = false
     var batchTranscription:      Bool     = true
     var autoSelectAudioDevices:  Bool     = true
     var customVocabulary:        [String] = []
@@ -361,6 +364,7 @@ struct AudioConfig: Codable, Equatable {
         case useCoreAudioCapture     = "use_core_audio_capture"
         case speakerIdEnabled        = "speaker_id_enabled"
         case filterMusic             = "filter_music"
+        case pauseOnMusicApp         = "pause_on_music_app"
         case batchTranscription      = "batch_transcription"
         case autoSelectAudioDevices  = "auto_select_audio_devices"
         case customVocabulary        = "custom_vocabulary"
@@ -382,6 +386,7 @@ struct AudioConfig: Codable, Equatable {
         useCoreAudioCapture    = c.dflt(Bool.self,     .useCoreAudioCapture, useCoreAudioCapture)
         speakerIdEnabled       = c.dflt(Bool.self,     .speakerIdEnabled, speakerIdEnabled)
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
+        pauseOnMusicApp        = c.dflt(Bool.self,     .pauseOnMusicApp, pauseOnMusicApp)
         batchTranscription     = c.dflt(Bool.self,     .batchTranscription, batchTranscription)
         autoSelectAudioDevices = c.dflt(Bool.self,     .autoSelectAudioDevices, autoSelectAudioDevices)
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)

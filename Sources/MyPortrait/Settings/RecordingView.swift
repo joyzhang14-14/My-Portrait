@@ -197,6 +197,12 @@ struct RecordingSettingsView: View {
                             Toggle("", isOn: config.binding(\.recording.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                         }
                         SettingsDivider()
+                        SettingsRow("Pause when a music app is playing",
+                                    description: "Stop recording entirely while a music app is playing audio — solves it at the source. Detected via the app's category; call apps (Zoom, etc.) aren't affected. Takes priority over Filter music.",
+                                    icon: "pause.circle") {
+                            Toggle("", isOn: config.binding(\.recording.audio.pauseOnMusicApp)).labelsHidden().toggleStyle(.switch)
+                        }
+                        SettingsDivider()
                         SettingsRow("Batch transcription",
                                     description: "Process audio chunks together for higher throughput. Slight latency cost.",
                                     icon: "tray.full") {
