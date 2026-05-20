@@ -91,10 +91,39 @@ final class HybridSearchEngine: SearchEngine, @unchecked Sendable {
         }
     }
 
-    /// 转录搜索：与 frames 同 hybrid 模式，但需要在 transcriptions 上做向量召回。
-    /// Phase 4.1：先只走 FTS（transcriptions 向量化 V5 再加），保证 UI 工作。
+    /// 转录搜索：FTS + 向量 + RRF 融合，结构跟 searchFrames 完全对称。
+    /// embedder 抛错时降级 FTS-only。
     func searchTranscriptions(query: String, limit: Int) async throws -> [TranscriptionSearchResult] {
-        try await fts.searchTranscriptions(query: query, limit: limit)
+        let ftsHits = try await fts.searchTranscriptions(query: query, limit: candidatesPerLayer)
+        let ftsIds = ftsHits.map(\.transcriptionId)
+
+        let semanticIds: [Int64]
+        do {
+            let queryVec = try await embedder.embed(query)
+            semanticIds = try await semanticTopTranscriptions(queryVector: queryVec)
+        } catch {
+            logger.info("embedder unavailable on transcriptions; FTS-only fallback: \(String(describing: error), privacy: .public)")
+            return Array(ftsHits.prefix(limit))
+        }
+
+        let fused = RRF.fuse([ftsIds, semanticIds])
+        let topIds = Array(fused.prefix(limit).map(\.id))
+
+        let metadata = try await db.transcriptionsByIds(topIds)
+        let metaById = Dictionary(uniqueKeysWithValues: metadata.map { ($0.id, $0) })
+        // FTS snippet 优先（高亮）；纯向量召回的结果用 text 头 80 字。
+        let snippetById = Dictionary(uniqueKeysWithValues: ftsHits.map { ($0.transcriptionId, $0.snippet) })
+
+        return fused.prefix(limit).compactMap { entry -> TranscriptionSearchResult? in
+            guard let m = metaById[entry.id] else { return nil }
+            return TranscriptionSearchResult(
+                transcriptionId: m.id,
+                audioChunkId: m.audioChunkId,
+                recordedAtMs: m.recordedAtMs,
+                snippet: snippetById[m.id] ?? String(m.text.prefix(80)),
+                score: entry.score
+            )
+        }
     }
 
     // MARK: - 私有
@@ -104,6 +133,18 @@ final class HybridSearchEngine: SearchEngine, @unchecked Sendable {
         if pairs.isEmpty { return [] }
 
         // Cosine = dot（前提：bge-m3 输出已 L2 归一化；EmbeddingWorker 也会再保险归一）
+        let scored = pairs.map { (pair: (id: Int64, vector: [Float])) -> (Int64, Float) in
+            (pair.id, VectorMath.cosineSimilarity(queryVector, pair.vector))
+        }
+        return scored
+            .sorted { $0.1 > $1.1 }
+            .prefix(candidatesPerLayer)
+            .map(\.0)
+    }
+
+    private func semanticTopTranscriptions(queryVector: [Float]) async throws -> [Int64] {
+        let pairs = try await db.allTranscriptionEmbeddings(model: embedder.modelIdentifier, limit: maxEmbeddingsScan)
+        if pairs.isEmpty { return [] }
         let scored = pairs.map { (pair: (id: Int64, vector: [Float])) -> (Int64, Float) in
             (pair.id, VectorMath.cosineSimilarity(queryVector, pair.vector))
         }

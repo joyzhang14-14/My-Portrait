@@ -264,6 +264,76 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 向量：转录
+
+    func transcriptionsNeedingEmbedding(model: String, limit: Int) async throws -> [Int64] {
+        try await dbPool.read { db in
+            try Int64.fetchAll(db, sql: """
+                SELECT id FROM audio_transcriptions
+                WHERE (embedding IS NULL OR embedding_model IS NOT ?)
+                  AND text IS NOT NULL AND length(text) > 4
+                ORDER BY transcribed_at_ms DESC
+                LIMIT ?
+                """, arguments: [model, limit])
+        }
+    }
+
+    func setTranscriptionEmbedding(transcriptionId: Int64, vector: [Float], model: String) async throws {
+        let blob = Data(floats: vector)
+        try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE audio_transcriptions SET embedding = ?, embedding_model = ? WHERE id = ?",
+                arguments: [blob, model, transcriptionId]
+            )
+        }
+    }
+
+    func allTranscriptionEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])] {
+        try await dbPool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, embedding FROM audio_transcriptions
+                WHERE embedding IS NOT NULL AND embedding_model = ?
+                ORDER BY transcribed_at_ms DESC
+                LIMIT ?
+                """, arguments: [model, limit])
+            return rows.compactMap { row -> (Int64, [Float])? in
+                guard let id: Int64 = row["id"],
+                      let blob: Data = row["embedding"],
+                      let vec = blob.asFloats else { return nil }
+                return (id, vec)
+            }
+        }
+    }
+
+    func transcriptionsByIds(_ ids: [Int64]) async throws -> [TranscriptionMetadata] {
+        guard !ids.isEmpty else { return [] }
+        return try await dbPool.read { db in
+            var out: [TranscriptionMetadata] = []
+            for chunk in stride(from: 0, to: ids.count, by: 500).map({
+                Array(ids[$0..<min($0 + 500, ids.count)])
+            }) {
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                let sql = """
+                SELECT t.id, t.audio_chunk_id, c.recorded_at_ms, t.text
+                FROM audio_transcriptions t
+                JOIN audio_chunks c ON c.id = t.audio_chunk_id
+                WHERE t.id IN (\(placeholders))
+                """
+                let args = StatementArguments(chunk.map { DatabaseValue(value: $0) ?? .null })
+                let rows = try Row.fetchAll(db, sql: sql, arguments: args)
+                for row in rows {
+                    out.append(TranscriptionMetadata(
+                        id: row["id"] ?? 0,
+                        audioChunkId: row["audio_chunk_id"] ?? 0,
+                        recordedAtMs: row["recorded_at_ms"] ?? 0,
+                        text: row["text"] ?? ""
+                    ))
+                }
+            }
+            return out
+        }
+    }
+
     func framesByIds(_ ids: [Int64]) async throws -> [FrameMetadata] {
         guard !ids.isEmpty else { return [] }
         return try await dbPool.read { db in

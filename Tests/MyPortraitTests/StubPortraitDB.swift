@@ -98,4 +98,20 @@ final class StubPortraitDB: PortraitDB, Sendable {
     func framesByIds(_ ids: [Int64]) async throws -> [FrameMetadata] {
         throw reporter.notImplemented("StubPortraitDB.framesByIds")
     }
+
+    func transcriptionsNeedingEmbedding(model: String, limit: Int) async throws -> [Int64] {
+        throw reporter.notImplemented("StubPortraitDB.transcriptionsNeedingEmbedding")
+    }
+
+    func setTranscriptionEmbedding(transcriptionId: Int64, vector: [Float], model: String) async throws {
+        throw reporter.notImplemented("StubPortraitDB.setTranscriptionEmbedding")
+    }
+
+    func allTranscriptionEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])] {
+        throw reporter.notImplemented("StubPortraitDB.allTranscriptionEmbeddings")
+    }
+
+    func transcriptionsByIds(_ ids: [Int64]) async throws -> [TranscriptionMetadata] {
+        throw reporter.notImplemented("StubPortraitDB.transcriptionsByIds")
+    }
 }

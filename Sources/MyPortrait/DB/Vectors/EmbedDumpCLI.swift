@@ -463,8 +463,67 @@ enum EmbedDumpCLI {
 
             let elapsed = Date().timeIntervalSince(started)
             print("")
-            print(String(format: "=== backfill done: %d embedded (%d written) in %.0fs (avg %.1f fr/s) ===",
+            print(String(format: "=== frames backfill done: %d embedded (%d written) in %.0fs (avg %.1f fr/s) ===",
                          totalEmbedded, totalWritten, elapsed, Double(totalEmbedded) / max(elapsed, 0.001)))
+            fflush(stdout)
+
+            // === transcriptions（同样的结构，但量小，不打 1000 进度，只打总数）===
+            print("")
+            print("=== backfilling transcriptions ===")
+            fflush(stdout)
+            let tStarted = Date()
+            var txEmbedded = 0
+            txOuter: while !Task.isCancelled {
+                let tids: [Int64]
+                do {
+                    tids = try await db.transcriptionsNeedingEmbedding(model: model, limit: 256)
+                } catch {
+                    FileHandle.standardError.write("transcriptionsNeedingEmbedding failed: \(error)\n".data(using: .utf8)!)
+                    break
+                }
+                if tids.isEmpty { break }
+
+                let metas: [TranscriptionMetadata]
+                do {
+                    metas = try await db.transcriptionsByIds(tids)
+                } catch {
+                    FileHandle.standardError.write("transcriptionsByIds failed: \(error)\n".data(using: .utf8)!)
+                    break
+                }
+                let work: [(Int64, String)] = metas.compactMap { t in
+                    guard !t.text.isEmpty else { return nil }
+                    return (t.id, t.text)
+                }
+                if work.isEmpty { continue }
+
+                let chunkSize = 32
+                var i = 0
+                while i < work.count {
+                    let end = min(i + chunkSize, work.count)
+                    let chunk = Array(work[i..<end])
+                    let vectors: [[Float]]
+                    do {
+                        vectors = try await embedder.embedBatch(chunk.map(\.1))
+                    } catch {
+                        FileHandle.standardError.write("transcriptions embedBatch failed: \(error)\n".data(using: .utf8)!)
+                        break txOuter
+                    }
+                    for (j, pair) in chunk.enumerated() {
+                        guard j < vectors.count else { break }
+                        var v = vectors[j]
+                        VectorMath.l2Normalize(&v)
+                        do {
+                            try await db.setTranscriptionEmbedding(transcriptionId: pair.0, vector: v, model: model)
+                            txEmbedded += 1
+                        } catch {
+                            FileHandle.standardError.write("setTranscriptionEmbedding(\(pair.0)) failed: \(error)\n".data(using: .utf8)!)
+                        }
+                    }
+                    i = end
+                }
+            }
+            let txElapsed = Date().timeIntervalSince(tStarted)
+            print(String(format: "transcriptions: %d embedded in %.1fs", txEmbedded, txElapsed))
             fflush(stdout)
 
             // === Sanity checks ===
@@ -488,21 +547,25 @@ enum EmbedDumpCLI {
             return
         }
         do {
-            let stats: (Int, Int, Int, Int, Int) = try await impl.dbPool.read { db in
-                let totalFrames = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM frames") ?? 0
-                let withEmbed = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM frames WHERE embedding IS NOT NULL") ?? 0
-                let distinctModels = try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT embedding_model) FROM frames WHERE embedding IS NOT NULL") ?? 0
-                let badLength = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM frames WHERE embedding IS NOT NULL AND length(embedding) != 4096") ?? 0
-                let nullModel = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM frames WHERE embedding IS NOT NULL AND embedding_model IS NULL") ?? 0
-                return (totalFrames, withEmbed, distinctModels, badLength, nullModel)
+            // 跑两份完全等价的统计 —— frames 和 audio_transcriptions
+            for table in ["frames", "audio_transcriptions"] {
+                let stats: (Int, Int, Int, Int, Int) = try await impl.dbPool.read { db in
+                    let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table)") ?? 0
+                    let withEmbed = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table) WHERE embedding IS NOT NULL") ?? 0
+                    let distinctModels = try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT embedding_model) FROM \(table) WHERE embedding IS NOT NULL") ?? 0
+                    let badLength = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table) WHERE embedding IS NOT NULL AND length(embedding) != 4096") ?? 0
+                    let nullModel = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table) WHERE embedding IS NOT NULL AND embedding_model IS NULL") ?? 0
+                    return (total, withEmbed, distinctModels, badLength, nullModel)
+                }
+                print("--- \(table) ---")
+                print("  total rows: \(stats.0)")
+                print("  with embedding: \(stats.1)")
+                print("  distinct embedding_model: \(stats.2)  (expected 1)")
+                print("  wrong blob length: \(stats.3)  (expected 0)")
+                print("  null model: \(stats.4)  (expected 0)")
+                let ok = (stats.1 == 0) || (stats.2 == 1 && stats.3 == 0 && stats.4 == 0)
+                print(ok ? "  SANITY: PASS ✓" : "  SANITY: FAIL ✗")
             }
-            print("total frames in DB: \(stats.0)")
-            print("frames with embedding: \(stats.1)")
-            print("distinct embedding_model values: \(stats.2)  (expected 1)")
-            print("frames with wrong blob length (!= 4096): \(stats.3)  (expected 0)")
-            print("frames with embedding but null model: \(stats.4)  (expected 0)")
-            let pass = stats.2 == 1 && stats.3 == 0 && stats.4 == 0
-            print(pass ? "SANITY: PASS ✓" : "SANITY: FAIL ✗")
         } catch {
             print("sanity query failed: \(error)")
         }
@@ -672,19 +735,25 @@ enum EmbedDumpCLI {
         let state = ExitState()
 
         let engine = services.searchEngine
-        let queries: [(String, String)] = [
-            // (label, query)
-            ("EN→ZH", "music player"),               // 应当召回 Spotify / 网易云
-            ("ZH→EN", "聊天"),                       // 应当召回 Discord / 微信
-            ("EN→EN", "code review"),                // 应当召回 Claude / Terminal
-            ("ZH→ZH", "代码"),                       // 应当召回 Claude / Terminal
-            ("EN→ZH", "browser"),                    // 应当召回 Safari / Chrome
-            ("ZH→EN", "笔记"),                       // 应当召回 Goodnotes / Obsidian
+        let frameQueries: [(String, String)] = [
+            ("EN→ZH", "music player"),
+            ("ZH→EN", "聊天"),
+            ("EN→EN", "code review"),
+            ("ZH→ZH", "代码"),
+            ("EN→ZH", "browser"),
+            ("ZH→EN", "笔记"),
+        ]
+        let transcriptionQueries: [(String, String)] = [
+            ("ZH", "学习"),
+            ("EN", "music"),
+            ("ZH", "约会"),
+            ("EN", "movie"),
         ]
 
         Task.detached {
             defer { state.done = true }
-            for (label, q) in queries {
+            print("\n>>> FRAMES <<<")
+            for (label, q) in frameQueries {
                 print("")
                 print("=== \(label): \"\(q)\" ===")
                 fflush(stdout)
@@ -696,6 +765,27 @@ enum EmbedDumpCLI {
                         for (i, r) in results.enumerated() {
                             let snippet = r.snippet.prefix(80).replacingOccurrences(of: "\n", with: " ")
                             print(String(format: "  %d. [%@ | %.3f] %@", i + 1, r.appName, r.score, snippet))
+                        }
+                    }
+                } catch {
+                    print("  ERROR: \(error)")
+                }
+                fflush(stdout)
+            }
+
+            print("\n>>> TRANSCRIPTIONS <<<")
+            for (label, q) in transcriptionQueries {
+                print("")
+                print("=== \(label): \"\(q)\" ===")
+                fflush(stdout)
+                do {
+                    let results = try await engine.searchTranscriptions(query: q, limit: 5)
+                    if results.isEmpty {
+                        print("  (no results)")
+                    } else {
+                        for (i, r) in results.enumerated() {
+                            let snippet = r.snippet.prefix(100).replacingOccurrences(of: "\n", with: " ")
+                            print(String(format: "  %d. [%.3f] %@", i + 1, r.score, snippet))
                         }
                     }
                 } catch {

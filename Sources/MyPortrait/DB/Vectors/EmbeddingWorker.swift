@@ -60,8 +60,17 @@ actor EmbeddingWorker {
     }
 
     /// 手动跑一轮（调试 / 测试用）。
+    /// 一轮做两件事：先吃 frames 积压，再吃 transcriptions 积压。两个独立，
+    /// frames 失败不阻塞 transcriptions（中间一次推理出错可能是模型 OOM，
+    /// transcriptions 一组小得多，往往能继续）。
     func runOnce() async {
         let model = embedder.modelIdentifier
+        await processFrames(model: model)
+        if Task.isCancelled { return }
+        await processTranscriptions(model: model)
+    }
+
+    private func processFrames(model: String) async {
         let ids: [Int64]
         do {
             ids = try await db.framesNeedingEmbedding(model: model, limit: batchSize)
@@ -78,8 +87,6 @@ actor EmbeddingWorker {
             logger.warning("framesByIds failed: \(String(describing: error), privacy: .public)")
             return
         }
-
-        // 过滤掉 full_text 空 / 太短的（framesNeedingEmbedding 已 length>4 过滤，这里防御）。
         let work: [(id: Int64, text: String)] = metas.compactMap { m in
             guard let t = m.fullText, !t.isEmpty else { return nil }
             return (m.id, t)
@@ -89,23 +96,18 @@ actor EmbeddingWorker {
         let started = Date()
         logger.info("embedding \(work.count) frames in chunks of \(self.embedChunkSize)")
 
-        var written: Int = 0
+        var written = 0
         var index = 0
         while index < work.count {
             let end = min(index + embedChunkSize, work.count)
             let chunk = Array(work[index..<end])
-
             let vectors: [[Float]]
             do {
                 vectors = try await embedder.embedBatch(chunk.map(\.text))
             } catch {
-                // 首次启动 bge-m3 模型还没下完 / 内存吃满都会走这里。
-                // 整轮放弃，下一分钟再试。
-                logger.info("embedder.embedBatch failed at offset \(index)/\(work.count) — aborting round: \(String(describing: error), privacy: .public)")
+                logger.info("frames embedBatch failed at offset \(index)/\(work.count) — aborting round: \(String(describing: error), privacy: .public)")
                 return
             }
-
-            // L2 兜底（BGEM3VectorEmbedder 内部已归一化，但接口允许 embedder 不归一）。
             for (i, pair) in chunk.enumerated() {
                 guard i < vectors.count else { break }
                 var v = vectors[i]
@@ -115,15 +117,70 @@ actor EmbeddingWorker {
                     written += 1
                 } catch {
                     logger.warning("setFrameEmbedding(\(pair.id)) failed: \(String(describing: error), privacy: .public)")
-                    // 单行失败继续下一个。
                 }
             }
-
             index = end
             if Task.isCancelled { break }
         }
 
         let elapsed = Date().timeIntervalSince(started)
         logger.info("embedded \(written)/\(work.count) frames in \(elapsed, format: .fixed(precision: 1))s (\(Double(written) / max(elapsed, 0.001), format: .fixed(precision: 1)) frames/s)")
+    }
+
+    private func processTranscriptions(model: String) async {
+        let ids: [Int64]
+        do {
+            ids = try await db.transcriptionsNeedingEmbedding(model: model, limit: batchSize)
+        } catch {
+            logger.warning("transcriptionsNeedingEmbedding failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+        if ids.isEmpty { return }
+
+        let metas: [TranscriptionMetadata]
+        do {
+            metas = try await db.transcriptionsByIds(ids)
+        } catch {
+            logger.warning("transcriptionsByIds failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+        let work: [(id: Int64, text: String)] = metas.compactMap { t in
+            guard !t.text.isEmpty else { return nil }
+            return (t.id, t.text)
+        }
+        if work.isEmpty { return }
+
+        let started = Date()
+        logger.info("embedding \(work.count) transcriptions in chunks of \(self.embedChunkSize)")
+
+        var written = 0
+        var index = 0
+        while index < work.count {
+            let end = min(index + embedChunkSize, work.count)
+            let chunk = Array(work[index..<end])
+            let vectors: [[Float]]
+            do {
+                vectors = try await embedder.embedBatch(chunk.map(\.text))
+            } catch {
+                logger.info("transcriptions embedBatch failed at offset \(index)/\(work.count) — aborting: \(String(describing: error), privacy: .public)")
+                return
+            }
+            for (i, pair) in chunk.enumerated() {
+                guard i < vectors.count else { break }
+                var v = vectors[i]
+                VectorMath.l2Normalize(&v)
+                do {
+                    try await db.setTranscriptionEmbedding(transcriptionId: pair.id, vector: v, model: model)
+                    written += 1
+                } catch {
+                    logger.warning("setTranscriptionEmbedding(\(pair.id)) failed: \(String(describing: error), privacy: .public)")
+                }
+            }
+            index = end
+            if Task.isCancelled { break }
+        }
+
+        let elapsed = Date().timeIntervalSince(started)
+        logger.info("embedded \(written)/\(work.count) transcriptions in \(elapsed, format: .fixed(precision: 1))s")
     }
 }

@@ -104,6 +104,26 @@ protocol PortraitDB: Sendable {
     /// 按 id 拉一批 frame 的元数据（HybridSearchEngine 拿到 RRF 结果后获取
     /// 显示字段）。返回顺序与 ids 顺序无关；调用方按 id 自己 reorder。
     func framesByIds(_ ids: [Int64]) async throws -> [FrameMetadata]
+
+    // MARK: - 向量：转录（跟上面 frames 一一对应）
+
+    func transcriptionsNeedingEmbedding(model: String, limit: Int) async throws -> [Int64]
+    func setTranscriptionEmbedding(transcriptionId: Int64, vector: [Float], model: String) async throws
+    func allTranscriptionEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])]
+    func transcriptionsByIds(_ ids: [Int64]) async throws -> [TranscriptionMetadata]
+}
+
+public struct TranscriptionMetadata: Sendable, Hashable {
+    public let id: Int64
+    public let audioChunkId: Int64
+    public let recordedAtMs: Int64
+    public let text: String
+    public init(id: Int64, audioChunkId: Int64, recordedAtMs: Int64, text: String) {
+        self.id = id
+        self.audioChunkId = audioChunkId
+        self.recordedAtMs = recordedAtMs
+        self.text = text
+    }
 }
 
 // MARK: - Records
