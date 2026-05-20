@@ -302,6 +302,51 @@ enum DBSchema {
                           on: "typing_events", columns: ["bundle_id", "timestamp_ms"])
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v11 — typing_events 重塑（DROP 重建成最终 schema）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // v10 建的列结构（timestamp_ms / kind / replaced_text ...）是早期
+        // diff 事件模型，跟最终的"一段连续输入即一条记录"设计不符。表里没有
+        // 任何真实数据，所以直接 DROP 重建——不拷数据、不备份，最干净。
+        //
+        // 新模型：每条记录是一次输入会话（started_at_ms ~ ended_at_ms），
+        // 带 thread_id 把同一上下文的多条串起来，text 是这段完整输入内容。
+        m.registerMigration("v11_typing_events_reshape") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS typing_events")
+
+            try db.create(table: "typing_events") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("started_at_ms", .integer).notNull()   // UTC ms，输入开始
+                t.column("ended_at_ms", .integer).notNull()     // UTC ms，输入结束
+                t.column("bundle_id", .text).notNull()          // com.tinyspeck.slackmacgap
+                t.column("app_name", .text)                     // "Slack"
+                t.column("window_title", .text)                 // 窗口标题
+                t.column("url", .text)                          // 浏览器 URL（如有）
+                t.column("element_role", .text)                 // AXTextField / AXTextArea / ...
+                t.column("thread_id", .text).notNull()          // 同上下文串联用
+                t.column("text", .text).notNull()               // 这段输入的完整内容
+                t.column("char_count", .integer).notNull()      // text 字符数
+                t.column("language_hint", .text)                // cjk | latin | mixed
+                t.column("created_at_ms", .integer).notNull()   // UTC ms，写入时刻
+            }
+
+            // 索引带 DESC / partial(WHERE)，GRDB create(index:) 不好表达，
+            // 直接 raw SQL（v4 已有此先例）。
+            try db.execute(sql: """
+                CREATE INDEX idx_typing_app ON typing_events(bundle_id, started_at_ms DESC)
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_typing_time ON typing_events(started_at_ms DESC)
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_typing_url ON typing_events(url) WHERE url IS NOT NULL
+                """)
+            try db.execute(sql: """
+                CREATE INDEX idx_typing_thread ON typing_events(thread_id)
+                """)
+        }
+
         return m
     }
 }
