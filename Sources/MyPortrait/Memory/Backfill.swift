@@ -243,9 +243,7 @@ enum Backfill {
         cache: inout [String: Entry]
     ) throws {
         let frameIds = members.flatMap { $0.session.sourceFrameIds }
-        let ocrTotal = members.reduce(0) { $0 + $1.ocrSnippet.count }
         let firstSeen = members.map { $0.session.firstSeen }.min() ?? day
-        let lastSeen = members.map { $0.session.lastSeen }.max() ?? day
 
         let filename = makeFilename(title: cluster.title, day: day)
         // Events live under events/<yyyy-MM-dd>/. Routing into portrait
@@ -253,9 +251,12 @@ enum Backfill {
         let url = PortraitPaths.eventsDayDir(for: day).appendingPathComponent(filename)
         let finalURL = uniqueURL(url)
 
+        // No placeholder impact — a new event is `unscored` until the LLM
+        // (ImpactScorer) gives it a real score. impact starts at the 1.0
+        // floor so an unscored event never outranks a scored one.
         var file = PortraitFile(
             created: firstSeen,
-            impact: baselineImpact(ocrTotal: ocrTotal, firstSeen: firstSeen, lastSeen: lastSeen),
+            impact: 1.0,
             body: renderBody(title: cluster.title, summary: cluster.summary),
             source: "timeline:event",
             tags: cluster.tags,
@@ -267,6 +268,7 @@ enum Backfill {
             memberFrameIds: frameIds
         )
         file.occurrences = [PortraitFile.truncateToDay(day)]
+        file.impactSource = "unscored"
 
         try PortraitFileIO.write(file, to: finalURL)
         let rel = finalURL.path
@@ -323,25 +325,6 @@ enum Backfill {
 
     private static func renderBody(title: String, summary: String) -> String {
         "# \(title)\n\n\(summary)\n"
-    }
-
-    /// Baseline impact = mostly OCR substance, lightly duration-modulated.
-    /// LLM rescore overrides this; the baseline just avoids ranking
-    /// "long but empty" events above "short but content-rich" ones.
-    private static func baselineImpact(ocrTotal: Int,
-                                       firstSeen: Date,
-                                       lastSeen: Date) -> Double {
-        let minutes = lastSeen.timeIntervalSince(firstSeen) / 60
-        let contentBase: Double
-        switch ocrTotal {
-        case ..<50:    contentBase = 1
-        case ..<200:   contentBase = 2
-        case ..<500:   contentBase = 3
-        case ..<1200:  contentBase = 4
-        default:       contentBase = 5
-        }
-        let durBoost: Double = (ocrTotal >= 50 && minutes >= 30) ? 0.5 : 0
-        return min(5, contentBase + durBoost)
     }
 
     // MARK: - Tree I/O

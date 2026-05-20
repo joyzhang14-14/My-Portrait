@@ -100,6 +100,26 @@ struct MyPortraitApp: App {
             MaterializeDayCLI.run(day: args[idx + 1], clusteringPath: args[idx + 2])
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--dump-events-by-category` exports distill input buckets.
+        if args.contains("--dump-events-by-category") {
+            DumpEventsByCategoryCLI.run()
+            // run() exits the process internally.
+        }
+        // DEV-ONLY: `--materialize-portrait <category> <decisions.json>`.
+        if let idx = args.firstIndex(of: "--materialize-portrait"), idx + 2 < args.count {
+            MaterializePortraitCLI.run(category: args[idx + 1], decisionsPath: args[idx + 2])
+            // run() exits the process internally.
+        }
+        // DEV-ONLY: `--dump-events-for-scoring` exports baseline-impact events.
+        if args.contains("--dump-events-for-scoring") {
+            DumpEventsForScoringCLI.run()
+            // run() exits the process internally.
+        }
+        // DEV-ONLY: `--apply-scores <scores.json>` writes subagent scores back.
+        if let idx = args.firstIndex(of: "--apply-scores"), idx + 1 < args.count {
+            ApplyScoresCLI.run(scoresPath: args[idx + 1])
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--rescore` runs ImpactScorer over every event file.
         if args.contains("--rescore") {
             RescoreCLI.run()

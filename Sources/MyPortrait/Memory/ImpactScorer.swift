@@ -1,7 +1,7 @@
 import Foundation
 
-/// LLM-driven impact scoring per design doc §6.2. Replaces the duration
-/// baseline written by `Backfill.baselineImpact()`.
+/// LLM-driven impact scoring per design doc §6.2. Scores events that
+/// Backfill wrote as `unscored`.
 ///
 /// Architecture:
 ///   - One long-lived `PiAgent` per `rescoreAll(...)` invocation
@@ -66,9 +66,8 @@ final class ImpactScorer {
         let start = Date()
 
         // Collect every (url, file) under ~/.portrait/events/ that is NOT
-        // archived. Backfill writes event files there with a duration
-        // baseline; this rescore replaces that baseline. Sequentially to
-        // keep memory tiny.
+        // archived. Backfill writes event files there as `unscored`; this
+        // rescore gives them a real impact. Sequentially to keep memory tiny.
         let candidates = try await collectCandidates()
         guard !candidates.isEmpty else {
             return Result(scoredCount: 0, failedCount: 0, elapsed: 0)

@@ -41,7 +41,7 @@ struct PortraitFile: Equatable {
                                         // for any future re-rebalance.
     var rebalanceCount: Int             // # of times the budget pass touched
                                         // this file. Capped at 5 (then frozen).
-    var impactSource: String            // "baseline_duration" / "llm:gpt-5.4" / "user_override"
+    var impactSource: String            // "unscored" / "llm:gpt-5.4" / "user_override"
     var weight: Double                  // computed, ≥0
     var occurrences: [Date]             // **per-day** deduped occurrence dates.
                                         // One date per day on which the event
@@ -88,7 +88,7 @@ struct PortraitFile: Equatable {
         self.impact = impact
         self.rawImpact = impact
         self.rebalanceCount = 0
-        self.impactSource = "baseline_duration"
+        self.impactSource = "unscored"
         self.weight = 0                  // weight pass fills this in
         self.occurrences = [stamp]
         self.eventTitle = eventTitle

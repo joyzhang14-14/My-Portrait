@@ -735,6 +735,192 @@ enum MaterializeDayCLI {
     }
 }
 
+/// `--dump-events-by-category` — DEV-ONLY. Mirrors PortraitDistiller's
+/// event bucketing (type → experiences/emotions, each facet → its bucket,
+/// top 50 by impact) and writes `/tmp/events_by_category.json`. No LLM.
+enum DumpEventsByCategoryCLI {
+    static func run() {
+        let fm = FileManager.default
+        guard let en = fm.enumerator(at: Storage.eventsDir,
+                                     includingPropertiesForKeys: nil,
+                                     options: [.skipsHiddenFiles]) else {
+            FileHandle.standardError.write(Data("no events dir\n".utf8)); exit(1)
+        }
+        var buckets: [String: [[String: Any]]] = [:]
+        while let url = en.nextObject() as? URL {
+            guard url.pathExtension == "md" else { continue }
+            guard url.lastPathComponent != "INDEX.md" else { continue }
+            if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
+            guard let f = try? PortraitFileIO.read(from: url) else { continue }
+            if f.eventTitle.isEmpty && f.eventSummary.isEmpty { continue }
+            let rel = url.path.replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
+            let entry: [String: Any] = [
+                "id": rel,
+                "title": f.eventTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : f.eventTitle,
+                "summary": f.eventSummary,
+                "impact": f.impact,
+                "occurrenceDays": f.occurrences.count,
+            ]
+            if f.eventType.lowercased() == "emotion" {
+                buckets["emotions", default: []].append(entry)
+            } else {
+                buckets["experiences", default: []].append(entry)
+            }
+            for facet in f.portraitFacets {
+                let name = facet.facet.lowercased()
+                guard name != "experiences", name != "emotions" else { continue }
+                buckets[name, default: []].append(entry)
+            }
+        }
+        for (k, v) in buckets {
+            let sorted = v.sorted { (($0["impact"] as? Double) ?? 0) > (($1["impact"] as? Double) ?? 0) }
+            buckets[k] = Array(sorted.prefix(50))
+        }
+        let outURL = URL(fileURLWithPath: "/tmp/events_by_category.json")
+        do {
+            let data = try JSONSerialization.data(withJSONObject: buckets,
+                                                  options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: outURL)
+            for (k, v) in buckets.sorted(by: { $0.key < $1.key }) {
+                print("\(k): \(v.count) events")
+            }
+            print("→ \(outURL.path)")
+        } catch {
+            FileHandle.standardError.write(Data("dump failed: \(error)\n".utf8)); exit(1)
+        }
+        exit(0)
+    }
+}
+
+/// `--materialize-portrait <category> <decisions.json>` — DEV-ONLY. Takes a
+/// subagent-produced distill decisions JSON and writes portrait files to
+/// `~/.portrait/portrait/<category>/<slug>.md`.
+///
+/// decisions JSON: [{"action":"create","slug":"...","title":"...","body":"...",
+///                   "derived_from":["event id",...]}]
+enum MaterializePortraitCLI {
+    static func run(category: String, decisionsPath: String) {
+        guard let data = FileManager.default.contents(atPath: decisionsPath),
+              let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+            FileHandle.standardError.write(Data("cannot read \(decisionsPath)\n".utf8)); exit(1)
+        }
+        let dir = PortraitPaths.categoryDir(category)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let portraitType = (category == "emotions") ? "emotion" : "experience"
+
+        var written = 0
+        for d in arr {
+            let action = (d["action"] as? String) ?? "noop"
+            guard action == "create" || action == "update" else { continue }
+            guard let slug = d["slug"] as? String, !slug.isEmpty,
+                  let title = d["title"] as? String, !title.isEmpty,
+                  let body = d["body"] as? String, !body.isEmpty else {
+                FileHandle.standardError.write(Data("skip malformed decision\n".utf8)); continue
+            }
+            let derived = (d["derived_from"] as? [String]) ?? []
+            var md = "# \(title)\n\n\(body)\n"
+            if !derived.isEmpty {
+                md += "\n**Derived from events:**\n"
+                for eid in derived.prefix(20) { md += "- [[\(eid)]]\n" }
+            }
+            var file = PortraitFile(
+                created: Date(),
+                impact: 3,
+                body: md,
+                source: "distilled",
+                tags: [category, "portrait"],
+                firstOccurrence: Date(),
+                eventTitle: title,
+                eventSummary: body,
+                eventType: portraitType,
+                portraitFacets: [],
+                category: category,
+                memberFrameIds: []
+            )
+            WeightCalculator.recompute(&file)
+            let url = dir.appendingPathComponent(slug + ".md")
+            do {
+                try PortraitFileIO.write(file, to: url)
+                written += 1
+            } catch {
+                FileHandle.standardError.write(Data("write failed: \(error)\n".utf8))
+            }
+        }
+        print("materialized \(written) portrait files → \(dir.path)")
+        exit(0)
+    }
+}
+
+/// `--dump-events-for-scoring` — DEV-ONLY. Exports every event whose
+/// impact_source is still `unscored` (id / title / summary /
+/// occurrence days) to `/tmp/events_to_score.json`. No LLM.
+enum DumpEventsForScoringCLI {
+    static func run() {
+        let fm = FileManager.default
+        guard let en = fm.enumerator(at: Storage.eventsDir,
+                                     includingPropertiesForKeys: nil,
+                                     options: [.skipsHiddenFiles]) else {
+            FileHandle.standardError.write(Data("no events dir\n".utf8)); exit(1)
+        }
+        var out: [[String: Any]] = []
+        while let url = en.nextObject() as? URL {
+            guard url.pathExtension == "md" else { continue }
+            guard url.lastPathComponent != "INDEX.md" else { continue }
+            if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
+            guard let f = try? PortraitFileIO.read(from: url) else { continue }
+            guard f.impactSource == "unscored" else { continue }
+            let rel = url.path.replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
+            out.append([
+                "id": rel,
+                "title": f.eventTitle,
+                "summary": f.eventSummary,
+                "occurrenceDays": f.occurrences.count,
+            ])
+        }
+        let outURL = URL(fileURLWithPath: "/tmp/events_to_score.json")
+        do {
+            let data = try JSONSerialization.data(withJSONObject: out,
+                                                  options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: outURL)
+            print("dumped \(out.count) events needing scores → \(outURL.path)")
+        } catch {
+            FileHandle.standardError.write(Data("dump failed: \(error)\n".utf8)); exit(1)
+        }
+        exit(0)
+    }
+}
+
+/// `--apply-scores <scores.json>` — DEV-ONLY. Reads `[{"id":"...","impact":2.3}]`
+/// and writes each impact back into its event file (impact + raw_impact,
+/// impact_source="llm:claude-subagent", weight recomputed).
+enum ApplyScoresCLI {
+    static func run(scoresPath: String) {
+        guard let data = FileManager.default.contents(atPath: scoresPath),
+              let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+            FileHandle.standardError.write(Data("cannot read \(scoresPath)\n".utf8)); exit(1)
+        }
+        var applied = 0, missing = 0
+        for s in arr {
+            guard let id = s["id"] as? String else { continue }
+            let impactRaw = (s["impact"] as? Double) ?? Double((s["impact"] as? Int) ?? 1)
+            let url = Storage.eventsDir.appendingPathComponent(id)
+            guard var f = try? PortraitFileIO.read(from: url) else { missing += 1; continue }
+            let c = PortraitFile.clampImpact(impactRaw)
+            f.impact = c
+            f.rawImpact = c
+            f.rebalanceCount = 0
+            f.impactSource = "llm:claude-subagent"
+            WeightCalculator.recompute(&f)
+            do { try PortraitFileIO.write(f, to: url); applied += 1 }
+            catch { FileHandle.standardError.write(Data("write failed \(id): \(error)\n".utf8)) }
+        }
+        print("applied \(applied) scores (\(missing) ids not found)")
+        exit(0)
+    }
+}
+
 // MARK: - Coordinator
 
 private actor PromptTestCoordinator {

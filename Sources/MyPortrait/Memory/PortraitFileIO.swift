@@ -60,9 +60,9 @@ enum PortraitFileIO {
         // and 0 — so pre-budget-pass files migrate without losing data.
         let rawImpact = (try? requireDouble(fields, "raw_impact")) ?? impact
         let rebalanceCount = (try? requireInt(fields, "rebalance_count")) ?? 0
-        // impact_source defaults to baseline_duration so older files (pre-LLM
+        // impact_source defaults to "unscored" so older files (pre-LLM
         // scoring) read cleanly without a re-migration.
-        let impactSource = (try? optionalString(fields, "impact_source")) ?? nil ?? "baseline_duration"
+        let impactSource = (try? optionalString(fields, "impact_source")) ?? nil ?? "unscored"
         let weight = try requireDouble(fields, "weight")
         let occurrences = try requireDateArray(fields, "occurrences")
         let tags = try requireStringArray(fields, "tags")
