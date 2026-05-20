@@ -24,6 +24,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var recording:     RecordingConfig     = .init()
     var notifications: NotificationsConfig = .init()
     var memory:        MemoryConfig        = .init()
+    var scheduler:     SchedulerConfig     = .init()
     var usage:         UsageConfig         = .init()
     var privacy:       PrivacyConfig       = .init()
     var storage:       StorageConfig       = .init()
@@ -34,7 +35,7 @@ struct MyPortraitConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case display, general, aiModels = "ai_models", recording, notifications
-        case memory, usage, privacy, storage, chat
+        case memory, scheduler, usage, privacy, storage, chat
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +48,7 @@ struct MyPortraitConfig: Codable, Equatable {
         recording     = c.dflt(RecordingConfig.self, .recording, recording)
         notifications = c.dflt(NotificationsConfig.self, .notifications, notifications)
         memory        = c.dflt(MemoryConfig.self, .memory, memory)
+        scheduler     = c.dflt(SchedulerConfig.self, .scheduler, scheduler)
         usage         = c.dflt(UsageConfig.self, .usage, usage)
         privacy       = c.dflt(PrivacyConfig.self, .privacy, privacy)
         storage       = c.dflt(StorageConfig.self, .storage, storage)
@@ -104,6 +106,38 @@ struct MemoryConfig: Codable, Equatable {
         archiveMaxImpact     = c.dflt(Double.self, .archiveMaxImpact,     archiveMaxImpact)
         archiveMaxWeight     = c.dflt(Double.self, .archiveMaxWeight,     archiveMaxWeight)
         archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
+    }
+}
+
+// MARK: - Scheduler
+
+/// 记忆流水线调度。两个 job：
+///   - daily  ：每天 `dailyHour` 点跑 event 聚类 + impact 评分。
+///   - weekly ：每周 `weeklyWeekday`（1=周日…7=周六）`weeklyHour` 点跑 distill。
+/// 时间均为本地时间。
+struct SchedulerConfig: Codable, Equatable {
+    var dailyEnabled:   Bool = true
+    var dailyHour:      Int  = 3
+    var weeklyEnabled:  Bool = true
+    var weeklyWeekday:  Int  = 1
+    var weeklyHour:     Int  = 4
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case dailyEnabled  = "daily_enabled"
+        case dailyHour     = "daily_hour"
+        case weeklyEnabled = "weekly_enabled"
+        case weeklyWeekday = "weekly_weekday"
+        case weeklyHour    = "weekly_hour"
+    }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dailyEnabled  = c.dflt(Bool.self, .dailyEnabled,  dailyEnabled)
+        dailyHour     = c.dflt(Int.self,  .dailyHour,     dailyHour)
+        weeklyEnabled = c.dflt(Bool.self, .weeklyEnabled, weeklyEnabled)
+        weeklyWeekday = c.dflt(Int.self,  .weeklyWeekday, weeklyWeekday)
+        weeklyHour    = c.dflt(Int.self,  .weeklyHour,    weeklyHour)
     }
 }
 
