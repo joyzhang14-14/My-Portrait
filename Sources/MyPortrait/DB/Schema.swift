@@ -257,6 +257,22 @@ enum DBSchema {
                           on: "distill_changelog", columns: ["entity_id"])
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v9 — processing_log 失败重试计数（retry_count）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 没这一列时 failed 是终态、永不封顶：反复崩溃的日会无限重试。
+        // 有了 retry_count：每次失败（含崩溃恢复）+1，retry_count >= 3 转
+        // dead_letter（status 列写 "dead_letter"），不再进入 7 天 cap 筛选。
+        // budget_deferred（额度耗尽）不计入 retry_count。
+        //
+        // NOT NULL DEFAULT 0：ALTER ADD COLUMN 自动给现有行补 0。
+        m.registerMigration("v9_processing_log_retry_count") { db in
+            try db.alter(table: "processing_log") { t in
+                t.add(column: "retry_count", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return m
     }
 }
