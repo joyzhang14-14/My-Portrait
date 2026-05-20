@@ -340,6 +340,7 @@ final class PortraitDistiller {
         let url = PortraitPaths.categoryDir(category).appendingPathComponent(decision.slug + ".md")
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         var file = try PortraitFileIO.read(from: url)
+        let oldBody = file.body
         // 合并 derived 溯源：旧 body 里已有的 `[[id]]` 与本轮 LLM 引用的
         // 并集（旧的在前、保序），否则 update 会把历史溯源链接抹掉。
         let oldDerived = Self.extractDerivedIds(from: file.body)
@@ -349,10 +350,26 @@ final class PortraitDistiller {
         }
         file.eventTitle = decision.title
         file.eventSummary = decision.body
-        file.body = renderBody(decision: decision, derivedIds: mergedDerived)
+        let newBody = renderBody(decision: decision, derivedIds: mergedDerived)
+        file.body = newBody
         file.recordOccurrence(on: Date())    // mark as "still relevant today"
         WeightCalculator.recompute(&file)
         try PortraitFileIO.write(file, to: url)
+
+        // 审计日志：body 实际变化才记一条 distill_changelog，供 debug / 回滚。
+        if oldBody != newBody {
+            let rel = url.path
+                .replacingOccurrences(of: Storage.portraitDir.path + "/", with: "")
+            let trigger = decision.derivedFromEventIds.isEmpty
+                ? nil : decision.derivedFromEventIds.joined(separator: ",")
+            ProcessingLogStore().appendChangelog(
+                entityId: rel,
+                before: oldBody,
+                after: newBody,
+                triggeredByEventId: trigger,
+                reasoning: nil    // distill 输出未含 reasoning 字段
+            )
+        }
         return true
     }
 
