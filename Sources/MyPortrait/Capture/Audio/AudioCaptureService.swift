@@ -30,6 +30,15 @@ actor AudioCaptureService {
     private var samplesContinuation: AsyncStream<[Float]>.Continuation?
     private var samplesTask: Task<Void, Never>?
 
+    /// 跟踪 inputNode 上 tap 是否真装过。**stop() 必须检查这个再调 removeTap**：
+    /// 没装过 tap 就 removeTap，AudioToolbox 内部抛 `-10877`
+    /// (`kAudioUnitErr_InvalidElement`)，紧接着 caulk.messenger 把这个错误投递
+    /// 回我们进程时撞 dispatch_assert_queue → 整进程崩。
+    /// 真凶在 Services.startManagedLifecycle：默认 settings 全 false，Combine
+    /// sink 启动时会立刻 fire applyAudioCapture(enabled=false) 调 stop()，
+    /// 但此时 start() 还没跑过，engine 上根本没 tap。
+    private var tapInstalled: Bool = false
+
     private var permissionGranted: Bool = false
 
     init(reporter: UnimplementedReporter, audioDir: URL = Storage.audioQueueDir) {
@@ -75,8 +84,12 @@ actor AudioCaptureService {
     }
 
     func stop() async {
-        engine.inputNode.removeTap(onBus: 0)
+        // 先停 engine 再 removeTap（Apple 标准顺序），并且只在装过 tap 时才 remove。
         if engine.isRunning { engine.stop() }
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
 
         samplesContinuation?.finish()
         samplesContinuation = nil
@@ -123,6 +136,7 @@ actor AudioCaptureService {
                 await self?.performConversion(buffer: buffer)
             }
         }
+        tapInstalled = true
 
         try engine.start()
 

@@ -45,6 +45,8 @@ actor SystemAudioCaptureService {
     private var samplesTask: Task<Void, Never>?
 
     private var isRunning: Bool = false
+    /// 见 AudioCaptureService.tapInstalled 注释 —— 防 -10877 + dispatch_assert 崩。
+    private var tapInstalled: Bool = false
 
     init(reporter: UnimplementedReporter, audioDir: URL = Storage.audioQueueDir) {
         self.reporter = reporter
@@ -138,8 +140,11 @@ actor SystemAudioCaptureService {
     }
 
     func stop() async {
-        engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning { engine.stop() }
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
 
         samplesContinuation?.finish()
         samplesContinuation = nil
@@ -241,6 +246,7 @@ actor SystemAudioCaptureService {
                 await self?.performConversion(buffer: buffer)
             }
         }
+        tapInstalled = true
 
         try engine.start()
 
