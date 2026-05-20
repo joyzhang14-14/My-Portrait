@@ -159,48 +159,57 @@ final class Services {
             }
         }
 
-        // **权限请求触发**：**只在用户真正 toggle ON 时**才请求权限。
+        // **权限请求触发**。两类信号要分清楚：
+        //   1. CGRequestScreenCaptureAccess / AVCaptureDevice.requestAccess
+        //      —— 弹**系统标准权限对话框**。这个**启动时也该调**：app 要截屏
+        //      就得请求，首次调用会把 app 注册进 TCC 列表（不调的话系统设置里
+        //      根本不出现 My Portrait）。
+        //   2. openSettings —— 打开**系统设置窗口**。这个只该在**用户主动
+        //      toggle** 时弹，启动时弹很烦。
         //
-        // `.dropFirst()` 是关键：`$screenCaptureEnabled` 订阅时会立刻发一次
-        // 当前值。如果 TOML 里 screen.enabled 本来就是 true（用户上次开过），
-        // 不 dropFirst 的话每次启动都会 fire 一遍 → 权限 denied → 弹系统设置。
-        // dropFirst 丢掉启动初始值，之后只有用户在 UI / 菜单里手动切才触发。
+        // 所以不能整体 dropFirst。改成：每个 sink 自己记"是不是首次 emission"
+        // （= 启动时的初始值），请求权限两种情况都做，但 openSettings 引导只在
+        // 非首次（用户主动切）时做。
+        var screenSinkSeenInitial = false
         settings.$screenCaptureEnabled
             .removeDuplicates()
-            .dropFirst()
             .sink { [weak self] enabled in
+                let userInitiated = screenSinkSeenInitial
+                screenSinkSeenInitial = true
                 guard let self, enabled else { return }
                 if self.permissions.screenRecording == .granted { return }
-                self.logger.info("screen toggle ON, permission not granted — requesting")
-                // **必须先调 CGRequestScreenCaptureAccess**：屏幕录制权限没有
-                // "notDetermined" 状态可查（CGPreflight 只给 bool），所以无条件
-                // 调一次。首次会弹系统对话框 + 把 app 注册进 TCC 列表；已拒过则
-                // 静默返回 false。返回 false 才引导去系统设置。
+                self.logger.info("screen enabled, permission not granted — requesting (userInitiated=\(userInitiated))")
+                // 无条件请求一次（注册 app + 首次弹系统对话框）。
                 let granted = self.permissions.requestScreenRecording()
-                if !granted {
+                if !granted && userInitiated {
+                    // 用户主动切的、还是没权限 → 弹确认框引导去系统设置。
                     self.confirmThenOpenSettings(
-                        title: "需要「屏幕录制」权限",
-                        body: "在系统设置里勾选 My Portrait 后，**退出并重新打开 app** —— 屏幕录制权限需要重启 app 才生效。是否现在打开系统设置？",
+                        title: "Screen Recording Permission Needed",
+                        body: "Enable My Portrait under System Settings, then quit and reopen the app — screen recording permission only takes effect after a restart. Open System Settings now?",
                         perm: .screen
                     )
                 }
             }
             .store(in: &settingsCancellables)
 
+        var audioSinkSeenInitial = false
         settings.$audioCaptureEnabled
             .removeDuplicates()
-            .dropFirst()
             .sink { [weak self] enabled in
+                let userInitiated = audioSinkSeenInitial
+                audioSinkSeenInitial = true
                 guard let self, enabled else { return }
                 let perm = self.permissions.microphone
                 if perm == .granted { return }
-                self.logger.info("audio toggle ON, permission=\(String(describing: perm), privacy: .public)")
+                self.logger.info("audio enabled, permission=\(String(describing: perm), privacy: .public) (userInitiated=\(userInitiated))")
                 if perm == .notDetermined {
+                    // 从没问过 → 弹系统标准对话框（启动时弹也 OK）。
                     self.permissions.requestMicrophone()
-                } else {
+                } else if userInitiated {
+                    // denied + 用户主动切 → 引导去系统设置。
                     self.confirmThenOpenSettings(
-                        title: "需要「麦克风」权限",
-                        body: "My Portrait 需要麦克风权限才能录音。是否打开系统设置授权？",
+                        title: "Microphone Permission Needed",
+                        body: "My Portrait needs microphone access to record audio. Open System Settings to grant it?",
                         perm: .microphone
                     )
                 }
@@ -302,8 +311,8 @@ final class Services {
         alert.messageText = title
         alert.informativeText = body
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
             permissions.openSettings(for: perm)
         }
