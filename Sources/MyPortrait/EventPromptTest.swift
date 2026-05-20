@@ -461,6 +461,40 @@ enum BackfillDayCLI {
     }
 }
 
+/// `--rescore` — DEV-ONLY entry point that runs ImpactScorer.rescoreAll
+/// over every event file. Disposable.
+enum RescoreCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run() {
+        print("=== rescore ===")
+        let state = State()
+        Task.detached {
+            do {
+                let scorer = await ImpactScorer()
+                let r = try await scorer.rescoreAll { p in
+                    print("batch \(p.batchIndex + 1)/\(p.batchCount) — scored \(p.scoredCount)/\(p.totalCount)")
+                }
+                print("=== rescore done ===")
+                print("scored:  \(r.scoredCount)")
+                print("failed:  \(r.failedCount)")
+                print("elapsed: \(String(format: "%.1f", r.elapsed))s")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
 // MARK: - Coordinator
 
 private actor PromptTestCoordinator {

@@ -82,6 +82,11 @@ struct MyPortraitApp: App {
             BackfillDayCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--rescore` runs ImpactScorer over every event file.
+        if args.contains("--rescore") {
+            RescoreCLI.run()
+            // run() exits the process internally.
+        }
         AppKeyboard.install()
     }
 
