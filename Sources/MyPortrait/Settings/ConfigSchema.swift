@@ -385,7 +385,7 @@ struct PrivacyConfig: Codable, Equatable {
     /// exact app name (case-insensitive) in IgnoreGate.
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
-        "My Portrait", "Wallpaper",
+        "My Portrait",
     ]
     /// Reserved, not enforced yet. Schema / UI / TOML round-trip work, but
     /// IgnoreGate has no allowlist logic — setting this currently does nothing.

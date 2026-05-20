@@ -389,6 +389,37 @@ struct TimelineDB: Sendable {
         return out
     }
 
+    /// 采集过的所有 app 名（去重），按出现次数从多到少。供 Settings → Privacy
+    /// 的 "ignored apps" 下拉用——让用户从真实捕获过的名字里挑，不用猜精确名。
+    func distinctAppNames(limit: Int = 200) -> [String] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT app_name, COUNT(*) AS n
+            FROM frames
+            WHERE app_name IS NOT NULL AND app_name != ''
+            GROUP BY app_name
+            ORDER BY n DESC
+            LIMIT ?
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { out.append(String(cString: c)) }
+        }
+        return out
+    }
+
     // MARK: - Write operations (auto-delete / manual purge)
 
     struct DeleteResult: Sendable {

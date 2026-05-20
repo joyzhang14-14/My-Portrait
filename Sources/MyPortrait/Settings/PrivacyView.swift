@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PrivacySettingsView: View {
     @State private var config = ConfigStore.shared
+    /// App names seen in captured frames — powers the ignored-apps dropdown.
+    @State private var discoveredApps: [String] = []
 
     var body: some View {
         SettingsPage("Privacy",
@@ -49,11 +51,11 @@ struct PrivacySettingsView: View {
                 footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Exact app-name match."
             ) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Select apps to ignore…")
+                    Text("Pick from apps you've captured, or type a custom name…")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.50))
                         .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                    TagListEditor(tags: config.binding(\.privacy.ignoredApps), placeholder: "e.g. 1Password, Banking")
+                    IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps), discovered: discoveredApps)
                         .padding(.horizontal, 14).padding(.bottom, 12)
                                         }
             }
@@ -100,5 +102,15 @@ struct PrivacySettingsView: View {
                                         }
             }
         }
+        .task {
+            discoveredApps = await Self.loadDiscoveredApps()
+        }
+    }
+
+    /// Off-main scan of `frames.app_name` for the ignored-apps dropdown.
+    private static func loadDiscoveredApps() async -> [String] {
+        await Task.detached(priority: .userInitiated) {
+            TimelineDB().distinctAppNames()
+        }.value
     }
 }

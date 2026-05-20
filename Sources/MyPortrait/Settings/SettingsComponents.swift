@@ -342,6 +342,98 @@ struct TagListEditor: View {
     }
 }
 
+/// Ignored-apps picker. Mirrors screenpipe's `MultiSelect`: a dropdown whose
+/// options are app names actually seen in captured frames (so the user picks
+/// the exact name instead of guessing), plus a free-text field for custom
+/// entries. Selected apps render as removable chips.
+struct IgnoredAppPicker: View {
+    @Binding var apps: [String]
+    var discovered: [String] = []
+    @State private var customDraft = ""
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Color.white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Menu {
+                    if discovered.isEmpty {
+                        Text("No captured apps yet")
+                    } else {
+                        ForEach(discovered, id: \.self) { app in
+                            Button { toggle(app) } label: {
+                                if apps.contains(app) {
+                                    Label(app, systemImage: "checkmark")
+                                } else {
+                                    Text(app)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus.circle.fill").font(.system(size: 11))
+                        Text("Select app to ignore").font(.system(size: 12))
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(boxBackground)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                TextField("or type a custom name…", text: $customDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(boxBackground)
+                    .onSubmit(addCustom)
+            }
+            if !apps.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(apps, id: \.self) { app in
+                        HStack(spacing: 4) {
+                            Text(app)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                            Button {
+                                apps.removeAll { $0 == app }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
+                            .buttonStyle(.bouncyIcon)
+                        }
+                        .padding(.horizontal, 7).padding(.vertical, 3.5)
+                        .background(
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func toggle(_ app: String) {
+        if let i = apps.firstIndex(of: app) { apps.remove(at: i) } else { apps.append(app) }
+    }
+
+    private func addCustom() {
+        let v = customDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty, !apps.contains(v) else { return }
+        apps.append(v)
+        customDraft = ""
+    }
+}
+
 /// `[String]` AppStorage bridge — UserDefaults stores arrays natively but
 /// `@AppStorage` doesn't directly support them, so we round-trip via JSON.
 struct StringArrayStorage {
