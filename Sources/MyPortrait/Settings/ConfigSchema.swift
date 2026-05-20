@@ -382,6 +382,8 @@ struct PrivacyConfig: Codable, Equatable {
     var recordAudioWhileLocked: Bool     = false
     var piiRemoval:             Bool     = true
     var ignoredApps:            [String] = []
+    /// Reserved, not enforced yet. Schema / UI / TOML round-trip work, but
+    /// IgnoreGate has no allowlist logic — setting this currently does nothing.
     var includedApps:           [String] = []
     var ignoredUrls:            [String] = []
     init() {}
