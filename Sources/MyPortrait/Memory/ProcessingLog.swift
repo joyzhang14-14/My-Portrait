@@ -1,0 +1,335 @@
+import Foundation
+import SQLite3
+import os.log
+
+private let procLog = Logger(subsystem: "com.myportrait.memory", category: "processing-log")
+
+/// 让 SQLite 在 bind 时立即拷贝字符串（Swift 临时 C 字符串只在调用期有效）。
+private let PL_SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/// 单阶段的状态机。idle → pending → in_progress → complete | failed | partial。
+enum ProcessingStatus: String, Sendable {
+    case idle
+    case pending
+    case inProgress = "in_progress"
+    case complete
+    case failed
+    case partial
+}
+
+/// processing_log 的四个处理阶段，对应四个 `_status` 列。
+enum ProcessingStage: String, CaseIterable, Sendable {
+    case raw
+    case event
+    case impact
+    case distill
+
+    var column: String { "\(rawValue)_status" }
+}
+
+/// processing_log 的一行：一个 UTC 日的四阶段状态 + 并发锁 + 续跑信息。
+struct ProcessingLogRow: Sendable {
+    var date: String                 // UTC yyyy-MM-dd
+    var raw: ProcessingStatus = .idle
+    var event: ProcessingStatus = .idle
+    var impact: ProcessingStatus = .idle
+    var distill: ProcessingStatus = .idle
+    var activeProcessor: String? = nil   // 非空 = 有处理器持锁
+    var checkpoint: [String] = []        // 已处理的 event id
+    var heartbeatMs: Int64? = nil        // 持锁处理器的心跳 UTC ms
+    var updatedAtMs: Int64 = 0
+
+    func status(of stage: ProcessingStage) -> ProcessingStatus {
+        switch stage {
+        case .raw:     return raw
+        case .event:   return event
+        case .impact:  return impact
+        case .distill: return distill
+        }
+    }
+}
+
+/// processing_log 表的读写客户端。裸 SQLite3、每方法自开连接，风格与
+/// `TimelineDB` 一致 —— Memory 层不引 GRDB。表本身由 `DBSchema` 的
+/// `v8_processing_log` 迁移建好。
+struct ProcessingLogStore: Sendable {
+    let dbPath: String
+
+    init(path: String? = nil) {
+        self.dbPath = path ?? Storage.portraitDBPath
+    }
+
+    var exists: Bool { FileManager.default.fileExists(atPath: dbPath) }
+
+    // MARK: - 日期工具（UTC yyyy-MM-dd）
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    /// 把 Date 折算成所在 UTC 日的 "yyyy-MM-dd"。
+    static func dayString(_ date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
+    /// "yyyy-MM-dd" → 该 UTC 日 00:00:00 的 Date。
+    static func day(from string: String) -> Date? {
+        dayFormatter.date(from: string)
+    }
+
+    private static func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
+
+    // MARK: - 读
+
+    /// 读某一天的行；不存在返回 nil。
+    func row(for date: String) -> ProcessingLogRow? {
+        guard exists else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT date, raw_status, event_status, impact_status, distill_status,
+                   active_processor, checkpoint, heartbeat_ms, updated_at_ms
+            FROM processing_log WHERE date = ?
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, date, -1, PL_SQLITE_TRANSIENT)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return Self.decodeRow(stmt)
+    }
+
+    /// 全表所有行。
+    func allRows() -> [ProcessingLogRow] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT date, raw_status, event_status, impact_status, distill_status,
+                   active_processor, checkpoint, heartbeat_ms, updated_at_ms
+            FROM processing_log ORDER BY date ASC
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var out: [ProcessingLogRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { out.append(Self.decodeRow(stmt)) }
+        return out
+    }
+
+    private static func decodeRow(_ stmt: OpaquePointer?) -> ProcessingLogRow {
+        func text(_ i: Int32) -> String? {
+            sqlite3_column_type(stmt, i) == SQLITE_NULL
+                ? nil : sqlite3_column_text(stmt, i).flatMap { String(cString: $0) }
+        }
+        func status(_ i: Int32) -> ProcessingStatus {
+            ProcessingStatus(rawValue: text(i) ?? "idle") ?? .idle
+        }
+        var row = ProcessingLogRow(date: text(0) ?? "")
+        row.raw     = status(1)
+        row.event   = status(2)
+        row.impact  = status(3)
+        row.distill = status(4)
+        row.activeProcessor = text(5)
+        if let cp = text(6), let data = cp.data(using: .utf8),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            row.checkpoint = ids
+        }
+        row.heartbeatMs = sqlite3_column_type(stmt, 7) == SQLITE_NULL
+            ? nil : sqlite3_column_int64(stmt, 7)
+        row.updatedAtMs = sqlite3_column_int64(stmt, 8)
+        return row
+    }
+
+    // MARK: - 写
+
+    /// 整行 upsert（INSERT OR REPLACE）。
+    @discardableResult
+    func upsert(_ row: ProcessingLogRow) -> Bool {
+        runWrite { db in
+            let sql = """
+                INSERT OR REPLACE INTO processing_log
+                  (date, raw_status, event_status, impact_status, distill_status,
+                   active_processor, checkpoint, heartbeat_ms, updated_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+
+            sqlite3_bind_text(stmt, 1, row.date, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, row.raw.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, row.event.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 4, row.impact.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 5, row.distill.rawValue, -1, PL_SQLITE_TRANSIENT)
+            if let p = row.activeProcessor {
+                sqlite3_bind_text(stmt, 6, p, -1, PL_SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 6)
+            }
+            let cpJSON = (try? JSONEncoder().encode(row.checkpoint))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            sqlite3_bind_text(stmt, 7, cpJSON, -1, PL_SQLITE_TRANSIENT)
+            if let hb = row.heartbeatMs {
+                sqlite3_bind_int64(stmt, 8, hb)
+            } else {
+                sqlite3_bind_null(stmt, 8)
+            }
+            sqlite3_bind_int64(stmt, 9, Self.nowMs())
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// 确保某天有一行（没有就建一个全 idle 行），返回当前行。
+    func ensureRow(for date: String) -> ProcessingLogRow {
+        if let existing = row(for: date) { return existing }
+        var fresh = ProcessingLogRow(date: date)
+        fresh.updatedAtMs = Self.nowMs()
+        upsert(fresh)
+        return fresh
+    }
+
+    /// 改单个阶段的状态。
+    @discardableResult
+    func setStatus(date: String, stage: ProcessingStage, status: ProcessingStatus) -> Bool {
+        runWrite { db in
+            let sql = "UPDATE processing_log SET \(stage.column) = ?, updated_at_ms = ? WHERE date = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, status.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 2, Self.nowMs())
+            sqlite3_bind_text(stmt, 3, date, -1, PL_SQLITE_TRANSIENT)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// 持锁：写 active_processor + 新心跳。调用方负责先确认未被别人持锁。
+    @discardableResult
+    func acquireLock(date: String, processor: String) -> Bool {
+        runWrite { db in
+            let sql = """
+                UPDATE processing_log
+                SET active_processor = ?, heartbeat_ms = ?, updated_at_ms = ?
+                WHERE date = ?
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            let now = Self.nowMs()
+            sqlite3_bind_text(stmt, 1, processor, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 2, now)
+            sqlite3_bind_int64(stmt, 3, now)
+            sqlite3_bind_text(stmt, 4, date, -1, PL_SQLITE_TRANSIENT)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// 续命：刷新持锁处理器的心跳。
+    @discardableResult
+    func heartbeat(date: String) -> Bool {
+        runWrite { db in
+            let sql = "UPDATE processing_log SET heartbeat_ms = ? WHERE date = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, Self.nowMs())
+            sqlite3_bind_text(stmt, 2, date, -1, PL_SQLITE_TRANSIENT)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// 释放锁：清空 active_processor + heartbeat_ms。
+    @discardableResult
+    func releaseLock(date: String) -> Bool {
+        runWrite { db in
+            let sql = """
+                UPDATE processing_log
+                SET active_processor = NULL, heartbeat_ms = NULL, updated_at_ms = ?
+                WHERE date = ?
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, Self.nowMs())
+            sqlite3_bind_text(stmt, 2, date, -1, PL_SQLITE_TRANSIENT)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// 写续跑断点（已处理 event id 列表）。
+    @discardableResult
+    func setCheckpoint(date: String, eventIds: [String]) -> Bool {
+        runWrite { db in
+            let json = (try? JSONEncoder().encode(eventIds))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            let sql = "UPDATE processing_log SET checkpoint = ?, updated_at_ms = ? WHERE date = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, json, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 2, Self.nowMs())
+            sqlite3_bind_text(stmt, 3, date, -1, PL_SQLITE_TRANSIENT)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    // MARK: - distill_changelog
+
+    /// 记一条 distiller 对 portrait body 的改动，供 debug / 回滚。
+    func appendChangelog(
+        entityId: String,
+        before: String?,
+        after: String,
+        triggeredByEventId: String?,
+        reasoning: String?
+    ) {
+        _ = runWrite { db in
+            let sql = """
+                INSERT INTO distill_changelog
+                  (entity_id, field_name, before, after,
+                   triggered_by_event_id, llm_reasoning, timestamp_ms)
+                VALUES (?, 'body', ?, ?, ?, ?, ?)
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, entityId, -1, PL_SQLITE_TRANSIENT)
+            if let b = before { sqlite3_bind_text(stmt, 2, b, -1, PL_SQLITE_TRANSIENT) }
+            else { sqlite3_bind_null(stmt, 2) }
+            sqlite3_bind_text(stmt, 3, after, -1, PL_SQLITE_TRANSIENT)
+            if let e = triggeredByEventId { sqlite3_bind_text(stmt, 4, e, -1, PL_SQLITE_TRANSIENT) }
+            else { sqlite3_bind_null(stmt, 4) }
+            if let r = reasoning { sqlite3_bind_text(stmt, 5, r, -1, PL_SQLITE_TRANSIENT) }
+            else { sqlite3_bind_null(stmt, 5) }
+            sqlite3_bind_int64(stmt, 6, Self.nowMs())
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    // MARK: - 私有
+
+    private func runWrite(_ body: (OpaquePointer?) -> Bool) -> Bool {
+        guard exists else {
+            procLog.error("processing_log write skipped — DB missing at \(dbPath, privacy: .public)")
+            return false
+        }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            procLog.error("processing_log open RW failed at \(dbPath, privacy: .public)")
+            return false
+        }
+        defer { sqlite3_close(db) }
+        return body(db)
+    }
+}
