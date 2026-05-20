@@ -390,9 +390,13 @@ struct PrivacyConfig: Codable, Equatable {
     /// IgnoreGate has no allowlist logic — setting this currently does nothing.
     var includedApps:           [String] = []
     var ignoredUrls:            [String] = []
-    /// Window-title substrings (case-insensitive contains). IgnoreGate skips
-    /// a frame when the focused window title contains any of these.
+    /// Window-title substrings (case-insensitive contains). A window whose
+    /// title contains any of these is masked out of the capture.
     var ignoredWindowTitles:    [String] = []
+    /// When true, windows matching ignoredApps / ignoredWindowTitles are
+    /// excluded from the ScreenCaptureKit buffer (transparent in the frame).
+    /// The frame itself is always captured.
+    var maskIgnoredApps:        Bool     = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
@@ -403,6 +407,7 @@ struct PrivacyConfig: Codable, Equatable {
         case includedApps            = "included_apps"
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
+        case maskIgnoredApps         = "mask_ignored_apps"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -415,6 +420,7 @@ struct PrivacyConfig: Codable, Equatable {
         includedApps           = c.dflt([String].self, .includedApps, includedApps)
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
+        maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
     }
 }
 

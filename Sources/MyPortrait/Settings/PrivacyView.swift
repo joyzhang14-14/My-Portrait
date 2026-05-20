@@ -25,6 +25,12 @@ struct PrivacySettingsView: View {
                             icon: "lock.shield") {
                     Toggle("", isOn: config.binding(\.privacy.recordAudioWhileLocked)).labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                SettingsRow("Mask ignored windows",
+                            description: "Exclude windows matching the ignore lists below from the screenshot — the frame is still captured, those windows just go transparent.",
+                            icon: "rectangle.dashed") {
+                    Toggle("", isOn: config.binding(\.privacy.maskIgnoredApps)).labelsHidden().toggleStyle(.switch)
+                }
             }
 
             SettingsCard(
@@ -40,7 +46,7 @@ struct PrivacySettingsView: View {
 
             SettingsCard(
                 title: "Ignored apps",
-                footnote: "Frames captured while these apps are foreground are dropped entirely."
+                footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Exact app-name match."
             ) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Select apps to ignore…")
@@ -82,7 +88,7 @@ struct PrivacySettingsView: View {
 
             SettingsCard(
                 title: "Ignored window titles",
-                footnote: "Case-insensitive substring match against the focused window's title. e.g. \"Incognito\" drops every private-browsing window."
+                footnote: "Case-insensitive substring match against each window's title. e.g. \"Incognito\" masks every private-browsing window out of the screenshot."
             ) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Window title substrings…")

@@ -51,14 +51,15 @@ actor CaptureCoordinator {
 
         let cache = OCRCache(config: config)
         self.ocrCache = cache
-        self.screen = ScreenCaptureService(config: config, reporter: reporter)
+        let ignoreGate = IgnoreGate()
+        self.ignore = ignoreGate
+        self.screen = ScreenCaptureService(config: config, reporter: reporter, ignore: ignoreGate)
         self.focus = FocusProbe(reporter: reporter)
         self.comparer = FrameComparer(config: config, reporter: reporter)
         self.snapshot = SnapshotWriter(config: config, reporter: reporter)
         self.ocr = OCRService(config: config, cache: cache, reporter: reporter)
         let drmGate = DRMGate()
         self.drm = drmGate
-        self.ignore = IgnoreGate()
         self.events = EventSources()
         let focusInstance = self.focus
         self.drmWatcher = DRMWatcher(focus: focusInstance, gate: drmGate)
@@ -87,6 +88,11 @@ actor CaptureCoordinator {
     /// Services 在 ConfigStore.privacy.ignoredWindowTitles 变化时调。
     nonisolated func setIgnoredWindowTitles(_ titles: [String]) {
         ignore.setIgnoredWindowTitles(titles)
+    }
+
+    /// Services 在 ConfigStore.privacy.maskIgnoredApps 变化时调。
+    nonisolated func setMaskingEnabled(_ enabled: Bool) {
+        ignore.setMaskingEnabled(enabled)
     }
 
     /// 启动采集流水线。幂等。
@@ -235,13 +241,8 @@ actor CaptureCoordinator {
             return
         }
 
-        // 3. 用户隐私 ignore 列表。命中 → 静默跳过这一帧（不动 lastCaptureAt
-        //    以免影响 minCaptureIntervalMs 计数，让真正可采集的下一帧立刻能跑）。
-        if ignore.shouldSkip(focusInfo) {
-            return
-        }
-
-        // 4. 抓帧。
+        // 3. 抓帧。用户 ignore 列表不再跳整帧——命中的窗口由 ScreenCaptureService
+        //    在 SCK content filter 里排除（content masking，帧照拍、窗口透明）。
         let image = try await screen.captureMainDisplay()
 
         // 5. 去重。

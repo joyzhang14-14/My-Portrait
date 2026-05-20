@@ -55,9 +55,13 @@ ignore_incognito = true
 ignored_apps = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Authy']
 # URL glob patterns (NSPredicate LIKE[c]). e.g. '*.bank.com/*', '*mail*'.
 ignored_urls = []
-# Window-title substrings (case-insensitive contains). Skips a frame when
-# the focused window title contains any of these.
+# Window-title substrings (case-insensitive contains). A window whose title
+# contains any of these is masked out of the screenshot.
 ignored_window_titles = []
+# When true, windows matching the ignore lists are excluded from the
+# ScreenCaptureKit buffer (transparent in the frame). The frame is still
+# captured. When false, nothing is masked.
+mask_ignored_apps = true
 # Reserved — not enforced yet. IgnoreGate has no allowlist logic.
 included_apps = []
 pii_removal = true

@@ -20,13 +20,14 @@ final class ScreenCaptureService {
     private let reporter: UnimplementedReporter
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "screen")
 
-    private var cachedDisplay: SCDisplay?
+    private let ignore: IgnoreGate
 
     /// `nonisolated` 让 CaptureCoordinator (actor) 的 init 不必是 @MainActor。
     /// 实际的 SCK 调用方法仍然在 @MainActor 上跑（绕开 macOS 26 SCK XPC bug）。
-    nonisolated init(config: CaptureConfig, reporter: UnimplementedReporter) {
+    nonisolated init(config: CaptureConfig, reporter: UnimplementedReporter, ignore: IgnoreGate) {
         self.config = config
         self.reporter = reporter
+        self.ignore = ignore
     }
 
     /// 抓主显示器一帧。失败重试 3 次。
@@ -54,8 +55,16 @@ final class ScreenCaptureService {
 
         for attempt in 0..<3 {
             do {
-                let display = try await getOrFetchMainDisplay()
-                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let (display, windows) = try await fetchDisplayAndWindows()
+                // Content masking：命中 ignore 规则的窗口排除出捕获 buffer
+                // （帧照拍，那些窗口在帧里变透明）。
+                let excluded = windows.filter {
+                    ignore.shouldMaskWindow(
+                        appName: $0.owningApplication?.applicationName ?? "",
+                        title: $0.title
+                    )
+                }
+                let filter = SCContentFilter(display: display, excludingWindows: excluded)
                 let cfg = SCStreamConfiguration()
                 cfg.width = Int(display.width)
                 cfg.height = Int(display.height)
@@ -84,9 +93,6 @@ final class ScreenCaptureService {
                     throw CaptureError.screenRecordingPermissionDenied
                 }
 
-                // 重置缓存 → 下次调用会重新枚举。
-                cachedDisplay = nil
-
                 // 重试前小睡（100ms），避免立即撞错。
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -96,18 +102,15 @@ final class ScreenCaptureService {
             ?? NSError(domain: "MyPortrait.Capture", code: -1))
     }
 
-    /// 停掉缓存的 SCDisplay handle，下次 capture 会懒重建。
-    func invalidateStream() async {
-        cachedDisplay = nil
-    }
+    /// 旧的 SCDisplay 缓存已移除（masking 要每帧重新枚举窗口）。保留方法
+    /// 供 sleep/wake / DRM watcher 调用，现在是 no-op。
+    func invalidateStream() async {}
 
     // MARK: - 私有
 
-    private func getOrFetchMainDisplay() async throws -> SCDisplay {
-        if let cached = cachedDisplay {
-            return cached
-        }
-
+    /// 每帧重新枚举：主显示器 + 当前所有屏上窗口。masking 要逐窗口判定排除，
+    /// 窗口位置 / 开关每帧都在变，不能缓存。
+    private func fetchDisplayAndWindows() async throws -> (SCDisplay, [SCWindow]) {
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(
@@ -127,9 +130,7 @@ final class ScreenCaptureService {
         else {
             throw CaptureError.displayNotFound(monitorId: config.monitorId)
         }
-
-        cachedDisplay = display
-        return display
+        return (display, content.windows)
     }
 
     /// ScreenCaptureKit 报权限错误时，NSError code 是 -3801（kSCStreamErrorUserDeclined）。
