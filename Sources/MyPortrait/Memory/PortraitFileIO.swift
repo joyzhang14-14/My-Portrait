@@ -155,23 +155,40 @@ enum PortraitFileIO {
     /// values keyed by field name. Each field's typed parser then converts.
     private static func parseFlatYAML(_ yaml: String) throws -> [String: String] {
         var out: [String: String] = [:]
+        var lastKey: String?
         for rawLine in yaml.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { continue }
-            guard let colon = line.firstIndex(of: ":") else {
+            // 只有以 `snake_case_key:` 开头的行才算新字段；其余视为上一字段的
+            // 续行 —— 兼容旧版序列化器写出的多行值（如多段 event_summary）。
+            if let colon = line.firstIndex(of: ":"),
+               isFieldKey(String(line[..<colon])) {
+                let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+                let valueStart = line.index(after: colon)
+                var value = String(line[valueStart...]).trimmingCharacters(in: .whitespaces)
+                // Strip an inline `# comment` (but only if not inside quotes/brackets).
+                if !value.hasPrefix("[") && !value.hasPrefix("\""),
+                   let hash = value.firstIndex(of: "#") {
+                    value = String(value[..<hash]).trimmingCharacters(in: .whitespaces)
+                }
+                out[key] = value
+                lastKey = key
+            } else if let k = lastKey {
+                out[k, default: ""] += "\n" + line
+            } else {
                 throw IOError.malformedFrontmatter("no colon in line: \(line)")
             }
-            let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
-            let valueStart = line.index(after: colon)
-            var value = String(line[valueStart...]).trimmingCharacters(in: .whitespaces)
-            // Strip an inline `# comment` (but only if not inside quotes/brackets).
-            if !value.hasPrefix("[") && !value.hasPrefix("\""),
-               let hash = value.firstIndex(of: "#") {
-                value = String(value[..<hash]).trimmingCharacters(in: .whitespaces)
-            }
-            out[key] = value
         }
         return out
+    }
+
+    /// 一段文本是否是合法 frontmatter 字段名（全小写 ASCII + 数字 + 下划线）。
+    /// 用于把"新字段行"与"上一字段值的散文续行"区分开。
+    private static func isFieldKey(_ s: String) -> Bool {
+        let k = s.trimmingCharacters(in: .whitespaces)
+        guard !k.isEmpty else { return false }
+        return k.allSatisfy { ($0.isLetter && $0.isLowercase && $0.isASCII)
+                              || $0.isNumber || $0 == "_" }
     }
 
     // MARK: - Typed field extractors
@@ -219,11 +236,27 @@ enum PortraitFileIO {
 
     private static func optionalString(_ fs: [String: String], _ key: String) throws -> String? {
         guard let raw = fs[key], raw != "null", !raw.isEmpty else { return nil }
-        // Strip surrounding quotes if present.
-        if raw.hasPrefix("\""), raw.hasSuffix("\"") {
-            return String(raw.dropFirst().dropLast())
+        // 加引号的值：去引号 + 反转义。未加引号的（旧文件多行原始值）原样返回。
+        if raw.hasPrefix("\""), raw.hasSuffix("\""), raw.count >= 2 {
+            return unescapeString(String(raw.dropFirst().dropLast()))
         }
         return raw
+    }
+
+    /// 反转义 `formatNullableString` 写出的 `\\` / `\"` / `\n`。
+    private static func unescapeString(_ s: String) -> String {
+        var out = ""
+        var it = s.makeIterator()
+        while let c = it.next() {
+            guard c == "\\", let n = it.next() else { out.append(c); continue }
+            switch n {
+            case "n":  out.append("\n")
+            case "\"": out.append("\"")
+            case "\\": out.append("\\")
+            default:   out.append(n)
+            }
+        }
+        return out
     }
 
     private static func requireStringArray(_ fs: [String: String], _ key: String) throws -> [String] {
@@ -353,19 +386,25 @@ enum PortraitFileIO {
         return "[\(parts.joined(separator: ", "))]"
     }
 
+    /// Flow-array 元素是否需要加引号（含会让解析器误判的字符）。
+    private static func needsQuotes(_ s: String) -> Bool {
+        s.contains(",") || s.contains(":") || s.contains("[") || s.contains("]")
+    }
+
     private static func formatDouble(_ d: Double) -> String {
         // Drop trailing zeros: 3.0 -> "3", 3.6 -> "3.6".
         if d.rounded() == d { return String(format: "%g", d) }
         return String(format: "%.4g", d)
     }
 
+    /// 始终加引号并转义反斜杠 / 双引号 / 换行 —— 保证多行值（如多段
+    /// event_summary）序列化成单物理行，扁平 YAML 解析器才不会被续行打断。
     private static func formatNullableString(_ s: String?) -> String {
         guard let s, !s.isEmpty else { return "null" }
-        return needsQuotes(s) ? "\"\(s)\"" : s
-    }
-
-    /// Quote if the value would confuse the parser (contains `,`, `:`, etc).
-    private static func needsQuotes(_ s: String) -> Bool {
-        s.contains(",") || s.contains(":") || s.contains("[") || s.contains("]")
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return "\"\(escaped)\""
     }
 }
