@@ -139,41 +139,21 @@ final class StatusBarMenu: NSObject {
     }
 
     private func refreshIcon() {
-        // User-supplied icon takes precedence over the state-driven symbol.
+        // User-supplied icon takes precedence.
         if !customIconPath.isEmpty,
            let img = NSImage(contentsOfFile: customIconPath) {
             img.size = NSSize(width: 18, height: 18)
             img.isTemplate = true       // template auto-tints with menu-bar style
             statusItem.button?.image = img
-            return
+        } else if let character = NSImage(named: "MenuBarIcon") {
+            // 默认菜单栏图标：项目角色立绘。
+            // **isTemplate = false 是关键**：角色图是彩色的，设 true 会被系统
+            // 压成黑白剪影。彩图直接原样渲染。
+            character.size = NSSize(width: 18, height: 18)
+            character.isTemplate = false
+            statusItem.button?.image = character
         }
-
-        let symbolName: String
-        let tint: NSColor?
-
-        if settings.isPaused {
-            symbolName = "pause.circle.fill"
-            tint = .systemYellow
-        } else if settings.screenCaptureEnabled || settings.audioCaptureEnabled {
-            symbolName = "record.circle"
-            tint = .systemRed
-        } else {
-            symbolName = "circle"
-            tint = .secondaryLabelColor
-        }
-
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        image?.isTemplate = false  // 用 tint 着色，不要被系统 monochrome 化
-        if let image, let tint {
-            let coloredImage = NSImage(size: image.size, flipped: false) { rect in
-                tint.set()
-                image.draw(in: rect, from: .zero, operation: .sourceIn, fraction: 1.0)
-                return true
-            }
-            statusItem.button?.image = coloredImage
-        } else {
-            statusItem.button?.image = image
-        }
+        // 采集状态不再压进图标本身（角色图是固定的），改由 tooltip 表达。
 
         let toolTip: String
         if settings.isPaused, let until = settings.pauseUntil {
