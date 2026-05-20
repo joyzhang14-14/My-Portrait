@@ -341,6 +341,53 @@ struct ProcessingLogStore: Sendable {
 
     // MARK: - distill_changelog
 
+    /// distill_changelog 的一行（UI / debug 用）。
+    struct ChangelogEntry: Identifiable, Sendable {
+        let id: Int64
+        let entityId: String
+        let before: String?
+        let after: String
+        let triggeredByEventId: String?
+        let reasoning: String?
+        let timestampMs: Int64
+    }
+
+    /// 最近的 changelog 条目（按时间倒序）。
+    func recentChangelog(limit: Int = 50) -> [ChangelogEntry] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT id, entity_id, before, after, triggered_by_event_id,
+                   llm_reasoning, timestamp_ms
+            FROM distill_changelog ORDER BY timestamp_ms DESC LIMIT ?
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+
+        var out: [ChangelogEntry] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            func text(_ i: Int32) -> String? {
+                sqlite3_column_type(stmt, i) == SQLITE_NULL
+                    ? nil : sqlite3_column_text(stmt, i).flatMap { String(cString: $0) }
+            }
+            out.append(ChangelogEntry(
+                id: sqlite3_column_int64(stmt, 0),
+                entityId: text(1) ?? "",
+                before: text(2),
+                after: text(3) ?? "",
+                triggeredByEventId: text(4),
+                reasoning: text(5),
+                timestampMs: sqlite3_column_int64(stmt, 6)
+            ))
+        }
+        return out
+    }
+
     /// 记一条 distiller 对 portrait body 的改动，供 debug / 回滚。
     func appendChangelog(
         entityId: String,

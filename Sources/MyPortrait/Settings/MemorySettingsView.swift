@@ -8,6 +8,7 @@ struct MemorySettingsView: View {
     private let cfg = ConfigStore.shared
 
     @State private var attention: [MemoryScheduler.AttentionItem] = []
+    @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
 
     var body: some View {
         ScrollView {
@@ -19,6 +20,7 @@ struct MemorySettingsView: View {
                 budgetSection
                 decaySection
                 archiveSection
+                changelogSection
 
                 footer
             }
@@ -28,11 +30,12 @@ struct MemorySettingsView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task { reloadAttention() }
+        .task { reload() }
     }
 
-    private func reloadAttention() {
+    private func reload() {
         attention = MemoryScheduler.shared.attentionDays()
+        changelog = ProcessingLogStore().recentChangelog(limit: 50)
     }
 
     private var header: some View {
@@ -168,7 +171,7 @@ struct MemorySettingsView: View {
                 .foregroundStyle(.tertiary)
             Button("Reset") {
                 MemoryScheduler.shared.resetDay(item.date)
-                reloadAttention()
+                reload()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -225,6 +228,47 @@ struct MemorySettingsView: View {
                    range: 7...365)
         }
     }
+
+    private var changelogSection: some View {
+        section(
+            title: "Distillation changelog",
+            blurb: "Portrait body changes made by the distiller, newest first. Recorded for debugging and rollback."
+        ) {
+            if changelog.isEmpty {
+                Text("No distillation changes recorded yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(changelog) { entry in
+                    changelogRow(entry)
+                }
+            }
+        }
+    }
+
+    private func changelogRow(_ entry: ProcessingLogStore.ChangelogEntry) -> some View {
+        let date = Date(timeIntervalSince1970: Double(entry.timestampMs) / 1000)
+        let triggerCount = entry.triggeredByEventId?
+            .split(separator: ",").count ?? 0
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.entityId)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                Text("\(Self.changelogDateFmt.string(from: date)) · \(triggerCount) event(s)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static let changelogDateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
 
     // MARK: - Components
 
