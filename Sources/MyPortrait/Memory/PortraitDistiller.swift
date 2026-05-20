@@ -126,6 +126,10 @@ final class PortraitDistiller {
                         break    // "noop" — nothing to do
                     }
                 }
+            } catch let e as BudgetExhaustedError {
+                // 撞额度：中止整轮 distill，调度器据此标 budget_deferred。
+                // 已写入 / 更新的分类保留（update 幂等，下次重跑覆盖）。
+                throw e
             } catch {
                 failed += 1
             }
@@ -185,6 +189,11 @@ final class PortraitDistiller {
             }
         } catch is CancellationError {
             throw DistillError.agentTimeout
+        }
+
+        // 撞额度优先于解析失败：抛 BudgetExhaustedError 让上层走 budget_deferred。
+        if let err = await coordinator.consumeError(), BudgetSignal.isExhausted(err) {
+            throw BudgetExhaustedError(processor: "PortraitDistiller", message: err)
         }
 
         return try Self.parseDecisions(from: collected)
@@ -458,11 +467,13 @@ private actor DistillerCoordinator {
     private var buffer: String = ""
     private var currentID: String?
     private var pending: CheckedContinuation<String, Never>?
+    private var lastError: String?
 
     func startTurn(id: String) {
         buffer = ""
         currentID = id
         pending = nil
+        lastError = nil
     }
 
     func awaitTurn() async -> String {
@@ -470,6 +481,9 @@ private actor DistillerCoordinator {
             pending = cont
         }
     }
+
+    /// 本轮 LLM `.error` 事件携带的错误文本（无错误返回 nil）。
+    func consumeError() -> String? { lastError }
 
     func handle(_ event: PiAgent.Event) {
         switch event {
@@ -482,7 +496,8 @@ private actor DistillerCoordinator {
                 pending = nil
                 p.resume(returning: buffer)
             }
-        case .error:
+        case .error(let msg):
+            lastError = msg
             if let p = pending {
                 pending = nil
                 p.resume(returning: buffer)

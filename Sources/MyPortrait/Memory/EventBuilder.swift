@@ -149,6 +149,9 @@ final class EventBuilder {
                 // for the strict check disappeared with the join fallback.
                 parsed = Self.coverGaps(parsed, lo: lo, hi: hi)
                 return parsed
+            } catch let e as BudgetExhaustedError {
+                // 撞额度重试无意义（额度不会几秒内恢复）—— 立即上抛。
+                throw e
             } catch {
                 lastError = error
                 print("EventBuilder: batch attempt \(attempt)/\(maxAttempts) failed — \(error.localizedDescription)")
@@ -175,8 +178,9 @@ final class EventBuilder {
         do { try agent.sendPrompt(prompt, id: requestID) }
         catch { throw BuilderError.agentSpawn(error.localizedDescription) }
 
+        let collected: String
         do {
-            return try await withThrowingTaskGroup(of: String.self) { group in
+            collected = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask { await coordinator.awaitTurn() }
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(self.perBatchTimeout * 1_000_000_000))
@@ -189,6 +193,12 @@ final class EventBuilder {
         } catch is CancellationError {
             throw BuilderError.agentTimeout
         }
+
+        // 撞额度优先于解析失败：抛 BudgetExhaustedError 让上层走 budget_deferred。
+        if let err = await coordinator.consumeError(), BudgetSignal.isExhausted(err) {
+            throw BudgetExhaustedError(processor: "EventBuilder", message: err)
+        }
+        return collected
     }
 
     // MARK: - Batched (fallback for > batchSize sessions)
@@ -449,11 +459,13 @@ private actor ResponseCoordinator {
     private var buffer: String = ""
     private var currentID: String?
     private var pending: CheckedContinuation<String, Never>?
+    private var lastError: String?
 
     func startTurn(id: String) {
         buffer = ""
         currentID = id
         pending = nil
+        lastError = nil
     }
 
     func awaitTurn() async -> String {
@@ -461,6 +473,9 @@ private actor ResponseCoordinator {
             pending = cont
         }
     }
+
+    /// 本轮 LLM `.error` 事件携带的错误文本（无错误返回 nil）。
+    func consumeError() -> String? { lastError }
 
     func handle(_ event: PiAgent.Event) {
         switch event {
@@ -473,7 +488,8 @@ private actor ResponseCoordinator {
                 pending = nil
                 p.resume(returning: buffer)
             }
-        case .error:
+        case .error(let msg):
+            lastError = msg
             if let p = pending {
                 pending = nil
                 p.resume(returning: buffer)

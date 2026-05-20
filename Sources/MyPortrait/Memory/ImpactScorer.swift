@@ -60,15 +60,22 @@ final class ImpactScorer {
         self.perBatchTimeout = perBatchTimeout
     }
 
-    /// Rescore every non-archived portrait file. Returns counts + duration.
-    /// `progress` is called on the main actor between batches.
-    func rescoreAll(progress: ((Progress) -> Void)? = nil) async throws -> Result {
+    /// Rescore every non-archived `unscored` event under `root`. Returns
+    /// counts + duration. `progress` is called on the main actor between
+    /// batches.
+    ///
+    /// `root` defaults to the whole events tree; the scheduler passes a single
+    /// day's directory (`events/<yyyy-MM-dd>/`) so the impact step is per-day.
+    func rescoreAll(
+        root: URL = Storage.eventsDir,
+        progress: ((Progress) -> Void)? = nil
+    ) async throws -> Result {
         let start = Date()
 
-        // Collect every (url, file) under ~/.portrait/events/ that is NOT
-        // archived. Backfill writes event files there as `unscored`; this
-        // rescore gives them a real impact. Sequentially to keep memory tiny.
-        let candidates = try await collectCandidates()
+        // Collect every (url, file) under `root` that is NOT archived.
+        // Backfill writes event files as `unscored`; this rescore gives them a
+        // real impact. Sequentially to keep memory tiny.
+        let candidates = try await collectCandidates(root: root)
         guard !candidates.isEmpty else {
             return Result(scoredCount: 0, failedCount: 0, elapsed: 0)
         }
@@ -104,6 +111,10 @@ final class ImpactScorer {
                     agent: agent,
                     coordinator: coordinator
                 )
+            } catch let e as BudgetExhaustedError {
+                // 撞额度：中止整个 rescore，调度器据此标 budget_deferred。
+                // 已写入的批次保留（幂等，下次只补未评分的）。
+                throw e
             } catch {
                 failed += batch.count
                 continue
@@ -171,6 +182,12 @@ final class ImpactScorer {
             throw ScorerError.agentTimeout
         }
 
+        // 撞额度优先于解析失败：LLM 报额度错时 buffer 为空，解析会抛
+        // noJSONInResponse 掩盖真因。先查 .error 文本。
+        if let err = await coordinator.consumeError(), BudgetSignal.isExhausted(err) {
+            throw BudgetExhaustedError(processor: "ImpactScorer", message: err)
+        }
+
         return try Self.parseScores(from: collected)
     }
 
@@ -234,16 +251,16 @@ final class ImpactScorer {
 
     // MARK: - Candidate collection
 
-    nonisolated private func collectCandidates() async throws -> [(URL, PortraitFile)] {
+    nonisolated private func collectCandidates(root: URL) async throws -> [(URL, PortraitFile)] {
         await Task.detached(priority: .userInitiated) {
-            Self.scanCandidates()
+            Self.scanCandidates(root: root)
         }.value
     }
 
-    nonisolated private static func scanCandidates() -> [(URL, PortraitFile)] {
+    nonisolated private static func scanCandidates(root: URL) -> [(URL, PortraitFile)] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
-            at: Storage.eventsDir,
+            at: root,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else { return [] }
@@ -271,11 +288,13 @@ private actor Coordinator {
     private var buffer: String = ""
     private var currentID: String?
     private var pending: CheckedContinuation<String, Never>?
+    private var lastError: String?
 
     func startTurn(id: String) {
         buffer = ""
         currentID = id
         pending = nil
+        lastError = nil
     }
 
     func awaitTurn() async -> String {
@@ -283,6 +302,9 @@ private actor Coordinator {
             pending = cont
         }
     }
+
+    /// 本轮 LLM `.error` 事件携带的错误文本（无错误返回 nil）。
+    func consumeError() -> String? { lastError }
 
     func handle(_ event: PiAgent.Event) {
         switch event {
@@ -297,7 +319,8 @@ private actor Coordinator {
                 pending = nil
                 p.resume(returning: buffer)
             }
-        case .error:
+        case .error(let msg):
+            lastError = msg
             if let p = pending {
                 pending = nil
                 // Surface as empty — caller's parser will throw noJSONInResponse.

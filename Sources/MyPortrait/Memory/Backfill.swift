@@ -155,6 +155,10 @@ enum Backfill {
                 clustering = try await builder.clusterDay(
                     date: day, sessions: enriched, activeEvents: active
                 )
+            } catch let e as BudgetExhaustedError {
+                // 撞额度不是"失败"——上抛让调度器标 budget_deferred 而非 failed，
+                // 不计入 retry_count。整个 Backfill 中止。
+                throw e
             } catch {
                 totals.llmFailedDays += 1
                 print("Day \(isoDay(day)): LLM clustering FAILED — \(error.localizedDescription) — nothing written")
