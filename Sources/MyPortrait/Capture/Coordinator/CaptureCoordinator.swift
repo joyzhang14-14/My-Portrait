@@ -101,8 +101,8 @@ actor CaptureCoordinator {
             // 不抛 —— 让事件流仍能启动。状态栏会从其他错误路径冒红点。
         }
 
-        // 3. 启动事件源（@MainActor，自动 hop 过去）。
-        await events.start()
+        // 3. 启动事件源（@MainActor，自动 hop 过去）。返回一条新的 trigger 流。
+        let stream = await events.start()
 
         // 4. DRM watcher（后台 3s 一次轮询；命中 → drmActive=true → 跳过所有帧）。
         await drmWatcher.start()
@@ -122,7 +122,6 @@ actor CaptureCoordinator {
         }
 
         // 6. 事件循环（detached：脱离当前 task tree，免被父 task cancel 牵连）。
-        let stream = events.stream
         captureTask = Task.detached(priority: .userInitiated) { [weak self] in
             await self?.runEventLoop(stream: stream)
         }
