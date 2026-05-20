@@ -276,9 +276,16 @@ private struct RunRow: View {
 /// Sheet for create/edit. Used by both PipesView (main pane) and
 /// TimelineSidebar's pipes section.
 struct PipeQuickEditor: View {
+    @Environment(AppState.self) private var appState
     @State var initial: PipeJob
     let onSave: (PipeJob) -> Void
     let onCancel: () -> Void
+
+    /// Integrations the user has actually connected — the only ones a pipe
+    /// can attach, since unconnected ones have no credentials to inject.
+    private var connectedIntegrations: [Integration] {
+        IntegrationRegistry.all.filter { appState.isConnected($0.id) }
+    }
 
     private let windowOptions: [ContextWindow] = [
         .none, .lastMinutes(5), .lastMinutes(30),
@@ -338,8 +345,55 @@ struct PipeQuickEditor: View {
                 Toggle("Enabled", isOn: $initial.isEnabled)
                     .toggleStyle(.switch)
             }
+
+            connectionsSelector
         }
         .padding(20)
         .frame(width: 480)
+    }
+
+    /// Multi-select menu over connected integrations. Toggling a row adds /
+    /// removes its id from `initial.connections`; at run time those ids
+    /// resolve into injected env-var credentials.
+    private var connectionsSelector: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Connections").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            if connectedIntegrations.isEmpty {
+                Text("No connected integrations. Add one in Connections.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Menu {
+                    ForEach(connectedIntegrations) { integ in
+                        Button {
+                            toggleConnection(integ.id)
+                        } label: {
+                            Label(integ.name,
+                                  systemImage: initial.connections.contains(integ.id)
+                                      ? "checkmark" : "")
+                        }
+                    }
+                } label: {
+                    Text(connectionsSummary)
+                        .font(.system(size: 12))
+                }
+            }
+        }
+    }
+
+    private var connectionsSummary: String {
+        let names = initial.connections.compactMap { id in
+            IntegrationRegistry.all.first { $0.id == id }?.name
+        }
+        return names.isEmpty ? "None" : names.joined(separator: ", ")
+    }
+
+    private func toggleConnection(_ id: String) {
+        if let idx = initial.connections.firstIndex(of: id) {
+            initial.connections.remove(at: idx)
+        } else {
+            initial.connections.append(id)
+        }
     }
 }
