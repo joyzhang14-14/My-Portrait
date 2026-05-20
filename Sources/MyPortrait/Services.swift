@@ -159,35 +159,50 @@ final class Services {
             }
         }
 
-        // **权限请求触发**：用户把 toggle 切 ON 时，如果权限不在 granted，
-        // 主动调系统标准对话框（NotDetermined 状态）或开 Settings（Denied）。
-        // PermissionMonitor 轮询会捕到授权结果，上面的 CombineLatest3 sink
-        // 自动重新评估。
+        // **权限请求触发**：**只在用户真正 toggle ON 时**才请求权限。
+        //
+        // `.dropFirst()` 是关键：`$screenCaptureEnabled` 订阅时会立刻发一次
+        // 当前值。如果 TOML 里 screen.enabled 本来就是 true（用户上次开过），
+        // 不 dropFirst 的话每次启动都会 fire 一遍 → 权限 denied → 弹系统设置。
+        // dropFirst 丢掉启动初始值，之后只有用户在 UI / 菜单里手动切才触发。
         settings.$screenCaptureEnabled
             .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] enabled in
                 guard let self, enabled else { return }
                 let perm = self.permissions.screenRecording
                 if perm == .granted { return }
-                self.logger.info("screen toggle ON but permission=\(String(describing: perm), privacy: .public) — requesting")
-                self.permissions.requestScreenRecording()
-                if perm == .denied {
-                    // Denied 状态系统对话框不会弹，跳 Settings 让用户手动开
-                    self.permissions.openSettings(for: .screen)
+                self.logger.info("screen toggle ON, permission=\(String(describing: perm), privacy: .public)")
+                if perm == .notDetermined {
+                    // 没问过 → CGRequestScreenCaptureAccess 弹系统标准对话框。
+                    self.permissions.requestScreenRecording()
+                } else {
+                    // denied → 系统对话框不会再弹，先问用户再开设置。
+                    self.confirmThenOpenSettings(
+                        title: "需要「屏幕录制」权限",
+                        body: "My Portrait 需要屏幕录制权限才能截屏。是否打开系统设置授权？",
+                        perm: .screen
+                    )
                 }
             }
             .store(in: &settingsCancellables)
 
         settings.$audioCaptureEnabled
             .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] enabled in
                 guard let self, enabled else { return }
                 let perm = self.permissions.microphone
                 if perm == .granted { return }
-                self.logger.info("audio toggle ON but permission=\(String(describing: perm), privacy: .public) — requesting")
-                self.permissions.requestMicrophone()
-                if perm == .denied {
-                    self.permissions.openSettings(for: .microphone)
+                self.logger.info("audio toggle ON, permission=\(String(describing: perm), privacy: .public)")
+                if perm == .notDetermined {
+                    self.permissions.requestMicrophone()
+                } else {
+                    self.confirmThenOpenSettings(
+                        title: "需要「麦克风」权限",
+                        body: "My Portrait 需要麦克风权限才能录音。是否打开系统设置授权？",
+                        perm: .microphone
+                    )
                 }
             }
             .store(in: &settingsCancellables)
@@ -276,6 +291,22 @@ final class Services {
         powerWatcher.stop()
         permissions.stop()
         settingsCancellables.removeAll()
+    }
+
+    // MARK: - 私有：权限
+
+    /// 权限被 denied 时弹 NSAlert 问用户，确认后才打开系统设置。
+    /// 不再像之前那样无脑 openSettings —— 那样每次启动都弹设置窗口。
+    private func confirmThenOpenSettings(title: String, body: String, perm: PermissionMonitor.Kind) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = body
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "打开系统设置")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            permissions.openSettings(for: perm)
+        }
     }
 
     // MARK: - 私有：响应 settings 变化
