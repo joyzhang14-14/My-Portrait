@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
         services = Services()
-        statusBarMenu = StatusBarMenu(settings: services.settings)
+        statusBarMenu = StatusBarMenu(settings: services.settings, permissions: services.permissions)
 
         // 确保磁盘目录结构存在
         do {

@@ -20,6 +20,7 @@ import Foundation
 final class StatusBarMenu: NSObject {
 
     private let settings: CaptureSettings
+    private let permissions: PermissionMonitor
     private let statusItem: NSStatusItem
     private let menu: NSMenu
     private var cancellables: Set<AnyCancellable> = []
@@ -36,8 +37,9 @@ final class StatusBarMenu: NSObject {
     private let statusHeader: NSMenuItem
     private let devModeBanner: NSMenuItem
 
-    init(settings: CaptureSettings) {
+    init(settings: CaptureSettings, permissions: PermissionMonitor) {
         self.settings = settings
+        self.permissions = permissions
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.menu = NSMenu()
         self.statusHeader = NSMenuItem(title: "—", action: nil, keyEquivalent: "")
@@ -62,7 +64,8 @@ final class StatusBarMenu: NSObject {
         // 初始 icon。
         refreshIcon()
 
-        // Combine 订阅：任一相关字段变化都刷新 icon + 菜单 state。
+        // Combine 订阅：settings 任一字段 + 权限状态变化都刷新 icon + 菜单 state。
+        // 菜单勾选要反映**真实录音状态**（开关 + 暂停 + 权限），所以权限变化也要订阅。
         Publishers.CombineLatest4(
             settings.$screenCaptureEnabled,
             settings.$audioCaptureEnabled,
@@ -74,6 +77,32 @@ final class StatusBarMenu: NSObject {
             self?.refreshMenuState()
         }
         .store(in: &cancellables)
+
+        Publishers.CombineLatest(
+            permissions.$screenRecording,
+            permissions.$microphone
+        )
+        .sink { [weak self] _, _ in
+            self?.refreshIcon()
+            self?.refreshMenuState()
+        }
+        .store(in: &cancellables)
+    }
+
+    // MARK: - 真实录音状态（= 意图开关 && 没暂停 && 权限已授）
+
+    /// 屏幕**实际**是否在录。菜单勾选 / 图标 tooltip 用这个，不用裸的 toggle 意图。
+    private var screenRecordingActive: Bool {
+        settings.screenCaptureEnabled
+            && !settings.isPaused
+            && permissions.screenRecording.isGranted
+    }
+
+    /// 麦克风**实际**是否在录。
+    private var audioRecordingActive: Bool {
+        settings.audioCaptureEnabled
+            && !settings.isPaused
+            && permissions.microphone.isGranted
     }
 
     // MARK: - 菜单构造
@@ -159,10 +188,10 @@ final class StatusBarMenu: NSObject {
         if settings.isPaused, let until = settings.pauseUntil {
             let fmt = RelativeDateTimeFormatter()
             toolTip = "Paused (resumes \(fmt.localizedString(for: until, relativeTo: Date())))"
-        } else if settings.screenCaptureEnabled || settings.audioCaptureEnabled {
+        } else if screenRecordingActive || audioRecordingActive {
             var parts: [String] = []
-            if settings.screenCaptureEnabled { parts.append("Screen") }
-            if settings.audioCaptureEnabled { parts.append("Mic") }
+            if screenRecordingActive { parts.append("Screen") }
+            if audioRecordingActive { parts.append("Mic") }
             toolTip = "Recording: \(parts.joined(separator: " + "))"
         } else {
             toolTip = "Capture off"
@@ -171,22 +200,51 @@ final class StatusBarMenu: NSObject {
     }
 
     private func refreshMenuState() {
-        screenToggle.state = settings.screenCaptureEnabled ? .on : .off
-        audioToggle.state = settings.audioCaptureEnabled ? .on : .off
+        // 勾 = 真实在录。开关 on 但权限没给 / 暂停中 → 不勾（对得上"没录音"）。
+        screenToggle.state = screenRecordingActive ? .on : .off
+        audioToggle.state = audioRecordingActive ? .on : .off
+
+        // 开关 on 但实际没录 → 标题给出原因，别让用户以为坏了。
+        screenToggle.title = Self.toggleTitle(
+            base: "Screen Capture",
+            wanted: settings.screenCaptureEnabled,
+            active: screenRecordingActive,
+            permission: permissions.screenRecording
+        )
+        audioToggle.title = Self.toggleTitle(
+            base: "Microphone",
+            wanted: settings.audioCaptureEnabled,
+            active: audioRecordingActive,
+            permission: permissions.microphone
+        )
 
         if settings.isPaused, let until = settings.pauseUntil {
             let fmt = RelativeDateTimeFormatter()
             statusHeader.title = "Paused — resumes \(fmt.localizedString(for: until, relativeTo: Date()))"
-        } else if settings.screenCaptureEnabled || settings.audioCaptureEnabled {
+        } else if screenRecordingActive || audioRecordingActive {
             var parts: [String] = []
-            if settings.screenCaptureEnabled { parts.append("Screen") }
-            if settings.audioCaptureEnabled { parts.append("Mic") }
+            if screenRecordingActive { parts.append("Screen") }
+            if audioRecordingActive { parts.append("Mic") }
             statusHeader.title = "Recording: \(parts.joined(separator: " + "))"
         } else {
             statusHeader.title = "Capture off"
         }
 
         devModeBanner.isHidden = !settings.hasUnimplementedStubs
+    }
+
+    /// 开关想开但实际没录时，标题补一句原因（权限没给）。
+    private static func toggleTitle(
+        base: String,
+        wanted: Bool,
+        active: Bool,
+        permission: PermissionMonitor.Status
+    ) -> String {
+        guard wanted, !active else { return base }
+        if !permission.isGranted {
+            return "\(base) (no permission)"
+        }
+        return base  // 想开、没录、但有权限 —— 多半是暂停中，statusHeader 已说明
     }
 
     // MARK: - 菜单项动作
