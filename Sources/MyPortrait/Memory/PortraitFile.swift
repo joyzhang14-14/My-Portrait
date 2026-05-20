@@ -71,6 +71,17 @@ struct PortraitFile: Equatable {
     var supersededBy: String?           // relative path under portrait/
     var pinned: Bool
     var archivedAt: Date?
+
+    // Phase 3 — EMA weight + personality concept fields. Uniform across all
+    // PortraitFile uses; non-personality files just leave primaryLabel nil
+    // and aliases [].
+    var mergeCount: Int                 // # of merges/rewrites into this file.
+                                        // 1 for a brand-new file.
+    var primaryLabel: String?           // personality concept's short label
+                                        // (nil for non-personality files)
+    var aliases: [String]               // alternate trait phrasings folded in
+    var lastModified: Date              // last body change — EMA decay anchor
+
     var body: String                    // raw markdown after frontmatter
 
     /// Initialiser for a brand-new file (sensible defaults).
@@ -108,6 +119,10 @@ struct PortraitFile: Equatable {
         self.supersededBy = nil
         self.pinned = false
         self.archivedAt = nil
+        self.mergeCount = 1
+        self.primaryLabel = nil
+        self.aliases = []
+        self.lastModified = created
         self.body = body
     }
 
@@ -132,6 +147,10 @@ struct PortraitFile: Equatable {
         supersededBy: String?,
         pinned: Bool,
         archivedAt: Date?,
+        mergeCount: Int = 1,
+        primaryLabel: String? = nil,
+        aliases: [String] = [],
+        lastModified: Date? = nil,
         body: String
     ) {
         self.created = created
@@ -155,6 +174,10 @@ struct PortraitFile: Equatable {
         self.supersededBy = supersededBy
         self.pinned = pinned
         self.archivedAt = archivedAt
+        self.mergeCount = mergeCount
+        self.primaryLabel = primaryLabel
+        self.aliases = aliases
+        self.lastModified = lastModified ?? created
         self.body = body
     }
 

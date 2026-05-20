@@ -83,6 +83,12 @@ enum PortraitFileIO {
         // distilled_into — portrait slugs already consumed from this event.
         // Default [] for files written before the field existed.
         let distilledInto = (try? requireStringArray(fields, "distilled_into")) ?? []
+        // Phase 3 fields. Default for files written before they existed:
+        // mergeCount 1, no primaryLabel, no aliases, lastModified = created.
+        let mergeCount = (try? requireInt(fields, "merge_count")) ?? 1
+        let primaryLabel = (try? optionalString(fields, "primary_label")) ?? nil
+        let aliases = (try? requireStringArray(fields, "aliases")) ?? []
+        let lastModified = ((try? optionalDate(fields, "last_modified")) ?? nil) ?? created
 
         return PortraitFile(
             created: created,
@@ -104,6 +110,10 @@ enum PortraitFileIO {
             supersededBy: supersededBy,
             pinned: pinned,
             archivedAt: archivedAt,
+            mergeCount: mergeCount,
+            primaryLabel: primaryLabel,
+            aliases: aliases,
+            lastModified: lastModified,
             body: body
         )
     }
@@ -144,6 +154,10 @@ enum PortraitFileIO {
         lines.append("superseded_by: \(formatNullableString(f.supersededBy))")
         lines.append("pinned: \(f.pinned)")
         lines.append("archived_at: \(f.archivedAt.map { formatDateTime($0) } ?? "null")")
+        lines.append("merge_count: \(f.mergeCount)")
+        lines.append("primary_label: \(formatNullableString(f.primaryLabel))")
+        lines.append("aliases: \(formatStringArray(f.aliases))")
+        lines.append("last_modified: \(formatDateOnly(f.lastModified))")
         lines.append("---")
         lines.append("")
         return lines.joined(separator: "\n") + f.body
