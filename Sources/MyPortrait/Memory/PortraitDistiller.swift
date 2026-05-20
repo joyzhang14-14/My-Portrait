@@ -411,6 +411,7 @@ final class PortraitDistiller {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
             if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             if f.eventTitle.isEmpty && f.eventSummary.isEmpty { continue }
             let rel = url.path
@@ -459,6 +460,7 @@ final class PortraitDistiller {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
             if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             let slug = url.deletingPathExtension().lastPathComponent
             let title = f.eventTitle.isEmpty ? slug : f.eventTitle
