@@ -383,14 +383,24 @@ struct FlowLayout: Layout {
     }
 }
 
-/// Ignored-apps picker. Mirrors screenpipe's `MultiSelect`: a dropdown whose
-/// options are app names actually seen in captured frames (so the user picks
-/// the exact name instead of guessing), plus a free-text field for custom
-/// entries. Selected apps render as removable chips.
+/// Ignored-apps picker. Mirrors screenpipe's `MultiSelect` with two dropdowns:
+///   - "Select app to ignore" — app names seen in captured frames
+///   - "System / privacy"     — curated system-level entries that never show
+///     up as a focused app (wallpaper, Dock, Control Center, …)
+/// Either dropdown toggles membership; selected entries render as removable
+/// chips. Every entry can be unchecked at any time.
 struct IgnoredAppPicker: View {
     @Binding var apps: [String]
     var discovered: [String] = []
-    @State private var customDraft = ""
+
+    /// Curated system / privacy entries. These are never the "focused app"
+    /// so they'd never appear in `discovered` — surfaced here so the user
+    /// can one-click toggle them. Mirrors screenpipe's default ignore list.
+    static let systemEntries: [String] = [
+        "Wallpaper", "Dock", "Control Center", "Settings",
+        "Trash", "VPN", "Private", "Incognito",
+        "Item-0", "App Icon Window", "Battery", "WiFi", "Clock",
+    ]
 
     private var boxBackground: some View {
         RoundedRectangle(cornerRadius: 7)
@@ -401,38 +411,10 @@ struct IgnoredAppPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Menu {
-                    if discovered.isEmpty {
-                        Text("No captured apps yet")
-                    } else {
-                        ForEach(discovered, id: \.self) { app in
-                            Button { toggle(app) } label: {
-                                if apps.contains(app) {
-                                    Label(app, systemImage: "checkmark")
-                                } else {
-                                    Text(app)
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "plus.circle.fill").font(.system(size: 11))
-                        Text("Select app to ignore").font(.system(size: 12))
-                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(boxBackground)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-
-                TextField("or type a custom name…", text: $customDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(boxBackground)
-                    .onSubmit(addCustom)
+                dropdown(title: "Select app to ignore", icon: "plus.circle.fill",
+                         options: discovered, emptyHint: "No captured apps yet")
+                dropdown(title: "System / privacy", icon: "macwindow",
+                         options: Self.systemEntries, emptyHint: "")
             }
             if !apps.isEmpty {
                 FlowLayout(spacing: 6) {
@@ -463,15 +445,38 @@ struct IgnoredAppPicker: View {
         }
     }
 
-    private func toggle(_ app: String) {
-        if let i = apps.firstIndex(of: app) { apps.remove(at: i) } else { apps.append(app) }
+    @ViewBuilder
+    private func dropdown(title: String, icon: String,
+                          options: [String], emptyHint: String) -> some View {
+        Menu {
+            if options.isEmpty {
+                Text(emptyHint)
+            } else {
+                ForEach(options, id: \.self) { app in
+                    Button { toggle(app) } label: {
+                        if apps.contains(app) {
+                            Label(app, systemImage: "checkmark")
+                        } else {
+                            Text(app)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(title).font(.system(size: 12))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(boxBackground)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
-    private func addCustom() {
-        let v = customDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !v.isEmpty, !apps.contains(v) else { return }
-        apps.append(v)
-        customDraft = ""
+    private func toggle(_ app: String) {
+        if let i = apps.firstIndex(of: app) { apps.remove(at: i) } else { apps.append(app) }
     }
 }
 

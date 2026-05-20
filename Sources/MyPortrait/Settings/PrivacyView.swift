@@ -51,7 +51,7 @@ struct PrivacySettingsView: View {
                 footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Case-insensitive substring match against the window's app name or title."
             ) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Pick from apps you've captured, or type a custom name…")
+                    Text("Pick from captured apps or the system / privacy list…")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.50))
                         .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
