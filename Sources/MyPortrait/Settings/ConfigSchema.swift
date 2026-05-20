@@ -315,14 +315,21 @@ struct RecordingConfig: Codable, Equatable {
     var audio:  AudioConfig  = .init()
     var screen: ScreenConfig = .init()
     var system: SystemConfig = .init()
+    /// Typing 采集「键盘活动关联判据」时间窗（毫秒）：value 变化前若
+    /// 这段时间内没有物理按键，则判定非用户打字、丢弃。
+    var typingKeyCorrelationWindowMs: Int = 1000
     init() {}
-    enum CodingKeys: String, CodingKey { case audio, screen, system }
+    enum CodingKeys: String, CodingKey {
+        case audio, screen, system
+        case typingKeyCorrelationWindowMs = "typing_key_correlation_window_ms"
+    }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         audio  = c.dflt(AudioConfig.self,  .audio, audio)
         screen = c.dflt(ScreenConfig.self, .screen, screen)
         system = c.dflt(SystemConfig.self, .system, system)
+        typingKeyCorrelationWindowMs = c.dflt(Int.self, .typingKeyCorrelationWindowMs, typingKeyCorrelationWindowMs)
     }
 }
 

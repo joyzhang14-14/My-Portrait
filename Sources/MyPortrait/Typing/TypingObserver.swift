@@ -17,6 +17,7 @@
 
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import Foundation
 
 @MainActor
@@ -49,6 +50,13 @@ final class TypingObserver {
     /// NSWorkspace app 切换通知的 observer token。
     private var workspaceObserverToken: NSObjectProtocol?
 
+    /// 最近一次物理 keyDown 的 UTC 毫秒时间戳。纯 @MainActor 存储属性 ——
+    /// 写（keyDown closure）和读（value-changed 判据）都在 MainActor，无需锁。
+    private var lastKeyDownMs: Int64 = 0
+
+    /// 全局 keyDown 监听句柄。stop / detach / deinit 时 removeMonitor。
+    private var keyDownMonitor: Any?
+
     /// 是否已 start（用于 stop 幂等）。
     private var running = false
 
@@ -73,7 +81,25 @@ final class TypingObserver {
             return
         }
 
+        // keyDown 全局监听需要 Input Monitoring 权限（与 Accessibility 是
+        // 两个独立 TCC 类别）。静默 preflight —— 不主动弹 prompt，macOS 会在
+        // 首次实际安装全局监听时自动弹系统授权框。
+        guard CGPreflightListenEventAccess() else {
+            print("[TypingObserver] Input Monitoring not granted — idle")
+            return
+        }
+
         running = true
+
+        // 全局 keyDown 监听 —— 维护 lastKeyDownMs，供 value-changed 判据用。
+        keyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            // 此 closure 事实上在主线程触发，但类型系统看作非隔离；
+            // assumeIsolated 同步进入 MainActor（同款于 AX C 回调）。
+            MainActor.assumeIsolated {
+                self.handleKeyDown(keyCode: event.keyCode,
+                                   modifierFlags: event.modifierFlags)
+            }
+        }
 
         // 监听 app 切换：切换时 detach 旧 observer、attach 新 app。
         let nc = NSWorkspace.shared.notificationCenter
@@ -105,6 +131,11 @@ final class TypingObserver {
         debounceTask?.cancel()
         debounceTask = nil
 
+        if let monitor = keyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyDownMonitor = nil
+        }
+
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
             workspaceObserverToken = nil
@@ -119,6 +150,9 @@ final class TypingObserver {
     /// 非 Sendable 的隔离字段（attachment / workspaceObserverToken）。
     isolated deinit {
         debounceTask?.cancel()
+        if let monitor = keyDownMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
         }
@@ -146,6 +180,20 @@ final class TypingObserver {
         guard pid > 0,
               let app = NSRunningApplication(processIdentifier: pid) else { return }
         attach(to: app)
+    }
+
+    /// 全局 keyDown 回调逻辑。⌘V / Shift+⌘V 粘贴不算「打字」—— 不更新
+    /// lastKeyDownMs；其它所有 keyDown 都刷新时间戳。
+    private func handleKeyDown(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) {
+        if modifierFlags.contains(.command), keyCode == UInt16(kVK_ANSI_V) {
+            return
+        }
+        lastKeyDownMs = Self.nowMs()
+    }
+
+    /// 当前 UTC 毫秒。
+    private static func nowMs() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
     }
 
     private func attach(to app: NSRunningApplication) {
@@ -326,6 +374,19 @@ final class TypingObserver {
 
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
+
+        // 键盘活动关联判据：value 变化前若 correlationWindow 内没有物理按键，
+        // 判定非用户打字（终端输出 / 别人的聊天消息 / AI 补全 ghost text 等）
+        // —— 丢弃，不 snapshot 不 diff。窗口值每次现读，支持运行中改配置生效。
+        let rawWindow = ConfigStore.shared.recording.typingKeyCorrelationWindowMs
+        let correlationWindowMs = Int64(min(max(rawWindow, 200), 5000))
+        let now = Self.nowMs()
+        if now - lastKeyDownMs > correlationWindowMs {
+            let agoSec = Double(now - lastKeyDownMs) / 1000
+            print(String(format: "[TypingObserver] discarded — no recent keyDown (last %.1fs ago) — bundle=%@",
+                         agoSec, att.bundleId))
+            return
+        }
 
         // IME 过滤：marked text range 非空 = 正在 composition（未上屏拼写），
         // 跳过；等 commit 后那次 value change 再处理。
