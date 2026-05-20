@@ -26,13 +26,20 @@ actor VADRecorder {
 
     private let audioDir: URL
 
-    /// VAD 阈值
+    /// VAD 参数
     private let sampleRate: Double = 16_000
-    private let frameSamples: Int = 160
+    /// VAD 帧长 = Silero v5 固定 512 样本（≈32ms）。RMS 退化路径也用此帧长。
+    private let frameSamples: Int = SileroVAD.frameSize
+    /// Silero 语音概率阈值。系统音频混背景音乐，阈值更低（抄 screenpipe）。
+    private let speechProbThreshold: Float
+    private let silenceProbThreshold: Float = 0.35
+    /// RMS 退化阈值（Silero 模型未就绪时用）。
     private let rmsSpeechThreshold: Float = 0.01
     private let rmsSilenceThreshold: Float = 0.005
+    /// 连续 N 帧语音才进 SPEECH（3 × 32ms ≈ 96ms）。
     private let speechEntryFrames: Int = 3
-    private let silenceExitFrames: Int = 80
+    /// 连续 N 帧静音才退出 SPEECH（25 × 32ms ≈ 800ms）。
+    private let silenceExitFrames: Int = 25
     private let minSegmentFrames: Int = 100
     private let maxSegmentSeconds: TimeInterval = 60
 
@@ -44,6 +51,12 @@ actor VADRecorder {
     private var state: State = .silent
     private var consecutiveSpeechFrames: Int = 0
     private var consecutiveSilenceFrames: Int = 0
+
+    /// 攒够 512 样本才送 VAD —— feed 进来的样本块大小不定。
+    private var pendingSamples: [Float] = []
+    /// Silero VAD。懒加载（首次需下载模型）；nil 时退化为 RMS。
+    private var silero: SileroVAD?
+    private var sileroLoadStarted = false
 
     private var currentWriter: AVAudioFile?
     private var currentWriterURL: URL?
@@ -58,6 +71,8 @@ actor VADRecorder {
     init(deviceLabel: String, audioDir: URL = Storage.audioQueueDir) {
         self.deviceLabel = deviceLabel
         self.audioDir = audioDir
+        // 系统音频（loopback）常混背景音乐，Silero 置信度偏低 → 用更低的语音阈值。
+        self.speechProbThreshold = (deviceLabel == "system_loopback") ? 0.15 : 0.5
         self.targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: sampleRate,
@@ -73,57 +88,80 @@ actor VADRecorder {
 
     /// 喂样本。调用方负责 16kHz mono Float32 转换。
     func feed(_ samples: [Float]) {
-        var i = 0
-        while i + frameSamples <= samples.count {
-            var sumSq: Float = 0
-            for j in 0..<frameSamples {
-                let s = samples[i + j]
-                sumSq += s * s
+        ensureSileroLoading()
+        pendingSamples.append(contentsOf: samples)
+        while pendingSamples.count >= frameSamples {
+            let frame = Array(pendingSamples.prefix(frameSamples))
+            pendingSamples.removeFirst(frameSamples)
+            processFrame(frame)
+        }
+    }
+
+    /// 处理一个 512 样本帧：跑 VAD 决策 + 推进状态机。
+    private func processFrame(_ frame: [Float]) {
+        let (isSpeech, isSilent) = decide(frame)
+
+        switch state {
+        case .silent:
+            if isSpeech {
+                consecutiveSpeechFrames += 1
+                if consecutiveSpeechFrames >= speechEntryFrames {
+                    openSegment()
+                    state = .speech
+                    consecutiveSilenceFrames = 0
+                }
+            } else {
+                consecutiveSpeechFrames = 0
             }
-            let rms = (sumSq / Float(frameSamples)).squareRoot()
 
-            let isSpeech = rms > rmsSpeechThreshold
-            let isSilent = rms < rmsSilenceThreshold
+        case .speech:
+            writeFrameToCurrentSegment(frame)
 
-            switch state {
-            case .silent:
-                if isSpeech {
-                    consecutiveSpeechFrames += 1
-                    if consecutiveSpeechFrames >= speechEntryFrames {
-                        openSegment()
-                        state = .speech
-                        consecutiveSilenceFrames = 0
-                    }
-                } else {
+            if isSilent {
+                consecutiveSilenceFrames += 1
+                if consecutiveSilenceFrames >= silenceExitFrames {
+                    closeCurrentSegment(reason: "silence")
+                    state = .silent
                     consecutiveSpeechFrames = 0
                 }
-
-            case .speech:
-                let frameSlice = Array(samples[i..<(i + self.frameSamples)])
-                writeFrameToCurrentSegment(frameSlice)
-
-                if isSilent {
-                    consecutiveSilenceFrames += 1
-                    if consecutiveSilenceFrames >= silenceExitFrames {
-                        closeCurrentSegment(reason: "silence")
-                        state = .silent
-                        consecutiveSpeechFrames = 0
-                    }
-                } else {
-                    consecutiveSilenceFrames = 0
-                }
-
-                // 强制切：超过 max。
-                if let startedAt = currentWriterStartedAt,
-                   Date().timeIntervalSince(startedAt) >= maxSegmentSeconds
-                {
-                    closeCurrentSegment(reason: "max_duration")
-                    openSegment()
-                    consecutiveSilenceFrames = 0
-                }
+            } else {
+                consecutiveSilenceFrames = 0
             }
 
-            i += frameSamples
+            // 强制切：超过 max。
+            if let startedAt = currentWriterStartedAt,
+               Date().timeIntervalSince(startedAt) >= maxSegmentSeconds
+            {
+                closeCurrentSegment(reason: "max_duration")
+                openSegment()
+                consecutiveSilenceFrames = 0
+            }
+        }
+    }
+
+    /// VAD 决策：Silero 就绪用神经网络概率，否则退化为 RMS 能量。
+    private func decide(_ frame: [Float]) -> (isSpeech: Bool, isSilent: Bool) {
+        if let silero, let prob = silero.probability(frame) {
+            return (prob > speechProbThreshold, prob < silenceProbThreshold)
+        }
+        var sumSq: Float = 0
+        for s in frame { sumSq += s * s }
+        let rms = (sumSq / Float(frame.count)).squareRoot()
+        return (rms > rmsSpeechThreshold, rms < rmsSilenceThreshold)
+    }
+
+    /// 懒加载 Silero VAD 模型（首次需后台下载）。失败则一直走 RMS 退化路径。
+    private func ensureSileroLoading() {
+        guard !sileroLoadStarted else { return }
+        sileroLoadStarted = true
+        Task {
+            do {
+                let path = try await SpeakerModelStore.shared.path(for: .vadSilero)
+                self.silero = try SileroVAD(modelPath: path.path)
+                self.logger.info("Silero VAD loaded")
+            } catch {
+                self.logger.warning("Silero VAD load failed, using RMS fallback: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -228,7 +266,7 @@ actor VADRecorder {
             "channels": 1,
             "format": "pcm_f32le",
             "device": deviceLabel,
-            "vad": "rms",
+            "vad": silero != nil ? "silero" : "rms",
             "close_reason": closeReason,
         ]
         do {

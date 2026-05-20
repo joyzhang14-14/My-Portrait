@@ -10,17 +10,25 @@ import os.log
 enum SpeakerModel: Sendable {
     case segmentation
     case embedding
+    /// Silero VAD v5 —— 语音活动检测（不属于说话人,但同样是可下载的音频 ONNX 模型）。
+    case vadSilero
 
     var filename: String {
         switch self {
         case .segmentation: return "segmentation-3.0.onnx"
         case .embedding:    return "wespeaker_en_voxceleb_CAM++.onnx"
+        case .vadSilero:    return "silero_vad.onnx"
         }
     }
 
     var url: String {
-        let base = "https://github.com/screenpipe/screenpipe/raw/refs/heads/main/crates/screenpipe-audio/models/pyannote"
-        return "\(base)/\(filename)"
+        switch self {
+        case .segmentation, .embedding:
+            let base = "https://github.com/screenpipe/screenpipe/raw/refs/heads/main/crates/screenpipe-audio/models/pyannote"
+            return "\(base)/\(filename)"
+        case .vadSilero:
+            return "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
+        }
     }
 }
 
