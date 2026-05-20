@@ -1,27 +1,27 @@
 import Foundation
 
-/// LLM-driven event clustering — the missing semantic layer between raw
-/// Tier 1 sessions and the persistent event-level PortraitFiles.
+/// LLM-driven event clustering — the semantic layer between raw Tier 1
+/// sessions and the persistent event-level PortraitFiles.
 ///
-/// Per design:
-///   - An "event" is what the USER subjectively did, not which app was open.
-///   - Events span apps within a day.
-///   - Occurrence counting is per-day: same event multiple times in one day
-///     counts as 1 occurrence; same event next day = +1 occurrence.
+/// Per-event protocol (2026-05-19 rewrite):
+///   - The LLM no longer emits a per-session decision. It emits a per-EVENT
+///     clustering: a list of events, each owning a non-empty `session_ids`
+///     list, plus a top-level `skipped` list.
+///   - Every input session id MUST appear exactly once — in some event's
+///     `session_ids` or in `skipped`. The parser enforces this; incomplete
+///     coverage throws and the whole day is rejected (no half-written data).
+///   - There is no "decision without content" shape, so empty-shell events
+///     (the old "App — Window" bug) are structurally impossible.
 ///
-/// Schema change (2026-05-18):
-///   - The single `category` field is removed.
-///   - Replaced by `type` (experience | emotion) plus optional
-///     `portrait_facets` (personality / background / social / speech_style /
-///     habits / interests / skills) with per-facet thresholds. Most events
-///     have an empty facet array — they're activity records, not portrait
-///     signals.
+/// An "event" is what the USER subjectively did, not which app was open.
+/// Events span apps within a day. Multiple sessions of the same activity
+/// (e.g. opening WeChat 18× to chat) are ONE event.
 @MainActor
 final class EventBuilder {
     /// A facet of the user's portrait that an event reflects.
     struct PortraitFacet: Equatable, Hashable {
-        let facet: String        // personality / background / social / ...
-        let value: String        // short descriptor (e.g. "art-history")
+        let facet: String
+        let value: String
     }
 
     /// A Tier 1 session enriched with OCR/transcript context, ready for LLM.
@@ -31,33 +31,32 @@ final class EventBuilder {
         let transcriptSnippet: String
     }
 
-    /// Reference to an event the LLM may want to join. Backfill builds this
-    /// list from existing PortraitFiles in `events/` (recent N days).
+    /// Reference to an event the LLM may want to continue across days.
+    /// Backfill builds this from existing PortraitFiles in `events/`.
     struct ActiveEvent {
         let id: String                  // stable id (relative path under events/)
         let title: String
         let summary: String
-        let type: String                // "experience" / "emotion"
-        let tags: [String]              // for theme matching
+        let type: String
+        let tags: [String]
         let lastOccurredOn: Date
     }
 
-    /// LLM decision for one session.
-    enum Decision {
-        case join(eventId: String)
-        case new(title: String,
-                 summary: String,
-                 type: String,                 // "experience" / "emotion"
-                 portraitFacets: [PortraitFacet],
-                 tags: [String])
-        case skip
+    /// One semantic event clustered from 1+ sessions.
+    struct ClusteredEvent {
+        let title: String
+        let summary: String
+        let type: String                // "experience" / "emotion"
+        let portraitFacets: [PortraitFacet]
+        let tags: [String]
+        let sessionIndices: [Int]        // 1-based indices into the day's session list
+        let joinExisting: String?        // id of an ActiveEvent, or nil
     }
 
-    /// Returned 1:1 with input sessions (same order).
-    struct Assignment {
-        let session: Tier1Merger.MergedEvent
-        let decision: Decision
-        let reason: String?
+    /// Result of clustering one day.
+    struct DayClustering {
+        let events: [ClusteredEvent]
+        let skippedIndices: [Int]
     }
 
     enum BuilderError: LocalizedError {
@@ -65,7 +64,7 @@ final class EventBuilder {
         case agentTimeout
         case noJSONInResponse
         case malformedJSON(String)
-        case sizeMismatch(expected: Int, got: Int)
+        case incompleteCoverage(missing: [Int])
 
         var errorDescription: String? {
             switch self {
@@ -73,28 +72,57 @@ final class EventBuilder {
             case .agentTimeout:          return "LLM did not respond within timeout"
             case .noJSONInResponse:      return "LLM response contained no JSON"
             case .malformedJSON(let m):  return "LLM JSON parse failed: \(m)"
-            case .sizeMismatch(let e, let g):
-                return "LLM returned \(g) assignments, expected \(e)"
+            case .incompleteCoverage(let m):
+                return "LLM clustering left sessions uncovered: \(m)"
             }
         }
     }
 
     private let model: String
-    private let perDayTimeout: TimeInterval
+    private let perBatchTimeout: TimeInterval
+    /// Sessions ≤ this run in a single LLM call. Above it, batched.
+    private let batchSize: Int
 
-    init(model: String = "gpt-5.4", perDayTimeout: TimeInterval = 120) {
+    init(model: String = "gpt-5.4",
+         perBatchTimeout: TimeInterval = 180,
+         batchSize: Int = 100) {
         self.model = model
-        self.perDayTimeout = perDayTimeout
+        self.perBatchTimeout = perBatchTimeout
+        self.batchSize = batchSize
     }
 
-    /// Resolve assignments for one day's sessions.
-    func assignDay(
+    /// Cluster one day's sessions into semantic events.
+    func clusterDay(
         date: Date,
         sessions: [EnrichedSession],
         activeEvents: [ActiveEvent]
-    ) async throws -> [Assignment] {
-        guard !sessions.isEmpty else { return [] }
+    ) async throws -> DayClustering {
+        guard !sessions.isEmpty else {
+            return DayClustering(events: [], skippedIndices: [])
+        }
+        if sessions.count <= batchSize {
+            return try await clusterOneBatch(
+                date: date,
+                sessions: sessions,
+                globalOffset: 0,
+                activeEvents: activeEvents
+            )
+        }
+        return try await clusterBatched(
+            date: date, sessions: sessions, activeEvents: activeEvents
+        )
+    }
 
+    // MARK: - Single batch
+
+    /// Cluster one batch. `globalOffset` shifts the 1-based session ids the
+    /// LLM sees so they stay unique across batches.
+    private func clusterOneBatch(
+        date: Date,
+        sessions: [EnrichedSession],
+        globalOffset: Int,
+        activeEvents: [ActiveEvent]
+    ) async throws -> DayClustering {
         let agent = try PiAgent(model: model)
         do { try await agent.start() }
         catch { throw BuilderError.agentSpawn(error.localizedDescription) }
@@ -106,9 +134,12 @@ final class EventBuilder {
         }
         defer { consumerTask.cancel() }
 
-        let prompt = Self.buildPrompt(date: date,
-                                      sessions: sessions,
-                                      activeEvents: activeEvents)
+        let prompt = Self.buildPrompt(
+            date: date,
+            sessions: sessions,
+            globalOffset: globalOffset,
+            activeEvents: activeEvents
+        )
 
         let requestID = UUID().uuidString
         await coordinator.startTurn(id: requestID)
@@ -120,7 +151,7 @@ final class EventBuilder {
             collected = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask { await coordinator.awaitTurn() }
                 group.addTask {
-                    try await Task.sleep(nanoseconds: UInt64(self.perDayTimeout * 1_000_000_000))
+                    try await Task.sleep(nanoseconds: UInt64(self.perBatchTimeout * 1_000_000_000))
                     throw BuilderError.agentTimeout
                 }
                 let result = try await group.next()!
@@ -131,11 +162,128 @@ final class EventBuilder {
             throw BuilderError.agentTimeout
         }
 
-        let decisions = try Self.parseDecisions(from: collected, expected: sessions.count)
-        return zip(sessions, decisions).map { (enriched, parsed) in
-            Assignment(session: enriched.session,
-                       decision: parsed.decision,
-                       reason: parsed.reason)
+        // Parse → join-defence → coverage check.
+        let lo = globalOffset + 1
+        let hi = globalOffset + sessions.count
+        var parsed = try Self.parseClustering(from: collected)
+        let validActiveIds = Set(activeEvents.map { $0.id })
+        parsed = Self.defendJoins(parsed, validActiveIds: validActiveIds)
+        try Self.verifyCoverage(parsed, lo: lo, hi: hi)
+        return parsed
+    }
+
+    // MARK: - Batched (fallback for > batchSize sessions)
+
+    /// Cluster a large day in chunks. Each chunk gets prior chunks' new
+    /// events as join candidates (temp ids prefixed `_b`). Cross-batch joins
+    /// to a temp id are merged in memory; joins to a real (historical) id are
+    /// left for Backfill. Session ids stay globally unique via offsets.
+    private func clusterBatched(
+        date: Date,
+        sessions: [EnrichedSession],
+        activeEvents: [ActiveEvent]
+    ) async throws -> DayClustering {
+        let chunks = stride(from: 0, to: sessions.count, by: batchSize).map {
+            Array(sessions[$0..<min($0 + batchSize, sessions.count)])
+        }
+
+        // Temp-id → cluster, preserving insertion order.
+        var tempOrder: [String] = []
+        var tempClusters: [String: ClusteredEvent] = [:]
+        var historicalJoinEvents: [ClusteredEvent] = []
+        var allSkipped: [Int] = []
+        var tempSeq = 0
+
+        for (ci, chunk) in chunks.enumerated() {
+            let offset = ci * batchSize
+
+            // Carry: prior chunks' new events become join candidates.
+            let carry: [ActiveEvent] = tempOrder.map { tid in
+                let c = tempClusters[tid]!
+                return ActiveEvent(id: tid, title: c.title, summary: c.summary,
+                                   type: c.type, tags: c.tags, lastOccurredOn: date)
+            }
+            let active = Self.rankActive(activeEvents + carry,
+                                         for: chunk).prefix(20)
+
+            let batch = try await clusterOneBatch(
+                date: date, sessions: chunk, globalOffset: offset,
+                activeEvents: Array(active)
+            )
+            allSkipped.append(contentsOf: batch.skippedIndices)
+
+            for ev in batch.events {
+                if let je = ev.joinExisting, je.hasPrefix("_b"),
+                   var target = tempClusters[je] {
+                    // Cross-batch join to an in-flight temp event → merge.
+                    target = ClusteredEvent(
+                        title: target.title, summary: target.summary,
+                        type: target.type, portraitFacets: target.portraitFacets,
+                        tags: target.tags,
+                        sessionIndices: target.sessionIndices + ev.sessionIndices,
+                        joinExisting: target.joinExisting
+                    )
+                    tempClusters[je] = target
+                } else if let je = ev.joinExisting, !je.hasPrefix("_b") {
+                    // Join to a real historical event — Backfill handles it.
+                    historicalJoinEvents.append(ev)
+                } else {
+                    // New event — register a temp id for later chunks.
+                    tempSeq += 1
+                    let tid = "_b\(tempSeq)"
+                    tempOrder.append(tid)
+                    tempClusters[tid] = ev
+                }
+            }
+        }
+
+        let merged = tempOrder.compactMap { tempClusters[$0] } + historicalJoinEvents
+        return DayClustering(events: merged, skippedIndices: allSkipped)
+    }
+
+    /// Rank active events by app overlap with the batch (most-overlapping
+    /// first) so the top-20 cut keeps the most relevant join candidates.
+    private static func rankActive(_ active: [ActiveEvent],
+                                   for batch: [EnrichedSession]) -> [ActiveEvent] {
+        let batchTags = Set(batch.flatMap { [$0.session.appName.lowercased()] })
+        return active.sorted { a, b in
+            let sa = Set(a.tags.map { $0.lowercased() }).intersection(batchTags).count
+            let sb = Set(b.tags.map { $0.lowercased() }).intersection(batchTags).count
+            return sa > sb
+        }
+    }
+
+    // MARK: - Join defence + coverage
+
+    /// Drop joins that point at a non-existent active id. The offending
+    /// event's sessions are moved to `skipped` rather than written as a shell.
+    private static func defendJoins(
+        _ clustering: DayClustering,
+        validActiveIds: Set<String>
+    ) -> DayClustering {
+        var keptEvents: [ClusteredEvent] = []
+        var skipped = clustering.skippedIndices
+        for ev in clustering.events {
+            if let je = ev.joinExisting, !validActiveIds.contains(je) {
+                // Hallucinated / stale join target — demote to skipped.
+                skipped.append(contentsOf: ev.sessionIndices)
+            } else {
+                keptEvents.append(ev)
+            }
+        }
+        return DayClustering(events: keptEvents, skippedIndices: skipped)
+    }
+
+    /// Every session id in `lo...hi` must be covered by an event or skipped.
+    private static func verifyCoverage(
+        _ clustering: DayClustering, lo: Int, hi: Int
+    ) throws {
+        var seen = Set<Int>()
+        for ev in clustering.events { seen.formUnion(ev.sessionIndices) }
+        seen.formUnion(clustering.skippedIndices)
+        let missing = (lo...hi).filter { !seen.contains($0) }
+        if !missing.isEmpty {
+            throw BuilderError.incompleteCoverage(missing: missing)
         }
     }
 
@@ -144,31 +292,27 @@ final class EventBuilder {
     nonisolated private static func buildPrompt(
         date: Date,
         sessions: [EnrichedSession],
+        globalOffset: Int,
         activeEvents: [ActiveEvent]
     ) -> String {
         let dayStr = isoDay(date)
 
-        // ─── Dynamic blocks (raw Swift, NOT raw string) ───────────────────
-
         let activeBlock: String
         if activeEvents.isEmpty {
-            activeBlock = "Active events from recent days: (none)"
+            activeBlock = "ACTIVE EVENTS (join candidates): (none)"
         } else {
-            var rows: [String] = ["Active events from recent days:"]
+            var rows: [String] = ["ACTIVE EVENTS (join candidates):"]
             for e in activeEvents {
                 let last = relativeDay(from: e.lastOccurredOn, on: date)
                 let tagStr = e.tags.isEmpty ? "—" : e.tags.joined(separator: ",")
-                let trim = e.summary.count > 140
-                    ? String(e.summary.prefix(140)) + "…" : e.summary
-                rows.append("  [\(e.id)] \(e.title)  | type=\(e.type) | tags=[\(tagStr)] | last=\(last)")
-                rows.append("    summary: \(trim.replacingOccurrences(of: "\n", with: " ⏎ "))")
+                rows.append("  [\(e.id)] \(e.title) | tags=[\(tagStr)] | last=\(last)")
             }
             activeBlock = rows.joined(separator: "\n")
         }
 
-        var sessionRows: [String] = ["Sessions to assign (id=1..\(sessions.count)):"]
+        var sessionRows: [String] = ["SESSIONS TO CLUSTER (use the id shown):"]
         for (i, item) in sessions.enumerated() {
-            let id = i + 1
+            let id = globalOffset + i + 1
             let s = item.session
             let timeRange = "\(timeOfDay(s.firstSeen))–\(timeOfDay(s.lastSeen))"
             let durMin = max(1, Int((s.lastSeen.timeIntervalSince(s.firstSeen) / 60).rounded()))
@@ -178,133 +322,70 @@ final class EventBuilder {
             sessionRows.append(line)
             if !item.ocrSnippet.isEmpty {
                 let snippet = item.ocrSnippet.replacingOccurrences(of: "\n", with: " ⏎ ")
-                let trim = snippet.count > 500 ? String(snippet.prefix(500)) + "…" : snippet
-                sessionRows.append("    ocr: \(trim)")
+                sessionRows.append("    ocr: \(snippet)")
             }
             if !item.transcriptSnippet.isEmpty {
-                let trim = item.transcriptSnippet.count > 200
-                    ? String(item.transcriptSnippet.prefix(200)) + "…"
-                    : item.transcriptSnippet
-                sessionRows.append("    audio: \(trim)")
+                sessionRows.append("    audio: \(item.transcriptSnippet)")
             }
         }
         let sessionBlock = sessionRows.joined(separator: "\n")
 
-        // ─── Static prompt body (raw string, no escape gymnastics) ────────
-
         let staticBody = #"""
-        You are clustering raw activity sessions into SEMANTIC EVENTS for a personal portrait system.
+        You cluster raw activity SESSIONS into semantic EVENTS for a personal portrait system.
 
-        OUTPUT SCHEMA
-        -------------
-        Respond with ONLY a JSON array, one object per input session, in the SAME ORDER as the sessions below.
-        No prose, no markdown fences.
+        An EVENT is what the USER was doing (subject + intent), NOT which app was open.
+        Multiple sessions of the same activity (e.g. opening WeChat 18 times to chat
+        with the same person) are ONE event. Sessions across different apps that serve
+        one task (research in Safari → notes in Notes) are ONE event.
 
-        Three decision shapes:
+        OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
+        {
+          "events": [
+            {
+              "title": "...",
+              "summary": "...",
+              "type": "experience",
+              "tags": ["..."],
+              "portrait_facets": [],
+              "session_ids": [1, 4, 9],
+              "join_existing": null
+            }
+          ],
+          "skipped": [3, 7]
+        }
 
-        join an existing event:
-          {"id": 1, "decision": "join", "event_id": "<id from active list>", "reason": "..."}
+        HARD RULES (a violation makes the whole output invalid):
+        - EVERY input session id MUST appear EXACTLY ONCE — either inside some
+          event's "session_ids", or in the top-level "skipped" array.
+        - "title": ≤ 60 chars, describes what the user was DOING. NEVER "App — Window".
+        - "summary": REQUIRED, 3-5 sentences, MUST cite specific topics / names /
+          actions visible in the OCR. NEVER write "the user used X app". If no OCR
+          supports a summary, the session belongs in "skipped", not in an event.
+        - THIRD PERSON always — "the user" / "they", never "you".
+        - "type": "experience" (default, 99%) or "emotion" (only a clear emotional
+          signal in the OCR — frustration, joy, conflict, anxiety).
+        - "session_ids": non-empty list of the ids this event covers.
+        - "join_existing": if this event continues an ACTIVE EVENT listed above, put
+          its id (e.g. "evt_03" or a path id); otherwise null. Only join when the
+          subject matter is genuinely the same thread of work / conversation.
+        - "skipped": sessions with no real content (idle glance, no meaningful OCR).
 
-        start a new event:
-          {
-            "id": 1,
-            "decision": "new",
-            "title": "...",
-            "summary": "...",
-            "type": "experience",
-            "portrait_facets": [],
-            "tags": ["..."],
-            "reason": "..."
-          }
+        portrait_facets — optional, default []. Only attach when the event reflects a
+        STABLE signal about who the user is. Each facet: {"facet": "<name>", "value": "<short>"}.
+          personality   — character trait visible in tone/decisions. RARE.
+          background    — STRICTLY demographic / biographical facts (age, location,
+                          education, family, occupation). NOT "background app".
+          social        — specific named people in the user's life.
+          speech_style  — vocabulary, tone, language preference.
+          habits        — recurring behaviour seen across 3+ days. NOT a single day.
+          interests     — topics/domains the user repeatedly engages with by choice.
+          skills        — a capability the user is practicing, with evidence.
 
-        skip (no real content):
-          {"id": 1, "decision": "skip", "reason": "no OCR / idle"}
-
-        EVENT FIELDS
-        ------------
-        title            ≤ 60 chars, grounded in OCR, describes what the user was actually DOING.
-        summary          3–5 sentences. Must cite specific topics, names, decisions, or actions visible
-                         in the OCR. Do NOT write filler like "the user was using X app". Write what
-                         the user was working on, with detail.
-        type             REQUIRED. Exactly one of:
-                           "experience"  ← default. Use for 99% of events.
-                           "emotion"     ← ONLY when the OCR shows a clear emotional signal
-                                            (frustration, joy, conflict, anxiety, etc.).
-                                            Merely being on an app is NOT emotion.
-        portrait_facets  Optional. Default []. Most events should have an empty array.
-                         Each facet is an object: {"facet": "<facet name>", "value": "<short descriptor>"}.
-                         Only attach a facet when the event reflects a STABLE signal about who the user is.
-
-                         Facet vocabulary + per-facet thresholds:
-                           personality   — character trait visible in tone/decisions/reactions. RARE.
-                           background    — STRICTLY demographic / biographical facts:
-                                           age, location, education, family, ethnicity, occupation history.
-                                           "Background music" or "background app" is NOT background.
-                                           Listening to music is NOT background — it might be `interests`.
-                           social        — specific people in the user's life (with name or clear identity).
-                           speech_style  — vocabulary, tone, language preference, idioms.
-                           habits        — recurring behaviour. ONLY attach if the same behaviour has
-                                           occurred 3+ days. A single occurrence is NOT a habit.
-                           interests     — topics/domains the user repeatedly engages with by choice.
-                           skills        — capability the user is practicing or demonstrating, with evidence.
-
-        tags             1–5 lowercase keywords drawn from the OCR (project names, libraries, people, topics).
-        reason           ≤ 20 words.
-                           join: which active event and why this session continues it.
-                           new : one phrase explaining why this isn't a continuation.
-                           skip: why no real content (e.g. "brief glance, no interaction").
-
-        CLUSTERING RULES
-        ----------------
-        - An EVENT is what the user was DOING (subject + intent), not which app was open.
-        - Events span apps. Messages → YouTube link sent in chat → Messages back = ONE event.
-        - Prefer JOIN over NEW when the subject matter is the SAME thread of work / conversation / topic,
-          even if the app differs.
-        - DO NOT JOIN if the subject matter clearly differs. Reading Wikipedia about Python and
-          reading Wikipedia about art history are TWO events even though both are "Wikipedia reading".
-        - If a candidate event in the active list is OLDER than 14 days AND the current session is not
-          an obvious continuation of the exact same thread (same project, same file, same conversation),
-          prefer NEW over JOIN.
-        - Choose `skip` when a session is clearly idle/transient or has no meaningful content.
-        - The summary MUST be grounded in the OCR. If no OCR supports a summary, choose `skip`.
-
-        WRITING STYLE
-        -------------
-        - THIRD PERSON. Always refer to the user as "the user" or "they"/"their".
-            ❌ "You opened Cursor and edited App.swift"
-            ✅ "The user opened Cursor and edited App.swift"
-
-        EXAMPLES (illustrative — your real input is below)
-        --------
-        Example A — join (continuation of yesterday's work on the same file):
-          Input session: 09:12–10:48 Cursor — App.swift
-            ocr: "AppDelegate ... NSWindow ... titleBar ... fullSizeContentView ..."
-          Active list contains:
-            [evt_2026-05-17_001] Wiring custom NSWindow chrome | type=experience | tags=[swift,nswindow] | last=yesterday
-          Decision:
-          {"id": 3, "decision": "join", "event_id": "evt_2026-05-17_001",
-           "reason": "same NSWindow chrome thread, App.swift"}
-
-        Example B — new (different topic, with a facet):
-          Input: 14:30–15:10 Safari — Wikipedia: Cubism
-            ocr: "Pablo Picasso ... 1907 Les Demoiselles d'Avignon ... African art ..."
-          Decision:
-          {"id": 5, "decision": "new",
-           "title": "Reading about Cubism on Wikipedia",
-           "summary": "The user read the Wikipedia article on Cubism, focusing on Picasso's 1907 Les Demoiselles d'Avignon and the early years of the movement. They scrolled through references to Braque and the African art influence section.",
-           "type": "experience",
-           "portrait_facets": [{"facet": "interests", "value": "art-history"}],
-           "tags": ["wikipedia", "cubism", "art-history"],
-           "reason": "new art-history topic; no related active event"}
-
-        Example C — skip (idle):
-          Input: 11:00–11:01 Finder
-            ocr: "Macintosh HD ... Users ... Downloads"
-          Decision:
-          {"id": 8, "decision": "skip", "reason": "brief Finder glance, no meaningful interaction"}
+        WRITING THE SUMMARY — be concrete:
+          ❌ "The user was chatting on WeChat."
+          ✅ "The user discussed the AP exam schedule with a friend, confirming the
+             May 12 calculus session and asking about the review sheet."
         """#
-
-        // ─── Stitch (header + dynamic data + sessions) ────────────────────
 
         return staticBody
             + "\n\nDate being processed: " + dayStr
@@ -314,63 +395,54 @@ final class EventBuilder {
 
     // MARK: - Response parsing
 
-    nonisolated private static func parseDecisions(
-        from response: String,
-        expected: Int
-    ) throws -> [(decision: Decision, reason: String?)] {
-        guard let firstBracket = response.firstIndex(of: "["),
-              let lastBracket = response.lastIndex(of: "]") else {
+    nonisolated private static func parseClustering(
+        from response: String
+    ) throws -> DayClustering {
+        guard let firstBrace = response.firstIndex(of: "{"),
+              let lastBrace = response.lastIndex(of: "}") else {
             throw BuilderError.noJSONInResponse
         }
-        let jsonStr = String(response[firstBracket...lastBracket])
+        let jsonStr = String(response[firstBrace...lastBrace])
         guard let data = jsonStr.data(using: .utf8) else {
             throw BuilderError.malformedJSON("could not encode response as UTF-8")
         }
         let obj: Any
         do { obj = try JSONSerialization.jsonObject(with: data) }
         catch { throw BuilderError.malformedJSON(error.localizedDescription) }
-        guard let arr = obj as? [[String: Any]] else {
-            throw BuilderError.malformedJSON("top-level was not an array of objects")
-        }
-        guard arr.count == expected else {
-            throw BuilderError.sizeMismatch(expected: expected, got: arr.count)
+        guard let root = obj as? [String: Any] else {
+            throw BuilderError.malformedJSON("top-level was not a JSON object")
         }
 
-        var out: [(Decision, String?)] = []
-        out.reserveCapacity(arr.count)
-        for (idx, entry) in arr.enumerated() {
-            let reason = entry["reason"] as? String
-            let kind = (entry["decision"] as? String)?.lowercased() ?? ""
-            switch kind {
-            case "join":
-                guard let eid = entry["event_id"] as? String, !eid.isEmpty else {
-                    throw BuilderError.malformedJSON("entry \(idx + 1) missing event_id for join")
-                }
-                out.append((.join(eventId: eid), reason))
-            case "new":
-                let title = (entry["title"] as? String) ?? "Untitled"
-                let summary = (entry["summary"] as? String) ?? ""
-                let rawType = ((entry["type"] as? String) ?? "experience").lowercased()
-                let type = (rawType == "emotion") ? "emotion" : "experience"
-                let tags = (entry["tags"] as? [String]) ?? []
-                let facets: [PortraitFacet] = ((entry["portrait_facets"] as? [[String: Any]]) ?? []).compactMap { f in
-                    guard let facet = f["facet"] as? String, !facet.isEmpty,
-                          let value = f["value"] as? String, !value.isEmpty else { return nil }
-                    return PortraitFacet(facet: facet.lowercased(), value: value)
-                }
-                out.append((.new(title: title,
-                                 summary: summary,
-                                 type: type,
-                                 portraitFacets: facets,
-                                 tags: tags),
-                            reason))
-            case "skip":
-                out.append((.skip, reason))
-            default:
-                throw BuilderError.malformedJSON("entry \(idx + 1) unknown decision \(kind)")
+        let rawEvents = (root["events"] as? [[String: Any]]) ?? []
+        var events: [ClusteredEvent] = []
+        events.reserveCapacity(rawEvents.count)
+        for (idx, e) in rawEvents.enumerated() {
+            let title = (e["title"] as? String) ?? ""
+            let summary = (e["summary"] as? String) ?? ""
+            let rawType = ((e["type"] as? String) ?? "experience").lowercased()
+            let type = (rawType == "emotion") ? "emotion" : "experience"
+            let tags = (e["tags"] as? [String]) ?? []
+            let facets: [PortraitFacet] = ((e["portrait_facets"] as? [[String: Any]]) ?? []).compactMap { f in
+                guard let facet = f["facet"] as? String, !facet.isEmpty,
+                      let value = f["value"] as? String, !value.isEmpty else { return nil }
+                return PortraitFacet(facet: facet.lowercased(), value: value)
             }
+            let sessionIDs = (e["session_ids"] as? [Int]) ?? []
+            if sessionIDs.isEmpty {
+                throw BuilderError.malformedJSON("event \(idx + 1) has empty session_ids")
+            }
+            if title.isEmpty || summary.isEmpty {
+                throw BuilderError.malformedJSON("event \(idx + 1) missing title or summary")
+            }
+            let join = (e["join_existing"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            events.append(ClusteredEvent(
+                title: title, summary: summary, type: type,
+                portraitFacets: facets, tags: tags,
+                sessionIndices: sessionIDs, joinExisting: join
+            ))
         }
-        return out
+        let skipped = (root["skipped"] as? [Int]) ?? []
+        return DayClustering(events: events, skippedIndices: skipped)
     }
 
     // MARK: - Formatters
@@ -392,8 +464,6 @@ final class EventBuilder {
     nonisolated private static func isoDay(_ d: Date) -> String { dayFmt.string(from: d) }
     nonisolated private static func timeOfDay(_ d: Date) -> String { timeFmt.string(from: d) }
 
-    /// "today" / "yesterday" / "Nd ago" — easier for the LLM to reason about
-    /// recency than absolute dates.
     nonisolated private static func relativeDay(from past: Date, on reference: Date) -> String {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC") ?? .current

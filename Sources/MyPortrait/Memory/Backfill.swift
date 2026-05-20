@@ -5,29 +5,27 @@ import Foundation
 /// Per-day loop:
 ///   1. Read frames for this day from `~/.portrait/portrait.sqlite`
 ///      (resolved by `TimelineDB`).
-///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions
-///   3. Enrich each session with OCR text from its member frames
-///   4. EventBuilder (LLM, one call per day): for each session, decide
-///      JOIN existing event or create NEW event
+///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions.
+///   3. Enrich each session with OCR; drop sessions with < 60 chars of OCR.
+///   4. EventBuilder (LLM, per-event clustering): one `DayClustering` with a
+///      list of events (each owning ≥1 session) plus a `skipped` list.
 ///   5. Materialise:
-///      - JOIN  → load existing PortraitFile, append today's date to
-///                occurrences (deduped per day), append frame ids
-///      - NEW   → create a fresh PortraitFile with title + summary +
-///                category from the LLM, today as first occurrence
-///   6. After all days processed: WeightCalculator pass + Archiver
+///      - join_existing → load the existing PortraitFile, +1 occurrence,
+///        append frame ids. Title / summary / facets are NOT changed.
+///      - new event     → create a fresh PortraitFile from the LLM's
+///        title + summary + type + facets.
+///   6. After all days: WeightCalculator pass + Archiver.
 ///
-/// Notes:
-///   - "Active events" passed to EventBuilder are PortraitFiles whose
-///     last occurrence is within the last `activeWindowDays` (default 14).
-///   - Re-runs are safe: if a session's frames already appear in an
-///     existing file's `memberFrameIds`, it's skipped.
+/// Coverage is enforced inside EventBuilder — if the LLM leaves a session
+/// uncovered the whole day throws and nothing is written for it. There is no
+/// empty-shell fallback anymore.
 @MainActor
 enum Backfill {
     struct Result {
         let daysScanned: Int
         let rawFrameCount: Int
         let tier1SessionCount: Int
-        let emptySessionCount: Int   // dropped before reaching LLM
+        let emptySessionCount: Int   // dropped (no OCR) or LLM-skipped
         let llmFailedDays: Int
         let newEventCount: Int
         let joinedSessionCount: Int
@@ -39,15 +37,18 @@ enum Backfill {
         let dayIndex: Int          // 1-based current day in the loop
         let dayCount: Int
         let day: Date              // which day is being processed
-        let phase: String          // e.g. "LLM grouping", "writing files"
+        let phase: String
     }
 
     /// Default: last 14 days. Idempotent + resumable — days whose
-    /// `events/<yyyy-MM-dd>/` directory already exists with files are
-    /// skipped (assumption: previous run finished that day).
+    /// `events/<yyyy-MM-dd>/` directory already has files are skipped.
+    ///
+    /// `onlyDay` (non-nil) restricts the run to that single calendar day —
+    /// used by the `--backfill-day` dev entry point.
     static func run(
         daysBack: Int = 14,
         activeWindowDays: Int = 14,
+        onlyDay: Date? = nil,
         progress: ((Progress) -> Void)? = nil
     ) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
@@ -63,27 +64,31 @@ enum Backfill {
         var totals = Counters()
         let cal = Calendar(identifier: .gregorian)
         let today = cal.startOfDay(for: Date())
+        let onlyDayStart = onlyDay.map { cal.startOfDay(for: $0) }
 
-        // Pre-load existing files once; we'll mutate the in-memory cache as
-        // the day-loop creates / appends to events.
+        // Pre-load existing files once; we mutate this cache as the day-loop
+        // creates / appends to events.
         var fileCache = try await loadAllFiles()
         let builder = EventBuilder()
 
-        // Iterate from oldest day to newest so EventBuilder always has the
-        // most relevant active events from prior days available.
+        // Iterate oldest → newest so EventBuilder always has the most
+        // relevant active events from prior days available.
         let dayCount = daysBack
         var dayIndex = 0
         for offset in stride(from: daysBack - 1, through: 0, by: -1) {
             dayIndex += 1
             guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
 
-            // Resumability: if events/<yyyy-MM-dd>/ already has files, skip
-            // — assume the day was processed in a prior run. Users can
-            // `rm -rf ~/.portrait/events/<day>` to force re-processing.
+            // Single-day restriction.
+            if let target = onlyDayStart, cal.startOfDay(for: day) != target { continue }
+
+            // Resumability: events/<yyyy-MM-dd>/ already populated → skip.
+            // Force a re-run with `rm -rf ~/.portrait/events/<day>`.
             let dayDir = PortraitPaths.eventsDayDir(for: day)
             if let existing = try? FileManager.default.contentsOfDirectory(atPath: dayDir.path),
                existing.contains(where: { $0.hasSuffix(".md") }) {
                 progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "skipped (already processed)"))
+                print("Day \(isoDay(day)): skipped — events/ already populated")
                 continue
             }
 
@@ -109,14 +114,8 @@ enum Backfill {
             totals.tier1SessionCount += sessions.count
             if sessions.isEmpty { continue }
 
-            // Enrich each session with OCR text + drop the ones with no
-            // semantic content. The previous filter (OCR short AND window
-            // empty AND short duration) let long-running idle sessions
-            // through; now we just check OCR substance. No OCR = nothing
-            // for the LLM to summarise = no real event worth recording.
+            // Enrich + drop OCR-poor sessions (no OCR → nothing to summarise).
             let minOcrChars = 60
-            // Up from 800 → 2000 so the LLM has real material to write
-            // a meaningful summary from.
             let maxOcrChars = 2000
             var enriched: [EventBuilder.EnrichedSession] = []
             for s in sessions {
@@ -126,14 +125,14 @@ enum Backfill {
                     continue
                 }
                 enriched.append(EventBuilder.EnrichedSession(
-                    session: s,
-                    ocrSnippet: ocr,
-                    transcriptSnippet: ""
+                    session: s, ocrSnippet: ocr, transcriptSnippet: ""
                 ))
             }
+            let dropped = sessions.count - enriched.count
+            print("Day \(isoDay(day)): \(sessions.count) sessions, \(enriched.count) enriched (OCR ≥ 60), \(dropped) dropped")
             if enriched.isEmpty { continue }
 
-            // Build the active-events catalogue from the in-memory cache.
+            // Active-events catalogue from the in-memory cache.
             let activeCutoff = cal.date(byAdding: .day, value: -activeWindowDays, to: day) ?? day
             let active: [EventBuilder.ActiveEvent] = fileCache.values.compactMap { entry in
                 guard !entry.file.eventTitle.isEmpty,
@@ -149,83 +148,54 @@ enum Backfill {
                 )
             }
 
-            // Ask LLM for assignments.
-            progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM grouping \(enriched.count) sessions"))
-            let assignments: [EventBuilder.Assignment]
+            // LLM per-event clustering.
+            progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM clustering \(enriched.count) sessions"))
+            let clustering: EventBuilder.DayClustering
             do {
-                assignments = try await builder.assignDay(
-                    date: day,
-                    sessions: enriched,
-                    activeEvents: active
+                clustering = try await builder.clusterDay(
+                    date: day, sessions: enriched, activeEvents: active
                 )
             } catch {
                 totals.llmFailedDays += 1
+                print("Day \(isoDay(day)): LLM clustering FAILED — \(error.localizedDescription) — nothing written")
                 progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM failed: \(error.localizedDescription)"))
                 continue
             }
 
-            // Index OCR length per session for impact baseline.
-            var ocrLenByFrameId: [Int64: Int] = [:]
-            for e in enriched {
-                let key = e.session.sourceFrameIds.first ?? 0
-                ocrLenByFrameId[key] = e.ocrSnippet.count
-            }
+            // Materialise. `sessionIndices` are 1-based into `enriched`.
+            for ev in clustering.events {
+                let members = ev.sessionIndices.compactMap { idx -> EventBuilder.EnrichedSession? in
+                    let i = idx - 1
+                    guard i >= 0, i < enriched.count else { return nil }
+                    return enriched[i]
+                }
+                if members.isEmpty { continue }
+                let frameIds = members.flatMap { $0.session.sourceFrameIds }
 
-            // Materialise.
-            for a in assignments {
-                let sessionFrameIds = a.session.sourceFrameIds
-                switch a.decision {
-                case .skip:
-                    totals.emptySessionCount += 1
-                    continue
-                case .join(let eventId):
-                    guard let entry = fileCache[eventId] else {
-                        // LLM hallucinated an event id — fall back to NEW
-                        // ONLY if there's enough OCR substance; otherwise skip.
-                        let firstId = a.session.sourceFrameIds.first ?? 0
-                        let ocrLen = ocrLenByFrameId[firstId] ?? 0
-                        if ocrLen < 30 {
-                            totals.emptySessionCount += 1
-                            continue
-                        }
-                        try createNewEvent(
-                            from: a,
-                            session: a.session,
-                            day: day,
-                            ocrLen: ocrLen,
-                            cache: &fileCache,
-                            fallbackTitle: "\(a.session.appName) — \(a.session.windowName)"
-                        )
-                        totals.newEventCount += 1
-                        continue
-                    }
-                    // Skip if frames already accounted for (re-run safety).
-                    if !sessionFrameIds.isEmpty,
-                       entry.file.memberFrameIds.contains(where: sessionFrameIds.contains) {
+                if let je = ev.joinExisting, let entry = fileCache[je] {
+                    // Re-run safety: frames already accounted for.
+                    if !frameIds.isEmpty,
+                       entry.file.memberFrameIds.contains(where: frameIds.contains) {
                         totals.skippedSessionCount += 1
                         continue
                     }
+                    // Cross-day join: +1 occurrence, append frames. Title /
+                    // summary / facets stay frozen at first creation.
                     var updated = entry.file
                     updated.recordOccurrence(on: day)
-                    updated.memberFrameIds.append(contentsOf: sessionFrameIds)
+                    updated.memberFrameIds.append(contentsOf: frameIds)
                     try PortraitFileIO.write(updated, to: entry.url)
-                    fileCache[eventId] = .init(url: entry.url,
-                                               relativePath: entry.relativePath,
-                                               file: updated)
+                    fileCache[je] = .init(url: entry.url,
+                                          relativePath: entry.relativePath,
+                                          file: updated)
                     totals.joinedSessionCount += 1
-                case .new:
-                    let firstId = a.session.sourceFrameIds.first ?? 0
-                    let ocrLen = ocrLenByFrameId[firstId] ?? 0
-                    try createNewEvent(
-                        from: a,
-                        session: a.session,
-                        day: day,
-                        ocrLen: ocrLen,
-                        cache: &fileCache
-                    )
+                } else {
+                    try createNewEvent(cluster: ev, members: members,
+                                       day: day, cache: &fileCache)
                     totals.newEventCount += 1
                 }
             }
+            totals.skippedSessionCount += clustering.skippedIndices.count
         }
 
         // Weight pass across the whole tree.
@@ -265,62 +235,40 @@ enum Backfill {
         var skippedSessionCount = 0
     }
 
-    /// Build and write a new PortraitFile from a NEW assignment.
+    /// Build and write a new PortraitFile from a clustered event.
     private static func createNewEvent(
-        from a: EventBuilder.Assignment,
-        session: Tier1Merger.MergedEvent,
+        cluster: EventBuilder.ClusteredEvent,
+        members: [EventBuilder.EnrichedSession],
         day: Date,
-        ocrLen: Int,
-        cache: inout [String: Entry],
-        fallbackTitle: String? = nil
+        cache: inout [String: Entry]
     ) throws {
-        let title: String
-        let summary: String
-        let type: String
-        let facets: [EventBuilder.PortraitFacet]
-        let tags: [String]
-        switch a.decision {
-        case .new(let t, let s, let ty, let f, let tg):
-            title = t.isEmpty ? (fallbackTitle ?? session.appName) : t
-            summary = s
-            type = ty
-            facets = f
-            tags = tg
-        case .join, .skip:
-            title = fallbackTitle ?? session.appName
-            summary = ""
-            type = "experience"
-            facets = []
-            tags = [session.appName.lowercased()]
-        }
+        let frameIds = members.flatMap { $0.session.sourceFrameIds }
+        let ocrTotal = members.reduce(0) { $0 + $1.ocrSnippet.count }
+        let firstSeen = members.map { $0.session.firstSeen }.min() ?? day
+        let lastSeen = members.map { $0.session.lastSeen }.max() ?? day
 
-        let filename = makeFilename(title: title, day: day)
-        // Events live under events/<yyyy-MM-dd>/ (NOT portrait/<cat>/).
-        // Routing into portrait subdirs is now the Distiller's job, based on
-        // event.type + event.portraitFacets.
+        let filename = makeFilename(title: cluster.title, day: day)
+        // Events live under events/<yyyy-MM-dd>/. Routing into portrait
+        // subdirs is the Distiller's job, based on type + portraitFacets.
         let url = PortraitPaths.eventsDayDir(for: day).appendingPathComponent(filename)
         let finalURL = uniqueURL(url)
 
-        // `created` should be the moment the event FIRST happened (its first
-        // session's first frame), not the time the file is written.
         var file = PortraitFile(
-            created: session.firstSeen,
-            impact: baselineImpact(for: session, ocrLen: ocrLen),
-            body: renderBody(title: title, summary: summary, session: session),
+            created: firstSeen,
+            impact: baselineImpact(ocrTotal: ocrTotal, firstSeen: firstSeen, lastSeen: lastSeen),
+            body: renderBody(title: cluster.title, summary: cluster.summary),
             source: "timeline:event",
-            tags: tags,
+            tags: cluster.tags,
             firstOccurrence: day,
-            eventTitle: title,
-            eventSummary: summary,
-            eventType: type,
-            portraitFacets: facets,
-            memberFrameIds: session.sourceFrameIds
+            eventTitle: cluster.title,
+            eventSummary: cluster.summary,
+            eventType: cluster.type,
+            portraitFacets: cluster.portraitFacets,
+            memberFrameIds: frameIds
         )
-        // Ensure occurrence is truncated to day.
         file.occurrences = [PortraitFile.truncateToDay(day)]
 
         try PortraitFileIO.write(file, to: finalURL)
-
         let rel = finalURL.path
             .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
         cache[rel] = Entry(url: finalURL, relativePath: rel, file: file)
@@ -329,13 +277,17 @@ enum Backfill {
     // MARK: - Title/file helpers
 
     private static func makeFilename(title: String, day: Date) -> String {
+        let stamp = isoDay(day)
+        let slug = slugify(title)
+        return "\(stamp)_\(slug).md"
+    }
+
+    private static func isoDay(_ day: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(identifier: "UTC")
-        let stamp = f.string(from: day)
-        let slug = slugify(title)
-        return "\(stamp)_\(slug).md"
+        return f.string(from: day)
     }
 
     private static func slugify(_ s: String) -> String {
@@ -353,7 +305,6 @@ enum Backfill {
             }
         }
         let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-        // Cap filename slug length to keep paths sane.
         if trimmed.count > 60 { return String(trimmed.prefix(60)) }
         return trimmed.isEmpty ? "event" : trimmed
     }
@@ -370,40 +321,26 @@ enum Backfill {
         return url    // give up; will overwrite
     }
 
-    private static func renderBody(title: String, summary: String, session: Tier1Merger.MergedEvent) -> String {
-        var lines: [String] = []
-        lines.append("# \(title)")
-        lines.append("")
-        if !summary.isEmpty {
-            lines.append(summary)
-            lines.append("")
-        }
-        let durMin = max(1, Int(session.lastSeen.timeIntervalSince(session.firstSeen) / 60))
-        lines.append("- First app: **\(session.appName)**")
-        if !session.windowName.isEmpty { lines.append("- First window: \(session.windowName)") }
-        if let u = session.browserURL, !u.isEmpty { lines.append("- URL: \(u)") }
-        lines.append("- Initial session duration: \(durMin) min")
-        return lines.joined(separator: "\n") + "\n"
+    private static func renderBody(title: String, summary: String) -> String {
+        "# \(title)\n\n\(summary)\n"
     }
 
     /// Baseline impact = mostly OCR substance, lightly duration-modulated.
-    /// LLM rescore will override this; the baseline just avoids ranking
-    /// "long but empty" sessions above "short but content-rich" ones.
-    private static func baselineImpact(for s: Tier1Merger.MergedEvent,
-                                       ocrLen: Int) -> Double {
-        let minutes = s.lastSeen.timeIntervalSince(s.firstSeen) / 60
-        // Content score: 1 (almost nothing) → 5 (lots of OCR)
+    /// LLM rescore overrides this; the baseline just avoids ranking
+    /// "long but empty" events above "short but content-rich" ones.
+    private static func baselineImpact(ocrTotal: Int,
+                                       firstSeen: Date,
+                                       lastSeen: Date) -> Double {
+        let minutes = lastSeen.timeIntervalSince(firstSeen) / 60
         let contentBase: Double
-        switch ocrLen {
+        switch ocrTotal {
         case ..<50:    contentBase = 1
         case ..<200:   contentBase = 2
         case ..<500:   contentBase = 3
         case ..<1200:  contentBase = 4
         default:       contentBase = 5
         }
-        // Long sessions with content nudge up slightly; long sessions
-        // without content stay at the content score (no duration bonus).
-        let durBoost: Double = (ocrLen >= 50 && minutes >= 30) ? 0.5 : 0
+        let durBoost: Double = (ocrTotal >= 50 && minutes >= 30) ? 0.5 : 0
         return min(5, contentBase + durBoost)
     }
 
@@ -428,6 +365,7 @@ enum Backfill {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
             if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             let rel = url.path
                 .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
@@ -445,8 +383,6 @@ enum Backfill {
     /// Sync helper — NSEnumerator iteration isn't usable from `async` bodies
     /// under Swift 6 strict concurrency, so isolate it here.
     nonisolated private static func weightPassSync() {
-        let fm = FileManager.default
-        // Recompute weights for BOTH layers — events and portrait entries.
         for root in [Storage.eventsDir, Storage.portraitDir] {
             weightPassDir(root)
         }
@@ -464,6 +400,7 @@ enum Backfill {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
             if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
             do {
                 var f = try PortraitFileIO.read(from: url)
                 WeightCalculator.recompute(&f)

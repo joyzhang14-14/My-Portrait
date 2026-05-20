@@ -69,6 +69,19 @@ struct MyPortraitApp: App {
             EmbedDumpCLI.runBackfill(services: services)
             // exit inside
         }
+        // DEV-ONLY: `--event-prompt-test <yyyy-MM-dd>` validates the proposed
+        // per-event clustering prompt against one day's data. stdout only,
+        // writes nothing. Disposable — remove with EventPromptTest.swift.
+        if let idx = args.firstIndex(of: "--event-prompt-test"), idx + 1 < args.count {
+            EventPromptTestCLI.run(day: args[idx + 1])
+            // run() exits the process internally.
+        }
+        // DEV-ONLY: `--backfill-day <yyyy-MM-dd>` runs the real Backfill for a
+        // single day. Disposable — remove with EventPromptTest.swift.
+        if let idx = args.firstIndex(of: "--backfill-day"), idx + 1 < args.count {
+            BackfillDayCLI.run(day: args[idx + 1])
+            // run() exits the process internally.
+        }
         AppKeyboard.install()
     }
 
