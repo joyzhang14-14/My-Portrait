@@ -4,36 +4,37 @@ import SwiftUI
 
 /// 采集层用户开关 — SwiftUI Settings UI 与后端 Services 之间的桥。
 ///
-/// **单一真相在 UserDefaults**。Settings UI 用 `@AppStorage(SettingsKeys.xxx)`
-/// 写，这里也用同样的 key 读写，外加监听 `UserDefaults.didChangeNotification`
-/// 把变化映射到 `@Published` 字段。Services 通过 Combine sink 订阅 @Published。
+/// **三个 capture 开关 (screen / audio / systemAudio) 的单一真相在 ConfigStore
+/// (~/.myportrait/config.toml)**，本类是它的镜像 + Combine 适配层。原因：
+///   - Settings UI (RecordingView) 直接绑定 `ConfigStore.recording.xxx.enabled`
+///   - Services 用 Combine sink 订阅 @Published，要桥到 Observation 框架
+///   - vim 改 TOML 也要 live reload（ConfigStore 已经实现 DispatchSource 监听）
 ///
-/// 双向同步流程：
-///   - UI 改 @AppStorage → UserDefaults 变 → 通知 → reloadFromDefaults → @Published → Services sink
-///   - 状态栏菜单改 settings.xxx → didSet 写 UserDefaults → 通知 → reloadFromDefaults (flag 抑制) → 仍触发 sink
+/// 双向同步：
+///   - UI / TOML / 状态栏 → ConfigStore.mutate → withObservationTracking 触发
+///     → applyFromConfig → @Published → Services sink
+///   - 程序化 settings.xxx = true → didSet → ConfigStore.mutate → 走上面这一路
 ///
-/// 默认值（首次启动 UserDefaults 无值时）：
-///   - screen / audio / systemAudio 都 **OFF**（开发期测试方便；不弹权限）
-///   - SwiftUI 视图里的 `@AppStorage(...) private var xxx = true` 默认无效 ——
-///     init 里 force-write false 抢先注册（已经有值的不动）。
+/// `ignoredAppNames` / `ignoredUrlPatterns` / `pauseUntil` 仍走 UserDefaults
+/// （它们暂时不在 TOML schema 里；可以以后单独迁移）。
 @MainActor
 final class CaptureSettings: ObservableObject {
 
-    // MARK: - 用户可改字段（与 SettingsKeys / Settings UI 共享 UserDefaults key）
+    // MARK: - 用户可改字段
 
-    /// 屏幕采集总开关。对应 `SettingsKeys.screenRecordingEnabled`。
+    /// 屏幕采集总开关。镜像 `ConfigStore.shared.recording.screen.enabled`。
     @Published var screenCaptureEnabled: Bool {
-        didSet { writeIfNeeded(screenCaptureEnabled, forKey: SettingsKeys.screenRecordingEnabled) }
+        didSet { writeBackToConfig(\.recording.screen.enabled, screenCaptureEnabled) }
     }
 
-    /// 麦克风采集总开关。对应 `SettingsKeys.audioRecordingEnabled`。
+    /// 麦克风采集总开关。镜像 `ConfigStore.shared.recording.audio.enabled`。
     @Published var audioCaptureEnabled: Bool {
-        didSet { writeIfNeeded(audioCaptureEnabled, forKey: SettingsKeys.audioRecordingEnabled) }
+        didSet { writeBackToConfig(\.recording.audio.enabled, audioCaptureEnabled) }
     }
 
-    /// 系统音频采集开关。对应 `SettingsKeys.captureSystemAudio`。
+    /// 系统音频采集开关。镜像 `ConfigStore.shared.recording.audio.captureSystemAudio`。
     @Published var systemAudioCaptureEnabled: Bool {
-        didSet { writeIfNeeded(systemAudioCaptureEnabled, forKey: SettingsKeys.captureSystemAudio) }
+        didSet { writeBackToConfig(\.recording.audio.captureSystemAudio, systemAudioCaptureEnabled) }
     }
 
     /// 屏蔽 app 名单（不区分大小写整名匹配）。对应 `SettingsKeys.ignoredApps`。
@@ -94,32 +95,23 @@ final class CaptureSettings: ObservableObject {
     /// reloadFromDefaults 期间临时为 true，防止 didSet 触发 UserDefaults 写回循环。
     private var isReloadingFromDefaults = false
 
+    /// applyFromConfig 期间临时为 true，防止 capture toggle didSet 写回 ConfigStore 死循环。
+    private var isReloadingFromConfig = false
+
     private var reporterSink: AnyCancellable?
     private var autoResumeTask: Task<Void, Never>?
     private var defaultsObserver: NSObjectProtocol?
 
     init() {
         let defaults = UserDefaults.standard
+        let store = ConfigStore.shared
 
-        // **每次启动都把 3 个采集开关重写为 false**。理由：
-        //   1. SwiftUI 视图的 `@AppStorage(...) = true` 默认会让首次读到 true。
-        //   2. 用户测试期间 toggle 过的值会持久化，下次启动莫名其妙开始录音 +
-        //      duck 其他 app 音乐（"我一 build 就有麦克风干扰"）。
-        //   3. 设计原则（user 原话）："默认关闭，方便测试"。
-        //
-        // 用户想录就在 Settings UI 里手动 toggle；退出后状态不带走。
-        for key in [
-            SettingsKeys.screenRecordingEnabled,
-            SettingsKeys.audioRecordingEnabled,
-            SettingsKeys.captureSystemAudio,
-        ] {
-            defaults.set(false, forKey: key)
-        }
+        // 三个 capture 开关从 TOML 读初值。
+        self.screenCaptureEnabled = store.recording.screen.enabled
+        self.audioCaptureEnabled = store.recording.audio.enabled
+        self.systemAudioCaptureEnabled = store.recording.audio.captureSystemAudio
 
-        // 读初值。
-        self.screenCaptureEnabled = defaults.bool(forKey: SettingsKeys.screenRecordingEnabled)
-        self.audioCaptureEnabled = defaults.bool(forKey: SettingsKeys.audioRecordingEnabled)
-        self.systemAudioCaptureEnabled = defaults.bool(forKey: SettingsKeys.captureSystemAudio)
+        // 其他字段仍走 UserDefaults。
         self.ignoredAppNames = Set(defaults.stringArray(forKey: SettingsKeys.ignoredApps) ?? [])
         self.ignoredUrlPatterns = defaults.stringArray(forKey: SettingsKeys.ignoredURLs) ?? []
 
@@ -140,7 +132,10 @@ final class CaptureSettings: ObservableObject {
             scheduleAutoResume(at: d)
         }
 
-        // 监听 UserDefaults 变化（SwiftUI @AppStorage 写入会触发）。
+        // 监听 ConfigStore.recording 变化（vim 编辑 TOML / UI toggle / 状态栏 都走它）。
+        startObservingConfig()
+
+        // 监听 UserDefaults 变化（ignoredApps / ignoredUrls 仍在 UserDefaults）。
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: defaults,
@@ -150,6 +145,50 @@ final class CaptureSettings: ObservableObject {
                 self?.reloadFromDefaults()
             }
         }
+    }
+
+    /// 用 Observation 框架追踪 ConfigStore.recording 字段。任一变化 → 重跑
+    /// applyFromConfig 推送到 @Published → Combine sink 醒来。
+    /// withObservationTracking 是一次性的：onChange 触发后注册自动失效，所以
+    /// 在 onChange 里递归重启。
+    private func startObservingConfig() {
+        let store = ConfigStore.shared
+        withObservationTracking {
+            _ = store.recording.screen.enabled
+            _ = store.recording.audio.enabled
+            _ = store.recording.audio.captureSystemAudio
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.applyFromConfig()
+                self.startObservingConfig()
+            }
+        }
+    }
+
+    /// ConfigStore → @Published 单向同步。带 reentrancy guard 防 didSet 写回 →
+    /// 再触发 observe → 再 apply 的循环。
+    private func applyFromConfig() {
+        let store = ConfigStore.shared
+        isReloadingFromConfig = true
+        defer { isReloadingFromConfig = false }
+        if screenCaptureEnabled != store.recording.screen.enabled {
+            screenCaptureEnabled = store.recording.screen.enabled
+        }
+        if audioCaptureEnabled != store.recording.audio.enabled {
+            audioCaptureEnabled = store.recording.audio.enabled
+        }
+        if systemAudioCaptureEnabled != store.recording.audio.captureSystemAudio {
+            systemAudioCaptureEnabled = store.recording.audio.captureSystemAudio
+        }
+    }
+
+    /// didSet → ConfigStore。带 guard 防被 applyFromConfig 触发后又写回。
+    private func writeBackToConfig(_ kp: WritableKeyPath<MyPortraitConfig, Bool>, _ value: Bool) {
+        guard !isLoading, !isReloadingFromConfig else { return }
+        let store = ConfigStore.shared
+        guard store.current[keyPath: kp] != value else { return }
+        store.mutate { $0[keyPath: kp] = value }
     }
 
     // 注：不写 deinit 移除 observer —— Swift 6 严格并发禁止 nonisolated deinit
@@ -166,32 +205,18 @@ final class CaptureSettings: ObservableObject {
 
     // MARK: - 私有
 
-    /// UserDefaults 变化 → @Published 字段。带 reentrancy guard 防回写循环；
-    /// 比较新旧值，只在变化时赋值。
+    /// UserDefaults 变化 → @Published 字段。**只覆盖** ignoredApps / ignoredUrls
+    /// 这两个仍在 UserDefaults 的字段；capture toggle 已转走 ConfigStore，不再监听。
     private func reloadFromDefaults() {
         let defaults = UserDefaults.standard
         isReloadingFromDefaults = true
         defer { isReloadingFromDefaults = false }
-
-        let newScreen = defaults.bool(forKey: SettingsKeys.screenRecordingEnabled)
-        if newScreen != screenCaptureEnabled { screenCaptureEnabled = newScreen }
-
-        let newAudio = defaults.bool(forKey: SettingsKeys.audioRecordingEnabled)
-        if newAudio != audioCaptureEnabled { audioCaptureEnabled = newAudio }
-
-        let newSys = defaults.bool(forKey: SettingsKeys.captureSystemAudio)
-        if newSys != systemAudioCaptureEnabled { systemAudioCaptureEnabled = newSys }
 
         let newApps = Set(defaults.stringArray(forKey: SettingsKeys.ignoredApps) ?? [])
         if newApps != ignoredAppNames { ignoredAppNames = newApps }
 
         let newUrls = defaults.stringArray(forKey: SettingsKeys.ignoredURLs) ?? []
         if newUrls != ignoredUrlPatterns { ignoredUrlPatterns = newUrls }
-    }
-
-    private func writeIfNeeded(_ value: Bool, forKey key: String) {
-        guard !isLoading, !isReloadingFromDefaults else { return }
-        UserDefaults.standard.set(value, forKey: key)
     }
 
     private func scheduleAutoResume(at expiration: Date) {
