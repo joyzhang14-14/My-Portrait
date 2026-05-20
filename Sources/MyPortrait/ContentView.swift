@@ -85,7 +85,6 @@ struct ContentView: View {
         switch selection ?? .home {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
-        case .connections:   ConnectionsView()
         case .pipes:         PipesView(selection: $pipeSelection)
         case .memories:      MemoriesView(scope: $memoryScope)
         case .settings:      SettingsPane(subsection: $settingsSubsection)

@@ -4,7 +4,7 @@ import SwiftUI
 /// One of the nine subsections inside Settings. Drives both the sidebar
 /// list and the main pane router.
 enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
-    case display, general, aiModels, recording, notifications
+    case display, general, aiModels, connections, recording, notifications
     case memory
     case usage, privacy, storage, speakers
     var id: String { rawValue }
@@ -14,6 +14,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .display:       return "Display"
         case .general:       return "General"
         case .aiModels:      return "AI models"
+        case .connections:   return "Connections"
         case .recording:     return "Recording"
         case .notifications: return "Notifications"
         case .memory:        return "Memory"
@@ -29,6 +30,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .display:       return "display"
         case .general:       return "gearshape"
         case .aiModels:      return "brain"
+        case .connections:   return "powerplug"
         case .recording:     return "record.circle"
         case .notifications: return "bell"
         case .memory:        return "sparkles"
@@ -47,7 +49,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
 
     var group: Group {
         switch self {
-        case .display, .general, .aiModels, .recording, .notifications: return .app
+        case .display, .general, .aiModels, .connections, .recording, .notifications: return .app
         case .memory:                                                   return .memory
         case .usage, .privacy, .storage, .speakers:                     return .dataPrivacy
         }

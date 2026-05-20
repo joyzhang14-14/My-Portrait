@@ -39,7 +39,7 @@ enum MemoryScope: Hashable, Identifiable {
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
-    case home, pipes, timeline, memories, connections, settings
+    case home, pipes, timeline, memories, settings
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -47,7 +47,6 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         case .pipes: return "Pipes"
         case .timeline: return "Timeline"
         case .memories: return "Memories"
-        case .connections: return "Connections"
         case .settings: return "Settings"
         }
     }
@@ -57,7 +56,6 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         case .pipes: return "puzzlepiece.extension"
         case .timeline: return "clock.arrow.circlepath"
         case .memories: return "sparkles"
-        case .connections: return "powerplug"
         case .settings: return "gearshape"
         }
     }

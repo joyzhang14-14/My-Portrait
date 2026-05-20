@@ -11,6 +11,7 @@ struct SettingsPane: View {
             case .display:       DisplaySettingsView()
             case .general:       GeneralSettingsView()
             case .aiModels:      AIModelsSettingsView()
+            case .connections:   ConnectionsView()
             case .recording:     RecordingSettingsView()
             case .notifications: NotificationsSettingsView()
             case .memory:        MemorySettingsView()
@@ -64,7 +65,10 @@ struct SettingsScene: View {
                     .padding(.bottom, 4)
 
                 VStack(spacing: 2) {
-                    ForEach(SettingsSubsection.allCases.filter { $0.group == grp }) { s in
+                    // Connections is only reachable from the in-app Settings
+                    // tab (it needs AppState, which this standalone ⌘, window
+                    // doesn't inject) — so it's excluded from this rail.
+                    ForEach(SettingsSubsection.allCases.filter { $0.group == grp && $0 != .connections }) { s in
                         SettingsSidebarRow(
                             subsection: s,
                             isActive: subsection == s,
@@ -85,6 +89,13 @@ struct SettingsScene: View {
         case .display:       DisplaySettingsView()
         case .general:       GeneralSettingsView()
         case .aiModels:      AIModelsSettingsView()
+        case .connections:
+            // Unreachable from this window's rail (filtered out above);
+            // the case only exists to keep the switch exhaustive.
+            Text("Open Connections from the main window.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .recording:     RecordingSettingsView()
         case .notifications: NotificationsSettingsView()
         case .memory:        MemorySettingsView()

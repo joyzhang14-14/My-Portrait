@@ -108,7 +108,7 @@ struct TimelineSidebar: View {
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {
-                ForEach([SidebarSection.timeline, .home, .connections, .memories, .pipes, .settings], id: \.self) { item in
+                ForEach([SidebarSection.timeline, .home, .memories, .pipes, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
                         selection = item
                     }
