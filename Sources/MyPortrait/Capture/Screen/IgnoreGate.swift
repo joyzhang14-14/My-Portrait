@@ -15,15 +15,21 @@ final class IgnoreGate: @unchecked Sendable {
 
     private struct State {
         var appsLower: Set<String> = []
-        var urlPatterns: [String] = []   // 小写 + LIKE 格式
+        var urlPatterns: [String] = []         // 小写 + LIKE 格式
+        var windowTitlesLower: [String] = []   // 小写,子串匹配
     }
 
     private let state = OSAllocatedUnfairLock<State>(initialState: State())
 
-    init(initialApps: Set<String> = [], initialUrlPatterns: [String] = []) {
+    init(
+        initialApps: Set<String> = [],
+        initialUrlPatterns: [String] = [],
+        initialWindowTitles: [String] = []
+    ) {
         state.withLock { s in
             s.appsLower = Set(initialApps.map { $0.lowercased() })
             s.urlPatterns = initialUrlPatterns.map { $0.lowercased() }
+            s.windowTitlesLower = initialWindowTitles.map { $0.lowercased() }
         }
     }
 
@@ -47,6 +53,11 @@ final class IgnoreGate: @unchecked Sendable {
         state.withLock { $0.urlPatterns = normalized }
     }
 
+    func setIgnoredWindowTitles(_ titles: [String]) {
+        let normalized = titles.map { $0.lowercased() }
+        state.withLock { $0.windowTitlesLower = normalized }
+    }
+
     /// 该帧是否应该跳过。app 匹配整名（不区分大小写），URL 走 glob。
     /// 命中 → 调用方应 return，但仍可记录焦点元数据。
     func shouldSkip(_ focus: FocusInfo) -> Bool {
@@ -59,6 +70,11 @@ final class IgnoreGate: @unchecked Sendable {
             for pattern in snap.urlPatterns {
                 let pred = NSPredicate(format: "SELF LIKE[c] %@", pattern)
                 if pred.evaluate(with: url) { return true }
+            }
+        }
+        if let title = focus.windowTitle?.lowercased(), !snap.windowTitlesLower.isEmpty {
+            for sub in snap.windowTitlesLower where title.contains(sub) {
+                return true
             }
         }
         return false

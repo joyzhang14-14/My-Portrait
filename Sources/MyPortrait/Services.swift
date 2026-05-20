@@ -280,6 +280,7 @@ final class Services {
         let p = ConfigStore.shared.privacy
         coordinator.setIgnoredApps(Set(p.ignoredApps))
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
+        coordinator.setIgnoredWindowTitles(p.ignoredWindowTitles)
     }
 
     /// 监听 ConfigStore.privacy 的 ignore 字段（vim 改 TOML / UI 编辑都走它），
@@ -289,6 +290,7 @@ final class Services {
         withObservationTracking {
             _ = store.privacy.ignoredApps
             _ = store.privacy.ignoredUrls
+            _ = store.privacy.ignoredWindowTitles
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }

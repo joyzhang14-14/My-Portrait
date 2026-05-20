@@ -55,6 +55,9 @@ ignore_incognito = true
 ignored_apps = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Authy']
 # URL glob patterns (NSPredicate LIKE[c]). e.g. '*.bank.com/*', '*mail*'.
 ignored_urls = []
+# Window-title substrings (case-insensitive contains). Skips a frame when
+# the focused window title contains any of these.
+ignored_window_titles = []
 # Reserved — not enforced yet. IgnoreGate has no allowlist logic.
 included_apps = []
 pii_removal = true

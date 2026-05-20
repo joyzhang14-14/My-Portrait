@@ -73,15 +73,20 @@ actor CaptureCoordinator {
 
     var isRunning: Bool { captureTask != nil }
 
-    /// Services 在 settings.ignoredAppNames 变化时调。
+    /// Services 在 ConfigStore.privacy.ignoredApps 变化时调。
     /// 直接传给 IgnoreGate（lock-protected，线程安全）。
     nonisolated func setIgnoredApps(_ apps: Set<String>) {
         ignore.setIgnoredApps(apps)
     }
 
-    /// Services 在 settings.ignoredUrlPatterns 变化时调。
+    /// Services 在 ConfigStore.privacy.ignoredUrls 变化时调。
     nonisolated func setIgnoredUrlPatterns(_ patterns: [String]) {
         ignore.setIgnoredUrlPatterns(patterns)
+    }
+
+    /// Services 在 ConfigStore.privacy.ignoredWindowTitles 变化时调。
+    nonisolated func setIgnoredWindowTitles(_ titles: [String]) {
+        ignore.setIgnoredWindowTitles(titles)
     }
 
     /// 启动采集流水线。幂等。

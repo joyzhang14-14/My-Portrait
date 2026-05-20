@@ -390,6 +390,9 @@ struct PrivacyConfig: Codable, Equatable {
     /// IgnoreGate has no allowlist logic — setting this currently does nothing.
     var includedApps:           [String] = []
     var ignoredUrls:            [String] = []
+    /// Window-title substrings (case-insensitive contains). IgnoreGate skips
+    /// a frame when the focused window title contains any of these.
+    var ignoredWindowTitles:    [String] = []
     init() {}
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
@@ -399,6 +402,7 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredApps             = "ignored_apps"
         case includedApps            = "included_apps"
         case ignoredUrls             = "ignored_urls"
+        case ignoredWindowTitles     = "ignored_window_titles"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -410,6 +414,7 @@ struct PrivacyConfig: Codable, Equatable {
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
         includedApps           = c.dflt([String].self, .includedApps, includedApps)
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
+        ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
     }
 }
 
