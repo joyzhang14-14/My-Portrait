@@ -28,29 +28,9 @@ enum Storage {
     /// Daily raw JSON logs (one file per day, batched at sleep).
     static var dailyLogsDir: URL { rootURL.appendingPathComponent("logs", isDirectory: true) }
 
-    /// Lightweight SQLite that indexes the file-system source of truth.
-    /// Schema lives in `Schema.swift` once we start writing.
-    static var indexDBPath: String { rootURL.appendingPathComponent("index.sqlite").path }
-
-    /// Reserved for future vector sidecar — empty until ~500 portrait files.
-    static var embeddingsDir: URL { rootURL.appendingPathComponent(".embeddings", isDirectory: true) }
-
     /// Append-only daily action logs from the Memory pipeline (merges,
     /// archives, supersede decisions, weight passes). See design doc 6.6.
     static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
-
-    /// Imported timeline snapshot — historical frames + OCR + audio +
-    /// MP4 chunks copied into a snapshot the app fully owns. Paths in
-    /// the snapshot's `db.sqlite` are stored RELATIVE to this root, so
-    /// the directory can be moved or shipped anywhere.
-    static var timelineImportedRoot: URL {
-        rootURL.appendingPathComponent("imported/timeline", isDirectory: true)
-    }
-
-    /// Convenience: full path to the imported timeline SQLite DB.
-    static var timelineImportedDBPath: String {
-        timelineImportedRoot.appendingPathComponent("db.sqlite").path
-    }
 
     // MARK: - Capture layer (Capture/ module)
 
@@ -70,8 +50,6 @@ enum Storage {
     static var videoDir: URL { rawDataDir.appendingPathComponent("video", isDirectory: true) }
 
     /// SQLite written by the capture layer (frames / video_chunks / OCR / audio).
-    /// Separate file from `indexDBPath` so the capture layer and portrait layer
-    /// can evolve schemas independently.
     static var portraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
 
     /// Local model cache (bge-m3 embeddings, future Whisper local cache, etc).

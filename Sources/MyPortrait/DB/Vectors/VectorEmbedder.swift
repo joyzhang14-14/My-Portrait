@@ -6,7 +6,6 @@ import Foundation
 ///   - `BGEM3VectorEmbedder` — bge-m3 真推理，跨语言、1024 维（**当前激活路径**）
 ///   - `NLEmbeddingVectorEmbedder` — Apple NLEmbedding（注：macOS 26 Apple
 ///     Intelligence entitlement 缺失会 crash，目前禁用）
-///   - `DisabledVectorEmbedder` — 永远 throw，FTS-only 降级路径
 protocol VectorEmbedder: Sendable {
 
     /// 向量维度。HybridSearchEngine 在做 brute-force cosine 时要求 query 向量

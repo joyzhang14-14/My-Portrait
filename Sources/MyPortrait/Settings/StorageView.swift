@@ -13,7 +13,7 @@ struct StorageSettingsView: View {
 
     private var resolvedDataDir: String {
         if !config.current.storage.dataDirectory.isEmpty { return config.current.storage.dataDirectory }
-        return NSString("~/.portrait/imported/timeline").expandingTildeInPath
+        return NSString("~/.portrait").expandingTildeInPath
     }
 
     var body: some View {
@@ -23,7 +23,7 @@ struct StorageSettingsView: View {
                 SettingsRow(
                     "Data directory",
                     description: config.current.storage.dataDirectory.isEmpty
-                        ? "~/.portrait/imported/timeline (default) · changing directory starts fresh recordings"
+                        ? "~/.portrait (default) · changing directory starts fresh recordings"
                         : resolvedDataDir,
                     icon: "folder"
                 ) {
