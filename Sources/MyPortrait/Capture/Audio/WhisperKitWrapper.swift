@@ -93,16 +93,6 @@ final class WhisperKitWrapper: @unchecked Sendable {
         return tok.encode(text: " " + terms.joined(separator: ", "))
     }
 
-    /// 转录一个 wav 文件，返回纯文本。
-    func transcribe(wavPath: String, language: String?) async throws -> String {
-        try await ensurePipe()
-        let results = try await pipe!.transcribe(
-            audioPath: wavPath,
-            decodeOptions: decodeOptions(language: language, promptTokens: nil)
-        )
-        return Self.joinText(results)
-    }
-
     /// 转录一段 16kHz mono float 样本，返回纯文本。
     /// 近静音（RMS < 阈值）直接判空，不喂 Whisper；其余先做归一化 +（可选）音乐过滤。
     func transcribe(

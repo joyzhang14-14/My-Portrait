@@ -140,6 +140,49 @@ struct RecordingSettingsView: View {
                                 .frame(width: 220)
                         }
                     }
+                    if engine == AudioEngine.custom.rawValue {
+                        SettingsDivider()
+                        SettingsRow("Endpoint",
+                                    description: "OpenAI-compatible transcription server (mlx-audio, llama.cpp, vLLM…). Audio leaves this Mac.",
+                                    icon: "network") {
+                            TextField("http://127.0.0.1:8080", text: config.binding(\.recording.audio.customEndpoint))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
+                                        .overlay(RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                                )
+                                .frame(width: 220)
+                        }
+                        SettingsDivider()
+                        SettingsRow("Model", description: "Model ID sent to the endpoint.", icon: "cpu") {
+                            TextField("whisper-1", text: config.binding(\.recording.audio.customModel))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
+                                        .overlay(RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                                )
+                                .frame(width: 220)
+                        }
+                        SettingsDivider()
+                        SettingsRow("API key", description: "Optional — leave blank for local servers.", icon: "key") {
+                            SecureField("paste key…", text: config.secretBinding(refKeyPath: \.recording.audio.customApiKeyRef, defaultRef: "custom_transcribe_key"))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
+                                        .overlay(RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                                )
+                                .frame(width: 220)
+                        }
+                    }
                     SettingsDivider()
                     SettingsRow("Languages",
                                 description: "Models to load for transcription.",

@@ -180,15 +180,56 @@ actor TranscriptionScheduler {
         }
     }
 
-    /// 读设置里的转录配置：语言提示（取语言列表首项，空 → nil 自动检测）、
-    /// 自定义词汇、音乐过滤开关。
-    private static func transcriptionConfig() async
-        -> (language: String?, vocabulary: [String], filterMusic: Bool)
-    {
+    /// 转录设置快照（引擎 + 语言 + 词汇 + 云引擎凭据）。
+    private struct TranscribeSettings: Sendable {
+        let engine: String
+        let language: String?
+        let vocabulary: [String]
+        let filterMusic: Bool
+        let deepgramKey: String
+        let customEndpoint: String
+        let customModel: String
+        let customKey: String
+    }
+
+    /// 读设置里的转录配置（含云引擎凭据，从 SecretStore 解出）。
+    private static func transcriptionConfig() async -> TranscribeSettings {
         await MainActor.run {
             let a = ConfigStore.shared.current.recording.audio
             let lang = a.languages.first.flatMap { $0.isEmpty ? nil : $0 }
-            return (lang, a.customVocabulary, a.filterMusic)
+            func secret(_ ref: String) -> String {
+                guard !ref.isEmpty, let d = SecretStore.shared.get(ref) else { return "" }
+                return String(data: d, encoding: .utf8) ?? ""
+            }
+            return TranscribeSettings(
+                engine: a.engine,
+                language: lang,
+                vocabulary: a.customVocabulary,
+                filterMusic: a.filterMusic,
+                deepgramKey: secret(a.deepgramApiKeyRef),
+                customEndpoint: a.customEndpoint,
+                customModel: a.customModel,
+                customKey: secret(a.customApiKeyRef)
+            )
+        }
+    }
+
+    /// 按设置里选的引擎转录一段样本。disabled → 空串。
+    private func transcribeSamples(_ samples: [Float], _ s: TranscribeSettings) async throws -> String {
+        switch s.engine {
+        case "deepgram":
+            return try await CloudTranscriber.deepgram(
+                samples: samples, apiKey: s.deepgramKey, language: s.language)
+        case "custom":
+            return try await CloudTranscriber.openAICompatible(
+                samples: samples, endpoint: s.customEndpoint, model: s.customModel,
+                apiKey: s.customKey, language: s.language, vocabulary: s.vocabulary)
+        case "disabled":
+            return ""
+        default:   // whisper（本地）
+            return try await whisper.transcribe(
+                samples: samples, language: s.language,
+                vocabulary: s.vocabulary, filterMusic: s.filterMusic)
         }
     }
 
@@ -198,8 +239,7 @@ actor TranscriptionScheduler {
         // 1. 标 in_progress
         try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .inProgress)
 
-        // 转录配置：语言提示 + 自定义词汇 + 音乐过滤（来自设置）。
-        let (language, vocabulary, filterMusic) = await Self.transcriptionConfig()
+        let settings = await Self.transcriptionConfig()
 
         // 2. 说话人分离：把 chunk 切成若干说话人语音段（未启用 / 模型未就绪 → 空）。
         let segments = await speaker.diarize(wavPath: chunk.filePath, isInput: chunk.isInput)
@@ -209,29 +249,33 @@ actor TranscriptionScheduler {
 
         if segments.isEmpty {
             // 退化路径：整段一次转录，无说话人归属。
-            let text: String
-            do {
-                text = try await whisper.transcribe(wavPath: chunk.filePath, language: language)
-            } catch {
-                logger.error("whisper transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
+            guard let samples = AudioWAV.readSamples(path: chunk.filePath) else {
+                logger.error("cannot read wav for transcription: \(chunk.filePath, privacy: .public)")
                 try? await db.recordAudioChunkFailure(chunkId: chunkId)
                 return
             }
-            records.append(TranscriptionRecord(
-                audioChunkId: chunkId, startS: 0, endS: chunk.durationS,
-                text: text, speakerId: nil, engine: "whisperkit", transcribedAtMs: nowMs
-            ))
+            let text: String
+            do {
+                text = try await transcribeSamples(samples, settings)
+            } catch {
+                logger.error("transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
+                try? await db.recordAudioChunkFailure(chunkId: chunkId)
+                return
+            }
+            if !text.isEmpty {
+                records.append(TranscriptionRecord(
+                    audioChunkId: chunkId, startS: 0, endS: chunk.durationS,
+                    text: text, speakerId: nil, engine: settings.engine, transcribedAtMs: nowMs
+                ))
+            }
         } else {
             // 完整路径：逐说话人段单独转录，每段一行。
             for seg in segments {
                 let text: String
                 do {
-                    text = try await whisper.transcribe(
-                        samples: seg.samples, language: language,
-                        vocabulary: vocabulary, filterMusic: filterMusic
-                    )
+                    text = try await transcribeSamples(seg.samples, settings)
                 } catch {
-                    logger.error("whisper transcribe (segment) failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
+                    logger.error("transcribe (segment) failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
                     try? await db.recordAudioChunkFailure(chunkId: chunkId)
                     return
                 }
@@ -239,7 +283,7 @@ actor TranscriptionScheduler {
                 records.append(TranscriptionRecord(
                     audioChunkId: chunkId, startS: seg.startS, endS: seg.endS,
                     text: text, speakerId: seg.speakerId.map { Int($0) },
-                    engine: "whisperkit", transcribedAtMs: nowMs
+                    engine: settings.engine, transcribedAtMs: nowMs
                 ))
             }
         }

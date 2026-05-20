@@ -335,6 +335,10 @@ struct AudioConfig: Codable, Equatable {
     var batchTranscription:      Bool     = true
     var autoSelectAudioDevices:  Bool     = true
     var customVocabulary:        [String] = []
+    /// engine = "custom" 时用：OpenAI 兼容转录服务端点 / 模型 / API key 引用。
+    var customEndpoint:          String   = ""
+    var customModel:             String   = "whisper-1"
+    var customApiKeyRef:         String   = ""
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
@@ -342,6 +346,9 @@ struct AudioConfig: Codable, Equatable {
         case engine
         case whisperModel            = "whisper_model"
         case deepgramApiKeyRef       = "deepgram_api_key_ref"
+        case customEndpoint          = "custom_endpoint"
+        case customModel             = "custom_model"
+        case customApiKeyRef         = "custom_api_key_ref"
         case languages
         case microphonesSelected     = "microphones_selected"
         case captureSystemAudio      = "capture_system_audio"
@@ -360,6 +367,9 @@ struct AudioConfig: Codable, Equatable {
         engine                 = c.dflt(String.self,   .engine, engine)
         whisperModel           = c.dflt(String.self,   .whisperModel, whisperModel)
         deepgramApiKeyRef      = c.dflt(String.self,   .deepgramApiKeyRef, deepgramApiKeyRef)
+        customEndpoint         = c.dflt(String.self,   .customEndpoint, customEndpoint)
+        customModel            = c.dflt(String.self,   .customModel, customModel)
+        customApiKeyRef        = c.dflt(String.self,   .customApiKeyRef, customApiKeyRef)
         languages              = c.dflt([String].self, .languages, languages)
         microphonesSelected    = c.dflt([String].self, .microphonesSelected, microphonesSelected)
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
