@@ -47,7 +47,22 @@ final class ConfigStore {
     private init() {
         loadFromDisk()
         migrateIfNeeded()
+        cleanupLegacyDefaults()
         startWatching()
+    }
+
+    /// One-shot: drop legacy UserDefaults keys whose single source moved to
+    /// TOML. `migrateIfNeeded` already seeded their values into config.toml;
+    /// after that the UserDefaults copies are dead weight and a stale second
+    /// source. Runs once, gated by a version flag.
+    private func cleanupLegacyDefaults() {
+        let ud = UserDefaults.standard
+        let flag = "MyPortrait.cleanup.legacyIgnoreKeys.v1"
+        guard !ud.bool(forKey: flag) else { return }
+        for key in ["Settings.ignoredApps", "Settings.ignoredURLs"] {
+            ud.removeObject(forKey: key)
+        }
+        ud.set(true, forKey: flag)
     }
 
     // MARK: - Public mutation hook

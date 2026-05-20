@@ -268,20 +268,34 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 忽略 app 列表订阅。
-        let coordinator = self.coordinator
-        settings.$ignoredAppNames
-            .sink { apps in
-                coordinator.setIgnoredApps(apps)
-            }
-            .store(in: &settingsCancellables)
+        // 忽略规则（app + URL）。单一真相是 ConfigStore.privacy（TOML）。
+        // ConfigStore 是 @Observable 不是 Combine，用 withObservationTracking
+        // 递归重注册——跟 CaptureSettings.startObservingConfig 一个套路。
+        pushIgnoreRules()
+        observeIgnoreRules()
+    }
 
-        // 忽略 URL pattern 列表订阅。
-        settings.$ignoredUrlPatterns
-            .sink { patterns in
-                coordinator.setIgnoredUrlPatterns(patterns)
+    /// 把 ConfigStore.privacy 的 ignore 规则推给 capture coordinator。
+    private func pushIgnoreRules() {
+        let p = ConfigStore.shared.privacy
+        coordinator.setIgnoredApps(Set(p.ignoredApps))
+        coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
+    }
+
+    /// 监听 ConfigStore.privacy 的 ignore 字段（vim 改 TOML / UI 编辑都走它），
+    /// 变化时重推给 coordinator。withObservationTracking 一次性，onChange 里递归重注册。
+    private func observeIgnoreRules() {
+        let store = ConfigStore.shared
+        withObservationTracking {
+            _ = store.privacy.ignoredApps
+            _ = store.privacy.ignoredUrls
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.pushIgnoreRules()
+                self.observeIgnoreRules()
             }
-            .store(in: &settingsCancellables)
+        }
     }
 
     /// AppDelegate 在 `applicationWillTerminate` 调，停所有子系统。
