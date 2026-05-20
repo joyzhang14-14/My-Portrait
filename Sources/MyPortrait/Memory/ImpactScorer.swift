@@ -65,8 +65,10 @@ final class ImpactScorer {
     func rescoreAll(progress: ((Progress) -> Void)? = nil) async throws -> Result {
         let start = Date()
 
-        // Collect every (url, file) under ~/.portrait/portrait/ that is NOT
-        // archived. Sequentially to keep memory tiny.
+        // Collect every (url, file) under ~/.portrait/events/ that is NOT
+        // archived. Backfill writes event files there with a duration
+        // baseline; this rescore replaces that baseline. Sequentially to
+        // keep memory tiny.
         let candidates = try await collectCandidates()
         guard !candidates.isEmpty else {
             return Result(scoredCount: 0, failedCount: 0, elapsed: 0)
@@ -285,7 +287,7 @@ final class ImpactScorer {
     nonisolated private static func scanCandidates() -> [(URL, PortraitFile)] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
-            at: Storage.portraitDir,
+            at: Storage.eventsDir,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else { return [] }
