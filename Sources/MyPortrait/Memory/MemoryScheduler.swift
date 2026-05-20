@@ -3,10 +3,11 @@ import os.log
 
 private let schedLog = Logger(subsystem: "com.myportrait.memory", category: "scheduler")
 
-/// 记忆流水线的调度器。两个 job：
-///   - daily   ：跑当天及之前未处理日的 event 聚类 + impact 评分（per-day）。
-///   - weekly  ：跑 distill（事件 → 画像蒸馏），用 `_weekly` 哨兵行记状态。
+/// 记忆流水线的调度器。两个 job（频率各自可配 off/daily/weekly/monthly）：
+///   - event   ：跑当天及之前未处理日的 event 聚类 + impact 评分（per-day）。
+///   - portrait ：跑 distill（事件 → 画像蒸馏），用 `_distill_anchor` 哨兵行记状态。
 ///
+/// "event / portrait" 是调度器身份（跑什么），频率是它的配置（多久跑一次）。
 /// 每次触发最多处理 7 个数据日（`dayCap`），从最旧的未处理日开始。
 ///
 /// 失败语义（见 ProcessingStatus）：
@@ -45,8 +46,10 @@ final class MemoryScheduler {
     private let rawGraceSeconds: TimeInterval = 2 * 3600
     /// tick 周期。
     private let tickInterval: TimeInterval = 15 * 60
-    /// weekly distill 状态记在这个哨兵行（不是真实日期，不会与 yyyy-MM-dd 冲突）。
-    private let weeklyAnchor = "_weekly"
+    /// distill 是一次性整体操作（非 per-day），锁 / 状态记在这个哨兵行。
+    /// 不是真实日期，不会与 yyyy-MM-dd 冲突。anchor 是 distill 这个 processor
+    /// 的锁身份，与运行频率无关。
+    private let distillAnchor = "_distill_anchor"
 
     /// 心跳超过这个时长视为死锁。默认 10min（单日 Backfill 多轮 LLM 可能 >5min
     /// 仍在正常跑）。可经 env `MYPORTRAIT_SCHEDULER_STALE_MS` 覆盖（测试用）。
@@ -64,8 +67,8 @@ final class MemoryScheduler {
     private let model = "gpt-5.4"
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
-    private let kLastDaily  = "scheduler.lastDailyRun"
-    private let kLastWeekly = "scheduler.lastWeeklyRun"
+    private let kLastEvent    = "scheduler.lastEventRun"
+    private let kLastPortrait = "scheduler.lastPortraitRun"
 
     private init() {}
 
@@ -87,44 +90,79 @@ final class MemoryScheduler {
         timer = nil
     }
 
-    /// 周期检查：到点且今天还没跑过就跑。
+    /// 周期检查：每个调度器按各自频率到点、且今天还没跑过就跑。
     func tick() async {
         guard !isRunning else { return }
-        let cfg = ConfigStore.shared.current.scheduler
+        let s = ConfigStore.shared.current.scheduler
         let now = Date()
 
-        var ranDaily = false
-        if cfg.dailyEnabled, isDailyDue(now: now, cfg: cfg) {
-            setLastRun(kLastDaily, now)
-            await runDailyJob()
-            ranDaily = true
+        var ranEvent = false
+        if Self.shouldTriggerNow(config: s.event, now: now),
+           lastRunDay(kLastEvent) != localDayString(now) {
+            setLastRun(kLastEvent, now)
+            await runEventJob()
+            ranEvent = true
         }
-        if cfg.weeklyEnabled {
-            if isWeeklyDue(now: now, cfg: cfg) {
-                setLastRun(kLastWeekly, now)
-                await runWeeklyJob()
-            } else if ranDaily, weeklyNeedsRetry() {
-                // distill 之前被 defer / failed —— 借 daily 触发的 24h 节流顺带重试。
-                await runWeeklyJob()
-            }
+        if Self.shouldTriggerNow(config: s.portrait, now: now),
+           lastRunDay(kLastPortrait) != localDayString(now) {
+            setLastRun(kLastPortrait, now)
+            await runPortraitJob()
+        } else if ranEvent, s.portrait.frequency != .off, portraitNeedsRetry() {
+            // distill 之前被 defer / failed —— 借 event job 触发的节流顺带重试。
+            await runPortraitJob()
         }
     }
 
-    // MARK: - daily job：event 聚类 + impact 评分（per-day）
+    /// 给定调度器配置与当前时刻，判断现在是否落在它的触发窗口内
+    /// （频率匹配 + 到点）。是否"今天已跑过"由调用方另做去重。
+    static func shouldTriggerNow(config: SchedulerConfig, now: Date) -> Bool {
+        guard config.frequency != .off else { return false }
+        let cal = Calendar.current
+
+        switch config.frequency {
+        case .off:
+            return false
+        case .daily:
+            break   // 每天都匹配
+        case .weekly:
+            // Calendar.weekday 是 1…7（1=周日）；config.dayOfWeek 是 0…6。
+            let wd = cal.component(.weekday, from: now) - 1
+            guard wd == config.dayOfWeek else { return false }
+        case .monthly:
+            let day = cal.component(.day, from: now)
+            guard day == effectiveDayOfMonth(config.dayOfMonth, now: now, cal: cal) else {
+                return false
+            }
+        }
+
+        // 到点：当前时刻 ≥ 配置时刻（按分钟比较）。
+        let nowMinutes = cal.component(.hour, from: now) * 60
+            + cal.component(.minute, from: now)
+        return nowMinutes >= config.hour * 60 + config.minute
+    }
+
+    /// monthly 的 day-of-month edge case：选 31 但当月只有 30 天 → 落到当月
+    /// 最后一天。
+    static func effectiveDayOfMonth(_ requested: Int, now: Date, cal: Calendar) -> Int {
+        let lastDay = cal.range(of: .day, in: .month, for: now)?.count ?? 28
+        return min(max(requested, 1), lastDay)
+    }
+
+    // MARK: - event job：event 聚类 + impact 评分（per-day）
 
     /// 处理至多 `dayCap` 个未完成的数据日（旧 → 新）。每天 event → impact
     /// 顺序跑，各自持锁 + 心跳。
-    func runDailyJob() async {
+    func runEventJob() async {
         guard !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
 
         let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
-            schedLog.info("daily job: no pending days")
+            schedLog.info("event job: no pending days")
             return
         }
-        print("[Scheduler] daily job — \(days.count) day(s) to process")
+        print("[Scheduler] event job — \(days.count) day(s) to process")
 
         for day in days {
             let ds = ProcessingLogStore.dayString(day)
@@ -159,25 +197,25 @@ final class MemoryScheduler {
         }
     }
 
-    // MARK: - weekly job：distill
+    // MARK: - portrait job：distill
 
-    /// 跑一次完整 distill，状态记在 `_weekly` 哨兵行（持锁 + 心跳，崩溃可恢复）。
-    /// distiller 扫盘上所有非归档事件 —— 失败日的事件已被 daily job 清除，
-    /// 所以盘上事件天然只来自 event 处理成功的日。
-    func runWeeklyJob() async {
+    /// 跑一次完整 distill，状态记在 `_distill_anchor` 哨兵行（持锁 + 心跳，
+    /// 崩溃可恢复）。distiller 扫盘上所有非归档事件 —— 失败日的事件已被 event
+    /// job 清除，所以盘上事件天然只来自 event 处理成功的日。
+    func runPortraitJob() async {
         guard !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
 
-        _ = store.ensureRow(for: weeklyAnchor)
-        let distill = store.row(for: weeklyAnchor)?.distill ?? .idle
+        _ = store.ensureRow(for: distillAnchor)
+        let distill = store.row(for: distillAnchor)?.distill ?? .idle
         guard distill.needsWork else {
-            schedLog.info("weekly job: distill is \(distill.rawValue, privacy: .public) — skip")
+            schedLog.info("portrait job: distill is \(distill.rawValue, privacy: .public) — skip")
             return
         }
-        print("[Scheduler] weekly job — distilling")
+        print("[Scheduler] portrait job — distilling")
 
-        await runStep(date: weeklyAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
+        await runStep(date: distillAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
             let r = try await PortraitDistiller(model: self.model).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
@@ -283,8 +321,9 @@ final class MemoryScheduler {
 
     // MARK: - UI 支持：重置 / 待处理列表
 
-    /// 手动重置某天 / `_weekly`：把 failed / dead_letter / budget_deferred 的
-    /// 阶段回退 pending，retry_count 归零，释放锁。下次 tick 会重新尝试。
+    /// 手动重置某天 / `_distill_anchor`：把 failed / dead_letter /
+    /// budget_deferred 的阶段回退 pending，retry_count 归零，释放锁。
+    /// 下次 tick 会重新尝试。
     func resetDay(_ date: String) {
         guard let row = store.row(for: date) else { return }
         for stage in ProcessingStage.allCases {
@@ -354,7 +393,7 @@ final class MemoryScheduler {
         for day in days {
             guard isRawReady(day) else { continue }
             let row = store.row(for: ProcessingLogStore.dayString(day))
-            if isDailyCandidate(row) {
+            if isEventCandidate(row) {
                 out.append(day)
                 if out.count >= cap { break }
             }
@@ -362,23 +401,23 @@ final class MemoryScheduler {
         return out
     }
 
-    /// tick / daily job 是否还会处理某天 —— 与 pendingDays 用的是同一谓词。
+    /// tick / event job 是否还会处理某天 —— 与 pendingDays 用的是同一谓词。
     /// dead_letter / 全 complete → false。测试 / UI 可查。
-    func wouldProcessInDailyJob(date: String) -> Bool {
-        isDailyCandidate(store.row(for: date))
+    func wouldProcessInEventJob(date: String) -> Bool {
+        isEventCandidate(store.row(for: date))
     }
 
-    /// 一天是否需要 daily job 处理（event 或 impact 阶段还有活）。
-    private func isDailyCandidate(_ row: ProcessingLogRow?) -> Bool {
+    /// 一天是否需要 event job 处理（event 或 impact 阶段还有活）。
+    private func isEventCandidate(_ row: ProcessingLogRow?) -> Bool {
         guard let row else { return true }              // 无行 = idle = 需 event
         if row.event.needsWork { return true }          // event 待处理
         if row.event == .complete, row.impact.needsWork { return true }  // 待 impact
         return false                                    // complete / in_progress / dead_letter
     }
 
-    /// weekly distill 是否处于待重试态（failed / budget_deferred）。
-    private func weeklyNeedsRetry() -> Bool {
-        switch store.row(for: weeklyAnchor)?.distill {
+    /// distill 是否处于待重试态（failed / budget_deferred）。
+    private func portraitNeedsRetry() -> Bool {
+        switch store.row(for: distillAnchor)?.distill {
         case .failed, .budgetDeferred: return true
         default: return false
         }
@@ -430,21 +469,6 @@ final class MemoryScheduler {
                 _ = store.heartbeat(date: date)
             }
         }
-    }
-
-    // MARK: - 到点判定
-
-    private func isDailyDue(now: Date, cfg: SchedulerConfig) -> Bool {
-        let cal = Calendar.current
-        if lastRunDay(kLastDaily) == localDayString(now) { return false }
-        return cal.component(.hour, from: now) >= cfg.dailyHour
-    }
-
-    private func isWeeklyDue(now: Date, cfg: SchedulerConfig) -> Bool {
-        let cal = Calendar.current
-        if cal.component(.weekday, from: now) != cfg.weeklyWeekday { return false }
-        if lastRunDay(kLastWeekly) == localDayString(now) { return false }
-        return cal.component(.hour, from: now) >= cfg.weeklyHour
     }
 
     // MARK: - 工具
