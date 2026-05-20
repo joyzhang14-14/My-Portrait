@@ -18,9 +18,9 @@ enum Theme {
     static let active = Color.white.opacity(0.10)
     static let stroke = Color.white.opacity(0.10)
 
-    /// Violet accent — deliberately the same hue as the ambient background
-    /// blobs so highlights feel native to the gradient behind them.
-    static let accent = Color(hue: 0.74, saturation: 0.55, brightness: 0.95)
+    /// Blue accent — close to the indigo ambient-background blob so
+    /// highlights feel native to the gradient behind them.
+    static let accent = Color(hue: 0.60, saturation: 0.70, brightness: 0.98)
 
     // MARK: Spacing scale — use these instead of magic numbers
     enum Space {
@@ -78,9 +78,15 @@ extension View {
 
 // MARK: - Sidebar backdrop
 
-/// Calm dark backdrop for the sidebar — a near-black vertical gradient with a
-/// faint violet glow top-left, giving the glass cards something to float over
-/// without paying for the animated `AmbientBackground`.
+/// Calm dark backdrop for the sidebar / main panes — a near-black vertical
+/// gradient with a faint violet glow top-left, giving the glass cards
+/// something to float over without paying for the animated
+/// `AmbientBackground`.
+///
+/// `.ignoresSafeArea()` lives inside the body (same as `AmbientBackground`)
+/// so that when used via `.background(SidebarBackdrop())` it reliably fills
+/// the whole window — including under the transparent title bar — instead of
+/// leaving a black strip at the top.
 struct SidebarBackdrop: View {
     var body: some View {
         ZStack {
@@ -91,5 +97,6 @@ struct SidebarBackdrop: View {
                 colors: [Theme.accent.opacity(0.13), .clear],
                 center: .topLeading, startRadius: 0, endRadius: 340)
         }
+        .ignoresSafeArea()
     }
 }
