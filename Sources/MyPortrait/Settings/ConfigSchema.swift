@@ -381,7 +381,11 @@ struct PrivacyConfig: Codable, Equatable {
     var captureClipboard:       Bool     = false
     var recordAudioWhileLocked: Bool     = false
     var piiRemoval:             Bool     = true
-    var ignoredApps:            [String] = []
+    /// Default blacklist: password managers / sensitive tools. Matched by
+    /// exact app name (case-insensitive) in IgnoreGate.
+    var ignoredApps:            [String] = [
+        "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
+    ]
     /// Reserved, not enforced yet. Schema / UI / TOML round-trip work, but
     /// IgnoreGate has no allowlist logic — setting this currently does nothing.
     var includedApps:           [String] = []
