@@ -36,6 +36,14 @@ final class WhisperKitWrapper: @unchecked Sendable {
         self.modelName = modelName.isEmpty ? "openai_whisper-base" : modelName
     }
 
+    /// 释放已加载的模型,回收内存（可达 GB 级）。下次 transcribe 自动重新加载。
+    /// 调用方（TranscriptionScheduler）保证不与 transcribe 并发。
+    func unload() {
+        guard pipe != nil else { return }
+        pipe = nil
+        logger.info("WhisperKit model unloaded — freed memory")
+    }
+
     /// 懒加载 WhisperKit pipeline（首跑下载模型）。
     private func ensurePipe() async throws {
         guard pipe == nil else { return }

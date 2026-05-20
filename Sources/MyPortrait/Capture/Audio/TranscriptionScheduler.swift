@@ -122,6 +122,7 @@ actor TranscriptionScheduler {
         ingestSysTask = nil
         transcribeTask = nil
         powerTask = nil
+        whisper.unload()
         logger.info("TranscriptionScheduler stopped")
     }
 
@@ -158,7 +159,8 @@ actor TranscriptionScheduler {
 
     private func processQueueOnce() async {
         guard PowerMonitor.isOnAC else {
-            // 电池模式：什么都不干。
+            // 电池模式不转录 → 释放 Whisper 模型,别白占内存。
+            whisper.unload()
             return
         }
 
@@ -167,6 +169,12 @@ actor TranscriptionScheduler {
             chunks = try await db.pendingAudioChunks(limit: queueBatchLimit)
         } catch {
             logger.warning("pendingAudioChunks failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+
+        guard !chunks.isEmpty else {
+            // 队列空 → 没有转录任务 → 释放 Whisper 模型。
+            whisper.unload()
             return
         }
 
