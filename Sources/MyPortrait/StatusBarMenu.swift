@@ -17,7 +17,7 @@ import Foundation
 /// 状态反应通过 Combine 订阅 CaptureSettings。用户操作直接修改 settings 字段，
 /// 由 Services 那边的 sink 落到 coordinator/audio start/stop。
 @MainActor
-final class StatusBarMenu: NSObject {
+final class StatusBarMenu: NSObject, NSMenuDelegate {
 
     private let settings: CaptureSettings
     private let permissions: PermissionMonitor
@@ -59,6 +59,9 @@ final class StatusBarMenu: NSObject {
         self.audioToggle.action = #selector(toggleAudio)
 
         buildMenu()
+        // 菜单每次打开前强制重算状态（menuNeedsUpdate）。Combine sink 时序不可靠
+        // （settings 镜像层可能 desync），靠它会 stale；打开即刷新最稳。
+        menu.delegate = self
         statusItem.menu = menu
 
         // 初始 icon。
@@ -91,18 +94,29 @@ final class StatusBarMenu: NSObject {
 
     // MARK: - 真实录音状态（= 意图开关 && 没暂停 && 权限已授）
 
+    /// capture 开关的单一真相是 ConfigStore，不读 settings 镜像（镜像可能 desync）。
+    private var screenCaptureWanted: Bool { ConfigStore.shared.recording.screen.enabled }
+    private var audioCaptureWanted: Bool { ConfigStore.shared.recording.audio.enabled }
+
     /// 屏幕**实际**是否在录。菜单勾选 / 图标 tooltip 用这个，不用裸的 toggle 意图。
     private var screenRecordingActive: Bool {
-        settings.screenCaptureEnabled
+        screenCaptureWanted
             && !settings.isPaused
             && permissions.screenRecording.isGranted
     }
 
     /// 麦克风**实际**是否在录。
     private var audioRecordingActive: Bool {
-        settings.audioCaptureEnabled
+        audioCaptureWanted
             && !settings.isPaused
             && permissions.microphone.isGranted
+    }
+
+    // MARK: - NSMenuDelegate
+
+    /// AppKit 在菜单显示前调用 —— 此刻强制按 ConfigStore 当前值重算所有 state。
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        refreshMenuState()
     }
 
     // MARK: - 菜单构造
@@ -207,13 +221,13 @@ final class StatusBarMenu: NSObject {
         // 开关 on 但实际没录 → 标题给出原因，别让用户以为坏了。
         screenToggle.title = Self.toggleTitle(
             base: "Screen Capture",
-            wanted: settings.screenCaptureEnabled,
+            wanted: screenCaptureWanted,
             active: screenRecordingActive,
             permission: permissions.screenRecording
         )
         audioToggle.title = Self.toggleTitle(
             base: "Microphone",
-            wanted: settings.audioCaptureEnabled,
+            wanted: audioCaptureWanted,
             active: audioRecordingActive,
             permission: permissions.microphone
         )
@@ -250,11 +264,15 @@ final class StatusBarMenu: NSObject {
     // MARK: - 菜单项动作
 
     @objc private func toggleScreen() {
-        settings.screenCaptureEnabled.toggle()
+        let next = !ConfigStore.shared.recording.screen.enabled
+        ConfigStore.shared.mutate { $0.recording.screen.enabled = next }
+        refreshMenuState()
     }
 
     @objc private func toggleAudio() {
-        settings.audioCaptureEnabled.toggle()
+        let next = !ConfigStore.shared.recording.audio.enabled
+        ConfigStore.shared.mutate { $0.recording.audio.enabled = next }
+        refreshMenuState()
     }
 
     @objc private func pauseFor(_ sender: NSMenuItem) {
