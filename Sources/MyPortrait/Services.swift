@@ -127,8 +127,17 @@ final class Services {
                 logger.warning("resetInProgressAudioChunks failed (expected with stub DB): \(String(describing: error), privacy: .public)")
             }
 
-            await compactor.start()
-            await transcriber.start()
+            let env = ProcessInfo.processInfo.environment
+            if env["MYPORTRAIT_NO_COMPACTOR"] != "1" {
+                await compactor.start()
+            } else {
+                logger.info("CompactionWorker SKIPPED (MYPORTRAIT_NO_COMPACTOR=1)")
+            }
+            if env["MYPORTRAIT_NO_TRANSCRIBER"] != "1" {
+                await transcriber.start()
+            } else {
+                logger.info("TranscriptionScheduler SKIPPED (MYPORTRAIT_NO_TRANSCRIBER=1)")
+            }
             await retentionWorker.start()
 
             // EmbeddingWorker 启。bge-m3 推理走 MLX 本地，不再撞 Apple Intelligence
