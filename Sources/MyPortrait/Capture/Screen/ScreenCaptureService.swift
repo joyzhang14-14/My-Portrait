@@ -39,6 +39,14 @@ final class ScreenCaptureService {
         // 后这些 reply 落到已经 invalidated 的 dispatch queue → dispatch_assert
         // → 整进程崩。避免发请求是唯一稳的法子。
         if !CGPreflightScreenCaptureAccess() {
+            // **第一次失败时主动请求授权**：CGRequestScreenCaptureAccess() 会弹
+            // 标准系统对话框（如果没弹过 / 上次拒绝过会再弹一次）；如果用户已
+            // 在 System Settings 给"另一个"MyPortrait 授过权但 cdhash 不匹配，
+            // 这一次也会按当前 binary 的 cdhash 重新登记。
+            // 调用本身是同步、非 XPC、纯 TCC 操作，不会触发崩溃路径。
+            // 用户点 Allow 后，TCC entry 落地，下一次 preflight 就过。
+            _ = CGRequestScreenCaptureAccess()
+            // 不管对话框结果如何，本次仍然 fail —— 用户授权后需要再 toggle 一下。
             throw CaptureError.screenRecordingPermissionDenied
         }
 
