@@ -172,6 +172,14 @@ final class Services {
             }
         }
 
+        // 记忆流水线调度器：启动时回收死锁、立刻 tick 一次、再起周期 timer。
+        // 调试开关：env `MYPORTRAIT_NO_SCHEDULER=1` 跳过。
+        if ProcessInfo.processInfo.environment["MYPORTRAIT_NO_SCHEDULER"] != "1" {
+            MemoryScheduler.shared.start()
+        } else {
+            logger.info("MemoryScheduler SKIPPED (MYPORTRAIT_NO_SCHEDULER=1)")
+        }
+
         // **权限请求触发**。两类信号要分清楚：
         //   1. CGRequestScreenCaptureAccess / AVCaptureDevice.requestAccess
         //      —— 弹**系统标准权限对话框**。这个**启动时也该调**：app 要截屏
