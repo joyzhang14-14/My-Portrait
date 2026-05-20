@@ -24,7 +24,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var recording:     RecordingConfig     = .init()
     var notifications: NotificationsConfig = .init()
     var memory:        MemoryConfig        = .init()
-    var scheduler:     SchedulerConfig     = .init()
+    var scheduler:     SchedulerSettings   = .init()
     var usage:         UsageConfig         = .init()
     var privacy:       PrivacyConfig       = .init()
     var storage:       StorageConfig       = .init()
@@ -48,7 +48,7 @@ struct MyPortraitConfig: Codable, Equatable {
         recording     = c.dflt(RecordingConfig.self, .recording, recording)
         notifications = c.dflt(NotificationsConfig.self, .notifications, notifications)
         memory        = c.dflt(MemoryConfig.self, .memory, memory)
-        scheduler     = c.dflt(SchedulerConfig.self, .scheduler, scheduler)
+        scheduler     = c.dflt(SchedulerSettings.self, .scheduler, scheduler)
         usage         = c.dflt(UsageConfig.self, .usage, usage)
         privacy       = c.dflt(PrivacyConfig.self, .privacy, privacy)
         storage       = c.dflt(StorageConfig.self, .storage, storage)
@@ -111,33 +111,75 @@ struct MemoryConfig: Codable, Equatable {
 
 // MARK: - Scheduler
 
-/// 记忆流水线调度。两个 job：
-///   - daily  ：每天 `dailyHour` 点跑 event 聚类 + impact 评分。
-///   - weekly ：每周 `weeklyWeekday`（1=周日…7=周六）`weeklyHour` 点跑 distill。
-/// 时间均为本地时间。
+/// 一个调度器的运行频率。频率是*配置*，不是身份 —— event / portrait 两个
+/// 调度器都能选任意频率（或关掉走纯手动）。
+enum SchedulerFrequency: String, Codable, CaseIterable, Equatable, Sendable {
+    case off       // 不自动跑，纯手动
+    case daily
+    case weekly
+    case monthly
+}
+
+/// 单个调度器的配置（频率可配的容器）。
+///   - `timeOfDay`   ："HH:mm" 本地时间，所有非 off 频率都用。
+///   - `dayOfWeek`   ：0=周日…6=周六，仅 weekly 用。
+///   - `dayOfMonth`  ：1…31，仅 monthly 用。选 31 但当月不足时自动落到当月
+///                     最后一天（逻辑里处理，UI 不暴露）。
 struct SchedulerConfig: Codable, Equatable {
-    var dailyEnabled:   Bool = true
-    var dailyHour:      Int  = 3
-    var weeklyEnabled:  Bool = true
-    var weeklyWeekday:  Int  = 1
-    var weeklyHour:     Int  = 4
+    var frequency:  SchedulerFrequency = .daily
+    var timeOfDay:  String = "03:00"
+    var dayOfWeek:  Int    = 0
+    var dayOfMonth: Int    = 1
 
     init() {}
+    init(frequency: SchedulerFrequency, timeOfDay: String,
+         dayOfWeek: Int, dayOfMonth: Int) {
+        self.frequency = frequency
+        self.timeOfDay = timeOfDay
+        self.dayOfWeek = dayOfWeek
+        self.dayOfMonth = dayOfMonth
+    }
     enum CodingKeys: String, CodingKey {
-        case dailyEnabled  = "daily_enabled"
-        case dailyHour     = "daily_hour"
-        case weeklyEnabled = "weekly_enabled"
-        case weeklyWeekday = "weekly_weekday"
-        case weeklyHour    = "weekly_hour"
+        case frequency
+        case timeOfDay  = "time_of_day"
+        case dayOfWeek  = "day_of_week"
+        case dayOfMonth = "day_of_month"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        dailyEnabled  = c.dflt(Bool.self, .dailyEnabled,  dailyEnabled)
-        dailyHour     = c.dflt(Int.self,  .dailyHour,     dailyHour)
-        weeklyEnabled = c.dflt(Bool.self, .weeklyEnabled, weeklyEnabled)
-        weeklyWeekday = c.dflt(Int.self,  .weeklyWeekday, weeklyWeekday)
-        weeklyHour    = c.dflt(Int.self,  .weeklyHour,    weeklyHour)
+        frequency  = c.dflt(SchedulerFrequency.self, .frequency,  frequency)
+        timeOfDay  = c.dflt(String.self,             .timeOfDay,  timeOfDay)
+        dayOfWeek  = c.dflt(Int.self,                .dayOfWeek,  dayOfWeek)
+        dayOfMonth = c.dflt(Int.self,                .dayOfMonth, dayOfMonth)
+    }
+
+    /// "HH:mm" 拆出的小时。
+    var hour: Int {
+        Int(timeOfDay.split(separator: ":").first ?? "0") ?? 0
+    }
+    /// "HH:mm" 拆出的分钟。
+    var minute: Int {
+        let parts = timeOfDay.split(separator: ":")
+        return parts.count > 1 ? (Int(parts[1]) ?? 0) : 0
+    }
+}
+
+/// 记忆流水线的两个调度器容器。频率各自独立配置。
+///   - `event`   ：跑 event 聚类 + impact 评分。
+///   - `portrait`：跑 distill（事件 → 画像蒸馏）。
+struct SchedulerSettings: Codable, Equatable {
+    var event:    SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
+                                          dayOfWeek: 0, dayOfMonth: 1)
+    var portrait: SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",
+                                          dayOfWeek: 0, dayOfMonth: 1)
+    init() {}
+    enum CodingKeys: String, CodingKey { case event, portrait }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        event    = c.dflt(SchedulerConfig.self, .event,    event)
+        portrait = c.dflt(SchedulerConfig.self, .portrait, portrait)
     }
 }
 

@@ -91,7 +91,7 @@ final class ConfigStore {
     var recording:     RecordingConfig     { get { current.recording }     set { mutate { $0.recording = newValue } } }
     var notifications: NotificationsConfig { get { current.notifications } set { mutate { $0.notifications = newValue } } }
     var memory:        MemoryConfig        { get { current.memory }        set { mutate { $0.memory = newValue } } }
-    var scheduler:     SchedulerConfig     { get { current.scheduler }     set { mutate { $0.scheduler = newValue } } }
+    var scheduler:     SchedulerSettings   { get { current.scheduler }     set { mutate { $0.scheduler = newValue } } }
     var usage:         UsageConfig         { get { current.usage }         set { mutate { $0.usage = newValue } } }
     var privacy:       PrivacyConfig       { get { current.privacy }       set { mutate { $0.privacy = newValue } } }
     var storage:       StorageConfig       { get { current.storage }       set { mutate { $0.storage = newValue } } }
