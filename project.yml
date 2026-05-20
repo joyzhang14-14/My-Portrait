@@ -1,0 +1,109 @@
+# XcodeGen 声明 —— `xcodegen generate` 从这个文件吐出 MyPortrait.xcodeproj。
+#
+# 为什么用它：SwiftPM executable target 构建出的是裸 binary，TCC 按 cdhash 匹配，
+# 每次 rebuild 权限失效。正经 macOS App target 出签名 .app bundle，TCC 按
+# designated requirement（bundle id + 证书）匹配，跨 rebuild 稳定。
+#
+# 改配置就改这个 yml + 重跑 `xcodegen generate`。源码一行不用动。
+# Package.swift 保留 —— `swift build` / CI 仍可用，两套构建并存。
+name: MyPortrait
+
+options:
+  bundleIdPrefix: com.joyzhang
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 7.10.0
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    from: 0.14.1
+  mlx-swift:
+    url: https://github.com/ml-explore/mlx-swift.git
+    from: 0.21.3
+  swift-transformers:
+    url: https://github.com/huggingface/swift-transformers.git
+    from: 0.1.24
+  mlx-embeddings:
+    url: https://github.com/mzbac/mlx.embeddings.git
+    from: 0.1.1
+  TOMLKit:
+    url: https://github.com/LebJe/TOMLKit.git
+    from: 0.6.0
+
+targets:
+  MyPortrait:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/MyPortrait
+        excludes:
+          - "**/README.md"
+    dependencies:
+      - package: GRDB
+        product: GRDB
+      - package: WhisperKit
+        product: WhisperKit
+      - package: mlx-swift
+        product: MLX
+      - package: mlx-swift
+        product: MLXNN
+      - package: mlx-swift
+        product: MLXFast
+      - package: swift-transformers
+        product: Transformers
+      - package: mlx-embeddings
+        product: mlx_embeddings
+      - package: TOMLKit
+        product: TOMLKit
+      - sdk: libsqlite3.tbd
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleDisplayName: My Portrait
+        CFBundleName: MyPortrait
+        LSMinimumSystemVersion: "15.0"
+        NSHighResolutionCapable: true
+        NSMicrophoneUsageDescription: My Portrait records microphone audio to build your personal activity timeline.
+        NSCameraUsageDescription: My Portrait does not use the camera.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait
+        SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: MyPortraitDev
+        DEVELOPMENT_TEAM: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        ENABLE_HARDENED_RUNTIME: false
+        # @testable import 需要 app target 开 testability。
+        ENABLE_TESTABILITY: true
+
+  MyPortraitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/MyPortraitTests
+    dependencies:
+      - target: MyPortrait
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+
+schemes:
+  MyPortrait:
+    build:
+      targets:
+        MyPortrait: all
+        MyPortraitTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MyPortraitTests

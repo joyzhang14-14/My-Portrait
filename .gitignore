@@ -28,3 +28,5 @@ MyPortrait.app/
 # Build / temp
 build/
 *.bak
+MyPortrait.xcodeproj/
+/build/
