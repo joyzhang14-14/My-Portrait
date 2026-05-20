@@ -64,7 +64,6 @@ final class EventBuilder {
         case agentTimeout
         case noJSONInResponse
         case malformedJSON(String)
-        case incompleteCoverage(missing: [Int])
 
         var errorDescription: String? {
             switch self {
@@ -72,8 +71,6 @@ final class EventBuilder {
             case .agentTimeout:          return "LLM did not respond within timeout"
             case .noJSONInResponse:      return "LLM response contained no JSON"
             case .malformedJSON(let m):  return "LLM JSON parse failed: \(m)"
-            case .incompleteCoverage(let m):
-                return "LLM clustering left sessions uncovered: \(m)"
             }
         }
     }
@@ -81,14 +78,19 @@ final class EventBuilder {
     private let model: String
     private let perBatchTimeout: TimeInterval
     /// Sessions ≤ this run in a single LLM call. Above it, batched.
+    /// Kept small (40) so the LLM rarely drops a session from a big day.
     private let batchSize: Int
+    /// Retries per batch on a malformed-JSON / timeout response.
+    private let maxAttempts: Int
 
     init(model: String = "gpt-5.4",
          perBatchTimeout: TimeInterval = 180,
-         batchSize: Int = 100) {
+         batchSize: Int = 40,
+         maxAttempts: Int = 3) {
         self.model = model
         self.perBatchTimeout = perBatchTimeout
         self.batchSize = batchSize
+        self.maxAttempts = maxAttempts
     }
 
     /// Cluster one day's sessions into semantic events.
@@ -123,6 +125,40 @@ final class EventBuilder {
         globalOffset: Int,
         activeEvents: [ActiveEvent]
     ) async throws -> DayClustering {
+        let lo = globalOffset + 1
+        let hi = globalOffset + sessions.count
+        let validActiveIds = Set(activeEvents.map { $0.id })
+        let prompt = Self.buildPrompt(
+            date: date,
+            sessions: sessions,
+            globalOffset: globalOffset,
+            activeEvents: activeEvents
+        )
+
+        // The LLM occasionally returns malformed JSON or times out. A failed
+        // batch loses the whole day, so retry a few times before giving up.
+        var lastError: Error = BuilderError.noJSONInResponse
+        for attempt in 1...maxAttempts {
+            do {
+                let raw = try await runLLM(prompt: prompt)
+                var parsed = try Self.parseClustering(from: raw)
+                parsed = Self.defendJoins(parsed, validActiveIds: validActiveIds)
+                // Sessions the LLM forgot are moved to `skipped` rather than
+                // failing the whole day. A skipped session produces no file,
+                // so it cannot create a shell event — the original reason
+                // for the strict check disappeared with the join fallback.
+                parsed = Self.coverGaps(parsed, lo: lo, hi: hi)
+                return parsed
+            } catch {
+                lastError = error
+                print("EventBuilder: batch attempt \(attempt)/\(maxAttempts) failed — \(error.localizedDescription)")
+            }
+        }
+        throw lastError
+    }
+
+    /// One LLM round-trip: spawn agent, send prompt, collect the response.
+    private func runLLM(prompt: String) async throws -> String {
         let agent = try PiAgent(model: model)
         do { try await agent.start() }
         catch { throw BuilderError.agentSpawn(error.localizedDescription) }
@@ -134,21 +170,13 @@ final class EventBuilder {
         }
         defer { consumerTask.cancel() }
 
-        let prompt = Self.buildPrompt(
-            date: date,
-            sessions: sessions,
-            globalOffset: globalOffset,
-            activeEvents: activeEvents
-        )
-
         let requestID = UUID().uuidString
         await coordinator.startTurn(id: requestID)
         do { try agent.sendPrompt(prompt, id: requestID) }
         catch { throw BuilderError.agentSpawn(error.localizedDescription) }
 
-        let collected: String
         do {
-            collected = try await withThrowingTaskGroup(of: String.self) { group in
+            return try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask { await coordinator.awaitTurn() }
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(self.perBatchTimeout * 1_000_000_000))
@@ -161,15 +189,6 @@ final class EventBuilder {
         } catch is CancellationError {
             throw BuilderError.agentTimeout
         }
-
-        // Parse → join-defence → coverage check.
-        let lo = globalOffset + 1
-        let hi = globalOffset + sessions.count
-        var parsed = try Self.parseClustering(from: collected)
-        let validActiveIds = Set(activeEvents.map { $0.id })
-        parsed = Self.defendJoins(parsed, validActiveIds: validActiveIds)
-        try Self.verifyCoverage(parsed, lo: lo, hi: hi)
-        return parsed
     }
 
     // MARK: - Batched (fallback for > batchSize sessions)
@@ -274,17 +293,22 @@ final class EventBuilder {
         return DayClustering(events: keptEvents, skippedIndices: skipped)
     }
 
-    /// Every session id in `lo...hi` must be covered by an event or skipped.
-    private static func verifyCoverage(
+    /// Sessions the LLM left out of every event AND out of `skipped` are
+    /// appended to `skipped`. Logged but non-fatal — a forgotten session
+    /// produces no file, so it cannot create a shell event.
+    private static func coverGaps(
         _ clustering: DayClustering, lo: Int, hi: Int
-    ) throws {
+    ) -> DayClustering {
         var seen = Set<Int>()
         for ev in clustering.events { seen.formUnion(ev.sessionIndices) }
         seen.formUnion(clustering.skippedIndices)
         let missing = (lo...hi).filter { !seen.contains($0) }
-        if !missing.isEmpty {
-            throw BuilderError.incompleteCoverage(missing: missing)
-        }
+        if missing.isEmpty { return clustering }
+        print("EventBuilder: \(missing.count) session(s) uncovered by LLM → moved to skipped")
+        return DayClustering(
+            events: clustering.events,
+            skippedIndices: clustering.skippedIndices + missing
+        )
     }
 
     // MARK: - Prompt construction
