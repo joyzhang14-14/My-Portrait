@@ -20,6 +20,7 @@ struct ConnectionsView: View {
     @State private var smtpPort: String = "587"
     @State private var smtpUser: String = ""
     @State private var smtpPass: String = ""
+    @State private var smtpTestTo: String = ""
     // Currently-selected Obsidian vault path, mirrored from SecretStore.
     @State private var obsidianVaultPath: String? = ObsidianConfig.vaultPath
 
@@ -166,6 +167,7 @@ struct ConnectionsView: View {
                     smtpField("Port (e.g. 587)", text: $smtpPort)
                     smtpField("Username / email", text: $smtpUser)
                     smtpSecureField("Password / app password", text: $smtpPass)
+                    smtpField("Test recipient (blank = send to yourself)", text: $smtpTestTo)
                 }
             }
 
@@ -294,9 +296,10 @@ struct ConnectionsView: View {
         }
     }
 
-    /// SMTP integration: collect host / port / user / password, save them as
-    /// a single JSON blob in SecretStore under `smtp:<id>`. The password never
-    /// touches UserDefaults.
+    /// SMTP integration: collect host / port / user / password, then — like
+    /// screenpipe's `test()` — actually send one verification email. Only if
+    /// that succeeds do we save the credentials as a single JSON blob in
+    /// SecretStore under `smtp:<id>`. The password never touches UserDefaults.
     private func connectSMTP(_ integration: Integration) {
         let host = smtpHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let port = smtpPort.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -306,13 +309,35 @@ struct ConnectionsView: View {
             loginError = "Fill in host, port, username and password."
             return
         }
-        let creds = SMTPCredentials(host: host, port: port, username: user, password: pass)
-        do {
-            try SecretStore.shared.setJSON(SMTPCredentials.ref(for: integration.id), creds)
-            smtpHost = ""; smtpPort = "587"; smtpUser = ""; smtpPass = ""
-            if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
-        } catch {
-            loginError = error.localizedDescription
+        guard let portNum = Int(port) else {
+            loginError = "Port must be a number (e.g. 465 or 587)."
+            return
+        }
+        // From = username; To = test recipient, defaulting to self.
+        let toTrimmed = smtpTestTo.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipient = toTrimmed.isEmpty ? user : toTrimmed
+
+        connecting = integration.id
+        Task {
+            do {
+                try await SMTPClient.sendTestEmail(host: host, port: portNum,
+                                                   username: user, password: pass,
+                                                   from: user, to: recipient)
+                let creds = SMTPCredentials(host: host, port: port,
+                                            username: user, password: pass,
+                                            testRecipient: toTrimmed)
+                try SecretStore.shared.setJSON(SMTPCredentials.ref(for: integration.id), creds)
+                await MainActor.run {
+                    smtpHost = ""; smtpPort = "587"; smtpUser = ""; smtpPass = ""; smtpTestTo = ""
+                    connecting = nil
+                    if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
+                }
+            } catch {
+                await MainActor.run {
+                    connecting = nil
+                    loginError = "Test email failed — credentials not saved. \(error.localizedDescription)"
+                }
+            }
         }
     }
 

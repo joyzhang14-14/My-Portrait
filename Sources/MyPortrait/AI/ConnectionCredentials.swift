@@ -7,6 +7,9 @@ struct SMTPCredentials: Codable, Hashable {
     var port: String
     var username: String
     var password: String
+    /// Address the verification test email is sent to. The `from` address is
+    /// always `username`. Defaults to `username` (send-to-self) when blank.
+    var testRecipient: String = ""
 
     /// SecretStore key for a given integration id (e.g. `smtp:email-smtp`).
     static func ref(for integrationId: String) -> String { "smtp:\(integrationId)" }
