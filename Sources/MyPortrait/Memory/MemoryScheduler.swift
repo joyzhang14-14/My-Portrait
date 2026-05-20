@@ -46,10 +46,9 @@ final class MemoryScheduler {
     private let rawGraceSeconds: TimeInterval = 2 * 3600
     /// tick 周期。
     private let tickInterval: TimeInterval = 15 * 60
-    /// distill 是一次性整体操作（非 per-day），锁 / 状态记在这个哨兵行。
-    /// 不是真实日期，不会与 yyyy-MM-dd 冲突。anchor 是 distill 这个 processor
-    /// 的锁身份，与运行频率无关。
-    private let distillAnchor = "_distill_anchor"
+    /// distill 锚行的 date 值。anchor 是 distill 这个 processor 的锁身份，与
+    /// 运行频率无关。定义 / 语义见 `ProcessingLogStore.distillAnchorDate`。
+    private let distillAnchor = ProcessingLogStore.distillAnchorDate
 
     /// 心跳超过这个时长视为死锁。默认 10min（单日 Backfill 多轮 LLM 可能 >5min
     /// 仍在正常跑）。可经 env `MYPORTRAIT_SCHEDULER_STALE_MS` 覆盖（测试用）。

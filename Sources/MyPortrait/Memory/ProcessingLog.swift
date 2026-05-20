@@ -32,6 +32,12 @@ enum ProcessingStatus: String, Sendable {
 }
 
 /// processing_log 的四个处理阶段，对应四个 `_status` 列。
+///
+/// 行的语义分两类（见 `ProcessingLogRow.isAnchor`）：
+///   - 日期行（date = "yyyy-MM-dd"）：用 `raw` / `event` / `impact` 三列。
+///     `distill` 列对日期行**无语义**，恒为 idle —— distill 不是 per-day 操作。
+///   - distill 锚行（date = `ProcessingLogStore.distillAnchorDate`）：只用
+///     `distill` 列。distill 是一次性整体操作，锁 / 状态 / retry 全记在这一行。
 enum ProcessingStage: String, CaseIterable, Sendable {
     case raw
     case event
@@ -62,12 +68,21 @@ struct ProcessingLogRow: Sendable {
         case .distill: return distill
         }
     }
+
+    /// 是否为 distill 锚行（而非某个数据日的行）。锚行只用 `distill` 列；
+    /// 日期行只用 `raw` / `event` / `impact` 列。
+    var isAnchor: Bool { date == ProcessingLogStore.distillAnchorDate }
 }
 
 /// processing_log 表的读写客户端。裸 SQLite3、每方法自开连接，风格与
 /// `TimelineDB` 一致 —— Memory 层不引 GRDB。表本身由 `DBSchema` 的
 /// `v8_processing_log` 迁移建好。
 struct ProcessingLogStore: Sendable {
+    /// distill 锚行的 `date` 值。distill 是一次性整体操作（非 per-day），它的
+    /// 锁 / 状态 / retry 记在这一行的 `distill_status` 列。不是真实日期，不会
+    /// 与 "yyyy-MM-dd" 冲突。
+    static let distillAnchorDate = "_distill_anchor"
+
     let dbPath: String
 
     init(path: String? = nil) {
