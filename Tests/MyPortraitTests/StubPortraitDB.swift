@@ -59,6 +59,30 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.resetInProgressAudioChunks")
     }
 
+    func recordAudioChunkFailure(chunkId: Int64) async throws {
+        throw reporter.notImplemented("StubPortraitDB.recordAudioChunkFailure")
+    }
+
+    func resetRetryableFailedAudioChunks() async throws -> Int {
+        throw reporter.notImplemented("StubPortraitDB.resetRetryableFailedAudioChunks")
+    }
+
+    func matchSpeaker(embedding: [Float]) async throws -> Int64? {
+        throw reporter.notImplemented("StubPortraitDB.matchSpeaker")
+    }
+
+    func enrollSpeaker(embedding: [Float]) async throws -> Int64 {
+        throw reporter.notImplemented("StubPortraitDB.enrollSpeaker")
+    }
+
+    func addEmbeddingToSpeaker(speakerId: Int64, embedding: [Float]) async throws {
+        throw reporter.notImplemented("StubPortraitDB.addEmbeddingToSpeaker")
+    }
+
+    func nameSpeakerIfUnnamed(speakerId: Int64, name: String) async throws {
+        throw reporter.notImplemented("StubPortraitDB.nameSpeakerIfUnnamed")
+    }
+
     func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
         throw reporter.notImplemented("StubPortraitDB.mediaPathsBefore")
     }
