@@ -34,7 +34,11 @@ actor SystemAudioCaptureService {
     private var aggregateID: AudioDeviceID = 0
 
     // AVFoundation
-    private let engine = AVAudioEngine()
+    //
+    // **懒构造**：见 AudioCaptureService.engine 注释 ——
+    // AVAudioEngine() 构造即拉起 caulk XPC 通道，是其他无关代码崩 dispatch_assert
+    // 的根因之一。
+    private var engine: AVAudioEngine?
     private var targetFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
 
@@ -114,6 +118,8 @@ actor SystemAudioCaptureService {
         aggregateID = aggregate
 
         // 4. 把 AVAudioEngine 的 input device 切到 aggregate
+        //    真正录之前才构造 engine（懒构造，见 engine 字段注释）。
+        if engine == nil { engine = AVAudioEngine() }
         do {
             try bindAggregateToEngine(aggregateID: aggregate)
         } catch {
@@ -140,6 +146,13 @@ actor SystemAudioCaptureService {
     }
 
     func stop() async {
+        // engine 没构造 → 整条 start() 没跑过 → 直接退。同 AudioCaptureService.stop 注释。
+        guard let engine else {
+            logger.info("SystemAudioCaptureService stopped (was never started)")
+            isRunning = false
+            return
+        }
+
         if engine.isRunning { engine.stop() }
         if tapInstalled {
             engine.inputNode.removeTap(onBus: 0)
@@ -193,6 +206,11 @@ actor SystemAudioCaptureService {
     /// 把 engine.inputNode 的底层 AudioUnit 切到 aggregate device。
     /// 必须在 engine.start() **之前**完成。
     private func bindAggregateToEngine(aggregateID: AudioDeviceID) throws {
+        guard let engine else {
+            throw NSError(domain: "SystemAudio", code: -9, userInfo: [
+                NSLocalizedDescriptionKey: "engine not constructed"
+            ])
+        }
         // 触发 audioUnit 懒构造：先 access inputNode.outputFormat 才能拿到 audioUnit。
         _ = engine.inputNode.outputFormat(forBus: 0)
         guard let au = engine.inputNode.audioUnit else {
@@ -217,6 +235,11 @@ actor SystemAudioCaptureService {
     }
 
     private func configureTapAndStart() throws {
+        guard let engine else {
+            throw NSError(domain: "SystemAudio", code: -8, userInfo: [
+                NSLocalizedDescriptionKey: "engine not constructed"
+            ])
+        }
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 

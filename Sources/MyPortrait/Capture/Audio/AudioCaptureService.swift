@@ -20,7 +20,14 @@ actor AudioCaptureService {
     private let audioDir: URL
 
     // 引擎 + 转换
-    private let engine = AVAudioEngine()
+    //
+    // **AVAudioEngine 必须懒构造**：仅仅 `AVAudioEngine()` 这一步就会拉起
+    // Audio Toolbox + caulk.messenger XPC 通道。caulk 通道一旦活着，进程里
+    // 其他无关代码（比如 SCK 走 caulk 的 reply、Combine sink 走它的 worker）
+    // 撞错队列时就会触发 dispatch_assert_queue_fail 把整个进程 abort 掉。
+    // 实测：audio toggle 一直 OFF + screen toggle 切换也会崩，唯一不崩的姿势
+    // 就是 **从来不构造 AVAudioEngine**。
+    private var engine: AVAudioEngine?
     private var targetFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
 
@@ -84,6 +91,13 @@ actor AudioCaptureService {
     }
 
     func stop() async {
+        // engine 没构造 → 整条 start() 流水线没跑过，下面所有字段都是 nil → 直接退。
+        // 关键防御：避免 lazy 触发 engine 构造（构造本身就会拉起 caulk）。
+        guard let engine else {
+            logger.info("AudioCaptureService stopped (was never started)")
+            return
+        }
+
         // 先停 engine 再 removeTap（Apple 标准顺序），并且只在装过 tap 时才 remove。
         if engine.isRunning { engine.stop() }
         if tapInstalled {
@@ -105,6 +119,14 @@ actor AudioCaptureService {
     // MARK: - 引擎配置 + tap
 
     private func configureEngineAndStartTap() throws {
+        // 真正需要 AVAudioEngine 的时候才构造（实际录音那一瞬间）。见上面 engine 注释。
+        let engine: AVAudioEngine = {
+            if let e = self.engine { return e }
+            let e = AVAudioEngine()
+            self.engine = e
+            return e
+        }()
+
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
