@@ -94,7 +94,14 @@ struct MyPortraitApp: App {
 /// title bar, this leaves a single chrome layer: the title bar with the
 /// traffic-light buttons floating over the content.
 final class ChromelessWindow: NSWindow {
-    override var toolbar: NSToolbar? {
+    // **`nonisolated` 是关键**：NSWindow.toolbar 在 SDK 里是 @MainActor 隔离的，
+    // Swift 6 会在 override 的 getter 里插 `_checkExpectedExecutor`。但 macOS
+    // 的 Accessibility 子系统（NSAccessibilityGetObjectForAttributeUsingLegacyAPI）
+    // 会从**后台线程**调 `accessibilityChildrenAttribute` → 间接调这个 getter →
+    // executor 检查发现不在 main → `dispatch_assert_queue_fail` 整进程崩。
+    // getter 只返回常量 nil、setter 空体，不碰任何 actor 状态，标 nonisolated
+    // 完全安全，且能让任意线程调用它而不触发 executor 断言。
+    nonisolated override var toolbar: NSToolbar? {
         get { nil }
         set { /* refuse — keep nil forever */ }
     }
