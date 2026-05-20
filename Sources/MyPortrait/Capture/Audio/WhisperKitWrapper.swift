@@ -104,12 +104,15 @@ final class WhisperKitWrapper: @unchecked Sendable {
     }
 
     /// 转录一段 16kHz mono float 样本，返回纯文本。
-    /// 近静音（RMS < 阈值）直接判空，不喂 Whisper。
-    func transcribe(samples: [Float], language: String?, vocabulary: [String]) async throws -> String {
+    /// 近静音（RMS < 阈值）直接判空，不喂 Whisper；其余先做归一化 +（可选）音乐过滤。
+    func transcribe(
+        samples: [Float], language: String?, vocabulary: [String], filterMusic: Bool
+    ) async throws -> String {
         try await ensurePipe()
-        guard Self.rms(samples) >= Self.minRMS else { return "" }
+        guard Self.rms(samples) >= Self.minRMS else { return "" }   // RMS 门限走原始音频
+        let processed = AudioPreprocessor.process(samples, filterMusic: filterMusic)
         let results = try await pipe!.transcribe(
-            audioArray: samples,
+            audioArray: processed,
             decodeOptions: decodeOptions(language: language, promptTokens: promptTokens(for: vocabulary))
         )
         return Self.joinText(results)
