@@ -125,6 +125,11 @@ struct MyPortraitApp: App {
             RescoreCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--distill` runs the full PortraitDistiller pass.
+        if args.contains("--distill") {
+            DistillCLI.run()
+            // run() exits the process internally.
+        }
         // `--import-default-pipes` seeds the two built-in pipes into
         // PipeStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {

@@ -531,6 +531,42 @@ enum BackfillDaysCLI {
     }
 }
 
+/// `--distill` — DEV-ONLY entry point that runs the full PortraitDistiller
+/// pass over all categories. Disposable.
+enum DistillCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run() {
+        print("=== distill ===")
+        let state = State()
+        Task.detached {
+            do {
+                let distiller = await PortraitDistiller()
+                let r = try await distiller.distill { p in
+                    print("category \(p.categoryIndex + 1)/\(p.categoryCount): \(p.category) — written so far \(p.written)")
+                }
+                print("=== distill done ===")
+                print("categories processed: \(r.categoriesProcessed)")
+                print("portrait files written: \(r.portraitFilesWritten)")
+                print("portrait files updated: \(r.portraitFilesUpdated)")
+                print("LLM-failed categories: \(r.llmFailedCategories)")
+                print("elapsed: \(String(format: "%.1f", r.elapsed))s")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
 /// `--dump-day <yyyy-MM-dd>` — DEV-ONLY. Exports one day's enriched Tier-1
 /// sessions (id / time / app / window / url / OCR / frame ids) as JSON to
 /// `/tmp/dump_<day>.json`. No LLM call — used to hand data to a subagent
