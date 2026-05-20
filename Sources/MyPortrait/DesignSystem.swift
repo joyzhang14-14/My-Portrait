@@ -100,3 +100,38 @@ struct SidebarBackdrop: View {
         .ignoresSafeArea()
     }
 }
+
+// MARK: - Bouncy icon button
+
+/// Button style for SF Symbol icon buttons: renders the label exactly like
+/// `.plain` (no chrome of its own — the label keeps whatever background it
+/// already has) and plays a one-shot `.bounce` symbol animation each time
+/// the button is pressed, plus a brief dim on press for tactile feedback.
+///
+/// Drop-in replacement for `.buttonStyle(.plain)` on any icon button.
+struct BouncyIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        BouncyLabel(configuration: configuration)
+    }
+
+    /// A nested View is needed so we can hold `@State` — the press counter
+    /// drives `.symbolEffect`, firing one bounce per press-down.
+    private struct BouncyLabel: View {
+        let configuration: Configuration
+        @State private var taps = 0
+
+        var body: some View {
+            configuration.label
+                .symbolEffect(.bounce, value: taps)
+                .opacity(configuration.isPressed ? 0.6 : 1)
+                .onChange(of: configuration.isPressed) { _, pressed in
+                    if pressed { taps += 1 }
+                }
+        }
+    }
+}
+
+extension ButtonStyle where Self == BouncyIconButtonStyle {
+    /// `.buttonStyle(.bouncyIcon)` — see `BouncyIconButtonStyle`.
+    static var bouncyIcon: BouncyIconButtonStyle { BouncyIconButtonStyle() }
+}

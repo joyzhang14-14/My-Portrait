@@ -395,13 +395,13 @@ private struct IdentifiedRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.70))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.70))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)

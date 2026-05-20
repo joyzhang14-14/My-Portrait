@@ -195,7 +195,7 @@ private struct TimelineControlsBar: View {
             } label: {
                 Image(systemName: "chevron.left")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.bouncyIcon)
 
             Button { calendarOpen.toggle() } label: {
                 HStack(spacing: 8) {
@@ -214,7 +214,7 @@ private struct TimelineControlsBar: View {
             } label: {
                 Image(systemName: "chevron.right")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.bouncyIcon)
             .disabled(!canGoForward)
 
             Button {
@@ -223,7 +223,7 @@ private struct TimelineControlsBar: View {
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.bouncyIcon)
 
             Spacer()
         }
@@ -259,7 +259,7 @@ private struct CalendarPopover: View {
                     Image(systemName: "chevron.left").font(.system(size: 11))
                         .frame(width: 26, height: 26)
                         .background(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.18), lineWidth: 1))
-                }.buttonStyle(.plain)
+                }.buttonStyle(.bouncyIcon)
                 Spacer()
                 Text(monthTitle(anchor)).font(.system(size: 13, weight: .semibold))
                 Spacer()
@@ -267,7 +267,7 @@ private struct CalendarPopover: View {
                     Image(systemName: "chevron.right").font(.system(size: 11))
                         .frame(width: 26, height: 26)
                         .background(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.18), lineWidth: 1))
-                }.buttonStyle(.plain)
+                }.buttonStyle(.bouncyIcon)
             }
 
             HStack(spacing: 0) {

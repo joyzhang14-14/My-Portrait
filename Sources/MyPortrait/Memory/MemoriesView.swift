@@ -56,31 +56,31 @@ struct MemoriesView: View {
                 Button {
                     Task { await runBackfill() }
                 } label: { Image(systemName: "arrow.down.circle") }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bouncyIcon)
                 .help("Backfill events from the timeline")
 
                 Button {
                     Task { await runRescore() }
                 } label: { Image(systemName: "sparkles") }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bouncyIcon)
                 .help("Rescore event impacts with LLM")
 
                 Button {
                     Task { await runRebalance() }
                 } label: { Image(systemName: "equal.circle") }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bouncyIcon)
                 .help("Weekly memory budget — scale down impacts if the past 7 days exceed the consolidation budget")
 
                 Button {
                     Task { await runDistill() }
                 } label: { Image(systemName: "wand.and.stars") }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bouncyIcon)
                 .help("Distill portrait files from events")
 
                 Button {
                     Task { await reload() }
                 } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bouncyIcon)
                 .help("Reload from disk")
             }
             .padding(.horizontal, 16)

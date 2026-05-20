@@ -124,7 +124,7 @@ private struct CodeBlockView: View {
                     }
                     .foregroundStyle(.white.opacity(hover || copied ? 0.95 : 0.55))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
 

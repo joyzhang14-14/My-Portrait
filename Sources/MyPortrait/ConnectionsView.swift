@@ -119,7 +119,7 @@ struct ConnectionsView: View {
                     Image(systemName: "xmark").font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.55))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
             }
 
             Divider().background(Color.white.opacity(0.08))

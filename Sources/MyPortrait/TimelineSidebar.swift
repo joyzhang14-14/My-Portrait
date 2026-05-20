@@ -468,7 +468,7 @@ private struct SidebarIconButton: View {
                             .strokeBorder(Theme.stroke, lineWidth: 0.8))
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .help(help)
     }
@@ -498,7 +498,7 @@ private struct NavIconButton: View {
                                               lineWidth: 1))
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .help(section.label)
     }
@@ -660,14 +660,14 @@ private struct RecentRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.textSecondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
                 .help(conv.pinned ? "Unpin" : "Pin")
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.textSecondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
                 .help("Delete")
             }
         }

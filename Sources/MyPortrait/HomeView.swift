@@ -505,7 +505,7 @@ private struct BubbleActions: View {
                 .foregroundStyle(.white.opacity(0.78))
                 .frame(width: 22, height: 22)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .help(help)
     }
 }
@@ -572,7 +572,7 @@ private struct ErrorCard: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.55))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
             }
             .padding(12)
 
@@ -1160,13 +1160,13 @@ private struct TemplateCardView: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.65))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.bouncyIcon)
                         Button(action: onDelete) {
                             Image(systemName: "trash")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.white.opacity(0.65))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.bouncyIcon)
                     }
                 }
                 VStack(alignment: .leading, spacing: 3) {
@@ -1586,7 +1586,7 @@ private struct AttachmentThumb: View {
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, Color.black.opacity(0.75))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
                 .offset(x: 6, y: -6)
             }
         }
@@ -1774,7 +1774,7 @@ private struct SendButton: View {
             }
             .scaleEffect(pressed ? 0.92 : (hover ? 1.04 : 1.0))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .disabled(!enabled)
         .onHover { hover = $0 }
         .simultaneousGesture(

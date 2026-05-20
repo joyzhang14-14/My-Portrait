@@ -24,7 +24,7 @@ struct ContextChipView: View {
                         .font(.system(size: 8.5, weight: .bold))
                         .foregroundStyle(.white.opacity(hover ? 0.95 : 0.55))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
             }
         }
         .padding(.horizontal, compact ? 7 : 8)

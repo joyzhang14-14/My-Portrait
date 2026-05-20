@@ -302,7 +302,7 @@ struct TagListEditor: View {
                             RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08))
                         )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bouncyIcon)
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if !tags.isEmpty {
@@ -319,7 +319,7 @@ struct TagListEditor: View {
                                     .font(.system(size: 8, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.55))
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.bouncyIcon)
                         }
                         .padding(.horizontal, 7).padding(.vertical, 3.5)
                         .background(
