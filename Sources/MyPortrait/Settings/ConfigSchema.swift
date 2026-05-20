@@ -321,11 +321,15 @@ struct RecordingConfig: Codable, Equatable {
     /// Typing 采集暂停开关。true → TypingObserver 丢弃所有 value 变化（不快照、
     /// 不 diff、不写库）。持久化到 TOML，跨重启保留。菜单栏一键切换。
     var typingCapturePaused: Bool = false
+    /// Typing 采集总开关。默认 false —— 读用户全部打字，隐私敏感，须用户显式开。
+    /// true → 正常 app 启动时 TypingObserver 跟随权限门禁运行。
+    var typingCaptureEnabled: Bool = false
     init() {}
     enum CodingKeys: String, CodingKey {
         case audio, screen, system
         case typingKeyCorrelationWindowMs = "typing_key_correlation_window_ms"
         case typingCapturePaused = "typing_capture_paused"
+        case typingCaptureEnabled = "typing_capture_enabled"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -335,6 +339,7 @@ struct RecordingConfig: Codable, Equatable {
         system = c.dflt(SystemConfig.self, .system, system)
         typingKeyCorrelationWindowMs = c.dflt(Int.self, .typingKeyCorrelationWindowMs, typingKeyCorrelationWindowMs)
         typingCapturePaused = c.dflt(Bool.self, .typingCapturePaused, typingCapturePaused)
+        typingCaptureEnabled = c.dflt(Bool.self, .typingCaptureEnabled, typingCaptureEnabled)
     }
 }
 

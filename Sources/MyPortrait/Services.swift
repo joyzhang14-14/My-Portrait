@@ -40,6 +40,9 @@ final class Services {
     let permissions: PermissionMonitor
     /// 音乐播放监测 —— 开启 pauseOnMusicApp 后,音乐类 app 出声时暂停音频采集。
     let musicMonitor: MusicPlaybackMonitor
+    /// 打字采集：把用户在输入框里最终打出的文字写库（学习写作风格）。
+    let typingStore: TypingEventStore
+    let typingObserver: TypingObserver
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -112,6 +115,12 @@ final class Services {
         self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)
         self.permissions = PermissionMonitor()
         self.musicMonitor = MusicPlaybackMonitor()
+
+        // 打字采集。共用同一个 DatabasePool（WAL 多 reader 安全）。
+        // 启停由 startManagedLifecycle 按 recording.typingCaptureEnabled 驱动。
+        let typingStore = TypingEventStore(dbPool: dbImpl.dbPool)
+        self.typingStore = typingStore
+        self.typingObserver = TypingObserver(store: typingStore)
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
@@ -308,6 +317,40 @@ final class Services {
         // 递归重注册——跟 CaptureSettings.startObservingConfig 一个套路。
         pushIgnoreRules()
         observeIgnoreRules()
+
+        // 打字采集。escape hatch：MYPORTRAIT_NO_TYPING=1 完全不启。
+        // 否则按 ConfigStore.recording.typingCaptureEnabled 动态启停 ——
+        // TypingObserver 自身还有 AX / Input Monitoring 权限门禁，没授权会自己 idle。
+        if ProcessInfo.processInfo.environment["MYPORTRAIT_NO_TYPING"] == "1" {
+            logger.info("TypingObserver SKIPPED (MYPORTRAIT_NO_TYPING=1)")
+        } else {
+            applyTypingCapture(enabled: ConfigStore.shared.recording.typingCaptureEnabled)
+            observeTypingCapture()
+        }
+    }
+
+    /// 监听 ConfigStore.recording.typingCaptureEnabled（vim 改 TOML / UI 编辑都走它），
+    /// 翻 true → typingObserver.start()，翻 false → stop()。
+    /// withObservationTracking 一次性，onChange 里递归重注册。
+    private func observeTypingCapture() {
+        let store = ConfigStore.shared
+        withObservationTracking {
+            _ = store.recording.typingCaptureEnabled
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.applyTypingCapture(enabled: ConfigStore.shared.recording.typingCaptureEnabled)
+                self.observeTypingCapture()
+            }
+        }
+    }
+
+    private func applyTypingCapture(enabled: Bool) {
+        if enabled {
+            typingObserver.start()
+        } else {
+            typingObserver.stop()
+        }
     }
 
     /// 把 ConfigStore.privacy 的 ignore 规则推给 capture coordinator。
@@ -346,6 +389,7 @@ final class Services {
         await transcriber.stop()
         await retentionWorker.stop()
         await embeddingWorker.stop()
+        typingObserver.stop()
         powerWatcher.stop()
         permissions.stop()
         settingsCancellables.removeAll()

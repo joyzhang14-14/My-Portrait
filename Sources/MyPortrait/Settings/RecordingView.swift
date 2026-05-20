@@ -16,6 +16,7 @@ struct RecordingSettingsView: View {
             powerModeCard
             audioSection
             screenSection
+            typingSection
             systemSection
         }
     }
@@ -303,6 +304,31 @@ struct RecordingSettingsView: View {
                             ForEach(OCREngine.allCases) { o in Text(o.label).tag(o.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 160)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Typing
+
+    private var typingSection: some View {
+        SettingsCard(title: "Typing capture") {
+            SettingsRow("Capture typing",
+                        description: "Reads the text you finish typing into input fields, used to learn your writing style. All data stays on this Mac and is never uploaded. Password fields and secure inputs are never read.",
+                        icon: "keyboard") {
+                Toggle("", isOn: config.binding(\.recording.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)
+            }
+            if config.current.recording.typingCaptureEnabled {
+                SettingsDivider()
+                SettingsRow("Keyboard correlation window",
+                            description: "Only text changes that happen within this long after a keystroke count as your typing (filters out terminal output, incoming messages, etc.).",
+                            icon: "timer") {
+                    Stepper(value: config.binding(\.recording.typingKeyCorrelationWindowMs),
+                            in: 200...5000, step: 100) {
+                        Text("\(config.current.recording.typingKeyCorrelationWindowMs) ms")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
                     }
                 }
             }
