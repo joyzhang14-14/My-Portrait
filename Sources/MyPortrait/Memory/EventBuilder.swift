@@ -354,63 +354,7 @@ final class EventBuilder {
         }
         let sessionBlock = sessionRows.joined(separator: "\n")
 
-        let staticBody = #"""
-        You cluster raw activity SESSIONS into semantic EVENTS for a personal portrait system.
-
-        An EVENT is what the USER was doing (subject + intent), NOT which app was open.
-        Multiple sessions of the same activity (e.g. opening WeChat 18 times to chat
-        with the same person) are ONE event. Sessions across different apps that serve
-        one task (research in Safari → notes in Notes) are ONE event.
-
-        OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
-        {
-          "events": [
-            {
-              "title": "...",
-              "summary": "...",
-              "type": "experience",
-              "tags": ["..."],
-              "portrait_facets": [],
-              "session_ids": [1, 4, 9],
-              "join_existing": null
-            }
-          ],
-          "skipped": [3, 7]
-        }
-
-        HARD RULES (a violation makes the whole output invalid):
-        - EVERY input session id MUST appear EXACTLY ONCE — either inside some
-          event's "session_ids", or in the top-level "skipped" array.
-        - "title": ≤ 60 chars, describes what the user was DOING. NEVER "App — Window".
-        - "summary": REQUIRED, 3-5 sentences, MUST cite specific topics / names /
-          actions visible in the OCR. NEVER write "the user used X app". If no OCR
-          supports a summary, the session belongs in "skipped", not in an event.
-        - THIRD PERSON always — "the user" / "they", never "you".
-        - "type": "experience" (default, 99%) or "emotion" (only a clear emotional
-          signal in the OCR — frustration, joy, conflict, anxiety).
-        - "session_ids": non-empty list of the ids this event covers.
-        - "join_existing": if this event continues an ACTIVE EVENT listed above, put
-          its id (e.g. "evt_03" or a path id); otherwise null. Only join when the
-          subject matter is genuinely the same thread of work / conversation.
-        - "skipped": sessions with no real content (idle glance, no meaningful OCR).
-
-        portrait_facets — optional, default []. Only attach when the event reflects a
-        STABLE signal about who the user is. Each facet: {"facet": "<name>", "value": "<short>"}.
-          personality   — character trait visible in tone/decisions. RARE.
-          background    — STRICTLY demographic / biographical facts (age, location,
-                          education, family, occupation). NOT "background app".
-          social        — specific named people in the user's life.
-          speech_style  — vocabulary, tone, language preference.
-          interests     — topics/domains the user repeatedly engages with by choice.
-          skills        — a capability the user is practicing, with evidence.
-
-        WRITING THE SUMMARY — be concrete:
-          ❌ "The user was chatting on WeChat."
-          ✅ "The user discussed the AP exam schedule with a friend, confirming the
-             May 12 calculus session and asking about the review sheet."
-        """#
-
-        return staticBody
+        return MemoryPrompts.eventClustering
             + "\n\nDate being processed: " + dayStr
             + "\n\n" + activeBlock
             + "\n\n" + sessionBlock

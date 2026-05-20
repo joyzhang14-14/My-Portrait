@@ -198,21 +198,11 @@ final class PortraitDistiller {
         existing: [PortraitEntry]
     ) -> String {
         var lines: [String] = []
-        lines.append("You are distilling raw EVENTS into long-term PORTRAIT entries about the user.")
+        lines.append(MemoryPrompts.distillIntro)
         lines.append("Target portrait category: **\(category)**")
         lines.append("")
         lines.append("Definitions:")
-        switch category {
-        case "personality":  lines.append("- personality = stable traits, working style, decision style. NOT one-off events.")
-        case "social":       lines.append("- social = relationships, recurring contacts, group memberships.")
-        case "background":   lines.append("- background = biographical facts: schooling, region, family, life history.")
-        case "experiences":  lines.append("- experiences = significant past events that shaped the user.")
-        case "interests":    lines.append("- interests = topics/domains the user repeatedly engages with by choice.")
-        case "speech_style": lines.append("- speech_style = how the user talks/writes (formality, language mix, idioms).")
-        case "skills":       lines.append("- skills = capabilities the user has demonstrated, with evidence.")
-        case "emotions":     lines.append("- emotions = recurring emotional patterns and triggers.")
-        default:             lines.append("- generic personal-portrait entry.")
-        }
+        lines.append(MemoryPrompts.distillDefinition(for: category))
         lines.append("")
 
         // Existing entries.
@@ -244,21 +234,7 @@ final class PortraitDistiller {
         lines.append("")
 
         // Output spec.
-        lines.append("Decide what portrait entries should exist for this category. Respond with ONLY a JSON array (no prose, no markdown fences).")
-        lines.append("Each object is one decision:")
-        lines.append("  { \"action\": \"create\" | \"update\" | \"noop\",")
-        lines.append("    \"slug\": \"snake_case_short\",   // for update, must match an existing slug")
-        lines.append("    \"title\": \"Human-readable title\",")
-        lines.append("    \"body\": \"Markdown body, multiple sentences, third person about the user. Cite specific evidence from events. Use \\n for newlines.\",")
-        lines.append("    \"derived_from\": [\"<event id>\", \"<event id>\"]")
-        lines.append("  }")
-        lines.append("")
-        lines.append("Rules:")
-        lines.append("- ONLY return entries the evidence actually supports. If nothing strong enough, return [].")
-        lines.append("- Prefer UPDATE over duplicate CREATE if an existing slug covers the same trait.")
-        lines.append("- Multiple distinct portrait entries per category are fine.")
-        lines.append("- Slugs use snake_case and ≤40 chars (e.g. swift_ui_development, personal_ai_research, late_night_focus).")
-        lines.append("- Each body should be a real summary citing concrete signals — not 'the user used X app'.")
+        lines.append(MemoryPrompts.distillOutputSpec)
         return lines.joined(separator: "\n")
     }
 

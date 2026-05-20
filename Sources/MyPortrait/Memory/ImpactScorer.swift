@@ -177,50 +177,7 @@ final class ImpactScorer {
     // MARK: - Prompt + parse
 
     private static func buildPrompt(for batch: [(URL, PortraitFile)]) -> String {
-        let header = #"""
-            You score the long-term IMPORTANCE of each user activity event for the user's PERSONAL PROFILE. Scale: 0.0-5.0 (float).
-
-            CALIBRATION PRIOR
-            - The distribution is heavily skewed low. ~80% of events should score 0.0-2.0.
-            - 4.0+ is rare. 4.5+ is exceptional.
-
-            ANCHORS — calibrate strictly. Most events should be 0-2.
-              0.0-0.9  pointless. Examples: scrolling Finder, checking the time, idle background app.
-              1.0-1.9  trivial / passive. Examples: replying to a few messages, glancing at a dashboard, brief tab switching, a song playing in the background.
-              2.0-2.9  routine engagement, focused activity worth noting later. Examples: chatting with someone for a while, reading a short article, finishing homework, looking something up, normal browsing, coping with school stuff.
-              3.0-3.5  noteworthy activity. A solid completed engagement. "I did X" — describes the action. Examples: an hour of focused coding on a specific feature, a substantive phone call, making an appointment, reading a chapter the user cares about.
-              3.6-4.0  noteworthy with weight. Something shifted or was achieved. "X mattered" — describes a result, decision, or change. Examples: completing a project milestone, a conversation that revealed something new, real progress on a stuck problem.
-              4.1-4.8  pivotal event the user might remember for a year, life slightly changed. Examples: deciding on a tech approach, an emotionally significant exchange, a meeting where a real decision was made, a breakthrough realization.
-              4.9-5.0  real change of life. Examples: a life-changing relationship, a life-changing career opportunity, a life-changing event, a life-changing decision. Those who have experienced it will never forget it.
-
-            RULES (read carefully):
-            - Score from the EVENT SUMMARY content, NOT from the app or duration. Long sessions in Finder/Code/Safari that did nothing memorable are 1.
-            - If summary describes a routine browsing/idle/glance pattern, ALWAYS 1-2 regardless of duration or app.
-            - Music note: song titles alone cap at ~1.2. Climb higher only if the summary explicitly shows the user's engagement (e.g. "paused work to focus on this album", "looped the same song for an hour", "this song came up right after the breakup mention").
-            - 4.0+ requires a concrete outcome, decision, milestone, or emotional weight visible in the summary.
-            - To distinguish 3.0-3.5 from 3.6-4.0: 3.0-3.5 uses verbs like did/spent/read/chatted; 3.6-4.0 uses verbs like finished/decided/realized/breakthrough.
-            - Repeated days (high occurrences_days) only mildly raise the score. A daily routine is still a routine.
-            - The `evidence` field MUST quote or paraphrase a SPECIFIC fragment from the summary that justifies the score. If you cannot point to specifics, the score is ≤ 2.0.
-
-            EXAMPLES:
-
-            Input: User had Slack open in the background for 3 hours; sent two short replies. Otherwise watched a YouTube video on cooking.
-            Output: {"id": 1, "evidence": "two short replies, otherwise watched a cooking video", "impact": 1.2}
-
-            Input: User spent 90 minutes coding a new ranking algorithm for the search feature; finally got the unit tests passing after fixing a subtle off-by-one in the merge step.
-            Output: {"id": 2, "evidence": "got the unit tests passing... fixing an off-by-one", "impact": 3.7}
-
-            Input: User accepted a job offer from a startup in Tokyo over a long video call with the founder; planning to move next month.
-            Output: {"id": 3, "evidence": "accepted a job offer... planning to move next month", "impact": 4.9}
-
-            OUTPUT FORMAT:
-            Return ONLY a JSON array. No prose, no markdown fences.
-            [{"id": <int>, "evidence": "<quoted fragment>", "impact": <float>}, ...]
-
-            EVENTS TO SCORE:
-            """#
-
-        var lines: [String] = [header]
+        var lines: [String] = [MemoryPrompts.impactScoring]
         for (i, item) in batch.enumerated() {
             let (_, f) = item
             let id = i + 1
