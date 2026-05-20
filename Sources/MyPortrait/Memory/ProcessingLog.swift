@@ -7,7 +7,11 @@ private let procLog = Logger(subsystem: "com.myportrait.memory", category: "proc
 /// 让 SQLite 在 bind 时立即拷贝字符串（Swift 临时 C 字符串只在调用期有效）。
 private let PL_SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// 单阶段的状态机。idle → pending → in_progress → complete | failed | partial。
+/// 单阶段的状态机。
+/// idle → pending → in_progress → complete | failed | partial | budget_deferred
+///   - failed         ：可重试失败，retry_count 已 +1。
+///   - budget_deferred ：撞 LLM 额度，等额度恢复自动重试，不计 retry_count。
+///   - dead_letter     ：retry_count ≥ 3，放弃自动重试，等用户手动重置。
 enum ProcessingStatus: String, Sendable {
     case idle
     case pending
@@ -15,6 +19,16 @@ enum ProcessingStatus: String, Sendable {
     case complete
     case failed
     case partial
+    case budgetDeferred = "budget_deferred"
+    case deadLetter = "dead_letter"
+
+    /// 该状态是否还需要（自动）处理。pendingDays 据此筛选。
+    var needsWork: Bool {
+        switch self {
+        case .idle, .pending, .failed, .budgetDeferred: return true
+        case .inProgress, .complete, .partial, .deadLetter: return false
+        }
+    }
 }
 
 /// processing_log 的四个处理阶段，对应四个 `_status` 列。
@@ -37,6 +51,7 @@ struct ProcessingLogRow: Sendable {
     var activeProcessor: String? = nil   // 非空 = 有处理器持锁
     var checkpoint: [String] = []        // 已处理的 event id
     var heartbeatMs: Int64? = nil        // 持锁处理器的心跳 UTC ms
+    var retryCount: Int = 0              // 失败重试次数，≥3 转 dead_letter
     var updatedAtMs: Int64 = 0
 
     func status(of stage: ProcessingStage) -> ProcessingStatus {
@@ -94,7 +109,7 @@ struct ProcessingLogStore: Sendable {
 
         let sql = """
             SELECT date, raw_status, event_status, impact_status, distill_status,
-                   active_processor, checkpoint, heartbeat_ms, updated_at_ms
+                   active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms
             FROM processing_log WHERE date = ?
             """
         var stmt: OpaquePointer?
@@ -115,7 +130,7 @@ struct ProcessingLogStore: Sendable {
 
         let sql = """
             SELECT date, raw_status, event_status, impact_status, distill_status,
-                   active_processor, checkpoint, heartbeat_ms, updated_at_ms
+                   active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms
             FROM processing_log ORDER BY date ASC
             """
         var stmt: OpaquePointer?
@@ -147,7 +162,8 @@ struct ProcessingLogStore: Sendable {
         }
         row.heartbeatMs = sqlite3_column_type(stmt, 7) == SQLITE_NULL
             ? nil : sqlite3_column_int64(stmt, 7)
-        row.updatedAtMs = sqlite3_column_int64(stmt, 8)
+        row.retryCount = Int(sqlite3_column_int64(stmt, 8))
+        row.updatedAtMs = sqlite3_column_int64(stmt, 9)
         return row
     }
 
@@ -160,8 +176,8 @@ struct ProcessingLogStore: Sendable {
             let sql = """
                 INSERT OR REPLACE INTO processing_log
                   (date, raw_status, event_status, impact_status, distill_status,
-                   active_processor, checkpoint, heartbeat_ms, updated_at_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
@@ -185,7 +201,8 @@ struct ProcessingLogStore: Sendable {
             } else {
                 sqlite3_bind_null(stmt, 8)
             }
-            sqlite3_bind_int64(stmt, 9, Self.nowMs())
+            sqlite3_bind_int64(stmt, 9, Int64(row.retryCount))
+            sqlite3_bind_int64(stmt, 10, Self.nowMs())
             return sqlite3_step(stmt) == SQLITE_DONE
         }
     }
@@ -208,6 +225,29 @@ struct ProcessingLogStore: Sendable {
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, status.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 2, Self.nowMs())
+            sqlite3_bind_text(stmt, 3, date, -1, PL_SQLITE_TRANSIENT)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    /// retry_count += 1，返回自增后的值。失败 / 崩溃恢复时调。
+    func bumpRetry(date: String) -> Int {
+        let current = row(for: date)?.retryCount ?? 0
+        let next = current + 1
+        _ = setRetryCount(date: date, count: next)
+        return next
+    }
+
+    /// 直接设 retry_count（UI 重置时归零）。
+    @discardableResult
+    func setRetryCount(date: String, count: Int) -> Bool {
+        runWrite { db in
+            let sql = "UPDATE processing_log SET retry_count = ?, updated_at_ms = ? WHERE date = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, Int64(count))
             sqlite3_bind_int64(stmt, 2, Self.nowMs())
             sqlite3_bind_text(stmt, 3, date, -1, PL_SQLITE_TRANSIENT)
             return sqlite3_step(stmt) == SQLITE_DONE
