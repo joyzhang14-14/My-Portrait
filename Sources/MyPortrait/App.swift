@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import GRDB
 import MLX
 import os.log
 
@@ -238,7 +239,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 主 run loop 仍需活着（AX 回调靠它），所以不开窗口但不退出。
         if Self.typingObserveOnly {
             NSApp.setActivationPolicy(.accessory)
-            let observer = TypingObserver()
+            // 开 ~/.portrait/portrait.sqlite 的 DatabasePool，让 observer 真正写库。
+            // prepareDatabase 必须注册 FoundationTokenizer，否则 frames_fts
+            // migration 会因 "no such tokenizer" 失败（同 PortraitDBImpl.init）。
+            let store: TypingEventStore?
+            do {
+                let path = Storage.portraitDBPath
+                try FileManager.default.createDirectory(
+                    at: URL(fileURLWithPath: path).deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                var config = Configuration()
+                config.prepareDatabase { db in
+                    db.add(tokenizer: FoundationTokenizer.self)
+                }
+                let pool = try DatabasePool(path: path, configuration: config)
+                try DBSchema.migrator().migrate(pool)
+                store = TypingEventStore(dbPool: pool)
+                print("[TypingObserver] DB opened: \(path)")
+            } catch {
+                print("[TypingObserver] DB open failed: \(error) — print-only mode")
+                store = nil
+            }
+            let observer = TypingObserver(store: store)
             observer.start()
             typingObserver = observer
             // Ctrl+C → 走 stop() 清理路径再退出。SIGINT 在 main queue 上回调。

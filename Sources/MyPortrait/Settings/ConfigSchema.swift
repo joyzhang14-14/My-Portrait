@@ -507,6 +507,9 @@ struct PrivacyConfig: Codable, Equatable {
     /// excluded from the ScreenCaptureKit buffer (transparent in the frame).
     /// The frame itself is always captured.
     var maskIgnoredApps:        Bool     = true
+    /// Typing 采集的额外 app 黑名单（按 bundle id）。命中的 app TypingObserver
+    /// 整体不订阅 AX。与 TypingPrivacyFilter 的 hardcode 默认黑名单取并集。
+    var typingBlacklistBundleIds: [String] = []
     init() {}
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
@@ -518,6 +521,7 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
         case maskIgnoredApps         = "mask_ignored_apps"
+        case typingBlacklistBundleIds = "typing_blacklist_bundle_ids"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -531,6 +535,7 @@ struct PrivacyConfig: Codable, Equatable {
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
+        typingBlacklistBundleIds = c.dflt([String].self, .typingBlacklistBundleIds, typingBlacklistBundleIds)
     }
 }
 

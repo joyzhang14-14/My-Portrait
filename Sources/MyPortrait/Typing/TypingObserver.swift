@@ -40,9 +40,15 @@ final class TypingObserver {
 
     private var attachment: Attachment?
 
-    /// 当前 focused 元素上一次的快照，用于 diff。
-    /// Step 5 backlog: 升级为 [AXUIElement: AXSnapshot] dict，每 element 独立维护快照，避免切回旧窗口时整段被当 insert。
-    private var lastSnapshot: AXSnapshot?
+    /// 写库目标。nil → 保持 print-only（兼容旧行为）；非 nil → diff 出
+    /// TypingChange 后既 print 也写库。
+    private let store: TypingEventStore?
+
+    /// 每个 AX 元素独立维护的上次快照，用于 diff。
+    /// 切回旧窗口/旧元素不会把整段当 insert —— 各 element 各自一份快照。
+    /// key 用 ElementKey（包 AXUIElement，CFHash/CFEqual 实现 Hashable）。
+    /// element 消失 / app detach 时清理对应条目，避免字典无限涨。
+    private var snapshots: [ElementKey: AXSnapshot] = [:]
 
     /// kAXValueChangedNotification 的 ~200ms debounce task，新事件取消旧 task。
     private var debounceTask: Task<Void, Never>?
@@ -71,6 +77,11 @@ final class TypingObserver {
     private static let debounceMs: UInt64 = 200
 
     // MARK: - 生命周期
+
+    /// - Parameter store: 写库目标。传 nil（默认）→ print-only。
+    init(store: TypingEventStore? = nil) {
+        self.store = store
+    }
 
     func start() {
         guard !running else { return }
@@ -142,7 +153,7 @@ final class TypingObserver {
         }
 
         detach()
-        lastSnapshot = nil
+        snapshots.removeAll()
         print("[TypingObserver] stopped")
     }
 
@@ -174,9 +185,10 @@ final class TypingObserver {
     }
 
     private func handleAppActivated(pid: pid_t) {
-        // 先 detach 旧的，再 attach 新的。
+        // 先 detach 旧的，再 attach 新的。app 切走 → 清空全部快照（旧 app
+        // 的元素已无效，留着只会让字典无限涨）。
         detach()
-        lastSnapshot = nil
+        snapshots.removeAll()
         guard pid > 0,
               let app = NSRunningApplication(processIdentifier: pid) else { return }
         attach(to: app)
@@ -201,6 +213,12 @@ final class TypingObserver {
         guard pid > 0 else { return }
         let bundleId = app.bundleIdentifier ?? "unknown"
         let appName = app.localizedName
+
+        // 隐私闸门：密码管理器 / 机密类 app 整体不订阅 AX。
+        if TypingPrivacyFilter.isBlacklisted(bundleId: bundleId) {
+            print("[TypingObserver] skipped — blacklisted app bundle=\(bundleId)")
+            return
+        }
 
         // 1. 创建 AXObserver。
         var observerRef: AXObserver?
@@ -310,7 +328,6 @@ final class TypingObserver {
         guard err == .success, let focusedRef else {
             // 没有 focused 元素（如切到 Finder 桌面）—— 静默，不订阅。
             attachment = att
-            lastSnapshot = nil
             return
         }
         // CFTypeRef → AXUIElement。AXUIElement 是 CFType，强转安全。
@@ -331,8 +348,8 @@ final class TypingObserver {
 
         att.focusedElement = focused
         attachment = att
-        // 焦点换到新元素 —— 清旧快照，下次 value change 从空 diff。
-        lastSnapshot = nil
+        // 焦点换到新元素 —— 不清快照。snapshots 字典里若已有这个元素的
+        // 旧快照，下次 value change 会基于它正确 diff（切回旧窗口不丢上下文）。
     }
 
     // MARK: - 通知处理
@@ -397,6 +414,14 @@ final class TypingObserver {
         // 读 role —— 用于判断是否文本元素 + 写进快照。
         let role = copyStringAttr(focused, kAXRoleAttribute)
 
+        // 隐私闸门：secure field（密码输入框）不快照、不 diff。
+        if TypingPrivacyFilter.isSecureRole(role) {
+            print("[TypingObserver] skipped — secure field")
+            return
+        }
+
+        let key = ElementKey(element: focused)
+
         // 读全文。
         var valueRef: CFTypeRef?
         let valueErr = AXUIElementCopyAttributeValue(
@@ -412,6 +437,8 @@ final class TypingObserver {
                 reason = "ax-timeout"
             case .invalidUIElement:
                 reason = "element-gone"
+                // 元素已消失 —— 清掉它在字典里的条目，别让字典无限涨。
+                snapshots[key] = nil
             default:
                 reason = "ax-error-\(valueErr.rawValue)"
             }
@@ -430,22 +457,98 @@ final class TypingObserver {
         let snapshot = AXSnapshot(
             value: value,
             selection: selection,
-            timestampMs: Int64(Date().timeIntervalSince1970 * 1000),
+            timestampMs: Self.nowMs(),
             role: role,
             bundleId: att.bundleId,
             appName: att.appName,
             elementHint: nil
         )
 
-        defer { lastSnapshot = snapshot }
+        // 取该 element 自己的上次快照（首次为 nil）。无论如何都更新字典。
+        let old = snapshots[key]
+        defer { snapshots[key] = snapshot }
 
-        // 首次快照无 old，不 diff。
-        guard let old = lastSnapshot else { return }
+        // 首次见到这个元素 —— 只存快照，不 diff（否则整段被当 insert）。
+        guard let old else { return }
 
-        if let change = TextDiff.diff(from: old.value, to: snapshot.value) {
-            let roleStr = role ?? "?"
-            print("[TypingObserver] \(change.kind) \"\(change.text)\" (\(change.languageHint)) — \(att.bundleId) / \(roleStr)")
+        guard let change = TextDiff.diff(from: old.value, to: snapshot.value) else {
+            return
         }
+
+        let roleStr = role ?? "?"
+        print("[TypingObserver] \(change.kind) \"\(change.text)\" (\(change.languageHint)) — \(att.bundleId) / \(roleStr)")
+
+        // 写库（store 注入了才写；nil → 保持 print-only）。
+        if let store {
+            writeChange(change, snapshot: snapshot, prevSnapshot: old,
+                        focused: focused, att: att, store: store)
+        }
+    }
+
+    /// 把一次 TypingChange 落库到 typing_events。
+    ///
+    /// v1 映射：insert/replace 入库，delete 不入。算法待重构。
+    /// （v11 schema 的 typing_events 没有 kind / 删除字段，只存"打出来的文本"。）
+    private func writeChange(_ change: TypingChange,
+                             snapshot: AXSnapshot,
+                             prevSnapshot: AXSnapshot,
+                             focused: AXUIElement,
+                             att: Attachment,
+                             store: TypingEventStore) {
+        // delete 不入库（v1 映射），print 已照打。
+        guard change.kind != .delete else { return }
+
+        // windowTitle：focused 元素所属 window 的 AXTitle，best-effort。
+        let windowTitle = copyWindowTitle(focused)
+
+        // thread_id：60s 内同 (bundle, window) 有事件 → 复用其 threadId；
+        // 没有 → 新建一个 UUID。
+        let threadId: String
+        do {
+            if let last = try store.lastEvent(bundleId: att.bundleId,
+                                              windowTitle: windowTitle,
+                                              withinMs: 60_000) {
+                threadId = last.threadId
+            } else {
+                threadId = UUID().uuidString
+            }
+        } catch {
+            print("[TypingObserver] lastEvent query failed: \(error) — new thread")
+            threadId = UUID().uuidString
+        }
+
+        let event = TypingEvent(
+            id: nil,
+            // 单次 diff 无跨度：started = 上一快照时刻、ended = 本次快照时刻。
+            startedAtMs: prevSnapshot.timestampMs,
+            endedAtMs: snapshot.timestampMs,
+            bundleId: att.bundleId,
+            appName: att.appName,
+            windowTitle: windowTitle,
+            url: nil,                       // 浏览器 url 是 Step 6/7 的事
+            elementRole: snapshot.role,
+            threadId: threadId,
+            text: change.text,              // replace 用新文本
+            charCount: change.text.count,
+            languageHint: change.languageHint,
+            createdAtMs: Self.nowMs()
+        )
+        do {
+            try store.insert(event)
+        } catch {
+            print("[TypingObserver] insert failed: \(error)")
+        }
+    }
+
+    /// 读 focused 元素所属 window 的 kAXTitleAttribute，best-effort（拿不到 nil）。
+    private func copyWindowTitle(_ element: AXUIElement) -> String? {
+        var windowRef: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(
+            element, kAXWindowAttribute as CFString, &windowRef
+        )
+        guard err == .success, let windowRef else { return nil }
+        let window = windowRef as! AXUIElement
+        return copyStringAttr(window, kAXTitleAttribute)
     }
 
     // MARK: - AX 读取小工具
@@ -488,5 +591,19 @@ final class TypingObserver {
         guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
         guard range.location >= 0, range.length >= 0 else { return nil }
         return range.location ..< (range.location + range.length)
+    }
+}
+
+/// `AXUIElement` 是 CFType，不直接 Hashable。包一层用 `CFHash` / `CFEqual`
+/// 实现 Hashable，才能当 `snapshots` 字典的 key。
+private struct ElementKey: Hashable {
+    let element: AXUIElement
+
+    static func == (lhs: ElementKey, rhs: ElementKey) -> Bool {
+        CFEqual(lhs.element, rhs.element)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(CFHash(element))
     }
 }
