@@ -74,14 +74,21 @@ final class PiAgent: @unchecked Sendable {
     /// per-provider key (apikey:anthropic, apikey:openai, …).
     private let apiKeyRefOverride: String?
 
+    /// Extra environment variables injected into the spawned process. Used by
+    /// pipes to pass connection credentials (SMTP_*, OBSIDIAN_VAULT_PATH, …)
+    /// to the agent — mirrors screenpipe's `cmd.env(...)` injection.
+    private let extraEnv: [String: String]
+
     init(provider: Provider = .chatgpt, model: String? = nil,
-         apiKeyRefOverride: String? = nil) throws {
+         apiKeyRefOverride: String? = nil,
+         extraEnv: [String: String] = [:]) throws {
         guard BunInstaller.isInstalled else { throw SpawnError.missingBun }
         guard PiInstaller.isInstalled else { throw SpawnError.missingPi }
 
         self.provider = provider
         self.model = model ?? provider.defaultModel
         self.apiKeyRefOverride = apiKeyRefOverride
+        self.extraEnv = extraEnv
         self.process = Process()
         self.stdoutPipe = Pipe()
         self.stderrPipe = Pipe()
@@ -129,6 +136,8 @@ final class PiAgent: @unchecked Sendable {
         }
         env["BUN_INSTALL"] = AIPaths.bunDir.path
         env["HOME"] = NSHomeDirectory()
+        // Connection credentials supplied by the pipe runner.
+        for (k, v) in extraEnv { env[k] = v }
         process.environment = env
 
         // Anchor Pi's cwd to the user's home so bash / file tools have a

@@ -19,6 +19,32 @@ enum PipeExecutor {
         Task { await execute(pipe) }
     }
 
+    /// Resolve a pipe's attached connections into environment variables that
+    /// get injected into the spawned agent process — mirrors screenpipe's
+    /// per-pipe `cmd.env(...)` credential injection.
+    private static func connectionEnv(for pipe: PipeJob) -> [String: String] {
+        var env: [String: String] = [:]
+        for id in pipe.connections {
+            switch id {
+            case "email-smtp":
+                if let creds: SMTPCredentials = SecretStore.shared.getJSON(
+                        SMTPCredentials.ref(for: id), as: SMTPCredentials.self) {
+                    env["SMTP_HOST"] = creds.host
+                    env["SMTP_PORT"] = creds.port
+                    env["SMTP_USER"] = creds.username
+                    env["SMTP_PASS"] = creds.password
+                }
+            case "obsidian":
+                if let path = ObsidianConfig.vaultPath {
+                    env["OBSIDIAN_VAULT_PATH"] = path
+                }
+            default:
+                break
+            }
+        }
+        return env
+    }
+
     private static func execute(_ pipe: PipeJob) async {
         guard AISetup.shared.isReady else { return }
 
@@ -50,7 +76,9 @@ enum PipeExecutor {
 
         let (provider, model, refOverride) = providerResolver()
         do {
-            let agent = try PiAgent(provider: provider, model: model, apiKeyRefOverride: refOverride)
+            let agent = try PiAgent(provider: provider, model: model,
+                                    apiKeyRefOverride: refOverride,
+                                    extraEnv: connectionEnv(for: pipe))
             try await agent.start()
             let pasted = context.markdown.isEmpty
                 ? pipe.prompt
