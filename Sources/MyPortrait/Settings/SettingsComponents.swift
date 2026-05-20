@@ -398,7 +398,7 @@ struct IgnoredAppPicker: View {
     /// can one-click toggle them. Mirrors screenpipe's default ignore list.
     static let systemEntries: [String] = [
         "Wallpaper", "Dock", "Control Center", "Settings",
-        "Trash", "VPN", "Private", "Incognito",
+        "Trash", "VPN", "Private", "Incognito", ".env",
         "Item-0", "App Icon Window", "Battery", "WiFi", "Clock",
     ]
 
