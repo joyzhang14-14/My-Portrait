@@ -85,7 +85,7 @@ struct MemorySettingsView: View {
     private var decaySection: some View {
         section(
             title: "Weight decay",
-            blurb: "weight = impact × (1 + days_since_last_access)^-α × (1 + log(1 + access_count)). Higher α → faster forgetting."
+            blurb: "weight = impact × (1 + days_since_last_occurrence)^-α × (1 + log(1 + occurrence_days)). Higher α → faster forgetting."
         ) {
             doubleRow("α (decay exponent)",
                       value: cfg.binding(\.memory.alpha),

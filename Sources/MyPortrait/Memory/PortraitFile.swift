@@ -7,9 +7,7 @@ import Foundation
 ///   created: 2026-05-17
 ///   impact: 4
 ///   weight: 3.6
-///   access_count: 7
-///   access_history: [2026-05-09, 2026-05-12, 2026-05-17]
-///   occurrences: [2026-05-17T14:20:00Z]
+///   occurrences: [2026-05-09, 2026-05-17]
 ///   source: meeting_2026-05-17_v2_review
 ///   tags: [产品, 决策]
 ///   superseded_by: null
@@ -45,14 +43,12 @@ struct PortraitFile: Equatable {
                                         // this file. Capped at 5 (then frozen).
     var impactSource: String            // "baseline_duration" / "llm:gpt-5.4" / "user_override"
     var weight: Double                  // computed, ≥0
-    var accessCount: Int
-    var accessHistory: [Date]           // most recent N=10, oldest → newest
     var occurrences: [Date]             // **per-day** deduped occurrence dates.
                                         // One date per day on which the event
                                         // happened, regardless of how many times
-                                        // within that day. Used by the spacing
-                                        // effect: log(1 + count) gives the
-                                        // "how many distinct days" boost.
+                                        // within that day. Drives both decay
+                                        // (days since the last one) and the
+                                        // spacing-effect boost: log(1 + count).
     var eventTitle: String              // short human-readable event name (LLM)
     var eventSummary: String            // one-paragraph description (LLM)
     var eventType: String               // "experience" / "emotion" (LLM)
@@ -71,9 +67,6 @@ struct PortraitFile: Equatable {
     var pinned: Bool
     var archivedAt: Date?
     var body: String                    // raw markdown after frontmatter
-
-    /// Max entries we keep in `accessHistory` (older are dropped).
-    static let accessHistoryCap = 10
 
     /// Initialiser for a brand-new file (sensible defaults).
     init(
@@ -97,8 +90,6 @@ struct PortraitFile: Equatable {
         self.rebalanceCount = 0
         self.impactSource = "baseline_duration"
         self.weight = 0                  // weight pass fills this in
-        self.accessCount = 0
-        self.accessHistory = []
         self.occurrences = [stamp]
         self.eventTitle = eventTitle
         self.eventSummary = eventSummary
@@ -122,8 +113,6 @@ struct PortraitFile: Equatable {
         rebalanceCount: Int,
         impactSource: String,
         weight: Double,
-        accessCount: Int,
-        accessHistory: [Date],
         occurrences: [Date],
         eventTitle: String,
         eventSummary: String,
@@ -144,8 +133,6 @@ struct PortraitFile: Equatable {
         self.rebalanceCount = rebalanceCount
         self.impactSource = impactSource
         self.weight = weight
-        self.accessCount = accessCount
-        self.accessHistory = accessHistory
         // Defensive: collapse any datetime occurrences to startOfDay so
         // legacy files migrate transparently.
         self.occurrences = occurrences.map(Self.truncateToDay).uniqued()
@@ -173,37 +160,15 @@ struct PortraitFile: Equatable {
 
     // MARK: - Derived helpers
 
-    /// Most recent access — for decay calculations.
-    var lastAccessedAt: Date? { accessHistory.last }
+    /// Most recent day this event occurred — for decay calculations.
+    var lastOccurrence: Date? { occurrences.max() }
 
-    /// Whole-day count since last access (≥0). If never accessed, count from
-    /// `created` instead so brand-new files don't get treated as ancient.
-    func daysSinceLastAccess(now: Date = Date()) -> Int {
-        let reference = lastAccessedAt ?? created
+    /// Whole-day count since the last occurrence (≥0). Falls back to
+    /// `created` if `occurrences` is somehow empty.
+    func daysSinceLastOccurrence(now: Date = Date()) -> Int {
+        let reference = lastOccurrence ?? created
         let secs = now.timeIntervalSince(reference)
         return max(0, Int(secs / 86_400))
-    }
-
-    /// Window inside which repeat accesses don't double-count. Stops the
-    /// user from inflating their own access_count by clicking back and
-    /// forth across a few entries in MemoriesView.
-    static let accessDedupWindow: TimeInterval = 5 * 60   // 5 minutes
-
-    /// Append an access timestamp (called at retrieval time). No-ops if the
-    /// last access landed within `accessDedupWindow` seconds — same
-    /// retrieval session shouldn't keep boosting the count.
-    @discardableResult
-    mutating func recordAccess(at when: Date = Date()) -> Bool {
-        if let last = accessHistory.last,
-           when.timeIntervalSince(last) < Self.accessDedupWindow {
-            return false
-        }
-        accessCount += 1
-        accessHistory.append(when)
-        if accessHistory.count > Self.accessHistoryCap {
-            accessHistory.removeFirst(accessHistory.count - Self.accessHistoryCap)
-        }
-        return true
     }
 
     /// Append an occurrence date (Tier 1 merge / repeat detection). Idempotent

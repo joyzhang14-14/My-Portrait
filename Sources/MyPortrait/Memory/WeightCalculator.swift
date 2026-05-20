@@ -2,13 +2,14 @@ import Foundation
 
 /// Pure-function weight model per design doc §6.2:
 ///
-///   weight = impact × power_decay(days_since_last_access) × log(1 + access_count)
+///   weight = impact × power_decay(days_since_last_occurrence) × log(1 + occurrence_days)
 ///
 /// Three terms:
 ///   - `impact`            (1-5, Double, may be micro-adjusted by LLM)
 ///   - `power_decay(d)`    = (1 + d) ^ -α     — power law, not exponential
-///   - `freq_boost(n)`     = log(1 + n)        — log so 100 cheap accesses
-///                                              don't dwarf one big event
+///   - `freq_boost(n)`     = log(1 + n)        — n = number of distinct days
+///                                              the event occurred (spacing
+///                                              effect: recurring events stick)
 ///
 /// All inputs are taken from a PortraitFile; no I/O happens here.
 enum WeightCalculator {
@@ -38,10 +39,10 @@ enum WeightCalculator {
     static func weight(for file: PortraitFile,
                        now: Date = Date(),
                        params: Params = .default) -> Double {
-        let days = Double(file.daysSinceLastAccess(now: now))
+        let days = Double(file.daysSinceLastOccurrence(now: now))
         let decay = pow(1.0 + days, -params.alpha)
-        let freq = log(1.0 + Double(file.accessCount))
-        // log(1) == 0, so a never-accessed file would yield weight 0 if we
+        let freq = log(1.0 + Double(file.occurrences.count))
+        // log(1) == 0, so a single-day event would yield weight 0 if we
         // multiplied straight. Use (1 + log()) so frequency only BOOSTS,
         // never zeroes out the base impact×decay signal.
         let raw = file.impact * decay * (1.0 + freq)

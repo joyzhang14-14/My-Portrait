@@ -52,8 +52,8 @@ enum PortraitFileIO {
 
         let fields = try parseFlatYAML(yaml)
 
-        // Required: created, impact, weight, access_count, access_history,
-        // occurrences, tags, pinned. Optional: source, superseded_by, archived_at.
+        // Required: created, impact, weight, occurrences, tags, pinned.
+        // Optional: source, superseded_by, archived_at.
         let created = try requireDate(fields, "created")
         let impact = try requireDouble(fields, "impact")
         // raw_impact / rebalance_count default to mirror the current impact
@@ -64,8 +64,6 @@ enum PortraitFileIO {
         // scoring) read cleanly without a re-migration.
         let impactSource = (try? optionalString(fields, "impact_source")) ?? nil ?? "baseline_duration"
         let weight = try requireDouble(fields, "weight")
-        let accessCount = try requireInt(fields, "access_count")
-        let accessHistory = try requireDateArray(fields, "access_history")
         let occurrences = try requireDateArray(fields, "occurrences")
         let tags = try requireStringArray(fields, "tags")
         let pinned = try requireBool(fields, "pinned")
@@ -90,8 +88,6 @@ enum PortraitFileIO {
             rebalanceCount: rebalanceCount,
             impactSource: impactSource,
             weight: weight,
-            accessCount: accessCount,
-            accessHistory: accessHistory,
             occurrences: occurrences,
             eventTitle: eventTitle,
             eventSummary: eventSummary,
@@ -106,29 +102,6 @@ enum PortraitFileIO {
             archivedAt: archivedAt,
             body: body
         )
-    }
-
-    // MARK: - Access logging
-
-    /// Record a retrieval event on the file at `url`: bump access_count
-    /// (subject to the dedup window), append timestamp to access_history,
-    /// recompute weight, write back. Returns the updated file so the
-    /// caller can sync in-memory state without a second disk read.
-    ///
-    /// Caller is responsible for triggering this — e.g. MemoriesView when
-    /// the user opens a detail pane. NOT called by the system when
-    /// internal workers (ImpactScorer, Distiller, Backfill) read the file:
-    /// those are housekeeping, not "the user / agent recalled this".
-    @discardableResult
-    static func recordAccess(at url: URL,
-                             when: Date = Date()) throws -> PortraitFile {
-        var file = try read(from: url)
-        let didCount = file.recordAccess(at: when)
-        if didCount {
-            WeightCalculator.recompute(&file)
-            try write(file, to: url)
-        }
-        return file
     }
 
     // MARK: - Write
@@ -150,8 +123,6 @@ enum PortraitFileIO {
         lines.append("rebalance_count: \(f.rebalanceCount)")
         lines.append("impact_source: \(f.impactSource)")
         lines.append("weight: \(formatDouble(f.weight))")
-        lines.append("access_count: \(f.accessCount)")
-        lines.append("access_history: \(formatDateArray(f.accessHistory, dateOnly: true))")
         lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: true))")
         lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")
         lines.append("event_summary: \(formatNullableString(f.eventSummary.isEmpty ? nil : f.eventSummary))")

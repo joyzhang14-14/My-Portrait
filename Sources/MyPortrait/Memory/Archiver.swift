@@ -98,7 +98,7 @@ enum Archiver {
             }
 
             // Rule check.
-            let days = file.daysSinceLastAccess(now: now)
+            let days = file.daysSinceLastOccurrence(now: now)
             let qualifies = file.impact < rule.maxImpact
                 && file.weight < rule.maxWeight
                 && days >= rule.minDaysSinceAccess
