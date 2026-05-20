@@ -220,6 +220,43 @@ enum DBSchema {
                           on: "speaker_embeddings", columns: ["speaker_id"])
         }
 
+        // v8: memory-pipeline scheduler bookkeeping.
+        // 一行一个 UTC 日，四个处理阶段各一状态列：
+        //   raw   = 当天屏幕原始数据是否收齐（纯时间判定）
+        //   event = backfill / EventBuilder 聚类
+        //   impact= ImpactScorer 评分
+        //   distill = PortraitDistiller 蒸馏
+        // 每列状态机 idle → pending → in_progress → complete | failed | partial。
+        // 全局同一时刻只允许一个 (date, processor) 处于 in_progress：
+        //   active_processor 非空即"有处理器在跑"，配 heartbeat 做并发保护，
+        //   checkpoint 存已处理 event id 列表用于崩溃续跑。
+        m.registerMigration("v8_processing_log") { db in
+            try db.create(table: "processing_log") { t in
+                t.column("date", .text).primaryKey()              // UTC yyyy-MM-dd
+                t.column("raw_status", .text).notNull().defaults(to: "idle")
+                t.column("event_status", .text).notNull().defaults(to: "idle")
+                t.column("impact_status", .text).notNull().defaults(to: "idle")
+                t.column("distill_status", .text).notNull().defaults(to: "idle")
+                t.column("active_processor", .text)               // NULL = 无锁
+                t.column("checkpoint", .text)                     // JSON [event id]
+                t.column("heartbeat_ms", .integer)                // UTC ms
+                t.column("updated_at_ms", .integer).notNull().defaults(to: 0)
+            }
+            // distiller 改字段的审计日志，用于 debug / 潜在回滚。
+            try db.create(table: "distill_changelog") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("entity_id", .text).notNull()            // portrait 文件相对路径
+                t.column("field_name", .text).notNull()           // 现仅 "body"
+                t.column("before", .text)
+                t.column("after", .text)
+                t.column("triggered_by_event_id", .text)
+                t.column("llm_reasoning", .text)
+                t.column("timestamp_ms", .integer).notNull()
+            }
+            try db.create(index: "idx_distill_changelog_entity",
+                          on: "distill_changelog", columns: ["entity_id"])
+        }
+
         return m
     }
 }
