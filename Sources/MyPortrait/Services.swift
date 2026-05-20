@@ -133,6 +133,16 @@ final class Services {
                 logger.warning("resetInProgressAudioChunks failed (expected with stub DB): \(String(describing: error), privacy: .public)")
             }
 
+            // 失败重试：把 retry_count 没到上限的 failed chunk 回退 pending 重跑。
+            do {
+                let retried = try await db.resetRetryableFailedAudioChunks()
+                if retried > 0 {
+                    logger.info("retry recovery: reset \(retried, privacy: .public) failed audio chunks to pending")
+                }
+            } catch {
+                logger.warning("resetRetryableFailedAudioChunks failed: \(String(describing: error), privacy: .public)")
+            }
+
             let env = ProcessInfo.processInfo.environment
             if env["MYPORTRAIT_NO_COMPACTOR"] != "1" {
                 await compactor.start()

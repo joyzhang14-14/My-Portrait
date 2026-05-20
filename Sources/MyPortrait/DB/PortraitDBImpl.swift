@@ -210,11 +210,31 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    func recordAudioChunkFailure(chunkId: Int64) async throws {
+        try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE audio_chunks SET status = ?, retry_count = retry_count + 1 WHERE id = ?",
+                arguments: [AudioChunkStatus.failed.rawValue, chunkId]
+            )
+        }
+    }
+
     func resetInProgressAudioChunks() async throws -> Int {
         try await dbPool.write { db in
             try db.execute(
                 sql: "UPDATE audio_chunks SET status = ? WHERE status = ?",
                 arguments: [AudioChunkStatus.pending.rawValue, AudioChunkStatus.inProgress.rawValue]
+            )
+            return db.changesCount
+        }
+    }
+
+    func resetRetryableFailedAudioChunks() async throws -> Int {
+        try await dbPool.write { db in
+            // retry_count < 3：重试上限，超过的保持 failed 不再重跑。
+            try db.execute(
+                sql: "UPDATE audio_chunks SET status = ? WHERE status = ? AND retry_count < 3",
+                arguments: [AudioChunkStatus.pending.rawValue, AudioChunkStatus.failed.rawValue]
             )
             return db.changesCount
         }

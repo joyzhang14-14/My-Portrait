@@ -170,6 +170,23 @@ enum DBSchema {
             try db.execute(sql: "ALTER TABLE audio_transcriptions ADD COLUMN embedding_model TEXT")
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v6 — 转录失败重试计数（retry_count）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // WhisperKit 转录失败时 chunk 标 failed。没这一列时 failed 是终态、
+        // 永不重试，偶发错误（临时资源不足等）会永久丢掉转录文本。
+        //
+        // 有了 retry_count：失败时 +1，启动时把 failed AND retry_count < 3 的
+        // 行回退 pending 重跑；retry_count >= 3 保持 failed 不再重试（有上限）。
+        //
+        // NOT NULL DEFAULT 0：ALTER ADD COLUMN 自动给现有行补 0。
+        m.registerMigration("v6_audio_chunk_retry_count") { db in
+            try db.alter(table: "audio_chunks") { t in
+                t.add(column: "retry_count", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return m
     }
 }

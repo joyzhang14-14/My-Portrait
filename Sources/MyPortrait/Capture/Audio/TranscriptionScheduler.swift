@@ -192,7 +192,7 @@ actor TranscriptionScheduler {
             text = try await whisper.transcribe(wavPath: chunk.filePath)
         } catch {
             logger.error("whisper transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
-            try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .failed)
+            try? await db.recordAudioChunkFailure(chunkId: chunkId)
             return
         }
 
@@ -219,7 +219,7 @@ actor TranscriptionScheduler {
             try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
         } catch {
             logger.error("DB insertTranscription failed: \(String(describing: error), privacy: .public)")
-            try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .failed)
+            try? await db.recordAudioChunkFailure(chunkId: chunkId)
         }
     }
 

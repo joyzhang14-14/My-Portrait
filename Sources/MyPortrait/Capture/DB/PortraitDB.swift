@@ -46,6 +46,11 @@ protocol PortraitDB: Sendable {
     func insertTranscription(_ record: TranscriptionRecord) async throws
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
 
+    /// 转录失败：`status = failed` 且 `retry_count += 1`。
+    /// 启动时 `resetRetryableFailedAudioChunks()` 会把 retry_count 没到上限的
+    /// failed 行回退 pending 重跑。
+    func recordAudioChunkFailure(chunkId: Int64) async throws
+
     /// 启动时崩溃恢复：把所有 `status = in_progress` 的 audio_chunks 回退到 `pending`，
     /// 让 TranscriptionScheduler 下一轮拾起重跑。
     ///
@@ -54,6 +59,12 @@ protocol PortraitDB: Sendable {
     ///
     /// 返回受影响的行数（log 出来方便观察）。
     func resetInProgressAudioChunks() async throws -> Int
+
+    /// 启动时失败重试：把 `status = failed AND retry_count < 3` 的 audio_chunks
+    /// 回退到 `pending` 重跑。retry_count >= 3 的保持 failed，不再重试。
+    ///
+    /// 返回受影响的行数。
+    func resetRetryableFailedAudioChunks() async throws -> Int
 
     // MARK: - 保留期 / 自动删除（RetentionWorker 用）
 
