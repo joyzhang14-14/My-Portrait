@@ -21,7 +21,14 @@ struct ContentView: View {
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
 
-            Divider()
+            // Hairline separator. A plain `Divider()` stops at the title-bar
+            // safe-area inset, leaving a 1px gap there through which the
+            // window's black background shows — so use a Rectangle that
+            // ignores the safe area and runs the full window height.
+            Rectangle()
+                .fill(Theme.stroke)
+                .frame(width: 1)
+                .ignoresSafeArea()
 
             mainPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
