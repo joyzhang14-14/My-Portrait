@@ -15,6 +15,11 @@ struct ConnectionsView: View {
     @State private var connecting: String? = nil
     @State private var loginError: String? = nil
     @State private var apiKeyDraft: String = ""
+    // SMTP form drafts — only used by the `.smtp` integration panel.
+    @State private var smtpHost: String = ""
+    @State private var smtpPort: String = "587"
+    @State private var smtpUser: String = ""
+    @State private var smtpPass: String = ""
 
     private var filteredTiles: [Integration] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -151,6 +156,17 @@ struct ConnectionsView: View {
                     )
             }
 
+            // SMTP form — appears for the unconnected `.smtp` integration.
+            if !appState.isConnected(integration.id),
+               integration.signInMethod == .smtp {
+                VStack(spacing: 8) {
+                    smtpField("SMTP host (e.g. smtp.gmail.com)", text: $smtpHost)
+                    smtpField("Port (e.g. 587)", text: $smtpPort)
+                    smtpField("Username / email", text: $smtpUser)
+                    smtpSecureField("Password / app password", text: $smtpPass)
+                }
+            }
+
             HStack(spacing: 8) {
                 if appState.isConnected(integration.id) {
                     if integration.category == .ai && appState.activeAIId != integration.id {
@@ -202,6 +218,8 @@ struct ConnectionsView: View {
             connectOllama(integration)
         } else if integration.signInMethod == .apiKey {
             connectAPIKey(integration)
+        } else if integration.signInMethod == .smtp {
+            connectSMTP(integration)
         } else if integration.signInMethod == .localApp {
             connectLocalApp(integration)
         } else if integration.signInMethod == .systemAccess {
@@ -220,6 +238,12 @@ struct ConnectionsView: View {
         if let p = Provider.from(integrationId: integration.id),
            let key = p.secretKey {
             SecretStore.shared.delete(key)
+        }
+        if integration.signInMethod == .smtp {
+            SecretStore.shared.delete(SMTPCredentials.ref(for: integration.id))
+        }
+        if integration.id == "obsidian" {
+            SecretStore.shared.delete(ObsidianConfig.vaultPathRef)
         }
         appState.toggleConnect(integration)
         // Re-write models.json without this provider so Pi stops listing it.
@@ -245,6 +269,52 @@ struct ConnectionsView: View {
         } catch {
             loginError = error.localizedDescription
         }
+    }
+
+    /// SMTP integration: collect host / port / user / password, save them as
+    /// a single JSON blob in SecretStore under `smtp:<id>`. The password never
+    /// touches UserDefaults.
+    private func connectSMTP(_ integration: Integration) {
+        let host = smtpHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = smtpPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let user = smtpUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pass = smtpPass
+        guard !host.isEmpty, !port.isEmpty, !user.isEmpty, !pass.isEmpty else {
+            loginError = "Fill in host, port, username and password."
+            return
+        }
+        let creds = SMTPCredentials(host: host, port: port, username: user, password: pass)
+        do {
+            try SecretStore.shared.setJSON(SMTPCredentials.ref(for: integration.id), creds)
+            smtpHost = ""; smtpPort = "587"; smtpUser = ""; smtpPass = ""
+            if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
+        } catch {
+            loginError = error.localizedDescription
+        }
+    }
+
+    private func smtpField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+            )
+    }
+
+    private func smtpSecureField(_ placeholder: String, text: Binding<String>) -> some View {
+        SecureField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+            )
     }
 
     private func connectOllama(_ integration: Integration) {
@@ -347,6 +417,7 @@ struct ConnectionsView: View {
         case .apiKey: return "key.fill"
         case .localApp: return "arrow.down.app.fill"
         case .systemAccess: return "lock.open.fill"
+        case .smtp: return "envelope.fill"
         }
     }
     private func signInLabel(for i: Integration) -> String {
@@ -355,6 +426,7 @@ struct ConnectionsView: View {
         case .apiKey: return "Add API key"
         case .localApp: return "Detect \(i.name)"
         case .systemAccess: return "Grant access"
+        case .smtp: return "Save SMTP settings"
         }
     }
     private func descriptionFor(_ i: Integration) -> String {
@@ -373,6 +445,7 @@ struct ConnectionsView: View {
         case "obsidian":    return "Read & write your Obsidian vault as memory."
         case "notion":      return "Import Notion pages as context."
         case "linear":      return "Sync Linear issues."
+        case "email-smtp":  return "Let pipes send email via your SMTP server. Credentials stay encrypted on this Mac."
         case "spotify":     return "Track listening history as part of activity."
         case "apple-calendar":      return "Access your local Calendar.app events."
         case "google-calendar":     return "OAuth into Google Calendar."
