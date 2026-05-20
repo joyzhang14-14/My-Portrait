@@ -37,6 +37,7 @@ final class Services {
     let modelManager: BGEM3ModelManager
     let embedder: any VectorEmbedder
     let embeddingWorker: EmbeddingWorker
+    let permissions: PermissionMonitor
 
     private let logger = Logger(subsystem: "com.myportrait", category: "services")
     private var settingsCancellables: Set<AnyCancellable> = []
@@ -101,6 +102,7 @@ final class Services {
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
         self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)
+        self.permissions = PermissionMonitor()
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。
@@ -111,6 +113,10 @@ final class Services {
     func startManagedLifecycle() {
         // PowerWatcher 必须在 main thread 注册 IOPS run loop source。
         powerWatcher.start()
+
+        // 权限轮询启动。3 秒一次查 TCC / AX / AVCapture，状态变化会触发
+        // 下面的 Combine sink 重新评估 capture toggle 是否能 effective。
+        permissions.start()
 
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
@@ -153,12 +159,53 @@ final class Services {
             }
         }
 
-        // 屏幕采集订阅。effective = enabled && !paused。
+        // **权限请求触发**：用户把 toggle 切 ON 时，如果权限不在 granted，
+        // 主动调系统标准对话框（NotDetermined 状态）或开 Settings（Denied）。
+        // PermissionMonitor 轮询会捕到授权结果，上面的 CombineLatest3 sink
+        // 自动重新评估。
+        settings.$screenCaptureEnabled
+            .removeDuplicates()
+            .sink { [weak self] enabled in
+                guard let self, enabled else { return }
+                let perm = self.permissions.screenRecording
+                if perm == .granted { return }
+                self.logger.info("screen toggle ON but permission=\(String(describing: perm), privacy: .public) — requesting")
+                self.permissions.requestScreenRecording()
+                if perm == .denied {
+                    // Denied 状态系统对话框不会弹，跳 Settings 让用户手动开
+                    self.permissions.openSettings(for: .screen)
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$audioCaptureEnabled
+            .removeDuplicates()
+            .sink { [weak self] enabled in
+                guard let self, enabled else { return }
+                let perm = self.permissions.microphone
+                if perm == .granted { return }
+                self.logger.info("audio toggle ON but permission=\(String(describing: perm), privacy: .public) — requesting")
+                self.permissions.requestMicrophone()
+                if perm == .denied {
+                    self.permissions.openSettings(for: .microphone)
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        // 屏幕采集订阅。effective = enabled && !paused && screenRecording granted。
         // CombineLatest 在任一上游变化时重算；pauseUntil 自动到期由 CaptureSettings
         // 内的 Task 把 pauseUntil 置回 nil → 再次触发本 sink。
-        Publishers.CombineLatest(settings.$screenCaptureEnabled, settings.$pauseUntil)
-            .map { enabled, until in
+        // **权限**：PermissionMonitor 3 秒轮询；用户在 System Settings 里授权后
+        // 这个 publisher 会变 granted，sink 自动重新评估，coordinator 自动启动，
+        // 不需要用户再 toggle 一次。
+        Publishers.CombineLatest3(
+            settings.$screenCaptureEnabled,
+            settings.$pauseUntil,
+            permissions.$screenRecording
+        )
+            .map { enabled, until, perm in
                 if let until, until > Date() { return false }
+                guard perm.isGranted else { return false }
                 return enabled
             }
             .removeDuplicates()
@@ -167,10 +214,15 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 音频采集订阅。effective = enabled && !paused。
-        Publishers.CombineLatest(settings.$audioCaptureEnabled, settings.$pauseUntil)
-            .map { enabled, until in
+        // 音频采集订阅。effective = enabled && !paused && microphone granted。
+        Publishers.CombineLatest3(
+            settings.$audioCaptureEnabled,
+            settings.$pauseUntil,
+            permissions.$microphone
+        )
+            .map { enabled, until, perm in
                 if let until, until > Date() { return false }
+                guard perm.isGranted else { return false }
                 return enabled
             }
             .removeDuplicates()
@@ -179,10 +231,15 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 系统音频订阅。同样的暂停语义。
-        Publishers.CombineLatest(settings.$systemAudioCaptureEnabled, settings.$pauseUntil)
-            .map { enabled, until in
+        // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
+        Publishers.CombineLatest3(
+            settings.$systemAudioCaptureEnabled,
+            settings.$pauseUntil,
+            permissions.$microphone
+        )
+            .map { enabled, until, perm in
                 if let until, until > Date() { return false }
+                guard perm.isGranted else { return false }
                 return enabled
             }
             .removeDuplicates()
@@ -217,6 +274,7 @@ final class Services {
         await retentionWorker.stop()
         await embeddingWorker.stop()
         powerWatcher.stop()
+        permissions.stop()
         settingsCancellables.removeAll()
     }
 
