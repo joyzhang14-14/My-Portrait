@@ -321,6 +321,7 @@ struct MemoriesView: View {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
             if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
             guard let file = try? PortraitFileIO.read(from: url) else { continue }
             let categoryPath = file.category
             let title = file.eventTitle.isEmpty
