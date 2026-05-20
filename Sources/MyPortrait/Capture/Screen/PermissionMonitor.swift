@@ -4,6 +4,7 @@ import ApplicationServices
 import Combine
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 import os.log
 
 /// 系统级权限实时监控。仿 `My-Orphies/crates/screenpipe-core/src/permissions.rs`
@@ -55,6 +56,15 @@ final class PermissionMonitor: ObservableObject {
             }
         }
         logger.info("PermissionMonitor started (poll=\(self.pollInterval)s)")
+
+        // **启动即向 TCC 注册屏幕录制**。不绑定 capture toggle —— 一个会录屏的
+        // app 本来就该在启动时让自己出现在系统设置的「屏幕录制」列表里。
+        // requestScreenRecording 内部 probe 一次 SCShareableContent，首次会弹
+        // 系统对话框 + 注册 app。已授权则跳过（不弹）。
+        if screenRecording != .granted {
+            logger.info("screen recording not granted at launch — probing to register with TCC")
+            requestScreenRecording()
+        }
     }
 
     func stop() {
@@ -85,18 +95,27 @@ final class PermissionMonitor: ObservableObject {
 
     /// 请求 screen recording 权限。如果当前 binary 不在 TCC，弹标准系统对话框；
     /// 如果是 Denied 状态（用户之前主动拒过），CGRequestScreenCaptureAccess()
-    /// 不会再弹，只能跳到 System Settings。
-    /// 调用后立刻 refresh 一次拿到最新状态（用户可能秒授权）。
-    /// 返回 `CGRequestScreenCaptureAccess()` 的结果（true = 已授权）。
+    /// 触发屏幕录制权限请求。
     ///
-    /// **必须调它而不是只 openSettings**：首次调用会弹系统标准对话框 **并把
-    /// app 注册进 TCC 的"屏幕录制"列表**。从没调过的话，app 可能根本不在那个
-    /// 列表里 / 状态不对，用户在系统设置里怎么勾都没用。
-    @discardableResult
-    func requestScreenRecording() -> Bool {
-        let granted = CGRequestScreenCaptureAccess()
-        refresh()
-        return granted
+    /// **关键**：`CGRequestScreenCaptureAccess()` 是 CGWindowList 时代的老 API，
+    /// macOS 14+/26 上对 ScreenCaptureKit app 不一定弹窗也不一定注册。真正能
+    /// 触发系统提示 + 把 app 加进"屏幕录制"列表的，是**实际发起一次
+    /// `SCShareableContent` 查询**。所以这里两个都做：先调老 API（无害），
+    /// 再真正 probe 一次 SCK —— 没权限会抛错（预期内），但这次调用本身已经
+    /// 让 macOS 把 app 注册进 TCC + 弹出系统对话框。
+    func requestScreenRecording() {
+        _ = CGRequestScreenCaptureAccess()
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await SCShareableContent.excludingDesktopWindows(
+                    false, onScreenWindowsOnly: true
+                )
+            } catch {
+                // 没权限 → 抛错，预期内。注册副作用已经发生。
+                self?.logger.info("SCShareableContent probe threw (expected if not yet granted): \(String(describing: error), privacy: .public)")
+            }
+            self?.refresh()
+        }
     }
 
     /// 请求 microphone。NotDetermined 状态会弹标准对话框；Denied 状态系统对话框

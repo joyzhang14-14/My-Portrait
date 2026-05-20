@@ -177,18 +177,14 @@ final class Services {
                 let userInitiated = screenSinkSeenInitial
                 screenSinkSeenInitial = true
                 guard let self, enabled else { return }
+                _ = userInitiated
                 if self.permissions.screenRecording == .granted { return }
-                self.logger.info("screen enabled, permission not granted — requesting (userInitiated=\(userInitiated))")
-                // 无条件请求一次（注册 app + 首次弹系统对话框）。
-                let granted = self.permissions.requestScreenRecording()
-                if !granted && userInitiated {
-                    // 用户主动切的、还是没权限 → 弹确认框引导去系统设置。
-                    self.confirmThenOpenSettings(
-                        title: "Screen Recording Permission Needed",
-                        body: "Enable My Portrait under System Settings, then quit and reopen the app — screen recording permission only takes effect after a restart. Open System Settings now?",
-                        perm: .screen
-                    )
-                }
+                self.logger.info("screen enabled, permission not granted — requesting")
+                // requestScreenRecording 内部会真正 probe 一次 SCK —— 首次会弹
+                // 系统对话框 + 把 app 注册进 TCC「屏幕录制」列表。授权结果由
+                // PermissionMonitor 的 3 秒轮询捕获，上面的 CombineLatest3 sink
+                // 自动重新评估。所以这里不需要再弹我们自己的确认框。
+                self.permissions.requestScreenRecording()
             }
             .store(in: &settingsCancellables)
 

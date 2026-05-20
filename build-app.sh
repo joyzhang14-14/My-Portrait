@@ -1,104 +1,49 @@
 #!/bin/bash
-# 把 SwiftPM 裸可执行文件包成签名的 MyPortrait.app。
+# 构建 MyPortrait.xcodeproj 并**独立启动**产出的 .app。
 #
-# 为什么需要：SwiftPM 项目 `xcodebuild` 产出的是裸 Mach-O 可执行文件，不是
-# .app bundle。macOS TCC（屏幕录制 / 麦克风权限）对裸文件按 cdhash 匹配 ——
-# 每次 rebuild cdhash 都变，授权立刻失效。
+# 为什么不用 Xcode ⌘R 测 capture：⌘R 把 app 跑在 Xcode debugger 之下，
+# macOS TCC（屏幕录制 / 麦克风权限）会把权限请求归属到宿主 Xcode，
+# My Portrait 自己永远拿不到授权条目。必须独立启动（不挂 debugger）。
 #
-# 包成 .app + 用固定证书（MyPortraitDev）签名后，TCC 改按"designated
-# requirement"（证书链）匹配，跨 rebuild 稳定 —— 授权一次永久有效。
+# xcodeproj 本身已配 MyPortraitDev 自动签名 —— 这里不再手动组 bundle / 签名，
+# 直接编 + open。
 #
-# 用法：./build-app.sh [--run]
-#   --run  打包完直接启动 MyPortrait.app
+# 用法: ./build-app.sh         只构建
+#       ./build-app.sh --run   构建后独立启动
 set -euo pipefail
-
 cd "$(dirname "$0")"
 
+PROJECT="MyPortrait.xcodeproj"
 SCHEME="MyPortrait"
-DERIVED="/tmp/mp-xc"
-BUILD_DIR="$DERIVED/Build/Products/Debug"
-APP="build/MyPortrait.app"
-BUNDLE_ID="com.joyzhang.myportrait"
-SIGN_IDENTITY="MyPortraitDev"
+DERIVED="$HOME/Library/Developer/Xcode/DerivedData"
 
-echo "==> xcodebuild ($SCHEME)"
-xcodebuild -scheme "$SCHEME" -destination 'platform=macOS' \
-    -derivedDataPath "$DERIVED" build 2>&1 | tail -3
+# 源文件增删后 xcodeproj 的静态文件列表会过期，先 regenerate 保险。
+if command -v xcodegen >/dev/null 2>&1; then
+    echo "==> xcodegen generate"
+    xcodegen generate --quiet
+fi
 
-if [ ! -f "$BUILD_DIR/MyPortrait" ]; then
-    echo "ERROR: binary not found at $BUILD_DIR/MyPortrait"
+echo "==> xcodebuild ($PROJECT / $SCHEME)"
+xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
+    -destination 'platform=macOS' -configuration Debug build 2>&1 | tail -3
+
+# 找出刚构建的 .app（按修改时间取最新）
+APP=$(find "$DERIVED"/MyPortrait-*/Build/Products/Debug -maxdepth 1 -name "MyPortrait.app" \
+    -exec stat -f "%m %N" {} \; 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+
+if [ -z "$APP" ] || [ ! -d "$APP" ]; then
+    echo "ERROR: built MyPortrait.app not found under DerivedData"
     exit 1
 fi
 
-echo "==> assembling $APP"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
-mkdir -p "$APP/Contents/Resources"
-
-# 1) 主可执行文件
-cp "$BUILD_DIR/MyPortrait" "$APP/Contents/MacOS/MyPortrait"
-
-# 2) SPM 资源 bundle → Contents/Resources/。
-#    .app 里 SPM 的 Bundle.module 查 Bundle.main.resourceURL（= Contents/Resources/），
-#    **不查** Contents/MacOS/。裸 binary 能用是因为 resourceURL 就是 exe 同级目录。
-#    mlx-swift_Cmlx.bundle 里有 default.metallib，MLX 推理离了它就崩。
-for b in "$BUILD_DIR"/*.bundle; do
-    [ -e "$b" ] || continue
-    cp -R "$b" "$APP/Contents/Resources/"
-done
-
-# 3) Info.plist —— 有了它进程才算"跑在 .app bundle 里"，bundle identifier 才非空。
-cat > "$APP/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>MyPortrait</string>
-    <key>CFBundleIdentifier</key>
-    <string>$BUNDLE_ID</string>
-    <key>CFBundleName</key>
-    <string>MyPortrait</string>
-    <key>CFBundleDisplayName</key>
-    <string>My Portrait</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
-    <key>LSUIElement</key>
-    <false/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>My Portrait records microphone audio to build your personal activity timeline.</string>
-    <key>NSCameraUsageDescription</key>
-    <string>My Portrait does not use the camera.</string>
-</dict>
-</plist>
-PLIST
-
-# 4) 签名 —— 固定证书 + 固定 bundle id。
-#    bundle 在 Contents/Resources/ 里只是资源，codesign 会随 .app 一起密封，
-#    不用单独签。直接签 .app 本体即可。
-#    不上 hardened runtime（dev build；省去 entitlement 配置）。
-echo "==> codesign ($SIGN_IDENTITY) app"
-codesign --force --sign "$SIGN_IDENTITY" \
-    --identifier "$BUNDLE_ID" \
-    --timestamp=none \
-    "$APP" 2>&1
-
-echo "==> codesign verify"
-codesign --verify --verbose=2 "$APP" 2>&1 || true
-
 echo ""
 echo "built: $APP"
-echo "bundle id: $BUNDLE_ID  signed: $SIGN_IDENTITY"
+codesign -d -r- "$APP" 2>&1 | grep -E "designated" || true
 
 if [ "${1:-}" = "--run" ]; then
-    echo "==> launching"
+    # 杀掉可能在跑的旧实例（含 Xcode ⌘R 起的），再独立启动新的。
+    pkill -f "MyPortrait.app/Contents/MacOS/MyPortrait" 2>/dev/null || true
+    sleep 1
+    echo "==> launching standalone (no debugger)"
     open "$APP"
 fi
