@@ -12,6 +12,7 @@ struct SpeakersSettingsView: View {
     @State private var search = ""
     @State private var organizing = false
     @State private var organizeError: String? = nil
+    @State private var showCountdown = false
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -26,6 +27,11 @@ struct SpeakersSettingsView: View {
                      subtitle: "Voices captured from your microphone and system audio") {
 
             ProgressHeader(identified: identified.count, total: rows.count)
+
+            VoiceTrainingCard(
+                existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty },
+                onStart: { showCountdown = true }
+            )
 
             if !unidentified.isEmpty {
                 AttentionBanner(count: unidentified.count)
@@ -66,6 +72,17 @@ struct SpeakersSettingsView: View {
             }
         }
         .task { reload() }
+        .sheet(isPresented: $showCountdown) {
+            VoiceTrainingSheet(
+                onFinish: {
+                    showCountdown = false
+                    VoiceTrainer.shared.assign(
+                        name: ConfigStore.shared.current.recording.audio.userName
+                    )
+                },
+                onCancel: { showCountdown = false }
+            )
+        }
     }
 
     // MARK: - Toolbar
@@ -469,6 +486,205 @@ private struct StatPill: View {
         .foregroundStyle(.white.opacity(0.60))
         .padding(.horizontal, 6).padding(.vertical, 2.5)
         .background(Capsule().fill(Color.white.opacity(0.05)))
+    }
+}
+
+// MARK: - Voice training
+
+/// 声纹训练卡片。复刻 screenpipe 的格式：填名字 → Start training → 30s 倒计时
+/// 期间正常说话 → 后台把那段时间窗的麦克风声纹簇命名成你。
+private struct VoiceTrainingCard: View {
+    let existingNames: [String]
+    let onStart: () -> Void
+
+    private var cfg: ConfigStore { ConfigStore.shared }
+    private var trainer: VoiceTrainer { VoiceTrainer.shared }
+
+    private var name: String { cfg.current.recording.audio.userName }
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+    private var audioOn: Bool { cfg.current.recording.audio.enabled }
+    private var speakerOn: Bool { cfg.current.recording.audio.speakerIdEnabled }
+    private var blocked: Bool { trimmedName.isEmpty || !audioOn || !speakerOn || trainer.isRunning }
+
+    private var suggestions: [String] {
+        let q = trimmedName.lowercased()
+        guard !q.isEmpty else { return [] }
+        return Array(existingNames
+            .filter { $0.lowercased().hasPrefix(q) && $0.lowercased() != q }
+            .prefix(3))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "mic.badge.plus")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.purple.opacity(0.9))
+                Text("Voice Training")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.95))
+            }
+            Text("Read a short passage aloud for ~30 seconds so My Portrait can recognise your voice across recordings.")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Text("Your name")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.70))
+                TextField("e.g. Louis", text: cfg.binding(\.recording.audio.userName))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 7)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    )
+                    .frame(maxWidth: 200)
+            }
+
+            if !suggestions.isEmpty {
+                HStack(spacing: 6) {
+                    Text("existing:")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.40))
+                    ForEach(suggestions, id: \.self) { s in
+                        Button(s) { cfg.mutate { $0.recording.audio.userName = s } }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.blue.opacity(0.85))
+                    }
+                }
+            }
+
+            if !audioOn {
+                warningRow("Turn on audio recording first.")
+            } else if !speakerOn {
+                warningRow("Turn on speaker identification first.")
+            }
+
+            HStack {
+                statusLine
+                Spacer()
+                Button(action: onStart) {
+                    Text("Start training")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(LinearGradient(
+                                    colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.28)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .overlay(RoundedRectangle(cornerRadius: 7)
+                                    .stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(blocked)
+                .opacity(blocked ? 0.45 : 1)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+        )
+    }
+
+    @ViewBuilder private var statusLine: some View {
+        switch trainer.phase {
+        case .idle:
+            EmptyView()
+        case .matching:
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.small)
+                Text("Matching your voice — may take a few minutes…")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.60))
+            }
+        case .success(let n):
+            Text("✓ Trained as \(n)")
+                .font(.system(size: 11)).foregroundStyle(Color.green.opacity(0.90))
+        case .failure(let msg):
+            Text(msg)
+                .font(.system(size: 11)).foregroundStyle(Color.red.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func warningRow(_ text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+            Text(text).font(.system(size: 11))
+        }
+        .foregroundStyle(Color.orange.opacity(0.85))
+    }
+}
+
+/// 30 秒倒计时对话框。期间用户照着 passage 朗读，常驻采集在录音。
+private struct VoiceTrainingSheet: View {
+    let onFinish: () -> Void
+    let onCancel: () -> Void
+
+    @State private var secondsLeft = 30
+    @State private var finished = false
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let passage = """
+        The morning light moved slowly across the kitchen floor. \
+        I poured a cup of coffee and watched the rain trace thin lines \
+        down the window. Somewhere outside a dog barked twice, then the \
+        street was quiet again. Days like this feel unhurried, as if the \
+        clock had quietly agreed to wait for me.
+        """
+
+    var body: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 6) {
+                Circle().fill(Color.red).frame(width: 8, height: 8)
+                Text("recording · \(30 - secondsLeft)s")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Read this aloud")
+                .font(.system(size: 15, weight: .semibold))
+
+            Text(passage)
+                .font(.system(size: 13))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.primary.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+
+            Text("\(secondsLeft)")
+                .font(.system(size: 40, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+
+            HStack(spacing: 10) {
+                Button("Cancel") { onCancel() }
+                    .buttonStyle(.bordered)
+                Button("Done") { finish() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(28)
+        .frame(width: 380)
+        .onReceive(timer) { _ in
+            guard !finished else { return }
+            if secondsLeft > 1 { secondsLeft -= 1 } else { finish() }
+        }
+    }
+
+    private func finish() {
+        guard !finished else { return }
+        finished = true
+        onFinish()
     }
 }
 

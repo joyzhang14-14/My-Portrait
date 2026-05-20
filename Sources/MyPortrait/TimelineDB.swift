@@ -586,6 +586,36 @@ struct TimelineDB: Sendable {
         )
     }
 
+    /// 时间窗 [fromMs, toMs] 内、来自麦克风输入设备的音频块被分到的所有
+    /// speaker_id（含重复，调用方计票）。声纹训练用。
+    func inputSpeakerVotes(fromMs: Int64, toMs: Int64) -> [Int64] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT t.speaker_id
+            FROM audio_transcriptions t
+            JOIN audio_chunks c ON c.id = t.audio_chunk_id
+            WHERE c.is_input = 1
+              AND c.recorded_at_ms BETWEEN ? AND ?
+              AND t.speaker_id IS NOT NULL
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, fromMs)
+        sqlite3_bind_int64(stmt, 2, toMs)
+        var out: [Int64] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            out.append(sqlite3_column_int64(stmt, 0))
+        }
+        return out
+    }
+
     /// speakers 表的单语句写入小工具。
     private func runSpeakerWrite(sql: String, bind: (OpaquePointer?) -> Void) -> Bool {
         guard exists else { return false }
