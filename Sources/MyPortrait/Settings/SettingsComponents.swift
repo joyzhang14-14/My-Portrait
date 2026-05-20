@@ -306,7 +306,7 @@ struct TagListEditor: View {
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if !tags.isEmpty {
-                HStack(spacing: 6) {
+                FlowLayout(spacing: 6) {
                     ForEach(tags, id: \.self) { tag in
                         HStack(spacing: 4) {
                             Text(tag)
@@ -339,6 +339,47 @@ struct TagListEditor: View {
         guard !v.isEmpty, !tags.contains(v) else { return }
         tags.append(v)
         draft = ""
+    }
+}
+
+/// 自动换行的横向布局：一行放不下就折到下一行。SwiftUI 的 HStack 不会换行，
+/// chip 多了会被挤压；用这个让 chip 流式排布、容器高度自适应。
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for sv in subviews {
+            let size = sv.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: maxWidth == .infinity ? x : maxWidth, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for sv in subviews {
+            let size = sv.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            sv.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 
@@ -394,7 +435,7 @@ struct IgnoredAppPicker: View {
                     .onSubmit(addCustom)
             }
             if !apps.isEmpty {
-                HStack(spacing: 6) {
+                FlowLayout(spacing: 6) {
                     ForEach(apps, id: \.self) { app in
                         HStack(spacing: 4) {
                             Text(app)
