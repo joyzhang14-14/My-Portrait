@@ -319,7 +319,7 @@ final class PortraitDistiller {
         var file = PortraitFile(
             created: Date(),
             impact: 3,                    // distilled-portrait baseline
-            body: renderBody(decision: decision),
+            body: renderBody(decision: decision, derivedIds: decision.derivedFromEventIds),
             source: "distilled",
             tags: [category, "portrait"],
             firstOccurrence: Date(),
@@ -340,9 +340,16 @@ final class PortraitDistiller {
         let url = PortraitPaths.categoryDir(category).appendingPathComponent(decision.slug + ".md")
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         var file = try PortraitFileIO.read(from: url)
+        // 合并 derived 溯源：旧 body 里已有的 `[[id]]` 与本轮 LLM 引用的
+        // 并集（旧的在前、保序），否则 update 会把历史溯源链接抹掉。
+        let oldDerived = Self.extractDerivedIds(from: file.body)
+        var mergedDerived = oldDerived
+        for id in decision.derivedFromEventIds where !mergedDerived.contains(id) {
+            mergedDerived.append(id)
+        }
         file.eventTitle = decision.title
         file.eventSummary = decision.body
-        file.body = renderBody(decision: decision)
+        file.body = renderBody(decision: decision, derivedIds: mergedDerived)
         file.recordOccurrence(on: Date())    // mark as "still relevant today"
         WeightCalculator.recompute(&file)
         try PortraitFileIO.write(file, to: url)
@@ -365,15 +372,27 @@ final class PortraitDistiller {
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func renderBody(decision: ParsedDecision) -> String {
+    /// 从已渲染 body 的 `**Derived from events:**` 块抽出 `[[id]]` 列表。
+    nonisolated private static func extractDerivedIds(from body: String) -> [String] {
+        var out: [String] = []
+        for raw in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("- [[") && line.hasSuffix("]]") else { continue }
+            let inner = line.dropFirst(4).dropLast(2)
+            if !inner.isEmpty { out.append(String(inner)) }
+        }
+        return out
+    }
+
+    private func renderBody(decision: ParsedDecision, derivedIds: [String]) -> String {
         var lines: [String] = []
         lines.append("# \(decision.title)")
         lines.append("")
         lines.append(decision.body)
-        if !decision.derivedFromEventIds.isEmpty {
+        if !derivedIds.isEmpty {
             lines.append("")
             lines.append("**Derived from events:**")
-            for eid in decision.derivedFromEventIds.prefix(20) {
+            for eid in derivedIds.prefix(20) {
                 lines.append("- [[\(eid)]]")
             }
         }
