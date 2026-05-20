@@ -7,12 +7,15 @@ import SwiftUI
 struct MemorySettingsView: View {
     private let cfg = ConfigStore.shared
 
+    @State private var attention: [MemoryScheduler.AttentionItem] = []
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
                 schedulerSection
+                attentionSection
                 budgetSection
                 decaySection
                 archiveSection
@@ -25,6 +28,11 @@ struct MemorySettingsView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task { reloadAttention() }
+    }
+
+    private func reloadAttention() {
+        attention = MemoryScheduler.shared.attentionDays()
     }
 
     private var header: some View {
@@ -85,6 +93,55 @@ struct MemorySettingsView: View {
                        value: cfg.binding(\.scheduler.weeklyWeekday))
             hourRow("Run weekly at",
                     value: cfg.binding(\.scheduler.weeklyHour))
+        }
+    }
+
+    private var attentionSection: some View {
+        section(
+            title: "Needs attention",
+            blurb: "Days whose processing failed, hit a model budget limit, or gave up after repeated failures (dead_letter). Reset puts the day back to pending and zeroes its retry count so the next run retries it."
+        ) {
+            if attention.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.green)
+                    Text("All processed days are healthy.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(attention) { item in
+                    attentionRow(item)
+                }
+            }
+        }
+    }
+
+    private func attentionRow(_ item: MemoryScheduler.AttentionItem) -> some View {
+        let problemText = item.problems
+            .map { "\($0.stage.rawValue): \($0.status.rawValue)" }
+            .joined(separator: " · ")
+        let title = item.date == "_weekly" ? "Weekly distillation" : item.date
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                Text(problemText)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("retry \(item.retryCount)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
+            Button("Reset") {
+                MemoryScheduler.shared.resetDay(item.date)
+                reloadAttention()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 
