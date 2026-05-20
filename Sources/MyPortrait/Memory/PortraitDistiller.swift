@@ -226,8 +226,11 @@ final class PortraitDistiller {
         } else {
             lines.append("Existing portrait entries you may UPDATE — these are SETTLED knowledge (slug | title | last updated):")
             for p in existing {
-                let full = p.body.count > 1200
-                    ? String(p.body.prefix(1200)) + "…" : p.body
+                // 喂 LLM 的是纯正文（去掉 `# 标题` 行和 derived 尾块）——
+                // 否则 LLM 合并时会把渲染产物原样抄回，renderBody 再前置标题
+                // 就出现重复标题。
+                let prose = Self.proseOf(p.body)
+                let full = prose.count > 1200 ? String(prose.prefix(1200)) + "…" : prose
                 lines.append("  - \(p.slug) | \(p.title) | last updated \(dayFmt.string(from: p.lastUpdated))")
                 lines.append("    body: \(full.replacingOccurrences(of: "\n", with: " ⏎ "))")
             }
@@ -344,6 +347,22 @@ final class PortraitDistiller {
         WeightCalculator.recompute(&file)
         try PortraitFileIO.write(file, to: url)
         return true
+    }
+
+    /// 从已渲染的 portrait body 抽出纯正文：去掉开头 `# 标题` 行 + 结尾的
+    /// `**Derived from events:**` 块。LLM 合并的对象是正文，不是渲染产物。
+    nonisolated private static func proseOf(_ body: String) -> String {
+        var lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if let first = lines.first, first.hasPrefix("# ") {
+            lines.removeFirst()
+            while let f = lines.first, f.trimmingCharacters(in: .whitespaces).isEmpty {
+                lines.removeFirst()
+            }
+        }
+        if let idx = lines.firstIndex(where: { $0.hasPrefix("**Derived from events:**") }) {
+            lines = Array(lines[..<idx])
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func renderBody(decision: ParsedDecision) -> String {
