@@ -531,6 +531,210 @@ enum BackfillDaysCLI {
     }
 }
 
+/// `--dump-day <yyyy-MM-dd>` — DEV-ONLY. Exports one day's enriched Tier-1
+/// sessions (id / time / app / window / url / OCR / frame ids) as JSON to
+/// `/tmp/dump_<day>.json`. No LLM call — used to hand data to a subagent
+/// when the codex quota is exhausted. Disposable.
+enum DumpDayCLI {
+    static func run(day dayStr: String) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        guard let day = fmt.date(from: dayStr) else {
+            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
+            exit(1)
+        }
+        let iso = ISO8601DateFormatter()
+        let hm = DateFormatter()
+        hm.locale = Locale(identifier: "en_US_POSIX")
+        hm.dateFormat = "HH:mm"
+        hm.timeZone = TimeZone(identifier: "UTC")
+
+        let db = TimelineDB()
+        guard db.exists else {
+            FileHandle.standardError.write(Data("timeline DB not found\n".utf8))
+            exit(1)
+        }
+        let frames = db.frames(on: day, limit: 5000)
+        let merged = Tier1Merger.merge(frames.map { f in
+            Tier1Merger.RawEvent(timestamp: f.timestamp, appName: f.appName,
+                                 windowName: f.windowName, browserURL: f.browserUrl,
+                                 frameId: f.id)
+        })
+
+        var sessions: [[String: Any]] = []
+        var gid = 0
+        var dropped = 0
+        for m in merged {
+            let ocr = db.ocrText(forFrameIds: m.sourceFrameIds, maxChars: 800)
+            if ocr.count < 60 { dropped += 1; continue }
+            gid += 1
+            let dur = max(1, Int(m.lastSeen.timeIntervalSince(m.firstSeen) / 60))
+            sessions.append([
+                "id": gid,
+                "time": "\(hm.string(from: m.firstSeen))–\(hm.string(from: m.lastSeen))",
+                "durMin": dur,
+                "firstSeen": iso.string(from: m.firstSeen),
+                "lastSeen": iso.string(from: m.lastSeen),
+                "app": m.appName,
+                "window": m.windowName,
+                "url": m.browserURL ?? "",
+                "frameIds": m.sourceFrameIds,
+                "ocr": ocr,
+            ])
+        }
+        let root: [String: Any] = [
+            "day": dayStr,
+            "tier1Total": merged.count,
+            "enriched": sessions.count,
+            "droppedNoOCR": dropped,
+            "sessions": sessions,
+        ]
+        let outURL = URL(fileURLWithPath: "/tmp/dump_\(dayStr).json")
+        do {
+            let data = try JSONSerialization.data(withJSONObject: root,
+                                                  options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: outURL)
+            print("dumped \(sessions.count) sessions (\(dropped) dropped) → \(outURL.path)")
+        } catch {
+            FileHandle.standardError.write(Data("dump failed: \(error)\n".utf8))
+            exit(1)
+        }
+        exit(0)
+    }
+}
+
+/// `--materialize-day <yyyy-MM-dd> <clustering.json>` — DEV-ONLY. Takes a
+/// subagent-produced clustering JSON and the matching `/tmp/dump_<day>.json`,
+/// and writes correct PortraitFile `.md` events to `~/.portrait/events/<day>/`.
+/// Used when the codex quota is exhausted and a subagent did the clustering.
+///
+/// clustering JSON shape:
+///   {"events":[{"title","summary","type","tags":[],"portrait_facets":["f:v"],
+///               "impact":3.2,"session_ids":[1,5]}], "skipped":[...]}
+enum MaterializeDayCLI {
+    static func run(day dayStr: String, clusteringPath: String) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        guard let day = fmt.date(from: dayStr) else {
+            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
+            exit(1)
+        }
+        let iso = ISO8601DateFormatter()
+
+        // Load dump (sessions by id).
+        guard let dumpData = FileManager.default.contents(atPath: "/tmp/dump_\(dayStr).json"),
+              let dumpRoot = (try? JSONSerialization.jsonObject(with: dumpData)) as? [String: Any],
+              let dumpSessions = dumpRoot["sessions"] as? [[String: Any]] else {
+            FileHandle.standardError.write(Data("cannot read /tmp/dump_\(dayStr).json\n".utf8))
+            exit(1)
+        }
+        var sessionById: [Int: [String: Any]] = [:]
+        for s in dumpSessions { if let id = s["id"] as? Int { sessionById[id] = s } }
+
+        // Load clustering.
+        guard let clData = FileManager.default.contents(atPath: clusteringPath),
+              let clRoot = (try? JSONSerialization.jsonObject(with: clData)) as? [String: Any],
+              let events = clRoot["events"] as? [[String: Any]] else {
+            FileHandle.standardError.write(Data("cannot read clustering \(clusteringPath)\n".utf8))
+            exit(1)
+        }
+
+        let dayDir = PortraitPaths.eventsDayDir(for: day)
+        try? FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
+
+        var written = 0
+        for ev in events {
+            guard let title = ev["title"] as? String, !title.isEmpty,
+                  let summary = ev["summary"] as? String, !summary.isEmpty,
+                  let ids = ev["session_ids"] as? [Int], !ids.isEmpty else {
+                FileHandle.standardError.write(Data("skipping malformed event\n".utf8))
+                continue
+            }
+            let members = ids.compactMap { sessionById[$0] }
+            if members.isEmpty { continue }
+            var frameIds: [Int64] = []
+            var firstSeens: [Date] = []
+            var lastSeens: [Date] = []
+            for m in members {
+                if let fids = m["frameIds"] as? [Int64] { frameIds.append(contentsOf: fids) }
+                else if let fids = m["frameIds"] as? [Int] { frameIds.append(contentsOf: fids.map(Int64.init)) }
+                if let fs = m["firstSeen"] as? String, let d = iso.date(from: fs) { firstSeens.append(d) }
+                if let ls = m["lastSeen"] as? String, let d = iso.date(from: ls) { lastSeens.append(d) }
+            }
+            frameIds.sort()
+            let firstSeen = firstSeens.min() ?? day
+            let type = ((ev["type"] as? String) ?? "experience").lowercased() == "emotion"
+                ? "emotion" : "experience"
+            let tags = (ev["tags"] as? [String]) ?? []
+            let facets: [EventBuilder.PortraitFacet] = ((ev["portrait_facets"] as? [String]) ?? []).compactMap { fv in
+                let parts = fv.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { return nil }
+                return EventBuilder.PortraitFacet(facet: parts[0].lowercased(), value: parts[1])
+            }
+            let impactRaw = (ev["impact"] as? Double) ?? Double((ev["impact"] as? Int) ?? 1)
+            let impact = PortraitFile.clampImpact(impactRaw)
+
+            var file = PortraitFile(
+                created: firstSeen,
+                impact: impact,
+                body: "# \(title)\n\n\(summary)\n",
+                source: "timeline:event",
+                tags: tags,
+                firstOccurrence: day,
+                eventTitle: title,
+                eventSummary: summary,
+                eventType: type,
+                portraitFacets: facets,
+                memberFrameIds: frameIds
+            )
+            file.rawImpact = impact
+            file.impactSource = "llm:claude-subagent"
+            file.occurrences = [PortraitFile.truncateToDay(day)]
+            WeightCalculator.recompute(&file)
+
+            let url = uniqueURL(dayDir.appendingPathComponent(makeFilename(title: title, day: dayStr)))
+            do {
+                try PortraitFileIO.write(file, to: url)
+                written += 1
+            } catch {
+                FileHandle.standardError.write(Data("write failed: \(error)\n".utf8))
+            }
+        }
+        print("materialized \(written) events → \(dayDir.path)")
+        exit(0)
+    }
+
+    private static func makeFilename(title: String, day: String) -> String {
+        let lower = title.lowercased()
+        var out = ""
+        var sep = false
+        for sc in lower.unicodeScalars {
+            let c = Character(sc)
+            if c.isLetter || c.isNumber { out.append(c); sep = false }
+            else if !sep { out.append("_"); sep = true }
+        }
+        var slug = out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        if slug.count > 60 { slug = String(slug.prefix(60)) }
+        if slug.isEmpty { slug = "event" }
+        return "\(day)_\(slug).md"
+    }
+
+    private static func uniqueURL(_ url: URL) -> URL {
+        if !FileManager.default.fileExists(atPath: url.path) { return url }
+        let dir = url.deletingLastPathComponent()
+        let base = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        for n in 2...200 {
+            let c = dir.appendingPathComponent("\(base)_\(n).\(ext)")
+            if !FileManager.default.fileExists(atPath: c.path) { return c }
+        }
+        return url
+    }
+}
+
 // MARK: - Coordinator
 
 private actor PromptTestCoordinator {

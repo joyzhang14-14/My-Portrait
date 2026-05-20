@@ -82,6 +82,24 @@ struct MyPortraitApp: App {
             BackfillDayCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--backfill-days <N>` runs the real Backfill over the
+        // last N days in one process.
+        if let idx = args.firstIndex(of: "--backfill-days"), idx + 1 < args.count,
+           let n = Int(args[idx + 1]) {
+            BackfillDaysCLI.run(daysBack: n)
+            // run() exits the process internally.
+        }
+        // DEV-ONLY: `--dump-day <yyyy-MM-dd>` exports one day's sessions as JSON.
+        if let idx = args.firstIndex(of: "--dump-day"), idx + 1 < args.count {
+            DumpDayCLI.run(day: args[idx + 1])
+            // run() exits the process internally.
+        }
+        // DEV-ONLY: `--materialize-day <yyyy-MM-dd> <clustering.json>` writes
+        // events from a subagent-produced clustering JSON.
+        if let idx = args.firstIndex(of: "--materialize-day"), idx + 2 < args.count {
+            MaterializeDayCLI.run(day: args[idx + 1], clusteringPath: args[idx + 2])
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--rescore` runs ImpactScorer over every event file.
         if args.contains("--rescore") {
             RescoreCLI.run()
