@@ -530,7 +530,7 @@ actor PortraitDBImpl: PortraitDB {
 
     // MARK: - 读（UI 用）
 
-    func framesForDay(_ day: Date, limit: Int) async throws -> [TimelineFrame] {
+    func framesForDay(_ day: Date) async throws -> [TimelineFrame] {
         let cal = Calendar(identifier: .gregorian)
         let dayStart = cal.startOfDay(for: day)
         let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
@@ -546,13 +546,10 @@ actor PortraitDBImpl: PortraitDB {
             LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
             WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
               AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
-            ORDER BY f.timestamp_ms DESC
-            LIMIT ?
+            ORDER BY f.timestamp_ms ASC
             """
-            // DESC + limit：超出上限时丢最旧的、保留最近的（不会让刚拍的帧落到
-            // 截断区外）。结果再 reverse 回时间正序给时间线用。
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs, limit])
-            return rows.reversed().map { row -> TimelineFrame in
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs])
+            return rows.map { row -> TimelineFrame in
                 let id: Int64 = row["id"] ?? 0
                 let ts: Int64 = row["timestamp_ms"] ?? 0
                 let app: String = row["app_name"] ?? ""

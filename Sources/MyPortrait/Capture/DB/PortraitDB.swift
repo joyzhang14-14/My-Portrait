@@ -100,7 +100,8 @@ protocol PortraitDB: Sendable {
 
     /// 某天的全部帧（按 timestamp 升序），TimelineView 主体读这个。
     /// 包含 video_chunks JOIN 出来的 MP4 文件路径 + fps，方便 AVAssetImageGenerator 抠帧。
-    func framesForDay(_ day: Date, limit: Int) async throws -> [TimelineFrame]
+    /// 不设 limit —— 一天的帧天然有界（秒数 × 采集频率封顶）。
+    func framesForDay(_ day: Date) async throws -> [TimelineFrame]
 
     /// 在某时刻附近活跃的 app 列表（按"最后出现时间"倒序），用于 Timeline 侧边栏。
     func activeAppsAround(timestamp: Date, windowSeconds: TimeInterval) async throws -> [ActiveAppEntry]

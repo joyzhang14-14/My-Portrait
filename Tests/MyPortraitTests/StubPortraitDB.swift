@@ -91,7 +91,7 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.applyRetention")
     }
 
-    func framesForDay(_ day: Date, limit: Int) async throws -> [TimelineFrame] {
+    func framesForDay(_ day: Date) async throws -> [TimelineFrame] {
         throw reporter.notImplemented("StubPortraitDB.framesForDay")
     }
 
