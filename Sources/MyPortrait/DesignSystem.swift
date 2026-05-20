@@ -101,33 +101,23 @@ struct SidebarBackdrop: View {
     }
 }
 
-// MARK: - Bouncy icon button
+// MARK: - Bouncy button
 
-/// Button style for SF Symbol icon buttons: renders the label exactly like
-/// `.plain` (no chrome of its own — the label keeps whatever background it
-/// already has) and plays a one-shot `.bounce` symbol animation each time
-/// the button is pressed, plus a brief dim on press for tactile feedback.
+/// Button style that renders the label exactly like `.plain` (no chrome of
+/// its own — the label keeps whatever background it already has) and gives
+/// every press an unmistakable, springy bounce:
+///   - the label scales down on press and springs back past 1.0 on release
+///     (low damping ⇒ a visible overshoot bounce)
+///   - any SF Symbol inside also plays its native `.bounce` effect
 ///
-/// Drop-in replacement for `.buttonStyle(.plain)` on any icon button.
+/// Drop-in replacement for `.buttonStyle(.plain)` on any button.
 struct BouncyIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        BouncyLabel(configuration: configuration)
-    }
-
-    /// A nested View is needed so we can hold `@State` — the press counter
-    /// drives `.symbolEffect`, firing one bounce per press-down.
-    private struct BouncyLabel: View {
-        let configuration: Configuration
-        @State private var taps = 0
-
-        var body: some View {
-            configuration.label
-                .symbolEffect(.bounce, value: taps)
-                .opacity(configuration.isPressed ? 0.6 : 1)
-                .onChange(of: configuration.isPressed) { _, pressed in
-                    if pressed { taps += 1 }
-                }
-        }
+        configuration.label
+            .symbolEffect(.bounce, value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.86 : 1.0)
+            .animation(.spring(response: 0.28, dampingFraction: 0.40),
+                       value: configuration.isPressed)
     }
 }
 

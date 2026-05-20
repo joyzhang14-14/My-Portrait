@@ -724,7 +724,7 @@ private struct ThinkingCard: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
     }
 
     private var label: String {
@@ -844,7 +844,7 @@ private struct ToolCard: View {
             .padding(.horizontal, 12)
             .padding(.vertical, expanded ? 9 : 10)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
     }
 
     // MARK: - Friendly label (collapsed)
@@ -1189,7 +1189,7 @@ private struct TemplateCardView: View {
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10), lineWidth: 1))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .contextMenu {
             Button("Edit", action: onEdit)
@@ -1222,7 +1222,7 @@ private struct AddTemplateCard: View {
                     )
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }
@@ -1337,7 +1337,7 @@ private struct SuggestionCardView: View {
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10), lineWidth: 1))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }
@@ -1368,7 +1368,7 @@ private struct ActivityChipView: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }
@@ -1671,7 +1671,7 @@ private struct IconActionButton: View {
                 )
                 .scaleEffect(pressed ? 0.90 : (hover ? 1.04 : 1.0))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .help(help ?? "")
         .onHover { hover = $0 }
         .simultaneousGesture(
@@ -1714,7 +1714,7 @@ private struct StopButton: View {
             }
             .scaleEffect(pressed ? 0.92 : (hover ? 1.04 : 1.0))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
@@ -1837,7 +1837,7 @@ private struct ProviderModelPicker: View {
                     .fill(Color.white.opacity(hover ? 0.05 : 0))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .popover(isPresented: $open, arrowEdge: .bottom) {
             PickerPopover { open = false }
@@ -1953,6 +1953,6 @@ private struct PickerPopover: View {
                 Color.white.opacity(active ? 0.05 : 0)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
     }
 }

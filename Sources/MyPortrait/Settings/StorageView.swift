@@ -344,7 +344,7 @@ private struct DeleteButton: View {
                             .stroke(Color.red.opacity(0.45), lineWidth: 0.8))
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }
@@ -402,7 +402,7 @@ private struct AutoDeleteModeRow: View {
             .background(Color.white.opacity(isActive ? 0.04 : (hover ? 0.03 : 0)))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }

@@ -113,7 +113,7 @@ struct SpeakersSettingsView: View {
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.18), lineWidth: 0.7))
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bouncyIcon)
             .disabled(unidentified.isEmpty)
             .opacity(unidentified.isEmpty ? 0.45 : 1)
         }
@@ -303,7 +303,7 @@ private struct UnidentifiedCard: View {
                             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.20), lineWidth: 0.7))
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bouncyIcon)
             .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
 
             Menu {

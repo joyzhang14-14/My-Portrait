@@ -356,7 +356,7 @@ private struct DayCell: View {
                     : AnyView(Color.clear)
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .disabled(isFuture)
     }
 }
@@ -677,7 +677,7 @@ private struct BrowserURLBar: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.65))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bouncyIcon)
             .help("Open in browser")
         }
         .padding(.horizontal, 12)

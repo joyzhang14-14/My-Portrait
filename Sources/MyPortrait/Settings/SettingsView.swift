@@ -136,7 +136,7 @@ struct SettingsSidebarRow: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
     }

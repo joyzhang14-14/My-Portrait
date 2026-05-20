@@ -316,7 +316,7 @@ struct TimelineSidebar: View {
                         .strokeBorder(isOn ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
     }
 
     // MARK: Pipes (background AI workers)

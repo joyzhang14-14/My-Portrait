@@ -266,7 +266,7 @@ private struct RunRow: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }

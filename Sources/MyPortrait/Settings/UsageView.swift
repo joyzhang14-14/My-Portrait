@@ -158,7 +158,7 @@ private struct UsageRangeChip: View {
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.7))
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }

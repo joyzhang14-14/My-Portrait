@@ -177,7 +177,7 @@ struct ConnectionsView: View {
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(RoundedRectangle(cornerRadius: 7).fill(integration.accent.opacity(0.85)))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bouncyIcon)
                     .disabled(connecting != nil)
                 }
                 Spacer()
@@ -425,7 +425,7 @@ private struct IntegrationTile: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
     }
 }
