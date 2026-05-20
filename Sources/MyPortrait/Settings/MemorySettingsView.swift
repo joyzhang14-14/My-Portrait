@@ -78,21 +78,51 @@ struct MemorySettingsView: View {
     private var schedulerSection: some View {
         section(
             title: "Automatic processing",
-            blurb: "The daily job clusters events and scores their impact; the weekly job distills events into portrait entries. Times are local. Each trigger handles up to 7 unprocessed days, oldest first; failed days retry on the next run."
+            blurb: "Two independent schedulers. Each can run off (manual only), daily, weekly, or monthly. Times are local. Each trigger handles up to 7 unprocessed days, oldest first; failed days retry on the next run."
         ) {
-            toggleRow("Daily job (event clustering + impact scoring)",
-                      value: cfg.binding(\.scheduler.dailyEnabled))
-            hourRow("Run daily at",
-                    value: cfg.binding(\.scheduler.dailyHour))
+            schedulerBlock(
+                title: "Event processing",
+                desc: "Clusters captured activity into events and scores their impact.",
+                config: \.scheduler.event)
+            Divider().padding(.vertical, 4)
+            schedulerBlock(
+                title: "Portrait distillation",
+                desc: "Distills events into long-term portrait entries.",
+                config: \.scheduler.portrait)
+        }
+    }
 
-            Divider().padding(.vertical, 2)
+    @ViewBuilder
+    private func schedulerBlock(
+        title: String,
+        desc: String,
+        config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
+    ) -> some View {
+        let freq = cfg.binding(kp.appending(path: \.frequency))
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(desc)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            toggleRow("Weekly job (portrait distillation)",
-                      value: cfg.binding(\.scheduler.weeklyEnabled))
-            weekdayRow("Run weekly on",
-                       value: cfg.binding(\.scheduler.weeklyWeekday))
-            hourRow("Run weekly at",
-                    value: cfg.binding(\.scheduler.weeklyHour))
+            frequencyRow("Frequency", value: freq)
+
+            switch freq.wrappedValue {
+            case .off:
+                Text("Manual only — runs only when you trigger it.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .daily:
+                timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
+            case .weekly:
+                weekdayRow("Day of week", value: cfg.binding(kp.appending(path: \.dayOfWeek)))
+                timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
+            case .monthly:
+                dayOfMonthRow("Day of month", value: cfg.binding(kp.appending(path: \.dayOfMonth)))
+                timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
+            }
         }
     }
 
@@ -123,7 +153,7 @@ struct MemorySettingsView: View {
         let problemText = item.problems
             .map { "\($0.stage.rawValue): \($0.status.rawValue)" }
             .joined(separator: " · ")
-        let title = item.date == "_weekly" ? "Weekly distillation" : item.date
+        let title = item.date == "_distill_anchor" ? "Portrait distillation" : item.date
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -242,45 +272,75 @@ struct MemorySettingsView: View {
         }
     }
 
-    private func toggleRow(_ label: String, value: Binding<Bool>) -> some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.system(size: 12))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Toggle("", isOn: value)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-        }
-    }
-
-    private func hourRow(_ label: String, value: Binding<Int>) -> some View {
+    private func frequencyRow(_ label: String, value: Binding<SchedulerFrequency>) -> some View {
         HStack(spacing: 12) {
             Text(label)
                 .font(.system(size: 12))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Picker("", selection: value) {
-                ForEach(0..<24, id: \.self) { h in
-                    Text(String(format: "%02d:00", h)).tag(h)
-                }
+                Text("Off (manual only)").tag(SchedulerFrequency.off)
+                Text("Daily").tag(SchedulerFrequency.daily)
+                Text("Weekly").tag(SchedulerFrequency.weekly)
+                Text("Monthly").tag(SchedulerFrequency.monthly)
             }
             .labelsHidden()
-            .frame(width: 110)
+            .frame(width: 160)
         }
     }
 
+    /// 时刻选择：DatePicker(.hourAndMinute) ↔ "HH:mm" 字符串桥接。
+    private func timeRow(_ label: String, value: Binding<String>) -> some View {
+        let dateBinding = Binding<Date>(
+            get: {
+                let p = value.wrappedValue.split(separator: ":")
+                var c = DateComponents()
+                c.hour = Int(p.first ?? "0") ?? 0
+                c.minute = p.count > 1 ? (Int(p[1]) ?? 0) : 0
+                return Calendar.current.date(from: c) ?? Date()
+            },
+            set: { d in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+                value.wrappedValue = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+            }
+        )
+        return HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            DatePicker("", selection: dateBinding, displayedComponents: .hourAndMinute)
+                .labelsHidden()
+        }
+    }
+
+    /// 星期选择：0=周日…6=周六。
     private func weekdayRow(_ label: String, value: Binding<Int>) -> some View {
         HStack(spacing: 12) {
             Text(label)
                 .font(.system(size: 12))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Picker("", selection: value) {
-                ForEach(1...7, id: \.self) { wd in
-                    Text(Self.weekdayNames[wd - 1]).tag(wd)
+                ForEach(0...6, id: \.self) { wd in
+                    Text(Self.weekdayNames[wd]).tag(wd)
                 }
             }
             .labelsHidden()
             .frame(width: 130)
+        }
+    }
+
+    /// 几号选择：1…31。当月不足时由调度逻辑落到当月最后一天，UI 不暴露。
+    private func dayOfMonthRow(_ label: String, value: Binding<Int>) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Picker("", selection: value) {
+                ForEach(1...31, id: \.self) { d in
+                    Text("\(d)").tag(d)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 90)
         }
     }
 
