@@ -77,10 +77,12 @@ targets:
         SWIFT_VERSION: "6.0"
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: MyPortraitDev
-        DEVELOPMENT_TEAM: ""
-        PROVISIONING_PROFILE_SPECIFIER: ""
+        # **签名：用 Apple Development 证书，不用自签名 MyPortraitDev**。
+        # 自签名证书（无 Apple 锚定）macOS TCC 对 Screen Recording 主动拒绝
+        # （auth_value 卡 0）。Apple Development 证书 DR 带 `anchor apple generic`，
+        # TCC 才认。Automatic 签名 + Team ID 让 Xcode 自动选 Apple Development cert。
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: VYHNX2Y2AL
         ENABLE_HARDENED_RUNTIME: false
         # @testable import 需要 app target 开 testability。
         ENABLE_TESTABILITY: true
