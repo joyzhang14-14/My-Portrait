@@ -273,6 +273,35 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v10 — typing capture（AX 订阅采集真实打字数据）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 独立模块，跟 capture / backfill / impact / distill 流水线解耦。
+        // TypingObserver 通过 Accessibility API 订阅 focused text element
+        // 的值变化，diff 出 insert / delete / replace 写进这张表。
+        // 共用同一个 portrait.sqlite，不另建文件。
+        m.registerMigration("v10_typing_events") { db in
+            try db.create(table: "typing_events") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("timestamp_ms", .integer).notNull()   // UTC ms
+                t.column("bundle_id", .text).notNull()         // com.tinyspeck.slackmacgap
+                t.column("app_name", .text)                    // "Slack"
+                t.column("element_role", .text)                // AXTextField / AXTextArea / ...
+                t.column("element_hint", .text)                // focused 元素 label / placeholder
+                t.column("kind", .text).notNull()              // insert | delete | replace
+                t.column("text", .text).notNull()              // 插入或删除的内容
+                t.column("replaced_text", .text)               // replace 时被替换的原文，否则 NULL
+                t.column("language_hint", .text)               // cjk | latin | mixed
+            }
+            try db.create(index: "idx_typing_events_ts",
+                          on: "typing_events", columns: ["timestamp_ms"])
+            try db.create(index: "idx_typing_events_bundle",
+                          on: "typing_events", columns: ["bundle_id"])
+            try db.create(index: "idx_typing_events_bundle_ts",
+                          on: "typing_events", columns: ["bundle_id", "timestamp_ms"])
+        }
+
         return m
     }
 }
