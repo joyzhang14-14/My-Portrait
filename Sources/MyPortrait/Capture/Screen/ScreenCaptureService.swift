@@ -22,6 +22,10 @@ final class ScreenCaptureService {
 
     private let ignore: IgnoreGate
 
+    /// 被排除窗口区域的填充色。`SCStreamConfiguration.backgroundColor` 是
+    /// `unowned(unsafe)`，必须用长生命周期常量，否则临时 CGColor 立即释放成野指针。
+    private static let maskBackground = CGColor(gray: 0, alpha: 1)
+
     /// `nonisolated` 让 CaptureCoordinator (actor) 的 init 不必是 @MainActor。
     /// 实际的 SCK 调用方法仍然在 @MainActor 上跑（绕开 macOS 26 SCK XPC bug）。
     nonisolated init(config: CaptureConfig, reporter: UnimplementedReporter, ignore: IgnoreGate) {
@@ -61,8 +65,7 @@ final class ScreenCaptureService {
                 let excluded = windows.filter {
                     ignore.shouldMaskWindow(
                         appName: $0.owningApplication?.applicationName ?? "",
-                        title: $0.title,
-                        windowLayer: $0.windowLayer
+                        title: $0.title
                     )
                 }
                 let filter = SCContentFilter(display: display, excludingWindows: excluded)
@@ -72,6 +75,8 @@ final class ScreenCaptureService {
                 cfg.scalesToFit = false
                 cfg.showsCursor = false
                 cfg.capturesAudio = false
+                // 被排除的窗口区域填不透明黑（默认是透明，存 JPG 时会被压平成白）。
+                cfg.backgroundColor = Self.maskBackground
 
                 let cgImage = try await SCScreenshotManager.captureImage(
                     contentFilter: filter,
