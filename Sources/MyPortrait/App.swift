@@ -137,6 +137,12 @@ struct MyPortraitApp: App {
             RepairPortraitCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--migrate-portrait-ema` one-time Phase 3 migration —
+        // backup + reset every portrait file to the EMA clean baseline.
+        if args.contains("--migrate-portrait-ema") {
+            MigratePortraitEMACLI.run()
+            // run() exits the process internally.
+        }
         // `--import-default-pipes` seeds the two built-in pipes into
         // PipeStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {

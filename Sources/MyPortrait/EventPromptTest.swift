@@ -531,6 +531,63 @@ enum BackfillDaysCLI {
     }
 }
 
+/// `--migrate-portrait-ema` — DEV-ONLY 一次性迁移（Phase 3 策略 A）。
+/// 先把 ~/.portrait/portrait 备份到 portrait.bak.YYYY-MM-DD，再把每个非归档 /
+/// 非隔离的 portrait .md 重置为 EMA 干净起点：weight=1.0, mergeCount=1,
+/// aliases=[], primaryLabel=nil, lastModified=created。body / 其它 metadata 保留。
+/// 只动 portrait/ —— events/ 不在迁移范围（其字段靠读取默认值惰性补全）。
+enum MigratePortraitEMACLI {
+    static func run() {
+        print("=== migrate-portrait-ema (策略 A：全部重置) ===")
+        let fm = FileManager.default
+        let portraitDir = Storage.portraitDir
+
+        // 备份。
+        let stamp: String = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            return f.string(from: Date())
+        }()
+        let backup = portraitDir.deletingLastPathComponent()
+            .appendingPathComponent("portrait.bak.\(stamp)")
+        do {
+            if fm.fileExists(atPath: backup.path) { try fm.removeItem(at: backup) }
+            try fm.copyItem(at: portraitDir, to: backup)
+            print("backup: \(backup.path)")
+        } catch {
+            FileHandle.standardError.write(Data("backup FAILED, 中止: \(error)\n".utf8))
+            exit(1)
+        }
+
+        var migrated = 0, failed = 0
+        guard let en = fm.enumerator(
+            at: portraitDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { exit(1) }
+        while let url = en.nextObject() as? URL {
+            guard url.pathExtension == "md",
+                  url.lastPathComponent != "INDEX.md" else { continue }
+            if url.pathComponents.contains("_quarantine")
+                || url.pathComponents.contains("_archive") { continue }
+            do {
+                var f = try PortraitFileIO.read(from: url)
+                f.weight = 1.0
+                f.mergeCount = 1
+                f.aliases = []
+                f.primaryLabel = nil
+                f.lastModified = f.created
+                try PortraitFileIO.write(f, to: url)
+                migrated += 1
+            } catch {
+                failed += 1
+                FileHandle.standardError.write(Data("FAIL \(url.lastPathComponent): \(error)\n".utf8))
+            }
+        }
+        print("=== done === migrated: \(migrated), failed: \(failed)")
+        exit(failed == 0 ? 0 : 1)
+    }
+}
+
 /// `--repair-portrait` — DEV-ONLY. 把 events/ 与 portrait/ 下每个 .md 读出来
 /// 再写回，用更新后的 PortraitFileIO 修复格式（如旧的多行 frontmatter）。
 /// 报告读取成功 / 失败数。Disposable.
