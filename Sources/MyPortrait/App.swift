@@ -46,6 +46,20 @@ struct MyPortraitApp: App {
             services.startManagedLifecycle()
             EmbedDumpCLI.runCaptureProfile(services: services, scenario: scenario)
         }
+        if args.contains("--rebuild-frames-fts") {
+            print("=== rebuild-frames-fts ===")
+            fflush(stdout)
+            let services = Services()
+            services.startManagedLifecycle()
+            EmbedDumpCLI.runRebuildFramesFts(services: services)
+        }
+        if args.contains("--embed-search-test") {
+            print("=== embed-search-test ===")
+            fflush(stdout)
+            let services = Services()
+            services.startManagedLifecycle()
+            EmbedDumpCLI.runSearchTest(services: services)
+        }
         if args.contains("--embed-backfill") {
             print("=== backfill mode ===")
             print("RSS: \(rssEarlyMB()) MB")
