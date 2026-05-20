@@ -1,10 +1,10 @@
 import Foundation
 
-/// Event-level backfill from existing imported timeline data.
+/// Event-level backfill from captured timeline data.
 ///
 /// Per-day loop:
-///   1. Read frames for this day from the imported snapshot at
-///      `~/.portrait/imported/timeline/db.sqlite` (resolved by `TimelineDB`).
+///   1. Read frames for this day from `~/.portrait/portrait.sqlite`
+///      (resolved by `TimelineDB`).
 ///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions
 ///   3. Enrich each session with OCR text from its member frames
 ///   4. EventBuilder (LLM, one call per day): for each session, decide

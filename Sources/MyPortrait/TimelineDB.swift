@@ -455,7 +455,7 @@ struct TimelineDB: Sendable {
 
     /// Speakers: pull a few representative transcripts so the LLM-driven
     /// organiser can guess a name. Filters out short / one-word lines.
-    /// Read-only — works against the imported snapshot DB.
+    /// Read-only — works against the unified portrait.sqlite.
     func sampleTranscripts(forSpeakerId speakerId: Int64, limit: Int = 5) -> [String] {
         guard exists else { return [] }
         var db: OpaquePointer?

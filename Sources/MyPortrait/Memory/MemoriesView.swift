@@ -8,7 +8,7 @@ import SwiftUI
 ///   detail       → selected file's YAML metadata + body
 ///
 /// Toolbar at the top of the middle column has three actions:
-///   ↓     Backfill events from imported timeline
+///   ↓     Backfill events from the timeline
 ///   ✨    Rescore event impacts with LLM
 ///   🪄    Distill portrait files from events
 struct MemoriesView: View {
@@ -57,7 +57,7 @@ struct MemoriesView: View {
                     Task { await runBackfill() }
                 } label: { Image(systemName: "arrow.down.circle") }
                 .buttonStyle(.borderless)
-                .help("Backfill events from imported timeline")
+                .help("Backfill events from the timeline")
 
                 Button {
                     Task { await runRescore() }
@@ -250,7 +250,7 @@ struct MemoriesView: View {
 
     @MainActor
     private func runBackfill() async {
-        actionStatus = "Backfilling events from imported timeline…"
+        actionStatus = "Backfilling events from the timeline…"
         do {
             let r = try await Backfill.run { p in
                 Task { @MainActor in
@@ -429,7 +429,7 @@ private struct EmptyHint: View {
     private var emptyText: String {
         switch scope {
         case .events:
-            return "No events yet.\nClick ↓ to backfill from imported timeline."
+            return "No events yet.\nClick ↓ to backfill from the timeline."
         case .portrait:
             return "No portrait entries in this category yet.\nRun events backfill first, then 🪄 to distill."
         }
