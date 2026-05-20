@@ -17,6 +17,7 @@ struct MemoriesView: View {
     @State private var loading: Bool = false
     @State private var actionStatus: String = ""
     @State private var selected: Entry.ID?
+    @State private var confirmingDelete: Bool = false
 
     struct Entry: Identifiable {
         let id: URL
@@ -127,9 +128,17 @@ struct MemoriesView: View {
         if let id = selected, let entry = entries.first(where: { $0.id == id }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(entry.title)
-                        .font(.system(size: 22, weight: .semibold))
-                        .padding(.top, 44)
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(entry.title)
+                            .font(.system(size: 22, weight: .semibold))
+                        Spacer()
+                        Button {
+                            confirmingDelete = true
+                        } label: { Image(systemName: "trash") }
+                        .buttonStyle(.bouncyIcon)
+                        .help("Delete this event")
+                    }
+                    .padding(.top, 44)
                     metadataBlock(entry.file, category: entry.category)
                     Divider().background(Color.white.opacity(0.06))
                     Text(entry.file.body)
@@ -140,6 +149,18 @@ struct MemoriesView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .confirmationDialog(
+                "Delete “\(entry.title)”?",
+                isPresented: $confirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteEntry(entry) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes the event file from disk.")
             }
         } else {
             VStack(spacing: 8) {
@@ -195,6 +216,19 @@ struct MemoriesView: View {
     /// does NOT touch weight or any counter.
     private func handleSelect(entry: Entry) {
         selected = entry.id
+    }
+
+    /// Permanently delete one event's `.md` file from disk.
+    @MainActor
+    private func deleteEntry(_ entry: Entry) async {
+        do {
+            try FileManager.default.removeItem(at: entry.id)
+            entries.removeAll { $0.id == entry.id }
+            selected = nil
+            actionStatus = "Deleted: \(entry.title)"
+        } catch {
+            actionStatus = "Delete failed: \(error.localizedDescription)"
+        }
     }
 
     @MainActor
