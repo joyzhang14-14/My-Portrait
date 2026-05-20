@@ -61,7 +61,8 @@ final class ScreenCaptureService {
                 let excluded = windows.filter {
                     ignore.shouldMaskWindow(
                         appName: $0.owningApplication?.applicationName ?? "",
-                        title: $0.title
+                        title: $0.title,
+                        windowLayer: $0.windowLayer
                     )
                 }
                 let filter = SCContentFilter(display: display, excludingWindows: excluded)

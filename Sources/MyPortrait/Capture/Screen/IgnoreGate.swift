@@ -62,11 +62,12 @@ final class IgnoreGate: @unchecked Sendable {
     /// 一个窗口是否应该从截图里抹掉。仿 screenpipe `is_valid` 取反：
     ///   - builtin 系统进程永远抹
     ///   - masking 关 → 永不抹
+    ///   - "wallpaper" 特殊词条：桌面壁纸不是 app，是窗口层级在桌面层
+    ///     (`windowLayer < 0`) 的原生窗口。按层级判定，跨 macOS 版本 /
+    ///     跨标题命名都稳，不依赖标题里恰好含 "wallpaper"。
     ///   - ignoredApps 子串命中窗口 app 名**或**标题 → 抹
-    ///     （子串匹配是关键：`"WallpaperAgent".contains("wallpaper")` 才能让
-    ///      "Wallpaper" 这条命中真实的壁纸进程）
     ///   - 窗口标题子串命中 ignoredWindowTitles / ignoredUrls → 抹
-    func shouldMaskWindow(appName: String, title: String?) -> Bool {
+    func shouldMaskWindow(appName: String, title: String?, windowLayer: Int) -> Bool {
         let app = appName.lowercased()
         if Self.builtinIgnored.contains(app) { return true }
 
@@ -74,6 +75,11 @@ final class IgnoreGate: @unchecked Sendable {
         guard snap.maskingEnabled else { return false }
 
         let t = (title ?? "").lowercased()
+
+        // "wallpaper" 词条 → 抹桌面层窗口（壁纸在 windowLayer 极负的桌面层）。
+        if windowLayer < 0, snap.appsLower.contains("wallpaper") {
+            return true
+        }
 
         // ignoredApps：子串匹配窗口 app 名 OR 标题（screenpipe is_valid 同款）。
         for term in snap.appsLower where !term.isEmpty {

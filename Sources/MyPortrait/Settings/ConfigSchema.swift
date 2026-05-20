@@ -382,9 +382,9 @@ struct PrivacyConfig: Codable, Equatable {
     var recordAudioWhileLocked: Bool     = false
     var piiRemoval:             Bool     = true
     /// Default blacklist: password managers / sensitive tools + desktop
-    /// wallpaper. Case-insensitive **substring** match against a window's
-    /// app name or title in IgnoreGate (so "Wallpaper" catches the
-    /// "WallpaperAgent" process).
+    /// wallpaper. Case-insensitive substring match against a window's app
+    /// name or title in IgnoreGate. "Wallpaper" is special-cased — it
+    /// masks desktop-layer windows by `windowLayer`, not by name.
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
         "My Portrait", "Wallpaper",
