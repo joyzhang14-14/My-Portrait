@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import CoreAudio
 import Foundation
 import os.log
 
@@ -48,6 +49,11 @@ actor AudioCaptureService {
 
     private var permissionGranted: Bool = false
 
+    /// 默认输入设备变更监听 block（热插拔）。非 nil = 已注册。
+    private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
+    /// 设备变更后的防抖重启任务。
+    private var restartTask: Task<Void, Never>?
+
     init(reporter: UnimplementedReporter, audioDir: URL = Storage.audioQueueDir) {
         self.reporter = reporter
         self.audioDir = audioDir
@@ -87,10 +93,15 @@ actor AudioCaptureService {
             return
         }
 
+        registerDeviceChangeListener()
         logger.info("AudioCaptureService started (mic, VAD-segmented)")
     }
 
     func stop() async {
+        restartTask?.cancel()
+        restartTask = nil
+        unregisterDeviceChangeListener()
+
         // engine 没构造 → 整条 start() 流水线没跑过，下面所有字段都是 nil → 直接退。
         // 关键防御：避免 lazy 触发 engine 构造（构造本身就会拉起 caulk）。
         guard let engine else {
@@ -151,7 +162,9 @@ actor AudioCaptureService {
         let stream = AsyncStream<[Float]> { cont in c = cont }
         samplesContinuation = c
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) {
+        // 蓝牙输入设备投递抖动大（±200ms），用更大的 tap 缓冲吸收抖动。
+        let bufferSize: AVAudioFrameCount = Self.defaultInputIsBluetooth() ? 8192 : 4096
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
             [weak self] buffer, _ in
             guard let self else { return }
             Task { [weak self] in
@@ -202,6 +215,84 @@ actor AudioCaptureService {
         let count = Int(output.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
         cont.yield(samples)
+    }
+
+    // MARK: - 设备热插拔
+
+    /// 默认输入设备的属性地址（系统对象上）。CoreAudio API 要 `&` 指针，
+    /// 调用处各自拷一份本地 var 传入。
+    private static func defaultInputAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
+    /// 注册「默认输入设备变更」监听 —— 拔耳机 / 插 USB 麦时自动重启采集。
+    private func registerDeviceChangeListener() {
+        guard deviceListenerBlock == nil else { return }
+        let block: AudioObjectPropertyListenerBlock = { @Sendable [weak self] _, _ in
+            Task { await self?.handleDeviceChange() }
+        }
+        var addr = Self.defaultInputAddress()
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main, block
+        )
+        if status == noErr {
+            deviceListenerBlock = block
+        } else {
+            logger.warning("failed to register device-change listener: \(status)")
+        }
+    }
+
+    private func unregisterDeviceChangeListener() {
+        guard let block = deviceListenerBlock else { return }
+        var addr = Self.defaultInputAddress()
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main, block
+        )
+        deviceListenerBlock = nil
+    }
+
+    /// 设备变更回调。防抖：1 秒内的连续变更合并成一次重启（拔插常爆发多个事件）。
+    private func handleDeviceChange() {
+        restartTask?.cancel()
+        restartTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.restartForDeviceChange()
+        }
+    }
+
+    private func restartForDeviceChange() async {
+        guard samplesTask != nil else { return }   // 没在采集就不重启
+        logger.info("default input device changed — restarting mic capture")
+        await stop()
+        await start()
+    }
+
+    /// 查默认输入设备是不是蓝牙（CoreAudio transport type，不碰 AVAudioEngine）。
+    private static func defaultInputIsBluetooth() -> Bool {
+        var deviceID = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var addr = defaultInputAddress()
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &addr, 0, nil, &size, &deviceID
+        ) == noErr, deviceID != 0 else { return false }
+
+        var transport: UInt32 = 0
+        var tsize = UInt32(MemoryLayout<UInt32>.size)
+        var taddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(deviceID, &taddr, 0, nil, &tsize, &transport) == noErr
+        else { return false }
+        return transport == kAudioDeviceTransportTypeBluetooth
+            || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
     // MARK: - 工具
