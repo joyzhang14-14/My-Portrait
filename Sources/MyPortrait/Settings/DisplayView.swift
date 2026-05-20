@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct DisplaySettingsView: View {
     @State private var config = ConfigStore.shared
@@ -6,12 +7,7 @@ struct DisplaySettingsView: View {
     var body: some View {
         SettingsPage("Display", subtitle: "Theme, window behaviour, and personalization") {
 
-            AppCustomizeCard(
-                appName:       config.binding(\.display.appName),
-                dockIconPath:  config.binding(\.display.customDockIcon),
-                trayIconPath:  config.binding(\.display.customTrayIcon),
-                showInMenuBar: config.binding(\.display.showInMenuBar)
-            )
+            AppCustomizeCard()
 
             SettingsCard(title: "Appearance") {
                 SettingsRow("Theme",
@@ -71,12 +67,24 @@ struct DisplaySettingsView: View {
 /// Uploads write into `~/Library/Application Support/MyPortrait/customize/`
 /// so the icons survive app restarts. Reset deletes the file.
 private struct AppCustomizeCard: View {
-    @Binding var appName: String
-    @Binding var dockIconPath: String
-    @Binding var trayIconPath: String
-    @Binding var showInMenuBar: Bool
+    @State private var config = ConfigStore.shared
+
+    // Staged local edits — committed to ConfigStore only on Save.
+    @State private var appName: String = ""
+    @State private var dockIconPath: String = ""
+    @State private var trayIconPath: String = ""
+    @State private var showInMenuBar: Bool = true
+    @State private var loaded = false
 
     private let maxNameLength = 32
+
+    private var hasUnsavedChanges: Bool {
+        let d = config.current.display
+        return appName != d.appName
+            || dockIconPath != d.customDockIcon
+            || trayIconPath != d.customTrayIcon
+            || showInMenuBar != d.showInMenuBar
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -149,6 +157,22 @@ private struct AppCustomizeCard: View {
                 Spacer(minLength: 12)
                 Toggle("", isOn: $showInMenuBar).labelsHidden().toggleStyle(.switch)
             }
+
+            Divider().background(Color.white.opacity(0.08))
+
+            HStack(spacing: 10) {
+                Text("Saving restarts My Portrait so the new name + icons take effect.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(hasUnsavedChanges ? 0.55 : 0.30))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                Button(action: saveAndRestart) {
+                    Label("Save", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasUnsavedChanges)
+            }
         }
         .padding(16)
         .background(
@@ -166,6 +190,39 @@ private struct AppCustomizeCard: View {
                 )
                 .shadow(color: Color.purple.opacity(0.12), radius: 16, x: 0, y: 6)
         )
+        .onAppear {
+            guard !loaded else { return }
+            let d = config.current.display
+            appName       = d.appName
+            dockIconPath  = d.customDockIcon
+            trayIconPath  = d.customTrayIcon
+            showInMenuBar = d.showInMenuBar
+            loaded = true
+        }
+    }
+
+    /// Commit the staged edits, flush the config write, then relaunch the
+    /// app — mirrors screenpipe, where saving app-customize restarts so the
+    /// process picks up the new name + icons cleanly.
+    private func saveAndRestart() {
+        config.mutate {
+            $0.display.appName       = appName
+            $0.display.customDockIcon  = dockIconPath
+            $0.display.customTrayIcon  = trayIconPath
+            $0.display.showInMenuBar = showInMenuBar
+        }
+        config.saveNow()
+        Self.relaunch()
+    }
+
+    /// Spawn a detached `open` that fires after this process exits, then quit.
+    private static func relaunch() {
+        let path = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; open \"\(path)\""]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 }
 
@@ -267,9 +324,9 @@ private struct IconSlot: View {
     }
 
     private func reset() {
-        if !path.isEmpty {
-            try? FileManager.default.removeItem(atPath: path)
-        }
+        // Staged: just clear the path. The actual file is left in place —
+        // committing an empty path on Save means "no custom icon"; the
+        // orphan PNG is harmless (overwritten on the next upload).
         path = ""
         preview = nil
     }
