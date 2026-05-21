@@ -208,6 +208,13 @@ final class TypingObserver {
             return
         }
 
+        // 终端黑名单（算法限制）：终端输入/输出共享同一 AX 元素，stdout 会被
+        // Layer 1 心跳误判为用户输入 —— 终端整段不订阅。
+        if TypingPrivacyFilter.isTerminalApp(bundleId: bundleId) {
+            print("[TypingObserver] terminal app, observer idle bundle=\(bundleId)")
+            return
+        }
+
         // 1. 创建 AXObserver。
         var observerRef: AXObserver?
         let createErr = AXObserverCreate(pid, Self.axCallback, &observerRef)

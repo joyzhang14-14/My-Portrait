@@ -18,6 +18,22 @@ struct TypingPrivacyFilter {
         "com.apple.keychainaccess",     // Keychain Access
     ]
 
+    /// 终端类 app 的 bundle id。**算法限制**，非用户隐私选择 —— 终端的
+    /// 输入区和输出区共享同一个 AX text 元素，stdout（ls / cat / git 输出）
+    /// 会在 keyDown 后 120ms 内到达，被 Layer 1 心跳误判为用户输入。AX 不
+    /// 暴露"输入区 vs 输出区"，无法区分，故终端整段不订阅 AX。
+    /// 与 ConfigStore.privacy.ignoredApps（用户可配）是两个独立机制。
+    /// FocusProbe.terminalBundleIds 有一份平行列表（用途不同，各自维护）。
+    private static let terminalBundleIds: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "co.zeit.hyper",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.github.wez.wezterm",
+        "dev.warp.Warp-Stable",
+    ]
+
     /// secure text field 的 AX role。
     private static let secureFieldRole = "AXSecureTextField"
 
@@ -32,5 +48,11 @@ struct TypingPrivacyFilter {
     /// role 是否为密码输入框。
     static func isSecureRole(_ role: String?) -> Bool {
         role == secureFieldRole
+    }
+
+    /// bundle id 是否为终端类 app。命中则整段不订阅 AX（算法限制，见
+    /// `terminalBundleIds` 注释）。
+    static func isTerminalApp(bundleId: String) -> Bool {
+        terminalBundleIds.contains(bundleId)
     }
 }
