@@ -2,8 +2,8 @@ import XCTest
 import GRDB
 @testable import MyPortrait
 
-/// `TypingRecordWriter`（v14 splice 模型）单测：splice 三态 / baseline 吸纳 /
-/// burst / 黑名单减法 / flush INSERT / 多 element 独立。
+/// `TypingRecordWriter`（v14 event-log 模型）单测：净新增 text / burst /
+/// 黑名单减法 / flush INSERT / 多 element 独立。
 @MainActor
 final class TypingRecordWriterTests: XCTestCase {
 
@@ -31,73 +31,43 @@ final class TypingRecordWriterTests: XCTestCase {
         return TypingEventStore(dbPool: pool)
     }
 
-    private func makeRecord(baseline: String = "") -> TypingRecordWriter.InProgressRecord {
-        TypingRecordWriter.InProgressRecord(bundleId: "app.a", elementHash: 1,
-                                            baseline: baseline, nowMs: 0)
+    // MARK: - sessionText：净新增内容
+
+    /// 空 element 打字 → text = 全部输入。
+    func testSessionTextFromEmpty() {
+        XCTAssertEqual(
+            TypingRecordWriter.sessionText(sessionStart: "", finalValue: "你好"),
+            "你好")
     }
 
-    // MARK: - splice 三态
-
-    func testSplicePureInsert() {
-        let rec = makeRecord()
-        TypingRecordWriter.splice(rec, prev: "", new: "hello", nowMs: 1)
-        XCTAssertEqual(rec.text, "hello")
-        XCTAssertEqual(rec.editLog.count, 1)
-        XCTAssertEqual(rec.editLog.first?.kind, "commit")
+    /// 末尾追加 → text 只含追加部分。
+    func testSessionTextAppend() {
+        XCTAssertEqual(
+            TypingRecordWriter.sessionText(sessionStart: "ABC", finalValue: "ABCDEF"),
+            "DEF")
     }
 
-    func testSpliceInsertMiddle() {
-        let rec = makeRecord()
-        TypingRecordWriter.splice(rec, prev: "", new: "ad", nowMs: 1)
-        TypingRecordWriter.splice(rec, prev: "ad", new: "abcd", nowMs: 2)
-        XCTAssertEqual(rec.text, "abcd")    // 中段插入 "bc"
+    /// 中段插入 —— text 只含插入的字，不把旧内容吸进来（修「吸走笔记」bug）。
+    func testSessionTextMidInsertDoesNotAbsorb() {
+        XCTAssertEqual(
+            TypingRecordWriter.sessionText(sessionStart: "ABCD", finalValue: "ABXXXCD"),
+            "XXX")
     }
 
-    func testSplicePureDelete() {
-        let rec = makeRecord()
-        TypingRecordWriter.splice(rec, prev: "", new: "hello", nowMs: 1)
-        TypingRecordWriter.splice(rec, prev: "hello", new: "heo", nowMs: 2)
-        XCTAssertEqual(rec.text, "heo")
-        XCTAssertEqual(rec.editLog.last?.kind, "delete")
-        XCTAssertEqual(rec.editLog.last?.text, "ll")
+    /// 一大段已有内容里只插了 XXX → text = "XXX"，不是整篇。
+    func testSessionTextMidInsertLongDoc() {
+        let doc = "第一段内容。\n第二段内容。\n第三段。"
+        let edited = "第一段内容。\n第二XXX段内容。\n第三段。"
+        XCTAssertEqual(
+            TypingRecordWriter.sessionText(sessionStart: doc, finalValue: edited),
+            "XXX")
     }
 
-    /// 中段替换 —— KI-1 修复验证：detest → detect 必须就地替换，不能转位成 detetc。
-    func testSpliceReplaceMidText() {
-        let rec = makeRecord()
-        TypingRecordWriter.splice(rec, prev: "", new: "detest", nowMs: 1)
-        TypingRecordWriter.splice(rec, prev: "detest", new: "detect", nowMs: 2)
-        XCTAssertEqual(rec.text, "detect")
-    }
-
-    // MARK: - baseline 吸纳
-
-    /// 中段插入触及 baseline → baseline 被吸纳进 text。
-    func testBaselineAbsorptionOnMidInsert() {
-        let rec = makeRecord(baseline: "ABC")
-        XCTAssertEqual(rec.baselineOffset, 3)
-        TypingRecordWriter.splice(rec, prev: "ABC", new: "ABXC", nowMs: 1)
-        XCTAssertEqual(rec.text, "ABXC")
-        XCTAssertEqual(rec.baseline, "")
-        XCTAssertEqual(rec.baselineOffset, 0)
-    }
-
-    /// 末尾追加不触及 baseline → baseline 不动，text 只含 session 输入。
-    func testBaselineNotAbsorbedOnAppend() {
-        let rec = makeRecord(baseline: "ABC")
-        TypingRecordWriter.splice(rec, prev: "ABC", new: "ABCDEF", nowMs: 1)
-        XCTAssertEqual(rec.text, "DEF")
-        XCTAssertEqual(rec.baseline, "ABC")
-    }
-
-    /// 删除 baseline 内容（KI-2 场景）→ 吸纳 + 就地删除。
-    func testBaselineAbsorptionOnDelete() {
-        let rec = makeRecord(baseline: "你好世界")
-        TypingRecordWriter.splice(rec, prev: "你好世界", new: "你好", nowMs: 1)
-        XCTAssertEqual(rec.text, "你好")
-        XCTAssertEqual(rec.baseline, "")
-        XCTAssertEqual(rec.editLog.last?.kind, "delete")
-        XCTAssertEqual(rec.editLog.last?.text, "世界")
+    /// 删除旧内容 → 净新增为空。
+    func testSessionTextPureDelete() {
+        XCTAssertEqual(
+            TypingRecordWriter.sessionText(sessionStart: "你好世界", finalValue: "你好"),
+            "")
     }
 
     // MARK: - 纯函数
@@ -117,14 +87,14 @@ final class TypingRecordWriterTests: XCTestCase {
 
     // MARK: - flush
 
-    /// flush → INSERT 一条新 record；flush 后 record 从 state 移除。
-    func testFlushInsertsRecord() throws {
+    /// flush → INSERT 一条 record，text = 净新增；flush 后 record 从 state 移除。
+    func testFlushInsertsNetText() throws {
         let store = try makeStore()
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
         writer.beginSession(key: key, bundleId: "app.a", baseline: "")
         let rec = try XCTUnwrap(writer.state[key])
-        TypingRecordWriter.splice(rec, prev: "", new: "hello", nowMs: 1)
+        rec.lastValueSnapshot = "hello"
         rec.pendingChanges = true
         writer.flushElement(key)
 
@@ -132,6 +102,20 @@ final class TypingRecordWriterTests: XCTestCase {
         XCTAssertEqual(recs.count, 1)
         XCTAssertEqual(recs.first?.text, "hello")
         XCTAssertNil(writer.state[key])
+    }
+
+    /// 已有内容的 element 里中段插入 → 落库 text 只含插入字，不含旧内容。
+    func testFlushMidInsertDoesNotAbsorb() throws {
+        let store = try makeStore()
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "一大段已有的笔记内容")
+        let rec = try XCTUnwrap(writer.state[key])
+        rec.lastValueSnapshot = "一大段已XXX有的笔记内容"
+        rec.pendingChanges = true
+        writer.flushElement(key)
+
+        XCTAssertEqual(try store.records(bundleId: "app.a").first?.text, "XXX")
     }
 
     /// 没发生变化的 session → flush 不落库。
@@ -152,7 +136,7 @@ final class TypingRecordWriterTests: XCTestCase {
             let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: eh)
             writer.beginSession(key: key, bundleId: "app.a", baseline: "")
             let rec = try XCTUnwrap(writer.state[key])
-            TypingRecordWriter.splice(rec, prev: "", new: txt, nowMs: 1)
+            rec.lastValueSnapshot = txt
             rec.pendingChanges = true
             writer.flushElement(key)
         }

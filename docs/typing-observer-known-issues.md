@@ -5,7 +5,7 @@
 
 ## KI-1：中段编辑导致 `text` 字段字符顺序错乱
 
-**状态**：✅ **RESOLVED in v14**（splice 就地替换）。
+**状态**：✅ **RESOLVED in v14**（event-log + 净新增 diff）。
 
 ### 描述
 
@@ -70,7 +70,7 @@ prevMid→newMid 原位替换、suffix 不变）。
 
 ## KI-2：切窗口回来后大段删除丢失
 
-**状态**：✅ **RESOLVED in v14**（event-log + baseline 吸纳）。
+**状态**：✅ **RESOLVED in v14**（event-log + 净新增 diff）。
 
 ### 描述
 
@@ -92,12 +92,15 @@ KI-1 + KI-2 同根，v14 batch 重构一并解决：
 
 - `typing_events` 改成 **append-only event log**（一条 record = 一个
   (app, element) 的一段 session），不再 master-record-per-app UPSERT。
-- 每个 (app, element) 一份 in-progress record，带 `baseline` +
-  `baselineOffset` + `text`；每次 value-change 经 350ms debounce 后用
-  `TextDiff.sandwich` 出 delta、**就地 splice**（insert /
-  removeSubrange / replaceSubrange）。
-- 切窗口回来：新 session 的 `baseline` = 输入框当前内容。删除旧内容时
-  `effPos < 0` 触发 baseline 吸纳，删除在新 session 里就地生效、记进
-  `edit_log`。不再有「跨 record 2000 字符逐字匹配」这条脆弱路径
-  （`handleDelete` 整个移除）。
-- 不变量 `lastValueSnapshot == baseline + text` 保证 splice 位置永远对。
+- 每个 (app, element) 一份 in-progress record，存 `sessionStart`
+  （session 开始时 element 已有的内容）+ `lastValueSnapshot`（最新
+  AX value）。每次 value-change 经 350ms debounce 收敛。
+- record 的 `text` = `sandwich(sessionStart, 最终值).newMid` —— 这段
+  session 用户**净新增**的内容；`edit_log` 是逐 debounce 窗口的
+  `sandwich(上次快照, 当前值)` delta 流水。
+- `text` 永远从「session 起止两个完整快照」直接 diff 得出，不靠累加 ——
+  中段编辑（KI-1）、切窗口后删除（KI-2）都自然正确。`handleDelete`
+  「跨 record 2000 字符逐字匹配」那条脆弱路径整个移除。
+
+> 注：v14 初版曾用 baseline 吸纳 + 就地 splice，会把中段编辑时整篇
+> 旧内容吸进 `text`。已改为上面的「两快照 diff」模型。
