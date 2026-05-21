@@ -201,6 +201,14 @@ struct MyPortraitApp: App {
             KeystrokeLedgerCLI.run()
             // run() 内部进入 RunLoop，不会返回。
         }
+        // `--typing-observe-m3` 只跑 TypingObserver 的 L1+L2 流水线（dev tool）：
+        // 不 init Services / UI / Capture / Memory；每条 IMEFoldEvent print
+        // 一行；Ctrl+C → observer.stop() + exit(0)。
+        // 同 --typing-observe：AX 回调靠主 run loop，所以**不 exit()**，只置标志，
+        // AppDelegate 据此跳过 Services / 窗口创建。
+        if args.contains("--typing-observe-m3") {
+            AppDelegate.typingObserveM3Only = true
+        }
         AppKeyboard.install()
     }
 
@@ -250,6 +258,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 仅在 App init（启动早期，单线程）写一次，之后只读 —— nonisolated(unsafe) 安全。
     nonisolated(unsafe) static var typingObserveOnly = false
 
+    /// `--typing-observe-m3` CLI 模式标志。L1+L2 流水线 dev tool，每条
+    /// IMEFoldEvent print 一行。仅启动早期写一次 —— nonisolated(unsafe) 安全。
+    nonisolated(unsafe) static var typingObserveM3Only = false
+
     /// `--typing-observe` 模式下持有的 observer（持有它以保证存活 + 退出时 stop）。
     private var typingObserver: TypingObserver?
 
@@ -263,35 +275,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // CLI 模式：只跑 TypingObserver，跳过 Services / 窗口创建。
+        // CLI 模式：只跑 TypingObserver（L1+L2 流水线），跳过 Services / 窗口创建。
         // 主 run loop 仍需活着（AX 回调靠它），所以不开窗口但不退出。
-        if Self.typingObserveOnly {
+        // M3 observer 不写 DB —— 不再打开 DatabasePool。
+        if Self.typingObserveOnly || Self.typingObserveM3Only {
             NSApp.setActivationPolicy(.accessory)
-            // 开 ~/.portrait/portrait.sqlite 的 DatabasePool，让 observer 真正写库。
-            // prepareDatabase 必须注册 FoundationTokenizer，否则 frames_fts
-            // migration 会因 "no such tokenizer" 失败（同 PortraitDBImpl.init）。
-            let store: TypingEventStore?
-            do {
-                let path = Storage.portraitDBPath
-                try FileManager.default.createDirectory(
-                    at: URL(fileURLWithPath: path).deletingLastPathComponent(),
-                    withIntermediateDirectories: true)
-                var config = Configuration()
-                config.prepareDatabase { db in
-                    db.add(tokenizer: FoundationTokenizer.self)
+            let isM3 = Self.typingObserveM3Only
+            let observer = TypingObserver()
+            // M3 dev flag：每条 IMEFoldEvent print 一行（dev tool 允许 print）。
+            if isM3 {
+                observer.onFoldEvent = { events in
+                    for e in events {
+                        print("[m3] \(e.kind) \"\(e.text)\" script=\(e.script) trace=\(e.traceTag?.description ?? "-")")
+                    }
                 }
-                let pool = try DatabasePool(path: path, configuration: config)
-                try DBSchema.migrator().migrate(pool)
-                store = TypingEventStore(dbPool: pool)
-                print("[TypingObserver] DB opened: \(path)")
-            } catch {
-                print("[TypingObserver] DB open failed: \(error) — print-only mode")
-                store = nil
             }
-            let observer = TypingObserver(store: store)
             observer.start()
             typingObserver = observer
-            // 菜单栏暂停开关 —— --typing-observe 模式专跑 typing，装一个合理。
+            // 菜单栏暂停开关 —— typing-observe 模式专跑 typing，装一个合理。
             let typingItem = TypingStatusItem()
             typingItem.install()
             typingStatusItem = typingItem
@@ -305,7 +306,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signal(SIGINT, SIG_IGN)  // 默认 handler 终止进程，先忽略让 dispatch source 接管
             // 防 src 被释放：用 associated 静态引用顶住其生命周期。
             Self.sigintSource = src
-            print("[TypingObserver] --typing-observe mode — press Ctrl+C to stop")
+            let modeName = isM3 ? "--typing-observe-m3" : "--typing-observe"
+            print("[TypingObserver] \(modeName) mode — press Ctrl+C to stop")
             return
         }
 
@@ -388,8 +390,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // --typing-observe 模式：只需停 observer（走三步清理路径）。
-        if Self.typingObserveOnly {
+        // typing-observe / m3 模式：只需停 observer（走三步清理路径）。
+        if Self.typingObserveOnly || Self.typingObserveM3Only {
             typingObserver?.stop()
             typingStatusItem?.remove()
             return

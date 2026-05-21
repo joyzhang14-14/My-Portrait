@@ -22,6 +22,72 @@ struct RawEdit {
     var traceTag: TraceTag?
 }
 
+extension RawEdit {
+    /// 对比 element 的旧值/新值，求单段连续编辑。
+    ///
+    /// UTF-16 层面求公共前缀长度 P + 公共后缀长度 S（后缀不与前缀重叠）：
+    ///   oldMid = old[P ..< old.count-S]，newMid = new[P ..< new.count-S]
+    ///   - oldMid 空 & newMid 非空 → `.insert`，text=newMid，range=(P, 0)
+    ///   - oldMid 非空 & newMid 空  → `.delete`，text=""，range=(P, oldMid.count)
+    ///   - 两者都非空              → `.replace`，text=newMid，range=(P, oldMid.count)
+    ///   - 两者都空                → nil（无变化）
+    ///
+    /// range 是 UTF-16 单元，location 指向 OLD 值里的改动起点。
+    /// `script` 由 `Script.classify(newMid)` 算（delete 时 newMid 空 → `.latin`）。
+    static func from(oldValue: String, newValue: String,
+                     pid: pid_t, elementHash: Int, ts: TimeInterval) -> RawEdit? {
+        let oldUnits = Array(oldValue.utf16)
+        let newUnits = Array(newValue.utf16)
+        let oldCount = oldUnits.count
+        let newCount = newUnits.count
+
+        // 公共前缀长度 P。
+        var prefix = 0
+        let prefixMax = min(oldCount, newCount)
+        while prefix < prefixMax && oldUnits[prefix] == newUnits[prefix] {
+            prefix += 1
+        }
+
+        // 公共后缀长度 S —— 不能与前缀重叠（两侧剩余长度封顶）。
+        var suffix = 0
+        let suffixMax = min(oldCount - prefix, newCount - prefix)
+        while suffix < suffixMax
+            && oldUnits[oldCount - 1 - suffix] == newUnits[newCount - 1 - suffix] {
+            suffix += 1
+        }
+
+        let oldMidLen = oldCount - prefix - suffix
+        let newMidLen = newCount - prefix - suffix
+
+        // 两者都空 → 无变化。
+        if oldMidLen == 0 && newMidLen == 0 { return nil }
+
+        let newMidUnits = Array(newUnits[prefix ..< (prefix + newMidLen)])
+        let newMid = String(decoding: newMidUnits, as: UTF16.self)
+
+        let kind: Kind
+        if oldMidLen == 0 {
+            kind = .insert
+        } else if newMidLen == 0 {
+            kind = .delete
+        } else {
+            kind = .replace
+        }
+
+        let text = (kind == .delete) ? "" : newMid
+        return RawEdit(
+            kind: kind,
+            text: text,
+            script: Script.classify(text),
+            range: NSRange(location: prefix, length: oldMidLen),
+            ts: ts,
+            pid: pid,
+            elementHash: elementHash,
+            traceTag: nil
+        )
+    }
+}
+
 /// 书写系统分类。
 enum Script {
     case latin, cjk, mixed, other

@@ -1,9 +1,12 @@
-/// TypingObserver —— 通过 Accessibility (AX) API 订阅 frontmost app 的
-/// focused text element，把文本变化 diff 成打字事件。
+/// TypingObserver —— Typing Observer v2 的 Layer 1 + Layer 2 orchestrator（M3）。
 ///
-/// **本版（Step 4）只 print 日志**：不写 DB、不接 TypingEventStore。
-/// observer 接入正常 app 启动是 Step 7 的事；本版只能由 CLI flag
-/// `--typing-observe` 拉起。
+/// 通过 Accessibility (AX) API 订阅 frontmost app 的 focused text element，
+/// 把每次 `kAXValueChangedNotification` 折成一段 `RawEdit`，经
+///   Layer 1（KeystrokeLedger 心跳过滤）→ Layer 2（IMEStateMachineRegistry 折叠）
+/// 输出 `IMEFoldEvent`。
+///
+/// **M3 只到 IMEFoldEvent 输出为止**：只 log（+ 可注入 `onFoldEvent` 闭包），
+/// 不写 DB，不做 Layer 3/4，不做健康检查。
 ///
 /// 并发模型：
 ///   AXObserver 的 C 回调（@convention(c)）契约上跑在主线程 ——
@@ -17,8 +20,9 @@
 
 import AppKit
 import ApplicationServices
-import Carbon.HIToolbox
 import Foundation
+import os.log
+import QuartzCore
 
 @MainActor
 final class TypingObserver {
@@ -40,28 +44,29 @@ final class TypingObserver {
 
     private var attachment: Attachment?
 
-    /// 写库目标。nil → 保持 print-only（兼容旧行为）；非 nil → diff 出
-    /// TypingChange 后既 print 也写库。
-    private let store: TypingEventStore?
+    // MARK: - Layer 1 / Layer 2
 
-    /// 每个 AX 元素独立维护的上次快照，用于 diff。
-    /// 切回旧窗口/旧元素不会把整段当 insert —— 各 element 各自一份快照。
-    /// key 用 ElementKey（包 AXUIElement，CFHash/CFEqual 实现 Hashable）。
-    /// element 消失 / app detach 时清理对应条目，避免字典无限涨。
-    private var snapshots: [ElementKey: AXSnapshot] = [:]
+    /// Layer 1 —— 人类心跳层。observer 持有一个实例，start/stop 同步起停。
+    private let ledger = KeystrokeLedger()
 
-    /// kAXValueChangedNotification 的 ~200ms debounce task，新事件取消旧 task。
-    private var debounceTask: Task<Void, Never>?
+    /// Layer 2 —— 多 element IME 折叠层。
+    private let registry = IMEStateMachineRegistry()
+
+    /// 每个 element 上次缓存的完整文本值。key = elementHash = CFHash(focused)。
+    /// 首次见到某 element 只存值不 diff（否则整段被当 insert）。
+    /// element 失焦 / app 切走时清对应条目，避免字典无限涨。
+    private var lastValues: [Int: String] = [:]
+
+    /// L2 折叠出的 IMEFoldEvent 的额外消费口。dev flag / M4 注入。
+    var onFoldEvent: (([IMEFoldEvent]) -> Void)?
+
+    // MARK: - 其它状态
 
     /// NSWorkspace app 切换通知的 observer token。
     private var workspaceObserverToken: NSObjectProtocol?
 
-    /// 最近一次物理 keyDown 的 UTC 毫秒时间戳。纯 @MainActor 存储属性 ——
-    /// 写（keyDown closure）和读（value-changed 判据）都在 MainActor，无需锁。
-    private var lastKeyDownMs: Int64 = 0
-
-    /// 全局 keyDown 监听句柄。stop / detach / deinit 时 removeMonitor。
-    private var keyDownMonitor: Any?
+    /// 规则 9 的 compose-timeout tick 定时器（100ms 间隔，main thread）。
+    private var tickTimer: Timer?
 
     /// 是否已 start（用于 stop 幂等）。
     private var running = false
@@ -69,48 +74,47 @@ final class TypingObserver {
     /// 每个 AX 元素的跨进程消息超时（秒）。
     private static let messagingTimeout: Float = 1.5
 
-    /// IME composition 标记属性名。SDK 没导出 `kAXMarkedTextRangeAttribute`
-    /// 常量，但属性本身存在 —— 用字符串字面量直访。
-    private static let markedTextRangeAttribute = "AXMarkedTextRange"
+    /// L1 心跳关联窗口（秒）。insert/replace 与 delete 各一档，硬编码（M5 才挪进 ConfigStore）。
+    private static let keystrokeWindowEditSec: TimeInterval = 0.120
+    private static let keystrokeWindowDeleteSec: TimeInterval = 0.200
 
-    /// value change 后等待的 debounce 间隔。
-    private static let debounceMs: UInt64 = 200
+    /// compose-timeout tick 间隔。
+    private static let tickIntervalSec: TimeInterval = 0.100
+
+    private let pipelineLog = Logger(subsystem: "com.joyzhang.myportrait",
+                                     category: "typing.pipeline")
 
     // MARK: - 生命周期
 
-    /// - Parameter store: 写库目标。传 nil（默认）→ print-only。
-    init(store: TypingEventStore? = nil) {
-        self.store = store
-    }
+    init() {}
 
     func start() {
         guard !running else { return }
 
-        // 静默检查 AX 权限 —— 不带 prompt（弹窗引导是后面的 UI 件）。
+        // 静默检查 AX 权限 —— 不带 prompt（弹窗引导是 UI 件）。
         guard AXIsProcessTrusted() else {
             print("[TypingObserver] AX not granted — idle")
             return
         }
 
-        // keyDown 全局监听需要 Input Monitoring 权限（与 Accessibility 是
-        // 两个独立 TCC 类别）。静默 preflight —— 不主动弹 prompt，macOS 会在
-        // 首次实际安装全局监听时自动弹系统授权框。
-        guard CGPreflightListenEventAccess() else {
-            print("[TypingObserver] Input Monitoring not granted — idle")
-            return
-        }
-
         running = true
 
-        // 全局 keyDown 监听 —— 维护 lastKeyDownMs，供 value-changed 判据用。
-        keyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            // 此 closure 事实上在主线程触发，但类型系统看作非隔离；
-            // assumeIsolated 同步进入 MainActor（同款于 AX C 回调）。
+        // Layer 1 起 CGEventTap。失败不崩，KeystrokeLedger 自身会 log warning，
+        // isRunning 保持 false，hasKeystroke 永远 false。
+        do {
+            try ledger.start()
+        } catch {
+            pipelineLog.warning("KeystrokeLedger.start failed: \(String(describing: error), privacy: .public)")
+        }
+
+        // compose-timeout tick：每 100ms 驱动一次 registry.tick。
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.tickIntervalSec,
+                                         repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self.handleKeyDown(keyCode: event.keyCode,
-                                   modifierFlags: event.modifierFlags)
+                self?.handleTick()
             }
         }
+        tickTimer = timer
 
         // 监听 app 切换：切换时 detach 旧 observer、attach 新 app。
         let nc = NSWorkspace.shared.notificationCenter
@@ -139,31 +143,28 @@ final class TypingObserver {
         guard running else { return }
         running = false
 
-        debounceTask?.cancel()
-        debounceTask = nil
-
-        if let monitor = keyDownMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyDownMonitor = nil
-        }
+        tickTimer?.invalidate()
+        tickTimer = nil
 
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
             workspaceObserverToken = nil
         }
 
+        // app/observer 整体停 —— flush 所有 element 的 buffer。
+        emit(registry.flushAll())
+
+        ledger.stop()
+
         detach()
-        snapshots.removeAll()
+        lastValues.removeAll()
         print("[TypingObserver] stopped")
     }
 
     /// `isolated deinit` —— 在 MainActor 上跑（SE-0371），才能安全读
     /// 非 Sendable 的隔离字段（attachment / workspaceObserverToken）。
     isolated deinit {
-        debounceTask?.cancel()
-        if let monitor = keyDownMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
+        tickTimer?.invalidate()
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
         }
@@ -185,27 +186,14 @@ final class TypingObserver {
     }
 
     private func handleAppActivated(pid: pid_t) {
-        // 先 detach 旧的，再 attach 新的。app 切走 → 清空全部快照（旧 app
-        // 的元素已无效，留着只会让字典无限涨）。
+        // app 切走：flush 所有 element 的 buffer，清值缓存（旧 app 的元素已
+        // 无效，留着只会让字典无限涨），再 detach 旧的 attach 新的。
+        emit(registry.flushAll())
+        lastValues.removeAll()
         detach()
-        snapshots.removeAll()
         guard pid > 0,
               let app = NSRunningApplication(processIdentifier: pid) else { return }
         attach(to: app)
-    }
-
-    /// 全局 keyDown 回调逻辑。⌘V / Shift+⌘V 粘贴不算「打字」—— 不更新
-    /// lastKeyDownMs；其它所有 keyDown 都刷新时间戳。
-    private func handleKeyDown(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) {
-        if modifierFlags.contains(.command), keyCode == UInt16(kVK_ANSI_V) {
-            return
-        }
-        lastKeyDownMs = Self.nowMs()
-    }
-
-    /// 当前 UTC 毫秒。
-    private static func nowMs() -> Int64 {
-        Int64(Date().timeIntervalSince1970 * 1000)
     }
 
     private func attach(to app: NSRunningApplication) {
@@ -228,7 +216,6 @@ final class TypingObserver {
             return
         }
         // observer 是 CFType：CFRetain 持有它，deinit/detach 时 CFRelease 平衡。
-        // （AXObserverCreate 返回的对象，存进我们的结构体后要保证存活期。）
         _ = Unmanaged.passRetained(observer)
 
         // 2. app 元素。
@@ -277,7 +264,6 @@ final class TypingObserver {
     /// 三步 AX 清理，deinit 与 detach 共用。`nonisolated` 以便 nonisolated
     /// deinit 也能调。只碰 CF / AX C-API，不碰 actor 状态。
     /// 严格三步顺序：a 移 source → b 撤所有 notification → c CFRelease observer。
-    /// （passUnretained 不 retain self，漏一步 → 回调在 self 释放后被调 → 崩。）
     nonisolated private static func teardown(_ att: Attachment) {
         // a. 从 main run loop 移除 source。先断回调投递通道。
         CFRunLoopRemoveSource(
@@ -348,8 +334,6 @@ final class TypingObserver {
 
         att.focusedElement = focused
         attachment = att
-        // 焦点换到新元素 —— 不清快照。snapshots 字典里若已有这个元素的
-        // 旧快照，下次 value change 会基于它正确 diff（切回旧窗口不丢上下文）。
     }
 
     // MARK: - 通知处理
@@ -370,208 +354,104 @@ final class TypingObserver {
     private func handleNotification(_ name: String) {
         switch name {
         case kAXFocusedUIElementChangedNotification:
-            // 焦点换元素 —— 重订 value-changed 到新 focused 元素、清旧快照。
+            // 焦点换元素：对旧 focused 元素 flush + 清值缓存，再重订到新元素。
+            if let old = attachment?.focusedElement {
+                let oldHash = Int(CFHash(old))
+                emit(registry.handleFocusChange(elementHash: oldHash))
+                lastValues[oldHash] = nil
+            }
             subscribeFocusedElement()
 
         case kAXValueChangedNotification:
-            // ~200ms debounce：取消上一个未触发的 task，排新的。
-            debounceTask?.cancel()
-            debounceTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: Self.debounceMs * 1_000_000)
-                guard !Task.isCancelled else { return }
-                self?.processValueChange()
-            }
+            // v2 逐条同步处理，不 debounce —— 状态机本来就是为逐条事件设计的。
+            processValueChange()
 
         default:
             break
         }
     }
 
-    // MARK: - 值变化 → 快照 → diff → print
+    // MARK: - tick
+
+    /// compose-timeout tick：100ms 一次，驱动 registry 对所有 element 跑规则 9。
+    private func handleTick() {
+        emit(registry.tick(now: CACurrentMediaTime()))
+    }
+
+    // MARK: - 值变化 → RawEdit → L1 → L2 → handler
 
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
 
-        // 暂停闸门：菜单栏暂停开关打开时，整体丢弃 value 变化 —— 不快照、不 diff、
-        // 不写库、不 print。AX 订阅保持不动，恢复后下一次 value 变化立即生效。
+        // 暂停闸门：菜单栏暂停开关打开时，整体丢弃 value 变化。
+        // AX 订阅保持不动，恢复后下一次 value 变化立即生效。
         if ConfigStore.shared.recording.typingCapturePaused { return }
 
-        // 键盘活动关联判据：value 变化前若 correlationWindow 内没有物理按键，
-        // 判定非用户打字（终端输出 / 别人的聊天消息 / AI 补全 ghost text 等）
-        // —— 丢弃，不 snapshot 不 diff。窗口值每次现读，支持运行中改配置生效。
-        let rawWindow = ConfigStore.shared.recording.typingKeyCorrelationWindowMs
-        let correlationWindowMs = Int64(min(max(rawWindow, 200), 5000))
-        let now = Self.nowMs()
-        if now - lastKeyDownMs > correlationWindowMs {
-            let agoSec = Double(now - lastKeyDownMs) / 1000
-            print(String(format: "[TypingObserver] discarded — no recent keyDown (last %.1fs ago) — bundle=%@",
-                         agoSec, att.bundleId))
-            return
-        }
-
-        // IME 过滤：marked text range 非空 = 正在 composition（未上屏拼写），
-        // 跳过；等 commit 后那次 value change 再处理。
-        if hasMarkedText(focused) {
-            return
-        }
-
-        // 读 role —— 用于判断是否文本元素 + 写进快照。
+        // 隐私闸门：secure field（密码输入框）不读值、不 diff。
         let role = copyStringAttr(focused, kAXRoleAttribute)
-
-        // 隐私闸门：secure field（密码输入框）不快照、不 diff。
         if TypingPrivacyFilter.isSecureRole(role) {
-            print("[TypingObserver] skipped — secure field")
             return
         }
 
-        let key = ElementKey(element: focused)
+        let elementHash = Int(CFHash(focused))
 
-        // 读全文。
+        // 读 focused 元素当前完整文本值。
         var valueRef: CFTypeRef?
         let valueErr = AXUIElementCopyAttributeValue(
             focused, kAXValueAttribute as CFString, &valueRef
         )
         guard valueErr == .success else {
-            // 拿不到 value —— 带具体原因 log。
-            let reason: String
-            switch valueErr {
-            case .noValue, .attributeUnsupported:
-                reason = "no-value"
-            case .cannotComplete:
-                reason = "ax-timeout"
-            case .invalidUIElement:
-                reason = "element-gone"
-                // 元素已消失 —— 清掉它在字典里的条目，别让字典无限涨。
-                snapshots[key] = nil
-            default:
-                reason = "ax-error-\(valueErr.rawValue)"
+            // 元素已消失 —— 清掉它的值缓存条目。其它读失败静默忽略。
+            if valueErr == .invalidUIElement {
+                lastValues[elementHash] = nil
             }
-            print("[TypingObserver] unsupported element role=\(role ?? "?") bundle=\(att.bundleId) reason=\(reason)")
             return
         }
-        guard let value = valueRef as? String else {
+        guard let newValue = valueRef as? String else {
             // value 存在但不是字符串 —— 不是文本元素。
-            print("[TypingObserver] unsupported element role=\(role ?? "?") bundle=\(att.bundleId) reason=non-text-value")
             return
         }
 
-        // 读选区（可空，失败不致命）。
-        let selection = copySelectionRange(focused)
+        // 取该 element 上次缓存的值。首次见到 → 只存值不 diff。
+        guard let oldValue = lastValues[elementHash] else {
+            lastValues[elementHash] = newValue
+            return
+        }
+        lastValues[elementHash] = newValue
 
-        let snapshot = AXSnapshot(
-            value: value,
-            selection: selection,
-            timestampMs: Self.nowMs(),
-            role: role,
-            bundleId: att.bundleId,
-            appName: att.appName,
-            elementHint: nil
-        )
-
-        // 取该 element 自己的上次快照（首次为 nil）。无论如何都更新字典。
-        let old = snapshots[key]
-        defer { snapshots[key] = snapshot }
-
-        // 首次见到这个元素 —— 只存快照，不 diff（否则整段被当 insert）。
-        guard let old else { return }
-
-        guard let change = TextDiff.diff(from: old.value, to: snapshot.value) else {
+        // 求单段连续编辑。无变化 → nil → return。
+        guard let raw = RawEdit.from(oldValue: oldValue, newValue: newValue,
+                                     pid: att.pid, elementHash: elementHash,
+                                     ts: CACurrentMediaTime()) else {
             return
         }
 
-        let roleStr = role ?? "?"
-        print("[TypingObserver] \(change.kind) \"\(change.text)\" (\(change.languageHint)) — \(att.bundleId) / \(roleStr)")
-
-        // 写库（store 注入了才写；nil → 保持 print-only）。
-        if let store {
-            writeChange(change, snapshot: snapshot, prevSnapshot: old,
-                        focused: focused, att: att, store: store)
+        // Layer 1：心跳过滤。insert/replace 看 120ms 窗口，delete 看 200ms。
+        let window: TimeInterval = (raw.kind == .delete)
+            ? Self.keystrokeWindowDeleteSec
+            : Self.keystrokeWindowEditSec
+        guard ledger.hasKeystroke(within: window) else {
+            pipelineLog.debug("L1:drop:no-keystroke kind=\(String(describing: raw.kind), privacy: .public)")
+            return
         }
+
+        // Layer 2：折叠。
+        emit(registry.feed(raw))
     }
 
-    /// 把一次 TypingChange 落库到 typing_events。
-    ///
-    /// v1 映射：insert/replace 入库，delete 不入。算法待重构。
-    /// （v11 schema 的 typing_events 没有 kind / 删除字段，只存"打出来的文本"。）
-    private func writeChange(_ change: TypingChange,
-                             snapshot: AXSnapshot,
-                             prevSnapshot: AXSnapshot,
-                             focused: AXUIElement,
-                             att: Attachment,
-                             store: TypingEventStore) {
-        // delete 不入库（v1 映射），print 已照打。
-        guard change.kind != .delete else { return }
+    // MARK: - IMEFoldEvent handler
 
-        // windowTitle：focused 元素所属 window 的 AXTitle，best-effort。
-        let windowTitle = copyWindowTitle(focused)
-
-        // thread_id：60s 内同 (bundle, window) 有事件 → 复用其 threadId；
-        // 没有 → 新建一个 UUID。
-        let threadId: String
-        do {
-            if let last = try store.lastEvent(bundleId: att.bundleId,
-                                              windowTitle: windowTitle,
-                                              withinMs: 60_000) {
-                threadId = last.threadId
-            } else {
-                threadId = UUID().uuidString
-            }
-        } catch {
-            print("[TypingObserver] lastEvent query failed: \(error) — new thread")
-            threadId = UUID().uuidString
+    /// M3 的 handler —— 每条 IMEFoldEvent log 一行 + 转交 onFoldEvent 闭包。
+    private func emit(_ events: [IMEFoldEvent]) {
+        guard !events.isEmpty else { return }
+        for event in events {
+            pipelineLog.debug(
+                "[L2] \(String(describing: event.kind), privacy: .public) \"\(event.text, privacy: .public)\" script=\(String(describing: event.script), privacy: .public) trace=\(event.traceTag?.description ?? "-", privacy: .public)")
         }
-
-        let event = TypingEvent(
-            id: nil,
-            // 单次 diff 无跨度：started = 上一快照时刻、ended = 本次快照时刻。
-            startedAtMs: prevSnapshot.timestampMs,
-            endedAtMs: snapshot.timestampMs,
-            bundleId: att.bundleId,
-            appName: att.appName,
-            windowTitle: windowTitle,
-            url: nil,                       // 浏览器 url 是 Step 6/7 的事
-            elementRole: snapshot.role,
-            threadId: threadId,
-            text: change.text,              // replace 用新文本
-            charCount: change.text.count,
-            languageHint: change.languageHint,
-            createdAtMs: Self.nowMs()
-        )
-        do {
-            try store.insert(event)
-        } catch {
-            print("[TypingObserver] insert failed: \(error)")
-        }
-    }
-
-    /// 读 focused 元素所属 window 的 kAXTitleAttribute，best-effort（拿不到 nil）。
-    private func copyWindowTitle(_ element: AXUIElement) -> String? {
-        var windowRef: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(
-            element, kAXWindowAttribute as CFString, &windowRef
-        )
-        guard err == .success, let windowRef else { return nil }
-        let window = windowRef as! AXUIElement
-        return copyStringAttr(window, kAXTitleAttribute)
+        onFoldEvent?(events)
     }
 
     // MARK: - AX 读取小工具
-
-    /// marked text range 是否存在且非空（IME composition 中）。
-    private func hasMarkedText(_ element: AXUIElement) -> Bool {
-        var ref: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(
-            element, Self.markedTextRangeAttribute as CFString, &ref
-        )
-        // 属性不支持 / 无值 → 视为没有 marked text。
-        guard err == .success, let ref else { return false }
-        guard CFGetTypeID(ref) == AXValueGetTypeID() else { return false }
-        let axValue = ref as! AXValue
-        guard AXValueGetType(axValue) == .cfRange else { return false }
-        var range = CFRange()
-        guard AXValueGetValue(axValue, .cfRange, &range) else { return false }
-        return range.length > 0
-    }
 
     /// 读字符串属性，失败返回 nil。
     private func copyStringAttr(_ element: AXUIElement, _ attr: String) -> String? {
@@ -579,35 +459,5 @@ final class TypingObserver {
         let err = AXUIElementCopyAttributeValue(element, attr as CFString, &ref)
         guard err == .success else { return nil }
         return ref as? String
-    }
-
-    /// 读 kAXSelectedTextRangeAttribute → Range<Int>，失败返回 nil。
-    private func copySelectionRange(_ element: AXUIElement) -> Range<Int>? {
-        var ref: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(
-            element, kAXSelectedTextRangeAttribute as CFString, &ref
-        )
-        guard err == .success, let ref else { return nil }
-        guard CFGetTypeID(ref) == AXValueGetTypeID() else { return nil }
-        let axValue = ref as! AXValue
-        guard AXValueGetType(axValue) == .cfRange else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
-        guard range.location >= 0, range.length >= 0 else { return nil }
-        return range.location ..< (range.location + range.length)
-    }
-}
-
-/// `AXUIElement` 是 CFType，不直接 Hashable。包一层用 `CFHash` / `CFEqual`
-/// 实现 Hashable，才能当 `snapshots` 字典的 key。
-private struct ElementKey: Hashable {
-    let element: AXUIElement
-
-    static func == (lhs: ElementKey, rhs: ElementKey) -> Bool {
-        CFEqual(lhs.element, rhs.element)
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(CFHash(element))
     }
 }
