@@ -318,6 +318,17 @@ final class Services {
         } else {
             applyTypingCapture(enabled: ConfigStore.shared.recording.typingCaptureEnabled)
             observeTypingCapture()
+            // AX 权限是 typing observer 的硬门禁。用户在系统设置里授权后，
+            // PermissionMonitor 3 秒轮询会捕获到 → 把 idle 的 observer 拾起。
+            permissions.$accessibility
+                .removeDuplicates()
+                .sink { [weak self] status in
+                    guard let self, status == .granted,
+                          ConfigStore.shared.recording.typingCaptureEnabled else { return }
+                    self.logger.info("accessibility granted — starting typing observer")
+                    self.typingObserver.start()
+                }
+                .store(in: &settingsCancellables)
         }
     }
 
@@ -339,7 +350,15 @@ final class Services {
 
     private func applyTypingCapture(enabled: Bool) {
         if enabled {
-            // start() 内部会 print 启动 banner（config + gate 状态）。
+            // 打字采集需要 Accessibility 权限。没授 → 请求（跟 screen 一样：
+            // requestAccessibility 内部 AXIsProcessTrustedWithOptions + prompt
+            // 弹系统标准对话框，对话框自带「打开系统设置」按钮，不用我们再弹）。
+            // 授权后由 PermissionMonitor 轮询 → 上面的 $accessibility sink 拾起。
+            if permissions.accessibility != .granted {
+                logger.info("typing enabled, accessibility not granted — requesting")
+                permissions.requestAccessibility()
+            }
+            // start() 内部会 print 启动 banner；AX 没授时它自己 idle。
             typingObserver.start()
         } else {
             // 总开关关 —— observer 不启动。显式 print，避免「为什么没采集」
