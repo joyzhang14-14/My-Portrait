@@ -156,10 +156,14 @@ final class TypingRecordWriterTests: XCTestCase {
             sessionStart: "ABC", recordEndValue: ""))
         XCTAssertFalse(TypingRecordWriter.isContinuation(
             sessionStart: "XYZ", recordEndValue: "ABC"))
-        // 只比末 100 字：前缀不同、末 100 字相同 → 接得上。
+        // 首尾两个锚点都要对上：尾 100 字相同但首不同 → 不算延续（防误合并）。
         let tail = String(repeating: "x", count: 100)
-        XCTAssertTrue(TypingRecordWriter.isContinuation(
+        XCTAssertFalse(TypingRecordWriter.isContinuation(
             sessionStart: "AAAA" + tail, recordEndValue: "BBBB" + tail))
+        // 首尾都相同 → 延续。
+        let big = String(repeating: "本", count: 300)
+        XCTAssertTrue(TypingRecordWriter.isContinuation(
+            sessionStart: big, recordEndValue: big))
     }
 
     /// 起点接得上已有 record → 合并，不新建。

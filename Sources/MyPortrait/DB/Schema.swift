@@ -426,8 +426,8 @@ enum DBSchema {
         // 一段输入因 5s 静默 / 切窗口被 flush 成多条 record，但其实是同一段
         // 连续编辑。v15 给 record 加两个锚点：`session_start`（这段 session
         // 开始时 element 的完整内容）、`end_value`（结束时的完整内容）。
-        // 新 session flush 时，若它起点内容跟某条 record 的 end_value 末
-        // 100 字「接得上」→ 合并进那条 record（见 TypingRecordWriter）。
+        // 新 session flush 时，若它起点内容跟某条 record 的 end_value 首尾
+        // 各 100 字都「接得上」→ 合并进那条 record（见 TypingRecordWriter）。
         m.registerMigration("v15_typing_events_continuation_anchors") { db in
             try db.alter(table: "typing_events") { t in
                 t.add(column: "session_start", .text).notNull().defaults(to: "")

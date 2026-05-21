@@ -69,7 +69,7 @@ final class TypingRecordWriter {
     static let flushSec: TimeInterval = 5.0
     static let pasteAssocSec: TimeInterval = 0.5
     static let submitAssocSec: TimeInterval = 1.0
-    /// continuation 匹配只比末尾这么多字 —— 同 element 内 100 字足够辨识。
+    /// continuation 匹配比首 / 尾各这么多字 —— 同 element 内足够辨识。
     static let matchWindowChars = 100
 
     // MARK: - 状态
@@ -262,7 +262,7 @@ final class TypingRecordWriter {
     }
 
     /// 找这段 session 的 continuation 目标 —— 同 (app, element) 中、`end_value`
-    /// 末 100 字跟本 session 起点内容接得上的 record。无 → nil（新建）。
+    /// 首尾各 100 字跟本 session 起点内容都接得上的 record。无 → nil（新建）。
     private func findContinuation(rec: InProgressRecord) -> TypingEvent? {
         guard !rec.sessionStart.isEmpty, let store else { return nil }
         let candidates = (try? store.recordsForElement(
@@ -316,14 +316,16 @@ final class TypingRecordWriter {
         TextDiff.sandwich(prev: sessionStart, new: finalValue).newMid
     }
 
-    /// 本 session 起点内容是否接得上某 record 的结尾 —— 比末 `matchWindowChars`
-    /// 字。同 (app, element) 内、不限时间。空起点（如聊天发送后输入框清空）
-    /// 不算 continuation。
+    /// 本 session 起点内容是否接得上某 record 的结尾。
+    ///
+    /// `sessionStart` 是本 session「还没编辑前」的输入框快照 —— 真延续时它跟
+    /// 旧 record 的 `end_value` 完全相等。比**首尾各 `matchWindowChars` 字两个
+    /// 锚点**：都对上才算延续，防两篇不同内容尾巴碰巧相同的误合并。
+    /// 同 (app, element) 内、不限时间。空起点（如聊天发送后输入框清空）不算。
     static func isContinuation(sessionStart: String, recordEndValue: String) -> Bool {
-        let a = String(sessionStart.suffix(matchWindowChars))
-        let b = String(recordEndValue.suffix(matchWindowChars))
-        guard !a.isEmpty, !b.isEmpty else { return false }
-        return a == b
+        guard !sessionStart.isEmpty, !recordEndValue.isEmpty else { return false }
+        return sessionStart.prefix(matchWindowChars) == recordEndValue.prefix(matchWindowChars)
+            && sessionStart.suffix(matchWindowChars) == recordEndValue.suffix(matchWindowChars)
     }
 
     /// 黑名单减法：按长度倒序减，每个 entry 只减一次。
