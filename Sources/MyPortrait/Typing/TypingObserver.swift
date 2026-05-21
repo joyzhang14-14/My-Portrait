@@ -3,21 +3,17 @@
 /// 通过 Accessibility (AX) API 订阅 frontmost app 的 focused text element，
 /// 每次 `kAXValueChangedNotification` 把当前 AX value 交给
 /// `TypingRecordWriter` —— 后者经 350ms debounce 收敛后用
-/// `TextDiff.sandwich` 出 delta、就地 splice 进该 (app, element) session 的
-/// `text`，session flush 时 INSERT 一条新 record。
+/// `TextDiff.sandwich` 出 delta、就地 splice 进该 (app, element) session。
 ///
-/// v14 砍掉了 marked-range composition 检测 与 Layer 2（IMEStateMachine）——
-/// splice 的 `replaceSubrange` 天然就地纠正 IME 候选；debounce 收敛拼音中间态。
-/// IMEStateMachine* 文件暂留（future commit 删）。
+/// **AX 调用不在主线程跑**：`AXUIElementCopyAttributeValue` /
+/// `AXObserverAddNotification` 等是同步跨进程调用，目标 app 卡住时会死锁。
+/// 这里把每个 AX C 调用经 `axCall` 挪到后台串行队列 `axQueue`，MainActor
+/// 用 `await` 等它 —— 调用真卡死也只卡住 axQueue，主线程照常跑 run loop、
+/// app 不冻。所有 AX 操作再经 `enqueueAXOp` 串成一条链，保证顺序 +
+/// `attachment` 不被并发改。
 ///
-/// 并发模型：
-///   AXObserver 的 C 回调（@convention(c)）契约上跑在主线程 —— 它的
-///   run-loop source 被加到 CFRunLoopGetMain()。回调里用
-///   `MainActor.assumeIsolated { }` 同步进入 MainActor，不用 `Task {}`
-///   （会异步推迟、导致回调间乱序）。
-///
-/// 生命周期：挂到 frontmost app，监听 NSWorkspace app 切换通知，切换时
-/// flush 旧 app 的 records、detach 旧 AXObserver、attach 新 app。
+/// 生命周期：挂到 frontmost app，监听 NSWorkspace app 切换，切换时 flush
+/// 旧 app 的 records、detach 旧 AXObserver、attach 新 app。
 
 import AppKit
 import ApplicationServices
@@ -25,12 +21,15 @@ import Foundation
 import os.log
 import QuartzCore
 
+/// AX C 类型（AXUIElement / AXObserver）不是 Sendable，但跨线程传引用、
+/// 跨线程调 AX C API 是安全的。装箱过 Swift 6 的 Sendable 检查。
+private struct SendableBox<T>: @unchecked Sendable { let v: T }
+
 @MainActor
 final class TypingObserver {
 
     // MARK: - AX 订阅状态
 
-    /// 当前挂着的一组 AX 资源。app 切换时整体替换。
     private struct Attachment {
         let pid: pid_t
         let bundleId: String
@@ -41,32 +40,29 @@ final class TypingObserver {
     }
 
     private var attachment: Attachment?
-
     private typealias ElementKey = TypingRecordWriter.ElementKey
 
     // MARK: - 依赖
 
-    /// Layer 1 —— CGEventTap 记录物理按键 / ⌘V / 回车。writer 据此判定
-    /// 键盘活动关联、粘贴、发送。
     private let ledger = KeystrokeLedger()
-
-    /// Layer 4 —— 写入层（per-element session / splice / flush / 黑名单）。
     private let writer: TypingRecordWriter
-
-    /// 剪贴板镜像 —— 判定插入文本是不是粘贴来的。
     private let pasteboardMonitor = PasteboardMonitor()
 
-    /// 旧 `--typing-observe-m3` dev flag 的消费口。v14 已不喂 Layer 2，
-    /// 此属性保留仅为 m3 flag 编译兼容，实际不再被调用。
+    /// 旧 `--typing-observe-m3` dev flag 的消费口（v14 已不喂 L2，仅编译兼容）。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
 
-    /// dev flag 日志出口。设置时同步给 writer。
     var onDevLog: ((String) -> Void)? {
         didSet { writer.onDevLog = onDevLog }
     }
 
-    /// 启动 banner 的运行模式标签。
     private let modeLabel: String
+
+    // MARK: - AX 后台队列 / 串行 op 链
+
+    /// 所有会跨进程、可能卡死的 AX C 调用都在这条后台串行队列上跑。
+    private let axQueue = DispatchQueue(label: "com.joyzhang.myportrait.typing.ax")
+    /// AX 操作串行链 —— 每个 op 等上一个完成，保证顺序、`attachment` 不并发改。
+    private var axOpChain: Task<Void, Never>?
 
     // MARK: - 其它状态
 
@@ -82,9 +78,6 @@ final class TypingObserver {
 
     // MARK: - 生命周期
 
-    /// - Parameters:
-    ///   - store: typing_events DAO。`nil`（dev 模式无 DB）时只在内存里跑、不落库。
-    ///   - modeLabel: 启动 banner 的模式标签。
     init(store: TypingEventStore? = nil, modeLabel: String = "production") {
         self.modeLabel = modeLabel
         self.writer = TypingRecordWriter(store: store, ledger: ledger)
@@ -93,15 +86,12 @@ final class TypingObserver {
     func start() {
         guard !running else { return }
 
-        // Layer 1 起 CGEventTap。失败不崩，KeystrokeLedger 自身 log warning。
         do {
             try ledger.start()
         } catch {
             pipelineLog.warning("KeystrokeLedger.start failed: \(String(describing: error), privacy: .public)")
         }
         pasteboardMonitor.start()
-
-        // 启动 banner —— 第一时间 print config / gate 状态，修补 silent failure。
         logStartupBanner()
 
         guard AXIsProcessTrusted() else {
@@ -110,16 +100,12 @@ final class TypingObserver {
         }
         running = true
 
-        // 黑名单 TTL 清理：每 5min 扫一遍。
         blacklistCleanupTimer = Timer.scheduledTimer(
             withTimeInterval: Self.blacklistCleanupSec, repeats: true
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.writer.cleanupBlacklist(now: CACurrentMediaTime())
-            }
+            MainActor.assumeIsolated { self?.writer.cleanupBlacklist(now: CACurrentMediaTime()) }
         }
 
-        // 监听 app 切换。
         let nc = NSWorkspace.shared.notificationCenter
         workspaceObserverToken = nc.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -127,21 +113,21 @@ final class TypingObserver {
         ) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             let pid: pid_t = app?.processIdentifier ?? -1
-            MainActor.assumeIsolated { self?.handleAppActivated(pid: pid) }
+            MainActor.assumeIsolated {
+                self?.enqueueAXOp { await self?.handleAppActivated(pid: pid) }
+            }
         }
 
-        attachToFrontmostApp()
+        enqueueAXOp { [weak self] in await self?.attachToFrontmostApp() }
         print("[TypingObserver] started")
     }
 
-    /// 停止并清理（幂等）。flush 所有 in-progress session 落库。
     func stop() {
         guard running else { return }
         running = false
 
         blacklistCleanupTimer?.invalidate()
         blacklistCleanupTimer = nil
-
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
             workspaceObserverToken = nil
@@ -150,11 +136,12 @@ final class TypingObserver {
         writer.flushAll()
         pasteboardMonitor.stop()
         ledger.stop()
-        detach()
+        // detach 串进 op 链 —— 等在飞的 AX op 跑完再清，避免 CFRelease 撞用。
+        enqueueAXOp { [weak self] in self?.detach() }
         print("[TypingObserver] stopped")
     }
 
-    /// `isolated deinit` —— MainActor 上跑（SE-0371），才能安全读隔离字段。
+    /// `isolated deinit` —— MainActor 上跑（SE-0371）。
     isolated deinit {
         blacklistCleanupTimer?.invalidate()
         if let token = workspaceObserverToken {
@@ -162,6 +149,25 @@ final class TypingObserver {
         }
         if let att = attachment {
             Self.teardown(att)
+        }
+    }
+
+    // MARK: - AX 后台调用 / op 链
+
+    /// 把一个 AX C 调用挪到后台串行队列跑，MainActor `await` 它。
+    /// 调用卡死也只卡 axQueue，主线程照常跑 run loop。
+    private func axCall<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { (cont: CheckedContinuation<T, Never>) in
+            axQueue.async { cont.resume(returning: work()) }
+        }
+    }
+
+    /// 把一个 AX 操作串进链尾 —— 等上一个 op 完成再跑，保证顺序。
+    private func enqueueAXOp(_ op: @escaping @MainActor () async -> Void) {
+        let prev = axOpChain
+        axOpChain = Task { @MainActor in
+            await prev?.value
+            await op()
         }
     }
 
@@ -188,16 +194,15 @@ final class TypingObserver {
 
     // MARK: - attach / detach
 
-    private func attachToFrontmostApp() {
+    private func attachToFrontmostApp() async {
         guard let app = NSWorkspace.shared.frontmostApplication else {
             print("[TypingObserver] no frontmost app")
             return
         }
-        attach(to: app)
+        await attach(to: app)
     }
 
-    private func handleAppActivated(pid: pid_t) {
-        // app 切走：flush 旧 app 的所有 in-progress session 落库。
+    private func handleAppActivated(pid: pid_t) async {
         if let oldBundle = attachment?.bundleId {
             writer.flushApp(bundleId: oldBundle)
             let msg = "app-switch flush bundle=\(oldBundle)"
@@ -205,32 +210,34 @@ final class TypingObserver {
             onDevLog?(msg)
         }
         detach()
-        guard pid > 0,
+        guard running, pid > 0,
               let app = NSRunningApplication(processIdentifier: pid) else { return }
-        attach(to: app)
+        await attach(to: app)
     }
 
-    private func attach(to app: NSRunningApplication) {
+    private func attach(to app: NSRunningApplication) async {
         let pid = app.processIdentifier
         guard pid > 0 else { return }
         let bundleId = app.bundleIdentifier ?? "unknown"
         let appName = app.localizedName
 
-        // 隐私闸门：密码管理器 / 机密类 app 整体不订阅 AX。
         if TypingPrivacyFilter.isBlacklisted(bundleId: bundleId) {
             print("[TypingObserver] skipped — blacklisted app bundle=\(bundleId)")
             return
         }
-        // 终端黑名单（算法限制）：终端输入/输出共享同一 AX 元素。
         if TypingPrivacyFilter.isTerminalApp(bundleId: bundleId) {
             print("[TypingObserver] terminal app, observer idle bundle=\(bundleId)")
             return
         }
 
-        var observerRef: AXObserver?
-        let createErr = AXObserverCreate(pid, Self.axCallback, &observerRef)
-        guard createErr == .success, let observer = observerRef else {
-            print("[TypingObserver] AXObserverCreate failed (\(createErr.rawValue)) for \(bundleId)")
+        // AXObserverCreate 在 axQueue 上跑（不卡主线程）。
+        let cb = Self.axCallback
+        let created: SendableBox<AXObserver?> = await axCall {
+            var ref: AXObserver?
+            return SendableBox(v: AXObserverCreate(pid, cb, &ref) == .success ? ref : nil)
+        }
+        guard running, let observer = created.v else {
+            print("[TypingObserver] AXObserverCreate failed for \(bundleId)")
             return
         }
         // observer 是 CFType：CFRetain 持有，detach/deinit 时 CFRelease 平衡。
@@ -240,25 +247,32 @@ final class TypingObserver {
         AXUIElementSetMessagingTimeout(appElement, Self.messagingTimeout)
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        let focusErr = AXObserverAddNotification(
-            observer, appElement,
-            kAXFocusedUIElementChangedNotification as CFString, refcon
-        )
-        if focusErr != .success {
-            print("[TypingObserver] add focus-changed notification failed (\(focusErr.rawValue)) for \(bundleId)")
+        let obsBox = SendableBox(v: observer)
+        let appBox = SendableBox(v: appElement)
+        let refconBox = SendableBox(v: refcon)
+        _ = await axCall {
+            AXObserverAddNotification(
+                obsBox.v, appBox.v,
+                kAXFocusedUIElementChangedNotification as CFString, refconBox.v)
         }
 
         CFRunLoopAddSource(
             CFRunLoopGetMain(),
-            AXObserverGetRunLoopSource(observer),
-            .commonModes
+            AXObserverGetRunLoopSource(observer), .commonModes
         )
 
+        // 在 await 期间可能已被 stop()/再次 app-switch 改写 —— 重核。
+        guard running, attachment == nil else {
+            Self.teardown(Attachment(pid: pid, bundleId: bundleId, appName: appName,
+                                     observer: observer, appElement: appElement,
+                                     focusedElement: nil))
+            return
+        }
         attachment = Attachment(
             pid: pid, bundleId: bundleId, appName: appName,
             observer: observer, appElement: appElement, focusedElement: nil
         )
-        subscribeFocusedElement()
+        await subscribeFocusedElement()
     }
 
     private func detach() {
@@ -267,93 +281,101 @@ final class TypingObserver {
         Self.teardown(att)
     }
 
-    /// AX 清理，deinit 与 detach 共用。`nonisolated` 以便 nonisolated deinit 也能调。
-    ///
-    /// **不调 `AXObserverRemoveNotification`**：它是同步跨进程调用，切走 app
-    /// 时目标 app 正忙 / 后台化会把主线程吊死在 `__ulock_wait`。observer
-    /// 紧接着 `CFRelease`，注册的 notification 随 observer 一起销毁。
+    /// AX 清理。**不调 `AXObserverRemoveNotification`**（同步跨进程，会卡死）——
+    /// observer 紧接着 CFRelease，注册的 notification 随它一起销毁。
+    /// `CFRunLoopRemoveSource` + `CFRelease` 都是本地操作，不阻塞。
     nonisolated private static func teardown(_ att: Attachment) {
         CFRunLoopRemoveSource(
             CFRunLoopGetMain(),
-            AXObserverGetRunLoopSource(att.observer),
-            .commonModes
+            AXObserverGetRunLoopSource(att.observer), .commonModes
         )
         Unmanaged.passUnretained(att.observer).release()
     }
 
     // MARK: - focused 元素订阅
 
-    /// 读 app 当前 focused 元素，订阅它的 kAXValueChangedNotification，
-    /// 并让 writer 为它开一段新 session（baseline = 此刻 AX value）。
-    private func subscribeFocusedElement() {
-        guard var att = attachment else { return }
+    private func subscribeFocusedElement() async {
+        guard let att0 = attachment else { return }
+        let observer = att0.observer
+        let appElement = att0.appElement
 
-        if let old = att.focusedElement {
-            AXObserverRemoveNotification(
-                att.observer, old, kAXValueChangedNotification as CFString
-            )
-            att.focusedElement = nil
+        // 撤旧 focused 元素订阅（v14 仍保留这一处 remove —— observer 活着）。
+        if let old = att0.focusedElement {
+            let obsBox = SendableBox(v: observer)
+            let oldBox = SendableBox(v: old)
+            _ = await axCall {
+                AXObserverRemoveNotification(
+                    obsBox.v, oldBox.v, kAXValueChangedNotification as CFString)
+            }
+            guard running, attachment != nil else { return }
+            attachment?.focusedElement = nil
         }
 
-        var focusedRef: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(
-            att.appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef
-        )
-        guard err == .success, let focusedRef else {
-            attachment = att   // 无 focused 元素（如桌面）—— 静默
-            return
+        // 读 focused 元素。
+        let appBox = SendableBox(v: appElement)
+        let focusedResult: SendableBox<AXUIElement?> = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(
+                appBox.v, kAXFocusedUIElementAttribute as CFString, &ref)
+            return SendableBox(v: (e == .success ? (ref.map { $0 as! AXUIElement }) : nil))
         }
-        let focused = focusedRef as! AXUIElement
+        guard running, attachment != nil, let focused = focusedResult.v else { return }
         AXUIElementSetMessagingTimeout(focused, Self.messagingTimeout)
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        let addErr = AXObserverAddNotification(
-            att.observer, focused, kAXValueChangedNotification as CFString, refcon
-        )
-        if addErr != .success {
-            print("[TypingObserver] add value-changed notification failed (\(addErr.rawValue)) bundle=\(att.bundleId)")
-            attachment = att
+        let obsBox = SendableBox(v: observer)
+        let focBox = SendableBox(v: focused)
+        let refconBox = SendableBox(v: refcon)
+        let addErr: Int32 = await axCall {
+            AXObserverAddNotification(
+                obsBox.v, focBox.v, kAXValueChangedNotification as CFString,
+                refconBox.v).rawValue
+        }
+        guard running, attachment != nil else { return }
+        if addErr != AXError.success.rawValue {
+            print("[TypingObserver] add value-changed notification failed (\(addErr))")
             return
         }
-        att.focusedElement = focused
-        attachment = att
+        attachment?.focusedElement = focused
 
-        // 读 baseline（此刻 element 完整内容）→ writer 开新 session。
-        var baselineRef: CFTypeRef?
-        let baselineErr = AXUIElementCopyAttributeValue(
-            focused, kAXValueAttribute as CFString, &baselineRef
-        )
-        let baseline = (baselineErr == .success ? (baselineRef as? String) : nil) ?? ""
+        // 读 baseline → writer 开新 session。
+        let baseline: String = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(
+                focBox.v, kAXValueAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil) ?? ""
+        }
+        guard running, let att = attachment else { return }
         let key = ElementKey(pid: att.pid, elementHash: Int(CFHash(focused)))
         writer.beginSession(key: key, bundleId: att.bundleId, baseline: baseline)
     }
 
     // MARK: - 通知处理
 
-    /// AXObserver 的 C 回调。run-loop source 在 main loop，故此函数跑在主线程。
+    /// AXObserver 的 C 回调。run-loop source 在 main loop → 此函数跑在主线程，
+    /// 但只做「串一个 op 进链」这件轻活，不碰 AX C API、不阻塞。
     private static let axCallback: AXObserverCallback = {
         _, _, notification, refcon in
         guard let refcon else { return }
         let observer = Unmanaged<TypingObserver>.fromOpaque(refcon).takeUnretainedValue()
         let name = notification as String
         MainActor.assumeIsolated {
-            observer.handleNotification(name)
+            observer.enqueueAXOp { [weak observer] in
+                await observer?.handleNotification(name)
+            }
         }
     }
 
-    private func handleNotification(_ name: String) {
+    private func handleNotification(_ name: String) async {
         switch name {
         case kAXFocusedUIElementChangedNotification:
-            // 焦点换元素：flush 旧 element 的 session，再订到新元素。
             if let att = attachment, let old = att.focusedElement {
                 let oldKey = ElementKey(pid: att.pid, elementHash: Int(CFHash(old)))
                 writer.flushElement(oldKey)
             }
-            subscribeFocusedElement()
-
+            await subscribeFocusedElement()
         case kAXValueChangedNotification:
-            processValueChange()
-
+            await processValueChange()
         default:
             break
         }
@@ -361,29 +383,29 @@ final class TypingObserver {
 
     // MARK: - 值变化 → writer
 
-    private func processValueChange() {
+    private func processValueChange() async {
         guard let att = attachment, let focused = att.focusedElement else { return }
+        let focBox = SendableBox(v: focused)
 
-        // 隐私闸门：secure field（密码输入框）不读值。
-        let role = copyStringAttr(focused, kAXRoleAttribute)
+        // secure field（密码框）不读值。
+        let role: String? = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(
+                focBox.v, kAXRoleAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil)
+        }
         if TypingPrivacyFilter.isSecureRole(role) { return }
 
-        var valueRef: CFTypeRef?
-        let valueErr = AXUIElementCopyAttributeValue(
-            focused, kAXValueAttribute as CFString, &valueRef
-        )
-        guard valueErr == .success, let newValue = valueRef as? String else { return }
-
-        let key = ElementKey(pid: att.pid, elementHash: Int(CFHash(focused)))
+        let newValue: String? = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(
+                focBox.v, kAXValueAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil)
+        }
+        // await 期间 focus / app 可能已变 —— 重核仍是同一 element。
+        guard running, let att2 = attachment, let focused2 = att2.focusedElement,
+              CFHash(focused2) == CFHash(focused), let newValue else { return }
+        let key = ElementKey(pid: att2.pid, elementHash: Int(CFHash(focused2)))
         writer.noteValueChange(key: key, newValue: newValue)
-    }
-
-    // MARK: - AX 读取小工具
-
-    private func copyStringAttr(_ element: AXUIElement, _ attr: String) -> String? {
-        var ref: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(element, attr as CFString, &ref)
-        guard err == .success else { return nil }
-        return ref as? String
     }
 }
