@@ -183,6 +183,55 @@ enum MemoryPrompts {
     }
     """#
 
+    // MARK: - PersonalityMerger — daily traits → personality concepts
+
+    /// 把一天 observed traits 归并进现有 personality concepts 的指令文本。
+    /// caller 在后面追加现有 concepts 列表 + 今日 traits。
+    static let personalityMerge = #"""
+    You decide how a day's observed PERSONALITY TRAITS map onto the user's
+    existing PERSONALITY CONCEPTS. One decision per observed trait.
+
+    For EACH observed trait, choose exactly one action:
+
+    - mergeInto: the trait is the SAME behavioral pattern as an existing
+      concept — semantically the same pattern, just phrased differently.
+      Provide:
+        conceptSlug : the existing concept's slug.
+        mergedBody  : the concept's body rewritten to fold in today's
+                      evidence. Preserve what is still true; integrate the
+                      new signal. Cite specifics. Third person.
+        aliases     : the trait's phrasing, to add to that concept's aliases.
+
+    - createNew: a genuinely new pattern no existing concept covers.
+      Provide:
+        primaryLabel : short behavioral label, 3-8 words, verb-led when
+                       possible (same style as the trait labels).
+        body         : 2-4 sentence description, third person, cite the
+                       day's evidence for this pattern.
+        aliases      : initial aliases — start with the observed trait phrasing.
+
+    - skipTrait: evidence too thin or trait too vague to commit. Provide reason.
+
+    MERGE STRICTNESS — medium:
+    - Merge when it is the SAME behavioral pattern phrased differently
+      ("withdraws when interrupted" vs "steps away from notifications").
+    - Do NOT merge just because two traits are loosely related or both about
+      "work". When unsure, prefer createNew over a forced merge.
+
+    OUTPUT — respond with ONLY a JSON array, one object per observed trait.
+    No prose, no markdown fences:
+    [
+      { "trait": "<the observed trait, verbatim>",
+        "action": "mergeInto" | "createNew" | "skipTrait",
+        "conceptSlug": "...",     // mergeInto only
+        "mergedBody": "...",      // mergeInto only
+        "primaryLabel": "...",    // createNew only
+        "body": "...",            // createNew only
+        "aliases": ["..."],       // mergeInto: alias(es) to add; createNew: initial aliases
+        "reason": "..." }         // skipTrait only
+    ]
+    """#
+
     // MARK: - PortraitDistiller — event → portrait distillation
 
     /// Opening line of the distill prompt.

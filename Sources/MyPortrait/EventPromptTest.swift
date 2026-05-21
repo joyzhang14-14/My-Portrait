@@ -721,6 +721,68 @@ enum PersonalityPromptTestCLI {
     }
 }
 
+/// `--personality-merge-test <yyyy-MM-dd>` — DEV-ONLY. 对指定日期跑
+/// PersonalityAgent → snapshot → PersonalityMerger.merge，打印 merge prompt +
+/// LLM 原始 + 解析后的 actions。**不落盘**（review-first）。Disposable.
+enum PersonalityMergeTestCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run(day dayStr: String) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        guard let day = fmt.date(from: dayStr) else {
+            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
+            exit(1)
+        }
+        print("=== personality-merge-test \(dayStr) ===")
+        let state = State()
+        Task {
+            do {
+                let events = await PersonalityAgent.readEvents(for: day)
+                let snapshot = try await PersonalityAgent().generateDailySnapshot(date: day, events: events)
+                print("daily snapshot — \(snapshot.observedTraits.count) trait(s): \(snapshot.observedTraits)")
+
+                let concepts = await PersonalityMerger.readConcepts()
+                print("existing personality concepts: \(concepts.count)")
+
+                let r = try await PersonalityMerger().mergeWithRaw(
+                    snapshot: snapshot, existingConcepts: concepts)
+                print("\n──── MERGE PROMPT ────")
+                print(r.prompt)
+                print("\n──── LLM RAW ────")
+                print(r.raw)
+                print("\n──── PARSED ACTIONS (\(r.actions.count)) ────")
+                for (i, a) in r.actions.enumerated() {
+                    switch a {
+                    case .mergeInto(let slug, let body, let aliases):
+                        print("\(i + 1). mergeInto [\(slug)]  +aliases=\(aliases)")
+                        print("     body: \(body)")
+                    case .createNew(let label, let body, let aliases):
+                        print("\(i + 1). createNew \"\(label)\"  aliases=\(aliases)")
+                        print("     body: \(body)")
+                    case .skipTrait(let reason):
+                        print("\(i + 1). skipTrait — \(reason)")
+                    }
+                }
+                print("\n(dry-run: nothing written to disk)")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
 /// `--distill` — DEV-ONLY entry point that runs the full PortraitDistiller
 /// pass over all categories. Disposable.
 enum DistillCLI {

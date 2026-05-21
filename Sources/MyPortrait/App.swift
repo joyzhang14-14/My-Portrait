@@ -137,6 +137,12 @@ struct MyPortraitApp: App {
             PersonalityPromptTestCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--personality-merge-test <yyyy-MM-dd>` runs agent → snapshot
+        // → PersonalityMerger.merge, prints actions. Writes nothing (dry-run).
+        if let idx = args.firstIndex(of: "--personality-merge-test"), idx + 1 < args.count {
+            PersonalityMergeTestCLI.run(day: args[idx + 1])
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--repair-portrait` re-reads + re-writes every portrait /
         // event .md to fix stale on-disk frontmatter formatting.
         if args.contains("--repair-portrait") {

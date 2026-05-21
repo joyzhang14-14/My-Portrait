@@ -32,3 +32,19 @@ final class PersonalityAgentTests: XCTestCase {
         XCTAssertFalse(snap.date.isEmpty)
     }
 }
+
+final class PersonalityMergerTests: XCTestCase {
+
+    /// observedTraits 为空（snapshot skip 了）→ merge 短路返回 []，不调 LLM。
+    @MainActor
+    func testMergeShortCircuitsOnEmptyTraits() async throws {
+        let snap = PersonalityDailySnapshot(
+            date: "2026-05-11",
+            summary: "Not enough activity today to read personality.",
+            observedTraits: [],
+            evidenceEventIds: [])
+        let actions = try await PersonalityMerger().merge(
+            snapshot: snap, existingConcepts: [])
+        XCTAssertTrue(actions.isEmpty)
+    }
+}
