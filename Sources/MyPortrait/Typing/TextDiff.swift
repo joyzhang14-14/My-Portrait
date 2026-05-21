@@ -141,6 +141,39 @@ enum TextDiff {
         )
     }
 
+    // MARK: - sandwich（M4 AX value-change delta 提取）
+
+    /// 纯「公共前后缀夹中段」—— 不走 LCS、不聚合、不分类。把 `prev` / `new`
+    /// 的公共前缀、公共后缀剥掉，夹出中段：
+    ///   - `newMid` = 用户这次新打的字符（delta）
+    ///   - `prevMid` = 用户这次删掉的字符
+    ///
+    /// M4 的 AX value-change diff 专用 —— 修「整段 newValue 当新 commit」那个
+    /// bug 的核心：拿到的是 delta，不是全量。
+    ///
+    /// 按 `Character` 比较（与 `diff()` 一致，emoji ZWJ 序列不会被拆）。
+    /// 后缀不与前缀重叠（两侧剩余长度封顶）。
+    static func sandwich(prev: String, new: String)
+        -> (prefix: String, prevMid: String, newMid: String, suffix: String) {
+        let p = Array(prev)
+        let n = Array(new)
+
+        var pre = 0
+        let preMax = min(p.count, n.count)
+        while pre < preMax, p[pre] == n[pre] { pre += 1 }
+
+        var suf = 0
+        let sufMax = min(p.count, n.count) - pre
+        while suf < sufMax, p[p.count - 1 - suf] == n[n.count - 1 - suf] { suf += 1 }
+
+        return (
+            prefix: String(p[0..<pre]),
+            prevMid: String(p[pre..<(p.count - suf)]),
+            newMid: String(n[pre..<(n.count - suf)]),
+            suffix: String(p[(p.count - suf)..<p.count])
+        )
+    }
+
     // MARK: - 聚合
 
     /// 把按 offset 升序的离散字符操作聚合成连续 chunk。

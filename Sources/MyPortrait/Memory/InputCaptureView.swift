@@ -3,17 +3,18 @@ import SwiftUI
 /// Memory 区 "Input" scope 的渲染路径。
 ///
 /// 跟 `MemoriesView` 不同 —— 数据来自 SQLite `typing_events` 表（typing capture
-/// 模块采集），不是 `PortraitFile`，所以走独立 view。按 thread 分组：一个打字
-/// session 一条。
+/// 模块采集），不是 `PortraitFile`，所以走独立 view。
 ///
-///   [thread 列表]  [合并文本 + 元数据 + 逐 event 列表]
+/// v13 schema 是「一个 app 一条主记录」：左列每行一个 app，右侧展示该 app 累积
+/// 的最终输入文本 + commit/delete 流水（edit_log）。
+///
+///   [app 列表]  [累积文本 + 元数据 + edit_log 时间线]
 @MainActor
 struct InputCaptureView: View {
     @Environment(\.services) private var services
 
-    @State private var threads: [TypingThreadSummary] = []
-    @State private var selected: TypingThreadSummary.ID?
-    @State private var events: [TypingEvent] = []
+    @State private var apps: [TypingEvent] = []
+    @State private var selected: String?          // bundle_id
     @State private var loading: Bool = false
     @State private var loadFailed: Bool = false
 
@@ -36,7 +37,7 @@ struct InputCaptureView: View {
             HStack(spacing: 10) {
                 Text("Input")
                     .font(.system(size: 16, weight: .semibold))
-                Text("\(threads.count)")
+                Text("\(apps.count)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -44,7 +45,7 @@ struct InputCaptureView: View {
                     Task { await reload() }
                 } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.bouncyIcon)
-                .help("Reload typing sessions")
+                .help("Reload typing capture")
             }
             .padding(.horizontal, 16)
             .padding(.top, 44)
@@ -52,16 +53,16 @@ struct InputCaptureView: View {
 
             Divider().background(Color.white.opacity(0.06))
 
-            if threads.isEmpty && !loading {
+            if apps.isEmpty && !loading {
                 emptyHint
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(threads) { thread in
-                            ThreadRow(thread: thread, selected: selected == thread.id)
+                        ForEach(apps, id: \.bundleId) { app in
+                            AppRow(app: app, selected: selected == app.bundleId)
                                 .contentShape(Rectangle())
-                                .onTapGesture { handleSelect(thread) }
+                                .onTapGesture { selected = app.bundleId }
                             Divider().background(Color.white.opacity(0.04))
                         }
                     }
@@ -94,37 +95,29 @@ struct InputCaptureView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let id = selected, let thread = threads.first(where: { $0.id == id }) {
+        if let id = selected, let app = apps.first(where: { $0.bundleId == id }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(Self.appLabel(thread))
+                    Text(Self.appLabel(app.bundleId))
                         .font(.system(size: 22, weight: .semibold))
                         .padding(.top, 44)
 
-                    metadataBlock(thread)
+                    metadataBlock(app)
                     Divider().background(Color.white.opacity(0.06))
 
-                    Text(mergedText)
+                    Text(app.text.isEmpty ? "—" : app.text)
                         .font(.system(size: 15))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if !events.isEmpty {
+                    let log = TypingRecordWriter.decodeLog(app.editLog)
+                    if !log.isEmpty {
                         Divider().background(Color.white.opacity(0.06))
-                        Text("Events")
+                        Text("Edit log · \(log.count)")
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)
-                        ForEach(events, id: \.id) { ev in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(Self.timeString(ev.startedAtMs))
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
-                                Text(ev.text)
-                                    .font(.system(size: 12))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 4)
+                        ForEach(Array(log.enumerated()), id: \.offset) { _, entry in
+                            editRow(entry)
                         }
                     }
                 }
@@ -137,7 +130,7 @@ struct InputCaptureView: View {
                 Image(systemName: "keyboard")
                     .font(.system(size: 30, weight: .light))
                     .foregroundStyle(.tertiary)
-                Text("Select a typing session")
+                Text("Select an app")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -146,16 +139,12 @@ struct InputCaptureView: View {
     }
 
     @ViewBuilder
-    private func metadataBlock(_ t: TypingThreadSummary) -> some View {
-        let windowTitle = events.compactMap { $0.windowTitle }.first
-        let langHint = events.compactMap { $0.languageHint }.first
+    private func metadataBlock(_ app: TypingEvent) -> some View {
         let rows: [(String, String)] = [
-            ("app", t.appName ?? t.bundleId),
-            ("window_title", windowTitle ?? "—"),
-            ("span", Self.spanString(t.startedAt, t.endedAt)),
-            ("language_hint", langHint ?? "—"),
-            ("events", "\(t.eventCount)"),
-            ("chars", "\(t.charCount)")
+            ("bundle_id", app.bundleId),
+            ("time_start", Self.timeString(app.timeStart)),
+            ("last_updated", Self.timeString(app.lastUpdated)),
+            ("total_chars", "\(app.totalChars)")
         ]
         VStack(alignment: .leading, spacing: 4) {
             ForEach(rows, id: \.0) { row in
@@ -173,66 +162,58 @@ struct InputCaptureView: View {
         }
     }
 
-    private var mergedText: String {
-        // events 已按 started_at_ms ASC 排（eventsInThread 保证）。
-        events.map(\.text).joined(separator: "\n\n")
+    @ViewBuilder
+    private func editRow(_ entry: EditEntry) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(entry.kind == "delete" ? "−" : "+")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(entry.kind == "delete" ? Color.red.opacity(0.8)
+                                                        : Color.green.opacity(0.8))
+                .frame(width: 14, alignment: .center)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.timeString(entry.ts))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Text(entry.text)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 3)
     }
 
     // MARK: - Actions
-
-    private func handleSelect(_ thread: TypingThreadSummary) {
-        selected = thread.id
-        events = []
-        guard let store = services?.typingStore else { return }
-        do {
-            events = try store.eventsInThread(threadId: thread.threadId)
-        } catch {
-            events = []
-        }
-    }
 
     @MainActor
     private func reload() async {
         guard let store = services?.typingStore else {
             loadFailed = true
-            threads = []
+            apps = []
             return
         }
         loading = true
         do {
-            threads = try store.recentThreads(limit: 300)
+            apps = try store.recentApps(limit: 300)
             loadFailed = false
         } catch {
-            threads = []
+            apps = []
             loadFailed = true
         }
-        // 选中项可能已不在新列表里。
-        if let id = selected, !threads.contains(where: { $0.id == id }) {
+        if let id = selected, !apps.contains(where: { $0.bundleId == id }) {
             selected = nil
-            events = []
         }
         loading = false
     }
 
     // MARK: - Formatting
 
-    static func appLabel(_ t: TypingThreadSummary) -> String {
-        if let name = t.appName, !name.isEmpty { return name }
-        return t.bundleId
+    /// bundle_id 末段当友好名（com.tinyspeck.slackmacgap → slackmacgap）。
+    static func appLabel(_ bundleId: String) -> String {
+        let last = bundleId.split(separator: ".").last.map(String.init)
+        return (last?.isEmpty == false ? last : nil) ?? bundleId
     }
 
-    nonisolated(unsafe) private static let timeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-    nonisolated(unsafe) private static let dayFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
     nonisolated(unsafe) private static let stampFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -240,28 +221,13 @@ struct InputCaptureView: View {
         return f
     }()
 
-    private static func date(_ ms: Int64) -> Date {
-        Date(timeIntervalSince1970: Double(ms) / 1000)
-    }
-
     static func timeString(_ ms: Int64) -> String {
-        stampFmt.string(from: date(ms))
-    }
-
-    /// 同一天 → `HH:mm–HH:mm`；跨天 → `yyyy-MM-dd HH:mm → yyyy-MM-dd HH:mm`。
-    static func spanString(_ startMs: Int64, _ endMs: Int64) -> String {
-        let start = date(startMs)
-        let end = date(endMs)
-        if dayFmt.string(from: start) == dayFmt.string(from: end) {
-            return "\(dayFmt.string(from: start)) \(timeFmt.string(from: start))–\(timeFmt.string(from: end))"
-        }
-        return "\(dayFmt.string(from: start)) \(timeFmt.string(from: start)) → " +
-               "\(dayFmt.string(from: end)) \(timeFmt.string(from: end))"
+        stampFmt.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
     }
 }
 
-private struct ThreadRow: View {
-    let thread: TypingThreadSummary
+private struct AppRow: View {
+    let app: TypingEvent
     let selected: Bool
 
     var body: some View {
@@ -269,22 +235,22 @@ private struct ThreadRow: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(AppColor.color(for: InputCaptureView.appLabel(thread)))
+                    .fill(AppColor.color(for: InputCaptureView.appLabel(app.bundleId)))
                     .frame(width: 3, height: 24)
                 Spacer(minLength: 0)
             }
             .frame(width: 6)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(InputCaptureView.appLabel(thread))
+                Text(InputCaptureView.appLabel(app.bundleId))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    Text(InputCaptureView.spanString(thread.startedAt, thread.endedAt))
+                    Text(InputCaptureView.timeString(app.lastUpdated))
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
-                    Text("\(thread.eventCount) edits · \(thread.charCount) chars")
+                    Text("\(app.totalChars) chars")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                     Spacer()

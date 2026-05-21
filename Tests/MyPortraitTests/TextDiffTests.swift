@@ -96,3 +96,73 @@ final class TextDiffTests: XCTestCase {
         XCTAssertNil(TextDiff.diff(from: "same", to: "same"))
     }
 }
+
+/// `TextDiff.sandwich` —— M4 AX value-change delta 提取。
+final class TextDiffSandwichTests: XCTestCase {
+
+    // 纯插入（尾部）：newMid = 新打的字，prevMid 空。
+    func testPureInsertTail() {
+        let r = TextDiff.sandwich(prev: "hello", new: "hello world")
+        XCTAssertEqual(r.prefix, "hello")
+        XCTAssertEqual(r.prevMid, "")
+        XCTAssertEqual(r.newMid, " world")
+        XCTAssertEqual(r.suffix, "")
+    }
+
+    // 纯插入（中段）：前后缀夹出中段。
+    func testPureInsertMiddle() {
+        let r = TextDiff.sandwich(prev: "abef", new: "abcdef")
+        XCTAssertEqual(r.prefix, "ab")
+        XCTAssertEqual(r.prevMid, "")
+        XCTAssertEqual(r.newMid, "cd")
+        XCTAssertEqual(r.suffix, "ef")
+    }
+
+    // 纯删除：prevMid = 删掉的字，newMid 空。
+    func testPureDelete() {
+        let r = TextDiff.sandwich(prev: "hello world", new: "hello")
+        XCTAssertEqual(r.prevMid, " world")
+        XCTAssertEqual(r.newMid, "")
+    }
+
+    // 替换：prevMid + newMid 都非空。
+    func testReplace() {
+        let r = TextDiff.sandwich(prev: "zhong", new: "中")
+        XCTAssertEqual(r.prefix, "")
+        XCTAssertEqual(r.prevMid, "zhong")
+        XCTAssertEqual(r.newMid, "中")
+        XCTAssertEqual(r.suffix, "")
+    }
+
+    // 空 → 非空 / 非空 → 空 / 完全相等。
+    func testEmptyEdges() {
+        let ins = TextDiff.sandwich(prev: "", new: "中文")
+        XCTAssertEqual(ins.newMid, "中文")
+        XCTAssertEqual(ins.prevMid, "")
+
+        let del = TextDiff.sandwich(prev: "中文", new: "")
+        XCTAssertEqual(del.prevMid, "中文")
+        XCTAssertEqual(del.newMid, "")
+
+        let same = TextDiff.sandwich(prev: "same", new: "same")
+        XCTAssertEqual(same.prevMid, "")
+        XCTAssertEqual(same.newMid, "")
+        XCTAssertEqual(same.prefix, "same")
+    }
+
+    // 前后缀不重叠：prev 全在 new 里时，前缀吃满后缀不再回头。
+    func testPrefixSuffixNoOverlap() {
+        // "aa" → "aaa"：公共前缀 2，剩余只能算一侧，suffix 不与 prefix 重叠。
+        let r = TextDiff.sandwich(prev: "aa", new: "aaa")
+        XCTAssertEqual(r.prefix.count + r.suffix.count, 2)
+        XCTAssertEqual(r.newMid, "a")
+        XCTAssertEqual(r.prevMid, "")
+    }
+
+    // emoji ZWJ 序列按 Character 处理，不被拆。
+    func testEmojiNotSplit() {
+        let r = TextDiff.sandwich(prev: "hi", new: "hi👨‍👩‍👧")
+        XCTAssertEqual(r.newMid, "👨‍👩‍👧")
+        XCTAssertEqual(r.newMid.count, 1)
+    }
+}

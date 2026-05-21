@@ -1,12 +1,16 @@
-/// TypingObserver —— Typing Observer v2 的 Layer 1 + Layer 2 orchestrator（M3）。
+/// TypingObserver —— Typing Observer v2 的 L1+L2+L3+L4 顶层 orchestrator（M4）。
 ///
-/// 通过 Accessibility (AX) API 订阅 frontmost app 的 focused text element，
-/// 把每次 `kAXValueChangedNotification` 折成一段 `RawEdit`，经
-///   Layer 1（KeystrokeLedger 心跳过滤）→ Layer 2（IMEStateMachineRegistry 折叠）
-/// 输出 `IMEFoldEvent`。
+/// 通过 Accessibility (AX) API 订阅 frontmost app 的 focused text element。
+/// 每次 `kAXValueChangedNotification`：
+///   1. `TextDiff.sandwich` diff 出 delta（segment = 新打的字 / deletion = 删的字）
+///   2. 速度阈值 burst 检测 —— 大段且极快 = 鼠标点击触发的 AX 全文吸附，
+///      进黑名单、不入库
+///   3. segment 喂 Layer 2（IME 折叠）；deletion 交 `TypingRecordWriter`
+///   4. Layer 2 折出的 commit 累加进该 app 的 master record
+///   5/7. 5s debounce flush，写库前减黑名单
 ///
-/// **M3 只到 IMEFoldEvent 输出为止**：只 log（+ 可注入 `onFoldEvent` 闭包），
-/// 不写 DB，不做 Layer 3/4，不做健康检查。
+/// **M4 的关键修正**：步骤 1 拿到的是 prev→new 的 delta，不是整段 newValue。
+/// 旧实现把整段 newValue 当新 commit append，导致 edit_log 全是版本快照。
 ///
 /// 并发模型：
 ///   AXObserver 的 C 回调（@convention(c)）契约上跑在主线程 ——
@@ -16,7 +20,7 @@
 ///   导致回调间乱序）。
 ///
 /// 生命周期：挂到 frontmost app，监听 NSWorkspace 的 app 切换通知，
-/// 切换时 detach 旧 AXObserver、attach 新 app。
+/// 切换时 flush 旧 app 的 record、detach 旧 AXObserver、attach 新 app。
 
 import AppKit
 import ApplicationServices
@@ -44,21 +48,42 @@ final class TypingObserver {
 
     private var attachment: Attachment?
 
-    // MARK: - Layer 1 / Layer 2
+    // MARK: - 各 element 的 diff 快照
 
-    /// Layer 1 —— 人类心跳层。observer 持有一个实例，start/stop 同步起停。
+    /// 一个 AX element 的 diff 状态：上次完整文本值 + 上次变化时刻。
+    private struct ElementState {
+        /// 用于 prev→new diff 的上次快照。
+        var lastValueSnapshot: String
+        /// 用于 burst 速度阈值的上次 value-change 时刻（CACurrentMediaTime）。
+        var lastValueChangeTs: TimeInterval
+    }
+
+    private typealias ElementKey = TypingRecordWriter.ElementKey
+
+    /// per (app, element) 的 diff 快照。首次见到某 element 只存 baseline 不 diff
+    /// （否则整段被当 insert）。element 失焦 / app 切走时清对应条目。
+    private var elementState: [ElementKey: ElementState] = [:]
+
+    // MARK: - Layer 1 / Layer 2 / Layer 4
+
+    /// Layer 1 —— 人类心跳层。作为流水线基础设施起停；M4 的噪声过滤改由
+    /// 步骤 2 的 burst 检测负责，flush 计时由 value-change 活动驱动。
     private let ledger = KeystrokeLedger()
 
     /// Layer 2 —— 多 element IME 折叠层。
     private let registry = IMEStateMachineRegistry()
 
-    /// 每个 element 上次缓存的完整文本值。key = elementHash = CFHash(focused)。
-    /// 首次见到某 element 只存值不 diff（否则整段被当 insert）。
-    /// element 失焦 / app 切走时清对应条目，避免字典无限涨。
-    private var lastValues: [Int: String] = [:]
+    /// Layer 4 —— 写入层（in-progress record / 跨记录 delete / flush / 黑名单）。
+    private let writer: TypingRecordWriter
 
-    /// L2 折叠出的 IMEFoldEvent 的额外消费口。dev flag / M4 注入。
+    /// L2 折叠出的 IMEFoldEvent 的额外消费口（`--typing-observe-m3` dev flag 注入）。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
+
+    /// dev flag 日志出口（burst / 跨记录 delete / flush 关键事件）。
+    /// 设置时同步给 writer。
+    var onDevLog: ((String) -> Void)? {
+        didSet { writer.onDevLog = onDevLog }
+    }
 
     // MARK: - 其它状态
 
@@ -68,25 +93,31 @@ final class TypingObserver {
     /// 规则 9 的 compose-timeout tick 定时器（100ms 间隔，main thread）。
     private var tickTimer: Timer?
 
+    /// 黑名单 TTL 清理定时器（5min 间隔）。
+    private var blacklistCleanupTimer: Timer?
+
     /// 是否已 start（用于 stop 幂等）。
     private var running = false
 
     /// 每个 AX 元素的跨进程消息超时（秒）。
     private static let messagingTimeout: Float = 1.5
 
-    /// L1 心跳关联窗口（秒）。insert/replace 与 delete 各一档，硬编码（M5 才挪进 ConfigStore）。
-    private static let keystrokeWindowEditSec: TimeInterval = 0.120
-    private static let keystrokeWindowDeleteSec: TimeInterval = 0.200
-
     /// compose-timeout tick 间隔。
     private static let tickIntervalSec: TimeInterval = 0.100
+
+    /// 黑名单 TTL 清理间隔。
+    private static let blacklistCleanupSec: TimeInterval = 300
 
     private let pipelineLog = Logger(subsystem: "com.joyzhang.myportrait",
                                      category: "typing.pipeline")
 
     // MARK: - 生命周期
 
-    init() {}
+    /// - Parameter store: typing_events DAO。`nil` 时（`--typing-observe` /
+    ///   `--typing-observe-m3` dev 模式）L4 只在内存里累加、不落库。
+    init(store: TypingEventStore? = nil) {
+        self.writer = TypingRecordWriter(store: store)
+    }
 
     func start() {
         guard !running else { return }
@@ -99,8 +130,7 @@ final class TypingObserver {
 
         running = true
 
-        // Layer 1 起 CGEventTap。失败不崩，KeystrokeLedger 自身会 log warning，
-        // isRunning 保持 false，hasKeystroke 永远 false。
+        // Layer 1 起 CGEventTap。失败不崩，KeystrokeLedger 自身会 log warning。
         do {
             try ledger.start()
         } catch {
@@ -108,15 +138,23 @@ final class TypingObserver {
         }
 
         // compose-timeout tick：每 100ms 驱动一次 registry.tick。
-        let timer = Timer.scheduledTimer(withTimeInterval: Self.tickIntervalSec,
+        tickTimer = Timer.scheduledTimer(withTimeInterval: Self.tickIntervalSec,
                                          repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.handleTick()
             }
         }
-        tickTimer = timer
 
-        // 监听 app 切换：切换时 detach 旧 observer、attach 新 app。
+        // 黑名单 TTL 清理：每 5min 扫一遍，减掉 1h 前的条目。
+        blacklistCleanupTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.blacklistCleanupSec, repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.writer.cleanupBlacklist(now: CACurrentMediaTime())
+            }
+        }
+
+        // 监听 app 切换：切换时 flush + detach 旧 observer、attach 新 app。
         let nc = NSWorkspace.shared.notificationCenter
         workspaceObserverToken = nc.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -138,26 +176,32 @@ final class TypingObserver {
         print("[TypingObserver] started")
     }
 
-    /// 停止并清理（幂等）。走与 deinit 相同的三步清理路径。
+    /// 停止并清理（幂等）。flush 所有 in-progress record 到 DB。
     func stop() {
         guard running else { return }
         running = false
 
         tickTimer?.invalidate()
         tickTimer = nil
+        blacklistCleanupTimer?.invalidate()
+        blacklistCleanupTimer = nil
 
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
             workspaceObserverToken = nil
         }
 
-        // app/observer 整体停 —— flush 所有 element 的 buffer。
-        emit(registry.flushAll())
+        // observer 整体停：flush L2 buffer → 累加 → flush 所有 record 落库。
+        let flushed = registry.flushAll()
+        if let bundleId = attachment?.bundleId {
+            handleFoldEvents(flushed, bundleId: bundleId, nowMs: TypingRecordWriter.nowMs())
+        }
+        writer.flushAll(nowMs: TypingRecordWriter.nowMs())
 
         ledger.stop()
 
         detach()
-        lastValues.removeAll()
+        elementState.removeAll()
         print("[TypingObserver] stopped")
     }
 
@@ -165,6 +209,7 @@ final class TypingObserver {
     /// 非 Sendable 的隔离字段（attachment / workspaceObserverToken）。
     isolated deinit {
         tickTimer?.invalidate()
+        blacklistCleanupTimer?.invalidate()
         if let token = workspaceObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
         }
@@ -186,10 +231,19 @@ final class TypingObserver {
     }
 
     private func handleAppActivated(pid: pid_t) {
-        // app 切走：flush 所有 element 的 buffer，清值缓存（旧 app 的元素已
-        // 无效，留着只会让字典无限涨），再 detach 旧的 attach 新的。
-        emit(registry.flushAll())
-        lastValues.removeAll()
+        // app 切走：flush 旧 app 的 L2 buffer → 累加 → 立即把它的 record 落库。
+        if let oldBundle = attachment?.bundleId {
+            handleFoldEvents(registry.flushAll(), bundleId: oldBundle,
+                             nowMs: TypingRecordWriter.nowMs())
+            writer.flush(bundleId: oldBundle, nowMs: TypingRecordWriter.nowMs())
+            let msg = "app-switch flush bundle=\(oldBundle)"
+            pipelineLog.info("\(msg, privacy: .public)")
+            onDevLog?(msg)
+            // 清掉旧 app 的 element 快照（元素已无效，留着字典无限涨）。
+            elementState = elementState.filter { $0.key.bundleId != oldBundle }
+        } else {
+            _ = registry.flushAll()
+        }
         detach()
         guard pid > 0,
               let app = NSRunningApplication(processIdentifier: pid) else { return }
@@ -209,7 +263,7 @@ final class TypingObserver {
         }
 
         // 终端黑名单（算法限制）：终端输入/输出共享同一 AX 元素，stdout 会被
-        // Layer 1 心跳误判为用户输入 —— 终端整段不订阅。
+        // 误判为用户输入 —— 终端整段不订阅。
         if TypingPrivacyFilter.isTerminalApp(bundleId: bundleId) {
             print("[TypingObserver] terminal app, observer idle bundle=\(bundleId)")
             return
@@ -342,21 +396,17 @@ final class TypingObserver {
         att.focusedElement = focused
         attachment = att
 
-        // 立刻读一次 baseline 值写进 lastValues —— 否则该 element 的第一次
-        // value 变化会撞上 processValueChange 的"首次见到只存值不 diff"，
-        // 把第一个字符吞掉。读失败（如某些不可读元素）→ 退化为空串 baseline。
-        // 元素正处于 IME composition 时也照读 raw value，后续 Layer 2 状态机
-        // 会折叠 composition。
-        let elementHash = Int(CFHash(focused))
+        // 立刻读一次 baseline 值写进 elementState —— 否则该 element 的第一次
+        // value 变化会撞上"首次见到只存值不 diff"，把第一个字符吞掉。
+        // 读失败（如某些不可读元素）→ 退化为空串 baseline。
+        let key = ElementKey(bundleId: att.bundleId, elementHash: Int(CFHash(focused)))
         var baselineRef: CFTypeRef?
         let baselineErr = AXUIElementCopyAttributeValue(
             focused, kAXValueAttribute as CFString, &baselineRef
         )
-        if baselineErr == .success, let baseline = baselineRef as? String {
-            lastValues[elementHash] = baseline
-        } else {
-            lastValues[elementHash] = ""
-        }
+        let baseline = (baselineErr == .success ? (baselineRef as? String) : nil) ?? ""
+        elementState[key] = ElementState(lastValueSnapshot: baseline,
+                                         lastValueChangeTs: CACurrentMediaTime())
     }
 
     // MARK: - 通知处理
@@ -377,11 +427,13 @@ final class TypingObserver {
     private func handleNotification(_ name: String) {
         switch name {
         case kAXFocusedUIElementChangedNotification:
-            // 焦点换元素：对旧 focused 元素 flush + 清值缓存，再重订到新元素。
-            if let old = attachment?.focusedElement {
+            // 焦点换元素：对旧 focused 元素 flush L2 buffer + 清快照，再重订。
+            if let att = attachment, let old = att.focusedElement {
                 let oldHash = Int(CFHash(old))
-                emit(registry.handleFocusChange(elementHash: oldHash))
-                lastValues[oldHash] = nil
+                handleFoldEvents(registry.handleFocusChange(elementHash: oldHash),
+                                 bundleId: att.bundleId,
+                                 nowMs: TypingRecordWriter.nowMs())
+                elementState[ElementKey(bundleId: att.bundleId, elementHash: oldHash)] = nil
             }
             subscribeFocusedElement()
 
@@ -397,26 +449,27 @@ final class TypingObserver {
     // MARK: - tick
 
     /// compose-timeout tick：100ms 一次，驱动 registry 对所有 element 跑规则 9。
+    /// registry 里的状态机只属于当前 attach 的 app（切 app 时已 flushAll 清空）。
     private func handleTick() {
-        emit(registry.tick(now: CACurrentMediaTime()))
+        let events = registry.tick(now: CACurrentMediaTime())
+        guard !events.isEmpty, let bundleId = attachment?.bundleId else { return }
+        handleFoldEvents(events, bundleId: bundleId, nowMs: TypingRecordWriter.nowMs())
     }
 
-    // MARK: - 值变化 → RawEdit → L1 → L2 → handler
+    // MARK: - 值变化 → sandwich → burst → L2 / handleDelete → L4
 
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
 
         // 暂停闸门：菜单栏暂停开关打开时，整体丢弃 value 变化。
-        // AX 订阅保持不动，恢复后下一次 value 变化立即生效。
         if ConfigStore.shared.recording.typingCapturePaused { return }
 
         // 隐私闸门：secure field（密码输入框）不读值、不 diff。
         let role = copyStringAttr(focused, kAXRoleAttribute)
-        if TypingPrivacyFilter.isSecureRole(role) {
-            return
-        }
+        if TypingPrivacyFilter.isSecureRole(role) { return }
 
         let elementHash = Int(CFHash(focused))
+        let key = ElementKey(bundleId: att.bundleId, elementHash: elementHash)
 
         // 读 focused 元素当前完整文本值。
         var valueRef: CFTypeRef?
@@ -424,10 +477,8 @@ final class TypingObserver {
             focused, kAXValueAttribute as CFString, &valueRef
         )
         guard valueErr == .success else {
-            // 元素已消失 —— 清掉它的值缓存条目。其它读失败静默忽略。
-            if valueErr == .invalidUIElement {
-                lastValues[elementHash] = nil
-            }
+            // 元素已消失 —— 清掉它的快照条目。其它读失败静默忽略。
+            if valueErr == .invalidUIElement { elementState[key] = nil }
             return
         }
         guard let newValue = valueRef as? String else {
@@ -435,43 +486,78 @@ final class TypingObserver {
             return
         }
 
-        // 取该 element 上次缓存的值。首次见到 → 只存值不 diff。
-        guard let oldValue = lastValues[elementHash] else {
-            lastValues[elementHash] = newValue
+        // 首次见到该 element（baseline 未预存成功）→ 只存快照不 diff。
+        guard var state = elementState[key] else {
+            elementState[key] = ElementState(lastValueSnapshot: newValue,
+                                             lastValueChangeTs: CACurrentMediaTime())
             return
         }
-        lastValues[elementHash] = newValue
+        let prevValue = state.lastValueSnapshot
 
-        // 求单段连续编辑。无变化 → nil → return。
-        guard let raw = RawEdit.from(oldValue: oldValue, newValue: newValue,
-                                     pid: att.pid, elementHash: elementHash,
-                                     ts: CACurrentMediaTime()) else {
-            return
-        }
-
-        // Layer 1：心跳过滤。insert/replace 看 120ms 窗口，delete 看 200ms。
-        let window: TimeInterval = (raw.kind == .delete)
-            ? Self.keystrokeWindowDeleteSec
-            : Self.keystrokeWindowEditSec
-        guard ledger.hasKeystroke(within: window) else {
-            pipelineLog.debug("L1:drop:no-keystroke kind=\(String(describing: raw.kind), privacy: .public)")
+        // ── 步骤 1：sandwich diff 出 delta ──────────────────────────
+        let (prefix, prevMid, newMid, _) = TextDiff.sandwich(prev: prevValue, new: newValue)
+        let segment = newMid       // 用户这次新打的字符
+        let deletion = prevMid     // 用户这次删的字符
+        state.lastValueSnapshot = newValue
+        if segment.isEmpty, deletion.isEmpty {
+            elementState[key] = state
             return
         }
 
-        // Layer 2：折叠。
-        emit(registry.feed(raw))
+        // ── 步骤 2：速度阈值 burst 检测 ─────────────────────────────
+        let now = CACurrentMediaTime()
+        let intervalMs = (now - state.lastValueChangeTs) * 1000.0
+        if TypingRecordWriter.isBurst(segmentCharCount: segment.count,
+                                      intervalMs: intervalMs) {
+            writer.recordBurst(key: key, segment: segment, now: now)
+            state.lastValueChangeTs = now
+            elementState[key] = state
+            let msg = "burst bundle=\(att.bundleId) size=\(segment.count) "
+                + "interval=\(Int(intervalMs))ms"
+            pipelineLog.info("\(msg, privacy: .public)")
+            onDevLog?(msg)
+            return  // 不进 edit_log、不喂 Layer 2
+        }
+        state.lastValueChangeTs = now
+        elementState[key] = state
+
+        // ── 步骤 3：喂 Layer 2 + handleDelete ──────────────────────
+        let nowMs = TypingRecordWriter.nowMs()
+        if !segment.isEmpty {
+            // segment 一律作 .insert 喂 L2；range.location 指向插入点
+            // （= 公共前缀的 UTF-16 长度），L2 规则 3 靠它判连续输入。
+            let raw = RawEdit(
+                kind: .insert,
+                text: segment,
+                script: Script.classify(segment),
+                range: NSRange(location: prefix.utf16.count, length: 0),
+                ts: now,
+                pid: att.pid,
+                elementHash: elementHash,
+                traceTag: nil
+            )
+            handleFoldEvents(registry.feed(raw), bundleId: att.bundleId, nowMs: nowMs)
+        }
+        if !deletion.isEmpty {
+            writer.handleDelete(deletedText: deletion, bundleId: att.bundleId, nowMs: nowMs)
+        }
     }
 
     // MARK: - IMEFoldEvent handler
 
-    /// M3 的 handler —— 每条 IMEFoldEvent log 一行 + 转交 onFoldEvent 闭包。
-    private func emit(_ events: [IMEFoldEvent]) {
+    /// L2 折出的事件：log 一行 + 转交 onFoldEvent（dev flag）+ commit 累加进
+    /// Layer 4 的 master record。
+    private func handleFoldEvents(_ events: [IMEFoldEvent],
+                                  bundleId: String, nowMs: Int64) {
         guard !events.isEmpty else { return }
         for event in events {
             pipelineLog.debug(
-                "[L2] \(String(describing: event.kind), privacy: .public) \"\(event.text, privacy: .public)\" script=\(String(describing: event.script), privacy: .public) trace=\(event.traceTag?.description ?? "-", privacy: .public)")
+                "[L2] \(String(describing: event.kind), privacy: .public) \"\(event.text, privacy: .public)\" trace=\(event.traceTag?.description ?? "-", privacy: .public)")
         }
         onFoldEvent?(events)
+        // M4 只把 .insert 喂给 L2，故 L2 只会折出 .commit。防御性 filter。
+        let commitTexts = events.filter { $0.kind == .commit }.map(\.text)
+        writer.accumulate(commitTexts: commitTexts, bundleId: bundleId, nowMs: nowMs)
     }
 
     // MARK: - AX 读取小工具

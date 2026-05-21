@@ -347,6 +347,45 @@ enum DBSchema {
                 """)
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v12 — typing_events edit_log（占位 / no-op）
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 这一槽位曾被一版 typing observer M4 实现占用（带 close_reason /
+        // edit_log 的 session schema）。该实现有根本性 bug 已整体 revert。
+        //
+        // 但**线上库的 `grdb_migrations` 表已记录 `v12_typing_events_edit_log`
+        // 这个 identifier**——GRDB 按 identifier 字符串去重，不可复用此名做新
+        // 迁移（会被当成"已应用"直接跳过）。故保留一个同名空迁移：
+        //   - 线上库：已应用 → 跳过；
+        //   - 全新库：执行空 body（no-op），typing_events 维持 v11 形态，
+        //     真正的重塑由紧随其后的 v13 完成。
+        // 这样注册表与磁盘账本始终前缀一致，真正的工作全在 v13。
+        m.registerMigration("v12_typing_events_edit_log") { _ in
+            // 故意为空 —— 见上方注释。
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v13 — typing_events 重塑为 master record per app
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 新模型：一个 app 一条主记录（bundle_id 主键）。`text` 是用户在该
+        // app 累积的最终输入内容，`edit_log` 是 commit/delete 的 JSON 流水。
+        // 废弃 session / thread_id / close_reason 等概念。旧表数据全部是
+        // buggy 数据，直接 DROP 重建——不迁移。
+        m.registerMigration("v13_typing_events_master_record") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS typing_events")
+
+            try db.create(table: "typing_events") { t in
+                t.column("bundle_id", .text).primaryKey()        // 一个 app 一条
+                t.column("text", .text).notNull().defaults(to: "")
+                t.column("edit_log", .text).notNull().defaults(to: "[]")  // JSON [EditEntry]
+                t.column("time_start", .integer).notNull()       // UTC ms，首次记录
+                t.column("last_updated", .integer).notNull()     // UTC ms，最近 flush
+                t.column("total_chars", .integer).notNull().defaults(to: 0)  // text.count
+            }
+        }
+
         return m
     }
 }

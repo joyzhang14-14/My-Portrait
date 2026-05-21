@@ -1,48 +1,37 @@
 import Foundation
 import GRDB
 
-/// 一条打字事件 —— 一次连续输入会话（started_at_ms ~ ended_at_ms）。
-/// 对应 `typing_events` 表（v11 schema）。
-struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
-    var id: Int64?
-    var startedAtMs: Int64
-    var endedAtMs: Int64
-    var bundleId: String
-    var appName: String?
-    var windowTitle: String?
-    var url: String?
-    var elementRole: String?
-    var threadId: String
+/// `edit_log` 里的一条流水。commit = 用户写的字符；delete = 实际删掉的字符。
+/// `ts` 是 UTC 毫秒（绝对时间，不是单调时钟）。JSON array 的元素结构。
+struct EditEntry: Codable, Equatable, Sendable {
+    var ts: Int64
+    var kind: String   // "commit" | "delete"
     var text: String
-    var charCount: Int
-    var languageHint: String?
-    var createdAtMs: Int64
+}
+
+/// 一条打字记录 —— 一个 app 一条主记录（v13 schema，master record per app）。
+/// 对应 `typing_events` 表：`bundle_id` 是主键。
+struct TypingEvent: Codable, FetchableRecord, Sendable {
+    var bundleId: String
+    /// 用户在该 app 累积的最终输入内容。
+    var text: String
+    /// JSON array of `EditEntry`。
+    var editLog: String
+    /// UTC ms —— 该 app 首次记录时间。
+    var timeStart: Int64
+    /// UTC ms —— 最近一次 flush 时间。
+    var lastUpdated: Int64
+    /// `text` 字符数，查询加速用。
+    var totalChars: Int
 
     static let databaseTableName = "typing_events"
 
     static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
     static let databaseColumnDecodingStrategy: DatabaseColumnDecodingStrategy = .convertFromSnakeCase
-
-    mutating func didInsert(_ inserted: InsertionSuccess) {
-        id = inserted.rowID
-    }
 }
 
-/// 一个打字 thread 的聚合摘要 —— 一次 session 一行。
-/// 由 `recentThreads(limit:)` 用 GROUP BY thread_id 算出来。
-struct TypingThreadSummary: Identifiable, Sendable {
-    var threadId: String
-    var appName: String?
-    var bundleId: String
-    var startedAt: Int64
-    var endedAt: Int64
-    var eventCount: Int
-    var charCount: Int
-
-    var id: String { threadId }
-}
-
-/// `typing_events` 表的 DAO。接受外部注入的 `DatabasePool`，不自己开 DB。
+/// `typing_events` 表（v13 master-record schema）的 DAO。
+/// 接受外部注入的 `DatabasePool`，不自己开 DB。
 struct TypingEventStore {
 
     let dbPool: DatabasePool
@@ -51,83 +40,47 @@ struct TypingEventStore {
         self.dbPool = dbPool
     }
 
-    /// 显式列清单，所有 SELECT 复用 —— 不用 `SELECT *`（列顺序/新增列都不会出岔）。
+    /// 显式列清单，所有 SELECT 复用 —— 不用 `SELECT *`。
     private static let columns =
-        "id, started_at_ms, ended_at_ms, bundle_id, app_name, window_title, " +
-        "url, element_role, thread_id, text, char_count, language_hint, created_at_ms"
+        "bundle_id, text, edit_log, time_start, last_updated, total_chars"
 
-    /// 单条写入，事务内。`insert` 是 mutating，块内做可变拷贝。
-    func insert(_ event: TypingEvent) throws {
-        try dbPool.write { db in
-            var copy = event
-            try copy.insert(db)
-        }
-    }
-
-    /// 调试用：最近 `limit` 条，按 started_at_ms 降序。
-    func recent(limit: Int) throws -> [TypingEvent] {
+    /// 取某 app 的主记录，没有返回 nil。
+    func fetch(bundleId: String) throws -> TypingEvent? {
         try dbPool.read { db in
-            try TypingEvent.fetchAll(
-                db,
-                sql: "SELECT \(Self.columns) FROM typing_events " +
-                     "ORDER BY started_at_ms DESC LIMIT ?",
-                arguments: [limit]
-            )
-        }
-    }
-
-    /// 同一 thread 的全部事件，按 started_at_ms 升序。
-    func eventsInThread(threadId: String) throws -> [TypingEvent] {
-        try dbPool.read { db in
-            try TypingEvent.fetchAll(
-                db,
-                sql: "SELECT \(Self.columns) FROM typing_events " +
-                     "WHERE thread_id = ? ORDER BY started_at_ms ASC",
-                arguments: [threadId]
-            )
-        }
-    }
-
-    /// 按 thread 聚合的最近会话摘要，按起始时间降序。
-    /// 显式列名，不用 `SELECT *`。
-    func recentThreads(limit: Int) throws -> [TypingThreadSummary] {
-        try dbPool.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: "SELECT thread_id, app_name, bundle_id, " +
-                     "MIN(started_at_ms) AS started, MAX(ended_at_ms) AS ended, " +
-                     "COUNT(*) AS n, SUM(char_count) AS chars " +
-                     "FROM typing_events GROUP BY thread_id " +
-                     "ORDER BY started DESC LIMIT ?",
-                arguments: [limit]
-            )
-            return rows.map { row in
-                TypingThreadSummary(
-                    threadId: row["thread_id"],
-                    appName: row["app_name"],
-                    bundleId: row["bundle_id"],
-                    startedAt: row["started"],
-                    endedAt: row["ended"],
-                    eventCount: row["n"],
-                    charCount: row["chars"]
-                )
-            }
-        }
-    }
-
-    /// 查最近 `withinMs` 毫秒内、同 (bundle_id, window_title) 的最后一条。
-    /// SQLite 的 `IS` 对 NULL 和非 NULL 都正确，windowTitle 为 nil 时绑 NULL 即可。
-    func lastEvent(bundleId: String,
-                   windowTitle: String?,
-                   withinMs: Int64) throws -> TypingEvent? {
-        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) - withinMs
-        return try dbPool.read { db in
             try TypingEvent.fetchOne(
                 db,
+                sql: "SELECT \(Self.columns) FROM typing_events WHERE bundle_id = ?",
+                arguments: [bundleId]
+            )
+        }
+    }
+
+    /// 整行 upsert。`bundle_id` 是主键 —— `INSERT OR REPLACE` 命中冲突时
+    /// 删旧行插新行。flushRecord / 跨记录 delete 都走它（传入已算好的完整行）。
+    func upsert(_ event: TypingEvent) throws {
+        try dbPool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT OR REPLACE INTO typing_events
+                    (bundle_id, text, edit_log, time_start, last_updated, total_chars)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    event.bundleId, event.text, event.editLog,
+                    event.timeStart, event.lastUpdated, event.totalChars,
+                ]
+            )
+        }
+    }
+
+    /// 最近活跃的 `limit` 个 app，按 last_updated 降序。Memory「Input」页用。
+    func recentApps(limit: Int) throws -> [TypingEvent] {
+        try dbPool.read { db in
+            try TypingEvent.fetchAll(
+                db,
                 sql: "SELECT \(Self.columns) FROM typing_events " +
-                     "WHERE bundle_id = ? AND window_title IS ? AND started_at_ms >= ? " +
-                     "ORDER BY started_at_ms DESC LIMIT 1",
-                arguments: [bundleId, windowTitle, cutoff]
+                     "ORDER BY last_updated DESC LIMIT ?",
+                arguments: [limit]
             )
         }
     }
