@@ -610,8 +610,8 @@ final class TypingObserver {
 
         if markedState == .unknown {
             // 该 app 不暴露 marked-range → 350ms debounce 兜底：静默这么久
-            // 才认定 composition 结束、做一次 diff。
-            scheduleDebounce(key: key, newValue: newValue, pid: att.pid)
+            // 才认定 composition 结束、做一次同步快照 diff。
+            scheduleDebounce(key: key, newValue: newValue)
         } else {
             // markedState == .idle：app 暴露 marked-range 且当前非 composition
             // → 立即 diff。
@@ -662,27 +662,58 @@ final class TypingObserver {
         elementState[key] = st
     }
 
-    /// (重新) 安排一次 350ms 后的 diff。窗口内有新变化 → 重置计时。
-    private func scheduleDebounce(key: ElementKey, newValue: String, pid: pid_t) {
+    /// (重新) 安排一次 debounce 后的同步快照 diff。窗口内有新变化 → 重置计时。
+    ///
+    /// L1 键盘活动关联闸门在**这里**判（value-change 时刻）—— debounce 触发
+    /// 时刻离按键已超过 correlation 窗口，那时再查 hasKeystroke 必然失败。
+    /// 无按键 = 程序输出 / 鼠标点击 AX 全文吸附 → 不更新 pendingValue、不重排
+    /// 计时器（pendingValue 保持 stale → 后续 fire 的 diff 不含这次噪声）。
+    private func scheduleDebounce(key: ElementKey, newValue: String) {
+        let corrWindowSec =
+            Double(ConfigStore.shared.recording.typingKeyCorrelationWindowMs) / 1000.0
+        guard ledger.hasKeystroke(within: corrWindowSec) else {
+            pipelineLog.debug("L1:drop:no-keystroke(debounce) bundle=\(key.bundleId, privacy: .public)")
+            return
+        }
         guard var st = elementState[key] else { return }
         st.debounceTimer?.invalidate()
         st.pendingValue = newValue
         st.debounceTimer = Timer.scheduledTimer(
             withTimeInterval: Self.compositionDebounceSec, repeats: false
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.fireDebounce(key: key, pid: pid) }
+            MainActor.assumeIsolated { self?.fireDebounce(key: key) }
         }
         elementState[key] = st
     }
 
-    /// debounce 计时器触发：拿窗口内最后的值做一次 diff。
-    private func fireDebounce(key: ElementKey, pid: pid_t) {
+    /// debounce 计时器触发：拿窗口内最后的完整值做一次**同步**快照 diff，
+    /// 直接 accumulate / handleDelete，**不经 Layer 2** —— 避免 L2 异步 tick
+    /// flush 与同步 handleDelete 抢跑导致漏删 / 错删。
+    ///
+    /// self-heal：某次快照不巧抓到半截拼音（如 "nih"），下一次快照 diff 出
+    /// prevMid="nih" / newMid="你好"。先删后插、全同步，两种残留都能纠正：
+    ///   - "nih" 还在 in-progress record → handleDelete 同 record .backwards 减掉
+    ///   - "nih" 已被 5s flush 进 DB → handleDelete 跨 record 在末尾 2000 字符减掉
+    private func fireDebounce(key: ElementKey) {
         guard var st = elementState[key], let pending = st.pendingValue else { return }
+        let prevValue = st.lastValueSnapshot
         st.debounceTimer = nil
         st.pendingValue = nil
+        st.lastValueSnapshot = pending
         elementState[key] = st
-        onDevLog?("debounce diff bundle=\(key.bundleId)")
-        performDiff(newValue: pending, key: key, pid: pid)
+
+        let (_, prevMid, newMid, _) = TextDiff.sandwich(prev: prevValue, new: pending)
+        if prevMid.isEmpty, newMid.isEmpty { return }
+        onDevLog?("debounce diff bundle=\(key.bundleId) "
+                  + "del=\"\(prevMid.prefix(16))\" seg=\"\(newMid.prefix(16))\"")
+        let nowMs = TypingRecordWriter.nowMs()
+        // 先删后插 —— self-heal 的关键：prevMid 含上次快照的半截拼音残留。
+        if !prevMid.isEmpty {
+            writer.handleDelete(deletedText: prevMid, bundleId: key.bundleId, nowMs: nowMs)
+        }
+        if !newMid.isEmpty {
+            writer.accumulate(commitTexts: [newMid], bundleId: key.bundleId, nowMs: nowMs)
+        }
     }
 
     /// 清掉某 element 的全部状态（含 debounce 计时器）。
