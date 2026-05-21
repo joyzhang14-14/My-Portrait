@@ -188,6 +188,13 @@ struct MyPortraitApp: App {
         if args.contains("--typing-observe") {
             AppDelegate.typingObserveOnly = true
         }
+        // `--typing-observe-m1` 只跑 KeystrokeLedger（Layer 1 dev tool）：
+        // 不 init Services / UI / Capture / Memory；每秒 print 一次最近 5s
+        // 内的击键时间戳分布；Ctrl+C → ledger.stop() + exit(0)。
+        if args.contains("--typing-observe-m1") {
+            KeystrokeLedgerCLI.run()
+            // run() 内部进入 RunLoop，不会返回。
+        }
         AppKeyboard.install()
     }
 
