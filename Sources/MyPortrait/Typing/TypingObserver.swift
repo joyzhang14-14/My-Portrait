@@ -2,6 +2,8 @@
 ///
 /// 通过 Accessibility (AX) API 订阅 frontmost app 的 focused text element。
 /// 每次 `kAXValueChangedNotification`：
+///   0. IME composition 检测 —— marked-text-range 非空 = 拼音 preedit 未上屏，
+///      整段跳过；不暴露该属性的 app 走 350ms debounce 兜底
 ///   1. `TextDiff.sandwich` diff 出 delta（segment = 新打的字 / deletion = 删的字）
 ///   2. 速度阈值 burst 检测 —— 大段且极快 = 鼠标点击触发的 AX 全文吸附，
 ///      进黑名单、不入库
@@ -51,12 +53,18 @@ final class TypingObserver {
 
     // MARK: - 各 element 的 diff 快照
 
-    /// 一个 AX element 的 diff 状态：上次完整文本值 + 上次变化时刻。
+    /// 一个 AX element 的 diff 状态。
     private struct ElementState {
-        /// 用于 prev→new diff 的上次快照。
+        /// 用于 prev→new diff 的上次快照。IME composition 期间**保持不变**。
         var lastValueSnapshot: String
         /// 用于 burst 速度阈值的上次 value-change 时刻（CACurrentMediaTime）。
         var lastValueChangeTs: TimeInterval
+        /// 上次是否处于 IME composition —— 用于检测进入/退出 composition 的过渡。
+        var wasComposing: Bool = false
+        /// debounce 兜底路径的待 diff 计时器（不暴露 marked-range 的 app 用）。
+        var debounceTimer: Timer?
+        /// debounce 窗口内最近一次见到的完整值。
+        var pendingValue: String?
     }
 
     private typealias ElementKey = TypingRecordWriter.ElementKey
@@ -64,6 +72,9 @@ final class TypingObserver {
     /// per (app, element) 的 diff 快照。首次见到某 element 只存 baseline 不 diff
     /// （否则整段被当 insert）。element 失焦 / app 切走时清对应条目。
     private var elementState: [ElementKey: ElementState] = [:]
+
+    /// IME composition 检测的三态。
+    private enum CompositionState { case composing, idle, unknown }
 
     // MARK: - Layer 1 / Layer 2 / Layer 4
 
@@ -116,6 +127,13 @@ final class TypingObserver {
 
     /// 黑名单 TTL 清理间隔。
     private static let blacklistCleanupSec: TimeInterval = 300
+
+    /// IME marked-text-range 的 AX 属性名。app 不暴露 → 走 debounce 兜底。
+    private static let markedTextRangeAttribute = "AXMarkedTextRange"
+
+    /// 不暴露 marked-range 的 app 的 debounce 兜底窗口。与 L2 规则 9 的
+    /// compose-timeout（350ms）一致 —— 静默这么久即认定 composition 结束。
+    private static let compositionDebounceSec: TimeInterval = 0.350
 
     private let pipelineLog = Logger(subsystem: "com.joyzhang.myportrait",
                                      category: "typing.pipeline")
@@ -224,6 +242,8 @@ final class TypingObserver {
         ledger.stop()
 
         detach()
+        // 收回所有 element 的 debounce 计时器。
+        for st in elementState.values { st.debounceTimer?.invalidate() }
         elementState.removeAll()
         print("[TypingObserver] stopped")
     }
@@ -275,6 +295,7 @@ final class TypingObserver {
         }
 
         print("  keyboard_correlation_ms   = \(corrMs)")
+        print("  ime_composition_detection = enabled  (marked-range or 350ms debounce)")
 
         // L1 闸门依赖 KeystrokeLedger；它没起来 → hasKeystroke 永远 false
         // → 步骤 2.5 把所有输入丢光。
@@ -313,6 +334,10 @@ final class TypingObserver {
             pipelineLog.info("\(msg, privacy: .public)")
             onDevLog?(msg)
             // 清掉旧 app 的 element 快照（元素已无效，留着字典无限涨）。
+            // 先收回它们的 debounce 计时器 —— composition 中途切 app 即丢弃。
+            for (k, st) in elementState where k.bundleId == oldBundle {
+                st.debounceTimer?.invalidate()
+            }
             elementState = elementState.filter { $0.key.bundleId != oldBundle }
         } else {
             _ = registry.flushAll()
@@ -506,7 +531,8 @@ final class TypingObserver {
                 handleFoldEvents(registry.handleFocusChange(elementHash: oldHash),
                                  bundleId: att.bundleId,
                                  nowMs: TypingRecordWriter.nowMs())
-                elementState[ElementKey(bundleId: att.bundleId, elementHash: oldHash)] = nil
+                // composition 中途切焦点 → 丢弃该 element 状态（含 debounce 计时器）。
+                clearElementState(ElementKey(bundleId: att.bundleId, elementHash: oldHash))
             }
             subscribeFocusedElement()
 
@@ -529,7 +555,7 @@ final class TypingObserver {
         handleFoldEvents(events, bundleId: bundleId, nowMs: TypingRecordWriter.nowMs())
     }
 
-    // MARK: - 值变化 → sandwich → burst → L1 闸门 → L2 / handleDelete → L4
+    // MARK: - 值变化 → composition 检测 → diff → burst → L1 → L2/delete → L4
 
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
@@ -546,14 +572,25 @@ final class TypingObserver {
         let elementHash = Int(CFHash(focused))
         let key = ElementKey(bundleId: att.bundleId, elementHash: elementHash)
 
+        // ── 步骤 0：IME composition 检测 ────────────────────────────
+        // 拼音 preedit 期间（marked range 非空）整段跳过：不 diff、不更新
+        // snapshot、不喂 L2。snapshot 保持 pre-composition；等上屏（marked
+        // range 清空）再一次性 diff 出干净的汉字。
+        let markedState = markedTextState(of: focused)
+        if markedState == .composing {
+            cancelDebounce(key)
+            noteComposing(key: key, composing: true, bundleId: att.bundleId)
+            return
+        }
+
         // 读 focused 元素当前完整文本值。
         var valueRef: CFTypeRef?
         let valueErr = AXUIElementCopyAttributeValue(
             focused, kAXValueAttribute as CFString, &valueRef
         )
         guard valueErr == .success else {
-            // 元素已消失 —— 清掉它的快照条目。其它读失败静默忽略。
-            if valueErr == .invalidUIElement { elementState[key] = nil }
+            // 元素已消失 —— 清掉它的快照条目（含计时器）。其它读失败静默忽略。
+            if valueErr == .invalidUIElement { clearElementState(key) }
             return
         }
         guard let newValue = valueRef as? String else {
@@ -562,11 +599,104 @@ final class TypingObserver {
         }
 
         // 首次见到该 element（baseline 未预存成功）→ 只存快照不 diff。
-        guard var state = elementState[key] else {
+        guard elementState[key] != nil else {
             elementState[key] = ElementState(lastValueSnapshot: newValue,
                                              lastValueChangeTs: CACurrentMediaTime())
             return
         }
+
+        // composition 刚结束的过渡（composing→idle/unknown）。
+        noteComposing(key: key, composing: false, bundleId: att.bundleId)
+
+        if markedState == .unknown {
+            // 该 app 不暴露 marked-range → 350ms debounce 兜底：静默这么久
+            // 才认定 composition 结束、做一次 diff。
+            scheduleDebounce(key: key, newValue: newValue, pid: att.pid)
+        } else {
+            // markedState == .idle：app 暴露 marked-range 且当前非 composition
+            // → 立即 diff。
+            cancelDebounce(key)
+            performDiff(newValue: newValue, key: key, pid: att.pid)
+        }
+    }
+
+    // MARK: - IME composition 检测
+
+    /// 读 focused 元素的 marked-text-range（IME preedit 区间）。
+    /// - `.composing`: marked range 非空 → 拼音正在 composition、未上屏。
+    /// - `.idle`:      属性可读但 range 空 → 非 composition。
+    /// - `.unknown`:   app 不暴露此属性 → 调用方走 debounce 兜底。
+    private func markedTextState(of element: AXUIElement) -> CompositionState {
+        var ref: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(
+            element, Self.markedTextRangeAttribute as CFString, &ref
+        )
+        guard err == .success, let ref,
+              CFGetTypeID(ref) == AXValueGetTypeID() else {
+            return .unknown
+        }
+        let axValue = ref as! AXValue
+        var range = CFRange()
+        guard AXValueGetValue(axValue, .cfRange, &range) else { return .unknown }
+        return range.length > 0 ? .composing : .idle
+    }
+
+    /// 跟踪 composition 进入/退出，仅在状态翻转时发一条 dev log（不逐键 print）。
+    private func noteComposing(key: ElementKey, composing: Bool, bundleId: String) {
+        guard var st = elementState[key], st.wasComposing != composing else { return }
+        st.wasComposing = composing
+        elementState[key] = st
+        onDevLog?(composing
+                  ? "composition started bundle=\(bundleId)"
+                  : "composition committed bundle=\(bundleId)")
+    }
+
+    // MARK: - debounce 兜底（不暴露 marked-range 的 app）
+
+    /// 取消某 element 的 debounce 计时器。
+    private func cancelDebounce(_ key: ElementKey) {
+        guard var st = elementState[key], st.debounceTimer != nil else { return }
+        st.debounceTimer?.invalidate()
+        st.debounceTimer = nil
+        st.pendingValue = nil
+        elementState[key] = st
+    }
+
+    /// (重新) 安排一次 350ms 后的 diff。窗口内有新变化 → 重置计时。
+    private func scheduleDebounce(key: ElementKey, newValue: String, pid: pid_t) {
+        guard var st = elementState[key] else { return }
+        st.debounceTimer?.invalidate()
+        st.pendingValue = newValue
+        st.debounceTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.compositionDebounceSec, repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fireDebounce(key: key, pid: pid) }
+        }
+        elementState[key] = st
+    }
+
+    /// debounce 计时器触发：拿窗口内最后的值做一次 diff。
+    private func fireDebounce(key: ElementKey, pid: pid_t) {
+        guard var st = elementState[key], let pending = st.pendingValue else { return }
+        st.debounceTimer = nil
+        st.pendingValue = nil
+        elementState[key] = st
+        onDevLog?("debounce diff bundle=\(key.bundleId)")
+        performDiff(newValue: pending, key: key, pid: pid)
+    }
+
+    /// 清掉某 element 的全部状态（含 debounce 计时器）。
+    private func clearElementState(_ key: ElementKey) {
+        elementState[key]?.debounceTimer?.invalidate()
+        elementState[key] = nil
+    }
+
+    // MARK: - diff → burst → L1 闸门 → L2 / handleDelete → L4
+
+    /// 对一个 element 做 prev→new diff，跑完 burst / L1 / L2 / handleDelete。
+    /// prev 取 `elementState[key].lastValueSnapshot`。
+    private func performDiff(newValue: String, key: ElementKey, pid: pid_t) {
+        guard var state = elementState[key] else { return }
         let prevValue = state.lastValueSnapshot
 
         // ── 步骤 1：sandwich diff 出 delta ──────────────────────────
@@ -587,7 +717,7 @@ final class TypingObserver {
             writer.recordBurst(key: key, segment: segment, now: now)
             state.lastValueChangeTs = now
             elementState[key] = state
-            let msg = "burst bundle=\(att.bundleId) size=\(segment.count) "
+            let msg = "burst bundle=\(key.bundleId) size=\(segment.count) "
                 + "interval=\(Int(intervalMs))ms"
             pipelineLog.info("\(msg, privacy: .public)")
             onDevLog?(msg)
@@ -603,7 +733,7 @@ final class TypingObserver {
         let corrWindowSec =
             Double(ConfigStore.shared.recording.typingKeyCorrelationWindowMs) / 1000.0
         guard ledger.hasKeystroke(within: corrWindowSec) else {
-            pipelineLog.debug("L1:drop:no-keystroke bundle=\(att.bundleId, privacy: .public)")
+            pipelineLog.debug("L1:drop:no-keystroke bundle=\(key.bundleId, privacy: .public)")
             return
         }
 
@@ -618,14 +748,14 @@ final class TypingObserver {
                 script: Script.classify(segment),
                 range: NSRange(location: prefix.utf16.count, length: 0),
                 ts: now,
-                pid: att.pid,
-                elementHash: elementHash,
+                pid: pid,
+                elementHash: key.elementHash,
                 traceTag: nil
             )
-            handleFoldEvents(registry.feed(raw), bundleId: att.bundleId, nowMs: nowMs)
+            handleFoldEvents(registry.feed(raw), bundleId: key.bundleId, nowMs: nowMs)
         }
         if !deletion.isEmpty {
-            writer.handleDelete(deletedText: deletion, bundleId: att.bundleId, nowMs: nowMs)
+            writer.handleDelete(deletedText: deletion, bundleId: key.bundleId, nowMs: nowMs)
         }
     }
 
