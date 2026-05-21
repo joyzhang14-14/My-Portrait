@@ -258,12 +258,19 @@ struct GeneralConfig: Codable, Equatable {
 
 struct AIModelsConfig: Codable, Equatable {
     var presets: [AIPresetSpec] = []
+    /// 语义搜索索引（bge-m3 向量化）开关。默认关 —— 开着 EmbeddingWorker 会把
+    /// 历史文本全转成向量，常驻 ~1.15GB 内存;关掉则只用关键词搜索。
+    var semanticIndexEnabled: Bool = false
     init() {}
-    enum CodingKeys: String, CodingKey { case presets }
+    enum CodingKeys: String, CodingKey {
+        case presets
+        case semanticIndexEnabled = "semantic_index_enabled"
+    }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         presets = c.dflt([AIPresetSpec].self, .presets, presets)
+        semanticIndexEnabled = c.dflt(Bool.self, .semanticIndexEnabled, semanticIndexEnabled)
     }
 }
 

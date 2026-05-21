@@ -70,6 +70,14 @@ actor EmbeddingWorker {
     /// frames 失败不阻塞 transcriptions（中间一次推理出错可能是模型 OOM，
     /// transcriptions 一组小得多，往往能继续）。
     func runOnce() async {
+        // 设置里的语义索引开关（AI Models 页）。关掉 → 不 embed + 卸载 bge-m3。
+        let indexEnabled = await MainActor.run {
+            ConfigStore.shared.current.aiModels.semanticIndexEnabled
+        }
+        guard indexEnabled else {
+            await embedder.unload()
+            return
+        }
         // 电池模式：不 embed（重活留给插电时），顺手卸载 bge-m3 释放 ~1.15GB 内存。
         // 与 TranscriptionScheduler 的 AC 门控一致。
         guard PowerMonitor.isOnAC else {

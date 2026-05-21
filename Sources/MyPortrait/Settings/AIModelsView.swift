@@ -67,6 +67,18 @@ struct AIModelsSettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
             }
+
+            SettingsCard(
+                title: "Semantic search index",
+                footnote: "Off by default. When on, captured text is embedded into vectors (bge-m3) so search can match by meaning, not just keywords — at the cost of ~1.15 GB resident memory while indexing. Keyword search works either way. Indexing runs only while plugged in."
+            ) {
+                SettingsRow("Enable semantic indexing",
+                            description: "Build a vector index for meaning-based search.",
+                            icon: "magnifyingglass") {
+                    Toggle("", isOn: config.binding(\.aiModels.semanticIndexEnabled))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+            }
         }
         .sheet(item: $editing) { preset in
             AIPresetEditor(initial: preset) { saved in
