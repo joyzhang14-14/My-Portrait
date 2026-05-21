@@ -45,7 +45,11 @@ enum WeightCalculator {
         // log(1) == 0, so a single-day event would yield weight 0 if we
         // multiplied straight. Use (1 + log()) so frequency only BOOSTS,
         // never zeroes out the base impact×decay signal.
-        let raw = file.impact * decay * (1.0 + freq)
+        // WeightCalculator 只服务 event 层，event 必有 impact；?? 0 是类型
+        // 系统防御，运行时永远不触发。portrait 文件不再被任何路径喂进这里
+        // （writeNewPortrait / updateExistingPortrait / Backfill weightPass /
+        // MaterializePortraitCLI 四处对 portrait 的 recompute 调用已被删除）。
+        let raw = (file.impact ?? 0) * decay * (1.0 + freq)
         return max(params.minWeight, raw)
     }
 

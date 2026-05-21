@@ -137,30 +137,33 @@ enum MemoryBudget {
 
         var touched = 0
         for b in bucketed {
+            // MemoryBudget 只扫 events/，event 必有 impact；?? 0 是类型系统
+            // 防御，运行时永远不触发。
+            let cur = b.file.impact ?? 0
             switch b.kind {
             case .outside:
                 plans.append(.init(url: b.url,
-                                   oldImpact: b.file.impact,
-                                   newImpact: b.file.impact,
+                                   oldImpact: cur,
+                                   newImpact: cur,
                                    kind: .outsideWindow))
             case .protected:
                 // Force final = raw in case a prior pass had scaled it.
                 let target = PortraitFile.clampImpact(b.file.rawImpact)
-                let needsWrite = abs(b.file.impact - target) > 0.0001
+                let needsWrite = abs(cur - target) > 0.0001
                 plans.append(.init(url: b.url,
-                                   oldImpact: b.file.impact,
-                                   newImpact: needsWrite ? target : b.file.impact,
+                                   oldImpact: cur,
+                                   newImpact: needsWrite ? target : cur,
                                    kind: .protected))
             case .frozen:
                 plans.append(.init(url: b.url,
-                                   oldImpact: b.file.impact,
-                                   newImpact: b.file.impact,
+                                   oldImpact: cur,
+                                   newImpact: cur,
                                    kind: .frozen))
             case .rebalancable:
                 let newImpact = PortraitFile.clampImpact(b.file.rawImpact * scale)
                 let kind: Plan.Kind = (scale < 1.0) ? .rebalanced : .restored
                 plans.append(.init(url: b.url,
-                                   oldImpact: b.file.impact,
+                                   oldImpact: cur,
                                    newImpact: newImpact,
                                    kind: kind))
                 touched += 1
