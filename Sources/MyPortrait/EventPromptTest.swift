@@ -783,6 +783,60 @@ enum PersonalityMergeTestCLI {
     }
 }
 
+/// `--personality-merge-apply <yyyy-MM-dd>` — DEV-ONLY. 跟 merge-test 一样跑
+/// agent → snapshot → merge，但**落盘**：applyActions 把 createNew / mergeInto
+/// 写进 portrait/personality/。报告写了什么。Disposable.
+enum PersonalityMergeApplyCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run(day dayStr: String) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        guard let day = fmt.date(from: dayStr) else {
+            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
+            exit(1)
+        }
+        print("=== personality-merge-apply \(dayStr) ===")
+        let state = State()
+        Task {
+            do {
+                let events = await PersonalityAgent.readEvents(for: day)
+                let snapshot = try await PersonalityAgent().generateDailySnapshot(date: day, events: events)
+                print("daily snapshot — \(snapshot.observedTraits.count) trait(s)")
+                let concepts = await PersonalityMerger.readConcepts()
+                print("existing personality concepts: \(concepts.count)")
+
+                let merger = await PersonalityMerger()
+                let actions = try await merger.merge(snapshot: snapshot, existingConcepts: concepts)
+                for (i, a) in actions.enumerated() {
+                    switch a {
+                    case .mergeInto(let s, _, let al): print("\(i + 1). mergeInto [\(s)] +aliases=\(al)")
+                    case .createNew(let l, _, _):      print("\(i + 1). createNew \"\(l)\"")
+                    case .skipTrait(let r):            print("\(i + 1). skipTrait — \(r)")
+                    }
+                }
+                let result = try await merger.applyActions(actions, on: day)
+                print("\n=== applied ===")
+                print("created: \(result.created), merged: \(result.merged), skipped: \(result.skipped)")
+                print("written slugs: \(result.writtenSlugs)")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
 /// `--distill` — DEV-ONLY entry point that runs the full PortraitDistiller
 /// pass over all categories. Disposable.
 enum DistillCLI {
