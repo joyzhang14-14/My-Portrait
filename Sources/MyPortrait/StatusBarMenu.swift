@@ -9,6 +9,7 @@ import Foundation
 ///   - 菜单项：
 ///     * 屏幕采集 toggle
 ///     * 麦克风 toggle
+///     * 打字采集 toggle
 ///     * 打开 ~/.portrait/ 文件夹
 ///     * Dev Mode 警告（仅 stub 命中时）
 ///     * 退出
@@ -32,6 +33,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // 菜单项缓存（要在状态变化时更新它们的 state / title）。
     private let screenToggle: NSMenuItem
     private let audioToggle: NSMenuItem
+    private let typingToggle: NSMenuItem
     private let statusHeader: NSMenuItem
     private let devModeBanner: NSMenuItem
 
@@ -44,6 +46,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         self.statusHeader.isEnabled = false
         self.screenToggle = NSMenuItem(title: "Screen Capture", action: nil, keyEquivalent: "")
         self.audioToggle = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        self.typingToggle = NSMenuItem(title: "Typing Capture", action: nil, keyEquivalent: "")
         self.devModeBanner = NSMenuItem(title: "⚠ Dev Mode (stub hits)", action: nil, keyEquivalent: "")
         self.devModeBanner.isEnabled = false
         self.devModeBanner.isHidden = true
@@ -54,6 +57,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         self.screenToggle.action = #selector(toggleScreen)
         self.audioToggle.target = self
         self.audioToggle.action = #selector(toggleAudio)
+        self.typingToggle.target = self
+        self.typingToggle.action = #selector(toggleTyping)
 
         buildMenu()
         // 菜单每次打开前强制重算状态（menuNeedsUpdate）。Combine sink 时序不可靠
@@ -77,11 +82,12 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         }
         .store(in: &cancellables)
 
-        Publishers.CombineLatest(
+        Publishers.CombineLatest3(
             permissions.$screenRecording,
-            permissions.$microphone
+            permissions.$microphone,
+            permissions.$accessibility
         )
-        .sink { [weak self] _, _ in
+        .sink { [weak self] _, _, _ in
             self?.refreshIcon()
             self?.refreshMenuState()
         }
@@ -104,6 +110,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         audioCaptureWanted && permissions.microphone.isGranted
     }
 
+    /// 打字采集开关意图（单一真相 ConfigStore）。
+    private var typingCaptureWanted: Bool { ConfigStore.shared.recording.typingCaptureEnabled }
+
+    /// 打字采集**实际**是否在跑。需要 Accessibility 权限。
+    private var typingCaptureActive: Bool {
+        typingCaptureWanted && permissions.accessibility.isGranted
+    }
+
     // MARK: - NSMenuDelegate
 
     /// AppKit 在菜单显示前调用 —— 此刻强制按 ConfigStore 当前值重算所有 state。
@@ -119,6 +133,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(screenToggle)
         menu.addItem(audioToggle)
+        menu.addItem(typingToggle)
         menu.addItem(.separator())
 
         let openDir = NSMenuItem(
@@ -171,10 +186,11 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         // 采集状态不再压进图标本身（角色图是固定的），改由 tooltip 表达。
 
         let toolTip: String
-        if screenRecordingActive || audioRecordingActive {
+        if screenRecordingActive || audioRecordingActive || typingCaptureActive {
             var parts: [String] = []
             if screenRecordingActive { parts.append("Screen") }
             if audioRecordingActive { parts.append("Mic") }
+            if typingCaptureActive { parts.append("Typing") }
             toolTip = "Recording: \(parts.joined(separator: " + "))"
         } else {
             toolTip = "Capture off"
@@ -186,6 +202,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         // 勾 = 真实在录。开关 on 但权限没给 / 暂停中 → 不勾（对得上"没录音"）。
         screenToggle.state = screenRecordingActive ? .on : .off
         audioToggle.state = audioRecordingActive ? .on : .off
+        typingToggle.state = typingCaptureActive ? .on : .off
 
         // 开关 on 但实际没录 → 标题给出原因，别让用户以为坏了。
         screenToggle.title = Self.toggleTitle(
@@ -200,11 +217,18 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             active: audioRecordingActive,
             permission: permissions.microphone
         )
+        typingToggle.title = Self.toggleTitle(
+            base: "Typing Capture",
+            wanted: typingCaptureWanted,
+            active: typingCaptureActive,
+            permission: permissions.accessibility
+        )
 
-        if screenRecordingActive || audioRecordingActive {
+        if screenRecordingActive || audioRecordingActive || typingCaptureActive {
             var parts: [String] = []
             if screenRecordingActive { parts.append("Screen") }
             if audioRecordingActive { parts.append("Mic") }
+            if typingCaptureActive { parts.append("Typing") }
             statusHeader.title = "Recording: \(parts.joined(separator: " + "))"
         } else {
             statusHeader.title = "Capture off"
@@ -238,6 +262,16 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     @objc private func toggleAudio() {
         let next = !ConfigStore.shared.recording.audio.enabled
         ConfigStore.shared.mutate { $0.recording.audio.enabled = next }
+        refreshMenuState()
+    }
+
+    /// 打字采集总开关 —— 跟 Settings → Recording 的「Capture typing」是同一个
+    /// `typing_capture_enabled` 字段。翻转后 Services 那边的 sink 会启停
+    /// TypingObserver。
+    @objc private func toggleTyping() {
+        let next = !ConfigStore.shared.recording.typingCaptureEnabled
+        ConfigStore.shared.mutate { $0.recording.typingCaptureEnabled = next }
+        refreshIcon()
         refreshMenuState()
     }
 
