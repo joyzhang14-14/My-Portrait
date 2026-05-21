@@ -143,6 +143,12 @@ struct MyPortraitApp: App {
             MigratePortraitEMACLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--drop-portrait-impact` one-time migration —
+        // backup + scrub `impact` line from every portrait .md frontmatter.
+        if args.contains("--drop-portrait-impact") {
+            DropPortraitImpactCLI.run()
+            // run() exits the process internally.
+        }
         // `--import-default-pipes` seeds the two built-in pipes into
         // PipeStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {

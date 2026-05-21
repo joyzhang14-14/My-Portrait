@@ -531,6 +531,57 @@ enum BackfillDaysCLI {
     }
 }
 
+/// `--drop-portrait-impact` — DEV-ONLY 一次性迁移：把 portrait/ 下每个非
+/// 归档 / 非隔离的 .md 读出来、清掉 impact 字段、重写（PortraitFileIO 序列
+/// 化器现在会 skip nil impact 行）。备份 ~/.portrait/portrait →
+/// portrait.bak.<date>。events/ 不动。
+enum DropPortraitImpactCLI {
+    static func run() {
+        print("=== drop-portrait-impact ===")
+        let fm = FileManager.default
+        let portraitDir = Storage.portraitDir
+
+        let stamp: String = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            return f.string(from: Date())
+        }()
+        let backup = portraitDir.deletingLastPathComponent()
+            .appendingPathComponent("portrait.bak.\(stamp)")
+        do {
+            if fm.fileExists(atPath: backup.path) { try fm.removeItem(at: backup) }
+            try fm.copyItem(at: portraitDir, to: backup)
+            print("backup: \(backup.path)")
+        } catch {
+            FileHandle.standardError.write(Data("backup FAILED, 中止: \(error)\n".utf8))
+            exit(1)
+        }
+
+        var migrated = 0, failed = 0
+        guard let en = fm.enumerator(
+            at: portraitDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { exit(1) }
+        while let url = en.nextObject() as? URL {
+            guard url.pathExtension == "md",
+                  url.lastPathComponent != "INDEX.md" else { continue }
+            if url.pathComponents.contains("_quarantine")
+                || url.pathComponents.contains("_archive") { continue }
+            do {
+                var f = try PortraitFileIO.read(from: url)
+                f.impact = nil
+                try PortraitFileIO.write(f, to: url)
+                migrated += 1
+            } catch {
+                failed += 1
+                FileHandle.standardError.write(Data("FAIL \(url.lastPathComponent): \(error)\n".utf8))
+            }
+        }
+        print("=== done === migrated: \(migrated), failed: \(failed)")
+        exit(failed == 0 ? 0 : 1)
+    }
+}
+
 /// `--migrate-portrait-ema` — DEV-ONLY 一次性迁移（Phase 3 策略 A）。
 /// 先把 ~/.portrait/portrait 备份到 portrait.bak.YYYY-MM-DD，再把每个非归档 /
 /// 非隔离的 portrait .md 重置为 EMA 干净起点：weight=1.0, mergeCount=1,
