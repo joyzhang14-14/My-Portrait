@@ -341,6 +341,22 @@ final class TypingObserver {
 
         att.focusedElement = focused
         attachment = att
+
+        // 立刻读一次 baseline 值写进 lastValues —— 否则该 element 的第一次
+        // value 变化会撞上 processValueChange 的"首次见到只存值不 diff"，
+        // 把第一个字符吞掉。读失败（如某些不可读元素）→ 退化为空串 baseline。
+        // 元素正处于 IME composition 时也照读 raw value，后续 Layer 2 状态机
+        // 会折叠 composition。
+        let elementHash = Int(CFHash(focused))
+        var baselineRef: CFTypeRef?
+        let baselineErr = AXUIElementCopyAttributeValue(
+            focused, kAXValueAttribute as CFString, &baselineRef
+        )
+        if baselineErr == .success, let baseline = baselineRef as? String {
+            lastValues[elementHash] = baseline
+        } else {
+            lastValues[elementHash] = ""
+        }
     }
 
     // MARK: - 通知处理
