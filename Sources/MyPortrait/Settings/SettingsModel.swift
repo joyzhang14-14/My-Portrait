@@ -5,39 +5,43 @@ import SwiftUI
 /// list and the main pane router.
 enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
     case display, general, aiModels, connections, recording, notifications
-    case memory
+    case memoryParameter, memoryScheduler, memoryChangelog
     case usage, privacy, storage, speakers
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .display:       return "Display"
-        case .general:       return "General"
-        case .aiModels:      return "AI models"
-        case .connections:   return "Connections"
-        case .recording:     return "Recording"
-        case .notifications: return "Notifications"
-        case .memory:        return "Memory"
-        case .usage:         return "Usage"
-        case .privacy:       return "Privacy"
-        case .storage:       return "Storage"
-        case .speakers:      return "Speakers"
+        case .display:          return "Display"
+        case .general:          return "General"
+        case .aiModels:         return "AI models"
+        case .connections:      return "Connections"
+        case .recording:        return "Recording"
+        case .notifications:    return "Notifications"
+        case .memoryParameter:  return "Parameter"
+        case .memoryScheduler:  return "Scheduler"
+        case .memoryChangelog:  return "Changelog"
+        case .usage:            return "Usage"
+        case .privacy:          return "Privacy"
+        case .storage:          return "Storage"
+        case .speakers:         return "Speakers"
         }
     }
 
     var icon: String {
         switch self {
-        case .display:       return "display"
-        case .general:       return "gearshape"
-        case .aiModels:      return "brain"
-        case .connections:   return "powerplug"
-        case .recording:     return "record.circle"
-        case .notifications: return "bell"
-        case .memory:        return "sparkles"
-        case .usage:         return "chart.bar"
-        case .privacy:       return "hand.raised"
-        case .storage:       return "externaldrive"
-        case .speakers:      return "person.wave.2"
+        case .display:          return "display"
+        case .general:          return "gearshape"
+        case .aiModels:         return "brain"
+        case .connections:      return "powerplug"
+        case .recording:        return "record.circle"
+        case .notifications:    return "bell"
+        case .memoryParameter:  return "slider.horizontal.3"
+        case .memoryScheduler:  return "calendar.badge.clock"
+        case .memoryChangelog:  return "list.bullet.rectangle"
+        case .usage:            return "chart.bar"
+        case .privacy:          return "hand.raised"
+        case .storage:          return "externaldrive"
+        case .speakers:         return "person.wave.2"
         }
     }
 
@@ -50,7 +54,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
     var group: Group {
         switch self {
         case .display, .general, .aiModels, .connections, .recording, .notifications: return .app
-        case .memory:                                                   return .memory
+        case .memoryParameter, .memoryScheduler, .memoryChangelog:       return .memory
         case .usage, .privacy, .storage, .speakers:                     return .dataPrivacy
         }
     }

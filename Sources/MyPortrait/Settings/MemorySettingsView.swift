@@ -10,21 +10,19 @@ struct MemorySettingsView: View {
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
 
-    /// Memory 区的三个子板块，分开调。
-    private enum Tab: String, CaseIterable, Identifiable {
+    /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
+    enum Tab: String {
         case parameter = "Parameter"
         case scheduler = "Scheduler"
         case changelog = "Changelog"
-        var id: String { rawValue }
     }
-    @State private var tab: Tab = .parameter
+    /// 由 SettingsView 的路由根据侧栏选中的子分区注入。
+    let tab: Tab
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
-
-                tabBar
 
                 switch tab {
                 case .parameter:
@@ -50,16 +48,6 @@ struct MemorySettingsView: View {
         .task { reload() }
     }
 
-    private var tabBar: some View {
-        Picker("", selection: $tab) {
-            ForEach(Tab.allCases) { t in
-                Text(t.rawValue).tag(t)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-    }
-
     private func reload() {
         attention = MemoryScheduler.shared.attentionDays()
         changelog = ProcessingLogStore().recentChangelog(limit: 50)
@@ -67,11 +55,22 @@ struct MemorySettingsView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Memory")
+            Text("Memory · \(tab.rawValue)")
                 .font(.system(size: 26, weight: .semibold))
-            Text("Tune how the memory system weighs, consolidates, and forgets events. Changes write to `~/.myportrait/config.toml` (debounced).")
+            Text(headerBlurb)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var headerBlurb: String {
+        switch tab {
+        case .parameter:
+            return "Tune how the memory system weighs, consolidates, and forgets events. Changes write to `~/.myportrait/config.toml` (debounced)."
+        case .scheduler:
+            return "Configure when the event and portrait pipelines run, and review days that need attention."
+        case .changelog:
+            return "Portrait body changes made by the distiller, newest first."
         }
     }
 
