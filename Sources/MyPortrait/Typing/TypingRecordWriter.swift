@@ -69,6 +69,8 @@ final class TypingRecordWriter {
     static let flushSec: TimeInterval = 5.0
     static let pasteAssocSec: TimeInterval = 0.5
     static let submitAssocSec: TimeInterval = 1.0
+    /// continuation 匹配只比末尾这么多字 —— 同 element 内 100 字足够辨识。
+    static let matchWindowChars = 100
 
     // MARK: - 状态
 
@@ -198,33 +200,76 @@ final class TypingRecordWriter {
         }
     }
 
-    /// flush 一个 element 的 in-progress record：有变化 → INSERT 一条新 record，
-    /// 再从 state 移除。`text` = `sandwich(sessionStart, 最终值).newMid` —— 这段
-    /// session 的净新增内容（不含 sessionStart 旧内容）。
+    /// flush 一个 element 的 in-progress record，再从 state 移除。
+    ///
+    /// 若这段 session 接得上某条已有 record（continuation）→ **合并进那条**
+    /// （UPDATE：`text` 重算、`edit_log` 续接、`ended_at` 更新）；接不上
+    /// → INSERT 一条新 record。`text` = `sandwich(sessionStart, 最终值).newMid`。
     func flushElement(_ key: ElementKey) {
         guard let rec = state[key] else { return }
         rec.debounceTimer?.invalidate()
         rec.flushTimer?.invalidate()
         if rec.pendingChanges {
-            let (_, _, added, _) = TextDiff.sandwich(prev: rec.sessionStart,
-                                                     new: rec.lastValueSnapshot)
+            let endValue = rec.lastValueSnapshot
             let combined = Set((blacklist[key] ?? [:]).keys)
-            let cleaned = Self.stripBlacklist(added, blacklist: combined)
-            let event = TypingEvent(
-                id: nil,
-                bundleId: rec.bundleId,
-                elementHash: rec.elementHash,
-                startedAt: rec.startedAtMs,
-                endedAt: Self.nowMs(),
-                text: cleaned,
-                editLog: Self.encodeLog(rec.editLog),
-                totalChars: cleaned.count
-            )
-            try? store?.insert(event)
-            onDevLog?("flush bundle=\(rec.bundleId) element=\(rec.elementHash) "
-                      + "\(cleaned.count) chars \(rec.editLog.count) edits")
+            let nowMs = Self.nowMs()
+
+            if let target = findContinuation(rec: rec) {
+                // 接得上 → 合并进 target record。
+                let mergedText = Self.stripBlacklist(
+                    Self.sessionText(sessionStart: target.sessionStart, finalValue: endValue),
+                    blacklist: combined)
+                var mergedLog = Self.decodeLog(target.editLog)
+                mergedLog.append(contentsOf: rec.editLog)
+                let merged = TypingEvent(
+                    id: target.id,
+                    bundleId: target.bundleId,
+                    elementHash: target.elementHash,
+                    startedAt: target.startedAt,
+                    endedAt: nowMs,
+                    text: mergedText,
+                    editLog: Self.encodeLog(mergedLog),
+                    totalChars: mergedText.count,
+                    sessionStart: target.sessionStart,
+                    endValue: endValue
+                )
+                try? store?.update(merged)
+                onDevLog?("merge bundle=\(rec.bundleId) → record #\(target.id ?? -1) "
+                          + "\(mergedText.count) chars")
+            } else {
+                // 接不上 → 新建 record。
+                let cleaned = Self.stripBlacklist(
+                    Self.sessionText(sessionStart: rec.sessionStart, finalValue: endValue),
+                    blacklist: combined)
+                let event = TypingEvent(
+                    id: nil,
+                    bundleId: rec.bundleId,
+                    elementHash: rec.elementHash,
+                    startedAt: rec.startedAtMs,
+                    endedAt: nowMs,
+                    text: cleaned,
+                    editLog: Self.encodeLog(rec.editLog),
+                    totalChars: cleaned.count,
+                    sessionStart: rec.sessionStart,
+                    endValue: endValue
+                )
+                try? store?.insert(event)
+                onDevLog?("flush bundle=\(rec.bundleId) element=\(rec.elementHash) "
+                          + "\(cleaned.count) chars \(rec.editLog.count) edits")
+            }
         }
         state[key] = nil
+    }
+
+    /// 找这段 session 的 continuation 目标 —— 同 (app, element) 中、`end_value`
+    /// 末 100 字跟本 session 起点内容接得上的 record。无 → nil（新建）。
+    private func findContinuation(rec: InProgressRecord) -> TypingEvent? {
+        guard !rec.sessionStart.isEmpty, let store else { return nil }
+        let candidates = (try? store.recordsForElement(
+            bundleId: rec.bundleId, elementHash: rec.elementHash)) ?? []
+        return candidates.first {
+            Self.isContinuation(sessionStart: rec.sessionStart, recordEndValue: $0.endValue)
+        }
     }
 
     /// flush 后立刻在同一 element 上开新 session。
@@ -269,6 +314,16 @@ final class TypingRecordWriter {
     /// 一段 session 的净新增内容 = `sandwich(sessionStart, 最终值).newMid`。
     static func sessionText(sessionStart: String, finalValue: String) -> String {
         TextDiff.sandwich(prev: sessionStart, new: finalValue).newMid
+    }
+
+    /// 本 session 起点内容是否接得上某 record 的结尾 —— 比末 `matchWindowChars`
+    /// 字。同 (app, element) 内、不限时间。空起点（如聊天发送后输入框清空）
+    /// 不算 continuation。
+    static func isContinuation(sessionStart: String, recordEndValue: String) -> Bool {
+        let a = String(sessionStart.suffix(matchWindowChars))
+        let b = String(recordEndValue.suffix(matchWindowChars))
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        return a == b
     }
 
     /// 黑名单减法：按长度倒序减，每个 entry 只减一次。

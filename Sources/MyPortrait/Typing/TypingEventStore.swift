@@ -10,7 +10,7 @@ struct EditEntry: Codable, Equatable, Sendable {
 }
 
 /// 一条打字记录 —— 一个 (app, element) 的一段输入 session（v14 event-log schema）。
-/// append-only：每次 flush INSERT 一条，record 落库后 immutable。
+/// v15 起可被 continuation 合并：新 session 接得上时 UPDATE 这条 record。
 struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var id: Int64?
     var bundleId: String
@@ -20,6 +20,10 @@ struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable
     var text: String           // 本次 session 用户真实输入
     var editLog: String        // JSON [EditEntry]
     var totalChars: Int
+    /// session 开始时 element 已有的完整内容（continuation 重算 text 用）。
+    var sessionStart: String = ""
+    /// 该 record 结束时 element 的完整内容（continuation 匹配用）。
+    var endValue: String = ""
 
     static let databaseTableName = "typing_events"
     static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
@@ -49,13 +53,33 @@ struct TypingEventStore {
 
     /// 显式列清单，所有 SELECT 复用。
     private static let columns =
-        "id, bundle_id, element_hash, started_at, ended_at, text, edit_log, total_chars"
+        "id, bundle_id, element_hash, started_at, ended_at, text, edit_log, " +
+        "total_chars, session_start, end_value"
 
-    /// INSERT 一条新 record（append-only，绝不 UPSERT）。
+    /// INSERT 一条新 record。
     func insert(_ event: TypingEvent) throws {
         try dbPool.write { db in
             var copy = event
             try copy.insert(db)
+        }
+    }
+
+    /// UPDATE 一条已有 record（continuation 合并用，按 id）。
+    func update(_ event: TypingEvent) throws {
+        try dbPool.write { db in
+            try event.update(db)
+        }
+    }
+
+    /// 某 (app, element) 的全部 records，按 ended_at 倒序 —— continuation 候选。
+    func recordsForElement(bundleId: String, elementHash: Int) throws -> [TypingEvent] {
+        try dbPool.read { db in
+            try TypingEvent.fetchAll(
+                db,
+                sql: "SELECT \(Self.columns) FROM typing_events " +
+                     "WHERE bundle_id = ? AND element_hash = ? ORDER BY ended_at DESC",
+                arguments: [bundleId, elementHash]
+            )
         }
     }
 

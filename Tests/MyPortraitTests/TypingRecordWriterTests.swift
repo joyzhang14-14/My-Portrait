@@ -144,4 +144,58 @@ final class TypingRecordWriterTests: XCTestCase {
         XCTAssertEqual(recs.count, 2)
         XCTAssertEqual(Set(recs.map(\.text)), ["first", "second"])
     }
+
+    // MARK: - continuation 合并
+
+    func testIsContinuation() {
+        XCTAssertTrue(TypingRecordWriter.isContinuation(
+            sessionStart: "ABC", recordEndValue: "ABC"))
+        XCTAssertFalse(TypingRecordWriter.isContinuation(
+            sessionStart: "", recordEndValue: "ABC"))      // 空起点（聊天发送后）
+        XCTAssertFalse(TypingRecordWriter.isContinuation(
+            sessionStart: "ABC", recordEndValue: ""))
+        XCTAssertFalse(TypingRecordWriter.isContinuation(
+            sessionStart: "XYZ", recordEndValue: "ABC"))
+        // 只比末 100 字：前缀不同、末 100 字相同 → 接得上。
+        let tail = String(repeating: "x", count: 100)
+        XCTAssertTrue(TypingRecordWriter.isContinuation(
+            sessionStart: "AAAA" + tail, recordEndValue: "BBBB" + tail))
+    }
+
+    /// 起点接得上已有 record → 合并，不新建。
+    func testMergeContinuation() throws {
+        let store = try makeStore()
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
+
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "")
+        writer.state[key]?.lastValueSnapshot = "ABC"
+        writer.state[key]?.pendingChanges = true
+        writer.flushElement(key)
+
+        // session 2 起点 = "ABC"，接得上 record1 的 end_value "ABC"。
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "ABC")
+        writer.state[key]?.lastValueSnapshot = "ABCDEF"
+        writer.state[key]?.pendingChanges = true
+        writer.flushElement(key)
+
+        let recs = try store.records(bundleId: "app.a")
+        XCTAssertEqual(recs.count, 1)               // 合并，没新建
+        XCTAssertEqual(recs.first?.text, "ABCDEF")
+        XCTAssertEqual(recs.first?.endValue, "ABCDEF")
+    }
+
+    /// 聊天每条消息发送后输入框清空 → 起点为空 → 每条独立，不合并。
+    func testChatMessagesStayIndependent() throws {
+        let store = try makeStore()
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
+        for msg in ["msg1", "msg2"] {
+            writer.beginSession(key: key, bundleId: "app.chat", baseline: "")
+            writer.state[key]?.lastValueSnapshot = msg
+            writer.state[key]?.pendingChanges = true
+            writer.flushElement(key)
+        }
+        XCTAssertEqual(try store.records(bundleId: "app.chat").count, 2)
+    }
 }
