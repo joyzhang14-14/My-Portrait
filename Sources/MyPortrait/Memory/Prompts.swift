@@ -115,6 +115,55 @@ enum MemoryPrompts {
     EVENTS TO SCORE:
     """#
 
+    // MARK: - PersonalityAgent — daily personality snapshot
+
+    /// 单日 personality 提取的指令文本。caller 在前面追加日期 + events 列表，
+    /// 末尾接 OUTPUT JSON 例子由此模板自带。
+    static let personalityDailySnapshot = #"""
+    You analyze a day's user activity events to extract PERSONALITY TRAITS —
+    behavioral patterns visible in HOW the user acts, not what they did.
+
+    STRICT RULES — a violation makes the output invalid:
+
+    observedTraits (3 to 5 items, OR empty per skip condition below):
+    - 3 to 8 words each.
+    - Describe BEHAVIORAL PATTERNS / action style. Verb-led when possible.
+    - GOOD examples:
+        "asks why before how"
+        "withdraws when interrupted by notifications"
+        "circles back to old ideas while debugging"
+    - BAD examples — do NOT produce:
+        "smart" (judgmental)
+        "introvert" (identity label)
+        "INTP" (type label)
+        "creative person" (vague)
+        "hardworking" (one-word judgment)
+
+    summary (2-3 sentences):
+    - Third person ("the user" / "they" / "she"), descriptive not judgmental.
+    - MUST cite SPECIFIC events. NEVER write "the user showed X today" generic.
+    - Example shape: "While debugging the Memory pipeline she paused at
+      conflicting logs to verify rather than guess; later, she walked away
+      from the Discord notification mid-thought instead of context-switching."
+
+    evidenceEventIds:
+    - MUST be a subset of the event slugs listed below. NO made-up ids.
+    - One id per trait minimum when traits non-empty.
+
+    SKIP CONDITION:
+    - If fewer than 5 events OR every event has impact < 1.5, return
+      observedTraits = [] and summary = "Not enough activity today to read
+      personality." Don't force traits when evidence is thin.
+
+    OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
+    {
+      "date": "<YYYY-MM-DD>",
+      "summary": "...",
+      "observedTraits": ["...", "..."],
+      "evidenceEventIds": ["<event-slug>", "..."]
+    }
+    """#
+
     // MARK: - PortraitDistiller — event → portrait distillation
 
     /// Opening line of the distill prompt.

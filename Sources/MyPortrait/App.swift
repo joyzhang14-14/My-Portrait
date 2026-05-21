@@ -131,6 +131,12 @@ struct MyPortraitApp: App {
             DistillCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--personality-prompt-test <yyyy-MM-dd>` runs PersonalityAgent
+        // on one day, prints prompt + raw + parsed snapshot. Writes nothing.
+        if let idx = args.firstIndex(of: "--personality-prompt-test"), idx + 1 < args.count {
+            PersonalityPromptTestCLI.run(day: args[idx + 1])
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--repair-portrait` re-reads + re-writes every portrait /
         // event .md to fix stale on-disk frontmatter formatting.
         if args.contains("--repair-portrait") {

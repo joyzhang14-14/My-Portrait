@@ -673,6 +673,54 @@ enum RepairPortraitCLI {
     }
 }
 
+/// `--personality-prompt-test <yyyy-MM-dd>` — DEV-ONLY. 对指定日期的 events
+/// 跑一次 PersonalityAgent，打印 prompt + LLM 原始 JSON + parsed snapshot。
+/// 不写盘。用于人工评估 trait 质量。Disposable.
+enum PersonalityPromptTestCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run(day dayStr: String) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        guard let day = fmt.date(from: dayStr) else {
+            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
+            exit(1)
+        }
+        print("=== personality-prompt-test \(dayStr) ===")
+        let state = State()
+        Task {
+            do {
+                let events = await PersonalityAgent.readEvents(for: day)
+                print("events for \(dayStr): \(events.count)")
+                let agent = await PersonalityAgent()
+                let r = try await agent.runWithRaw(date: day, events: events)
+                print("\n──── PROMPT ────")
+                print(r.prompt)
+                print("\n──── LLM RAW ────")
+                print(r.raw)
+                print("\n──── PARSED SNAPSHOT ────")
+                print("date:    \(r.snapshot.date)")
+                print("summary: \(r.snapshot.summary)")
+                print("traits:  \(r.snapshot.observedTraits)")
+                print("evidence:\(r.snapshot.evidenceEventIds)")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
 /// `--distill` — DEV-ONLY entry point that runs the full PortraitDistiller
 /// pass over all categories. Disposable.
 enum DistillCLI {
