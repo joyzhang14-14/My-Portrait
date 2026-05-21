@@ -30,6 +30,11 @@ final class KeystrokeLedger {
     private var writeIdx: Int = 0
     private var lock = os_unfair_lock_s()
 
+    /// 最近一次 ⌘V / Shift+⌘V 的时间戳（ms，单调时钟）。0 = 还没发生过。
+    /// 粘贴不是「打字」，不进 `buffer`；但上层（TypingObserver）需要知道
+    /// 「这次 value 变化是不是粘贴触发的」，故单独记一个时刻。`lock` 同护。
+    private var lastPasteMs: Int64 = 0
+
     // MARK: - CGEventTap / 后台线程
 
     private var eventTap: CFMachPort?
@@ -138,6 +143,24 @@ final class KeystrokeLedger {
         record(timestampMs: Self.nowMs())
     }
 
+    /// 记一次粘贴（⌘V / Shift+⌘V）。callback 内调。
+    func recordPaste() {
+        os_unfair_lock_lock(&lock)
+        lastPasteMs = Self.nowMs()
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// 最近 `seconds` 秒内是否发生过粘贴。TypingObserver 用它判定某次
+    /// value 变化是不是 ⌘V 触发的（→ 不是打字，进黑名单）。
+    func hasPaste(within seconds: TimeInterval) -> Bool {
+        let now = Self.nowMs()
+        let cutoff = now - Int64(seconds * 1000.0)
+        os_unfair_lock_lock(&lock)
+        let p = lastPasteMs
+        os_unfair_lock_unlock(&lock)
+        return p > 0 && p >= cutoff && p <= now
+    }
+
     /// 最近 `seconds` 秒内是否有击键。
     /// 边界用 `<=` —— 精确 seconds 秒前那一笔仍算 hit。
     func hasKeystroke(within seconds: TimeInterval) -> Bool {
@@ -226,7 +249,9 @@ private func keystrokeLedgerTapCallback(
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
     let isPaste = flags.contains(.maskCommand) && keyCode == Int64(kVK_ANSI_V)
-    if !isPaste {
+    if isPaste {
+        ledger.recordPaste()
+    } else {
         ledger.record()
     }
     return Unmanaged.passUnretained(event)

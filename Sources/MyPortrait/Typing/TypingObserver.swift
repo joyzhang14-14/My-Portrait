@@ -135,6 +135,9 @@ final class TypingObserver {
     /// compose-timeout（350ms）一致 —— 静默这么久即认定 composition 结束。
     private static let compositionDebounceSec: TimeInterval = 0.350
 
+    /// value 变化与 ⌘V 的关联窗口 —— 这么短内发生过 ⌘V，即判定本次变化是粘贴。
+    private static let pasteAssocSec: TimeInterval = 0.3
+
     private let pipelineLog = Logger(subsystem: "com.joyzhang.myportrait",
                                      category: "typing.pipeline")
 
@@ -611,7 +614,12 @@ final class TypingObserver {
         if markedState == .unknown {
             // 该 app 不暴露 marked-range → 350ms debounce 兜底：静默这么久
             // 才认定 composition 结束、做一次同步快照 diff。
-            scheduleDebounce(key: key, newValue: newValue)
+            if ledger.hasPaste(within: Self.pasteAssocSec) {
+                // 这次变化由 ⌘V 触发 —— 粘贴不是打字。
+                handlePasteValueChange(key: key, newValue: newValue)
+            } else {
+                scheduleDebounce(key: key, newValue: newValue)
+            }
         } else {
             // markedState == .idle：app 暴露 marked-range 且当前非 composition
             // → 立即 diff。
@@ -716,6 +724,44 @@ final class TypingObserver {
         }
     }
 
+    /// debounce 路径上、由 ⌘V 触发的 value 变化 —— 粘贴不是打字：
+    ///   1. 先把窗口内「粘贴之前的真实打字」flush 掉（别跟粘贴一起丢）
+    ///   2. 粘贴 delta 进黑名单（flush 时 stripBlacklist 减掉，belt-and-suspenders）
+    ///   3. snapshot 跳过粘贴段 —— 后续打字从粘贴后干净 diff
+    private func handlePasteValueChange(key: ElementKey, newValue: String) {
+        guard var st = elementState[key] else { return }
+        st.debounceTimer?.invalidate()
+        st.debounceTimer = nil
+        let prevSnap = st.lastValueSnapshot
+        let beforePaste = st.pendingValue ?? prevSnap   // 粘贴前的值
+
+        // 1. 粘贴之前、窗口里尚未 flush 的真实打字。
+        if beforePaste != prevSnap {
+            let (_, tDel, tIns, _) = TextDiff.sandwich(prev: prevSnap, new: beforePaste)
+            let nowMs = TypingRecordWriter.nowMs()
+            if !tDel.isEmpty {
+                writer.handleDelete(deletedText: tDel, bundleId: key.bundleId, nowMs: nowMs)
+            }
+            if !tIns.isEmpty {
+                writer.accumulate(commitTexts: [tIns], bundleId: key.bundleId, nowMs: nowMs)
+            }
+        }
+
+        // 2. 粘贴 delta 入黑名单。
+        let (_, _, pasteIns, _) = TextDiff.sandwich(prev: beforePaste, new: newValue)
+        if !pasteIns.isEmpty {
+            writer.recordBurst(key: key, segment: pasteIns, now: CACurrentMediaTime())
+            let msg = "paste blacklisted bundle=\(key.bundleId) \(pasteIns.count) chars"
+            pipelineLog.info("\(msg, privacy: .public)")
+            onDevLog?(msg)
+        }
+
+        // 3. snapshot 吸收粘贴段。
+        st.lastValueSnapshot = newValue
+        st.pendingValue = nil
+        elementState[key] = st
+    }
+
     /// 清掉某 element 的全部状态（含 debounce 计时器）。
     private func clearElementState(_ key: ElementKey) {
         elementState[key]?.debounceTimer?.invalidate()
@@ -737,6 +783,19 @@ final class TypingObserver {
         state.lastValueSnapshot = newValue
         if segment.isEmpty, deletion.isEmpty {
             elementState[key] = state
+            return
+        }
+
+        // ── 粘贴检测：撞上 ⌘V → 这次变化是粘贴，不是打字 ──────────
+        // 粘贴 delta 进黑名单（flush 时 stripBlacklist 减掉），不入 edit_log。
+        if ledger.hasPaste(within: Self.pasteAssocSec) {
+            elementState[key] = state  // snapshot 已推进，吸收粘贴段
+            if !segment.isEmpty {
+                writer.recordBurst(key: key, segment: segment, now: CACurrentMediaTime())
+            }
+            let msg = "paste blacklisted bundle=\(key.bundleId) \(segment.count) chars"
+            pipelineLog.info("\(msg, privacy: .public)")
+            onDevLog?(msg)
             return
         }
 
