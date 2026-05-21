@@ -73,8 +73,8 @@ struct MemoryConfig: Codable, Equatable {
     var alpha:                 Double = 0.3
     var minWeight:             Double = 0
 
-    // Archiver — programmatic, no LLM.
-    var archiveMaxImpact:      Double = 2
+    // Archiver — programmatic, no LLM. portrait 不持有 impact，归档只看
+    // weight + days_idle（+ pin + protected-category 在代码里）。
     var archiveMaxWeight:      Double = 0.05
     var archiveMinDaysIdle:    Int    = 90
 
@@ -96,7 +96,6 @@ struct MemoryConfig: Codable, Equatable {
         case windowDays           = "window_days"
         case alpha
         case minWeight            = "min_weight"
-        case archiveMaxImpact     = "archive_max_impact"
         case archiveMaxWeight     = "archive_max_weight"
         case archiveMinDaysIdle   = "archive_min_days_idle"
         case distillEvidenceThreshold = "distill_evidence_threshold"
@@ -113,7 +112,6 @@ struct MemoryConfig: Codable, Equatable {
         windowDays           = c.dflt(Int.self,    .windowDays,           windowDays)
         alpha                = c.dflt(Double.self, .alpha,                alpha)
         minWeight            = c.dflt(Double.self, .minWeight,            minWeight)
-        archiveMaxImpact     = c.dflt(Double.self, .archiveMaxImpact,     archiveMaxImpact)
         archiveMaxWeight     = c.dflt(Double.self, .archiveMaxWeight,     archiveMaxWeight)
         archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
         distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)

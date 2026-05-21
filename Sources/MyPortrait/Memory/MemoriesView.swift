@@ -149,7 +149,7 @@ struct MemoriesView: View {
                         .help("Delete this event")
                     }
                     .padding(.top, 44)
-                    metadataBlock(entry.file, category: entry.category)
+                    metadataBlock(entry.file, category: entry.category, scope: entry.scope)
                     Divider().background(Color.white.opacity(0.06))
                     Text(entry.file.body)
                         .font(.system(size: 13))
@@ -186,26 +186,30 @@ struct MemoriesView: View {
     }
 
     @ViewBuilder
-    private func metadataBlock(_ f: PortraitFile, category: String) -> some View {
+    private func metadataBlock(_ f: PortraitFile, category: String, scope: MemoryScope) -> some View {
         let facetStr = f.portraitFacets.isEmpty
             ? "—"
             : f.portraitFacets.map { "\($0.facet):\($0.value)" }.joined(separator: ", ")
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let curW = WeightEMA(halfLifeDays: halfLife)
             .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified())
-        let rows: [(String, String)] = [
-            ("type", f.eventType.isEmpty ? "experience" : f.eventType),
-            ("portrait_facets", facetStr),
-            ("category (legacy)", category.isEmpty ? "—" : category),
-            ("weight", String(format: "%.4g", curW)),
-            ("impact", String(format: "%.4g", f.impact)),
-            ("impact_source", f.impactSource),
-            ("created", Self.dayString(f.created)),
-            ("last_occurred", f.lastOccurrence.map { Self.dayString($0) } ?? "—"),
-            ("occurrences (days)", "\(f.occurrences.count)"),
-            ("member frames", "\(f.memberFrameIds.count)"),
-            ("tags", f.tags.joined(separator: ", "))
-        ]
+        // event 路径展示 impact / impact_source；portrait 路径整行不渲染
+        // （portrait 不持有 impact，impact_source 残留也无意义）。
+        let impactRows: [(String, String)] = scope == .events
+            ? [("impact", String(format: "%.4g", f.impact ?? 0)),
+               ("impact_source", f.impactSource)]
+            : []
+        let rows: [(String, String)] =
+            [("type", f.eventType.isEmpty ? "experience" : f.eventType),
+             ("portrait_facets", facetStr),
+             ("category (legacy)", category.isEmpty ? "—" : category),
+             ("weight", String(format: "%.4g", curW))]
+            + impactRows
+            + [("created", Self.dayString(f.created)),
+               ("last_occurred", f.lastOccurrence.map { Self.dayString($0) } ?? "—"),
+               ("occurrences (days)", "\(f.occurrences.count)"),
+               ("member frames", "\(f.memberFrameIds.count)"),
+               ("tags", f.tags.joined(separator: ", "))]
         VStack(alignment: .leading, spacing: 4) {
             ForEach(rows, id: \.0) { row in
                 HStack(spacing: 12) {
@@ -428,9 +432,11 @@ private struct EntryRow: View {
                     Text("w=\(String(format: "%.2f", entry.currentWeight))")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
-                    Text("i=\(String(format: "%.1f", entry.file.impact))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                    if entry.scope == .events, let imp = entry.file.impact {
+                        Text("i=\(String(format: "%.1f", imp))")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
                     Text("×\(entry.file.occurrences.count)d")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)

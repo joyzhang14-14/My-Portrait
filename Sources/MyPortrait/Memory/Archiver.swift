@@ -19,7 +19,6 @@ import Foundation
 /// Every archival action is appended to today's journal.
 enum Archiver {
     struct Rule {
-        var maxImpact: Double = 2          // strict-less-than
         var maxWeight: Double = 0.05       // strict-less-than（与 EMA currentWeight 比较）
         var minDaysSinceAccess: Int = 90   // greater-or-equal
         var protectedCategoryPrefixes: [String] = ["skills"]
@@ -31,7 +30,6 @@ enum Archiver {
         static var fromConfig: Rule {
             let m = ConfigStore.shared.current.memory
             return Rule(
-                maxImpact: m.archiveMaxImpact,
                 maxWeight: m.archiveMaxWeight,
                 minDaysSinceAccess: m.archiveMinDaysIdle,
                 weightHalfLifeDays: Double(m.weightHalfLifeDays)
@@ -99,13 +97,13 @@ enum Archiver {
                 skipped += 1; continue
             }
 
-            // Rule check —— weight 用 EMA lazy 衰减后的当前值，而不是 stored 值。
+            // Rule check —— portrait 不再持有 impact（event-only），归档判定
+            // 只看 weight（EMA 衰减后）+ days_idle + pin + protected-category。
             let days = file.daysSinceLastOccurrence(now: now)
             let curWeight = WeightEMA(halfLifeDays: rule.weightHalfLifeDays)
                 .currentWeight(stored: file.weight,
                                daysSinceModified: file.daysSinceModified(now: now))
-            let qualifies = file.impact < rule.maxImpact
-                && curWeight < rule.maxWeight
+            let qualifies = curWeight < rule.maxWeight
                 && days >= rule.minDaysSinceAccess
 
             if !qualifies { skipped += 1; continue }
@@ -118,7 +116,7 @@ enum Archiver {
             let destRel = "\(category)/_archive/\(tail)"
             let destURL = portraitRoot.appendingPathComponent(destRel)
 
-            let reason = "impact=\(file.impact) weight=\(formatted(curWeight)) days_idle=\(days)"
+            let reason = "weight=\(formatted(curWeight)) days_idle=\(days)"
             plans.append(Plan(source: url, destination: destURL, reason: reason))
         }
 

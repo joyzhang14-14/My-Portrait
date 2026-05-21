@@ -218,9 +218,6 @@ struct MemorySettingsView: View {
             title: "Archival rule",
             blurb: "Programmatic, no LLM. All three thresholds must be met (and the file must not live under skills/ or be pinned) for the file to move into _archive/."
         ) {
-            doubleRow("Max impact",
-                      value: cfg.binding(\.memory.archiveMaxImpact),
-                      range: 0.5...4.0, step: 0.1)
             doubleRow("Max weight",
                       value: cfg.binding(\.memory.archiveMaxWeight),
                       range: 0.001...0.5, step: 0.01)
