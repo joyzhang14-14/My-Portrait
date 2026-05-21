@@ -120,7 +120,7 @@ final class Services {
         // 启停由 startManagedLifecycle 按 recording.typingCaptureEnabled 驱动。
         let typingStore = TypingEventStore(dbPool: dbImpl.dbPool)
         self.typingStore = typingStore
-        self.typingObserver = TypingObserver()
+        self.typingObserver = TypingObserver(store: typingStore)
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。

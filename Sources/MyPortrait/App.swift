@@ -221,6 +221,13 @@ struct MyPortraitApp: App {
         if args.contains("--typing-observe-m3") {
             AppDelegate.typingObserveM3Only = true
         }
+        // `--typing-observe-m4` 只跑 TypingObserver 的 L1+L2+L3 完整流水线
+        // （dev tool）：不 init Services / UI / Capture / Memory，但**会开 DB**
+        // —— Layer 3 会话关闭时写 typing_events 表。每次产出并入库 print 一行。
+        // Ctrl+C → observer.stop() + exit(0)。同上：不 exit()，只置标志。
+        if args.contains("--typing-observe-m4") {
+            AppDelegate.typingObserveM4Only = true
+        }
         AppKeyboard.install()
     }
 
@@ -274,6 +281,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// IMEFoldEvent print 一行。仅启动早期写一次 —— nonisolated(unsafe) 安全。
     nonisolated(unsafe) static var typingObserveM3Only = false
 
+    /// `--typing-observe-m4` CLI 模式标志。L1+L2+L3 完整流水线 dev tool，
+    /// 会话关闭入库时 print 一行。仅启动早期写一次 —— nonisolated(unsafe) 安全。
+    nonisolated(unsafe) static var typingObserveM4Only = false
+
     /// `--typing-observe` 模式下持有的 observer（持有它以保证存活 + 退出时 stop）。
     private var typingObserver: TypingObserver?
 
@@ -287,19 +298,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // CLI 模式：只跑 TypingObserver（L1+L2 流水线），跳过 Services / 窗口创建。
+        // CLI 模式：只跑 TypingObserver（L1+L2+L3 流水线），跳过 Services / 窗口创建。
         // 主 run loop 仍需活着（AX 回调靠它），所以不开窗口但不退出。
-        // M3 observer 不写 DB —— 不再打开 DatabasePool。
-        if Self.typingObserveOnly || Self.typingObserveM3Only {
+        // observer 需要 TypingEventStore —— 三个 flag 都开 DB（Layer 3 会写库）。
+        if Self.typingObserveOnly || Self.typingObserveM3Only || Self.typingObserveM4Only {
             NSApp.setActivationPolicy(.accessory)
             let isM3 = Self.typingObserveM3Only
-            let observer = TypingObserver()
+            let isM4 = Self.typingObserveM4Only
+
+            // 打开 DB —— Layer 3 会话关闭时写 typing_events 表。
+            let dbImpl: PortraitDBImpl
+            do {
+                dbImpl = try PortraitDBImpl()
+            } catch {
+                print("[TypingObserver] DB open failed: \(error)")
+                exit(1)
+            }
+            let store = TypingEventStore(dbPool: dbImpl.dbPool)
+            let observer = TypingObserver(store: store)
+
             // M3 dev flag：每条 IMEFoldEvent print 一行（dev tool 允许 print）。
             if isM3 {
                 observer.onFoldEvent = { events in
                     for e in events {
                         print("[m3] \(e.kind) \"\(e.text)\" script=\(e.script) trace=\(e.traceTag?.description ?? "-")")
                     }
+                }
+            }
+            // M4 dev flag：每次会话关闭产出并入库 print 一行。
+            if isM4 {
+                observer.onTypingEvent = { event in
+                    let id = event.id.map(String.init) ?? "?"
+                    print("[m4] insert id=\(id) text=\"\(event.text)\" reason=\(event.closeReason ?? "-") editLog=\(event.editLog.count)条")
                 }
             }
             observer.start()
@@ -318,7 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signal(SIGINT, SIG_IGN)  // 默认 handler 终止进程，先忽略让 dispatch source 接管
             // 防 src 被释放：用 associated 静态引用顶住其生命周期。
             Self.sigintSource = src
-            let modeName = isM3 ? "--typing-observe-m3" : "--typing-observe"
+            let modeName = isM4 ? "--typing-observe-m4"
+                : (isM3 ? "--typing-observe-m3" : "--typing-observe")
             print("[TypingObserver] \(modeName) mode — press Ctrl+C to stop")
             return
         }
@@ -402,8 +433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // typing-observe / m3 模式：只需停 observer（走三步清理路径）。
-        if Self.typingObserveOnly || Self.typingObserveM3Only {
+        // typing-observe / m3 / m4 模式：只需停 observer（走三步清理路径）。
+        if Self.typingObserveOnly || Self.typingObserveM3Only || Self.typingObserveM4Only {
             typingObserver?.stop()
             typingStatusItem?.remove()
             return
