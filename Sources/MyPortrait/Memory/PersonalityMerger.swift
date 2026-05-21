@@ -327,6 +327,9 @@ final class PersonalityMerger {
 
     // MARK: - slug 工具
 
+    /// tag → kebab-case slug。tag 本身已是 kebab-case 单名词，这里只做
+    /// 防御性规整：小写、非字母数字折成连字符（**保留连字符**，不转下划线，
+    /// 这样 slug == tag name，跟 daily snapshot 一致）。
     private static func slugify(_ s: String) -> String {
         var out = ""
         var lastSep = false
@@ -335,11 +338,11 @@ final class PersonalityMerger {
             if c.isLetter || c.isNumber {
                 out.append(c); lastSep = false
             } else if !lastSep {
-                out.append("_"); lastSep = true
+                out.append("-"); lastSep = true
             }
         }
-        let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-        if trimmed.isEmpty { return "trait" }
+        let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if trimmed.isEmpty { return "tag" }
         return trimmed.count > 40 ? String(trimmed.prefix(40)) : trimmed
     }
 
