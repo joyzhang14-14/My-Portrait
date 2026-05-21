@@ -367,7 +367,7 @@ struct TimelineSidebar: View {
 
     private var settingsListSection: some View {
         sectionCard {
-            ForEach([SettingsSubsection.Group.app, .memory, .dataPrivacy], id: \.self) { grp in
+            ForEach([SettingsSubsection.Group.app, .recording, .memory, .dataPrivacy], id: \.self) { grp in
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
