@@ -350,13 +350,22 @@ final class Services {
 
     private func applyTypingCapture(enabled: Bool) {
         if enabled {
-            // 打字采集需要 Accessibility 权限。没授 → 请求（跟 screen 一样：
-            // requestAccessibility 内部 AXIsProcessTrustedWithOptions + prompt
-            // 弹系统标准对话框，对话框自带「打开系统设置」按钮，不用我们再弹）。
-            // 授权后由 PermissionMonitor 轮询 → 上面的 $accessibility sink 拾起。
+            // 打字采集需要 Accessibility 权限。没授 → 请求 + 引导。
             if permissions.accessibility != .granted {
-                logger.info("typing enabled, accessibility not granted — requesting")
+                logger.info("typing enabled, accessibility not granted — requesting + guiding")
+                // ① 把 app 注册进系统设置的「辅助功能」列表（macOS 肯弹时也会
+                //    弹系统标准对话框）。
                 permissions.requestAccessibility()
+                // ② AX 的系统对话框是「一次性」的 —— app 进列表后不再弹，照抄
+                //    screen 的系统弹窗对老用户静默无效。补一个我们自己的 NSAlert
+                //    （同 microphone denied 路径），必定可见、点确认直达系统设置。
+                //    授权后 PermissionMonitor 轮询 → $accessibility sink 拾起 observer。
+                confirmThenOpenSettings(
+                    title: "Accessibility Permission Needed",
+                    body: "My Portrait needs Accessibility access to capture your typing. "
+                        + "Open System Settings to grant it?",
+                    perm: .accessibility
+                )
             }
             // start() 内部会 print 启动 banner；AX 没授时它自己 idle。
             typingObserver.start()
