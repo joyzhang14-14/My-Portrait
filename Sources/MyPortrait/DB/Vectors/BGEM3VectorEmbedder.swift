@@ -104,6 +104,13 @@ actor BGEM3VectorEmbedder: VectorEmbedder {
         return result
     }
 
+    /// 释放 MLX 模型容器,回收 ~1.15GB 内存。下次 embed 经 loadedContainer 重新加载。
+    func unload() {
+        guard container != nil else { return }
+        container = nil
+        logger.info("bge-m3 model unloaded — freed memory")
+    }
+
     // MARK: - 加载
 
     private func loadedContainer() async throws -> ModelContainer {

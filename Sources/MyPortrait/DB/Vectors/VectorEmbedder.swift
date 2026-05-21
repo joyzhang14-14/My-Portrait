@@ -22,6 +22,10 @@ protocol VectorEmbedder: Sendable {
 
     /// 批量 embed（实现优先级最高 —— 7000 条历史回灌时 batch=32 比逐条快 ~10×）。
     func embedBatch(_ texts: [String]) async throws -> [[Float]]
+
+    /// 释放已加载的模型,回收内存。下次 embed 按需重新加载。
+    /// 持大模型的实现（bge-m3 ~1.15GB）应复写;轻量实现保持默认 no-op。
+    func unload() async
 }
 
 extension VectorEmbedder {
@@ -34,4 +38,7 @@ extension VectorEmbedder {
         }
         return results
     }
+
+    /// 默认 no-op —— 不持大模型的实现无需释放。
+    func unload() async {}
 }
