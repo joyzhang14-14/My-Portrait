@@ -386,6 +386,39 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v14 — typing_events 重塑为 append-only event log
+        // ═══════════════════════════════════════════════════════════
+        //
+        // v13 的 master-record-per-app（bundle_id 主键、UPSERT 累加）有两个
+        // 同根缺陷：KI-1 中段编辑字符错位、KI-2 切窗口后大段删除丢失 ——
+        // 根子都是「累加文本 ≠ 输入框真实内容」。
+        //
+        // v14 改成 event log：每次 flush INSERT 一条新 record，一条 record =
+        // 一个 (app, element) 的一段输入 session。record immutable，不再 UPSERT。
+        // 配套 splice 算法（baseline + 就地 splice）让 text 始终等于输入框真实
+        // 内容。旧数据是 buggy 模型，直接 DROP 不迁移。
+        m.registerMigration("v14_typing_events_event_log") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS typing_events")
+
+            try db.create(table: "typing_events") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("bundle_id", .text).notNull()
+                t.column("element_hash", .integer).notNull()
+                t.column("started_at", .integer).notNull()       // UTC ms
+                t.column("ended_at", .integer).notNull()         // UTC ms
+                t.column("text", .text).notNull()                // 本次 session 真实输入
+                t.column("edit_log", .text).notNull()            // JSON [EditEntry]
+                t.column("total_chars", .integer).notNull()
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_typing_events_app ON typing_events(bundle_id)")
+            try db.execute(sql:
+                "CREATE INDEX idx_typing_events_app_element ON typing_events(bundle_id, element_hash)")
+            try db.execute(sql:
+                "CREATE INDEX idx_typing_events_time ON typing_events(started_at)")
+        }
+
         return m
     }
 }

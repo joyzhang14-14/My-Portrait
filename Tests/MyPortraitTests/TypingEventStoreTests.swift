@@ -2,9 +2,9 @@ import XCTest
 import GRDB
 @testable import MyPortrait
 
-/// `TypingEventStore`（v13 master-record schema）基础写入 / 查询测试。
-/// 用临时文件 DatabasePool + 跑 `DBSchema.migrator()`（WAL 模式不支持
-/// `:memory:`，跟 PortraitDBImplTests 一致）。
+/// `TypingEventStore`（v14 event-log schema）测试。临时文件 DatabasePool +
+/// 跑 `DBSchema.migrator()`（WAL 不支持 `:memory:`）。
+@MainActor
 final class TypingEventStoreTests: XCTestCase {
 
     private var tempPaths: [String] = []
@@ -24,8 +24,6 @@ final class TypingEventStoreTests: XCTestCase {
             .appendingPathComponent("MyPortraitTypingTest-\(UUID().uuidString).sqlite")
             .path
         tempPaths.append(path)
-        // 注册 ICU 分词器，否则 v1 的 frames_fts migration 会失败
-        // （跟 PortraitDBImpl.init 一致）。
         var config = Configuration()
         config.prepareDatabase { db in
             db.add(tokenizer: FoundationTokenizer.self)
@@ -35,61 +33,65 @@ final class TypingEventStoreTests: XCTestCase {
         return TypingEventStore(dbPool: pool)
     }
 
-    private func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
-
-    /// upsert 一条 → fetch 取回，字段一致。
-    func testUpsertAndFetch() throws {
-        let store = try makeStore()
-        let ts = nowMs()
-        let event = TypingEvent(
-            bundleId: "com.tinyspeck.slackmacgap",
-            text: "hello world",
-            editLog: #"[{"ts":1,"kind":"commit","text":"hello world"}]"#,
-            timeStart: ts,
-            lastUpdated: ts + 500,
-            totalChars: 11
-        )
-        try store.upsert(event)
-
-        let got = try XCTUnwrap(store.fetch(bundleId: "com.tinyspeck.slackmacgap"))
-        XCTAssertEqual(got.bundleId, event.bundleId)
-        XCTAssertEqual(got.text, event.text)
-        XCTAssertEqual(got.editLog, event.editLog)
-        XCTAssertEqual(got.timeStart, event.timeStart)
-        XCTAssertEqual(got.lastUpdated, event.lastUpdated)
-        XCTAssertEqual(got.totalChars, event.totalChars)
+    private func event(_ bundle: String, _ element: Int, started: Int64, ended: Int64,
+                       text: String) -> TypingEvent {
+        TypingEvent(id: nil, bundleId: bundle, elementHash: element,
+                    startedAt: started, endedAt: ended, text: text,
+                    editLog: "[]", totalChars: text.count)
     }
 
-    /// 同 bundle_id 再 upsert → 整行替换（不是插第二行）。
-    func testUpsertReplacesSameBundle() throws {
+    /// insert → fetch，字段一致。
+    func testInsertAndFetch() throws {
         let store = try makeStore()
-        let ts = nowMs()
-        try store.upsert(TypingEvent(bundleId: "app.x", text: "v1", editLog: "[]",
-                                     timeStart: ts, lastUpdated: ts, totalChars: 2))
-        try store.upsert(TypingEvent(bundleId: "app.x", text: "v2-longer", editLog: "[]",
-                                     timeStart: ts, lastUpdated: ts + 100, totalChars: 9))
-
-        let all = try store.recentApps(limit: 100)
-        XCTAssertEqual(all.count, 1)
-        XCTAssertEqual(all.first?.text, "v2-longer")
+        try store.insert(event("app.a", 1, started: 100, ended: 200, text: "hello"))
+        let recs = try store.records(bundleId: "app.a")
+        XCTAssertEqual(recs.count, 1)
+        let got = try XCTUnwrap(recs.first)
+        XCTAssertNotNil(got.id)
+        XCTAssertEqual(got.bundleId, "app.a")
+        XCTAssertEqual(got.elementHash, 1)
+        XCTAssertEqual(got.text, "hello")
+        XCTAssertEqual(got.startedAt, 100)
+        XCTAssertEqual(got.endedAt, 200)
     }
 
-    /// fetch 不存在的 bundle → nil。
-    func testFetchMissing() throws {
+    /// append-only —— 同 bundle 再 insert 是第二条 record，不是 upsert。
+    func testAppendOnlyNotUpsert() throws {
         let store = try makeStore()
-        XCTAssertNil(try store.fetch(bundleId: "no.such.app"))
+        try store.insert(event("app.a", 1, started: 1, ended: 2, text: "first"))
+        try store.insert(event("app.a", 1, started: 3, ended: 4, text: "second"))
+        XCTAssertEqual(try store.records(bundleId: "app.a").count, 2)
     }
 
-    /// recentApps 按 last_updated 降序。
-    func testRecentAppsOrder() throws {
+    /// records 按 started_at 倒序。
+    func testRecordsOrderDesc() throws {
         let store = try makeStore()
-        let ts = nowMs()
-        try store.upsert(TypingEvent(bundleId: "app.old", text: "o", editLog: "[]",
-                                     timeStart: ts, lastUpdated: ts - 1000, totalChars: 1))
-        try store.upsert(TypingEvent(bundleId: "app.new", text: "n", editLog: "[]",
-                                     timeStart: ts, lastUpdated: ts, totalChars: 1))
+        try store.insert(event("a", 1, started: 100, ended: 200, text: "old"))
+        try store.insert(event("a", 1, started: 300, ended: 400, text: "new"))
+        XCTAssertEqual(try store.records(bundleId: "a").map(\.text), ["new", "old"])
+    }
 
-        let recent = try store.recentApps(limit: 10)
-        XCTAssertEqual(recent.map(\.bundleId), ["app.new", "app.old"])
+    /// appSummaries：按 app 聚合 count + 最近 ended_at，按 ended_at 倒序。
+    func testAppSummaries() throws {
+        let store = try makeStore()
+        try store.insert(event("a", 1, started: 1, ended: 10, text: "x"))
+        try store.insert(event("a", 1, started: 2, ended: 20, text: "y"))
+        try store.insert(event("b", 1, started: 3, ended: 30, text: "z"))
+        let s = try store.appSummaries()
+        XCTAssertEqual(s.count, 2)
+        XCTAssertEqual(s.first?.bundleId, "b")   // ended 30 最近
+        let a = try XCTUnwrap(s.first(where: { $0.bundleId == "a" }))
+        XCTAssertEqual(a.recordCount, 2)
+        XCTAssertEqual(a.lastEndedAt, 20)
+    }
+
+    /// delete 只删该 app 的 records。
+    func testDelete() throws {
+        let store = try makeStore()
+        try store.insert(event("a", 1, started: 1, ended: 2, text: "x"))
+        try store.insert(event("b", 1, started: 1, ended: 2, text: "y"))
+        try store.delete(bundleId: "a")
+        XCTAssertEqual(try store.records(bundleId: "a").count, 0)
+        XCTAssertEqual(try store.records(bundleId: "b").count, 1)
     }
 }

@@ -1,255 +1,326 @@
 import Foundation
 import QuartzCore
 
-/// Typing Observer v2 — Layer 4「写入层」。
+/// Typing Observer v2 — Layer 4 写入层（v14 splice 模型）。
 ///
-/// `TypingObserver`（L1+L2+L3，AX 重耦合）把折叠好的 commit / delete 交给
-/// 这里。L4 负责：
-///   - 按 app 维护 in-progress 主记录（一个 app 一条）
-///   - 跨记录 delete（当前内存记录 → DB 主记录末尾 2000 字符窗口）
-///   - 5s debounce flush + 写库时减黑名单
-///   - 速度阈值 burst 命中的黑名单（per element，1h TTL）
+/// 一个 (app, element) 一段 in-progress session。每次 AX value-change 经 350ms
+/// debounce 收敛后，用 `TextDiff.sandwich` 出 delta，**就地 splice** 进
+/// `text`（insert / removeSubrange / replaceSubrange）—— 中段编辑、删除都在
+/// 原位生效。修掉 KI-1（中段错位）+ KI-2（大段删除丢失）。
 ///
-/// 拆成独立类有两个理由：(1) 让 spec 要求的单测（burst 边界 / 黑名单减法 /
-/// handleDelete 三态 / flush 重置）能脱离 AX 直接跑；(2) L4 是 spec 命名的
-/// 分层，不是为「灵活性」造的抽象。
+/// session 在 5s 静默 / 切 element / 切 app / 发送 / 进程退出时 flush ——
+/// **INSERT 一条新 record**（append-only，不 UPSERT），record 落库后 immutable。
 ///
-/// `@MainActor` —— 只被 `TypingObserver`（MainActor）和它的 Timer 回调驱动。
+/// 不变量：`lastValueSnapshot == baseline + text`。splice 的位置换算
+/// （`effPos = splicePos - baselineOffset`）全靠它。burst / 粘贴 / 程序输出
+/// 这些「噪声」也照常 splice 进 text（保住不变量），只是把那段 segment
+/// 进黑名单 —— flush 时 `stripBlacklist` 减掉。
+///
+/// `@MainActor` —— 只被 `TypingObserver`（MainActor）与它的 Timer 驱动。
 @MainActor
 final class TypingRecordWriter {
 
-    // MARK: - 内存中的 in-progress 记录
-
-    /// 一个 app 一条。flush 后清空累积部分但保留对象（下次有 event 再累加）。
-    final class InProgressRecord {
-        let bundleId: String
-        var text: String = ""
-        var editLog: [EditEntry] = []
-        /// UTC ms，创建时设定，不变。
-        let timeStartMs: Int64
-        var lastEventMs: Int64
-        var flushTimer: Timer?
-        /// 自上次 flush 后有无新变化。
-        var pendingChanges: Bool = false
-
-        init(bundleId: String, timeStartMs: Int64) {
-            self.bundleId = bundleId
-            self.timeStartMs = timeStartMs
-            self.lastEventMs = timeStartMs
-        }
+    /// state / 黑名单 的 key —— per (app 进程, element)。
+    struct ElementKey: Hashable {
+        let pid: pid_t
+        let elementHash: Int
     }
 
-    /// 黑名单 key —— per (app, element)。
-    struct ElementKey: Hashable {
+    /// 一个 (app, element) 的 in-progress 输入 session。
+    final class InProgressRecord {
         let bundleId: String
         let elementHash: Int
+        let startedAtMs: Int64
+        var lastEventMs: Int64
+
+        /// session 开始时 element 已有的内容（不算用户本次输入）。
+        var baseline: String
+        /// = `baseline.count`（Character 数），splice 位置换算用。
+        var baselineOffset: Int
+        /// 本次 session 用户真实输入 —— splice 的目标。
+        var text: String
+        var editLog: [EditEntry]
+
+        /// 该 element 上次 AX 完整 value。不变量：`== baseline + text`。
+        var lastValueSnapshot: String
+        var lastValueChangeTs: TimeInterval
+
+        /// debounce 窗口内最近一次的 AX value。
+        var pendingValue: String?
+        /// 本 debounce 窗口是否见过 burst / 粘贴 / 物理按键。
+        var windowHadBurst = false
+        var windowHadPaste = false
+        var windowHadKeystroke = false
+
+        var debounceTimer: Timer?
+        var flushTimer: Timer?
+        var pendingChanges = false
+
+        init(bundleId: String, elementHash: Int, baseline: String, nowMs: Int64) {
+            self.bundleId = bundleId
+            self.elementHash = elementHash
+            self.startedAtMs = nowMs
+            self.lastEventMs = nowMs
+            self.baseline = baseline
+            self.baselineOffset = baseline.count
+            self.text = ""
+            self.editLog = []
+            self.lastValueSnapshot = baseline
+            self.lastValueChangeTs = CACurrentMediaTime()
+        }
     }
 
     // MARK: - 硬编码参数（M5 统一挪进 ConfigStore）
 
-    /// burst 判定：segment 字符数 **超过** 此值。
     static let burstCharThreshold = 10
-    /// burst 判定：两次 value-change 间隔 **小于** 此毫秒数。
     static let burstIntervalMs: Double = 30
-    /// 黑名单条目存活时长（秒）。
     static let blacklistTTLSec: TimeInterval = 3600
-    /// 跨记录 delete 在 DB 主记录里搜索的末尾窗口（字符）。
-    static let deleteSearchWindow = 2000
+    /// AX value 稳定多久才走 splice —— 收敛 IME 拼音中间态。
+    static let debounceSec: TimeInterval = 0.350
+    /// session 静默多久落库。
+    static let flushSec: TimeInterval = 5.0
+    static let pasteAssocSec: TimeInterval = 0.5
+    static let submitAssocSec: TimeInterval = 1.0
 
     // MARK: - 状态
 
     private let store: TypingEventStore?
-    /// flush debounce 间隔（秒）。默认 5s，单测可注入短值。
-    let flushInterval: TimeInterval
-
-    /// app_bundle_id → in-progress 记录。
-    private(set) var records: [String: InProgressRecord] = [:]
-    /// (app, element) → 黑名单：entry 字符串 → 命中时刻（CACurrentMediaTime）。
-    /// 用普通 Dictionary —— spec 写 OrderedDict，但顺序在任何地方都没被用到
-    /// （TTL 全扫、finalize 按长度排序），无需引入 swift-collections。
-    private(set) var blacklist: [ElementKey: [String: TimeInterval]] = [:]
-
-    /// dev flag 日志出口（跨记录 delete / flush 关键事件）。
+    private let ledger: KeystrokeLedger
     var onDevLog: ((String) -> Void)?
 
-    init(store: TypingEventStore?, flushInterval: TimeInterval = 5.0) {
+    private(set) var state: [ElementKey: InProgressRecord] = [:]
+    /// 黑名单 per (app, element)：噪声 segment → 命中时刻（CACurrentMediaTime）。
+    private(set) var blacklist: [ElementKey: [String: TimeInterval]] = [:]
+
+    init(store: TypingEventStore?, ledger: KeystrokeLedger) {
         self.store = store
-        self.flushInterval = flushInterval
+        self.ledger = ledger
     }
 
-    // MARK: - 时间源
-
-    /// UTC 毫秒（墙上时钟）。edit_log ts / time_start / last_updated 都用它。
+    /// UTC 毫秒 —— started_at / ended_at / edit_log ts 都用它。
     static func nowMs() -> Int64 {
         Int64(Date().timeIntervalSince1970 * 1000.0)
     }
 
-    // MARK: - 步骤 2：burst 检测
+    // MARK: - session 生命周期
 
-    /// 速度阈值：segment 字符数 > 10 **且** 间隔 < 30ms → burst。
-    /// 纯函数，供 `TypingObserver` 调用 + 单测覆盖边界。
-    static func isBurst(segmentCharCount: Int, intervalMs: Double) -> Bool {
-        segmentCharCount > burstCharThreshold && intervalMs < burstIntervalMs
+    /// element 获得焦点 → 开一段新 session。`baseline` = 此刻 AX 完整 value。
+    func beginSession(key: ElementKey, bundleId: String, baseline: String) {
+        flushElement(key)   // 若有旧 record，先 flush 落库 + 移除
+        state[key] = InProgressRecord(bundleId: bundleId, elementHash: key.elementHash,
+                                      baseline: baseline, nowMs: Self.nowMs())
     }
 
-    /// burst 命中 → 把 segment 记进该 element 的黑名单。
-    func recordBurst(key: ElementKey, segment: String, now: TimeInterval) {
-        blacklist[key, default: [:]][segment] = now
-    }
+    /// 一次 AX value-change。存进 pendingValue + 重排 350ms debounce。
+    /// burst / 粘贴 / 按键 的判定在这里做（要时间新鲜）→ 标记到 record。
+    func noteValueChange(key: ElementKey, newValue: String) {
+        guard let rec = state[key] else { return }
 
-    // MARK: - 步骤 4：累加 commit
-
-    /// L2 折出的 commit 文本累加进该 app 的 in-progress 记录，并重置 flush 计时。
-    func accumulate(commitTexts: [String], bundleId: String, nowMs: Int64) {
-        let texts = commitTexts.filter { !$0.isEmpty }
-        guard !texts.isEmpty else { return }
-        let rec = recordFor(bundleId: bundleId, nowMs: nowMs)
-        for text in texts {
-            rec.text += text
-            rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: text))
+        // 发送检测：输入框被清空 + 之前有内容 + 刚按过回车 = 聊天 app 发出消息。
+        // 在 value-change 时刻判（不是 debounce 触发时）—— 此刻 pendingValue
+        // 还是清空前的消息内容。
+        if newValue.isEmpty {
+            let msg = rec.pendingValue ?? rec.lastValueSnapshot
+            if !msg.isEmpty, ledger.hasSubmitKey(within: Self.submitAssocSec) {
+                handleSubmit(key: key, rec: rec, fullValue: msg)
+                return
+            }
         }
+
+        let now = CACurrentMediaTime()
+        let intervalMs = (now - rec.lastValueChangeTs) * 1000.0
+        let prevSeen = rec.pendingValue ?? rec.lastValueSnapshot
+        if abs(newValue.count - prevSeen.count) > Self.burstCharThreshold,
+           intervalMs < Self.burstIntervalMs {
+            rec.windowHadBurst = true
+        }
+        let corrWindowSec =
+            Double(ConfigStore.shared.recording.typingKeyCorrelationWindowMs) / 1000.0
+        if ledger.hasKeystroke(within: corrWindowSec) { rec.windowHadKeystroke = true }
+        if ledger.hasPaste(within: Self.pasteAssocSec) { rec.windowHadPaste = true }
+
+        rec.lastValueChangeTs = now
+        rec.pendingValue = newValue
+        rec.debounceTimer?.invalidate()
+        rec.debounceTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.debounceSec, repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fireDebounce(key) }
+        }
+    }
+
+    // MARK: - debounce 触发 → splice
+
+    private func fireDebounce(_ key: ElementKey) {
+        guard let rec = state[key], let pending = rec.pendingValue else { return }
+        rec.debounceTimer = nil
+        rec.pendingValue = nil
+        let prev = rec.lastValueSnapshot
+        guard prev != pending else { return }
+
+        // 噪声判定（窗口标记，noteValueChange 时新鲜采集的）。
+        let noise = rec.windowHadBurst || rec.windowHadPaste || !rec.windowHadKeystroke
+        rec.windowHadBurst = false
+        rec.windowHadPaste = false
+        rec.windowHadKeystroke = false
+        rec.lastValueSnapshot = pending
+
+        let nowMs = Self.nowMs()
+        let (_, inserted) = Self.splice(rec, prev: prev, new: pending, nowMs: nowMs)
+
+        // 噪声 → 把这次插入的 segment 进黑名单（flush 时 stripBlacklist 减掉）。
+        // 照常 splice 进 text 是为了保住「lastValueSnapshot == baseline+text」
+        // 不变量；黑名单负责落库时把噪声剔除。
+        if noise, !inserted.isEmpty {
+            blacklist[key, default: [:]][inserted] = CACurrentMediaTime()
+            onDevLog?("noise→blacklist bundle=\(rec.bundleId) \(inserted.count) chars")
+        }
+
         rec.lastEventMs = nowMs
         rec.pendingChanges = true
-        scheduleFlush(rec)
+        scheduleFlush(rec, key: key)
     }
 
-    /// 记一次「发送」事件（聊天 app 回车发消息）。只往 edit_log 加一条
-    /// kind="submit" 标记，**不动 record.text** —— 消息内容此前已由 commit
-    /// 累加进去了，submit 只是标一个「这里发出去了」的边界。
-    func appendSubmit(text: String, bundleId: String, nowMs: Int64) {
-        let rec = recordFor(bundleId: bundleId, nowMs: nowMs)
-        rec.editLog.append(EditEntry(ts: nowMs, kind: "submit", text: text))
-        rec.lastEventMs = nowMs
+    /// 对 record 做一次 prev→new 的就地 splice。baseline 吸纳、3 路 splice、
+    /// editLog 追加都在内。纯逻辑、无 timer / ledger —— 单测直接覆盖。
+    /// 返回 (prevMid 删掉的, newMid 新插的)。
+    @discardableResult
+    static func splice(_ rec: InProgressRecord, prev: String, new: String, nowMs: Int64)
+        -> (prevMid: String, newMid: String) {
+        let (prefix, prevMid, newMid, _) = TextDiff.sandwich(prev: prev, new: new)
+        if prevMid.isEmpty, newMid.isEmpty { return ("", "") }
+
+        // splice 位置：AX 坐标 → session-text 坐标。
+        let splicePos = prefix.count
+        var effPos = splicePos - rec.baselineOffset
+        if effPos < 0 {
+            // 触及 baseline → 把 baseline 吸纳进 text，之后只在 text 里 splice。
+            rec.text = rec.baseline + rec.text
+            rec.baseline = ""
+            rec.baselineOffset = 0
+            effPos = splicePos
+        }
+        // 不变量成立时 effPos / delLen 必然合法；min/max 兜底防越界 trap。
+        effPos = min(max(effPos, 0), rec.text.count)
+        let lo = rec.text.index(rec.text.startIndex, offsetBy: effPos)
+        let delLen = min(prevMid.count, rec.text.distance(from: lo, to: rec.text.endIndex))
+        let hi = rec.text.index(lo, offsetBy: delLen)
+
+        if prevMid.isEmpty {
+            rec.text.insert(contentsOf: newMid, at: lo)
+            rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: newMid))
+        } else if newMid.isEmpty {
+            rec.text.removeSubrange(lo..<hi)
+            rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: prevMid))
+        } else {
+            rec.text.replaceSubrange(lo..<hi, with: newMid)
+            rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: prevMid))
+            rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: newMid))
+        }
+        return (prevMid, newMid)
+    }
+
+    // MARK: - 发送
+
+    /// 聊天 app 回车发送 —— 输入框清空。`fullValue` = 清空前的完整内容。
+    /// 把它当本次 session 的最终 text，记一条 submit，立即 flush，开新空 session。
+    private func handleSubmit(key: ElementKey, rec: InProgressRecord, fullValue: String) {
+        rec.debounceTimer?.invalidate()
+        rec.debounceTimer = nil
+        // 用户本次输入 = fullValue 去掉 baseline 前缀（聊天框 baseline 通常为空）。
+        let message = fullValue.hasPrefix(rec.baseline)
+            ? String(fullValue.dropFirst(rec.baseline.count))
+            : fullValue
+        rec.text = message
+        rec.editLog.append(EditEntry(ts: Self.nowMs(), kind: "submit", text: message))
         rec.pendingChanges = true
-        scheduleFlush(rec)
+        onDevLog?("submit bundle=\(rec.bundleId) \(message.count) chars")
+        flushAndContinue(key, newBaseline: "")
     }
 
-    // MARK: - 步骤 5：handleDelete（跨记录，2000 字符窗口）
+    // MARK: - flush
 
-    /// 处理一次删除。优先在当前内存记录里 `.backwards` 找；找不到再查 DB 主
-    /// 记录末尾 `deleteSearchWindow` 字符；都没有 → 丢弃（按 spec 设计）。
-    func handleDelete(deletedText: String, bundleId: String, nowMs: Int64) {
-        guard !deletedText.isEmpty else { return }
-        let rec = recordFor(bundleId: bundleId, nowMs: nowMs)
-
-        // 当前内存记录，从后往前找。
-        if let range = rec.text.range(of: deletedText, options: .backwards) {
-            rec.text.removeSubrange(range)
-            rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deletedText))
-            rec.pendingChanges = true
-            scheduleFlush(rec)
-            return
-        }
-
-        // 当前记录找不到 → 查 DB 同 app 的主记录，限末尾 2000 字符。
-        guard let store, let dbRec = try? store.fetch(bundleId: bundleId) else { return }
-        var fullText = dbRec.text
-        // Substring 与父 String 共享 index space —— window 上算出的 range
-        // 直接能用在 fullText 上，不用做 offset 换算。
-        let window = fullText.suffix(Self.deleteSearchWindow)
-        guard let range = window.range(of: deletedText, options: .backwards) else {
-            return  // 窗口内也没有 → 丢弃
-        }
-        fullText.removeSubrange(range)
-        var log = Self.decodeLog(dbRec.editLog)
-        log.append(EditEntry(ts: nowMs, kind: "delete", text: deletedText))
-        let updated = TypingEvent(
-            bundleId: bundleId,
-            text: fullText,
-            editLog: Self.encodeLog(log),
-            timeStart: dbRec.timeStart,
-            lastUpdated: nowMs,
-            totalChars: fullText.count
-        )
-        try? store.upsert(updated)
-        onDevLog?("cross-record delete bundle=\(bundleId) "
-                  + "deleted=\"\(deletedText)\" remaining=\(fullText.count) chars")
-    }
-
-    // MARK: - 步骤 6：flush 计时
-
-    /// 重置该记录的 5s debounce 计时器（每次活动都调）。
-    private func scheduleFlush(_ rec: InProgressRecord) {
+    private func scheduleFlush(_ rec: InProgressRecord, key: ElementKey) {
         rec.flushTimer?.invalidate()
-        let bundleId = rec.bundleId
         rec.flushTimer = Timer.scheduledTimer(
-            withTimeInterval: flushInterval, repeats: false
+            withTimeInterval: Self.flushSec, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.flush(bundleId: bundleId, nowMs: Self.nowMs())
+                guard let self, let r = self.state[key] else { return }
+                // 5s 静默落库 —— element 还活着，落库后用当前完整内容当新 baseline 续上。
+                self.flushAndContinue(key, newBaseline: r.lastValueSnapshot)
             }
         }
     }
 
-    // MARK: - 步骤 7：flushRecord（写库时减黑名单）
-
-    /// 把某 app 的 in-progress 记录写进 DB。写入前用该 app 所有 element 的
-    /// 黑名单做减法。无 pending 变化 → 直接返回。
-    func flush(bundleId: String, nowMs: Int64) {
-        guard let rec = records[bundleId] else { return }
+    /// flush 一个 element 的 in-progress record：有变化 → INSERT 一条新 record，
+    /// 然后把它从 state 移除。无变化 → 直接移除、不落库。
+    func flushElement(_ key: ElementKey) {
+        guard let rec = state[key] else { return }
+        rec.debounceTimer?.invalidate()
         rec.flushTimer?.invalidate()
-        rec.flushTimer = nil
-        guard rec.pendingChanges else { return }
-
-        // 该 app 所有 element 的黑名单合并。
-        var combined: Set<String> = []
-        for (key, entries) in blacklist where key.bundleId == bundleId {
-            combined.formUnion(entries.keys)
+        if rec.pendingChanges {
+            // 落库前减黑名单（只减 text）。
+            let combined = Set((blacklist[key] ?? [:]).keys)
+            let cleaned = Self.stripBlacklist(rec.text, blacklist: combined)
+            let event = TypingEvent(
+                id: nil,
+                bundleId: rec.bundleId,
+                elementHash: rec.elementHash,
+                startedAt: rec.startedAtMs,
+                endedAt: Self.nowMs(),
+                text: cleaned,
+                editLog: Self.encodeLog(rec.editLog),
+                totalChars: cleaned.count
+            )
+            try? store?.insert(event)
+            onDevLog?("flush bundle=\(rec.bundleId) element=\(rec.elementHash) "
+                      + "\(cleaned.count) chars \(rec.editLog.count) edits")
         }
-        let cleanedText = Self.stripBlacklist(rec.text, blacklist: combined)
-
-        // 读 DB 现有行 → 追加 → 整行 INSERT OR REPLACE。
-        var existing: TypingEvent?
-        if let store {
-            existing = (try? store.fetch(bundleId: bundleId)) ?? nil
-        }
-        let newText = (existing?.text ?? "") + cleanedText
-        let mergedLog = Self.mergeEditLogs(existing: existing?.editLog,
-                                           appending: rec.editLog)
-        let timeStart = existing?.timeStart ?? rec.timeStartMs
-        let event = TypingEvent(
-            bundleId: bundleId,
-            text: newText,
-            editLog: mergedLog,
-            timeStart: timeStart,
-            lastUpdated: nowMs,
-            totalChars: newText.count
-        )
-        try? store?.upsert(event)
-        onDevLog?("flush bundle=\(bundleId) +\(cleanedText.count) chars "
-                  + "(total \(newText.count))")
-
-        // 清空累积部分，保留 record 对象。
-        rec.text = ""
-        rec.editLog = []
-        rec.pendingChanges = false
+        state[key] = nil
     }
 
-    /// flush 所有 in-progress 记录（进程退出 / observer 停）。
-    func flushAll(nowMs: Int64) {
-        for bundleId in Array(records.keys) {
-            flush(bundleId: bundleId, nowMs: nowMs)
+    /// flush 后立刻在同一 element 上开新 session（5s 静默续写 / 发送后续写）。
+    private func flushAndContinue(_ key: ElementKey, newBaseline: String) {
+        guard let rec = state[key] else { return }
+        let bundleId = rec.bundleId
+        let elementHash = rec.elementHash
+        flushElement(key)
+        state[key] = InProgressRecord(bundleId: bundleId, elementHash: elementHash,
+                                      baseline: newBaseline, nowMs: Self.nowMs())
+    }
+
+    /// flush 某 app 的所有 element（app 切走时）。
+    func flushApp(bundleId: String) {
+        for key in Array(state.keys) where state[key]?.bundleId == bundleId {
+            flushElement(key)
         }
     }
 
-    // MARK: - 步骤 8：黑名单 TTL 清理
+    /// flush 所有 in-progress record（observer 停 / 进程退出）。
+    func flushAll() {
+        for key in Array(state.keys) { flushElement(key) }
+    }
 
-    /// 移除所有命中时刻早于 1h 的黑名单条目。`now` 用 `CACurrentMediaTime()`。
+    // MARK: - 黑名单 TTL
+
+    /// 移除命中时刻早于 1h 的黑名单条目。`now` 用 CACurrentMediaTime()。
     func cleanupBlacklist(now: TimeInterval) {
         for (key, entries) in blacklist {
             let kept = entries.filter { now - $0.value <= Self.blacklistTTLSec }
-            if kept.isEmpty {
-                blacklist[key] = nil
-            } else if kept.count != entries.count {
-                blacklist[key] = kept
-            }
+            if kept.isEmpty { blacklist[key] = nil }
+            else if kept.count != entries.count { blacklist[key] = kept }
         }
     }
 
     // MARK: - 纯函数辅助（单测覆盖）
 
-    /// 黑名单减法：按 entry 长度倒序减（避免短串先吃掉长串的一部分），
-    /// 每个 entry 只减 first occurrence 一次。
+    /// burst 判定 —— 单次 value-change 的字符跳变 + 间隔。
+    static func isBurst(jumpChars: Int, intervalMs: Double) -> Bool {
+        jumpChars > burstCharThreshold && intervalMs < burstIntervalMs
+    }
+
+    /// 黑名单减法：按长度倒序减（避免短串先吃长串），每个 entry 只减一次。
     static func stripBlacklist(_ text: String, blacklist: Set<String>) -> String {
         var result = text
         for entry in blacklist.sorted(by: { $0.count > $1.count }) where !entry.isEmpty {
@@ -260,14 +331,6 @@ final class TypingRecordWriter {
         return result
     }
 
-    /// 把新的 edit_log entries 追加到已有 JSON 之后，返回新 JSON。
-    static func mergeEditLogs(existing: String?, appending: [EditEntry]) -> String {
-        var entries = existing.map(decodeLog) ?? []
-        entries += appending
-        return encodeLog(entries)
-    }
-
-    /// 解析 edit_log JSON。坏数据 → 空数组（不崩）。
     static func decodeLog(_ json: String) -> [EditEntry] {
         guard let data = json.data(using: .utf8),
               let decoded = try? JSONDecoder().decode([EditEntry].self, from: data)
@@ -275,22 +338,10 @@ final class TypingRecordWriter {
         return decoded
     }
 
-    /// 编码 edit_log JSON。失败 → `"[]"`。
     static func encodeLog(_ entries: [EditEntry]) -> String {
         guard let data = try? JSONEncoder().encode(entries),
               let json = String(data: data, encoding: .utf8)
         else { return "[]" }
         return json
-    }
-
-    // MARK: - 私有
-
-    /// 取某 app 的 in-progress 记录，没有则新建（time_start = now）。
-    @discardableResult
-    func recordFor(bundleId: String, nowMs: Int64) -> InProgressRecord {
-        if let existing = records[bundleId] { return existing }
-        let rec = InProgressRecord(bundleId: bundleId, timeStartMs: nowMs)
-        records[bundleId] = rec
-        return rec
     }
 }
