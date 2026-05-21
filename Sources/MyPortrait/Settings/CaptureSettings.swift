@@ -15,7 +15,6 @@ import SwiftUI
 ///     → applyFromConfig → @Published → Services sink
 ///   - 程序化 settings.xxx = true → didSet → ConfigStore.mutate → 走上面这一路
 ///
-/// `pauseUntil` 仍走 UserDefaults（运行时状态，不属于用户偏好）。
 /// ignore 列表（apps / urls）的单一真相在 ConfigStore.privacy；本类不再镜像。
 @MainActor
 final class CaptureSettings: ObservableObject {
@@ -37,39 +36,8 @@ final class CaptureSettings: ObservableObject {
         didSet { writeBackToConfig(\.recording.audio.captureSystemAudio, systemAudioCaptureEnabled) }
     }
 
-    // MARK: - 运行时状态（不在 SettingsKeys，仍走自家 key）
-
-    /// "暂停到何时"。非 nil 且未过期 → 屏幕/音频采集都暂停。到期后 Task 自动清回 nil。
-    /// 运行时状态，不属于"用户偏好"，UI 走状态栏菜单设置。
-    @Published var pauseUntil: Date? {
-        didSet {
-            guard !isLoading else { return }
-            let defaults = UserDefaults.standard
-            if let d = pauseUntil {
-                defaults.set(d, forKey: PrivateKeys.pauseUntil)
-                scheduleAutoResume(at: d)
-            } else {
-                defaults.removeObject(forKey: PrivateKeys.pauseUntil)
-                autoResumeTask?.cancel()
-                autoResumeTask = nil
-            }
-        }
-    }
-
-    /// 派生：当前是否处于"暂停"状态。
-    var isPaused: Bool {
-        guard let d = pauseUntil else { return false }
-        return d > Date()
-    }
-
     /// 是否有 stub 路径被命中。镜像 UnimplementedReporter.hasUnimplementedStubs。
     @Published private(set) var hasUnimplementedStubs: Bool = false
-
-    // MARK: - 内部 key（不出现在 SettingsKeys）
-
-    private enum PrivateKeys {
-        static let pauseUntil = "MyPortrait.capture.pauseUntil.v1"
-    }
 
     // MARK: - 私有状态
 
@@ -80,10 +48,8 @@ final class CaptureSettings: ObservableObject {
     private var isReloadingFromConfig = false
 
     private var reporterSink: AnyCancellable?
-    private var autoResumeTask: Task<Void, Never>?
 
     init() {
-        let defaults = UserDefaults.standard
         let store = ConfigStore.shared
 
         // 三个 capture 开关从 TOML 读初值。
@@ -91,22 +57,7 @@ final class CaptureSettings: ObservableObject {
         self.audioCaptureEnabled = store.recording.audio.enabled
         self.systemAudioCaptureEnabled = store.recording.audio.captureSystemAudio
 
-        // 暂停到期：过期就清掉。
-        let storedPause = defaults.object(forKey: PrivateKeys.pauseUntil) as? Date
-        if let d = storedPause, d > Date() {
-            self.pauseUntil = d
-        } else {
-            self.pauseUntil = nil
-            if storedPause != nil {
-                defaults.removeObject(forKey: PrivateKeys.pauseUntil)
-            }
-        }
-
         self.isLoading = false
-
-        if let d = pauseUntil {
-            scheduleAutoResume(at: d)
-        }
 
         // 监听 ConfigStore.recording 变化（vim 编辑 TOML / UI toggle / 状态栏 都走它）。
         startObservingConfig()
@@ -163,22 +114,6 @@ final class CaptureSettings: ObservableObject {
         }
     }
 
-    // MARK: - 私有
-
-    private func scheduleAutoResume(at expiration: Date) {
-        autoResumeTask?.cancel()
-        let delay = expiration.timeIntervalSinceNow
-        guard delay > 0 else {
-            pauseUntil = nil
-            return
-        }
-        let ns = UInt64(delay * 1_000_000_000)
-        autoResumeTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: ns)
-            guard !Task.isCancelled else { return }
-            await MainActor.run { self?.pauseUntil = nil }
-        }
-    }
 }
 
 // MARK: - SwiftUI 环境注入
