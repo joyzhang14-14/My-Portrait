@@ -415,30 +415,23 @@ final class TypingObserver {
         Self.teardown(att)
     }
 
-    /// 三步 AX 清理，deinit 与 detach 共用。`nonisolated` 以便 nonisolated
+    /// AX 清理，deinit 与 detach 共用。`nonisolated` 以便 nonisolated
     /// deinit 也能调。只碰 CF / AX C-API，不碰 actor 状态。
-    /// 严格三步顺序：a 移 source → b 撤所有 notification → c CFRelease observer。
+    ///
+    /// **不调 `AXObserverRemoveNotification`**：它是同步跨进程调用，切走
+    /// app 时目标 app 可能正忙 / 正后台化，这个调用会把主线程吊死在
+    /// `__ulock_wait`（实测 app 切换 → detach → teardown 整个冻结、被
+    /// SIGTERM 杀）。observer 紧接着 `CFRelease`，它注册的所有 notification
+    /// 会随 observer 一起销毁 —— 逐个 remove 是多余的，且有死锁风险。
     nonisolated private static func teardown(_ att: Attachment) {
-        // a. 从 main run loop 移除 source。先断回调投递通道。
+        // a. 从 main run loop 移除 source —— 断回调投递通道。本地操作，不阻塞。
         CFRunLoopRemoveSource(
             CFRunLoopGetMain(),
             AXObserverGetRunLoopSource(att.observer),
             .commonModes
         )
-
-        // b. 撤掉所有已加的订阅。
-        if let focused = att.focusedElement {
-            AXObserverRemoveNotification(
-                att.observer, focused,
-                kAXValueChangedNotification as CFString
-            )
-        }
-        AXObserverRemoveNotification(
-            att.observer, att.appElement,
-            kAXFocusedUIElementChangedNotification as CFString
-        )
-
-        // c. 释放 attach 时 CFRetain 的那次持有，平衡 create 时的 passRetained。
+        // b. 释放 attach 时 CFRetain 的那次持有 —— observer 销毁，
+        //    其上注册的 notification 随之消失，无需逐撤。
         Unmanaged.passUnretained(att.observer).release()
     }
 
