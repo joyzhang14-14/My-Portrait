@@ -136,6 +136,10 @@ final class TypingObserver {
     /// value 变化与 ⌘V 的关联窗口 —— 这么短内发生过 ⌘V，即判定本次变化是粘贴。
     private static let pasteAssocSec: TimeInterval = 0.3
 
+    /// 「输入框清空」与回车键的关联窗口 —— 这么短内按过回车 + 框清空 = 聊天
+    /// app 发出了消息。比 paste 窗口宽：debounce 路径触发时离按键已 ~350ms+。
+    private static let submitAssocSec: TimeInterval = 1.0
+
     private let pipelineLog = Logger(subsystem: "com.joyzhang.myportrait",
                                      category: "typing.pipeline")
 
@@ -699,6 +703,13 @@ final class TypingObserver {
 
         let (_, prevMid, newMid, _) = TextDiff.sandwich(prev: prevValue, new: pending)
         if prevMid.isEmpty, newMid.isEmpty { return }
+        // 发送检测：输入框被清空 + 刚按过回车 = 聊天 app 发出了消息，不是删除。
+        // 已发出的消息留在 record 里（这是最该留的数据），不 handleDelete。
+        if pending.isEmpty, !prevMid.isEmpty,
+           ledger.hasSubmitKey(within: Self.submitAssocSec) {
+            onDevLog?("submit (not delete) bundle=\(key.bundleId) \(prevMid.count) chars")
+            return
+        }
         onDevLog?("debounce diff bundle=\(key.bundleId) "
                   + "del=\"\(prevMid.prefix(16))\" seg=\"\(newMid.prefix(16))\"")
         let nowMs = TypingRecordWriter.nowMs()
@@ -770,6 +781,14 @@ final class TypingObserver {
         state.lastValueSnapshot = newValue
         if segment.isEmpty, deletion.isEmpty {
             elementState[key] = state
+            return
+        }
+
+        // ── 发送检测：输入框清空 + 刚按过回车 = 发出消息，不是删除 ──
+        if newValue.isEmpty, !deletion.isEmpty,
+           ledger.hasSubmitKey(within: Self.submitAssocSec) {
+            elementState[key] = state
+            onDevLog?("submit (not delete) bundle=\(key.bundleId) \(deletion.count) chars")
             return
         }
 

@@ -35,6 +35,11 @@ final class KeystrokeLedger {
     /// 「这次 value 变化是不是粘贴触发的」，故单独记一个时刻。`lock` 同护。
     private var lastPasteMs: Int64 = 0
 
+    /// 最近一次回车键（Return / 小键盘 Enter）的时间戳（ms，单调时钟）。
+    /// 聊天 app 里回车 = 发送消息 → 输入框被清空。上层据此把「输入框清空」
+    /// 判定为发送而非删除。`lock` 同护。
+    private var lastSubmitMs: Int64 = 0
+
     // MARK: - CGEventTap / 后台线程
 
     private var eventTap: CFMachPort?
@@ -161,6 +166,24 @@ final class KeystrokeLedger {
         return p > 0 && p >= cutoff && p <= now
     }
 
+    /// 记一次回车键（Return / 小键盘 Enter）。callback 内调。
+    func recordSubmit() {
+        os_unfair_lock_lock(&lock)
+        lastSubmitMs = Self.nowMs()
+        os_unfair_lock_unlock(&lock)
+    }
+
+    /// 最近 `seconds` 秒内是否按过回车。TypingObserver 用它判定「输入框清空」
+    /// 是发送消息（→ 不是删除，保留）还是真删除。
+    func hasSubmitKey(within seconds: TimeInterval) -> Bool {
+        let now = Self.nowMs()
+        let cutoff = now - Int64(seconds * 1000.0)
+        os_unfair_lock_lock(&lock)
+        let s = lastSubmitMs
+        os_unfair_lock_unlock(&lock)
+        return s > 0 && s >= cutoff && s <= now
+    }
+
     /// 最近 `seconds` 秒内是否有击键。
     /// 边界用 `<=` —— 精确 seconds 秒前那一笔仍算 hit。
     func hasKeystroke(within seconds: TimeInterval) -> Bool {
@@ -249,10 +272,13 @@ private func keystrokeLedgerTapCallback(
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
     let isPaste = flags.contains(.maskCommand) && keyCode == Int64(kVK_ANSI_V)
+    let isReturn = keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter)
     if isPaste {
         ledger.recordPaste()
     } else {
         ledger.record()
+        // 回车既是普通击键，也是「提交/发送」信号 —— 额外记一笔。
+        if isReturn { ledger.recordSubmit() }
     }
     return Unmanaged.passUnretained(event)
 }
