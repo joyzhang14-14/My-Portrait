@@ -28,6 +28,20 @@ struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable
     }
 }
 
+/// 一个打字 thread 的聚合摘要 —— 一次 session 一行。
+/// 由 `recentThreads(limit:)` 用 GROUP BY thread_id 算出来。
+struct TypingThreadSummary: Identifiable, Sendable {
+    var threadId: String
+    var appName: String?
+    var bundleId: String
+    var startedAt: Int64
+    var endedAt: Int64
+    var eventCount: Int
+    var charCount: Int
+
+    var id: String { threadId }
+}
+
 /// `typing_events` 表的 DAO。接受外部注入的 `DatabasePool`，不自己开 DB。
 struct TypingEventStore {
 
@@ -71,6 +85,33 @@ struct TypingEventStore {
                      "WHERE thread_id = ? ORDER BY started_at_ms ASC",
                 arguments: [threadId]
             )
+        }
+    }
+
+    /// 按 thread 聚合的最近会话摘要，按起始时间降序。
+    /// 显式列名，不用 `SELECT *`。
+    func recentThreads(limit: Int) throws -> [TypingThreadSummary] {
+        try dbPool.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT thread_id, app_name, bundle_id, " +
+                     "MIN(started_at_ms) AS started, MAX(ended_at_ms) AS ended, " +
+                     "COUNT(*) AS n, SUM(char_count) AS chars " +
+                     "FROM typing_events GROUP BY thread_id " +
+                     "ORDER BY started DESC LIMIT ?",
+                arguments: [limit]
+            )
+            return rows.map { row in
+                TypingThreadSummary(
+                    threadId: row["thread_id"],
+                    appName: row["app_name"],
+                    bundleId: row["bundle_id"],
+                    startedAt: row["started"],
+                    endedAt: row["ended"],
+                    eventCount: row["n"],
+                    charCount: row["chars"]
+                )
+            }
         }
     }
 

@@ -28,18 +28,25 @@ struct MemoriesView: View {
         let modified: Date
     }
 
+    @ViewBuilder
     var body: some View {
-        HSplitView {
-            listColumn
-                .frame(minWidth: 320, idealWidth: 400, maxWidth: 520)
+        // .input scope 的数据源是 SQLite typing_events，不是 PortraitFile，
+        // 走独立渲染路径（InputCaptureView）；其它 scope 走文件目录扫描。
+        if scope == .input {
+            InputCaptureView()
+        } else {
+            HSplitView {
+                listColumn
+                    .frame(minWidth: 320, idealWidth: 400, maxWidth: 520)
 
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(SidebarBackdrop().ignoresSafeArea())
-        .task(id: scope) {
-            selected = nil
-            await reload()
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(SidebarBackdrop().ignoresSafeArea())
+            .task(id: scope) {
+                selected = nil
+                await reload()
+            }
         }
     }
 
