@@ -17,15 +17,26 @@ final class RawEditFromTests: XCTestCase {
         XCTAssertEqual(raw?.range, NSRange(location: 3, length: 0))
     }
 
-    /// 纯 delete：尾部砍掉一段。
+    /// 纯 delete：尾部砍掉一段。text = 被删的中段内容（oldMid）。
     func testPureDelete() {
         let raw = RawEdit.from(oldValue: "abcdef", newValue: "abc",
                                pid: 1, elementHash: 9, ts: 0)
         XCTAssertNotNil(raw)
         XCTAssertEqual(raw?.kind, .delete)
-        XCTAssertEqual(raw?.text, "")
+        // M4：delete 的 text 是被删内容 oldMid，不再是空串。
+        XCTAssertEqual(raw?.text, "def")
         // oldMid = "def" → range 长 3，location 指向 OLD 值改动起点。
         XCTAssertEqual(raw?.range, NSRange(location: 3, length: 3))
+    }
+
+    /// 中段 delete：被删内容是中间一段。
+    func testMidDelete() {
+        let raw = RawEdit.from(oldValue: "abXYZcd", newValue: "abcd",
+                               pid: 1, elementHash: 9, ts: 0)
+        XCTAssertNotNil(raw)
+        XCTAssertEqual(raw?.kind, .delete)
+        XCTAssertEqual(raw?.text, "XYZ")
+        XCTAssertEqual(raw?.range, NSRange(location: 2, length: 3))
     }
 
     /// replace：中段被替换（前缀 + 后缀都非空）。
