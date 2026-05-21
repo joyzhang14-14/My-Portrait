@@ -179,10 +179,13 @@ final class TypingRecordWriter {
         rec.debounceTimer?.invalidate()
         rec.debounceTimer = nil
         rec.lastValueSnapshot = fullValue
-        let (_, _, message, _) = TextDiff.sandwich(prev: rec.sessionStart, new: fullValue)
-        rec.editLog.append(EditEntry(ts: Self.nowMs(), kind: "submit", text: message))
+        // submit 条目记**整条发出的消息** = 发送时输入框的完整内容。不能用
+        // sandwich(sessionStart, fullValue) 的 diff —— 消息若在上一段 session
+        // 就打完了（如打完停顿 >5s 触发 flush），sessionStart 已等于 fullValue，
+        // diff 会算成空串。
+        rec.editLog.append(EditEntry(ts: Self.nowMs(), kind: "submit", text: fullValue))
         rec.pendingChanges = true
-        onDevLog?("submit bundle=\(rec.bundleId) \(message.count) chars")
+        onDevLog?("submit bundle=\(rec.bundleId) \(fullValue.count) chars")
         flushAndContinue(key, newSessionStart: "")
     }
 
