@@ -42,6 +42,32 @@ final class PortraitFileIOTests: XCTestCase {
         XCTAssertEqual(back.eventSummary, f.eventSummary)
     }
 
+    /// portrait 文件 impact = nil 往返：序列化时整行 skip，反序列化为 nil。
+    func testPortraitImpactNilRoundTrip() throws {
+        let f = PortraitFile(impact: nil, body: "# portrait\n\nbody")
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try PortraitFileIO.write(f, to: url)
+
+        // 落盘 frontmatter 不应包含 `impact:` 行。
+        let raw = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(raw.contains("\nimpact:"),
+                       "portrait 文件不应序列化 impact 行")
+
+        let back = try PortraitFileIO.read(from: url)
+        XCTAssertNil(back.impact)
+    }
+
+    /// event 文件 impact 仍正常往返（非 nil）。
+    func testEventImpactRoundTrip() throws {
+        let f = PortraitFile(impact: 3.7, body: "# event\n\nbody")
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try PortraitFileIO.write(f, to: url)
+        let back = try PortraitFileIO.read(from: url)
+        XCTAssertEqual(back.impact, 3.7)
+    }
+
     /// 老文件缺 Phase 3 字段 → 读出默认值（mergeCount 1 / nil / [] / =created）。
     func testOldFileDefaultsForMissingPhase3Fields() throws {
         let url = tempURL()

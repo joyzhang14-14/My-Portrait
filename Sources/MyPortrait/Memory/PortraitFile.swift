@@ -32,10 +32,10 @@ struct PortraitFile: Equatable {
     }
 
     var created: Date
-    var impact: Double                  // FINAL impact used by WeightCalculator.
-                                        // Initially equals rawImpact; the
-                                        // MemoryBudget weekly pass may scale
-                                        // it down when the week is overloaded.
+    /// **Event-only**：LLM 评出的 impact（1–5）。portrait 文件不再持有 impact
+    /// —— 语义上 impact 是事件强度，画像维度不依赖。portrait 文件读这个字段
+    /// 永远 nil，序列化时整行 skip。
+    var impact: Double?
     var rawImpact: Double               // LLM's original score, never modified
                                         // by the budget pass. Source of truth
                                         // for any future re-rebalance.
@@ -85,9 +85,10 @@ struct PortraitFile: Equatable {
     var body: String                    // raw markdown after frontmatter
 
     /// Initialiser for a brand-new file (sensible defaults).
+    /// `impact: nil` 用于 portrait 文件（不持有 impact）；event 文件必传值。
     init(
         created: Date = Date(),
-        impact: Double,
+        impact: Double? = nil,
         body: String,
         source: String? = nil,
         tags: [String] = [],
@@ -102,7 +103,8 @@ struct PortraitFile: Equatable {
         let stamp = Self.truncateToDay(firstOccurrence ?? created)
         self.created = created
         self.impact = impact
-        self.rawImpact = impact
+        // raw_impact 跟 impact 同源；portrait（impact=nil）落 0 作残留可接受值。
+        self.rawImpact = impact ?? 0
         self.rebalanceCount = 0
         self.impactSource = "unscored"
         self.weight = 0                  // weight pass fills this in
@@ -129,7 +131,7 @@ struct PortraitFile: Equatable {
     /// Designated init used by the parser — every field explicit.
     init(
         created: Date,
-        impact: Double,
+        impact: Double?,
         rawImpact: Double,
         rebalanceCount: Int,
         impactSource: String,

@@ -52,13 +52,14 @@ enum PortraitFileIO {
 
         let fields = try parseFlatYAML(yaml)
 
-        // Required: created, impact, weight, occurrences, tags, pinned.
-        // Optional: source, superseded_by, archived_at.
+        // Required: created, weight, occurrences, tags, pinned.
+        // Optional: impact (event-only — portrait files don't write it),
+        //           source, superseded_by, archived_at.
         let created = try requireDate(fields, "created")
-        let impact = try requireDouble(fields, "impact")
-        // raw_impact / rebalance_count default to mirror the current impact
-        // and 0 — so pre-budget-pass files migrate without losing data.
-        let rawImpact = (try? requireDouble(fields, "raw_impact")) ?? impact
+        let impact: Double? = (try? requireDouble(fields, "impact"))   // nil for portrait
+        // raw_impact / rebalance_count: portrait 文件可能仍有 raw_impact 残留
+        // (这次只清 impact，raw_impact 留作独立任务)；找不到时 mirror impact 或 0。
+        let rawImpact = (try? requireDouble(fields, "raw_impact")) ?? impact ?? 0
         let rebalanceCount = (try? requireInt(fields, "rebalance_count")) ?? 0
         // impact_source defaults to "unscored" so older files (pre-LLM
         // scoring) read cleanly without a re-migration.
@@ -132,7 +133,11 @@ enum PortraitFileIO {
     static func serialize(_ f: PortraitFile) -> String {
         var lines: [String] = ["---"]
         lines.append("created: \(formatDateOnly(f.created))")
-        lines.append("impact: \(formatDouble(f.impact))")
+        // impact 是 event-only 字段。portrait 文件 impact=nil 时整行 skip，
+        // frontmatter 里完全不出现这一行。
+        if let i = f.impact {
+            lines.append("impact: \(formatDouble(i))")
+        }
         lines.append("raw_impact: \(formatDouble(f.rawImpact))")
         lines.append("rebalance_count: \(f.rebalanceCount)")
         lines.append("impact_source: \(f.impactSource)")
