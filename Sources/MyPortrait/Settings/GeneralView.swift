@@ -45,6 +45,15 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            SettingsCard(title: "System") {
+                SettingsRow("Chinese mirror",
+                            description: "Use a CN-region mirror for model downloads.",
+                            icon: "globe.asia.australia") {
+                    Toggle("", isOn: config.binding(\.recording.system.chineseMirror))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+            }
+
             SettingsCard(title: "Maintenance") {
                 SettingsRow("Clear cache",
                             description: "Remove AI agent cache, old logs, and recovery artifacts.",

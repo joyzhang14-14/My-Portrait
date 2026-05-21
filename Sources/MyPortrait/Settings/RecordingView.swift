@@ -1,40 +1,15 @@
 import SwiftUI
 
-/// Mirrors Orphies' Recording section. User-vetoed fields are intentionally
-/// absent: Use all monitors, Auto-detect audio devices, Auto-detect meeting.
-struct RecordingSettingsView: View {
+/// Audio Recording 设置子分区：麦克风 + 转录 + 说话人。
+struct AudioRecordingSettingsView: View {
     @State private var config = ConfigStore.shared
 
-    // Quick aliases so the giant view body reads cleaner.
-    private var audioRec: Bool      { config.current.recording.audio.enabled }
-    private var screenRec: Bool     { config.current.recording.screen.enabled }
-    private var engine: String      { config.current.recording.audio.engine }
+    private var audioRec: Bool { config.current.recording.audio.enabled }
+    private var engine: String { config.current.recording.audio.engine }
 
     var body: some View {
-        SettingsPage("Recording", subtitle: "Audio + screen capture") {
-
-            powerModeCard
+        SettingsPage("Audio Recording", subtitle: "Microphone + transcription") {
             audioSection
-            screenSection
-            typingSection
-            systemSection
-        }
-    }
-
-    // MARK: - Power mode
-
-    private var powerModeCard: some View {
-        SettingsCard(
-            title: "Power mode",
-            footnote: "Switches capture FPS, transcription cadence, and OCR aggressiveness based on the profile you pick."
-        ) {
-            ForEach(PowerMode.allCases) { mode in
-                PowerModeRow(mode: mode,
-                             isActive: config.current.recording.system.powerMode == mode.rawValue) {
-                    config.mutate { $0.recording.system.powerMode = mode.rawValue }
-                }
-                if mode != PowerMode.allCases.last { SettingsDivider() }
-            }
         }
     }
 
@@ -233,7 +208,37 @@ struct RecordingSettingsView: View {
         }
     }
 
-    // MARK: - Screen
+}
+
+// MARK: - Screen Recording
+
+/// Screen Recording 设置子分区：Power mode + 屏幕采集（截图 + OCR）。
+struct ScreenRecordingSettingsView: View {
+    @State private var config = ConfigStore.shared
+
+    private var screenRec: Bool { config.current.recording.screen.enabled }
+
+    var body: some View {
+        SettingsPage("Screen Recording", subtitle: "Screenshots + OCR") {
+            powerModeCard
+            screenSection
+        }
+    }
+
+    private var powerModeCard: some View {
+        SettingsCard(
+            title: "Power mode",
+            footnote: "Switches capture FPS, transcription cadence, and OCR aggressiveness based on the profile you pick."
+        ) {
+            ForEach(PowerMode.allCases) { mode in
+                PowerModeRow(mode: mode,
+                             isActive: config.current.recording.system.powerMode == mode.rawValue) {
+                    config.mutate { $0.recording.system.powerMode = mode.rawValue }
+                }
+                if mode != PowerMode.allCases.last { SettingsDivider() }
+            }
+        }
+    }
 
     private var screenSection: some View {
         Group {
@@ -310,7 +315,19 @@ struct RecordingSettingsView: View {
         }
     }
 
-    // MARK: - Typing
+}
+
+// MARK: - Typing Recording
+
+/// Typing Recording 设置子分区。
+struct TypingRecordingSettingsView: View {
+    @State private var config = ConfigStore.shared
+
+    var body: some View {
+        SettingsPage("Typing Recording", subtitle: "Learn your writing style") {
+            typingSection
+        }
+    }
 
     private var typingSection: some View {
         SettingsCard(title: "Typing capture") {
@@ -331,18 +348,6 @@ struct RecordingSettingsView: View {
                             .foregroundStyle(.white.opacity(0.55))
                     }
                 }
-            }
-        }
-    }
-
-    // MARK: - System
-
-    private var systemSection: some View {
-        SettingsCard(title: "System") {
-            SettingsRow("Chinese mirror",
-                        description: "Use a CN-region mirror for model downloads.",
-                        icon: "globe.asia.australia") {
-                Toggle("", isOn: config.binding(\.recording.system.chineseMirror)).labelsHidden().toggleStyle(.switch)
             }
         }
     }

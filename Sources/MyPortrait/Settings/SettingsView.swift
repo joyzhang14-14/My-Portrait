@@ -12,7 +12,9 @@ struct SettingsPane: View {
             case .general:       GeneralSettingsView()
             case .aiModels:      AIModelsSettingsView()
             case .connections:   ConnectionsView()
-            case .recording:     RecordingSettingsView()
+            case .recordingScreen:  ScreenRecordingSettingsView()
+            case .recordingAudio:   AudioRecordingSettingsView()
+            case .recordingTyping:  TypingRecordingSettingsView()
             case .notifications: NotificationsSettingsView()
             case .memoryParameter: MemorySettingsView(tab: .parameter)
             case .memoryScheduler: MemorySettingsView(tab: .scheduler)
@@ -57,7 +59,7 @@ struct SettingsScene: View {
                 .padding(.top, 18)
                 .padding(.bottom, 16)
 
-            ForEach([SettingsSubsection.Group.app, .memory, .dataPrivacy], id: \.self) { grp in
+            ForEach([SettingsSubsection.Group.app, .recording, .memory, .dataPrivacy], id: \.self) { grp in
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
@@ -98,7 +100,9 @@ struct SettingsScene: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .recording:     RecordingSettingsView()
+        case .recordingScreen:  ScreenRecordingSettingsView()
+        case .recordingAudio:   AudioRecordingSettingsView()
+        case .recordingTyping:  TypingRecordingSettingsView()
         case .notifications: NotificationsSettingsView()
         case .memoryParameter: MemorySettingsView(tab: .parameter)
         case .memoryScheduler: MemorySettingsView(tab: .scheduler)
