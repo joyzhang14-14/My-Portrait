@@ -73,6 +73,16 @@ struct TypingEventStore {
         }
     }
 
+    /// 删除某 app 的整条主记录。Memory「Input」页的删除键用。
+    func delete(bundleId: String) throws {
+        try dbPool.write { db in
+            try db.execute(
+                sql: "DELETE FROM typing_events WHERE bundle_id = ?",
+                arguments: [bundleId]
+            )
+        }
+    }
+
     /// 最近活跃的 `limit` 个 app，按 last_updated 降序。Memory「Input」页用。
     func recentApps(limit: Int) throws -> [TypingEvent] {
         try dbPool.read { db in

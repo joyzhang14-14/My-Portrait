@@ -17,6 +17,7 @@ struct InputCaptureView: View {
     @State private var selected: String?          // bundle_id
     @State private var loading: Bool = false
     @State private var loadFailed: Bool = false
+    @State private var confirmingDelete: Bool = false
 
     var body: some View {
         HSplitView {
@@ -98,9 +99,17 @@ struct InputCaptureView: View {
         if let id = selected, let app = apps.first(where: { $0.bundleId == id }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(Self.appLabel(app.bundleId))
-                        .font(.system(size: 22, weight: .semibold))
-                        .padding(.top, 44)
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(Self.appLabel(app.bundleId))
+                            .font(.system(size: 22, weight: .semibold))
+                        Spacer()
+                        Button {
+                            confirmingDelete = true
+                        } label: { Image(systemName: "trash") }
+                        .buttonStyle(.bouncyIcon)
+                        .help("Delete this app's captured typing")
+                    }
+                    .padding(.top, 44)
 
                     metadataBlock(app)
                     Divider().background(Color.white.opacity(0.06))
@@ -124,6 +133,18 @@ struct InputCaptureView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .confirmationDialog(
+                "Delete captured typing for “\(Self.appLabel(app.bundleId))”?",
+                isPresented: $confirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteApp(app) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes this app's typing_events row from the database.")
             }
         } else {
             VStack(spacing: 8) {
@@ -204,6 +225,19 @@ struct InputCaptureView: View {
             selected = nil
         }
         loading = false
+    }
+
+    /// 永久删除某 app 的整条 typing_events 主记录。
+    @MainActor
+    private func deleteApp(_ app: TypingEvent) async {
+        guard let store = services?.typingStore else { return }
+        do {
+            try store.delete(bundleId: app.bundleId)
+            apps.removeAll { $0.bundleId == app.bundleId }
+            if selected == app.bundleId { selected = nil }
+        } catch {
+            // 删除失败 —— 静默；下次 reload 回到真实状态。
+        }
     }
 
     // MARK: - Formatting
