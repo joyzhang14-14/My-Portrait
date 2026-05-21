@@ -251,19 +251,15 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 屏幕采集订阅。effective = enabled && !paused && screenRecording granted。
-        // CombineLatest 在任一上游变化时重算；pauseUntil 自动到期由 CaptureSettings
-        // 内的 Task 把 pauseUntil 置回 nil → 再次触发本 sink。
+        // 屏幕采集订阅。effective = enabled && screenRecording granted。
         // **权限**：PermissionMonitor 3 秒轮询；用户在 System Settings 里授权后
         // 这个 publisher 会变 granted，sink 自动重新评估，coordinator 自动启动，
         // 不需要用户再 toggle 一次。
-        Publishers.CombineLatest3(
+        Publishers.CombineLatest(
             settings.$screenCaptureEnabled,
-            settings.$pauseUntil,
             permissions.$screenRecording
         )
-            .map { enabled, until, perm in
-                if let until, until > Date() { return false }
+            .map { enabled, perm in
                 guard perm.isGranted else { return false }
                 return enabled
             }
@@ -273,17 +269,15 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 音频采集订阅。effective = enabled && !paused && microphone granted && !music。
+        // 音频采集订阅。effective = enabled && microphone granted && !music。
         // music 在播 → 整体暂停采集（pauseOnMusicApp；关闭时 musicDetected 恒 false）。
-        Publishers.CombineLatest4(
+        Publishers.CombineLatest3(
             settings.$audioCaptureEnabled,
-            settings.$pauseUntil,
             permissions.$microphone,
             musicMonitor.$musicDetected
         )
-            .map { enabled, until, perm, music in
+            .map { enabled, perm, music in
                 if music { return false }
-                if let until, until > Date() { return false }
                 guard perm.isGranted else { return false }
                 return enabled
             }
@@ -294,15 +288,13 @@ final class Services {
             .store(in: &settingsCancellables)
 
         // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
-        Publishers.CombineLatest4(
+        Publishers.CombineLatest3(
             settings.$systemAudioCaptureEnabled,
-            settings.$pauseUntil,
             permissions.$microphone,
             musicMonitor.$musicDetected
         )
-            .map { enabled, until, perm, music in
+            .map { enabled, perm, music in
                 if music { return false }
-                if let until, until > Date() { return false }
                 guard perm.isGranted else { return false }
                 return enabled
             }

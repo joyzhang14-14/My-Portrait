@@ -88,6 +88,9 @@ final class TypingObserver {
     /// Layer 4 —— 写入层（in-progress record / 跨记录 delete / flush / 黑名单）。
     private let writer: TypingRecordWriter
 
+    /// 剪贴板镜像 —— 判定插入文本是不是粘贴来的（与 ⌘V 判据互补）。
+    private let pasteboardMonitor = PasteboardMonitor()
+
     /// L2 折叠出的 IMEFoldEvent 的额外消费口（`--typing-observe-m3` dev flag 注入）。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
 
@@ -168,6 +171,9 @@ final class TypingObserver {
             pipelineLog.warning("KeystrokeLedger.start failed: \(String(describing: error), privacy: .public)")
         }
 
+        // 剪贴板监视器 —— 轮询 changeCount 维护内存镜像。
+        pasteboardMonitor.start()
+
         // 启动 banner —— 第一时间 print 全部关键 config + gate 状态。修补
         // 「某个 gate 静默把 observer 搞哑」的 silent failure（paused / ledger
         // down / AX denied 都会让采集无声失效）。
@@ -242,6 +248,7 @@ final class TypingObserver {
         }
         writer.flushAll(nowMs: TypingRecordWriter.nowMs())
 
+        pasteboardMonitor.stop()
         ledger.stop()
 
         detach()
@@ -614,8 +621,12 @@ final class TypingObserver {
         if markedState == .unknown {
             // 该 app 不暴露 marked-range → 350ms debounce 兜底：静默这么久
             // 才认定 composition 结束、做一次同步快照 diff。
-            if ledger.hasPaste(within: Self.pasteAssocSec) {
-                // 这次变化由 ⌘V 触发 —— 粘贴不是打字。
+            // 粘贴判据：⌘V 时间关联，或本次插入 delta 命中剪贴板镜像。
+            let prevSeen = elementState[key]?.pendingValue
+                ?? elementState[key]?.lastValueSnapshot ?? ""
+            let delta = TextDiff.sandwich(prev: prevSeen, new: newValue).newMid
+            if ledger.hasPaste(within: Self.pasteAssocSec)
+                || pasteboardMonitor.looksLikePaste(delta) {
                 handlePasteValueChange(key: key, newValue: newValue)
             } else {
                 scheduleDebounce(key: key, newValue: newValue)
@@ -786,9 +797,10 @@ final class TypingObserver {
             return
         }
 
-        // ── 粘贴检测：撞上 ⌘V → 这次变化是粘贴，不是打字 ──────────
+        // ── 粘贴检测：⌘V 时间关联，或 segment 命中剪贴板镜像 ──────
         // 粘贴 delta 进黑名单（flush 时 stripBlacklist 减掉），不入 edit_log。
-        if ledger.hasPaste(within: Self.pasteAssocSec) {
+        if ledger.hasPaste(within: Self.pasteAssocSec)
+            || pasteboardMonitor.looksLikePaste(segment) {
             elementState[key] = state  // snapshot 已推进，吸收粘贴段
             if !segment.isEmpty {
                 writer.recordBurst(key: key, segment: segment, now: CACurrentMediaTime())
