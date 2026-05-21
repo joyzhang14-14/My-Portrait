@@ -10,18 +10,34 @@ struct MemorySettingsView: View {
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
 
+    /// Memory 区的三个子板块，分开调。
+    private enum Tab: String, CaseIterable, Identifiable {
+        case parameter = "Parameter"
+        case scheduler = "Scheduler"
+        case changelog = "Changelog"
+        var id: String { rawValue }
+    }
+    @State private var tab: Tab = .parameter
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
-                schedulerSection
-                attentionSection
-                budgetSection
-                decaySection
-                archiveSection
-                distillationSection
-                changelogSection
+                tabBar
+
+                switch tab {
+                case .parameter:
+                    budgetSection
+                    decaySection
+                    archiveSection
+                    distillationSection
+                case .scheduler:
+                    schedulerSection
+                    attentionSection
+                case .changelog:
+                    changelogSection
+                }
 
                 footer
             }
@@ -32,6 +48,16 @@ struct MemorySettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { reload() }
+    }
+
+    private var tabBar: some View {
+        Picker("", selection: $tab) {
+            ForEach(Tab.allCases) { t in
+                Text(t.rawValue).tag(t)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     private func reload() {
