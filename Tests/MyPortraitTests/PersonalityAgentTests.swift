@@ -3,46 +3,43 @@ import XCTest
 
 final class PersonalityAgentTests: XCTestCase {
 
-    /// LLM 返回的 JSON 形状能 decode 进 PersonalityDailySnapshot（契约测试）。
+    /// LLM 返回的 v3 JSON（tags + 各自 evidence）能 decode（契约测试）。
     func testSnapshotDecodesFromLLMJSON() throws {
         let json = """
         {
           "date": "2026-05-11",
-          "summary": "While releasing My Orphies the user tightened many small parts.",
-          "observedTraits": ["cross-checks details across tools", "interleaves planning with execution"],
-          "evidenceEventIds": ["2026-05-11_set_up_and_release_my_orphies_app"]
+          "tags": [
+            { "name": "verification", "evidence": ["set_up_my_orphies_app", "inspected_update_settings"] },
+            { "name": "background-audio", "evidence": ["listened_to_music"] }
+          ]
         }
         """
         let s = try JSONDecoder().decode(PersonalityDailySnapshot.self,
                                          from: Data(json.utf8))
         XCTAssertEqual(s.date, "2026-05-11")
-        XCTAssertEqual(s.observedTraits.count, 2)
-        XCTAssertEqual(s.evidenceEventIds, ["2026-05-11_set_up_and_release_my_orphies_app"])
-        XCTAssertTrue(s.summary.contains("My Orphies"))
+        XCTAssertEqual(s.tags.count, 2)
+        XCTAssertEqual(s.tags[0].name, "verification")
+        XCTAssertEqual(s.tags[0].evidence, ["set_up_my_orphies_app", "inspected_update_settings"])
+        XCTAssertEqual(s.tags[1].name, "background-audio")
     }
 
-    /// 空事件日：短路返回空 snapshot，不调 LLM。
+    /// 空事件日：短路返回空 tags，不调 LLM。
     @MainActor
     func testEmptyEventsShortCircuits() async throws {
         let agent = PersonalityAgent()
         let day = PortraitFile.truncateToDay(Date())
         let snap = try await agent.generateDailySnapshot(date: day, events: [])
-        XCTAssertTrue(snap.observedTraits.isEmpty)
-        XCTAssertTrue(snap.evidenceEventIds.isEmpty)
+        XCTAssertTrue(snap.tags.isEmpty)
         XCTAssertFalse(snap.date.isEmpty)
     }
 }
 
 final class PersonalityMergerTests: XCTestCase {
 
-    /// observedTraits 为空（snapshot skip 了）→ merge 短路返回 []，不调 LLM。
+    /// tags 为空（snapshot skip 了）→ merge 短路返回 []，不调 LLM。
     @MainActor
-    func testMergeShortCircuitsOnEmptyTraits() async throws {
-        let snap = PersonalityDailySnapshot(
-            date: "2026-05-11",
-            summary: "Not enough activity today to read personality.",
-            observedTraits: [],
-            evidenceEventIds: [])
+    func testMergeShortCircuitsOnEmptyTags() async throws {
+        let snap = PersonalityDailySnapshot(date: "2026-05-11", tags: [])
         let actions = try await PersonalityMerger().merge(
             snapshot: snap, existingConcepts: [])
         XCTAssertTrue(actions.isEmpty)

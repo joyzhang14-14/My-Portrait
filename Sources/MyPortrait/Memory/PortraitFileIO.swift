@@ -90,6 +90,8 @@ enum PortraitFileIO {
         let primaryLabel = (try? optionalString(fields, "primary_label")) ?? nil
         let aliases = (try? requireStringArray(fields, "aliases")) ?? []
         let lastModified = ((try? optionalDate(fields, "last_modified")) ?? nil) ?? created
+        // personality concept 的累积 evidence；老文件 / 非 personality 默认 []。
+        let evidenceEventIds = (try? requireStringArray(fields, "evidence_event_ids")) ?? []
 
         return PortraitFile(
             created: created,
@@ -115,6 +117,7 @@ enum PortraitFileIO {
             primaryLabel: primaryLabel,
             aliases: aliases,
             lastModified: lastModified,
+            evidenceEventIds: evidenceEventIds,
             body: body
         )
     }
@@ -163,6 +166,7 @@ enum PortraitFileIO {
         lines.append("primary_label: \(formatNullableString(f.primaryLabel))")
         lines.append("aliases: \(formatStringArray(f.aliases))")
         lines.append("last_modified: \(formatDateOnly(f.lastModified))")
+        lines.append("evidence_event_ids: \(formatStringArray(f.evidenceEventIds))")
         lines.append("---")
         lines.append("")
         return lines.joined(separator: "\n") + f.body

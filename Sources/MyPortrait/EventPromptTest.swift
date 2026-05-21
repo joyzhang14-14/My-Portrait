@@ -704,10 +704,11 @@ enum PersonalityPromptTestCLI {
                 print("\n──── LLM RAW ────")
                 print(r.raw)
                 print("\n──── PARSED SNAPSHOT ────")
-                print("date:    \(r.snapshot.date)")
-                print("summary: \(r.snapshot.summary)")
-                print("traits:  \(r.snapshot.observedTraits)")
-                print("evidence:\(r.snapshot.evidenceEventIds)")
+                print("date: \(r.snapshot.date)")
+                print("tags (\(r.snapshot.tags.count)):")
+                for t in r.snapshot.tags {
+                    print("  - \(t.name)  evidence=\(t.evidence)")
+                }
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
                 state.code = 1
@@ -745,7 +746,7 @@ enum PersonalityMergeTestCLI {
             do {
                 let events = await PersonalityAgent.readEvents(for: day)
                 let snapshot = try await PersonalityAgent().generateDailySnapshot(date: day, events: events)
-                print("daily snapshot — \(snapshot.observedTraits.count) trait(s): \(snapshot.observedTraits)")
+                print("daily snapshot — \(snapshot.tags.count) tag(s): \(snapshot.tags.map(\.name))")
 
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
@@ -759,14 +760,14 @@ enum PersonalityMergeTestCLI {
                 print("\n──── PARSED ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {
                     switch a {
-                    case .mergeInto(let slug, let body, let aliases):
-                        print("\(i + 1). mergeInto [\(slug)]  +aliases=\(aliases)")
+                    case .mergeInto(let slug, let body, let aliases, let ev):
+                        print("\(i + 1). mergeInto [\(slug)]  +aliases=\(aliases)  evidence=\(ev)")
                         print("     body: \(body)")
-                    case .createNew(let label, let body, let aliases):
-                        print("\(i + 1). createNew \"\(label)\"  aliases=\(aliases)")
+                    case .createNew(let label, let body, let aliases, let ev):
+                        print("\(i + 1). createNew \"\(label)\"  aliases=\(aliases)  evidence=\(ev)")
                         print("     body: \(body)")
-                    case .skipTrait(let reason):
-                        print("\(i + 1). skipTrait — \(reason)")
+                    case .skipTag(let tag, let reason):
+                        print("\(i + 1). skipTag [\(tag)] — \(reason)")
                     }
                 }
                 print("\n(dry-run: nothing written to disk)")
@@ -807,7 +808,7 @@ enum PersonalityMergeApplyCLI {
             do {
                 let events = await PersonalityAgent.readEvents(for: day)
                 let snapshot = try await PersonalityAgent().generateDailySnapshot(date: day, events: events)
-                print("daily snapshot — \(snapshot.observedTraits.count) trait(s)")
+                print("daily snapshot — \(snapshot.tags.count) tag(s): \(snapshot.tags.map(\.name))")
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
 
@@ -815,9 +816,9 @@ enum PersonalityMergeApplyCLI {
                 let actions = try await merger.merge(snapshot: snapshot, existingConcepts: concepts)
                 for (i, a) in actions.enumerated() {
                     switch a {
-                    case .mergeInto(let s, _, let al): print("\(i + 1). mergeInto [\(s)] +aliases=\(al)")
-                    case .createNew(let l, _, _):      print("\(i + 1). createNew \"\(l)\"")
-                    case .skipTrait(let r):            print("\(i + 1). skipTrait — \(r)")
+                    case .mergeInto(let s, _, let al, _): print("\(i + 1). mergeInto [\(s)] +aliases=\(al)")
+                    case .createNew(let l, _, _, _):      print("\(i + 1). createNew \"\(l)\"")
+                    case .skipTag(let t, let r):          print("\(i + 1). skipTag [\(t)] — \(r)")
                     }
                 }
                 let result = try await merger.applyActions(actions, on: day)

@@ -120,122 +120,110 @@ enum MemoryPrompts {
     /// 单日 personality 提取的指令文本。caller 在前面追加日期 + events 列表，
     /// 末尾接 OUTPUT JSON 例子由此模板自带。
     static let personalityDailySnapshot = #"""
-    You analyze a day's user activity events to extract PERSONALITY TRAITS —
-    behavioral patterns visible in HOW the user acts, not what they did.
+    You analyze a day's user activity events and TAG the most distinct
+    behavioral patterns observed — single-noun tags, not sentences.
 
-    SCAN MULTIPLE DIMENSIONS — personality is more than work style.
-    Before deciding traits, scan EVERY event for signals across:
-      - How they work — focus, attention, debugging / problem-solving style.
-      - How they relate to others — social activity threaded through focused
-        work; when they reach out vs. withdraw.
-      - What they need to function — background music, time-of-day rhythm,
+    SCAN MULTIPLE DIMENSIONS — before tagging, scan EVERY event across:
+      - How they work — focus, attention, problem-solving style.
+      - How they relate to others — social activity threaded through work.
+      - What they need to function — background audio, time-of-day rhythm,
         context-switching, recovery / regulation habits.
-      - What they care about beyond utility — curiosity, taste, values that
-        show through in what they choose to do.
-    Do NOT force coverage: if today's events genuinely only support one
-    dimension, output fewer traits. But actively look for the non-obvious
-    signal in EVERY event before concluding.
+      - What they care about beyond utility — curiosity, taste, values.
 
-    STRICT RULES — a violation makes the output invalid:
+    OUTPUT 1 to 3 tags for the most distinct patterns. Output FEWER if
+    today's events only support 1-2 dimensions — NEVER force 3.
 
-    observedTraits (3 to 5 items, OR empty per skip condition below):
-    - 3 to 8 words each.
-    - Describe BEHAVIORAL PATTERNS / action style. Verb-led when possible.
-    - GOOD examples:
-        "asks why before how"
-        "withdraws when interrupted by notifications"
-        "circles back to old ideas while debugging"
-    - BAD examples — do NOT produce:
-        "smart" (judgmental)
-        "introvert" (identity label)
-        "INTP" (type label)
-        "creative person" (vague)
-        "hardworking" (one-word judgment)
+    Each tag MUST be:
+    - A single noun OR hyphenated noun phrase: "verification", "multitasking",
+      "background-audio", "time-boxing".
+    - Lowercase. kebab-case for multi-word (no spaces, ever).
+    - An observable behavior pattern, not an identity / type label.
+    - Concrete enough to recur tomorrow ("verification" recurs; "genius" does not).
 
-    summary (2-3 sentences):
-    - PRONOUN: use "the user" as the subject in EVERY sentence. Do NOT use
-      "they" / "their" / "them" / "she" / "he" to refer to the user. When
-      other people appear, name them so every referent is unambiguous.
-    - Descriptive, not judgmental.
-    - MUST cite SPECIFIC events. NEVER write "the user showed X today" generic.
-    - Example shape: "While debugging the Memory pipeline the user paused at
-      conflicting logs to verify rather than guess; later the user stepped
-      away from the Discord notification mid-thought instead of switching."
+    BAD tags — do NOT output:
+    - Verbs / verb phrases: "verifies workflows", "cross-checks details".
+    - Identity / type labels: "introvert", "creative", "INTP", "smart".
+    - Vague abstractions: "parallel", "thoughtful", "organized".
 
-    evidenceEventIds:
-    - MUST be a subset of the event slugs listed below. NO made-up ids.
-    - One id per trait minimum when traits non-empty.
+    GOOD tag examples:
+      verification, multitasking, time-boxing, background-audio,
+      micro-iteration, social-check-ins, end-to-end-execution,
+      pragmatic-tuning, tool-research.
 
-    SELF-CHECK before finalizing:
-    - If 3 or more of your traits all describe work methodology, STOP and ask:
-      what habit, social pattern, focus/attention pattern, emotional state, or
-      value cue does today's data ALSO reveal? Revise if a real signal was
-      missed. (Do not invent one — only revise if the events genuinely show it.)
+    SELF-CHECK before finalizing: if every tag describes work methodology,
+    stop — what social, focus, sensory, or value pattern did today's events
+    ALSO show? Revise only if a real signal was missed (do not invent one).
+
+    Each tag carries an "evidence" list — the event slugs from below that
+    support it. 1 to N slugs per tag. A slug MAY appear under multiple tags.
 
     SKIP CONDITION:
-    - If fewer than 5 events OR every event has impact < 1.5, return
-      observedTraits = [] and summary = "Not enough activity today to read
-      personality." Don't force traits when evidence is thin.
+    - If fewer than 5 events, or every event has impact < 1.5, return an
+      empty "tags" array. Don't force tags when evidence is thin.
 
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
       "date": "<YYYY-MM-DD>",
-      "summary": "...",
-      "observedTraits": ["...", "..."],
-      "evidenceEventIds": ["<event-slug>", "..."]
+      "tags": [
+        { "name": "<single-noun-tag>", "evidence": ["<event-slug>", "..."] }
+      ]
     }
     """#
 
-    // MARK: - PersonalityMerger — daily traits → personality concepts
+    // MARK: - PersonalityMerger — daily tags → personality concepts
 
-    /// 把一天 observed traits 归并进现有 personality concepts 的指令文本。
-    /// caller 在后面追加现有 concepts 列表 + 今日 traits。
+    /// 把一天 observed tags 归并进现有 personality concepts 的指令文本。
+    /// caller 在后面追加现有 concepts 列表 + 今日 tags。
     static let personalityMerge = #"""
-    You decide how a day's observed PERSONALITY TRAITS map onto the user's
-    existing PERSONALITY CONCEPTS. One decision per observed trait.
+    You decide how a day's observed PERSONALITY TAGS map onto the user's
+    existing PERSONALITY CONCEPTS. One decision per observed tag.
 
     PRONOUN — in every body you write (mergedBody / body), use "the user" as
     the subject. Do NOT use "they" / "their" / "them" / "she" / "he" to refer
     to the user. Name other people explicitly so referents stay unambiguous.
 
-    For EACH observed trait, choose exactly one action:
+    For EACH observed tag, choose exactly one action:
 
-    - mergeInto: the trait is the SAME behavioral pattern as an existing
-      concept — semantically the same pattern, just phrased differently.
+    - mergeInto: the tag is a SYNONYM or NEAR-SYNONYM of an existing concept's
+      primary_label OR any of its aliases.
       Provide:
         conceptSlug : the existing concept's slug.
         mergedBody  : the concept's body rewritten to fold in today's
                       evidence. Preserve what is still true; integrate the
-                      new signal. Cite specifics. Third person.
-        aliases     : the trait's phrasing, to add to that concept's aliases.
+                      new signal. Cite specifics.
+        aliases     : the tag itself, to add to that concept's aliases.
 
     - createNew: a genuinely new pattern no existing concept covers.
       Provide:
-        primaryLabel : short behavioral label, 3-8 words, verb-led when
-                       possible (same style as the trait labels).
-        body         : 2-4 sentence description, third person, cite the
-                       day's evidence for this pattern.
-        aliases      : initial aliases — start with the observed trait phrasing.
+        primaryLabel : a single-noun or kebab-case tag — SAME format as the
+                       observed tags (e.g. "verification", "tool-research").
+                       Lowercase, no spaces.
+        body         : 2-4 sentence description, cite the day's evidence.
+        aliases      : initial aliases — start with the observed tag itself.
 
-    - skipTrait: evidence too thin or trait too vague to commit. Provide reason.
+    - skipTag: evidence too thin or the tag too vague to commit. Provide reason.
 
-    MERGE STRICTNESS — medium:
-    - Merge when it is the SAME behavioral pattern phrased differently
-      ("withdraws when interrupted" vs "steps away from notifications").
-    - Do NOT merge just because two traits are loosely related or both about
-      "work". When unsure, prefer createNew over a forced merge.
+    MERGE STRICTNESS — moderate. When in doubt, createNew rather than over-merge.
+    Merge-worthy synonymy:
+      verification ↔ checking, validation, cross-checking
+      multitasking ↔ context-switching, parallel-execution
+      background-audio ↔ ambient-music, sensory-anchor
+    NOT-merge (different concepts):
+      verification vs methodology      — different scope
+      focus vs flow-state              — related but different
+      multitasking vs distractibility  — positive vs negative framing
 
-    OUTPUT — respond with ONLY a JSON array, one object per observed trait.
+    OUTPUT — respond with ONLY a JSON array, one object per observed tag.
     No prose, no markdown fences:
     [
-      { "trait": "<the observed trait, verbatim>",
-        "action": "mergeInto" | "createNew" | "skipTrait",
+      { "tag": "<the observed tag, verbatim>",
+        "action": "mergeInto" | "createNew" | "skipTag",
         "conceptSlug": "...",     // mergeInto only
         "mergedBody": "...",      // mergeInto only
         "primaryLabel": "...",    // createNew only
         "body": "...",            // createNew only
-        "aliases": ["..."],       // mergeInto: alias(es) to add; createNew: initial aliases
-        "reason": "..." }         // skipTrait only
+        "aliases": ["..."],       // mergeInto: tag to add; createNew: initial aliases
+        "reason": "..." }         // skipTag only
     ]
     """#
 

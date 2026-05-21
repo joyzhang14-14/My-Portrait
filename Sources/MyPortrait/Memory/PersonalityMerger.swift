@@ -3,15 +3,15 @@ import os.log
 
 private let pmLog = Logger(subsystem: "com.myportrait.memory", category: "personality-merger")
 
-/// 一个 observed trait 的归属决定。LLM 对 daily snapshot 的每个 trait 产一个。
+/// 一个 observed tag 的归属决定。LLM 对 daily snapshot 的每个 tag 产一个。
+/// `evidence` = 该 tag 的 event slug，落盘时累加进 concept 的 evidenceEventIds。
 enum PersonalityMergeAction: Equatable, Sendable {
-    /// trait 跟某现有 concept 是同一行为模式 → 合并：新 body + 该 trait 措辞
-    /// 加入 aliases。
-    case mergeInto(conceptSlug: String, mergedBody: String, newAliases: [String])
+    /// tag 是某现有 concept 的同义 / 近义词 → 合并：新 body + 该 tag 加入 aliases。
+    case mergeInto(conceptSlug: String, mergedBody: String, newAliases: [String], evidence: [String])
     /// 全新 personality concept → 建新文件。
-    case createNew(primaryLabel: String, body: String, aliases: [String])
-    /// 证据不足 / trait 太模糊 → 跳过。
-    case skipTrait(reason: String)
+    case createNew(primaryLabel: String, body: String, aliases: [String], evidence: [String])
+    /// 证据不足 / tag 太模糊 → 跳过。
+    case skipTag(tag: String, reason: String)
 }
 
 /// 把 PersonalityDailySnapshot 的 traits 合进 portrait/personality/ 的概念文件。
@@ -87,9 +87,9 @@ final class PersonalityMerger {
     ) async throws -> (prompt: String, raw: String, actions: [PersonalityMergeAction]) {
         let prompt = Self.buildPrompt(snapshot: snapshot, concepts: existingConcepts)
 
-        // traits 为空（snapshot skip 了）→ 无需 LLM。
-        if snapshot.observedTraits.isEmpty {
-            return (prompt: prompt, raw: "(short-circuited: no observed traits)", actions: [])
+        // tags 为空（snapshot skip 了）→ 无需 LLM。
+        if snapshot.tags.isEmpty {
+            return (prompt: prompt, raw: "(short-circuited: no tags)", actions: [])
         }
 
         let agent = try PiAgent(model: model)
@@ -128,7 +128,7 @@ final class PersonalityMerger {
             throw BudgetExhaustedError(processor: "PersonalityMerger", message: err)
         }
 
-        let actions = try Self.parseActions(from: collected)
+        let actions = try Self.parseActions(from: collected, tags: snapshot.tags)
         return (prompt: prompt, raw: collected, actions: actions)
     }
 
@@ -155,10 +155,10 @@ final class PersonalityMerger {
 
         for action in actions {
             switch action {
-            case .skipTrait:
+            case .skipTag:
                 result.skipped += 1
 
-            case .createNew(let primaryLabel, let body, let aliases):
+            case .createNew(let primaryLabel, let body, let aliases, let evidence):
                 let slug = Self.uniqueSlug(Self.slugify(primaryLabel), in: dir)
                 var file = PortraitFile(
                     created: today,
@@ -179,11 +179,12 @@ final class PersonalityMerger {
                 file.mergeCount = 1
                 file.weight = 1.0                 // 新 concept = afterMerge(0,0)
                 file.lastModified = today
+                file.evidenceEventIds = Self.capEvidence(evidence)
                 try PortraitFileIO.write(file, to: dir.appendingPathComponent(slug + ".md"))
                 result.created += 1
                 result.writtenSlugs.append(slug)
 
-            case .mergeInto(let conceptSlug, let mergedBody, let newAliases):
+            case .mergeInto(let conceptSlug, let mergedBody, let newAliases, let evidence):
                 let url = dir.appendingPathComponent(conceptSlug + ".md")
                 guard FileManager.default.fileExists(atPath: url.path) else {
                     pmLog.error("mergeInto: concept not found — \(conceptSlug, privacy: .public)")
@@ -198,6 +199,12 @@ final class PersonalityMerger {
                 for a in newAliases where !file.aliases.contains(a) {
                     file.aliases.append(a)
                 }
+                // evidence 并集（旧在前、保序、去重），尾部截断到 50。
+                var mergedEvidence = file.evidenceEventIds
+                for e in evidence where !mergedEvidence.contains(e) {
+                    mergedEvidence.append(e)
+                }
+                file.evidenceEventIds = Self.capEvidence(mergedEvidence)
                 // EMA：旧 weight 衰减到今天再 +1。
                 file.weight = ema.afterMerge(
                     stored: file.weight,
@@ -213,6 +220,11 @@ final class PersonalityMerger {
         return result
     }
 
+    /// evidence 列表上限 50 —— 满了保留最近的（尾部）。
+    private static func capEvidence(_ ids: [String]) -> [String] {
+        ids.count > 50 ? Array(ids.suffix(50)) : ids
+    }
+
     // MARK: - Prompt
 
     fileprivate static func buildPrompt(
@@ -223,11 +235,11 @@ final class PersonalityMerger {
         lines.append("")
         lines.append("EXISTING PERSONALITY CONCEPTS (slug | primary_label | aliases):")
         if concepts.isEmpty {
-            lines.append("  (none — every trait is necessarily createNew)")
+            lines.append("  (none — every tag is necessarily createNew)")
         } else {
             for (slug, f) in concepts {
                 let label = f.primaryLabel ?? f.eventTitle
-                let aliases = f.aliases.joined(separator: "; ")
+                let aliases = f.aliases.joined(separator: ", ")
                 let bodyProse = Self.prose(of: f.body)
                 let trimBody = bodyProse.count > 320
                     ? String(bodyProse.prefix(320)) + "…" : bodyProse
@@ -237,12 +249,10 @@ final class PersonalityMerger {
         }
         lines.append("")
         lines.append("TODAY'S DATE: \(snapshot.date)")
-        lines.append("OBSERVED TRAITS to place (one decision each):")
-        for t in snapshot.observedTraits {
-            lines.append("  - \(t)")
+        lines.append("OBSERVED TAGS to place (one decision each):")
+        for t in snapshot.tags {
+            lines.append("  - \(t.name)")
         }
-        lines.append("")
-        lines.append("Day summary for context: \(snapshot.summary)")
         return lines.joined(separator: "\n")
     }
 
@@ -264,7 +274,10 @@ final class PersonalityMerger {
 
     // MARK: - JSON 解析
 
-    private static func parseActions(from response: String) throws -> [PersonalityMergeAction] {
+    private static func parseActions(
+        from response: String,
+        tags: [PersonalityTag]
+    ) throws -> [PersonalityMergeAction] {
         guard let first = response.firstIndex(of: "["),
               let last = response.lastIndex(of: "]") else {
             throw MergerError.noJSONInResponse
@@ -287,19 +300,25 @@ final class PersonalityMerger {
 
         return arr.compactMap { obj -> PersonalityMergeAction? in
             let action = (obj["action"] as? String) ?? ""
+            let tagName = (obj["tag"] as? String) ?? ""
+            // 该 tag 的 evidence 从 snapshot 取 —— LLM 不必回传，避免漏 slug。
+            let evidence = tags.first { $0.name == tagName }?.evidence ?? []
             switch action {
             case "mergeInto":
                 guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty,
                       let body = obj["mergedBody"] as? String, !body.isEmpty else { return nil }
                 let aliases = (obj["aliases"] as? [String]) ?? []
-                return .mergeInto(conceptSlug: slug, mergedBody: body, newAliases: aliases)
+                return .mergeInto(conceptSlug: slug, mergedBody: body,
+                                  newAliases: aliases, evidence: evidence)
             case "createNew":
                 guard let label = obj["primaryLabel"] as? String, !label.isEmpty,
                       let body = obj["body"] as? String, !body.isEmpty else { return nil }
                 let aliases = (obj["aliases"] as? [String]) ?? []
-                return .createNew(primaryLabel: label, body: body, aliases: aliases)
-            case "skipTrait":
-                return .skipTrait(reason: (obj["reason"] as? String) ?? "unspecified")
+                return .createNew(primaryLabel: label, body: body,
+                                  aliases: aliases, evidence: evidence)
+            case "skipTag", "skipTrait":
+                return .skipTag(tag: tagName,
+                                reason: (obj["reason"] as? String) ?? "unspecified")
             default:
                 return nil
             }

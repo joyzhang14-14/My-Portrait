@@ -77,10 +77,13 @@ struct PortraitFile: Equatable {
     // and aliases [].
     var mergeCount: Int                 // # of merges/rewrites into this file.
                                         // 1 for a brand-new file.
-    var primaryLabel: String?           // personality concept's short label
-                                        // (nil for non-personality files)
-    var aliases: [String]               // alternate trait phrasings folded in
+    var primaryLabel: String?           // personality concept's single-noun
+                                        // tag label (nil for non-personality)
+    var aliases: [String]               // synonym tags folded into this concept
     var lastModified: Date              // last body change — EMA decay anchor
+    var evidenceEventIds: [String]      // personality concept: accumulated
+                                        // evidence event slugs across days,
+                                        // capped at 50. [] for non-personality.
 
     var body: String                    // raw markdown after frontmatter
 
@@ -125,6 +128,7 @@ struct PortraitFile: Equatable {
         self.primaryLabel = nil
         self.aliases = []
         self.lastModified = created
+        self.evidenceEventIds = []
         self.body = body
     }
 
@@ -153,6 +157,7 @@ struct PortraitFile: Equatable {
         primaryLabel: String? = nil,
         aliases: [String] = [],
         lastModified: Date? = nil,
+        evidenceEventIds: [String] = [],
         body: String
     ) {
         self.created = created
@@ -180,6 +185,7 @@ struct PortraitFile: Equatable {
         self.primaryLabel = primaryLabel
         self.aliases = aliases
         self.lastModified = lastModified ?? created
+        self.evidenceEventIds = evidenceEventIds
         self.body = body
     }
 

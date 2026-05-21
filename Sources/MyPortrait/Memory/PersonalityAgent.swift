@@ -3,13 +3,17 @@ import os.log
 
 private let paLog = Logger(subsystem: "com.myportrait.memory", category: "personality-agent")
 
+/// 单日观察到的一个 personality tag —— 单名词 + 它的证据 event slug 列表。
+struct PersonalityTag: Codable, Equatable, Sendable {
+    let name: String                   // single noun / kebab-case，如 "verification"
+    let evidence: [String]             // 支撑这个 tag 的 event slug（输入子集）
+}
+
 /// 单日 personality 快照。PersonalityAgent 输出，PersonalityMerger（P2）消费。
-/// Codable —— LLM 返回的 JSON 直接 decode。
+/// Codable —— LLM 返回的 JSON 直接 decode。1-3 个 tag，证据 tag-level。
 struct PersonalityDailySnapshot: Codable, Equatable, Sendable {
     let date: String                   // "YYYY-MM-DD"
-    let summary: String                // 2-3 句 markdown，第三人称
-    let observedTraits: [String]       // 3-5 个 short behavioral labels；skip 时空
-    let evidenceEventIds: [String]     // 引用的 event slug（须是输入子集）
+    let tags: [PersonalityTag]         // 1-3 个；events 不足时空
 }
 
 /// 一天的事件 → personality 快照。LLM 路径复刻 ImpactScorer 的 PiAgent +
@@ -90,12 +94,7 @@ final class PersonalityAgent {
         // 空事件日短路：不浪费 LLM round-trip。1-4 个事件的 skip 规则交给
         // LLM（prompt 里的 SKIP CONDITION，阈值 < 5）。
         if events.isEmpty {
-            let s = PersonalityDailySnapshot(
-                date: dateStr,
-                summary: "No events recorded for this day.",
-                observedTraits: [],
-                evidenceEventIds: []
-            )
+            let s = PersonalityDailySnapshot(date: dateStr, tags: [])
             return (prompt: prompt, raw: "(short-circuited: events.isEmpty)", snapshot: s)
         }
 
@@ -206,12 +205,7 @@ final class PersonalityAgent {
             let s = try JSONDecoder().decode(PersonalityDailySnapshot.self, from: data)
             // LLM 偶尔漏 date —— 用 fallback 补。
             guard s.date.isEmpty else { return s }
-            return PersonalityDailySnapshot(
-                date: fallbackDate,
-                summary: s.summary,
-                observedTraits: s.observedTraits,
-                evidenceEventIds: s.evidenceEventIds
-            )
+            return PersonalityDailySnapshot(date: fallbackDate, tags: s.tags)
         } catch {
             throw AgentError.malformedJSON(error.localizedDescription)
         }
