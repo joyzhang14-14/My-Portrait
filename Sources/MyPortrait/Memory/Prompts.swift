@@ -123,6 +123,19 @@ enum MemoryPrompts {
     You analyze a day's user activity events to extract PERSONALITY TRAITS —
     behavioral patterns visible in HOW the user acts, not what they did.
 
+    SCAN MULTIPLE DIMENSIONS — personality is more than work style.
+    Before deciding traits, scan EVERY event for signals across:
+      - How they work — focus, attention, debugging / problem-solving style.
+      - How they relate to others — social activity threaded through focused
+        work; when they reach out vs. withdraw.
+      - What they need to function — background music, time-of-day rhythm,
+        context-switching, recovery / regulation habits.
+      - What they care about beyond utility — curiosity, taste, values that
+        show through in what they choose to do.
+    Do NOT force coverage: if today's events genuinely only support one
+    dimension, output fewer traits. But actively look for the non-obvious
+    signal in EVERY event before concluding.
+
     STRICT RULES — a violation makes the output invalid:
 
     observedTraits (3 to 5 items, OR empty per skip condition below):
@@ -149,6 +162,12 @@ enum MemoryPrompts {
     evidenceEventIds:
     - MUST be a subset of the event slugs listed below. NO made-up ids.
     - One id per trait minimum when traits non-empty.
+
+    SELF-CHECK before finalizing:
+    - If 3 or more of your traits all describe work methodology, STOP and ask:
+      what habit, social pattern, focus/attention pattern, emotional state, or
+      value cue does today's data ALSO reveal? Revise if a real signal was
+      missed. (Do not invent one — only revise if the events genuinely show it.)
 
     SKIP CONDITION:
     - If fewer than 5 events OR every event has impact < 1.5, return
