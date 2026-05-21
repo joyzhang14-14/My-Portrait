@@ -82,6 +82,10 @@ struct MemoryConfig: Codable, Equatable {
     // events must support a change before a settled portrait body is rewritten.
     var distillEvidenceThreshold: Int = 3
 
+    // Phase 3 EMA weight — half-life in days. portrait weight decays by half
+    // every N days since the file's last modification. Larger = stickier.
+    var weightHalfLifeDays:    Int    = 180
+
     init() {}
     enum CodingKeys: String, CodingKey {
         case indexerEnabled       = "indexer_enabled"
@@ -96,6 +100,7 @@ struct MemoryConfig: Codable, Equatable {
         case archiveMaxWeight     = "archive_max_weight"
         case archiveMinDaysIdle   = "archive_min_days_idle"
         case distillEvidenceThreshold = "distill_evidence_threshold"
+        case weightHalfLifeDays   = "weight_half_life_days"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -112,6 +117,7 @@ struct MemoryConfig: Codable, Equatable {
         archiveMaxWeight     = c.dflt(Double.self, .archiveMaxWeight,     archiveMaxWeight)
         archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
         distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)
+        weightHalfLifeDays   = c.dflt(Int.self,    .weightHalfLifeDays,   weightHalfLifeDays)
     }
 }
 
