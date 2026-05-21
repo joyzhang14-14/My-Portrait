@@ -100,11 +100,6 @@ final class TypingObserver {
         didSet { writer.onDevLog = onDevLog }
     }
 
-    /// 是否尊重 `typing_capture_paused` 暂停闸门。
-    /// 生产环境（Services 路径）= true；三个 `--typing-observe*` dev flag = false
-    /// —— dev 工具「跑了就抓」，不该被一个无关的菜单栏静音键静默搞哑。
-    private let respectsPauseGate: Bool
-
     /// 启动 banner 里显示的运行模式标签（production / m4-dev / ...）。
     private let modeLabel: String
 
@@ -149,14 +144,10 @@ final class TypingObserver {
     /// - Parameters:
     ///   - store: typing_events DAO。`nil` 时（`--typing-observe` /
     ///     `--typing-observe-m3` dev 模式）L4 只在内存里累加、不落库。
-    ///   - respectsPauseGate: 是否尊重 `typing_capture_paused`。生产 true，
-    ///     dev flag false。
     ///   - modeLabel: 启动 banner 的模式标签。
     init(store: TypingEventStore? = nil,
-         respectsPauseGate: Bool = true,
          modeLabel: String = "production") {
         self.writer = TypingRecordWriter(store: store)
-        self.respectsPauseGate = respectsPauseGate
         self.modeLabel = modeLabel
     }
 
@@ -280,7 +271,6 @@ final class TypingObserver {
     private func logStartupBanner() {
         let cfg = ConfigStore.shared.recording
         let enabled = cfg.typingCaptureEnabled
-        let paused = cfg.typingCapturePaused
         let corrMs = cfg.typingKeyCorrelationWindowMs
         let axOK = AXIsProcessTrusted()
         let ledgerOK = ledger.isRunning
@@ -289,19 +279,10 @@ final class TypingObserver {
         print("[TypingObserver] config:")
 
         // 总开关：dev flag 绕过 Services，故此字段对 dev 模式无效。
-        if respectsPauseGate {
+        if modeLabel == "production" {
             print("  typing_capture_enabled    = \(enabled)")
         } else {
             print("  typing_capture_enabled    = \(enabled)   (ignored — dev flag bypasses Services)")
-        }
-
-        // 暂停闸门：会哑。dev flag 忽略它。
-        if paused && respectsPauseGate {
-            print("  typing_capture_paused     = true   ⚠️  WILL DROP ALL INPUT")
-        } else if paused {
-            print("  typing_capture_paused     = true   (ignored — dev mode)")
-        } else {
-            print("  typing_capture_paused     = false")
         }
 
         print("  keyboard_correlation_ms   = \(corrMs)")
@@ -569,11 +550,6 @@ final class TypingObserver {
 
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
-
-        // 暂停闸门：菜单栏暂停开关。dev flag 模式 respectsPauseGate=false → 忽略。
-        if respectsPauseGate, ConfigStore.shared.recording.typingCapturePaused {
-            return
-        }
 
         // 隐私闸门：secure field（密码输入框）不读值、不 diff。
         let role = copyStringAttr(focused, kAXRoleAttribute)

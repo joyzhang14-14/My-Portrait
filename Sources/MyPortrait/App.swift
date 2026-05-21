@@ -291,9 +291,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `--typing-observe-m4` 模式下持有的 DB 实现（持有它防 DatabasePool 释放）。
     private var m4DBImpl: PortraitDBImpl?
 
-    /// 菜单栏 Typing 采集暂停开关。正常模式 + --typing-observe 模式都装。
-    private var typingStatusItem: TypingStatusItem?
-
     /// SIGINT dispatch source —— 静态引用顶住生命周期，否则会被立即释放。
     /// 仅在 launching（MainActor）写一次 —— nonisolated(unsafe) 安全。
     nonisolated(unsafe) private static var sigintSource: DispatchSourceSignal?
@@ -320,18 +317,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     exit(1)
                 }
                 m4DBImpl = dbImpl  // 持有防 DatabasePool 释放
-                // dev flag：respectsPauseGate=false —— 忽略 typing_capture_paused，
-                // dev 工具「跑了就抓」，不被无关的菜单栏静音键搞哑。
                 observer = TypingObserver(
                     store: TypingEventStore(dbPool: dbImpl.dbPool),
-                    respectsPauseGate: false,
                     modeLabel: "m4-dev")
                 // M4 关键事件（burst / 跨记录 delete / flush）print 到终端。
                 // 启动 banner 由 start() 自己 print，不走这里。
                 observer.onDevLog = { print("[m4] \($0)") }
                 modeName = "--typing-observe-m4"
             } else if Self.typingObserveM3Only {
-                observer = TypingObserver(respectsPauseGate: false, modeLabel: "m3-dev")
+                observer = TypingObserver(modeLabel: "m3-dev")
                 // M3 dev flag：每条 IMEFoldEvent print 一行（dev tool 允许 print）。
                 observer.onFoldEvent = { events in
                     for e in events {
@@ -340,16 +334,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 modeName = "--typing-observe-m3"
             } else {
-                observer = TypingObserver(respectsPauseGate: false, modeLabel: "observe-dev")
+                observer = TypingObserver(modeLabel: "observe-dev")
                 modeName = "--typing-observe"
             }
 
             observer.start()
             typingObserver = observer
-            // 菜单栏暂停开关 —— typing-observe 模式专跑 typing，装一个合理。
-            let typingItem = TypingStatusItem()
-            typingItem.install()
-            typingStatusItem = typingItem
             // Ctrl+C → 走 stop() 清理路径再退出。SIGINT 在 main queue 上回调。
             let src = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
             src.setEventHandler { [weak self] in
@@ -367,11 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
         services = Services()
         statusBarMenu = StatusBarMenu(settings: services.settings, permissions: services.permissions)
-
-        // 菜单栏 Typing 采集暂停开关。
-        let typingItem = TypingStatusItem()
-        typingItem.install()
-        typingStatusItem = typingItem
 
         // 确保磁盘目录结构存在
         do {
@@ -447,10 +432,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // in-progress record 落库）。
         if Self.typingObserveOnly || Self.typingObserveM3Only || Self.typingObserveM4Only {
             typingObserver?.stop()
-            typingStatusItem?.remove()
             return
         }
-        typingStatusItem?.remove()
         // 进程退出前尽量优雅停止所有子系统（刷盘、关 SCStream、停 compaction、停录音）。
         // 同步等最多 ~1s，超时由系统 ~5s 后强制 kill 兜底。
         let sem = DispatchSemaphore(value: 0)
