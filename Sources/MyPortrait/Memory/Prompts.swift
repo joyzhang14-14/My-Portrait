@@ -153,11 +153,14 @@ enum MemoryPrompts {
         "hardworking" (one-word judgment)
 
     summary (2-3 sentences):
-    - Third person ("the user" / "they" / "she"), descriptive not judgmental.
+    - PRONOUN: use "the user" as the subject in EVERY sentence. Do NOT use
+      "they" / "their" / "them" / "she" / "he" to refer to the user. When
+      other people appear, name them so every referent is unambiguous.
+    - Descriptive, not judgmental.
     - MUST cite SPECIFIC events. NEVER write "the user showed X today" generic.
-    - Example shape: "While debugging the Memory pipeline she paused at
-      conflicting logs to verify rather than guess; later, she walked away
-      from the Discord notification mid-thought instead of context-switching."
+    - Example shape: "While debugging the Memory pipeline the user paused at
+      conflicting logs to verify rather than guess; later the user stepped
+      away from the Discord notification mid-thought instead of switching."
 
     evidenceEventIds:
     - MUST be a subset of the event slugs listed below. NO made-up ids.
@@ -190,6 +193,10 @@ enum MemoryPrompts {
     static let personalityMerge = #"""
     You decide how a day's observed PERSONALITY TRAITS map onto the user's
     existing PERSONALITY CONCEPTS. One decision per observed trait.
+
+    PRONOUN — in every body you write (mergedBody / body), use "the user" as
+    the subject. Do NOT use "they" / "their" / "them" / "she" / "he" to refer
+    to the user. Name other people explicitly so referents stay unambiguous.
 
     For EACH observed trait, choose exactly one action:
 
