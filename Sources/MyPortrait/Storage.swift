@@ -32,6 +32,13 @@ enum Storage {
     /// archives, supersede decisions, weight passes). See design doc 6.6.
     static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
 
+    /// Per-day personality snapshots (one file per day, `YYYY-MM-DD.md`),
+    /// produced by PersonalityAgent. Kept separate from the portrait tree —
+    /// these are transient daily reads, not long-term concepts.
+    static var personalityDailyDir: URL {
+        rootURL.appendingPathComponent("personality_daily", isDirectory: true)
+    }
+
     // MARK: - Capture layer (Capture/ module)
 
     /// Raw data produced by the capture layer (screen frames + MP4 chunks).
@@ -65,7 +72,7 @@ enum Storage {
         let fm = FileManager.default
         for url in [
             rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
-            journalDir, rawDataDir, framesDir, videoDir
+            journalDir, personalityDailyDir, rawDataDir, framesDir, videoDir
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }

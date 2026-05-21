@@ -809,6 +809,8 @@ enum PersonalityMergeApplyCLI {
                 let events = await PersonalityAgent.readEvents(for: day)
                 let snapshot = try await PersonalityAgent().generateDailySnapshot(date: day, events: events)
                 print("daily snapshot — \(snapshot.tags.count) tag(s): \(snapshot.tags.map(\.name))")
+                let dailyURL = try PersonalityDailyStore.write(snapshot)
+                print("daily snapshot written: \(dailyURL.path)")
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
 
