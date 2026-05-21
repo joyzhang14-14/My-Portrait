@@ -30,11 +30,6 @@ final class KeystrokeLedger {
     private var writeIdx: Int = 0
     private var lock = os_unfair_lock_s()
 
-    /// 最近一次「提交键」（Return / 小键盘 Enter）的时间戳（ms）。0 = 还没按过。
-    /// 单个变量即够 —— Layer 3 的 submit_close 只关心「刚刚有没有按提交键」。
-    /// 跟 buffer 共用 `lock` 保护。纯 Enter 和 ⌘+Enter 都算提交，不看修饰键。
-    private var lastSubmitMs: Int64 = 0
-
     // MARK: - CGEventTap / 后台线程
 
     private var eventTap: CFMachPort?
@@ -143,24 +138,6 @@ final class KeystrokeLedger {
         record(timestampMs: Self.nowMs())
     }
 
-    /// 记一次「提交键」按下（callback 内调；单测也可直接注入）。
-    func recordSubmit(timestampMs: Int64) {
-        os_unfair_lock_lock(&lock)
-        lastSubmitMs = timestampMs
-        os_unfair_lock_unlock(&lock)
-    }
-
-    /// 最近 `seconds` 秒内是否按过提交键（Return / 小键盘 Enter）。
-    /// 边界 `<=`，与 `hasKeystroke` 同款。
-    func hasSubmitKey(within seconds: TimeInterval) -> Bool {
-        let now = Self.nowMs()
-        let cutoff = now - Int64(seconds * 1000.0)
-        os_unfair_lock_lock(&lock)
-        let ts = lastSubmitMs
-        os_unfair_lock_unlock(&lock)
-        return ts > 0 && ts >= cutoff && ts <= now
-    }
-
     /// 最近 `seconds` 秒内是否有击键。
     /// 边界用 `<=` —— 精确 seconds 秒前那一笔仍算 hit。
     func hasKeystroke(within seconds: TimeInterval) -> Bool {
@@ -251,11 +228,6 @@ private func keystrokeLedgerTapCallback(
     let isPaste = flags.contains(.maskCommand) && keyCode == Int64(kVK_ANSI_V)
     if !isPaste {
         ledger.record()
-    }
-    // 提交键检测：纯 Return / 小键盘 Enter 都算提交，不看 ⌘ 修饰键
-    // （Slack 等 ⌘+Enter 发送也要算）。
-    if keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter) {
-        ledger.recordSubmit(timestampMs: KeystrokeLedger.nowMs())
     }
     return Unmanaged.passUnretained(event)
 }

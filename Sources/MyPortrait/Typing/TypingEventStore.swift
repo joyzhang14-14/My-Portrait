@@ -1,26 +1,9 @@
 import Foundation
 import GRDB
 
-/// 打字会话 editLog 里的一笔明细 —— 会话内一次 commit 或 delete。
-///
-/// `ts` 是相对会话第一条 `IMEFoldEvent` 的秒数（首条 = 0.0）。
-/// 整个 editLog 以 JSON 数组存进 `typing_events.edit_log` 列：
-///   `[{"ts":0.0,"kind":"commit","text":"hello"}]`
-struct EditEntry: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case commit, delete }
-    var ts: TimeInterval
-    var kind: Kind
-    var text: String
-}
-
 /// 一条打字事件 —— 一次连续输入会话（started_at_ms ~ ended_at_ms）。
-/// 对应 `typing_events` 表（v12 schema）。
-///
-/// `edit_log` 列在 SQLite 里是 JSON string。`[EditEntry]` 不是合法的
-/// SQLite 列值类型，所以这里**不走 Codable 自动合成**——手写
-/// `FetchableRecord.init(row:)` 与 `EncodableRecord.encode(to:)`，
-/// 在 `[EditEntry]` ↔ JSON string 之间手动互转，其余列普通映射。
-struct TypingEvent: FetchableRecord, MutablePersistableRecord, Sendable {
+/// 对应 `typing_events` 表（v11 schema）。
+struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var id: Int64?
     var startedAtMs: Int64
     var endedAtMs: Int64
@@ -34,105 +17,14 @@ struct TypingEvent: FetchableRecord, MutablePersistableRecord, Sendable {
     var charCount: Int
     var languageHint: String?
     var createdAtMs: Int64
-    /// 会话内每次 commit / delete 的有序明细。`edit_log` 列存其 JSON 数组。
-    var editLog: [EditEntry]
-    /// 会话关闭原因：submit / idle / focus_change / app_change / max_chars。
-    var closeReason: String?
 
     static let databaseTableName = "typing_events"
 
-    init(id: Int64?,
-         startedAtMs: Int64,
-         endedAtMs: Int64,
-         bundleId: String,
-         appName: String?,
-         windowTitle: String?,
-         url: String?,
-         elementRole: String?,
-         threadId: String,
-         text: String,
-         charCount: Int,
-         languageHint: String?,
-         createdAtMs: Int64,
-         editLog: [EditEntry] = [],
-         closeReason: String? = nil) {
-        self.id = id
-        self.startedAtMs = startedAtMs
-        self.endedAtMs = endedAtMs
-        self.bundleId = bundleId
-        self.appName = appName
-        self.windowTitle = windowTitle
-        self.url = url
-        self.elementRole = elementRole
-        self.threadId = threadId
-        self.text = text
-        self.charCount = charCount
-        self.languageHint = languageHint
-        self.createdAtMs = createdAtMs
-        self.editLog = editLog
-        self.closeReason = closeReason
-    }
-
-    // MARK: - FetchableRecord：从 DB 行解码（手写，处理 edit_log JSON）
-
-    init(row: Row) throws {
-        id = row["id"]
-        startedAtMs = row["started_at_ms"]
-        endedAtMs = row["ended_at_ms"]
-        bundleId = row["bundle_id"]
-        appName = row["app_name"]
-        windowTitle = row["window_title"]
-        url = row["url"]
-        elementRole = row["element_role"]
-        threadId = row["thread_id"]
-        text = row["text"]
-        charCount = row["char_count"]
-        languageHint = row["language_hint"]
-        createdAtMs = row["created_at_ms"]
-        closeReason = row["close_reason"]
-        let json: String = row["edit_log"] ?? "[]"
-        editLog = Self.decodeEditLog(json)
-    }
-
-    // MARK: - PersistableRecord：编码进 DB 行（手写，edit_log → JSON）
-
-    func encode(to container: inout PersistenceContainer) throws {
-        container["id"] = id
-        container["started_at_ms"] = startedAtMs
-        container["ended_at_ms"] = endedAtMs
-        container["bundle_id"] = bundleId
-        container["app_name"] = appName
-        container["window_title"] = windowTitle
-        container["url"] = url
-        container["element_role"] = elementRole
-        container["thread_id"] = threadId
-        container["text"] = text
-        container["char_count"] = charCount
-        container["language_hint"] = languageHint
-        container["created_at_ms"] = createdAtMs
-        container["close_reason"] = closeReason
-        container["edit_log"] = Self.encodeEditLog(editLog)
-    }
+    static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
+    static let databaseColumnDecodingStrategy: DatabaseColumnDecodingStrategy = .convertFromSnakeCase
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
-    }
-
-    // MARK: - editLog JSON 互转
-
-    /// `[EditEntry]` → JSON string。编码失败退化 `"[]"`。
-    private static func encodeEditLog(_ entries: [EditEntry]) -> String {
-        guard let data = try? JSONEncoder().encode(entries),
-              let str = String(data: data, encoding: .utf8) else { return "[]" }
-        return str
-    }
-
-    /// JSON string → `[EditEntry]`。坏数据退化空数组。
-    private static func decodeEditLog(_ json: String) -> [EditEntry] {
-        guard let data = json.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode([EditEntry].self, from: data)
-        else { return [] }
-        return decoded
     }
 }
 
@@ -162,8 +54,7 @@ struct TypingEventStore {
     /// 显式列清单，所有 SELECT 复用 —— 不用 `SELECT *`（列顺序/新增列都不会出岔）。
     private static let columns =
         "id, started_at_ms, ended_at_ms, bundle_id, app_name, window_title, " +
-        "url, element_role, thread_id, text, char_count, language_hint, " +
-        "created_at_ms, edit_log, close_reason"
+        "url, element_role, thread_id, text, char_count, language_hint, created_at_ms"
 
     /// 单条写入，事务内。`insert` 是 mutating，块内做可变拷贝。
     func insert(_ event: TypingEvent) throws {

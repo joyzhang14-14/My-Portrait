@@ -347,23 +347,6 @@ enum DBSchema {
                 """)
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // v12 — typing_events 加 edit_log + close_reason（Layer 3 会话聚合）
-        // ═══════════════════════════════════════════════════════════
-        //
-        // Layer 3 把同一输入会话内的多条 IMEFoldEvent 聚合成一条记录。
-        //   - edit_log：会话内每次 commit / delete 的有序明细，JSON 数组，
-        //     形如 [{"ts":0.0,"kind":"commit","text":"hello"}]。ts 相对会话
-        //     第一条 event 的秒数（首条 = 0.0）。NOT NULL DEFAULT '[]' 给旧行补空。
-        //   - close_reason：会话关闭原因（submit / idle / focus_change /
-        //     app_change / max_chars）。可空——旧行没有此信息，留 NULL。
-        m.registerMigration("v12_typing_events_edit_log") { db in
-            try db.execute(sql:
-                "ALTER TABLE typing_events ADD COLUMN edit_log TEXT NOT NULL DEFAULT '[]'")
-            try db.execute(sql:
-                "ALTER TABLE typing_events ADD COLUMN close_reason TEXT")
-        }
-
         return m
     }
 }

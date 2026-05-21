@@ -28,12 +28,12 @@ extension RawEdit {
     /// UTF-16 层面求公共前缀长度 P + 公共后缀长度 S（后缀不与前缀重叠）：
     ///   oldMid = old[P ..< old.count-S]，newMid = new[P ..< new.count-S]
     ///   - oldMid 空 & newMid 非空 → `.insert`，text=newMid，range=(P, 0)
-    ///   - oldMid 非空 & newMid 空  → `.delete`，text=oldMid（被删内容），range=(P, oldMid.count)
+    ///   - oldMid 非空 & newMid 空  → `.delete`，text=""，range=(P, oldMid.count)
     ///   - 两者都非空              → `.replace`，text=newMid，range=(P, oldMid.count)
     ///   - 两者都空                → nil（无变化）
     ///
     /// range 是 UTF-16 单元，location 指向 OLD 值里的改动起点。
-    /// `script` 由 `Script.classify(text)` 算（delete 时 text 是被删的 oldMid）。
+    /// `script` 由 `Script.classify(newMid)` 算（delete 时 newMid 空 → `.latin`）。
     static func from(oldValue: String, newValue: String,
                      pid: pid_t, elementHash: Int, ts: TimeInterval) -> RawEdit? {
         let oldUnits = Array(oldValue.utf16)
@@ -64,8 +64,6 @@ extension RawEdit {
 
         let newMidUnits = Array(newUnits[prefix ..< (prefix + newMidLen)])
         let newMid = String(decoding: newMidUnits, as: UTF16.self)
-        let oldMidUnits = Array(oldUnits[prefix ..< (prefix + oldMidLen)])
-        let oldMid = String(decoding: oldMidUnits, as: UTF16.self)
 
         let kind: Kind
         if oldMidLen == 0 {
@@ -76,8 +74,7 @@ extension RawEdit {
             kind = .replace
         }
 
-        // delete 的 text = 被删的中段内容（oldMid）；insert/replace = newMid。
-        let text = (kind == .delete) ? oldMid : newMid
+        let text = (kind == .delete) ? "" : newMid
         return RawEdit(
             kind: kind,
             text: text,

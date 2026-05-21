@@ -56,39 +56,6 @@ final class KeystrokeLedgerTests: XCTestCase {
         XCTAssertTrue(ledger.hasKeystroke(within: 0.5))
     }
 
-    // MARK: - hasSubmitKey
-
-    func testHasSubmitKey_hit() {
-        let ledger = KeystrokeLedger()
-        ledger.recordSubmit(timestampMs: KeystrokeLedger.nowMs())
-        XCTAssertTrue(ledger.hasSubmitKey(within: 0.5))
-    }
-
-    func testHasSubmitKey_miss_neverPressed() {
-        // 从没按过提交键 → lastSubmitMs == 0 → 永远 false。
-        let ledger = KeystrokeLedger()
-        XCTAssertFalse(ledger.hasSubmitKey(within: 10.0))
-    }
-
-    func testHasSubmitKey_miss_tooOld() {
-        let ledger = KeystrokeLedger()
-        ledger.recordSubmit(timestampMs: KeystrokeLedger.nowMs() - 1000) // 1s ago
-        XCTAssertFalse(ledger.hasSubmitKey(within: 0.3))
-    }
-
-    func testHasSubmitKey_boundary() {
-        // 精确 300ms 前命中（边界 inclusive）；301ms 前 miss。
-        let ledger1 = KeystrokeLedger()
-        ledger1.recordSubmit(timestampMs: KeystrokeLedger.nowMs() - 300)
-        XCTAssertTrue(ledger1.hasSubmitKey(within: 0.3),
-                      "精确 300ms 前应命中（边界 inclusive）")
-
-        let ledger2 = KeystrokeLedger()
-        ledger2.recordSubmit(timestampMs: KeystrokeLedger.nowMs() - 400)
-        XCTAssertFalse(ledger2.hasSubmitKey(within: 0.3),
-                       "400ms 前查 300ms 窗口应 miss")
-    }
-
     func testConcurrentWriteRead() {
         // 起 2 个 GCD task，一个高频 record，一个高频 hasKeystroke，
         // 跑 0.1s，无 crash 无数据竞争（ThreadSanitizer 友好）。

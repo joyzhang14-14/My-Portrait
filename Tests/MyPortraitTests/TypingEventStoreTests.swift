@@ -75,64 +75,6 @@ final class TypingEventStoreTests: XCTestCase {
         XCTAssertEqual(got.createdAtMs, event.createdAtMs)
     }
 
-    /// editLog + closeReason 经 DB 往返一致（v12：edit_log JSON 列）。
-    func testEditLogAndCloseReasonRoundTrip() throws {
-        let store = try makeStore()
-        let ts = nowMs()
-        let editLog = [
-            EditEntry(ts: 0.0, kind: .commit, text: "hel"),
-            EditEntry(ts: 0.4, kind: .delete, text: "l"),
-            EditEntry(ts: 0.8, kind: .commit, text: "llo"),
-        ]
-        let event = TypingEvent(
-            id: nil,
-            startedAtMs: ts,
-            endedAtMs: ts + 800,
-            bundleId: "com.example.app",
-            appName: "Example",
-            windowTitle: "win",
-            url: nil,
-            elementRole: "AXTextField",
-            threadId: "t-edit",
-            text: "hello",
-            charCount: 5,
-            languageHint: "latin",
-            createdAtMs: ts + 900,
-            editLog: editLog,
-            closeReason: "submit"
-        )
-        try store.insert(event)
-
-        let fetched = try XCTUnwrap(try store.recent(limit: 1).first)
-        XCTAssertEqual(fetched.editLog, editLog)
-        XCTAssertEqual(fetched.closeReason, "submit")
-    }
-
-    /// 默认构造（不传 editLog / closeReason）→ DB 里是空数组 / NULL。
-    func testInsertWithoutEditLog_defaultsEmpty() throws {
-        let store = try makeStore()
-        let ts = nowMs()
-        let event = TypingEvent(
-            id: nil,
-            startedAtMs: ts,
-            endedAtMs: ts + 100,
-            bundleId: "b",
-            appName: nil,
-            windowTitle: nil,
-            url: nil,
-            elementRole: nil,
-            threadId: "t-default",
-            text: "abc",
-            charCount: 3,
-            languageHint: nil,
-            createdAtMs: ts
-        )
-        try store.insert(event)
-        let fetched = try XCTUnwrap(try store.recent(limit: 1).first)
-        XCTAssertEqual(fetched.editLog, [])
-        XCTAssertNil(fetched.closeReason)
-    }
-
     /// lastEvent：窗口内查得到，超出 1 小时窗口查不到。
     func testLastEventRespectsWindow() throws {
         let store = try makeStore()

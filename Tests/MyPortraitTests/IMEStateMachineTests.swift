@@ -22,9 +22,9 @@ final class IMEStateMachineTests: XCTestCase {
                 ts: ts, pid: 42, elementHash: 7, traceTag: nil)
     }
 
-    private func delete(_ deletedText: String = "", location: Int = 0,
-                        length: Int = 1, ts: TimeInterval = 0) -> RawEdit {
-        RawEdit(kind: .delete, text: deletedText, script: Script.classify(deletedText),
+    private func delete(location: Int = 0, length: Int = 1,
+                        ts: TimeInterval = 0) -> RawEdit {
+        RawEdit(kind: .delete, text: "", script: .latin,
                 range: NSRange(location: location, length: length),
                 ts: ts, pid: 42, elementHash: 7, traceTag: nil)
     }
@@ -127,22 +127,12 @@ final class IMEStateMachineTests: XCTestCase {
     }
 
     func testRule8_idleDelete_emitsDeleteSignal() {
-        // M4：rule 8 输出的 delete 事件 text 带被删内容。
         let sm = IMEStateMachine()
-        let events = sm.feed(delete("xyz", length: 3))
+        let events = sm.feed(delete())
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .delete)
-        XCTAssertEqual(events[0].text, "xyz")
+        XCTAssertEqual(events[0].text, "")
         XCTAssertEqual(events[0].traceTag, .l2IdleDelete)
-    }
-
-    func testRule8_idleDeleteCJK_emitsDeletedCJKText() {
-        let sm = IMEStateMachine()
-        let events = sm.feed(delete("中文", length: 2))
-        XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events[0].kind, .delete)
-        XCTAssertEqual(events[0].text, "中文")
-        XCTAssertEqual(events[0].script, .cjk)
     }
 
     func testRule9_composingTimeout_flushesAsLatin() {

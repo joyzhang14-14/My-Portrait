@@ -1,15 +1,12 @@
-/// TypingObserver —— Typing Observer v2 的 Layer 1~3 orchestrator（M4）。
+/// TypingObserver —— Typing Observer v2 的 Layer 1 + Layer 2 orchestrator（M3）。
 ///
 /// 通过 Accessibility (AX) API 订阅 frontmost app 的 focused text element，
 /// 把每次 `kAXValueChangedNotification` 折成一段 `RawEdit`，经
 ///   Layer 1（KeystrokeLedger 心跳过滤）→ Layer 2（IMEStateMachineRegistry 折叠）
-///   → Layer 3（TypingSessionAggregator 会话聚合）
-/// 聚合成「一次输入会话」并写进 `typing_events` 表。
+/// 输出 `IMEFoldEvent`。
 ///
-/// **M4 到 DB 写入为止**：Layer 3 把同一 (pid, element) 上的多条
-/// `IMEFoldEvent` 攒成一条 `TypingEvent`，会话关闭时（submit / idle /
-/// focus_change / app_change / max_chars 五个触发器）落库。
-/// 不做 Layer 4（metadata enrichment / URL 黑名单）、不做健康检查。
+/// **M3 只到 IMEFoldEvent 输出为止**：只 log（+ 可注入 `onFoldEvent` 闭包），
+/// 不写 DB，不做 Layer 3/4，不做健康检查。
 ///
 /// 并发模型：
 ///   AXObserver 的 C 回调（@convention(c)）契约上跑在主线程 ——
@@ -47,7 +44,7 @@ final class TypingObserver {
 
     private var attachment: Attachment?
 
-    // MARK: - Layer 1 / Layer 2 / Layer 3
+    // MARK: - Layer 1 / Layer 2
 
     /// Layer 1 —— 人类心跳层。observer 持有一个实例，start/stop 同步起停。
     private let ledger = KeystrokeLedger()
@@ -55,26 +52,13 @@ final class TypingObserver {
     /// Layer 2 —— 多 element IME 折叠层。
     private let registry = IMEStateMachineRegistry()
 
-    /// Layer 3 —— 会话聚合层。把 IMEFoldEvent 攒成输入会话。
-    private let aggregator = TypingSessionAggregator()
-
-    /// `typing_events` 表 DAO —— 会话关闭时写库。
-    private let store: TypingEventStore
-
     /// 每个 element 上次缓存的完整文本值。key = elementHash = CFHash(focused)。
     /// 首次见到某 element 只存值不 diff（否则整段被当 insert）。
     /// element 失焦 / app 切走时清对应条目，避免字典无限涨。
     private var lastValues: [Int: String] = [:]
 
-    /// 当前上下文的 thread id —— attach / 焦点切换时算一次缓存，建
-    /// SessionContext 时复用。同一窗口 1 小时内的会话串成一个 thread。
-    private var currentThreadId: String = UUID().uuidString
-
-    /// L2 折叠出的 IMEFoldEvent 的额外消费口。dev flag 注入。
+    /// L2 折叠出的 IMEFoldEvent 的额外消费口。dev flag / M4 注入。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
-
-    /// 会话关闭并产出 TypingEvent 时的额外消费口。dev flag（--typing-observe-m4）注入。
-    var onTypingEvent: ((TypingEvent) -> Void)?
 
     // MARK: - 其它状态
 
@@ -97,23 +81,12 @@ final class TypingObserver {
     /// compose-timeout tick 间隔。
     private static let tickIntervalSec: TimeInterval = 0.100
 
-    /// Layer 3 会话 idle 超时（秒）。无新 event 超过此时长 → idle 关闭。
-    private static let sessionIdleSec: TimeInterval = 4.0
-
-    /// submit_close 的提交键关联窗口（秒）。
-    private static let submitWindowSec: TimeInterval = 0.300
-
-    /// thread 复用窗口（毫秒）—— 同窗口 1 小时内的会话串成一个 thread。
-    private static let threadReuseWindowMs: Int64 = 3_600_000
-
     private let pipelineLog = Logger(subsystem: "com.joyzhang.myportrait",
                                      category: "typing.pipeline")
 
     // MARK: - 生命周期
 
-    init(store: TypingEventStore) {
-        self.store = store
-    }
+    init() {}
 
     func start() {
         guard !running else { return }
@@ -178,12 +151,7 @@ final class TypingObserver {
             workspaceObserverToken = nil
         }
 
-        // 整体停 —— 关闭所有未完成的 Layer 3 会话，落库未丢的内容。
-        // 旧 app 元素多半已失效，finalText 用 lastValues 兜底（取不到 → ""）。
-        for key in aggregator.allKeys() {
-            let finalText = lastValues[key.elementHash] ?? ""
-            closeSession(key: key, reason: "idle", finalText: finalText)
-        }
+        // app/observer 整体停 —— flush 所有 element 的 buffer。
         emit(registry.flushAll())
 
         ledger.stop()
@@ -218,13 +186,8 @@ final class TypingObserver {
     }
 
     private func handleAppActivated(pid: pid_t) {
-        // app 切走（app_change 关闭触发器）：旧 app 的元素多半已失效，
-        // 对每个在册 Layer 3 会话用 lastValues 兜底作 finalText 关闭并落库，
-        // 再 flush L2、清值缓存，detach 旧的 attach 新的。
-        for key in aggregator.allKeys() {
-            let finalText = lastValues[key.elementHash] ?? ""
-            closeSession(key: key, reason: "app_change", finalText: finalText)
-        }
+        // app 切走：flush 所有 element 的 buffer，清值缓存（旧 app 的元素已
+        // 无效，留着只会让字典无限涨），再 detach 旧的 attach 新的。
         emit(registry.flushAll())
         lastValues.removeAll()
         detach()
@@ -394,23 +357,6 @@ final class TypingObserver {
         } else {
             lastValues[elementHash] = ""
         }
-
-        // 重算缓存 thread id —— 同 (bundle, window) 1 小时内的会话串成一个 thread。
-        recomputeThreadId(bundleId: att.bundleId)
-    }
-
-    /// 重算并缓存 `currentThreadId`：查最近 1 小时内同 (bundle, window) 的
-    /// 最后一条 typing_events，命中 → 复用其 thread id，否则新建 UUID。
-    /// 查询失败（DB 错误）静默退化为新 UUID。
-    private func recomputeThreadId(bundleId: String) {
-        let windowTitle = currentWindowTitle()
-        if let last = try? store.lastEvent(bundleId: bundleId,
-                                           windowTitle: windowTitle,
-                                           withinMs: Self.threadReuseWindowMs) {
-            currentThreadId = last.threadId
-        } else {
-            currentThreadId = UUID().uuidString
-        }
     }
 
     // MARK: - 通知处理
@@ -431,16 +377,10 @@ final class TypingObserver {
     private func handleNotification(_ name: String) {
         switch name {
         case kAXFocusedUIElementChangedNotification:
-            // 焦点换元素（focus_change 关闭触发器）：对旧 focused 元素 ——
-            // ① 读它当前 AX value 作 finalText（读失败用 lastValues 兜底）
-            // ② closeSession 关闭其 Layer 3 会话并落库
-            // ③ 清值缓存，再重订到新元素 + 重算 thread id。
-            if let att = attachment, let old = att.focusedElement {
+            // 焦点换元素：对旧 focused 元素 flush + 清值缓存，再重订到新元素。
+            if let old = attachment?.focusedElement {
                 let oldHash = Int(CFHash(old))
-                let oldKey = SessionKey(pid: att.pid, elementHash: oldHash)
-                let finalText = copyStringAttr(old, kAXValueAttribute)
-                    ?? lastValues[oldHash] ?? ""
-                closeSession(key: oldKey, reason: "focus_change", finalText: finalText)
+                emit(registry.handleFocusChange(elementHash: oldHash))
                 lastValues[oldHash] = nil
             }
             subscribeFocusedElement()
@@ -456,33 +396,9 @@ final class TypingObserver {
 
     // MARK: - tick
 
-    /// compose-timeout tick：100ms 一次。
-    /// ① 驱动 registry 对所有 element 跑规则 9（compose timeout flush）。
-    /// ② idle_close 关闭触发器：关掉所有 4s 内无新 event 的 Layer 3 会话。
+    /// compose-timeout tick：100ms 一次，驱动 registry 对所有 element 跑规则 9。
     private func handleTick() {
-        let now = CACurrentMediaTime()
-        // compose-timeout flush 出的 commit 属于当前 focused 元素 —— 喂进它的会话。
-        let tickEvents = registry.tick(now: now)
-        emit(tickEvents)
-        if !tickEvents.isEmpty,
-           let att = attachment, let focused = att.focusedElement {
-            let key = SessionKey(pid: att.pid, elementHash: Int(CFHash(focused)))
-            feedAggregator(tickEvents, key: key, focused: focused)
-        }
-
-        for key in aggregator.idleKeys(now: now, idleSeconds: Self.sessionIdleSec) {
-            // 若该 key 正是当前 focused 元素 → 读其 AX value 作 finalText，
-            // 否则用 lastValues 兜底（取不到 → ""）。
-            let finalText: String
-            if let focused = attachment?.focusedElement,
-               Int(CFHash(focused)) == key.elementHash {
-                finalText = copyStringAttr(focused, kAXValueAttribute)
-                    ?? lastValues[key.elementHash] ?? ""
-            } else {
-                finalText = lastValues[key.elementHash] ?? ""
-            }
-            closeSession(key: key, reason: "idle", finalText: finalText)
-        }
+        emit(registry.tick(now: CACurrentMediaTime()))
     }
 
     // MARK: - 值变化 → RawEdit → L1 → L2 → handler
@@ -524,18 +440,6 @@ final class TypingObserver {
             lastValues[elementHash] = newValue
             return
         }
-
-        // submit_close 关闭触发器：输入框从「有内容」骤然清空（提交后框被清）
-        // 且最近 300ms 内按过提交键 → 判定为「提交」，用提交前的内容 oldValue
-        // 作 finalText 关闭会话落库，清空那次变化不喂 L2/L3。
-        let key = SessionKey(pid: att.pid, elementHash: elementHash)
-        if oldValue.count >= 3 && newValue.count < 3
-            && ledger.hasSubmitKey(within: Self.submitWindowSec) {
-            lastValues[elementHash] = newValue
-            closeSession(key: key, reason: "submit", finalText: oldValue)
-            return
-        }
-
         lastValues[elementHash] = newValue
 
         // 求单段连续编辑。无变化 → nil → return。
@@ -554,24 +458,13 @@ final class TypingObserver {
             return
         }
 
-        // Layer 2：折叠。Layer 3：把折出的 event 喂进会话聚合器。
-        let events = registry.feed(raw)
-        emit(events)
-        let overMax = feedAggregator(events, key: key, focused: focused)
-        // max_chars 关闭触发器：累计 commit 字符数超 10000 → 读当前 focused
-        // 元素 AX value 作 finalText 关闭会话落库。之后用户继续打字自然开新 session。
-        if overMax {
-            let finalText = copyStringAttr(focused, kAXValueAttribute)
-                ?? lastValues[elementHash] ?? ""
-            closeSession(key: key, reason: "max_chars", finalText: finalText)
-        }
+        // Layer 2：折叠。
+        emit(registry.feed(raw))
     }
 
     // MARK: - IMEFoldEvent handler
 
-    /// 每条 IMEFoldEvent log 一行 + 转交 onFoldEvent 闭包。
-    /// （Layer 3 的 aggregator.feed 由 `feedAggregator` 单独做 —— 它需要明确的
-    ///  SessionKey / SessionContext，emit 处于多个调用点拿不到统一的 key。）
+    /// M3 的 handler —— 每条 IMEFoldEvent log 一行 + 转交 onFoldEvent 闭包。
     private func emit(_ events: [IMEFoldEvent]) {
         guard !events.isEmpty else { return }
         for event in events {
@@ -579,85 +472,6 @@ final class TypingObserver {
                 "[L2] \(String(describing: event.kind), privacy: .public) \"\(event.text, privacy: .public)\" script=\(String(describing: event.script), privacy: .public) trace=\(event.traceTag?.description ?? "-", privacy: .public)")
         }
         onFoldEvent?(events)
-    }
-
-    // MARK: - Layer 3 会话聚合
-
-    /// 把一组 IMEFoldEvent 喂进 Layer 3 会话聚合器。
-    /// - Returns: 该 session 累计 commit 字符数是否已超 max_chars。
-    @discardableResult
-    private func feedAggregator(_ events: [IMEFoldEvent],
-                                key: SessionKey,
-                                focused: AXUIElement) -> Bool {
-        guard !events.isEmpty else { return false }
-        let ctx = makeSessionContext(focused: focused)
-        var overMax = false
-        for event in events {
-            if aggregator.feed(event, key: key, ctx: ctx) { overMax = true }
-        }
-        return overMax
-    }
-
-    /// 关闭统一子流程（五个关闭触发器共用）。
-    /// ① `registry.handleFocusChange` flush L2 的 Composing buffer，
-    ///    把 flush 出的 event 先喂进 aggregator（保证 editLog 完整）。
-    /// ② `aggregator.close` 产出 `TypingEvent?`。
-    /// ③ 非 nil → 写库 + 转交 onTypingEvent。
-    private func closeSession(key: SessionKey, reason: String, finalText: String) {
-        // ① flush L2 残余 buffer，喂进 aggregator —— 用被关闭的 key，不依赖
-        //    「当前 focused」（focus_change 时焦点已换走）。
-        let flushed = registry.handleFocusChange(elementHash: key.elementHash)
-        if !flushed.isEmpty {
-            emit(flushed)
-            // 仅当会话仍在册时才喂（flush 的 event 不该为已不存在的会话凭空建一个）。
-            if aggregator.hasSession(key) {
-                let ctx = currentSessionContextForClose()
-                for event in flushed {
-                    _ = aggregator.feed(event, key: key, ctx: ctx)
-                }
-            }
-        }
-
-        // ② 产出 TypingEvent（finalText < 3 → nil 丢弃）。无论产出与否都移除 key。
-        guard let event = aggregator.close(key: key, finalText: finalText,
-                                           reason: reason) else {
-            return
-        }
-
-        // ③ 写库 + dev flag 消费口。
-        do {
-            try store.insert(event)
-        } catch {
-            pipelineLog.warning("typing_events insert failed: \(String(describing: error), privacy: .public)")
-        }
-        onTypingEvent?(event)
-    }
-
-    /// 给当前 focused 元素构造 SessionContext。
-    private func makeSessionContext(focused: AXUIElement) -> SessionContext {
-        let role = copyStringAttr(focused, kAXRoleAttribute)
-        return SessionContext(
-            bundleId: attachment?.bundleId ?? "unknown",
-            appName: attachment?.appName,
-            windowTitle: currentWindowTitle(),
-            elementRole: role,
-            threadId: currentThreadId
-        )
-    }
-
-    /// closeSession 步骤① flush 出 event 但会话恰好是新建的兜底场景用。
-    /// 正常情况下会话早已存在、ctx 已固定，这里只是 `aggregator.feed` 的形参要求。
-    private func currentSessionContextForClose() -> SessionContext {
-        if let focused = attachment?.focusedElement {
-            return makeSessionContext(focused: focused)
-        }
-        return SessionContext(
-            bundleId: attachment?.bundleId ?? "unknown",
-            appName: attachment?.appName,
-            windowTitle: currentWindowTitle(),
-            elementRole: nil,
-            threadId: currentThreadId
-        )
     }
 
     // MARK: - AX 读取小工具
@@ -668,16 +482,5 @@ final class TypingObserver {
         let err = AXUIElementCopyAttributeValue(element, attr as CFString, &ref)
         guard err == .success else { return nil }
         return ref as? String
-    }
-
-    /// 读当前 app 的 focused 窗口标题，失败返回 nil。
-    private func currentWindowTitle() -> String? {
-        guard let att = attachment else { return nil }
-        var windowRef: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(
-            att.appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
-        guard err == .success, let windowRef else { return nil }
-        let window = windowRef as! AXUIElement
-        return copyStringAttr(window, kAXTitleAttribute)
     }
 }

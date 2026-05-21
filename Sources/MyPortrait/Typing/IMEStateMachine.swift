@@ -90,11 +90,10 @@ final class IMEStateMachine {
             trace(.l2EnterComposing(text: edit.text))
             return []
 
-        // 规则 8：Idle + delete → 输出一条 delete 信号，text 带被删内容。
+        // 规则 8：Idle + delete → 输出一条 delete 信号。
         case (.idle, .delete):
             trace(.l2IdleDelete)
-            return [IMEFoldEvent(kind: .delete, text: edit.text,
-                                 script: Script.classify(edit.text),
+            return [IMEFoldEvent(kind: .delete, text: "", script: .latin,
                                  ts: edit.ts, pid: edit.pid,
                                  elementHash: edit.elementHash,
                                  traceTag: .l2IdleDelete)]
