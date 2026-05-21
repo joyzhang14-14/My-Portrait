@@ -321,7 +321,8 @@ struct RecordingConfig: Codable, Equatable {
     var system: SystemConfig = .init()
     /// Typing 采集「键盘活动关联判据」时间窗（毫秒）：value 变化前若
     /// 这段时间内没有物理按键，则判定非用户打字、丢弃。
-    var typingKeyCorrelationWindowMs: Int = 1000
+    /// 默认 200 = max(insert 120, delete 200)；UI 可调 50–500ms。
+    var typingKeyCorrelationWindowMs: Int = 200
     /// Typing 采集暂停开关。true → TypingObserver 丢弃所有 value 变化（不快照、
     /// 不 diff、不写库）。持久化到 TOML，跨重启保留。菜单栏一键切换。
     var typingCapturePaused: Bool = false

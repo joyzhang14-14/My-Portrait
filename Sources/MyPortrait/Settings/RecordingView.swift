@@ -325,7 +325,7 @@ struct RecordingSettingsView: View {
                             description: "Only text changes that happen within this long after a keystroke count as your typing (filters out terminal output, incoming messages, etc.).",
                             icon: "timer") {
                     Stepper(value: config.binding(\.recording.typingKeyCorrelationWindowMs),
-                            in: 200...5000, step: 100) {
+                            in: 50...500, step: 50) {
                         Text("\(config.current.recording.typingKeyCorrelationWindowMs) ms")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.55))

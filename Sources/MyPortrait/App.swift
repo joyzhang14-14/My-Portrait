@@ -320,12 +320,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     exit(1)
                 }
                 m4DBImpl = dbImpl  // 持有防 DatabasePool 释放
-                observer = TypingObserver(store: TypingEventStore(dbPool: dbImpl.dbPool))
+                // dev flag：respectsPauseGate=false —— 忽略 typing_capture_paused，
+                // dev 工具「跑了就抓」，不被无关的菜单栏静音键搞哑。
+                observer = TypingObserver(
+                    store: TypingEventStore(dbPool: dbImpl.dbPool),
+                    respectsPauseGate: false,
+                    modeLabel: "m4-dev")
                 // M4 关键事件（burst / 跨记录 delete / flush）print 到终端。
+                // 启动 banner 由 start() 自己 print，不走这里。
                 observer.onDevLog = { print("[m4] \($0)") }
                 modeName = "--typing-observe-m4"
             } else if Self.typingObserveM3Only {
-                observer = TypingObserver()
+                observer = TypingObserver(respectsPauseGate: false, modeLabel: "m3-dev")
                 // M3 dev flag：每条 IMEFoldEvent print 一行（dev tool 允许 print）。
                 observer.onFoldEvent = { events in
                     for e in events {
@@ -334,7 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 modeName = "--typing-observe-m3"
             } else {
-                observer = TypingObserver()
+                observer = TypingObserver(respectsPauseGate: false, modeLabel: "observe-dev")
                 modeName = "--typing-observe"
             }
 

@@ -5,6 +5,7 @@
 ///   1. `TextDiff.sandwich` diff 出 delta（segment = 新打的字 / deletion = 删的字）
 ///   2. 速度阈值 burst 检测 —— 大段且极快 = 鼠标点击触发的 AX 全文吸附，
 ///      进黑名单、不入库
+///   2.5 L1 键盘活动关联闸门 —— correlation 窗口内无物理按键 = 非用户打字，丢弃
 ///   3. segment 喂 Layer 2（IME 折叠）；deletion 交 `TypingRecordWriter`
 ///   4. Layer 2 折出的 commit 累加进该 app 的 master record
 ///   5/7. 5s debounce flush，写库前减黑名单
@@ -66,8 +67,8 @@ final class TypingObserver {
 
     // MARK: - Layer 1 / Layer 2 / Layer 4
 
-    /// Layer 1 —— 人类心跳层。作为流水线基础设施起停；M4 的噪声过滤改由
-    /// 步骤 2 的 burst 检测负责，flush 计时由 value-change 活动驱动。
+    /// Layer 1 —— 人类心跳层。CGEventTap 记录物理按键；步骤 2.5 的键盘活动
+    /// 关联闸门靠 `hasKeystroke(within:)` 判定 value 变化是不是用户打的。
     private let ledger = KeystrokeLedger()
 
     /// Layer 2 —— 多 element IME 折叠层。
@@ -79,11 +80,19 @@ final class TypingObserver {
     /// L2 折叠出的 IMEFoldEvent 的额外消费口（`--typing-observe-m3` dev flag 注入）。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
 
-    /// dev flag 日志出口（burst / 跨记录 delete / flush 关键事件）。
+    /// dev flag 日志出口（burst / 跨记录 delete / flush 关键事件 + 启动 banner）。
     /// 设置时同步给 writer。
     var onDevLog: ((String) -> Void)? {
         didSet { writer.onDevLog = onDevLog }
     }
+
+    /// 是否尊重 `typing_capture_paused` 暂停闸门。
+    /// 生产环境（Services 路径）= true；三个 `--typing-observe*` dev flag = false
+    /// —— dev 工具「跑了就抓」，不该被一个无关的菜单栏静音键静默搞哑。
+    private let respectsPauseGate: Bool
+
+    /// 启动 banner 里显示的运行模式标签（production / m4-dev / ...）。
+    private let modeLabel: String
 
     // MARK: - 其它状态
 
@@ -113,14 +122,35 @@ final class TypingObserver {
 
     // MARK: - 生命周期
 
-    /// - Parameter store: typing_events DAO。`nil` 时（`--typing-observe` /
-    ///   `--typing-observe-m3` dev 模式）L4 只在内存里累加、不落库。
-    init(store: TypingEventStore? = nil) {
+    /// - Parameters:
+    ///   - store: typing_events DAO。`nil` 时（`--typing-observe` /
+    ///     `--typing-observe-m3` dev 模式）L4 只在内存里累加、不落库。
+    ///   - respectsPauseGate: 是否尊重 `typing_capture_paused`。生产 true，
+    ///     dev flag false。
+    ///   - modeLabel: 启动 banner 的模式标签。
+    init(store: TypingEventStore? = nil,
+         respectsPauseGate: Bool = true,
+         modeLabel: String = "production") {
         self.writer = TypingRecordWriter(store: store)
+        self.respectsPauseGate = respectsPauseGate
+        self.modeLabel = modeLabel
     }
 
     func start() {
         guard !running else { return }
+
+        // Layer 1 起 CGEventTap。失败不崩，KeystrokeLedger 自身会 log warning。
+        // 先起 ledger —— 这样启动 banner 能如实报告它的状态。
+        do {
+            try ledger.start()
+        } catch {
+            pipelineLog.warning("KeystrokeLedger.start failed: \(String(describing: error), privacy: .public)")
+        }
+
+        // 启动 banner —— 第一时间 print 全部关键 config + gate 状态。修补
+        // 「某个 gate 静默把 observer 搞哑」的 silent failure（paused / ledger
+        // down / AX denied 都会让采集无声失效）。
+        logStartupBanner()
 
         // 静默检查 AX 权限 —— 不带 prompt（弹窗引导是 UI 件）。
         guard AXIsProcessTrusted() else {
@@ -129,13 +159,6 @@ final class TypingObserver {
         }
 
         running = true
-
-        // Layer 1 起 CGEventTap。失败不崩，KeystrokeLedger 自身会 log warning。
-        do {
-            try ledger.start()
-        } catch {
-            pipelineLog.warning("KeystrokeLedger.start failed: \(String(describing: error), privacy: .public)")
-        }
 
         // compose-timeout tick：每 100ms 驱动一次 registry.tick。
         tickTimer = Timer.scheduledTimer(withTimeInterval: Self.tickIntervalSec,
@@ -217,6 +240,56 @@ final class TypingObserver {
         // CFRelease observer），见 Self.teardown。
         if let att = attachment {
             Self.teardown(att)
+        }
+    }
+
+    // MARK: - 启动 banner
+
+    /// 第一时间 print 关键 config + gate 状态。任何 gate 处在「会哑」状态
+    /// 加 `⚠️` 显眼标记 —— 修补 silent failure。
+    private func logStartupBanner() {
+        let cfg = ConfigStore.shared.recording
+        let enabled = cfg.typingCaptureEnabled
+        let paused = cfg.typingCapturePaused
+        let corrMs = cfg.typingKeyCorrelationWindowMs
+        let axOK = AXIsProcessTrusted()
+        let ledgerOK = ledger.isRunning
+
+        print("[TypingObserver] starting (mode=\(modeLabel))")
+        print("[TypingObserver] config:")
+
+        // 总开关：dev flag 绕过 Services，故此字段对 dev 模式无效。
+        if respectsPauseGate {
+            print("  typing_capture_enabled    = \(enabled)")
+        } else {
+            print("  typing_capture_enabled    = \(enabled)   (ignored — dev flag bypasses Services)")
+        }
+
+        // 暂停闸门：会哑。dev flag 忽略它。
+        if paused && respectsPauseGate {
+            print("  typing_capture_paused     = true   ⚠️  WILL DROP ALL INPUT")
+        } else if paused {
+            print("  typing_capture_paused     = true   (ignored — dev mode)")
+        } else {
+            print("  typing_capture_paused     = false")
+        }
+
+        print("  keyboard_correlation_ms   = \(corrMs)")
+
+        // L1 闸门依赖 KeystrokeLedger；它没起来 → hasKeystroke 永远 false
+        // → 步骤 2.5 把所有输入丢光。
+        if ledgerOK {
+            print("  keystroke_ledger          = running")
+        } else {
+            print("  keystroke_ledger          = down   ⚠️  WILL DROP ALL INPUT (L1 gate)")
+        }
+
+        print("  terminal_blocklist        = \(TypingPrivacyFilter.terminalBlocklistCount) apps")
+
+        if axOK {
+            print("  ax_permission             = granted")
+        } else {
+            print("  ax_permission             = DENIED   ⚠️  OBSERVER WILL NOT START")
         }
     }
 
@@ -456,13 +529,15 @@ final class TypingObserver {
         handleFoldEvents(events, bundleId: bundleId, nowMs: TypingRecordWriter.nowMs())
     }
 
-    // MARK: - 值变化 → sandwich → burst → L2 / handleDelete → L4
+    // MARK: - 值变化 → sandwich → burst → L1 闸门 → L2 / handleDelete → L4
 
     private func processValueChange() {
         guard let att = attachment, let focused = att.focusedElement else { return }
 
-        // 暂停闸门：菜单栏暂停开关打开时，整体丢弃 value 变化。
-        if ConfigStore.shared.recording.typingCapturePaused { return }
+        // 暂停闸门：菜单栏暂停开关。dev flag 模式 respectsPauseGate=false → 忽略。
+        if respectsPauseGate, ConfigStore.shared.recording.typingCapturePaused {
+            return
+        }
 
         // 隐私闸门：secure field（密码输入框）不读值、不 diff。
         let role = copyStringAttr(focused, kAXRoleAttribute)
@@ -520,6 +595,17 @@ final class TypingObserver {
         }
         state.lastValueChangeTs = now
         elementState[key] = state
+
+        // ── 步骤 2.5：L1 键盘活动关联闸门 ──────────────────────────
+        // value 变化前 correlation 窗口内若无物理按键 → 判定非用户打字
+        // （程序输出 / 收到的消息 / AX 自动吸附），整段丢弃。窗口由
+        // typing_key_correlation_window_ms 配置（UI 可调，50–500ms）。
+        let corrWindowSec =
+            Double(ConfigStore.shared.recording.typingKeyCorrelationWindowMs) / 1000.0
+        guard ledger.hasKeystroke(within: corrWindowSec) else {
+            pipelineLog.debug("L1:drop:no-keystroke bundle=\(att.bundleId, privacy: .public)")
+            return
+        }
 
         // ── 步骤 3：喂 Layer 2 + handleDelete ──────────────────────
         let nowMs = TypingRecordWriter.nowMs()

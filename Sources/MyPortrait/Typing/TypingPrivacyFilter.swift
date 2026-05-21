@@ -37,6 +37,9 @@ struct TypingPrivacyFilter {
     /// secure text field 的 AX role。
     private static let secureFieldRole = "AXSecureTextField"
 
+    /// 终端黑名单 app 数量 —— TypingObserver 启动 banner 用。
+    static var terminalBlocklistCount: Int { terminalBundleIds.count }
+
     /// bundle id 是否命中黑名单。最终黑名单 = hardcode ∪ 用户配置。
     /// 读 ConfigStore.shared（@MainActor 隔离），故方法标 @MainActor。
     @MainActor

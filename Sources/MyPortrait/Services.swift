@@ -347,8 +347,12 @@ final class Services {
 
     private func applyTypingCapture(enabled: Bool) {
         if enabled {
+            // start() 内部会 print 启动 banner（config + gate 状态）。
             typingObserver.start()
         } else {
+            // 总开关关 —— observer 不启动。显式 print，避免「为什么没采集」
+            // 又是一次无提示的 silent failure。
+            print("[TypingObserver] not started — typing_capture_enabled = false  ⚠️")
             typingObserver.stop()
         }
     }
