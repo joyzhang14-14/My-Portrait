@@ -89,7 +89,9 @@ final class PortraitDistiller {
         var written = 0
         var updated = 0
         var failed = 0
-        let categories = PortraitPaths.seedCategories
+        // distillCategories 排除 personality —— personality 走独立的
+        // PersonalityAgent / PersonalityMerger pipeline，不归通用 distiller。
+        let categories = PortraitPaths.distillCategories
 
         for (idx, category) in categories.enumerated() {
             let events = eventsByCategory[category] ?? []

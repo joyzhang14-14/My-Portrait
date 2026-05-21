@@ -4,12 +4,18 @@ import Foundation
 /// directories; this layer knows about the subfolder taxonomy described in
 /// design doc 五（personality / social / skills / …）.
 enum PortraitPaths {
-    /// The top-level categories we ship with. New ones can appear later via
-    /// the classification Agent.
+    /// The top-level categories we ship with — used for directory seeding +
+    /// sidebar UI. New ones can appear later via the classification Agent.
     static let seedCategories: [String] = [
         "personality", "social", "background", "experiences",
         "interests", "speech_style", "skills", "emotions"
     ]
+
+    /// Categories the generic PortraitDistiller loops over — `seedCategories`
+    /// MINUS `personality`. personality is driven by the independent
+    /// PersonalityAgent / PersonalityMerger pipeline; if the distiller also
+    /// processed it, the two pipelines would fight over portrait/personality/.
+    static let distillCategories: [String] = seedCategories.filter { $0 != "personality" }
 
     static func categoryDir(_ name: String) -> URL {
         Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
