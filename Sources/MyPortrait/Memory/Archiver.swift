@@ -20,9 +20,10 @@ import Foundation
 enum Archiver {
     struct Rule {
         var maxImpact: Double = 2          // strict-less-than
-        var maxWeight: Double = 0.05       // strict-less-than
+        var maxWeight: Double = 0.05       // strict-less-than（与 EMA currentWeight 比较）
         var minDaysSinceAccess: Int = 90   // greater-or-equal
         var protectedCategoryPrefixes: [String] = ["skills"]
+        var weightHalfLifeDays: Double = 180   // Phase 3 EMA 半衰期
 
         static let `default` = Rule()
 
@@ -32,7 +33,8 @@ enum Archiver {
             return Rule(
                 maxImpact: m.archiveMaxImpact,
                 maxWeight: m.archiveMaxWeight,
-                minDaysSinceAccess: m.archiveMinDaysIdle
+                minDaysSinceAccess: m.archiveMinDaysIdle,
+                weightHalfLifeDays: Double(m.weightHalfLifeDays)
             )
         }
     }
@@ -97,10 +99,13 @@ enum Archiver {
                 skipped += 1; continue
             }
 
-            // Rule check.
+            // Rule check —— weight 用 EMA lazy 衰减后的当前值，而不是 stored 值。
             let days = file.daysSinceLastOccurrence(now: now)
+            let curWeight = WeightEMA(halfLifeDays: rule.weightHalfLifeDays)
+                .currentWeight(stored: file.weight,
+                               daysSinceModified: file.daysSinceModified(now: now))
             let qualifies = file.impact < rule.maxImpact
-                && file.weight < rule.maxWeight
+                && curWeight < rule.maxWeight
                 && days >= rule.minDaysSinceAccess
 
             if !qualifies { skipped += 1; continue }
@@ -113,7 +118,7 @@ enum Archiver {
             let destRel = "\(category)/_archive/\(tail)"
             let destURL = portraitRoot.appendingPathComponent(destRel)
 
-            let reason = "impact=\(file.impact) weight=\(formatted(file.weight)) days_idle=\(days)"
+            let reason = "impact=\(file.impact) weight=\(formatted(curWeight)) days_idle=\(days)"
             plans.append(Plan(source: url, destination: destURL, reason: reason))
         }
 

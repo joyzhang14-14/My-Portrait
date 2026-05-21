@@ -26,6 +26,9 @@ struct MemoriesView: View {
         let scope: MemoryScope
         let file: PortraitFile
         let modified: Date
+        /// EMA lazy-decayed weight at scan time. List 排序 / 渲染都用这个，
+        /// 不是 file.weight。同一 reload 内不重算。
+        let currentWeight: Double
     }
 
     @ViewBuilder
@@ -187,11 +190,14 @@ struct MemoriesView: View {
         let facetStr = f.portraitFacets.isEmpty
             ? "—"
             : f.portraitFacets.map { "\($0.facet):\($0.value)" }.joined(separator: ", ")
+        let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
+        let curW = WeightEMA(halfLifeDays: halfLife)
+            .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified())
         let rows: [(String, String)] = [
             ("type", f.eventType.isEmpty ? "experience" : f.eventType),
             ("portrait_facets", facetStr),
             ("category (legacy)", category.isEmpty ? "—" : category),
-            ("weight", String(format: "%.4g", f.weight)),
+            ("weight", String(format: "%.4g", curW)),
             ("impact", String(format: "%.4g", f.impact)),
             ("impact_source", f.impactSource),
             ("created", Self.dayString(f.created)),
@@ -242,8 +248,9 @@ struct MemoriesView: View {
     private func reload() async {
         loading = true
         let currentScope = scope
+        let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let loaded = await Task.detached(priority: .userInitiated) {
-            Self.scan(scope: currentScope)
+            Self.scan(scope: currentScope, halfLifeDays: halfLife)
         }.value
         entries = loaded
         loading = false
@@ -317,7 +324,7 @@ struct MemoriesView: View {
 
     /// Walks the appropriate root (events/ or portrait/<cat>/) for the
     /// current scope. Off the main actor.
-    nonisolated private static func scan(scope: MemoryScope) -> [Entry] {
+    nonisolated private static func scan(scope: MemoryScope, halfLifeDays: Double) -> [Entry] {
         let fm = FileManager.default
         let root: URL
         switch scope {
@@ -349,16 +356,20 @@ struct MemoriesView: View {
                 ? (extractTitle(from: file.body) ?? url.deletingPathExtension().lastPathComponent)
                 : file.eventTitle
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? file.created
+            let cw = WeightEMA(halfLifeDays: halfLifeDays)
+                .currentWeight(stored: file.weight,
+                               daysSinceModified: file.daysSinceModified())
             out.append(Entry(
                 id: url,
                 title: title,
                 category: categoryPath,
                 scope: scope,
                 file: file,
-                modified: modified
+                modified: modified,
+                currentWeight: cw
             ))
         }
-        out.sort { $0.file.weight > $1.file.weight }
+        out.sort { $0.currentWeight > $1.currentWeight }
         return out
     }
 
@@ -400,7 +411,7 @@ private struct EntryRow: View {
                 Spacer(minLength: 0)
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(barColor)
-                    .frame(width: 3, height: max(4, min(36, CGFloat(entry.file.weight) * 6)))
+                    .frame(width: 3, height: max(4, min(36, CGFloat(entry.currentWeight) * 6)))
                 Spacer(minLength: 0)
             }
             .frame(width: 6)
@@ -414,7 +425,7 @@ private struct EntryRow: View {
                     Text(entry.category)
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(.tertiary)
-                    Text("w=\(String(format: "%.2f", entry.file.weight))")
+                    Text("w=\(String(format: "%.2f", entry.currentWeight))")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                     Text("i=\(String(format: "%.1f", entry.file.impact))")
@@ -437,7 +448,7 @@ private struct EntryRow: View {
     }
 
     private var barColor: Color {
-        let w = max(0, min(5, entry.file.weight))
+        let w = max(0, min(5, entry.currentWeight))
         let hue = (w / 5) * 0.35
         return Color(hue: hue, saturation: 0.7, brightness: 0.9)
     }

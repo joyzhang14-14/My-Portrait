@@ -202,6 +202,13 @@ struct PortraitFile: Equatable {
         return max(0, Int(secs / 86_400))
     }
 
+    /// 距 `lastModified` 的天数（分数）—— 给 EMA lazy 衰减用。
+    /// 跟 `daysSinceLastOccurrence` 不同：那是事件粒度的整数日；EMA 是连续
+    /// 衰减，需要分数 days 才能反映"修改后几小时也有微小衰减"。
+    func daysSinceModified(now: Date = Date()) -> Double {
+        max(0, now.timeIntervalSince(lastModified) / 86_400)
+    }
+
     /// Append an occurrence date (Tier 1 merge / repeat detection). Idempotent
     /// per day — calling twice on the same day is a no-op.
     mutating func recordOccurrence(on when: Date) {
