@@ -119,14 +119,14 @@ struct InputCaptureView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    let log = TypingRecordWriter.decodeLog(app.editLog)
-                    if !log.isEmpty {
+                    let groups = Self.groupedLog(TypingRecordWriter.decodeLog(app.editLog))
+                    if !groups.isEmpty {
                         Divider().background(Color.white.opacity(0.06))
-                        Text("Edit log · \(log.count)")
+                        Text("Edit log · \(groups.count)")
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)
-                        ForEach(Array(log.enumerated()), id: \.offset) { _, entry in
-                            editRow(entry)
+                        ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                            editGroupRow(group)
                         }
                     }
                 }
@@ -183,19 +183,42 @@ struct InputCaptureView: View {
         }
     }
 
+    /// 一组编辑（连续同类已合并）。commit=绿+ / delete=红− / submit=蓝纸飞机。
     @ViewBuilder
-    private func editRow(_ entry: EditEntry) -> some View {
+    private func editGroupRow(_ group: EditGroup) -> some View {
+        let isSubmit = group.kind == "submit"
+        let isDelete = group.kind == "delete"
+        let color: Color = isSubmit ? Theme.accent
+            : (isDelete ? Color.red.opacity(0.8) : Color.green.opacity(0.8))
+
         HStack(alignment: .top, spacing: 8) {
-            Text(entry.kind == "delete" ? "−" : "+")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundStyle(entry.kind == "delete" ? Color.red.opacity(0.8)
-                                                        : Color.green.opacity(0.8))
-                .frame(width: 14, alignment: .center)
+            Group {
+                if isSubmit {
+                    Image(systemName: "paperplane.fill")
+                } else {
+                    Text(isDelete ? "−" : "+")
+                }
+            }
+            .font(.system(size: 12, weight: .bold, design: .monospaced))
+            .foregroundStyle(color)
+            .frame(width: 14, alignment: .center)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text(Self.timeString(entry.ts))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                Text(entry.text)
+                HStack(spacing: 6) {
+                    Text(Self.timeRangeString(group.firstTs, group.lastTs))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    if isSubmit {
+                        Text("SENT")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundStyle(color)
+                    } else if group.count > 1 {
+                        Text("×\(group.count)")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Text(group.text)
                     .font(.system(size: 12))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -258,6 +281,42 @@ struct InputCaptureView: View {
     static func timeString(_ ms: Int64) -> String {
         stampFmt.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
     }
+
+    /// 单时刻 → `HH:mm:ss`；跨时刻 → `起 – 止`。
+    static func timeRangeString(_ first: Int64, _ last: Int64) -> String {
+        first == last ? timeString(first)
+                       : "\(timeString(first)) – \(timeString(last))"
+    }
+
+    /// 把 edit_log 的连续同类条目（commit / delete）合并成组 —— 提高可读性。
+    /// submit 永远独立成组（它是发送边界）。
+    static func groupedLog(_ entries: [EditEntry]) -> [EditGroup] {
+        var groups: [EditGroup] = []
+        for e in entries {
+            if let last = groups.last, last.kind == e.kind, e.kind != "submit" {
+                groups[groups.count - 1] = EditGroup(
+                    kind: last.kind,
+                    text: last.text + e.text,
+                    firstTs: last.firstTs,
+                    lastTs: e.ts,
+                    count: last.count + 1
+                )
+            } else {
+                groups.append(EditGroup(kind: e.kind, text: e.text,
+                                        firstTs: e.ts, lastTs: e.ts, count: 1))
+            }
+        }
+        return groups
+    }
+}
+
+/// edit_log 里一段连续同类编辑合并成的一组（commit / delete / submit）。
+struct EditGroup {
+    let kind: String      // "commit" | "delete" | "submit"
+    let text: String      // 合并后的文本
+    let firstTs: Int64
+    let lastTs: Int64
+    let count: Int
 }
 
 private struct AppRow: View {

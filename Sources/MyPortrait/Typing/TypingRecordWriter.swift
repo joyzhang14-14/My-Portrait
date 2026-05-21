@@ -113,6 +113,17 @@ final class TypingRecordWriter {
         scheduleFlush(rec)
     }
 
+    /// 记一次「发送」事件（聊天 app 回车发消息）。只往 edit_log 加一条
+    /// kind="submit" 标记，**不动 record.text** —— 消息内容此前已由 commit
+    /// 累加进去了，submit 只是标一个「这里发出去了」的边界。
+    func appendSubmit(text: String, bundleId: String, nowMs: Int64) {
+        let rec = recordFor(bundleId: bundleId, nowMs: nowMs)
+        rec.editLog.append(EditEntry(ts: nowMs, kind: "submit", text: text))
+        rec.lastEventMs = nowMs
+        rec.pendingChanges = true
+        scheduleFlush(rec)
+    }
+
     // MARK: - 步骤 5：handleDelete（跨记录，2000 字符窗口）
 
     /// 处理一次删除。优先在当前内存记录里 `.backwards` 找；找不到再查 DB 主

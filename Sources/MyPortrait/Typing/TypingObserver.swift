@@ -707,7 +707,9 @@ final class TypingObserver {
         // 已发出的消息留在 record 里（这是最该留的数据），不 handleDelete。
         if pending.isEmpty, !prevMid.isEmpty,
            ledger.hasSubmitKey(within: Self.submitAssocSec) {
-            onDevLog?("submit (not delete) bundle=\(key.bundleId) \(prevMid.count) chars")
+            onDevLog?("submit bundle=\(key.bundleId) \(prevMid.count) chars")
+            writer.appendSubmit(text: prevMid, bundleId: key.bundleId,
+                                nowMs: TypingRecordWriter.nowMs())
             return
         }
         onDevLog?("debounce diff bundle=\(key.bundleId) "
@@ -788,7 +790,9 @@ final class TypingObserver {
         if newValue.isEmpty, !deletion.isEmpty,
            ledger.hasSubmitKey(within: Self.submitAssocSec) {
             elementState[key] = state
-            onDevLog?("submit (not delete) bundle=\(key.bundleId) \(deletion.count) chars")
+            onDevLog?("submit bundle=\(key.bundleId) \(deletion.count) chars")
+            writer.appendSubmit(text: deletion, bundleId: key.bundleId,
+                                nowMs: TypingRecordWriter.nowMs())
             return
         }
 
