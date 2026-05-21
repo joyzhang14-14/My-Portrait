@@ -320,7 +320,7 @@ final class PortraitDistiller {
         let portraitType: String = (category == "emotions") ? "emotion" : "experience"
         var file = PortraitFile(
             created: Date(),
-            impact: 3,                    // distilled-portrait baseline
+            // impact: 不传 —— portrait 不持有 impact（event-only 字段）。
             body: renderBody(decision: decision, derivedIds: decision.derivedFromEventIds),
             source: "distilled",
             tags: [category, "portrait"],
@@ -332,7 +332,9 @@ final class PortraitDistiller {
             category: category,
             memberFrameIds: []
         )
-        WeightCalculator.recompute(&file)
+        // 新 portrait = "一次合并自零"，EMA.afterMerge(0, 0) = 1.0 —— 跟 P3
+        // baseline 一致。这是字面量赋值，不走 event 的 WeightCalculator 公式。
+        file.weight = 1.0
         try PortraitFileIO.write(file, to: url)
     }
 
@@ -355,7 +357,8 @@ final class PortraitDistiller {
         let newBody = renderBody(decision: decision, derivedIds: mergedDerived)
         file.body = newBody
         file.recordOccurrence(on: Date())    // mark as "still relevant today"
-        WeightCalculator.recompute(&file)
+        // portrait weight 不再走 WeightCalculator（event 公式）。P5 接入
+        // WeightEMA.afterMerge；interim 内 update 不动 stored weight。
         try PortraitFileIO.write(file, to: url)
 
         // 审计日志：body 实际变化才记一条 distill_changelog，供 debug / 回滚。
@@ -472,7 +475,7 @@ final class PortraitDistiller {
                 id: rel,
                 title: f.eventTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : f.eventTitle,
                 summary: f.eventSummary,
-                impact: f.impact,
+                impact: f.impact ?? 0,   // event 必有 impact，?? 0 防御不触发
                 weight: f.weight,
                 created: f.created,
                 occurrenceDays: f.occurrences.count

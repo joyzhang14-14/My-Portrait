@@ -373,9 +373,10 @@ enum Backfill {
     /// Sync helper — NSEnumerator iteration isn't usable from `async` bodies
     /// under Swift 6 strict concurrency, so isolate it here.
     nonisolated private static func weightPassSync() {
-        for root in [Storage.eventsDir, Storage.portraitDir] {
-            weightPassDir(root)
-        }
+        // 只对 events/ 跑 WeightCalculator —— portrait 不再走 event 的
+        // impact×decay 公式。portrait 的 weight 由 P5 EMA 写入路径管理；
+        // P5 接入前 portrait weight 保持 P3 迁移后的 1.0 不被覆盖。
+        weightPassDir(Storage.eventsDir)
     }
 
     nonisolated private static func weightPassDir(_ root: URL) {

@@ -884,7 +884,7 @@ enum DumpEventsByCategoryCLI {
                 "id": rel,
                 "title": f.eventTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : f.eventTitle,
                 "summary": f.eventSummary,
-                "impact": f.impact,
+                "impact": f.impact ?? 0,   // event 路径 dump；event 必有 impact
                 "occurrenceDays": f.occurrences.count,
             ]
             if f.eventType.lowercased() == "emotion" {
@@ -951,7 +951,7 @@ enum MaterializePortraitCLI {
             }
             var file = PortraitFile(
                 created: Date(),
-                impact: 3,
+                // portrait 不持有 impact（event-only 字段）。
                 body: md,
                 source: "distilled",
                 tags: [category, "portrait"],
@@ -963,7 +963,8 @@ enum MaterializePortraitCLI {
                 category: category,
                 memberFrameIds: []
             )
-            WeightCalculator.recompute(&file)
+            // 新 portrait baseline = EMA.afterMerge(0,0) = 1.0；不走 event 公式。
+            file.weight = 1.0
             let url = dir.appendingPathComponent(slug + ".md")
             do {
                 try PortraitFileIO.write(file, to: url)
