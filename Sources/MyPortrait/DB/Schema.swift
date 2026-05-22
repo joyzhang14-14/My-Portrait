@@ -449,6 +449,20 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v17 — typing_events 记浏览器 URL
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 浏览器 app 里，光按 bundle_id 分太粗（一个 Safari 混了所有页面）。
+        // v17 加 `url` 列：浏览器 record 记下输入时所在页面的 URL（取自焦点
+        // 窗口的 AXDocument，跟 frames.url 同路子）。非浏览器 url 为空。
+        // Input 页据此把浏览器拆成 per-URL 分组。
+        m.registerMigration("v17_typing_events_url") { db in
+            try db.alter(table: "typing_events") { t in
+                t.add(column: "url", .text).notNull().defaults(to: "")
+            }
+        }
+
         return m
     }
 }

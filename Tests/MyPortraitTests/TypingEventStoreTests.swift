@@ -44,7 +44,7 @@ final class TypingEventStoreTests: XCTestCase {
     func testInsertAndFetch() throws {
         let store = try makeStore()
         try store.insert(event("app.a", 1, started: 100, ended: 200, text: "hello"))
-        let recs = try store.records(bundleId: "app.a")
+        let recs = try store.records(bundleId: "app.a", url: "")
         XCTAssertEqual(recs.count, 1)
         let got = try XCTUnwrap(recs.first)
         XCTAssertNotNil(got.id)
@@ -60,7 +60,7 @@ final class TypingEventStoreTests: XCTestCase {
         let store = try makeStore()
         try store.insert(event("app.a", 1, started: 1, ended: 2, text: "first"))
         try store.insert(event("app.a", 1, started: 3, ended: 4, text: "second"))
-        XCTAssertEqual(try store.records(bundleId: "app.a").count, 2)
+        XCTAssertEqual(try store.records(bundleId: "app.a", url: "").count, 2)
     }
 
     /// records 按 started_at 倒序。
@@ -68,7 +68,7 @@ final class TypingEventStoreTests: XCTestCase {
         let store = try makeStore()
         try store.insert(event("a", 1, started: 100, ended: 200, text: "old"))
         try store.insert(event("a", 1, started: 300, ended: 400, text: "new"))
-        XCTAssertEqual(try store.records(bundleId: "a").map(\.text), ["new", "old"])
+        XCTAssertEqual(try store.records(bundleId: "a", url: "").map(\.text), ["new", "old"])
     }
 
     /// appSummaries：按 app 聚合 count + 最近 ended_at，按 ended_at 倒序。
@@ -90,8 +90,8 @@ final class TypingEventStoreTests: XCTestCase {
         let store = try makeStore()
         try store.insert(event("a", 1, started: 1, ended: 2, text: "x"))
         try store.insert(event("b", 1, started: 1, ended: 2, text: "y"))
-        try store.delete(bundleId: "a")
-        XCTAssertEqual(try store.records(bundleId: "a").count, 0)
-        XCTAssertEqual(try store.records(bundleId: "b").count, 1)
+        try store.delete(bundleId: "a", url: "")
+        XCTAssertEqual(try store.records(bundleId: "a", url: "").count, 0)
+        XCTAssertEqual(try store.records(bundleId: "b", url: "").count, 1)
     }
 }

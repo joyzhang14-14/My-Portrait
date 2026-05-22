@@ -338,17 +338,46 @@ final class TypingObserver {
         }
         attachment?.focusedElement = focused
 
-        // 读 baseline → writer 开新 session。
+        // 读 baseline。
         let baseline: String = await axCall {
             var ref: CFTypeRef?
             let e = AXUIElementCopyAttributeValue(
                 focBox.v, kAXValueAttribute as CFString, &ref)
             return (e == .success ? (ref as? String) : nil) ?? ""
         }
-        guard running, let att = attachment else { return }
+        guard running, let attB = attachment else { return }
+
+        // 浏览器 app → 读焦点窗口 AXDocument 拿当前页面 URL（同 FocusProbe）。
+        var url = ""
+        if Self.browserBundleIds.contains(attB.bundleId) {
+            let appBox2 = SendableBox(v: appElement)
+            url = await axCall {
+                var winRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(
+                        appBox2.v, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
+                      let winRef, CFGetTypeID(winRef) == AXUIElementGetTypeID()
+                else { return "" }
+                let win = winRef as! AXUIElement
+                var docRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(
+                        win, "AXDocument" as CFString, &docRef) == .success
+                else { return "" }
+                return (docRef as? String) ?? ""
+            }
+            guard running, attachment != nil else { return }
+        }
+
+        guard let att = attachment else { return }
         let key = ElementKey(pid: att.pid, elementHash: Int(CFHash(focused)))
-        writer.beginSession(key: key, bundleId: att.bundleId, baseline: baseline)
+        writer.beginSession(key: key, bundleId: att.bundleId, baseline: baseline, url: url)
     }
+
+    /// 9 个浏览器 bundle id —— 跟 FocusProbe.browserBundleIds 平行（各自维护）。
+    private static let browserBundleIds: Set<String> = [
+        "com.google.Chrome", "com.apple.Safari", "com.microsoft.edgemac",
+        "com.brave.Browser", "company.thebrowser.Browser", "org.chromium.Chromium",
+        "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "org.mozilla.firefox",
+    ]
 
     // MARK: - 通知处理
 

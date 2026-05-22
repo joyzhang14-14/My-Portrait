@@ -11,7 +11,7 @@ struct InputCaptureView: View {
     @Environment(\.services) private var services
 
     @State private var apps: [TypingAppSummary] = []
-    @State private var selectedApp: String?              // bundle_id
+    @State private var selectedGroup: TypingAppSummary?   // (app, URL) 分组
     @State private var records: [TypingEvent] = []
     @State private var selectedRecordId: Int64?
     @State private var loadFailed = false
@@ -33,8 +33,8 @@ struct InputCaptureView: View {
 
     @ViewBuilder
     private var leftColumn: some View {
-        if let bundleId = selectedApp {
-            recordsListColumn(bundleId: bundleId)
+        if let group = selectedGroup {
+            recordsListColumn(group: group)
         } else {
             appsListColumn
         }
@@ -69,7 +69,7 @@ struct InputCaptureView: View {
                         ForEach(apps) { app in
                             AppRow(app: app)
                                 .contentShape(Rectangle())
-                                .onTapGesture { Task { await openApp(app.bundleId) } }
+                                .onTapGesture { Task { await openGroup(app) } }
                             Divider().background(Color.white.opacity(0.04))
                         }
                     }
@@ -80,26 +80,34 @@ struct InputCaptureView: View {
         .background(Color.black.opacity(0.28))
     }
 
-    private func recordsListColumn(bundleId: String) -> some View {
+    private func recordsListColumn(group: TypingAppSummary) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Button {
-                    selectedApp = nil
+                    selectedGroup = nil
                     selectedRecordId = nil
                     records = []
                 } label: { Image(systemName: "chevron.left") }
                 .buttonStyle(.bouncyIcon)
                 .help("Back to apps")
-                Text(Self.appLabel(bundleId))
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Self.appLabel(group.bundleId))
+                        .font(.system(size: 16, weight: .semibold))
+                        .lineLimit(1)
+                    if !group.url.isEmpty {
+                        Text(group.url)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                }
                 Text("\(records.count)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button { confirmingDelete = true } label: { Image(systemName: "trash") }
                     .buttonStyle(.bouncyIcon)
-                    .help("Delete all captured typing for this app")
+                    .help("Delete all captured typing for this group")
             }
             .padding(.horizontal, 16)
             .padding(.top, 44)
@@ -122,15 +130,15 @@ struct InputCaptureView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.28))
         .confirmationDialog(
-            "Delete all captured typing for “\(Self.appLabel(bundleId))”?",
+            "Delete all captured typing for “\(Self.appLabel(group.bundleId))”?",
             isPresented: $confirmingDelete, titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                Task { await deleteApp(bundleId) }
+                Task { await deleteGroup(group) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently removes all \(records.count) typing records for this app.")
+            Text("This permanently removes all \(records.count) typing records here.")
         }
     }
 
@@ -207,7 +215,7 @@ struct InputCaptureView: View {
                 Image(systemName: "keyboard")
                     .font(.system(size: 30, weight: .light))
                     .foregroundStyle(.tertiary)
-                Text(selectedApp == nil ? "Select an app" : "Select a record")
+                Text(selectedGroup == nil ? "Select an app" : "Select a record")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -217,13 +225,13 @@ struct InputCaptureView: View {
 
     @ViewBuilder
     private func metadataBlock(_ rec: TypingEvent) -> some View {
-        let rows: [(String, String)] = [
-            ("bundle_id", rec.bundleId),
-            ("element", Self.elementLabel(rec.elementHash, in: records)),
-            ("started_at", Self.timeString(rec.startedAt)),
-            ("ended_at", Self.timeString(rec.endedAt)),
-            ("total_chars", "\(rec.totalChars)")
-        ]
+        let rows: [(String, String)] =
+            [("bundle_id", rec.bundleId),
+             ("element", Self.elementLabel(rec.elementHash, in: records))]
+            + (rec.url.isEmpty ? [] : [("url", rec.url)])
+            + [("started_at", Self.timeString(rec.startedAt)),
+               ("ended_at", Self.timeString(rec.endedAt)),
+               ("total_chars", "\(rec.totalChars)")]
         VStack(alignment: .leading, spacing: 4) {
             ForEach(rows, id: \.0) { row in
                 HStack(spacing: 12) {
@@ -292,25 +300,25 @@ struct InputCaptureView: View {
         } catch {
             apps = []; loadFailed = true
         }
-        if let id = selectedApp, !apps.contains(where: { $0.bundleId == id }) {
-            selectedApp = nil; records = []; selectedRecordId = nil
+        if let g = selectedGroup, !apps.contains(where: { $0.id == g.id }) {
+            selectedGroup = nil; records = []; selectedRecordId = nil
         }
     }
 
     @MainActor
-    private func openApp(_ bundleId: String) async {
+    private func openGroup(_ group: TypingAppSummary) async {
         guard let store = services?.typingStore else { return }
-        selectedApp = bundleId
+        selectedGroup = group
         selectedRecordId = nil
-        records = (try? store.records(bundleId: bundleId)) ?? []
+        records = (try? store.records(bundleId: group.bundleId, url: group.url)) ?? []
     }
 
-    /// 永久删除某 app 的全部 typing records。
+    /// 永久删除某 (app, URL) 分组的全部 typing records。
     @MainActor
-    private func deleteApp(_ bundleId: String) async {
+    private func deleteGroup(_ group: TypingAppSummary) async {
         guard let store = services?.typingStore else { return }
-        try? store.delete(bundleId: bundleId)
-        selectedApp = nil
+        try? store.delete(bundleId: group.bundleId, url: group.url)
+        selectedGroup = nil
         records = []
         selectedRecordId = nil
         await reloadApps()
@@ -407,6 +415,12 @@ private struct AppRow: View {
                 Text(InputCaptureView.appLabel(app.bundleId))
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
+                if !app.url.isEmpty {
+                    Text(app.url)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
                 HStack(spacing: 6) {
                     Text(InputCaptureView.timeString(app.lastEndedAt))
                         .font(.system(size: 9, design: .monospaced))

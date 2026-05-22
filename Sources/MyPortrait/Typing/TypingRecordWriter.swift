@@ -32,6 +32,8 @@ final class TypingRecordWriter {
 
         /// session 开始时 element 已有的内容（immutable）。不进最终 `text`。
         let sessionStart: String
+        /// 浏览器输入时所在页面 URL；非浏览器为空。
+        let url: String
         /// 该 element 最近一次 AX 完整 value。
         var lastValueSnapshot: String
         var lastValueChangeTs: TimeInterval
@@ -48,12 +50,14 @@ final class TypingRecordWriter {
         var flushTimer: Timer?
         var pendingChanges = false
 
-        init(bundleId: String, elementHash: Int, sessionStart: String, nowMs: Int64) {
+        init(bundleId: String, elementHash: Int, sessionStart: String,
+             url: String, nowMs: Int64) {
             self.bundleId = bundleId
             self.elementHash = elementHash
             self.startedAtMs = nowMs
             self.lastEventMs = nowMs
             self.sessionStart = sessionStart
+            self.url = url
             self.lastValueSnapshot = sessionStart
             self.lastValueChangeTs = CACurrentMediaTime()
             self.editLog = []
@@ -103,6 +107,7 @@ final class TypingRecordWriter {
         let endValue: String
         let editLog: [EditEntry]
         let blacklist: Set<String>
+        let url: String
     }
 
     /// UTC 毫秒 —— started_at / ended_at / edit_log ts 都用它。
@@ -112,11 +117,12 @@ final class TypingRecordWriter {
 
     // MARK: - session 生命周期
 
-    /// element 获得焦点 → 开一段新 session。`baseline` = 此刻 AX 完整 value。
-    func beginSession(key: ElementKey, bundleId: String, baseline: String) {
+    /// element 获得焦点 → 开一段新 session。`baseline` = 此刻 AX 完整 value，
+    /// `url` = 浏览器当前页面 URL（非浏览器传空）。
+    func beginSession(key: ElementKey, bundleId: String, baseline: String, url: String) {
         flushElement(key)   // 若有旧 record，先 flush 落库 + 移除
         state[key] = InProgressRecord(bundleId: bundleId, elementHash: key.elementHash,
-                                      sessionStart: baseline, nowMs: Self.nowMs())
+                                      sessionStart: baseline, url: url, nowMs: Self.nowMs())
     }
 
     /// 一次 AX value-change。存进 pendingValue + 重排 350ms debounce。
@@ -248,7 +254,8 @@ final class TypingRecordWriter {
                 sessionStart: rec.sessionStart,
                 endValue: rec.lastValueSnapshot,
                 editLog: rec.editLog,
-                blacklist: Set((blacklist[key] ?? [:]).keys)
+                blacklist: Set((blacklist[key] ?? [:]).keys),
+                url: rec.url
             )
             dbQueue.async { Self.persist(snap, store: store) }
         }
@@ -264,8 +271,10 @@ final class TypingRecordWriter {
         // continuation 目标：同 (app, element)、end_value 首尾 100 字接得上。
         let candidates = (try? store.recordsForElement(
             bundleId: snap.bundleId, elementHash: snap.elementHash)) ?? []
+        // 接得上还要求**同 URL** —— 浏览器换页 → 新 record，不跟旧页合并。
         let target = snap.sessionStart.isEmpty ? nil : candidates.first {
-            isContinuation(sessionStart: snap.sessionStart, recordEndValue: $0.endValue)
+            $0.url == snap.url
+                && isContinuation(sessionStart: snap.sessionStart, recordEndValue: $0.endValue)
         }
 
         if let target {
@@ -288,7 +297,8 @@ final class TypingRecordWriter {
                 totalChars: mergedText.count,
                 sessionStart: target.sessionStart,
                 endValue: snap.endValue,
-                stripped: encodeStrings(strippedNow)
+                stripped: encodeStrings(strippedNow),
+                url: target.url
             )
             try? store.update(merged)
         } else {
@@ -307,7 +317,8 @@ final class TypingRecordWriter {
                 totalChars: cleaned.count,
                 sessionStart: snap.sessionStart,
                 endValue: snap.endValue,
-                stripped: encodeStrings(strippedNow)
+                stripped: encodeStrings(strippedNow),
+                url: snap.url
             )
             try? store.insert(event)
         }
@@ -318,9 +329,11 @@ final class TypingRecordWriter {
         guard let rec = state[key] else { return }
         let bundleId = rec.bundleId
         let elementHash = rec.elementHash
+        let url = rec.url
         flushElement(key)
         state[key] = InProgressRecord(bundleId: bundleId, elementHash: elementHash,
-                                      sessionStart: newSessionStart, nowMs: Self.nowMs())
+                                      sessionStart: newSessionStart, url: url,
+                                      nowMs: Self.nowMs())
     }
 
     /// flush 某 app 的所有 element（app 切走时）。

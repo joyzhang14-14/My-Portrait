@@ -27,6 +27,8 @@ struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable
     /// 这条 record 实际剔除过的噪声段（JSON [String]）—— merge 重算 text
     /// 时一并剔除，不依赖内存黑名单存活。
     var stripped: String = "[]"
+    /// 浏览器输入时所在页面的 URL；非浏览器为空。Input 页据此 per-URL 分组。
+    var url: String = ""
 
     static let databaseTableName = "typing_events"
     static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
@@ -37,12 +39,14 @@ struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable
     }
 }
 
-/// 一个 app 的 records 概览 —— Memory「Input」页左列用。
+/// Input 页左列的一个分组。非浏览器 = 一个 app 一组（`url` 空）；浏览器 =
+/// 一个 (app, URL) 一组。
 struct TypingAppSummary: Identifiable, Sendable {
     var bundleId: String
+    var url: String
     var recordCount: Int
     var lastEndedAt: Int64
-    var id: String { bundleId }
+    var id: String { bundleId + "\u{1}" + url }
 }
 
 /// `typing_events` 的 DAO。接受外部注入的 DatabasePool。
@@ -58,7 +62,7 @@ struct TypingEventStore: Sendable {
     /// 显式列清单，所有 SELECT 复用。
     private static let columns =
         "id, bundle_id, element_hash, started_at, ended_at, text, edit_log, " +
-        "total_chars, session_start, end_value, stripped"
+        "total_chars, session_start, end_value, stripped, url"
 
     /// INSERT 一条新 record。
     func insert(_ event: TypingEvent) throws {
@@ -87,40 +91,42 @@ struct TypingEventStore: Sendable {
         }
     }
 
-    /// 按 app 聚合：每个 app 的 record 数 + 最近 ended_at。Input 页左列。
+    /// 按 (app, URL) 聚合 —— Input 页左列。非浏览器 url 恒为空 → 一个 app
+    /// 归一组；浏览器每个 URL 一组。
     func appSummaries() throws -> [TypingAppSummary] {
         try dbPool.read { db in
             let rows = try Row.fetchAll(
                 db,
-                sql: "SELECT bundle_id, COUNT(*) AS n, MAX(ended_at) AS last " +
-                     "FROM typing_events GROUP BY bundle_id ORDER BY last DESC"
+                sql: "SELECT bundle_id, url, COUNT(*) AS n, MAX(ended_at) AS last " +
+                     "FROM typing_events GROUP BY bundle_id, url ORDER BY last DESC"
             )
             return rows.map {
                 TypingAppSummary(bundleId: $0["bundle_id"],
+                                 url: $0["url"],
                                  recordCount: $0["n"],
                                  lastEndedAt: $0["last"])
             }
         }
     }
 
-    /// 某 app 的全部 records，按 started_at 倒序。
-    func records(bundleId: String) throws -> [TypingEvent] {
+    /// 某 (app, URL) 分组的全部 records，按 started_at 倒序。
+    func records(bundleId: String, url: String) throws -> [TypingEvent] {
         try dbPool.read { db in
             try TypingEvent.fetchAll(
                 db,
                 sql: "SELECT \(Self.columns) FROM typing_events " +
-                     "WHERE bundle_id = ? ORDER BY started_at DESC",
-                arguments: [bundleId]
+                     "WHERE bundle_id = ? AND url = ? ORDER BY started_at DESC",
+                arguments: [bundleId, url]
             )
         }
     }
 
-    /// 删除某 app 的全部 records。Input 页 app 级删除键用。
-    func delete(bundleId: String) throws {
+    /// 删除某 (app, URL) 分组的全部 records。Input 页分组级删除键用。
+    func delete(bundleId: String, url: String) throws {
         try dbPool.write { db in
             try db.execute(
-                sql: "DELETE FROM typing_events WHERE bundle_id = ?",
-                arguments: [bundleId]
+                sql: "DELETE FROM typing_events WHERE bundle_id = ? AND url = ?",
+                arguments: [bundleId, url]
             )
         }
     }

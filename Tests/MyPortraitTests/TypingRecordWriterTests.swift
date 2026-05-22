@@ -105,14 +105,14 @@ final class TypingRecordWriterTests: XCTestCase {
         let store = try makeStore()
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
-        writer.beginSession(key: key, bundleId: "app.a", baseline: "")
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "", url: "")
         let rec = try XCTUnwrap(writer.state[key])
         rec.lastValueSnapshot = "hello"
         rec.pendingChanges = true
         writer.flushElement(key)
 
         writer.waitForPendingDBWork()
-        let recs = try store.records(bundleId: "app.a")
+        let recs = try store.records(bundleId: "app.a", url: "")
         XCTAssertEqual(recs.count, 1)
         XCTAssertEqual(recs.first?.text, "hello")
         XCTAssertNil(writer.state[key])
@@ -123,14 +123,14 @@ final class TypingRecordWriterTests: XCTestCase {
         let store = try makeStore()
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
-        writer.beginSession(key: key, bundleId: "app.a", baseline: "一大段已有的笔记内容")
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "一大段已有的笔记内容", url: "")
         let rec = try XCTUnwrap(writer.state[key])
         rec.lastValueSnapshot = "一大段已XXX有的笔记内容"
         rec.pendingChanges = true
         writer.flushElement(key)
 
         writer.waitForPendingDBWork()
-        XCTAssertEqual(try store.records(bundleId: "app.a").first?.text, "XXX")
+        XCTAssertEqual(try store.records(bundleId: "app.a", url: "").first?.text, "XXX")
     }
 
     /// 没发生变化的 session → flush 不落库。
@@ -138,9 +138,9 @@ final class TypingRecordWriterTests: XCTestCase {
         let store = try makeStore()
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
-        writer.beginSession(key: key, bundleId: "app.a", baseline: "")
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "", url: "")
         writer.flushElement(key)
-        XCTAssertEqual(try store.records(bundleId: "app.a").count, 0)
+        XCTAssertEqual(try store.records(bundleId: "app.a", url: "").count, 0)
     }
 
     /// 两个 element 各自独立 record（不再 UPSERT 同 bundle_id）。
@@ -149,14 +149,14 @@ final class TypingRecordWriterTests: XCTestCase {
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         for (eh, txt) in [(1, "first"), (2, "second")] {
             let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: eh)
-            writer.beginSession(key: key, bundleId: "app.a", baseline: "")
+            writer.beginSession(key: key, bundleId: "app.a", baseline: "", url: "")
             let rec = try XCTUnwrap(writer.state[key])
             rec.lastValueSnapshot = txt
             rec.pendingChanges = true
             writer.flushElement(key)
         }
         writer.waitForPendingDBWork()
-        let recs = try store.records(bundleId: "app.a")
+        let recs = try store.records(bundleId: "app.a", url: "")
         XCTAssertEqual(recs.count, 2)
         XCTAssertEqual(Set(recs.map(\.text)), ["first", "second"])
     }
@@ -188,19 +188,19 @@ final class TypingRecordWriterTests: XCTestCase {
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
 
-        writer.beginSession(key: key, bundleId: "app.a", baseline: "")
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "", url: "")
         writer.state[key]?.lastValueSnapshot = "ABC"
         writer.state[key]?.pendingChanges = true
         writer.flushElement(key)
 
         // session 2 起点 = "ABC"，接得上 record1 的 end_value "ABC"。
-        writer.beginSession(key: key, bundleId: "app.a", baseline: "ABC")
+        writer.beginSession(key: key, bundleId: "app.a", baseline: "ABC", url: "")
         writer.state[key]?.lastValueSnapshot = "ABCDEF"
         writer.state[key]?.pendingChanges = true
         writer.flushElement(key)
 
         writer.waitForPendingDBWork()
-        let recs = try store.records(bundleId: "app.a")
+        let recs = try store.records(bundleId: "app.a", url: "")
         XCTAssertEqual(recs.count, 1)               // 合并，没新建
         XCTAssertEqual(recs.first?.text, "ABCDEF")
         XCTAssertEqual(recs.first?.endValue, "ABCDEF")
@@ -212,12 +212,12 @@ final class TypingRecordWriterTests: XCTestCase {
         let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
         for msg in ["msg1", "msg2"] {
-            writer.beginSession(key: key, bundleId: "app.chat", baseline: "")
+            writer.beginSession(key: key, bundleId: "app.chat", baseline: "", url: "")
             writer.state[key]?.lastValueSnapshot = msg
             writer.state[key]?.pendingChanges = true
             writer.flushElement(key)
         }
         writer.waitForPendingDBWork()
-        XCTAssertEqual(try store.records(bundleId: "app.chat").count, 2)
+        XCTAssertEqual(try store.records(bundleId: "app.chat", url: "").count, 2)
     }
 }
