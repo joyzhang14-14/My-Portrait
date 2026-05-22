@@ -348,21 +348,31 @@ final class TypingObserver {
         guard running, let attB = attachment else { return }
 
         // 浏览器 app → 读焦点窗口 AXDocument 拿当前页面 URL（同 FocusProbe）。
+        // 浏览器 app → 从焦点元素往上爬，找 AXWebArea 的 AXURL（值是 CFURL）。
+        // 多个 AXWebArea（iframe 嵌套）时外层覆盖内层 → 留最外层 = 顶层页面。
         var url = ""
         if Self.browserBundleIds.contains(attB.bundleId) {
-            let appBox2 = SendableBox(v: appElement)
             url = await axCall {
-                var winRef: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(
-                        appBox2.v, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
-                      let winRef, CFGetTypeID(winRef) == AXUIElementGetTypeID()
-                else { return "" }
-                let win = winRef as! AXUIElement
-                var docRef: CFTypeRef?
-                guard AXUIElementCopyAttributeValue(
-                        win, "AXDocument" as CFString, &docRef) == .success
-                else { return "" }
-                return (docRef as? String) ?? ""
+                func parent(_ el: AXUIElement) -> AXUIElement? {
+                    var p: CFTypeRef?
+                    guard AXUIElementCopyAttributeValue(
+                            el, kAXParentAttribute as CFString, &p) == .success,
+                          let p, CFGetTypeID(p) == AXUIElementGetTypeID() else { return nil }
+                    return (p as! AXUIElement)
+                }
+                var result = ""
+                var cur: AXUIElement? = focBox.v
+                for _ in 0..<12 {
+                    guard let c = cur else { break }
+                    var ref: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(c, "AXURL" as CFString, &ref) == .success,
+                       let nsurl = ref as? NSURL, let s = nsurl.absoluteString,
+                       s.hasPrefix("http") {
+                        result = s
+                    }
+                    cur = parent(c)
+                }
+                return result
             }
             guard running, attachment != nil else { return }
         }
