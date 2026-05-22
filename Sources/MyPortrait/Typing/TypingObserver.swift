@@ -7,8 +7,8 @@
 ///
 /// **AX 调用不在主线程跑**：`AXUIElementCopyAttributeValue` /
 /// `AXObserverAddNotification` 等是同步跨进程调用，目标 app 卡住时会死锁。
-/// 这里把每个 AX C 调用经 `axCall` 挪到后台串行队列 `axQueue`，MainActor
-/// 用 `await` 等它 —— 调用真卡死也只卡住 axQueue，主线程照常跑 run loop、
+/// 这里把每个 AX C 调用经 `axCall` 挪到后台串行队列 `AXSerialQueue`，MainActor
+/// 用 `await` 等它 —— 调用真卡死也只卡住 AXSerialQueue，主线程照常跑 run loop、
 /// app 不冻。所有 AX 操作再经 `enqueueAXOp` 串成一条链，保证顺序 +
 /// `attachment` 不被并发改。
 ///
@@ -59,8 +59,6 @@ final class TypingObserver {
 
     // MARK: - AX 后台队列 / 串行 op 链
 
-    /// 所有会跨进程、可能卡死的 AX C 调用都在这条后台串行队列上跑。
-    private let axQueue = DispatchQueue(label: "com.joyzhang.myportrait.typing.ax")
     /// AX 操作串行链 —— 每个 op 等上一个完成，保证顺序、`attachment` 不并发改。
     private var axOpChain: Task<Void, Never>?
 
@@ -155,10 +153,10 @@ final class TypingObserver {
     // MARK: - AX 后台调用 / op 链
 
     /// 把一个 AX C 调用挪到后台串行队列跑，MainActor `await` 它。
-    /// 调用卡死也只卡 axQueue，主线程照常跑 run loop。
+    /// 调用卡死也只卡 AXSerialQueue，主线程照常跑 run loop。
     private func axCall<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
         await withCheckedContinuation { (cont: CheckedContinuation<T, Never>) in
-            axQueue.async { cont.resume(returning: work()) }
+            AXSerialQueue.shared.async { cont.resume(returning: work()) }
         }
     }
 
@@ -230,7 +228,7 @@ final class TypingObserver {
             return
         }
 
-        // AXObserverCreate 在 axQueue 上跑（不卡主线程）。
+        // AXObserverCreate 在 AXSerialQueue 上跑（不卡主线程）。
         let cb = Self.axCallback
         let created: SendableBox<AXObserver?> = await axCall {
             var ref: AXObserver?

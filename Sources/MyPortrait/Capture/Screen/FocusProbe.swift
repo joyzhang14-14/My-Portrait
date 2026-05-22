@@ -49,10 +49,6 @@ actor FocusProbe {
     /// AX 文本总长度上限（字符）。防止巨型页面（如 Twitter timeline）撑爆 RSS。
     private let axMaxChars = 100_000
 
-    /// AX 树遍历跑这条后台串行队列 —— 同步阻塞的 AX 调用不能堵 actor 执行器
-    /// （AX 树大时会卡死协作线程池 → 线程爆炸 + 崩溃）。
-    private static let axQueue = DispatchQueue(label: "com.myportrait.capture.focus.ax")
-
     private var cached: FocusInfo = FocusInfo(
         appName: "Unknown",
         bundleId: nil,
@@ -129,11 +125,12 @@ actor FocusProbe {
 
         // AX 查询。若无权限就只返回 app 名。
         if AXIsProcessTrusted() {
-            // AX 树遍历是同步阻塞调用 —— 挪到后台队列，绝不在 actor 执行器上
-            // 跑（AX 树大时会堵死协作线程池 → 线程爆炸 + 崩溃）。
+            // AX 树遍历是同步阻塞调用 —— 跑全 app 共用的串行 AX 队列:既不堵
+            // actor 执行器，又跟其它子系统(TypingObserver)的 AX 调用串行不并发
+            // （AX API 并发不安全，见 AXSerialQueue）。
             let result: (title: String?, url: String?, axText: String?) =
                 await withCheckedContinuation { cont in
-                    Self.axQueue.async {
+                    AXSerialQueue.shared.async {
                         cont.resume(returning: self.queryAX(pid: pid, bundleId: bundleId))
                     }
                 }
@@ -160,6 +157,8 @@ actor FocusProbe {
     /// 仅在 refresh() 内调用，不在采集热路径上。
     nonisolated private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?) {
         let axApp = AXUIElementCreateApplication(pid)
+        // 卡死时单次调用最多等 1.5s —— 共用串行队列,一个慢调用别拖垮全局。
+        AXUIElementSetMessagingTimeout(axApp, 1.5)
 
         // 1. 焦点窗口
         var focusedWindowRef: CFTypeRef?
