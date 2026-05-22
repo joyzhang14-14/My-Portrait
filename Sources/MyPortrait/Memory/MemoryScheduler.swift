@@ -225,6 +225,11 @@ final class MemoryScheduler {
                 }
             }
         }
+
+        // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
+        // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
+        _ = MemoryBudget_applyToDisk()
+
         return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 

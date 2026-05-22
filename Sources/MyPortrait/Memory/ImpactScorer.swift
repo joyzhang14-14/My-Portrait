@@ -146,10 +146,10 @@ final class ImpactScorer {
                         scoredCount: scored,
                         totalCount: candidates.count))
 
-        // Hook：impact 评分一跑完就自动接周预算 rebalance。rebalance 是程序化、
-        // 不烧 token 的 consolidation pass，消费的正是上面刚写入的 impact。
-        // 手动 Rescore 和调度器 impact 任务都走 rescoreAll，所以两条路都自动接上。
-        _ = MemoryBudget_applyToDisk()
+        // rebalance 不在这里跑 —— rescoreAll 被 runEventJob 按天调用（一次
+        // event 处理调 N 次），放这里会让 rebalance 跑 N 遍、几次就把
+        // rebalance_count 烧到 maxRebalances 冻结。改成 runEventJob 末尾
+        // 整个跑完只调一次。
 
         return Result(
             scoredCount: scored,
