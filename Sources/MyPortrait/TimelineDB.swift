@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import SQLite3
 import os.log
 
@@ -686,23 +687,32 @@ struct TimelineDB: Sendable {
 
     /// 合并两个说话人：把 `merge` 的转录 + 声纹样本全部改挂到 `keep`，再删掉 `merge`。
     /// 事务执行。keep 的 centroid 不重算 —— matchSpeaker 主要比对样本向量，已够用。
+    ///
+    /// **为什么用 GRDB 连接而不是裸 sqlite**：`UPDATE audio_transcriptions` 会触发
+    /// FTS5 同步触发器 `__transcriptions_fts_au`，它要用自定义分词器 `foundation_icu`
+    /// 重新分词。裸 sqlite 连接没注册这个分词器 → 触发器报错 → 整个事务回滚、
+    /// 合并静默失败。GRDB 连接通过 prepareDatabase 注册分词器。
     @discardableResult
     func mergeSpeakers(keep keepId: Int64, merge mergeId: Int64) -> Bool {
         guard exists, keepId != mergeId else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_close(db) }
-        func exec(_ sql: String) -> Bool { sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK }
-
-        guard exec("BEGIN") else { return false }
-        let ok = exec("UPDATE audio_transcriptions SET speaker_id = \(keepId) WHERE speaker_id = \(mergeId)")
-            && exec("UPDATE speaker_embeddings SET speaker_id = \(keepId) WHERE speaker_id = \(mergeId)")
-            && exec("DELETE FROM speakers WHERE id = \(mergeId)")
-        if ok {
-            return exec("COMMIT")
-        } else {
-            _ = exec("ROLLBACK")
-            timelineLog.error("mergeSpeakers failed: \(sqlErr(db), privacy: .public)")
+        do {
+            var config = Configuration()
+            config.prepareDatabase { db in
+                db.add(tokenizer: FoundationTokenizer.self)
+            }
+            let queue = try DatabaseQueue(path: dbPath, configuration: config)
+            try queue.write { db in
+                try db.execute(sql:
+                    "UPDATE audio_transcriptions SET speaker_id = ? WHERE speaker_id = ?",
+                    arguments: [keepId, mergeId])
+                try db.execute(sql:
+                    "UPDATE speaker_embeddings SET speaker_id = ? WHERE speaker_id = ?",
+                    arguments: [keepId, mergeId])
+                try db.execute(sql: "DELETE FROM speakers WHERE id = ?", arguments: [mergeId])
+            }
+            return true
+        } catch {
+            timelineLog.error("mergeSpeakers failed: \(String(describing: error), privacy: .public)")
             return false
         }
     }
