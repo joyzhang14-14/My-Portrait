@@ -94,7 +94,7 @@ actor AudioCaptureService {
         }
 
         registerDeviceChangeListener()
-        logger.info("AudioCaptureService started (mic, VAD-segmented)")
+        logger.notice("AudioCaptureService started (mic, VAD-segmented)")
     }
 
     func stop() async {

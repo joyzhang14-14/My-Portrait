@@ -32,7 +32,7 @@ actor MusicAudioDetector {
             report.append("\(bundleID ?? "<no-bundle>")\(music ? " [MUSIC]" : "")")
             if music { verdict = true }
         }
-        logger.info("isMusicPlaying: outputting=[\(report.joined(separator: ", "), privacy: .public)] → \(verdict, privacy: .public)")
+        logger.notice("isMusicPlaying: outputting=[\(report.joined(separator: ", "), privacy: .public)] → \(verdict, privacy: .public)")
         return verdict
     }
 
@@ -45,7 +45,7 @@ actor MusicAudioDetector {
             category = cat
         }
         let isMusic = (category == Self.musicCategory)
-        logger.info("category lookup: \(bundleID, privacy: .public) = \(category, privacy: .public) → music=\(isMusic)")
+        logger.notice("category lookup: \(bundleID, privacy: .public) = \(category, privacy: .public) → music=\(isMusic)")
         categoryCache[bundleID] = isMusic
         return isMusic
     }
@@ -131,15 +131,15 @@ final class MusicPlaybackMonitor {
     private func tick() async {
         let enabled = ConfigStore.shared.current.recording.audio.pauseOnMusicApp
         guard enabled else {
-            logger.info("tick: pauseOnMusicApp=false → musicDetected forced false")
+            logger.notice("tick: pauseOnMusicApp=false → musicDetected forced false")
             if musicDetected { musicDetected = false }
             return
         }
         let playing = await detector.isMusicPlaying()
-        logger.info("tick: pauseOnMusicApp=true playing=\(playing, privacy: .public) musicDetected(before)=\(self.musicDetected, privacy: .public)")
+        logger.notice("tick: pauseOnMusicApp=true playing=\(playing, privacy: .public) musicDetected(before)=\(self.musicDetected, privacy: .public)")
         if musicDetected != playing {
             musicDetected = playing
-            logger.info("music \(playing ? "started" : "stopped", privacy: .public) — audio capture \(playing ? "paused" : "resumed", privacy: .public)")
+            logger.notice("music \(playing ? "started" : "stopped", privacy: .public) — audio capture \(playing ? "paused" : "resumed", privacy: .public)")
         }
     }
 }

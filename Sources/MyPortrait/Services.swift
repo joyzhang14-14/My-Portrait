@@ -278,7 +278,7 @@ final class Services {
         )
             .map { [logger] enabled, perm, music in
                 let effective = !music && perm.isGranted && enabled
-                logger.info("audio sink: enabled=\(enabled, privacy: .public) micPerm=\(perm.isGranted, privacy: .public) music=\(music, privacy: .public) → effective=\(effective, privacy: .public)")
+                logger.notice("audio sink: enabled=\(enabled, privacy: .public) micPerm=\(perm.isGranted, privacy: .public) music=\(music, privacy: .public) → effective=\(effective, privacy: .public)")
                 return effective
             }
             .removeDuplicates()
@@ -454,7 +454,7 @@ final class Services {
     }
 
     private func applyAudioCapture(enabled: Bool) {
-        logger.info("applyAudioCapture(enabled: \(enabled, privacy: .public))")
+        logger.notice("applyAudioCapture(enabled: \(enabled, privacy: .public))")
         let audio = self.audio
         Task.detached(priority: .userInitiated) {
             if enabled {
