@@ -272,7 +272,9 @@ private func keystrokeLedgerTapCallback(
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
     let isPaste = flags.contains(.maskCommand) && keyCode == Int64(kVK_ANSI_V)
-    let isReturn = keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter)
+    // Shift+Return 在多数 app 里是换行，不是发送 —— 不算提交信号。
+    let isReturn = (keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter))
+        && !flags.contains(.maskShift)
     if isPaste {
         ledger.recordPaste()
     } else {
