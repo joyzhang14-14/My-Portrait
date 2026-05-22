@@ -203,7 +203,9 @@ actor AudioCaptureService {
         let state = InputBlockState()
         let status = converter.convert(to: output, error: &error) { _, statusPtr in
             if state.consumed {
-                statusPtr.pointee = .endOfStream
+                // .noDataNow（不是 .endOfStream）：本次输入喂完，但流继续。
+                // .endOfStream 会永久终结转换器，导致第二个缓冲起 convert 全失败。
+                statusPtr.pointee = .noDataNow
                 return nil
             }
             state.consumed = true
