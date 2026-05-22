@@ -43,19 +43,24 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
         )
         guard !speech.isEmpty else { return [] }
 
-        // 局部 speaker id（chunk 内）→ DB 持久 speaker id，每个解析一次。
+        // 局部 speaker id（chunk 内）→ DB 持久 speaker id。
+        // 每个局部说话人用它「最长的那段」去解析 —— 段越长，CAM++ 向量越稳。
         var localToDB: [Int: Int64] = [:]
+        for (local, segs) in Dictionary(grouping: speech, by: { $0.localSpeaker }) {
+            guard let best = segs.max(by: { $0.samples.count < $1.samples.count })
+            else { continue }
+            if let id = await resolveSpeaker(
+                embedding: best.embedding, speechSamples: best.samples.count
+            ) {
+                localToDB[local] = id
+            }
+        }
+
         var out: [DiarizedSegment] = []
         for s in speech {
-            let dbId: Int64?
-            if let cached = localToDB[s.localSpeaker] {
-                dbId = cached
-            } else {
-                dbId = await resolveSpeaker(embedding: s.embedding)
-                if let id = dbId { localToDB[s.localSpeaker] = id }
-            }
             out.append(DiarizedSegment(
-                startS: s.start, endS: s.end, speakerId: dbId, samples: s.samples
+                startS: s.start, endS: s.end,
+                speakerId: localToDB[s.localSpeaker], samples: s.samples
             ))
         }
 
@@ -94,12 +99,23 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
         }
     }
 
-    /// embedding → DB 持久 speaker id。命中已有说话人则追加样本，否则新建。
-    private func resolveSpeaker(embedding: [Float]) async -> Int64? {
+    /// 最短入库语音时长。短于此的段 CAM++ 向量不够可靠，不写库（只做只读匹配）。
+    /// 16kHz × 2s = 32000 样本。
+    private static let minEnrollSamples = 32_000
+
+    /// embedding → DB 持久 speaker id。
+    ///
+    /// 命中已有说话人 → 复用 id；只有足够长的段才把向量并进去（保持 centroid 干净）。
+    /// 未命中 → 仅足够长的段才新建说话人；短段不够可靠，返回 nil（留空标签）。
+    private func resolveSpeaker(embedding: [Float], speechSamples: Int) async -> Int64? {
+        let longEnough = speechSamples >= Self.minEnrollSamples
         if let matched = try? await db.matchSpeaker(embedding: embedding) {
-            try? await db.addEmbeddingToSpeaker(speakerId: matched, embedding: embedding)
+            if longEnough {
+                try? await db.addEmbeddingToSpeaker(speakerId: matched, embedding: embedding)
+            }
             return matched
         }
+        guard longEnough else { return nil }
         return try? await db.enrollSpeaker(embedding: embedding)
     }
 
