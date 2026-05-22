@@ -326,12 +326,6 @@ struct TypingRecordingSettingsView: View {
     /// 用户打过字的 app（bundle id）—— 给两个 app 选择器的下拉用。
     @State private var discovered: [String] = []
 
-    /// 常见「回车发送」app 预设（bundle id）。
-    static let commonChatApps: [String] = [
-        "com.tencent.xinWeChat", "com.tencent.qq", "com.apple.MobileSMS",
-        "com.tinyspeck.slackmacgap", "com.hnc.Discord", "ru.keepcoder.Telegram",
-    ]
-
     var body: some View {
         SettingsPage("Typing Recording", subtitle: "Learn your writing style") {
             typingSection
@@ -367,14 +361,12 @@ struct TypingRecordingSettingsView: View {
             footnote: "In these apps, pressing Return sends a message — captured as a “sent” event rather than a line break. Shift+Return is always a line break."
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Pick from your apps or the common chat list…")
+                Text("Pick an app you've typed in…")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TypingAppPicker(apps: config.binding(\.privacy.typingSubmitBundleIds),
-                                discovered: discovered,
-                                presets: Self.commonChatApps,
-                                presetTitle: "Common chat apps")
+                                discovered: discovered)
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }

@@ -486,8 +486,6 @@ struct IgnoredAppPicker: View {
 struct TypingAppPicker: View {
     @Binding var apps: [String]            // bundle id
     var discovered: [String] = []          // 用户打过字的 app（bundle id）
-    var presets: [String] = []             // 预设建议（bundle id）；空 → 不显示第二个下拉
-    var presetTitle: String = "Common apps"
     /// 永远生效、不可移除的条目（如硬编码黑名单）—— 灰显、带锁、无 × 。
     var locked: [String] = []
 
@@ -505,14 +503,8 @@ struct TypingAppPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                dropdown(title: "Select app", icon: "plus.circle.fill",
-                         options: discovered, emptyHint: "No typed-in apps yet")
-                if !presets.isEmpty {
-                    dropdown(title: presetTitle, icon: "app.badge",
-                             options: presets, emptyHint: "")
-                }
-            }
+            dropdown(title: "Select app", icon: "plus.circle.fill",
+                     options: discovered, emptyHint: "No typed-in apps yet")
             if !locked.isEmpty || !apps.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(locked, id: \.self) { lockedChip($0) }
