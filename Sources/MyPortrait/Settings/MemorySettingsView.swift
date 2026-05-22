@@ -10,24 +10,21 @@ struct MemorySettingsView: View {
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
 
-    /// 手动触发的 pipeline 阶段（都烧 LLM token）。Rebalance 不在列 —— 它是
-    /// 程序化的，已挂成 hook 在每次 impact rescore 后自动跑。
+    /// 手动触发的 pipeline 阶段（都烧 LLM token）。两个，对齐调度器的两个
+    /// scheduler。Rebalance 不在列 —— 程序化的，已挂成 hook 在 rescore 后自动跑。
     private enum ManualTrigger: String, Identifiable {
-        case backfill, rescore, distill
+        case eventProcessing, distill
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .backfill: return "Backfill events"
-            case .rescore:  return "Rescore impact"
-            case .distill:  return "Distill portrait"
+            case .eventProcessing: return "Process events"
+            case .distill:         return "Distill portrait"
             }
         }
         var desc: String {
             switch self {
-            case .backfill:
-                return "Reads the raw timeline and builds event files for any unprocessed days. Uses the LLM to cluster captured activity into semantic events."
-            case .rescore:
-                return "Re-scores every event's long-term impact with the LLM. The weekly budget rebalance runs automatically right after."
+            case .eventProcessing:
+                return "Reads the raw timeline, builds event files for unprocessed days, then re-scores every event's impact with the LLM. The weekly budget rebalance runs automatically at the end. Mirrors the scheduler's Event processing job."
             case .distill:
                 return "Distills events into long-term portrait entries. Uses the LLM once per portrait category."
             }
@@ -101,37 +98,34 @@ struct MemorySettingsView: View {
         runningTrigger = t
         defer { runningTrigger = nil }
         switch t {
-        case .backfill: await runBackfill()
-        case .rescore:  await runRescore()
-        case .distill:  await runDistill()
+        case .eventProcessing: await runEventProcessing()
+        case .distill:         await runDistill()
         }
     }
 
+    /// Backfill → Rescore 连跑，对齐调度器的 Event processing job。
+    /// Rescore 末尾的 rebalance hook 自动跟上。
     @MainActor
-    private func runBackfill() async {
+    private func runEventProcessing() async {
         actionStatus = "Backfilling events from the timeline…"
         do {
-            let r = try await Backfill.run { p in
+            let b = try await Backfill.run { p in
                 Task { @MainActor in
-                    actionStatus = "Day \(p.dayIndex)/\(p.dayCount) — \(p.phase)"
+                    actionStatus = "Backfill — day \(p.dayIndex)/\(p.dayCount): \(p.phase)"
                 }
             }
-            actionStatus = "Done. \(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions → \(r.newEventCount) new events, LLM-failed days: \(r.llmFailedDays)"
+            actionStatus = "Backfilled \(b.newEventCount) new events. Rescoring impact…"
         } catch {
             actionStatus = "Backfill failed: \(error.localizedDescription)"
+            return
         }
-    }
-
-    @MainActor
-    private func runRescore() async {
-        actionStatus = "Rescoring impact with LLM…"
         do {
             let r = try await ImpactScorer().rescoreAll { p in
                 Task { @MainActor in
                     actionStatus = "Rescoring batch \(p.batchIndex)/\(p.batchCount) — \(p.scoredCount)/\(p.totalCount) files"
                 }
             }
-            actionStatus = "Rescored \(r.scoredCount) (failed \(r.failedCount)) in \(String(format: "%.1f", r.elapsed))s. Weekly budget rebalance applied."
+            actionStatus = "Done. Rescored \(r.scoredCount) (failed \(r.failedCount)) in \(String(format: "%.1f", r.elapsed))s. Weekly budget rebalance applied."
         } catch {
             actionStatus = "Rescore failed: \(error.localizedDescription)"
         }
@@ -259,9 +253,7 @@ struct MemorySettingsView: View {
             title: "Run now",
             blurb: "Trigger a pipeline stage manually instead of waiting for the scheduler. Each uses LLM tokens, so you'll be asked to confirm. The weekly budget rebalance is not listed — it runs automatically after every impact rescore."
         ) {
-            triggerRow(.backfill)
-            Divider().padding(.vertical, 2)
-            triggerRow(.rescore)
+            triggerRow(.eventProcessing)
             Divider().padding(.vertical, 2)
             triggerRow(.distill)
             if !actionStatus.isEmpty {
