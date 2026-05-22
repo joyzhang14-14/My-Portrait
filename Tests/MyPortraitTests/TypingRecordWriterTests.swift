@@ -111,6 +111,7 @@ final class TypingRecordWriterTests: XCTestCase {
         rec.pendingChanges = true
         writer.flushElement(key)
 
+        writer.waitForPendingDBWork()
         let recs = try store.records(bundleId: "app.a")
         XCTAssertEqual(recs.count, 1)
         XCTAssertEqual(recs.first?.text, "hello")
@@ -128,6 +129,7 @@ final class TypingRecordWriterTests: XCTestCase {
         rec.pendingChanges = true
         writer.flushElement(key)
 
+        writer.waitForPendingDBWork()
         XCTAssertEqual(try store.records(bundleId: "app.a").first?.text, "XXX")
     }
 
@@ -153,6 +155,7 @@ final class TypingRecordWriterTests: XCTestCase {
             rec.pendingChanges = true
             writer.flushElement(key)
         }
+        writer.waitForPendingDBWork()
         let recs = try store.records(bundleId: "app.a")
         XCTAssertEqual(recs.count, 2)
         XCTAssertEqual(Set(recs.map(\.text)), ["first", "second"])
@@ -196,6 +199,7 @@ final class TypingRecordWriterTests: XCTestCase {
         writer.state[key]?.pendingChanges = true
         writer.flushElement(key)
 
+        writer.waitForPendingDBWork()
         let recs = try store.records(bundleId: "app.a")
         XCTAssertEqual(recs.count, 1)               // 合并，没新建
         XCTAssertEqual(recs.first?.text, "ABCDEF")
@@ -213,6 +217,7 @@ final class TypingRecordWriterTests: XCTestCase {
             writer.state[key]?.pendingChanges = true
             writer.flushElement(key)
         }
+        writer.waitForPendingDBWork()
         XCTAssertEqual(try store.records(bundleId: "app.chat").count, 2)
     }
 }

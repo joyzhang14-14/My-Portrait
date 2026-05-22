@@ -45,8 +45,9 @@ struct TypingAppSummary: Identifiable, Sendable {
     var id: String { bundleId }
 }
 
-/// `typing_events`（v14 event-log schema）的 DAO。接受外部注入的 DatabasePool。
-struct TypingEventStore {
+/// `typing_events` 的 DAO。接受外部注入的 DatabasePool。
+/// `Sendable` —— 可交给 TypingRecordWriter 的后台 DB 队列。
+struct TypingEventStore: Sendable {
 
     let dbPool: DatabasePool
 

@@ -62,15 +62,15 @@ final class TypingRecordWriter {
 
     // MARK: - 硬编码参数（M5 统一挪进 ConfigStore）
 
-    static let burstCharThreshold = 10
-    static let burstIntervalMs: Double = 30
-    static let blacklistTTLSec: TimeInterval = 3600
-    static let debounceSec: TimeInterval = 0.350
-    static let flushSec: TimeInterval = 5.0
-    static let pasteAssocSec: TimeInterval = 0.5
-    static let submitAssocSec: TimeInterval = 1.0
+    nonisolated static let burstCharThreshold = 10
+    nonisolated static let burstIntervalMs: Double = 30
+    nonisolated static let blacklistTTLSec: TimeInterval = 3600
+    nonisolated static let debounceSec: TimeInterval = 0.350
+    nonisolated static let flushSec: TimeInterval = 5.0
+    nonisolated static let pasteAssocSec: TimeInterval = 0.5
+    nonisolated static let submitAssocSec: TimeInterval = 1.0
     /// continuation 匹配比首 / 尾各这么多字 —— 同 element 内足够辨识。
-    static let matchWindowChars = 100
+    nonisolated static let matchWindowChars = 100
 
     // MARK: - 状态
 
@@ -82,13 +82,29 @@ final class TypingRecordWriter {
     /// 黑名单 per (app, element)：噪声 segment → 命中时刻（CACurrentMediaTime）。
     private(set) var blacklist: [ElementKey: [String: TimeInterval]] = [:]
 
+    /// flush 的 DB 读写跑在这条后台串行队列上 —— GRDB 的 read/write 是同步
+    /// 阻塞调用，绝不能在 MainActor 上跑（DB 一忙主线程就吊死）。串行 →
+    /// continuation 合并的顺序（先 INSERT 才能被后面 merge 查到）有保证。
+    private let dbQueue = DispatchQueue(label: "com.joyzhang.myportrait.typing.db")
+
     init(store: TypingEventStore?, ledger: KeystrokeLedger) {
         self.store = store
         self.ledger = ledger
     }
 
+    /// flush 时从 in-progress record 取下来、交给后台 DB 队列的快照（Sendable）。
+    private struct FlushSnapshot: Sendable {
+        let bundleId: String
+        let elementHash: Int
+        let startedAtMs: Int64
+        let sessionStart: String
+        let endValue: String
+        let editLog: [EditEntry]
+        let blacklist: Set<String>
+    }
+
     /// UTC 毫秒 —— started_at / ended_at / edit_log ts 都用它。
-    static func nowMs() -> Int64 {
+    nonisolated static func nowMs() -> Int64 {
         Int64(Date().timeIntervalSince1970 * 1000.0)
     }
 
@@ -203,79 +219,83 @@ final class TypingRecordWriter {
         }
     }
 
-    /// flush 一个 element 的 in-progress record，再从 state 移除。
-    ///
-    /// 若这段 session 接得上某条已有 record（continuation）→ **合并进那条**
-    /// （UPDATE：`text` 重算、`edit_log` 续接、`ended_at` 更新）；接不上
-    /// → INSERT 一条新 record。`text` = `sandwich(sessionStart, 最终值).newMid`。
+    /// flush 一个 element 的 in-progress record：从 in-progress state 取下快照、
+    /// 移除，把 DB 读写**派到后台串行队列**（GRDB 的 read/write 同步阻塞，
+    /// 不能在 MainActor 上跑）。
     func flushElement(_ key: ElementKey) {
         guard let rec = state[key] else { return }
         rec.debounceTimer?.invalidate()
         rec.flushTimer?.invalidate()
-        if rec.pendingChanges {
-            let endValue = rec.lastValueSnapshot
-            let liveBlacklist = Set((blacklist[key] ?? [:]).keys)
-            let nowMs = Self.nowMs()
-
-            if let target = findContinuation(rec: rec) {
-                // 接得上 → 合并进 target record。剔除时并上 target 自己记的
-                // stripped —— 即使内存黑名单已过期，旧噪声也不复活。
-                let combined = liveBlacklist.union(Self.decodeStrings(target.stripped))
-                let (mergedText, strippedNow) = Self.stripBlacklist(
-                    Self.sessionText(sessionStart: target.sessionStart, finalValue: endValue),
-                    blacklist: combined)
-                var mergedLog = Self.decodeLog(target.editLog)
-                mergedLog.append(contentsOf: rec.editLog)
-                let merged = TypingEvent(
-                    id: target.id,
-                    bundleId: target.bundleId,
-                    elementHash: target.elementHash,
-                    startedAt: target.startedAt,
-                    endedAt: nowMs,
-                    text: mergedText,
-                    editLog: Self.encodeLog(mergedLog),
-                    totalChars: mergedText.count,
-                    sessionStart: target.sessionStart,
-                    endValue: endValue,
-                    stripped: Self.encodeStrings(strippedNow)
-                )
-                try? store?.update(merged)
-                onDevLog?("merge bundle=\(rec.bundleId) → record #\(target.id ?? -1) "
-                          + "\(mergedText.count) chars")
-            } else {
-                // 接不上 → 新建 record。
-                let (cleaned, strippedNow) = Self.stripBlacklist(
-                    Self.sessionText(sessionStart: rec.sessionStart, finalValue: endValue),
-                    blacklist: liveBlacklist)
-                let event = TypingEvent(
-                    id: nil,
-                    bundleId: rec.bundleId,
-                    elementHash: rec.elementHash,
-                    startedAt: rec.startedAtMs,
-                    endedAt: nowMs,
-                    text: cleaned,
-                    editLog: Self.encodeLog(rec.editLog),
-                    totalChars: cleaned.count,
-                    sessionStart: rec.sessionStart,
-                    endValue: endValue,
-                    stripped: Self.encodeStrings(strippedNow)
-                )
-                try? store?.insert(event)
-                onDevLog?("flush bundle=\(rec.bundleId) element=\(rec.elementHash) "
-                          + "\(cleaned.count) chars \(rec.editLog.count) edits")
-            }
+        if rec.pendingChanges, let store {
+            let snap = FlushSnapshot(
+                bundleId: rec.bundleId,
+                elementHash: rec.elementHash,
+                startedAtMs: rec.startedAtMs,
+                sessionStart: rec.sessionStart,
+                endValue: rec.lastValueSnapshot,
+                editLog: rec.editLog,
+                blacklist: Set((blacklist[key] ?? [:]).keys)
+            )
+            dbQueue.async { Self.persist(snap, store: store) }
         }
         state[key] = nil
     }
 
-    /// 找这段 session 的 continuation 目标 —— 同 (app, element) 中、`end_value`
-    /// 首尾各 100 字跟本 session 起点内容都接得上的 record。无 → nil（新建）。
-    private func findContinuation(rec: InProgressRecord) -> TypingEvent? {
-        guard !rec.sessionStart.isEmpty, let store else { return nil }
+    /// 落库 —— 在后台 DB 队列上跑。接得上某条已有 record（continuation）→
+    /// **合并进那条**（UPDATE）；接不上 → INSERT 一条新 record。
+    /// `text` = `sandwich(sessionStart, 最终值).newMid`。
+    nonisolated private static func persist(_ snap: FlushSnapshot, store: TypingEventStore) {
+        let nowMs = nowMs()
+
+        // continuation 目标：同 (app, element)、end_value 首尾 100 字接得上。
         let candidates = (try? store.recordsForElement(
-            bundleId: rec.bundleId, elementHash: rec.elementHash)) ?? []
-        return candidates.first {
-            Self.isContinuation(sessionStart: rec.sessionStart, recordEndValue: $0.endValue)
+            bundleId: snap.bundleId, elementHash: snap.elementHash)) ?? []
+        let target = snap.sessionStart.isEmpty ? nil : candidates.first {
+            isContinuation(sessionStart: snap.sessionStart, recordEndValue: $0.endValue)
+        }
+
+        if let target {
+            // 接得上 → 合并。剔除时并上 target 自己记的 stripped —— 即使内存
+            // 黑名单已过期，旧噪声也不复活。
+            let combined = snap.blacklist.union(decodeStrings(target.stripped))
+            let (mergedText, strippedNow) = stripBlacklist(
+                sessionText(sessionStart: target.sessionStart, finalValue: snap.endValue),
+                blacklist: combined)
+            var mergedLog = decodeLog(target.editLog)
+            mergedLog.append(contentsOf: snap.editLog)
+            let merged = TypingEvent(
+                id: target.id,
+                bundleId: target.bundleId,
+                elementHash: target.elementHash,
+                startedAt: target.startedAt,
+                endedAt: nowMs,
+                text: mergedText,
+                editLog: encodeLog(mergedLog),
+                totalChars: mergedText.count,
+                sessionStart: target.sessionStart,
+                endValue: snap.endValue,
+                stripped: encodeStrings(strippedNow)
+            )
+            try? store.update(merged)
+        } else {
+            // 接不上 → 新建 record。
+            let (cleaned, strippedNow) = stripBlacklist(
+                sessionText(sessionStart: snap.sessionStart, finalValue: snap.endValue),
+                blacklist: snap.blacklist)
+            let event = TypingEvent(
+                id: nil,
+                bundleId: snap.bundleId,
+                elementHash: snap.elementHash,
+                startedAt: snap.startedAtMs,
+                endedAt: nowMs,
+                text: cleaned,
+                editLog: encodeLog(snap.editLog),
+                totalChars: cleaned.count,
+                sessionStart: snap.sessionStart,
+                endValue: snap.endValue,
+                stripped: encodeStrings(strippedNow)
+            )
+            try? store.insert(event)
         }
     }
 
@@ -301,6 +321,11 @@ final class TypingRecordWriter {
         for key in Array(state.keys) { flushElement(key) }
     }
 
+    /// 测试用：阻塞等所有已派发的后台 DB 写入完成。串行队列上的 barrier。
+    func waitForPendingDBWork() {
+        dbQueue.sync {}
+    }
+
     // MARK: - 黑名单 TTL
 
     func cleanupBlacklist(now: TimeInterval) {
@@ -314,12 +339,12 @@ final class TypingRecordWriter {
     // MARK: - 纯函数辅助（单测覆盖）
 
     /// burst 判定 —— 单次 value-change 的字符跳变 + 间隔。
-    static func isBurst(jumpChars: Int, intervalMs: Double) -> Bool {
+    nonisolated static func isBurst(jumpChars: Int, intervalMs: Double) -> Bool {
         jumpChars > burstCharThreshold && intervalMs < burstIntervalMs
     }
 
     /// 一段 session 的净新增内容 = `sandwich(sessionStart, 最终值).newMid`。
-    static func sessionText(sessionStart: String, finalValue: String) -> String {
+    nonisolated static func sessionText(sessionStart: String, finalValue: String) -> String {
         TextDiff.sandwich(prev: sessionStart, new: finalValue).newMid
     }
 
@@ -329,7 +354,7 @@ final class TypingRecordWriter {
     /// 旧 record 的 `end_value` 完全相等。比**首尾各 `matchWindowChars` 字两个
     /// 锚点**：都对上才算延续，防两篇不同内容尾巴碰巧相同的误合并。
     /// 同 (app, element) 内、不限时间。空起点（如聊天发送后输入框清空）不算。
-    static func isContinuation(sessionStart: String, recordEndValue: String) -> Bool {
+    nonisolated static func isContinuation(sessionStart: String, recordEndValue: String) -> Bool {
         guard !sessionStart.isEmpty, !recordEndValue.isEmpty else { return false }
         return sessionStart.prefix(matchWindowChars) == recordEndValue.prefix(matchWindowChars)
             && sessionStart.suffix(matchWindowChars) == recordEndValue.suffix(matchWindowChars)
@@ -337,7 +362,7 @@ final class TypingRecordWriter {
 
     /// 黑名单减法：按长度倒序减，每个 entry 只减一次。返回剔除后文本 +
     /// 实际命中（被剔掉）的段 —— 后者落进 record 的 `stripped`。
-    static func stripBlacklist(_ text: String, blacklist: Set<String>)
+    nonisolated static func stripBlacklist(_ text: String, blacklist: Set<String>)
         -> (text: String, stripped: Set<String>) {
         var result = text
         var used: Set<String> = []
@@ -350,28 +375,28 @@ final class TypingRecordWriter {
         return (result, used)
     }
 
-    static func decodeLog(_ json: String) -> [EditEntry] {
+    nonisolated static func decodeLog(_ json: String) -> [EditEntry] {
         guard let data = json.data(using: .utf8),
               let decoded = try? JSONDecoder().decode([EditEntry].self, from: data)
         else { return [] }
         return decoded
     }
 
-    static func encodeLog(_ entries: [EditEntry]) -> String {
+    nonisolated static func encodeLog(_ entries: [EditEntry]) -> String {
         guard let data = try? JSONEncoder().encode(entries),
               let json = String(data: data, encoding: .utf8)
         else { return "[]" }
         return json
     }
 
-    static func decodeStrings(_ json: String) -> Set<String> {
+    nonisolated static func decodeStrings(_ json: String) -> Set<String> {
         guard let data = json.data(using: .utf8),
               let arr = try? JSONDecoder().decode([String].self, from: data)
         else { return [] }
         return Set(arr)
     }
 
-    static func encodeStrings(_ set: Set<String>) -> String {
+    nonisolated static func encodeStrings(_ set: Set<String>) -> String {
         guard let data = try? JSONEncoder().encode(Array(set)),
               let json = String(data: data, encoding: .utf8)
         else { return "[]" }
