@@ -432,6 +432,17 @@ struct TypingRecordingSettingsView: View {
                             .foregroundStyle(.white.opacity(0.55))
                     }
                 }
+                SettingsDivider()
+                SettingsRow("Paste match minimum",
+                            description: "Clipboard content shorter than this isn't used to detect pastes — avoids flagging short typed text that happens to equal the clipboard.",
+                            icon: "doc.on.clipboard") {
+                    Stepper(value: config.binding(\.recording.typingPasteMinChars),
+                            in: 2...50, step: 1) {
+                        Text("\(config.current.recording.typingPasteMinChars) chars")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
             }
         }
     }

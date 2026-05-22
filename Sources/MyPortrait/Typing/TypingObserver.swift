@@ -80,7 +80,7 @@ final class TypingObserver {
 
     init(store: TypingEventStore? = nil, modeLabel: String = "production") {
         self.modeLabel = modeLabel
-        self.writer = TypingRecordWriter(store: store, ledger: ledger)
+        self.writer = TypingRecordWriter(store: store, ledger: ledger, pasteboard: pasteboardMonitor)
     }
 
     func start() {

@@ -24,10 +24,6 @@ final class PasteboardMonitor {
     /// 计数器变化时发生。
     private static let pollIntervalSec: TimeInterval = 0.25
 
-    /// 剪贴板内容短于此长度不参与粘贴匹配 —— 避免「打的字恰好等于剪贴板」
-    /// 那种巧合误判（如剪贴板是 "ok"、用户也打了 "ok"）。
-    private static let minMatchLen = 6
-
     init() {
         let pb = NSPasteboard.general
         lastChangeCount = pb.changeCount
@@ -48,9 +44,10 @@ final class PasteboardMonitor {
     }
 
     /// `segment` 是否就是 / 包含当前剪贴板内容 —— 命中即判定为粘贴。
-    /// 太短的剪贴板内容不参与（见 `minMatchLen`）。
+    /// 太短的剪贴板内容不参与（见 `typing_paste_min_chars`）。
     func looksLikePaste(_ segment: String) -> Bool {
-        guard let clip = currentText, clip.count >= Self.minMatchLen else { return false }
+        let minLen = ConfigStore.shared.recording.typingPasteMinChars
+        guard let clip = currentText, clip.count >= minLen else { return false }
         return segment == clip || segment.contains(clip)
     }
 

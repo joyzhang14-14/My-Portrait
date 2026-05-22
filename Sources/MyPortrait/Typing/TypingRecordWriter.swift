@@ -76,6 +76,7 @@ final class TypingRecordWriter {
 
     private let store: TypingEventStore?
     private let ledger: KeystrokeLedger
+    private let pasteboard: PasteboardMonitor
     var onDevLog: ((String) -> Void)?
 
     private(set) var state: [ElementKey: InProgressRecord] = [:]
@@ -87,9 +88,10 @@ final class TypingRecordWriter {
     /// continuation 合并的顺序（先 INSERT 才能被后面 merge 查到）有保证。
     private let dbQueue = DispatchQueue(label: "com.joyzhang.myportrait.typing.db")
 
-    init(store: TypingEventStore?, ledger: KeystrokeLedger) {
+    init(store: TypingEventStore?, ledger: KeystrokeLedger, pasteboard: PasteboardMonitor) {
         self.store = store
         self.ledger = ledger
+        self.pasteboard = pasteboard
     }
 
     /// flush 时从 in-progress record 取下来、交给后台 DB 队列的快照（Sendable）。
@@ -162,13 +164,16 @@ final class TypingRecordWriter {
         let prev = rec.lastValueSnapshot
         guard prev != pending else { return }
 
-        let noise = rec.windowHadBurst || rec.windowHadPaste || !rec.windowHadKeystroke
+        let windowNoise = rec.windowHadBurst || rec.windowHadPaste || !rec.windowHadKeystroke
         rec.windowHadBurst = false
         rec.windowHadPaste = false
         rec.windowHadKeystroke = false
         rec.lastValueSnapshot = pending
 
         let (_, deleted, added, _) = TextDiff.sandwich(prev: prev, new: pending)
+        // windowNoise = ⌘V / burst / 无按键；外加剪贴板内容匹配 —— 抓菜单 /
+        // 右键 / 拖拽等非 ⌘V 粘贴。
+        let noise = windowNoise || pasteboard.looksLikePaste(added)
         let nowMs = Self.nowMs()
         if noise {
             // burst / 粘贴 / 程序输出 —— 新增段进黑名单，flush 时从 text 减掉，

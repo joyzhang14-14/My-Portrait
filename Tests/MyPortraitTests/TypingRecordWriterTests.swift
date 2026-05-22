@@ -103,7 +103,7 @@ final class TypingRecordWriterTests: XCTestCase {
     /// flush → INSERT 一条 record，text = 净新增；flush 后 record 从 state 移除。
     func testFlushInsertsNetText() throws {
         let store = try makeStore()
-        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
         writer.beginSession(key: key, bundleId: "app.a", baseline: "")
         let rec = try XCTUnwrap(writer.state[key])
@@ -121,7 +121,7 @@ final class TypingRecordWriterTests: XCTestCase {
     /// 已有内容的 element 里中段插入 → 落库 text 只含插入字，不含旧内容。
     func testFlushMidInsertDoesNotAbsorb() throws {
         let store = try makeStore()
-        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
         writer.beginSession(key: key, bundleId: "app.a", baseline: "一大段已有的笔记内容")
         let rec = try XCTUnwrap(writer.state[key])
@@ -136,7 +136,7 @@ final class TypingRecordWriterTests: XCTestCase {
     /// 没发生变化的 session → flush 不落库。
     func testFlushSkipsEmptySession() throws {
         let store = try makeStore()
-        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
         writer.beginSession(key: key, bundleId: "app.a", baseline: "")
         writer.flushElement(key)
@@ -146,7 +146,7 @@ final class TypingRecordWriterTests: XCTestCase {
     /// 两个 element 各自独立 record（不再 UPSERT 同 bundle_id）。
     func testMultipleElementsIndependent() throws {
         let store = try makeStore()
-        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         for (eh, txt) in [(1, "first"), (2, "second")] {
             let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: eh)
             writer.beginSession(key: key, bundleId: "app.a", baseline: "")
@@ -185,7 +185,7 @@ final class TypingRecordWriterTests: XCTestCase {
     /// 起点接得上已有 record → 合并，不新建。
     func testMergeContinuation() throws {
         let store = try makeStore()
-        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
 
         writer.beginSession(key: key, bundleId: "app.a", baseline: "")
@@ -209,7 +209,7 @@ final class TypingRecordWriterTests: XCTestCase {
     /// 聊天每条消息发送后输入框清空 → 起点为空 → 每条独立，不合并。
     func testChatMessagesStayIndependent() throws {
         let store = try makeStore()
-        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger())
+        let writer = TypingRecordWriter(store: store, ledger: KeystrokeLedger(), pasteboard: PasteboardMonitor())
         let key = TypingRecordWriter.ElementKey(pid: 1, elementHash: 1)
         for msg in ["msg1", "msg2"] {
             writer.beginSession(key: key, bundleId: "app.chat", baseline: "")

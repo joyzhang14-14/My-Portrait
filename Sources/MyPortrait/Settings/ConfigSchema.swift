@@ -339,6 +339,8 @@ struct RecordingConfig: Codable, Equatable {
     var typingFlushIdleSec: Int = 5
     /// 回车后多久内（毫秒）输入框清空才算「发送」。
     var typingSubmitWindowMs: Int = 1000
+    /// 剪贴板内容短于这么多字不参与粘贴匹配 —— 避免「打的字恰好等于剪贴板」误判。
+    var typingPasteMinChars: Int = 6
     init() {}
     enum CodingKeys: String, CodingKey {
         case audio, screen, system
@@ -347,6 +349,7 @@ struct RecordingConfig: Codable, Equatable {
         case typingDebounceMs     = "typing_debounce_ms"
         case typingFlushIdleSec   = "typing_flush_idle_sec"
         case typingSubmitWindowMs = "typing_submit_window_ms"
+        case typingPasteMinChars  = "typing_paste_min_chars"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -359,6 +362,7 @@ struct RecordingConfig: Codable, Equatable {
         typingDebounceMs     = c.dflt(Int.self, .typingDebounceMs, typingDebounceMs)
         typingFlushIdleSec   = c.dflt(Int.self, .typingFlushIdleSec, typingFlushIdleSec)
         typingSubmitWindowMs = c.dflt(Int.self, .typingSubmitWindowMs, typingSubmitWindowMs)
+        typingPasteMinChars  = c.dflt(Int.self, .typingPasteMinChars, typingPasteMinChars)
     }
 }
 
