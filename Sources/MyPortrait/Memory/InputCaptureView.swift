@@ -15,7 +15,8 @@ struct InputCaptureView: View {
     @State private var records: [TypingEvent] = []
     @State private var selectedRecordId: Int64?
     @State private var loadFailed = false
-    @State private var confirmingDelete = false
+    @State private var confirmingDelete = false        // app 级
+    @State private var confirmingRecordDelete = false   // 单条 session
 
     var body: some View {
         HSplitView {
@@ -157,9 +158,17 @@ struct InputCaptureView: View {
         if let id = selectedRecordId, let rec = records.first(where: { $0.id == id }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(Self.appLabel(rec.bundleId))
-                        .font(.system(size: 22, weight: .semibold))
-                        .padding(.top, 44)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(Self.appLabel(rec.bundleId))
+                            .font(.system(size: 22, weight: .semibold))
+                        Spacer()
+                        Button { confirmingRecordDelete = true } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.bouncyIcon)
+                        .help("Delete this session")
+                    }
+                    .padding(.top, 44)
                     metadataBlock(rec)
                     Divider().background(Color.white.opacity(0.06))
 
@@ -182,6 +191,16 @@ struct InputCaptureView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .confirmationDialog("Delete this typing session?",
+                                isPresented: $confirmingRecordDelete,
+                                titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteRecord(id) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes this one record.")
             }
         } else {
             VStack(spacing: 8) {
@@ -293,6 +312,16 @@ struct InputCaptureView: View {
         try? store.delete(bundleId: bundleId)
         selectedApp = nil
         records = []
+        selectedRecordId = nil
+        await reloadApps()
+    }
+
+    /// 永久删除单条 session record。
+    @MainActor
+    private func deleteRecord(_ id: Int64) async {
+        guard let store = services?.typingStore else { return }
+        try? store.delete(id: id)
+        records.removeAll { $0.id == id }
         selectedRecordId = nil
         await reloadApps()
     }

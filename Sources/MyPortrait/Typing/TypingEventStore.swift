@@ -115,12 +115,22 @@ struct TypingEventStore: Sendable {
         }
     }
 
-    /// 删除某 app 的全部 records。Input 页删除键用。
+    /// 删除某 app 的全部 records。Input 页 app 级删除键用。
     func delete(bundleId: String) throws {
         try dbPool.write { db in
             try db.execute(
                 sql: "DELETE FROM typing_events WHERE bundle_id = ?",
                 arguments: [bundleId]
+            )
+        }
+    }
+
+    /// 删除单条 record（按 id）。Input 页单条 session 删除键用。
+    func delete(id: Int64) throws {
+        try dbPool.write { db in
+            try db.execute(
+                sql: "DELETE FROM typing_events WHERE id = ?",
+                arguments: [id]
             )
         }
     }
