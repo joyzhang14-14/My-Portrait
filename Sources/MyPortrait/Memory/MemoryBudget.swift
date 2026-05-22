@@ -13,14 +13,15 @@ import Foundation
 ///        protected (rawImpact ≥ peakProtection) — final = raw, untouched.
 ///        frozen    (rebalanceCount ≥ maxRebalances) — leave impact alone.
 ///        rebalancable (everything else)
-///   3. Group the rebalancable events BY DAY. For each day, sum its events'
-///      rawImpact.
-///   4. Per day: if sum > dailyBudget → scale = dailyBudget / sum;
-///                                      final = rawImpact × scale.
-///               else                → scale = 1.0; final = rawImpact.
-///      Each day is scaled independently, so a busy day compresses without
-///      dragging quiet days down (the old single-window scale flattened a
-///      whole week by one number).
+///   3. Group the rebalancable events BY DAY.
+///   4. Per day — greedy waterline:
+///        if the day's rawImpact sum ≤ dailyBudget → keep every raw value.
+///        else → sort the day's events high→low, hand out the budget in
+///               order. Events that fit keep their full rawImpact; the one
+///               that crosses the line gets the leftover; the rest floor to
+///               the impact minimum. Big things keep their weight; the day's
+///               trivia fades. (Linear scaling would crush a release event
+///               as hard as an idle-browsing one — the wrong shape.)
 ///   5. Increment rebalanceCount on each touched file.
 ///
 /// Pure-function module — file I/O is the caller's job.
@@ -132,16 +133,34 @@ enum MemoryBudget {
             cal.startOfDay(for: file.occurrences.max() ?? file.created)
         }
 
-        // 按天汇总 rebalancable 的 raw 总和，每天各自算 scale。
-        var dayRawSum: [Date: Double] = [:]
+        // 按天分组 rebalancable，每天用"贪心水位线"压缩，而不是等比缩放：
+        // 当天事件按 rawImpact 从高到低排，依次占用 daily budget——
+        //   占满之前的（大事）保留原值；
+        //   跨过水位线的那一个拿到 budget 剩余的零头（部分保留）；
+        //   之后的（琐事）budget 已空 → 沉到 impact 地板。
+        // 等比缩放会把重要事件压得跟琐事一样狠；水位线则"大事挤掉小事"。
+        var rebalByDay: [Date: [(url: URL, raw: Double)]] = [:]
         for b in bucketed where b.kind == .rebalancable {
-            dayRawSum[dayOf(b.file), default: 0] += b.file.rawImpact
+            rebalByDay[dayOf(b.file), default: []].append((b.url, b.file.rawImpact))
         }
-        var dayScale: [Date: Double] = [:]
-        for (day, sum) in dayRawSum {
-            dayScale[day] = (sum > params.dailyBudget && sum > 0)
-                ? params.dailyBudget / sum
-                : 1.0
+        var newImpactByURL: [URL: Double] = [:]
+        var overBudgetDays: Set<Date> = []
+        for (day, items) in rebalByDay {
+            let daySum = items.reduce(0.0) { $0 + $1.raw }
+            if daySum <= params.dailyBudget {
+                // 安静的天：全保留原值。
+                for it in items {
+                    newImpactByURL[it.url] = PortraitFile.clampImpact(it.raw)
+                }
+            } else {
+                overBudgetDays.insert(day)
+                var remaining = params.dailyBudget
+                for it in items.sorted(by: { $0.raw > $1.raw }) {
+                    let give = min(it.raw, max(0, remaining))
+                    newImpactByURL[it.url] = PortraitFile.clampImpact(give)
+                    remaining -= give
+                }
+            }
         }
 
         var touched = 0
@@ -170,9 +189,10 @@ enum MemoryBudget {
                                    newImpact: cur,
                                    kind: .frozen))
             case .rebalancable:
-                let scale = dayScale[dayOf(b.file)] ?? 1.0
-                let newImpact = PortraitFile.clampImpact(b.file.rawImpact * scale)
-                let kind: Plan.Kind = (scale < 1.0) ? .rebalanced : .restored
+                let newImpact = newImpactByURL[b.url]
+                    ?? PortraitFile.clampImpact(b.file.rawImpact)
+                let kind: Plan.Kind = overBudgetDays.contains(dayOf(b.file))
+                    ? .rebalanced : .restored
                 plans.append(.init(url: b.url,
                                    oldImpact: cur,
                                    newImpact: newImpact,
