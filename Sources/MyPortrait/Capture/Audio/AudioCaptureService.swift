@@ -57,16 +57,25 @@ actor AudioCaptureService {
     /// 设备变更后的防抖重启任务。
     private var restartTask: Task<Void, Never>?
 
+    /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。VADRecorder 每次
+    /// start/stop、设备热插拔都会换新实例，但消费方订阅这条稳定流即可，不会断。
+    nonisolated let segmentEventStream: AsyncStream<AudioSegmentEvent>
+    private let segmentEventCont: AsyncStream<AudioSegmentEvent>.Continuation
+    /// 把当前 VADRecorder 的段转发进 segmentEventStream 的任务。
+    private var forwardTask: Task<Void, Never>?
+
     init(reporter: UnimplementedReporter, audioDir: URL = Storage.audioQueueDir) {
         self.reporter = reporter
         self.audioDir = audioDir
+        var c: AsyncStream<AudioSegmentEvent>.Continuation!
+        self.segmentEventStream = AsyncStream<AudioSegmentEvent> { c = $0 }
+        self.segmentEventCont = c
     }
 
-    /// 当前 VADRecorder 的段事件流。`stop()` 后 vadRecorder = nil，返回已 finish 的空流。
-    /// Services 在 startManagedLifecycle 里 merge 这个与 SystemAudioCaptureService 的同名流。
+    /// 稳定的段事件流。Services 在 startManagedLifecycle 里 merge 这个与
+    /// SystemAudioCaptureService 的同名流。VADRecorder 重建不影响这条流。
     func segmentEvents() -> AsyncStream<AudioSegmentEvent> {
-        if let r = vadRecorder { return r.segmentEvents }
-        return AsyncStream { $0.finish() }
+        return segmentEventStream
     }
 
     // MARK: - 生命周期
@@ -87,7 +96,12 @@ actor AudioCaptureService {
             return
         }
 
-        vadRecorder = VADRecorder(deviceLabel: "default_microphone", audioDir: audioDir)
+        let recorder = VADRecorder(deviceLabel: "default_microphone", audioDir: audioDir)
+        vadRecorder = recorder
+        let cont = segmentEventCont
+        forwardTask = Task {
+            for await seg in recorder.segmentEvents { cont.yield(seg) }
+        }
 
         do {
             try configureEngineAndStartTap()
@@ -124,6 +138,8 @@ actor AudioCaptureService {
         samplesTask?.cancel()
         samplesTask = nil
 
+        forwardTask?.cancel()
+        forwardTask = nil
         await vadRecorder?.flush()
         vadRecorder = nil
 

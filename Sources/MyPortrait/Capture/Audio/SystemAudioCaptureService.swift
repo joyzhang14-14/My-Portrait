@@ -52,15 +52,23 @@ actor SystemAudioCaptureService {
     /// 见 AudioCaptureService.tapInstalled 注释 —— 防 -10877 + dispatch_assert 崩。
     private var tapInstalled: Bool = false
 
+    /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。见 AudioCaptureService 同名注释。
+    nonisolated let segmentEventStream: AsyncStream<AudioSegmentEvent>
+    private let segmentEventCont: AsyncStream<AudioSegmentEvent>.Continuation
+    /// 把当前 VADRecorder 的段转发进 segmentEventStream 的任务。
+    private var forwardTask: Task<Void, Never>?
+
     init(reporter: UnimplementedReporter, audioDir: URL = Storage.audioQueueDir) {
         self.reporter = reporter
         self.audioDir = audioDir
+        var c: AsyncStream<AudioSegmentEvent>.Continuation!
+        self.segmentEventStream = AsyncStream<AudioSegmentEvent> { c = $0 }
+        self.segmentEventCont = c
     }
 
-    /// 当前 VADRecorder 的段事件流（`stop()` 后是空 finished stream）。
+    /// 稳定的段事件流。VADRecorder 重建不影响这条流。
     func segmentEvents() -> AsyncStream<AudioSegmentEvent> {
-        if let r = vadRecorder { return r.segmentEvents }
-        return AsyncStream { $0.finish() }
+        return segmentEventStream
     }
 
     // MARK: - 生命周期
@@ -129,12 +137,19 @@ actor SystemAudioCaptureService {
         }
 
         // 5. VADRecorder + tap + 转换 + start
-        vadRecorder = VADRecorder(deviceLabel: "system_loopback", audioDir: audioDir)
+        let recorder = VADRecorder(deviceLabel: "system_loopback", audioDir: audioDir)
+        vadRecorder = recorder
+        let cont = segmentEventCont
+        forwardTask = Task {
+            for await seg in recorder.segmentEvents { cont.yield(seg) }
+        }
 
         do {
             try configureTapAndStart()
         } catch {
             logger.error("engine start failed: \(String(describing: error), privacy: .public)")
+            forwardTask?.cancel()
+            forwardTask = nil
             await vadRecorder?.flush()
             vadRecorder = nil
             cleanupCoreAudio()
@@ -164,6 +179,8 @@ actor SystemAudioCaptureService {
         samplesTask?.cancel()
         samplesTask = nil
 
+        forwardTask?.cancel()
+        forwardTask = nil
         await vadRecorder?.flush()
         vadRecorder = nil
 
