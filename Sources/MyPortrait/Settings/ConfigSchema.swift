@@ -63,8 +63,8 @@ struct MemoryConfig: Codable, Equatable {
     var indexerEnabled:        Bool   = true
     var indexIntervalMinutes:  Int    = 15
 
-    // MemoryBudget — sleep-consolidation weekly pass.
-    var weeklyBudget:          Double = 50
+    // MemoryBudget — sleep-consolidation pass. Per-day impact budget.
+    var dailyBudget:           Double = 50
     var peakProtection:        Double = 4.5
     var maxRebalances:         Int    = 5
     var windowDays:            Int    = 7
@@ -94,7 +94,7 @@ struct MemoryConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case indexerEnabled       = "indexer_enabled"
         case indexIntervalMinutes = "index_interval_minutes"
-        case weeklyBudget         = "weekly_budget"
+        case dailyBudget          = "daily_budget"
         case peakProtection       = "peak_protection"
         case maxRebalances        = "max_rebalances"
         case windowDays           = "window_days"
@@ -111,7 +111,7 @@ struct MemoryConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         indexerEnabled       = c.dflt(Bool.self,   .indexerEnabled,       indexerEnabled)
         indexIntervalMinutes = c.dflt(Int.self,    .indexIntervalMinutes, indexIntervalMinutes)
-        weeklyBudget         = c.dflt(Double.self, .weeklyBudget,         weeklyBudget)
+        dailyBudget          = c.dflt(Double.self, .dailyBudget,          dailyBudget)
         peakProtection       = c.dflt(Double.self, .peakProtection,       peakProtection)
         maxRebalances        = c.dflt(Int.self,    .maxRebalances,        maxRebalances)
         windowDays           = c.dflt(Int.self,    .windowDays,           windowDays)

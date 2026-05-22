@@ -491,11 +491,11 @@ struct MemorySettingsView: View {
 
     private var budgetSection: some View {
         section(
-            title: "Weekly consolidation budget",
-            blurb: "Mirrors the brain's nightly consolidation cap. When the past N days of LLM-given impacts sum above the budget, the rebalance pass scales them down proportionally. Quiet weeks are not amplified."
+            title: "Daily consolidation budget",
+            blurb: "Mirrors the brain's nightly consolidation cap. Each day's events are scaled independently — when a day's LLM-given impacts sum above the budget, that day is compressed proportionally. Quiet days are left alone."
         ) {
-            doubleRow("Weekly budget (sum of impacts)",
-                      value: cfg.binding(\.memory.weeklyBudget),
+            doubleRow("Daily budget (sum of impacts per day)",
+                      value: cfg.binding(\.memory.dailyBudget),
                       range: 10...200, step: 1)
             doubleRow("Peak protection (raw ≥ this is never scaled)",
                       value: cfg.binding(\.memory.peakProtection),

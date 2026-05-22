@@ -2,36 +2,33 @@ import Foundation
 
 /// Sleep-consolidation budget pass.
 ///
-/// Cognitive premise: the brain has a roughly fixed weekly capacity to
-/// consolidate memories into long-term storage. A wild week and a quiet
-/// week produce a similar number of deeply-encoded events; the wild week's
-/// big things crowd out smaller ones.
+/// Cognitive premise: the brain consolidates memories nightly, with a
+/// roughly fixed **daily** capacity. A wild day and a quiet day encode a
+/// similar number of deep memories; the wild day's big things crowd out
+/// smaller ones.
 ///
-/// Algorithm (per §design):
-///   1. Take all events whose latest occurrence is in the past 7 days.
+/// Algorithm:
+///   1. Take all events whose latest occurrence is in the past `windowDays`.
 ///   2. Separate three groups:
 ///        protected (rawImpact ≥ peakProtection) — final = raw, untouched.
 ///        frozen    (rebalanceCount ≥ maxRebalances) — leave impact alone.
 ///        rebalancable (everything else)
-///   3. Sum rawImpact of the rebalancable group.
-///   4. If sum > budget:  scale = budget / sum
-///                        final = rawImpact × scale
-///      If sum ≤ budget:  scale = 1.0
-///                        final = rawImpact     (no compression)
+///   3. Group the rebalancable events BY DAY. For each day, sum its events'
+///      rawImpact.
+///   4. Per day: if sum > dailyBudget → scale = dailyBudget / sum;
+///                                      final = rawImpact × scale.
+///               else                → scale = 1.0; final = rawImpact.
+///      Each day is scaled independently, so a busy day compresses without
+///      dragging quiet days down (the old single-window scale flattened a
+///      whole week by one number).
 ///   5. Increment rebalanceCount on each touched file.
 ///
-/// Triggering policy:
-///   - Don't run more than once per UTC day. (Weekly is the spec; daily
-///     would re-shuffle recent events constantly.)
-///   - Cap per-event re-touches at 5; after that the event's final impact
-///     is permanently the most-recent post-budget value.
-///
-/// Pure-function module — file I/O is the caller's job (Backfill or the
-/// dedicated "rebalance" UI button).
+/// Pure-function module — file I/O is the caller's job.
 enum MemoryBudget {
     struct Params {
-        /// Total weekly impact budget.
-        var weeklyBudget: Double = 50
+        /// Per-day impact budget. Each day's rebalancable events are scaled
+        /// so their rawImpact sum doesn't exceed this.
+        var dailyBudget: Double = 50
 
         /// Events with rawImpact at or above this never get scaled down.
         var peakProtection: Double = 4.5
@@ -49,7 +46,7 @@ enum MemoryBudget {
         static var fromConfig: Params {
             let m = ConfigStore.shared.current.memory
             return Params(
-                weeklyBudget: m.weeklyBudget,
+                dailyBudget: m.dailyBudget,
                 peakProtection: m.peakProtection,
                 maxRebalances: m.maxRebalances,
                 windowDays: m.windowDays
@@ -130,12 +127,25 @@ enum MemoryBudget {
             rebalancableRawSum += file.rawImpact
         }
 
-        // Compute scale. Quiet week → 1.0 (no scaling).
-        let scale: Double = (rebalancableRawSum > params.weeklyBudget && rebalancableRawSum > 0)
-            ? params.weeklyBudget / rebalancableRawSum
-            : 1.0
+        // 该事件归属的"天" = 最近一次 occurrence（无则 created）的 UTC 当日。
+        func dayOf(_ file: PortraitFile) -> Date {
+            cal.startOfDay(for: file.occurrences.max() ?? file.created)
+        }
+
+        // 按天汇总 rebalancable 的 raw 总和，每天各自算 scale。
+        var dayRawSum: [Date: Double] = [:]
+        for b in bucketed where b.kind == .rebalancable {
+            dayRawSum[dayOf(b.file), default: 0] += b.file.rawImpact
+        }
+        var dayScale: [Date: Double] = [:]
+        for (day, sum) in dayRawSum {
+            dayScale[day] = (sum > params.dailyBudget && sum > 0)
+                ? params.dailyBudget / sum
+                : 1.0
+        }
 
         var touched = 0
+        var totalNewImpact: Double = 0   // rebalancable group 的 new 总和
         for b in bucketed {
             // MemoryBudget 只扫 events/，event 必有 impact；?? 0 是类型系统
             // 防御，运行时永远不触发。
@@ -160,15 +170,23 @@ enum MemoryBudget {
                                    newImpact: cur,
                                    kind: .frozen))
             case .rebalancable:
+                let scale = dayScale[dayOf(b.file)] ?? 1.0
                 let newImpact = PortraitFile.clampImpact(b.file.rawImpact * scale)
                 let kind: Plan.Kind = (scale < 1.0) ? .rebalanced : .restored
                 plans.append(.init(url: b.url,
                                    oldImpact: cur,
                                    newImpact: newImpact,
                                    kind: kind))
+                totalNewImpact += newImpact
                 touched += 1
             }
         }
+
+        // Result.scale 报整体有效比（new 总和 / raw 总和）—— 每天 scale 不同，
+        // 单一数字只作概览。
+        let scale: Double = rebalancableRawSum > 0
+            ? totalNewImpact / rebalancableRawSum
+            : 1.0
 
         return Result(
             weekStart: weekStart,
@@ -271,7 +289,7 @@ private func writeJournal(result: MemoryBudget.Result, now: Date) {
     timeFmt.timeZone = TimeZone(identifier: "UTC")
 
     var lines: [String] = []
-    lines.append("\n## Weekly memory budget (\(timeFmt.string(from: now)))")
+    lines.append("\n## Daily memory budget (\(timeFmt.string(from: now)))")
     lines.append("- Window: \(dayFmt.string(from: result.weekStart)) → \(dayFmt.string(from: result.weekEnd))")
     lines.append("- Sum raw impact (rebalancable): \(String(format: "%.2f", result.sumRawImpact))")
     lines.append("- Scale applied: \(String(format: "%.3f", result.scale))")
