@@ -344,6 +344,11 @@ final class PortraitDistiller {
         // 新 portrait = "一次合并自零"，EMA.afterMerge(0, 0) = 1.0 —— 跟 P3
         // baseline 一致。这是字面量赋值，不走 event 的 WeightCalculator 公式。
         file.weight = 1.0
+        // portrait-layer 字段：所有 portrait 文件都要带 mergeCount + lastModified
+        // （EMA 衰减锚点）。primaryLabel / aliases / evidenceEventIds 留 nil ——
+        // 那几个是 personality concept 专属。
+        file.mergeCount = 1
+        file.lastModified = file.created
         try PortraitFileIO.write(file, to: url)
     }
 
@@ -368,6 +373,9 @@ final class PortraitDistiller {
         file.recordOccurrence(on: Date())    // mark as "still relevant today"
         // portrait weight 不再走 WeightCalculator（event 公式）。P5 接入
         // WeightEMA.afterMerge；interim 内 update 不动 stored weight。
+        // body 改了 → 刷新 EMA 锚点 + merge 计数（老文件可能 nil，兜 1）。
+        file.mergeCount = (file.mergeCount ?? 1) + 1
+        file.lastModified = Date()
         try PortraitFileIO.write(file, to: url)
 
         // 审计日志：body 实际变化才记一条 distill_changelog，供 debug / 回滚。

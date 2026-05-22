@@ -196,11 +196,13 @@ final class PersonalityMerger {
                 file.body = Self.renderBody(title: label, body: mergedBody)
                 file.eventSummary = mergedBody
                 // aliases 并集，保序去重。
-                for a in newAliases where !file.aliases.contains(a) {
-                    file.aliases.append(a)
+                var mergedAliases = file.aliases ?? []
+                for a in newAliases where !mergedAliases.contains(a) {
+                    mergedAliases.append(a)
                 }
+                file.aliases = mergedAliases
                 // evidence 并集（旧在前、保序、去重），尾部截断到 50。
-                var mergedEvidence = file.evidenceEventIds
+                var mergedEvidence = file.evidenceEventIds ?? []
                 for e in evidence where !mergedEvidence.contains(e) {
                     mergedEvidence.append(e)
                 }
@@ -209,7 +211,7 @@ final class PersonalityMerger {
                 file.weight = ema.afterMerge(
                     stored: file.weight,
                     daysSinceModified: file.daysSinceModified(now: today))
-                file.mergeCount += 1
+                file.mergeCount = (file.mergeCount ?? 1) + 1
                 file.lastModified = today
                 file.recordOccurrence(on: today)
                 try PortraitFileIO.write(file, to: url)
@@ -239,7 +241,7 @@ final class PersonalityMerger {
         } else {
             for (slug, f) in concepts {
                 let label = f.primaryLabel ?? f.eventTitle
-                let aliases = f.aliases.joined(separator: ", ")
+                let aliases = (f.aliases ?? []).joined(separator: ", ")
                 let bodyProse = Self.prose(of: f.body)
                 let trimBody = bodyProse.count > 320
                     ? String(bodyProse.prefix(320)) + "…" : bodyProse

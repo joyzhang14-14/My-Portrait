@@ -152,7 +152,7 @@ enum MemoryStaging {
     /// 这些一变不算"实质改动"。
     private static let mechanicalKeys = [
         "weight:", "last_modified:", "raw_impact:",
-        "rebalance_count:", "impact_source:",
+        "rebalance_count:", "impact_source:", "merge_count:",
     ]
 
     /// 两份原文除了机械字段行之外完全相同 → 只是机械重算，不进审核列表。

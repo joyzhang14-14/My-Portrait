@@ -72,18 +72,15 @@ struct PortraitFile: Equatable {
     var pinned: Bool
     var archivedAt: Date?
 
-    // Phase 3 — EMA weight + personality concept fields. Uniform across all
-    // PortraitFile uses; non-personality files just leave primaryLabel nil
-    // and aliases [].
-    var mergeCount: Int                 // # of merges/rewrites into this file.
-                                        // 1 for a brand-new file.
-    var primaryLabel: String?           // personality concept's single-noun
-                                        // tag label (nil for non-personality)
-    var aliases: [String]               // synonym tags folded into this concept
-    var lastModified: Date              // last body change — EMA decay anchor
-    var evidenceEventIds: [String]      // personality concept: accumulated
-                                        // evidence event slugs across days,
-                                        // capped at 50. [] for non-personality.
+    // Phase 3 — portrait-layer fields. **全部 portrait 专属，event 文件不持有**
+    // （nil → 序列化时整行 skip）。
+    //   mergeCount / lastModified —— 所有 portrait 文件都有（EMA 衰减锚点）。
+    //   primaryLabel / aliases / evidenceEventIds —— 仅 personality concept。
+    var mergeCount: Int?                // # of merges/rewrites；portrait 文件 1+
+    var primaryLabel: String?           // personality concept 的单名词 tag
+    var aliases: [String]?              // personality concept 的同义 tag
+    var lastModified: Date?             // last body change — EMA decay anchor
+    var evidenceEventIds: [String]?     // personality concept 累积证据 slug（≤50）
 
     var body: String                    // raw markdown after frontmatter
 
@@ -124,11 +121,13 @@ struct PortraitFile: Equatable {
         self.supersededBy = nil
         self.pinned = false
         self.archivedAt = nil
-        self.mergeCount = 1
+        // event 文件默认全 nil —— portrait 专属字段。portrait 写入方
+        // （distiller / PersonalityMerger）建好后再显式赋值。
+        self.mergeCount = nil
         self.primaryLabel = nil
-        self.aliases = []
-        self.lastModified = created
-        self.evidenceEventIds = []
+        self.aliases = nil
+        self.lastModified = nil
+        self.evidenceEventIds = nil
         self.body = body
     }
 
@@ -153,11 +152,11 @@ struct PortraitFile: Equatable {
         supersededBy: String?,
         pinned: Bool,
         archivedAt: Date?,
-        mergeCount: Int = 1,
+        mergeCount: Int? = nil,
         primaryLabel: String? = nil,
-        aliases: [String] = [],
+        aliases: [String]? = nil,
         lastModified: Date? = nil,
-        evidenceEventIds: [String] = [],
+        evidenceEventIds: [String]? = nil,
         body: String
     ) {
         self.created = created
@@ -184,7 +183,7 @@ struct PortraitFile: Equatable {
         self.mergeCount = mergeCount
         self.primaryLabel = primaryLabel
         self.aliases = aliases
-        self.lastModified = lastModified ?? created
+        self.lastModified = lastModified
         self.evidenceEventIds = evidenceEventIds
         self.body = body
     }
@@ -213,8 +212,11 @@ struct PortraitFile: Equatable {
     /// 距 `lastModified` 的天数（分数）—— 给 EMA lazy 衰减用。
     /// 跟 `daysSinceLastOccurrence` 不同：那是事件粒度的整数日；EMA 是连续
     /// 衰减，需要分数 days 才能反映"修改后几小时也有微小衰减"。
+    /// event 文件无 lastModified（portrait 专属）→ 返回 0（不衰减）；event
+    /// 本来也不走 EMA。
     func daysSinceModified(now: Date = Date()) -> Double {
-        max(0, now.timeIntervalSince(lastModified) / 86_400)
+        guard let lastModified else { return 0 }
+        return max(0, now.timeIntervalSince(lastModified) / 86_400)
     }
 
     /// Append an occurrence date (Tier 1 merge / repeat detection). Idempotent

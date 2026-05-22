@@ -68,7 +68,7 @@ final class PortraitFileIOTests: XCTestCase {
         XCTAssertEqual(back.impact, 3.7)
     }
 
-    /// 老文件缺 Phase 3 字段 → 读出默认值（mergeCount 1 / nil / [] / =created）。
+    /// 缺 Phase 3 portrait-layer 字段（event 文件本就不带）→ 读出全 nil。
     func testOldFileDefaultsForMissingPhase3Fields() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -99,9 +99,26 @@ final class PortraitFileIOTests: XCTestCase {
         try yaml.write(to: url, atomically: true, encoding: .utf8)
         let f = try PortraitFileIO.read(from: url)
 
-        XCTAssertEqual(f.mergeCount, 1)
+        XCTAssertNil(f.mergeCount)
         XCTAssertNil(f.primaryLabel)
-        XCTAssertEqual(f.aliases, [])
-        XCTAssertEqual(f.lastModified, f.created)
+        XCTAssertNil(f.aliases)
+        XCTAssertNil(f.lastModified)
+        XCTAssertNil(f.evidenceEventIds)
+    }
+
+    /// portrait 专属字段：event 文件不带（序列化时整行 skip）。
+    func testEventFileOmitsPortraitFields() throws {
+        let f = PortraitFile(impact: 3, body: "# E\n\nbody")   // 便利 init = event
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try PortraitFileIO.write(f, to: url)
+        let raw = try String(contentsOf: url, encoding: .utf8)
+        for key in ["merge_count:", "primary_label:", "aliases:",
+                    "last_modified:", "evidence_event_ids:"] {
+            XCTAssertFalse(raw.contains("\n\(key)"), "event 文件不该写 \(key)")
+        }
+        let back = try PortraitFileIO.read(from: url)
+        XCTAssertNil(back.mergeCount)
+        XCTAssertNil(back.lastModified)
     }
 }

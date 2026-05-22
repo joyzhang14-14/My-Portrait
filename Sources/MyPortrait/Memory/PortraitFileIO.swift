@@ -84,14 +84,13 @@ enum PortraitFileIO {
         // distilled_into — portrait slugs already consumed from this event.
         // Default [] for files written before the field existed.
         let distilledInto = (try? requireStringArray(fields, "distilled_into")) ?? []
-        // Phase 3 fields. Default for files written before they existed:
-        // mergeCount 1, no primaryLabel, no aliases, lastModified = created.
-        let mergeCount = (try? requireInt(fields, "merge_count")) ?? 1
+        // Phase 3 portrait-layer fields —— 全 optional，缺失 → nil（event 文件
+        // 不持有这些；序列化时整行 skip）。
+        let mergeCount = try? requireInt(fields, "merge_count")
         let primaryLabel = (try? optionalString(fields, "primary_label")) ?? nil
-        let aliases = (try? requireStringArray(fields, "aliases")) ?? []
-        let lastModified = ((try? optionalDate(fields, "last_modified")) ?? nil) ?? created
-        // personality concept 的累积 evidence；老文件 / 非 personality 默认 []。
-        let evidenceEventIds = (try? requireStringArray(fields, "evidence_event_ids")) ?? []
+        let aliases = try? requireStringArray(fields, "aliases")
+        let lastModified = (try? optionalDate(fields, "last_modified")) ?? nil
+        let evidenceEventIds = try? requireStringArray(fields, "evidence_event_ids")
 
         return PortraitFile(
             created: created,
@@ -162,11 +161,12 @@ enum PortraitFileIO {
         lines.append("superseded_by: \(formatNullableString(f.supersededBy))")
         lines.append("pinned: \(f.pinned)")
         lines.append("archived_at: \(f.archivedAt.map { formatDateTime($0) } ?? "null")")
-        lines.append("merge_count: \(f.mergeCount)")
-        lines.append("primary_label: \(formatNullableString(f.primaryLabel))")
-        lines.append("aliases: \(formatStringArray(f.aliases))")
-        lines.append("last_modified: \(formatDateOnly(f.lastModified))")
-        lines.append("evidence_event_ids: \(formatStringArray(f.evidenceEventIds))")
+        // Phase 3 portrait-layer 字段：nil 整行 skip —— event 文件不持有这些。
+        if let mc = f.mergeCount { lines.append("merge_count: \(mc)") }
+        if let pl = f.primaryLabel { lines.append("primary_label: \(formatNullableString(pl))") }
+        if let al = f.aliases { lines.append("aliases: \(formatStringArray(al))") }
+        if let lm = f.lastModified { lines.append("last_modified: \(formatDateOnly(lm))") }
+        if let ev = f.evidenceEventIds { lines.append("evidence_event_ids: \(formatStringArray(ev))") }
         lines.append("---")
         lines.append("")
         return lines.joined(separator: "\n") + f.body
