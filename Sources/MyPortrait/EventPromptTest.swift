@@ -447,7 +447,6 @@ enum BackfillDayCLI {
                 print("dropped (no OCR):     \(r.emptySessionCount)")
                 print("LLM-skipped sessions: \(r.skippedSessionCount)")
                 print("LLM-failed days:      \(r.llmFailedDays)")
-                print("archived:             \(r.archiverResult.archivedCount)")
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
                 state.code = 1
@@ -517,7 +516,6 @@ enum BackfillDaysCLI {
                 print("dropped (no OCR):     \(r.emptySessionCount)")
                 print("LLM-skipped sessions: \(r.skippedSessionCount)")
                 print("LLM-failed days:      \(r.llmFailedDays)")
-                print("archived:             \(r.archiverResult.archivedCount)")
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
                 state.code = 1
@@ -862,6 +860,7 @@ enum DistillCLI {
                 print("portrait files written: \(r.portraitFilesWritten)")
                 print("portrait files updated: \(r.portraitFilesUpdated)")
                 print("LLM-failed categories: \(r.llmFailedCategories)")
+                print("archived: \(r.archivedCount)")
                 print("elapsed: \(String(format: "%.1f", r.elapsed))s")
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))

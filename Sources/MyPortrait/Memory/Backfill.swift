@@ -30,7 +30,6 @@ enum Backfill {
         let newEventCount: Int
         let joinedSessionCount: Int
         let skippedSessionCount: Int
-        let archiverResult: Archiver.Result
     }
 
     struct Progress {
@@ -202,11 +201,11 @@ enum Backfill {
             totals.skippedSessionCount += clustering.skippedIndices.count
         }
 
-        // Weight pass across the whole tree.
+        // Weight pass across the events tree.
         try await weightPass()
 
-        // Archiver pass.
-        let archiveResult = try Archiver.run()
+        // 归档不在这里跑 —— 它动的是 portrait/ 文件，挪到了
+        // PortraitDistiller.distill 之后。
 
         return Result(
             daysScanned: daysBack,
@@ -216,8 +215,7 @@ enum Backfill {
             llmFailedDays: totals.llmFailedDays,
             newEventCount: totals.newEventCount,
             joinedSessionCount: totals.joinedSessionCount,
-            skippedSessionCount: totals.skippedSessionCount,
-            archiverResult: archiveResult
+            skippedSessionCount: totals.skippedSessionCount
         )
     }
 

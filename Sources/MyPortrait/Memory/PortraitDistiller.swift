@@ -37,6 +37,7 @@ final class PortraitDistiller {
         let portraitFilesWritten: Int
         let portraitFilesUpdated: Int
         let llmFailedCategories: Int
+        let archivedCount: Int
         let elapsed: TimeInterval
     }
 
@@ -139,11 +140,17 @@ final class PortraitDistiller {
             progress?(.init(categoryIndex: idx + 1, categoryCount: categories.count, category: category, written: written))
         }
 
+        // 蒸馏后扫一遍 portrait/ 归档（程序化、无 LLM）。放在 distill 之后
+        // 是因为归档动的就是 portrait 文件、distill 刚更新完它们；用 Settings
+        // 配置的阈值（archive_max_weight / archive_min_days_idle）。
+        let archive = try Archiver.run(rule: .fromConfig)
+
         return Result(
             categoriesProcessed: categories.count,
             portraitFilesWritten: written,
             portraitFilesUpdated: updated,
             llmFailedCategories: failed,
+            archivedCount: archive.archivedCount,
             elapsed: Date().timeIntervalSince(start)
         )
     }

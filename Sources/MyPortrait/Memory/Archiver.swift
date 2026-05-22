@@ -2,12 +2,18 @@ import Foundation
 
 /// Programmatic archival per design doc §6.7. **No LLM involvement.**
 ///
+/// Runs at the end of `PortraitDistiller.distill` — it operates on
+/// `portrait/` files, which distill has just rewritten. Thresholds come
+/// from Settings (`Rule.fromConfig`).
+///
 /// A file is archived when ALL of:
-///   - impact < 2
-///   - weight < 0.05
-///   - days_since_last_access ≥ 90
+///   - currentWeight (EMA-decayed) < archive_max_weight (default 0.05)
+///   - days_since_last_occurrence ≥ archive_min_days_idle (default 90)
 ///   - path does NOT start with "skills/"
 ///   - not pinned
+///   - not already archived
+///
+/// portrait 不再持有 impact —— 它不是归档条件。
 ///
 /// Archiving = moving the file from
 ///     <portrait>/<category>/<...>/file.md
