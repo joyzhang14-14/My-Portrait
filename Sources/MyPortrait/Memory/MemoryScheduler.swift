@@ -147,19 +147,28 @@ final class MemoryScheduler {
         return min(max(requested, 1), lastDay)
     }
 
+    /// runEventJob / runPortraitJob 的结果。手动触发的 UI 用它区分
+    /// "真跑了" / "没活干直接罢工" / "调度器在忙"。
+    enum JobOutcome: Sendable {
+        case ran(String)   // 跑了；String 是给用户看的简述
+        case noWork        // 没有待处理的天 / 画像已最新 —— 直接罢工
+        case busy          // 调度器或另一次触发正在跑
+    }
+
     // MARK: - event job：event 聚类 + impact 评分（per-day）
 
     /// 处理至多 `dayCap` 个未完成的数据日（旧 → 新）。每天 event → impact
-    /// 顺序跑，各自持锁 + 心跳。
-    func runEventJob() async {
-        guard !isRunning else { return }
+    /// 顺序跑，各自持锁 + 心跳。手动触发与定时触发走同一个函数。
+    @discardableResult
+    func runEventJob() async -> JobOutcome {
+        guard !isRunning else { return .busy }
         isRunning = true
         defer { isRunning = false }
 
         let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
             schedLog.info("event job: no pending days")
-            return
+            return .noWork
         }
         print("[Scheduler] event job — \(days.count) day(s) to process")
 
@@ -194,6 +203,7 @@ final class MemoryScheduler {
                 }
             }
         }
+        return .ran("Processed \(days.count) day(s).")
     }
 
     // MARK: - portrait job：distill
@@ -201,8 +211,9 @@ final class MemoryScheduler {
     /// 跑一次完整 distill，状态记在 `_distill_anchor` 哨兵行（持锁 + 心跳，
     /// 崩溃可恢复）。distiller 扫盘上所有非归档事件 —— 失败日的事件已被 event
     /// job 清除，所以盘上事件天然只来自 event 处理成功的日。
-    func runPortraitJob() async {
-        guard !isRunning else { return }
+    @discardableResult
+    func runPortraitJob() async -> JobOutcome {
+        guard !isRunning else { return .busy }
         isRunning = true
         defer { isRunning = false }
 
@@ -210,7 +221,7 @@ final class MemoryScheduler {
         let distill = store.row(for: distillAnchor)?.distill ?? .idle
         guard distill.needsWork else {
             schedLog.info("portrait job: distill is \(distill.rawValue, privacy: .public) — skip")
-            return
+            return .noWork
         }
         print("[Scheduler] portrait job — distilling")
 
@@ -218,6 +229,7 @@ final class MemoryScheduler {
             let r = try await PortraitDistiller(model: self.model).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
+        return .ran("Distillation complete.")
     }
 
     // MARK: - 单步执行（持锁 + 心跳 + 结果落库）
