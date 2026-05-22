@@ -171,9 +171,12 @@ final class PiAgent: @unchecked Sendable {
             throw SpawnError.launchFailed(error.localizedDescription)
         }
         self.stdin = stdinPipe.fileHandleForWriting
+        // Register so the "Stop" emergency brake can find + kill this agent.
+        PiAgentRegistry.shared.register(self)
     }
 
     func stop() {
+        PiAgentRegistry.shared.unregister(self)
         eventContinuation?.finish()
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil

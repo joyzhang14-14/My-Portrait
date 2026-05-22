@@ -33,6 +33,7 @@ struct MemorySettingsView: View {
     @State private var actionStatus: String = ""
     @State private var runningTrigger: ManualTrigger? = nil
     @State private var confirmTrigger: ManualTrigger? = nil
+    @State private var runTask: Task<Void, Never>? = nil
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -78,7 +79,10 @@ struct MemorySettingsView: View {
             presenting: confirmTrigger
         ) { trigger in
             Button("Run \(trigger.title)") {
-                Task { await run(trigger) }
+                runTask = Task {
+                    await run(trigger)
+                    runTask = nil
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: { trigger in
@@ -256,6 +260,22 @@ struct MemorySettingsView: View {
             triggerRow(.eventProcessing)
             Divider().padding(.vertical, 2)
             triggerRow(.distill)
+            if runningTrigger != nil {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Button("Stop") {
+                        let n = PiAgentRegistry.shared.stopAll()
+                        runTask?.cancel()
+                        runTask = nil
+                        runningTrigger = nil
+                        actionStatus = "Stopped — killed \(n) LLM process(es)."
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+                }
+                .padding(.top, 6)
+            }
             if !actionStatus.isEmpty {
                 Text(actionStatus)
                     .font(.system(size: 11, design: .monospaced))
