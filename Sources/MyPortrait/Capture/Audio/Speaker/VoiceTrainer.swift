@@ -32,9 +32,6 @@ final class VoiceTrainer {
     /// 轮询间隔与上限（15s × 40 = 10 分钟）。
     private static let pollIntervalNs: UInt64 = 15_000_000_000
     private static let maxAttempts = 40
-    /// 传播合并阈值：训练窗口里和主簇 centroid 余弦相似度 ≥ 此值的其它簇，
-    /// 判定为被分离器切碎的同一个人，合并进主簇。
-    private static let mergeThreshold: Float = 0.5
 
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "voice-training")
     private var task: Task<Void, Never>?
@@ -78,17 +75,13 @@ final class VoiceTrainer {
                 named = true
                 self?.logger.info("voice training: named speaker \(dominant) as '\(trimmed, privacy: .public)'")
 
-                // 传播合并：训练时你一个人在说话，窗口里被分离器切出的其它声纹
-                // 簇同样是你。和主簇 centroid 足够像的合并进主簇，消除碎片化。
-                let others = Set(tally.keys).subtracting([dominant])
-                if !others.isEmpty {
-                    let simMap = Dictionary(
-                        await Self.similarSpeakers(to: dominant).map { ($0.id, $0.similarity) },
-                        uniquingKeysWith: { a, _ in a })
-                    for sid in others where (simMap[sid] ?? 0) >= Self.mergeThreshold {
-                        await Self.merge(keep: dominant, merge: sid)
-                        self?.logger.info("voice training: merged speaker \(sid) into \(dominant)")
-                    }
+                // 传播合并：训练时全程只有用户一个人，所以训练窗口里被分离器
+                // 切出的每一个声纹簇都是同一个人 —— 全部无条件合并进主簇。
+                // CAM++ 对短/特殊语音段偶尔抖动（相似度可低到 0.2），靠相似度
+                // 阈值筛会漏掉这些碎片；既然窗口已知单人，直接全并最干净。
+                for sid in Set(tally.keys).subtracting([dominant]) {
+                    await Self.merge(keep: dominant, merge: sid)
+                    self?.logger.info("voice training: merged speaker \(sid) into \(dominant)")
                 }
                 break
             }
@@ -115,10 +108,6 @@ final class VoiceTrainer {
 
     private static func rename(speakerId: Int64, to name: String) async {
         _ = await Task.detached { TimelineDB().renameSpeaker(id: speakerId, to: name) }.value
-    }
-
-    private static func similarSpeakers(to id: Int64) async -> [SimilarSpeaker] {
-        await Task.detached { TimelineDB().similarSpeakers(to: id, limit: 20) }.value
     }
 
     private static func merge(keep: Int64, merge mergeId: Int64) async {
