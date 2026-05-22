@@ -527,6 +527,16 @@ struct PrivacyConfig: Codable, Equatable {
     /// Typing 采集的额外 app 黑名单（按 bundle id）。命中的 app TypingObserver
     /// 整体不订阅 AX。与 TypingPrivacyFilter 的 hardcode 默认黑名单取并集。
     var typingBlacklistBundleIds: [String] = []
+    /// 「回车 = 发送」的 app（按 bundle id）—— 这些 app 里回车要识别成发送
+    /// 消息而非换行。
+    var typingSubmitBundleIds: [String] = [
+        "com.tencent.xinWeChat",      // 微信
+        "com.tencent.qq",             // QQ
+        "com.apple.MobileSMS",        // Messages
+        "com.tinyspeck.slackmacgap",  // Slack
+        "com.hnc.Discord",            // Discord
+        "ru.keepcoder.Telegram",      // Telegram
+    ]
     init() {}
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
@@ -539,6 +549,7 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredWindowTitles     = "ignored_window_titles"
         case maskIgnoredApps         = "mask_ignored_apps"
         case typingBlacklistBundleIds = "typing_blacklist_bundle_ids"
+        case typingSubmitBundleIds    = "typing_submit_bundle_ids"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -553,6 +564,7 @@ struct PrivacyConfig: Codable, Equatable {
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
         typingBlacklistBundleIds = c.dflt([String].self, .typingBlacklistBundleIds, typingBlacklistBundleIds)
+        typingSubmitBundleIds    = c.dflt([String].self, .typingSubmitBundleIds, typingSubmitBundleIds)
     }
 }
 

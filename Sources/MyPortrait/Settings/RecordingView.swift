@@ -322,11 +322,69 @@ struct ScreenRecordingSettingsView: View {
 /// Typing Recording 设置子分区。
 struct TypingRecordingSettingsView: View {
     @State private var config = ConfigStore.shared
+    @Environment(\.services) private var services
+    /// 用户打过字的 app（bundle id）—— 给两个 app 选择器的下拉用。
+    @State private var discovered: [String] = []
+
+    /// 常见「回车发送」app 预设（bundle id）。
+    static let commonChatApps: [String] = [
+        "com.tencent.xinWeChat", "com.tencent.qq", "com.apple.MobileSMS",
+        "com.tinyspeck.slackmacgap", "com.hnc.Discord", "ru.keepcoder.Telegram",
+    ]
 
     var body: some View {
         SettingsPage("Typing Recording", subtitle: "Learn your writing style") {
             typingSection
+            blacklistSection
+            submitSection
         }
+        .task { discovered = await Self.loadDiscovered(services?.typingStore) }
+    }
+
+    /// 黑名单 app —— 命中的 app 整段不采集打字。
+    private var blacklistSection: some View {
+        SettingsCard(
+            title: "Typing blacklist",
+            footnote: "Password managers and terminals are always excluded. Add apps here to skip capturing typing from them entirely."
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Pick an app you've typed in…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                TypingAppPicker(apps: config.binding(\.privacy.typingBlacklistBundleIds),
+                                discovered: discovered)
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+        }
+    }
+
+    /// 「回车 = 发送」的 app —— 这些 app 里回车识别为发送消息而非换行。
+    private var submitSection: some View {
+        SettingsCard(
+            title: "Enter-to-send apps",
+            footnote: "In these apps, pressing Return sends a message — captured as a “sent” event rather than a line break. Shift+Return is always a line break."
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Pick from your apps or the common chat list…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                TypingAppPicker(apps: config.binding(\.privacy.typingSubmitBundleIds),
+                                discovered: discovered,
+                                presets: Self.commonChatApps,
+                                presetTitle: "Common chat apps")
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+        }
+    }
+
+    /// 后台扫 typing_events 的 distinct bundle id。
+    private static func loadDiscovered(_ store: TypingEventStore?) async -> [String] {
+        guard let store else { return [] }
+        return await Task.detached {
+            (try? store.appSummaries())?.map(\.bundleId) ?? []
+        }.value
     }
 
     private var typingSection: some View {

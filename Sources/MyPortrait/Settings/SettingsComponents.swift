@@ -480,6 +480,102 @@ struct IgnoredAppPicker: View {
     }
 }
 
+/// Typing 设置用的 app 选择器 —— 黑名单 / 回车发送列表共用。
+/// 跟 `IgnoredAppPicker` 同形（下拉 + 可移除 chips），但条目是 **bundle id**：
+/// 存 bundle id，显示友好名（bundle id 末段）。
+struct TypingAppPicker: View {
+    @Binding var apps: [String]            // bundle id
+    var discovered: [String] = []          // 用户打过字的 app（bundle id）
+    var presets: [String] = []             // 预设建议（bundle id）；空 → 不显示第二个下拉
+    var presetTitle: String = "Common apps"
+
+    /// bundle id → 友好名（com.tencent.xinWeChat → xinWeChat）。
+    static func label(_ bundleId: String) -> String {
+        let last = bundleId.split(separator: ".").last.map(String.init)
+        return (last?.isEmpty == false ? last : nil) ?? bundleId
+    }
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Color.white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                dropdown(title: "Select app", icon: "plus.circle.fill",
+                         options: discovered, emptyHint: "No typed-in apps yet")
+                if !presets.isEmpty {
+                    dropdown(title: presetTitle, icon: "app.badge",
+                             options: presets, emptyHint: "")
+                }
+            }
+            if !apps.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(apps, id: \.self) { app in
+                        HStack(spacing: 4) {
+                            Text(Self.label(app))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.85))
+                            Button {
+                                apps.removeAll { $0 == app }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
+                            .buttonStyle(.bouncyIcon)
+                        }
+                        .padding(.horizontal, 7).padding(.vertical, 3.5)
+                        .help(app)
+                        .background(
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dropdown(title: String, icon: String,
+                          options: [String], emptyHint: String) -> some View {
+        Menu {
+            if options.isEmpty {
+                Text(emptyHint)
+            } else {
+                ForEach(options, id: \.self) { app in
+                    Button { toggle(app) } label: {
+                        if apps.contains(app) {
+                            Label(Self.label(app), systemImage: "checkmark")
+                        } else {
+                            Text(Self.label(app))
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(title).font(.system(size: 12))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(boxBackground)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func toggle(_ app: String) {
+        if let i = apps.firstIndex(of: app) { apps.remove(at: i) } else { apps.append(app) }
+    }
+}
+
 /// `[String]` AppStorage bridge — UserDefaults stores arrays natively but
 /// `@AppStorage` doesn't directly support them, so we round-trip via JSON.
 struct StringArrayStorage {
