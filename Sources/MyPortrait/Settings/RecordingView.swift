@@ -399,6 +399,39 @@ struct TypingRecordingSettingsView: View {
                             .foregroundStyle(.white.opacity(0.55))
                     }
                 }
+                SettingsDivider()
+                SettingsRow("Edit-log debounce",
+                            description: "Edits that settle within this long collapse into one edit-log step. Higher = coarser log; also collapses IME (pinyin) intermediate states.",
+                            icon: "hourglass") {
+                    Stepper(value: config.binding(\.recording.typingDebounceMs),
+                            in: 100...1000, step: 50) {
+                        Text("\(config.current.recording.typingDebounceMs) ms")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
+                SettingsDivider()
+                SettingsRow("Session flush idle",
+                            description: "After this long without typing, the current input is saved as a record. Continuous edits keep merging into the same record.",
+                            icon: "tray.and.arrow.down") {
+                    Stepper(value: config.binding(\.recording.typingFlushIdleSec),
+                            in: 2...30, step: 1) {
+                        Text("\(config.current.recording.typingFlushIdleSec) s")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
+                SettingsDivider()
+                SettingsRow("Enter-to-send window",
+                            description: "After pressing Return, the input box must clear within this long to count as a sent message rather than a deletion.",
+                            icon: "paperplane") {
+                    Stepper(value: config.binding(\.recording.typingSubmitWindowMs),
+                            in: 200...3000, step: 100) {
+                        Text("\(config.current.recording.typingSubmitWindowMs) ms")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
             }
         }
     }

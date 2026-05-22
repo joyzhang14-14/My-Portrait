@@ -333,11 +333,20 @@ struct RecordingConfig: Codable, Equatable {
     /// Typing 采集总开关。默认 false —— 读用户全部打字，隐私敏感，须用户显式开。
     /// true → 正常 app 启动时 TypingObserver 跟随权限门禁运行。
     var typingCaptureEnabled: Bool = false
+    /// AX 内容稳定多久（毫秒）才记一个编辑窗口 —— 收敛 IME 拼音中间态。
+    var typingDebounceMs: Int = 350
+    /// 停打多久（秒）这段输入 session 落库。
+    var typingFlushIdleSec: Int = 5
+    /// 回车后多久内（毫秒）输入框清空才算「发送」。
+    var typingSubmitWindowMs: Int = 1000
     init() {}
     enum CodingKeys: String, CodingKey {
         case audio, screen, system
         case typingKeyCorrelationWindowMs = "typing_key_correlation_window_ms"
         case typingCaptureEnabled = "typing_capture_enabled"
+        case typingDebounceMs     = "typing_debounce_ms"
+        case typingFlushIdleSec   = "typing_flush_idle_sec"
+        case typingSubmitWindowMs = "typing_submit_window_ms"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -347,6 +356,9 @@ struct RecordingConfig: Codable, Equatable {
         system = c.dflt(SystemConfig.self, .system, system)
         typingKeyCorrelationWindowMs = c.dflt(Int.self, .typingKeyCorrelationWindowMs, typingKeyCorrelationWindowMs)
         typingCaptureEnabled = c.dflt(Bool.self, .typingCaptureEnabled, typingCaptureEnabled)
+        typingDebounceMs     = c.dflt(Int.self, .typingDebounceMs, typingDebounceMs)
+        typingFlushIdleSec   = c.dflt(Int.self, .typingFlushIdleSec, typingFlushIdleSec)
+        typingSubmitWindowMs = c.dflt(Int.self, .typingSubmitWindowMs, typingSubmitWindowMs)
     }
 }
 

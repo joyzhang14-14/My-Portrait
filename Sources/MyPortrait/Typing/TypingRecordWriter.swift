@@ -60,15 +60,15 @@ final class TypingRecordWriter {
         }
     }
 
-    // MARK: - 硬编码参数（M5 统一挪进 ConfigStore）
+    // MARK: - 参数
+    //
+    // debounce / flush idle / submit window 三个走 ConfigStore（用户可调），
+    // 其余仍硬编码。
 
     nonisolated static let burstCharThreshold = 10
     nonisolated static let burstIntervalMs: Double = 30
     nonisolated static let blacklistTTLSec: TimeInterval = 3600
-    nonisolated static let debounceSec: TimeInterval = 0.350
-    nonisolated static let flushSec: TimeInterval = 5.0
     nonisolated static let pasteAssocSec: TimeInterval = 0.5
-    nonisolated static let submitAssocSec: TimeInterval = 1.0
     /// continuation 匹配比首 / 尾各这么多字 —— 同 element 内足够辨识。
     nonisolated static let matchWindowChars = 100
 
@@ -122,9 +122,11 @@ final class TypingRecordWriter {
         guard let rec = state[key] else { return }
 
         // 发送检测：输入框被清空 + 之前有内容 + 刚按过回车 = 聊天 app 发出消息。
+        let cfg = ConfigStore.shared.recording
         if newValue.isEmpty {
             let msg = rec.pendingValue ?? rec.lastValueSnapshot
-            if !msg.isEmpty, ledger.hasSubmitKey(within: Self.submitAssocSec) {
+            if !msg.isEmpty,
+               ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
                 handleSubmit(key: key, rec: rec, fullValue: msg)
                 return
             }
@@ -145,7 +147,7 @@ final class TypingRecordWriter {
         rec.pendingValue = newValue
         rec.debounceTimer?.invalidate()
         rec.debounceTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.debounceSec, repeats: false
+            withTimeInterval: Double(cfg.typingDebounceMs) / 1000.0, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.fireDebounce(key) }
         }
@@ -210,7 +212,8 @@ final class TypingRecordWriter {
     private func scheduleFlush(_ rec: InProgressRecord, key: ElementKey) {
         rec.flushTimer?.invalidate()
         rec.flushTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.flushSec, repeats: false
+            withTimeInterval: Double(ConfigStore.shared.recording.typingFlushIdleSec),
+            repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let r = self.state[key] else { return }
