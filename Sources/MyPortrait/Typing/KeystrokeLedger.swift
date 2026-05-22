@@ -184,6 +184,13 @@ final class KeystrokeLedger {
         return s > 0 && s >= cutoff && s <= now
     }
 
+    /// 清掉最近回车记录 —— 一次发送只触发一次，处理过即作废。
+    func consumeSubmit() {
+        os_unfair_lock_lock(&lock)
+        lastSubmitMs = 0
+        os_unfair_lock_unlock(&lock)
+    }
+
     /// 最近 `seconds` 秒内是否有击键。
     /// 边界用 `<=` —— 精确 seconds 秒前那一笔仍算 hit。
     func hasKeystroke(within seconds: TimeInterval) -> Bool {

@@ -125,13 +125,20 @@ final class TypingRecordWriter {
 
         // 发送检测：输入框被清空 + 之前有内容 + 刚按过回车 = 聊天 app 发出消息。
         let cfg = ConfigStore.shared.recording
-        if newValue.isEmpty {
+        // 发送检测：只对 Enter-to-send 列表里的 app。列表内，回车后第一次
+        // value-change 即视为发送（Shift+Enter 不算回车，见 KeystrokeLedger）。
+        // 不靠「输入框变空」判断 —— 有些 app（Claude desktop）空框是占位符
+        // 文字、永远非空。
+        if ConfigStore.shared.privacy.typingSubmitBundleIds.contains(rec.bundleId),
+           ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
+            ledger.consumeSubmit()
             let msg = rec.pendingValue ?? rec.lastValueSnapshot
-            if !msg.isEmpty,
-               ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
-                handleSubmit(key: key, rec: rec, fullValue: msg)
+            if !msg.isEmpty, msg != rec.sessionStart {
+                handleSubmit(key: key, rec: rec, message: msg, clearedValue: newValue)
                 return
             }
+            // 否则（没真打过字 / 误触回车）：consumeSubmit 已作废这次回车，
+            // 继续按普通输入处理。
         }
 
         let now = CACurrentMediaTime()
@@ -197,19 +204,18 @@ final class TypingRecordWriter {
 
     // MARK: - 发送
 
-    /// 聊天 app 回车发送 —— 输入框清空。`fullValue` = 清空前的完整内容。
-    private func handleSubmit(key: ElementKey, rec: InProgressRecord, fullValue: String) {
+    /// 回车发送 —— `message` = 发出的整条消息；`clearedValue` = 发送后输入框
+    /// 当前内容（空串 / 占位符文字，作为下一段 session 的起点）。
+    private func handleSubmit(key: ElementKey, rec: InProgressRecord,
+                              message: String, clearedValue: String) {
         rec.debounceTimer?.invalidate()
         rec.debounceTimer = nil
-        rec.lastValueSnapshot = fullValue
-        // submit 条目记**整条发出的消息** = 发送时输入框的完整内容。不能用
-        // sandwich(sessionStart, fullValue) 的 diff —— 消息若在上一段 session
-        // 就打完了（如打完停顿 >5s 触发 flush），sessionStart 已等于 fullValue，
-        // diff 会算成空串。
-        rec.editLog.append(EditEntry(ts: Self.nowMs(), kind: "submit", text: fullValue))
+        rec.lastValueSnapshot = message
+        // submit 条目记**整条发出的消息**。
+        rec.editLog.append(EditEntry(ts: Self.nowMs(), kind: "submit", text: message))
         rec.pendingChanges = true
-        onDevLog?("submit bundle=\(rec.bundleId) \(fullValue.count) chars")
-        flushAndContinue(key, newSessionStart: "")
+        onDevLog?("submit bundle=\(rec.bundleId) \(message.count) chars")
+        flushAndContinue(key, newSessionStart: clearedValue)
     }
 
     // MARK: - flush
