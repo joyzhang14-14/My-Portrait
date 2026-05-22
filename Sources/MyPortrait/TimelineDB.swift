@@ -623,6 +623,31 @@ struct TimelineDB: Sendable {
         return out
     }
 
+    /// 窗口内还在处理中（status 不是 done/failed）的输入（麦克风）音频块数。
+    /// voice training 用它判断「训练窗口的音频是否已全部转录 + 分离完」，
+    /// 全部处理完再统计声纹簇，避免只拿到先处理完的那部分。
+    func pendingInputChunkCount(fromMs: Int64, toMs: Int64) -> Int {
+        guard exists else { return 0 }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT count(*) FROM audio_chunks
+            WHERE is_input = 1
+              AND recorded_at_ms BETWEEN ? AND ?
+              AND status NOT IN ('done', 'failed')
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
+            return 0
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, fromMs)
+        sqlite3_bind_int64(stmt, 2, toMs)
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
     /// 找声音相似的说话人（centroid 余弦相似度 > 0.25，按相似度降序取前 limit）。
     /// 用于在 Speakers 页建议「这俩是不是同一个人 → 合并」。
     func similarSpeakers(to speakerId: Int64, limit: Int = 5) -> [SimilarSpeaker] {

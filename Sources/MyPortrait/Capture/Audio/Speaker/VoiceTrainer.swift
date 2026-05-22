@@ -67,6 +67,14 @@ final class VoiceTrainer {
                     }
                     continue
                 }
+                // 转录是逐块完成的：窗口里还有块在 pending/in_progress 时就统计，
+                // 只会拿到先处理完的那部分声纹簇，漏掉其余碎片。等全部处理完
+                // 再统计（最后一次轮询则用现有结果兜底）。
+                let pending = await Self.pendingInputChunks(fromMs: startMs, toMs: endMs)
+                if pending > 0, attempt < Self.maxAttempts {
+                    self?.logger.info("voice training: \(pending) input chunk(s) still processing (attempt \(attempt)/\(Self.maxAttempts))")
+                    continue
+                }
                 // 票数最多的声纹簇 = 用户本人。
                 var tally: [Int64: Int] = [:]
                 for v in votes { tally[v, default: 0] += 1 }
@@ -112,5 +120,9 @@ final class VoiceTrainer {
 
     private static func merge(keep: Int64, merge mergeId: Int64) async {
         _ = await Task.detached { TimelineDB().mergeSpeakers(keep: keep, merge: mergeId) }.value
+    }
+
+    private static func pendingInputChunks(fromMs: Int64, toMs: Int64) async -> Int {
+        await Task.detached { TimelineDB().pendingInputChunkCount(fromMs: fromMs, toMs: toMs) }.value
     }
 }
