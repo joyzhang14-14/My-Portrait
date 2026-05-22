@@ -125,15 +125,12 @@ actor FocusProbe {
 
         // AX 查询。若无权限就只返回 app 名。
         if AXIsProcessTrusted() {
-            // AX 树遍历是同步阻塞调用 —— 跑全 app 共用的串行 AX 队列:既不堵
-            // actor 执行器，又跟其它子系统(TypingObserver)的 AX 调用串行不并发
-            // （AX API 并发不安全，见 AXSerialQueue）。
+            // AX 树深度递归遍历**必须在主线程跑** —— 在后台队列上调
+            // AXUIElementCopyAttributeValue 会 _dispatch_assert_queue_fail 崩。
+            // refresh 由 app 切换触发(不频繁)，遍历有 depth/char/超时三重
+            // 上限，主线程上的停顿可忽略。
             let result: (title: String?, url: String?, axText: String?) =
-                await withCheckedContinuation { cont in
-                    AXSerialQueue.shared.async {
-                        cont.resume(returning: self.queryAX(pid: pid, bundleId: bundleId))
-                    }
-                }
+                await MainActor.run { self.queryAX(pid: pid, bundleId: bundleId) }
             windowTitle = result.title
             browserUrl = result.url
             axText = result.axText
