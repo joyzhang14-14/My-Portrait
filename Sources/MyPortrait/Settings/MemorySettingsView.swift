@@ -256,7 +256,7 @@ struct MemorySettingsView: View {
     private var schedulerSection: some View {
         section(
             title: "Automatic processing",
-            blurb: "Two independent schedulers. Each can run off (manual only), daily, weekly, or monthly. Times are local. Each trigger handles up to 7 unprocessed days, oldest first; failed days retry on the next run."
+            blurb: "Two independent schedulers. Each can run off (manual only), daily, weekly, or monthly. Times are local. Each run handles the oldest unprocessed days first, up to the per-run cap below; failed days retry on the next run."
         ) {
             schedulerBlock(
                 title: "Event processing",
@@ -267,6 +267,10 @@ struct MemorySettingsView: View {
                 title: "Portrait distillation",
                 desc: "Distills events into long-term portrait entries.",
                 config: \.scheduler.portrait)
+            Divider().padding(.vertical, 4)
+            intRow("Days processed per run",
+                   value: cfg.binding(\.memory.eventDayCap),
+                   range: 1...30)
         }
     }
 

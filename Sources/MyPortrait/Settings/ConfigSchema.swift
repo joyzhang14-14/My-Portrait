@@ -86,6 +86,10 @@ struct MemoryConfig: Codable, Equatable {
     // every N days since the file's last modification. Larger = stickier.
     var weightHalfLifeDays:    Int    = 180
 
+    // Scheduler — max unprocessed days handled per event-processing run
+    // (manual or automatic). Oldest first.
+    var eventDayCap:           Int    = 7
+
     init() {}
     enum CodingKeys: String, CodingKey {
         case indexerEnabled       = "indexer_enabled"
@@ -100,6 +104,7 @@ struct MemoryConfig: Codable, Equatable {
         case archiveMinDaysIdle   = "archive_min_days_idle"
         case distillEvidenceThreshold = "distill_evidence_threshold"
         case weightHalfLifeDays   = "weight_half_life_days"
+        case eventDayCap          = "event_day_cap"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -116,6 +121,7 @@ struct MemoryConfig: Codable, Equatable {
         archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
         distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)
         weightHalfLifeDays   = c.dflt(Int.self,    .weightHalfLifeDays,   weightHalfLifeDays)
+        eventDayCap          = c.dflt(Int.self,    .eventDayCap,          eventDayCap)
     }
 }
 

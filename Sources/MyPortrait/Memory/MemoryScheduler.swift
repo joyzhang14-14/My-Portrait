@@ -39,7 +39,8 @@ final class MemoryScheduler {
     private let store = ProcessingLogStore()
 
     /// 每次触发处理的数据日上限。
-    private let dayCap = 7
+    /// 每次 event-processing 跑最多处理几个未处理日 —— 由 Settings 配置。
+    private var dayCap: Int { ConfigStore.shared.current.memory.eventDayCap }
     /// 失败重试上限：retry_count ≥ 此值转 dead_letter。
     private let maxRetries = 3
     /// 原始数据"收齐"判定：数据日结束（UTC 次日 0 点）后再等这么久。
