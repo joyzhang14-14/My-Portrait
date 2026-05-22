@@ -49,6 +49,10 @@ actor FocusProbe {
     /// AX 文本总长度上限（字符）。防止巨型页面（如 Twitter timeline）撑爆 RSS。
     private let axMaxChars = 100_000
 
+    /// AX 树遍历跑这条后台串行队列 —— 同步阻塞的 AX 调用不能堵 actor 执行器
+    /// （AX 树大时会卡死协作线程池 → 线程爆炸 + 崩溃）。
+    private static let axQueue = DispatchQueue(label: "com.myportrait.capture.focus.ax")
+
     private var cached: FocusInfo = FocusInfo(
         appName: "Unknown",
         bundleId: nil,
@@ -94,7 +98,7 @@ actor FocusProbe {
             Task { await self.refresh() }
         }
 
-        refresh()
+        await refresh()
     }
 
     func stop() async {
@@ -112,7 +116,7 @@ actor FocusProbe {
 
     // MARK: - 私有
 
-    private func refresh() {
+    private func refresh() async {
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
 
         let name = app.localizedName ?? "Unknown"
@@ -125,7 +129,14 @@ actor FocusProbe {
 
         // AX 查询。若无权限就只返回 app 名。
         if AXIsProcessTrusted() {
-            let result = queryAX(pid: pid, bundleId: bundleId)
+            // AX 树遍历是同步阻塞调用 —— 挪到后台队列，绝不在 actor 执行器上
+            // 跑（AX 树大时会堵死协作线程池 → 线程爆炸 + 崩溃）。
+            let result: (title: String?, url: String?, axText: String?) =
+                await withCheckedContinuation { cont in
+                    Self.axQueue.async {
+                        cont.resume(returning: self.queryAX(pid: pid, bundleId: bundleId))
+                    }
+                }
             windowTitle = result.title
             browserUrl = result.url
             axText = result.axText
@@ -147,7 +158,7 @@ actor FocusProbe {
     /// 调 AX 抓窗口标题 + URL（仅浏览器）+ AX tree 文本子树。
     /// AX API 是跨进程同步 XPC，可能 10–50ms（AX text 走到 100ms+ 时降级让出）。
     /// 仅在 refresh() 内调用，不在采集热路径上。
-    private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?) {
+    nonisolated private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?) {
         let axApp = AXUIElementCreateApplication(pid)
 
         // 1. 焦点窗口
@@ -207,7 +218,7 @@ actor FocusProbe {
 
     /// 递归遍历 AX element，累计 AXValue / AXTitle / AXDescription 文本。
     /// 写成迭代风格其实更快，但递归读起来直观；depth ≤ 5 时栈深度可控。
-    private func walkAXText(
+    nonisolated private func walkAXText(
         element: AXUIElement,
         depth: Int,
         maxDepth: Int,
