@@ -80,9 +80,23 @@ final class SpeakerEmbeddingExtractor {
     func embed(_ samples: [Float]) -> [Float]? {
         let feats = fbank.compute(samples)              // [num_frames][80]
         guard !feats.isEmpty else { return nil }
+
+        // CMN（特征均值归一化）：每个 mel 频带减去整段的均值。
+        // wespeaker CAM++ 模型按归一化特征训练，漏掉这步会让 embedding 被
+        // 录音电平/麦克风的直流偏置主导，同一个人不同段相似度可低到 0.1。
+        let bins = FbankExtractor.numMelBins
+        var means = [Float](repeating: 0, count: bins)
+        for row in feats {
+            for b in 0..<bins { means[b] += row[b] }
+        }
+        let inv = 1 / Float(feats.count)
+        for b in 0..<bins { means[b] *= inv }
+
         var flat: [Float] = []
-        flat.reserveCapacity(feats.count * FbankExtractor.numMelBins)
-        for row in feats { flat.append(contentsOf: row) }
+        flat.reserveCapacity(feats.count * bins)
+        for row in feats {
+            for b in 0..<bins { flat.append(row[b] - means[b]) }
+        }
         do {
             let (out, _) = try model.run(
                 input: flat, shape: [1, feats.count, FbankExtractor.numMelBins]
