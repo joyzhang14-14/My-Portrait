@@ -79,10 +79,23 @@ final class TypingRecordWriterTests: XCTestCase {
     }
 
     func testStripBlacklist() {
-        XCTAssertEqual(TypingRecordWriter.stripBlacklist("aXXbXX", blacklist: ["XX"]), "abXX")
+        XCTAssertEqual(TypingRecordWriter.stripBlacklist("aXXbXX", blacklist: ["XX"]).text, "abXX")
         // 长度倒序：先减 XXXX，剩 "ab"，"XX" 找不到。
-        XCTAssertEqual(TypingRecordWriter.stripBlacklist("aXXXXb", blacklist: ["XX", "XXXX"]), "ab")
-        XCTAssertEqual(TypingRecordWriter.stripBlacklist("keep", blacklist: []), "keep")
+        XCTAssertEqual(TypingRecordWriter.stripBlacklist("aXXXXb",
+                                                         blacklist: ["XX", "XXXX"]).text, "ab")
+        XCTAssertEqual(TypingRecordWriter.stripBlacklist("keep", blacklist: []).text, "keep")
+        // 命中的段进 stripped，没命中的不进。
+        let r = TypingRecordWriter.stripBlacklist("aXXb", blacklist: ["XX", "ZZ"])
+        XCTAssertEqual(r.text, "ab")
+        XCTAssertEqual(r.stripped, ["XX"])
+    }
+
+    /// stripped 持久化往返：encode → decode 不丢。
+    func testStrippedRoundTrip() {
+        let set: Set<String> = ["pasted junk", "burst"]
+        XCTAssertEqual(
+            TypingRecordWriter.decodeStrings(TypingRecordWriter.encodeStrings(set)), set)
+        XCTAssertEqual(TypingRecordWriter.decodeStrings("[]"), [])
     }
 
     // MARK: - flush

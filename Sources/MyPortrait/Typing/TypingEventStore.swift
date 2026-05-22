@@ -24,6 +24,9 @@ struct TypingEvent: Codable, FetchableRecord, MutablePersistableRecord, Sendable
     var sessionStart: String = ""
     /// 该 record 结束时 element 的完整内容（continuation 匹配用）。
     var endValue: String = ""
+    /// 这条 record 实际剔除过的噪声段（JSON [String]）—— merge 重算 text
+    /// 时一并剔除，不依赖内存黑名单存活。
+    var stripped: String = "[]"
 
     static let databaseTableName = "typing_events"
     static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
@@ -54,7 +57,7 @@ struct TypingEventStore {
     /// 显式列清单，所有 SELECT 复用。
     private static let columns =
         "id, bundle_id, element_hash, started_at, ended_at, text, edit_log, " +
-        "total_chars, session_start, end_value"
+        "total_chars, session_start, end_value, stripped"
 
     /// INSERT 一条新 record。
     func insert(_ event: TypingEvent) throws {

@@ -214,12 +214,14 @@ final class TypingRecordWriter {
         rec.flushTimer?.invalidate()
         if rec.pendingChanges {
             let endValue = rec.lastValueSnapshot
-            let combined = Set((blacklist[key] ?? [:]).keys)
+            let liveBlacklist = Set((blacklist[key] ?? [:]).keys)
             let nowMs = Self.nowMs()
 
             if let target = findContinuation(rec: rec) {
-                // 接得上 → 合并进 target record。
-                let mergedText = Self.stripBlacklist(
+                // 接得上 → 合并进 target record。剔除时并上 target 自己记的
+                // stripped —— 即使内存黑名单已过期，旧噪声也不复活。
+                let combined = liveBlacklist.union(Self.decodeStrings(target.stripped))
+                let (mergedText, strippedNow) = Self.stripBlacklist(
                     Self.sessionText(sessionStart: target.sessionStart, finalValue: endValue),
                     blacklist: combined)
                 var mergedLog = Self.decodeLog(target.editLog)
@@ -234,16 +236,17 @@ final class TypingRecordWriter {
                     editLog: Self.encodeLog(mergedLog),
                     totalChars: mergedText.count,
                     sessionStart: target.sessionStart,
-                    endValue: endValue
+                    endValue: endValue,
+                    stripped: Self.encodeStrings(strippedNow)
                 )
                 try? store?.update(merged)
                 onDevLog?("merge bundle=\(rec.bundleId) → record #\(target.id ?? -1) "
                           + "\(mergedText.count) chars")
             } else {
                 // 接不上 → 新建 record。
-                let cleaned = Self.stripBlacklist(
+                let (cleaned, strippedNow) = Self.stripBlacklist(
                     Self.sessionText(sessionStart: rec.sessionStart, finalValue: endValue),
-                    blacklist: combined)
+                    blacklist: liveBlacklist)
                 let event = TypingEvent(
                     id: nil,
                     bundleId: rec.bundleId,
@@ -254,7 +257,8 @@ final class TypingRecordWriter {
                     editLog: Self.encodeLog(rec.editLog),
                     totalChars: cleaned.count,
                     sessionStart: rec.sessionStart,
-                    endValue: endValue
+                    endValue: endValue,
+                    stripped: Self.encodeStrings(strippedNow)
                 )
                 try? store?.insert(event)
                 onDevLog?("flush bundle=\(rec.bundleId) element=\(rec.elementHash) "
@@ -331,15 +335,19 @@ final class TypingRecordWriter {
             && sessionStart.suffix(matchWindowChars) == recordEndValue.suffix(matchWindowChars)
     }
 
-    /// 黑名单减法：按长度倒序减，每个 entry 只减一次。
-    static func stripBlacklist(_ text: String, blacklist: Set<String>) -> String {
+    /// 黑名单减法：按长度倒序减，每个 entry 只减一次。返回剔除后文本 +
+    /// 实际命中（被剔掉）的段 —— 后者落进 record 的 `stripped`。
+    static func stripBlacklist(_ text: String, blacklist: Set<String>)
+        -> (text: String, stripped: Set<String>) {
         var result = text
+        var used: Set<String> = []
         for entry in blacklist.sorted(by: { $0.count > $1.count }) where !entry.isEmpty {
             if let range = result.range(of: entry) {
                 result.removeSubrange(range)
+                used.insert(entry)
             }
         }
-        return result
+        return (result, used)
     }
 
     static func decodeLog(_ json: String) -> [EditEntry] {
@@ -351,6 +359,20 @@ final class TypingRecordWriter {
 
     static func encodeLog(_ entries: [EditEntry]) -> String {
         guard let data = try? JSONEncoder().encode(entries),
+              let json = String(data: data, encoding: .utf8)
+        else { return "[]" }
+        return json
+    }
+
+    static func decodeStrings(_ json: String) -> Set<String> {
+        guard let data = json.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return Set(arr)
+    }
+
+    static func encodeStrings(_ set: Set<String>) -> String {
+        guard let data = try? JSONEncoder().encode(Array(set)),
               let json = String(data: data, encoding: .utf8)
         else { return "[]" }
         return json

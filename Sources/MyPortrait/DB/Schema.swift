@@ -435,6 +435,20 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v16 — typing_events 记住自己剔除过的噪声段
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 黑名单（粘贴 / burst / 程序输出）只在内存里、有 1h TTL、app 重启即失。
+        // continuation 合并时 `text` 从原始快照重算，若噪声段的黑名单条目已
+        // 过期 → 噪声会复活进 `text`。`stripped`（JSON 字符串数组）让每条
+        // record 记住自己实际剔掉过的段，重算时一并剔除，不靠内存黑名单存活。
+        m.registerMigration("v16_typing_events_stripped") { db in
+            try db.alter(table: "typing_events") { t in
+                t.add(column: "stripped", .text).notNull().defaults(to: "[]")
+            }
+        }
+
         return m
     }
 }
