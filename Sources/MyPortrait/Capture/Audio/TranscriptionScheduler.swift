@@ -226,11 +226,14 @@ actor TranscriptionScheduler {
     private func transcribeSamples(_ samples: [Float], _ s: TranscribeSettings) async throws -> String {
         switch s.engine {
         case "deepgram":
+            // 云端引擎自己不做预处理，在这里补上（本地 whisper 在 wrapper 内部做）。
+            let processed = AudioPreprocessor.process(samples, filterMusic: s.filterMusic)
             return try await CloudTranscriber.deepgram(
-                samples: samples, apiKey: s.deepgramKey, language: s.language)
+                samples: processed, apiKey: s.deepgramKey, language: s.language)
         case "custom":
+            let processed = AudioPreprocessor.process(samples, filterMusic: s.filterMusic)
             return try await CloudTranscriber.openAICompatible(
-                samples: samples, endpoint: s.customEndpoint, model: s.customModel,
+                samples: processed, endpoint: s.customEndpoint, model: s.customModel,
                 apiKey: s.customKey, language: s.language, vocabulary: s.vocabulary)
         case "disabled":
             return ""
