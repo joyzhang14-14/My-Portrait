@@ -54,6 +54,10 @@ actor VADRecorder {
 
     /// 攒够 512 样本才送 VAD —— feed 进来的样本块大小不定。
     private var pendingSamples: [Float] = []
+    /// 诊断：累计处理帧数 + 上次打点帧数 + 最近一帧 VAD 分数。
+    private var framesProcessed: Int = 0
+    private var lastLoggedFrames: Int = 0
+    private var lastScore: Float = -1
     /// Silero VAD。懒加载（首次需下载模型）；nil 时退化为 RMS。
     private var silero: SileroVAD?
     private var sileroLoadStarted = false
@@ -101,6 +105,12 @@ actor VADRecorder {
     private func processFrame(_ frame: [Float]) {
         let (isSpeech, isSilent) = decide(frame)
 
+        framesProcessed += 1
+        if framesProcessed - lastLoggedFrames >= 150 {
+            lastLoggedFrames = framesProcessed
+            logger.notice("vad[\(self.deviceLabel, privacy: .public)]: \(self.framesProcessed, privacy: .public) frames processed, state=\(self.state == .speech ? "speech" : "silent", privacy: .public) lastScore=\(self.lastScore, privacy: .public) silero=\(self.silero != nil, privacy: .public)")
+        }
+
         switch state {
         case .silent:
             if isSpeech {
@@ -142,11 +152,13 @@ actor VADRecorder {
     /// VAD 决策：Silero 就绪用神经网络概率，否则退化为 RMS 能量。
     private func decide(_ frame: [Float]) -> (isSpeech: Bool, isSilent: Bool) {
         if let silero, let prob = silero.probability(frame) {
+            lastScore = prob
             return (prob > speechProbThreshold, prob < silenceProbThreshold)
         }
         var sumSq: Float = 0
         for s in frame { sumSq += s * s }
         let rms = (sumSq / Float(frame.count)).squareRoot()
+        lastScore = rms
         return (rms > rmsSpeechThreshold, rms < rmsSilenceThreshold)
     }
 
@@ -197,6 +209,7 @@ actor VADRecorder {
             currentWriterURL = wavURL
             currentWriterStartedAt = now
             currentWriterFramesWritten = 0
+            logger.notice("segment opened: \(segName, privacy: .public)")
         } catch {
             logger.error("open writer failed for \(wavURL.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
             currentWriter = nil
@@ -234,6 +247,7 @@ actor VADRecorder {
 
         // 太短的段丢弃。
         if framesWritten < minSegmentFrames {
+            logger.notice("segment discarded (too short): \(wavURL.lastPathComponent, privacy: .public) frames=\(framesWritten, privacy: .public) reason=\(reason, privacy: .public)")
             try? FileManager.default.removeItem(at: wavURL)
             currentWriterURL = nil
             currentWriterStartedAt = nil
@@ -250,6 +264,7 @@ actor VADRecorder {
             device: deviceLabel
         )
         writeMeta(at: metaURL, segment: segment, closeReason: reason)
+        logger.notice("segment closed: \(wavURL.lastPathComponent, privacy: .public) frames=\(framesWritten, privacy: .public) dur=\(durationS, privacy: .public)s reason=\(reason, privacy: .public) → event yielded")
         _segCont.yield(segment)
 
         currentWriterURL = nil

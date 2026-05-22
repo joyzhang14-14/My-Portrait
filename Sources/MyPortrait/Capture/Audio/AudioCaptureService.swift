@@ -49,6 +49,9 @@ actor AudioCaptureService {
 
     private var permissionGranted: Bool = false
 
+    /// 诊断：tap 缓冲转换计数，确认麦克风数据是否真在流动。
+    private var conversionCount: Int = 0
+
     /// 默认输入设备变更监听 block（热插拔）。非 nil = 已注册。
     private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
     /// 设备变更后的防抖重启任务。
@@ -214,6 +217,10 @@ actor AudioCaptureService {
         }
         let count = Int(output.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
+        conversionCount += 1
+        if conversionCount == 1 || conversionCount % 150 == 0 {
+            logger.notice("tap buffer converted: count=\(self.conversionCount, privacy: .public) samples=\(count, privacy: .public)")
+        }
         cont.yield(samples)
     }
 
