@@ -92,6 +92,13 @@ final class MemoryScheduler {
     /// 周期检查：每个调度器按各自频率到点、且今天还没跑过就跑。
     func tick() async {
         guard !isRunning else { return }
+        // 有手动触发的结果在等审核 → 暂停定时调度，避免它写 events/ 后被
+        // Reject 的快照还原误伤。
+        guard !MemoryStaging.hasPending(.events),
+              !MemoryStaging.hasPending(.portrait) else {
+            schedLog.info("tick: a manual run is pending review — skip")
+            return
+        }
         let s = ConfigStore.shared.current.scheduler
         let now = Date()
 
@@ -150,9 +157,23 @@ final class MemoryScheduler {
     /// runEventJob / runPortraitJob 的结果。手动触发的 UI 用它区分
     /// "真跑了" / "没活干直接罢工" / "调度器在忙"。
     enum JobOutcome: Sendable {
-        case ran(String)   // 跑了；String 是给用户看的简述
+        /// 跑了。`days` 是处理的 ProcessingLog 行 key —— event job 是日期串，
+        /// portrait job 是 ["_distill_anchor"]。Reject 时用来重置回 pending。
+        case ran(days: [String])
         case noWork        // 没有待处理的天 / 画像已最新 —— 直接罢工
         case busy          // 调度器或另一次触发正在跑
+    }
+
+    /// event job 现在有没有活干（有未处理的天）。手动触发拍快照前先 check，
+    /// 没活就直接罢工、不浪费快照。
+    func eventJobHasWork() -> Bool {
+        !pendingDays(cap: dayCap).isEmpty
+    }
+
+    /// portrait job 现在有没有活干（distill 哨兵 needsWork）。
+    func portraitJobHasWork() -> Bool {
+        _ = store.ensureRow(for: distillAnchor)
+        return (store.row(for: distillAnchor)?.distill ?? .idle).needsWork
     }
 
     // MARK: - event job：event 聚类 + impact 评分（per-day）
@@ -203,7 +224,7 @@ final class MemoryScheduler {
                 }
             }
         }
-        return .ran("Processed \(days.count) day(s).")
+        return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 
     // MARK: - portrait job：distill
@@ -229,7 +250,7 @@ final class MemoryScheduler {
             let r = try await PortraitDistiller(model: self.model).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
-        return .ran("Distillation complete.")
+        return .ran(days: [distillAnchor])
     }
 
     // MARK: - 单步执行（持锁 + 心跳 + 结果落库）

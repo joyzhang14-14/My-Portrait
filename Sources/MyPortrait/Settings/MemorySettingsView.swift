@@ -24,9 +24,15 @@ struct MemorySettingsView: View {
         var desc: String {
             switch self {
             case .eventProcessing:
-                return "Reads the raw timeline, builds event files for unprocessed days, then re-scores every event's impact with the LLM. The weekly budget rebalance runs automatically at the end. Mirrors the scheduler's Event processing job."
+                return "Reads the raw timeline, builds event files for unprocessed days, then re-scores every event's impact with the LLM. The weekly budget rebalance runs automatically at the end. Mirrors the scheduler's Event processing job. Output is staged for review before it commits."
             case .distill:
-                return "Distills events into long-term portrait entries. Uses the LLM once per portrait category."
+                return "Distills events into long-term portrait entries. Uses the LLM once per portrait category. Output is staged for review before it commits."
+            }
+        }
+        var kind: MemoryStaging.Kind {
+            switch self {
+            case .eventProcessing: return .events
+            case .distill:         return .portrait
             }
         }
     }
@@ -34,6 +40,8 @@ struct MemorySettingsView: View {
     @State private var runningTrigger: ManualTrigger? = nil
     @State private var confirmTrigger: ManualTrigger? = nil
     @State private var runTask: Task<Void, Never>? = nil
+    @State private var eventsSummary: MemoryStaging.Summary? = nil
+    @State private var portraitSummary: MemoryStaging.Summary? = nil
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -58,6 +66,7 @@ struct MemorySettingsView: View {
                 case .scheduler:
                     schedulerSection
                     manualRunSection
+                    reviewSection
                     attentionSection
                 case .changelog:
                     changelogSection
@@ -93,6 +102,12 @@ struct MemorySettingsView: View {
     private func reload() {
         attention = MemoryScheduler.shared.attentionDays()
         changelog = ProcessingLogStore().recentChangelog(limit: 50)
+        refreshStaging()
+    }
+
+    private func refreshStaging() {
+        eventsSummary = MemoryStaging.summary(.events)
+        portraitSummary = MemoryStaging.summary(.portrait)
     }
 
     // MARK: - Manual triggers
@@ -107,47 +122,84 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// Backfill → Rescore 连跑，对齐调度器的 Event processing job。
-    /// Rescore 末尾的 rebalance hook 自动跟上。
+    /// 走调度器的 runEventJob（与定时触发同一函数：pending-days + 上限 7 +
+    /// 没活罢工）。跑前拍快照，跑完进审核。
     @MainActor
     private func runEventProcessing() async {
-        actionStatus = "Backfilling events from the timeline…"
-        do {
-            let b = try await Backfill.run { p in
-                Task { @MainActor in
-                    actionStatus = "Backfill — day \(p.dayIndex)/\(p.dayCount): \(p.phase)"
-                }
-            }
-            actionStatus = "Backfilled \(b.newEventCount) new events. Rescoring impact…"
-        } catch {
-            actionStatus = "Backfill failed: \(error.localizedDescription)"
+        guard MemoryScheduler.shared.eventJobHasWork() else {
+            actionStatus = "All days already processed — nothing to run."
             return
         }
-        do {
-            let r = try await ImpactScorer().rescoreAll { p in
-                Task { @MainActor in
-                    actionStatus = "Rescoring batch \(p.batchIndex)/\(p.batchCount) — \(p.scoredCount)/\(p.totalCount) files"
-                }
-            }
-            actionStatus = "Done. Rescored \(r.scoredCount) (failed \(r.failedCount)) in \(String(format: "%.1f", r.elapsed))s. Weekly budget rebalance applied."
-        } catch {
-            actionStatus = "Rescore failed: \(error.localizedDescription)"
+        do { try MemoryStaging.beginRun(.events) }
+        catch { actionStatus = "Can't start: \(error.localizedDescription)"; return }
+
+        actionStatus = "Processing events… (Backfill + impact rescore)"
+        let outcome = await MemoryScheduler.shared.runEventJob()
+        switch outcome {
+        case .ran(let days):
+            try? MemoryStaging.markRan(.events, days: days)
+            actionStatus = "Run complete — review the staged changes below."
+        case .noWork:
+            try? MemoryStaging.approve(.events)   // race: 活没了，丢快照
+            actionStatus = "All days already processed — nothing to run."
+        case .busy:
+            try? MemoryStaging.approve(.events)
+            actionStatus = "The scheduler is already running. Try again shortly."
         }
+        refreshStaging()
     }
 
+    /// 走调度器的 runPortraitJob。跑前拍快照，跑完进审核。
     @MainActor
     private func runDistill() async {
-        actionStatus = "Distilling portrait from events…"
-        do {
-            let r = try await PortraitDistiller().distill { p in
-                Task { @MainActor in
-                    actionStatus = "Distilling \(p.categoryIndex)/\(p.categoryCount): \(p.category) (\(p.written) written)"
-                }
-            }
-            actionStatus = "Distilled: \(r.portraitFilesWritten) new + \(r.portraitFilesUpdated) updated, \(r.llmFailedCategories) categories failed, \(String(format: "%.1f", r.elapsed))s"
-        } catch {
-            actionStatus = "Distill failed: \(error.localizedDescription)"
+        guard MemoryScheduler.shared.portraitJobHasWork() else {
+            actionStatus = "Portrait is already up to date — nothing to distill."
+            return
         }
+        do { try MemoryStaging.beginRun(.portrait) }
+        catch { actionStatus = "Can't start: \(error.localizedDescription)"; return }
+
+        actionStatus = "Distilling portrait from events…"
+        let outcome = await MemoryScheduler.shared.runPortraitJob()
+        switch outcome {
+        case .ran(let days):
+            try? MemoryStaging.markRan(.portrait, days: days)
+            actionStatus = "Run complete — review the staged changes below."
+        case .noWork:
+            try? MemoryStaging.approve(.portrait)
+            actionStatus = "Portrait is already up to date — nothing to distill."
+        case .busy:
+            try? MemoryStaging.approve(.portrait)
+            actionStatus = "The scheduler is already running. Try again shortly."
+        }
+        refreshStaging()
+    }
+
+    // MARK: - 审核
+
+    private func approveStaging(_ kind: MemoryStaging.Kind) {
+        do {
+            try MemoryStaging.approve(kind)
+            actionStatus = "Approved — changes committed."
+        } catch {
+            actionStatus = "Approve failed: \(error.localizedDescription)"
+        }
+        refreshStaging()
+    }
+
+    private func rejectStaging(_ kind: MemoryStaging.Kind) {
+        // 先把 ProcessingLog 那几天重置回 pending，再用快照还原文件树。
+        for day in MemoryStaging.pendingDays(kind) {
+            MemoryScheduler.shared.resetDay(day)
+        }
+        do {
+            try MemoryStaging.reject(kind)
+            actionStatus = "Rejected — changes discarded, those days are pending again."
+        } catch {
+            actionStatus = "Reject failed: \(error.localizedDescription)"
+        }
+        attention = MemoryScheduler.shared.attentionDays()
+        refreshStaging()
     }
 
     private var header: some View {
@@ -297,12 +349,56 @@ struct MemorySettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            Button(runningTrigger == t ? "Running…" : "Run") {
+            let pending = MemoryStaging.hasPending(t.kind)
+            Button(runningTrigger == t ? "Running…"
+                   : pending ? "Pending review" : "Run") {
                 confirmTrigger = t
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(runningTrigger != nil)
+            .disabled(runningTrigger != nil || pending)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var reviewSection: some View {
+        if eventsSummary != nil || portraitSummary != nil {
+            section(
+                title: "Pending review",
+                blurb: "Manual-run output is staged, not yet committed. Approve keeps it; Reject discards it and puts those days back to pending so they can be re-run."
+            ) {
+                if let s = eventsSummary {
+                    reviewRow(.events, "Process events", s)
+                }
+                if eventsSummary != nil && portraitSummary != nil {
+                    Divider().padding(.vertical, 2)
+                }
+                if let s = portraitSummary {
+                    reviewRow(.portrait, "Distill portrait", s)
+                }
+            }
+        }
+    }
+
+    private func reviewRow(_ kind: MemoryStaging.Kind,
+                           _ title: String,
+                           _ s: MemoryStaging.Summary) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text("\(s.added) new, \(s.modified) modified file(s) staged")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            Button("Reject") { rejectStaging(kind) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+            Button("Approve") { approveStaging(kind) }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
