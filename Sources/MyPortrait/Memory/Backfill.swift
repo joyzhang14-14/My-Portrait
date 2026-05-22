@@ -61,7 +61,10 @@ enum Backfill {
         }
 
         var totals = Counters()
-        let cal = Calendar(identifier: .gregorian)
+        // UTC —— 跟 pendingDays / isRawReady / events/<date>/ 目录命名一致。
+        // 本地日历会把 pendingDays 传来的 UTC 午夜 day 错位到相邻日。
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .current
         let today = cal.startOfDay(for: Date())
         let onlyDayStart = onlyDay.map { cal.startOfDay(for: $0) }
 

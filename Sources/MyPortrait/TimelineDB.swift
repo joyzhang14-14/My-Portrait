@@ -125,7 +125,10 @@ struct TimelineDB: Sendable {
     func frames(on day: Date, limit: Int = 800) -> [TimelineFrame] {
         guard exists else { return [] }
 
-        let cal = Calendar(identifier: .gregorian)
+        // UTC —— 跟 pendingDays / availableDays / events/<date>/ 目录命名一致。
+        // 用本地日历会把 UTC 午夜的 day 错位到前一天（负偏移时区）。
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .current
         let dayStart = cal.startOfDay(for: day)
         let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
 
