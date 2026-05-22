@@ -353,7 +353,8 @@ struct TypingRecordingSettingsView: View {
                     .foregroundStyle(.white.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TypingAppPicker(apps: config.binding(\.privacy.typingBlacklistBundleIds),
-                                discovered: discovered)
+                                discovered: discovered,
+                                locked: TypingPrivacyFilter.defaultBlacklist)
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }

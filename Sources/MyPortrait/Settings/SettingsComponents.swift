@@ -488,6 +488,8 @@ struct TypingAppPicker: View {
     var discovered: [String] = []          // 用户打过字的 app（bundle id）
     var presets: [String] = []             // 预设建议（bundle id）；空 → 不显示第二个下拉
     var presetTitle: String = "Common apps"
+    /// 永远生效、不可移除的条目（如硬编码黑名单）—— 灰显、带锁、无 × 。
+    var locked: [String] = []
 
     /// bundle id → 友好名（com.tencent.xinWeChat → xinWeChat）。
     static func label(_ bundleId: String) -> String {
@@ -511,39 +513,65 @@ struct TypingAppPicker: View {
                              options: presets, emptyHint: "")
                 }
             }
-            if !apps.isEmpty {
+            if !locked.isEmpty || !apps.isEmpty {
                 FlowLayout(spacing: 6) {
-                    ForEach(apps, id: \.self) { app in
-                        HStack(spacing: 4) {
-                            Text(Self.label(app))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.85))
-                            Button {
-                                apps.removeAll { $0 == app }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.55))
-                            }
-                            .buttonStyle(.bouncyIcon)
-                        }
-                        .padding(.horizontal, 7).padding(.vertical, 3.5)
-                        .help(app)
-                        .background(
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-                        )
-                    }
+                    ForEach(locked, id: \.self) { lockedChip($0) }
+                    ForEach(apps, id: \.self) { editableChip($0) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
+    /// 用户加的条目 —— 可移除。
+    @ViewBuilder
+    private func editableChip(_ app: String) -> some View {
+        HStack(spacing: 4) {
+            Text(Self.label(app))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+            Button {
+                apps.removeAll { $0 == app }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .buttonStyle(.bouncyIcon)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .help(app)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+        )
+    }
+
+    /// 硬编码、永远生效的条目 —— 灰显、带锁、不可移除。
+    @ViewBuilder
+    private func lockedChip(_ app: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white.opacity(0.35))
+            Text(Self.label(app))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .help("\(app) — always excluded")
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.03))
+                .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 0.7))
+        )
+    }
+
     @ViewBuilder
     private func dropdown(title: String, icon: String,
-                          options: [String], emptyHint: String) -> some View {
+                          options rawOptions: [String], emptyHint: String) -> some View {
+        let options = rawOptions.filter { !locked.contains($0) }
         Menu {
             if options.isEmpty {
                 Text(emptyHint)
