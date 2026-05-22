@@ -10,6 +10,33 @@ struct MemorySettingsView: View {
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
 
+    /// 手动触发的 pipeline 阶段（都烧 LLM token）。Rebalance 不在列 —— 它是
+    /// 程序化的，已挂成 hook 在每次 impact rescore 后自动跑。
+    private enum ManualTrigger: String, Identifiable {
+        case backfill, rescore, distill
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .backfill: return "Backfill events"
+            case .rescore:  return "Rescore impact"
+            case .distill:  return "Distill portrait"
+            }
+        }
+        var desc: String {
+            switch self {
+            case .backfill:
+                return "Reads the raw timeline and builds event files for any unprocessed days. Uses the LLM to cluster captured activity into semantic events."
+            case .rescore:
+                return "Re-scores every event's long-term impact with the LLM. The weekly budget rebalance runs automatically right after."
+            case .distill:
+                return "Distills events into long-term portrait entries. Uses the LLM once per portrait category."
+            }
+        }
+    }
+    @State private var actionStatus: String = ""
+    @State private var runningTrigger: ManualTrigger? = nil
+    @State private var confirmTrigger: ManualTrigger? = nil
+
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
         case parameter = "Parameter"
@@ -32,6 +59,7 @@ struct MemorySettingsView: View {
                     distillationSection
                 case .scheduler:
                     schedulerSection
+                    manualRunSection
                     attentionSection
                 case .changelog:
                     changelogSection
@@ -46,11 +74,82 @@ struct MemorySettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { reload() }
+        .confirmationDialog(
+            "Run this now?",
+            isPresented: Binding(get: { confirmTrigger != nil },
+                                 set: { if !$0 { confirmTrigger = nil } }),
+            presenting: confirmTrigger
+        ) { trigger in
+            Button("Run \(trigger.title)") {
+                Task { await run(trigger) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { trigger in
+            Text("\(trigger.title) uses LLM tokens. \(trigger.desc)")
+        }
     }
 
     private func reload() {
         attention = MemoryScheduler.shared.attentionDays()
         changelog = ProcessingLogStore().recentChangelog(limit: 50)
+    }
+
+    // MARK: - Manual triggers
+
+    @MainActor
+    private func run(_ t: ManualTrigger) async {
+        runningTrigger = t
+        defer { runningTrigger = nil }
+        switch t {
+        case .backfill: await runBackfill()
+        case .rescore:  await runRescore()
+        case .distill:  await runDistill()
+        }
+    }
+
+    @MainActor
+    private func runBackfill() async {
+        actionStatus = "Backfilling events from the timeline…"
+        do {
+            let r = try await Backfill.run { p in
+                Task { @MainActor in
+                    actionStatus = "Day \(p.dayIndex)/\(p.dayCount) — \(p.phase)"
+                }
+            }
+            actionStatus = "Done. \(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions → \(r.newEventCount) new events, LLM-failed days: \(r.llmFailedDays)"
+        } catch {
+            actionStatus = "Backfill failed: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func runRescore() async {
+        actionStatus = "Rescoring impact with LLM…"
+        do {
+            let r = try await ImpactScorer().rescoreAll { p in
+                Task { @MainActor in
+                    actionStatus = "Rescoring batch \(p.batchIndex)/\(p.batchCount) — \(p.scoredCount)/\(p.totalCount) files"
+                }
+            }
+            actionStatus = "Rescored \(r.scoredCount) (failed \(r.failedCount)) in \(String(format: "%.1f", r.elapsed))s. Weekly budget rebalance applied."
+        } catch {
+            actionStatus = "Rescore failed: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func runDistill() async {
+        actionStatus = "Distilling portrait from events…"
+        do {
+            let r = try await PortraitDistiller().distill { p in
+                Task { @MainActor in
+                    actionStatus = "Distilling \(p.categoryIndex)/\(p.categoryCount): \(p.category) (\(p.written) written)"
+                }
+            }
+            actionStatus = "Distilled: \(r.portraitFilesWritten) new + \(r.portraitFilesUpdated) updated, \(r.llmFailedCategories) categories failed, \(String(format: "%.1f", r.elapsed))s"
+        } catch {
+            actionStatus = "Distill failed: \(error.localizedDescription)"
+        }
     }
 
     private var header: some View {
@@ -153,6 +252,47 @@ struct MemorySettingsView: View {
                 timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
             }
         }
+    }
+
+    private var manualRunSection: some View {
+        section(
+            title: "Run now",
+            blurb: "Trigger a pipeline stage manually instead of waiting for the scheduler. Each uses LLM tokens, so you'll be asked to confirm. The weekly budget rebalance is not listed — it runs automatically after every impact rescore."
+        ) {
+            triggerRow(.backfill)
+            Divider().padding(.vertical, 2)
+            triggerRow(.rescore)
+            Divider().padding(.vertical, 2)
+            triggerRow(.distill)
+            if !actionStatus.isEmpty {
+                Text(actionStatus)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+            }
+        }
+    }
+
+    private func triggerRow(_ t: ManualTrigger) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t.title).font(.system(size: 13, weight: .semibold))
+                Text(t.desc)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Button(runningTrigger == t ? "Running…" : "Run") {
+                confirmTrigger = t
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(runningTrigger != nil)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var attentionSection: some View {

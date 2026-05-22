@@ -7,10 +7,9 @@ import SwiftUI
 ///   file list    → portrait files in selected category (or events stream)
 ///   detail       → selected file's YAML metadata + body
 ///
-/// Toolbar at the top of the middle column has three actions:
-///   ↓     Backfill events from the timeline
-///   ✨    Rescore event impacts with LLM
-///   🪄    Distill portrait files from events
+/// Toolbar at the top of the middle column has a single action: reload from
+/// disk. The pipeline triggers (Backfill / Rescore / Distill) live in
+/// Settings → Memory → Scheduler.
 struct MemoriesView: View {
     @Binding var scope: MemoryScope
     @State private var entries: [Entry] = []
@@ -64,30 +63,6 @@ struct MemoriesView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
-                    Task { await runBackfill() }
-                } label: { Image(systemName: "arrow.down.circle") }
-                .buttonStyle(.bouncyIcon)
-                .help("Backfill events from the timeline")
-
-                Button {
-                    Task { await runRescore() }
-                } label: { Image(systemName: "sparkles") }
-                .buttonStyle(.bouncyIcon)
-                .help("Rescore event impacts with LLM")
-
-                Button {
-                    Task { await runRebalance() }
-                } label: { Image(systemName: "equal.circle") }
-                .buttonStyle(.bouncyIcon)
-                .help("Weekly memory budget — scale down impacts if the past 7 days exceed the consolidation budget")
-
-                Button {
-                    Task { await runDistill() }
-                } label: { Image(systemName: "wand.and.stars") }
-                .buttonStyle(.bouncyIcon)
-                .help("Distill portrait files from events")
-
                 Button {
                     Task { await reload() }
                 } label: { Image(systemName: "arrow.clockwise") }
@@ -258,70 +233,6 @@ struct MemoriesView: View {
         }.value
         entries = loaded
         loading = false
-    }
-
-    @MainActor
-    private func runRescore() async {
-        actionStatus = "Rescoring impact with LLM…"
-        let scorer = ImpactScorer()
-        do {
-            let r = try await scorer.rescoreAll { p in
-                Task { @MainActor in
-                    actionStatus = "Rescoring batch \(p.batchIndex)/\(p.batchCount) — \(p.scoredCount)/\(p.totalCount) files"
-                }
-            }
-            actionStatus = "Rescored \(r.scoredCount) (failed \(r.failedCount)) in \(String(format: "%.1f", r.elapsed))s"
-            await reload()
-        } catch {
-            actionStatus = "Rescore failed: \(error.localizedDescription)"
-        }
-    }
-
-    @MainActor
-    private func runBackfill() async {
-        actionStatus = "Backfilling events from the timeline…"
-        do {
-            let r = try await Backfill.run { p in
-                Task { @MainActor in
-                    let dayStr = Self.dayString(p.day)
-                    actionStatus = "Day \(p.dayIndex)/\(p.dayCount) [\(dayStr)] — \(p.phase)"
-                }
-            }
-            actionStatus = "Done. \(r.rawFrameCount) frames → \(r.tier1SessionCount) sessions (\(r.emptySessionCount) skipped) → \(r.newEventCount) new events, \(r.joinedSessionCount) joined, LLM-failed days: \(r.llmFailedDays)"
-            await reload()
-        } catch {
-            actionStatus = "Backfill failed: \(error.localizedDescription)"
-        }
-    }
-
-    @MainActor
-    private func runRebalance() async {
-        actionStatus = "Rebalancing weekly memory budget…"
-        // MemoryBudget pulls params from ConfigStore (@MainActor), so the
-        // pass itself must run on the main actor. The heavy file I/O inside
-        // is synchronous but the volume is small (low hundreds of files);
-        // future optimization can split this into [main load params → off
-        // main scan → main write back].
-        let outcome = MemoryBudget_applyToDisk()
-        actionStatus = outcome
-        await reload()
-    }
-
-    @MainActor
-    private func runDistill() async {
-        actionStatus = "Distilling portrait from events…"
-        let distiller = PortraitDistiller()
-        do {
-            let r = try await distiller.distill { p in
-                Task { @MainActor in
-                    actionStatus = "Distilling \(p.categoryIndex)/\(p.categoryCount): \(p.category) (\(p.written) written)"
-                }
-            }
-            actionStatus = "Distilled: \(r.portraitFilesWritten) new + \(r.portraitFilesUpdated) updated, \(r.llmFailedCategories) categories failed, \(String(format: "%.1f", r.elapsed))s"
-            await reload()
-        } catch {
-            actionStatus = "Distill failed: \(error.localizedDescription)"
-        }
     }
 
     // MARK: - Disk scan
