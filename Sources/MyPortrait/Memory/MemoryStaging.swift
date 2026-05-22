@@ -23,9 +23,14 @@ enum MemoryStaging {
         }
     }
 
-    struct Summary: Sendable {
-        let added: Int       // 跑出来的新文件数
-        let modified: Int    // 被改动的已有文件数
+    /// 一个有实质改动的暂存文件 —— 用于审核列表 + 内容预览。
+    struct StagedChange: Identifiable, Sendable, Equatable {
+        let id: String           // 相对路径
+        let relativePath: String
+        let displayTitle: String
+        let isNew: Bool
+        let beforeText: String?  // 快照里的原文（新文件为 nil）
+        let afterText: String    // 跑完的现文
     }
 
     // MARK: - 路径
@@ -77,20 +82,33 @@ enum MemoryStaging {
         try data.write(to: daysManifest(k))
     }
 
-    /// 审核摘要：跟快照比，新增 / 改动了多少 .md。nil = 没有 pending。
-    static func summary(_ k: Kind) -> Summary? {
-        guard hasPending(k) else { return nil }
-        let before = mdFiles(under: backupDir(k))
-        let after = mdFiles(under: liveDir(k))
-        var added = 0, modified = 0
-        for (rel, afterData) in after {
-            if let beforeData = before[rel] {
-                if beforeData != afterData { modified += 1 }
+    /// 有实质改动的暂存文件列表。**只算实质改动** —— 只有 weight /
+    /// last_modified / raw_impact / rebalance_count / impact_source 这类机械
+    /// 重算的文件被过滤掉（否则一次 weight pass 会把整棵树标成"改动"）。
+    static func changes(_ k: Kind) -> [StagedChange] {
+        guard hasPending(k) else { return [] }
+        let before = mdTexts(under: backupDir(k))
+        let after = mdTexts(under: liveDir(k))
+        var out: [StagedChange] = []
+        for (rel, afterText) in after {
+            if let beforeText = before[rel] {
+                guard beforeText != afterText,
+                      !onlyMechanicalChange(beforeText, afterText) else { continue }
+                out.append(StagedChange(
+                    id: rel, relativePath: rel,
+                    displayTitle: title(of: afterText, fallback: rel),
+                    isNew: false, beforeText: beforeText, afterText: afterText))
             } else {
-                added += 1
+                out.append(StagedChange(
+                    id: rel, relativePath: rel,
+                    displayTitle: title(of: afterText, fallback: rel),
+                    isNew: true, beforeText: nil, afterText: afterText))
             }
         }
-        return Summary(added: added, modified: modified)
+        return out.sorted {
+            if $0.isNew != $1.isNew { return $0.isNew && !$1.isNew }
+            return $0.relativePath < $1.relativePath
+        }
     }
 
     /// 批准：保留 live，删快照 + 清单。
@@ -115,18 +133,49 @@ enum MemoryStaging {
 
     // MARK: - 工具
 
-    /// 收集 root 下所有 .md 的 (相对路径 → 内容)。
-    private static func mdFiles(under root: URL) -> [String: Data] {
+    /// 收集 root 下所有 .md 的 (相对路径 → 原文)。
+    private static func mdTexts(under root: URL) -> [String: String] {
         let fm = FileManager.default
         guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil,
                                      options: [.skipsHiddenFiles]) else { return [:] }
-        var out: [String: Data] = [:]
+        var out: [String: String] = [:]
         let prefix = root.path + "/"
         while let url = en.nextObject() as? URL {
             guard url.pathExtension == "md" else { continue }
             let rel = url.path.replacingOccurrences(of: prefix, with: "")
-            out[rel] = (try? Data(contentsOf: url)) ?? Data()
+            out[rel] = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         }
         return out
+    }
+
+    /// 机械字段（weight / 衰减锚点 / rebalance 中间量）的 frontmatter 行。
+    /// 这些一变不算"实质改动"。
+    private static let mechanicalKeys = [
+        "weight:", "last_modified:", "raw_impact:",
+        "rebalance_count:", "impact_source:",
+    ]
+
+    /// 两份原文除了机械字段行之外完全相同 → 只是机械重算，不进审核列表。
+    private static func onlyMechanicalChange(_ a: String, _ b: String) -> Bool {
+        stripMechanical(a) == stripMechanical(b)
+    }
+
+    private static func stripMechanical(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { line in !mechanicalKeys.contains { line.hasPrefix($0) } }
+            .joined(separator: "\n")
+    }
+
+    /// 从 .md 原文取展示标题：优先 frontmatter 的 event_title，回退文件名。
+    private static func title(of text: String, fallback rel: String) -> String {
+        for line in text.split(separator: "\n") {
+            guard line.hasPrefix("event_title:") else { continue }
+            let v = line.dropFirst("event_title:".count)
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            if !v.isEmpty { return v }
+        }
+        return (rel as NSString).lastPathComponent
+            .replacingOccurrences(of: ".md", with: "")
     }
 }

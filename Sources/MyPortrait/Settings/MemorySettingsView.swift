@@ -40,8 +40,9 @@ struct MemorySettingsView: View {
     @State private var runningTrigger: ManualTrigger? = nil
     @State private var confirmTrigger: ManualTrigger? = nil
     @State private var runTask: Task<Void, Never>? = nil
-    @State private var eventsSummary: MemoryStaging.Summary? = nil
-    @State private var portraitSummary: MemoryStaging.Summary? = nil
+    @State private var eventsChanges: [MemoryStaging.StagedChange] = []
+    @State private var portraitChanges: [MemoryStaging.StagedChange] = []
+    @State private var previewChange: MemoryStaging.StagedChange? = nil
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -97,6 +98,9 @@ struct MemorySettingsView: View {
         } message: { trigger in
             Text("\(trigger.title) uses LLM tokens. \(trigger.desc)")
         }
+        .sheet(item: $previewChange) { change in
+            StagedChangePreview(change: change)
+        }
     }
 
     private func reload() {
@@ -106,8 +110,8 @@ struct MemorySettingsView: View {
     }
 
     private func refreshStaging() {
-        eventsSummary = MemoryStaging.summary(.events)
-        portraitSummary = MemoryStaging.summary(.portrait)
+        eventsChanges = MemoryStaging.changes(.events)
+        portraitChanges = MemoryStaging.changes(.portrait)
     }
 
     // MARK: - Manual triggers
@@ -367,44 +371,73 @@ struct MemorySettingsView: View {
 
     @ViewBuilder
     private var reviewSection: some View {
-        if eventsSummary != nil || portraitSummary != nil {
+        let hasEvents = MemoryStaging.hasPending(.events)
+        let hasPortrait = MemoryStaging.hasPending(.portrait)
+        if hasEvents || hasPortrait {
             section(
                 title: "Pending review",
-                blurb: "Manual-run output is staged, not yet committed. Approve keeps it; Reject discards it and puts those days back to pending so they can be re-run."
+                blurb: "Manual-run output is staged, not yet committed. Click a file to preview before vs after. Approve keeps it; Reject discards it and puts those days back to pending so they can be re-run."
             ) {
-                if let s = eventsSummary {
-                    reviewRow(.events, "Process events", s)
+                if hasEvents {
+                    reviewBlock(.events, "Process events", eventsChanges)
                 }
-                if eventsSummary != nil && portraitSummary != nil {
-                    Divider().padding(.vertical, 2)
+                if hasEvents && hasPortrait {
+                    Divider().padding(.vertical, 6)
                 }
-                if let s = portraitSummary {
-                    reviewRow(.portrait, "Distill portrait", s)
+                if hasPortrait {
+                    reviewBlock(.portrait, "Distill portrait", portraitChanges)
                 }
             }
         }
     }
 
-    private func reviewRow(_ kind: MemoryStaging.Kind,
-                           _ title: String,
-                           _ s: MemoryStaging.Summary) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text("\(s.added) new, \(s.modified) modified file(s) staged")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+    private func reviewBlock(_ kind: MemoryStaging.Kind,
+                             _ title: String,
+                             _ changes: [MemoryStaging.StagedChange]) -> some View {
+        let newN = changes.filter(\.isNew).count
+        let modN = changes.count - newN
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    Text(changes.isEmpty
+                         ? "No content changes — only mechanical weight recomputation."
+                         : "\(newN) new, \(modN) changed — click a file to preview.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Button("Reject") { rejectStaging(kind) }
+                    .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                Button("Approve") { approveStaging(kind) }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
             }
-            Spacer(minLength: 12)
-            Button("Reject") { rejectStaging(kind) }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.red)
-            Button("Approve") { approveStaging(kind) }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+            ForEach(changes) { ch in
+                changeRow(ch)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func changeRow(_ ch: MemoryStaging.StagedChange) -> some View {
+        Button { previewChange = ch } label: {
+            HStack(spacing: 8) {
+                Text(ch.isNew ? "NEW" : "CHANGED")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ch.isNew ? Color.green : Color.orange)
+                    .frame(width: 62, alignment: .leading)
+                Text(ch.displayTitle)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 3)
+        }
+        .buttonStyle(.plain)
     }
 
     private var attentionSection: some View {
@@ -691,5 +724,62 @@ struct MemorySettingsView: View {
                 .frame(width: 70)
                 .font(.system(size: 11, design: .monospaced))
         }
+    }
+}
+
+/// 暂存改动的内容预览 —— 改动前 vs 改动后并排。新文件只显示"现文"。
+private struct StagedChangePreview: View {
+    let change: MemoryStaging.StagedChange
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(change.isNew ? "NEW" : "CHANGED")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(change.isNew ? Color.green : Color.orange)
+                Text(change.displayTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding(12)
+            Divider()
+            Text(change.relativePath)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if let before = change.beforeText {
+                HStack(spacing: 0) {
+                    pane("Before", before)
+                    Divider()
+                    pane("After", change.afterText)
+                }
+            } else {
+                pane("New file", change.afterText)
+            }
+        }
+        .frame(width: 860, height: 580)
+    }
+
+    private func pane(_ label: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+            Divider()
+            ScrollView {
+                Text(text)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
