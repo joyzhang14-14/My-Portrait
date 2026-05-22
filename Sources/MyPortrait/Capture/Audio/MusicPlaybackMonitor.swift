@@ -19,26 +19,33 @@ actor MusicAudioDetector {
 
     /// bundleID → 是否音乐类 app。读过一次就缓存。
     private var categoryCache: [String: Bool] = [:]
+    private let logger = Logger(subsystem: "com.myportrait.capture", category: "music-detector")
 
     /// 当前是否有音乐类 app 正在输出音频。
     func isMusicPlaying() -> Bool {
+        var verdict = false
+        var report: [String] = []
         for process in Self.audioProcessObjects() {
-            guard Self.isRunningOutput(process),
-                  let bundleID = Self.bundleID(of: process)
-            else { continue }
-            if isMusicApp(bundleID) { return true }
+            guard Self.isRunningOutput(process) else { continue }
+            let bundleID = Self.bundleID(of: process)
+            let music = bundleID.map { isMusicApp($0) } ?? false
+            report.append("\(bundleID ?? "<no-bundle>")\(music ? " [MUSIC]" : "")")
+            if music { verdict = true }
         }
-        return false
+        logger.info("isMusicPlaying: outputting=[\(report.joined(separator: ", "), privacy: .public)] → \(verdict, privacy: .public)")
+        return verdict
     }
 
     private func isMusicApp(_ bundleID: String) -> Bool {
         if let cached = categoryCache[bundleID] { return cached }
-        var isMusic = false
+        var category = "<none>"
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
            let bundle = Bundle(url: url),
-           let category = bundle.infoDictionary?["LSApplicationCategoryType"] as? String {
-            isMusic = (category == Self.musicCategory)
+           let cat = bundle.infoDictionary?["LSApplicationCategoryType"] as? String {
+            category = cat
         }
+        let isMusic = (category == Self.musicCategory)
+        logger.info("category lookup: \(bundleID, privacy: .public) = \(category, privacy: .public) → music=\(isMusic)")
         categoryCache[bundleID] = isMusic
         return isMusic
     }
@@ -124,10 +131,12 @@ final class MusicPlaybackMonitor {
     private func tick() async {
         let enabled = ConfigStore.shared.current.recording.audio.pauseOnMusicApp
         guard enabled else {
+            logger.info("tick: pauseOnMusicApp=false → musicDetected forced false")
             if musicDetected { musicDetected = false }
             return
         }
         let playing = await detector.isMusicPlaying()
+        logger.info("tick: pauseOnMusicApp=true playing=\(playing, privacy: .public) musicDetected(before)=\(self.musicDetected, privacy: .public)")
         if musicDetected != playing {
             musicDetected = playing
             logger.info("music \(playing ? "started" : "stopped", privacy: .public) — audio capture \(playing ? "paused" : "resumed", privacy: .public)")
