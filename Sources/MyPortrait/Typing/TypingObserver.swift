@@ -47,6 +47,9 @@ final class TypingObserver {
     private let ledger = KeystrokeLedger()
     private let writer: TypingRecordWriter
     private let pasteboardMonitor = PasteboardMonitor()
+    /// L3 字符 logger —— 挂在 KeystrokeLedger 同条 CGEventTap callback。
+    /// 生产模式注入(写 keystroke_log),dev/observe 模式 nil。
+    private let keystrokeCharLogger: KeystrokeCharLogger?
     #if DEBUG
     /// 调研 probe —— 只 DEBUG build 跑,捕获键码 + Unicode 字符 + app
     /// 到 `~/Library/Logs/MyPortrait/keystroke-probe.jsonl`。详见 KeystrokeProbe。
@@ -83,13 +86,29 @@ final class TypingObserver {
 
     // MARK: - 生命周期
 
-    init(store: TypingEventStore? = nil, modeLabel: String = "production") {
+    init(
+        store: TypingEventStore? = nil,
+        keystrokeStore: KeystrokeStore? = nil,
+        modeLabel: String = "production"
+    ) {
         self.modeLabel = modeLabel
         self.writer = TypingRecordWriter(store: store, ledger: ledger, pasteboard: pasteboardMonitor)
+        self.keystrokeCharLogger = keystrokeStore.map { KeystrokeCharLogger(store: $0) }
     }
 
     func start() {
         guard !running else { return }
+
+        // L3 字符 logger 必须在 ledger.start() 之前挂上 —— start() 后 tap
+        // 立刻活,callback 已经会读 ledger.charLogger。
+        if let charLogger = keystrokeCharLogger {
+            // 同步 typing 黑名单 snapshot:hardcode + 用户配置。union 化成 Set
+            let userList = ConfigStore.shared.privacy.typingBlacklistBundleIds
+            let hardcoded = TypingPrivacyFilter.defaultBlacklist
+            let union = Set(hardcoded).union(userList)
+            charLogger.updateBlacklist(union)
+            ledger.charLogger = charLogger
+        }
 
         do {
             try ledger.start()
@@ -144,6 +163,7 @@ final class TypingObserver {
 
         writer.flushAll()
         pasteboardMonitor.stop()
+        ledger.charLogger = nil
         ledger.stop()
         #if DEBUG
         keystrokeProbe.stop()

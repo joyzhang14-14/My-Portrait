@@ -55,6 +55,10 @@ final class KeystrokeLedger {
 
     private let log = Logger(subsystem: "com.joyzhang.myportrait", category: "typing.ledger")
 
+    /// 可选 L3 字符 logger —— 挂上后,每次 keyDown callback 都会同步派一份给它。
+    /// 生产路径由 TypingObserver 注入;dev/observe 模式不带。
+    var charLogger: KeystrokeCharLogger?
+
     // MARK: - 生命周期
 
     init() {}
@@ -288,6 +292,13 @@ private func keystrokeLedgerTapCallback(
         ledger.record()
         // 回车既是普通击键，也是「提交/发送」信号 —— 额外记一笔。
         if isReturn { ledger.recordSubmit() }
+    }
+
+    // L3 字符日志 —— 挂了 charLogger 就同步派一份。kVK_Delete 是退格(后退),
+    // kVK_ForwardDelete 是 Fn+Delete(前删),都算「删字符」。
+    if let charLogger = ledger.charLogger {
+        let isBackspace = (keyCode == Int64(kVK_Delete) || keyCode == Int64(kVK_ForwardDelete))
+        charLogger.ingest(event: event, isBackspace: isBackspace)
     }
     return Unmanaged.passUnretained(event)
 }

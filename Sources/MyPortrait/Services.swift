@@ -119,8 +119,12 @@ final class Services {
         // 打字采集。共用同一个 DatabasePool（WAL 多 reader 安全）。
         // 启停由 startManagedLifecycle 按 recording.typingCaptureEnabled 驱动。
         let typingStore = TypingEventStore(dbPool: dbImpl.dbPool)
+        let keystrokeStore = KeystrokeStore(dbPool: dbImpl.dbPool)
         self.typingStore = typingStore
-        self.typingObserver = TypingObserver(store: typingStore)
+        self.typingObserver = TypingObserver(
+            store: typingStore,
+            keystrokeStore: keystrokeStore
+        )
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。

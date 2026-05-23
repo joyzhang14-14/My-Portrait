@@ -336,6 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 m4DBImpl = dbImpl  // 持有防 DatabasePool 释放
                 observer = TypingObserver(
                     store: TypingEventStore(dbPool: dbImpl.dbPool),
+                    keystrokeStore: KeystrokeStore(dbPool: dbImpl.dbPool),
                     modeLabel: "m4-dev")
                 // M4 关键事件（burst / 跨记录 delete / flush）print 到终端。
                 // 启动 banner 由 start() 自己 print，不走这里。

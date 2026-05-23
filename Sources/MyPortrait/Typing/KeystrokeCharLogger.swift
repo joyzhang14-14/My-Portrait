@@ -1,0 +1,124 @@
+import Foundation
+import AppKit
+import CoreGraphics
+import GRDB
+import os.log
+
+/// L3 keystroke 字符 logger —— 跟 `KeystrokeLedger` 平行,挂同一条 CGEventTap callback。
+///
+/// 职责拆分:
+/// - `KeystrokeLedger`:时间戳 ring buffer,给 `hasKeystroke` 用(v14 typing observer)
+/// - `KeystrokeCharLogger`(本类):抓 Unicode 字符 + bundle_id 写 `keystroke_log` DB,
+///    给 LLM Pass 2 当 L3 输入用
+///
+/// 中文 IME 的限制实测确认过(见 `current-arch-and-blockers.md` Q-A):
+/// `CGEventKeyboardGetUnicodeString` 拿到的是**拼音字母 + 选词数字键**,
+/// **拿不到合成的汉字**。所以这里存的中文 char 永远是 latin 字母,真中文得靠
+/// `typing_events`(普通 app)或 OCR(canvas)。
+///
+/// 线程模型:
+/// - `ingest(event:isBackspace:)` 在 CGEventTap callback 线程被同步调用
+///   (要在那里同步提取 unicode —— `CGEvent` 是 C 结构,不能跨线程持有)
+/// - DB 写派到 `writeQueue` 后台串行队列,**callback 不阻塞**
+///
+/// 见 `canvas-editor-capture-design-final.md` §3.2, §9.1。
+final class KeystrokeCharLogger {
+
+    private let store: KeystrokeStore
+    private let writeQueue = DispatchQueue(label: "com.myportrait.keystroke-char.write")
+    private let log = Logger(
+        subsystem: "com.joyzhang.myportrait", category: "typing.keystroke-char")
+
+    /// 黑名单(同 typing 设置页),命中不录。
+    /// hardcode 默认值 + 用户配置的 union。`TypingObserver` 在 start() 时
+    /// snapshot 一份推过来。
+    private var blacklist: Set<String> = []
+    private let blacklistLock = NSLock()
+
+    init(store: KeystrokeStore) {
+        self.store = store
+    }
+
+    /// `TypingObserver` 在 start() 时调用,推一份黑名单 snapshot。
+    /// 后续 ConfigStore 变化也可以重新推。
+    func updateBlacklist(_ ids: Set<String>) {
+        blacklistLock.lock(); defer { blacklistLock.unlock() }
+        blacklist = ids
+    }
+
+    /// 从 CGEventTap callback 同步调用 —— 内部异步写 DB,**不阻塞 callback**。
+    /// `event` 必须是 `.keyDown` 事件;`isBackspace` 由调用方根据 keyCode 判好。
+    func ingest(event: CGEvent, isBackspace: Bool) {
+        // 同步在 callback 线程提取 —— `CGEvent` 是 C 结构,不能跨线程持有。
+        var length = 0
+        var buf = [UniChar](repeating: 0, count: 8)
+        event.keyboardGetUnicodeString(
+            maxStringLength: 8, actualStringLength: &length, unicodeString: &buf)
+        let chars = length > 0
+            ? String(utf16CodeUnits: buf, count: length)
+            : ""
+        // `frontmostApplication` 实测在后台线程读 cached 值稳定(KeystrokeProbe 已验证)。
+        let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        // 黑名单短路 —— 命中就不进队列了
+        blacklistLock.lock()
+        let drop = blacklist.contains(app)
+        blacklistLock.unlock()
+        if drop { return }
+
+        // 派到后台写 DB —— callback 立刻返回
+        let store = self.store
+        let logger = self.log
+        writeQueue.async {
+            do {
+                var entry = KeystrokeEntry(
+                    id: nil,
+                    tsMs: nowMs,
+                    bundleId: app,
+                    char: chars.isEmpty ? nil : chars,
+                    isBackspace: isBackspace ? 1 : 0
+                )
+                try store.insert(&entry)
+            } catch {
+                logger.warning("insert failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+}
+
+// MARK: - KeystrokeEntry + Store
+
+/// 一条 `keystroke_log` 记录(v19 schema)。
+struct KeystrokeEntry: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
+    var id: Int64?
+    var tsMs: Int64
+    var bundleId: String
+    var char: String?              // nullable:纯退格 / 修饰键时为 nil
+    var isBackspace: Int           // 0 / 1
+
+    static let databaseTableName = "keystroke_log"
+    static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
+    static let databaseColumnDecodingStrategy: DatabaseColumnDecodingStrategy = .convertFromSnakeCase
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
+/// `keystroke_log` 的 DAO,跟 `TypingEventStore` 同一个 dbPool。
+struct KeystrokeStore: Sendable {
+
+    let dbPool: DatabasePool
+
+    init(dbPool: DatabasePool) {
+        self.dbPool = dbPool
+    }
+
+    /// INSERT 一条击键。`KeystrokeCharLogger` 的 writeQueue 同步调用。
+    func insert(_ entry: inout KeystrokeEntry) throws {
+        try dbPool.write { db in
+            try entry.insert(db)
+        }
+    }
+}
