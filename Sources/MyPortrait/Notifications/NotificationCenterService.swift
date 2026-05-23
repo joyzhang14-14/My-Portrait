@@ -46,9 +46,22 @@ final class NotificationCenterService {
         ) { [weak self] granted, error in
             Task { @MainActor in
                 self?.authorized = granted
-                if let error {
-                    self?.log.error("authorization error: \(error.localizedDescription, privacy: .public)")
-                }
+                self?.log.notice("authorization result: granted=\(granted, privacy: .public) error=\(error?.localizedDescription ?? "nil", privacy: .public)")
+            }
+        }
+    }
+
+    /// Diagnostic: log macOS-level authorization status without changing it.
+    func logCurrentSettings() {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] s in
+            // 提取 Sendable 标量再跨 actor 边界,避免 UNNotificationSettings
+            // 自身非 Sendable 触发 Swift 6 data race 报错。
+            let auth = s.authorizationStatus.rawValue
+            let alert = s.alertSetting.rawValue
+            let nc = s.notificationCenterSetting.rawValue
+            let sound = s.soundSetting.rawValue
+            Task { @MainActor in
+                self?.log.notice("settings: authStatus=\(auth, privacy: .public) alert=\(alert, privacy: .public) banner=\(nc, privacy: .public) sound=\(sound, privacy: .public)")
             }
         }
     }
@@ -69,8 +82,14 @@ final class NotificationCenterService {
         let categoryId: String
         switch kind {
         case let .cronJobRun(jobName, preview):
-            guard n.cronJobAlerts else { return }
-            guard !n.mutedCronJobs.contains(jobName) else { return }
+            guard n.cronJobAlerts else {
+                log.notice("post skipped: cronJobAlerts toggle is OFF")
+                return
+            }
+            guard !n.mutedCronJobs.contains(jobName) else {
+                log.notice("post skipped: '\(jobName, privacy: .public)' is muted")
+                return
+            }
             title = "🛰️ \(jobName)"
             body  = preview.isEmpty ? "Run finished." : preview
             categoryId = "cron-job.run"
@@ -93,7 +112,10 @@ final class NotificationCenterService {
     private func deliver(title: String, body: String, categoryId: String) {
         // Same guard as requestAuthorizationOnce — Xcode dev runs would
         // otherwise crash inside UNUserNotificationCenter.add.
-        guard isBundledApp else { return }
+        guard isBundledApp else {
+            log.notice("deliver skipped: not running inside a .app bundle")
+            return
+        }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body  = body
@@ -105,9 +127,12 @@ final class NotificationCenterService {
             content: content,
             trigger: nil    // deliver immediately
         )
+        log.notice("deliver attempt: title='\(title, privacy: .public)' authorized=\(self.authorized, privacy: .public)")
         UNUserNotificationCenter.current().add(req) { [weak self] error in
             if let error {
-                self?.log.warning("post failed: \(error.localizedDescription, privacy: .public)")
+                self?.log.error("deliver failed: \(error.localizedDescription, privacy: .public)")
+            } else {
+                self?.log.notice("deliver ok")
             }
         }
     }
