@@ -212,6 +212,63 @@ enum MemoryPrompts {
     ]
     """#
 
+    // MARK: - PortraitToTagsAgent — portrait → personality tag
+
+    /// 给一批 portrait(社交/技能/兴趣/等)抽 personality tag。caller 在前面
+    /// 拼上每个 portrait 的 `[slug] title — body`。
+    static let portraitToTags = #"""
+    You analyze the user's existing PORTRAIT entries (social, skills, interests,
+    experiences, background, speech_style, emotions) and extract PERSONALITY
+    TAGS — single-noun or kebab-case behavioral / dispositional words that
+    these portraits imply about the user.
+
+    For EACH portrait below, output 0–3 tags.
+
+    Each tag MUST be:
+    - A single noun or hyphenated noun phrase: "verification", "tool-research",
+      "systems-builder", "hands-on-debugging".
+    - Lowercase, kebab-case for multi-word (no spaces).
+    - A behavioral / dispositional pattern, NOT a topic or identity:
+        GOOD: "iterative-shipping", "live-coordination", "background-audio"
+        BAD:  "swift" (topic), "introvert" (identity), "smart" (judgmental)
+    - Concrete enough to recur in someone else's portrait.
+
+    If the portrait is too generic / topic-only / doesn't imply a personality
+    pattern → return an empty tags array for that portrait.
+
+    OUTPUT — JSON array, one object per portrait. No prose, no markdown:
+    [
+      { "portrait": "<the portrait's relative path, verbatim>",
+        "tags": ["<tag>", "<tag>"] }
+    ]
+    """#
+
+    // MARK: - OCRToTagsAgent — daily OCR → personality tag
+
+    /// 给一天的屏幕 OCR 文本抽 personality tag。caller 在前面拼上当天 OCR 的
+    /// 拼接文本(截断防爆)。
+    static let ocrToTags = #"""
+    You analyze ONE DAY of the user's screen OCR text (raw on-screen content
+    captured throughout the day) and extract PERSONALITY TAGS — single-noun
+    or kebab-case behavioral / dispositional words that the patterns in this
+    OCR imply about the user.
+
+    Output 0–5 tags for the day. Skip topical noise (app names, URLs,
+    proper nouns). Look for HOW the user works / interacts patterns visible
+    in the text: repeated terms, command vocabulary, message tone, etc.
+
+    Each tag MUST be:
+    - A single noun or hyphenated noun phrase, kebab-case, lowercase.
+    - A behavioral / dispositional pattern, NOT a topic / identity / app name:
+        GOOD: "command-fluency", "terse-messaging", "live-debugging"
+        BAD:  "discord" (app), "git" (tool), "studious" (judgmental)
+
+    If the day's OCR is mostly noise / no clear pattern → return empty array.
+
+    OUTPUT — JSON object. No prose, no markdown:
+    { "tags": ["<tag>", "<tag>"] }
+    """#
+
     // MARK: - PortraitDistiller — event → portrait distillation
 
     /// Opening line of the distill prompt.
