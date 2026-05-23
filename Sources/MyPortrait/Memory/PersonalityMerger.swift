@@ -298,11 +298,14 @@ final class PersonalityMerger {
             }
 
             file.primaryLabel = primaryLabel
-            file.aliases = aliases
+            // 空数组 → nil,让 PortraitFileIO 跳过 frontmatter 行(否则会
+            // 出现 "aliases: []" 这种无信息量的行)。
+            file.aliases = aliases.isEmpty ? nil : aliases
             file.body = body.render(title: primaryLabel)
             file.eventTitle = primaryLabel
             file.eventSummary = ""
-            file.evidenceEventIds = ConceptBody.capList(body.events)
+            let evIds = ConceptBody.capList(body.events)
+            file.evidenceEventIds = evIds.isEmpty ? nil : evIds
             file.recordOccurrence(on: today)
             file.mergeCount = (file.mergeCount ?? 0) + group.count
             file.lastModified = today

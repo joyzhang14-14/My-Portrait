@@ -147,13 +147,19 @@ enum PortraitFileIO {
         lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")
         lines.append("event_summary: \(formatNullableString(f.eventSummary.isEmpty ? nil : f.eventSummary))")
         lines.append("type: \(f.eventType.isEmpty ? "experience" : f.eventType)")
-        lines.append("portrait_facets: \(formatFacetArray(f.portraitFacets))")
+        // 空数组 / 空集合 跳行 —— 减少无信息量的 "portrait_facets: []" /
+        // "member_frame_ids: []" 噪声(personality concept 这俩天然为空)。
+        if !f.portraitFacets.isEmpty {
+            lines.append("portrait_facets: \(formatFacetArray(f.portraitFacets))")
+        }
         if !f.category.isEmpty {
             // Only emit legacy `category` if it was present on read — keeps
             // brand-new files lean.
             lines.append("category: \(f.category)")
         }
-        lines.append("member_frame_ids: \(formatInt64Array(f.memberFrameIds))")
+        if !f.memberFrameIds.isEmpty {
+            lines.append("member_frame_ids: \(formatInt64Array(f.memberFrameIds))")
+        }
         lines.append("distilled_into: \(formatStringArray(f.distilledInto))")
         lines.append("source: \(formatNullableString(f.source))")
         lines.append("tags: \(formatStringArray(f.tags))")

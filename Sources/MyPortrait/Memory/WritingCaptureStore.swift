@@ -263,7 +263,7 @@ struct WritingCaptureStore: Sendable {
     }
 
     /// 读某日 staged 的所有 records(Pending review UI 用)。
-    func fetchStagedRecords(date: String) throws -> [StagedRecordRow] {
+    func fetchStagedRecords(date: String) throws -> [WritingRecordViewRow] {
         try dbPool.read { db in
             try Row.fetchAll(
                 db,
@@ -275,20 +275,59 @@ struct WritingCaptureStore: Sendable {
                     ORDER BY start_ts ASC
                     """,
                 arguments: [date]
-            ).map { r in
-                StagedRecordRow(
-                    id: r["id"],
-                    startTs: r["start_ts"], endTs: r["end_ts"],
-                    app: r["app"], url: r["url"],
-                    text: r["text"], editLog: r["edit_log"],
-                    confidence: r["confidence"],
-                    contextSummary: r["context_summary"],
-                    source: r["source"],
-                    workerRunId: r["worker_run_id"],
-                    createdAt: r["created_at"]
-                )
-            }
+            ).map { Self.rowToView($0) }
         }
+    }
+
+    /// 查 writing_records(approved 后才进)里跟给定时间窗 + app 重叠的记录。
+    /// InputCaptureView detail 用 —— 该天 approved 时,把 LLM 最终输出展示在
+    /// 对应 typing_event 的旁边。
+    func writingRecordsOverlapping(
+        startTs: Int64, endTs: Int64, app: String
+    ) throws -> [WritingRecordViewRow] {
+        try dbPool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
+                           context_summary, source, worker_run_id, created_at
+                    FROM writing_records
+                    WHERE app = ? AND start_ts < ? AND end_ts > ?
+                    ORDER BY start_ts ASC
+                    """,
+                arguments: [app, endTs, startTs]
+            ).map { Self.rowToView($0) }
+        }
+    }
+
+    /// 给定时间戳所在 UTC 日的 writing_capture_runs 状态。未跑过返回 nil。
+    func dayStatus(forTsMs ts: Int64) throws -> WritingCaptureRunStatus? {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        let date = fmt.string(from: Date(timeIntervalSince1970: TimeInterval(ts) / 1000))
+        let statusStr: String? = try dbPool.read { db in
+            try String.fetchOne(
+                db,
+                sql: "SELECT status FROM writing_capture_runs WHERE date_utc = ?",
+                arguments: [date]
+            )
+        }
+        return statusStr.flatMap { WritingCaptureRunStatus(rawValue: $0) }
+    }
+
+    private static func rowToView(_ r: Row) -> WritingRecordViewRow {
+        WritingRecordViewRow(
+            id: r["id"],
+            startTs: r["start_ts"], endTs: r["end_ts"],
+            app: r["app"], url: r["url"],
+            text: r["text"], editLog: r["edit_log"],
+            confidence: r["confidence"],
+            contextSummary: r["context_summary"],
+            source: r["source"],
+            workerRunId: r["worker_run_id"],
+            createdAt: r["created_at"]
+        )
     }
 
     /// 清某日 staged(Reject 用)。
@@ -368,8 +407,8 @@ struct WritingCaptureStore: Sendable {
     }
 }
 
-/// Pending review UI 显示用的 staged 行投影。
-struct StagedRecordRow: Sendable {
+/// 给 UI 展示用的 writing_record 行投影。staged 和 committed 共用同一个字段集。
+struct WritingRecordViewRow: Sendable {
     let id: Int64
     let startTs: Int64
     let endTs: Int64
@@ -383,3 +422,6 @@ struct StagedRecordRow: Sendable {
     let workerRunId: String?
     let createdAt: Int64
 }
+
+/// 兼容老名字。不要在新代码里用。
+typealias StagedRecordRow = WritingRecordViewRow
