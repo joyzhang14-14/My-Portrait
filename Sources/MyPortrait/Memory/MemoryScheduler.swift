@@ -316,7 +316,7 @@ final class MemoryScheduler {
         await runStep(date: personalityAnchor, stage: .personality,
                       processor: "personality", rollbackDay: nil) {
             let r = try await PersonalityRefresh(model: self.model).refresh(day: day)
-            print("[Scheduler] personality job: events→\(r.eventCandidates) portraits→\(r.portraitCandidates) ocr→\(r.ocrCandidates) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
+            print("[Scheduler] personality job: events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) (≥\(PersonalityRefresh.minOCRFrames) frames) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
             return .success
         }
         return .ran(days: [personalityAnchor])

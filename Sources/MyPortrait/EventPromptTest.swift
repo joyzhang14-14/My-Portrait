@@ -800,7 +800,7 @@ enum PersonalityPromptTestCLI {
                 print("date: \(r.snapshot.date)")
                 print("tags (\(r.snapshot.tags.count)):")
                 for t in r.snapshot.tags {
-                    print("  - \(t.name)  evidence=\(t.evidence)")
+                    print("  - \(t.name)  evidence=\(t.evidence)  ocr_keywords=\(t.ocrKeywords)")
                 }
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
@@ -1425,10 +1425,10 @@ enum PersonalityRefreshApplyCLI {
         Task {
             do {
                 let r = try await PersonalityRefresh().refresh(day: day)
-                print("events on \(dayStr): \(r.eventCount) → \(r.eventCandidates) tag(s)")
-                print("portraits scanned: \(r.portraitInputs) → \(r.portraitCandidates) tag(s)")
-                print("ocr → \(r.ocrCandidates) tag(s)")
-                print("clusters: \(r.clusterCount) (from \(r.eventCandidates + r.portraitCandidates + r.ocrCandidates) candidate(s))")
+                print("events on \(dayStr): \(r.eventsTotal) total → \(r.eventsAboveWeight) above weight \(PersonalityRefresh.minEventWeight)")
+                print("snapshot tags: \(r.snapshotTags)")
+                print("ocr validation (≥\(PersonalityRefresh.minOCRFrames) frames): kept \(r.ocrKept), dropped \(r.ocrDropped)")
+                print("clusters: \(r.clusterCount) (from \(r.ocrKept * 2) candidate(s) — each kept tag emits .events + .ocr)")
                 print("existing personality concepts: \(r.existingConceptCount)")
                 print("\n──── ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {

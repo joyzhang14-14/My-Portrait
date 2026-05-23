@@ -7,6 +7,27 @@ private let paLog = Logger(subsystem: "com.myportrait.memory", category: "person
 struct PersonalityTag: Codable, Equatable, Sendable {
     let name: String                   // single noun / kebab-case，如 "verification"
     let evidence: [String]             // 支撑这个 tag 的 event slug（输入子集）
+    let ocrKeywords: [String]          // OCR 验证用的关键词（3-6 个），LLM 提供
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case evidence
+        case ocrKeywords = "ocr_keywords"
+    }
+
+    init(name: String, evidence: [String], ocrKeywords: [String] = []) {
+        self.name = name
+        self.evidence = evidence
+        self.ocrKeywords = ocrKeywords
+    }
+
+    /// 兼容旧 snapshot(没 ocr_keywords 字段) —— decode 失败回退空数组。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.evidence = try c.decodeIfPresent([String].self, forKey: .evidence) ?? []
+        self.ocrKeywords = try c.decodeIfPresent([String].self, forKey: .ocrKeywords) ?? []
+    }
 }
 
 /// 单日 personality 快照。PersonalityAgent 输出，PersonalityMerger（P2）消费。
@@ -52,8 +73,9 @@ final class PersonalityAgent {
 
     /// 扫 `events/<day>/` 把每个事件读成 `(slug, PortraitFile)`。slug = 文件名
     /// 去 `.md`，用于 snapshot 的 evidenceEventIds 回引。CLI 与 scheduler(P7)
-    /// 共用。
-    static func readEvents(for day: Date) -> [(slug: String, file: PortraitFile)] {
+    /// 共用。可选 `minWeight` 过滤(personality refresh 只看高权重事件)。
+    static func readEvents(for day: Date,
+                           minWeight: Double? = nil) -> [(slug: String, file: PortraitFile)] {
         let fm = FileManager.default
         let dir = PortraitPaths.eventsDayDir(for: day)
         guard let en = fm.enumerator(
@@ -66,6 +88,7 @@ final class PersonalityAgent {
             if url.pathComponents.contains("_quarantine")
                 || url.pathComponents.contains("_archive") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
+            if let min = minWeight, f.weight < min { continue }
             out.append((url.deletingPathExtension().lastPathComponent, f))
         }
         return out

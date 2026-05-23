@@ -9,7 +9,8 @@ final class PersonalityAgentTests: XCTestCase {
         {
           "date": "2026-05-11",
           "tags": [
-            { "name": "verification", "evidence": ["set_up_my_orphies_app", "inspected_update_settings"] },
+            { "name": "verification", "evidence": ["set_up_my_orphies_app", "inspected_update_settings"],
+              "ocr_keywords": ["verify", "double-check", "confirm"] },
             { "name": "background-audio", "evidence": ["listened_to_music"] }
           ]
         }
@@ -20,7 +21,10 @@ final class PersonalityAgentTests: XCTestCase {
         XCTAssertEqual(s.tags.count, 2)
         XCTAssertEqual(s.tags[0].name, "verification")
         XCTAssertEqual(s.tags[0].evidence, ["set_up_my_orphies_app", "inspected_update_settings"])
+        XCTAssertEqual(s.tags[0].ocrKeywords, ["verify", "double-check", "confirm"])
         XCTAssertEqual(s.tags[1].name, "background-audio")
+        // 旧 snapshot 无 ocr_keywords 字段 → 默认空数组(向后兼容)。
+        XCTAssertEqual(s.tags[1].ocrKeywords, [])
     }
 
     /// 空事件日：短路返回空 tags，不调 LLM。

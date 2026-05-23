@@ -157,6 +157,16 @@ enum MemoryPrompts {
     Each tag carries an "evidence" list — the event slugs from below that
     support it. 1 to N slugs per tag. A slug MAY appear under multiple tags.
 
+    Each tag ALSO carries an "ocr_keywords" list of 3-6 short search terms
+    (single words / short phrases) that would plausibly appear in the user's
+    on-screen text if this trait is real, e.g.:
+      verification    → ["verify", "double-check", "confirm", "review"]
+      multitasking    → ["switch", "tab", "window", "context"]
+      background-audio → ["spotify", "music", "playlist", "queue"]
+    Keywords are matched substring on full_text (case-insensitive). Use the
+    tag's CONCEPT, not the tag string itself. Mix English / native language
+    naturally — whatever would actually show up in app UI / chat / code.
+
     SKIP CONDITION:
     - If fewer than 5 events, or every event has impact < 1.5, return an
       empty "tags" array. Don't force tags when evidence is thin.
@@ -165,7 +175,9 @@ enum MemoryPrompts {
     {
       "date": "<YYYY-MM-DD>",
       "tags": [
-        { "name": "<single-noun-tag>", "evidence": ["<event-slug>", "..."] }
+        { "name": "<single-noun-tag>",
+          "evidence": ["<event-slug>", "..."],
+          "ocr_keywords": ["<keyword>", "..."] }
       ]
     }
     """#

@@ -249,6 +249,44 @@ struct TimelineDB: Sendable {
         return orderedLines.joined(separator: "\n")
     }
 
+    /// 数当天有多少帧的 OCR 文本命中给定关键词集合中**任一个**(substring,
+    /// 大小写不敏感)。给 PersonalityRefresh 的 OCR 验证器(≥20 帧才落 tag)用。
+    /// 空 keywords → 返回 0。
+    func frameCount(on day: Date, keywords: [String]) -> Int {
+        guard exists, !keywords.isEmpty else { return 0 }
+
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let dayStart = cal.startOfDay(for: day)
+        let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_close(db) }
+
+        // 拼 N 个 LOWER(full_text) LIKE ? 用 OR 串。SQLite ASCII LIKE 自带
+        // 不敏感,但 LOWER 兜底中英混排里的大小写;中文走 substring 字面匹配。
+        let likes = Array(repeating: "LOWER(full_text) LIKE ?", count: keywords.count)
+            .joined(separator: " OR ")
+        let sql = """
+            SELECT COUNT(DISTINCT id) FROM frames
+            WHERE timestamp_ms >= ? AND timestamp_ms < ?
+              AND full_text IS NOT NULL AND length(full_text) > 4
+              AND (\(likes))
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Self.dbMs(dayStart))
+        sqlite3_bind_int64(stmt, 2, Self.dbMs(dayEnd))
+        for (i, kw) in keywords.enumerated() {
+            let pat = "%" + kw.lowercased() + "%"
+            sqlite3_bind_text(stmt, Int32(3 + i), pat, -1, SQLITE_TRANSIENT)
+        }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
     /// Distinct app/window combinations active around the given moment.
     /// Used by the Timeline sidebar's "Active Apps" panel.
     func activeApps(around moment: Date, window: TimeInterval = 45) -> [ActiveAppEntry] {
