@@ -496,23 +496,23 @@ struct SystemConfig: Codable, Equatable {
 
 struct NotificationsConfig: Codable, Equatable {
     var appUpdates:             Bool     = true
-    var pipeAlerts:             Bool     = true
+    var cronJobAlerts:             Bool     = true
     var captureStalls:          Bool     = false
-    var mutedPipes:             [String] = []
+    var mutedCronJobs:             [String] = []
     init() {}
     enum CodingKeys: String, CodingKey {
         case appUpdates             = "app_updates"
-        case pipeAlerts             = "pipe_alerts"
+        case cronJobAlerts             = "cron_job_alerts"
         case captureStalls          = "capture_stalls"
-        case mutedPipes             = "muted_pipes"
+        case mutedCronJobs             = "muted_cron_jobs"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         appUpdates             = c.dflt(Bool.self,     .appUpdates, appUpdates)
-        pipeAlerts             = c.dflt(Bool.self,     .pipeAlerts, pipeAlerts)
+        cronJobAlerts             = c.dflt(Bool.self,     .cronJobAlerts, cronJobAlerts)
         captureStalls          = c.dflt(Bool.self,     .captureStalls, captureStalls)
-        mutedPipes             = c.dflt([String].self, .mutedPipes, mutedPipes)
+        mutedCronJobs             = c.dflt([String].self, .mutedCronJobs, mutedCronJobs)
     }
 }
 

@@ -47,7 +47,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .home: return "Home"
-        case .pipes: return "Pipes"
+        case .cronJobs: return "Pipes"
         case .timeline: return "Timeline"
         case .memories: return "Memories"
         case .settings: return "Settings"
@@ -56,7 +56,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .home: return "plus.message"
-        case .pipes: return "puzzlepiece.extension"
+        case .cronJobs: return "puzzlepiece.extension"
         case .timeline: return "clock.arrow.circlepath"
         case .memories: return "sparkles"
         case .settings: return "gearshape"

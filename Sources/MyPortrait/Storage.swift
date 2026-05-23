@@ -65,7 +65,7 @@ enum Storage {
 
     /// AI pipes — one directory per pipe (`<slug>/pipe.md` + `runs.json`).
     /// `~/.portrait/pipes/`.
-    static var pipesDir: URL { rootURL.appendingPathComponent("pipes", isDirectory: true) }
+    static var cronJobsDir: URL { rootURL.appendingPathComponent("pipes", isDirectory: true) }
 
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {

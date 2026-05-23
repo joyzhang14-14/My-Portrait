@@ -4,25 +4,25 @@ import Foundation
 ///   1. Builds the screen context (if pipe.window != .none)
 ///   2. Creates a brand-new conversation in ChatStore titled after the pipe
 ///   3. Spawns a one-shot PiAgent, sends prompt+context, accumulates text
-///   4. Persists the assistant reply into the conv + appends a PipeRun
+///   4. Persists the assistant reply into the conv + appends a CronJobRun
 ///      with a 120-char preview pointing at the conv
 ///
 /// Doesn't reuse the live ChatController so user's open chat is undisturbed.
 @MainActor
-enum PipeExecutor {
+enum CronJobExecutor {
     /// Override at boot — supplies the same provider+model as the chat.
     static var providerResolver: () -> (Provider, String, String?) = {
         (.chatgpt, Provider.chatgpt.defaultModel, nil)
     }
 
-    static func run(_ pipe: PipeJob) {
+    static func run(_ pipe: CronJob) {
         Task { await execute(pipe) }
     }
 
     /// Resolve a pipe's attached connections into environment variables that
     /// get injected into the spawned agent process — mirrors screenpipe's
     /// per-pipe `cmd.env(...)` credential injection.
-    private static func connectionEnv(for pipe: PipeJob) -> [String: String] {
+    private static func connectionEnv(for pipe: CronJob) -> [String: String] {
         var env: [String: String] = [:]
         for id in pipe.connections {
             switch id {
@@ -45,7 +45,7 @@ enum PipeExecutor {
         return env
     }
 
-    private static func execute(_ pipe: PipeJob) async {
+    private static func execute(_ pipe: CronJob) async {
         guard AISetup.shared.isReady else { return }
 
         let startedAt = Date()
@@ -98,7 +98,7 @@ enum PipeExecutor {
             }
             agent.stop()
         } catch {
-            assistantBuf = "⚠️ PipeJob couldn't start: \(error.localizedDescription)"
+            assistantBuf = "⚠️ CronJob couldn't start: \(error.localizedDescription)"
         }
 
         parts.append(.text(id: UUID(), value: assistantBuf))
@@ -112,10 +112,10 @@ enum PipeExecutor {
         // 4. Record run on the pipe.
         let preview = String(assistantBuf.prefix(120))
             .replacingOccurrences(of: "\n", with: " ")
-        let run = PipeRun(convId: conv.id, startedAt: startedAt, preview: preview)
-        PipeStore.shared.appendRun(run, to: pipe.id)
+        let run = CronJobRun(convId: conv.id, startedAt: startedAt, preview: preview)
+        CronJobStore.shared.appendRun(run, to: pipe.id)
 
-        // 5. Notify (respects notifications.pipeAlerts + mutedPipes).
+        // 5. Notify (respects notifications.cronJobAlerts + mutedCronJobs).
         NotificationCenterService.shared.post(
             .pipeRun(pipeName: pipe.name, preview: preview)
         )

@@ -218,21 +218,27 @@ struct InputCaptureView: View {
 
                     writingCaptureBlock(rec: rec)
 
-                    Divider().background(Color.white.opacity(0.06))
-
-                    Text(rec.text.isEmpty ? "（无新增文本，仅编辑/删除）" : rec.text)
-                        .font(.system(size: 15))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    let groups = Self.groupedLog(TypingRecordWriter.decodeLog(rec.editLog))
-                    if !groups.isEmpty {
+                    // Approved 天 → 只展示 LLM 输出(writingCaptureBlock 上面已展示)。
+                    // 不再显示原 typing_events 的 text + edit_log。
+                    //
+                    // 未跑 / Pending review / Reject / Failed → 显示 raw(原行为)。
+                    if writingCaptureDayStatus != .approved {
                         Divider().background(Color.white.opacity(0.06))
-                        Text("Edit log · \(groups.count)")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                        ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
-                            editGroupRow(g)
+
+                        Text(rec.text.isEmpty ? "（无新增文本，仅编辑/删除）" : rec.text)
+                            .font(.system(size: 15))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        let groups = Self.groupedLog(TypingRecordWriter.decodeLog(rec.editLog))
+                        if !groups.isEmpty {
+                            Divider().background(Color.white.opacity(0.06))
+                            Text("Edit log · \(groups.count)")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                            ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
+                                editGroupRow(g)
+                            }
                         }
                     }
                 }
@@ -302,8 +308,21 @@ struct InputCaptureView: View {
                 .background(Color.accentColor.opacity(0.08))
                 .cornerRadius(6)
             }
+        } else if writingCaptureDayStatus == .approved {
+            // 该天 approved 但这条 typing_event 没匹配到 writing_record —— LLM 把
+            // 整段判定为 throwaway(搜索 / 短应答 / 命令行 等)。raw 不再展示。
+            HStack(spacing: 6) {
+                Image(systemName: "trash.slash")
+                    .foregroundStyle(.secondary)
+                Text("Filtered as throwaway by Pass 2 LLM (search / short response / command / etc.)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
+            .padding(.vertical, 8)
         } else if let status = writingCaptureDayStatus, status != .approved {
-            // 该天跑过但没 approved —— 提示 raw 显示
+            // 该天跑过但没 approved(pending_review / rejected_for_rerun / failed)
+            // —— 提示状态,raw 在下面继续显示
             HStack {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)

@@ -7,7 +7,7 @@ struct UsageSettingsView: View {
     @State private var config = ConfigStore.shared
     @Environment(ChatController.self) private var chat
     @Environment(ChatStore.self) private var chatStore
-    @State private var pipeStore = PipeStore.shared
+    @State private var cronJobStore = CronJobStore.shared
 
     var body: some View {
         SettingsPage("Usage", subtitle: "What you've put through My Portrait") {
@@ -28,7 +28,7 @@ struct UsageSettingsView: View {
                            icon: "bubble.left.and.bubble.right",
                            accent: .purple)
                 MetricTile(label: "Pipes configured",
-                           value: "\(pipeStore.pipes.count)",
+                           value: "\(cronJobStore.cronJobs.count)",
                            icon: "antenna.radiowaves.left.and.right",
                            accent: .cyan)
                 MetricTile(label: "Pipe runs",
@@ -61,7 +61,7 @@ struct UsageSettingsView: View {
             }
 
             SettingsCard(title: "Recent pipe runs") {
-                let runs = recentPipeRuns()
+                let runs = recentCronJobRuns()
                 if runs.isEmpty {
                     Text("No pipe runs yet.")
                         .font(.system(size: 12))
@@ -105,9 +105,9 @@ struct UsageSettingsView: View {
 
     private var pipeRunTotal: Int {
         if let since = rangeStart {
-            return pipeStore.pipes.reduce(0) { $0 + $1.runs.filter { $0.startedAt >= since }.count }
+            return cronJobStore.cronJobs.reduce(0) { $0 + $1.runs.filter { $0.startedAt >= since }.count }
         }
-        return pipeStore.pipes.reduce(0) { $0 + $1.runs.count }
+        return cronJobStore.cronJobs.reduce(0) { $0 + $1.runs.count }
     }
 
     private func usageLine(for convId: UUID) -> String? {
@@ -119,10 +119,10 @@ struct UsageSettingsView: View {
 
     private struct RunRow { let pipeName: String; let subtitle: String; let timeAgo: String; let when: Date }
 
-    private func recentPipeRuns() -> [RunRow] {
+    private func recentCronJobRuns() -> [RunRow] {
         let since = rangeStart
         var all: [RunRow] = []
-        for p in pipeStore.pipes {
+        for p in cronJobStore.cronJobs {
             for r in p.runs {
                 if let since, r.startedAt < since { continue }
                 let df = RelativeDateTimeFormatter(); df.unitsStyle = .short

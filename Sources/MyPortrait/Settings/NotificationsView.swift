@@ -22,7 +22,7 @@ struct NotificationsSettingsView: View {
                 SettingsRow("Pipe run notifications",
                             description: "Show a system banner when an installed pipe finishes a run.",
                             icon: "antenna.radiowaves.left.and.right") {
-                    Toggle("", isOn: config.binding(\.notifications.pipeAlerts)).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.notifications.cronJobAlerts)).labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -44,21 +44,21 @@ struct NotificationsSettingsView: View {
                 title: "Muted pipes",
                 footnote: "Pipes added here won't trigger any notifications, no matter their configuration."
             ) {
-                if config.current.notifications.mutedPipes.isEmpty {
+                if config.current.notifications.mutedCronJobs.isEmpty {
                     Text("No muted pipes.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.5))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
-                    ForEach(config.current.notifications.mutedPipes, id: \.self) { name in
+                    ForEach(config.current.notifications.mutedCronJobs, id: \.self) { name in
                         SettingsRow(name, icon: "speaker.slash") {
                             Button("Unmute") {
-                                config.mutate { $0.notifications.mutedPipes.removeAll { $0 == name } }
+                                config.mutate { $0.notifications.mutedCronJobs.removeAll { $0 == name } }
                                 
                             }
                             .font(.system(size: 11))
                         }
-                        if name != config.current.notifications.mutedPipes.last { SettingsDivider() }
+                        if name != config.current.notifications.mutedCronJobs.last { SettingsDivider() }
                     }
                 }
             }

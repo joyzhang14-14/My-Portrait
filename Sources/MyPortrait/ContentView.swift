@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var chat = ChatController()
     @State private var chatStore = ChatStore.shared
     @State private var memoryScope: MemoryScope = .events
-    @State private var pipeSelection: UUID? = nil
+    @State private var cronJobSelection: UUID? = nil
     @State private var settingsSubsection: SettingsSubsection? = .app(.general)
 
     var body: some View {
@@ -16,7 +16,7 @@ struct ContentView: View {
                             selection: $selection,
                             chat: chat,
                             memoryScope: $memoryScope,
-                            pipeSelection: $pipeSelection,
+                            cronJobSelection: $cronJobSelection,
                             settingsSubsection: $settingsSubsection)
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
@@ -65,9 +65,9 @@ struct ContentView: View {
                 chat.send(template.prompt, chips: chips)
             }
             ScheduleRunner.shared.dispatchPipe = { pipe in
-                PipeExecutor.run(pipe)
+                CronJobExecutor.run(pipe)
             }
-            PipeExecutor.providerResolver = resolver
+            CronJobExecutor.providerResolver = resolver
             ScheduleRunner.shared.start()
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
@@ -85,7 +85,7 @@ struct ContentView: View {
         switch selection ?? .home {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
-        case .pipes:         PipesView(selection: $pipeSelection)
+        case .cronJobs:         CronJobsView(selection: $cronJobSelection)
         case .memories:      MemoriesView(scope: $memoryScope)
         case .settings:      SettingsPane(subsection: $settingsSubsection)
         }

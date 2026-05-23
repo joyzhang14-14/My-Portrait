@@ -3,23 +3,23 @@ import SwiftUI
 /// Main pane is the detail only. The pipe LIST + `+` action lives in the
 /// left sidebar (alongside Home's Recents + Memory scope) so Pipes feels
 /// like a first-class section instead of having a nested column.
-struct PipesView: View {
+struct CronJobsView: View {
     @Environment(ChatController.self) private var chat
     @Binding var selection: UUID?
-    @State private var store = PipeStore.shared
-    @State private var editing: PipeJob? = nil
+    @State private var store = CronJobStore.shared
+    @State private var editing: CronJob? = nil
 
     var body: some View {
         Group {
             if let pipe = currentPipe {
-                PipeDetailView(
+                CronJobDetailView(
                     pipe: pipe,
                     onEdit: { editing = pipe },
                     onDelete: {
                         store.delete(pipe.id)
                         selection = nil
                     },
-                    onRunNow: { PipeExecutor.run(pipe) },
+                    onRunNow: { CronJobExecutor.run(pipe) },
                     onOpenConv: { convId in
                         chat.switchTo(convId)
                         NotificationCenter.default.post(name: .navigateToHome, object: nil)
@@ -32,8 +32,8 @@ struct PipesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SidebarBackdrop().ignoresSafeArea())
         .sheet(item: $editing) { pipe in
-            PipeQuickEditor(initial: pipe) { saved in
-                if store.pipes.contains(where: { $0.id == saved.id }) {
+            CronJobQuickEditor(initial: pipe) { saved in
+                if store.cronJobs.contains(where: { $0.id == saved.id }) {
                     store.update(saved)
                 } else {
                     store.add(saved)
@@ -44,7 +44,7 @@ struct PipesView: View {
         }
         .onAppear {
             // Land on the first pipe if none picked yet.
-            if selection == nil, let first = store.pipes.first {
+            if selection == nil, let first = store.cronJobs.first {
                 selection = first.id
             }
         }
@@ -55,11 +55,11 @@ struct PipesView: View {
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(.white.opacity(0.35))
-            Text(store.pipes.isEmpty ? "No pipes yet"
+            Text(store.cronJobs.isEmpty ? "No pipes yet"
                                      : "Select a pipe from the sidebar")
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.60))
-            if store.pipes.isEmpty {
+            if store.cronJobs.isEmpty {
                 Button {
                     editing = Self.blankPipe()
                 } label: {
@@ -72,13 +72,13 @@ struct PipesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var currentPipe: PipeJob? {
+    private var currentPipe: CronJob? {
         guard let id = selection else { return nil }
-        return store.pipes.first { $0.id == id }
+        return store.cronJobs.first { $0.id == id }
     }
 
-    static func blankPipe() -> PipeJob {
-        PipeJob(name: "New pipe",
+    static func blankPipe() -> CronJob {
+        CronJob(name: "New pipe",
                 prompt: "Summarize what changed since the last run.",
                 window: .lastHours(1),
                 schedule: .everyMinutes(60))
@@ -86,15 +86,15 @@ struct PipesView: View {
 }
 
 extension Notification.Name {
-    /// Posted by PipesView to ask ContentView to jump back to .home after
+    /// Posted by CronJobsView to ask ContentView to jump back to .home after
     /// opening a pipe-run conversation.
     static let navigateToHome = Notification.Name("MyPortrait.NavigateToHome")
 }
 
-// MARK: - PipeJob row in sidebar (also used by TimelineSidebar)
+// MARK: - CronJob row in sidebar (also used by TimelineSidebar)
 
-struct PipeSidebarRow: View {
-    let pipe: PipeJob
+struct CronJobSidebarRow: View {
+    let pipe: CronJob
     let isActive: Bool
     let onTap: () -> Void
     let onToggle: () -> Void
@@ -139,10 +139,10 @@ struct PipeSidebarRow: View {
     }
 }
 
-// MARK: - PipeJob detail
+// MARK: - CronJob detail
 
-private struct PipeDetailView: View {
-    let pipe: PipeJob
+private struct CronJobDetailView: View {
+    let pipe: CronJob
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onRunNow: () -> Void
@@ -237,7 +237,7 @@ private struct PipeDetailView: View {
 }
 
 private struct RunRow: View {
-    let run: PipeRun
+    let run: CronJobRun
     let onTap: () -> Void
     @State private var hover = false
     static let fmt: DateFormatter = {
@@ -271,14 +271,14 @@ private struct RunRow: View {
     }
 }
 
-// MARK: - PipeJob editor sheet
+// MARK: - CronJob editor sheet
 
-/// Sheet for create/edit. Used by both PipesView (main pane) and
+/// Sheet for create/edit. Used by both CronJobsView (main pane) and
 /// TimelineSidebar's pipes section.
-struct PipeQuickEditor: View {
+struct CronJobQuickEditor: View {
     @Environment(AppState.self) private var appState
-    @State var initial: PipeJob
-    let onSave: (PipeJob) -> Void
+    @State var initial: CronJob
+    let onSave: (CronJob) -> Void
     let onCancel: () -> Void
 
     /// Integrations the user has actually connected — the only ones a pipe
@@ -300,7 +300,7 @@ struct PipeQuickEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("PipeJob").font(.system(size: 14, weight: .semibold))
+                Text("CronJob").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                 Button("Save") { onSave(initial) }

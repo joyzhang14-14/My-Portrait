@@ -1,6 +1,6 @@
 import Foundation
 
-/// Serializes / parses a `PipeJob` to the screenpipe-style on-disk format:
+/// Serializes / parses a `CronJob` to the screenpipe-style on-disk format:
 /// a per-pipe directory containing `pipe.md` (frontmatter + prompt) and
 /// `runs.json` (run history sidecar).
 ///
@@ -24,7 +24,7 @@ import Foundation
 ///   schedule: `never` | `every 60m` (everyMinutes) |
 ///             `daily at 21` (dailyAt hour) | `weekly 2 at 9` (weeklyOn weekday hour)
 ///   window:   `none` | `last 30m` (lastMinutes) | `last 2h` (lastHours) | `today`
-enum PipeFile {
+enum CronJobFile {
 
     // MARK: - Cadence <-> String
 
@@ -86,7 +86,7 @@ enum PipeFile {
     // MARK: - pipe.md generate
 
     /// Build the full `pipe.md` text for a pipe.
-    static func renderMarkdown(_ p: PipeJob) -> String {
+    static func renderMarkdown(_ p: CronJob) -> String {
         var fm = "---\n"
         fm += "id: \(p.id.uuidString)\n"
         fm += "title: \(p.name)\n"
@@ -107,7 +107,7 @@ enum PipeFile {
 
     /// Parse a `pipe.md`. Returns nil if the frontmatter is malformed.
     /// `runs` / `lastRunAt` come from the runs.json sidecar, not here.
-    static func parseMarkdown(_ text: String, fallbackName: String) -> PipeJob? {
+    static func parseMarkdown(_ text: String, fallbackName: String) -> CronJob? {
         // Split into frontmatter + body on the first two `---` fence lines.
         let lines = text.components(separatedBy: "\n")
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
@@ -151,7 +151,7 @@ enum PipeFile {
         let schedule = decodeCadence(scalars["schedule"] ?? "never")
         let window = decodeWindow(scalars["window"] ?? "none")
 
-        return PipeJob(id: id, name: name, prompt: prompt, window: window,
+        return CronJob(id: id, name: name, prompt: prompt, window: window,
                        schedule: schedule, isEnabled: enabled,
                        connections: connections)
     }

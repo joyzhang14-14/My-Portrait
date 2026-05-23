@@ -189,9 +189,9 @@ struct MyPortraitApp: App {
             WipePersonalityCLI.run()
         }
         // `--import-default-pipes` seeds the two built-in pipes into
-        // PipeStore. Idempotent (matches by name). Exits when done.
+        // CronJobStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {
-            DefaultPipesImportCLI.run()
+            DefaultCronJobsImportCLI.run()
             // run() exits the process internally.
         }
         // DEV-ONLY: MemoryScheduler 崩溃恢复 / retry / dead_letter 测试入口。

@@ -321,9 +321,9 @@ final class ConfigStore {
 
         // — Notifications
         c.notifications.appUpdates       = bool(ud, "Settings.notifyAppUpdates",      default: c.notifications.appUpdates)
-        c.notifications.pipeAlerts       = bool(ud, "Settings.notifyPipeAlerts",      default: c.notifications.pipeAlerts)
+        c.notifications.cronJobAlerts       = bool(ud, "Settings.notifyPipeAlerts",      default: c.notifications.cronJobAlerts)
         c.notifications.captureStalls    = bool(ud, "Settings.notifyCaptureStalls",   default: c.notifications.captureStalls)
-        c.notifications.mutedPipes       = stringArray(ud, "Settings.mutedPipes")
+        c.notifications.mutedCronJobs       = stringArray(ud, "Settings.mutedCronJobs")
 
         // — Usage
         if let v = ud.string(forKey: "Settings.usageRange") { c.usage.range = v }

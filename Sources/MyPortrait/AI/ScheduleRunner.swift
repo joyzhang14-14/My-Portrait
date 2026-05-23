@@ -18,8 +18,8 @@ final class ScheduleRunner {
     /// directly (keeps it testable + avoids retain cycles).
     var dispatch: (SummaryTemplate) -> Void = { _ in }
     /// Closure the runner calls to fire a pipe — same idea, different
-    /// destination (creates a NEW conv per fire, records a PipeRun).
-    var dispatchPipe: (PipeJob) -> Void = { _ in }
+    /// destination (creates a NEW conv per fire, records a CronJobRun).
+    var dispatchPipe: (CronJob) -> Void = { _ in }
 
     private var timer: Timer?
 
@@ -48,7 +48,7 @@ final class ScheduleRunner {
         }
 
         // Pipes (background workers).
-        let pipes = PipeStore.shared
+        let pipes = CronJobStore.shared
         for p in pipes.pipes
             where p.isEnabled && p.schedule.isDue(lastRun: p.lastRunAt, now: now)
         {

@@ -1,11 +1,11 @@
 import Foundation
 
 /// `--import-default-pipes` — one-time entry point that seeds two built-in
-/// pipes into PipeStore (UserDefaults `MyPortrait.pipes.v1`).
+/// pipes into CronJobStore (UserDefaults `MyPortrait.cronJobs.v1`).
 ///
 /// Idempotent: pipes are matched by `name`, so re-running skips ones that
 /// already exist. Prints what it did and exits.
-enum DefaultPipesImportCLI {
+enum DefaultCronJobsImportCLI {
 
     private static let obsidianPrompt = """
     每天晚上检查我的 Obsidian 仓库并执行 git commit + git push。
@@ -41,17 +41,17 @@ enum DefaultPipesImportCLI {
 
     static func run() {
         MainActor.assumeIsolated {
-            let store = PipeStore.shared
-            let existing = Set(store.pipes.map(\.name))
+            let store = CronJobStore.shared
+            let existing = Set(store.cronJobs.map(\.name))
 
-            let defaults: [PipeJob] = [
-                PipeJob(name: "Obsidian Updater",
+            let defaults: [CronJob] = [
+                CronJob(name: "Obsidian Updater",
                         prompt: obsidianPrompt,
                         window: .none,
                         schedule: .dailyAt(hour: 21),
                         isEnabled: true,
                         connections: ["obsidian"]),
-                PipeJob(name: "Follow-up Reminders",
+                CronJob(name: "Follow-up Reminders",
                         prompt: followupPrompt,
                         window: .lastHours(1),
                         schedule: .everyMinutes(60),

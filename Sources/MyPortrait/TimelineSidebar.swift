@@ -15,11 +15,11 @@ struct TimelineSidebar: View {
     @Binding var selection: SidebarSection?
     let chat: ChatController
     @Binding var memoryScope: MemoryScope
-    @Binding var pipeSelection: UUID?
+    @Binding var cronJobSelection: UUID?
     @Binding var settingsSubsection: SettingsSubsection?
 
-    @State private var pipeStore = PipeStore.shared
-    @State private var editingPipe: PipeJob? = nil
+    @State private var cronJobStore = CronJobStore.shared
+    @State private var editingCronJob: CronJob? = nil
 
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.services) private var services
@@ -76,8 +76,8 @@ struct TimelineSidebar: View {
                         recentsSection
                     } else if selection == .memories {
                         memoryScopeSection
-                    } else if selection == .pipes {
-                        pipesSection
+                    } else if selection == .cronJobs {
+                        cronJobsSection
                     } else if selection == .settings {
                         settingsListSection
                     } else {
@@ -108,7 +108,7 @@ struct TimelineSidebar: View {
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {
-                ForEach([SidebarSection.timeline, .home, .memories, .pipes, .settings], id: \.self) { item in
+                ForEach([SidebarSection.timeline, .home, .memories, .cronJobs, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
                         selection = item
                     }
@@ -324,42 +324,42 @@ struct TimelineSidebar: View {
 
     // MARK: Pipes (background AI workers)
 
-    private var pipesSection: some View {
+    private var cronJobsSection: some View {
         sectionCard {
             HStack(spacing: Theme.Space.sm) {
-                SectionHeader(title: "PIPES", count: pipeStore.pipes.count)
+                SectionHeader(title: "PIPES", count: cronJobStore.cronJobs.count)
                 SidebarIconButton(systemName: "plus", help: "New pipe") {
-                    editingPipe = PipesView.blankPipe()
+                    editingCronJob = CronJobsView.blankPipe()
                 }
             }
 
-            if pipeStore.pipes.isEmpty {
+            if cronJobStore.cronJobs.isEmpty {
                 EmptyRow(text: "No pipes yet — click + to create one.")
             } else {
                 VStack(spacing: 2) {
-                    ForEach(pipeStore.pipes) { p in
-                        PipeSidebarRow(
+                    ForEach(cronJobStore.cronJobs) { p in
+                        CronJobSidebarRow(
                             pipe: p,
-                            isActive: pipeSelection == p.id,
-                            onTap: { pipeSelection = p.id },
-                            onToggle: { pipeStore.toggleEnabled(p.id) }
+                            isActive: cronJobSelection == p.id,
+                            onTap: { cronJobSelection = p.id },
+                            onToggle: { cronJobStore.toggleEnabled(p.id) }
                         )
                     }
                 }
             }
         }
-        .sheet(item: $editingPipe) { pipe in
+        .sheet(item: $editingCronJob) { pipe in
             // Inline edit sheet so user can create a pipe directly from the
             // sidebar — same content the main pane uses.
-            PipeQuickEditor(initial: pipe) { saved in
-                if pipeStore.pipes.contains(where: { $0.id == saved.id }) {
-                    pipeStore.update(saved)
+            CronJobQuickEditor(initial: pipe) { saved in
+                if cronJobStore.cronJobs.contains(where: { $0.id == saved.id }) {
+                    cronJobStore.update(saved)
                 } else {
-                    pipeStore.add(saved)
+                    cronJobStore.add(saved)
                 }
-                editingPipe = nil
-                pipeSelection = saved.id
-            } onCancel: { editingPipe = nil }
+                editingCronJob = nil
+                cronJobSelection = saved.id
+            } onCancel: { editingCronJob = nil }
         }
     }
 
