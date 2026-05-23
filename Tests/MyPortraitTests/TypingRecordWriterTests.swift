@@ -88,7 +88,8 @@ final class TypingRecordWriterTests: XCTestCase {
             message: "hello world", newValue: "Write a message...",
             sessionStart: "Write a message..."))
 
-        // Bug 复现:Claude desktop plain Enter 插换行 → 不是
+        // Enter=换行 模式的 app(Slack 设了 Enter newline / 多行编辑器):
+        // newValue = message + "\n" → 不是
         XCTAssertFalse(TypingRecordWriter.looksLikeSubmitClear(
             message: "因为有的app", newValue: "因为有的app\n", sessionStart: ""))
 

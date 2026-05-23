@@ -148,20 +148,20 @@ final class TypingRecordWriter {
            ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
             ledger.consumeSubmit()
             let msg = rec.pendingValue ?? rec.lastValueSnapshot
-            // 「按过回车 + 之前有内容」还不够 —— Claude desktop 这类 app
-            // plain Enter 其实是换行(发送是 ⌘+Enter),用户下意识 / 习惯
-            // 按 Enter 就会被误当 send。加一道合理性检查:真发送后 value
-            // 会清空 / 回到 placeholder / 长度断崖式下降,换行 / IME commit
-            // / 误触 不会让 value 这样动。
+            // 「按过回车 + 之前有内容」还不够 —— 一些场景按 Enter 不会真发送:
+            //   - Slack / Discord 等 app 用户可能开「Enter = 换行」设置
+            //   - 某些 IME 用 Enter 做内部操作 (commit raw pinyin / 关候选窗)
+            //   - 多行文本编辑器里 Enter 就是换行
+            // 加一道合理性检查:真发送后 value 会清空 / 回 placeholder / 长度
+            // 断崖式下降。这些场景里 value 不会这样动。
             if !msg.isEmpty, msg != rec.sessionStart,
                Self.looksLikeSubmitClear(
                    message: msg, newValue: newValue, sessionStart: rec.sessionStart) {
                 handleSubmit(key: key, rec: rec, message: msg, clearedValue: newValue)
                 return
             }
-            // 否则(回车按了但 value 没像被清空) —— 多半是 plain Enter
-            // 插换行 / IME commit / 误触。consumeSubmit 已作废这次回车,
-            // 继续按普通输入处理。
+            // 否则(回车按了但 value 没像被清空) —— 换行 / IME commit / 误触。
+            // consumeSubmit 已作废这次回车,继续按普通输入处理。
         }
 
         let now = CACurrentMediaTime()
@@ -405,7 +405,8 @@ final class TypingRecordWriter {
     ///   (c) 长消息 + 长度断崖下降(`message ≥ 30` 且 `newValue < 30`)
     ///
     /// 不像被清空的(应当返回 false):
-    /// - Claude desktop 里 plain Enter 是插换行 → `newValue = message + "\n"`
+    /// - Enter = 换行 的 app (多行编辑器、开了 Enter-newline 设置的 Slack)
+    ///   → `newValue = message + "\n"`
     /// - IME commit Enter(commit raw pinyin)→ `newValue` 长度差不多
     /// - 用户连按 Enter 但 value 几乎没变
     nonisolated static func looksLikeSubmitClear(
