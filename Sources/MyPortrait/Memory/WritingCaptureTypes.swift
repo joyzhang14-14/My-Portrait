@@ -1,0 +1,75 @@
+import Foundation
+
+/// 写作采集 worker 的内存数据类型 —— Step 0 → Pass 1/2 之间传递的载体。
+/// 不入 DB,只是运行时对象。详见 `canvas-editor-capture-design-final.md` §3.3。
+
+// MARK: - 原始 OCR 帧(预压缩前)
+
+/// 从 `frames` 表读出来的一帧,Step 0 dedupe 之前的形态。
+struct WritingCaptureRawOcr: Sendable, Equatable {
+    let id: Int64
+    let tsMs: Int64
+    let app: String
+    let url: String?
+    let text: String
+}
+
+// MARK: - 预压缩后的 OCR 帧
+
+/// Step 0 Jaccard dedupe 后的 OCR 帧。`start_ts ~ end_ts` 是合并的时间区间
+/// (从多个 raw 帧合来,文本相似度 > 95%)。
+struct WritingCaptureOcrFrame: Sendable, Equatable, Codable {
+    let frameId: Int64        // 保留最早那帧的 id 当代表
+    let startTs: Int64
+    let endTs: Int64
+    let app: String
+    let url: String?
+    let text: String
+}
+
+// MARK: - 一个 raw_session
+
+/// 写作采集的基本处理单元 —— (app, url, 时间窗) 内的多源数据聚合。
+/// Step 0 切分输出,Pass 2 喂给 LLM 当原料。
+///
+/// 注:不实现 Equatable —— TypingEvent / KeystrokeEntry 没有 Equatable
+/// (避开 Codable 字段对比的歧义)。测试时按需对比具体字段。
+struct WritingCaptureRawSession: Sendable {
+    /// "sess_<8 char hex>" 形态。Step 0 生成,跨 session 唯一。
+    let id: String
+    let app: String
+    let url: String?
+    let startTs: Int64
+    let endTs: Int64
+    let typingEvents: [TypingEvent]
+    let keystrokes: [KeystrokeEntry]
+    /// OCR 帧 —— 已 Jaccard dedupe。
+    let ocrFrames: [WritingCaptureOcrFrame]
+    /// session 内最长文本长度(用于 throwaway 过滤的字数判定)。
+    /// = max(typing_events.text 拼起来 长度, max ocr_frame.text 长度)
+    let maxContentChars: Int
+}
+
+// MARK: - Step 0 输出
+
+/// Step 0 算法预压缩的产物 —— 给 Pass 1 / Pass 2 用。
+struct WritingCaptureStep0Output: Sendable {
+    /// 切分 + dedupe 完的 sessions(throwaway 已过滤掉)。
+    let rawSessions: [WritingCaptureRawSession]
+    /// throwaway 丢掉的 session(还保留 id + 短预览给 discarded 列表用)。
+    let throwawaySessions: [WritingCaptureThrowaway]
+    /// Pass 2 合并候选集 —— 每组 = 同 app + 同 url + 间隔 < 30min 的 session_id 数组。
+    /// 单 session 也会自己成一组([session_id])。
+    let mergeCandidates: [[String]]
+}
+
+/// throwaway 短 session 的占位记录 —— 给 Pass 2 的 discarded 列表当材料。
+struct WritingCaptureThrowaway: Sendable, Equatable {
+    let id: String
+    let app: String
+    let url: String?
+    let startTs: Int64
+    let endTs: Int64
+    let chars: Int             // 总字数(< 20)
+    let preview: String        // ≤ 80 字符预览
+}
