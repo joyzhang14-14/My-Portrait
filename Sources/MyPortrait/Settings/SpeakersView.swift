@@ -52,7 +52,7 @@ struct SpeakersSettingsView: View {
                     ForEach(unidentified) { r in
                         UnidentifiedCard(row: r,
                                          onName: { newName in rename(r, to: newName) },
-                                         onHallucination: { hide(r) })
+                                         onHallucination: { markHallucination(r) })
                     }
                 }
             }
@@ -66,7 +66,7 @@ struct SpeakersSettingsView: View {
                     ForEach(identified) { r in
                         IdentifiedRow(row: r,
                                       onRename: { newName in rename(r, to: newName) },
-                                      onDelete: { hide(r) },
+                                      onDelete: { markHallucination(r) },
                                       onMerge: { similarId in merge(r, with: similarId) })
                     }
                 }
@@ -174,7 +174,7 @@ struct SpeakersSettingsView: View {
             _ = TimelineDB().renameSpeaker(id: sid, to: v)
         }
     }
-    private func hide(_ r: SpeakerRow) {
+    private func markHallucination(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
         guard let sid = Int64(r.id) else { return }
         Task.detached(priority: .userInitiated) {

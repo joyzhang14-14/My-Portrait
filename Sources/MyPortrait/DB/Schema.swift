@@ -607,6 +607,18 @@ enum DBSchema {
                 "CREATE INDEX idx_writing_capture_runs_status ON writing_capture_runs(status)")
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v23 — speakers.hidden 改名 speakers.hallucination
+        // ═══════════════════════════════════════════════════════════
+        //
+        // UI 一直叫 "Mark as hallucination",方法叫 markSpeakerHallucination,
+        // 但 DB 列叫 `hidden`、实现内部又叫 `hide()`,三套术语并存。统一成
+        // hallucination(UI 已用的词,语义更准:这是"误判出的假说话人簇")。
+        m.registerMigration("v23_speakers_hallucination_rename") { db in
+            try db.execute(sql:
+                "ALTER TABLE speakers RENAME COLUMN hidden TO hallucination")
+        }
+
         return m
     }
 }

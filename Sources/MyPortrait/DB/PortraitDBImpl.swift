@@ -257,7 +257,7 @@ actor PortraitDBImpl: PortraitDB {
                 SELECT se.speaker_id AS sid, se.embedding AS emb
                 FROM speaker_embeddings se
                 JOIN speakers s ON s.id = se.speaker_id
-                WHERE s.hidden = 0
+                WHERE s.hallucination = 0
                 """)
             for row in embRows {
                 guard let blob: Data = row["emb"], let vec = blob.asFloats,
@@ -270,7 +270,7 @@ actor PortraitDBImpl: PortraitDB {
             if let b = best { return b.id }
             // 2. 样本没命中再比对 centroid（运行平均向量）。
             let cRows = try Row.fetchAll(db, sql: """
-                SELECT id, centroid FROM speakers WHERE hidden = 0 AND centroid IS NOT NULL
+                SELECT id, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
                 """)
             for row in cRows {
                 guard let blob: Data = row["centroid"], let vec = blob.asFloats,
@@ -289,7 +289,7 @@ actor PortraitDBImpl: PortraitDB {
         let now = Self.nowMs()
         return try await dbPool.write { db in
             try db.execute(sql: """
-                INSERT INTO speakers (name, centroid, embedding_count, hidden, created_at_ms, updated_at_ms)
+                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms)
                 VALUES (NULL, ?, 1, 0, ?, ?)
                 """, arguments: [blob, now, now])
             let sid = db.lastInsertedRowID

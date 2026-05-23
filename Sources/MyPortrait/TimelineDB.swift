@@ -588,7 +588,7 @@ struct TimelineDB: Sendable {
                    MAX(t.transcribed_at_ms) AS last_heard
             FROM speakers s
             LEFT JOIN audio_transcriptions t ON t.speaker_id = s.id
-            WHERE s.hidden = 0
+            WHERE s.hallucination = 0
             GROUP BY s.id
             ORDER BY last_heard DESC NULLS LAST, s.id DESC
         """
@@ -623,11 +623,11 @@ struct TimelineDB: Sendable {
         )
     }
 
-    /// 把说话人标记为幻听（hidden=1），列表不再显示。
+    /// 把说话人标记为幻听（hallucination=1），列表不再显示。
     @discardableResult
     func markSpeakerHallucination(id speakerId: Int64) -> Bool {
         runSpeakerWrite(
-            sql: "UPDATE speakers SET hidden = 1, updated_at_ms = ? WHERE id = ?",
+            sql: "UPDATE speakers SET hallucination = 1, updated_at_ms = ? WHERE id = ?",
             bind: { stmt in
                 sqlite3_bind_int64(stmt, 1, Int64(Date().timeIntervalSince1970 * 1000))
                 sqlite3_bind_int64(stmt, 2, speakerId)
@@ -697,7 +697,7 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
-        let sql = "SELECT id, name, centroid FROM speakers WHERE hidden = 0 AND centroid IS NOT NULL"
+        let sql = "SELECT id, name, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
