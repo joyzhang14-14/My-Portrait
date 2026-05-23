@@ -529,6 +529,50 @@ enum BackfillDaysCLI {
     }
 }
 
+/// `--wipe-personality-concepts` — DEV-ONLY 一次性迁移:备份 portrait/
+/// personality/ + personality_daily/,然后清空(只留 INDEX.md)。用于
+/// personality pipeline 改架构后从零重建。events/ 不动。
+enum WipePersonalityCLI {
+    static func run() {
+        print("=== wipe-personality-concepts ===")
+        let fm = FileManager.default
+        let personalityDir = Storage.portraitDir.appendingPathComponent("personality")
+        let dailyDir = Storage.personalityDailyDir
+        let stamp: String = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd-HHmmss"
+            return f.string(from: Date())
+        }()
+        let backupRoot = Storage.rootURL.appendingPathComponent("personality.bak.\(stamp)")
+        do {
+            try fm.createDirectory(at: backupRoot, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: personalityDir.path) {
+                try fm.copyItem(at: personalityDir, to: backupRoot.appendingPathComponent("personality"))
+            }
+            if fm.fileExists(atPath: dailyDir.path) {
+                try fm.copyItem(at: dailyDir, to: backupRoot.appendingPathComponent("personality_daily"))
+            }
+            print("backup: \(backupRoot.path)")
+        } catch {
+            FileHandle.standardError.write(Data("backup FAILED: \(error)\n".utf8))
+            exit(1)
+        }
+        var removed = 0
+        for dir in [personalityDir, dailyDir] {
+            guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil,
+                                         options: [.skipsHiddenFiles]) else { continue }
+            while let url = en.nextObject() as? URL {
+                guard url.pathExtension == "md", url.lastPathComponent != "INDEX.md" else { continue }
+                try? fm.removeItem(at: url)
+                removed += 1
+            }
+        }
+        print("=== done === removed \(removed) file(s)")
+        exit(0)
+    }
+}
+
 /// `--drop-portrait-impact-residue` — DEV-ONLY 一次性迁移:把 portrait/ 下
 /// 每个非归档 / 非隔离的 .md 读出来,清掉 `rawImpact` / `rebalanceCount` /
 /// `impactSource` 三个 event-only 字段(序列化器现在会 skip nil),重写。

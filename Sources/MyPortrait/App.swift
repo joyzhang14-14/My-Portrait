@@ -173,6 +173,11 @@ struct MyPortraitApp: App {
             DropPortraitImpactResidueCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--wipe-personality-concepts` —— backup + wipe
+        // portrait/personality/ + personality_daily/ for the new architecture.
+        if args.contains("--wipe-personality-concepts") {
+            WipePersonalityCLI.run()
+        }
         // `--import-default-pipes` seeds the two built-in pipes into
         // PipeStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {
