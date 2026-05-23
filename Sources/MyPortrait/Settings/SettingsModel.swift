@@ -1,56 +1,90 @@
 import Foundation
 import SwiftUI
 
-/// One of the nine subsections inside Settings. Drives both the sidebar
-/// list and the main pane router.
-enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
-    case display, general, aiModels, connections, notifications
-    case captureScreen, captureAudio, captureTyping
-    case memoryParameter, memoryScheduler, memoryChangelog
-    case usage, privacy, storage, speakers
-    var id: String { rawValue }
+/// 一个 Settings 子分区。用嵌套枚举表达 group 归属:
+/// 类型系统强制 `.capture(.screen)` 形态,switch 时模式匹配清楚。
+///
+/// 用法:
+///   - 路由 switch:`case .capture(.screen): ...`
+///   - 整组遍历:`SettingsSubsection.allCases.filter { $0.group == .capture }`
+///   - 持久化(AppStorage)等用 `id`(形如 `"app.display"`)。
+enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
+
+    case app(App)
+    case capture(Capture)
+    case memory(Memory)
+    case data(DataPrivacy)
+
+    enum App: String, Hashable, CaseIterable {
+        case display, general, aiModels, connections, notifications
+    }
+    enum Capture: String, Hashable, CaseIterable {
+        case screen, audio, typing
+    }
+    enum Memory: String, Hashable, CaseIterable {
+        case parameter, scheduler, changelog
+    }
+    enum DataPrivacy: String, Hashable, CaseIterable {
+        case usage, privacy, storage, speakers
+    }
+
+    var id: String {
+        switch self {
+        case .app(let s):     return "app.\(s.rawValue)"
+        case .capture(let s): return "capture.\(s.rawValue)"
+        case .memory(let s):  return "memory.\(s.rawValue)"
+        case .data(let s):    return "data.\(s.rawValue)"
+        }
+    }
+
+    static var allCases: [SettingsSubsection] {
+        App.allCases.map(SettingsSubsection.app)
+        + Capture.allCases.map(SettingsSubsection.capture)
+        + Memory.allCases.map(SettingsSubsection.memory)
+        + DataPrivacy.allCases.map(SettingsSubsection.data)
+    }
 
     var label: String {
         switch self {
-        case .display:          return "Display"
-        case .general:          return "General"
-        case .aiModels:         return "AI models"
-        case .connections:      return "Connections"
-        case .captureScreen:    return "Screen Capture"
-        case .captureAudio:     return "Audio Capture"
-        case .captureTyping:    return "Typing Capture"
-        case .notifications:    return "Notifications"
-        case .memoryParameter:  return "Parameter"
-        case .memoryScheduler:  return "Scheduler"
-        case .memoryChangelog:  return "Changelog"
-        case .usage:            return "Usage"
-        case .privacy:          return "Privacy"
-        case .storage:          return "Storage"
-        case .speakers:         return "Speakers"
+        case .app(.display):           return "Display"
+        case .app(.general):           return "General"
+        case .app(.aiModels):          return "AI models"
+        case .app(.connections):       return "Connections"
+        case .app(.notifications):     return "Notifications"
+        case .capture(.screen):        return "Screen Capture"
+        case .capture(.audio):         return "Audio Capture"
+        case .capture(.typing):        return "Typing Capture"
+        case .memory(.parameter):      return "Parameter"
+        case .memory(.scheduler):      return "Scheduler"
+        case .memory(.changelog):      return "Changelog"
+        case .data(.usage):            return "Usage"
+        case .data(.privacy):          return "Privacy"
+        case .data(.storage):          return "Storage"
+        case .data(.speakers):         return "Speakers"
         }
     }
 
     var icon: String {
         switch self {
-        case .display:          return "display"
-        case .general:          return "gearshape"
-        case .aiModels:         return "brain"
-        case .connections:      return "powerplug"
-        case .captureScreen:    return "display"
-        case .captureAudio:     return "mic"
-        case .captureTyping:    return "keyboard"
-        case .notifications:    return "bell"
-        case .memoryParameter:  return "slider.horizontal.3"
-        case .memoryScheduler:  return "calendar.badge.clock"
-        case .memoryChangelog:  return "list.bullet.rectangle"
-        case .usage:            return "chart.bar"
-        case .privacy:          return "hand.raised"
-        case .storage:          return "externaldrive"
-        case .speakers:         return "person.wave.2"
+        case .app(.display):           return "display"
+        case .app(.general):           return "gearshape"
+        case .app(.aiModels):          return "brain"
+        case .app(.connections):       return "powerplug"
+        case .app(.notifications):     return "bell"
+        case .capture(.screen):        return "display"
+        case .capture(.audio):         return "mic"
+        case .capture(.typing):        return "keyboard"
+        case .memory(.parameter):      return "slider.horizontal.3"
+        case .memory(.scheduler):      return "calendar.badge.clock"
+        case .memory(.changelog):      return "list.bullet.rectangle"
+        case .data(.usage):            return "chart.bar"
+        case .data(.privacy):          return "hand.raised"
+        case .data(.storage):          return "externaldrive"
+        case .data(.speakers):         return "person.wave.2"
         }
     }
 
-    enum Group: String, Hashable {
+    enum Group: String, Hashable, CaseIterable {
         case app         = "APP"
         case capture     = "CAPTURE"
         case memory      = "MEMORY"
@@ -59,10 +93,10 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
 
     var group: Group {
         switch self {
-        case .display, .general, .aiModels, .connections, .notifications: return .app
-        case .captureScreen, .captureAudio, .captureTyping:               return .capture
-        case .memoryParameter, .memoryScheduler, .memoryChangelog:        return .memory
-        case .usage, .privacy, .storage, .speakers:                       return .dataPrivacy
+        case .app:     return .app
+        case .capture: return .capture
+        case .memory:  return .memory
+        case .data:    return .dataPrivacy
         }
     }
 }

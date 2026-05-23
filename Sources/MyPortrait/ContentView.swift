@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var chatStore = ChatStore.shared
     @State private var memoryScope: MemoryScope = .events
     @State private var pipeSelection: UUID? = nil
-    @State private var settingsSubsection: SettingsSubsection? = .general
+    @State private var settingsSubsection: SettingsSubsection? = .app(.general)
 
     var body: some View {
         HStack(spacing: 0) {

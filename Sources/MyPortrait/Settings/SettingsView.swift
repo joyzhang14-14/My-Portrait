@@ -7,22 +7,22 @@ struct SettingsPane: View {
     @Binding var subsection: SettingsSubsection?
     var body: some View {
         Group {
-            switch subsection ?? .display {
-            case .display:       DisplaySettingsView()
-            case .general:       GeneralSettingsView()
-            case .aiModels:      AIModelsSettingsView()
-            case .connections:   ConnectionsView()
-            case .captureScreen:  ScreenCaptureSettingsView()
-            case .captureAudio:   AudioCaptureSettingsView()
-            case .captureTyping:  TypingCaptureSettingsView()
-            case .notifications: NotificationsSettingsView()
-            case .memoryParameter: MemorySettingsView(tab: .parameter)
-            case .memoryScheduler: MemorySettingsView(tab: .scheduler)
-            case .memoryChangelog: MemorySettingsView(tab: .changelog)
-            case .usage:         UsageSettingsView()
-            case .privacy:       PrivacySettingsView()
-            case .storage:       StorageSettingsView()
-            case .speakers:      SpeakersSettingsView()
+            switch subsection ?? .app(.display) {
+            case .app(.display):       DisplaySettingsView()
+            case .app(.general):       GeneralSettingsView()
+            case .app(.aiModels):      AIModelsSettingsView()
+            case .app(.connections):   ConnectionsView()
+            case .app(.notifications): NotificationsSettingsView()
+            case .capture(.screen):    ScreenCaptureSettingsView()
+            case .capture(.audio):     AudioCaptureSettingsView()
+            case .capture(.typing):    TypingCaptureSettingsView()
+            case .memory(.parameter):  MemorySettingsView(tab: .parameter)
+            case .memory(.scheduler):  MemorySettingsView(tab: .scheduler)
+            case .memory(.changelog):  MemorySettingsView(tab: .changelog)
+            case .data(.usage):        UsageSettingsView()
+            case .data(.privacy):      PrivacySettingsView()
+            case .data(.storage):      StorageSettingsView()
+            case .data(.speakers):     SpeakersSettingsView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -34,7 +34,7 @@ struct SettingsPane: View {
 /// app menu). Self-contained layout: left rail with the 6 subsection rows,
 /// right pane with the selected subsection.
 struct SettingsScene: View {
-    @State private var subsection: SettingsSubsection = .general
+    @State private var subsection: SettingsSubsection = .app(.general)
 
     var body: some View {
         HStack(spacing: 0) {
@@ -72,7 +72,7 @@ struct SettingsScene: View {
                     // Connections is only reachable from the in-app Settings
                     // tab (it needs AppState, which this standalone ⌘, window
                     // doesn't inject) — so it's excluded from this rail.
-                    ForEach(SettingsSubsection.allCases.filter { $0.group == grp && $0 != .connections }) { s in
+                    ForEach(SettingsSubsection.allCases.filter { $0.group == grp && $0 != .app(.connections) }) { s in
                         SettingsSidebarRow(
                             subsection: s,
                             isActive: subsection == s,
@@ -90,27 +90,27 @@ struct SettingsScene: View {
 
     @ViewBuilder private var detail: some View {
         switch subsection {
-        case .display:       DisplaySettingsView()
-        case .general:       GeneralSettingsView()
-        case .aiModels:      AIModelsSettingsView()
-        case .connections:
+        case .app(.display):       DisplaySettingsView()
+        case .app(.general):       GeneralSettingsView()
+        case .app(.aiModels):      AIModelsSettingsView()
+        case .app(.connections):
             // Unreachable from this window's rail (filtered out above);
             // the case only exists to keep the switch exhaustive.
             Text("Open Connections from the main window.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .captureScreen:  ScreenCaptureSettingsView()
-        case .captureAudio:   AudioCaptureSettingsView()
-        case .captureTyping:  TypingCaptureSettingsView()
-        case .notifications: NotificationsSettingsView()
-        case .memoryParameter: MemorySettingsView(tab: .parameter)
-        case .memoryScheduler: MemorySettingsView(tab: .scheduler)
-        case .memoryChangelog: MemorySettingsView(tab: .changelog)
-        case .usage:         UsageSettingsView()
-        case .privacy:       PrivacySettingsView()
-        case .storage:       StorageSettingsView()
-        case .speakers:      SpeakersSettingsView()
+        case .app(.notifications): NotificationsSettingsView()
+        case .capture(.screen):    ScreenCaptureSettingsView()
+        case .capture(.audio):     AudioCaptureSettingsView()
+        case .capture(.typing):    TypingCaptureSettingsView()
+        case .memory(.parameter):  MemorySettingsView(tab: .parameter)
+        case .memory(.scheduler):  MemorySettingsView(tab: .scheduler)
+        case .memory(.changelog):  MemorySettingsView(tab: .changelog)
+        case .data(.usage):        UsageSettingsView()
+        case .data(.privacy):      PrivacySettingsView()
+        case .data(.storage):      StorageSettingsView()
+        case .data(.speakers):     SpeakersSettingsView()
         }
     }
 }
