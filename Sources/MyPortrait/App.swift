@@ -245,6 +245,28 @@ struct MyPortraitApp: App {
         if args.contains("--typing-observe-m4") {
             AppDelegate.typingObserveM4Only = true
         }
+        // `--writing-capture-*` 写作采集 worker CLI 入口(UI Run now 的等价物)。
+        // 内部跑完 → exit,不开窗口 / Services / capture。详见 WritingCaptureCLI。
+        if args.contains("--writing-capture-list") {
+            WritingCaptureCLI.list()
+        }
+        if let idx = args.firstIndex(of: "--writing-capture-approve"), idx + 1 < args.count {
+            WritingCaptureCLI.approve(date: args[idx + 1])
+        }
+        if let idx = args.firstIndex(of: "--writing-capture-reject"), idx + 1 < args.count {
+            WritingCaptureCLI.reject(date: args[idx + 1])
+        }
+        if args.contains("--writing-capture-run") {
+            // 后面跟可选的日期 YYYY-MM-DD
+            let idx = args.firstIndex(of: "--writing-capture-run")!
+            let nextArg: String? = (idx + 1 < args.count) ? args[idx + 1] : nil
+            // 简单格式校验:YYYY-MM-DD 长度 10 + 含 "-"
+            let date: String? = {
+                guard let s = nextArg, s.count == 10, s.contains("-") else { return nil }
+                return s
+            }()
+            WritingCaptureCLI.run(specificDate: date)
+        }
         AppKeyboard.install()
     }
 
