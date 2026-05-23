@@ -148,11 +148,19 @@ final class TypingRecordWriter {
            ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
             ledger.consumeSubmit()
             let msg = rec.pendingValue ?? rec.lastValueSnapshot
-            if !msg.isEmpty, msg != rec.sessionStart {
+            // 「按过回车 + 之前有内容」还不够 —— Claude desktop 这类 app
+            // plain Enter 其实是换行(发送是 ⌘+Enter),用户下意识 / 习惯
+            // 按 Enter 就会被误当 send。加一道合理性检查:真发送后 value
+            // 会清空 / 回到 placeholder / 长度断崖式下降,换行 / IME commit
+            // / 误触 不会让 value 这样动。
+            if !msg.isEmpty, msg != rec.sessionStart,
+               Self.looksLikeSubmitClear(
+                   message: msg, newValue: newValue, sessionStart: rec.sessionStart) {
                 handleSubmit(key: key, rec: rec, message: msg, clearedValue: newValue)
                 return
             }
-            // 否则（没真打过字 / 误触回车）：consumeSubmit 已作废这次回车，
+            // 否则(回车按了但 value 没像被清空) —— 多半是 plain Enter
+            // 插换行 / IME commit / 误触。consumeSubmit 已作废这次回车,
             // 继续按普通输入处理。
         }
 
@@ -387,6 +395,26 @@ final class TypingRecordWriter {
     /// burst 判定 —— 单次 value-change 的字符跳变 + 间隔。
     nonisolated static func isBurst(jumpChars: Int, intervalMs: Double) -> Bool {
         jumpChars > burstCharThreshold && intervalMs < burstIntervalMs
+    }
+
+    /// 「Enter 后 value 真的看起来像被清空」判定 —— submit 二道防线。
+    ///
+    /// 真发送后 value 表现:
+    ///   (a) 清空(`newValue` empty)
+    ///   (b) 回到 session 初始值(placeholder 模式;`newValue == sessionStart`)
+    ///   (c) 长消息 + 长度断崖下降(`message ≥ 30` 且 `newValue < 30`)
+    ///
+    /// 不像被清空的(应当返回 false):
+    /// - Claude desktop 里 plain Enter 是插换行 → `newValue = message + "\n"`
+    /// - IME commit Enter(commit raw pinyin)→ `newValue` 长度差不多
+    /// - 用户连按 Enter 但 value 几乎没变
+    nonisolated static func looksLikeSubmitClear(
+        message: String, newValue: String, sessionStart: String
+    ) -> Bool {
+        if newValue.isEmpty { return true }
+        if newValue == sessionStart { return true }
+        if message.count >= 30 && newValue.count < 30 { return true }
+        return false
     }
 
     /// 「单次 AX 跳变远超附近按键能产生的字符量」判定。

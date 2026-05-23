@@ -78,6 +78,34 @@ final class TypingRecordWriterTests: XCTestCase {
         XCTAssertFalse(TypingRecordWriter.isBurst(jumpChars: 11, intervalMs: 30))
     }
 
+    func testLooksLikeSubmitClear() {
+        // 真发送:value 清空 → 是
+        XCTAssertTrue(TypingRecordWriter.looksLikeSubmitClear(
+            message: "因为有的app", newValue: "", sessionStart: ""))
+
+        // 真发送:value 回到 session 初始 placeholder → 是
+        XCTAssertTrue(TypingRecordWriter.looksLikeSubmitClear(
+            message: "hello world", newValue: "Write a message...",
+            sessionStart: "Write a message..."))
+
+        // Bug 复现:Claude desktop plain Enter 插换行 → 不是
+        XCTAssertFalse(TypingRecordWriter.looksLikeSubmitClear(
+            message: "因为有的app", newValue: "因为有的app\n", sessionStart: ""))
+
+        // IME commit Enter:value 长度差不多 → 不是
+        XCTAssertFalse(TypingRecordWriter.looksLikeSubmitClear(
+            message: "yin w", newValue: "因", sessionStart: ""))
+
+        // 长消息 + 断崖下降 → 是(覆盖 placeholder 短的情况)
+        XCTAssertTrue(TypingRecordWriter.looksLikeSubmitClear(
+            message: String(repeating: "a", count: 50), newValue: "Send a msg",
+            sessionStart: ""))
+
+        // 短消息 + 没清空 → 不是(避免短消息误判)
+        XCTAssertFalse(TypingRecordWriter.looksLikeSubmitClear(
+            message: "hi", newValue: "hi.", sessionStart: ""))
+    }
+
     func testIsOversizedDelta() {
         // 1258 字 + 0 按键(Obsidian 切 note) → 触发
         XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 1258, keystrokeCount: 0))
