@@ -18,9 +18,9 @@ struct NotificationsSettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Pipes") {
-                SettingsRow("Pipe run notifications",
-                            description: "Show a system banner when an installed pipe finishes a run.",
+            SettingsCard(title: "Cron Jobs") {
+                SettingsRow("Cron job run notifications",
+                            description: "Show a system banner when an installed cronJob finishes a run.",
                             icon: "antenna.radiowaves.left.and.right") {
                     Toggle("", isOn: config.binding(\.notifications.cronJobAlerts)).labelsHidden().toggleStyle(.switch)
                 }
@@ -41,11 +41,11 @@ struct NotificationsSettingsView: View {
             }
 
             SettingsCard(
-                title: "Muted pipes",
-                footnote: "Pipes added here won't trigger any notifications, no matter their configuration."
+                title: "Muted cronJobs",
+                footnote: "Cron jobs added here won't trigger any notifications, no matter their configuration."
             ) {
                 if config.current.notifications.mutedCronJobs.isEmpty {
-                    Text("No muted pipes.")
+                    Text("No muted cronJobs.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.5))
                         .padding(.horizontal, 14).padding(.vertical, 12)

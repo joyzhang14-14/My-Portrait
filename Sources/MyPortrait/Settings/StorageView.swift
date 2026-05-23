@@ -210,7 +210,7 @@ private struct StorageStats {
                        + fileSize(root.appendingPathComponent("portrait.sqlite-wal"))
                        + fileSize(root.appendingPathComponent("portrait.sqlite-shm"))
         let logBytes   = directorySize(root.appendingPathComponent("logs"))
-        let pipeBytes  = directorySize(root.appendingPathComponent("pipes"))
+        let pipeBytes  = directorySize(root.appendingPathComponent("cronJobs"))
         let otherBytes = max(0, dataBytes - cacheBytes - mediaBytes - dbBytes - logBytes - pipeBytes)
 
         var free: Int64 = 0
@@ -229,7 +229,7 @@ private struct StorageStats {
             otherBreakdown: [
                 (label: "Database", size: dbBytes,    icon: "cylinder"),
                 (label: "Logs",     size: logBytes,   icon: "doc.text"),
-                (label: "Pipes",    size: pipeBytes,  icon: "antenna.radiowaves.left.and.right"),
+                (label: "Cron Jobs",    size: pipeBytes,  icon: "antenna.radiowaves.left.and.right"),
                 (label: "Other",    size: otherBytes, icon: "ellipsis.circle")
             ],
             months: months

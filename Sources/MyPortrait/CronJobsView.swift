@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Main pane is the detail only. The pipe LIST + `+` action lives in the
-/// left sidebar (alongside Home's Recents + Memory scope) so Pipes feels
+/// Main pane is the detail only. The cron job list + `+` action lives in the
+/// left sidebar (alongside Home's Recents + Memory scope) so Cron Jobs feels
 /// like a first-class section instead of having a nested column.
 struct CronJobsView: View {
     @Environment(ChatController.self) private var chat
@@ -11,15 +11,15 @@ struct CronJobsView: View {
 
     var body: some View {
         Group {
-            if let pipe = currentPipe {
+            if let cronJob = currentCronJob {
                 CronJobDetailView(
-                    pipe: pipe,
-                    onEdit: { editing = pipe },
+                    cronJob: cronJob,
+                    onEdit: { editing = cronJob },
                     onDelete: {
-                        store.delete(pipe.id)
+                        store.delete(cronJob.id)
                         selection = nil
                     },
-                    onRunNow: { CronJobExecutor.run(pipe) },
+                    onRunNow: { CronJobExecutor.run(cronJob) },
                     onOpenConv: { convId in
                         chat.switchTo(convId)
                         NotificationCenter.default.post(name: .navigateToHome, object: nil)
@@ -31,8 +31,8 @@ struct CronJobsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SidebarBackdrop().ignoresSafeArea())
-        .sheet(item: $editing) { pipe in
-            CronJobQuickEditor(initial: pipe) { saved in
+        .sheet(item: $editing) { cronJob in
+            CronJobQuickEditor(initial: cronJob) { saved in
                 if store.cronJobs.contains(where: { $0.id == saved.id }) {
                     store.update(saved)
                 } else {
@@ -43,7 +43,7 @@ struct CronJobsView: View {
             } onCancel: { editing = nil }
         }
         .onAppear {
-            // Land on the first pipe if none picked yet.
+            // Land on the first cronJob if none picked yet.
             if selection == nil, let first = store.cronJobs.first {
                 selection = first.id
             }
@@ -55,15 +55,15 @@ struct CronJobsView: View {
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(.white.opacity(0.35))
-            Text(store.cronJobs.isEmpty ? "No pipes yet"
-                                     : "Select a pipe from the sidebar")
+            Text(store.cronJobs.isEmpty ? "No cron jobs yet"
+                                     : "Select a cron job from the sidebar")
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.60))
             if store.cronJobs.isEmpty {
                 Button {
-                    editing = Self.blankPipe()
+                    editing = Self.blankCronJob()
                 } label: {
-                    Label("New pipe", systemImage: "plus")
+                    Label("New cron job", systemImage: "plus")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .padding(.top, 4)
@@ -72,13 +72,13 @@ struct CronJobsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var currentPipe: CronJob? {
+    private var currentCronJob: CronJob? {
         guard let id = selection else { return nil }
         return store.cronJobs.first { $0.id == id }
     }
 
-    static func blankPipe() -> CronJob {
-        CronJob(name: "New pipe",
+    static func blankCronJob() -> CronJob {
+        CronJob(name: "New cron job",
                 prompt: "Summarize what changed since the last run.",
                 window: .lastHours(1),
                 schedule: .everyMinutes(60))
@@ -87,14 +87,14 @@ struct CronJobsView: View {
 
 extension Notification.Name {
     /// Posted by CronJobsView to ask ContentView to jump back to .home after
-    /// opening a pipe-run conversation.
+    /// opening a cronJob-run conversation.
     static let navigateToHome = Notification.Name("MyPortrait.NavigateToHome")
 }
 
 // MARK: - CronJob row in sidebar (also used by TimelineSidebar)
 
 struct CronJobSidebarRow: View {
-    let pipe: CronJob
+    let cronJob: CronJob
     let isActive: Bool
     let onTap: () -> Void
     let onToggle: () -> Void
@@ -102,16 +102,16 @@ struct CronJobSidebarRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Toggle("", isOn: Binding(get: { pipe.isEnabled }, set: { _ in onToggle() }))
+            Toggle("", isOn: Binding(get: { cronJob.isEnabled }, set: { _ in onToggle() }))
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .labelsHidden()
             VStack(alignment: .leading, spacing: 1) {
-                Text(pipe.name)
+                Text(cronJob.name)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(isActive ? .primary : .secondary)
                     .lineLimit(1)
-                Text(pipe.schedule.label + lastRunSuffix)
+                Text(cronJob.schedule.label + lastRunSuffix)
                     .font(.system(size: 9.5, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
@@ -132,7 +132,7 @@ struct CronJobSidebarRow: View {
     }
 
     private var lastRunSuffix: String {
-        guard let t = pipe.lastRunAt else { return " · never run" }
+        guard let t = cronJob.lastRunAt else { return " · never run" }
         let df = RelativeDateTimeFormatter()
         df.unitsStyle = .short
         return " · " + df.localizedString(for: t, relativeTo: Date())
@@ -142,7 +142,7 @@ struct CronJobSidebarRow: View {
 // MARK: - CronJob detail
 
 private struct CronJobDetailView: View {
-    let pipe: CronJob
+    let cronJob: CronJob
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onRunNow: () -> Void
@@ -152,7 +152,7 @@ private struct CronJobDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
-                    Text(pipe.name)
+                    Text(cronJob.name)
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.95))
                     Spacer()
@@ -179,13 +179,13 @@ private struct CronJobDetailView: View {
                     .tracking(0.8)
                     .foregroundStyle(.white.opacity(0.55))
 
-                if pipe.runs.isEmpty {
+                if cronJob.runs.isEmpty {
                     Text("No runs yet.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.55))
                 } else {
                     VStack(spacing: 4) {
-                        ForEach(pipe.runs) { run in
+                        ForEach(cronJob.runs) { run in
                             RunRow(run: run) { onOpenConv(run.convId) }
                         }
                     }
@@ -199,16 +199,16 @@ private struct CronJobDetailView: View {
 
     private var metaGrid: some View {
         VStack(alignment: .leading, spacing: 6) {
-            metaRow("Schedule", pipe.schedule.label, icon: "clock")
-            metaRow("Context", pipe.window.label, icon: "viewfinder")
-            metaRow("Status", pipe.isEnabled ? "enabled" : "paused",
-                    icon: pipe.isEnabled ? "checkmark.circle" : "pause.circle")
+            metaRow("Schedule", cronJob.schedule.label, icon: "clock")
+            metaRow("Context", cronJob.window.label, icon: "viewfinder")
+            metaRow("Status", cronJob.isEnabled ? "enabled" : "paused",
+                    icon: cronJob.isEnabled ? "checkmark.circle" : "pause.circle")
             VStack(alignment: .leading, spacing: 4) {
                 Text("PROMPT")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(0.6)
                     .foregroundStyle(.white.opacity(0.45))
-                Text(pipe.prompt)
+                Text(cronJob.prompt)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.85))
                     .textSelection(.enabled)
@@ -274,14 +274,14 @@ private struct RunRow: View {
 // MARK: - CronJob editor sheet
 
 /// Sheet for create/edit. Used by both CronJobsView (main pane) and
-/// TimelineSidebar's pipes section.
+/// TimelineSidebar's cronJobs section.
 struct CronJobQuickEditor: View {
     @Environment(AppState.self) private var appState
     @State var initial: CronJob
     let onSave: (CronJob) -> Void
     let onCancel: () -> Void
 
-    /// Integrations the user has actually connected — the only ones a pipe
+    /// Integrations the user has actually connected — the only ones a cronJob
     /// can attach, since unconnected ones have no credentials to inject.
     private var connectedIntegrations: [Integration] {
         IntegrationRegistry.all.filter { appState.isConnected($0.id) }

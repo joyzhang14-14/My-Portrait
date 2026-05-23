@@ -75,7 +75,7 @@ final class PiAgent: @unchecked Sendable {
     private let apiKeyRefOverride: String?
 
     /// Extra environment variables injected into the spawned process. Used by
-    /// pipes to pass connection credentials (SMTP_*, OBSIDIAN_VAULT_PATH, …)
+    /// cronJobs to pass connection credentials (SMTP_*, OBSIDIAN_VAULT_PATH, …)
     /// to the agent — mirrors screenpipe's `cmd.env(...)` injection.
     private let extraEnv: [String: String]
 
@@ -136,7 +136,7 @@ final class PiAgent: @unchecked Sendable {
         }
         env["BUN_INSTALL"] = AIPaths.bunDir.path
         env["HOME"] = NSHomeDirectory()
-        // Connection credentials supplied by the pipe runner.
+        // Connection credentials supplied by the cron job runner.
         for (k, v) in extraEnv { env[k] = v }
         process.environment = env
 

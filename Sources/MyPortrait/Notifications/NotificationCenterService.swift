@@ -5,7 +5,7 @@ import os.log
 /// Thin facade around `UNUserNotificationCenter`. Handles:
 ///   - One-time authorization request at app launch
 ///   - Posting banner / sound notifications (respecting per-feature toggles)
-///   - Per-pipe mute via `notifications.mutedCronJobs`
+///   - Per-cronJob mute via `notifications.mutedCronJobs`
 ///
 /// Callers don't decide what's allowed — they pass the *kind* of event
 /// (`.pipeRun(pipeName:)`, `.appUpdate`, `.captureStall`) and the service
@@ -73,7 +73,7 @@ final class NotificationCenterService {
             guard !n.mutedCronJobs.contains(pipeName) else { return }
             title = "🛰️ \(pipeName)"
             body  = preview.isEmpty ? "Run finished." : preview
-            categoryId = "pipe.run"
+            categoryId = "cronJob.run"
 
         case let .appUpdate(version):
             guard n.appUpdates else { return }

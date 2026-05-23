@@ -188,9 +188,9 @@ struct MyPortraitApp: App {
         if args.contains("--wipe-personality-concepts") {
             WipePersonalityCLI.run()
         }
-        // `--import-default-pipes` seeds the two built-in pipes into
+        // `--import-default-cron-jobs` seeds the two built-in cronJobs into
         // CronJobStore. Idempotent (matches by name). Exits when done.
-        if args.contains("--import-default-pipes") {
+        if args.contains("--import-default-cron-jobs") {
             DefaultCronJobsImportCLI.run()
             // run() exits the process internally.
         }

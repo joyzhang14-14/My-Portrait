@@ -1,10 +1,10 @@
 import Foundation
 
 /// Serializes / parses a `CronJob` to the screenpipe-style on-disk format:
-/// a per-pipe directory containing `pipe.md` (frontmatter + prompt) and
+/// a per-cron-job directory containing `cron_job.md` (frontmatter + prompt) and
 /// `runs.json` (run history sidecar).
 ///
-/// `pipe.md` layout — two `---` fences; everything after the 2nd fence is
+/// `cron_job.md` layout — two `---` fences; everything after the 2nd fence is
 /// the prompt body verbatim (so the prompt may contain any character):
 /// ```
 /// ---
@@ -83,9 +83,9 @@ enum CronJobFile {
         return .none
     }
 
-    // MARK: - pipe.md generate
+    // MARK: - cron_job.md generate
 
-    /// Build the full `pipe.md` text for a pipe.
+    /// Build the full `cron_job.md` text for a cronJob.
     static func renderMarkdown(_ p: CronJob) -> String {
         var fm = "---\n"
         fm += "id: \(p.id.uuidString)\n"
@@ -103,9 +103,9 @@ enum CronJobFile {
         return fm + p.prompt
     }
 
-    // MARK: - pipe.md parse
+    // MARK: - cron_job.md parse
 
-    /// Parse a `pipe.md`. Returns nil if the frontmatter is malformed.
+    /// Parse a `cron_job.md`. Returns nil if the frontmatter is malformed.
     /// `runs` / `lastRunAt` come from the runs.json sidecar, not here.
     static func parseMarkdown(_ text: String, fallbackName: String) -> CronJob? {
         // Split into frontmatter + body on the first two `---` fence lines.
@@ -171,6 +171,6 @@ enum CronJobFile {
             }
         }
         while out.hasSuffix("-") { out.removeLast() }
-        return out.isEmpty ? "pipe" : out
+        return out.isEmpty ? "cronJob" : out
     }
 }

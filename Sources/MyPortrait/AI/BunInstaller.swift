@@ -85,12 +85,12 @@ enum BunInstaller {
         let p = Process()
         p.launchPath = "/usr/bin/unzip"
         p.arguments = ["-oq", zip.path, "-d", dir.path]
-        let pipe = Pipe()
-        p.standardError = pipe
+        let errPipe = Pipe()
+        p.standardError = errPipe
         try p.run()
         p.waitUntilExit()
         guard p.terminationStatus == 0 else {
-            let err = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             throw InstallError.unzipFailed(err)
         }
     }

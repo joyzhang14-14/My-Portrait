@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Aggregates the token / conversation / pipe-run counters we already track
+/// Aggregates the token / conversation / cronJob-run counters we already track
 /// in memory so the user can see how much they've used. No charts — just
 /// concrete numbers in glass cards.
 struct UsageSettingsView: View {
@@ -27,11 +27,11 @@ struct UsageSettingsView: View {
                            value: "\(filteredConvs.count)",
                            icon: "bubble.left.and.bubble.right",
                            accent: .purple)
-                MetricTile(label: "Pipes configured",
+                MetricTile(label: "Cron jobs configured",
                            value: "\(cronJobStore.cronJobs.count)",
                            icon: "antenna.radiowaves.left.and.right",
                            accent: .cyan)
-                MetricTile(label: "Pipe runs",
+                MetricTile(label: "Cron job runs",
                            value: "\(pipeRunTotal)",
                            icon: "play.circle",
                            accent: .pink)
@@ -60,10 +60,10 @@ struct UsageSettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Recent pipe runs") {
+            SettingsCard(title: "Recent cronJob runs") {
                 let runs = recentCronJobRuns()
                 if runs.isEmpty {
-                    Text("No pipe runs yet.")
+                    Text("No cron job runs yet.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.50))
                         .padding(.horizontal, 14).padding(.vertical, 12)

@@ -8,7 +8,7 @@ import AppKit
 ///   - ATX headings (#, ##, ###)
 ///   - Bullet and numbered lists
 ///   - Blockquotes
-///   - Tables (pipe syntax)
+///   - Tables (cronJob syntax)
 ///   - Paragraphs with **bold**, *italic*, `inline code`, [text](url)
 ///
 /// Each block is its own SwiftUI view so a long answer doesn't re-render the

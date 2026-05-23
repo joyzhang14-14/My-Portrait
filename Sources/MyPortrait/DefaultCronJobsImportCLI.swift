@@ -1,9 +1,9 @@
 import Foundation
 
-/// `--import-default-pipes` — one-time entry point that seeds two built-in
-/// pipes into CronJobStore (UserDefaults `MyPortrait.cronJobs.v1`).
+/// `--import-default-cron-jobs` — one-time entry point that seeds two built-in
+/// cronJobs into CronJobStore (UserDefaults `MyPortrait.cronJobs.v1`).
 ///
-/// Idempotent: pipes are matched by `name`, so re-running skips ones that
+/// Idempotent: cronJobs are matched by `name`, so re-running skips ones that
 /// already exist. Prints what it did and exits.
 enum DefaultCronJobsImportCLI {
 
@@ -59,12 +59,12 @@ enum DefaultCronJobsImportCLI {
                         connections: [])
             ]
 
-            for pipe in defaults {
-                if existing.contains(pipe.name) {
-                    print("[import-default-pipes] skip (exists): \(pipe.name)")
+            for cronJob in defaults {
+                if existing.contains(cronJob.name) {
+                    print("[import-default-cron-jobs] skip (exists): \(cronJob.name)")
                 } else {
-                    store.add(pipe)
-                    print("[import-default-pipes] added: \(pipe.name)")
+                    store.add(cronJob)
+                    print("[import-default-cron-jobs] added: \(cronJob.name)")
                 }
             }
         }

@@ -13,7 +13,7 @@ import Foundation
 ///   - Weight is recomputed on each file after scoring
 ///
 /// Reuses the existing infrastructure (`PiAgent`, `ChatGPTOAuth`) so we don't
-/// add a new HTTP path — the project's Codex / ChatGPT OAuth pipe is the
+/// add a new HTTP path — the project's Codex / ChatGPT OAuth cronJob is the
 /// canonical AI ingress.
 @MainActor
 final class ImpactScorer {

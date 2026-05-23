@@ -3,9 +3,9 @@ import Observation
 
 /// A background AI worker. The user defines a name + prompt + cadence; the
 /// CronJobRunner schedules it, and each fire creates a fresh conversation +
-/// records a `CronJobRun` entry. Pipes survive across launches as one
-/// directory per pipe under `~/.portrait/pipes/` (screenpipe-style):
-/// `<slug>/pipe.md` (frontmatter + prompt) + `<slug>/runs.json` (history).
+/// records a `CronJobRun` entry. Cron Jobs survive across launches as one
+/// directory per cronJob under `~/.portrait/cronJobs/` (screenpipe-style):
+/// `<slug>/cron_job.md` (frontmatter + prompt) + `<slug>/runs.json` (history).
 @MainActor
 @Observable
 final class CronJobStore {
@@ -21,44 +21,44 @@ final class CronJobStore {
 
     // MARK: - CRUD
 
-    func add(_ p: CronJob) { pipes.append(p); save() }
+    func add(_ p: CronJob) { cronJobs.append(p); save() }
 
     func update(_ p: CronJob) {
-        guard let i = pipes.firstIndex(where: { $0.id == p.id }) else { return }
-        pipes[i] = p; save()
+        guard let i = cronJobs.firstIndex(where: { $0.id == p.id }) else { return }
+        cronJobs[i] = p; save()
     }
 
     func delete(_ id: UUID) {
-        pipes.removeAll { $0.id == id }; save()
+        cronJobs.removeAll { $0.id == id }; save()
     }
 
     func toggleEnabled(_ id: UUID) {
-        guard let i = pipes.firstIndex(where: { $0.id == id }) else { return }
-        pipes[i].isEnabled.toggle(); save()
+        guard let i = cronJobs.firstIndex(where: { $0.id == id }) else { return }
+        cronJobs[i].isEnabled.toggle(); save()
     }
 
-    /// Record a run on a pipe. Caps the runs list at `runsCap` so the JSON
+    /// Record a run on a cronJob. Caps the runs list at `runsCap` so the JSON
     /// blob doesn't grow forever.
     func appendRun(_ run: CronJobRun, to id: UUID) {
-        guard let i = pipes.firstIndex(where: { $0.id == id }) else { return }
-        pipes[i].runs.insert(run, at: 0)
-        if pipes[i].runs.count > runsCap {
-            pipes[i].runs = Array(pipes[i].runs.prefix(runsCap))
+        guard let i = cronJobs.firstIndex(where: { $0.id == id }) else { return }
+        cronJobs[i].runs.insert(run, at: 0)
+        if cronJobs[i].runs.count > runsCap {
+            cronJobs[i].runs = Array(cronJobs[i].runs.prefix(runsCap))
         }
-        pipes[i].lastRunAt = run.startedAt
+        cronJobs[i].lastRunAt = run.startedAt
         save()
     }
 
     // MARK: - Persistence
 
-    /// Run history sidecar (`runs.json`) — runtime data kept out of pipe.md.
+    /// Run history sidecar (`runs.json`) — runtime data kept out of cron_job.md.
     private struct RunsSidecar: Codable {
         var runs: [CronJobRun]
         var lastRunAt: Date?
     }
 
-    /// Load all pipes from `~/.portrait/pipes/`. If that directory has no
-    /// pipe sub-directories, attempt a one-time migration from the legacy
+    /// Load all cronJobs from `~/.portrait/cronJobs/`. If that directory has no
+    /// cronJob sub-directories, attempt a one-time migration from the legacy
     /// UserDefaults JSON blob.
     private func load() {
         let fm = FileManager.default
@@ -68,16 +68,16 @@ final class CronJobStore {
             includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]))?
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true } ?? []
 
-        let withPipeMd = subdirs.filter { fm.fileExists(atPath: $0.appendingPathComponent("pipe.md").path) }
+        let withCronJobMd = subdirs.filter { fm.fileExists(atPath: $0.appendingPathComponent("cron_job.md").path) }
 
-        guard !withPipeMd.isEmpty else {
+        guard !withCronJobMd.isEmpty else {
             migrateFromUserDefaults()
             return
         }
 
         var loaded: [CronJob] = []
-        for sub in withPipeMd {
-            let mdURL = sub.appendingPathComponent("pipe.md")
+        for sub in withCronJobMd {
+            let mdURL = sub.appendingPathComponent("cron_job.md")
             guard let text = try? String(contentsOf: mdURL, encoding: .utf8),
                   var job = CronJobFile.parseMarkdown(text, fallbackName: sub.lastPathComponent) else { continue }
             if let rData = try? Data(contentsOf: sub.appendingPathComponent("runs.json")),
@@ -87,7 +87,7 @@ final class CronJobStore {
             }
             loaded.append(job)
         }
-        pipes = loaded
+        cronJobs = loaded
     }
 
     /// One-time migration: decode the legacy `[CronJob]` JSON, write it out
@@ -95,14 +95,14 @@ final class CronJobStore {
     private func migrateFromUserDefaults() {
         guard let data = UserDefaults.standard.data(forKey: legacyKey),
               let decoded = try? JSONDecoder().decode([CronJob].self, from: data) else { return }
-        pipes = decoded
+        cronJobs = decoded
         save()
         UserDefaults.standard.removeObject(forKey: legacyKey)
     }
 
-    /// Full rewrite of `~/.portrait/pipes/` (pipe count is tiny). Each pipe
-    /// gets `<slug>/pipe.md` + `<slug>/runs.json`; slug collisions get a
-    /// numeric suffix; directories for deleted pipes are removed.
+    /// Full rewrite of `~/.portrait/cronJobs/` (cronJob count is tiny). Each cronJob
+    /// gets `<slug>/cron_job.md` + `<slug>/runs.json`; slug collisions get a
+    /// numeric suffix; directories for deleted cronJobs are removed.
     private func save() {
         let fm = FileManager.default
         let root = Storage.cronJobsDir
@@ -111,20 +111,20 @@ final class CronJobStore {
         var usedSlugs: Set<String> = []
         var keepDirs: Set<String> = []
 
-        for pipe in pipes {
-            var slug = CronJobFile.slug(pipe.name)
+        for cronJob in cronJobs {
+            var slug = CronJobFile.slug(cronJob.name)
             var n = 2
-            while usedSlugs.contains(slug) { slug = "\(CronJobFile.slug(pipe.name))-\(n)"; n += 1 }
+            while usedSlugs.contains(slug) { slug = "\(CronJobFile.slug(cronJob.name))-\(n)"; n += 1 }
             usedSlugs.insert(slug)
             keepDirs.insert(slug)
 
             let dir = root.appendingPathComponent(slug, isDirectory: true)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
-            let md = CronJobFile.renderMarkdown(pipe)
-            try? md.write(to: dir.appendingPathComponent("pipe.md"), atomically: true, encoding: .utf8)
+            let md = CronJobFile.renderMarkdown(cronJob)
+            try? md.write(to: dir.appendingPathComponent("cron_job.md"), atomically: true, encoding: .utf8)
 
-            let sidecar = RunsSidecar(runs: pipe.runs, lastRunAt: pipe.lastRunAt)
+            let sidecar = RunsSidecar(runs: cronJob.runs, lastRunAt: cronJob.lastRunAt)
             let enc = JSONEncoder()
             enc.outputFormatting = .prettyPrinted
             if let rData = try? enc.encode(sidecar) {
@@ -132,7 +132,7 @@ final class CronJobStore {
             }
         }
 
-        // Drop directories that no longer correspond to a live pipe.
+        // Drop directories that no longer correspond to a live cronJob.
         let existing = (try? fm.contentsOfDirectory(at: root,
             includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
         for sub in existing {
@@ -153,9 +153,9 @@ struct CronJob: Identifiable, Hashable, Codable {
     var isEnabled: Bool
     var runs: [CronJobRun]
     var lastRunAt: Date?
-    /// Integration ids (see `IntegrationRegistry`) this pipe uses. At run
+    /// Integration ids (see `IntegrationRegistry`) this cronJob uses. At run
     /// time their credentials are injected into the agent process as env
-    /// vars. Old stored pipes without this key decode to `[]`.
+    /// vars. Old stored cronJobs without this key decode to `[]`.
     var connections: [String] = []
 
     init(id: UUID = UUID(), name: String, prompt: String, window: ContextWindow,

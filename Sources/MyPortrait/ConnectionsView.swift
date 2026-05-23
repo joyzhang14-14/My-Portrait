@@ -171,7 +171,7 @@ struct ConnectionsView: View {
                 }
             }
 
-            // Obsidian vault path — pipes need the git repo location, which
+            // Obsidian vault path — cronJobs need the git repo location, which
             // the `.localApp` probe alone doesn't tell us.
             if integration.id == "obsidian" {
                 VStack(alignment: .leading, spacing: 6) {
@@ -511,7 +511,7 @@ struct ConnectionsView: View {
         case "obsidian":    return "Read & write your Obsidian vault as memory."
         case "notion":      return "Import Notion pages as context."
         case "linear":      return "Sync Linear issues."
-        case "email-smtp":  return "Let pipes send email via your SMTP server. Credentials stay encrypted on this Mac."
+        case "email-smtp":  return "Let cronJobs send email via your SMTP server. Credentials stay encrypted on this Mac."
         case "spotify":     return "Track listening history as part of activity."
         case "apple-calendar":      return "Access your local Calendar.app events."
         case "google-calendar":     return "OAuth into Google Calendar."

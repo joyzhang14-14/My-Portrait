@@ -230,7 +230,7 @@ private struct ConfigToolbar: View {
             Button("Reset", role: .destructive) { config.resetToDefaults() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This deletes ~/.portrait/config.toml and restores every Settings value to its built-in default. Your conversations / pipes / templates are not touched.")
+            Text("This deletes ~/.portrait/config.toml and restores every Settings value to its built-in default. Your conversations / cronJobs / templates are not touched.")
         }
     }
 }

@@ -204,11 +204,14 @@ final class ConfigStore {
         }
         do {
             let raw = try String(contentsOf: path, encoding: .utf8)
-            // 一次性迁移:[recording.*] → [capture.*]。下次保存即写新 key,
-            // 此后这两行 replace 是 no-op。
+            // 一次性 key 迁移。下次保存即写新 key,此后这些 replace 是 no-op。
+            //   [recording.*] → [capture.*]
+            //   pipe_alerts / muted_pipes → cron_job_alerts / muted_cron_jobs
             let migrated = raw
                 .replacingOccurrences(of: "[recording]",  with: "[capture]")
                 .replacingOccurrences(of: "[recording.", with: "[capture.")
+                .replacingOccurrences(of: "pipe_alerts",  with: "cron_job_alerts")
+                .replacingOccurrences(of: "muted_pipes",  with: "muted_cron_jobs")
             let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: migrated)
             current = applySchemaMigration(decoded)
             loadError = nil

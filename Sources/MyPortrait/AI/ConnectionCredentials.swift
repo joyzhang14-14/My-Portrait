@@ -16,7 +16,7 @@ struct SMTPCredentials: Codable, Hashable {
 }
 
 /// Extra Obsidian config that the `.localApp` probe doesn't capture — namely
-/// the vault directory the user picked. Pipes read this to know where the
+/// the vault directory the user picked. Cron Jobs read this to know where the
 /// git repo lives.
 enum ObsidianConfig {
     /// SecretStore key holding the absolute vault path (plain UTF-8).

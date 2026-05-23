@@ -8,7 +8,7 @@ import AppKit
 ///   - Audio: transcript chunks within the recent window (favours -120s..+30s)
 ///
 /// When the user is not on the Timeline section, body shows the relevant
-/// list (Recents / Memories scope / Pipes / Settings) or a friendly
+/// list (Recents / Memories scope / Cron Jobs / Settings) or a friendly
 /// placeholder.
 struct TimelineSidebar: View {
     let state: TimelineState
@@ -322,24 +322,24 @@ struct TimelineSidebar: View {
         .buttonStyle(.bouncyIcon)
     }
 
-    // MARK: Pipes (background AI workers)
+    // MARK: Cron Jobs (background AI workers)
 
     private var cronJobsSection: some View {
         sectionCard {
             HStack(spacing: Theme.Space.sm) {
-                SectionHeader(title: "PIPES", count: cronJobStore.cronJobs.count)
-                SidebarIconButton(systemName: "plus", help: "New pipe") {
-                    editingCronJob = CronJobsView.blankPipe()
+                SectionHeader(title: "CRON JOBS", count: cronJobStore.cronJobs.count)
+                SidebarIconButton(systemName: "plus", help: "New cron job") {
+                    editingCronJob = CronJobsView.blankCronJob()
                 }
             }
 
             if cronJobStore.cronJobs.isEmpty {
-                EmptyRow(text: "No pipes yet — click + to create one.")
+                EmptyRow(text: "No cron jobs yet — click + to create one.")
             } else {
                 VStack(spacing: 2) {
                     ForEach(cronJobStore.cronJobs) { p in
                         CronJobSidebarRow(
-                            pipe: p,
+                            cronJob: p,
                             isActive: cronJobSelection == p.id,
                             onTap: { cronJobSelection = p.id },
                             onToggle: { cronJobStore.toggleEnabled(p.id) }
@@ -348,10 +348,10 @@ struct TimelineSidebar: View {
                 }
             }
         }
-        .sheet(item: $editingCronJob) { pipe in
-            // Inline edit sheet so user can create a pipe directly from the
+        .sheet(item: $editingCronJob) { cronJob in
+            // Inline edit sheet so user can create a cronJob directly from the
             // sidebar — same content the main pane uses.
-            CronJobQuickEditor(initial: pipe) { saved in
+            CronJobQuickEditor(initial: cronJob) { saved in
                 if cronJobStore.cronJobs.contains(where: { $0.id == saved.id }) {
                     cronJobStore.update(saved)
                 } else {

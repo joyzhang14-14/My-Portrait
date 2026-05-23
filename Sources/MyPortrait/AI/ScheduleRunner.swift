@@ -17,9 +17,9 @@ final class ScheduleRunner {
     /// at app boot so the runner doesn't need to know about ChatController
     /// directly (keeps it testable + avoids retain cycles).
     var dispatch: (SummaryTemplate) -> Void = { _ in }
-    /// Closure the runner calls to fire a pipe — same idea, different
+    /// Closure the runner calls to fire a cronJob — same idea, different
     /// destination (creates a NEW conv per fire, records a CronJobRun).
-    var dispatchPipe: (CronJob) -> Void = { _ in }
+    var dispatchCronJob: (CronJob) -> Void = { _ in }
 
     private var timer: Timer?
 
@@ -47,12 +47,12 @@ final class ScheduleRunner {
             dispatch(updated)
         }
 
-        // Pipes (background workers).
-        let pipes = CronJobStore.shared
-        for p in pipes.pipes
+        // Cron Jobs (background workers).
+        let cronJobs = CronJobStore.shared
+        for p in cronJobs.cronJobs
             where p.isEnabled && p.schedule.isDue(lastRun: p.lastRunAt, now: now)
         {
-            dispatchPipe(p)
+            dispatchCronJob(p)
         }
     }
 }

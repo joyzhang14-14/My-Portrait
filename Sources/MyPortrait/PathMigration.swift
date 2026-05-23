@@ -33,6 +33,24 @@ enum PathMigration {
             removeIfEmpty(oldMyPortrait)
         }
 
+        // 1.5. ~/.portrait/pipes/ → ~/.portrait/cron_jobs/(含子目录的 pipe.md → cron_job.md)
+        let oldPipes = target.appendingPathComponent("pipes", isDirectory: true)
+        let newCronJobs = target.appendingPathComponent("cron_jobs", isDirectory: true)
+        if fm.fileExists(atPath: oldPipes.path), !fm.fileExists(atPath: newCronJobs.path) {
+            try? fm.moveItem(at: oldPipes, to: newCronJobs)
+            // 重命名每个子目录里的 pipe.md → cron_job.md
+            for sub in (try? fm.contentsOfDirectory(at: newCronJobs,
+                                                   includingPropertiesForKeys: [.isDirectoryKey],
+                                                   options: [.skipsHiddenFiles])) ?? [] {
+                let oldMd = sub.appendingPathComponent("pipe.md")
+                let newMd = sub.appendingPathComponent("cron_job.md")
+                if fm.fileExists(atPath: oldMd.path), !fm.fileExists(atPath: newMd.path) {
+                    try? fm.moveItem(at: oldMd, to: newMd)
+                }
+            }
+            logger.notice("migrated ~/.portrait/pipes/ → ~/.portrait/cron_jobs/")
+        }
+
         // 2. AI 子系统: ~/Library/Application Support/MyPortrait/ → ~/.portrait/
         guard let appSupportBase = try? fm.url(for: .applicationSupportDirectory,
                                                in: .userDomainMask,

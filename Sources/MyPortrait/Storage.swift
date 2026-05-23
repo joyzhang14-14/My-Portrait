@@ -63,9 +63,9 @@ enum Storage {
     /// `~/.portrait/models/`.
     static var modelsDir: URL { rootURL.appendingPathComponent("models", isDirectory: true) }
 
-    /// AI pipes — one directory per pipe (`<slug>/pipe.md` + `runs.json`).
-    /// `~/.portrait/pipes/`.
-    static var cronJobsDir: URL { rootURL.appendingPathComponent("pipes", isDirectory: true) }
+    /// AI cron jobs — one directory per cron job (`<slug>/cron_job.md` + `runs.json`).
+    /// `~/.portrait/cron_jobs/`.
+    static var cronJobsDir: URL { rootURL.appendingPathComponent("cron_jobs", isDirectory: true) }
 
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {

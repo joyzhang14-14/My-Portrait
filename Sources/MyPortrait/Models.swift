@@ -42,12 +42,12 @@ enum MemoryScope: Hashable, Identifiable {
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
-    case home, pipes, timeline, memories, settings
+    case home, cronJobs, timeline, memories, settings
     var id: String { rawValue }
     var label: String {
         switch self {
         case .home: return "Home"
-        case .cronJobs: return "Pipes"
+        case .cronJobs: return "Cron Jobs"
         case .timeline: return "Timeline"
         case .memories: return "Memories"
         case .settings: return "Settings"

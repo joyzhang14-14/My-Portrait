@@ -57,15 +57,15 @@ struct ContentView: View {
             }
             chat.providerResolver = resolver
 
-            // Wire the scheduler so it can fire templates + pipes into the
-            // chat / pipe-store when their cadence ticks.
+            // Wire the scheduler so it can fire templates + cronJobs into the
+            // chat / cronJob-store when their cadence ticks.
             ScheduleRunner.shared.dispatch = { template in
                 chat.switchTo(nil)
                 let chips = [template.window.resolveChip()].compactMap { $0 }
                 chat.send(template.prompt, chips: chips)
             }
-            ScheduleRunner.shared.dispatchPipe = { pipe in
-                CronJobExecutor.run(pipe)
+            ScheduleRunner.shared.dispatchCronJob = { cronJob in
+                CronJobExecutor.run(cronJob)
             }
             CronJobExecutor.providerResolver = resolver
             ScheduleRunner.shared.start()
