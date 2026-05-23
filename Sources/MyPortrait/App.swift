@@ -149,6 +149,12 @@ struct MyPortraitApp: App {
             PersonalityMergeApplyCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--personality-refresh-apply <yyyy-MM-dd>` runs the full
+        // 3-source(events + portraits + OCR) personality pipeline AND落盘。
+        if let idx = args.firstIndex(of: "--personality-refresh-apply"), idx + 1 < args.count {
+            PersonalityRefreshApplyCLI.run(day: args[idx + 1])
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--repair-portrait` re-reads + re-writes every portrait /
         // event .md to fix stale on-disk frontmatter formatting.
         if args.contains("--repair-portrait") {

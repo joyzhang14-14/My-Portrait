@@ -1396,3 +1396,57 @@ private actor PromptTestCoordinator {
         }
     }
 }
+
+/// `--personality-refresh-apply <yyyy-MM-dd>` — DEV-ONLY. 跑完整的三源
+/// personality 流水线(events + portraits + OCR)并落盘到
+/// portrait/personality/。Disposable.
+enum PersonalityRefreshApplyCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run(day dayStr: String) {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        guard let day = fmt.date(from: dayStr) else {
+            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
+            exit(1)
+        }
+        print("=== personality-refresh-apply \(dayStr) ===")
+        let state = State()
+        Task {
+            do {
+                let r = try await PersonalityRefresh().refresh(day: day)
+                print("events on \(dayStr): \(r.eventCount) → \(r.eventCandidates) tag(s)")
+                print("portraits scanned: \(r.portraitInputs) → \(r.portraitCandidates) tag(s)")
+                print("ocr → \(r.ocrCandidates) tag(s)")
+                print("existing personality concepts: \(r.existingConceptCount)")
+                print("\n──── ACTIONS (\(r.actions.count)) ────")
+                for (i, a) in r.actions.enumerated() {
+                    switch a {
+                    case .mergeInto(let slug, let cand):
+                        print("\(i + 1). mergeInto [\(slug)]  tag=\(cand.tag)  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
+                    case .createNew(let cand):
+                        print("\(i + 1). createNew \"\(cand.tag)\"  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
+                    case .skipTag(let tag, let reason):
+                        print("\(i + 1). skipTag [\(tag)] — \(reason)")
+                    }
+                }
+                print("\n=== applied ===")
+                print("created: \(r.apply.created), merged: \(r.apply.merged), skipped: \(r.apply.skipped)")
+                print("written slugs: \(r.apply.writtenSlugs)")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
