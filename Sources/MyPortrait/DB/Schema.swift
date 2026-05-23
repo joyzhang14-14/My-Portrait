@@ -477,6 +477,136 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v19 — keystroke_log:全局击键字符日志(写作采集 L3)
+        // ═══════════════════════════════════════════════════════════
+        //
+        // KeystrokeCharLogger 写入。挂在跟 KeystrokeLedger 同一个 CGEventTap
+        // callback,但职责拆分:ledger 只存 ts ring buffer 给 hasKeystroke 用,
+        // char logger 抓 unicode 字符 + bundle_id 入 DB,给 LLM Pass 2 当 L3 输入。
+        //
+        // 中文 IME 的限制实测过:CGEventKeyboardGetUnicodeString 拿到的是
+        // 拼音字母 + 选词数字键,**拿不到合成的汉字**。所以 keystroke_log 里
+        // 中文 char 永远是 latin 字母,真中文得靠 typing_events / OCR。
+        //
+        // 详见 canvas-editor-capture-design-final.md §3.2, §9.1。
+        m.registerMigration("v19_keystroke_log") { db in
+            try db.create(table: "keystroke_log") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("ts_ms", .integer).notNull()
+                t.column("bundle_id", .text).notNull()
+                t.column("char", .text)                       // nullable for pure backspace
+                t.column("is_backspace", .integer).notNull().defaults(to: 0)
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_keystroke_log_ts ON keystroke_log(ts_ms)")
+            try db.execute(sql:
+                "CREATE INDEX idx_keystroke_log_app ON keystroke_log(bundle_id, ts_ms)")
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v20 — writing_records:LLM 融合后的最终写作记录
+        // ═══════════════════════════════════════════════════════════
+        //
+        // Pass 2 Approve 后落地的表。Personality / Speech Style 分析以这里
+        // 为输入源。raw 三张表(typing_events / keystroke_log / frames)仍各自
+        // 独立保留,通过 reference_*_ids 反向链当训练对。
+        //
+        // source enum: "ax_cleaned"(普通 app) | "canvas_fusion"(canvas) | "merged"
+        // prompt_id = sha256(prompt 文本)[..16],阶段三训练数据版本追踪。
+        m.registerMigration("v20_writing_records") { db in
+            try db.create(table: "writing_records") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("start_ts", .integer).notNull()
+                t.column("end_ts", .integer).notNull()
+                t.column("app", .text).notNull()
+                t.column("url", .text)
+                t.column("text", .text).notNull()
+                t.column("edit_log", .text).notNull()         // JSON [{kind, text, ts}]
+                t.column("confidence", .double).notNull()
+                t.column("context_summary", .text)            // ≤ 100 chars
+                t.column("source", .text).notNull()           // ax_cleaned | canvas_fusion | merged
+                t.column("reference_typing_event_ids", .text) // JSON array
+                t.column("reference_frame_ids", .text)        // JSON array
+                t.column("reference_keystroke_range", .text)  // JSON {start, end}
+                t.column("raw_output", .text)                 // LLM raw JSON
+                t.column("prompt_id", .text)                  // sha256(prompt)[..16]
+                t.column("created_at", .integer).notNull()
+                t.column("worker_run_id", .text)
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_date ON writing_records(start_ts)")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_app ON writing_records(app)")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_run ON writing_records(worker_run_id)")
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v21 — writing_records_staged:Pending review 暂存
+        // ═══════════════════════════════════════════════════════════
+        //
+        // worker 跑完先写这张表,等用户 Approve 才拷到 writing_records。
+        // schema 跟 writing_records 一致 + 加 `date_utc` 字段方便按天 cleanup。
+        // Reject 时按 worker_run_id / date_utc 清这张表的对应行。
+        m.registerMigration("v21_writing_records_staged") { db in
+            try db.create(table: "writing_records_staged") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("date_utc", .text).notNull()         // 'YYYY-MM-DD'
+                t.column("start_ts", .integer).notNull()
+                t.column("end_ts", .integer).notNull()
+                t.column("app", .text).notNull()
+                t.column("url", .text)
+                t.column("text", .text).notNull()
+                t.column("edit_log", .text).notNull()
+                t.column("confidence", .double).notNull()
+                t.column("context_summary", .text)
+                t.column("source", .text).notNull()
+                t.column("reference_typing_event_ids", .text)
+                t.column("reference_frame_ids", .text)
+                t.column("reference_keystroke_range", .text)
+                t.column("raw_output", .text)
+                t.column("prompt_id", .text)
+                t.column("created_at", .integer).notNull()
+                t.column("worker_run_id", .text).notNull()
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_staged_date ON writing_records_staged(date_utc)")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_staged_run ON writing_records_staged(worker_run_id)")
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v22 — writing_capture_runs:跑过的天 + 状态机
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 一行 = 一个 UTC 日期的处理记录。status 枚举:
+        //   pending             — 该天有 raw 但没跑过 / 等下次 Run
+        //   processing          — 正在跑(防并发)
+        //   pending_review      — LLM 跑完了,staged 有数据,等 Approve/Reject
+        //   approved            — Approve 了,数据已落 writing_records
+        //   rejected_for_rerun  — Reject 了,raw 不删,下次 Run 重跑
+        //   failed              — 跑失败,测试期改源码兜底
+        //
+        // 「未处理的天」query 看 final 设计文档 §9.2。
+        m.registerMigration("v22_writing_capture_runs") { db in
+            try db.create(table: "writing_capture_runs") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("date_utc", .text).notNull().unique()  // 'YYYY-MM-DD'
+                t.column("status", .text).notNull()
+                t.column("run_id", .text)                       // UUID
+                t.column("started_at", .integer)
+                t.column("completed_at", .integer)
+                t.column("error_message", .text)
+                t.column("pass1_token_usage", .integer)
+                t.column("pass2_token_usage", .integer)
+                t.column("discarded_count", .integer).defaults(to: 0)
+                t.column("records_count", .integer).defaults(to: 0)
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_capture_runs_status ON writing_capture_runs(status)")
+        }
+
         return m
     }
 }
