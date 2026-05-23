@@ -538,26 +538,8 @@ enum WipePersonalityCLI {
         let fm = FileManager.default
         let personalityDir = Storage.portraitDir.appendingPathComponent("personality")
         let dailyDir = Storage.personalityDailyDir
-        let stamp: String = {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.dateFormat = "yyyy-MM-dd-HHmmss"
-            return f.string(from: Date())
-        }()
-        let backupRoot = Storage.rootURL.appendingPathComponent("personality.bak.\(stamp)")
-        do {
-            try fm.createDirectory(at: backupRoot, withIntermediateDirectories: true)
-            if fm.fileExists(atPath: personalityDir.path) {
-                try fm.copyItem(at: personalityDir, to: backupRoot.appendingPathComponent("personality"))
-            }
-            if fm.fileExists(atPath: dailyDir.path) {
-                try fm.copyItem(at: dailyDir, to: backupRoot.appendingPathComponent("personality_daily"))
-            }
-            print("backup: \(backupRoot.path)")
-        } catch {
-            FileHandle.standardError.write(Data("backup FAILED: \(error)\n".utf8))
-            exit(1)
-        }
+        // 不再备份 —— 测试期间反复 wipe 会堆一坨 personality.bak.* 占地方,
+        // 用户已确认风险自担。
         var removed = 0
         for dir in [personalityDir, dailyDir] {
             guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil,
