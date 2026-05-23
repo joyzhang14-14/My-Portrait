@@ -32,7 +32,7 @@ struct UsageSettingsView: View {
                            icon: "antenna.radiowaves.left.and.right",
                            accent: .cyan)
                 MetricTile(label: "Cron job runs",
-                           value: "\(pipeRunTotal)",
+                           value: "\(cronJobRunTotal)",
                            icon: "play.circle",
                            accent: .pink)
             }
@@ -69,7 +69,7 @@ struct UsageSettingsView: View {
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
                     ForEach(Array(runs.prefix(10).enumerated()), id: \.offset) { idx, row in
-                        SettingsRow(row.pipeName,
+                        SettingsRow(row.jobName,
                                     description: row.subtitle,
                                     icon: "play.fill") {
                             Text(row.timeAgo)
@@ -103,7 +103,7 @@ struct UsageSettingsView: View {
         return chatStore.conversations.filter { $0.updatedAt >= since }
     }
 
-    private var pipeRunTotal: Int {
+    private var cronJobRunTotal: Int {
         if let since = rangeStart {
             return cronJobStore.cronJobs.reduce(0) { $0 + $1.runs.filter { $0.startedAt >= since }.count }
         }
@@ -117,7 +117,7 @@ struct UsageSettingsView: View {
         return "estimated"
     }
 
-    private struct RunRow { let pipeName: String; let subtitle: String; let timeAgo: String; let when: Date }
+    private struct RunRow { let jobName: String; let subtitle: String; let timeAgo: String; let when: Date }
 
     private func recentCronJobRuns() -> [RunRow] {
         let since = rangeStart
@@ -127,7 +127,7 @@ struct UsageSettingsView: View {
                 if let since, r.startedAt < since { continue }
                 let df = RelativeDateTimeFormatter(); df.unitsStyle = .short
                 all.append(RunRow(
-                    pipeName: p.name,
+                    jobName: p.name,
                     subtitle: r.preview.isEmpty ? "(empty)" : r.preview,
                     timeAgo: df.localizedString(for: r.startedAt, relativeTo: Date()),
                     when: r.startedAt

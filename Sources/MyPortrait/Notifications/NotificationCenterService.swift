@@ -8,14 +8,14 @@ import os.log
 ///   - Per-cronJob mute via `notifications.mutedCronJobs`
 ///
 /// Callers don't decide what's allowed — they pass the *kind* of event
-/// (`.pipeRun(pipeName:)`, `.appUpdate`, `.captureStall`) and the service
+/// (`.cronJobRun(jobName:)`, `.appUpdate`, `.captureStall`) and the service
 /// gates it against the config + system authorization status.
 @MainActor
 final class NotificationCenterService {
     static let shared = NotificationCenterService()
 
     enum Kind {
-        case pipeRun(pipeName: String, preview: String)
+        case cronJobRun(jobName: String, preview: String)
         case appUpdate(version: String)
         case captureStall(reason: String)
     }
@@ -68,12 +68,12 @@ final class NotificationCenterService {
         let body: String
         let categoryId: String
         switch kind {
-        case let .pipeRun(pipeName, preview):
+        case let .cronJobRun(jobName, preview):
             guard n.cronJobAlerts else { return }
-            guard !n.mutedCronJobs.contains(pipeName) else { return }
-            title = "🛰️ \(pipeName)"
+            guard !n.mutedCronJobs.contains(jobName) else { return }
+            title = "🛰️ \(jobName)"
             body  = preview.isEmpty ? "Run finished." : preview
-            categoryId = "cronJob.run"
+            categoryId = "cron-job.run"
 
         case let .appUpdate(version):
             guard n.appUpdates else { return }

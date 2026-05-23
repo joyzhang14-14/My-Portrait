@@ -117,7 +117,7 @@ enum CronJobExecutor {
 
         // 5. Notify (respects notifications.cronJobAlerts + mutedCronJobs).
         NotificationCenterService.shared.post(
-            .pipeRun(pipeName: cronJob.name, preview: preview)
+            .cronJobRun(jobName: cronJob.name, preview: preview)
         )
     }
 }
