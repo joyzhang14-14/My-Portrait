@@ -168,8 +168,9 @@ enum MemoryPrompts {
     naturally — whatever would actually show up in app UI / chat / code.
 
     SKIP CONDITION:
-    - If fewer than 5 events, or every event has impact < 1.5, return an
-      empty "tags" array. Don't force tags when evidence is thin.
+    - Input events are already filtered upstream to high-weight ones. Even
+      a single strong event can support 1 tag. Only return an empty "tags"
+      array when truly nothing recurrent/dispositional is observable.
 
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
