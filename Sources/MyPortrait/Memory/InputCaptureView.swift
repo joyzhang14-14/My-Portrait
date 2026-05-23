@@ -18,6 +18,11 @@ struct InputCaptureView: View {
     @State private var confirmingDelete = false        // app 级
     @State private var confirmingRecordDelete = false   // 单条 session
 
+    // 写作采集 LLM 输出 —— approved 天的 writing_records 跟选中的 typing_event
+    // 时间窗重叠时,detail 顶部展示。
+    @State private var matchedWritingRecords: [WritingRecordViewRow] = []
+    @State private var writingCaptureDayStatus: WritingCaptureRunStatus? = nil
+
     var body: some View {
         HSplitView {
             leftColumn
@@ -27,6 +32,38 @@ struct InputCaptureView: View {
         }
         .background(SidebarBackdrop().ignoresSafeArea())
         .task { await reloadApps() }
+        .onChange(of: selectedRecordId) { _, _ in
+            loadMatchedWritingRecords()
+        }
+    }
+
+    /// 选了某条 typing_event → 查写作采集状态 + 重叠的 writing_records。
+    private func loadMatchedWritingRecords() {
+        guard let id = selectedRecordId,
+              let rec = records.first(where: { $0.id == id }),
+              let worker = WritingCaptureWorker.shared else {
+            matchedWritingRecords = []
+            writingCaptureDayStatus = nil
+            return
+        }
+        let store = worker.store
+        let startTs = rec.startedAt
+        let endTs = rec.endedAt
+        let app = rec.bundleId
+        Task.detached(priority: .userInitiated) {
+            let status = (try? store.dayStatus(forTsMs: startTs)) ?? nil
+            let matched: [WritingRecordViewRow]
+            if status == .approved {
+                matched = (try? store.writingRecordsOverlapping(
+                    startTs: startTs, endTs: endTs, app: app)) ?? []
+            } else {
+                matched = []
+            }
+            await MainActor.run {
+                self.writingCaptureDayStatus = status
+                self.matchedWritingRecords = matched
+            }
+        }
     }
 
     // MARK: - 左列：app 列表 / records 列表
@@ -178,6 +215,9 @@ struct InputCaptureView: View {
                     }
                     .padding(.top, 44)
                     metadataBlock(rec)
+
+                    writingCaptureBlock(rec: rec)
+
                     Divider().background(Color.white.opacity(0.06))
 
                     Text(rec.text.isEmpty ? "（无新增文本，仅编辑/删除）" : rec.text)
@@ -220,6 +260,58 @@ struct InputCaptureView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// 写作采集 LLM 输出 block —— 该天 approved 且有对应 writing_records 时才展示。
+    /// 显示 LLM 整理后的最终文本 + context_summary,而不是原始 typing_event 文本。
+    @ViewBuilder
+    private func writingCaptureBlock(rec: TypingEvent) -> some View {
+        if !matchedWritingRecords.isEmpty {
+            Divider().background(Color.white.opacity(0.06))
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.tint)
+                Text("Writing capture · \(writingCaptureDayStatus?.rawValue ?? "?") · \(matchedWritingRecords.count) record(s)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            ForEach(matchedWritingRecords, id: \.id) { row in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(row.source)
+                            .font(.system(size: 9))
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.15))
+                            .cornerRadius(4)
+                        Text(String(format: "conf %.2f", row.confidence))
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                        if let cs = row.contextSummary, !cs.isEmpty {
+                            Text(cs).font(.system(size: 10))
+                                .foregroundStyle(.secondary).italic()
+                                .lineLimit(2)
+                        }
+                    }
+                    Text(row.text)
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(8)
+                .background(Color.accentColor.opacity(0.08))
+                .cornerRadius(6)
+            }
+        } else if let status = writingCaptureDayStatus, status != .approved {
+            // 该天跑过但没 approved —— 提示 raw 显示
+            HStack {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                Text("This day's writing-capture status: \(status.rawValue) — showing raw typing event below.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 4)
         }
     }
 
