@@ -358,6 +358,11 @@ final class PortraitDistiller {
         let url = PortraitPaths.categoryDir(category).appendingPathComponent(decision.slug + ".md")
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         var file = try PortraitFileIO.read(from: url)
+        // 旧 portrait 文件可能残留 3 个 event-only 字段(早期未做镜像清理)。
+        // 写回前清掉,序列化时整行 skip,文件就只剩真正的 portrait 字段。
+        file.rawImpact = nil
+        file.rebalanceCount = nil
+        file.impactSource = nil
         let oldBody = file.body
         // 合并 derived 溯源：旧 body 里已有的 `[[id]]` 与本轮 LLM 引用的
         // 并集（旧的在前、保序），否则 update 会把历史溯源链接抹掉。

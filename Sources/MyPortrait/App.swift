@@ -167,6 +167,12 @@ struct MyPortraitApp: App {
             DropPortraitImpactCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--drop-portrait-impact-residue` —— strip the 3 remaining
+        // event-only fields (raw_impact / rebalance_count / impact_source).
+        if args.contains("--drop-portrait-impact-residue") {
+            DropPortraitImpactResidueCLI.run()
+            // run() exits the process internally.
+        }
         // `--import-default-pipes` seeds the two built-in pipes into
         // PipeStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-pipes") {

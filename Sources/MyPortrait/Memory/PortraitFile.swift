@@ -36,12 +36,13 @@ struct PortraitFile: Equatable {
     /// —— 语义上 impact 是事件强度，画像维度不依赖。portrait 文件读这个字段
     /// 永远 nil，序列化时整行 skip。
     var impact: Double?
-    var rawImpact: Double               // LLM's original score, never modified
-                                        // by the budget pass. Source of truth
-                                        // for any future re-rebalance.
-    var rebalanceCount: Int             // # of times the budget pass touched
-                                        // this file. Capped at 5 (then frozen).
-    var impactSource: String            // "unscored" / "llm:gpt-5.4" / "user_override"
+    // 下面 3 个都是 **event-only** —— 跟 impact 同源,portrait 文件不持有
+    // (nil → 序列化整行 skip)。鏡像 impact 的处理。
+    var rawImpact: Double?              // LLM's original score; budget pass
+                                        // never overwrites it.
+    var rebalanceCount: Int?            // # of times the budget pass touched
+                                        // this file. Frozen at maxRebalances.
+    var impactSource: String?           // "unscored" / "llm:gpt-5.4" / "user_override"
     var weight: Double                  // computed, ≥0
     var occurrences: [Date]             // **per-day** deduped occurrence dates.
                                         // One date per day on which the event
@@ -104,9 +105,10 @@ struct PortraitFile: Equatable {
         self.created = created
         self.impact = impact
         // raw_impact 跟 impact 同源；portrait（impact=nil）落 0 作残留可接受值。
-        self.rawImpact = impact ?? 0
-        self.rebalanceCount = 0
-        self.impactSource = "unscored"
+        // event(impact 非 nil)才有这 3 个字段;portrait 全 nil 让序列化整行 skip。
+        self.rawImpact = impact
+        self.rebalanceCount = impact.map { _ in 0 }
+        self.impactSource = impact.map { _ in "unscored" }
         self.weight = 0                  // weight pass fills this in
         self.occurrences = [stamp]
         self.eventTitle = eventTitle
@@ -135,9 +137,9 @@ struct PortraitFile: Equatable {
     init(
         created: Date,
         impact: Double?,
-        rawImpact: Double,
-        rebalanceCount: Int,
-        impactSource: String,
+        rawImpact: Double?,
+        rebalanceCount: Int?,
+        impactSource: String?,
         weight: Double,
         occurrences: [Date],
         eventTitle: String,

@@ -192,6 +192,10 @@ final class PersonalityMerger {
                     continue
                 }
                 var file = try PortraitFileIO.read(from: url)
+                // 清掉 event-only 字段残留(老文件可能带)。
+                file.rawImpact = nil
+                file.rebalanceCount = nil
+                file.impactSource = nil
                 let label = file.primaryLabel ?? file.eventTitle
                 file.body = Self.renderBody(title: label, body: mergedBody)
                 file.eventSummary = mergedBody

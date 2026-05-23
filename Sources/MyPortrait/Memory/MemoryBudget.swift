@@ -114,18 +114,21 @@ enum MemoryBudget {
                 bucketed.append(.init(url: url, file: file, kind: .outside))
                 continue
             }
-            if file.rawImpact >= params.peakProtection {
+            // event 必有 rawImpact / rebalanceCount;?? 0 仅类型系统防御。
+            let raw = file.rawImpact ?? 0
+            let rebal = file.rebalanceCount ?? 0
+            if raw >= params.peakProtection {
                 bucketed.append(.init(url: url, file: file, kind: .protected))
                 protectedCount += 1
                 continue
             }
-            if file.rebalanceCount >= params.maxRebalances {
+            if rebal >= params.maxRebalances {
                 bucketed.append(.init(url: url, file: file, kind: .frozen))
                 frozenCount += 1
                 continue
             }
             bucketed.append(.init(url: url, file: file, kind: .rebalancable))
-            rebalancableRawSum += file.rawImpact
+            rebalancableRawSum += raw
         }
 
         // 该事件归属的"天" = 最近一次 occurrence（无则 created）的 UTC 当日。
@@ -141,7 +144,7 @@ enum MemoryBudget {
         // 等比缩放会把重要事件压得跟琐事一样狠；水位线则"大事挤掉小事"。
         var rebalByDay: [Date: [(url: URL, raw: Double)]] = [:]
         for b in bucketed where b.kind == .rebalancable {
-            rebalByDay[dayOf(b.file), default: []].append((b.url, b.file.rawImpact))
+            rebalByDay[dayOf(b.file), default: []].append((b.url, b.file.rawImpact ?? 0))
         }
         var newImpactByURL: [URL: Double] = [:]
         var overBudgetDays: Set<Date> = []
@@ -177,7 +180,7 @@ enum MemoryBudget {
                                    kind: .outsideWindow))
             case .protected:
                 // Force final = raw in case a prior pass had scaled it.
-                let target = PortraitFile.clampImpact(b.file.rawImpact)
+                let target = PortraitFile.clampImpact(b.file.rawImpact ?? 0)
                 let needsWrite = abs(cur - target) > 0.0001
                 plans.append(.init(url: b.url,
                                    oldImpact: cur,
@@ -190,7 +193,7 @@ enum MemoryBudget {
                                    kind: .frozen))
             case .rebalancable:
                 let newImpact = newImpactByURL[b.url]
-                    ?? PortraitFile.clampImpact(b.file.rawImpact)
+                    ?? PortraitFile.clampImpact(b.file.rawImpact ?? 0)
                 let kind: Plan.Kind = overBudgetDays.contains(dayOf(b.file))
                     ? .rebalanced : .restored
                 plans.append(.init(url: b.url,
@@ -230,7 +233,7 @@ enum MemoryBudget {
             file.impact = plan.newImpact
         case .rebalanced, .restored:
             file.impact = plan.newImpact
-            file.rebalanceCount += 1
+            file.rebalanceCount = (file.rebalanceCount ?? 0) + 1
         }
     }
 }

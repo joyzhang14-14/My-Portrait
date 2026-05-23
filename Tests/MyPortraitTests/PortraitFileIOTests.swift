@@ -56,6 +56,13 @@ final class PortraitFileIOTests: XCTestCase {
 
         let back = try PortraitFileIO.read(from: url)
         XCTAssertNil(back.impact)
+        // 同源的 3 个 event-only 字段也不该写。
+        XCTAssertFalse(raw.contains("\nraw_impact:"))
+        XCTAssertFalse(raw.contains("\nrebalance_count:"))
+        XCTAssertFalse(raw.contains("\nimpact_source:"))
+        XCTAssertNil(back.rawImpact)
+        XCTAssertNil(back.rebalanceCount)
+        XCTAssertNil(back.impactSource)
     }
 
     /// event 文件 impact 仍正常往返（非 nil）。

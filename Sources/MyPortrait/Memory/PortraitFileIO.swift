@@ -57,13 +57,11 @@ enum PortraitFileIO {
         //           source, superseded_by, archived_at.
         let created = try requireDate(fields, "created")
         let impact: Double? = (try? requireDouble(fields, "impact"))   // nil for portrait
-        // raw_impact / rebalance_count: portrait 文件可能仍有 raw_impact 残留
-        // (这次只清 impact，raw_impact 留作独立任务)；找不到时 mirror impact 或 0。
-        let rawImpact = (try? requireDouble(fields, "raw_impact")) ?? impact ?? 0
-        let rebalanceCount = (try? requireInt(fields, "rebalance_count")) ?? 0
-        // impact_source defaults to "unscored" so older files (pre-LLM
-        // scoring) read cleanly without a re-migration.
-        let impactSource = (try? optionalString(fields, "impact_source")) ?? nil ?? "unscored"
+        // raw_impact / rebalance_count / impact_source —— event-only。
+        // portrait 文件不写它们,缺失 → nil(序列化也整行 skip)。
+        let rawImpact = try? requireDouble(fields, "raw_impact")
+        let rebalanceCount = try? requireInt(fields, "rebalance_count")
+        let impactSource = (try? optionalString(fields, "impact_source")) ?? nil
         let weight = try requireDouble(fields, "weight")
         let occurrences = try requireDateArray(fields, "occurrences")
         let tags = try requireStringArray(fields, "tags")
@@ -140,9 +138,10 @@ enum PortraitFileIO {
         if let i = f.impact {
             lines.append("impact: \(formatDouble(i))")
         }
-        lines.append("raw_impact: \(formatDouble(f.rawImpact))")
-        lines.append("rebalance_count: \(f.rebalanceCount)")
-        lines.append("impact_source: \(f.impactSource)")
+        // 3 个 event-only 字段:nil 整行 skip。portrait 文件不写。
+        if let ri = f.rawImpact { lines.append("raw_impact: \(formatDouble(ri))") }
+        if let rc = f.rebalanceCount { lines.append("rebalance_count: \(rc)") }
+        if let isrc = f.impactSource { lines.append("impact_source: \(isrc)") }
         lines.append("weight: \(formatDouble(f.weight))")
         lines.append("occurrences: \(formatDateArray(f.occurrences, dateOnly: true))")
         lines.append("event_title: \(formatNullableString(f.eventTitle.isEmpty ? nil : f.eventTitle))")

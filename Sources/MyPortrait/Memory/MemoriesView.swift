@@ -172,7 +172,7 @@ struct MemoriesView: View {
         // （portrait 不持有 impact，impact_source 残留也无意义）。
         let impactRows: [(String, String)] = scope == .events
             ? [("impact", String(format: "%.4g", f.impact ?? 0)),
-               ("impact_source", f.impactSource)]
+               ("impact_source", f.impactSource ?? "—")]
             : []
         let rows: [(String, String)] =
             [("type", f.eventType.isEmpty ? "experience" : f.eventType),
