@@ -115,9 +115,23 @@ enum CronJobExecutor {
         let run = CronJobRun(convId: conv.id, startedAt: startedAt, preview: preview)
         CronJobStore.shared.appendRun(run, to: cronJob.id)
 
-        // 5. Notify (respects notifications.cronJobAlerts + mutedCronJobs).
-        NotificationCenterService.shared.post(
-            .cronJobRun(jobName: cronJob.name, preview: preview)
-        )
+        // 5. 通知:只发 LLM 在回复末尾显式写出的 `### Notify` 区块内容。
+        //    没写就不打扰用户(LLM 自己判断"这次没什么值得通知的事")。
+        if let body = Self.extractNotifyBody(from: assistantBuf) {
+            NotificationCenterService.shared.post(
+                .cronJobRun(jobName: cronJob.name, preview: body)
+            )
+        }
+    }
+
+    /// 抓回复里最后一个 `### Notify` 区块之后到结尾的文本。容忍大小写差异
+    /// 和首尾空白。返回 nil = LLM 没写 → 跳过通知。
+    static func extractNotifyBody(from buf: String) -> String? {
+        guard let range = buf.range(of: "### Notify",
+                                    options: [.caseInsensitive, .backwards])
+        else { return nil }
+        let tail = buf[range.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return tail.isEmpty ? nil : tail
     }
 }

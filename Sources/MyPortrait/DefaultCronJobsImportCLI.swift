@@ -19,7 +19,16 @@ enum DefaultCronJobsImportCLI {
     4. 执行 git add -A、git commit -m "<message>"、git push。
     5. 如果 push 失败,说明失败原因(网络/凭证/冲突)。
     6. 不要编造修改内容,commit message 必须基于真实 diff。
-    7. 输出本次处理结果:是否有变更、commit message、push 是否成功。
+
+    ## 通知规则(关键)
+
+    **只在以下情况**,在你的回复**末尾**追加 `### Notify` 区块(1-3 行,直接说重点,中文):
+    - ✅ 提交并 push 成功 → `### Notify\\n✅ pushed: <commit message>`
+    - ❌ push 失败 → `### Notify\\n❌ push failed: <原因>`
+
+    **今天没有变化** → **不要**写 `### Notify` 区块。系统会自动跳过通知,不打扰用户。
+
+    不要把过程独白("我来检查一下...""现在让我...")放进 Notify 区块。
     """
 
     private static let followupPrompt = """
@@ -69,9 +78,21 @@ enum DefaultCronJobsImportCLI {
     - 7 天前的项移除
     - 不要编造、不要无中生有
 
-    ## 第 4 步:输出本次处理摘要
+    ## 第 4 步:通知规则(关键)
 
-    简短说本次加了几条、移了几条、改了几条状态。
+    **只在出现新的紧急(Urgent)待办时**,在回复**末尾**追加 `### Notify` 区块:
+
+    ```
+    ### Notify
+    🔔 新待办:
+    - <最紧急任务 1>
+    - <最紧急任务 2>
+    (共 N 项 urgent)
+    ```
+
+    **只是 This Week / Waiting on 类、或本次没有新增 urgent → 不要**写 `### Notify` 区块。系统会自动跳过通知,不打扰用户。
+
+    不要把过程独白放进 Notify 区块。Notify 区块写完整 markdown,但保持简洁(≤5 行最佳)。
     """
 
     static func run() {
