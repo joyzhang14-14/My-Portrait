@@ -136,6 +136,12 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(typingToggle)
         menu.addItem(.separator())
 
+        let openWindow = NSMenuItem(
+            title: "Open My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
+        )
+        openWindow.target = self
+        menu.addItem(openWindow)
+
         let openDir = NSMenuItem(
             title: "Open ~/.portrait/", action: #selector(openPortraitDir), keyEquivalent: ""
         )
@@ -273,6 +279,10 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         ConfigStore.shared.mutate { $0.recording.typingCaptureEnabled = next }
         refreshIcon()
         refreshMenuState()
+    }
+
+    @objc private func openMainWindow() {
+        (NSApp.delegate as? AppDelegate)?.showMainWindow()
     }
 
     @objc private func openPortraitDir() {

@@ -421,6 +421,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hosting.sizingOptions = []
         window.contentView = hosting
 
+        // 红绿灯关窗 = 只隐藏窗口（app 继续在后台跑采集 / 转录管线）。
+        // 配合 applicationShouldTerminateAfterLastWindowClosed = false。
+        window.isReleasedWhenClosed = false
+
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -441,7 +445,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // 关窗不退出 —— 采集 / 转录在后台继续。退出走菜单栏 Quit (Cmd-Q)。
+        false
+    }
+
+    /// 点 Dock 图标重新打开主窗口（窗口已隐藏时）。
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { showMainWindow() }
+        return true
+    }
+
+    /// 把主窗口拉到前台。菜单栏 "Open My Portrait" 和 Dock 重开都走这里。
+    @objc func showMainWindow() {
+        guard let window else { return }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
