@@ -18,7 +18,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .connections:      return "Connections"
         case .recordingScreen:  return "Screen Recording"
         case .recordingAudio:   return "Audio Recording"
-        case .recordingTyping:  return "Typing Recording"
+        case .recordingTyping:  return "Typing Capture"
         case .notifications:    return "Notifications"
         case .memoryParameter:  return "Parameter"
         case .memoryScheduler:  return "Scheduler"

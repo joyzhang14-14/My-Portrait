@@ -45,7 +45,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         self.statusHeader = NSMenuItem(title: "—", action: nil, keyEquivalent: "")
         self.statusHeader.isEnabled = false
         self.screenToggle = NSMenuItem(title: "Screen Capture", action: nil, keyEquivalent: "")
-        self.audioToggle = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        self.audioToggle = NSMenuItem(title: "Audio Capture", action: nil, keyEquivalent: "")
         self.typingToggle = NSMenuItem(title: "Typing Capture", action: nil, keyEquivalent: "")
         self.devModeBanner = NSMenuItem(title: "⚠ Dev Mode (stub hits)", action: nil, keyEquivalent: "")
         self.devModeBanner.isEnabled = false
@@ -195,7 +195,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         if screenRecordingActive || audioRecordingActive || typingCaptureActive {
             var parts: [String] = []
             if screenRecordingActive { parts.append("Screen") }
-            if audioRecordingActive { parts.append("Mic") }
+            if audioRecordingActive { parts.append("Audio") }
             if typingCaptureActive { parts.append("Typing") }
             toolTip = "Recording: \(parts.joined(separator: " + "))"
         } else {
@@ -218,7 +218,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             permission: permissions.screenRecording
         )
         audioToggle.title = Self.toggleTitle(
-            base: "Microphone",
+            base: "Audio Capture",
             wanted: audioCaptureWanted,
             active: audioRecordingActive,
             permission: permissions.microphone
@@ -233,7 +233,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         if screenRecordingActive || audioRecordingActive || typingCaptureActive {
             var parts: [String] = []
             if screenRecordingActive { parts.append("Screen") }
-            if audioRecordingActive { parts.append("Mic") }
+            if audioRecordingActive { parts.append("Audio") }
             if typingCaptureActive { parts.append("Typing") }
             statusHeader.title = "Recording: \(parts.joined(separator: " + "))"
         } else {
@@ -271,7 +271,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         refreshMenuState()
     }
 
-    /// 打字采集总开关 —— 跟 Settings → Recording 的「Capture typing」是同一个
+    /// 打字采集总开关 —— 跟 Settings → Recording 的「Typing Capture」是同一个
     /// `typing_capture_enabled` 字段。翻转后 Services 那边的 sink 会启停
     /// TypingObserver。
     @objc private func toggleTyping() {

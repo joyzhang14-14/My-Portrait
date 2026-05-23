@@ -317,9 +317,9 @@ struct ScreenRecordingSettingsView: View {
 
 }
 
-// MARK: - Typing Recording
+// MARK: - Typing Capture
 
-/// Typing Recording 设置子分区。
+/// Typing Capture 设置子分区。
 struct TypingRecordingSettingsView: View {
     @State private var config = ConfigStore.shared
     @Environment(\.services) private var services
@@ -327,7 +327,7 @@ struct TypingRecordingSettingsView: View {
     @State private var discovered: [String] = []
 
     var body: some View {
-        SettingsPage("Typing Recording", subtitle: "Learn your writing style") {
+        SettingsPage("Typing Capture", subtitle: "Learn your writing style") {
             typingSection
             blacklistSection
             submitSection
@@ -381,8 +381,8 @@ struct TypingRecordingSettingsView: View {
     }
 
     private var typingSection: some View {
-        SettingsCard(title: "Typing capture") {
-            SettingsRow("Capture typing",
+        SettingsCard(title: "Typing Capture") {
+            SettingsRow("Typing Capture",
                         description: "Reads the text you finish typing into input fields, used to learn your writing style. All data stays on this Mac and is never uploaded. Password fields and secure inputs are never read.",
                         icon: "keyboard") {
                 Toggle("", isOn: config.binding(\.recording.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)

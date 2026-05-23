@@ -206,9 +206,9 @@ private struct StorageStats {
         let audioBytes = directorySize(root.appendingPathComponent("data/audio"))
         let mediaBytes = directorySize(root.appendingPathComponent("data"))
 
-        let dbBytes    = fileSize(root.appendingPathComponent("db.sqlite"))
-                       + fileSize(root.appendingPathComponent("db.sqlite-wal"))
-                       + fileSize(root.appendingPathComponent("db.sqlite-shm"))
+        let dbBytes    = fileSize(root.appendingPathComponent("portrait.sqlite"))
+                       + fileSize(root.appendingPathComponent("portrait.sqlite-wal"))
+                       + fileSize(root.appendingPathComponent("portrait.sqlite-shm"))
         let logBytes   = directorySize(root.appendingPathComponent("logs"))
         let pipeBytes  = directorySize(root.appendingPathComponent("pipes"))
         let otherBytes = max(0, dataBytes - cacheBytes - mediaBytes - dbBytes - logBytes - pipeBytes)
