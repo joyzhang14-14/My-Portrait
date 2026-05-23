@@ -57,6 +57,13 @@ final class KeystrokeCharLogger {
         let chars = length > 0
             ? String(utf16CodeUnits: buf, count: length)
             : ""
+        // 提取修饰键(packed bit 字段,见 keystroke_log v24 migration)
+        let flags = event.flags
+        var modifiers = 0
+        if flags.contains(.maskCommand)   { modifiers |= 0x01 }
+        if flags.contains(.maskAlternate) { modifiers |= 0x02 }   // Option / Alt
+        if flags.contains(.maskControl)   { modifiers |= 0x04 }
+        if flags.contains(.maskShift)     { modifiers |= 0x08 }
         // `frontmostApplication` 实测在后台线程读 cached 值稳定(KeystrokeProbe 已验证)。
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -77,7 +84,8 @@ final class KeystrokeCharLogger {
                     tsMs: nowMs,
                     bundleId: app,
                     char: chars.isEmpty ? nil : chars,
-                    isBackspace: isBackspace ? 1 : 0
+                    isBackspace: isBackspace ? 1 : 0,
+                    modifiers: modifiers
                 )
                 try store.insert(&entry)
             } catch {
@@ -89,13 +97,15 @@ final class KeystrokeCharLogger {
 
 // MARK: - KeystrokeEntry + Store
 
-/// 一条 `keystroke_log` 记录(v19 schema)。
+/// 一条 `keystroke_log` 记录(v19 schema + v24 加 modifiers)。
 struct KeystrokeEntry: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var id: Int64?
     var tsMs: Int64
     var bundleId: String
     var char: String?              // nullable:纯退格 / 修饰键时为 nil
     var isBackspace: Int           // 0 / 1
+    /// Packed bit 字段:0x01=cmd, 0x02=opt, 0x04=ctrl, 0x08=shift。无修饰=0。
+    var modifiers: Int = 0
 
     static let databaseTableName = "keystroke_log"
     static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
@@ -103,6 +113,17 @@ struct KeystrokeEntry: Codable, FetchableRecord, MutablePersistableRecord, Senda
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+
+    /// 修饰键 packed Int → 人类可读字符串(给 LLM payload 用)。
+    /// 例:0x01 → "cmd";0x09 → "cmd+shift";0 → nil。
+    static func modifiersString(_ packed: Int) -> String? {
+        var parts: [String] = []
+        if packed & 0x01 != 0 { parts.append("cmd") }
+        if packed & 0x02 != 0 { parts.append("opt") }
+        if packed & 0x04 != 0 { parts.append("ctrl") }
+        if packed & 0x08 != 0 { parts.append("shift") }
+        return parts.isEmpty ? nil : parts.joined(separator: "+")
     }
 }
 

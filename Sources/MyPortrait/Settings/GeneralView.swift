@@ -112,7 +112,6 @@ struct GeneralSettingsView: View {
     /// exist) still show with "—" so the user knows we looked.
     private func scanCache() {
         let targets: [(path: String, isDir: Bool)] = [
-            (AIPaths.supportDir.appendingPathComponent("pi-rpc.log").path,          false),
             (AIPaths.supportDir.appendingPathComponent("attachments").path,         true),
             (AIPaths.supportDir.appendingPathComponent("bun/install/cache").path,   true),
         ]

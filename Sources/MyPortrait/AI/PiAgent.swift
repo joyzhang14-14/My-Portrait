@@ -151,14 +151,11 @@ final class PiAgent: @unchecked Sendable {
             let data = handle.availableData
             if data.isEmpty { return }
             self?.appendStdout(data)
-            // Mirror raw Pi traffic to a logfile so we can debug offline.
-            Self.appendLog(prefix: "[OUT]", data: data)
         }
-        // Mirror stderr to the same logfile.
+        // stderr 丢弃 —— readabilityHandler 必须挂,不然 stderr 缓冲塞满会
+        // 阻塞子进程,但不写盘。
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty { return }
-            Self.appendLog(prefix: "[ERR]", data: data)
+            _ = handle.availableData
         }
 
         process.terminationHandler = { [weak self] _ in
@@ -314,27 +311,5 @@ final class PiAgent: @unchecked Sendable {
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
-    // MARK: - Debug logfile
-
-    /// `~/.portrait/pi-rpc.log`
-    private static let logURL = AIPaths.supportDir.appendingPathComponent("pi-rpc.log")
-    private static let logQueue = DispatchQueue(label: "MyPortrait.PiAgent.log")
-
-    static func appendLog(prefix: String, data: Data) {
-        logQueue.async {
-            try? AIPaths.ensureExists()
-            let line = "\n--- \(prefix) " + ISO8601DateFormatter().string(from: Date()) + " ---\n"
-            let blob = (line.data(using: .utf8) ?? Data()) + data
-            if FileManager.default.fileExists(atPath: logURL.path) {
-                if let h = try? FileHandle(forWritingTo: logURL) {
-                    h.seekToEndOfFile()
-                    try? h.write(contentsOf: blob)
-                    try? h.close()
-                }
-            } else {
-                try? blob.write(to: logURL)
-            }
-        }
-    }
 }
 

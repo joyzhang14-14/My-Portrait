@@ -619,6 +619,24 @@ enum DBSchema {
                 "ALTER TABLE speakers RENAME COLUMN hidden TO hallucination")
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v24 — keystroke_log.modifiers(快捷键 bit 字段)
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 没有这字段,LLM 在 Pass 2 看不出 ⌘X / ⌘Z / ⌘A 这种快捷键 —— keystroke
+        // 长得跟普通输入字母一样。加 packed Int 字段:
+        //   bit 0(0x01) = command
+        //   bit 1(0x02) = option / alt
+        //   bit 2(0x04) = control
+        //   bit 3(0x08) = shift
+        // 没有任何修饰键时 = 0。CGEvent.flags 转换详见 KeystrokeCharLogger。
+        // 旧行 DEFAULT 0(没修饰键),不影响已有数据。
+        m.registerMigration("v24_keystroke_log_modifiers") { db in
+            try db.alter(table: "keystroke_log") { t in
+                t.add(column: "modifiers", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return m
     }
 }

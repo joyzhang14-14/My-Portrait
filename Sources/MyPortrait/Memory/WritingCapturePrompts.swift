@@ -83,9 +83,19 @@ enum WritingCapturePrompts {
         - typing_events[*]: PRE-PROCESSED AX path data (v14 splice algorithm).
           `text` is the FINAL user-perceived content. DO NOT modify it.
           `edit_log` contains commit/delete events (may include IME intermediate pinyin commits).
-        - keystroke_log[*]: raw keystrokes [{ts, char, bs}]. IMPORTANT: for Chinese IME,
-          `char` is LATIN pinyin letters (n, i, h, a, o, space, digit selection keys) —
-          NOT composed Chinese.
+        - keystroke_log[*]: raw keystrokes [{ts, char, bs, mods}]. IMPORTANT:
+          - `char` for Chinese IME = LATIN pinyin letters (n, i, h, a, o, space, digit
+            selection keys) — NOT composed Chinese.
+          - `bs` = true means user pressed Backspace/Delete key (single press; 1 bs
+            ≠ 1 char deleted when there was a selection).
+          - `mods` = modifier-key combo: "cmd" / "opt" / "ctrl" / "shift" or combos like
+            "cmd+shift". nil/absent = no modifier. USE THIS TO DETECT SHORTCUTS:
+            * {char:"x", mods:"cmd"}  = ⌘X (Cut) — content is on the pasteboard, NOT typed
+            * {char:"z", mods:"cmd"}  = ⌘Z (Undo) — earlier edits got reverted
+            * {char:"a", mods:"cmd"}  = ⌘A (Select all) — next bs/letter affects whole field
+            * {char:"v", mods:"cmd"}  = ⌘V (Paste) — content from pasteboard, not typed
+            * {char:"\b", mods:"cmd"} = ⌘+Backspace (delete whole line) — multi-char delete
+            Shortcut-driven actions are NOT user "typing" the literal letter.
         - ocr_frames[*]: pre-processed OCR frames [{frame_id, start_ts, end_ts, text}].
           Jaccard-deduped, throwaway-filtered.
     - merge_candidates: precomputed groups of session_ids sharing same app + same URL + gap < 30 min.

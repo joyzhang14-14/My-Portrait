@@ -312,15 +312,19 @@ private struct TypingEventPayload: Encodable {
 }
 
 /// 一条 keystroke 给 LLM 看的 shape。
+/// `mods` 是修饰键人类可读字符串("cmd" / "cmd+shift" / nil)—— DB 里是 packed
+/// Int(见 KeystrokeEntry.modifiersString),给 LLM 时翻译成字符串可读。
 private struct KeystrokePayload: Encodable {
     let ts: Int64
     let char: String?
     let bs: Bool
+    let mods: String?
 
     init(_ k: KeystrokeEntry) {
         self.ts = k.tsMs
         self.char = k.char
         self.bs = k.isBackspace != 0
+        self.mods = KeystrokeEntry.modifiersString(k.modifiers)
     }
 }
 
