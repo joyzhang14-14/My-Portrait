@@ -72,20 +72,23 @@ enum WritingCapturePrompts {
 
     static let pass2Fusion = #"""
     You consolidate a day's writing into final writing_records, using a Pass-1 context
-    timeline plus raw multi-source data.
+    timeline plus raw multi-source data grouped by session.
 
     INPUT
     - context_timeline: Pass 1 output, segments describing what user was doing per time range.
       Format: [{start_ts, end_ts, app, url, intent_type, summary}, ...]
-    - typing_events: PRE-PROCESSED AX path data (v14 splice algorithm).
-      `text` is the FINAL user-perceived content. DO NOT modify it.
-      `edit_log` contains commit/delete events (may include IME intermediate pinyin commits).
-      Each record represents one continuous AX session (1 element, contiguous time).
-    - keystroke_log: raw keystrokes [{ts, char, bs}]. IMPORTANT: for Chinese IME, `char` is
-      LATIN pinyin letters (n, i, h, a, o, space, digit selection keys) — NOT composed Chinese.
-    - ocr_frames: pre-processed OCR frames [{frame_id, start_ts, end_ts, app, url, text}].
-      Jaccard-deduped, throwaway-filtered.
-    - merge_candidates: precomputed groups of raw_session_ids sharing same app + same URL + gap < 30 min.
+    - raw_sessions: list of sessions, each with all its multi-source data:
+      [{session_id, app, url, start_ts, end_ts,
+        typing_events, keystroke_log, ocr_frames}, ...]
+        - typing_events[*]: PRE-PROCESSED AX path data (v14 splice algorithm).
+          `text` is the FINAL user-perceived content. DO NOT modify it.
+          `edit_log` contains commit/delete events (may include IME intermediate pinyin commits).
+        - keystroke_log[*]: raw keystrokes [{ts, char, bs}]. IMPORTANT: for Chinese IME,
+          `char` is LATIN pinyin letters (n, i, h, a, o, space, digit selection keys) —
+          NOT composed Chinese.
+        - ocr_frames[*]: pre-processed OCR frames [{frame_id, start_ts, end_ts, text}].
+          Jaccard-deduped, throwaway-filtered.
+    - merge_candidates: precomputed groups of session_ids sharing same app + same URL + gap < 30 min.
       Format: [[sess_id, ...], [sess_id, ...], ...]
       The LLM may merge ONLY WITHIN a group.
 
