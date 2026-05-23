@@ -185,20 +185,26 @@ struct SchedulerConfig: Codable, Equatable {
 ///   - `event`   ：跑 event 聚类 + impact 评分。
 ///   - `portrait`：跑 distill（事件 → 画像蒸馏）。
 struct SchedulerSettings: Codable, Equatable {
-    var event:       SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
-                                             dayOfWeek: 0, dayOfMonth: 1)
-    var portrait:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",
-                                             dayOfWeek: 0, dayOfMonth: 1)
-    var personality: SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
-                                             dayOfWeek: 0, dayOfMonth: 1)
+    var event:          SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
+                                                dayOfWeek: 0, dayOfMonth: 1)
+    var portrait:       SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",
+                                                dayOfWeek: 0, dayOfMonth: 1)
+    var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
+                                                dayOfWeek: 0, dayOfMonth: 1)
+    /// 写作采集 worker(Step 0 + Pass 1 + Pass 2)。默认 off 因为它需要用户
+    /// 在 Pending review 里手动 Approve,完全无人值守不合适。用户开了之后
+    /// 自动跑只是「先把 staged 准备好」,等用户审核。
+    var writingCapture: SchedulerConfig = .init(frequency: .off,    timeOfDay: "03:30",
+                                                dayOfWeek: 0, dayOfMonth: 1)
     init() {}
-    enum CodingKeys: String, CodingKey { case event, portrait, personality }
+    enum CodingKeys: String, CodingKey { case event, portrait, personality, writingCapture = "writing_capture" }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        event       = c.dflt(SchedulerConfig.self, .event,       event)
-        portrait    = c.dflt(SchedulerConfig.self, .portrait,    portrait)
-        personality = c.dflt(SchedulerConfig.self, .personality, personality)
+        event          = c.dflt(SchedulerConfig.self, .event,          event)
+        portrait       = c.dflt(SchedulerConfig.self, .portrait,       portrait)
+        personality    = c.dflt(SchedulerConfig.self, .personality,    personality)
+        writingCapture = c.dflt(SchedulerConfig.self, .writingCapture, writingCapture)
     }
 }
 

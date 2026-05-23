@@ -359,6 +359,11 @@ struct MemorySettingsView: View {
                 desc: "Aggregates events / other portraits / OCR into personality tags.",
                 config: \.scheduler.personality)
             Divider().padding(.vertical, 4)
+            schedulerBlock(
+                title: "Writing capture",
+                desc: "Runs Pass 1 (context timeline) + Pass 2 (multi-source fusion) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
+                config: \.scheduler.writingCapture)
+            Divider().padding(.vertical, 4)
             intRow("Days processed per run",
                    value: cfg.binding(\.memory.eventDayCap),
                    range: 1...30)

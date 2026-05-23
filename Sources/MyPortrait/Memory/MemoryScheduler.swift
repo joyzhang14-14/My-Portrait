@@ -69,9 +69,10 @@ final class MemoryScheduler {
     private let model = "gpt-5.4"
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
-    private let kLastEvent       = "scheduler.lastEventRun"
-    private let kLastPortrait    = "scheduler.lastPortraitRun"
-    private let kLastPersonality = "scheduler.lastPersonalityRun"
+    private let kLastEvent          = "scheduler.lastEventRun"
+    private let kLastPortrait       = "scheduler.lastPortraitRun"
+    private let kLastPersonality    = "scheduler.lastPersonalityRun"
+    private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
 
     private init() {}
 
@@ -131,6 +132,31 @@ final class MemoryScheduler {
             await runPersonalityJob()
         } else if ranPortrait, s.personality.frequency != .off, personalityNeedsRetry() {
             await runPersonalityJob()
+        }
+
+        // 写作采集:自动只是「把 staged 准备好」,等用户在 Pending review
+        // 里 Approve/Reject,不直接 commit 到 writing_records。
+        if Self.shouldTriggerNow(config: s.writingCapture, now: now),
+           lastRunDay(kLastWritingCapture) != localDayString(now) {
+            setLastRun(kLastWritingCapture, now)
+            await runWritingCaptureJob()
+        }
+    }
+
+    /// 跑写作采集 worker —— 同手动 Run 一样,跑所有未处理的天,落
+    /// writing_records_staged。失败 swallow + log,不阻塞下一次 tick。
+    func runWritingCaptureJob() async {
+        guard let worker = WritingCaptureWorker.shared else {
+            schedLog.warning("writingCapture tick: worker not initialized — skip")
+            return
+        }
+        do {
+            let summaries = try await worker.runUnprocessedDays()
+            let pending = summaries.filter { $0.status == .pendingReview }.count
+            let failed = summaries.filter { $0.status == .failed }.count
+            schedLog.info("writingCapture: ran \(summaries.count) day(s), \(pending) pending review, \(failed) failed")
+        } catch {
+            schedLog.warning("writingCapture failed: \(String(describing: error), privacy: .public)")
         }
     }
 
