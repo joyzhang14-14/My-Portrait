@@ -185,17 +185,20 @@ struct SchedulerConfig: Codable, Equatable {
 ///   - `event`   ：跑 event 聚类 + impact 评分。
 ///   - `portrait`：跑 distill（事件 → 画像蒸馏）。
 struct SchedulerSettings: Codable, Equatable {
-    var event:    SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
-                                          dayOfWeek: 0, dayOfMonth: 1)
-    var portrait: SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",
-                                          dayOfWeek: 0, dayOfMonth: 1)
+    var event:       SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
+                                             dayOfWeek: 0, dayOfMonth: 1)
+    var portrait:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",
+                                             dayOfWeek: 0, dayOfMonth: 1)
+    var personality: SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
+                                             dayOfWeek: 0, dayOfMonth: 1)
     init() {}
-    enum CodingKeys: String, CodingKey { case event, portrait }
+    enum CodingKeys: String, CodingKey { case event, portrait, personality }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        event    = c.dflt(SchedulerConfig.self, .event,    event)
-        portrait = c.dflt(SchedulerConfig.self, .portrait, portrait)
+        event       = c.dflt(SchedulerConfig.self, .event,       event)
+        portrait    = c.dflt(SchedulerConfig.self, .portrait,    portrait)
+        personality = c.dflt(SchedulerConfig.self, .personality, personality)
     }
 }
 

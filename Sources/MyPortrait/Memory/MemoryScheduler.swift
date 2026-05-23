@@ -50,6 +50,8 @@ final class MemoryScheduler {
     /// distill 锚行的 date 值。anchor 是 distill 这个 processor 的锁身份，与
     /// 运行频率无关。定义 / 语义见 `ProcessingLogStore.distillAnchorDate`。
     private let distillAnchor = ProcessingLogStore.distillAnchorDate
+    /// personality 锚行的 date 值。跟 distill 同样的 anchor-row 模式。
+    private let personalityAnchor = ProcessingLogStore.personalityAnchorDate
 
     /// 心跳超过这个时长视为死锁。默认 10min（单日 Backfill 多轮 LLM 可能 >5min
     /// 仍在正常跑）。可经 env `MYPORTRAIT_SCHEDULER_STALE_MS` 覆盖（测试用）。
@@ -67,8 +69,9 @@ final class MemoryScheduler {
     private let model = "gpt-5.4"
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
-    private let kLastEvent    = "scheduler.lastEventRun"
-    private let kLastPortrait = "scheduler.lastPortraitRun"
+    private let kLastEvent       = "scheduler.lastEventRun"
+    private let kLastPortrait    = "scheduler.lastPortraitRun"
+    private let kLastPersonality = "scheduler.lastPersonalityRun"
 
     private init() {}
 
@@ -96,7 +99,8 @@ final class MemoryScheduler {
         // 有手动触发的结果在等审核 → 暂停定时调度，避免它写 events/ 后被
         // Reject 的快照还原误伤。
         guard !MemoryStaging.hasPending(.events),
-              !MemoryStaging.hasPending(.portrait) else {
+              !MemoryStaging.hasPending(.portrait),
+              !MemoryStaging.hasPending(.personality) else {
             schedLog.info("tick: a manual run is pending review — skip")
             return
         }
@@ -110,13 +114,23 @@ final class MemoryScheduler {
             await runEventJob()
             ranEvent = true
         }
+        var ranPortrait = false
         if Self.shouldTriggerNow(config: s.portrait, now: now),
            lastRunDay(kLastPortrait) != localDayString(now) {
             setLastRun(kLastPortrait, now)
             await runPortraitJob()
+            ranPortrait = true
         } else if ranEvent, s.portrait.frequency != .off, portraitNeedsRetry() {
             // distill 之前被 defer / failed —— 借 event job 触发的节流顺带重试。
             await runPortraitJob()
+            ranPortrait = true
+        }
+        if Self.shouldTriggerNow(config: s.personality, now: now),
+           lastRunDay(kLastPersonality) != localDayString(now) {
+            setLastRun(kLastPersonality, now)
+            await runPersonalityJob()
+        } else if ranPortrait, s.personality.frequency != .off, personalityNeedsRetry() {
+            await runPersonalityJob()
         }
     }
 
@@ -175,6 +189,12 @@ final class MemoryScheduler {
     func portraitJobHasWork() -> Bool {
         _ = store.ensureRow(for: distillAnchor)
         return (store.row(for: distillAnchor)?.distill ?? .idle).needsWork
+    }
+
+    /// personality job 现在有没有活干（personality 哨兵 needsWork）。
+    func personalityJobHasWork() -> Bool {
+        _ = store.ensureRow(for: personalityAnchor)
+        return (store.row(for: personalityAnchor)?.personality ?? .idle).needsWork
     }
 
     // MARK: - event job：event 聚类 + impact 评分（per-day）
@@ -262,7 +282,44 @@ final class MemoryScheduler {
             let r = try await PortraitDistiller(model: self.model).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
+        // distill 完一站,personality 该重跑——锚行重新标 pending,让
+        // runPersonalityJob 知道有新内容要汇聚 tag。
+        _ = store.ensureRow(for: personalityAnchor)
+        store.setStatus(date: personalityAnchor, stage: .personality, status: .pending)
         return .ran(days: [distillAnchor])
+    }
+
+    // MARK: - personality job:三源 personality 汇聚(events + portraits + OCR)
+
+    /// 跑一次完整的 PersonalityRefresh,锚行 `_personality_anchor` 记状态,
+    /// 跟 distill 一样的 anchor 模式。跑前对 portrait/personality/ 拍快照,
+    /// 跑完进 Pending Review(Reject 还原 / Approve 保留)。
+    @discardableResult
+    func runPersonalityJob() async -> JobOutcome {
+        guard !isRunning else { return .busy }
+        isRunning = true
+        defer { isRunning = false }
+
+        _ = store.ensureRow(for: personalityAnchor)
+        let p = store.row(for: personalityAnchor)?.personality ?? .idle
+        guard p.needsWork else {
+            schedLog.info("personality job: personality is \(p.rawValue, privacy: .public) — skip")
+            return .noWork
+        }
+        print("[Scheduler] personality job — refreshing")
+
+        // 决定要 refresh 哪一天:取今天的 UTC 日(三源里 events / OCR 是
+        // 当日的、portraits 是全量)。锚行模式下"跑一次就 complete",所以
+        // 单次跑当天就够,新事件到了 distill 再把 anchor 标 pending 重跑。
+        let day = utcCalendar().startOfDay(for: Date())
+
+        await runStep(date: personalityAnchor, stage: .personality,
+                      processor: "personality", rollbackDay: nil) {
+            let r = try await PersonalityRefresh(model: self.model).refresh(day: day)
+            print("[Scheduler] personality job: events→\(r.eventCandidates) portraits→\(r.portraitCandidates) ocr→\(r.ocrCandidates) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
+            return .success
+        }
+        return .ran(days: [personalityAnchor])
     }
 
     // MARK: - 单步执行（持锁 + 心跳 + 结果落库）
@@ -359,6 +416,9 @@ final class MemoryScheduler {
             }
             if row.distill == .inProgress {
                 applyOutcome(date: row.date, stage: .distill, outcome: .failed, rollbackDay: nil)
+            }
+            if row.personality == .inProgress {
+                applyOutcome(date: row.date, stage: .personality, outcome: .failed, rollbackDay: nil)
             }
         }
     }
@@ -462,6 +522,14 @@ final class MemoryScheduler {
     /// distill 是否处于待重试态（failed / budget_deferred）。
     private func portraitNeedsRetry() -> Bool {
         switch store.row(for: distillAnchor)?.distill {
+        case .failed, .budgetDeferred: return true
+        default: return false
+        }
+    }
+
+    /// personality 是否处于待重试态（failed / budget_deferred）。
+    private func personalityNeedsRetry() -> Bool {
+        switch store.row(for: personalityAnchor)?.personality {
         case .failed, .budgetDeferred: return true
         default: return false
         }

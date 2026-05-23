@@ -13,12 +13,13 @@ struct MemorySettingsView: View {
     /// 手动触发的 pipeline 阶段（都烧 LLM token）。两个，对齐调度器的两个
     /// scheduler。Rebalance 不在列 —— 程序化的，已挂成 hook 在 rescore 后自动跑。
     private enum ManualTrigger: String, Identifiable {
-        case eventProcessing, distill
+        case eventProcessing, distill, personality
         var id: String { rawValue }
         var title: String {
             switch self {
             case .eventProcessing: return "Process events"
             case .distill:         return "Distill portrait"
+            case .personality:     return "Refresh personality"
             }
         }
         var desc: String {
@@ -27,12 +28,15 @@ struct MemorySettingsView: View {
                 return "Reads the raw timeline, builds event files for unprocessed days, then re-scores every event's impact with the LLM. The weekly budget rebalance runs automatically at the end. Mirrors the scheduler's Event processing job. Output is staged for review before it commits."
             case .distill:
                 return "Distills events into long-term portrait entries. Uses the LLM once per portrait category. Output is staged for review before it commits."
+            case .personality:
+                return "Aggregates today's events, other portrait sections, and today's OCR into personality tags. Output is staged for review before it commits."
             }
         }
         var kind: MemoryStaging.Kind {
             switch self {
             case .eventProcessing: return .events
             case .distill:         return .portrait
+            case .personality:     return .personality
             }
         }
     }
@@ -42,6 +46,7 @@ struct MemorySettingsView: View {
     @State private var runTask: Task<Void, Never>? = nil
     @State private var eventsChanges: [MemoryStaging.StagedChange] = []
     @State private var portraitChanges: [MemoryStaging.StagedChange] = []
+    @State private var personalityChanges: [MemoryStaging.StagedChange] = []
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
@@ -112,6 +117,7 @@ struct MemorySettingsView: View {
     private func refreshStaging() {
         eventsChanges = MemoryStaging.changes(.events)
         portraitChanges = MemoryStaging.changes(.portrait)
+        personalityChanges = MemoryStaging.changes(.personality)
     }
 
     // MARK: - Manual triggers
@@ -123,6 +129,7 @@ struct MemorySettingsView: View {
         switch t {
         case .eventProcessing: await runEventProcessing()
         case .distill:         await runDistill()
+        case .personality:     await runPersonalityRefresh()
         }
     }
 
@@ -174,6 +181,32 @@ struct MemorySettingsView: View {
             actionStatus = "Portrait is already up to date — nothing to distill."
         case .busy:
             try? MemoryStaging.approve(.portrait)
+            actionStatus = "The scheduler is already running. Try again shortly."
+        }
+        refreshStaging()
+    }
+
+    /// 走调度器的 runPersonalityJob。跑前拍快照,跑完进审核。
+    @MainActor
+    private func runPersonalityRefresh() async {
+        guard MemoryScheduler.shared.personalityJobHasWork() else {
+            actionStatus = "Personality is already up to date — nothing to refresh."
+            return
+        }
+        do { try MemoryStaging.beginRun(.personality) }
+        catch { actionStatus = "Can't start: \(error.localizedDescription)"; return }
+
+        actionStatus = "Refreshing personality (events + portraits + OCR)…"
+        let outcome = await MemoryScheduler.shared.runPersonalityJob()
+        switch outcome {
+        case .ran(let days):
+            try? MemoryStaging.markRan(.personality, days: days)
+            actionStatus = "Run complete — review the staged changes below."
+        case .noWork:
+            try? MemoryStaging.approve(.personality)
+            actionStatus = "Personality is already up to date — nothing to refresh."
+        case .busy:
+            try? MemoryStaging.approve(.personality)
             actionStatus = "The scheduler is already running. Try again shortly."
         }
         refreshStaging()
@@ -272,6 +305,11 @@ struct MemorySettingsView: View {
                 desc: "Distills events into long-term portrait entries.",
                 config: \.scheduler.portrait)
             Divider().padding(.vertical, 4)
+            schedulerBlock(
+                title: "Personality refresh",
+                desc: "Aggregates events / other portraits / OCR into personality tags.",
+                config: \.scheduler.personality)
+            Divider().padding(.vertical, 4)
             intRow("Days processed per run",
                    value: cfg.binding(\.memory.eventDayCap),
                    range: 1...30)
@@ -320,6 +358,8 @@ struct MemorySettingsView: View {
             triggerRow(.eventProcessing)
             Divider().padding(.vertical, 2)
             triggerRow(.distill)
+            Divider().padding(.vertical, 2)
+            triggerRow(.personality)
             if runningTrigger != nil {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -373,7 +413,8 @@ struct MemorySettingsView: View {
     private var reviewSection: some View {
         let hasEvents = MemoryStaging.hasPending(.events)
         let hasPortrait = MemoryStaging.hasPending(.portrait)
-        if hasEvents || hasPortrait {
+        let hasPersonality = MemoryStaging.hasPending(.personality)
+        if hasEvents || hasPortrait || hasPersonality {
             section(
                 title: "Pending review",
                 blurb: "Manual-run output is staged, not yet committed. Click a file to preview before vs after. Approve keeps it; Reject discards it and puts those days back to pending so they can be re-run."
@@ -381,11 +422,17 @@ struct MemorySettingsView: View {
                 if hasEvents {
                     reviewBlock(.events, "Process events", eventsChanges)
                 }
-                if hasEvents && hasPortrait {
+                if hasEvents && (hasPortrait || hasPersonality) {
                     Divider().padding(.vertical, 6)
                 }
                 if hasPortrait {
                     reviewBlock(.portrait, "Distill portrait", portraitChanges)
+                }
+                if hasPortrait && hasPersonality {
+                    Divider().padding(.vertical, 6)
+                }
+                if hasPersonality {
+                    reviewBlock(.personality, "Refresh personality", personalityChanges)
                 }
             }
         }

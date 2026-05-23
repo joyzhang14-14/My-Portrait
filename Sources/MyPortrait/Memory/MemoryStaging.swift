@@ -10,7 +10,7 @@ import Foundation
 /// 调用方拿 `pendingDays` 自己做。
 enum MemoryStaging {
     enum Kind: String, Sendable, CaseIterable {
-        case events, portrait
+        case events, portrait, personality
     }
 
     enum StagingError: LocalizedError {
@@ -45,7 +45,11 @@ enum MemoryStaging {
         stagingRoot.appendingPathComponent("\(k.rawValue)_days.json")
     }
     private static func liveDir(_ k: Kind) -> URL {
-        k == .events ? Storage.eventsDir : Storage.portraitDir
+        switch k {
+        case .events:      return Storage.eventsDir
+        case .portrait:    return Storage.portraitDir
+        case .personality: return Storage.portraitDir.appendingPathComponent("personality", isDirectory: true)
+        }
     }
 
     // MARK: - 状态
