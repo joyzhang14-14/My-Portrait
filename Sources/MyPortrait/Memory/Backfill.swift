@@ -190,6 +190,9 @@ enum Backfill {
                     var updated = entry.file
                     updated.recordOccurrence(on: day)
                     updated.memberFrameIds.append(contentsOf: frameIds)
+                    // 事件又活了 → 清空 distilledInto,让下次 distill 重新看到
+                    // 它(增量 distill 的"改过"通道)。
+                    updated.distilledInto = []
                     try PortraitFileIO.write(updated, to: entry.url)
                     fileCache[je] = .init(url: entry.url,
                                           relativePath: entry.relativePath,

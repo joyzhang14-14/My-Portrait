@@ -350,6 +350,10 @@ final class PortraitDistiller {
         file.mergeCount = 1
         file.lastModified = file.created
         try PortraitFileIO.write(file, to: url)
+        // 回写每个被消费的事件,标记"我已被蒸馏进 <slug>"。下次 distill
+        // 通过 distilledInto 跳过它们,LLM 只看新事件。
+        Self.markEventsDistilled(eventIds: decision.derivedFromEventIds,
+                                 into: decision.slug)
     }
 
     /// Returns true if file existed and was updated; false if not found.
@@ -382,6 +386,9 @@ final class PortraitDistiller {
         file.mergeCount = (file.mergeCount ?? 1) + 1
         file.lastModified = Date()
         try PortraitFileIO.write(file, to: url)
+        // 回写每个被消费的事件,标记"我已被蒸馏进 <slug>"。
+        Self.markEventsDistilled(eventIds: decision.derivedFromEventIds,
+                                 into: decision.slug)
 
         // 审计日志：body 实际变化才记一条 distill_changelog，供 debug / 回滚。
         if oldBody != newBody {
@@ -476,6 +483,24 @@ final class PortraitDistiller {
         }.value
     }
 
+    /// 把 portrait slug 追加到给定 event 文件的 distilledInto。已存在就跳。
+    /// 失败默默忽略 —— 单个事件回写失败不该让整个 distill 跑废。
+    nonisolated private static func markEventsDistilled(eventIds: [String],
+                                                        into portraitSlug: String) {
+        let fm = FileManager.default
+        for id in eventIds {
+            let url = Storage.eventsDir.appendingPathComponent(id)
+            guard fm.fileExists(atPath: url.path) else { continue }
+            do {
+                var f = try PortraitFileIO.read(from: url)
+                if !f.distilledInto.contains(portraitSlug) {
+                    f.distilledInto.append(portraitSlug)
+                    try PortraitFileIO.write(f, to: url)
+                }
+            } catch { continue }
+        }
+    }
+
     nonisolated private static func scanEventsSync() -> [String: [EventEntry]] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
@@ -491,6 +516,10 @@ final class PortraitDistiller {
             if url.pathComponents.contains("_quarantine") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             if f.eventTitle.isEmpty && f.eventSummary.isEmpty { continue }
+            // 增量 distill:已被 distill 消费过的事件跳过(distilledInto 非空)。
+            // Backfill join-existing 会清空 distilledInto,让"事件又活了"的
+            // 文件重新进入 distill 视野。
+            if !f.distilledInto.isEmpty { continue }
             let rel = url.path
                 .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
             let entry = EventEntry(
