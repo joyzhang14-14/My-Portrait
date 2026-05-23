@@ -230,6 +230,12 @@ final class MemoryScheduler {
         // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
         _ = MemoryBudget_applyToDisk()
 
+        // 新事件到了 → distill 锚点重新标 pending,让 portrait job 知道有
+        // 新东西要蒸馏(否则锚点永远是 complete、distill 永远 "already up to
+        // date",哪怕事件已经堆了 22 条)。
+        _ = store.ensureRow(for: distillAnchor)
+        store.setStatus(date: distillAnchor, stage: .distill, status: .pending)
+
         return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 
