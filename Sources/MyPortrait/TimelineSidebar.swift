@@ -73,11 +73,10 @@ struct TimelineSidebar: View {
                                 text: "Pick a moment in the timeline\nto see context.")
                         }
                     } else if selection == .home {
+                        cronJobsSection
                         recentsSection
                     } else if selection == .memories {
                         memoryScopeSection
-                    } else if selection == .cronJobs {
-                        cronJobsSection
                     } else if selection == .settings {
                         settingsListSection
                     } else {
@@ -108,7 +107,7 @@ struct TimelineSidebar: View {
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {
-                ForEach([SidebarSection.timeline, .home, .memories, .cronJobs, .settings], id: \.self) { item in
+                ForEach([SidebarSection.timeline, .home, .memories, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
                         selection = item
                     }
@@ -341,7 +340,10 @@ struct TimelineSidebar: View {
                         CronJobSidebarRow(
                             cronJob: p,
                             isActive: cronJobSelection == p.id,
-                            onTap: { cronJobSelection = p.id },
+                            onTap: {
+                                cronJobSelection = p.id
+                                selection = .cronJobs
+                            },
                             onToggle: { cronJobStore.toggleEnabled(p.id) }
                         )
                     }
