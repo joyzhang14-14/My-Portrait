@@ -175,33 +175,23 @@ enum MemoryPrompts {
     /// 把一天 observed tags 归并进现有 personality concepts 的指令文本。
     /// caller 在后面追加现有 concepts 列表 + 今日 tags。
     static let personalityMerge = #"""
-    You decide how a day's observed PERSONALITY TAGS map onto the user's
-    existing PERSONALITY CONCEPTS. One decision per observed tag.
+    You decide how observed PERSONALITY TAGS map onto the user's existing
+    PERSONALITY CONCEPTS. One decision per observed tag.
 
-    PRONOUN — in every body you write (mergedBody / body), use "the user" as
-    the subject. Do NOT use "they" / "their" / "them" / "she" / "he" to refer
-    to the user. Name other people explicitly so referents stay unambiguous.
+    Each tag is a single noun or kebab-case phrase (e.g. "verification",
+    "context-switching", "background-audio"). Concepts ARE tags — there is
+    no prose body; the system tracks evidence structurally elsewhere.
 
     For EACH observed tag, choose exactly one action:
 
     - mergeInto: the tag is a SYNONYM or NEAR-SYNONYM of an existing concept's
-      primary_label OR any of its aliases.
-      Provide:
-        conceptSlug : the existing concept's slug.
-        mergedBody  : the concept's body rewritten to fold in today's
-                      evidence. Preserve what is still true; integrate the
-                      new signal. Cite specifics.
-        aliases     : the tag itself, to add to that concept's aliases.
+      primary_label OR any of its aliases. Provide conceptSlug only — the
+      tag itself will be added to that concept's aliases automatically.
 
-    - createNew: a genuinely new pattern no existing concept covers.
-      Provide:
-        primaryLabel : a single-noun or kebab-case tag — SAME format as the
-                       observed tags (e.g. "verification", "tool-research").
-                       Lowercase, no spaces.
-        body         : 2-4 sentence description, cite the day's evidence.
-        aliases      : initial aliases — start with the observed tag itself.
+    - createNew: a genuinely new tag, no existing concept covers it. No
+      additional fields needed — the tag becomes a new concept.
 
-    - skipTag: evidence too thin or the tag too vague to commit. Provide reason.
+    - skipTag: tag is too vague / not personality-relevant. Provide reason.
 
     MERGE STRICTNESS — moderate. When in doubt, createNew rather than over-merge.
     Merge-worthy synonymy:
@@ -213,17 +203,12 @@ enum MemoryPrompts {
       focus vs flow-state              — related but different
       multitasking vs distractibility  — positive vs negative framing
 
-    OUTPUT — respond with ONLY a JSON array, one object per observed tag.
-    No prose, no markdown fences:
+    OUTPUT — JSON array, one object per observed tag. No prose, no markdown:
     [
       { "tag": "<the observed tag, verbatim>",
         "action": "mergeInto" | "createNew" | "skipTag",
-        "conceptSlug": "...",     // mergeInto only
-        "mergedBody": "...",      // mergeInto only
-        "primaryLabel": "...",    // createNew only
-        "body": "...",            // createNew only
-        "aliases": ["..."],       // mergeInto: tag to add; createNew: initial aliases
-        "reason": "..." }         // skipTag only
+        "conceptSlug": "...",   // mergeInto only
+        "reason": "..." }       // skipTag only
     ]
     """#
 

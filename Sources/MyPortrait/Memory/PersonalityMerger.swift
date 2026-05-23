@@ -3,34 +3,95 @@ import os.log
 
 private let pmLog = Logger(subsystem: "com.myportrait.memory", category: "personality-merger")
 
-/// 一个 observed tag 的归属决定。LLM 对 daily snapshot 的每个 tag 产一个。
-/// `evidence` = 该 tag 的 event slug，落盘时累加进 concept 的 evidenceEventIds。
-enum PersonalityMergeAction: Equatable, Sendable {
-    /// tag 是某现有 concept 的同义 / 近义词 → 合并：新 body + 该 tag 加入 aliases。
-    case mergeInto(conceptSlug: String, mergedBody: String, newAliases: [String], evidence: [String])
-    /// 全新 personality concept → 建新文件。
-    case createNew(primaryLabel: String, body: String, aliases: [String], evidence: [String])
-    /// 证据不足 / tag 太模糊 → 跳过。
+// MARK: - Multi-source 候选 / 操作 / 概念 body
+
+/// tag 候选的来源。三源:events / portraits / ocr。
+enum PersonalitySource: String, Sendable, Equatable, Codable, CaseIterable {
+    case events, portraits, ocr
+}
+
+/// 一个 tag 候选 —— 从某一源观测到的某个 tag,带证据。
+struct PersonalityTagCandidate: Sendable, Equatable {
+    let tag: String                  // single noun / kebab-case
+    let source: PersonalitySource
+    let evidence: [String]           // events:event slug;portraits:portrait 相对路径;ocr:"<date>: w1, w2"
+}
+
+/// LLM 对每个 tag 候选的归属决定。
+enum PersonalityMergeAction: Sendable, Equatable {
+    case mergeInto(conceptSlug: String, candidate: PersonalityTagCandidate)
+    case createNew(candidate: PersonalityTagCandidate)
     case skipTag(tag: String, reason: String)
 }
 
-/// 把 PersonalityDailySnapshot 的 traits 合进 portrait/personality/ 的概念文件。
-///
-/// `merge()` 走 LLM 出决定（[PersonalityMergeAction]）；`applyActions()` 把
-/// 决定落盘 —— EMA weight + merge_count + last_modified。两步分开：决定可
-/// 单独 review / 测试，落盘是另一回事。
-///
-/// LLM 路径复刻 ImpactScorer / PersonalityAgent：PiAgent + 私有 Coordinator +
-/// budget 检测，不抽共享基类。
+/// 概念文件 body 的结构化形式 —— 三个 section,每个 section 一组 string。
+/// 落盘是 markdown:`## events / ## portraits / ## ocr` + 列表。
+/// 读取时反解析,write 前再 render。**body 即 trace,无 prose**。
+struct ConceptBody: Equatable, Sendable {
+    var events: [String] = []
+    var portraits: [String] = []
+    var ocr: [String] = []
+    private static let cap = 50
+
+    static func parse(_ text: String) -> ConceptBody {
+        var ev: [String] = [], pt: [String] = [], oc: [String] = []
+        var cur: PersonalitySource? = nil
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("## events") { cur = .events; continue }
+            if line.hasPrefix("## portraits") { cur = .portraits; continue }
+            if line.hasPrefix("## ocr") { cur = .ocr; continue }
+            if line.hasPrefix("#") { cur = nil; continue }     // 别的 heading,退出 section
+            guard line.hasPrefix("- ") else { continue }
+            let item = String(line.dropFirst(2))
+            if item == "(none)" { continue }
+            switch cur {
+            case .events: ev.append(item)
+            case .portraits: pt.append(item)
+            case .ocr: oc.append(item)
+            case nil: continue
+            }
+        }
+        return ConceptBody(events: ev, portraits: pt, ocr: oc)
+    }
+
+    func render(title: String) -> String {
+        var out = "# \(title)\n"
+        func sec(_ name: String, _ items: [String]) {
+            out += "\n## \(name)\n"
+            if items.isEmpty { out += "- (none)\n" }
+            else { for it in items { out += "- \(it)\n" } }
+        }
+        sec("events", events)
+        sec("portraits", portraits)
+        sec("ocr", ocr)
+        return out
+    }
+
+    mutating func add(_ source: PersonalitySource, items: [String]) {
+        switch source {
+        case .events:
+            for it in items where !events.contains(it) { events.append(it) }
+            if events.count > Self.cap { events = Array(events.suffix(Self.cap)) }
+        case .portraits:
+            for it in items where !portraits.contains(it) { portraits.append(it) }
+            if portraits.count > Self.cap { portraits = Array(portraits.suffix(Self.cap)) }
+        case .ocr:
+            for it in items where !ocr.contains(it) { ocr.append(it) }
+            if ocr.count > Self.cap { ocr = Array(ocr.suffix(Self.cap)) }
+        }
+    }
+}
+
+// MARK: - PersonalityMerger
+
+/// 把三源汇总的 tag 候选合进 portrait/personality/ 概念文件。
+/// **没有 prose body** —— 概念文件 body 是结构化 trace(events/portraits/ocr)。
 @MainActor
 final class PersonalityMerger {
 
     enum MergerError: LocalizedError {
-        case agentSpawn(String)
-        case agentTimeout
-        case noJSONInResponse
-        case malformedJSON(String)
-
+        case agentSpawn(String), agentTimeout, noJSONInResponse, malformedJSON(String)
         var errorDescription: String? {
             switch self {
             case .agentSpawn(let m):    return "Failed to spawn LLM agent: \(m)"
@@ -58,14 +119,11 @@ final class PersonalityMerger {
 
     // MARK: - 读取现有 concept
 
-    /// 扫 portrait/personality/ 把每个概念读成 `(slug, PortraitFile)`。
-    /// slug = 文件名去 `.md`，mergeInto 用它定位。
     static func readConcepts() -> [(slug: String, file: PortraitFile)] {
         let fm = FileManager.default
         let dir = PortraitPaths.categoryDir("personality")
-        guard let en = fm.enumerator(
-            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        ) else { return [] }
+        guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil,
+                                     options: [.skipsHiddenFiles]) else { return [] }
         var out: [(String, PortraitFile)] = []
         while let url = en.nextObject() as? URL {
             guard url.pathExtension == "md",
@@ -78,18 +136,16 @@ final class PersonalityMerger {
         return out
     }
 
-    // MARK: - merge（LLM 决定）
+    // MARK: - merge(多源)
 
-    /// 测试入口：同时返回 prompt、LLM 原始、解析后的 actions。
+    /// 测试入口:同时返回 prompt / LLM 原始 / 解析后 actions。
     func mergeWithRaw(
-        snapshot: PersonalityDailySnapshot,
+        candidates: [PersonalityTagCandidate],
         existingConcepts: [(slug: String, file: PortraitFile)]
     ) async throws -> (prompt: String, raw: String, actions: [PersonalityMergeAction]) {
-        let prompt = Self.buildPrompt(snapshot: snapshot, concepts: existingConcepts)
-
-        // tags 为空（snapshot skip 了）→ 无需 LLM。
-        if snapshot.tags.isEmpty {
-            return (prompt: prompt, raw: "(short-circuited: no tags)", actions: [])
+        let prompt = Self.buildPrompt(candidates: candidates, concepts: existingConcepts)
+        if candidates.isEmpty {
+            return (prompt: prompt, raw: "(short-circuited: no candidates)", actions: [])
         }
 
         let agent = try PiAgent(model: model)
@@ -128,22 +184,22 @@ final class PersonalityMerger {
             throw BudgetExhaustedError(processor: "PersonalityMerger", message: err)
         }
 
-        let actions = try Self.parseActions(from: collected, tags: snapshot.tags)
+        let actions = try Self.parseActions(from: collected, candidates: candidates)
         return (prompt: prompt, raw: collected, actions: actions)
     }
 
-    /// 生产入口：跑 LLM 返回 actions。
     func merge(
-        snapshot: PersonalityDailySnapshot,
+        candidates: [PersonalityTagCandidate],
         existingConcepts: [(slug: String, file: PortraitFile)]
     ) async throws -> [PersonalityMergeAction] {
-        try await mergeWithRaw(snapshot: snapshot, existingConcepts: existingConcepts).actions
+        try await mergeWithRaw(candidates: candidates,
+                               existingConcepts: existingConcepts).actions
     }
 
-    // MARK: - applyActions（落盘）
+    // MARK: - applyActions(落盘)
 
-    /// 把 actions 落到 portrait/personality/。`on` 是 snapshot 的日期，用作
-    /// last_modified。
+    /// 把 actions 落到 portrait/personality/。同一 slug 的多个 action
+    /// (可能来自多个源)合并成一次写入。
     @discardableResult
     func applyActions(_ actions: [PersonalityMergeAction], on date: Date) throws -> ApplyResult {
         var result = ApplyResult()
@@ -152,89 +208,100 @@ final class PersonalityMerger {
         let ema = WeightEMA(halfLifeDays: halfLife)
         let dir = PortraitPaths.categoryDir("personality")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
 
+        // 按目标 slug 分组(同一概念可能在一次 run 里收多个候选)。
+        var groups: [String: [PersonalityMergeAction]] = [:]
         for action in actions {
             switch action {
+            case .createNew(let cand):
+                groups[Self.slugify(cand.tag), default: []].append(action)
+            case .mergeInto(let slug, _):
+                groups[slug, default: []].append(action)
             case .skipTag:
                 result.skipped += 1
+            }
+        }
 
-            case .createNew(let primaryLabel, let body, let aliases, let evidence):
-                let slug = Self.uniqueSlug(Self.slugify(primaryLabel), in: dir)
-                var file = PortraitFile(
+        for (slug, group) in groups {
+            let url = dir.appendingPathComponent(slug + ".md")
+            let exists = fm.fileExists(atPath: url.path)
+            // 候选 tag 列表 + 第一个 createNew 用作 primaryLabel 兜底。
+            var primaryLabel = slug
+            for a in group {
+                if case .createNew(let cand) = a { primaryLabel = cand.tag; break }
+            }
+
+            var file: PortraitFile
+            var body: ConceptBody
+            var aliases: [String]
+            if exists {
+                file = try PortraitFileIO.read(from: url)
+                file.rawImpact = nil; file.rebalanceCount = nil; file.impactSource = nil
+                body = ConceptBody.parse(file.body)
+                aliases = file.aliases ?? []
+                primaryLabel = file.primaryLabel ?? primaryLabel
+            } else {
+                file = PortraitFile(
                     created: today,
-                    // impact: 不传 —— portrait 不持有 impact。
-                    body: Self.renderBody(title: primaryLabel, body: body),
+                    body: "",
                     source: "personality",
                     tags: ["personality", "portrait"],
                     firstOccurrence: today,
                     eventTitle: primaryLabel,
-                    eventSummary: body,
+                    eventSummary: "",
                     eventType: "experience",
                     portraitFacets: [],
                     category: "personality",
                     memberFrameIds: []
                 )
-                file.primaryLabel = primaryLabel
-                file.aliases = aliases
-                file.mergeCount = 1
-                file.weight = 1.0                 // 新 concept = afterMerge(0,0)
-                file.lastModified = today
-                file.evidenceEventIds = Self.capEvidence(evidence)
-                try PortraitFileIO.write(file, to: dir.appendingPathComponent(slug + ".md"))
-                result.created += 1
-                result.writtenSlugs.append(slug)
+                body = ConceptBody()
+                aliases = []
+            }
 
-            case .mergeInto(let conceptSlug, let mergedBody, let newAliases, let evidence):
-                let url = dir.appendingPathComponent(conceptSlug + ".md")
-                guard FileManager.default.fileExists(atPath: url.path) else {
-                    pmLog.error("mergeInto: concept not found — \(conceptSlug, privacy: .public)")
-                    result.skipped += 1
-                    continue
+            // 应用每个 action 的 candidate evidence / 别名。
+            for action in group {
+                switch action {
+                case .createNew(let cand):
+                    body.add(cand.source, items: cand.evidence)
+                    // createNew 的 tag 本身不进 aliases(它就是 primary_label)
+                case .mergeInto(_, let cand):
+                    body.add(cand.source, items: cand.evidence)
+                    // mergeInto 的 tag 是同义词 → 加 aliases
+                    if cand.tag != primaryLabel && !aliases.contains(cand.tag) {
+                        aliases.append(cand.tag)
+                    }
+                case .skipTag: continue
                 }
-                var file = try PortraitFileIO.read(from: url)
-                // 清掉 event-only 字段残留(老文件可能带)。
-                file.rawImpact = nil
-                file.rebalanceCount = nil
-                file.impactSource = nil
-                let label = file.primaryLabel ?? file.eventTitle
-                file.body = Self.renderBody(title: label, body: mergedBody)
-                file.eventSummary = mergedBody
-                // aliases 并集，保序去重。
-                var mergedAliases = file.aliases ?? []
-                for a in newAliases where !mergedAliases.contains(a) {
-                    mergedAliases.append(a)
-                }
-                file.aliases = mergedAliases
-                // evidence 并集（旧在前、保序、去重），尾部截断到 50。
-                var mergedEvidence = file.evidenceEventIds ?? []
-                for e in evidence where !mergedEvidence.contains(e) {
-                    mergedEvidence.append(e)
-                }
-                file.evidenceEventIds = Self.capEvidence(mergedEvidence)
-                // EMA：旧 weight 衰减到今天再 +1。
+            }
+
+            file.primaryLabel = primaryLabel
+            file.aliases = aliases
+            file.body = body.render(title: primaryLabel)
+            file.eventTitle = primaryLabel
+            file.eventSummary = ""
+            file.evidenceEventIds = ConceptBody.capList(body.events)
+            file.recordOccurrence(on: today)
+            file.mergeCount = (file.mergeCount ?? 0) + group.count
+            file.lastModified = today
+            if exists {
                 file.weight = ema.afterMerge(
                     stored: file.weight,
                     daysSinceModified: file.daysSinceModified(now: today))
-                file.mergeCount = (file.mergeCount ?? 1) + 1
-                file.lastModified = today
-                file.recordOccurrence(on: today)
-                try PortraitFileIO.write(file, to: url)
-                result.merged += 1
-                result.writtenSlugs.append(conceptSlug)
+            } else {
+                file.weight = 1.0
             }
+            try PortraitFileIO.write(file, to: url)
+            if exists { result.merged += 1 } else { result.created += 1 }
+            result.writtenSlugs.append(slug)
         }
         return result
-    }
-
-    /// evidence 列表上限 50 —— 满了保留最近的（尾部）。
-    private static func capEvidence(_ ids: [String]) -> [String] {
-        ids.count > 50 ? Array(ids.suffix(50)) : ids
     }
 
     // MARK: - Prompt
 
     fileprivate static func buildPrompt(
-        snapshot: PersonalityDailySnapshot,
+        candidates: [PersonalityTagCandidate],
         concepts: [(slug: String, file: PortraitFile)]
     ) -> String {
         var lines: [String] = [MemoryPrompts.personalityMerge]
@@ -246,43 +313,22 @@ final class PersonalityMerger {
             for (slug, f) in concepts {
                 let label = f.primaryLabel ?? f.eventTitle
                 let aliases = (f.aliases ?? []).joined(separator: ", ")
-                let bodyProse = Self.prose(of: f.body)
-                let trimBody = bodyProse.count > 320
-                    ? String(bodyProse.prefix(320)) + "…" : bodyProse
                 lines.append("  - [\(slug)] \(label) | aliases: \(aliases)")
-                lines.append("      body: \(trimBody.replacingOccurrences(of: "\n", with: " ⏎ "))")
             }
         }
         lines.append("")
-        lines.append("TODAY'S DATE: \(snapshot.date)")
-        lines.append("OBSERVED TAGS to place (one decision each):")
-        for t in snapshot.tags {
-            lines.append("  - \(t.name)")
+        lines.append("OBSERVED TAGS to place (one decision each — note source for context):")
+        for c in candidates {
+            lines.append("  - \(c.tag)  (source: \(c.source.rawValue))")
         }
         return lines.joined(separator: "\n")
-    }
-
-    /// 从已渲染 body 抽纯正文（去掉 `# 标题` 行）。
-    private static func prose(of body: String) -> String {
-        var lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        if let first = lines.first, first.hasPrefix("# ") {
-            lines.removeFirst()
-            while let f = lines.first, f.trimmingCharacters(in: .whitespaces).isEmpty {
-                lines.removeFirst()
-            }
-        }
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func renderBody(title: String, body: String) -> String {
-        "# \(title)\n\n\(body)\n"
     }
 
     // MARK: - JSON 解析
 
     private static func parseActions(
         from response: String,
-        tags: [PersonalityTag]
+        candidates: [PersonalityTagCandidate]
     ) throws -> [PersonalityMergeAction] {
         guard let first = response.firstIndex(of: "["),
               let last = response.lastIndex(of: "]") else {
@@ -304,38 +350,33 @@ final class PersonalityMerger {
             throw MergerError.malformedJSON(error.localizedDescription)
         }
 
-        return arr.compactMap { obj -> PersonalityMergeAction? in
+        var out: [PersonalityMergeAction] = []
+        for obj in arr {
             let action = (obj["action"] as? String) ?? ""
             let tagName = (obj["tag"] as? String) ?? ""
-            // 该 tag 的 evidence 从 snapshot 取 —— LLM 不必回传，避免漏 slug。
-            let evidence = tags.first { $0.name == tagName }?.evidence ?? []
-            switch action {
-            case "mergeInto":
-                guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty,
-                      let body = obj["mergedBody"] as? String, !body.isEmpty else { return nil }
-                let aliases = (obj["aliases"] as? [String]) ?? []
-                return .mergeInto(conceptSlug: slug, mergedBody: body,
-                                  newAliases: aliases, evidence: evidence)
-            case "createNew":
-                guard let label = obj["primaryLabel"] as? String, !label.isEmpty,
-                      let body = obj["body"] as? String, !body.isEmpty else { return nil }
-                let aliases = (obj["aliases"] as? [String]) ?? []
-                return .createNew(primaryLabel: label, body: body,
-                                  aliases: aliases, evidence: evidence)
-            case "skipTag", "skipTrait":
-                return .skipTag(tag: tagName,
-                                reason: (obj["reason"] as? String) ?? "unspecified")
-            default:
-                return nil
+            // 每个 candidate 都对应一个 action(同 tag 多源 → 多个 action,
+            // 各自带源 + 证据;applyActions 会把它们 group 进同一 concept)。
+            let matchedCands = candidates.filter { $0.tag == tagName }
+            if matchedCands.isEmpty { continue }
+            for cand in matchedCands {
+                switch action {
+                case "mergeInto":
+                    guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty else { continue }
+                    out.append(.mergeInto(conceptSlug: slug, candidate: cand))
+                case "createNew":
+                    out.append(.createNew(candidate: cand))
+                case "skipTag", "skipTrait":
+                    out.append(.skipTag(tag: tagName,
+                                        reason: (obj["reason"] as? String) ?? "unspecified"))
+                default: continue
+                }
             }
         }
+        return out
     }
 
     // MARK: - slug 工具
 
-    /// tag → kebab-case slug。tag 本身已是 kebab-case 单名词，这里只做
-    /// 防御性规整：小写、非字母数字折成连字符（**保留连字符**，不转下划线，
-    /// 这样 slug == tag name，跟 daily snapshot 一致）。
     private static func slugify(_ s: String) -> String {
         var out = ""
         var lastSep = false
@@ -351,21 +392,16 @@ final class PersonalityMerger {
         if trimmed.isEmpty { return "tag" }
         return trimmed.count > 40 ? String(trimmed.prefix(40)) : trimmed
     }
+}
 
-    private static func uniqueSlug(_ base: String, in dir: URL) -> String {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: dir.appendingPathComponent(base + ".md").path) { return base }
-        for n in 2...99 {
-            let candidate = "\(base)_\(n)"
-            if !fm.fileExists(atPath: dir.appendingPathComponent(candidate + ".md").path) {
-                return candidate
-            }
-        }
-        return base
+extension ConceptBody {
+    /// 给 evidence_event_ids frontmatter 用的截断(跟 events section 同源)。
+    static func capList(_ a: [String], cap: Int = 50) -> [String] {
+        a.count > cap ? Array(a.suffix(cap)) : a
     }
 }
 
-// MARK: - PiAgent 事件流 Coordinator（PersonalityMerger 私用）
+// MARK: - PiAgent 事件流 Coordinator
 
 private actor MergerCoordinator {
     private var buffer: String = ""
@@ -374,33 +410,24 @@ private actor MergerCoordinator {
     private var lastError: String?
 
     func startTurn(id: String) {
-        buffer = ""
-        currentID = id
-        pending = nil
-        lastError = nil
+        buffer = ""; currentID = id; pending = nil; lastError = nil
     }
-
     func awaitTurn() async -> String {
         await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
             pending = cont
         }
     }
-
     func consumeError() -> String? { lastError }
-
     func handle(_ event: PiAgent.Event) {
         switch event {
-        case .textDelta(let d):
-            buffer.append(d)
-        case .assistantFinalText(let t):
-            if buffer.isEmpty { buffer = t }
+        case .textDelta(let d): buffer.append(d)
+        case .assistantFinalText(let t): if buffer.isEmpty { buffer = t }
         case .agentEnd:
             if let p = pending { pending = nil; p.resume(returning: buffer) }
         case .error(let msg):
             lastError = msg
             if let p = pending { pending = nil; p.resume(returning: buffer) }
-        default:
-            break
+        default: break
         }
     }
 }

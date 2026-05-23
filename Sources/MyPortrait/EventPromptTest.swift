@@ -844,8 +844,12 @@ enum PersonalityMergeTestCLI {
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
 
+                // events-only 候选(其他两源 portraits/ocr 在后续 commit 接进来)。
+                let candidates: [PersonalityTagCandidate] = snapshot.tags.map {
+                    PersonalityTagCandidate(tag: $0.name, source: .events, evidence: $0.evidence)
+                }
                 let r = try await PersonalityMerger().mergeWithRaw(
-                    snapshot: snapshot, existingConcepts: concepts)
+                    candidates: candidates, existingConcepts: concepts)
                 print("\n──── MERGE PROMPT ────")
                 print(r.prompt)
                 print("\n──── LLM RAW ────")
@@ -853,12 +857,10 @@ enum PersonalityMergeTestCLI {
                 print("\n──── PARSED ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {
                     switch a {
-                    case .mergeInto(let slug, let body, let aliases, let ev):
-                        print("\(i + 1). mergeInto [\(slug)]  +aliases=\(aliases)  evidence=\(ev)")
-                        print("     body: \(body)")
-                    case .createNew(let label, let body, let aliases, let ev):
-                        print("\(i + 1). createNew \"\(label)\"  aliases=\(aliases)  evidence=\(ev)")
-                        print("     body: \(body)")
+                    case .mergeInto(let slug, let cand):
+                        print("\(i + 1). mergeInto [\(slug)]  tag=\(cand.tag)  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
+                    case .createNew(let cand):
+                        print("\(i + 1). createNew \"\(cand.tag)\"  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
                     case .skipTag(let tag, let reason):
                         print("\(i + 1). skipTag [\(tag)] — \(reason)")
                     }
@@ -907,13 +909,16 @@ enum PersonalityMergeApplyCLI {
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
 
+                let candidates: [PersonalityTagCandidate] = snapshot.tags.map {
+                    PersonalityTagCandidate(tag: $0.name, source: .events, evidence: $0.evidence)
+                }
                 let merger = await PersonalityMerger()
-                let actions = try await merger.merge(snapshot: snapshot, existingConcepts: concepts)
+                let actions = try await merger.merge(candidates: candidates, existingConcepts: concepts)
                 for (i, a) in actions.enumerated() {
                     switch a {
-                    case .mergeInto(let s, _, let al, _): print("\(i + 1). mergeInto [\(s)] +aliases=\(al)")
-                    case .createNew(let l, _, _, _):      print("\(i + 1). createNew \"\(l)\"")
-                    case .skipTag(let t, let r):          print("\(i + 1). skipTag [\(t)] — \(r)")
+                    case .mergeInto(let s, let cand): print("\(i + 1). mergeInto [\(s)] tag=\(cand.tag)")
+                    case .createNew(let cand):        print("\(i + 1). createNew \"\(cand.tag)\"")
+                    case .skipTag(let t, let r):      print("\(i + 1). skipTag [\(t)] — \(r)")
                     }
                 }
                 let result = try await merger.applyActions(actions, on: day)

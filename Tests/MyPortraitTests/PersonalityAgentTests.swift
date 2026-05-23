@@ -36,12 +36,11 @@ final class PersonalityAgentTests: XCTestCase {
 
 final class PersonalityMergerTests: XCTestCase {
 
-    /// tags 为空（snapshot skip 了）→ merge 短路返回 []，不调 LLM。
+    /// 候选为空 → merge 短路返回 []，不调 LLM。
     @MainActor
-    func testMergeShortCircuitsOnEmptyTags() async throws {
-        let snap = PersonalityDailySnapshot(date: "2026-05-11", tags: [])
+    func testMergeShortCircuitsOnEmptyCandidates() async throws {
         let actions = try await PersonalityMerger().merge(
-            snapshot: snap, existingConcepts: [])
+            candidates: [], existingConcepts: [])
         XCTAssertTrue(actions.isEmpty)
     }
 }
