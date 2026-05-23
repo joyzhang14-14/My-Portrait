@@ -64,7 +64,7 @@ struct DisplaySettingsView: View {
 ///   3. Menu bar icon slot — same controls
 ///   4. Show-in-menu-bar toggle
 ///
-/// Uploads write into `~/Library/Application Support/MyPortrait/customize/`
+/// Uploads write into `~/.portrait/customize/`
 /// so the icons survive app restarts. Reset deletes the file.
 private struct AppCustomizeCard: View {
     @State private var config = ConfigStore.shared

@@ -3,7 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// A file or image the user has attached to the input bar. Persisted to
-/// `~/Library/Application Support/MyPortrait/attachments/<uuid>.<ext>` so the
+/// `~/.portrait/attachments/<uuid>.<ext>` so the
 /// path stays stable after the user pastes ephemeral clipboard data.
 struct Attachment: Identifiable, Hashable {
     let id: UUID

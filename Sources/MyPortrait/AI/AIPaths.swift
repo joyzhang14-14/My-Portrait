@@ -1,17 +1,11 @@
 import Foundation
 
-/// Filesystem layout for AI subsystem.
-/// Lives under `~/Library/Application Support/MyPortrait/` per Apple guidelines,
-/// separate from the legacy `~/.portrait/` tree managed by `Storage`.
+/// AI 子系统的文件布局。跟 capture 层一样统一在 `~/.portrait/` 下 ——
+/// 单一数据目录,易于备份 / 清理 / 迁移。旧版本曾分到
+/// `~/.portrait/`,启动时 `PathMigration` 把
+/// 旧位置的文件搬过来。
 enum AIPaths {
-    static var supportDir: URL {
-        let fm = FileManager.default
-        let base = try! fm.url(for: .applicationSupportDirectory,
-                               in: .userDomainMask,
-                               appropriateFor: nil,
-                               create: true)
-        return base.appendingPathComponent("MyPortrait", isDirectory: true)
-    }
+    static var supportDir: URL { Storage.rootURL }
 
     static var secretsDB: URL { supportDir.appendingPathComponent("secrets.sqlite") }
     static var chatDB: URL    { supportDir.appendingPathComponent("chat.sqlite") }

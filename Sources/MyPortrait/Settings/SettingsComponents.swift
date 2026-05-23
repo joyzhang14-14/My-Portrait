@@ -158,7 +158,7 @@ struct SettingsPageTitle: View {
 
 /// Standard scrollable container for a settings section. Holds the page
 /// title + an arbitrary VStack of cards. Surfaces config-file errors
-/// (parse failures) inline so the user knows when ~/.myportrait/config.toml
+/// (parse failures) inline so the user knows when ~/.portrait/config.toml
 /// got rejected and the app fell back to defaults.
 struct SettingsPage<Content: View>: View {
     let title: String
@@ -213,7 +213,7 @@ private struct ConfigToolbar: View {
                 Label("config.toml", systemImage: "arrow.up.right.square")
                     .font(.system(size: 11, weight: .medium))
             }
-            .help("Open ~/.myportrait/config.toml in Finder")
+            .help("Open ~/.portrait/config.toml in Finder")
 
             Button(role: .destructive) {
                 confirmingReset = true
@@ -230,7 +230,7 @@ private struct ConfigToolbar: View {
             Button("Reset", role: .destructive) { config.resetToDefaults() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This deletes ~/.myportrait/config.toml and restores every Settings value to its built-in default. Your conversations / pipes / templates are not touched.")
+            Text("This deletes ~/.portrait/config.toml and restores every Settings value to its built-in default. Your conversations / pipes / templates are not touched.")
         }
     }
 }

@@ -316,7 +316,7 @@ final class PiAgent: @unchecked Sendable {
 
     // MARK: - Debug logfile
 
-    /// `~/Library/Application Support/MyPortrait/pi-rpc.log`
+    /// `~/.portrait/pi-rpc.log`
     private static let logURL = AIPaths.supportDir.appendingPathComponent("pi-rpc.log")
     private static let logQueue = DispatchQueue(label: "MyPortrait.PiAgent.log")
 

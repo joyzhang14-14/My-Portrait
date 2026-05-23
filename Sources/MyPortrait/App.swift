@@ -9,6 +9,10 @@ struct MyPortraitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     init() {
+        // 数据路径迁移最先跑 —— CLI 模式也起 Services,所以放最前面,确保
+        // 任何模式下读路径前都已经搬完。Idempotent,重复跑不出错。
+        PathMigration.runOnceIfNeeded()
+
         // CLI 模式：`--embed-dump <text>` 跑 bge-m3 推理 → stdout 拷向量 → exit。
         // 用于跟 Python FlagEmbedding 数值对齐（要求 cosine ≥ 0.999）。
         // 必须在任何 SwiftUI / AppDelegate 设置之前拦截，否则会被窗口初始化拖慢。

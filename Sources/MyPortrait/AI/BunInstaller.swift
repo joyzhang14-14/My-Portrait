@@ -1,6 +1,6 @@
 import Foundation
 
-/// Downloads & installs the Bun runtime to `~/Library/Application Support/MyPortrait/bun/bin/bun`.
+/// Downloads & installs the Bun runtime to `~/.portrait/bun/bin/bun`.
 /// Pi (`@mariozechner/pi-coding-agent`) requires Bun (or Node) to run; we ship Bun
 /// because Orphies does and the package is small (~50 MB) and self-contained.
 enum BunInstaller {

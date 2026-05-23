@@ -132,7 +132,7 @@ final class SecretStore: @unchecked Sendable {
 
     // MARK: - Master key (file-backed)
     //
-    // Stored at ~/Library/Application Support/MyPortrait/master.key with
+    // Stored at ~/.portrait/master.key with
     // 0600 perms (owner read/write only). On a FileVault'd disk this is
     // adequate for a dev tool; for a production release we'd switch to a
     // properly-signed app + Keychain with kSecUseDataProtectionKeychain.

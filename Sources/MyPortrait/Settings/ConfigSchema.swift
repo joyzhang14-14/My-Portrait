@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persistent settings file mapped 1:1 to `~/.myportrait/config.toml`.
+/// Persistent settings file mapped 1:1 to `~/.portrait/config.toml`.
 ///
 /// Design rules (all four enforced):
 ///   1. **schemaVersion** at the top so future shapes can be migrated in place.

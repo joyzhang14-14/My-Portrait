@@ -4,7 +4,7 @@ import AppKit
 import Observation
 import TOMLKit
 
-/// Single source of truth for everything in `~/.myportrait/config.toml`.
+/// Single source of truth for everything in `~/.portrait/config.toml`.
 /// Replaces every Settings `@AppStorage` — UI binds through here.
 ///
 /// Lifecycle:
@@ -37,7 +37,7 @@ final class ConfigStore {
     // File path / write debounce / fs watcher
     private let path: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".myportrait/config.toml")
+        return home.appendingPathComponent(".portrait/config.toml")
     }()
     private var writeTask: Task<Void, Never>?
     private var watchSource: DispatchSourceFileSystemObject?
@@ -125,7 +125,7 @@ final class ConfigStore {
     static var path: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent(".myportrait/config.toml")
+            .appendingPathComponent(".portrait/config.toml")
     }
 
     /// Convenience two-way Binding for any value in the config tree.

@@ -5,7 +5,7 @@ import SwiftUI
 /// 采集层用户开关 — SwiftUI Settings UI 与后端 Services 之间的桥。
 ///
 /// **三个 capture 开关 (screen / audio / systemAudio) 的单一真相在 ConfigStore
-/// (~/.myportrait/config.toml)**，本类是它的镜像 + Combine 适配层。原因：
+/// (~/.portrait/config.toml)**，本类是它的镜像 + Combine 适配层。原因：
 ///   - Settings UI (RecordingView) 直接绑定 `ConfigStore.capture.xxx.enabled`
 ///   - Services 用 Combine sink 订阅 @Published，要桥到 Observation 框架
 ///   - vim 改 TOML 也要 live reload（ConfigStore 已经实现 DispatchSource 监听）

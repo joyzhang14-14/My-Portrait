@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Tunable fields for the Memory pipeline. Persists to ~/.myportrait/config.toml
+/// Tunable fields for the Memory pipeline. Persists to ~/.portrait/config.toml
 /// via ConfigStore. MemoryBudget / WeightCalculator / Archiver each pull
 /// `.fromConfig` so changes take effect on the next rebalance / weight pass /
 /// archive run.
@@ -301,7 +301,7 @@ struct MemorySettingsView: View {
     private var headerBlurb: String {
         switch tab {
         case .parameter:
-            return "Tune how the memory system weighs, consolidates, and forgets events. Changes write to `~/.myportrait/config.toml` (debounced)."
+            return "Tune how the memory system weighs, consolidates, and forgets events. Changes write to `~/.portrait/config.toml` (debounced)."
         case .scheduler:
             return "Configure when the event and portrait pipelines run, and review days that need attention."
         case .changelog:
