@@ -43,6 +43,7 @@ enum ProcessingStage: String, CaseIterable, Sendable {
     case event
     case impact
     case distill
+    case personality
 
     var column: String { "\(rawValue)_status" }
 }
@@ -54,6 +55,7 @@ struct ProcessingLogRow: Sendable {
     var event: ProcessingStatus = .idle
     var impact: ProcessingStatus = .idle
     var distill: ProcessingStatus = .idle
+    var personality: ProcessingStatus = .idle
     var activeProcessor: String? = nil   // 非空 = 有处理器持锁
     var checkpoint: [String] = []        // 已处理的 event id
     var heartbeatMs: Int64? = nil        // 持锁处理器的心跳 UTC ms
@@ -66,12 +68,16 @@ struct ProcessingLogRow: Sendable {
         case .event:   return event
         case .impact:  return impact
         case .distill: return distill
+        case .personality: return personality
         }
     }
 
     /// 是否为 distill 锚行（而非某个数据日的行）。锚行只用 `distill` 列；
     /// 日期行只用 `raw` / `event` / `impact` 列。
-    var isAnchor: Bool { date == ProcessingLogStore.distillAnchorDate }
+    var isAnchor: Bool {
+        date == ProcessingLogStore.distillAnchorDate
+            || date == ProcessingLogStore.personalityAnchorDate
+    }
 }
 
 /// processing_log 表的读写客户端。裸 SQLite3、每方法自开连接，风格与
@@ -82,6 +88,10 @@ struct ProcessingLogStore: Sendable {
     /// 锁 / 状态 / retry 记在这一行的 `distill_status` 列。不是真实日期，不会
     /// 与 "yyyy-MM-dd" 冲突。
     static let distillAnchorDate = "_distill_anchor"
+
+    /// personality 锚行的 `date` 值。personality 是 distill 后一站、一次性整体
+    /// 操作(非 per-day),锁 / 状态 / retry 记在这一行的 `personality_status` 列。
+    static let personalityAnchorDate = "_personality_anchor"
 
     let dbPath: String
 
@@ -124,6 +134,7 @@ struct ProcessingLogStore: Sendable {
 
         let sql = """
             SELECT date, raw_status, event_status, impact_status, distill_status,
+                   personality_status,
                    active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms
             FROM processing_log WHERE date = ?
             """
@@ -145,6 +156,7 @@ struct ProcessingLogStore: Sendable {
 
         let sql = """
             SELECT date, raw_status, event_status, impact_status, distill_status,
+                   personality_status,
                    active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms
             FROM processing_log ORDER BY date ASC
             """
@@ -170,15 +182,16 @@ struct ProcessingLogStore: Sendable {
         row.event   = status(2)
         row.impact  = status(3)
         row.distill = status(4)
-        row.activeProcessor = text(5)
-        if let cp = text(6), let data = cp.data(using: .utf8),
+        row.personality = status(5)
+        row.activeProcessor = text(6)
+        if let cp = text(7), let data = cp.data(using: .utf8),
            let ids = try? JSONDecoder().decode([String].self, from: data) {
             row.checkpoint = ids
         }
-        row.heartbeatMs = sqlite3_column_type(stmt, 7) == SQLITE_NULL
-            ? nil : sqlite3_column_int64(stmt, 7)
-        row.retryCount = Int(sqlite3_column_int64(stmt, 8))
-        row.updatedAtMs = sqlite3_column_int64(stmt, 9)
+        row.heartbeatMs = sqlite3_column_type(stmt, 8) == SQLITE_NULL
+            ? nil : sqlite3_column_int64(stmt, 8)
+        row.retryCount = Int(sqlite3_column_int64(stmt, 9))
+        row.updatedAtMs = sqlite3_column_int64(stmt, 10)
         return row
     }
 
@@ -191,8 +204,9 @@ struct ProcessingLogStore: Sendable {
             let sql = """
                 INSERT OR REPLACE INTO processing_log
                   (date, raw_status, event_status, impact_status, distill_status,
+                   personality_status,
                    active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
@@ -203,21 +217,22 @@ struct ProcessingLogStore: Sendable {
             sqlite3_bind_text(stmt, 3, row.event.rawValue, -1, PL_SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 4, row.impact.rawValue, -1, PL_SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 5, row.distill.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 6, row.personality.rawValue, -1, PL_SQLITE_TRANSIENT)
             if let p = row.activeProcessor {
-                sqlite3_bind_text(stmt, 6, p, -1, PL_SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 7, p, -1, PL_SQLITE_TRANSIENT)
             } else {
-                sqlite3_bind_null(stmt, 6)
+                sqlite3_bind_null(stmt, 7)
             }
             let cpJSON = (try? JSONEncoder().encode(row.checkpoint))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-            sqlite3_bind_text(stmt, 7, cpJSON, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 8, cpJSON, -1, PL_SQLITE_TRANSIENT)
             if let hb = row.heartbeatMs {
-                sqlite3_bind_int64(stmt, 8, hb)
+                sqlite3_bind_int64(stmt, 9, hb)
             } else {
-                sqlite3_bind_null(stmt, 8)
+                sqlite3_bind_null(stmt, 9)
             }
-            sqlite3_bind_int64(stmt, 9, Int64(row.retryCount))
-            sqlite3_bind_int64(stmt, 10, Self.nowMs())
+            sqlite3_bind_int64(stmt, 10, Int64(row.retryCount))
+            sqlite3_bind_int64(stmt, 11, Self.nowMs())
             return sqlite3_step(stmt) == SQLITE_DONE
         }
     }

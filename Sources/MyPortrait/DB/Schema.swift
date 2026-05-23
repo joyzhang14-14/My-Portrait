@@ -463,6 +463,20 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v18 — processing_log 第五阶段:personality
+        // ═══════════════════════════════════════════════════════════
+        //
+        // personality 是 distill 之后的最后一站,把 events / 其他 portrait /
+        // 当天 OCR 三源汇聚成 personality concept。anchor-row 设计跟 distill
+        // 一致(`_personality_anchor` 行,只用 `personality_status` 列)。
+        // NOT NULL DEFAULT 'idle':现有行自动 idle。
+        m.registerMigration("v18_processing_log_personality") { db in
+            try db.alter(table: "processing_log") { t in
+                t.add(column: "personality_status", .text).notNull().defaults(to: "idle")
+            }
+        }
+
         return m
     }
 }
