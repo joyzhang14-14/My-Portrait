@@ -11,7 +11,7 @@ import os.log
 /// (`.cronJobRun(jobName:)`, `.appUpdate`, `.captureStall`) and the service
 /// gates it against the config + system authorization status.
 @MainActor
-final class NotificationCenterService {
+final class NotificationCenterService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationCenterService()
 
     enum Kind {
@@ -24,7 +24,22 @@ final class NotificationCenterService {
     private(set) var authorized: Bool = false
     private var didRequest = false
 
-    private init() {}
+    private override init() {
+        super.init()
+        // app 在前台时,默认 macOS 把通知静默放进通知中心,不弹 banner。
+        // 实现 willPresent 显式让 banner + sound 在前台也出现。
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
 
     /// Called from AppDelegate. If the user hasn't been asked yet, prompt
     /// for banner + sound permission. Idempotent — re-calling is cheap.
