@@ -50,13 +50,6 @@ final class TypingObserver {
     /// L3 字符 logger —— 挂在 KeystrokeLedger 同条 CGEventTap callback。
     /// 生产模式注入(写 keystroke_log),dev/observe 模式 nil。
     private let keystrokeCharLogger: KeystrokeCharLogger?
-    #if DEBUG
-    /// 调研 probe —— 只 DEBUG build 跑,捕获键码 + Unicode 字符 + app
-    /// 到 `~/Library/Logs/MyPortrait/keystroke-probe.jsonl`。详见 KeystrokeProbe。
-    private let keystrokeProbe = KeystrokeProbe()
-    /// 同上调研 —— 100ms 轮询焦点元素的选择状态。详见 SelectionProbe。
-    private let selectionProbe = SelectionProbe()
-    #endif
 
     /// 旧 `--typing-observe-m3` dev flag 的消费口（v14 已不喂 L2，仅编译兼容）。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
@@ -115,10 +108,6 @@ final class TypingObserver {
         } catch {
             pipelineLog.warning("KeystrokeLedger.start failed: \(String(describing: error), privacy: .public)")
         }
-        #if DEBUG
-        keystrokeProbe.start()
-        selectionProbe.start()
-        #endif
         pasteboardMonitor.start()
         logStartupBanner()
 
@@ -165,10 +154,6 @@ final class TypingObserver {
         pasteboardMonitor.stop()
         ledger.charLogger = nil
         ledger.stop()
-        #if DEBUG
-        keystrokeProbe.stop()
-        selectionProbe.stop()
-        #endif
         // detach 串进 op 链 —— 等在飞的 AX op 跑完再清，避免 CFRelease 撞用。
         enqueueAXOp { [weak self] in self?.detach() }
         print("[TypingObserver] stopped")
