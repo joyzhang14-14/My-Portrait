@@ -1,42 +1,77 @@
 import Foundation
 
-/// `--import-default-cron-jobs` — one-time entry point that seeds two built-in
-/// cronJobs into CronJobStore (UserDefaults `MyPortrait.cronJobs.v1`).
+/// `--import-default-cron-jobs` — 一次性入口,把两个内置 cron job 写到
+/// CronJobStore(对应 ~/.portrait/cron_jobs/ 里的两个目录)。
 ///
-/// Idempotent: cronJobs are matched by `name`, so re-running skips ones that
-/// already exist. Prints what it did and exits.
+/// 幂等:按 `name` 去重,已存在则跳过。Prompts 是从 screenpipe 的两个真实
+/// activated pipe(Obsidian-updater + todo-list-assistant)迁过来的,
+/// todo 那个改成了用 My-Portrait 自带的 TimelineContext 注入
+/// (`window: lastHours(1)`)而不是 screenpipe 的 localhost:3030 HTTP API。
 enum DefaultCronJobsImportCLI {
 
     private static let obsidianPrompt = """
     每天晚上检查我的 Obsidian 仓库并执行 git commit + git push。
 
     要求:
-    1. 自动定位并使用我当前的 Obsidian vault / git 仓库位置（环境变量 OBSIDIAN_VAULT_PATH 给出了路径,优先用它）。
-    2. 先检查是否有未提交变更;如果没有,就简短说明今天没有变化并结束。
-    3. 如果有变化,分析变更内容后生成一个准确、简洁的 commit message,明确描述本次修改了什么。
-    4. 执行 git add -A、git commit、git push。
-    5. 如果 push 失败,说明失败原因。
+    1. 用环境变量 OBSIDIAN_VAULT_PATH 定位 Obsidian vault / git 仓库位置(这是从 Settings → Connections → Obsidian 配的路径,会自动注入到环境变量里)。
+    2. 先 cd 到该路径并执行 git status,检查是否有未提交变更;如果没有,简短说明今天没有变化并结束。
+    3. 如果有变化,跑 git diff 看具体内容,生成准确、简洁的 commit message,明确描述本次修改了什么。
+    4. 执行 git add -A、git commit -m "<message>"、git push。
+    5. 如果 push 失败,说明失败原因(网络/凭证/冲突)。
     6. 不要编造修改内容,commit message 必须基于真实 diff。
     7. 输出本次处理结果:是否有变更、commit message、push 是否成功。
     """
 
     private static let followupPrompt = """
-    你是"待办跟进"助手。基于下面提供的"最近 1 小时活动"上下文,提取需要跟进的行动项:
-    - 我做出的承诺（"我会发那个""我跟进一下"）
-    - 分配给我的任务
+    你是"待办跟进"助手。每小时跑一次。
+
+    **输入**:本 prompt 之前已经自动注入了"最近 1 小时活动"上下文(屏幕 OCR、转录、打字记录)。直接读它,不要再去 curl 任何 HTTP 端点。
+
+    ## 第 1 步:读取已有 todo 文件
+
+    读取 ~/.portrait/cron_jobs/follow-up-reminders/output/todos.md。文件不存在就当作全新开始。
+
+    ## 第 2 步:从上下文里提取行动项
+
+    扫上面注入的"最近 1 小时活动",找:
+    - 我做出的承诺("我会发那个""我跟进一下"等)
+    - 别人分配给我的任务
     - 提到的截止日期
     - 我还没回的消息
-    - 失败的任务（报错、构建挂掉）
+    - 失败/报错的任务(构建挂了、命令报错)
 
-    如果上下文里没有任何行动项,直接说"暂无新待办"并结束,不要编造。
+    **如果上下文为空 / 没有任何行动项,直接说"暂无新待办"并结束,不要更新文件,不要编造。**
 
-    否则输出一个待办清单,按这四组分类:
-    ## 紧急（今天做）
-    ## 本周
-    ## 等待中（等某人 → 何时回查）
-    ## 已完成（最近 3 天)
+    ## 第 3 步:更新 todo 文件
 
-    规则:同一任务不重复列;有完成证据的标完成;7 天前的项去掉。
+    写入 ~/.portrait/cron_jobs/follow-up-reminders/output/todos.md,Markdown 格式:
+
+    ```markdown
+    # Todo List
+    Last updated: <时间戳>
+
+    ## Urgent (do today)
+    - [ ] Task — 出处:在哪/谁/什么时候
+
+    ## This Week
+    - [ ] Task — 出处
+
+    ## Waiting on
+    - [ ] Waiting on <人> — 何时回查
+
+    ## Completed (last 3 days)
+    - [x] Task — 完成于 <日期>
+    ```
+
+    **规则**:
+    - 去重:同一任务不要重复列
+    - 看到完成证据(邮件发了、回了消息、构建过了)→ 标完成
+    - 7 天前的项移除
+    - 不要编造、不要无中生有
+
+    ## 第 4 步:输出本次处理摘要
+
+    简短说本次加了几条、移了几条、改了几条状态。
     """
 
     static func run() {
