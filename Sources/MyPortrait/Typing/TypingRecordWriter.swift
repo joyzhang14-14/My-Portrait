@@ -76,8 +76,10 @@ final class TypingRecordWriter {
     nonisolated static let burstIntervalMs: Double = 30
     /// 单次 AX 跳变最小值 —— 低于这个不查,正常打字会自然在这个量级。
     nonisolated static let oversizedDeltaFloor = 50
-    /// 每个按键最多能产生的字符数(含 IME 选词)—— 超出 = 不可能是打字。
-    nonisolated static let oversizedDeltaCharsPerKey = 10
+    /// 每个按键最多产生 1 个字符 —— 一键一字。
+    /// 注:跳变小于 `oversizedDeltaFloor` 不查,所以中文 IME 短 commit
+    /// (你好世界 4 字 / 1 键 之类)天然过关,不会被这条误拦。
+    nonisolated static let oversizedDeltaCharsPerKey = 1
     nonisolated static let blacklistTTLSec: TimeInterval = 3600
     nonisolated static let pasteAssocSec: TimeInterval = 0.5
     /// continuation 匹配比首 / 尾各这么多字 —— 同 element 内足够辨识。
@@ -388,11 +390,14 @@ final class TypingRecordWriter {
     }
 
     /// 「单次 AX 跳变远超附近按键能产生的字符量」判定。
-    /// - `jumpChars > oversizedDeltaFloor` (50)：跳变够大值得查
-    /// - `jumpChars > keystrokeCount * oversizedDeltaCharsPerKey`：按键数撑不起这量
+    /// - `jumpChars > oversizedDeltaFloor` (50):跳变够大值得查
+    /// - `jumpChars > keystrokeCount`(每键 1 字封顶):按键撑不起这量
+    ///
+    /// 一键一字是用户真实输入的硬上限。`floor=50` 让中文 IME 短 commit、
+    /// 小 autocomplete 这类天然过关;超过 floor 后,按键计数才严格生效。
     ///
     /// 触发场景:Obsidian 切 note 整段替换、Electron 编辑器程序写入、
-    /// 插件 / autosave / 系统输入法以外的字符注入。
+    /// 插件 / autosave / snippet expand / 大段 autocomplete。
     nonisolated static func isOversizedDelta(jumpChars: Int, keystrokeCount: Int) -> Bool {
         jumpChars > oversizedDeltaFloor
             && jumpChars > keystrokeCount * oversizedDeltaCharsPerKey

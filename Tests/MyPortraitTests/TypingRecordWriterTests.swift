@@ -79,18 +79,21 @@ final class TypingRecordWriterTests: XCTestCase {
     }
 
     func testIsOversizedDelta() {
-        // 1258 字跳变 + 0 按键(Obsidian 切 note) → 触发
+        // 1258 字 + 0 按键(Obsidian 切 note) → 触发
         XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 1258, keystrokeCount: 0))
-        // 1258 字 + 1 按键(用户按了一下箭头,Obsidian 注入内容) → 仍触发
+        // 1258 字 + 1 按键(用户按了一下箭头 + 程序注入) → 仍触发
         XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 1258, keystrokeCount: 1))
-        // 跳变 < floor 50,即使 0 按键也不算 —— 正常打字会自然出现这种量级
+        // 跳变 ≤ floor 50,即使 0 按键也不算
         XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 50, keystrokeCount: 0))
-        // 51 字 / 6 按键(每键 < 10 字) —— 正常中文 IME 打字,不触发
-        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 51, keystrokeCount: 6))
-        // 100 字 + 10 按键 = 边界(10 字/键)—— 刚好不触发
-        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 100, keystrokeCount: 10))
-        // 101 字 + 10 按键 —— 超阈值,触发
-        XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 101, keystrokeCount: 10))
+        // 中文 IME 短 commit:「你好世界」4 字 + 1 键 → 远低 floor,不触发
+        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 4, keystrokeCount: 1))
+        // 边界:51 字 + 51 键(用户用键盘连打 51 字) → 不触发
+        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 51, keystrokeCount: 51))
+        // snippet expand:60 字 + 6 键 —— 6 键不可能产 60 字,触发
+        XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 60, keystrokeCount: 6))
+        // 52 字 + 51 键(快打多出 1 字,可能 IME 选词) → 触发
+        // ↑ 这条边界严苛,但用户确认要 1:1。floor=50 已经保护正常 IME 用法。
+        XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 52, keystrokeCount: 51))
     }
 
     func testStripBlacklist() {
