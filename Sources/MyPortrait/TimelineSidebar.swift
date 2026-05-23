@@ -72,7 +72,7 @@ struct TimelineSidebar: View {
                                 symbol: "clock",
                                 text: "Pick a moment in the timeline\nto see context.")
                         }
-                    } else if selection == .home {
+                    } else if selection == .home || selection == .cronJobs {
                         cronJobsSection
                         recentsSection
                     } else if selection == .memories {
