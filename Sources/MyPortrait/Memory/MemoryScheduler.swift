@@ -50,8 +50,8 @@ final class MemoryScheduler {
     /// distill 锚行的 date 值。anchor 是 distill 这个 processor 的锁身份，与
     /// 运行频率无关。定义 / 语义见 `ProcessingLogStore.distillAnchorDate`。
     private let distillAnchor = ProcessingLogStore.distillAnchorDate
-    /// personality 锚行的 date 值。跟 distill 同样的 anchor-row 模式。
-    private let personalityAnchor = ProcessingLogStore.personalityAnchorDate
+    // personality 不用 anchor —— 它是 per-day 流水线(每天的 events 各自有
+    // 各自的 personality_status 列),进度直接落在日期行里。
 
     /// 心跳超过这个时长视为死锁。默认 10min（单日 Backfill 多轮 LLM 可能 >5min
     /// 仍在正常跑）。可经 env `MYPORTRAIT_SCHEDULER_STALE_MS` 覆盖（测试用）。
@@ -191,10 +191,9 @@ final class MemoryScheduler {
         return (store.row(for: distillAnchor)?.distill ?? .idle).needsWork
     }
 
-    /// personality job 现在有没有活干（personality 哨兵 needsWork）。
+    /// personality job 现在有没有活干（per-day 待处理列表非空）。
     func personalityJobHasWork() -> Bool {
-        _ = store.ensureRow(for: personalityAnchor)
-        return (store.row(for: personalityAnchor)?.personality ?? .idle).needsWork
+        !pendingPersonalityDays(cap: dayCap).isEmpty
     }
 
     // MARK: - event job：event 聚类 + impact 评分（per-day）
@@ -256,6 +255,17 @@ final class MemoryScheduler {
         _ = store.ensureRow(for: distillAnchor)
         store.setStatus(date: distillAnchor, stage: .distill, status: .pending)
 
+        // 同时把这些天的 personality_status 标 pending —— 事件变了,
+        // 那天的 personality 也得重跑(per-day,跟 distill 不一样)。
+        for day in days {
+            let ds = ProcessingLogStore.dayString(day)
+            let row = store.row(for: ds)
+            // 仅 event+impact 都 complete 的天才有意义跑 personality。
+            if row?.event == .complete, row?.impact == .complete {
+                store.setStatus(date: ds, stage: .personality, status: .pending)
+            }
+        }
+
         return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 
@@ -282,44 +292,38 @@ final class MemoryScheduler {
             let r = try await PortraitDistiller(model: self.model).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
-        // distill 完一站,personality 该重跑——锚行重新标 pending,让
-        // runPersonalityJob 知道有新内容要汇聚 tag。
-        _ = store.ensureRow(for: personalityAnchor)
-        store.setStatus(date: personalityAnchor, stage: .personality, status: .pending)
         return .ran(days: [distillAnchor])
     }
 
-    // MARK: - personality job:三源 personality 汇聚(events + portraits + OCR)
+    // MARK: - personality job:per-day events → personality(events + OCR 验证)
 
-    /// 跑一次完整的 PersonalityRefresh,锚行 `_personality_anchor` 记状态,
-    /// 跟 distill 一样的 anchor 模式。跑前对 portrait/personality/ 拍快照,
-    /// 跑完进 Pending Review(Reject 还原 / Approve 保留)。
+    /// 跑 personality refresh,**per-day**:遍历 event+impact 都 complete、
+    /// 但 personality 还需做的天,最多 `dayCap` 个(从最旧未做开始)。跟
+    /// distill(anchor 模式)不同 —— personality 跟 events 一样按天滚动,
+    /// 进度落在每天那行的 `personality_status` 列。
     @discardableResult
     func runPersonalityJob() async -> JobOutcome {
         guard !isRunning else { return .busy }
         isRunning = true
         defer { isRunning = false }
 
-        _ = store.ensureRow(for: personalityAnchor)
-        let p = store.row(for: personalityAnchor)?.personality ?? .idle
-        guard p.needsWork else {
-            schedLog.info("personality job: personality is \(p.rawValue, privacy: .public) — skip")
+        let days = pendingPersonalityDays(cap: dayCap)
+        guard !days.isEmpty else {
+            schedLog.info("personality job: no pending days")
             return .noWork
         }
-        print("[Scheduler] personality job — refreshing")
+        print("[Scheduler] personality job — \(days.count) day(s) to process")
 
-        // 决定要 refresh 哪一天:取今天的 UTC 日(三源里 events / OCR 是
-        // 当日的、portraits 是全量)。锚行模式下"跑一次就 complete",所以
-        // 单次跑当天就够,新事件到了 distill 再把 anchor 标 pending 重跑。
-        let day = utcCalendar().startOfDay(for: Date())
-
-        await runStep(date: personalityAnchor, stage: .personality,
-                      processor: "personality", rollbackDay: nil) {
-            let r = try await PersonalityRefresh(model: self.model).refresh(day: day)
-            print("[Scheduler] personality job: events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) (≥\(PersonalityRefresh.minOCRFrames) frames) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
-            return .success
+        for day in days {
+            let ds = ProcessingLogStore.dayString(day)
+            await runStep(date: ds, stage: .personality,
+                          processor: "personality", rollbackDay: nil) {
+                let r = try await PersonalityRefresh(model: self.model).refresh(day: day)
+                print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
+                return .success
+            }
         }
-        return .ran(days: [personalityAnchor])
+        return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 
     // MARK: - 单步执行（持锁 + 心跳 + 结果落库）
@@ -527,12 +531,37 @@ final class MemoryScheduler {
         }
     }
 
-    /// personality 是否处于待重试态（failed / budget_deferred）。
+    /// personality 是否处于待重试态(任一天的 personality 失败/撞额度)。
     private func personalityNeedsRetry() -> Bool {
-        switch store.row(for: personalityAnchor)?.personality {
-        case .failed, .budgetDeferred: return true
-        default: return false
+        for row in store.allRows() {
+            if row.isAnchor { continue }
+            switch row.personality {
+            case .failed, .budgetDeferred: return true
+            default: continue
+            }
         }
+        return false
+    }
+
+    /// personality job 的候选天:event+impact 都 complete、personality 还
+    /// 需做(idle / pending / failed / budget_deferred);跳 in_progress /
+    /// complete / dead_letter。按日期升序、上限 `cap`。
+    func pendingPersonalityDays(cap: Int) -> [Date] {
+        let cal = utcCalendar()
+        var days: [Date] = TimelineDB().availableDays(monthsBack: 3)
+            .compactMap { cal.date(from: $0) }
+        days.sort()
+
+        var out: [Date] = []
+        for day in days {
+            let ds = ProcessingLogStore.dayString(day)
+            guard let row = store.row(for: ds) else { continue }
+            guard row.event == .complete, row.impact == .complete else { continue }
+            guard row.personality.needsWork else { continue }
+            out.append(day)
+            if out.count >= cap { break }
+        }
+        return out
     }
 
     /// 原始数据"收齐"：数据日 UTC 结束后再过 `rawGraceSeconds`。
