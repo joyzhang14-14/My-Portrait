@@ -71,7 +71,9 @@ struct ConceptBody: Equatable, Sendable {
             else { for it in items { out += "- \(it)\n" } }
         }
         sec("events", events)
-        sec("portraits", portraits)
+        // portraits 源已下线;仅当老 concept 里残留时才渲染,空段直接省略
+        // 不再写 "- (none)" 占位行。
+        if !portraits.isEmpty { sec("portraits", portraits) }
         sec("ocr", ocr)
         return out
     }
