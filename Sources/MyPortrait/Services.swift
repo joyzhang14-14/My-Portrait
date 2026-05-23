@@ -125,6 +125,12 @@ final class Services {
             store: typingStore,
             keystrokeStore: keystrokeStore
         )
+
+        // 写作采集 worker(共用同一 DatabasePool)。注册到 WritingCaptureWorker.shared
+        // 给 UI(MemorySettingsView)用。
+        let writingStore = WritingCaptureStore(dbPool: dbImpl.dbPool)
+        let writingWorker = WritingCaptureWorker(store: writingStore)
+        WritingCaptureWorker.shared = writingWorker
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。

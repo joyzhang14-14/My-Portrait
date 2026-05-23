@@ -49,6 +49,13 @@ struct MemorySettingsView: View {
     @State private var personalityChanges: [MemoryStaging.StagedChange] = []
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
+    // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
+    // —— 不共用 MemoryStaging,自己一套)
+    @State private var writingCaptureRunning: Bool = false
+    @State private var writingCaptureStatus: String = ""
+    @State private var writingCaptureSummaries: [WritingCaptureDayRunSummary] = []
+    @State private var writingCaptureConfirm: Bool = false
+
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
         case parameter = "Parameter"
@@ -72,6 +79,7 @@ struct MemorySettingsView: View {
                 case .scheduler:
                     schedulerSection
                     manualRunSection
+                    writingCaptureSection
                     reviewSection
                     attentionSection
                 case .changelog:
@@ -349,6 +357,106 @@ struct MemorySettingsView: View {
             }
         }
     }
+
+    // MARK: - Writing Capture(独立于 Memory pipeline 的 manualRunSection)
+
+    /// 写作采集 worker 的 Run now UI。仿照 manualRunSection,但状态完全独立
+    /// (走 WritingCaptureWorker.shared,不走 MemoryStaging)。
+    private var writingCaptureSection: some View {
+        section(
+            title: "Writing capture",
+            blurb: "Reads typing_events / keystroke_log / OCR frames for unprocessed UTC days, runs the LLM (gpt-5.4-mini) Pass 1 (context timeline) + Pass 2 (multi-source fusion), and stages writing_records for review. Approve/Reject UI shows below once a day is in pending_review."
+        ) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Process writing capture")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Runs the writing-capture worker on all unprocessed days. Uses LLM tokens.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Button(writingCaptureRunning ? "Running…" : "Run") {
+                    writingCaptureConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(writingCaptureRunning || WritingCaptureWorker.shared == nil)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if writingCaptureRunning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Pass 1 + Pass 2 on unprocessed days — may take a few minutes…")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 6)
+            }
+            if !writingCaptureStatus.isEmpty {
+                Text(writingCaptureStatus)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+            }
+            if !writingCaptureSummaries.isEmpty {
+                Divider().padding(.vertical, 4)
+                ForEach(writingCaptureSummaries, id: \.date) { s in
+                    HStack {
+                        Text(s.date).font(.system(size: 12, design: .monospaced))
+                        Spacer(minLength: 12)
+                        Text("\(s.recordsCount) records / \(s.discardedCount) discarded")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Text(s.status.rawValue)
+                            .font(.system(size: 11))
+                            .foregroundStyle(s.status == .failed ? .red : .secondary)
+                    }
+                }
+            }
+        }
+        .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
+            Button("Run", role: .none) {
+                let task = Task { @MainActor in await runWritingCapture() }
+                runTask = task
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Process all unprocessed UTC days with Pass 1 (context) + Pass 2 (fusion) LLM calls. Output is staged for review.")
+        }
+    }
+
+    @MainActor
+    private func runWritingCapture() async {
+        guard let worker = WritingCaptureWorker.shared else {
+            writingCaptureStatus = "Worker not initialized (Services not started yet?)."
+            return
+        }
+        writingCaptureRunning = true
+        writingCaptureStatus = "Running…"
+        defer { writingCaptureRunning = false }
+        do {
+            let summaries = try await worker.runUnprocessedDays()
+            writingCaptureSummaries = summaries
+            if summaries.isEmpty {
+                writingCaptureStatus = "All days already processed — nothing to run."
+            } else {
+                let approved = summaries.filter { $0.status == .approved }.count
+                let pending = summaries.filter { $0.status == .pendingReview }.count
+                let failed = summaries.filter { $0.status == .failed }.count
+                writingCaptureStatus =
+                    "Done. \(summaries.count) day(s): \(approved) auto-approved (empty), \(pending) pending review, \(failed) failed."
+            }
+        } catch {
+            writingCaptureStatus = "Run failed: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Memory pipeline 的 manualRunSection(原有)
 
     private var manualRunSection: some View {
         section(
