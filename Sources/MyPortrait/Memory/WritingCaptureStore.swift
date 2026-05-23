@@ -74,6 +74,16 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// 查所有 status = 'pending_review' 的天,按 date 升序。给 UI Pending review 区。
+    func fetchPendingReviewDays() throws -> [WritingCaptureRun] {
+        try dbPool.read { db in
+            try WritingCaptureRun.fetchAll(
+                db,
+                sql: "SELECT * FROM writing_capture_runs WHERE status = 'pending_review' ORDER BY date_utc ASC"
+            )
+        }
+    }
+
     func fetchRun(date: String) throws -> WritingCaptureRun? {
         try dbPool.read { db in
             try WritingCaptureRun.fetchOne(

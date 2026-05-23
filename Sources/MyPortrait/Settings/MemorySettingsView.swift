@@ -55,6 +55,10 @@ struct MemorySettingsView: View {
     @State private var writingCaptureStatus: String = ""
     @State private var writingCaptureSummaries: [WritingCaptureDayRunSummary] = []
     @State private var writingCaptureConfirm: Bool = false
+    /// pending_review 的天 + 各自 staged 内容,UI 同步 reload 后展示。
+    @State private var writingCapturePending: [WritingCaptureRun] = []
+    /// 用户点开某天后展示的 staged records(preview sheet)。
+    @State private var writingCapturePreviewDate: String? = nil
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -120,6 +124,43 @@ struct MemorySettingsView: View {
         attention = MemoryScheduler.shared.attentionDays()
         changelog = ProcessingLogStore().recentChangelog(limit: 50)
         refreshStaging()
+        refreshWritingCapture()
+    }
+
+    /// 重新从 DB 拉 pending_review 那几天。Run / Approve / Reject 后都调一次。
+    private func refreshWritingCapture() {
+        guard let worker = WritingCaptureWorker.shared else { return }
+        let store = worker.store
+        Task.detached(priority: .userInitiated) {
+            let pending = (try? store.fetchPendingReviewDays()) ?? []
+            await MainActor.run {
+                writingCapturePending = pending
+            }
+        }
+    }
+
+    @MainActor
+    private func approveWritingCapture(date: String) async {
+        guard let worker = WritingCaptureWorker.shared else { return }
+        do {
+            let copied = try await worker.approveDay(date: date)
+            writingCaptureStatus = "Approved \(date) — \(copied) record(s) → writing_records."
+        } catch {
+            writingCaptureStatus = "Approve \(date) failed: \(error.localizedDescription)"
+        }
+        refreshWritingCapture()
+    }
+
+    @MainActor
+    private func rejectWritingCapture(date: String) async {
+        guard let worker = WritingCaptureWorker.shared else { return }
+        do {
+            try await worker.rejectDay(date: date)
+            writingCaptureStatus = "Rejected \(date) — staged dropped, will re-run next time."
+        } catch {
+            writingCaptureStatus = "Reject \(date) failed: \(error.localizedDescription)"
+        }
+        refreshWritingCapture()
     }
 
     private func refreshStaging() {
@@ -418,6 +459,40 @@ struct MemorySettingsView: View {
                     }
                 }
             }
+
+            // Pending review:每天一行,Approve / Reject 按钮 + 点击 preview
+            if !writingCapturePending.isEmpty {
+                Divider().padding(.vertical, 6)
+                Text("Pending review")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(writingCapturePending, id: \.dateUtc) { run in
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(run.dateUtc).font(.system(size: 12, design: .monospaced))
+                            Text("\(run.recordsCount ?? 0) records / \(run.discardedCount ?? 0) discarded — click to preview")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            writingCapturePreviewDate = run.dateUtc
+                        }
+                        Button("Reject") {
+                            Task { @MainActor in await rejectWritingCapture(date: run.dateUtc) }
+                        }
+                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                        Button("Approve") {
+                            Task { @MainActor in await approveWritingCapture(date: run.dateUtc) }
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                }
+            }
+        }
+        .sheet(item: $writingCapturePreviewDate.mappedToIdentifiable) { wrapped in
+            WritingCapturePreview(date: wrapped.id)
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
@@ -454,6 +529,7 @@ struct MemorySettingsView: View {
         } catch {
             writingCaptureStatus = "Run failed: \(error.localizedDescription)"
         }
+        refreshWritingCapture()
     }
 
     // MARK: - Memory pipeline 的 manualRunSection(原有)
@@ -936,5 +1012,131 @@ private struct StagedChangePreview: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Writing Capture Preview Sheet
+
+/// 写作采集 Pending review 的 preview sheet —— 显示某天 staged 的所有
+/// writing_records(text + edit_log + context_summary + source / confidence)。
+private struct WritingCapturePreview: View {
+    let date: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var records: [StagedRecordRow] = []
+    @State private var loadError: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Writing capture · \(date)")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Close") { dismiss() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let err = loadError {
+                        Text("Load failed: \(err)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 12)
+                    } else if records.isEmpty {
+                        Text("(no staged records — should not happen if status=pending_review)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                    } else {
+                        ForEach(records, id: \.id) { row in
+                            recordCard(row)
+                        }
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+        }
+        .frame(width: 720, height: 520)
+        .task { load() }
+    }
+
+    private func recordCard(_ row: StagedRecordRow) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(row.app).font(.system(size: 11, design: .monospaced))
+                if let u = row.url, !u.isEmpty {
+                    Text(u).font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text(row.source).font(.system(size: 10))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.15))
+                    .cornerRadius(4)
+                Text(String(format: "conf %.2f", row.confidence))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            if let s = row.contextSummary, !s.isEmpty {
+                Text(s).font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
+            Text(row.text)
+                .font(.system(size: 12))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Edit log (raw JSON):")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            Text(row.editLog)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .lineLimit(8)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.05))
+        .cornerRadius(6)
+        .padding(.horizontal, 12)
+    }
+
+    private func load() {
+        guard let worker = WritingCaptureWorker.shared else {
+            loadError = "Worker not initialized"
+            return
+        }
+        let store = worker.store
+        let date = self.date
+        Task.detached(priority: .userInitiated) {
+            do {
+                let rows = try store.fetchStagedRecords(date: date)
+                await MainActor.run { self.records = rows }
+            } catch {
+                await MainActor.run { self.loadError = error.localizedDescription }
+            }
+        }
+    }
+}
+
+// MARK: - Optional<String> .sheet(item:) 适配
+
+/// SwiftUI .sheet(item:) 要 Identifiable,Optional<String> 自身不满足。
+/// 包一层 IdentifiableString。
+private struct IdentifiableString: Identifiable {
+    let id: String
+}
+
+private extension Binding where Value == Optional<String> {
+    /// 把 Optional<String> 视图转成 Optional<IdentifiableString>(双向绑定)。
+    var mappedToIdentifiable: Binding<IdentifiableString?> {
+        Binding<IdentifiableString?>(
+            get: { wrappedValue.map(IdentifiableString.init(id:)) },
+            set: { wrappedValue = $0?.id }
+        )
     }
 }
