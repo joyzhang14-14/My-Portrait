@@ -235,7 +235,11 @@ struct TimelineSidebar: View {
                             isRenaming: renamingConvId == conv.id,
                             renameDraft: $renameDraft,
                             onTap: {
-                                if renamingConvId == nil { chat.switchTo(conv.id) }
+                                if renamingConvId == nil {
+                                    chat.switchTo(conv.id)
+                                    // 若主面板正停在 CronJobsView,切回 Home 让聊天显示出来。
+                                    if selection == .cronJobs { selection = .home }
+                                }
                             },
                             onStartRename: {
                                 renameDraft = conv.title
