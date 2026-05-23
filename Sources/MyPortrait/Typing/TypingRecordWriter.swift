@@ -45,6 +45,9 @@ final class TypingRecordWriter {
         var windowHadBurst = false
         var windowHadPaste = false
         var windowHadKeystroke = false
+        /// 单次 AX 跳变远超附近按键能产生的字符量 —— Electron 切 note、
+        /// 程序注入、插件改值 等场景。`isOversizedDelta` 判定。
+        var windowOversizedDelta = false
 
         var debounceTimer: Timer?
         var flushTimer: Timer?
@@ -71,6 +74,10 @@ final class TypingRecordWriter {
 
     nonisolated static let burstCharThreshold = 10
     nonisolated static let burstIntervalMs: Double = 30
+    /// 单次 AX 跳变最小值 —— 低于这个不查,正常打字会自然在这个量级。
+    nonisolated static let oversizedDeltaFloor = 50
+    /// 每个按键最多能产生的字符数(含 IME 选词)—— 超出 = 不可能是打字。
+    nonisolated static let oversizedDeltaCharsPerKey = 10
     nonisolated static let blacklistTTLSec: TimeInterval = 3600
     nonisolated static let pasteAssocSec: TimeInterval = 0.5
     /// continuation 匹配比首 / 尾各这么多字 —— 同 element 内足够辨识。
@@ -150,12 +157,20 @@ final class TypingRecordWriter {
         let now = CACurrentMediaTime()
         let intervalMs = (now - rec.lastValueChangeTs) * 1000.0
         let prevSeen = rec.pendingValue ?? rec.lastValueSnapshot
-        if Self.isBurst(jumpChars: abs(newValue.count - prevSeen.count), intervalMs: intervalMs) {
+        let jumpChars = abs(newValue.count - prevSeen.count)
+        if Self.isBurst(jumpChars: jumpChars, intervalMs: intervalMs) {
             rec.windowHadBurst = true
         }
         let corrWindowSec =
             Double(ConfigStore.shared.recording.typingKeyCorrelationWindowMs) / 1000.0
-        if ledger.hasKeystroke(within: corrWindowSec) { rec.windowHadKeystroke = true }
+        let keystrokeCount = ledger.recentTimestamps(within: corrWindowSec).count
+        if keystrokeCount > 0 { rec.windowHadKeystroke = true }
+        // 一次跳变 50+ 字,但相关窗口内按键数撑不起来 —— 不是打字,可能是
+        // Electron 切 note / 程序写入 / 插件 / autosave。
+        if Self.isOversizedDelta(jumpChars: jumpChars, keystrokeCount: keystrokeCount) {
+            rec.windowOversizedDelta = true
+            onDevLog?("oversize→noise bundle=\(rec.bundleId) jump=\(jumpChars) keys=\(keystrokeCount)")
+        }
         if ledger.hasPaste(within: Self.pasteAssocSec) { rec.windowHadPaste = true }
 
         rec.lastValueChangeTs = now
@@ -177,10 +192,12 @@ final class TypingRecordWriter {
         let prev = rec.lastValueSnapshot
         guard prev != pending else { return }
 
-        let windowNoise = rec.windowHadBurst || rec.windowHadPaste || !rec.windowHadKeystroke
+        let windowNoise = rec.windowHadBurst || rec.windowHadPaste
+            || !rec.windowHadKeystroke || rec.windowOversizedDelta
         rec.windowHadBurst = false
         rec.windowHadPaste = false
         rec.windowHadKeystroke = false
+        rec.windowOversizedDelta = false
         rec.lastValueSnapshot = pending
 
         let (_, deleted, added, _) = TextDiff.sandwich(prev: prev, new: pending)
@@ -368,6 +385,17 @@ final class TypingRecordWriter {
     /// burst 判定 —— 单次 value-change 的字符跳变 + 间隔。
     nonisolated static func isBurst(jumpChars: Int, intervalMs: Double) -> Bool {
         jumpChars > burstCharThreshold && intervalMs < burstIntervalMs
+    }
+
+    /// 「单次 AX 跳变远超附近按键能产生的字符量」判定。
+    /// - `jumpChars > oversizedDeltaFloor` (50)：跳变够大值得查
+    /// - `jumpChars > keystrokeCount * oversizedDeltaCharsPerKey`：按键数撑不起这量
+    ///
+    /// 触发场景:Obsidian 切 note 整段替换、Electron 编辑器程序写入、
+    /// 插件 / autosave / 系统输入法以外的字符注入。
+    nonisolated static func isOversizedDelta(jumpChars: Int, keystrokeCount: Int) -> Bool {
+        jumpChars > oversizedDeltaFloor
+            && jumpChars > keystrokeCount * oversizedDeltaCharsPerKey
     }
 
     /// 一段 session 的净新增内容 = `sandwich(sessionStart, 最终值).newMid`。

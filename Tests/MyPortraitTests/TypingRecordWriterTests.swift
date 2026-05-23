@@ -78,6 +78,21 @@ final class TypingRecordWriterTests: XCTestCase {
         XCTAssertFalse(TypingRecordWriter.isBurst(jumpChars: 11, intervalMs: 30))
     }
 
+    func testIsOversizedDelta() {
+        // 1258 字跳变 + 0 按键(Obsidian 切 note) → 触发
+        XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 1258, keystrokeCount: 0))
+        // 1258 字 + 1 按键(用户按了一下箭头,Obsidian 注入内容) → 仍触发
+        XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 1258, keystrokeCount: 1))
+        // 跳变 < floor 50,即使 0 按键也不算 —— 正常打字会自然出现这种量级
+        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 50, keystrokeCount: 0))
+        // 51 字 / 6 按键(每键 < 10 字) —— 正常中文 IME 打字,不触发
+        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 51, keystrokeCount: 6))
+        // 100 字 + 10 按键 = 边界(10 字/键)—— 刚好不触发
+        XCTAssertFalse(TypingRecordWriter.isOversizedDelta(jumpChars: 100, keystrokeCount: 10))
+        // 101 字 + 10 按键 —— 超阈值,触发
+        XCTAssertTrue(TypingRecordWriter.isOversizedDelta(jumpChars: 101, keystrokeCount: 10))
+    }
+
     func testStripBlacklist() {
         XCTAssertEqual(TypingRecordWriter.stripBlacklist("aXXbXX", blacklist: ["XX"]).text, "abXX")
         // 长度倒序：先减 XXXX，剩 "ab"，"XX" 找不到。
