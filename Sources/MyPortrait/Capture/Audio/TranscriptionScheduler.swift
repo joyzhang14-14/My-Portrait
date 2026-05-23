@@ -203,7 +203,7 @@ actor TranscriptionScheduler {
     /// 读设置里的转录配置（含云引擎凭据，从 SecretStore 解出）。
     private static func transcriptionConfig() async -> TranscribeSettings {
         await MainActor.run {
-            let a = ConfigStore.shared.current.recording.audio
+            let a = ConfigStore.shared.current.capture.audio
             let lang = a.languages.first.flatMap { $0.isEmpty ? nil : $0 }
             func secret(_ ref: String) -> String {
                 guard !ref.isEmpty, let d = SecretStore.shared.get(ref) else { return "" }

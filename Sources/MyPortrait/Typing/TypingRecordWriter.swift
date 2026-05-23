@@ -139,7 +139,7 @@ final class TypingRecordWriter {
         guard let rec = state[key] else { return }
 
         // 发送检测：输入框被清空 + 之前有内容 + 刚按过回车 = 聊天 app 发出消息。
-        let cfg = ConfigStore.shared.recording
+        let cfg = ConfigStore.shared.capture
         // 发送检测：只对 Enter-to-send 列表里的 app。列表内，回车后第一次
         // value-change 即视为发送（Shift+Enter 不算回车，见 KeystrokeLedger）。
         // 不靠「输入框变空」判断 —— 有些 app（Claude desktop）空框是占位符
@@ -172,7 +172,7 @@ final class TypingRecordWriter {
             rec.windowHadBurst = true
         }
         let corrWindowSec =
-            Double(ConfigStore.shared.recording.typingKeyCorrelationWindowMs) / 1000.0
+            Double(ConfigStore.shared.capture.typingKeyCorrelationWindowMs) / 1000.0
         let keystrokeCount = ledger.recentTimestamps(within: corrWindowSec).count
         if keystrokeCount > 0 { rec.windowHadKeystroke = true }
         // 一次跳变 50+ 字,但相关窗口内按键数撑不起来 —— 不是打字,可能是
@@ -256,7 +256,7 @@ final class TypingRecordWriter {
     private func scheduleFlush(_ rec: InProgressRecord, key: ElementKey) {
         rec.flushTimer?.invalidate()
         rec.flushTimer = Timer.scheduledTimer(
-            withTimeInterval: Double(ConfigStore.shared.recording.typingFlushIdleSec),
+            withTimeInterval: Double(ConfigStore.shared.capture.typingFlushIdleSec),
             repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {

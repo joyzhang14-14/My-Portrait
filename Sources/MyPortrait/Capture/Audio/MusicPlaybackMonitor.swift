@@ -129,7 +129,7 @@ final class MusicPlaybackMonitor {
     }
 
     private func tick() async {
-        let enabled = ConfigStore.shared.current.recording.audio.pauseOnMusicApp
+        let enabled = ConfigStore.shared.current.capture.audio.pauseOnMusicApp
         guard enabled else {
             logger.notice("tick: pauseOnMusicApp=false → musicDetected forced false")
             if musicDetected { musicDetected = false }

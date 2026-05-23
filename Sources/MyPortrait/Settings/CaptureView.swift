@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// Audio Recording 设置子分区：麦克风 + 转录 + 说话人。
-struct AudioRecordingSettingsView: View {
+struct AudioCaptureSettingsView: View {
     @State private var config = ConfigStore.shared
 
-    private var audioRec: Bool { config.current.recording.audio.enabled }
-    private var engine: String { config.current.recording.audio.engine }
+    private var audioRec: Bool { config.current.capture.audio.enabled }
+    private var engine: String { config.current.capture.audio.engine }
 
     var body: some View {
-        SettingsPage("Audio Recording", subtitle: "Microphone + transcription") {
+        SettingsPage("Audio Capture", subtitle: "Microphone + transcription") {
             audioSection
         }
     }
@@ -17,18 +17,18 @@ struct AudioRecordingSettingsView: View {
 
     private var audioSection: some View {
         Group {
-            SettingsCard(title: "Audio recording") {
-                SettingsRow("Audio recording",
+            SettingsCard(title: "Audio Capture") {
+                SettingsRow("Audio Capture",
                             description: "Capture from your microphone(s).",
                             icon: "mic") {
-                    Toggle("", isOn: config.binding(\.recording.audio.enabled)).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.capture.audio.enabled)).labelsHidden().toggleStyle(.switch)
                 }
                 if audioRec {
                     SettingsDivider()
                     SettingsRow("Your name",
                                 description: "Used so the assistant knows when you're the speaker.",
                                 icon: "person.text.rectangle") {
-                        TextField("e.g. Louis", text: config.binding(\.recording.audio.userName))
+                        TextField("e.g. Louis", text: config.binding(\.capture.audio.userName))
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
                             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -47,13 +47,13 @@ struct AudioRecordingSettingsView: View {
                     SettingsRow("Auto-select audio devices",
                                 description: "Records all default devices. Turn off to exclude Bluetooth headphones or pick specific devices below.",
                                 icon: "speaker.wave.3") {
-                        Toggle("", isOn: config.binding(\.recording.audio.autoSelectAudioDevices)).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.capture.audio.autoSelectAudioDevices)).labelsHidden().toggleStyle(.switch)
                     }
                     SettingsDivider()
                     SettingsRow("Microphones",
                                 description: "Devices to capture from. Used when auto-select is off.",
                                 icon: "mic.fill") { EmptyView() }
-                    VStack { TagListEditor(tags: config.binding(\.recording.audio.microphonesSelected), placeholder: "device name…") }
+                    VStack { TagListEditor(tags: config.binding(\.capture.audio.microphonesSelected), placeholder: "device name…") }
                         .padding(.horizontal, 48).padding(.bottom, 12)
                                         }
 
@@ -61,13 +61,13 @@ struct AudioRecordingSettingsView: View {
                     SettingsRow("Capture system audio",
                                 description: "What you hear (loopback).",
                                 icon: "speaker.wave.2") {
-                        Toggle("", isOn: config.binding(\.recording.audio.captureSystemAudio)).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.capture.audio.captureSystemAudio)).labelsHidden().toggleStyle(.switch)
                     }
                     SettingsDivider()
                     SettingsRow("CoreAudio system audio capture",
                                 description: "Lower-overhead path. Requires macOS 14+.",
                                 icon: "rectangle.connected.to.line.below") {
-                        Toggle("", isOn: config.binding(\.recording.audio.useCoreAudioCapture)).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.capture.audio.useCoreAudioCapture)).labelsHidden().toggleStyle(.switch)
                     }
                 }
 
@@ -80,7 +80,7 @@ struct AudioRecordingSettingsView: View {
                             : "Pick an engine to enable speech-to-text.")
                 ) {
                     SettingsRow("Transcription engine", icon: "waveform.path") {
-                        Picker("", selection: config.binding(\.recording.audio.engine)) {
+                        Picker("", selection: config.binding(\.capture.audio.engine)) {
                             ForEach(AudioEngine.allCases) { e in Text(e.label).tag(e.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 200)
@@ -90,7 +90,7 @@ struct AudioRecordingSettingsView: View {
                         SettingsRow("Whisper model",
                                     description: "Larger models are more accurate but slower and bigger to download.",
                                     icon: "cpu") {
-                            Picker("", selection: config.binding(\.recording.audio.whisperModel)) {
+                            Picker("", selection: config.binding(\.capture.audio.whisperModel)) {
                                 Text("Tiny (~75 MB)").tag("openai_whisper-tiny")
                                 Text("Base (~150 MB)").tag("openai_whisper-base")
                                 Text("Small (~500 MB)").tag("openai_whisper-small")
@@ -104,7 +104,7 @@ struct AudioRecordingSettingsView: View {
                         SettingsRow("Deepgram API key",
                                     description: "Required for cloud transcription.",
                                     icon: "key") {
-                            SecureField("paste key…", text: config.secretBinding(refKeyPath: \.recording.audio.deepgramApiKeyRef, defaultRef: "deepgram_key"))
+                            SecureField("paste key…", text: config.secretBinding(refKeyPath: \.capture.audio.deepgramApiKeyRef, defaultRef: "deepgram_key"))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
@@ -121,7 +121,7 @@ struct AudioRecordingSettingsView: View {
                         SettingsRow("Endpoint",
                                     description: "OpenAI-compatible transcription server (mlx-audio, llama.cpp, vLLM…). Audio leaves this Mac.",
                                     icon: "network") {
-                            TextField("http://127.0.0.1:8080", text: config.binding(\.recording.audio.customEndpoint))
+                            TextField("http://127.0.0.1:8080", text: config.binding(\.capture.audio.customEndpoint))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
@@ -134,7 +134,7 @@ struct AudioRecordingSettingsView: View {
                         }
                         SettingsDivider()
                         SettingsRow("Model", description: "Model ID sent to the endpoint.", icon: "cpu") {
-                            TextField("whisper-1", text: config.binding(\.recording.audio.customModel))
+                            TextField("whisper-1", text: config.binding(\.capture.audio.customModel))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
@@ -147,7 +147,7 @@ struct AudioRecordingSettingsView: View {
                         }
                         SettingsDivider()
                         SettingsRow("API key", description: "Optional — leave blank for local servers.", icon: "key") {
-                            SecureField("paste key…", text: config.secretBinding(refKeyPath: \.recording.audio.customApiKeyRef, defaultRef: "custom_transcribe_key"))
+                            SecureField("paste key…", text: config.secretBinding(refKeyPath: \.capture.audio.customApiKeyRef, defaultRef: "custom_transcribe_key"))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
@@ -163,26 +163,26 @@ struct AudioRecordingSettingsView: View {
                     SettingsRow("Languages",
                                 description: "Models to load for transcription.",
                                 icon: "character.bubble") { EmptyView() }
-                    VStack { TagListEditor(tags: config.binding(\.recording.audio.languages), placeholder: "e.g. en, zh, ja") }
+                    VStack { TagListEditor(tags: config.binding(\.capture.audio.languages), placeholder: "e.g. en, zh, ja") }
                         .padding(.horizontal, 48).padding(.bottom, 12)
                                             if engine != AudioEngine.disabled.rawValue {
                         SettingsDivider()
                         SettingsRow("Filter music",
                                     description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
                                     icon: "music.note.list") {
-                            Toggle("", isOn: config.binding(\.recording.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
+                            Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                         }
                         SettingsDivider()
                         SettingsRow("Pause when a music app is playing",
                                     description: "Stop recording entirely while a music app is playing audio — solves it at the source. Detected via the app's category; call apps (Zoom, etc.) aren't affected. Takes priority over Filter music.",
                                     icon: "pause.circle") {
-                            Toggle("", isOn: config.binding(\.recording.audio.pauseOnMusicApp)).labelsHidden().toggleStyle(.switch)
+                            Toggle("", isOn: config.binding(\.capture.audio.pauseOnMusicApp)).labelsHidden().toggleStyle(.switch)
                         }
                         SettingsDivider()
                         SettingsRow("Batch transcription",
                                     description: "Process audio chunks together for higher throughput. Slight latency cost.",
                                     icon: "tray.full") {
-                            Toggle("", isOn: config.binding(\.recording.audio.batchTranscription)).labelsHidden().toggleStyle(.switch)
+                            Toggle("", isOn: config.binding(\.capture.audio.batchTranscription)).labelsHidden().toggleStyle(.switch)
                         }
                     }
                 }
@@ -192,7 +192,7 @@ struct AudioRecordingSettingsView: View {
                     footnote: "Boost recognition of names, jargon, and brand terms."
                 ) {
                     VStack(alignment: .leading) {
-                        TagListEditor(tags: config.binding(\.recording.audio.customVocabulary), placeholder: "term · optional replacement")
+                        TagListEditor(tags: config.binding(\.capture.audio.customVocabulary), placeholder: "term · optional replacement")
                             .padding(.horizontal, 14).padding(.vertical, 12)
                     }
                                     }
@@ -201,7 +201,7 @@ struct AudioRecordingSettingsView: View {
                     SettingsRow("Enable speaker identification",
                                 description: "Detect and cluster distinct voices.",
                                 icon: "person.wave.2") {
-                        Toggle("", isOn: config.binding(\.recording.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
+                        Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
                     }
                 }
             }
@@ -213,13 +213,13 @@ struct AudioRecordingSettingsView: View {
 // MARK: - Screen Recording
 
 /// Screen Recording 设置子分区：Power mode + 屏幕采集（截图 + OCR）。
-struct ScreenRecordingSettingsView: View {
+struct ScreenCaptureSettingsView: View {
     @State private var config = ConfigStore.shared
 
-    private var screenRec: Bool { config.current.recording.screen.enabled }
+    private var screenRec: Bool { config.current.capture.screen.enabled }
 
     var body: some View {
-        SettingsPage("Screen Recording", subtitle: "Screenshots + OCR") {
+        SettingsPage("Screen Capture", subtitle: "Screenshots + OCR") {
             powerModeCard
             screenSection
         }
@@ -232,8 +232,8 @@ struct ScreenRecordingSettingsView: View {
         ) {
             ForEach(PowerMode.allCases) { mode in
                 PowerModeRow(mode: mode,
-                             isActive: config.current.recording.system.powerMode == mode.rawValue) {
-                    config.mutate { $0.recording.system.powerMode = mode.rawValue }
+                             isActive: config.current.capture.system.powerMode == mode.rawValue) {
+                    config.mutate { $0.capture.system.powerMode = mode.rawValue }
                 }
                 if mode != PowerMode.allCases.last { SettingsDivider() }
             }
@@ -242,25 +242,25 @@ struct ScreenRecordingSettingsView: View {
 
     private var screenSection: some View {
         Group {
-            SettingsCard(title: "Screen recording") {
-                SettingsRow("Screen recording",
+            SettingsCard(title: "Screen Capture") {
+                SettingsRow("Screen Capture",
                             description: "Capture periodic snapshots of your screen.",
                             icon: "display") {
-                    Toggle("", isOn: config.binding(\.recording.screen.enabled)).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
                 }
                 if screenRec {
                     SettingsDivider()
                     SettingsRow("Recording quality",
                                 description: "Higher quality means larger snapshots.",
                                 icon: "rectangle.stack") {
-                        Picker("", selection: config.binding(\.recording.screen.quality)) {
+                        Picker("", selection: config.binding(\.capture.screen.quality)) {
                             ForEach(RecordingQuality.allCases) { q in Text(q.label).tag(q.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 110)
                     }
                     SettingsDivider()
                     SettingsRow("Output video format", icon: "rectangle.compress.vertical") {
-                        Picker("", selection: config.binding(\.recording.screen.videoFormat)) {
+                        Picker("", selection: config.binding(\.capture.screen.videoFormat)) {
                             ForEach(VideoFormat.allCases) { f in Text(f.label).tag(f.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 110)
@@ -271,10 +271,10 @@ struct ScreenRecordingSettingsView: View {
                                 icon: "speedometer") {
                         HStack(spacing: 8) {
                             Slider(value: Binding(
-                                get: { Double(config.current.recording.screen.videoFps) },
-                                set: { v in config.mutate { $0.recording.screen.videoFps = Int(v) } }
+                                get: { Double(config.current.capture.screen.videoFps) },
+                                set: { v in config.mutate { $0.capture.screen.videoFps = Int(v) } }
                             ), in: 1...30, step: 1).frame(width: 140)
-                            Text("\(config.current.recording.screen.videoFps) fps")
+                            Text("\(config.current.capture.screen.videoFps) fps")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.55))
                                 .frame(width: 50, alignment: .trailing)
@@ -285,7 +285,7 @@ struct ScreenRecordingSettingsView: View {
                                 description: "Milliseconds between standalone snapshots.",
                                 icon: "timer") {
                         HStack(spacing: 4) {
-                            TextField("", value: config.binding(\.recording.screen.frameIntervalMs), formatter: NumberFormatter())
+                            TextField("", value: config.binding(\.capture.screen.frameIntervalMs), formatter: NumberFormatter())
                                 .textFieldStyle(.plain)
                                 .multilineTextAlignment(.trailing)
                                 .font(.system(size: 12, design: .monospaced))
@@ -305,7 +305,7 @@ struct ScreenRecordingSettingsView: View {
                     SettingsRow("OCR engine",
                                 description: "Convert captured frames into searchable text.",
                                 icon: "doc.text.viewfinder") {
-                        Picker("", selection: config.binding(\.recording.screen.ocrEngine)) {
+                        Picker("", selection: config.binding(\.capture.screen.ocrEngine)) {
                             ForEach(OCREngine.allCases) { o in Text(o.label).tag(o.rawValue) }
                         }
                         .pickerStyle(.menu).labelsHidden().frame(width: 160)
@@ -320,7 +320,7 @@ struct ScreenRecordingSettingsView: View {
 // MARK: - Typing Capture
 
 /// Typing Capture 设置子分区。
-struct TypingRecordingSettingsView: View {
+struct TypingCaptureSettingsView: View {
     @State private var config = ConfigStore.shared
     @Environment(\.services) private var services
     /// 用户打过字的 app（bundle id）—— 给两个 app 选择器的下拉用。
@@ -385,16 +385,16 @@ struct TypingRecordingSettingsView: View {
             SettingsRow("Typing Capture",
                         description: "Reads the text you finish typing into input fields, used to learn your writing style. All data stays on this Mac and is never uploaded. Password fields and secure inputs are never read.",
                         icon: "keyboard") {
-                Toggle("", isOn: config.binding(\.recording.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)
+                Toggle("", isOn: config.binding(\.capture.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)
             }
-            if config.current.recording.typingCaptureEnabled {
+            if config.current.capture.typingCaptureEnabled {
                 SettingsDivider()
                 SettingsRow("Keyboard correlation window",
                             description: "Only text changes that happen within this long after a keystroke count as your typing (filters out terminal output, incoming messages, etc.).",
                             icon: "timer") {
-                    Stepper(value: config.binding(\.recording.typingKeyCorrelationWindowMs),
+                    Stepper(value: config.binding(\.capture.typingKeyCorrelationWindowMs),
                             in: 50...500, step: 50) {
-                        Text("\(config.current.recording.typingKeyCorrelationWindowMs) ms")
+                        Text("\(config.current.capture.typingKeyCorrelationWindowMs) ms")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -403,9 +403,9 @@ struct TypingRecordingSettingsView: View {
                 SettingsRow("Edit-log debounce",
                             description: "Edits that settle within this long collapse into one edit-log step. Higher = coarser log; also collapses IME (pinyin) intermediate states.",
                             icon: "hourglass") {
-                    Stepper(value: config.binding(\.recording.typingDebounceMs),
+                    Stepper(value: config.binding(\.capture.typingDebounceMs),
                             in: 100...1000, step: 50) {
-                        Text("\(config.current.recording.typingDebounceMs) ms")
+                        Text("\(config.current.capture.typingDebounceMs) ms")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -414,9 +414,9 @@ struct TypingRecordingSettingsView: View {
                 SettingsRow("Session flush idle",
                             description: "After this long without typing, the current input is saved as a record. Continuous edits keep merging into the same record.",
                             icon: "tray.and.arrow.down") {
-                    Stepper(value: config.binding(\.recording.typingFlushIdleSec),
+                    Stepper(value: config.binding(\.capture.typingFlushIdleSec),
                             in: 2...30, step: 1) {
-                        Text("\(config.current.recording.typingFlushIdleSec) s")
+                        Text("\(config.current.capture.typingFlushIdleSec) s")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -425,9 +425,9 @@ struct TypingRecordingSettingsView: View {
                 SettingsRow("Enter-to-send window",
                             description: "After pressing Return, the input box must clear within this long to count as a sent message rather than a deletion.",
                             icon: "paperplane") {
-                    Stepper(value: config.binding(\.recording.typingSubmitWindowMs),
+                    Stepper(value: config.binding(\.capture.typingSubmitWindowMs),
                             in: 200...3000, step: 100) {
-                        Text("\(config.current.recording.typingSubmitWindowMs) ms")
+                        Text("\(config.current.capture.typingSubmitWindowMs) ms")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -436,9 +436,9 @@ struct TypingRecordingSettingsView: View {
                 SettingsRow("Paste match minimum",
                             description: "Clipboard content shorter than this isn't used to detect pastes — avoids flagging short typed text that happens to equal the clipboard.",
                             icon: "doc.on.clipboard") {
-                    Stepper(value: config.binding(\.recording.typingPasteMinChars),
+                    Stepper(value: config.binding(\.capture.typingPasteMinChars),
                             in: 2...50, step: 1) {
-                        Text("\(config.current.recording.typingPasteMinChars) chars")
+                        Text("\(config.current.capture.typingPasteMinChars) chars")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.55))
                     }

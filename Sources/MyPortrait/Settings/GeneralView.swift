@@ -49,7 +49,7 @@ struct GeneralSettingsView: View {
                 SettingsRow("Chinese mirror",
                             description: "Use a CN-region mirror for model downloads.",
                             icon: "globe.asia.australia") {
-                    Toggle("", isOn: config.binding(\.recording.system.chineseMirror))
+                    Toggle("", isOn: config.binding(\.capture.system.chineseMirror))
                         .labelsHidden().toggleStyle(.switch)
                 }
             }

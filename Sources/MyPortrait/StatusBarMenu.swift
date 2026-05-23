@@ -97,8 +97,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // MARK: - 真实录音状态（= 意图开关 && 没暂停 && 权限已授）
 
     /// capture 开关的单一真相是 ConfigStore，不读 settings 镜像（镜像可能 desync）。
-    private var screenCaptureWanted: Bool { ConfigStore.shared.recording.screen.enabled }
-    private var audioCaptureWanted: Bool { ConfigStore.shared.recording.audio.enabled }
+    private var screenCaptureWanted: Bool { ConfigStore.shared.capture.screen.enabled }
+    private var audioCaptureWanted: Bool { ConfigStore.shared.capture.audio.enabled }
 
     /// 屏幕**实际**是否在录。菜单勾选 / 图标 tooltip 用这个，不用裸的 toggle 意图。
     private var screenRecordingActive: Bool {
@@ -111,7 +111,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     }
 
     /// 打字采集开关意图（单一真相 ConfigStore）。
-    private var typingCaptureWanted: Bool { ConfigStore.shared.recording.typingCaptureEnabled }
+    private var typingCaptureWanted: Bool { ConfigStore.shared.capture.typingCaptureEnabled }
 
     /// 打字采集**实际**是否在跑。需要 Accessibility 权限。
     private var typingCaptureActive: Bool {
@@ -197,7 +197,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             if screenRecordingActive { parts.append("Screen") }
             if audioRecordingActive { parts.append("Audio") }
             if typingCaptureActive { parts.append("Typing") }
-            toolTip = "Recording: \(parts.joined(separator: " + "))"
+            toolTip = "Capture: \(parts.joined(separator: " + "))"
         } else {
             toolTip = "Capture off"
         }
@@ -260,14 +260,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // MARK: - 菜单项动作
 
     @objc private func toggleScreen() {
-        let next = !ConfigStore.shared.recording.screen.enabled
-        ConfigStore.shared.mutate { $0.recording.screen.enabled = next }
+        let next = !ConfigStore.shared.capture.screen.enabled
+        ConfigStore.shared.mutate { $0.capture.screen.enabled = next }
         refreshMenuState()
     }
 
     @objc private func toggleAudio() {
-        let next = !ConfigStore.shared.recording.audio.enabled
-        ConfigStore.shared.mutate { $0.recording.audio.enabled = next }
+        let next = !ConfigStore.shared.capture.audio.enabled
+        ConfigStore.shared.mutate { $0.capture.audio.enabled = next }
         refreshMenuState()
     }
 
@@ -275,8 +275,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     /// `typing_capture_enabled` 字段。翻转后 Services 那边的 sink 会启停
     /// TypingObserver。
     @objc private func toggleTyping() {
-        let next = !ConfigStore.shared.recording.typingCaptureEnabled
-        ConfigStore.shared.mutate { $0.recording.typingCaptureEnabled = next }
+        let next = !ConfigStore.shared.capture.typingCaptureEnabled
+        ConfigStore.shared.mutate { $0.capture.typingCaptureEnabled = next }
         refreshIcon()
         refreshMenuState()
     }

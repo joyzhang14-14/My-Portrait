@@ -26,7 +26,7 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
     func diarize(wavPath: String, isInput: Bool) async -> [DiarizedSegment] {
         // 设置里的 speaker_id_enabled 开关 —— 关掉直接退化。
         let enabled = await MainActor.run {
-            ConfigStore.shared.current.recording.audio.speakerIdEnabled
+            ConfigStore.shared.current.capture.audio.speakerIdEnabled
         }
         guard enabled else { return [] }
 
@@ -67,7 +67,7 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
         // 麦克风输入 + 全程单一说话人 → 多半是用户本人，自动命名。
         if isInput, localToDB.count == 1, let onlyId = localToDB.values.first {
             let userName = await MainActor.run {
-                ConfigStore.shared.current.recording.audio.userName
+                ConfigStore.shared.current.capture.audio.userName
             }
             let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {

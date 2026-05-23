@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// **三个 capture 开关 (screen / audio / systemAudio) 的单一真相在 ConfigStore
 /// (~/.myportrait/config.toml)**，本类是它的镜像 + Combine 适配层。原因：
-///   - Settings UI (RecordingView) 直接绑定 `ConfigStore.recording.xxx.enabled`
+///   - Settings UI (RecordingView) 直接绑定 `ConfigStore.capture.xxx.enabled`
 ///   - Services 用 Combine sink 订阅 @Published，要桥到 Observation 框架
 ///   - vim 改 TOML 也要 live reload（ConfigStore 已经实现 DispatchSource 监听）
 ///
@@ -21,19 +21,19 @@ final class CaptureSettings: ObservableObject {
 
     // MARK: - 用户可改字段
 
-    /// 屏幕采集总开关。镜像 `ConfigStore.shared.recording.screen.enabled`。
+    /// 屏幕采集总开关。镜像 `ConfigStore.shared.capture.screen.enabled`。
     @Published var screenCaptureEnabled: Bool {
-        didSet { writeBackToConfig(\.recording.screen.enabled, screenCaptureEnabled) }
+        didSet { writeBackToConfig(\.capture.screen.enabled, screenCaptureEnabled) }
     }
 
-    /// 麦克风采集总开关。镜像 `ConfigStore.shared.recording.audio.enabled`。
+    /// 麦克风采集总开关。镜像 `ConfigStore.shared.capture.audio.enabled`。
     @Published var audioCaptureEnabled: Bool {
-        didSet { writeBackToConfig(\.recording.audio.enabled, audioCaptureEnabled) }
+        didSet { writeBackToConfig(\.capture.audio.enabled, audioCaptureEnabled) }
     }
 
-    /// 系统音频采集开关。镜像 `ConfigStore.shared.recording.audio.captureSystemAudio`。
+    /// 系统音频采集开关。镜像 `ConfigStore.shared.capture.audio.captureSystemAudio`。
     @Published var systemAudioCaptureEnabled: Bool {
-        didSet { writeBackToConfig(\.recording.audio.captureSystemAudio, systemAudioCaptureEnabled) }
+        didSet { writeBackToConfig(\.capture.audio.captureSystemAudio, systemAudioCaptureEnabled) }
     }
 
     /// 是否有 stub 路径被命中。镜像 UnimplementedReporter.hasUnimplementedStubs。
@@ -53,26 +53,26 @@ final class CaptureSettings: ObservableObject {
         let store = ConfigStore.shared
 
         // 三个 capture 开关从 TOML 读初值。
-        self.screenCaptureEnabled = store.recording.screen.enabled
-        self.audioCaptureEnabled = store.recording.audio.enabled
-        self.systemAudioCaptureEnabled = store.recording.audio.captureSystemAudio
+        self.screenCaptureEnabled = store.capture.screen.enabled
+        self.audioCaptureEnabled = store.capture.audio.enabled
+        self.systemAudioCaptureEnabled = store.capture.audio.captureSystemAudio
 
         self.isLoading = false
 
-        // 监听 ConfigStore.recording 变化（vim 编辑 TOML / UI toggle / 状态栏 都走它）。
+        // 监听 ConfigStore.capture 变化（vim 编辑 TOML / UI toggle / 状态栏 都走它）。
         startObservingConfig()
     }
 
-    /// 用 Observation 框架追踪 ConfigStore.recording 字段。任一变化 → 重跑
+    /// 用 Observation 框架追踪 ConfigStore.capture 字段。任一变化 → 重跑
     /// applyFromConfig 推送到 @Published → Combine sink 醒来。
     /// withObservationTracking 是一次性的：onChange 触发后注册自动失效，所以
     /// 在 onChange 里递归重启。
     private func startObservingConfig() {
         let store = ConfigStore.shared
         withObservationTracking {
-            _ = store.recording.screen.enabled
-            _ = store.recording.audio.enabled
-            _ = store.recording.audio.captureSystemAudio
+            _ = store.capture.screen.enabled
+            _ = store.capture.audio.enabled
+            _ = store.capture.audio.captureSystemAudio
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -88,14 +88,14 @@ final class CaptureSettings: ObservableObject {
         let store = ConfigStore.shared
         isReloadingFromConfig = true
         defer { isReloadingFromConfig = false }
-        if screenCaptureEnabled != store.recording.screen.enabled {
-            screenCaptureEnabled = store.recording.screen.enabled
+        if screenCaptureEnabled != store.capture.screen.enabled {
+            screenCaptureEnabled = store.capture.screen.enabled
         }
-        if audioCaptureEnabled != store.recording.audio.enabled {
-            audioCaptureEnabled = store.recording.audio.enabled
+        if audioCaptureEnabled != store.capture.audio.enabled {
+            audioCaptureEnabled = store.capture.audio.enabled
         }
-        if systemAudioCaptureEnabled != store.recording.audio.captureSystemAudio {
-            systemAudioCaptureEnabled = store.recording.audio.captureSystemAudio
+        if systemAudioCaptureEnabled != store.capture.audio.captureSystemAudio {
+            systemAudioCaptureEnabled = store.capture.audio.captureSystemAudio
         }
     }
 

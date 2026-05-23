@@ -88,7 +88,7 @@ final class ConfigStore {
     var display:       DisplayConfig       { get { current.display }       set { mutate { $0.display = newValue } } }
     var general:       GeneralConfig       { get { current.general }       set { mutate { $0.general = newValue } } }
     var aiModels:      AIModelsConfig      { get { current.aiModels }      set { mutate { $0.aiModels = newValue } } }
-    var recording:     RecordingConfig     { get { current.recording }     set { mutate { $0.recording = newValue } } }
+    var capture:       RecordingConfig     { get { current.capture }       set { mutate { $0.capture = newValue } } }
     var notifications: NotificationsConfig { get { current.notifications } set { mutate { $0.notifications = newValue } } }
     var memory:        MemoryConfig        { get { current.memory }        set { mutate { $0.memory = newValue } } }
     var scheduler:     SchedulerSettings   { get { current.scheduler }     set { mutate { $0.scheduler = newValue } } }
@@ -204,7 +204,12 @@ final class ConfigStore {
         }
         do {
             let raw = try String(contentsOf: path, encoding: .utf8)
-            let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: raw)
+            // 一次性迁移:[recording.*] → [capture.*]。下次保存即写新 key,
+            // 此后这两行 replace 是 no-op。
+            let migrated = raw
+                .replacingOccurrences(of: "[recording]",  with: "[capture]")
+                .replacingOccurrences(of: "[recording.", with: "[capture.")
+            let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: migrated)
             current = applySchemaMigration(decoded)
             loadError = nil
         } catch {
@@ -287,32 +292,32 @@ final class ConfigStore {
         if mins > 0 { c.general.updateCheckMinutes = mins }
 
         // — Recording / audio
-        c.recording.audio.enabled                = bool(ud, "Settings.audioRecordingEnabled",  default: c.recording.audio.enabled)
-        if let v = ud.string(forKey: "Settings.userName")              { c.recording.audio.userName = v }
-        if let v = ud.string(forKey: "Settings.audioEngine")           { c.recording.audio.engine = v }
-        c.recording.audio.languages              = stringArray(ud, "Settings.audioLanguages")
-        c.recording.audio.microphonesSelected    = stringArray(ud, "Settings.microphonesSelected")
-        c.recording.audio.captureSystemAudio     = bool(ud, "Settings.captureSystemAudio",     default: c.recording.audio.captureSystemAudio)
-        c.recording.audio.useCoreAudioCapture    = bool(ud, "Settings.useCoreAudioCapture",    default: c.recording.audio.useCoreAudioCapture)
-        c.recording.audio.speakerIdEnabled       = bool(ud, "Settings.speakerIdEnabled",       default: c.recording.audio.speakerIdEnabled)
-        c.recording.audio.filterMusic            = bool(ud, "Settings.filterMusic",            default: c.recording.audio.filterMusic)
-        c.recording.audio.batchTranscription     = bool(ud, "Settings.batchTranscription",     default: c.recording.audio.batchTranscription)
-        c.recording.audio.autoSelectAudioDevices = bool(ud, "Settings.autoSelectAudioDevices", default: c.recording.audio.autoSelectAudioDevices)
-        c.recording.audio.customVocabulary       = stringArray(ud, "Settings.customVocabulary")
+        c.capture.audio.enabled                = bool(ud, "Settings.audioRecordingEnabled",  default: c.capture.audio.enabled)
+        if let v = ud.string(forKey: "Settings.userName")              { c.capture.audio.userName = v }
+        if let v = ud.string(forKey: "Settings.audioEngine")           { c.capture.audio.engine = v }
+        c.capture.audio.languages              = stringArray(ud, "Settings.audioLanguages")
+        c.capture.audio.microphonesSelected    = stringArray(ud, "Settings.microphonesSelected")
+        c.capture.audio.captureSystemAudio     = bool(ud, "Settings.captureSystemAudio",     default: c.capture.audio.captureSystemAudio)
+        c.capture.audio.useCoreAudioCapture    = bool(ud, "Settings.useCoreAudioCapture",    default: c.capture.audio.useCoreAudioCapture)
+        c.capture.audio.speakerIdEnabled       = bool(ud, "Settings.speakerIdEnabled",       default: c.capture.audio.speakerIdEnabled)
+        c.capture.audio.filterMusic            = bool(ud, "Settings.filterMusic",            default: c.capture.audio.filterMusic)
+        c.capture.audio.batchTranscription     = bool(ud, "Settings.batchTranscription",     default: c.capture.audio.batchTranscription)
+        c.capture.audio.autoSelectAudioDevices = bool(ud, "Settings.autoSelectAudioDevices", default: c.capture.audio.autoSelectAudioDevices)
+        c.capture.audio.customVocabulary       = stringArray(ud, "Settings.customVocabulary")
 
         // — Recording / screen
-        c.recording.screen.enabled               = bool(ud, "Settings.screenRecordingEnabled", default: c.recording.screen.enabled)
-        if let v = ud.string(forKey: "Settings.ocrEngine")             { c.recording.screen.ocrEngine = v }
+        c.capture.screen.enabled               = bool(ud, "Settings.screenRecordingEnabled", default: c.capture.screen.enabled)
+        if let v = ud.string(forKey: "Settings.ocrEngine")             { c.capture.screen.ocrEngine = v }
         let fps = ud.integer(forKey: "Settings.videoFps")
-        if fps > 0 { c.recording.screen.videoFps = fps }
-        if let v = ud.string(forKey: "Settings.recordingQuality")      { c.recording.screen.quality = v }
-        if let v = ud.string(forKey: "Settings.videoFormat")           { c.recording.screen.videoFormat = v }
+        if fps > 0 { c.capture.screen.videoFps = fps }
+        if let v = ud.string(forKey: "Settings.recordingQuality")      { c.capture.screen.quality = v }
+        if let v = ud.string(forKey: "Settings.videoFormat")           { c.capture.screen.videoFormat = v }
         let fim = ud.integer(forKey: "Settings.frameIntervalMs")
-        if fim > 0 { c.recording.screen.frameIntervalMs = fim }
+        if fim > 0 { c.capture.screen.frameIntervalMs = fim }
 
         // — Recording / system
-        c.recording.system.chineseMirror = bool(ud, "Settings.chineseMirror", default: c.recording.system.chineseMirror)
-        if let v = ud.string(forKey: "Settings.powerMode") { c.recording.system.powerMode = v }
+        c.capture.system.chineseMirror = bool(ud, "Settings.chineseMirror", default: c.capture.system.chineseMirror)
+        if let v = ud.string(forKey: "Settings.powerMode") { c.capture.system.powerMode = v }
 
         // — Notifications
         c.notifications.appUpdates       = bool(ud, "Settings.notifyAppUpdates",      default: c.notifications.appUpdates)

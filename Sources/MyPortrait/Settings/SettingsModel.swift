@@ -5,7 +5,7 @@ import SwiftUI
 /// list and the main pane router.
 enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
     case display, general, aiModels, connections, notifications
-    case recordingScreen, recordingAudio, recordingTyping
+    case captureScreen, captureAudio, captureTyping
     case memoryParameter, memoryScheduler, memoryChangelog
     case usage, privacy, storage, speakers
     var id: String { rawValue }
@@ -16,9 +16,9 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .general:          return "General"
         case .aiModels:         return "AI models"
         case .connections:      return "Connections"
-        case .recordingScreen:  return "Screen Recording"
-        case .recordingAudio:   return "Audio Recording"
-        case .recordingTyping:  return "Typing Capture"
+        case .captureScreen:    return "Screen Capture"
+        case .captureAudio:     return "Audio Capture"
+        case .captureTyping:    return "Typing Capture"
         case .notifications:    return "Notifications"
         case .memoryParameter:  return "Parameter"
         case .memoryScheduler:  return "Scheduler"
@@ -36,9 +36,9 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
         case .general:          return "gearshape"
         case .aiModels:         return "brain"
         case .connections:      return "powerplug"
-        case .recordingScreen:  return "display"
-        case .recordingAudio:   return "mic"
-        case .recordingTyping:  return "keyboard"
+        case .captureScreen:    return "display"
+        case .captureAudio:     return "mic"
+        case .captureTyping:    return "keyboard"
         case .notifications:    return "bell"
         case .memoryParameter:  return "slider.horizontal.3"
         case .memoryScheduler:  return "calendar.badge.clock"
@@ -52,7 +52,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
 
     enum Group: String, Hashable {
         case app         = "APP"
-        case recording   = "RECORDING"
+        case capture     = "CAPTURE"
         case memory      = "MEMORY"
         case dataPrivacy = "DATA & PRIVACY"
     }
@@ -60,7 +60,7 @@ enum SettingsSubsection: String, CaseIterable, Identifiable, Hashable {
     var group: Group {
         switch self {
         case .display, .general, .aiModels, .connections, .notifications: return .app
-        case .recordingScreen, .recordingAudio, .recordingTyping:         return .recording
+        case .captureScreen, .captureAudio, .captureTyping:               return .capture
         case .memoryParameter, .memoryScheduler, .memoryChangelog:        return .memory
         case .usage, .privacy, .storage, .speakers:                       return .dataPrivacy
         }

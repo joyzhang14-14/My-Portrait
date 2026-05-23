@@ -192,7 +192,7 @@ final class TypingObserver {
     // MARK: - 启动 banner
 
     private func logStartupBanner() {
-        let cfg = ConfigStore.shared.recording
+        let cfg = ConfigStore.shared.capture
         print("[TypingObserver] starting (mode=\(modeLabel))")
         print("[TypingObserver] config:")
         print("  typing_capture_enabled    = \(cfg.typingCaptureEnabled)")

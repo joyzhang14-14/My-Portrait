@@ -107,7 +107,7 @@ final class Services {
             reporter: reporter,
             power: pw,
             whisper: WhisperKitWrapper(
-                modelName: ConfigStore.shared.current.recording.audio.whisperModel
+                modelName: ConfigStore.shared.current.capture.audio.whisperModel
             ),
             speaker: OnnxSpeakerDiarizer(db: dbImpl)
         )
@@ -321,12 +321,12 @@ final class Services {
         observeIgnoreRules()
 
         // 打字采集。escape hatch：MYPORTRAIT_NO_TYPING=1 完全不启。
-        // 否则按 ConfigStore.recording.typingCaptureEnabled 动态启停 ——
+        // 否则按 ConfigStore.capture.typingCaptureEnabled 动态启停 ——
         // TypingObserver 自身还有 AX / Input Monitoring 权限门禁，没授权会自己 idle。
         if ProcessInfo.processInfo.environment["MYPORTRAIT_NO_TYPING"] == "1" {
             logger.info("TypingObserver SKIPPED (MYPORTRAIT_NO_TYPING=1)")
         } else {
-            applyTypingCapture(enabled: ConfigStore.shared.recording.typingCaptureEnabled)
+            applyTypingCapture(enabled: ConfigStore.shared.capture.typingCaptureEnabled)
             observeTypingCapture()
             // AX 权限是 typing observer 的硬门禁。用户在系统设置里授权后，
             // PermissionMonitor 3 秒轮询会捕获到 → 把 idle 的 observer 拾起。
@@ -334,7 +334,7 @@ final class Services {
                 .removeDuplicates()
                 .sink { [weak self] status in
                     guard let self, status == .granted,
-                          ConfigStore.shared.recording.typingCaptureEnabled else { return }
+                          ConfigStore.shared.capture.typingCaptureEnabled else { return }
                     self.logger.info("accessibility granted — starting typing observer")
                     self.typingObserver.start()
                 }
@@ -342,17 +342,17 @@ final class Services {
         }
     }
 
-    /// 监听 ConfigStore.recording.typingCaptureEnabled（vim 改 TOML / UI 编辑都走它），
+    /// 监听 ConfigStore.capture.typingCaptureEnabled（vim 改 TOML / UI 编辑都走它），
     /// 翻 true → typingObserver.start()，翻 false → stop()。
     /// withObservationTracking 一次性，onChange 里递归重注册。
     private func observeTypingCapture() {
         let store = ConfigStore.shared
         withObservationTracking {
-            _ = store.recording.typingCaptureEnabled
+            _ = store.capture.typingCaptureEnabled
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.applyTypingCapture(enabled: ConfigStore.shared.recording.typingCaptureEnabled)
+                self.applyTypingCapture(enabled: ConfigStore.shared.capture.typingCaptureEnabled)
                 self.observeTypingCapture()
             }
         }

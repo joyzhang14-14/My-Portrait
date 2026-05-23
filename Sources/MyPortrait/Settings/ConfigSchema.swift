@@ -21,7 +21,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var display:       DisplayConfig       = .init()
     var general:       GeneralConfig       = .init()
     var aiModels:      AIModelsConfig      = .init()
-    var recording:     RecordingConfig     = .init()
+    var capture:       RecordingConfig     = .init()
     var notifications: NotificationsConfig = .init()
     var memory:        MemoryConfig        = .init()
     var scheduler:     SchedulerSettings   = .init()
@@ -34,7 +34,7 @@ struct MyPortraitConfig: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
-        case display, general, aiModels = "ai_models", recording, notifications
+        case display, general, aiModels = "ai_models", capture, notifications
         case memory, scheduler, usage, privacy, storage, chat
     }
 
@@ -45,7 +45,7 @@ struct MyPortraitConfig: Codable, Equatable {
         display       = c.dflt(DisplayConfig.self, .display, display)
         general       = c.dflt(GeneralConfig.self, .general, general)
         aiModels      = c.dflt(AIModelsConfig.self, .aiModels, aiModels)
-        recording     = c.dflt(RecordingConfig.self, .recording, recording)
+        capture       = c.dflt(RecordingConfig.self, .capture, capture)
         notifications = c.dflt(NotificationsConfig.self, .notifications, notifications)
         memory        = c.dflt(MemoryConfig.self, .memory, memory)
         scheduler     = c.dflt(SchedulerSettings.self, .scheduler, scheduler)

@@ -78,7 +78,7 @@ struct SpeakersSettingsView: View {
                 onFinish: {
                     showCountdown = false
                     VoiceTrainer.shared.assign(
-                        name: ConfigStore.shared.current.recording.audio.userName
+                        name: ConfigStore.shared.current.capture.audio.userName
                     )
                 },
                 onCancel: { showCountdown = false }
@@ -573,10 +573,10 @@ private struct VoiceTrainingCard: View {
     private var cfg: ConfigStore { ConfigStore.shared }
     private var trainer: VoiceTrainer { VoiceTrainer.shared }
 
-    private var name: String { cfg.current.recording.audio.userName }
+    private var name: String { cfg.current.capture.audio.userName }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
-    private var audioOn: Bool { cfg.current.recording.audio.enabled }
-    private var speakerOn: Bool { cfg.current.recording.audio.speakerIdEnabled }
+    private var audioOn: Bool { cfg.current.capture.audio.enabled }
+    private var speakerOn: Bool { cfg.current.capture.audio.speakerIdEnabled }
     private var blocked: Bool { trimmedName.isEmpty || !audioOn || !speakerOn || trainer.isRunning }
 
     private var suggestions: [String] {
@@ -606,7 +606,7 @@ private struct VoiceTrainingCard: View {
                 Text("Your name")
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.70))
-                TextField("e.g. Louis", text: cfg.binding(\.recording.audio.userName))
+                TextField("e.g. Louis", text: cfg.binding(\.capture.audio.userName))
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .padding(.horizontal, 10).padding(.vertical, 6)
@@ -624,7 +624,7 @@ private struct VoiceTrainingCard: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.40))
                     ForEach(suggestions, id: \.self) { s in
-                        Button(s) { cfg.mutate { $0.recording.audio.userName = s } }
+                        Button(s) { cfg.mutate { $0.capture.audio.userName = s } }
                             .buttonStyle(.plain)
                             .font(.system(size: 10))
                             .foregroundStyle(Color.blue.opacity(0.85))
@@ -633,7 +633,7 @@ private struct VoiceTrainingCard: View {
             }
 
             if !audioOn {
-                warningRow("Turn on audio recording first.")
+                warningRow("Turn on audio capture first.")
             } else if !speakerOn {
                 warningRow("Turn on speaker identification first.")
             }
