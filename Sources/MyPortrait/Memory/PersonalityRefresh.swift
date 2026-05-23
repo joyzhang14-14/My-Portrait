@@ -18,13 +18,21 @@ final class PersonalityRefresh {
         let portraitInputs: Int
         let portraitCandidates: Int
         let ocrCandidates: Int
+        let clusterCount: Int
         let existingConceptCount: Int
         let actions: [PersonalityMergeAction]
         let apply: PersonalityMerger.ApplyResult
     }
 
     private let model: String
-    init(model: String = "gpt-5.4") { self.model = model }
+    /// cluster 这步用更轻的模型(默认 gpt-5.4-mini)。轻语义聚类任务不值得
+    /// 烧主模型,而且 mini 在这种"列一堆 tag 分组"的任务里反而决断更利索。
+    private let clusterModel: String
+    init(model: String = "gpt-5.4",
+         clusterModel: String = "gpt-5.4-mini") {
+        self.model = model
+        self.clusterModel = clusterModel
+    }
 
     func refresh(day: Date, writeDailySnapshot: Bool = true) async throws -> Report {
 
@@ -63,11 +71,15 @@ final class PersonalityRefresh {
             PersonalityTagCandidate(tag: $0, source: .ocr, evidence: [dayStr])
         }
 
-        // ── 4) 合并 + 落盘 ───────────────────────────────────────────
+        // ── 4) 语义聚类(去重 + 收敛同义) ───────────────────────────
         let all = eventsCandidates + portraitCandidates + ocrCandidates
+        let clusterAgent = PersonalityClusterAgent(model: clusterModel)
+        let clusters = try await clusterAgent.cluster(candidates: all)
+
+        // ── 5) merge 决策(per-cluster) + 落盘 ──────────────────────
         let existing = await PersonalityMerger.readConcepts()
         let merger = PersonalityMerger(model: model)
-        let actions = try await merger.merge(candidates: all, existingConcepts: existing)
+        let actions = try await merger.merge(clusters: clusters, existingConcepts: existing)
         let apply = try merger.applyActions(actions, on: day)
 
         return Report(
@@ -77,6 +89,7 @@ final class PersonalityRefresh {
             portraitInputs: portraitInputs.count,
             portraitCandidates: portraitCandidates.count,
             ocrCandidates: ocrCandidates.count,
+            clusterCount: clusters.count,
             existingConceptCount: existing.count,
             actions: actions,
             apply: apply

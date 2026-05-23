@@ -36,11 +36,11 @@ final class PersonalityAgentTests: XCTestCase {
 
 final class PersonalityMergerTests: XCTestCase {
 
-    /// 候选为空 → merge 短路返回 []，不调 LLM。
+    /// cluster 为空 → merge 短路返回 []，不调 LLM。
     @MainActor
-    func testMergeShortCircuitsOnEmptyCandidates() async throws {
+    func testMergeShortCircuitsOnEmptyClusters() async throws {
         let actions = try await PersonalityMerger().merge(
-            candidates: [], existingConcepts: [])
+            clusters: [], existingConcepts: [])
         XCTAssertTrue(actions.isEmpty)
     }
 }

@@ -170,45 +170,84 @@ enum MemoryPrompts {
     }
     """#
 
-    // MARK: - PersonalityMerger — daily tags → personality concepts
+    // MARK: - PersonalityClusterAgent — pre-cluster 同义 tag
 
-    /// 把一天 observed tags 归并进现有 personality concepts 的指令文本。
-    /// caller 在后面追加现有 concepts 列表 + 今日 tags。
+    /// 在 merger 之前先做语义聚类:把表面不同但意思相同的 tag 归一组。
+    /// caller 在后面拼上 `INDEXED TAGS` 列表。结果是 [{head, members:[idx]}]。
+    static let personalityCluster = #"""
+    You group SEMANTICALLY SIMILAR personality tags into clusters.
+
+    INPUT — a list of tags indexed 0..N-1. Tags may differ in surface form
+    but describe the same behavioral disposition.
+
+    CLUSTER WHEN — two or more tags describe the same disposition:
+      GOOD: ["systems-builder", "systems-thinking", "systems-obsession",
+             "framework-design", "architecture-planning"]
+      GOOD: ["tool-research", "tool-assisted-learning", "tool-fluency"]
+      GOOD: ["context-switching", "multitasking", "parallel-execution"]
+      GOOD: ["background-audio", "ambient-music", "sensory-anchor"]
+
+    DO NOT CLUSTER — related-but-distinct patterns stay separate:
+      BAD: ["verification", "methodology"]      — different scope
+      BAD: ["focus", "flow-state"]              — related but different
+      BAD: ["learning", "teaching"]             — different roles
+      BAD: ["iterative-shipping", "perfectionism"] — opposite mindsets
+
+    RULES:
+    - Every input index MUST appear in exactly one cluster.
+    - Singleton clusters are fine for genuinely unique tags.
+    - Prefer fewer larger clusters when synonymy is clear — the whole point
+      of this pass is to collapse duplicates before downstream merge.
+    - Pick `head` as the most CONCRETE behavioral phrase in the cluster
+      (kebab-case, lowercase).
+
+    OUTPUT — JSON array. No prose, no markdown:
+    [
+      { "head": "<canonical-kebab-case>", "members": [<index>, <index>, ...] }
+    ]
+    """#
+
+    // MARK: - PersonalityMerger — cluster → existing concept 决策
+
+    /// 拿到聚类后的 cluster,一个 cluster 一个决策:mergeInto 现有 concept
+    /// 还是 createNew 或 skipCluster。caller 后面拼现有 concepts 列表 +
+    /// cluster 列表(head + 成员 tag 预览)。
     static let personalityMerge = #"""
-    You decide how observed PERSONALITY TAGS map onto the user's existing
-    PERSONALITY CONCEPTS. One decision per observed tag.
+    You decide how each PERSONALITY TAG CLUSTER maps onto the user's existing
+    PERSONALITY CONCEPTS. One decision per cluster.
 
-    Each tag is a single noun or kebab-case phrase (e.g. "verification",
-    "context-switching", "background-audio"). Concepts ARE tags — there is
-    no prose body; the system tracks evidence structurally elsewhere.
+    Each cluster is a group of synonymous tags already deduplicated upstream.
+    Concepts ARE tags — there is no prose body; evidence is tracked elsewhere.
 
-    For EACH observed tag, choose exactly one action:
+    For EACH cluster, choose exactly one action:
 
-    - mergeInto: the tag is a SYNONYM or NEAR-SYNONYM of an existing concept's
-      primary_label OR any of its aliases. Provide conceptSlug only — the
-      tag itself will be added to that concept's aliases automatically.
+    - mergeInto: the cluster's head OR any of its members matches an existing
+      concept's primary_label or aliases (synonym / near-synonym). Provide
+      conceptSlug only — the cluster members will be added to that concept's
+      aliases automatically.
 
-    - createNew: a genuinely new tag, no existing concept covers it. No
-      additional fields needed — the tag becomes a new concept.
+    - createNew: a genuinely new disposition, no existing concept covers it.
+      No additional fields needed — the cluster head becomes the new concept.
 
-    - skipTag: tag is too vague / not personality-relevant. Provide reason.
+    - skipCluster: the cluster is too vague / not personality-relevant
+      (topic / identity / app name). Provide reason.
 
-    MERGE STRICTNESS — moderate. When in doubt, createNew rather than over-merge.
-    Merge-worthy synonymy:
+    MERGE STRICTNESS — moderate. When in doubt, createNew rather than
+    over-merge. Examples of merge-worthy synonymy:
       verification ↔ checking, validation, cross-checking
       multitasking ↔ context-switching, parallel-execution
       background-audio ↔ ambient-music, sensory-anchor
-    NOT-merge (different concepts):
+    Examples that should NOT merge:
       verification vs methodology      — different scope
       focus vs flow-state              — related but different
       multitasking vs distractibility  — positive vs negative framing
 
-    OUTPUT — JSON array, one object per observed tag. No prose, no markdown:
+    OUTPUT — JSON array, one object per cluster. No prose, no markdown:
     [
-      { "tag": "<the observed tag, verbatim>",
-        "action": "mergeInto" | "createNew" | "skipTag",
+      { "head": "<the cluster head, verbatim>",
+        "action": "mergeInto" | "createNew" | "skipCluster",
         "conceptSlug": "...",   // mergeInto only
-        "reason": "..." }       // skipTag only
+        "reason": "..." }       // skipCluster only
     ]
     """#
 

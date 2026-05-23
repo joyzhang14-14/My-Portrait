@@ -844,12 +844,15 @@ enum PersonalityMergeTestCLI {
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
 
-                // events-only 候选(其他两源 portraits/ocr 在后续 commit 接进来)。
+                // events-only 候选(其他两源 portraits/ocr 走 --personality-refresh-apply)。
                 let candidates: [PersonalityTagCandidate] = snapshot.tags.map {
                     PersonalityTagCandidate(tag: $0.name, source: .events, evidence: $0.evidence)
                 }
+                // 先聚类(降噪 + 收敛同义),再 merge。
+                let clusters = try await PersonalityClusterAgent().cluster(candidates: candidates)
+                print("clusters: \(clusters.count) (from \(candidates.count) candidate(s))")
                 let r = try await PersonalityMerger().mergeWithRaw(
-                    candidates: candidates, existingConcepts: concepts)
+                    clusters: clusters, existingConcepts: concepts)
                 print("\n──── MERGE PROMPT ────")
                 print(r.prompt)
                 print("\n──── LLM RAW ────")
@@ -857,12 +860,12 @@ enum PersonalityMergeTestCLI {
                 print("\n──── PARSED ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {
                     switch a {
-                    case .mergeInto(let slug, let cand):
-                        print("\(i + 1). mergeInto [\(slug)]  tag=\(cand.tag)  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
-                    case .createNew(let cand):
-                        print("\(i + 1). createNew \"\(cand.tag)\"  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
-                    case .skipTag(let tag, let reason):
-                        print("\(i + 1). skipTag [\(tag)] — \(reason)")
+                    case .mergeInto(let slug, let cluster):
+                        print("\(i + 1). mergeInto [\(slug)]  head=\(cluster.head)  members=\(cluster.members.map(\.tag))")
+                    case .createNew(let cluster):
+                        print("\(i + 1). createNew \"\(cluster.head)\"  members=\(cluster.members.map(\.tag))")
+                    case .skipCluster(let head, let reason):
+                        print("\(i + 1). skipCluster [\(head)] — \(reason)")
                     }
                 }
                 print("\n(dry-run: nothing written to disk)")
@@ -912,13 +915,15 @@ enum PersonalityMergeApplyCLI {
                 let candidates: [PersonalityTagCandidate] = snapshot.tags.map {
                     PersonalityTagCandidate(tag: $0.name, source: .events, evidence: $0.evidence)
                 }
+                let clusters = try await PersonalityClusterAgent().cluster(candidates: candidates)
+                print("clusters: \(clusters.count) (from \(candidates.count) candidate(s))")
                 let merger = await PersonalityMerger()
-                let actions = try await merger.merge(candidates: candidates, existingConcepts: concepts)
+                let actions = try await merger.merge(clusters: clusters, existingConcepts: concepts)
                 for (i, a) in actions.enumerated() {
                     switch a {
-                    case .mergeInto(let s, let cand): print("\(i + 1). mergeInto [\(s)] tag=\(cand.tag)")
-                    case .createNew(let cand):        print("\(i + 1). createNew \"\(cand.tag)\"")
-                    case .skipTag(let t, let r):      print("\(i + 1). skipTag [\(t)] — \(r)")
+                    case .mergeInto(let s, let cl): print("\(i + 1). mergeInto [\(s)] head=\(cl.head) members=\(cl.members.map(\.tag))")
+                    case .createNew(let cl):        print("\(i + 1). createNew \"\(cl.head)\" members=\(cl.members.map(\.tag))")
+                    case .skipCluster(let h, let r):print("\(i + 1). skipCluster [\(h)] — \(r)")
                     }
                 }
                 let result = try await merger.applyActions(actions, on: day)
@@ -1423,16 +1428,17 @@ enum PersonalityRefreshApplyCLI {
                 print("events on \(dayStr): \(r.eventCount) → \(r.eventCandidates) tag(s)")
                 print("portraits scanned: \(r.portraitInputs) → \(r.portraitCandidates) tag(s)")
                 print("ocr → \(r.ocrCandidates) tag(s)")
+                print("clusters: \(r.clusterCount) (from \(r.eventCandidates + r.portraitCandidates + r.ocrCandidates) candidate(s))")
                 print("existing personality concepts: \(r.existingConceptCount)")
                 print("\n──── ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {
                     switch a {
-                    case .mergeInto(let slug, let cand):
-                        print("\(i + 1). mergeInto [\(slug)]  tag=\(cand.tag)  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
-                    case .createNew(let cand):
-                        print("\(i + 1). createNew \"\(cand.tag)\"  source=\(cand.source.rawValue)  evidence=\(cand.evidence)")
-                    case .skipTag(let tag, let reason):
-                        print("\(i + 1). skipTag [\(tag)] — \(reason)")
+                    case .mergeInto(let slug, let cluster):
+                        print("\(i + 1). mergeInto [\(slug)]  head=\(cluster.head)  members=\(cluster.members.map(\.tag))")
+                    case .createNew(let cluster):
+                        print("\(i + 1). createNew \"\(cluster.head)\"  members=\(cluster.members.map(\.tag))")
+                    case .skipCluster(let head, let reason):
+                        print("\(i + 1). skipCluster [\(head)] — \(reason)")
                     }
                 }
                 print("\n=== applied ===")

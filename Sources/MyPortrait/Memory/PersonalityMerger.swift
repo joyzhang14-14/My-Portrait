@@ -17,11 +17,19 @@ struct PersonalityTagCandidate: Sendable, Equatable {
     let evidence: [String]           // events:event slug;portraits:portrait 相对路径;ocr:"<date>: w1, w2"
 }
 
-/// LLM 对每个 tag 候选的归属决定。
+/// 上游 PersonalityClusterAgent 把候选 tag 聚类后的产物。一个 cluster =
+/// 一组同义候选 + 一个 canonical kebab-case head。下游 merger 一个 cluster
+/// 一个决策(mergeInto / createNew / skipCluster)。
+struct PersonalityCluster: Sendable, Equatable {
+    let head: String                          // canonical kebab-case
+    let members: [PersonalityTagCandidate]    // 同义候选(含多源)
+}
+
+/// LLM 对每个 cluster 的归属决定。
 enum PersonalityMergeAction: Sendable, Equatable {
-    case mergeInto(conceptSlug: String, candidate: PersonalityTagCandidate)
-    case createNew(candidate: PersonalityTagCandidate)
-    case skipTag(tag: String, reason: String)
+    case mergeInto(conceptSlug: String, cluster: PersonalityCluster)
+    case createNew(cluster: PersonalityCluster)
+    case skipCluster(head: String, reason: String)
 }
 
 /// 概念文件 body 的结构化形式 —— 三个 section,每个 section 一组 string。
@@ -136,16 +144,16 @@ final class PersonalityMerger {
         return out
     }
 
-    // MARK: - merge(多源)
+    // MARK: - merge(cluster-input)
 
     /// 测试入口:同时返回 prompt / LLM 原始 / 解析后 actions。
     func mergeWithRaw(
-        candidates: [PersonalityTagCandidate],
+        clusters: [PersonalityCluster],
         existingConcepts: [(slug: String, file: PortraitFile)]
     ) async throws -> (prompt: String, raw: String, actions: [PersonalityMergeAction]) {
-        let prompt = Self.buildPrompt(candidates: candidates, concepts: existingConcepts)
-        if candidates.isEmpty {
-            return (prompt: prompt, raw: "(short-circuited: no candidates)", actions: [])
+        let prompt = Self.buildPrompt(clusters: clusters, concepts: existingConcepts)
+        if clusters.isEmpty {
+            return (prompt: prompt, raw: "(short-circuited: no clusters)", actions: [])
         }
 
         let agent = try PiAgent(model: model)
@@ -184,15 +192,15 @@ final class PersonalityMerger {
             throw BudgetExhaustedError(processor: "PersonalityMerger", message: err)
         }
 
-        let actions = try Self.parseActions(from: collected, candidates: candidates)
+        let actions = try Self.parseActions(from: collected, clusters: clusters)
         return (prompt: prompt, raw: collected, actions: actions)
     }
 
     func merge(
-        candidates: [PersonalityTagCandidate],
+        clusters: [PersonalityCluster],
         existingConcepts: [(slug: String, file: PortraitFile)]
     ) async throws -> [PersonalityMergeAction] {
-        try await mergeWithRaw(candidates: candidates,
+        try await mergeWithRaw(clusters: clusters,
                                existingConcepts: existingConcepts).actions
     }
 
@@ -210,15 +218,16 @@ final class PersonalityMerger {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fm = FileManager.default
 
-        // 按目标 slug 分组(同一概念可能在一次 run 里收多个候选)。
+        // 按目标 slug 分组(同一概念可能在一次 run 里收多个 cluster:罕见,
+        // 但保留 grouping 防 LLM 把同义两组都判到同一个 existing concept)。
         var groups: [String: [PersonalityMergeAction]] = [:]
         for action in actions {
             switch action {
-            case .createNew(let cand):
-                groups[Self.slugify(cand.tag), default: []].append(action)
+            case .createNew(let cluster):
+                groups[Self.slugify(cluster.head), default: []].append(action)
             case .mergeInto(let slug, _):
                 groups[slug, default: []].append(action)
-            case .skipTag:
+            case .skipCluster:
                 result.skipped += 1
             }
         }
@@ -226,10 +235,10 @@ final class PersonalityMerger {
         for (slug, group) in groups {
             let url = dir.appendingPathComponent(slug + ".md")
             let exists = fm.fileExists(atPath: url.path)
-            // 候选 tag 列表 + 第一个 createNew 用作 primaryLabel 兜底。
+            // 第一个 createNew 的 cluster head 兜底 primaryLabel。
             var primaryLabel = slug
             for a in group {
-                if case .createNew(let cand) = a { primaryLabel = cand.tag; break }
+                if case .createNew(let cluster) = a { primaryLabel = cluster.head; break }
             }
 
             var file: PortraitFile
@@ -259,19 +268,30 @@ final class PersonalityMerger {
                 aliases = []
             }
 
-            // 应用每个 action 的 candidate evidence / 别名。
+            // 应用每个 cluster 的成员证据 / 别名。
             for action in group {
                 switch action {
-                case .createNew(let cand):
-                    body.add(cand.source, items: cand.evidence)
-                    // createNew 的 tag 本身不进 aliases(它就是 primary_label)
-                case .mergeInto(_, let cand):
-                    body.add(cand.source, items: cand.evidence)
-                    // mergeInto 的 tag 是同义词 → 加 aliases
-                    if cand.tag != primaryLabel && !aliases.contains(cand.tag) {
-                        aliases.append(cand.tag)
+                case .createNew(let cluster):
+                    for m in cluster.members {
+                        body.add(m.source, items: m.evidence)
+                        // member.tag ≠ head → 加进 aliases(head 本身就是 primary)
+                        if m.tag != primaryLabel && !aliases.contains(m.tag) {
+                            aliases.append(m.tag)
+                        }
                     }
-                case .skipTag: continue
+                case .mergeInto(_, let cluster):
+                    // cluster 整组都是 existing concept 的同义词 → head + 成员
+                    // 都进 aliases,证据按源落 body。
+                    if cluster.head != primaryLabel && !aliases.contains(cluster.head) {
+                        aliases.append(cluster.head)
+                    }
+                    for m in cluster.members {
+                        body.add(m.source, items: m.evidence)
+                        if m.tag != primaryLabel && !aliases.contains(m.tag) {
+                            aliases.append(m.tag)
+                        }
+                    }
+                case .skipCluster: continue
                 }
             }
 
@@ -301,14 +321,14 @@ final class PersonalityMerger {
     // MARK: - Prompt
 
     fileprivate static func buildPrompt(
-        candidates: [PersonalityTagCandidate],
+        clusters: [PersonalityCluster],
         concepts: [(slug: String, file: PortraitFile)]
     ) -> String {
         var lines: [String] = [MemoryPrompts.personalityMerge]
         lines.append("")
         lines.append("EXISTING PERSONALITY CONCEPTS (slug | primary_label | aliases):")
         if concepts.isEmpty {
-            lines.append("  (none — every tag is necessarily createNew)")
+            lines.append("  (none — every cluster is necessarily createNew)")
         } else {
             for (slug, f) in concepts {
                 let label = f.primaryLabel ?? f.eventTitle
@@ -317,9 +337,10 @@ final class PersonalityMerger {
             }
         }
         lines.append("")
-        lines.append("OBSERVED TAGS to place (one decision each — note source for context):")
-        for c in candidates {
-            lines.append("  - \(c.tag)  (source: \(c.source.rawValue))")
+        lines.append("CLUSTERS to place (one decision each — head + member tags for context):")
+        for cl in clusters {
+            let memberStr = cl.members.map(\.tag).joined(separator: ", ")
+            lines.append("  - head=\(cl.head)  members=[\(memberStr)]")
         }
         return lines.joined(separator: "\n")
     }
@@ -328,7 +349,7 @@ final class PersonalityMerger {
 
     private static func parseActions(
         from response: String,
-        candidates: [PersonalityTagCandidate]
+        clusters: [PersonalityCluster]
     ) throws -> [PersonalityMergeAction] {
         guard let first = response.firstIndex(of: "["),
               let last = response.lastIndex(of: "]") else {
@@ -350,27 +371,31 @@ final class PersonalityMerger {
             throw MergerError.malformedJSON(error.localizedDescription)
         }
 
+        // head → cluster 索引,防 LLM 错配 / 漏配。
+        let byHead = Dictionary(uniqueKeysWithValues: clusters.map { ($0.head, $0) })
+        var decided = Set<String>()
         var out: [PersonalityMergeAction] = []
         for obj in arr {
             let action = (obj["action"] as? String) ?? ""
-            let tagName = (obj["tag"] as? String) ?? ""
-            // 每个 candidate 都对应一个 action(同 tag 多源 → 多个 action,
-            // 各自带源 + 证据;applyActions 会把它们 group 进同一 concept)。
-            let matchedCands = candidates.filter { $0.tag == tagName }
-            if matchedCands.isEmpty { continue }
-            for cand in matchedCands {
-                switch action {
-                case "mergeInto":
-                    guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty else { continue }
-                    out.append(.mergeInto(conceptSlug: slug, candidate: cand))
-                case "createNew":
-                    out.append(.createNew(candidate: cand))
-                case "skipTag", "skipTrait":
-                    out.append(.skipTag(tag: tagName,
+            let head = (obj["head"] as? String) ?? ""
+            guard let cluster = byHead[head] else { continue }
+            decided.insert(head)
+            switch action {
+            case "mergeInto":
+                guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty else { continue }
+                out.append(.mergeInto(conceptSlug: slug, cluster: cluster))
+            case "createNew":
+                out.append(.createNew(cluster: cluster))
+            case "skipCluster", "skipTag", "skipTrait":
+                out.append(.skipCluster(head: head,
                                         reason: (obj["reason"] as? String) ?? "unspecified"))
-                default: continue
-                }
+            default: continue
             }
+        }
+        // 兜底:LLM 漏判的 cluster → createNew(防数据丢失)。
+        for cl in clusters where !decided.contains(cl.head) {
+            pmLog.notice("orphan cluster head=\(cl.head, privacy: .public) — defaulting to createNew")
+            out.append(.createNew(cluster: cl))
         }
         return out
     }
