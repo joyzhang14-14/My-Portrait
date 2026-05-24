@@ -222,19 +222,21 @@ struct Integration: Identifiable, Hashable {
     let bundleId: String?
     /// Single-letter "wordmark" glyph used when no real icon is available.
     let letter: String
-    /// 可选 SF Symbol —— 优先于 letter。给没 bundleId、letter 在 system rounded
-    /// font 下渲染不漂亮的 case 用(如 email-smtp 的 "✉")。
+    /// 可选 SF Symbol —— 优先级:assetName > iconSymbol > letter。
     let iconSymbol: String?
+    /// 可选 Assets.xcassets 里的 imageset 名(用真品牌 SVG)。
+    /// 优先级最高 —— 有就用,没有再 iconSymbol,再 letter。
+    let assetName: String?
     /// Brand accent color, used for the letter glyph background and accents.
     let accent: Color
     let signInMethod: SignInMethod
     let category: Category
 
     init(id: String, name: String, bundleId: String?, letter: String,
-         iconSymbol: String? = nil,
+         iconSymbol: String? = nil, assetName: String? = nil,
          accent: Color, signInMethod: SignInMethod, category: Category) {
         self.id = id; self.name = name; self.bundleId = bundleId
-        self.letter = letter; self.iconSymbol = iconSymbol
+        self.letter = letter; self.iconSymbol = iconSymbol; self.assetName = assetName
         self.accent = accent; self.signInMethod = signInMethod; self.category = category
     }
 
@@ -253,9 +255,9 @@ enum IntegrationRegistry {
         // app 就显示真图标(原"Claude Desktop"tile 拔了)。
         .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
         .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
-        // Perplexity:品牌 logo 就是个星号(asterisk)。用户没装 Perplexity app
-        // 时(NSWorkspace 拿不到真图标),回落到 SF Symbol asterisk 接近真 logo。
-        .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  iconSymbol: "asterisk", accent: Color(red: 0.11, green: 0.66, blue: 0.69),  signInMethod: .apiKey,       category: .ai),
+        // Perplexity:用 bundle 的 perplexity.svg 资源(从 screenpipe 引来的
+        // 原版品牌 logo),iconSymbol asterisk 是再下一层兜底。
+        .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  iconSymbol: "asterisk", assetName: "Perplexity", accent: Color(red: 0.12, green: 0.72, blue: 0.80),  signInMethod: .apiKey,       category: .ai),
 
         // Local model runners
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
