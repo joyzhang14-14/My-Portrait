@@ -578,44 +578,44 @@ private struct EditContextPill: View {
     @State private var pulse: Bool = false
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 14) {
             Image(systemName: "sparkles")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(LinearGradient(
                     colors: [.cyan, .purple, .pink],
                     startPoint: .leading, endPoint: .trailing))
                 .symbolEffect(.pulse, options: .repeating, value: pulse)
             Text("EDITING")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .tracking(0.7)
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(.white.opacity(0.65))
             Text(slug)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.95))
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
             Text("Body-only · approval required")
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 14)
                     .fill(.ultraThinMaterial)
                     .opacity(0.85)
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 14)
                     .fill(LinearGradient(
                         colors: [.cyan.opacity(0.14), .purple.opacity(0.12), .pink.opacity(0.10)],
                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 14)
                     .stroke(LinearGradient(
                         colors: [.cyan, .purple, .pink],
-                        startPoint: .leading, endPoint: .trailing).opacity(0.55),
-                        lineWidth: 0.8)
+                        startPoint: .leading, endPoint: .trailing).opacity(0.65),
+                        lineWidth: 1.2)
             }
         )
         .onAppear { pulse.toggle() }
