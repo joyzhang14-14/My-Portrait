@@ -69,7 +69,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
         case .gemini:     return ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
         case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
-        case .deepseek:   return ["deepseek-chat", "deepseek-reasoner"]
+        case .deepseek:   return ["deepseek-v4-pro", "deepseek-v4-flash"]
         // claude CLI 接受 alias(sonnet/opus/haiku 自动取最新)或完整 model id。
         case .claudeCode: return ["sonnet", "opus", "haiku"]
         }
