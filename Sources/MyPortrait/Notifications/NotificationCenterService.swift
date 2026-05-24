@@ -73,14 +73,18 @@ final class NotificationCenterService {
         active.append(notif)
         log.notice("posted: \(title, privacy: .public)")
 
-        // 首次发通知时把浮窗装上(idempotent)。
-        NotificationOverlay.shared.ensureInstalled()
+        // 有通知 → 浮窗 show(lazy install + orderFront)。
+        NotificationOverlay.shared.show()
 
         scheduleDismiss(notif.id, after: defaultTimeout)
     }
 
     func dismiss(_ id: UUID) {
         active.removeAll { $0.id == id }
+        // 没通知了 → 浮窗 hide(orderOut),释放屏幕空间 + hit-test 让位。
+        if active.isEmpty {
+            NotificationOverlay.shared.hide()
+        }
     }
 
     private func scheduleDismiss(_ id: UUID, after: TimeInterval) {

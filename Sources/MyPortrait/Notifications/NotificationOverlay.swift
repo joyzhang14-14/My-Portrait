@@ -18,8 +18,23 @@ final class NotificationOverlay {
 
     private init() {}
 
-    /// 首次有通知时安装。idempotent。
-    func ensureInstalled() {
+    /// 有通知时调:lazy 安装 panel + orderFront。idempotent。
+    func show() {
+        ensureInstalled()
+        guard let p = panel else { return }
+        positionPanel(p)
+        p.orderFrontRegardless()
+    }
+
+    /// 没通知时调:把 panel `orderOut`,屏幕上完全消失(不占空间,
+    /// 不接事件,不挡鼠标 hit-test)。panel 实例保留在内存,下次
+    /// show 不用重建。
+    func hide() {
+        panel?.orderOut(nil)
+    }
+
+    /// idempotent;构造 panel + hosting view,但不一定显示。
+    private func ensureInstalled() {
         guard panel == nil else { return }
         let p = NSPanel(
             contentRect: .zero,
@@ -34,7 +49,7 @@ final class NotificationOverlay {
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         p.hidesOnDeactivate = false
         p.isMovableByWindowBackground = false
-        p.ignoresMouseEvents = false   // 让卡片可点;空列表时 view 自己 allowsHitTesting=false
+        p.ignoresMouseEvents = false   // 让卡片可点
 
         let host = NSHostingView(rootView: NotificationOverlayView())
         host.autoresizingMask = [.width, .height]
@@ -42,7 +57,6 @@ final class NotificationOverlay {
         hostingView = host
 
         positionPanel(p)
-        p.orderFrontRegardless()
         panel = p
 
         // 屏幕配置变化时重定位(分辨率切换、外接显示器拔插)。
