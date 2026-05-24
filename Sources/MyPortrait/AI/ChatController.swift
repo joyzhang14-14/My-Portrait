@@ -50,6 +50,11 @@ final class ChatController {
     /// 后续消息走普通 send(对话已有完整上下文)。
     private var pendingEditOriginalURL: URL? = nil
 
+    /// 本轮 AI 跑过的 `--ai-draft-write-body` 相对路径队列。toolEnd 时只
+    /// 记录(不插卡片),agentEnd 才把卡片追加到 assistant 消息**末尾**,
+    /// 这样卡片始终在 AI 回复完整出来之后才出现,不会夹在 bash blocks 中间。
+    private var pendingDraftRelPathsThisTurn: [String] = []
+
     private let store = ChatStore.shared
     /// Closure resolving the currently-selected provider + model + optional
     /// SecretStore key reference for that preset's API key (when the user
@@ -448,6 +453,13 @@ final class ChatController {
             if currentTextLength() == 0 { appendText(text) }
         case .agentEnd:
             flushPending()
+            // 把本轮排队的 draft 卡片都追加到 assistant 消息**末尾**,确保
+            // 卡片在所有 bash / 文字之后才出现。assistantMessageID 还在
+            // (清空在下面),appendEditDraftBlock 能找到当前消息。
+            for rel in pendingDraftRelPathsThisTurn {
+                appendEditDraftBlock(originalRelPath: rel)
+            }
+            pendingDraftRelPathsThisTurn.removeAll()
             isStreaming = false
             assistantMessageID = nil
             activeTextPartID = nil
@@ -590,7 +602,11 @@ final class ChatController {
                 if !isError {
                     if let rel = Self.parseDraftWriteBodyRel(fromCommand: b.command)
                         ?? Self.parseDraftWriteBodyRel(fromOutput: b.output) {
-                        appendEditDraftBlock(originalRelPath: rel)
+                        // 不在这里插卡片 —— 排到队列,等 agentEnd 一起追到末尾,
+                        // 这样卡片永远在 AI 文字结束之后才出现,不会夹在 bash 中。
+                        if !pendingDraftRelPathsThisTurn.contains(rel) {
+                            pendingDraftRelPathsThisTurn.append(rel)
+                        }
                     }
                 }
                 return

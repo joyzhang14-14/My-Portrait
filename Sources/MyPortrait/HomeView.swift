@@ -707,20 +707,19 @@ private struct EditDraftCard: View {
                     .tracking(0.6)
                     .foregroundStyle(.white.opacity(0.55))
             }
-            ScrollView {
-                Text(block.afterBody)
-                    .font(.system(size: 12.5, design: .default))
-                    .foregroundStyle(.white.opacity(0.88))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-            }
-            .frame(maxHeight: 240)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.green.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.22), lineWidth: 0.6))
-            )
+            // 全文直出,不嵌 ScrollView —— 否则跟外层 chat ScrollView 抢
+            // 手势,稍快滑动整段卡片就跟着窗口飞。
+            Text(block.afterBody)
+                .font(.system(size: 12.5))
+                .foregroundStyle(.white.opacity(0.88))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.green.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.22), lineWidth: 0.6))
+                )
         }
         .padding(.horizontal, 14)
     }
@@ -743,21 +742,18 @@ private struct EditDraftCard: View {
             }
             .buttonStyle(.plain)
             if showOriginal {
-                ScrollView {
-                    Text(block.beforeBody.isEmpty ? "(empty)" : block.beforeBody)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                }
-                .frame(maxHeight: 180)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.red.opacity(0.05))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.18), lineWidth: 0.6))
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                Text(block.beforeBody.isEmpty ? "(empty)" : block.beforeBody)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.red.opacity(0.05))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.18), lineWidth: 0.6))
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.horizontal, 14)
