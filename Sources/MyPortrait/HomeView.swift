@@ -1740,6 +1740,13 @@ private struct ChatInputBar: View {
                 .focused($focused)
                 .onKeyPress(.return) {
                     if NSEvent.modifierFlags.contains(.shift) { return .ignored }
+                    // IME 候选输入期间(中/日/韩),first responder 有 marked
+                    // text —— 这下回车是给 IME 选词的,不能拿来发消息。让
+                    // event 继续往下传给 IME 消费。
+                    if let client = NSApp.keyWindow?.firstResponder as? NSTextInputClient,
+                       client.hasMarkedText() {
+                        return .ignored
+                    }
                     onSend()
                     return .handled
                 }
