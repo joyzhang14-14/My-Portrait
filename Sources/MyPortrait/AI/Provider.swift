@@ -120,6 +120,20 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     /// Whether this provider needs no setup beyond detection.
     var isLocal: Bool { self == .ollama || self == .claudeCode }
 
+    /// Connections / AI Models 里对应的 Integration.id。跟
+    /// `from(integrationId:)` 互为反函数。
+    var integrationId: String {
+        switch self {
+        case .chatgpt:    return "chatgpt"
+        case .openaiBYOK: return "openai-byok"
+        case .anthropic:  return "anthropic-api"
+        case .gemini:     return "gemini"
+        case .ollama:     return "ollama"
+        case .perplexity: return "perplexity"
+        case .claudeCode: return "claude-code"
+        }
+    }
+
     /// 给用户看的展示名 —— 用在错误文案里(避免 "Codex not signed in"
     /// 一刀切到所有 provider)。跟 Connections 里的 tile 名保持一致。
     var displayName: String {

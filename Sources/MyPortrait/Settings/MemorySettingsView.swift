@@ -738,47 +738,66 @@ struct MemorySettingsView: View {
 
     /// Memory pipeline 用哪个 AI provider + 哪两档 model。改完立即生效
     ///(scheduler 每次跑都现读 config),无需重启 app。
+    ///
+    /// 可选项跟 Settings → AI Models 联动:在那边关掉的 provider 这里就不
+    /// 列;每个 provider 的 model 下拉也只列那边勾上的子集。AI Models 那边
+    /// 完全没勾过 = 走 provider 全量(向后兼容)。
     private var providerSection: some View {
-        // 当前选中的 provider —— 决定 model 下拉里列哪些 id。
+        let aiCfg = cfg.current.aiModels
+        // Provider 列表:过掉 AI Models 那边 disable 的(按 integrationId 比对)。
+        let availableProviders = Provider.allCases.filter {
+            !aiCfg.disabledProviderIds.contains($0.integrationId)
+        }
         let providerId = cfg.current.memory.providerId
         let selectedProvider = Provider(rawValue: providerId) ?? .chatgpt
-        let models = selectedProvider.availableModels
+        // Model 列表:走 AIModelsConfig.visibleModels(空 / 缺省 = 全量)。
+        let models = aiCfg.visibleModels(
+            forIntegrationId: selectedProvider.integrationId,
+            available: selectedProvider.availableModels
+        )
 
         return section(
             title: "AI provider",
-            blurb: "Which model runs the memory pipeline (impact scoring, event clustering, portrait distillation, personality refresh). Main model handles heavy tasks; light model handles clustering / writing-capture passes. Changes apply on the next scheduled run."
+            blurb: "Which model runs the memory pipeline (impact scoring, event clustering, portrait distillation, personality refresh). Choices come from Settings → AI Models — disable a provider or hide a model there to remove it from here. Changes apply on the next scheduled run."
         ) {
-            HStack(spacing: 12) {
-                Text("Provider")
-                    .font(.system(size: 12))
-                    .frame(maxWidth: 280, alignment: .leading)
-                Picker("", selection: cfg.binding(\.memory.providerId)) {
-                    ForEach(Provider.allCases, id: \.rawValue) { p in
-                        Text(Self.providerDisplayName(p)).tag(p.rawValue)
+            if availableProviders.isEmpty {
+                Text("All AI providers are disabled in Settings → AI Models. Enable at least one to run the memory pipeline.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 12) {
+                    Text("Provider")
+                        .font(.system(size: 12))
+                        .frame(maxWidth: 280, alignment: .leading)
+                    Picker("", selection: cfg.binding(\.memory.providerId)) {
+                        ForEach(availableProviders, id: \.rawValue) { p in
+                            Text(Self.providerDisplayName(p)).tag(p.rawValue)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack(spacing: 12) {
-                Text("Main model (heavy tasks)")
-                    .font(.system(size: 12))
-                    .frame(maxWidth: 280, alignment: .leading)
-                Picker("", selection: cfg.binding(\.memory.model)) {
-                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                HStack(spacing: 12) {
+                    Text("Main model (heavy tasks)")
+                        .font(.system(size: 12))
+                        .frame(maxWidth: 280, alignment: .leading)
+                    Picker("", selection: cfg.binding(\.memory.model)) {
+                        ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack(spacing: 12) {
-                Text("Light model (clustering / writing capture)")
-                    .font(.system(size: 12))
-                    .frame(maxWidth: 280, alignment: .leading)
-                Picker("", selection: cfg.binding(\.memory.modelLight)) {
-                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                HStack(spacing: 12) {
+                    Text("Light model (clustering / writing capture)")
+                        .font(.system(size: 12))
+                        .frame(maxWidth: 280, alignment: .leading)
+                    Picker("", selection: cfg.binding(\.memory.modelLight)) {
+                        ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
