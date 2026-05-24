@@ -264,9 +264,40 @@ final class WritingCaptureWorker {
 
     /// 跑一次 backlog:cursor → now。
     /// approve 后 cursor 推进,reject 不动 cursor。
+    /// **防重复**:已有 pending_review 或 processing 状态时拒绝重跑,要求先
+    /// approve/reject。避免用户忘了 review 又点一次 → 上次 LLM 输出被清重跑。
+    enum BacklogError: LocalizedError {
+        case pendingReviewExists(records: Int)
+        case alreadyProcessing
+        var errorDescription: String? {
+            switch self {
+            case .pendingReviewExists(let n):
+                return "Backlog already has \(n) record(s) pending review. " +
+                       "Approve or reject them first before running again."
+            case .alreadyProcessing:
+                return "Backlog run already in progress. Wait for it to finish."
+            }
+        }
+    }
+
     func runBacklog() async throws -> WritingCaptureDayRunSummary {
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        // 防重复触发:当前状态如果是 pending_review / processing,拒绝重跑
+        let existing = try await Task.detached(priority: .userInitiated) { [store] in
+            try store.fetchRun(date: Self.backlogDateKey)
+        }.value
+        if let r = existing {
+            switch r.status {
+            case WritingCaptureRunStatus.pendingReview.rawValue:
+                throw BacklogError.pendingReviewExists(records: r.recordsCount ?? 0)
+            case WritingCaptureRunStatus.processing.rawValue:
+                throw BacklogError.alreadyProcessing
+            default:
+                break  // approved / rejected / failed → 允许重跑
+            }
+        }
 
         // cursor:上次 approve 处理到的 max ts(exclusive)。
         // 首次跑(cursor=0)从**第一条 typing_event 的 ts** 开始 —— 没 typing 的
@@ -279,7 +310,8 @@ final class WritingCaptureWorker {
         }.value
         let endMs = Int64(Date().timeIntervalSince1970 * 1000)
         workerLog.info("backlog: cursor=\(cursor, privacy: .public), startMs=\(startMs, privacy: .public)")
-        // 跑之前先清 staged(避免上次 pending_review 没 approve/reject 残留)
+        // 跑之前清 staged(approved / failed / rejected 状态下的残留),
+        // 上一步 gate 已经挡掉 pending_review,这里安全。
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.clearStaged(date: Self.backlogDateKey)
             try store.upsertRunStatus(
