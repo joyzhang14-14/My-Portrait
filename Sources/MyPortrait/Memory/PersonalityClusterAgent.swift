@@ -22,10 +22,12 @@ final class PersonalityClusterAgent {
         }
     }
 
+    private let provider: Provider
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 90) {
+    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 90) {
+        self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
     }
@@ -50,7 +52,7 @@ final class PersonalityClusterAgent {
                     clusters: [PersonalityCluster(head: c.tag, members: [c])])
         }
 
-        let agent = try PiAgent(model: model)
+        let agent = try MemoryAgentFactory.make(provider: provider, model: model)
         do { try await agent.start() }
         catch { throw AgentError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }

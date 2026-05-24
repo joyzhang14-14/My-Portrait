@@ -32,8 +32,11 @@ final class WritingCaptureWorker {
     static var shared: WritingCaptureWorker?
 
     let store: WritingCaptureStore
-    private let pass1: WritingCapturePass1Agent
-    private let pass2: WritingCapturePass2Agent
+    /// pass1/pass2 在每次 runDay 重新构造 —— 这样用户在 Settings 改 provider
+    /// 后下一次跑就用新的(写作采集用 LIGHT 模型档,跟 cluster 一档)。
+    /// init 传入的 override 仍然优先(测试用)。
+    private let pass1Override: WritingCapturePass1Agent?
+    private let pass2Override: WritingCapturePass2Agent?
 
     init(
         store: WritingCaptureStore,
@@ -41,8 +44,19 @@ final class WritingCaptureWorker {
         pass2: WritingCapturePass2Agent? = nil
     ) {
         self.store = store
-        self.pass1 = pass1 ?? WritingCapturePass1Agent()
-        self.pass2 = pass2 ?? WritingCapturePass2Agent()
+        self.pass1Override = pass1
+        self.pass2Override = pass2
+    }
+
+    private var pass1: WritingCapturePass1Agent {
+        if let o = pass1Override { return o }
+        let cfg = ConfigStore.shared.current.memory
+        return WritingCapturePass1Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
+    }
+    private var pass2: WritingCapturePass2Agent {
+        if let o = pass2Override { return o }
+        let cfg = ConfigStore.shared.current.memory
+        return WritingCapturePass2Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
     }
 
     /// 跑所有「未处理的天」。返回每天的执行摘要。

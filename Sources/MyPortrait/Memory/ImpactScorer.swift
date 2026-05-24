@@ -50,11 +50,15 @@ final class ImpactScorer {
     private let batchSize: Int
     private let perBatchTimeout: TimeInterval
 
+    private let provider: Provider
+
     init(
+        provider: Provider = .chatgpt,
         model: String = "gpt-5.4",
         batchSize: Int = 20,
         perBatchTimeout: TimeInterval = 90
     ) {
+        self.provider = provider
         self.model = model
         self.batchSize = batchSize
         self.perBatchTimeout = perBatchTimeout
@@ -80,7 +84,7 @@ final class ImpactScorer {
             return Result(scoredCount: 0, failedCount: 0, elapsed: 0)
         }
 
-        let agent = try PiAgent(model: model)
+        let agent = try MemoryAgentFactory.make(provider: provider, model: model)
         do { try await agent.start() }
         catch { throw ScorerError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }
@@ -162,7 +166,7 @@ final class ImpactScorer {
 
     private func sendBatch(
         prompt: String,
-        agent: PiAgent,
+        agent: any ChatAgent,
         coordinator: Coordinator
     ) async throws -> [LLMScore] {
         let requestID = UUID().uuidString

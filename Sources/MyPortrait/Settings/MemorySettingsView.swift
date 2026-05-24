@@ -76,6 +76,7 @@ struct MemorySettingsView: View {
 
                 switch tab {
                 case .parameter:
+                    providerSection
                     budgetSection
                     decaySection
                     archiveSection
@@ -732,6 +733,65 @@ struct MemorySettingsView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+        }
+    }
+
+    /// Memory pipeline 用哪个 AI provider + 哪两档 model。改完立即生效
+    ///(scheduler 每次跑都现读 config),无需重启 app。
+    private var providerSection: some View {
+        // 当前选中的 provider —— 决定 model 下拉里列哪些 id。
+        let providerId = cfg.current.memory.providerId
+        let selectedProvider = Provider(rawValue: providerId) ?? .chatgpt
+        let models = selectedProvider.availableModels
+
+        return section(
+            title: "AI provider",
+            blurb: "Which model runs the memory pipeline (impact scoring, event clustering, portrait distillation, personality refresh). Main model handles heavy tasks; light model handles clustering / writing-capture passes. Changes apply on the next scheduled run."
+        ) {
+            HStack(spacing: 12) {
+                Text("Provider")
+                    .font(.system(size: 12))
+                    .frame(maxWidth: 280, alignment: .leading)
+                Picker("", selection: cfg.binding(\.memory.providerId)) {
+                    ForEach(Provider.allCases, id: \.rawValue) { p in
+                        Text(Self.providerDisplayName(p)).tag(p.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 12) {
+                Text("Main model (heavy tasks)")
+                    .font(.system(size: 12))
+                    .frame(maxWidth: 280, alignment: .leading)
+                Picker("", selection: cfg.binding(\.memory.model)) {
+                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 12) {
+                Text("Light model (clustering / writing capture)")
+                    .font(.system(size: 12))
+                    .frame(maxWidth: 280, alignment: .leading)
+                Picker("", selection: cfg.binding(\.memory.modelLight)) {
+                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private static func providerDisplayName(_ p: Provider) -> String {
+        switch p {
+        case .chatgpt:     return "Codex (ChatGPT Pro / Plus OAuth)"
+        case .openaiBYOK:  return "OpenAI (API key)"
+        case .anthropic:   return "Anthropic (API key)"
+        case .ollama:      return "Ollama (local)"
+        case .gemini:      return "Gemini (API key)"
+        case .perplexity:  return "Perplexity (API key)"
+        case .claudeCode:  return "Claude Code CLI (Pro / Max subscription)"
         }
     }
 

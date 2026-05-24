@@ -17,6 +17,9 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
 
     private let log = Logger(subsystem: "com.myportrait", category: "claude-code-agent")
     private let model: String
+    /// true = 每轮 sendPrompt 都不复用 session_id(memory pipeline 用,每条
+    /// prompt 是独立任务,串上下文反而污染);false = 多轮续会话(chat 用)。
+    private let oneshot: Bool
     /// 多轮续会话:第一次响应里抓出来,后续 sendPrompt 用 `-r <sid>` 续。
     private var sessionId: String?
 
@@ -36,8 +39,9 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     private var eventContinuation: AsyncStream<PiAgent.Event>.Continuation?
     let events: AsyncStream<PiAgent.Event>
 
-    init(model: String) {
+    init(model: String, oneshot: Bool = false) {
         self.model = model.isEmpty ? "sonnet" : model
+        self.oneshot = oneshot
         var c: AsyncStream<PiAgent.Event>.Continuation!
         self.events = AsyncStream { cont in c = cont }
         self.eventContinuation = c
@@ -72,7 +76,7 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             "--permission-mode", "bypassPermissions",
             "--model", model,
         ]
-        if let sid = sessionId {
+        if !oneshot, let sid = sessionId {
             args.append(contentsOf: ["-r", sid])
         }
         args.append(contentsOf: ["-p", text])
@@ -170,7 +174,8 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         let type = (obj["type"] as? String) ?? ""
         switch type {
         case "system":
-            if (obj["subtype"] as? String) == "init",
+            if !oneshot,
+               (obj["subtype"] as? String) == "init",
                let sid = obj["session_id"] as? String {
                 sessionId = sid
             }

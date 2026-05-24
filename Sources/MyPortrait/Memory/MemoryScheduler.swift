@@ -66,7 +66,9 @@ final class MemoryScheduler {
     private var isRunning = false
     private var timer: Timer?
 
-    private let model = "gpt-5.4"
+    /// 当前 memory pipeline 的 provider/model — 从 ConfigStore 读。每次需要时
+    /// 现拉,这样用户在 Settings 改完无需重启 scheduler 立刻生效。
+    private var memoryCfg: MemoryConfig { ConfigStore.shared.current.memory }
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
     private let kLastEvent          = "scheduler.lastEventRun"
@@ -266,7 +268,8 @@ final class MemoryScheduler {
             if row.event == .complete, row.impact.needsWork {
                 await runStep(date: ds, stage: .impact, processor: "impact", rollbackDay: nil) {
                     let dir = PortraitPaths.eventsDayDir(for: day)
-                    let r = try await ImpactScorer(model: self.model).rescoreAll(root: dir)
+                    let cfg = self.memoryCfg
+                    let r = try await ImpactScorer(provider: cfg.resolvedProvider, model: cfg.resolvedModel).rescoreAll(root: dir)
                     return r.failedCount == 0 ? .success : .failed
                 }
             }
@@ -316,7 +319,8 @@ final class MemoryScheduler {
         print("[Scheduler] portrait job — distilling")
 
         await runStep(date: distillAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
-            let r = try await PortraitDistiller(model: self.model).distill()
+            let cfg = self.memoryCfg
+            let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
         return .ran(days: [distillAnchor])
@@ -345,7 +349,8 @@ final class MemoryScheduler {
             let ds = ProcessingLogStore.dayString(day)
             await runStep(date: ds, stage: .personality,
                           processor: "personality", rollbackDay: nil) {
-                let r = try await PersonalityRefresh(model: self.model).refresh(day: day)
+                let cfg = self.memoryCfg
+                let r = try await PersonalityRefresh(provider: cfg.resolvedProvider, model: cfg.resolvedModel, clusterModel: cfg.resolvedModelLight).refresh(day: day)
                 print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
                 return .success
             }

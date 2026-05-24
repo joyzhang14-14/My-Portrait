@@ -57,10 +57,12 @@ final class PortraitDistiller {
         }
     }
 
+    private let provider: Provider
     private let model: String
     private let perCategoryTimeout: TimeInterval
 
-    init(model: String = "gpt-5.4", perCategoryTimeout: TimeInterval = 120) {
+    init(provider: Provider = .chatgpt, model: String = "gpt-5.4", perCategoryTimeout: TimeInterval = 120) {
+        self.provider = provider
         self.model = model
         self.perCategoryTimeout = perCategoryTimeout
     }
@@ -76,7 +78,7 @@ final class PortraitDistiller {
         // 2. Snapshot existing portrait files (for UPDATE decisions).
         let portraitByCategory = await collectPortraitByCategory()
 
-        let agent = try PiAgent(model: model)
+        let agent = try MemoryAgentFactory.make(provider: provider, model: model)
         do { try await agent.start() }
         catch { throw DistillError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }
@@ -169,7 +171,7 @@ final class PortraitDistiller {
         category: String,
         events: [EventEntry],
         existing: [PortraitEntry],
-        agent: PiAgent,
+        agent: any ChatAgent,
         coordinator: DistillerCoordinator
     ) async throws -> [ParsedDecision] {
         let requestID = UUID().uuidString

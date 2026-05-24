@@ -8,10 +8,20 @@ protocol ChatAgent: AnyObject, Sendable {
     func start() async throws
     /// 发一条用户提示。
     func sendPrompt(_ text: String) throws
+    /// 发一条带 request id 的提示(供 memory 流水线做响应相关)。
+    /// 默认实现把 id 丢掉直接 delegate 到 1-arg —— PiAgent 自带原生实现。
+    func sendPrompt(_ text: String, id: String) throws
     /// 通知子进程停止(发 SIGTERM / 写 stop 命令)。
     func stop()
     /// 中断当前正在流式的回复(用户点 Cancel)。
     func abort() throws
     /// 事件流。生命周期跟 agent 一致,start() 之后开始有事件,stop 后 finish。
     var events: AsyncStream<PiAgent.Event> { get }
+}
+
+extension ChatAgent {
+    /// 默认 2-arg 实现:丢 id,转给 1-arg。PiAgent 重写,有真正的 id 透传。
+    func sendPrompt(_ text: String, id: String) throws {
+        try sendPrompt(text)
+    }
 }

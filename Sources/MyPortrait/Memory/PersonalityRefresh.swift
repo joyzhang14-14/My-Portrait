@@ -37,12 +37,15 @@ final class PersonalityRefresh {
         let apply: PersonalityMerger.ApplyResult
     }
 
+    private let provider: Provider
     private let model: String
     /// cluster 这步用更轻的模型(默认 gpt-5.4-mini)。轻语义聚类任务不值得
     /// 烧主模型,而且 mini 在这种"列一堆 tag 分组"的任务里反而决断更利索。
     private let clusterModel: String
-    init(model: String = "gpt-5.4",
+    init(provider: Provider = .chatgpt,
+         model: String = "gpt-5.4",
          clusterModel: String = "gpt-5.4-mini") {
+        self.provider = provider
         self.model = model
         self.clusterModel = clusterModel
     }
@@ -54,7 +57,7 @@ final class PersonalityRefresh {
         let highWeightEvents = allEvents.filter { $0.file.weight > Self.minEventWeight }
         prLog.notice("events: \(allEvents.count) total → \(highWeightEvents.count) with weight > \(Self.minEventWeight)")
 
-        let snapshot = try await PersonalityAgent(model: model)
+        let snapshot = try await PersonalityAgent(provider: provider, model: model)
             .generateDailySnapshot(date: day, events: highWeightEvents)
         if writeDailySnapshot {
             _ = try? PersonalityDailyStore.write(snapshot)
@@ -92,12 +95,12 @@ final class PersonalityRefresh {
         }
 
         // ── 3) 语义聚类(去重 + 收敛同义) ───────────────────────────
-        let clusterAgent = PersonalityClusterAgent(model: clusterModel)
+        let clusterAgent = PersonalityClusterAgent(provider: provider, model: clusterModel)
         let clusters = try await clusterAgent.cluster(candidates: keptCandidates)
 
         // ── 4) merge 决策(per-cluster) + 落盘 ──────────────────────
         let existing = await PersonalityMerger.readConcepts()
-        let merger = PersonalityMerger(model: model)
+        let merger = PersonalityMerger(provider: provider, model: model)
         let actions = try await merger.merge(clusters: clusters, existingConcepts: existing)
         let apply = try merger.applyActions(actions, on: day)
 

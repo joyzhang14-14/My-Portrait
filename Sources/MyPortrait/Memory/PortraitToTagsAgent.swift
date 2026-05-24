@@ -30,10 +30,12 @@ final class PortraitToTagsAgent {
         let bodyExcerpt: String    // 截断到 ~400 字
     }
 
+    private let provider: Provider
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(model: String = "gpt-5.4", perRunTimeout: TimeInterval = 120) {
+    init(provider: Provider = .chatgpt, model: String = "gpt-5.4", perRunTimeout: TimeInterval = 120) {
+        self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
     }
@@ -77,7 +79,7 @@ final class PortraitToTagsAgent {
             return (prompt: prompt, raw: "(short-circuited: no portraits)", result: [])
         }
 
-        let agent = try PiAgent(model: model)
+        let agent = try MemoryAgentFactory.make(provider: provider, model: model)
         do { try await agent.start() }
         catch { throw AgentError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }

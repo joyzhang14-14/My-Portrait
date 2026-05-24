@@ -90,6 +90,14 @@ struct MemoryConfig: Codable, Equatable {
     // (manual or automatic). Oldest first.
     var eventDayCap:           Int    = 7
 
+    // LLM provider used by the memory pipeline. providerId 匹配 Provider 的
+    // rawValue("chatgpt"/"anthropic"/"claude-code"/...);model 是主任务模型
+    //(EventBuilder/Distiller/Personality 等),modelLight 是轻任务模型
+    //(Cluster/WritingPass1/Pass2)。空串 = 用 provider.defaultModel。
+    var providerId:            String = "chatgpt"
+    var model:                 String = "gpt-5.4"
+    var modelLight:            String = "gpt-5.4-mini"
+
     init() {}
     enum CodingKeys: String, CodingKey {
         case indexerEnabled       = "indexer_enabled"
@@ -105,6 +113,9 @@ struct MemoryConfig: Codable, Equatable {
         case distillEvidenceThreshold = "distill_evidence_threshold"
         case weightHalfLifeDays   = "weight_half_life_days"
         case eventDayCap          = "event_day_cap"
+        case providerId           = "provider_id"
+        case model
+        case modelLight           = "model_light"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -122,6 +133,22 @@ struct MemoryConfig: Codable, Equatable {
         distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)
         weightHalfLifeDays   = c.dflt(Int.self,    .weightHalfLifeDays,   weightHalfLifeDays)
         eventDayCap          = c.dflt(Int.self,    .eventDayCap,          eventDayCap)
+        providerId           = c.dflt(String.self, .providerId,           providerId)
+        model                = c.dflt(String.self, .model,                model)
+        modelLight           = c.dflt(String.self, .modelLight,           modelLight)
+    }
+
+    /// 把 providerId / model / modelLight 解析成 agent 调用方实际要用的值。
+    /// providerId 不认识就回落到 chatgpt;model 空就用 provider.defaultModel;
+    /// modelLight 空就跟 model 同档。
+    var resolvedProvider: Provider {
+        Provider(rawValue: providerId) ?? .chatgpt
+    }
+    var resolvedModel: String {
+        model.isEmpty ? resolvedProvider.defaultModel : model
+    }
+    var resolvedModelLight: String {
+        modelLight.isEmpty ? resolvedModel : modelLight
     }
 }
 

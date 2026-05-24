@@ -83,10 +83,14 @@ final class EventBuilder {
     /// Retries per batch on a malformed-JSON / timeout response.
     private let maxAttempts: Int
 
-    init(model: String = "gpt-5.4",
+    private let provider: Provider
+
+    init(provider: Provider = .chatgpt,
+         model: String = "gpt-5.4",
          perBatchTimeout: TimeInterval = 180,
          batchSize: Int = 40,
          maxAttempts: Int = 3) {
+        self.provider = provider
         self.model = model
         self.perBatchTimeout = perBatchTimeout
         self.batchSize = batchSize
@@ -162,7 +166,7 @@ final class EventBuilder {
 
     /// One LLM round-trip: spawn agent, send prompt, collect the response.
     private func runLLM(prompt: String) async throws -> String {
-        let agent = try PiAgent(model: model)
+        let agent = try MemoryAgentFactory.make(provider: provider, model: model)
         do { try await agent.start() }
         catch { throw BuilderError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }
