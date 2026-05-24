@@ -17,6 +17,10 @@ struct InputCaptureView: View {
     @State private var loadFailed = false
     @State private var confirmingDelete = false        // app 级
     @State private var confirmingRecordDelete = false   // 单条 session
+    /// app 列表的标题搜(app label).
+    @State private var appSearchText: String = ""
+    /// records 列表的标题搜(URL / element label).
+    @State private var recordSearchText: String = ""
 
     // 写作采集 LLM 输出 —— approved 天的 writing_records 跟选中的 typing_event
     // 时间窗重叠时,detail 顶部展示。
@@ -77,12 +81,21 @@ struct InputCaptureView: View {
         }
     }
 
+    /// app 标题(label)模糊搜。
+    private var visibleApps: [TypingAppSummary] {
+        let q = appSearchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return apps }
+        return apps.filter {
+            Self.appLabel($0.bundleId).localizedCaseInsensitiveContains(q)
+        }
+    }
+
     private var appsListColumn: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Text("Input")
                     .font(.system(size: 16, weight: .semibold))
-                Text("\(apps.count)")
+                Text("\(visibleApps.count)\(appSearchText.isEmpty ? "" : " / \(apps.count)")")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -95,15 +108,26 @@ struct InputCaptureView: View {
             .padding(.horizontal, 16)
             .padding(.top, 44)
             .padding(.bottom, 8)
+
+            SearchBar(text: $appSearchText, placeholder: "Search apps")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
             Divider().background(Color.white.opacity(0.06))
 
             if apps.isEmpty {
                 emptyHint
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if visibleApps.isEmpty {
+                Text("No apps match “\(appSearchText)”.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 40)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(apps) { app in
+                        ForEach(visibleApps) { app in
                             AppRow(app: app)
                                 .contentShape(Rectangle())
                                 .onTapGesture { Task { await openGroup(app) } }
@@ -117,6 +141,18 @@ struct InputCaptureView: View {
         .background(Color.black.opacity(0.28))
     }
 
+    /// records 标题模糊搜:URL + element label 都参与匹配(两者构成 record
+    /// 在列表里可见的"标题"语义)。
+    private var visibleRecords: [TypingEvent] {
+        let q = recordSearchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return records }
+        return records.filter { rec in
+            let label = Self.elementLabel(rec.elementHash, in: records)
+            return rec.url.localizedCaseInsensitiveContains(q)
+                || label.localizedCaseInsensitiveContains(q)
+        }
+    }
+
     private func recordsListColumn(group: TypingAppSummary) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -124,6 +160,7 @@ struct InputCaptureView: View {
                     selectedGroup = nil
                     selectedRecordId = nil
                     records = []
+                    recordSearchText = ""
                 } label: { Image(systemName: "chevron.left") }
                 .buttonStyle(.bouncyIcon)
                 .help("Back to apps")
@@ -138,7 +175,7 @@ struct InputCaptureView: View {
                             .lineLimit(1).truncationMode(.middle)
                     }
                 }
-                Text("\(records.count)")
+                Text("\(visibleRecords.count)\(recordSearchText.isEmpty ? "" : " / \(records.count)")")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -149,17 +186,30 @@ struct InputCaptureView: View {
             .padding(.horizontal, 16)
             .padding(.top, 44)
             .padding(.bottom, 8)
+
+            SearchBar(text: $recordSearchText, placeholder: "Search URL or element")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
             Divider().background(Color.white.opacity(0.06))
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(records, id: \.id) { rec in
-                        RecordRow(record: rec,
-                                  elementLabel: Self.elementLabel(rec.elementHash, in: records),
-                                  selected: selectedRecordId == rec.id)
-                            .contentShape(Rectangle())
-                            .onTapGesture { selectedRecordId = rec.id }
-                        Divider().background(Color.white.opacity(0.04))
+            if visibleRecords.isEmpty && !recordSearchText.isEmpty {
+                Text("No records match “\(recordSearchText)”.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 40)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(visibleRecords, id: \.id) { rec in
+                            RecordRow(record: rec,
+                                      elementLabel: Self.elementLabel(rec.elementHash, in: records),
+                                      selected: selectedRecordId == rec.id)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedRecordId = rec.id }
+                            Divider().background(Color.white.opacity(0.04))
+                        }
                     }
                 }
             }

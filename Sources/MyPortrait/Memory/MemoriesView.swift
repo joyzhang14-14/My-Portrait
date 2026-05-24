@@ -21,6 +21,8 @@ struct MemoriesView: View {
     @State private var actionStatus: String = ""
     @State private var selected: Entry.ID?
     @State private var confirmingDelete: Bool = false
+    /// 标题模糊搜(case-insensitive)。空 = 不过滤。切 scope 时清空。
+    @State private var searchText: String = ""
 
     struct Entry: Identifiable {
         let id: URL
@@ -51,6 +53,7 @@ struct MemoriesView: View {
             .background(SidebarBackdrop().ignoresSafeArea())
             .task(id: scope) {
                 selected = nil
+                searchText = ""
                 await reload()
             }
         }
@@ -58,12 +61,19 @@ struct MemoriesView: View {
 
     // MARK: - List column (toolbar + list)
 
+    /// 搜索过滤:空串走全量,否则按 title case-insensitive contains。
+    private var visibleEntries: [Entry] {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return entries }
+        return entries.filter { $0.title.localizedCaseInsensitiveContains(q) }
+    }
+
     private var listColumn: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Text(scope.displayName)
                     .font(.system(size: 16, weight: .semibold))
-                Text("\(entries.count)")
+                Text("\(visibleEntries.count)\(searchText.isEmpty ? "" : " / \(entries.count)")")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -76,6 +86,10 @@ struct MemoriesView: View {
             .padding(.horizontal, 16)
             .padding(.top, 44)
             .padding(.bottom, 8)
+
+            SearchBar(text: $searchText, placeholder: "Search titles")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
 
             if !actionStatus.isEmpty {
                 Text(actionStatus)
@@ -92,10 +106,16 @@ struct MemoriesView: View {
             if entries.isEmpty && !loading {
                 EmptyHint(scope: scope)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if visibleEntries.isEmpty {
+                Text("No titles match “\(searchText)”.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 40)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(entries) { entry in
+                        ForEach(visibleEntries) { entry in
                             EntryRow(entry: entry, selected: selected == entry.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { handleSelect(entry: entry) }
