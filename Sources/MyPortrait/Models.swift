@@ -253,7 +253,9 @@ enum IntegrationRegistry {
         // app 就显示真图标(原"Claude Desktop"tile 拔了)。
         .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
         .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
-        .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  accent: Color(red: 0.11, green: 0.66, blue: 0.69),  signInMethod: .apiKey,       category: .ai),
+        // Perplexity:品牌 logo 就是个星号(asterisk)。用户没装 Perplexity app
+        // 时(NSWorkspace 拿不到真图标),回落到 SF Symbol asterisk 接近真 logo。
+        .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  iconSymbol: "asterisk", accent: Color(red: 0.11, green: 0.66, blue: 0.69),  signInMethod: .apiKey,       category: .ai),
 
         // Local model runners
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
