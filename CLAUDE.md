@@ -30,3 +30,34 @@ macOS 原生 Swift app（个人 AI 记忆系统）。
   之类报错在同模块内常是误报，以 `Build complete` 为准。
 - 用户在 Xcode 里 build & run 跑真正的 `.app`。代码改动需用户重新 build；
   纯数据改动（`~/.portrait/` 下的文件）只需 app 内 reload 或重开。
+
+## ⚠️ GRDB `arguments:` 必须用 dict 形式,不要用数组字面量
+
+```swift
+// ❌ 错误 —— 偶发死锁
+try Row.fetchAll(db, sql: "... WHERE a = ? AND b = ?", arguments: [v1, v2])
+
+// ✅ 正确
+try Row.fetchAll(db, sql: "... WHERE a = :a AND b = :b",
+                 arguments: ["a": v1, "b": v2])
+```
+
+**为什么**:数组字面量 `[v1, v2]` 会被隐式转成
+`[any DatabaseValueConvertible]`,Swift runtime 在 `_getWitnessTable` 查
+protocol conformance 时**偶发死循环**(libswiftCore 已知 edge case,
+跟 GRDB 无关)。
+
+**症状**:GRDB reader 线程 100% 卡在
+`StatementArguments.append(contentsOf:)` → `Array.append` →
+`swift::_getWitnessTable` → `<deduplicated_symbol>` 死循环,主线程跟着
+卡 SwiftUI 更新,整个 app 假死。Activity Monitor → Sample 才能抓到。
+
+**约束**:
+- 所有 `arguments: [...]` 一律用 dict
+- `Int` 显式 cast 成 `Int64`(dict 形式无隐式 Int→Int64 转换):
+  `["limit": Int64(limit)]`
+- 动态变长 IN 子句必须保留数组时,显式用 `StatementArguments(args)` 包装
+  (不是字面量,走另一条 API)
+- 全工程已批量修过一次(48 处),新代码别走回头路
+
+如果将来遇到「app 莫名卡死」,优先怀疑这条路径漏网。
