@@ -2116,6 +2116,7 @@ private struct ChipButton: View {
 /// two sections (Provider / Model) the user can flip without leaving the chat.
 private struct ProviderModelPicker: View {
     @Environment(AppState.self) private var appState
+    @Environment(ChatController.self) private var chat
     @State private var open = false
     @State private var hover = false
 
@@ -2127,29 +2128,43 @@ private struct ProviderModelPicker: View {
         guard let id = activeIntegration?.id else { return "" }
         return appState.currentModel(forIntegrationId: id)
     }
+    /// 当前对话已有消息 → 锁定 provider。换 provider 等于 spawn 新子进程,
+    /// 历史对话只在 UI 端,新进程啥都不知道,后续回复会驴唇不对马嘴。
+    /// 想换 → 用户主动开新对话(左侧栏 + 按钮)。
+    private var isLocked: Bool { !chat.messages.isEmpty }
 
     var body: some View {
-        Button { open.toggle() } label: {
+        Button { if !isLocked { open.toggle() } } label: {
             HStack(spacing: 6) {
                 Text(activeIntegration?.id.uppercased() ?? "—")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(isLocked ? 0.30 : 0.55))
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
                 Text(activeModel.isEmpty ? "—" : activeModel)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.92))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(hover ? 0.85 : 0.50))
+                    .foregroundStyle(.white.opacity(isLocked ? 0.45 : 0.92))
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.40))
+                } else {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(hover ? 0.85 : 0.50))
+                }
             }
             .padding(.horizontal, 6).padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(hover ? 0.05 : 0))
+                    .fill(Color.white.opacity(hover && !isLocked ? 0.05 : 0))
             )
         }
         .buttonStyle(.bouncyIcon)
+        .disabled(isLocked)
+        .help(isLocked
+              ? "Provider locked for this chat — start a new chat to switch."
+              : "Switch provider / model")
         .onHover { hover = $0 }
         .popover(isPresented: $open, arrowEdge: .bottom) {
             PickerPopover { open = false }
