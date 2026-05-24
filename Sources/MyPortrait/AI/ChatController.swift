@@ -145,6 +145,14 @@ final class ChatController {
     /// Drop the live Pi agent and load `convId`'s messages from disk.
     /// Use `nil` to clear the view (e.g. when "New chat" is pressed).
     func switchTo(_ convId: UUID?) {
+        // **切走前先 persist 当前 conv 的内存消息** —— 否则 streaming 中
+        // 切对话:agent 被 stop 不会再触发 agentEnd → persist() 永远不调 →
+        // 用户消息 + 部分 assistant 回复只在内存里 → 下面被 loadMessages
+        // 的 B 覆盖 → 切回来从磁盘读发现啥都没有。
+        // 先 flushPending 把已 buffer 的 delta 落入 messages,再 persist。
+        flushPending()
+        persist()
+
         agent?.stop()
         agent = nil
         assistantMessageID = nil
