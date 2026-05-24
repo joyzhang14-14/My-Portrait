@@ -159,6 +159,9 @@ struct MyPortraitApp: App {
             PersonalityRefreshApplyCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
+        // AI 聊天编辑工具面(--ai-* 子命令)。dispatcher 命中 → exit;
+        // 不命中 → fall through。给 chat 里的 AI 通过 Bash 调用。
+        AIEditCLI.dispatch(args: args)
         // DEV-ONLY: `--repair-portrait` re-reads + re-writes every portrait /
         // event .md to fix stale on-disk frontmatter formatting.
         if args.contains("--repair-portrait") {
