@@ -194,10 +194,8 @@ struct ConnectionsView: View {
 
             HStack(spacing: 8) {
                 if appState.isConnected(integration.id) {
-                    if integration.category == .ai && appState.activeAIId != integration.id {
-                        Button("Make active for chat") { appState.activeAIId = integration.id }
-                            .buttonStyle(SubtleButton())
-                    }
+                    // "Make active for chat" 移除了 —— 实际激活是从 chat picker
+                    // 里选,在这放只是多余按钮。
                     Button("Disconnect", role: .destructive) {
                         disconnect(integration)
                     }
