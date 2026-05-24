@@ -83,6 +83,12 @@ struct PortraitFile: Equatable {
     var lastModified: Date?             // last body change — EMA decay anchor
     var evidenceEventIds: [String]?     // personality concept 累积证据 slug（≤50）
 
+    /// AI 编辑历史。用户通过聊天微调 event/portrait body 后,每次 approve
+    /// 留一行 `{date, summary, request}`,落 frontmatter `edit_notes:`。
+    /// nil → 文件没经历过 AI 编辑(序列化时整行 skip)。
+    /// 给下游 distill/personality LLM 看的提示:别再犯同样的事实错误。
+    var editNotes: [EditNote]?
+
     var body: String                    // raw markdown after frontmatter
 
     /// Initialiser for a brand-new file (sensible defaults).
@@ -130,6 +136,7 @@ struct PortraitFile: Equatable {
         self.aliases = nil
         self.lastModified = nil
         self.evidenceEventIds = nil
+        self.editNotes = nil
         self.body = body
     }
 
@@ -159,6 +166,7 @@ struct PortraitFile: Equatable {
         aliases: [String]? = nil,
         lastModified: Date? = nil,
         evidenceEventIds: [String]? = nil,
+        editNotes: [EditNote]? = nil,
         body: String
     ) {
         self.created = created
@@ -187,7 +195,16 @@ struct PortraitFile: Equatable {
         self.aliases = aliases
         self.lastModified = lastModified
         self.evidenceEventIds = evidenceEventIds
+        self.editNotes = editNotes
         self.body = body
+    }
+
+    /// 一条 AI 编辑记录。frontmatter 落成
+    /// `- {date: 2026-05-23, summary: "...", request: "..."}` 的列表项。
+    struct EditNote: Equatable, Sendable {
+        var date: Date           // 编辑落盘那一天(UTC truncate)
+        var summary: String      // AI 一句话总结改了什么
+        var request: String      // 用户原话需求(可截断长度,见 EditDraft)
     }
 
     /// Truncate any timestamp to the start of its UTC calendar day. Used to

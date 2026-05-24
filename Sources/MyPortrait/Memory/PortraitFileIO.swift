@@ -89,6 +89,7 @@ enum PortraitFileIO {
         let aliases = try? requireStringArray(fields, "aliases")
         let lastModified = (try? optionalDate(fields, "last_modified")) ?? nil
         let evidenceEventIds = try? requireStringArray(fields, "evidence_event_ids")
+        let editNotes = try? editNotesArray(fields, "edit_notes")
 
         return PortraitFile(
             created: created,
@@ -115,6 +116,7 @@ enum PortraitFileIO {
             aliases: aliases,
             lastModified: lastModified,
             evidenceEventIds: evidenceEventIds,
+            editNotes: editNotes,
             body: body
         )
     }
@@ -172,6 +174,10 @@ enum PortraitFileIO {
         if let al = f.aliases { lines.append("aliases: \(formatStringArray(al))") }
         if let lm = f.lastModified { lines.append("last_modified: \(formatDateOnly(lm))") }
         if let ev = f.evidenceEventIds { lines.append("evidence_event_ids: \(formatStringArray(ev))") }
+        // AI 编辑历史。nil → 整行 skip;非空才写。
+        if let notes = f.editNotes, !notes.isEmpty {
+            lines.append("edit_notes: \(formatEditNotes(notes))")
+        }
         lines.append("---")
         lines.append("")
         return lines.joined(separator: "\n") + f.body
@@ -320,6 +326,43 @@ enum PortraitFileIO {
     private static func formatFacetArray(_ facets: [EventBuilder.PortraitFacet]) -> String {
         let parts = facets.map { "\"\($0.facet):\($0.value)\"" }
         return "[\(parts.joined(separator: ", "))]"
+    }
+
+    /// `edit_notes: [{"date":"2026-05-23","summary":"...","request":"..."}]`
+    /// 用标准 JSON 解,省得自己处理字符串转义。空 / 非法 → nil。
+    private static func editNotesArray(_ fs: [String: String], _ key: String) throws
+        -> [PortraitFile.EditNote]?
+    {
+        guard let raw = fs[key], !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        guard let data = raw.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+        var out: [PortraitFile.EditNote] = []
+        for obj in arr {
+            guard let dateStr = obj["date"] as? String,
+                  let date = parseDate(dateStr),
+                  let summary = obj["summary"] as? String,
+                  let request = obj["request"] as? String else { continue }
+            out.append(.init(date: date, summary: summary, request: request))
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    /// 反向 —— 编码成单行 JSON。日期取 yyyy-MM-dd(UTC,跟 occurrences 一致)。
+    private static func formatEditNotes(_ notes: [PortraitFile.EditNote]) -> String {
+        let arr: [[String: Any]] = notes.map {
+            ["date": formatDateOnly($0.date),
+             "summary": $0.summary,
+             "request": $0.request]
+        }
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: arr,
+                options: [.withoutEscapingSlashes, .sortedKeys]),
+              let s = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return s
     }
 
     private static func optionalInt64Array(_ fs: [String: String], _ key: String) throws -> [Int64] {
