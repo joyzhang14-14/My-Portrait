@@ -41,9 +41,11 @@ struct MemorySettingsView: View {
         }
     }
     @State private var actionStatus: String = ""
-    @State private var runningTrigger: ManualTrigger? = nil
+    /// 同时可能跑多个(distill || personality)。每个 trigger 独立持有 Task,
+    /// 由对应 runXxxJob 的 scheduler 锁实际把关并发安全。
+    @State private var runningTriggers: Set<ManualTrigger> = []
     @State private var confirmTrigger: ManualTrigger? = nil
-    @State private var runTask: Task<Void, Never>? = nil
+    @State private var runTasks: [ManualTrigger: Task<Void, Never>] = [:]
     @State private var eventsChanges: [MemoryStaging.StagedChange] = []
     @State private var portraitChanges: [MemoryStaging.StagedChange] = []
     @State private var personalityChanges: [MemoryStaging.StagedChange] = []
@@ -51,6 +53,7 @@ struct MemorySettingsView: View {
 
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
     // —— 不共用 MemoryStaging,自己一套)
+    @State private var writingCaptureTask: Task<Void, Never>? = nil
     @State private var writingCaptureRunning: Bool = false
     @State private var writingCaptureStatus: String = ""
     @State private var writingCaptureSummaries: [WritingCaptureDayRunSummary] = []
@@ -112,9 +115,10 @@ struct MemorySettingsView: View {
             presenting: confirmTrigger
         ) { trigger in
             Button("Run \(trigger.title)") {
-                runTask = Task {
-                    await run(trigger)
-                    runTask = nil
+                let t = trigger
+                runTasks[t] = Task {
+                    await run(t)
+                    runTasks[t] = nil
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -189,8 +193,8 @@ struct MemorySettingsView: View {
 
     @MainActor
     private func run(_ t: ManualTrigger) async {
-        runningTrigger = t
-        defer { runningTrigger = nil }
+        runningTriggers.insert(t)
+        defer { runningTriggers.remove(t) }
         switch t {
         case .eventProcessing: await runEventProcessing()
         case .distill:         await runDistill()
@@ -529,8 +533,7 @@ struct MemorySettingsView: View {
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
-                let task = Task { @MainActor in await runWritingCapture() }
-                runTask = task
+                writingCaptureTask = Task { @MainActor in await runWritingCapture() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -648,14 +651,20 @@ struct MemorySettingsView: View {
             triggerRow(.distill)
             Divider().padding(.vertical, 2)
             triggerRow(.personality)
-            if runningTrigger != nil {
+            if !runningTriggers.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Button("Stop") {
+                    Text(runningTriggers.count == 1
+                         ? "1 job running…"
+                         : "\(runningTriggers.count) jobs running…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Stop all") {
                         let n = PiAgentRegistry.shared.stopAll()
-                        runTask?.cancel()
-                        runTask = nil
-                        runningTrigger = nil
+                        for (_, task) in runTasks { task.cancel() }
+                        runTasks.removeAll()
+                        runningTriggers.removeAll()
                         actionStatus = "Stopped — killed \(n) LLM process(es)."
                     }
                     .buttonStyle(.bordered)
@@ -686,15 +695,42 @@ struct MemorySettingsView: View {
             }
             Spacer(minLength: 12)
             let pending = MemoryStaging.hasPending(t.kind)
-            Button(runningTrigger == t ? "Running…"
-                   : pending ? "Pending review" : "Run") {
+            // 自己是不是正在跑(本 View 自己的并发 token 集合 = runningTriggers).
+            let selfRunning = runningTriggers.contains(t)
+            // scheduler 侧的"能不能起"原因。读 MemoryScheduler.shared 的
+            // @Observable 属性,跑/结束自动重渲染。手动 run 调 setupRun() 前
+            // scheduler 还没置 flag,所以也要 OR 本 View 自己的 runningTrigger.
+            let schedulerReason = schedulerBlockReason(for: t)
+            let disabledReason: String? = {
+                if selfRunning { return "\(t.title) is already running." }
+                if pending     { return "Pending review — Approve / Reject first." }
+                return schedulerReason
+            }()
+            let label: String = {
+                if selfRunning { return "Running…" }
+                if pending     { return "Pending review" }
+                return "Run"
+            }()
+            Button(label) {
                 confirmTrigger = t
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(runningTrigger != nil || pending)
+            .disabled(disabledReason != nil)
+            .help(disabledReason ?? "Trigger \(t.title) now.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Map ManualTrigger → MemoryScheduler 的 canRunXxx 阻塞原因。
+    /// 直接读 scheduler 状态,@Observable 会让本 View 自动重算。
+    private func schedulerBlockReason(for t: ManualTrigger) -> String? {
+        let s = MemoryScheduler.shared
+        switch t {
+        case .eventProcessing: return s.eventBlockedReason()
+        case .distill:         return s.distillBlockedReason()
+        case .personality:     return s.personalityBlockedReason()
+        }
     }
 
     @ViewBuilder
