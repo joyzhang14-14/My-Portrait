@@ -618,11 +618,16 @@ struct IntegrationIcon: View {
     }
 
     private func tryLoadRealIcon() async {
+        // 先清旧 —— 切 tile 时 SwiftUI 复用同一份 IntegrationIcon View 实例,
+        // @State realIcon 会保留上一个 integration 的图。新 integration 没
+        // bundleId / NSWorkspace 探不到时,不清就会一直显示上一个图(展开面
+        // 板里选 Email 还看到 Spotify 的图标就是这个)。
+        self.realIcon = nil
         let bid = integration.bundleId
         let img = await Task.detached(priority: .userInitiated) {
             AppIconLoader.icon(forBundleId: bid)
         }.value
-        if let img { self.realIcon = img }
+        self.realIcon = img
     }
 
     /// Approximate perceived brightness — for choosing black vs white letter.
