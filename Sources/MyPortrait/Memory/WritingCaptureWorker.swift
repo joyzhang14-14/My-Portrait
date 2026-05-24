@@ -259,11 +259,17 @@ final class WritingCaptureWorker {
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
 
-        // cursor:上次 approve 处理到的 max ts(exclusive)
-        let cursor = try await Task.detached(priority: .userInitiated) { [store] in
-            try store.getCursor()
+        // cursor:上次 approve 处理到的 max ts(exclusive)。
+        // 首次跑(cursor=0)从**第一条 typing_event 的 ts** 开始 —— 没 typing 的
+        // 历史天纯 OCR 重建意义不大,白烧 token。
+        let (cursor, startMs) = try await Task.detached(priority: .userInitiated) { [store] in
+            let c = try store.getCursor()
+            if c > 0 { return (c, c) }
+            let first = (try? store.firstTypingEventTs()) ?? nil
+            return (c, first ?? 0)
         }.value
         let endMs = Int64(Date().timeIntervalSince1970 * 1000)
+        workerLog.info("backlog: cursor=\(cursor, privacy: .public), startMs=\(startMs, privacy: .public)")
         // 跑之前先清 staged(避免上次 pending_review 没 approve/reject 残留)
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.clearStaged(date: Self.backlogDateKey)
@@ -275,7 +281,7 @@ final class WritingCaptureWorker {
 
         do {
             let summary = try await runBacklogCore(
-                runId: runId, startMs: cursor, endMs: endMs
+                runId: runId, startMs: startMs, endMs: endMs
             )
             return summary
         } catch {
