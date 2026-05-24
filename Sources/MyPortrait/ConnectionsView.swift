@@ -99,6 +99,10 @@ struct ConnectionsView: View {
                 ) {
                     withAnimation(.easeOut(duration: 0.15)) {
                         selectedId = (selectedId == tile.id) ? nil : tile.id
+                        // 切 tile 清掉上一个 tile 留下的报错(如 "Claude Code
+                        // doesn't expose a bundle ID"),避免出现在不相关 tile
+                        // 的展开面板里。
+                        loginError = nil
                     }
                 }
             }
