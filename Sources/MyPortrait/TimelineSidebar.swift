@@ -32,6 +32,9 @@ struct TimelineSidebar: View {
     @State private var renamingConvId: UUID? = nil
     @State private var renameDraft: String = ""
     @State private var cronJobHistoryCollapsed: Bool = true
+    @State private var cronHistorySearch: String = ""
+    @State private var cronHistorySearchOpen: Bool = false
+    @State private var confirmingClearCronHistory: Bool = false
 
     private var focusedFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
@@ -282,8 +285,12 @@ struct TimelineSidebar: View {
     }
 
     /// CRON JOB HISTORY:仅 cron job 跑出来的 conv,按 ChatStore 的时间序。
+    /// cronHistorySearch 非空时按标题模糊过滤(case-insensitive)。
     private var cronJobHistoryConversations: [Conversation] {
-        chatStore.conversations.filter { cronJobConvIds.contains($0.id) }
+        let q = cronHistorySearch.trimmingCharacters(in: .whitespaces).lowercased()
+        let base = chatStore.conversations.filter { cronJobConvIds.contains($0.id) }
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.title.lowercased().contains(q) }
     }
 
     // MARK: Memories scope picker (shown when selection == .memories)
@@ -344,11 +351,17 @@ struct TimelineSidebar: View {
 
     private var cronJobHistorySection: some View {
         sectionCard {
-            // 标题 + 折叠箭头(默认折叠,避免大量 cron job run 把聊天压下去)
+            // 标题 + 折叠箭头 + 搜索 + 一键清除(展开时才显示后两个,
+            // 避免折叠态噪声)
             HStack(spacing: Theme.Space.sm) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         cronJobHistoryCollapsed.toggle()
+                        // 折叠时顺手关搜索 + 清空 query
+                        if cronJobHistoryCollapsed {
+                            cronHistorySearchOpen = false
+                            cronHistorySearch = ""
+                        }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -361,11 +374,47 @@ struct TimelineSidebar: View {
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 0)
+                if !cronJobHistoryCollapsed {
+                    SidebarIconButton(
+                        systemName: cronHistorySearchOpen ? "xmark" : "magnifyingglass",
+                        help: "Search history"
+                    ) {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            cronHistorySearchOpen.toggle()
+                            if !cronHistorySearchOpen { cronHistorySearch = "" }
+                        }
+                    }
+                    SidebarIconButton(systemName: "trash", help: "Clear all history") {
+                        confirmingClearCronHistory = true
+                    }
+                }
             }
 
             if !cronJobHistoryCollapsed {
+                if cronHistorySearchOpen {
+                    HStack(spacing: Theme.Space.xs) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textSecondary)
+                        TextField("filter history…", text: $cronHistorySearch)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                    }
+                    .padding(.horizontal, Theme.Space.sm)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                                .strokeBorder(Theme.stroke, lineWidth: 0.7))
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 if cronJobHistoryConversations.isEmpty {
-                    EmptyRow(text: "No runs yet.")
+                    EmptyRow(text: cronHistorySearch.isEmpty
+                             ? "No runs yet."
+                             : "No history matches \"\(cronHistorySearch)\".")
                 } else {
                     VStack(spacing: 2) {
                         ForEach(cronJobHistoryConversations) { conv in
@@ -403,6 +452,21 @@ struct TimelineSidebar: View {
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Clear all cron job history?",
+            isPresented: $confirmingClearCronHistory,
+            titleVisibility: .visible
+        ) {
+            Button("Clear \(cronJobHistoryConversations.count) run(s)", role: .destructive) {
+                let active = chat.currentConvId
+                let ids = cronJobHistoryConversations.map { $0.id }
+                for id in ids { chatStore.deleteConversation(id) }
+                if let a = active, ids.contains(a) { chat.switchTo(nil) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes every cron job run conversation. The cron jobs themselves stay.")
         }
     }
 

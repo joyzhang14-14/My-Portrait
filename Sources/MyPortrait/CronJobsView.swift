@@ -148,6 +148,15 @@ private struct CronJobDetailView: View {
     let onRunNow: () -> Void
     let onOpenConv: (UUID) -> Void
 
+    /// 用来过滤掉「conv 已被用户在 CRON JOB HISTORY 里删了」的旧 run 记录,
+    /// 否则点 run 跳过去是个 404 的死链。
+    @Environment(ChatStore.self) private var chatStore
+
+    private var visibleRuns: [CronJobRun] {
+        let existing = Set(chatStore.conversations.map { $0.id })
+        return cronJob.runs.filter { existing.contains($0.convId) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -179,13 +188,13 @@ private struct CronJobDetailView: View {
                     .tracking(0.8)
                     .foregroundStyle(.white.opacity(0.55))
 
-                if cronJob.runs.isEmpty {
+                if visibleRuns.isEmpty {
                     Text("No runs yet.")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.55))
                 } else {
                     VStack(spacing: 4) {
-                        ForEach(cronJob.runs) { run in
+                        ForEach(visibleRuns) { run in
                             RunRow(run: run) { onOpenConv(run.convId) }
                         }
                     }
