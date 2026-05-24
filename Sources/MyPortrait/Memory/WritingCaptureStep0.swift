@@ -32,9 +32,8 @@ struct WritingCaptureStep0 {
     static let throwawayPreviewLen = 80
     /// **OCR 反向 join 窗口**:一个 session 只保留"typing / keystroke 事件
     /// ± 这么多毫秒"内的 OCR 帧。session 时间窗内但远离任何键击的帧
-    /// 当成"用户在看东西不是在写"不喂给 LLM。30s 是经验值:用户按下 Enter
-    /// 后 ~30s 还可能在看 / 编辑刚发出的内容,值得保留。
-    static let ocrAnchorWindowMs: Int64 = 30 * 1000
+    /// 当成"用户在看东西不是在写"不喂给 LLM。
+    static let ocrAnchorWindowMs: Int64 = 10 * 1000
 
     // MARK: - 主入口
 
