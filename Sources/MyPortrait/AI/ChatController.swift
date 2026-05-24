@@ -600,8 +600,12 @@ final class ChatController {
                 //      "draft body written: <rel>"(ClaudeCodeAgent 等不
                 //      暴露 bash 命令字符串时兜底)。
                 if !isError {
-                    if let rel = Self.parseDraftWriteBodyRel(fromCommand: b.command)
-                        ?? Self.parseDraftWriteBodyRel(fromOutput: b.output) {
+                    // output 优先 —— `draft body written: <rel>` 是 AIEditCLI
+                    // 在程序运行后打印的,路径是 shell 展开后的真实值;
+                    // command 字符串可能含未展开的 $TARGET 之类变量(AI 喜
+                    // 欢这么写省字),解出来是字面量会扑空。command 当兜底。
+                    if let rel = Self.parseDraftWriteBodyRel(fromOutput: b.output)
+                        ?? Self.parseDraftWriteBodyRel(fromCommand: b.command) {
                         // 不在这里插卡片 —— 排到队列,等 agentEnd 一起追到末尾,
                         // 这样卡片永远在 AI 文字结束之后才出现,不会夹在 bash 中。
                         if !pendingDraftRelPathsThisTurn.contains(rel) {
