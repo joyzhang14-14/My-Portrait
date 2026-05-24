@@ -185,12 +185,23 @@ final class PermissionMonitor: ObservableObject {
         AXIsProcessTrusted() ? .granted : .denied
     }
 
-    /// Full Disk Access 没有公开 API,只能 probe。TCC.db 是 macOS 标准
-    /// TCC 数据库(每台 Mac 必有),只在 FDA 授权后才可读;否则 sandbox /
-    /// kernel 直接 deny。`isReadableFile` 不抛 stderr 噪声,够轻量。
+    /// Full Disk Access 没有公开 API,只能 probe。**真去 open() 才能触发
+    /// TCC 校验** —— `isReadableFile`/`access(R_OK)` 只查 Unix BSD 权限,
+    /// TCC.db Unix 层就不世界可读,这条会假阴(每次启动误判 denied)。
+    ///
+    /// 用 open() + EACCES/EPERM 区分:
+    ///   - 成功(fd >= 0)→ 有 FDA
+    ///   - errno == EACCES(13)/EPERM(1)→ TCC 拒了 → 没 FDA
+    ///   - errno == ENOENT(2)→ 文件不存在(理论上不会,TCC.db 每台 Mac 都有)
+    ///     退化当 denied 处理,反正用户没法用功能
     private static func checkFullDiskAccess() -> Status {
         let path = NSString(string: "~/Library/Application Support/com.apple.TCC/TCC.db")
             .expandingTildeInPath
-        return FileManager.default.isReadableFile(atPath: path) ? .granted : .denied
+        let fd = open(path, O_RDONLY)
+        if fd >= 0 {
+            close(fd)
+            return .granted
+        }
+        return .denied   // EACCES / EPERM / ENOENT 都按 denied 处理
     }
 }
