@@ -311,6 +311,84 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// InputCaptureView 左列:writing_records 按 (app, url) 聚合。
+    /// COALESCE(url, '') —— 跟 TypingAppSummary.url 语义一致(空 = 非浏览器)。
+    func writingRecordAppSummaries() throws -> [WritingCaptureAppSummary] {
+        try dbPool.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT app, COALESCE(url, '') AS url,
+                           COUNT(*) AS n, MAX(end_ts) AS last
+                    FROM writing_records
+                    GROUP BY app, url
+                    ORDER BY last DESC
+                    """
+            )
+            return rows.map { r in
+                WritingCaptureAppSummary(
+                    app: r["app"],
+                    url: r["url"],
+                    recordCount: r["n"],
+                    lastEndedAt: r["last"]
+                )
+            }
+        }
+    }
+
+    /// 某 (app, url) 分组的全部 writing_records,start_ts 倒序。
+    /// url 传 "" 匹配 url IS NULL OR url = ''(跟 TypingEventStore 一致)。
+    func writingRecordsForGroup(app: String, url: String) throws -> [WritingRecordViewRow] {
+        try dbPool.read { db in
+            let urlMatch: String
+            if url.isEmpty {
+                urlMatch = "AND (url IS NULL OR url = '')"
+            } else {
+                urlMatch = "AND url = :url"
+            }
+            var args: [String: DatabaseValueConvertible] = ["app": app]
+            if !url.isEmpty { args["url"] = url }
+            return try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
+                           context_summary, source, worker_run_id, created_at
+                    FROM writing_records
+                    WHERE app = :app \(urlMatch)
+                    ORDER BY start_ts DESC
+                    """,
+                arguments: StatementArguments(args)
+            ).map { Self.rowToView($0) }
+        }
+    }
+
+    /// 删除某 (app, url) 分组的全部 writing_records(用户手动清除)。
+    func deleteWritingRecordsForGroup(app: String, url: String) throws {
+        try dbPool.write { db in
+            if url.isEmpty {
+                try db.execute(
+                    sql: "DELETE FROM writing_records WHERE app = :app AND (url IS NULL OR url = '')",
+                    arguments: ["app": app]
+                )
+            } else {
+                try db.execute(
+                    sql: "DELETE FROM writing_records WHERE app = :app AND url = :url",
+                    arguments: ["app": app, "url": url]
+                )
+            }
+        }
+    }
+
+    /// 删除单条 writing_record。
+    func deleteWritingRecord(id: Int64) throws {
+        try dbPool.write { db in
+            try db.execute(
+                sql: "DELETE FROM writing_records WHERE id = :id",
+                arguments: ["id": id]
+            )
+        }
+    }
+
     /// 给定时间戳所在 UTC 日的 writing_capture_runs 状态。未跑过返回 nil。
     func dayStatus(forTsMs ts: Int64) throws -> WritingCaptureRunStatus? {
         let fmt = DateFormatter()
@@ -416,6 +494,16 @@ struct WritingCaptureStore: Sendable {
             }
         }
     }
+}
+
+/// 给 InputCaptureView 左列用 —— writing_records 按 (app, url) 聚合的一个分组。
+/// url 空字符串表示非浏览器 app(跟 TypingAppSummary 同语义)。
+struct WritingCaptureAppSummary: Identifiable, Sendable {
+    let app: String
+    let url: String                 // "" = 非浏览器
+    let recordCount: Int
+    let lastEndedAt: Int64          // ms
+    var id: String { app + "\u{1}" + url }
 }
 
 /// 给 UI 展示用的 writing_record 行投影。staged 和 committed 共用同一个字段集。
