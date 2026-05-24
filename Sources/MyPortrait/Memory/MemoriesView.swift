@@ -12,6 +12,10 @@ import SwiftUI
 /// Settings → Memory → Scheduler.
 struct MemoriesView: View {
     @Binding var scope: MemoryScope
+    /// AI 编辑触发器。ContentView 注入:点击后把 chat 切到 edit 模式并
+    /// 跳转到 Home。nil = 编辑按钮隐藏(测试 / 旧调用方兼容)。
+    var onEditEntity: ((URL) -> Void)? = nil
+
     @State private var entries: [Entry] = []
     @State private var loading: Bool = false
     @State private var actionStatus: String = ""
@@ -117,6 +121,13 @@ struct MemoriesView: View {
                         Text(entry.title)
                             .font(.system(size: 22, weight: .semibold))
                         Spacer()
+                        if let onEdit = onEditEntity {
+                            Button {
+                                onEdit(entry.id)
+                            } label: { Image(systemName: "sparkles") }
+                            .buttonStyle(.bouncyIcon)
+                            .help("Edit with AI chat")
+                        }
                         Button {
                             confirmingDelete = true
                         } label: { Image(systemName: "trash") }

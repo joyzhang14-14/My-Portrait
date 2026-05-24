@@ -93,7 +93,11 @@ struct ContentView: View {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
         case .cronJobs:         CronJobsView(selection: $cronJobSelection)
-        case .memories:      MemoriesView(scope: $memoryScope)
+        case .memories:      MemoriesView(scope: $memoryScope,
+                                          onEditEntity: { url in
+                                              chat.startEditConversation(originalURL: url)
+                                              selection = .home
+                                          })
         case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
     }

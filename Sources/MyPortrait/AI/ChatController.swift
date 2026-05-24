@@ -43,6 +43,11 @@ final class ChatController {
     /// the first one (⇒ derive the conv title from it).
     private var pendingTitleFromFirstMessage: Bool = false
 
+    /// startEditConversation 设的标记 —— 下一次用户调 send() 时,改走
+    /// sendEditRequest(自动包 edit-mode priming)。第一条消息发出后清空,
+    /// 后续消息走普通 send(对话已有完整上下文)。
+    private var pendingEditOriginalURL: URL? = nil
+
     private let store = ChatStore.shared
     /// Closure resolving the currently-selected provider + model + optional
     /// SecretStore key reference for that preset's API key (when the user
@@ -114,6 +119,8 @@ final class ChatController {
         isStreaming = false
         lastError = nil
         currentConvId = convId
+        // 离开当前 conv → 编辑模式标记失效(未消费就丢)。
+        pendingEditOriginalURL = nil
         if let convId {
             messages = store.loadMessages(for: convId)
         } else {
@@ -145,6 +152,15 @@ final class ChatController {
     func send(_ text: String, chips: [ContextChip] = [], attachments: [Attachment] = [], redactPII: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // 编辑模式拦截:startEditConversation 设了 pendingEditOriginalURL,
+        // 第一条消息走 edit-mode priming。chips / attachments 在 edit 模式
+        // 没意义(已经把 entity 全文塞进 prompt),忽略它们。
+        if let editURL = pendingEditOriginalURL {
+            pendingEditOriginalURL = nil
+            sendEditRequest(originalURL: editURL, request: trimmed)
+            return
+        }
 
         guard AISetup.shared.isReady else {
             lastError = "Setup not finished — Bun/Pi still installing."
@@ -221,6 +237,9 @@ final class ChatController {
         let slug = originalURL.deletingPathExtension().lastPathComponent
         store.renameConversation(conv.id, to: "Edit: \(slug)")
         switchTo(conv.id)
+        // switchTo 清掉了 pendingEditOriginalURL,所以这里重设。下一次 send()
+        // 会消费它,自动走 sendEditRequest 路线。
+        pendingEditOriginalURL = originalURL
         return conv.id
     }
 
