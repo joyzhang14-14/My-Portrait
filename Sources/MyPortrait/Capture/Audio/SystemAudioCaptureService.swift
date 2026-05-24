@@ -185,6 +185,13 @@ actor SystemAudioCaptureService {
         vadRecorder = nil
 
         cleanupCoreAudio()
+
+        // 同 AudioCaptureService.stop:置 nil 释放 AVAudioEngine,
+        // 避免 AUHAL 持着音频硬件让系统以为还在录(蓝牙 HFP 降质)。
+        self.engine = nil
+        self.converter = nil
+        self.targetFormat = nil
+
         isRunning = false
         logger.info("SystemAudioCaptureService stopped")
     }

@@ -143,6 +143,15 @@ actor AudioCaptureService {
         await vadRecorder?.flush()
         vadRecorder = nil
 
+        // 关键:把 engine / converter / targetFormat 都置 nil,让 ARC 回收
+        // AVAudioEngine 实例。否则即使调了 engine.stop(),内部 AUHAL 仍持着
+        // 麦克风硬件连接,macOS 还把这个 app 当"正在录",蓝牙耳机会被强切到
+        // HFP(低音质双向)→ 音乐音质明显下降。
+        // 代价:下次 start() 要重建 engine(拉起 caulk),~50ms 额外开销。
+        self.engine = nil
+        self.converter = nil
+        self.targetFormat = nil
+
         logger.info("AudioCaptureService stopped")
     }
 
