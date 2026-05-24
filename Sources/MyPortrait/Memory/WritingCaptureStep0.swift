@@ -30,6 +30,11 @@ struct WritingCaptureStep0 {
     static let ocrJaccardThreshold = 0.85
     /// throwaway preview 截断长度
     static let throwawayPreviewLen = 80
+    /// **OCR 反向 join 窗口**:一个 session 只保留"typing / keystroke 事件
+    /// ± 这么多毫秒"内的 OCR 帧。session 时间窗内但远离任何键击的帧
+    /// 当成"用户在看东西不是在写"不喂给 LLM。30s 是经验值:用户按下 Enter
+    /// 后 ~30s 还可能在看 / 编辑刚发出的内容,值得保留。
+    static let ocrAnchorWindowMs: Int64 = 30 * 1000
 
     // MARK: - 主入口
 
@@ -99,6 +104,9 @@ struct WritingCaptureStep0 {
             let url: String?
         }
 
+        // **只用 typing + keystroke 作锚切 session**,OCR 不参与切分。
+        // OCR 是被反向 join 进来当上下文的 —— 没 typing/keystroke 锚点的纯 OCR
+        // 时段(仅浏览/阅读)不该形成 session 跑 Pass 2。
         var points: [ActivityPoint] = []
         for e in typingEvents {
             points.append(ActivityPoint(
@@ -108,9 +116,6 @@ struct WritingCaptureStep0 {
         for k in keystrokes {
             // keystroke 不带 url,先存 nil,匹配 session 时跟 typing/OCR 的 url 对齐
             points.append(ActivityPoint(ts: k.tsMs, app: k.bundleId, url: nil))
-        }
-        for f in ocrFrames {
-            points.append(ActivityPoint(ts: f.tsMs, app: f.app, url: f.url))
         }
         points.sort { $0.ts < $1.ts }
         guard !points.isEmpty else { return [] }
@@ -171,10 +176,21 @@ struct WritingCaptureStep0 {
                 $0.bundleId == acc.app
                     && $0.tsMs >= acc.start && $0.tsMs <= acc.lastTs
             }
-            let sessionFrames = ocrFrames.filter {
-                $0.app == acc.app
-                    && $0.tsMs >= acc.start && $0.tsMs <= acc.lastTs
-                    && urlMatch($0.url, acc.url)
+            // OCR 反向 join:session 窗 + 同 app + url 匹配 + **靠近 typing/
+            // keystroke 锚点**(±ocrAnchorWindowMs)。session 窗内但远离任何键击
+            // 的帧丢掉 —— 用户在看东西不是在写。
+            let anchorTimestamps: [Int64] = sessionTyping.flatMap { e in
+                [e.startedAt, e.endedAt]
+            } + sessionKeys.map(\.tsMs)
+            let sortedAnchors = anchorTimestamps.sorted()
+            let sessionFrames = ocrFrames.filter { f in
+                guard f.app == acc.app,
+                      f.tsMs >= acc.start, f.tsMs <= acc.lastTs,
+                      urlMatch(f.url, acc.url) else { return false }
+                return Self.hasAnchorNearby(
+                    ts: f.tsMs, sortedAnchors: sortedAnchors,
+                    windowMs: ocrAnchorWindowMs
+                )
             }
             let dedupedFrames = jaccardDedupe(sessionFrames)
             let maxChars = computeMaxContentChars(
@@ -295,6 +311,25 @@ struct WritingCaptureStep0 {
         let inter = a.intersection(b).count
         let union = a.union(b).count
         return Double(inter) / Double(union)
+    }
+
+    /// 给定 sorted anchor 列表,判 `ts` 附近 ±`windowMs` 是否有锚点。
+    /// 二分查找最接近的 anchor,O(log n)。
+    static func hasAnchorNearby(
+        ts: Int64, sortedAnchors: [Int64], windowMs: Int64
+    ) -> Bool {
+        guard !sortedAnchors.isEmpty else { return false }
+        var lo = 0, hi = sortedAnchors.count - 1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            let v = sortedAnchors[mid]
+            if v == ts { return true }
+            if v < ts { lo = mid + 1 } else { hi = mid - 1 }
+        }
+        // lo = 第一个 > ts 的位置;hi = 最后一个 < ts 的位置
+        if lo < sortedAnchors.count, sortedAnchors[lo] - ts <= windowMs { return true }
+        if hi >= 0, ts - sortedAnchors[hi] <= windowMs { return true }
+        return false
     }
 
     // MARK: - throwaway 字数

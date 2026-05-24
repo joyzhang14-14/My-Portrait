@@ -222,18 +222,16 @@ final class WritingCaptureStep0Tests: XCTestCase {
         XCTAssertEqual(output.throwawaySessions.count, 0)
     }
 
-    func testThrowawayFilterDropsOcrOnlyShortSession() {
-        // 纯 OCR + 内容 < 20 字 → throwaway(无 typing)
-        let shortFrame = WritingCaptureRawOcr(
-            id: 1, tsMs: 0, app: "snipaste", url: nil, text: "Menu"
+    func testPureOcrNoTypingNorKeystrokeProducesNoSession() {
+        // 新语义:纯 OCR 没 typing/keystroke 锚点 → 不形成 session
+        // (OCR 是反向 join 进来的上下文,自己不切 session)
+        let frame = WritingCaptureRawOcr(
+            id: 1, tsMs: 0, app: "snipaste", url: nil, text: "Some text"
         )
         let output = WritingCaptureStep0.preprocess(
-            typingEvents: [],
-            keystrokes: [],
-            rawOcrFrames: [shortFrame]
+            typingEvents: [], keystrokes: [], rawOcrFrames: [frame]
         )
         XCTAssertEqual(output.rawSessions.count, 0)
-        XCTAssertEqual(output.throwawaySessions.count, 1)
-        XCTAssertEqual(output.throwawaySessions[0].app, "snipaste")
+        XCTAssertEqual(output.throwawaySessions.count, 0)
     }
 }
