@@ -1214,7 +1214,6 @@ private struct ToolCard: View {
 private struct BubbleAvatar: View {
     let role: ChatRole
     var glowing: Bool = false
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         if glowing {
@@ -1237,8 +1236,7 @@ private struct BubbleAvatar: View {
     }
 
     private var animatedOrb: some View {
-        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0,
-                                        paused: scenePhase != .active)) { ctx in
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0, paused: false)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let breath = CGFloat(1 + 0.04 * sin(t * 1.6))
             let pulse  = CGFloat(0.55 + 0.35 * sin(t * 3.0))
@@ -1319,9 +1317,6 @@ private struct ChatThinking: View {
 /// each leaving a softly fading motion trail behind it. The whole rig
 /// breathes (orbit radius modulates by ±10% on a 3-second cycle).
 private struct OrbitingParticles: View {
-    /// 失焦 / 背景态停止粒子动画,避免烧 main thread + GPU。
-    @Environment(\.scenePhase) private var scenePhase
-
     /// Orbital period in seconds.
     private let period: Double = 1.6
     /// Visual canvas size — orbit fits comfortably inside.
@@ -1338,8 +1333,7 @@ private struct OrbitingParticles: View {
     ]
 
     var body: some View {
-        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0,
-                                        paused: scenePhase != .active)) { ctx in
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0, paused: false)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             Canvas { gctx, canvasSize in
                 draw(into: &gctx, size: canvasSize, t: t)
