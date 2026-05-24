@@ -450,6 +450,15 @@ struct ConnectionsView: View {
     /// that the app is actually installed by asking NSWorkspace for the
     /// bundleId. No network, no fake delay.
     private func connectLocalApp(_ integration: Integration) {
+        // claude-code:CLI 探测,不走 NSWorkspace。
+        if integration.id == "claude-code" {
+            if ClaudeCodeAgent.isInstalled {
+                appState.toggleConnect(integration)
+            } else {
+                loginError = "Claude Code CLI (`claude`) not found in PATH. Install with `brew install claude` or check ~/.local/bin."
+            }
+            return
+        }
         guard let bundleId = integration.bundleId else {
             loginError = "\(integration.name) doesn't expose a bundle ID we can probe."
             return
@@ -500,7 +509,7 @@ struct ConnectionsView: View {
     private func descriptionFor(_ i: Integration) -> String {
         switch i.id {
         case "chatgpt":     return "Sign in with your ChatGPT Plus / Pro account. No API key needed."
-        case "claude-code": return "Add this project to Claude Code's MCP registry."
+        case "claude-code": return "Use your Claude Code CLI (Pro/Max subscription quota). Requires `claude login` done in Terminal first."
         case "anthropic-api": return "Use your Anthropic API key. Pay-per-token, lowest latency."
         case "gemini":      return "Google AI Studio API key. Free tier available."
         case "perplexity":  return "Perplexity API for web-grounded answers."

@@ -24,7 +24,9 @@ final class ChatController {
     /// new one is created lazily on the first `send`.
     private(set) var currentConvId: UUID? = nil
 
-    private var agent: PiAgent?
+    /// 当前会话用的 agent。可能是 PiAgent(BYOK / OAuth provider)或
+    /// ClaudeCodeAgent(Claude Code CLI 子进程)。统一靠 ChatAgent 协议。
+    private var agent: (any ChatAgent)?
     /// What provider+model the live agent was spawned for. Used to detect
     /// a mid-session change so we can kill and re-spawn on the next send.
     private var agentSpec: (Provider, String)? = nil
@@ -162,13 +164,8 @@ final class ChatController {
             return
         }
 
-        guard AISetup.shared.isReady else {
-            lastError = "Setup not finished — Bun/Pi still installing."
-            return
-        }
-        guard ChatGPTOAuth.isLoggedIn() else {
-            lastError = "Sign in to ChatGPT from Connections first."
-            return
+        if let reason = providerPrecheckError() {
+            lastError = reason; return
         }
 
         if currentConvId == nil {
@@ -250,13 +247,8 @@ final class ChatController {
         let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        guard AISetup.shared.isReady else {
-            lastError = "Setup not finished — Bun/Pi still installing."
-            return
-        }
-        guard ChatGPTOAuth.isLoggedIn() else {
-            lastError = "Sign in to ChatGPT from Connections first."
-            return
+        if let reason = providerPrecheckError() {
+            lastError = reason; return
         }
 
         if currentConvId == nil { _ = startEditConversation(originalURL: originalURL) }
@@ -387,6 +379,33 @@ final class ChatController {
         }
     }
 
+    /// 按 provider 校验前置条件,失败返回错误文案,可成功返回 nil。
+    /// 在 send() / sendEditRequest() 进入异步前先 fail-fast。
+    private func providerPrecheckError() -> String? {
+        let (provider, _, _) = providerResolver()
+        switch provider {
+        case .chatgpt:
+            guard AISetup.shared.isReady else {
+                return "Setup not finished — Bun/Pi still installing."
+            }
+            guard ChatGPTOAuth.isLoggedIn() else {
+                return "Sign in to ChatGPT from Connections first."
+            }
+            return nil
+        case .claudeCode:
+            guard ClaudeCodeAgent.isInstalled else {
+                return "Claude Code CLI not found. Install with `brew install claude` or check ~/.local/bin."
+            }
+            return nil
+        default:
+            guard AISetup.shared.isReady else {
+                return "Setup not finished — Bun/Pi still installing."
+            }
+            // 凭证缺失 → spawn 时 ProviderAuth 抛错走 .error 通道。
+            return nil
+        }
+    }
+
     private func ensureAgent() async throws {
         let (provider, model, apiKeyRef) = providerResolver()
         // If the live agent's provider/model no longer matches what the user
@@ -397,7 +416,14 @@ final class ChatController {
             self.agentSpec = nil
         }
         if agent != nil { return }
-        let a = try PiAgent(provider: provider, model: model, apiKeyRefOverride: apiKeyRef)
+        let a: any ChatAgent
+        switch provider {
+        case .claudeCode:
+            // 不走 Pi,直接 spawn `claude` CLI 子进程。
+            a = ClaudeCodeAgent(model: model)
+        default:
+            a = try PiAgent(provider: provider, model: model, apiKeyRefOverride: apiKeyRef)
+        }
         try await a.start()
         agent = a
         agentSpec = (provider, model)

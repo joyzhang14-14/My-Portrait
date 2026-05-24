@@ -186,6 +186,11 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
 
     // MARK: - Sending
 
+    /// ChatAgent 协议要求的 1-arg 版本 —— delegate 给带 id 的实现。
+    func sendPrompt(_ text: String) throws {
+        try sendPrompt(text, id: UUID().uuidString)
+    }
+
     func sendPrompt(_ message: String, id: String = UUID().uuidString) throws {
         try send(["type": "prompt", "message": message, "id": id])
     }
