@@ -76,6 +76,7 @@ enum ContentPart: Identifiable, Hashable, Codable {
     case tool(ToolBlock)
     case thinking(ThinkingBlock)
     case error(ErrorBlock)
+    case editDraft(EditDraftBlock)
 
     var id: UUID {
         switch self {
@@ -83,12 +84,13 @@ enum ContentPart: Identifiable, Hashable, Codable {
         case .tool(let b):       return b.id
         case .thinking(let b):   return b.id
         case .error(let b):      return b.id
+        case .editDraft(let b):  return b.id
         }
     }
 
     // Custom Codable so the JSON layout is stable.
     private enum CodingKeys: String, CodingKey { case kind, id, value, block }
-    private enum Kind: String, Codable { case text, tool, thinking, error }
+    private enum Kind: String, Codable { case text, tool, thinking, error, editDraft = "edit_draft" }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -102,6 +104,8 @@ enum ContentPart: Identifiable, Hashable, Codable {
             self = .thinking(try c.decode(ThinkingBlock.self, forKey: .block))
         case .error:
             self = .error(try c.decode(ErrorBlock.self, forKey: .block))
+        case .editDraft:
+            self = .editDraft(try c.decode(EditDraftBlock.self, forKey: .block))
         }
     }
     func encode(to encoder: Encoder) throws {
@@ -120,8 +124,30 @@ enum ContentPart: Identifiable, Hashable, Codable {
         case .error(let b):
             try c.encode(Kind.error, forKey: .kind)
             try c.encode(b, forKey: .block)
+        case .editDraft(let b):
+            try c.encode(Kind.editDraft, forKey: .kind)
+            try c.encode(b, forKey: .block)
         }
     }
+}
+
+/// AI 编辑 draft 卡片。AI 调 `--ai-draft-write-body` 落 draft 后,
+/// ChatController 拦 toolEnd 自动注入这块到 assistant 消息流。UI 渲染
+/// 前后对比 + Approve/Reject 按钮。状态在用户拍板后翻成 approved/
+/// rejected,UI 收起按钮换显示「已批准」/「已拒绝」。
+struct EditDraftBlock: Identifiable, Hashable, Codable {
+    let id: UUID
+    let originalRelPath: String       // events/2026-05-16/foo.md 之类
+    let request: String
+    var summary: String?
+    var beforeBody: String
+    var afterBody: String
+    var state: State
+
+    enum State: String, Codable, Hashable {
+        case pending, approved, rejected, failed
+    }
+    var errorMessage: String?         // state=.failed 时填
 }
 
 /// Streamed chain-of-thought block (gpt-5, o1, claude reasoning models).

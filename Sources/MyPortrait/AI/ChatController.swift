@@ -612,7 +612,8 @@ final class ChatController {
     /// 用户点 Approve。成功 → block.state=.approved + 删 draft 文件。
     /// 失败 → block.state=.failed + errorMessage 显示原因。
     func approveEditDraft(blockId: UUID) {
-        guard let (mIdx, pIdx, var block) = locateEditDraftBlock(blockId: blockId) else { return }
+        guard let located = locateEditDraftBlock(blockId: blockId) else { return }
+        var block = located.2
         guard block.state == .pending else { return }
         let originalURL = Storage.rootURL.appendingPathComponent(block.originalRelPath)
         do {
@@ -622,13 +623,14 @@ final class ChatController {
             block.state = .failed
             block.errorMessage = error.localizedDescription
         }
-        messages[mIdx].parts[pIdx] = .editDraft(block)
+        messages[located.0].parts[located.1] = .editDraft(block)
         persist()
     }
 
     /// 用户点 Reject。删 draft 文件,原文件不动。
     func rejectEditDraft(blockId: UUID) {
-        guard let (mIdx, pIdx, var block) = locateEditDraftBlock(blockId: blockId) else { return }
+        guard let located = locateEditDraftBlock(blockId: blockId) else { return }
+        var block = located.2
         guard block.state == .pending else { return }
         let originalURL = Storage.rootURL.appendingPathComponent(block.originalRelPath)
         do {
@@ -638,7 +640,7 @@ final class ChatController {
             block.state = .failed
             block.errorMessage = error.localizedDescription
         }
-        messages[mIdx].parts[pIdx] = .editDraft(block)
+        messages[located.0].parts[located.1] = .editDraft(block)
         persist()
     }
 

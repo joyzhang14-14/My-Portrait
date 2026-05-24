@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct HomeView: View {
     @Environment(AppState.self) private var appState
     @Environment(ChatController.self) private var chat
+    @Environment(ChatStore.self) private var chatStore
     @State private var prompt: String = ""
     @State private var setup = AISetup.shared
     @State private var contextChips: [ContextChip] = []
@@ -36,6 +37,13 @@ struct HomeView: View {
         VStack(spacing: 0) {
             if let banner = setupBannerText {
                 SetupBanner(text: banner, isError: setupIsError)
+            }
+            // 编辑模式时,顶部 sticky 一张闪烁渐变 pill,把当前在编辑的
+            // entity slug 持续可见。会话标题以 "Edit: " 开头时显示。
+            if let slug = editTargetSlug {
+                EditContextPill(slug: slug)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
             }
             if chat.messages.isEmpty {
                 ScrollView { greetingContent }
@@ -85,6 +93,19 @@ struct HomeView: View {
         .task {
             AISetup.shared.ensureInstalled()
         }
+    }
+
+    /// 编辑会话提取出来的目标 entity slug。约定:会话标题形如
+    /// "Edit: <slug>"(由 startEditConversation 设置)→ 显示 pill。
+    private var editTargetSlug: String? {
+        guard let convId = chat.currentConvId,
+              let conv = chatStore.conversations.first(where: { $0.id == convId }) else {
+            return nil
+        }
+        let prefix = "Edit: "
+        guard conv.title.hasPrefix(prefix) else { return nil }
+        let slug = String(conv.title.dropFirst(prefix.count))
+        return slug.isEmpty ? nil : slug
     }
 
     private var setupBannerText: String? {
@@ -546,6 +567,283 @@ private struct AssistantBody: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+}
+
+/// 编辑会话顶部的渐变 pill —— 持续可见地告诉用户「现在在编辑哪个 entity」。
+/// 走 LinearGradient + ultraThin material 玻璃质感,sparkles 旋转图标 +
+/// 缓慢呼吸动画,跟主 chat 风格一致但有「持续焦点」的暗示。
+private struct EditContextPill: View {
+    let slug: String
+    @State private var pulse: Bool = false
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(LinearGradient(
+                    colors: [.cyan, .purple, .pink],
+                    startPoint: .leading, endPoint: .trailing))
+                .symbolEffect(.pulse, options: .repeating, value: pulse)
+            Text("EDITING")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(0.7)
+                .foregroundStyle(.white.opacity(0.55))
+            Text(slug)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            Text("Body-only · approval required")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 8)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.85)
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(LinearGradient(
+                        colors: [.cyan.opacity(0.14), .purple.opacity(0.12), .pink.opacity(0.10)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(LinearGradient(
+                        colors: [.cyan, .purple, .pink],
+                        startPoint: .leading, endPoint: .trailing).opacity(0.55),
+                        lineWidth: 0.8)
+            }
+        )
+        .onAppear { pulse.toggle() }
+    }
+}
+
+/// AI 提议的编辑 draft 卡片。漂亮、清晰、有状态反馈:
+/// - 顶部:闪烁渐变 header,sparkles + 「Proposed edit」+ slug pill
+/// - 用户原话需求 / AI 一句总结
+/// - 「After」是默认展开的(用户直接看新内容,markdown 渲染);「Show original」
+///   折叠 disclosure 展开原 body
+/// - 底部:Approve(绿,主色)/Reject(红,bordered);state 切换时按钮收起,
+///   显示已批准 / 已拒绝徽章,带 spring 动画
+private struct EditDraftCard: View {
+    let block: EditDraftBlock
+    @Environment(ChatController.self) private var chat
+    @State private var showOriginal: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            if let summary = block.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .padding(.horizontal, 14)
+            }
+            if !block.request.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Text("Request")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(0.6)
+                        .foregroundStyle(.white.opacity(0.45))
+                        .padding(.top, 1)
+                    Text(block.request)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 14)
+            }
+            Divider().background(Color.white.opacity(0.08)).padding(.horizontal, 14)
+            afterBlock
+            originalDisclosure
+            footer
+        }
+        .padding(.vertical, 14)
+        .background(cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(accentGradient)
+            Text("Proposed edit")
+                .font(.system(size: 12, weight: .semibold))
+                .tracking(0.3)
+                .foregroundStyle(.white.opacity(0.95))
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Image(systemName: entityIcon)
+                    .font(.system(size: 9, weight: .medium))
+                Text(slugLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+            }
+            .foregroundStyle(.white.opacity(0.78))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.white.opacity(0.08))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.10), lineWidth: 0.6))
+            )
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 2)
+    }
+
+    private var afterBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.green.opacity(0.85))
+                Text("AFTER")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(0.6)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            ScrollView {
+                Text(block.afterBody)
+                    .font(.system(size: 12.5, design: .default))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .frame(maxHeight: 240)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.green.opacity(0.06))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.22), lineWidth: 0.6))
+            )
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private var originalDisclosure: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeOut(duration: 0.22)) { showOriginal.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: showOriginal ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 9))
+                    Text(showOriginal ? "HIDE ORIGINAL" : "SHOW ORIGINAL")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(0.6)
+                }
+                .foregroundStyle(.white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            if showOriginal {
+                ScrollView {
+                    Text(block.beforeBody.isEmpty ? "(empty)" : block.beforeBody)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                }
+                .frame(maxHeight: 180)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.red.opacity(0.05))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.red.opacity(0.18), lineWidth: 0.6))
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.horizontal, 14)
+    }
+
+    @ViewBuilder private var footer: some View {
+        switch block.state {
+        case .pending:
+            HStack(spacing: 10) {
+                Spacer()
+                Button {
+                    chat.rejectEditDraft(blockId: block.id)
+                } label: {
+                    Label("Reject", systemImage: "xmark")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                Button {
+                    chat.approveEditDraft(blockId: block.id)
+                } label: {
+                    Label("Approve", systemImage: "checkmark")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.green)
+            }
+            .padding(.horizontal, 14)
+        case .approved:
+            statusBadge(label: "Approved", icon: "checkmark.seal.fill", color: .green)
+        case .rejected:
+            statusBadge(label: "Rejected", icon: "xmark.seal.fill", color: .red)
+        case .failed:
+            VStack(alignment: .leading, spacing: 4) {
+                statusBadge(label: "Failed", icon: "exclamationmark.triangle.fill", color: .orange)
+                if let msg = block.errorMessage {
+                    Text(msg)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange.opacity(0.85))
+                        .padding(.horizontal, 14)
+                }
+            }
+        }
+    }
+
+    private func statusBadge(label: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.3)
+            Spacer()
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+
+    private var slugLabel: String {
+        (block.originalRelPath as NSString).lastPathComponent
+            .replacingOccurrences(of: ".md", with: "")
+    }
+    private var entityIcon: String {
+        block.originalRelPath.hasPrefix("events/") ? "doc.text" : "person.crop.rectangle"
+    }
+    private var accentGradient: LinearGradient {
+        LinearGradient(colors: [.cyan, .purple, .pink],
+                       startPoint: .leading, endPoint: .trailing)
+    }
+    private var cardBackground: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .opacity(0.85)
+            RoundedRectangle(cornerRadius: 14)
+                .fill(LinearGradient(
+                    colors: [.cyan.opacity(0.10), .purple.opacity(0.10), .pink.opacity(0.06)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(accentGradient.opacity(0.45), lineWidth: 0.9)
+        }
     }
 }
 
