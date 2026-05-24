@@ -42,9 +42,14 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     private var eventContinuation: AsyncStream<PiAgent.Event>.Continuation?
     let events: AsyncStream<PiAgent.Event>
 
-    init(model: String, oneshot: Bool = false) {
+    /// Cron job 等场景注入的额外环境变量(SMTP_*, OBSIDIAN_VAULT_PATH …),
+    /// 跟 PiAgent.extraEnv 等价。空 = 走继承的 ProcessInfo 环境。
+    private let extraEnv: [String: String]
+
+    init(model: String, oneshot: Bool = false, extraEnv: [String: String] = [:]) {
         self.model = model.isEmpty ? "sonnet" : model
         self.oneshot = oneshot
+        self.extraEnv = extraEnv
         var c: AsyncStream<PiAgent.Event>.Continuation!
         self.events = AsyncStream { cont in c = cont }
         self.eventContinuation = c
@@ -85,6 +90,14 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         args.append(contentsOf: ["-p", text])
         proc.arguments = args
         proc.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
+
+        // 注入 cron job 的 connection 凭证(SMTP_*, OBSIDIAN_VAULT_PATH …),
+        // 跟 PiAgent.start 那侧对齐。空 extraEnv = 不改环境,继承 parent。
+        if !extraEnv.isEmpty {
+            var env = ProcessInfo.processInfo.environment
+            for (k, v) in extraEnv { env[k] = v }
+            proc.environment = env
+        }
 
         let stdout = Pipe()
         let stderr = Pipe()

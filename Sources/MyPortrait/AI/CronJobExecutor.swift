@@ -46,7 +46,14 @@ enum CronJobExecutor {
     }
 
     private static func execute(_ cronJob: CronJob) async {
-        guard AISetup.shared.isReady else { return }
+        let (provider, _, _) = providerResolver()
+        // Claude Code 不走 Pi,只要 CLI 装着就行;其它 provider 需要 Bun/Pi 装好。
+        switch provider {
+        case .claudeCode:
+            guard ClaudeCodeAgent.isInstalled else { return }
+        default:
+            guard AISetup.shared.isReady else { return }
+        }
 
         let startedAt = Date()
 
@@ -74,11 +81,20 @@ enum CronJobExecutor {
         var parts: [ContentPart] = []
         let assistantId = UUID()
 
-        let (provider, model, refOverride) = providerResolver()
+        let (_, model, refOverride) = providerResolver()
+        let envInjection = connectionEnv(for: cronJob)
         do {
-            let agent = try PiAgent(provider: provider, model: model,
+            let agent: any ChatAgent
+            switch provider {
+            case .claudeCode:
+                // claude --print 一次跑就退,本身就是 oneshot,不需要复用
+                // session(也 oneshot=true 关续接,避免上轮污染下轮)。
+                agent = ClaudeCodeAgent(model: model, oneshot: true, extraEnv: envInjection)
+            default:
+                agent = try PiAgent(provider: provider, model: model,
                                     apiKeyRefOverride: refOverride,
-                                    extraEnv: connectionEnv(for: cronJob))
+                                    extraEnv: envInjection)
+            }
             try await agent.start()
             let pasted = context.markdown.isEmpty
                 ? cronJob.prompt
