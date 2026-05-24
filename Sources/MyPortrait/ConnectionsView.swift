@@ -585,12 +585,18 @@ struct IntegrationIcon: View {
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else {
-                // Brand-color letter glyph fallback (NOT an SF Symbol).
+                // 品牌色底块 + 优先 SF Symbol(若提供),否则用 letter 字形。
                 RoundedRectangle(cornerRadius: size * 0.22)
                     .fill(integration.accent)
-                Text(integration.letter)
-                    .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
-                    .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                if let symbol = integration.iconSymbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: size * 0.50, weight: .semibold))
+                        .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                } else {
+                    Text(integration.letter)
+                        .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
+                        .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                }
             }
         }
         .frame(width: size, height: size)

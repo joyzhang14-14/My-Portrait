@@ -222,10 +222,21 @@ struct Integration: Identifiable, Hashable {
     let bundleId: String?
     /// Single-letter "wordmark" glyph used when no real icon is available.
     let letter: String
+    /// 可选 SF Symbol —— 优先于 letter。给没 bundleId、letter 在 system rounded
+    /// font 下渲染不漂亮的 case 用(如 email-smtp 的 "✉")。
+    let iconSymbol: String?
     /// Brand accent color, used for the letter glyph background and accents.
     let accent: Color
     let signInMethod: SignInMethod
     let category: Category
+
+    init(id: String, name: String, bundleId: String?, letter: String,
+         iconSymbol: String? = nil,
+         accent: Color, signInMethod: SignInMethod, category: Category) {
+        self.id = id; self.name = name; self.bundleId = bundleId
+        self.letter = letter; self.iconSymbol = iconSymbol
+        self.accent = accent; self.signInMethod = signInMethod; self.category = category
+    }
 
     enum SignInMethod: String { case oauth, apiKey, localApp, systemAccess, smtp }
     enum Category: String { case ai = "AI Providers", productivity = "Productivity", media = "Media & Calendar", local = "Local Models" }
@@ -254,7 +265,7 @@ enum IntegrationRegistry {
         .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
         .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  accent: Color(white: 0.95),                         signInMethod: .oauth,        category: .productivity),
         .init(id: "linear",             name: "Linear",          bundleId: "com.linear",                            letter: "L",  accent: Color(red: 0.36, green: 0.40, blue: 0.94),  signInMethod: .oauth,        category: .productivity),
-        .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "✉",  accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
+        .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  iconSymbol: "envelope.fill", accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
 
         // Media / Calendar
         .init(id: "spotify",            name: "Spotify",         bundleId: "com.spotify.client",                    letter: "♪",  accent: Color(red: 0.11, green: 0.72, blue: 0.33),  signInMethod: .oauth,        category: .media),
