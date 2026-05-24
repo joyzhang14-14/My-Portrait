@@ -195,7 +195,7 @@ struct SettingsPage<Content: View>: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color.black)
+        .background(SidebarBackdrop())
     }
 }
 
