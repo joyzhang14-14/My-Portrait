@@ -74,7 +74,11 @@ final class KeystrokeLedger {
             return
         }
 
-        let mask: CGEventMask = 1 << CGEventType.keyDown.rawValue
+        // keyDown + tap-disabled 事件(后者收不进 mask 也会 fire,但显式加上更稳)
+        let mask: CGEventMask =
+              (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.tapDisabledByTimeout.rawValue)
+            | (1 << CGEventType.tapDisabledByUserInput.rawValue)
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -135,6 +139,15 @@ final class KeystrokeLedger {
         tapRunLoop = nil
         tapThread = nil
         log.info("KeystrokeLedger stopped")
+    }
+
+    /// macOS disable 了 tap 后调用,显式 re-enable。callback 内调。
+    /// `reason` 仅用于 log,方便后续看哪类 disable 频发。
+    fileprivate func reenableTap(reason: CGEventType) {
+        guard let tap = eventTap else { return }
+        let why = reason == .tapDisabledByTimeout ? "timeout" : "user_input"
+        log.warning("CGEventTap disabled (\(why, privacy: .public)) — re-enabling")
+        CGEvent.tapEnable(tap: tap, enable: true)
     }
 
     // MARK: - 写入 / 查询
@@ -275,6 +288,15 @@ private func keystrokeLedgerTapCallback(
     event: CGEvent,
     userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
+    // macOS 可能因 callback 慢 / 系统压力 disable tap。必须显式 re-enable,
+    // 否则后续所有键都收不到(这是 5/22-5/23 大段 keystroke_log 空洞的真因)。
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        if let userInfo {
+            let ledger = Unmanaged<KeystrokeLedger>.fromOpaque(userInfo).takeUnretainedValue()
+            ledger.reenableTap(reason: type)
+        }
+        return Unmanaged.passUnretained(event)
+    }
     guard type == .keyDown, let userInfo else {
         return Unmanaged.passUnretained(event)
     }
