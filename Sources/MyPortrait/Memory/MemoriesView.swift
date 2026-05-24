@@ -141,6 +141,10 @@ struct MemoriesView: View {
                         .font(.system(size: 13))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    if let notes = entry.file.editNotes, !notes.isEmpty {
+                        Divider().background(Color.white.opacity(0.06))
+                        editNotesBlock(notes)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
@@ -208,6 +212,54 @@ struct MemoriesView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
+            }
+        }
+    }
+
+    /// 详情页底部:AI 编辑历史。每条 EditNote 一行 `(date) summary`,
+    /// 时间倒序(最新在上)。给用户 + 下游 distill/personality 的 LLM 看,
+    /// 提醒别再犯同样的事实错误。
+    private func editNotesBlock(_ notes: [PortraitFile.EditNote]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.left.and.text.bubble.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text("EDIT HISTORY")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(0.6)
+                    .foregroundStyle(.tertiary)
+                Text("(\(notes.count))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            ForEach(Array(notes.reversed().enumerated()), id: \.offset) { _, note in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(Self.dayString(note.date))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text(note.summary)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !note.request.isEmpty {
+                        Text("Request: \(note.request)")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.08), lineWidth: 0.5))
+                )
             }
         }
     }
