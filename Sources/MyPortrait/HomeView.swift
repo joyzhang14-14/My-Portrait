@@ -43,7 +43,7 @@ struct HomeView: View {
             if let slug = editTargetSlug {
                 EditContextPill(slug: slug)
                     .padding(.horizontal, 24)
-                    .padding(.top, 10)
+                    .padding(.top, 0)
             }
             if chat.messages.isEmpty {
                 ScrollView { greetingContent }
@@ -578,44 +578,44 @@ private struct EditContextPill: View {
     @State private var pulse: Bool = false
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Image(systemName: "sparkles")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(LinearGradient(
                     colors: [.cyan, .purple, .pink],
                     startPoint: .leading, endPoint: .trailing))
                 .symbolEffect(.pulse, options: .repeating, value: pulse)
             Text("EDITING")
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .tracking(1.0)
-                .foregroundStyle(.white.opacity(0.65))
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .tracking(0.9)
+                .foregroundStyle(.white.opacity(0.62))
             Text(slug)
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
+                .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.98))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 12)
+            Spacer(minLength: 10)
             Text("Body-only · approval required")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.50))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 12)
                     .fill(.ultraThinMaterial)
                     .opacity(0.85)
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 12)
                     .fill(LinearGradient(
                         colors: [.cyan.opacity(0.14), .purple.opacity(0.12), .pink.opacity(0.10)],
                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 12)
                     .stroke(LinearGradient(
                         colors: [.cyan, .purple, .pink],
-                        startPoint: .leading, endPoint: .trailing).opacity(0.65),
-                        lineWidth: 1.2)
+                        startPoint: .leading, endPoint: .trailing).opacity(0.60),
+                        lineWidth: 1.0)
             }
         )
         .onAppear { pulse.toggle() }
