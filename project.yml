@@ -75,6 +75,10 @@ targets:
         NSHighResolutionCapable: true
         NSMicrophoneUsageDescription: My Portrait records microphone audio to build your personal activity timeline.
         NSCameraUsageDescription: My Portrait does not use the camera.
+        # macOS 14+ (Sonoma) 起 Calendar 权限分 write-only / full,我们要读
+        # 事件给 LLM 当上下文,得申请 full access。第一次调用
+        # EKEventStore.requestFullAccessToEvents 时系统弹这个文案。
+        NSCalendarsFullAccessUsageDescription: My Portrait reads your calendar so AI cronJobs and timeline context can reason about your meetings and schedule.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import EventKit
 
 /// Matches Orphies' Settings → Connections layout:
 ///   ┌───────────────────────────────────┐
@@ -472,12 +473,16 @@ struct ConnectionsView: View {
 
     /// SystemAccess integrations (Apple Calendar, Voice Memos, Apple
     /// Intelligence): TCC permission lives in System Settings → Privacy.
-    /// Open the right pane and mark connected — the actual permission grant
-    /// happens out of process; we trust the user's intent here.
+    /// Apple Calendar 走 EventKit:第一次调用 requestFullAccessToEvents 系统
+    /// 会弹原生权限弹窗;之后如果用户拒了再点 Connect,我们就跳系统设置让
+    /// 他改。其它两个仍走"跳系统设置"那条路(底层 API 没接,纯 cosmetic)。
     private func connectSystemAccess(_ integration: Integration) {
+        if integration.id == "apple-calendar" {
+            connectCalendar(integration)
+            return
+        }
         let pane: String = {
             switch integration.id {
-            case "apple-calendar":     return "Privacy_Calendars"
             case "voice-memos":        return "Privacy_Microphone"
             default:                   return "Privacy_AppleIntelligenceReport"
             }
@@ -486,6 +491,43 @@ struct ConnectionsView: View {
             NSWorkspace.shared.open(url)
         }
         appState.toggleConnect(integration)
+    }
+
+    /// Apple Calendar 真接 EventKit。三种 TCC 状态:
+    ///   - notDetermined → requestFullAccessToEvents 弹原生权限对话框
+    ///   - authorized / fullAccess → 直接 toggleConnect 亮绿点
+    ///   - denied / restricted → 跳系统设置(API 不能再弹了)
+    private func connectCalendar(_ integration: Integration) {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        switch status {
+        case .fullAccess, .authorized:
+            if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
+        case .notDetermined:
+            connecting = integration.id
+            let store = EKEventStore()
+            store.requestFullAccessToEvents { granted, err in
+                DispatchQueue.main.async {
+                    self.connecting = nil
+                    if granted {
+                        if !self.appState.isConnected(integration.id) {
+                            self.appState.toggleConnect(integration)
+                        }
+                    } else {
+                        self.loginError = err?.localizedDescription
+                            ?? "Calendar access was not granted."
+                    }
+                }
+            }
+        case .denied, .restricted, .writeOnly:
+            // 走过一次拒了或只给了 write-only —— EventKit 不再弹,
+            // 只能跳系统设置让用户手动改。
+            loginError = "Calendar access is \(status == .writeOnly ? "write-only" : "denied"). Opening System Settings — turn on full access for My Portrait."
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                NSWorkspace.shared.open(url)
+            }
+        @unknown default:
+            break
+        }
     }
 
     private func signInIcon(for i: Integration) -> String {
