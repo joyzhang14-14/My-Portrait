@@ -11,6 +11,43 @@ private let pass2Log = Logger(subsystem: "com.myportrait.memory", category: "wri
 struct WritingCaptureRecord: Codable, Sendable {
     let text: String
     let editLog: [EditEntry]
+
+    // LLM 偶发对 delete 类目省略 text 字段 → 自定义 decode 容忍。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        // edit_log:逐条 decode,缺 text 默认 "" 兜底
+        var rawArray = try c.nestedUnkeyedContainer(forKey: .editLog)
+        var entries: [EditEntry] = []
+        while !rawArray.isAtEnd {
+            let raw = try rawArray.decode(EditEntryTolerant.self)
+            entries.append(EditEntry(ts: raw.ts, kind: raw.kind, text: raw.text ?? ""))
+        }
+        editLog = entries
+        kind = try c.decode(String.self, forKey: .kind)
+        source = try c.decode(String.self, forKey: .source)
+        confidence = try c.decode(Double.self, forKey: .confidence)
+        contextSummary = try c.decodeIfPresent(String.self, forKey: .contextSummary)
+        app = try c.decode(String.self, forKey: .app)
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        startTs = try c.decode(Int64.self, forKey: .startTs)
+        endTs = try c.decode(Int64.self, forKey: .endTs)
+        referenceTypingEventIds = try c.decode([Int64].self, forKey: .referenceTypingEventIds)
+        referenceFrameIds = try c.decode([Int64].self, forKey: .referenceFrameIds)
+        // 老 record 偶发整段缺 reference_keystroke_range —— 默认 null/null
+        if let r = try c.decodeIfPresent(KeystrokeRange.self, forKey: .referenceKeystrokeRange) {
+            referenceKeystrokeRange = r
+        } else {
+            referenceKeystrokeRange = KeystrokeRange(start: nil, end: nil)
+        }
+    }
+
+    private struct EditEntryTolerant: Decodable {
+        let ts: Int64
+        let kind: String
+        let text: String?
+    }
+
     let kind: String                         // long_form | short_form | other (v26)
     let source: String                       // ax_cleaned | canvas_fusion | merged
     let confidence: Double
@@ -24,8 +61,9 @@ struct WritingCaptureRecord: Codable, Sendable {
     let referenceKeystrokeRange: KeystrokeRange
 
     struct KeystrokeRange: Codable, Sendable, Equatable {
-        let start: Int64
-        let end: Int64
+        // canvas_fusion 等无 keystroke 的 record,LLM 可能输出 null —— 容忍
+        let start: Int64?
+        let end: Int64?
     }
 
     enum CodingKeys: String, CodingKey {
@@ -47,14 +85,27 @@ struct WritingCaptureRecord: Codable, Sendable {
 
 /// Pass 2 输出的一条 throwaway 记录。
 struct WritingCaptureDiscarded: Codable, Sendable, Equatable {
-    let reason: String                       // "search_query: ..." | ...
+    let reason: String
     let sessionIds: [String]
-    let preview: String
+    let preview: String                      // LLM 偶发省略 → "" 兜底
 
     enum CodingKeys: String, CodingKey {
         case reason
         case sessionIds = "session_ids"
         case preview
+    }
+
+    init(reason: String, sessionIds: [String], preview: String) {
+        self.reason = reason
+        self.sessionIds = sessionIds
+        self.preview = preview
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reason = try c.decode(String.self, forKey: .reason)
+        sessionIds = try c.decode([String].self, forKey: .sessionIds)
+        preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
     }
 }
 
@@ -105,7 +156,7 @@ final class WritingCapturePass2Agent {
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .claudeCode, model: String = "sonnet[1m]", perRunTimeout: TimeInterval = 600) {
+    init(provider: Provider = .claudeCode, model: String = "sonnet", perRunTimeout: TimeInterval = 1200) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
@@ -295,15 +346,48 @@ final class WritingCapturePass2Agent {
 
     /// 从 LLM 响应里抓 JSON object,解析成 (records, discarded)。
     /// 校验 source 合法 + discarded.reason 前缀合法。
+    /// 从响应文本里抽出**第一个**完整 JSON object(括号平衡 + string-aware),
+    /// 忽略后面可能跟着的第二个对象(claude --print 偶发吐两条 result)。
+    /// 返回 nil 表示找不到任何完整对象。
+    static func extractFirstBalancedJSONObject(_ s: String) -> String? {
+        let chars = Array(s)
+        var i = 0
+        // 找第一个 {
+        while i < chars.count && chars[i] != "{" { i += 1 }
+        guard i < chars.count else { return nil }
+        let start = i
+        var depth = 0
+        var inString = false
+        var escape = false
+        while i < chars.count {
+            let c = chars[i]
+            if inString {
+                if escape { escape = false }
+                else if c == "\\" { escape = true }
+                else if c == "\"" { inString = false }
+            } else {
+                if c == "\"" { inString = true }
+                else if c == "{" { depth += 1 }
+                else if c == "}" {
+                    depth -= 1
+                    if depth == 0 { return String(chars[start...i]) }
+                }
+            }
+            i += 1
+        }
+        return nil
+    }
+
     static func parse(
         from response: String
     ) throws -> (records: [WritingCaptureRecord], discarded: [WritingCaptureDiscarded]) {
-        guard let first = response.firstIndex(of: "{"),
-              let last = response.lastIndex(of: "}") else {
+        // 找首个**括号平衡**的 JSON object,而不是 first { ~ last }。
+        // claude --print 偶发吐两条 result 消息,响应变成 {A}{B},last } 抓
+        // 到第二个对象末尾,整体不是合法 JSON。
+        guard let jsonStr = Self.extractFirstBalancedJSONObject(response) else {
             let preview = String(response.prefix(500))
             throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
         }
-        let jsonStr = String(response[first...last])
         guard let data = jsonStr.data(using: .utf8) else {
             throw AgentError.malformedJSON("response not UTF-8")
         }

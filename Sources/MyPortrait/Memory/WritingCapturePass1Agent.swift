@@ -69,7 +69,7 @@ final class WritingCapturePass1Agent {
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .claudeCode, model: String = "sonnet[1m]", perRunTimeout: TimeInterval = 300) {
+    init(provider: Provider = .claudeCode, model: String = "sonnet", perRunTimeout: TimeInterval = 300) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
@@ -188,15 +188,13 @@ final class WritingCapturePass1Agent {
 
     // MARK: - JSON 解析
 
-    /// 从 LLM 响应里抓 JSON object,解析成 timeline。
+    /// 从 LLM 响应里抓首个**括号平衡**的 JSON object,解析成 timeline。
+    /// claude --print 偶发吐两条 result(响应变成 {A}{B}),不能用 last `}`。
     static func parse(from response: String) throws -> [WritingCaptureContextSegment] {
-        guard let first = response.firstIndex(of: "{"),
-              let last = response.lastIndex(of: "}") else {
-            // 把 LLM 实际响应的前 500 字附在 error 里,方便排查(prose / 拒绝 / 空 等)
+        guard let jsonStr = WritingCapturePass2Agent.extractFirstBalancedJSONObject(response) else {
             let preview = String(response.prefix(500))
             throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
         }
-        let jsonStr = String(response[first...last])
         guard let data = jsonStr.data(using: .utf8) else {
             throw AgentError.malformedJSON("response not UTF-8")
         }

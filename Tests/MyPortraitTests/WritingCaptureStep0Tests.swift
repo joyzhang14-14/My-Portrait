@@ -205,8 +205,9 @@ final class WritingCaptureStep0Tests: XCTestCase {
 
     // MARK: - throwaway filter
 
-    func testThrowawayFilter() {
-        // 一个 < 20 字的 session 应该被丢到 throwaway,不进 rawSessions
+    func testThrowawayFilterKeepsAnyTyping() {
+        // 新规则:任何 typing_events 一律直通(短输出是 speech-style 信号);
+        // 只过滤"纯 OCR 0-typing 且 OCR 太短"的会话。
         let shortEvt = TypingEvent(id: nil, bundleId: "a", elementHash: 0, startedAt: 0, endedAt: 1000,
                                     text: "ok", editLog: "[]", totalChars: 2)
         let longEvt = TypingEvent(id: nil, bundleId: "b", elementHash: 0, startedAt: 10 * 60 * 1000, endedAt: 10 * 60 * 1000 + 1000,
@@ -216,10 +217,23 @@ final class WritingCaptureStep0Tests: XCTestCase {
             keystrokes: [],
             rawOcrFrames: []
         )
-        XCTAssertEqual(output.rawSessions.count, 1)
-        XCTAssertEqual(output.rawSessions[0].app, "b")
+        // 两个 session 都该保留(typing 一律不丢)
+        XCTAssertEqual(output.rawSessions.count, 2)
+        XCTAssertEqual(output.throwawaySessions.count, 0)
+    }
+
+    func testThrowawayFilterDropsOcrOnlyShortSession() {
+        // 纯 OCR + 内容 < 20 字 → throwaway(无 typing)
+        let shortFrame = WritingCaptureRawOcr(
+            id: 1, tsMs: 0, app: "snipaste", url: nil, text: "Menu"
+        )
+        let output = WritingCaptureStep0.preprocess(
+            typingEvents: [],
+            keystrokes: [],
+            rawOcrFrames: [shortFrame]
+        )
+        XCTAssertEqual(output.rawSessions.count, 0)
         XCTAssertEqual(output.throwawaySessions.count, 1)
-        XCTAssertEqual(output.throwawaySessions[0].app, "a")
-        XCTAssertEqual(output.throwawaySessions[0].chars, 2)
+        XCTAssertEqual(output.throwawaySessions[0].app, "snipaste")
     }
 }

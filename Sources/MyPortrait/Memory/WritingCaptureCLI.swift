@@ -153,10 +153,16 @@ enum WritingCaptureCLI {
                     print("  (no records)")
                     continue
                 }
+                let kindBreakdown = Dictionary(grouping: rows, by: { $0.kind })
+                    .mapValues { $0.count }
+                let breakdownStr = kindBreakdown.sorted { $0.key < $1.key }
+                    .map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+                print("  kind breakdown: \(breakdownStr)")
                 for (i, row) in rows.enumerated() {
                     print("--- [\(i + 1)/\(rows.count)] ---")
                     print("  app:        \(row.app)")
                     if let u = row.url, !u.isEmpty { print("  url:        \(u)") }
+                    print("  kind:       \(row.kind)")
                     print("  source:     \(row.source)")
                     print("  confidence: \(String(format: "%.2f", row.confidence))")
                     if let cs = row.contextSummary, !cs.isEmpty {
