@@ -472,6 +472,7 @@ final class ChatController {
             case .tool(let b):       return acc + b.command.count + b.output.count
             case .thinking(let b):   return acc + b.text.count
             case .error(let b):      return acc + b.message.count
+            case .editDraft(let b):  return acc + b.request.count + b.beforeBody.count + b.afterBody.count
             }
         } }
         return chars / 4   // ~4 chars per token
@@ -552,9 +553,104 @@ final class ChatController {
                 b.isRunning = false
                 b.isError = isError
                 messages[mIdx].parts[pIdx] = .tool(b)
+                // 如果是成功的 `--ai-draft-write-body <rel>` 调用 → 自动追加
+                // 一张 EditDraftBlock 卡片到对话流(用户在卡片上 approve/reject)。
+                if !isError, let rel = Self.parseDraftWriteBodyRel(from: b.command) {
+                    appendEditDraftBlock(originalRelPath: rel)
+                }
                 return
             }
         }
+    }
+
+    /// 从 ToolBlock.command(summarizeArgs 输出的 bash 命令文本)里抠出
+    /// `--ai-draft-write-body <rel>` 后的相对路径。匹不到 → nil。
+    private static func parseDraftWriteBodyRel(from command: String) -> String? {
+        guard let range = command.range(of: "--ai-draft-write-body ") else { return nil }
+        let tail = command[range.upperBound...]
+        // 取下一个空格前的 token,trim 引号。
+        let token = tail.prefix(while: { !$0.isWhitespace })
+        let unquoted = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        return unquoted.isEmpty ? nil : unquoted
+    }
+
+    /// 追加一张 EditDraftBlock 到当前 assistant 消息。读 draft 现成内容
+    /// (before/after/meta),失败也插入一张 .failed 卡片提示。
+    private func appendEditDraftBlock(originalRelPath: String) {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        let originalURL = Storage.rootURL.appendingPathComponent(originalRelPath)
+        let block: EditDraftBlock
+        do {
+            let (before, after) = try EditDraft.preview(originalURL: originalURL)
+            let meta = try EditDraft.readMeta(originalURL: originalURL)
+            block = EditDraftBlock(
+                id: UUID(),
+                originalRelPath: originalRelPath,
+                request: meta.request,
+                summary: meta.summary,
+                beforeBody: before,
+                afterBody: after,
+                state: .pending,
+                errorMessage: nil)
+        } catch {
+            block = EditDraftBlock(
+                id: UUID(),
+                originalRelPath: originalRelPath,
+                request: "(meta unreadable)",
+                summary: nil,
+                beforeBody: "", afterBody: "",
+                state: .failed,
+                errorMessage: error.localizedDescription)
+        }
+        messages[mIdx].parts.append(.editDraft(block))
+        activeTextPartID = nil   // 后续 text delta 起新 part
+    }
+
+    // MARK: - EditDraft 公开 API(UI 卡片按钮调)
+
+    /// 用户点 Approve。成功 → block.state=.approved + 删 draft 文件。
+    /// 失败 → block.state=.failed + errorMessage 显示原因。
+    func approveEditDraft(blockId: UUID) {
+        guard let (mIdx, pIdx, var block) = locateEditDraftBlock(blockId: blockId) else { return }
+        guard block.state == .pending else { return }
+        let originalURL = Storage.rootURL.appendingPathComponent(block.originalRelPath)
+        do {
+            try EditDraft.approve(originalURL: originalURL)
+            block.state = .approved
+        } catch {
+            block.state = .failed
+            block.errorMessage = error.localizedDescription
+        }
+        messages[mIdx].parts[pIdx] = .editDraft(block)
+        persist()
+    }
+
+    /// 用户点 Reject。删 draft 文件,原文件不动。
+    func rejectEditDraft(blockId: UUID) {
+        guard let (mIdx, pIdx, var block) = locateEditDraftBlock(blockId: blockId) else { return }
+        guard block.state == .pending else { return }
+        let originalURL = Storage.rootURL.appendingPathComponent(block.originalRelPath)
+        do {
+            try EditDraft.reject(originalURL: originalURL)
+            block.state = .rejected
+        } catch {
+            block.state = .failed
+            block.errorMessage = error.localizedDescription
+        }
+        messages[mIdx].parts[pIdx] = .editDraft(block)
+        persist()
+    }
+
+    private func locateEditDraftBlock(blockId: UUID) -> (Int, Int, EditDraftBlock)? {
+        for (mIdx, msg) in messages.enumerated() {
+            for (pIdx, part) in msg.parts.enumerated() {
+                if case .editDraft(let b) = part, b.id == blockId {
+                    return (mIdx, pIdx, b)
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - Thinking blocks

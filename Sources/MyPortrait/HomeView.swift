@@ -222,6 +222,8 @@ private func plainTextOf(_ m: ChatMessage) -> String {
             if !b.text.isEmpty { out.append("[thinking] \(b.text)") }
         case .error(let b):
             out.append("[error] \(b.message)")
+        case .editDraft(let b):
+            out.append("[edit draft \(b.state.rawValue)] \(b.originalRelPath) — \(b.summary ?? b.request)")
         }
     }
     return out.joined(separator: "\n\n")
@@ -536,6 +538,9 @@ private struct AssistantBody: View {
                     }
                 case .error(let block):
                     ErrorCard(block: block)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                case .editDraft(let block):
+                    EditDraftCard(block: block)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
                 }
             }
