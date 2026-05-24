@@ -99,13 +99,21 @@ final class ConfigApplier {
             mainWindow?.title = display.appName.isEmpty ? "" : display.appName
         }
 
-        // Custom Dock icon
+        // Custom Dock icon —— NSImage(contentsOfFile:) 是同步磁盘 IO,放主线程
+        // 会卡(且 applyAll 是 ConfigStore observation 触发的,改 config 时
+        // 频繁跑)。后台读完回主线程赋图。
         if display.customDockIcon != lastDockIcon {
             lastDockIcon = display.customDockIcon
             if display.customDockIcon.isEmpty {
                 NSApp.applicationIconImage = nil   // revert to bundle default
-            } else if let img = NSImage(contentsOfFile: display.customDockIcon) {
-                NSApp.applicationIconImage = img
+            } else {
+                let p = display.customDockIcon
+                Task.detached(priority: .userInitiated) {
+                    let img = NSImage(contentsOfFile: p)
+                    await MainActor.run {
+                        if let img { NSApp.applicationIconImage = img }
+                    }
+                }
             }
         }
 

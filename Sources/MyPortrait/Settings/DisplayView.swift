@@ -292,10 +292,14 @@ private struct IconSlot: View {
     // MARK: - File ops
 
     private func loadPreview() {
-        guard !path.isEmpty, let img = NSImage(contentsOfFile: path) else {
-            preview = nil; return
+        guard !path.isEmpty else { preview = nil; return }
+        // NSImage(contentsOfFile:) 是同步磁盘 IO + 解码,大图会卡主线程。
+        // 后台读完回主线程赋值。
+        let p = path
+        Task.detached(priority: .userInitiated) {
+            let img = NSImage(contentsOfFile: p)
+            await MainActor.run { preview = img }
         }
-        preview = img
     }
 
     private func pickFile() {

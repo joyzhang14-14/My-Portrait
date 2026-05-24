@@ -121,8 +121,18 @@ struct MemorySettingsView: View {
     }
 
     private func reload() {
-        attention = MemoryScheduler.shared.attentionDays()
-        changelog = ProcessingLogStore().recentChangelog(limit: 50)
+        // attentionDays + recentChangelog 是同步 sqlite 扫表,放主线程会卡。
+        // attentionDays 已 nonisolated,可以 off-main 跑;ProcessingLogStore
+        // 是 Sendable struct,本来就能 off-main。
+        Task.detached(priority: .userInitiated) {
+            let scheduler = await MemoryScheduler.shared
+            let att = scheduler.attentionDays()
+            let log = ProcessingLogStore().recentChangelog(limit: 50)
+            await MainActor.run {
+                attention = att
+                changelog = log
+            }
+        }
         refreshStaging()
         refreshWritingCapture()
     }

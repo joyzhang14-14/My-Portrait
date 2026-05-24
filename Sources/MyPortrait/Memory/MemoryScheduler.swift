@@ -474,7 +474,9 @@ final class MemoryScheduler {
     }
 
     /// 需要用户关注的日：任一阶段处于 failed / dead_letter / budget_deferred。
-    func attentionDays() -> [AttentionItem] {
+    /// nonisolated:纯 DB 读 + 数据变换,不碰 MainActor 状态,可在后台调用
+    /// 避免阻塞 UI(被 MemorySettingsView.reload 从 detached task 调)。
+    nonisolated func attentionDays() -> [AttentionItem] {
         store.allRows().compactMap { row in
             let problems = ProcessingStage.allCases.compactMap {
                 stage -> (stage: ProcessingStage, status: ProcessingStatus)? in

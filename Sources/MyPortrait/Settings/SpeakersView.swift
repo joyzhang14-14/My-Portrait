@@ -139,7 +139,13 @@ struct SpeakersSettingsView: View {
 
     // MARK: - Mutators
 
-    private func reload() { rows = SpeakerLoader.loadAll() }
+    private func reload() {
+        // loadSpeakers 同步 sqlite JOIN + GROUP BY,主线程跑会卡(切到这页就触发)。
+        Task.detached(priority: .userInitiated) {
+            let loaded = SpeakerLoader.loadAll()
+            await MainActor.run { rows = loaded }
+        }
+    }
 
     /// Ask the LLM to propose names for every unidentified cluster, then
     /// apply each suggested label through the existing `rename` path
