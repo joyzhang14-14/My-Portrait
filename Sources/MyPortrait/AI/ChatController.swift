@@ -581,8 +581,17 @@ final class ChatController {
                 messages[mIdx].parts[pIdx] = .tool(b)
                 // 如果是成功的 `--ai-draft-write-body <rel>` 调用 → 自动追加
                 // 一张 EditDraftBlock 卡片到对话流(用户在卡片上 approve/reject)。
-                if !isError, let rel = Self.parseDraftWriteBodyRel(from: b.command) {
-                    appendEditDraftBlock(originalRelPath: rel)
+                // 两条识别路径(取第一条命中的):
+                //   1. command 包含 --ai-draft-write-body(PiAgent 把 bash
+                //      命令塞进 args["command"],summarizeArgs 还原)。
+                //   2. output 里有 AIEditCLI 落 draft 时打的成功行
+                //      "draft body written: <rel>"(ClaudeCodeAgent 等不
+                //      暴露 bash 命令字符串时兜底)。
+                if !isError {
+                    if let rel = Self.parseDraftWriteBodyRel(fromCommand: b.command)
+                        ?? Self.parseDraftWriteBodyRel(fromOutput: b.output) {
+                        appendEditDraftBlock(originalRelPath: rel)
+                    }
                 }
                 return
             }
@@ -591,13 +600,28 @@ final class ChatController {
 
     /// 从 ToolBlock.command(summarizeArgs 输出的 bash 命令文本)里抠出
     /// `--ai-draft-write-body <rel>` 后的相对路径。匹不到 → nil。
-    private static func parseDraftWriteBodyRel(from command: String) -> String? {
+    private static func parseDraftWriteBodyRel(fromCommand command: String) -> String? {
         guard let range = command.range(of: "--ai-draft-write-body ") else { return nil }
         let tail = command[range.upperBound...]
         // 取下一个空格前的 token,trim 引号。
         let token = tail.prefix(while: { !$0.isWhitespace })
         let unquoted = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
         return unquoted.isEmpty ? nil : unquoted
+    }
+
+    /// 从 ToolBlock.output 里识别 `--ai-draft-write-body` 落盘成功 ——
+    /// AIEditCLI.draftWriteBody 成功时 print "draft body written: <rel>"。
+    /// agent 没暴露 bash command 字符串时(如 ClaudeCodeAgent)用这条。
+    private static func parseDraftWriteBodyRel(fromOutput output: String) -> String? {
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let prefix = "draft body written: "
+            guard trimmed.hasPrefix(prefix) else { continue }
+            let rel = String(trimmed.dropFirst(prefix.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !rel.isEmpty { return rel }
+        }
+        return nil
     }
 
     /// 追加一张 EditDraftBlock 到当前 assistant 消息。读 draft 现成内容
