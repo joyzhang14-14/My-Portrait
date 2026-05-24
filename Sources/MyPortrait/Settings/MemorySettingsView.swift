@@ -147,14 +147,19 @@ struct MemorySettingsView: View {
         refreshWritingCapture()
     }
 
-    /// 重新从 DB 拉 pending_review 那几天。Run / Approve / Reject 后都调一次。
+    /// 重新从 DB 拉 backlog pending row(date_utc='all')。
+    /// Run / Approve / Reject 后都调一次。GUI 只关心 backlog 模式,
+    /// per-day 老 rows 即使存在也不显示(走 CLI 兼容路径)。
     private func refreshWritingCapture() {
         guard let worker = WritingCaptureWorker.shared else { return }
         let store = worker.store
         Task.detached(priority: .userInitiated) {
             let pending = (try? store.fetchPendingReviewDays()) ?? []
+            let backlogOnly = pending.filter {
+                $0.dateUtc == WritingCaptureWorker.backlogDateKey
+            }
             await MainActor.run {
-                writingCapturePending = pending
+                writingCapturePending = backlogOnly
             }
         }
     }
@@ -163,10 +168,13 @@ struct MemorySettingsView: View {
     private func approveWritingCapture(date: String) async {
         guard let worker = WritingCaptureWorker.shared else { return }
         do {
-            let copied = try await worker.approveDay(date: date)
-            writingCaptureStatus = "Approved \(date) — \(copied) record(s) → writing_records."
+            let copied = try await worker.approveBacklog()
+            writingCaptureStatus = "Approved backlog — \(copied) record(s) → writing_records, cursor advanced."
+            // 清掉展开缓存,下次 run 完展开时重新加载
+            writingCaptureExpanded.remove(date)
+            writingCaptureExpandedRecords.removeValue(forKey: date)
         } catch {
-            writingCaptureStatus = "Approve \(date) failed: \(error.localizedDescription)"
+            writingCaptureStatus = "Approve failed: \(error.localizedDescription)"
         }
         refreshWritingCapture()
     }
@@ -175,10 +183,12 @@ struct MemorySettingsView: View {
     private func rejectWritingCapture(date: String) async {
         guard let worker = WritingCaptureWorker.shared else { return }
         do {
-            try await worker.rejectDay(date: date)
-            writingCaptureStatus = "Rejected \(date) — staged dropped, will re-run next time."
+            try await worker.rejectBacklog()
+            writingCaptureStatus = "Rejected backlog — staged dropped, cursor unchanged."
+            writingCaptureExpanded.remove(date)
+            writingCaptureExpandedRecords.removeValue(forKey: date)
         } catch {
-            writingCaptureStatus = "Reject \(date) failed: \(error.localizedDescription)"
+            writingCaptureStatus = "Reject failed: \(error.localizedDescription)"
         }
         refreshWritingCapture()
     }
@@ -430,14 +440,14 @@ struct MemorySettingsView: View {
     /// (走 WritingCaptureWorker.shared,不走 MemoryStaging)。
     private var writingCaptureSection: some View {
         section(
-            title: "Writing capture",
-            blurb: "Reads typing_events / keystroke_log / OCR frames for unprocessed UTC days, runs the LLM (gpt-5.4-mini) Pass 1 (context timeline) + Pass 2 (multi-source fusion), and stages writing_records for review. Approve/Reject UI shows below once a day is in pending_review."
+            title: "Writing capture (backlog)",
+            blurb: "Reads typing_events / keystroke_log / OCR frames from cursor → now (not per-day). Runs Pass 1 (context timeline, 1 LLM call) + Pass 2 (per-app+url subagent fanout, sonnet 200K). Stages writing_records for review — Approve advances the cursor."
         ) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Process writing capture")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Runs the writing-capture worker on all unprocessed days. Uses LLM tokens.")
+                    Text("Runs the worker on everything since the last approved cursor. Uses LLM tokens.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -455,7 +465,7 @@ struct MemorySettingsView: View {
             if writingCaptureRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Pass 1 + Pass 2 on unprocessed days — may take a few minutes…")
+                    Text("Pass 1 + Pass 2 fanout — may take a few minutes…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -499,7 +509,9 @@ struct MemorySettingsView: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(run.dateUtc).font(.system(size: 12, design: .monospaced))
+                                let title = run.dateUtc == WritingCaptureWorker.backlogDateKey
+                                    ? "Backlog (cursor → now)" : run.dateUtc
+                                Text(title).font(.system(size: 12, design: .monospaced))
                                 Text("\(run.recordsCount ?? 0) records / \(run.discardedCount ?? 0) discarded — click to \(expanded ? "collapse" : "expand")")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
@@ -537,7 +549,7 @@ struct MemorySettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Process all unprocessed UTC days with Pass 1 (context) + Pass 2 (fusion) LLM calls. Output is staged for review.")
+            Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (fanout) LLM calls. Output is staged for review.")
         }
     }
 
@@ -619,19 +631,21 @@ struct MemorySettingsView: View {
             return
         }
         writingCaptureRunning = true
-        writingCaptureStatus = "Running…"
+        writingCaptureStatus = "Running backlog (cursor → now)…"
         defer { writingCaptureRunning = false }
         do {
-            let summaries = try await worker.runUnprocessedDays()
-            writingCaptureSummaries = summaries
-            if summaries.isEmpty {
-                writingCaptureStatus = "All days already processed — nothing to run."
-            } else {
-                let approved = summaries.filter { $0.status == .approved }.count
-                let pending = summaries.filter { $0.status == .pendingReview }.count
-                let failed = summaries.filter { $0.status == .failed }.count
+            let s = try await worker.runBacklog()
+            writingCaptureSummaries = [s]
+            switch s.status {
+            case .approved:
+                writingCaptureStatus = "No new data since last cursor — nothing staged."
+            case .pendingReview:
                 writingCaptureStatus =
-                    "Done. \(summaries.count) day(s): \(approved) auto-approved (empty), \(pending) pending review, \(failed) failed."
+                    "Done. \(s.recordsCount) record(s) / \(s.discardedCount) discarded — pending review below."
+            case .failed:
+                writingCaptureStatus = "Failed: \(s.errorMessage ?? "(unknown)")"
+            default:
+                writingCaptureStatus = "Status: \(s.status.rawValue)"
             }
         } catch {
             writingCaptureStatus = "Run failed: \(error.localizedDescription)"
