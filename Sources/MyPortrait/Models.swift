@@ -248,23 +248,19 @@ enum IntegrationRegistry {
     static let all: [Integration] = [
         // AI providers
         .init(id: "chatgpt",            name: "ChatGPT",         bundleId: "com.openai.chat",                       letter: "G",  accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
-        .init(id: "claude",             name: "Claude Desktop",  bundleId: "com.anthropic.claudefordesktop",        letter: "C",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
         .init(id: "claude-code",        name: "Claude Code",     bundleId: nil,                                     letter: ">",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
-        .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: nil,                                     letter: "A",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
+        // Anthropic API 复用 Claude Desktop 的 bundleId,NSWorkspace 装了 Claude
+        // app 就显示真图标(原"Claude Desktop"tile 拔了)。
+        .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
         .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
         .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  accent: Color(red: 0.11, green: 0.66, blue: 0.69),  signInMethod: .apiKey,       category: .ai),
-        .init(id: "cursor",             name: "Cursor",          bundleId: "com.todesktop.230313mzl4w4u92",         letter: "C",  accent: Color(white: 0.85),                         signInMethod: .localApp,     category: .ai),
-        .init(id: "warp",               name: "Warp",            bundleId: "dev.warp.Warp-Stable",                  letter: "W",  accent: Color(red: 0.95, green: 0.30, blue: 0.50),  signInMethod: .localApp,     category: .ai),
 
         // Local model runners
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
-        .init(id: "lmstudio",           name: "LM Studio",       bundleId: "ai.lmstudio.LMStudio",                  letter: "L",  accent: Color(red: 0.32, green: 0.40, blue: 0.78),  signInMethod: .localApp,     category: .local),
-        .init(id: "msty",               name: "Msty",            bundleId: "com.msty.studio",                       letter: "M",  accent: Color(red: 0.20, green: 0.71, blue: 0.65),  signInMethod: .localApp,     category: .local),
 
         // Productivity
         .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
         .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  accent: Color(white: 0.95),                         signInMethod: .oauth,        category: .productivity),
-        .init(id: "linear",             name: "Linear",          bundleId: "com.linear",                            letter: "L",  accent: Color(red: 0.36, green: 0.40, blue: 0.94),  signInMethod: .oauth,        category: .productivity),
         .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  iconSymbol: "envelope.fill", accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
 
         // Media / Calendar
@@ -366,6 +362,7 @@ final class AppState {
         case .anthropic:     return "anthropic-api"
         case .gemini:        return "gemini"
         case .ollama:        return "ollama"
+        case .perplexity:    return "perplexity"
         case .openaiBYOK:    return nil    // no dedicated tile yet
         }
     }

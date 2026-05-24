@@ -15,6 +15,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     case anthropic
     case ollama
     case gemini
+    case perplexity
 
     var id: String { rawValue }
 
@@ -25,6 +26,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case "anthropic-api": return .anthropic
         case "gemini":        return .gemini
         case "ollama":        return .ollama
+        case "perplexity":    return .perplexity
         // We don't have a separate "openai BYOK" tile yet; reuse chatgpt id
         // if the user only has a raw OpenAI key (TODO when a tile exists).
         default:              return nil
@@ -40,6 +42,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .anthropic:      return "anthropic-byok"
         case .ollama:         return "ollama"
         case .gemini:         return "openai-byok"   // Gemini speaks an OpenAI-compatible API
+        case .perplexity:     return "perplexity-byok"
         }
     }
 
@@ -56,6 +59,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .anthropic:  return ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
         case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
         case .gemini:     return ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
+        case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
         }
     }
 
@@ -75,6 +79,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .anthropic:      return "https://api.anthropic.com"
         case .ollama:         return "http://localhost:11434/v1"
         case .gemini:         return "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .perplexity:     return "https://api.perplexity.ai"
         }
     }
 
@@ -86,6 +91,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .anthropic:      return "ANTHROPIC_API_KEY"
         case .ollama:         return ""         // none
         case .gemini:         return "GEMINI_API_KEY"
+        case .perplexity:     return "PERPLEXITY_API_KEY"
         }
     }
 
@@ -95,6 +101,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .anthropic:      return "apikey:anthropic"
         case .openaiBYOK:     return "apikey:openai"
         case .gemini:         return "apikey:gemini"
+        case .perplexity:     return "apikey:perplexity"
         case .chatgpt, .ollama: return nil
         }
     }

@@ -211,6 +211,133 @@ final class ChatController {
         return oneLine.count > 40 ? String(oneLine.prefix(40)) + "…" : oneLine
     }
 
+    // MARK: - Edit mode
+
+    /// 开一个新的「编辑某个 event/portrait」对话。返回新 conv id;UI 把侧栏
+    /// 选中切过去。不污染日常 chat —— 每次点编辑按钮都是新 session。
+    @discardableResult
+    func startEditConversation(originalURL: URL) -> UUID {
+        let conv = store.createConversation()
+        let slug = originalURL.deletingPathExtension().lastPathComponent
+        store.renameConversation(conv.id, to: "Edit: \(slug)")
+        switchTo(conv.id)
+        return conv.id
+    }
+
+    /// 发起一轮编辑请求。用户气泡只显示 `request`(干净);送给 PiAgent 的
+    /// 提示自动包了 edit-mode system priming + 当前文件内容 + 受控工具用
+    /// 法。AI 用 `--ai-draft-*` 工具落 draft,user 在 UI 里 approve/reject。
+    func sendEditRequest(originalURL: URL, request: String) {
+        let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        guard AISetup.shared.isReady else {
+            lastError = "Setup not finished — Bun/Pi still installing."
+            return
+        }
+        guard ChatGPTOAuth.isLoggedIn() else {
+            lastError = "Sign in to ChatGPT from Connections first."
+            return
+        }
+
+        if currentConvId == nil { _ = startEditConversation(originalURL: originalURL) }
+
+        // 读当前文件内容塞进 prompt。失败就保留 placeholder 让 AI 用 --ai-read 自己拉。
+        let currentContent: String
+        if let data = try? Data(contentsOf: originalURL),
+           let s = String(data: data, encoding: .utf8) {
+            currentContent = s
+        } else {
+            currentContent = "(read failed — call --ai-read to fetch)"
+        }
+
+        // 相对路径:AI 的工具用这个寻址。
+        let rel = Self.relativeToPortraitRoot(originalURL)
+        let binPath = Bundle.main.executablePath ?? "MyPortrait"
+
+        // 可见的 user bubble = 干净 request。
+        var msg = ChatMessage(role: .user, text: trimmed, time: Date())
+        msg.parts = [.text(id: UUID(), value: trimmed)]
+        messages.append(msg)
+        lastError = nil
+
+        if pendingTitleFromFirstMessage, let convId = currentConvId {
+            store.renameConversation(convId, to: Self.titleFromText(trimmed))
+            pendingTitleFromFirstMessage = false
+        }
+
+        // invisible system priming + entity context + user request
+        let priming = Self.editSystemPrompt(
+            binPath: binPath, rel: rel,
+            currentContent: currentContent, request: trimmed)
+        Task { await self.deliver(priming) }
+    }
+
+    private static func relativeToPortraitRoot(_ url: URL) -> String {
+        let root = Storage.rootURL.standardizedFileURL.path + "/"
+        let p = url.standardizedFileURL.path
+        return p.hasPrefix(root) ? String(p.dropFirst(root.count)) : p
+    }
+
+    /// edit-mode 给 AI 的指令文本。**完整 prompt**:工具用法 + 严格规则 +
+    /// 当前 entity 内容 + 用户原话需求。
+    private static func editSystemPrompt(
+        binPath: String, rel: String, currentContent: String, request: String
+    ) -> String {
+        """
+        You are editing ONE entry in the user's personal memory system.
+        Your only job is to propose a body edit that fulfills the user's
+        request. You CANNOT touch the original file directly — only the
+        --ai-draft-* CLI below writes to the staging area, which the user
+        will manually approve or reject in the UI.
+
+        TARGET: \(rel)
+
+        CURRENT CONTENT (frontmatter + body):
+        ─────────────────────────────────────────
+        \(currentContent)
+        ─────────────────────────────────────────
+
+        USER REQUEST: \(request)
+
+        AVAILABLE TOOLS (call via Bash, use `\(binPath)` as the binary):
+
+          read / search (zero side effects):
+            \(binPath) --ai-read <rel-path>
+            \(binPath) --ai-grep <pattern>
+            \(binPath) --ai-find-related <rel-path>
+
+          draft (writes to ~/.portrait/.edit_draft/, NOT the original):
+            \(binPath) --ai-draft-begin <rel-path> --request-file <tmpfile>
+            \(binPath) --ai-draft-write-body <rel-path> --body-file <tmpfile>
+            \(binPath) --ai-draft-set-summary <rel-path> --summary "<short>"
+            \(binPath) --ai-draft-preview <rel-path>
+
+        WORKFLOW for this turn:
+          1. Read the user request. Decide what body content (markdown after
+             the frontmatter `---`) needs to change to satisfy it.
+          2. Write the FULL new body markdown into a tmpfile under /tmp/.
+          3. Write the user's verbatim request into another tmpfile.
+          4. Call --ai-draft-begin with --request-file pointing at #3.
+          5. Call --ai-draft-write-body with --body-file pointing at #2.
+          6. Call --ai-draft-set-summary with a one-line summary of what
+             you changed (this lands in the file's frontmatter as an
+             edit_note on approve).
+          7. Call --ai-draft-preview to show the user before/after.
+          8. Stop. Say one short sentence confirming the draft is ready
+             for review.
+
+        STRICT RULES:
+        - NEVER use Write/Edit on files under ~/.portrait/events/ or
+          ~/.portrait/portrait/ — that bypasses approval.
+        - Only modify the BODY (markdown after `---`). Do not edit
+          frontmatter fields — they are system-owned.
+        - One draft per turn. Do not chain multiple edits.
+        - If the request is unclear or unfulfillable, say so and stop;
+          do not invent changes.
+        """
+    }
+
     /// Tear down the Pi process when the user closes the conversation.
     func close() {
         agent?.stop()
