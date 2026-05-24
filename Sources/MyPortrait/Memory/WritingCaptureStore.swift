@@ -88,8 +88,8 @@ struct WritingCaptureStore: Sendable {
         try dbPool.read { db in
             try WritingCaptureRun.fetchOne(
                 db,
-                sql: "SELECT * FROM writing_capture_runs WHERE date_utc = ? LIMIT 1",
-                arguments: [date]
+                sql: "SELECT * FROM writing_capture_runs WHERE date_utc = :d LIMIT 1",
+                arguments: ["d": date]
             )
         }
     }
@@ -114,7 +114,8 @@ struct WritingCaptureStore: Sendable {
                 INSERT INTO writing_capture_runs
                     (date_utc, status, run_id, started_at, completed_at, error_message,
                      pass1_token_usage, pass2_token_usage, discarded_count, records_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (:d, :status, :runId, :startedAt, :completedAt, :errMsg,
+                        :p1, :p2, :discarded, :records)
                 ON CONFLICT(date_utc) DO UPDATE SET
                     status            = excluded.status,
                     run_id            = COALESCE(excluded.run_id, writing_capture_runs.run_id),
@@ -127,8 +128,12 @@ struct WritingCaptureStore: Sendable {
                     records_count     = COALESCE(excluded.records_count, writing_capture_runs.records_count)
                 """,
                 arguments: [
-                    date, status.rawValue, runId, startedAt, completedAt, errorMessage,
-                    pass1TokenUsage, pass2TokenUsage, discardedCount, recordsCount
+                    "d": date, "status": status.rawValue, "runId": runId,
+                    "startedAt": startedAt, "completedAt": completedAt, "errMsg": errorMessage,
+                    "p1": pass1TokenUsage.map { Int64($0) },
+                    "p2": pass2TokenUsage.map { Int64($0) },
+                    "discarded": discardedCount.map { Int64($0) },
+                    "records": recordsCount.map { Int64($0) }
                 ])
         }
     }
@@ -145,10 +150,10 @@ struct WritingCaptureStore: Sendable {
                     SELECT id, bundle_id, element_hash, started_at, ended_at, text, edit_log,
                            total_chars, session_start, end_value, stripped, url
                     FROM typing_events
-                    WHERE started_at >= ? AND started_at < ?
+                    WHERE started_at >= :startMs AND started_at < :endMs
                     ORDER BY started_at ASC
                     """,
-                arguments: [startMs, endMs]
+                arguments: ["startMs": startMs, "endMs": endMs]
             )
         }
     }
@@ -165,10 +170,10 @@ struct WritingCaptureStore: Sendable {
                     db,
                     sql: """
                         SELECT id, ts_ms, bundle_id, char, is_backspace FROM keystroke_log
-                        WHERE ts_ms >= ? AND ts_ms < ?
+                        WHERE ts_ms >= :startMs AND ts_ms < :endMs
                         ORDER BY ts_ms ASC
                         """,
-                    arguments: [startMs, endMs]
+                    arguments: ["startMs": startMs, "endMs": endMs]
                 )
             }
             // 用 IN(?, ?, ?) 排除
@@ -199,11 +204,11 @@ struct WritingCaptureStore: Sendable {
                 db,
                 sql: """
                     SELECT id, timestamp_ms, app_name, browser_url, full_text FROM frames
-                    WHERE timestamp_ms >= ? AND timestamp_ms < ?
+                    WHERE timestamp_ms >= :startMs AND timestamp_ms < :endMs
                       AND full_text IS NOT NULL AND full_text != ''
                     ORDER BY timestamp_ms ASC
                     """,
-                arguments: [startMs, endMs]
+                arguments: ["startMs": startMs, "endMs": endMs]
             )
             return rows.map {
                 WritingCaptureRawOcr(
@@ -246,13 +251,19 @@ struct WritingCaptureStore: Sendable {
                          context_summary, source, reference_typing_event_ids,
                          reference_frame_ids, reference_keystroke_range, raw_output,
                          prompt_id, created_at, worker_run_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (:d, :startTs, :endTs, :app, :url, :text, :editLog, :conf,
+                            :ctxSum, :source, :refTyping,
+                            :refFrame, :refRange, :rawOut,
+                            :promptId, :createdAt, :runId)
                     """,
                     arguments: [
-                        date, r.startTs, r.endTs, r.app, r.url, r.text, editLogJSON, r.confidence,
-                        r.contextSummary, r.source, refTypingJSON,
-                        refFrameJSON, refRangeJSON, rawOut,
-                        promptId, createdAt, runId
+                        "d": date, "startTs": r.startTs, "endTs": r.endTs,
+                        "app": r.app, "url": r.url, "text": r.text,
+                        "editLog": editLogJSON, "conf": r.confidence,
+                        "ctxSum": r.contextSummary, "source": r.source,
+                        "refTyping": refTypingJSON,
+                        "refFrame": refFrameJSON, "refRange": refRangeJSON, "rawOut": rawOut,
+                        "promptId": promptId, "createdAt": createdAt, "runId": runId
                     ])
             }
             // 简单存一份 raw 摘要到 writing_capture_runs.error_message 字段?太 hack。
@@ -271,10 +282,10 @@ struct WritingCaptureStore: Sendable {
                     SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
                            context_summary, source, worker_run_id, created_at
                     FROM writing_records_staged
-                    WHERE date_utc = ?
+                    WHERE date_utc = :d
                     ORDER BY start_ts ASC
                     """,
-                arguments: [date]
+                arguments: ["d": date]
             ).map { Self.rowToView($0) }
         }
     }
@@ -292,10 +303,10 @@ struct WritingCaptureStore: Sendable {
                     SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
                            context_summary, source, worker_run_id, created_at
                     FROM writing_records
-                    WHERE app = ? AND start_ts < ? AND end_ts > ?
+                    WHERE app = :app AND start_ts < :endTs AND end_ts > :startTs
                     ORDER BY start_ts ASC
                     """,
-                arguments: [app, endTs, startTs]
+                arguments: ["app": app, "endTs": endTs, "startTs": startTs]
             ).map { Self.rowToView($0) }
         }
     }
@@ -309,8 +320,8 @@ struct WritingCaptureStore: Sendable {
         let statusStr: String? = try dbPool.read { db in
             try String.fetchOne(
                 db,
-                sql: "SELECT status FROM writing_capture_runs WHERE date_utc = ?",
-                arguments: [date]
+                sql: "SELECT status FROM writing_capture_runs WHERE date_utc = :d",
+                arguments: ["d": date]
             )
         }
         return statusStr.flatMap { WritingCaptureRunStatus(rawValue: $0) }
@@ -334,8 +345,8 @@ struct WritingCaptureStore: Sendable {
     func clearStaged(date: String) throws {
         try dbPool.write { db in
             try db.execute(
-                sql: "DELETE FROM writing_records_staged WHERE date_utc = ?",
-                arguments: [date]
+                sql: "DELETE FROM writing_records_staged WHERE date_utc = :d",
+                arguments: ["d": date]
             )
         }
     }
@@ -355,21 +366,21 @@ struct WritingCaptureStore: Sendable {
                        context_summary, source, reference_typing_event_ids,
                        reference_frame_ids, reference_keystroke_range, raw_output,
                        prompt_id, created_at, worker_run_id
-                FROM writing_records_staged WHERE date_utc = ?
+                FROM writing_records_staged WHERE date_utc = :d
                 """,
-                arguments: [date])
+                arguments: ["d": date])
             let copied = db.changesCount
             // 2. 清 staged
             try db.execute(
-                sql: "DELETE FROM writing_records_staged WHERE date_utc = ?",
-                arguments: [date])
+                sql: "DELETE FROM writing_records_staged WHERE date_utc = :d",
+                arguments: ["d": date])
             // 3. 标 runs.status = approved
             try db.execute(sql: """
                 UPDATE writing_capture_runs SET status = 'approved',
-                                                 completed_at = ?
-                WHERE date_utc = ?
+                                                 completed_at = :completedAt
+                WHERE date_utc = :d
                 """,
-                arguments: [Int64(Date().timeIntervalSince1970 * 1000), date])
+                arguments: ["completedAt": Int64(Date().timeIntervalSince1970 * 1000), "d": date])
             return copied
         }
     }

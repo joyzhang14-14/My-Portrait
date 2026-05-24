@@ -85,8 +85,8 @@ struct TypingEventStore: Sendable {
             try TypingEvent.fetchAll(
                 db,
                 sql: "SELECT \(Self.columns) FROM typing_events " +
-                     "WHERE bundle_id = ? AND element_hash = ? ORDER BY ended_at DESC",
-                arguments: [bundleId, elementHash]
+                     "WHERE bundle_id = :b AND element_hash = :h ORDER BY ended_at DESC",
+                arguments: ["b": bundleId, "h": Int64(elementHash)]
             )
         }
     }
@@ -115,8 +115,8 @@ struct TypingEventStore: Sendable {
             try TypingEvent.fetchAll(
                 db,
                 sql: "SELECT \(Self.columns) FROM typing_events " +
-                     "WHERE bundle_id = ? AND url = ? ORDER BY started_at DESC",
-                arguments: [bundleId, url]
+                     "WHERE bundle_id = :b AND url = :u ORDER BY started_at DESC",
+                arguments: ["b": bundleId, "u": url]
             )
         }
     }
@@ -125,8 +125,8 @@ struct TypingEventStore: Sendable {
     func delete(bundleId: String, url: String) throws {
         try dbPool.write { db in
             try db.execute(
-                sql: "DELETE FROM typing_events WHERE bundle_id = ? AND url = ?",
-                arguments: [bundleId, url]
+                sql: "DELETE FROM typing_events WHERE bundle_id = :b AND url = :u",
+                arguments: ["b": bundleId, "u": url]
             )
         }
     }
@@ -135,8 +135,8 @@ struct TypingEventStore: Sendable {
     func delete(id: Int64) throws {
         try dbPool.write { db in
             try db.execute(
-                sql: "DELETE FROM typing_events WHERE id = ?",
-                arguments: [id]
+                sql: "DELETE FROM typing_events WHERE id = :id",
+                arguments: ["id": id]
             )
         }
     }

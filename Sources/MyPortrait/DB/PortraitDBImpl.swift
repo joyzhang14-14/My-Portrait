@@ -138,11 +138,11 @@ actor PortraitDBImpl: PortraitDB {
             // 批量 UPDATE frames，预编译语句循环。
             let stmt = try db.makeStatement(sql: """
                 UPDATE frames
-                SET video_chunk_id = ?, offset_ms = ?, snapshot_path = NULL
-                WHERE id = ?
+                SET video_chunk_id = :chunkId, offset_ms = :offset, snapshot_path = NULL
+                WHERE id = :frameId
                 """)
             for (frameId, offset) in frames {
-                try stmt.execute(arguments: [chunkId, offset, frameId])
+                try stmt.execute(arguments: ["chunkId": chunkId, "offset": Int64(offset), "frameId": frameId])
             }
             return chunkId
         }
@@ -170,8 +170,8 @@ actor PortraitDBImpl: PortraitDB {
     func updateAudioChunkStatus(chunkId: Int64, status: AudioChunkStatus) async throws {
         try await dbPool.write { db in
             try db.execute(
-                sql: "UPDATE audio_chunks SET status = ? WHERE id = ?",
-                arguments: [status.rawValue, chunkId]
+                sql: "UPDATE audio_chunks SET status = :status WHERE id = :chunkId",
+                arguments: ["status": status.rawValue, "chunkId": chunkId]
             )
         }
     }
@@ -219,8 +219,8 @@ actor PortraitDBImpl: PortraitDB {
     func recordAudioChunkFailure(chunkId: Int64) async throws {
         try await dbPool.write { db in
             try db.execute(
-                sql: "UPDATE audio_chunks SET status = ?, retry_count = retry_count + 1 WHERE id = ?",
-                arguments: [AudioChunkStatus.failed.rawValue, chunkId]
+                sql: "UPDATE audio_chunks SET status = :status, retry_count = retry_count + 1 WHERE id = :chunkId",
+                arguments: ["status": AudioChunkStatus.failed.rawValue, "chunkId": chunkId]
             )
         }
     }
@@ -228,8 +228,8 @@ actor PortraitDBImpl: PortraitDB {
     func resetInProgressAudioChunks() async throws -> Int {
         try await dbPool.write { db in
             try db.execute(
-                sql: "UPDATE audio_chunks SET status = ? WHERE status = ?",
-                arguments: [AudioChunkStatus.pending.rawValue, AudioChunkStatus.inProgress.rawValue]
+                sql: "UPDATE audio_chunks SET status = :newStatus WHERE status = :oldStatus",
+                arguments: ["newStatus": AudioChunkStatus.pending.rawValue, "oldStatus": AudioChunkStatus.inProgress.rawValue]
             )
             return db.changesCount
         }
@@ -239,8 +239,8 @@ actor PortraitDBImpl: PortraitDB {
         try await dbPool.write { db in
             // retry_count < 3：重试上限，超过的保持 failed 不再重跑。
             try db.execute(
-                sql: "UPDATE audio_chunks SET status = ? WHERE status = ? AND retry_count < 3",
-                arguments: [AudioChunkStatus.pending.rawValue, AudioChunkStatus.failed.rawValue]
+                sql: "UPDATE audio_chunks SET status = :newStatus WHERE status = :oldStatus AND retry_count < 3",
+                arguments: ["newStatus": AudioChunkStatus.pending.rawValue, "oldStatus": AudioChunkStatus.failed.rawValue]
             )
             return db.changesCount
         }
@@ -296,12 +296,12 @@ actor PortraitDBImpl: PortraitDB {
         return try await dbPool.write { db in
             try db.execute(sql: """
                 INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms)
-                VALUES (NULL, ?, 1, 0, ?, ?)
-                """, arguments: [blob, now, now])
+                VALUES (NULL, :blob, 1, 0, :createdAt, :updatedAt)
+                """, arguments: ["blob": blob, "createdAt": now, "updatedAt": now])
             let sid = db.lastInsertedRowID
             try db.execute(sql: """
-                INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (?, ?, ?)
-                """, arguments: [sid, blob, now])
+                INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (:sid, :blob, :createdAt)
+                """, arguments: ["sid": sid, "blob": blob, "createdAt": now])
             return sid
         }
     }
@@ -310,7 +310,7 @@ actor PortraitDBImpl: PortraitDB {
         let now = Self.nowMs()
         try await dbPool.write { db in
             guard let row = try Row.fetchOne(db, sql:
-                "SELECT centroid, embedding_count FROM speakers WHERE id = ?", arguments: [speakerId])
+                "SELECT centroid, embedding_count FROM speakers WHERE id = :speakerId", arguments: ["speakerId": speakerId])
             else { return }
             let count: Int = row["embedding_count"] ?? 0
             let centroid: [Float]
@@ -327,15 +327,15 @@ actor PortraitDBImpl: PortraitDB {
             }
             VectorMath.l2Normalize(&next)
             try db.execute(sql: """
-                UPDATE speakers SET centroid = ?, embedding_count = embedding_count + 1, updated_at_ms = ?
-                WHERE id = ?
-                """, arguments: [Data(floats: next), now, speakerId])
+                UPDATE speakers SET centroid = :centroid, embedding_count = embedding_count + 1, updated_at_ms = :updatedAt
+                WHERE id = :speakerId
+                """, arguments: ["centroid": Data(floats: next), "updatedAt": now, "speakerId": speakerId])
             try db.execute(sql:
-                "INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (?, ?, ?)",
-                arguments: [speakerId, Data(floats: embedding), now])
+                "INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (:speakerId, :embedding, :createdAt)",
+                arguments: ["speakerId": speakerId, "embedding": Data(floats: embedding), "createdAt": now])
             // 样本超上限 → 删掉最接近 centroid 的（最冗余）。
             let embRows = try Row.fetchAll(db, sql:
-                "SELECT id, embedding FROM speaker_embeddings WHERE speaker_id = ?", arguments: [speakerId])
+                "SELECT id, embedding FROM speaker_embeddings WHERE speaker_id = :speakerId", arguments: ["speakerId": speakerId])
             if embRows.count > Self.maxEmbeddingsPerSpeaker {
                 var closest: (id: Int64, sim: Float)?
                 for r in embRows {
@@ -345,7 +345,7 @@ actor PortraitDBImpl: PortraitDB {
                     if sim > (closest?.sim ?? -2) { closest = (r["id"], sim) }
                 }
                 if let c = closest {
-                    try db.execute(sql: "DELETE FROM speaker_embeddings WHERE id = ?", arguments: [c.id])
+                    try db.execute(sql: "DELETE FROM speaker_embeddings WHERE id = :id", arguments: ["id": c.id])
                 }
             }
         }
@@ -355,9 +355,9 @@ actor PortraitDBImpl: PortraitDB {
         let now = Self.nowMs()
         try await dbPool.write { db in
             try db.execute(sql: """
-                UPDATE speakers SET name = ?, updated_at_ms = ?
-                WHERE id = ? AND (name IS NULL OR name = '')
-                """, arguments: [name, now, speakerId])
+                UPDATE speakers SET name = :name, updated_at_ms = :updatedAt
+                WHERE id = :speakerId AND (name IS NULL OR name = '')
+                """, arguments: ["name": name, "updatedAt": now, "speakerId": speakerId])
         }
     }
 
@@ -370,11 +370,11 @@ actor PortraitDBImpl: PortraitDB {
             // 跑完一遍历史数据后所有行 model 都对齐，后续轮次几乎只命中第一支条件。
             try Int64.fetchAll(db, sql: """
                 SELECT id FROM frames
-                WHERE (embedding IS NULL OR embedding_model IS NOT ?)
+                WHERE (embedding IS NULL OR embedding_model IS NOT :model)
                   AND full_text IS NOT NULL AND length(full_text) > 4
                 ORDER BY timestamp_ms DESC
-                LIMIT ?
-                """, arguments: [model, limit])
+                LIMIT :limit
+                """, arguments: ["model": model, "limit": Int64(limit)])
         }
     }
 
@@ -382,8 +382,8 @@ actor PortraitDBImpl: PortraitDB {
         let blob = Data(floats: vector)
         try await dbPool.write { db in
             try db.execute(
-                sql: "UPDATE frames SET embedding = ?, embedding_model = ? WHERE id = ?",
-                arguments: [blob, model, frameId]
+                sql: "UPDATE frames SET embedding = :blob, embedding_model = :model WHERE id = :frameId",
+                arguments: ["blob": blob, "model": model, "frameId": frameId]
             )
         }
     }
@@ -392,10 +392,10 @@ actor PortraitDBImpl: PortraitDB {
         try await dbPool.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT id, embedding FROM frames
-                WHERE embedding IS NOT NULL AND embedding_model = ?
+                WHERE embedding IS NOT NULL AND embedding_model = :model
                 ORDER BY timestamp_ms DESC
-                LIMIT ?
-                """, arguments: [model, limit])
+                LIMIT :limit
+                """, arguments: ["model": model, "limit": Int64(limit)])
             return rows.compactMap { row -> (Int64, [Float])? in
                 guard let id: Int64 = row["id"],
                       let blob: Data = row["embedding"],
@@ -411,11 +411,11 @@ actor PortraitDBImpl: PortraitDB {
         try await dbPool.read { db in
             try Int64.fetchAll(db, sql: """
                 SELECT id FROM audio_transcriptions
-                WHERE (embedding IS NULL OR embedding_model IS NOT ?)
+                WHERE (embedding IS NULL OR embedding_model IS NOT :model)
                   AND text IS NOT NULL AND length(text) > 4
                 ORDER BY transcribed_at_ms DESC
-                LIMIT ?
-                """, arguments: [model, limit])
+                LIMIT :limit
+                """, arguments: ["model": model, "limit": Int64(limit)])
         }
     }
 
@@ -423,8 +423,8 @@ actor PortraitDBImpl: PortraitDB {
         let blob = Data(floats: vector)
         try await dbPool.write { db in
             try db.execute(
-                sql: "UPDATE audio_transcriptions SET embedding = ?, embedding_model = ? WHERE id = ?",
-                arguments: [blob, model, transcriptionId]
+                sql: "UPDATE audio_transcriptions SET embedding = :blob, embedding_model = :model WHERE id = :transcriptionId",
+                arguments: ["blob": blob, "model": model, "transcriptionId": transcriptionId]
             )
         }
     }
@@ -433,10 +433,10 @@ actor PortraitDBImpl: PortraitDB {
         try await dbPool.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT id, embedding FROM audio_transcriptions
-                WHERE embedding IS NOT NULL AND embedding_model = ?
+                WHERE embedding IS NOT NULL AND embedding_model = :model
                 ORDER BY transcribed_at_ms DESC
-                LIMIT ?
-                """, arguments: [model, limit])
+                LIMIT :limit
+                """, arguments: ["model": model, "limit": Int64(limit)])
             return rows.compactMap { row -> (Int64, [Float])? in
                 guard let id: Int64 = row["id"],
                       let blob: Data = row["embedding"],
@@ -515,16 +515,16 @@ actor PortraitDBImpl: PortraitDB {
             // nothing to delete for them.
             let rawSnapshots = try String.fetchAll(db, sql: """
                 SELECT snapshot_path FROM frames
-                WHERE snapshot_path IS NOT NULL AND timestamp_ms < ?
-                """, arguments: [ms])
+                WHERE snapshot_path IS NOT NULL AND timestamp_ms < :ms
+                """, arguments: ["ms": ms])
             let rawVideoChunks = try String.fetchAll(db, sql: """
                 SELECT file_path FROM video_chunks
-                WHERE end_ts_ms < ?
-                """, arguments: [ms])
+                WHERE end_ts_ms < :ms
+                """, arguments: ["ms": ms])
             let rawAudio = try String.fetchAll(db, sql: """
                 SELECT file_path FROM audio_chunks
-                WHERE recorded_at_ms < ?
-                """, arguments: [ms])
+                WHERE recorded_at_ms < :ms
+                """, arguments: ["ms": ms])
 
             return RetentionFileList(
                 snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
@@ -677,14 +677,14 @@ actor PortraitDBImpl: PortraitDB {
                 try db.execute(sql: """
                     UPDATE frames
                     SET snapshot_path = NULL, video_chunk_id = NULL, offset_ms = NULL
-                    WHERE timestamp_ms < ?
-                    """, arguments: [beforeMs])
+                    WHERE timestamp_ms < :beforeMs
+                    """, arguments: ["beforeMs": beforeMs])
                 let framesAffected = db.changesCount
 
                 // 2. 删旧的 video_chunks 行（frames 已经 NULL 了 video_chunk_id 引用）
                 try db.execute(sql: """
-                    DELETE FROM video_chunks WHERE end_ts_ms < ?
-                    """, arguments: [beforeMs])
+                    DELETE FROM video_chunks WHERE end_ts_ms < :beforeMs
+                    """, arguments: ["beforeMs": beforeMs])
                 let videoChunksDeleted = db.changesCount
 
                 // mediaOnly：audio_chunks 保留（含 transcriptions 关联），文件由 worker 删。
@@ -696,19 +696,19 @@ actor PortraitDBImpl: PortraitDB {
 
             case .everything:
                 try db.execute(sql: """
-                    DELETE FROM frames WHERE timestamp_ms < ?
-                    """, arguments: [beforeMs])
+                    DELETE FROM frames WHERE timestamp_ms < :beforeMs
+                    """, arguments: ["beforeMs": beforeMs])
                 let framesAffected = db.changesCount
 
                 try db.execute(sql: """
-                    DELETE FROM video_chunks WHERE end_ts_ms < ?
-                    """, arguments: [beforeMs])
+                    DELETE FROM video_chunks WHERE end_ts_ms < :beforeMs
+                    """, arguments: ["beforeMs": beforeMs])
                 let videoChunksDeleted = db.changesCount
 
                 // CASCADE 删 transcriptions
                 try db.execute(sql: """
-                    DELETE FROM audio_chunks WHERE recorded_at_ms < ?
-                    """, arguments: [beforeMs])
+                    DELETE FROM audio_chunks WHERE recorded_at_ms < :beforeMs
+                    """, arguments: ["beforeMs": beforeMs])
                 let audioChunksDeleted = db.changesCount
 
                 return RetentionStats(

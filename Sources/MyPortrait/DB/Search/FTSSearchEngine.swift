@@ -44,11 +44,13 @@ final class FTSSearchEngine: SearchEngine, @unchecked Sendable {
                 -bm25(frames_fts) AS score
             FROM frames_fts
             JOIN frames f ON f.rowid = frames_fts.rowid
-            WHERE frames_fts MATCH ?
+            WHERE frames_fts MATCH :q
             ORDER BY score DESC
-            LIMIT ?
+            LIMIT :limit
             """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [cleanQuery, limit])
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["q": cleanQuery, "limit": Int64(limit)])
             return rows.compactMap { row -> FrameSearchResult? in
                 guard let id: Int64 = row["id"],
                       let ts: Int64 = row["timestamp_ms"],
@@ -82,11 +84,13 @@ final class FTSSearchEngine: SearchEngine, @unchecked Sendable {
             FROM transcriptions_fts
             JOIN audio_transcriptions t ON t.rowid = transcriptions_fts.rowid
             JOIN audio_chunks c ON c.id = t.audio_chunk_id
-            WHERE transcriptions_fts MATCH ?
+            WHERE transcriptions_fts MATCH :q
             ORDER BY score DESC
-            LIMIT ?
+            LIMIT :limit
             """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [cleanQuery, limit])
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["q": cleanQuery, "limit": Int64(limit)])
             return rows.compactMap { row -> TranscriptionSearchResult? in
                 guard let id: Int64 = row["id"],
                       let chunkId: Int64 = row["audio_chunk_id"],

@@ -743,13 +743,16 @@ struct TimelineDB: Sendable {
             }
             let queue = try DatabaseQueue(path: dbPath, configuration: config)
             try queue.write { db in
+                // dict-form 参数:绕开 [Int64,Int64] → [any DatabaseValueConvertible]
+                // existential 转换里 Swift runtime _getWitnessTable 偶发死循环。
                 try db.execute(sql:
-                    "UPDATE audio_transcriptions SET speaker_id = ? WHERE speaker_id = ?",
-                    arguments: [keepId, mergeId])
+                    "UPDATE audio_transcriptions SET speaker_id = :keep WHERE speaker_id = :merge",
+                    arguments: ["keep": keepId, "merge": mergeId])
                 try db.execute(sql:
-                    "UPDATE speaker_embeddings SET speaker_id = ? WHERE speaker_id = ?",
-                    arguments: [keepId, mergeId])
-                try db.execute(sql: "DELETE FROM speakers WHERE id = ?", arguments: [mergeId])
+                    "UPDATE speaker_embeddings SET speaker_id = :keep WHERE speaker_id = :merge",
+                    arguments: ["keep": keepId, "merge": mergeId])
+                try db.execute(sql: "DELETE FROM speakers WHERE id = :merge",
+                               arguments: ["merge": mergeId])
             }
             return true
         } catch {
