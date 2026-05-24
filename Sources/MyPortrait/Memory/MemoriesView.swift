@@ -215,8 +215,7 @@ struct MemoriesView: View {
              ("category (legacy)", category.isEmpty ? "—" : category),
              ("weight", String(format: "%.4g", curW))]
             + impactRows
-            + [("created", Self.dayString(f.created)),
-               ("last_occurred", f.lastOccurrence.map { Self.dayString($0) } ?? "—"),
+            + [("last_occurred", f.lastOccurrence.map { Self.dayString($0) } ?? "—"),
                ("occurrences (days)", "\(f.occurrences.count)"),
                ("member frames", "\(f.memberFrameIds.count)"),
                ("tags", f.tags.joined(separator: ", "))]
@@ -434,9 +433,13 @@ private struct EntryRow: View {
                     Text("×\(entry.file.occurrences.count)d")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
-                    Text(Self.dayFmt.string(from: entry.file.created))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                    // 显示「最近一次出现」而不是「文件创建日」—— 后者只是
+                    // 蒸馏跑那一天,信息量低且会让所有同批 portrait 看上去一样。
+                    if let last = entry.file.lastOccurrence {
+                        Text(Self.dayFmt.string(from: last))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer()
                 }
             }
