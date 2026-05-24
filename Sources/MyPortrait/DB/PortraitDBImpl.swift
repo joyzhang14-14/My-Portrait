@@ -89,11 +89,17 @@ actor PortraitDBImpl: PortraitDB {
             SELECT id, timestamp_ms, snapshot_path, device_name
             FROM frames
             WHERE snapshot_path IS NOT NULL
-              AND timestamp_ms < ?
+              AND timestamp_ms < :olderThanMs
             ORDER BY device_name, timestamp_ms
-            LIMIT ?
+            LIMIT :limit
             """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [olderThanMs, limit])
+            // dict-form StatementArguments —— 绕过 [Int64,Int64] 数组字面量
+            // 走 [any DatabaseValueConvertible] 的隐式 existential 转换
+            // (该路径在 Swift runtime _getWitnessTable 偶发死循环,
+            // 真实卡死 sample 拍到过)。
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["olderThanMs": olderThanMs, "limit": Int64(limit)])
             return rows.compactMap { row -> FrameForCompaction? in
                 guard let id: Int64 = row["id"],
                       let ts: Int64 = row["timestamp_ms"],
@@ -545,10 +551,12 @@ actor PortraitDBImpl: PortraitDB {
             FROM frames f
             LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
             WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
-              AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
+              AND f.timestamp_ms >= :startMs AND f.timestamp_ms < :endMs
             ORDER BY f.timestamp_ms ASC
             """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs])
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["startMs": startMs, "endMs": endMs])
             return rows.map { row -> TimelineFrame in
                 let id: Int64 = row["id"] ?? 0
                 let ts: Int64 = row["timestamp_ms"] ?? 0
@@ -591,13 +599,15 @@ actor PortraitDBImpl: PortraitDB {
                    COALESCE(browser_url, '') AS browser_url,
                    MAX(timestamp_ms) AS latest
             FROM frames
-            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
+            WHERE timestamp_ms >= :startMs AND timestamp_ms <= :endMs
               AND app_name IS NOT NULL AND app_name != ''
             GROUP BY app_name, window_name
             ORDER BY latest DESC
             LIMIT 30
             """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs])
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["startMs": startMs, "endMs": endMs])
             return rows.map { row -> ActiveAppEntry in
                 let app: String = row["app_name"] ?? ""
                 let win: String = row["window_name"] ?? ""
@@ -633,12 +643,14 @@ actor PortraitDBImpl: PortraitDB {
                    t.speaker_id
             FROM audio_transcriptions t
             JOIN audio_chunks c ON c.id = t.audio_chunk_id
-            WHERE c.recorded_at_ms >= ? AND c.recorded_at_ms <= ?
+            WHERE c.recorded_at_ms >= :startMs AND c.recorded_at_ms <= :endMs
               AND t.text IS NOT NULL AND t.text != ''
             ORDER BY c.recorded_at_ms ASC
             LIMIT 60
             """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [startMs, endMs])
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["startMs": startMs, "endMs": endMs])
             return rows.map { row -> AudioTranscriptEntry in
                 let tsMs: Int64 = row["ts_ms"] ?? 0
                 let text: String = row["text"] ?? ""
