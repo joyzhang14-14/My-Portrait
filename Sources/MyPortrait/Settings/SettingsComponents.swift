@@ -395,7 +395,10 @@ struct IgnoredAppPicker: View {
 
     /// Curated system / privacy entries. These are never the "focused app"
     /// so they'd never appear in `discovered` — surfaced here so the user
-    /// can one-click toggle them. Mirrors screenpipe's default ignore list.
+    /// can one-click toggle them.
+    ///
+    /// Adapted from screenpipe's default ignore list (MIT licensed):
+    /// https://github.com/screenpipe/screenpipe
     static let systemEntries: [String] = [
         "Wallpaper", "Dock", "Control Center", "Settings",
         "Trash", "VPN", "Private", "Incognito", ".env",

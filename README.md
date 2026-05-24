@@ -134,8 +134,9 @@ filesystem changes — adding, removing, or renaming any `.swift` requires
 
 ## Credits
 
-- **[screenpipe](https://github.com/screenpipe/screenpipe)** — architecture,
-  capture pipeline shape, FTS storage model, "your data is yours" stance. This
-  project would not exist without it. Go star it.
+- **[screenpipe](https://github.com/screenpipe/screenpipe)** (MIT) — architecture,
+  capture pipeline shape, FTS storage model, "your data is yours" stance, and
+  the default system-app ignore list (see `IgnoredAppPicker.systemEntries`).
+  This project would not exist without it. Go star it.
 - All the upstream libraries listed under [Tech stack](#tech-stack) — especially
   WhisperKit, MLX-Swift, and GRDB, which make on-device AI on macOS practical.
