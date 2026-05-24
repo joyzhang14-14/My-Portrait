@@ -53,6 +53,14 @@ final class KeystrokeLedger {
 
     private(set) var isRunning: Bool = false
 
+    /// 最近一次收到 keyDown 的时间(单调时钟 ms)。健康检查用 ——
+    /// healthMonitorTimer 每 5 min 看 tap.isEnabled + 这个值。
+    private var lastKeystrokeMonoMs: Int64 = 0
+    /// 主线程定时器,每 5 分钟检查一次 tap 健康状态。
+    private var healthCheckTimer: Timer?
+    /// healthCheck 周期(秒)。也是"距上次 keystroke 多久算可疑"的阈值。
+    private static let healthCheckIntervalSec: TimeInterval = 300
+
     private let log = Logger(subsystem: "com.joyzhang.myportrait", category: "typing.ledger")
 
     /// 可选 L3 字符 logger —— 挂上后,每次 keyDown callback 都会同步派一份给它。
@@ -119,6 +127,52 @@ final class KeystrokeLedger {
         _ = startedSem.wait(timeout: .now() + 1.0)
         isRunning = true
         log.info("KeystrokeLedger started")
+
+        // 起健康检查 timer:每 5 min 看 tap 还在不在 enable 状态。macOS 偶发
+        // disable(已有 callback auto re-enable 兜底,但 callback 没被触发的
+        // silent dead 也要查)。同时记录最近 keystroke 时间,长期 0 keystroke
+        // + tap enabled = 用户离开,不报警;tap disabled = 主动 re-enable + 报警。
+        startHealthCheck()
+    }
+
+    /// 起健康检查 timer(MainActor)。重复调用安全:旧 timer 先 invalidate。
+    private func startHealthCheck() {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.healthCheckIntervalSec, repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.healthCheckTick() }
+        }
+    }
+
+    @MainActor
+    private func healthCheckTick() {
+        guard let tap = eventTap else { return }
+        let enabled = CGEvent.tapIsEnabled(tap: tap)
+        os_unfair_lock_lock(&lock)
+        let lastKey = lastKeystrokeMonoMs
+        os_unfair_lock_unlock(&lock)
+        let now = Self.nowMs()
+        let idleMs = lastKey > 0 ? (now - lastKey) : Int64.max
+
+        if !enabled {
+            // 硬异常:tap 被 disable 了 —— 主动 re-enable + 红灯
+            log.warning("HEALTH: CGEventTap disabled silently — re-enabling")
+            CGEvent.tapEnable(tap: tap, enable: true)
+            HealthMonitor.shared.report(
+                component: "KeystrokeLedger.tap",
+                reason: "tap disabled silently (no callback fired) — re-enabled. last keystroke \(idleMs)ms ago"
+            )
+            return
+        }
+
+        // tap 还活着:5 min 0 keystroke 只 log,不变红(可能用户离开)。
+        // 但如果 30 分钟 0 keystroke 而你之前有过键击,值得 log warn。
+        if lastKey > 0 && idleMs > Int64(Self.healthCheckIntervalSec * 1000 * 6) {
+            log.warning("HEALTH: no keystroke for \(idleMs)ms (tap still enabled — likely user idle)")
+        }
+        // tap 健康 → 清掉之前可能存在的 fault
+        HealthMonitor.shared.clear(component: "KeystrokeLedger.tap")
     }
 
     /// 停 tap，CFRunLoopStop，等 thread 退出。
@@ -126,6 +180,8 @@ final class KeystrokeLedger {
         guard isRunning else { return }
         isRunning = false
 
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -157,6 +213,7 @@ final class KeystrokeLedger {
         os_unfair_lock_lock(&lock)
         buffer[writeIdx] = timestampMs
         writeIdx = (writeIdx + 1) % Self.capacity
+        lastKeystrokeMonoMs = timestampMs
         os_unfair_lock_unlock(&lock)
     }
 

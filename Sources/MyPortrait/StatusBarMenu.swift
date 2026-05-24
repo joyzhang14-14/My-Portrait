@@ -92,6 +92,12 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             self?.refreshMenuState()
         }
         .store(in: &cancellables)
+
+        // 健康状态变化 → 重画 icon(异常加红色徽标)
+        HealthMonitor.shared.$unhealthy
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.refreshIcon() }
+            .store(in: &cancellables)
     }
 
     // MARK: - 真实录音状态（= 意图开关 && 没暂停 && 权限已授）
@@ -175,24 +181,41 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     }
 
     private func refreshIcon() {
-        // User-supplied icon takes precedence.
-        if !customIconPath.isEmpty,
-           let img = NSImage(contentsOfFile: customIconPath) {
-            img.size = NSSize(width: 18, height: 18)
-            img.isTemplate = true       // template auto-tints with menu-bar style
-            statusItem.button?.image = img
-        } else if let character = NSImage(named: "MenuBarIcon") {
-            // 默认菜单栏图标：项目角色立绘。
-            // **isTemplate = false 是关键**：角色图是彩色的，设 true 会被系统
-            // 压成黑白剪影。彩图直接原样渲染。
-            character.size = NSSize(width: 18, height: 18)
-            character.isTemplate = false
-            statusItem.button?.image = character
+        let unhealthy = HealthMonitor.shared.unhealthy
+        if unhealthy {
+            // 健康异常 —— 用红色感叹号 SF Symbol 替代默认 icon,**最显眼**。
+            let conf = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+            if let warn = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
+                                  accessibilityDescription: "MyPortrait health warning")?
+                              .withSymbolConfiguration(conf) {
+                warn.isTemplate = false
+                statusItem.button?.image = warn
+                statusItem.button?.contentTintColor = .systemRed
+            }
+        } else {
+            statusItem.button?.contentTintColor = nil
+            // User-supplied icon takes precedence.
+            if !customIconPath.isEmpty,
+               let img = NSImage(contentsOfFile: customIconPath) {
+                img.size = NSSize(width: 18, height: 18)
+                img.isTemplate = true       // template auto-tints with menu-bar style
+                statusItem.button?.image = img
+            } else if let character = NSImage(named: "MenuBarIcon") {
+                // 默认菜单栏图标：项目角色立绘。
+                // **isTemplate = false 是关键**：角色图是彩色的，设 true 会被系统
+                // 压成黑白剪影。彩图直接原样渲染。
+                character.size = NSSize(width: 18, height: 18)
+                character.isTemplate = false
+                statusItem.button?.image = character
+            }
         }
         // 采集状态不再压进图标本身（角色图是固定的），改由 tooltip 表达。
 
         let toolTip: String
-        if screenRecordingActive || audioRecordingActive || typingCaptureActive {
+        if unhealthy {
+            let faulty = HealthMonitor.shared.faults.keys.sorted().joined(separator: ", ")
+            toolTip = "⚠ Capture issue: \(faulty)\n(see ~/.portrait/logs/health.log)"
+        } else if screenRecordingActive || audioRecordingActive || typingCaptureActive {
             var parts: [String] = []
             if screenRecordingActive { parts.append("Screen") }
             if audioRecordingActive { parts.append("Audio") }
