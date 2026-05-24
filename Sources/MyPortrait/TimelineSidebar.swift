@@ -31,6 +31,7 @@ struct TimelineSidebar: View {
     @State private var recentsSearchOpen: Bool = false
     @State private var renamingConvId: UUID? = nil
     @State private var renameDraft: String = ""
+    @State private var cronJobHistoryCollapsed: Bool = true
 
     private var focusedFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
@@ -266,10 +267,23 @@ struct TimelineSidebar: View {
         }
     }
 
+    /// 所有 cron job 跑过的 conv id 集合 —— 用来从 RECENTS 里过滤掉、单独
+    /// 归到 CRON JOB HISTORY 分区。
+    private var cronJobConvIds: Set<UUID> {
+        Set(cronJobStore.cronJobs.flatMap { $0.runs.map { $0.convId } })
+    }
+
+    /// RECENTS:只留普通聊天,把 cron job 跑出来的 conv 排除掉。
     private var filteredConversations: [Conversation] {
         let q = recentsSearch.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return chatStore.conversations }
-        return chatStore.conversations.filter { $0.title.lowercased().contains(q) }
+        let base = chatStore.conversations.filter { !cronJobConvIds.contains($0.id) }
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.title.lowercased().contains(q) }
+    }
+
+    /// CRON JOB HISTORY:仅 cron job 跑出来的 conv,按 ChatStore 的时间序。
+    private var cronJobHistoryConversations: [Conversation] {
+        chatStore.conversations.filter { cronJobConvIds.contains($0.id) }
     }
 
     // MARK: Memories scope picker (shown when selection == .memories)
@@ -326,33 +340,66 @@ struct TimelineSidebar: View {
         .buttonStyle(.bouncyIcon)
     }
 
-    // MARK: Cron Job History (跨任务的最近运行汇总)
-
-    /// 把所有 cron job 的 runs 揉到一起,按时间倒序。最多展示 20 条。
-    private var aggregateCronJobRuns: [(jobName: String, run: CronJobRun)] {
-        cronJobStore.cronJobs
-            .flatMap { job in job.runs.map { (jobName: job.name, run: $0) } }
-            .sorted { $0.run.startedAt > $1.run.startedAt }
-    }
+    // MARK: Cron Job History (折叠分区,跟 RECENTS 同样的标题行样式)
 
     private var cronJobHistorySection: some View {
         sectionCard {
-            SectionHeader(title: "CRON JOB HISTORY", count: aggregateCronJobRuns.count)
-            if aggregateCronJobRuns.isEmpty {
-                EmptyRow(text: "No runs yet.")
-            } else {
-                VStack(spacing: 2) {
-                    ForEach(Array(aggregateCronJobRuns.prefix(20)), id: \.run.id) { row in
-                        CronJobHistoryRow(
-                            jobName: row.jobName,
-                            startedAt: row.run.startedAt,
-                            preview: row.run.preview,
-                            isActive: chat.currentConvId == row.run.convId,
-                            onTap: {
-                                chat.switchTo(row.run.convId)
-                                if selection == .cronJobs { selection = .home }
-                            }
-                        )
+            // 标题 + 折叠箭头(默认折叠,避免大量 cron job run 把聊天压下去)
+            HStack(spacing: Theme.Space.sm) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        cronJobHistoryCollapsed.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: cronJobHistoryCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 10)
+                        SectionHeader(title: "CRON JOB HISTORY", count: cronJobHistoryConversations.count)
+                    }
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
+            }
+
+            if !cronJobHistoryCollapsed {
+                if cronJobHistoryConversations.isEmpty {
+                    EmptyRow(text: "No runs yet.")
+                } else {
+                    VStack(spacing: 2) {
+                        ForEach(cronJobHistoryConversations) { conv in
+                            RecentRow(
+                                conv: conv,
+                                isActive: chat.currentConvId == conv.id,
+                                isRenaming: renamingConvId == conv.id,
+                                renameDraft: $renameDraft,
+                                onTap: {
+                                    if renamingConvId == nil {
+                                        chat.switchTo(conv.id)
+                                        if selection == .cronJobs { selection = .home }
+                                    }
+                                },
+                                onStartRename: {
+                                    renameDraft = conv.title
+                                    renamingConvId = conv.id
+                                },
+                                onCommitRename: {
+                                    let v = renameDraft.trimmingCharacters(in: .whitespaces)
+                                    if !v.isEmpty {
+                                        chatStore.renameConversation(conv.id, to: v)
+                                    }
+                                    renamingConvId = nil
+                                },
+                                onCancelRename: { renamingConvId = nil },
+                                onTogglePin: { chatStore.togglePinned(conv.id) },
+                                onDelete: {
+                                    let wasActive = chat.currentConvId == conv.id
+                                    chatStore.deleteConversation(conv.id)
+                                    if wasActive { chat.switchTo(nil) }
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -491,74 +538,6 @@ private struct EmptyRow: View {
     }
 }
 
-/// 单条 cron job 运行历史的行。jobName + 相对时间 + 一行 preview。
-/// 点击 → 切到那次 run 产生的 conv。
-private struct CronJobHistoryRow: View {
-    let jobName: String
-    let startedAt: Date
-    let preview: String
-    let isActive: Bool
-    let onTap: () -> Void
-    @State private var hover = false
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 10))
-                    .foregroundStyle(isActive ? Theme.accent : Theme.textTertiary)
-                    .frame(width: 14, alignment: .center)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(jobName)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(isActive ? Theme.accent : Theme.textPrimary)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(Self.relative(startedAt))
-                            .font(.system(size: 10, weight: .regular, design: .monospaced))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                    }
-                    Text(preview.isEmpty ? "(empty)" : preview)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .multilineTextAlignment(.leading)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? Theme.accent.opacity(0.16)
-                          : (hover ? Color.white.opacity(0.05) : .clear))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(isActive ? Theme.accent.opacity(0.55) : .clear,
-                                    lineWidth: 0.7)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-    }
-
-    /// "2m ago" / "1h ago" / "3d ago" / 日期 fallback。
-    static func relative(_ date: Date) -> String {
-        let delta = Date().timeIntervalSince(date)
-        if delta < 60 { return "now" }
-        if delta < 3600 { return "\(Int(delta / 60))m ago" }
-        if delta < 86400 { return "\(Int(delta / 3600))h ago" }
-        if delta < 7 * 86400 { return "\(Int(delta / 86400))d ago" }
-        let f = DateFormatter()
-        f.dateFormat = "MMM d"
-        return f.string(from: date)
-    }
-}
 
 /// Compact glass icon button used for the +/search affordances inside cards.
 private struct SidebarIconButton: View {
