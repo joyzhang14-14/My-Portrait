@@ -39,13 +39,42 @@ enum PiInstaller {
         try writeModelsJSON(providers: [.chatgpt])
     }
 
-    /// **Pi 0.60 起 noop**:Pi 不再读自定义 models.json,所有 provider 都从
-    /// 内置 catalog 走(@mariozechner/pi-ai/dist/models.generated.js)。这个
-    /// 方法保留是为了避免改大批调用方,实际什么也不写。
-    /// 老版本残留的 `~/.pi/agent/models.json` 可以手动 `rm` 掉,Pi 0.60 不读它。
+    /// Pi 0.60 起内置 catalog 覆盖 openai-codex / openai / anthropic / google
+    /// 等主流 provider —— 这些**不需要** models.json。这个方法现在只为
+    /// **非内置** provider(ollama / perplexity)写自定义 entry,schema 走
+    /// Pi 0.60 的 ModelsConfigSchema:
+    ///   { providers: { <name>: { baseUrl, api, apiKey, models: [...] } } }
+    /// apiKey 值是个 env var 名(resolveConfigValue 会拿 process.env 去解析),
+    /// 实际值由 PiAgent.start 时通过 env 注入。
+    /// 没传或全是内置 provider → models.json 删掉(避免老残留污染)。
     static func writeModelsJSON(providers: [Provider]) throws {
-        // intentionally empty — Pi 0.60 不读这个文件。
-        _ = providers
+        let custom = providers.filter { needsCustomEntry($0) }
+        let configDir = piGlobalConfigDir()
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let path = configDir.appendingPathComponent("models.json")
+
+        if custom.isEmpty {
+            // 没自定义 provider → 删掉文件,免得老的 schema 残留报错。
+            try? FileManager.default.removeItem(at: path)
+            return
+        }
+
+        var providerMap: [String: Any] = [:]
+        for p in custom {
+            providerMap[p.piName] = providerEntry(for: p)
+        }
+        let root: [String: Any] = ["providers": providerMap]
+        let data = try JSONSerialization.data(withJSONObject: root,
+                                              options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: path, options: .atomic)
+    }
+
+    /// 内置 provider 不需要 models.json(Pi 0.60 自带 catalog)。
+    private static func needsCustomEntry(_ p: Provider) -> Bool {
+        switch p {
+        case .ollama, .perplexity: return true
+        default:                    return false
+        }
     }
 
     // MARK: - private
@@ -58,31 +87,32 @@ enum PiInstaller {
             .appendingPathComponent("agent", isDirectory: true)
     }
 
-    /// Build one provider entry for `models.json`. Mirrors the schema Pi
-    /// expects: `{ baseUrl, api, apiKey (env var name), models: [...] }`.
-    /// Registers every model in `models` so the in-chat picker can flip
-    /// freely without rewriting the config.
-    private static func providerEntry(for p: Provider, models: [String]) -> [String: Any] {
-        let modelDefs: [[String: Any]] = models.map { model in
-            // GPT-5 / o-series reject `max_tokens`; require `max_completion_tokens`.
-            let needsCompletionTokens = model.hasPrefix("gpt-5") || model.hasPrefix("o1")
-                                     || model.hasPrefix("o3") || model.hasPrefix("o4")
-            var def: [String: Any] = [
+    /// 给一个自定义(非 Pi 0.60 内置)provider 拼 models.json entry。
+    /// schema:Pi 0.60 ModelsConfigSchema(model-registry.js)
+    ///   { baseUrl, api, apiKey, models: [{ id, input, cost, maxTokens, ... }] }
+    /// apiKey 字段写的是 env var 名 —— resolveConfigValue 会 process.env
+    /// 去拿真值,真值由 PiAgent.start 时通过 env 注入(perplexity 走
+    /// PERPLEXITY_API_KEY)。ollama 不验 key,写个 placeholder。
+    private static func providerEntry(for p: Provider) -> [String: Any] {
+        let apiKeyField: String = {
+            switch p {
+            case .ollama:     return "ollama"   // Ollama 不验,占位即可
+            default:          return p.apiKeyEnv.isEmpty ? "" : p.apiKeyEnv
+            }
+        }()
+        let modelDefs: [[String: Any]] = p.availableModels.map { model in
+            return [
                 "id": model,
                 "name": model,
-                "input": ["text", "image"],
-                "maxTokens": 16384,
+                "input": ["text"],
+                "maxTokens": 4096,
                 "cost": ["input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0]
             ]
-            if needsCompletionTokens && p.wireApi == "openai-completions" {
-                def["compat"] = ["maxTokensField": "max_completion_tokens"]
-            }
-            return def
         }
         return [
             "baseUrl": p.baseURL,
-            "api": p.wireApi,
-            "apiKey": p.apiKeyEnv,
+            "api": p.wireApi,            // 都是 "openai-completions"
+            "apiKey": apiKeyField,
             "models": modelDefs
         ]
     }
