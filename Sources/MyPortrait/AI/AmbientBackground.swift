@@ -4,6 +4,10 @@ import SwiftUI
 /// cursor-following soft glow + grain. Designed to fill the whole content area
 /// behind the chat. Use as `.background(AmbientBackground())`.
 struct AmbientBackground: View {
+    /// 窗口失焦 / 进入后台时 SwiftUI 把 scenePhase 切到 .inactive / .background。
+    /// 把 TimelineView paused 跟它绑住,后台不烧 GPU / 主线程,前台才动。
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         ZStack {
             Color.black
@@ -12,7 +16,10 @@ struct AmbientBackground: View {
             // clock without driving SwiftUI state ⇒ no view-tree invalidation.
             // 30 fps — blobs drift on 40+s cycles, so the human eye can't
             // tell, but the GPU saves half a heavy blur+screen pass per second.
-            SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0, paused: false)) { ctx in
+            // 失焦时 paused = true:背景态停止重绘,主线程不再 99% 卡在
+            // CAContext.waitForCommitId,UI 不再"看起来响应不了点击"。
+            SwiftUI.TimelineView(.animation(minimumInterval: 1.0/30.0,
+                                            paused: scenePhase != .active)) { ctx in
                 let t = ctx.date.timeIntervalSinceReferenceDate
                 Canvas { gctx, size in
                     drawBlobs(into: &gctx, size: size, t: t)
