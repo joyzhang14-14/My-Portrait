@@ -65,8 +65,9 @@ final class WritingCapturePass1AgentTests: XCTestCase {
     func testParseNoJSON() {
         let raw = "Sorry, I couldn't process that."
         XCTAssertThrowsError(try WritingCapturePass1Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass1Agent.AgentError.noJSONInResponse = err else {
-                return XCTFail("expected noJSONInResponse, got \(err)")
+            guard case WritingCapturePass1Agent.AgentError.malformedJSON(let m) = err,
+                  m.contains("noJSONInResponse") else {
+                return XCTFail("expected malformedJSON(noJSONInResponse), got \(err)")
             }
         }
     }

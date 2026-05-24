@@ -168,54 +168,73 @@ final class WritingCaptureWorker {
         let pass1Out = try await pass1.run(ocrFrames: allOcrFrames)
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        // 4. 算法层 pre-merge —— 按 (app, url) 整天合并(不限时间窗)。
-        // Pass 2 一天 hundreds of sessions 会撑爆 context;按 app 合并后
-        // 一般 < 30 个 mega-session。
-        // trade-off:LLM 看不到一天里同 app 的多个写作 session 的边界
-        // (例如上午写文章 / 下午又来改),输出一条 record 覆盖整段。
-        // 对风格分析够,对「精确还原一次写作 session」会模糊。
-        let mergedByApp = Self.mergeRawSessionsByApp(step0.rawSessions)
-        workerLog.info("pre-merge by app: \(step0.rawSessions.count) → \(mergedByApp.count) mega-sessions")
-        let merged = mergedByApp
+        // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
+        let groups = Self.groupRawSessionsByApp(step0.rawSessions)
+        workerLog.info("grouped by app+url: \(step0.rawSessions.count) sessions → \(groups.count) groups")
 
-        // 5. Pass 2 —— 多源融合(mega-sessions + 每个自己一组的 trivial candidates)
-        let trivialCandidates = merged.map { [$0.id] }
-        let pass2Out = try await pass2.run(
+        // 5. **每组一个 subagent 并发跑 Pass 2**(sonnet[1m])。
+        // 失败 group 单独标错,不阻塞其他 group。最多 5 并发,防止 Anthropic
+        // 限流 + 本机 CPU 打爆。每个并发任务都创建一个全新的 Pass2Agent,
+        // 不复用(每 agent 有 subprocess 状态)。
+        let pass2Results = await Self.runPass2Concurrently(
             contextTimeline: pass1Out.timeline,
-            rawSessions: merged,
-            mergeCandidates: trivialCandidates
+            groups: groups,
+            concurrency: 5,
+            makePass2: { @MainActor in WritingCapturePass2Agent() }
         )
-        workerLog.info("pass2: \(pass2Out.records.count) records, \(pass2Out.discarded.count) discarded")
 
-        // 5. 落 staged
+        // 6. 合并所有 group 输出
+        var allRecords: [WritingCaptureRecord] = []
+        var allDiscarded: [WritingCaptureDiscarded] = []
+        var failedGroups = 0
+        var rawResponses: [String] = []
+        var firstPrompt: String?
+        for r in pass2Results {
+            switch r {
+            case .success(let out):
+                allRecords.append(contentsOf: out.records)
+                allDiscarded.append(contentsOf: out.discarded)
+                rawResponses.append(out.rawResponse)
+                if firstPrompt == nil { firstPrompt = out.prompt }
+            case .failure(let err):
+                failedGroups += 1
+                workerLog.warning("pass2 group failed: \(String(describing: err), privacy: .public)")
+            }
+        }
+        workerLog.info("pass2 fanout: \(allRecords.count) records, \(allDiscarded.count) discarded, \(failedGroups) failed groups")
+
+        // 7. 落 staged + discarded
         let promptId = Self.promptIdHash(
-            pass1: pass1Out.prompt, pass2: pass2Out.prompt
+            pass1: pass1Out.prompt, pass2: firstPrompt ?? ""
         )
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.insertStaged(
                 date: date,
                 runId: runId,
                 promptId: promptId,
-                records: pass2Out.records,
+                records: allRecords,
                 rawPass1Output: pass1Out.rawResponse,
-                rawPass2Output: pass2Out.rawResponse
+                rawPass2Output: rawResponses.joined(separator: "\n---\n")
+            )
+            try store.insertStagedDiscarded(
+                date: date, runId: runId, discarded: allDiscarded
             )
         }.value
 
-        // 6. 标 pending_review
+        // 8. 标 pending_review
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.upsertRunStatus(
                 date: date, status: .pendingReview,
                 completedAt: Int64(Date().timeIntervalSince1970 * 1000),
-                discardedCount: pass2Out.discarded.count,
-                recordsCount: pass2Out.records.count
+                discardedCount: allDiscarded.count,
+                recordsCount: allRecords.count
             )
         }.value
 
         return WritingCaptureDayRunSummary(
             date: date, runId: runId, status: .pendingReview,
-            recordsCount: pass2Out.records.count,
-            discardedCount: pass2Out.discarded.count,
+            recordsCount: allRecords.count,
+            discardedCount: allDiscarded.count,
             errorMessage: nil
         )
     }
@@ -244,8 +263,102 @@ final class WritingCaptureWorker {
 
     // MARK: - prompt id
 
-    /// 按 (app, url) 整天合并 raw_sessions。Pre-Pass-2 算法层优化,
-    /// 防止 600+ session 撑爆 LLM context。
+    /// 按 (app, url) **分组**(不合)。Pass 2 LLM 在 group 内自己决定切多少 record。
+    /// 跟 mergeRawSessionsByApp 的区别:这里保留每个 session 独立结构,LLM 可以
+    /// 把 session 拆成多个 short_form record(聊天连发多条)。
+    struct WritingCaptureGroup: Sendable {
+        let app: String
+        let url: String?
+        let sessions: [WritingCaptureRawSession]
+    }
+
+    static func groupRawSessionsByApp(
+        _ sessions: [WritingCaptureRawSession]
+    ) -> [WritingCaptureGroup] {
+        struct Key: Hashable { let app: String; let url: String }
+        var groups: [Key: [WritingCaptureRawSession]] = [:]
+        var keyOrder: [Key] = []
+        for s in sessions {
+            let k = Key(app: s.app, url: s.url ?? "")
+            if groups[k] == nil { keyOrder.append(k) }
+            groups[k, default: []].append(s)
+        }
+        return keyOrder.compactMap { k in
+            guard let members = groups[k] else { return nil }
+            return WritingCaptureGroup(
+                app: k.app,
+                url: k.url.isEmpty ? nil : k.url,
+                sessions: members.sorted(by: { $0.startTs < $1.startTs })
+            )
+        }
+    }
+
+    /// 并发跑多 group 的 Pass 2 —— sonnet[1m] subagent 一组一个。
+    /// 限流 `concurrency` 道闸,防止瞬间 spawn 30 个 claude 子进程。
+    enum Pass2GroupResult {
+        case success(WritingCapturePass2Agent.Output)
+        case failure(Error)
+    }
+    static func runPass2Concurrently(
+        contextTimeline: [WritingCaptureContextSegment],
+        groups: [WritingCaptureGroup],
+        concurrency: Int,
+        makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent
+    ) async -> [Pass2GroupResult] {
+        await withTaskGroup(of: (Int, Pass2GroupResult).self) { taskGroup in
+            var inFlight = 0
+            var nextIdx = 0
+            var results: [Int: Pass2GroupResult] = [:]
+            // 启动初始批
+            while inFlight < concurrency && nextIdx < groups.count {
+                let idx = nextIdx; nextIdx += 1
+                let g = groups[idx]
+                taskGroup.addTask {
+                    do {
+                        let agent = await makePass2()
+                        let out = try await agent.run(
+                            contextTimeline: contextTimeline,
+                            groupApp: g.app, groupUrl: g.url,
+                            rawSessions: g.sessions
+                        )
+                        return (idx, .success(out))
+                    } catch {
+                        return (idx, .failure(error))
+                    }
+                }
+                inFlight += 1
+            }
+            // 收一个 → 补一个
+            while let (idx, res) = await taskGroup.next() {
+                results[idx] = res
+                inFlight -= 1
+                if nextIdx < groups.count {
+                    let nidx = nextIdx; nextIdx += 1
+                    let g = groups[nidx]
+                    taskGroup.addTask {
+                        do {
+                            let agent = await makePass2()
+                            let out = try await agent.run(
+                                contextTimeline: contextTimeline,
+                                groupApp: g.app, groupUrl: g.url,
+                                rawSessions: g.sessions
+                            )
+                            return (nidx, .success(out))
+                        } catch {
+                            return (nidx, .failure(error))
+                        }
+                    }
+                    inFlight += 1
+                }
+            }
+            return (0..<groups.count).map { results[$0] ?? .failure(Pass2GroupError.missing) }
+        }
+    }
+
+    enum Pass2GroupError: Error { case missing }
+
+    /// 按 (app, url) 整天合并 raw_sessions(已弃用,留向后兼容)。
+    /// Pre-Pass-2 算法层优化的早期方案,现在改成 group + 并发 subagent。
     static func mergeRawSessionsByApp(
         _ sessions: [WritingCaptureRawSession]
     ) -> [WritingCaptureRawSession] {

@@ -69,7 +69,7 @@ final class WritingCapturePass1Agent {
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 300) {
+    init(provider: Provider = .claudeCode, model: String = "sonnet[1m]", perRunTimeout: TimeInterval = 300) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout

@@ -251,11 +251,11 @@ struct WritingCaptureStore: Sendable {
                 try db.execute(sql: """
                     INSERT INTO writing_records_staged
                         (date_utc, start_ts, end_ts, app, url, text, edit_log, confidence,
-                         context_summary, source, reference_typing_event_ids,
+                         context_summary, source, kind, reference_typing_event_ids,
                          reference_frame_ids, reference_keystroke_range, raw_output,
                          prompt_id, created_at, worker_run_id)
                     VALUES (:d, :startTs, :endTs, :app, :url, :text, :editLog, :conf,
-                            :ctxSum, :source, :refTyping,
+                            :ctxSum, :source, :kind, :refTyping,
                             :refFrame, :refRange, :rawOut,
                             :promptId, :createdAt, :runId)
                     """,
@@ -263,16 +263,37 @@ struct WritingCaptureStore: Sendable {
                         "d": date, "startTs": r.startTs, "endTs": r.endTs,
                         "app": r.app, "url": r.url, "text": r.text,
                         "editLog": editLogJSON, "conf": r.confidence,
-                        "ctxSum": r.contextSummary, "source": r.source,
+                        "ctxSum": r.contextSummary, "source": r.source, "kind": r.kind,
                         "refTyping": refTypingJSON,
                         "refFrame": refFrameJSON, "refRange": refRangeJSON, "rawOut": rawOut,
                         "promptId": promptId, "createdAt": createdAt, "runId": runId
                     ])
             }
-            // 简单存一份 raw 摘要到 writing_capture_runs.error_message 字段?太 hack。
-            // 真要存到 staged 第一条的 raw_output 上(下次 Approve 时挪到 writing_records)。
-            // 此版本暂不实现,等需要时再加专门的 staging_raw_outputs 表。
             _ = rawPass1Output; _ = rawPass2Output
+        }
+    }
+
+    /// 把 Pass 2 输出的 discarded[] 落到 writing_records_discarded 表(staged 阶段)。
+    /// Approve 时拷成 kind='committed',Reject 时跟 staged records 一起清。
+    func insertStagedDiscarded(
+        date: String,
+        runId: String,
+        discarded: [WritingCaptureDiscarded]
+    ) throws {
+        let createdAt = Int64(Date().timeIntervalSince1970 * 1000)
+        try dbPool.write { db in
+            for d in discarded {
+                let sessionIdsJSON = Self.encodeJSON(d.sessionIds) ?? "[]"
+                try db.execute(sql: """
+                    INSERT INTO writing_records_discarded
+                        (date_utc, reason, session_ids, preview, worker_run_id, kind, created_at)
+                    VALUES (:d, :reason, :ids, :preview, :runId, 'staged', :createdAt)
+                    """,
+                    arguments: [
+                        "d": date, "reason": d.reason, "ids": sessionIdsJSON,
+                        "preview": d.preview, "runId": runId, "createdAt": createdAt
+                    ])
+            }
         }
     }
 
@@ -283,7 +304,7 @@ struct WritingCaptureStore: Sendable {
                 db,
                 sql: """
                     SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
-                           context_summary, source, worker_run_id, created_at
+                           context_summary, source, kind, worker_run_id, created_at
                     FROM writing_records_staged
                     WHERE date_utc = :d
                     ORDER BY start_ts ASC
@@ -304,7 +325,7 @@ struct WritingCaptureStore: Sendable {
                 db,
                 sql: """
                     SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
-                           context_summary, source, worker_run_id, created_at
+                           context_summary, source, kind, worker_run_id, created_at
                     FROM writing_records
                     WHERE app = :app AND start_ts < :endTs AND end_ts > :startTs
                     ORDER BY start_ts ASC
@@ -355,7 +376,7 @@ struct WritingCaptureStore: Sendable {
                 db,
                 sql: """
                     SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
-                           context_summary, source, worker_run_id, created_at
+                           context_summary, source, kind, worker_run_id, created_at
                     FROM writing_records
                     WHERE app = :app \(urlMatch)
                     ORDER BY start_ts DESC
@@ -417,16 +438,21 @@ struct WritingCaptureStore: Sendable {
             confidence: r["confidence"],
             contextSummary: r["context_summary"],
             source: r["source"],
+            kind: (r["kind"] as String?) ?? "long_form",
             workerRunId: r["worker_run_id"],
             createdAt: r["created_at"]
         )
     }
 
-    /// 清某日 staged(Reject 用)。
+    /// 清某日 staged(Reject 用)。同时清 discarded 表里 kind='staged' 的行。
     func clearStaged(date: String) throws {
         try dbPool.write { db in
             try db.execute(
                 sql: "DELETE FROM writing_records_staged WHERE date_utc = :d",
+                arguments: ["d": date]
+            )
+            try db.execute(
+                sql: "DELETE FROM writing_records_discarded WHERE date_utc = :d AND kind = 'staged'",
                 arguments: ["d": date]
             )
         }
@@ -440,11 +466,11 @@ struct WritingCaptureStore: Sendable {
             try db.execute(sql: """
                 INSERT INTO writing_records
                     (start_ts, end_ts, app, url, text, edit_log, confidence,
-                     context_summary, source, reference_typing_event_ids,
+                     context_summary, source, kind, reference_typing_event_ids,
                      reference_frame_ids, reference_keystroke_range, raw_output,
                      prompt_id, created_at, worker_run_id)
                 SELECT start_ts, end_ts, app, url, text, edit_log, confidence,
-                       context_summary, source, reference_typing_event_ids,
+                       context_summary, source, kind, reference_typing_event_ids,
                        reference_frame_ids, reference_keystroke_range, raw_output,
                        prompt_id, created_at, worker_run_id
                 FROM writing_records_staged WHERE date_utc = :d
@@ -455,7 +481,13 @@ struct WritingCaptureStore: Sendable {
             try db.execute(
                 sql: "DELETE FROM writing_records_staged WHERE date_utc = :d",
                 arguments: ["d": date])
-            // 3. 标 runs.status = approved
+            // 3. discarded: staged → committed
+            try db.execute(sql: """
+                UPDATE writing_records_discarded SET kind = 'committed'
+                WHERE date_utc = :d AND kind = 'staged'
+                """,
+                arguments: ["d": date])
+            // 4. 标 runs.status = approved
             try db.execute(sql: """
                 UPDATE writing_capture_runs SET status = 'approved',
                                                  completed_at = :completedAt
@@ -521,6 +553,7 @@ struct WritingRecordViewRow: Sendable {
     let confidence: Double
     let contextSummary: String?
     let source: String
+    let kind: String                 // "long_form" | "short_form" | "other"
     let workerRunId: String?
     let createdAt: Int64
 }

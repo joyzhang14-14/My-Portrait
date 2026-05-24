@@ -16,6 +16,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
                 {"kind":"commit","text":"今天","ts":1716393600000},
                 {"kind":"commit","text":"天气真好","ts":1716393601000}
               ],
+              "kind": "long_form",
               "source": "ax_cleaned",
               "confidence": 0.85,
               "context_summary": "Journal entry",
@@ -30,7 +31,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
           ],
           "discarded": [
             {
-              "reason": "search_query: looked up quantum mechanics",
+              "reason": "search query the user typed but did not commit",
               "session_ids": ["sess_abc"],
               "preview": "量子力学"
             }
@@ -40,6 +41,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
         let (recs, disc) = try WritingCapturePass2Agent.parse(from: raw)
         XCTAssertEqual(recs.count, 1)
         XCTAssertEqual(recs[0].text, "今天天气真好")
+        XCTAssertEqual(recs[0].kind, "long_form")
         XCTAssertEqual(recs[0].source, "ax_cleaned")
         XCTAssertEqual(recs[0].editLog.count, 2)
         XCTAssertEqual(recs[0].referenceKeystrokeRange.start, 1716393600000)
@@ -54,11 +56,11 @@ final class WritingCapturePass2AgentTests: XCTestCase {
         XCTAssertEqual(disc.count, 0)
     }
 
-    func testParseInvalidSource() {
+    func testParseInvalidKind() {
         let raw = """
         {
           "records": [{
-            "text": "x", "edit_log": [], "source": "WRONG", "confidence": 0.5,
+            "text": "x", "edit_log": [], "kind": "WRONG", "source": "ax_cleaned", "confidence": 0.5,
             "context_summary": null, "app": "a", "url": null,
             "start_ts": 0, "end_ts": 1,
             "reference_typing_event_ids": [], "reference_frame_ids": [],
@@ -69,8 +71,29 @@ final class WritingCapturePass2AgentTests: XCTestCase {
         """
         XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
             guard case WritingCapturePass2Agent.AgentError.malformedJSON(let m) = err,
-                  m.contains("invalid source") else {
-                return XCTFail("expected malformedJSON(invalid source), got \(err)")
+                  m.contains("kind") else {
+                return XCTFail("expected malformedJSON(kind), got \(err)")
+            }
+        }
+    }
+
+    func testParseInvalidSource() {
+        let raw = """
+        {
+          "records": [{
+            "text": "x", "edit_log": [], "kind": "long_form", "source": "WRONG", "confidence": 0.5,
+            "context_summary": null, "app": "a", "url": null,
+            "start_ts": 0, "end_ts": 1,
+            "reference_typing_event_ids": [], "reference_frame_ids": [],
+            "reference_keystroke_range": {"start": 0, "end": 1}
+          }],
+          "discarded": []
+        }
+        """
+        XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
+            guard case WritingCapturePass2Agent.AgentError.malformedJSON(let m) = err,
+                  m.contains("source") else {
+                return XCTFail("expected malformedJSON(source), got \(err)")
             }
         }
     }
@@ -79,7 +102,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
         let raw = """
         {
           "records": [{
-            "text": "x", "edit_log": [], "source": "ax_cleaned", "confidence": 1.5,
+            "text": "x", "edit_log": [], "kind": "long_form", "source": "ax_cleaned", "confidence": 1.5,
             "context_summary": null, "app": "a", "url": null,
             "start_ts": 0, "end_ts": 1,
             "reference_typing_event_ids": [], "reference_frame_ids": [],
@@ -96,54 +119,24 @@ final class WritingCapturePass2AgentTests: XCTestCase {
         }
     }
 
-    func testParseInvalidDiscardedPrefix() {
+    func testParseDiscardedFreeTextReason() throws {
+        // discarded.reason 现在是自由文本(无 enum 前缀要求)
         let raw = """
         {
           "records": [],
-          "discarded": [{
-            "reason": "free-form reason no prefix",
-            "session_ids": ["a"],
-            "preview": "x"
-          }]
+          "discarded": [{"reason": "anything goes here, no prefix needed", "session_ids": ["a"], "preview": "x"}]
         }
         """
-        XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass2Agent.AgentError.malformedJSON(let m) = err,
-                  m.contains("prefix") else {
-                return XCTFail("expected malformedJSON(prefix), got \(err)")
-            }
-        }
-    }
-
-    func testParseValidDiscardedAllPrefixes() throws {
-        // 所有合法前缀都能过
-        let prefixes = [
-            "search_query: ...",
-            "short_response: ...",
-            "shell_command: ...",
-            "address_bar: ...",
-            "filler_text: ...",
-            "repeated_input: ...",
-            "no_intent: ...",
-            "other: ..."
-        ]
-        for p in prefixes {
-            let raw = """
-            {
-              "records": [],
-              "discarded": [{"reason": "\(p)", "session_ids": ["a"], "preview": "x"}]
-            }
-            """
-            let (_, disc) = try WritingCapturePass2Agent.parse(from: raw)
-            XCTAssertEqual(disc.count, 1, "prefix \(p) should parse OK")
-        }
+        let (_, disc) = try WritingCapturePass2Agent.parse(from: raw)
+        XCTAssertEqual(disc.count, 1)
+        XCTAssertEqual(disc[0].reason, "anything goes here, no prefix needed")
     }
 
     func testParseNoJSON() {
         let raw = "I cannot process this"
         XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass2Agent.AgentError.noJSONInResponse = err else {
-                return XCTFail("expected noJSONInResponse, got \(err)")
+            guard case WritingCapturePass2Agent.AgentError.malformedJSON = err else {
+                return XCTFail("expected malformedJSON, got \(err)")
             }
         }
     }
@@ -153,13 +146,13 @@ final class WritingCapturePass2AgentTests: XCTestCase {
     func testBuildPromptEmpty() {
         let p = WritingCapturePass2Agent.buildPrompt(
             contextTimeline: [],
-            rawSessions: [],
-            mergeCandidates: []
+            groupApp: "obs",
+            groupUrl: nil,
+            rawSessions: []
         )
-        XCTAssertTrue(p.contains("You consolidate a day's writing"))
         XCTAssertTrue(p.contains("context_timeline:"))
+        XCTAssertTrue(p.contains("group_meta:"))
         XCTAssertTrue(p.contains("raw_sessions:"))
-        XCTAssertTrue(p.contains("merge_candidates:"))
     }
 
     func testBuildPromptWithData() {
@@ -184,16 +177,16 @@ final class WritingCapturePass2AgentTests: XCTestCase {
         )
         let p = WritingCapturePass2Agent.buildPrompt(
             contextTimeline: timeline,
-            rawSessions: [session],
-            mergeCandidates: [["sess_001"]]
+            groupApp: "obs",
+            groupUrl: nil,
+            rawSessions: [session]
         )
-        // 字段名 snake_case
         XCTAssertTrue(p.contains("\"intent_type\":\"writing\""))
         XCTAssertTrue(p.contains("\"session_id\":\"sess_001\""))
         XCTAssertTrue(p.contains("\"typing_events\""))
         XCTAssertTrue(p.contains("\"keystroke_log\""))
         XCTAssertTrue(p.contains("\"ocr_frames\""))
-        // typing event id + text 进了 payload
+        XCTAssertTrue(p.contains("\"app\":\"obs\""))
         XCTAssertTrue(p.contains("\"id\":42"))
         XCTAssertTrue(p.contains("hello world test"))
     }

@@ -1,11 +1,9 @@
 import Foundation
 
-/// 写作采集 worker 的 LLM prompt 模板。
+/// 写作采集 worker 的 LLM prompt 模板(英文,跟 MemoryPrompts 风格一致)。
+/// 运行时数据由各 agent 的 `buildPrompt` 拼接。
 ///
-/// 这里只放静态指令文本(英文,跟 MemoryPrompts 风格一致)。运行时数据
-/// (OCR 帧列表 / Pass 1 输出 / 候选集...)由各 agent 的 `buildPrompt` 拼接。
-///
-/// prompt 文本完整版见 `canvas-editor-capture-design-final.md` §8。
+/// 完整设计见 `canvas-editor-capture-design-final.md` §8。
 enum WritingCapturePrompts {
 
     // MARK: - Pass 1 —— Context Timeline 提取(整天 1 次,OCR-only)
@@ -15,7 +13,7 @@ enum WritingCapturePrompts {
 
     INPUT (all timestamps in unix ms, sorted ascending)
     - ocr_frames: list of OCR text frames per time range, with focused app/URL metadata.
-      Pre-processed: adjacent frames with >95% Jaccard similarity have been deduped,
+      Pre-processed: adjacent frames with >85% Jaccard similarity have been deduped,
       and frames where total text < 20 chars have been filtered out.
       Format: [{frame_id, start_ts, end_ts, app, url, text}, ...]
 
@@ -71,113 +69,109 @@ enum WritingCapturePrompts {
     - Single-frame stretch with clear intent → still emit a segment
     """#
 
-    // MARK: - Pass 2 —— 多源融合 → writing_records(整天 1 次)
+    // MARK: - Pass 2 —— per-(app, URL) group 多源融合 → writing_records
 
     static let pass2Fusion = #"""
-    You consolidate a day's writing into final writing_records, using a Pass-1 context
-    timeline plus raw multi-source data grouped by session.
+    You consolidate one user's activity within ONE (app, url) group on a single UTC day
+    into final writing_records. You judge what's a complete record on your own — no
+    hard rule about length, "short response", or "throwaway".
+
+    The user wants to PRESERVE almost every piece of MEANINGFUL input they produced —
+    short chat replies, quick social-media posts, terse commit messages, ⌘+Enter-sent
+    messages — these all matter as behavior / speech-style signal. Only drop input that
+    has NO meaningful content (e.g. an accidental keystroke that produced "a", a single
+    space, repeated test gibberish like "aaaa").
 
     INPUT
-    - context_timeline: Pass 1 output, segments describing what user was doing per time range.
+    - context_timeline: Pass 1's whole-day timeline (segments describing what user did
+      per time range). Use this to understand the SURROUNDING context of this group.
       Format: [{start_ts, end_ts, app, url, intent_type, summary}, ...]
-    - raw_sessions: list of sessions, each with all its multi-source data:
-      [{session_id, app, url, start_ts, end_ts,
-        typing_events, keystroke_log, ocr_frames}, ...]
+    - group_meta: the (app, url) this group covers + total session count
+    - raw_sessions: every session inside this group, each with multi-source data:
+      [{session_id, start_ts, end_ts, typing_events, keystroke_log, ocr_frames}, ...]
         - typing_events[*]: PRE-PROCESSED AX path data (v14 splice algorithm).
           `text` is the FINAL user-perceived content. DO NOT modify it.
-          `edit_log` contains commit/delete events (may include IME intermediate pinyin commits).
-        - keystroke_log[*]: raw keystrokes [{ts, char, bs, mods}]. IMPORTANT:
-          - `char` for Chinese IME = LATIN pinyin letters (n, i, h, a, o, space, digit
-            selection keys) — NOT composed Chinese.
-          - `bs` = true means user pressed Backspace/Delete key (single press; 1 bs
-            ≠ 1 char deleted when there was a selection).
-          - `mods` = modifier-key combo: "cmd" / "opt" / "ctrl" / "shift" or combos like
-            "cmd+shift". nil/absent = no modifier. USE THIS TO DETECT SHORTCUTS:
-            * {char:"x", mods:"cmd"}  = ⌘X (Cut) — content is on the pasteboard, NOT typed
-            * {char:"z", mods:"cmd"}  = ⌘Z (Undo) — earlier edits got reverted
-            * {char:"a", mods:"cmd"}  = ⌘A (Select all) — next bs/letter affects whole field
-            * {char:"v", mods:"cmd"}  = ⌘V (Paste) — content from pasteboard, not typed
-            * {char:"\b", mods:"cmd"} = ⌘+Backspace (delete whole line) — multi-char delete
+          `edit_log` contains commit/delete events.
+        - keystroke_log[*]: raw keystrokes [{ts, char, bs, mods}].
+          - `char` for Chinese IME = LATIN pinyin letters — NOT composed Chinese
+          - `bs` = backspace/delete pressed
+          - `mods` = "cmd" / "cmd+shift" / etc.; nil = no modifier. Use this to
+            detect shortcuts:
+              {char:"x", mods:"cmd"}  = ⌘X (Cut) — content went to pasteboard
+              {char:"z", mods:"cmd"}  = ⌘Z (Undo)
+              {char:"v", mods:"cmd"}  = ⌘V (Paste)
+              {char:"\b", mods:"cmd"} = ⌘+Backspace (delete whole line)
             Shortcut-driven actions are NOT user "typing" the literal letter.
-        - ocr_frames[*]: pre-processed OCR frames [{frame_id, start_ts, end_ts, text}].
-          Jaccard-deduped, throwaway-filtered.
-    - merge_candidates: precomputed groups of session_ids sharing same app + same URL + gap < 30 min.
-      Format: [[sess_id, ...], [sess_id, ...], ...]
-      The LLM may merge ONLY WITHIN a group.
+        - ocr_frames[*]: pre-processed OCR text [{frame_id, start_ts, end_ts, text}].
+          Already Jaccard-deduped and short-content-filtered.
 
     TASK
 
-    For each merge_candidates group, decide what writing_records to produce, using context_timeline
-    to inform decisions about INTENT.
+    Look at this entire (app, url) group on this day, then produce writing_records.
 
-    1. THROWAWAY FILTER — drop sessions into "discarded" where user was NOT creatively writing.
-       Use context_timeline.intent_type as a STRONG signal:
-       - intent_type = "writing"              → KEEP as record
-       - intent_type = "search" / "command"   → likely throwaway
-       - intent_type = "chat"                 → likely throwaway (short responses) — but if a session
-                                                 has > 200 chars of substantive composing, keep
-       - intent_type = "reading" / "other"    → judge by content
+    1. SEGMENT THE GROUP INTO RECORDS
+       Decide where one "thing the user wrote" ends and the next one begins. You may:
+       - Treat each typing_events row as its own record (if the user sent multiple
+         short messages in a chat)
+       - Combine adjacent typing_events into one bigger record (if they're parts of
+         a single document or message that was edited multiple times)
+       - Pull content from ocr_frames when typing_events is empty (canvas editors)
+       - Use keystroke_log timing/clusters to spot delete-bursts, paste events,
+         shortcut-triggered actions
+       - Split a single typing_events row into multiple records if the user clearly
+         switched topics or sent multiple messages within it
+       Aim for records that correspond to ONE thing the user did intentionally.
 
-       Reference categories for discarded.reason (prefix REQUIRED, free-text suffix allowed):
-       - "search_query: ..."    — "量子力学", "how to fix gradient descent"
-       - "short_response: ..."  — "ok", "好的", "嗯嗯"
-       - "shell_command: ..."   — "ls", "cd ~", "git status"
-       - "address_bar: ..."     — "https://...", "docs.google.com"
-       - "filler_text: ..."     — "aaaaa", "test test"
-       - "repeated_input: ..."  — same word typed over and over
-       - "no_intent: ..."       — ≥ 20 chars but obviously not creative writing
-       - "other: ..."           — describe in free-text
+    2. CLASSIFY EACH RECORD'S `kind`
+       - "long_form"  — substantive writing: article, essay, code, document, long
+                        email, multi-paragraph note. Usually ≥ 100 chars with
+                        structure.
+       - "short_form" — short discrete output: chat reply, social media post, commit
+                        message, IM, brief comment. Length varies — could be 3 chars
+                        ("好的") or 80 chars ("我也觉得这部电影后半段太拖了").
+                        The SIGNAL is "user produced a discrete piece of communication
+                        with intent".
+       - "other"       — meaningful input that's neither (e.g. search-style typing
+                        the user wants to remember, a single creative word/phrase).
 
-       Length is NOT the sole criterion. 50-char self-narration like
-       "我去查一下量子力学是什么后来发现是这样的" is still a search-style throwaway.
-       CORE TEST: was there CREATIVE INTENT? Writing article / message / notes = yes.
-       Searching / form-filling / responding / running commands = no.
-
-    2. CROSS-SESSION MERGE — only WITHIN merge_candidates groups.
-       - Content continuous (user writes article, replies to a message, returns to article) → MERGE
-       - Same doc but unrelated topics → KEEP SEPARATE
-       - Cross-group: NEVER merge (different app / URL / > 30 min gap)
-       - Group with single session → 1 record, no merge needed
-
-    3. SOURCE LABELING per output record:
-       - typing_events.text non-empty AND scales with OCR body length (gap < 50 chars
-         OR ax_value_length ≈ keystroke-derived length) → "ax_cleaned"
-       - typing_events empty OR much shorter than OCR / keystroke count
-         (gap > 50 chars OR keystroke_count >> ax_value_length) → "canvas_fusion"
-       - Merged sessions of different sources → "merged"
+    3. DROP ONLY GENUINE NOISE INTO `discarded`
+       Drop only if there's NO meaningful intent:
+       - Accidental key (single char with no follow-up, no commit)
+       - Repeated gibberish: "aaaaa", "test test test"
+       - Pure shortcut keystrokes with no resulting content (Cmd+Tab spam, etc.)
+       - Empty session (typing=0, OCR=0)
+       Use free-text reason describing why.
+       DO NOT drop just because content is short — short messages are SIGNAL.
+       DO NOT drop because intent_type from Pass 1 was "search" or "chat" — the user
+       wants to keep short chats.
 
     4. CONTENT RECONSTRUCTION
-
-       For AX path ("ax_cleaned"):
+       For AX path (typing_events.text non-empty):
        - text = typing_events.text (DO NOT modify — v14 splice already cleaned it)
-       - edit_log = filter intermediate events from typing_events.edit_log:
-         * DROP ASCII-letter commits immediately followed by Chinese commit in the same window
-           (these are IME intermediates: "j" → "ji" → "jin" → delete → "今")
-         * KEEP final Chinese / English commits
-         * COALESCE continuous backspace runs into 1 "delete" entry, text = the deleted content
-         * COALESCE continuous "commit" entries with no delete between into 1 "commit"
+       - edit_log = filter typing_events.edit_log:
+         * DROP ASCII-letter commits immediately followed by Chinese commit (IME middle)
+         * KEEP final commits
+         * COALESCE continuous backspace runs into one "delete" entry
+       For canvas path (typing_events empty or much shorter than OCR):
+       - text = reconstructed from OCR + keystroke timing
+       - Strip IME residue (trailing ASCII matching recent pinyin keystrokes without
+         subsequent Chinese commit)
+       - edit_log = synthesized from OCR diff + keystroke backspace clusters
 
-       For canvas path ("canvas_fusion"):
-       - text = reconstructed from OCR (Step-0-deduped) + keystroke timing
-       - Strip IME residue from OCR text tail: if AX value ends with ASCII letters matching
-         recent keystrokes but no subsequent Chinese commit / backspace → residue → drop.
-         Example: OCR shows "今天天气真好,我们 wen f", keystrokes show w-e-n-space-f typed
-         without a digit selection key → "wen f" is residue → text = "今天天气真好,我们"
-       - edit_log = synthesized from OCR diff between frames + keystroke backspace clusters
-
-    5. FIELDS per record:
-       - text, edit_log, source: per above
-       - confidence: AX path with clean data → high (0.8+); canvas with clean OCR + matching
-         keystrokes → high (0.7+); merged sessions → take MIN of constituents (conservative);
-         heavy noise / sources strongly disagree → low (< 0.5)
-       - context_summary: pull from context_timeline segment matching the record's time range;
-         if record spans multiple context segments, synthesize ≤ 100 chars
-       - app, url: shared by the merge group
-       - start_ts: earliest session.start_ts in the merge
-       - end_ts: latest session.end_ts in the merge
-       - reference_typing_event_ids: concatenated typing_event ids from all merged sessions
-       - reference_frame_ids: concatenated frame ids from all merged sessions
-       - reference_keystroke_range: {start: earliest keystroke ts, end: latest keystroke ts}
+    5. FIELDS per record
+       - text, edit_log, kind, source as above
+       - source: "ax_cleaned" | "canvas_fusion" | "merged"
+           Use "ax_cleaned" when typing_events is the main content source.
+           Use "canvas_fusion" when OCR + keystrokes drove the reconstruction.
+           Use "merged" when this record combines multiple sessions of different sources.
+       - confidence ∈ [0, 1]: how sure you are about the reconstruction
+       - context_summary ≤ 100 chars: distill what the user did, from context_timeline + content
+       - app, url: from group_meta
+       - start_ts: earliest session.start_ts that contributed
+       - end_ts: latest session.end_ts that contributed
+       - reference_typing_event_ids: typing_events ids that contributed (JSON array)
+       - reference_frame_ids: frame_ids that contributed (JSON array)
+       - reference_keystroke_range: {start, end} ms range of keystrokes that contributed
 
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
@@ -185,9 +179,9 @@ enum WritingCapturePrompts {
         {
           "text": "...",
           "edit_log": [
-            {"kind": "commit", "text": "今天天气真好", "ts": 1716393600000},
-            {"kind": "delete", "text": "今天", "ts": 1716393605000}
+            {"kind": "commit", "text": "今天天气真好", "ts": 1716393600000}
           ],
+          "kind": "long_form",
           "source": "ax_cleaned",
           "confidence": 0.85,
           "context_summary": "Personal journal entry about weather",
@@ -196,15 +190,30 @@ enum WritingCapturePrompts {
           "start_ts": 1716393600000,
           "end_ts":   1716393700000,
           "reference_typing_event_ids": [123, 124],
-          "reference_frame_ids":        [456, 457],
+          "reference_frame_ids":        [],
           "reference_keystroke_range":  {"start": 1716393600000, "end": 1716393700000}
+        },
+        {
+          "text": "好的!",
+          "edit_log": [{"kind": "commit", "text": "好的!", "ts": 1716393800000}],
+          "kind": "short_form",
+          "source": "ax_cleaned",
+          "confidence": 0.9,
+          "context_summary": "Brief acknowledgment in Discord chat",
+          "app": "com.hnc.Discord",
+          "url": null,
+          "start_ts": 1716393800000,
+          "end_ts": 1716393801000,
+          "reference_typing_event_ids": [125],
+          "reference_frame_ids": [],
+          "reference_keystroke_range": {"start": 1716393800000, "end": 1716393801000}
         }
       ],
       "discarded": [
         {
-          "reason":       "search_query: looked up quantum mechanics",
-          "session_ids":  ["sess_abc"],
-          "preview":      "量子力学"
+          "reason": "accidental keystroke producing single char 'a' with no follow-up",
+          "session_ids": ["sess_abc"],
+          "preview": "a"
         }
       ]
     }
@@ -214,23 +223,23 @@ enum WritingCapturePrompts {
       string value MUST be escaped as `\"`. Same for `\` (escape as `\\`) and newlines
       (escape as `\n`). Most common failure: user content like 我说："我是男生" gets
       emitted without escapes, breaks the parser. Always escape.
-    - Every input raw_session_id from merge_candidates appears EXACTLY ONCE — either inside
-      some record (via reference_*_ids of its constituent sessions) or in "discarded.session_ids"
+    - Every input session_id from raw_sessions appears EXACTLY ONCE — either inside some
+      record's `reference_*_ids` (its originating session) or in `discarded.session_ids`
     - A session_id NEVER appears in both records and discarded
+    - "kind" is EXACTLY one of: "long_form" | "short_form" | "other"
     - "source" is EXACTLY one of: "ax_cleaned" | "canvas_fusion" | "merged"
-    - "discarded.reason" prefix MUST start with one of:
-        "search_query:" | "short_response:" | "shell_command:" | "address_bar:" |
-        "filler_text:" | "repeated_input:" | "no_intent:" | "other:"
-      followed by ≤ 200 chars free-text description
+    - "discarded.reason" is free-text describing why (no enum prefix required)
     - "context_summary" ≤ 100 chars per record
-    - "kind" in edit_log is EXACTLY "commit" or "delete"
+    - "kind" in edit_log entries is EXACTLY "commit" or "delete"
     - edit_log is sorted by ts ascending
-    - AX path output: text MUST EQUAL typing_events.text (do NOT modify)
+    - AX path output: text MUST EQUAL typing_events.text (do NOT modify content)
     - Respond with ONLY the JSON object, no markdown / prose / code fences
 
     EDGE CASES
-    - Whole group is throwaway → all sessions in "discarded", no record from this group
-    - Group with no typing_events AND no usable OCR → put all sessions in discarded with reason "no_intent: empty session"
-    - Sources conflict badly → output the most likely version + low confidence + still include the record
+    - Whole group is genuine noise → all sessions in `discarded`, records=[]
+    - Group has only OCR (no typing/keystroke) → still try to reconstruct from OCR if
+      it represents user-typed content; if it's just app chrome / web content the user
+      was reading → discarded
+    - One session has clearly multiple distinct sent messages → split into multiple records
     """#
 }

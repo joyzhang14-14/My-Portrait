@@ -11,6 +11,7 @@ private let pass2Log = Logger(subsystem: "com.myportrait.memory", category: "wri
 struct WritingCaptureRecord: Codable, Sendable {
     let text: String
     let editLog: [EditEntry]
+    let kind: String                         // long_form | short_form | other (v26)
     let source: String                       // ax_cleaned | canvas_fusion | merged
     let confidence: Double
     let contextSummary: String?              // ≤ 100 chars
@@ -30,6 +31,7 @@ struct WritingCaptureRecord: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case text
         case editLog                = "edit_log"
+        case kind
         case source
         case confidence
         case contextSummary         = "context_summary"
@@ -103,26 +105,30 @@ final class WritingCapturePass2Agent {
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 600) {
+    init(provider: Provider = .claudeCode, model: String = "sonnet[1m]", perRunTimeout: TimeInterval = 600) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
     }
 
-    /// 跑 Pass 2。
+    /// 跑 Pass 2 —— **每个 (app, url) group 一次调用**(并发由 worker 在
+    /// 外层 fan out)。LLM 自己看 group 内 sessions 怎么分 record / 哪些丢。
     /// - Parameters:
-    ///   - contextTimeline: Pass 1 输出
-    ///   - rawSessions: Step 0 的 rawSessions(不含 throwaway)
-    ///   - mergeCandidates: Step 0 算的合并候选集
+    ///   - contextTimeline: Pass 1 整天的 timeline(给 LLM 看上下文)
+    ///   - groupApp: 这个 group 的 app(bundle_id)
+    ///   - groupUrl: 这个 group 的 url(可空)
+    ///   - rawSessions: 这个 group 里的所有 sessions(已按 app+url 分组)
     func run(
         contextTimeline: [WritingCaptureContextSegment],
-        rawSessions: [WritingCaptureRawSession],
-        mergeCandidates: [[String]]
+        groupApp: String,
+        groupUrl: String?,
+        rawSessions: [WritingCaptureRawSession]
     ) async throws -> Output {
         let prompt = Self.buildPrompt(
             contextTimeline: contextTimeline,
-            rawSessions: rawSessions,
-            mergeCandidates: mergeCandidates
+            groupApp: groupApp,
+            groupUrl: groupUrl,
+            rawSessions: rawSessions
         )
 
         // 空 session 短路 —— 整天没 raw,直接返回空。
@@ -240,49 +246,42 @@ final class WritingCapturePass2Agent {
         return out
     }
 
-    /// 过滤 noise session:typing=0 且单帧 OCR text 都 < 这个阈值的 session
-    /// 是「用户看了一眼但没创作」,Pass 2 不需要。Step 0 throwaway 阈值 20 字
-    /// 太宽,这里拉到 200 字。
-    static let pass2NoiseSessionOcrMaxThreshold = 200
-
-    /// 一个 session 是不是 noise(无创作意图)。
-    static func isNoiseSession(_ s: WritingCaptureRawSession) -> Bool {
-        let typingTotal = s.typingEvents.map { $0.text.count }.reduce(0, +)
-        let ocrMax = s.ocrFrames.map { $0.text.count }.max() ?? 0
-        return typingTotal == 0 && ocrMax < pass2NoiseSessionOcrMaxThreshold
-    }
-
-    /// 拼 prompt:静态 system 指令 + user 数据块(context_timeline / raw_sessions /
-    /// merge_candidates)。
-    ///
-    /// raw_sessions 过滤 noise + per-session 截断/采样。merge_candidates 同步
-    /// 移除被过滤掉的 session_id。
+    /// 拼 per-group prompt:静态 system 指令 + context_timeline + group_meta +
+    /// raw_sessions(per-session prep:OCR 截字 + keystroke 采样)。
+    /// 不做 noise 过滤 —— LLM 自己判。
     static func buildPrompt(
         contextTimeline: [WritingCaptureContextSegment],
-        rawSessions: [WritingCaptureRawSession],
-        mergeCandidates: [[String]]
+        groupApp: String,
+        groupUrl: String?,
+        rawSessions: [WritingCaptureRawSession]
     ) -> String {
-        // 1. noise 过滤
-        let kept = rawSessions.filter { !isNoiseSession($0) }
-        let keptIds = Set(kept.map(\.id))
-        // 2. merge_candidates 同步剔掉已过滤 session_id
-        let filteredCandidates: [[String]] = mergeCandidates
-            .map { $0.filter { keptIds.contains($0) } }
-            .filter { !$0.isEmpty }
-        // 3. per-session prep(截 OCR / 采样 keystroke / AX 路径不要 OCR)
-        let prepared = kept.map(prepareSessionForPrompt).map(RawSessionPayload.init)
-
+        let prepared = rawSessions.map(prepareSessionForPrompt).map(RawSessionPayload.init)
+        let meta: [String: String?] = [
+            "app": groupApp,
+            "url": groupUrl,
+            "session_count": "\(rawSessions.count)"
+        ]
         var lines: [String] = [WritingCapturePrompts.pass2Fusion]
         lines.append("")
         lines.append("context_timeline:")
         lines.append(encodeJSON(contextTimeline) ?? "[]")
         lines.append("")
+        lines.append("group_meta:")
+        lines.append(encodeJSONAny(meta) ?? "{}")
+        lines.append("")
         lines.append("raw_sessions:")
         lines.append(encodeJSON(prepared) ?? "[]")
-        lines.append("")
-        lines.append("merge_candidates:")
-        lines.append(encodeJSON(filteredCandidates) ?? "[]")
         return lines.joined(separator: "\n")
+    }
+
+    /// `Encodable` 对 `[String: String?]` 通过 JSONSerialization 编码避开
+    /// Codable 的 Optional 编码歧义。
+    private static func encodeJSONAny(_ v: Any) -> String? {
+        guard JSONSerialization.isValidJSONObject(v),
+              let data = try? JSONSerialization.data(withJSONObject: v),
+              let s = String(data: data, encoding: .utf8)
+        else { return nil }
+        return s
     }
 
     private static func encodeJSON<T: Encodable>(_ v: T) -> String? {
@@ -311,29 +310,21 @@ final class WritingCapturePass2Agent {
         do {
             let parsed = try JSONDecoder().decode(Pass2Response.self, from: data)
 
-            // 校验 source 合法
+            // 校验 source / kind 合法 + confidence 范围
             let validSources = Set(["ax_cleaned", "canvas_fusion", "merged"])
+            let validKinds = Set(["long_form", "short_form", "other"])
             for r in parsed.records {
                 if !validSources.contains(r.source) {
                     throw AgentError.malformedJSON("invalid source: \(r.source)")
+                }
+                if !validKinds.contains(r.kind) {
+                    throw AgentError.malformedJSON("invalid kind: \(r.kind)")
                 }
                 if r.confidence < 0 || r.confidence > 1 {
                     throw AgentError.malformedJSON("confidence out of range: \(r.confidence)")
                 }
             }
-
-            // 校验 discarded.reason 前缀合法
-            let validPrefixes = [
-                "search_query:", "short_response:", "shell_command:",
-                "address_bar:", "filler_text:", "repeated_input:",
-                "no_intent:", "other:"
-            ]
-            for d in parsed.discarded {
-                if !validPrefixes.contains(where: { d.reason.hasPrefix($0) }) {
-                    throw AgentError.malformedJSON(
-                        "discarded.reason missing valid prefix: '\(d.reason.prefix(40))'")
-                }
-            }
+            // discarded.reason 现在自由文本(LLM 描述),不再强制 enum 前缀。
 
             return (parsed.records, parsed.discarded)
         } catch let e as AgentError {
