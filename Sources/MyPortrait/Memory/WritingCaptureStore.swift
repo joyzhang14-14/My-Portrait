@@ -194,11 +194,13 @@ struct WritingCaptureStore: Sendable {
     }
 
     /// 读某 UTC 日期的 frames(已过滤 full_text 非空)。
-    /// 注:frames.app_name 是 localized name(如 "Obsidian"),不是 bundle id。
-    /// 跨表跟 typing_events.bundle_id 不能直接比对 —— 调用方(Step 0)按时间
-    /// 关联,不强求 app 字段相等。
+    /// **frames.app_name 是 localized name**(如 "Claude" / "Obsidian"),跟
+    /// typing_events.bundle_id("com.anthropic.claudefordesktop")不能直接对比。
+    /// 这里用 `AppIdentifierNormalizer` 翻译成 bundle_id 风格,让 Step 0
+    /// 按 app 合并时同物理 app 不会被切成两条 session。
     func framesForDay(_ date: String) throws -> [WritingCaptureRawOcr] {
         let (startMs, endMs) = try Self.utcDayRangeMs(date: date)
+        let normalizer = AppIdentifierNormalizer.snapshot()
         return try dbPool.read { db in
             let rows = try Row.fetchAll(
                 db,
@@ -211,10 +213,11 @@ struct WritingCaptureStore: Sendable {
                 arguments: ["startMs": startMs, "endMs": endMs]
             )
             return rows.map {
-                WritingCaptureRawOcr(
+                let rawApp = ($0["app_name"] as String?) ?? "unknown"
+                return WritingCaptureRawOcr(
                     id: $0["id"],
                     tsMs: $0["timestamp_ms"],
-                    app: ($0["app_name"] as String?) ?? "unknown",
+                    app: normalizer.bundleId(forLocalizedName: rawApp),
                     url: $0["browser_url"],
                     text: ($0["full_text"] as String?) ?? ""
                 )

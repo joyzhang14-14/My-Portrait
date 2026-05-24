@@ -159,15 +159,34 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     }
 
     func stop() {
-        currentProcess?.terminate()
+        forceKillCurrentProcess()
         currentProcess = nil
         eventContinuation?.finish()
         eventContinuation = nil
     }
 
     func abort() throws {
-        currentProcess?.terminate()
+        forceKillCurrentProcess()
         // 不 finish events 流 —— conversation 还能继续。
+    }
+
+    /// 先 SIGTERM 给 1.5s 优雅退出窗口,还活着就 SIGKILL 强杀。
+    /// claude --print 在大 prompt 时对 SIGTERM 响应可能 10s+,timeout 不能等。
+    private func forceKillCurrentProcess() {
+        guard let proc = currentProcess, proc.isRunning else { return }
+        let pid = proc.processIdentifier
+        proc.terminate()
+        // 后台 0.05s 心跳,2s 内不退 → SIGKILL。
+        DispatchQueue.global(qos: .userInitiated).async {
+            let deadline = Date().addingTimeInterval(2.0)
+            while Date() < deadline {
+                if !proc.isRunning { return }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if proc.isRunning {
+                kill(pid, SIGKILL)
+            }
+        }
     }
 
     // MARK: - stdout buffer + line splitting

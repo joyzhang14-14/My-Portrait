@@ -637,6 +637,50 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v25 — writing_records_discarded:持久化 LLM 丢弃的 session
+        // ═══════════════════════════════════════════════════════════
+        //
+        // Pass 2 的 LLM 输出有 records[] 和 discarded[]。原来 discarded 直接
+        // 扔了,看 LLM 为啥丢某个 session 没法 debug。落表持久化:
+        // - 按天/run_id 查
+        // - kind=staged → Reject 时清,Approve 时拷到 kind=committed
+        m.registerMigration("v25_writing_records_discarded") { db in
+            try db.create(table: "writing_records_discarded") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("date_utc", .text).notNull()           // 'YYYY-MM-DD'
+                t.column("reason", .text).notNull()              // "throwaway: ..." 或 LLM 自由文本
+                t.column("session_ids", .text).notNull()         // JSON [String]
+                t.column("preview", .text)                       // ≤ 80 字
+                t.column("worker_run_id", .text).notNull()
+                t.column("kind", .text).notNull()                // "staged" | "committed"
+                t.column("created_at", .integer).notNull()
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_discarded_date ON writing_records_discarded(date_utc, kind)")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_discarded_run ON writing_records_discarded(worker_run_id)")
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v26 — writing_records / _staged 加 kind 字段(long_form / short_form / other)
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 大/小 session 双轨:LLM 把每条 record 标 long_form(长文 / 笔记 /
+        // 文档)、short_form(聊天消息 / 短社交输出)、other(应答 / 命令等
+        // 仍想保留为信号但不是创作)。前端按 kind 分两个 sub-tab 展示。
+        // 旧数据 default 'long_form' —— 之前的 records 都是当长文存的。
+        m.registerMigration("v26_writing_records_kind") { db in
+            try db.alter(table: "writing_records") { t in
+                t.add(column: "kind", .text).notNull().defaults(to: "long_form")
+            }
+            try db.alter(table: "writing_records_staged") { t in
+                t.add(column: "kind", .text).notNull().defaults(to: "long_form")
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_kind ON writing_records(kind, start_ts)")
+        }
+
         return m
     }
 }
