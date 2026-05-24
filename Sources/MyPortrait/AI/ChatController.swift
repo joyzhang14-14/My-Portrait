@@ -55,6 +55,26 @@ final class ChatController {
     /// 这样卡片始终在 AI 回复完整出来之后才出现,不会夹在 bash blocks 中间。
     private var pendingDraftRelPathsThisTurn: [String] = []
 
+    /// 顶住 App Nap 的活动 token —— streaming 期间持有,把 chat 的
+    /// @MainActor 事件循环从背景态节流里救出来,否则用户切走窗口后
+    /// agent 输出的 bash/text 全部"卡住",等切回来才一次性补上。
+    /// streaming 一启动就 begin,agentEnd / error / abort 时 end。
+    private var streamingActivityToken: (any NSObjectProtocol)?
+
+    private func beginStreamingActivity() {
+        guard streamingActivityToken == nil else { return }
+        streamingActivityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "Chat streaming in flight")
+    }
+
+    private func endStreamingActivity() {
+        if let t = streamingActivityToken {
+            ProcessInfo.processInfo.endActivity(t)
+            streamingActivityToken = nil
+        }
+    }
+
     private let store = ChatStore.shared
     /// Closure resolving the currently-selected provider + model + optional
     /// SecretStore key reference for that preset's API key (when the user
@@ -111,6 +131,7 @@ final class ChatController {
         try? agent?.abort()
         flushPending()
         isStreaming = false
+        endStreamingActivity()
         assistantMessageID = nil
         activeTextPartID = nil
         persist()
@@ -124,6 +145,7 @@ final class ChatController {
         assistantMessageID = nil
         activeTextPartID = nil
         isStreaming = false
+        endStreamingActivity()
         lastError = nil
         currentConvId = convId
         // 离开当前 conv → 编辑模式标记失效(未消费就丢)。
@@ -367,6 +389,7 @@ final class ChatController {
             try await ensureAgent()
             try agent?.sendPrompt(text)
             isStreaming = true
+            beginStreamingActivity()
             // Prepare an empty assistant bubble we'll stream parts into.
             let placeholder = ChatMessage(role: .assistant, text: "", parts: [], time: Date())
             messages.append(placeholder)
@@ -381,6 +404,7 @@ final class ChatController {
         } catch {
             lastError = error.localizedDescription
             isStreaming = false
+            endStreamingActivity()
         }
     }
 
@@ -461,6 +485,7 @@ final class ChatController {
             }
             pendingDraftRelPathsThisTurn.removeAll()
             isStreaming = false
+            endStreamingActivity()
             assistantMessageID = nil
             activeTextPartID = nil
             persist()
@@ -469,6 +494,7 @@ final class ChatController {
             lastError = msg
             appendErrorBlock(msg)
             isStreaming = false
+            endStreamingActivity()
             persist()
         case .toolStart(let id, let name, let args):
             // Make sure any pending text lands BEFORE the tool block so order
