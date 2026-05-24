@@ -253,6 +253,9 @@ struct Integration: Identifiable, Hashable {
     /// 可选 Assets.xcassets 里的 imageset 名(用真品牌 SVG)。
     /// 优先级最高 —— 有就用,没有再 iconSymbol,再 letter。
     let assetName: String?
+    /// asset 本身已是完整 app-icon(自带圆角 + 背景)时设 true,
+    /// 渲染走 realIcon 同款全填模式(不加白底、不再 padding)。
+    let assetFullBleed: Bool
     /// Brand accent color, used for the letter glyph background and accents.
     let accent: Color
     let signInMethod: SignInMethod
@@ -260,9 +263,11 @@ struct Integration: Identifiable, Hashable {
 
     init(id: String, name: String, bundleId: String?, letter: String,
          iconSymbol: String? = nil, assetName: String? = nil,
+         assetFullBleed: Bool = false,
          accent: Color, signInMethod: SignInMethod, category: Category) {
         self.id = id; self.name = name; self.bundleId = bundleId
         self.letter = letter; self.iconSymbol = iconSymbol; self.assetName = assetName
+        self.assetFullBleed = assetFullBleed
         self.accent = accent; self.signInMethod = signInMethod; self.category = category
     }
 
@@ -287,7 +292,7 @@ enum IntegrationRegistry {
         // Perplexity:用 bundle 的 perplexity.svg 资源(从 screenpipe 引来的
         // 原版品牌 logo),iconSymbol asterisk 是再下一层兜底。
         .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  iconSymbol: "asterisk", assetName: "Perplexity", accent: Color(red: 0.12, green: 0.72, blue: 0.80),  signInMethod: .apiKey,       category: .ai),
-        .init(id: "deepseek",           name: "DeepSeek",        bundleId: nil,                                     letter: "D",  assetName: "DeepSeek", accent: Color(red: 0.27, green: 0.49, blue: 0.94),  signInMethod: .apiKey,       category: .ai),
+        .init(id: "deepseek",           name: "DeepSeek",        bundleId: nil,                                     letter: "D",  assetName: "DeepSeek", assetFullBleed: true, accent: Color(red: 0.27, green: 0.49, blue: 0.94),  signInMethod: .apiKey,       category: .ai),
 
         // Local model runners
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),

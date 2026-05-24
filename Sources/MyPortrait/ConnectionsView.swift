@@ -634,13 +634,23 @@ struct IntegrationIcon: View {
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else if let asset = integration.assetName {
-                // 真品牌 SVG/PNG 资源 —— 白底原色,跟 macOS app icon 视觉一致。
-                RoundedRectangle(cornerRadius: size * 0.22)
-                    .fill(Color.white)
-                Image(asset)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(size * 0.18)
+                if integration.assetFullBleed {
+                    // asset 已是完整 app-icon,直接铺满 + 圆角裁切。
+                    Image(asset)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
+                } else {
+                    // 真品牌 SVG/PNG 资源 —— 白底原色,跟 macOS app icon 视觉一致。
+                    RoundedRectangle(cornerRadius: size * 0.22)
+                        .fill(Color.white)
+                    Image(asset)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(size * 0.18)
+                }
             } else {
                 // 品牌色底块 + 优先 SF Symbol(若提供),否则用 letter 字形。
                 RoundedRectangle(cornerRadius: size * 0.22)
