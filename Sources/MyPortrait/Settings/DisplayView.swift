@@ -25,6 +25,13 @@ struct DisplaySettingsView: View {
                     Toggle("", isOn: config.binding(\.display.translucentSidebar))
                         .labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                SettingsRow("Show in menu bar",
+                            description: "Adds a quick-access menu next to the clock for capture toggles (Screen / Audio / Typing) and opening ~/.portrait/. Useful when the main window is closed.",
+                            icon: "menubar.rectangle") {
+                    Toggle("", isOn: config.binding(\.display.showInMenuBar))
+                        .labelsHidden().toggleStyle(.switch)
+                }
             }
 
             SettingsCard(title: "Chat") {
@@ -62,18 +69,22 @@ struct DisplaySettingsView: View {
 ///   1. Editable app name (max 32 chars)
 ///   2. Dock icon slot — Upload / Replace / Reset
 ///   3. Menu bar icon slot — same controls
-///   4. Show-in-menu-bar toggle
+///
+/// 默认折叠 —— 多数人不会改这些,展开后 Save 还会重启 app,放收起来
+/// 里更不容易误触。Show-in-menu-bar 不需要重启,搬去 Appearance 卡。
 ///
 /// Uploads write into `~/.portrait/customize/`
 /// so the icons survive app restarts. Reset deletes the file.
 private struct AppCustomizeCard: View {
     @State private var config = ConfigStore.shared
 
+    /// 默认折叠。展开后才显示 name + 两张 icon slot + Save。
+    @State private var expanded: Bool = false
+
     // Staged local edits — committed to ConfigStore only on Save.
     @State private var appName: String = ""
     @State private var dockIconPath: String = ""
     @State private var trayIconPath: String = ""
-    @State private var showInMenuBar: Bool = true
     @State private var loaded = false
 
     private let maxNameLength = 32
@@ -83,95 +94,89 @@ private struct AppCustomizeCard: View {
         return appName != d.appName
             || dockIconPath != d.customDockIcon
             || trayIconPath != d.customTrayIcon
-            || showInMenuBar != d.showInMenuBar
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("App customize")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.96))
-                    Text("Personalize the in-app display name and the Dock + menu bar icons.")
-                        .font(.system(size: 11))
+        VStack(alignment: .leading, spacing: expanded ? 14 : 0) {
+            // 折叠头 —— 整行可点击切换。
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("App customize")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.96))
+                        Text("Personalize the in-app display name and the Dock + menu bar icons.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.55))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("APP NAME (MAX \(maxNameLength) CHARS)")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.45))
+                    TextField("My Portrait", text: Binding(
+                        get: { appName },
+                        set: { appName = String($0.prefix(maxNameLength)) }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                    )
+                    Text("macOS controls the name shown in the menu bar (next to the Apple logo). Changing it here updates the dock title + windows.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.45))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-            }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("APP NAME (MAX \(maxNameLength) CHARS)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.45))
-                TextField("My Portrait", text: Binding(
-                    get: { appName },
-                    set: { appName = String($0.prefix(maxNameLength)) }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.white.opacity(0.04))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                Divider().background(Color.white.opacity(0.08))
+
+                IconSlot(
+                    title: "Dock icon",
+                    subtitle: "Shown in the Dock and the cmd-Tab switcher.",
+                    path: $dockIconPath,
+                    fileName: "dock.png"
                 )
-                Text("macOS controls the name shown in the menu bar (next to the Apple logo). Changing it here updates the dock title + windows.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
 
-            Divider().background(Color.white.opacity(0.08))
+                IconSlot(
+                    title: "Menu bar icon",
+                    subtitle: "Used by the status item next to the clock.",
+                    path: $trayIconPath,
+                    fileName: "tray.png"
+                )
 
-            IconSlot(
-                title: "Dock icon",
-                subtitle: "Shown in the Dock and the cmd-Tab switcher.",
-                path: $dockIconPath,
-                fileName: "dock.png"
-            )
+                Divider().background(Color.white.opacity(0.08))
 
-            IconSlot(
-                title: "Menu bar icon",
-                subtitle: "Used by the status item next to the clock.",
-                path: $trayIconPath,
-                fileName: "tray.png"
-            )
-
-            Divider().background(Color.white.opacity(0.08))
-
-            HStack(spacing: 12) {
-                Image(systemName: "menubar.rectangle")
-                    .font(.system(size: 14)).foregroundStyle(.white.opacity(0.75))
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Show in menu bar")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.92))
-                    Text("Adds a status item next to the clock for quick chat.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.50))
+                HStack(spacing: 10) {
+                    Text("Saving restarts My Portrait so the new name + icons take effect.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(hasUnsavedChanges ? 0.55 : 0.30))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 12)
+                    Button(action: saveAndRestart) {
+                        Label("Save", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!hasUnsavedChanges)
                 }
-                Spacer(minLength: 12)
-                Toggle("", isOn: $showInMenuBar).labelsHidden().toggleStyle(.switch)
-            }
-
-            Divider().background(Color.white.opacity(0.08))
-
-            HStack(spacing: 10) {
-                Text("Saving restarts My Portrait so the new name + icons take effect.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(hasUnsavedChanges ? 0.55 : 0.30))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                Button(action: saveAndRestart) {
-                    Label("Save", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!hasUnsavedChanges)
             }
         }
         .padding(16)
@@ -196,7 +201,6 @@ private struct AppCustomizeCard: View {
             appName       = d.appName
             dockIconPath  = d.customDockIcon
             trayIconPath  = d.customTrayIcon
-            showInMenuBar = d.showInMenuBar
             loaded = true
         }
     }
@@ -209,7 +213,6 @@ private struct AppCustomizeCard: View {
             $0.display.appName       = appName
             $0.display.customDockIcon  = dockIconPath
             $0.display.customTrayIcon  = trayIconPath
-            $0.display.showInMenuBar = showInMenuBar
         }
         config.saveNow()
         Self.relaunch()
