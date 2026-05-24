@@ -69,7 +69,7 @@ final class WritingCapturePass1Agent {
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 120) {
+    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 300) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
@@ -118,8 +118,15 @@ final class WritingCapturePass1Agent {
             throw AgentError.agentTimeout
         }
 
-        if let err = await coordinator.consumeError(), BudgetSignal.isExhausted(err) {
-            throw BudgetExhaustedError(processor: "WritingCapturePass1Agent", message: err)
+        if let err = await coordinator.consumeError() {
+            if BudgetSignal.isExhausted(err) {
+                throw BudgetExhaustedError(processor: "WritingCapturePass1Agent", message: err)
+            }
+            // 非 budget 错误(LLM 拒绝 / 鉴权失败 / 模型不存在 / 等):buffer
+            // 通常是空,直接报出来才看得见。
+            if collected.isEmpty {
+                throw AgentError.agentSpawn("LLM error: \(err)")
+            }
         }
 
         let timeline = try Self.parse(from: collected)
@@ -128,13 +135,49 @@ final class WritingCapturePass1Agent {
 
     // MARK: - Prompt
 
+    /// 单帧 OCR text 截多少字 —— Chrome / 菜单 / 工具栏 重复噪音不必给 LLM
+    /// 看完整,300 字够它 infer 上下文。原始数据完整保留在 frames 表里,
+    /// 截断只在 LLM 输入这一层。
+    static let pass1OcrTextMaxChars = 300
+
+    /// Pass 1 最多喂给 LLM 多少帧。Pass 1 只要 "时段-意图" 时间轴,不需要
+    /// 每帧。重写作日 5000+ 帧实测会撑爆 200K context。50 也够分时段
+    /// (1 帧 / 30 分钟),先确保管道跑通,后续调优。
+    static let pass1FrameCap = 50
+
+    /// 把 ocrFrames 沿时间均匀采样到 ≤ `pass1FrameCap` 帧。
+    /// 跨度大就大跨度采,小就全留。每帧仍截 text 到 `pass1OcrTextMaxChars`。
+    static func prepareFramesForPrompt(
+        _ ocrFrames: [WritingCaptureOcrFrame]
+    ) -> [WritingCaptureOcrFrame] {
+        // 先截字
+        let truncated = ocrFrames.map { f -> WritingCaptureOcrFrame in
+            WritingCaptureOcrFrame(
+                frameId: f.frameId,
+                startTs: f.startTs, endTs: f.endTs,
+                app: f.app, url: f.url,
+                text: String(f.text.prefix(pass1OcrTextMaxChars))
+            )
+        }
+        guard truncated.count > pass1FrameCap else { return truncated }
+        // 均匀采样:第 i 帧 = 全集第 floor(i * total / cap) 个
+        var sampled: [WritingCaptureOcrFrame] = []
+        sampled.reserveCapacity(pass1FrameCap)
+        let total = truncated.count
+        for i in 0..<pass1FrameCap {
+            let idx = (i * total) / pass1FrameCap
+            sampled.append(truncated[idx])
+        }
+        return sampled
+    }
+
     /// 拼 prompt:静态 system 指令 + user 数据块。
     static func buildPrompt(ocrFrames: [WritingCaptureOcrFrame]) -> String {
         var lines: [String] = [WritingCapturePrompts.pass1ContextTimeline]
         lines.append("")
         lines.append("ocr_frames:")
-        // 直接 JSON 序列化数组 —— LLM 见过这种 format。
-        if let data = try? JSONEncoder.pass1Encoder.encode(ocrFrames),
+        let prepared = prepareFramesForPrompt(ocrFrames)
+        if let data = try? JSONEncoder.pass1Encoder.encode(prepared),
            let json = String(data: data, encoding: .utf8) {
             lines.append(json)
         } else {
@@ -149,7 +192,9 @@ final class WritingCapturePass1Agent {
     static func parse(from response: String) throws -> [WritingCaptureContextSegment] {
         guard let first = response.firstIndex(of: "{"),
               let last = response.lastIndex(of: "}") else {
-            throw AgentError.noJSONInResponse
+            // 把 LLM 实际响应的前 500 字附在 error 里,方便排查(prose / 拒绝 / 空 等)
+            let preview = String(response.prefix(500))
+            throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
         }
         let jsonStr = String(response[first...last])
         guard let data = jsonStr.data(using: .utf8) else {
@@ -168,7 +213,9 @@ final class WritingCapturePass1Agent {
         } catch let e as AgentError {
             throw e
         } catch {
-            throw AgentError.malformedJSON(error.localizedDescription)
+            // DEBUG: dump raw response on decode failure
+            try? response.write(toFile: "/tmp/claude-agent-last-response.txt", atomically: false, encoding: .utf8)
+            throw AgentError.malformedJSON("\(error.localizedDescription) — full response dumped /tmp/claude-agent-last-response.txt")
         }
     }
 }

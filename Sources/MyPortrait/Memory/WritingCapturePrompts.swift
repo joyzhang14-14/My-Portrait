@@ -56,6 +56,9 @@ enum WritingCapturePrompts {
     }
 
     HARD RULES (a violation makes the output invalid)
+    - **JSON string escaping**: ANY `"` (English double quote) inside a string value MUST
+      be escaped as `\"`. Same for `\` (→ `\\`) and newlines (→ `\n`). Forgetting to escape
+      user text breaks the parser. Always escape.
     - timeline is sorted by start_ts ascending and segments DO NOT overlap
     - segments may skip empty stretches (no requirement to cover the full day)
     - "intent_type" is EXACTLY one of: "writing" | "search" | "reading" | "command" | "chat" | "other"
@@ -207,6 +210,10 @@ enum WritingCapturePrompts {
     }
 
     HARD RULES (a violation makes the output invalid)
+    - **JSON string escaping**: ANY `"` (English double quote) that appears INSIDE a JSON
+      string value MUST be escaped as `\"`. Same for `\` (escape as `\\`) and newlines
+      (escape as `\n`). Most common failure: user content like 我说："我是男生" gets
+      emitted without escapes, breaks the parser. Always escape.
     - Every input raw_session_id from merge_candidates appears EXACTLY ONCE — either inside
       some record (via reference_*_ids of its constituent sessions) or in "discarded.session_ids"
     - A session_id NEVER appears in both records and discarded

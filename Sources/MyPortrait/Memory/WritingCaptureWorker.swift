@@ -159,14 +159,31 @@ final class WritingCaptureWorker {
         // 3. Pass 1 —— 整天 OCR 抽 context timeline
         let allOcrFrames = step0.rawSessions.flatMap { $0.ocrFrames }
             .sorted(by: { $0.startTs < $1.startTs })
+        // DEBUG: 转储 prompt 给 /tmp 看实际大小
+        let probePrompt = WritingCapturePass1Agent.buildPrompt(ocrFrames: allOcrFrames)
+        try? probePrompt.write(
+            toFile: "/tmp/writing-capture-pass1-prompt.txt",
+            atomically: false, encoding: .utf8)
+        workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars, dumped /tmp/writing-capture-pass1-prompt.txt")
         let pass1Out = try await pass1.run(ocrFrames: allOcrFrames)
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        // 4. Pass 2 —— 多源融合
+        // 4. 算法层 pre-merge —— 按 (app, url) 整天合并(不限时间窗)。
+        // Pass 2 一天 hundreds of sessions 会撑爆 context;按 app 合并后
+        // 一般 < 30 个 mega-session。
+        // trade-off:LLM 看不到一天里同 app 的多个写作 session 的边界
+        // (例如上午写文章 / 下午又来改),输出一条 record 覆盖整段。
+        // 对风格分析够,对「精确还原一次写作 session」会模糊。
+        let mergedByApp = Self.mergeRawSessionsByApp(step0.rawSessions)
+        workerLog.info("pre-merge by app: \(step0.rawSessions.count) → \(mergedByApp.count) mega-sessions")
+        let merged = mergedByApp
+
+        // 5. Pass 2 —— 多源融合(mega-sessions + 每个自己一组的 trivial candidates)
+        let trivialCandidates = merged.map { [$0.id] }
         let pass2Out = try await pass2.run(
             contextTimeline: pass1Out.timeline,
-            rawSessions: step0.rawSessions,
-            mergeCandidates: step0.mergeCandidates
+            rawSessions: merged,
+            mergeCandidates: trivialCandidates
         )
         workerLog.info("pass2: \(pass2Out.records.count) records, \(pass2Out.discarded.count) discarded")
 
@@ -226,6 +243,43 @@ final class WritingCaptureWorker {
     }
 
     // MARK: - prompt id
+
+    /// 按 (app, url) 整天合并 raw_sessions。Pre-Pass-2 算法层优化,
+    /// 防止 600+ session 撑爆 LLM context。
+    static func mergeRawSessionsByApp(
+        _ sessions: [WritingCaptureRawSession]
+    ) -> [WritingCaptureRawSession] {
+        struct Key: Hashable { let app: String; let url: String }
+        var groups: [Key: [WritingCaptureRawSession]] = [:]
+        var keyOrder: [Key] = []
+        for s in sessions {
+            let k = Key(app: s.app, url: s.url ?? "")
+            if groups[k] == nil { keyOrder.append(k) }
+            groups[k, default: []].append(s)
+        }
+        return keyOrder.compactMap { k -> WritingCaptureRawSession? in
+            guard let members = groups[k] else { return nil }
+            if members.count == 1 { return members[0] }
+            let typing = members.flatMap { $0.typingEvents }
+                .sorted(by: { $0.startedAt < $1.startedAt })
+            let keys = members.flatMap { $0.keystrokes }
+                .sorted(by: { $0.tsMs < $1.tsMs })
+            let frames = members.flatMap { $0.ocrFrames }
+                .sorted(by: { $0.startTs < $1.startTs })
+            let first = members[0]
+            return WritingCaptureRawSession(
+                id: first.id,
+                app: first.app,
+                url: first.url,
+                startTs: members.map(\.startTs).min() ?? first.startTs,
+                endTs: members.map(\.endTs).max() ?? first.endTs,
+                typingEvents: typing,
+                keystrokes: keys,
+                ocrFrames: frames,
+                maxContentChars: members.map(\.maxContentChars).max() ?? 0
+            )
+        }
+    }
 
     /// `prompt_id = sha256(pass1_prompt + pass2_prompt)[..16]` hex string。
     /// prompt 迭代时阶段三能筛同版本训练对。

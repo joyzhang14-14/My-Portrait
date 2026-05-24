@@ -24,8 +24,10 @@ struct WritingCaptureStep0 {
     static let mergeWindowMs: Int64 = 30 * 60 * 1000
     /// throwaway 最小字数
     static let throwawayMinChars = 20
-    /// OCR Jaccard 相似度阈值
-    static let ocrJaccardThreshold = 0.95
+    /// OCR Jaccard 相似度阈值。0.85 比 0.95 激进 —— 大量 chrome / 菜单
+    /// 不变的连续帧会被合并,大幅压缩 LLM context。原 0.95 在重写作日把
+    /// claude code 撑爆过(Prompt is too long)。
+    static let ocrJaccardThreshold = 0.85
     /// throwaway preview 截断长度
     static let throwawayPreviewLen = 80
 
@@ -316,6 +318,56 @@ struct WritingCaptureStep0 {
     }
 
     // MARK: - Pass 2 合并候选集
+
+    /// 把 raw_sessions 按 mergeCandidates 群组**算法层合并**成 mega-sessions。
+    /// 同候选组(同 app + 同 URL + < 30min)的所有 sessions 拼成一条 ——
+    /// typing_events / keystrokes / ocr_frames 都按 ts 排序拼起来。
+    ///
+    /// 原本 Pass 2 prompt 会把所有 raw_sessions 都喂给 LLM,让 LLM 在候选组
+    /// 内决合不合 —— 重活动日 774 sessions 直接撑爆 context。算法层先合,
+    /// LLM 看到的是 ~20 个 mega-session,空间 / token 都省一大截。
+    ///
+    /// trade-off:LLM 失去「同 doc 里换主题就拆开」的能力。重活动日的反复
+    /// 切换 + 主题断裂场景,Pass 2 输出会少一些细分 record(可能合在一条
+    /// 里覆盖多个子主题)。可接受 —— Pass 2 一条 record 可以是「这段时间
+    /// 在写文章 + 改稿」,粒度够分析风格用。
+    static func mergeByCandidates(
+        rawSessions: [WritingCaptureRawSession],
+        candidates: [[String]]
+    ) -> [WritingCaptureRawSession] {
+        let byId = Dictionary(uniqueKeysWithValues: rawSessions.map { ($0.id, $0) })
+        var merged: [WritingCaptureRawSession] = []
+        for group in candidates {
+            let members = group.compactMap { byId[$0] }
+                .sorted(by: { $0.startTs < $1.startTs })
+            guard !members.isEmpty else { continue }
+            if members.count == 1 {
+                merged.append(members[0])
+                continue
+            }
+            // 多个 → 合并
+            let typing = members.flatMap { $0.typingEvents }
+                .sorted(by: { $0.startedAt < $1.startedAt })
+            let keys = members.flatMap { $0.keystrokes }
+                .sorted(by: { $0.tsMs < $1.tsMs })
+            let frames = members.flatMap { $0.ocrFrames }
+                .sorted(by: { $0.startTs < $1.startTs })
+            let first = members[0]
+            let combined = WritingCaptureRawSession(
+                id: first.id,        // 保留首个 id 当代表
+                app: first.app,
+                url: first.url,
+                startTs: members.first!.startTs,
+                endTs: members.last!.endTs,
+                typingEvents: typing,
+                keystrokes: keys,
+                ocrFrames: frames,
+                maxContentChars: members.map(\.maxContentChars).max() ?? 0
+            )
+            merged.append(combined)
+        }
+        return merged
+    }
 
     /// 同 app + 同 url + 间隔 < 30min 的相邻 session 算一组。
     /// 输入 sessions 已按 startTs 升序。

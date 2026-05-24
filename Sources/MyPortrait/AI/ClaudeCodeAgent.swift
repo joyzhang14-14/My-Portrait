@@ -87,7 +87,9 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         if !oneshot, let sid = sessionId {
             args.append(contentsOf: ["-r", sid])
         }
-        args.append(contentsOf: ["-p", text])
+        // ⚠️ prompt 通过 stdin 传,不走 `-p <text>` 的 argv —— 大 prompt
+        // (Memory pipeline / 写作采集 OCR 几百 KB)会撞 macOS ARG_MAX(~256KB)。
+        // `claude --print` 在没 `-p` 时从 stdin 读 prompt(实测验过)。
         proc.arguments = args
         proc.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
 
@@ -99,8 +101,10 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             proc.environment = env
         }
 
+        let stdinPipe = Pipe()
         let stdout = Pipe()
         let stderr = Pipe()
+        proc.standardInput = stdinPipe
         proc.standardOutput = stdout
         proc.standardError = stderr
 
@@ -136,6 +140,22 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         }
         currentProcess = proc
         cont?.yield(.agentStart)
+
+        // 把 prompt 通过 stdin 喂给 claude --print 然后关掉 stdin(EOF
+        // 触发 claude 开始处理)。写大块可能 block,派后台线程做。
+        let stdinHandle = stdinPipe.fileHandleForWriting
+        // DEBUG: 把实际发的 prompt 一份转到 /tmp 方便排查
+        try? text.write(toFile: "/tmp/claude-agent-last-stdin.txt", atomically: false, encoding: .utf8)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                if let data = text.data(using: .utf8) {
+                    try stdinHandle.write(contentsOf: data)
+                }
+                try stdinHandle.close()
+            } catch {
+                self?.log.warning("write prompt to stdin failed: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     func stop() {

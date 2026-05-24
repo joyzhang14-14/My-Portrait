@@ -169,7 +169,7 @@ struct WritingCaptureStore: Sendable {
                 return try KeystrokeEntry.fetchAll(
                     db,
                     sql: """
-                        SELECT id, ts_ms, bundle_id, char, is_backspace FROM keystroke_log
+                        SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers FROM keystroke_log
                         WHERE ts_ms >= :startMs AND ts_ms < :endMs
                         ORDER BY ts_ms ASC
                         """,
@@ -183,7 +183,7 @@ struct WritingCaptureStore: Sendable {
             return try KeystrokeEntry.fetchAll(
                 db,
                 sql: """
-                    SELECT id, ts_ms, bundle_id, char, is_backspace FROM keystroke_log
+                    SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers FROM keystroke_log
                     WHERE ts_ms >= ? AND ts_ms < ?
                       AND bundle_id NOT IN (\(placeholders))
                     ORDER BY ts_ms ASC

@@ -103,7 +103,7 @@ final class WritingCapturePass2Agent {
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 240) {
+    init(provider: Provider = .chatgpt, model: String = "gpt-5.4-mini", perRunTimeout: TimeInterval = 600) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
@@ -165,8 +165,13 @@ final class WritingCapturePass2Agent {
             throw AgentError.agentTimeout
         }
 
-        if let err = await coordinator.consumeError(), BudgetSignal.isExhausted(err) {
-            throw BudgetExhaustedError(processor: "WritingCapturePass2Agent", message: err)
+        if let err = await coordinator.consumeError() {
+            if BudgetSignal.isExhausted(err) {
+                throw BudgetExhaustedError(processor: "WritingCapturePass2Agent", message: err)
+            }
+            if collected.isEmpty {
+                throw AgentError.agentSpawn("LLM error: \(err)")
+            }
         }
 
         let (records, discarded) = try Self.parse(from: collected)
@@ -176,23 +181,107 @@ final class WritingCapturePass2Agent {
 
     // MARK: - Prompt
 
+    /// Pass 2 单帧 OCR 截多少字。原始数据完整保留在 frames 表,截断只在
+    /// LLM 输入这一层。300 字够 LLM 看出 session 内容意图。
+    static let pass2OcrTextMaxChars = 200
+
+    /// Pass 2 单 session 最多塞几帧 OCR。重写作日 60+ sessions 全塞会
+    /// 撑爆 200K context,10 帧 / session 是经验值。
+    static let pass2OcrFramesPerSessionCap = 10
+
+    /// Pass 2 单 session 最多塞多少 keystroke。
+    static let pass2KeystrokesPerSessionCap = 100
+
+    /// AX 路径 session 的判定阈值:typing_events.text 总长 > 这个,认为
+    /// AX 数据完整,Pass 2 不需要 OCR 重建。
+    static let pass2AxPathTypingThreshold = 50
+
+    /// 把一个 raw_session 处理成 prompt 友好的 shape:
+    /// - typing_events.text 总长 > `pass2AxPathTypingThreshold` 字 → AX 路径,
+    ///   **完全丢 OCR**(typing_events.text 就是 ground truth,不需要 OCR 重建)
+    /// - 否则(canvas 路径)→ OCR 截字 + 均匀采样
+    /// keystroke 一律均匀采样。
+    static func prepareSessionForPrompt(_ s: WritingCaptureRawSession) -> WritingCaptureRawSession {
+        let typingTotal = s.typingEvents.map { $0.text.count }.reduce(0, +)
+        let isAxPath = typingTotal > pass2AxPathTypingThreshold
+
+        let trimmedFrames: [WritingCaptureOcrFrame]
+        if isAxPath {
+            trimmedFrames = []
+        } else {
+            let truncated = s.ocrFrames.map { f -> WritingCaptureOcrFrame in
+                WritingCaptureOcrFrame(
+                    frameId: f.frameId,
+                    startTs: f.startTs, endTs: f.endTs,
+                    app: f.app, url: f.url,
+                    text: String(f.text.prefix(pass2OcrTextMaxChars))
+                )
+            }
+            trimmedFrames = sampleEvenly(truncated, cap: pass2OcrFramesPerSessionCap)
+        }
+        let sampledKeys = sampleEvenly(s.keystrokes, cap: pass2KeystrokesPerSessionCap)
+        return WritingCaptureRawSession(
+            id: s.id, app: s.app, url: s.url,
+            startTs: s.startTs, endTs: s.endTs,
+            typingEvents: s.typingEvents,
+            keystrokes: sampledKeys,
+            ocrFrames: trimmedFrames,
+            maxContentChars: s.maxContentChars
+        )
+    }
+
+    /// 通用均匀采样:`[A B C D E ...]` cap=3 → 第 0, ⌊1×n/3⌋, ⌊2×n/3⌋ 个。
+    private static func sampleEvenly<T>(_ xs: [T], cap: Int) -> [T] {
+        guard xs.count > cap else { return xs }
+        var out: [T] = []
+        out.reserveCapacity(cap)
+        let total = xs.count
+        for i in 0..<cap { out.append(xs[(i * total) / cap]) }
+        return out
+    }
+
+    /// 过滤 noise session:typing=0 且单帧 OCR text 都 < 这个阈值的 session
+    /// 是「用户看了一眼但没创作」,Pass 2 不需要。Step 0 throwaway 阈值 20 字
+    /// 太宽,这里拉到 200 字。
+    static let pass2NoiseSessionOcrMaxThreshold = 200
+
+    /// 一个 session 是不是 noise(无创作意图)。
+    static func isNoiseSession(_ s: WritingCaptureRawSession) -> Bool {
+        let typingTotal = s.typingEvents.map { $0.text.count }.reduce(0, +)
+        let ocrMax = s.ocrFrames.map { $0.text.count }.max() ?? 0
+        return typingTotal == 0 && ocrMax < pass2NoiseSessionOcrMaxThreshold
+    }
+
     /// 拼 prompt:静态 system 指令 + user 数据块(context_timeline / raw_sessions /
     /// merge_candidates)。
+    ///
+    /// raw_sessions 过滤 noise + per-session 截断/采样。merge_candidates 同步
+    /// 移除被过滤掉的 session_id。
     static func buildPrompt(
         contextTimeline: [WritingCaptureContextSegment],
         rawSessions: [WritingCaptureRawSession],
         mergeCandidates: [[String]]
     ) -> String {
+        // 1. noise 过滤
+        let kept = rawSessions.filter { !isNoiseSession($0) }
+        let keptIds = Set(kept.map(\.id))
+        // 2. merge_candidates 同步剔掉已过滤 session_id
+        let filteredCandidates: [[String]] = mergeCandidates
+            .map { $0.filter { keptIds.contains($0) } }
+            .filter { !$0.isEmpty }
+        // 3. per-session prep(截 OCR / 采样 keystroke / AX 路径不要 OCR)
+        let prepared = kept.map(prepareSessionForPrompt).map(RawSessionPayload.init)
+
         var lines: [String] = [WritingCapturePrompts.pass2Fusion]
         lines.append("")
         lines.append("context_timeline:")
         lines.append(encodeJSON(contextTimeline) ?? "[]")
         lines.append("")
         lines.append("raw_sessions:")
-        lines.append(encodeJSON(rawSessions.map(RawSessionPayload.init)) ?? "[]")
+        lines.append(encodeJSON(prepared) ?? "[]")
         lines.append("")
         lines.append("merge_candidates:")
-        lines.append(encodeJSON(mergeCandidates) ?? "[]")
+        lines.append(encodeJSON(filteredCandidates) ?? "[]")
         return lines.joined(separator: "\n")
     }
 
@@ -212,7 +301,8 @@ final class WritingCapturePass2Agent {
     ) throws -> (records: [WritingCaptureRecord], discarded: [WritingCaptureDiscarded]) {
         guard let first = response.firstIndex(of: "{"),
               let last = response.lastIndex(of: "}") else {
-            throw AgentError.noJSONInResponse
+            let preview = String(response.prefix(500))
+            throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
         }
         let jsonStr = String(response[first...last])
         guard let data = jsonStr.data(using: .utf8) else {
@@ -249,7 +339,9 @@ final class WritingCapturePass2Agent {
         } catch let e as AgentError {
             throw e
         } catch {
-            throw AgentError.malformedJSON(error.localizedDescription)
+            // DEBUG: dump raw response on decode failure
+            try? response.write(toFile: "/tmp/claude-agent-last-response.txt", atomically: false, encoding: .utf8)
+            throw AgentError.malformedJSON("\(error.localizedDescription) — full response dumped /tmp/claude-agent-last-response.txt")
         }
     }
 }
