@@ -342,6 +342,12 @@ final class WritingCaptureWorker {
         // 3. Pass 1
         let allOcrFrames = step0.rawSessions.flatMap { $0.ocrFrames }
             .sorted(by: { $0.startTs < $1.startTs })
+        // per-session ocrFrames 数 + 总和(诊断"OCR 喂量"用)
+        let perSessionFrames = step0.rawSessions.map { $0.ocrFrames.count }
+        let frameSum = perSessionFrames.reduce(0, +)
+        let frameMax = perSessionFrames.max() ?? 0
+        let frameDist = perSessionFrames.sorted(by: >).prefix(5).map(String.init).joined(separator: ",")
+        workerLog.info("ocr/session: sum=\(frameSum, privacy: .public) max=\(frameMax, privacy: .public) top5=[\(frameDist, privacy: .public)] sessions=\(step0.rawSessions.count, privacy: .public)")
         let probePrompt = WritingCapturePass1Agent.buildPrompt(ocrFrames: allOcrFrames)
         try? probePrompt.write(
             toFile: "/tmp/writing-capture-pass1-prompt.txt",
