@@ -97,12 +97,13 @@ final class MemoryScheduler {
     /// 周期检查：每个调度器按各自频率到点、且今天还没跑过就跑。
     func tick() async {
         guard !isRunning else { return }
-        // 有手动触发的结果在等审核 → 暂停定时调度，避免它写 events/ 后被
-        // Reject 的快照还原误伤。
+        // 有手动触发的结果在等审核 / AI 编辑 draft 在等审 → 暂停定时调度,
+        // 避免 distill / personality 跑完覆盖了用户没拍板的改动。
         guard !MemoryStaging.hasPending(.events),
               !MemoryStaging.hasPending(.portrait),
-              !MemoryStaging.hasPending(.personality) else {
-            schedLog.info("tick: a manual run is pending review — skip")
+              !MemoryStaging.hasPending(.personality),
+              !EditDraft.hasAnyPending() else {
+            schedLog.info("tick: manual run / AI edit draft pending — skip")
             return
         }
         let s = ConfigStore.shared.current.scheduler

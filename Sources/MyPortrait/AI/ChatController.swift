@@ -625,6 +625,43 @@ final class ChatController {
         }
         messages[located.0].parts[located.1] = .editDraft(block)
         persist()
+        // Approve 成功 → 自动触发第二轮:让 AI 扫相关条目找出同向需改的,
+        // 给每个生成独立 draft 卡片(用户逐个 approve/reject)。失败 / 已被
+        // 翻成其他状态的不触发。
+        if block.state == .approved {
+            triggerRelatedScan(approvedRelPath: block.originalRelPath,
+                               approvedSummary: block.summary ?? block.request)
+        }
+    }
+
+    /// 给 AI 发一段 follow-up,要它顺 --ai-find-related 扫双向引用,对真
+    /// 需要同向调整的相关条目各起一份新 draft。每份新 draft 会自动通过
+    /// finishTool 钩子变成新的 EditDraftCard 等用户拍板。
+    private func triggerRelatedScan(approvedRelPath: String, approvedSummary: String) {
+        let binPath = Bundle.main.executablePath ?? "MyPortrait"
+        let followUp = """
+        The user APPROVED the edit to `\(approvedRelPath)`.
+        Edit summary: \(approvedSummary)
+
+        Now do the SECOND ROUND — find any other entries that should change
+        in the same direction (e.g., same factual correction):
+
+        1. Call `\(binPath) --ai-find-related \(approvedRelPath)` to list
+           entries linked to this one via evidence_event_ids / distilled_into
+           (both directions).
+        2. For EACH related entry, read it (`\(binPath) --ai-read <rel>`)
+           and judge if it needs the same kind of edit to stay consistent.
+        3. If it does, propose a draft using the same --ai-draft-* workflow:
+           begin → write-body → set-summary → preview. Each proposed draft
+           will surface as its own approval card; the user will accept or
+           reject them individually.
+        4. If no related entries need changes, say so and stop.
+
+        STRICT — same rules as before: only --ai-draft-* writes, body-only,
+        one draft per related entry, never edit frontmatter, never touch
+        unrelated entries.
+        """
+        Task { await self.deliver(followUp) }
     }
 
     /// 用户点 Reject。删 draft 文件,原文件不动。
