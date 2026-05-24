@@ -815,8 +815,15 @@ final class ChatController {
     /// Build a short human-readable summary of a tool's args. For bash that's
     /// the command itself; for everything else we just JSON-encode.
     private static func summarizeArgs(name: String, args: [String: Any]) -> String {
-        if name == "bash", let cmd = args["command"] as? String { return cmd }
-        if name == "read", let path = args["path"] as? String { return path }
+        // Pi 的工具名都是小写(bash/read),Claude Code 用大写驼峰
+        // (Bash/Read/Edit/Glob/...);统一 lowercase 后再 match。
+        let lname = name.lowercased()
+        if lname == "bash", let cmd = args["command"] as? String { return cmd }
+        if lname == "read", let path = args["file_path"] as? String ?? args["path"] as? String {
+            return path
+        }
+        if lname == "write" || lname == "edit",
+           let path = args["file_path"] as? String { return path }
         if let json = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]),
            let s = String(data: json, encoding: .utf8) {
             return s

@@ -32,9 +32,12 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     /// 每个 content_block index → 那个 block 对应的 tool_use id(start 时记)。
     /// input_json_delta 通过 index 找回 id,再累积 partial_json。
     private var toolIdByIndex: [Int: String] = [:]
-    /// 每个 tool_use id → 已累积的 input partial_json(暂未使用,留作以后
-    /// 想在 toolStart 时把完整 args 解出来的话用)。
+    /// 每个 tool_use id → 已累积的 input partial_json。content_block_stop
+    /// 时解析这串拿到完整 args,再 yield 一个带 args 的 toolStart 给 UI。
     private var pendingToolInput: [String: String] = [:]
+    /// 每个 tool_use id → tool name(content_block_start 时记下,
+    /// content_block_stop yield toolStart 时一起用)。
+    private var pendingToolName: [String: String] = [:]
 
     private var eventContinuation: AsyncStream<PiAgent.Event>.Continuation?
     let events: AsyncStream<PiAgent.Event>
@@ -198,10 +201,11 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
                     let name = (block["name"] as? String) ?? "tool"
                     toolIdByIndex[index] = id
                     pendingToolInput[id] = ""
-                    // 参数在 input_json_delta 里 stream,先发 toolStart(空 args),
-                    // UI 立刻能渲染一张"运行中"卡片;args 在 content_block_stop
-                    // 时解出来如果想用,这里图简化暂不用。
-                    cont?.yield(.toolStart(id: id, name: name, args: [:]))
+                    // 暂不 yield toolStart —— args 还在 input_json_delta 里
+                    // 流,空字典发出去 UI 显示不出 bash 命令。等
+                    // content_block_stop 时 args 攒全了再一次性 yield。
+                    // tool_use 的 name 也记下来,stop 时一起用。
+                    pendingToolName[id] = name
                 case "text":
                     break  // text 走 delta 累积
                 default: break
@@ -228,6 +232,23 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             case "content_block_stop":
                 if currentBlockType[index] == "thinking" {
                     cont?.yield(.thinkingEnd(finalText: nil, durationMs: nil))
+                }
+                // tool_use 块结束:input_json_delta 已经流完,从
+                // pendingToolInput 里解出完整 args,这时才 yield toolStart。
+                // 之前的设计是 start 时空 args + stop 时不更新,导致 UI
+                // ToolBlock.command 永远是空,bash 命令完全看不到。
+                if currentBlockType[index] == "tool_use",
+                   let toolId = toolIdByIndex[index] {
+                    let name = pendingToolName[toolId] ?? "tool"
+                    let raw = pendingToolInput[toolId] ?? ""
+                    var args: [String: Any] = [:]
+                    if let data = raw.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        args = parsed
+                    }
+                    cont?.yield(.toolStart(id: toolId, name: name, args: args))
+                    pendingToolInput.removeValue(forKey: toolId)
+                    pendingToolName.removeValue(forKey: toolId)
                 }
                 currentBlockType.removeValue(forKey: index)
                 toolIdByIndex.removeValue(forKey: index)
