@@ -64,6 +64,19 @@ enum ChatGPTOAuth {
         return tokens.accessToken
     }
 
+    /// Return the full tokens(access + refresh + expiresAt),自动 refresh
+    /// 过期那一项。PiAgent 写 Pi 0.60 的 auth.json 时需要全套(refresh +
+    /// expires 让 Pi 自己接管后续 refresh)。
+    static func validTokens() async throws -> Tokens {
+        guard let tokens = SecretStore.shared.getJSON(secretKey, as: Tokens.self) else {
+            throw OAuthError.notLoggedIn
+        }
+        if tokens.isExpired {
+            return try await refresh(tokens.refreshToken)
+        }
+        return tokens
+    }
+
     static func logout() {
         SecretStore.shared.delete(secretKey)
     }

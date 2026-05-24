@@ -36,16 +36,18 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Pi's `--provider` CLI value for this provider. Must match the key Pi
-    /// reads from models.json. claudeCode 不走 Pi,这里返回空串占位。
+    /// Pi 0.60+ `--provider` CLI value。Pi 0.60 起 provider 是内置 catalog
+    /// (`@mariozechner/pi-ai/dist/models.generated.js`),老的 models.json
+    /// 自定义命名(openai-chatgpt / anthropic-byok 等)已经废弃。
+    /// claudeCode 不走 Pi,返回空串占位。
     var piName: String {
         switch self {
-        case .chatgpt:        return "openai-chatgpt"
-        case .openaiBYOK:     return "openai-byok"
-        case .anthropic:      return "anthropic-byok"
-        case .ollama:         return "ollama"
-        case .gemini:         return "openai-byok"   // Gemini speaks an OpenAI-compatible API
-        case .perplexity:     return "perplexity-byok"
+        case .chatgpt:        return "openai-codex"  // ChatGPT Plus/Pro OAuth
+        case .openaiBYOK:     return "openai"        // 纯 OpenAI API key
+        case .anthropic:      return "anthropic"
+        case .ollama:         return "ollama"        // ⚠️ Pi 0.60 不内置,需 models.json 自定义
+        case .gemini:         return "google"        // Pi 把 GEMINI_API_KEY 映射到 google
+        case .perplexity:     return "perplexity"    // ⚠️ Pi 0.60 不内置
         case .claudeCode:     return ""              // 不走 Pi
         }
     }

@@ -113,10 +113,12 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
 
     // MARK: - Lifecycle
 
-    /// Spawn the Pi process. Resolves the right credential for `provider`
-    /// (OAuth token / API key / nothing) and injects it as the env var Pi
-    /// expects. If `apiKeyRefOverride` was set (preset path), prefer the
-    /// value stored under that SecretStore key over the provider default.
+    /// Spawn the Pi process. 凭证注入策略(Pi 0.60 起两种):
+    ///   - Codex(ChatGPT OAuth):写 `~/.pi/agent/auth.json` 的
+    ///     `openai-codex` entry,Pi 自己读 + 自己 refresh
+    ///   - 其它(anthropic / openai / google API key):仍走 env var
+    ///     (Pi 0.60 的 getEnvApiKey 内置认 OPENAI_API_KEY /
+    ///      ANTHROPIC_API_KEY / GEMINI_API_KEY)
     func start() async throws {
         let credential: String
         do {
@@ -128,6 +130,12 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
                 credential = try await ProviderAuth.resolveEnvValue(for: provider)
             }
         } catch { throw SpawnError.missingToken(provider: provider.displayName) }
+
+        // Codex 走 auth.json,需要拿到完整的 OAuth tokens(access + refresh
+        // + expires),不止 access token。从 ChatGPTOAuth 重新读一遍。
+        if provider == .chatgpt {
+            try await Self.writeCodexAuth()
+        }
 
         let stdinPipe = Pipe()
         process.executableURL = AIPaths.bunBinary
@@ -142,7 +150,10 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
         process.standardError = stderrPipe
 
         var env = ProcessInfo.processInfo.environment
-        if !provider.apiKeyEnv.isEmpty {
+        // Codex 不通过 env(Pi 0.60 没给它 env 入口,只能走 auth.json)。
+        // 其它 provider:沿用 env var 注入,Pi 0.60 的 getEnvApiKey 认 OPENAI_API_KEY
+        // / ANTHROPIC_API_KEY / GEMINI_API_KEY 这三个 builtin。
+        if provider != .chatgpt, !provider.apiKeyEnv.isEmpty {
             env[provider.apiKeyEnv] = credential
         }
         env["BUN_INSTALL"] = AIPaths.bunDir.path
@@ -346,6 +357,55 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             return arr.compactMap { $0["text"] as? String }.joined(separator: "\n")
         }
         return nil
+    }
+
+    /// 写 Pi 0.60 的 `~/.pi/agent/auth.json`,把 ChatGPT OAuth tokens 塞进
+    /// `openai-codex` entry。Pi 自己后续负责 refresh(它认 refresh + expires)。
+    /// 与现有 entries 合并,不会覆盖别人的(比如 anthropic API key)。
+    fileprivate static func writeCodexAuth() async throws {
+        // 拿到当前一定有效的全套 tokens(自动 refresh 过期的)。
+        let tokens = try await ChatGPTOAuth.validTokens()
+
+        let authPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".pi", isDirectory: true)
+            .appendingPathComponent("agent", isDirectory: true)
+            .appendingPathComponent("auth.json")
+        try FileManager.default.createDirectory(
+            at: authPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        // 读现有 auth.json(可能没有 / 损坏 → 当空 dict)。
+        var root: [String: Any] = [:]
+        if let data = try? Data(contentsOf: authPath),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            root = parsed
+        }
+
+        // Pi 0.60 schema(从 dist/utils/oauth/openai-codex.js 反向工程):
+        //   { type: "oauth", access: <jwt>, refresh: <token>, expires: <ms> }
+        // expires 是 unix milliseconds(注意 ChatGPTOAuth 里 expiresAt 是
+        // 秒,× 1000)。
+        let expiresMs: Int64
+        if let secs = tokens.expiresAt {
+            expiresMs = Int64(secs * 1000)
+        } else {
+            // 没有 expiresAt 字段就保守给 1 小时,让 Pi 早点 refresh。
+            expiresMs = Int64((Date().timeIntervalSince1970 + 3600) * 1000)
+        }
+        root["openai-codex"] = [
+            "type": "oauth",
+            "access": tokens.accessToken,
+            "refresh": tokens.refreshToken,
+            "expires": expiresMs,
+        ] as [String: Any]
+
+        let data = try JSONSerialization.data(withJSONObject: root,
+                                              options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: authPath, options: .atomic)
+        // Pi 自己写时 chmod 0600,我们对齐。
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                              ofItemAtPath: authPath.path)
     }
 
     /// Same shape as a tool result but applied to a top-level message.

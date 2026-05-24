@@ -39,28 +39,13 @@ enum PiInstaller {
         try writeModelsJSON(providers: [.chatgpt])
     }
 
-    /// Re-write `~/.pi/agent/models.json`, registering every available model
-    /// per supplied provider so the in-chat picker can switch freely without
-    /// rewriting this file each time. Existing unknown entries are preserved.
+    /// **Pi 0.60 起 noop**:Pi 不再读自定义 models.json,所有 provider 都从
+    /// 内置 catalog 走(@mariozechner/pi-ai/dist/models.generated.js)。这个
+    /// 方法保留是为了避免改大批调用方,实际什么也不写。
+    /// 老版本残留的 `~/.pi/agent/models.json` 可以手动 `rm` 掉,Pi 0.60 不读它。
     static func writeModelsJSON(providers: [Provider]) throws {
-        let configDir = piGlobalConfigDir()
-        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-        let path = configDir.appendingPathComponent("models.json")
-
-        var root: [String: Any] = [:]
-        if let data = try? Data(contentsOf: path),
-           let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
-            root = parsed
-        }
-        var providerMap = (root["providers"] as? [String: Any]) ?? [:]
-        for p in providers {
-            providerMap[p.piName] = providerEntry(for: p, models: p.availableModels)
-        }
-        root["providers"] = providerMap
-
-        let data = try JSONSerialization.data(withJSONObject: root,
-                                              options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: path, options: .atomic)
+        // intentionally empty — Pi 0.60 不读这个文件。
+        _ = providers
     }
 
     // MARK: - private
