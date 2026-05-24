@@ -562,16 +562,11 @@ private struct IntegrationTile: View {
                         )
                     )
             )
-            // SwiftUI Button 默认只把 label "实际内容"算入命中区,.background
-            // 的圆角矩形不算。短文本 + 小 icon 的 tile(Notion / Perplexity 等)
-            // 点空白边就完全没反应。显式把整块矩形纳入命中。
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(alignment: .topTrailing) {
                 if isConnected {
                     Circle().fill(Color.green)
                         .frame(width: 7, height: 7)
                         .padding(7)
-                        .allowsHitTesting(false)  // 别拦住下面 button 的点击
                 }
             }
         }
@@ -588,35 +583,37 @@ struct IntegrationIcon: View {
 
     var body: some View {
         ZStack {
-            // 统一:所有 tile 都先铺一层品牌色圆角底块,再叠 foreground 内容
-            //(真 app 图标 / 资源图 / SF Symbol / letter)。视觉风格归一,
-            // 不再三种风格混着出现。
-            RoundedRectangle(cornerRadius: size * 0.22)
-                .fill(integration.accent)
-
             if let img = realIcon {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
-                    .padding(size * 0.12)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else if let asset = integration.assetName {
+                // 真品牌 SVG/PNG 资源 —— 白底原色,跟 macOS app icon 视觉一致。
+                RoundedRectangle(cornerRadius: size * 0.22)
+                    .fill(Color.white)
                 Image(asset)
                     .resizable()
                     .scaledToFit()
-                    .padding(size * 0.16)
-            } else if let symbol = integration.iconSymbol {
-                Image(systemName: symbol)
-                    .font(.system(size: size * 0.50, weight: .semibold))
-                    .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                    .padding(size * 0.18)
             } else {
-                Text(integration.letter)
-                    .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
-                    .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                // 品牌色底块 + 优先 SF Symbol(若提供),否则用 letter 字形。
+                RoundedRectangle(cornerRadius: size * 0.22)
+                    .fill(integration.accent)
+                if let symbol = integration.iconSymbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: size * 0.50, weight: .semibold))
+                        .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                } else {
+                    Text(integration.letter)
+                        .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
+                        .foregroundStyle(luminance(integration.accent) > 0.55 ? .black : .white)
+                }
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
         .task(id: integration.id) { await tryLoadRealIcon() }
     }
 
