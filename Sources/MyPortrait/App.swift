@@ -484,6 +484,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 系统对话框,只能用我们自己的 NSAlert + deep link 跳过去。
     /// 用户点过「Don't ask again」就在 UserDefaults 记一笔,后续启动跳过;
     /// 但 PermissionMonitor 3 秒轮询仍然会更新状态,UI 侧的徽章能反映出来。
+    /// `@MainActor` —— 内部全调 PermissionMonitor (@MainActor) +
+    /// NSAlert / NSApp 的 main-actor-isolated API。
+    @MainActor
     private func promptForFullDiskAccessIfNeeded() {
         guard services?.permissions.fullDiskAccess != .granted else { return }
         let kDismissedKey = "permissions.fullDiskAccess.promptDismissed"
