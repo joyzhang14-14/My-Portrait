@@ -471,6 +471,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //    - coordinator / audio **由 settings 驱动**：默认开关都 OFF →
         //      首启不弹屏幕录制 / 麦克风权限。用户在 Settings 面板打开后才启。
         services.startManagedLifecycle()
+
+        // 4. Full Disk Access 启动检查。FDA 没有 request API,只能 deep-link
+        // 到 System Settings。第一轮 refresh 是同步的,刚才 startManagedLifecycle
+        // 内部已经触发;直接读最新状态。用户主动 dismiss 过就不再 nag,直到
+        // 重新启动 + 状态从未授权过(避免每次启动都打扰)。
+        promptForFullDiskAccessIfNeeded()
+    }
+
+    /// 启动时如果 FDA 没授权,弹一个 NSAlert 引导用户去 System Settings 加
+    /// 这个 app。**macOS 16 之后系统对 TCC 弹窗收紧**,不能 in-process 强弹
+    /// 系统对话框,只能用我们自己的 NSAlert + deep link 跳过去。
+    /// 用户点过「Don't ask again」就在 UserDefaults 记一笔,后续启动跳过;
+    /// 但 PermissionMonitor 3 秒轮询仍然会更新状态,UI 侧的徽章能反映出来。
+    private func promptForFullDiskAccessIfNeeded() {
+        guard services?.permissions.fullDiskAccess != .granted else { return }
+        let kDismissedKey = "permissions.fullDiskAccess.promptDismissed"
+        if UserDefaults.standard.bool(forKey: kDismissedKey) { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Full Disk Access needed"
+        alert.informativeText = """
+        My Portrait reads files outside its sandbox (Mail, Safari, your \
+        ~/Library data sources) to build a complete personal-memory index. \
+        macOS requires Full Disk Access for this.
+
+        Click Open Settings to add My Portrait to the list, then toggle it \
+        on. You'll need to relaunch for the new permission to take effect.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: "Don't ask again")
+        // 让弹窗回到主应用上下文 —— 否则 macOS 26 偶尔把它丢到后台。
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:
+            services.permissions.openSettings(for: .fullDisk)
+        case .alertThirdButtonReturn:
+            UserDefaults.standard.set(true, forKey: kDismissedKey)
+        default:
+            break   // Later: 下次启动再问
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -35,6 +35,10 @@ final class PermissionMonitor: ObservableObject {
     @Published private(set) var screenRecording: Status = .notDetermined
     @Published private(set) var microphone: Status = .notDetermined
     @Published private(set) var accessibility: Status = .notDetermined
+    /// Full Disk Access。**没有 request API** —— 只能让用户去 System Settings
+    /// 手动加。检测靠 probe 读 TCC 数据库本身(macOS 每台必有,只在 FDA 授权
+    /// 后才可读)。3 秒轮询会自动捕获用户授权后的状态翻转。
+    @Published private(set) var fullDiskAccess: Status = .notDetermined
 
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "permissions")
     private let pollInterval: TimeInterval = 3.0
@@ -89,6 +93,11 @@ final class PermissionMonitor: ObservableObject {
             logger.info("accessibility: \(String(describing: self.accessibility), privacy: .public) → \(String(describing: newAX), privacy: .public)")
             accessibility = newAX
         }
+        let newFDA = Self.checkFullDiskAccess()
+        if newFDA != fullDiskAccess {
+            logger.info("full disk access: \(String(describing: self.fullDiskAccess), privacy: .public) → \(String(describing: newFDA), privacy: .public)")
+            fullDiskAccess = newFDA
+        }
     }
 
     // MARK: - 触发系统对话框
@@ -135,22 +144,27 @@ final class PermissionMonitor: ObservableObject {
         refresh()
     }
 
-    /// 直接跳到 System Settings 对应面板。用户拒过权限的话弹窗弹不了，靠这个。
+    /// 直接跳到 System Settings 对应面板。用户拒过权限的话弹窗弹不了,靠这个。
+    /// macOS 13+(Ventura,System Settings 重做)走新 URL scheme
+    /// `com.apple.settings.PrivacySecurity.extension`;老系统兼容旧 scheme。
+    /// 新 URL 在新系统打不开时退化到旧的(NSWorkspace.open 返回 false → 兜底)。
     func openSettings(for perm: Kind) {
-        let url: URL
+        let anchor: String
         switch perm {
-        case .screen:
-            url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-        case .microphone:
-            url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
-        case .accessibility:
-            url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        case .screen:        anchor = "Privacy_ScreenCapture"
+        case .microphone:    anchor = "Privacy_Microphone"
+        case .accessibility: anchor = "Privacy_Accessibility"
+        case .fullDisk:      anchor = "Privacy_AllFiles"
         }
-        NSWorkspace.shared.open(url)
+        let modernURL = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(anchor)")!
+        let legacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!
+        if !NSWorkspace.shared.open(modernURL) {
+            NSWorkspace.shared.open(legacyURL)
+        }
     }
 
     enum Kind: Sendable {
-        case screen, microphone, accessibility
+        case screen, microphone, accessibility, fullDisk
     }
 
     // MARK: - 检测实现（macOS）
@@ -169,5 +183,14 @@ final class PermissionMonitor: ObservableObject {
 
     private static func checkAccessibility() -> Status {
         AXIsProcessTrusted() ? .granted : .denied
+    }
+
+    /// Full Disk Access 没有公开 API,只能 probe。TCC.db 是 macOS 标准
+    /// TCC 数据库(每台 Mac 必有),只在 FDA 授权后才可读;否则 sandbox /
+    /// kernel 直接 deny。`isReadableFile` 不抛 stderr 噪声,够轻量。
+    private static func checkFullDiskAccess() -> Status {
+        let path = NSString(string: "~/Library/Application Support/com.apple.TCC/TCC.db")
+            .expandingTildeInPath
+        return FileManager.default.isReadableFile(atPath: path) ? .granted : .denied
     }
 }
