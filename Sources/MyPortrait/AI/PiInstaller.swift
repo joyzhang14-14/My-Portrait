@@ -72,7 +72,7 @@ enum PiInstaller {
     /// 内置 provider 不需要 models.json(Pi 0.60 自带 catalog)。
     private static func needsCustomEntry(_ p: Provider) -> Bool {
         switch p {
-        case .ollama, .perplexity: return true
+        case .ollama, .perplexity, .deepseek: return true
         default:                    return false
         }
     }

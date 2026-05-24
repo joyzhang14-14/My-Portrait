@@ -934,6 +934,7 @@ struct MemorySettingsView: View {
         case .ollama:      return "Ollama (local)"
         case .gemini:      return "Gemini (API key)"
         case .perplexity:  return "Perplexity (API key)"
+        case .deepseek:    return "DeepSeek (API key)"
         case .claudeCode:  return "Claude Code CLI (Pro / Max subscription)"
         }
     }

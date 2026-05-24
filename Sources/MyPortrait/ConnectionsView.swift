@@ -556,6 +556,7 @@ struct ConnectionsView: View {
         case "anthropic-api": return "Use your Anthropic API key. Pay-per-token, lowest latency."
         case "gemini":      return "Google AI Studio API key. Free tier available."
         case "perplexity":  return "Perplexity API for web-grounded answers."
+        case "deepseek":    return "DeepSeek API key. OpenAI-compatible endpoint, cheap pay-per-token."
         case "ollama":      return "Run open-source models on this Mac. Detects local Ollama install."
         case "obsidian":    return "Read & write your Obsidian vault as memory."
         case "notion":      return "Import Notion pages as context."

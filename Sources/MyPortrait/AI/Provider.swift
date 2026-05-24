@@ -16,6 +16,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     case ollama
     case gemini
     case perplexity
+    case deepseek
     /// Claude Code CLI(`claude` 二进制)—— 不走 Pi,用 ClaudeCodeAgent
     /// spawn 子进程,凭用户的 Pro/Max 订阅(`claude login`)用额度。
     case claudeCode = "claude-code"
@@ -31,6 +32,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case "gemini":        return .gemini
         case "ollama":        return .ollama
         case "perplexity":    return .perplexity
+        case "deepseek":      return .deepseek
         case "claude-code":   return .claudeCode
         default:              return nil
         }
@@ -48,6 +50,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:         return "ollama"        // ⚠️ Pi 0.60 不内置,需 models.json 自定义
         case .gemini:         return "google"        // Pi 把 GEMINI_API_KEY 映射到 google
         case .perplexity:     return "perplexity"    // ⚠️ Pi 0.60 不内置
+        case .deepseek:       return "deepseek"      // ⚠️ Pi 0.60 不内置
         case .claudeCode:     return ""              // 不走 Pi
         }
     }
@@ -66,6 +69,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
         case .gemini:     return ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
         case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
+        case .deepseek:   return ["deepseek-chat", "deepseek-reasoner"]
         // claude CLI 接受 alias(sonnet/opus/haiku 自动取最新)或完整 model id。
         case .claudeCode: return ["sonnet", "opus", "haiku"]
         }
@@ -88,6 +92,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:         return "http://localhost:11434/v1"
         case .gemini:         return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .perplexity:     return "https://api.perplexity.ai"
+        case .deepseek:       return "https://api.deepseek.com/v1"
         case .claudeCode:     return ""              // CLI 自己管理
         }
     }
@@ -101,6 +106,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:         return ""         // none
         case .gemini:         return "GEMINI_API_KEY"
         case .perplexity:     return "PERPLEXITY_API_KEY"
+        case .deepseek:       return "DEEPSEEK_API_KEY"
         case .claudeCode:     return ""         // none (CLI 走 `claude login`)
         }
     }
@@ -112,6 +118,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .openaiBYOK:     return "apikey:openai"
         case .gemini:         return "apikey:gemini"
         case .perplexity:     return "apikey:perplexity"
+        case .deepseek:       return "apikey:deepseek"
         case .chatgpt, .ollama, .claudeCode: return nil
         }
     }
@@ -132,6 +139,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .gemini:     return "gemini"
         case .ollama:     return "ollama"
         case .perplexity: return "perplexity"
+        case .deepseek:   return "deepseek"
         case .claudeCode: return "claude-code"
         }
     }
@@ -146,6 +154,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:     return "Ollama"
         case .gemini:     return "Gemini"
         case .perplexity: return "Perplexity"
+        case .deepseek:   return "DeepSeek"
         case .claudeCode: return "Claude Code"
         }
     }
