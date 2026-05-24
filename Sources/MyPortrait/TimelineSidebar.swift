@@ -74,6 +74,7 @@ struct TimelineSidebar: View {
                         }
                     } else if selection == .home || selection == .cronJobs {
                         cronJobsSection
+                        cronJobHistorySection
                         recentsSection
                     } else if selection == .memories {
                         memoryScopeSection
@@ -325,6 +326,39 @@ struct TimelineSidebar: View {
         .buttonStyle(.bouncyIcon)
     }
 
+    // MARK: Cron Job History (跨任务的最近运行汇总)
+
+    /// 把所有 cron job 的 runs 揉到一起,按时间倒序。最多展示 20 条。
+    private var aggregateCronJobRuns: [(jobName: String, run: CronJobRun)] {
+        cronJobStore.cronJobs
+            .flatMap { job in job.runs.map { (jobName: job.name, run: $0) } }
+            .sorted { $0.run.startedAt > $1.run.startedAt }
+    }
+
+    private var cronJobHistorySection: some View {
+        sectionCard {
+            SectionHeader(title: "CRON JOB HISTORY", count: aggregateCronJobRuns.count)
+            if aggregateCronJobRuns.isEmpty {
+                EmptyRow(text: "No runs yet.")
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(Array(aggregateCronJobRuns.prefix(20)), id: \.run.id) { row in
+                        CronJobHistoryRow(
+                            jobName: row.jobName,
+                            startedAt: row.run.startedAt,
+                            preview: row.run.preview,
+                            isActive: chat.currentConvId == row.run.convId,
+                            onTap: {
+                                chat.switchTo(row.run.convId)
+                                if selection == .cronJobs { selection = .home }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Cron Jobs (background AI workers)
 
     private var cronJobsSection: some View {
@@ -454,6 +488,75 @@ private struct EmptyRow: View {
             .font(.system(size: 11))
             .foregroundStyle(Theme.textTertiary)
             .padding(.vertical, Theme.Space.xs)
+    }
+}
+
+/// 单条 cron job 运行历史的行。jobName + 相对时间 + 一行 preview。
+/// 点击 → 切到那次 run 产生的 conv。
+private struct CronJobHistoryRow: View {
+    let jobName: String
+    let startedAt: Date
+    let preview: String
+    let isActive: Bool
+    let onTap: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isActive ? Theme.accent : Theme.textTertiary)
+                    .frame(width: 14, alignment: .center)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(jobName)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(isActive ? Theme.accent : Theme.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(Self.relative(startedAt))
+                            .font(.system(size: 10, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    }
+                    Text(preview.isEmpty ? "(empty)" : preview)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isActive ? Theme.accent.opacity(0.16)
+                          : (hover ? Color.white.opacity(0.05) : .clear))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(isActive ? Theme.accent.opacity(0.55) : .clear,
+                                    lineWidth: 0.7)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+
+    /// "2m ago" / "1h ago" / "3d ago" / 日期 fallback。
+    static func relative(_ date: Date) -> String {
+        let delta = Date().timeIntervalSince(date)
+        if delta < 60 { return "now" }
+        if delta < 3600 { return "\(Int(delta / 60))m ago" }
+        if delta < 86400 { return "\(Int(delta / 3600))h ago" }
+        if delta < 7 * 86400 { return "\(Int(delta / 86400))d ago" }
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f.string(from: date)
     }
 }
 
