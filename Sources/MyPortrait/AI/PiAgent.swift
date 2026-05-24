@@ -65,6 +65,13 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
     private let model: String
     private var stdoutBuffer = Data()
     private let bufLock = NSLock()
+    /// 最近 ~8KB stderr 输出。Pi 异常退出时附在 .error 里给用户/我们看,
+    /// 不写盘(避免 pi-rpc.log 那种无界增长)。
+    private var stderrTail = Data()
+    private let stderrLock = NSLock()
+    /// 进程退出前是否已经发过 agentEnd / message_end 的状态。terminationHandler
+    /// 据此决定是否要补一个 .error 给 ChatController(避免"thinking…"死循环)。
+    private var sawTurnEnd = false
 
     /// Continuation used to drive the AsyncStream of events.
     private var eventContinuation: AsyncStream<Event>.Continuation?
@@ -156,14 +163,40 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             if data.isEmpty { return }
             self?.appendStdout(data)
         }
-        // stderr 丢弃 —— readabilityHandler 必须挂,不然 stderr 缓冲塞满会
-        // 阻塞子进程,但不写盘。
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
+        // stderr 留最近 ~8KB 在内存(ring buffer 模拟:超长就截到 tail),
+        // 用于异常退出时给用户看为什么挂的。不写盘,无界增长是个大坑。
+        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let self else { return }
+            self.stderrLock.lock()
+            self.stderrTail.append(data)
+            if self.stderrTail.count > 8 * 1024 {
+                self.stderrTail = self.stderrTail.suffix(8 * 1024)
+            }
+            self.stderrLock.unlock()
         }
 
-        process.terminationHandler = { [weak self] _ in
-            self?.eventContinuation?.finish()
+        process.terminationHandler = { [weak self] proc in
+            guard let self else { return }
+            // 进程异常退出且没发过 turn-end 事件 → ChatController 不知道
+            // 怎么收尾,会一直转圈。补一个 .error 把 stderr tail 带回去。
+            if !self.sawTurnEnd {
+                self.stderrLock.lock()
+                let tail = String(data: self.stderrTail, encoding: .utf8) ?? ""
+                self.stderrLock.unlock()
+                let trimmed = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+                let msg: String
+                if proc.terminationStatus != 0 {
+                    msg = "Pi agent crashed (exit code \(proc.terminationStatus))."
+                        + (trimmed.isEmpty ? "" : "\n\nstderr:\n\(trimmed.suffix(2000))")
+                } else {
+                    msg = "Pi agent exited before responding."
+                        + (trimmed.isEmpty ? "" : "\n\nstderr:\n\(trimmed.suffix(2000))")
+                }
+                self.eventContinuation?.yield(.error(msg))
+                self.eventContinuation?.yield(.agentEnd)
+            }
+            self.eventContinuation?.finish()
         }
 
         do {
@@ -250,6 +283,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
         case "agent_start":
             emit(.agentStart)
         case "agent_end":
+            sawTurnEnd = true
             emit(.agentEnd)
         case "thinking_start":
             emit(.thinkingStart)
@@ -270,6 +304,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             let result  = Self.extractText(obj["result"]) ?? ""
             emit(.toolEnd(id: id, result: result, isError: isError))
         case "message_end":
+            sawTurnEnd = true
             // Fallback path for providers that don't emit text_delta
             // (notably openai-codex-responses). Extract assistant text from
             // the final message.content array, or surface errorMessage.
