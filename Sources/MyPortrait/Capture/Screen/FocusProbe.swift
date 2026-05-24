@@ -42,12 +42,28 @@ actor FocusProbe {
         "dev.warp.Warp-Stable",
     ]
 
-    /// AX 文本抓取的最大递归深度。5 层足够触达大多数 app 的内容区，
-    /// 而不会爆。10K 项以上的 Chrome 页面树会走早退保护。
-    private let axMaxDepth = 5
+    /// AX 文本抓取的最大递归深度。3 层覆盖大多数 app 的「窗口 → 主区 →
+    /// 子组件」三段,Electron / SwiftUI 嵌套深的不强求(它们 OCR 也够)。
+    /// 从 5 降到 3 主要是为了减少 walkAXText 时主线程持有时间。
+    private let axMaxDepth = 3
 
     /// AX 文本总长度上限（字符）。防止巨型页面（如 Twitter timeline）撑爆 RSS。
     private let axMaxChars = 100_000
+
+    /// AX 树元素数上限。深度门槛只能挡递归层数,挡不住一个窗口里 10000
+    /// 个 sibling 的情况(Chrome 大页面、Slack 长 timeline)。500 是经验值,
+    /// 主线程上 500 次跨进程 XPC 大约 30–80ms,可以接受。
+    private let axMaxElements = 500
+
+    /// 单次 walkAXText 总墙钟预算(纳秒)。超时立即返回当前已抓到的内容。
+    /// 150ms 是「用户感觉到的卡顿门槛」边界 —— 比这再长一帧就掉。
+    private let axWalkBudgetNs: UInt64 = 150_000_000
+
+    /// 节流:相邻两次 refresh 最小间隔。NSWorkspace 通知风暴时(Mission
+    /// Control / 快速 Cmd-Tab)会一秒打过来七八条,如果每条都跑一整次 AX
+    /// 遍历,主线程当场跪。
+    private let refreshMinIntervalMs: Int64 = 300
+    private var lastRefreshAtMs: Int64 = 0
 
     private var cached: FocusInfo = FocusInfo(
         appName: "Unknown",
@@ -113,6 +129,13 @@ actor FocusProbe {
     // MARK: - 私有
 
     private func refresh() async {
+        // 节流:NSWorkspace 通知风暴(Mission Control / 快速 Cmd-Tab)会瞬间
+        // 派发七八条 didActivateApplication,跳过 refreshMinIntervalMs 内的
+        // 重复触发,避免主线程被 AX walk 串行队列堵死。
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        if nowMs - lastRefreshAtMs < refreshMinIntervalMs { return }
+        lastRefreshAtMs = nowMs
+
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
 
         let name = app.localizedName ?? "Unknown"
@@ -195,13 +218,21 @@ actor FocusProbe {
         if let bid = bundleId, !Self.terminalBundleIds.contains(bid) {
             var pieces: [String] = []
             var charCount = 0
+            var elemCount = 0
+            // 墙钟 deadline:从「现在」开始的 axWalkBudgetNs。任何递归层
+            // 看到当前时间超出就 return。最差情况:抓到的 axText 不全,
+            // 但主线程一定能在 150ms 内放手。
+            let deadline = DispatchTime.now().uptimeNanoseconds + axWalkBudgetNs
             walkAXText(
                 element: focusedWindow,
                 depth: 0,
                 maxDepth: axMaxDepth,
                 maxChars: axMaxChars,
+                maxElements: axMaxElements,
+                deadlineNs: deadline,
                 pieces: &pieces,
-                charCount: &charCount
+                charCount: &charCount,
+                elemCount: &elemCount
             )
             let joined = pieces.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
             if !joined.isEmpty {
@@ -213,16 +244,22 @@ actor FocusProbe {
     }
 
     /// 递归遍历 AX element，累计 AXValue / AXTitle / AXDescription 文本。
-    /// 写成迭代风格其实更快，但递归读起来直观；depth ≤ 5 时栈深度可控。
+    /// 写成迭代风格其实更快，但递归读起来直观；depth ≤ 3 时栈深度可控。
+    /// 三重早退保护:depth / charCount / elemCount,加上墙钟 deadline。
     nonisolated private func walkAXText(
         element: AXUIElement,
         depth: Int,
         maxDepth: Int,
         maxChars: Int,
+        maxElements: Int,
+        deadlineNs: UInt64,
         pieces: inout [String],
-        charCount: inout Int
+        charCount: inout Int,
+        elemCount: inout Int
     ) {
-        if depth > maxDepth || charCount > maxChars { return }
+        if depth > maxDepth || charCount > maxChars || elemCount > maxElements { return }
+        if DispatchTime.now().uptimeNanoseconds > deadlineNs { return }
+        elemCount += 1
 
         // 顺序尝试：AXValue → AXTitle → AXDescription。一个元素只取一份，
         // 不双计 title+value（title 通常是 value 的标签）。
@@ -243,10 +280,13 @@ actor FocusProbe {
         if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
            let children = childrenRef as? [AXUIElement] {
             for child in children {
-                if charCount > maxChars { return }
+                if charCount > maxChars || elemCount > maxElements { return }
+                if DispatchTime.now().uptimeNanoseconds > deadlineNs { return }
                 walkAXText(
                     element: child, depth: depth + 1, maxDepth: maxDepth,
-                    maxChars: maxChars, pieces: &pieces, charCount: &charCount
+                    maxChars: maxChars, maxElements: maxElements,
+                    deadlineNs: deadlineNs,
+                    pieces: &pieces, charCount: &charCount, elemCount: &elemCount
                 )
             }
         }
