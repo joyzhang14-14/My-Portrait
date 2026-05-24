@@ -276,16 +276,44 @@ struct AIModelsConfig: Codable, Equatable {
     /// 语义搜索索引（bge-m3 向量化）开关。默认关 —— 开着 EmbeddingWorker 会把
     /// 历史文本全转成向量，常驻 ~1.15GB 内存;关掉则只用关键词搜索。
     var semanticIndexEnabled: Bool = false
+
+    /// Integration id (chatgpt / anthropic-api / gemini / ollama) → 是否在
+    /// chat picker 里隐藏。Connections 里照常连着,只是聊天选不到。
+    var disabledProviderIds: [String] = []
+
+    /// Integration id → 用户勾选的可见 model 子集。不在 map / 空数组 = "全部
+    /// model 都可见"(向后兼容默认值)。空 string array 等价于"一个都不留",
+    /// chat picker 里 model 列表会空 —— UI 不允许保存空数组。
+    var enabledModelsByProvider: [String: [String]] = [:]
+
     init() {}
     enum CodingKeys: String, CodingKey {
         case presets
-        case semanticIndexEnabled = "semantic_index_enabled"
+        case semanticIndexEnabled       = "semantic_index_enabled"
+        case disabledProviderIds        = "disabled_provider_ids"
+        case enabledModelsByProvider    = "enabled_models_by_provider"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        presets = c.dflt([AIPresetSpec].self, .presets, presets)
-        semanticIndexEnabled = c.dflt(Bool.self, .semanticIndexEnabled, semanticIndexEnabled)
+        presets                  = c.dflt([AIPresetSpec].self,        .presets, presets)
+        semanticIndexEnabled     = c.dflt(Bool.self,                  .semanticIndexEnabled, semanticIndexEnabled)
+        disabledProviderIds      = c.dflt([String].self,              .disabledProviderIds, disabledProviderIds)
+        enabledModelsByProvider  = c.dflt([String: [String]].self,    .enabledModelsByProvider, enabledModelsByProvider)
+    }
+
+    /// chat picker 用:某个 integration 是否可见。
+    func isProviderEnabled(_ integrationId: String) -> Bool {
+        !disabledProviderIds.contains(integrationId)
+    }
+
+    /// chat picker 用:某个 integration 应该列哪些 model。没配置过 = 全列。
+    func visibleModels(forIntegrationId id: String, available: [String]) -> [String] {
+        guard let picked = enabledModelsByProvider[id], !picked.isEmpty else {
+            return available
+        }
+        let set = Set(picked)
+        return available.filter { set.contains($0) }
     }
 }
 
