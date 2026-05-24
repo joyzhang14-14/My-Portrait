@@ -61,12 +61,20 @@ final class WritingCaptureWorker {
 
     /// 跑所有「未处理的天」。返回每天的执行摘要。
     /// 串行处理,一天一天跑 —— LLM 调用本来就慢,并发没意义。
+    /// **过滤**:跳过当天 typing_events 为 0 的天 —— 纯 OCR 重建不可靠,
+    /// 浪费 LLM token + 出来的多是幻觉。
     func runUnprocessedDays() async throws -> [WritingCaptureDayRunSummary] {
-        let days = try await Task.detached(priority: .userInitiated) { [store] in
+        let candidate = try await Task.detached(priority: .userInitiated) { [store] in
             try store.unprocessedDays()
         }.value
+        let days = try await Task.detached(priority: .userInitiated) { [store] in
+            candidate.filter { d in
+                (try? store.hasTypingEvents(date: d)) == true
+            }
+        }.value
+        let skipped = candidate.count - days.count
 
-        workerLog.info("found \(days.count, privacy: .public) unprocessed days")
+        workerLog.info("found \(candidate.count, privacy: .public) unprocessed days, \(days.count, privacy: .public) with typing (\(skipped, privacy: .public) skipped: no typing)")
 
         var summaries: [WritingCaptureDayRunSummary] = []
         for day in days {

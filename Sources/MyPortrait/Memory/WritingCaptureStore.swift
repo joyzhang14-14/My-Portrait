@@ -141,6 +141,19 @@ struct WritingCaptureStore: Sendable {
     // MARK: - 读 raw(某 UTC 天)
 
     /// 读某 UTC 日期的 typing_events。
+    /// 某 UTC 日是否有 typing_events。`runUnprocessedDays()` 拿来过滤纯 OCR 天。
+    func hasTypingEvents(date: String) throws -> Bool {
+        let (startMs, endMs) = try Self.utcDayRangeMs(date: date)
+        return try dbPool.read { db in
+            let n: Int = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM typing_events WHERE started_at >= :s AND started_at < :e LIMIT 1",
+                arguments: ["s": startMs, "e": endMs]
+            ) ?? 0
+            return n > 0
+        }
+    }
+
     func typingEventsForDay(_ date: String) throws -> [TypingEvent] {
         let (startMs, endMs) = try Self.utcDayRangeMs(date: date)
         return try dbPool.read { db in
