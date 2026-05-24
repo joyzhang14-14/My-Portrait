@@ -76,14 +76,25 @@ final class WritingCapturePass1Agent {
     }
 
     /// 跑 Pass 1。
-    /// - Parameter ocrFrames: 一天里所有 raw_session 的 ocrFrames 拍平拼起来,按 ts 排好。
+    /// - Parameters:
+    ///   - ocrFrames: 时间窗内所有 raw_session 的 ocrFrames 拍平排好。
+    ///   - typingEvents: 同时间窗的 typing_events,给 LLM 当"用户在哪段时间真打字"信号。
+    ///   - keystrokes: 同时间窗的 keystroke_log,聚合成"key_activity per minute"塞进 prompt。
     /// - Returns: prompt + raw 响应 + 解析后的 timeline。
-    func run(ocrFrames: [WritingCaptureOcrFrame]) async throws -> Output {
-        let prompt = Self.buildPrompt(ocrFrames: ocrFrames)
+    func run(
+        ocrFrames: [WritingCaptureOcrFrame],
+        typingEvents: [TypingEvent] = [],
+        keystrokes: [KeystrokeEntry] = []
+    ) async throws -> Output {
+        let prompt = Self.buildPrompt(
+            ocrFrames: ocrFrames,
+            typingEvents: typingEvents,
+            keystrokes: keystrokes
+        )
 
-        // 空 OCR 短路 —— 整天没 OCR 数据,直接返回空 timeline。
-        if ocrFrames.isEmpty {
-            return Output(prompt: prompt, rawResponse: "(short-circuited: no ocr frames)", timeline: [])
+        // 空 OCR + 空 typing + 空 keystroke 短路 —— 没数据无法切 timeline
+        if ocrFrames.isEmpty && typingEvents.isEmpty && keystrokes.isEmpty {
+            return Output(prompt: prompt, rawResponse: "(short-circuited: no input data)", timeline: [])
         }
 
         let agent = try MemoryAgentFactory.make(provider: provider, model: model)
@@ -172,7 +183,13 @@ final class WritingCapturePass1Agent {
     }
 
     /// 拼 prompt:静态 system 指令 + user 数据块。
-    static func buildPrompt(ocrFrames: [WritingCaptureOcrFrame]) -> String {
+    /// 三块输入:ocr_frames(已 dedupe + 采样),typing_summary(轻量,
+    /// 帮 LLM 知道哪段时间真在打字),keystroke_activity(per minute 聚合)。
+    static func buildPrompt(
+        ocrFrames: [WritingCaptureOcrFrame],
+        typingEvents: [TypingEvent] = [],
+        keystrokes: [KeystrokeEntry] = []
+    ) -> String {
         var lines: [String] = [WritingCapturePrompts.pass1ContextTimeline]
         lines.append("")
         lines.append("ocr_frames:")
@@ -183,7 +200,63 @@ final class WritingCapturePass1Agent {
         } else {
             lines.append("[]")
         }
+        lines.append("")
+        lines.append("typing_summary:")
+        lines.append(encodeTypingSummary(typingEvents))
+        lines.append("")
+        lines.append("keystroke_activity:")
+        lines.append(encodeKeystrokeActivity(keystrokes))
         return lines.joined(separator: "\n")
+    }
+
+    /// typing summary —— 给 LLM "哪段时间在某 app 真打了多少字" 信号。
+    /// 不喂 text(那是 Pass 2 的事),只喂 {ts, app, url, chars}。
+    static func encodeTypingSummary(_ events: [TypingEvent]) -> String {
+        struct Row: Encodable {
+            let ts: Int64
+            let app: String
+            let url: String?
+            let chars: Int
+        }
+        let rows = events.map { e in
+            Row(ts: e.startedAt, app: e.bundleId,
+                url: e.url.isEmpty ? nil : e.url,
+                chars: e.text.count)
+        }
+        return (try? JSONEncoder.pass1Encoder.encode(rows))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    }
+
+    /// keystroke activity —— 按 (1 分钟 bucket, app) 聚合 keystroke 数量。
+    /// LLM 看这个能判:某分钟某 app 有多少键击 → 用户在干啥。
+    /// 不喂 char(隐私 + 量大),只喂 count。
+    static func encodeKeystrokeActivity(_ keys: [KeystrokeEntry]) -> String {
+        struct Row: Encodable {
+            let tsMinute: Int64
+            let app: String
+            let count: Int
+            enum CodingKeys: String, CodingKey {
+                case tsMinute = "ts_minute"
+                case app, count
+            }
+        }
+        // 按 (minute bucket, app) 聚合
+        var bucket: [String: (Int64, String, Int)] = [:]
+        for k in keys {
+            let minute = (k.tsMs / 60_000) * 60_000
+            let key = "\(minute)|\(k.bundleId)"
+            if var v = bucket[key] {
+                v.2 += 1
+                bucket[key] = v
+            } else {
+                bucket[key] = (minute, k.bundleId, 1)
+            }
+        }
+        let rows = bucket.values
+            .sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+            .map { Row(tsMinute: $0.0, app: $0.1, count: $0.2) }
+        return (try? JSONEncoder.pass1Encoder.encode(rows))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     }
 
     // MARK: - JSON 解析

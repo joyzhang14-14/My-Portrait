@@ -167,13 +167,22 @@ final class WritingCaptureWorker {
         // 3. Pass 1 —— 整天 OCR 抽 context timeline
         let allOcrFrames = step0.rawSessions.flatMap { $0.ocrFrames }
             .sorted(by: { $0.startTs < $1.startTs })
-        // DEBUG: 转储 prompt 给 /tmp 看实际大小
-        let probePrompt = WritingCapturePass1Agent.buildPrompt(ocrFrames: allOcrFrames)
+        // Pass 1 也喂 raw.typing + raw.keys 当 cross-signal,帮 LLM 区分
+        // "用户在打字" vs "用户在看东西"
+        let probePrompt = WritingCapturePass1Agent.buildPrompt(
+            ocrFrames: allOcrFrames,
+            typingEvents: raw.typing,
+            keystrokes: raw.keys
+        )
         try? probePrompt.write(
             toFile: "/tmp/writing-capture-pass1-prompt.txt",
             atomically: false, encoding: .utf8)
         workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars, dumped /tmp/writing-capture-pass1-prompt.txt")
-        let pass1Out = try await pass1.run(ocrFrames: allOcrFrames)
+        let pass1Out = try await pass1.run(
+            ocrFrames: allOcrFrames,
+            typingEvents: raw.typing,
+            keystrokes: raw.keys
+        )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
@@ -348,12 +357,20 @@ final class WritingCaptureWorker {
         let frameMax = perSessionFrames.max() ?? 0
         let frameDist = perSessionFrames.sorted(by: >).prefix(5).map(String.init).joined(separator: ",")
         workerLog.info("ocr/session: sum=\(frameSum, privacy: .public) max=\(frameMax, privacy: .public) top5=[\(frameDist, privacy: .public)] sessions=\(step0.rawSessions.count, privacy: .public)")
-        let probePrompt = WritingCapturePass1Agent.buildPrompt(ocrFrames: allOcrFrames)
+        let probePrompt = WritingCapturePass1Agent.buildPrompt(
+            ocrFrames: allOcrFrames,
+            typingEvents: raw.typing,
+            keystrokes: raw.keys
+        )
         try? probePrompt.write(
             toFile: "/tmp/writing-capture-pass1-prompt.txt",
             atomically: false, encoding: .utf8)
         workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars")
-        let pass1Out = try await pass1.run(ocrFrames: allOcrFrames)
+        let pass1Out = try await pass1.run(
+            ocrFrames: allOcrFrames,
+            typingEvents: raw.typing,
+            keystrokes: raw.keys
+        )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
         // 4. group + 5. Pass 2 并发

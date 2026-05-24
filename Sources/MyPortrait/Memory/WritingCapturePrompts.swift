@@ -13,9 +13,31 @@ enum WritingCapturePrompts {
 
     INPUT (all timestamps in unix ms, sorted ascending)
     - ocr_frames: list of OCR text frames per time range, with focused app/URL metadata.
-      Pre-processed: adjacent frames with >85% Jaccard similarity have been deduped,
-      and frames where total text < 20 chars have been filtered out.
-      Format: [{frame_id, start_ts, end_ts, app, url, text}, ...]
+      Pre-processed: adjacent frames with >50% Jaccard similarity have been deduped,
+      anchored to ±10s of a typing/keystroke event. Format:
+      [{frame_id, start_ts, end_ts, app, url, text}, ...]
+    - typing_summary: every typing_event in the window (no text content shown).
+      Format: [{ts, app, url, chars}, ...]
+      Tells you which time slices the user was ACTUALLY typing (AX confirmed
+      content went into an input field) vs which slices they were just looking
+      at content.
+    - keystroke_activity: raw key presses aggregated per (1-minute bucket, app).
+      Format: [{ts_minute, app, count}, ...]
+      Tells you the physical typing rhythm even when AX missed it (canvas
+      editors, etc). High count = user actively typing; zero count = passive
+      reading / browsing.
+
+    CROSS-SIGNAL READING (critical for accurate intent_type)
+    - OCR alone is misleading: "Slack with English text" on screen could be
+      the user reading messages OR replying. typing_summary + keystroke_activity
+      disambiguates.
+    - High keystroke + low/no typing_summary in canvas-like app
+      (Google Docs, Notion, Obsidian web) → user IS writing (canvas_fusion).
+    - Zero keystroke + zero typing_summary + OCR text changing → user is
+      reading / scrolling, intent = "reading".
+    - Zero keystroke + stable OCR → idle, skip the segment.
+    - Many short chat-style typing_summary entries → "chat".
+    - Long typing_summary in editor app → "writing".
 
     TASK
 
