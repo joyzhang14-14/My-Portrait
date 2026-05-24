@@ -431,6 +431,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.closeButton)?.isHidden = false
         window.standardWindowButton(.miniaturizeButton)?.isHidden = false
         window.standardWindowButton(.zoomButton)?.isHidden = false
+        // 关掉 NSWindow 默认的 state restoration —— 用户上次手动 resize
+        // 后,macOS 会偷偷把那个尺寸记下,下次启动 contentRect 被覆盖,
+        // 看上去"初始窗口变大了"。关掉后每次启动都老老实实 1200×835。
+        window.isRestorable = false
+        window.setContentSize(NSSize(width: 1200, height: 835))
 
         // Host the SwiftUI ContentView inside the AppKit window.
         // Inject the Services container + captureSettings into the environment
