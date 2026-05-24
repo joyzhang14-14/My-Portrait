@@ -247,6 +247,181 @@ final class WritingCaptureWorker {
         )
     }
 
+    // MARK: - Backlog mode(v27) —— 不按天分,从 cursor 跑到现在
+
+    /// backlog 模式的固定 date_utc key —— 复用 writing_capture_runs 表 schema,
+    /// 不用 'YYYY-MM-DD' 而是常量 'all'。staged / discarded / runs 全用这个 key。
+    nonisolated static let backlogDateKey = "all"
+
+    /// 跑一次 backlog:cursor → now。
+    /// approve 后 cursor 推进,reject 不动 cursor。
+    func runBacklog() async throws -> WritingCaptureDayRunSummary {
+        let runId = UUID().uuidString
+        let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        // cursor:上次 approve 处理到的 max ts(exclusive)
+        let cursor = try await Task.detached(priority: .userInitiated) { [store] in
+            try store.getCursor()
+        }.value
+        let endMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 跑之前先清 staged(避免上次 pending_review 没 approve/reject 残留)
+        try await Task.detached(priority: .userInitiated) { [store] in
+            try store.clearStaged(date: Self.backlogDateKey)
+            try store.upsertRunStatus(
+                date: Self.backlogDateKey, status: .processing,
+                runId: runId, startedAt: startedAtMs
+            )
+        }.value
+
+        do {
+            let summary = try await runBacklogCore(
+                runId: runId, startMs: cursor, endMs: endMs
+            )
+            return summary
+        } catch {
+            let msg = error.localizedDescription
+            try? await Task.detached(priority: .userInitiated) { [store] in
+                try store.upsertRunStatus(
+                    date: Self.backlogDateKey, status: .failed,
+                    completedAt: Int64(Date().timeIntervalSince1970 * 1000),
+                    errorMessage: msg
+                )
+            }.value
+            throw error
+        }
+    }
+
+    private func runBacklogCore(
+        runId: String, startMs: Int64, endMs: Int64
+    ) async throws -> WritingCaptureDayRunSummary {
+        let date = Self.backlogDateKey
+        let userBlacklist = ConfigStore.shared.privacy.typingBlacklistBundleIds
+        let hardcoded = TypingPrivacyFilter.defaultBlacklist
+        let blacklist = Set(hardcoded).union(userBlacklist)
+
+        // 1. 读 raw —— 全范围(startMs, endMs)
+        let raw = try await Task.detached(priority: .userInitiated) { [store] in
+            let typing = try store.typingEventsInRange(startMs: startMs, endMs: endMs)
+            let keys = try store.keystrokesInRange(
+                startMs: startMs, endMs: endMs, excludeBundleIds: blacklist
+            )
+            let frames = try store.framesInRange(startMs: startMs, endMs: endMs)
+            return (typing: typing, keys: keys, frames: frames)
+        }.value
+        workerLog.info("backlog range=[\(startMs, privacy: .public), \(endMs, privacy: .public)) raw: typing=\(raw.typing.count) keys=\(raw.keys.count) frames=\(raw.frames.count)")
+
+        // 2. Step 0
+        let step0 = WritingCaptureStep0.preprocess(
+            typingEvents: raw.typing, keystrokes: raw.keys, rawOcrFrames: raw.frames
+        )
+        workerLog.info("step0: \(step0.rawSessions.count) sessions, \(step0.throwawaySessions.count) throwaway")
+
+        // 没 sessions → 没东西可 review,直接标 approved 空 + 推进 cursor
+        if step0.rawSessions.isEmpty {
+            try await Task.detached(priority: .userInitiated) { [store] in
+                try store.setCursor(endMs)
+                try store.upsertRunStatus(
+                    date: date, status: .approved,
+                    completedAt: Int64(Date().timeIntervalSince1970 * 1000),
+                    discardedCount: step0.throwawaySessions.count, recordsCount: 0
+                )
+            }.value
+            return WritingCaptureDayRunSummary(
+                date: date, runId: runId, status: .approved,
+                recordsCount: 0, discardedCount: step0.throwawaySessions.count,
+                errorMessage: nil
+            )
+        }
+
+        // 3. Pass 1
+        let allOcrFrames = step0.rawSessions.flatMap { $0.ocrFrames }
+            .sorted(by: { $0.startTs < $1.startTs })
+        let probePrompt = WritingCapturePass1Agent.buildPrompt(ocrFrames: allOcrFrames)
+        try? probePrompt.write(
+            toFile: "/tmp/writing-capture-pass1-prompt.txt",
+            atomically: false, encoding: .utf8)
+        workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars")
+        let pass1Out = try await pass1.run(ocrFrames: allOcrFrames)
+        workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
+
+        // 4. group + 5. Pass 2 并发
+        let groups = Self.groupRawSessionsByApp(step0.rawSessions)
+        workerLog.info("grouped by app+url: \(step0.rawSessions.count) sessions → \(groups.count) groups")
+        let pass2Results = await Self.runPass2Concurrently(
+            contextTimeline: pass1Out.timeline, groups: groups, concurrency: 5,
+            makePass2: { @MainActor in WritingCapturePass2Agent() }
+        )
+
+        // 6. 合并
+        var allRecords: [WritingCaptureRecord] = []
+        var allDiscarded: [WritingCaptureDiscarded] = []
+        var failedGroups = 0
+        var rawResponses: [String] = []
+        var firstPrompt: String?
+        for r in pass2Results {
+            switch r {
+            case .success(let out):
+                allRecords.append(contentsOf: out.records)
+                allDiscarded.append(contentsOf: out.discarded)
+                rawResponses.append(out.rawResponse)
+                if firstPrompt == nil { firstPrompt = out.prompt }
+            case .failure(let err):
+                failedGroups += 1
+                workerLog.warning("pass2 group failed: \(String(describing: err), privacy: .public)")
+            }
+        }
+        workerLog.info("pass2 fanout: \(allRecords.count) records, \(allDiscarded.count) discarded, \(failedGroups) failed groups")
+
+        // 7. stage
+        let promptId = Self.promptIdHash(pass1: pass1Out.prompt, pass2: firstPrompt ?? "")
+        try await Task.detached(priority: .userInitiated) { [store] in
+            try store.insertStaged(
+                date: date, runId: runId, promptId: promptId,
+                records: allRecords,
+                rawPass1Output: pass1Out.rawResponse,
+                rawPass2Output: rawResponses.joined(separator: "\n---\n")
+            )
+            try store.insertStagedDiscarded(date: date, runId: runId, discarded: allDiscarded)
+        }.value
+
+        // 8. pending_review。**完成时刻 = endMs**,approve 时把 cursor 推进到这。
+        try await Task.detached(priority: .userInitiated) { [store] in
+            try store.upsertRunStatus(
+                date: date, status: .pendingReview,
+                completedAt: endMs,   // 复用 completed_at 编码 range_end
+                discardedCount: allDiscarded.count, recordsCount: allRecords.count
+            )
+        }.value
+
+        return WritingCaptureDayRunSummary(
+            date: date, runId: runId, status: .pendingReview,
+            recordsCount: allRecords.count, discardedCount: allDiscarded.count,
+            errorMessage: nil
+        )
+    }
+
+    /// approve backlog:拷 staged → writing_records,推进 cursor,清 staged。
+    func approveBacklog() async throws -> Int {
+        return try await Task.detached(priority: .userInitiated) { [store] in
+            // cursor 推进到本次 run 的 endMs(存在 runs.completed_at)
+            let endMs = (try? store.fetchRunCompletedAt(date: Self.backlogDateKey)) ?? Int64(Date().timeIntervalSince1970 * 1000)
+            let copied = try store.approveStaged(date: Self.backlogDateKey)
+            try store.setCursor(endMs)
+            return copied
+        }.value
+    }
+
+    /// reject backlog:清 staged,cursor 不动(下次 run 同样范围重跑)。
+    func rejectBacklog() async throws {
+        try await Task.detached(priority: .userInitiated) { [store] in
+            try store.clearStaged(date: Self.backlogDateKey)
+            try store.upsertRunStatus(
+                date: Self.backlogDateKey, status: .rejectedForRerun,
+                completedAt: Int64(Date().timeIntervalSince1970 * 1000)
+            )
+        }.value
+    }
+
     // MARK: - Approve / Reject
 
     /// 用户在 Pending review 里点 Approve。

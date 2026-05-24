@@ -681,6 +681,18 @@ enum DBSchema {
                 "CREATE INDEX idx_writing_records_kind ON writing_records(kind, start_ts)")
         }
 
+        // v27: 全历史 backlog cursor —— 一个 row,记录"已处理到哪个 ts"。
+        // approve 后 cursor 推进到本次 run 处理的 max ts,下次只跑 cursor 之后。
+        m.registerMigration("v27_writing_capture_cursor") { db in
+            try db.create(table: "writing_capture_cursor") { t in
+                t.column("id", .integer).primaryKey()  // 永远 = 1
+                t.column("last_processed_ts", .integer).notNull().defaults(to: 0)
+                t.check(sql: "id = 1")
+            }
+            try db.execute(sql:
+                "INSERT INTO writing_capture_cursor (id, last_processed_ts) VALUES (1, 0)")
+        }
+
         return m
     }
 }

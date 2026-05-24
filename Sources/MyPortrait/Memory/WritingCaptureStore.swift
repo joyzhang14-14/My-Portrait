@@ -141,6 +141,121 @@ struct WritingCaptureStore: Sendable {
     // MARK: - 读 raw(某 UTC 天)
 
     /// 读某 UTC 日期的 typing_events。
+    // MARK: - Backlog cursor(v27) —— 全历史一次跑用
+
+    /// 读 cursor:上次 approve 后处理到的 max ts(exclusive lower bound)。
+    /// 0 = 还没 approve 过任何 backlog,从最早 typing 开始。
+    func getCursor() throws -> Int64 {
+        try dbPool.read { db in
+            try Int64.fetchOne(
+                db, sql: "SELECT last_processed_ts FROM writing_capture_cursor WHERE id = 1"
+            ) ?? 0
+        }
+    }
+
+    /// 推进 cursor。approve backlog 时调。
+    func setCursor(_ ts: Int64) throws {
+        try dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE writing_capture_cursor SET last_processed_ts = :ts WHERE id = 1",
+                arguments: ["ts": ts]
+            )
+        }
+    }
+
+    /// 读某 run 的 completed_at —— backlog approve 时拿来推进 cursor。
+    func fetchRunCompletedAt(date: String) throws -> Int64? {
+        try dbPool.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT completed_at FROM writing_capture_runs WHERE date_utc = :d",
+                arguments: ["d": date]
+            )
+        }
+    }
+
+    /// 第一条 typing_event 的 ts(给 UI / log 展示用)。无 typing 返回 nil。
+    func firstTypingEventTs() throws -> Int64? {
+        try dbPool.read { db in
+            try Int64.fetchOne(
+                db, sql: "SELECT MIN(started_at) FROM typing_events"
+            )
+        }
+    }
+
+    // MARK: - Range queries(backlog 用)
+
+    func typingEventsInRange(startMs: Int64, endMs: Int64) throws -> [TypingEvent] {
+        try dbPool.read { db in
+            try TypingEvent.fetchAll(
+                db,
+                sql: """
+                    SELECT id, bundle_id, element_hash, started_at, ended_at, text, edit_log,
+                           total_chars, session_start, end_value, stripped, url
+                    FROM typing_events
+                    WHERE started_at >= :s AND started_at < :e
+                    ORDER BY started_at ASC
+                    """,
+                arguments: ["s": startMs, "e": endMs]
+            )
+        }
+    }
+
+    func keystrokesInRange(
+        startMs: Int64, endMs: Int64, excludeBundleIds: Set<String>
+    ) throws -> [KeystrokeEntry] {
+        try dbPool.read { db in
+            if excludeBundleIds.isEmpty {
+                return try KeystrokeEntry.fetchAll(
+                    db,
+                    sql: """
+                        SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers FROM keystroke_log
+                        WHERE ts_ms >= :s AND ts_ms < :e
+                        ORDER BY ts_ms ASC
+                        """,
+                    arguments: ["s": startMs, "e": endMs]
+                )
+            }
+            let placeholders = excludeBundleIds.map { _ in "?" }.joined(separator: ",")
+            var args: [DatabaseValueConvertible] = [startMs, endMs]
+            args.append(contentsOf: excludeBundleIds.map { $0 as DatabaseValueConvertible })
+            return try KeystrokeEntry.fetchAll(
+                db,
+                sql: """
+                    SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers FROM keystroke_log
+                    WHERE ts_ms >= ? AND ts_ms < ?
+                      AND bundle_id NOT IN (\(placeholders))
+                    ORDER BY ts_ms ASC
+                    """,
+                arguments: StatementArguments(args)
+            )
+        }
+    }
+
+    func framesInRange(startMs: Int64, endMs: Int64) throws -> [WritingCaptureRawOcr] {
+        let normalizer = AppIdentifierNormalizer.snapshot()
+        return try dbPool.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, timestamp_ms, app_name, browser_url, full_text FROM frames
+                    WHERE timestamp_ms >= :s AND timestamp_ms < :e
+                      AND full_text IS NOT NULL AND full_text != ''
+                    ORDER BY timestamp_ms ASC
+                    """,
+                arguments: ["s": startMs, "e": endMs]
+            )
+            return rows.map {
+                let rawApp = ($0["app_name"] as String?) ?? "unknown"
+                return WritingCaptureRawOcr(
+                    id: $0["id"], tsMs: $0["timestamp_ms"],
+                    app: normalizer.bundleId(forLocalizedName: rawApp),
+                    url: $0["browser_url"], text: ($0["full_text"] as String?) ?? ""
+                )
+            }
+        }
+    }
+
     /// 某 UTC 日是否有 typing_events。`runUnprocessedDays()` 拿来过滤纯 OCR 天。
     func hasTypingEvents(date: String) throws -> Bool {
         let (startMs, endMs) = try Self.utcDayRangeMs(date: date)

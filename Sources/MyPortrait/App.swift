@@ -274,6 +274,16 @@ struct MyPortraitApp: App {
             }()
             WritingCaptureCLI.run(specificDate: date)
         }
+        // v27 backlog 模式:不按天分,cursor → 现在,全量跑一次
+        if args.contains("--writing-capture-backlog") {
+            WritingCaptureCLI.runBacklog()
+        }
+        if args.contains("--writing-capture-backlog-approve") {
+            WritingCaptureCLI.approveBacklog()
+        }
+        if args.contains("--writing-capture-backlog-reject") {
+            WritingCaptureCLI.rejectBacklog()
+        }
         AppKeyboard.install()
     }
 

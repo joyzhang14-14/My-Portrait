@@ -81,6 +81,54 @@ enum WritingCaptureCLI {
         RunLoop.main.run()
     }
 
+    /// Backlog: cursor → 现在,全量跑一次。
+    static func runBacklog() {
+        Task {
+            do {
+                let worker = try await MainActor.run { try makeWorker() }
+                print("[writing-capture] backlog run starting…")
+                let s = try await worker.runBacklog()
+                printSummaries([s])
+                printStagedRecords(worker: worker, dates: s.status == .pendingReview ? [WritingCaptureWorker.backlogDateKey] : [])
+                exit(0)
+            } catch {
+                fputs("[writing-capture] ERROR: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
+    static func approveBacklog() {
+        Task {
+            do {
+                let worker = try await MainActor.run { try makeWorker() }
+                let copied = try await worker.approveBacklog()
+                print("[writing-capture] approved backlog — \(copied) record(s) → writing_records, cursor advanced")
+                exit(0)
+            } catch {
+                fputs("[writing-capture] ERROR: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
+    static func rejectBacklog() {
+        Task {
+            do {
+                let worker = try await MainActor.run { try makeWorker() }
+                try await worker.rejectBacklog()
+                print("[writing-capture] rejected backlog — staged dropped, cursor unchanged")
+                exit(0)
+            } catch {
+                fputs("[writing-capture] ERROR: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     /// Reject 某日:清 staged + 标 rejected_for_rerun。
     static func reject(date: String) {
         Task {
