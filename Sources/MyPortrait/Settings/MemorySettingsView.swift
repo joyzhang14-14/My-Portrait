@@ -59,6 +59,11 @@ struct MemorySettingsView: View {
     @State private var writingCapturePending: [WritingCaptureRun] = []
     /// 用户点开某天后展示的 staged records(preview sheet)。
     @State private var writingCapturePreviewDate: String? = nil
+    /// 哪些 pending 行已展开内联预览(按 date_utc)
+    @State private var writingCaptureExpanded: Set<String> = []
+    /// 每天的 staged records 缓存(展开时按需加载)
+    @State private var writingCaptureExpandedRecords: [String: [StagedRecordRow]] = [:]
+    @State private var writingCaptureExpandedError: [String: String] = [:]
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -483,26 +488,38 @@ struct MemorySettingsView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(writingCapturePending, id: \.dateUtc) { run in
-                    HStack(alignment: .center, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(run.dateUtc).font(.system(size: 12, design: .monospaced))
-                            Text("\(run.recordsCount ?? 0) records / \(run.discardedCount ?? 0) discarded — click to preview")
-                                .font(.system(size: 11))
+                    let expanded = writingCaptureExpanded.contains(run.dateUtc)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .center, spacing: 12) {
+                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(run.dateUtc).font(.system(size: 12, design: .monospaced))
+                                Text("\(run.recordsCount ?? 0) records / \(run.discardedCount ?? 0) discarded — click to \(expanded ? "collapse" : "expand")")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                toggleWritingCaptureExpand(date: run.dateUtc)
+                            }
+                            Button("Detail") { writingCapturePreviewDate = run.dateUtc }
+                                .buttonStyle(.bordered).controlSize(.small)
+                            Button("Reject") {
+                                Task { @MainActor in await rejectWritingCapture(date: run.dateUtc) }
+                            }
+                            .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                            Button("Approve") {
+                                Task { @MainActor in await approveWritingCapture(date: run.dateUtc) }
+                            }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            writingCapturePreviewDate = run.dateUtc
+                        if expanded {
+                            inlineRecordsList(date: run.dateUtc)
+                                .padding(.leading, 18)
                         }
-                        Button("Reject") {
-                            Task { @MainActor in await rejectWritingCapture(date: run.dateUtc) }
-                        }
-                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
-                        Button("Approve") {
-                            Task { @MainActor in await approveWritingCapture(date: run.dateUtc) }
-                        }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
                     }
                 }
             }
@@ -518,6 +535,77 @@ struct MemorySettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Process all unprocessed UTC days with Pass 1 (context) + Pass 2 (fusion) LLM calls. Output is staged for review.")
+        }
+    }
+
+    /// 展开 / 折叠某天的内联 record 列表。第一次展开时异步加载。
+    private func toggleWritingCaptureExpand(date: String) {
+        if writingCaptureExpanded.contains(date) {
+            writingCaptureExpanded.remove(date)
+            return
+        }
+        writingCaptureExpanded.insert(date)
+        // 已缓存就不再加载
+        if writingCaptureExpandedRecords[date] != nil { return }
+        guard let worker = WritingCaptureWorker.shared else {
+            writingCaptureExpandedError[date] = "Worker not initialized"
+            return
+        }
+        let store = worker.store
+        Task.detached(priority: .userInitiated) {
+            do {
+                let rows = try store.fetchStagedRecords(date: date)
+                await MainActor.run { writingCaptureExpandedRecords[date] = rows }
+            } catch {
+                await MainActor.run { writingCaptureExpandedError[date] = error.localizedDescription }
+            }
+        }
+    }
+
+    /// 内联展开的 record 列表(每条:app · kind · text 前 200 字)。
+    @ViewBuilder
+    private func inlineRecordsList(date: String) -> some View {
+        if let err = writingCaptureExpandedError[date] {
+            Text("Load failed: \(err)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.red)
+        } else if let rows = writingCaptureExpandedRecords[date] {
+            if rows.isEmpty {
+                Text("(no records)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(rows, id: \.id) { r in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(r.app).font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                Text(r.kind).font(.system(size: 10))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.accentColor.opacity(0.15))
+                                    .cornerRadius(3)
+                                Text(String(format: "conf %.2f", r.confidence))
+                                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                            if let cs = r.contextSummary, !cs.isEmpty {
+                                Text(cs).font(.system(size: 10))
+                                    .foregroundStyle(.secondary).italic()
+                            }
+                            Text(r.text.count > 200
+                                 ? String(r.text.prefix(200)) + "…"
+                                 : r.text)
+                                .font(.system(size: 11))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.06))
+                        .cornerRadius(4)
+                    }
+                }
+            }
+        } else {
+            Text("Loading…").font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
 
