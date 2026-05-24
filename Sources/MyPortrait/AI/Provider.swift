@@ -26,13 +26,12 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     static func from(integrationId: String) -> Provider? {
         switch integrationId {
         case "chatgpt":       return .chatgpt
+        case "openai-byok":   return .openaiBYOK
         case "anthropic-api": return .anthropic
         case "gemini":        return .gemini
         case "ollama":        return .ollama
         case "perplexity":    return .perplexity
         case "claude-code":   return .claudeCode
-        // We don't have a separate "openai BYOK" tile yet; reuse chatgpt id
-        // if the user only has a raw OpenAI key (TODO when a tile exists).
         default:              return nil
         }
     }

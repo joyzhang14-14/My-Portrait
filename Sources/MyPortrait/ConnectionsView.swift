@@ -509,6 +509,7 @@ struct ConnectionsView: View {
     private func descriptionFor(_ i: Integration) -> String {
         switch i.id {
         case "chatgpt":     return "Sign in with your ChatGPT Plus / Pro account (uses the Codex OAuth flow). No API key needed."
+        case "openai-byok": return "Paste a raw OpenAI API key (sk-...). Pay-per-token via api.openai.com, no ChatGPT subscription needed."
         case "claude-code": return "Use your Claude Code CLI (Pro/Max subscription quota). Requires `claude login` done in Terminal first."
         case "anthropic-api": return "Use your Anthropic API key. Pay-per-token, lowest latency."
         case "gemini":      return "Google AI Studio API key. Free tier available."

@@ -275,12 +275,15 @@ enum IntegrationRegistry {
     /// (not Apple system colors, not SF Symbol tinting).
     static let all: [Integration] = [
         // AI providers
-        .init(id: "chatgpt",            name: "Codex",           bundleId: "com.openai.chat",                       letter: "G",  accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
+        .init(id: "chatgpt",            name: "Codex",           bundleId: "com.openai.codex",                      letter: "G",  assetName: "Codex", accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
+        // 走 OpenAI 公共 API,不复用 Codex OAuth(那一档是 ChatGPT Plus 订阅
+        // 走 Codex client_id 拿额度)。这一档纯 BYOK,贴 sk-... API key。
+        .init(id: "openai-byok",        name: "OpenAI API",      bundleId: "com.openai.chat",                       letter: "O",  assetName: "OpenAI", accent: Color(white: 0.10),                         signInMethod: .apiKey,       category: .ai),
         .init(id: "claude-code",        name: "Claude Code",     bundleId: nil,                                     letter: ">",  iconSymbol: "terminal.fill", accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
         // Anthropic API 复用 Claude Desktop 的 bundleId,NSWorkspace 装了 Claude
         // app 就显示真图标(原"Claude Desktop"tile 拔了)。
         .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
-        .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
+        .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  assetName: "Gemini", accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
         // Perplexity:用 bundle 的 perplexity.svg 资源(从 screenpipe 引来的
         // 原版品牌 logo),iconSymbol asterisk 是再下一层兜底。
         .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  iconSymbol: "asterisk", assetName: "Perplexity", accent: Color(red: 0.12, green: 0.72, blue: 0.80),  signInMethod: .apiKey,       category: .ai),
