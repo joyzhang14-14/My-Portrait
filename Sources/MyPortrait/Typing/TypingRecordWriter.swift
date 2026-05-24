@@ -273,7 +273,17 @@ final class TypingRecordWriter {
         guard let rec = state[key] else { return }
         rec.debounceTimer?.invalidate()
         rec.flushTimer?.invalidate()
-        if rec.pendingChanges, let store {
+        let snapBlacklist = Set((blacklist[key] ?? [:]).keys)
+        // **整段判为 noise 的 record 直接不写**:editLog 全空(没有任何被算法
+        // 认可的 commit/delete)且 blacklist 非空(value-change 全被 fireDebounce
+        // 判 paste/burst/oversized/no-keystroke)→ session 净增量全是 noise,
+        // 不是真打字。
+        //
+        // 典型症状:typing_events 落了一条 text 几百字 + edit_log = "[]" +
+        // stripped 非空 —— sandwich diff 和 blacklist 段字符串不重合时
+        // stripBlacklist 减不干净,残留 noise 写进了 DB。
+        let allNoise = rec.editLog.isEmpty && !snapBlacklist.isEmpty
+        if rec.pendingChanges, let store, !allNoise {
             let snap = FlushSnapshot(
                 bundleId: rec.bundleId,
                 elementHash: rec.elementHash,
@@ -281,10 +291,13 @@ final class TypingRecordWriter {
                 sessionStart: rec.sessionStart,
                 endValue: rec.lastValueSnapshot,
                 editLog: rec.editLog,
-                blacklist: Set((blacklist[key] ?? [:]).keys),
+                blacklist: snapBlacklist,
                 url: rec.url
             )
             dbQueue.async { Self.persist(snap, store: store) }
+        }
+        if allNoise {
+            onDevLog?("drop all-noise record bundle=\(rec.bundleId) blacklist=\(snapBlacklist.count) segs")
         }
         state[key] = nil
     }
