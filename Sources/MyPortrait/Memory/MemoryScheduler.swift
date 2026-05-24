@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import os.log
 
 private let schedLog = Logger(subsystem: "com.myportrait.memory", category: "scheduler")
@@ -19,8 +20,17 @@ private let schedLog = Logger(subsystem: "com.myportrait.memory", category: "sch
 /// 保护：每个 LLM 步（event / impact / distill）持锁并每 30s 续心跳；启动时
 /// `recoverStaleLocks` 把心跳过期的 in_progress 行当一次失败回收（retry +1）。
 ///
-/// 进程内并发由 `@MainActor` + `isRunning` 保证。
+/// 进程内并发由 `@MainActor` + 3 把分离的锁保证:
+///   - `eventRunning`        :event job 跑着,屏蔽所有其它 job(它 rebalance
+///                              重写整个 events/,distill/personality 同跑会
+///                              读到撕裂状态)
+///   - `distillRunning`      :distill 跑着,屏蔽 event 和自己重入(distill
+///                              跟 personality 可以并行 —— 写盘目录不重叠)
+///   - `personalityRunning`  :personality 跑着,屏蔽 event 和自己重入
+/// 写作采集 worker **完全独立**,不参与上面三把锁(它走另一套 DB 表,跟
+/// memory pipeline 零交集,在用户手动调试时不被 memory 阻塞)。
 @MainActor
+@Observable
 final class MemoryScheduler {
 
     static let shared = MemoryScheduler()
@@ -63,8 +73,43 @@ final class MemoryScheduler {
         return 10 * 60 * 1000
     }()
 
-    private var isRunning = false
+    /// 三把分离的锁。View 侧 @Observable 跟踪它们,Run 按钮根据 canRunXxx
+    /// 实时灰掉 + tooltip 说理由。
+    private(set) var eventRunning = false
+    private(set) var distillRunning = false
+    private(set) var personalityRunning = false
+    /// tick() 自身的可重入防护(timer 与 startup 并发触发时只跑一次)。
+    private var tickRunning = false
     private var timer: Timer?
+
+    // MARK: - View bindings(canRunXxx + 解释文案)
+    /// 当前是否有事件家族(distill or personality)在跑。
+    var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
+
+    /// 能不能现在起 event job(必须自己空闲 + portrait/personality 都空闲)。
+    var canRunEvent: Bool { !eventRunning && !portraitFamilyRunning }
+    /// 能不能现在起 distill(必须 event 空闲 + 自己空闲;personality 不挡)。
+    var canRunDistill: Bool { !eventRunning && !distillRunning }
+    /// 能不能现在起 personality(必须 event 空闲 + 自己空闲;distill 不挡)。
+    var canRunPersonality: Bool { !eventRunning && !personalityRunning }
+
+    /// 解释为什么某个 Run 按钮当前不能点(给 UI 的 tooltip 用)。
+    /// nil = 能点。
+    func eventBlockedReason() -> String? {
+        if eventRunning { return "Event job is already running." }
+        if portraitFamilyRunning { return "Waiting for distill / personality to finish." }
+        return nil
+    }
+    func distillBlockedReason() -> String? {
+        if eventRunning { return "Waiting for event job to finish." }
+        if distillRunning { return "Distill is already running." }
+        return nil
+    }
+    func personalityBlockedReason() -> String? {
+        if eventRunning { return "Waiting for event job to finish." }
+        if personalityRunning { return "Personality refresh is already running." }
+        return nil
+    }
 
     /// 当前 memory pipeline 的 provider/model — 从 ConfigStore 读。每次需要时
     /// 现拉,这样用户在 Settings 改完无需重启 scheduler 立刻生效。
@@ -98,7 +143,11 @@ final class MemoryScheduler {
 
     /// 周期检查：每个调度器按各自频率到点、且今天还没跑过就跑。
     func tick() async {
-        guard !isRunning else { return }
+        // tick 本身防重入。每个 runXxxJob 内部还会按 canRunXxx 二次把关,
+        // 跟手动触发 / 上一次 tick 残留并发安全。
+        guard !tickRunning else { return }
+        tickRunning = true
+        defer { tickRunning = false }
         // 有手动触发的结果在等审核 / AI 编辑 draft 在等审 → 暂停定时调度,
         // 避免 distill / personality 跑完覆盖了用户没拍板的改动。
         guard !MemoryStaging.hasPending(.events),
@@ -231,9 +280,9 @@ final class MemoryScheduler {
     /// 顺序跑，各自持锁 + 心跳。手动触发与定时触发走同一个函数。
     @discardableResult
     func runEventJob() async -> JobOutcome {
-        guard !isRunning else { return .busy }
-        isRunning = true
-        defer { isRunning = false }
+        guard canRunEvent else { return .busy }
+        eventRunning = true
+        defer { eventRunning = false }
 
         let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
@@ -306,9 +355,9 @@ final class MemoryScheduler {
     /// job 清除，所以盘上事件天然只来自 event 处理成功的日。
     @discardableResult
     func runPortraitJob() async -> JobOutcome {
-        guard !isRunning else { return .busy }
-        isRunning = true
-        defer { isRunning = false }
+        guard canRunDistill else { return .busy }
+        distillRunning = true
+        defer { distillRunning = false }
 
         _ = store.ensureRow(for: distillAnchor)
         let distill = store.row(for: distillAnchor)?.distill ?? .idle
@@ -334,9 +383,9 @@ final class MemoryScheduler {
     /// 进度落在每天那行的 `personality_status` 列。
     @discardableResult
     func runPersonalityJob() async -> JobOutcome {
-        guard !isRunning else { return .busy }
-        isRunning = true
-        defer { isRunning = false }
+        guard canRunPersonality else { return .busy }
+        personalityRunning = true
+        defer { personalityRunning = false }
 
         let days = pendingPersonalityDays(cap: dayCap)
         guard !days.isEmpty else {

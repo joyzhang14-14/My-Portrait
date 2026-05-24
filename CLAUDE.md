@@ -2,6 +2,13 @@
 
 macOS 原生 Swift app（个人 AI 记忆系统）。
 
+## ⚠️ 写作采集 LLM 模型:用 `sonnet`(200K),**不要用 `sonnet[1m]`**
+
+`WritingCapturePass1Agent` / `WritingCapturePass2Agent` 的 `model` 默认 `"sonnet"`。
+**不要**改回 `"sonnet[1m]"` —— 1M context 在用户账号需付费开 "Usage credits",
+用户明确说**不想开 / 不想花这钱**。当前实测 200K 已经足够(Pass 2 已按 (app, url)
+分组并发,单组 prompt 不大;Pass 1 整天 OCR 预压后才 23k chars)。
+
 ## 构建系统：双轨
 
 项目同时有两套构建：
