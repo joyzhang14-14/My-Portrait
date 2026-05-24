@@ -1,110 +1,141 @@
 # My-Portrait
 
-7×24 跑在本地的个人 AI 数据库 —— macOS 原生 Swift app。
+A 24/7 personal AI database that runs locally — native macOS Swift app.
 
-后台采集屏幕（截图 + OCR）、音频（Whisper 转写）、打字、焦点切换；把原始事件
-蒸馏成"个人画像"（personality / portrait）；再把这份画像喂给 LLM，让 AI 真的
-懂你。数据全部留在本机。
+Captures your screen (screenshots + OCR), audio (Whisper transcription), typing,
+and focus changes in the background. Distills raw events into a "personal
+portrait" (personality / portrait / writing-style). Feeds that portrait into an
+LLM so the AI actually knows who you are. All data stays on your machine.
 
-> 状态：WIP，未发布。`Capture/` 还在 P0 stub 阶段，调用会冒红点。发布前必修项
-> 见 `BEFORE_SHARING.md`。
+> Status: WIP, not released. `Capture/` is still in P0 stub stage — calls flash
+> a red dot in the status bar. See `BEFORE_SHARING.md` for things that must be
+> fixed before any release.
 
 ---
 
-## 跑起来
+## Inspired by [screenpipe](https://github.com/screenpipe/screenpipe)
 
-**前置**：macOS 15+、Xcode 16+、[xcodegen](https://github.com/yonaskolb/XcodeGen)
-（`brew install xcodegen`）。
+My-Portrait owes its architecture and philosophy to **[screenpipe](https://github.com/screenpipe/screenpipe)**
+by mediar-ai. screenpipe pioneered the "24/7 local-first context layer" idea
+and proved the engineering pattern — continuous screen + audio capture, on-device
+OCR / transcription, an FTS-indexed SQLite store, and LLM integrations on top.
+
+Key things borrowed:
+
+- **Capture pipeline shape** — frame comparer → snapshot writer → async OCR →
+  event stream, mirrors screenpipe's Rust pipeline
+- **Storage model** — SQLite + WAL + FTS5 for full-text search across frames,
+  transcripts, and UI events (screenpipe uses SQLx, we use GRDB)
+- **Two-stage frame storage** — JPG hot tier → background MP4 compaction
+- **Ignored-apps / system-privacy defaults** — `IgnoredAppPicker`'s system
+  entry list is taken straight from screenpipe's default ignore list
+- **The whole "your data is yours" stance** — everything local, no cloud
+  required, user owns the database file
+
+If you want a mature, cross-platform, well-tested version of this idea, use
+screenpipe. My-Portrait is a Swift-native take focused on macOS + personal
+portrait distillation, optimized for one user (me).
+
+---
+
+## Run it
+
+**Prerequisites:** macOS 15+, Xcode 16+, [xcodegen](https://github.com/yonaskolb/XcodeGen)
+(`brew install xcodegen`).
 
 ```bash
-xcodegen generate          # 从 project.yml 生成 .xcodeproj
-./build-app.sh --run       # 编 + 独立启动 .app
+xcodegen generate          # generates .xcodeproj from project.yml
+./build-app.sh --run       # builds + launches the .app standalone
 ```
 
-⚠️ **必须独立启动**（不能用 Xcode ⌘R）。挂在 Xcode debugger 下时，TCC（屏幕录制 /
-麦克风权限）会把请求归属到 Xcode，My Portrait 自己永远拿不到授权。`build-app.sh`
-已经处理好。
+⚠️ **Must launch standalone** (not Xcode's ⌘R). When the app runs under the
+Xcode debugger, macOS TCC attributes screen-recording / microphone permission
+prompts to Xcode itself — My-Portrait never gets authorized.
+`build-app.sh` handles this correctly.
 
-日常迭代直接在 Xcode 里 ⌘B 也行，但要跑 Capture 还是得 `./build-app.sh --run`。
+Day-to-day, ⌘B in Xcode is fine for compile checks; just use `./build-app.sh --run`
+when you actually need Capture to work.
 
-### 增删 `.swift` 文件后
+### After adding / removing / renaming a `.swift` file
 
 ```bash
 xcodegen generate
 ```
 
-SwiftPM 自动扫 `Sources/`，但 `.xcodeproj` 是静态文件列表，不重新生成 Xcode 会
-`Cannot find 'Xxx' in scope`。
+SwiftPM auto-scans `Sources/`, but `.xcodeproj` carries a static file list —
+without regenerating, Xcode builds fail with `Cannot find 'Xxx' in scope`.
 
 ---
 
-## 配置
+## Configuration
 
-用户配置：`~/.portrait/config.toml`（模板见 `docs/config.example.toml`）。
-UI 里改和手改文件等价，互相同步。
+User config lives at `~/.portrait/config.toml` (template:
+`docs/config.example.toml`). The UI and direct file edits are equivalent — both
+sync.
 
-数据存放：
+Data locations:
 
-- `~/.portrait/` —— 配置、cron 任务、画像、对话
-- `~/Library/Application Support/MyPortrait/` —— 密钥、缓存、DB
-- `~/.screenpipe/` —— **只读复用**，要拷只 copy 不 mv
+- `~/.portrait/` — config, cron jobs, portraits, conversations
+- `~/Library/Application Support/MyPortrait/` — secrets, caches, DB
+- `~/.screenpipe/` — **read-only reuse** (copy from, never `mv`)
 
 ---
 
-## 代码地图
+## Code map
 
 ```
 Sources/MyPortrait/
-├── Capture/      屏幕 / 音频 / 打字 / 焦点采集（性能优先，对标 screenpipe）
-├── Memory/       事件 → 画像 蒸馏管线（personality、portrait、Tier1 合并、印象 EMA）
-├── AI/           多 Provider 聊天、cron 调度、Agent、PII 脱敏、OAuth、SMTP
+├── Capture/      Screen / audio / typing / focus capture (perf-first, mirrors screenpipe)
+├── Memory/       Event → portrait distillation (personality, portrait, Tier1 merge, impression EMA)
+├── AI/           Multi-provider chat, cron scheduling, agents, PII redaction, OAuth, SMTP
 ├── DB/           GRDB + SQLite + WAL + FTS5
-├── Settings/     设置面板 + TOML 配置读写
-├── Typing/       打字采集与回放
-├── Notifications/ 通知 / 推送
-├── DesignSystem.swift   玻璃浮层 + 蓝色渐变 主题 token
-├── ContentView.swift    主窗口（左侧 sidebar + 右侧 pane）
+├── Settings/     Settings panes + TOML config read/write
+├── Typing/       Typing capture & replay
+├── Notifications/ Notifications / push
+├── DesignSystem.swift   Glass + blue-gradient theme tokens
+├── ContentView.swift    Main window (sidebar + main pane)
 ├── HomeView.swift / TimelineView.swift / ConnectionsView.swift / ...
-└── App.swift            入口
+└── App.swift            Entry point
 ```
 
-每个子目录大都有自己的 `README.md` 讲细节（例如 `Capture/README.md` 画了完整
-调用图）。
+Most subdirectories carry their own `README.md` with deeper detail (e.g.
+`Capture/README.md` has the full call graph).
 
 ---
 
-## 技术栈
+## Tech stack
 
-| 用途 | 依赖 |
+| Purpose | Dependency |
 |---|---|
-| SQLite ORM（持久化） | [GRDB.swift](https://github.com/groue/GRDB.swift) |
-| 端上语音识别 | [WhisperKit](https://github.com/argmaxinc/WhisperKit) |
-| 端上 LLM / 向量 | [mlx-swift](https://github.com/ml-explore/mlx-swift) + [mlx-embeddings](https://github.com/mzbac/mlx.embeddings) |
-| 说话人识别（pyannote + wespeaker） | [onnxruntime](https://github.com/microsoft/onnxruntime-swift-package-manager) |
-| TOML 配置 | [TOMLKit](https://github.com/LebJe/TOMLKit) |
+| SQLite ORM (persistence) | [GRDB.swift](https://github.com/groue/GRDB.swift) |
+| On-device speech-to-text | [WhisperKit](https://github.com/argmaxinc/WhisperKit) |
+| On-device LLM / embeddings | [mlx-swift](https://github.com/ml-explore/mlx-swift) + [mlx-embeddings](https://github.com/mzbac/mlx.embeddings) |
+| Speaker diarization (pyannote + wespeaker) | [onnxruntime](https://github.com/microsoft/onnxruntime-swift-package-manager) |
+| TOML config | [TOMLKit](https://github.com/LebJe/TOMLKit) |
 | Tokenizer | [swift-transformers](https://github.com/huggingface/swift-transformers) |
 
-UI：SwiftUI + `.ultraThinMaterial`（玻璃）+ `.symbolEffect(.bounce)`（图标动效）。
+UI: SwiftUI + `.ultraThinMaterial` (glass) + `.symbolEffect(.bounce)` (icon
+animations).
 
 ---
 
-## 双轨构建
+## Dual build system
 
-| | 用途 | 入口 |
+| | Used for | Entry point |
 |---|---|---|
-| **SwiftPM** | `swift build` / CI / Claude 验证编译 | `Package.swift` |
-| **Xcode** | 真正出签名 `.app`、跑 TCC、平时用 | `MyPortrait.xcodeproj`（XcodeGen 从 `project.yml` 生成，不手动维护） |
+| **SwiftPM** | `swift build` / CI / compile checks | `Package.swift` |
+| **Xcode** | Real signed `.app`, TCC, daily use | `MyPortrait.xcodeproj` (generated from `project.yml` by XcodeGen — do not edit by hand) |
 
-源码一份，两套都能 build。两者唯一的差别就是 `.xcodeproj` 不会自动感知文件
-系统变化 —— 新增/删除/改名 `.swift` 必须 `xcodegen generate`。
+Same source, both build. The one gotcha: `.xcodeproj` doesn't auto-detect
+filesystem changes — adding, removing, or renaming any `.swift` requires
+`xcodegen generate`.
 
 ---
 
-## 给 Claude / 协作者
+## Credits
 
-项目级约定见 `CLAUDE.md`。重点：
-
-- 改完 `.swift` 文件结构跑 `xcodegen generate`
-- `swift build` 报 `Cannot find type` 在同模块内多半是 SourceKit 误报，看 `Build complete`
-- `~/.screenpipe/` 只读，永远不要 `mv`
-- 仓库会有并行 Claude session 同时写入，commit 前 `git status` 两次，不动陌生 dirty 文件
+- **[screenpipe](https://github.com/screenpipe/screenpipe)** — architecture,
+  capture pipeline shape, FTS storage model, "your data is yours" stance. This
+  project would not exist without it. Go star it.
+- All the upstream libraries listed under [Tech stack](#tech-stack) — especially
+  WhisperKit, MLX-Swift, and GRDB, which make on-device AI on macOS practical.
