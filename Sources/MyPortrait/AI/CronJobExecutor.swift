@@ -119,7 +119,7 @@ enum CronJobExecutor {
         //    没写就不打扰用户(LLM 自己判断"这次没什么值得通知的事")。
         if let body = Self.extractNotifyBody(from: assistantBuf) {
             NotificationCenterService.shared.post(
-                .cronJobRun(jobName: cronJob.name, preview: body)
+                .cronJobRun(jobName: cronJob.name, body: body, convId: conv.id)
             )
         }
     }

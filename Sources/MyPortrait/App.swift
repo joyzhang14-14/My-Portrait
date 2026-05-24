@@ -460,10 +460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // / Dock icon / launch-at-login all flow through this once ConfigStore
         // changes (vim edits or in-app toggles both fire the trampoline).
         ConfigApplier.shared.install(window: window, statusBar: statusBarMenu)
-        // 弹一次系统通知权限请求。用户拒绝后 ConfigStore 里的 toggle 仍可切，
-        // 但 NotificationCenterService.post 会因 authorized=false 静默放弃。
-        NotificationCenterService.shared.requestAuthorizationOnce()
-        NotificationCenterService.shared.logCurrentSettings()
+        // 自建造鱼通知:浮窗在首次 post 时懒装载,这里不用预先做任何事。
+        // 不再用 UNUserNotificationCenter,所以也不需要请求系统权限。
 
         // 3. 启动 services 生命周期管理。
         //    - compactor / transcriber 立即开始（空转零成本）

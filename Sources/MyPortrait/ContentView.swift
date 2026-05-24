@@ -69,6 +69,13 @@ struct ContentView: View {
             }
             CronJobExecutor.providerResolver = resolver
             ScheduleRunner.shared.start()
+
+            // 点 cron job 通知卡片 → 切 conv + 主窗口拉到前台。
+            NotificationCenterService.shared.onCronJobTap = { convId in
+                chat.switchTo(convId)
+                selection = .home
+                (NSApp.delegate as? AppDelegate)?.showMainWindow()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home

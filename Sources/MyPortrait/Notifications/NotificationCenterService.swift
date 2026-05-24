@@ -1,154 +1,103 @@
 import Foundation
-import UserNotifications
+import AppKit
+import Observation
 import os.log
 
-/// Thin facade around `UNUserNotificationCenter`. Handles:
-///   - One-time authorization request at app launch
-///   - Posting banner / sound notifications (respecting per-feature toggles)
-///   - Per-cronJob mute via `notifications.mutedCronJobs`
+/// 自建造鱼通知中心(替代 UNUserNotificationCenter)。
 ///
-/// Callers don't decide what's allowed — they pass the *kind* of event
-/// (`.cronJobRun(jobName:)`, `.appUpdate`, `.captureStall`) and the service
-/// gates it against the config + system authorization status.
+/// 为什么自建:macOS 原生通知 body 最多 3 行截断、不渲染 markdown、不能放链接,
+/// 跟 screenpipe 那套自渲染浮窗体验差太远。这里走纯 Swift/AppKit/SwiftUI:
+/// 一个 NSPanel 浮在屏幕右上,SwiftUI 卡片渲染 markdown,点击触发回调。
+///
+/// API(`post(Kind)`)保持跟旧 UN 版本兼容,callers 不用改。
 @MainActor
-final class NotificationCenterService: NSObject, UNUserNotificationCenterDelegate {
+@Observable
+final class NotificationCenterService {
     static let shared = NotificationCenterService()
 
-    enum Kind {
-        case cronJobRun(jobName: String, preview: String)
+    enum Kind: Sendable {
+        case cronJobRun(jobName: String, body: String, convId: UUID)
         case appUpdate(version: String)
         case captureStall(reason: String)
     }
 
+    /// 当前可见的通知列表(最旧在前,最新在后)。Overlay view observe 这个。
+    private(set) var active: [InAppNotification] = []
+
+    /// 点击 cron job 通知时的回调。app 启动时由 ContentView 接进来:
+    /// 通常是 "切到 .home + chat.switchTo(convId) + 主窗口拉到前台"。
+    var onCronJobTap: (UUID) -> Void = { _ in }
+
     private let log = Logger(subsystem: "com.myportrait", category: "notifications")
-    private(set) var authorized: Bool = false
-    private var didRequest = false
+    private let defaultTimeout: TimeInterval = 20
 
-    private override init() {
-        super.init()
-        // app 在前台时,默认 macOS 把通知静默放进通知中心,不弹 banner。
-        // 实现 willPresent 显式让 banner + sound 在前台也出现。
-        UNUserNotificationCenter.current().delegate = self
-    }
+    private init() {}
 
-    // MARK: - UNUserNotificationCenterDelegate
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound, .list])
-    }
-
-    /// Called from AppDelegate. If the user hasn't been asked yet, prompt
-    /// for banner + sound permission. Idempotent — re-calling is cheap.
-    ///
-    /// `UNUserNotificationCenter` requires the process to be inside a real
-    /// `.app` bundle; Xcode's "Run" path executes a loose binary inside
-    /// `DerivedData/.../Build/Products/Debug/` and the framework throws an
-    /// uncatchable Obj-C exception (`bundleProxyForCurrentProcess is nil`).
-    /// We skip the call in that case so dev builds don't crash.
-    func requestAuthorizationOnce() {
-        guard !didRequest else { return }
-        didRequest = true
-        guard isBundledApp else {
-            log.notice("skipping notification authorization — not running inside a .app bundle")
-            return
-        }
-        UNUserNotificationCenter.current().requestAuthorization(
-            options: [.alert, .sound]
-        ) { [weak self] granted, error in
-            Task { @MainActor in
-                self?.authorized = granted
-                self?.log.notice("authorization result: granted=\(granted, privacy: .public) error=\(error?.localizedDescription ?? "nil", privacy: .public)")
-            }
-        }
-    }
-
-    /// Diagnostic: log macOS-level authorization status without changing it.
-    func logCurrentSettings() {
-        UNUserNotificationCenter.current().getNotificationSettings { [weak self] s in
-            // 提取 Sendable 标量再跨 actor 边界,避免 UNNotificationSettings
-            // 自身非 Sendable 触发 Swift 6 data race 报错。
-            let auth = s.authorizationStatus.rawValue
-            let alert = s.alertSetting.rawValue
-            let nc = s.notificationCenterSetting.rawValue
-            let sound = s.soundSetting.rawValue
-            Task { @MainActor in
-                self?.log.notice("settings: authStatus=\(auth, privacy: .public) alert=\(alert, privacy: .public) banner=\(nc, privacy: .public) sound=\(sound, privacy: .public)")
-            }
-        }
-    }
-
-    /// True when `Bundle.main` resolves to a real `.app` package. The
-    /// UserNotifications framework only works in that case — see comment
-    /// on `requestAuthorizationOnce` above.
-    private var isBundledApp: Bool {
-        Bundle.main.bundleURL.pathExtension == "app"
-    }
-
-    /// Post a notification iff the matching config toggle is on AND we have
-    /// system authorization. Silent no-op otherwise.
     func post(_ kind: Kind) {
         let n = ConfigStore.shared.notifications
         let title: String
         let body: String
-        let categoryId: String
+        var onTap: (() -> Void)?
+
         switch kind {
-        case let .cronJobRun(jobName, preview):
+        case let .cronJobRun(jobName, body_, convId):
             guard n.cronJobAlerts else {
-                log.notice("post skipped: cronJobAlerts toggle is OFF")
-                return
+                log.notice("post skipped: cronJobAlerts is OFF"); return
             }
             guard !n.mutedCronJobs.contains(jobName) else {
-                log.notice("post skipped: '\(jobName, privacy: .public)' is muted")
-                return
+                log.notice("post skipped: '\(jobName, privacy: .public)' is muted"); return
             }
             title = "🛰️ \(jobName)"
-            body  = preview.isEmpty ? "Run finished." : preview
-            categoryId = "cron-job.run"
+            body = body_
+            onTap = { [weak self] in self?.onCronJobTap(convId) }
 
         case let .appUpdate(version):
             guard n.appUpdates else { return }
             title = "My Portrait \(version) available"
-            body  = "Open the app to install."
-            categoryId = "app.update"
+            body = "Open the app to install."
 
         case let .captureStall(reason):
             guard n.captureStalls else { return }
             title = "Capture stalled"
-            body  = reason
-            categoryId = "capture.stall"
+            body = reason
         }
-        deliver(title: title, body: body, categoryId: categoryId)
-    }
 
-    private func deliver(title: String, body: String, categoryId: String) {
-        // Same guard as requestAuthorizationOnce — Xcode dev runs would
-        // otherwise crash inside UNUserNotificationCenter.add.
-        guard isBundledApp else {
-            log.notice("deliver skipped: not running inside a .app bundle")
-            return
-        }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body  = body
-        content.sound = .default
-        content.categoryIdentifier = categoryId
-
-        let req = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil    // deliver immediately
+        let notif = InAppNotification(
+            id: UUID(),
+            title: title,
+            body: body,
+            createdAt: Date(),
+            timeout: defaultTimeout,
+            onTap: onTap
         )
-        log.notice("deliver attempt: title='\(title, privacy: .public)' authorized=\(self.authorized, privacy: .public)")
-        UNUserNotificationCenter.current().add(req) { [weak self] error in
-            if let error {
-                self?.log.error("deliver failed: \(error.localizedDescription, privacy: .public)")
-            } else {
-                self?.log.notice("deliver ok")
-            }
+        active.append(notif)
+        log.notice("posted: \(title, privacy: .public)")
+
+        // 首次发通知时把浮窗装上(idempotent)。
+        NotificationOverlay.shared.ensureInstalled()
+
+        scheduleDismiss(notif.id, after: defaultTimeout)
+    }
+
+    func dismiss(_ id: UUID) {
+        active.removeAll { $0.id == id }
+    }
+
+    private func scheduleDismiss(_ id: UUID, after: TimeInterval) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+            self?.dismiss(id)
         }
     }
+}
+
+/// 一条活动中的通知。`onTap` 是闭包(非 Codable),所以不持久化 —— app 重启
+/// 后丢失所有未读通知,跟原生通知中心的"已读历史"语义不同。够用。
+struct InAppNotification: Identifiable {
+    let id: UUID
+    let title: String
+    let body: String
+    let createdAt: Date
+    let timeout: TimeInterval
+    let onTap: (() -> Void)?
 }
