@@ -41,13 +41,17 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
     enum SpawnError: LocalizedError {
         case missingBun
         case missingPi
-        case missingToken
+        /// Provider 凭证缺失(OAuth 未登录 / API key 没贴)。associated value
+        /// 是 provider 的展示名,确保错误文案里出现的是真正用的那个 provider,
+        /// 而不是 ChatGPT/Codex 一刀切。
+        case missingToken(provider: String)
         case launchFailed(String)
         var errorDescription: String? {
             switch self {
             case .missingBun:        return "Bun runtime is not installed."
             case .missingPi:         return "Pi agent is not installed."
-            case .missingToken:      return "Codex not signed in."
+            case .missingToken(let p):
+                return "\(p) credential missing — set it up in Connections."
             case .launchFailed(let m): return "Failed to start Pi: \(m)"
             }
         }
@@ -116,7 +120,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             } else {
                 credential = try await ProviderAuth.resolveEnvValue(for: provider)
             }
-        } catch { throw SpawnError.missingToken }
+        } catch { throw SpawnError.missingToken(provider: provider.displayName) }
 
         let stdinPipe = Pipe()
         process.executableURL = AIPaths.bunBinary

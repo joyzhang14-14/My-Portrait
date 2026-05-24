@@ -119,6 +119,20 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
 
     /// Whether this provider needs no setup beyond detection.
     var isLocal: Bool { self == .ollama || self == .claudeCode }
+
+    /// 给用户看的展示名 —— 用在错误文案里(避免 "Codex not signed in"
+    /// 一刀切到所有 provider)。跟 Connections 里的 tile 名保持一致。
+    var displayName: String {
+        switch self {
+        case .chatgpt:    return "Codex"
+        case .openaiBYOK: return "OpenAI API"
+        case .anthropic:  return "Anthropic API"
+        case .ollama:     return "Ollama"
+        case .gemini:     return "Gemini"
+        case .perplexity: return "Perplexity"
+        case .claudeCode: return "Claude Code"
+        }
+    }
 }
 
 /// Helper that resolves the credential (token / API key) for a provider.
@@ -134,7 +148,7 @@ enum ProviderAuth {
             guard let key = provider.secretKey,
                   let data = SecretStore.shared.get(key),
                   let s = String(data: data, encoding: .utf8), !s.isEmpty else {
-                throw PiAgent.SpawnError.missingToken
+                throw PiAgent.SpawnError.missingToken(provider: provider.displayName)
             }
             return s
         }
