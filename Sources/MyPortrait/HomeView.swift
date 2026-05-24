@@ -72,7 +72,7 @@ struct HomeView: View {
 
             ChatInputBar(
                 prompt: $prompt,
-                providerName: appState.activeAI?.name ?? "ChatGPT",
+                providerName: appState.activeAI?.name ?? "Codex",
                 providerSlug: appState.activeAI?.id.uppercased() ?? "OPENAI-CHATGPT",
                 isConnected: appState.activeAI != nil,
                 contextChips: $contextChips,
@@ -947,7 +947,7 @@ private struct ErrorCard: View {
         case .modelNotAllowed:
             return "The selected model isn't on your plan. Switch in Connections."
         case .authExpired:
-            return "Re-sign in to ChatGPT from Connections to continue."
+            return "Re-sign in to Codex from Connections to continue."
         case .network:
             return "Couldn't reach OpenAI. Check your connection and retry."
         case .other:

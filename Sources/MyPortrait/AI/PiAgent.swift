@@ -47,7 +47,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             switch self {
             case .missingBun:        return "Bun runtime is not installed."
             case .missingPi:         return "Pi agent is not installed."
-            case .missingToken:      return "ChatGPT not signed in."
+            case .missingToken:      return "Codex not signed in."
             case .launchFailed(let m): return "Failed to start Pi: \(m)"
             }
         }

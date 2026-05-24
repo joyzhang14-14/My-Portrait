@@ -389,7 +389,7 @@ final class ChatController {
                 return "Setup not finished — Bun/Pi still installing."
             }
             guard ChatGPTOAuth.isLoggedIn() else {
-                return "Sign in to ChatGPT from Connections first."
+                return "Sign in to Codex from Connections first."
             }
             return nil
         case .claudeCode:

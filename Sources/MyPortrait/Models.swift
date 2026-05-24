@@ -275,7 +275,7 @@ enum IntegrationRegistry {
     /// (not Apple system colors, not SF Symbol tinting).
     static let all: [Integration] = [
         // AI providers
-        .init(id: "chatgpt",            name: "ChatGPT",         bundleId: "com.openai.chat",                       letter: "G",  accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
+        .init(id: "chatgpt",            name: "Codex",           bundleId: "com.openai.chat",                       letter: "G",  accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
         .init(id: "claude-code",        name: "Claude Code",     bundleId: nil,                                     letter: ">",  iconSymbol: "terminal.fill", accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
         // Anthropic API 复用 Claude Desktop 的 bundleId,NSWorkspace 装了 Claude
         // app 就显示真图标(原"Claude Desktop"tile 拔了)。

@@ -204,7 +204,7 @@ enum OAuthError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notLoggedIn:           return "Not signed in to ChatGPT."
+        case .notLoggedIn:           return "Not signed in to Codex."
         case .badRequest(let m):     return "OAuth request error: \(m)"
         case .badResponse(let m):    return "OAuth response error: \(m)"
         case .timeout:               return "Login timed out (120s)."
