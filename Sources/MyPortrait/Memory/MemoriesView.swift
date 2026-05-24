@@ -124,7 +124,7 @@ struct MemoriesView: View {
                         if let onEdit = onEditEntity {
                             Button {
                                 onEdit(entry.id)
-                            } label: { Image(systemName: "sparkles") }
+                            } label: { Image(systemName: "bubble.left.and.text.bubble.right") }
                             .buttonStyle(.bouncyIcon)
                             .help("Edit with AI chat")
                         }

@@ -16,7 +16,7 @@ import Foundation
 ///
 /// One agent serves one conversation. Caller is responsible for `stop()` when
 /// the conversation is closed.
-final class PiAgent: @unchecked Sendable {
+final class PiAgent: @unchecked Sendable, ChatAgent {
 
     enum Event: @unchecked Sendable {
         case textDelta(String)

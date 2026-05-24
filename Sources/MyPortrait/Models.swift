@@ -393,6 +393,7 @@ final class AppState {
         case .gemini:        return "gemini"
         case .ollama:        return "ollama"
         case .perplexity:    return "perplexity"
+        case .claudeCode:    return "claude-code"
         case .openaiBYOK:    return nil    // no dedicated tile yet
         }
     }

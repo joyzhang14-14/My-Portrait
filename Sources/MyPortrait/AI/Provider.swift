@@ -16,6 +16,9 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     case ollama
     case gemini
     case perplexity
+    /// Claude Code CLI(`claude` 二进制)—— 不走 Pi,用 ClaudeCodeAgent
+    /// spawn 子进程,凭用户的 Pro/Max 订阅(`claude login`)用额度。
+    case claudeCode = "claude-code"
 
     var id: String { rawValue }
 
@@ -27,6 +30,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case "gemini":        return .gemini
         case "ollama":        return .ollama
         case "perplexity":    return .perplexity
+        case "claude-code":   return .claudeCode
         // We don't have a separate "openai BYOK" tile yet; reuse chatgpt id
         // if the user only has a raw OpenAI key (TODO when a tile exists).
         default:              return nil
@@ -34,7 +38,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     }
 
     /// Pi's `--provider` CLI value for this provider. Must match the key Pi
-    /// reads from models.json.
+    /// reads from models.json. claudeCode 不走 Pi,这里返回空串占位。
     var piName: String {
         switch self {
         case .chatgpt:        return "openai-chatgpt"
@@ -43,6 +47,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:         return "ollama"
         case .gemini:         return "openai-byok"   // Gemini speaks an OpenAI-compatible API
         case .perplexity:     return "perplexity-byok"
+        case .claudeCode:     return ""              // 不走 Pi
         }
     }
 
@@ -60,6 +65,8 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
         case .gemini:     return ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
         case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
+        // claude CLI 接受 alias(sonnet/opus/haiku 自动取最新)或完整 model id。
+        case .claudeCode: return ["sonnet", "opus", "haiku"]
         }
     }
 
@@ -80,6 +87,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:         return "http://localhost:11434/v1"
         case .gemini:         return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .perplexity:     return "https://api.perplexity.ai"
+        case .claudeCode:     return ""              // CLI 自己管理
         }
     }
 
@@ -92,6 +100,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .ollama:         return ""         // none
         case .gemini:         return "GEMINI_API_KEY"
         case .perplexity:     return "PERPLEXITY_API_KEY"
+        case .claudeCode:     return ""         // none (CLI 走 `claude login`)
         }
     }
 
@@ -102,12 +111,15 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .openaiBYOK:     return "apikey:openai"
         case .gemini:         return "apikey:gemini"
         case .perplexity:     return "apikey:perplexity"
-        case .chatgpt, .ollama: return nil
+        case .chatgpt, .ollama, .claudeCode: return nil
         }
     }
 
+    /// 走 Pi 的 provider 才出现在 PiInstaller 的 models.json,claudeCode 跳过。
+    var usesPi: Bool { self != .claudeCode }
+
     /// Whether this provider needs no setup beyond detection.
-    var isLocal: Bool { self == .ollama }
+    var isLocal: Bool { self == .ollama || self == .claudeCode }
 }
 
 /// Helper that resolves the credential (token / API key) for a provider.
