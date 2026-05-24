@@ -70,6 +70,16 @@ struct HomeView: View {
                 )
             }
 
+            // 至少 2 张 pending draft 时,在输入框上方挂一条统一拍板栏。
+            // 一张时单卡 Approve/Reject 已经够用,显示 batch bar 反而冗余。
+            if chat.pendingEditDraftCount >= 2 {
+                BatchApproveBar(count: chat.pendingEditDraftCount,
+                                onApproveAll: { _ = chat.approveAllPendingEditDrafts() },
+                                onRejectAll: { _ = chat.rejectAllPendingEditDrafts() })
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 6)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             ChatInputBar(
                 prompt: $prompt,
                 providerName: appState.activeAI?.name ?? "Codex",
@@ -567,6 +577,63 @@ private struct AssistantBody: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+}
+
+/// chat 输入框上方的「统一拍板」横条 —— 第二轮相关条目扫之后,如果有
+/// 2+ 张 pending draft,这条出现,让用户一键 Approve all / Reject all。
+/// 已 approve / rejected / failed 的不算 pending,不影响 count。
+private struct BatchApproveBar: View {
+    let count: Int
+    let onApproveAll: () -> Void
+    let onRejectAll: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray.full.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(LinearGradient(
+                    colors: [.cyan, .purple, .pink],
+                    startPoint: .leading, endPoint: .trailing))
+            Text("\(count) drafts pending review")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+            Spacer(minLength: 8)
+            Button(action: onRejectAll) {
+                Label("Reject all", systemImage: "xmark")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(.red)
+            Button(action: onApproveAll) {
+                Label("Approve all", systemImage: "checkmark")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(.green)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.85)
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(LinearGradient(
+                        colors: [.cyan.opacity(0.10), .purple.opacity(0.08)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(LinearGradient(
+                        colors: [.cyan, .purple, .pink],
+                        startPoint: .leading, endPoint: .trailing).opacity(0.50),
+                        lineWidth: 0.8)
+            }
+        )
     }
 }
 

@@ -55,6 +55,11 @@ final class ChatController {
     /// 这样卡片始终在 AI 回复完整出来之后才出现,不会夹在 bash blocks 中间。
     private var pendingDraftRelPathsThisTurn: [String] = []
 
+    /// 本对话是否已经触发过「相关条目扫」第二轮。每个 chat 最多一次
+    /// LLM scan,防止用户每次 approve 都烧 token。第二轮出来一批 drafts
+    /// 后,用户用 Approve all 统一拍板,后续不再 trigger。switchTo 时重置。
+    private var relatedScanFiredThisConv: Bool = false
+
     /// 顶住 App Nap 的活动 token —— streaming 期间持有,把 chat 的
     /// @MainActor 事件循环从背景态节流里救出来,否则用户切走窗口后
     /// agent 输出的 bash/text 全部"卡住",等切回来才一次性补上。
@@ -150,6 +155,8 @@ final class ChatController {
         currentConvId = convId
         // 离开当前 conv → 编辑模式标记失效(未消费就丢)。
         pendingEditOriginalURL = nil
+        // 每个对话独立计数,新对话允许再次扫一次相关条目。
+        relatedScanFiredThisConv = false
         if let convId {
             messages = store.loadMessages(for: convId)
         } else {
@@ -707,6 +714,10 @@ final class ChatController {
 
     /// 用户点 Approve。成功 → block.state=.approved + 删 draft 文件。
     /// 失败 → block.state=.failed + errorMessage 显示原因。
+    ///
+    /// 第一次 approve 触发 triggerRelatedScan —— AI 一次性扫所有相关条目
+    /// 提一批 drafts;后续 approve 不再触发任何 LLM(每个对话最多一次扫)。
+    /// 用户对那批 drafts 用 Approve all 统一拍板。
     func approveEditDraft(blockId: UUID) {
         guard let located = locateEditDraftBlock(blockId: blockId) else { return }
         var block = located.2
@@ -721,43 +732,104 @@ final class ChatController {
         }
         messages[located.0].parts[located.1] = .editDraft(block)
         persist()
-        // Approve 成功 → 自动触发第二轮:让 AI 扫相关条目找出同向需改的,
-        // 给每个生成独立 draft 卡片(用户逐个 approve/reject)。失败 / 已被
-        // 翻成其他状态的不触发。
-        if block.state == .approved {
+        // 第一次成功 approve → 启动唯一一次相关条目扫。
+        if block.state == .approved, !relatedScanFiredThisConv {
+            relatedScanFiredThisConv = true
             triggerRelatedScan(approvedRelPath: block.originalRelPath,
                                approvedSummary: block.summary ?? block.request)
         }
     }
 
     /// 给 AI 发一段 follow-up,要它顺 --ai-find-related 扫双向引用,对真
-    /// 需要同向调整的相关条目各起一份新 draft。每份新 draft 会自动通过
-    /// finishTool 钩子变成新的 EditDraftCard 等用户拍板。
+    /// 需要同向调整的相关条目**一次性**全部提出 drafts。每份 draft 会自动
+    /// 通过 finishTool 钩子变成新的 EditDraftCard。用户用 Approve all
+    /// 按钮一键拍板,后续 approve 不再触发 LLM(relatedScanFiredThisConv
+    /// 守门)。
     private func triggerRelatedScan(approvedRelPath: String, approvedSummary: String) {
         let binPath = Bundle.main.executablePath ?? "MyPortrait"
         let followUp = """
         The user APPROVED the edit to `\(approvedRelPath)`.
         Edit summary: \(approvedSummary)
 
-        Now do the SECOND ROUND — find any other entries that should change
-        in the same direction (e.g., same factual correction):
+        SECOND ROUND — find ALL other entries needing the SAME factual
+        correction, and propose drafts for them ALL IN THIS ONE TURN:
 
         1. Call `\(binPath) --ai-find-related \(approvedRelPath)` to list
-           entries linked to this one via evidence_event_ids / distilled_into
-           (both directions).
-        2. For EACH related entry, read it (`\(binPath) --ai-read <rel>`)
-           and judge if it needs the same kind of edit to stay consistent.
-        3. If it does, propose a draft using the same --ai-draft-* workflow:
-           begin → write-body → set-summary → preview. Each proposed draft
-           will surface as its own approval card; the user will accept or
-           reject them individually.
+           entries linked via evidence_event_ids / distilled_into.
+        2. For EACH related entry, `--ai-read <rel>` and judge if it needs
+           the same kind of edit to stay consistent with the approved one.
+        3. For EACH entry that DOES need the same edit, propose a draft
+           (begin → write-body → set-summary → preview).
         4. If no related entries need changes, say so and stop.
 
         STRICT — same rules as before: only --ai-draft-* writes, body-only,
-        one draft per related entry, never edit frontmatter, never touch
-        unrelated entries.
+        never edit frontmatter, never touch unrelated entries. **Do all
+        drafts in this single turn** — the user will approve them in BULK
+        in the UI (Approve all button). You will NOT get another follow-up,
+        so don't hold back drafts for later.
         """
         Task { await self.deliver(followUp) }
+    }
+
+    /// 一键 Approve 当前对话里所有 pending draft。给用户「统一拍板」按钮调。
+    /// 返回成功落盘的数量(.approved 翻成功)。失败的留在 .failed 状态。
+    @discardableResult
+    func approveAllPendingEditDrafts() -> Int {
+        var approved = 0
+        for mIdx in messages.indices {
+            for pIdx in messages[mIdx].parts.indices {
+                guard case .editDraft(var block) = messages[mIdx].parts[pIdx],
+                      block.state == .pending else { continue }
+                let url = Storage.rootURL.appendingPathComponent(block.originalRelPath)
+                do {
+                    try EditDraft.approve(originalURL: url)
+                    block.state = .approved
+                    approved += 1
+                } catch {
+                    block.state = .failed
+                    block.errorMessage = error.localizedDescription
+                }
+                messages[mIdx].parts[pIdx] = .editDraft(block)
+            }
+        }
+        if approved > 0 { persist() }
+        return approved
+    }
+
+    /// 一键 Reject 当前对话里所有 pending draft。
+    @discardableResult
+    func rejectAllPendingEditDrafts() -> Int {
+        var rejected = 0
+        for mIdx in messages.indices {
+            for pIdx in messages[mIdx].parts.indices {
+                guard case .editDraft(var block) = messages[mIdx].parts[pIdx],
+                      block.state == .pending else { continue }
+                let url = Storage.rootURL.appendingPathComponent(block.originalRelPath)
+                do {
+                    try EditDraft.reject(originalURL: url)
+                    block.state = .rejected
+                    rejected += 1
+                } catch {
+                    block.state = .failed
+                    block.errorMessage = error.localizedDescription
+                }
+                messages[mIdx].parts[pIdx] = .editDraft(block)
+            }
+        }
+        if rejected > 0 { persist() }
+        return rejected
+    }
+
+    /// 当前对话里 pending 状态的 draft 数。UI 用来决定「Approve all」按钮
+    /// 是否显示 + 显示几张。
+    var pendingEditDraftCount: Int {
+        var n = 0
+        for msg in messages {
+            for part in msg.parts {
+                if case .editDraft(let b) = part, b.state == .pending { n += 1 }
+            }
+        }
+        return n
     }
 
     /// 用户点 Reject。删 draft 文件,原文件不动。
