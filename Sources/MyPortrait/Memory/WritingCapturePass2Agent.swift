@@ -432,6 +432,13 @@ private struct RawSessionPayload: Encodable {
     let url: String?
     let startTs: Int64
     let endTs: Int64
+    /// keystroke_text:把 keystrokes 的 char 按 ts 升序拼成一条字符串(跳过
+    /// 修饰键-only / backspace / Cmd-X 等 shortcut)。**最强证据**:用户真实
+    /// 敲了什么。AX/OCR 跟它对不上 → 大概率 paste/load/program-write。
+    /// 注意:中文 IME 这里是 latin pinyin(CGEventKeyboardGetUnicodeString
+    /// 限制),不是合成的汉字。
+    let keystrokeText: String
+    let keystrokeCount: Int
     let typingEvents: [TypingEventPayload]
     let keystrokeLog: [KeystrokePayload]
     let ocrFrames: [WritingCaptureOcrFrame]
@@ -442,9 +449,11 @@ private struct RawSessionPayload: Encodable {
         case url
         case startTs      = "start_ts"
         case endTs        = "end_ts"
-        case typingEvents = "typing_events"
-        case keystrokeLog = "keystroke_log"
-        case ocrFrames    = "ocr_frames"
+        case keystrokeText  = "keystroke_text"
+        case keystrokeCount = "keystroke_count"
+        case typingEvents   = "typing_events"
+        case keystrokeLog   = "keystroke_log"
+        case ocrFrames      = "ocr_frames"
     }
 
     init(_ s: WritingCaptureRawSession) {
@@ -453,9 +462,33 @@ private struct RawSessionPayload: Encodable {
         self.url = s.url
         self.startTs = s.startTs
         self.endTs = s.endTs
+        self.keystrokeText = Self.assembleKeystrokeText(s.keystrokes)
+        self.keystrokeCount = s.keystrokes.count
         self.typingEvents = s.typingEvents.map(TypingEventPayload.init)
         self.keystrokeLog = s.keystrokes.map(KeystrokePayload.init)
         self.ocrFrames = s.ocrFrames
+    }
+
+    /// 把 keystrokes 拼成一条「真实敲了什么」的字符串。
+    /// - 含修饰键(cmd/opt/ctrl)的 char 跳过(shortcut,不是输入)
+    /// - backspace 不拼(它的删字效果用 `<BS>` 标记便于 LLM 看清)
+    /// - 普通字符按 ts 升序串联
+    /// 中文用户输入"你好"会得到拼音 "nihao"(IME 不暴露合成字)。
+    static func assembleKeystrokeText(_ keys: [KeystrokeEntry]) -> String {
+        var out = ""
+        for k in keys.sorted(by: { $0.tsMs < $1.tsMs }) {
+            // 任何带 cmd/opt/ctrl 的击键当 shortcut,不算输入字符
+            let m = k.modifiers
+            if (m & 0x01) != 0 || (m & 0x02) != 0 || (m & 0x04) != 0 { continue }
+            if k.isBackspace != 0 {
+                out += "<BS>"
+                continue
+            }
+            if let c = k.char, !c.isEmpty {
+                out += c
+            }
+        }
+        return out
     }
 }
 

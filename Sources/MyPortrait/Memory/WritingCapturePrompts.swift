@@ -88,22 +88,34 @@ enum WritingCapturePrompts {
       Format: [{start_ts, end_ts, app, url, intent_type, summary}, ...]
     - group_meta: the (app, url) this group covers + total session count
     - raw_sessions: every session inside this group, each with multi-source data:
-      [{session_id, start_ts, end_ts, typing_events, keystroke_log, ocr_frames}, ...]
-        - typing_events[*]: PRE-PROCESSED AX path data (v14 splice algorithm).
-          `text` is the FINAL user-perceived content. DO NOT modify it.
-          `edit_log` contains commit/delete events.
-        - keystroke_log[*]: raw keystrokes [{ts, char, bs, mods}].
-          - `char` for Chinese IME = LATIN pinyin letters — NOT composed Chinese
-          - `bs` = backspace/delete pressed
-          - `mods` = "cmd" / "cmd+shift" / etc.; nil = no modifier. Use this to
-            detect shortcuts:
-              {char:"x", mods:"cmd"}  = ⌘X (Cut) — content went to pasteboard
-              {char:"z", mods:"cmd"}  = ⌘Z (Undo)
-              {char:"v", mods:"cmd"}  = ⌘V (Paste)
-              {char:"\b", mods:"cmd"} = ⌘+Backspace (delete whole line)
-            Shortcut-driven actions are NOT user "typing" the literal letter.
-        - ocr_frames[*]: pre-processed OCR text [{frame_id, start_ts, end_ts, text}].
-          Already Jaccard-deduped and short-content-filtered.
+      [{session_id, start_ts, end_ts, keystroke_text, keystroke_count,
+        typing_events, keystroke_log, ocr_frames}, ...]
+
+      **THREE-SOURCE CROSS-VALIDATION — read carefully:**
+
+      Two sources are GROUND TRUTH (cannot lie about what the user typed):
+        - keystroke_text: STRING of every char the user physically pressed
+          (sorted, modifier-key-only and shortcut presses excluded, backspace
+          shown as "<BS>"). For Chinese IME this is the LATIN PINYIN the user
+          typed, NOT the composed characters.
+        - keystroke_count: total raw key presses (debug aid)
+
+      Two sources are FALLIBLE and must be cross-checked against the ground truth:
+        - typing_events[*]: AX-path data. `text` is what the input field
+          contained per AX. **AX can lie** —— it captures paste/load/program-write
+          /sync/iCloud-merge content as if the user typed it. Verify against
+          `keystroke_text` before trusting.
+        - ocr_frames[*]: screen OCR (already Jaccard-deduped and anchor-filtered
+          to ±10s of a typing/keystroke). **OCR can mislead** —— it shows whatever
+          is on screen including content the user is just reading.
+
+      keystroke_log[*] is the raw stream backing keystroke_text:
+        [{ts, char, bs, mods}]. Use it to spot timing patterns / shortcuts.
+        - `mods` = "cmd" / "cmd+shift" / etc.; nil = no modifier.
+          {char:"v", mods:"cmd"}  = ⌘V (Paste)
+          {char:"z", mods:"cmd"}  = ⌘Z (Undo)
+          {char:"x", mods:"cmd"}  = ⌘X (Cut)
+          Shortcut presses are NOT user "typing" the literal letter.
 
     TASK
 
@@ -140,8 +152,38 @@ enum WritingCapturePrompts {
        - Repeated gibberish: "aaaaa", "test test test"
        - Pure shortcut keystrokes with no resulting content (Cmd+Tab spam, etc.)
        - Empty session (typing=0, OCR=0)
+       - **AX/OCR content not backed by keystrokes** (see §3a below)
        Use free-text reason describing why.
        DO NOT drop just because content is short — short messages are SIGNAL.
+
+    3a. CROSS-SOURCE VERIFICATION (the core anti-hallucination rule)
+
+       For every candidate record, BEFORE emitting it:
+       - Take the `keystroke_text` for that session
+       - Compare it to what you'd output as the record's `text`
+       - For Latin/ASCII content: keystroke_text and text should be largely the
+         same string (allowing for backspace edits "<BS>")
+       - For Chinese content: keystroke_text is PINYIN, text is the composed
+         Chinese. They should match phonetically — e.g. text "你好" requires
+         keystroke_text to contain "nihao" (possibly with selection numbers /
+         spaces / <BS>)
+       - For canvas editors (typing_events empty): the OCR-reconstructed text
+         must STILL have phonetic / character backing from keystroke_text
+
+       If the candidate text has substantially more content than keystroke_text
+       can account for (e.g. text=500 chars but keystroke_text=20 chars and no
+       reasonable IME explanation), it's **paste / file-load / sync / iCloud
+       merge / program-write** — NOT user writing.
+       → Put the session in `discarded` with reason explaining the mismatch.
+       → DO NOT emit a record for unverified content.
+
+       Acceptable mismatches (still emit the record):
+       - keystroke_text has <BS> markers → user edited; final text shorter is fine
+       - keystroke_text has IME selection digits (1-9) → normal Chinese input
+       - text contains 1-2 chars from autocomplete / autocorrect not in keystroke
+         (acceptable noise margin)
+       - Very short paste explicitly followed by user editing keystrokes
+         (e.g. paste a URL then add a "?" — keystroke_text="?" + paste of URL)
        DO NOT drop because intent_type from Pass 1 was "search" or "chat" — the user
        wants to keep short chats.
 

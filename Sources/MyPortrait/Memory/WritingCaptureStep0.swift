@@ -24,10 +24,13 @@ struct WritingCaptureStep0 {
     static let mergeWindowMs: Int64 = 30 * 60 * 1000
     /// throwaway 最小字数
     static let throwawayMinChars = 20
-    /// OCR Jaccard 相似度阈值。0.85 比 0.95 激进 —— 大量 chrome / 菜单
-    /// 不变的连续帧会被合并,大幅压缩 LLM context。原 0.95 在重写作日把
-    /// claude code 撑爆过(Prompt is too long)。
-    static let ocrJaccardThreshold = 0.85
+    /// OCR Jaccard 相似度阈值。0.50 比 0.85 更激进 —— 牺牲"看清用户打字
+    /// 过程中的中间帧"换取大幅 token 节省,只保留"最终输出"那一刻的帧。
+    /// 95 → 85 → 50 演进:
+    ///   0.95:看得到每一步小改动,但 prompt 撑爆过 claude code
+    ///   0.85:大部分 chrome 不变帧合并,5/23 实测 23K tokens
+    ///   0.50:连用户打字过程中的中间状态也合并,只留终态 + 显著变化的帧
+    static let ocrJaccardThreshold = 0.50
     /// throwaway preview 截断长度
     static let throwawayPreviewLen = 80
     /// **OCR 反向 join 窗口**:一个 session 只保留"typing / keystroke 事件
