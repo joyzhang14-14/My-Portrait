@@ -2182,9 +2182,6 @@ private struct ProviderModelPicker: View {
     @State private var hover = false
 
     private var activeIntegration: Integration? { appState.activeAI }
-    private var activeProvider: Provider? {
-        activeIntegration.flatMap { Provider.from(integrationId: $0.id) }
-    }
     private var activeModel: String {
         guard let id = activeIntegration?.id else { return "" }
         return appState.currentModel(forIntegrationId: id)

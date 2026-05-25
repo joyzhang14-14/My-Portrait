@@ -8,9 +8,6 @@ struct CaptureConfig: Sendable {
 
     // MARK: - 帧调度
 
-    /// P1 定时模式下的间隔。事件驱动模式（P2+）下被 EventSources 接管。
-    var captureIntervalMs: Int = 1000
-
     /// 两次实际捕获之间的最小间隔（防抖）。任何调度路径都必须遵守。
     var minCaptureIntervalMs: Int = 200
 

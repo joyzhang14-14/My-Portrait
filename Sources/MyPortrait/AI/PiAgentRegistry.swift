@@ -31,12 +31,6 @@ final class PiAgentRegistry: @unchecked Sendable {
         boxes.removeAll { $0.agent == nil || $0.agent === agent }
     }
 
-    /// Number of agents currently alive.
-    var liveCount: Int {
-        lock.lock(); defer { lock.unlock() }
-        return boxes.filter { $0.agent != nil }.count
-    }
-
     /// Stop every live agent. Returns how many were stopped.
     @discardableResult
     func stopAll() -> Int {

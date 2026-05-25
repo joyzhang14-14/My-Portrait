@@ -51,15 +51,6 @@ actor BGEM3ModelManager {
         self.session = URLSession(configuration: config)
     }
 
-    /// 检查所有必需文件是否就位。
-    var isDownloaded: Bool {
-        let fm = FileManager.default
-        return Self.requiredFiles.allSatisfy { rel in
-            let path = modelDir.appendingPathComponent(rel).path
-            return fm.fileExists(atPath: path)
-        }
-    }
-
     /// 完整路径（推理用）。
     func filePath(for relative: String) -> URL {
         modelDir.appendingPathComponent(relative)
@@ -89,13 +80,6 @@ actor BGEM3ModelManager {
         guard !FileManager.default.fileExists(atPath: dest.path) else { return }
         logger.info("downloading bge-m3 weights (~2.27 GB) — this may take a while...")
         try await downloadFile(relative: Self.weightsFile, to: dest)
-    }
-
-    /// 检查是否权重文件就位（MLX 推理调用前的 fast path）。
-    var hasWeights: Bool {
-        FileManager.default.fileExists(
-            atPath: modelDir.appendingPathComponent(Self.weightsFile).path
-        )
     }
 
     // MARK: - 私有
