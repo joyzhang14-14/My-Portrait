@@ -808,30 +808,43 @@ private struct SchedulerStep: View {
 
 // MARK: - Step 7: Speaker training
 
-/// 让用户念一段 ~30s 的 passage,把麦克风听到的声纹打成「就是这位用户」的
-/// label。复用 Settings → Speakers 里现有的 VoiceTrainingCard / Sheet —
-/// 不重写,也不接首启自动跑(等 onboarding 整体接首启再说)。
+/// 自洽的声纹训练:**不依赖** Settings 里的 audio / speaker_id 开关。
+/// 用户点 Start 时:
+///   1. 记下 audio.enabled / speakerIdEnabled 的原值
+///   2. 强制开 audio + speaker_id —— Services pipeline 自动起 AudioCaptureService
+///   3. 30s 倒计时,期间 mic 正在采 + 分离
+///   4. assign(name:) 后台轮询窗口里的声纹簇,主簇标用户名
+///   5. trainer.phase 变 .success/.failure → 恢复原值
+///
+/// mic 权限没给 → 显示警告,Start 灰。其它情况一律可点。
 private struct SpeakerTrainingStep: View {
+    @State private var config = ConfigStore.shared
+    @StateObject private var monitor = PermissionMonitor()
+    /// 直接观察 trainer.phase 变化触发恢复逻辑。
+    @State private var trainer = VoiceTrainer.shared
     @State private var showCountdown = false
+    /// 训练前的 audio.enabled / speakerIdEnabled,完成时还原。
+    @State private var prevAudioEnabled: Bool? = nil
+    @State private var prevSpeakerIdEnabled: Bool? = nil
+
+    private var name: String {
+        config.current.capture.audio.userName.trimmingCharacters(in: .whitespaces)
+    }
+    private var micGranted: Bool { monitor.microphone == .granted }
+    private var blocked: Bool { name.isEmpty || !micGranted || trainer.isRunning }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Train your voice (optional)")
                     .font(.system(size: 24, weight: .semibold))
-                Text("My Portrait separates speakers by voiceprint. If you read a short passage now, future recordings can attribute lines to \"you\" instead of \"unknown cluster #3\". You can do this any time later from Settings → Speakers.")
+                Text("My Portrait separates speakers by voiceprint. Read a short passage now and future recordings can attribute lines to \"you\" instead of \"unknown cluster #3\". You can do this any time later from Settings → Speakers.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 6)
 
-                // 复用 Settings → Speakers 里的 card —— 它已经处理好 audio /
-                // speakerId 开关检查、name 输入框、状态 line。existingNames 传
-                // 空,onboarding 期间几乎没存量数据,suggestion 用不上。
-                VoiceTrainingCard(
-                    existingNames: [],
-                    onStart: { showCountdown = true }
-                )
+                card
 
                 Color.clear.frame(height: 8)
             }
@@ -840,16 +853,155 @@ private struct SpeakerTrainingStep: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear { monitor.start() }
+        .onDisappear { monitor.stop() }
+        // Phase 变 success/failure 时恢复 audio 设置。
+        .onChange(of: phaseKey(trainer.phase)) { _, newKey in
+            if newKey == "success" || newKey == "failure" {
+                restoreAudioState()
+            }
+        }
         .sheet(isPresented: $showCountdown) {
             VoiceTrainingSheet(
                 onFinish: {
                     showCountdown = false
-                    VoiceTrainer.shared.assign(
-                        name: ConfigStore.shared.current.capture.audio.userName
-                    )
+                    trainer.assign(name: name)
                 },
-                onCancel: { showCountdown = false }
+                onCancel: {
+                    showCountdown = false
+                    // 用户取消 → 没真训练,直接还原。
+                    restoreAudioState()
+                }
             )
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "mic.badge.plus")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Color.purple.opacity(0.9))
+                Text("Voice Training").font(.system(size: 14, weight: .semibold))
+            }
+            Text("Read a short passage aloud for ~30 seconds. My Portrait will briefly turn on your microphone for the training session and turn it back off when it's done.")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Text("Your name")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.70))
+                TextField("e.g. Joy", text: config.binding(\.capture.audio.userName))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 7)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    )
+                    .frame(maxWidth: 220)
+            }
+
+            if !micGranted {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text("Microphone permission needed — grant it in the Permissions step.")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(Color.orange.opacity(0.85))
+            }
+
+            HStack {
+                statusLine
+                Spacer()
+                Button(action: startTraining) {
+                    Text(trainer.isRunning ? "Training…" : "Start training")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(LinearGradient(
+                                    colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.28)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .overlay(RoundedRectangle(cornerRadius: 7)
+                                    .stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(blocked)
+                .opacity(blocked ? 0.45 : 1)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+        )
+    }
+
+    @ViewBuilder private var statusLine: some View {
+        switch trainer.phase {
+        case .idle:
+            EmptyView()
+        case .matching:
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.small)
+                Text("Matching your voice — may take a few minutes…")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.60))
+            }
+        case .success(let n):
+            Text("✓ Trained as \(n)")
+                .font(.system(size: 11)).foregroundStyle(Color.green.opacity(0.90))
+        case .failure(let msg):
+            Text(msg)
+                .font(.system(size: 11)).foregroundStyle(Color.red.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Audio toggle 临时拉起 / 还原
+
+    private func startTraining() {
+        guard !blocked else { return }
+        // 记下原值。如果之前已 success/failure,这里 prevXxx 可能还残留之前那次
+        // 的值;重新记一次覆盖。
+        prevAudioEnabled = config.current.capture.audio.enabled
+        prevSpeakerIdEnabled = config.current.capture.audio.speakerIdEnabled
+        // 强制开 —— Services pipeline 会自动起 AudioCaptureService + 分离。
+        config.mutate { c in
+            c.capture.audio.enabled = true
+            c.capture.audio.speakerIdEnabled = true
+        }
+        showCountdown = true
+    }
+
+    /// 恢复 audio.enabled / speakerIdEnabled 到训练前的值。idempotent —— 多次
+    /// 调用(cancel + phase change)只生效一次。
+    private func restoreAudioState() {
+        guard let prevAudio = prevAudioEnabled,
+              let prevSpk = prevSpeakerIdEnabled else { return }
+        config.mutate { c in
+            c.capture.audio.enabled = prevAudio
+            c.capture.audio.speakerIdEnabled = prevSpk
+        }
+        prevAudioEnabled = nil
+        prevSpeakerIdEnabled = nil
+    }
+
+    /// VoiceTrainer.Phase 不是 Equatable-keyed-by-case,onChange 需要个稳定 key。
+    private func phaseKey(_ p: VoiceTrainer.Phase) -> String {
+        switch p {
+        case .idle: return "idle"
+        case .matching: return "matching"
+        case .success: return "success"
+        case .failure: return "failure"
         }
     }
 }
