@@ -298,12 +298,18 @@ enum Backfill {
         return "\(stamp)_\(slug).md"
     }
 
-    private static func isoDay(_ day: Date) -> String {
+    /// `isoDay` 一天每次 backfill 都会调,DateFormatter 构造昂贵,缓存住。
+    /// 跟 EventBuilder.dayFmt 同样的 Sendable 静态实例模式。
+    private static let isoDayFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(identifier: "UTC")
-        return f.string(from: day)
+        return f
+    }()
+
+    private static func isoDay(_ day: Date) -> String {
+        isoDayFmt.string(from: day)
     }
 
     private static func slugify(_ s: String) -> String {
