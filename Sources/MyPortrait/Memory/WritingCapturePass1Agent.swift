@@ -152,9 +152,9 @@ final class WritingCapturePass1Agent {
     static let pass1OcrTextMaxChars = 300
 
     /// Pass 1 最多喂给 LLM 多少帧。Pass 1 只要 "时段-意图" 时间轴,不需要
-    /// 每帧。重写作日 5000+ 帧实测会撑爆 200K context。50 也够分时段
-    /// (1 帧 / 30 分钟),先确保管道跑通,后续调优。
-    static let pass1FrameCap = 50
+    /// 每帧。重写作日 5000+ 帧实测会撑爆 200K context。100 帧均匀采样足以
+    /// 覆盖一天大部分时段,Step 0 的 10s + 50% Jaccard 已大幅减帧。
+    static let pass1FrameCap = 100
 
     /// 把 ocrFrames 沿时间均匀采样到 ≤ `pass1FrameCap` 帧。
     /// 跨度大就大跨度采,小就全留。每帧仍截 text 到 `pass1OcrTextMaxChars`。
