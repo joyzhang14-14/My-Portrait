@@ -80,6 +80,10 @@ final class SpeechStyleDistiller {
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
         try store.insertRun(runId: runId, mode: mode, startedAt: startedAt)
 
+        // 入口先 refresh 一次 —— 即使本轮无新 record(short-circuit)也让
+        // 现有 entry 按当前时间衰减一次。
+        Self.refreshAllWeights()
+
         do {
             // 1. 拉一批未处理 records(截断到 batchCap)
             let records = try await Task.detached(priority: .userInitiated) { [store, batchCap] in
