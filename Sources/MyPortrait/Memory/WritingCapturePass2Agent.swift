@@ -240,13 +240,14 @@ final class WritingCapturePass2Agent {
 
     // MARK: - Prompt
 
-    /// Pass 2 单帧 OCR 截多少字。原始数据完整保留在 frames 表,截断只在
-    /// LLM 输入这一层。300 字够 LLM 看出 session 内容意图。
-    static let pass2OcrTextMaxChars = 200
+    /// Pass 2 单帧 OCR 截多少字。Step 0 已经做 10s window + 50% Jaccard
+    /// 减帧,Pass 2 不再砍字,canvas 路径用满 OCR(单 group ~50-150K chars,
+    /// 仍在 200K context 内)。0 = 不截。
+    static let pass2OcrTextMaxChars = 0
 
-    /// Pass 2 单 session 最多塞几帧 OCR。重写作日 60+ sessions 全塞会
-    /// 撑爆 200K context,10 帧 / session 是经验值。
-    static let pass2OcrFramesPerSessionCap = 10
+    /// Pass 2 单 session 最多塞几帧 OCR。同上,Step 0 已减帧,Pass 2 不再
+    /// 采样。0 = 不限制。
+    static let pass2OcrFramesPerSessionCap = 0
 
     /// Pass 2 单 session 最多塞多少 keystroke。
     static let pass2KeystrokesPerSessionCap = 100
@@ -268,15 +269,24 @@ final class WritingCapturePass2Agent {
         if isAxPath {
             trimmedFrames = []
         } else {
-            let truncated = s.ocrFrames.map { f -> WritingCaptureOcrFrame in
-                WritingCaptureOcrFrame(
-                    frameId: f.frameId,
-                    startTs: f.startTs, endTs: f.endTs,
-                    app: f.app, url: f.url,
-                    text: String(f.text.prefix(pass2OcrTextMaxChars))
-                )
+            // 截字:cap=0 表示不截
+            let truncated: [WritingCaptureOcrFrame]
+            if pass2OcrTextMaxChars > 0 {
+                truncated = s.ocrFrames.map { f -> WritingCaptureOcrFrame in
+                    WritingCaptureOcrFrame(
+                        frameId: f.frameId,
+                        startTs: f.startTs, endTs: f.endTs,
+                        app: f.app, url: f.url,
+                        text: String(f.text.prefix(pass2OcrTextMaxChars))
+                    )
+                }
+            } else {
+                truncated = s.ocrFrames
             }
-            trimmedFrames = sampleEvenly(truncated, cap: pass2OcrFramesPerSessionCap)
+            // 采样:cap=0 表示不采样
+            trimmedFrames = pass2OcrFramesPerSessionCap > 0
+                ? sampleEvenly(truncated, cap: pass2OcrFramesPerSessionCap)
+                : truncated
         }
         let sampledKeys = sampleEvenly(s.keystrokes, cap: pass2KeystrokesPerSessionCap)
         return WritingCaptureRawSession(

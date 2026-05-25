@@ -149,7 +149,7 @@ final class WritingCapturePass1Agent {
     /// 单帧 OCR text 截多少字 —— Chrome / 菜单 / 工具栏 重复噪音不必给 LLM
     /// 看完整,300 字够它 infer 上下文。原始数据完整保留在 frames 表里,
     /// 截断只在 LLM 输入这一层。
-    static let pass1OcrTextMaxChars = 300
+    static let pass1OcrTextMaxChars = 1500
 
     /// Pass 1 最多喂给 LLM 多少帧。Pass 1 只要 "时段-意图" 时间轴,不需要
     /// 每帧。重写作日 5000+ 帧实测会撑爆 200K context。100 帧均匀采样足以
