@@ -687,7 +687,7 @@ struct WritingCaptureStore: Sendable {
     /// 原子事务。
     func approveStaged(date: String) throws -> Int {
         try dbPool.write { db in
-            // 1. 拷 staged → writing_records
+            // 1. 拷 staged → writing_records(跳过被用户 reject 标 hidden 的)
             try db.execute(sql: """
                 INSERT INTO writing_records
                     (start_ts, end_ts, app, url, text, edit_log, confidence,
@@ -698,7 +698,8 @@ struct WritingCaptureStore: Sendable {
                        context_summary, source, kind, reference_typing_event_ids,
                        reference_frame_ids, reference_keystroke_range, raw_output,
                        prompt_id, created_at, worker_run_id
-                FROM writing_records_staged WHERE date_utc = :d
+                FROM writing_records_staged
+                WHERE date_utc = :d AND hidden_at IS NULL
                 """,
                 arguments: ["d": date])
             let copied = db.changesCount
