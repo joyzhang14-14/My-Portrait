@@ -129,8 +129,12 @@ struct PersonalInfoView: View {
                 // 直接复用 SettingsRow,跟上面 First name / Nationality 等字段
                 // 用同一套排版,SwiftUI Text 对齐细节由组件负责,不再自己拼
                 // HStack(避免 SF Symbol 字形重心 + 单行 vs 双行的视觉错位)。
+                // icon 用 character.book.closed.fill —— 之前 character.bubble.fill
+                // 有向下小尾巴,bounding box 比文字高、视觉重心偏上,HStack
+                // center 之后整行内容跑到上半,下半留空看着不平衡。book 这个
+                // 图标 bounds 矩形对称无尾巴,跟文字 center 对齐严丝合缝。
                 ForEach(Array(langs.enumerated()), id: \.offset) { idx, lang in
-                    SettingsRow(lang, icon: "character.bubble.fill") {
+                    SettingsRow(lang, icon: "character.book.closed.fill") {
                         Button {
                             removeLanguage(at: idx)
                         } label: {
