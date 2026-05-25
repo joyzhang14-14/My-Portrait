@@ -656,7 +656,12 @@ struct MemorySettingsView: View {
                         speechStyleTask?.cancel()
                         speechStyleTask = nil
                         speechStyleRunning = false
-                        speechStyleStatus = "Stopped — killed \(n) LLM process(es)."
+                        // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
+                        // 启动时 unprocessedCount / pending 判断会被僵尸行误导。
+                        let zombies = (try? SpeechStyleDistiller.shared?.store
+                            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
+                        speechStyleStatus = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+                        refreshSpeechStyle()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)

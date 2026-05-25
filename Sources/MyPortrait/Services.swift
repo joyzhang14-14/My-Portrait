@@ -136,6 +136,13 @@ final class Services {
         // 同一 DatabasePool。注册到 SpeechStyleDistiller.shared 给 UI / scheduler 用。
         let ssStore = SpeechStyleStore(dbPool: dbImpl.dbPool)
         SpeechStyleDistiller.shared = SpeechStyleDistiller(store: ssStore)
+        // 启动时清残留 zombie processing 行 —— 上次进程崩 / 用户硬退之后
+        // 没改回 final status 的 run。
+        if let zombies = try? ssStore.markStuckProcessingAsFailed(
+            message: "process exited before run completed"
+        ), zombies > 0 {
+            print("[speech-style] startup recovery: marked \(zombies) zombie run(s) as failed")
+        }
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。

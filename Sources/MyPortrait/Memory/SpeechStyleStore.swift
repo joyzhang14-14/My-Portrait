@@ -141,6 +141,27 @@ struct SpeechStyleStore: Sendable {
         }
     }
 
+    /// 把所有卡在 'processing' 的 run 标为 failed —— 给 Stop 按钮 / 启动恢复用。
+    /// 没 Stop / 进程崩了之后留下来的僵尸行会污染下次 unprocessedCount 判断。
+    @discardableResult
+    func markStuckProcessingAsFailed(message: String) throws -> Int {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return try dbPool.write { db in
+            try db.execute(sql: """
+                UPDATE speech_style_runs
+                SET status        = :status,
+                    completed_at  = :now,
+                    error_message = :msg
+                WHERE status = 'processing'
+                """,
+                arguments: [
+                    "status": SpeechStyleRunStatus.failed.rawValue,
+                    "now": now, "msg": message
+                ])
+            return db.changesCount
+        }
+    }
+
     /// status = pending_review 的所有 run,新到旧。
     func fetchPendingReviewRuns() throws -> [SpeechStyleRunRow] {
         try dbPool.read { db in
