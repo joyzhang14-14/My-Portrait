@@ -35,6 +35,13 @@ final class KeystrokeLedger {
     /// 「这次 value 变化是不是粘贴触发的」，故单独记一个时刻。`lock` 同护。
     private var lastPasteMs: Int64 = 0
 
+    /// 最近一次 ⌘X(cut)/ ⌘C(copy)/ ⌘Z(undo)/ ⌘⇧Z(redo) 时间戳。
+    /// 给 TypingRecordWriter 判用户在重组自己内容 vs 粘外人内容用。
+    private var lastCutMs: Int64 = 0
+    private var lastCopyMs: Int64 = 0
+    private var lastUndoMs: Int64 = 0
+    private var lastRedoMs: Int64 = 0
+
     /// 最近一次回车键（Return / 小键盘 Enter）的时间戳（ms，单调时钟）。
     /// 聊天 app 里回车 = 发送消息 → 输入框被清空。上层据此把「输入框清空」
     /// 判定为发送而非删除。`lock` 同护。
@@ -229,6 +236,19 @@ final class KeystrokeLedger {
         os_unfair_lock_unlock(&lock)
     }
 
+    func recordCut() {
+        os_unfair_lock_lock(&lock); lastCutMs = Self.nowMs(); os_unfair_lock_unlock(&lock)
+    }
+    func recordCopy() {
+        os_unfair_lock_lock(&lock); lastCopyMs = Self.nowMs(); os_unfair_lock_unlock(&lock)
+    }
+    func recordUndo() {
+        os_unfair_lock_lock(&lock); lastUndoMs = Self.nowMs(); os_unfair_lock_unlock(&lock)
+    }
+    func recordRedo() {
+        os_unfair_lock_lock(&lock); lastRedoMs = Self.nowMs(); os_unfair_lock_unlock(&lock)
+    }
+
     /// 最近 `seconds` 秒内是否发生过粘贴。TypingObserver 用它判定某次
     /// value 变化是不是 ⌘V 触发的（→ 不是打字，进黑名单）。
     func hasPaste(within seconds: TimeInterval) -> Bool {
@@ -237,6 +257,27 @@ final class KeystrokeLedger {
         os_unfair_lock_lock(&lock)
         let p = lastPasteMs
         os_unfair_lock_unlock(&lock)
+        return p > 0 && p >= cutoff && p <= now
+    }
+
+    func hasCut(within seconds: TimeInterval) -> Bool {
+        let now = Self.nowMs(); let cutoff = now - Int64(seconds * 1000.0)
+        os_unfair_lock_lock(&lock); let p = lastCutMs; os_unfair_lock_unlock(&lock)
+        return p > 0 && p >= cutoff && p <= now
+    }
+    func hasCopy(within seconds: TimeInterval) -> Bool {
+        let now = Self.nowMs(); let cutoff = now - Int64(seconds * 1000.0)
+        os_unfair_lock_lock(&lock); let p = lastCopyMs; os_unfair_lock_unlock(&lock)
+        return p > 0 && p >= cutoff && p <= now
+    }
+    func hasUndo(within seconds: TimeInterval) -> Bool {
+        let now = Self.nowMs(); let cutoff = now - Int64(seconds * 1000.0)
+        os_unfair_lock_lock(&lock); let p = lastUndoMs; os_unfair_lock_unlock(&lock)
+        return p > 0 && p >= cutoff && p <= now
+    }
+    func hasRedo(within seconds: TimeInterval) -> Bool {
+        let now = Self.nowMs(); let cutoff = now - Int64(seconds * 1000.0)
+        os_unfair_lock_lock(&lock); let p = lastRedoMs; os_unfair_lock_unlock(&lock)
         return p > 0 && p >= cutoff && p <= now
     }
 
@@ -361,12 +402,28 @@ private func keystrokeLedgerTapCallback(
 
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
-    let isPaste = flags.contains(.maskCommand) && keyCode == Int64(kVK_ANSI_V)
+    let hasCmd = flags.contains(.maskCommand)
+    let hasShift = flags.contains(.maskShift)
+    // ⌘+key shortcuts(忽略 ctrl/opt 修饰组合,只识别纯 cmd / cmd+shift)
+    let isPaste  = hasCmd && keyCode == Int64(kVK_ANSI_V)
+    let isCut    = hasCmd && keyCode == Int64(kVK_ANSI_X)
+    let isCopy   = hasCmd && keyCode == Int64(kVK_ANSI_C)
+    let isUndoOrRedo = hasCmd && keyCode == Int64(kVK_ANSI_Z)
+    let isRedo   = isUndoOrRedo && hasShift
+    let isUndo   = isUndoOrRedo && !hasShift
     // Shift+Return 在多数 app 里是换行，不是发送 —— 不算提交信号。
     let isReturn = (keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter))
-        && !flags.contains(.maskShift)
+        && !hasShift
     if isPaste {
         ledger.recordPaste()
+    } else if isCut {
+        ledger.recordCut()
+    } else if isCopy {
+        ledger.recordCopy()
+    } else if isRedo {
+        ledger.recordRedo()
+    } else if isUndo {
+        ledger.recordUndo()
     } else {
         ledger.record()
         // 回车既是普通击键，也是「提交/发送」信号 —— 额外记一笔。

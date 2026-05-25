@@ -174,38 +174,50 @@ enum WritingCapturePrompts {
        - Repeated gibberish: "aaaaa", "test test test"
        - Pure shortcut keystrokes with no resulting content (Cmd+Tab spam, etc.)
        - Empty session (typing=0, OCR=0)
-       - **AX/OCR content not backed by keystrokes** (see §3a below)
+       - **External paste with no user editing** (see §3a — large paste of AI reply,
+         web copy, etc. with no surrounding cut/typing pattern indicating it's the user's)
        Use free-text reason describing why.
        DO NOT drop just because content is short — short messages are SIGNAL.
+       DO NOT drop just because keystroke is missing — Chinese IME shows pinyin only,
+         and OCR / typing_events.text are still valid sources when keystroke is sparse.
 
-    3a. CROSS-SOURCE VERIFICATION (the core anti-hallucination rule)
+    3a. KEYSTROKE-EVENT TIMELINE (self-paste vs external paste)
 
-       For every candidate record, BEFORE emitting it:
-       - Take the `keystroke_text` for that session
-       - Compare it to what you'd output as the record's `text`
-       - For Latin/ASCII content: keystroke_text and text should be largely the
-         same string (allowing for backspace edits "<BS>")
-       - For Chinese content: keystroke_text is PINYIN, text is the composed
-         Chinese. They should match phonetically — e.g. text "你好" requires
-         keystroke_text to contain "nihao" (possibly with selection numbers /
-         spaces / <BS>)
-       - For canvas editors (typing_events empty): the OCR-reconstructed text
-         must STILL have phonetic / character backing from keystroke_text
+       edit_log entries carry kinds that map to keyboard events. Use them to judge
+       whether pasted content is the user's own or external:
 
-       If the candidate text has substantially more content than keystroke_text
-       can account for (e.g. text=500 chars but keystroke_text=20 chars and no
-       reasonable IME explanation), it's **paste / file-load / sync / iCloud
-       merge / program-write** — NOT user writing.
-       → Put the session in `discarded` with reason explaining the mismatch.
-       → DO NOT emit a record for unverified content.
+       - kind="commit"  → user typed (or short paste ≤100 chars, treated as user input)
+       - kind="delete"  → user deleted via backspace
+       - kind="paste"   → ⌘V with text > 100 chars (potentially external)
+       - kind="cut"     → ⌘X — user cut their own selection (with text = what was cut)
+       - kind="undo"    → ⌘Z (no text payload)
+       - kind="redo"    → ⌘⇧Z
+       - kind="submit"  → Return key, message sent
 
-       Acceptable mismatches (still emit the record):
-       - keystroke_text has <BS> markers → user edited; final text shorter is fine
-       - keystroke_text has IME selection digits (1-9) → normal Chinese input
-       - text contains 1-2 chars from autocomplete / autocorrect not in keystroke
-         (acceptable noise margin)
-       - Very short paste explicitly followed by user editing keystrokes
-         (e.g. paste a URL then add a "?" — keystroke_text="?" + paste of URL)
+       Rules:
+       (a) kind="paste" preceded by kind="cut" within the same session
+           (or recent prior session in same group): user is REORGANIZING their own
+           content — KEEP as user-original. Same applies if a prior session in the
+           group contains the cut/copied text.
+       (b) kind="paste" with no preceding cut/copy in the group, AND keystroke_text
+           shows no IME backing for the pasted content: likely EXTERNAL paste
+           (AI reply, web copy, doc snippet). EITHER:
+              - Drop the session if the whole session is just this paste, OR
+              - Keep the record but exclude the pasted block from `text` (treat
+                like an inline quote — user's surrounding edits stay).
+       (c) Many small kind="commit" (≤100 chars each) interleaved → normal typing
+           with occasional snippet moves. KEEP everything.
+       (d) Pure kind="undo"/"redo"/"cut" with no surviving authored text → user
+           was reshaping; if the resulting AX/OCR text is non-trivial AND matches
+           text that appeared in prior session edit_logs, KEEP it (user moved
+           their writing). Otherwise drop.
+
+       For Chinese IME: keystroke_text is pinyin, text is composed Chinese.
+       Phonetic match (e.g. text "你好" ↔ keystroke_text containing "nihao") confirms
+       user wrote it. If keystroke_text is empty BUT typing_events.text or OCR
+       shows Chinese, that's still acceptable — the user's writing is real, just
+       captured via AX/OCR instead.
+
        DO NOT drop because intent_type from Pass 1 was "search" or "chat" — the user
        wants to keep short chats.
 

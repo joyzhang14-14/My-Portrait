@@ -3,10 +3,15 @@ import GRDB
 
 /// `edit_log` 里的一条流水。
 /// kind:
-///   - "commit" = 用户打字新增段
+///   - "commit" = 用户打字新增段 / 短粘贴(≤100 字,大概率自己挪片段)
 ///   - "delete" = 删的字
 ///   - "submit" = 回车发出的消息(text = 整条消息)
-///   - "paste"  = 粘贴 / 程序输出 / burst(开关 `typing_record_paste_events` 开时才记)
+///   - "paste"  = 长粘贴(>100 字,可能粘外人内容如 AI 回答)/ burst / 程序注入
+///   - "cut"    = ⌘X 剪切(text = 被剪掉的字)
+///   - "undo"   = ⌘Z 撤销(text 空,只记时间)
+///   - "redo"   = ⌘⇧Z 重做(text 空,只记时间)
+/// LLM 通过 kind 配对判断:cut→paste 间隔短 = 用户挪自己内容;
+/// 单 paste 无前置 cut/copy = 外来粘贴。
 /// `ts` 是 UTC 毫秒（绝对时间）。
 struct EditEntry: Codable, Equatable, Sendable {
     var ts: Int64

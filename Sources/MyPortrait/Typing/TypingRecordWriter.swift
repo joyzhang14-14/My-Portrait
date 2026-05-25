@@ -44,6 +44,9 @@ final class TypingRecordWriter {
         var pendingValue: String?
         var windowHadBurst = false
         var windowHadPaste = false
+        var windowHadCut = false
+        var windowHadUndo = false
+        var windowHadRedo = false
         var windowHadKeystroke = false
         /// 单次 AX 跳变远超附近按键能产生的字符量 —— Electron 切 note、
         /// 程序注入、插件改值 等场景。`isOversizedDelta` 判定。
@@ -182,6 +185,9 @@ final class TypingRecordWriter {
             onDevLog?("oversize→noise bundle=\(rec.bundleId) jump=\(jumpChars) keys=\(keystrokeCount)")
         }
         if ledger.hasPaste(within: Self.pasteAssocSec) { rec.windowHadPaste = true }
+        if ledger.hasCut(within: Self.pasteAssocSec)  { rec.windowHadCut  = true }
+        if ledger.hasUndo(within: Self.pasteAssocSec) { rec.windowHadUndo = true }
+        if ledger.hasRedo(within: Self.pasteAssocSec) { rec.windowHadRedo = true }
 
         rec.lastValueChangeTs = now
         rec.pendingValue = newValue
@@ -202,24 +208,59 @@ final class TypingRecordWriter {
         let prev = rec.lastValueSnapshot
         guard prev != pending else { return }
 
-        let windowNoise = rec.windowHadBurst || rec.windowHadPaste
-            || !rec.windowHadKeystroke || rec.windowOversizedDelta
+        let hadPaste = rec.windowHadPaste
+        let hadCut   = rec.windowHadCut
+        let hadUndo  = rec.windowHadUndo
+        let hadRedo  = rec.windowHadRedo
+        let hadBurst = rec.windowHadBurst
+        let hadNoKey = !rec.windowHadKeystroke
+        let hadOver  = rec.windowOversizedDelta
         rec.windowHadBurst = false
         rec.windowHadPaste = false
+        rec.windowHadCut = false
+        rec.windowHadUndo = false
+        rec.windowHadRedo = false
         rec.windowHadKeystroke = false
         rec.windowOversizedDelta = false
         rec.lastValueSnapshot = pending
 
         let (_, deleted, added, _) = TextDiff.sandwich(prev: prev, new: pending)
-        // windowNoise = ⌘V / burst / 无按键；外加剪贴板内容匹配 —— 抓菜单 /
-        // 右键 / 拖拽等非 ⌘V 粘贴。
-        let noise = windowNoise || pasteboard.looksLikePaste(added)
         let nowMs = Self.nowMs()
         let recordPasteEvents = ConfigStore.shared.capture.typingRecordPasteEvents
-        if noise {
-            // burst / 粘贴 / 程序输出 —— 默认进 editLog 标 kind="paste"(保留时间轴,
-            // 让 LLM Pass 2 自己判断是否当用户原创);关掉开关则走旧行为(进黑名单
-            // 不进 editLog,flush 时从 text 减掉)。
+        let pasteboardMatch = pasteboard.looksLikePaste(added)
+        // 优先级:undo/redo > cut > paste(含剪贴板匹配)> oversized/burst/no-key
+        // 100 字阈值:短粘贴(< 100 字)大概率是用户挪自己的片段 / 短小代码片段,
+        // 当 commit 计;长粘贴才标 kind="paste" 让 LLM 判外来。
+        let pasteShortThreshold = 100
+        if hadUndo || hadRedo {
+            // undo/redo 不记 text(value 是回滚态,记 text 没意义),只标时间
+            rec.editLog.append(EditEntry(ts: nowMs, kind: hadRedo ? "redo" : "undo", text: ""))
+            // value 真的回滚了不要忘了对应的 delete/add,LLM 凭 kind 判,这里不
+            // 重复记
+        } else if hadCut {
+            if !deleted.isEmpty {
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "cut", text: deleted))
+            }
+            if !added.isEmpty {
+                // cut 通常只删,但保险万一同窗口又有输入
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: added))
+            }
+        } else if hadPaste || pasteboardMatch {
+            // paste(⌘V / 剪贴板匹配)
+            if !added.isEmpty {
+                let kind = added.count <= pasteShortThreshold ? "commit" : "paste"
+                if recordPasteEvents || kind == "commit" {
+                    rec.editLog.append(EditEntry(ts: nowMs, kind: kind, text: added))
+                } else {
+                    blacklist[key, default: [:]][added] = CACurrentMediaTime()
+                    onDevLog?("paste→blacklist bundle=\(rec.bundleId) \(added.count) chars")
+                }
+            }
+            if !deleted.isEmpty {
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
+            }
+        } else if hadBurst || hadOver || hadNoKey {
+            // 非用户输入(程序注入 / autosave / oversized)—— 进黑名单或标 paste
             if !added.isEmpty {
                 if recordPasteEvents {
                     rec.editLog.append(EditEntry(ts: nowMs, kind: "paste", text: added))
@@ -228,12 +269,11 @@ final class TypingRecordWriter {
                     onDevLog?("noise→blacklist bundle=\(rec.bundleId) \(added.count) chars")
                 }
             }
-            // delete 段在 noise 窗口里也记一下(只在开关开时),否则 select-then-paste
-            // 这种"替换"操作会丢失"先删了什么"的信息
             if recordPasteEvents, !deleted.isEmpty {
                 rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
             }
         } else {
+            // 正常打字
             if !deleted.isEmpty {
                 rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
             }
