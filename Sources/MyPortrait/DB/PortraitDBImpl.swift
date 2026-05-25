@@ -31,6 +31,14 @@ actor PortraitDBImpl: PortraitDB {
             try db.execute(sql: "PRAGMA synchronous = NORMAL")
             // 默认 SQLite 不强制外键，必须显式开
             try db.execute(sql: "PRAGMA foreign_keys = ON")
+            // mmap_size:256MB 虚拟地址空间映射 DB 文件,读 query 走 mmap
+            // 直接读页,免去 read syscall + buffer copy。TimelineSidebar /
+            // OCR 文本搜索这种大表读密集场景能快 2-5x。注:虚拟内存,
+            // 实际物理内存按需 page-in。
+            try db.execute(sql: "PRAGMA mmap_size = 268435456")
+            // cache_size:负值 = KB,-64000 = 64MB page cache。默认 ~2MB
+            // 对几百 MB 大表完全不够,JOIN / FTS5 重排都得反复 page-in。
+            try db.execute(sql: "PRAGMA cache_size = -65536")
             // 注册 Foundation 后端的 ICU 分词器，FTS5 表才能识别 tokenizer="foundation_icu"。
             // 见 FoundationTokenizer.swift —— Foundation enumerateSubstrings(.byWords)
             // 在 Darwin 上是 ICU-backed，等价于"直接用 ICU 分词器"。
