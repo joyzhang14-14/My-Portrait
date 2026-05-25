@@ -49,6 +49,11 @@ struct MemorySettingsView: View {
     @State private var eventsChanges: [MemoryStaging.StagedChange] = []
     @State private var portraitChanges: [MemoryStaging.StagedChange] = []
     @State private var personalityChanges: [MemoryStaging.StagedChange] = []
+    /// 三个 job 当前有没有活要干。每次 reload / run / approve / reject 后
+    /// 刷新,不每帧扫 DB(扫 timeline + processing_log 有成本)。
+    @State private var hasEventWork: Bool = true
+    @State private var hasDistillWork: Bool = true
+    @State private var hasPersonalityWork: Bool = true
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
@@ -197,6 +202,22 @@ struct MemorySettingsView: View {
         eventsChanges = MemoryStaging.changes(.events)
         portraitChanges = MemoryStaging.changes(.portrait)
         personalityChanges = MemoryStaging.changes(.personality)
+        refreshHasWork()
+    }
+
+    /// 重新算三个 job 当前有没有活。off-main 跑(扫 timeline+processing_log)。
+    private func refreshHasWork() {
+        Task.detached(priority: .userInitiated) {
+            let s = await MemoryScheduler.shared
+            let e = await s.eventJobHasWork()
+            let d = await s.portraitJobHasWork()
+            let p = await s.personalityJobHasWork()
+            await MainActor.run {
+                hasEventWork = e
+                hasDistillWork = d
+                hasPersonalityWork = p
+            }
+        }
     }
 
     // MARK: - Manual triggers
@@ -715,10 +736,27 @@ struct MemorySettingsView: View {
             // @Observable 属性,跑/结束自动重渲染。手动 run 调 setupRun() 前
             // scheduler 还没置 flag,所以也要 OR 本 View 自己的 runningTrigger.
             let schedulerReason = schedulerBlockReason(for: t)
+            // 有没有活要干 —— 全 complete / dead_letter 时按钮该灰,避免误点。
+            let hasWork: Bool = {
+                switch t {
+                case .eventProcessing: return hasEventWork
+                case .distill:         return hasDistillWork
+                case .personality:     return hasPersonalityWork
+                }
+            }()
+            let noWorkReason: String? = {
+                switch t {
+                case .eventProcessing: return "All processed days are already complete — nothing to run."
+                case .distill:         return "Portrait is already up to date — nothing to distill."
+                case .personality:     return "Personality is already up to date — nothing to refresh."
+                }
+            }()
             let disabledReason: String? = {
                 if selfRunning { return "\(t.title) is already running." }
                 if pending     { return "Pending review — Approve / Reject first." }
-                return schedulerReason
+                if let r = schedulerReason { return r }
+                if !hasWork    { return noWorkReason }
+                return nil
             }()
             let label: String = {
                 if selfRunning { return "Running…" }
