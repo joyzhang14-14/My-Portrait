@@ -307,7 +307,7 @@ enum EventPromptTestCLI {
         portrait_facets — optional, default []. Only attach when the event reflects a
         STABLE signal about who the user is. Each facet: {"facet": "<name>", "value": "<short>"}.
           personality / background (demographic facts only) / social (named people) /
-          speech_style / interests / skills.
+          interests / skills.
 
         WRITING THE SUMMARY — be concrete:
           ❌ "The user was chatting on WeChat."

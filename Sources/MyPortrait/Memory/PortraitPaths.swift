@@ -12,10 +12,12 @@ enum PortraitPaths {
     ]
 
     /// Categories the generic PortraitDistiller loops over — `seedCategories`
-    /// MINUS `personality`. personality is driven by the independent
-    /// PersonalityAgent / PersonalityMerger pipeline; if the distiller also
-    /// processed it, the two pipelines would fight over portrait/personality/.
-    static let distillCategories: [String] = seedCategories.filter { $0 != "personality" }
+    /// MINUS `personality` and `speech_style`. personality is driven by the
+    /// independent PersonalityAgent / PersonalityMerger pipeline；speech_style
+    /// 由独立的 speech-style 提炼链路负责。两类都要避免被通用 distiller 覆写。
+    static let distillCategories: [String] = seedCategories.filter {
+        $0 != "personality" && $0 != "speech_style"
+    }
 
     static func categoryDir(_ name: String) -> URL {
         Storage.portraitDir.appendingPathComponent(name, isDirectory: true)

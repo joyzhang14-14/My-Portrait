@@ -108,7 +108,6 @@ enum MemoryPrompts {
       background    — STRICTLY demographic / biographical facts (age, location,
                       education, family, occupation). NOT "background app".
       social        — specific named people in the user's life.
-      speech_style  — vocabulary, tone, language preference.
       interests     — topics/domains the user repeatedly engages with by choice.
       skills        — a capability the user is practicing, with evidence.
 
@@ -320,7 +319,7 @@ enum MemoryPrompts {
     /// 拼上每个 portrait 的 `[slug] title — body`。
     static let portraitToTags = #"""
     You analyze the user's existing PORTRAIT entries (social, skills, interests,
-    experiences, background, speech_style, emotions) and extract PERSONALITY
+    experiences, background, emotions) and extract PERSONALITY
     TAGS — single-noun or kebab-case behavioral / dispositional words that
     these portraits imply about the user.
 
@@ -385,7 +384,6 @@ enum MemoryPrompts {
         case "background":   return "- background = biographical facts: schooling, region, family, life history."
         case "experiences":  return "- experiences = significant past events that shaped the user."
         case "interests":    return "- interests = topics/domains the user repeatedly engages with by choice."
-        case "speech_style": return "- speech_style = how the user talks/writes (formality, language mix, idioms)."
         case "skills":       return "- skills = capabilities the user has demonstrated, with evidence."
         case "emotions":     return "- emotions = recurring emotional patterns and triggers."
         default:             return "- generic personal-portrait entry."
