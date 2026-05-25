@@ -288,6 +288,20 @@ struct MyPortraitApp: App {
         if args.contains("--writing-capture-backlog-reject") {
             WritingCaptureCLI.rejectBacklog()
         }
+        // `--speech-style-*` 独立提炼链路 CLI 入口。详见 SpeechStyleCLI。
+        if args.contains("--speech-style-run") {
+            let mode: SpeechStyleMode = args.contains("--auto") ? .auto : .manual
+            SpeechStyleCLI.run(mode: mode)
+        }
+        if args.contains("--speech-style-list") {
+            SpeechStyleCLI.list()
+        }
+        if let idx = args.firstIndex(of: "--speech-style-approve"), idx + 1 < args.count {
+            SpeechStyleCLI.approve(runId: args[idx + 1])
+        }
+        if let idx = args.firstIndex(of: "--speech-style-reject"), idx + 1 < args.count {
+            SpeechStyleCLI.reject(runId: args[idx + 1])
+        }
         AppKeyboard.install()
     }
 

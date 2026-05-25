@@ -76,6 +76,17 @@ struct MemorySettingsView: View {
     @State private var writingCaptureExpandedRecords: [String: [StagedRecordRow]] = [:]
     @State private var writingCaptureExpandedError: [String: String] = [:]
 
+    // speech_style 提炼链路的 UI 状态(独立于上面所有 pipeline)。
+    @State private var speechStyleTask: Task<Void, Never>? = nil
+    @State private var speechStyleRunning: Bool = false
+    @State private var speechStyleStatus: String = ""
+    @State private var speechStyleConfirm: Bool = false
+    @State private var speechStylePending: [SpeechStyleRunRow] = []
+    @State private var speechStyleUnprocessed: Int = 0
+    @State private var speechStylePreviewRun: String? = nil
+    @State private var speechStyleExpanded: Set<String> = []
+    @State private var speechStyleExpandedDrafts: [String: [SpeechStyleStagedRow]] = [:]
+
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
         case parameter = "Parameter"
@@ -101,6 +112,7 @@ struct MemorySettingsView: View {
                     schedulerSection
                     manualRunSection
                     writingCaptureSection
+                    speechStyleSection
                     reviewSection
                     attentionSection
                 case .changelog:
@@ -153,6 +165,7 @@ struct MemorySettingsView: View {
         }
         refreshStaging()
         refreshWritingCapture()
+        refreshSpeechStyle()
     }
 
     /// 重新从 DB 拉 backlog pending row(date_utc='all')。
@@ -588,6 +601,237 @@ struct MemorySettingsView: View {
         } message: {
             Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (fanout) LLM calls. Output is staged for review.")
         }
+    }
+
+    // MARK: - Speech style(独立链路,跟 writing capture 同模式)
+
+    /// speech_style 提炼链路的 Run now UI。manual 模式 = staged + pending
+    /// review;auto 模式由 scheduler 自动跑,直接落 portrait/speech_style/。
+    private var speechStyleSection: some View {
+        section(
+            title: "Speech style distillation",
+            blurb: "Reads writing_records (approved) marked as unprocessed, asks the LLM to extract speech-style facets (register, voice, edit rhythm). Manual run stages drafts for review; auto schedule writes portrait/speech_style/ directly."
+        ) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Distill speech style")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Up to \(SpeechStyleDistiller.defaultBatchCap) records per run · \(speechStyleUnprocessed) unprocessed remaining.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                let ssHasPending = !speechStylePending.isEmpty
+                let ssDisabledReason: String? = {
+                    if SpeechStyleDistiller.shared == nil { return "Speech style distiller is not available." }
+                    if speechStyleRunning { return "Speech style is already running." }
+                    if ssHasPending { return "Pending review — Approve / Reject first." }
+                    if speechStyleUnprocessed == 0 { return "No unprocessed writing_records." }
+                    return nil
+                }()
+                Button(speechStyleRunning ? "Running…" : "Run") {
+                    speechStyleConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(ssDisabledReason != nil)
+                .help(ssDisabledReason ?? "Run speech style distillation (manual mode, staged for review).")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if speechStyleRunning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("LLM analyzing speech style — may take a few minutes…")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 6)
+            }
+            if !speechStyleStatus.isEmpty {
+                Text(speechStyleStatus)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+            }
+
+            // Pending review:每 run 一行,Approve / Reject 按钮 + expand 看 drafts
+            if !speechStylePending.isEmpty {
+                Divider().padding(.vertical, 6)
+                Text("Pending review")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(speechStylePending, id: \.runId) { run in
+                    let expanded = speechStyleExpanded.contains(run.runId)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .center, spacing: 12) {
+                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("run \(String(run.runId.prefix(8)))")
+                                    .font(.system(size: 12, design: .monospaced))
+                                Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts — click to \(expanded ? "collapse" : "expand")")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                toggleSpeechStyleExpand(runId: run.runId)
+                            }
+                            Button("Detail") { speechStylePreviewRun = run.runId }
+                                .buttonStyle(.bordered).controlSize(.small)
+                            Button("Reject") {
+                                Task { @MainActor in await rejectSpeechStyle(runId: run.runId) }
+                            }
+                            .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                            Button("Approve") {
+                                Task { @MainActor in await approveSpeechStyle(runId: run.runId) }
+                            }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                        }
+                        if expanded {
+                            inlineSpeechStyleDrafts(runId: run.runId)
+                                .padding(.leading, 18)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(item: $speechStylePreviewRun.mappedToIdentifiable) { wrapped in
+            SpeechStylePreview(runId: wrapped.id)
+        }
+        .alert("Run speech style distillation?", isPresented: $speechStyleConfirm) {
+            Button("Run", role: .none) {
+                speechStyleTask = Task { @MainActor in await runSpeechStyleManual() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Analyze up to \(SpeechStyleDistiller.defaultBatchCap) unprocessed writing_records with the LLM. Drafts are staged for review.")
+        }
+    }
+
+    /// 展开/折叠某 run 的 drafts 列表(按需加载)。
+    private func toggleSpeechStyleExpand(runId: String) {
+        if speechStyleExpanded.contains(runId) {
+            speechStyleExpanded.remove(runId)
+            return
+        }
+        speechStyleExpanded.insert(runId)
+        if speechStyleExpandedDrafts[runId] != nil { return }
+        guard let distiller = SpeechStyleDistiller.shared else { return }
+        let store = distiller.store
+        Task.detached(priority: .userInitiated) {
+            let rows = (try? store.fetchStaged(runId: runId)) ?? []
+            await MainActor.run { speechStyleExpandedDrafts[runId] = rows }
+        }
+    }
+
+    @ViewBuilder
+    private func inlineSpeechStyleDrafts(runId: String) -> some View {
+        if let rows = speechStyleExpandedDrafts[runId] {
+            if rows.isEmpty {
+                Text("(no drafts)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(rows, id: \.id) { d in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(d.action.rawValue).font(.system(size: 10))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.accentColor.opacity(0.15))
+                                    .cornerRadius(3)
+                                Text(d.slug).font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                if let prior = d.existingSlug, prior != d.slug {
+                                    Text("(was \(prior))").font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Text(d.title).font(.system(size: 12, weight: .semibold))
+                            Text(d.body.count > 200
+                                 ? String(d.body.prefix(200)) + "…"
+                                 : d.body)
+                                .font(.system(size: 11))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.06))
+                        .cornerRadius(4)
+                    }
+                }
+            }
+        } else {
+            Text("Loading…")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func refreshSpeechStyle() {
+        guard let distiller = SpeechStyleDistiller.shared else { return }
+        let store = distiller.store
+        Task.detached(priority: .userInitiated) {
+            let pending = (try? store.fetchPendingReviewRuns()) ?? []
+            let unprocessed = (try? store.unprocessedCount()) ?? 0
+            await MainActor.run {
+                speechStylePending = pending
+                speechStyleUnprocessed = unprocessed
+            }
+        }
+    }
+
+    @MainActor
+    private func runSpeechStyleManual() async {
+        guard let distiller = SpeechStyleDistiller.shared else {
+            speechStyleStatus = "Distiller not initialized."
+            return
+        }
+        speechStyleRunning = true
+        speechStyleStatus = "Running speech style distillation…"
+        defer {
+            speechStyleRunning = false
+            refreshSpeechStyle()
+        }
+        do {
+            let s = try await distiller.runManual()
+            speechStyleStatus = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
+        } catch {
+            speechStyleStatus = "Failed: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func approveSpeechStyle(runId: String) async {
+        guard let distiller = SpeechStyleDistiller.shared else { return }
+        do {
+            let n = try distiller.approveStaged(runId: runId)
+            speechStyleStatus = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/speech_style/."
+            speechStyleExpanded.remove(runId)
+            speechStyleExpandedDrafts.removeValue(forKey: runId)
+        } catch {
+            speechStyleStatus = "Approve failed: \(error.localizedDescription)"
+        }
+        refreshSpeechStyle()
+    }
+
+    @MainActor
+    private func rejectSpeechStyle(runId: String) async {
+        guard let distiller = SpeechStyleDistiller.shared else { return }
+        do {
+            try distiller.rejectStaged(runId: runId)
+            speechStyleStatus = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
+            speechStyleExpanded.remove(runId)
+            speechStyleExpandedDrafts.removeValue(forKey: runId)
+        } catch {
+            speechStyleStatus = "Reject failed: \(error.localizedDescription)"
+        }
+        refreshSpeechStyle()
     }
 
     /// 展开 / 折叠某天的内联 record 列表。第一次展开时异步加载。
@@ -1518,6 +1762,99 @@ private struct RejectReasonSheet: View {
         }
         .padding(16)
         .frame(width: 460)
+    }
+}
+
+// MARK: - SpeechStylePreview sheet
+
+/// 一次 run 的全部 staged drafts 完整内容。跟 WritingCapturePreview 同形态,
+/// 只是数据源换成 speech_style_staged。
+private struct SpeechStylePreview: View {
+    let runId: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var drafts: [SpeechStyleStagedRow] = []
+    @State private var loadError: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Speech style · run \(String(runId.prefix(8)))")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Close") { dismiss() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let err = loadError {
+                        Text("Load failed: \(err)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 12)
+                    } else if drafts.isEmpty {
+                        Text("(no staged drafts)")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                    } else {
+                        ForEach(drafts, id: \.id) { d in
+                            draftCard(d)
+                        }
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+        }
+        .frame(width: 720, height: 520)
+        .task { load() }
+    }
+
+    private func draftCard(_ d: SpeechStyleStagedRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(d.action.rawValue).font(.system(size: 10))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.18))
+                    .cornerRadius(4)
+                Text(d.slug).font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if let prior = d.existingSlug, prior != d.slug {
+                    Text("(was \(prior))").font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(d.sourceRecordIds.count) refs")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            Text(d.title).font(.system(size: 13, weight: .semibold))
+            Text(d.body)
+                .font(.system(size: 12))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .cornerRadius(6)
+        .padding(.horizontal, 12)
+    }
+
+    private func load() {
+        guard let distiller = SpeechStyleDistiller.shared else {
+            loadError = "Distiller not initialized"
+            return
+        }
+        let store = distiller.store
+        Task.detached(priority: .userInitiated) {
+            do {
+                let rows = try store.fetchStaged(runId: runId)
+                await MainActor.run { drafts = rows }
+            } catch {
+                await MainActor.run { loadError = error.localizedDescription }
+            }
+        }
     }
 }
 

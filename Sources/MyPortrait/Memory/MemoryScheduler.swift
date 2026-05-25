@@ -120,6 +120,7 @@ final class MemoryScheduler {
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
     private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
+    private let kLastSpeechStyle    = "scheduler.lastSpeechStyleRun"
 
     private init() {}
 
@@ -192,6 +193,29 @@ final class MemoryScheduler {
            lastRunDay(kLastWritingCapture) != localDayString(now) {
             setLastRun(kLastWritingCapture, now)
             await runWritingCaptureJob()
+        }
+
+        // speech_style:auto 模式 → 直接落 portrait/speech_style/,不审核。
+        // 跟 writing capture 一样不参与 event/portrait/personality 三锁。
+        if Self.shouldTriggerNow(config: s.speechStyle, now: now),
+           lastRunDay(kLastSpeechStyle) != localDayString(now) {
+            setLastRun(kLastSpeechStyle, now)
+            await runSpeechStyleJob()
+        }
+    }
+
+    /// 跑 speech_style auto —— 跟 writing capture 同模式:失败 swallow + log,
+    /// 不阻塞下一次 tick。
+    func runSpeechStyleJob() async {
+        guard let distiller = SpeechStyleDistiller.shared else {
+            schedLog.warning("speechStyle tick: distiller not initialized — skip")
+            return
+        }
+        do {
+            let s = try await distiller.runAuto()
+            schedLog.info("speechStyle auto: status=\(s.status.rawValue, privacy: .public) records=\(s.recordsCount) drafts=\(s.draftsCount)")
+        } catch {
+            schedLog.warning("speechStyle auto failed: \(String(describing: error), privacy: .public)")
         }
     }
 

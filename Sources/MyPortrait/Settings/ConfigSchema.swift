@@ -291,8 +291,16 @@ struct SchedulerSettings: Codable, Equatable {
     /// 自动跑只是「先把 staged 准备好」,等用户审核。
     var writingCapture: SchedulerConfig = .init(frequency: .off,    timeOfDay: "03:30",
                                                 dayOfWeek: 0, dayOfMonth: 1)
+    /// speech_style 提炼链路。auto 模式 → 直接落 portrait/speech_style/,不审。
+    /// 默认 off。
+    var speechStyle:    SchedulerConfig = .init(frequency: .off,    timeOfDay: "04:30",
+                                                dayOfWeek: 0, dayOfMonth: 1)
     init() {}
-    enum CodingKeys: String, CodingKey { case event, portrait, personality, writingCapture = "writing_capture" }
+    enum CodingKeys: String, CodingKey {
+        case event, portrait, personality
+        case writingCapture = "writing_capture"
+        case speechStyle    = "speech_style"
+    }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -300,6 +308,7 @@ struct SchedulerSettings: Codable, Equatable {
         portrait       = c.dflt(SchedulerConfig.self, .portrait,       portrait)
         personality    = c.dflt(SchedulerConfig.self, .personality,    personality)
         writingCapture = c.dflt(SchedulerConfig.self, .writingCapture, writingCapture)
+        speechStyle    = c.dflt(SchedulerConfig.self, .speechStyle,    speechStyle)
     }
 }
 

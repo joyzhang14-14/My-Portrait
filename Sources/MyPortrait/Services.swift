@@ -131,6 +131,11 @@ final class Services {
         let writingStore = WritingCaptureStore(dbPool: dbImpl.dbPool)
         let writingWorker = WritingCaptureWorker(store: writingStore)
         WritingCaptureWorker.shared = writingWorker
+
+        // speech_style 提炼链路(独立于写作采集 + memory pipeline)。也共用
+        // 同一 DatabasePool。注册到 SpeechStyleDistiller.shared 给 UI / scheduler 用。
+        let ssStore = SpeechStyleStore(dbPool: dbImpl.dbPool)
+        SpeechStyleDistiller.shared = SpeechStyleDistiller(store: ssStore)
     }
 
     /// AppDelegate 在 `applicationDidFinishLaunching` 末尾调一次。

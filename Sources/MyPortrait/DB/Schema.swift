@@ -724,6 +724,58 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v29 — speech_style 提炼链路
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 独立于 PortraitDistiller / PersonalityAgent，吃 writing_records 当
+        // 输入源。三块改动：
+        //   1) writing_records 加 speech_style_processed_at —— 标 completed,
+        //      下次跑就跳过这条 record(避免重复喂 LLM)。
+        //   2) speech_style_runs —— 每次 run 一行,状态机:processing /
+        //      pending_review(manual)/ auto_committed(auto)/ approved /
+        //      rejected_for_rerun / failed。
+        //   3) speech_style_staged —— manual 模式的 staged 决策行,等
+        //      Approve 才落 portrait/speech_style/ 文件。auto 模式直接落
+        //      portrait,不入这张表。
+        m.registerMigration("v29_speech_style") { db in
+            try db.alter(table: "writing_records") { t in
+                t.add(column: "speech_style_processed_at", .integer)
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_ss_pending ON writing_records(speech_style_processed_at)")
+
+            try db.create(table: "speech_style_runs") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("run_id", .text).notNull().unique()
+                t.column("mode", .text).notNull()              // 'manual' | 'auto'
+                t.column("status", .text).notNull()
+                t.column("started_at", .integer).notNull()
+                t.column("completed_at", .integer)
+                t.column("error_message", .text)
+                t.column("records_count", .integer)            // 喂给 LLM 的 record 数
+                t.column("drafts_count", .integer)             // LLM 返回的 draft 数
+                t.column("token_usage", .integer)
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_speech_style_runs_status ON speech_style_runs(status, started_at)")
+
+            try db.create(table: "speech_style_staged") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("run_id", .text).notNull()
+                t.column("created_at", .integer).notNull()
+                t.column("action", .text).notNull()            // 'create' | 'update' | 'noop'
+                t.column("slug", .text).notNull()              // 目标文件 slug
+                t.column("title", .text).notNull()
+                t.column("body", .text).notNull()              // markdown 正文
+                t.column("source_record_ids", .text).notNull() // JSON [int]
+                t.column("existing_slug", .text)               // update 时 = 目标 slug;create/noop 留空
+                t.column("hidden_at", .integer)                // 被单条 reject 时标
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_speech_style_staged_run ON speech_style_staged(run_id)")
+        }
+
         return m
     }
 }
