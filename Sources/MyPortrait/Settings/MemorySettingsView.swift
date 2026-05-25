@@ -521,6 +521,17 @@ struct MemorySettingsView: View {
                     Text("Pass 1 + Pass 2 fanout — may take a few minutes…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Stop") {
+                        let n = PiAgentRegistry.shared.stopAll()
+                        writingCaptureTask?.cancel()
+                        writingCaptureTask = nil
+                        writingCaptureRunning = false
+                        writingCaptureStatus = "Stopped — killed \(n) LLM process(es)."
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
                 }
                 .padding(.top, 6)
             }
@@ -637,6 +648,17 @@ struct MemorySettingsView: View {
                     Text("LLM analyzing speech style — may take a few minutes…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Stop") {
+                        let n = PiAgentRegistry.shared.stopAll()
+                        speechStyleTask?.cancel()
+                        speechStyleTask = nil
+                        speechStyleRunning = false
+                        speechStyleStatus = "Stopped — killed \(n) LLM process(es)."
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
                 }
                 .padding(.top, 6)
             }
