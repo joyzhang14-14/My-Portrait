@@ -15,48 +15,30 @@ struct ContentView: View {
     @State private var configStore = ConfigStore.shared
 
     var body: some View {
-        HStack(spacing: 0) {
-            TimelineSidebar(state: timeline,
-                            selection: $selection,
-                            chat: chat,
-                            memoryScope: $memoryScope,
-                            cronJobSelection: $cronJobSelection,
-                            settingsSubsection: $settingsSubsection)
-                .frame(width: 300)
-                .frame(maxHeight: .infinity)
-
-            // Hairline separator. A plain `Divider()` stops at the title-bar
-            // safe-area inset, leaving a 1px gap there through which the
-            // window's black background shows — so use a Rectangle that
-            // ignores the safe area and runs the full window height.
-            Rectangle()
-                .fill(Theme.stroke)
-                .frame(width: 1)
-                .ignoresSafeArea()
-
-            mainPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 首启:onboardingCompleted == false → 主 view 完全不渲染,只显示
+        // OnboardingView 填满整个窗口;走完 flag 置 true → SwiftUI 重新计算
+        // body 显示主 view。**不用 sheet** 因为:
+        //   1. sheet 会让主 view 在背后渲染(白屏闪 / 启动负载,用户能看到)
+        //   2. sheet content 不继承父的 .environment(...) 注入,
+        //      ConnectAIStep 用 @Environment(AppState) 会 crash:
+        //      "No Observable object of type AppState found"
+        // Group + if/else 的好处:environment 注入到外层 Group,两个分支都拿得到。
+        Group {
+            if configStore.current.general.onboardingCompleted {
+                mainContent
+            } else {
+                OnboardingView {
+                    // 写 flag + 立即 flush —— debounced 写默认 ~1s 才落盘,
+                    // 用户 Finish 后秒退应用就会丢这条记录,下次启动又看到 onboarding。
+                    configStore.mutate { $0.general.onboardingCompleted = true }
+                    configStore.saveNow()
+                }
+            }
         }
         .environment(appState)
         .environment(chat)
         .environment(chatStore)
         .environment(ConfigStore.shared)
-        // 首启:onboardingCompleted == false → sheet 自动弹,挡主 UI。
-        // OnboardingView.onFinish 把 flag 置 true,sheet 自动 dismiss。
-        // sheet 本身没 close 按钮(只有 footer 的 Back/Skip/Next/Finish),
-        // 用户没法绕过去;Esc 也压不开 modal sheet on macOS。
-        .sheet(isPresented: Binding(
-            get: { !configStore.current.general.onboardingCompleted },
-            set: { newVal in
-                if !newVal {
-                    configStore.mutate { $0.general.onboardingCompleted = true }
-                }
-            }
-        )) {
-            OnboardingView {
-                configStore.mutate { $0.general.onboardingCompleted = true }
-            }
-        }
         .onAppear {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
@@ -104,6 +86,33 @@ struct ContentView: View {
             guard let date = notif.object as? Date else { return }
             selection = .timeline
             timeline.seek(to: date)
+        }
+    }
+
+    /// 主 view 本体 —— 用户完成 onboarding 后渲染。封成 computed property
+    /// 让 body 的 if/else 干净。
+    private var mainContent: some View {
+        HStack(spacing: 0) {
+            TimelineSidebar(state: timeline,
+                            selection: $selection,
+                            chat: chat,
+                            memoryScope: $memoryScope,
+                            cronJobSelection: $cronJobSelection,
+                            settingsSubsection: $settingsSubsection)
+                .frame(width: 300)
+                .frame(maxHeight: .infinity)
+
+            // Hairline separator. A plain `Divider()` stops at the title-bar
+            // safe-area inset, leaving a 1px gap there through which the
+            // window's black background shows — so use a Rectangle that
+            // ignores the safe area and runs the full window height.
+            Rectangle()
+                .fill(Theme.stroke)
+                .frame(width: 1)
+                .ignoresSafeArea()
+
+            mainPane
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
