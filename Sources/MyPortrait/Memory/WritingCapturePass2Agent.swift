@@ -261,9 +261,13 @@ final class WritingCapturePass2Agent {
     ///   **完全丢 OCR**(typing_events.text 就是 ground truth,不需要 OCR 重建)
     /// - 否则(canvas 路径)→ OCR 截字 + 均匀采样
     /// keystroke 一律均匀采样。
-    static func prepareSessionForPrompt(_ s: WritingCaptureRawSession) -> WritingCaptureRawSession {
+    static func prepareSessionForPrompt(
+        _ s: WritingCaptureRawSession, includeAxText: Bool = true
+    ) -> WritingCaptureRawSession {
         let typingTotal = s.typingEvents.map { $0.text.count }.reduce(0, +)
-        let isAxPath = typingTotal > pass2AxPathTypingThreshold
+        // 实验模式 --no-ax:强制走 canvas 路径,保留 OCR(否则 AX 路径会丢 OCR,
+        // 加上后面 payload 把 typing 也清空 → LLM 啥都拿不到)
+        let isAxPath = includeAxText && typingTotal > pass2AxPathTypingThreshold
 
         let trimmedFrames: [WritingCaptureOcrFrame]
         if isAxPath {
@@ -319,7 +323,9 @@ final class WritingCapturePass2Agent {
         rawSessions: [WritingCaptureRawSession],
         includeAxText: Bool = true
     ) -> String {
-        let prepared = rawSessions.map(prepareSessionForPrompt).map {
+        let prepared = rawSessions.map {
+            prepareSessionForPrompt($0, includeAxText: includeAxText)
+        }.map {
             RawSessionPayload($0, includeAxText: includeAxText)
         }
         let meta: [String: String?] = [
