@@ -736,14 +736,31 @@ struct MemorySettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Map ManualTrigger → MemoryScheduler 的 canRunXxx 阻塞原因。
-    /// 直接读 scheduler 状态,@Observable 会让本 View 自动重算。
+    /// UI 阻塞原因 —— 只看本 View 自己的 `runningTriggers`(用户点击驱动,
+     /// run 完 defer 清,绝对不会卡)。**故意不读** scheduler 的
+     /// eventRunning/distillRunning/personalityRunning in-memory flag —— 历史
+     /// 上观察到 event job 返回后 @Observable flag 偶发不清,导致三个按钮一起
+     /// 灰回不来。scheduler 的真实并发把关由 `runXxxJob` 里 `guard canRunXxx`
+     /// 兜底:用户硬点上去也只是走 `.busy` 分支弹 status,不会真的双跑。
+     /// 互斥规则跟 MemoryScheduler 一致:
+     ///   - event 独占,跟 distill/personality 互斥
+     ///   - distill 跟 distill 互斥(自身不重入)
+     ///   - personality 跟 personality 互斥(自身不重入)
+     ///   - distill 跟 personality 可以并行
     private func schedulerBlockReason(for t: ManualTrigger) -> String? {
-        let s = MemoryScheduler.shared
+        let eventRun       = runningTriggers.contains(.eventProcessing)
+        let distillRun     = runningTriggers.contains(.distill)
+        let personalityRun = runningTriggers.contains(.personality)
         switch t {
-        case .eventProcessing: return s.eventBlockedReason()
-        case .distill:         return s.distillBlockedReason()
-        case .personality:     return s.personalityBlockedReason()
+        case .eventProcessing:
+            if distillRun || personalityRun { return "Waiting for distill / personality to finish." }
+            return nil
+        case .distill:
+            if eventRun { return "Waiting for event job to finish." }
+            return nil
+        case .personality:
+            if eventRun { return "Waiting for event job to finish." }
+            return nil
         }
     }
 
