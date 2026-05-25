@@ -433,6 +433,11 @@ struct MemorySettingsView: View {
                 desc: "Runs Pass 1 (context timeline) + Pass 2 (multi-source fusion) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
                 config: \.scheduler.writingCapture)
             Divider().padding(.vertical, 4)
+            schedulerBlock(
+                title: "Speech style distillation",
+                desc: "Reads approved writing_records (unprocessed) and distills speech-style facets (register, voice, edit rhythm) into portrait/speech_style/. Auto-run commits drafts directly — manual run from the section below stages drafts for review.",
+                config: \.scheduler.speechStyle)
+            Divider().padding(.vertical, 4)
             intRow("Days processed per run",
                    value: cfg.binding(\.memory.eventDayCap),
                    range: 1...30)
