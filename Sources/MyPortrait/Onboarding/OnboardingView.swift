@@ -4,7 +4,6 @@ import AVFoundation
 import ApplicationServices
 import CoreGraphics
 import IOKit.hid
-import UserNotifications
 
 /// 首次启动引导。**当前未自动接入** —— 在 Settings → General → Maintenance
 /// 有个 "Preview onboarding" 按钮可以手动唤起。等流程跑顺再切到首启自动弹。
@@ -151,9 +150,7 @@ private struct WelcomeStep: View {
 private struct PermissionsStep: View {
     @StateObject private var monitor = PermissionMonitor()
     @State private var inputMonitoring: PermStatus = .unknown
-    @State private var notification:    PermStatus = .unknown
-    /// UI 刷新 trigger —— Input Monitoring / Notification 不在 PermissionMonitor 里,
-    /// 用 timer 拉一次。
+    /// UI 刷新 trigger —— Input Monitoring 不在 PermissionMonitor 里,用 timer 拉一次。
     @State private var pollTask: Task<Void, Never>? = nil
 
     enum PermStatus { case granted, denied, unknown }
@@ -207,14 +204,6 @@ private struct PermissionsStep: View {
                     status: mapAppKit(monitor.fullDiskAccess),
                     action: nil,
                     openSettings: { monitor.openSettings(for: .fullDisk) }
-                )
-                permRow(
-                    icon: "bell",
-                    title: "Notifications",
-                    why: "Optional. Used for completion alerts when AI cron jobs finish.",
-                    status: notification,
-                    action: { requestNotification() },
-                    openSettings: { openNotificationSettings() }
                 )
             }
             .padding(.horizontal, 32)
@@ -308,9 +297,6 @@ private struct PermissionsStep: View {
 
     private func refreshExtraPerms() {
         inputMonitoring = checkInputMonitoring()
-        Task { @MainActor in
-            self.notification = await checkNotification()
-        }
     }
 
     private func startPoll() {
@@ -341,28 +327,6 @@ private struct PermissionsStep: View {
 
     private func openInputMonitoringSettings() {
         let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent")!
-        NSWorkspace.shared.open(url)
-    }
-
-    @MainActor
-    private func checkNotification() async -> PermStatus {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        switch settings.authorizationStatus {
-        case .authorized, .provisional, .ephemeral: return .granted
-        case .denied: return .denied
-        case .notDetermined: return .unknown
-        @unknown default: return .unknown
-        }
-    }
-
-    private func requestNotification() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
-            Task { @MainActor in self.refreshExtraPerms() }
-        }
-    }
-
-    private func openNotificationSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
         NSWorkspace.shared.open(url)
     }
 }
