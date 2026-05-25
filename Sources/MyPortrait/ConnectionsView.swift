@@ -10,6 +10,13 @@ import EventKit
 ///   │ Expanded panel below (if clicked) │
 ///   └───────────────────────────────────┘
 struct ConnectionsView: View {
+    /// 限制只展示某几个 category 的 tile —— onboarding "Connect an AI" 步用,
+    /// 只让 AI/local 出现。nil = 全量。
+    var categoryFilter: Set<Integration.Category>? = nil
+    /// 内嵌进 onboarding 时把 "Connections" 标题 + 描述句藏掉,避免跟外层
+    /// 标题打架。Settings 里走默认 true。
+    var showsHeader: Bool = true
+
     @Environment(AppState.self) private var appState
     @State private var search: String = ""
     @State private var selectedId: String? = nil
@@ -25,27 +32,36 @@ struct ConnectionsView: View {
     // Currently-selected Obsidian vault path, mirrored from SecretStore.
     @State private var obsidianVaultPath: String? = ObsidianConfig.vaultPath
 
+    /// 走 categoryFilter 限定后的全集。filteredTiles / selectedIntegration 都
+    /// 基于这个,确保 onboarding 里点不出非 AI 的 tile。
+    private var scopedTiles: [Integration] {
+        guard let filter = categoryFilter else { return IntegrationRegistry.all }
+        return IntegrationRegistry.all.filter { filter.contains($0.category) }
+    }
+
     private var filteredTiles: [Integration] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return IntegrationRegistry.all }
-        return IntegrationRegistry.all.filter { $0.name.lowercased().contains(q) }
+        guard !q.isEmpty else { return scopedTiles }
+        return scopedTiles.filter { $0.name.lowercased().contains(q) }
     }
 
     private var selectedIntegration: Integration? {
         guard let id = selectedId else { return nil }
-        return IntegrationRegistry.all.first { $0.id == id }
+        return scopedTiles.first { $0.id == id }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Connections")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                if showsHeader {
+                    Text("Connections")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
 
-                Text("Give AI access to your memory, and connect to the apps you use every day")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.55))
+                    Text("Give AI access to your memory, and connect to the apps you use every day")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
 
                 searchField
 

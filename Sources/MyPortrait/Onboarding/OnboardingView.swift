@@ -563,9 +563,13 @@ private struct ConnectAIStep: View {
             .padding(.bottom, 12)
 
             // 直接嵌入现有 ConnectionsView —— 用户点 tile → expand → add 流程
-            // 跟 Settings 里完全一致,不重写。
-            ConnectionsView()
-                .frame(maxHeight: .infinity)
+            // 跟 Settings 里完全一致,不重写。**限制只展示 AI/local 两类**,
+            // 不出现 Notion/SMTP/Calendar 等。
+            ConnectionsView(
+                categoryFilter: [.ai, .local],
+                showsHeader: false
+            )
+            .frame(maxHeight: .infinity)
 
             HStack(spacing: 8) {
                 Image(systemName: connectedCount > 0 ? "checkmark.circle.fill" : "info.circle")
