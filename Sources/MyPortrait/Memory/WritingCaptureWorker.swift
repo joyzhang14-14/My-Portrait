@@ -280,6 +280,15 @@ final class WritingCaptureWorker {
         }
     }
 
+    /// backlog 现在有没有活 —— cursor 之后有没有未处理的 typing_event。
+    /// UI 拿来灰 Run 按钮。
+    func backlogHasWork() async -> Bool {
+        await Task.detached(priority: .userInitiated) { [store] in
+            let cursor = (try? store.getCursor()) ?? 0
+            return (try? store.hasTypingEventsAfter(cursor: cursor)) ?? false
+        }.value
+    }
+
     func runBacklog() async throws -> WritingCaptureDayRunSummary {
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)

@@ -54,6 +54,8 @@ struct MemorySettingsView: View {
     @State private var hasEventWork: Bool = true
     @State private var hasDistillWork: Bool = true
     @State private var hasPersonalityWork: Bool = true
+    /// writing capture backlog 现在有没有未处理的 typing_event。
+    @State private var hasWritingCaptureWork: Bool = true
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
@@ -163,8 +165,10 @@ struct MemorySettingsView: View {
             let backlogOnly = pending.filter {
                 $0.dateUtc == WritingCaptureWorker.backlogDateKey
             }
+            let hasWork = await worker.backlogHasWork()
             await MainActor.run {
                 writingCapturePending = backlogOnly
+                hasWritingCaptureWork = hasWork
             }
         }
     }
@@ -474,12 +478,23 @@ struct MemorySettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
+                let wcHasPending = writingCapturePending.contains {
+                    $0.dateUtc == WritingCaptureWorker.backlogDateKey
+                }
+                let wcDisabledReason: String? = {
+                    if WritingCaptureWorker.shared == nil { return "Writing capture worker is not available." }
+                    if writingCaptureRunning { return "Writing capture is already running." }
+                    if wcHasPending { return "Pending review — Approve / Reject first." }
+                    if !hasWritingCaptureWork { return "No new typing events since the last approved cursor." }
+                    return nil
+                }()
                 Button(writingCaptureRunning ? "Running…" : "Run") {
                     writingCaptureConfirm = true
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(writingCaptureRunning || WritingCaptureWorker.shared == nil)
+                .disabled(wcDisabledReason != nil)
+                .help(wcDisabledReason ?? "Run writing capture backlog now.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

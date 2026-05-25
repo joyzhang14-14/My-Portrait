@@ -174,6 +174,17 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// cursor 之后还有没有未处理的 typing_event。给 UI 灰按钮用。
+    func hasTypingEventsAfter(cursor: Int64) throws -> Bool {
+        try dbPool.read { db in
+            (try Int64.fetchOne(
+                db,
+                sql: "SELECT 1 FROM typing_events WHERE started_at > :c LIMIT 1",
+                arguments: ["c": cursor]
+            )) != nil
+        }
+    }
+
     /// 第一条 typing_event 的 ts(给 UI / log 展示用)。无 typing 返回 nil。
     func firstTypingEventTs() throws -> Int64? {
         try dbPool.read { db in
