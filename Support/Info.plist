@@ -17,18 +17,20 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>My Portrait reads your calendar so AI cronJobs and timeline context can reason about your meetings and schedule.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>My Portrait does not use the camera.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>My Portrait monitors keystrokes to build a private timeline of what you wrote. Keystrokes stay on this Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>My Portrait records microphone audio to build your personal activity timeline.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>My Portrait captures screen contents to extract text (OCR) for your personal activity timeline. All processing happens on this Mac.</string>
 </dict>
 </plist>

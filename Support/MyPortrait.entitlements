@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Hardened runtime entitlements。
+        notarize 时 Apple 校验这个文件 declare 出来的「受保护能力」必须跟 binary
+        实际用的对得上,否则拒。
+
+        我们用到:
+          - 麦克风(AudioCaptureService)
+          - EventKit 读 Calendar 事件
+          - 动态加载:MLX / WhisperKit / onnxruntime 通过 dlopen 加载 .dylib
+            和 Metal kernel,hardened runtime 默认禁;disable-library-validation
+            让 binary 能加载自带 frameworks 里的非 Apple 签名 .dylib。
+          - JIT:MLX 在 GPU 路径上有 Metal shader JIT 编译。
+          - Apple Events:暂未用(NSWorkspace running apps 不需要)。
+        屏幕录制 + Accessibility + Input Monitoring 走 TCC 不在这里 declare。
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

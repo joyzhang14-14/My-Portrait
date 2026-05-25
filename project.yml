@@ -74,11 +74,16 @@ targets:
         LSMinimumSystemVersion: "15.0"
         NSHighResolutionCapable: true
         NSMicrophoneUsageDescription: My Portrait records microphone audio to build your personal activity timeline.
-        NSCameraUsageDescription: My Portrait does not use the camera.
         # macOS 14+ (Sonoma) 起 Calendar 权限分 write-only / full,我们要读
         # 事件给 LLM 当上下文,得申请 full access。第一次调用
         # EKEventStore.requestFullAccessToEvents 时系统弹这个文案。
         NSCalendarsFullAccessUsageDescription: My Portrait reads your calendar so AI cronJobs and timeline context can reason about your meetings and schedule.
+        # 屏幕录制 —— ScreenCaptureKit / CGRequestScreenCaptureAccess 用。
+        # 公证审查必查;缺这条 macOS 14+ 拒绝授权。
+        NSScreenCaptureUsageDescription: My Portrait captures screen contents to extract text (OCR) for your personal activity timeline. All processing happens on this Mac.
+        # 输入监听 —— CGEventTap + IOHIDCheckAccess 用,跟 Accessibility 是
+        # 两个独立 TCC 项。公证必查。
+        NSInputMonitoringUsageDescription: My Portrait monitors keystrokes to build a private timeline of what you wrote. Keystrokes stay on this Mac.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait
@@ -92,7 +97,11 @@ targets:
         # TCC 才认。Automatic 签名 + Team ID 让 Xcode 自动选 Apple Development cert。
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: VYHNX2Y2AL
-        ENABLE_HARDENED_RUNTIME: false
+        # Hardened runtime + entitlements —— Apple notarize 必须。
+        # entitlements 文件 declare 用到的「受保护能力」(mic / camera / Apple
+        # events / 动态库加载),hardened runtime 强制只允许声明过的能力。
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_ENTITLEMENTS: Support/MyPortrait.entitlements
         # @testable import 需要 app target 开 testability。
         ENABLE_TESTABILITY: true
 
