@@ -93,24 +93,6 @@ final class MemoryScheduler {
     /// 能不能现在起 personality(必须 event 空闲 + 自己空闲;distill 不挡)。
     var canRunPersonality: Bool { !eventRunning && !personalityRunning }
 
-    /// 解释为什么某个 Run 按钮当前不能点(给 UI 的 tooltip 用)。
-    /// nil = 能点。
-    func eventBlockedReason() -> String? {
-        if eventRunning { return "Event job is already running." }
-        if portraitFamilyRunning { return "Waiting for distill / personality to finish." }
-        return nil
-    }
-    func distillBlockedReason() -> String? {
-        if eventRunning { return "Waiting for event job to finish." }
-        if distillRunning { return "Distill is already running." }
-        return nil
-    }
-    func personalityBlockedReason() -> String? {
-        if eventRunning { return "Waiting for event job to finish." }
-        if personalityRunning { return "Personality refresh is already running." }
-        return nil
-    }
-
     /// 当前 memory pipeline 的 provider/model — 从 ConfigStore 读。每次需要时
     /// 现拉,这样用户在 Settings 改完无需重启 scheduler 立刻生效。
     private var memoryCfg: MemoryConfig { ConfigStore.shared.current.memory }
