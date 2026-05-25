@@ -23,7 +23,7 @@ struct OnboardingView: View {
     var onFinish: () -> Void
 
     @State private var step: Int = 0
-    private let totalSteps = 5
+    private let totalSteps = 7
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +62,8 @@ struct OnboardingView: View {
         case 1: PermissionsStep()
         case 2: PersonalInfoStep()
         case 3: ConnectAIStep()
+        case 4: MemoryProviderStep()
+        case 5: SchedulerStep()
         default: FinishStep()
         }
     }
@@ -588,7 +590,258 @@ private struct ConnectAIStep: View {
     }
 }
 
-// MARK: - Step 5: Finish
+// MARK: - Step 5: Memory AI provider
+
+/// 选 memory pipeline 用哪个 provider + 主/轻两档 model。可选项跟 Settings →
+/// Memory → Parameter 的 AI provider 段同源(只列已连接 + 未 disable 的)。
+/// 全空时显示提示,可 Skip。
+private struct MemoryProviderStep: View {
+    @Environment(AppState.self) private var appState
+    @State private var config = ConfigStore.shared
+
+    private var availableProviders: [Provider] {
+        let aiCfg = config.current.aiModels
+        return Provider.allCases.filter {
+            appState.isConnected($0.integrationId)
+            && !aiCfg.disabledProviderIds.contains($0.integrationId)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Memory AI model")
+                    .font(.system(size: 24, weight: .semibold))
+                Text("Which AI runs the memory pipeline — clustering raw activity into events, scoring importance, distilling your portrait, refreshing personality. Two model slots: a main model for heavy tasks, a lighter model for clustering / writing capture. You can change all of this later in Settings → Memory → Parameter.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+
+                if availableProviders.isEmpty {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.orange)
+                        Text("No connected AI provider yet. Go back to the previous step to connect one — or skip this and set it later in Settings → Memory → Parameter.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
+                    )
+                } else {
+                    providerCard
+                }
+
+                Color.clear.frame(height: 8)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var providerCard: some View {
+        let providerId = config.current.memory.providerId
+        let selectedProvider = Provider(rawValue: providerId) ?? availableProviders.first ?? .chatgpt
+        let models = config.current.aiModels.visibleModels(
+            forIntegrationId: selectedProvider.integrationId,
+            available: selectedProvider.availableModels
+        )
+
+        VStack(alignment: .leading, spacing: 12) {
+            row("Provider", desc: "Which AI service to use.") {
+                Picker("", selection: config.binding(\.memory.providerId)) {
+                    ForEach(availableProviders, id: \.rawValue) { p in
+                        Text(Self.providerDisplayName(p)).tag(p.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 280)
+            }
+            Divider().overlay(Color.white.opacity(0.08))
+            row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
+                Picker("", selection: config.binding(\.memory.model)) {
+                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 280)
+            }
+            Divider().overlay(Color.white.opacity(0.08))
+            row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
+                Picker("", selection: config.binding(\.memory.modelLight)) {
+                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 280)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        )
+    }
+
+    @ViewBuilder
+    private func row<Trailing: View>(_ title: String,
+                                     desc: String,
+                                     @ViewBuilder _ trailing: () -> Trailing) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(desc)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            trailing()
+        }
+    }
+
+    private static func providerDisplayName(_ p: Provider) -> String {
+        switch p {
+        case .chatgpt:     return "Codex (ChatGPT)"
+        case .openaiBYOK:  return "OpenAI (API key)"
+        case .anthropic:   return "Anthropic (API key)"
+        case .ollama:      return "Ollama (local)"
+        case .gemini:      return "Gemini (API key)"
+        case .perplexity:  return "Perplexity (API key)"
+        case .deepseek:    return "DeepSeek (API key)"
+        case .claudeCode:  return "Claude Code CLI"
+        }
+    }
+}
+
+// MARK: - Step 6: Scheduler
+
+/// 4 个自动调度器的频率配置(event / portrait / personality / writing capture)。
+/// 每个只暴露 frequency 下拉 + 非 off 时的 timeOfDay TimePicker。weekly /
+/// monthly 的 dayOfWeek / dayOfMonth 走默认值(周日 / 1 号),用户后续在
+/// Settings 里调。
+private struct SchedulerStep: View {
+    @State private var config = ConfigStore.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Automatic processing")
+                    .font(.system(size: 24, weight: .semibold))
+                Text("Each pipeline stage can run automatically on its own schedule, or stay manual-only. Times are local; weekly/monthly defaults to Sunday / the 1st (tune later in Settings → Memory → Scheduler).")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+
+                schedulerCard(
+                    title: "Event processing",
+                    desc: "Clusters raw activity into events and scores their long-term importance.",
+                    config: \.scheduler.event)
+                schedulerCard(
+                    title: "Portrait distillation",
+                    desc: "Distills events into long-term portrait entries (one LLM call per category).",
+                    config: \.scheduler.portrait)
+                schedulerCard(
+                    title: "Personality refresh",
+                    desc: "Aggregates events + portraits + OCR into personality tags.",
+                    config: \.scheduler.personality)
+                schedulerCard(
+                    title: "Writing capture",
+                    desc: "Stages writing records from your typing for review. Approval is always manual.",
+                    config: \.scheduler.writingCapture)
+
+                Color.clear.frame(height: 8)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func schedulerCard(
+        title: String,
+        desc: String,
+        config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
+    ) -> some View {
+        let freq = config.binding(kp.appending(path: \.frequency))
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(desc)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 12) {
+                Text("Frequency")
+                    .font(.system(size: 12))
+                    .frame(width: 90, alignment: .leading)
+                Picker("", selection: freq) {
+                    Text("Off (manual only)").tag(SchedulerFrequency.off)
+                    Text("Daily").tag(SchedulerFrequency.daily)
+                    Text("Weekly").tag(SchedulerFrequency.weekly)
+                    Text("Monthly").tag(SchedulerFrequency.monthly)
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+                Spacer(minLength: 0)
+            }
+
+            if freq.wrappedValue != .off {
+                HStack(spacing: 12) {
+                    Text("Time")
+                        .font(.system(size: 12))
+                        .frame(width: 90, alignment: .leading)
+                    timeOfDayPicker(binding: config.binding(kp.appending(path: \.timeOfDay)))
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        )
+    }
+
+    /// "HH:mm" string ↔ DatePicker。同 SchedulerSettingsView 风格但更紧凑。
+    @ViewBuilder
+    private func timeOfDayPicker(binding: Binding<String>) -> some View {
+        let date = Binding<Date>(
+            get: {
+                let parts = binding.wrappedValue.split(separator: ":")
+                let h = Int(parts.first ?? "3") ?? 3
+                let m = parts.count > 1 ? (Int(parts[1]) ?? 0) : 0
+                var dc = DateComponents()
+                dc.hour = h; dc.minute = m
+                return Calendar.current.date(from: dc) ?? Date()
+            },
+            set: { newDate in
+                let dc = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                let h = dc.hour ?? 3, m = dc.minute ?? 0
+                binding.wrappedValue = String(format: "%02d:%02d", h, m)
+            }
+        )
+        DatePicker("", selection: date, displayedComponents: .hourAndMinute)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+    }
+}
+
+// MARK: - Step 7: Finish
 
 private struct FinishStep: View {
     var body: some View {

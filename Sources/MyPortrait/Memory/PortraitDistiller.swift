@@ -72,6 +72,10 @@ final class PortraitDistiller {
         try PortraitPaths.ensureSeedTree()
         let start = Date()
 
+        // 入口先刷一次 weight —— 即使本轮 LLM 没动某条 entry,也按当前时间
+        // 让它的 weight 随 lastModified 衰减。跟 SpeechStyle 同套路。
+        PortraitWeight.refreshDistillCategories()
+
         // 1. Group events by category from disk.
         let eventsByCategory = await collectEventsByCategory()
 
@@ -347,9 +351,13 @@ final class PortraitDistiller {
             category: category,
             memberFrameIds: []
         )
-        // 新 portrait = "一次合并自零"，EMA.afterMerge(0, 0) = 1.0 —— 跟 P3
-        // baseline 一致。这是字面量赋值，不走 event 的 WeightCalculator 公式。
-        file.weight = 1.0
+        // weight = ref_count × exp(-Δt / τ);ref_count 跟 body 渲染保持一致
+        // 封顶在 20(renderBody 用 derivedIds.prefix(20)),防止单条超热 facet
+        // 把 weight 拉爆。
+        file.weight = PortraitWeight.compute(
+            refCount: min(decision.derivedFromEventIds.count, 20),
+            lastModified: file.created, now: file.created
+        )
         // portrait-layer 字段：所有 portrait 文件都要带 mergeCount + lastModified
         // （EMA 衰减锚点）。primaryLabel / aliases / evidenceEventIds 留 nil ——
         // 那几个是 personality concept 专属。
@@ -386,11 +394,15 @@ final class PortraitDistiller {
         let newBody = renderBody(decision: decision, derivedIds: mergedDerived)
         file.body = newBody
         file.recordOccurrence(on: Date())    // mark as "still relevant today"
-        // portrait weight 不再走 WeightCalculator（event 公式）。P5 接入
-        // WeightEMA.afterMerge；interim 内 update 不动 stored weight。
-        // body 改了 → 刷新 EMA 锚点 + merge 计数（老文件可能 nil，兜 1）。
+        // body 改了 → 刷新 EMA 锚点 + merge 计数(老文件可能 nil,兜 1)。
         file.mergeCount = (file.mergeCount ?? 1) + 1
-        file.lastModified = Date()
+        let now = Date()
+        file.lastModified = now
+        // weight 用合并后的 ref 数(同样封顶 20,跟 render 一致)。
+        file.weight = PortraitWeight.compute(
+            refCount: min(mergedDerived.count, 20),
+            lastModified: now, now: now
+        )
         try PortraitFileIO.write(file, to: url)
         // 回写每个被消费的事件,标记"我已被蒸馏进 <slug>"。
         Self.markEventsDistilled(eventIds: decision.derivedFromEventIds,
