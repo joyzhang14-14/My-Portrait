@@ -480,26 +480,16 @@ struct MemorySettingsView: View {
 
     /// 写作采集 worker 的 Run now UI。仿照 manualRunSection,但状态完全独立
     /// (走 WritingCaptureWorker.shared,不走 MemoryStaging)。
-    /// 写作采集 worker 的 inline 子区块 —— 由 runNowSection 拼装,
-    /// 不再单独 `section()` 包卡。alert / sheet 由 runNowSection 顶端挂。
+    /// 写作采集 worker 的 inline 子区块 —— 由 runNowSection 拼装,跟其它
+     /// triggerRow 同形:title + desc + Run。alert / sheet 由 runNowSection 顶端挂。
     @ViewBuilder
     private var writingCaptureBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Writing capture (backlog)")
-                .font(.system(size: 13, weight: .semibold))
-            Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 + Pass 2 (sonnet 200K). Stages writing_records for review — Approve advances the cursor.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
         VStack(spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Process writing capture")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Runs the worker on everything since the last approved cursor. Uses LLM tokens.")
+                    Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 (context timeline) + Pass 2 (per-app+url subagent fanout, sonnet 200K). Stages writing_records for review — Approve advances the cursor.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -609,25 +599,15 @@ struct MemorySettingsView: View {
 
     /// speech_style 提炼链路的 inline 子区块。manual 模式 = staged + pending
     /// review;auto 模式由 scheduler 自动跑,直接落 portrait/speech_style/。
-    /// alert / sheet 由 runNowSection 顶端挂。
+    /// alert / sheet 由 runNowSection 顶端挂。跟其它 triggerRow 同形。
     @ViewBuilder
     private var speechStyleBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Speech style distillation")
-                .font(.system(size: 13, weight: .semibold))
-            Text("Reads writing_records (approved) marked as unprocessed, extracts speech-style facets (register, voice, edit rhythm). Manual run stages drafts; auto schedule writes portrait/speech_style/ directly.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
         VStack(spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Distill speech style")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Up to \(SpeechStyleDistiller.defaultBatchCap) records per run · \(speechStyleUnprocessed) unprocessed remaining.")
+                    Text("Reads writing_records (approved) marked as unprocessed, extracts speech-style facets (register, voice, edit rhythm) into portrait/speech_style/. Up to \(SpeechStyleDistiller.defaultBatchCap) records per run · \(speechStyleUnprocessed) unprocessed remaining. Manual run stages drafts; auto schedule writes directly.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -982,11 +962,11 @@ struct MemorySettingsView: View {
             }
 
             // —— Writing capture(独立链路,跟 memory pipeline 不互锁)
-            Divider().padding(.vertical, 8)
+            Divider().padding(.vertical, 2)
             writingCaptureBlock
 
             // —— Speech style distillation(独立链路)
-            Divider().padding(.vertical, 8)
+            Divider().padding(.vertical, 2)
             speechStyleBlock
         }
         // 三种 sheet / alert 统一挂在最外层 —— 内层 block 只负责触发对应 @State。
