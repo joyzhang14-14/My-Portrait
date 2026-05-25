@@ -197,12 +197,16 @@ final class WritingCaptureWorker {
         let pass2Provider = pass2Cfg.resolvedProvider
         let pass2Model = pass2Cfg.resolvedModelLight
         let userLanguages = ConfigStore.shared.current.personalInfo.languages
+        let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
+            try store.fetchRecentUserRejections()
+        }.value) ?? []
         let pass2Results = await Self.runPass2Concurrently(
             contextTimeline: pass1Out.timeline,
             groups: groups,
             concurrency: 5,
             makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass2Provider, model: pass2Model) },
-            userLanguages: userLanguages
+            userLanguages: userLanguages,
+            userRejections: userRejections
         )
 
         // 6. 合并所有 group 输出
@@ -428,11 +432,18 @@ final class WritingCaptureWorker {
         let pass2Provider = pass2Cfg.resolvedProvider
         let pass2Model = pass2Cfg.resolvedModelLight
         let userLanguages = ConfigStore.shared.current.personalInfo.languages
+        let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
+            try store.fetchRecentUserRejections()
+        }.value) ?? []
+        if !userRejections.isEmpty {
+            workerLog.info("user_rejections: \(userRejections.count) examples fed to Pass 2")
+        }
         let pass2Results = await Self.runPass2Concurrently(
             contextTimeline: pass1Out.timeline, groups: groups, concurrency: 5,
             makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass2Provider, model: pass2Model) },
             includeAxText: includeAxText,
-            userLanguages: userLanguages
+            userLanguages: userLanguages,
+            userRejections: userRejections
         )
 
         // 6. 合并
@@ -571,7 +582,8 @@ final class WritingCaptureWorker {
         concurrency: Int,
         makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent,
         includeAxText: Bool = true,
-        userLanguages: [String] = []
+        userLanguages: [String] = [],
+        userRejections: [UserRejectionRow] = []
     ) async -> [Pass2GroupResult] {
         await withTaskGroup(of: (Int, Pass2GroupResult).self) { taskGroup in
             var inFlight = 0
@@ -589,7 +601,8 @@ final class WritingCaptureWorker {
                             groupApp: g.app, groupUrl: g.url,
                             rawSessions: g.sessions,
                             includeAxText: includeAxText,
-                            userLanguages: userLanguages
+                            userLanguages: userLanguages,
+                            userRejections: userRejections
                         )
                         return (idx, .success(out))
                     } catch {
@@ -613,7 +626,8 @@ final class WritingCaptureWorker {
                                 groupApp: g.app, groupUrl: g.url,
                                 rawSessions: g.sessions,
                                 includeAxText: includeAxText,
-                                userLanguages: userLanguages
+                                userLanguages: userLanguages,
+                                userRejections: userRejections
                             )
                             return (nidx, .success(out))
                         } catch {

@@ -693,6 +693,37 @@ enum DBSchema {
                 "INSERT INTO writing_capture_cursor (id, last_processed_ts) VALUES (1, 0)")
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v28 — writing_records_user_rejected: 用户手动拒过的 record
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 用户在 Pending review UI 点 "Reject this" 标某条 staged 不要时,
+        // 把那条的 text/app/kind + 拒绝 reason 写到这里。下次 Pass 2 会
+        // 从这表读最近 100 条 OR 90 天内的拒绝记录,塞进 prompt 当 few-shot,
+        // LLM 据此判类似 candidate 是否丢 discarded。
+        //
+        // 同时 writing_records_staged 加 hidden_at 列:被拒的 staged 不删
+        // (留着审计),只标 hidden_at,UI 列表过滤掉。
+        m.registerMigration("v28_writing_records_user_rejected") { db in
+            try db.create(table: "writing_records_user_rejected") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("text", .text).notNull()
+                t.column("app", .text).notNull()
+                t.column("url", .text)
+                t.column("kind", .text).notNull()
+                t.column("reason_category", .text).notNull()  // gibberish|private|irrelevant|typo_residue|other
+                t.column("reason_text", .text)                 // 自由文本(可空)
+                t.column("staged_id", .integer)                // 来源 staged.id(可空,审计)
+                t.column("worker_run_id", .text)
+                t.column("rejected_at", .integer).notNull()
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_user_rejected_at ON writing_records_user_rejected(rejected_at)")
+            try db.alter(table: "writing_records_staged") { t in
+                t.add(column: "hidden_at", .integer)
+            }
+        }
+
         return m
     }
 }

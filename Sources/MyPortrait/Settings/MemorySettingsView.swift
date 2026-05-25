@@ -1333,6 +1333,7 @@ private struct WritingCapturePreview: View {
     @Environment(\.dismiss) private var dismiss
     @State private var records: [StagedRecordRow] = []
     @State private var loadError: String? = nil
+    @State private var rejectTarget: StagedRecordRow? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1369,6 +1370,27 @@ private struct WritingCapturePreview: View {
         }
         .frame(width: 720, height: 520)
         .task { load() }
+        .sheet(item: $rejectTarget) { row in
+            RejectReasonSheet(row: row) { category, text in
+                rejectOne(row, category: category, reasonText: text)
+            }
+        }
+    }
+
+    private func rejectOne(_ row: StagedRecordRow, category: String, reasonText: String?) {
+        guard let worker = WritingCaptureWorker.shared else { return }
+        let store = worker.store
+        Task.detached(priority: .userInitiated) {
+            do {
+                try store.rejectStagedRecord(
+                    stagedId: row.id, reasonCategory: category, reasonText: reasonText
+                )
+                let rows = try store.fetchStagedRecords(date: date)
+                await MainActor.run { records = rows }
+            } catch {
+                await MainActor.run { loadError = error.localizedDescription }
+            }
+        }
     }
 
     private func recordCard(_ row: StagedRecordRow) -> some View {
@@ -1388,6 +1410,14 @@ private struct WritingCapturePreview: View {
                 Text(String(format: "conf %.2f", row.confidence))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                Button {
+                    rejectTarget = row
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .help("Reject this record (will be used as a learning example next run)")
             }
             if let s = row.contextSummary, !s.isEmpty {
                 Text(s).font(.system(size: 11))
@@ -1429,6 +1459,65 @@ private struct WritingCapturePreview: View {
                 await MainActor.run { self.loadError = error.localizedDescription }
             }
         }
+    }
+}
+
+// MARK: - Reject reason sheet (用户拒一条 staged record)
+
+/// 弹出表单:让用户从 5 个 reason category 里选一个 + 选填自由文本,
+/// 提交时调 callback(category, text)。父 view 负责调 store + 刷新。
+private struct RejectReasonSheet: View {
+    let row: StagedRecordRow
+    var onSubmit: (String, String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var category: String = "gibberish"
+    @State private var reasonText: String = ""
+
+    private static let categories: [(id: String, label: String)] = [
+        ("gibberish",    "Gibberish / 乱码"),
+        ("private",      "Private / 私密"),
+        ("irrelevant",   "Irrelevant / 不重要"),
+        ("typo_residue", "Typo residue / 中间态"),
+        ("other",        "Other / 其他"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Reject this record")
+                .font(.system(size: 14, weight: .semibold))
+            Text(String(row.text.prefix(200)))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(4)
+                .padding(8)
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(4)
+            Text("Reason category")
+                .font(.system(size: 11, weight: .semibold))
+            Picker("", selection: $category) {
+                ForEach(Self.categories, id: \.id) { c in
+                    Text(c.label).tag(c.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            Text("Notes (optional)")
+                .font(.system(size: 11, weight: .semibold))
+            TextField("e.g. 含手机号 / 太短没意义 / OCR 误识", text: $reasonText)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Reject") {
+                    let trimmed = reasonText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSubmit(category, trimmed.isEmpty ? nil : trimmed)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .frame(width: 460)
     }
 }
 

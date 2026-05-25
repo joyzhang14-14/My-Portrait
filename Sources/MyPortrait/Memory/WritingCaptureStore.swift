@@ -15,6 +15,16 @@ enum WritingCaptureRunStatus: String, Sendable {
     case failed
 }
 
+/// 一条用户手动拒绝的 record(给 Pass 2 prompt 当 few-shot 用)。
+struct UserRejectionRow: Sendable, Equatable {
+    let text: String
+    let app: String
+    let url: String?
+    let kind: String
+    let reasonCategory: String
+    let reasonText: String?
+}
+
 struct WritingCaptureRun: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var id: Int64?
     var dateUtc: String                // 'YYYY-MM-DD'
@@ -445,11 +455,87 @@ struct WritingCaptureStore: Sendable {
                     SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
                            context_summary, source, kind, worker_run_id, created_at
                     FROM writing_records_staged
-                    WHERE date_utc = :d
+                    WHERE date_utc = :d AND hidden_at IS NULL
                     ORDER BY start_ts ASC
                     """,
                 arguments: ["d": date]
             ).map { Self.rowToView($0) }
+        }
+    }
+
+    /// 用户手动拒一条 staged record:写到 user_rejected 表 + 标 hidden_at,
+    /// 下次跑 Pass 2 时把它当 few-shot 例子塞 prompt,让 LLM 自动判类似 candidate。
+    func rejectStagedRecord(
+        stagedId: Int64,
+        reasonCategory: String,
+        reasonText: String?
+    ) throws {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        try dbPool.write { db in
+            // 取 staged 那条的内容写到 rejected 表
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT text, app, url, kind, worker_run_id
+                    FROM writing_records_staged WHERE id = :id
+                    """,
+                arguments: ["id": stagedId]
+            ) else { return }
+            try db.execute(
+                sql: """
+                    INSERT INTO writing_records_user_rejected
+                    (text, app, url, kind, reason_category, reason_text,
+                     staged_id, worker_run_id, rejected_at)
+                    VALUES (:t, :a, :u, :k, :rc, :rt, :sid, :wrid, :now)
+                    """,
+                arguments: [
+                    "t":   row["text"] as String? ?? "",
+                    "a":   row["app"]  as String? ?? "",
+                    "u":   row["url"]  as String?,
+                    "k":   row["kind"] as String? ?? "other",
+                    "rc":  reasonCategory,
+                    "rt":  reasonText,
+                    "sid": stagedId,
+                    "wrid": row["worker_run_id"] as String?,
+                    "now": now
+                ]
+            )
+            // 标 hidden,不删原行
+            try db.execute(
+                sql: "UPDATE writing_records_staged SET hidden_at = :now WHERE id = :id",
+                arguments: ["now": now, "id": stagedId]
+            )
+        }
+    }
+
+    /// 拉最近 N 天内最多 M 条用户拒绝记录,给 Pass 2 prompt 当 few-shot。
+    /// 90 天 / 100 条,哪个小用哪个。
+    func fetchRecentUserRejections(maxCount: Int = 100, withinDays: Int = 90)
+        throws -> [UserRejectionRow]
+    {
+        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) -
+            Int64(withinDays) * 86_400_000
+        return try dbPool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT text, app, url, kind, reason_category, reason_text
+                    FROM writing_records_user_rejected
+                    WHERE rejected_at >= :cutoff
+                    ORDER BY rejected_at DESC
+                    LIMIT :lim
+                    """,
+                arguments: ["cutoff": cutoff, "lim": Int64(maxCount)]
+            ).map {
+                UserRejectionRow(
+                    text:           $0["text"] as String? ?? "",
+                    app:            $0["app"]  as String? ?? "",
+                    url:            $0["url"]  as String?,
+                    kind:           $0["kind"] as String? ?? "other",
+                    reasonCategory: $0["reason_category"] as String? ?? "other",
+                    reasonText:     $0["reason_text"] as String?
+                )
+            }
         }
     }
 
@@ -681,7 +767,7 @@ struct WritingCaptureAppSummary: Identifiable, Sendable {
 }
 
 /// 给 UI 展示用的 writing_record 行投影。staged 和 committed 共用同一个字段集。
-struct WritingRecordViewRow: Sendable {
+struct WritingRecordViewRow: Sendable, Identifiable {
     let id: Int64
     let startTs: Int64
     let endTs: Int64

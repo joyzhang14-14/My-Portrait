@@ -210,6 +210,27 @@ enum WritingCapturePrompts {
        If `user_languages` is empty/missing, fall back to: accept anything that
        looks like coherent text in any major language.
 
+    3c. USER REJECTION PATTERNS (when `user_rejected_examples` is provided)
+
+       `user_rejected_examples` is the user's recent manual rejections. Each item
+       has {text, app, kind, reason_category, reason_text}.
+
+       reason_category values:
+       - "gibberish"     → pinyin residue / random chars / OCR garbage
+       - "private"       → user considers content too personal to keep
+       - "irrelevant"    → not meaningful writing in this context
+       - "typo_residue"  → mid-edit state, not a finished thought
+       - "other"         → see reason_text
+
+       For each new candidate record, check if it's structurally / semantically
+       similar to ANY past rejection (same gibberish shape, same private topic,
+       same fragment pattern, same app+content combo). If yes:
+       → Put in `discarded` with reason "matches user rejection pattern: <ref>"
+       → Where <ref> = a short phrase identifying the matched rejection.
+
+       Be conservative: only drop on clear similarity. When in doubt, keep —
+       the user can reject again, and that's faster than missing real content.
+
     3a. KEYSTROKE-EVENT TIMELINE (self-paste vs external paste)
 
        edit_log entries carry kinds that map to keyboard events. Use them to judge

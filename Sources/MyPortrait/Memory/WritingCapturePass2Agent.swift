@@ -175,7 +175,8 @@ final class WritingCapturePass2Agent {
         groupUrl: String?,
         rawSessions: [WritingCaptureRawSession],
         includeAxText: Bool = true,
-        userLanguages: [String] = []
+        userLanguages: [String] = [],
+        userRejections: [UserRejectionRow] = []
     ) async throws -> Output {
         let prompt = Self.buildPrompt(
             contextTimeline: contextTimeline,
@@ -183,7 +184,8 @@ final class WritingCapturePass2Agent {
             groupUrl: groupUrl,
             rawSessions: rawSessions,
             includeAxText: includeAxText,
-            userLanguages: userLanguages
+            userLanguages: userLanguages,
+            userRejections: userRejections
         )
 
         // 空 session 短路 —— 整天没 raw,直接返回空。
@@ -324,7 +326,8 @@ final class WritingCapturePass2Agent {
         groupUrl: String?,
         rawSessions: [WritingCaptureRawSession],
         includeAxText: Bool = true,
-        userLanguages: [String] = []
+        userLanguages: [String] = [],
+        userRejections: [UserRejectionRow] = []
     ) -> String {
         let prepared = rawSessions.map {
             prepareSessionForPrompt($0, includeAxText: includeAxText)
@@ -354,6 +357,23 @@ final class WritingCapturePass2Agent {
         lines.append("group_meta:")
         lines.append(encodeJSONAny(meta) ?? "{}")
         lines.append("")
+        if !userRejections.isEmpty {
+            // 用户历史拒过的 record(最近 90 天 / 100 条),给 LLM 当 few-shot:
+            // 看到新 candidate 跟这些"形态/类别"相似,就丢 discarded。
+            let payload = userRejections.map { r -> [String: String?] in
+                [
+                    "text": String(r.text.prefix(300)),
+                    "app": r.app,
+                    "kind": r.kind,
+                    "reason_category": r.reasonCategory,
+                    "reason_text": r.reasonText
+                ]
+            }
+            lines.append("user_rejected_examples:")
+            lines.append((try? JSONSerialization.data(withJSONObject: payload))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]")
+            lines.append("")
+        }
         lines.append("raw_sessions:")
         lines.append(encodeJSON(prepared) ?? "[]")
         return lines.joined(separator: "\n")
