@@ -275,7 +275,11 @@ struct MyPortraitApp: App {
             WritingCaptureCLI.run(specificDate: date)
         }
         // v27 backlog 模式:不按天分,cursor → 现在,全量跑一次
-        if args.contains("--writing-capture-backlog") {
+        // 注意:`--writing-capture-backlog-no-ax` 必须先匹配,否则会被
+        // `--writing-capture-backlog` 误判。
+        if args.contains("--writing-capture-backlog-no-ax") {
+            WritingCaptureCLI.runBacklog(includeAxText: false)
+        } else if args.contains("--writing-capture-backlog") {
             WritingCaptureCLI.runBacklog()
         }
         if args.contains("--writing-capture-backlog-approve") {

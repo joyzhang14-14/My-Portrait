@@ -82,12 +82,14 @@ enum WritingCaptureCLI {
     }
 
     /// Backlog: cursor → 现在,全量跑一次。
-    static func runBacklog() {
+    /// - Parameter includeAxText: false → AX 文本不喂给 LLM(实验:测纯
+    ///   OCR + keystroke + context 能不能重建)。默认 true。
+    static func runBacklog(includeAxText: Bool = true) {
         Task {
             do {
                 let worker = try await MainActor.run { try makeWorker() }
-                print("[writing-capture] backlog run starting…")
-                let s = try await worker.runBacklog()
+                print("[writing-capture] backlog run starting… (include_ax_text=\(includeAxText))")
+                let s = try await worker.runBacklog(includeAxText: includeAxText)
                 printSummaries([s])
                 printStagedRecords(worker: worker, dates: s.status == .pendingReview ? [WritingCaptureWorker.backlogDateKey] : [])
                 exit(0)

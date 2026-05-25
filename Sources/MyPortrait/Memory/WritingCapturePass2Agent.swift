@@ -173,13 +173,15 @@ final class WritingCapturePass2Agent {
         contextTimeline: [WritingCaptureContextSegment],
         groupApp: String,
         groupUrl: String?,
-        rawSessions: [WritingCaptureRawSession]
+        rawSessions: [WritingCaptureRawSession],
+        includeAxText: Bool = true
     ) async throws -> Output {
         let prompt = Self.buildPrompt(
             contextTimeline: contextTimeline,
             groupApp: groupApp,
             groupUrl: groupUrl,
-            rawSessions: rawSessions
+            rawSessions: rawSessions,
+            includeAxText: includeAxText
         )
 
         // 空 session 短路 —— 整天没 raw,直接返回空。
@@ -304,15 +306,24 @@ final class WritingCapturePass2Agent {
         contextTimeline: [WritingCaptureContextSegment],
         groupApp: String,
         groupUrl: String?,
-        rawSessions: [WritingCaptureRawSession]
+        rawSessions: [WritingCaptureRawSession],
+        includeAxText: Bool = true
     ) -> String {
-        let prepared = rawSessions.map(prepareSessionForPrompt).map(RawSessionPayload.init)
+        let prepared = rawSessions.map(prepareSessionForPrompt).map {
+            RawSessionPayload($0, includeAxText: includeAxText)
+        }
         let meta: [String: String?] = [
             "app": groupApp,
             "url": groupUrl,
-            "session_count": "\(rawSessions.count)"
+            "session_count": "\(rawSessions.count)",
+            "ax_text_included": includeAxText ? "true" : "false"
         ]
         var lines: [String] = [WritingCapturePrompts.pass2Fusion]
+        if !includeAxText {
+            lines.append("")
+            lines.append("⚠ EXPERIMENTAL MODE: AX text (typing_events with editor content) is NOT provided.")
+            lines.append("Reconstruct what the user wrote using ONLY keystroke_text, keystroke_log, ocr_frames, app, url, and context_timeline. typing_events array will be empty.")
+        }
         lines.append("")
         lines.append("context_timeline:")
         lines.append(encodeJSON(contextTimeline) ?? "[]")
@@ -456,7 +467,7 @@ private struct RawSessionPayload: Encodable {
         case ocrFrames      = "ocr_frames"
     }
 
-    init(_ s: WritingCaptureRawSession) {
+    init(_ s: WritingCaptureRawSession, includeAxText: Bool = true) {
         self.sessionId = s.id
         self.app = s.app
         self.url = s.url
@@ -464,7 +475,9 @@ private struct RawSessionPayload: Encodable {
         self.endTs = s.endTs
         self.keystrokeText = Self.assembleKeystrokeText(s.keystrokes)
         self.keystrokeCount = s.keystrokes.count
-        self.typingEvents = s.typingEvents.map(TypingEventPayload.init)
+        // AX-less 实验模式:typing_events 不喂(里面带 AX 抓到的编辑器文本 +
+        // editLog),只剩 keystroke + OCR + 上下文。
+        self.typingEvents = includeAxText ? s.typingEvents.map(TypingEventPayload.init) : []
         self.keystrokeLog = s.keystrokes.map(KeystrokePayload.init)
         self.ocrFrames = s.ocrFrames
     }
