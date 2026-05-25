@@ -297,6 +297,11 @@ struct TimelineSidebar: View {
 
     private var memoryScopeSection: some View {
         sectionCard {
+            scopeHeader("PROFILE")
+            VStack(spacing: 2) {
+                scopeRow(.personalInfo)
+            }
+            Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
             scopeHeader("PORTRAIT")
             VStack(spacing: 2) {
                 ForEach(PortraitPaths.seedCategories, id: \.self) { cat in

@@ -122,7 +122,10 @@ final class PortraitToTagsAgent {
     // MARK: - Prompt
 
     private static func buildPrompt(portraits: [PortraitInput]) -> String {
-        var lines: [String] = [MemoryPrompts.portraitToTags]
+        var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(ConfigStore.shared.current.personalInfo)
+        if !about.isEmpty { lines.append(about); lines.append("") }
+        lines.append(MemoryPrompts.portraitToTags)
         lines.append("")
         lines.append("PORTRAITS:")
         for p in portraits {

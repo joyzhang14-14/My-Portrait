@@ -190,7 +190,10 @@ final class PersonalityAgent {
     }
 
     fileprivate static func buildPrompt(date: String, sources: [SourceEvent]) -> String {
-        var lines: [String] = [personalityIntro]
+        var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(ConfigStore.shared.current.personalInfo)
+        if !about.isEmpty { lines.append(about); lines.append("") }
+        lines.append(personalityIntro)
         lines.append("DATE: \(date)")
         lines.append("")
         lines.append("EVENTS — id | title | impact | tags | facets:")

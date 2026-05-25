@@ -109,7 +109,10 @@ final class OCRToTagsAgent {
     private static func formatDay(_ d: Date) -> String { dayFmt.string(from: d) }
 
     private static func buildPrompt(date: String, ocrText: String) -> String {
-        var lines: [String] = [MemoryPrompts.ocrToTags]
+        var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(ConfigStore.shared.current.personalInfo)
+        if !about.isEmpty { lines.append(about); lines.append("") }
+        lines.append(MemoryPrompts.ocrToTags)
         lines.append("")
         lines.append("DATE: \(date)")
         lines.append("OCR (deduped, truncated):")

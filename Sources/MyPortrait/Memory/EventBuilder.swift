@@ -132,11 +132,14 @@ final class EventBuilder {
         let lo = globalOffset + 1
         let hi = globalOffset + sessions.count
         let validActiveIds = Set(activeEvents.map { $0.id })
+        // 在 MainActor 拿 personal info snapshot,传给 nonisolated buildPrompt。
+        let personal = ConfigStore.shared.current.personalInfo
         let prompt = Self.buildPrompt(
             date: date,
             sessions: sessions,
             globalOffset: globalOffset,
-            activeEvents: activeEvents
+            activeEvents: activeEvents,
+            personal: personal
         )
 
         // The LLM occasionally returns malformed JSON or times out. A failed
@@ -331,7 +334,8 @@ final class EventBuilder {
         date: Date,
         sessions: [EnrichedSession],
         globalOffset: Int,
-        activeEvents: [ActiveEvent]
+        activeEvents: [ActiveEvent],
+        personal: PersonalInfoConfig
     ) -> String {
         let dayStr = isoDay(date)
 
@@ -368,7 +372,10 @@ final class EventBuilder {
         }
         let sessionBlock = sessionRows.joined(separator: "\n")
 
-        return MemoryPrompts.eventClustering
+        let about = MemoryPrompts.aboutUserBlock(personal)
+        let prefix = about.isEmpty ? "" : about + "\n\n"
+        return prefix
+            + MemoryPrompts.eventClustering
             + "\n\nDate being processed: " + dayStr
             + "\n\n" + activeBlock
             + "\n\n" + sessionBlock

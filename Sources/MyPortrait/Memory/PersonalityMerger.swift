@@ -331,7 +331,10 @@ final class PersonalityMerger {
         clusters: [PersonalityCluster],
         concepts: [(slug: String, file: PortraitFile)]
     ) -> String {
-        var lines: [String] = [MemoryPrompts.personalityMerge]
+        var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(ConfigStore.shared.current.personalInfo)
+        if !about.isEmpty { lines.append(about); lines.append("") }
+        lines.append(MemoryPrompts.personalityMerge)
         lines.append("")
         lines.append("EXISTING PERSONALITY CONCEPTS (slug | primary_label | aliases):")
         if concepts.isEmpty {

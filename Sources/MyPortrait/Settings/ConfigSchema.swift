@@ -29,6 +29,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var privacy:       PrivacyConfig       = .init()
     var storage:       StorageConfig       = .init()
     var chat:          ChatConfig          = .init()
+    var personalInfo:  PersonalInfoConfig  = .init()
 
     init() {}
 
@@ -36,6 +37,7 @@ struct MyPortraitConfig: Codable, Equatable {
         case schemaVersion = "schema_version"
         case display, general, aiModels = "ai_models", capture, notifications
         case memory, scheduler, usage, privacy, storage, chat
+        case personalInfo = "personal_info"
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +55,72 @@ struct MyPortraitConfig: Codable, Equatable {
         privacy       = c.dflt(PrivacyConfig.self, .privacy, privacy)
         storage       = c.dflt(StorageConfig.self, .storage, storage)
         chat          = c.dflt(ChatConfig.self, .chat, chat)
+        personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
+    }
+}
+
+// MARK: - Personal Info
+//
+// 用户自填的基础画像。**全部可选** —— 任何字段空 → 不进 LLM prompt。
+// 由 memory pipeline(event / portrait / personality)各 agent 在 buildPrompt
+// 时通过 `MemoryPrompts.aboutUserBlock()` 拼到 system prompt 顶部。
+
+/// 性别字段:对 LLM 来说只关心代称(pronoun)。 he / she / they / 空。
+enum PersonalInfoGender: String, Codable, Equatable, CaseIterable {
+    case unset = ""    // 没填,等于空 —— 不进 prompt
+    case he
+    case she
+    case they
+
+    var displayName: String {
+        switch self {
+        case .unset: return "—"
+        case .he:    return "He"
+        case .she:   return "She"
+        case .they:  return "They"
+        }
+    }
+}
+
+struct PersonalInfoConfig: Codable, Equatable {
+    var firstName:   String = ""
+    var middleName:  String = ""
+    var lastName:    String = ""
+    var alias:       String = ""    // 别名 / 昵称 / 自称
+    var gender:      PersonalInfoGender = .unset
+    var nationality: String = ""
+    var ethnicity:   String = ""
+    /// 用户会说的语言。无限添加,空数组 = 不进 prompt。
+    var languages:   [String] = []
+    /// 出生日期,ISO 8601 'YYYY-MM-DD'。空串 = 没填。
+    var birthDate:   String = ""
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case firstName   = "first_name"
+        case middleName  = "middle_name"
+        case lastName    = "last_name"
+        case alias
+        case gender
+        case nationality
+        case ethnicity
+        case languages
+        case birthDate   = "birth_date"
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        firstName   = c.dflt(String.self,   .firstName,   firstName)
+        middleName  = c.dflt(String.self,   .middleName,  middleName)
+        lastName    = c.dflt(String.self,   .lastName,    lastName)
+        alias       = c.dflt(String.self,   .alias,       alias)
+        gender      = c.dflt(PersonalInfoGender.self, .gender, gender)
+        nationality = c.dflt(String.self,   .nationality, nationality)
+        ethnicity   = c.dflt(String.self,   .ethnicity,   ethnicity)
+        languages   = c.dflt([String].self, .languages,   languages)
+        birthDate   = c.dflt(String.self,   .birthDate,   birthDate)
     }
 }
 

@@ -181,7 +181,8 @@ final class PortraitDistiller {
             category: category,
             events: events,
             existing: existing,
-            evidenceThreshold: ConfigStore.shared.current.memory.distillEvidenceThreshold
+            evidenceThreshold: ConfigStore.shared.current.memory.distillEvidenceThreshold,
+            personal: ConfigStore.shared.current.personalInfo
         )
 
         do { try agent.sendPrompt(prompt, id: requestID) }
@@ -217,9 +218,12 @@ final class PortraitDistiller {
         category: String,
         events: [EventEntry],
         existing: [PortraitEntry],
-        evidenceThreshold: Int
+        evidenceThreshold: Int,
+        personal: PersonalInfoConfig
     ) -> String {
         var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(personal)
+        if !about.isEmpty { lines.append(about); lines.append("") }
         lines.append(MemoryPrompts.distillIntro)
         lines.append("Target portrait category: **\(category)**")
         lines.append("")

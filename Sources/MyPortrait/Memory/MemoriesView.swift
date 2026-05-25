@@ -40,7 +40,9 @@ struct MemoriesView: View {
     var body: some View {
         // .input scope 的数据源是 SQLite typing_events，不是 PortraitFile，
         // 走独立渲染路径（InputCaptureView）；其它 scope 走文件目录扫描。
-        if scope == .input {
+        if scope == .personalInfo {
+            PersonalInfoView()
+        } else if scope == .input {
             InputCaptureView()
         } else {
             HSplitView {
@@ -327,8 +329,8 @@ struct MemoriesView: View {
         switch scope {
         case .events:
             root = Storage.eventsDir
-        case .input:
-            // AX 输入采集的数据源尚未接入 —— 暂无可扫描的目录。
+        case .input, .personalInfo:
+            // .input 走 InputCaptureView,.personalInfo 走 PersonalInfoView —— 都没文件可扫。
             return []
         case .portrait(let cat):
             root = Storage.portraitDir.appendingPathComponent(cat, isDirectory: true)
@@ -479,6 +481,9 @@ private struct EmptyHint: View {
             return "No events yet.\nClick ↓ to backfill from the timeline."
         case .input:
             return "Input capture is not set up yet."
+        case .personalInfo:
+            // 不会走到 —— .personalInfo 路由直接进 PersonalInfoView,不走 list 列。
+            return ""
         case .portrait:
             return "No portrait entries in this category yet.\nRun events backfill first, then 🪄 to distill."
         }

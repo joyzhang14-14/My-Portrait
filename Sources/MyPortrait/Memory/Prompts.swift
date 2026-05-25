@@ -9,6 +9,56 @@ import Foundation
 /// caller's `buildPrompt` and concatenated with these templates.
 enum MemoryPrompts {
 
+    // MARK: - About the user(用户手填的基础画像,顶部 prefix)
+
+    /// 用户在 Memories → Personal Info 填的基础画像,拼成一段
+    /// "About the user:" 文本,放在所有 memory pipeline prompt 的最顶部。
+    /// 没填的字段不进 prompt;全空 → 返回 ""(调用方判空跳过)。
+    ///
+    /// 参数:caller 先在 MainActor 上拿 snapshot 再传进来。这样函数本身
+    /// 是 nonisolated,可以从 buildPrompt(nonisolated static)调用。
+    nonisolated static func aboutUserBlock(_ p: PersonalInfoConfig) -> String {
+        var lines: [String] = []
+
+        // 姓名:把 first/middle/last 拼起来。任一为空就跳过那段。
+        let nameParts = [p.firstName, p.middleName, p.lastName]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if !nameParts.isEmpty {
+            lines.append("- Name: \(nameParts.joined(separator: " "))")
+        }
+
+        let alias = p.alias.trimmingCharacters(in: .whitespaces)
+        if !alias.isEmpty { lines.append("- Also goes by: \(alias)") }
+
+        // 代称 —— LLM 写第三人称叙述时用得到。
+        switch p.gender {
+        case .he:   lines.append("- Pronouns: he/him")
+        case .she:  lines.append("- Pronouns: she/her")
+        case .they: lines.append("- Pronouns: they/them")
+        case .unset: break
+        }
+
+        let nat = p.nationality.trimmingCharacters(in: .whitespaces)
+        if !nat.isEmpty { lines.append("- Nationality: \(nat)") }
+
+        let eth = p.ethnicity.trimmingCharacters(in: .whitespaces)
+        if !eth.isEmpty { lines.append("- Ethnicity: \(eth)") }
+
+        let langs = p.languages
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if !langs.isEmpty {
+            lines.append("- Speaks: \(langs.joined(separator: ", "))")
+        }
+
+        let bd = p.birthDate.trimmingCharacters(in: .whitespaces)
+        if !bd.isEmpty { lines.append("- Date of birth: \(bd)") }
+
+        guard !lines.isEmpty else { return "" }
+        return "About the user (self-reported):\n" + lines.joined(separator: "\n")
+    }
+
     // MARK: - EventBuilder — per-event clustering
 
     /// Clusters Tier-1 sessions into semantic events. The caller appends the

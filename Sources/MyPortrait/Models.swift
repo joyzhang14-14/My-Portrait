@@ -6,12 +6,14 @@ import Observation
 /// outer TimelineSidebar (left rail) and MemoriesView (detail) can both
 /// read/write the same selection.
 enum MemoryScope: Hashable, Identifiable {
+    case personalInfo
     case events
     case input
     case portrait(category: String)
 
     var id: String {
         switch self {
+        case .personalInfo:        return "__personal_info__"
         case .events:              return "__events__"
         case .input:               return "__input__"
         case .portrait(let c):     return "portrait:\(c)"
@@ -19,6 +21,7 @@ enum MemoryScope: Hashable, Identifiable {
     }
     var displayName: String {
         switch self {
+        case .personalInfo:        return "Personal Info"
         case .events:              return "Events"
         case .input:               return "Input"
         case .portrait(let c):     return c.replacingOccurrences(of: "_", with: " ").capitalized
@@ -26,6 +29,7 @@ enum MemoryScope: Hashable, Identifiable {
     }
     var systemImage: String {
         switch self {
+        case .personalInfo:             return "person.text.rectangle.fill"
         case .events:                   return "clock.arrow.circlepath"
         case .input:                    return "keyboard"
         case .portrait("personality"):  return "person.fill"

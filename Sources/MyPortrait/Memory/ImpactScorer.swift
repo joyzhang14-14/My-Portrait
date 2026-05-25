@@ -203,7 +203,10 @@ final class ImpactScorer {
     // MARK: - Prompt + parse
 
     private static func buildPrompt(for batch: [(URL, PortraitFile)]) -> String {
-        var lines: [String] = [MemoryPrompts.impactScoring]
+        var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(ConfigStore.shared.current.personalInfo)
+        if !about.isEmpty { lines.append(about); lines.append("") }
+        lines.append(MemoryPrompts.impactScoring)
         for (i, item) in batch.enumerated() {
             let (_, f) = item
             let id = i + 1

@@ -102,7 +102,10 @@ final class PersonalityClusterAgent {
     // MARK: - Prompt
 
     private static func buildPrompt(candidates: [PersonalityTagCandidate]) -> String {
-        var lines: [String] = [MemoryPrompts.personalityCluster]
+        var lines: [String] = []
+        let about = MemoryPrompts.aboutUserBlock(ConfigStore.shared.current.personalInfo)
+        if !about.isEmpty { lines.append(about); lines.append("") }
+        lines.append(MemoryPrompts.personalityCluster)
         lines.append("")
         lines.append("INDEXED TAGS:")
         for (i, c) in candidates.enumerated() {
