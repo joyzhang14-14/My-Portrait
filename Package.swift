@@ -16,6 +16,8 @@ let package = Package(
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0"),
         // ONNX Runtime（说话人识别：pyannote 分离 + wespeaker CAM++ 嵌入）
         .package(url: "https://github.com/microsoft/onnxruntime-swift-package-manager", from: "1.24.0"),
+        // Sparkle 自动更新（GitHub Pages 托管 appcast.xml）
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [
         .executableTarget(
@@ -30,6 +32,7 @@ let package = Package(
                 .product(name: "mlx_embeddings", package: "mlx.embeddings"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
                 .product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/MyPortrait",
             exclude: [

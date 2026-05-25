@@ -18,7 +18,8 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Updates") {
+            SettingsCard(title: "Updates",
+                         footnote: "Sparkle checks GitHub for new releases. EdDSA-signed appcast, hardened-runtime verified.") {
                 SettingsRow("Auto-update app",
                             description: "Download and install app updates automatically.",
                             icon: "arrow.down.app") {
@@ -45,6 +46,20 @@ struct GeneralSettingsView: View {
                             .foregroundStyle(.white.opacity(0.55))
                     }
                 }
+                SettingsDivider()
+                SettingsRow("Check for updates now",
+                            description: "Force Sparkle to query the GitHub appcast immediately.",
+                            icon: "arrow.clockwise.circle") {
+                    Button("Check now") { UpdaterService.shared.checkForUpdates() }
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+            // 两个字段改完同步给 SPUUpdater(否则 toggle 是死配置)。
+            .onChange(of: config.current.general.autoDownloadUpdates) { _, _ in
+                UpdaterService.shared.applyConfig()
+            }
+            .onChange(of: config.current.general.updateCheckMinutes) { _, _ in
+                UpdaterService.shared.applyConfig()
             }
 
             SettingsCard(title: "System") {

@@ -37,6 +37,9 @@ packages:
   onnxruntime:
     url: https://github.com/microsoft/onnxruntime-swift-package-manager
     from: 1.24.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
 
 targets:
   MyPortrait:
@@ -66,6 +69,8 @@ targets:
       - package: onnxruntime
         product: onnxruntime
       - sdk: libsqlite3.tbd
+      - package: Sparkle
+        product: Sparkle
     info:
       path: Support/Info.plist
       properties:
@@ -84,6 +89,16 @@ targets:
         # 输入监听 —— CGEventTap + IOHIDCheckAccess 用,跟 Accessibility 是
         # 两个独立 TCC 项。公证必查。
         NSInputMonitoringUsageDescription: My Portrait monitors keystrokes to build a private timeline of what you wrote. Keystrokes stay on this Mac.
+        # ---------- Sparkle 自动更新 ----------
+        # 公开 URL —— GitHub Pages 托管的 appcast。第一次推之前要在
+        # GitHub 仓库 Settings → Pages 把 docs/ 当 source。
+        SUFeedURL: https://joyzhang14-14.github.io/My-Portrait/appcast.xml
+        # EdDSA 公钥(generate_keys 产物的 public key 部分)。私钥进 keychain
+        # 不进仓库;sign_update 时 Sparkle 自己从 keychain 取。
+        # ⚠️ 第一次发布前要把 PLACEHOLDER 换成真公钥(`./scripts/sparkle/generate-keys.sh`)。
+        SUPublicEDKey: PLACEHOLDER_RUN_generate-keys.sh
+        # 跳过用户手动「Check for Updates」对话框,直接弹更新提示。
+        SUEnableAutomaticChecks: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait

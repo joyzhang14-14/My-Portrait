@@ -441,6 +441,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
         services = Services()
         statusBarMenu = StatusBarMenu(settings: services.settings, permissions: services.permissions)
+        // Sparkle:启动时实例化 controller(startingUpdater=true 自动开始
+        // 后台检查 + 周期轮询)。引用单例让它持续活着。Info.plist 的
+        // SUFeedURL / SUPublicEDKey 是 Sparkle 自己读的。
+        _ = UpdaterService.shared
 
         // 确保磁盘目录结构存在
         do {

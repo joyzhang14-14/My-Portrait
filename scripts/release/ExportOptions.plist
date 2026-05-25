@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Developer ID Application 签名,用于 GitHub release 公开分发(不进 App Store) -->
+    <key>method</key>
+    <string>developer-id</string>
+    <key>teamID</key>
+    <string>VYHNX2Y2AL</string>
+    <!-- 走 manual signing,xcodebuild 自动选 Developer ID Application 证书 -->
+    <key>signingStyle</key>
+    <string>manual</string>
+    <!-- 不要 Xcode automatic 上传到 Apple -->
+    <key>destination</key>
+    <string>export</string>
+</dict>
+</plist>
