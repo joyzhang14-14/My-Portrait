@@ -24,6 +24,13 @@ struct OnboardingView: View {
     @State private var step: Int = 0
     private let totalSteps = 8
 
+    /// Onboarding 期间 NSWindow 缩到的尺寸(比主 app 的 1200x835 小一截,
+    /// 视觉上一看就知道是"setup wizard"而不是主 app)。
+    private static let onboardingSize = NSSize(width: 720, height: 560)
+    /// 主 app 的窗口尺寸(跟 App.swift 里 ChromelessWindow 初始一致),Finish
+    /// 后恢复。
+    private static let mainAppSize = NSSize(width: 1200, height: 835)
+
     var body: some View {
         VStack(spacing: 0) {
             progressBar
@@ -31,8 +38,30 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             footer
         }
-        .frame(minWidth: 720, minHeight: 560)
         .background(SidebarBackdrop().ignoresSafeArea())
+        .onAppear { resizeWindow(to: Self.onboardingSize, animate: false) }
+        .onDisappear { resizeWindow(to: Self.mainAppSize, animate: true) }
+    }
+
+    /// 拿到 app 主 NSWindow + 改 content size + 居中。 ContentView 的 Group
+    /// 切换 view 不会重建 NSWindow(同一个 NSApplicationDelegate.window),所以
+    /// 这里 resize 是直接对那个 window 操作。
+    private func resizeWindow(to size: NSSize, animate: Bool) {
+        guard let window = NSApp.windows.first(where: { $0.contentView?.subviews.first != nil }) else {
+            return
+        }
+        let currentFrame = window.frame
+        let contentRect = window.contentRect(forFrameRect: currentFrame)
+        // setContentSize 不动 origin,会从左下角拉伸 —— 视觉上"窗口往上长"。
+        // 显式重算 frame 让窗口保持在原中心。
+        let delta = NSSize(width: size.width - contentRect.width,
+                           height: size.height - contentRect.height)
+        var newFrame = window.frame
+        newFrame.origin.x -= delta.width / 2
+        newFrame.origin.y -= delta.height / 2
+        newFrame.size.width  += delta.width
+        newFrame.size.height += delta.height
+        window.setFrame(newFrame, display: true, animate: animate)
     }
 
     // MARK: - Header / progress
