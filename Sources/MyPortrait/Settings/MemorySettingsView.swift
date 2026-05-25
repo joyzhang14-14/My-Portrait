@@ -1474,11 +1474,11 @@ private struct RejectReasonSheet: View {
     @State private var reasonText: String = ""
 
     private static let categories: [(id: String, label: String)] = [
-        ("gibberish",    "Gibberish / 乱码"),
-        ("private",      "Private / 私密"),
-        ("irrelevant",   "Irrelevant / 不重要"),
-        ("typo_residue", "Typo residue / 中间态"),
-        ("other",        "Other / 其他"),
+        ("gibberish",    "Gibberish"),
+        ("private",      "Private"),
+        ("irrelevant",   "Irrelevant"),
+        ("typo_residue", "Typo residue"),
+        ("other",        "Other"),
     ]
 
     var body: some View {
@@ -1503,7 +1503,7 @@ private struct RejectReasonSheet: View {
             .pickerStyle(.menu)
             Text("Notes (optional)")
                 .font(.system(size: 11, weight: .semibold))
-            TextField("e.g. 含手机号 / 太短没意义 / OCR 误识", text: $reasonText)
+            TextField("e.g. contains phone number, too short, OCR misread", text: $reasonText)
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
