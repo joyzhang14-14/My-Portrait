@@ -96,38 +96,6 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// Convenience overload: row that does nothing on the right (e.g. a button
-/// row where the button IS the row's body).
-struct SettingsActionRow: View {
-    let title: String
-    let description: String?
-    let buttonLabel: String
-    let buttonIcon: String?
-    let role: ButtonRole?
-    let action: () -> Void
-
-    init(_ title: String, description: String? = nil,
-         buttonLabel: String, buttonIcon: String? = nil,
-         role: ButtonRole? = nil, action: @escaping () -> Void) {
-        self.title = title; self.description = description
-        self.buttonLabel = buttonLabel; self.buttonIcon = buttonIcon
-        self.role = role; self.action = action
-    }
-
-    var body: some View {
-        SettingsRow(title, description: description) {
-            Button(role: role, action: action) {
-                HStack(spacing: 4) {
-                    if let buttonIcon {
-                        Image(systemName: buttonIcon).font(.system(size: 11))
-                    }
-                    Text(buttonLabel).font(.system(size: 12, weight: .medium))
-                }
-            }
-        }
-    }
-}
-
 /// Thin separator that fits the card visual.
 struct SettingsDivider: View {
     var body: some View {
@@ -599,20 +567,3 @@ struct TypingAppPicker: View {
     }
 }
 
-/// `[String]` AppStorage bridge — UserDefaults stores arrays natively but
-/// `@AppStorage` doesn't directly support them, so we round-trip via JSON.
-struct StringArrayStorage {
-    let key: String
-    func get() -> [String] {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let arr = try? JSONDecoder().decode([String].self, from: data) else {
-            return []
-        }
-        return arr
-    }
-    func set(_ value: [String]) {
-        if let data = try? JSONEncoder().encode(value) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
-}

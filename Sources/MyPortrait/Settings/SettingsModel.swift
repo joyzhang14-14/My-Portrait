@@ -109,12 +109,6 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
-enum UpdateInterval: String, CaseIterable, Identifiable {
-    case hourly, daily, weekly, never
-    var id: String { rawValue }
-    var label: String { rawValue.capitalized }
-}
-
 enum AudioEngine: String, CaseIterable, Identifiable {
     case disabled, whisper, deepgram, custom
     var id: String { rawValue }
@@ -241,32 +235,3 @@ enum AutoDeleteMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum AccentColor: String, CaseIterable, Identifiable {
-    case purple, blue, pink, green, orange, indigo, mint
-    var id: String { rawValue }
-    var label: String { rawValue.capitalized }
-    var color: Color {
-        switch self {
-        case .purple: return Color(red: 0.65, green: 0.30, blue: 1.0)
-        case .blue:   return Color(red: 0.25, green: 0.55, blue: 1.0)
-        case .pink:   return Color(red: 0.95, green: 0.35, blue: 0.65)
-        case .green:  return Color(red: 0.30, green: 0.78, blue: 0.55)
-        case .orange: return Color(red: 1.00, green: 0.55, blue: 0.25)
-        case .indigo: return Color(red: 0.40, green: 0.35, blue: 0.95)
-        case .mint:   return Color(red: 0.40, green: 0.85, blue: 0.75)
-        }
-    }
-}
-
-enum AppIconVariant: String, CaseIterable, Identifiable {
-    case `default`, dark, monochrome, gradient
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .default:    return "Default"
-        case .dark:       return "Dark"
-        case .monochrome: return "Monochrome"
-        case .gradient:   return "Gradient"
-        }
-    }
-}

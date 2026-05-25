@@ -103,20 +103,3 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Native placeholder
-
-private struct NativePlaceholder: View {
-    let title: String
-    let systemImage: String
-    let subtitle: String?
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-        } description: {
-            if let subtitle {
-                Text(subtitle)
-            }
-        }
-    }
-}

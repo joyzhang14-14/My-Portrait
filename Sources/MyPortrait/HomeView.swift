@@ -1676,38 +1676,6 @@ private struct TemplateEditor: View {
     ]
 }
 
-private struct SuggestionCardView: View {
-    let card: SuggestionCard
-    let onTap: () -> Void
-    @State private var hover = false
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(card.emoji).font(.system(size: 18))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(card.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                    Text(card.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(hover ? 0.05 : 0.025))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10), lineWidth: 1))
-            )
-        }
-        .buttonStyle(.bouncyIcon)
-        .onHover { hover = $0 }
-    }
-}
-
 private struct ActivityChipView: View {
     let chip: ActivityChip
     let onTap: () -> Void
