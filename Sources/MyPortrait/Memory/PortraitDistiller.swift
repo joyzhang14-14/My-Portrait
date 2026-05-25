@@ -69,6 +69,12 @@ final class PortraitDistiller {
 
     /// Run a full distillation pass across all 9 categories.
     func distill(progress: ((Progress) -> Void)? = nil) async throws -> Result {
+        let napGuard = AppNapGuard.acquire(reason: "Portrait distillation")
+        defer { napGuard.release() }
+        return try await distillImpl(progress: progress)
+    }
+
+    private func distillImpl(progress: ((Progress) -> Void)?) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
         let start = Date()
 

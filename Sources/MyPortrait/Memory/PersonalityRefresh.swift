@@ -51,6 +51,12 @@ final class PersonalityRefresh {
     }
 
     func refresh(day: Date, writeDailySnapshot: Bool = true) async throws -> Report {
+        let napGuard = AppNapGuard.acquire(reason: "Personality refresh")
+        defer { napGuard.release() }
+        return try await refreshImpl(day: day, writeDailySnapshot: writeDailySnapshot)
+    }
+
+    private func refreshImpl(day: Date, writeDailySnapshot: Bool) async throws -> Report {
 
         // ── 1) events 源(weight > threshold) ──────────────────────────
         let allEvents = await PersonalityAgent.readEvents(for: day)

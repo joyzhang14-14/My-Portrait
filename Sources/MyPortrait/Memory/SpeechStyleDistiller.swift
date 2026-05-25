@@ -71,6 +71,12 @@ final class SpeechStyleDistiller {
     // MARK: - 共用核心
 
     private func runCore(mode: SpeechStyleMode) async throws -> SpeechStyleRunSummary {
+        let napGuard = AppNapGuard.acquire(reason: "Speech style distillation")
+        defer { napGuard.release() }
+        return try await runCoreImpl(mode: mode)
+    }
+
+    private func runCoreImpl(mode: SpeechStyleMode) async throws -> SpeechStyleRunSummary {
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
         try store.insertRun(runId: runId, mode: mode, startedAt: startedAt)

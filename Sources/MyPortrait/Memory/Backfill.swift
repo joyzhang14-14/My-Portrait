@@ -50,6 +50,18 @@ enum Backfill {
         onlyDay: Date? = nil,
         progress: ((Progress) -> Void)? = nil
     ) async throws -> Result {
+        let napGuard = AppNapGuard.acquire(reason: "Backfill / event clustering")
+        defer { napGuard.release() }
+        return try await runImpl(
+            daysBack: daysBack, activeWindowDays: activeWindowDays,
+            onlyDay: onlyDay, progress: progress
+        )
+    }
+
+    private static func runImpl(
+        daysBack: Int, activeWindowDays: Int, onlyDay: Date?,
+        progress: ((Progress) -> Void)?
+    ) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
 
         let db = TimelineDB()

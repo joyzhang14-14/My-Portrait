@@ -109,6 +109,9 @@ final class WhisperKitWrapper: @unchecked Sendable {
         try await ensurePipe()
         guard Self.rms(samples) >= Self.minRMS else { return "" }   // RMS 门限走原始音频
         let processed = AudioPreprocessor.process(samples, filterMusic: filterMusic)
+        // App Nap 防护:后台跑 30s 段在 throttle 下能拖到分钟级。
+        let napGuard = AppNapGuard.acquire(reason: "Whisper transcription")
+        defer { napGuard.release() }
         let results = try await pipe!.transcribe(
             audioArray: processed,
             decodeOptions: decodeOptions(language: language, promptTokens: promptTokens(for: vocabulary))

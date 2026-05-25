@@ -106,7 +106,10 @@ final class WritingCaptureWorker {
             )
         }.value
 
+        let napGuard = AppNapGuard.acquire(reason: "Writing capture day run")
+        defer { napGuard.release() }
         do {
+            // App Nap 防护:Pass 1 + Pass 2 fanout 长任务,后台跑能拖到 10x。
             let summary = try await runDayCore(date: date, runId: runId)
             return summary
         } catch {
@@ -338,7 +341,10 @@ final class WritingCaptureWorker {
             )
         }.value
 
+        let napGuard = AppNapGuard.acquire(reason: "Writing capture backlog")
+        defer { napGuard.release() }
         do {
+            // App Nap 防护:backlog 跑全历史时间窗,LLM fanout 可能跑几分钟。
             let summary = try await runBacklogCore(
                 runId: runId, startMs: startMs, endMs: endMs,
                 includeAxText: includeAxText

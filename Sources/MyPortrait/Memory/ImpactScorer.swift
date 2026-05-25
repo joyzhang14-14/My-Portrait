@@ -74,6 +74,14 @@ final class ImpactScorer {
         root: URL = Storage.eventsDir,
         progress: ((Progress) -> Void)? = nil
     ) async throws -> Result {
+        let napGuard = AppNapGuard.acquire(reason: "Impact rescoring")
+        defer { napGuard.release() }
+        return try await rescoreAllImpl(root: root, progress: progress)
+    }
+
+    private func rescoreAllImpl(
+        root: URL, progress: ((Progress) -> Void)?
+    ) async throws -> Result {
         let start = Date()
 
         // Collect every (url, file) under `root` that is NOT archived.
