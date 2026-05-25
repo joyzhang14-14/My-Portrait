@@ -81,7 +81,6 @@ struct PersonalInfoView: View {
                                 description: "YYYY-MM-DD. Used as-is.",
                                 icon: "calendar") {
                         textField(\.personalInfo.birthDate, placeholder: "1990-01-31")
-                            .frame(width: 130)
                     }
                 }
 
