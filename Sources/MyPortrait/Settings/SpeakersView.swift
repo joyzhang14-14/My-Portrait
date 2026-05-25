@@ -572,7 +572,7 @@ private struct StatPill: View {
 
 /// 声纹训练卡片。复刻 screenpipe 的格式：填名字 → Start training → 30s 倒计时
 /// 期间正常说话 → 后台把那段时间窗的麦克风声纹簇命名成你。
-private struct VoiceTrainingCard: View {
+struct VoiceTrainingCard: View {
     let existingNames: [String]
     let onStart: () -> Void
 
@@ -706,7 +706,7 @@ private struct VoiceTrainingCard: View {
 }
 
 /// 30 秒倒计时对话框。期间用户照着 passage 朗读，常驻采集在录音。
-private struct VoiceTrainingSheet: View {
+struct VoiceTrainingSheet: View {
     let onFinish: () -> Void
     let onCancel: () -> Void
 

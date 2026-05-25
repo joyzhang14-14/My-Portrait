@@ -23,7 +23,7 @@ struct OnboardingView: View {
     var onFinish: () -> Void
 
     @State private var step: Int = 0
-    private let totalSteps = 7
+    private let totalSteps = 8
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,6 +64,7 @@ struct OnboardingView: View {
         case 3: ConnectAIStep()
         case 4: MemoryProviderStep()
         case 5: SchedulerStep()
+        case 6: SpeakerTrainingStep()
         default: FinishStep()
         }
     }
@@ -841,7 +842,55 @@ private struct SchedulerStep: View {
     }
 }
 
-// MARK: - Step 7: Finish
+// MARK: - Step 7: Speaker training
+
+/// 让用户念一段 ~30s 的 passage,把麦克风听到的声纹打成「就是这位用户」的
+/// label。复用 Settings → Speakers 里现有的 VoiceTrainingCard / Sheet —
+/// 不重写,也不接首启自动跑(等 onboarding 整体接首启再说)。
+private struct SpeakerTrainingStep: View {
+    @State private var showCountdown = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Train your voice (optional)")
+                    .font(.system(size: 24, weight: .semibold))
+                Text("My Portrait separates speakers by voiceprint. If you read a short passage now, future recordings can attribute lines to \"you\" instead of \"unknown cluster #3\". You can do this any time later from Settings → Speakers.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
+
+                // 复用 Settings → Speakers 里的 card —— 它已经处理好 audio /
+                // speakerId 开关检查、name 输入框、状态 line。existingNames 传
+                // 空,onboarding 期间几乎没存量数据,suggestion 用不上。
+                VoiceTrainingCard(
+                    existingNames: [],
+                    onStart: { showCountdown = true }
+                )
+
+                Color.clear.frame(height: 8)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .sheet(isPresented: $showCountdown) {
+            VoiceTrainingSheet(
+                onFinish: {
+                    showCountdown = false
+                    VoiceTrainer.shared.assign(
+                        name: ConfigStore.shared.current.capture.audio.userName
+                    )
+                },
+                onCancel: { showCountdown = false }
+            )
+        }
+    }
+}
+
+// MARK: - Step 8: Finish
 
 private struct FinishStep: View {
     var body: some View {
