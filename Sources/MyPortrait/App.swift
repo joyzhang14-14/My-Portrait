@@ -302,6 +302,15 @@ struct MyPortraitApp: App {
         if let idx = args.firstIndex(of: "--speech-style-reject"), idx + 1 < args.count {
             SpeechStyleCLI.reject(runId: args[idx + 1])
         }
+        // 一次性触发 PortraitWeight.refreshDistillCategories() —— 不调 LLM,
+        // 只按当前公式重算 social/background/experiences/interests/skills/
+        // emotions 下所有 .md 的 weight。speech_style 顺手刷一遍。
+        if args.contains("--portrait-weight-refresh") {
+            PortraitWeight.refreshDistillCategories()
+            PortraitWeight.refreshSpeechStyle()
+            print("[portrait-weight] refreshed distill categories + speech_style")
+            exit(0)
+        }
         AppKeyboard.install()
     }
 
