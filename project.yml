@@ -97,8 +97,7 @@ targets:
         SUFeedURL: https://joyzhang14-14.github.io/My-Portrait/appcast.xml
         # EdDSA 公钥(generate_keys 产物的 public key 部分)。私钥进 keychain
         # 不进仓库;sign_update 时 Sparkle 自己从 keychain 取。
-        # ⚠️ 第一次发布前要把 PLACEHOLDER 换成真公钥(`./scripts/sparkle/generate-keys.sh`)。
-        SUPublicEDKey: PLACEHOLDER_RUN_generate-keys.sh
+        SUPublicEDKey: r40y799hLosIZZpq47T953f24ElEj5ou0BEdPN0lMCM=
         # 跳过用户手动「Check for Updates」对话框,直接弹更新提示。
         SUEnableAutomaticChecks: true
     settings:
