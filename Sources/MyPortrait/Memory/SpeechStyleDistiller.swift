@@ -29,6 +29,11 @@ final class SpeechStyleDistiller {
         return 600
     }()
 
+    /// weight 半衰期(天)。τ = halfLifeDays / ln(2),用于指数衰减:
+    /// weight = ref_count × exp(-Δt / τ)
+    /// 30 天 = 一个月没新 record 引用,权重砍半。
+    nonisolated static let weightHalfLifeDays: Double = 30.0
+
     let store: SpeechStyleStore
     let agentProvider: () -> SpeechStyleAgent
     let batchCap: Int
@@ -124,8 +129,9 @@ final class SpeechStyleDistiller {
                 )
 
             case .auto:
-                // 直接落盘 + 标 records completed。
+                // 直接落盘 + 标 records completed + refresh 全量 weight。
                 Self.applyDrafts(out.drafts)
+                Self.refreshAllWeights()
                 try store.markRecordsProcessed(ids: recordIds, at: nowMs)
                 try store.updateRun(
                     runId: runId, status: .autoCommitted,
@@ -169,6 +175,7 @@ final class SpeechStyleDistiller {
             )
         }
         Self.applyDrafts(drafts)
+        Self.refreshAllWeights()
         // 标 records completed —— union 所有 source_record_ids
         let allIds = Array(Set(staged.flatMap { $0.sourceRecordIds }))
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -236,7 +243,7 @@ final class SpeechStyleDistiller {
             category: "speech_style",
             memberFrameIds: []
         )
-        file.weight = 1.0
+        file.weight = computeWeight(refCount: draft.sourceRecordIds.count, lastModified: now, now: now)
         file.mergeCount = 1
         file.lastModified = now
         do { try PortraitFileIO.write(file, to: url) }
@@ -263,7 +270,9 @@ final class SpeechStyleDistiller {
             file.body = renderBody(title: draft.title, body: draft.body, sourceIds: merged)
             file.recordOccurrence(on: Date())
             file.mergeCount = (file.mergeCount ?? 1) + 1
-            file.lastModified = Date()
+            let now = Date()
+            file.lastModified = now
+            file.weight = computeWeight(refCount: merged.count, lastModified: now, now: now)
             try PortraitFileIO.write(file, to: url)
         } catch {
             ssLog.error("writeUpdate failed for \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -278,6 +287,35 @@ final class SpeechStyleDistiller {
             out += "\n\n**Derived from writing records:** \(links)"
         }
         return out
+    }
+
+    /// 指数衰减 weight。Δt 用天数。lastModified 在未来(测试 / 时钟漂)按 0 处理。
+    nonisolated static func computeWeight(refCount: Int, lastModified: Date, now: Date) -> Double {
+        let count = Double(max(0, refCount))
+        let dtDays = max(0.0, now.timeIntervalSince(lastModified) / 86_400.0)
+        let tau = weightHalfLifeDays / log(2.0)
+        return count * exp(-dtDays / tau)
+    }
+
+    /// 对 portrait/speech_style/ 下所有 .md 重算 weight。每次 run(manual /
+    /// auto / approve 落盘后)调一次。这一步**只动 weight + lastModified 不变**,
+    /// 让没被本轮 update 的 entry 也随时间淡出。
+    nonisolated static func refreshAllWeights() {
+        let dir = PortraitPaths.categoryDir("speech_style")
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        let now = Date()
+        for name in items where name.hasSuffix(".md") && name != "INDEX.md" {
+            let url = dir.appendingPathComponent(name)
+            guard var file = try? PortraitFileIO.read(from: url) else { continue }
+            let refCount = extractDerivedIds(from: file.body).count
+            let anchor = file.lastModified ?? file.created
+            let newWeight = computeWeight(refCount: refCount, lastModified: anchor, now: now)
+            // 浮点容差 1e-6,避免无变化文件被反复改写(影响 mtime / git diff)
+            if abs(file.weight - newWeight) < 1e-6 { continue }
+            file.weight = newWeight
+            try? PortraitFileIO.write(file, to: url)
+        }
     }
 
     /// 从 body 抽出 `[[wr:<id>]]` 形态的引用 —— update 合并溯源用。
