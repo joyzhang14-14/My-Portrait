@@ -76,5 +76,13 @@ enum Storage {
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
+        // Spotlight 排除标记 —— Apple 文档:目录根放个空的 `.metadata_never_index`
+        // 文件,Spotlight 跳过整目录。`~/.portrait` 堆 GB 级 OCR 文本 + audio +
+        // 帧图,被 mdworker 全文索引会持续烧 CPU / 硬盘 I/O。
+        // 借鉴 upstream screenpipe commit 6bed20eb9。idempotent。
+        let marker = rootURL.appendingPathComponent(".metadata_never_index")
+        if !fm.fileExists(atPath: marker.path) {
+            fm.createFile(atPath: marker.path, contents: nil)
+        }
     }
 }

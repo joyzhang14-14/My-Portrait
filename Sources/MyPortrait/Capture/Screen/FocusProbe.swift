@@ -275,6 +275,20 @@ actor FocusProbe {
 
         if charCount > maxChars { return }
 
+        // 进入 AXWebArea(Electron 嵌入浏览器 / Safari 等)边界时,把 child
+        // 的 depth 重置 0 —— 让 web 子树能拿到完整 maxDepth 走 budget。
+        // 否则 VS Code / Discord / Slack 的 web 视图在 depth=1 就被截断,
+        // 拿不到终端 / 聊天内容。安全网仍是 axMaxElements + axWalkBudgetNs。
+        // 借鉴 upstream screenpipe commit 2b06b643d。
+        let recurseDepth: Int = {
+            var roleRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
+               let role = roleRef as? String, role == "AXWebArea" {
+                return 0
+            }
+            return depth + 1
+        }()
+
         // 递归 children。
         var childrenRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
@@ -283,7 +297,7 @@ actor FocusProbe {
                 if charCount > maxChars || elemCount > maxElements { return }
                 if DispatchTime.now().uptimeNanoseconds > deadlineNs { return }
                 walkAXText(
-                    element: child, depth: depth + 1, maxDepth: maxDepth,
+                    element: child, depth: recurseDepth, maxDepth: maxDepth,
                     maxChars: maxChars, maxElements: maxElements,
                     deadlineNs: deadlineNs,
                     pieces: &pieces, charCount: &charCount, elemCount: &elemCount
