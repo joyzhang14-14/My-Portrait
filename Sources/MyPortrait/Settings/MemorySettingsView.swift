@@ -6,6 +6,7 @@ import SwiftUI
 /// archive run.
 struct MemorySettingsView: View {
     private let cfg = ConfigStore.shared
+    @Environment(AppState.self) private var appState
 
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
@@ -952,9 +953,14 @@ struct MemorySettingsView: View {
     /// 完全没勾过 = 走 provider 全量(向后兼容)。
     private var providerSection: some View {
         let aiCfg = cfg.current.aiModels
-        // Provider 列表:过掉 AI Models 那边 disable 的(按 integrationId 比对)。
+        // Provider 列表:要同时满足
+        //   1) Connections 里已连上(appState.connectedIds 有 integrationId)
+        //   2) AI Models 那边没被 toggle off(disabledProviderIds 不含)
+        // 跟 Settings → AI Models 用同一套谓词,避免出现「没连接的 provider
+        // 也能选中给 memory pipeline 用」。
         let availableProviders = Provider.allCases.filter {
-            !aiCfg.disabledProviderIds.contains($0.integrationId)
+            appState.isConnected($0.integrationId)
+            && !aiCfg.disabledProviderIds.contains($0.integrationId)
         }
         let providerId = cfg.current.memory.providerId
         let selectedProvider = Provider(rawValue: providerId) ?? .chatgpt
