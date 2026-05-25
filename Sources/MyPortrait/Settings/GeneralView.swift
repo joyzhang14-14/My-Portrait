@@ -4,6 +4,8 @@ struct GeneralSettingsView: View {
     @State private var config = ConfigStore.shared
     @State private var clearingCache = false
     @State private var scanResults: ScanResults? = nil
+    /// 调试入口 —— 触发后弹出独立的 onboarding sheet。等流程跑顺再切到首启自动弹。
+    @State private var showOnboarding: Bool = false
 
     var body: some View {
         SettingsPage("General", subtitle: "Startup and updates") {
@@ -54,6 +56,17 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            // 调试用 —— onboarding 还没接首启自动弹,先靠这个手动唤起。
+            SettingsCard(title: "Onboarding (debug)",
+                         footnote: "Preview the first-launch onboarding flow. Not yet wired to auto-launch — this button is the only entry point while we iterate.") {
+                SettingsRow("Show onboarding",
+                            description: "Open the welcome / permissions / personal info / connect flow as a sheet.",
+                            icon: "sparkles") {
+                    Button("Show") { showOnboarding = true }
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+
             SettingsCard(title: "Maintenance") {
                 SettingsRow("Clear cache",
                             description: "Remove AI agent cache, old logs, and recovery artifacts.",
@@ -92,6 +105,9 @@ struct GeneralSettingsView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                 }
             }
+        }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingView { showOnboarding = false }
         }
     }
 
