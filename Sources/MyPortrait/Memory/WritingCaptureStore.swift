@@ -94,6 +94,28 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// 把所有 status='processing' 的 run 标 failed —— 给 Stop 按钮 / 启动恢复用。
+    /// 没 Stop / 进程崩了之后留下来的僵尸 'processing' 行会让 runBacklog
+    /// 拒绝再跑("Backlog run already in progress")。
+    @discardableResult
+    func markStuckProcessingAsFailed(message: String) throws -> Int {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return try dbPool.write { db in
+            try db.execute(sql: """
+                UPDATE writing_capture_runs
+                SET status        = :status,
+                    completed_at  = :now,
+                    error_message = :msg
+                WHERE status = 'processing'
+                """,
+                arguments: [
+                    "status": WritingCaptureRunStatus.failed.rawValue,
+                    "now": now, "msg": message
+                ])
+            return db.changesCount
+        }
+    }
+
     func fetchRun(date: String) throws -> WritingCaptureRun? {
         try dbPool.read { db in
             try WritingCaptureRun.fetchOne(

@@ -527,7 +527,12 @@ struct MemorySettingsView: View {
                         writingCaptureTask?.cancel()
                         writingCaptureTask = nil
                         writingCaptureRunning = false
-                        writingCaptureStatus = "Stopped — killed \(n) LLM process(es)."
+                        // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
+                        // runBacklog 会报 "Backlog run already in progress" 拒绝。
+                        let zombies = (try? WritingCaptureWorker.shared?.store
+                            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
+                        writingCaptureStatus = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+                        refreshWritingCapture()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)

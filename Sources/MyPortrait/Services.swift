@@ -131,6 +131,13 @@ final class Services {
         let writingStore = WritingCaptureStore(dbPool: dbImpl.dbPool)
         let writingWorker = WritingCaptureWorker(store: writingStore)
         WritingCaptureWorker.shared = writingWorker
+        // 启动时清残留 zombie processing 行 —— 上次进程崩 / 用户硬退之后
+        // 没改回 final status 的 run。否则下次 runBacklog 报 "already in progress"。
+        if let zombies = try? writingStore.markStuckProcessingAsFailed(
+            message: "process exited before run completed"
+        ), zombies > 0 {
+            print("[writing-capture] startup recovery: marked \(zombies) zombie run(s) as failed")
+        }
 
         // speech_style 提炼链路(独立于写作采集 + memory pipeline)。也共用
         // 同一 DatabasePool。注册到 SpeechStyleDistiller.shared 给 UI / scheduler 用。
