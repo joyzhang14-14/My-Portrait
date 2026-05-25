@@ -1,11 +1,16 @@
 import Foundation
 import GRDB
 
-/// `edit_log` 里的一条流水。commit = 写的字 / delete = 删的字 / submit = 发出的消息。
+/// `edit_log` 里的一条流水。
+/// kind:
+///   - "commit" = 用户打字新增段
+///   - "delete" = 删的字
+///   - "submit" = 回车发出的消息(text = 整条消息)
+///   - "paste"  = 粘贴 / 程序输出 / burst(开关 `typing_record_paste_events` 开时才记)
 /// `ts` 是 UTC 毫秒（绝对时间）。
 struct EditEntry: Codable, Equatable, Sendable {
     var ts: Int64
-    var kind: String   // "commit" | "delete" | "submit"
+    var kind: String
     var text: String
 }
 

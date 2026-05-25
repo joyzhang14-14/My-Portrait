@@ -215,12 +215,23 @@ final class TypingRecordWriter {
         // 右键 / 拖拽等非 ⌘V 粘贴。
         let noise = windowNoise || pasteboard.looksLikePaste(added)
         let nowMs = Self.nowMs()
+        let recordPasteEvents = ConfigStore.shared.capture.typingRecordPasteEvents
         if noise {
-            // burst / 粘贴 / 程序输出 —— 新增段进黑名单，flush 时从 text 减掉，
-            // 不进 editLog。
+            // burst / 粘贴 / 程序输出 —— 默认进 editLog 标 kind="paste"(保留时间轴,
+            // 让 LLM Pass 2 自己判断是否当用户原创);关掉开关则走旧行为(进黑名单
+            // 不进 editLog,flush 时从 text 减掉)。
             if !added.isEmpty {
-                blacklist[key, default: [:]][added] = CACurrentMediaTime()
-                onDevLog?("noise→blacklist bundle=\(rec.bundleId) \(added.count) chars")
+                if recordPasteEvents {
+                    rec.editLog.append(EditEntry(ts: nowMs, kind: "paste", text: added))
+                } else {
+                    blacklist[key, default: [:]][added] = CACurrentMediaTime()
+                    onDevLog?("noise→blacklist bundle=\(rec.bundleId) \(added.count) chars")
+                }
+            }
+            // delete 段在 noise 窗口里也记一下(只在开关开时),否则 select-then-paste
+            // 这种"替换"操作会丢失"先删了什么"的信息
+            if recordPasteEvents, !deleted.isEmpty {
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
             }
         } else {
             if !deleted.isEmpty {

@@ -411,6 +411,10 @@ struct RecordingConfig: Codable, Equatable {
     var typingSubmitWindowMs: Int = 1000
     /// 剪贴板内容短于这么多字不参与粘贴匹配 —— 避免「打的字恰好等于剪贴板」误判。
     var typingPasteMinChars: Int = 6
+    /// 打字采集是否把粘贴(⌘V / 程序粘贴 / 剪贴板匹配)记进 editLog(kind="paste")。
+    /// 默认 true —— 用户工作流常粘贴大段(笔记 / Claude Desktop),不记会丢内容。
+    /// false → 旧行为:粘贴段进黑名单不进 editLog。
+    var typingRecordPasteEvents: Bool = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case audio, screen, system
@@ -420,6 +424,7 @@ struct RecordingConfig: Codable, Equatable {
         case typingFlushIdleSec   = "typing_flush_idle_sec"
         case typingSubmitWindowMs = "typing_submit_window_ms"
         case typingPasteMinChars  = "typing_paste_min_chars"
+        case typingRecordPasteEvents = "typing_record_paste_events"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -433,6 +438,7 @@ struct RecordingConfig: Codable, Equatable {
         typingFlushIdleSec   = c.dflt(Int.self, .typingFlushIdleSec, typingFlushIdleSec)
         typingSubmitWindowMs = c.dflt(Int.self, .typingSubmitWindowMs, typingSubmitWindowMs)
         typingPasteMinChars  = c.dflt(Int.self, .typingPasteMinChars, typingPasteMinChars)
+        typingRecordPasteEvents = c.dflt(Bool.self, .typingRecordPasteEvents, typingRecordPasteEvents)
     }
 }
 

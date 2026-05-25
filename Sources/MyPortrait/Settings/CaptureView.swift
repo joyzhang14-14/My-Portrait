@@ -443,6 +443,13 @@ struct TypingCaptureSettingsView: View {
                             .foregroundStyle(.white.opacity(0.55))
                     }
                 }
+                SettingsDivider()
+                SettingsRow("Record paste events",
+                            description: "On: pastes (⌘V / clipboard match / burst) are recorded as 'paste' entries in edit log — LLM decides what counts as user input. Off: pastes are stripped from the record.",
+                            icon: "doc.on.doc") {
+                    Toggle("", isOn: config.binding(\.capture.typingRecordPasteEvents))
+                        .labelsHidden().toggleStyle(.switch)
+                }
             }
         }
     }
