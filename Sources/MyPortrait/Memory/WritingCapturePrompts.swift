@@ -132,12 +132,14 @@ enum WritingCapturePrompts {
           is on screen including content the user is just reading.
 
       keystroke_log[*] is the raw stream backing keystroke_text:
-        [{ts, char, bs, mods}]. Use it to spot timing patterns / shortcuts.
+        [{ts, char, bs, mods, shortcut}]. Use it to spot timing patterns / shortcuts.
         - `mods` = "cmd" / "cmd+shift" / etc.; nil = no modifier.
-          {char:"v", mods:"cmd"}  = ⌘V (Paste)
-          {char:"z", mods:"cmd"}  = ⌘Z (Undo)
-          {char:"x", mods:"cmd"}  = ⌘X (Cut)
-          Shortcut presses are NOT user "typing" the literal letter.
+        - `shortcut` is pre-derived from (char, mods):
+          "paste" = ⌘V       "cut"  = ⌘X
+          "copy"  = ⌘C       "undo" = ⌘Z       "redo" = ⌘⇧Z
+        - Use `shortcut` directly for self-paste vs external-paste judgement
+          per §3a; don't re-derive from char+mods.
+        - Shortcut presses are NOT user "typing" the literal letter.
 
     TASK
 

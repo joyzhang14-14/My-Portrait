@@ -545,17 +545,37 @@ private struct TypingEventPayload: Encodable {
 /// 一条 keystroke 给 LLM 看的 shape。
 /// `mods` 是修饰键人类可读字符串("cmd" / "cmd+shift" / nil)—— DB 里是 packed
 /// Int(见 KeystrokeEntry.modifiersString),给 LLM 时翻译成字符串可读。
+/// `shortcut` 派生自 (char, modifiers):⌘V/⌘X/⌘C/⌘Z/⌘⇧Z → paste/cut/copy/undo/redo。
+/// 历史 keystroke_log 也能用,无需 DB 改动。
 private struct KeystrokePayload: Encodable {
     let ts: Int64
     let char: String?
     let bs: Bool
     let mods: String?
+    let shortcut: String?
 
     init(_ k: KeystrokeEntry) {
         self.ts = k.tsMs
         self.char = k.char
         self.bs = k.isBackspace != 0
         self.mods = KeystrokeEntry.modifiersString(k.modifiers)
+        self.shortcut = Self.deriveShortcut(char: k.char, modifiers: k.modifiers)
+    }
+
+    /// (char, modifiers) → shortcut 名。char 大小写无关。
+    /// modifiers: 0x01=cmd, 0x08=shift。
+    static func deriveShortcut(char: String?, modifiers: Int) -> String? {
+        guard let c = char?.lowercased(), modifiers & 0x01 != 0 else { return nil }
+        let hasShift = modifiers & 0x08 != 0
+        // 排除 cmd+opt / cmd+ctrl 复合(非 std shortcut)
+        if modifiers & 0x02 != 0 || modifiers & 0x04 != 0 { return nil }
+        switch c {
+        case "v": return "paste"
+        case "x": return "cut"
+        case "c": return "copy"
+        case "z": return hasShift ? "redo" : "undo"
+        default:  return nil
+        }
     }
 }
 
