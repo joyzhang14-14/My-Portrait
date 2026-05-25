@@ -2,15 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Developer ID Application 签名,用于 GitHub release 公开分发(不进 App Store) -->
+    <!-- 没付 $99/年 Developer Program 拿不到 "Developer ID Application" 证书。
+         用 "development" method —— 让 Xcode 选 Apple Development 证书。
+         代价:用户下载 .dmg 后 Gatekeeper 第一次会拦截"无法验证开发者",
+         得右键 Open 一次绕过。-->
     <key>method</key>
-    <string>developer-id</string>
+    <string>development</string>
     <key>teamID</key>
     <string>VYHNX2Y2AL</string>
-    <!-- 走 manual signing,xcodebuild 自动选 Developer ID Application 证书 -->
     <key>signingStyle</key>
-    <string>manual</string>
-    <!-- 不要 Xcode automatic 上传到 Apple -->
+    <string>automatic</string>
     <key>destination</key>
     <string>export</string>
 </dict>

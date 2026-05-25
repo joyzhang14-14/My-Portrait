@@ -38,15 +38,13 @@ hdiutil create \
     -format UDZO \
     "$DMG_PATH"
 
-# 3) DMG 也要签名(虽然 Apple 没强制,但用户从 Gatekeeper 看到「来自已识别开发者」体验更好)
-echo "→ codesign dmg"
-codesign --force --sign "Developer ID Application: Zhuoyi Zhang (VYHNX2Y2AL)" \
-    --timestamp \
+# 3) DMG 用 Apple Development 证书签名(没付 Developer Program 年费,拿不到
+#    "Developer ID Application" 证书,先用免费的 "Apple Development" 签)。
+#    --timestamp 加不上(timestamp 服务器只认 Developer ID 证书),省掉。
+#    用户安装时 Gatekeeper 会拦"无法验证开发者",得右键 Open 一次。
+echo "→ codesign dmg (Apple Development cert, no notarize)"
+codesign --force --sign "Apple Development: joyzhang_14@163.com (QCC4H9ZG7R)" \
     "$DMG_PATH"
-
-# 4) 也可以选择性 notarize DMG(单独 notarize 一次)
-# 推荐:不动 dmg notarize,因为 .app 里的 staple 已生效;dmg 是个壳。
-# 如果用户不接 internet 装 dmg,Gatekeeper 仍能从 stapled .app 验。
 
 echo ""
 echo "=================================================="
