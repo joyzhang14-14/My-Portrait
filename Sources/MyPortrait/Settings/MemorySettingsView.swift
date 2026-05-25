@@ -618,7 +618,7 @@ struct MemorySettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Distill speech style")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Reads writing_records (approved) marked as unprocessed, extracts speech-style facets (register, voice, edit rhythm) into portrait/speech_style/. Up to \(SpeechStyleDistiller.defaultBatchCap) records per run · \(speechStyleUnprocessed) unprocessed remaining. Manual run stages drafts; auto schedule writes directly.")
+                    Text("**Downstream of writing capture** — reads approved writing_records marked as unprocessed and extracts speech-style facets (register, voice, edit rhythm) into portrait/speech_style/. Up to \(SpeechStyleDistiller.defaultBatchCap) records per run · \(speechStyleUnprocessed) unprocessed remaining. Manual run stages drafts; auto schedule writes directly.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -629,7 +629,9 @@ struct MemorySettingsView: View {
                     if SpeechStyleDistiller.shared == nil { return "Speech style distiller is not available." }
                     if speechStyleRunning { return "Speech style is already running." }
                     if ssHasPending { return "Pending review — Approve / Reject first." }
-                    if speechStyleUnprocessed == 0 { return "No unprocessed writing_records." }
+                    if speechStyleUnprocessed == 0 {
+                        return "Nothing to distill — run writing capture first to produce writing_records."
+                    }
                     return nil
                 }()
                 Button(speechStyleRunning ? "Running…" : "Run") {

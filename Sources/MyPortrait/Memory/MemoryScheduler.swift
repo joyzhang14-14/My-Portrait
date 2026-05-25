@@ -187,10 +187,19 @@ final class MemoryScheduler {
     }
 
     /// 跑 speech_style auto —— 跟 writing capture 同模式:失败 swallow + log,
-    /// 不阻塞下一次 tick。
+    /// 不阻塞下一次 tick。dependency gate:speech_style 是 writing_capture 的
+    /// 下游,没新 writing_records 可消费就早退,避免空跑。
     func runSpeechStyleJob() async {
         guard let distiller = SpeechStyleDistiller.shared else {
             schedLog.warning("speechStyle tick: distiller not initialized — skip")
+            return
+        }
+        // dependency gate:0 unprocessed → 跳本次 tick,不调 distiller。
+        // distiller.runAuto 内部也有同样的 gate(双层兜底),但这里先查能省 token
+        // 的 nap-guard / refresh-weights 一连串开销。
+        let unprocessed = (try? distiller.store.unprocessedCount()) ?? 0
+        guard unprocessed > 0 else {
+            schedLog.info("speechStyle tick: 0 unprocessed writing_records — skip (waiting for writing_capture)")
             return
         }
         do {

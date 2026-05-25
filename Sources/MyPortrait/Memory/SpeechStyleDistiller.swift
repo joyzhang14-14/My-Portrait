@@ -77,13 +77,28 @@ final class SpeechStyleDistiller {
     }
 
     private func runCoreImpl(mode: SpeechStyleMode) async throws -> SpeechStyleRunSummary {
+        // 入口先 refresh 一次 —— 即使本轮无新 record(short-circuit 提前返回)
+        // 也让现有 entry 按当前时间衰减一次。
+        Self.refreshAllWeights()
+
+        // **dependency gate**:speech_style 是 writing_capture 的下游 ——
+        // 没新 writing_records 可消费就别建 run 行 / 不调 LLM,直接返回 noop。
+        // 避免 0-record run 把 speech_style_runs 表灌满 + 避免 scheduler
+        // 每天定时跑出一堆空 auto_committed 记录。
+        let unprocessedCount = try store.unprocessedCount()
+        if unprocessedCount == 0 {
+            ssLog.info("runCore(\(mode.rawValue, privacy: .public)): 0 unprocessed records — noop, no run row created")
+            let status: SpeechStyleRunStatus = (mode == .auto) ? .autoCommitted : .approved
+            return SpeechStyleRunSummary(
+                runId: "", mode: mode, status: status,
+                recordsCount: 0, draftsCount: 0,
+                errorMessage: nil
+            )
+        }
+
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
         try store.insertRun(runId: runId, mode: mode, startedAt: startedAt)
-
-        // 入口先 refresh 一次 —— 即使本轮无新 record(short-circuit)也让
-        // 现有 entry 按当前时间衰减一次。
-        Self.refreshAllWeights()
 
         do {
             // 1. 拉一批未处理 records(截断到 batchCap)
@@ -92,7 +107,10 @@ final class SpeechStyleDistiller {
             }.value
 
             if records.isEmpty {
-                ssLog.info("runCore(\(mode.rawValue, privacy: .public)): no unprocessed records — noop")
+                // 理论不可能 —— 上面 unprocessedCount 刚查过 > 0。兜底防止竞态:
+                // 比如用户同时手动 reject 了某 run 但 records 标 completed
+                // 状态被另一进程改了。直接 noop 返回,不抛错。
+                ssLog.warning("runCore(\(mode.rawValue, privacy: .public)): empty after insertRun — race?")
                 let status: SpeechStyleRunStatus = (mode == .auto) ? .autoCommitted : .approved
                 try store.updateRun(
                     runId: runId, status: status,
