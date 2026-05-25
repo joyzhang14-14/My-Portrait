@@ -127,48 +127,50 @@ struct PersonalInfoView: View {
                     .padding(.vertical, 4)
             } else {
                 // 每条一行 + 删除按钮 —— 不限数量。
+                // 跟 SettingsRow 同款样式(icon 14pt / text 13pt / padding 10)
+                // 才能跟上面 Nationality / Date of birth 等行视觉对齐。
                 ForEach(Array(langs.enumerated()), id: \.offset) { idx, lang in
-                    HStack(spacing: 10) {
-                        Image(systemName: "character.bubble")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.50))
-                            .frame(width: 18)
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "character.bubble.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .frame(width: 22)
                         Text(lang)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.85))
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.92))
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button {
                             removeLanguage(at: idx)
                         } label: {
                             Image(systemName: "minus.circle.fill")
-                                .font(.system(size: 13))
+                                .font(.system(size: 14))
                                 .foregroundStyle(.red.opacity(0.85))
                         }
                         .buttonStyle(.plain)
                         .help("Remove \(lang)")
                     }
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 10)
                     if idx != langs.count - 1 { SettingsDivider() }
                 }
             }
 
             SettingsDivider()
-            HStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .frame(width: 18)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .frame(width: 22)
                 TextField("Add a language (e.g. English, 中文)", text: $newLanguage)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .onSubmit(addLanguage)
                 Button("Add") { addLanguage() }
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .disabled(newLanguage.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
         }
     }
 
