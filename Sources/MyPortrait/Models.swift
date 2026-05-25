@@ -303,15 +303,16 @@ enum IntegrationRegistry {
 
         // Productivity
         .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
-        .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  accent: Color(white: 0.95),                         signInMethod: .oauth,        category: .productivity),
+        // Notion 走 Internal Integration Token(纯 API key)—— 不走 OAuth,因为
+        // 原项目用的是「后端 proxy 转 client_secret」方案,My-Portrait 没那个
+        // 后端。NotionConfig 在 ConnectionCredentials.swift。
+        .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  accent: Color(white: 0.95),                         signInMethod: .apiKey,       category: .productivity),
         .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  iconSymbol: "envelope.fill", accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
 
         // Media / Calendar
-        .init(id: "spotify",            name: "Spotify",         bundleId: "com.spotify.client",                    letter: "♪",  accent: Color(red: 0.11, green: 0.72, blue: 0.33),  signInMethod: .oauth,        category: .media),
+        // Spotify / Google Calendar / Voice Memos / Apple Intelligence 暂时下线
+        //(原版要么不诚实地假绿点,要么 OAuth 没接)。等真要接的时候再放回。
         .init(id: "apple-calendar",     name: "Apple Calendar",  bundleId: "com.apple.iCal",                        letter: "📅", accent: Color(red: 0.93, green: 0.27, blue: 0.27),  signInMethod: .systemAccess, category: .media),
-        .init(id: "google-calendar",    name: "Google Calendar", bundleId: nil,                                     letter: "📆", accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .oauth,        category: .media),
-        .init(id: "voice-memos",        name: "Voice Memos",     bundleId: "com.apple.VoiceMemos",                  letter: "🎙", accent: Color(red: 0.93, green: 0.27, blue: 0.27),  signInMethod: .systemAccess, category: .media),
-        .init(id: "apple-intelligence", name: "Apple Intelligence", bundleId: nil,                                  letter: "✦",  accent: Color(red: 0.92, green: 0.42, blue: 0.66),  signInMethod: .systemAccess, category: .media)
     ]
 }
 
@@ -381,6 +382,18 @@ final class AppState {
                 connectedIds.insert(intId)
                 changed = true
             }
+        }
+
+        // Notion(不在 Provider.allCases 里):双向同步 NotionConfig.token
+        // 跟 connectedIds 的 "notion" 项。
+        let notionHasToken = NotionConfig.token != nil
+        if connectedIds.contains("notion"), !notionHasToken {
+            connectedIds.remove("notion")
+            changed = true
+        }
+        if notionHasToken, !connectedIds.contains("notion") {
+            connectedIds.insert("notion")
+            changed = true
         }
 
         // If activeAIId points at a connection we just dropped, fall back to

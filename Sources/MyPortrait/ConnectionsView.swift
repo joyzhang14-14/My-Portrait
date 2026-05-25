@@ -260,6 +260,8 @@ struct ConnectionsView: View {
             connectChatGPT(integration)
         } else if integration.id == "ollama" {
             connectOllama(integration)
+        } else if integration.id == "notion" {
+            connectNotion(integration)
         } else if integration.signInMethod == .apiKey {
             connectAPIKey(integration)
         } else if integration.signInMethod == .smtp {
@@ -289,6 +291,9 @@ struct ConnectionsView: View {
         if integration.id == "obsidian" {
             SecretStore.shared.delete(ObsidianConfig.vaultPathRef)
         }
+        if integration.id == "notion" {
+            NotionConfig.deleteToken()
+        }
         appState.toggleConnect(integration)
         // Re-write models.json without this provider so Pi stops listing it.
         try? PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
@@ -312,6 +317,60 @@ struct ConnectionsView: View {
             try PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
         } catch {
             loginError = error.localizedDescription
+        }
+    }
+
+    /// Notion Internal Integration Token 流:用户从 notion.so/profile/integrations
+    /// 拷的 `ntn_...` / `secret_...` token,粘进 apiKeyDraft 后调本函数。先用
+    /// `GET /v1/users/me` 校验 token + 列权限,通过才存 SecretStore + 亮绿点。
+    /// 校验失败不存,token 错的话用户当场看见 "Unauthorized" 而不是连完了后续静默失败。
+    private func connectNotion(_ integration: Integration) {
+        let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            loginError = "Paste your Notion integration token first (starts with `ntn_` or `secret_`)."
+            return
+        }
+        connecting = integration.id
+        Task { @MainActor in
+            defer { connecting = nil }
+            do {
+                try await verifyNotionToken(trimmed)
+                try NotionConfig.setToken(trimmed)
+                apiKeyDraft = ""
+                if !appState.isConnected(integration.id) {
+                    appState.toggleConnect(integration)
+                }
+            } catch {
+                loginError = error.localizedDescription
+            }
+        }
+    }
+
+    /// `GET /v1/users/me` —— Notion 文档里 token 自检的标准 endpoint。
+    /// 200 = ok,401 = token 错,其它 = 网络/服务异常。
+    private func verifyNotionToken(_ token: String) async throws {
+        var req = URLRequest(url: URL(string: "https://api.notion.com/v1/users/me")!)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("2022-06-28", forHTTPHeaderField: "Notion-Version")
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw NSError(domain: "Notion", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "No HTTP response from Notion."])
+        }
+        switch http.statusCode {
+        case 200..<300:
+            return
+        case 401:
+            throw NSError(domain: "Notion", code: 401, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Notion rejected the token (401 Unauthorized). Double-check the token from notion.so/profile/integrations."
+            ])
+        default:
+            throw NSError(domain: "Notion", code: http.statusCode, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Notion returned HTTP \(http.statusCode). Try again in a moment."
+            ])
         }
     }
 
@@ -575,13 +634,9 @@ struct ConnectionsView: View {
         case "deepseek":    return "DeepSeek API key. OpenAI-compatible endpoint, cheap pay-per-token."
         case "ollama":      return "Run open-source models on this Mac. Detects local Ollama install."
         case "obsidian":    return "Read & write your Obsidian vault as memory."
-        case "notion":      return "Import Notion pages as context."
+        case "notion":      return "Internal Integration Token. Create one at notion.so/profile/integrations, copy the `ntn_...` / `secret_...` token, paste below. Only pages you share with the integration will be visible."
         case "email-smtp":  return "Let cronJobs send email via your SMTP server. Credentials stay encrypted on this Mac."
-        case "spotify":     return "Track listening history as part of activity."
         case "apple-calendar":      return "Access your local Calendar.app events."
-        case "google-calendar":     return "OAuth into Google Calendar."
-        case "voice-memos":         return "Read Voice Memos.app recordings."
-        case "apple-intelligence":  return "On-device Apple Intelligence (macOS 26+, Apple Silicon)."
         default: return "Connect this integration to your AI."
         }
     }
