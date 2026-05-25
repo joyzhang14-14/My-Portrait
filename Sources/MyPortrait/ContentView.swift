@@ -9,6 +9,10 @@ struct ContentView: View {
     @State private var memoryScope: MemoryScope = .events
     @State private var cronJobSelection: UUID? = nil
     @State private var settingsSubsection: SettingsSubsection? = .app(.general)
+    /// 首启 onboarding 状态。绑定 ConfigStore.general.onboardingCompleted。
+    /// false → ContentView 起来后立刻弹 onboarding sheet 挡主 UI;
+    /// onFinish 把 flag 置 true → sheet 自动关。
+    @State private var configStore = ConfigStore.shared
 
     var body: some View {
         HStack(spacing: 0) {
@@ -37,6 +41,22 @@ struct ContentView: View {
         .environment(chat)
         .environment(chatStore)
         .environment(ConfigStore.shared)
+        // 首启:onboardingCompleted == false → sheet 自动弹,挡主 UI。
+        // OnboardingView.onFinish 把 flag 置 true,sheet 自动 dismiss。
+        // sheet 本身没 close 按钮(只有 footer 的 Back/Skip/Next/Finish),
+        // 用户没法绕过去;Esc 也压不开 modal sheet on macOS。
+        .sheet(isPresented: Binding(
+            get: { !configStore.current.general.onboardingCompleted },
+            set: { newVal in
+                if !newVal {
+                    configStore.mutate { $0.general.onboardingCompleted = true }
+                }
+            }
+        )) {
+            OnboardingView {
+                configStore.mutate { $0.general.onboardingCompleted = true }
+            }
+        }
         .onAppear {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in

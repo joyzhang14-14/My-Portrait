@@ -71,11 +71,13 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            // 调试用 —— onboarding 还没接首启自动弹,先靠这个手动唤起。
-            SettingsCard(title: "Onboarding (debug)",
-                         footnote: "Preview the first-launch onboarding flow. Not yet wired to auto-launch — this button is the only entry point while we iterate.") {
-                SettingsRow("Show onboarding",
-                            description: "Open the welcome / permissions / personal info / connect flow as a sheet.",
+            // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
+             // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
+             // 只是临时显示一次 sheet。
+            SettingsCard(title: "Onboarding",
+                         footnote: "Re-open the welcome / permissions / personal info / connect flow. Settings already entered (API keys, etc.) stay as-is — this doesn't reset anything.") {
+                SettingsRow("Replay onboarding",
+                            description: "Open the onboarding sheet again — useful to grant a permission you skipped, or change your AI provider.",
                             icon: "sparkles") {
                     Button("Show") { showOnboarding = true }
                         .font(.system(size: 12, weight: .medium))
