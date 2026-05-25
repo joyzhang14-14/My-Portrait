@@ -126,19 +126,11 @@ struct PersonalInfoView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 4)
             } else {
-                // 每条一行 + 删除按钮 —— 不限数量。
-                // 跟 SettingsRow 同款样式(icon 14pt / text 13pt / padding 10)
-                // 才能跟上面 Nationality / Date of birth 等行视觉对齐。
+                // 直接复用 SettingsRow,跟上面 First name / Nationality 等字段
+                // 用同一套排版,SwiftUI Text 对齐细节由组件负责,不再自己拼
+                // HStack(避免 SF Symbol 字形重心 + 单行 vs 双行的视觉错位)。
                 ForEach(Array(langs.enumerated()), id: \.offset) { idx, lang in
-                    HStack(alignment: .center, spacing: 12) {
-                        Image(systemName: "character.bubble.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.75))
-                            .frame(width: 22)
-                        Text(lang)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    SettingsRow(lang, icon: "character.bubble.fill") {
                         Button {
                             removeLanguage(at: idx)
                         } label: {
@@ -149,13 +141,15 @@ struct PersonalInfoView: View {
                         .buttonStyle(.plain)
                         .help("Remove \(lang)")
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
                     if idx != langs.count - 1 { SettingsDivider() }
                 }
             }
 
             SettingsDivider()
+            // Add 行不能复用 SettingsRow(它假设 title-on-left + control-on-right);
+            // 这里 TextField 要紧跟 icon 占据主区域。手写 HStack,padding 跟
+            // SettingsRow 完全一致(leading 14 / trailing 14 / vertical 10),
+            // 视觉跟上面 language 行对齐。
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "plus.circle")
                     .font(.system(size: 14))
@@ -169,7 +163,8 @@ struct PersonalInfoView: View {
                     .font(.system(size: 13, weight: .medium))
                     .disabled(newLanguage.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(.horizontal, 14)
+            .padding(.leading, 14)
+            .padding(.trailing, 14)
             .padding(.vertical, 10)
         }
     }
