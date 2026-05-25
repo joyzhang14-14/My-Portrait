@@ -178,10 +178,37 @@ enum WritingCapturePrompts {
        - Empty session (typing=0, OCR=0)
        - **External paste with no user editing** (see §3a — large paste of AI reply,
          web copy, etc. with no surrounding cut/typing pattern indicating it's the user's)
+       - **Pinyin / keystroke residue not composed into a real language** (see §3b)
        Use free-text reason describing why.
        DO NOT drop just because content is short — short messages are SIGNAL.
        DO NOT drop just because keystroke is missing — Chinese IME shows pinyin only,
          and OCR / typing_events.text are still valid sources when keystroke is sparse.
+
+    3b. LANGUAGE-COHERENCE FILTER (when `user_languages` is provided in group_meta)
+
+       `group_meta.user_languages` lists languages the user actually speaks/writes
+       (e.g. "Chinese, English"). Any candidate record's final `text` MUST be
+       readable in at least one of these languages — i.e. it should look like
+       words / phrases / sentences a literate speaker of that language would
+       recognize.
+
+       **Drop** as gibberish/residue when:
+       - text consists of obvious pinyin tokens that never composed into Chinese
+         (e.g. "ox1prompt1moban1diyici1ch v11 flash" — pinyin syllables with
+         IME selection digits "1", no actual Chinese characters)
+       - text is a sequence of single Latin letters / random chars with no
+         word-level structure (e.g. "Promoxm", "pro 2-tage1")
+       - text mixes language fragments incoherently AND keystroke_text shows it
+         was abandoned pinyin input (lots of <BS>, no Chinese commit)
+
+       **Keep** even if rough when:
+       - text is short but a real word in user's language ("Pro", "json", "OK")
+       - text is a deliberate code/identifier ("PipelineA-v2", "useState")
+       - text is in user's language with typos / informal style (real users typo)
+       - text mixes user's languages naturally ("用 ffmpeg 提取关键帧")
+
+       If `user_languages` is empty/missing, fall back to: accept anything that
+       looks like coherent text in any major language.
 
     3a. KEYSTROKE-EVENT TIMELINE (self-paste vs external paste)
 

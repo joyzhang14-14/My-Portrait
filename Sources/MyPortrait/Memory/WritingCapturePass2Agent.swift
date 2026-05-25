@@ -174,14 +174,16 @@ final class WritingCapturePass2Agent {
         groupApp: String,
         groupUrl: String?,
         rawSessions: [WritingCaptureRawSession],
-        includeAxText: Bool = true
+        includeAxText: Bool = true,
+        userLanguages: [String] = []
     ) async throws -> Output {
         let prompt = Self.buildPrompt(
             contextTimeline: contextTimeline,
             groupApp: groupApp,
             groupUrl: groupUrl,
             rawSessions: rawSessions,
-            includeAxText: includeAxText
+            includeAxText: includeAxText,
+            userLanguages: userLanguages
         )
 
         // 空 session 短路 —— 整天没 raw,直接返回空。
@@ -321,18 +323,23 @@ final class WritingCapturePass2Agent {
         groupApp: String,
         groupUrl: String?,
         rawSessions: [WritingCaptureRawSession],
-        includeAxText: Bool = true
+        includeAxText: Bool = true,
+        userLanguages: [String] = []
     ) -> String {
         let prepared = rawSessions.map {
             prepareSessionForPrompt($0, includeAxText: includeAxText)
         }.map {
             RawSessionPayload($0, includeAxText: includeAxText)
         }
+        // 用户填的语言塞进 meta;Pass 2 prompt 据此判 record.text 是不是
+        // 有意义文本(拼音残留 / 乱码 → discard)
+        let langsStr = userLanguages.isEmpty ? nil : userLanguages.joined(separator: ", ")
         let meta: [String: String?] = [
             "app": groupApp,
             "url": groupUrl,
             "session_count": "\(rawSessions.count)",
-            "ax_text_included": includeAxText ? "true" : "false"
+            "ax_text_included": includeAxText ? "true" : "false",
+            "user_languages": langsStr
         ]
         var lines: [String] = [WritingCapturePrompts.pass2Fusion]
         if !includeAxText {
