@@ -1560,11 +1560,9 @@ struct MemorySettingsView: View {
         )
     }
     private static let minuteSteps = [0, 15, 30, 45]
-    /// 24h hour → "12 AM" / "1 PM" 等显示。
+    /// 24h 显示("00"…"23")。用户在 issue 里要 24h,不要 AM/PM。
     private static func hourLabel(_ h: Int) -> String {
-        let ampm = h < 12 ? "AM" : "PM"
-        let h12 = h % 12 == 0 ? 12 : h % 12
-        return "\(h12) \(ampm)"
+        String(format: "%02d", h)
     }
 
     /// 星期选择：0=周日…6=周六。
