@@ -52,20 +52,18 @@ struct ConnectionsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
                 if showsHeader {
-                    // size + opacity 跟 SettingsPageTitle 对齐(其他 Settings
-                    // 页都走 SettingsPageTitle 是 26/0.96,这里之前钉死 24/
-                    // 0.95 比邻居小一号,用户复现"connections 比 general
-                    // 小")。ConnectionsView 自己嵌进 onboarding 时也复用这
-                    // 个 header(showsHeader=true),所以不直接套 SettingsPage。
-                    Text("Connections")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.96))
-
-                    Text("Give AI access to your memory, and connect to the apps you use every day")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                    // 标题块走 SettingsPageTitle 跟其他 Settings 页(General/
+                    // Display/AI models…)一模一样。之前是自己 Text("Connections")
+                    // + 自己一行 subtitle,size/opacity 跟 SettingsPageTitle
+                    // 看着差不多但 layout 错位 —— 同一份组件保证字号/spacing
+                    // 完全一致。onboarding 嵌入时 showsHeader=false,不影响。
+                    SettingsPageTitle(
+                        title: "Connections",
+                        subtitle: "Give AI access to your memory, and connect to the apps you use every day"
+                    )
+                    .padding(.bottom, 4)
                 }
 
                 searchField
@@ -79,9 +77,11 @@ struct ConnectionsView: View {
 
                 Spacer(minLength: 0)
             }
+            // 跟 SettingsPage 同款 padding —— horizontal 28 + top 30 + bottom 40。
+            // 之前 top 22 让标题贴顶,跟其他 Settings 页对比"挤上去"了。
             .padding(.horizontal, 28)
-            .padding(.top, 22)
-            .padding(.bottom, 36)
+            .padding(.top, 30)
+            .padding(.bottom, 40)
             .frame(maxWidth: 920)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
