@@ -526,12 +526,18 @@ struct ConnectionsView: View {
     /// that the app is actually installed by asking NSWorkspace for the
     /// bundleId. No network, no fake delay.
     private func connectLocalApp(_ integration: Integration) {
-        // claude-code:CLI 探测,不走 NSWorkspace。
+        // claude-code:真发一句 "hi" 看 CLI 能不能拿到回复。仅"binary 存在"
+        // 不够 —— 用户可能没 `claude login`、登录态过期、模型 API 挂等。
         if integration.id == "claude-code" {
-            if ClaudeCodeAgent.isInstalled {
-                appState.toggleConnect(integration)
-            } else {
-                loginError = "Claude Code CLI (`claude`) not found in PATH. Install with `brew install claude` or check ~/.local/bin."
+            connecting = integration.id
+            Task { @MainActor in
+                defer { connecting = nil }
+                do {
+                    _ = try await ClaudeCodeAgent.probeConnection()
+                    appState.toggleConnect(integration)
+                } catch {
+                    loginError = error.localizedDescription
+                }
             }
             return
         }
