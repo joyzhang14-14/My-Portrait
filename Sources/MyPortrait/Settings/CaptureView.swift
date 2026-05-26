@@ -205,6 +205,13 @@ struct AudioCaptureSettingsView: View {
                         Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
                     }
                 }
+
+                // 原来独立的 Speakers 分页(训练 + 簇管理 + Organize w/ AI)
+                // 现在折进 Audio Capture 末尾。speakerId 关掉时这块就没意义,
+                // 不显示。SpeakersSettingsView 自带懒加载和 task 触发。
+                if config.current.capture.audio.speakerIdEnabled {
+                    SpeakersSettingsView()
+                }
             }
         }
     }
