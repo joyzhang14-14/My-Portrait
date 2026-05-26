@@ -198,21 +198,26 @@ struct AudioCaptureSettingsView: View {
                     }
                                     }
 
-                SettingsCard(title: "Speakers (Voice ID)") {
-                    SettingsRow("Enable speaker identification",
-                                description: "Detect and cluster distinct voices.",
-                                icon: "person.wave.2") {
-                        Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
-                    }
-                }
+            }
 
-                // 原来独立的 Speakers 分页(训练 + 簇管理 + Organize w/ AI)
-                // 现在折进 Audio Capture 末尾。speakerId 关掉时这块就没意义,
-                // 不显示。SpeakersSettingsView 自带懒加载和 task 触发。
-                if config.current.capture.audio.speakerIdEnabled {
-                    SpeakersSettingsView()
+            // Speakers 部分(toggle + 训练 + 簇管理)。**故意放在 audioRec
+            // 判断外面 —— audio capture 关着也能看到、能开始训练。**
+            // VoiceTrainingCard.startTraining 自己会临时强开
+            // audio.enabled + speakerIdEnabled,训练完(success/failure/
+            // cancel)还原回原值,跟之前的设计一致。
+            SettingsCard(title: "Speakers (Voice ID)") {
+                SettingsRow("Enable speaker identification",
+                            description: "Detect and cluster distinct voices.",
+                            icon: "person.wave.2") {
+                    Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
                 }
             }
+
+            // 原来独立的 Speakers 分页(训练 + 簇管理 + Organize w/ AI)。
+            // **不再 gate** —— 训练入口要随时可达;speakerId 关 / DB 空
+            // 时下面列表自然就是 "0 of 0 identified",VoiceTrainingCard
+            // 仍可点。SpeakersSettingsView 自带懒加载 + task 触发。
+            SpeakersSettingsView()
         }
     }
 
