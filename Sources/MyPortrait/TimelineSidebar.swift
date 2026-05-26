@@ -138,6 +138,19 @@ struct TimelineSidebar: View {
         .glassCard()
     }
 
+    /// 同 sectionCard,但用 macOS 26 Liquid Glass(老系统 fallback)。
+    /// Timeline 的 ACTIVE APPS / AUDIO 两张卡专用 —— 它们贴主 timeline 内容,
+    /// 折射 / 高光跟动态背景反应明显,值得给这两张做真 Glass。
+    @ViewBuilder
+    private func liquidGlassSectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            content()
+        }
+        .padding(Theme.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassCard()
+    }
+
     private func placeholderCard(symbol: String, text: String) -> some View {
         VStack(spacing: Theme.Space.sm) {
             Image(systemName: symbol)
@@ -156,7 +169,7 @@ struct TimelineSidebar: View {
     // MARK: Active Apps
 
     private var activeAppsSection: some View {
-        sectionCard {
+        liquidGlassSectionCard {
             SectionHeader(title: "ACTIVE APPS", count: activeApps.count)
             if activeApps.isEmpty && !loading {
                 EmptyRow(text: "No apps captured at this moment.")
@@ -173,7 +186,7 @@ struct TimelineSidebar: View {
     // MARK: Audio
 
     private var audioSection: some View {
-        sectionCard {
+        liquidGlassSectionCard {
             SectionHeader(title: "AUDIO", count: audioItems.count)
             if audioItems.isEmpty && !loading {
                 EmptyRow(text: "No audio in the surrounding window.")
