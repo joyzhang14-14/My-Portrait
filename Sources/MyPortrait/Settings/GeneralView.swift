@@ -5,7 +5,7 @@ struct GeneralSettingsView: View {
     @State private var clearingCache = false
     @State private var scanResults: ScanResults? = nil
     /// 调试入口 —— 触发后弹出独立的 onboarding sheet。等流程跑顺再切到首启自动弹。
-    @State private var showOnboarding: Bool = false
+    @State private var configStoreGen = ConfigStore.shared
 
     var body: some View {
         SettingsPage("General", subtitle: "Startup and updates",
@@ -103,8 +103,17 @@ struct GeneralSettingsView: View {
                 SettingsRow("Replay onboarding",
                             description: "Open the onboarding sheet again — useful to grant a permission you skipped, or change your AI provider.",
                             icon: "sparkles") {
-                    Button("Show") { showOnboarding = true }
-                        .font(.system(size: 12, weight: .medium))
+                    Button("Show") {
+                        // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。
+                        // sheet 模式两个 bug:① attached sheet 主窗口在背后能看到
+                        // ② dismiss 后 NSHostingView 重算 intrinsic size 收缩窗口。
+                        // 把 onboardingCompleted 设 false → ContentView 立刻把
+                        // mainContent 换成 OnboardingView 填满整个窗口;onboarding
+                        // finish callback 把 flag 设回 true → 切回 mainContent。
+                        configStoreGen.mutate { $0.general.onboardingCompleted = false }
+                        configStoreGen.saveNow()
+                    }
+                    .font(.system(size: 12, weight: .medium))
                 }
             }
 
@@ -146,9 +155,6 @@ struct GeneralSettingsView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                 }
             }
-        }
-        .sheet(isPresented: $showOnboarding) {
-            OnboardingView { showOnboarding = false }
         }
     }
 
