@@ -383,6 +383,11 @@ struct TimelineSidebar: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
                         .strokeBorder(isOn ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
             )
+            // 整行(含 Spacer 空白区)都可点击,而不只是 icon + text 像素。
+            // Button 默认 hit-test 只在 label 内容上,不加这条只能点 icon
+            // 或文字才选中。跟 RecentRow / CronJobSidebarRow / SettingsSidebarRow
+            // 同款修法。(#7)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.bouncyIcon)
     }
