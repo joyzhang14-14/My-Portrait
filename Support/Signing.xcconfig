@@ -1,0 +1,19 @@
+// Code-signing team for the MyPortrait Xcode target.
+//
+// The default below is the upstream maintainer's Apple Developer team. It lets
+// the maintainer run `xcodegen generate` and build without any extra setup.
+//
+// Contributors (anyone not in team VYHNX2Y2AL) must override it with their own
+// Apple ID's team — otherwise Xcode falls back to ad-hoc "Sign to Run Locally",
+// whose designated requirement contains a `cdhash` that changes on every
+// rebuild, which makes TCC silently revoke screen-recording / mic permission
+// every time you build.
+//
+// To override: create `Support/Signing.local.xcconfig` (gitignored) with:
+//     DEVELOPMENT_TEAM = YOURTEAMID
+// then re-run `xcodegen generate`. The #include? below is "optional include"
+// (Xcode 11+ syntax) — missing file is fine, present file wins.
+
+DEVELOPMENT_TEAM = VYHNX2Y2AL
+
+#include? "Signing.local.xcconfig"
