@@ -34,5 +34,8 @@ MyPortrait.xcodeproj/
 # Contributor-local signing override (see Support/Signing.xcconfig)
 Support/Signing.local.xcconfig
 
+# dmgbuild 本地 venv(scripts/release/dmg.sh 第一次跑会创建)
+scripts/release/dmg/.venv/
+
 # Claude Code 会话本地文件
 .claude/

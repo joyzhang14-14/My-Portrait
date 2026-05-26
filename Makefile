@@ -13,24 +13,28 @@
 #   make build / notarize / dmg / sparkle
 #
 # 关于签名:
-#   build.sh 直接用 Xcode automatic 签出来的 Apple Development cert,**不二次
-#   重签**。
+#   build.sh 先用 Xcode export(中间产物 Apple Development 签),再用本机
+#   keychain 自签的 cert MyPortraitDev 整体重签 —— 跟 My-Smart-Bar /
+#   My-Orphies 同款方案。
 #
-#   为啥不用自签 keychain cert(MyPortraitDev / 类似):My-Portrait 核心走
-#   ScreenCaptureKit,macOS TCC 对**非 Apple-anchored 签名**直接拒 Screen
-#   Recording(auth_value 卡 0),系统设置里给权限也不解锁。这条原始作者
-#   在 project.yml 里写明过。Apple Development cert DR 带 `anchor apple
-#   generic`,TCC 才认。
+#   为啥不用 ad-hoc(`codesign --sign -`):ad-hoc 的 designated requirement
+#   含 cdhash,每次 build 漂,Sparkle 跨版本判 identity 不一致拒绝自动升级。
+#   MyPortraitDev 自签 cert 的 DR 含稳定的 cert subject hash,跨版本 TCC +
+#   Sparkle 都吃这套。
 #
-#   为啥不用 ad-hoc(`codesign --sign -`):ad-hoc 的 DR 带 cdhash,每次
-#   build 漂,Sparkle 跨版本判 identity 不一致拒绝自动升级。
+#   为啥不用 Apple Development cert:绑你 Apple ID(签名里直接暴露作者
+#   邮箱),账号变更 / expired 后签名身份就丢。自签 cert 跟 Apple ID 解耦。
 #
-#   付不起 $99/yr Developer Program → 拿不到 Developer ID + notarize,用户
-#   下载 .dmg 第一次仍需 \`xattr -d com.apple.quarantine\` 绕 Gatekeeper
-#   (README 已说明);Sparkle 自动升级路径不走 Gatekeeper,体验透明。
+#   一次性建 cert(本机做一次):Keychain Access → Certificate Assistant
+#   → Create a Certificate(Name=MyPortraitDev,Self Signed Root,
+#   Code Signing,trust=Always Trust)。
 #
-#   付了年费后,ExportOptions.plist method 改成 developer-id,`release:`
-#   target 加 notarize。
+#   用户安装时仍需 xattr -d com.apple.quarantine 绕 Gatekeeper(README
+#   已说明);Sparkle 自动升级路径不走 Gatekeeper,体验透明。
+#
+#   付了年费后,把 ExportOptions.plist method 改成 developer-id,build.sh
+#   里 codesign 重签那段删掉,`release:` target 改成 `build notarize dmg
+#   sparkle`。
 
 .PHONY: build notarize dmg sparkle release sparkle-keys clean
 

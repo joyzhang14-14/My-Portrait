@@ -1,55 +1,62 @@
 #!/usr/bin/env bash
-# 用 hdiutil 把 stapled .app 打成 .dmg。
-# 不依赖 npm/create-dmg —— hdiutil 是 macOS 自带。
+# 用 dmgbuild 把 .app 打成 .dmg(带布局:左 app 图标 + 右 Applications 快捷方式)。
 #
 # 输出:
 #   build/MyPortrait-<version>.dmg
 #
 # 版本号从 .app 的 Info.plist CFBundleShortVersionString 读。
+#
+# 依赖:dmgbuild + 三个 pyobjc 包,锁在 scripts/release/dmg/requirements.txt。
+# 第一次跑会自动建本地 .venv 装好;以后直接复用。
 
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 APP_PATH="build/export/MyPortrait.app"
-[[ -d "$APP_PATH" ]] || { echo "ERROR: $APP_PATH not found." >&2; exit 1; }
+[[ -d "$APP_PATH" ]] || { echo "ERROR: $APP_PATH not found. Run scripts/release/build.sh first." >&2; exit 1; }
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
     "$APP_PATH/Contents/Info.plist")
 DMG_NAME="MyPortrait-${VERSION}.dmg"
 DMG_PATH="build/$DMG_NAME"
-STAGING="build/dmg-staging"
 
-# 1) staging 目录布局:
-#    MyPortrait.app
-#    Applications -> /Applications(快捷方式,用户拖进去就装好)
-echo "→ stage dmg contents"
-rm -rf "$STAGING"
-mkdir -p "$STAGING"
-cp -R "$APP_PATH" "$STAGING/"
-ln -s /Applications "$STAGING/Applications"
+# 1) 准备 dmgbuild venv(只第一次跑要)
+VENV="scripts/release/dmg/.venv"
+if [[ ! -x "$VENV/bin/dmgbuild" ]]; then
+    echo "→ first run: creating dmgbuild venv"
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --quiet --require-hashes \
+        -r scripts/release/dmg/requirements.txt
+fi
 
-# 2) 出 dmg
-echo "→ hdiutil create $DMG_NAME"
+# 2) 找 .app 自己的 .icns 给 dmgbuild 打 volume badge
+APP_ICON=""
+for icns in "$APP_PATH/Contents/Resources/"*.icns; do
+    [[ -f "$icns" ]] && { APP_ICON="$icns"; break; }
+done
+
+# 3) 通过环境变量 + dmgbuild_settings.py 出 .dmg
+echo "→ dmgbuild MyPortrait-${VERSION}.dmg"
 rm -f "$DMG_PATH"
-hdiutil create \
-    -volname "MyPortrait" \
-    -srcfolder "$STAGING" \
-    -ov \
-    -format UDZO \
+DMG_APP_PATH="$(cd "$(dirname "$APP_PATH")" && pwd)/$(basename "$APP_PATH")" \
+DMG_VOLUME_NAME="My Portrait ${VERSION}" \
+DMG_BADGE_ICON="$APP_ICON" \
+    "$VENV/bin/dmgbuild" \
+    -s scripts/release/dmg/dmgbuild_settings.py \
+    "My Portrait ${VERSION}" \
     "$DMG_PATH"
 
-# 3) DMG 用 Apple Development 证书签名(没付 Developer Program 年费,拿不到
-#    "Developer ID Application" 证书,先用免费的 "Apple Development" 签)。
-#    --timestamp 加不上(timestamp 服务器只认 Developer ID 证书),省掉。
-#    用户安装时 Gatekeeper 会拦"无法验证开发者",得右键 Open 一次。
-echo "→ codesign dmg (Apple Development cert, no notarize)"
-codesign --force --sign "Apple Development: joyzhang_14@163.com (QCC4H9ZG7R)" \
-    "$DMG_PATH"
+# 4) 用同一个自签 cert 签 dmg(跟 .app 一致;Gatekeeper 检 dmg 文件本身
+#    的签名跟 .app 的签名同源,可以减少二次警告)
+SIGN_IDENTITY="${SIGN_IDENTITY:-MyPortraitDev}"
+echo "→ codesign dmg ($SIGN_IDENTITY)"
+codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"
 
 echo ""
 echo "=================================================="
 echo "DMG ready: $DMG_PATH"
 echo "Version:   $VERSION"
+echo "Size:      $(du -h "$DMG_PATH" | cut -f1)"
 echo ""
 echo "Next: scripts/release/sparkle.sh"
 echo "=================================================="
