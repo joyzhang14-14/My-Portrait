@@ -64,7 +64,7 @@ enum SpeechStylePrompts {
         "action":            "create" | "update" | "noop",
         "slug":              "snake_case_short",
         "title":             "Human-readable title",
-        "body":              "Markdown body. **First sentence must be a plain-English one-line definition** of what this facet means (so a reader who only sees the title can still understand it). Follow with 2-4 sentences citing specific evidence — short quotes from text or descriptions of edit_log patterns. Third person about the user. Use \n for newlines.",
+        "body":              "Markdown body. **Open with a short one-line definition** of what this facet means so a reader who only sees the title can grasp it — wording / language / length is up to you, just make it read like a real definition rather than evidence. Then 2-4 sentences citing specific evidence — short quotes from text or descriptions of edit_log patterns. Third person about the user. Use \n for newlines.",
         "source_record_ids": [123, 124, 125],
         "existing_slug":     null
       }

@@ -305,14 +305,15 @@ enum MemoryPrompts {
       multitasking vs distractibility  — positive vs negative framing
 
     DESCRIPTION — for **every** mergeInto / createNew decision, also output a
-    one-sentence `description` in plain English explaining what the tag means
-    (so a reader who only sees the title `verification` or `multitasking` can
-    still understand the trait). Examples:
+    one-sentence `description` explaining what the tag actually means, so a
+    reader who only sees the title `verification` or `multitasking` can still
+    grasp it. Wording / phrasing / language are up to you — just keep it
+    one sentence, third person, and short enough to read at a glance.
+    Examples (style, not template):
       verification    → "The user repeatedly double-checks results before moving on."
       multitasking    → "The user works on multiple tasks in parallel rather than serially."
       background-audio → "The user plays ambient music or background audio while focused on tasks."
-    Third person, ≤ 100 chars, no period optional. skipCluster decisions do NOT
-    need a description.
+    skipCluster decisions do NOT need a description.
 
     OUTPUT — JSON array, one object per cluster. No prose, no markdown:
     [
