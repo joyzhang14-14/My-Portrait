@@ -39,6 +39,12 @@ final class CronJobStore {
 
     /// Record a run on a cronJob. Caps the runs list at `runsCap` so the JSON
     /// blob doesn't grow forever.
+    ///
+    /// **关键**:LLM 还没跑完就要先 appendRun 一次,占位 preview="" —— 让
+    /// TimelineSidebar 的 `cronJobConvIds` 立刻能识别这条 conv 是 cron run,
+    /// 不会出现在 RECENTS 里。LLM 跑完调 `updateRunPreview` 补 preview。
+    /// 不这样的话:cronJob 跑了 LLM 几分钟 / 失败 / app 中途退出 → conv 永远
+    /// 显示在 RECENTS 里。
     func appendRun(_ run: CronJobRun, to id: UUID) {
         guard let i = cronJobs.firstIndex(where: { $0.id == id }) else { return }
         cronJobs[i].runs.insert(run, at: 0)
@@ -47,6 +53,18 @@ final class CronJobStore {
         }
         cronJobs[i].lastRunAt = run.startedAt
         save()
+    }
+
+    /// LLM 跑完后更新已有 run 的 preview。按 convId 找。LLM 中途失败的话
+    /// preview 留空,run 仍然在,RECENTS 仍然不显示这条 conv。
+    func updateRunPreview(convId: UUID, preview: String) {
+        for i in cronJobs.indices {
+            guard let runIdx = cronJobs[i].runs.firstIndex(where: { $0.convId == convId })
+            else { continue }
+            cronJobs[i].runs[runIdx].preview = preview
+            save()
+            return
+        }
     }
 
     // MARK: - Persistence

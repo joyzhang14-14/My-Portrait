@@ -75,6 +75,13 @@ enum CronJobExecutor {
             title: "🛰️ \(cronJob.name) · \(stampFmt.string(from: startedAt))"
         )
 
+        // **必须立刻 appendRun**(LLM 跑完才登记的话,跑的几分钟里这条 conv
+        // 会出现在 sidebar RECENTS 区 —— TimelineSidebar 反查 cronJobConvIds
+        // 判定是不是 cron run)。LLM 失败 / app 中途退出也保证不会变成幽灵
+        // RECENTS 项。preview 留空,跑完用 updateRunPreview 补。
+        let runPlaceholder = CronJobRun(convId: conv.id, startedAt: startedAt, preview: "")
+        CronJobStore.shared.appendRun(runPlaceholder, to: cronJob.id)
+
         // 3. Persist user message + spawn one-shot agent.
         let userMsg = ChatMessage(role: .user, text: cronJob.prompt, time: startedAt)
         var assistantBuf = ""
@@ -125,11 +132,10 @@ enum CronJobExecutor {
 
         store.saveMessages([userMsg, assistantMsg], for: conv.id)
 
-        // 4. Record run on the cron job.
+        // 4. LLM 跑完了 —— 用真 preview 更新已有 run(占位 run 在 step 2 已建好)。
         let preview = String(assistantBuf.prefix(120))
             .replacingOccurrences(of: "\n", with: " ")
-        let run = CronJobRun(convId: conv.id, startedAt: startedAt, preview: preview)
-        CronJobStore.shared.appendRun(run, to: cronJob.id)
+        CronJobStore.shared.updateRunPreview(convId: conv.id, preview: preview)
 
         // 5. 通知:只发 LLM 在回复末尾显式写出的 `### Notify` 区块内容。
         //    没写就不打扰用户(LLM 自己判断"这次没什么值得通知的事")。
