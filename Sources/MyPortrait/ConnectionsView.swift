@@ -698,14 +698,17 @@ struct IntegrationIcon: View {
     var body: some View {
         ZStack {
             if let img = realIcon {
-                // 真 app icon —— scaledToFill 铺满,跟 fullBleed asset 视觉密度
-                // 对齐。macOS app icon 自带 squircle 外圈留白会被裁,但跨品牌
-                // 大小统一(原来 scaledToFit 让 Codex / Ollama 看起来比
-                // Anthropic / DeepSeek 小一截)。
+                // 真 app icon —— macOS 设计规范本身就含 ~15% squircle 外圈
+                // 留白(`1024 → 内容区 ~824`)。直接 scaledToFit/Fill 进
+                // size×size frame 视觉上比 fullBleed asset(DeepSeek)
+                // / letter 方块(Claude Code)小一截。
+                // 做法:让 Image frame 放大 1.22 倍铺满(把 squircle 外圈
+                // 内容"挤"到 size 边缘),clip 到 size 矩形,视觉跟其他对齐。
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFill()
+                    .frame(width: size * 1.22, height: size * 1.22)
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else if let asset = integration.assetName {
