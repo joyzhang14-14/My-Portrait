@@ -20,7 +20,6 @@ struct SettingsPane: View {
             case .memory(.scheduler):  MemorySettingsView(tab: .scheduler)
             case .memory(.changelog):  MemorySettingsView(tab: .changelog)
             case .data(.usage):        UsageSettingsView()
-            case .data(.privacy):      PrivacySettingsView()
             case .data(.storage):      StorageSettingsView()
             case .data(.speakers):     SpeakersSettingsView()
             }
@@ -113,7 +112,6 @@ struct SettingsScene: View {
         case .memory(.scheduler):  MemorySettingsView(tab: .scheduler)
         case .memory(.changelog):  MemorySettingsView(tab: .changelog)
         case .data(.usage):        UsageSettingsView()
-        case .data(.privacy):      PrivacySettingsView()
         case .data(.storage):      StorageSettingsView()
         case .data(.speakers):     SpeakersSettingsView()
         }

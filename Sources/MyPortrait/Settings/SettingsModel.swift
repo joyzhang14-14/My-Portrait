@@ -25,7 +25,8 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case parameter, scheduler, changelog
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
-        case usage, privacy, storage, speakers
+        // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
+        case usage, storage, speakers
     }
 
     var id: String {
@@ -58,7 +59,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .memory(.scheduler):      return "Scheduler"
         case .memory(.changelog):      return "Changelog"
         case .data(.usage):            return "Usage"
-        case .data(.privacy):          return "Privacy"
         case .data(.storage):          return "Storage"
         case .data(.speakers):         return "Speakers"
         }
@@ -78,7 +78,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .memory(.scheduler):      return "calendar.badge.clock"
         case .memory(.changelog):      return "list.bullet.rectangle"
         case .data(.usage):            return "chart.bar"
-        case .data(.privacy):          return "hand.raised"
         case .data(.storage):          return "externaldrive"
         case .data(.speakers):         return "person.wave.2"
         }
@@ -88,7 +87,8 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case app         = "APP"
         case capture     = "CAPTURE"
         case memory      = "MEMORY"
-        case dataPrivacy = "DATA & PRIVACY"
+        // case 名保留 dataPrivacy(改名要动一堆调用),只把展示文字改成 DATA。
+        case dataPrivacy = "DATA"
     }
 
     var group: Group {
