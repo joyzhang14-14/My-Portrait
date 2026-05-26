@@ -16,14 +16,17 @@ LLM so the AI actually knows who you are. All data stays on your machine.
 ## Install
 
 1. Grab the latest **`MyPortrait-x.x.x.dmg`** from [Releases](https://github.com/joyzhang14-14/My-Portrait/releases).
-2. Open the `.dmg`, drag **My Portrait** into **Applications**.
-3. Because the app isn't notarized (Apple charges $99/year, I'm not paying), macOS Gatekeeper will refuse the first launch with **"can't verify the developer"**. Strip the quarantine attribute in Terminal:
+2. **Before opening the `.dmg`**, strip Gatekeeper's quarantine flag from it in Terminal:
 
    ```bash
-   xattr -d com.apple.quarantine /Applications/MyPortrait.app
+   xattr -d com.apple.quarantine ~/Downloads/MyPortrait-*.dmg
    ```
 
-   Then open it normally. The app is still **signed** (Apple Development cert) and runs with **hardened runtime + entitlements** — same security posture as a notarized build, just without Apple's seal of approval. Auto-updates via Sparkle work as expected once you're past the first launch.
+3. Open the `.dmg`, drag **My Portrait** into **Applications**, launch normally.
+
+> **Alternative (no Terminal)**: If you skip step 2 and just double-click the app, macOS will refuse with "can't verify the developer". Open **System Settings → Privacy & Security**, scroll down to "MyPortrait was blocked", click **Open Anyway**.
+
+Why any of this is needed: Apple charges $99/year for notarization, and I'm not paying. The app is still **signed** (Apple Development cert) and runs with **hardened runtime + entitlements** — same security posture as a notarized build, just without Apple's seal of approval. Auto-updates via Sparkle work as expected once you're past the first launch.
 
 > Requires macOS 15+ on Apple Silicon (M1 / M2 / M3 / M4).
 
