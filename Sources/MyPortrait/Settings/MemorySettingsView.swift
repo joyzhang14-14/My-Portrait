@@ -199,7 +199,9 @@ struct MemorySettingsView: View {
         do {
             let copied = try await worker.approveBacklog()
             writingCaptureUI.statusMessage = "Approved backlog — \(copied) record(s) → writing_records, cursor advanced."
-            // 清掉展开缓存,下次 run 完展开时重新加载
+            // 清 lastSummary,不然之前 run 的摘要行带着旧 pending_review 标签
+            // 继续显示,看着像还有东西要审
+            writingCaptureUI.lastSummary = nil
             writingCaptureExpanded.remove(date)
             writingCaptureExpandedRecords.removeValue(forKey: date)
         } catch {
@@ -214,6 +216,8 @@ struct MemorySettingsView: View {
         do {
             try await worker.rejectBacklog()
             writingCaptureUI.statusMessage = "Rejected backlog — staged dropped, cursor unchanged."
+            // 清 lastSummary,不然摘要行带着旧 pending_review 标签继续显示
+            writingCaptureUI.lastSummary = nil
             writingCaptureExpanded.remove(date)
             writingCaptureExpandedRecords.removeValue(forKey: date)
         } catch {
