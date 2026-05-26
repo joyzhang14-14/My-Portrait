@@ -44,6 +44,28 @@ struct ScreenpipeImporter: Sendable {
     static let defaultSourceDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".screenpipe")
 
+    /// 进度回调载体。UI 用来渲染当前阶段 + 进度条。
+    /// 阶段顺序:scanning → copyingVideo → importingFrames → importingAudio → done
+    struct Progress: Sendable {
+        enum Stage: String, Sendable {
+            case scanning              // 0
+            case copyingVideo          // 1
+            case importingFrames       // 2
+            case importingAudio        // 3
+            case done                  // 4
+        }
+        let stage: Stage
+        let current: Int               // 当前 stage 已完成数
+        let total: Int                 // 当前 stage 总数(0 = 未知)
+        let bytesDone: Int64           // copyingVideo 用,其它阶段 0
+        let bytesTotal: Int64          // copyingVideo 用
+        /// 0..1 给 SwiftUI ProgressView。0 / negative → 不确定进度。
+        var fraction: Double {
+            guard total > 0 else { return 0 }
+            return min(1.0, Double(current) / Double(total))
+        }
+    }
+
     /// 扫盘结果。UI 自动扫盘后展示给用户。**count 字段都是按 cutoff 过滤
     /// 后"还需要导入的"数量**,不是源端总数 —— 用户能直接判断"按下 Import
     /// 会写多少行 / 还有没有数据要导"。
@@ -262,9 +284,16 @@ struct ScreenpipeImporter: Sendable {
     }
 
     /// 主入口。
-    /// - Parameter target: 目标 My-Portrait DatabasePool。
+    /// - Parameters:
+    ///   - target: 目标 My-Portrait DatabasePool。
+    ///   - onProgress: 进度回调,主线程友好(实际调用线程不保证 MainActor)。
     /// - Returns: Report —— 总导入 / 跳过 / 错误数。
-    func run(into target: DatabasePool) async throws -> Report {
+    func run(
+        into target: DatabasePool,
+        onProgress: (@Sendable (Progress) -> Void)? = nil
+    ) async throws -> Report {
+        onProgress?(Progress(stage: .scanning, current: 0, total: 0, bytesDone: 0, bytesTotal: 0))
+
         // 1. 找 source db
         let sourceDB = sourceDir.appendingPathComponent("db.sqlite")
         guard FileManager.default.fileExists(atPath: sourceDB.path) else {
@@ -302,7 +331,8 @@ struct ScreenpipeImporter: Sendable {
         let (chunkIdMap, videoChunksIn, videoBytes) = try await Task.detached(priority: .userInitiated) { [sourceDir] in
             try Self.importVideoChunks(
                 source: source, target: target,
-                cutoffMs: cutoffMs, sourceDir: sourceDir
+                cutoffMs: cutoffMs, sourceDir: sourceDir,
+                onProgress: onProgress
             )
         }.value
 
@@ -310,14 +340,20 @@ struct ScreenpipeImporter: Sendable {
         let (framesIn, framesBackfilled, skippedFrames) = try await Task.detached(priority: .userInitiated) {
             try Self.importFrames(
                 source: source, target: target,
-                cutoffMs: cutoffMs, chunkIdMap: chunkIdMap
+                cutoffMs: cutoffMs, chunkIdMap: chunkIdMap,
+                onProgress: onProgress
             )
         }.value
 
         // 6. 导 audio_chunks + audio_transcriptions
         let (chunksIn, transcriptsIn) = try await Task.detached(priority: .userInitiated) {
-            try Self.importAudio(source: source, target: target, cutoffMs: cutoffMs)
+            try Self.importAudio(
+                source: source, target: target, cutoffMs: cutoffMs,
+                onProgress: onProgress
+            )
         }.value
+
+        onProgress?(Progress(stage: .done, current: 1, total: 1, bytesDone: 0, bytesTotal: 0))
 
         return Report(
             cutoffMs: cutoffMs,
@@ -344,7 +380,8 @@ struct ScreenpipeImporter: Sendable {
         source: DatabaseQueue,
         target: DatabasePool,
         cutoffMs: Int64?,
-        sourceDir: URL
+        sourceDir: URL,
+        onProgress: (@Sendable (Progress) -> Void)? = nil
     ) throws -> (chunkIdMap: [Int64: Int64], imported: Int, bytesCopied: Int64) {
         let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
 
@@ -407,7 +444,24 @@ struct ScreenpipeImporter: Sendable {
         let videoRoot = Storage.videoDir
         try fm.createDirectory(at: videoRoot, withIntermediateDirectories: true)
 
+        // 总字节估算给进度条 —— 跟 scan 同款 stat。也算 chunk 总数。
+        var bytesTotal: Int64 = 0
         for r in rows {
+            let src: URL = r.filePath.hasPrefix("/")
+                ? URL(fileURLWithPath: r.filePath)
+                : sourceDir.appendingPathComponent(r.filePath)
+            if fm.fileExists(atPath: src.path),
+               let s = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) {
+                bytesTotal += Int64(s)
+            }
+        }
+        let total = rows.count
+        onProgress?(Progress(
+            stage: .copyingVideo, current: 0, total: total,
+            bytesDone: 0, bytesTotal: bytesTotal
+        ))
+
+        for (idx, r) in rows.enumerated() {
             // 1. resolve source path:可能是绝对路径,可能 sourceDir 相对
             let srcAbs: URL = r.filePath.hasPrefix("/")
                 ? URL(fileURLWithPath: r.filePath)
@@ -472,6 +526,12 @@ struct ScreenpipeImporter: Sendable {
             }
             idMap[r.oldId] = newId
             importedCount += 1
+            // tick 进度 —— 每个 chunk 完一份 callback。文件大 callback 间隔
+            // 几秒,UI 看着够 smooth。
+            onProgress?(Progress(
+                stage: .copyingVideo, current: idx + 1, total: total,
+                bytesDone: bytesCopied, bytesTotal: bytesTotal
+            ))
         }
         importLog.info("video chunks imported=\(importedCount, privacy: .public) bytes=\(bytesCopied, privacy: .public)")
         return (idMap, importedCount, bytesCopied)
@@ -488,7 +548,8 @@ struct ScreenpipeImporter: Sendable {
         source: DatabaseQueue,
         target: DatabasePool,
         cutoffMs: Int64?,
-        chunkIdMap: [Int64: Int64]
+        chunkIdMap: [Int64: Int64],
+        onProgress: (@Sendable (Progress) -> Void)? = nil
     ) throws -> (inserted: Int, backfilled: Int, skippedNoOCR: Int) {
         var inserted = 0
         var backfilled = 0
@@ -548,9 +609,24 @@ struct ScreenpipeImporter: Sendable {
             return out
         }
 
+        let total = rows.count
+        onProgress?(Progress(
+            stage: .importingFrames, current: 0, total: total,
+            bytesDone: 0, bytesTotal: 0
+        ))
+        var processed = 0
         try target.write { db in
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            // 每 ~200 行回调一次 UI,避免 callback overhead 拖慢 INSERT。
+            let tickEvery = max(1, total / 50)
             for r in rows {
+                processed += 1
+                if processed % tickEvery == 0 || processed == total {
+                    onProgress?(Progress(
+                        stage: .importingFrames, current: processed, total: total,
+                        bytesDone: 0, bytesTotal: 0
+                    ))
+                }
                 guard let text = r.ocrText, !text.isEmpty else {
                     skipped += 1
                     continue
@@ -626,7 +702,8 @@ struct ScreenpipeImporter: Sendable {
     private static func importAudio(
         source: DatabaseQueue,
         target: DatabasePool,
-        cutoffMs: Int64?
+        cutoffMs: Int64?,
+        onProgress: (@Sendable (Progress) -> Void)? = nil
     ) throws -> (chunks: Int, transcripts: Int) {
         var importedChunks = 0
         var importedTranscripts = 0
@@ -713,6 +790,15 @@ struct ScreenpipeImporter: Sendable {
         importLog.info("screenpipe audio: chunks=\(chunks.count) transcripts=\(transcripts.count)")
 
         // INSERT。先插 chunks 攒 old→new id map,再插 transcripts。
+        let totalChunks = chunks.count
+        let totalTranscripts = transcripts.count
+        let totalTicks = totalChunks + totalTranscripts
+        var ticked = 0
+        let tickEvery = max(1, totalTicks / 50)
+        onProgress?(Progress(
+            stage: .importingAudio, current: 0, total: totalTicks,
+            bytesDone: 0, bytesTotal: 0
+        ))
         try target.write { db in
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
             var idMap: [Int64: Int64] = [:]    // screenpipe.chunk_id → portrait.chunk_id
@@ -729,6 +815,13 @@ struct ScreenpipeImporter: Sendable {
                     ])
                 idMap[c.oldId] = db.lastInsertedRowID
                 importedChunks += 1
+                ticked += 1
+                if ticked % tickEvery == 0 || ticked == totalTicks {
+                    onProgress?(Progress(
+                        stage: .importingAudio, current: ticked, total: totalTicks,
+                        bytesDone: 0, bytesTotal: 0
+                    ))
+                }
             }
 
             for t in transcripts {
@@ -742,6 +835,13 @@ struct ScreenpipeImporter: Sendable {
                         "cid": newId, "text": t.text, "ts": t.timestampMs
                     ])
                 importedTranscripts += 1
+                ticked += 1
+                if ticked % tickEvery == 0 || ticked == totalTicks {
+                    onProgress?(Progress(
+                        stage: .importingAudio, current: ticked, total: totalTicks,
+                        bytesDone: 0, bytesTotal: 0
+                    ))
+                }
             }
         }
         importLog.info("audio imported chunks=\(importedChunks, privacy: .public) transcripts=\(importedTranscripts, privacy: .public)")
