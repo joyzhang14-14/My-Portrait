@@ -87,6 +87,7 @@ struct ImportSettingsView: View {
             }
             statRow("Path",         s.sourceDir.path, mono: true)
             statRow("OCR frames",   "\(s.frameCount.formatted()) to import", mono: false)
+            statRow("Video chunks", "\(s.videoChunkCount.formatted()) MP4(s) · ~\(Self.bytesHuman(s.videoBytesEst)) to copy", mono: false)
             statRow("Audio chunks", "\(s.audioChunkCount.formatted()) to import", mono: false)
             statRow("Audio transcripts", "\(s.audioTranscriptCount.formatted()) to import", mono: false)
             if let cutoff = s.cutoffMs {
@@ -192,7 +193,8 @@ struct ImportSettingsView: View {
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .tracking(0.6)
                 .foregroundStyle(.white.opacity(0.45))
-            statRow("Frames",            "\(r.framesImported) imported · \(r.skippedFramesNoOCR) skipped (no OCR)", mono: false)
+            statRow("Frames",            "\(r.framesImported) new · \(r.framesBackfilled) backfilled · \(r.skippedFramesNoOCR) skipped (no OCR)", mono: false)
+            statRow("Video chunks",      "\(r.videoChunksImported) MP4(s) copied · \(Self.bytesHuman(r.videoBytesCopied))", mono: false)
             statRow("Audio chunks",      "\(r.audioChunksImported) imported", mono: false)
             statRow("Audio transcripts", "\(r.audioTranscriptsImported) imported", mono: false)
             statRow("Cutoff",            Self.cutoffDescription(r.cutoffMs), mono: false)
@@ -239,6 +241,14 @@ struct ImportSettingsView: View {
         return fmt.string(from: d)
     }
 
+    /// "1.2 GB" / "812 MB" / "34 KB" ——给 UI 显示磁盘占用估算。
+    private static func bytesHuman(_ b: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useGB, .useMB, .useKB]
+        f.countStyle = .file
+        return f.string(fromByteCount: b)
+    }
+
     private static func cutoffDescription(_ ms: Int64?) -> String {
         guard let ms = ms else {
             return "no cutoff (My Portrait was empty, imported all)"
@@ -253,6 +263,8 @@ struct ImportSettingsView: View {
         scanning = true
         defer { scanning = false }
         // 先从 My-Portrait DB 拿 cutoff,再扫盘按 cutoff 过滤源端 count。
+        // cutoff = 最早**带媒体**的 frame ts,允许 backfill 老 NULL-media
+        // imported frames(B 方案场景)。
         let dbImpl = services?.db as? PortraitDBImpl
         let dbPool = dbImpl?.dbPool
         let override = overrideDir
@@ -260,7 +272,10 @@ struct ImportSettingsView: View {
             let cutoff: Int64? = {
                 guard let pool = dbPool else { return nil }
                 return (try? pool.read { db in
-                    try Int64.fetchOne(db, sql: "SELECT MIN(timestamp_ms) FROM frames")
+                    try Int64.fetchOne(db, sql: """
+                        SELECT MIN(timestamp_ms) FROM frames
+                        WHERE snapshot_path IS NOT NULL OR video_chunk_id IS NOT NULL
+                        """)
                 }) ?? nil
             }()
             if let dir = override {
@@ -269,7 +284,9 @@ struct ImportSettingsView: View {
                         sourceDir: dir,
                         dbPath: dir.appendingPathComponent("db.sqlite"),
                         exists: false, cutoffMs: cutoff,
-                        frameCount: 0, audioChunkCount: 0, audioTranscriptCount: 0,
+                        frameCount: 0,
+                        videoChunkCount: 0, videoBytesEst: 0,
+                        audioChunkCount: 0, audioTranscriptCount: 0,
                         earliestMs: nil, latestMs: nil
                     )
             }

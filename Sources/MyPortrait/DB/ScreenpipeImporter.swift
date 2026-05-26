@@ -19,7 +19,10 @@ struct ScreenpipeImporter: Sendable {
 
     struct Report: Sendable {
         let cutoffMs: Int64?           // 时间边界:导 < 这个 ts 的;nil = 全导(MyPortrait 空)
-        let framesImported: Int
+        let framesImported: Int        // 新建 frames
+        let framesBackfilled: Int      // 老 frame 补上 video_chunk_id (这次 import 媒体场景)
+        let videoChunksImported: Int   // 新建 video_chunks (拷贝 MP4)
+        let videoBytesCopied: Int64    // 实际拷的 MP4 总字节
         let audioChunksImported: Int
         let audioTranscriptsImported: Int
         let skippedFramesNoOCR: Int
@@ -50,14 +53,17 @@ struct ScreenpipeImporter: Sendable {
         let exists: Bool          // db.sqlite 在不在
         let cutoffMs: Int64?      // 用户当前 cutoff(My-Portrait 最早 frame ts)
         let frameCount: Int       // 待导入 OCR frame 数(已减掉 < cutoff 过滤)
+        let videoChunkCount: Int  // 待导入 MP4 chunks 数
+        let videoBytesEst: Int64  // 待拷 MP4 总字节(扫盘 stat)
         let audioChunkCount: Int  // 待导入 audio chunk 数
         let audioTranscriptCount: Int  // 待导入 transcript 数
         let earliestMs: Int64?    // 源端最早 ts(显示用)
         let latestMs: Int64?      // 源端最晚 ts
 
-        /// 0 = 全都已导(按钮该灰)。
+        /// 0 = 全都已导(按钮该灰)。也包含 videoChunk —— B 方案 backfill 场景下
+        /// frameCount 可能 0 但 chunks 还要补。
         var hasAnythingToImport: Bool {
-            frameCount > 0 || audioTranscriptCount > 0
+            frameCount > 0 || audioTranscriptCount > 0 || videoChunkCount > 0
         }
     }
 
@@ -91,7 +97,9 @@ struct ScreenpipeImporter: Sendable {
             sourceDir: defaultSourceDir,
             dbPath: defaultSourceDir.appendingPathComponent("db.sqlite"),
             exists: false, cutoffMs: cutoffMs,
-            frameCount: 0, audioChunkCount: 0, audioTranscriptCount: 0,
+            frameCount: 0,
+            videoChunkCount: 0, videoBytesEst: 0,
+            audioChunkCount: 0, audioTranscriptCount: 0,
             earliestMs: nil, latestMs: nil
         )
     }
@@ -103,7 +111,9 @@ struct ScreenpipeImporter: Sendable {
         guard FileManager.default.fileExists(atPath: db.path) else {
             return ScanResult(
                 sourceDir: dir, dbPath: db, exists: false, cutoffMs: cutoffMs,
-                frameCount: 0, audioChunkCount: 0, audioTranscriptCount: 0,
+                frameCount: 0,
+                videoChunkCount: 0, videoBytesEst: 0,
+                audioChunkCount: 0, audioTranscriptCount: 0,
                 earliestMs: nil, latestMs: nil
             )
         }
@@ -181,9 +191,66 @@ struct ScreenpipeImporter: Sendable {
             let maxTs: String? = (try? String.fetchOne(d, sql: "SELECT MAX(timestamp) FROM frames")) ?? nil
             return (fc, ac, tc, minTs.flatMap(isoToMs), maxTs.flatMap(isoToMs))
         }
+
+        // 视频 chunks 数 + 总字节(让 UI 提示用户要拷多少 GB)
+        // 单独 read,因为需要文件 stat,不能在前面 read closure 里做。
+        let chunkRows: [(id: Int64, path: String)] = try q.read { d -> [(Int64, String)] in
+            let chunkSQL: String
+            if cutoffSec != nil {
+                chunkSQL = """
+                    SELECT DISTINCT vc.id, vc.file_path
+                    FROM video_chunks vc
+                    INNER JOIN frames f ON f.video_chunk_id = vc.id
+                    WHERE CAST(strftime('%s', f.timestamp) AS INTEGER) < :cutoff
+                    """
+            } else {
+                chunkSQL = """
+                    SELECT DISTINCT vc.id, vc.file_path
+                    FROM video_chunks vc
+                    INNER JOIN frames f ON f.video_chunk_id = vc.id
+                    """
+            }
+            var chunkArgs: StatementArguments = [:]
+            if let cu = cutoffSec { chunkArgs = ["cutoff": cu] }
+            return try Row.fetchAll(d, sql: chunkSQL, arguments: chunkArgs).map {
+                ($0["id"], ($0["file_path"] as String?) ?? "")
+            }
+        }
+        // stat 实际待拷字节(已存在的复用就不算)
+        let fm = FileManager.default
+        let videoRoot = Storage.videoDir
+        var chunksToImport = 0
+        var bytesEst: Int64 = 0
+        for (_, path) in chunkRows {
+            let srcAbs: URL = path.hasPrefix("/")
+                ? URL(fileURLWithPath: path)
+                : dir.appendingPathComponent(path)
+            guard fm.fileExists(atPath: srcAbs.path) else { continue }
+            let base = "imported_\(srcAbs.lastPathComponent)"
+            // 粗略 day 估算 —— 用文件名里 unix_ms 抽,失败用 mtime
+            let dayDir = videoRoot.appendingPathComponent("*")
+            _ = dayDir   // 实际路径要 startTsMs 算,scan 阶段不必精确,只用来探重
+            // 已存在的不算(避免重复 stat 多算)
+            // 简化:任何一个候选 day 目录里有同名文件就算已拷。
+            var alreadyExists = false
+            if let days = try? fm.contentsOfDirectory(atPath: videoRoot.path) {
+                for day in days {
+                    let candidate = videoRoot.appendingPathComponent(day).appendingPathComponent(base)
+                    if fm.fileExists(atPath: candidate.path) { alreadyExists = true; break }
+                }
+            }
+            if alreadyExists { continue }
+            chunksToImport += 1
+            if let size = (try? srcAbs.resourceValues(forKeys: [.fileSizeKey]).fileSize) {
+                bytesEst += Int64(size)
+            }
+        }
         return ScanResult(
             sourceDir: dir, dbPath: db, exists: true, cutoffMs: cutoffMs,
-            frameCount: fc, audioChunkCount: ac, audioTranscriptCount: tc,
+            frameCount: fc,
+            videoChunkCount: chunksToImport,
+            videoBytesEst: bytesEst,
+            audioChunkCount: ac, audioTranscriptCount: tc,
             earliestMs: minMs, latestMs: maxMs
         )
     }
@@ -204,15 +271,19 @@ struct ScreenpipeImporter: Sendable {
             throw ImportError.sourceMissing(sourceDB.path)
         }
 
-        // 2. 算 cutoff:My-Portrait 最早 frame timestamp,只导比它老的。
+        // 2. 算 cutoff:My-Portrait 最早**带媒体**的 frame ts。无媒体的老
+        // imported frames 不算,允许这次回头补 video_chunk(B 方案 backfill 场景)。
         let cutoffMs = try await Task.detached(priority: .userInitiated) {
             try target.read { db in
                 try Int64.fetchOne(
-                    db, sql: "SELECT MIN(timestamp_ms) FROM frames"
+                    db, sql: """
+                        SELECT MIN(timestamp_ms) FROM frames
+                        WHERE snapshot_path IS NOT NULL OR video_chunk_id IS NOT NULL
+                        """
                 )
             }
         }.value
-        importLog.info("cutoff_ms=\(cutoffMs.map(String.init) ?? "nil", privacy: .public) (MyPortrait earliest)")
+        importLog.info("cutoff_ms=\(cutoffMs.map(String.init) ?? "nil", privacy: .public) (MyPortrait earliest with media)")
 
         // 3. read-only 打开 screenpipe DB(URI mode 加 mode=ro 防误写)。
         let roConfig: Configuration = {
@@ -227,12 +298,23 @@ struct ScreenpipeImporter: Sendable {
             throw ImportError.sourceOpenFailed(error.localizedDescription)
         }
 
-        // 4. 导 frames + ocr_text
-        let (framesIn, skippedFrames) = try await Task.detached(priority: .userInitiated) {
-            try Self.importFrames(source: source, target: target, cutoffMs: cutoffMs)
+        // 4. 拷 MP4 video_chunks → 拿 chunkId map
+        let (chunkIdMap, videoChunksIn, videoBytes) = try await Task.detached(priority: .userInitiated) { [sourceDir] in
+            try Self.importVideoChunks(
+                source: source, target: target,
+                cutoffMs: cutoffMs, sourceDir: sourceDir
+            )
         }.value
 
-        // 5. 导 audio_chunks + audio_transcriptions
+        // 5. 导 frames + ocr_text(UPSERT:ts+app 已存在 → UPDATE video_chunk_id)
+        let (framesIn, framesBackfilled, skippedFrames) = try await Task.detached(priority: .userInitiated) {
+            try Self.importFrames(
+                source: source, target: target,
+                cutoffMs: cutoffMs, chunkIdMap: chunkIdMap
+            )
+        }.value
+
+        // 6. 导 audio_chunks + audio_transcriptions
         let (chunksIn, transcriptsIn) = try await Task.detached(priority: .userInitiated) {
             try Self.importAudio(source: source, target: target, cutoffMs: cutoffMs)
         }.value
@@ -240,6 +322,9 @@ struct ScreenpipeImporter: Sendable {
         return Report(
             cutoffMs: cutoffMs,
             framesImported: framesIn,
+            framesBackfilled: framesBackfilled,
+            videoChunksImported: videoChunksIn,
+            videoBytesCopied: videoBytes,
             audioChunksImported: chunksIn,
             audioTranscriptsImported: transcriptsIn,
             skippedFramesNoOCR: skippedFrames,
@@ -247,33 +332,177 @@ struct ScreenpipeImporter: Sendable {
         )
     }
 
+    // MARK: - Video chunks (B 方案:真拷 MP4)
+
+    /// 拷 screenpipe MP4 chunks 到 ~/.portrait/raw_data/video/<day>/imported/,
+    /// 同时 INSERT My-Portrait video_chunks 行,返回 old_chunk_id → new_chunk_id 映射
+    /// 给 importFrames 用。
+    ///
+    /// 已经拷过的 chunk(file_path basename 比对) → 复用 new_id 不重复拷。
+    /// fps / start_ts_ms / end_ts_ms / frame_count 从 screenpipe.frames JOIN 算。
+    private static func importVideoChunks(
+        source: DatabaseQueue,
+        target: DatabasePool,
+        cutoffMs: Int64?,
+        sourceDir: URL
+    ) throws -> (chunkIdMap: [Int64: Int64], imported: Int, bytesCopied: Int64) {
+        let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
+
+        // 拉所有 chunks(JOIN frames 算 start/end/count/fps),按 cutoff 过滤
+        struct ChunkRow: Sendable {
+            let oldId: Int64
+            let filePath: String       // 原 screenpipe 路径(可能相对)
+            let startTsMs: Int64
+            let endTsMs: Int64
+            let frameCount: Int
+            let fps: Double
+        }
+        let rows: [ChunkRow] = try source.read { db in
+            let sql: String
+            if cutoffSec != nil {
+                sql = """
+                    SELECT vc.id, vc.file_path,
+                           (CAST(strftime('%s', MIN(f.timestamp)) AS INTEGER) * 1000) AS start_ms,
+                           (CAST(strftime('%s', MAX(f.timestamp)) AS INTEGER) * 1000) AS end_ms,
+                           COUNT(f.id) AS n
+                    FROM video_chunks vc
+                    INNER JOIN frames f ON f.video_chunk_id = vc.id
+                    WHERE CAST(strftime('%s', f.timestamp) AS INTEGER) < :cutoff
+                    GROUP BY vc.id, vc.file_path
+                    """
+            } else {
+                sql = """
+                    SELECT vc.id, vc.file_path,
+                           (CAST(strftime('%s', MIN(f.timestamp)) AS INTEGER) * 1000) AS start_ms,
+                           (CAST(strftime('%s', MAX(f.timestamp)) AS INTEGER) * 1000) AS end_ms,
+                           COUNT(f.id) AS n
+                    FROM video_chunks vc
+                    INNER JOIN frames f ON f.video_chunk_id = vc.id
+                    GROUP BY vc.id, vc.file_path
+                    """
+            }
+            var args: StatementArguments = [:]
+            if let c = cutoffSec { args = ["cutoff": c] }
+            return try Row.fetchAll(db, sql: sql, arguments: args).map {
+                let start = ($0["start_ms"] as Int64?) ?? 0
+                let end = ($0["end_ms"] as Int64?) ?? start
+                let n = ($0["n"] as Int64?).map { Int($0) } ?? 0
+                let durS = max(1.0, Double(end - start) / 1000.0)
+                let fps = n > 1 ? max(0.1, Double(n) / durS) : 1.0
+                return ChunkRow(
+                    oldId: $0["id"],
+                    filePath: ($0["file_path"] as String?) ?? "",
+                    startTsMs: start, endTsMs: end, frameCount: n, fps: fps
+                )
+            }
+        }
+        importLog.info("video_chunks to consider: \(rows.count, privacy: .public)")
+
+        // 拷文件到 ~/.portrait/raw_data/video/<day>/imported_<basename>
+        var idMap: [Int64: Int64] = [:]
+        var importedCount = 0
+        var bytesCopied: Int64 = 0
+        let fm = FileManager.default
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let videoRoot = Storage.videoDir
+        try fm.createDirectory(at: videoRoot, withIntermediateDirectories: true)
+
+        for r in rows {
+            // 1. resolve source path:可能是绝对路径,可能 sourceDir 相对
+            let srcAbs: URL = r.filePath.hasPrefix("/")
+                ? URL(fileURLWithPath: r.filePath)
+                : sourceDir.appendingPathComponent(r.filePath)
+            guard fm.fileExists(atPath: srcAbs.path) else {
+                importLog.warning("video chunk source missing: \(srcAbs.path, privacy: .public) — skip")
+                continue
+            }
+            // 2. 按 chunk start_ts day 分目录
+            let dayFmt = DateFormatter()
+            dayFmt.dateFormat = "yyyy-MM-dd"
+            dayFmt.timeZone = TimeZone(identifier: "UTC")
+            let day = dayFmt.string(from: Date(timeIntervalSince1970: TimeInterval(r.startTsMs) / 1000))
+            let dayDir = videoRoot.appendingPathComponent(day, isDirectory: true)
+            try? fm.createDirectory(at: dayDir, withIntermediateDirectories: true)
+            let destName = "imported_\(srcAbs.lastPathComponent)"
+            let destAbs = dayDir.appendingPathComponent(destName)
+
+            // 3. 已存在同名 → 复用(再 import 同 chunk 不重复拷)
+            if fm.fileExists(atPath: destAbs.path) {
+                // 找已有 My-Portrait video_chunks 行
+                let relPath = "raw_data/video/\(day)/\(destName)"
+                let existingId: Int64? = try? target.read { d in
+                    try Int64.fetchOne(
+                        d,
+                        sql: "SELECT id FROM video_chunks WHERE file_path = :p",
+                        arguments: ["p": relPath]
+                    )
+                }
+                if let eid = existingId {
+                    idMap[r.oldId] = eid
+                    continue
+                }
+                // 文件在但 DB 没行(被清过) → 当成新文件继续
+            } else {
+                do {
+                    try fm.copyItem(at: srcAbs, to: destAbs)
+                    let size = (try? destAbs.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                    bytesCopied += Int64(size)
+                } catch {
+                    importLog.warning("copy failed \(srcAbs.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                    continue
+                }
+            }
+
+            // 4. INSERT My-Portrait video_chunks(path 存 Storage.rootURL 相对,
+            //    跟原 capture 流水线一致 —— compactor / retention 都按相对路径)。
+            let relPath = "raw_data/video/\(day)/\(destName)"
+            let newId: Int64 = try target.write { d in
+                try d.execute(sql: """
+                    INSERT INTO video_chunks
+                        (file_path, device_name, fps, start_ts_ms, end_ts_ms,
+                         frame_count, created_at_ms)
+                    VALUES (:fp, 'imported', :fps, :st, :en, :n, :now)
+                    """,
+                    arguments: [
+                        "fp": relPath, "fps": r.fps,
+                        "st": r.startTsMs, "en": r.endTsMs,
+                        "n": Int64(r.frameCount), "now": nowMs
+                    ])
+                return d.lastInsertedRowID
+            }
+            idMap[r.oldId] = newId
+            importedCount += 1
+        }
+        importLog.info("video chunks imported=\(importedCount, privacy: .public) bytes=\(bytesCopied, privacy: .public)")
+        return (idMap, importedCount, bytesCopied)
+    }
+
     // MARK: - Frames
 
     /// JOIN screenpipe `frames` × `ocr_text`,转换 ISO TIMESTAMP → UTC ms,
-    /// INSERT 到 My-Portrait `frames`。无 OCR 的 frame 跳过(My-Portrait full_text
-    /// notNull,且没 OCR 就没价值给 distill)。
+    /// INSERT/UPSERT 到 My-Portrait `frames`。
+    /// - UPSERT 模式:同 (ts, app) 已存在的 frame → UPDATE video_chunk_id (B 方案
+    ///   backfill);不存在 → INSERT 新行。
+    /// - 无 OCR 的 frame 跳过(My-Portrait full_text notNull,且没 OCR 就没价值)。
     private static func importFrames(
         source: DatabaseQueue,
         target: DatabasePool,
-        cutoffMs: Int64?
-    ) throws -> (imported: Int, skippedNoOCR: Int) {
-        // 拿 screenpipe 那边 ts < cutoff 的 frames(没 cutoff 就全拿)。
-        // screenpipe.timestamp 是 ISO 8601 TEXT,SQL 用 strftime 转 unix sec
-        // 再乘 1000 拿 ms。
-        var imported = 0
+        cutoffMs: Int64?,
+        chunkIdMap: [Int64: Int64]
+    ) throws -> (inserted: Int, backfilled: Int, skippedNoOCR: Int) {
+        var inserted = 0
+        var backfilled = 0
         var skipped = 0
 
-        // 批量 fetch(全捞到内存,几万 rows 通常 ~50MB,可接受;否则 cursor)。
+        // 批量 fetch(全捞到内存,几万 rows 通常 ~50MB)。带 video_chunk_id +
+        // start_ts 算 offset_ms。
         let rows: [SourceFrameRow] = try source.read { db in
-            // 用 strftime('%s', ...) 转 unix sec 比较,避免 timestamp 字符串
-            // 两种格式 ('YYYY-MM-DD HH:MM:SS' vs 'YYYY-MM-DDTHH:MM:SS.sssZ')
-            // 字符串比较 false positive。跟 scan 一致。
             let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
             let sql: String
             if cutoffSec != nil {
                 sql = """
                     SELECT f.id, f.timestamp, f.app_name, f.window_name, f.browser_url, f.focused,
-                           o.text
+                           f.video_chunk_id, o.text
                     FROM frames f
                     LEFT JOIN ocr_text o ON o.frame_id = f.id
                     WHERE CAST(strftime('%s', f.timestamp) AS INTEGER) < :cutoff
@@ -282,7 +511,7 @@ struct ScreenpipeImporter: Sendable {
             } else {
                 sql = """
                     SELECT f.id, f.timestamp, f.app_name, f.window_name, f.browser_url, f.focused,
-                           o.text
+                           f.video_chunk_id, o.text
                     FROM frames f
                     LEFT JOIN ocr_text o ON o.frame_id = f.id
                     ORDER BY f.timestamp ASC
@@ -298,14 +527,27 @@ struct ScreenpipeImporter: Sendable {
                     windowName: r["window_name"] as String?,
                     browserURL: r["browser_url"] as String?,
                     focused: (r["focused"] as Int64?).map { $0 != 0 } ?? true,
+                    sourceVideoChunkId: r["video_chunk_id"] as Int64?,
                     ocrText: r["text"] as String?
                 )
             }
         }
-
         importLog.info("screenpipe frames to consider: \(rows.count, privacy: .public)")
 
-        // 批量 INSERT 进 My-Portrait。事务包裹,触发 FTS5 同步一次性。
+        // 拿 video_chunks 的 start_ts_ms 给 offset_ms 算
+        let chunkStartTs: [Int64: Int64] = try target.read { db in
+            var out: [Int64: Int64] = [:]
+            for (_, newId) in chunkIdMap {
+                if let st = try Int64.fetchOne(
+                    db, sql: "SELECT start_ts_ms FROM video_chunks WHERE id = :id",
+                    arguments: ["id": newId]
+                ) {
+                    out[newId] = st
+                }
+            }
+            return out
+        }
+
         try target.write { db in
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
             for r in rows {
@@ -314,30 +556,67 @@ struct ScreenpipeImporter: Sendable {
                     continue
                 }
                 let ts = Self.isoToMs(r.timestampISO) ?? nowMs
-                // **再次** 在客户端确认 ts < cutoff(SQL 转换偶发漂)
                 if let cutoff = cutoffMs, ts >= cutoff {
                     skipped += 1
                     continue
                 }
-                try db.execute(sql: """
-                    INSERT INTO frames
-                        (timestamp_ms, app_name, window_name, browser_url, focused,
-                         device_name, snapshot_path, video_chunk_id, offset_ms,
-                         capture_trigger, full_text, text_source, created_at_ms)
-                    VALUES (:ts, :app, :win, :url, :focused,
-                            'imported', NULL, NULL, NULL,
-                            'screenpipe_import', :text, 'ocr', :now)
-                    """,
-                    arguments: [
-                        "ts": ts, "app": r.appName, "win": r.windowName,
-                        "url": r.browserURL, "focused": r.focused,
-                        "text": text, "now": nowMs
-                    ])
-                imported += 1
+                // 算这条 frame 该挂哪个 My-Portrait chunk + offset_ms
+                let newChunkId: Int64? = r.sourceVideoChunkId.flatMap { chunkIdMap[$0] }
+                let offsetMs: Int64? = newChunkId.flatMap { id in
+                    chunkStartTs[id].map { max(0, ts - $0) }
+                }
+
+                // UPSERT:同 (ts, app) 已存在 → UPDATE video_chunk_id / offset_ms
+                // (B 方案 backfill 场景)。否则 INSERT 新行。
+                let existingId: Int64? = try Int64.fetchOne(
+                    db,
+                    sql: """
+                        SELECT id FROM frames
+                        WHERE timestamp_ms = :ts AND app_name = :app
+                          AND device_name = 'imported'
+                        LIMIT 1
+                        """,
+                    arguments: ["ts": ts, "app": r.appName]
+                )
+                if let eid = existingId {
+                    // 已有行:只补 video_chunk_id + offset_ms,别的字段保留
+                    if let newChunkId = newChunkId {
+                        try db.execute(sql: """
+                            UPDATE frames
+                            SET video_chunk_id = :vc, offset_ms = :off
+                            WHERE id = :id
+                            """,
+                            arguments: [
+                                "vc": newChunkId, "off": offsetMs,
+                                "id": eid
+                            ])
+                        backfilled += 1
+                    } else {
+                        // 同 ts 已存在 + 这次没新 chunk → 真重复,跳过
+                        skipped += 1
+                    }
+                } else {
+                    try db.execute(sql: """
+                        INSERT INTO frames
+                            (timestamp_ms, app_name, window_name, browser_url, focused,
+                             device_name, snapshot_path, video_chunk_id, offset_ms,
+                             capture_trigger, full_text, text_source, created_at_ms)
+                        VALUES (:ts, :app, :win, :url, :focused,
+                                'imported', NULL, :vc, :off,
+                                'screenpipe_import', :text, 'ocr', :now)
+                        """,
+                        arguments: [
+                            "ts": ts, "app": r.appName, "win": r.windowName,
+                            "url": r.browserURL, "focused": r.focused,
+                            "vc": newChunkId, "off": offsetMs,
+                            "text": text, "now": nowMs
+                        ])
+                    inserted += 1
+                }
             }
         }
-        importLog.info("frames imported=\(imported, privacy: .public) skipped=\(skipped, privacy: .public)")
-        return (imported, skipped)
+        importLog.info("frames inserted=\(inserted, privacy: .public) backfilled=\(backfilled, privacy: .public) skipped=\(skipped, privacy: .public)")
+        return (inserted, backfilled, skipped)
     }
 
     // MARK: - Audio
@@ -477,6 +756,9 @@ struct ScreenpipeImporter: Sendable {
         let windowName: String?
         let browserURL: String?
         let focused: Bool
+        /// 源端 video_chunks.id —— importVideoChunks 拷完后通过 idMap 映射到
+        /// My-Portrait video_chunks.id 当 frames.video_chunk_id 用。
+        let sourceVideoChunkId: Int64?
         let ocrText: String?
     }
 
