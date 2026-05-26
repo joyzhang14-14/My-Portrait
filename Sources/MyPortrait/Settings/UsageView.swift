@@ -10,7 +10,8 @@ struct UsageSettingsView: View {
     @State private var cronJobStore = CronJobStore.shared
 
     var body: some View {
-        SettingsPage("Usage", subtitle: "What you've put through My Portrait") {
+        SettingsPage("Usage", subtitle: "What you've put through My Portrait",
+                     onResetCurrentPage: { config.mutate { $0.usage = .init() } }) {
 
             HStack(spacing: 8) {
                 ForEach(UsageRange.allCases) { r in

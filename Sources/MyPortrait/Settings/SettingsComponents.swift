@@ -131,12 +131,21 @@ struct SettingsPageTitle: View {
 struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String?
+    /// 「reset 当前 page」的回调 —— 由每个 Page caller 自己定义,比如
+    /// DisplayView 传 `{ config.mutate { $0.display = .init() } }`,只回
+    /// Display 那一段。nil = 不显示 Reset 按钮(罕见,有些 page 没有可
+    /// reset 的 config)。
+    let onResetCurrentPage: (() -> Void)?
     @ViewBuilder var content: () -> Content
     @State private var config = ConfigStore.shared
 
     init(_ title: String, subtitle: String? = nil,
+         onResetCurrentPage: (() -> Void)? = nil,
          @ViewBuilder content: @escaping () -> Content) {
-        self.title = title; self.subtitle = subtitle; self.content = content
+        self.title = title
+        self.subtitle = subtitle
+        self.onResetCurrentPage = onResetCurrentPage
+        self.content = content
     }
 
     var body: some View {
@@ -145,7 +154,9 @@ struct SettingsPage<Content: View>: View {
                 HStack(alignment: .top) {
                     SettingsPageTitle(title: title, subtitle: subtitle)
                     Spacer()
-                    ConfigToolbar(config: config)
+                    ConfigToolbar(config: config,
+                                  pageTitle: title,
+                                  onResetCurrentPage: onResetCurrentPage)
                 }
                 .padding(.bottom, 4)
 
@@ -172,6 +183,10 @@ struct SettingsPage<Content: View>: View {
 /// way and the user wants to edit by hand or wipe the slate.
 private struct ConfigToolbar: View {
     let config: ConfigStore
+    let pageTitle: String
+    /// 仅 reset 当前 page 的字段。nil = 不显示 Reset 按钮(罕见,有些 page
+    /// 没 config-backed 字段)。
+    let onResetCurrentPage: (() -> Void)?
     @State private var confirmingReset = false
     var body: some View {
         HStack(spacing: 6) {
@@ -183,22 +198,27 @@ private struct ConfigToolbar: View {
             }
             .help("Open ~/.portrait/config.toml in Finder")
 
-            Button(role: .destructive) {
-                confirmingReset = true
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-                    .font(.system(size: 11, weight: .medium))
+            if onResetCurrentPage != nil {
+                Button(role: .destructive) {
+                    confirmingReset = true
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .help("Reset only the \(pageTitle) page back to defaults. Other Settings pages are not touched.")
             }
-            .help("Restore every setting to its baked-in default")
         }
         .confirmationDialog(
-            "Reset all settings to defaults?",
-            isPresented: $confirmingReset
+            "Reset \(pageTitle) to defaults?",
+            isPresented: $confirmingReset,
+            titleVisibility: .visible
         ) {
-            Button("Reset", role: .destructive) { config.resetToDefaults() }
+            Button("Reset \(pageTitle)", role: .destructive) {
+                onResetCurrentPage?()
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This deletes ~/.portrait/config.toml and restores every Settings value to its built-in default. Your conversations / cronJobs / templates are not touched.")
+            Text("Resets every field on the \(pageTitle) page back to its built-in default. Other Settings pages and your conversations / cron jobs / templates / portrait data are not touched.")
         }
     }
 }

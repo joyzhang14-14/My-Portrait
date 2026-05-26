@@ -8,7 +8,8 @@ struct GeneralSettingsView: View {
     @State private var showOnboarding: Bool = false
 
     var body: some View {
-        SettingsPage("General", subtitle: "Startup and updates") {
+        SettingsPage("General", subtitle: "Startup and updates",
+                     onResetCurrentPage: { config.mutate { $0.general = .init() } }) {
 
             SettingsCard(title: "Startup") {
                 SettingsRow("Auto-start",

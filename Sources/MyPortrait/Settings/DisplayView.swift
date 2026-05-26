@@ -5,7 +5,9 @@ struct DisplaySettingsView: View {
     @State private var config = ConfigStore.shared
 
     var body: some View {
-        SettingsPage("Display", subtitle: "Theme, window behaviour, and personalization") {
+        SettingsPage("Display",
+                     subtitle: "Theme, window behaviour, and personalization",
+                     onResetCurrentPage: { config.mutate { $0.display = .init() } }) {
 
             AppCustomizeCard()
 
