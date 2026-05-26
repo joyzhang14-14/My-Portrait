@@ -83,6 +83,8 @@ struct MemorySettingsView: View {
     @State private var speechStylePending: [SpeechStyleRunRow] = []
     @State private var speechStyleUnprocessed: Int = 0
     @State private var speechStylePreviewRun: String? = nil
+    /// 点击某一行 draft 时打开的 sheet,只显示这一条 draft 详情。
+    @State private var speechStylePreviewDraft: SpeechStyleStagedRow? = nil
     @State private var speechStyleExpandedDrafts: [String: [SpeechStyleStagedRow]] = [:]
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
@@ -771,8 +773,9 @@ struct MemorySettingsView: View {
             case .noop:   return ("NOOP", .gray)
             }
         }()
+        _ = parentRunId    // 不再用 —— 改成 per-draft preview。
         return Button {
-            speechStylePreviewRun = parentRunId
+            speechStylePreviewDraft = d
         } label: {
             HStack(spacing: 8) {
                 Text(label)
@@ -1013,6 +1016,10 @@ struct MemorySettingsView: View {
         }
         .sheet(item: $speechStylePreviewRun.mappedToIdentifiable) { wrapped in
             SpeechStylePreview(runId: wrapped.id)
+        }
+        // Per-draft sheet:点单条 NEW/CHANGED 行打开,只显示这一条 draft 详情。
+        .sheet(item: $speechStylePreviewDraft) { draft in
+            SpeechStyleDraftDetail(draft: draft)
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
@@ -1822,6 +1829,58 @@ private struct RejectReasonSheet: View {
 
 /// 一次 run 的全部 staged drafts 完整内容。跟 WritingCapturePreview 同形态,
 /// 只是数据源换成 speech_style_staged。
+/// 单条 draft 的详情 sheet —— 点 NEW/CHANGED 行打开,只显示这一条。
+private struct SpeechStyleDraftDetail: View {
+    let draft: SpeechStyleStagedRow
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                let (label, color): (String, Color) = {
+                    switch draft.action {
+                    case .create: return ("NEW", .green)
+                    case .update: return ("CHANGED", .orange)
+                    case .noop:   return ("NOOP", .gray)
+                    }
+                }()
+                Text(label)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
+                Text(draft.slug)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if let prior = draft.existingSlug, prior != draft.slug {
+                    Text("(was \(prior))").font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(draft.sourceRecordIds.count) refs")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                Button("Close") { dismiss() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(draft.title)
+                        .font(.system(size: 16, weight: .semibold))
+                    Text(draft.body)
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(width: 680, height: 460)
+    }
+}
+
 private struct SpeechStylePreview: View {
     let runId: String
     @Environment(\.dismiss) private var dismiss
