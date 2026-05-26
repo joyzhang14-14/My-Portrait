@@ -145,6 +145,9 @@ struct TimelineDB: Sendable {
         // JPG snapshot. We accept either. video_chunks JOIN surfaces the
         // chunk's file path + fps + start_ts_ms so we can compute the
         // offset (in ms) into the MP4 for any extracted frame.
+        // 历史上限定"必须有 snapshot 或 video chunk",防止误显示空帧。
+        // **screenpipe import 的帧没有媒体只有 OCR 文本**,放行 device_name='imported'
+        // 让它们也出现在 timeline(渲染层有 NoMediaPlaceholder 兜底)。
         let sql = """
             SELECT f.id, f.timestamp_ms, f.app_name,
                    COALESCE(f.window_name, ''),
@@ -155,7 +158,9 @@ struct TimelineDB: Sendable {
                    COALESCE(v.fps, 0)
             FROM frames f
             LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
-            WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
+            WHERE (f.snapshot_path IS NOT NULL
+                   OR f.video_chunk_id IS NOT NULL
+                   OR f.device_name = 'imported')
               AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
             ORDER BY f.timestamp_ms ASC
             LIMIT ?
