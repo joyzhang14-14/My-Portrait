@@ -117,7 +117,14 @@ final class ChatStore {
                 sqlite3_bind_double(stmt, 6, m.time.timeIntervalSince1970)
             }
         }
-        touchConversation(convId)
+        // **只在真有消息时 bump RECENTS 排序**。新建 conv 还没发消息就切走
+        // 会触发 persist()→saveMessages([])→DELETE→ 这里仍调 reload 但不 touch,
+        // 列表顺序不变。"有效对话"才上浮。
+        if !messages.isEmpty {
+            touchConversation(convId)
+        } else {
+            reloadConversations()
+        }
     }
 
     func loadMessages(for convId: UUID) -> [ChatMessage] {
@@ -189,8 +196,13 @@ final class ChatStore {
 
     /// Per-conv provider/model 锁定。HomeView 的 model picker 切换时调,把
     /// 当前选择写进这个 conv;切回时读出来用。NULL 表示"跟全局走"。
+    ///
+    /// **不动 updated_at** —— sidebar RECENTS 按 updated_at 排序,只 model
+    /// lock 这种元数据更新不应该把 conv bump 到顶(用户切对话 → capture
+    /// 触发 updateConversationModel → 列表大乱)。只有 saveMessages
+    /// (真发消息)和 renameConversation 才动 updated_at。
     func updateConversationModel(_ id: UUID, providerId: String?, model: String?) {
-        execute("UPDATE conversations SET provider_id=?, model=?, updated_at=? WHERE id=?") { stmt in
+        execute("UPDATE conversations SET provider_id=?, model=? WHERE id=?") { stmt in
             if let providerId {
                 sqlite3_bind_text(stmt, 1, providerId, -1, Self.SQLITE_TRANSIENT)
             } else {
@@ -201,8 +213,7 @@ final class ChatStore {
             } else {
                 sqlite3_bind_null(stmt, 2)
             }
-            sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
-            sqlite3_bind_text(stmt, 4, id.uuidString, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, id.uuidString, -1, Self.SQLITE_TRANSIENT)
         }
         reloadConversations()
     }
