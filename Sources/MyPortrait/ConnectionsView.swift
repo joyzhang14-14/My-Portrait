@@ -695,6 +695,17 @@ struct IntegrationIcon: View {
 
     @State private var realIcon: NSImage? = nil
 
+    /// `Image(named:)` + SwiftUI 在某些 macOS / 构建配置下加载 asset 不稳:
+    /// Stan 反馈过 v1.0.0 的 Codex / OpenAI / Gemini / Perplexity / DeepSeek
+    /// 全是空白方块,即使 Assets.car 验证过有完整数据。换 `NSImage(named:)`
+    /// **直接走 AppKit**,绕过 SwiftUI 的 template-rendering-intent 解析,
+    /// 还能在加载失败时拿到 nil 让 view 显式 fallback 到 letter,不会再渲
+    /// 染空白瓦片。
+    private var bundledIcon: NSImage? {
+        guard let asset = integration.assetName else { return nil }
+        return NSImage(named: asset)
+    }
+
     var body: some View {
         ZStack {
             if let img = realIcon {
@@ -711,36 +722,30 @@ struct IntegrationIcon: View {
                     .frame(width: size * 1.22, height: size * 1.22)
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
-            } else if let asset = integration.assetName {
+            } else if let nsImg = bundledIcon {
                 if integration.assetFullBleed {
                     // asset 已是完整 app-icon,直接铺满 + 圆角裁切。
-                    // **`.renderingMode(.original)` 必须显式**:asset catalog 里
-                    // 设了 `template-rendering-intent: original`,理论上 SwiftUI
-                    // 该按 original 渲染,但 Stan v1.0.0 在他机器上验证那条 hint
-                    // 没生效 —— `Image(name:)` 走默认 .template 把整张图当
-                    // monochrome mask,foreground 又是白色 ⇒ 整片 tile 空白。
-                    // 加 .renderingMode(.original) 兜底,不依赖 catalog 那条属性。
-                    Image(asset)
-                        .renderingMode(.original)
+                    Image(nsImage: nsImg)
                         .resizable()
                         .interpolation(.high)
                         .scaledToFill()
                         .frame(width: size, height: size)
                         .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
                 } else {
-                    // 透明背景品牌 SVG —— 白底 + 极小 padding 让 logo 大致填满,
-                    // 跟 fullBleed / 真 icon 视觉密度对齐(原 18% padding 让
-                    // 它们明显偏小)。
+                    // 透明背景品牌 SVG/PNG —— 白底 + 极小 padding 让 logo
+                    // 大致填满,跟 fullBleed / 真 icon 视觉密度对齐。
                     RoundedRectangle(cornerRadius: size * 0.22)
                         .fill(Color.white)
-                    Image(asset)
-                        .renderingMode(.original)
+                    Image(nsImage: nsImg)
                         .resizable()
+                        .interpolation(.high)
                         .scaledToFit()
                         .padding(size * 0.06)
                 }
             } else {
                 // 品牌色底块 + 优先 SF Symbol(若提供),否则用 letter 字形。
+                // **bundled asset 加载失败也走这条**(以前会停在前面那个 else if
+                // 里渲染空白白瓦片)—— 即使图标丢了,至少看到品牌色 + 字母。
                 RoundedRectangle(cornerRadius: size * 0.22)
                     .fill(integration.accent)
                 if let symbol = integration.iconSymbol {
