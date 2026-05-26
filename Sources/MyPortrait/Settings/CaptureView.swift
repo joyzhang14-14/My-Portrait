@@ -353,11 +353,15 @@ struct TypingCaptureSettingsView: View {
         }
     }
 
-/// 后台扫 typing_events 的 distinct bundle id。
+/// 后台扫 typing_events 的 distinct bundle id(去重 —— appSummaries 按
+    /// (bundle_id, url) 分组,每个浏览器 URL 一行,bundle_id 会重复)。
     private static func loadDiscovered(_ store: TypingEventStore?) async -> [String] {
         guard let store else { return [] }
         return await Task.detached {
-            (try? store.appSummaries())?.map(\.bundleId) ?? []
+            var seen = Set<String>()
+            return (try? store.appSummaries())?
+                .map(\.bundleId)
+                .filter { seen.insert($0).inserted } ?? []
         }.value
     }
 
