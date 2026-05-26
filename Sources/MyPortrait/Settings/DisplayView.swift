@@ -218,12 +218,25 @@ private struct AppCustomizeCard: View {
         Self.relaunch()
     }
 
-    /// Spawn a detached `open` that fires after this process exits, then quit.
+    /// 重启 app:先 spawn 一个 detached 进程预定好新 instance 启动,
+    /// 再退当前进程。
+    ///
+    /// **不用 `open <path>`** —— 它走 LaunchServices,dev build 的 .app
+    /// 在 DerivedData 下经常没在 LS 注册,抛 -600 procNotFound,结果
+    /// app 退了但没自启。
+    ///
+    /// 改成直接 spawn 可执行文件 `{bundle}/Contents/MacOS/<binary>`,
+    /// 绕开 LaunchServices。父进程 sh 立即 exit,子进程在 sleep 1 后
+    /// fork+exec binary,这时原 app 已经 NSApp.terminate 退完了。
     private static func relaunch() {
-        let path = Bundle.main.bundlePath
+        guard let exec = Bundle.main.executablePath else {
+            NSApp.terminate(nil); return
+        }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; open \"\(path)\""]
+        // 单引号包路径 + \''\'' escape 内部单引号,容忍路径里的空格 / 特殊字符。
+        let escaped = exec.replacingOccurrences(of: "'", with: "'\\''")
+        task.arguments = ["-c", "sleep 1; '\(escaped)' &"]
         try? task.run()
         NSApp.terminate(nil)
     }
