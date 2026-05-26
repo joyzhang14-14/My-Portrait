@@ -114,10 +114,17 @@ targets:
         SWIFT_VERSION: "6.0"
         MARKETING_VERSION: "1.0.76"
         CURRENT_PROJECT_VERSION: "76"
-        # **签名：用 Apple Development 证书，不用自签名 MyPortraitDev**。
-        # 自签名证书（无 Apple 锚定）macOS TCC 对 Screen Recording 主动拒绝
-        # （auth_value 卡 0）。Apple Development 证书 DR 带 `anchor apple generic`，
-        # TCC 才认。Automatic 签名 + Team ID 让 Xcode 自动选 Apple Development cert。
+        # **签名:Xcode build 阶段用 Apple Development 证书签**(contributor
+        # 走自己的 Apple ID,通过 Support/Signing.local.xcconfig 覆盖 team)。
+        #
+        # 这里出来的是**中间产物**;`make release` 阶段 build.sh 会用本地
+        # keychain 自签 cert(MyPortraitDev,跟 My-Smart-Bar / My-Orphies
+        # 同款思路)整体重签后再打 dmg。自签 cert 跨版本 cert subject 稳定,
+        # Sparkle 跨版本兼容,跟 Apple ID 解耦。
+        #
+        # 历史注释曾说"自签名证书 macOS TCC 对 Screen Recording 主动拒绝
+        # (auth_value 卡 0)"—— 经 My-Orphies(MyOrphiesDev 自签 cert)实测,
+        # **这条不成立**(可能早期 macOS 14.x 有过 bug 已修)。
         CODE_SIGN_STYLE: Automatic
         # DEVELOPMENT_TEAM 由 Support/Signing.xcconfig 提供(默认 VYHNX2Y2AL,
         # contributor 可通过 Signing.local.xcconfig 覆盖)。settings.base 里
