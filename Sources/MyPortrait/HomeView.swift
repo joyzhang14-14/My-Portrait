@@ -2146,12 +2146,31 @@ private struct ChipButton: View {
 private struct ProviderModelPicker: View {
     @Environment(AppState.self) private var appState
     @Environment(ChatController.self) private var chat
+    @Environment(ChatStore.self) private var chatStore
     @State private var open = false
     @State private var hover = false
 
-    private var activeIntegration: Integration? { appState.activeAI }
+    /// 当前 conv 锁定的 provider id;无 lock → 走全局 appState。
+    private var activeIntegrationId: String? {
+        if let convId = chat.currentConvId,
+           let conv = chatStore.conversations.first(where: { $0.id == convId }),
+           let locked = conv.providerId {
+            return locked
+        }
+        return appState.activeAIId
+    }
+    private var activeIntegration: Integration? {
+        guard let id = activeIntegrationId else { return nil }
+        return IntegrationRegistry.all.first { $0.id == id }
+    }
     private var activeModel: String {
-        guard let id = activeIntegration?.id else { return "" }
+        guard let id = activeIntegrationId else { return "" }
+        // conv 有 model lock → 用 lock;否则 fallback 全局。
+        if let convId = chat.currentConvId,
+           let conv = chatStore.conversations.first(where: { $0.id == convId }),
+           let locked = conv.model, conv.providerId == id {
+            return locked
+        }
         return appState.currentModel(forIntegrationId: id)
     }
     /// 当前对话已有消息 → 锁定 provider。换 provider 等于 spawn 新子进程,
@@ -2201,6 +2220,8 @@ private struct ProviderModelPicker: View {
 
 private struct PickerPopover: View {
     @Environment(AppState.self) private var appState
+    @Environment(ChatController.self) private var chat
+    @Environment(ChatStore.self) private var chatStore
     let onDismiss: () -> Void
 
     /// Connections 里已连接 + AI Models 页里没被用户关掉 的 provider。
@@ -2211,6 +2232,50 @@ private struct PickerPopover: View {
             appState.isConnected($0.id)
             && Provider.from(integrationId: $0.id) != nil
             && cfg.isProviderEnabled($0.id)
+        }
+    }
+
+    /// 当前 conv 的 provider 锁定值;nil = 没 conv 或没锁,回退全局 appState。
+    private var effectiveActiveProviderId: String? {
+        if let convId = chat.currentConvId,
+           let conv = chatStore.conversations.first(where: { $0.id == convId }),
+           let locked = conv.providerId {
+            return locked
+        }
+        return appState.activeAIId
+    }
+
+    /// 当前 conv 的 model 锁定值;nil = 没 conv 或没锁,回退 appState.currentModel。
+    private func effectiveModel(for integrationId: String) -> String {
+        if let convId = chat.currentConvId,
+           let conv = chatStore.conversations.first(where: { $0.id == convId }),
+           let locked = conv.model, conv.providerId == integrationId {
+            return locked
+        }
+        return appState.currentModel(forIntegrationId: integrationId)
+    }
+
+    /// 点 picker 时:有 conv → 写 conv lock + 同步全局(下次新 conv 继承);
+    /// 没 conv → 只写全局,新建 conv 时会快照。
+    private func applyProvider(_ id: String) {
+        appState.activeAIId = id
+        if let convId = chat.currentConvId {
+            chatStore.updateConversationModel(
+                convId,
+                providerId: id,
+                model: appState.currentModel(forIntegrationId: id)
+            )
+        }
+    }
+
+    private func applyModel(_ m: String, for integrationId: String) {
+        appState.setModel(m, forIntegrationId: integrationId)
+        if let convId = chat.currentConvId {
+            chatStore.updateConversationModel(
+                convId,
+                providerId: integrationId,
+                model: m
+            )
         }
     }
 
@@ -2229,14 +2294,14 @@ private struct PickerPopover: View {
                         subtitle: i.id,
                         icon: "circle.fill",
                         iconColor: i.accent,
-                        active: appState.activeAIId == i.id
+                        active: effectiveActiveProviderId == i.id
                     ) {
-                        appState.activeAIId = i.id
+                        applyProvider(i.id)
                     }
                 }
             }
 
-            if let activeId = appState.activeAIId,
+            if let activeId = effectiveActiveProviderId,
                let provider = Provider.from(integrationId: activeId) {
                 Divider().background(Color.white.opacity(0.08))
                     .padding(.vertical, 4)
@@ -2250,10 +2315,10 @@ private struct PickerPopover: View {
                         subtitle: "",
                         icon: nil,
                         iconColor: nil,
-                        active: appState.currentModel(forIntegrationId: activeId) == m,
+                        active: effectiveModel(for: activeId) == m,
                         mono: true
                     ) {
-                        appState.setModel(m, forIntegrationId: activeId)
+                        applyModel(m, for: activeId)
                         onDismiss()
                     }
                 }

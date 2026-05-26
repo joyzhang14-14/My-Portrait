@@ -43,15 +43,24 @@ struct ContentView: View {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
             // Connections.
-            let resolver: () -> (Provider, String, String?) = {
-                // If a default AI preset is configured, it wins — uses its own
-                // provider, model, and SecretStore-stored API key ref.
+            //
+            // 优先级:
+            //   1. 当前 conv 有锁定 (providerId/model 非 NULL) → 用 conv 的
+            //      这条让"切回老 conv,picker 显示当时选过的 model"成立。
+            //   2. AI preset 标了 default → 用 preset(单一全局默认)
+            //   3. fallback appState.activeAIId(全局 picker 选择)
+            let resolver: (UUID?) -> (Provider, String, String?) = { convId in
+                if let convId,
+                   case let (lockedProvider, lockedModel) = chatStore.conversationModel(id: convId),
+                   let pid = lockedProvider,
+                   let model = lockedModel,
+                   let p = Provider(rawValue: pid) {
+                    return (p, model, nil)
+                }
                 if let preset = ConfigStore.shared.aiModels.presets.first(where: { $0.isDefault }),
                    let p = Provider(rawValue: preset.provider) {
                     return (p, preset.model, preset.apiKeyRef.isEmpty ? nil : preset.apiKeyRef)
                 }
-                // Otherwise fall back to the per-tile connection chosen in
-                // Connections / the input-bar provider picker.
                 guard let id = appState.activeAIId,
                       let p = Provider.from(integrationId: id)
                 else { return (.chatgpt, Provider.chatgpt.defaultModel, nil) }
@@ -69,7 +78,9 @@ struct ContentView: View {
             ScheduleRunner.shared.dispatchCronJob = { cronJob in
                 CronJobExecutor.run(cronJob)
             }
-            CronJobExecutor.providerResolver = resolver
+            // CronJobExecutor 不属于任何 conv,永远走全局(nil convId 让
+            // resolver 跳过 per-conv lock 那条分支)。
+            CronJobExecutor.providerResolver = { resolver(nil) }
             ScheduleRunner.shared.start()
 
             // 点 cron job 通知卡片 → 切 conv + 主窗口拉到前台。

@@ -158,7 +158,7 @@ final class ChatStore {
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         let sql = """
-            SELECT id, title, pinned, created_at, updated_at
+            SELECT id, title, pinned, created_at, updated_at, provider_id, model
             FROM conversations
             ORDER BY pinned DESC, updated_at DESC
         """
@@ -174,9 +174,44 @@ final class ChatStore {
             let pinned = sqlite3_column_int(stmt, 2) != 0
             let created = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
             let updated = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
-            rows.append(Conversation(id: id, title: title, pinned: pinned, createdAt: created, updatedAt: updated))
+            // provider_id / model 是 v2 migration 加的列;NULL 时读不到 cString,
+            // map 给个 nil(fallback 读全局 AppState)。
+            let providerId = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+            let model = sqlite3_column_text(stmt, 6).map { String(cString: $0) }
+            rows.append(Conversation(
+                id: id, title: title, pinned: pinned,
+                createdAt: created, updatedAt: updated,
+                providerId: providerId, model: model
+            ))
         }
         self.conversations = rows
+    }
+
+    /// Per-conv provider/model 锁定。HomeView 的 model picker 切换时调,把
+    /// 当前选择写进这个 conv;切回时读出来用。NULL 表示"跟全局走"。
+    func updateConversationModel(_ id: UUID, providerId: String?, model: String?) {
+        execute("UPDATE conversations SET provider_id=?, model=?, updated_at=? WHERE id=?") { stmt in
+            if let providerId {
+                sqlite3_bind_text(stmt, 1, providerId, -1, Self.SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            if let model {
+                sqlite3_bind_text(stmt, 2, model, -1, Self.SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 2)
+            }
+            sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
+            sqlite3_bind_text(stmt, 4, id.uuidString, -1, Self.SQLITE_TRANSIENT)
+        }
+        reloadConversations()
+    }
+
+    /// 查单条 conv 的 (providerId, model),给 ChatController 起 agent 时用。
+    /// 缺省走 reload 后的内存 cache,不打 DB。
+    func conversationModel(id: UUID) -> (providerId: String?, model: String?) {
+        guard let conv = conversations.first(where: { $0.id == id }) else { return (nil, nil) }
+        return (conv.providerId, conv.model)
     }
 
     // MARK: - DB plumbing
@@ -212,6 +247,13 @@ final class ChatStore {
             );
             CREATE INDEX IF NOT EXISTS messages_conv_time ON messages(conv_id, time);
         """, nil, nil, nil)
+
+        // v2 migration:per-conv provider/model 锁定。NULL → 读全局 appState
+        // 默认(老 conv 行为不变;用户在 picker 改 model 时才填实值)。
+        // ALTER TABLE 是 idempotent —— 列已经存在时 SQLite 报"duplicate column",
+        // 我们忽略错误,跑不跑都得正确。
+        sqlite3_exec(db, "ALTER TABLE conversations ADD COLUMN provider_id TEXT", nil, nil, nil)
+        sqlite3_exec(db, "ALTER TABLE conversations ADD COLUMN model TEXT",       nil, nil, nil)
     }
 
     private func execute(_ sql: String, bind: ((OpaquePointer?) -> Void)? = nil) {
@@ -232,4 +274,10 @@ struct Conversation: Identifiable, Hashable {
     var pinned: Bool
     let createdAt: Date
     var updatedAt: Date
+    /// Per-conversation AI provider lock。Nil → fallback 读全局
+    /// AppState.activeAIId(老 conv / 没在 picker 改过的 conv 走这条)。
+    /// 非 nil → 这个 conv 锁定了 picker 选过的 provider,切走再切回不变。
+    var providerId: String? = nil
+    /// 同上,锁定 model 名(provider 的 availableModels 之一)。
+    var model: String? = nil
 }

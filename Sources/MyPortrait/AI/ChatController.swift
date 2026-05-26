@@ -85,7 +85,11 @@ final class ChatController {
     /// SecretStore key reference for that preset's API key (when the user
     /// has marked an AI preset as default). When ref is nil, ProviderAuth
     /// falls back to the standard per-provider keychain key.
-    var providerResolver: () -> (Provider, String, String?) = {
+    /// 返回当前 conv 应该用的 (provider, model, apiKeyRef)。
+    /// 接收当前 convId(可能 nil = 还没有 conv);ContentView 注入时先查
+    /// chatStore 看这条 conv 有没有锁定的 providerId/model,有就用,否则
+    /// fallback 到全局 appState。
+    var providerResolver: (UUID?) -> (Provider, String, String?) = { _ in
         (.chatgpt, Provider.chatgpt.defaultModel, nil)
     }
 
@@ -426,7 +430,7 @@ final class ChatController {
     /// 按 provider 校验前置条件,失败返回错误文案,可成功返回 nil。
     /// 在 send() / sendEditRequest() 进入异步前先 fail-fast。
     private func providerPrecheckError() -> String? {
-        let (provider, _, _) = providerResolver()
+        let (provider, _, _) = providerResolver(currentConvId)
         switch provider {
         case .chatgpt:
             guard AISetup.shared.isReady else {
@@ -451,7 +455,7 @@ final class ChatController {
     }
 
     private func ensureAgent() async throws {
-        let (provider, model, apiKeyRef) = providerResolver()
+        let (provider, model, apiKeyRef) = providerResolver(currentConvId)
         // If the live agent's provider/model no longer matches what the user
         // picked, tear it down so the new pick takes effect.
         if let agent, let spec = agentSpec, (spec.0 != provider || spec.1 != model) {
