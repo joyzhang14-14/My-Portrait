@@ -69,23 +69,42 @@ struct ImportSettingsView: View {
 
     @ViewBuilder
     private func foundBlock(_ s: ScreenpipeImporter.ScanResult) -> some View {
+        let nothingNew = !s.hasAnythingToImport
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Text("Found screenpipe data")
+                Image(systemName: nothingNew
+                      ? "checkmark.seal.fill"
+                      : "checkmark.circle.fill")
+                    .foregroundStyle(nothingNew ? .blue : .green)
+                Text(nothingNew
+                     ? "Already up to date"
+                     : "Found screenpipe data")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("Re-scan") { Task { await rescan() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-            statRow("Path",       s.sourceDir.path,                        mono: true)
-            statRow("OCR frames", "\(s.frameCount.formatted()) importable",mono: false)
+            statRow("Path",         s.sourceDir.path, mono: true)
+            statRow("OCR frames",   "\(s.frameCount.formatted()) to import", mono: false)
+            statRow("Audio chunks", "\(s.audioChunkCount.formatted()) to import", mono: false)
+            statRow("Audio transcripts", "\(s.audioTranscriptCount.formatted()) to import", mono: false)
+            if let cutoff = s.cutoffMs {
+                statRow("Cutoff",
+                        "only data BEFORE \(Self.shortDate(cutoff)) is imported (your earliest data)",
+                        mono: false)
+            }
             if let mn = s.earliestMs, let mx = s.latestMs {
-                statRow("Range",
+                statRow("Source range",
                         "\(Self.shortDate(mn))  →  \(Self.shortDate(mx))",
                         mono: false)
+            }
+            if nothingNew {
+                Text("Everything older than your cutoff has already been imported. Nothing left to copy.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
             }
             HStack(spacing: 8) {
                 Spacer()
@@ -102,7 +121,10 @@ struct ImportSettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(running || s.frameCount == 0)
+                .disabled(running || nothingNew)
+                .help(nothingNew
+                      ? "Nothing new to import."
+                      : "Copy frames + transcripts older than your cutoff into My Portrait.")
             }
             .padding(.top, 4)
         }
@@ -230,80 +252,30 @@ struct ImportSettingsView: View {
     private func rescan() async {
         scanning = true
         defer { scanning = false }
-        // 后台跑 scan,SQLite query 是同步 IO。
-        let result = await Task.detached(priority: .userInitiated) {
-            // 用户选过自定义路径就只扫那条;否则走 candidateDirs 全扫。
-            if let dir = await MainActor.run(body: { self.overrideDir }) {
-                return Self.scanSingleDir(dir)
+        // 先从 My-Portrait DB 拿 cutoff,再扫盘按 cutoff 过滤源端 count。
+        let dbImpl = services?.db as? PortraitDBImpl
+        let dbPool = dbImpl?.dbPool
+        let override = overrideDir
+        let result = await Task.detached(priority: .userInitiated) { () -> ScreenpipeImporter.ScanResult in
+            let cutoff: Int64? = {
+                guard let pool = dbPool else { return nil }
+                return (try? pool.read { db in
+                    try Int64.fetchOne(db, sql: "SELECT MIN(timestamp_ms) FROM frames")
+                }) ?? nil
+            }()
+            if let dir = override {
+                return (try? ScreenpipeImporter.scanSingle(dir: dir, cutoffMs: cutoff))
+                    ?? ScreenpipeImporter.ScanResult(
+                        sourceDir: dir,
+                        dbPath: dir.appendingPathComponent("db.sqlite"),
+                        exists: false, cutoffMs: cutoff,
+                        frameCount: 0, audioChunkCount: 0, audioTranscriptCount: 0,
+                        earliestMs: nil, latestMs: nil
+                    )
             }
-            return ScreenpipeImporter.scan()
+            return ScreenpipeImporter.scan(cutoffMs: cutoff)
         }.value
         scan = result
-    }
-
-    /// 单目录扫盘(用户 picker 选的)。内部复用 ScreenpipeImporter.scan 的
-    /// candidate 路径检测逻辑,但只测一条路径。nonisolated 让 Task.detached
-    /// 能直接调,不被 MainActor 隔离阻塞。
-    nonisolated private static func scanSingleDir(_ dir: URL) -> ScreenpipeImporter.ScanResult {
-        let db = dir.appendingPathComponent("db.sqlite")
-        guard FileManager.default.fileExists(atPath: db.path) else {
-            return ScreenpipeImporter.ScanResult(
-                sourceDir: dir, dbPath: db, exists: false,
-                frameCount: 0, earliestMs: nil, latestMs: nil
-            )
-        }
-        // 把 dir 临时塞 candidateDirs 头部 —— 简单粗暴:直接复用全 scan,它会
-        // 优先返回找到的第一个。但 candidate 是固定的,这里不能直接覆盖。
-        // 改:复刻一份 scan 逻辑只跑这条路径。
-        do {
-            var c = Configuration()
-            c.readonly = true
-            let q = try DatabaseQueue(path: db.path, configuration: c)
-            let (cnt, minMs, maxMs): (Int, Int64?, Int64?) = try q.read { d in
-                let cnt = (try? Int.fetchOne(
-                    d,
-                    sql: """
-                        SELECT COUNT(*) FROM frames f
-                        INNER JOIN ocr_text o ON o.frame_id = f.id
-                        WHERE o.text IS NOT NULL AND o.text != ''
-                        """
-                )) ?? 0
-                let minTs: String? = (try? String.fetchOne(d, sql: "SELECT MIN(timestamp) FROM frames")) ?? nil
-                let maxTs: String? = (try? String.fetchOne(d, sql: "SELECT MAX(timestamp) FROM frames")) ?? nil
-                return (cnt, minTs.flatMap(isoToMs), maxTs.flatMap(isoToMs))
-            }
-            return ScreenpipeImporter.ScanResult(
-                sourceDir: dir, dbPath: db, exists: true,
-                frameCount: cnt, earliestMs: minMs, latestMs: maxMs
-            )
-        } catch {
-            return ScreenpipeImporter.ScanResult(
-                sourceDir: dir, dbPath: db, exists: false,
-                frameCount: 0, earliestMs: nil, latestMs: nil
-            )
-        }
-    }
-
-    /// 复用 ScreenpipeImporter 私有的 ISO→ms 转换(public-internal 接口)。
-    /// scanSingleDir 里要用,通过这个 trampoline 转发。
-    nonisolated private static func isoToMs(_ s: String) -> Int64? {
-        // 跟 ScreenpipeImporter.isoToMs 同实现 —— private 不能跨 struct
-        // 调,这里复刻一份(就 10 行,不抽 protocol)。
-        guard !s.isEmpty else { return nil }
-        let iso1 = ISO8601DateFormatter()
-        iso1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso1.date(from: s) { return Int64(d.timeIntervalSince1970 * 1000) }
-        let iso2 = ISO8601DateFormatter()
-        iso2.formatOptions = [.withInternetDateTime]
-        if let d = iso2.date(from: s) { return Int64(d.timeIntervalSince1970 * 1000) }
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone(identifier: "UTC")
-        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        if let d = df.date(from: s) { return Int64(d.timeIntervalSince1970 * 1000) }
-        df.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
-        if let d = df.date(from: s) { return Int64(d.timeIntervalSince1970 * 1000) }
-        return nil
     }
 
     private func pickFolder() {

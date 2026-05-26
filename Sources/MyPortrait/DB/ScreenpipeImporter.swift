@@ -41,14 +41,24 @@ struct ScreenpipeImporter: Sendable {
     static let defaultSourceDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".screenpipe")
 
-    /// 扫盘结果。UI 自动扫盘后展示给用户。
+    /// 扫盘结果。UI 自动扫盘后展示给用户。**count 字段都是按 cutoff 过滤
+    /// 后"还需要导入的"数量**,不是源端总数 —— 用户能直接判断"按下 Import
+    /// 会写多少行 / 还有没有数据要导"。
     struct ScanResult: Sendable {
         let sourceDir: URL
         let dbPath: URL
         let exists: Bool          // db.sqlite 在不在
-        let frameCount: Int       // ocr_text 关联的可导入 frame 数
-        let earliestMs: Int64?    // 源端最早 ts(给"将导 < cutoff"做对比)
-        let latestMs: Int64?
+        let cutoffMs: Int64?      // 用户当前 cutoff(My-Portrait 最早 frame ts)
+        let frameCount: Int       // 待导入 OCR frame 数(已减掉 < cutoff 过滤)
+        let audioChunkCount: Int  // 待导入 audio chunk 数
+        let audioTranscriptCount: Int  // 待导入 transcript 数
+        let earliestMs: Int64?    // 源端最早 ts(显示用)
+        let latestMs: Int64?      // 源端最晚 ts
+
+        /// 0 = 全都已导(按钮该灰)。
+        var hasAnythingToImport: Bool {
+            frameCount > 0 || audioTranscriptCount > 0
+        }
     }
 
     /// 候选扫描位置(按优先级)。screenpipe 一般固定 ~/.screenpipe,但
@@ -62,48 +72,119 @@ struct ScreenpipeImporter: Sendable {
         ]
     }
 
-    /// 扫盘:找第一个有 db.sqlite 的候选目录,统计可导入元数据。
-    /// 找不到返回 ScanResult(exists=false) 让 UI 显示"not found"。
-    static func scan() -> ScanResult {
+    /// 扫盘:找第一个有 db.sqlite 的候选目录,按 cutoff 过滤统计**待导入**
+    /// 元数据。找不到返回 exists=false。
+    /// - Parameter cutoffMs: My-Portrait 当前最早 frame ts。**所有 count 都
+    ///   按 source.ts < cutoff 过滤** —— 跟真正导入用的边界一致。nil = 全统计。
+    static func scan(cutoffMs: Int64?) -> ScanResult {
         for dir in candidateDirs() {
             let db = dir.appendingPathComponent("db.sqlite")
             guard FileManager.default.fileExists(atPath: db.path) else { continue }
-            // 拿统计
             do {
-                var c = Configuration()
-                c.readonly = true
-                let q = try DatabaseQueue(path: db.path, configuration: c)
-                let (cnt, minMs, maxMs): (Int, Int64?, Int64?) = try q.read { d in
-                    let cnt = (try? Int.fetchOne(
-                        d,
-                        sql: """
-                            SELECT COUNT(*) FROM frames f
-                            INNER JOIN ocr_text o ON o.frame_id = f.id
-                            WHERE o.text IS NOT NULL AND o.text != ''
-                            """
-                    )) ?? 0
-                    // String.fetchOne 返回 String?(SQL null 时 nil),外面 try? 又
-                    // 套一层 Optional(throws 失败 nil),用 (try? ...).flatMap { $0 }
-                    // 把 String?? → String?。
-                    let minTs: String? = (try? String.fetchOne(d, sql: "SELECT MIN(timestamp) FROM frames")) ?? nil
-                    let maxTs: String? = (try? String.fetchOne(d, sql: "SELECT MAX(timestamp) FROM frames")) ?? nil
-                    return (cnt, minTs.flatMap(isoToMs), maxTs.flatMap(isoToMs))
-                }
-                return ScanResult(
-                    sourceDir: dir, dbPath: db, exists: true,
-                    frameCount: cnt, earliestMs: minMs, latestMs: maxMs
-                )
+                return try scanSingle(dir: dir, dbPath: db, cutoffMs: cutoffMs)
             } catch {
                 importLog.warning("scan: failed to open \(db.path, privacy: .public): \(String(describing: error), privacy: .public)")
                 continue
             }
         }
-        // 全没找到 → 用 default 路径返回 exists=false
         return ScanResult(
             sourceDir: defaultSourceDir,
             dbPath: defaultSourceDir.appendingPathComponent("db.sqlite"),
-            exists: false, frameCount: 0,
+            exists: false, cutoffMs: cutoffMs,
+            frameCount: 0, audioChunkCount: 0, audioTranscriptCount: 0,
             earliestMs: nil, latestMs: nil
+        )
+    }
+
+    /// 单目录扫盘(自动扫 / 用户 picker 选都用这个)。
+    /// **internal** —— UI 兜底 picker 也直接调。
+    static func scanSingle(dir: URL, dbPath: URL? = nil, cutoffMs: Int64?) throws -> ScanResult {
+        let db = dbPath ?? dir.appendingPathComponent("db.sqlite")
+        guard FileManager.default.fileExists(atPath: db.path) else {
+            return ScanResult(
+                sourceDir: dir, dbPath: db, exists: false, cutoffMs: cutoffMs,
+                frameCount: 0, audioChunkCount: 0, audioTranscriptCount: 0,
+                earliestMs: nil, latestMs: nil
+            )
+        }
+        var c = Configuration()
+        c.readonly = true
+        let q = try DatabaseQueue(path: db.path, configuration: c)
+        // ISO cutoff 给 SQL 用。nil = 全统计。
+        let cutoffISO: String? = cutoffMs.map { ms in
+            let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return fmt.string(from: date)
+        }
+        let (fc, ac, tc, minMs, maxMs): (Int, Int, Int, Int64?, Int64?) = try q.read { d in
+            // frames count(JOIN ocr_text + 按 cutoff 过滤)
+            let frameSQL: String
+            if cutoffISO != nil {
+                frameSQL = """
+                    SELECT COUNT(*) FROM frames f
+                    INNER JOIN ocr_text o ON o.frame_id = f.id
+                    WHERE o.text IS NOT NULL AND o.text != ''
+                      AND f.timestamp < :cutoff
+                    """
+            } else {
+                frameSQL = """
+                    SELECT COUNT(*) FROM frames f
+                    INNER JOIN ocr_text o ON o.frame_id = f.id
+                    WHERE o.text IS NOT NULL AND o.text != ''
+                    """
+            }
+            var frameArgs: StatementArguments = [:]
+            if let cu = cutoffISO { frameArgs = ["cutoff": cu] }
+            let fc = (try? Int.fetchOne(d, sql: frameSQL, arguments: frameArgs)) ?? 0
+
+            // audio_transcripts count(按 cutoff 过滤)
+            let trSQL: String
+            if cutoffISO != nil {
+                trSQL = """
+                    SELECT COUNT(*) FROM audio_transcriptions
+                    WHERE transcription IS NOT NULL AND transcription != ''
+                      AND timestamp < :cutoff
+                    """
+            } else {
+                trSQL = """
+                    SELECT COUNT(*) FROM audio_transcriptions
+                    WHERE transcription IS NOT NULL AND transcription != ''
+                    """
+            }
+            var trArgs: StatementArguments = [:]
+            if let cu = cutoffISO { trArgs = ["cutoff": cu] }
+            let tc = (try? Int.fetchOne(d, sql: trSQL, arguments: trArgs)) ?? 0
+
+            // audio chunks 数:有 transcripts 关联的(跟真正 import 用的口径一致)
+            let acSQL: String
+            if cutoffISO != nil {
+                acSQL = """
+                    SELECT COUNT(DISTINCT ac.id) FROM audio_chunks ac
+                    INNER JOIN audio_transcriptions at ON at.audio_chunk_id = ac.id
+                    WHERE at.transcription IS NOT NULL AND at.transcription != ''
+                      AND at.timestamp < :cutoff
+                    """
+            } else {
+                acSQL = """
+                    SELECT COUNT(DISTINCT ac.id) FROM audio_chunks ac
+                    INNER JOIN audio_transcriptions at ON at.audio_chunk_id = ac.id
+                    WHERE at.transcription IS NOT NULL AND at.transcription != ''
+                    """
+            }
+            var acArgs: StatementArguments = [:]
+            if let cu = cutoffISO { acArgs = ["cutoff": cu] }
+            let ac = (try? Int.fetchOne(d, sql: acSQL, arguments: acArgs)) ?? 0
+
+            // earliest / latest 源端日期 —— 不带 cutoff,UI 显示源端时间范围。
+            let minTs: String? = (try? String.fetchOne(d, sql: "SELECT MIN(timestamp) FROM frames")) ?? nil
+            let maxTs: String? = (try? String.fetchOne(d, sql: "SELECT MAX(timestamp) FROM frames")) ?? nil
+            return (fc, ac, tc, minTs.flatMap(isoToMs), maxTs.flatMap(isoToMs))
+        }
+        return ScanResult(
+            sourceDir: dir, dbPath: db, exists: true, cutoffMs: cutoffMs,
+            frameCount: fc, audioChunkCount: ac, audioTranscriptCount: tc,
+            earliestMs: minMs, latestMs: maxMs
         )
     }
 
