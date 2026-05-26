@@ -33,6 +33,13 @@ if [[ -z "$SIGN_UPDATE" ]]; then
 fi
 
 VERSION=$(basename "$DMG_PATH" .dmg | sed 's/MyPortrait-//')
+# **Sparkle 比较版本用 build number(CFBundleVersion),不是 marketing
+# version(CFBundleShortVersionString)**。早期 sparkle:version 直接塞
+# "1.0.82" → Sparkle 字符串比较 "1.0.82" vs running CFBundleVersion="82"
+# 判定 running 更新 → 自动升永远 "You're up to date"(实际上不是)。
+# 从 .app 的 Info.plist 读 CFBundleVersion 当 sparkle:version。
+BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" \
+    "build/export/MyPortrait.app/Contents/Info.plist")
 SIZE=$(stat -f%z "$DMG_PATH")
 SIG=$("$SIGN_UPDATE" "$DMG_PATH")
 
@@ -51,7 +58,7 @@ Sparkle appcast item:
         <item>
             <title>Version ${VERSION}</title>
             <pubDate>${PUB_DATE}</pubDate>
-            <sparkle:version>${VERSION}</sparkle:version>
+            <sparkle:version>${BUILD}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
