@@ -142,6 +142,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(typingToggle)
         menu.addItem(.separator())
 
+        // 版本号行 —— 灰色 disabled item,用户看一眼就知道当前装的是哪版。
+        // 从 Info.plist 读 CFBundleShortVersionString(marketing version)。
+        let versionString = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let versionItem = NSMenuItem(title: "Version \(versionString)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        menu.addItem(.separator())
+
         let openWindow = NSMenuItem(
             title: "Open My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
         )
