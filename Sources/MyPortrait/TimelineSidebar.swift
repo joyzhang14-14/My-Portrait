@@ -128,21 +128,10 @@ struct TimelineSidebar: View {
     // MARK: section card wrapper
 
     /// Wraps a section's header + rows in a floating glass card.
+    /// macOS 26+ → 真 Liquid Glass `.glassEffect()`;macOS 15-25 → fallback
+    /// `.glassCard()`(ultraThinMaterial)。
     @ViewBuilder
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.sm) {
-            content()
-        }
-        .padding(Theme.Space.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard()
-    }
-
-    /// 同 sectionCard,但用 macOS 26 Liquid Glass(老系统 fallback)。
-    /// Timeline 的 ACTIVE APPS / AUDIO 两张卡专用 —— 它们贴主 timeline 内容,
-    /// 折射 / 高光跟动态背景反应明显,值得给这两张做真 Glass。
-    @ViewBuilder
-    private func liquidGlassSectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
             content()
         }
@@ -169,7 +158,7 @@ struct TimelineSidebar: View {
     // MARK: Active Apps
 
     private var activeAppsSection: some View {
-        liquidGlassSectionCard {
+        sectionCard {
             SectionHeader(title: "ACTIVE APPS", count: activeApps.count)
             if activeApps.isEmpty && !loading {
                 EmptyRow(text: "No apps captured at this moment.")
@@ -186,7 +175,7 @@ struct TimelineSidebar: View {
     // MARK: Audio
 
     private var audioSection: some View {
-        liquidGlassSectionCard {
+        sectionCard {
             SectionHeader(title: "AUDIO", count: audioItems.count)
             if audioItems.isEmpty && !loading {
                 EmptyRow(text: "No audio in the surrounding window.")
