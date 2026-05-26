@@ -1566,60 +1566,336 @@ struct MemorySettingsView: View {
     }
 }
 
-/// 暂存改动的内容预览 —— 改动前 vs 改动后并排。新文件只显示"现文"。
+// MARK: - 暂存改动预览的子组件
+
+/// 解析后的 markdown 文件:frontmatter key-value + body 文本 + 可选 H1 title。
+private struct ParsedConceptFile {
+    var frontmatter: [(key: String, value: String)] = []
+    var title: String? = nil
+    var body: String = ""
+
+    static func parse(_ raw: String) -> ParsedConceptFile {
+        var out = ParsedConceptFile()
+        var rest = raw
+        // YAML frontmatter 在 `---` 之间
+        if rest.hasPrefix("---\n") {
+            let afterOpen = rest.dropFirst(4)
+            if let end = afterOpen.range(of: "\n---\n") {
+                let yaml = afterOpen[..<end.lowerBound]
+                for line in yaml.split(separator: "\n", omittingEmptySubsequences: false) {
+                    guard let colon = line.firstIndex(of: ":") else { continue }
+                    let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+                    let value = line[line.index(after: colon)...]
+                        .trimmingCharacters(in: .whitespaces)
+                    if !key.isEmpty {
+                        out.frontmatter.append((key: key, value: value))
+                    }
+                }
+                rest = String(afterOpen[end.upperBound...])
+            }
+        }
+        // body 的第一行 `# Title` 抽出来当标题
+        let lines = rest.split(separator: "\n", omittingEmptySubsequences: false)
+        if let i = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+           lines[i].hasPrefix("# ") {
+            out.title = String(lines[i].dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            out.body = lines.enumerated()
+                .filter { $0.offset != i }
+                .map { String($0.element) }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            out.body = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return out
+    }
+
+    /// 给 UI 当 chip 显示的精选字段顺序 + 别名。
+    static let chipOrder: [(key: String, label: String)] = [
+        ("weight",        "Weight"),
+        ("type",          "Type"),
+        ("category",      "Category"),
+        ("source",        "Source"),
+        ("pinned",        "Pinned"),
+        ("merge_count",   "Merges"),
+        ("created",       "Created"),
+        ("last_modified", "Modified"),
+        ("primary_label", "Label"),
+    ]
+
+    /// 把 evidence_event_ids / occurrences 这种数组字段解析成 "N items"。
+    func arrayCount(_ key: String) -> Int? {
+        guard let v = frontmatter.first(where: { $0.key == key })?.value else { return nil }
+        let inner = v.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if inner.trimmingCharacters(in: .whitespaces).isEmpty { return 0 }
+        return inner.split(separator: ",").count
+    }
+}
+
+/// 暂存改动的内容预览 —— 解析 frontmatter + 标题 + body,左右对照旧/新版。
 private struct StagedChangePreview: View {
     let change: MemoryStaging.StagedChange
     @Environment(\.dismiss) private var dismiss
 
+    /// 显示模式:after-only(默认)/ split(并排 diff)。
+    @State private var splitView: Bool = false
+
+    private var parsedAfter: ParsedConceptFile { ParsedConceptFile.parse(change.afterText) }
+    private var parsedBefore: ParsedConceptFile? {
+        change.beforeText.map(ParsedConceptFile.parse)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(change.isNew ? "NEW" : "CHANGED")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(change.isNew ? Color.green : Color.orange)
-                Text(change.displayTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
-            .padding(12)
+            header
             Divider()
+            pathBar
+            Divider()
+            content
+        }
+        .frame(width: 900, height: 640)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: header
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            StatusBadge(isNew: change.isNew)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(parsedAfter.title ?? change.displayTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                Text(change.displayTitle)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if parsedBefore != nil {
+                Picker("", selection: $splitView) {
+                    Image(systemName: "doc.text").tag(false)
+                    Image(systemName: "rectangle.split.2x1").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 110)
+                .help(splitView ? "Side-by-side diff" : "Show new version only")
+            }
+            Button("Close") { dismiss() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    // MARK: path bar
+
+    private var pathBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
             Text(change.relativePath)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.tertiary)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-            Divider()
-            if let before = change.beforeText {
-                HStack(spacing: 0) {
-                    pane("Before", before)
-                    Divider()
-                    pane("After", change.afterText)
-                }
-            } else {
-                pane("New file", change.afterText)
-            }
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
         }
-        .frame(width: 860, height: 580)
+        .padding(.horizontal, 16).padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.05))
     }
 
-    private func pane(_ label: String, _ text: String) -> some View {
+    // MARK: content
+
+    @ViewBuilder
+    private var content: some View {
+        if splitView, let before = parsedBefore {
+            HStack(spacing: 0) {
+                pane(label: "Before", parsed: before)
+                Divider()
+                pane(label: "After", parsed: parsedAfter)
+            }
+        } else {
+            pane(label: parsedBefore == nil ? "New file" : "After", parsed: parsedAfter)
+        }
+    }
+
+    private func pane(label: String, parsed: ParsedConceptFile) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
+            HStack(spacing: 6) {
+                Text(label.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
             Divider()
             ScrollView {
-                Text(text)
-                    .font(.system(size: 11, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+                VStack(alignment: .leading, spacing: 14) {
+                    metadataBlock(parsed)
+                    bodyBlock(parsed)
+                    rawFrontmatterBlock(parsed)
+                }
+                .padding(14)
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: metadata chips
+
+    @ViewBuilder
+    private func metadataBlock(_ p: ParsedConceptFile) -> some View {
+        let chips = collectChips(p)
+        if !chips.isEmpty {
+            FlowLayout(spacing: 6) {
+                ForEach(chips, id: \.label) { c in
+                    MetaChip(label: c.label, value: c.value, accent: c.accent)
+                }
+            }
+        }
+    }
+
+    private struct ChipData { let label: String; let value: String; let accent: Bool }
+
+    private func collectChips(_ p: ParsedConceptFile) -> [ChipData] {
+        var out: [ChipData] = []
+        let dict = Dictionary(uniqueKeysWithValues:
+            p.frontmatter.map { ($0.key, $0.value) })
+        for entry in ParsedConceptFile.chipOrder {
+            if let v = dict[entry.key], !v.isEmpty,
+               v != "null", v != "[]", v != "false" {
+                out.append(ChipData(label: entry.label, value: v, accent: false))
+            }
+        }
+        if let n = p.arrayCount("evidence_event_ids"), n > 0 {
+            out.append(ChipData(label: "Evidence", value: "\(n) ref\(n == 1 ? "" : "s")", accent: true))
+        }
+        if let n = p.arrayCount("occurrences"), n > 0 {
+            out.append(ChipData(label: "Occurrences", value: "\(n)", accent: false))
+        }
+        if let tags = dict["tags"], !tags.isEmpty, tags != "[]" {
+            let clean = tags.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            let list = clean.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            for t in list {
+                out.append(ChipData(label: "tag", value: t, accent: false))
+            }
+        }
+        return out
+    }
+
+    // MARK: body
+
+    @ViewBuilder
+    private func bodyBlock(_ p: ParsedConceptFile) -> some View {
+        if !p.body.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if let attributed = markdownAttributed(p.body) {
+                    Text(attributed)
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(p.body)
+                        .font(.system(size: 12, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.secondary.opacity(0.06))
+            )
+        }
+    }
+
+    private func markdownAttributed(_ s: String) -> AttributedString? {
+        var opts = AttributedString.MarkdownParsingOptions()
+        opts.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        return try? AttributedString(markdown: s, options: opts)
+    }
+
+    // MARK: raw frontmatter (collapsed by default)
+
+    @ViewBuilder
+    private func rawFrontmatterBlock(_ p: ParsedConceptFile) -> some View {
+        if !p.frontmatter.isEmpty {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(p.frontmatter.enumerated()), id: \.offset) { _, kv in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(kv.key)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 130, alignment: .leading)
+                            Text(kv.value.isEmpty ? "—" : kv.value)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.primary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Frontmatter (\(p.frontmatter.count) field\(p.frontmatter.count == 1 ? "" : "s"))")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// 状态徽章:NEW(绿)/ CHANGED(橙)。
+private struct StatusBadge: View {
+    let isNew: Bool
+    var body: some View {
+        Text(isNew ? "NEW" : "CHANGED")
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(
+                Capsule().fill(isNew ? Color.green : Color.orange)
+            )
+    }
+}
+
+/// 单条 metadata chip:label 灰小字 + value 加粗。accent=true 用蓝色强调。
+private struct MetaChip: View {
+    let label: String
+    let value: String
+    var accent: Bool = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Text(value)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(accent ? .blue : .primary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(accent
+                      ? Color.blue.opacity(0.12)
+                      : Color.secondary.opacity(0.10))
+                .overlay(
+                    Capsule().stroke(
+                        accent ? Color.blue.opacity(0.30) : Color.secondary.opacity(0.18),
+                        lineWidth: 0.7)
+                )
+        )
     }
 }
 
