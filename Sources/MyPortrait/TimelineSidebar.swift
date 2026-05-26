@@ -23,6 +23,7 @@ struct TimelineSidebar: View {
 
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.services) private var services
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var activeApps: [ActiveAppEntry] = []
     @State private var audioItems: [AudioTranscriptEntry] = []
@@ -145,12 +146,18 @@ struct TimelineSidebar: View {
         if translucent {
             card.liquidGlassCard()
         } else {
+            // **fill / stroke 必须跟着 colorScheme 切** —— 之前钉死 white-on-X
+            // 在 Light 主题侧栏(奶白 + 浅薰衣草)上完全融成一片,看不见卡片
+            // 边界。Dark 仍是白底浮起,Light 改成 black 低透明做"压下去"的
+            // 卡边。
+            let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
+            let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
             card.background(
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(fill)
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 0.8)
+                            .stroke(stroke, lineWidth: 0.8)
                     )
             )
         }
