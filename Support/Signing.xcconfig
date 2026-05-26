@@ -1,19 +1,31 @@
-// Code-signing team for the MyPortrait Xcode target.
+// Code-signing settings for the MyPortrait Xcode target.
 //
-// The default below is the upstream maintainer's Apple Developer team. It lets
-// the maintainer run `xcodegen generate` and build without any extra setup.
+// **Defaults below are for fresh contributors.** They use Xcode's automatic
+// signing with the upstream maintainer's Apple Developer team — which works
+// out of the box only for the maintainer; everyone else has to override.
 //
-// Contributors (anyone not in team VYHNX2Y2AL) must override it with their own
-// Apple ID's team — otherwise Xcode falls back to ad-hoc "Sign to Run Locally",
-// whose designated requirement contains a `cdhash` that changes on every
-// rebuild, which makes TCC silently revoke screen-recording / mic permission
-// every time you build.
+// To override (gitignored, per-machine):
+//   Create `Support/Signing.local.xcconfig` with whichever of these settings
+//   you need:
 //
-// To override: create `Support/Signing.local.xcconfig` (gitignored) with:
-//     DEVELOPMENT_TEAM = YOURTEAMID
-// then re-run `xcodegen generate`. The #include? below is "optional include"
+//   Contributor (you have your own Apple ID, want stable TCC permissions):
+//       DEVELOPMENT_TEAM = YOURTEAMID
+//
+//   Maintainer (use the local self-signed cert that the release pipeline uses,
+//   so Xcode debug builds and release dmg share the same TCC entries):
+//       CODE_SIGN_STYLE   = Manual
+//       CODE_SIGN_IDENTITY = MyPortraitDev
+//       DEVELOPMENT_TEAM  =
+//
+// Then re-run `xcodegen generate`. The `#include?` below is "optional include"
 // (Xcode 11+ syntax) — missing file is fine, present file wins.
+//
+// Why these settings have to live in an xcconfig and not in project.yml's
+// `settings.base`: settings.base entries are emitted as per-target build
+// settings in the .pbxproj, which **override xcconfig values**. Putting the
+// defaults here is what lets Signing.local.xcconfig actually win.
 
+CODE_SIGN_STYLE  = Automatic
 DEVELOPMENT_TEAM = VYHNX2Y2AL
 
 #include? "Signing.local.xcconfig"
