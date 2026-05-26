@@ -12,7 +12,6 @@ struct SpeakersSettingsView: View {
     @State private var search = ""
     @State private var organizing = false
     @State private var organizeError: String? = nil
-    @State private var showCountdown = false
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -29,8 +28,7 @@ struct SpeakersSettingsView: View {
             ProgressHeader(identified: identified.count, total: rows.count)
 
             VoiceTrainingCard(
-                existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty },
-                onStart: { showCountdown = true }
+                existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty }
             )
 
             if !unidentified.isEmpty {
@@ -73,17 +71,6 @@ struct SpeakersSettingsView: View {
             }
         }
         .task { reload() }
-        .sheet(isPresented: $showCountdown) {
-            VoiceTrainingSheet(
-                onFinish: {
-                    showCountdown = false
-                    VoiceTrainer.shared.assign(
-                        name: ConfigStore.shared.current.capture.audio.userName
-                    )
-                },
-                onCancel: { showCountdown = false }
-            )
-        }
     }
 
     // MARK: - Toolbar
@@ -572,18 +559,31 @@ private struct StatPill: View {
 
 /// 声纹训练卡片。复刻 screenpipe 的格式：填名字 → Start training → 30s 倒计时
 /// 期间正常说话 → 后台把那段时间窗的麦克风声纹簇命名成你。
+/// 自洽的声纹训练 card —— 跟 onboarding 里 SpeakerTrainingStep 完全同款流程:
+/// 不依赖 audio.enabled / speakerIdEnabled 这两个 toggle 提前开,而是
+/// 点 Start 时临时强开,训练完(success/failure/cancel)恢复成原值。
+///
+/// 只要求:mic 权限给了 + 名字填了。
+///
+/// 自带 PermissionMonitor + 自带训练倒计时 sheet,SpeakersView 把它当
+/// 普通 view 放进去就行。
 struct VoiceTrainingCard: View {
     let existingNames: [String]
-    let onStart: () -> Void
 
-    private var cfg: ConfigStore { ConfigStore.shared }
-    private var trainer: VoiceTrainer { VoiceTrainer.shared }
+    @State private var cfg = ConfigStore.shared
+    @StateObject private var monitor = PermissionMonitor()
+    @State private var trainer = VoiceTrainer.shared
+    @State private var showCountdown = false
+    /// 训练前的 audio.enabled / speakerIdEnabled,完成时还原。
+    @State private var prevAudioEnabled: Bool? = nil
+    @State private var prevSpeakerIdEnabled: Bool? = nil
 
     private var name: String { cfg.current.capture.audio.userName }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
-    private var audioOn: Bool { cfg.current.capture.audio.enabled }
-    private var speakerOn: Bool { cfg.current.capture.audio.speakerIdEnabled }
-    private var blocked: Bool { trimmedName.isEmpty || !audioOn || !speakerOn || trainer.isRunning }
+    private var micGranted: Bool { monitor.microphone == .granted }
+    private var blocked: Bool {
+        trimmedName.isEmpty || !micGranted || trainer.isRunning
+    }
 
     private var suggestions: [String] {
         let q = trimmedName.lowercased()
@@ -603,7 +603,7 @@ struct VoiceTrainingCard: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.95))
             }
-            Text("Read a short passage aloud for ~30 seconds so My Portrait can recognise your voice across recordings.")
+            Text("Read a short passage aloud for ~30 seconds. My Portrait will briefly turn on your microphone for the training session and turn it back off when it's done.")
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
@@ -638,17 +638,15 @@ struct VoiceTrainingCard: View {
                 }
             }
 
-            if !audioOn {
-                warningRow("Turn on audio capture first.")
-            } else if !speakerOn {
-                warningRow("Turn on speaker identification first.")
+            if !micGranted {
+                warningRow("Microphone permission needed — grant it in System Settings → Privacy.")
             }
 
             HStack {
                 statusLine
                 Spacer()
-                Button(action: onStart) {
-                    Text("Start training")
+                Button(action: startTraining) {
+                    Text(trainer.isRunning ? "Training…" : "Start training")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.white.opacity(0.95))
                         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -673,6 +671,67 @@ struct VoiceTrainingCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.white.opacity(0.12), lineWidth: 0.7))
         )
+        .onAppear { monitor.start() }
+        .onDisappear { monitor.stop() }
+        // trainer.phase 变 success/failure → 还原 audio toggle。
+        .onChange(of: phaseKey(trainer.phase)) { _, newKey in
+            if newKey == "success" || newKey == "failure" {
+                restoreAudioState()
+            }
+        }
+        // 倒计时 sheet 自己持有,SpeakersView 不再管它。
+        .sheet(isPresented: $showCountdown) {
+            VoiceTrainingSheet(
+                onFinish: {
+                    showCountdown = false
+                    trainer.assign(name: trimmedName)
+                },
+                onCancel: {
+                    showCountdown = false
+                    // 用户取消 → 没真训练,直接还原 toggle。
+                    restoreAudioState()
+                }
+            )
+        }
+    }
+
+    // MARK: - Audio toggle 临时拉起 / 还原
+
+    private func startTraining() {
+        guard !blocked else { return }
+        // 备份原值。如果之前已 success/failure,prevXxx 可能还残留之前那次
+        // 的值;重新覆盖。
+        prevAudioEnabled = cfg.current.capture.audio.enabled
+        prevSpeakerIdEnabled = cfg.current.capture.audio.speakerIdEnabled
+        // 强制开 —— Services pipeline 自动起 AudioCaptureService + 分离。
+        cfg.mutate { c in
+            c.capture.audio.enabled = true
+            c.capture.audio.speakerIdEnabled = true
+        }
+        showCountdown = true
+    }
+
+    /// 恢复 audio.enabled / speakerIdEnabled 到训练前的值。idempotent —— 多次
+    /// 调用(cancel + phase change)只生效一次。
+    private func restoreAudioState() {
+        guard let prevAudio = prevAudioEnabled,
+              let prevSpk = prevSpeakerIdEnabled else { return }
+        cfg.mutate { c in
+            c.capture.audio.enabled = prevAudio
+            c.capture.audio.speakerIdEnabled = prevSpk
+        }
+        prevAudioEnabled = nil
+        prevSpeakerIdEnabled = nil
+    }
+
+    /// VoiceTrainer.Phase 不是 Equatable-keyed-by-case,onChange 要个稳定 key。
+    private func phaseKey(_ p: VoiceTrainer.Phase) -> String {
+        switch p {
+        case .idle: return "idle"
+        case .matching: return "matching"
+        case .success: return "success"
+        case .failure: return "failure"
+        }
     }
 
     @ViewBuilder private var statusLine: some View {
