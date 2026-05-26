@@ -440,4 +440,68 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     }
 
     static var isInstalled: Bool { claudeBinaryPath != nil }
+
+    // MARK: - 真连通性测试
+
+    enum ProbeError: LocalizedError {
+        case notInstalled
+        case timeout
+        case cliError(String)
+        case noReply
+        var errorDescription: String? {
+            switch self {
+            case .notInstalled:    return "Claude Code CLI (`claude`) not found. Install with `brew install claude` or run the official install script."
+            case .timeout:         return "Claude Code didn't respond in 30 seconds. Make sure you've run `claude login` in Terminal."
+            case .cliError(let m): return "Claude Code CLI error: \(m)"
+            case .noReply:         return "Claude Code exited without a reply. Try `claude --print hi` in Terminal to debug."
+            }
+        }
+    }
+
+    /// 真连通性测试:spawn claude + 发 "hi" + 等回复。
+    ///   - 收到 textDelta / assistantFinalText / agentEnd(带过文本)→ true
+    ///   - 30s 超时 / 进程报错 / 退出无回复 → throws
+    /// 用在 Connections 页 Connect 按钮 —— 仅"binary 存在"不够,可能用户没
+    /// `claude login`,登录态过期,模型 API 挂等。真发一句话才知道能不能用。
+    @MainActor
+    static func probeConnection() async throws -> Bool {
+        guard isInstalled else { throw ProbeError.notInstalled }
+        let agent = ClaudeCodeAgent(model: "haiku", oneshot: true)
+        try await agent.start()
+        try agent.sendPrompt("hi")
+
+        do {
+            let result = try await withThrowingTaskGroup(of: Bool.self) { group in
+                group.addTask { @Sendable in
+                    var sawText = false
+                    for await event in agent.events {
+                        switch event {
+                        case .textDelta(let s) where !s.isEmpty:           sawText = true
+                        case .assistantFinalText(let s) where !s.isEmpty:  sawText = true
+                        case .error(let msg):
+                            throw ProbeError.cliError(msg)
+                        case .agentEnd:
+                            if sawText { return true }
+                            throw ProbeError.noReply
+                        default: continue
+                        }
+                    }
+                    if sawText { return true }
+                    throw ProbeError.noReply
+                }
+                group.addTask { @Sendable in
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                    throw ProbeError.timeout
+                }
+                let r = try await group.next()!
+                group.cancelAll()
+                return r
+            }
+            agent.stop()
+            return result
+        } catch {
+            agent.stop()
+            throw error
+        }
+    }
 }
