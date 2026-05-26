@@ -125,6 +125,15 @@ struct MemorySettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { reload() }
+        // 跑完 / approve / reject 改了 UIState 后,自动刷新 Pending review 列表,
+        // 不再依赖手动点刷新。运行状态翻转(true→false)和最后一次 summary 变化
+        // 都触发。
+        .onChange(of: writingCaptureUI.isRunning) { _, newValue in
+            if !newValue { refreshWritingCapture() }
+        }
+        .onChange(of: writingCaptureUI.lastSummary?.runId) { _, _ in
+            refreshWritingCapture()
+        }
         .confirmationDialog(
             "Run this now?",
             isPresented: Binding(get: { confirmTrigger != nil },
