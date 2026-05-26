@@ -375,13 +375,76 @@ private struct PermissionsStep: View {
     }
 
     private func checkInputMonitoring() -> PermStatus {
-        // IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) — 不弹窗,纯查
-        let t = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
-        switch t {
-        case kIOHIDAccessTypeGranted: return .granted
-        case kIOHIDAccessTypeDenied:  return .denied
-        default:                       return .unknown
+        // **两层检查**:
+        //   1. IOHIDCheckAccess —— 标准 API,但 hidd 后台 daemon 内存里有
+        //      stale cache(tccutil reset 后 TCC db 清了 daemon 还说 granted),
+        //      自己一个人不可信
+        //   2. 真发个 null event + 自己装个 CGEventTap 看能不能收到 —— 这条
+        //      绕过 daemon cache,直接 round-trip 验证 tap 能不能跑
+        //
+        // 两条都过才算 .granted。哪条不过 → 显示 .denied / .unknown 让用户
+        // 重新走 Allow 流程。
+        let api = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+        if api == kIOHIDAccessTypeDenied { return .denied }
+
+        // probe 实际 tap 能不能 round-trip 收事件
+        let tapWorks = probeInputMonitoringTap()
+        if tapWorks { return .granted }
+
+        // API 说 granted 但 tap 收不到事件 → daemon cache 撒谎,实际没权限
+        return api == kIOHIDAccessTypeGranted ? .denied : .unknown
+    }
+
+    /// 装一个临时 CGEventTap,自己 post 一个 null event,看 callback 能不
+    /// 能收到。能收到 → tap 真起来了,Input Monitoring 是 truly granted。
+    /// 收不到 → 即使 IOHIDCheckAccess 说 granted,实际 tap 也跑不动。
+    ///
+    /// 同步实现:run loop spin 至多 100 ms 等 callback。结束清理 tap。
+    private func probeInputMonitoringTap() -> Bool {
+        // 用 heap 分配的 box 把"received"标志传进 C-style callback。
+        // userInfo 直接传 &local 不行,callback 异步触发时 local 可能已出作用域。
+        final class FlagBox { var received = false }
+        let box = FlagBox()
+        let boxPtr = Unmanaged.passRetained(box).toOpaque()
+        defer { Unmanaged<FlagBox>.fromOpaque(boxPtr).release() }
+
+        // 监听 null event(类型 0)—— 没人用,不污染别的 app
+        let mask = CGEventMask(1 << CGEventType.null.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: mask,
+            callback: { _, _, event, info in
+                if let info = info {
+                    Unmanaged<FlagBox>.fromOpaque(info).takeUnretainedValue().received = true
+                }
+                return Unmanaged.passUnretained(event)
+            },
+            userInfo: boxPtr)
+        else { return false }   // tap 创建直接失败 → 100% 没权限
+
+        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+
+        // post 一个 null event 给自己
+        if let nullEvent = CGEvent(source: nil) {
+            nullEvent.post(tap: .cgSessionEventTap)
         }
+
+        // run loop spin 至多 100 ms 等 callback
+        let deadline = Date().addingTimeInterval(0.1)
+        while Date() < deadline && !box.received {
+            CFRunLoopRunInMode(.defaultMode, 0.01, false)
+        }
+
+        // 清理
+        CGEvent.tapEnable(tap: tap, enable: false)
+        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes)
+        CFMachPortInvalidate(tap)
+
+        return box.received
     }
 
     private func requestInputMonitoring() {
