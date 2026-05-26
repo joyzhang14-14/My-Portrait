@@ -26,6 +26,13 @@ final class UpdaterService: NSObject {
     /// Sparkle delegate(必须 strong 持有 —— Sparkle weak-ref delegate)。
     private let bannerDelegate = UpdateBannerDelegate()
 
+    /// 自己跑的 check timer。Sparkle 内部 scheduler 在 Release build 强制
+    /// 最小检查间隔 1h(SPUUpdaterSettings.minimumUpdateCheckInterval 写死),
+    /// UI 设 1min 实际还是 1h 才 check。**我们关掉 Sparkle 自动 scheduler,
+    /// 自己驱动 checkForUpdatesInBackground()**(developer-facing API
+    /// 不被 minimum 拦),用户设多久就多久。
+    private var checkTimer: Timer?
+
     private override init() {
         // startingUpdater: true → Sparkle 在 controller 构造时就开始它的
         // 周期检查;我们不需要再手动 start。
@@ -45,20 +52,45 @@ final class UpdaterService: NSObject {
     }
 
     /// 用户点菜单 / 设置里的 "Check Now" 按钮调这个。
+    /// autoDownloadUpdates toggle 决定走哪条:
+    ///   - on  → checkForUpdatesInBackground:silent path 走我们的 delegate,
+    ///           找到新版直接 banner 倒计时 + 强制装(测试 Option B 链路时
+    ///           不用等 60min 自动 timer)
+    ///   - off → 标准 user-initiated check,弹 Sparkle 原生 modal
     func checkForUpdates() {
-        controller.checkForUpdates(nil)
+        if ConfigStore.shared.current.general.autoDownloadUpdates {
+            controller.updater.checkForUpdatesInBackground()
+        } else {
+            controller.checkForUpdates(nil)
+        }
     }
 
-    /// 把 ConfigStore.general 里的两个字段同步到 SPUUpdater。
-    /// 在 init 时调一次,之后由 SettingsView 的 onChange 触发再调一次。
+    /// 把 ConfigStore.general 里的两个字段同步到 SPUUpdater + 我们自己的
+    /// checkTimer。在 init 时调一次,之后由 SettingsView 的 onChange 触发
+    /// 再调一次。
     func applyConfig() {
         let g = ConfigStore.shared.current.general
         let u = controller.updater
-        u.automaticallyChecksForUpdates = true
+        // **automaticallyChecksForUpdates = false** 让 Sparkle 不再自己跑
+        // scheduler(那个 scheduler 被 hardcoded 1h minimum 卡死),我们用
+        // 自己的 checkTimer 驱动 checkForUpdatesInBackground()。
+        u.automaticallyChecksForUpdates = false
         u.automaticallyDownloadsUpdates = g.autoDownloadUpdates
-        // ConfigStore 限制 1...1440 分钟,这里 max 当 1440 兜底。
+
+        // 重启 checkTimer 按新间隔跑
         let clamped = max(1, min(1440, g.updateCheckMinutes))
-        u.updateCheckInterval = TimeInterval(clamped * 60)
+        checkTimer?.invalidate()
+        let interval = TimeInterval(clamped * 60)
+        // **fires=true** 立刻先 check 一次,然后每 interval 再 check
+        let t = Timer(timeInterval: interval, repeats: true) { _ in
+            Task { @MainActor [weak self] in
+                self?.controller.updater.checkForUpdatesInBackground()
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        checkTimer = t
+        // 立刻先调一次,不用等第一个 interval 过去
+        controller.updater.checkForUpdatesInBackground()
     }
 }
 
