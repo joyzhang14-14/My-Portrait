@@ -210,20 +210,20 @@ final class MemoryScheduler {
         }
     }
 
-    /// 跑写作采集 worker —— 同手动 Run 一样,跑所有未处理的天,落
-    /// writing_records_staged。失败 swallow + log,不阻塞下一次 tick。
+    /// 跑写作采集 worker(backlog 模式)—— 跟手动 Run 一样,从 cursor 跑到现在
+    /// 一次性出一个 staged batch。失败 swallow + log,不阻塞下一次 tick。
+    /// 已经有 pending_review / processing → backlog 内部自带 guard 跳过,不会
+    /// 重复跑。
     func runWritingCaptureJob() async {
         guard let worker = WritingCaptureWorker.shared else {
             schedLog.warning("writingCapture tick: worker not initialized — skip")
             return
         }
         do {
-            let summaries = try await worker.runUnprocessedDays()
-            let pending = summaries.filter { $0.status == .pendingReview }.count
-            let failed = summaries.filter { $0.status == .failed }.count
-            schedLog.info("writingCapture: ran \(summaries.count) day(s), \(pending) pending review, \(failed) failed")
+            let summary = try await worker.runBacklog()
+            schedLog.info("writingCapture backlog: status=\(summary.status.rawValue, privacy: .public) records=\(summary.recordsCount) discarded=\(summary.discardedCount)")
         } catch {
-            schedLog.warning("writingCapture failed: \(String(describing: error), privacy: .public)")
+            schedLog.warning("writingCapture backlog failed: \(String(describing: error), privacy: .public)")
         }
     }
 
