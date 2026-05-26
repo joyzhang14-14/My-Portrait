@@ -19,6 +19,8 @@ struct ImportSettingsView: View {
     @State private var errorMessage: String? = nil
     /// 用户用 folder picker 选了自定义 path → 覆盖自动扫盘。
     @State private var overrideDir: URL? = nil
+    /// 当前进度(running 时实时更新)。
+    @State private var progress: ScreenpipeImporter.Progress? = nil
 
     var body: some View {
         SettingsPage(
@@ -35,6 +37,10 @@ struct ImportSettingsView: View {
                     foundBlock(s)
                 } else {
                     notFoundBlock
+                }
+                if let p = progress, running {
+                    SettingsDivider()
+                    progressBlock(p)
                 }
                 if !statusLines.isEmpty {
                     SettingsDivider()
@@ -170,6 +176,50 @@ struct ImportSettingsView: View {
     }
 
     // MARK: status / summary
+
+    @ViewBuilder
+    private func progressBlock(_ p: ScreenpipeImporter.Progress) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text(Self.stageTitle(p.stage))
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                if p.total > 0 {
+                    Text("\(p.current.formatted()) / \(p.total.formatted())")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            if p.total > 0 {
+                ProgressView(value: p.fraction)
+                    .progressViewStyle(.linear)
+                    .tint(Color.accentColor)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(Color.accentColor)
+            }
+            if p.stage == .copyingVideo, p.bytesTotal > 0 {
+                Text("\(Self.bytesHuman(p.bytesDone))  /  \(Self.bytesHuman(p.bytesTotal))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.50))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private static func stageTitle(_ s: ScreenpipeImporter.Progress.Stage) -> String {
+        switch s {
+        case .scanning:        return "Preparing…"
+        case .copyingVideo:    return "Copying video chunks"
+        case .importingFrames: return "Importing frames (OCR text)"
+        case .importingAudio:  return "Importing audio transcripts"
+        case .done:            return "Done"
+        }
+    }
 
     @ViewBuilder
     private var statusBlock: some View {
@@ -311,7 +361,11 @@ struct ImportSettingsView: View {
         statusLines = ["Importing from \(source.path)…"]
         lastReport = nil
         errorMessage = nil
-        defer { running = false }
+        progress = nil
+        defer {
+            running = false
+            progress = nil
+        }
 
         guard let dbImpl = services?.db as? PortraitDBImpl else {
             errorMessage = "Portrait DB not available (Services not initialized)."
@@ -320,7 +374,10 @@ struct ImportSettingsView: View {
         let dbPool = dbImpl.dbPool
         do {
             let importer = ScreenpipeImporter(sourceDir: source)
-            let r = try await importer.run(into: dbPool)
+            // progress callback 跑在 detached task 上,跳回 MainActor 更新 @State。
+            let r = try await importer.run(into: dbPool) { p in
+                Task { @MainActor in self.progress = p }
+            }
             statusLines.append("Done.")
             lastReport = r
         } catch {
