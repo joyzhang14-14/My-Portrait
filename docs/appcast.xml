@@ -11,5 +11,22 @@
             最新版本放最上面。
         -->
 
+        <item>
+            <title>Version 1.0.0</title>
+            <pubDate>Tue, 26 May 2026 03:23:10 +0000</pubDate>
+            <sparkle:version>1.0.0</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li>First release — see GitHub release page for full notes.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.0/MyPortrait-1.0.0.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="jyRPWvZQJbQPz8YRZeD86unbxp8DEugJNy33PgMg9Avw0LlJG6opP6vo7Uf7f7kYACY4Y+lu8YTLNlwdOn8SDg==" length="49759915" />
+        </item>
+
     </channel>
 </rss>
