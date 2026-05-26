@@ -1,15 +1,6 @@
 # My-Portrait
 
-A 24/7 personal AI database that runs locally — native macOS Swift app.
-
-Captures your screen (screenshots + OCR), audio (Whisper transcription), typing,
-and focus changes in the background. Distills raw events into a "personal
-portrait" (personality / portrait / writing-style). Feeds that portrait into an
-LLM so the AI actually knows who you are. All data stays on your machine.
-
-> Status: WIP, not released. `Capture/` is still in P0 stub stage — calls flash
-> a red dot in the status bar. See `BEFORE_SHARING.md` for things that must be
-> fixed before any release.
+A local-first AI memory system for macOS. My Portrait watches what you do, listens to what you say, reads what you write — and builds a long-term portrait that, given enough time, becomes a digital version of you. **Everything stays on your Mac.**
 
 ---
 
@@ -24,9 +15,8 @@ LLM so the AI actually knows who you are. All data stays on your machine.
 
 3. Open the `.dmg`, drag **My Portrait** into **Applications**, launch normally.
 
-> **Alternative (no Terminal)**: If you skip step 2 and just double-click the app, macOS will refuse with "can't verify the developer". Open **System Settings → Privacy & Security**, scroll down to "MyPortrait was blocked", click **Open Anyway**.
+> **Alternative**: If you skip step 2 and just double-click the app, macOS will refuse with "can't verify the developer". Open **System Settings → Privacy & Security**, scroll down to "MyPortrait was blocked", click **Open Anyway**.
 
-Why any of this is needed: Apple charges $99/year for notarization, and I'm not paying. The app is still **signed** (Apple Development cert) and runs with **hardened runtime + entitlements** — same security posture as a notarized build, just without Apple's seal of approval. Auto-updates via Sparkle work as expected once you're past the first launch.
 
 > Requires macOS 15+ on Apple Silicon (M).
 
@@ -53,7 +43,7 @@ Key things borrowed:
 
 If you want a mature, cross-platform, well-tested version of this idea, use
 screenpipe. My-Portrait is a Swift-native take focused on macOS + personal
-portrait distillation, optimized for one user (me).
+portrait distillation.
 
 ---
 
@@ -94,9 +84,7 @@ sync.
 
 Data locations:
 
-- `~/.portrait/` — config, cron jobs, portraits, conversations
-- `~/Library/Application Support/MyPortrait/` — secrets, caches, DB
-- `~/.screenpipe/` — **read-only reuse** (copy from, never `mv`)
+- `~/.portrait/` — config, cron jobs, portraits, conversations, secrets, caches, DB
 
 ---
 
