@@ -22,7 +22,7 @@ struct DisplaySettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Translucent sidebar",
-                            description: "Frosted glass effect on the left rail (macOS only).",
+                            description: "Frosted glass effect on the left rail.",
                             icon: "rectangle.lefthalf.inset.filled") {
                     Toggle("", isOn: config.binding(\.display.translucentSidebar))
                         .labelsHidden().toggleStyle(.switch)
