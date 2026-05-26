@@ -356,9 +356,12 @@ final class SpeechStyleDistiller {
         }
     }
 
-    /// body 渲染:`# 标题` + 一空行 + body + 一空行 + Derived from writing records 行。
+    /// body 渲染:body 正文 + Derived from writing records 行。
+    /// **不再前置 `# 标题`** —— 标题已在 frontmatter event_title 中,UI 顶部
+    /// 已渲染 H1,正文里再放就重复。derived 块保留(用户审计 + UI 显示溯源)。
     nonisolated static func renderBody(title: String, body: String, sourceIds: [Int64]) -> String {
-        var out = "# \(title)\n\n\(body)"
+        _ = title    // 不再使用,保留参数签名兼容调用方
+        var out = body
         if !sourceIds.isEmpty {
             let links = sourceIds.map { "[[wr:\($0)]]" }.joined(separator: ", ")
             out += "\n\n**Derived from writing records:** \(links)"

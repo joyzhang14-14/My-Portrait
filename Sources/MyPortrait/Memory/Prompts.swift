@@ -304,12 +304,23 @@ enum MemoryPrompts {
       focus vs flow-state              — related but different
       multitasking vs distractibility  — positive vs negative framing
 
+    DESCRIPTION — for **every** mergeInto / createNew decision, also output a
+    one-sentence `description` in plain English explaining what the tag means
+    (so a reader who only sees the title `verification` or `multitasking` can
+    still understand the trait). Examples:
+      verification    → "The user repeatedly double-checks results before moving on."
+      multitasking    → "The user works on multiple tasks in parallel rather than serially."
+      background-audio → "The user plays ambient music or background audio while focused on tasks."
+    Third person, ≤ 100 chars, no period optional. skipCluster decisions do NOT
+    need a description.
+
     OUTPUT — JSON array, one object per cluster. No prose, no markdown:
     [
       { "head": "<the cluster head, verbatim>",
         "action": "mergeInto" | "createNew" | "skipCluster",
-        "conceptSlug": "...",   // mergeInto only
-        "reason": "..." }       // skipCluster only
+        "conceptSlug": "...",      // mergeInto only
+        "description": "...",      // mergeInto + createNew (omit for skipCluster)
+        "reason": "..." }          // skipCluster only
     ]
     """#
 

@@ -842,9 +842,9 @@ enum PersonalityMergeTestCLI {
                 print("\n──── PARSED ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {
                     switch a {
-                    case .mergeInto(let slug, let cluster):
+                    case .mergeInto(let slug, let cluster, _):
                         print("\(i + 1). mergeInto [\(slug)]  head=\(cluster.head)  members=\(cluster.members.map(\.tag))")
-                    case .createNew(let cluster):
+                    case .createNew(let cluster, _):
                         print("\(i + 1). createNew \"\(cluster.head)\"  members=\(cluster.members.map(\.tag))")
                     case .skipCluster(let head, let reason):
                         print("\(i + 1). skipCluster [\(head)] — \(reason)")
@@ -903,8 +903,8 @@ enum PersonalityMergeApplyCLI {
                 let actions = try await merger.merge(clusters: clusters, existingConcepts: concepts)
                 for (i, a) in actions.enumerated() {
                     switch a {
-                    case .mergeInto(let s, let cl): print("\(i + 1). mergeInto [\(s)] head=\(cl.head) members=\(cl.members.map(\.tag))")
-                    case .createNew(let cl):        print("\(i + 1). createNew \"\(cl.head)\" members=\(cl.members.map(\.tag))")
+                    case .mergeInto(let s, let cl, _): print("\(i + 1). mergeInto [\(s)] head=\(cl.head) members=\(cl.members.map(\.tag))")
+                    case .createNew(let cl, _):        print("\(i + 1). createNew \"\(cl.head)\" members=\(cl.members.map(\.tag))")
                     case .skipCluster(let h, let r):print("\(i + 1). skipCluster [\(h)] — \(r)")
                     }
                 }
@@ -1415,9 +1415,9 @@ enum PersonalityRefreshApplyCLI {
                 print("\n──── ACTIONS (\(r.actions.count)) ────")
                 for (i, a) in r.actions.enumerated() {
                     switch a {
-                    case .mergeInto(let slug, let cluster):
+                    case .mergeInto(let slug, let cluster, _):
                         print("\(i + 1). mergeInto [\(slug)]  head=\(cluster.head)  members=\(cluster.members.map(\.tag))")
-                    case .createNew(let cluster):
+                    case .createNew(let cluster, _):
                         print("\(i + 1). createNew \"\(cluster.head)\"  members=\(cluster.members.map(\.tag))")
                     case .skipCluster(let head, let reason):
                         print("\(i + 1). skipCluster [\(head)] — \(reason)")

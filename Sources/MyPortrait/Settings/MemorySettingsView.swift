@@ -1992,22 +1992,36 @@ private struct SpeechStyleDraftDetail: View {
     }
 
     private func bodyColumn(label: String, color: Color, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // 跟 MemoriesView.markdownBody 同套路 —— 逐段 AttributedString 解析,
+        // bold / 引用 / link 都渲染。Text(.init(markdown:)) 一段跨多行用
+        // `\n` 保留,跨段 `\n\n` 强制分段(否则 SwiftUI 把空行也吞了)。
+        let paragraphs = text
+            .split(separator: "\n\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        return VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(color)
                 .tracking(0.6)
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.92))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.04))
-                )
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
+                    let attr = (try? AttributedString(
+                        markdown: para,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                    )) ?? AttributedString(para)
+                    Text(attr)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
+            )
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }

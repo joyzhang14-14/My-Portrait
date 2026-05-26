@@ -26,9 +26,12 @@ struct PersonalityCluster: Sendable, Equatable {
 }
 
 /// LLM 对每个 cluster 的归属决定。
+/// `description` 是 LLM 输出的一句话定义(给"标题就是一个词"的 tag 加可读
+/// 解释 —— `verification` / `multitasking` 这种纯单词标签下面就有人能看懂
+/// 的句子)。skipCluster 没 description。
 enum PersonalityMergeAction: Sendable, Equatable {
-    case mergeInto(conceptSlug: String, cluster: PersonalityCluster)
-    case createNew(cluster: PersonalityCluster)
+    case mergeInto(conceptSlug: String, cluster: PersonalityCluster, description: String?)
+    case createNew(cluster: PersonalityCluster, description: String?)
     case skipCluster(head: String, reason: String)
 }
 
@@ -63,19 +66,26 @@ struct ConceptBody: Equatable, Sendable {
         return ConceptBody(events: ev, portraits: pt, ocr: oc)
     }
 
-    func render(title: String) -> String {
-        var out = "# \(title)\n"
+    /// **不再前置 `# title`**(已在 frontmatter event_title,UI 自渲)。
+    /// `description` 是一句话定义,渲染成 markdown blockquote 放在最顶部。
+    /// 老调用方仍可传 title=primaryLabel,内部不用。
+    func render(title: String, description: String? = nil) -> String {
+        _ = title
+        var out = ""
+        if let desc = description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !desc.isEmpty {
+            out += "> \(desc)\n\n"
+        }
         func sec(_ name: String, _ items: [String]) {
-            out += "\n## \(name)\n"
+            out += "## \(name)\n"
             if items.isEmpty { out += "- (none)\n" }
             else { for it in items { out += "- \(it)\n" } }
+            out += "\n"
         }
         sec("events", events)
-        // portraits 源已下线;仅当老 concept 里残留时才渲染,空段直接省略
-        // 不再写 "- (none)" 占位行。
         if !portraits.isEmpty { sec("portraits", portraits) }
         sec("ocr", ocr)
-        return out
+        return out.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 
     mutating func add(_ source: PersonalitySource, items: [String]) {
@@ -227,9 +237,9 @@ final class PersonalityMerger {
         var groups: [String: [PersonalityMergeAction]] = [:]
         for action in actions {
             switch action {
-            case .createNew(let cluster):
+            case .createNew(let cluster, _):
                 groups[Self.slugify(cluster.head), default: []].append(action)
-            case .mergeInto(let slug, _):
+            case .mergeInto(let slug, _, _):
                 groups[slug, default: []].append(action)
             case .skipCluster:
                 result.skipped += 1
@@ -242,7 +252,24 @@ final class PersonalityMerger {
             // 第一个 createNew 的 cluster head 兜底 primaryLabel。
             var primaryLabel = slug
             for a in group {
-                if case .createNew(let cluster) = a { primaryLabel = cluster.head; break }
+                if case .createNew(let cluster, _) = a { primaryLabel = cluster.head; break }
+            }
+
+            // 取最早出现的非空 description 作为这个概念的"一句话定义"。
+            // mergeInto / createNew 都可能带 description,优先 createNew 的
+            // (新概念的解释更可靠),再 fallback mergeInto。
+            var pickedDescription: String? = nil
+            for a in group {
+                if case .createNew(_, let d) = a, let s = d, !s.isEmpty {
+                    pickedDescription = s; break
+                }
+            }
+            if pickedDescription == nil {
+                for a in group {
+                    if case .mergeInto(_, _, let d) = a, let s = d, !s.isEmpty {
+                        pickedDescription = s; break
+                    }
+                }
             }
 
             var file: PortraitFile
@@ -275,7 +302,7 @@ final class PersonalityMerger {
             // 应用每个 cluster 的成员证据 / 别名。
             for action in group {
                 switch action {
-                case .createNew(let cluster):
+                case .createNew(let cluster, _):
                     for m in cluster.members {
                         body.add(m.source, items: m.evidence)
                         // member.tag ≠ head → 加进 aliases(head 本身就是 primary)
@@ -283,7 +310,7 @@ final class PersonalityMerger {
                             aliases.append(m.tag)
                         }
                     }
-                case .mergeInto(_, let cluster):
+                case .mergeInto(_, let cluster, _):
                     // cluster 整组都是 existing concept 的同义词 → head + 成员
                     // 都进 aliases,证据按源落 body。
                     if cluster.head != primaryLabel && !aliases.contains(cluster.head) {
@@ -303,9 +330,11 @@ final class PersonalityMerger {
             // 空数组 → nil,让 PortraitFileIO 跳过 frontmatter 行(否则会
             // 出现 "aliases: []" 这种无信息量的行)。
             file.aliases = aliases.isEmpty ? nil : aliases
-            file.body = body.render(title: primaryLabel)
+            file.body = body.render(title: primaryLabel, description: pickedDescription)
             file.eventTitle = primaryLabel
-            file.eventSummary = ""
+            // 存一句话定义到 eventSummary —— MemoriesView 顶部 / Draft sheet
+            // 都能直接读这字段渲染副标题。空串保留旧行为(skipCluster 群组)。
+            file.eventSummary = pickedDescription ?? ""
             let evIds = ConceptBody.capList(body.events)
             file.evidenceEventIds = evIds.isEmpty ? nil : evIds
             file.recordOccurrence(on: today)
@@ -390,12 +419,15 @@ final class PersonalityMerger {
             let head = (obj["head"] as? String) ?? ""
             guard let cluster = byHead[head] else { continue }
             decided.insert(head)
+            let descRaw = (obj["description"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let description: String? = (descRaw?.isEmpty ?? true) ? nil : descRaw
             switch action {
             case "mergeInto":
                 guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty else { continue }
-                out.append(.mergeInto(conceptSlug: slug, cluster: cluster))
+                out.append(.mergeInto(conceptSlug: slug, cluster: cluster, description: description))
             case "createNew":
-                out.append(.createNew(cluster: cluster))
+                out.append(.createNew(cluster: cluster, description: description))
             case "skipCluster", "skipTag", "skipTrait":
                 out.append(.skipCluster(head: head,
                                         reason: (obj["reason"] as? String) ?? "unspecified"))
@@ -405,7 +437,7 @@ final class PersonalityMerger {
         // 兜底:LLM 漏判的 cluster → createNew(防数据丢失)。
         for cl in clusters where !decided.contains(cl.head) {
             pmLog.notice("orphan cluster head=\(cl.head, privacy: .public) — defaulting to createNew")
-            out.append(.createNew(cluster: cl))
+            out.append(.createNew(cluster: cl, description: nil))
         }
         return out
     }

@@ -159,10 +159,10 @@ struct MemoriesView: View {
                     .padding(.top, 44)
                     metadataBlock(entry.file, category: entry.category, scope: entry.scope)
                     Divider().background(Color.white.opacity(0.06))
-                    Text(entry.file.body)
-                        .font(.system(size: 13))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // markdown 渲染:body 里 `**bold**` / `> quote` 这种标记
+                    // 现在能正确显示。SwiftUI 原生 `Text(.init(...))` 走
+                    // AttributedString 解析,够用且零依赖。
+                    markdownBody(entry.file.body)
                     if let notes = entry.file.editNotes, !notes.isEmpty {
                         Divider().background(Color.white.opacity(0.06))
                         editNotesBlock(notes)
@@ -194,6 +194,29 @@ struct MemoriesView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// 把 portrait body 渲染成 markdown(原生 AttributedString)。
+    /// 只能逐段处理 —— SwiftUI Text(.init(...)) 解析单段,跨段会丢换行。
+    @ViewBuilder
+    private func markdownBody(_ raw: String) -> some View {
+        let paragraphs = raw
+            .split(separator: "\n\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
+                let attr = (try? AttributedString(
+                    markdown: para,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                )) ?? AttributedString(para)
+                Text(attr)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 

@@ -459,10 +459,11 @@ final class PortraitDistiller {
         return out
     }
 
+    /// **不再前置 `# 标题`** —— 标题已在 frontmatter event_title 中,UI 顶部
+    /// 已渲染 H1,正文里再放就重复。derived 块保留(用户审计 + UI 溯源)。
+    /// proseOf() 仍能正确剥老文件残留的 `# title` 行(向后兼容)。
     private func renderBody(decision: ParsedDecision, derivedIds: [String]) -> String {
         var lines: [String] = []
-        lines.append("# \(decision.title)")
-        lines.append("")
         lines.append(decision.body)
         if !derivedIds.isEmpty {
             lines.append("")
