@@ -31,5 +31,8 @@ build/
 MyPortrait.xcodeproj/
 /build/
 
+# Contributor-local signing override (see Support/Signing.xcconfig)
+Support/Signing.local.xcconfig
+
 # Claude Code 会话本地文件
 .claude/
