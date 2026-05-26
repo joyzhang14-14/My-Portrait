@@ -14,15 +14,24 @@
 #
 # 关于签名:
 #   付不起 $99/yr Developer Program → 拿不到 Developer ID,没法 notarize。
-#   build.sh 会先用 Xcode export(Apple Development 证书),再 codesign --sign -
-#   重签 **ad-hoc**。ad-hoc 签名没 team identity,**别人的 Mac TCC 才能正常
-#   授权**(用 Apple Development 签的话 TCC 设里给了权限也没用 —— Stan
-#   v1.0.0 反馈过 issue #?)。用户安装时仍需 xattr -d com.apple.quarantine
-#   绕 Gatekeeper(README 已说明)。
+#   build.sh 先用 Xcode export(中间产物 Apple Development 签),再用本机
+#   keychain 自签的 cert MyPortraitDev 整体重签 —— 跟 My-Smart-Bar /
+#   My-Orphies 同款方案。
 #
-#   付了年费后,把 ExportOptions.plist method 改成 developer-id,
-#   build.sh 里 codesign --sign - 那段删掉,`release:` target 改成
-#   `build notarize dmg sparkle`。
+#   为什么不用 ad-hoc:ad-hoc 的 designated requirement 含 cdhash,每次 build
+#   漂,Sparkle 跨版本判 identity 不一致直接拒绝自动升级。MyPortraitDev
+#   自签 cert 的 DR 含稳定的 cert subject,跨版本 TCC + Sparkle 都吃这套。
+#
+#   一次性建 cert(本机做一次):Keychain Access → Certificate Assistant
+#   → Create a Certificate(Name=MyPortraitDev,Self Signed Root,
+#   Code Signing,trust=Always Trust)。
+#
+#   用户安装时仍需 xattr -d com.apple.quarantine 绕 Gatekeeper(README
+#   已说明);Sparkle 自动升级路径不走 Gatekeeper,体验透明。
+#
+#   付了年费后,把 ExportOptions.plist method 改成 developer-id,build.sh
+#   里 codesign 重签那段删掉,`release:` target 改成 `build notarize dmg
+#   sparkle`。
 
 .PHONY: build notarize dmg sparkle release sparkle-keys clean
 
