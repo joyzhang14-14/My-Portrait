@@ -258,21 +258,23 @@ final class Services {
         // 所以不能整体 dropFirst。改成：每个 sink 自己记"是不是首次 emission"
         // （= 启动时的初始值），请求权限两种情况都做，但 openSettings 引导只在
         // 非首次（用户主动切）时做。
+        // **启动初始 emission 永远不 request 权限**。系统权限对话框只在两个
+        // 地方触发:
+        //   ① OnboardingView Permissions step 用户主动点 Allow(独立路径,
+        //      直接调 monitor.requestXxx,不走这里的 sink)
+        //   ② 用户在 Settings 主动 toggle capture OFF → ON,sink 触发,
+        //      userInitiated=true 走 request
+        // 启动时 sink 初始 emission(userInitiated=false)一律静默,避免新用户
+        // 还没看到 onboarding 第一页就被 N 个权限对话框糊脸。
         var screenSinkSeenInitial = false
         settings.$screenCaptureEnabled
             .removeDuplicates()
             .sink { [weak self] enabled in
                 let userInitiated = screenSinkSeenInitial
                 screenSinkSeenInitial = true
-                guard let self, enabled else { return }
+                guard let self, enabled, userInitiated else { return }
                 if self.permissions.screenRecording == .granted { return }
-                // onboarding 没走完 → 不主动 request 权限,等用户走到 Permissions
-                // step 点 Allow。否则首启 4 个权限对话框一起涌出来,用户都还没
-                // 看到 onboarding 第一页。
-                guard userInitiated
-                        || ConfigStore.shared.current.general.onboardingCompleted
-                else { return }
-                self.logger.info("screen enabled, permission not granted — requesting")
+                self.logger.info("screen toggled on by user, requesting permission")
                 self.permissions.requestScreenRecording()
             }
             .store(in: &settingsCancellables)
@@ -283,17 +285,13 @@ final class Services {
             .sink { [weak self] enabled in
                 let userInitiated = audioSinkSeenInitial
                 audioSinkSeenInitial = true
-                guard let self, enabled else { return }
+                guard let self, enabled, userInitiated else { return }
                 let perm = self.permissions.microphone
                 if perm == .granted { return }
-                // 同 screen:onboarding 没走完别主动 request,免得 4 个对话框堆栈。
-                guard userInitiated
-                        || ConfigStore.shared.current.general.onboardingCompleted
-                else { return }
-                self.logger.info("audio enabled, permission=\(String(describing: perm), privacy: .public) (userInitiated=\(userInitiated))")
+                self.logger.info("audio toggled on by user, mic permission=\(String(describing: perm), privacy: .public)")
                 if perm == .notDetermined {
                     self.permissions.requestMicrophone()
-                } else if userInitiated {
+                } else {
                     self.confirmThenOpenSettings(
                         title: "Microphone Permission Needed",
                         body: "My Portrait needs microphone access to record audio. Open System Settings to grant it?",
@@ -400,15 +398,19 @@ final class Services {
         }
     }
 
+    /// applyTypingCapture 是不是被启动时第一次调过 —— 首次调=启动 emission
+    /// 不 request 权限,之后=用户主动 toggle 才 request。
+    private var typingSinkSeenInitial = false
+
     private func applyTypingCapture(enabled: Bool) {
+        let userInitiated = typingSinkSeenInitial
+        typingSinkSeenInitial = true
         if enabled {
-            // 打字采集需要 Accessibility 权限。没授 → 请求 + 引导。
-            // **onboarding 没走完时跳过 request + 引导对话框**,等用户在
-            // onboarding Permissions step 主动 grant。否则首启就弹 NSAlert 引导,
-            // 同时屏幕录制 / 麦克风对话框一起出来,用户根本看不到 onboarding。
-            let onboardingDone = ConfigStore.shared.current.general.onboardingCompleted
-            if permissions.accessibility != .granted, onboardingDone {
-                logger.info("typing enabled, accessibility not granted — requesting + guiding")
+            // 打字采集需要 Accessibility 权限。**仅在用户主动 toggle 时**才
+            // request + 引导,跟 screen / audio sink 同款逻辑。启动初始调
+            // 静默(observer 自己 AX 门禁挡着,没授权也不会瞎跑)。
+            if permissions.accessibility != .granted, userInitiated {
+                logger.info("typing toggled on by user, accessibility not granted — requesting + guiding")
                 permissions.requestAccessibility()
                 confirmThenOpenSettings(
                     title: "Accessibility Permission Needed",
@@ -417,9 +419,7 @@ final class Services {
                     perm: .accessibility
                 )
             }
-            // start() 内部会 print 启动 banner;AX 没授时它自己 idle。
-            // 即使 onboarding 没完成,observer 也照常 start —— 它自己有 AX 门禁
-            // 不会瞎跑;授权后 PermissionMonitor 轮询 → sink 拾起。
+            // observer.start() 照常 —— AX 没授就 idle,有授就跑。
             typingObserver.start()
         } else {
             // 总开关关 —— observer 不启动。显式 print，避免「为什么没采集」
