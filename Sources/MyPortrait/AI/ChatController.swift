@@ -258,6 +258,11 @@ final class ChatController {
                 if self.pendingTitleFromFirstMessage, let convId = self.currentConvId {
                     self.store.renameConversation(convId, to: Self.titleFromText(trimmed))
                     self.pendingTitleFromFirstMessage = false
+                } else if let convId = self.currentConvId {
+                    // RECENTS 顶部 = 真发消息(saveMessages 不再自动 touch,
+                    // 切对话 / picker 改 model 不算"活动")。第一条消息走 rename
+                    // 路径已经 UPDATE updated_at,这里只补后续 send。
+                    self.store.touchConversation(convId)
                 }
 
                 // What Pi actually sees: context block ++ attachment refs ++ user question.
@@ -334,6 +339,9 @@ final class ChatController {
         if pendingTitleFromFirstMessage, let convId = currentConvId {
             store.renameConversation(convId, to: Self.titleFromText(trimmed))
             pendingTitleFromFirstMessage = false
+        } else if let convId = currentConvId {
+            // 同 send() —— 真发消息时 bump RECENTS。
+            store.touchConversation(convId)
         }
 
         // invisible system priming + entity context + user request

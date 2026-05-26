@@ -78,7 +78,11 @@ final class ChatStore {
         reloadConversations()
     }
 
-    private func touchConversation(_ id: UUID) {
+    /// Bump 一个 conv 在 RECENTS 列表里的顺序到顶。**只在用户真发了一条
+    /// 新消息时调** —— 切对话 / picker 改 model / 空对话保存这些"被动持久化"
+    /// 不调,否则 RECENTS 会被无意义动作搅乱。
+    /// ChatController.send() 等真发消息的路径显式调一次。
+    func touchConversation(_ id: UUID) {
         execute("UPDATE conversations SET updated_at=? WHERE id=?") { stmt in
             sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
             sqlite3_bind_text(stmt, 2, id.uuidString, -1, Self.SQLITE_TRANSIENT)
@@ -117,14 +121,11 @@ final class ChatStore {
                 sqlite3_bind_double(stmt, 6, m.time.timeIntervalSince1970)
             }
         }
-        // **只在真有消息时 bump RECENTS 排序**。新建 conv 还没发消息就切走
-        // 会触发 persist()→saveMessages([])→DELETE→ 这里仍调 reload 但不 touch,
-        // 列表顺序不变。"有效对话"才上浮。
-        if !messages.isEmpty {
-            touchConversation(convId)
-        } else {
-            reloadConversations()
-        }
+        // **不在 saveMessages 里 touch** —— saveMessages 也被「切走 persist」
+        // 路径调,如果 touch 就等于"切走时把刚才那个 conv 顶上去",RECENTS
+        // 永远跟着用户切对话动。touch 改成由 ChatController.send() 在真发
+        // 消息时显式调。这里只 reload 让 UI 反映 DELETE/INSERT 结果。
+        reloadConversations()
     }
 
     func loadMessages(for convId: UUID) -> [ChatMessage] {
