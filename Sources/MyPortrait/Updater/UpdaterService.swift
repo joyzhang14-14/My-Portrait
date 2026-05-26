@@ -15,20 +15,25 @@ import Sparkle
 /// appcast 公开 URL 写死在 Info.plist `SUFeedURL`(GitHub Pages),公钥
 /// `SUPublicEDKey` 同。运行时不需要从 config 读。
 @MainActor
-final class UpdaterService: NSObject, SPUUpdaterDelegate {
+final class UpdaterService: NSObject {
 
     static let shared = UpdaterService()
 
     /// 持久持有 —— controller 一释放就不再后台检查了。
     let controller: SPUStandardUpdaterController
 
+    /// Sparkle delegate(必须 strong 持有 —— Sparkle weak-ref delegate)。
+    private let bannerDelegate = UpdateBannerDelegate()
+
     private override init() {
         // startingUpdater: true → Sparkle 在 controller 构造时就开始它的
-        // 周期检查;我们不需要再手动 start。delegate=self 让我们能 hook
-        // 比如「更新前/后做点事」(目前没用)。
+        // 周期检查;我们不需要再手动 start。
+        // updaterDelegate=bannerDelegate 让 Sparkle 发现新版本时
+        // (didFindValidUpdate)弹一条 in-app banner —— Sparkle 自带对话框
+        // 照常弹,banner 是额外醒目入口。
         self.controller = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: bannerDelegate,
             userDriverDelegate: nil
         )
         super.init()
@@ -53,5 +58,22 @@ final class UpdaterService: NSObject, SPUUpdaterDelegate {
         // ConfigStore 限制 1...1440 分钟,这里 max 当 1440 兜底。
         let clamped = max(1, min(1440, g.updateCheckMinutes))
         u.updateCheckInterval = TimeInterval(clamped * 60)
+    }
+}
+
+/// Sparkle delegate —— 单独拆出来是因为 SPUUpdaterDelegate 必须在
+/// SPUStandardUpdaterController init 时就传进去,而 init 里没法引用 self
+/// (super.init 还没跑)。所以把 delegate 做成独立的小对象,
+/// UpdaterService 自己 strong-hold 它(Sparkle weak-refs delegate)。
+///
+/// 现在只做一件事:Sparkle 发现新版本 → post 一条 in-app banner。
+/// Notifications 页 appUpdates toggle 关掉时,NotificationCenterService.post
+/// 内部会自动跳过,这里不用判。
+private final class UpdateBannerDelegate: NSObject, SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let version = item.displayVersionString
+        Task { @MainActor in
+            NotificationCenterService.shared.post(.appUpdate(version: version))
+        }
     }
 }
