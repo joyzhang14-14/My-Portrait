@@ -66,7 +66,7 @@ struct ImportSettingsView: View {
             ProgressView().controlSize(.small)
             Text("Scanning ~/.screenpipe / Library / Documents …")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
@@ -109,7 +109,7 @@ struct ImportSettingsView: View {
             if nothingNew {
                 Text("Everything older than your cutoff has already been imported. Nothing left to copy.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
@@ -155,7 +155,7 @@ struct ImportSettingsView: View {
             }
             Text("Searched ~/.screenpipe, ~/Library/Application Support/screenpipe, and ~/Documents/screenpipe. If your data is somewhere else, pick the folder manually.")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Spacer()
@@ -188,7 +188,7 @@ struct ImportSettingsView: View {
                 if p.total > 0 {
                     Text("\(p.current.formatted()) / \(p.total.formatted())")
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
             if p.total > 0 {
@@ -203,7 +203,7 @@ struct ImportSettingsView: View {
             if p.stage == .copyingVideo, p.bytesTotal > 0 {
                 Text("\(Self.bytesHuman(p.bytesDone))  /  \(Self.bytesHuman(p.bytesTotal))")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,7 +227,7 @@ struct ImportSettingsView: View {
             ForEach(Array(statusLines.enumerated()), id: \.offset) { _, line in
                 Text(line)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -242,7 +242,7 @@ struct ImportSettingsView: View {
             Text("LAST IMPORT")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .tracking(0.6)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textTertiary)
             statRow("Frames",            "\(r.framesImported) new · \(r.framesBackfilled) backfilled · \(r.skippedFramesNoOCR) skipped (no OCR)", mono: false)
             statRow("Video chunks",      "\(r.videoChunksImported) MP4(s) copied · \(Self.bytesHuman(r.videoBytesCopied))", mono: false)
             statRow("Audio chunks",      "\(r.audioChunksImported) imported", mono: false)
@@ -250,7 +250,7 @@ struct ImportSettingsView: View {
             statRow("Cutoff",            Self.cutoffDescription(r.cutoffMs), mono: false)
             Text("Next: Settings → Memory → Scheduler → Process events to distill the new data into events.")
                 .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,11 +273,11 @@ struct ImportSettingsView: View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.50))
+                .foregroundStyle(Theme.textSecondary)
                 .frame(width: 110, alignment: .leading)
             Text(value)
                 .font(.system(size: 12, design: mono ? .monospaced : .default))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
