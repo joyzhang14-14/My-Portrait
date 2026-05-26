@@ -325,30 +325,47 @@ struct TypingCaptureSettingsView: View {
     @Environment(\.services) private var services
     /// 用户打过字的 app（bundle id）—— 给两个 app 选择器的下拉用。
     @State private var discovered: [String] = []
+    /// 发现到的 (bundle_id, url) 对子,给 URL-prefix picker 列候选用。
+    @State private var discoveredSummaries: [(bundleId: String, url: String)] = []
 
     var body: some View {
         SettingsPage("Typing Capture", subtitle: "Learn your writing style") {
             typingSection
             blacklistSection
         }
-        .task { discovered = await Self.loadDiscovered(services?.typingStore) }
+        .task {
+            discovered = await Self.loadDiscovered(services?.typingStore)
+            discoveredSummaries = await Self.loadDiscoveredSummaries(services?.typingStore)
+        }
     }
 
-    /// 黑名单 app —— 命中的 app 整段不采集打字。
+    /// 后台扫 typing_events 的 (bundle_id, url) 对子。
+    private static func loadDiscoveredSummaries(_ store: TypingEventStore?)
+        async -> [(bundleId: String, url: String)]
+    {
+        guard let store else { return [] }
+        return await Task.detached {
+            (try? store.appSummaries())?.map { (bundleId: $0.bundleId, url: $0.url) } ?? []
+        }.value
+    }
+
+    /// 黑名单 entries —— 整 app 或 (app, urlPrefix) 屏蔽打字。
     private var blacklistSection: some View {
         SettingsCard(
             title: "Typing blacklist",
-            footnote: "Password managers and terminals are always excluded. Add apps here to skip capturing typing from them entirely."
+            footnote: "Password managers and terminals are always excluded. Pick an app to block the whole app, or pick a specific URL inside a browser to block only pages with that URL prefix."
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Pick an app you've typed in…")
+                Text("Pick an app (and optionally a URL prefix)…")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TypingAppPicker(apps: config.binding(\.privacy.typingBlacklistBundleIds),
-                                discovered: discovered,
-                                locked: TypingPrivacyFilter.defaultBlacklist)
-                    .padding(.horizontal, 14).padding(.bottom, 12)
+                TypingBlacklistEntryPicker(
+                    entries: config.binding(\.privacy.typingBlacklistEntries),
+                    summaries: discoveredSummaries,
+                    locked: TypingPrivacyFilter.defaultBlacklist
+                )
+                .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }
     }

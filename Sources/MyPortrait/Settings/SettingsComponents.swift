@@ -567,3 +567,143 @@ struct TypingAppPicker: View {
     }
 }
 
+
+// MARK: - TypingBlacklistEntryPicker —— 支持 (bundle, urlPrefix) 双层 entry
+
+/// 像 TypingAppPicker 但每个 entry 可带可选 urlPrefix。
+/// 添加流程:Select app → 子菜单 → Block whole app / 选具体 URL。
+struct TypingBlacklistEntryPicker: View {
+    @Binding var entries: [TypingBlacklistEntry]
+    /// (bundle_id, url) 发现的对子,用于在子菜单里列出可选的 URL 候选。
+    var summaries: [(bundleId: String, url: String)] = []
+    /// 永远生效、不可移除的整 app 条目(hardcoded password manager 等)。
+    var locked: [String] = []
+
+    static func label(_ bundleId: String) -> String {
+        let last = bundleId.split(separator: ".").last.map(String.init)
+        return (last?.isEmpty == false ? last : nil) ?? bundleId
+    }
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Color.white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    private var distinctBundles: [String] {
+        var seen = Set<String>()
+        return summaries.map(\.bundleId).filter { seen.insert($0).inserted }
+    }
+
+    private func urls(for bundle: String) -> [String] {
+        var seen = Set<String>()
+        return summaries
+            .filter { $0.bundleId == bundle && !$0.url.isEmpty }
+            .map(\.url)
+            .filter { seen.insert($0).inserted }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Menu {
+                if distinctBundles.isEmpty {
+                    Text("No typed-in apps yet")
+                } else {
+                    ForEach(distinctBundles.filter { !locked.contains($0) }, id: \.self) { bundle in
+                        let urls = urls(for: bundle)
+                        if urls.isEmpty {
+                            Button(Self.label(bundle)) { add(bundle, "") }
+                        } else {
+                            Menu(Self.label(bundle)) {
+                                Button("Block whole app") { add(bundle, "") }
+                                Divider()
+                                ForEach(urls, id: \.self) { url in
+                                    Button(url) { add(bundle, url) }
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 11))
+                    Text("Select app").font(.system(size: 12))
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(boxBackground)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            if !locked.isEmpty || !entries.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(locked, id: \.self) { lockedChip($0) }
+                    ForEach(Array(entries.enumerated()), id: \.offset) { idx, e in
+                        editableChip(e, at: idx)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func add(_ bundleId: String, _ urlPrefix: String) {
+        let new = TypingBlacklistEntry(bundleId: bundleId, urlPrefix: urlPrefix)
+        if !entries.contains(new) { entries.append(new) }
+    }
+
+    @ViewBuilder
+    private func editableChip(_ e: TypingBlacklistEntry, at idx: Int) -> some View {
+        HStack(spacing: 4) {
+            Text(Self.label(e.bundleId))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+            if !e.urlPrefix.isEmpty {
+                Text("·")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+                Text(e.urlPrefix)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 220)
+            }
+            Button {
+                if idx < entries.count { entries.remove(at: idx) }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .buttonStyle(.bouncyIcon)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .help(e.urlPrefix.isEmpty ? e.bundleId : "\(e.bundleId) · URL starts with \(e.urlPrefix)")
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.05))
+                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+        )
+    }
+
+    @ViewBuilder
+    private func lockedChip(_ app: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white.opacity(0.35))
+            Text(Self.label(app))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .help("\(app) — always excluded")
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.03))
+                .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 0.7))
+        )
+    }
+}

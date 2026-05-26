@@ -144,7 +144,11 @@ final class WritingCaptureWorker {
     /// 真实业务流程 —— 出错 throw 给上层标 failed。
     private func runDayCore(date: String, runId: String) async throws -> WritingCaptureDayRunSummary {
         // 黑名单 snapshot(同步打字采集那套配置)
-        let userBlacklist = ConfigStore.shared.privacy.typingBlacklistBundleIds
+        // keystroke_log 表行没 URL,只能按 bundle_id 屏蔽 —— 从 entries 里抽
+        // 整 app 屏蔽的(urlPrefix 空)。URL-level entries 已在 TypingRecordWriter
+        // 写入时拦住,typing_events 表里直接就没那些行。
+        let entries = ConfigStore.shared.privacy.typingBlacklistEntries
+        let userBlacklist = entries.compactMap { $0.urlPrefix.isEmpty ? $0.bundleId : nil }
         let hardcoded = TypingPrivacyFilter.defaultBlacklist
         let blacklist = Set(hardcoded).union(userBlacklist)
 
@@ -401,7 +405,11 @@ final class WritingCaptureWorker {
     ) async throws -> WritingCaptureDayRunSummary {
         let date = Self.backlogDateKey
         let ui = WritingCaptureUIState.shared
-        let userBlacklist = ConfigStore.shared.privacy.typingBlacklistBundleIds
+        // keystroke_log 表行没 URL,只能按 bundle_id 屏蔽 —— 从 entries 里抽
+        // 整 app 屏蔽的(urlPrefix 空)。URL-level entries 已在 TypingRecordWriter
+        // 写入时拦住,typing_events 表里直接就没那些行。
+        let entries = ConfigStore.shared.privacy.typingBlacklistEntries
+        let userBlacklist = entries.compactMap { $0.urlPrefix.isEmpty ? $0.bundleId : nil }
         let hardcoded = TypingPrivacyFilter.defaultBlacklist
         let blacklist = Set(hardcoded).union(userBlacklist)
 

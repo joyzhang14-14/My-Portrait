@@ -95,10 +95,14 @@ final class TypingObserver {
         // L3 字符 logger 必须在 ledger.start() 之前挂上 —— start() 后 tap
         // 立刻活,callback 已经会读 ledger.charLogger。
         if let charLogger = keystrokeCharLogger {
-            // 同步 typing 黑名单 snapshot:hardcode + 用户配置。union 化成 Set
-            let userList = ConfigStore.shared.privacy.typingBlacklistBundleIds
+            // 同步 typing 黑名单 snapshot 给 keystroke_log 写入路径。
+            // 只塞 app 级 entries(urlPrefix 空):keystroke_log 行级没有 URL
+            // 信息,只能按 bundle_id 屏蔽。URL 级屏蔽走 TypingRecordWriter
+            // 那条路。
+            let entries = ConfigStore.shared.privacy.typingBlacklistEntries
+            let appLevel = entries.compactMap { $0.urlPrefix.isEmpty ? $0.bundleId : nil }
             let hardcoded = TypingPrivacyFilter.defaultBlacklist
-            let union = Set(hardcoded).union(userList)
+            let union = Set(hardcoded).union(appLevel)
             charLogger.updateBlacklist(union)
             ledger.charLogger = charLogger
         }

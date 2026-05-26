@@ -318,6 +318,13 @@ final class TypingRecordWriter {
         guard let rec = state[key] else { return }
         rec.debounceTimer?.invalidate()
         rec.flushTimer?.invalidate()
+        // URL 级黑名单:整 app 屏蔽已经在 TypingObserver.attach 拦住,这里
+        // 处理"app 没全屏蔽但当前 URL 命中前缀"。命中 → 直接弃掉本 record。
+        if TypingPrivacyFilter.isBlacklisted(bundleId: rec.bundleId, url: rec.url) {
+            onDevLog?("url-blacklist drop bundle=\(rec.bundleId) url=\(rec.url)")
+            state[key] = nil
+            return
+        }
         let snapBlacklist = Set((blacklist[key] ?? [:]).keys)
         // **整段判为 noise 的 record 直接不写**:editLog 全空(没有任何被算法
         // 认可的 commit/delete)且 blacklist 非空(value-change 全被 fireDebounce

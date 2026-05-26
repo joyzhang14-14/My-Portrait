@@ -46,13 +46,43 @@ struct TypingPrivacyFilter {
     static let defaultBlacklist: [String] =
         hardcodedBlacklist.sorted() + terminalBundleIds.sorted()
 
-    /// bundle id 是否命中黑名单。最终黑名单 = hardcode ∪ 用户配置。
-    /// 读 ConfigStore.shared（@MainActor 隔离），故方法标 @MainActor。
+    /// bundle id 是否整 app 屏蔽 —— 用户在 entries 里加了一条 urlPrefix 留空
+    /// 的就算。给 TypingObserver.attach 用(没 URL 信息,只能判 app 级)。
+    /// 读 ConfigStore.shared(@MainActor 隔离),故方法标 @MainActor。
     @MainActor
     static func isBlacklisted(bundleId: String) -> Bool {
         if hardcodedBlacklist.contains(bundleId) { return true }
-        return ConfigStore.shared.privacy.typingBlacklistBundleIds.contains(bundleId)
+        return ConfigStore.shared.privacy.typingBlacklistEntries.contains {
+            $0.bundleId == bundleId && $0.urlPrefix.isEmpty
+        }
     }
+
+    /// (bundle, url) 是否命中黑名单 —— 整 app 屏蔽,或 URL 以某条 entry 的
+    /// urlPrefix 开头。给 TypingRecordWriter.persist 用(已知具体 URL)。
+    @MainActor
+    static func isBlacklisted(bundleId: String, url: String) -> Bool {
+        if hardcodedBlacklist.contains(bundleId) { return true }
+        return ConfigStore.shared.privacy.typingBlacklistEntries.contains {
+            guard $0.bundleId == bundleId else { return false }
+            return $0.urlPrefix.isEmpty || url.hasPrefix($0.urlPrefix)
+        }
+    }
+
+    /// 给后台批读用 —— 把 entries snapshot 一份成 Set,在 dbPool 线程上比对
+    /// `(bundle_id, url)`。nonisolated,可以脱离 MainActor 用。
+    static func matches(
+        entries: [TypingBlacklistEntry], hardcoded: Set<String>,
+        bundleId: String, url: String
+    ) -> Bool {
+        if hardcoded.contains(bundleId) { return true }
+        return entries.contains { e in
+            guard e.bundleId == bundleId else { return false }
+            return e.urlPrefix.isEmpty || url.hasPrefix(e.urlPrefix)
+        }
+    }
+
+    /// hardcoded 黑名单 snapshot —— `matches(...)` 用。
+    static var hardcodedSnapshot: Set<String> { hardcodedBlacklist }
 
     /// role 是否为密码输入框。
     static func isSecureRole(_ role: String?) -> Bool {

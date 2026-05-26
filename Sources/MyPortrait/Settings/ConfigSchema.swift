@@ -701,8 +701,16 @@ struct PrivacyConfig: Codable, Equatable {
     /// The frame itself is always captured.
     var maskIgnoredApps:        Bool     = true
     /// Typing 采集的额外 app 黑名单（按 bundle id）。命中的 app TypingObserver
-    /// 整体不订阅 AX。与 TypingPrivacyFilter 的 hardcode 默认黑名单取并集。
+    /// DEPRECATED → 自动迁移到 `typingBlacklistEntries`(urlPrefix 留空)。
+    /// 保留字段只为不破坏老 config.toml 的解码。
     var typingBlacklistBundleIds: [String] = []
+
+    /// 黑名单 entries —— 每条要么 (bundle_id) 整 app 屏蔽,要么 (bundle_id,
+    /// urlPrefix) 屏蔽该 app 下匹配 URL 前缀的页面。前缀比对 case-sensitive,
+    /// urlPrefix 留空字符串 = 整个 app(等价老 bundle 列表)。
+    /// 与 TypingPrivacyFilter 的 hardcoded 默认黑名单取并集。
+    var typingBlacklistEntries: [TypingBlacklistEntry] = []
+
     /// DEPRECATED:不再使用。submit 检测改用 `looksLikeSubmitClear` 行为判断
     /// (回车后 value 真的清空 / 断崖式缩短),不需要 app 白名单。字段保留只为
     /// 不破坏老 config.toml 的解码。
@@ -719,6 +727,7 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredWindowTitles     = "ignored_window_titles"
         case maskIgnoredApps         = "mask_ignored_apps"
         case typingBlacklistBundleIds = "typing_blacklist_bundle_ids"
+        case typingBlacklistEntries   = "typing_blacklist_entries"
         case typingSubmitBundleIds    = "typing_submit_bundle_ids"
     }
     init(from decoder: Decoder) throws {
@@ -734,7 +743,33 @@ struct PrivacyConfig: Codable, Equatable {
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
         typingBlacklistBundleIds = c.dflt([String].self, .typingBlacklistBundleIds, typingBlacklistBundleIds)
+        typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, typingBlacklistEntries)
         typingSubmitBundleIds    = c.dflt([String].self, .typingSubmitBundleIds, typingSubmitBundleIds)
+
+        // 老字段 typing_blacklist_bundle_ids 自动迁移到新 entries。
+        if !typingBlacklistBundleIds.isEmpty {
+            let migrated = typingBlacklistBundleIds.map {
+                TypingBlacklistEntry(bundleId: $0, urlPrefix: "")
+            }
+            // 跟现有 entries 合并去重
+            let existing = Set(typingBlacklistEntries)
+            typingBlacklistEntries.append(contentsOf:
+                migrated.filter { !existing.contains($0) })
+            typingBlacklistBundleIds = []  // 清空,下次写盘只有新字段
+        }
+    }
+}
+
+/// 打字黑名单一条 entry。`urlPrefix` 空 = 整 app 屏蔽;非空 = 该 app 下 URL
+/// 以这个前缀开头的 typing event 屏蔽(前缀比对 case-sensitive,字面前缀,
+/// 不是 glob/regex)。
+struct TypingBlacklistEntry: Codable, Equatable, Hashable, Sendable {
+    var bundleId: String
+    var urlPrefix: String = ""
+
+    enum CodingKeys: String, CodingKey {
+        case bundleId  = "bundle_id"
+        case urlPrefix = "url_prefix"
     }
 }
 
