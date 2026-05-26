@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Sparkle
 
@@ -34,7 +35,7 @@ final class UpdaterService: NSObject {
         self.controller = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: bannerDelegate,
-            userDriverDelegate: nil
+            userDriverDelegate: bannerDelegate   // 同一个对象,两套 delegate
         )
         super.init()
 
@@ -61,19 +62,86 @@ final class UpdaterService: NSObject {
     }
 }
 
-/// Sparkle delegate —— 单独拆出来是因为 SPUUpdaterDelegate 必须在
-/// SPUStandardUpdaterController init 时就传进去,而 init 里没法引用 self
-/// (super.init 还没跑)。所以把 delegate 做成独立的小对象,
+/// Sparkle delegate —— 同时实现 SPUUpdaterDelegate(发现新版本回调)和
+/// SPUStandardUserDriverDelegate(替 Sparkle 决定 UI 怎么呈现 update)。
+///
+/// 拆成独立小对象是因为这两个 delegate 都必须在 SPUStandardUpdaterController
+/// init 时传进去,init 里没法引用 self(super.init 还没跑)。
 /// UpdaterService 自己 strong-hold 它(Sparkle weak-refs delegate)。
 ///
-/// 现在只做一件事:Sparkle 发现新版本 → post 一条 in-app banner。
-/// Notifications 页 appUpdates toggle 关掉时,NotificationCenterService.post
-/// 内部会自动跳过,这里不用判。
-private final class UpdateBannerDelegate: NSObject, SPUUpdaterDelegate {
-    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+/// 两件事:
+///   1. Sparkle 发现新版本 → post 一条 in-app "new version available" banner
+///      (走 .appUpdate kind,被 notifications.appUpdates toggle 控制)
+///   2. **autoDownloadUpdates toggle 开 + Sparkle 已经后台下完新版** →
+///      不让 Sparkle 弹标准 modal,改 post 倒计时 banner "Updating in 10s,
+///      click to postpone"。倒计时跑完 NSApp.terminate(),Sparkle 的
+///      install-on-quit 接管 → 装新版 → 重启 app。toggle 关时走 Sparkle
+///      原生 modal 流程不动。
+private final class UpdateBannerDelegate: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
+
+    // MARK: SPUUpdaterDelegate
+
+    /// 这些 delegate 方法 Sparkle 在 main thread 调,所以全部标 nonisolated
+    /// + 内部 Task { @MainActor } 跳进 MainActor 读 ConfigStore / post 通知。
+    /// 不标 nonisolated 的话 Swift 6 strict concurrency 报"conformance crosses
+    /// into main actor-isolated code"。
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let version = item.displayVersionString
         Task { @MainActor in
             NotificationCenterService.shared.post(.appUpdate(version: version))
+        }
+    }
+
+    // MARK: SPUStandardUserDriverDelegate
+
+    /// 告诉 Sparkle 我们支持"温和提醒"(scheduled update 用 delegate 自己
+    /// 的 UI 而不是 Sparkle 的 modal)。
+    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    /// Sparkle 准备好要让用户看到 scheduled update 时问的:
+    ///   - true(default)  → Sparkle 弹自己的 modal
+    ///   - false           → delegate 自己处理 UI
+    /// autoDownloadUpdates toggle on 时返回 false —— 我们用 banner 倒计时。
+    ///
+    /// Sparkle 调这条在 main thread,MainActor.assumeIsolated 同步读 config。
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        MainActor.assumeIsolated {
+            !ConfigStore.shared.current.general.autoDownloadUpdates
+        }
+    }
+
+    /// Sparkle 已经决定要把 update 呈现给用户时调。`handleShowingUpdate`
+    /// false 表示 delegate 接管 UI(对应上面那条返回 false 的分支)。
+    /// state.userInitiated true 表示用户手动 Check now 触发的,这种**不要**
+    /// 走静默路径,他想看 modal 看到。
+    nonisolated func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        guard !handleShowingUpdate else { return }
+        guard !state.userInitiated else { return }
+
+        let version = update.displayVersionString
+        Task { @MainActor in
+            NotificationCenterService.shared.post(.updateCountdown(
+                version: version,
+                seconds: 10,
+                onPostpone: {
+                    // 用户点了 banner → 取消这次自动 install。Sparkle 下个
+                    // 检查周期(默认 60min)如果新版还在,会再次触发整个
+                    // 流程。不主动 cancel Sparkle 的下载产物,留着下次复用。
+                },
+                onTimeout: {
+                    // 倒计时跑完用户没操作 → NSApp.terminate 退出。Sparkle
+                    // 因为 automaticallyDownloadsUpdates=true 且已经下完新版,
+                    // 退出时它的 installer 自动接管:装新版 → relaunch。
+                    NSApp.terminate(nil)
+                }
+            ))
         }
     }
 }

@@ -19,6 +19,16 @@ final class NotificationCenterService {
         case cronJobRun(jobName: String, body: String, convId: UUID)
         case appUpdate(version: String)
         case captureStall(reason: String)
+        /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
+        /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
+        /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
+        /// (取消这次,让 Sparkle 下次检查重试)。
+        case updateCountdown(
+            version: String,
+            seconds: TimeInterval,
+            onPostpone: @MainActor () -> Void,
+            onTimeout: @MainActor () -> Void
+        )
     }
 
     /// 当前可见的通知列表(最旧在前,最新在后)。Overlay view observe 这个。
@@ -38,6 +48,8 @@ final class NotificationCenterService {
         let title: String
         let body: String
         var onTap: (() -> Void)?
+        var onTimeout: (() -> Void)? = nil
+        var timeout = defaultTimeout
 
         switch kind {
         case let .cronJobRun(jobName, body_, convId):
@@ -60,6 +72,13 @@ final class NotificationCenterService {
             guard n.captureStalls else { return }
             title = "Capture stalled"
             body = reason
+
+        case let .updateCountdown(version, seconds, onPostpone, onTimeoutCb):
+            title = "Updating to \(version)"
+            body = "App will restart automatically. Click to postpone."
+            timeout = seconds
+            onTap = { onPostpone() }
+            onTimeout = { onTimeoutCb() }
         }
 
         let notif = InAppNotification(
@@ -67,8 +86,9 @@ final class NotificationCenterService {
             title: title,
             body: body,
             createdAt: Date(),
-            timeout: defaultTimeout,
-            onTap: onTap
+            timeout: timeout,
+            onTap: onTap,
+            onTimeout: onTimeout
         )
         active.append(notif)
         log.notice("posted: \(title, privacy: .public)")
@@ -76,7 +96,7 @@ final class NotificationCenterService {
         // 有通知 → 浮窗 show(lazy install + orderFront)。
         NotificationOverlay.shared.show()
 
-        scheduleDismiss(notif.id, after: defaultTimeout)
+        scheduleDismiss(notif.id, after: timeout)
     }
 
     func dismiss(_ id: UUID) {
@@ -90,7 +110,14 @@ final class NotificationCenterService {
     private func scheduleDismiss(_ id: UUID, after: TimeInterval) {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
-            self?.dismiss(id)
+            guard let self else { return }
+            // 还在 active 里 = 用户没点掉 → 触发 onTimeout(updateCountdown
+            // 倒计时到点要 install)。注意先 fire 再 dismiss,因为 onTimeout
+            // 可能调 NSApp.terminate,Sparkle 会接管,dismiss 那行不一定跑到。
+            if let notif = self.active.first(where: { $0.id == id }) {
+                notif.onTimeout?()
+            }
+            self.dismiss(id)
         }
     }
 }
@@ -104,4 +131,7 @@ struct InAppNotification: Identifiable {
     let createdAt: Date
     let timeout: TimeInterval
     let onTap: (() -> Void)?
+    /// 倒计时跑完(用户没 dismiss 也没 tap)时调。给 updateCountdown 用 ——
+    /// 触发 NSApp.terminate → Sparkle install-on-quit 链路。
+    let onTimeout: (() -> Void)?
 }

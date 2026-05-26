@@ -179,15 +179,11 @@ struct GeneralSettingsView: View {
         return f
     }()
 
-    /// 显示给用户的版本号 —— 从 Info.plist 读
-    /// CFBundleShortVersionString(marketing,1.0.81 之类) + CFBundleVersion
-    /// (build,数字)。Sparkle 自动升级也按这条 marketing version 跟 appcast
-    /// 里的 sparkle:shortVersionString 比对。
+    /// 显示给用户的版本号 —— 只显示 marketing version
+    /// (CFBundleShortVersionString,"1.0.82" 之类)。Build number
+    /// (CFBundleVersion)是 Sparkle 内部比版本用的,用户不关心,不显示。
     private static let currentVersionString: String = {
-        let info = Bundle.main.infoDictionary ?? [:]
-        let marketing = info["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info["CFBundleVersion"] as? String ?? ""
-        return build.isEmpty ? marketing : "\(marketing) (\(build))"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
     }()
 
     // MARK: - Scan & clear (real filesystem)
