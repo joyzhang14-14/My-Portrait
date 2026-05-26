@@ -112,8 +112,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.76"
+        CURRENT_PROJECT_VERSION: "76"
         # **签名：用 Apple Development 证书，不用自签名 MyPortraitDev**。
         # 自签名证书（无 Apple 锚定）macOS TCC 对 Screen Recording 主动拒绝
         # （auth_value 卡 0）。Apple Development 证书 DR 带 `anchor apple generic`，
