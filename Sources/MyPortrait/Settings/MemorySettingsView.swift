@@ -97,7 +97,10 @@ struct MemorySettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            // VStack spacing / 外层 padding 跟 SettingsPage 完全对齐
+            // (spacing 20 / top 30 / bottom 40)—— 原来钉死 24 / 44 / 28 跟
+             // General / Display 等页对比明显错位。
+            VStack(alignment: .leading, spacing: 20) {
                 header
 
                 switch tab {
@@ -119,8 +122,8 @@ struct MemorySettingsView: View {
                 footer
             }
             .padding(.horizontal, 28)
-            .padding(.top, 44)
-            .padding(.bottom, 28)
+            .padding(.top, 30)
+            .padding(.bottom, 40)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -367,14 +370,17 @@ struct MemorySettingsView: View {
         refreshStaging()
     }
 
+    /// 标题块直接用 SettingsPageTitle 跟其他 Settings 页对齐(尺寸 / 颜色
+     /// / spacing 全部一份组件控制)。原来用自己的 Text + size 26 default
+     /// primary 渲染,subtitle 12 .secondary —— 跟 General/Display 用的
+     /// SettingsPageTitle(title 26 / 0.96, subtitle 13 / 0.55)视觉对不上。
+     ///
+     /// title 也从 "Memory · Parameter" / "Memory · Scheduler" 改成单词
+     /// (Parameter / Scheduler / Changelog),跟左边 sidebar 一致 ——
+     /// Capture 页那边右边 pane 就是 "Screen Capture" 单词没有 "Capture · "
+     /// 前缀。
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Memory · \(tab.rawValue)")
-                .font(.system(size: 26, weight: .semibold))
-            Text(headerBlurb)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
+        SettingsPageTitle(title: tab.rawValue, subtitle: headerBlurb)
     }
 
     private var headerBlurb: String {
