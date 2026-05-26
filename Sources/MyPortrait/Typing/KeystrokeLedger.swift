@@ -146,10 +146,16 @@ final class KeystrokeLedger {
     private func startHealthCheck() {
         healthCheckTimer?.invalidate()
         healthCheckTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.healthCheckIntervalSec, repeats: true
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.healthCheckTick() }
-        }
+            timeInterval: Self.healthCheckIntervalSec,
+            target: self,
+            selector: #selector(onHealthCheckTick),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @MainActor @objc private func onHealthCheckTick() {
+        healthCheckTick()
     }
 
     @MainActor
