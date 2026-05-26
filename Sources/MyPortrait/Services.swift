@@ -32,6 +32,8 @@ final class Services {
     let audio: AudioCaptureService
     let systemAudio: SystemAudioCaptureService
     let transcriber: TranscriptionScheduler
+    /// WhisperKit 模型 wrapper —— 启动时 prefetch + transcriber 持引用复用。
+    let whisper: WhisperKitWrapper
     let powerWatcher: PowerWatcher
     let retentionWorker: RetentionWorker
     let modelManager: BGEM3ModelManager
@@ -100,15 +102,18 @@ final class Services {
         self.powerWatcher = pw
         // 说话人分离：ONNX 实现。运行时由 recording.audio.speakerIdEnabled 开关
         // 控制（关掉时 diarize 直接返回空，退化为整段一行无说话人）。
+        // 单独持引用让启动时能 prefetch 模型(防止用户第一次真录音才下 150MB)。
+        let whisperWrapper = WhisperKitWrapper(
+            modelName: ConfigStore.shared.current.capture.audio.whisperModel
+        )
+        self.whisper = whisperWrapper
         self.transcriber = TranscriptionScheduler(
             db: dbImpl,
             audio: audioSvc,
             systemAudio: self.systemAudio,
             reporter: reporter,
             power: pw,
-            whisper: WhisperKitWrapper(
-                modelName: ConfigStore.shared.current.capture.audio.whisperModel
-            ),
+            whisper: whisperWrapper,
             speaker: OnnxSpeakerDiarizer(db: dbImpl)
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
@@ -171,11 +176,19 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
-        // 启动时后台 prefetch 说话人识别 3 个 ONNX 小模型(共 ~40MB)。
-        // 不阻塞 lifecycle 启动。新用户首启 → 在 onboarding 各步走过去的
-        // 时间里模型已下载完,VoiceTrainer 录完 30s 不会再卡。
-        Task.detached(priority: .utility) {
+        // 启动时统一后台 prefetch 所有可能 lazy 下载的本地资源。新用户首启
+        // 时直接拉满,避免用户在 onboarding / 真用某功能时才下载导致卡顿
+        // 或失败:
+        //   1. Speaker / VAD ONNX (~40MB):VoiceTrainer 依赖
+        //   2. WhisperKit 模型 (默认 base ~150MB):Audio Capture 第一段录音依赖
+        //   3. Bun + Pi @mariozechner/pi-coding-agent (~30MB):Chat / cron job 依赖
+        Task.detached(priority: .utility) { [whisper] in
             await SpeakerModelStore.shared.prefetchAll()
+            await whisper.prefetch()
+        }
+        Task { @MainActor in
+            // ensureInstalled 内部已 idempotent(已 ready 直接 return)。
+            AISetup.shared.ensureInstalled()
         }
 
         Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, embeddingWorker, logger] in
