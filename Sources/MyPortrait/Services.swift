@@ -265,13 +265,14 @@ final class Services {
                 let userInitiated = screenSinkSeenInitial
                 screenSinkSeenInitial = true
                 guard let self, enabled else { return }
-                _ = userInitiated
                 if self.permissions.screenRecording == .granted { return }
+                // onboarding 没走完 → 不主动 request 权限,等用户走到 Permissions
+                // step 点 Allow。否则首启 4 个权限对话框一起涌出来,用户都还没
+                // 看到 onboarding 第一页。
+                guard userInitiated
+                        || ConfigStore.shared.current.general.onboardingCompleted
+                else { return }
                 self.logger.info("screen enabled, permission not granted — requesting")
-                // requestScreenRecording 内部会真正 probe 一次 SCK —— 首次会弹
-                // 系统对话框 + 把 app 注册进 TCC「屏幕录制」列表。授权结果由
-                // PermissionMonitor 的 3 秒轮询捕获，上面的 CombineLatest3 sink
-                // 自动重新评估。所以这里不需要再弹我们自己的确认框。
                 self.permissions.requestScreenRecording()
             }
             .store(in: &settingsCancellables)
@@ -285,12 +286,14 @@ final class Services {
                 guard let self, enabled else { return }
                 let perm = self.permissions.microphone
                 if perm == .granted { return }
+                // 同 screen:onboarding 没走完别主动 request,免得 4 个对话框堆栈。
+                guard userInitiated
+                        || ConfigStore.shared.current.general.onboardingCompleted
+                else { return }
                 self.logger.info("audio enabled, permission=\(String(describing: perm), privacy: .public) (userInitiated=\(userInitiated))")
                 if perm == .notDetermined {
-                    // 从没问过 → 弹系统标准对话框（启动时弹也 OK）。
                     self.permissions.requestMicrophone()
                 } else if userInitiated {
-                    // denied + 用户主动切 → 引导去系统设置。
                     self.confirmThenOpenSettings(
                         title: "Microphone Permission Needed",
                         body: "My Portrait needs microphone access to record audio. Open System Settings to grant it?",
@@ -400,15 +403,13 @@ final class Services {
     private func applyTypingCapture(enabled: Bool) {
         if enabled {
             // 打字采集需要 Accessibility 权限。没授 → 请求 + 引导。
-            if permissions.accessibility != .granted {
+            // **onboarding 没走完时跳过 request + 引导对话框**,等用户在
+            // onboarding Permissions step 主动 grant。否则首启就弹 NSAlert 引导,
+            // 同时屏幕录制 / 麦克风对话框一起出来,用户根本看不到 onboarding。
+            let onboardingDone = ConfigStore.shared.current.general.onboardingCompleted
+            if permissions.accessibility != .granted, onboardingDone {
                 logger.info("typing enabled, accessibility not granted — requesting + guiding")
-                // ① 把 app 注册进系统设置的「辅助功能」列表（macOS 肯弹时也会
-                //    弹系统标准对话框）。
                 permissions.requestAccessibility()
-                // ② AX 的系统对话框是「一次性」的 —— app 进列表后不再弹，照抄
-                //    screen 的系统弹窗对老用户静默无效。补一个我们自己的 NSAlert
-                //    （同 microphone denied 路径），必定可见、点确认直达系统设置。
-                //    授权后 PermissionMonitor 轮询 → $accessibility sink 拾起 observer。
                 confirmThenOpenSettings(
                     title: "Accessibility Permission Needed",
                     body: "My Portrait needs Accessibility access to capture your typing. "
@@ -416,7 +417,9 @@ final class Services {
                     perm: .accessibility
                 )
             }
-            // start() 内部会 print 启动 banner；AX 没授时它自己 idle。
+            // start() 内部会 print 启动 banner;AX 没授时它自己 idle。
+            // 即使 onboarding 没完成,observer 也照常 start —— 它自己有 AX 门禁
+            // 不会瞎跑;授权后 PermissionMonitor 轮询 → sink 拾起。
             typingObserver.start()
         } else {
             // 总开关关 —— observer 不启动。显式 print，避免「为什么没采集」
