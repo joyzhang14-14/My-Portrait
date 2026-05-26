@@ -54,9 +54,14 @@ struct ConnectionsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if showsHeader {
+                    // size + opacity 跟 SettingsPageTitle 对齐(其他 Settings
+                    // 页都走 SettingsPageTitle 是 26/0.96,这里之前钉死 24/
+                    // 0.95 比邻居小一号,用户复现"connections 比 general
+                    // 小")。ConnectionsView 自己嵌进 onboarding 时也复用这
+                    // 个 header(showsHeader=true),所以不直接套 SettingsPage。
                     Text("Connections")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.96))
 
                     Text("Give AI access to your memory, and connect to the apps you use every day")
                         .font(.system(size: 13))
