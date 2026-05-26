@@ -39,6 +39,12 @@ struct ContentView: View {
         .environment(chat)
         .environment(chatStore)
         .environment(ConfigStore.shared)
+        // **SwiftUI colorScheme 必须显式 .preferredColorScheme()** 强制 ——
+        // ConfigApplier 设了 NSApp.appearance 影响 AppKit chrome,但 SwiftUI
+        // view tree 不会自动 reload colorScheme,所有 Theme.textPrimary
+        // / Color(nsColor:) 等 dynamic 颜色不变。这里读 config.display.theme
+        // 直接告诉 SwiftUI 切。"system" → nil 跟 macOS 走。
+        .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme))
         .onAppear {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
@@ -97,6 +103,16 @@ struct ContentView: View {
             guard let date = notif.object as? Date else { return }
             selection = .timeline
             timeline.seek(to: date)
+        }
+    }
+
+    /// 把 config.display.theme 字符串("system" / "light" / "dark")映射到
+     /// SwiftUI 的 preferredColorScheme。"system" → nil(跟 macOS 走)。
+    private static func preferredScheme(_ raw: String) -> ColorScheme? {
+        switch raw {
+        case "light": return .light
+        case "dark":  return .dark
+        default:      return nil
         }
     }
 
