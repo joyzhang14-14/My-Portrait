@@ -755,6 +755,9 @@ struct MemorySettingsView: View {
         }
     }
 
+    /// 跟 event/portrait/personality 的 changeRow 同样的形态:NEW/CHANGED
+    /// 标签 + 单行标题 + chevron → 点击直接打开 Detail sheet 看完整 body。
+    /// 之前的卡片样式预览只截 200 字 + 没 diff,update 看着像没变化。
     @ViewBuilder
     private func inlineSpeechStyleDrafts(runId: String) -> some View {
         if let rows = speechStyleExpandedDrafts[runId] {
@@ -762,32 +765,9 @@ struct MemorySettingsView: View {
                 Text("(no drafts)")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows, id: \.id) { d in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(d.action.rawValue).font(.system(size: 10))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color.accentColor.opacity(0.15))
-                                    .cornerRadius(3)
-                                Text(d.slug).font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                if let prior = d.existingSlug, prior != d.slug {
-                                    Text("(was \(prior))").font(.system(size: 10))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Text(d.title).font(.system(size: 12, weight: .semibold))
-                            Text(d.body.count > 200
-                                 ? String(d.body.prefix(200)) + "…"
-                                 : d.body)
-                                .font(.system(size: 11))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.06))
-                        .cornerRadius(4)
+                        speechStyleDraftRow(d, parentRunId: runId)
                     }
                 }
             }
@@ -795,6 +775,38 @@ struct MemorySettingsView: View {
             Text("Loading…")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
+    }
+
+    /// 一条 draft 的行:`[NEW|CHANGED|NOOP] <title>` + chevron → 整行点击
+    /// 打开 detail sheet,跟 changeRow 视觉一致。
+    private func speechStyleDraftRow(_ d: SpeechStyleStagedRow, parentRunId: String) -> some View {
+        let (label, color): (String, Color) = {
+            switch d.action {
+            case .create: return ("NEW", .green)
+            case .update: return ("CHANGED", .orange)
+            case .noop:   return ("NOOP", .gray)
+            }
+        }()
+        return Button {
+            speechStylePreviewRun = parentRunId
+        } label: {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
+                    .frame(width: 62, alignment: .leading)
+                Text(d.title)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 3)
+        }
+        .buttonStyle(.plain)
     }
 
     private func refreshSpeechStyle() {
