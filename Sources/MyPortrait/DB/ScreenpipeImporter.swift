@@ -41,6 +41,72 @@ struct ScreenpipeImporter: Sendable {
     static let defaultSourceDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".screenpipe")
 
+    /// 扫盘结果。UI 自动扫盘后展示给用户。
+    struct ScanResult: Sendable {
+        let sourceDir: URL
+        let dbPath: URL
+        let exists: Bool          // db.sqlite 在不在
+        let frameCount: Int       // ocr_text 关联的可导入 frame 数
+        let earliestMs: Int64?    // 源端最早 ts(给"将导 < cutoff"做对比)
+        let latestMs: Int64?
+    }
+
+    /// 候选扫描位置(按优先级)。screenpipe 一般固定 ~/.screenpipe,但
+    /// 用户万一改了 base_dir 也兜底搜常见位置。
+    static func candidateDirs() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home.appendingPathComponent(".screenpipe"),
+            home.appendingPathComponent("Library/Application Support/screenpipe"),
+            home.appendingPathComponent("Documents/screenpipe"),
+        ]
+    }
+
+    /// 扫盘:找第一个有 db.sqlite 的候选目录,统计可导入元数据。
+    /// 找不到返回 ScanResult(exists=false) 让 UI 显示"not found"。
+    static func scan() -> ScanResult {
+        for dir in candidateDirs() {
+            let db = dir.appendingPathComponent("db.sqlite")
+            guard FileManager.default.fileExists(atPath: db.path) else { continue }
+            // 拿统计
+            do {
+                var c = Configuration()
+                c.readonly = true
+                let q = try DatabaseQueue(path: db.path, configuration: c)
+                let (cnt, minMs, maxMs): (Int, Int64?, Int64?) = try q.read { d in
+                    let cnt = (try? Int.fetchOne(
+                        d,
+                        sql: """
+                            SELECT COUNT(*) FROM frames f
+                            INNER JOIN ocr_text o ON o.frame_id = f.id
+                            WHERE o.text IS NOT NULL AND o.text != ''
+                            """
+                    )) ?? 0
+                    // String.fetchOne 返回 String?(SQL null 时 nil),外面 try? 又
+                    // 套一层 Optional(throws 失败 nil),用 (try? ...).flatMap { $0 }
+                    // 把 String?? → String?。
+                    let minTs: String? = (try? String.fetchOne(d, sql: "SELECT MIN(timestamp) FROM frames")) ?? nil
+                    let maxTs: String? = (try? String.fetchOne(d, sql: "SELECT MAX(timestamp) FROM frames")) ?? nil
+                    return (cnt, minTs.flatMap(isoToMs), maxTs.flatMap(isoToMs))
+                }
+                return ScanResult(
+                    sourceDir: dir, dbPath: db, exists: true,
+                    frameCount: cnt, earliestMs: minMs, latestMs: maxMs
+                )
+            } catch {
+                importLog.warning("scan: failed to open \(db.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                continue
+            }
+        }
+        // 全没找到 → 用 default 路径返回 exists=false
+        return ScanResult(
+            sourceDir: defaultSourceDir,
+            dbPath: defaultSourceDir.appendingPathComponent("db.sqlite"),
+            exists: false, frameCount: 0,
+            earliestMs: nil, latestMs: nil
+        )
+    }
+
     let sourceDir: URL
 
     init(sourceDir: URL = ScreenpipeImporter.defaultSourceDir) {
