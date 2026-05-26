@@ -290,23 +290,25 @@ enum IntegrationRegistry {
         .init(id: "openai-byok",        name: "OpenAI API",      bundleId: "com.openai.chat",                       letter: "O",  assetName: "OpenAI", accent: Color(white: 0.10),                         signInMethod: .apiKey,       category: .ai),
         .init(id: "claude-code",        name: "Claude Code",     bundleId: nil,                                     letter: ">",  iconSymbol: "terminal.fill", accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
         // Anthropic API 复用 Claude Desktop 的 bundleId,NSWorkspace 装了 Claude
-        // app 就显示真图标(原"Claude Desktop"tile 拔了)。
-        .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
+        // app 就显示真 Claude.app icon(原"Claude Desktop"tile 拔了)。
+        // assetName: "Anthropic" —— 没装 Claude.app 的用户兜底,bundled brand 标识
+        // (simpleicons.org 的官方品牌 SVG,Anthropic brand 橙)。
+        .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  assetName: "Anthropic", accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
         .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  assetName: "Gemini", accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
         // Perplexity:用 bundle 的 perplexity.svg 资源(从 screenpipe 引来的
         // 原版品牌 logo),iconSymbol asterisk 是再下一层兜底。
         .init(id: "perplexity",         name: "Perplexity",      bundleId: "ai.perplexity.mac",                     letter: "P",  iconSymbol: "asterisk", assetName: "Perplexity", accent: Color(red: 0.12, green: 0.72, blue: 0.80),  signInMethod: .apiKey,       category: .ai),
-        .init(id: "deepseek",           name: "DeepSeek",        bundleId: nil,                                     letter: "D",  assetName: "DeepSeek", assetFullBleed: true, accent: Color(red: 0.27, green: 0.49, blue: 0.94),  signInMethod: .apiKey,       category: .ai),
+        .init(id: "deepseek",           name: "DeepSeek",        bundleId: nil,                                     letter: "D",  assetName: "DeepSeek", accent: Color(red: 0.27, green: 0.49, blue: 0.94),  signInMethod: .apiKey,       category: .ai),
 
         // Local model runners
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", assetName: "Ollama", assetFullBleed: true, accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
 
         // Productivity
-        .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
+        .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  assetName: "Obsidian", accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
         // Notion 走 Internal Integration Token(纯 API key)—— 不走 OAuth,因为
         // 原项目用的是「后端 proxy 转 client_secret」方案,My-Portrait 没那个
         // 后端。NotionConfig 在 ConnectionCredentials.swift。
-        .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  accent: Color(white: 0.95),                         signInMethod: .apiKey,       category: .productivity),
+        .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  assetName: "Notion", accent: Color(white: 0.95),                         signInMethod: .apiKey,       category: .productivity),
         .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  iconSymbol: "envelope.fill", accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
 
         // Media / Calendar
