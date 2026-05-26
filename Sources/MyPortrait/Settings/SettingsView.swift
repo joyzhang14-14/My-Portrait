@@ -34,6 +34,7 @@ struct SettingsPane: View {
 /// right pane with the selected subsection.
 struct SettingsScene: View {
     @State private var subsection: SettingsSubsection = .app(.general)
+    @State private var configStore = ConfigStore.shared
 
     var body: some View {
         HStack(spacing: 0) {
@@ -44,6 +45,18 @@ struct SettingsScene: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black)
+        }
+        // ⌘, 弹出来的独立 Settings 窗口跟主 window 是两个 SwiftUI scene,
+        // 主 window 上 ContentView 那条 .preferredColorScheme 传不过来,
+        // 自己读一次 config.display.theme。
+        .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme))
+    }
+
+    private static func preferredScheme(_ raw: String) -> ColorScheme? {
+        switch raw {
+        case "light": return .light
+        case "dark":  return .dark
+        default:      return nil
         }
     }
 
