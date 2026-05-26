@@ -171,6 +171,19 @@ final class ChatController {
         relatedScanFiredThisConv = false
         if let convId {
             messages = store.loadMessages(for: convId)
+            // 🔒 Capture-on-switch:切到一个还没 lock 的 conv(老 conv 或
+            // 锁状态下没机会改的),立刻把当前全局快照写进它的 lock,这样
+            // 后面切走改全局 → 切回时 picker 仍然显示这个 conv 当时的值。
+            // 只 capture 一次,lock 已有就跳过。
+            let lock = store.conversationModel(id: convId)
+            if lock.providerId == nil || lock.model == nil {
+                let (provider, model, _) = providerResolver(convId)
+                store.updateConversationModel(
+                    convId,
+                    providerId: provider.integrationId,
+                    model: model
+                )
+            }
         } else {
             messages = []
         }
@@ -456,6 +469,22 @@ final class ChatController {
 
     private func ensureAgent() async throws {
         let (provider, model, apiKeyRef) = providerResolver(currentConvId)
+
+        // 🔒 Capture-on-first-use:这个 conv 发消息时,如果还没写过 lock
+        // (老 conv,或者 picker 锁状态下用户无法手动改),立刻把这次实际
+        // 用的 provider/model 写进 conv。下次切回这个 conv,picker 显示
+        // 不会被全局新值串掉。
+        // 只 capture 一次 —— lock 已有就跳过(让用户手动切换的选择优先)。
+        if let convId = currentConvId {
+            let lock = store.conversationModel(id: convId)
+            if lock.providerId == nil || lock.model == nil {
+                store.updateConversationModel(
+                    convId,
+                    providerId: provider.integrationId,
+                    model: model
+                )
+            }
+        }
         // If the live agent's provider/model no longer matches what the user
         // picked, tear it down so the new pick takes effect.
         if let agent, let spec = agentSpec, (spec.0 != provider || spec.1 != model) {
