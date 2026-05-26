@@ -349,7 +349,7 @@ enum WritingCapturePrompts {
 
     Example A — short chat reply, AX present:
       typing_events.text = "好的!"
-      keystroke_text = "haode!"  (pinyin + punctuation)
+      keystroke_text = "haode1!"  (pinyin + IME selection digit "1" + punctuation)
       → record { kind: "short_form", source: "ax_cleaned", text: "好的!" }
 
     Example B — chat-heavy session, AX exposes each message:
@@ -358,7 +358,9 @@ enum WritingCapturePrompts {
 
     Example C — long Chinese note via IME:
       typing_events.text = "先用apify找到爆款视频的链接\n下载视频\n..."
-      keystroke_text contains pinyin spans like "xianyong apify..."
+      keystroke_text contains spans like "xiany1 apify..." (pinyin + selection
+      digits per phrase: e.g. "xian" then "1" picks 先, "yong" then a digit picks
+      用, etc. — the digit choice depends on candidate position in the IME panel)
       → record { kind: "long_form", source: "ax_cleaned" }, KEEP.
 
     Example D — canvas editor, OCR only (AX returns empty):
