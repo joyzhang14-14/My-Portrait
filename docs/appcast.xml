@@ -23,21 +23,19 @@
                     <li>Screenpipe data import (auto-scan disks, copy MP4 / audio metadata, recompute cutoff, progress bar + live byte counter)</li>
                     <li>Pre-fetch local models (WhisperKit / pyannote / wespeaker / Silero VAD) on launch — first-run no longer stalls</li>
                     <li>Proper Light theme: warm-white → lavender gradient + dynamic glass</li>
-                    <li>Bundled brand icons for DeepSeek / Ollama / Anthropic / Obsidian / Notion</li>
-                    <li>Claude Code "Connect" actually sends "hi" and reads the reply</li>
-                    <li>"New version available" toggle wired to Sparkle didFindValidUpdate</li>
                     <li>App customize: dock icon auto-cropped to macOS squircle template</li>
-                    <li>Speakers training entry visible even when Audio Capture is off; Speakers page folded into Audio Capture</li>
+                    <li>Speakers page folded into Audio Capture</li>
+                    <li>"New version available" toggle wired to Sparkle didFindValidUpdate</li>
                 </ul>
                 <h3>Bug fixes</h3>
                 <ul>
                     <li>Chat: provider / model locked per-conversation; RECENTS ordering fixed; empty assistant placeholder hidden (#6)</li>
                     <li>Onboarding: window resize before flag flip; permissions never proactively requested; Input Monitoring CGEventTap side-effect registers app in System Settings</li>
                     <li>Scheduler UI: 24-hour picker; Time row uses menu Pickers for visual alignment</li>
+                    <li>Connections: bundled brand icons for DeepSeek / Ollama / Anthropic / Obsidian / Notion; Claude Code "Connect" actually sends "hi" and reads the reply</li>
                     <li>Cron jobs: trimmed conversations are deleted, no longer leak into RECENTS</li>
                     <li>Sidebar: Memories rows fully clickable (#7); Translucent sidebar toggle takes effect</li>
-                    <li>Integration icons: NSImage(named:) loading + letter fallback when assets fail</li>
-                    <li>DeepSeek icon flood-filled to remove iOS-style black border</li>
+                    <li>Integration icons: NSImage(named:) loading + letter fallback when assets fail; DeepSeek icon flood-filled to remove iOS-style black border</li>
                     <li>App customize bugs fixed; tray icon renders in colour</li>
                     <li>Memory Settings + Connections page title layout consistent with rest of Settings</li>
                     <li>Swift 6 data-race warning fix; main window pinned to min size</li>
