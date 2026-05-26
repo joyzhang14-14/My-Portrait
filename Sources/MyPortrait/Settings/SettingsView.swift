@@ -22,6 +22,7 @@ struct SettingsPane: View {
             case .data(.usage):        UsageSettingsView()
             case .data(.storage):      StorageSettingsView()
             case .data(.speakers):     SpeakersSettingsView()
+            case .data(.imports):      ImportSettingsView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -114,6 +115,7 @@ struct SettingsScene: View {
         case .data(.usage):        UsageSettingsView()
         case .data(.storage):      StorageSettingsView()
         case .data(.speakers):     SpeakersSettingsView()
+        case .data(.imports):      ImportSettingsView()
         }
     }
 }

@@ -26,7 +26,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
-        case usage, storage, speakers
+        case usage, storage, speakers, imports
     }
 
     var id: String {
@@ -61,6 +61,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .data(.usage):            return "Usage"
         case .data(.storage):          return "Storage"
         case .data(.speakers):         return "Speakers"
+        case .data(.imports):          return "Import"
         }
     }
 
@@ -80,6 +81,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .data(.usage):            return "chart.bar"
         case .data(.storage):          return "externaldrive"
         case .data(.speakers):         return "person.wave.2"
+        case .data(.imports):          return "tray.and.arrow.down"
         }
     }
 
