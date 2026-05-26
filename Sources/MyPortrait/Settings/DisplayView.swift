@@ -340,10 +340,14 @@ private struct IconSlot: View {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: dest)
-        do {
-            try FileManager.default.copyItem(at: src, to: dest)
+        // dock.png 走 macOS squircle 模板裁剪;tray.png 中心 crop + resize 不圆。
+        // 仿 My-Orphies app-customize-card.tsx 的 squareCropResize。
+        let success: Bool = (fileName == "dock.png")
+            ? Self.writeDockIcon(src: src, dest: dest)
+            : Self.writeTrayIcon(src: src, dest: dest)
+        if success {
             path = dest.path
-        } catch {
+        } else {
             // Surface in a console log only; the UI just reverts to "default".
             path = ""
         }
@@ -355,5 +359,90 @@ private struct IconSlot: View {
         // orphan PNG is harmless (overwritten on the next upload).
         path = ""
         preview = nil
+    }
+
+    // MARK: - Icon processing(仿 My-Orphies app-customize-card.tsx)
+
+    /// macOS Big Sur+ icon 模板:body 占 824/1024 ≈ 80.5% 居中,周围
+    /// ~100px 透明 padding(否则 Dock 里比标准 app 大一圈)。
+    private static let dockTargetSize: Int = 1024
+    private static let dockBodyRatio: CGFloat = 824.0 / 1024.0
+    /// 圆角 ≈ body 边长的 22.5%(不是 canvas 边)。macOS squircle 常数。
+    private static let dockCornerRadiusRatio: CGFloat = 0.225
+
+    /// tray icon 单纯 center-crop + resize,不圆,菜单栏渲染要 flush。
+    private static let trayTargetSize: Int = 128
+
+    /// 把用户上传的图裁成 macOS Dock squircle 模板的 1024×1024 PNG。
+    /// 失败返回 false,UI 回退到"无自定义图"。
+    static func writeDockIcon(src: URL, dest: URL) -> Bool {
+        guard let srcCG = loadCGImage(src) else { return false }
+        let cropped = centerSquareCrop(srcCG)
+        let size = CGFloat(dockTargetSize)
+        let bodySize = size * dockBodyRatio
+        let offset = (size - bodySize) / 2
+        let radius = bodySize * dockCornerRadiusRatio
+        guard let ctx = makeARGBContext(width: dockTargetSize, height: dockTargetSize) else { return false }
+        ctx.interpolationQuality = .high
+        let bodyRect = CGRect(x: offset, y: offset, width: bodySize, height: bodySize)
+        // squircle clip + draw —— ctx 默认 alpha = 0 全透明,clip 外的区域
+        // 保持透明 padding。
+        let pathRect = CGPath(
+            roundedRect: bodyRect,
+            cornerWidth: radius, cornerHeight: radius,
+            transform: nil
+        )
+        ctx.saveGState()
+        ctx.addPath(pathRect)
+        ctx.clip()
+        ctx.draw(cropped, in: bodyRect)
+        ctx.restoreGState()
+        guard let finalCG = ctx.makeImage() else { return false }
+        return writePNG(cg: finalCG, to: dest)
+    }
+
+    /// tray icon:center-crop + resize 128×128,无圆角无 padding。
+    static func writeTrayIcon(src: URL, dest: URL) -> Bool {
+        guard let srcCG = loadCGImage(src) else { return false }
+        let cropped = centerSquareCrop(srcCG)
+        let target = trayTargetSize
+        guard let ctx = makeARGBContext(width: target, height: target) else { return false }
+        ctx.interpolationQuality = .high
+        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: target, height: target))
+        guard let finalCG = ctx.makeImage() else { return false }
+        return writePNG(cg: finalCG, to: dest)
+    }
+
+    // MARK: helpers
+
+    private static func loadCGImage(_ url: URL) -> CGImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        return cg
+    }
+
+    private static func centerSquareCrop(_ cg: CGImage) -> CGImage {
+        let side = min(cg.width, cg.height)
+        let sx = (cg.width - side) / 2
+        let sy = (cg.height - side) / 2
+        return cg.cropping(to: CGRect(x: sx, y: sy, width: side, height: side)) ?? cg
+    }
+
+    private static func makeARGBContext(width: Int, height: Int) -> CGContext? {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        return CGContext(
+            data: nil, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: bitmapInfo
+        )
+    }
+
+    private static func writePNG(cg: CGImage, to dest: URL) -> Bool {
+        guard let dst = CGImageDestinationCreateWithURL(
+            dest as CFURL, "public.png" as CFString, 1, nil
+        ) else { return false }
+        CGImageDestinationAddImage(dst, cg, nil)
+        return CGImageDestinationFinalize(dst)
     }
 }
