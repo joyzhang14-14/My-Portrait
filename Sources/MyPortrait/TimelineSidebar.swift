@@ -286,11 +286,21 @@ struct TimelineSidebar: View {
 
     /// CRON JOB HISTORY:仅 cron job 跑出来的 conv,按 ChatStore 的时间序。
     /// cronHistorySearch 非空时按标题模糊过滤(case-insensitive)。
+    /// 受 Settings → General → CronJob history limit 截断,0 = 不截。
     private var cronJobHistoryConversations: [Conversation] {
         let q = cronHistorySearch.trimmingCharacters(in: .whitespaces).lowercased()
         let base = chatStore.conversations.filter { cronJobConvIds.contains($0.id) }
-        guard !q.isEmpty else { return base }
-        return base.filter { $0.title.lowercased().contains(q) }
+        let filtered: [Conversation]
+        if q.isEmpty {
+            filtered = base
+        } else {
+            filtered = base.filter { $0.title.lowercased().contains(q) }
+        }
+        let cap = ConfigStore.shared.current.general.cronJobHistoryLimit
+        if cap > 0, filtered.count > cap {
+            return Array(filtered.prefix(cap))
+        }
+        return filtered
     }
 
     // MARK: Memories scope picker (shown when selection == .memories)

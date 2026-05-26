@@ -358,12 +358,18 @@ struct GeneralConfig: Codable, Equatable {
     /// 默认 false → 全新安装自动看到 onboarding。Settings → General → Onboarding
     /// 里的 "Show" 按钮不动这个 flag,只临时预览。
     var onboardingCompleted: Bool = false
+    /// CronJob 历史记录保留上限 —— sidebar CRON JOB HISTORY 区只显示前 N 条,
+    /// CronJobStore.appendRun 按这个值裁 runs.json。
+    /// 0 = no limit(runs.json 会无限增长,慎选)。
+    /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
+    var cronJobHistoryLimit: Int = 20
     init() {}
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
         case autoDownloadUpdates  = "auto_download_updates"
         case updateCheckMinutes   = "update_check_minutes"
         case onboardingCompleted  = "onboarding_completed"
+        case cronJobHistoryLimit  = "cron_job_history_limit"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -372,6 +378,7 @@ struct GeneralConfig: Codable, Equatable {
         autoDownloadUpdates = c.dflt(Bool.self, .autoDownloadUpdates, autoDownloadUpdates)
         updateCheckMinutes  = c.dflt(Int.self,  .updateCheckMinutes, updateCheckMinutes)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
+        cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
     }
 }
 

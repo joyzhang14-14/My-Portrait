@@ -71,6 +71,29 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
+            // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
+            SettingsCard(title: "Cron Jobs",
+                         footnote: "Affects both the sidebar list and the on-disk runs.json. \"No limit\" lets runs.json grow forever — handy if you want a full log, costly otherwise.") {
+                SettingsRow("History per cron job",
+                            description: "How many recent runs to keep for each cron job.",
+                            icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
+                    Picker("", selection: config.binding(\.general.cronJobHistoryLimit)) {
+                        Text("5").tag(5)
+                        Text("10").tag(10)
+                        Text("20").tag(20)
+                        Text("50").tag(50)
+                        Text("No limit").tag(0)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 110)
+                }
+            }
+            .onChange(of: config.current.general.cronJobHistoryLimit) { _, _ in
+                CronJobStore.shared.applyHistoryLimit()
+            }
+
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。

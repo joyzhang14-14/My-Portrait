@@ -15,7 +15,11 @@ final class CronJobStore {
 
     /// Legacy UserDefaults key — only read once for the one-time migration.
     private let legacyKey = "MyPortrait.cronJobs.v1"
-    private let runsCap = 50
+    /// runs.json 留多少条 —— 读 GeneralConfig.cronJobHistoryLimit。0 = 不裁。
+    /// 用户在 Settings → General 改下拉时实时生效(applyHistoryLimit 主动调一次)。
+    private var runsCap: Int {
+        ConfigStore.shared.current.general.cronJobHistoryLimit
+    }
 
     private init() { load() }
 
@@ -48,11 +52,25 @@ final class CronJobStore {
     func appendRun(_ run: CronJobRun, to id: UUID) {
         guard let i = cronJobs.firstIndex(where: { $0.id == id }) else { return }
         cronJobs[i].runs.insert(run, at: 0)
-        if cronJobs[i].runs.count > runsCap {
-            cronJobs[i].runs = Array(cronJobs[i].runs.prefix(runsCap))
+        let cap = runsCap
+        if cap > 0, cronJobs[i].runs.count > cap {
+            cronJobs[i].runs = Array(cronJobs[i].runs.prefix(cap))
         }
         cronJobs[i].lastRunAt = run.startedAt
         save()
+    }
+
+    /// 用户改 Settings → General → CronJob history limit 时调一次,把所有
+    /// cronJob 的 runs[] 裁到当前 cap。limit=0(no limit)→ 全保留。
+    func applyHistoryLimit() {
+        let cap = runsCap
+        guard cap > 0 else { return }
+        var changed = false
+        for i in cronJobs.indices where cronJobs[i].runs.count > cap {
+            cronJobs[i].runs = Array(cronJobs[i].runs.prefix(cap))
+            changed = true
+        }
+        if changed { save() }
     }
 
     /// LLM 跑完后更新已有 run 的 preview。按 convId 找。LLM 中途失败的话
