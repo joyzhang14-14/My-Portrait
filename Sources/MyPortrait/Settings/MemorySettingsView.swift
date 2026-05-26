@@ -1944,14 +1944,36 @@ private struct SpeechStyleDraftDetail: View {
 
     @ViewBuilder
     private var bodySection: some View {
+        // AFTER 是 approve 后的最终形态 —— 包含 LLM 输出 body + 自动追加的
+        // `**Derived from writing records:**` 块。BEFORE 是现有 .md 的 body
+        // 原样(也含 derived 块)。这样两栏直接对照 = 文件 approve 前后的
+        // 完整对比,用户不会困惑"derived 块不见了"。
+        let afterFinal = finalAfterBody
         if draft.action == .update, let prior = existingBody {
             HStack(alignment: .top, spacing: 12) {
                 bodyColumn(label: "BEFORE", color: .secondary, text: prior)
-                bodyColumn(label: "AFTER",  color: .orange,    text: draft.body)
+                bodyColumn(label: "AFTER",  color: .orange,    text: afterFinal)
             }
         } else {
-            bodyColumn(label: actionLabelForBody, color: actionColorForBody, text: draft.body)
+            bodyColumn(label: actionLabelForBody, color: actionColorForBody, text: afterFinal)
         }
+    }
+
+    /// approve 后落盘的最终 body —— LLM body + derived 块。
+    /// 跟 SpeechStyleDistiller.renderBody 的 update 路径行为一致(union 旧 ids)。
+    private var finalAfterBody: String {
+        // update 时 derived ids = 旧 .md 抽出的 ids ∪ 这次 draft 的 sourceRecordIds
+        // create / noop 时 = 这次 draft 的 sourceRecordIds
+        var ids: [Int64] = []
+        if draft.action == .update, let prior = existingBody {
+            ids = SpeechStyleDistiller.extractDerivedIds(from: prior)
+        }
+        for id in draft.sourceRecordIds where !ids.contains(id) {
+            ids.append(id)
+        }
+        return SpeechStyleDistiller.renderBody(
+            title: draft.title, body: draft.body, sourceIds: ids
+        )
     }
 
     private var actionLabelForBody: String {

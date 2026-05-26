@@ -121,6 +121,14 @@ final class SpeechStyleDistiller {
                 try store.unprocessedRecords(limit: batchCap)
             }.value
 
+            // 立刻把整批 input ids 持久化到 runs 行 —— approve / auto-commit
+            // 时按它标 completed,**不**按 LLM 引用过的子集。这样 LLM 看完
+            // 决定不归入任何 facet 的 records 也不会下次再被喂。
+            let inputIds = records.map { $0.id }
+            if !inputIds.isEmpty {
+                try store.setInputRecordIds(runId: runId, ids: inputIds)
+            }
+
             if records.isEmpty {
                 // 理论不可能 —— 上面 unprocessedCount 刚查过 > 0。兜底防止竞态:
                 // 比如用户同时手动 reject 了某 run 但 records 标 completed
@@ -170,6 +178,8 @@ final class SpeechStyleDistiller {
                 // 直接落盘 + 标 records completed + refresh 全量 weight。
                 Self.applyDrafts(out.drafts)
                 Self.refreshAllWeights()
+                // 标整批 input 为 completed —— recordIds 就是这次 input,
+                // 已经在上面 setInputRecordIds 持久化。
                 try store.markRecordsProcessed(ids: recordIds, at: nowMs)
                 try store.updateRun(
                     runId: runId, status: .autoCommitted,
@@ -214,8 +224,17 @@ final class SpeechStyleDistiller {
         }
         Self.applyDrafts(drafts)
         Self.refreshAllWeights()
-        // 标 records completed —— union 所有 source_record_ids
-        let allIds = Array(Set(staged.flatMap { $0.sourceRecordIds }))
+        // 标整批 input 为 completed —— **不**只标 LLM 引用过的子集,否则
+        // LLM 看完不归入任何 facet 的 records 下次 run 又被喂一次。
+        // input_record_ids 在 runCoreImpl 跑完 unprocessedRecords 后立刻
+        // 写入 runs 行。fallback:读不到就 union staged sources(老 run 兜底)。
+        let inputIds = (try? store.fetchInputRecordIds(runId: runId)) ?? []
+        let allIds: [Int64]
+        if !inputIds.isEmpty {
+            allIds = inputIds
+        } else {
+            allIds = Array(Set(staged.flatMap { $0.sourceRecordIds }))
+        }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         if !allIds.isEmpty {
             try store.markRecordsProcessed(ids: allIds, at: nowMs)

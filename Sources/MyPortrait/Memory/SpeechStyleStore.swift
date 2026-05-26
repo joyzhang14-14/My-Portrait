@@ -114,6 +114,33 @@ struct SpeechStyleStore: Sendable {
 
     // MARK: - runs
 
+    /// 写入这次 run 喂给 LLM 的整批 record ids —— approve / auto-commit 时
+    /// 按它标 completed,而不是按"LLM 引用过的"子集。
+    func setInputRecordIds(runId: String, ids: [Int64]) throws {
+        let json = Self.encodeJSON(ids) ?? "[]"
+        try dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE speech_style_runs SET input_record_ids = :ids WHERE run_id = :rid",
+                arguments: ["ids": json, "rid": runId]
+            )
+        }
+    }
+
+    /// 读 run 的 input_record_ids。approve / auto-commit 路径用。
+    func fetchInputRecordIds(runId: String) throws -> [Int64] {
+        try dbPool.read { db in
+            let json: String? = try String.fetchOne(
+                db,
+                sql: "SELECT input_record_ids FROM speech_style_runs WHERE run_id = :rid",
+                arguments: ["rid": runId]
+            )
+            guard let s = json, let data = s.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([Int64].self, from: data)
+            else { return [] }
+            return arr
+        }
+    }
+
     func insertRun(
         runId: String, mode: SpeechStyleMode, startedAt: Int64
     ) throws {

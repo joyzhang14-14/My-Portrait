@@ -1,3 +1,4 @@
+import Foundation
 import GRDB
 
 /// Centralised migrator. **追加策略**：永远 `registerMigration` 新版本，
@@ -774,6 +775,37 @@ enum DBSchema {
             }
             try db.execute(sql:
                 "CREATE INDEX idx_speech_style_staged_run ON speech_style_staged(run_id)")
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v30 — speech_style_runs.input_record_ids + 历史修复
+        // ═══════════════════════════════════════════════════════════
+        //
+        // bug:approveStaged 只标 LLM 引用过的 records 为 completed,LLM 看完
+        // 但决定不归入任何 facet 的 records 仍是 NULL,下次 run 又被喂一次,
+        // 浪费 token + 污染判断。
+        //
+        // 修法:run 时把整批 input 的 record ids 持久化到 runs 表;approve /
+        // auto-commit 时按 input 全标 completed。
+        //
+        // 历史修复:在 migration 里把所有 id ≤ 已 approved run 喂过的最大 id
+        // 之前的 NULL records 一次性标 completed(那批它们都被喂过)。
+        m.registerMigration("v30_speech_style_input_record_ids") { db in
+            try db.alter(table: "speech_style_runs") { t in
+                t.add(column: "input_record_ids", .text)   // JSON array of Int64
+            }
+            // 历史修复:把所有 NULL records 里 id ≤ max(已 processed id) 的
+            // 标 completed —— 这些 ids 在某次 approved run 时一定被喂过(LLM
+            // 按 start_ts ASC LIMIT 拉,过去 max id 之前的都跑过),只是 LLM
+            // 没引用所以漏标。completed_at 用 now 兜底。
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            try db.execute(sql: """
+                UPDATE writing_records
+                SET speech_style_processed_at = ?
+                WHERE speech_style_processed_at IS NULL
+                  AND id <= (SELECT MAX(id) FROM writing_records WHERE speech_style_processed_at IS NOT NULL)
+                """,
+                arguments: [now])
         }
 
         return m
