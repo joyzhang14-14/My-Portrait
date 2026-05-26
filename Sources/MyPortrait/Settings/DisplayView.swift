@@ -208,14 +208,20 @@ private struct AppCustomizeCard: View {
     /// Commit the staged edits, flush the config write, then relaunch the
     /// app — mirrors screenpipe, where saving app-customize restarts so the
     /// process picks up the new name + icons cleanly.
+    ///
+    /// **必须 await saveNowAndWait**:saveNow 是 fire-and-forget Task,
+    /// 立刻被下面 NSApp.terminate 杀掉,配置没真落盘,新 instance 启动
+    /// 看到老值,"重启后又变回去"。
     private func saveAndRestart() {
         config.mutate {
             $0.display.appName       = appName
             $0.display.customDockIcon  = dockIconPath
             $0.display.customTrayIcon  = trayIconPath
         }
-        config.saveNow()
-        Self.relaunch()
+        Task { @MainActor in
+            await config.saveNowAndWait()
+            Self.relaunch()
+        }
     }
 
     /// 重启 app:先 spawn 一个 detached 进程预定好新 instance 启动,
