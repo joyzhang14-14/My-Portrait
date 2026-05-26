@@ -552,13 +552,18 @@ actor PortraitDBImpl: PortraitDB {
         let endMs = Int64(dayEnd.timeIntervalSince1970 * 1000)
 
         return try await dbPool.read { db in
+            // **screenpipe import 的帧 snapshot_path/video_chunk_id 都 NULL**
+            // 但 device_name='imported',加进 WHERE 让 timeline UI 也显示。
+            // 渲染层 TimelineView 有 NoMediaPlaceholder 兜底无媒体帧。
             let sql = """
             SELECT f.id, f.timestamp_ms, f.app_name, f.window_name, f.browser_url,
                    f.snapshot_path, v.file_path AS video_path, f.offset_ms,
                    COALESCE(v.fps, 1.0) AS fps
             FROM frames f
             LEFT JOIN video_chunks v ON v.id = f.video_chunk_id
-            WHERE (f.snapshot_path IS NOT NULL OR f.video_chunk_id IS NOT NULL)
+            WHERE (f.snapshot_path IS NOT NULL
+                   OR f.video_chunk_id IS NOT NULL
+                   OR f.device_name = 'imported')
               AND f.timestamp_ms >= :startMs AND f.timestamp_ms < :endMs
             ORDER BY f.timestamp_ms ASC
             """
