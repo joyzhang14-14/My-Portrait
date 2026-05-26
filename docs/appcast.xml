@@ -12,6 +12,25 @@
         -->
 
         <item>
+            <title>Version 1.0.82</title>
+            <pubDate>Tue, 26 May 2026 22:55:11 +0000</pubDate>
+            <sparkle:version>1.0.82</sparkle:version>
+            <sparkle:shortVersionString>1.0.82</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Auto-update test build (Sparkle 1.0.81 → 1.0.82 round-trip).</p>
+                <ul>
+                    <li>Settings → General → Updates: show the currently-installed version + build number</li>
+                    <li>Settings → Display: drop the "(macOS only)" suffix on Translucent sidebar</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.82/MyPortrait-1.0.82.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="AoJROTqV3bRiykawniuLQChozmrvCdrruGh9+43XtlG3vHPTJhuZTAFIU87+Yag2gsJxg9uOGjcM+435YCbEBw==" length="44380851" />
+        </item>
+
+        <item>
             <title>Version 1.0.81</title>
             <pubDate>Tue, 26 May 2026 22:37:53 +0000</pubDate>
             <sparkle:version>1.0.81</sparkle:version>
