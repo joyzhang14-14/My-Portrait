@@ -83,7 +83,6 @@ struct MemorySettingsView: View {
     @State private var speechStylePending: [SpeechStyleRunRow] = []
     @State private var speechStyleUnprocessed: Int = 0
     @State private var speechStylePreviewRun: String? = nil
-    @State private var speechStyleExpanded: Set<String> = []
     @State private var speechStyleExpandedDrafts: [String: [SpeechStyleStagedRow]] = [:]
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
@@ -693,33 +692,23 @@ struct MemorySettingsView: View {
                     .padding(.top, 6)
             }
 
-            // Pending review:每 run 一行,Approve / Reject 按钮 + expand 看 drafts
+            // Pending review:直接展开 drafts(NEW/CHANGED 行),不藏 chevron。
+            // 跟 reviewSection 同形态:左侧 ForEach 行 + 右侧 Approve/Reject 按钮。
             if !speechStylePending.isEmpty {
                 Divider().padding(.vertical, 6)
-                Text("Pending review")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
                 ForEach(speechStylePending, id: \.runId) { run in
-                    let expanded = speechStyleExpanded.contains(run.runId)
                     VStack(alignment: .leading, spacing: 6) {
+                        // 头部行:run 元信息 + Approve/Reject
                         HStack(alignment: .center, spacing: 12) {
-                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("run \(String(run.runId.prefix(8)))")
-                                    .font(.system(size: 12, design: .monospaced))
-                                Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts — click to \(expanded ? "collapse" : "expand")")
+                                Text("Pending review")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                toggleSpeechStyleExpand(runId: run.runId)
-                            }
-                            Button("Detail") { speechStylePreviewRun = run.runId }
-                                .buttonStyle(.bordered).controlSize(.small)
                             Button("Reject") {
                                 Task { @MainActor in await rejectSpeechStyle(runId: run.runId) }
                             }
@@ -729,23 +718,18 @@ struct MemorySettingsView: View {
                             }
                             .buttonStyle(.borderedProminent).controlSize(.small)
                         }
-                        if expanded {
-                            inlineSpeechStyleDrafts(runId: run.runId)
-                                .padding(.leading, 18)
-                        }
+                        // drafts 直接展开,跟 event/portrait/personality 的 reviewBlock 同款。
+                        // 第一次出现时按需加载。
+                        inlineSpeechStyleDrafts(runId: run.runId)
+                            .onAppear { ensureSpeechStyleDraftsLoaded(runId: run.runId) }
                     }
                 }
             }
         }
     }
 
-    /// 展开/折叠某 run 的 drafts 列表(按需加载)。
-    private func toggleSpeechStyleExpand(runId: String) {
-        if speechStyleExpanded.contains(runId) {
-            speechStyleExpanded.remove(runId)
-            return
-        }
-        speechStyleExpanded.insert(runId)
+    /// 第一次展示 drafts 时按需 fetch(避免每帧重查 DB)。
+    private func ensureSpeechStyleDraftsLoaded(runId: String) {
         if speechStyleExpandedDrafts[runId] != nil { return }
         guard let distiller = SpeechStyleDistiller.shared else { return }
         let store = distiller.store
@@ -848,7 +832,6 @@ struct MemorySettingsView: View {
         do {
             let n = try distiller.approveStaged(runId: runId)
             speechStyleStatus = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/speech_style/."
-            speechStyleExpanded.remove(runId)
             speechStyleExpandedDrafts.removeValue(forKey: runId)
         } catch {
             speechStyleStatus = "Approve failed: \(error.localizedDescription)"
@@ -862,7 +845,6 @@ struct MemorySettingsView: View {
         do {
             try distiller.rejectStaged(runId: runId)
             speechStyleStatus = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
-            speechStyleExpanded.remove(runId)
             speechStyleExpandedDrafts.removeValue(forKey: runId)
         } catch {
             speechStyleStatus = "Reject failed: \(error.localizedDescription)"
