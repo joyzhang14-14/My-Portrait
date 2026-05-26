@@ -77,6 +77,20 @@ actor SpeakerModelStore {
         throw lastError ?? NSError(domain: "MyPortrait.SpeakerModel", code: -1)
     }
 
+    /// 启动时调一次,并行预下载 3 个 ONNX 小模型(segmentation ~5MB +
+    /// embedding ~30MB + silero ~2MB,共 ~40MB)。已有缓存秒返。失败 swallow,
+    /// 真用到再走 path(for:) 的重试逻辑兜底。让新用户在 onboarding voice
+    /// training 步开始前模型就 ready,避免训完声音模型还没下完导致训练失败。
+    func prefetchAll() async {
+        await withTaskGroup(of: Void.self) { group in
+            for model in [SpeakerModel.segmentation, .embedding, .vadSilero] {
+                group.addTask { [weak self] in
+                    _ = try? await self?.path(for: model)
+                }
+            }
+        }
+    }
+
     private func download(_ model: SpeakerModel, to tmp: URL, final dest: URL) async throws {
         guard let url = URL(string: model.url) else {
             throw NSError(domain: "MyPortrait.SpeakerModel", code: -2,
