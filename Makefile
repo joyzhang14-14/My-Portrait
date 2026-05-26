@@ -12,11 +12,17 @@
 # 中间步骤也可以单独跑:
 #   make build / notarize / dmg / sparkle
 #
-# 关于 notarize:
-#   notarize 需要 $99/年 的 Apple Developer Program 会员。当前账号没付费,
-#   `make release` 默认跳过 notarize。用户安装后 Gatekeeper 会拦截
-#  「无法验证开发者」,需要右键 Open 一次绕过(README 已说明)。
-#   付了年费后,把 `release:` 这条 target 改回 `build notarize dmg sparkle`。
+# 关于签名:
+#   付不起 $99/yr Developer Program → 拿不到 Developer ID,没法 notarize。
+#   build.sh 会先用 Xcode export(Apple Development 证书),再 codesign --sign -
+#   重签 **ad-hoc**。ad-hoc 签名没 team identity,**别人的 Mac TCC 才能正常
+#   授权**(用 Apple Development 签的话 TCC 设里给了权限也没用 —— Stan
+#   v1.0.0 反馈过 issue #?)。用户安装时仍需 xattr -d com.apple.quarantine
+#   绕 Gatekeeper(README 已说明)。
+#
+#   付了年费后,把 ExportOptions.plist method 改成 developer-id,
+#   build.sh 里 codesign --sign - 那段删掉,`release:` target 改成
+#   `build notarize dmg sparkle`。
 
 .PHONY: build notarize dmg sparkle release sparkle-keys clean
 
