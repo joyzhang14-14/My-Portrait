@@ -302,14 +302,24 @@ private struct ChatTranscript: View {
     var onRegenerate: (UUID) -> Void = { _ in }
     var onEdit: (ChatMessage) -> Void = { _ in }
 
+    /// 过滤空 assistant placeholder —— ChatController streaming 一启动就先
+    /// 插入一条 content="" 的 assistant message,但 thinking 状态由底下独立
+    /// ChatThinking 表达,placeholder 本身渲染就是个空 bubble,跟 thinking
+    /// 并列形成 "两个 bubble" 的 bug。(#6)
+    private var displayMessages: [ChatMessage] {
+        // ChatMessage 用 text + parts;空 placeholder = 两者都空。
+        messages.filter { !($0.role == .assistant && $0.text.isEmpty && $0.parts.isEmpty) }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    ForEach(Array(messages.enumerated()), id: \.element.id) { idx, msg in
+                    let visible = displayMessages
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { idx, msg in
                         // The streaming assistant bubble is always the last
                         // assistant message; only it should glow.
-                        let isLastAssistant = idx == messages.count - 1 && msg.role == .assistant
+                        let isLastAssistant = idx == visible.count - 1 && msg.role == .assistant
                         ChatBubble(
                             message: msg,
                             isStreaming: isLastAssistant && isThinking,
