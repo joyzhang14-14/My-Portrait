@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @State private var selection: SidebarSection? = .timeline
@@ -32,6 +33,18 @@ struct ContentView: View {
                     // 用户 Finish 后秒退应用就会丢这条记录,下次启动又看到 onboarding。
                     configStore.mutate { $0.general.onboardingCompleted = true }
                     configStore.saveNow()
+                    // **Replay onboarding 场景**:OnboardingView 比 mainContent
+                    // intrinsic 小,SwiftUI 切回 mainContent 那一刻 NSHostingView
+                    // 第一帧 layout 报小尺寸,window 被收到 onboarding size。
+                    // 虽然 hosting.sizingOptions=[] 禁了持续反馈,但 swap 时
+                    // 那一帧仍会触发 setContentSize。这里 finish 后主动复位回
+                    // App.swift 启动时设的 1200×835。用户不需要再点 Timeline 才正常。
+                    DispatchQueue.main.async {
+                        if let win = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) {
+                            win.setContentSize(NSSize(width: 1200, height: 835))
+                            win.center()
+                        }
+                    }
                 }
             }
         }
