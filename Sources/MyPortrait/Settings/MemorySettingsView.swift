@@ -1508,18 +1508,63 @@ struct MemorySettingsView: View {
             Text(label)
                 .font(.system(size: 12))
                 .frame(maxWidth: .infinity, alignment: .leading)
-            // **fixedSize + frame(width:160, alignment:.trailing)**:
-            // DatePicker(.hourAndMinute) 默认按内容宽度走,跟同一行的
-            // 160 宽 Frequency Picker 视觉不齐(time 控件靠右挤、Frequency
-            // 控件居中铺 160px,trailing 边对不上)。固定 trailing 边的
-            // 160 宽容器把 DatePicker 推到右沿,跟 Frequency 行齐平。
-            // 用 fixedSize 让 DatePicker 自己用 intrinsic 宽度,再用外层
-            // 160 frame 推到 trailing。
-            DatePicker("", selection: dateBinding, displayedComponents: .hourAndMinute)
+            // 用 menu 风格的 dropdown 复刻一个 hour-minute 选择器 ——
+            // 视觉上跟同一行 Frequency Picker(160 宽 menu)完全一致,
+            // 右沿 + 内 padding 都对齐。
+            // 原来用 DatePicker(.hourAndMinute) 出来的是 stepperField
+            // 风格(内嵌小输入框 + 外挂上下箭头),宽度跟同一行 Frequency
+            // Picker 视觉对不齐,Stan 复现"time 右侧选项框左右 padding
+            // 不一致"就是这条。改成 menu 后两行控件一模一样。
+            HStack(spacing: 4) {
+                Picker("", selection: hourBinding(dateBinding)) {
+                    ForEach(0..<24, id: \.self) { Text(Self.hourLabel($0)).tag($0) }
+                }
                 .labelsHidden()
-                .fixedSize()
-                .frame(width: 160, alignment: .trailing)
+                .frame(maxWidth: .infinity)
+                Text(":").font(.system(size: 12))
+                Picker("", selection: minuteBinding(dateBinding)) {
+                    ForEach(Self.minuteSteps, id: \.self) { Text(String(format: "%02d", $0)).tag($0) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+            }
+            .frame(width: 160)
         }
+    }
+
+    /// 把 Date Binding 解出 hour 部分,反向 set 时合并回原 minute。
+    private func hourBinding(_ d: Binding<Date>) -> Binding<Int> {
+        Binding(
+            get: { Calendar.current.component(.hour, from: d.wrappedValue) },
+            set: { newHour in
+                var comp = Calendar.current.dateComponents([.hour, .minute], from: d.wrappedValue)
+                comp.hour = newHour
+                if let nd = Calendar.current.date(from: comp) { d.wrappedValue = nd }
+            }
+        )
+    }
+    /// minute 选项只展示 0/15/30/45 四档,够 scheduler 用。已有 config 里
+    /// 落在四档之外的值(配置文件手动改的)读时 round 到最近一档,避免
+    /// menu Picker 因 tag 对不上显示空白。
+    private func minuteBinding(_ d: Binding<Date>) -> Binding<Int> {
+        Binding(
+            get: {
+                let raw = Calendar.current.component(.minute, from: d.wrappedValue)
+                return Self.minuteSteps.min { abs($0 - raw) < abs($1 - raw) } ?? 0
+            },
+            set: { newMin in
+                var comp = Calendar.current.dateComponents([.hour, .minute], from: d.wrappedValue)
+                comp.minute = newMin
+                if let nd = Calendar.current.date(from: comp) { d.wrappedValue = nd }
+            }
+        )
+    }
+    private static let minuteSteps = [0, 15, 30, 45]
+    /// 24h hour → "12 AM" / "1 PM" 等显示。
+    private static func hourLabel(_ h: Int) -> String {
+        let ampm = h < 12 ? "AM" : "PM"
+        let h12 = h % 12 == 0 ? 12 : h % 12
+        return "\(h12) \(ampm)"
     }
 
     /// 星期选择：0=周日…6=周六。
