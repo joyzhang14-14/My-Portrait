@@ -171,6 +171,13 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
+        // 启动时后台 prefetch 说话人识别 3 个 ONNX 小模型(共 ~40MB)。
+        // 不阻塞 lifecycle 启动。新用户首启 → 在 onboarding 各步走过去的
+        // 时间里模型已下载完,VoiceTrainer 录完 30s 不会再卡。
+        Task.detached(priority: .utility) {
+            await SpeakerModelStore.shared.prefetchAll()
+        }
+
         Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, embeddingWorker, logger] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
