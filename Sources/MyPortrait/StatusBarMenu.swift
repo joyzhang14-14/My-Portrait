@@ -198,7 +198,11 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             if !customIconPath.isEmpty,
                let img = NSImage(contentsOfFile: customIconPath) {
                 img.size = NSSize(width: 18, height: 18)
-                img.isTemplate = true       // template auto-tints with menu-bar style
+                // **isTemplate = false** 关键 —— template 模式系统把图当 alpha
+                // mask 用文字色绘制(黑/白),用户上传的彩色 PNG 会被压成剪影。
+                // 跟默认 character icon 同款处理,彩图原样渲染。仿 My-Orphies
+                // customize.rs:222 "Force template OFF so colours render"。
+                img.isTemplate = false
                 statusItem.button?.image = img
             } else if let character = NSImage(named: "MenuBarIcon") {
                 // 默认菜单栏图标：项目角色立绘。
