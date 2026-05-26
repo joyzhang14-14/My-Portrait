@@ -273,7 +273,7 @@ private struct CalendarPopover: View {
             HStack(spacing: 0) {
                 ForEach(["Su","Mo","Tu","We","Th","Fr","Sa"], id: \.self) { d in
                     Text(d).font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -300,7 +300,7 @@ private struct CalendarPopover: View {
                 }
             }
         }
-        .foregroundStyle(.white.opacity(0.9))
+        .foregroundStyle(Theme.textPrimary.opacity(0.9))
         .padding(14)
         .frame(width: 280)
         .background(Color(NSColor.windowBackgroundColor).opacity(0.98))
@@ -380,10 +380,10 @@ private struct NoMediaPlaceholder: View {
             VStack(spacing: 8) {
                 Image(systemName: "eye.slash")
                     .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.35))
                 Text("No image saved for this frame")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
             }
         }
     }
@@ -424,16 +424,16 @@ private struct FramePreview: View {
                 RealAppIcon(appName: frame.appName, size: 21)
                 Text(frame.appName.isEmpty ? "(unknown app)" : frame.appName)
                     .font(.system(size: 17, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                Text("·").font(.system(size: 17)).foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.9))
+                Text("·").font(.system(size: 17)).foregroundStyle(Theme.textPrimary.opacity(0.3))
                 Text(frame.windowName)
                     .font(.system(size: 15, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     .lineLimit(1)
                 Spacer()
                 Text(timeFmt.string(from: frame.timestamp))
                     .font(.system(size: 15, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
             }
             .padding(.horizontal, 18).padding(.bottom, 8)
         }
@@ -661,7 +661,7 @@ private struct BrowserURLBar: View {
 
             Text(displayURL)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
@@ -675,7 +675,7 @@ private struct BrowserURLBar: View {
             } label: {
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
             }
             .buttonStyle(.bouncyIcon)
             .help("Open in browser")
@@ -704,16 +704,16 @@ private struct EmptyState: View {
         VStack(spacing: 10) {
             if loading {
                 ProgressView().controlSize(.small)
-                Text("Loading frames…").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                Text("Loading frames…").font(.system(size: 12)).foregroundStyle(Theme.textPrimary.opacity(0.5))
             } else if !hasDB {
                 Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 32))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.3))
                 Text("No ~/.portrait/portrait.sqlite found")
-                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 12)).foregroundStyle(Theme.textPrimary.opacity(0.5))
             } else {
                 Image(systemName: "moon.zzz").font(.system(size: 32))
-                    .foregroundStyle(.white.opacity(0.3))
-                Text("No frames on this day").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.3))
+                Text("No frames on this day").font(.system(size: 12)).foregroundStyle(Theme.textPrimary.opacity(0.5))
             }
         }
     }

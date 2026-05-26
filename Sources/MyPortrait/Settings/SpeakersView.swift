@@ -80,7 +80,7 @@ struct SpeakersSettingsView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 TextField("Search speakers…", text: $search)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -108,7 +108,7 @@ struct SpeakersSettingsView: View {
                     Text("Organize with AI")
                         .font(.system(size: 12, weight: .medium))
                 }
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
@@ -200,15 +200,15 @@ private struct ProgressHeader: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(identified) of \(total) speakers identified")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     Text("Identified speakers are searchable as \(token: "@speaker:<name>") in chat.")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 Spacer()
                 Text("\(Int(pct * 100))%")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
             }
             ProgressView(value: pct)
                 .tint(LinearGradient(
@@ -235,10 +235,10 @@ private struct AttentionBanner: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(count) unidentified \(count == 1 ? "cluster" : "clusters")")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 Text("Give each a name below, or click Organize with AI to group similar voices.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.60))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.60))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
@@ -264,10 +264,10 @@ private struct SectionLabel: View {
             Text(title)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.50))
+                .foregroundStyle(Theme.textPrimary.opacity(0.50))
             Text(subtitle)
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textPrimary.opacity(0.45))
         }
         .padding(.top, 8)
         .padding(.bottom, 2)
@@ -290,7 +290,7 @@ private struct UnidentifiedCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Cluster \(row.id.prefix(8))")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 HStack(spacing: 6) {
                     StatPill(icon: "waveform", text: "\(row.sampleCount) samples")
                     if let last = row.lastHeard {
@@ -314,7 +314,7 @@ private struct UnidentifiedCard: View {
             Button(action: commit) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                     .frame(width: 28, height: 28)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
@@ -332,7 +332,7 @@ private struct UnidentifiedCard: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
                     .frame(width: 24, height: 28)
             }
             .menuStyle(.borderlessButton)
@@ -401,7 +401,7 @@ private struct IdentifiedRow: View {
             } else {
                 Text(row.name ?? "Unknown")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
             }
 
             HStack(spacing: 4) {
@@ -419,7 +419,7 @@ private struct IdentifiedRow: View {
                 } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.70))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.70))
                 }
                 .buttonStyle(.bouncyIcon)
                 Button {
@@ -428,14 +428,14 @@ private struct IdentifiedRow: View {
                 } label: {
                     Image(systemName: "person.2.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.70))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.70))
                 }
                 .buttonStyle(.bouncyIcon)
                 .popover(isPresented: $showMerge, arrowEdge: .bottom) { mergePopover }
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.70))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.70))
                 }
                 .buttonStyle(.bouncyIcon)
             }
@@ -536,7 +536,7 @@ private struct SpeakerAvatar: View {
                 .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
             Text(letter)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Theme.textPrimary.opacity(0.95))
         }
         .onAppear { if animating { pulse = true } }
     }
@@ -549,7 +549,7 @@ private struct StatPill: View {
             Image(systemName: icon).font(.system(size: 8.5))
             Text(text).font(.system(size: 10, design: .monospaced))
         }
-        .foregroundStyle(.white.opacity(0.60))
+        .foregroundStyle(Theme.textPrimary.opacity(0.60))
         .padding(.horizontal, 6).padding(.vertical, 2.5)
         .background(Capsule().fill(Color.white.opacity(0.05)))
     }
@@ -601,17 +601,17 @@ struct VoiceTrainingCard: View {
                     .foregroundStyle(Color.purple.opacity(0.9))
                 Text("Voice Training")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
             }
             Text("Read a short passage aloud for ~30 seconds. My Portrait will briefly turn on your microphone for the training session and turn it back off when it's done.")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
                 Text("Your name")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.70))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.70))
                 TextField("e.g. Louis", text: cfg.binding(\.capture.audio.userName))
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -628,7 +628,7 @@ struct VoiceTrainingCard: View {
                 HStack(spacing: 6) {
                     Text("existing:")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.40))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.40))
                     ForEach(suggestions, id: \.self) { s in
                         Button(s) { cfg.mutate { $0.capture.audio.userName = s } }
                             .buttonStyle(.plain)
@@ -648,7 +648,7 @@ struct VoiceTrainingCard: View {
                 Button(action: startTraining) {
                     Text(trainer.isRunning ? "Training…" : "Start training")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 7)
@@ -742,7 +742,7 @@ struct VoiceTrainingCard: View {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.small)
                 Text("Matching your voice — may take a few minutes…")
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.60))
+                    .font(.system(size: 11)).foregroundStyle(Theme.textPrimary.opacity(0.60))
             }
         case .success(let n):
             Text("✓ Trained as \(n)")

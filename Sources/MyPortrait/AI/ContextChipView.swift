@@ -14,15 +14,15 @@ struct ContextChipView: View {
         HStack(spacing: 6) {
             Image(systemName: chip.icon)
                 .font(.system(size: compact ? 9 : 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
             Text(chip.label)
                 .font(.system(size: compact ? 10 : 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
             if onRemove != nil {
                 Button(action: { onRemove?() }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 8.5, weight: .bold))
-                        .foregroundStyle(.white.opacity(hover ? 0.95 : 0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.95 : 0.55))
                 }
                 .buttonStyle(.bouncyIcon)
             }

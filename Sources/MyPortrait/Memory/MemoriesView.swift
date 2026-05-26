@@ -212,7 +212,7 @@ struct MemoriesView: View {
                 )) ?? AttributedString(para)
                 Text(attr)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -285,14 +285,14 @@ struct MemoriesView: View {
                             .foregroundStyle(.secondary)
                         Text(note.summary)
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.85))
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if !note.request.isEmpty {
                         Text("Request: \(note.request)")
                             .font(.system(size: 10.5))
-                            .foregroundStyle(.white.opacity(0.50))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.50))
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

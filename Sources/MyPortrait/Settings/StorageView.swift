@@ -66,13 +66,13 @@ struct StorageSettingsView: View {
                 SettingsRow("Audio", icon: "waveform") {
                     Text(bytes(stats.audioBytes))
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 }
                 SettingsDivider()
                 SettingsRow("Total", icon: "rectangle.stack") {
                     Text(bytes(stats.mediaTotalBytes))
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 }
             }
 
@@ -81,7 +81,7 @@ struct StorageSettingsView: View {
                     SettingsRow(row.label, icon: row.icon) {
                         Text(bytes(row.size))
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     }
                     if row.label != stats.otherBreakdown.last?.label {
                         SettingsDivider()
@@ -264,7 +264,7 @@ private struct SummaryRow: View {
             HStack {
                 Text(headline)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 Spacer()
             }
             ProgressView(value: fillFraction)
@@ -273,7 +273,7 @@ private struct SummaryRow: View {
                 .frame(maxWidth: .infinity)
             Text(monthsRemaining)
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
         }
     }
 
@@ -309,10 +309,10 @@ private struct StatTile: View {
                 Text(label.uppercased())
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.7)
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                 Text(value)
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.96))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.96))
             }
             Spacer()
         }
@@ -335,7 +335,7 @@ private struct DeleteButton: View {
             Text(label)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .tracking(0.4)
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(Theme.textPrimary.opacity(0.9))
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
@@ -376,7 +376,7 @@ private struct AutoDeleteModeRow: View {
                     HStack(spacing: 6) {
                         Text(mode.label)
                             .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                            .foregroundStyle(.white.opacity(0.95))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.95))
                         if recommended {
                             Text("RECOMMENDED")
                                 .font(.system(size: 8, weight: .bold, design: .monospaced))
@@ -388,7 +388,7 @@ private struct AutoDeleteModeRow: View {
                     }
                     Text(mode.subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()

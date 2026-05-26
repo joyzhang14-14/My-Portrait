@@ -20,7 +20,7 @@ struct SettingsCard<Content: View>: View {
                 Text(title.uppercased())
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     .padding(.leading, 14)
             }
             VStack(spacing: 0) {
@@ -43,7 +43,7 @@ struct SettingsCard<Content: View>: View {
             if let footnote {
                 Text(footnote)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     .padding(.leading, 14)
                     .padding(.top, 2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,17 +73,17 @@ struct SettingsRow<Trailing: View>: View {
             if let icon {
                 Image(systemName: icon)
                     .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.75))
                     .frame(width: 22)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 if let description {
                     Text(description)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.50))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -114,11 +114,11 @@ struct SettingsPageTitle: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.96))
+                .foregroundStyle(Theme.textPrimary.opacity(0.96))
             if let subtitle {
                 Text(subtitle)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
         }
     }
@@ -216,10 +216,10 @@ private struct ConfigErrorBanner: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("config.toml problem")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 Text(message)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
@@ -265,7 +265,7 @@ struct TagListEditor: View {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
                         .frame(width: 28, height: 28)
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
                         .background(
                             RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08))
                         )
@@ -279,13 +279,13 @@ struct TagListEditor: View {
                         HStack(spacing: 4) {
                             Text(tag)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
                             Button {
                                 tags.removeAll { $0 == tag }
                             } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.55))
+                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                             }
                             .buttonStyle(.bouncyIcon)
                         }
@@ -393,13 +393,13 @@ struct IgnoredAppPicker: View {
                         HStack(spacing: 4) {
                             Text(app)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
                             Button {
                                 apps.removeAll { $0 == app }
                             } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.55))
+                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                             }
                             .buttonStyle(.bouncyIcon)
                         }
@@ -492,13 +492,13 @@ struct TypingAppPicker: View {
         HStack(spacing: 4) {
             Text(Self.label(app))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
             Button {
                 apps.removeAll { $0 == app }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .buttonStyle(.bouncyIcon)
         }
@@ -517,10 +517,10 @@ struct TypingAppPicker: View {
         HStack(spacing: 4) {
             Image(systemName: "lock.fill")
                 .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.textPrimary.opacity(0.35))
             Text(Self.label(app))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textPrimary.opacity(0.45))
         }
         .padding(.horizontal, 7).padding(.vertical, 3.5)
         .help("\(app) — always excluded")
@@ -658,14 +658,14 @@ struct TypingBlacklistEntryPicker: View {
         HStack(spacing: 4) {
             Text(Self.label(e.bundleId))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
             if !e.urlPrefix.isEmpty {
                 Text("·")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.4))
                 Text(e.urlPrefix)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: 220)
@@ -675,7 +675,7 @@ struct TypingBlacklistEntryPicker: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .buttonStyle(.bouncyIcon)
         }
@@ -693,10 +693,10 @@ struct TypingBlacklistEntryPicker: View {
         HStack(spacing: 4) {
             Image(systemName: "lock.fill")
                 .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.textPrimary.opacity(0.35))
             Text(Self.label(app))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textPrimary.opacity(0.45))
         }
         .padding(.horizontal, 7).padding(.vertical, 3.5)
         .help("\(app) — always excluded")

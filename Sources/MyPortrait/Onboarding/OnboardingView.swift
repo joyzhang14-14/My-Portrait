@@ -273,7 +273,7 @@ private struct PermissionsStep: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 18))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 .frame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
@@ -445,7 +445,7 @@ private struct PersonalInfoStep: View {
             Text(title.uppercased())
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textPrimary.opacity(0.45))
                 .padding(.bottom, 6)
             VStack(alignment: .leading, spacing: 8) {
                 content()
@@ -466,7 +466,7 @@ private struct PersonalInfoStep: View {
         HStack {
             Text(label)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
             Spacer(minLength: 12)
             trailing()
         }
@@ -499,7 +499,7 @@ private struct PersonalInfoStep: View {
                 HStack(spacing: 8) {
                     Image(systemName: "character.bubble")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     Text(lang).font(.system(size: 12))
                     Spacer()
                     Button {
@@ -912,7 +912,7 @@ private struct FinishHint: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.70))
+                .foregroundStyle(Theme.textPrimary.opacity(0.70))
                 .frame(width: 18)
                 .padding(.top, 1)
             Text(text).font(.system(size: 13))

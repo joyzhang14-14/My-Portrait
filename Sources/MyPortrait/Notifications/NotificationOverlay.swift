@@ -153,7 +153,7 @@ struct NotificationCardView: View {
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(hover ? 0.9 : 0.0))
+                        .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.9 : 0.0))
                 }
                 .buttonStyle(.plain)
                 .help("Dismiss")
@@ -166,7 +166,7 @@ struct NotificationCardView: View {
             // body markdown
             Text(bodyAttributed)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.93))
+                .foregroundStyle(Theme.textPrimary.opacity(0.93))
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
                 .textSelection(.enabled)

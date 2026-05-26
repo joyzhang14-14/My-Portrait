@@ -32,13 +32,13 @@ struct MarkdownView: View {
             Text(MDInline.attributed(text))
                 .font(.system(size: [22, 18, 16, 15, 14, 13][min(level - 1, 5)],
                               weight: .semibold))
-                .foregroundStyle(.white.opacity(0.97))
+                .foregroundStyle(Theme.textPrimary.opacity(0.97))
                 .padding(.top, 4)
 
         case .paragraph(let text):
             Text(MDInline.attributed(text))
                 .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.96))
+                .foregroundStyle(Theme.textPrimary.opacity(0.96))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(5)
@@ -50,10 +50,10 @@ struct MarkdownView: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("•").foregroundStyle(.white.opacity(0.55))
+                        Text("•").foregroundStyle(Theme.textPrimary.opacity(0.55))
                         Text(MDInline.attributed(item))
                             .font(.system(size: 15))
-                            .foregroundStyle(.white.opacity(0.96))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.96))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -66,10 +66,10 @@ struct MarkdownView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("\(idx + 1).")
                             .font(.system(size: 14, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         Text(MDInline.attributed(item))
                             .font(.system(size: 15))
-                            .foregroundStyle(.white.opacity(0.96))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.96))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -83,7 +83,7 @@ struct MarkdownView: View {
                 Text(MDInline.attributed(text))
                     .font(.system(size: 14))
                     .italic()
-                    .foregroundStyle(.white.opacity(0.78))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.78))
                     .padding(.horizontal, 10)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -113,7 +113,7 @@ private struct CodeBlockView: View {
                 Text(language.isEmpty ? "code" : language)
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 Spacer()
                 Button(action: copyToClipboard) {
                     HStack(spacing: 4) {
@@ -122,7 +122,7 @@ private struct CodeBlockView: View {
                         Text(copied ? "Copied" : "Copy")
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundStyle(.white.opacity(hover || copied ? 0.95 : 0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(hover || copied ? 0.95 : 0.55))
                 }
                 .buttonStyle(.bouncyIcon)
             }
@@ -133,7 +133,7 @@ private struct CodeBlockView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
                     .font(.system(size: 12.5, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .fixedSize(horizontal: true, vertical: true)
@@ -192,7 +192,7 @@ private struct TableView: View {
                 Text(MDInline.attributed(cell))
                     .font(.system(size: isHeader ? 12 : 13,
                                   weight: isHeader ? .semibold : .regular))
-                    .foregroundStyle(.white.opacity(isHeader ? 0.85 : 0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(isHeader ? 0.85 : 0.92))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 7)
             }

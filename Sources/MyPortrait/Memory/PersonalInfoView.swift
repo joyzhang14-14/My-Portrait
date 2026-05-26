@@ -157,7 +157,7 @@ struct PersonalInfoView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "plus.circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.75))
                     .frame(width: 22)
                 TextField("Add a language (e.g. English, 中文)", text: $newLanguage)
                     .textFieldStyle(.plain)

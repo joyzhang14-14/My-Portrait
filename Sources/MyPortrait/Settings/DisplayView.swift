@@ -108,16 +108,16 @@ private struct AppCustomizeCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("App customize")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.96))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.96))
                         Text("Personalize the in-app display name and the Dock + menu bar icons.")
                             .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                 }
                 .contentShape(Rectangle())
@@ -129,7 +129,7 @@ private struct AppCustomizeCard: View {
                     Text("APP NAME (MAX \(maxNameLength) CHARS)")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .tracking(0.8)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     TextField("My Portrait", text: Binding(
                         get: { appName },
                         set: { appName = String($0.prefix(maxNameLength)) }
@@ -144,7 +144,7 @@ private struct AppCustomizeCard: View {
                     )
                     Text("macOS controls the name shown in the menu bar (next to the Apple logo). Changing it here updates the dock title + windows.")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -169,7 +169,7 @@ private struct AppCustomizeCard: View {
                 HStack(spacing: 10) {
                     Text("Saving restarts My Portrait so the new name + icons take effect.")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(hasUnsavedChanges ? 0.55 : 0.30))
+                        .foregroundStyle(Theme.textPrimary.opacity(hasUnsavedChanges ? 0.55 : 0.30))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 12)
                     Button(action: saveAndRestart) {
@@ -268,10 +268,10 @@ private struct IconSlot: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 Text(subtitle)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 HStack(spacing: 6) {
                     Button(action: pickFile) {
                         Label(path.isEmpty ? "Upload" : "Replace",
@@ -303,7 +303,7 @@ private struct IconSlot: View {
                     RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06))
                     Text("default")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
             }
         }

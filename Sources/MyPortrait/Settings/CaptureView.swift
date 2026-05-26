@@ -280,7 +280,7 @@ struct ScreenCaptureSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Pick from captured apps or the system / privacy list…")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps), discovered: discoveredApps)
                     .padding(.horizontal, 14).padding(.bottom, 12)
@@ -294,7 +294,7 @@ struct ScreenCaptureSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Only capture these apps (optional)…")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TagListEditor(tags: config.binding(\.privacy.includedApps), placeholder: "app name")
                     .padding(.horizontal, 14).padding(.bottom, 12)
@@ -308,7 +308,7 @@ struct ScreenCaptureSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Hostnames or substrings…")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TagListEditor(tags: config.binding(\.privacy.ignoredUrls), placeholder: "e.g. wellsfargo.com, mail.")
                     .padding(.horizontal, 14).padding(.bottom, 12)
@@ -322,7 +322,7 @@ struct ScreenCaptureSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Window title substrings…")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TagListEditor(tags: config.binding(\.privacy.ignoredWindowTitles), placeholder: "e.g. Incognito, Private")
                     .padding(.horizontal, 14).padding(.bottom, 12)
@@ -388,7 +388,7 @@ struct ScreenCaptureSettingsView: View {
                             ), in: 1...30, step: 1).frame(width: 140)
                             Text("\(config.current.capture.screen.videoFps) fps")
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
                                 .frame(width: 50, alignment: .trailing)
                         }
                     }
@@ -410,7 +410,7 @@ struct ScreenCaptureSettingsView: View {
                                 .frame(width: 70)
                             Text("ms")
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         }
                     }
                     SettingsDivider()
@@ -470,7 +470,7 @@ struct TypingCaptureSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Pick an app (and optionally a URL prefix)…")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TypingBlacklistEntryPicker(
                     entries: config.binding(\.privacy.typingBlacklistEntries),
@@ -510,7 +510,7 @@ struct TypingCaptureSettingsView: View {
                             in: 50...500, step: 50) {
                         Text("\(config.current.capture.typingKeyCorrelationWindowMs) ms")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     }
                 }
                 SettingsDivider()
@@ -521,7 +521,7 @@ struct TypingCaptureSettingsView: View {
                             in: 100...1000, step: 50) {
                         Text("\(config.current.capture.typingDebounceMs) ms")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     }
                 }
                 SettingsDivider()
@@ -532,7 +532,7 @@ struct TypingCaptureSettingsView: View {
                             in: 2...30, step: 1) {
                         Text("\(config.current.capture.typingFlushIdleSec) s")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     }
                 }
                 SettingsDivider()
@@ -543,7 +543,7 @@ struct TypingCaptureSettingsView: View {
                             in: 200...3000, step: 100) {
                         Text("\(config.current.capture.typingSubmitWindowMs) ms")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     }
                 }
                 SettingsDivider()
@@ -554,7 +554,7 @@ struct TypingCaptureSettingsView: View {
                             in: 2...50, step: 1) {
                         Text("\(config.current.capture.typingPasteMinChars) chars")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     }
                 }
                 SettingsDivider()
@@ -594,10 +594,10 @@ private struct PowerModeRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.label)
                         .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     Text(mode.subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 Spacer()
                 if isActive {

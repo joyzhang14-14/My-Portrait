@@ -42,7 +42,7 @@ struct UsageSettingsView: View {
                 if chat.tokenUsageByConv.isEmpty && chatStore.conversations.isEmpty {
                     Text("No conversations yet.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.50))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
                     ForEach(Array(filteredConvs.prefix(20))) { conv in
@@ -51,7 +51,7 @@ struct UsageSettingsView: View {
                                     icon: "text.bubble") {
                             Text("\(chat.tokenTotal(for: conv.id))")
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
                         }
                         if conv.id != filteredConvs.prefix(20).last?.id {
                             SettingsDivider()
@@ -65,7 +65,7 @@ struct UsageSettingsView: View {
                 if runs.isEmpty {
                     Text("No cron job runs yet.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.50))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
                     ForEach(Array(runs.prefix(10).enumerated()), id: \.offset) { idx, row in
@@ -74,7 +74,7 @@ struct UsageSettingsView: View {
                                     icon: "play.fill") {
                             Text(row.timeAgo)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         }
                         if idx < min(runs.count, 10) - 1 { SettingsDivider() }
                     }
@@ -178,11 +178,11 @@ private struct MetricTile: View {
             }
             Text(value)
                 .font(.system(size: 28, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.96))
+                .foregroundStyle(Theme.textPrimary.opacity(0.96))
             Text(label.uppercased())
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.50))
+                .foregroundStyle(Theme.textPrimary.opacity(0.50))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)

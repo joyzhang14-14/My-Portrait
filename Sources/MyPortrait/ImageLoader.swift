@@ -39,7 +39,7 @@ struct AsyncDiskThumbnail: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(
                         Image(systemName: "photo")
-                            .foregroundStyle(.white.opacity(0.2))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.2))
                     )
             }
         }
@@ -104,7 +104,7 @@ struct AsyncMP4FrameThumbnail: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(
                         Image(systemName: "film")
-                            .foregroundStyle(.white.opacity(0.2))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.2))
                     )
             }
         }
