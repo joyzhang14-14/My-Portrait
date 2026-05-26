@@ -120,19 +120,11 @@ struct AIModelsSettingsView: View {
         }
     }
 
+    /// 跟 Connections / Chat picker 同款 IntegrationIcon —— 优先真 app icon
+    /// (Codex / Claude / Gemini …),fallback assetName(DeepSeek / Perplexity
+    /// 等带的品牌 SVG),最后 letter 方块兜底。视觉跨页面统一。
     private func providerGlyph(_ integ: Integration) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(integ.accent.opacity(0.22))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(integ.accent.opacity(0.55), lineWidth: 0.6)
-                )
-            Text(integ.letter)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-        }
-        .frame(width: 26, height: 26)
+        IntegrationIcon(integration: integ, size: 26)
     }
 
     @ViewBuilder
