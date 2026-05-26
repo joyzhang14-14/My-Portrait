@@ -34,14 +34,16 @@ struct DisplaySettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Chat") {
-                SettingsRow("Chat always on top",
-                            description: "Keep the chat window floating above other apps.",
+            SettingsCard(title: "Window") {
+                SettingsRow("Keep app window on top",
+                            description: "Pin the entire My Portrait window above other apps. Useful when watching a video or reading docs while chatting in the side.",
                             icon: "macwindow.on.rectangle") {
                     Toggle("", isOn: config.binding(\.display.chatAlwaysOnTop))
                         .labelsHidden().toggleStyle(.switch)
                 }
-                SettingsDivider()
+            }
+
+            SettingsCard(title: "Chat") {
                 SettingsRow("Hide thinking blocks",
                             description: "Don't show the model's reasoning trace in the transcript.",
                             icon: "brain") {
