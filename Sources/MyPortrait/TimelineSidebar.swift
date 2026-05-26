@@ -129,17 +129,31 @@ struct TimelineSidebar: View {
 
     // MARK: section card wrapper
 
-    /// Wraps a section's header + rows in a floating glass card.
-    /// macOS 26+ → 真 Liquid Glass `.glassEffect()`;macOS 15-25 → fallback
-    /// `.glassCard()`(ultraThinMaterial)。
+    /// Wraps a section's header + rows in a card。受 Settings → Display
+    /// "Translucent sidebar" toggle 控制:
+    ///   - ON  → Liquid Glass(macOS 26+ .glassEffect / 老系统 ultraThinMaterial)
+    ///   - OFF → solid 深色卡片(无半透明,可读性优先)
     @ViewBuilder
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+        let translucent = ConfigStore.shared.display.translucentSidebar
+        let card = VStack(alignment: .leading, spacing: Theme.Space.sm) {
             content()
         }
         .padding(Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassCard()
+
+        if translucent {
+            card.liquidGlassCard()
+        } else {
+            card.background(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.8)
+                    )
+            )
+        }
     }
 
     private func placeholderCard(symbol: String, text: String) -> some View {
