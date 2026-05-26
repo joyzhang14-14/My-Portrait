@@ -154,6 +154,12 @@ struct ContentView: View {
             mainPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // 强制 mainContent intrinsic 不小于启动默认 size。否则首启 / Replay
+        // onboarding finish 时 NSHostingView 第一帧 layout 报 pane 自身
+        // intrinsic(Home / Settings 等较小),触发 window 缩小一瞬。
+        // Timeline 自带很大 intrinsic 所以切到它能立刻恢复 —— 但用户进任何
+        // 其他 pane 时窗口都该一开始就完整。
+        .frame(minWidth: 1200, minHeight: 835)
     }
 
     @ViewBuilder
