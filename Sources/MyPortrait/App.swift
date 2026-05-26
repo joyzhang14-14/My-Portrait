@@ -329,7 +329,6 @@ struct MyPortraitApp: App {
         // via the App menu without polluting the main sidebar.
         Settings {
             SettingsScene()
-                .preferredColorScheme(.dark)
                 .frame(minWidth: 880, minHeight: 580)
         }
     }
@@ -497,12 +496,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Inject the Services container + captureSettings into the environment
         // so any descendant view can read \.services (db / coordinator / reporter)
         // or \.captureSettings (toggle bindings for the Settings UI).
+        //
+        // **不在这里钉 .preferredColorScheme(.dark)** —— 之前钉死的话 ContentView
+        // 自己读 config.display.theme 设的 preferredColorScheme 会被外层这条
+        // 盖掉,Settings 切 Light/Dark/System 跟没切一样。让 ContentView 决定。
         let hosting = NSHostingView(
             rootView: ContentView()
                 .environment(\.services, services)
                 .environment(\.captureSettings, services.settings)
                 .environmentObject(services.settings)
-                .preferredColorScheme(.dark)
         )
         hosting.autoresizingMask = [.width, .height]
         // Default sizingOptions let SwiftUI's intrinsic size feed back into the
