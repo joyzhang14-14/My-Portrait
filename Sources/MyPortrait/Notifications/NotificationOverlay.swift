@@ -72,13 +72,16 @@ final class NotificationOverlay {
     }
 
     /// 钉在主屏幕右上角,留出菜单栏 + 安全边距。
+    /// **panelHeight 限到 480** 而不是整屏 —— 之前 visible.height-40 让透明
+    /// 面板从顶到底铺满,虽然没卡片时不渲染,但调试时把 panel 边框露出来
+    /// 看着特别"占地方"。480 够堆 4 张卡(单卡 ~110px + 间距),够用。
     private func positionPanel(_ p: NSPanel) {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let panelWidth: CGFloat = 380
-        let panelHeight: CGFloat = visible.height - 40   // 给底边留点空气
+        let panelWidth: CGFloat = 320
+        let panelHeight: CGFloat = min(480, visible.height - 40)
         let x = visible.maxX - panelWidth - 16
-        let y = visible.minY + 20
+        let y = visible.maxY - panelHeight - 20   // 钉在屏幕顶部往下 20pt
         p.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
     }
 }
@@ -209,7 +212,7 @@ struct NotificationCardView: View {
         .scaleEffect(pressed ? 0.97 : (hover ? 1.01 : 1.0))
         .animation(.spring(response: 0.28, dampingFraction: 0.7), value: hover)
         .animation(.spring(response: 0.18, dampingFraction: 0.6), value: pressed)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
         .onHover { hover = $0 }
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
