@@ -61,10 +61,9 @@ struct MemorySettingsView: View {
 
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
     // —— 不共用 MemoryStaging,自己一套)
+    // Running / status / summary 走全局 UIState 单例,view 切换不丢
+    @ObservedObject private var writingCaptureUI = WritingCaptureUIState.shared
     @State private var writingCaptureTask: Task<Void, Never>? = nil
-    @State private var writingCaptureRunning: Bool = false
-    @State private var writingCaptureStatus: String = ""
-    @State private var writingCaptureSummaries: [WritingCaptureDayRunSummary] = []
     @State private var writingCaptureConfirm: Bool = false
     /// pending_review 的天 + 各自 staged 内容,UI 同步 reload 后展示。
     @State private var writingCapturePending: [WritingCaptureRun] = []
@@ -190,12 +189,12 @@ struct MemorySettingsView: View {
         guard let worker = WritingCaptureWorker.shared else { return }
         do {
             let copied = try await worker.approveBacklog()
-            writingCaptureStatus = "Approved backlog — \(copied) record(s) → writing_records, cursor advanced."
+            writingCaptureUI.statusMessage = "Approved backlog — \(copied) record(s) → writing_records, cursor advanced."
             // 清掉展开缓存,下次 run 完展开时重新加载
             writingCaptureExpanded.remove(date)
             writingCaptureExpandedRecords.removeValue(forKey: date)
         } catch {
-            writingCaptureStatus = "Approve failed: \(error.localizedDescription)"
+            writingCaptureUI.statusMessage = "Approve failed: \(error.localizedDescription)"
         }
         refreshWritingCapture()
     }
@@ -205,11 +204,11 @@ struct MemorySettingsView: View {
         guard let worker = WritingCaptureWorker.shared else { return }
         do {
             try await worker.rejectBacklog()
-            writingCaptureStatus = "Rejected backlog — staged dropped, cursor unchanged."
+            writingCaptureUI.statusMessage = "Rejected backlog — staged dropped, cursor unchanged."
             writingCaptureExpanded.remove(date)
             writingCaptureExpandedRecords.removeValue(forKey: date)
         } catch {
-            writingCaptureStatus = "Reject failed: \(error.localizedDescription)"
+            writingCaptureUI.statusMessage = "Reject failed: \(error.localizedDescription)"
         }
         refreshWritingCapture()
     }
@@ -500,12 +499,12 @@ struct MemorySettingsView: View {
                 }
                 let wcDisabledReason: String? = {
                     if WritingCaptureWorker.shared == nil { return "Writing capture worker is not available." }
-                    if writingCaptureRunning { return "Writing capture is already running." }
+                    if writingCaptureUI.isRunning { return "Writing capture is already running." }
                     if wcHasPending { return "Pending review — Approve / Reject first." }
                     if !hasWritingCaptureWork { return "No new typing events since the last approved cursor." }
                     return nil
                 }()
-                Button(writingCaptureRunning ? "Running…" : "Run") {
+                Button(writingCaptureUI.isRunning ? "Running…" : "Run") {
                     writingCaptureConfirm = true
                 }
                 .buttonStyle(.bordered)
@@ -515,7 +514,7 @@ struct MemorySettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if writingCaptureRunning {
+            if writingCaptureUI.isRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Pass 1 + Pass 2 fanout — may take a few minutes…")
@@ -526,12 +525,12 @@ struct MemorySettingsView: View {
                         let n = PiAgentRegistry.shared.stopAll()
                         writingCaptureTask?.cancel()
                         writingCaptureTask = nil
-                        writingCaptureRunning = false
+                        writingCaptureUI.isRunning = false
                         // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
                         // runBacklog 会报 "Backlog run already in progress" 拒绝。
                         let zombies = (try? WritingCaptureWorker.shared?.store
                             .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-                        writingCaptureStatus = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+                        writingCaptureUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
                         refreshWritingCapture()
                     }
                     .buttonStyle(.bordered)
@@ -540,27 +539,25 @@ struct MemorySettingsView: View {
                 }
                 .padding(.top, 6)
             }
-            if !writingCaptureStatus.isEmpty {
-                Text(writingCaptureStatus)
+            if !writingCaptureUI.statusMessage.isEmpty {
+                Text(writingCaptureUI.statusMessage)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
             }
-            if !writingCaptureSummaries.isEmpty {
+            if let s = writingCaptureUI.lastSummary {
                 Divider().padding(.vertical, 4)
-                ForEach(writingCaptureSummaries, id: \.date) { s in
-                    HStack {
-                        Text(s.date).font(.system(size: 12, design: .monospaced))
-                        Spacer(minLength: 12)
-                        Text("\(s.recordsCount) records / \(s.discardedCount) discarded")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        Text(s.status.rawValue)
-                            .font(.system(size: 11))
-                            .foregroundStyle(s.status == .failed ? .red : .secondary)
-                    }
+                HStack {
+                    Text(s.date).font(.system(size: 12, design: .monospaced))
+                    Spacer(minLength: 12)
+                    Text("\(s.recordsCount) records / \(s.discardedCount) discarded")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text(s.status.rawValue)
+                        .font(.system(size: 11))
+                        .foregroundStyle(s.status == .failed ? .red : .secondary)
                 }
             }
 
@@ -922,28 +919,28 @@ struct MemorySettingsView: View {
     @MainActor
     private func runWritingCapture() async {
         guard let worker = WritingCaptureWorker.shared else {
-            writingCaptureStatus = "Worker not initialized (Services not started yet?)."
+            writingCaptureUI.statusMessage = "Worker not initialized (Services not started yet?)."
             return
         }
-        writingCaptureRunning = true
-        writingCaptureStatus = "Running backlog (cursor → now)…"
-        defer { writingCaptureRunning = false }
+        writingCaptureUI.isRunning = true
+        writingCaptureUI.statusMessage = "Running backlog (cursor → now)…"
+        defer { writingCaptureUI.isRunning = false }
         do {
             let s = try await worker.runBacklog()
-            writingCaptureSummaries = [s]
+            writingCaptureUI.lastSummary = s
             switch s.status {
             case .approved:
-                writingCaptureStatus = "No new data since last cursor — nothing staged."
+                writingCaptureUI.statusMessage = "No new data since last cursor — nothing staged."
             case .pendingReview:
-                writingCaptureStatus =
+                writingCaptureUI.statusMessage =
                     "Done. \(s.recordsCount) record(s) / \(s.discardedCount) discarded — pending review below."
             case .failed:
-                writingCaptureStatus = "Failed: \(s.errorMessage ?? "(unknown)")"
+                writingCaptureUI.statusMessage = "Failed: \(s.errorMessage ?? "(unknown)")"
             default:
-                writingCaptureStatus = "Status: \(s.status.rawValue)"
+                writingCaptureUI.statusMessage = "Status: \(s.status.rawValue)"
             }
         } catch {
-            writingCaptureStatus = "Run failed: \(error.localizedDescription)"
+            writingCaptureUI.statusMessage = "Run failed: \(error.localizedDescription)"
         }
         refreshWritingCapture()
     }

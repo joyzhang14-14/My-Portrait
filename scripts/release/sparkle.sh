@@ -59,9 +59,10 @@ Sparkle appcast item:
                     <li>TODO: fill in release notes</li>
                 </ul>
             ]]></description>
+            <!-- sign_update 输出的 \$SIG 已经包含 length="..." 和
+                 sparkle:edSignature="..." 两个属性,这里不重复指定 length。-->
             <enclosure
                 url="${DOWNLOAD_URL}"
-                length="${SIZE}"
                 type="application/octet-stream"
                 ${SIG} />
         </item>

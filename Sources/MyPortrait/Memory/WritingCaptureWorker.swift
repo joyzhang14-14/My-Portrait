@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Combine
 import os.log
 
 private let workerLog = Logger(subsystem: "com.myportrait.memory", category: "writing-worker")
@@ -13,6 +14,21 @@ struct WritingCaptureDayRunSummary: Sendable {
     let recordsCount: Int
     let discardedCount: Int
     let errorMessage: String?
+}
+
+// MARK: - UI 状态(跨 view 持久化,不随 sidebar 切换销毁)
+
+/// 全局单例。Worker 跑 backlog/runDay 时更新这里,view 订阅。
+/// 切换 sidebar 时 view 被销毁,但 state 在这里活着,回来时直接读。
+@MainActor
+final class WritingCaptureUIState: ObservableObject {
+    static let shared = WritingCaptureUIState()
+    @Published var isRunning: Bool = false
+    @Published var stage: String = ""              // "Step 0" / "Pass 1" / "Pass 2 (3/5)" / "Saving"
+    @Published var statusMessage: String = ""      // 给用户看的一行
+    @Published var lastSummary: WritingCaptureDayRunSummary? = nil
+    @Published var lastError: String? = nil
+    private init() {}
 }
 
 // MARK: - WritingCaptureWorker
@@ -304,6 +320,15 @@ final class WritingCaptureWorker {
     func runBacklog(includeAxText: Bool = true) async throws -> WritingCaptureDayRunSummary {
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let ui = WritingCaptureUIState.shared
+        ui.isRunning = true
+        ui.stage = "starting"
+        ui.statusMessage = "Backlog run starting…"
+        ui.lastError = nil
+        defer {
+            ui.isRunning = false
+            ui.stage = ""
+        }
 
         // 防重复触发:当前状态如果是 pending_review / processing,拒绝重跑
         let existing = try await Task.detached(priority: .userInitiated) { [store] in
@@ -349,9 +374,16 @@ final class WritingCaptureWorker {
                 runId: runId, startMs: startMs, endMs: endMs,
                 includeAxText: includeAxText
             )
+            ui.lastSummary = summary
+            ui.stage = "done"
+            ui.statusMessage = summary.status == .pendingReview
+                ? "Done — \(summary.recordsCount) record(s) staged, \(summary.discardedCount) discarded. Review below."
+                : "Status: \(summary.status.rawValue)"
             return summary
         } catch {
             let msg = error.localizedDescription
+            ui.lastError = msg
+            ui.statusMessage = "Failed: \(msg)"
             try? await Task.detached(priority: .userInitiated) { [store] in
                 try store.upsertRunStatus(
                     date: Self.backlogDateKey, status: .failed,
@@ -368,10 +400,13 @@ final class WritingCaptureWorker {
         includeAxText: Bool = true
     ) async throws -> WritingCaptureDayRunSummary {
         let date = Self.backlogDateKey
+        let ui = WritingCaptureUIState.shared
         let userBlacklist = ConfigStore.shared.privacy.typingBlacklistBundleIds
         let hardcoded = TypingPrivacyFilter.defaultBlacklist
         let blacklist = Set(hardcoded).union(userBlacklist)
 
+        ui.stage = "reading raw"
+        ui.statusMessage = "Reading typing / keystrokes / OCR frames…"
         // 1. 读 raw —— 全范围(startMs, endMs)
         let raw = try await Task.detached(priority: .userInitiated) { [store] in
             let typing = try store.typingEventsInRange(startMs: startMs, endMs: endMs)
@@ -383,6 +418,8 @@ final class WritingCaptureWorker {
         }.value
         workerLog.info("backlog range=[\(startMs, privacy: .public), \(endMs, privacy: .public)) raw: typing=\(raw.typing.count) keys=\(raw.keys.count) frames=\(raw.frames.count)")
 
+        ui.stage = "Step 0"
+        ui.statusMessage = "Step 0: segmenting sessions and dedup OCR…"
         // 2. Step 0
         let step0 = WritingCaptureStep0.preprocess(
             typingEvents: raw.typing, keystrokes: raw.keys, rawOcrFrames: raw.frames
@@ -424,6 +461,8 @@ final class WritingCaptureWorker {
             toFile: "/tmp/writing-capture-pass1-prompt.txt",
             atomically: false, encoding: .utf8)
         workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars")
+        ui.stage = "Pass 1"
+        ui.statusMessage = "Pass 1: extracting context timeline (\(allOcrFrames.count) OCR frames)…"
         let pass1Out = try await pass1.run(
             ocrFrames: allOcrFrames,
             typingEvents: raw.typing,
@@ -433,6 +472,8 @@ final class WritingCaptureWorker {
 
         // 4. group + 5. Pass 2 并发
         let groups = Self.groupRawSessionsByApp(step0.rawSessions)
+        ui.stage = "Pass 2"
+        ui.statusMessage = "Pass 2: \(groups.count) (app, url) groups — running concurrently (max 5)…"
         workerLog.info("grouped by app+url: \(step0.rawSessions.count) sessions → \(groups.count) groups")
         let pass2Cfg = ConfigStore.shared.current.memory
         let pass2Provider = pass2Cfg.resolvedProvider
@@ -471,6 +512,8 @@ final class WritingCaptureWorker {
             }
         }
         workerLog.info("pass2 fanout: \(allRecords.count) records, \(allDiscarded.count) discarded, \(failedGroups) failed groups")
+        ui.stage = "saving"
+        ui.statusMessage = "Saving \(allRecords.count) record(s), \(allDiscarded.count) discarded…"
 
         // 7. stage
         let promptId = Self.promptIdHash(pass1: pass1Out.prompt, pass2: firstPrompt ?? "")

@@ -43,25 +43,33 @@ struct OnboardingView: View {
         .onDisappear { resizeWindow(to: Self.mainAppSize, animate: true) }
     }
 
-    /// 拿到 app 主 NSWindow + 改 content size + 居中。 ContentView 的 Group
+    /// 拿到 app 主 NSWindow + 改 content size + 居中。ContentView 的 Group
     /// 切换 view 不会重建 NSWindow(同一个 NSApplicationDelegate.window),所以
     /// 这里 resize 是直接对那个 window 操作。
+    ///
+    /// 主 window 标志:有 .titled style + .resizable。NSPanel 浮层(NotificationOverlay
+    /// 等)styleMask 通常不含 .titled,过滤掉。
     private func resizeWindow(to size: NSSize, animate: Bool) {
-        guard let window = NSApp.windows.first(where: { $0.contentView?.subviews.first != nil }) else {
+        let mainWindow = NSApp.windows.first { w in
+            w.styleMask.contains(.titled) && w.styleMask.contains(.resizable)
+        }
+        guard let window = mainWindow else {
+            print("[Onboarding] resizeWindow: no main window found (windows=\(NSApp.windows.count))")
             return
         }
-        let currentFrame = window.frame
-        let contentRect = window.contentRect(forFrameRect: currentFrame)
-        // setContentSize 不动 origin,会从左下角拉伸 —— 视觉上"窗口往上长"。
-        // 显式重算 frame 让窗口保持在原中心。
-        let delta = NSSize(width: size.width - contentRect.width,
-                           height: size.height - contentRect.height)
-        var newFrame = window.frame
-        newFrame.origin.x -= delta.width / 2
-        newFrame.origin.y -= delta.height / 2
-        newFrame.size.width  += delta.width
-        newFrame.size.height += delta.height
-        window.setFrame(newFrame, display: true, animate: animate)
+        // setContentSize 处理「内容尺寸」(去掉 titlebar 后),最干净;不需要
+        // 自己 contentRect 转换。但 setContentSize 默认从左下扩展 → 显式重新
+        // 居中:用旧 frame center 算新 frame origin。
+        let oldFrame = window.frame
+        let oldCenter = NSPoint(x: oldFrame.midX, y: oldFrame.midY)
+        window.setContentSize(size)
+        // setContentSize 之后 frame.size 变了,但 origin 还没动 —— 显式居中。
+        let newFrame = window.frame
+        let newOrigin = NSPoint(x: oldCenter.x - newFrame.width / 2,
+                                y: oldCenter.y - newFrame.height / 2)
+        window.setFrame(NSRect(origin: newOrigin, size: newFrame.size),
+                        display: true, animate: animate)
+        print("[Onboarding] resized \(oldFrame.size) → \(size)")
     }
 
     // MARK: - Header / progress
