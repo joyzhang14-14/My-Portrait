@@ -52,7 +52,12 @@ struct SettingsScene: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("My Portrait")
+            // App customize:跟 mainWindow.title / sidebar header 同步。
+            Text({
+                let n = ConfigStore.shared.current.display.appName
+                    .trimmingCharacters(in: .whitespaces)
+                return n.isEmpty ? "My Portrait" : n
+            }())
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.92))
                 .padding(.horizontal, 14)

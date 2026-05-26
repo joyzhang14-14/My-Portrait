@@ -311,8 +311,8 @@ private struct IconSlot: View {
         panel.allowsMultipleSelection = false
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        if panel.runModal() != .OK, let _ = panel.url { return }
-        guard panel.runModal() == .OK || panel.url != nil, let src = panel.url else { return }
+        // **只调一次 runModal** —— 旧代码调了两次,第二次又弹一次 panel。
+        guard panel.runModal() == .OK, let src = panel.url else { return }
         copyAndSet(src: src)
     }
 

@@ -21,13 +21,18 @@ final class ConfigApplier {
     weak var statusBar: StatusBarMenu?
 
     private var registered = false
-    private var lastTheme: String = ""
-    private var lastAlwaysOnTop: Bool = false
-    private var lastDockIcon: String = ""
-    private var lastTrayIcon: String = ""
-    private var lastShowInMenuBar: Bool = true
-    private var lastAppName: String = ""
-    private var lastLaunchAtLogin: Bool = false
+    // 这些字段用 sentinel "<<UNAPPLIED>>" 初始化,确保 install() 里第一次
+    // applyAll 走 if x != lastX 路径全部 apply。否则启动时 dock icon /
+    // tray icon / window title 都不会按 config 重 apply,重启后 customize
+    // 看着完全不生效。
+    private static let unapplied = "<<UNAPPLIED>>"
+    private var lastTheme: String = ConfigApplier.unapplied
+    private var lastAlwaysOnTop: Bool? = nil
+    private var lastDockIcon: String = ConfigApplier.unapplied
+    private var lastTrayIcon: String = ConfigApplier.unapplied
+    private var lastShowInMenuBar: Bool? = nil
+    private var lastAppName: String = ConfigApplier.unapplied
+    private var lastLaunchAtLogin: Bool? = nil
 
     private init() {}
 
@@ -37,16 +42,9 @@ final class ConfigApplier {
         registered = true
         mainWindow = window
         self.statusBar = statusBar
-        // Snapshot current values so the first pass through the trampoline
-        // doesn't fire onChange handlers for stuff that's already correct.
-        let c = ConfigStore.shared.display
-        lastTheme         = c.theme
-        lastAlwaysOnTop   = c.chatAlwaysOnTop
-        lastDockIcon      = c.customDockIcon
-        lastTrayIcon      = c.customTrayIcon
-        lastShowInMenuBar = c.showInMenuBar
-        lastAppName       = c.appName
-        lastLaunchAtLogin = ConfigStore.shared.general.launchAtLogin
+        // **不 snapshot** —— lastXxx 已用 sentinel 初始化,applyAll 第一次
+        // 跑会全部应用一遍(包括 customize 的 dock/tray icon)。这才是
+        // 重启后能看到 customize 生效的关键。
         applyAll()
         trampoline()
     }
@@ -88,7 +86,7 @@ final class ConfigApplier {
         }
 
         // Always on top
-        if display.chatAlwaysOnTop != lastAlwaysOnTop {
+        if lastAlwaysOnTop != display.chatAlwaysOnTop {
             lastAlwaysOnTop = display.chatAlwaysOnTop
             mainWindow?.level = display.chatAlwaysOnTop ? .floating : .normal
         }
@@ -124,13 +122,13 @@ final class ConfigApplier {
         }
 
         // Status-bar visibility
-        if display.showInMenuBar != lastShowInMenuBar {
+        if lastShowInMenuBar != display.showInMenuBar {
             lastShowInMenuBar = display.showInMenuBar
             statusBar?.setVisible(display.showInMenuBar)
         }
 
         // Launch at login
-        if general.launchAtLogin != lastLaunchAtLogin {
+        if lastLaunchAtLogin != general.launchAtLogin {
             lastLaunchAtLogin = general.launchAtLogin
             applyLaunchAtLogin(general.launchAtLogin)
         }
