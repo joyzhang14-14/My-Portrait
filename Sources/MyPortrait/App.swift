@@ -302,6 +302,14 @@ struct MyPortraitApp: App {
         if let idx = args.firstIndex(of: "--speech-style-reject"), idx + 1 < args.count {
             SpeechStyleCLI.reject(runId: args[idx + 1])
         }
+        // `--import-screenpipe [path]` 从 ~/.screenpipe 把历史 frames + audio
+        // transcripts 搬到 My-Portrait,只导比当前最早数据老的部分。
+        if let idx = args.firstIndex(of: "--import-screenpipe") {
+            let nextArg: String? = (idx + 1 < args.count) ? args[idx + 1] : nil
+            // 路径参数必须以 / 开头,否则当成 flag 而不是 path。
+            let pathArg: String? = (nextArg?.hasPrefix("/") == true) ? nextArg : nil
+            ScreenpipeImportCLI.run(sourcePath: pathArg)
+        }
         // 一次性触发 PortraitWeight.refreshDistillCategories() —— 不调 LLM,
         // 只按当前公式重算 social/background/experiences/interests/skills/
         // emotions 下所有 .md 的 weight。speech_style 顺手刷一遍。
