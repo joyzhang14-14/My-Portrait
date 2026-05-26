@@ -151,7 +151,7 @@ struct HomeView: View {
             VStack(spacing: 12) {
                 Image(systemName: "rectangle.connected.to.line.below")
                     .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     .frame(width: 60, height: 60)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -159,10 +159,10 @@ struct HomeView: View {
                     )
                 Text(Self.greeting())
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.96))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.96))
                 Text("One-click summaries from your screen activity")
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .padding(.top, 36)
 
@@ -201,7 +201,7 @@ struct HomeView: View {
                 Text("QUICK ACTIONS")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.5))
                 Spacer()
             }
             .padding(.horizontal, 22)
@@ -361,7 +361,7 @@ private struct ChatBubble: View {
                     Text(message.role == .user ? "You" : "Assistant")
                         .font(.system(size: 11, weight: .semibold))
                         .tracking(0.4)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     Spacer()
                     if hover, !isStreaming {
                         BubbleActions(role: message.role,
@@ -395,7 +395,7 @@ private struct ChatBubble: View {
                 if message.role == .user {
                     Text(.init(message.text))
                         .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.96))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.96))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineSpacing(5)
@@ -437,7 +437,7 @@ private struct CitationFooter: View {
             Text("SOURCES")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.40))
+                .foregroundStyle(Theme.textPrimary.opacity(0.40))
             ForEach(citations) { c in
                 CitationRow(citation: c)
             }
@@ -458,15 +458,15 @@ private struct CitationRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(citation.label)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 Text(citation.detail)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
             }
             Spacer()
             Image(systemName: actionIcon)
                 .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(hover ? 0.85 : 0.40))
+                .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.85 : 0.40))
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(
@@ -547,7 +547,7 @@ private struct BubbleActions: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(Theme.textPrimary.opacity(0.78))
                 .frame(width: 22, height: 22)
         }
         .buttonStyle(.bouncyIcon)
@@ -609,7 +609,7 @@ private struct BatchApproveBar: View {
                     startPoint: .leading, endPoint: .trailing))
             Text("\(count) drafts pending review")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
             Spacer(minLength: 8)
             Button(action: onRejectAll) {
                 Label("Reject all", systemImage: "xmark")
@@ -667,16 +667,16 @@ private struct EditContextPill: View {
             Text("EDITING")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .tracking(0.9)
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(Theme.textPrimary.opacity(0.62))
             Text(slug)
                 .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.98))
+                .foregroundStyle(Theme.textPrimary.opacity(0.98))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 10)
             Text("Body-only · approval required")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.50))
+                .foregroundStyle(Theme.textPrimary.opacity(0.50))
                 .lineLimit(1)
         }
         .padding(.horizontal, 18)
@@ -719,7 +719,7 @@ private struct EditDraftCard: View {
             if let summary = block.summary, !summary.isEmpty {
                 Text(summary)
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
                     .padding(.horizontal, 14)
             }
             if !block.request.isEmpty {
@@ -727,11 +727,11 @@ private struct EditDraftCard: View {
                     Text("Request")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .tracking(0.6)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                         .padding(.top, 1)
                     Text(block.request)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.65))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 14)
@@ -754,7 +754,7 @@ private struct EditDraftCard: View {
             Text("Proposed edit")
                 .font(.system(size: 12, weight: .semibold))
                 .tracking(0.3)
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Theme.textPrimary.opacity(0.95))
             Spacer(minLength: 8)
             HStack(spacing: 4) {
                 Image(systemName: entityIcon)
@@ -762,7 +762,7 @@ private struct EditDraftCard: View {
                 Text(slugLabel)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
             }
-            .foregroundStyle(.white.opacity(0.78))
+            .foregroundStyle(Theme.textPrimary.opacity(0.78))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
@@ -784,13 +784,13 @@ private struct EditDraftCard: View {
                 Text("AFTER")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             // 全文直出,不嵌 ScrollView —— 否则跟外层 chat ScrollView 抢
             // 手势,稍快滑动整段卡片就跟着窗口飞。
             Text(block.afterBody)
                 .font(.system(size: 12.5))
-                .foregroundStyle(.white.opacity(0.88))
+                .foregroundStyle(Theme.textPrimary.opacity(0.88))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
@@ -817,13 +817,13 @@ private struct EditDraftCard: View {
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .tracking(0.6)
                 }
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .buttonStyle(.plain)
             if showOriginal {
                 Text(block.beforeBody.isEmpty ? "(empty)" : block.beforeBody)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.62))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
@@ -936,10 +936,10 @@ private struct ErrorCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     Text(subtitle)
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.65))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -948,7 +948,7 @@ private struct ErrorCard: View {
                 } label: {
                     Image(systemName: showDetails ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 .buttonStyle(.bouncyIcon)
             }
@@ -959,7 +959,7 @@ private struct ErrorCard: View {
                 ScrollView {
                     Text(block.message)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.65))
                         .textSelection(.enabled)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1046,7 +1046,7 @@ private struct ThinkingCard: View {
                 ScrollView {
                     Text(block.text)
                         .font(.system(size: 12, design: .default))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.72))
                         .italic()
                         .textSelection(.enabled)
                         .padding(.horizontal, 12)
@@ -1085,18 +1085,18 @@ private struct ThinkingCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "brain")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.75))
                 Text(label)
                     .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                     .tracking(0.4)
-                    .foregroundStyle(.white.opacity(0.82))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.82))
                 Spacer()
                 if block.isRunning {
                     ProgressView().controlSize(.small).tint(.white.opacity(0.7))
                 }
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)
@@ -1141,7 +1141,7 @@ private struct ToolCard: View {
                     Divider().background(Color.white.opacity(0.08))
                     Text(block.command)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.88))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.88))
                         .textSelection(.enabled)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -1152,7 +1152,7 @@ private struct ToolCard: View {
                     ScrollView {
                         Text(block.output)
                             .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.78))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.78))
                             .textSelection(.enabled)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -1199,16 +1199,16 @@ private struct ToolCard: View {
             HStack(spacing: 8) {
                 Image(systemName: iconFor(block.name))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.75))
                 if expanded {
                     Text(block.name)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .tracking(0.5)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.8))
                 } else {
                     Text(friendlyLabel)
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -1216,7 +1216,7 @@ private struct ToolCard: View {
                 statusBadge
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)
@@ -1307,7 +1307,7 @@ private struct BubbleAvatar: View {
             orbFill
             Image(systemName: role == .user ? "person.fill" : "sparkles")
                 .font(.system(size: 16, weight: role == .user ? .semibold : .medium))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Theme.textPrimary.opacity(0.95))
         }
         .frame(width: 36, height: 36)
         .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.6))
@@ -1334,7 +1334,7 @@ private struct BubbleAvatar: View {
                     orbFill
                     Image(systemName: role == .user ? "person.fill" : "sparkles")
                         .font(.system(size: 16, weight: role == .user ? .semibold : .medium))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 }
                 .frame(width: 36, height: 36)
                 .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.6))
@@ -1381,7 +1381,7 @@ private struct ChatThinking: View {
                 Text("thinking…")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .tracking(0.5)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 14)
@@ -1536,13 +1536,13 @@ private struct TemplateCardView: View {
                         Button(action: onEdit) {
                             Image(systemName: "pencil")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.65))
                         }
                         .buttonStyle(.bouncyIcon)
                         Button(action: onDelete) {
                             Image(systemName: "trash")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.65))
                         }
                         .buttonStyle(.bouncyIcon)
                     }
@@ -1550,11 +1550,11 @@ private struct TemplateCardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(template.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
                         .lineLimit(1)
                     Text(template.subtitle.isEmpty ? template.window.label : template.subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -1586,10 +1586,10 @@ private struct AddTemplateCard: View {
             VStack(spacing: 6) {
                 Image(systemName: "plus")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white.opacity(hover ? 0.85 : 0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.85 : 0.45))
                 Text("New shortcut")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(hover ? 0.75 : 0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.75 : 0.45))
             }
             .frame(maxWidth: .infinity, minHeight: 86)
             .background(
@@ -1697,13 +1697,13 @@ private struct ActivityChipView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(chip.text)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 if let hint = chip.hint {
                     Text(hint)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.4))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1751,7 +1751,7 @@ private struct ChatInputBar: View {
                 if tokenTotal > 0 {
                     Text("\(formatTokens(tokenTotal)) tok")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                         .help("Estimated total tokens in this conversation")
                 }
                 Spacer()
@@ -1777,7 +1777,7 @@ private struct ChatInputBar: View {
                     text: $prompt,
                     prompt: Text("Ask about your screen…  (type @ for filters, paste images)")
                         .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.30)),
+                        .foregroundColor(Theme.textPrimary.opacity(0.30)),
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
@@ -1957,10 +1957,10 @@ private struct AttachmentThumb: View {
             VStack(spacing: 4) {
                 Image(systemName: "doc.text.fill")
                     .font(.system(size: 18))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.7))
                 Text(attachment.displayName)
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(width: 50)
@@ -2122,7 +2122,7 @@ private struct SendButton: View {
                     .frame(width: 34, height: 34)
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(enabled ? 0.97 : 0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(enabled ? 0.97 : 0.45))
                     .offset(x: pressed ? 1 : 0, y: pressed ? 1 : 0)
             }
             .scaleEffect(pressed ? 0.92 : (hover ? 1.04 : 1.0))
@@ -2147,7 +2147,7 @@ private struct ChipButton: View {
             Image(systemName: icon).font(.system(size: 11))
             Text(label).font(.system(size: 12, design: .monospaced))
         }
-        .foregroundStyle(.white.opacity(0.75))
+        .foregroundStyle(Theme.textPrimary.opacity(0.75))
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.14), lineWidth: 1))
     }
@@ -2195,20 +2195,20 @@ private struct ProviderModelPicker: View {
             HStack(spacing: 6) {
                 Text(activeIntegration?.id.uppercased() ?? "—")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(isLocked ? 0.30 : 0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(isLocked ? 0.30 : 0.55))
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
                 Text(activeModel.isEmpty ? "—" : activeModel)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(isLocked ? 0.45 : 0.92))
+                    .foregroundStyle(Theme.textPrimary.opacity(isLocked ? 0.45 : 0.92))
                 if isLocked {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.40))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.40))
                 } else {
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(hover ? 0.85 : 0.50))
+                        .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.85 : 0.50))
                 }
             }
             .padding(.horizontal, 6).padding(.vertical, 3)
@@ -2297,7 +2297,7 @@ private struct PickerPopover: View {
             if connectedProviders.isEmpty {
                 Text("No AI providers connected.\nGo to Connections to add one.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     .padding(.horizontal, 12).padding(.vertical, 10)
             } else {
                 ForEach(connectedProviders) { i in
@@ -2352,7 +2352,7 @@ private struct PickerPopover: View {
         Text(s)
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .tracking(0.8)
-            .foregroundStyle(.white.opacity(0.45))
+            .foregroundStyle(Theme.textPrimary.opacity(0.45))
             .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 4)
     }
 
@@ -2371,11 +2371,11 @@ private struct PickerPopover: View {
                     Text(title)
                         .font(.system(size: 12, weight: .medium,
                                       design: mono ? .monospaced : .default))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     if !subtitle.isEmpty {
                         Text(subtitle)
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.40))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.40))
                     }
                 }
                 Spacer()

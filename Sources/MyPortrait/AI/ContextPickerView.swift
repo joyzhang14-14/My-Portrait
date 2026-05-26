@@ -74,7 +74,7 @@ struct ContextPickerView: View {
                 if showingAppList && rows.isEmpty {
                     Text("No matching apps")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                         .padding(.horizontal, 12).padding(.vertical, 10)
                 }
             }
@@ -111,11 +111,11 @@ struct ContextPickerView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 .onSubmit { onSubmit?() }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -204,21 +204,21 @@ private struct PickerRow: View {
         HStack(spacing: 10) {
             Image(systemName: row.icon)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(Theme.textPrimary.opacity(0.78))
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.title)
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 Text(row.hint)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
             }
             Spacer()
             if row.intent != .none {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)

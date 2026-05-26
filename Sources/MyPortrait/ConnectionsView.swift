@@ -56,11 +56,11 @@ struct ConnectionsView: View {
                 if showsHeader {
                     Text("Connections")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
 
                     Text("Give AI access to your memory, and connect to the apps you use every day")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
 
                 searchField
@@ -88,11 +88,11 @@ struct ConnectionsView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Theme.textPrimary.opacity(0.5))
             TextField("search connections…", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .background(
@@ -134,10 +134,10 @@ struct ConnectionsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(integration.name)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     Text(integration.category.rawValue)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.5))
                 }
                 if appState.isConnected(integration.id) {
                     StatusPill(text: appState.activeAIId == integration.id ? "ACTIVE" : "CONNECTED",
@@ -146,7 +146,7 @@ struct ConnectionsView: View {
                 Spacer()
                 Button { selectedId = nil } label: {
                     Image(systemName: "xmark").font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 .buttonStyle(.bouncyIcon)
             }
@@ -155,7 +155,7 @@ struct ConnectionsView: View {
 
             Text(descriptionFor(integration))
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(Theme.textPrimary.opacity(0.7))
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -199,11 +199,11 @@ struct ConnectionsView: View {
                     Text("OBSIDIAN VAULT PATH")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .tracking(0.6)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     HStack(spacing: 8) {
                         Text(obsidianVaultPath ?? "No vault selected")
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(obsidianVaultPath == nil ? 0.4 : 0.85))
+                            .foregroundStyle(Theme.textPrimary.opacity(obsidianVaultPath == nil ? 0.4 : 0.85))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
@@ -657,7 +657,7 @@ private struct IntegrationTile: View {
                 IntegrationIcon(integration: integration, size: 32)
                 Text(integration.name)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.9))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }

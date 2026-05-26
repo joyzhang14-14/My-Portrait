@@ -466,7 +466,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.minSize = NSSize(width: 700, height: 500)
-        window.backgroundColor = .black
+        // NSWindow 背景色跟随 system appearance(light/dark)。light 用接近
+        // AmbientBackground 顶端的奶白,dark 仍是纯黑,避免 sidebar 出现一道
+        // 跟其余视图不一致的色块。
+        window.backgroundColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+                ? NSColor(red: 0.97, green: 0.96, blue: 0.99, alpha: 1.0)
+                : .black
+        }
         // Explicit unhide — some macOS 26 chrome configurations hide these
         // by default when the title bar is transparent.
         window.standardWindowButton(.closeButton)?.isHidden = false

@@ -63,10 +63,10 @@ struct AIModelsSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No AI providers connected yet.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.65))
+                .foregroundStyle(Theme.textPrimary.opacity(0.65))
             Text("Open Settings → Connections to add ChatGPT, Anthropic, Gemini, Ollama, etc.")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textPrimary.opacity(0.45))
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -86,10 +86,10 @@ struct AIModelsSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(integ.name)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(isEnabled ? 0.95 : 0.45))
+                        .foregroundStyle(Theme.textPrimary.opacity(isEnabled ? 0.95 : 0.45))
                     Text(modelsSummary(for: integ, enabled: isEnabled))
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 Spacer(minLength: 8)
                 Button {
@@ -97,7 +97,7 @@ struct AIModelsSettingsView: View {
                 } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.6))
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
@@ -145,7 +145,7 @@ struct AIModelsSettingsView: View {
                                              : .white.opacity(0.5))
                         Text(model)
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.white.opacity(isChecked ? 0.92 : 0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(isChecked ? 0.92 : 0.55))
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())

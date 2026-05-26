@@ -47,7 +47,7 @@ struct NotificationsSettingsView: View {
                 if config.current.notifications.mutedCronJobs.isEmpty {
                     Text("No muted cronJobs.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.5))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
                     ForEach(config.current.notifications.mutedCronJobs, id: \.self) { name in

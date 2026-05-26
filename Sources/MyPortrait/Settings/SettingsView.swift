@@ -58,7 +58,7 @@ struct SettingsScene: View {
                 return n.isEmpty ? "My Portrait" : n
             }())
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 .padding(.horizontal, 14)
                 .padding(.top, 18)
                 .padding(.bottom, 16)
@@ -67,7 +67,7 @@ struct SettingsScene: View {
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.40))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.40))
                     .padding(.horizontal, 14)
                     .padding(.top, 10)
                     .padding(.bottom, 4)

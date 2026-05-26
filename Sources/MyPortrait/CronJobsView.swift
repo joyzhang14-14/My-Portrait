@@ -54,11 +54,11 @@ struct CronJobsView: View {
         VStack(spacing: 14) {
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.textPrimary.opacity(0.35))
             Text(store.cronJobs.isEmpty ? "No cron jobs yet"
                                      : "Select a cron job from the sidebar")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.60))
+                .foregroundStyle(Theme.textPrimary.opacity(0.60))
             if store.cronJobs.isEmpty {
                 Button {
                     editing = Self.blankCronJob()
@@ -163,7 +163,7 @@ private struct CronJobDetailView: View {
                 HStack(spacing: 12) {
                     Text(cronJob.name)
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     Spacer()
                     Button(action: onRunNow) {
                         Label("Run now", systemImage: "play.fill")
@@ -186,12 +186,12 @@ private struct CronJobDetailView: View {
                 Text("RUNS")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
 
                 if visibleRuns.isEmpty {
                     Text("No runs yet.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 } else {
                     VStack(spacing: 4) {
                         ForEach(visibleRuns) { run in
@@ -216,10 +216,10 @@ private struct CronJobDetailView: View {
                 Text("PROMPT")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
                 Text(cronJob.prompt)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     .textSelection(.enabled)
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -233,13 +233,13 @@ private struct CronJobDetailView: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
             Text(label.uppercased())
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(0.6)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Theme.textPrimary.opacity(0.45))
                 .frame(width: 70, alignment: .leading)
-            Text(value).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+            Text(value).font(.system(size: 12)).foregroundStyle(Theme.textPrimary.opacity(0.85))
             Spacer()
         }
     }
@@ -257,16 +257,16 @@ private struct RunRow: View {
             HStack(alignment: .top, spacing: 10) {
                 Text(Self.fmt.string(from: run.startedAt))
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     .frame(width: 90, alignment: .leading)
                 Text(run.preview.isEmpty ? "(empty)" : run.preview)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.90))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.90))
                     .lineLimit(2)
                 Spacer()
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(hover ? 0.85 : 0.35))
+                    .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.85 : 0.35))
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(

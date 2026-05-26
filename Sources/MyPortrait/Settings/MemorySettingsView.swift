@@ -1867,7 +1867,7 @@ private struct SpeechStyleDraftDetail: View {
             actionBadge
             Text(draft.slug)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
             if let prior = draft.existingSlug, prior != draft.slug {
                 Text("← \(prior)")
                     .font(.system(size: 10, design: .monospaced))
@@ -1936,7 +1936,7 @@ private struct SpeechStyleDraftDetail: View {
             }()
             Text("\(m.mode.rawValue) · \(fmt.string(from: dt)) · \(m.recordsCount ?? 0) records · \(m.draftsCount ?? 0) drafts · run \(String(m.runId.prefix(8)))")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Theme.textPrimary.opacity(0.35))
         }
     }
 
@@ -2011,7 +2011,7 @@ private struct SpeechStyleDraftDetail: View {
                     )) ?? AttributedString(para)
                     Text(attr)
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2128,10 +2128,10 @@ private struct SpeechStyleRefsSheet: View {
                 Spacer()
                 Text(fmt.string(from: dt))
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.35))
                 Text("#\(r.id)")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.35))
             }
             if let cs = r.contextSummary, !cs.isEmpty {
                 Text(cs)
@@ -2141,7 +2141,7 @@ private struct SpeechStyleRefsSheet: View {
             }
             Text(r.text)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.92))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }

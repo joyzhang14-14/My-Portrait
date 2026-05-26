@@ -43,7 +43,7 @@ struct GeneralSettingsView: View {
                             .frame(width: 70)
                         Text("min")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     }
                 }
                 SettingsDivider()
@@ -123,15 +123,15 @@ struct GeneralSettingsView: View {
                             HStack {
                                 Image(systemName: "doc")
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.white.opacity(0.50))
+                                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
                                 Text(entry.displayPath)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.78))
+                                    .foregroundStyle(Theme.textPrimary.opacity(0.78))
                                     .lineLimit(1).truncationMode(.middle)
                                 Spacer()
                                 Text(entry.sizeLabel)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.55))
+                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                             }
                         }
                         HStack {
