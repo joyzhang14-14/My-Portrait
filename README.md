@@ -28,7 +28,7 @@ LLM so the AI actually knows who you are. All data stays on your machine.
 
 Why any of this is needed: Apple charges $99/year for notarization, and I'm not paying. The app is still **signed** (Apple Development cert) and runs with **hardened runtime + entitlements** — same security posture as a notarized build, just without Apple's seal of approval. Auto-updates via Sparkle work as expected once you're past the first launch.
 
-> Requires macOS 15+ on Apple Silicon (M1 / M2 / M3 / M4).
+> Requires macOS 15+ on Apple Silicon (M).
 
 ---
 
