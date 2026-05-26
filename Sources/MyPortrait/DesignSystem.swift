@@ -74,6 +74,18 @@ extension View {
                    corner: CGFloat = Theme.Radius.card) -> some View {
         modifier(GlassCardModifier(tint: tint, corner: corner))
     }
+
+    /// macOS 26+ 真 Liquid Glass(`.glassEffect()`),老系统 fallback `glassCard()`。
+    /// 用在 Timeline 侧边栏的 ACTIVE APPS / AUDIO 两张卡 —— 这俩离主内容
+    /// 最近,折射 / 高光最容易被用户注意到。其它卡仍走 .glassCard。
+    @ViewBuilder
+    func liquidGlassCard(corner: CGFloat = Theme.Radius.card) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular, in: .rect(cornerRadius: corner))
+        } else {
+            self.glassCard(corner: corner)
+        }
+    }
 }
 
 // MARK: - Sidebar backdrop
