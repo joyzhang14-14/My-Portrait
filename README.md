@@ -57,6 +57,33 @@ xcodegen generate          # generates .xcodeproj from project.yml
 ./build-app.sh --run       # builds + launches the .app standalone
 ```
 
+### ⚠️ First-time: switch signing to your own Apple ID
+
+`project.yml` hard-codes `DEVELOPMENT_TEAM: VYHNX2Y2AL` (the original
+author's team). On your machine, Xcode can't sign with someone else's team
+ID, so on first build you'll see a signing error — or, worse, Xcode silently
+falls back to "Sign to Run Locally" (ad-hoc). Ad-hoc signing puts the
+binary's **cdhash** into the designated requirement, which changes on every
+rebuild → macOS TCC sees a "different app" each time → screen recording /
+mic / accessibility permissions you grant on one build don't carry over to
+the next one (you can even grant them in System Settings and they still
+won't unlock the next build).
+
+To get stable permissions:
+
+1. Open `MyPortrait.xcodeproj` in Xcode.
+2. Select the **MyPortrait** target → **Signing & Capabilities**.
+3. Click the Team dropdown → **Add an Account…** → sign in with your own
+   Apple ID (free account is fine). Pick your **Personal Team**.
+4. Build & run. Your signature is now an `Apple Development:
+   <your_email>` cert; its designated requirement is identifier + your cert
+   subject (no cdhash), so TCC tracks permissions cross-rebuild.
+
+You'll still hit Gatekeeper the first time you launch the standalone .app —
+right-click → **Open** to allow it once.
+
+### Why launch standalone, not Xcode ⌘R
+
 ⚠️ **Must launch standalone** (not Xcode's ⌘R). When the app runs under the
 Xcode debugger, macOS TCC attributes screen-recording / microphone permission
 prompts to Xcode itself — My-Portrait never gets authorized.
