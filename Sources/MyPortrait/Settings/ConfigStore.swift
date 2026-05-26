@@ -102,6 +102,14 @@ final class ConfigStore {
         Task { await writeNow() }
     }
 
+    /// 阻塞版的 saveNow —— 真正等磁盘写完才返回。saveAndRestart 这种
+    /// "写完立刻 terminate" 的场景必须用这个,否则 fire-and-forget Task
+    /// 会被 NSApp.terminate 杀掉,配置没落盘,新 instance 启动后看到的
+    /// 还是老值。
+    func saveNowAndWait() async {
+        await writeNow()
+    }
+
     /// Cross-actor read for non-MainActor callers (TimelineDB, background
      /// scanners). Updated by `refreshSnapshot()` on every mutate / load.
      /// Keep small — only fields needed off the main actor go here.
