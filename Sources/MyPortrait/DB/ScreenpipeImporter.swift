@@ -110,22 +110,22 @@ struct ScreenpipeImporter: Sendable {
         var c = Configuration()
         c.readonly = true
         let q = try DatabaseQueue(path: db.path, configuration: c)
-        // ISO cutoff 给 SQL 用。nil = 全统计。
-        let cutoffISO: String? = cutoffMs.map { ms in
-            let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-            let fmt = ISO8601DateFormatter()
-            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return fmt.string(from: date)
-        }
+        // **不用 ISO 字符串比较** —— screenpipe 历史 timestamp 有两种格式
+        // ('2024-05-04 14:23:12' 和 '2024-05-04T14:23:12.000Z'),字符串比
+        // 较里空格 < T,老格式行永远算 "< cutoff" false positive,导致 scan
+        // 显示固定卡 1 帧(真 import 里 Swift 层 ms 二次过滤把它 skip)。
+        // 改用 strftime('%s', ...) 转 unix sec,SQLite 能解析两种格式,
+        // 结果跟 isoToMs 一致。
+        let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
         let (fc, ac, tc, minMs, maxMs): (Int, Int, Int, Int64?, Int64?) = try q.read { d in
             // frames count(JOIN ocr_text + 按 cutoff 过滤)
             let frameSQL: String
-            if cutoffISO != nil {
+            if cutoffSec != nil {
                 frameSQL = """
                     SELECT COUNT(*) FROM frames f
                     INNER JOIN ocr_text o ON o.frame_id = f.id
                     WHERE o.text IS NOT NULL AND o.text != ''
-                      AND f.timestamp < :cutoff
+                      AND CAST(strftime('%s', f.timestamp) AS INTEGER) < :cutoff
                     """
             } else {
                 frameSQL = """
@@ -135,16 +135,16 @@ struct ScreenpipeImporter: Sendable {
                     """
             }
             var frameArgs: StatementArguments = [:]
-            if let cu = cutoffISO { frameArgs = ["cutoff": cu] }
+            if let cu = cutoffSec { frameArgs = ["cutoff": cu] }
             let fc = (try? Int.fetchOne(d, sql: frameSQL, arguments: frameArgs)) ?? 0
 
             // audio_transcripts count(按 cutoff 过滤)
             let trSQL: String
-            if cutoffISO != nil {
+            if cutoffSec != nil {
                 trSQL = """
                     SELECT COUNT(*) FROM audio_transcriptions
                     WHERE transcription IS NOT NULL AND transcription != ''
-                      AND timestamp < :cutoff
+                      AND CAST(strftime('%s', timestamp) AS INTEGER) < :cutoff
                     """
             } else {
                 trSQL = """
@@ -153,17 +153,17 @@ struct ScreenpipeImporter: Sendable {
                     """
             }
             var trArgs: StatementArguments = [:]
-            if let cu = cutoffISO { trArgs = ["cutoff": cu] }
+            if let cu = cutoffSec { trArgs = ["cutoff": cu] }
             let tc = (try? Int.fetchOne(d, sql: trSQL, arguments: trArgs)) ?? 0
 
             // audio chunks 数:有 transcripts 关联的(跟真正 import 用的口径一致)
             let acSQL: String
-            if cutoffISO != nil {
+            if cutoffSec != nil {
                 acSQL = """
                     SELECT COUNT(DISTINCT ac.id) FROM audio_chunks ac
                     INNER JOIN audio_transcriptions at ON at.audio_chunk_id = ac.id
                     WHERE at.transcription IS NOT NULL AND at.transcription != ''
-                      AND at.timestamp < :cutoff
+                      AND CAST(strftime('%s', at.timestamp) AS INTEGER) < :cutoff
                     """
             } else {
                 acSQL = """
@@ -173,7 +173,7 @@ struct ScreenpipeImporter: Sendable {
                     """
             }
             var acArgs: StatementArguments = [:]
-            if let cu = cutoffISO { acArgs = ["cutoff": cu] }
+            if let cu = cutoffSec { acArgs = ["cutoff": cu] }
             let ac = (try? Int.fetchOne(d, sql: acSQL, arguments: acArgs)) ?? 0
 
             // earliest / latest 源端日期 —— 不带 cutoff,UI 显示源端时间范围。
@@ -265,23 +265,18 @@ struct ScreenpipeImporter: Sendable {
 
         // 批量 fetch(全捞到内存,几万 rows 通常 ~50MB,可接受;否则 cursor)。
         let rows: [SourceFrameRow] = try source.read { db in
-            // ts 边界用 SQL 端过滤,省序列化。
-            let cutoffISO: String? = cutoffMs.map { ms in
-                // ms → ISO 比 ts < x 安全。SQLite datetime() round-trip。
-                let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-                let fmt = ISO8601DateFormatter()
-                fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                return fmt.string(from: date)
-            }
-
+            // 用 strftime('%s', ...) 转 unix sec 比较,避免 timestamp 字符串
+            // 两种格式 ('YYYY-MM-DD HH:MM:SS' vs 'YYYY-MM-DDTHH:MM:SS.sssZ')
+            // 字符串比较 false positive。跟 scan 一致。
+            let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
             let sql: String
-            if cutoffISO != nil {
+            if cutoffSec != nil {
                 sql = """
                     SELECT f.id, f.timestamp, f.app_name, f.window_name, f.browser_url, f.focused,
                            o.text
                     FROM frames f
                     LEFT JOIN ocr_text o ON o.frame_id = f.id
-                    WHERE f.timestamp < :cutoff
+                    WHERE CAST(strftime('%s', f.timestamp) AS INTEGER) < :cutoff
                     ORDER BY f.timestamp ASC
                     """
             } else {
@@ -294,7 +289,7 @@ struct ScreenpipeImporter: Sendable {
                     """
             }
             var args: StatementArguments = [:]
-            if let c = cutoffISO { args = ["cutoff": c] }
+            if let c = cutoffSec { args = ["cutoff": c] }
 
             return try Row.fetchAll(db, sql: sql, arguments: args).map { r -> SourceFrameRow in
                 SourceFrameRow(
@@ -357,12 +352,8 @@ struct ScreenpipeImporter: Sendable {
         var importedChunks = 0
         var importedTranscripts = 0
 
-        let cutoffISO: String? = cutoffMs.map { ms in
-            let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-            let fmt = ISO8601DateFormatter()
-            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return fmt.string(from: date)
-        }
+        // 同 importFrames 用 strftime sec 比较 —— 避免字符串两种格式问题。
+        let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
 
         // 拉所有 audio_chunks(没有自身 ts —— audio_transcriptions.timestamp 是
         // 这条 chunk 第一段转译的时刻;按它 group by chunk id 取 min/max)。
@@ -381,7 +372,7 @@ struct ScreenpipeImporter: Sendable {
         let (chunks, transcripts): ([ChunkRow], [TranscriptRow]) = try source.read { db in
             // chunk 元数据
             let chunkSQL: String
-            if cutoffISO != nil {
+            if cutoffSec != nil {
                 chunkSQL = """
                     SELECT ac.id, ac.file_path,
                            (CAST(strftime('%s', MIN(at.timestamp)) AS INTEGER) * 1000) AS first_ms,
@@ -389,7 +380,7 @@ struct ScreenpipeImporter: Sendable {
                           - CAST(strftime('%s', MIN(at.timestamp)) AS INTEGER)) AS dur_s
                     FROM audio_chunks ac
                     JOIN audio_transcriptions at ON at.audio_chunk_id = ac.id
-                    WHERE at.timestamp < :cutoff
+                    WHERE CAST(strftime('%s', at.timestamp) AS INTEGER) < :cutoff
                     GROUP BY ac.id, ac.file_path
                     """
             } else {
@@ -404,7 +395,7 @@ struct ScreenpipeImporter: Sendable {
                     """
             }
             var chunkArgs: StatementArguments = [:]
-            if let c = cutoffISO { chunkArgs = ["cutoff": c] }
+            if let c = cutoffSec { chunkArgs = ["cutoff": c] }
             let chunkRows = try Row.fetchAll(db, sql: chunkSQL, arguments: chunkArgs).map {
                 ChunkRow(
                     oldId: $0["id"], filePath: $0["file_path"] as String? ?? "",
@@ -415,11 +406,11 @@ struct ScreenpipeImporter: Sendable {
 
             // transcripts
             let transcriptSQL: String
-            if cutoffISO != nil {
+            if cutoffSec != nil {
                 transcriptSQL = """
                     SELECT audio_chunk_id, timestamp, transcription
                     FROM audio_transcriptions
-                    WHERE timestamp < :cutoff
+                    WHERE CAST(strftime('%s', timestamp) AS INTEGER) < :cutoff
                     ORDER BY audio_chunk_id ASC, timestamp ASC
                     """
             } else {
@@ -430,7 +421,7 @@ struct ScreenpipeImporter: Sendable {
                     """
             }
             var transArgs: StatementArguments = [:]
-            if let c = cutoffISO { transArgs = ["cutoff": c] }
+            if let c = cutoffSec { transArgs = ["cutoff": c] }
             let transRows = try Row.fetchAll(db, sql: transcriptSQL, arguments: transArgs).map {
                 TranscriptRow(
                     oldChunkId: $0["audio_chunk_id"],
