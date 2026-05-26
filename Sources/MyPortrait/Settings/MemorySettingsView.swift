@@ -61,9 +61,9 @@ struct MemorySettingsView: View {
 
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
     // —— 不共用 MemoryStaging,自己一套)
-    // Running / status / summary 走全局 UIState 单例,view 切换不丢
+    // Running / status / summary / task 全走 UIState.shared,view 切走再回来
+    // Stop 按钮仍可点,状态不丢。
     @ObservedObject private var writingCaptureUI = WritingCaptureUIState.shared
-    @State private var writingCaptureTask: Task<Void, Never>? = nil
     @State private var writingCaptureConfirm: Bool = false
     /// pending_review 的天 + 各自 staged 内容,UI 同步 reload 后展示。
     @State private var writingCapturePending: [WritingCaptureRun] = []
@@ -76,9 +76,8 @@ struct MemorySettingsView: View {
     @State private var writingCaptureExpandedError: [String: String] = [:]
 
     // speech_style 提炼链路的 UI 状态(独立于上面所有 pipeline)。
-    @State private var speechStyleTask: Task<Void, Never>? = nil
-    @State private var speechStyleRunning: Bool = false
-    @State private var speechStyleStatus: String = ""
+    // Running / status / task 走 UIState.shared,跟 writing capture 同模式。
+    @ObservedObject private var speechStyleUI = SpeechStyleUIState.shared
     @State private var speechStyleConfirm: Bool = false
     @State private var speechStylePending: [SpeechStyleRunRow] = []
     @State private var speechStyleUnprocessed: Int = 0
@@ -532,8 +531,8 @@ struct MemorySettingsView: View {
                     Spacer(minLength: 0)
                     Button("Stop") {
                         let n = PiAgentRegistry.shared.stopAll()
-                        writingCaptureTask?.cancel()
-                        writingCaptureTask = nil
+                        writingCaptureUI.task?.cancel()
+                        writingCaptureUI.task = nil
                         writingCaptureUI.isRunning = false
                         // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
                         // runBacklog 会报 "Backlog run already in progress" 拒绝。
@@ -638,14 +637,14 @@ struct MemorySettingsView: View {
                 let ssHasPending = !speechStylePending.isEmpty
                 let ssDisabledReason: String? = {
                     if SpeechStyleDistiller.shared == nil { return "Speech style distiller is not available." }
-                    if speechStyleRunning { return "Speech style is already running." }
+                    if speechStyleUI.isRunning { return "Speech style is already running." }
                     if ssHasPending { return "Pending review — Approve / Reject first." }
                     if speechStyleUnprocessed == 0 {
                         return "Nothing to distill — run writing capture first to produce writing_records."
                     }
                     return nil
                 }()
-                Button(speechStyleRunning ? "Running…" : "Run") {
+                Button(speechStyleUI.isRunning ? "Running…" : "Run") {
                     speechStyleConfirm = true
                 }
                 .buttonStyle(.bordered)
@@ -655,7 +654,7 @@ struct MemorySettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if speechStyleRunning {
+            if speechStyleUI.isRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("LLM analyzing speech style — may take a few minutes…")
@@ -664,14 +663,14 @@ struct MemorySettingsView: View {
                     Spacer(minLength: 0)
                     Button("Stop") {
                         let n = PiAgentRegistry.shared.stopAll()
-                        speechStyleTask?.cancel()
-                        speechStyleTask = nil
-                        speechStyleRunning = false
+                        speechStyleUI.task?.cancel()
+                        speechStyleUI.task = nil
+                        speechStyleUI.isRunning = false
                         // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
                         // 启动时 unprocessedCount / pending 判断会被僵尸行误导。
                         let zombies = (try? SpeechStyleDistiller.shared?.store
                             .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-                        speechStyleStatus = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+                        speechStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
                         refreshSpeechStyle()
                     }
                     .buttonStyle(.bordered)
@@ -680,8 +679,8 @@ struct MemorySettingsView: View {
                 }
                 .padding(.top, 6)
             }
-            if !speechStyleStatus.isEmpty {
-                Text(speechStyleStatus)
+            if !speechStyleUI.statusMessage.isEmpty {
+                Text(speechStyleUI.statusMessage)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -807,20 +806,20 @@ struct MemorySettingsView: View {
     @MainActor
     private func runSpeechStyleManual() async {
         guard let distiller = SpeechStyleDistiller.shared else {
-            speechStyleStatus = "Distiller not initialized."
+            speechStyleUI.statusMessage = "Distiller not initialized."
             return
         }
-        speechStyleRunning = true
-        speechStyleStatus = "Running speech style distillation…"
+        speechStyleUI.isRunning = true
+        speechStyleUI.statusMessage = "Running speech style distillation…"
         defer {
-            speechStyleRunning = false
+            speechStyleUI.isRunning = false
             refreshSpeechStyle()
         }
         do {
             let s = try await distiller.runManual()
-            speechStyleStatus = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
+            speechStyleUI.statusMessage = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
         } catch {
-            speechStyleStatus = "Failed: \(error.localizedDescription)"
+            speechStyleUI.statusMessage = "Failed: \(error.localizedDescription)"
         }
     }
 
@@ -829,10 +828,10 @@ struct MemorySettingsView: View {
         guard let distiller = SpeechStyleDistiller.shared else { return }
         do {
             let n = try distiller.approveStaged(runId: runId)
-            speechStyleStatus = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/speech_style/."
+            speechStyleUI.statusMessage = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/speech_style/."
             speechStyleExpandedDrafts.removeValue(forKey: runId)
         } catch {
-            speechStyleStatus = "Approve failed: \(error.localizedDescription)"
+            speechStyleUI.statusMessage = "Approve failed: \(error.localizedDescription)"
         }
         refreshSpeechStyle()
     }
@@ -842,10 +841,10 @@ struct MemorySettingsView: View {
         guard let distiller = SpeechStyleDistiller.shared else { return }
         do {
             try distiller.rejectStaged(runId: runId)
-            speechStyleStatus = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
+            speechStyleUI.statusMessage = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
             speechStyleExpandedDrafts.removeValue(forKey: runId)
         } catch {
-            speechStyleStatus = "Reject failed: \(error.localizedDescription)"
+            speechStyleUI.statusMessage = "Reject failed: \(error.localizedDescription)"
         }
         refreshSpeechStyle()
     }
@@ -1018,7 +1017,7 @@ struct MemorySettingsView: View {
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
-                writingCaptureTask = Task { @MainActor in await runWritingCapture() }
+                writingCaptureUI.task = Task { @MainActor in await runWritingCapture() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -1026,7 +1025,7 @@ struct MemorySettingsView: View {
         }
         .alert("Run speech style distillation?", isPresented: $speechStyleConfirm) {
             Button("Run", role: .none) {
-                speechStyleTask = Task { @MainActor in await runSpeechStyleManual() }
+                speechStyleUI.task = Task { @MainActor in await runSpeechStyleManual() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

@@ -28,6 +28,9 @@ final class WritingCaptureUIState: ObservableObject {
     @Published var statusMessage: String = ""      // 给用户看的一行
     @Published var lastSummary: WritingCaptureDayRunSummary? = nil
     @Published var lastError: String? = nil
+    /// 跑 backlog 的 Task 句柄 —— Stop 按钮 cancel 用。挂在单例上,view 切走
+    /// 再回来 Stop 按钮仍可点(原本 @State 在 view 里,view 销毁后 task 句柄丢)。
+    var task: Task<Void, Never>? = nil
     private init() {}
 }
 

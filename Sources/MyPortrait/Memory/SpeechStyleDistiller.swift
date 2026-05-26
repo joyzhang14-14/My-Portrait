@@ -3,6 +3,21 @@ import os.log
 
 private let ssLog = Logger(subsystem: "com.myportrait.memory", category: "speech-style")
 
+/// 全局单例 UI 状态。Distiller 跑时更新这里,view 订阅。
+/// 切换 sidebar 时 view 被销毁,但 state 在这里活着,回来时直接读。
+/// 跟 WritingCaptureUIState 同模式 —— speech_style 也是长任务,view 切走
+/// 再回来要保持状态可见 + Stop 按钮可点。
+@MainActor
+final class SpeechStyleUIState: ObservableObject {
+    static let shared = SpeechStyleUIState()
+    @Published var isRunning: Bool = false
+    @Published var statusMessage: String = ""
+    /// 跑 distiller 的 Task 句柄 —— Stop 按钮 cancel 用。挂单例上,view 切走
+    /// 再回来 Stop 仍可点。
+    var task: Task<Void, Never>? = nil
+    private init() {}
+}
+
 /// speech_style 提炼链路的 orchestrator —— 两个入口:
 ///   - `runManual()` —— UI Run 按钮触发。LLM 决策落 speech_style_staged,
 ///                      run.status = pending_review。用户在 UI Approve 后
