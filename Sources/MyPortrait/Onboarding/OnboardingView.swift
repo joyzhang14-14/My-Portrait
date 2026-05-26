@@ -40,7 +40,22 @@ struct OnboardingView: View {
         }
         .background(SidebarBackdrop().ignoresSafeArea())
         .onAppear { resizeWindow(to: Self.onboardingSize, animate: false) }
-        .onDisappear { resizeWindow(to: Self.mainAppSize, animate: true) }
+        // **不能再靠 .onDisappear 还原窗口尺寸** —— ContentView 用
+        // Group + if/else 切到 mainContent 时,SwiftUI 把 OnboardingView 从
+        // view tree 摘掉的时机不固定;onDisappear 可能在 mainContent 已经
+        // 按"老 onboarding size 720x560"布局之后才烧起来,等用户点 sidebar
+        // 重新触发 layout 才纠正回去(用户复现的"app 缩小,点 timeline 才恢
+        // 复"就是这个)。改成在 Finish 按钮回调里**先**还原窗口尺寸,**再**
+        // 调 onFinish() 翻 flag,顺序明确。
+    }
+
+    /// Finish 按钮的最终步:先 resize 窗口回主 app 尺寸,再调 onFinish 翻
+    /// onboardingCompleted flag。这两步先后顺序很重要 —— SwiftUI 收到 flag
+    /// 变化后会立即重算 ContentView body 切到 mainContent,如果窗口此时
+    /// 还是 720x560,mainContent 就按那个小尺寸初次布局,UI 看着像缩水。
+    private func finish() {
+        resizeWindow(to: Self.mainAppSize, animate: true)
+        onFinish()
     }
 
     /// 拿到 app 主 NSWindow + 改 content size + 居中。ContentView 的 Group
@@ -122,7 +137,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
             }
             Button(step == totalSteps - 1 ? "Finish" : "Next") {
-                if step == totalSteps - 1 { onFinish() }
+                if step == totalSteps - 1 { finish() }
                 else { advance() }
             }
             .buttonStyle(.borderedProminent)
