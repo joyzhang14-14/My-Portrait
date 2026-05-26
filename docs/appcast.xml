@@ -12,6 +12,50 @@
         -->
 
         <item>
+            <title>Version 1.0.81</title>
+            <pubDate>Tue, 26 May 2026 22:37:53 +0000</pubDate>
+            <sparkle:version>1.0.81</sparkle:version>
+            <sparkle:shortVersionString>1.0.81</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>New features</h3>
+                <ul>
+                    <li>Screenpipe data import (auto-scan disks, copy MP4 / audio metadata, recompute cutoff, progress bar + live byte counter)</li>
+                    <li>Pre-fetch local models (WhisperKit / pyannote / wespeaker / Silero VAD) on launch — first-run no longer stalls</li>
+                    <li>Proper Light theme: warm-white → lavender gradient + dynamic glass</li>
+                    <li>Bundled brand icons for DeepSeek / Ollama / Anthropic / Obsidian / Notion</li>
+                    <li>Claude Code "Connect" actually sends "hi" and reads the reply</li>
+                    <li>"New version available" toggle wired to Sparkle didFindValidUpdate</li>
+                    <li>App customize: dock icon auto-cropped to macOS squircle template</li>
+                    <li>Speakers training entry visible even when Audio Capture is off; Speakers page folded into Audio Capture</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li>Chat: provider / model locked per-conversation; RECENTS ordering fixed; empty assistant placeholder hidden (#6)</li>
+                    <li>Onboarding: window resize before flag flip; permissions never proactively requested; Input Monitoring CGEventTap side-effect registers app in System Settings</li>
+                    <li>Scheduler UI: 24-hour picker; Time row uses menu Pickers for visual alignment</li>
+                    <li>Cron jobs: trimmed conversations are deleted, no longer leak into RECENTS</li>
+                    <li>Sidebar: Memories rows fully clickable (#7); Translucent sidebar toggle takes effect</li>
+                    <li>Integration icons: NSImage(named:) loading + letter fallback when assets fail</li>
+                    <li>DeepSeek icon flood-filled to remove iOS-style black border</li>
+                    <li>App customize bugs fixed; tray icon renders in colour</li>
+                    <li>Memory Settings + Connections page title layout consistent with rest of Settings</li>
+                    <li>Swift 6 data-race warning fix; main window pinned to min size</li>
+                </ul>
+                <h3>Under-the-hood</h3>
+                <ul>
+                    <li>Code-signing identity moved to a local self-signed cert (MyPortraitDev) — keeps TCC permissions + Sparkle auto-update stable across versions, no Apple ID dependency</li>
+                    <li>Support/Signing.local.xcconfig lets contributors override signing without touching committed defaults</li>
+                </ul>
+                <p><strong>⚠️ Upgrade from v1.0.0:</strong> Sparkle auto-update is rejected this once because the code-signing identity changed. Please download this .dmg and install manually. macOS TCC treats the new build as a new app, so re-grant Screen Recording / Microphone / Accessibility / Input Monitoring / Full Disk Access. After v1.0.81, future Sparkle auto-updates will work normally.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.81/MyPortrait-1.0.81.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="MgCyCEQQpnftf/HFMQWMnZOCKBwYFufR8IdXyVIgTNzda+OFDZBx+Qi1jT/UFtREa3coH7xtjgE4oNRQQru4Aw==" length="44371950" />
+        </item>
+
+        <item>
             <title>Version 1.0.0</title>
             <pubDate>Tue, 26 May 2026 03:23:10 +0000</pubDate>
             <sparkle:version>1.0.0</sparkle:version>
