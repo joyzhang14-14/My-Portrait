@@ -44,6 +44,21 @@ final class WhisperKitWrapper: @unchecked Sendable {
         logger.info("WhisperKit model unloaded — freed memory")
     }
 
+    /// 启动时调,把模型下到磁盘并释放内存。下次真转录 ensurePipe 会从磁盘
+    /// cache 秒加载,不再触发下载。新用户首启不会卡 150MB 下载在第一段
+    /// 录音时。失败 swallow,真用到再走 ensurePipe 重试。
+    func prefetch() async {
+        guard pipe == nil else { return }
+        logger.info("prefetching WhisperKit model: \(self.modelName, privacy: .public)")
+        do {
+            let temp = try await WhisperKit(model: modelName)
+            _ = temp           // 仅触发下载 + 初始化,立刻释放
+            logger.info("WhisperKit model prefetched to disk")
+        } catch {
+            logger.warning("WhisperKit prefetch failed (will retry on first transcribe): \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// 懒加载 WhisperKit pipeline（首跑下载模型）。
     private func ensurePipe() async throws {
         guard pipe == nil else { return }
