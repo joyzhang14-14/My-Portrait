@@ -127,10 +127,6 @@ struct PersonalInfoConfig: Codable, Equatable {
 // MARK: - Memory
 
 struct MemoryConfig: Codable, Equatable {
-    // Capture-layer indexer (existing).
-    var indexerEnabled:        Bool   = true
-    var indexIntervalMinutes:  Int    = 15
-
     // MemoryBudget — sleep-consolidation pass. Per-day impact budget.
     var dailyBudget:           Double = 50
     var peakProtection:        Double = 4.5
@@ -168,8 +164,6 @@ struct MemoryConfig: Codable, Equatable {
 
     init() {}
     enum CodingKeys: String, CodingKey {
-        case indexerEnabled       = "indexer_enabled"
-        case indexIntervalMinutes = "index_interval_minutes"
         case dailyBudget          = "daily_budget"
         case peakProtection       = "peak_protection"
         case maxRebalances        = "max_rebalances"
@@ -188,8 +182,6 @@ struct MemoryConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        indexerEnabled       = c.dflt(Bool.self,   .indexerEnabled,       indexerEnabled)
-        indexIntervalMinutes = c.dflt(Int.self,    .indexIntervalMinutes, indexIntervalMinutes)
         dailyBudget          = c.dflt(Double.self, .dailyBudget,          dailyBudget)
         peakProtection       = c.dflt(Double.self, .peakProtection,       peakProtection)
         maxRebalances        = c.dflt(Int.self,    .maxRebalances,        maxRebalances)
@@ -711,10 +703,6 @@ struct PrivacyConfig: Codable, Equatable {
     /// 与 TypingPrivacyFilter 的 hardcoded 默认黑名单取并集。
     var typingBlacklistEntries: [TypingBlacklistEntry] = []
 
-    /// DEPRECATED:不再使用。submit 检测改用 `looksLikeSubmitClear` 行为判断
-    /// (回车后 value 真的清空 / 断崖式缩短),不需要 app 白名单。字段保留只为
-    /// 不破坏老 config.toml 的解码。
-    var typingSubmitBundleIds: [String] = []
     init() {}
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
@@ -728,7 +716,6 @@ struct PrivacyConfig: Codable, Equatable {
         case maskIgnoredApps         = "mask_ignored_apps"
         case typingBlacklistBundleIds = "typing_blacklist_bundle_ids"
         case typingBlacklistEntries   = "typing_blacklist_entries"
-        case typingSubmitBundleIds    = "typing_submit_bundle_ids"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -744,7 +731,6 @@ struct PrivacyConfig: Codable, Equatable {
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
         typingBlacklistBundleIds = c.dflt([String].self, .typingBlacklistBundleIds, typingBlacklistBundleIds)
         typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, typingBlacklistEntries)
-        typingSubmitBundleIds    = c.dflt([String].self, .typingSubmitBundleIds, typingSubmitBundleIds)
 
         // 老字段 typing_blacklist_bundle_ids 自动迁移到新 entries。
         if !typingBlacklistBundleIds.isEmpty {

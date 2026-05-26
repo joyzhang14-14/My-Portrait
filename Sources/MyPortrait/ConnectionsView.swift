@@ -550,22 +550,16 @@ struct ConnectionsView: View {
     /// Intelligence): TCC permission lives in System Settings → Privacy.
     /// Apple Calendar 走 EventKit:第一次调用 requestFullAccessToEvents 系统
     /// 会弹原生权限弹窗;之后如果用户拒了再点 Connect,我们就跳系统设置让
-    /// 他改。其它两个仍走"跳系统设置"那条路(底层 API 没接,纯 cosmetic)。
+    /// 他改。当前 .systemAccess 只剩 apple-calendar 一个 tile —— 其它假
+    /// systemAccess tile(Voice Memos / Apple Intelligence)已经从
+    /// IntegrationRegistry 删掉。
     private func connectSystemAccess(_ integration: Integration) {
-        if integration.id == "apple-calendar" {
-            connectCalendar(integration)
+        guard integration.id == "apple-calendar" else {
+            // 未来如果再加 systemAccess tile 走这里;现在不应触发。
+            loginError = "\(integration.name) is not wired yet."
             return
         }
-        let pane: String = {
-            switch integration.id {
-            case "voice-memos":        return "Privacy_Microphone"
-            default:                   return "Privacy_AppleIntelligenceReport"
-            }
-        }()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-            NSWorkspace.shared.open(url)
-        }
-        appState.toggleConnect(integration)
+        connectCalendar(integration)
     }
 
     /// Apple Calendar 真接 EventKit。三种 TCC 状态:
