@@ -52,6 +52,38 @@ struct SpeechStyleStore: Sendable {
         }
     }
 
+    /// 按 id list 拉 writing_records —— UI Draft sheet 展开"N refs"用。
+    /// 跟 unprocessedRecords 同投影,只是 WHERE 条件不一样。
+    func fetchRecordsByIds(_ ids: [Int64]) throws -> [SpeechStyleRecordInput] {
+        guard !ids.isEmpty else { return [] }
+        return try dbPool.read { db in
+            let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+            let args: [DatabaseValueConvertible] = ids.map { $0 as DatabaseValueConvertible }
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, start_ts, app, url, text, edit_log, kind, context_summary
+                    FROM writing_records
+                    WHERE id IN (\(placeholders))
+                    ORDER BY start_ts ASC
+                    """,
+                arguments: StatementArguments(args)
+            )
+            return rows.map {
+                SpeechStyleRecordInput(
+                    id: $0["id"],
+                    startTs: $0["start_ts"],
+                    app: $0["app"],
+                    url: $0["url"],
+                    text: $0["text"],
+                    editLog: ($0["edit_log"] as String?) ?? "[]",
+                    kind: ($0["kind"] as String?) ?? "other",
+                    contextSummary: $0["context_summary"]
+                )
+            }
+        }
+    }
+
     /// 还有多少未处理 record(UI Run 按钮文案 + 灰按钮判断)。
     func unprocessedCount() throws -> Int {
         try dbPool.read { db in

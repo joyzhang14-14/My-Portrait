@@ -1821,36 +1821,213 @@ private struct RejectReasonSheet: View {
 
 // MARK: - SpeechStylePreview sheet
 
-/// 一次 run 的全部 staged drafts 完整内容。跟 WritingCapturePreview 同形态,
-/// 只是数据源换成 speech_style_staged。
-/// 单条 draft 的详情 sheet —— 点 NEW/CHANGED 行打开,只显示这一条。
+/// 单条 draft 的详情 sheet。布局:
+///  - 顶部紧凑 header(action badge + slug + refs link + Close)
+///  - 极小灰色 run meta 一行(mode · timestamp · records/drafts)
+///  - 标题
+///  - 正文:update 时 BEFORE / AFTER 两栏 diff,create / noop 时单栏
+///
+/// refs 点击 → 弹二级 sheet 列源 records 全文(SpeechStyleRefsSheet)
 private struct SpeechStyleDraftDetail: View {
     let draft: SpeechStyleStagedRow
     @Environment(\.dismiss) private var dismiss
+    @State private var runMeta: SpeechStyleRunRow? = nil
+    @State private var existingBody: String? = nil
+    @State private var showRefs: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                let (label, color): (String, Color) = {
-                    switch draft.action {
-                    case .create: return ("NEW", .green)
-                    case .update: return ("CHANGED", .orange)
-                    case .noop:   return ("NOOP", .gray)
-                    }
-                }()
-                Text(label)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(color)
-                Text(draft.slug)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                if let prior = draft.existingSlug, prior != draft.slug {
-                    Text("(was \(prior))").font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+            header
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    runMetaLine
+                    Text(draft.title)
+                        .font(.system(size: 18, weight: .semibold))
+                        .padding(.top, 2)
+                    bodySection
                 }
+                .padding(.horizontal, 18)
+                .padding(.top, 12)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(width: 780, height: 540)
+        .task { await load() }
+        .sheet(isPresented: $showRefs) {
+            SpeechStyleRefsSheet(ids: draft.sourceRecordIds)
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            actionBadge
+            Text(draft.slug)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+            if let prior = draft.existingSlug, prior != draft.slug {
+                Text("← \(prior)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button {
+                showRefs = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "link")
+                        .font(.system(size: 10))
+                    Text("\(draft.sourceRecordIds.count) refs")
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.18))
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(draft.sourceRecordIds.isEmpty)
+            .help(draft.sourceRecordIds.isEmpty
+                  ? "No source records"
+                  : "View the \(draft.sourceRecordIds.count) writing_records that backed this draft")
+            Button("Close") { dismiss() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    @ViewBuilder
+    private var actionBadge: some View {
+        let (label, color): (String, Color) = {
+            switch draft.action {
+            case .create: return ("NEW", .green)
+            case .update: return ("CHANGED", .orange)
+            case .noop:   return ("NOOP", .gray)
+            }
+        }()
+        Text(label)
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(color.opacity(0.15))
+            )
+    }
+
+    // MARK: - Meta line
+
+    @ViewBuilder
+    private var runMetaLine: some View {
+        if let m = runMeta {
+            let dt = Date(timeIntervalSince1970: TimeInterval(m.startedAt) / 1000)
+            let fmt: DateFormatter = {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy-MM-dd HH:mm"
+                return f
+            }()
+            Text("\(m.mode.rawValue) · \(fmt.string(from: dt)) · \(m.recordsCount ?? 0) records · \(m.draftsCount ?? 0) drafts · run \(String(m.runId.prefix(8)))")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+    }
+
+    // MARK: - Body
+
+    @ViewBuilder
+    private var bodySection: some View {
+        if draft.action == .update, let prior = existingBody {
+            HStack(alignment: .top, spacing: 12) {
+                bodyColumn(label: "BEFORE", color: .secondary, text: prior)
+                bodyColumn(label: "AFTER",  color: .orange,    text: draft.body)
+            }
+        } else {
+            bodyColumn(label: actionLabelForBody, color: actionColorForBody, text: draft.body)
+        }
+    }
+
+    private var actionLabelForBody: String {
+        switch draft.action {
+        case .create: return "NEW BODY"
+        case .update: return "BODY"
+        case .noop:   return "BODY"
+        }
+    }
+    private var actionColorForBody: Color {
+        switch draft.action {
+        case .create: return .green
+        case .update: return .orange
+        case .noop:   return .gray
+        }
+    }
+
+    private func bodyColumn(label: String, color: Color, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+                .tracking(0.6)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.92))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.04))
+                )
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - Load
+
+    private func load() async {
+        let runIdLocal = draft.runId
+        let slugLocal: String? = draft.action == .update
+            ? (draft.existingSlug ?? draft.slug)
+            : nil
+        // Run 元数据
+        if let store = SpeechStyleDistiller.shared?.store {
+            let r = (try? store.fetchRun(runId: runIdLocal)) ?? nil
+            runMeta = r
+        }
+        // 现有 portrait/speech_style/<slug>.md 的 body
+        if let slug = slugLocal {
+            let url = PortraitPaths.categoryDir("speech_style")
+                .appendingPathComponent(slug + ".md")
+            let body = (try? PortraitFileIO.read(from: url))?.body
+            existingBody = body
+        }
+    }
+}
+
+/// 二级 sheet:展示一组 source writing_records 的全文。
+/// 点 SpeechStyleDraftDetail 顶部 "N refs" 按钮打开。
+private struct SpeechStyleRefsSheet: View {
+    let ids: [Int64]
+    @Environment(\.dismiss) private var dismiss
+    @State private var records: [SpeechStyleRecordInput] = []
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "link")
+                    .font(.system(size: 11))
+                Text("\(ids.count) source writing_records")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Text("\(draft.sourceRecordIds.count) refs")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
                 Button("Close") { dismiss() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1858,20 +2035,86 @@ private struct SpeechStyleDraftDetail: View {
             .padding(12)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(draft.title)
-                        .font(.system(size: 16, weight: .semibold))
-                    Text(draft.body)
-                        .font(.system(size: 13))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if !loaded {
+                        ProgressView().controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 24)
+                    } else if records.isEmpty {
+                        Text("(no records found — IDs may have been deleted)")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(records, id: \.id) { r in
+                            recordCard(r)
+                        }
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
         }
-        .frame(width: 680, height: 460)
+        .frame(width: 720, height: 540)
+        .task {
+            if let store = SpeechStyleDistiller.shared?.store {
+                let rows = (try? store.fetchRecordsByIds(ids)) ?? []
+                records = rows
+            }
+            loaded = true
+        }
+    }
+
+    private func recordCard(_ r: SpeechStyleRecordInput) -> some View {
+        let dt = Date(timeIntervalSince1970: TimeInterval(r.startTs) / 1000)
+        let fmt: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "MM-dd HH:mm"
+            return f
+        }()
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(r.kind)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.accentColor.opacity(0.15))
+                    )
+                Text(r.app)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if let u = r.url, !u.isEmpty {
+                    Text(u)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Text(fmt.string(from: dt))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+                Text("#\(r.id)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            if let cs = r.contextSummary, !cs.isEmpty {
+                Text(cs)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
+            Text(r.text)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.92))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 }
 
