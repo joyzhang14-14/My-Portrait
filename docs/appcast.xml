@@ -12,6 +12,26 @@
         -->
 
         <item>
+            <title>Version 1.0.85</title>
+            <pubDate>Tue, 26 May 2026 23:55:00 +0000</pubDate>
+            <sparkle:version>85</sparkle:version>
+            <sparkle:shortVersionString>1.0.85</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Make <strong>Update check interval</strong> actually respect what you pick.</p>
+                <ul>
+                    <li>Sparkle's Release build hard-codes a 1-hour minimum between scheduled checks. Replaced its internal scheduler with our own Timer that calls <code>checkForUpdatesInBackground()</code> at the user-chosen interval (1 min → really 1 min).</li>
+                    <li>Settings → General → <strong>Check now</strong> respects the Auto-update toggle: toggle on → silent Option B path; toggle off → standard Sparkle modal.</li>
+                    <li>Notification overlay panel further shrunk to 100 px tall.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.85/MyPortrait-1.0.85.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="lFhzDr01arkxCn09ZEMZ880ob7oFhIucrjGMTNv5FR2KNum9KuEwMKzcFgmpn/ct9Ijpk3Q9SYkljuVe7O+TCA==" length="44398413" />
+        </item>
+
+        <item>
             <title>Version 1.0.84</title>
             <pubDate>Tue, 26 May 2026 23:40:45 +0000</pubDate>
             <sparkle:version>84</sparkle:version>
