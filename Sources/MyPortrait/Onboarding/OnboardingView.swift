@@ -385,8 +385,34 @@ private struct PermissionsStep: View {
     }
 
     private func requestInputMonitoring() {
-        // IOHIDRequestAccess 第一次没 denied 过时会弹系统对话框。
+        // 1) 标准 API —— Apple-notarized 应用一般够,但自签 cert / 非
+        //    notarize app `IOHIDRequestAccess` 经常**静默返回 false**,系统
+        //    设置 → 隐私 → Input Monitoring 列表里**根本不出现 MyPortrait
+        //    那条**,用户没东西可 toggle。
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+
+        // 2) **真正能把 app 注册进系统列表的副作用**:尝试创建一个
+        //    CGEventTap。macOS 不管 tap 实际有没有权限运行,只要进程"试图"
+        //    创建过 tap,就会把它写进 Input Monitoring 列表。
+        //    .listenOnly + 立刻 invalidate,纯触发副作用,不真起 tap。
+        let mask: CGEventMask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: mask,
+            callback: { _, _, event, _ in Unmanaged.passUnretained(event) },
+            userInfo: nil)
+        if let tap = tap {
+            // 拿到了说明已经有权限,直接 release 不留 tap
+            CFMachPortInvalidate(tap)
+        }
+        // tap == nil 也无所谓 —— 创建尝试本身已经把 app 注册进系统列表了
+
+        // 3) 直接跳到系统设置 Input Monitoring 面板,用户可以立刻看到
+        //    "MyPortrait" 那一行并 toggle。
+        openInputMonitoringSettings()
+
         refreshExtraPerms()
     }
 
