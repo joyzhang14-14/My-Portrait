@@ -703,8 +703,9 @@ struct PrivacyConfig: Codable, Equatable {
     /// Typing 采集的额外 app 黑名单（按 bundle id）。命中的 app TypingObserver
     /// 整体不订阅 AX。与 TypingPrivacyFilter 的 hardcode 默认黑名单取并集。
     var typingBlacklistBundleIds: [String] = []
-    /// 「回车 = 发送」的 app（按 bundle id）—— 这些 app 里回车要识别成发送
-    /// 消息而非换行。用户自行添加。
+    /// DEPRECATED:不再使用。submit 检测改用 `looksLikeSubmitClear` 行为判断
+    /// (回车后 value 真的清空 / 断崖式缩短),不需要 app 白名单。字段保留只为
+    /// 不破坏老 config.toml 的解码。
     var typingSubmitBundleIds: [String] = []
     init() {}
     enum CodingKeys: String, CodingKey {

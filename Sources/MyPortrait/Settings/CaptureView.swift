@@ -330,7 +330,6 @@ struct TypingCaptureSettingsView: View {
         SettingsPage("Typing Capture", subtitle: "Learn your writing style") {
             typingSection
             blacklistSection
-            submitSection
         }
         .task { discovered = await Self.loadDiscovered(services?.typingStore) }
     }
@@ -354,25 +353,7 @@ struct TypingCaptureSettingsView: View {
         }
     }
 
-    /// 「回车 = 发送」的 app —— 这些 app 里回车识别为发送消息而非换行。
-    private var submitSection: some View {
-        SettingsCard(
-            title: "Enter-to-send apps",
-            footnote: "In these apps, pressing Return sends a message — captured as a “sent” event rather than a line break. Shift+Return is always a line break."
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Pick an app you've typed in…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TypingAppPicker(apps: config.binding(\.privacy.typingSubmitBundleIds),
-                                discovered: discovered)
-                    .padding(.horizontal, 14).padding(.bottom, 12)
-            }
-        }
-    }
-
-    /// 后台扫 typing_events 的 distinct bundle id。
+/// 后台扫 typing_events 的 distinct bundle id。
     private static func loadDiscovered(_ store: TypingEventStore?) async -> [String] {
         guard let store else { return [] }
         return await Task.detached {

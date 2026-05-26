@@ -141,22 +141,16 @@ final class TypingRecordWriter {
     func noteValueChange(key: ElementKey, newValue: String) {
         guard let rec = state[key] else { return }
 
-        // 发送检测：输入框被清空 + 之前有内容 + 刚按过回车 = 聊天 app 发出消息。
+        // 发送检测:回车 + value 真的清空/断崖式缩短 = 聊天 app 发出消息。
+        // 不再用 app 白名单(app 无限多,写死维护不过来)。靠键盘事件 +
+        // `looksLikeSubmitClear` 行为检测:
+        //   - 编辑器(Notes/Obsidian)按 Enter 是换行,value 不清空 → 不判 submit
+        //   - 聊天 app 按 Enter 发消息,value 清空/回 placeholder → 判 submit
+        // IME commit / 误触场景 value 也不清空,自然过滤。
         let cfg = ConfigStore.shared.capture
-        // 发送检测：只对 Enter-to-send 列表里的 app。列表内，回车后第一次
-        // value-change 即视为发送（Shift+Enter 不算回车，见 KeystrokeLedger）。
-        // 不靠「输入框变空」判断 —— 有些 app（Claude desktop）空框是占位符
-        // 文字、永远非空。
-        if ConfigStore.shared.privacy.typingSubmitBundleIds.contains(rec.bundleId),
-           ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
+        if ledger.hasSubmitKey(within: Double(cfg.typingSubmitWindowMs) / 1000.0) {
             ledger.consumeSubmit()
             let msg = rec.pendingValue ?? rec.lastValueSnapshot
-            // 「按过回车 + 之前有内容」还不够 —— 一些场景按 Enter 不会真发送:
-            //   - Slack / Discord 等 app 用户可能开「Enter = 换行」设置
-            //   - 某些 IME 用 Enter 做内部操作 (commit raw pinyin / 关候选窗)
-            //   - 多行文本编辑器里 Enter 就是换行
-            // 加一道合理性检查:真发送后 value 会清空 / 回 placeholder / 长度
-            // 断崖式下降。这些场景里 value 不会这样动。
             if !msg.isEmpty, msg != rec.sessionStart,
                Self.looksLikeSubmitClear(
                    message: msg, newValue: newValue, sessionStart: rec.sessionStart) {
