@@ -71,6 +71,13 @@ targets:
       - sdk: libsqlite3.tbd
       - package: Sparkle
         product: Sparkle
+    # DEVELOPMENT_TEAM 通过 xcconfig 注入,不在 settings.base 里硬编。
+    # base 里的 build settings 优先级高于 xcconfig,会覆盖掉它,所以这里必须
+    # 用 configFiles 而不是 base。Signing.xcconfig 里有默认 team,contributor
+    # 通过 #include? Signing.local.xcconfig 覆盖。
+    configFiles:
+      Debug: Support/Signing.xcconfig
+      Release: Support/Signing.xcconfig
     info:
       path: Support/Info.plist
       properties:
@@ -112,7 +119,9 @@ targets:
         # （auth_value 卡 0）。Apple Development 证书 DR 带 `anchor apple generic`，
         # TCC 才认。Automatic 签名 + Team ID 让 Xcode 自动选 Apple Development cert。
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: VYHNX2Y2AL
+        # DEVELOPMENT_TEAM 由 Support/Signing.xcconfig 提供(默认 VYHNX2Y2AL,
+        # contributor 可通过 Signing.local.xcconfig 覆盖)。settings.base 里
+        # 显式设值会优先于 xcconfig,所以这里**不要**写回 DEVELOPMENT_TEAM。
         # Hardened runtime + entitlements —— Apple notarize 必须。
         # entitlements 文件 declare 用到的「受保护能力」(mic / camera / Apple
         # events / 动态库加载),hardened runtime 强制只允许声明过的能力。
