@@ -299,7 +299,7 @@ enum IntegrationRegistry {
         .init(id: "deepseek",           name: "DeepSeek",        bundleId: nil,                                     letter: "D",  assetName: "DeepSeek", assetFullBleed: true, accent: Color(red: 0.27, green: 0.49, blue: 0.94),  signInMethod: .apiKey,       category: .ai),
 
         // Local model runners
-        .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
+        .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", assetName: "Ollama", assetFullBleed: true, accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
 
         // Productivity
         .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
