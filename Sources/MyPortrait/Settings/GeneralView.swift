@@ -21,6 +21,21 @@ struct GeneralSettingsView: View {
 
             SettingsCard(title: "Updates",
                          footnote: "Sparkle checks GitHub for new releases. EdDSA-signed appcast, hardened-runtime verified.") {
+                SettingsRow("Current version",
+                            description: "Build currently installed. \"Check now\" below queries GitHub appcast for newer builds.",
+                            icon: "info.circle") {
+                    Text(Self.currentVersionString)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(0.05))
+                                .overlay(RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                        )
+                }
+                SettingsDivider()
                 SettingsRow("Auto-update app",
                             description: "Download and install app updates automatically.",
                             icon: "arrow.down.app") {
@@ -162,6 +177,17 @@ struct GeneralSettingsView: View {
         let f = NumberFormatter()
         f.minimum = 1; f.maximum = 1440; f.allowsFloats = false
         return f
+    }()
+
+    /// 显示给用户的版本号 —— 从 Info.plist 读
+    /// CFBundleShortVersionString(marketing,1.0.81 之类) + CFBundleVersion
+    /// (build,数字)。Sparkle 自动升级也按这条 marketing version 跟 appcast
+    /// 里的 sparkle:shortVersionString 比对。
+    private static let currentVersionString: String = {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let marketing = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? ""
+        return build.isEmpty ? marketing : "\(marketing) (\(build))"
     }()
 
     // MARK: - Scan & clear (real filesystem)
