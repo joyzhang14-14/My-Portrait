@@ -1508,8 +1508,17 @@ struct MemorySettingsView: View {
             Text(label)
                 .font(.system(size: 12))
                 .frame(maxWidth: .infinity, alignment: .leading)
+            // **fixedSize + frame(width:160, alignment:.trailing)**:
+            // DatePicker(.hourAndMinute) 默认按内容宽度走,跟同一行的
+            // 160 宽 Frequency Picker 视觉不齐(time 控件靠右挤、Frequency
+            // 控件居中铺 160px,trailing 边对不上)。固定 trailing 边的
+            // 160 宽容器把 DatePicker 推到右沿,跟 Frequency 行齐平。
+            // 用 fixedSize 让 DatePicker 自己用 intrinsic 宽度,再用外层
+            // 160 frame 推到 trailing。
             DatePicker("", selection: dateBinding, displayedComponents: .hourAndMinute)
                 .labelsHidden()
+                .fixedSize()
+                .frame(width: 160, alignment: .trailing)
         }
     }
 
