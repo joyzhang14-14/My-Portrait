@@ -698,10 +698,14 @@ struct IntegrationIcon: View {
     var body: some View {
         ZStack {
             if let img = realIcon {
+                // 真 app icon —— scaledToFill 铺满,跟 fullBleed asset 视觉密度
+                // 对齐。macOS app icon 自带 squircle 外圈留白会被裁,但跨品牌
+                // 大小统一(原来 scaledToFit 让 Codex / Ollama 看起来比
+                // Anthropic / DeepSeek 小一截)。
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.high)
-                    .scaledToFit()
+                    .scaledToFill()
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             } else if let asset = integration.assetName {
@@ -714,13 +718,15 @@ struct IntegrationIcon: View {
                         .frame(width: size, height: size)
                         .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
                 } else {
-                    // 真品牌 SVG/PNG 资源 —— 白底原色,跟 macOS app icon 视觉一致。
+                    // 透明背景品牌 SVG —— 白底 + 极小 padding 让 logo 大致填满,
+                    // 跟 fullBleed / 真 icon 视觉密度对齐(原 18% padding 让
+                    // 它们明显偏小)。
                     RoundedRectangle(cornerRadius: size * 0.22)
                         .fill(Color.white)
                     Image(asset)
                         .resizable()
                         .scaledToFit()
-                        .padding(size * 0.18)
+                        .padding(size * 0.06)
                 }
             } else {
                 // 品牌色底块 + 优先 SF Symbol(若提供),否则用 letter 字形。
