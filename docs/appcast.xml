@@ -12,6 +12,34 @@
         -->
 
         <item>
+            <title>Version 1.0.83</title>
+            <pubDate>Tue, 26 May 2026 23:31:26 +0000</pubDate>
+            <sparkle:version>83</sparkle:version>
+            <sparkle:shortVersionString>1.0.83</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Auto-update polish + tiny UI fixes.</p>
+                <h3>Auto-update</h3>
+                <ul>
+                    <li>When <strong>Auto-update app</strong> toggle is on, the app no longer pops a modal. Sparkle silently downloads the new build; when ready a small banner shows top-right saying "Updating to v1.0.X — click to postpone". 10s without interaction → app quits, installs, and relaunches into the new version. Click banner to skip this round.</li>
+                    <li>When toggle is off, Sparkle still shows the standard "Install Update?" dialog.</li>
+                    <li>User-initiated <strong>Check now</strong> always shows the standard dialog.</li>
+                </ul>
+                <h3>UI</h3>
+                <ul>
+                    <li>Notification overlay panel shrunk to 320×480, pinned to screen top</li>
+                    <li>Settings → General → Current version no longer shows build number in parens</li>
+                    <li>Settings → Display → Translucent sidebar: dropped "(macOS only)" suffix</li>
+                </ul>
+                <p>The silent Option B path activates <strong>from v1.0.83 onward</strong>. The transition from v1.0.82 still uses Sparkle's standard modal (because v1.0.82 doesn't know about gentle reminders yet).</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.83/MyPortrait-1.0.83.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="AAkZw8CX1SO8C97Ds+dqE+WB+sgBwAEhX+ApQCQwnIF56obPn2dC5dvdTFGfnP9LBjvSKzSk8YFIQpMm3GlRDg==" length="44389582" />
+        </item>
+
+        <item>
             <title>Version 1.0.82</title>
             <pubDate>Tue, 26 May 2026 22:55:11 +0000</pubDate>
             <sparkle:version>82</sparkle:version>
