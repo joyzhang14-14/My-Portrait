@@ -10,12 +10,9 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(title: "App") {
                 SettingsRow("New version available",
-                            description: "Notify when a new build is ready to install.",
+                            description: "Show a banner when Sparkle finds a new build on the GitHub appcast.",
                             icon: "bell.badge") {
-                    HStack(spacing: 6) {
-                        NotWiredBadge()
-                        Toggle("", isOn: config.binding(\.notifications.appUpdates)).labelsHidden().toggleStyle(.switch)
-                    }
+                    Toggle("", isOn: config.binding(\.notifications.appUpdates)).labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -67,9 +64,10 @@ struct NotificationsSettingsView: View {
     }
 }
 
-/// Pill that flags a toggle whose backend isn't connected yet. Used for
-/// `appUpdates` (no auto-updater) and `captureStalls` (depends on the
-/// Capture WIP).
+/// Pill that flags a toggle whose backend isn't connected yet. Currently
+/// only used for `captureStalls` —— `appUpdates` 已经接到 Sparkle
+/// didFindValidUpdate。capture stall watchdog 还没写,等 capture 引擎加
+/// 心跳检测后这块也能去掉。
 private struct NotWiredBadge: View {
     var body: some View {
         Text("NOT WIRED")
