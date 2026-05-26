@@ -714,7 +714,14 @@ struct IntegrationIcon: View {
             } else if let asset = integration.assetName {
                 if integration.assetFullBleed {
                     // asset 已是完整 app-icon,直接铺满 + 圆角裁切。
+                    // **`.renderingMode(.original)` 必须显式**:asset catalog 里
+                    // 设了 `template-rendering-intent: original`,理论上 SwiftUI
+                    // 该按 original 渲染,但 Stan v1.0.0 在他机器上验证那条 hint
+                    // 没生效 —— `Image(name:)` 走默认 .template 把整张图当
+                    // monochrome mask,foreground 又是白色 ⇒ 整片 tile 空白。
+                    // 加 .renderingMode(.original) 兜底,不依赖 catalog 那条属性。
                     Image(asset)
+                        .renderingMode(.original)
                         .resizable()
                         .interpolation(.high)
                         .scaledToFill()
@@ -727,6 +734,7 @@ struct IntegrationIcon: View {
                     RoundedRectangle(cornerRadius: size * 0.22)
                         .fill(Color.white)
                     Image(asset)
+                        .renderingMode(.original)
                         .resizable()
                         .scaledToFit()
                         .padding(size * 0.06)
