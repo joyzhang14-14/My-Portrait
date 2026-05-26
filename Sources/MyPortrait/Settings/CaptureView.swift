@@ -8,7 +8,8 @@ struct AudioCaptureSettingsView: View {
     private var engine: String { config.current.capture.audio.engine }
 
     var body: some View {
-        SettingsPage("Audio Capture", subtitle: "Microphone + transcription") {
+        SettingsPage("Audio Capture", subtitle: "Microphone + transcription",
+                     onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
             audioSection
         }
     }
@@ -223,7 +224,13 @@ struct ScreenCaptureSettingsView: View {
     private var screenRec: Bool { config.current.capture.screen.enabled }
 
     var body: some View {
-        SettingsPage("Screen Capture", subtitle: "Screenshots + OCR + Privacy") {
+        SettingsPage("Screen Capture", subtitle: "Screenshots + OCR + Privacy",
+                     onResetCurrentPage: {
+                         config.mutate {
+                             $0.capture.screen = .init()
+                             $0.capture.system = .init()
+                         }
+                     }) {
             powerModeCard
             screenSection
             privacySection
@@ -441,7 +448,19 @@ struct TypingCaptureSettingsView: View {
     @State private var discoveredSummaries: [(bundleId: String, url: String)] = []
 
     var body: some View {
-        SettingsPage("Typing Capture", subtitle: "Learn your writing style") {
+        SettingsPage("Typing Capture", subtitle: "Learn your writing style",
+                     onResetCurrentPage: {
+                         config.mutate {
+                             let def = RecordingConfig()
+                             $0.capture.typingKeyCorrelationWindowMs = def.typingKeyCorrelationWindowMs
+                             $0.capture.typingCaptureEnabled         = def.typingCaptureEnabled
+                             $0.capture.typingDebounceMs             = def.typingDebounceMs
+                             $0.capture.typingFlushIdleSec           = def.typingFlushIdleSec
+                             $0.capture.typingSubmitWindowMs         = def.typingSubmitWindowMs
+                             $0.capture.typingPasteMinChars          = def.typingPasteMinChars
+                             $0.capture.typingRecordPasteEvents      = def.typingRecordPasteEvents
+                         }
+                     }) {
             typingSection
             blacklistSection
         }

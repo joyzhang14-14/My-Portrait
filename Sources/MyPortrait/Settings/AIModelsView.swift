@@ -27,7 +27,8 @@ struct AIModelsSettingsView: View {
 
     var body: some View {
         SettingsPage("AI models",
-                     subtitle: "Pick which connected AI services + models show up in your chat picker") {
+                     subtitle: "Pick which connected AI services + models show up in your chat picker",
+                     onResetCurrentPage: { config.mutate { $0.aiModels = .init() } }) {
 
             SettingsCard(
                 title: "Connected providers",
