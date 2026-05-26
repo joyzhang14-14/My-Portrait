@@ -93,13 +93,24 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         proc.arguments = args
         proc.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
 
-        // 注入 cron job 的 connection 凭证(SMTP_*, OBSIDIAN_VAULT_PATH …),
-        // 跟 PiAgent.start 那侧对齐。空 extraEnv = 不改环境,继承 parent。
-        if !extraEnv.isEmpty {
-            var env = ProcessInfo.processInfo.environment
-            for (k, v) in extraEnv { env[k] = v }
-            proc.environment = env
-        }
+        // 注入 cron job 凭证 + 增强 PATH。GUI app 默认 PATH 极窄,claude
+        // 内部 spawn node / npm / npx 时会找不到二进制 → 跑起来后秒退。
+        // 把常见 dev bin 路径前置(用户实际 binary 所在目录优先级最高)。
+        var env = ProcessInfo.processInfo.environment
+        let home = NSHomeDirectory()
+        let extraPaths = [
+            URL(fileURLWithPath: bin).deletingLastPathComponent().path,  // claude 二进制目录,优先
+            "/opt/homebrew/bin", "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "\(home)/.claude/local",
+            "\(home)/.local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.bun/bin",
+        ]
+        let existingPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extraPaths + [existingPath]).joined(separator: ":")
+        for (k, v) in extraEnv { env[k] = v }
+        proc.environment = env
 
         let stdinPipe = Pipe()
         let stdout = Pipe()
@@ -368,22 +379,50 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
 
     // MARK: - 静态:CLI 探测
 
-    /// `claude` 二进制路径,找不到返回 nil。优先常见 brew / 用户 bin 路径,
-    /// 都失败则走 `which claude` 兜底。
+    /// `claude` 二进制路径,找不到返回 nil。
+    ///
+    /// 探测顺序:
+    ///   1. 直接 stat 一组常见安装路径(Claude 官方 install script /
+    ///      brew / npm global / bun / 用户自定义 ~/.local/bin)
+    ///   2. 用户的登录 shell 跑 `command -v claude` —— GUI app 启动的
+    ///      subprocess 默认 PATH 是 `/usr/bin:/bin:/usr/sbin:/sbin`,
+    ///      不含 ~/.local/bin / /opt/homebrew/bin / npm-global 等,直接
+    ///      `which claude` 会假阴。走登录 shell 才能拿到用户实际 PATH。
     static var claudeBinaryPath: String? {
+        let fm = FileManager.default
+        // 0. 终极兜底:用户在 ~/.portrait/config.toml 没办法表达完整路径
+        // 时,用 env var MYPORTRAIT_CLAUDE_PATH 显式指定。能解奇葩装的
+        // (nix / asdf / mise / 自编译)路径问题。
+        if let override = ProcessInfo.processInfo.environment["MYPORTRAIT_CLAUDE_PATH"],
+           !override.isEmpty, fm.isExecutableFile(atPath: override) {
+            return override
+        }
+        let home = NSHomeDirectory()
         let candidates = [
+            // Claude 官方 install script 默认路径(curl claude.ai/install.sh | bash)
+            "\(home)/.claude/local/claude",
+            // brew Apple Silicon / Intel
             "/opt/homebrew/bin/claude",
             "/usr/local/bin/claude",
-            "\(NSHomeDirectory())/.local/bin/claude",
+            // 用户自己手动放的
+            "\(home)/.local/bin/claude",
+            // npm global(默认 / npm config set prefix=~/.npm-global)
+            "\(home)/.npm-global/bin/claude",
+            "/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude",
+            // bun global
+            "\(home)/.bun/bin/claude",
         ]
-        let fm = FileManager.default
         for p in candidates where fm.isExecutableFile(atPath: p) {
             return p
         }
-        // PATH 兜底
+
+        // 兜底:让用户登录 shell 替我们解析 PATH。GUI app 子进程的 PATH
+        // 不包含用户 dotfile 加的 dev bin 路径,直接 `which` 失败。
+        // 用 `-l -i -c` 让 shell 完整加载 ~/.zprofile / ~/.zshrc / ~/.bashrc。
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let proc = Process()
-        proc.launchPath = "/usr/bin/env"
-        proc.arguments = ["which", "claude"]
+        proc.launchPath = shell
+        proc.arguments = ["-l", "-i", "-c", "command -v claude"]
         let out = Pipe()
         proc.standardOutput = out
         proc.standardError = Pipe()
@@ -392,7 +431,9 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             proc.waitUntilExit()
             let data = out.fileHandleForReading.readDataToEndOfFile()
             let path = (String(data: data, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: "\n").last
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                ?? ""
             if !path.isEmpty, fm.isExecutableFile(atPath: path) { return path }
         } catch { }
         return nil
