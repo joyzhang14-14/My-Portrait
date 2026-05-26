@@ -21,7 +21,6 @@ struct SettingsPane: View {
             case .memory(.changelog):  MemorySettingsView(tab: .changelog)
             case .data(.usage):        UsageSettingsView()
             case .data(.storage):      StorageSettingsView()
-            case .data(.speakers):     SpeakersSettingsView()
             case .data(.imports):      ImportSettingsView()
             }
         }
@@ -114,7 +113,6 @@ struct SettingsScene: View {
         case .memory(.changelog):  MemorySettingsView(tab: .changelog)
         case .data(.usage):        UsageSettingsView()
         case .data(.storage):      StorageSettingsView()
-        case .data(.speakers):     SpeakersSettingsView()
         case .data(.imports):      ImportSettingsView()
         }
     }

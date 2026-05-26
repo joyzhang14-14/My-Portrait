@@ -2,11 +2,15 @@ import SwiftUI
 import SQLite3
 
 /// Speakers — voices captured from your microphone + system audio.
-/// Polished rewrite: progress header, attention banner for unidentified
-/// clusters, a dense identified roster with avatar + sample count + last
-/// heard + hover actions, search + "Organize w/ AI" button.
+/// Progress header, attention banner for unidentified clusters, a dense
+/// identified roster with avatar + sample count + last heard + hover
+/// actions, search + "Organize w/ AI" button.
 ///
 /// Reads `speakers JOIN audio_transcriptions` live from timeline DB.
+///
+/// **2026-05-26**: 之前是独立的 Settings 分页(`SettingsPage("Speakers", ...)`)。
+/// 现在被嵌进 Audio Capture 页 —— 训练 + 簇管理跟麦克风/转录配置放一起,
+/// 不再单独走 sidebar。view 自己不再包 SettingsPage,由 caller 控制版式。
 struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
@@ -22,9 +26,7 @@ struct SpeakersSettingsView: View {
     private var unidentified: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
 
     var body: some View {
-        SettingsPage("Speakers",
-                     subtitle: "Voices captured from your microphone and system audio") {
-
+        VStack(alignment: .leading, spacing: 20) {
             ProgressHeader(identified: identified.count, total: rows.count)
 
             VoiceTrainingCard(
