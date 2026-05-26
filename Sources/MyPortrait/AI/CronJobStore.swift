@@ -54,6 +54,14 @@ final class CronJobStore {
         cronJobs[i].runs.insert(run, at: 0)
         let cap = runsCap
         if cap > 0, cronJobs[i].runs.count > cap {
+            // 裁掉超出 cap 的那部分 —— **同时把对应 conv 从 ChatStore 删掉**。
+            // 不删的话,被 cronJob runs[] 剔除的 conv 因为没人引用了,
+            // TimelineSidebar.cronJobConvIds 反查不到,会回弹到 RECENTS 区,
+            // 完全不是用户预期的"超 cap 自动 GC"行为。
+            let dropped = cronJobs[i].runs.suffix(from: cap)
+            for r in dropped {
+                ChatStore.shared.deleteConversation(r.convId)
+            }
             cronJobs[i].runs = Array(cronJobs[i].runs.prefix(cap))
         }
         cronJobs[i].lastRunAt = run.startedAt
@@ -62,11 +70,17 @@ final class CronJobStore {
 
     /// 用户改 Settings → General → CronJob history limit 时调一次,把所有
     /// cronJob 的 runs[] 裁到当前 cap。limit=0(no limit)→ 全保留。
+    /// 跟 appendRun 一样,被裁掉的 run 对应的 conv 同步从 ChatStore 删,
+    /// 避免回弹到 RECENTS。
     func applyHistoryLimit() {
         let cap = runsCap
         guard cap > 0 else { return }
         var changed = false
         for i in cronJobs.indices where cronJobs[i].runs.count > cap {
+            let dropped = cronJobs[i].runs.suffix(from: cap)
+            for r in dropped {
+                ChatStore.shared.deleteConversation(r.convId)
+            }
             cronJobs[i].runs = Array(cronJobs[i].runs.prefix(cap))
             changed = true
         }
