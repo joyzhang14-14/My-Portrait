@@ -404,11 +404,6 @@ struct MemorySettingsView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            Button("Reset Memory section") {
-                cfg.mutate { $0.memory = MemoryConfig() }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(.top, 8)
     }
