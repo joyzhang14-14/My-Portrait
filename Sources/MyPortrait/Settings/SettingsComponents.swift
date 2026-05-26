@@ -178,48 +178,22 @@ struct SettingsPage<Content: View>: View {
     }
 }
 
-/// "Reveal config.toml" + "Reset to defaults" buttons in the page header.
-/// Lives on every Settings tab — fast escape hatch when the UI gets in the
-/// way and the user wants to edit by hand or wipe the slate.
+/// "Reveal config.toml" 按钮。Reset 按钮已下线 —— 用户反馈"会清空所有
+/// 数据"且 per-page reset 改造之后仍有歧义/复发,直接砍掉这个暴力入口。
+/// 想恢复默认改 config.toml 即可(整文件删了下次启动也会回默认)。
 private struct ConfigToolbar: View {
     let config: ConfigStore
     let pageTitle: String
-    /// 仅 reset 当前 page 的字段。nil = 不显示 Reset 按钮(罕见,有些 page
-    /// 没 config-backed 字段)。
+    /// 保留参数,callers 不用一起改;实际不再渲染 Reset 按钮。
     let onResetCurrentPage: (() -> Void)?
-    @State private var confirmingReset = false
     var body: some View {
-        HStack(spacing: 6) {
-            Button {
-                config.revealInFinder()
-            } label: {
-                Label("config.toml", systemImage: "arrow.up.right.square")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .help("Open ~/.portrait/config.toml in Finder")
-
-            if onResetCurrentPage != nil {
-                Button(role: .destructive) {
-                    confirmingReset = true
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .help("Reset only the \(pageTitle) page back to defaults. Other Settings pages are not touched.")
-            }
+        Button {
+            config.revealInFinder()
+        } label: {
+            Label("config.toml", systemImage: "arrow.up.right.square")
+                .font(.system(size: 11, weight: .medium))
         }
-        .confirmationDialog(
-            "Reset \(pageTitle) to defaults?",
-            isPresented: $confirmingReset,
-            titleVisibility: .visible
-        ) {
-            Button("Reset \(pageTitle)", role: .destructive) {
-                onResetCurrentPage?()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Resets every field on the \(pageTitle) page back to its built-in default. Other Settings pages and your conversations / cron jobs / templates / portrait data are not touched.")
-        }
+        .help("Open ~/.portrait/config.toml in Finder")
     }
 }
 
