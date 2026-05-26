@@ -27,6 +27,18 @@ struct HomeView: View {
         chat.send(t.prompt, chips: chips, redactPII: redact)
     }
 
+    /// New chat 标题 "How can I help, <name>?" 的 <name> 部分。优先级:
+    ///   1. personalInfo.alias(用户填的 preferred name / nickname)
+    ///   2. personalInfo.firstName
+    ///   3. 都空 → "How can I help?"(不带名字)
+    static func greeting() -> String {
+        let info = ConfigStore.shared.current.personalInfo
+        let alias = info.alias.trimmingCharacters(in: .whitespaces)
+        let first = info.firstName.trimmingCharacters(in: .whitespaces)
+        let name = !alias.isEmpty ? alias : first
+        return name.isEmpty ? "How can I help?" : "How can I help, \(name)?"
+    }
+
     private var displayedActivityChips: [ActivityChip] { Mock.activityChips }
     /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
     /// a past user message. Send-on-Enter routes through editAndResend
@@ -145,7 +157,7 @@ struct HomeView: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .stroke(Color.white.opacity(0.18), lineWidth: 1)
                     )
-                Text("How can I help, Joy?")
+                Text(Self.greeting())
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.96))
                 Text("One-click summaries from your screen activity")
