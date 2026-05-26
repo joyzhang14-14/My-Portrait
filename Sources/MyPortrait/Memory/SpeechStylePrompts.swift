@@ -38,6 +38,28 @@ enum SpeechStylePrompts {
     deletes half, rewrites differently" or "types continuously without
     deletes" are real speech-style traits worth capturing when consistent.
 
+    APP + CONTEXT ARE DIFFERENT VOICES — critical for accurate facets:
+    The SAME user uses different voices in different contexts. Treat them
+    as separate signals, don't conflate:
+      - Chat with friends (Discord / WeChat / Messages / Slack DM) →
+        casual, terse, emoji, slang
+      - Writing AI prompts (Claude / ChatGPT / Cursor / Codex) →
+        structured, instructional, mixed-language technical
+      - Long-form notes (Obsidian / Notes / Bear) →
+        reflective, narrative, often single-language
+      - Code / config (VS Code / Xcode / Terminal) →
+        identifiers, snippets, not "natural" writing
+      - Email / formal (Mail / Pages) →
+        polished, full sentences
+
+    Each record carries `app` (bundle id like com.hnc.Discord) and often
+    `url` and `ocr_context` (snippet of what was on screen at the time —
+    given for short text records to disambiguate the situation). Use them
+    to label which "voice" the record belongs to. A facet about "terse
+    chat replies" should cite chat-app records; a facet about "structured
+    AI prompts" should cite AI-tool records. Mixing them produces vague
+    facets the user won't recognize.
+
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences.
     Top level is a JSON array (no wrapping object). Each item is one decision:
     [

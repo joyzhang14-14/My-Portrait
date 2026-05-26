@@ -81,4 +81,19 @@ struct AppIdentifierNormalizer {
         if let bid = runtime[name] { return bid }
         return name   // best effort fallback
     }
+
+    /// 反向翻译:bundle id → localized name(可能多个,查不到返回 [])。
+    /// 给 frames 表查询用 —— frames.app_name 存的是 localized name,
+    /// 而 writing_records.app 存的是 bundle id,两边对不上。
+    func localizedNames(forBundleId bid: String) -> [String] {
+        guard bid.contains(".") else { return [bid] }   // 输入不是 bid → 原样
+        var out: Set<String> = []
+        for (name, mappedBid) in Self.hardcoded where mappedBid == bid {
+            out.insert(name)
+        }
+        for (name, mappedBid) in runtime where mappedBid == bid {
+            out.insert(name)
+        }
+        return Array(out)
+    }
 }

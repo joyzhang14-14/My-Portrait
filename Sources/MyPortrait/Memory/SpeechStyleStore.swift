@@ -52,6 +52,57 @@ struct SpeechStyleStore: Sendable {
         }
     }
 
+    /// 给一条 writing_record 取 midpoint OCR snippet 作语境辅助。
+    /// 双匹配:app 反向翻译成 localized name(允许多个候选) + timestamp ±30s。
+    /// 找到最接近 mid 的一帧,full_text 截到 maxChars 字。
+    /// 没匹配返回 nil(LLM 那边按"无语境"处理)。
+    func midpointOcrSnippet(
+        appBundleId: String,
+        midMs: Int64,
+        maxChars: Int = 200
+    ) throws -> String? {
+        let normalizer = AppIdentifierNormalizer.snapshot()
+        let names = normalizer.localizedNames(forBundleId: appBundleId)
+        return try dbPool.read { db in
+            let row: Row?
+            if names.isEmpty {
+                // 无反向映射 —— 只按 timestamp 取最近一帧(可能误抓背景 app)
+                row = try Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT full_text FROM frames
+                        WHERE timestamp_ms BETWEEN :lo AND :hi
+                          AND full_text IS NOT NULL AND full_text != ''
+                        ORDER BY ABS(timestamp_ms - :mid) ASC
+                        LIMIT 1
+                        """,
+                    arguments: [
+                        "lo": midMs - 30_000, "hi": midMs + 30_000, "mid": midMs
+                    ])
+            } else {
+                let placeholders = names.map { _ in "?" }.joined(separator: ",")
+                var args: [DatabaseValueConvertible] = [midMs - 30_000, midMs + 30_000]
+                args.append(contentsOf: names.map { $0 as DatabaseValueConvertible })
+                args.append(midMs)
+                row = try Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT full_text FROM frames
+                        WHERE timestamp_ms BETWEEN ? AND ?
+                          AND app_name IN (\(placeholders))
+                          AND full_text IS NOT NULL AND full_text != ''
+                        ORDER BY ABS(timestamp_ms - ?) ASC
+                        LIMIT 1
+                        """,
+                    arguments: StatementArguments(args))
+            }
+            guard let text = row?["full_text"] as String? else { return nil }
+            return text.count > maxChars
+                ? String(text.prefix(maxChars)) + "…"
+                : text
+        }
+    }
+
     /// 按 id list 拉 writing_records —— UI Draft sheet 展开"N refs"用。
     /// 跟 unprocessedRecords 同投影,只是 WHERE 条件不一样。
     func fetchRecordsByIds(_ ids: [Int64]) throws -> [SpeechStyleRecordInput] {

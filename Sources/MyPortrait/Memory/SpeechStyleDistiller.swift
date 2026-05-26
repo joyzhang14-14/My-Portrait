@@ -129,6 +129,26 @@ final class SpeechStyleDistiller {
                 try store.setInputRecordIds(runId: runId, ids: inputIds)
             }
 
+            // 富化:对短文本 record 加 midpoint OCR snippet 作语境辅助。
+            // 长 record(text > 100 字)自身已有足够上下文,不再加 OCR 省 token。
+            // OCR 最多 200 字 × 短 record 数 ≈ 5-15k extra tokens,可控。
+            // 双匹配:app(bundle id → localized name)+ ts ±30s。
+            let enriched = try await Task.detached(priority: .userInitiated) { [store] in
+                records.map { r -> SpeechStyleRecordInput in
+                    guard r.text.count < 100 else { return r }
+                    let mid = (r.startTs + r.startTs + Int64(r.text.count * 100)) / 2
+                    // text 没有自己的 endTs,用 startTs + 估算时长当 mid。
+                    // 误差几十秒可接受 —— ±30s window 内仍能命中同 app 帧。
+                    let snippet = try? store.midpointOcrSnippet(
+                        appBundleId: r.app, midMs: mid
+                    )
+                    var copy = r
+                    copy.ocrContext = snippet
+                    return copy
+                }
+            }.value
+            let recordsForLLM = enriched
+
             if records.isEmpty {
                 // 理论不可能 —— 上面 unprocessedCount 刚查过 > 0。兜底防止竞态:
                 // 比如用户同时手动 reject 了某 run 但 records 标 completed
@@ -152,7 +172,7 @@ final class SpeechStyleDistiller {
 
             // 3. 调 LLM
             let agent = agentProvider()
-            let out = try await agent.run(records: records, existing: existing)
+            let out = try await agent.run(records: recordsForLLM, existing: existing)
             ssLog.info("runCore(\(mode.rawValue, privacy: .public)): LLM returned \(out.drafts.count) drafts")
 
             // 4. 分模式落地

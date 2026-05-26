@@ -143,6 +143,12 @@ final class SpeechStyleAgent {
             if let cs = r.contextSummary, !cs.isEmpty {
                 lines.append("context: \(cs)")
             }
+            // 短文本 record 的 midpoint OCR 语境(屏幕上当时显示什么)。
+            // 帮 LLM 区分"我跟朋友 Discord 聊"vs"我给 AI 写 prompt",
+            // 这两种场景同一句"为什么"语义完全不同。
+            if let ocr = r.ocrContext, !ocr.isEmpty {
+                lines.append("ocr_context: \(ocr)")
+            }
             lines.append("text:")
             lines.append(truncate(r.text, max: recordTextMaxChars))
             lines.append("edit_log:")
