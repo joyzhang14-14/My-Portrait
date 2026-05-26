@@ -61,14 +61,16 @@ final class PermissionMonitor: ObservableObject {
         }
         logger.info("PermissionMonitor started (poll=\(self.pollInterval)s)")
 
-        // **启动即向 TCC 注册屏幕录制**。不绑定 capture toggle —— 一个会录屏的
-        // app 本来就该在启动时让自己出现在系统设置的「屏幕录制」列表里。
-        // requestScreenRecording 内部 probe 一次 SCShareableContent，首次会弹
-        // 系统对话框 + 注册 app。已授权则跳过（不弹）。
-        if screenRecording != .granted {
-            logger.info("screen recording not granted at launch — probing to register with TCC")
-            requestScreenRecording()
-        }
+        // **不再启动即请求屏幕录制权限**。原本这里无条件 requestScreenRecording
+        // 是想"让 app 出现在系统设置的屏幕录制列表里"。但 hardened runtime
+        // 开了以后,Apple Development 证书 Debug 构建每次 rebuild cdhash 都变,
+        // TCC 看每次启动都是"新 app",反复弹"录屏权限"对话框,体验极差。
+        //
+        // 现在的请求路径:
+        //   1. Onboarding Permissions 步,用户主动点 Allow → requestScreenRecording
+        //   2. ScreenCaptureService 实际起 capture 时,preflight 失败 → fallback
+        //      request(用户已经手动开了 capture toggle,弹窗是预期的)
+        // 后台 3s 轮询 refresh() 仍在,用户在 System Settings 授权后自动捕获。
     }
 
     func stop() {
