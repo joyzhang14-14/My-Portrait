@@ -1,3 +1,4 @@
+
 @preconcurrency import AVFoundation
 import AudioToolbox
 import CoreAudio
@@ -265,8 +266,13 @@ actor SystemAudioCaptureService {
             ])
         }
         let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
 
+        // **不再预创建 converter** —— 用 kAudioOutputUnitProperty_CurrentDevice
+        // 接系统音频时,`inputNode.outputFormat(forBus: 0)` 报的格式跟
+        // tap 点实际能用的格式经常对不上(AVAudioEngine 内部 bug,user 反馈
+        // 24000 Hz Float32 mono 报错"Failed to create tap due to format
+        // mismatch")。改成 installTap 传 nil,由系统用真实 tap 格式;
+        // converter 在第一帧 buffer 回调时按 buffer.format 动态建/重建。
         guard let target = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16_000,
@@ -277,16 +283,12 @@ actor SystemAudioCaptureService {
         }
         targetFormat = target
 
-        guard let conv = AVAudioConverter(from: inputFormat, to: target) else {
-            throw NSError(domain: "SystemAudio", code: -21)
-        }
-        converter = conv
-
         var c: AsyncStream<[Float]>.Continuation!
         let stream = AsyncStream<[Float]> { cont in c = cont }
         samplesContinuation = c
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) {
+        // format: nil → 用 tap 点真实格式,绕开 outputFormat(forBus:) 撒谎。
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) {
             [weak self] buffer, _ in
             guard let self else { return }
             Task { [weak self] in
@@ -306,7 +308,18 @@ actor SystemAudioCaptureService {
     }
 
     private func performConversion(buffer: AVAudioPCMBuffer) {
-        guard let converter, let targetFormat, let cont = samplesContinuation else { return }
+        guard let targetFormat, let cont = samplesContinuation else { return }
+
+        // **converter 按真实 buffer.format 懒建**(see configureTapAndStart
+        // 注释)。如果第一帧来的 buffer.format 跟我们之前建的 converter
+        // 输入格式不一样(macOS 偶发会变),重建一次。
+        if converter == nil || converter?.inputFormat != buffer.format {
+            guard let conv = AVAudioConverter(from: buffer.format, to: targetFormat) else {
+                return
+            }
+            converter = conv
+        }
+        guard let converter else { return }
 
         let inputFrames = AVAudioFrameCount(buffer.frameLength)
         let outputCapacity = AVAudioFrameCount(
