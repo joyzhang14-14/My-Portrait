@@ -12,6 +12,25 @@
         -->
 
         <item>
+            <title>Version 1.0.88</title>
+            <pubDate>Wed, 27 May 2026 01:10:00 +0000</pubDate>
+            <sparkle:version>88</sparkle:version>
+            <sparkle:shortVersionString>1.0.88</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Make silent auto-update actually silent (it wasn't in 1.0.86 / 1.0.87 despite the release notes).</p>
+                <ul>
+                    <li>Added <code>SUAllowsAutomaticUpdates=true</code> to Info.plist. Sparkle had a cascade dependency where disabling its scheduler (which we did to bypass the 1-hour minimum) silently rejected our <code>setAutomaticallyDownloadsUpdates(true)</code> call. With this explicit Info.plist flag, the setter actually takes effect.</li>
+                </ul>
+                <p>If you're on 1.0.86 / 1.0.87 with Auto-update toggle on, this should arrive completely silently: 10 s countdown banner top-right, then install + relaunch.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.88/MyPortrait-1.0.88.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="9bUER/GsaVK8K3d5eWz1MJCCOvPEZNFprGUw5y8/xyVYhDn3DAJ/1etFfD/EKUMQaBy6D6GpiDtMBiUlV/ImCA==" length="44396389" />
+        </item>
+
+        <item>
             <title>Version 1.0.87</title>
             <pubDate>Wed, 27 May 2026 00:50:00 +0000</pubDate>
             <sparkle:version>87</sparkle:version>
