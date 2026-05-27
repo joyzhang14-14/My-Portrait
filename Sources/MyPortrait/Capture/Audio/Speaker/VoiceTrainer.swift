@@ -197,28 +197,26 @@ final class VoiceTrainer {
             return
         }
 
-        if converter == nil || converter?.inputFormat != sourceFormat {
-            converter = AVAudioConverter(from: sourceFormat, to: target)
-        }
-        guard let converter else { return }
-
-        // 把 [Float] 装回一个 AVAudioPCMBuffer(按 sourceFormat),走 converter。
-        // 注意:这里 raw 可能是 multi-channel interleaved → deinterleaved 复杂,
-        // 简化处理 —— tap 回调里我们已经在 copyToFloat 把 channel 0 抠出来当 mono,
-        // 所以 raw 永远是 mono float;只剩 sample rate 不同要 resample。
+        // raw 永远是 mono float(tap 回调 copyToFloat 已经把 channel 0 抠出来),
+        // 所以 converter 输入恒定是 (sourceFormat.sampleRate, 1ch, Float32)。
+        // **converter 按 monoSrc 缓存复用** —— 不能每帧重建,resampler 内部
+        // 状态丢失会在拼接处出 click,30s 训练里累积上百次跳变让 embedding
+        // 不稳。之前 bug:用 sourceFormat(多通道)去比 monoSrc(单通道),
+        // 永远不等,等同每帧重建。
         guard let monoSrc = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: sourceFormat.sampleRate,
             channels: 1,
             interleaved: false
-        ),
-        let monoConverter: AVAudioConverter = (
-            converter.inputFormat == monoSrc ? converter : AVAudioConverter(from: monoSrc, to: target)
-        ),
-        let srcBuf = AVAudioPCMBuffer(pcmFormat: monoSrc, frameCapacity: AVAudioFrameCount(raw.count)) else {
+        ) else { return }
+
+        if converter == nil || converter?.inputFormat != monoSrc {
+            converter = AVAudioConverter(from: monoSrc, to: target)
+        }
+        guard let converter,
+              let srcBuf = AVAudioPCMBuffer(pcmFormat: monoSrc, frameCapacity: AVAudioFrameCount(raw.count)) else {
             return
         }
-        self.converter = monoConverter
         srcBuf.frameLength = AVAudioFrameCount(raw.count)
         if let dst = srcBuf.floatChannelData?[0] {
             raw.withUnsafeBufferPointer { srcPtr in
@@ -232,7 +230,7 @@ final class VoiceTrainer {
 
         var error: NSError?
         let consumed = ConsumeOnce()
-        let status = monoConverter.convert(to: outBuf, error: &error) { _, statusPtr in
+        let status = converter.convert(to: outBuf, error: &error) { _, statusPtr in
             if consumed.done {
                 statusPtr.pointee = .endOfStream
                 return nil
