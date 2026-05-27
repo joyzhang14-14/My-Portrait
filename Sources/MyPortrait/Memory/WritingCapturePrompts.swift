@@ -195,20 +195,15 @@ enum WritingCapturePrompts {
        - "other"      — meaningful input that's neither (a remembered search query,
                         a single creative word/phrase the user typed deliberately).
 
-    3. DROP ONLY GENUINE NOISE INTO `discarded`
-       Drop only if there's NO meaningful intent:
-       - Accidental key (single char with no follow-up, no commit)
-       - Repeated gibberish (e.g. "aaaaa", "test test test")
-       - Pure shortcut presses with no resulting content (rapid app-switching, etc.)
-       - Empty session (typing=0, OCR=0)
-       - External paste with no user editing (see §3a — large pasted block of
-         external content with no surrounding cut/typing pattern indicating it's
-         the user's own)
-       - Keystroke residue not composed into any real language (see §3b)
-       Use free-text reason describing why.
-       DO NOT drop just because content is short — short messages are SIGNAL.
-       DO NOT drop just because keystroke is missing — IME composition can mask
-         keystroke; AX or OCR alone are still valid sources when keystroke is sparse.
+    3. DO NOT DISCARD ANYTHING IN THIS PASS
+       Translate every session you receive into a record. A separate Pass 3
+       gate decides what to drop based on keystroke-support evidence. Your
+       job here is purely transcription + segmentation + cleanup.
+       - If a session looks like noise / external paste / keystroke residue,
+         STILL emit a record for it. Pass 3 will drop it.
+       - Do not include `discarded` in your output. Output `records` only.
+       - Every input session_id must appear in at least one record's
+         `reference_*_ids`.
 
     3a. KEYSTROKE-EVENT TIMELINE (self-paste vs external paste)
 
@@ -335,10 +330,6 @@ enum WritingCapturePrompts {
           "reference_typing_event_ids": [], "reference_frame_ids": [],
           "reference_keystroke_range": {"start": <ms>, "end": <ms>}
         }
-      ],
-      "discarded": [
-        { "reason": "<free text>", "session_ids": ["sess_..."],
-          "preview": "<≤200 chars sample>" }
       ]
     }
 
@@ -346,13 +337,10 @@ enum WritingCapturePrompts {
     - **JSON string escaping**: ANY `"` inside a JSON string value MUST be escaped
       as `\"`. Same for `\` (escape as `\\`) and newlines (escape as `\n`). User
       content containing nested quotes will break the parser if unescaped.
-    - Every input session_id from raw_sessions appears EXACTLY ONCE — either inside
-      some record's `reference_*_ids` (its originating session) or in
-      `discarded.session_ids`
-    - A session_id NEVER appears in both records and discarded
+    - Every input session_id from raw_sessions MUST appear in at least one
+      record's `reference_*_ids` (no `discarded` in this pass — Pass 3 handles it)
     - "kind" is EXACTLY one of: "long_form" | "short_form" | "other"
     - "source" is EXACTLY one of: "ax_cleaned" | "canvas_fusion" | "merged"
-    - "discarded.reason" is free-text describing why (no enum prefix required)
     - "context_summary" ≤ 100 chars per record
     - "kind" in edit_log entries is EXACTLY "commit" or "delete"
     - edit_log is sorted by ts ascending
@@ -360,10 +348,8 @@ enum WritingCapturePrompts {
     - Respond with ONLY the JSON object, no markdown / prose / code fences
 
     EDGE CASES
-    - Whole group is genuine noise → all sessions in `discarded`, records=[]
     - Group has only OCR (no typing/keystroke) → still try to reconstruct from OCR
-      if it represents user-typed content; if it's just app chrome / passive
-      content → discarded
+      and emit a record (Pass 3 will judge if it's user-produced)
     - One session contains multiple distinct sent messages → split into multiple
       records
 
@@ -412,5 +398,83 @@ enum WritingCapturePrompts {
     Example H — version label that looks like gibberish but isn't:
       text = "PipelineA-v2"
       → KEEP. Code identifier / version tag in user's language.
+    """#
+
+    // MARK: - Pass 3 —— keystroke 支撑度过滤(records → kept / discarded)
+
+    static let pass3KeystrokeSupport = #"""
+    You are the FINAL filter gate. You receive writing_records that Pass 2 produced
+    (Pass 2 translates without filtering — you decide what survives).
+
+    Your single job: for each record, decide whether the period's KEYSTROKE
+    EVIDENCE actually supports the user having produced this text. If not,
+    DISCARD it. If yes, KEEP it.
+
+    INPUT
+    - records: array of candidate records from Pass 2. Per record you see:
+      { record_id, text, kind, source, app, url, start_ts, end_ts,
+        keystroke_text, keystroke_count, typing_events_text,
+        has_paste_event, has_cut_event,
+        ime_likely  // true if keystroke pattern looks like IME pinyin / kana }
+      - keystroke_text  : every physical key the user pressed in the record's
+                          window (sorted; <BS> shown for backspace; shortcut
+                          presses excluded).
+      - keystroke_count : total raw key presses in the window.
+      - typing_events_text: AX-path text in the window (if any; "" if absent).
+      - has_paste_event : ⌘V pressed > 100 chars (potentially external paste).
+      - has_cut_event   : ⌘X pressed (user cut their OWN content).
+      - ime_likely      : the keystroke pattern matches IME composition style.
+
+    JUDGEMENT RULES
+
+    KEEP a record when ANY of:
+    - keystroke_count is roughly proportional to text.length (for ASCII
+      languages: keystroke_count ≥ 0.6 × text.length is plenty);
+    - ime_likely is true AND keystroke_count is reasonable for an IME
+      composition of this text (Chinese pinyin: keystroke is the latin
+      phonetic, ~1.5–3× the composed char count);
+    - has_cut_event is true AND text matches what was cut (user re-pasted
+      their own content);
+    - typing_events_text contains the record.text (AX confirms user typed
+      it into an input field), regardless of keystroke count;
+    - The app is one where keystrokes are commonly swallowed (custom IME,
+      web-based chat, canvas editor) AND AX or OCR backs the content with
+      a coherent message in the user's language.
+
+    DISCARD a record when ALL of:
+    - keystroke_count is far below what text.length would require AND not
+      explained by IME; AND
+    - typing_events_text does NOT contain or closely match record.text; AND
+    - has_paste_event is true OR keystroke_text is sparse/empty
+      → this is external paste / OCR residue / app chrome that leaked in.
+
+    ALSO DISCARD:
+    - Pure shortcut presses with no resulting meaningful text.
+    - Empty / near-empty text with no clear user intent (single char, single
+      space, repeated gibberish "aaaaa" without IME context).
+    - OCR residue: text comes only from OCR with zero keystroke AND zero
+      AX support AND the content reads like app chrome (e.g. UI labels,
+      menu items, system notifications).
+
+    DO NOT discard for length alone. Short legitimate replies are valid.
+    DO NOT discard just because keystroke is missing — IME composition and
+      keystroke-swallowing apps are real edge cases. Look at AX + content
+      coherence.
+
+    OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
+    {
+      "kept": ["<record_id>", ...],
+      "discarded": [
+        { "record_id": "<id>", "reason": "<free text ≤ 120 chars>",
+          "preview": "<≤ 200 chars sample of the record's text>" }
+      ]
+    }
+
+    HARD RULES
+    - **JSON string escaping**: escape `"` → `\"`, `\` → `\\`, newlines → `\n`.
+    - EVERY input record_id appears EXACTLY ONCE — either in `kept` or in
+      `discarded.record_id`. Never both.
+    - "reason" is free text, no enum required.
+    - Respond with ONLY the JSON object, no prose / code fences.
     """#
 }

@@ -110,9 +110,21 @@ struct WritingCaptureDiscarded: Codable, Sendable, Equatable {
 }
 
 /// LLM 返回的顶层 JSON。
+/// `discarded` 字段从 Pass 3 接管后变成可选(老 prompt / 老缓存兼容)。
 private struct Pass2Response: Codable {
     let records: [WritingCaptureRecord]
     let discarded: [WritingCaptureDiscarded]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        records = try c.decode([WritingCaptureRecord].self, forKey: .records)
+        discarded = try c.decodeIfPresent([WritingCaptureDiscarded].self, forKey: .discarded) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case records
+        case discarded
+    }
 }
 
 // MARK: - Pass 2 Agent
