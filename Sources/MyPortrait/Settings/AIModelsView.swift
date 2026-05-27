@@ -13,6 +13,9 @@ struct AIModelsSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var config = ConfigStore.shared
     @State private var expanded: Set<String> = []
+    /// 本地模型 ready 状态轮询(SpeakerModelStore.isOnDisk / WhisperKitWrapper.isOnDisk
+    /// 都是同步 fs check,2s 轮一次)。view 可见时跑,disappear 后停。
+    @State private var localModelTick: Int = 0
 
     /// connections 里已连上的 AI provider(category .ai + .local 且能映射到
     /// 实际的 Provider)。disabled 状态不影响这个列表 —— 这里列的是"能用的",
@@ -45,6 +48,24 @@ struct AIModelsSettingsView: View {
             }
 
             SettingsCard(
+                title: "Local capture models",
+                footnote: "Downloaded automatically on first launch (~190 MB total). Required for transcription, voice training, and speaker grouping. The app works without them but voice features stay disabled until they finish."
+            ) {
+                localModelRow("Transcription", detail: "openai_whisper-base (~150 MB)",
+                              ready: WhisperKitWrapper.isOnDisk())
+                SettingsDivider()
+                localModelRow("Voice signature", detail: "wespeaker CAM++ (~30 MB)",
+                              ready: SpeakerModelStore.isOnDisk(.embedding))
+                SettingsDivider()
+                localModelRow("Voice segmentation", detail: "pyannote segmentation-3.0 (~6 MB)",
+                              ready: SpeakerModelStore.isOnDisk(.segmentation))
+                SettingsDivider()
+                localModelRow("Voice activity", detail: "Silero VAD (~2 MB)",
+                              ready: SpeakerModelStore.isOnDisk(.vadSilero))
+            }
+            .id(localModelTick)   // 强制重渲染,反映新的 isOnDisk 结果
+
+            SettingsCard(
                 title: "Semantic search index",
                 footnote: "Off by default. When on, captured text is embedded into vectors (bge-m3) so search can match by meaning, not just keywords — at the cost of ~1.15 GB resident memory while indexing. Keyword search works either way. Indexing runs only while plugged in."
             ) {
@@ -56,6 +77,53 @@ struct AIModelsSettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Local model row
+
+    private func localModelRow(_ title: String, detail: String, ready: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: ready ? "checkmark.circle.fill" : "arrow.down.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(ready ? Color.green.opacity(0.85) : Color.orange.opacity(0.85))
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            Spacer(minLength: 8)
+            Text(ready ? "Ready" : "Downloading…")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ready
+                                 ? Color.green.opacity(0.85)
+                                 : Color.orange.opacity(0.85))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .onAppear { startLocalModelPolling() }
+    }
+
+    /// 2s 轮一次 isOnDisk,把状态打到 localModelTick 强制重渲染。view 不可见
+    /// 时 Timer 不再被 SwiftUI 持有自然停。
+    private func startLocalModelPolling() {
+        // 简单实现:每次 onAppear 启动一个 Task 短轮询(只在所有模型都还没
+        // ready 时才反复轮,全 ready 之后停)。
+        Task { @MainActor in
+            while !allLocalModelsReady {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                localModelTick &+= 1
+            }
+        }
+    }
+
+    private var allLocalModelsReady: Bool {
+        WhisperKitWrapper.isOnDisk()
+            && SpeakerModelStore.isOnDisk(.embedding)
+            && SpeakerModelStore.isOnDisk(.segmentation)
+            && SpeakerModelStore.isOnDisk(.vadSilero)
     }
 
     // MARK: - Empty state

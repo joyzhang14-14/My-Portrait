@@ -44,6 +44,19 @@ final class WhisperKitWrapper: @unchecked Sendable {
         logger.info("WhisperKit model unloaded — freed memory")
     }
 
+    /// 模型是否在磁盘上 —— 给 Settings 状态面板用。WhisperKit cache 默认在
+    /// `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/<modelName>/`
+    /// 下,目录里有 mlmodelc bundle 就算 ready。
+    nonisolated static func isOnDisk(modelName: String = "openai_whisper-base") -> Bool {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        guard let docs else { return false }
+        let dir = docs.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+            .appendingPathComponent(modelName)
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return false }
+        // 至少要有 *.mlmodelc 才算下完(只有 config.json 之类是没下完)。
+        return entries.contains { $0.hasSuffix(".mlmodelc") }
+    }
+
     /// 启动时调,把模型下到磁盘并释放内存。下次真转录 ensurePipe 会从磁盘
     /// cache 秒加载,不再触发下载。新用户首启不会卡 150MB 下载在第一段
     /// 录音时。失败 swallow,真用到再走 ensurePipe 重试。
