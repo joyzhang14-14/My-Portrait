@@ -54,7 +54,7 @@ final class VoiceTrainer {
         guard task == nil else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            phase = .failure("先填写你的名字")
+            phase = .failure("Please enter your name first.")
             return
         }
         phase = .matching
@@ -96,7 +96,7 @@ final class VoiceTrainer {
             guard let self else { return }
             self.phase = assignedRows > 0
                 ? .success(name: trimmed)
-                : .failure("没找到你的语音 —— 确认麦克风录音已开启,接上电源让转录跑完")
+                : .failure("Couldn't find your voice — make sure microphone capture is on and try again.")
             self.task = nil
         }
     }
