@@ -248,25 +248,66 @@ final class WritingCaptureWorker {
             userRejections: userRejections
         )
 
-        // 6. 合并所有 group 输出
-        var allRecords: [WritingCaptureRecord] = []
-        var allDiscarded: [WritingCaptureDiscarded] = []
+        // 6. 收集 Pass 2 输出(按 group 索引保留分组),给 Pass 3 用
+        var recordsByGroupIdx: [[WritingCaptureRecord]] = []
         var failedGroups = 0
         var rawResponses: [String] = []
         var firstPrompt: String?
         for r in pass2Results {
             switch r {
             case .success(let out):
-                allRecords.append(contentsOf: out.records)
-                allDiscarded.append(contentsOf: out.discarded)
+                recordsByGroupIdx.append(out.records)
                 rawResponses.append(out.rawResponse)
                 if firstPrompt == nil { firstPrompt = out.prompt }
             case .failure(let err):
+                recordsByGroupIdx.append([])
                 failedGroups += 1
                 workerLog.warning("pass2 group failed: \(String(describing: err), privacy: .public)")
             }
         }
-        workerLog.info("pass2 fanout: \(allRecords.count) records, \(allDiscarded.count) discarded, \(failedGroups) failed groups")
+        let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
+        workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
+
+        // 6b. Pass 3 —— keystroke 支撑度过滤(每组一次,跟 Pass 2 同 provider/model)
+        let pass3Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
+            recs.enumerated().map { (ri, rec) in
+                WritingCapturePass3Builders.buildInput(
+                    recordId: "g\(gi)_r\(ri)",
+                    record: rec, typing: raw.typing, keys: raw.keys
+                )
+            }
+        }
+        let pass3Results = await WritingCapturePass3Builders.runConcurrently(
+            inputsByGroupIdx: pass3Inputs,
+            concurrency: 5,
+            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass2Provider, model: pass2Model) }
+        )
+        var allRecords: [WritingCaptureRecord] = []
+        var allDiscarded: [WritingCaptureDiscarded] = []
+        var pass3RawResponses: [String] = []
+        var pass3FailedGroups = 0
+        for (gi, recs) in recordsByGroupIdx.enumerated() {
+            switch pass3Results[gi] {
+            case .success(let out):
+                pass3RawResponses.append(out.rawResponse)
+                for (ri, rec) in recs.enumerated() {
+                    let id = "g\(gi)_r\(ri)"
+                    if out.kept.contains(id) { allRecords.append(rec) }
+                }
+                for d in out.discarded {
+                    allDiscarded.append(WritingCaptureDiscarded(
+                        reason: "pass3: \(d.reason)",
+                        sessionIds: [],
+                        preview: d.preview
+                    ))
+                }
+            case .failure(let err):
+                pass3FailedGroups += 1
+                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
+                allRecords.append(contentsOf: recs)
+            }
+        }
+        workerLog.info("pass3 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass3FailedGroups) failed groups")
 
         // 7. 落 staged + discarded
         let promptId = Self.promptIdHash(
@@ -517,25 +558,66 @@ final class WritingCaptureWorker {
             userRejections: userRejections
         )
 
-        // 6. 合并
-        var allRecords: [WritingCaptureRecord] = []
-        var allDiscarded: [WritingCaptureDiscarded] = []
+        // 6. 收集 Pass 2 输出(按 group 索引保留)
+        var recordsByGroupIdx: [[WritingCaptureRecord]] = []
         var failedGroups = 0
         var rawResponses: [String] = []
         var firstPrompt: String?
         for r in pass2Results {
             switch r {
             case .success(let out):
-                allRecords.append(contentsOf: out.records)
-                allDiscarded.append(contentsOf: out.discarded)
+                recordsByGroupIdx.append(out.records)
                 rawResponses.append(out.rawResponse)
                 if firstPrompt == nil { firstPrompt = out.prompt }
             case .failure(let err):
+                recordsByGroupIdx.append([])
                 failedGroups += 1
                 workerLog.warning("pass2 group failed: \(String(describing: err), privacy: .public)")
             }
         }
-        workerLog.info("pass2 fanout: \(allRecords.count) records, \(allDiscarded.count) discarded, \(failedGroups) failed groups")
+        let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
+        workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
+
+        // 6b. Pass 3
+        ui.stage = "Pass 3"
+        ui.statusMessage = "Pass 3: validating \(pass2Total) candidate record(s)…"
+        let pass3Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
+            recs.enumerated().map { (ri, rec) in
+                WritingCapturePass3Builders.buildInput(
+                    recordId: "g\(gi)_r\(ri)",
+                    record: rec, typing: raw.typing, keys: raw.keys
+                )
+            }
+        }
+        let pass3Results = await WritingCapturePass3Builders.runConcurrently(
+            inputsByGroupIdx: pass3Inputs,
+            concurrency: 5,
+            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass2Provider, model: pass2Model) }
+        )
+        var allRecords: [WritingCaptureRecord] = []
+        var allDiscarded: [WritingCaptureDiscarded] = []
+        var pass3FailedGroups = 0
+        for (gi, recs) in recordsByGroupIdx.enumerated() {
+            switch pass3Results[gi] {
+            case .success(let out):
+                for (ri, rec) in recs.enumerated() {
+                    let id = "g\(gi)_r\(ri)"
+                    if out.kept.contains(id) { allRecords.append(rec) }
+                }
+                for d in out.discarded {
+                    allDiscarded.append(WritingCaptureDiscarded(
+                        reason: "pass3: \(d.reason)",
+                        sessionIds: [],
+                        preview: d.preview
+                    ))
+                }
+            case .failure(let err):
+                pass3FailedGroups += 1
+                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
+                allRecords.append(contentsOf: recs)
+            }
+        }
+        workerLog.info("pass3 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass3FailedGroups) failed groups")
         ui.stage = "saving"
         ui.statusMessage = "Saving \(allRecords.count) record(s), \(allDiscarded.count) discarded…"
 
