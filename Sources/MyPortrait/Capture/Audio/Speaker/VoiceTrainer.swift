@@ -97,7 +97,11 @@ final class VoiceTrainer {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            phase = .failure("Couldn't start microphone: \(error.localizedDescription)")
+            // 按钮层 micGranted 已经拦住未授权,这里跑到大概率是 (a) 用户
+            // 跨进程刚撤销权限 / (b) 硬件被独占(蓝牙在 HFP)/ (c) AUHAL 撞
+            // bug。给一句通用的下一步提示,别假设是权限问题误导。
+            let detail = error.localizedDescription
+            phase = .failure("Couldn't start microphone (\(detail)). Check System Settings → Privacy → Microphone, then try again.")
             logger.error("voice training: engine.start() failed: \(String(describing: error), privacy: .public)")
             return false
         }
