@@ -728,6 +728,15 @@ struct TimelineDB: Sendable {
             let ok = sqlite3_step(upd) == SQLITE_DONE
             sqlite3_finalize(upd)
             guard ok else { return nil }
+
+            // 重训:清掉这个 speaker 的所有旧样本向量。否则 matchSpeaker 第 1 步
+            // 遍历 speaker_embeddings 时,旧的(可能采到的是别人 / 是脏样本)
+            // 余弦可能压过新训练的样本,导致重训后说话还被错配回原聚类。
+            if let del = prepare(db, "DELETE FROM speaker_embeddings WHERE speaker_id = ?") {
+                sqlite3_bind_int64(del, 1, id)
+                _ = sqlite3_step(del)
+                sqlite3_finalize(del)
+            }
         }
 
         // 3) append sample to speaker_embeddings(matchSpeaker 也比对这张表)
