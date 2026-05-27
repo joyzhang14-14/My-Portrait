@@ -223,49 +223,155 @@ struct WritingCaptureStep0 {
         return r == s
     }
 
-    // MARK: - OCR Jaccard dedupe(per session)
+    // MARK: - OCR dedupe(per session,window-aware)
 
-    /// 相邻两帧 Jaccard 相似度 > 95% → 合并(保留第一帧的 frameId/startTs,
-    /// 把 endTs 延到后续帧)。单遍贪心。
+    /// LCS token-sequence 相似度阈值(Dice 系数)。
+    /// 相邻两帧 token 序列 LCS Dice > 0.7 → 视为同内容合并。
+    static let ocrLcsThreshold = 0.70
+    /// LCS 计算的最长序列上限。超过就跳过 LCS(O(n·m) 太贵),仅 Jaccard。
+    static let lcsMaxLen = 500
+
+    /// Dedupe 规则:
+    ///   1. 按 (app, windowTitle) 切相邻子段
+    ///   2. 每个子段强制保留**首帧 + 末帧**;中间帧走 Jaccard50% + LCS70% 合并
+    ///   3. 子段 ≤ 2 帧直接全留
     static func jaccardDedupe(
         _ frames: [WritingCaptureRawOcr]
     ) -> [WritingCaptureOcrFrame] {
         guard !frames.isEmpty else { return [] }
         var out: [WritingCaptureOcrFrame] = []
-        var cur = WritingCaptureOcrFrame(
-            frameId: frames[0].id,
-            startTs: frames[0].tsMs,
-            endTs: frames[0].tsMs,
-            app: frames[0].app,
-            url: frames[0].url,
-            text: frames[0].text
-        )
-        var curTokens = tokenize(frames[0].text)
+        var runStart = 0
+        for i in 1...frames.count {
+            let isBoundary = i == frames.count
+                || frames[i].app != frames[runStart].app
+                || frames[i].windowTitle != frames[runStart].windowTitle
+            if isBoundary {
+                let run = Array(frames[runStart..<i])
+                out.append(contentsOf: dedupeWindowRun(run))
+                runStart = i
+            }
+        }
+        return out
+    }
+
+    /// 单个 (app, windowTitle) 子段内的 dedupe。
+    /// ≤ 2 帧:全留(首尾保留约束自动满足)。
+    /// > 2 帧:首末原样,中间相邻合并。
+    static func dedupeWindowRun(
+        _ frames: [WritingCaptureRawOcr]
+    ) -> [WritingCaptureOcrFrame] {
+        if frames.isEmpty { return [] }
+        if frames.count == 1 { return [Self.makeFrame(frames[0])] }
+        if frames.count == 2 {
+            return [Self.makeFrame(frames[0]), Self.makeFrame(frames[1])]
+        }
+        let first = Self.makeFrame(frames[0])
+        let last = Self.makeFrame(frames[frames.count - 1])
+        let middle = mergeAdjacent(Array(frames[1..<frames.count - 1]))
+        return [first] + middle + [last]
+    }
+
+    /// 中间帧相邻合并:Jaccard set > 50% 或 LCS sequence Dice > 70% 即合并。
+    static func mergeAdjacent(
+        _ frames: [WritingCaptureRawOcr]
+    ) -> [WritingCaptureOcrFrame] {
+        guard !frames.isEmpty else { return [] }
+        var out: [WritingCaptureOcrFrame] = []
+        var cur = Self.makeFrame(frames[0])
+        var curSet = tokenize(frames[0].text)
+        var curSeq = tokenizeSequence(frames[0].text)
         for f in frames.dropFirst() {
-            let fTokens = tokenize(f.text)
-            let sim = jaccard(curTokens, fTokens)
-            if sim > ocrJaccardThreshold {
-                // 合并:延长 endTs,文本以更长的为准(canvas 滚动时新帧可能多内容)
+            let fSet = tokenize(f.text)
+            let fSeq = tokenizeSequence(f.text)
+            let jacc = jaccard(curSet, fSet)
+            let lcsR = lcsDiceCapped(curSeq, fSeq)
+            if jacc > ocrJaccardThreshold || lcsR > ocrLcsThreshold {
+                // 合并:延 endTs;文本以更长的胜出。
+                let pickF = f.text.count > cur.text.count
                 cur = WritingCaptureOcrFrame(
                     frameId: cur.frameId,
                     startTs: cur.startTs,
                     endTs: f.tsMs,
                     app: cur.app,
                     url: cur.url,
-                    text: f.text.count > cur.text.count ? f.text : cur.text
+                    windowTitle: cur.windowTitle,
+                    text: pickF ? f.text : cur.text
                 )
-                if f.text.count > curTokens.count { curTokens = fTokens }
+                if pickF {
+                    curSet = fSet
+                    curSeq = fSeq
+                }
             } else {
                 out.append(cur)
-                cur = WritingCaptureOcrFrame(
-                    frameId: f.id, startTs: f.tsMs, endTs: f.tsMs,
-                    app: f.app, url: f.url, text: f.text
-                )
-                curTokens = fTokens
+                cur = Self.makeFrame(f)
+                curSet = fSet
+                curSeq = fSeq
             }
         }
         out.append(cur)
         return out
+    }
+
+    private static func makeFrame(_ raw: WritingCaptureRawOcr) -> WritingCaptureOcrFrame {
+        WritingCaptureOcrFrame(
+            frameId: raw.id, startTs: raw.tsMs, endTs: raw.tsMs,
+            app: raw.app, url: raw.url, windowTitle: raw.windowTitle,
+            text: raw.text
+        )
+    }
+
+    /// 顺序 token list,LCS 用。复用 `tokenize` 的字符规则但保序、可重复。
+    static func tokenizeSequence(_ s: String) -> [String] {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var tokens: [String] = []
+        var current = ""
+        for c in trimmed {
+            if c.isLetter || c.isNumber {
+                if isCJK(c) {
+                    if !current.isEmpty { tokens.append(current); current = "" }
+                    tokens.append(String(c))
+                } else {
+                    current.append(c)
+                }
+            } else {
+                if !current.isEmpty { tokens.append(current); current = "" }
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens
+    }
+
+    /// LCS Dice 系数 = 2·|LCS| / (|a| + |b|)。两边都空 → 1.0。
+    /// 任一边超 `lcsMaxLen` → 直接返回 0(O(n·m) 退化,交给 Jaccard 兜底)。
+    static func lcsDiceCapped(_ a: [String], _ b: [String]) -> Double {
+        if a.isEmpty && b.isEmpty { return 1.0 }
+        if a.isEmpty || b.isEmpty { return 0.0 }
+        if a.count > lcsMaxLen || b.count > lcsMaxLen { return 0.0 }
+        let lcs = lcsLength(a, b)
+        let denom = a.count + b.count
+        return denom > 0 ? Double(2 * lcs) / Double(denom) : 0.0
+    }
+
+    /// 经典 DP LCS 长度。滚动数组,内存 O(min(m,n))。
+    static func lcsLength(_ a: [String], _ b: [String]) -> Int {
+        // 用较短的作为内层
+        let (x, y) = a.count <= b.count ? (a, b) : (b, a)
+        if x.isEmpty { return 0 }
+        var prev = [Int](repeating: 0, count: x.count + 1)
+        var curr = [Int](repeating: 0, count: x.count + 1)
+        for j in 1...y.count {
+            for i in 1...x.count {
+                if x[i - 1] == y[j - 1] {
+                    curr[i] = prev[i - 1] + 1
+                } else {
+                    curr[i] = max(prev[i], curr[i - 1])
+                }
+            }
+            swap(&prev, &curr)
+            for i in 0..<curr.count { curr[i] = 0 }
+        }
+        return prev[x.count]
     }
 
     /// 把文本切成 token set,用作 Jaccard 输入。
