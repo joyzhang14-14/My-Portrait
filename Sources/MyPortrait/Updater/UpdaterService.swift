@@ -55,18 +55,17 @@ final class UpdaterService: NSObject {
         applyConfig()
     }
 
-    /// 用户点菜单 / 设置里的 "Check Now" 按钮调这个。
-    /// autoDownloadUpdates toggle 决定走哪条:
-    ///   - on  → checkForUpdatesInBackground:silent path 走我们的 delegate,
-    ///           找到新版直接 banner 倒计时 + 强制装(测试 Option B 链路时
-    ///           不用等 60min 自动 timer)
-    ///   - off → 标准 user-initiated check,弹 Sparkle 原生 modal
+    /// 用户点菜单 / 设置里的 "Check Now" 按钮调这个 —— 永远走 Sparkle
+    /// 原生 modal,**不受 autoDownloadUpdates toggle 影响**:用户主动点
+    /// "Check now" 时想要的就是"有没有新版给我看一下",modal 给"是/否
+    /// + 立刻装"的明确反馈。
+    ///
+    /// 之前版本 toggle on 时走 checkForUpdatesInBackground() 是错的 ——
+    /// 那条 silent path 没 UI 反馈,用户点了感觉按钮"没反应"。
+    /// 自动 timer 路径仍走 silent(用 applyConfig 里那条 Timer 调
+    /// checkForUpdatesInBackground)。手动 ≠ 自动。
     func checkForUpdates() {
-        if ConfigStore.shared.current.general.autoDownloadUpdates {
-            controller.updater.checkForUpdatesInBackground()
-        } else {
-            controller.checkForUpdates(nil)
-        }
+        controller.checkForUpdates(nil)
     }
 
     /// 把 ConfigStore.general 里的两个字段同步到 SPUUpdater + 我们自己的
