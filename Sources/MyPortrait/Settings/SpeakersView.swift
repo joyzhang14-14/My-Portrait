@@ -703,16 +703,19 @@ struct VoiceTrainingCard: View {
 
     private func startTraining() {
         guard !blocked else { return }
-        // 备份原值给老逻辑兼容(没改 audio toggle 但 restoreAudioState 还
-        // 会被 onChange/onCancel 调到,prev 为 nil 时它直接 noop)。
         prevAudioEnabled = cfg.current.capture.audio.enabled
         prevSpeakerIdEnabled = cfg.current.capture.audio.speakerIdEnabled
-        // **不再强开全局 audio capture / speakerIdEnabled** —— embedding-based
-        // 训练自己起 AVAudioEngine 独立监听麦克风,不依赖全局 pipeline。
-        // 启动捕音,失败(没麦克风权限等)trainer.phase 直接到 .failure,
-        // sheet 弹出来 statusLine 会显示错误。
+        // **训练期间临时关掉主 mic capture** —— 两个 AVAudioEngine 同时 access
+        // 同一个 input 硬件会拿到 -10877 或者让蓝牙降到 HFP,训练录到的样本
+        // 会变质。assign/cancel/失败后 restoreAudioState() 还原成原值。
+        // (embedding-based 训练自己起独立 engine,不依赖全局 capture pipeline)
+        if cfg.current.capture.audio.enabled {
+            cfg.mutate { $0.capture.audio.enabled = false }
+        }
         guard trainer.start() else {
             // 没起来就别弹 sheet,phase 自带错误描述给 statusLine 用。
+            // 立刻还原 audio toggle —— 没真正训练就别让主 capture 关着。
+            restoreAudioState()
             return
         }
         showCountdown = true
