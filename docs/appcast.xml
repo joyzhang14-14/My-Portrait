@@ -12,6 +12,25 @@
         -->
 
         <item>
+            <title>Version 1.0.87</title>
+            <pubDate>Wed, 27 May 2026 00:50:00 +0000</pubDate>
+            <sparkle:version>87</sparkle:version>
+            <sparkle:shortVersionString>1.0.87</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Fix Check now button + verify the silent auto-update path.</p>
+                <ul>
+                    <li>Settings → General → <strong>Check now</strong> always opens Sparkle's native modal (regardless of the Auto-update toggle). Previously, with Auto-update on, the button silently routed into the background-check path with no visible feedback.</li>
+                </ul>
+                <p>If you're on 1.0.86 with Auto-update toggle on, this version should arrive completely silently — a 10 s countdown banner top-right, then the app installs + relaunches.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.87/MyPortrait-1.0.87.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="QnCkpkP7ZdPCjC9Qw879ZEDWj/tqJZ73bJW7Nd63hLKg4aAH/jq7Orbs8asIWrSsGDjF1rMSMEGuKhVs5ykrBg==" length="44396507" />
+        </item>
+
+        <item>
             <title>Version 1.0.86</title>
             <pubDate>Wed, 27 May 2026 00:30:00 +0000</pubDate>
             <sparkle:version>86</sparkle:version>
