@@ -60,6 +60,16 @@ final class VoiceTrainer {
     @discardableResult
     func start() -> Bool {
         guard case .idle = phase else { return false }
+
+        // 预检 wespeaker embedding 模型在磁盘上没。新用户首启,后台 prefetchAll
+        // 还没跑完时,这里能立刻提示用户"模型还在下",避免录满 30s 才在
+        // assign() 阶段才发现模型缺失浪费时间。
+        if !SpeakerModelStore.isOnDisk(.embedding) {
+            phase = .failure("AI voice model still downloading — wait a few seconds and try again.")
+            logger.warning("voice training blocked: embedding model not on disk yet")
+            return false
+        }
+
         buffer.removeAll(keepingCapacity: true)
 
         guard let target = AVAudioFormat(
