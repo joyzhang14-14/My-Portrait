@@ -49,6 +49,10 @@ targets:
       - path: Sources/MyPortrait
         excludes:
           - "**/README.md"
+      # ObjC try/catch helper —— 直接挂到 app target,不当独立 framework /
+      # static lib(framework 要 Info.plist + 签名,static lib modulemap
+      # 跟 Xcode auto-modulemap 打架)。Swift 通过 bridging header 看到。
+      - path: Sources/MyPortraitObjC
     dependencies:
       - package: GRDB
         product: GRDB
@@ -71,8 +75,6 @@ targets:
       - sdk: libsqlite3.tbd
       - package: Sparkle
         product: Sparkle
-      - target: MyPortraitObjC
-        embed: true
     # DEVELOPMENT_TEAM 通过 xcconfig 注入,不在 settings.base 里硬编。
     # base 里的 build settings 优先级高于 xcconfig,会覆盖掉它,所以这里必须
     # 用 configFiles 而不是 base。Signing.xcconfig 里有默认 team,contributor
@@ -145,33 +147,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Support/MyPortrait.entitlements
         # @testable import 需要 app target 开 testability。
         ENABLE_TESTABILITY: true
-
-  # ObjC try/catch helper —— Swift 不接 NSException,AVAudioEngine.installTap /
-  # engine.start 在 aggregate device 格式不匹配时抛 NSException 直接杀进程。
-  # 这个 framework 包一层 ObjC @try/@catch 把它转成 NSError。
-  MyPortraitObjC:
-    type: framework
-    platform: macOS
-    sources:
-      - path: Sources/MyPortraitObjC
-    # 签名走跟 app target 同一份 xcconfig —— 这样 contributor 的
-    # Signing.local.xcconfig(Manual + MyPortraitDev cert)能同时盖 framework,
-    # 不然 app 用 MyPortraitDev 签、framework 用 default Apple Development 签,
-    # codesign 时 framework 跟 app 主签名不一致直接报 CodeSign failed。
-    configFiles:
-      Debug: Support/Signing.xcconfig
-      Release: Support/Signing.xcconfig
-    settings:
-      base:
-        DEFINES_MODULE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait.objc
-        SKIP_INSTALL: YES
-        # **不要**覆盖 PUBLIC_HEADERS_FOLDER_PATH —— Xcode 自动 modulemap
-        # 找 `Headers/MyPortraitObjC.h` (默认值就是 Headers),自定义路径
-        # 会让 modulemap 的 umbrella header 找不到,Clang dependency
-        # scanner failure。
-        # **不要**写 CODE_SIGN_STYLE/IDENTITY —— settings.base 优先级高过
-        # xcconfig 会盖掉用户的 local override。
+        # ObjC bridging header —— 暴露 MyPortraitObjC.h 给 Swift 直接调,
+        # 不用 import。Sources/MyPortraitObjC 直接挂在 app target 里。
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/MyPortraitObjC/include/MyPortraitObjC.h
 
   MyPortraitTests:
     type: bundle.unit-test

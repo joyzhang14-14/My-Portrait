@@ -3,8 +3,12 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
-import MyPortraitObjC
 import os.log
+// SwiftPM 走 import 模块;Xcode 走 bridging header(SWIFT_OBJC_BRIDGING_HEADER),
+// 编译期 SWIFT_PACKAGE 由 SwiftPM 自动定义,bridging header 路径下不存在。
+#if SWIFT_PACKAGE
+import MyPortraitObjC
+#endif
 
 /// 系统音频 (loopback / output) 采集服务。捕获其他 app 的输出（如视频会议
 /// 另一方的声音、视频播放声等），与麦克风音频并列存在。
