@@ -12,6 +12,25 @@
         -->
 
         <item>
+            <title>Version 1.0.86</title>
+            <pubDate>Wed, 27 May 2026 00:30:00 +0000</pubDate>
+            <sparkle:version>86</sparkle:version>
+            <sparkle:shortVersionString>1.0.86</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Fix the silent auto-update countdown banner — it was wired to the wrong Sparkle callback in 1.0.83–1.0.85.</p>
+                <ul>
+                    <li>Switched to <code>SPUUpdaterDelegate.willInstallUpdateOnQuit:immediateInstallationBlock:</code> which fires after Sparkle finishes downloading + extracting in the silent path. Returns YES to take over, posts the "Updating to X — click to postpone" countdown banner, and after 10 s calls the install handler for a UI-less install + relaunch.</li>
+                </ul>
+                <p>Once you're on 1.0.86, the next release should actually show the countdown banner instead of installing silently on quit.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.86/MyPortrait-1.0.86.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="slRVl1DRNkdyEwhuTRcDWyJlxnUzygF2OIa0SuJOdWAM25iW4zYD9GqlsXZDLlgXSe+5M7g/i0KXnaFgp9VGAg==" length="44393230" />
+        </item>
+
+        <item>
             <title>Version 1.0.85</title>
             <pubDate>Tue, 26 May 2026 23:55:00 +0000</pubDate>
             <sparkle:version>85</sparkle:version>
