@@ -670,6 +670,83 @@ struct TimelineDB: Sendable {
         return out
     }
 
+    /// **voice training 用** —— 把训练录到的 30s embedding 直接写进
+    /// speakers + speaker_embeddings 两张表。
+    ///
+    /// - 同名 speaker 已存在 → centroid 覆盖成新 embedding(刚训练的算
+    ///   authoritative),embedding_count 重置 1,hallucination 清 0,追加
+    ///   一条 sample 到 speaker_embeddings
+    /// - 不存在 → INSERT 新行
+    ///
+    /// 不依赖 diarization、不依赖 transcription —— 纯 DB 写。返回 speaker_id。
+    func upsertVoiceTrainedSpeaker(name: String, embedding: [Float]) -> Int64? {
+        guard exists else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_close(db) }
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let blob = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+        // 1) find existing by name
+        var speakerId: Int64?
+        if let stmt = prepare(db, "SELECT id FROM speakers WHERE name = ? LIMIT 1") {
+            sqlite3_bind_text(stmt, 1, name, -1, transient)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                speakerId = sqlite3_column_int64(stmt, 0)
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        // 2) upsert speakers row
+        if speakerId == nil {
+            guard let ins = prepare(db, """
+                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms)
+                VALUES (?, ?, 1, 0, ?, ?)
+                """) else { return nil }
+            sqlite3_bind_text(ins, 1, name, -1, transient)
+            blob.withUnsafeBytes { rawBuf in
+                sqlite3_bind_blob(ins, 2, rawBuf.baseAddress, Int32(rawBuf.count), transient)
+            }
+            sqlite3_bind_int64(ins, 3, nowMs)
+            sqlite3_bind_int64(ins, 4, nowMs)
+            let ok = sqlite3_step(ins) == SQLITE_DONE
+            sqlite3_finalize(ins)
+            guard ok else { return nil }
+            speakerId = sqlite3_last_insert_rowid(db)
+        } else if let id = speakerId {
+            guard let upd = prepare(db, """
+                UPDATE speakers SET centroid = ?, embedding_count = 1, hallucination = 0, updated_at_ms = ?
+                WHERE id = ?
+                """) else { return nil }
+            blob.withUnsafeBytes { rawBuf in
+                sqlite3_bind_blob(upd, 1, rawBuf.baseAddress, Int32(rawBuf.count), transient)
+            }
+            sqlite3_bind_int64(upd, 2, nowMs)
+            sqlite3_bind_int64(upd, 3, id)
+            let ok = sqlite3_step(upd) == SQLITE_DONE
+            sqlite3_finalize(upd)
+            guard ok else { return nil }
+        }
+
+        // 3) append sample to speaker_embeddings(matchSpeaker 也比对这张表)
+        if let id = speakerId, let ins2 = prepare(db, """
+            INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms)
+            VALUES (?, ?, ?)
+            """) {
+            sqlite3_bind_int64(ins2, 1, id)
+            blob.withUnsafeBytes { rawBuf in
+                sqlite3_bind_blob(ins2, 2, rawBuf.baseAddress, Int32(rawBuf.count), transient)
+            }
+            sqlite3_bind_int64(ins2, 3, nowMs)
+            _ = sqlite3_step(ins2)
+            sqlite3_finalize(ins2)
+        }
+
+        return speakerId
+    }
+
     /// 窗口内**已转录**(audio_transcriptions 有行)的输入音频条数。
     /// voice training screenpipe 风格用 —— 不依赖 diarization,只看
     /// 转录是否产出行。≥1 就可以触发 reassignInputTranscriptionsToSpeaker。
