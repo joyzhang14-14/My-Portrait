@@ -18,159 +18,25 @@
             <sparkle:shortVersionString>1.0.89</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <p>UI tweak + verification build for silent auto-update on 1.0.88+.</p>
+                <p>Rolled-up release covering everything since 1.0.81 — fully silent auto-update + a handful of UI polish.</p>
+                <h3>Auto-update</h3>
                 <ul>
-                    <li>Settings → General → <strong>Current version</strong> chip's background colour was hard-coded white-on-white, invisible in Light theme. Switched to a colorScheme-aware fill/stroke.</li>
+                    <li><strong>Fully silent install.</strong> With <em>Settings → General → Auto-update app</em> on, new versions download in the background, then a small "Updating to 1.0.X — click to postpone" banner appears top-right. 10 s without interaction → install + relaunch on its own. Click banner to skip this round.</li>
+                    <li><strong>Update check interval</strong> really respects what you pick — Sparkle's hard-coded 1-hour minimum no longer applies.</li>
+                    <li><strong>Check now</strong> always opens Sparkle's native modal so a manual click gives an explicit yes/no answer.</li>
                 </ul>
-                <p>If you're on 1.0.88 with Auto-update toggle on, this should arrive completely silently: 10 s countdown banner top-right, then install + relaunch.</p>
+                <h3>UI</h3>
+                <ul>
+                    <li>Settings → General shows the currently-installed version. Light-theme aware.</li>
+                    <li>Menu bar dropdown shows the current version between Typing Capture and Open My Portrait.</li>
+                    <li>Notification overlay panel shrunk to a sane size.</li>
+                    <li>Settings → Display → Translucent sidebar: dropped the redundant "(macOS only)" suffix.</li>
+                </ul>
             ]]></description>
             <enclosure
                 url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.89/MyPortrait-1.0.89.dmg"
                 type="application/octet-stream"
                 sparkle:edSignature="fdfLLvSstqn1xpTJJRntKAKOR3hT2Ess+n7okB+QSxe3KBgKbOskM5PkFBpf2gK04/yd04LTTe59/Knp7Rw/CQ==" length="44395172" />
-        </item>
-
-        <item>
-            <title>Version 1.0.88</title>
-            <pubDate>Wed, 27 May 2026 01:10:00 +0000</pubDate>
-            <sparkle:version>88</sparkle:version>
-            <sparkle:shortVersionString>1.0.88</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Make silent auto-update actually silent (it wasn't in 1.0.86 / 1.0.87 despite the release notes).</p>
-                <ul>
-                    <li>Added <code>SUAllowsAutomaticUpdates=true</code> to Info.plist. Sparkle had a cascade dependency where disabling its scheduler (which we did to bypass the 1-hour minimum) silently rejected our <code>setAutomaticallyDownloadsUpdates(true)</code> call. With this explicit Info.plist flag, the setter actually takes effect.</li>
-                </ul>
-                <p>If you're on 1.0.86 / 1.0.87 with Auto-update toggle on, this should arrive completely silently: 10 s countdown banner top-right, then install + relaunch.</p>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.88/MyPortrait-1.0.88.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="9bUER/GsaVK8K3d5eWz1MJCCOvPEZNFprGUw5y8/xyVYhDn3DAJ/1etFfD/EKUMQaBy6D6GpiDtMBiUlV/ImCA==" length="44396389" />
-        </item>
-
-        <item>
-            <title>Version 1.0.87</title>
-            <pubDate>Wed, 27 May 2026 00:50:00 +0000</pubDate>
-            <sparkle:version>87</sparkle:version>
-            <sparkle:shortVersionString>1.0.87</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Fix Check now button + verify the silent auto-update path.</p>
-                <ul>
-                    <li>Settings → General → <strong>Check now</strong> always opens Sparkle's native modal (regardless of the Auto-update toggle). Previously, with Auto-update on, the button silently routed into the background-check path with no visible feedback.</li>
-                </ul>
-                <p>If you're on 1.0.86 with Auto-update toggle on, this version should arrive completely silently — a 10 s countdown banner top-right, then the app installs + relaunches.</p>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.87/MyPortrait-1.0.87.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="QnCkpkP7ZdPCjC9Qw879ZEDWj/tqJZ73bJW7Nd63hLKg4aAH/jq7Orbs8asIWrSsGDjF1rMSMEGuKhVs5ykrBg==" length="44396507" />
-        </item>
-
-        <item>
-            <title>Version 1.0.86</title>
-            <pubDate>Wed, 27 May 2026 00:30:00 +0000</pubDate>
-            <sparkle:version>86</sparkle:version>
-            <sparkle:shortVersionString>1.0.86</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Fix the silent auto-update countdown banner — it was wired to the wrong Sparkle callback in 1.0.83–1.0.85.</p>
-                <ul>
-                    <li>Switched to <code>SPUUpdaterDelegate.willInstallUpdateOnQuit:immediateInstallationBlock:</code> which fires after Sparkle finishes downloading + extracting in the silent path. Returns YES to take over, posts the "Updating to X — click to postpone" countdown banner, and after 10 s calls the install handler for a UI-less install + relaunch.</li>
-                </ul>
-                <p>Once you're on 1.0.86, the next release should actually show the countdown banner instead of installing silently on quit.</p>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.86/MyPortrait-1.0.86.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="slRVl1DRNkdyEwhuTRcDWyJlxnUzygF2OIa0SuJOdWAM25iW4zYD9GqlsXZDLlgXSe+5M7g/i0KXnaFgp9VGAg==" length="44393230" />
-        </item>
-
-        <item>
-            <title>Version 1.0.85</title>
-            <pubDate>Tue, 26 May 2026 23:55:00 +0000</pubDate>
-            <sparkle:version>85</sparkle:version>
-            <sparkle:shortVersionString>1.0.85</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Make <strong>Update check interval</strong> actually respect what you pick.</p>
-                <ul>
-                    <li>Sparkle's Release build hard-codes a 1-hour minimum between scheduled checks. Replaced its internal scheduler with our own Timer that calls <code>checkForUpdatesInBackground()</code> at the user-chosen interval (1 min → really 1 min).</li>
-                    <li>Settings → General → <strong>Check now</strong> respects the Auto-update toggle: toggle on → silent Option B path; toggle off → standard Sparkle modal.</li>
-                    <li>Notification overlay panel further shrunk to 100 px tall.</li>
-                </ul>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.85/MyPortrait-1.0.85.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="lFhzDr01arkxCn09ZEMZ880ob7oFhIucrjGMTNv5FR2KNum9KuEwMKzcFgmpn/ct9Ijpk3Q9SYkljuVe7O+TCA==" length="44398413" />
-        </item>
-
-        <item>
-            <title>Version 1.0.84</title>
-            <pubDate>Tue, 26 May 2026 23:40:45 +0000</pubDate>
-            <sparkle:version>84</sparkle:version>
-            <sparkle:shortVersionString>1.0.84</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Option B silent auto-update verification build.</p>
-                <ul>
-                    <li>Menu bar dropdown shows the current version between "Typing Capture" and "Open My Portrait"</li>
-                </ul>
-                <p>If you're on v1.0.83 with Auto-update toggle on, this should arrive silently — a "Updating to 1.0.84 — click to postpone" banner pops top-right, ignore it for 10s and the app restarts into 1.0.84 on its own.</p>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.84/MyPortrait-1.0.84.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="QuEw8NxKe3q0eMwjJq4WtgLi0HBfWBg+KuX8tkxyzQmDkXUOuv3na6UA0UgK43Vx8cDPkigYUhDrEA1QFGJhBg==" length="44390792" />
-        </item>
-
-        <item>
-            <title>Version 1.0.83</title>
-            <pubDate>Tue, 26 May 2026 23:31:26 +0000</pubDate>
-            <sparkle:version>83</sparkle:version>
-            <sparkle:shortVersionString>1.0.83</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Auto-update polish + tiny UI fixes.</p>
-                <h3>Auto-update</h3>
-                <ul>
-                    <li>When <strong>Auto-update app</strong> toggle is on, the app no longer pops a modal. Sparkle silently downloads the new build; when ready a small banner shows top-right saying "Updating to v1.0.X — click to postpone". 10s without interaction → app quits, installs, and relaunches into the new version. Click banner to skip this round.</li>
-                    <li>When toggle is off, Sparkle still shows the standard "Install Update?" dialog.</li>
-                    <li>User-initiated <strong>Check now</strong> always shows the standard dialog.</li>
-                </ul>
-                <h3>UI</h3>
-                <ul>
-                    <li>Notification overlay panel shrunk to 320×480, pinned to screen top</li>
-                    <li>Settings → General → Current version no longer shows build number in parens</li>
-                    <li>Settings → Display → Translucent sidebar: dropped "(macOS only)" suffix</li>
-                </ul>
-                <p>The silent Option B path activates <strong>from v1.0.83 onward</strong>. The transition from v1.0.82 still uses Sparkle's standard modal (because v1.0.82 doesn't know about gentle reminders yet).</p>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.83/MyPortrait-1.0.83.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="AAkZw8CX1SO8C97Ds+dqE+WB+sgBwAEhX+ApQCQwnIF56obPn2dC5dvdTFGfnP9LBjvSKzSk8YFIQpMm3GlRDg==" length="44389582" />
-        </item>
-
-        <item>
-            <title>Version 1.0.82</title>
-            <pubDate>Tue, 26 May 2026 22:55:11 +0000</pubDate>
-            <sparkle:version>82</sparkle:version>
-            <sparkle:shortVersionString>1.0.82</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>Auto-update test build (Sparkle 1.0.81 → 1.0.82 round-trip).</p>
-                <ul>
-                    <li>Settings → General → Updates: show the currently-installed version + build number</li>
-                    <li>Settings → Display: drop the "(macOS only)" suffix on Translucent sidebar</li>
-                </ul>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.82/MyPortrait-1.0.82.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="AoJROTqV3bRiykawniuLQChozmrvCdrruGh9+43XtlG3vHPTJhuZTAFIU87+Yag2gsJxg9uOGjcM+435YCbEBw==" length="44380851" />
         </item>
 
         <item>
