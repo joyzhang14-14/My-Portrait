@@ -36,6 +36,13 @@ enum SpeakerModel: Sendable {
 actor SpeakerModelStore {
     static let shared = SpeakerModelStore()
 
+    /// 模型是否已经在磁盘上 —— **同步**查,UI 预检用(VoiceTrainer 启动
+    /// 前判断 embedding 模型 ready 不,避免用户录满 30s 才发现模型还没下完)。
+    nonisolated static func isOnDisk(_ model: SpeakerModel) -> Bool {
+        let path = Storage.modelsDir.appendingPathComponent(model.filename).path
+        return FileManager.default.fileExists(atPath: path)
+    }
+
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "speaker-models")
     /// 内存缓存：filename → 已确认存在的本地路径。
     private var cached: [String: URL] = [:]
