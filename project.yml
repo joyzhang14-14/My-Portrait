@@ -112,8 +112,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "1.0.85"
-        CURRENT_PROJECT_VERSION: "85"
+        MARKETING_VERSION: "1.0.86"
+        CURRENT_PROJECT_VERSION: "86"
         # **签名相关 build settings 全部走 Support/Signing.xcconfig**
         # —— `settings.base` 在 xcodegen / Xcode 里**优先级高于 xcconfig**,
         # 写在这里会盖掉 contributor 的 Signing.local.xcconfig 覆盖。
