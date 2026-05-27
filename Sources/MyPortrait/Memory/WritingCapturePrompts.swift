@@ -61,9 +61,26 @@ enum WritingCapturePrompts {
         "command"  — running commands (terminal / shell)
         "chat"     — short conversational responses
         "other"    — anything else
-    - summary: ≤ 100 chars, what they were doing. Be specific:
-        Mention the actual subject (what topic / what they're searching / what
-        they're drafting), not just the app name.
+    - summary: ≤ 100 chars. Describe the SCENE / SURFACE the user is on (what
+        kind of interface they're looking at), NOT what their typed text is
+        about.
+        • Identify the surface from OCR VISUAL cues: chat UI (channel /
+          message list, send button, reply thread), code editor (line numbers,
+          syntax-colored tokens, tabs), document / notes (long prose with
+          headings, no UI chrome), web article (article body + nav chrome),
+          terminal (prompt + command output), search results (link list +
+          snippets), email (inbox / thread), settings / preferences pane, etc.
+        • If the app is a known platform, name it ("chatting on Discord",
+          "drafting in Apple Notes", "browsing a GitHub repo page", "running
+          shell commands in Terminal"). For unknown apps, describe the surface
+          type ("conversational chat window", "long-form document editor",
+          "code editor with multiple tabs").
+        • DO NOT include the user's typed content, the conversation topic,
+          or what their document is about.
+          BAD: "Says it can store years of data" / "Discussing AI usage limits"
+          GOOD: "Chatting on Discord with one peer"
+          BAD: "Writing Python packaging notes"
+          GOOD: "Drafting a long note in Apple Notes"
 
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
@@ -293,7 +310,14 @@ enum WritingCapturePrompts {
            "canvas_fusion" — OCR + keystrokes drove the reconstruction
            "merged"        — record combines multiple sessions of different sources
        - confidence ∈ [0, 1]
-       - context_summary ≤ 100 chars: distill what the user did
+       - context_summary ≤ 100 chars: describe the SCENE / SURFACE the user is
+         on (inherit + refine from context_timeline's summary). Describe WHERE
+         and WHAT KIND OF interface, NOT what the typed text says.
+         GOOD: "Chatting on Discord with one peer" / "Drafting a long note in
+               Apple Notes" / "Replying in a Slack channel" / "Editing Swift
+               file in Xcode"
+         BAD:  "Says it can store years of data" / "Discussing AI limits" /
+               "Writing Python packaging notes" (these are CONTENT, not scene)
        - app, url: from group_meta
        - start_ts: earliest contributing session.start_ts
        - end_ts: latest contributing session.end_ts
