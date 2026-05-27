@@ -81,6 +81,13 @@ struct MyPortraitApp: App {
             EventPromptTestCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--voice-test <audio-file>` runs voice training embedding
+        // extraction on a real audio file. Verifies the new embedding-based
+        // VoiceTrainer end-to-end without mic / transcription / diarization.
+        if let idx = args.firstIndex(of: "--voice-test"), idx + 1 < args.count {
+            VoiceTrainingTestCLI.run(audioPath: args[idx + 1])
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--backfill-day <yyyy-MM-dd>` runs the real Backfill for a
         // single day. Disposable — remove with EventPromptTest.swift.
         if let idx = args.firstIndex(of: "--backfill-day"), idx + 1 < args.count {

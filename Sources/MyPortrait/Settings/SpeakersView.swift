@@ -686,11 +686,13 @@ struct VoiceTrainingCard: View {
             VoiceTrainingSheet(
                 onFinish: {
                     showCountdown = false
+                    // assign 内部会 stop engine + run embedding + 存 DB
                     trainer.assign(name: trimmedName)
                 },
                 onCancel: {
                     showCountdown = false
-                    // 用户取消 → 没真训练,直接还原 toggle。
+                    // 用户取消 → 关 engine,清 buffer,回 idle。
+                    trainer.cancel()
                     restoreAudioState()
                 }
             )
@@ -701,14 +703,17 @@ struct VoiceTrainingCard: View {
 
     private func startTraining() {
         guard !blocked else { return }
-        // 备份原值。如果之前已 success/failure,prevXxx 可能还残留之前那次
-        // 的值;重新覆盖。
+        // 备份原值给老逻辑兼容(没改 audio toggle 但 restoreAudioState 还
+        // 会被 onChange/onCancel 调到,prev 为 nil 时它直接 noop)。
         prevAudioEnabled = cfg.current.capture.audio.enabled
         prevSpeakerIdEnabled = cfg.current.capture.audio.speakerIdEnabled
-        // 强制开 —— Services pipeline 自动起 AudioCaptureService + 分离。
-        cfg.mutate { c in
-            c.capture.audio.enabled = true
-            c.capture.audio.speakerIdEnabled = true
+        // **不再强开全局 audio capture / speakerIdEnabled** —— embedding-based
+        // 训练自己起 AVAudioEngine 独立监听麦克风,不依赖全局 pipeline。
+        // 启动捕音,失败(没麦克风权限等)trainer.phase 直接到 .failure,
+        // sheet 弹出来 statusLine 会显示错误。
+        guard trainer.start() else {
+            // 没起来就别弹 sheet,phase 自带错误描述给 statusLine 用。
+            return
         }
         showCountdown = true
     }
@@ -730,7 +735,8 @@ struct VoiceTrainingCard: View {
     private func phaseKey(_ p: VoiceTrainer.Phase) -> String {
         switch p {
         case .idle: return "idle"
-        case .matching: return "matching"
+        case .recording: return "recording"
+        case .processing: return "processing"
         case .success: return "success"
         case .failure: return "failure"
         }
@@ -740,10 +746,16 @@ struct VoiceTrainingCard: View {
         switch trainer.phase {
         case .idle:
             EmptyView()
-        case .matching:
+        case .recording:
+            HStack(spacing: 5) {
+                Circle().fill(Color.red).frame(width: 6, height: 6)
+                Text("Recording your voice…")
+                    .font(.system(size: 11)).foregroundStyle(Theme.textPrimary.opacity(0.60))
+            }
+        case .processing:
             HStack(spacing: 5) {
                 ProgressView().controlSize(.small)
-                Text("Matching your voice — may take a few minutes…")
+                Text("Extracting voice signature…")
                     .font(.system(size: 11)).foregroundStyle(Theme.textPrimary.opacity(0.60))
             }
         case .success(let n):
