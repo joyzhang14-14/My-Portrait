@@ -72,13 +72,15 @@ final class NotificationOverlay {
     }
 
     /// 钉在主屏幕右上角,留出菜单栏 + 安全边距。
-    /// **panelHeight 100** —— 单卡占满即可,堆多卡时靠 SwiftUI VStack 自身溢出
-    /// 处理(超出部分裁掉);用户要求缩小透明面板范围,避免空白挡到下面 app。
+    /// **panelHeight 400** —— 之前 100 太小,多行 body 直接被裁(用户反馈
+    /// "Follow-up Reminders 信息完全不显示全")。400 够堆 3-4 张卡 + 容纳
+    /// 单卡多行 markdown 内容。panel 没卡片时整体 orderOut 隐藏,所以"空白
+    /// 透明面板挡屏幕"问题不存在。
     private func positionPanel(_ p: NSPanel) {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
         let panelWidth: CGFloat = 320
-        let panelHeight: CGFloat = 100
+        let panelHeight: CGFloat = min(400, visible.height - 40)
         let x = visible.maxX - panelWidth - 16
         let y = visible.maxY - panelHeight - 20   // 钉在屏幕顶部往下 20pt
         p.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
