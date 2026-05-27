@@ -71,6 +71,8 @@ targets:
       - sdk: libsqlite3.tbd
       - package: Sparkle
         product: Sparkle
+      - target: MyPortraitObjC
+        embed: true
     # DEVELOPMENT_TEAM 通过 xcconfig 注入,不在 settings.base 里硬编。
     # base 里的 build settings 优先级高于 xcconfig,会覆盖掉它,所以这里必须
     # 用 configFiles 而不是 base。Signing.xcconfig 里有默认 team,contributor
@@ -143,6 +145,23 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Support/MyPortrait.entitlements
         # @testable import 需要 app target 开 testability。
         ENABLE_TESTABILITY: true
+
+  # ObjC try/catch helper —— Swift 不接 NSException,AVAudioEngine.installTap /
+  # engine.start 在 aggregate device 格式不匹配时抛 NSException 直接杀进程。
+  # 这个 framework 包一层 ObjC @try/@catch 把它转成 NSError。
+  MyPortraitObjC:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/MyPortraitObjC
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait.objc
+        SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Automatic
+        # 公共 header 路径(供 app target Swift import 用)。
+        PUBLIC_HEADERS_FOLDER_PATH: include
 
   MyPortraitTests:
     type: bundle.unit-test

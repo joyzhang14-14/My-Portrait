@@ -3,6 +3,7 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
+import MyPortraitObjC
 import os.log
 
 /// 系统音频 (loopback / output) 采集服务。捕获其他 app 的输出（如视频会议
@@ -288,16 +289,40 @@ actor SystemAudioCaptureService {
         samplesContinuation = c
 
         // format: nil → 用 tap 点真实格式,绕开 outputFormat(forBus:) 撒谎。
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) {
-            [weak self] buffer, _ in
-            guard let self else { return }
-            Task { [weak self] in
-                await self?.performConversion(buffer: buffer)
+        //
+        // ⚠ installTap / engine.start 在 aggregate device 真实流格式跟
+        // AVAudioEngine 内部猜测对不上时,会抛 NSException (
+        // "Failed to create tap due to format mismatch"),Swift try 接不到,
+        // 直接杀进程。所以包一层 ObjC try/catch,失败 graceful 退出,actor
+        // 继续活着,app 不崩。
+        let installErr = MyPortraitObjCTryCatch {
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) {
+                [weak self] buffer, _ in
+                guard let self else { return }
+                Task { [weak self] in
+                    await self?.performConversion(buffer: buffer)
+                }
             }
+        }
+        if let installErr {
+            throw NSError(domain: "SystemAudio", code: -30, userInfo: [
+                NSLocalizedDescriptionKey: "installTap failed (caught ObjC exception): \(installErr.localizedDescription)"
+            ])
         }
         tapInstalled = true
 
-        try engine.start()
+        if let startErr = MyPortraitObjCTryCatch({
+            do { try engine.start() } catch {
+                // Swift NSError —— 转抛之外,这里包成 NSException 让外层统一处理
+                NSException(name: .internalInconsistencyException,
+                            reason: error.localizedDescription,
+                            userInfo: nil).raise()
+            }
+        }) {
+            throw NSError(domain: "SystemAudio", code: -31, userInfo: [
+                NSLocalizedDescriptionKey: "engine.start failed: \(startErr.localizedDescription)"
+            ])
+        }
 
         let recorder = vadRecorder
         samplesTask = Task {
