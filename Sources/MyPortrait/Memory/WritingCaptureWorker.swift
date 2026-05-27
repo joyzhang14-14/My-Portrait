@@ -191,12 +191,25 @@ final class WritingCaptureWorker {
         }
 
         // 3. Pass 1 —— 整天 OCR 抽 context timeline
-        let allOcrFrames = step0.rawSessions.flatMap { $0.ocrFrames }
-            .sorted(by: { $0.startTs < $1.startTs })
+        // 单帧 cap 决策 per session:AX 数 *10 < typing event 数 时,该 session
+        // OCR 不截字(AX 对该 session 几乎没拿到数据,OCR 是唯一来源)。
+        let pass1OcrFrames = step0.rawSessions.flatMap { s -> [WritingCaptureOcrFrame] in
+            let unlimited = s.axFrameCount * 10 < s.typingEvents.count
+            let cap = unlimited ? Int.max : WritingCapturePass1Agent.pass1OcrTextMaxChars
+            return s.ocrFrames.map { f in
+                guard f.text.count > cap else { return f }
+                return WritingCaptureOcrFrame(
+                    frameId: f.frameId,
+                    startTs: f.startTs, endTs: f.endTs,
+                    app: f.app, url: f.url, windowTitle: f.windowTitle,
+                    text: String(f.text.prefix(cap))
+                )
+            }
+        }.sorted(by: { $0.startTs < $1.startTs })
         // Pass 1 也喂 raw.typing + raw.keys 当 cross-signal,帮 LLM 区分
         // "用户在打字" vs "用户在看东西"
         let probePrompt = WritingCapturePass1Agent.buildPrompt(
-            ocrFrames: allOcrFrames,
+            ocrFrames: pass1OcrFrames,
             typingEvents: raw.typing,
             keystrokes: raw.keys
         )
@@ -205,7 +218,7 @@ final class WritingCaptureWorker {
             atomically: false, encoding: .utf8)
         workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars, dumped /tmp/writing-capture-pass1-prompt.txt")
         let pass1Out = try await pass1.run(
-            ocrFrames: allOcrFrames,
+            ocrFrames: pass1OcrFrames,
             typingEvents: raw.typing,
             keystrokes: raw.keys
         )
@@ -735,7 +748,8 @@ final class WritingCaptureWorker {
                 typingEvents: typing,
                 keystrokes: keys,
                 ocrFrames: frames,
-                maxContentChars: members.map(\.maxContentChars).max() ?? 0
+                maxContentChars: members.map(\.maxContentChars).max() ?? 0,
+                axFrameCount: members.map(\.axFrameCount).reduce(0, +)
             )
         }
     }

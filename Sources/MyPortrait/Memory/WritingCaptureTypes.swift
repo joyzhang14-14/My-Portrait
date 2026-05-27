@@ -80,6 +80,29 @@ struct WritingCaptureRawSession: Sendable {
     /// session 内最长文本长度(用于 throwaway 过滤的字数判定)。
     /// = max(typing_events.text 拼起来 长度, max ocr_frame.text 长度)
     let maxContentChars: Int
+    /// session 内 **dedupe 前**的 OCR raw 帧里 text_source == "ax" 的数量。
+    /// 给 Pass 1 决定单帧 cap 用 —— AX 稀缺(ax*10 < typingEvents 数)时
+    /// OCR 是唯一文本来源,放开 cap。
+    let axFrameCount: Int
+
+    init(
+        id: String, app: String, url: String?,
+        startTs: Int64, endTs: Int64,
+        typingEvents: [TypingEvent], keystrokes: [KeystrokeEntry],
+        ocrFrames: [WritingCaptureOcrFrame], maxContentChars: Int,
+        axFrameCount: Int = 0
+    ) {
+        self.id = id
+        self.app = app
+        self.url = url
+        self.startTs = startTs
+        self.endTs = endTs
+        self.typingEvents = typingEvents
+        self.keystrokes = keystrokes
+        self.ocrFrames = ocrFrames
+        self.maxContentChars = maxContentChars
+        self.axFrameCount = axFrameCount
+    }
 }
 
 // MARK: - Step 0 输出

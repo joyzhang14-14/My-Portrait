@@ -146,10 +146,13 @@ final class WritingCapturePass1Agent {
 
     // MARK: - Prompt
 
-    /// 单帧 OCR text 截多少字 —— Chrome / 菜单 / 工具栏 重复噪音不必给 LLM
-    /// 看完整,300 字够它 infer 上下文。原始数据完整保留在 frames 表里,
+    /// 单帧 OCR text 默认 cap —— chrome filter 已砍 menubar / dock / 极小字体,
+    /// 2000 字够 Pass 1 infer 上下文。原始数据完整保留在 frames 表里,
     /// 截断只在 LLM 输入这一层。
-    static let pass1OcrTextMaxChars = 1500
+    ///
+    /// 注意:per-session 决策权在 Worker —— 当 session AX 数 *10 < typing event 数
+    /// (AX 对该 session 几乎没拿到数据),Worker 会传 cap=nil 放开此值。
+    static let pass1OcrTextMaxChars = 2000
 
     /// Pass 1 最多喂给 LLM 多少帧。Pass 1 只要 "时段-意图" 时间轴,不需要
     /// 每帧。重写作日 5000+ 帧实测会撑爆 200K context。100 帧均匀采样足以
@@ -157,27 +160,21 @@ final class WritingCapturePass1Agent {
     static let pass1FrameCap = 100
 
     /// 把 ocrFrames 沿时间均匀采样到 ≤ `pass1FrameCap` 帧。
-    /// 跨度大就大跨度采,小就全留。每帧仍截 text 到 `pass1OcrTextMaxChars`。
+    /// 跨度大就大跨度采,小就全留。
+    ///
+    /// **不在这截字**:per-session cap 由 Worker 在 flatten 时按
+    /// `axFrameCount * 10 < typingEvents.count` 决定(放开或 2000)。
     static func prepareFramesForPrompt(
         _ ocrFrames: [WritingCaptureOcrFrame]
     ) -> [WritingCaptureOcrFrame] {
-        // 先截字
-        let truncated = ocrFrames.map { f -> WritingCaptureOcrFrame in
-            WritingCaptureOcrFrame(
-                frameId: f.frameId,
-                startTs: f.startTs, endTs: f.endTs,
-                app: f.app, url: f.url,
-                text: String(f.text.prefix(pass1OcrTextMaxChars))
-            )
-        }
-        guard truncated.count > pass1FrameCap else { return truncated }
+        guard ocrFrames.count > pass1FrameCap else { return ocrFrames }
         // 均匀采样:第 i 帧 = 全集第 floor(i * total / cap) 个
         var sampled: [WritingCaptureOcrFrame] = []
         sampled.reserveCapacity(pass1FrameCap)
-        let total = truncated.count
+        let total = ocrFrames.count
         for i in 0..<pass1FrameCap {
             let idx = (i * total) / pass1FrameCap
-            sampled.append(truncated[idx])
+            sampled.append(ocrFrames[idx])
         }
         return sampled
     }
