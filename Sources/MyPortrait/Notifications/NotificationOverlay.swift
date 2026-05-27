@@ -15,6 +15,12 @@ final class NotificationOverlay {
 
     private var panel: NSPanel?
     private var hostingView: NSHostingView<NotificationOverlayView>?
+    /// 单卡最小高度(空 panel/动画启动时给个保底),实际看 SwiftUI 报上来的 size。
+    private let minPanelHeight: CGFloat = 60
+    /// panel 宽度 —— 固定。
+    private let panelWidth: CGFloat = 320
+    /// panel 距屏幕顶部的距离(标题栏 + 安全边距)。
+    private let topInset: CGFloat = 20
 
     private init() {}
 
@@ -22,7 +28,8 @@ final class NotificationOverlay {
     func show() {
         ensureInstalled()
         guard let p = panel else { return }
-        positionPanel(p)
+        // 当前高度保持(已被 onPreferenceChange resize 过)。
+        positionPanel(p, height: p.frame.height)
         p.orderFrontRegardless()
     }
 
@@ -51,12 +58,19 @@ final class NotificationOverlay {
         p.isMovableByWindowBackground = false
         p.ignoresMouseEvents = false   // 让卡片可点
 
-        let host = NSHostingView(rootView: NotificationOverlayView())
+        // 让 SwiftUI overlay 把"卡片 stack 实测高度"回报上来,我们动态
+        // resize NSPanel,这样高度跟内容自适应 —— 单卡时小,多卡 / 多行
+        // markdown 时长,完全跟着 SwiftUI 算的 intrinsic content size 走。
+        let host = NSHostingView(rootView: NotificationOverlayView(
+            onContentSizeChange: { [weak self] size in
+                self?.resizePanel(toContentHeight: size.height)
+            }
+        ))
         host.autoresizingMask = [.width, .height]
         p.contentView = host
         hostingView = host
 
-        positionPanel(p)
+        positionPanel(p, height: minPanelHeight)
         panel = p
 
         // 屏幕配置变化时重定位(分辨率切换、外接显示器拔插)。
@@ -66,24 +80,27 @@ final class NotificationOverlay {
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let p = self.panel else { return }
-                self.positionPanel(p)
+                self.positionPanel(p, height: p.frame.height)
             }
         }
     }
 
-    /// 钉在主屏幕右上角,留出菜单栏 + 安全边距。
-    /// **panelHeight 400** —— 之前 100 太小,多行 body 直接被裁(用户反馈
-    /// "Follow-up Reminders 信息完全不显示全")。400 够堆 3-4 张卡 + 容纳
-    /// 单卡多行 markdown 内容。panel 没卡片时整体 orderOut 隐藏,所以"空白
-    /// 透明面板挡屏幕"问题不存在。
-    private func positionPanel(_ p: NSPanel) {
+    /// 钉在主屏幕右上角,留出菜单栏 + 安全边距。高度由 caller 决定。
+    private func positionPanel(_ p: NSPanel, height: CGFloat) {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let panelWidth: CGFloat = 320
-        let panelHeight: CGFloat = min(400, visible.height - 40)
+        // 屏幕极端短时给个 hard cap,避免 panel 比屏幕还高。
+        let h = max(minPanelHeight, min(height, visible.height - 40))
         let x = visible.maxX - panelWidth - 16
-        let y = visible.maxY - panelHeight - 20   // 钉在屏幕顶部往下 20pt
-        p.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
+        let y = visible.maxY - h - topInset
+        p.setFrame(NSRect(x: x, y: y, width: panelWidth, height: h), display: true)
+    }
+
+    /// SwiftUI 报上来"卡片 stack 实测高度" → resize panel,top edge 锚定
+    /// 不动。size 是 SwiftUI 测量的卡片 VStack 高度(含 padding)。
+    fileprivate func resizePanel(toContentHeight contentHeight: CGFloat) {
+        guard let p = panel else { return }
+        positionPanel(p, height: contentHeight)
     }
 }
 
@@ -92,8 +109,13 @@ final class NotificationOverlay {
 /// 堆叠卡片的容器。observe NotificationCenterService.active。
 struct NotificationOverlayView: View {
     private let service = NotificationCenterService.shared
+    /// SwiftUI 测出"卡片 stack 实际高度"后回报给 NSPanel 让它 resize。
+    var onContentSizeChange: (CGSize) -> Void = { _ in }
 
     var body: some View {
+        // **没 Spacer + 不再 maxHeight: .infinity** —— VStack 自然按内容
+        // 算高度。背景塞 GeometryReader 读真实尺寸,通过 PreferenceKey
+        // 回报上去触发 panel resize。
         VStack(spacing: 8) {
             ForEach(service.active.reversed()) { n in
                 NotificationCardView(notification: n) {
@@ -106,15 +128,32 @@ struct NotificationOverlayView: View {
                     )
                 )
             }
-            Spacer(minLength: 0)
         }
         .padding(.top, 12)
-        .padding(.trailing, 0)
-        .padding(.leading, 0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .topTrailing)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ContentSizePreferenceKey.self,
+                    value: proxy.size)
+            }
+        )
+        .onPreferenceChange(ContentSizePreferenceKey.self) { size in
+            onContentSizeChange(size)
+        }
         .animation(.spring(response: 0.45, dampingFraction: 0.78), value: service.active.count)
         // 没卡片时整张 view 透传点击;有卡片时只让卡片接受点击。
         .allowsHitTesting(!service.active.isEmpty)
+    }
+}
+
+/// 把 SwiftUI 测出的卡片 stack 实际大小往上传 —— NSPanel 根据这个值
+/// resize 自己,实现"banner 多大,浮窗就多大"。
+private struct ContentSizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 
