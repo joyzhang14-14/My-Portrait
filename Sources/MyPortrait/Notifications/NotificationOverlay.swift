@@ -127,6 +127,7 @@ struct NotificationCardView: View {
     @State private var pressed = false
     @State private var elapsed: TimeInterval = 0
     @State private var tickTask: Task<Void, Never>?
+    @Environment(\.colorScheme) private var colorScheme
 
     private var progress: Double {
         max(0, min(1, 1 - elapsed / notification.timeout))
@@ -142,13 +143,31 @@ struct NotificationCardView: View {
             ?? AttributedString(notification.body)
     }
 
+    /// 跟 colorScheme 切的 fill/stroke/shadow。原来钉死的全是 dark
+     /// 风格(black 30% 底 + white stroke + black 38% shadow),在 light
+     /// 主题下看着是"灰底 + 黑影晕开",非常突兀。
+    private var bgFill: Color {
+        colorScheme == .light ? Color.white.opacity(0.85) : Color.black.opacity(0.30)
+    }
+    private var strokeColors: [Color] {
+        colorScheme == .light
+            ? [Color.black.opacity(0.08), Color.black.opacity(0.03)]
+            : [Color.white.opacity(0.20), Color.white.opacity(0.05)]
+    }
+    private var shadowColor: Color {
+        colorScheme == .light ? .black.opacity(0.10) : .black.opacity(0.38)
+    }
+    private var progressTrackColor: Color {
+        colorScheme == .light ? Color.black.opacity(0.08) : Color.white.opacity(0.06)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 标题行
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(notification.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
@@ -178,7 +197,7 @@ struct NotificationCardView: View {
             // 进度条(倒计时收缩)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Rectangle().fill(.white.opacity(0.06))
+                    Rectangle().fill(progressTrackColor)
                     Rectangle()
                         .fill(LinearGradient(
                             colors: [Color.purple.opacity(0.65), Color.blue.opacity(0.55)],
@@ -189,16 +208,20 @@ struct NotificationCardView: View {
             .frame(height: 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // **clipShape 套在 VStack 整体上**——之前只 clip 了 background,
+        // 内容里的进度条 Rectangle 在底部直边,会"漏"出圆角之外露白。
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .background(
-            // 磨砂玻璃 + 圆角 + 高光描边
+            // 磨砂玻璃 + 圆角 + 高光描边。stroke 加在 background 里跟
+            // 内容一起被 clipShape 裁。
             ZStack {
                 VisualEffectBackdrop(material: .hudWindow, blending: .behindWindow)
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.black.opacity(0.30))
+                    .fill(bgFill)
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.20), Color.white.opacity(0.05)],
+                            colors: strokeColors,
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         ),
                         lineWidth: 0.8
@@ -207,7 +230,7 @@ struct NotificationCardView: View {
             .compositingGroup()
             .clipShape(RoundedRectangle(cornerRadius: 12))
         )
-        .shadow(color: .black.opacity(0.38), radius: 14, x: 0, y: 6)
+        .shadow(color: shadowColor, radius: 14, x: 0, y: 6)
         .scaleEffect(pressed ? 0.97 : (hover ? 1.01 : 1.0))
         .animation(.spring(response: 0.28, dampingFraction: 0.7), value: hover)
         .animation(.spring(response: 0.18, dampingFraction: 0.6), value: pressed)
