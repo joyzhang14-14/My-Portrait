@@ -154,14 +154,24 @@ targets:
     platform: macOS
     sources:
       - path: Sources/MyPortraitObjC
+    # 签名走跟 app target 同一份 xcconfig —— 这样 contributor 的
+    # Signing.local.xcconfig(Manual + MyPortraitDev cert)能同时盖 framework,
+    # 不然 app 用 MyPortraitDev 签、framework 用 default Apple Development 签,
+    # codesign 时 framework 跟 app 主签名不一致直接报 CodeSign failed。
+    configFiles:
+      Debug: Support/Signing.xcconfig
+      Release: Support/Signing.xcconfig
     settings:
       base:
         DEFINES_MODULE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait.objc
         SKIP_INSTALL: YES
-        CODE_SIGN_STYLE: Automatic
-        # 公共 header 路径(供 app target Swift import 用)。
-        PUBLIC_HEADERS_FOLDER_PATH: include
+        # **不要**覆盖 PUBLIC_HEADERS_FOLDER_PATH —— Xcode 自动 modulemap
+        # 找 `Headers/MyPortraitObjC.h` (默认值就是 Headers),自定义路径
+        # 会让 modulemap 的 umbrella header 找不到,Clang dependency
+        # scanner failure。
+        # **不要**写 CODE_SIGN_STYLE/IDENTITY —— settings.base 优先级高过
+        # xcconfig 会盖掉用户的 local override。
 
   MyPortraitTests:
     type: bundle.unit-test
