@@ -24,16 +24,7 @@ struct GeneralSettingsView: View {
                 SettingsRow("Current version",
                             description: "Build currently installed. \"Check now\" below queries GitHub appcast for newer builds.",
                             icon: "info.circle") {
-                    Text(Self.currentVersionString)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.05))
-                                .overlay(RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.white.opacity(0.10), lineWidth: 1))
-                        )
+                    VersionChip(text: Self.currentVersionString)
                 }
                 SettingsDivider()
                 SettingsRow("Auto-update app",
@@ -271,5 +262,29 @@ enum CacheScanner {
         if n == 0 { return "0 B" }
         let f = ByteCountFormatter(); f.allowedUnits = [.useAll]; f.countStyle = .file
         return f.string(fromByteCount: n)
+    }
+}
+
+/// 版本号小药丸 —— Settings → General → Current version 用。
+/// fill/stroke 跟 colorScheme 切:light 主题底色奶白,之前钉死
+/// `Color.white.opacity(0.05)` 在白底上完全不可见。
+private struct VersionChip: View {
+    let text: String
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        let fill   = colorScheme == .light ? Color.black.opacity(0.05) : Color.white.opacity(0.05)
+        let stroke = colorScheme == .light ? Color.black.opacity(0.12) : Color.white.opacity(0.10)
+        Text(text)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(Theme.textPrimary.opacity(0.85))
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(stroke, lineWidth: 1)
+                    )
+            )
     }
 }
