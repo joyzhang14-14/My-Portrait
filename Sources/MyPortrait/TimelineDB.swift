@@ -670,6 +670,83 @@ struct TimelineDB: Sendable {
         return out
     }
 
+    /// 窗口内**已转录**(audio_transcriptions 有行)的输入音频条数。
+    /// voice training screenpipe 风格用 —— 不依赖 diarization,只看
+    /// 转录是否产出行。≥1 就可以触发 reassignInputTranscriptionsToSpeaker。
+    func transcribedInputCount(fromMs: Int64, toMs: Int64) -> Int {
+        guard exists else { return 0 }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT count(*) FROM audio_transcriptions t
+            JOIN audio_chunks c ON c.id = t.audio_chunk_id
+            WHERE c.is_input = 1 AND c.recorded_at_ms BETWEEN ? AND ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, fromMs)
+        sqlite3_bind_int64(stmt, 2, toMs)
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
+    /// 找已有同名 speaker(case-insensitive 不算,精确匹配)→ 返回 id;
+    /// 没找到 → 新建一行返回新 id。voice training screenpipe 风格用。
+    func findOrCreateSpeaker(name: String) -> Int64? {
+        guard exists else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_close(db) }
+        // 先查
+        if let stmt = prepare(db, "SELECT id FROM speakers WHERE name = ? LIMIT 1") {
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                return sqlite3_column_int64(stmt, 0)
+            }
+        }
+        // 没就插
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        guard let ins = prepare(db,
+            "INSERT INTO speakers (name, created_at_ms, updated_at_ms, hallucination) VALUES (?, ?, ?, 0)"
+        ) else { return nil }
+        defer { sqlite3_finalize(ins) }
+        sqlite3_bind_text(ins, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(ins, 2, nowMs)
+        sqlite3_bind_int64(ins, 3, nowMs)
+        guard sqlite3_step(ins) == SQLITE_DONE else { return nil }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    /// **screenpipe 风格的 voice training 核心动作** —— 把训练窗口里所有
+    /// input device 的 transcription 行直接重写 speaker_id 到指定 speaker,
+    /// 不依赖 diarization 是否跑通 / 是否产出 cluster。返回更新行数。
+    func reassignInputTranscriptionsToSpeaker(
+        _ speakerId: Int64, fromMs: Int64, toMs: Int64
+    ) -> Int {
+        guard exists else { return 0 }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_close(db) }
+        let sql = """
+            UPDATE audio_transcriptions
+            SET speaker_id = ?
+            WHERE audio_chunk_id IN (
+                SELECT id FROM audio_chunks
+                WHERE is_input = 1 AND recorded_at_ms BETWEEN ? AND ?
+            )
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, speakerId)
+        sqlite3_bind_int64(stmt, 2, fromMs)
+        sqlite3_bind_int64(stmt, 3, toMs)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { return 0 }
+        return Int(sqlite3_changes(db))
+    }
+
     /// 窗口内还在处理中（status 不是 done/failed）的输入（麦克风）音频块数。
     /// voice training 用它判断「训练窗口的音频是否已全部转录 + 分离完」，
     /// 全部处理完再统计声纹簇，避免只拿到先处理完的那部分。
