@@ -107,13 +107,21 @@ targets:
         SUPublicEDKey: r40y799hLosIZZpq47T953f24ElEj5ou0BEdPN0lMCM=
         # 跳过用户手动「Check for Updates」对话框,直接弹更新提示。
         SUEnableAutomaticChecks: true
+        # **必须显式声明**:Sparkle 内部 `allowsAutomaticUpdates` 默认从
+        # automaticallyChecksForUpdates 推导,我们 UpdaterService 把它设
+        # false(关 Sparkle 自己的 scheduler 用我们的 Timer 绕开 1h
+        # minimum)→ allowsAutomaticUpdates = false → setAutomaticallyDownloads-
+        # Updates(true) **静默拒绝**,silent download 永远不发生。
+        # 这条 Info.plist key 把推导路径切到 explicit option,即使
+        # auto-check 是 false,只要 toggle 用户开了 autoDownloadUpdates 就生效。
+        SUAllowsAutomaticUpdates: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "1.0.87"
-        CURRENT_PROJECT_VERSION: "87"
+        MARKETING_VERSION: "1.0.88"
+        CURRENT_PROJECT_VERSION: "88"
         # **签名相关 build settings 全部走 Support/Signing.xcconfig**
         # —— `settings.base` 在 xcodegen / Xcode 里**优先级高于 xcconfig**,
         # 写在这里会盖掉 contributor 的 Signing.local.xcconfig 覆盖。
