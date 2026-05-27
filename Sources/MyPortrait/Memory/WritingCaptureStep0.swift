@@ -199,6 +199,7 @@ struct WritingCaptureStep0 {
                 typingEvents: sessionTyping,
                 ocrFrames: dedupedFrames
             )
+            let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
             result.append(WritingCaptureRawSession(
                 id: id,
                 app: acc.app,
@@ -208,7 +209,8 @@ struct WritingCaptureStep0 {
                 typingEvents: sessionTyping,
                 keystrokes: sessionKeys,
                 ocrFrames: dedupedFrames,
-                maxContentChars: maxChars
+                maxContentChars: maxChars,
+                axFrameCount: axCount
             ))
         }
         return result
@@ -507,7 +509,8 @@ struct WritingCaptureStep0 {
                 typingEvents: typing,
                 keystrokes: keys,
                 ocrFrames: frames,
-                maxContentChars: members.map(\.maxContentChars).max() ?? 0
+                maxContentChars: members.map(\.maxContentChars).max() ?? 0,
+                axFrameCount: members.map(\.axFrameCount).reduce(0, +)
             )
             merged.append(combined)
         }
