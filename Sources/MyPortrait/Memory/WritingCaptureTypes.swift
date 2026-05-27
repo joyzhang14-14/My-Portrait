@@ -11,7 +11,25 @@ struct WritingCaptureRawOcr: Sendable, Equatable {
     let tsMs: Int64
     let app: String
     let url: String?
+    let windowTitle: String?
     let text: String
+    /// "ocr" / "ax" / "unknown" / nil. 决定 chrome filter 是否生效 +
+    /// session AX/typing 比例统计。
+    let textSource: String?
+
+    init(
+        id: Int64, tsMs: Int64, app: String, url: String?,
+        windowTitle: String? = nil, text: String,
+        textSource: String? = nil
+    ) {
+        self.id = id
+        self.tsMs = tsMs
+        self.app = app
+        self.url = url
+        self.windowTitle = windowTitle
+        self.text = text
+        self.textSource = textSource
+    }
 }
 
 // MARK: - 预压缩后的 OCR 帧
@@ -24,7 +42,21 @@ struct WritingCaptureOcrFrame: Sendable, Equatable, Codable {
     let endTs: Int64
     let app: String
     let url: String?
+    let windowTitle: String?
     let text: String
+
+    init(
+        frameId: Int64, startTs: Int64, endTs: Int64,
+        app: String, url: String?, windowTitle: String? = nil, text: String
+    ) {
+        self.frameId = frameId
+        self.startTs = startTs
+        self.endTs = endTs
+        self.app = app
+        self.url = url
+        self.windowTitle = windowTitle
+        self.text = text
+    }
 }
 
 // MARK: - 一个 raw_session

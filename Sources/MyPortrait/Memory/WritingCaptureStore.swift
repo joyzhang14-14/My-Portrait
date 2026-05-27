@@ -281,7 +281,9 @@ struct WritingCaptureStore: Sendable {
             let rows = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, timestamp_ms, app_name, browser_url, full_text FROM frames
+                    SELECT id, timestamp_ms, app_name, window_name, browser_url,
+                           full_text, ocr_words_json, text_source
+                    FROM frames
                     WHERE timestamp_ms >= :s AND timestamp_ms < :e
                       AND full_text IS NOT NULL AND full_text != ''
                     ORDER BY timestamp_ms ASC
@@ -290,10 +292,20 @@ struct WritingCaptureStore: Sendable {
             )
             return rows.map {
                 let rawApp = ($0["app_name"] as String?) ?? "unknown"
+                let src = $0["text_source"] as String?
+                let raw = ($0["full_text"] as String?) ?? ""
+                let filtered = WritingCaptureChromeFilter.applyIfOcr(
+                    rawText: raw,
+                    wordsJson: $0["ocr_words_json"] as String?,
+                    textSource: src
+                )
                 return WritingCaptureRawOcr(
                     id: $0["id"], tsMs: $0["timestamp_ms"],
                     app: normalizer.bundleId(forLocalizedName: rawApp),
-                    url: $0["browser_url"], text: ($0["full_text"] as String?) ?? ""
+                    url: $0["browser_url"],
+                    windowTitle: $0["window_name"] as String?,
+                    text: filtered,
+                    textSource: src
                 )
             }
         }
@@ -376,7 +388,9 @@ struct WritingCaptureStore: Sendable {
             let rows = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, timestamp_ms, app_name, browser_url, full_text FROM frames
+                    SELECT id, timestamp_ms, app_name, window_name, browser_url,
+                           full_text, ocr_words_json, text_source
+                    FROM frames
                     WHERE timestamp_ms >= :startMs AND timestamp_ms < :endMs
                       AND full_text IS NOT NULL AND full_text != ''
                     ORDER BY timestamp_ms ASC
@@ -385,12 +399,21 @@ struct WritingCaptureStore: Sendable {
             )
             return rows.map {
                 let rawApp = ($0["app_name"] as String?) ?? "unknown"
+                let src = $0["text_source"] as String?
+                let raw = ($0["full_text"] as String?) ?? ""
+                let filtered = WritingCaptureChromeFilter.applyIfOcr(
+                    rawText: raw,
+                    wordsJson: $0["ocr_words_json"] as String?,
+                    textSource: src
+                )
                 return WritingCaptureRawOcr(
                     id: $0["id"],
                     tsMs: $0["timestamp_ms"],
                     app: normalizer.bundleId(forLocalizedName: rawApp),
                     url: $0["browser_url"],
-                    text: ($0["full_text"] as String?) ?? ""
+                    windowTitle: $0["window_name"] as String?,
+                    text: filtered,
+                    textSource: src
                 )
             }
         }
