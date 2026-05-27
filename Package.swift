@@ -20,9 +20,18 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [
+        // ObjC helper —— Swift 不接 NSException,AVAudioEngine.installTap /
+        // engine.start 在 aggregate device 格式不匹配时会抛 NSException
+        // 直接杀进程。这个 target 提供一个 ObjC try/catch wrapper 转成 NSError。
+        .target(
+            name: "MyPortraitObjC",
+            path: "Sources/MyPortraitObjC",
+            publicHeadersPath: "include"
+        ),
         .executableTarget(
             name: "MyPortrait",
             dependencies: [
+                "MyPortraitObjC",
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "WhisperKit", package: "WhisperKit"),
                 .product(name: "MLX", package: "mlx-swift"),
