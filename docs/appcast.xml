@@ -12,6 +12,48 @@
         -->
 
         <item>
+            <title>Version 1.1.0</title>
+            <pubDate>Thu, 28 May 2026 05:20:00 +0000</pubDate>
+            <sparkle:version>144</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Big release — the AI chat now actually knows what you've been doing.</p>
+                <h3>AI chat: agent-driven screen context</h3>
+                <ul>
+                    <li><strong>Chat answers based on your real screen activity now.</strong> Ask "summarize my yesterday" / "what was I writing in Cursor" / "what did I do on May 21" and the model autonomously queries your local timeline. No more "I don't have visibility into your day."</li>
+                    <li>Under the hood: a local CLI (<code>mp-query</code>) exposes your captured data; a SKILL preamble teaches the AI when and how to call it (inspired by screenpipe's REST + SKILL.md pattern). All data stays on your Mac.</li>
+                    <li><strong>Time accounting fixed.</strong> Activity totals now match macOS Screen Time within ~10% (previously off by 7×).</li>
+                </ul>
+                <h3>AI chat: input + bubble UX</h3>
+                <ul>
+                    <li>Input box grows with your message up to 4 lines, then scrolls inside (two-finger scroll). No more truncated long prompts.</li>
+                    <li>Hovering a message no longer shifts it down. Copy / edit / regenerate buttons trigger from anywhere on the message rectangle, not just on the text.</li>
+                    <li>"Quick Actions" cards under the greeting are now mode-aware — they change based on whether you've been coding, browsing, in a meeting, writing notes, etc. Clicking a card sends along the relevant context window automatically.</li>
+                </ul>
+                <h3>Voice training</h3>
+                <ul>
+                    <li><strong>Voice training is finally usable.</strong> Three crashes and two correctness bugs fixed in this cycle: the audio callback no longer trips Swift 6's isolation check, the input format actually delivers Float32 samples, and the resampler stays alive across the 30s window. Re-training a name truly replaces the old samples instead of stacking on top of them.</li>
+                    <li>"Trained as Joy" now shows "just now" instead of "5 days ago" — speaker list uses speaker.updated_at as the activity timestamp.</li>
+                </ul>
+                <h3>Local models</h3>
+                <ul>
+                    <li>All 4 Whisper transcription sizes (tiny / base / small / large-v3-turbo) are pre-downloaded on first launch, ~2.2 GB total. Switching sizes in Settings → Capture is now instant.</li>
+                    <li>New <strong>Local capture models</strong> card in Settings → AI models shows ready / downloading status for each of the 7 local AI models.</li>
+                </ul>
+                <h3>Light theme</h3>
+                <ul>
+                    <li>Timeline workspace forces dark internally (it shows your screen recordings on a black canvas) — the toolbar and calendar popover are no longer invisible white-on-black in Light mode.</li>
+                    <li>Memory and Input views' middle column no longer renders as a dark grey block on Light theme.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.1.0/MyPortrait-1.1.0.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="p7JxrRAHgo9g9KeRnja+5BYDhALgtW+YfxUnTsL+NWW/mqK16syEWkxgw2m82oi1SEqFcHMxsHAAKrHmtvGhAA==" length="44722187" />
+        </item>
+
+        <item>
             <title>Version 1.0.113</title>
             <pubDate>Thu, 28 May 2026 03:30:00 +0000</pubDate>
             <sparkle:version>113</sparkle:version>
