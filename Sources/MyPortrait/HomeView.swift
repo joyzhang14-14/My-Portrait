@@ -43,10 +43,7 @@ struct HomeView: View {
     /// SuggestionEngine 跑模式检测(coding / browsing / meeting / writing 等)
     /// 然后按模式产对应的模板。空(还没载入)/ DB 没数据时回退 Mock。
     /// view appear / 每 60s 重跑一次。
-    @State private var dynamicChips: [ActivityChip] = []
-    private var displayedActivityChips: [ActivityChip] {
-        dynamicChips.isEmpty ? Mock.activityChips : dynamicChips
-    }
+    @State private var dynamicSuggestions: [SuggestionEngine.Suggestion] = []
 
     /// Quick Actions 刷新:detached 跑 SQL,主线程只更新 state。
     private func refreshActivityChips() async {
@@ -54,8 +51,7 @@ struct HomeView: View {
             let activity = TimelineDB().recentActivity(lookback: 3600)
             return SuggestionEngine.suggestions(from: activity)
         }.value
-        let chips = suggestions.map { ActivityChip(text: $0.text, hint: $0.preview) }
-        await MainActor.run { self.dynamicChips = chips }
+        await MainActor.run { self.dynamicSuggestions = suggestions }
     }
 
     /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
@@ -236,10 +232,28 @@ struct HomeView: View {
             .padding(.top, 8)
 
             LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(displayedActivityChips) { chip in
-                    ActivityChipView(chip: chip) {
-                        prompt = chip.text
-                        send()
+                // 真有动态建议就用它(带 context chip);还没载入时回退 Mock 静态。
+                if !dynamicSuggestions.isEmpty {
+                    ForEach(dynamicSuggestions) { s in
+                        ActivityChipView(
+                            chip: ActivityChip(text: s.text, hint: s.preview)
+                        ) {
+                            // **关键**:把建议绑定的 context 范围一并塞进
+                            // chips 再 send。不然 AI 拿不到 OCR/audio 数据
+                            // 只能回 "I don't have visibility into your day"。
+                            prompt = s.text
+                            contextChips = [ContextChip(spec: s.context)]
+                            send()
+                        }
+                    }
+                } else {
+                    ForEach(Mock.activityChips) { chip in
+                        ActivityChipView(chip: chip) {
+                            prompt = chip.text
+                            // 静态兜底 chip 默认绑 lastMinutes(60),保底有数据
+                            contextChips = [ContextChip(spec: .lastMinutes(60))]
+                            send()
+                        }
                     }
                 }
             }
