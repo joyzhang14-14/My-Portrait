@@ -1857,7 +1857,7 @@ private struct ChatInputBar: View {
                         }
                     }
                 )
-                .frame(minHeight: 24, maxHeight: 96)   // ~1 行到 ~4 行
+                .frame(height: 32)   // 固定单行高,内容多了 NSScrollView 内部滚
                 .popover(isPresented: $pickerOpen, attachmentAnchor: .point(.topLeading),
                          arrowEdge: .bottom) {
                     ContextPickerView(
