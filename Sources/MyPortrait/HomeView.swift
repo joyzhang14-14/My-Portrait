@@ -479,6 +479,11 @@ private struct ChatBubble: View {
         .padding(.horizontal, 4)
         .opacity(appear ? 1 : 0)
         .offset(y: appear ? 0 : 12)
+        // **hover 触发范围 = 整条消息长方形**(包括留白),contentShape 让
+        // padding 区域也参与 hit-test。之前 hover 只在文字 / glass panel 上
+        // 起作用,鼠标 hover 在右侧 Spacer 区域时不触发,编辑/复制按钮怎么
+        // 都点不到。
+        .contentShape(Rectangle())
         .onAppear {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
         }
@@ -1833,45 +1838,26 @@ private struct ChatInputBar: View {
             }
 
             HStack(alignment: .center, spacing: 10) {
-                // 长 prompt 滚动:外层 ScrollView 框住 ~6 行高,TextField 自己
-                // 不限行(lineLimit 不传),内部按需增高;超过 maxHeight 后
-                // ScrollView 接管,垂直滚轮可拖。之前 `lineLimit(1...6)` 把行数
-                // 钉死 6,超出的字根本输不进来。
-                ScrollView(.vertical, showsIndicators: true) {
-                    TextField(
-                        "",
-                        text: $prompt,
-                        prompt: Text("Ask about your screen…  (type @ for filters, paste images)")
-                            .font(.system(size: 13))
-                            .foregroundColor(Theme.textPrimary.opacity(0.30)),
-                        axis: .vertical
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                .focused($focused)
-                .onKeyPress(.return) {
-                    if NSEvent.modifierFlags.contains(.shift) { return .ignored }
-                    // IME 候选输入期间(中/日/韩),first responder 有 marked
-                    // text —— 这下回车是给 IME 选词的,不能拿来发消息。让
-                    // event 继续往下传给 IME 消费。
-                    if let client = NSApp.keyWindow?.firstResponder as? NSTextInputClient,
-                       client.hasMarkedText() {
-                        return .ignored
+                // 自定义 NSTextView + NSScrollView 包装 —— SwiftUI 原生
+                // TextField(axis:.vertical) 没法做"框矮+内部滚动",拉伸/
+                // 截字都不对。ChatInputTextView 暴露:固定高度由外面 frame
+                // 决定,内容超出自动出滚条 + 双指可滚,Enter 提交 / Shift+
+                // Enter 换行,IME 期间 Enter 让给候选选词。
+                ChatInputTextView(
+                    text: $prompt,
+                    placeholder: "Ask about your screen…  (type @ for filters, paste images)",
+                    font: .systemFont(ofSize: 14),
+                    onSubmit: { onSend() },
+                    onTextChange: { old, new in
+                        // 输入 "@" 弹 picker,且把那个字符吃掉避免残留在
+                        // prompt 里(原 onChange 同款逻辑)。
+                        if new.count > old.count, new.hasSuffix("@") {
+                            prompt = String(new.dropLast())
+                            withAnimation(.easeOut(duration: 0.15)) { pickerOpen = true }
+                        }
                     }
-                    onSend()
-                    return .handled
-                }
-                .onChange(of: prompt) { oldValue, newValue in
-                    // Strip the typed `@` and pop the picker so the input
-                    // doesn't carry a stray character.
-                    if newValue.count > oldValue.count,
-                       newValue.hasSuffix("@") {
-                        prompt = String(newValue.dropLast())
-                        withAnimation(.easeOut(duration: 0.15)) { pickerOpen = true }
-                    }
-                }
+                )
+                .frame(minHeight: 24, maxHeight: 96)   // ~1 行到 ~4 行
                 .popover(isPresented: $pickerOpen, attachmentAnchor: .point(.topLeading),
                          arrowEdge: .bottom) {
                     ContextPickerView(
@@ -1887,9 +1873,6 @@ private struct ChatInputBar: View {
                     )
                     .padding(8)
                 }
-                }   // 关 ScrollView
-                // 6 行高 ≈ 6 × 18pt(14pt 字 + ~4pt 行距)。超出就内部滚动。
-                .frame(maxHeight: 110)
 
                 HStack(spacing: 4) {
                     IconActionButton(icon: "at") {
