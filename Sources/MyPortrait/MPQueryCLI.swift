@@ -116,18 +116,23 @@ enum MPQueryCLI {
         guard db.exists else { errJSON("timeline DB not found at \(db.dbPath)") }
 
         let activity = db.activity(from: start, to: end)
-        let totalFrames = activity.totalFrames
+        let totalMins = activity.totalActiveMinutes
 
         // 用 SuggestionEngine 已有的分类逻辑给个 inferred mode。
         let mode = inferModeLabel(from: activity)
 
+        // share_pct 按 active_minutes 算占比(分子分母都是真实时长)。
+        // sum(每个 app 的 active_minutes) 会 > total_active_minutes
+        // 因为同分钟切了多个 app 各算 1 分钟,所以用 sum 当分母不用总数。
+        let summed = activity.apps.reduce(0) { $0 + $1.activeMinutes }
+
         let apps: [[String: Any]] = activity.apps.prefix(10).map { a in
             [
                 "app_name": a.appName,
-                "frame_count": a.count,
-                "active_minutes": a.count / 60,
-                "share_pct": totalFrames > 0
-                    ? Int(round(Double(a.count) / Double(totalFrames) * 100))
+                "active_minutes": a.activeMinutes,
+                "frame_count": a.frameCount,   // raw count, 别用来推时间
+                "share_pct": summed > 0
+                    ? Int(round(Double(a.activeMinutes) / Double(summed) * 100))
                     : 0
             ]
         }
@@ -135,8 +140,8 @@ enum MPQueryCLI {
             [
                 "app_name": w.appName,
                 "window_name": w.windowName,
-                "frame_count": w.count,
-                "active_minutes": w.count / 60
+                "active_minutes": w.activeMinutes,
+                "frame_count": w.frameCount
             ]
         }
 
@@ -144,8 +149,8 @@ enum MPQueryCLI {
             "start_time": iso8601(start),
             "end_time": iso8601(end),
             "mode": mode,
-            "total_frames": totalFrames,
-            "total_active_minutes": totalFrames / 60,
+            "total_active_minutes": totalMins,
+            "total_frames": activity.totalFrames,
             "apps": apps,
             "windows": windows
         ])

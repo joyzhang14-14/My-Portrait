@@ -105,12 +105,12 @@ enum SuggestionEngine {
         windows: [TimelineDB.RecentActivity.WindowCount]
     ) -> Mode {
         guard !apps.isEmpty else { return .idle }
-        let totalFrames = apps.reduce(0) { $0 + $1.count }
+        let totalFrames = apps.reduce(0) { $0 + $1.frameCount }
         var scores: [Mode: Int] = [:]
 
         for app in apps {
             if let mode = classifyApp(app.appName) {
-                scores[mode, default: 0] += app.count
+                scores[mode, default: 0] += app.frameCount
             }
         }
 
@@ -121,7 +121,7 @@ enum SuggestionEngine {
             guard browserApps.contains(where: { appLower == $0 || appLower.hasPrefix($0) }) else { continue }
             let titleLower = w.windowName.lowercased()
             if meetingSites.contains(where: { titleLower.contains($0) }) {
-                scores[.meeting, default: 0] += w.count
+                scores[.meeting, default: 0] += w.frameCount
             }
         }
 
@@ -173,7 +173,7 @@ enum SuggestionEngine {
             terminalApps.contains(where: { app.appName.lowercased().contains($0) })
         }
         // 1 帧 ≈ 1 秒 → /60 = 分钟。
-        let editorMins = (editor?.count ?? 0) / 60
+        let editorMins = (editor?.activeMinutes ?? 0)
         let editorFiles: [String] = editor.map { ed in
             windows
                 .filter { $0.appName.caseInsensitiveCompare(ed.appName) == .orderedSame
@@ -226,7 +226,7 @@ enum SuggestionEngine {
     ) -> [Suggestion] {
         let totalMins = apps
             .filter { app in browserApps.contains { app.appName.lowercased().hasPrefix($0) } }
-            .reduce(0) { $0 + $1.count } / 60
+            .reduce(0) { $0 + $1.activeMinutes }
         let pages = windows
             .filter { w in
                 let app = w.appName.lowercased()
@@ -268,7 +268,7 @@ enum SuggestionEngine {
         let meetingApp = apps.first { app in
             meetingApps.contains(where: { app.appName.lowercased().contains($0) })
         }
-        let meetingMins = (meetingApp?.count ?? 0) / 60
+        let meetingMins = (meetingApp?.activeMinutes ?? 0)
         let appLabel = meetingApp?.appName ?? "your call"
         let meetingTitle = windows
             .first { w in
@@ -306,7 +306,7 @@ enum SuggestionEngine {
         let topComm = apps.first { app in
             communicationApps.contains(where: { app.appName.lowercased().contains($0) })
         }
-        let mins = (topComm?.count ?? 0) / 60
+        let mins = (topComm?.activeMinutes ?? 0)
         let label = topComm?.appName ?? "chat"
         let commCtx: ContextChip.Spec = topComm.map { .app($0.appName) } ?? .lastMinutes(60)
         return [
@@ -329,7 +329,7 @@ enum SuggestionEngine {
         let writer = apps.first { app in
             writingApps.contains(where: { app.appName.lowercased().contains($0) })
         }
-        let mins = (writer?.count ?? 0) / 60
+        let mins = (writer?.activeMinutes ?? 0)
         let label = writer?.appName ?? "your notes"
         let docs = writer.map { w in
             windows
@@ -360,7 +360,7 @@ enum SuggestionEngine {
         let editor = apps.first { app in
             videoEditingApps.contains(where: { app.appName.lowercased().contains($0) })
         }
-        let mins = (editor?.count ?? 0) / 60
+        let mins = (editor?.activeMinutes ?? 0)
         let editorCtx: ContextChip.Spec = editor.map { .app($0.appName) } ?? .lastMinutes(60)
         return [
             .init(text: "summarize my editing session",
