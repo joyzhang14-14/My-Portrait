@@ -232,16 +232,30 @@ enum MPQueryCLI {
         // 工具链上,`out[key] = val` 这种 Dictionary 下标赋值在 enum 的
         // private static func 里偶发会被优化掉(opts 永远空 dict),花了一
         // 小时定位。换成 updateValue(_:forKey:) 一切正常。
+        //
+        // 同时支持两种形式(AI agent 实际两种都会试):
+        //   --start today        (空格分隔)
+        //   --start=today        (等号 inline)
         var out: [String: String] = [:]
         var i = 0
         while i < args.count {
             let a = args[i]
-            if a.hasPrefix("--"), i + 1 < args.count {
-                let key = String(a.dropFirst(2))
-                let val = args[i + 1]
+            guard a.hasPrefix("--") else { i += 1; continue }
+            let stripped = String(a.dropFirst(2))
+            // inline 等号形式
+            if let eq = stripped.firstIndex(of: "=") {
+                let key = String(stripped[..<eq])
+                let val = String(stripped[stripped.index(after: eq)...])
                 out.updateValue(val, forKey: key)
+                i += 1
+                continue
+            }
+            // 空格分隔形式
+            if i + 1 < args.count {
+                out.updateValue(args[i + 1], forKey: stripped)
                 i += 2
             } else {
+                // 单独的 flag(没值)—— e.g. --help。当前用不到,跳过。
                 i += 1
             }
         }
