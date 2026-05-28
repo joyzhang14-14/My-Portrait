@@ -412,18 +412,24 @@ private struct ChatBubble: View {
         HStack(alignment: .top, spacing: 14) {
             BubbleAvatar(role: message.role, glowing: message.role == .assistant && isStreaming)
             VStack(alignment: .leading, spacing: 10) {
+                // 标题行高度恒定 —— 之前 hover 时 BubbleActions 出现在 HStack
+                // 里把行高从 11pt 字撑到按钮高,消息体被往下推一段,体感是
+                // "鼠标一悬停消息往下滑"。改成 actions 走 overlay 不占布局位。
                 HStack(spacing: 6) {
                     Text(message.role == .user ? "You" : "Assistant")
                         .font(.system(size: 11, weight: .semibold))
                         .tracking(0.4)
                         .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     Spacer()
+                }
+                .overlay(alignment: .trailing) {
+                    // hover 时显示 copy / regenerate / edit。overlay 不参与
+                    // 父 layout,显示/隐藏不会改变 bubble 任何尺寸。无动画。
                     if hover, !isStreaming {
                         BubbleActions(role: message.role,
                                       onCopy: onCopy,
                                       onRegenerate: onRegenerate,
                                       onEdit: onEdit)
-                            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .trailing)))
                     }
                 }
 
@@ -476,9 +482,9 @@ private struct ChatBubble: View {
         .onAppear {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
         }
-        .onHover { h in
-            withAnimation(.easeOut(duration: 0.18)) { hover = h }
-        }
+        // hover state 直接切换,不再裹 withAnimation —— actions 走 overlay
+        // 已经不会影响布局,加动画反而引入"消息下滑"错觉。
+        .onHover { hover = $0 }
     }
 }
 
@@ -1827,18 +1833,23 @@ private struct ChatInputBar: View {
             }
 
             HStack(alignment: .center, spacing: 10) {
-                TextField(
-                    "",
-                    text: $prompt,
-                    prompt: Text("Ask about your screen…  (type @ for filters, paste images)")
-                        .font(.system(size: 13))
-                        .foregroundColor(Theme.textPrimary.opacity(0.30)),
-                    axis: .vertical
-                )
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.textPrimary)
+                // 长 prompt 滚动:外层 ScrollView 框住 ~6 行高,TextField 自己
+                // 不限行(lineLimit 不传),内部按需增高;超过 maxHeight 后
+                // ScrollView 接管,垂直滚轮可拖。之前 `lineLimit(1...6)` 把行数
+                // 钉死 6,超出的字根本输不进来。
+                ScrollView(.vertical, showsIndicators: true) {
+                    TextField(
+                        "",
+                        text: $prompt,
+                        prompt: Text("Ask about your screen…  (type @ for filters, paste images)")
+                            .font(.system(size: 13))
+                            .foregroundColor(Theme.textPrimary.opacity(0.30)),
+                        axis: .vertical
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 .focused($focused)
                 .onKeyPress(.return) {
                     if NSEvent.modifierFlags.contains(.shift) { return .ignored }
@@ -1876,6 +1887,9 @@ private struct ChatInputBar: View {
                     )
                     .padding(8)
                 }
+                }   // 关 ScrollView
+                // 6 行高 ≈ 6 × 18pt(14pt 字 + ~4pt 行距)。超出就内部滚动。
+                .frame(maxHeight: 110)
 
                 HStack(spacing: 4) {
                     IconActionButton(icon: "at") {

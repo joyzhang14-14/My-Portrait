@@ -22,6 +22,7 @@ struct InputCaptureView: View {
     @State private var recordSearchText = ""
     @State private var confirmingDelete = false
     @State private var confirmingRecordDelete = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HSplitView {
@@ -76,7 +77,7 @@ struct InputCaptureView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
 
-            Divider().background(Color.white.opacity(0.06))
+            Divider().background(Color.primary.opacity(0.10))
 
             if apps.isEmpty {
                 emptyState
@@ -94,14 +95,14 @@ struct InputCaptureView: View {
                             AppRow(app: app)
                                 .contentShape(Rectangle())
                                 .onTapGesture { Task { await openGroup(app) } }
-                            Divider().background(Color.white.opacity(0.04))
+                            Divider().background(Color.primary.opacity(0.08))
                         }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.28))
+        .background(Color.black.opacity(colorScheme == .light ? 0.03 : 0.28))
     }
 
     /// 没 writing_records 时引导用户去 Settings 跑 worker。
@@ -173,7 +174,7 @@ struct InputCaptureView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
 
-            Divider().background(Color.white.opacity(0.06))
+            Divider().background(Color.primary.opacity(0.10))
 
             if records.isEmpty {
                 Text("No records")
@@ -188,14 +189,14 @@ struct InputCaptureView: View {
                             RecordRow(record: rec, selected: selectedRecordId == rec.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { selectedRecordId = rec.id }
-                            Divider().background(Color.white.opacity(0.04))
+                            Divider().background(Color.primary.opacity(0.08))
                         }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.28))
+        .background(Color.black.opacity(colorScheme == .light ? 0.03 : 0.28))
         .confirmationDialog("Delete all writing records for this group?",
                             isPresented: $confirmingDelete,
                             titleVisibility: .visible) {
@@ -228,7 +229,7 @@ struct InputCaptureView: View {
                     }
                     .padding(.top, 44)
                     metadataBlock(rec)
-                    Divider().background(Color.white.opacity(0.06))
+                    Divider().background(Color.primary.opacity(0.10))
 
                     Text(rec.text.isEmpty ? "(empty content)" : rec.text)
                         .font(.system(size: 15))
@@ -237,7 +238,7 @@ struct InputCaptureView: View {
 
                     let entries = decodeEditLog(rec.editLog)
                     if !entries.isEmpty {
-                        Divider().background(Color.white.opacity(0.06))
+                        Divider().background(Color.primary.opacity(0.10))
                         Text("Edit log · \(entries.count)")
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)
