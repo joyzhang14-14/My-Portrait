@@ -12,6 +12,29 @@
         -->
 
         <item>
+            <title>Version 1.0.112</title>
+            <pubDate>Thu, 28 May 2026 03:01:26 +0000</pubDate>
+            <sparkle:version>112</sparkle:version>
+            <sparkle:shortVersionString>1.0.112</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Light-mode visibility patch.</p>
+                <ul>
+                    <li>AI chat: input text, the @ / shield / paperclip icons, and the setup banner are all readable on a light background again — they used to render white-on-white.</li>
+                    <li>Timeline calendar: dates, month switcher and the selected-day highlight are now visible in Light theme (the popover content used to vanish entirely).</li>
+                    <li>Connections: "Disconnect" / subtle buttons text and borders no longer disappear in Light.</li>
+                    <li>Memory search bar: input text and box outline visible in Light.</li>
+                    <li>Settings → Capture / Storage / Usage: the non-selected tab icons and range chips now adapt to Light theme.</li>
+                </ul>
+                <p>Borders and dividers across other surfaces are still on the polish list — this patch covers the spots where text or interactive controls actually disappeared.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.112/MyPortrait-1.0.112.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="HhUjtqugIRsMnQx1m1oFSigBfdPwKXH/v+ANRbGCZ4fyZNRkp3kPLVSYHfyA5xE22NT77A16oZdXahu4dH2GBA==" length="44570262" />
+        </item>
+
+        <item>
             <title>Version 1.0.111</title>
             <pubDate>Thu, 28 May 2026 02:35:18 +0000</pubDate>
             <sparkle:version>111</sparkle:version>
