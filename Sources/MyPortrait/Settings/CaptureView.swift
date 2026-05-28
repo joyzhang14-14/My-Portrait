@@ -616,10 +616,12 @@ private struct PowerModeRow: View {
                               ? AnyShapeStyle(LinearGradient(
                                     colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.30)],
                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                              : AnyShapeStyle(Color.white.opacity(0.06)))
+                              : AnyShapeStyle(Color.primary.opacity(0.06)))
                     Image(systemName: mode.icon)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(isActive ? .white.opacity(0.95) : .white.opacity(0.75))
+                        // active 时背景是彩色 gradient,白色图标在 light/dark 都看得清;
+                        // 非 active 时背景透明,用 textPrimary 跟 colorScheme 切。
+                        .foregroundStyle(isActive ? Color.white.opacity(0.95) : Theme.textPrimary.opacity(0.75))
                 }
                 .frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 2) {

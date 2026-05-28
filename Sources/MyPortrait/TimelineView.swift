@@ -244,6 +244,7 @@ private struct CalendarPopover: View {
     @Binding var selected: Date
     @Binding var isPresented: Bool
     @State private var anchor: Date = Date()
+    @Environment(\.colorScheme) private var colorScheme
     private let cal = Calendar(identifier: .gregorian)
 
     init(selected: Binding<Date>, isPresented: Binding<Bool>) {
@@ -258,7 +259,7 @@ private struct CalendarPopover: View {
                 Button { shiftMonth(-1) } label: {
                     Image(systemName: "chevron.left").font(.system(size: 11))
                         .frame(width: 26, height: 26)
-                        .background(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.18), lineWidth: 1))
+                        .background(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.18), lineWidth: 1))
                 }.buttonStyle(.bouncyIcon)
                 Spacer()
                 Text(monthTitle(anchor)).font(.system(size: 13, weight: .semibold))
@@ -266,7 +267,7 @@ private struct CalendarPopover: View {
                 Button { shiftMonth(1) } label: {
                     Image(systemName: "chevron.right").font(.system(size: 11))
                         .frame(width: 26, height: 26)
-                        .background(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.18), lineWidth: 1))
+                        .background(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.18), lineWidth: 1))
                 }.buttonStyle(.bouncyIcon)
             }
 
@@ -338,21 +339,29 @@ private struct DayCell: View {
     let isSelected: Bool
     let isFuture: Bool
     let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         Button(action: action) {
             let day = Calendar.current.component(.day, from: date)
+            // 选中态背景:dark 用浅色块,light 用深色块。文字色取背景的反色。
+            let selectedFill: Color = (colorScheme == .light)
+                ? Color.black.opacity(0.85)
+                : Color.white.opacity(0.92)
+            let selectedFg: Color = (colorScheme == .light)
+                ? Color.white
+                : Color.black
             Text("\(day)")
                 .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                 .frame(maxWidth: .infinity, minHeight: 30)
                 .foregroundStyle(
-                    isFuture ? Color.white.opacity(0.15)
-                    : isSelected ? Color.black
-                    : inMonth ? Color.white.opacity(0.88)
-                    : Color.white.opacity(0.28)
+                    isFuture     ? Theme.textPrimary.opacity(0.20)
+                    : isSelected ? selectedFg
+                    : inMonth    ? Theme.textPrimary.opacity(0.88)
+                    :              Theme.textPrimary.opacity(0.32)
                 )
                 .background(
                     isSelected
-                    ? AnyView(RoundedRectangle(cornerRadius: 5).fill(Color.white))
+                    ? AnyView(RoundedRectangle(cornerRadius: 5).fill(selectedFill))
                     : AnyView(Color.clear)
                 )
         }

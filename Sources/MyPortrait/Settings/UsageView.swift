@@ -147,7 +147,11 @@ private struct UsageRangeChip: View {
             Text(label)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .tracking(0.5)
-                .foregroundStyle(active ? .white : .white.opacity(hover ? 0.85 : 0.55))
+                // active 时背景是彩色 gradient,白字在 light/dark 都看得清;
+                // 非 active 时用 textPrimary 跟 colorScheme 切。
+                .foregroundStyle(active
+                                 ? Color.white
+                                 : Theme.textPrimary.opacity(hover ? 0.85 : 0.55))
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
@@ -155,8 +159,8 @@ private struct UsageRangeChip: View {
                               ? AnyShapeStyle(LinearGradient(
                                     colors: [Color.purple.opacity(0.35), Color.blue.opacity(0.22)],
                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                              : AnyShapeStyle(Color.white.opacity(hover ? 0.06 : 0.02)))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+                              : AnyShapeStyle(Color.primary.opacity(hover ? 0.06 : 0.02)))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.12), lineWidth: 0.7))
                 )
         }
         .buttonStyle(.bouncyIcon)

@@ -367,10 +367,10 @@ private struct AutoDeleteModeRow: View {
                               ? AnyShapeStyle(LinearGradient(
                                     colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.28)],
                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                              : AnyShapeStyle(Color.white.opacity(0.06)))
+                              : AnyShapeStyle(Color.primary.opacity(0.06)))
                     Image(systemName: mode.icon)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(isActive ? .white.opacity(0.95) : .white.opacity(0.75))
+                        .foregroundStyle(isActive ? Color.white.opacity(0.95) : Theme.textPrimary.opacity(0.75))
                 }
                 .frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 2) {

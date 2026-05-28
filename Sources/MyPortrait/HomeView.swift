@@ -276,17 +276,20 @@ private func plainTextOf(_ m: ChatMessage) -> String {
 private struct SetupBanner: View {
     let text: String
     let isError: Bool
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         HStack(spacing: 8) {
-            if !isError { ProgressView().controlSize(.small).tint(.white.opacity(0.6)) }
+            if !isError { ProgressView().controlSize(.small).tint(Theme.textSecondary) }
             Text(text)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(isError ? Color.red.opacity(0.9) : Color.white.opacity(0.7))
+                .foregroundStyle(isError ? Color.red.opacity(0.9) : Theme.textSecondary)
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(isError ? Color.red.opacity(0.10) : Color.white.opacity(0.04))
+        .background(isError
+                    ? Color.red.opacity(0.10)
+                    : Color.primary.opacity(colorScheme == .light ? 0.04 : 0.04))
     }
 }
 
@@ -1793,7 +1796,7 @@ private struct ChatInputBar: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .font(.system(size: 14))
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.textPrimary)
                 .focused($focused)
                 .onKeyPress(.return) {
                     if NSEvent.modifierFlags.contains(.shift) { return .ignored }
@@ -2021,7 +2024,9 @@ private struct IconActionButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(tint ?? .white.opacity(hover ? 0.95 : 0.55))
+                // 没显式 tint 时用系统 label color(自动跟 light/dark 切),
+                // 之前钉 .white 在 light 模式下整个图标几乎看不见。
+                .foregroundStyle(tint ?? Theme.textPrimary.opacity(hover ? 0.95 : 0.55))
                 .frame(width: 32, height: 32)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -2029,7 +2034,7 @@ private struct IconActionButton: View {
                         .opacity(tint != nil ? 0.80 : (hover ? 0.80 : 0))
                         .overlay(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .stroke((tint ?? Color.white).opacity(tint != nil ? 0.45 : (hover ? 0.18 : 0)), lineWidth: 0.6)
+                                .stroke((tint ?? Color.primary).opacity(tint != nil ? 0.45 : (hover ? 0.18 : 0)), lineWidth: 0.6)
                         )
                 )
                 .scaleEffect(pressed ? 0.90 : (hover ? 1.04 : 1.0))
