@@ -23,6 +23,7 @@ struct MemoriesView: View {
     @State private var confirmingDelete: Bool = false
     /// 标题模糊搜(case-insensitive)。空 = 不过滤。切 scope 时清空。
     @State private var searchText: String = ""
+    @Environment(\.colorScheme) private var colorScheme
 
     struct Entry: Identifiable {
         let id: URL
@@ -103,7 +104,7 @@ struct MemoriesView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Divider().background(Color.white.opacity(0.06))
+            Divider().background(Color.primary.opacity(0.10))
 
             if entries.isEmpty && !loading {
                 EmptyHint(scope: scope)
@@ -121,7 +122,7 @@ struct MemoriesView: View {
                             EntryRow(entry: entry, selected: selected == entry.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { handleSelect(entry: entry) }
-                            Divider().background(Color.white.opacity(0.04))
+                            Divider().background(Color.primary.opacity(0.08))
                         }
                     }
                 }
@@ -129,7 +130,10 @@ struct MemoriesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.28))
+        // 中间列原来钉死 black.opacity(0.28),light 模式下盖在 warm-white
+        // 上变成大灰块,跟左右两列格格不入。light 下用极淡 black 透出底色,
+        // dark 下保留原本的 0.28 暗化效果。
+        .background(Color.black.opacity(colorScheme == .light ? 0.03 : 0.28))
     }
 
     // MARK: - Detail (right)
@@ -158,13 +162,13 @@ struct MemoriesView: View {
                     }
                     .padding(.top, 44)
                     metadataBlock(entry.file, category: entry.category, scope: entry.scope)
-                    Divider().background(Color.white.opacity(0.06))
+                    Divider().background(Color.primary.opacity(0.10))
                     // markdown 渲染:body 里 `**bold**` / `> quote` 这种标记
                     // 现在能正确显示。SwiftUI 原生 `Text(.init(...))` 走
                     // AttributedString 解析,够用且零依赖。
                     markdownBody(entry.file.body)
                     if let notes = entry.file.editNotes, !notes.isEmpty {
-                        Divider().background(Color.white.opacity(0.06))
+                        Divider().background(Color.primary.opacity(0.10))
                         editNotesBlock(notes)
                     }
                 }
@@ -301,7 +305,7 @@ struct MemoriesView: View {
                 .padding(.horizontal, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.04))
+                        .fill(Color.primary.opacity(0.06))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.08), lineWidth: 0.5))
                 )
             }
