@@ -1803,6 +1803,10 @@ private struct ChatInputBar: View {
     let onChipTap: (String) -> Void
 
     @FocusState private var focused: Bool
+    /// NSTextView 报回来的内容自然高度。空 ≈ 22pt(单行),涨到内容大小,
+    /// 外面 clamp 在 [32, 4 * lineHeight ≈ 96] 之间 —— 超过 4 行就不再涨,
+    /// 内部 NSScrollView 接管滚动。
+    @State private var inputContentHeight: CGFloat = 22
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1845,6 +1849,7 @@ private struct ChatInputBar: View {
                 // Enter 换行,IME 期间 Enter 让给候选选词。
                 ChatInputTextView(
                     text: $prompt,
+                    measuredHeight: $inputContentHeight,
                     placeholder: "Ask about your screen…  (type @ for filters, paste images)",
                     font: .systemFont(ofSize: 14),
                     onSubmit: { onSend() },
@@ -1857,7 +1862,9 @@ private struct ChatInputBar: View {
                         }
                     }
                 )
-                .frame(height: 32)   // 固定单行高,内容多了 NSScrollView 内部滚
+                // 高度 = clamp(测出的内容高, [32 单行, 96 ≈ 4 行])。涨够 4 行
+                // 后封顶,内部 NSScrollView 接管滚动。
+                .frame(height: min(max(inputContentHeight, 32), 96))
                 .popover(isPresented: $pickerOpen, attachmentAnchor: .point(.topLeading),
                          arrowEdge: .bottom) {
                     ContextPickerView(
