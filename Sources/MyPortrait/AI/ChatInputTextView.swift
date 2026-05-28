@@ -15,6 +15,9 @@ import AppKit
 struct ChatInputTextView: NSViewRepresentable {
 
     @Binding var text: String
+    /// NSTextView 测出的内容自然高度,回报给 SwiftUI。外部用它做 frame ——
+    /// 空 = 单行,内容增长跟着涨,封顶交给外部 maxHeight 限制(4 行)。
+    @Binding var measuredHeight: CGFloat
     var placeholder: String
     var font: NSFont = .systemFont(ofSize: 14)
     var onSubmit: () -> Void
@@ -69,6 +72,16 @@ struct ChatInputTextView: NSViewRepresentable {
         }
         tv.placeholderString = placeholder
         tv.font = font
+        reportMeasuredHeight(tv)
+    }
+
+    private func reportMeasuredHeight(_ tv: PaddedTextView) {
+        DispatchQueue.main.async {
+            let h = tv.naturalContentHeight()
+            if abs(h - measuredHeight) > 0.5 {
+                measuredHeight = h
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -85,6 +98,9 @@ struct ChatInputTextView: NSViewRepresentable {
             parent.text = new
             parent.onTextChange?(old, new)
             tv.needsDisplay = true   // 让 placeholder 重绘
+            if let padded = tv as? PaddedTextView {
+                parent.reportMeasuredHeight(padded)
+            }
         }
 
         /// Enter / Return → submit。Shift+Return / Option+Return → 换行。
@@ -108,7 +124,7 @@ struct ChatInputTextView: NSViewRepresentable {
 
 /// NSTextView 子类 —— 自己画 placeholder,因为 NSTextView 没原生 placeholder
 /// 字段(NSTextField 才有)。
-private final class PaddedTextView: NSTextView {
+final class PaddedTextView: NSTextView {
     var placeholderString: String = ""
     var placeholderColor: NSColor = .placeholderTextColor
     weak var coordinator: ChatInputTextView.Coordinator?
@@ -124,5 +140,21 @@ private final class PaddedTextView: NSTextView {
         let origin = NSPoint(x: inset.width + (textContainer?.lineFragmentPadding ?? 0),
                              y: inset.height)
         placeholderString.draw(at: origin, withAttributes: attrs)
+    }
+
+    /// 算当前内容的自然渲染高度(含上下 inset)。空 = 单行高 + inset。
+    /// 外部 SwiftUI frame 拿这值 clamp 到 [singleLine, 4*line]。
+    func naturalContentHeight() -> CGFloat {
+        let f = font ?? NSFont.systemFont(ofSize: 14)
+        let singleLine = ceil(f.ascender - f.descender + f.leading)
+        let insetH = textContainerInset.height * 2
+        guard let layout = layoutManager, let container = textContainer else {
+            return singleLine + insetH
+        }
+        // 强制 layout 当前所有 glyphs,再问 used rect。
+        layout.ensureLayout(for: container)
+        let used = layout.usedRect(for: container)
+        let textHeight = max(used.height, singleLine)
+        return ceil(textHeight + insetH)
     }
 }
