@@ -12,6 +12,25 @@
         -->
 
         <item>
+            <title>Version 1.0.113</title>
+            <pubDate>Thu, 28 May 2026 03:30:00 +0000</pubDate>
+            <sparkle:version>113</sparkle:version>
+            <sparkle:shortVersionString>1.0.113</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Hotfix for 1.0.112.</p>
+                <ul>
+                    <li><strong>Voice training no longer crashes.</strong> Clicking "Start training" on 1.0.112 hard-crashed the app — Swift 6 runtime caught a microphone callback touching main-actor state from the audio thread. Fixed by routing the callback through the singleton without capturing self.</li>
+                    <li>Memory page middle column: the dark grey overlay that made it look out of place against the rest of the Light theme is gone. Light mode now flows cleanly across all three columns; Dark mode looks the same as before.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.113/MyPortrait-1.0.113.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="IsjMgxu6hsINRuuC+m6siUbeGHJ3MM1NOq/gLLPBqTHdCbp9dfwgxsQ1+zI4rMEmEFhVcMLhru+lA0nU4eBhAA==" length="44571170" />
+        </item>
+
+        <item>
             <title>Version 1.0.112</title>
             <pubDate>Thu, 28 May 2026 03:01:26 +0000</pubDate>
             <sparkle:version>112</sparkle:version>
