@@ -32,6 +32,8 @@
 	<string>My Portrait records microphone audio to build your personal activity timeline.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>My Portrait captures screen contents to extract text (OCR) for your personal activity timeline. All processing happens on this Mac.</string>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
