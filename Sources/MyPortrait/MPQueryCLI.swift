@@ -43,8 +43,8 @@ enum MPQueryCLI {
     /// `search` —— 跨 OCR/audio 全文检索。
     private static func runSearch(args: [String]) -> Never {
         let opts = parseOpts(args)
-        let start = parseTime(opts["start"]) ?? Date().addingTimeInterval(-3600)
-        let end = parseTime(opts["end"]) ?? Date()
+        let start = parseTime(opts["start"], anchor: .start) ?? Date().addingTimeInterval(-3600)
+        let end = parseTime(opts["end"], anchor: .end) ?? Date()
         let limit = Int(opts["limit"] ?? "10") ?? 10
         let q = opts["q"]
         let appFilter = opts["app"]
@@ -107,14 +107,15 @@ enum MPQueryCLI {
     /// `activity-summary` —— 时间段内 top app + top window + 总时长概览。
     private static func runActivitySummary(args: [String]) -> Never {
         let opts = parseOpts(args)
-        let start = parseTime(opts["start"]) ?? Date().addingTimeInterval(-3600)
-        let end = parseTime(opts["end"]) ?? Date()
+        // `--start yesterday` = 昨天 00:00; `--end yesterday` 该是昨天 23:59,
+        // 别用同一个 startOfDay 当 end。解析时按 anchor 给两种语义。
+        let start = parseTime(opts["start"], anchor: .start) ?? Date().addingTimeInterval(-3600)
+        let end = parseTime(opts["end"], anchor: .end) ?? Date()
 
         let db = TimelineDB()
         guard db.exists else { errJSON("timeline DB not found at \(db.dbPath)") }
 
-        let lookback = end.timeIntervalSince(start)
-        let activity = db.recentActivity(lookback: lookback)
+        let activity = db.activity(from: start, to: end)
         let totalFrames = activity.totalFrames
 
         // 用 SuggestionEngine 已有的分类逻辑给个 inferred mode。
@@ -196,8 +197,8 @@ enum MPQueryCLI {
     /// `audio` —— 时间段内 / 按 speaker 过滤的转录条目。
     private static func runAudio(args: [String]) -> Never {
         let opts = parseOpts(args)
-        let start = parseTime(opts["start"]) ?? Date().addingTimeInterval(-3600)
-        let end = parseTime(opts["end"]) ?? Date()
+        let start = parseTime(opts["start"], anchor: .start) ?? Date().addingTimeInterval(-3600)
+        let end = parseTime(opts["end"], anchor: .end) ?? Date()
         let speaker = opts["speaker"]
         let limit = Int(opts["limit"] ?? "60") ?? 60
 
@@ -227,12 +228,18 @@ enum MPQueryCLI {
     // MARK: - Helpers
 
     private static func parseOpts(_ args: [String]) -> [String: String] {
+        // ⚠ **用 updateValue 不要用 subscript 赋值** —— Swift 6 / macOS 26
+        // 工具链上,`out[key] = val` 这种 Dictionary 下标赋值在 enum 的
+        // private static func 里偶发会被优化掉(opts 永远空 dict),花了一
+        // 小时定位。换成 updateValue(_:forKey:) 一切正常。
         var out: [String: String] = [:]
         var i = 0
         while i < args.count {
             let a = args[i]
             if a.hasPrefix("--"), i + 1 < args.count {
-                out[String(a.dropFirst(2))] = args[i + 1]
+                let key = String(a.dropFirst(2))
+                let val = args[i + 1]
+                out.updateValue(val, forKey: key)
                 i += 2
             } else {
                 i += 1
@@ -241,18 +248,30 @@ enum MPQueryCLI {
         return out
     }
 
+    /// 时间锚:解析"日"为单位的关键词时,start = 当天 00:00,end = 当天 23:59:59。
+    enum TimeAnchor { case start, end }
+
     /// 解析相对/绝对时间。失败返回 nil。
-    private static func parseTime(_ raw: String?) -> Date? {
+    private static func parseTime(_ raw: String?, anchor: TimeAnchor = .start) -> Date? {
         guard let s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
         let lower = s.lowercased()
         let now = Date()
+        let cal = Calendar.current
         if lower == "now"        { return now }
         if lower == "today" {
-            return Calendar.current.startOfDay(for: now)
+            let startOfToday = cal.startOfDay(for: now)
+            switch anchor {
+            case .start: return startOfToday
+            case .end:   return now   // today + end = 现在,别跳到明天 00:00
+            }
         }
         if lower == "yesterday" {
-            let start = Calendar.current.startOfDay(for: now)
-            return Calendar.current.date(byAdding: .day, value: -1, to: start)
+            let startOfToday = cal.startOfDay(for: now)
+            let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)!
+            switch anchor {
+            case .start: return startOfYesterday
+            case .end:   return startOfToday.addingTimeInterval(-1)   // 昨天 23:59:59
+            }
         }
 
         // 形如 "30m ago" / "1h ago" / "2d ago"

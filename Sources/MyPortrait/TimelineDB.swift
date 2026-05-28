@@ -503,7 +503,18 @@ struct TimelineDB: Sendable {
         var totalFrames: Int { apps.reduce(0) { $0 + $1.count } }
     }
 
+    /// 兼容旧调用方:从 `now - lookback` 到 `now`。HomeView Quick Actions 用。
     func recentActivity(lookback: TimeInterval = 3600) -> RecentActivity {
+        let end = Date()
+        let start = end.addingTimeInterval(-lookback)
+        return activity(from: start, to: end)
+    }
+
+    /// 显式时间段:查 `[start, end]` 内的活跃 app + 窗口频次。
+    /// mp-query activity-summary 走这条 —— 用户问 "yesterday" 时,
+    /// start = 昨天 00:00,end = 今天 NOW,旧的 lookback 路径会把窗口
+    /// 错算成"过去 N 小时从 now 起",查到的全是今天的数据。
+    func activity(from start: Date, to end: Date) -> RecentActivity {
         guard exists else { return .init(apps: [], windows: []) }
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
@@ -511,13 +522,14 @@ struct TimelineDB: Sendable {
         }
         defer { sqlite3_close(db) }
 
-        let startMs = Self.dbMs(Date().addingTimeInterval(-lookback))
+        let startMs = Self.dbMs(start)
+        let endMs = Self.dbMs(end)
 
         var appsOut: [RecentActivity.AppCount] = []
         let appSQL = """
             SELECT app_name, COUNT(*) AS n
             FROM frames
-            WHERE timestamp_ms >= ?
+            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
               AND app_name IS NOT NULL AND app_name != ''
             GROUP BY app_name
             ORDER BY n DESC
@@ -526,6 +538,7 @@ struct TimelineDB: Sendable {
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, appSQL, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int64(stmt, 1, startMs)
+            sqlite3_bind_int64(stmt, 2, endMs)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let c = sqlite3_column_text(stmt, 0) {
                     let name = String(cString: c)
@@ -540,7 +553,7 @@ struct TimelineDB: Sendable {
         let winSQL = """
             SELECT app_name, window_name, COUNT(*) AS n
             FROM frames
-            WHERE timestamp_ms >= ?
+            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
               AND app_name IS NOT NULL AND app_name != ''
               AND window_name IS NOT NULL AND window_name != ''
             GROUP BY app_name, window_name
@@ -549,6 +562,7 @@ struct TimelineDB: Sendable {
             """
         if sqlite3_prepare_v2(db, winSQL, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int64(stmt, 1, startMs)
+            sqlite3_bind_int64(stmt, 2, endMs)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let appC = sqlite3_column_text(stmt, 0),
                    let winC = sqlite3_column_text(stmt, 1) {
