@@ -39,7 +39,25 @@ struct HomeView: View {
         return name.isEmpty ? "How can I help?" : "How can I help, \(name)?"
     }
 
-    private var displayedActivityChips: [ActivityChip] { Mock.activityChips }
+    /// QUICK ACTIONS 区域显示的 chip。**根据最近 OCR 数据动态生成** ——
+    /// SuggestionEngine 跑模式检测(coding / browsing / meeting / writing 等)
+    /// 然后按模式产对应的模板。空(还没载入)/ DB 没数据时回退 Mock。
+    /// view appear / 每 60s 重跑一次。
+    @State private var dynamicChips: [ActivityChip] = []
+    private var displayedActivityChips: [ActivityChip] {
+        dynamicChips.isEmpty ? Mock.activityChips : dynamicChips
+    }
+
+    /// Quick Actions 刷新:detached 跑 SQL,主线程只更新 state。
+    private func refreshActivityChips() async {
+        let suggestions = await Task.detached(priority: .utility) {
+            let activity = TimelineDB().recentActivity(lookback: 3600)
+            return SuggestionEngine.suggestions(from: activity)
+        }.value
+        let chips = suggestions.map { ActivityChip(text: $0.text, hint: $0.preview) }
+        await MainActor.run { self.dynamicChips = chips }
+    }
+
     /// Non-nil when the input has been pre-populated by clicking ✏️ Edit on
     /// a past user message. Send-on-Enter routes through editAndResend
     /// instead of send so the old turn is dropped, not duplicated.
@@ -114,6 +132,16 @@ struct HomeView: View {
         .background(AmbientBackground())
         .task {
             AISetup.shared.ensureInstalled()
+        }
+        .task {
+            // QUICK ACTIONS:首次 appear 立刻刷,然后每 60s 重跑一次。
+            // 离开 view → task 自动取消,后台不再跑。
+            await refreshActivityChips()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                if Task.isCancelled { break }
+                await refreshActivityChips()
+            }
         }
     }
 

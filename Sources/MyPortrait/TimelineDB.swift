@@ -485,6 +485,85 @@ struct TimelineDB: Sendable {
         return out
     }
 
+    /// 最近 `lookback` 秒内的活跃 app + 窗口频次。给 AI chat 的 Quick Actions
+    /// 动态模板用 —— 端口自 screenpipe suggestions.rs 的 fetch_app_activity /
+    /// fetch_window_activity。同一次查询拉两组数据,避免主线程跑两次 SQL。
+    struct RecentActivity: Sendable {
+        struct AppCount: Sendable {
+            let appName: String
+            let count: Int
+        }
+        struct WindowCount: Sendable {
+            let appName: String
+            let windowName: String
+            let count: Int
+        }
+        let apps: [AppCount]
+        let windows: [WindowCount]
+        var totalFrames: Int { apps.reduce(0) { $0 + $1.count } }
+    }
+
+    func recentActivity(lookback: TimeInterval = 3600) -> RecentActivity {
+        guard exists else { return .init(apps: [], windows: []) }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return .init(apps: [], windows: [])
+        }
+        defer { sqlite3_close(db) }
+
+        let startMs = Self.dbMs(Date().addingTimeInterval(-lookback))
+
+        var appsOut: [RecentActivity.AppCount] = []
+        let appSQL = """
+            SELECT app_name, COUNT(*) AS n
+            FROM frames
+            WHERE timestamp_ms >= ?
+              AND app_name IS NOT NULL AND app_name != ''
+            GROUP BY app_name
+            ORDER BY n DESC
+            LIMIT 20
+            """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, appSQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int64(stmt, 1, startMs)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let c = sqlite3_column_text(stmt, 0) {
+                    let name = String(cString: c)
+                    let cnt = Int(sqlite3_column_int(stmt, 1))
+                    appsOut.append(.init(appName: name, count: cnt))
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        var winsOut: [RecentActivity.WindowCount] = []
+        let winSQL = """
+            SELECT app_name, window_name, COUNT(*) AS n
+            FROM frames
+            WHERE timestamp_ms >= ?
+              AND app_name IS NOT NULL AND app_name != ''
+              AND window_name IS NOT NULL AND window_name != ''
+            GROUP BY app_name, window_name
+            ORDER BY n DESC
+            LIMIT 20
+            """
+        if sqlite3_prepare_v2(db, winSQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_int64(stmt, 1, startMs)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let appC = sqlite3_column_text(stmt, 0),
+                   let winC = sqlite3_column_text(stmt, 1) {
+                    let app = String(cString: appC)
+                    let win = String(cString: winC)
+                    let cnt = Int(sqlite3_column_int(stmt, 2))
+                    winsOut.append(.init(appName: app, windowName: win, count: cnt))
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+
+        return .init(apps: appsOut, windows: winsOut)
+    }
+
     // MARK: - Write operations (auto-delete / manual purge)
 
     struct DeleteResult: Sendable {
