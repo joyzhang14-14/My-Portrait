@@ -88,18 +88,19 @@ final class VoiceTrainer {
         // 用 nil → 系统选 tap 点真实格式,跟 SystemAudioCaptureService 同一
         // 套路绕开 outputFormat(forBus:) 撒谎。converter 在每帧 buffer 回调
         // 里按真实 buffer.format 懒建。
-        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buf, _ in
-            // tap callback 在 audio thread。MainActor.assumeIsolated 不行(非 main)。
-            // 把数据 copy 出去,让 main actor 处理累积。
-            guard let self else { return }
-            let format = buf.format
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { buf, _ in
+            // ⚠ tap callback 跑在 AVFAudio RealtimeMessenger 队列上,**不是 main**。
+            // Swift 6 runtime 现在严格检查:闭包不能捕获 @MainActor 隔离的 self,
+            // 也不能 `[weak self] guard let self` —— 那一访问就 SIGTRAP
+            // (_dispatch_assert_queue_fail in _swift_task_checkIsolatedSwift)。
+            // 解法:完全不捕获 self。只调 nonisolated static 把音频 copy 成
+            // 值类型,然后 Task @MainActor 里通过 .shared 拿单例处理累积。
             let frameCount = AVAudioFrameCount(buf.frameLength)
             guard frameCount > 0 else { return }
-            // copy raw samples out of audio thread —— AVAudioPCMBuffer
-            // 不 Sendable,但 [Float] 是 value type 安全跨 actor。
-            let rawSamples = Self.copyToFloat(buf)
-            Task { @MainActor [weak self] in
-                self?.appendCapturedSamples(rawSamples, sourceFormat: format)
+            let format = buf.format
+            let rawSamples = VoiceTrainer.copyToFloat(buf)
+            Task { @MainActor in
+                VoiceTrainer.shared.appendCapturedSamples(rawSamples, sourceFormat: format)
             }
         }
 
