@@ -72,6 +72,41 @@ final class WhisperKitWrapper: @unchecked Sendable {
         }
     }
 
+    /// 全部可用 transcription 模型(跟 CaptureView Picker 的 4 选一对齐)。
+    /// 启动时一次性 prefetch 全部,让用户在 Settings → Capture 切换模型不用
+    /// 再等下载;AIModelsView 也照这张表显示每个的 ready 状态。
+    static let allTranscriptionModels: [(name: String, label: String, size: String)] = [
+        ("openai_whisper-tiny",                "Whisper Tiny",         "~75 MB"),
+        ("openai_whisper-base",                "Whisper Base",         "~150 MB"),
+        ("openai_whisper-small",               "Whisper Small",        "~500 MB"),
+        ("openai_whisper-large-v3-v20240930",  "Whisper Large v3 Turbo", "~1.5 GB"),
+    ]
+
+    /// 并行预拉 4 个 Whisper 模型。已下完的秒返。失败 swallow,真用到再走
+    /// ensurePipe 兜底重试。
+    static func prefetchAllTranscriptionModels(logger: Logger) async {
+        await withTaskGroup(of: Void.self) { group in
+            for entry in allTranscriptionModels {
+                let name = entry.name
+                let label = entry.label
+                group.addTask {
+                    if isOnDisk(modelName: name) {
+                        logger.info("\(label, privacy: .public): already on disk")
+                        return
+                    }
+                    logger.info("\(label, privacy: .public): downloading…")
+                    do {
+                        let temp = try await WhisperKit(model: name)
+                        _ = temp
+                        logger.info("\(label, privacy: .public): ready")
+                    } catch {
+                        logger.warning("\(label, privacy: .public): prefetch failed: \(String(describing: error), privacy: .public)")
+                    }
+                }
+            }
+        }
+    }
+
     /// 懒加载 WhisperKit pipeline（首跑下载模型）。
     private func ensurePipe() async throws {
         guard pipe == nil else { return }

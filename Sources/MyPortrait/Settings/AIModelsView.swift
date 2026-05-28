@@ -49,11 +49,16 @@ struct AIModelsSettingsView: View {
 
             SettingsCard(
                 title: "Local capture models",
-                footnote: "Downloaded automatically on first launch (~190 MB total). Required for transcription, voice training, and speaker grouping. The app works without them but voice features stay disabled until they finish."
+                footnote: "Downloaded automatically on first launch (~2.2 GB total for all 4 Whisper sizes + 40 MB speaker models). Required for transcription, voice training, and speaker grouping. The app works without them but voice features stay disabled until they finish."
             ) {
-                localModelRow("Transcription", detail: "openai_whisper-base (~150 MB)",
-                              ready: WhisperKitWrapper.isOnDisk())
-                SettingsDivider()
+                // 4 个 Whisper transcription 模型 —— 跟 Settings → Capture 的
+                // model picker 一一对应,启动时统一 prefetch,用户切大小不用再等。
+                ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { idx, m in
+                    localModelRow("Transcription",
+                                  detail: "\(m.label) (\(m.size))",
+                                  ready: WhisperKitWrapper.isOnDisk(modelName: m.name))
+                    SettingsDivider()
+                }
                 localModelRow("Voice signature", detail: "wespeaker CAM++ (~30 MB)",
                               ready: SpeakerModelStore.isOnDisk(.embedding))
                 SettingsDivider()
@@ -120,7 +125,9 @@ struct AIModelsSettingsView: View {
     }
 
     private var allLocalModelsReady: Bool {
-        WhisperKitWrapper.isOnDisk()
+        WhisperKitWrapper.allTranscriptionModels.allSatisfy {
+            WhisperKitWrapper.isOnDisk(modelName: $0.name)
+        }
             && SpeakerModelStore.isOnDisk(.embedding)
             && SpeakerModelStore.isOnDisk(.segmentation)
             && SpeakerModelStore.isOnDisk(.vadSilero)

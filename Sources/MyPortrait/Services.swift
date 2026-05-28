@@ -182,9 +182,11 @@ final class Services {
         //   1. Speaker / VAD ONNX (~40MB):VoiceTrainer 依赖
         //   2. WhisperKit 模型 (默认 base ~150MB):Audio Capture 第一段录音依赖
         //   3. Bun + Pi @mariozechner/pi-coding-agent (~30MB):Chat / cron job 依赖
-        Task.detached(priority: .utility) { [whisper] in
+        Task.detached(priority: .utility) { [logger] in
             await SpeakerModelStore.shared.prefetchAll()
-            await whisper.prefetch()
+            // 4 个 Whisper 模型一次性拉全,跟 CaptureView Picker 的选项对齐 ——
+            // 用户切大小不用再等下载。
+            await WhisperKitWrapper.prefetchAllTranscriptionModels(logger: logger)
         }
         Task { @MainActor in
             // ensureInstalled 内部已 idempotent(已 ready 直接 return)。
