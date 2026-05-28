@@ -14,7 +14,7 @@ struct SearchBar: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.textPrimary)
             if !text.isEmpty {
                 Button {
                     text = ""
@@ -30,7 +30,7 @@ struct SearchBar: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(Color.primary.opacity(0.06))
         )
     }
 }

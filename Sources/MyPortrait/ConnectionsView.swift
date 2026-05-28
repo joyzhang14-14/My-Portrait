@@ -808,12 +808,12 @@ private struct SubtleButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(destructive ? Color.red.opacity(0.85) : .white.opacity(0.85))
+            .foregroundStyle(destructive ? Color.red.opacity(0.85) : Color.primary.opacity(0.85))
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 7)
-                    .stroke(destructive ? Color.red.opacity(0.4) : Color.white.opacity(0.18), lineWidth: 1)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(configuration.isPressed ? 0.06 : 0.02)))
+                    .stroke(destructive ? Color.red.opacity(0.4) : Color.primary.opacity(0.18), lineWidth: 1)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(configuration.isPressed ? 0.06 : 0.02)))
             )
     }
 }
