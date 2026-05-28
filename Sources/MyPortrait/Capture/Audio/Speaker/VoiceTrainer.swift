@@ -273,7 +273,12 @@ final class VoiceTrainer {
         let consumed = ConsumeOnce()
         let status = converter.convert(to: outBuf, error: &error) { _, statusPtr in
             if consumed.done {
-                statusPtr.pointee = .endOfStream
+                // ⚠ **必须 .noDataNow,不能 .endOfStream**。
+                // .endOfStream 会让 AVAudioConverter 进入"流结束"内部状态,
+                // 缓存的 converter 后续 convert() 调用永远返回 0 帧 ——
+                // 现象就是 buffer 第一次涨到 ~1600 后停滞不前。
+                // .noDataNow = "这次没数据了但流还活着",converter 可复用。
+                statusPtr.pointee = .noDataNow
                 return nil
             }
             consumed.done = true
