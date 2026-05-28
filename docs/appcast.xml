@@ -12,6 +12,50 @@
         -->
 
         <item>
+            <title>Version 1.0.111</title>
+            <pubDate>Thu, 28 May 2026 02:35:18 +0000</pubDate>
+            <sparkle:version>111</sparkle:version>
+            <sparkle:shortVersionString>1.0.111</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Voice training, rebuilt</h3>
+                <ul>
+                    <li><strong>No longer needs power.</strong> Voice training is now fully decoupled from transcription — record 30s, the voice signature is extracted on-device, done. Battery is fine.</li>
+                    <li><strong>Re-training a name actually replaces the old samples</strong> instead of stacking on top of them (which used to make your voice get matched back to the older clustering).</li>
+                    <li>Quality fix: audio converter is reused across the 30s window instead of rebuilt every frame — the embedding is far more stable.</li>
+                    <li>Main mic capture is paused while training so two engines don't fight for the microphone.</li>
+                    <li>Start training pre-checks the AI voice model is on disk; if it's still downloading you get told <em>before</em> the 30s recording, not after.</li>
+                    <li>Mic-start failure message now points at <em>System Settings → Privacy → Microphone</em>.</li>
+                </ul>
+                <h3>System audio capture</h3>
+                <ul>
+                    <li><strong>Crash fix.</strong> Toggling system audio on certain Macs threw an audio-format mismatch that killed the app. Caught via an ObjC try/catch shim — failure now gracefully disables system audio instead of crashing.</li>
+                </ul>
+                <h3>Writing capture (Pass 1 / 2 / 3)</h3>
+                <ul>
+                    <li>OCR geometry chrome filter — toolbars, tabs and other window furniture no longer get into the captured text.</li>
+                    <li>OCR de-duplication now uses windowed sub-segments + 70% LCS merging, killing the duplicates you saw across nearby frames.</li>
+                    <li>Per-frame cap raised to 2000 chars; AX-scarce sessions get the cap fully released so long-form writing isn't truncated.</li>
+                    <li>Pass 1 / Pass 2 <code>context_summary</code> repurposed to scene description (more usable downstream).</li>
+                    <li>Pass 3 now filters by keystroke support — frames with no typing evidence get dropped before they reach records.</li>
+                </ul>
+                <h3>Notification overlay</h3>
+                <ul>
+                    <li>Light theme: banner colors fixed; progress bar no longer leaks past the corner radius.</li>
+                    <li>Panel height now matches the SwiftUI content — multi-line bodies aren't clipped, single-line bodies aren't padded into a giant box.</li>
+                </ul>
+                <h3>Settings</h3>
+                <ul>
+                    <li>New <strong>Local capture models</strong> card in Settings → AI models. Shows ready / downloading status for Whisper transcription, voice signature (CAM++), voice segmentation (pyannote), and voice activity (Silero VAD). New installs can see exactly what's still downloading.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.111/MyPortrait-1.0.111.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="ae9feE5YKFmxm34zLK58AXpN+GuYvu+8Mw684I8KUKd5NudnAedTofT6EyyhckfIImKtTt1JxHeqQ7g/m7UwCQ==" length="44567251" />
+        </item>
+
+        <item>
             <title>Version 1.0.89</title>
             <pubDate>Wed, 27 May 2026 01:30:00 +0000</pubDate>
             <sparkle:version>89</sparkle:version>
