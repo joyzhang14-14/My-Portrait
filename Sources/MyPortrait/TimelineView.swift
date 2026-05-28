@@ -99,6 +99,12 @@ struct TimelineView: View {
                 .clipped()
         }
         .background(Color.black)
+        // Timeline 主区域故意永远黑底(展示屏幕录像,黑底凸显画面)。
+        // 强制 dark colorScheme 让里面的 TimelineControlsBar / BrowserURLBar /
+        // FramePreview 等控件无论系统是 light 还是 dark,都用浅色字渲染 ——
+        // 否则 light 模式下系统给深色 label color,深字打在黑底上整个工具栏
+        // 隐身。
+        .environment(\.colorScheme, .dark)
         .clipped()                       // belt + suspenders — pane never overflows
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
