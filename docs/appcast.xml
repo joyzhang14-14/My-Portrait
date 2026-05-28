@@ -31,20 +31,20 @@
                 <ul>
                     <li><strong>Crash fix.</strong> Toggling system audio on certain Macs threw an audio-format mismatch that killed the app. Caught via an ObjC try/catch shim — failure now gracefully disables system audio instead of crashing.</li>
                 </ul>
-                <h3>Writing capture (Pass 1 / 2 / 3)</h3>
+                <h3>Writing capture</h3>
                 <ul>
-                    <li>OCR geometry chrome filter — toolbars, tabs and other window furniture no longer get into the captured text.</li>
-                    <li>OCR de-duplication now uses windowed sub-segments + 70% LCS merging, killing the duplicates you saw across nearby frames.</li>
-                    <li>Per-frame cap raised to 2000 chars; AX-scarce sessions get the cap fully released so long-form writing isn't truncated.</li>
-                    <li>Pass 1 / Pass 2 <code>context_summary</code> repurposed to scene description (more usable downstream).</li>
-                    <li>Pass 3 now filters by keystroke support — frames with no typing evidence get dropped before they reach records.</li>
+                    <li>Captured text is cleaner — toolbars, tab bars and other window chrome no longer end up in your writing records.</li>
+                    <li>Far fewer duplicates across consecutive frames; the same paragraph shouldn't repeat in your records anymore.</li>
+                    <li>Long-form writing isn't truncated — the per-frame cap was raised, and sessions where the editor can't expose its full text get the cap dropped entirely.</li>
+                    <li>The summary that gets stored alongside each writing record is now a real description of <em>where</em> you were writing (which app, what kind of document) rather than a generic blurb.</li>
+                    <li>Records require actual typing evidence — frames where nothing was typed get filtered out, so your writing history is signal-only.</li>
                 </ul>
                 <h3>Notification overlay</h3>
                 <ul>
                     <li>Light theme: banner colors fixed; progress bar no longer leaks past the corner radius.</li>
                     <li>Panel height now matches the SwiftUI content — multi-line bodies aren't clipped, single-line bodies aren't padded into a giant box.</li>
                 </ul>
-                <h3>Settings</h3>
+                <h3>UI</h3>
                 <ul>
                     <li>New <strong>Local capture models</strong> card in Settings → AI models. Shows ready / downloading status for Whisper transcription, voice signature (CAM++), voice segmentation (pyannote), and voice activity (Silero VAD). New installs can see exactly what's still downloading.</li>
                 </ul>
