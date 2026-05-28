@@ -234,23 +234,30 @@ final class ChatController {
             pendingTitleFromFirstMessage = true
         }
 
+        // 用户没附任何 @-chip → 默认挂最近 1h 屏幕上下文。My Portrait 整个
+        // 产品定位就是"知道你屏幕上干了啥的 AI",不带 OCR 数据 AI 只能空答
+        // "I don't have visibility into your day"。不想要的用户在输入栏点
+        // chip 的 × 删掉即可。不做语言/关键词判断 —— 任何语种都生效。
+        let resolvedChips = chips.isEmpty ? [Self.defaultAutoChip()] : chips
+
         // Resolve chips → context block (heavy: SQLite read). Do it on a
         // background hop and then deliver from the main actor.
         Task { [weak self] in
             guard let self else { return }
             let context: TimelineContext = await Task.detached(priority: .userInitiated) {
-                TimelineContextBuilder.build(chips: chips, redactPII: redactPII)
+                TimelineContextBuilder.build(chips: resolvedChips, redactPII: redactPII)
             }.value
 
             await MainActor.run {
                 // User bubble carries display text + chips + attachments
-                // for visual receipt.
+                // for visual receipt. 用 resolvedChips —— 自动注入的 chip 也
+                // 要在 bubble 里显示出来,让用户知道 AI 拿了哪些数据。
                 var msg = ChatMessage(role: .user, text: trimmed, time: Date())
-                if !chips.isEmpty {
+                if !resolvedChips.isEmpty {
                     msg.parts = [.text(id: UUID(), value: trimmed)]
                 }
                 self.messages.append(msg)
-                self.contextChipsByMessage[msg.id] = chips
+                self.contextChipsByMessage[msg.id] = resolvedChips
                 self.attachmentsByMessage[msg.id] = attachments
                 self.pendingCitations = context.citations
                 self.lastError = nil
@@ -286,6 +293,14 @@ final class ChatController {
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
         return oneLine.count > 40 ? String(oneLine.prefix(40)) + "…" : oneLine
+    }
+
+    /// 用户没附 @-chip 时的默认 context。My Portrait 整个产品定位就是
+    /// "知道你屏幕上发生什么的 AI",默认带最近 1h 屏幕上下文符合预期。
+    /// 不想带的用户在输入栏点 chip 的 × 删掉即可(UI 本来就显示 + 可删)。
+    /// **不做语言判断、不做关键词匹配** —— 用户说什么语言都生效。
+    static func defaultAutoChip() -> ContextChip {
+        ContextChip(spec: .lastMinutes(60))
     }
 
     // MARK: - Edit mode
