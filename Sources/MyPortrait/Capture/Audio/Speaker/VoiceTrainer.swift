@@ -114,6 +114,8 @@ final class VoiceTrainer {
         //
         // 唯一可靠解:把回调实现挪到独立的 `nonisolated static func`,在
         // 类型层面强制 nonisolated,start() 只传函数引用进去。
+        VoiceTrainer.diagCount = 0
+        VoiceTrainer.diagLog("start: installTap tapFormat=\(tapFormat) targetFormat=\(target)")
         input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat, block: VoiceTrainer.tapCallback)
 
         do {
@@ -213,8 +215,20 @@ final class VoiceTrainer {
     /// tap callback 来的原始 buffer(任意采样率 / 通道)→ 转 16kHz mono Float
     /// → append 到 self.buffer。converter 按真实 sourceFormat 懒建/重建。
     private func appendCapturedSamples(_ raw: [Float]?, sourceFormat: AVAudioFormat) {
-        guard let target = targetFormat else { return }
-        guard let raw, !raw.isEmpty else { return }
+        guard let target = targetFormat else {
+            Self.diagLog("append: targetFormat nil — bail")
+            return
+        }
+        guard let raw, !raw.isEmpty else {
+            Self.diagLog("append: raw nil/empty — bail")
+            return
+        }
+        let preCount = buffer.count
+        defer {
+            if Self.diagCount % 50 == 1 {
+                Self.diagLog("append: bufferGrew \(preCount)→\(buffer.count) (+\(buffer.count - preCount))")
+            }
+        }
 
         // 短路:source 已经是 16k mono float → 直接 append。
         if sourceFormat.commonFormat == target.commonFormat
@@ -279,9 +293,21 @@ final class VoiceTrainer {
     /// runtime 的 isolation check 杀进程。
     nonisolated private static func tapCallback(_ buf: AVAudioPCMBuffer, _ time: AVAudioTime) {
         let frameCount = AVAudioFrameCount(buf.frameLength)
-        guard frameCount > 0 else { return }
+        guard frameCount > 0 else {
+            diagLog("tap: frameCount=0 skip")
+            return
+        }
         let format = buf.format
         let rawSamples = copyToFloat(buf)
+        if rawSamples == nil {
+            diagLog("tap: copyToFloat NIL — format=\(format)")
+        } else {
+            // 每 50 个 callback 打一条,免得 30s 录音狂刷 log
+            diagCount &+= 1
+            if diagCount % 50 == 1 {
+                diagLog("tap: ok #\(diagCount) frames=\(frameCount) rawCount=\(rawSamples?.count ?? -1) format=\(format)")
+            }
+        }
         Task { @MainActor in
             VoiceTrainer.shared.appendCapturedSamples(rawSamples, sourceFormat: format)
         }
@@ -294,6 +320,15 @@ final class VoiceTrainer {
         guard frames > 0, let ch = buf.floatChannelData else { return nil }
         let ptr = ch[0]
         return Array(UnsafeBufferPointer(start: ptr, count: frames))
+    }
+
+    // MARK: - Diagnostic logging (临时,排查 buffer 永远空)
+
+    /// 累积计数,仅每 N 帧打一条,避免日志风暴。
+    nonisolated(unsafe) static var diagCount: Int = 0
+
+    nonisolated static func diagLog(_ msg: String) {
+        NSLog("[voice-training] \(msg)")
     }
 }
 
