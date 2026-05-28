@@ -158,6 +158,10 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
         }
         env["BUN_INSTALL"] = AIPaths.bunDir.path
         env["HOME"] = NSHomeDirectory()
+        // 把 ~/.portrait/bin 加进 PATH,让 pi-coding-agent 的 bash 能直接调
+        // `mp-query`(symlink 到 app 主二进制)拿屏幕数据。SKILL.md 风格。
+        let existingPATH = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = "\(AIPaths.binDir.path):\(existingPATH)"
         // Connection credentials supplied by the cron job runner.
         for (k, v) in extraEnv { env[k] = v }
         process.environment = env

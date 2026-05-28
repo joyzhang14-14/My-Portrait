@@ -88,6 +88,16 @@ struct MyPortraitApp: App {
             VoiceTrainingTestCLI.run(audioPath: args[idx + 1])
             // run() exits the process internally.
         }
+        // `mp-query` 给 AI agent 用的本地数据查询接口(端口自 screenpipe
+        // SKILL.md REST API,改成 CLI + JSON stdout)。app 启动时会把自身
+        // symlink 成 ~/.portrait/bin/mp-query,pi-coding-agent / Claude
+        // Code agent 通过 bash 调用拿 OCR / 转录 / activity summary 数据。
+        if args.contains("--mp-query") {
+            let idx = args.firstIndex(of: "--mp-query")!
+            let rest = Array(args.dropFirst(idx + 1))
+            MPQueryCLI.run(args: rest)
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--backfill-day <yyyy-MM-dd>` runs the real Backfill for a
         // single day. Disposable — remove with EventPromptTest.swift.
         if let idx = args.firstIndex(of: "--backfill-day"), idx + 1 < args.count {
