@@ -64,6 +64,23 @@ enum MPQuerySkill {
         you to write code, explain something general), just answer
         normally — don't run mp-query for no reason.
 
-        """
+        ## ⚠ Anti-patterns (don't do these)
+
+        - **Don't introspect the `mp-query` binary** —
+          no `strings`, `file`, `which`, `cat`, `head` on it; no reading
+          the shell wrapper. It's a real CLI that talks to a local
+          SQLite DB. If a call returns empty `data: []`, **that time
+          range simply has no captured frames** (the app may have been
+          off, or the user wasn't using the Mac). Don't treat empty
+          results as "the tool is broken" — accept it and tell the user.
+        - **One probe is enough.** If `activity-summary --start today`
+          returns the right shape (apps + windows arrays), the CLI is
+          fine. Don't run more diagnostic calls. Tool budget per turn
+          should be ≤ 4 mp-query calls.
+        - **Don't pipe `mp-query` output into other shell tools** like
+          `strings`, `xxd`, `od` — output is already JSON. Use `jq` if
+          you must filter.
+
+"""
     }
 }
