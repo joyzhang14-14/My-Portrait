@@ -20,6 +20,11 @@ enum SuggestionEngine {
         /// 二行小字预览,比如 "32min in Cursor — AppDelegate.swift, README.md"。
         /// nil 时 ChipView 不显示第二行。
         let preview: String?
+        /// 默认绑定的 context 范围 —— 点击 chip 时自动挂这条 ContextChip
+        /// 给 AI(不然 AI 拿不到 OCR / audio 数据,只能回 "I don't have
+        /// visibility into your day yet")。每个 mode 模板里选合适的范围:
+        /// today / lastMinutes(60) / app(name) / audio(60) 等。
+        let context: ContextChip.Spec
     }
 
     enum Mode: String, Sendable {
@@ -38,7 +43,7 @@ enum SuggestionEngine {
         // 保证最多 6 条 + 永远有"summarize my day"兜底
         var out = chips
         if !out.contains(where: { $0.text.lowercased().contains("summarize my day") }) {
-            out.append(.init(text: "summarize my day so far", preview: nil))
+            out.append(.init(text: "summarize my day so far", preview: nil, context: .today))
         }
         return Array(out.prefix(6))
     }
@@ -186,25 +191,30 @@ enum SuggestionEngine {
             if editorMins > 0 { return "\(editorMins)min in \(editorName)" }
             return nil
         }()
-        out.append(.init(text: "summarize my coding session", preview: editorPreview))
+        out.append(.init(text: "summarize my coding session", preview: editorPreview,
+                         context: .lastMinutes(60)))
 
         if let term = terminal {
             out.append(.init(
                 text: "what commands did I run in \(term.appName)?",
-                preview: nil
+                preview: nil,
+                context: .app(term.appName)
             ))
             out.append(.init(
                 text: "any errors or warnings in my terminal?",
-                preview: "check \(term.appName) output"
+                preview: "check \(term.appName) output",
+                context: .app(term.appName)
             ))
         }
         if let ed = editor {
             out.append(.init(
                 text: "what files did I edit in \(ed.appName)?",
-                preview: editorFiles.isEmpty ? nil : editorFiles.joined(separator: ", ")
+                preview: editorFiles.isEmpty ? nil : editorFiles.joined(separator: ", "),
+                context: .app(ed.appName)
             ))
         }
-        out.append(.init(text: "how much time did I spend coding today?", preview: nil))
+        out.append(.init(text: "how much time did I spend coding today?", preview: nil,
+                         context: .today))
         return out
     }
 
@@ -237,12 +247,15 @@ enum SuggestionEngine {
             if totalMins > 0 { return "\(totalMins)min browsing" }
             return nil
         }()
-        out.append(.init(text: "summarize the pages I browsed", preview: preview))
+        out.append(.init(text: "summarize the pages I browsed", preview: preview,
+                         context: .lastMinutes(60)))
         for p in pages {
-            out.append(.init(text: "what was I reading on \"\(p)\"?", preview: nil))
+            out.append(.init(text: "what was I reading on \"\(p)\"?", preview: nil,
+                             context: .search(p)))
         }
         out.append(.init(text: "how much time did I spend browsing?",
-                         preview: totalMins > 0 ? "~\(totalMins)min total" : nil))
+                         preview: totalMins > 0 ? "~\(totalMins)min total" : nil,
+                         context: .today))
         return out
     }
 
@@ -269,13 +282,19 @@ enum SuggestionEngine {
                 text: "summarize my meeting",
                 preview: meetingMins > 0
                     ? "\(meetingMins)min in \(appLabel)\(meetingTitle.map { " — \($0)" } ?? "")"
-                    : meetingTitle.map { "in \(appLabel) — \($0)" }
+                    : meetingTitle.map { "in \(appLabel) — \($0)" },
+                context: .audio(60)
             ),
-            .init(text: "what were the action items from my call?", preview: nil),
-            .init(text: "key decisions from the meeting", preview: nil),
-            .init(text: "who said what in this call?", preview: nil),
+            .init(text: "what were the action items from my call?", preview: nil,
+                  context: .audio(60)),
+            .init(text: "key decisions from the meeting", preview: nil,
+                  context: .audio(60)),
+            .init(text: "who said what in this call?", preview: nil,
+                  context: .audio(60)),
         ]
-        if let t = meetingTitle { out.insert(.init(text: "recap \"\(t)\"", preview: nil), at: 1) }
+        if let t = meetingTitle {
+            out.insert(.init(text: "recap \"\(t)\"", preview: nil, context: .audio(60)), at: 1)
+        }
         return out
     }
 
@@ -289,12 +308,15 @@ enum SuggestionEngine {
         }
         let mins = (topComm?.count ?? 0) / 60
         let label = topComm?.appName ?? "chat"
+        let commCtx: ContextChip.Spec = topComm.map { .app($0.appName) } ?? .lastMinutes(60)
         return [
             .init(text: "summarize my conversations",
-                  preview: mins > 0 ? "\(mins)min in \(label)" : nil),
-            .init(text: "what messages do I need to reply to?", preview: nil),
-            .init(text: "who reached out today?", preview: nil),
-            .init(text: "key threads from this morning", preview: nil),
+                  preview: mins > 0 ? "\(mins)min in \(label)" : nil,
+                  context: commCtx),
+            .init(text: "what messages do I need to reply to?", preview: nil,
+                  context: commCtx),
+            .init(text: "who reached out today?", preview: nil, context: .today),
+            .init(text: "key threads from this morning", preview: nil, context: commCtx),
         ]
     }
 
@@ -315,14 +337,18 @@ enum SuggestionEngine {
                 .prefix(3)
                 .map { truncate($0.windowName, max: 35) }
         } ?? []
+        let writerCtx: ContextChip.Spec = writer.map { .app($0.appName) } ?? .lastMinutes(60)
         return [
             .init(text: "summarize what I wrote",
                   preview: mins > 0 && !docs.isEmpty
                     ? "\(mins)min in \(label) — \(docs.joined(separator: ", "))"
-                    : (mins > 0 ? "\(mins)min in \(label)" : nil)),
-            .init(text: "main ideas from my notes", preview: nil),
-            .init(text: "what was I drafting?", preview: docs.isEmpty ? nil : docs.joined(separator: ", ")),
-            .init(text: "how much time did I spend writing?", preview: nil),
+                    : (mins > 0 ? "\(mins)min in \(label)" : nil),
+                  context: writerCtx),
+            .init(text: "main ideas from my notes", preview: nil, context: writerCtx),
+            .init(text: "what was I drafting?",
+                  preview: docs.isEmpty ? nil : docs.joined(separator: ", "),
+                  context: writerCtx),
+            .init(text: "how much time did I spend writing?", preview: nil, context: .today),
         ]
     }
 
@@ -335,12 +361,15 @@ enum SuggestionEngine {
             videoEditingApps.contains(where: { app.appName.lowercased().contains($0) })
         }
         let mins = (editor?.count ?? 0) / 60
+        let editorCtx: ContextChip.Spec = editor.map { .app($0.appName) } ?? .lastMinutes(60)
         return [
             .init(text: "summarize my editing session",
-                  preview: mins > 0 ? "\(mins)min in \(editor?.appName ?? "editor")" : nil),
-            .init(text: "what timeline edits did I make?", preview: nil),
-            .init(text: "show my recent screen activity", preview: nil),
-            .init(text: "summarize my day so far", preview: nil),
+                  preview: mins > 0 ? "\(mins)min in \(editor?.appName ?? "editor")" : nil,
+                  context: editorCtx),
+            .init(text: "what timeline edits did I make?", preview: nil, context: editorCtx),
+            .init(text: "show my recent screen activity", preview: nil,
+                  context: .lastMinutes(60)),
+            .init(text: "summarize my day so far", preview: nil, context: .today),
         ]
     }
 
@@ -348,12 +377,14 @@ enum SuggestionEngine {
 
     private static func idleTemplate() -> [Suggestion] {
         [
-            .init(text: "what did I work on in the last hour?", preview: nil),
-            .init(text: "summarize my day so far", preview: nil),
-            .init(text: "which apps did I use most today", preview: nil),
-            .init(text: "show my recent screen activity", preview: nil),
-            .init(text: "what was I working on", preview: nil),
-            .init(text: "how much time did I spend on each app", preview: nil),
+            .init(text: "what did I work on in the last hour?", preview: nil,
+                  context: .lastMinutes(60)),
+            .init(text: "summarize my day so far", preview: nil, context: .today),
+            .init(text: "which apps did I use most today", preview: nil, context: .today),
+            .init(text: "show my recent screen activity", preview: nil,
+                  context: .lastMinutes(60)),
+            .init(text: "what was I working on", preview: nil, context: .lastMinutes(60)),
+            .init(text: "how much time did I spend on each app", preview: nil, context: .today),
         ]
     }
 
