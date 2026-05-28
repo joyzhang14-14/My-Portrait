@@ -441,7 +441,7 @@ struct MemorySettingsView: View {
             Divider().padding(.vertical, 4)
             schedulerBlock(
                 title: "Writing capture",
-                desc: "Runs Pass 1 (context timeline) + Pass 2 (multi-source fusion) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
+                desc: "Runs Pass 1 (context timeline) + Pass 2 (multi-source fusion) + Pass 3 (keystroke-support filter) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
                 config: \.scheduler.writingCapture)
             Divider().padding(.vertical, 4)
             schedulerBlock(
@@ -502,7 +502,7 @@ struct MemorySettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Process writing capture")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 (context timeline) + Pass 2 (per-app+url subagent fanout, sonnet 200K). Stages writing_records for review — Approve advances the cursor.")
+                    Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 (context timeline) + Pass 2 (per-app+url subagent fanout, sonnet 200K) + Pass 3 (keystroke-support filter). Stages writing_records for review — Approve advances the cursor.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -531,7 +531,7 @@ struct MemorySettingsView: View {
             if writingCaptureUI.isRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Pass 1 + Pass 2 fanout — may take a few minutes…")
+                    Text("Pass 1 + Pass 2 + Pass 3 fanout — may take a few minutes…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -1027,7 +1027,7 @@ struct MemorySettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (fanout) LLM calls. Output is staged for review.")
+            Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (fanout) + Pass 3 (filter) LLM calls. Output is staged for review.")
         }
         .alert("Run speech style distillation?", isPresented: $speechStyleConfirm) {
             Button("Run", role: .none) {
