@@ -88,21 +88,20 @@ final class VoiceTrainer {
         // 用 nil → 系统选 tap 点真实格式,跟 SystemAudioCaptureService 同一
         // 套路绕开 outputFormat(forBus:) 撒谎。converter 在每帧 buffer 回调
         // 里按真实 buffer.format 懒建。
-        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { buf, _ in
-            // ⚠ tap callback 跑在 AVFAudio RealtimeMessenger 队列上,**不是 main**。
-            // Swift 6 runtime 现在严格检查:闭包不能捕获 @MainActor 隔离的 self,
-            // 也不能 `[weak self] guard let self` —— 那一访问就 SIGTRAP
-            // (_dispatch_assert_queue_fail in _swift_task_checkIsolatedSwift)。
-            // 解法:完全不捕获 self。只调 nonisolated static 把音频 copy 成
-            // 值类型,然后 Task @MainActor 里通过 .shared 拿单例处理累积。
-            let frameCount = AVAudioFrameCount(buf.frameLength)
-            guard frameCount > 0 else { return }
-            let format = buf.format
-            let rawSamples = VoiceTrainer.copyToFloat(buf)
-            Task { @MainActor in
-                VoiceTrainer.shared.appendCapturedSamples(rawSamples, sourceFormat: format)
-            }
-        }
+        // ⚠ tap callback 跑在 AVFAudio RealtimeMessenger 队列上,**不是 main**。
+        // 1.0.112 和 1.0.113 都崩在这里(_swift_task_checkIsolatedSwift →
+        // _dispatch_assert_queue_fail SIGTRAP)。
+        //
+        // 失败的尝试:
+        //   (1) [weak self] guard let self ← self 是 @MainActor 触发 isolation check
+        //   (2) 闭包内联写,改成不捕获 self,放 .shared 进 Task → 仍崩,因为
+        //       闭包是在 @MainActor `start()` 里定义的,**继承 MainActor 上下文**
+        //   (3) 显式 typed `@Sendable` 闭包 local 变量 → 仍崩,@Sendable 标识
+        //       跨线程发送性,**跟 isolation 是两码事**
+        //
+        // 唯一可靠解:把回调实现挪到独立的 `nonisolated static func`,在
+        // 类型层面强制 nonisolated,start() 只传函数引用进去。
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: VoiceTrainer.tapCallback)
 
         do {
             try engine.start()
@@ -259,6 +258,20 @@ final class VoiceTrainer {
         else { return }
         let count = Int(outBuf.frameLength)
         buffer.append(contentsOf: UnsafeBufferPointer(start: ch[0], count: count))
+    }
+
+    /// tap callback —— **必须 nonisolated**,见 start() 里的注释。
+    /// 在 audio thread 跑,只做最少的事:抽取 [Float] + 跨 actor 跳到 main
+    /// 调单例累积。这个函数本身 isolation = nonisolated,不会触发 Swift 6
+    /// runtime 的 isolation check 杀进程。
+    nonisolated private static func tapCallback(_ buf: AVAudioPCMBuffer, _ time: AVAudioTime) {
+        let frameCount = AVAudioFrameCount(buf.frameLength)
+        guard frameCount > 0 else { return }
+        let format = buf.format
+        let rawSamples = copyToFloat(buf)
+        Task { @MainActor in
+            VoiceTrainer.shared.appendCapturedSamples(rawSamples, sourceFormat: format)
+        }
     }
 
     /// 把 PCMBuffer 的 channel 0 拷贝出 [Float]。tap callback 在 audio thread,
