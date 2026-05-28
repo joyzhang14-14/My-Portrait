@@ -85,9 +85,22 @@ final class VoiceTrainer {
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        // 用 nil → 系统选 tap 点真实格式,跟 SystemAudioCaptureService 同一
-        // 套路绕开 outputFormat(forBus:) 撒谎。converter 在每帧 buffer 回调
-        // 里按真实 buffer.format 懒建。
+        // **必须显式传 inputNode.outputFormat 给 installTap**:
+        //
+        // 1.0.113 之前用 `format: nil` —— AVFAudio 按 audio unit **原生格式**
+        // 交付 buffer,在 macOS 26 上通常是 Int16/PCM,**不是 Float32**。
+        // 我们的 copyToFloat 检查 buf.floatChannelData(只有 Float32 格式才
+        // 非 nil),非 Float 直接返回 nil,所有音频静默丢弃 → buffer 永远
+        // 空 → "Recording was too short (got 0s, need ≥3s)"。
+        //
+        // AVAudioEngine.inputNode 的 outputFormat 自带 Float32 deinterleaved
+        // 保证 —— AVFAudio 用它自己的 converter 把硬件 PCM 转 Float32 后
+        // 再交付给我们,floatChannelData 拿到的就是真数据。
+        //
+        // (SystemAudioCaptureService 不能用这条路,那边是 aggregate device
+        // tap,outputFormat 跟实际 tap 流不匹配是它专属 bug;但 mic 普通
+        // inputNode 走这条路是 Apple 文档的标准做法。)
+        let tapFormat = input.outputFormat(forBus: 0)
         // ⚠ tap callback 跑在 AVFAudio RealtimeMessenger 队列上,**不是 main**。
         // 1.0.112 和 1.0.113 都崩在这里(_swift_task_checkIsolatedSwift →
         // _dispatch_assert_queue_fail SIGTRAP)。
@@ -101,7 +114,7 @@ final class VoiceTrainer {
         //
         // 唯一可靠解:把回调实现挪到独立的 `nonisolated static func`,在
         // 类型层面强制 nonisolated,start() 只传函数引用进去。
-        input.installTap(onBus: 0, bufferSize: 4096, format: nil, block: VoiceTrainer.tapCallback)
+        input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat, block: VoiceTrainer.tapCallback)
 
         do {
             try engine.start()
