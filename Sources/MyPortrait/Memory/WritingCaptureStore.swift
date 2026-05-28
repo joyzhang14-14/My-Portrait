@@ -152,12 +152,20 @@ struct WritingCaptureStore: Sendable {
                     status            = excluded.status,
                     run_id            = COALESCE(excluded.run_id, writing_capture_runs.run_id),
                     started_at        = COALESCE(excluded.started_at, writing_capture_runs.started_at),
-                    completed_at      = COALESCE(excluded.completed_at, writing_capture_runs.completed_at),
-                    error_message     = COALESCE(excluded.error_message, writing_capture_runs.error_message),
-                    pass1_token_usage = COALESCE(excluded.pass1_token_usage, writing_capture_runs.pass1_token_usage),
-                    pass2_token_usage = COALESCE(excluded.pass2_token_usage, writing_capture_runs.pass2_token_usage),
-                    discarded_count   = COALESCE(excluded.discarded_count, writing_capture_runs.discarded_count),
-                    records_count     = COALESCE(excluded.records_count, writing_capture_runs.records_count)
+                    -- 新 run 开始(processing)时清掉上一次的 completed_at / 错误信息 / 计数,
+                    -- 避免 UI 把残留旧字段当成本次的状态展示。
+                    completed_at      = CASE WHEN excluded.status='processing' THEN NULL
+                                              ELSE COALESCE(excluded.completed_at, writing_capture_runs.completed_at) END,
+                    error_message     = CASE WHEN excluded.status='processing' THEN NULL
+                                              ELSE COALESCE(excluded.error_message, writing_capture_runs.error_message) END,
+                    pass1_token_usage = CASE WHEN excluded.status='processing' THEN NULL
+                                              ELSE COALESCE(excluded.pass1_token_usage, writing_capture_runs.pass1_token_usage) END,
+                    pass2_token_usage = CASE WHEN excluded.status='processing' THEN NULL
+                                              ELSE COALESCE(excluded.pass2_token_usage, writing_capture_runs.pass2_token_usage) END,
+                    discarded_count   = CASE WHEN excluded.status='processing' THEN NULL
+                                              ELSE COALESCE(excluded.discarded_count, writing_capture_runs.discarded_count) END,
+                    records_count     = CASE WHEN excluded.status='processing' THEN NULL
+                                              ELSE COALESCE(excluded.records_count, writing_capture_runs.records_count) END
                 """,
                 arguments: [
                     "d": date, "status": status.rawValue, "runId": runId,
