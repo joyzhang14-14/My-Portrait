@@ -587,15 +587,22 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
+        // 列表"最后活动时间"= max(转录最后听到, speaker 表最后被改)。
+        // speakers.updated_at_ms 在 voice training / 改名 / addEmbedding 时
+        // bump,所以重训完没新转录时行也能立刻显示 just now(否则会停留
+        // 在多天前那条转录的时间,看着像没生效)。SQL 里只把两个原值
+        // SELECT 出来,max() 留给 Swift 算,绕开 SQLite 嵌套 aggregate 的
+        // 语法坑。
         let sql = """
             SELECT s.id, s.name,
                    COUNT(t.id) AS sample_count,
-                   MAX(t.transcribed_at_ms) AS last_heard
+                   MAX(t.transcribed_at_ms) AS last_transcribed,
+                   s.updated_at_ms AS speaker_updated
             FROM speakers s
             LEFT JOIN audio_transcriptions t ON t.speaker_id = s.id
             WHERE s.hallucination = 0
             GROUP BY s.id
-            ORDER BY last_heard DESC NULLS LAST, s.id DESC
+            ORDER BY speaker_updated DESC, s.id DESC
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -608,8 +615,12 @@ struct TimelineDB: Sendable {
             let id = sqlite3_column_int64(stmt, 0)
             let name = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
             let count = Int(sqlite3_column_int(stmt, 2))
-            let lastHeard: Int64? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
+            let lastTranscribed: Int64? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
                 ? nil : sqlite3_column_int64(stmt, 3)
+            let speakerUpdated: Int64 = sqlite3_column_int64(stmt, 4)
+            // 取较大者:重训过的 speaker 没新转录时 lastTranscribed 老,
+            // speakerUpdated 新;反之亦然。
+            let lastHeard: Int64 = max(lastTranscribed ?? 0, speakerUpdated)
             out.append(SpeakerListRow(id: id, name: name, sampleCount: count, lastHeardMs: lastHeard))
         }
         return out
