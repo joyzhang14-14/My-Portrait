@@ -265,8 +265,16 @@ final class ChatController {
                     self.store.touchConversation(convId)
                 }
 
-                // What Pi actually sees: context block ++ attachment refs ++ user question.
+                // What Pi actually sees:
+                //   [first turn only] SKILL preamble teaching it about `mp-query`
+                //   + chip-pinned context block (if user used @-picker)
+                //   + attachment refs
+                //   + user question
                 var sections: [String] = []
+                let isFirstTurnOfConv = (self.messages.count == 1)
+                if isFirstTurnOfConv {
+                    sections.append(MPQuerySkill.preamble)
+                }
                 if !context.markdown.isEmpty { sections.append(context.markdown) }
                 if !attachments.isEmpty {
                     let lines = attachments.map { a in
