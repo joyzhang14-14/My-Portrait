@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 /// `mp-query` CLI —— 给 AI agent(pi-coding-agent / Claude Code 等)用的
 /// 屏幕数据查询接口。设计端口自 screenpipe 的 SKILL.md(REST API),改成
@@ -71,7 +72,9 @@ enum MPQueryCLI {
                         "app_name": r.appName ?? "",
                         "window_name": r.windowName ?? "",
                         "browser_url": r.browserUrl ?? "",
-                        "text": r.ocrText.prefix(500).description
+                        // searchFrames 已经按 600 字符 snippet 截过(并居中
+                        // 在 query 周围),这里直接用,不再二次 prefix。
+                        "text": r.ocrText
                     ]
                 ])
             }
@@ -432,42 +435,102 @@ enum MPQueryCLI {
         db: TimelineDB, q: String?, appFilter: String?,
         start: Date, end: Date, limit: Int
     ) -> [FrameSearchResult] {
-        // 简化路径:用 TimelineDB.frames(on:) 拉那天的 frames,然后内存过滤
-        // 时间段 + app + text。OCR 文本通过 ocrText(forFrameIds:) 二次拉。
-        let candidates = db.frames(on: start, limit: 800)
-        var keep: [TimelineFrame] = []
-        let appLower = appFilter?.lowercased()
-        for f in candidates {
-            if f.timestamp < start || f.timestamp > end { continue }
-            if let appLower, !f.appName.lowercased().contains(appLower) { continue }
-            keep.append(f)
-            if keep.count >= limit * 3 { break }   // 多留点,文本过滤后再裁
+        // **per-frame SQL LIKE 直查** —— frames.full_text 每帧独立存 OCR,
+        // 直接 WHERE full_text LIKE '%q%' 命中精确帧。之前把所有帧 OCR 合
+        // 200k 大 blob 然后 substring 匹配,200k 一截大量帧丢了,而且匹配
+        // 粒度也丢了(blob 命中就 return 头 N 帧,不是真匹配的帧)。
+        var db_: OpaquePointer?
+        guard sqlite3_open_v2(db.dbPath, &db_, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
         }
-        // 批量拉 OCR text
-        let ids = keep.map { $0.id }
-        let ocrBlob = db.ocrText(forFrameIds: ids, maxChars: 200_000)
-        // ocrBlob 把所有 frame 文本合一了,这里不太能精确分配回每个 frame。
-        // 简化做法:把 ocrBlob 作为 "match haystack",如果 q 命中 blob 就保留
-        // 头 N 个 frame。要更精确需 per-frame text 查询接口。
-        let qLower = q?.lowercased()
+        defer { sqlite3_close(db_) }
+
+        // SQL 拼接:基础时间段过滤,可选 app + q 子句。
+        var sql = """
+            SELECT id, timestamp_ms, app_name,
+                   COALESCE(window_name, ''),
+                   COALESCE(browser_url, ''),
+                   COALESCE(full_text, '')
+            FROM frames
+            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
+              AND app_name IS NOT NULL AND app_name != ''
+            """
+        if appFilter != nil {
+            sql += " AND LOWER(app_name) LIKE ?"
+        }
+        if q != nil {
+            // 命中 OCR 全文,或者窗口标题(用户搜 "Gmail" 也能命中 "Gmail - 浏览…")
+            sql += " AND (LOWER(full_text) LIKE ? OR LOWER(window_name) LIKE ?)"
+        }
+        sql += " ORDER BY timestamp_ms DESC LIMIT ?"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db_, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        let TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        var bindIdx: Int32 = 1
+        sqlite3_bind_int64(stmt, bindIdx, Int64(start.timeIntervalSince1970 * 1000))
+        bindIdx += 1
+        sqlite3_bind_int64(stmt, bindIdx, Int64(end.timeIntervalSince1970 * 1000))
+        bindIdx += 1
+        if let appLower = appFilter?.lowercased() {
+            sqlite3_bind_text(stmt, bindIdx, "%\(appLower)%", -1, TRANSIENT)
+            bindIdx += 1
+        }
+        if let qLower = q?.lowercased() {
+            let pat = "%\(qLower)%"
+            sqlite3_bind_text(stmt, bindIdx, pat, -1, TRANSIENT)
+            bindIdx += 1
+            sqlite3_bind_text(stmt, bindIdx, pat, -1, TRANSIENT)
+            bindIdx += 1
+        }
+        sqlite3_bind_int(stmt, bindIdx, Int32(limit))
+
         var out: [FrameSearchResult] = []
-        for f in keep {
-            if let qLower {
-                let hayWin = f.windowName.lowercased()
-                let hayBlob = ocrBlob.lowercased()
-                if !hayWin.contains(qLower) && !hayBlob.contains(qLower) { continue }
-            }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let ts = sqlite3_column_int64(stmt, 1)
+            let app = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
+            let win = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
+            let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) } ?? ""
+            let full = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) } ?? ""
+            // 截 OCR 文本 ~600 字符给 AI(全文太大撑爆 context)。
+            let snippet = extractSnippet(fullText: full, query: q, maxChars: 600)
             out.append(.init(
-                id: f.id,
-                timestamp: f.timestamp,
-                appName: f.appName,
-                windowName: f.windowName,
-                browserUrl: f.browserUrl,
-                ocrText: ""   // 整 blob 太大,这里只回元数据;详情用 frame 子命令
+                id: id,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
+                appName: app,
+                windowName: win,
+                browserUrl: url.isEmpty ? nil : url,
+                ocrText: snippet
             ))
-            if out.count >= limit { break }
         }
         return out
+    }
+
+    /// 从一整段 OCR 文本里抠 query 周围 ~600 字符的窗口,AI 能直接看到上下文。
+    /// 没 query / 没命中 → 返头部 600 字符。
+    private static func extractSnippet(fullText: String, query: String?, maxChars: Int) -> String {
+        guard !fullText.isEmpty else { return "" }
+        guard let q = query, !q.isEmpty,
+              let range = fullText.range(of: q, options: .caseInsensitive) else {
+            return String(fullText.prefix(maxChars))
+        }
+        let lower = max(fullText.startIndex,
+                        fullText.index(range.lowerBound,
+                                       offsetBy: -maxChars / 3,
+                                       limitedBy: fullText.startIndex)
+                          ?? fullText.startIndex)
+        let upper = min(fullText.endIndex,
+                        fullText.index(range.upperBound,
+                                       offsetBy: maxChars * 2 / 3,
+                                       limitedBy: fullText.endIndex)
+                          ?? fullText.endIndex)
+        var snip = String(fullText[lower..<upper])
+        if lower != fullText.startIndex { snip = "…" + snip }
+        if upper != fullText.endIndex { snip = snip + "…" }
+        return snip
     }
 
     private static func searchTranscripts(
