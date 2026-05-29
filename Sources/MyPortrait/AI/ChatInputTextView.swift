@@ -23,6 +23,9 @@ struct ChatInputTextView: NSViewRepresentable {
     var onSubmit: () -> Void
     /// 文本任何变化时调一次。用来嗅探 "@" → 弹 picker。
     var onTextChange: ((_ old: String, _ new: String) -> Void)? = nil
+    /// 粘贴 / 拖拽进来一组 attachment(图片字节 + 文件 URL 混合)。
+    /// SwiftUI 那边把这些 append 到 `attachments` state 即可。
+    var onAttachmentsPasted: (([Attachment]) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -56,6 +59,9 @@ struct ChatInputTextView: NSViewRepresentable {
         textView.textContainer?.containerSize = NSSize(
             width: 0, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
+
+        // 接受图片 / 文件拖入(粘贴走 paste(_:) 那条路,不依赖这里注册的类型)。
+        textView.registerForDraggedTypes([.fileURL, .png, .tiff, .pdf])
 
         scroll.documentView = textView
         scroll.contentView.postsBoundsChangedNotifications = true
@@ -140,6 +146,92 @@ final class PaddedTextView: NSTextView {
         let origin = NSPoint(x: inset.width + (textContainer?.lineFragmentPadding ?? 0),
                              y: inset.height)
         placeholderString.draw(at: origin, withAttributes: attrs)
+    }
+
+    // MARK: - Paste(图片 / 文件 → attachment,文本 → 默认)
+
+    /// ⌘V 触发。NSTextView 默认 paste 会尝试把图片 / 文件转成 inline 富文本,
+    /// 我们 isRichText = false 时它直接吃掉啥也不做。重写一下:
+    ///   1. 剪贴板有 file URL → AttachmentStore.wrap 每个 url → 推 attachments
+    ///   2. 剪贴板有图片字节 → AttachmentStore.save → 推 attachments
+    ///   3. 啥都没有(纯文本) → super.paste(_:) 走默认插入
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        var attachments: [Attachment] = []
+
+        // 1. 文件 URL —— Finder 拷的文件、Notes app 里拷的附件等
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           !urls.isEmpty {
+            for url in urls where url.isFileURL {
+                attachments.append(AttachmentStore.wrap(fileURL: url))
+            }
+        }
+
+        // 2. 没拿到 URL 时,试图片字节(截图 / 浏览器拖来的图)
+        if attachments.isEmpty {
+            if let imgs = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+               !imgs.isEmpty {
+                for img in imgs {
+                    guard let tiff = img.tiffRepresentation,
+                          let rep = NSBitmapImageRep(data: tiff),
+                          let png = rep.representation(using: .png, properties: [:])
+                    else { continue }
+                    if let att = AttachmentStore.save(
+                        data: png, suggestedName: "pasted.png", isImage: true
+                    ) {
+                        attachments.append(att)
+                    }
+                }
+            }
+        }
+
+        if !attachments.isEmpty {
+            coordinator?.parent.onAttachmentsPasted?(attachments)
+            return   // 吃掉这次粘贴,不让文本路径再跑
+        }
+
+        // 3. 纯文本 —— 默认 NSTextView 行为
+        super.paste(sender)
+    }
+
+    // MARK: - 拖拽放进来
+
+    /// 用户从 Finder / 浏览器把文件 / 图片直接拖到输入框。复用 paste 的同款分流。
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+        var attachments: [Attachment] = []
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            for url in urls where url.isFileURL {
+                attachments.append(AttachmentStore.wrap(fileURL: url))
+            }
+        }
+        if attachments.isEmpty,
+           let imgs = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
+            for img in imgs {
+                guard let tiff = img.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:])
+                else { continue }
+                if let att = AttachmentStore.save(
+                    data: png, suggestedName: "dropped.png", isImage: true
+                ) { attachments.append(att) }
+            }
+        }
+        if !attachments.isEmpty {
+            coordinator?.parent.onAttachmentsPasted?(attachments)
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // 接受文件 / 图片拖入。文本拖入仍走 NSTextView 默认。
+        let pb = sender.draggingPasteboard
+        if pb.canReadObject(forClasses: [NSURL.self], options: nil)
+            || pb.canReadObject(forClasses: [NSImage.self], options: nil) {
+            return .copy
+        }
+        return super.draggingEntered(sender)
     }
 
     /// 算当前内容的自然渲染高度(含上下 inset)。空 = 单行高 + inset。
