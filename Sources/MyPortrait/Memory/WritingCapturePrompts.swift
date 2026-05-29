@@ -126,7 +126,7 @@ enum WritingCapturePrompts {
       optional user_languages
     - raw_sessions: every session inside this group, each with multi-source data:
       [{session_id, start_ts, end_ts, keystroke_text, keystroke_count,
-        typing_events, keystroke_log, ocr_frames}, ...]
+        typing_events, keystroke_log, ocr_frames, canvas_edits}, ...]
 
       **MULTI-SOURCE CROSS-VALIDATION — read carefully:**
 
@@ -155,6 +155,19 @@ enum WritingCapturePrompts {
         - Use `shortcut` directly for self-paste vs external-paste judgement;
           don't re-derive from char+mods.
         - Shortcut presses are NOT user "typing" the literal letter.
+
+      canvas_edits[*] is the EDITING-PROCESS signal for canvas apps (Google Docs /
+      Figma / web editors that expose no AX text). Present ONLY when typing_events
+      is empty/sparse. Each entry is a between-OCR-frame change, already
+      scroll-filtered (only intervals with real character/delete keystrokes kept):
+        [{ts, kind, before, after}]
+        - kind="commit" → text grew in that interval; `after` is the new middle
+          region, `before` is what was there before (common head/tail trimmed).
+        - kind="delete" → user removed > 10 chars; `before` is what was removed.
+        - This is your PRIMARY source for "how the user wrote it" (revision habits:
+          how much they add vs delete, whether they revise heavily) on canvas apps.
+        - Reconstruct each record's edit_log from canvas_edits when present, instead
+          of from typing_events. The FINAL text = the longest / last ocr_frame.
 
     INTERPRETIVE PRIORITY when sources disagree
     - If keystroke is present and consistent with typing_events.text (or its IME

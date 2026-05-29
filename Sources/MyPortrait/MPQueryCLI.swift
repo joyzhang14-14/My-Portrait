@@ -31,12 +31,103 @@ enum MPQueryCLI {
         case "activity-summary":  runActivitySummary(args: rest)
         case "memories":          runMemories(args: rest)
         case "audio":             runAudio(args: rest)
+        case "writing":           runWriting(args: rest)
         case "help", "--help", "-h":
             printUsage()
             exit(0)
         default:
             errJSON("unknown subcommand: \(sub). try `mp-query help`.")
         }
+    }
+
+    /// `writing` —— 搜 writing_records 表(LLM 整理过的用户实际书写内容)。
+    /// **这是最高保真度的数据源** —— OCR 只能看屏幕上呈现的文字(很多是
+    /// 截断的、滚动过的、garbled),writing_records 是 typing 流 + AX 全文 +
+    /// LLM 修正后的"用户真写了什么",带 app / url / context_summary。
+    ///
+    /// 用户问"我之前写过的关于 X 的内容"时,**这条比 search 更准**。
+    private static func runWriting(args: [String]) -> Never {
+        let opts = parseOpts(args)
+        let start = parseTime(opts["start"], anchor: .start) ?? Date().addingTimeInterval(-30 * 86400)
+        let end = parseTime(opts["end"], anchor: .end) ?? Date()
+        let q = opts["q"]?.lowercased()
+        let appFilter = opts["app"]?.lowercased()
+        let limit = Int(opts["limit"] ?? "10") ?? 10
+
+        let db = TimelineDB()
+        guard db.exists else { errJSON("timeline DB not found at \(db.dbPath)") }
+
+        var db_: OpaquePointer?
+        guard sqlite3_open_v2(db.dbPath, &db_, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            errJSON("could not open DB read-only")
+        }
+        defer { sqlite3_close(db_) }
+
+        var sql = """
+            SELECT id, start_ts, end_ts, app,
+                   COALESCE(url, ''),
+                   text,
+                   COALESCE(context_summary, '')
+            FROM writing_records
+            WHERE start_ts >= ? AND start_ts <= ?
+            """
+        if appFilter != nil { sql += " AND LOWER(app) LIKE ?" }
+        if q != nil {
+            sql += " AND (LOWER(text) LIKE ? OR LOWER(COALESCE(context_summary, '')) LIKE ?)"
+        }
+        sql += " ORDER BY start_ts DESC LIMIT ?"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db_, sql, -1, &stmt, nil) == SQLITE_OK else {
+            errJSON("sql prepare failed")
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        var bi: Int32 = 1
+        sqlite3_bind_int64(stmt, bi, Int64(start.timeIntervalSince1970 * 1000)); bi += 1
+        sqlite3_bind_int64(stmt, bi, Int64(end.timeIntervalSince1970 * 1000)); bi += 1
+        if let appLower = appFilter {
+            sqlite3_bind_text(stmt, bi, "%\(appLower)%", -1, TRANSIENT); bi += 1
+        }
+        if let qLower = q {
+            let pat = "%\(qLower)%"
+            sqlite3_bind_text(stmt, bi, pat, -1, TRANSIENT); bi += 1
+            sqlite3_bind_text(stmt, bi, pat, -1, TRANSIENT); bi += 1
+        }
+        sqlite3_bind_int(stmt, bi, Int32(limit))
+
+        var out: [[String: Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let startTs = sqlite3_column_int64(stmt, 1)
+            let endTs = sqlite3_column_int64(stmt, 2)
+            let app = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
+            let url = sqlite3_column_text(stmt, 4).flatMap { String(cString: $0) } ?? ""
+            let text = sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) } ?? ""
+            let summary = sqlite3_column_text(stmt, 6).flatMap { String(cString: $0) } ?? ""
+            // text 字段是用户实际书写的全文,可能很长 —— 返完整给 AI,
+            // 它能引用具体段落。limit 已经控制条数,单条上限也设个 ~2k。
+            let truncated = text.count > 2000
+                ? String(text.prefix(2000)) + "…[truncated]"
+                : text
+            out.append([
+                "id": id,
+                "start_time": iso8601(Date(timeIntervalSince1970: TimeInterval(startTs) / 1000)),
+                "end_time": iso8601(Date(timeIntervalSince1970: TimeInterval(endTs) / 1000)),
+                "app": app,
+                "url": url,
+                "context": summary,
+                "text": truncated
+            ])
+        }
+        emitJSON([
+            "data": out,
+            "start_time": iso8601(start),
+            "end_time": iso8601(end),
+            "result_count": out.count,
+            "query": q ?? NSNull()
+        ])
     }
 
     // MARK: - Subcommands

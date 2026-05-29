@@ -31,6 +31,10 @@ struct WritingCaptureStep0 {
     ///   0.85:大部分 chrome 不变帧合并,5/23 实测 23K tokens
     ///   0.50:连用户打字过程中的中间状态也合并,只留终态 + 显著变化的帧
     static let ocrJaccardThreshold = 0.50
+    /// canvas 编辑重建的触发阈值:session typing_events 总字数 ≤ 此值才认为
+    /// 是 AX 稀疏的 canvas,跑 CanvasEditReconstructor;超过则信 AX edit_log。
+    /// 跟 Pass2 的 pass2AxPathTypingThreshold(50)对齐。
+    static let canvasReconstructTypingThreshold = 50
     /// throwaway preview 截断长度
     static let throwawayPreviewLen = 80
     /// **OCR 反向 join 窗口**:一个 session 只保留"typing / keystroke 事件
@@ -200,6 +204,14 @@ struct WritingCaptureStep0 {
                 ocrFrames: dedupedFrames
             )
             let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
+            // canvas 编辑过程:仅 AX 稀疏 session 才重建(typing_events 字数少 →
+            // AX 拿不到 canvas 内容)。跑在 dedup 前的 raw sessionFrames 上。
+            let typingTotalChars = sessionTyping.map { $0.text.count }.reduce(0, +)
+            let canvasEdits: [CanvasEditReconstructor.Event] =
+                typingTotalChars <= canvasReconstructTypingThreshold
+                ? CanvasEditReconstructor.reconstruct(
+                    frames: sessionFrames, keystrokes: sessionKeys)
+                : []
             result.append(WritingCaptureRawSession(
                 id: id,
                 app: acc.app,
@@ -210,7 +222,8 @@ struct WritingCaptureStep0 {
                 keystrokes: sessionKeys,
                 ocrFrames: dedupedFrames,
                 maxContentChars: maxChars,
-                axFrameCount: axCount
+                axFrameCount: axCount,
+                canvasEdits: canvasEdits
             ))
         }
         return result
@@ -510,7 +523,8 @@ struct WritingCaptureStep0 {
                 keystrokes: keys,
                 ocrFrames: frames,
                 maxContentChars: members.map(\.maxContentChars).max() ?? 0,
-                axFrameCount: members.map(\.axFrameCount).reduce(0, +)
+                axFrameCount: members.map(\.axFrameCount).reduce(0, +),
+                canvasEdits: members.flatMap(\.canvasEdits).sorted { $0.ts < $1.ts }
             )
             merged.append(combined)
         }
