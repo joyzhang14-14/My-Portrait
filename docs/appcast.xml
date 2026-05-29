@@ -12,6 +12,43 @@
         -->
 
         <item>
+            <title>Version 1.1.16</title>
+            <pubDate>Fri, 29 May 2026 03:30:00 +0000</pubDate>
+            <sparkle:version>160</sparkle:version>
+            <sparkle:shortVersionString>1.1.16</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Writing capture got a major rebuild this week. Plus a system-audio crash fix.</p>
+                <h3>Writing capture — accuracy overhaul</h3>
+                <ul>
+                    <li><strong>Browser writing is now captured properly.</strong> Safari / Chrome / Arc force a Vision OCR pass instead of trusting the accessibility tree's "fast path" (which would routinely report empty / stale text for Google Docs, Notion, browser textareas). A one-shot backfill CLI re-OCR'd today's Safari + Google Doc frames so the new pipeline has clean source data.</li>
+                    <li><strong>Canvas editor support.</strong> Google Docs, Notion, browser-based editors — Pass 2 now reconstructs your edit history by fanning out per-window subagents with adaptive chrome-token filtering. The output matches the document's native version history.</li>
+                    <li><strong>Pass 4: three-source router.</strong> Each writing record now has an explicit route field that says where the source text came from — accessibility-cleaned, canvas-fusion, or merged. The router decides per (app, url) which source to trust, with AX authenticity checks for cases where the accessibility tree is partial.</li>
+                    <li><strong>Pass 3 keystroke-support filter improvements.</strong> Records require actual typing evidence in their time window — but canvas editors get an exemption based on keystroke count (not text patterns), so long-form writing in Google Docs isn't filtered out just because the OCR text doesn't repeat the typed characters verbatim. The canvas exemption also now excludes "AI replies you read" and "content you only scrolled through".</li>
+                    <li><strong>Frame URL attribution for keystrokes.</strong> Every keystroke is now attributed to the URL of the frame active at that moment — so writing in tab A and tab B doesn't get merged.</li>
+                </ul>
+                <h3>System audio</h3>
+                <ul>
+                    <li>Toggling system audio off no longer crashes the app. The shutdown sequence now properly unbinds the AVAudioEngine from the aggregate device before destroying it, and every step is wrapped in an ObjC NSException guard so HAL-level errors gracefully log instead of killing the process.</li>
+                </ul>
+                <h3>AI chat / mp-query</h3>
+                <ul>
+                    <li>The AI can now query <code>writing_records</code> directly via a new <code>mp-query writing</code> subcommand. When you ask "find the answer I wrote about X", the model goes to the LLM-distilled writing records first instead of guessing from raw OCR.</li>
+                    <li><code>mp-query search</code> rewritten to use per-frame SQL LIKE on <code>frames.full_text</code>. Previously the OCR for the whole time window was merged into a 200k blob before substring-matching, which threw away which frame actually matched. Now each match returns its real frame + a 600-char snippet centered on the query.</li>
+                    <li>Chat input box accepts ⌘V paste and drag-drop for images / files. Paperclip button still works the same way.</li>
+                </ul>
+                <h3>Scheduler</h3>
+                <ul>
+                    <li>Daily-frequency cron jobs now have a catch-up branch: if the app was closed during a job's scheduled time (e.g. 23:45), it runs as soon as the app comes back up the next day, instead of waiting another 24 hours.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.1.16/MyPortrait-1.1.16.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="lKomYaKhXnCKCdpuH5VbCVA+L4m3gbFu7f1oj/StYpndV/AdHFtUieES1JF+LnW9lv0cva7sDfcjLsz5JztPDg==" length="44948672" />
+        </item>
+
+        <item>
             <title>Version 1.1.0</title>
             <pubDate>Thu, 28 May 2026 05:20:00 +0000</pubDate>
             <sparkle:version>144</sparkle:version>
