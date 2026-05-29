@@ -18,7 +18,9 @@ actor FocusProbe {
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "focus")
 
     /// 9 个浏览器 bundle ID。命中其中之一才尝试抓 URL。
-    private static let browserBundleIds: Set<String> = [
+    /// 也用于 OCRService:浏览器系 AX 文本是 chrome(tab bar / 工具栏),
+    /// 不能当 canvas 内容用,必须跑 Vision OCR。
+    static let browserBundleIds: Set<String> = [
         "com.google.Chrome",
         "com.apple.Safari",
         "com.microsoft.edgemac",
