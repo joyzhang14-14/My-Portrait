@@ -155,7 +155,36 @@ final class PaddedTextView: NSTextView {
     ///   1. 剪贴板有 file URL → AttachmentStore.wrap 每个 url → 推 attachments
     ///   2. 剪贴板有图片字节 → AttachmentStore.save → 推 attachments
     ///   3. 啥都没有(纯文本) → super.paste(_:) 走默认插入
+    /// ⌘V 主拦截。NSTextView 默认有 3 个 paste 入口(paste / pasteAsPlainText
+    /// / pasteAsRichText),isRichText=false 时系统选哪个不确定,而且
+    /// 剪贴板只有图片字节时它可能直接走"无内容"返回。直接拦键事件最稳。
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // ⌘V (没有 shift / option / control)
+        if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+           event.charactersIgnoringModifiers == "v" {
+            if tryPasteAttachments() { return true }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func paste(_ sender: Any?) {
+        if tryPasteAttachments() { return }
+        super.paste(sender)
+    }
+
+    /// isRichText=false 时 macOS 偶尔走这条而不是 paste(_:)。
+    override func pasteAsPlainText(_ sender: Any?) {
+        if tryPasteAttachments() { return }
+        super.pasteAsPlainText(sender)
+    }
+
+    override func pasteAsRichText(_ sender: Any?) {
+        if tryPasteAttachments() { return }
+        super.pasteAsRichText(sender)
+    }
+
+    /// 真正的 attachment 处理。返 true = 吃掉粘贴,返 false = 让文本走默认。
+    private func tryPasteAttachments() -> Bool {
         let pb = NSPasteboard.general
         var attachments: [Attachment] = []
 
@@ -167,7 +196,7 @@ final class PaddedTextView: NSTextView {
             }
         }
 
-        // 2. 没拿到 URL 时,试图片字节(截图 / 浏览器拖来的图)
+        // 2. 没拿到 URL 时,试图片字节(截图 / 浏览器 Copy Image 来的)
         if attachments.isEmpty {
             if let imgs = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
                !imgs.isEmpty {
@@ -185,13 +214,14 @@ final class PaddedTextView: NSTextView {
             }
         }
 
-        if !attachments.isEmpty {
-            coordinator?.parent.onAttachmentsPasted?(attachments)
-            return   // 吃掉这次粘贴,不让文本路径再跑
+        guard !attachments.isEmpty else { return false }
+        // 主线程 dispatch — onAttachmentsPasted 触碰 SwiftUI state,paste 调用
+        // 路径上下文可能不在 main runloop tick,直接改 state 偶发引发布局崩。
+        let payload = attachments
+        DispatchQueue.main.async { [weak self] in
+            self?.coordinator?.parent.onAttachmentsPasted?(payload)
         }
-
-        // 3. 纯文本 —— 默认 NSTextView 行为
-        super.paste(sender)
+        return true
     }
 
     // MARK: - 拖拽放进来
