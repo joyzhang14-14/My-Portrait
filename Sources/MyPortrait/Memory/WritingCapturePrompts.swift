@@ -476,25 +476,23 @@ enum WritingCapturePrompts {
       from OCR of the document on screen. The keystroke_text for the window WILL
       look unrelated (pinyin fragments, Chinese chat from a side window, paste
       events, or near-empty) — THIS IS EXPECTED and is NOT grounds to discard.
-    - KEEP only if the text is THE USER'S OWN authored writing (their essay,
-      article, notes, structured prose they are composing). Mismatched keystrokes
-      are the NORMAL canvas signature, not a reason to drop the user's own doc.
-
-    BUT — canvas OCR captures WHATEVER is on screen, NOT always the user's writing.
-    DISCARD a canvas record when the text is clearly NOT authored by the user, even
-    if coherent long-form:
-    - An AI ASSISTANT'S REPLY / coaching / instructions addressed TO the user
-      (Claude / ChatGPT / Gemini desktop chat). Tells: second-person address
-      ("你跟我说的…", "you should…", "下一步:"), numbered advice, meta-commentary
-      ABOUT the user's writing rather than the writing itself, openers like
-      "好。停一下——". This is the model talking to the user → NOT the user's
-      writing → DISCARD.
-    - A CONVERSATION mixing both sides where the bulk is the assistant's turns.
-    - Content the user is READING (articles / docs others wrote / search results).
-    - Garbage (OCR-scrambled salad, chrome labels, empty).
-    Rule of thumb: KEEP a canvas record only when it reads as ONE coherent piece
-    the USER is writing in their own voice — not someone talking to them, not a
-    chat log, not something being read.
+    - The keystroke_TEXT won't match the body char-for-char (IME pinyin, paste,
+      canvas swallow) — that text mismatch alone is NOT a reason to discard.
+    - BUT keystroke_COUNT is still a VOLUME check, and it is the deciding signal:
+      did the user physically type enough to have AUTHORED this text?
+        * Rough need: ASCII text ≈ 0.5× its length in keystrokes; IME/Chinese ≈
+          1.5–3× the CJK char count (latin phonetic). Pasting one's OWN earlier
+          draft also counts (has_cut_event, or has_paste_event of the user's own
+          prior text).
+        * If keystroke_count is FAR below that need AND there is no own-paste/cut
+          evidence, the BULK of the on-screen text was NOT produced by the user.
+          Canvas OCR grabbed whatever was on screen — an AI assistant's reply,
+          a chat the user is reading, an article, search results → DISCARD.
+        * If keystroke_count plausibly supports authoring (or own-paste/cut),
+          KEEP — this is the user's own document, mismatched keystroke text and all.
+    Do NOT pattern-match on wording or tone; decide by keystroke VOLUME vs text
+    length. (A long screen of text with only a handful of keystrokes in the window
+    is content the user was reading/receiving, not writing.)
 
     DISCARD a record when ALL of:
     - keystroke_count is far below what text.length would require AND not
