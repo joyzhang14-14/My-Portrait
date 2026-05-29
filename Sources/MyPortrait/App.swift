@@ -299,6 +299,10 @@ struct MyPortraitApp: App {
         } else if args.contains("--writing-capture-backlog") {
             WritingCaptureCLI.runBacklog()
         }
+        // 一次性 backfill:今日 Safari Google Doc 帧重跑 Vision OCR
+        if args.contains("--reocr-google-docs-today") {
+            ReOcrCLI.runGoogleDocsToday()
+        }
         if args.contains("--writing-capture-backlog-approve") {
             WritingCaptureCLI.approveBacklog()
         }
