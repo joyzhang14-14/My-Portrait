@@ -50,11 +50,15 @@ struct WritingCaptureStep0 {
     ) -> WritingCaptureStep0Output {
 
         // 1. 切 session —— 用统一 activity timeline
-        let allSessions = segmentSessions(
+        let segmented = segmentSessions(
             typingEvents: typingEvents,
             keystrokes: keystrokes,
             ocrFrames: rawOcrFrames
         )
+
+        // 切割 + AX 真伪判断改到 Pass 4(LLM 判,非 canvas session)。Step 0 只切
+        // session,不按消息再切。见 memory: project_local_model_target。
+        let allSessions = segmented
 
         // 2. throwaway 过滤 —— 只过滤"纯 OCR 噪音"(0 typing + OCR 太短)。
         // 任何 typing_events 一律直通(短输出是 speech-style 信号,LLM 判 kind)。
@@ -209,10 +213,17 @@ struct WritingCaptureStep0 {
                 )
             }
             let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
-            // canvas(AX 稀疏)session:用时间桶粗快照保留编辑进程 + 自适应
-            // chrome 词表;普通 session 走 Jaccard dedup 省 token。
+            // canvas(真·自绘文档编辑器)判定:typing 极少 **且 OCR 内容远超
+            // typing**(OCR 才是真内容,typing 只是 "i"/"a" 之类残渣)。
+            // 只看 typing<=50 会误判聊天 app —— Discord/WeChat 一个 session 几条
+            // 短消息也 <50,但那些 typing_events 就是消息本身,该 explode 切,
+            // 不该走 canvas OCR。加 "OCR 主导" 条件区分:gdoc OCR 2900 >> typing
+            // 10(290×);聊天 OCR 跟 typing 同量级。
             let typingTotalChars = sessionTyping.map { $0.text.count }.reduce(0, +)
+            let ocrMaxChars = sessionFrames.map { $0.text.count }.max() ?? 0
             let isCanvas = typingTotalChars <= canvasTypingThreshold
+                && ocrMaxChars > typingTotalChars * 10
+                && ocrMaxChars >= 200
             let outFrames: [WritingCaptureOcrFrame]
             let chromeTokens: [String]
             if isCanvas {
