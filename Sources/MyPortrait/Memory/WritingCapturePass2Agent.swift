@@ -508,9 +508,6 @@ private struct RawSessionPayload: Encodable {
     let typingEvents: [TypingEventPayload]
     let keystrokeLog: [KeystrokePayload]
     let ocrFrames: [WritingCaptureOcrFrame]
-    /// canvas 编辑过程(相邻 OCR 帧中段 diff)。AX 拿不到内容时,这是用户
-    /// "怎么写的"的唯一来源。空数组表示该 session 走 AX 路径。
-    let canvasEdits: [CanvasEditReconstructor.Event]
 
     enum CodingKeys: String, CodingKey {
         case sessionId    = "session_id"
@@ -523,7 +520,6 @@ private struct RawSessionPayload: Encodable {
         case typingEvents   = "typing_events"
         case keystrokeLog   = "keystroke_log"
         case ocrFrames      = "ocr_frames"
-        case canvasEdits    = "canvas_edits"
     }
 
     init(_ s: WritingCaptureRawSession, includeAxText: Bool = true) {
@@ -539,7 +535,6 @@ private struct RawSessionPayload: Encodable {
         self.typingEvents = includeAxText ? s.typingEvents.map(TypingEventPayload.init) : []
         self.keystrokeLog = s.keystrokes.map(KeystrokePayload.init)
         self.ocrFrames = s.ocrFrames
-        self.canvasEdits = s.canvasEdits
     }
 
     /// 把 keystrokes 拼成一条「真实敲了什么」的字符串。

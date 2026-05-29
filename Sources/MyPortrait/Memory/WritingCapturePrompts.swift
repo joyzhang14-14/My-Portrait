@@ -126,7 +126,7 @@ enum WritingCapturePrompts {
       optional user_languages
     - raw_sessions: every session inside this group, each with multi-source data:
       [{session_id, start_ts, end_ts, keystroke_text, keystroke_count,
-        typing_events, keystroke_log, ocr_frames, canvas_edits}, ...]
+        typing_events, keystroke_log, ocr_frames}, ...]
 
       **MULTI-SOURCE CROSS-VALIDATION — read carefully:**
 
@@ -156,18 +156,30 @@ enum WritingCapturePrompts {
           don't re-derive from char+mods.
         - Shortcut presses are NOT user "typing" the literal letter.
 
-      canvas_edits[*] is the EDITING-PROCESS signal for canvas apps (Google Docs /
-      Figma / web editors that expose no AX text). Present ONLY when typing_events
-      is empty/sparse. Each entry is a between-OCR-frame change, already
-      scroll-filtered (only intervals with real character/delete keystrokes kept):
-        [{ts, kind, before, after}]
-        - kind="commit" → text grew in that interval; `after` is the new middle
-          region, `before` is what was there before (common head/tail trimmed).
-        - kind="delete" → user removed > 10 chars; `before` is what was removed.
-        - This is your PRIMARY source for "how the user wrote it" (revision habits:
-          how much they add vs delete, whether they revise heavily) on canvas apps.
-        - Reconstruct each record's edit_log from canvas_edits when present, instead
-          of from typing_events. The FINAL text = the longest / last ocr_frame.
+    CANVAS EDIT-HISTORY RECONSTRUCTION (Google Docs / Figma / web editors, no AX)
+      When typing_events is empty/sparse, reconstruct the edit_log YOURSELF by
+      comparing the DOCUMENT BODY across consecutive ocr_frames over time:
+        - ocr_frames are time-ordered snapshots of the screen. Each contains app /
+          browser CHROME (tab bar, address bar, menu/toolbar, "saving…/saved"
+          indicators, file name) PLUS the document body. IGNORE the chrome — only
+          compare the body prose.
+        - A paragraph/sentence that APPEARS in a later frame and wasn't in an
+          earlier one → a "commit" edit (the user wrote it). Use the new body text.
+        - A paragraph/sentence that was present then GONE in a later frame, with a
+          net reduction > ~15 chars of real prose → a "delete" edit. Record what
+          was removed in the edit entry text.
+        - This is for revision habits: how much the user adds vs deletes, whether
+          they revise heavily. The FINAL record text = the most complete / last
+          body state across the frames.
+
+      CRITICAL — DO NOT INVENT EDITS. Accuracy beats completeness here:
+        - If you are NOT confident a change is a real body edit (could be OCR
+          jitter, word-order scramble, scrolling, or chrome churn), DO NOT emit an
+          edit for it. A missed edit is fine; a fabricated edit is NOT.
+        - NEVER turn chrome text (URLs, tab names, "saving", toolbar labels, app
+          names) into an edit_log entry.
+        - When unsure, emit a SHORTER edit_log with only the edits you are sure of,
+          or an empty edit_log — never pad it with noise.
 
     INTERPRETIVE PRIORITY when sources disagree
     - If keystroke is present and consistent with typing_events.text (or its IME
