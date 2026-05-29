@@ -499,6 +499,8 @@ final class Services {
     private func applyScreenCapture(enabled: Bool) {
         let coordinator = self.coordinator
         let logger = self.logger
+        // 通知 StallDetector:用户关 toggle 后无帧是预期。
+        IntentionalPauseState.shared.captureDisabled = !enabled
         Task.detached(priority: .userInitiated) {
             if enabled {
                 do {

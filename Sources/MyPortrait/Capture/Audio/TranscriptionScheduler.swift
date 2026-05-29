@@ -110,6 +110,8 @@ actor TranscriptionScheduler {
             }
         }
 
+        // 健康度起点。StallDetector 用 uptime > 120s 跳 warmup 误报。
+        await AudioMetrics.shared.markStarted()
         logger.info("TranscriptionScheduler started (event-driven via PowerWatcher + 60s fallback)")
     }
 
@@ -150,6 +152,9 @@ actor TranscriptionScheduler {
         )
         do {
             _ = try await db.insertAudioChunk(record)
+            // 健康度埋点:成功入库一段(VAD 已过)。chunksProduced > 0 即说明
+            // 音频管线在真正出活,audioNeverCaptured stall 不会误报。
+            await AudioMetrics.shared.recordChunkProduced()
         } catch {
             logger.error("DB insertAudioChunk failed (segment will be re-tried next launch via filesystem scan): \(String(describing: error), privacy: .public)")
         }
@@ -315,6 +320,9 @@ actor TranscriptionScheduler {
                 try await db.insertTranscription(record)
             }
             try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
+            // 健康度埋点:成功转录并落 DB。Driver 比 chunksProduced 跟 chunksTranscribed
+            // 拉差,持续走宽 → audio 路径正常。
+            await AudioMetrics.shared.recordChunkTranscribed()
         } catch {
             logger.error("DB insertTranscription failed: \(String(describing: error), privacy: .public)")
             try? await db.recordAudioChunkFailure(chunkId: chunkId)
