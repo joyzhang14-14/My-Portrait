@@ -476,13 +476,25 @@ enum WritingCapturePrompts {
       from OCR of the document on screen. The keystroke_text for the window WILL
       look unrelated (pinyin fragments, Chinese chat from a side window, paste
       events, or near-empty) — THIS IS EXPECTED and is NOT grounds to discard.
-    - If the text is a COHERENT long-form document in a language the user writes
-      (a multi-paragraph essay, article, structured prose) → KEEP IT. The OCR of
-      the on-screen document IS the evidence; keystrokes are not the source here.
-    - Mismatched keystrokes ("evidence shows Chinese chat, not this English essay")
-      is the NORMAL canvas signature, NOT a reason to discard. Only discard a
-      canvas record if the TEXT ITSELF is garbage (OCR-scrambled word salad, chrome
-      labels, empty) — never because keystrokes don't match a coherent document.
+    - KEEP only if the text is THE USER'S OWN authored writing (their essay,
+      article, notes, structured prose they are composing). Mismatched keystrokes
+      are the NORMAL canvas signature, not a reason to drop the user's own doc.
+
+    BUT — canvas OCR captures WHATEVER is on screen, NOT always the user's writing.
+    DISCARD a canvas record when the text is clearly NOT authored by the user, even
+    if coherent long-form:
+    - An AI ASSISTANT'S REPLY / coaching / instructions addressed TO the user
+      (Claude / ChatGPT / Gemini desktop chat). Tells: second-person address
+      ("你跟我说的…", "you should…", "下一步:"), numbered advice, meta-commentary
+      ABOUT the user's writing rather than the writing itself, openers like
+      "好。停一下——". This is the model talking to the user → NOT the user's
+      writing → DISCARD.
+    - A CONVERSATION mixing both sides where the bulk is the assistant's turns.
+    - Content the user is READING (articles / docs others wrote / search results).
+    - Garbage (OCR-scrambled salad, chrome labels, empty).
+    Rule of thumb: KEEP a canvas record only when it reads as ONE coherent piece
+    the USER is writing in their own voice — not someone talking to them, not a
+    chat log, not something being read.
 
     DISCARD a record when ALL of:
     - keystroke_count is far below what text.length would require AND not
