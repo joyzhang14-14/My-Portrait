@@ -19,7 +19,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case display, general, aiModels, connections, notifications
     }
     enum Capture: String, Hashable, CaseIterable {
-        case screen, audio, typing
+        case screen, audio, typing, health
     }
     enum Memory: String, Hashable, CaseIterable {
         case parameter, scheduler, changelog
@@ -56,6 +56,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "Screen Capture"
         case .capture(.audio):         return "Audio Capture"
         case .capture(.typing):        return "Typing Capture"
+        case .capture(.health):        return "Health"
         case .memory(.parameter):      return "Parameter"
         case .memory(.scheduler):      return "Scheduler"
         case .memory(.changelog):      return "Changelog"
@@ -75,6 +76,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
+        case .capture(.health):        return "stethoscope"
         case .memory(.parameter):      return "slider.horizontal.3"
         case .memory(.scheduler):      return "calendar.badge.clock"
         case .memory(.changelog):      return "list.bullet.rectangle"
