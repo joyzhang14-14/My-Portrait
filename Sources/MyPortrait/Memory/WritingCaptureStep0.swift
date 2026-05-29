@@ -113,6 +113,17 @@ struct WritingCaptureStep0 {
         // **只用 typing + keystroke 作锚切 session**,OCR 不参与切分。
         // OCR 是被反向 join 进来当上下文的 —— 没 typing/keystroke 锚点的纯 OCR
         // 时段(仅浏览/阅读)不该形成 session 跑 Pass 2。
+        // keystroke 不带 url —— canvas 打字(击键多、AX typing_event 少)会被切进
+        // url=nil 的 session,跟真正的 url-session(如 Google Doc)分家。
+        // 修法:按时间戳给每个 keystroke join "打字当时屏幕上的 URL" ——
+        // 取同 app、ts 之前最近一帧 OCR 的 browser_url(±staleness 窗内)。
+        // 浏览器帧现在带 URL(FocusProbe Safari fallback 修复后),这步才有效。
+        let urlByApp = Dictionary(grouping: ocrFrames.filter {
+            $0.url?.isEmpty == false
+        }) { $0.app }.mapValues { frames in
+            frames.map { (ts: $0.tsMs, url: $0.url!) }.sorted { $0.ts < $1.ts }
+        }
+
         var points: [ActivityPoint] = []
         for e in typingEvents {
             points.append(ActivityPoint(
@@ -120,8 +131,9 @@ struct WritingCaptureStep0 {
                 url: e.url.isEmpty ? nil : e.url))
         }
         for k in keystrokes {
-            // keystroke 不带 url,先存 nil,匹配 session 时跟 typing/OCR 的 url 对齐
-            points.append(ActivityPoint(ts: k.tsMs, app: k.bundleId, url: nil))
+            let url = Self.nearestFrameURL(
+                ts: k.tsMs, app: k.bundleId, urlByApp: urlByApp)
+            points.append(ActivityPoint(ts: k.tsMs, app: k.bundleId, url: url))
         }
         points.sort { $0.ts < $1.ts }
         guard !points.isEmpty else { return [] }
@@ -227,6 +239,31 @@ struct WritingCaptureStep0 {
             ))
         }
         return result
+    }
+
+    /// keystroke ts 之前最近一帧 OCR 的 URL(同 app,±staleness 窗内)。
+    /// 给无 url 的击键补"打字当时屏幕上的网址",让 url-session 切分对 canvas
+    /// 生效。找不到返回 nil(退回老行为)。
+    static let keystrokeURLStalenessMs: Int64 = 30_000
+    static func nearestFrameURL(
+        ts: Int64, app: String,
+        urlByApp: [String: [(ts: Int64, url: String)]]
+    ) -> String? {
+        guard let frames = urlByApp[app], !frames.isEmpty else { return nil }
+        // 二分找最后一个 ts' <= ts
+        var lo = 0, hi = frames.count - 1, best = -1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if frames[mid].ts <= ts { best = mid; lo = mid + 1 } else { hi = mid - 1 }
+        }
+        if best >= 0, ts - frames[best].ts <= keystrokeURLStalenessMs {
+            return frames[best].url
+        }
+        // ts 之前没有帧,看之后最近一帧(刚切到页面、帧比首击晚一点)
+        if best + 1 < frames.count, frames[best + 1].ts - ts <= keystrokeURLStalenessMs {
+            return frames[best + 1].url
+        }
+        return nil
     }
 
     /// 一个 url 是否匹配一个 session 的 url。session url == nil 时,任意 url
