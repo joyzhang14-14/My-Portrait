@@ -174,10 +174,27 @@ actor SystemAudioCaptureService {
             return
         }
 
-        if engine.isRunning { engine.stop() }
-        if tapInstalled {
-            engine.inputNode.removeTap(onBus: 0)
-            tapInstalled = false
+        // ⚠ **必须严格按顺序拆**,任何一步反了就 SIGTRAP:
+        //   1. 先 stop engine + 摘 tap —— 让 audio thread 不再有新 callback 进来
+        //   2. cancel sample/forward tasks + flush vadRecorder —— 把 inflight
+        //      drain 干净
+        //   3. **engine.inputNode 解绑 aggregate device**(切回系统默认),
+        //      这样 AUHAL 不再持有 aggregate IOProcID。漏这一步 → engine
+        //      dealloc 时 HALC 去 destroy IOProcID → 但 aggregate 已经被
+        //      下面 cleanupCoreAudio 销毁 → assertion → SIGTRAP
+        //   4. cleanupCoreAudio 销毁 aggregate + tap
+        //   5. self.engine = nil 触发 dealloc(此时无 device 关联,安全)
+        // 整条用 ObjC try/catch 包一层兜底 NSException(AVAudioEngine
+        // dealloc / engine.stop 在 macOS 26 偶发抛 NSException 杀进程)。
+        let cleanupErr = MyPortraitObjCTryCatch {
+            if engine.isRunning { engine.stop() }
+            if self.tapInstalled {
+                engine.inputNode.removeTap(onBus: 0)
+                self.tapInstalled = false
+            }
+        }
+        if let cleanupErr {
+            logger.error("SystemAudio stop: tap/engine stop threw: \(cleanupErr.localizedDescription, privacy: .public)")
         }
 
         samplesContinuation?.finish()
@@ -190,11 +207,37 @@ actor SystemAudioCaptureService {
         await vadRecorder?.flush()
         vadRecorder = nil
 
+        // 关键:解绑 inputNode 从 aggregate device 切回系统默认输入,
+        // 这样 cleanupCoreAudio 销毁 aggregate 后 engine dealloc 不会再
+        // 引用一个已不存在的 device → IOProcID destroy 不会断言。
+        let unbindErr = MyPortraitObjCTryCatch {
+            if let au = engine.inputNode.audioUnit {
+                // 0 = use default device
+                var devID: AudioDeviceID = AudioObjectID(kAudioObjectUnknown)
+                _ = AudioUnitSetProperty(
+                    au,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global,
+                    0,
+                    &devID,
+                    UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
+            }
+        }
+        if let unbindErr {
+            logger.error("SystemAudio stop: inputNode unbind threw: \(unbindErr.localizedDescription, privacy: .public)")
+        }
+
         cleanupCoreAudio()
 
-        // 同 AudioCaptureService.stop:置 nil 释放 AVAudioEngine,
-        // 避免 AUHAL 持着音频硬件让系统以为还在录(蓝牙 HFP 降质)。
-        self.engine = nil
+        // 同 AudioCaptureService.stop:置 nil 触发 AVAudioEngine dealloc。
+        // 上面已经解绑 inputNode device,这步现在是安全的。还是包一层兜底。
+        let deallocErr = MyPortraitObjCTryCatch {
+            self.engine = nil
+        }
+        if let deallocErr {
+            logger.error("SystemAudio stop: engine dealloc threw: \(deallocErr.localizedDescription, privacy: .public)")
+        }
         self.converter = nil
         self.targetFormat = nil
 
