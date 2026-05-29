@@ -40,6 +40,9 @@ final class Services {
     let embedder: any VectorEmbedder
     let embeddingWorker: EmbeddingWorker
     let permissions: PermissionMonitor
+    /// Stall 检测后台 driver(30s 一次 evaluate)。startManagedLifecycle 启,
+    /// 不主动 stop —— 跟随进程退出。
+    let stallDriver: StallDetectorDriver
     /// 音乐播放监测 —— 开启 pauseOnMusicApp 后,音乐类 app 出声时暂停音频采集。
     let musicMonitor: MusicPlaybackMonitor
     /// 打字采集：把用户在输入框里最终打出的文字写库（学习写作风格）。
@@ -118,7 +121,9 @@ final class Services {
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
         self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)
-        self.permissions = PermissionMonitor()
+        let permissions = PermissionMonitor()
+        self.permissions = permissions
+        self.stallDriver = StallDetectorDriver(db: dbImpl, permissions: permissions)
         self.musicMonitor = MusicPlaybackMonitor()
 
         // 打字采集。共用同一个 DatabasePool（WAL 多 reader 安全）。
@@ -253,6 +258,11 @@ final class Services {
         } else {
             logger.info("MemoryScheduler SKIPPED (MYPORTRAIT_NO_SCHEDULER=1)")
         }
+
+        // Stall 检测后台 driver。30s 一次 evaluate;有 verdict → log +
+        // (notifications.captureStalls 亮时) post 浮窗。无 env 开关:
+        // 跟 PermissionMonitor / DRMWatcher 同级,常驻轻量。
+        stallDriver.start()
 
         // **权限请求触发**。两类信号要分清楚：
         //   1. CGRequestScreenCaptureAccess / AVCaptureDevice.requestAccess
