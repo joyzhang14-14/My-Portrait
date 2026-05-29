@@ -54,12 +54,17 @@ struct OCRService: Sendable {
             return cached
         }
 
-        // 2. AX text 快路（非终端 + 文本足够丰富）。
-        //    My-Orphies 经验：编辑器/浏览器/聊天 app 上 AX 比 OCR 准且快。
+        // 2. AX text 快路（非终端 + 非浏览器 + 文本足够丰富）。
+        //    编辑器/原生聊天 app:AX 是 canvas 内容,比 OCR 准且快。
+        //    浏览器(Safari/Chrome/...):AX 文本是 tab bar / 工具栏 chrome,
+        //    Google Docs / Notion / canvas 编辑器的正文 AX 一片空白,这时 AX
+        //    返回的 200 多字 chrome 会把 Vision OCR 顶掉,正文永远抓不到。
+        //    所以浏览器一律强制 Vision OCR。
         if let axText = focus.axText,
            axText.count >= Self.axMinChars,
            let bundleId = focus.bundleId,
-           !FocusProbe.terminalBundleIds.contains(bundleId)
+           !FocusProbe.terminalBundleIds.contains(bundleId),
+           !FocusProbe.browserBundleIds.contains(bundleId)
         {
             let result = OCRResult(
                 fullText: axText,
