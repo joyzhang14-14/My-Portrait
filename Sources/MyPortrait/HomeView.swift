@@ -139,6 +139,14 @@ struct HomeView: View {
                 await refreshActivityChips()
             }
         }
+        // ContentView 的窗口级 drop zone 在用户把文件 / 图片放到 chat pane
+        // 任何空白处时 broadcast 一条通知,HomeView 这边接住并 append 到
+        // 现有 @State,跟 ChatInputBar 里粘贴 / paperclip 拿到的 attachment
+        // 走同一根队列。
+        .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentsDropped)) { note in
+            guard let payload = note.object as? [Attachment] else { return }
+            attachments.append(contentsOf: payload)
+        }
     }
 
     /// 编辑会话提取出来的目标 entity slug。约定:会话标题形如
@@ -579,6 +587,10 @@ extension Notification.Name {
     /// moment in the Timeline view. ContentView observes this to switch the
     /// sidebar selection + seek.
     static let navigateToTimelineAt = Notification.Name("MyPortrait.NavigateToTimelineAt")
+    /// Posted by ContentView's window-wide drop zone when the user drops
+    /// files / images anywhere on the chat pane. HomeView listens and
+    /// appends them to its attachment strip. object = [Attachment].
+    static let chatAttachmentsDropped = Notification.Name("MyPortrait.ChatAttachmentsDropped")
 }
 
 /// Hover toolbar on a chat bubble. User msgs show Copy + Edit; assistant

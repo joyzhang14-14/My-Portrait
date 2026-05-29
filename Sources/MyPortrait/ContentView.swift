@@ -153,6 +153,10 @@ struct ContentView: View {
 
             mainPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 仅 chat 区(Home)启用全区域文件 / 图片拖拽接收靶。
+                // 把文件 / 图片拖到 sidebar 之外的任何 chat 空白处都 OK,
+                // 拖到输入框 / 消息上也 OK(allowsHitTesting=false 不挡)。
+                .chatDropZone(enabled: (selection ?? .home) == .home)
         }
         // 强制 mainContent intrinsic 不小于启动默认 size。否则首启 / Replay
         // onboarding finish 时 NSHostingView 第一帧 layout 报 pane 自身
