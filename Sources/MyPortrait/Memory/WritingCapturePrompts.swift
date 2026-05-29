@@ -453,65 +453,46 @@ enum WritingCapturePrompts {
       - has_cut_event   : ⌘X pressed (user cut their OWN content).
       - ime_likely      : the keystroke pattern matches IME composition style.
 
-    JUDGEMENT RULES
+    JUDGEMENT RULES — the single test is CORRESPONDENCE, not volume.
+
+    The deciding question: does keystroke_text CORRESPOND to record.text AT ALL?
+    Keystrokes will NEVER match the text character-for-character — the Apple
+    keyboard does predictive text + autocorrect (it rewrites/completes words), and
+    IME turns pinyin keystrokes into different composed characters. So PARTIAL,
+    loose, fuzzy correspondence is NORMAL and means the user typed it → KEEP.
+    Only when there is essentially ZERO correspondence is the text not the user's.
 
     KEEP a record when ANY of:
-    - keystroke_count is roughly proportional to text.length (for ASCII
-      languages: keystroke_count ≥ 0.6 × text.length is plenty);
-    - ime_likely is true AND keystroke_count is reasonable for an IME
-      composition of this text (Chinese pinyin: keystroke is the latin
-      phonetic, ~1.5–3× the composed char count);
-    - has_cut_event is true AND text matches what was cut (user re-pasted
-      their own content);
-    - typing_events_text contains the record.text (AX confirms user typed
-      it into an input field), regardless of keystroke count;
-    - The app is one where keystrokes are commonly swallowed (custom IME,
-      web-based chat, canvas editor) AND AX or OCR backs the content with
-      a coherent message in the user's language.
+    - keystroke_text has ANY loose correspondence to record.text — some of the
+      letters/words/pinyin line up, even roughly, even if autocorrect/predictive
+      changed them. A few keystrokes for a longer text is FINE (predictive text
+      completes words; the user accepted suggestions). KEEP.
+    - ime_likely is true and the keystroke pinyin loosely maps to the CJK text.
+    - typing_events_text contains or roughly matches record.text (AX confirms the
+      user typed into the field), regardless of keystroke count.
+    - has_cut_event and the text matches what was cut (user moved their own text).
+    - The content is a coherent message/sentence in the user's language and the
+      keystrokes are non-trivially present (the user was typing here).
 
-    CANVAS LONG-FORM EXEMPTION (read carefully — applies to source "canvas_fusion"
-    / "merged" on a document editor like Google Docs / Notion / Word-on-web):
-    - These apps expose NO keystroke/AX for the body. The record was reconstructed
-      from OCR of the document on screen. The keystroke_text for the window WILL
-      look unrelated (pinyin fragments, Chinese chat from a side window, paste
-      events, or near-empty) — THIS IS EXPECTED and is NOT grounds to discard.
-    - The keystroke_TEXT won't match the body char-for-char (IME pinyin, paste,
-      canvas swallow) — that text mismatch alone is NOT a reason to discard.
-    - BUT keystroke_COUNT is still a VOLUME check, and it is the deciding signal:
-      did the user physically type enough to have AUTHORED this text?
-        * Rough need: ASCII text ≈ 0.5× its length in keystrokes; IME/Chinese ≈
-          1.5–3× the CJK char count (latin phonetic). Pasting one's OWN earlier
-          draft also counts (has_cut_event, or has_paste_event of the user's own
-          prior text).
-        * If keystroke_count is FAR below that need AND there is no own-paste/cut
-          evidence, the BULK of the on-screen text was NOT produced by the user.
-          Canvas OCR grabbed whatever was on screen — an AI assistant's reply,
-          a chat the user is reading, an article, search results → DISCARD.
-        * If keystroke_count plausibly supports authoring (or own-paste/cut),
-          KEEP — this is the user's own document, mismatched keystroke text and all.
-    Do NOT pattern-match on wording or tone; decide by keystroke VOLUME vs text
-    length. (A long screen of text with only a handful of keystrokes in the window
-    is content the user was reading/receiving, not writing.)
+    DISCARD only when keystroke has ZERO correspondence to the text AND no AX
+    support — i.e. the text was NOT typed here at all:
+    - keystroke_count ≈ 0 (or only Enter/shortcuts) for meaningful text, and
+      typing_events_text does not match → it appeared without typing: AUTOFILL
+      (form email, saved name, password mask "•••"), EXTERNAL PASTE of someone
+      else's content, an AI assistant's reply, a received chat message, or an
+      article the user is reading.
+    - keystroke_text is clearly about something ELSE entirely than record.text
+      (no overlapping words/pinyin at all) AND no AX match → OCR grabbed unrelated
+      on-screen content, not what the user wrote.
 
-    DISCARD a record when ALL of:
-    - keystroke_count is far below what text.length would require AND not
-      explained by IME; AND
-    - typing_events_text does NOT contain or closely match record.text; AND
-    - has_paste_event is true OR keystroke_text is sparse/empty
-      → this is external paste / OCR residue / app chrome that leaked in.
+    ALSO DISCARD (independent of correspondence):
+    - Empty / whitespace-only / single stray char / pure repeated gibberish.
+    - Pure shortcut/Enter presses with no resulting text.
+    - OCR-only UI chrome (menu labels, "•••" masks, app-chrome strings).
 
-    ALSO DISCARD:
-    - Pure shortcut presses with no resulting meaningful text.
-    - Empty / near-empty text with no clear user intent (single char, single
-      space, repeated gibberish "aaaaa" without IME context).
-    - OCR residue: text comes only from OCR with zero keystroke AND zero
-      AX support AND the content reads like app chrome (e.g. UI labels,
-      menu items, system notifications).
-
-    DO NOT discard for length alone. Short legitimate replies are valid.
-    DO NOT discard just because keystroke is missing — IME composition and
-      keystroke-swallowing apps are real edge cases. Look at AX + content
-      coherence.
+    Bias toward KEEP. If there is SOME correspondence (even loose) or AX support,
+    keep it — autocorrect/predictive/IME mean real typing rarely matches exactly.
+    Only drop when the keystrokes have nothing to do with the text at all.
 
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
