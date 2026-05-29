@@ -1860,6 +1860,11 @@ private struct ChatInputBar: View {
                             prompt = String(new.dropLast())
                             withAnimation(.easeOut(duration: 0.15)) { pickerOpen = true }
                         }
+                    },
+                    onAttachmentsPasted: { newAtts in
+                        // ⌘V / 拖入文件 / 图片 → 直接 append 到 attachments,
+                        // 上方的 AttachmentStrip 自动显示。用户能像之前 ⨉ 删。
+                        attachments.append(contentsOf: newAtts)
                     }
                 )
                 // 高度 = clamp(测出的内容高, [32 单行, 96 ≈ 4 行])。涨够 4 行
