@@ -39,6 +39,17 @@ enum MPQuerySkill {
 
         mp-query memories --q "keyword" [--limit 20]
           → search the user's curated notes / event journals.
+
+        mp-query writing --start "30d ago" [--end "now"] [--q "..."]
+                         [--app "..."] [--limit 10]
+          → search what the user actually TYPED — LLM-distilled writing
+            records (typing stream + AX full text + LLM cleanup). Way
+            more reliable than OCR for "find what I wrote about X" —
+            OCR only catches what's visible on screen at capture time
+            (truncated, scrolled past, garbled). `writing` has the real
+            cleaned text, app, URL, context summary. **Default to this
+            first** when the user says "I wrote / I typed / find what I
+            said about / my answer to / my notes on ...".
         ```
 
         Time format: `30m ago` / `1h ago` / `2d ago` / `today` /

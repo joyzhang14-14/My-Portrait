@@ -831,7 +831,8 @@ final class WritingCaptureWorker {
                 keystrokes: keys,
                 ocrFrames: frames,
                 maxContentChars: members.map(\.maxContentChars).max() ?? 0,
-                axFrameCount: members.map(\.axFrameCount).reduce(0, +)
+                axFrameCount: members.map(\.axFrameCount).reduce(0, +),
+                canvasEdits: members.flatMap(\.canvasEdits).sorted { $0.ts < $1.ts }
             )
         }
     }
