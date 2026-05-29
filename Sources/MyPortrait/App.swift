@@ -303,6 +303,9 @@ struct MyPortraitApp: App {
         if args.contains("--reocr-google-docs-today") {
             ReOcrCLI.runGoogleDocsToday()
         }
+        if args.contains("--reocr-google-docs-today-mp4") {
+            ReOcrCLI.runGoogleDocsTodayMP4()
+        }
         if args.contains("--writing-capture-backlog-approve") {
             WritingCaptureCLI.approveBacklog()
         }

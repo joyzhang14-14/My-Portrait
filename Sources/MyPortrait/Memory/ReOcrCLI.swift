@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import GRDB
@@ -22,6 +23,22 @@ enum ReOcrCLI {
                 exit(0)
             } catch {
                 fputs("[re-ocr] ERROR: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
+    /// MP4 版:对今日 Google Doc 已压进 MP4 的帧(snapshot_path NULL,
+    /// video_chunk_id 非空)按 offset_ms 从视频抽帧 → Vision OCR → 覆盖。
+    static func runGoogleDocsTodayMP4() {
+        Task {
+            do {
+                let count = try await reocrTodayMP4()
+                print("[re-ocr-mp4] done. updated \(count) frame(s)")
+                exit(0)
+            } catch {
+                fputs("[re-ocr-mp4] ERROR: \(error.localizedDescription)\n", stderr)
                 exit(1)
             }
         }
@@ -91,6 +108,91 @@ enum ReOcrCLI {
         }
 
         // 4. 重建 FTS update trigger(跟 schema 一致)
+        try await dbPool.write { db in
+            try db.execute(sql: """
+                CREATE TRIGGER __frames_fts_au AFTER UPDATE ON "frames" BEGIN
+                  INSERT INTO "frames_fts"("frames_fts", "rowid", "app_name", "window_name", "browser_url", "full_text") VALUES('delete', OLD."rowid", OLD."app_name", OLD."window_name", OLD."browser_url", OLD."full_text");
+                  INSERT INTO "frames_fts"("rowid", "app_name", "window_name", "browser_url", "full_text") VALUES (NEW."rowid", NEW."app_name", NEW."window_name", NEW."browser_url", NEW."full_text");
+                END
+                """)
+        }
+        return updated
+    }
+
+    private struct MP4Todo: Sendable {
+        let id: Int64
+        let videoPath: String
+        let offsetMs: Int64
+    }
+
+    private static func reocrTodayMP4() async throws -> Int {
+        let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
+        let dbPool = try DatabasePool(path: dbPath)
+
+        // 今日 Google Doc 的 MP4 帧 + 视频路径 + offset,按视频文件分组
+        let todos: [MP4Todo] = try await dbPool.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT f.id AS id, v.file_path AS path, f.offset_ms AS off
+                FROM frames f JOIN video_chunks v ON v.id = f.video_chunk_id
+                WHERE f.app_name = 'Safari'
+                  AND f.browser_url LIKE '%docs.google%'
+                  AND date(f.timestamp_ms / 1000, 'unixepoch', 'localtime') = date('now', 'localtime')
+                  AND f.video_chunk_id IS NOT NULL
+                  AND f.offset_ms IS NOT NULL
+                ORDER BY v.file_path, f.offset_ms
+                """).compactMap { row in
+                guard let id = row["id"] as Int64?,
+                      let path = row["path"] as String?,
+                      let off = row["off"] as Int64? else { return nil }
+                return MP4Todo(id: id, videoPath: path, offsetMs: off)
+            }
+        }
+        print("[re-ocr-mp4] \(todos.count) MP4 frame(s) to re-OCR")
+
+        let langs = ["zh-Hans", "zh-Hant", "en-US"]
+        let root = NSString(string: "~/.portrait").expandingTildeInPath
+
+        try await dbPool.write { db in
+            try db.execute(sql: "DROP TRIGGER IF EXISTS __frames_fts_au")
+        }
+
+        // 按视频文件分组,一个 asset 抽多帧(省去反复开文件)
+        let byVideo = Dictionary(grouping: todos) { $0.videoPath }
+        var updated = 0
+        var done = 0
+        for (relPath, group) in byVideo {
+            let abs = (relPath as NSString).isAbsolutePath
+                ? relPath : (root as NSString).appendingPathComponent(relPath)
+            let asset = AVURLAsset(url: URL(fileURLWithPath: abs))
+            let gen = AVAssetImageGenerator(asset: asset)
+            gen.appliesPreferredTrackTransform = true
+            gen.requestedTimeToleranceBefore = CMTime(value: 500, timescale: 1000)
+            gen.requestedTimeToleranceAfter = CMTime(value: 500, timescale: 1000)
+            for todo in group {
+                done += 1
+                let time = CMTime(value: todo.offsetMs, timescale: 1000)
+                guard let cg = try? gen.copyCGImage(at: time, actualTime: nil) else {
+                    fputs("[re-ocr-mp4] frame \(todo.id): extract failed @\(todo.offsetMs)ms\n", stderr)
+                    continue
+                }
+                do {
+                    let (fullText, wordsJson) = try await ocr(image: cg, languages: langs)
+                    try await dbPool.write { db in
+                        try db.execute(sql: """
+                            UPDATE frames SET full_text = :t, ocr_words_json = :w, text_source = 'ocr'
+                            WHERE id = :id
+                            """, arguments: ["t": fullText, "w": wordsJson, "id": todo.id])
+                    }
+                    updated += 1
+                } catch {
+                    fputs("[re-ocr-mp4] frame \(todo.id): ocr failed: \(error.localizedDescription)\n", stderr)
+                }
+                if done % 25 == 0 || done == todos.count {
+                    print("[re-ocr-mp4] \(done)/\(todos.count) done")
+                }
+            }
+        }
+
         try await dbPool.write { db in
             try db.execute(sql: """
                 CREATE TRIGGER __frames_fts_au AFTER UPDATE ON "frames" BEGIN
