@@ -84,17 +84,13 @@ struct WritingCaptureRawSession: Sendable {
     /// 给 Pass 1 决定单帧 cap 用 —— AX 稀缺(ax*10 < typingEvents 数)时
     /// OCR 是唯一文本来源,放开 cap。
     let axFrameCount: Int
-    /// canvas 编辑过程(相邻 raw OCR 帧中段 diff + keystroke 闸门)。
-    /// 仅 AX 稀疏的 canvas session 非空;AX-rich session 走 typing_events.edit_log。
-    let canvasEdits: [CanvasEditReconstructor.Event]
 
     init(
         id: String, app: String, url: String?,
         startTs: Int64, endTs: Int64,
         typingEvents: [TypingEvent], keystrokes: [KeystrokeEntry],
         ocrFrames: [WritingCaptureOcrFrame], maxContentChars: Int,
-        axFrameCount: Int = 0,
-        canvasEdits: [CanvasEditReconstructor.Event] = []
+        axFrameCount: Int = 0
     ) {
         self.id = id
         self.app = app
@@ -106,7 +102,6 @@ struct WritingCaptureRawSession: Sendable {
         self.ocrFrames = ocrFrames
         self.maxContentChars = maxContentChars
         self.axFrameCount = axFrameCount
-        self.canvasEdits = canvasEdits
     }
 }
 
