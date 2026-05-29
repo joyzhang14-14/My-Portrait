@@ -100,6 +100,9 @@ actor CaptureCoordinator {
     func start() async throws {
         guard captureTask == nil else { return }
 
+        // 健康度起点。StallDetector 需要 uptime > 120s 才会判 stall(warmup)。
+        await VisionMetrics.shared.markStarted()
+
         // 1. 焦点监听（NSWorkspace 通知 + 初次刷新）。
         await focus.start()
 
@@ -165,6 +168,8 @@ actor CaptureCoordinator {
 
     private func handleDRMState(_ blocked: Bool) async {
         drmActive = blocked
+        // 通知 StallDetector:故意暂停,后续 60s 无帧不算 stall。
+        await MainActor.run { IntentionalPauseState.shared.drmActive = blocked }
         if blocked {
             // 命中 → 立即释放 SCStream，避免触发系统的录屏副作用。
             await screen.invalidateStream()
@@ -179,9 +184,11 @@ actor CaptureCoordinator {
     private func handleSleepWake(_ event: SleepWakeEvent) async {
         switch event {
         case .willSleep:
+            await MainActor.run { IntentionalPauseState.shared.screenAsleep = true }
             await screen.invalidateStream()
             comparer.reset()
         case .didWake:
+            await MainActor.run { IntentionalPauseState.shared.screenAsleep = false }
             // 睡前/睡后差异巨大，强制下一帧保留。
             comparer.reset()
             // SCStream 已 invalidate，下次 trigger 来时会懒重建。
@@ -231,6 +238,11 @@ actor CaptureCoordinator {
             }
         }
 
+        // 健康度埋点:这帧真正进入抓帧流水线(过了 DRM/防抖 gate)。
+        // dedup / DB 失败仍计入 attempt — silent_loss = attempts - persisted -
+        // dedup 才能算对。
+        await VisionMetrics.shared.recordAttempt()
+
         // 1. 焦点信息（actor，O(1) 读缓存）。
         let focusInfo = await focus.snapshot()
 
@@ -247,6 +259,7 @@ actor CaptureCoordinator {
 
         // 5. 去重。
         if !force, !comparer.shouldKeep(image, now: now) {
+            await VisionMetrics.shared.recordDedup()
             return
         }
 
@@ -293,9 +306,13 @@ actor CaptureCoordinator {
         } catch {
             // DB 写失败 → 静默丢弃这帧的事件（避免下游收到无效 frameId）。
             // JPG 已经落盘了，可以通过 compactor / 手动 SQL 回补。
+            // 不调 recordPersisted —— silent_loss 自动 +1 反映真"沉默丢失"。
             logger.error("DB insertFrameWithOCR failed: \(String(describing: error), privacy: .public)")
             return
         }
+        // 健康度埋点:真落库成功 → lastDbWriteMs 跳。StallDetector 拿这个
+        // 跟 lastAttemptMs 比,差 > 60s 且非 dedup → vision_db_write stall。
+        await VisionMetrics.shared.recordPersisted()
 
         // 10. 发事件。
         let event = FrameEvent(
