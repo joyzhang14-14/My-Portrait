@@ -82,11 +82,46 @@ enum CronJobExecutor {
         let runPlaceholder = CronJobRun(convId: conv.id, startedAt: startedAt, preview: "")
         CronJobStore.shared.appendRun(runPlaceholder, to: cronJob.id)
 
-        // 3. Persist user message + spawn one-shot agent.
+        // 3. Persist user message **right now** so user can open the conv
+        //    while it's still running and see at least the prompt. 之前
+        //    一直等到 LLM 全跑完才 save,过程中点进去看到的是空 conv,
+        //    用户体验跟普通 chat 完全不对齐。
         let userMsg = ChatMessage(role: .user, text: cronJob.prompt, time: startedAt)
-        var assistantBuf = ""
-        var parts: [ContentPart] = []
         let assistantId = UUID()
+        var assistant = ChatMessage(
+            id: assistantId, role: .assistant, text: "",
+            parts: [], time: Date()
+        )
+        store.saveMessages([userMsg, assistant], for: conv.id)
+
+        // 流式增量状态。所有 event 走同一个 mutate → persist 路径。
+        var pendingText = ""
+        var activeTextPartId: UUID? = nil
+        var lastPersist = Date.distantPast
+        let persistThrottle: TimeInterval = 0.35   // ~3 fps,够看见 thinking 字往外蹦
+
+        func flushPending() {
+            guard !pendingText.isEmpty else { return }
+            if let id = activeTextPartId, let idx = assistant.parts.firstIndex(where: { p in
+                if case .text(let pid, _) = p, pid == id { return true }
+                return false
+            }), case .text(let pid, let cur) = assistant.parts[idx] {
+                assistant.parts[idx] = .text(id: pid, value: cur + pendingText)
+            } else {
+                let newId = UUID()
+                activeTextPartId = newId
+                assistant.parts.append(.text(id: newId, value: pendingText))
+            }
+            assistant.text += pendingText
+            pendingText = ""
+        }
+
+        func persistNow(_ force: Bool = false) {
+            let now = Date()
+            if !force, now.timeIntervalSince(lastPersist) < persistThrottle { return }
+            lastPersist = now
+            store.saveMessages([userMsg, assistant], for: conv.id)
+        }
 
         let (_, model, refOverride) = providerResolver()
         let envInjection = connectionEnv(for: cronJob)
@@ -108,38 +143,108 @@ enum CronJobExecutor {
                 : "\(context.markdown)\n\nUser question:\n\(cronJob.prompt)"
             try agent.sendPrompt(pasted)
 
+            // 跟普通 chat 一样接所有事件:text / tool / thinking / error。
             iter: for await event in agent.events {
                 switch event {
-                case .textDelta(let d):            assistantBuf += d
-                case .assistantFinalText(let t):   if assistantBuf.isEmpty { assistantBuf = t }
-                case .agentEnd:                    break iter
-                case .error(let m):
-                    assistantBuf += "\n\n⚠️ \(m)"
+                case .textDelta(let d):
+                    pendingText += d
+                    flushPending()
+                    persistNow()
+
+                case .assistantFinalText(let t):
+                    if assistant.text.isEmpty {
+                        pendingText += t
+                        flushPending()
+                        persistNow(true)
+                    }
+
+                case .toolStart(let id, let name, let args):
+                    // text → tool → text 顺序:先把累积的文本落进上一段。
+                    flushPending()
+                    activeTextPartId = nil
+                    let cmd = (args["command"] as? String)
+                        ?? args.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+                    let block = ToolBlock(
+                        id: UUID(), toolCallId: id, name: name,
+                        command: cmd, output: "",
+                        isRunning: true, isError: false
+                    )
+                    assistant.parts.append(.tool(block))
+                    persistNow(true)
+
+                case .toolEnd(let id, let result, let isError):
+                    if let idx = assistant.parts.firstIndex(where: { p in
+                        if case .tool(let b) = p, b.toolCallId == id { return true }
+                        return false
+                    }), case .tool(var b) = assistant.parts[idx] {
+                        b.output = result
+                        b.isError = isError
+                        b.isRunning = false
+                        assistant.parts[idx] = .tool(b)
+                    }
+                    persistNow(true)
+
+                case .thinkingStart:
+                    flushPending()
+                    activeTextPartId = nil
+                    assistant.parts.append(.thinking(
+                        ThinkingBlock(id: UUID(), text: "", isRunning: true, durationMs: nil)
+                    ))
+                    persistNow(true)
+
+                case .thinkingDelta(let delta):
+                    if let idx = assistant.parts.lastIndex(where: { p in
+                        if case .thinking = p { return true } else { return false }
+                    }), case .thinking(var b) = assistant.parts[idx] {
+                        b.text += delta
+                        assistant.parts[idx] = .thinking(b)
+                    }
+                    persistNow()
+
+                case .thinkingEnd(let finalText, let durationMs):
+                    if let idx = assistant.parts.lastIndex(where: { p in
+                        if case .thinking = p { return true } else { return false }
+                    }), case .thinking(var b) = assistant.parts[idx] {
+                        if let finalText, !finalText.isEmpty, b.text.isEmpty {
+                            b.text = finalText
+                        }
+                        b.isRunning = false
+                        b.durationMs = durationMs
+                        assistant.parts[idx] = .thinking(b)
+                    }
+                    persistNow(true)
+
+                case .agentEnd:
+                    flushPending()
                     break iter
+
+                case .error(let m):
+                    flushPending()
+                    pendingText += "\n\n⚠️ \(m)"
+                    flushPending()
+                    break iter
+
                 default: break
                 }
             }
             agent.stop()
         } catch {
-            assistantBuf = "⚠️ CronJob couldn't start: \(error.localizedDescription)"
+            pendingText += "⚠️ CronJob couldn't start: \(error.localizedDescription)"
+            flushPending()
         }
 
-        parts.append(.text(id: UUID(), value: assistantBuf))
-        let assistantMsg = ChatMessage(
-            id: assistantId, role: .assistant,
-            text: assistantBuf, parts: parts, time: Date()
-        )
-
-        store.saveMessages([userMsg, assistantMsg], for: conv.id)
+        // 终态落盘(防 throttle 把最后一波 delta 丢了)。
+        flushPending()
+        persistNow(true)
 
         // 4. LLM 跑完了 —— 用真 preview 更新已有 run(占位 run 在 step 2 已建好)。
-        let preview = String(assistantBuf.prefix(120))
+        let preview = String(assistant.text.prefix(120))
             .replacingOccurrences(of: "\n", with: " ")
         CronJobStore.shared.updateRunPreview(convId: conv.id, preview: preview)
 
         // 5. 通知:只发 LLM 在回复末尾显式写出的 `### Notify` 区块内容。
         //    没写就不打扰用户(LLM 自己判断"这次没什么值得通知的事")。
-        if let body = Self.extractNotifyBody(from: assistantBuf) {
+        if let body = Self.extractNotifyBody(from: assistant.text) {
             NotificationCenterService.shared.post(
                 .cronJobRun(jobName: cronJob.name, body: body, convId: conv.id)
             )
