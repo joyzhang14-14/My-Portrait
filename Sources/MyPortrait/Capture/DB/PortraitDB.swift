@@ -46,6 +46,13 @@ protocol PortraitDB: Sendable {
     func insertTranscription(_ record: TranscriptionRecord) async throws
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
 
+    /// audio_chunks pending 队列实时 stats。StallDetector 用来判 audioBacklog
+    /// stall(数量 > 阈值且最老 chunk 已超 freshness)。
+    ///
+    /// 返回 `(pendingCount, oldestRecordedAtMs)`。`oldestRecordedAtMs == nil`
+    /// 当 pendingCount = 0(没活时直接早退,不报 stall)。
+    func audioBacklogStats() async throws -> (pendingCount: Int, oldestRecordedAtMs: Int64?)
+
     /// 转录失败：`status = failed` 且 `retry_count += 1`。
     /// 启动时 `resetRetryableFailedAudioChunks()` 会把 retry_count 没到上限的
     /// failed 行回退 pending 重跑。

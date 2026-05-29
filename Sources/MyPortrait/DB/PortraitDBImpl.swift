@@ -224,6 +224,21 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    func audioBacklogStats() async throws -> (pendingCount: Int, oldestRecordedAtMs: Int64?) {
+        try await dbPool.read { db in
+            // 单次查询拿 COUNT + MIN,索引扫描代价 ~ms 级。pending 表 ~1e3
+            // 量级时也不会成为热点(Driver 30s 一次)。
+            let row = try Row.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) AS cnt, MIN(recorded_at_ms) AS oldest FROM audio_chunks WHERE status = :status",
+                arguments: ["status": AudioChunkStatus.pending.rawValue]
+            )
+            let count: Int = row?["cnt"] ?? 0
+            let oldest: Int64? = row?["oldest"]
+            return (count, count > 0 ? oldest : nil)
+        }
+    }
+
     func recordAudioChunkFailure(chunkId: Int64) async throws {
         try await dbPool.write { db in
             try db.execute(
