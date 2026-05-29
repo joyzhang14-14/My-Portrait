@@ -143,16 +143,25 @@ final class MemoryScheduler {
         let s = ConfigStore.shared.current.scheduler
         let now = Date()
 
+        // **追赶分支**:除了"到点 + 今天没跑过"的 scheduled 触发,daily 频率
+        // 下只要有 pending 活 + 今天还没跑过,任何 tick 都触发(catchUp)。
+        // 解决"电脑半夜睡着,23:45 scheduled tick 错过 → 整天跳过"的滞后:
+        // 用户白天开机,首次 tick 就能把昨晚没跑成的活捡起来。weekly/monthly
+        // 维持原语义(只在 scheduled 日 + 到点跑),不被追赶逻辑破坏。
         var ranEvent = false
-        if Self.shouldTriggerNow(config: s.event, now: now),
-           lastRunDay(kLastEvent) != localDayString(now) {
+        let eventToday    = lastRunDay(kLastEvent) != localDayString(now)
+        let eventCatchUp  = s.event.frequency == .daily && eventJobHasWork()
+        if eventToday,
+           Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp {
             setLastRun(kLastEvent, now)
             await runEventJob()
             ranEvent = true
         }
         var ranPortrait = false
-        if Self.shouldTriggerNow(config: s.portrait, now: now),
-           lastRunDay(kLastPortrait) != localDayString(now) {
+        let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
+        let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
+        if portraitToday,
+           Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp {
             setLastRun(kLastPortrait, now)
             await runPortraitJob()
             ranPortrait = true
@@ -161,8 +170,10 @@ final class MemoryScheduler {
             await runPortraitJob()
             ranPortrait = true
         }
-        if Self.shouldTriggerNow(config: s.personality, now: now),
-           lastRunDay(kLastPersonality) != localDayString(now) {
+        let personalityToday   = lastRunDay(kLastPersonality) != localDayString(now)
+        let personalityCatchUp = s.personality.frequency == .daily && personalityJobHasWork()
+        if personalityToday,
+           Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp {
             setLastRun(kLastPersonality, now)
             await runPersonalityJob()
         } else if ranPortrait, s.personality.frequency != .off, personalityNeedsRetry() {
