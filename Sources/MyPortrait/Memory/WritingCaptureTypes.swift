@@ -84,13 +84,17 @@ struct WritingCaptureRawSession: Sendable {
     /// 给 Pass 1 决定单帧 cap 用 —— AX 稀缺(ax*10 < typingEvents 数)时
     /// OCR 是唯一文本来源,放开 cap。
     let axFrameCount: Int
+    /// canvas session 的自适应 chrome 词表(跨帧频率 >85% 的 token)。
+    /// 给 Pass 2 当提示:检测正文编辑时忽略这些 UI 词。非 canvas 为空。
+    let chromeTokens: [String]
 
     init(
         id: String, app: String, url: String?,
         startTs: Int64, endTs: Int64,
         typingEvents: [TypingEvent], keystrokes: [KeystrokeEntry],
         ocrFrames: [WritingCaptureOcrFrame], maxContentChars: Int,
-        axFrameCount: Int = 0
+        axFrameCount: Int = 0,
+        chromeTokens: [String] = []
     ) {
         self.id = id
         self.app = app
@@ -102,6 +106,7 @@ struct WritingCaptureRawSession: Sendable {
         self.ocrFrames = ocrFrames
         self.maxContentChars = maxContentChars
         self.axFrameCount = axFrameCount
+        self.chromeTokens = chromeTokens
     }
 }
 
