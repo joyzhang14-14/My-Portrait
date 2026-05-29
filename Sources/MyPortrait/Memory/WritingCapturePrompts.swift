@@ -199,19 +199,18 @@ enum WritingCapturePrompts {
 
     Look at this entire (app, url) group on this day, then produce writing_records.
 
-    1. SEGMENT THE GROUP INTO RECORDS
-       Decide where one "thing the user wrote" ends and the next one begins. You may:
-       - Treat each typing_events row as its own record (typical for chat-style apps
-         where each Enter sends a separate message)
-       - Combine adjacent typing_events into one bigger record (parts of a single
-         document or message edited multiple times)
-       - Pull content from ocr_frames when typing_events is empty (canvas-style apps
-         that don't expose AX; or apps that swallow keystroke events)
-       - Use keystroke_log timing/clusters to spot delete-bursts, paste events,
-         shortcut-triggered actions
-       - Split a single typing_events row into multiple records if the user clearly
-         switched topics or sent multiple separate things within it
-       Aim for records that correspond to ONE thing the user did intentionally.
+    1. ONE SESSION = ONE RECORD (segmentation already done for you)
+       Each session in raw_sessions has ALREADY been split to ONE unit the user
+       produced (one sent message / one input). Step 0 cut on the real message
+       boundaries (typing_event = one send/clear). So:
+       - DEFAULT: emit EXACTLY ONE record per session. Do not merge sessions. Do
+         not merge a session's content with another's.
+       - Only split a session into 2+ records in the RARE case its single
+         typing_event text obviously contains multiple distinct sent messages.
+       - Pull content from ocr_frames only when typing_events is empty (canvas /
+         keystroke-swallowing apps).
+       Do NOT decide boundaries yourself — they are pre-cut. Your job is to CLEAN
+       and TRANSCRIBE each unit, not to re-segment.
 
     2. CLASSIFY EACH RECORD'S `kind`
        - "long_form"  — substantive writing: article, essay, code, document, long
@@ -574,6 +573,75 @@ enum WritingCapturePrompts {
     - JSON string escaping: escape `"` → `\"`, `\` → `\\`, newlines → `\n`.
     - "kind" is EXACTLY "commit" or "delete".
     - edits sorted by ts ascending.
+    - Respond with ONLY the JSON object, no prose / code fences.
+    """#
+
+    // MARK: - Pass 4 —— 切割 + AX 真伪判断(judgment only)
+
+    /// Pass 4 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条
+    /// AX 真伪。轻量模型可胜任。keystroke + OCR 是不会说谎的对照物,只判 AX。
+    static let pass4Segment = #"""
+    You are a JUDGE, not a writer. For ONE activity session you decide:
+    (1) CUT the typing_events into units the user produced, and
+    (2) for each unit pick a ROUTE, or DROP it.
+    You output ids + route only — you do NOT rewrite or produce final text.
+
+    THREE SOURCES (use all to decide):
+    - typing_events (AX): what accessibility reported in the input field. Usually the
+      user's typing, BUT can be a lie — autofill, paste, or program-inserted text
+      shows up here too, as if typed.
+    - keystroke_text / keystroke_count: physical keys the user actually pressed
+      (sorted; <BS>=backspace; shortcuts excluded). For IME (Chinese pinyin) this is
+      the LATIN phonetic, ~1.5–3× the composed CJK char count. keystroke CANNOT lie.
+    - ocr_excerpt: text seen on screen (cross-check). Cannot lie about what showed.
+
+    INPUT (one session): app, url, typing_events:[{id,text}], keystroke_text,
+      keystroke_count, ocr_excerpt.
+
+    TASK 0 — WHERE IS THE REAL CONTENT: "ax" or "ocr" (session-level)
+    - "ax": the typing_events ARE the user's real content (chat messages, an input
+      the user composed). Even if short, they are complete/coherent. Pick "ax" when
+      typing_events read as real user writing that keystroke roughly supports.
+    - "ocr": the typing_events are JUNK fragments ("i", "a", a stray char) while the
+      real content the user wrote lives only on screen (ocr_excerpt) — e.g. a web
+      document editor (Google Docs) where the field exposes nothing useful but the
+      OCR shows a full essay the keystrokes support. Pick "ocr" then.
+    - Decide this FIRST. If "ocr", you may leave units empty — the OCR path handles
+      reconstruction. If "ax", do TASK 1 + TASK 2 below.
+
+    TASK 1 — CUT INTO UNITS (only when primary_source = "ax")
+    - One unit = one thing the user produced: usually ONE sent message (chat), or
+      ONE continuously-edited piece (a note/doc edited across a few events).
+    - DEFAULT: each typing_event is its own unit. MERGE consecutive events only if
+      clearly the same growing text (later extends earlier).
+
+    TASK 2 — ROUTE each unit (or DROP)
+    - route "ax": the AX text is the user's real input — keystroke_count plausibly
+      accounts for it (ASCII: ≈ length; IME: latin phonetic ≈ 1.5–3× CJK chars). A
+      chat message typed via pinyin belongs here. Most units are "ax".
+    - route "ocr": AX text is missing/poor but the user clearly composed content
+      that OCR shows — reconstruct from OCR+keystroke instead of AX.
+    - DROP: AX text looks meaningful BUT keystroke_count is ~0 and it isn't IME-
+      explained → it was AUTOFILLED / pasted / program-written, NOT typed (e.g. a
+      form email, saved name, password mask "•••", a received message the field
+      exposed). Also drop empty / single stray char / pure gibberish / invisible
+      chars / UI-label noise.
+    - When a unit has real keystrokes behind it, KEEP it (route "ax") — do not drop
+      the user's own messages (Discord / WeChat IME chat counts as real typing).
+
+    OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
+    {
+      "primary_source": "ax" | "ocr",
+      "units": [ { "event_ids": [<id>, ...] } ],
+      "dropped": [ { "event_id": <id>, "reason": "<≤120 chars>" } ]
+    }
+    - If primary_source = "ocr": units may be []; put junk typing_event ids in
+      dropped (or omit). The OCR path reconstructs the real content.
+    - If primary_source = "ax": every typing_event id appears EXACTLY ONCE — in a
+      unit's event_ids OR in dropped. A unit's event_ids are time-ordered.
+
+    HARD RULES
+    - JSON string escaping: escape `"` → `\"`, `\` → `\\`, newlines → `\n`.
     - Respond with ONLY the JSON object, no prose / code fences.
     """#
 }

@@ -224,17 +224,24 @@ final class WritingCaptureWorker {
         )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
+        let pass2Cfg = ConfigStore.shared.current.memory
+        let pass2Provider = pass2Cfg.resolvedProvider
+        let pass2Model = pass2Cfg.resolvedModelLight
+
+        // 3.5 Pass 4 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
+        let refinedSessions = await Self.applyPass4(
+            step0.rawSessions, concurrency: 5,
+            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass2Provider, model: pass2Model) })
+        workerLog.info("pass4: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
+
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
-        let groups = Self.groupRawSessionsByApp(step0.rawSessions)
-        workerLog.info("grouped by app+url: \(step0.rawSessions.count) sessions → \(groups.count) groups")
+        let groups = Self.groupRawSessionsByApp(refinedSessions)
+        workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
 
         // 5. **每组一个 subagent 并发跑 Pass 2**(sonnet[1m])。
         // 失败 group 单独标错,不阻塞其他 group。最多 5 并发,防止 Anthropic
         // 限流 + 本机 CPU 打爆。每个并发任务都创建一个全新的 Pass2Agent,
         // 不复用(每 agent 有 subprocess 状态)。
-        let pass2Cfg = ConfigStore.shared.current.memory
-        let pass2Provider = pass2Cfg.resolvedProvider
-        let pass2Model = pass2Cfg.resolvedModelLight
         let userLanguages = ConfigStore.shared.current.personalInfo.languages
         let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
             try store.fetchRecentUserRejections()
@@ -536,14 +543,23 @@ final class WritingCaptureWorker {
         )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        // 4. group + 5. Pass 2 并发
-        let groups = Self.groupRawSessionsByApp(step0.rawSessions)
-        ui.stage = "Pass 2"
-        ui.statusMessage = "Pass 2: \(groups.count) (app, url) groups — running concurrently (max 5)…"
-        workerLog.info("grouped by app+url: \(step0.rawSessions.count) sessions → \(groups.count) groups")
         let pass2Cfg = ConfigStore.shared.current.memory
         let pass2Provider = pass2Cfg.resolvedProvider
         let pass2Model = pass2Cfg.resolvedModelLight
+
+        // 3.5 Pass 4 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
+        ui.stage = "Pass 4"
+        ui.statusMessage = "Pass 4: judging \(step0.rawSessions.count) sessions (cut + AX validity)…"
+        let refinedSessions = await Self.applyPass4(
+            step0.rawSessions, concurrency: 5,
+            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass2Provider, model: pass2Model) })
+        workerLog.info("pass4: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
+
+        // 4. group + 5. Pass 2 并发
+        let groups = Self.groupRawSessionsByApp(refinedSessions)
+        ui.stage = "Pass 2"
+        ui.statusMessage = "Pass 2: \(groups.count) (app, url) groups — running concurrently (max 5)…"
+        workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
         let userLanguages = ConfigStore.shared.current.personalInfo.languages
         let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
             try store.fetchRecentUserRejections()
@@ -725,6 +741,107 @@ final class WritingCaptureWorker {
                 sessions: members.sorted(by: { $0.startTs < $1.startTs })
             )
         }
+    }
+
+    /// Pass 4 —— 切割 + AX 真伪判断,把非 canvas session 重建成"一单元一 session"。
+    /// canvas session(chromeTokens 非空)/ 无 typing_events 的 → 原样直通。
+    /// 并发限 `concurrency`。LLM 失败 fallback:该 session 原样保留。
+    static func applyPass4(
+        _ sessions: [WritingCaptureRawSession],
+        concurrency: Int,
+        makePass4: @escaping @MainActor @Sendable () -> WritingCapturePass4Agent
+    ) async -> [WritingCaptureRawSession] {
+        // 需要判的:有 typing_events 的 session(无论 Step 0 有没有 canvas 标记)。
+        // —— Pass 4 用三源做 session 级判断:真内容在 AX(ax,按消息切)还是 OCR
+        // (ocr,整 session 走重建)。这取代 Step 0 死检测的路由作用。
+        let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
+        @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
+            let s = sessions[idx]
+            let agent = await makePass4()
+            let result = (try? await agent.run(session: s))
+                ?? WritingCapturePass4Agent.Result(
+                    primarySource: "ax",
+                    units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
+            if result.primarySource == "ocr" {
+                // 真内容在 OCR:整 session 走 CanvasAgent。确保带 chromeTokens +
+                // 粗快照(Step 0 若没 canvas-prep 过,这里补)。
+                let ocrSession = Self.ensureOcrPrepped(s)
+                return (idx, [ocrSession])
+            }
+            // primary=ax:按单元重建(chromeTokens 清空 → 走 Pass2Agent);
+            // dropped 的 event(autofill/垃圾)不进任何单元;全空 = 整 session 丢。
+            let rebuilt = result.units.compactMap { rebuildUnitSession(from: s, eventIds: $0) }
+            return (idx, rebuilt)
+        }
+        var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
+        await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
+            var inFlight = 0, next = 0
+            while inFlight < concurrency && next < needJudge.count {
+                let idx = needJudge[next].offset; next += 1
+                tg.addTask { await judge(idx) }; inFlight += 1
+            }
+            while let (idx, r) = await tg.next() {
+                refinedByIdx[idx] = r; inFlight -= 1
+                if next < needJudge.count {
+                    let idx2 = needJudge[next].offset; next += 1
+                    tg.addTask { await judge(idx2) }; inFlight += 1
+                }
+            }
+        }
+        // 重组:被判过的 session 替换成它的单元;其余原样。保持原顺序。
+        var out: [WritingCaptureRawSession] = []
+        for (i, s) in sessions.enumerated() {
+            if let r = refinedByIdx[i] { out.append(contentsOf: r) } else { out.append(s) }
+        }
+        return out
+    }
+
+    /// 用 Pass 4 给的一组 event_ids 从原 session 重建一个 mini-session
+    /// (保留这些 typing_events + 其合并时间窗 ±10s 内的 keystrokes / frames)。
+    nonisolated static func rebuildUnitSession(
+        from s: WritingCaptureRawSession, eventIds: [Int64]
+    ) -> WritingCaptureRawSession? {
+        let kept = s.typingEvents.filter { e in e.id.map { eventIds.contains($0) } ?? false }
+        guard !kept.isEmpty else { return nil }
+        let pad: Int64 = 10_000
+        let lo = (kept.map(\.startedAt).min() ?? s.startTs) - pad
+        let hi = (kept.map(\.endedAt).max() ?? s.endTs) + pad
+        let keys = s.keystrokes.filter { $0.tsMs >= lo && $0.tsMs <= hi }
+        let frames = s.ocrFrames.filter { $0.startTs >= lo && $0.endTs <= hi }
+        let startTs = kept.map(\.startedAt).min() ?? s.startTs
+        return WritingCaptureRawSession(
+            id: makeUnitSessionId(startTs: startTs, app: s.app),
+            app: s.app, url: s.url,
+            startTs: startTs, endTs: kept.map(\.endedAt).max() ?? s.endTs,
+            typingEvents: kept, keystrokes: keys, ocrFrames: frames,
+            maxContentChars: max(kept.map { $0.text.count }.reduce(0, +),
+                                 frames.map { $0.text.count }.max() ?? 0),
+            axFrameCount: 0, chromeTokens: []
+        )
+    }
+
+    /// 确保一个走 OCR 路径的 session 带 chromeTokens(→ runPass2Concurrently 的
+    /// canvas 分支会路由到 CanvasAgent)。已有则原样;没有则从帧补算。
+    /// typingEvents 清空(OCR 路径不用 AX)。
+    nonisolated static func ensureOcrPrepped(
+        _ s: WritingCaptureRawSession
+    ) -> WritingCaptureRawSession {
+        let tokens = s.chromeTokens.isEmpty
+            ? CanvasFrameCleaner.chromeTokens(s.ocrFrames.map { f in
+                WritingCaptureRawOcr(id: f.frameId, tsMs: f.startTs, app: f.app, url: f.url,
+                                     windowTitle: f.windowTitle, text: f.text, textSource: "ocr") })
+            : s.chromeTokens
+        // chromeTokens 可能仍为空(帧太少);用一个 sentinel 确保被当 canvas 路由。
+        let finalTokens = tokens.isEmpty ? ["__ocr__"] : tokens
+        return WritingCaptureRawSession(
+            id: s.id, app: s.app, url: s.url, startTs: s.startTs, endTs: s.endTs,
+            typingEvents: [], keystrokes: s.keystrokes, ocrFrames: s.ocrFrames,
+            maxContentChars: s.maxContentChars, axFrameCount: s.axFrameCount,
+            chromeTokens: finalTokens)
+    }
+
+    nonisolated static func makeUnitSessionId(startTs: Int64, app: String) -> String {
+        "unit_" + String(format: "%llx", UInt64(bitPattern: startTs &* 31 &+ Int64(app.hashValue & 0xffff)))
     }
 
     /// 并发跑多 group 的 Pass 2 —— sonnet[1m] subagent 一组一个。
