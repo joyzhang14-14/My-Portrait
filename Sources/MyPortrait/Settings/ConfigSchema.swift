@@ -692,13 +692,23 @@ struct PrivacyConfig: Codable, Equatable {
     var captureClipboard:       Bool     = false
     var recordAudioWhileLocked: Bool     = false
     var piiRemoval:             Bool     = true
-    /// Default blacklist: password managers / sensitive tools + desktop
-    /// wallpaper. Case-insensitive substring match against a window's app
-    /// name or title in IgnoreGate ("wallpaper" catches the desktop window
-    /// whose title is "Wallpaper-<UUID>").
+    /// Default blacklist applied to every new install.
+    ///
+    /// Case-insensitive substring match against a window's app name or
+    /// title in IgnoreGate("wallpaper" catches the desktop window whose
+    /// title is "Wallpaper-<UUID>";"Trash" catches the empty/full-trash
+    /// preview windows users would never want recorded).
+    ///
+    /// Categories included by default:
+    ///   - Password managers / 2FA: 1Password / Bitwarden / KeePassXC / Authy
+    ///   - macOS sensitive surfaces: Keychain Access / Wallpaper / Trash
+    ///   - Self: My Portrait — we don't want to log the app's own UI
+    ///
+    /// New users get these out-of-the-box;they can add / remove from
+    /// Settings → Privacy → Ignored apps.
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
-        "My Portrait", "Wallpaper",
+        "My Portrait", "Wallpaper", "Trash",
     ]
     /// Reserved, not enforced yet. Schema / UI / TOML round-trip work, but
     /// IgnoreGate has no allowlist logic — setting this currently does nothing.
