@@ -203,14 +203,14 @@ actor FocusProbe {
             title = titleRef as? String
         }
 
-        // 3. URL（仅浏览器）。AXDocument 在 Chrome/Safari/Edge/Brave/Vivaldi/
-        //    Opera/Chromium 上是 URL 字符串；Firefox 不支持，Arc 需 AppleScript（P2）。
+        // 3. URL（仅浏览器）。
+        //    - Chrome / Edge / Brave / Chromium 系:window 的 AXDocument 直接是 URL 字符串
+        //    - Safari (macOS 26.x 起):window.AXDocument = nil。URL 改放在
+        //      AXWebArea 的 AXURL 属性,或 toolbar 地址栏 AXTextField 的 AXValue
+        //    - Firefox 不支持,Arc 需 AppleScript(P2)
         var url: String?
         if let bid = bundleId, Self.browserBundleIds.contains(bid) {
-            var docRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(focusedWindow, "AXDocument" as CFString, &docRef) == .success {
-                url = docRef as? String
-            }
+            url = Self.extractBrowserURL(focusedWindow: focusedWindow)
         }
 
         // 4. AX tree 文本子树。终端类 app 跳过（拿到的是脏数据，OCR 更准）。
@@ -241,6 +241,74 @@ actor FocusProbe {
         }
 
         return (title, url, axText)
+    }
+
+    /// 浏览器 URL 抽取。fallback 链:
+    ///   1. window.AXDocument                 — Chrome/Edge/Brave/Chromium 系
+    ///   2. 焦点窗口子树里的 AXWebArea.AXURL    — Safari (macOS 26.x 起)
+    ///   3. 子树里的 AXTextField.AXValue       — 地址栏兜底(subrole=AXAddressField)
+    /// BFS 搜索,深度上限 6,元素上限 200。返回首个非空 URL。
+    nonisolated static func extractBrowserURL(focusedWindow: AXUIElement) -> String? {
+        // 1. AXDocument(快路)
+        var docRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedWindow, "AXDocument" as CFString, &docRef) == .success,
+           let s = docRef as? String, !s.isEmpty {
+            return s
+        }
+
+        // 2/3. BFS 找 AXWebArea / AXTextField
+        let maxDepth = 6
+        let maxElements = 200
+        var visited = 0
+        var queue: [(AXUIElement, Int)] = [(focusedWindow, 0)]
+        while !queue.isEmpty, visited < maxElements {
+            let (elem, depth) = queue.removeFirst()
+            visited += 1
+
+            var roleRef: CFTypeRef?
+            let role: String? = {
+                guard AXUIElementCopyAttributeValue(elem, kAXRoleAttribute as CFString, &roleRef) == .success
+                else { return nil }
+                return roleRef as? String
+            }()
+
+            // 2. AXWebArea → AXURL(NSURL → absoluteString)
+            if role == "AXWebArea" {
+                var urlRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(elem, "AXURL" as CFString, &urlRef) == .success {
+                    if let nsurl = urlRef as? NSURL, let s = nsurl.absoluteString, !s.isEmpty {
+                        return s
+                    }
+                    if let s = urlRef as? String, !s.isEmpty { return s }
+                }
+            }
+            // 3. 地址栏 AXTextField(subrole AXAddressField)→ AXValue
+            if role == "AXTextField" {
+                var subRef: CFTypeRef?
+                let isAddr: Bool = {
+                    guard AXUIElementCopyAttributeValue(elem, kAXSubroleAttribute as CFString, &subRef) == .success
+                    else { return false }
+                    return (subRef as? String) == "AXAddressField"
+                }()
+                if isAddr {
+                    var valRef: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(elem, kAXValueAttribute as CFString, &valRef) == .success,
+                       let s = valRef as? String, !s.isEmpty {
+                        return s
+                    }
+                }
+            }
+
+            // 入队 children(不超深度)
+            guard depth < maxDepth else { continue }
+            var childrenRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(elem, kAXChildrenAttribute as CFString, &childrenRef) == .success
+            else { continue }
+            // swiftlint:disable:next force_cast
+            guard let children = childrenRef as? [AXUIElement] else { continue }
+            for c in children { queue.append((c, depth + 1)) }
+        }
+        return nil
     }
 
     /// 递归遍历 AX element，累计 AXValue / AXTitle / AXDescription 文本。
