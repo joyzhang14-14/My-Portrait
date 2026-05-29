@@ -84,9 +84,12 @@ struct WritingCaptureRawSession: Sendable {
     /// 给 Pass 1 决定单帧 cap 用 —— AX 稀缺(ax*10 < typingEvents 数)时
     /// OCR 是唯一文本来源,放开 cap。
     let axFrameCount: Int
-    /// canvas session 的自适应 chrome 词表(跨帧频率 >85% 的 token)。
-    /// 给 Pass 2 当提示:检测正文编辑时忽略这些 UI 词。非 canvas 为空。
+    /// 自适应 chrome 词表(跨帧频率 >85% 的 token)。**纯 hint** —— 只在 OCR
+    /// 路径喂给 CanvasAgent,让它检测正文编辑时忽略这些 UI 词。不参与路由。
     let chromeTokens: [String]
+    /// 路由:"ax"(信 typing_events,走 Pass2Agent 清洗)| "ocr"(真内容在屏幕,
+    /// 走 CanvasAgent 重建)。Step 0 给默认值,Pass 4 用三源裁决覆盖。
+    let route: String
 
     init(
         id: String, app: String, url: String?,
@@ -94,7 +97,8 @@ struct WritingCaptureRawSession: Sendable {
         typingEvents: [TypingEvent], keystrokes: [KeystrokeEntry],
         ocrFrames: [WritingCaptureOcrFrame], maxContentChars: Int,
         axFrameCount: Int = 0,
-        chromeTokens: [String] = []
+        chromeTokens: [String] = [],
+        route: String = "ax"
     ) {
         self.id = id
         self.app = app
@@ -107,6 +111,7 @@ struct WritingCaptureRawSession: Sendable {
         self.maxContentChars = maxContentChars
         self.axFrameCount = axFrameCount
         self.chromeTokens = chromeTokens
+        self.route = route
     }
 }
 

@@ -215,18 +215,17 @@ struct WritingCaptureStep0 {
             let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
             // canvas(真·自绘文档编辑器)判定:typing 极少 **且 OCR 内容远超
             // typing**(OCR 才是真内容,typing 只是 "i"/"a" 之类残渣)。
-            // 只看 typing<=50 会误判聊天 app —— Discord/WeChat 一个 session 几条
-            // 短消息也 <50,但那些 typing_events 就是消息本身,该 explode 切,
-            // 不该走 canvas OCR。加 "OCR 主导" 条件区分:gdoc OCR 2900 >> typing
-            // 10(290×);聊天 OCR 跟 typing 同量级。
+            // 这里只是**帧预处理 + 默认路由**的启发式;真正路由由 Pass 4 三源裁决
+            // 覆盖(Discord/聊天 这里可能误判 ocr,Pass 4 会改回 ax)。
+            // OCR 主导 → 粗快照(留编辑进程)+ 算 chrome hint + 默认 route=ocr。
             let typingTotalChars = sessionTyping.map { $0.text.count }.reduce(0, +)
             let ocrMaxChars = sessionFrames.map { $0.text.count }.max() ?? 0
-            let isCanvas = typingTotalChars <= canvasTypingThreshold
+            let ocrDominant = typingTotalChars <= canvasTypingThreshold
                 && ocrMaxChars > typingTotalChars * 10
                 && ocrMaxChars >= 200
             let outFrames: [WritingCaptureOcrFrame]
             let chromeTokens: [String]
-            if isCanvas {
+            if ocrDominant {
                 outFrames = CanvasFrameCleaner.coarseSnapshots(sessionFrames)
                 chromeTokens = CanvasFrameCleaner.chromeTokens(sessionFrames)
             } else {
@@ -248,7 +247,8 @@ struct WritingCaptureStep0 {
                 ocrFrames: outFrames,
                 maxContentChars: maxChars,
                 axFrameCount: axCount,
-                chromeTokens: chromeTokens
+                chromeTokens: chromeTokens,
+                route: ocrDominant ? "ocr" : "ax"
             ))
         }
         return result
@@ -574,7 +574,8 @@ struct WritingCaptureStep0 {
                 ocrFrames: frames,
                 maxContentChars: members.map(\.maxContentChars).max() ?? 0,
                 axFrameCount: members.map(\.axFrameCount).reduce(0, +),
-                chromeTokens: Array(Set(members.flatMap(\.chromeTokens))).sorted()
+                chromeTokens: Array(Set(members.flatMap(\.chromeTokens))).sorted(),
+                route: members.contains { $0.route == "ocr" } ? "ocr" : "ax"
             )
             merged.append(combined)
         }
