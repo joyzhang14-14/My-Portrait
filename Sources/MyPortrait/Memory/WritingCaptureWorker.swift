@@ -820,8 +820,8 @@ final class WritingCaptureWorker {
         )
     }
 
-    /// 确保一个走 OCR 路径的 session 带 chromeTokens(→ runPass2Concurrently 的
-    /// canvas 分支会路由到 CanvasAgent)。已有则原样;没有则从帧补算。
+    /// 把一个 session 标成走 OCR 路径(route="ocr" → dispatch 去 CanvasAgent)。
+    /// chromeTokens 仅作 hint:已有则留,没有则从帧补算(自适应频率,非写死)。
     /// typingEvents 清空(OCR 路径不用 AX)。
     nonisolated static func ensureOcrPrepped(
         _ s: WritingCaptureRawSession
@@ -831,13 +831,11 @@ final class WritingCaptureWorker {
                 WritingCaptureRawOcr(id: f.frameId, tsMs: f.startTs, app: f.app, url: f.url,
                                      windowTitle: f.windowTitle, text: f.text, textSource: "ocr") })
             : s.chromeTokens
-        // chromeTokens 可能仍为空(帧太少);用一个 sentinel 确保被当 canvas 路由。
-        let finalTokens = tokens.isEmpty ? ["__ocr__"] : tokens
         return WritingCaptureRawSession(
             id: s.id, app: s.app, url: s.url, startTs: s.startTs, endTs: s.endTs,
             typingEvents: [], keystrokes: s.keystrokes, ocrFrames: s.ocrFrames,
             maxContentChars: s.maxContentChars, axFrameCount: s.axFrameCount,
-            chromeTokens: finalTokens)
+            chromeTokens: tokens, route: "ocr")
     }
 
     nonisolated static func makeUnitSessionId(startTs: Int64, app: String) -> String {
@@ -864,7 +862,7 @@ final class WritingCaptureWorker {
         // fanout;普通组走 Pass 2 单调用。
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass2GroupResult) {
             let g = groups[idx]
-            let isCanvas = g.sessions.contains { !$0.chromeTokens.isEmpty }
+            let isCanvas = g.sessions.contains { $0.route == "ocr" }
             do {
                 if isCanvas {
                     let merged = Self.mergeCanvasSessions(g.sessions)
@@ -972,7 +970,8 @@ final class WritingCaptureWorker {
                 ocrFrames: frames,
                 maxContentChars: members.map(\.maxContentChars).max() ?? 0,
                 axFrameCount: members.map(\.axFrameCount).reduce(0, +),
-                chromeTokens: Array(Set(members.flatMap(\.chromeTokens))).sorted()
+                chromeTokens: Array(Set(members.flatMap(\.chromeTokens))).sorted(),
+                route: members.contains { $0.route == "ocr" } ? "ocr" : "ax"
             )
         }
     }
