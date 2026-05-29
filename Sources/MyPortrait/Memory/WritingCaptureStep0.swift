@@ -31,6 +31,8 @@ struct WritingCaptureStep0 {
     ///   0.85:大部分 chrome 不变帧合并,5/23 实测 23K tokens
     ///   0.50:连用户打字过程中的中间状态也合并,只留终态 + 显著变化的帧
     static let ocrJaccardThreshold = 0.50
+    /// canvas 判定:session typing_events 总字数 ≤ 此值 = AX 稀疏 canvas。
+    static let canvasTypingThreshold = 50
     /// throwaway preview 截断长度
     static let throwawayPreviewLen = 80
     /// **OCR 反向 join 窗口**:一个 session 只保留"typing / keystroke 事件
@@ -206,12 +208,24 @@ struct WritingCaptureStep0 {
                     windowMs: ocrAnchorWindowMs
                 )
             }
-            let dedupedFrames = jaccardDedupe(sessionFrames)
+            let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
+            // canvas(AX 稀疏)session:用时间桶粗快照保留编辑进程 + 自适应
+            // chrome 词表;普通 session 走 Jaccard dedup 省 token。
+            let typingTotalChars = sessionTyping.map { $0.text.count }.reduce(0, +)
+            let isCanvas = typingTotalChars <= canvasTypingThreshold
+            let outFrames: [WritingCaptureOcrFrame]
+            let chromeTokens: [String]
+            if isCanvas {
+                outFrames = CanvasFrameCleaner.coarseSnapshots(sessionFrames)
+                chromeTokens = CanvasFrameCleaner.chromeTokens(sessionFrames)
+            } else {
+                outFrames = jaccardDedupe(sessionFrames)
+                chromeTokens = []
+            }
             let maxChars = computeMaxContentChars(
                 typingEvents: sessionTyping,
-                ocrFrames: dedupedFrames
+                ocrFrames: outFrames
             )
-            let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
             result.append(WritingCaptureRawSession(
                 id: id,
                 app: acc.app,
@@ -220,9 +234,10 @@ struct WritingCaptureStep0 {
                 endTs: acc.lastTs,
                 typingEvents: sessionTyping,
                 keystrokes: sessionKeys,
-                ocrFrames: dedupedFrames,
+                ocrFrames: outFrames,
                 maxContentChars: maxChars,
-                axFrameCount: axCount
+                axFrameCount: axCount,
+                chromeTokens: chromeTokens
             ))
         }
         return result
@@ -547,7 +562,8 @@ struct WritingCaptureStep0 {
                 keystrokes: keys,
                 ocrFrames: frames,
                 maxContentChars: members.map(\.maxContentChars).max() ?? 0,
-                axFrameCount: members.map(\.axFrameCount).reduce(0, +)
+                axFrameCount: members.map(\.axFrameCount).reduce(0, +),
+                chromeTokens: Array(Set(members.flatMap(\.chromeTokens))).sorted()
             )
             merged.append(combined)
         }

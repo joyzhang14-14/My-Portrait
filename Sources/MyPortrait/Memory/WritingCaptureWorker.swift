@@ -244,6 +244,7 @@ final class WritingCaptureWorker {
             groups: groups,
             concurrency: 5,
             makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass2Provider, model: pass2Model) },
+            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass2Provider, model: pass2Model) },
             userLanguages: userLanguages,
             userRejections: userRejections
         )
@@ -553,6 +554,7 @@ final class WritingCaptureWorker {
         let pass2Results = await Self.runPass2Concurrently(
             contextTimeline: pass1Out.timeline, groups: groups, concurrency: 5,
             makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass2Provider, model: pass2Model) },
+            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass2Provider, model: pass2Model) },
             includeAxText: includeAxText,
             userLanguages: userLanguages,
             userRejections: userRejections
@@ -736,59 +738,59 @@ final class WritingCaptureWorker {
         groups: [WritingCaptureGroup],
         concurrency: Int,
         makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent,
+        makeCanvas: @escaping @MainActor @Sendable () -> WritingCaptureCanvasAgent,
         includeAxText: Bool = true,
         userLanguages: [String] = [],
         userRejections: [UserRejectionRow] = []
     ) async -> [Pass2GroupResult] {
-        await withTaskGroup(of: (Int, Pass2GroupResult).self) { taskGroup in
+        // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
+        // fanout;普通组走 Pass 2 单调用。
+        @Sendable func runOne(_ idx: Int) async -> (Int, Pass2GroupResult) {
+            let g = groups[idx]
+            let isCanvas = g.sessions.contains { !$0.chromeTokens.isEmpty }
+            do {
+                if isCanvas {
+                    let merged = Self.mergeCanvasSessions(g.sessions)
+                    let ctx = contextTimeline.first {
+                        $0.app == g.app && $0.startTs <= merged.endTs && $0.endTs >= merged.startTs
+                    }?.summary
+                    let agent = await makeCanvas()
+                    let out = try await agent.run(
+                        groupApp: g.app, groupUrl: g.url,
+                        session: merged, contextSummary: ctx)
+                    return (idx, .success(out))
+                } else {
+                    let agent = await makePass2()
+                    let out = try await agent.run(
+                        contextTimeline: contextTimeline,
+                        groupApp: g.app, groupUrl: g.url,
+                        rawSessions: g.sessions,
+                        includeAxText: includeAxText,
+                        userLanguages: userLanguages,
+                        userRejections: userRejections
+                    )
+                    return (idx, .success(out))
+                }
+            } catch {
+                return (idx, .failure(error))
+            }
+        }
+
+        return await withTaskGroup(of: (Int, Pass2GroupResult).self) { taskGroup in
             var inFlight = 0
             var nextIdx = 0
             var results: [Int: Pass2GroupResult] = [:]
-            // 启动初始批
             while inFlight < concurrency && nextIdx < groups.count {
                 let idx = nextIdx; nextIdx += 1
-                let g = groups[idx]
-                taskGroup.addTask {
-                    do {
-                        let agent = await makePass2()
-                        let out = try await agent.run(
-                            contextTimeline: contextTimeline,
-                            groupApp: g.app, groupUrl: g.url,
-                            rawSessions: g.sessions,
-                            includeAxText: includeAxText,
-                            userLanguages: userLanguages,
-                            userRejections: userRejections
-                        )
-                        return (idx, .success(out))
-                    } catch {
-                        return (idx, .failure(error))
-                    }
-                }
+                taskGroup.addTask { await runOne(idx) }
                 inFlight += 1
             }
-            // 收一个 → 补一个
             while let (idx, res) = await taskGroup.next() {
                 results[idx] = res
                 inFlight -= 1
                 if nextIdx < groups.count {
                     let nidx = nextIdx; nextIdx += 1
-                    let g = groups[nidx]
-                    taskGroup.addTask {
-                        do {
-                            let agent = await makePass2()
-                            let out = try await agent.run(
-                                contextTimeline: contextTimeline,
-                                groupApp: g.app, groupUrl: g.url,
-                                rawSessions: g.sessions,
-                                includeAxText: includeAxText,
-                                userLanguages: userLanguages,
-                                userRejections: userRejections
-                            )
-                            return (nidx, .success(out))
-                        } catch {
-                            return (nidx, .failure(error))
-                        }
-                    }
+                    taskGroup.addTask { await runOne(nidx) }
                     inFlight += 1
                 }
             }
@@ -797,6 +799,27 @@ final class WritingCaptureWorker {
     }
 
     enum Pass2GroupError: Error { case missing }
+
+    /// 把一个 canvas group 的多 session 并成一条(整篇文档跨天)——
+    /// ocrFrames 按 ts 拼,chromeTokens 取并集。
+    nonisolated static func mergeCanvasSessions(
+        _ sessions: [WritingCaptureRawSession]
+    ) -> WritingCaptureRawSession {
+        let first = sessions[0]
+        if sessions.count == 1 { return first }
+        let frames = sessions.flatMap { $0.ocrFrames }.sorted { $0.startTs < $1.startTs }
+        return WritingCaptureRawSession(
+            id: first.id, app: first.app, url: first.url,
+            startTs: sessions.map(\.startTs).min() ?? first.startTs,
+            endTs: sessions.map(\.endTs).max() ?? first.endTs,
+            typingEvents: sessions.flatMap { $0.typingEvents },
+            keystrokes: sessions.flatMap { $0.keystrokes },
+            ocrFrames: frames,
+            maxContentChars: sessions.map(\.maxContentChars).max() ?? 0,
+            axFrameCount: sessions.map(\.axFrameCount).reduce(0, +),
+            chromeTokens: Array(Set(sessions.flatMap(\.chromeTokens))).sorted()
+        )
+    }
 
     /// 按 (app, url) 整天合并 raw_sessions(已弃用,留向后兼容)。
     /// Pre-Pass-2 算法层优化的早期方案,现在改成 group + 并发 subagent。
@@ -831,7 +854,8 @@ final class WritingCaptureWorker {
                 keystrokes: keys,
                 ocrFrames: frames,
                 maxContentChars: members.map(\.maxContentChars).max() ?? 0,
-                axFrameCount: members.map(\.axFrameCount).reduce(0, +)
+                axFrameCount: members.map(\.axFrameCount).reduce(0, +),
+                chromeTokens: Array(Set(members.flatMap(\.chromeTokens))).sorted()
             )
         }
     }

@@ -12,6 +12,29 @@ struct WritingCaptureRecord: Codable, Sendable {
     let text: String
     let editLog: [EditEntry]
 
+    /// 程序化构造(canvas window 合并后建一条 record 用)。
+    init(
+        text: String, editLog: [EditEntry], kind: String, source: String,
+        confidence: Double, contextSummary: String?, app: String, url: String?,
+        startTs: Int64, endTs: Int64,
+        referenceTypingEventIds: [Int64], referenceFrameIds: [Int64],
+        referenceKeystrokeRange: KeystrokeRange
+    ) {
+        self.text = text
+        self.editLog = editLog
+        self.kind = kind
+        self.source = source
+        self.confidence = confidence
+        self.contextSummary = contextSummary
+        self.app = app
+        self.url = url
+        self.startTs = startTs
+        self.endTs = endTs
+        self.referenceTypingEventIds = referenceTypingEventIds
+        self.referenceFrameIds = referenceFrameIds
+        self.referenceKeystrokeRange = referenceKeystrokeRange
+    }
+
     // LLM 偶发对 delete 类目省略 text 字段 → 自定义 decode 容忍。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -508,6 +531,8 @@ private struct RawSessionPayload: Encodable {
     let typingEvents: [TypingEventPayload]
     let keystrokeLog: [KeystrokePayload]
     let ocrFrames: [WritingCaptureOcrFrame]
+    /// 自适应 chrome 词表(canvas session 才非空)。提示 LLM 检测编辑时忽略。
+    let chromeTokens: [String]
 
     enum CodingKeys: String, CodingKey {
         case sessionId    = "session_id"
@@ -520,6 +545,7 @@ private struct RawSessionPayload: Encodable {
         case typingEvents   = "typing_events"
         case keystrokeLog   = "keystroke_log"
         case ocrFrames      = "ocr_frames"
+        case chromeTokens   = "chrome_tokens"
     }
 
     init(_ s: WritingCaptureRawSession, includeAxText: Bool = true) {
@@ -535,6 +561,7 @@ private struct RawSessionPayload: Encodable {
         self.typingEvents = includeAxText ? s.typingEvents.map(TypingEventPayload.init) : []
         self.keystrokeLog = s.keystrokes.map(KeystrokePayload.init)
         self.ocrFrames = s.ocrFrames
+        self.chromeTokens = s.chromeTokens
     }
 
     /// 把 keystrokes 拼成一条「真实敲了什么」的字符串。

@@ -126,7 +126,7 @@ enum WritingCapturePrompts {
       optional user_languages
     - raw_sessions: every session inside this group, each with multi-source data:
       [{session_id, start_ts, end_ts, keystroke_text, keystroke_count,
-        typing_events, keystroke_log, ocr_frames}, ...]
+        typing_events, keystroke_log, ocr_frames, chrome_tokens}, ...]
 
       **MULTI-SOURCE CROSS-VALIDATION — read carefully:**
 
@@ -159,25 +159,29 @@ enum WritingCapturePrompts {
     CANVAS EDIT-HISTORY RECONSTRUCTION (Google Docs / Figma / web editors, no AX)
       When typing_events is empty/sparse, reconstruct the edit_log YOURSELF by
       comparing the DOCUMENT BODY across consecutive ocr_frames over time:
-        - ocr_frames are time-ordered snapshots of the screen. Each contains app /
-          browser CHROME (tab bar, address bar, menu/toolbar, "saving…/saved"
-          indicators, file name) PLUS the document body. IGNORE the chrome — only
-          compare the body prose.
-        - A paragraph/sentence that APPEARS in a later frame and wasn't in an
-          earlier one → a "commit" edit (the user wrote it). Use the new body text.
-        - A paragraph/sentence that was present then GONE in a later frame, with a
-          net reduction > ~15 chars of real prose → a "delete" edit. Record what
-          was removed in the edit entry text.
+        - ocr_frames here are COARSE time-bucketed snapshots (~one every few
+          minutes, the cleanest frame per bucket) — a version-level timeline, not
+          every keystroke. Aim for VERSION-LEVEL edits (a paragraph/sentence
+          added or removed between snapshots), matching that granularity.
+        - chrome_tokens is an ADAPTIVE list of UI words that appeared in almost
+          every frame this session (tab names, menu/toolbar labels, "saving/saved",
+          file name, URL fragments). These are app/browser chrome, NOT the user's
+          writing. When comparing snapshots, IGNORE any change made of only
+          chrome_tokens — it is UI churn, never a real edit.
+        - A paragraph/sentence of real prose that APPEARS in a later snapshot and
+          wasn't before → a "commit" edit. Use the new body text.
+        - A paragraph/sentence present then GONE in a later snapshot, net reduction
+          > ~15 chars of real prose → a "delete" edit. Record what was removed.
         - This is for revision habits: how much the user adds vs deletes, whether
           they revise heavily. The FINAL record text = the most complete / last
-          body state across the frames.
+          body state across the snapshots (use the RAW frame text, not stripped).
 
       CRITICAL — DO NOT INVENT EDITS. Accuracy beats completeness here:
         - If you are NOT confident a change is a real body edit (could be OCR
           jitter, word-order scramble, scrolling, or chrome churn), DO NOT emit an
           edit for it. A missed edit is fine; a fabricated edit is NOT.
-        - NEVER turn chrome text (URLs, tab names, "saving", toolbar labels, app
-          names) into an edit_log entry.
+        - NEVER turn chrome text (anything in chrome_tokens: URLs, tab names,
+          "saving", toolbar labels, app names) into an edit_log entry.
         - When unsure, emit a SHORTER edit_log with only the edits you are sure of,
           or an empty edit_log — never pad it with noise.
 
@@ -466,6 +470,20 @@ enum WritingCapturePrompts {
       web-based chat, canvas editor) AND AX or OCR backs the content with
       a coherent message in the user's language.
 
+    CANVAS LONG-FORM EXEMPTION (read carefully — applies to source "canvas_fusion"
+    / "merged" on a document editor like Google Docs / Notion / Word-on-web):
+    - These apps expose NO keystroke/AX for the body. The record was reconstructed
+      from OCR of the document on screen. The keystroke_text for the window WILL
+      look unrelated (pinyin fragments, Chinese chat from a side window, paste
+      events, or near-empty) — THIS IS EXPECTED and is NOT grounds to discard.
+    - If the text is a COHERENT long-form document in a language the user writes
+      (a multi-paragraph essay, article, structured prose) → KEEP IT. The OCR of
+      the on-screen document IS the evidence; keystrokes are not the source here.
+    - Mismatched keystrokes ("evidence shows Chinese chat, not this English essay")
+      is the NORMAL canvas signature, NOT a reason to discard. Only discard a
+      canvas record if the TEXT ITSELF is garbage (OCR-scrambled word salad, chrome
+      labels, empty) — never because keystrokes don't match a coherent document.
+
     DISCARD a record when ALL of:
     - keystroke_count is far below what text.length would require AND not
       explained by IME; AND
@@ -500,6 +518,52 @@ enum WritingCapturePrompts {
     - EVERY input record_id appears EXACTLY ONCE — either in `kept` or in
       `discarded.record_id`. Never both.
     - "reason" is free text, no enum required.
+    - Respond with ONLY the JSON object, no prose / code fences.
+    """#
+
+    // MARK: - Canvas window —— 一窗连续文档快照 → 编辑片段 + body
+
+    /// 一个 subagent 只看 ONE canvas 文档的几张连续时间快照,产出这段的编辑
+    /// 片段 + 最完整 body。多窗并发跑、结果合并(见 WritingCaptureCanvasAgent)。
+    static let canvasWindow = #"""
+    You are reconstructing the EDIT HISTORY of ONE document (Google Docs / Notion /
+    web editor) from a few consecutive screen snapshots over time.
+
+    INPUT
+    - chrome_tokens: words that appear in nearly every snapshot (tab names, menu /
+      toolbar labels, "saving/saved", file name, URL fragments). These are app /
+      browser CHROME, NOT the user's writing. IGNORE them everywhere.
+    - snapshots: time-ordered OCR snapshots of the screen, each {ts, text}. Each
+      text contains chrome PLUS the document body. The body is the prose the user
+      is writing.
+
+    TASK — compare the DOCUMENT BODY across consecutive snapshots:
+    1. edits: between each pair of consecutive snapshots, detect body changes:
+       - "commit": a sentence/paragraph of real prose appears that wasn't there
+         before. text = the new prose (trimmed of chrome).
+       - "delete": a sentence/paragraph of real prose that was present is now gone,
+         net removal > ~15 chars. text = the removed prose.
+       Use the LATER snapshot's ts for each edit.
+    2. body_text: the single most COMPLETE, CLEAN document body you can read across
+       these snapshots (usually the last/longest). Strip ALL chrome — output only
+       the user's prose, paragraphs in order.
+
+    CRITICAL — DO NOT INVENT. Accuracy beats completeness:
+    - If a change might be OCR jitter, word-order scramble, scrolling, or chrome
+      churn, DO NOT emit an edit. A missed edit is fine; a fabricated one is not.
+    - NEVER emit an edit whose text is made of chrome_tokens / UI labels / URLs.
+    - If you are unsure, emit fewer edits (or none). Never pad with noise.
+
+    OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
+    {
+      "edits": [ { "ts": <ms>, "kind": "commit|delete", "text": "<prose>" } ],
+      "body_text": "<cleanest full document body, chrome stripped>"
+    }
+
+    HARD RULES
+    - JSON string escaping: escape `"` → `\"`, `\` → `\\`, newlines → `\n`.
+    - "kind" is EXACTLY "commit" or "delete".
+    - edits sorted by ts ascending.
     - Respond with ONLY the JSON object, no prose / code fences.
     """#
 }
