@@ -166,8 +166,13 @@ struct NotificationCardView: View {
 
     @State private var hover = false
     @State private var pressed = false
-    @State private var progress: Double = 1.0
+    @State private var elapsed: TimeInterval = 0
+    @State private var tickTask: Task<Void, Never>?
     @Environment(\.colorScheme) private var colorScheme
+
+    private var progress: Double {
+        max(0, min(1, 1 - elapsed / notification.timeout))
+    }
 
     private var bodyAttributed: AttributedString {
         // .inlineOnlyPreservingWhitespace:保留换行,只渲染行内 markdown
@@ -297,13 +302,19 @@ struct NotificationCardView: View {
             }
         }
         .onAppear {
-            // 进度条收缩交给一次性线性动画,Core Animation 插值 frame width,
-            // 避免原来每 50ms 改 elapsed → 整卡 body 重算(含 markdown 重解析)。
-            // 自动消失由 NotificationCenterService.scheduleDismiss 独立管,与此无关。
-            withAnimation(.linear(duration: notification.timeout)) {
-                progress = 0
+            // 进度条 ticker:50ms 一次更新 elapsed,驱动条收缩
+            let start = Date()
+            let timeout = notification.timeout
+            tickTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    let dt = Date().timeIntervalSince(start)
+                    elapsed = dt
+                    if dt >= timeout { break }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
             }
         }
+        .onDisappear { tickTask?.cancel(); tickTask = nil }
     }
 }
 
