@@ -7,10 +7,21 @@ struct AudioCaptureSettingsView: View {
     private var audioRec: Bool { config.current.capture.audio.enabled }
     private var engine: String { config.current.capture.audio.engine }
 
-    /// Whisper 支持的语言(code → 英文名)。给转录 Language 下拉菜单用 —— 用户从
-    /// 列表里选,不手输,避免乱七八糟的值喂给 Whisper。
-    private struct WhisperLang: Identifiable, Hashable { let code, name: String; var id: String { code } }
-    private static let whisperLanguages: [WhisperLang] = [
+    /// 转录语言选项(code → 英文名)。给 Language 下拉用 —— 用户从列表选不手输。
+    /// **按 engine 绑定**:不同转录引擎支持的语言不同;新增引擎在
+    /// languageOptions(for:) 加一支即可。选中的 code 存进 capture.audio.languages。
+    private struct TranscriptionLanguage: Identifiable, Hashable { let code, name: String; var id: String { code } }
+
+    /// 当前引擎对应的语言选项。新增转录模型时在这里加 case。
+    private static func languageOptions(for engine: String) -> [TranscriptionLanguage] {
+        switch engine {
+        case AudioEngine.deepgram.rawValue: return deepgramLanguages
+        default:                            return whisperLanguages   // whisper / custom 默认用 Whisper 集
+        }
+    }
+
+    /// Whisper(on-device)支持的语言。
+    private static let whisperLanguages: [TranscriptionLanguage] = [
         ("af","Afrikaans"),("sq","Albanian"),("am","Amharic"),("ar","Arabic"),("hy","Armenian"),
         ("as","Assamese"),("az","Azerbaijani"),("ba","Bashkir"),("eu","Basque"),("be","Belarusian"),
         ("bn","Bengali"),("bs","Bosnian"),("br","Breton"),("bg","Bulgarian"),("my","Burmese"),
@@ -31,7 +42,17 @@ struct AudioCaptureSettingsView: View {
         ("ta","Tamil"),("tt","Tatar"),("te","Telugu"),("th","Thai"),("bo","Tibetan"),
         ("tr","Turkish"),("tk","Turkmen"),("uk","Ukrainian"),("ur","Urdu"),("uz","Uzbek"),
         ("vi","Vietnamese"),("cy","Welsh"),("yi","Yiddish"),("yo","Yoruba"),
-    ].map { WhisperLang(code: $0.0, name: $0.1) }
+    ].map { TranscriptionLanguage(code: $0.0, name: $0.1) }
+
+    /// Deepgram(cloud)支持的语言(常用子集,按需补)。
+    private static let deepgramLanguages: [TranscriptionLanguage] = [
+        ("en","English"),("zh","Chinese"),("es","Spanish"),("fr","French"),("de","German"),
+        ("hi","Hindi"),("ja","Japanese"),("ko","Korean"),("pt","Portuguese"),("ru","Russian"),
+        ("it","Italian"),("nl","Dutch"),("tr","Turkish"),("pl","Polish"),("sv","Swedish"),
+        ("da","Danish"),("no","Norwegian"),("fi","Finnish"),("id","Indonesian"),("uk","Ukrainian"),
+        ("vi","Vietnamese"),("th","Thai"),("cs","Czech"),("el","Greek"),("hu","Hungarian"),
+        ("ro","Romanian"),("ms","Malay"),("ta","Tamil"),("bg","Bulgarian"),("ca","Catalan"),
+    ].map { TranscriptionLanguage(code: $0.0, name: $0.1) }
 
     var body: some View {
         SettingsPage("Audio Capture", subtitle: "Microphone + transcription",
@@ -211,7 +232,7 @@ struct AudioCaptureSettingsView: View {
                             } }
                         )) {
                             Text("Auto-detect").tag("")
-                            ForEach(Self.whisperLanguages) { lang in
+                            ForEach(Self.languageOptions(for: engine)) { lang in
                                 Text(lang.name).tag(lang.code)
                             }
                         }
