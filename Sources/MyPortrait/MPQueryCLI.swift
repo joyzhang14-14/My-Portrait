@@ -32,6 +32,7 @@ enum MPQueryCLI {
         case "memories":          runMemories(args: rest)
         case "audio":             runAudio(args: rest)
         case "writing":           runWriting(args: rest)
+        case "cronjob":           MPQueryCronJobCLI.run(args: rest)
         case "help", "--help", "-h":
             printUsage()
             exit(0)
@@ -458,6 +459,8 @@ enum MPQueryCLI {
           activity-summary  top apps / windows over a time range
           memories          search the user's portrait notes / events
           audio             audio transcriptions over a time range
+          writing           search LLM-distilled writing records (what the user typed)
+          cronjob           manage scheduled AI cron jobs (add / list / remove)
 
         COMMON OPTIONS
           --start <time>    "30m ago" | "1h ago" | "today" | ISO 8601

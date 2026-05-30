@@ -21,7 +21,18 @@ final class CronJobStore {
         ConfigStore.shared.current.general.cronJobHistoryLimit
     }
 
-    private init() { load() }
+    private init() {
+        load()
+        // mp-query cronjob add/remove 落盘后 post Darwin notification,
+        // 主 app 这边 observe 一下立刻重读,免得用户为了看新 cron job 重启 app。
+        // observer 回调在任意线程,跳回 main 调 load()。
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(MPQueryCronJobCLI.reloadNotification),
+            object: nil, queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.load() }
+        }
+    }
 
     // MARK: - CRUD
 
