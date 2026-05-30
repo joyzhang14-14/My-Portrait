@@ -54,27 +54,36 @@ enum ChatGPTOAuth {
 
     /// Return a valid access token, refreshing if needed. Throws if not logged in.
     static func validToken() async throws -> String {
-        guard let tokens = SecretStore.shared.getJSON(secretKey, as: Tokens.self) else {
-            throw OAuthError.notLoggedIn
-        }
-        if tokens.isExpired {
-            let refreshed = try await refresh(tokens.refreshToken)
-            return refreshed.accessToken
-        }
-        return tokens.accessToken
+        try await RefreshGate.shared.validTokens().accessToken
     }
 
     /// Return the full tokens(access + refresh + expiresAt),自动 refresh
     /// 过期那一项。PiAgent 写 Pi 0.60 的 auth.json 时需要全套(refresh +
     /// expires 让 Pi 自己接管后续 refresh)。
     static func validTokens() async throws -> Tokens {
-        guard let tokens = SecretStore.shared.getJSON(secretKey, as: Tokens.self) else {
-            throw OAuthError.notLoggedIn
+        try await RefreshGate.shared.validTokens()
+    }
+
+    /// refresh 单飞闸 —— 同一时刻全进程只发一次 refresh POST + 串行写回。
+    /// 防止多个 cron job(或单 agent 双重取 token)并发 refresh 同一个 refresh_token:
+    /// OpenAI 轮转 refresh_token(旧的一次性失效),并发会让一方拿到的 token 作废 →
+    /// 把失效 token 写进 SecretStore / auth.json → 后续永久 401,要重新登录。
+    private actor RefreshGate {
+        static let shared = RefreshGate()
+        private var inFlight: Task<Tokens, Error>?
+
+        func validTokens() async throws -> Tokens {
+            guard let tokens = SecretStore.shared.getJSON(ChatGPTOAuth.secretKey, as: Tokens.self) else {
+                throw OAuthError.notLoggedIn
+            }
+            if !tokens.isExpired { return tokens }
+            // 已有 refresh 在飞 → 合流等它(它会写回 fresh token),不再发第二枪。
+            if let inFlight { return try await inFlight.value }
+            let task = Task { try await ChatGPTOAuth.refresh(tokens.refreshToken) }
+            inFlight = task
+            defer { inFlight = nil }
+            return try await task.value
         }
-        if tokens.isExpired {
-            return try await refresh(tokens.refreshToken)
-        }
-        return tokens
     }
 
     static func logout() {
