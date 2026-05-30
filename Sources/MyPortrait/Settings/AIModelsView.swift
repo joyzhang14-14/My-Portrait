@@ -18,6 +18,8 @@ struct AIModelsSettingsView: View {
     @State private var localModelTick: Int = 0
     /// 轮询重入 guard —— 7 行 onAppear + .id 重渲染会重复触发,没它会每 2s 增殖一批 Task。
     @State private var isPollingLocalModels = false
+    /// 正在下载的转录模型 name(点 Download 触发)。
+    @State private var downloading: Set<String> = []
 
     /// connections 里已连上的 AI provider(category .ai + .local 且能映射到
     /// 实际的 Provider)。disabled 状态不影响这个列表 —— 这里列的是"能用的",
@@ -51,14 +53,12 @@ struct AIModelsSettingsView: View {
 
             SettingsCard(
                 title: "Local capture models",
-                footnote: "Downloaded automatically on first launch (~2.2 GB total for all 4 Whisper sizes + 40 MB speaker models). Required for transcription, voice training, and speaker grouping. The app works without them but voice features stay disabled until they finish."
+                footnote: "Speaker models (~40 MB) download on first launch. Whisper transcription models download on demand — hit Download to fetch one; your selected model is fetched automatically. Voice features stay disabled until ready."
             ) {
-                // 4 个 Whisper transcription 模型 —— 跟 Settings → Capture 的
-                // model picker 一一对应,启动时统一 prefetch,用户切大小不用再等。
-                ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { idx, m in
-                    localModelRow("Transcription",
-                                  detail: "\(m.label) (\(m.size))",
-                                  ready: WhisperKitWrapper.isOnDisk(modelName: m.name))
+                // Whisper 转录模型 —— 跟 Audio Capture 的 model picker 同一份目录。
+                // 没装的这里点 Download 下载,装好后才能在 picker 里选。
+                ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { _, m in
+                    transcriptionModelRow(m)
                     SettingsDivider()
                 }
                 localModelRow("Voice signature", detail: "wespeaker CAM++ (~30 MB)",
@@ -113,6 +113,56 @@ struct AIModelsSettingsView: View {
         .onAppear { startLocalModelPolling() }
     }
 
+    /// Whisper 转录模型行 —— 没装显示 Download 按钮,下载中显示进度,装好显示 Ready。
+    private func transcriptionModelRow(_ m: (name: String, label: String, size: String)) -> some View {
+        let ready = WhisperKitWrapper.isOnDisk(modelName: m.name)
+        let isDownloading = downloading.contains(m.name)
+        return HStack(spacing: 12) {
+            Image(systemName: ready ? "checkmark.circle.fill" : "arrow.down.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(ready ? Color.green.opacity(0.85) : Color.orange.opacity(0.85))
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Transcription")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                Text("\(m.label) (\(m.size))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            Spacer(minLength: 8)
+            if ready {
+                Text("Ready")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.green.opacity(0.85))
+            } else if isDownloading {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading…")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.orange.opacity(0.85))
+                }
+            } else {
+                Button("Download") { downloadModel(m.name) }
+                    .font(.system(size: 11, weight: .medium))
+                    .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .onAppear { startLocalModelPolling() }
+    }
+
+    /// 点 Download:后台拉模型,完成后刷新让状态变 Ready。
+    private func downloadModel(_ name: String) {
+        guard !downloading.contains(name), !WhisperKitWrapper.isOnDisk(modelName: name) else { return }
+        downloading.insert(name)
+        Task { @MainActor in
+            await WhisperKitWrapper.downloadModel(name)
+            downloading.remove(name)
+            localModelTick &+= 1
+        }
+    }
+
     /// 2s 轮一次 isOnDisk,把状态打到 localModelTick 强制重渲染。view 不可见
     /// 时 Timer 不再被 SwiftUI 持有自然停。
     private func startLocalModelPolling() {
@@ -130,10 +180,10 @@ struct AIModelsSettingsView: View {
         }
     }
 
+    /// 轮询停止条件:只看「采集必需」的 —— 当前选中的 Whisper 模型 + 三个说话人
+    /// 模型 ready 即可。其它可选 Whisper 模型按需下载,不阻塞轮询停止。
     private var allLocalModelsReady: Bool {
-        WhisperKitWrapper.allTranscriptionModels.allSatisfy {
-            WhisperKitWrapper.isOnDisk(modelName: $0.name)
-        }
+        WhisperKitWrapper.isOnDisk(modelName: config.current.capture.audio.whisperModel)
             && SpeakerModelStore.isOnDisk(.embedding)
             && SpeakerModelStore.isOnDisk(.segmentation)
             && SpeakerModelStore.isOnDisk(.vadSilero)

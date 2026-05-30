@@ -54,6 +54,11 @@ struct AudioCaptureSettingsView: View {
         ("ro","Romanian"),("ms","Malay"),("ta","Tamil"),("bg","Bulgarian"),("ca","Catalan"),
     ].map { TranscriptionLanguage(code: $0.0, name: $0.1) }
 
+    /// 当前 whisperModel code → 显示标签(Menu 闭合态用)。找不到回退 code 本身。
+    private static func whisperModelLabel(_ code: String) -> String {
+        WhisperKitWrapper.allTranscriptionModels.first { $0.name == code }?.label ?? code
+    }
+
     /// code → 显示名(在 whisper/deepgram 表里找,找不到回退大写 code)。
     private static func displayName(for code: String) -> String {
         whisperLanguages.first { $0.code == code }?.name
@@ -189,14 +194,29 @@ struct AudioCaptureSettingsView: View {
                     if engine == AudioEngine.whisper.rawValue {
                         SettingsDivider()
                         SettingsRow("Whisper model",
-                                    description: "Larger models are more accurate but slower and bigger to download.",
+                                    description: "Download models in AI models. Uninstalled models can't be selected here.",
                                     icon: "cpu") {
-                            Picker("", selection: config.binding(\.capture.audio.whisperModel)) {
-                                Text("Small (~500 MB)").tag("openai_whisper-small")
-                                Text("Large v3 Turbo (~1.5 GB)").tag("openai_whisper-large-v3-v20240930")
-                                Text("Large v3 (~3 GB, downloads on first use)").tag("openai_whisper-large-v3")
+                            Menu {
+                                ForEach(WhisperKitWrapper.allTranscriptionModels, id: \.name) { m in
+                                    let installed = WhisperKitWrapper.isOnDisk(modelName: m.name)
+                                    Button {
+                                        config.mutate { $0.capture.audio.whisperModel = m.name }
+                                    } label: {
+                                        Text(installed ? "\(m.label) (\(m.size))"
+                                                       : "\(m.label) — uninstalled")
+                                    }
+                                    .disabled(!installed)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(Self.whisperModelLabel(config.current.capture.audio.whisperModel))
+                                        .font(.system(size: 12))
+                                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                                }
+                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
                             }
-                            .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
                         }
                     }
                     if engine == AudioEngine.deepgram.rawValue {

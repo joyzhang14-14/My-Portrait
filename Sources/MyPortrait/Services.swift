@@ -186,17 +186,18 @@ final class Services {
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
+        let whisper = self.whisper
         // 启动时统一后台 prefetch 所有可能 lazy 下载的本地资源。新用户首启
         // 时直接拉满,避免用户在 onboarding / 真用某功能时才下载导致卡顿
         // 或失败:
         //   1. Speaker / VAD ONNX (~40MB):VoiceTrainer 依赖
         //   2. WhisperKit 模型 (默认 base ~150MB):Audio Capture 第一段录音依赖
         //   3. Bun + Pi @mariozechner/pi-coding-agent (~30MB):Chat / cron job 依赖
-        Task.detached(priority: .utility) { [logger] in
+        Task.detached(priority: .utility) { [whisper] in
             await SpeakerModelStore.shared.prefetchAll()
-            // 4 个 Whisper 模型一次性拉全,跟 CaptureView Picker 的选项对齐 ——
-            // 用户切大小不用再等下载。
-            await WhisperKitWrapper.prefetchAllTranscriptionModels(logger: logger)
+            // 只预下「当前选中」的 Whisper 模型(whisper.modelName);其余在 AI models
+            // 页按需手动下载,避免启动一次拉满好几 GB。
+            await whisper.prefetch()
         }
         Task { @MainActor in
             // ensureInstalled 内部已 idempotent(已 ready 直接 return)。
