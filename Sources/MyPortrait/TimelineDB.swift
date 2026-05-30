@@ -722,12 +722,15 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
-        // 列表"最后活动时间"= max(转录最后听到, speaker 表最后被改)。
-        // speakers.updated_at_ms 在 voice training / 改名 / addEmbedding 时
-        // bump,所以重训完没新转录时行也能立刻显示 just now(否则会停留
-        // 在多天前那条转录的时间,看着像没生效)。SQL 里只把两个原值
-        // SELECT 出来,max() 留给 Swift 算,绕开 SQLite 嵌套 aggregate 的
-        // 语法坑。
+        // 列表"最后活动时间"= **严格的最后转录时间** —— 不混 updated_at_ms。
+        //
+        // 之前为了让"重训完立刻显示 just now"取 max(transcribed, updated_at),
+        // 副作用是任何 admin 操作(merge / dedupe / 重训 / 命名)都把时间顶
+        // 到 now,造成"两条录音相隔很久但 UI 都显示 2 min ago"。
+        //
+        // 现在严格走 transcribed_at:行展示的"X ago"就是你最后听到这个人的
+        // 时间,跟 UI 操作无关。ORDER BY 用 transcribed_at,没转录的(刚训
+        // 完没说话)用 created_at 当 secondary 排序兜底。
         let sql = """
             SELECT s.id, s.name,
                    COUNT(t.id) AS sample_count,
@@ -738,7 +741,7 @@ struct TimelineDB: Sendable {
             LEFT JOIN audio_transcriptions t ON t.speaker_id = s.id
             WHERE s.hallucination = 0
             GROUP BY s.id
-            ORDER BY speaker_updated DESC, s.id DESC
+            ORDER BY COALESCE(last_transcribed, s.created_at_ms) DESC, s.id DESC
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -753,15 +756,14 @@ struct TimelineDB: Sendable {
             let count = Int(sqlite3_column_int(stmt, 2))
             let lastTranscribed: Int64? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
                 ? nil : sqlite3_column_int64(stmt, 3)
-            let speakerUpdated: Int64 = sqlite3_column_int64(stmt, 4)
+            _ = sqlite3_column_int64(stmt, 4)   // speakerUpdated 不再用,保留 SELECT 顺序
             let trainedAt: Int64? = sqlite3_column_type(stmt, 5) == SQLITE_NULL
                 ? nil : sqlite3_column_int64(stmt, 5)
-            // 取较大者:重训过的 speaker 没新转录时 lastTranscribed 老,
-            // speakerUpdated 新;反之亦然。
-            let lastHeard: Int64 = max(lastTranscribed ?? 0, speakerUpdated)
+            // **严格只看转录时间**。没说过话(没转录)就 nil → UI 不显示
+            // "X ago"那条 pill。不再混 updated_at_ms 防 admin 操作刷时间。
             out.append(SpeakerListRow(
                 id: id, name: name, sampleCount: count,
-                lastHeardMs: lastHeard, trainedAtMs: trainedAt
+                lastHeardMs: lastTranscribed, trainedAtMs: trainedAt
             ))
         }
         return out
