@@ -76,6 +76,13 @@ enum CLIInputImporter {
         )
     }
 
+    /// 用户在 session 里以 `!` 开头打的 shell 转义指令(Codex 裸存 `!cmd`,
+    /// Claude Code 也可能裸文本)——不是自然语言写作,丢。半角 `!` 起头的自然
+    /// 语言几乎不存在(中文用全角「！」且不会句首),误伤可忽略。
+    private static func isShellEscape(_ text: String) -> Bool {
+        text.hasPrefix("!")
+    }
+
     // MARK: - kind 分类(纯长度,无 LLM)
 
     /// 长文 / 短句 —— writing_records.kind 取值跟 OCR 管线一致。
@@ -164,6 +171,7 @@ enum CLIInputImporter {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if ccNoisePrefixes.contains(where: { trimmed.hasPrefix($0) }) { return nil }
+        if isShellEscape(trimmed) { return nil }
         let tsMs = l.timestamp.flatMap { iso.date(from: $0) }
             .map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0
         guard tsMs > 0 else { return nil }
@@ -234,7 +242,7 @@ enum CLIInputImporter {
                   let l = try? JSONDecoder().decode(CodexHistLine.self, from: data),
                   let secs = l.ts, secs > 0,
                   let text = l.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !text.isEmpty
+                  !text.isEmpty, !isShellEscape(text)
             else { continue }
             let loc = l.session_id.flatMap { cwdMap[$0] }
             out.append(Imported(text: text, app: "codex-cli", url: nil, tsMs: secs * 1000,
