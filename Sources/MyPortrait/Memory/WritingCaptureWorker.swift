@@ -276,6 +276,13 @@ final class WritingCaptureWorker {
         let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
         workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
 
+        // 6a. edit_log 重建 + authoring 过滤(确定性):ax edit_log 从 typing_events
+        // 补全;没有 commit/delete 的(粘贴/OCR/AI)直接丢。
+        let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing)
+        recordsByGroupIdx = editLogFilter.records
+        let editLogDropped = editLogFilter.dropped
+        workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
+
         // 6b. Pass 3 —— keystroke 支撑度过滤(每组一次,跟 Pass 2 同 provider/model)
         let pass3Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
             recs.enumerated().map { (ri, rec) in
@@ -291,7 +298,7 @@ final class WritingCaptureWorker {
             makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass2Provider, model: pass2Model) }
         )
         var allRecords: [WritingCaptureRecord] = []
-        var allDiscarded: [WritingCaptureDiscarded] = []
+        var allDiscarded: [WritingCaptureDiscarded] = editLogDropped
         var pass3RawResponses: [String] = []
         var pass3FailedGroups = 0
         for (gi, recs) in recordsByGroupIdx.enumerated() {
@@ -596,6 +603,12 @@ final class WritingCaptureWorker {
         let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
         workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
 
+        // 6a. edit_log 重建 + authoring 过滤(确定性)
+        let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing)
+        recordsByGroupIdx = editLogFilter.records
+        let editLogDropped = editLogFilter.dropped
+        workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
+
         // 6b. Pass 3
         ui.stage = "Pass 3"
         ui.statusMessage = "Pass 3: validating \(pass2Total) candidate record(s)…"
@@ -613,7 +626,7 @@ final class WritingCaptureWorker {
             makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass2Provider, model: pass2Model) }
         )
         var allRecords: [WritingCaptureRecord] = []
-        var allDiscarded: [WritingCaptureDiscarded] = []
+        var allDiscarded: [WritingCaptureDiscarded] = editLogDropped
         var pass3FailedGroups = 0
         for (gi, recs) in recordsByGroupIdx.enumerated() {
             switch pass3Results[gi] {
@@ -914,6 +927,64 @@ final class WritingCaptureWorker {
     }
 
     enum Pass2GroupError: Error { case missing }
+
+    /// edit_log 重建 + authoring 过滤(确定性,不靠 LLM)。
+    /// 1. ax_cleaned record:edit_log 从源 typing_events.editLog 直接取(haiku 经常
+    ///    输出空 edit_log,这里补全 —— 真实反映编辑过程)。
+    /// 2. 过滤:edit_log 里没有任何 commit/delete(逐字编辑)= 不是用户敲出来的
+    ///    (粘贴 / OCR / AI 内容)→ 丢。Google Docs 逐字写的(canvas 抓到 commit/
+    ///    delete)留;纯粘贴一坨(paste-only / 空)→ 丢。
+    nonisolated static func refineAndFilterByEditLog(
+        _ recordsByGroupIdx: [[WritingCaptureRecord]],
+        typing: [TypingEvent]
+    ) -> (records: [[WritingCaptureRecord]], dropped: [WritingCaptureDiscarded]) {
+        struct RawEntry: Decodable { let ts: Int64?; let kind: String?; let text: String? }
+        let byId = Dictionary(typing.compactMap { e in e.id.map { ($0, e) } },
+                              uniquingKeysWith: { a, _ in a })
+        var outRecs: [[WritingCaptureRecord]] = []
+        var dropped: [WritingCaptureDiscarded] = []
+        for group in recordsByGroupIdx {
+            var keptGroup: [WritingCaptureRecord] = []
+            for rec in group {
+                var editLog = rec.editLog
+                if rec.source == "ax_cleaned", !rec.referenceTypingEventIds.isEmpty {
+                    var entries: [EditEntry] = []
+                    for tid in rec.referenceTypingEventIds {
+                        guard let ev = byId[tid], let data = ev.editLog.data(using: .utf8),
+                              let raw = try? JSONDecoder().decode([RawEntry].self, from: data)
+                        else { continue }
+                        for r in raw {
+                            entries.append(EditEntry(ts: r.ts ?? 0, kind: r.kind ?? "", text: r.text ?? ""))
+                        }
+                    }
+                    if !entries.isEmpty { editLog = entries.sorted { $0.ts < $1.ts } }
+                }
+                let hasAuthoring = editLog.contains { $0.kind == "commit" || $0.kind == "delete" }
+                if hasAuthoring {
+                    keptGroup.append(Self.withEditLog(rec, editLog))
+                } else {
+                    dropped.append(WritingCaptureDiscarded(
+                        reason: "no authoring edits in edit_log (pasted / OCR / AI content, not typed)",
+                        sessionIds: [], preview: String(rec.text.prefix(200))))
+                }
+            }
+            outRecs.append(keptGroup)
+        }
+        return (outRecs, dropped)
+    }
+
+    /// 用新 editLog 重建一条 record(其余字段不变)。
+    nonisolated static func withEditLog(
+        _ r: WritingCaptureRecord, _ editLog: [EditEntry]
+    ) -> WritingCaptureRecord {
+        WritingCaptureRecord(
+            text: r.text, editLog: editLog, kind: r.kind, source: r.source,
+            confidence: r.confidence, contextSummary: r.contextSummary,
+            app: r.app, url: r.url, startTs: r.startTs, endTs: r.endTs,
+            referenceTypingEventIds: r.referenceTypingEventIds,
+            referenceFrameIds: r.referenceFrameIds,
+            referenceKeystrokeRange: r.referenceKeystrokeRange)
+    }
 
     /// 把一个 canvas group 的多 session 并成一条(整篇文档跨天)——
     /// ocrFrames 按 ts 拼,chromeTokens 取并集。
