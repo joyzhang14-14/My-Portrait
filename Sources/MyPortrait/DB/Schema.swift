@@ -844,6 +844,20 @@ enum DBSchema {
                 """)
         }
 
+        // v33 — **撤回 v32 的回填**。v32 把"有名字"等同于"已训过",违背了
+        // identified 严格语义。用户诉求是:**只有真跑过 voice training 的
+        // 算 identified**,diarization 自动建后用户 rename 的不算。
+        //
+        // 这里把所有 trained_at_ms 清成 NULL。新版 VoiceTrainer 走
+        // upsertVoiceTrainedSpeaker 时会重新写 trained_at_ms = now,这是
+        // 唯一标记为 trained 的合法路径。
+        //
+        // 副作用:新版用户如果在 v32 → v33 之间真跑过 voice training,这次
+        // 也会被清掉。可接受 — 重训一次即可。
+        m.registerMigration("v33_clear_trained_at_backfill") { db in
+            try db.execute(sql: "UPDATE speakers SET trained_at_ms = NULL")
+        }
+
         return m
     }
 }
