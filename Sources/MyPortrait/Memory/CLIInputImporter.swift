@@ -22,12 +22,15 @@ enum CLIInputImporter {
         let app: String        // "claude-code" | "codex-cli"
         let url: String?       // cwd / 项目路径(Codex history 无,留 nil)
         let tsMs: Int64
+        let session: String?   // sessionId(CC) / session_id(Codex),用于数 session
     }
 
-    /// 扫盘结果 —— 各源解析出多少条(未去重前)。
+    /// 扫盘结果 —— 各源的 session 数 + prompt 数(未去重前)。
     struct ScanResult: Sendable {
-        let claudeCode: Int
+        let claudeCode: Int          // prompt 数
         let codex: Int
+        let claudeCodeSessions: Int  // 涉及的 session 数
+        let codexSessions: Int
         var total: Int { claudeCode + codex }
     }
 
@@ -50,9 +53,16 @@ enum CLIInputImporter {
     /// 单独解析 Codex 的用户输入。
     static func collectCodex() -> [Imported] { parseCodex() }
 
-    /// 只数数,不构造完整数组 —— 给 UI scan 用。
+    /// 只数数 —— 给 UI scan 用,prompt 数 + 涉及的 session 数。
     static func scan() -> ScanResult {
-        ScanResult(claudeCode: parseClaudeCode().count, codex: parseCodex().count)
+        let cc = parseClaudeCode()
+        let codex = parseCodex()
+        return ScanResult(
+            claudeCode: cc.count,
+            codex: codex.count,
+            claudeCodeSessions: Set(cc.compactMap { $0.session }).count,
+            codexSessions: Set(codex.compactMap { $0.session }).count
+        )
     }
 
     // MARK: - kind 分类(纯长度,无 LLM)
@@ -70,6 +80,7 @@ enum CLIInputImporter {
         let isSidechain: Bool?
         let timestamp: String?
         let cwd: String?
+        let sessionId: String?
         let message: CCMessage?
     }
     private struct CCMessage: Decodable {
@@ -144,7 +155,7 @@ enum CLIInputImporter {
         let tsMs = l.timestamp.flatMap { iso.date(from: $0) }
             .map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0
         guard tsMs > 0 else { return nil }
-        return Imported(text: trimmed, app: "claude-code", url: l.cwd, tsMs: tsMs)
+        return Imported(text: trimmed, app: "claude-code", url: l.cwd, tsMs: tsMs, session: l.sessionId)
     }
 
     // MARK: - Codex 解析
@@ -152,6 +163,7 @@ enum CLIInputImporter {
     private struct CodexHistLine: Decodable {
         let ts: Int64?
         let text: String?
+        let session_id: String?
     }
 
     private static func parseCodex() -> [Imported] {
@@ -165,7 +177,7 @@ enum CLIInputImporter {
                   let text = l.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.isEmpty
             else { continue }
-            out.append(Imported(text: text, app: "codex-cli", url: nil, tsMs: secs * 1000))
+            out.append(Imported(text: text, app: "codex-cli", url: nil, tsMs: secs * 1000, session: l.session_id))
         }
         cliImportLog.info("Codex: parsed \(out.count) user messages")
         return out

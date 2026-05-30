@@ -24,6 +24,7 @@ struct ImportSettingsView: View {
 
     // CLI 导入状态 —— Claude Code 与 Codex 各自独立。
     @State private var cliScan: CLIInputImporter.ScanResult? = nil
+    @State private var cliScanning: Bool = false
     @State private var ccRunning: Bool = false
     @State private var ccStatus: String? = nil
     @State private var codexRunning: Bool = false
@@ -70,6 +71,7 @@ struct ImportSettingsView: View {
                 cliSourceBlock(
                     icon: "terminal.fill",
                     title: "Claude Code",
+                    sessions: cliScan?.claudeCodeSessions,
                     count: cliScan?.claudeCode,
                     running: ccRunning,
                     status: ccStatus,
@@ -84,6 +86,7 @@ struct ImportSettingsView: View {
                 cliSourceBlock(
                     icon: "chevron.left.forwardslash.chevron.right",
                     title: "Codex CLI",
+                    sessions: cliScan?.codexSessions,
                     count: cliScan?.codex,
                     running: codexRunning,
                     status: codexStatus,
@@ -100,6 +103,7 @@ struct ImportSettingsView: View {
     private func cliSourceBlock(
         icon: String,
         title: String,
+        sessions: Int?,
         count: Int?,
         running: Bool,
         status: String?,
@@ -115,10 +119,22 @@ struct ImportSettingsView: View {
                 Button("Re-scan") { Task { await rescanCLI() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(running)
+                    .disabled(running || cliScanning)
             }
-            if let c = count {
-                statRow("Typed prompts", "\(c.formatted()) to import", mono: false)
+            if cliScanning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Scanning session logs …")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            } else {
+                if let s = sessions {
+                    statRow("Sessions", "\(s.formatted())", mono: false)
+                }
+                if let c = count {
+                    statRow("Typed prompts", "\(c.formatted()) to import", mono: false)
+                }
             }
             if let st = status {
                 Text(st)
@@ -143,10 +159,12 @@ struct ImportSettingsView: View {
     }
 
     private func rescanCLI() async {
+        cliScanning = true
         let result = await Task.detached(priority: .userInitiated) {
             CLIInputImporter.scan()
         }.value
         cliScan = result
+        cliScanning = false
     }
 
     /// 单源导入 —— app 取 "claude-code" 或 "codex-cli"。
