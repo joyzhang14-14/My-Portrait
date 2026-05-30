@@ -526,27 +526,27 @@ private struct FolderDisclosureRow: View {
             // **不 withAnimation** —— 同时动画 N 个 EntryRow 的 opacity/transform
             // 在 N=40+ 时帧预算爆炸,scroll 完全卡死。瞬时切换无肉眼可见瑕疵。
             Button(action: { expanded.toggle() }) {
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 12)
+                        .frame(width: 14)
                     // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
                     // (跟 Finder 文件夹观感一致)。
                     Image(systemName: "folder.fill")
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
-                        .font(.system(size: 14))
-                        .frame(width: 18)
+                        .font(.system(size: 17))
+                        .frame(width: 22)
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     Text("\(count)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tint.opacity(0.9))
-                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(
                             Capsule().fill(tint.opacity(0.13))
                                 .overlay(
@@ -555,7 +555,7 @@ private struct FolderDisclosureRow: View {
                         )
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.vertical, 12)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
