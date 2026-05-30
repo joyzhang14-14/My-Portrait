@@ -118,11 +118,19 @@ struct MemoriesView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(visibleEntries) { entry in
-                            EntryRow(entry: entry, selected: selected == entry.id)
-                                .contentShape(Rectangle())
-                                .onTapGesture { handleSelect(entry: entry) }
-                            Divider().background(Color.primary.opacity(0.08))
+                        if case .events = scope,
+                           searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                            // events 视图 + 没搜索 → 按 folder 分组(可展开)。
+                            // 搜索激活时仍走 flat 列表 —— 搜索本来就是要看跨 folder
+                            // 匹配,折叠成 group 会反直觉。
+                            foldersGroupedList
+                        } else {
+                            ForEach(visibleEntries) { entry in
+                                EntryRow(entry: entry, selected: selected == entry.id)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { handleSelect(entry: entry) }
+                                Divider().background(Color.primary.opacity(0.08))
+                            }
                         }
                     }
                 }
@@ -134,6 +142,70 @@ struct MemoriesView: View {
         // 上变成大灰块,跟左右两列格格不入。light 下用极淡 black 透出底色,
         // dark 下保留原本的 0.28 暗化效果。
         .background(Color.black.opacity(colorScheme == .light ? 0.03 : 0.28))
+    }
+
+    // MARK: - Folders-grouped events list
+
+    /// events 视图的 folder 分组渲染。读 _folders/*.json,把 visibleEntries 按
+    /// folder 归类,按 folder 内事件数倒序展示。剩下不属任何 folder 的 entries
+    /// 折进末尾的 "Ungrouped" 区。
+    @ViewBuilder
+    private var foldersGroupedList: some View {
+        let groups = makeFolderGroups()
+        ForEach(groups, id: \.id) { g in
+            FolderDisclosureRow(
+                title: g.title,
+                count: g.entries.count,
+                isUngrouped: g.isUngrouped,
+                entries: g.entries,
+                selected: selected,
+                onSelect: handleSelect
+            )
+            Divider().background(Color.primary.opacity(0.08))
+        }
+    }
+
+    /// 计算分组结果。Entry.id 是 URL,得换算成 "yyyy-MM-dd/foo.md" 相对路径
+    /// 跟 folder.events 对齐。
+    private func makeFolderGroups() -> [FolderGroup] {
+        // Entry → 相对路径
+        let prefix = Storage.eventsDir.path + "/"
+        func relPath(of url: URL) -> String {
+            url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
+        }
+        let byPath: [String: Entry] = Dictionary(uniqueKeysWithValues:
+            visibleEntries.map { (relPath(of: $0.id), $0) }
+        )
+
+        let folders = EventFolderStore.loadAll()
+        var groups: [FolderGroup] = folders
+            .map { f -> FolderGroup in
+                // 保 folder.events 的顺序,filter 出还在 visibleEntries 里的
+                let entries = f.events.compactMap { byPath[$0] }
+                return FolderGroup(id: "folder:" + f.slug,
+                                   title: f.name,
+                                   entries: entries,
+                                   isUngrouped: false)
+            }
+            .filter { !$0.entries.isEmpty }
+            .sorted { $0.entries.count > $1.entries.count }
+
+        let classifiedPaths = Set(folders.flatMap { $0.events })
+        let ungrouped = visibleEntries.filter { !classifiedPaths.contains(relPath(of: $0.id)) }
+        if !ungrouped.isEmpty {
+            groups.append(FolderGroup(id: "ungrouped",
+                                      title: "Ungrouped",
+                                      entries: ungrouped,
+                                      isUngrouped: true))
+        }
+        return groups
+    }
+
+    private struct FolderGroup {
+        let id: String
+        let title: String
+        let entries: [Entry]
+        let isUngrouped: Bool
     }
 
     // MARK: - Detail (right)
@@ -417,6 +489,94 @@ struct MemoriesView: View {
         return f
     }()
     nonisolated private static func dayString(_ d: Date) -> String { dayFmt.string(from: d) }
+}
+
+/// folder 行 = 可展开标题(folder 图标 + name + count 徽章),展开后是
+/// 该 folder 内 entries 的 EntryRow 列表。Ungrouped 用同一个组件,把图标和
+/// 颜色稍微调灰一点暗示"未分类"。
+private struct FolderDisclosureRow: View {
+    let title: String
+    let count: Int
+    let isUngrouped: Bool
+    let entries: [MemoriesView.Entry]
+    let selected: URL?
+    let onSelect: (MemoriesView.Entry) -> Void
+
+    @State private var expanded: Bool = false
+
+    /// 给 folder 名稳定挑一个柔和的色相,跟 macOS Finder 自带 tag 颜色一脉。
+    /// hash 取模 → 同名 folder 每次都同色,UI 视觉一致。Ungrouped 不参与,
+    /// 用统一灰色处理。
+    private static let folderTints: [Color] = [
+        Color(red: 0.36, green: 0.55, blue: 0.91),   // 蓝
+        Color(red: 0.46, green: 0.74, blue: 0.50),   // 绿
+        Color(red: 0.90, green: 0.58, blue: 0.30),   // 橙
+        Color(red: 0.72, green: 0.48, blue: 0.86),   // 紫
+        Color(red: 0.92, green: 0.45, blue: 0.55),   // 玫红
+        Color(red: 0.34, green: 0.71, blue: 0.78),   // 青
+        Color(red: 0.86, green: 0.74, blue: 0.36),   // 金
+    ]
+    private var tint: Color {
+        if isUngrouped { return .secondary }
+        let h = abs(title.hashValue) % Self.folderTints.count
+        return Self.folderTints[h]
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 头部:点击切换展开。整行可点。
+            Button(action: { withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() } }) {
+                HStack(spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                    // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
+                    // (跟 Finder 文件夹观感一致)。Ungrouped 用 tray.fill,
+                    // 视觉上立刻区分"未归类的杂物筐"。
+                    Image(systemName: isUngrouped ? "tray.fill" : "folder.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(
+                            tint.opacity(isUngrouped ? 0.55 : 0.95),
+                            tint.opacity(0.35)
+                        )
+                        .font(.system(size: 14))
+                        .frame(width: 18)
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isUngrouped ? .secondary : .primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tint.opacity(0.9))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(tint.opacity(0.13))
+                                .overlay(
+                                    Capsule().stroke(tint.opacity(0.25), lineWidth: 0.5)
+                                )
+                        )
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // 展开后的事件列表 —— 每行左侧多留一点缩进对齐 chevron。
+            if expanded {
+                ForEach(entries) { entry in
+                    EntryRow(entry: entry, selected: selected == entry.id)
+                        .padding(.leading, 22)   // 跟 chevron 缩对齐
+                        .contentShape(Rectangle())
+                        .onTapGesture { onSelect(entry) }
+                    Divider().background(Color.primary.opacity(0.05))
+                        .padding(.leading, 22)
+                }
+            }
+        }
+    }
 }
 
 private struct EntryRow: View {
