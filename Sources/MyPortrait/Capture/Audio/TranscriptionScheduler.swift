@@ -163,7 +163,9 @@ actor TranscriptionScheduler {
     // MARK: - B. Transcribe
 
     private func processQueueOnce() async {
-        guard PowerMonitor.isOnAC else {
+        // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
+        let acOnly = await MainActor.run { ConfigStore.shared.current.capture.audio.transcribeOnACOnly }
+        if acOnly && !PowerMonitor.isOnAC {
             // 电池模式不转录 → 释放 Whisper 模型,别白占内存。
             whisper.unload()
             // 通知 StallDetector:audio pending 堆积是故意的,不要报 backlog。
@@ -188,8 +190,8 @@ actor TranscriptionScheduler {
 
         for chunk in chunks {
             if Task.isCancelled { return }
-            // 中途变电池 → 当前段跑完即停。
-            if !PowerMonitor.isOnAC {
+            // 中途变电池 → 当前段跑完即停(仅 AC-only 模式下)。
+            if acOnly && !PowerMonitor.isOnAC {
                 logger.info("power switched to battery mid-batch, stopping after current segment")
             }
             await transcribeOne(chunk: chunk)

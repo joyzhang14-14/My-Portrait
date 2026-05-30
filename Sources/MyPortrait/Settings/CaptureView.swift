@@ -71,7 +71,9 @@ struct AudioCaptureSettingsView: View {
                         Toggle("", isOn: config.binding(\.capture.audio.useCoreAudioCapture)).labelsHidden().toggleStyle(.switch)
                     }
                 }
+            }   // 关闭 if audioRec —— Mic / System audio 仅采集开启时显示
 
+            // 转译配置常驻显示 —— 关着采集也能预先配好引擎/模型/语言/批量。
                 SettingsCard(
                     title: "Transcription",
                     footnote: engine == AudioEngine.deepgram.rawValue
@@ -80,22 +82,34 @@ struct AudioCaptureSettingsView: View {
                             ? "Whisper runs entirely on-device. Audio stays on this Mac."
                             : "Pick an engine to enable speech-to-text.")
                 ) {
-                    SettingsRow("Transcription engine", icon: "waveform.path") {
-                        Picker("", selection: config.binding(\.capture.audio.engine)) {
-                            ForEach(AudioEngine.allCases) { e in Text(e.label).tag(e.rawValue) }
-                        }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                    // 转译总开关 —— 关掉就把 engine 设成 disabled,下面引擎/模型/语言全隐藏。
+                    SettingsRow("Transcription",
+                                description: "Turn speech-to-text on or off.",
+                                icon: "waveform") {
+                        Toggle("", isOn: Binding(
+                            get: { engine != AudioEngine.disabled.rawValue },
+                            set: { on in config.mutate {
+                                $0.capture.audio.engine = on ? AudioEngine.whisper.rawValue : AudioEngine.disabled.rawValue
+                            } }
+                        )).labelsHidden().toggleStyle(.switch)
                     }
+                    if engine != AudioEngine.disabled.rawValue {
+                        SettingsDivider()
+                        SettingsRow("Transcription engine", icon: "waveform.path") {
+                            Picker("", selection: config.binding(\.capture.audio.engine)) {
+                                ForEach(AudioEngine.allCases.filter { $0 != .disabled }) { e in Text(e.label).tag(e.rawValue) }
+                            }
+                            .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                        }
                     if engine == AudioEngine.whisper.rawValue {
                         SettingsDivider()
                         SettingsRow("Whisper model",
                                     description: "Larger models are more accurate but slower and bigger to download.",
                                     icon: "cpu") {
                             Picker("", selection: config.binding(\.capture.audio.whisperModel)) {
-                                Text("Tiny (~75 MB)").tag("openai_whisper-tiny")
-                                Text("Base (~150 MB)").tag("openai_whisper-base")
                                 Text("Small (~500 MB)").tag("openai_whisper-small")
                                 Text("Large v3 Turbo (~1.5 GB)").tag("openai_whisper-large-v3-v20240930")
+                                Text("Large v3 (~3 GB, downloads on first use)").tag("openai_whisper-large-v3")
                             }
                             .pickerStyle(.menu).labelsHidden().frame(width: 200)
                         }
@@ -166,25 +180,34 @@ struct AudioCaptureSettingsView: View {
                                 icon: "character.bubble") { EmptyView() }
                     VStack { TagListEditor(tags: config.binding(\.capture.audio.languages), placeholder: "e.g. en, zh, ja") }
                         .padding(.horizontal, 48).padding(.bottom, 12)
-                                            if engine != AudioEngine.disabled.rawValue {
-                        SettingsDivider()
-                        SettingsRow("Filter music",
-                                    description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
-                                    icon: "music.note.list") {
-                            Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
-                        }
-                        SettingsDivider()
-                        SettingsRow("Pause when a music app is playing",
-                                    description: "Stop recording entirely while a music app is playing audio — solves it at the source. Detected via the app's category; call apps (Zoom, etc.) aren't affected. Takes priority over Filter music.",
-                                    icon: "pause.circle") {
-                            Toggle("", isOn: config.binding(\.capture.audio.pauseOnMusicApp)).labelsHidden().toggleStyle(.switch)
-                        }
                         SettingsDivider()
                         SettingsRow("Batch transcription",
                                     description: "Process audio chunks together for higher throughput. Slight latency cost.",
                                     icon: "tray.full") {
                             Toggle("", isOn: config.binding(\.capture.audio.batchTranscription)).labelsHidden().toggleStyle(.switch)
                         }
+                        SettingsDivider()
+                        SettingsRow("Only transcribe while plugged in",
+                                    description: "Saves battery — audio still records on battery and transcribes once you're back on AC power. Off = transcribe regardless of power.",
+                                    icon: "powerplug") {
+                            Toggle("", isOn: config.binding(\.capture.audio.transcribeOnACOnly)).labelsHidden().toggleStyle(.switch)
+                        }
+                    }
+                }
+
+            if audioRec {
+                // 录音行为相关 —— 只在采集开启时显示。
+                SettingsCard(title: "Music handling") {
+                    SettingsRow("Filter music",
+                                description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
+                                icon: "music.note.list") {
+                        Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
+                    }
+                    SettingsDivider()
+                    SettingsRow("Pause when a music app is playing",
+                                description: "Stop recording entirely while a music app is playing audio — solves it at the source. Detected via the app's category; call apps (Zoom, etc.) aren't affected. Takes priority over Filter music.",
+                                icon: "pause.circle") {
+                        Toggle("", isOn: config.binding(\.capture.audio.pauseOnMusicApp)).labelsHidden().toggleStyle(.switch)
                     }
                 }
 
