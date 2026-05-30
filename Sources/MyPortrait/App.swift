@@ -214,6 +214,10 @@ struct MyPortraitApp: App {
         if args.contains("--classify-dry-run") {
             EventClassifierCLI.dryRun()
         }
+        // 真跑(写盘),自动循环到 unclassified 清空。等价于 UI Run now。
+        if args.contains("--classify-run") {
+            EventClassifierCLI.runAll()
+        }
         // `--import-default-cron-jobs` seeds the two built-in cronJobs into
         // CronJobStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-cron-jobs") {
