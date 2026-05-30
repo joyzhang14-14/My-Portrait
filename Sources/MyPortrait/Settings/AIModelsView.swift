@@ -71,18 +71,6 @@ struct AIModelsSettingsView: View {
                               ready: SpeakerModelStore.isOnDisk(.vadSilero))
             }
             .id(localModelTick)   // 强制重渲染,反映新的 isOnDisk 结果
-
-            SettingsCard(
-                title: "Semantic search index",
-                footnote: "Off by default. When on, captured text is embedded into vectors (bge-m3) so search can match by meaning, not just keywords — at the cost of ~1.15 GB resident memory while indexing. Keyword search works either way. Indexing runs only while plugged in."
-            ) {
-                SettingsRow("Enable semantic indexing",
-                            description: "Build a vector index for meaning-based search.",
-                            icon: "magnifyingglass") {
-                    Toggle("", isOn: config.binding(\.aiModels.semanticIndexEnabled))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-            }
         }
     }
 

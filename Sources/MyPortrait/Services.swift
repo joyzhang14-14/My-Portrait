@@ -36,9 +36,6 @@ final class Services {
     let whisper: WhisperKitWrapper
     let powerWatcher: PowerWatcher
     let retentionWorker: RetentionWorker
-    let modelManager: BGEM3ModelManager
-    let embedder: any VectorEmbedder
-    let embeddingWorker: EmbeddingWorker
     let permissions: PermissionMonitor
     /// Stall 检测后台 driver(30s 一次 evaluate)。startManagedLifecycle 启,
     /// 不主动 stop —— 跟随进程退出。
@@ -73,28 +70,8 @@ final class Services {
         // 共用同一个 DatabasePool（WAL 多 reader 安全）。
         let ftsEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
 
-        // bge-m3 模型管理器保留：模型会下到 ~/.portrait/models/bge-m3/ 备用，
-        // 下个 session MLX 推理上线后从 NLEmbedding 切到 BGEM3VectorEmbedder。
-        let manager = BGEM3ModelManager()
-        self.modelManager = manager
-
-        // **当前激活的 embedder**：bge-m3 真推理（MLX，完全本地，1024 维）。
-        // 首次启动会下 ~1.13 GB 权重 + ~17 MB tokenizer 到 HF cache，
-        // 之后直接读 cache。embedder 加载/推理失败时 HybridSearchEngine 自动降级
-        // FTS-only —— UI 搜索仍工作。
-        //
-        // 关键 trick：swift-transformers 0.1.24 没有 XLMRobertaTokenizer 路由，
-        // 但 bge-m3 的 tokenizer.json 是 Unigram model，跟 T5Tokenizer 走同一条
-        // UnigramTokenizer 代码路径。所以 BGEM3VectorEmbedder 加载时在内存里把
-        // tokenizer_class 从 "XLMRobertaTokenizer" 改成 "T5Tokenizer"，零新依赖。
-        let activeEmbedder: any VectorEmbedder = BGEM3VectorEmbedder(reporter: reporter)
-        self.embedder = activeEmbedder
-
-        // Hybrid：FTS + 向量 + RRF。embedder 抛错（NLEmbedding 对完全非英语
-        // 输入会 throw `.unsupportedInput`）时自动降级 FTS-only。
-        self.searchEngine = HybridSearchEngine(
-            db: dbImpl, fts: ftsEngine, embedder: activeEmbedder
-        )
+        // 纯 FTS5 关键词搜索。语义搜索（bge-m3 向量 + RRF 融合）已整体移除。
+        self.searchEngine = ftsEngine
 
         self.coordinator = CaptureCoordinator(db: dbImpl, reporter: reporter)
         self.compactor = CompactionWorker(db: dbImpl, reporter: reporter)
@@ -120,7 +97,6 @@ final class Services {
             speaker: OnnxSpeakerDiarizer(db: dbImpl)
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
-        self.embeddingWorker = EmbeddingWorker(db: dbImpl, embedder: activeEmbedder)
         let permissions = PermissionMonitor()
         self.permissions = permissions
         self.stallDriver = StallDetectorDriver(db: dbImpl, permissions: permissions)
@@ -204,7 +180,7 @@ final class Services {
             AISetup.shared.ensureInstalled()
         }
 
-        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, embeddingWorker, logger] in
+        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, logger] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
             do {
@@ -238,18 +214,6 @@ final class Services {
                 logger.info("TranscriptionScheduler SKIPPED (MYPORTRAIT_NO_TRANSCRIBER=1)")
             }
             await retentionWorker.start()
-
-            // EmbeddingWorker 启。bge-m3 推理走 MLX 本地，不再撞 Apple Intelligence
-            // XPC 的 entitlement 坑。首次启动 BGEM3VectorEmbedder.loadedContainer
-            // 会下 ~1.13 GB 模型到 HF cache，之后秒级加载。
-            //
-            // 调试开关：env `MYPORTRAIT_NO_EMBED_WORKER=1` 时跳过 worker 启动。
-            // 用于二分定位 capture toggle 崩溃是否跟 MLX/embedding 路径有关。
-            if ProcessInfo.processInfo.environment["MYPORTRAIT_NO_EMBED_WORKER"] != "1" {
-                await embeddingWorker.start()
-            } else {
-                logger.info("EmbeddingWorker SKIPPED (MYPORTRAIT_NO_EMBED_WORKER=1)")
-            }
         }
 
         // 记忆流水线调度器：启动时回收死锁、立刻 tick 一次、再起周期 timer。
@@ -482,7 +446,6 @@ final class Services {
         await compactor.stop()
         await transcriber.stop()
         await retentionWorker.stop()
-        await embeddingWorker.stop()
         typingObserver.stop()
         powerWatcher.stop()
         permissions.stop()

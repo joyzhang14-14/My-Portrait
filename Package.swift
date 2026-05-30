@@ -8,10 +8,6 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
         .package(url: "https://github.com/argmaxinc/WhisperKit", from: "0.9.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.18.0"),
-        // sentencepiece tokenizer，HuggingFace 出的 Swift 包
-        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "0.1.13"),
-        // bge-m3 / XLM-RoBERTa 真推理（MLX-Swift 端口；用 mlx-community/bge-m3-mlx-fp16）
-        .package(url: "https://github.com/mzbac/mlx.embeddings.git", from: "0.1.0"),
         // TOML 1.0 codec for the user-editable ~/.myportrait/config.toml
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0"),
         // ONNX Runtime（说话人识别：pyannote 分离 + wespeaker CAM++ 嵌入）
@@ -37,8 +33,6 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
-                .product(name: "Transformers", package: "swift-transformers"),
-                .product(name: "mlx_embeddings", package: "mlx.embeddings"),
                 .product(name: "TOMLKit", package: "TOMLKit"),
                 .product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
                 .product(name: "Sparkle", package: "Sparkle"),
