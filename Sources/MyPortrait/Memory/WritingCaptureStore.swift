@@ -475,6 +475,17 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// CLI 导入增量游标:某源(app)已导入记录的最新发送时刻(ms)。
+    /// 下次 scan/import 只取 `ts > 此值` 的,避免重复扫全量。无记录 → nil(首次全量)。
+    func cliImportLastTs(app: String) throws -> Int64? {
+        try dbPool.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT MAX(start_ts) FROM writing_records WHERE source = 'cli_import' AND app = :app",
+                arguments: ["app": app])
+        }
+    }
+
     /// CLI 导入:把 Claude Code / Codex 手打 prompt **直接**写进 writing_records
     /// (不走 staged / 不审查 —— 地面真值)。按 (app, start_ts, text) 去重,
     /// 重复导入不重复入库。返回 (新增, 跳过重复)。
