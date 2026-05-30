@@ -658,7 +658,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum AppKeyboard {
     static func install() {
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            #if DEBUG
             print("[Keyboard] keyDown keyCode=\(event.keyCode) chars=\(event.charactersIgnoringModifiers ?? "")")
+            #endif
             if NSApp.keyWindow?.firstResponder is NSText { return event }
 
             let isAlt = event.modifierFlags.contains(.option)
