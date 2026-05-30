@@ -176,14 +176,10 @@ struct AudioCaptureSettingsView: View {
                     }
                     SettingsDivider()
                     SettingsRow("Languages",
-                                description: "Taken from your Personal Info → Languages. One language → used as a hint; multiple → auto-detect.",
-                                icon: "character.bubble") {
-                        Text(config.current.personalInfo.languages.isEmpty
-                             ? "Auto-detect"
-                             : config.current.personalInfo.languages.joined(separator: ", "))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textPrimary.opacity(0.6))
-                    }
+                                description: "Models to load for transcription.",
+                                icon: "character.bubble") { EmptyView() }
+                    VStack { TagListEditor(tags: config.binding(\.capture.audio.languages), placeholder: "e.g. en, zh, ja") }
+                        .padding(.horizontal, 48).padding(.bottom, 12)
                         SettingsDivider()
                         SettingsRow("Batch transcription",
                                     description: "Process audio chunks together for higher throughput. Slight latency cost.",
