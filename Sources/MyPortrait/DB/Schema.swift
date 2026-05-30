@@ -821,6 +821,29 @@ enum DBSchema {
             }
         }
 
+        // v32 — 回填:把"已有 name 的 speaker"视为 trained。
+        //
+        // 1.0.x 用户跑过 voice training 的 speaker 当时代码还没写
+        // trained_at_ms,迁移后留 NULL → SpeakersView 显示 0 of N
+        // identified,跟用户预期不符。
+        //
+        // 修法:凡是 name != NULL 且非 hallucination 的 speaker,
+        // 视为"已识别"(用户至少认过这个人),trained_at = updated_at_ms。
+        // 之后用户再跑 voice training 会覆盖 trained_at = now。
+        //
+        // 副作用:diarization 自动建后用户 rename 但没真训过的 speaker
+        // 也被算 trained。但语义上"用户至少认过这是某人"也算合理。
+        m.registerMigration("v32_backfill_trained_at") { db in
+            try db.execute(sql: """
+                UPDATE speakers
+                SET trained_at_ms = updated_at_ms
+                WHERE trained_at_ms IS NULL
+                  AND name IS NOT NULL
+                  AND name != ''
+                  AND hallucination = 0
+                """)
+        }
+
         return m
     }
 }
