@@ -99,6 +99,7 @@ enum CLIInputImporter {
         let timestamp: String?
         let cwd: String?
         let sessionId: String?
+        let entrypoint: String?      // "cli"/"claude-desktop"=交互;"sdk-*"=程序化 spawn
         let message: CCMessage?
     }
     private struct CCMessage: Decodable {
@@ -116,12 +117,14 @@ enum CLIInputImporter {
     }
 
     /// 以这些标记开头的 content 是系统注入 / slash 命令 / bash `!` 指令及输出 /
-    /// `/compact` 后自动注入的 AI 会话摘要 —— 都不是用户手打的自然语言,排除。
+    /// harness 任务完成通知 / `/compact` 后自动注入的 AI 会话摘要 ——
+    /// 都不是用户手打的自然语言,排除。
     private static let ccNoisePrefixes = [
         "<command-name>", "<command-message>", "<command-args>",
         "<local-command-caveat>", "<local-command-stdout>",
         "<system-reminder>",
         "<bash-input>", "<bash-stdout>", "<bash-stderr>",
+        "<task-notification>",
         "This session is being continued from a previous conversation that ran out of context",
     ]
 
@@ -162,10 +165,13 @@ enum CLIInputImporter {
         guard let data = line.data(using: .utf8),
               let l = try? JSONDecoder().decode(CCLine.self, from: data)
         else { return nil }
+        // entrypoint 以 "sdk" 开头 = My-Portrait 程序化 spawn 的 claude(Pi Agent /
+        // 定时任务,如 EventClassifier 系统 prompt),不是用户交互输入 → 整条丢。
         guard l.type == "user",
               l.message?.role == "user",
               l.isMeta != true,
               l.isSidechain != true,
+              l.entrypoint?.hasPrefix("sdk") != true,
               let text = l.message?.content?.text
         else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
