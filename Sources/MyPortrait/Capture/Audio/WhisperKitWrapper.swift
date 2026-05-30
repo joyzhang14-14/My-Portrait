@@ -78,6 +78,7 @@ final class WhisperKitWrapper: @unchecked Sendable {
     static let allTranscriptionModels: [(name: String, label: String, size: String)] = [
         ("openai_whisper-small",               "Whisper Small",          "~500 MB"),
         ("openai_whisper-large-v3-v20240930",  "Whisper Large v3 Turbo", "~1.5 GB"),
+        ("openai_whisper-large-v3",            "Whisper Large v3",       "~3 GB"),
     ]
 
     /// 并行预拉 4 个 Whisper 模型。已下完的秒返。失败 swallow,真用到再走
@@ -103,6 +104,12 @@ final class WhisperKitWrapper: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// 显式下载单个转录模型到磁盘(AI models 页 Download 按钮用)。
+    /// 失败 swallow —— UI 轮询 isOnDisk 反映结果(没下成还是 uninstalled)。
+    static func downloadModel(_ name: String) async {
+        _ = try? await WhisperKit(model: name)
     }
 
     /// 懒加载 WhisperKit pipeline（首跑下载模型）。
