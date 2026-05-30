@@ -34,7 +34,7 @@ private struct Pass1Response: Codable {
 /// 写作采集 Pass 1 —— Context Timeline 提取。
 ///
 /// 整天 OCR 帧 → LLM(默认 sonnet)→ 时间轴分段 [{start_ts, end_ts, app, url,
-/// intent_type, summary}, ...]。Pass 2 拿这个 timeline 当 anchor 判合并 +
+/// intent_type, summary}, ...]。Pass 3 拿这个 timeline 当 anchor 判合并 +
 /// throwaway。
 ///
 /// LLM 调用走 `PiAgent`(跟 Memory pipeline 同套路)。
@@ -207,7 +207,7 @@ final class WritingCapturePass1Agent {
     }
 
     /// typing summary —— 给 LLM "哪段时间在某 app 真打了多少字" 信号。
-    /// 不喂 text(那是 Pass 2 的事),只喂 {ts, app, url, chars}。
+    /// 不喂 text(那是 Pass 3 的事),只喂 {ts, app, url, chars}。
     static func encodeTypingSummary(_ events: [TypingEvent]) -> String {
         struct Row: Encodable {
             let ts: Int64
@@ -261,7 +261,7 @@ final class WritingCapturePass1Agent {
     /// 从 LLM 响应里抓首个**括号平衡**的 JSON object,解析成 timeline。
     /// claude --print 偶发吐两条 result(响应变成 {A}{B}),不能用 last `}`。
     static func parse(from response: String) throws -> [WritingCaptureContextSegment] {
-        guard let jsonStr = WritingCapturePass2Agent.extractFirstBalancedJSONObject(response) else {
+        guard let jsonStr = WritingCapturePass3Agent.extractFirstBalancedJSONObject(response) else {
             let preview = String(response.prefix(500))
             throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
         }

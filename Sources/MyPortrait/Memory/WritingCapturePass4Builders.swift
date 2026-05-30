@@ -1,20 +1,20 @@
 import Foundation
 
-/// Pass 3 输入构造 + fanout 协调,从 Worker 抽出来保持文件可读。
-enum WritingCapturePass3Builders {
+/// Pass 4 输入构造 + fanout 协调,从 Worker 抽出来保持文件可读。
+enum WritingCapturePass4Builders {
 
-    /// Pass 3 一组的执行结果。
+    /// Pass 4 一组的执行结果。
     enum GroupResult {
-        case success(WritingCapturePass3Agent.Output)
+        case success(WritingCapturePass4Agent.Output)
         case failure(Error)
     }
 
-    /// 并发跑多 group 的 Pass 3。inputs 数组按 group index 对齐(空数组表示该
-    /// group Pass 2 失败 / 无输出 → 跳过 LLM 调用)。
+    /// 并发跑多 group 的 Pass 4。inputs 数组按 group index 对齐(空数组表示该
+    /// group Pass 3 失败 / 无输出 → 跳过 LLM 调用)。
     static func runConcurrently(
-        inputsByGroupIdx: [[WritingCapturePass3InputRecord]],
+        inputsByGroupIdx: [[WritingCapturePass4InputRecord]],
         concurrency: Int,
-        makePass3: @escaping @MainActor @Sendable () -> WritingCapturePass3Agent
+        makePass4: @escaping @MainActor @Sendable () -> WritingCapturePass4Agent
     ) async -> [GroupResult] {
         await withTaskGroup(of: (Int, GroupResult).self) { taskGroup in
             var inFlight = 0
@@ -25,7 +25,7 @@ enum WritingCapturePass3Builders {
                 let inputs = inputsByGroupIdx[idx]
                 taskGroup.addTask {
                     do {
-                        let agent = await makePass3()
+                        let agent = await makePass4()
                         let out = try await agent.run(records: inputs)
                         return (idx, .success(out))
                     } catch {
@@ -42,7 +42,7 @@ enum WritingCapturePass3Builders {
                     let inputs = inputsByGroupIdx[nidx]
                     taskGroup.addTask {
                         do {
-                            let agent = await makePass3()
+                            let agent = await makePass4()
                             let out = try await agent.run(records: inputs)
                             return (nidx, .success(out))
                         } catch {
@@ -56,14 +56,14 @@ enum WritingCapturePass3Builders {
         }
     }
 
-    /// 从 (record, typing, keys) 构造一条 Pass 3 输入。
+    /// 从 (record, typing, keys) 构造一条 Pass 4 输入。
     /// recordId 由 Worker 按 "g<groupIdx>_r<recIdx>" 编号传入。
     static func buildInput(
         recordId: String,
         record: WritingCaptureRecord,
         typing: [TypingEvent],
         keys: [KeystrokeEntry]
-    ) -> WritingCapturePass3InputRecord {
+    ) -> WritingCapturePass4InputRecord {
         let start = record.startTs
         let end = record.endTs
 
@@ -93,7 +93,7 @@ enum WritingCapturePass3Builders {
 
         let imeLikely = detectImeLikely(text: record.text, keystrokeText: keystrokeText)
 
-        return WritingCapturePass3InputRecord(
+        return WritingCapturePass4InputRecord(
             recordId: recordId,
             text: record.text,
             kind: record.kind,
@@ -110,7 +110,7 @@ enum WritingCapturePass3Builders {
         )
     }
 
-    /// 跟 Pass2 的 `assembleKeystrokeText` 一致:
+    /// 跟 Pass3 的 `assembleKeystrokeText` 一致:
     /// 跳过 modifier-only / shortcut,backspace → "<BS>",其他 char 按 ts 拼接。
     static func assembleKeystrokeText(_ keys: [KeystrokeEntry]) -> String {
         var out = ""

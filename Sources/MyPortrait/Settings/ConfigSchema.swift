@@ -160,7 +160,7 @@ struct MemoryConfig: Codable, Equatable {
     // LLM provider used by the memory pipeline. providerId 匹配 Provider 的
     // rawValue("chatgpt"/"anthropic"/"claude-code"/...);model 是主任务模型
     //(EventBuilder/Distiller/Personality 等),modelLight 是轻任务模型
-    //(Cluster/WritingPass1/Pass2)。空串 = 用 provider.defaultModel。
+    //(Cluster/WritingPass1/Pass3)。空串 = 用 provider.defaultModel。
     var providerId:            String = "chatgpt"
     var model:                 String = "gpt-5.4"
     var modelLight:            String = "gpt-5.4-mini"
@@ -281,7 +281,7 @@ struct SchedulerSettings: Codable, Equatable {
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    /// 写作采集 worker(Step 0 + Pass 1 + Pass 2 + Pass 3)。默认 off 因为它需要用户
+    /// 写作采集 worker(Step 0 + Pass 1 + Pass 3 + Pass 4)。默认 off 因为它需要用户
     /// 在 Pending review 里手动 Approve,完全无人值守不合适。用户开了之后
     /// 自动跑只是「先把 staged 准备好」,等用户审核。
     var writingCapture: SchedulerConfig = .init(frequency: .off,    timeOfDay: "03:30",

@@ -2,7 +2,7 @@ import XCTest
 @testable import MyPortrait
 
 @MainActor
-final class WritingCapturePass2AgentTests: XCTestCase {
+final class WritingCapturePass3AgentTests: XCTestCase {
 
     // MARK: - parse
 
@@ -38,7 +38,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
           ]
         }
         """
-        let (recs, disc) = try WritingCapturePass2Agent.parse(from: raw)
+        let (recs, disc) = try WritingCapturePass3Agent.parse(from: raw)
         XCTAssertEqual(recs.count, 1)
         XCTAssertEqual(recs[0].text, "今天天气真好")
         XCTAssertEqual(recs[0].kind, "long_form")
@@ -51,7 +51,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
 
     func testParseEmpty() throws {
         let raw = #"{"records": [], "discarded": []}"#
-        let (recs, disc) = try WritingCapturePass2Agent.parse(from: raw)
+        let (recs, disc) = try WritingCapturePass3Agent.parse(from: raw)
         XCTAssertEqual(recs.count, 0)
         XCTAssertEqual(disc.count, 0)
     }
@@ -69,8 +69,8 @@ final class WritingCapturePass2AgentTests: XCTestCase {
           "discarded": []
         }
         """
-        XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass2Agent.AgentError.malformedJSON(let m) = err,
+        XCTAssertThrowsError(try WritingCapturePass3Agent.parse(from: raw)) { err in
+            guard case WritingCapturePass3Agent.AgentError.malformedJSON(let m) = err,
                   m.contains("kind") else {
                 return XCTFail("expected malformedJSON(kind), got \(err)")
             }
@@ -90,8 +90,8 @@ final class WritingCapturePass2AgentTests: XCTestCase {
           "discarded": []
         }
         """
-        XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass2Agent.AgentError.malformedJSON(let m) = err,
+        XCTAssertThrowsError(try WritingCapturePass3Agent.parse(from: raw)) { err in
+            guard case WritingCapturePass3Agent.AgentError.malformedJSON(let m) = err,
                   m.contains("source") else {
                 return XCTFail("expected malformedJSON(source), got \(err)")
             }
@@ -111,8 +111,8 @@ final class WritingCapturePass2AgentTests: XCTestCase {
           "discarded": []
         }
         """
-        XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass2Agent.AgentError.malformedJSON(let m) = err,
+        XCTAssertThrowsError(try WritingCapturePass3Agent.parse(from: raw)) { err in
+            guard case WritingCapturePass3Agent.AgentError.malformedJSON(let m) = err,
                   m.contains("confidence") else {
                 return XCTFail("expected malformedJSON(confidence), got \(err)")
             }
@@ -127,15 +127,15 @@ final class WritingCapturePass2AgentTests: XCTestCase {
           "discarded": [{"reason": "anything goes here, no prefix needed", "session_ids": ["a"], "preview": "x"}]
         }
         """
-        let (_, disc) = try WritingCapturePass2Agent.parse(from: raw)
+        let (_, disc) = try WritingCapturePass3Agent.parse(from: raw)
         XCTAssertEqual(disc.count, 1)
         XCTAssertEqual(disc[0].reason, "anything goes here, no prefix needed")
     }
 
     func testParseNoJSON() {
         let raw = "I cannot process this"
-        XCTAssertThrowsError(try WritingCapturePass2Agent.parse(from: raw)) { err in
-            guard case WritingCapturePass2Agent.AgentError.malformedJSON = err else {
+        XCTAssertThrowsError(try WritingCapturePass3Agent.parse(from: raw)) { err in
+            guard case WritingCapturePass3Agent.AgentError.malformedJSON = err else {
                 return XCTFail("expected malformedJSON, got \(err)")
             }
         }
@@ -144,7 +144,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
     // MARK: - buildPrompt
 
     func testBuildPromptEmpty() {
-        let p = WritingCapturePass2Agent.buildPrompt(
+        let p = WritingCapturePass3Agent.buildPrompt(
             contextTimeline: [],
             groupApp: "obs",
             groupUrl: nil,
@@ -175,7 +175,7 @@ final class WritingCapturePass2AgentTests: XCTestCase {
             ocrFrames: [],
             maxContentChars: 16
         )
-        let p = WritingCapturePass2Agent.buildPrompt(
+        let p = WritingCapturePass3Agent.buildPrompt(
             contextTimeline: timeline,
             groupApp: "obs",
             groupUrl: nil,

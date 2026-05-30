@@ -24,7 +24,7 @@ struct WritingCaptureDayRunSummary: Sendable {
 final class WritingCaptureUIState: ObservableObject {
     static let shared = WritingCaptureUIState()
     @Published var isRunning: Bool = false
-    @Published var stage: String = ""              // "Step 0" / "Pass 1" / "Pass 2 (3/5)" / "Saving"
+    @Published var stage: String = ""              // "Step 0" / "Pass 1" / "Pass 3 (3/5)" / "Saving"
     @Published var statusMessage: String = ""      // 给用户看的一行
     @Published var lastSummary: WritingCaptureDayRunSummary? = nil
     @Published var lastError: String? = nil
@@ -36,7 +36,7 @@ final class WritingCaptureUIState: ObservableObject {
 
 // MARK: - WritingCaptureWorker
 
-/// 写作采集主 worker —— 串起 Step 0 / Pass 1 / Pass 2 / DB。
+/// 写作采集主 worker —— 串起 Step 0 / Pass 1 / Pass 3 / DB。
 ///
 /// 测试期由 Settings → Scheduler 的 "Run now" 按钮调,跑「未处理的天」。
 /// 输出落 `writing_records_staged`,等用户 Approve/Reject。
@@ -51,20 +51,20 @@ final class WritingCaptureWorker {
     static var shared: WritingCaptureWorker?
 
     let store: WritingCaptureStore
-    /// pass1/pass2 在每次 runDay 重新构造 —— 这样用户在 Settings 改 provider
+    /// pass1/pass3 在每次 runDay 重新构造 —— 这样用户在 Settings 改 provider
     /// 后下一次跑就用新的(写作采集用 LIGHT 模型档,跟 cluster 一档)。
     /// init 传入的 override 仍然优先(测试用)。
     private let pass1Override: WritingCapturePass1Agent?
-    private let pass2Override: WritingCapturePass2Agent?
+    private let pass3Override: WritingCapturePass3Agent?
 
     init(
         store: WritingCaptureStore,
         pass1: WritingCapturePass1Agent? = nil,
-        pass2: WritingCapturePass2Agent? = nil
+        pass3: WritingCapturePass3Agent? = nil
     ) {
         self.store = store
         self.pass1Override = pass1
-        self.pass2Override = pass2
+        self.pass3Override = pass3
     }
 
     private var pass1: WritingCapturePass1Agent {
@@ -72,10 +72,10 @@ final class WritingCaptureWorker {
         let cfg = ConfigStore.shared.current.memory
         return WritingCapturePass1Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
     }
-    private var pass2: WritingCapturePass2Agent {
-        if let o = pass2Override { return o }
+    private var pass3: WritingCapturePass3Agent {
+        if let o = pass3Override { return o }
         let cfg = ConfigStore.shared.current.memory
-        return WritingCapturePass2Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
+        return WritingCapturePass3Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
     }
 
     /// 跑所有「未处理的天」。返回每天的执行摘要。
@@ -128,7 +128,7 @@ final class WritingCaptureWorker {
         let napGuard = AppNapGuard.acquire(reason: "Writing capture day run")
         defer { napGuard.release() }
         do {
-            // App Nap 防护:Pass 1 + Pass 2 fanout 长任务,后台跑能拖到 10x。
+            // App Nap 防护:Pass 1 + Pass 3 fanout 长任务,后台跑能拖到 10x。
             let summary = try await runDayCore(date: date, runId: runId)
             return summary
         } catch {
@@ -224,44 +224,44 @@ final class WritingCaptureWorker {
         )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        let pass2Cfg = ConfigStore.shared.current.memory
-        let pass2Provider = pass2Cfg.resolvedProvider
-        let pass2Model = pass2Cfg.resolvedModelLight
+        let pass3Cfg = ConfigStore.shared.current.memory
+        let pass3Provider = pass3Cfg.resolvedProvider
+        let pass3Model = pass3Cfg.resolvedModelLight
 
-        // 3.5 Pass 4 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
-        let refinedSessions = await Self.applyPass4(
+        // 3.5 Pass 2 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
+        let refinedSessions = await Self.applyPass2(
             step0.rawSessions, concurrency: 5,
-            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass2Provider, model: pass2Model) })
-        workerLog.info("pass4: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
+            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
+        workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
 
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
         let groups = Self.groupRawSessionsByApp(refinedSessions)
         workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
 
-        // 5. **每组一个 subagent 并发跑 Pass 2**(默认 sonnet)。
+        // 5. **每组一个 subagent 并发跑 Pass 3**(默认 sonnet)。
         // 失败 group 单独标错,不阻塞其他 group。最多 5 并发,防止 Anthropic
-        // 限流 + 本机 CPU 打爆。每个并发任务都创建一个全新的 Pass2Agent,
+        // 限流 + 本机 CPU 打爆。每个并发任务都创建一个全新的 Pass3Agent,
         // 不复用(每 agent 有 subprocess 状态)。
         let userLanguages = ConfigStore.shared.current.personalInfo.languages
         let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
             try store.fetchRecentUserRejections()
         }.value) ?? []
-        let pass2Results = await Self.runPass2Concurrently(
+        let pass3Results = await Self.runPass3Concurrently(
             contextTimeline: pass1Out.timeline,
             groups: groups,
             concurrency: 5,
-            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass2Provider, model: pass2Model) },
-            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass2Provider, model: pass2Model) },
+            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass3Provider, model: pass3Model) },
+            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
             userLanguages: userLanguages,
             userRejections: userRejections
         )
 
-        // 6. 收集 Pass 2 输出(按 group 索引保留分组),给 Pass 3 用
+        // 6. 收集 Pass 3 输出(按 group 索引保留分组),给 Pass 4 用
         var recordsByGroupIdx: [[WritingCaptureRecord]] = []
         var failedGroups = 0
         var rawResponses: [String] = []
         var firstPrompt: String?
-        for r in pass2Results {
+        for r in pass3Results {
             switch r {
             case .success(let out):
                 recordsByGroupIdx.append(out.records)
@@ -270,19 +270,19 @@ final class WritingCaptureWorker {
             case .failure(let err):
                 recordsByGroupIdx.append([])
                 failedGroups += 1
-                workerLog.warning("pass2 group failed: \(String(describing: err), privacy: .public)")
+                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public)")
             }
         }
-        let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
-        workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
+        let pass3Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
+        workerLog.info("pass3 fanout: \(pass3Total) records, \(failedGroups) failed groups")
 
-        // Pass 2 group 失败 = 那个 (app,url) 时间窗的写作数据被吞空。若放任,
+        // Pass 3 group 失败 = 那个 (app,url) 时间窗的写作数据被吞空。若放任,
         // 这天照常进 pending_review → approve 后标 'approved' → unprocessedDays
         // 不再返回这天(store:80) → 这段 raw 永不重跑 = 永久丢。故失败即整次 abort:
         // catch 标 'failed'('failed' 会被 unprocessedDays 重新捞起,raw 不删,下次重跑)。
-        // Pass 3 / Pass 4 失败是 fail-open(保留记录),不在此列。
+        // Pass 4 / Pass 2 失败是 fail-open(保留记录),不在此列。
         if failedGroups > 0 {
-            throw BacklogError.pass2GroupsFailed(count: failedGroups)
+            throw BacklogError.pass3GroupsFailed(count: failedGroups)
         }
 
         // 6a. edit_log 重建 + authoring 过滤(确定性):ax edit_log 从 typing_events
@@ -292,50 +292,50 @@ final class WritingCaptureWorker {
         let editLogDropped = editLogFilter.dropped
         workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
 
-        // 6b. Pass 3 —— keystroke 支撑度过滤(每组一次,跟 Pass 2 同 provider/model)
-        let pass3Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
+        // 6b. Pass 4 —— keystroke 支撑度过滤(每组一次,跟 Pass 3 同 provider/model)
+        let pass4Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
             recs.enumerated().map { (ri, rec) in
-                WritingCapturePass3Builders.buildInput(
+                WritingCapturePass4Builders.buildInput(
                     recordId: "g\(gi)_r\(ri)",
                     record: rec, typing: raw.typing, keys: raw.keys
                 )
             }
         }
-        let pass3Results = await WritingCapturePass3Builders.runConcurrently(
-            inputsByGroupIdx: pass3Inputs,
+        let pass4Results = await WritingCapturePass4Builders.runConcurrently(
+            inputsByGroupIdx: pass4Inputs,
             concurrency: 5,
-            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass2Provider, model: pass2Model) }
+            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass3Provider, model: pass3Model) }
         )
         var allRecords: [WritingCaptureRecord] = []
         var allDiscarded: [WritingCaptureDiscarded] = editLogDropped
-        var pass3RawResponses: [String] = []
-        var pass3FailedGroups = 0
+        var pass4RawResponses: [String] = []
+        var pass4FailedGroups = 0
         for (gi, recs) in recordsByGroupIdx.enumerated() {
-            switch pass3Results[gi] {
+            switch pass4Results[gi] {
             case .success(let out):
-                pass3RawResponses.append(out.rawResponse)
+                pass4RawResponses.append(out.rawResponse)
                 for (ri, rec) in recs.enumerated() {
                     let id = "g\(gi)_r\(ri)"
                     if out.kept.contains(id) { allRecords.append(rec) }
                 }
                 for d in out.discarded {
                     allDiscarded.append(WritingCaptureDiscarded(
-                        reason: "pass3: \(d.reason)",
+                        reason: "pass4: \(d.reason)",
                         sessionIds: [],
                         preview: d.preview
                     ))
                 }
             case .failure(let err):
-                pass3FailedGroups += 1
-                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
+                pass4FailedGroups += 1
+                workerLog.warning("pass4 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
                 allRecords.append(contentsOf: recs)
             }
         }
-        workerLog.info("pass3 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass3FailedGroups) failed groups")
+        workerLog.info("pass4 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass4FailedGroups) failed groups")
 
         // 7. 落 staged + discarded
         let promptId = Self.promptIdHash(
-            pass1: pass1Out.prompt, pass2: firstPrompt ?? ""
+            pass1: pass1Out.prompt, pass3: firstPrompt ?? ""
         )
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.insertStaged(
@@ -344,7 +344,7 @@ final class WritingCaptureWorker {
                 promptId: promptId,
                 records: allRecords,
                 rawPass1Output: pass1Out.rawResponse,
-                rawPass2Output: rawResponses.joined(separator: "\n---\n")
+                rawPass3Output: rawResponses.joined(separator: "\n---\n")
             )
             try store.insertStagedDiscarded(
                 date: date, runId: runId, discarded: allDiscarded
@@ -382,7 +382,7 @@ final class WritingCaptureWorker {
     enum BacklogError: LocalizedError {
         case pendingReviewExists(records: Int)
         case alreadyProcessing
-        case pass2GroupsFailed(count: Int)
+        case pass3GroupsFailed(count: Int)
         var errorDescription: String? {
             switch self {
             case .pendingReviewExists(let n):
@@ -390,8 +390,8 @@ final class WritingCaptureWorker {
                        "Approve or reject them first before running again."
             case .alreadyProcessing:
                 return "Backlog run already in progress. Wait for it to finish."
-            case .pass2GroupsFailed(let n):
-                return "\(n) Pass 2 group(s) failed (LLM error/timeout). " +
+            case .pass3GroupsFailed(let n):
+                return "\(n) Pass 3 group(s) failed (LLM error/timeout). " +
                        "Run aborted so no data window is skipped — try again."
             }
         }
@@ -563,45 +563,45 @@ final class WritingCaptureWorker {
         )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        let pass2Cfg = ConfigStore.shared.current.memory
-        let pass2Provider = pass2Cfg.resolvedProvider
-        let pass2Model = pass2Cfg.resolvedModelLight
+        let pass3Cfg = ConfigStore.shared.current.memory
+        let pass3Provider = pass3Cfg.resolvedProvider
+        let pass3Model = pass3Cfg.resolvedModelLight
 
-        // 3.5 Pass 4 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
-        ui.stage = "Pass 4"
-        ui.statusMessage = "Pass 4: judging \(step0.rawSessions.count) sessions (cut + AX validity)…"
-        let refinedSessions = await Self.applyPass4(
-            step0.rawSessions, concurrency: 5,
-            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass2Provider, model: pass2Model) })
-        workerLog.info("pass4: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
-
-        // 4. group + 5. Pass 2 并发
-        let groups = Self.groupRawSessionsByApp(refinedSessions)
+        // 3.5 Pass 2 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
         ui.stage = "Pass 2"
-        ui.statusMessage = "Pass 2: \(groups.count) (app, url) groups — running concurrently (max 5)…"
+        ui.statusMessage = "Pass 2: judging \(step0.rawSessions.count) sessions (cut + AX validity)…"
+        let refinedSessions = await Self.applyPass2(
+            step0.rawSessions, concurrency: 5,
+            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
+        workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
+
+        // 4. group + 5. Pass 3 并发
+        let groups = Self.groupRawSessionsByApp(refinedSessions)
+        ui.stage = "Pass 3"
+        ui.statusMessage = "Pass 3: \(groups.count) (app, url) groups — running concurrently (max 5)…"
         workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
         let userLanguages = ConfigStore.shared.current.personalInfo.languages
         let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
             try store.fetchRecentUserRejections()
         }.value) ?? []
         if !userRejections.isEmpty {
-            workerLog.info("user_rejections: \(userRejections.count) examples fed to Pass 2")
+            workerLog.info("user_rejections: \(userRejections.count) examples fed to Pass 3")
         }
-        let pass2Results = await Self.runPass2Concurrently(
+        let pass3Results = await Self.runPass3Concurrently(
             contextTimeline: pass1Out.timeline, groups: groups, concurrency: 5,
-            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass2Provider, model: pass2Model) },
-            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass2Provider, model: pass2Model) },
+            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass3Provider, model: pass3Model) },
+            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
             includeAxText: includeAxText,
             userLanguages: userLanguages,
             userRejections: userRejections
         )
 
-        // 6. 收集 Pass 2 输出(按 group 索引保留)
+        // 6. 收集 Pass 3 输出(按 group 索引保留)
         var recordsByGroupIdx: [[WritingCaptureRecord]] = []
         var failedGroups = 0
         var rawResponses: [String] = []
         var firstPrompt: String?
-        for r in pass2Results {
+        for r in pass3Results {
             switch r {
             case .success(let out):
                 recordsByGroupIdx.append(out.records)
@@ -610,18 +610,18 @@ final class WritingCaptureWorker {
             case .failure(let err):
                 recordsByGroupIdx.append([])
                 failedGroups += 1
-                workerLog.warning("pass2 group failed: \(String(describing: err), privacy: .public)")
+                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public)")
             }
         }
-        let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
-        workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
+        let pass3Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
+        workerLog.info("pass3 fanout: \(pass3Total) records, \(failedGroups) failed groups")
 
-        // Pass 2 group 失败 = 那个 (app,url) 时间窗的写作数据被吞空。若放任,
+        // Pass 3 group 失败 = 那个 (app,url) 时间窗的写作数据被吞空。若放任,
         // approve 会无条件把 cursor 推过整个窗(approveBacklog setCursor) → 这段 raw
         // 永不重跑 = 永久丢。故失败即整次 abort:catch 标 'failed'、不进 pending_review、
-        // cursor 不动,下次同范围重跑(raw 不删)。Pass 3 / Pass 4 失败 fail-open,不在此列。
+        // cursor 不动,下次同范围重跑(raw 不删)。Pass 4 / Pass 2 失败 fail-open,不在此列。
         if failedGroups > 0 {
-            throw BacklogError.pass2GroupsFailed(count: failedGroups)
+            throw BacklogError.pass3GroupsFailed(count: failedGroups)
         }
 
         // 6a. edit_log 重建 + authoring 过滤(确定性)
@@ -630,27 +630,27 @@ final class WritingCaptureWorker {
         let editLogDropped = editLogFilter.dropped
         workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
 
-        // 6b. Pass 3
-        ui.stage = "Pass 3"
-        ui.statusMessage = "Pass 3: validating \(pass2Total) candidate record(s)…"
-        let pass3Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
+        // 6b. Pass 4
+        ui.stage = "Pass 4"
+        ui.statusMessage = "Pass 4: validating \(pass3Total) candidate record(s)…"
+        let pass4Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
             recs.enumerated().map { (ri, rec) in
-                WritingCapturePass3Builders.buildInput(
+                WritingCapturePass4Builders.buildInput(
                     recordId: "g\(gi)_r\(ri)",
                     record: rec, typing: raw.typing, keys: raw.keys
                 )
             }
         }
-        let pass3Results = await WritingCapturePass3Builders.runConcurrently(
-            inputsByGroupIdx: pass3Inputs,
+        let pass4Results = await WritingCapturePass4Builders.runConcurrently(
+            inputsByGroupIdx: pass4Inputs,
             concurrency: 5,
-            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass2Provider, model: pass2Model) }
+            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass3Provider, model: pass3Model) }
         )
         var allRecords: [WritingCaptureRecord] = []
         var allDiscarded: [WritingCaptureDiscarded] = editLogDropped
-        var pass3FailedGroups = 0
+        var pass4FailedGroups = 0
         for (gi, recs) in recordsByGroupIdx.enumerated() {
-            switch pass3Results[gi] {
+            switch pass4Results[gi] {
             case .success(let out):
                 for (ri, rec) in recs.enumerated() {
                     let id = "g\(gi)_r\(ri)"
@@ -658,29 +658,29 @@ final class WritingCaptureWorker {
                 }
                 for d in out.discarded {
                     allDiscarded.append(WritingCaptureDiscarded(
-                        reason: "pass3: \(d.reason)",
+                        reason: "pass4: \(d.reason)",
                         sessionIds: [],
                         preview: d.preview
                     ))
                 }
             case .failure(let err):
-                pass3FailedGroups += 1
-                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
+                pass4FailedGroups += 1
+                workerLog.warning("pass4 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
                 allRecords.append(contentsOf: recs)
             }
         }
-        workerLog.info("pass3 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass3FailedGroups) failed groups")
+        workerLog.info("pass4 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass4FailedGroups) failed groups")
         ui.stage = "saving"
         ui.statusMessage = "Saving \(allRecords.count) record(s), \(allDiscarded.count) discarded…"
 
         // 7. stage
-        let promptId = Self.promptIdHash(pass1: pass1Out.prompt, pass2: firstPrompt ?? "")
+        let promptId = Self.promptIdHash(pass1: pass1Out.prompt, pass3: firstPrompt ?? "")
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.insertStaged(
                 date: date, runId: runId, promptId: promptId,
                 records: allRecords,
                 rawPass1Output: pass1Out.rawResponse,
-                rawPass2Output: rawResponses.joined(separator: "\n---\n")
+                rawPass3Output: rawResponses.joined(separator: "\n---\n")
             )
             try store.insertStagedDiscarded(date: date, runId: runId, discarded: allDiscarded)
         }.value
@@ -747,7 +747,7 @@ final class WritingCaptureWorker {
 
     // MARK: - prompt id
 
-    /// 按 (app, url) **分组**(不合)。Pass 2 LLM 在 group 内自己决定切多少 record。
+    /// 按 (app, url) **分组**(不合)。Pass 3 LLM 在 group 内自己决定切多少 record。
     /// 跟 mergeRawSessionsByApp 的区别:这里保留每个 session 独立结构,LLM 可以
     /// 把 session 拆成多个 short_form record(聊天连发多条)。
     struct WritingCaptureGroup: Sendable {
@@ -777,23 +777,23 @@ final class WritingCaptureWorker {
         }
     }
 
-    /// Pass 4 —— 切割 + AX 真伪判断,把非 canvas session 重建成"一单元一 session"。
+    /// Pass 2 —— 切割 + AX 真伪判断,把非 canvas session 重建成"一单元一 session"。
     /// canvas session(chromeTokens 非空)/ 无 typing_events 的 → 原样直通。
     /// 并发限 `concurrency`。LLM 失败 fallback:该 session 原样保留。
-    static func applyPass4(
+    static func applyPass2(
         _ sessions: [WritingCaptureRawSession],
         concurrency: Int,
-        makePass4: @escaping @MainActor @Sendable () -> WritingCapturePass4Agent
+        makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent
     ) async -> [WritingCaptureRawSession] {
         // 需要判的:有 typing_events 的 session(无论 Step 0 有没有 canvas 标记)。
-        // —— Pass 4 用三源做 session 级判断:真内容在 AX(ax,按消息切)还是 OCR
+        // —— Pass 2 用三源做 session 级判断:真内容在 AX(ax,按消息切)还是 OCR
         // (ocr,整 session 走重建)。这取代 Step 0 死检测的路由作用。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
             let s = sessions[idx]
-            let agent = await makePass4()
+            let agent = await makePass2()
             let result = (try? await agent.run(session: s))
-                ?? WritingCapturePass4Agent.Result(
+                ?? WritingCapturePass2Agent.Result(
                     primarySource: "ax",
                     units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
             if result.primarySource == "ocr" {
@@ -802,7 +802,7 @@ final class WritingCaptureWorker {
                 let ocrSession = Self.ensureOcrPrepped(s)
                 return (idx, [ocrSession])
             }
-            // primary=ax:按单元重建(chromeTokens 清空 → 走 Pass2Agent);
+            // primary=ax:按单元重建(chromeTokens 清空 → 走 Pass3Agent);
             // dropped 的 event(autofill/垃圾)不进任何单元;全空 = 整 session 丢。
             let rebuilt = result.units.compactMap { rebuildUnitSession(from: s, eventIds: $0) }
             return (idx, rebuilt)
@@ -830,7 +830,7 @@ final class WritingCaptureWorker {
         return out
     }
 
-    /// 用 Pass 4 给的一组 event_ids 从原 session 重建一个 mini-session
+    /// 用 Pass 2 给的一组 event_ids 从原 session 重建一个 mini-session
     /// (保留这些 typing_events + 其合并时间窗 ±10s 内的 keystrokes / frames)。
     nonisolated static func rebuildUnitSession(
         from s: WritingCaptureRawSession, eventIds: [Int64]
@@ -876,25 +876,25 @@ final class WritingCaptureWorker {
         "unit_" + String(format: "%llx", UInt64(bitPattern: startTs &* 31 &+ Int64(app.hashValue & 0xffff)))
     }
 
-    /// 并发跑多 group 的 Pass 2 —— 默认 sonnet subagent 一组一个。
+    /// 并发跑多 group 的 Pass 3 —— 默认 sonnet subagent 一组一个。
     /// 限流 `concurrency` 道闸,防止瞬间 spawn 30 个 claude 子进程。
-    enum Pass2GroupResult {
-        case success(WritingCapturePass2Agent.Output)
+    enum Pass3GroupResult {
+        case success(WritingCapturePass3Agent.Output)
         case failure(Error)
     }
-    static func runPass2Concurrently(
+    static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
         concurrency: Int,
-        makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent,
+        makePass3: @escaping @MainActor @Sendable () -> WritingCapturePass3Agent,
         makeCanvas: @escaping @MainActor @Sendable () -> WritingCaptureCanvasAgent,
         includeAxText: Bool = true,
         userLanguages: [String] = [],
         userRejections: [UserRejectionRow] = []
-    ) async -> [Pass2GroupResult] {
+    ) async -> [Pass3GroupResult] {
         // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
-        // fanout;普通组走 Pass 2 单调用。
-        @Sendable func runOne(_ idx: Int) async -> (Int, Pass2GroupResult) {
+        // fanout;普通组走 Pass 3 单调用。
+        @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
             let g = groups[idx]
             let isCanvas = g.sessions.contains { $0.route == "ocr" }
             do {
@@ -909,7 +909,7 @@ final class WritingCaptureWorker {
                         session: merged, contextSummary: ctx)
                     return (idx, .success(out))
                 } else {
-                    let agent = await makePass2()
+                    let agent = await makePass3()
                     let out = try await agent.run(
                         contextTimeline: contextTimeline,
                         groupApp: g.app, groupUrl: g.url,
@@ -925,10 +925,10 @@ final class WritingCaptureWorker {
             }
         }
 
-        return await withTaskGroup(of: (Int, Pass2GroupResult).self) { taskGroup in
+        return await withTaskGroup(of: (Int, Pass3GroupResult).self) { taskGroup in
             var inFlight = 0
             var nextIdx = 0
-            var results: [Int: Pass2GroupResult] = [:]
+            var results: [Int: Pass3GroupResult] = [:]
             while inFlight < concurrency && nextIdx < groups.count {
                 let idx = nextIdx; nextIdx += 1
                 taskGroup.addTask { await runOne(idx) }
@@ -943,11 +943,11 @@ final class WritingCaptureWorker {
                     inFlight += 1
                 }
             }
-            return (0..<groups.count).map { results[$0] ?? .failure(Pass2GroupError.missing) }
+            return (0..<groups.count).map { results[$0] ?? .failure(Pass3GroupError.missing) }
         }
     }
 
-    enum Pass2GroupError: Error { case missing }
+    enum Pass3GroupError: Error { case missing }
 
     /// edit_log 重建 + authoring 过滤(确定性,不靠 LLM)。
     /// 1. ax_cleaned record:edit_log 从源 typing_events.editLog 直接取(haiku 经常
@@ -1115,10 +1115,10 @@ final class WritingCaptureWorker {
         }
     }
 
-    /// `prompt_id = sha256(pass1_prompt + pass2_prompt)[..16]` hex string。
+    /// `prompt_id = sha256(pass1_prompt + pass3_prompt)[..16]` hex string。
     /// prompt 迭代时阶段三能筛同版本训练对。
-    static func promptIdHash(pass1: String, pass2: String) -> String {
-        let combined = pass1 + "\u{1F}" + pass2  // 单元分隔符
+    static func promptIdHash(pass1: String, pass3: String) -> String {
+        let combined = pass1 + "\u{1F}" + pass3  // 单元分隔符
         let digest = SHA256.hash(data: Data(combined.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return String(hex.prefix(16))

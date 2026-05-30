@@ -3,178 +3,269 @@ import os.log
 
 private let pass4Log = Logger(subsystem: "com.myportrait.memory", category: "writing-pass4")
 
-/// Pass 4 —— 切割 + AX 真伪判断(judgment only,不转写)。
+// MARK: - Pass 4 输入 / 输出类型
+
+/// Pass 4 收到的一条 candidate record(已由 Worker 从 Pass 3 records 加上
+/// 每条的 keystroke / AX 证据)。
+struct WritingCapturePass4InputRecord: Encodable, Sendable {
+    /// Worker 临时分配的 record_id —— Pass 3 的 records 数组里没显式 id,
+    /// Worker fanout 时按 "g<group>_r<idx>" 形态生成,Pass 4 用此引用回。
+    let recordId: String
+    let text: String
+    let kind: String
+    let source: String
+    let app: String
+    let url: String?
+    let startTs: Int64
+    let endTs: Int64
+
+    /// 用户在 [startTs, endTs] 真实敲键拼成的字符串(跳过 modifier-only /
+    /// shortcut)。
+    let keystrokeText: String
+    /// 同窗口的 raw 键击总数。
+    let keystrokeCount: Int
+    /// 同窗口里 typing_events.text 拼接(空字符串表示没有 AX)。
+    let typingEventsText: String
+    /// 同窗口里出现过 ⌘V > 100 字 的 paste 事件。
+    let hasPasteEvent: Bool
+    /// 同窗口里出现过 ⌘X 的 cut 事件(用户剪了自己的内容)。
+    let hasCutEvent: Bool
+    /// keystroke 形态像 IME pinyin / 假名:大量 ASCII 小写字母 + 偶发数字
+    /// (IME 候选选择)+ record.text 含 CJK。
+    let imeLikely: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case recordId           = "record_id"
+        case text, kind, source, app, url
+        case startTs            = "start_ts"
+        case endTs              = "end_ts"
+        case keystrokeText      = "keystroke_text"
+        case keystrokeCount     = "keystroke_count"
+        case typingEventsText   = "typing_events_text"
+        case hasPasteEvent      = "has_paste_event"
+        case hasCutEvent        = "has_cut_event"
+        case imeLikely          = "ime_likely"
+    }
+}
+
+/// Pass 4 输出的丢弃条目。
+struct WritingCapturePass4Discarded: Decodable, Sendable, Equatable {
+    let recordId: String
+    let reason: String
+    let preview: String
+
+    enum CodingKeys: String, CodingKey {
+        case recordId   = "record_id"
+        case reason
+        case preview
+    }
+
+    init(recordId: String, reason: String, preview: String) {
+        self.recordId = recordId
+        self.reason = reason
+        self.preview = preview
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        recordId = try c.decode(String.self, forKey: .recordId)
+        reason = try c.decode(String.self, forKey: .reason)
+        preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
+    }
+}
+
+/// LLM 返回的顶层 JSON。
+private struct Pass4Response: Decodable {
+    let kept: [String]
+    let discarded: [WritingCapturePass4Discarded]
+}
+
+// MARK: - Pass 4 Agent
+
+/// 写作采集 Pass 4 —— 最终丢弃阀门。
 ///
-/// 只跑**非 canvas session**(有 AX typing_events 的)。对一个 session:
-///   1. 把 typing_events 切成单元(一条消息 / 一篇连续编辑)
-///   2. 判每条 typing_event 文本本身有没有意义(garbage 直接 block,不下传)
+/// 输入:Pass 3 该 group 的 candidate records + 每条的 keystroke / AX 证据。
+/// 输出:`kept`(留下的 record_id 集) + `discarded`(LLM 给的原因)。
 ///
-/// 输出喂给 Worker,重建成"一单元一 mini-session",再交 Pass 2 转写。
-/// 判断活,轻量模型(haiku / 本地)可胜任。
+/// 整套 fanout 模式跟 Pass 3 一致(per-group 并发),provider/model 跟随
+/// `resolvedProviderLight` / `resolvedModelLight`(用户切 provider 时一起切)。
 @MainActor
 final class WritingCapturePass4Agent {
 
-    struct Result: Sendable {
-        /// session 级:真内容在 AX 还是 OCR。"ocr" → 整 session 走重建路径。
-        let primarySource: String   // "ax" | "ocr"
-        /// primary=ax 时的单元(每个 = 一组 typing_event id)。
-        let units: [[Int64]]
-        /// 被 block 的 typing_event id + 原因(autofill / 垃圾)。
-        let dropped: [(id: Int64, reason: String)]
+    enum AgentError: LocalizedError {
+        case agentSpawn(String)
+        case agentTimeout
+        case noJSONInResponse
+        case malformedJSON(String)
+        var errorDescription: String? {
+            switch self {
+            case .agentSpawn(let m):    return "Failed to spawn LLM agent: \(m)"
+            case .agentTimeout:         return "LLM did not respond within timeout"
+            case .noJSONInResponse:     return "LLM response contained no JSON object"
+            case .malformedJSON(let m): return "LLM JSON parse failed: \(m)"
+            }
+        }
+    }
+
+    struct Output {
+        let prompt: String
+        let rawResponse: String
+        let kept: Set<String>
+        let discarded: [WritingCapturePass4Discarded]
     }
 
     private let provider: Provider
     private let model: String
     private let perRunTimeout: TimeInterval
 
-    init(provider: Provider = .claudeCode, model: String = "haiku", perRunTimeout: TimeInterval = 300) {
+    init(provider: Provider = .claudeCode, model: String = "sonnet", perRunTimeout: TimeInterval = 600) {
         self.provider = provider
         self.model = model
         self.perRunTimeout = perRunTimeout
     }
 
-    /// 判一个 session。typing_events 为空 → 直接返回空(调用方应跳过)。
-    /// LLM 失败 → fallback:每条 event 各自一单元,全留(不丢用户数据)。
-    func run(session s: WritingCaptureRawSession) async throws -> Result {
-        let events = s.typingEvents
-        guard !events.isEmpty else { return Result(primarySource: "ax", units: [], dropped: []) }
-        let ids = events.compactMap { $0.id }
-        // fallback:LLM 失败 → 当 ax,每条各自一单元,全留(不丢用户数据)。
-        let fallback = Result(primarySource: "ax", units: ids.map { [$0] }, dropped: [])
+    /// 跑 Pass 4 —— **每个 (app, url) group 一次调用**(并发由 worker 在
+    /// 外层 fan out)。
+    func run(records: [WritingCapturePass4InputRecord]) async throws -> Output {
+        let prompt = Self.buildPrompt(records: records)
 
-        let prompt = Self.buildPrompt(session: s)
-
-        guard let agent = try? MemoryAgentFactory.make(provider: provider, model: model) else {
-            return fallback
+        // 空输入短路 —— Pass 3 该组没出 record,无需调用 LLM。
+        if records.isEmpty {
+            return Output(
+                prompt: prompt, rawResponse: "(short-circuited: no records)",
+                kept: [], discarded: []
+            )
         }
+
+        let agent = try MemoryAgentFactory.make(provider: provider, model: model)
         do { try await agent.start() }
-        catch { pass4Log.warning("pass4 spawn fail, fallback"); return fallback }
+        catch { throw AgentError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }
 
-        let coord = Pass4Coordinator()
-        let consumer = Task { [events = agent.events] in
-            for await ev in events { await coord.handle(ev) }
+        let coordinator = Pass4Coordinator()
+        let consumerTask = Task { [events = agent.events] in
+            for await event in events { await coordinator.handle(event) }
         }
-        defer { consumer.cancel() }
+        defer { consumerTask.cancel() }
 
-        let reqID = UUID().uuidString
-        await coord.startTurn(id: reqID)
-        do { try agent.sendPrompt(prompt, id: reqID) }
-        catch { return fallback }
+        let requestID = UUID().uuidString
+        await coordinator.startTurn(id: requestID)
+        do { try agent.sendPrompt(prompt, id: requestID) }
+        catch { throw AgentError.agentSpawn(error.localizedDescription) }
 
-        let collected: String = await withTaskGroup(of: String.self) { g in
-            g.addTask { await coord.awaitTurn() }
-            g.addTask {
-                (try? await Task.sleep(nanoseconds: UInt64(self.perRunTimeout * 1_000_000_000))) ?? ()
-                return ""
+        let collected: String
+        do {
+            collected = try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask { await coordinator.awaitTurn() }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: UInt64(self.perRunTimeout * 1_000_000_000))
+                    throw AgentError.agentTimeout
+                }
+                let r = try await group.next()!
+                group.cancelAll()
+                return r
             }
-            let r = await g.next() ?? ""
-            g.cancelAll()
-            return r
+        } catch is CancellationError {
+            throw AgentError.agentTimeout
         }
 
-        guard let parsed = Self.parse(collected, validIds: Set(ids)) else {
-            pass4Log.warning("pass4 parse fail, fallback (keep all as singletons)")
-            return fallback
+        if let err = await coordinator.consumeError() {
+            if BudgetSignal.isExhausted(err) {
+                throw BudgetExhaustedError(processor: "WritingCapturePass4Agent", message: err)
+            }
+            if collected.isEmpty {
+                throw AgentError.agentSpawn("LLM error: \(err)")
+            }
         }
-        return parsed
+
+        let (kept, discarded) = try Self.parse(from: collected, allIds: records.map(\.recordId))
+        return Output(prompt: prompt, rawResponse: collected, kept: kept, discarded: discarded)
     }
 
     // MARK: - Prompt
 
-    static func buildPrompt(session s: WritingCaptureRawSession) -> String {
-        struct EventPayload: Encodable { let id: Int64; let text: String }
-        let events = s.typingEvents.compactMap { e -> EventPayload? in
-            guard let id = e.id else { return nil }
-            return EventPayload(id: id, text: e.text)
-        }
-        var lines = [WritingCapturePrompts.pass4Segment, ""]
-        let meta: [String: String?] = ["app": s.app, "url": s.url]
-        lines.append("session_meta:")
-        lines.append((try? JSONSerialization.data(withJSONObject: meta.compactMapValues { $0 }))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
+    static func buildPrompt(records: [WritingCapturePass4InputRecord]) -> String {
+        var lines: [String] = [WritingCapturePrompts.pass4KeystrokeSupport]
         lines.append("")
-        lines.append("typing_events:")
-        let enc = JSONEncoder()
-        lines.append((try? enc.encode(events)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]")
-        lines.append("")
-        // keystroke 裁判:autofill = 有意义文本但 ~0 击键。
-        lines.append("keystroke_text: " + Self.assembleKeystrokeText(s.keystrokes))
-        lines.append("keystroke_count: \(s.keystrokes.count)")
-        lines.append("")
-        // OCR 摘要(交叉验证),截断防爆 prompt
-        let ocrExcerpt = s.ocrFrames.map { $0.text }.joined(separator: " ⏎ ")
-        lines.append("ocr_excerpt: " + String(ocrExcerpt.prefix(2000)))
+        lines.append("records:")
+        lines.append(encodeJSON(records) ?? "[]")
         return lines.joined(separator: "\n")
     }
 
-    /// keystroke → "用户真敲了什么" 串(跳过 modifier-only / shortcut / backspace
-    /// 拼 <BS>)。跟 Pass 2 同规则。
-    static func assembleKeystrokeText(_ keys: [KeystrokeEntry]) -> String {
-        var out = ""
-        for k in keys.sorted(by: { $0.tsMs < $1.tsMs }) {
-            let m = k.modifiers
-            if (m & 0x01) != 0 || (m & 0x02) != 0 || (m & 0x04) != 0 { continue }
-            if k.isBackspace != 0 { out += "<BS>"; continue }
-            if let c = k.char, !c.isEmpty { out += c }
-        }
-        return String(out.prefix(2000))
+    private static func encodeJSON<T: Encodable>(_ v: T) -> String? {
+        let enc = JSONEncoder()
+        enc.keyEncodingStrategy = .useDefaultKeys  // 显式 CodingKey 已 snake_case
+        guard let data = try? enc.encode(v) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
-    // MARK: - 解析
+    // MARK: - JSON 解析
 
-    private struct Response: Decodable {
-        struct RUnit: Decodable { let eventIds: [Int64]
-            enum CodingKeys: String, CodingKey { case eventIds = "event_ids" } }
-        struct Drop: Decodable { let eventId: Int64; let reason: String?
-            enum CodingKeys: String, CodingKey { case eventId = "event_id"; case reason } }
-        let primarySource: String?
-        let units: [RUnit]?
-        let dropped: [Drop]?
-        enum CodingKeys: String, CodingKey {
-            case primarySource = "primary_source"; case units; case dropped }
-    }
-
-    /// 解析 + 完整性补救。primary=ocr → units 空(OCR 路径整 session 重建)。
-    /// primary=ax → 漏网 id 默认各自成单元保留(不丢用户数据)。
-    static func parse(_ response: String, validIds: Set<Int64>) -> Result? {
-        guard let json = WritingCapturePass2Agent.extractFirstBalancedJSONObject(response),
-              let data = json.data(using: .utf8),
-              let r = try? JSONDecoder().decode(Response.self, from: data) else { return nil }
-        let primary = r.primarySource == "ocr" ? "ocr" : "ax"
-        let droppedIds = Set((r.dropped ?? []).map(\.eventId)).intersection(validIds)
-        let dropped = (r.dropped ?? []).filter { droppedIds.contains($0.eventId) }
-            .map { (id: $0.eventId, reason: $0.reason ?? "") }
-        if primary == "ocr" {
-            return Result(primarySource: "ocr", units: [], dropped: dropped)
+    /// 容错 + 完整性补救:
+    ///   - LLM 漏 id → 默认 kept(保守:不丢用户东西)
+    ///   - id 同时在 kept + discarded → 取 discarded(LLM 明确说丢)
+    ///   - 不存在的 id → 忽略
+    static func parse(
+        from response: String,
+        allIds: [String]
+    ) throws -> (kept: Set<String>, discarded: [WritingCapturePass4Discarded]) {
+        guard let jsonStr = WritingCapturePass3Agent.extractFirstBalancedJSONObject(response) else {
+            let preview = String(response.prefix(500))
+            throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
         }
-        var seen = Set<Int64>()
-        var units: [[Int64]] = []
-        for u in (r.units ?? []) {
-            let kept = u.eventIds.filter { validIds.contains($0) && !droppedIds.contains($0) && !seen.contains($0) }
-            kept.forEach { seen.insert($0) }
-            if !kept.isEmpty { units.append(kept) }
+        guard let data = jsonStr.data(using: .utf8) else {
+            throw AgentError.malformedJSON("response not UTF-8")
         }
-        for id in validIds where !seen.contains(id) && !droppedIds.contains(id) {
-            units.append([id]); seen.insert(id)
+        let parsed: Pass4Response
+        do {
+            parsed = try JSONDecoder().decode(Pass4Response.self, from: data)
+        } catch {
+            try? response.write(
+                toFile: "/tmp/claude-agent-last-response.txt",
+                atomically: false, encoding: .utf8
+            )
+            throw AgentError.malformedJSON(
+                "\(error.localizedDescription) — full response dumped /tmp/claude-agent-last-response.txt"
+            )
         }
-        return Result(primarySource: "ax", units: units, dropped: dropped)
+        let allIdSet = Set(allIds)
+        let discardedSet = Set(parsed.discarded.map(\.recordId))
+        var kept = Set<String>()
+        for id in allIdSet {
+            if discardedSet.contains(id) { continue }       // LLM 明确丢
+            kept.insert(id)                                  // 默认留下
+        }
+        let filteredDiscarded = parsed.discarded.filter { allIdSet.contains($0.recordId) }
+        return (kept, filteredDiscarded)
     }
 }
 
+// MARK: - 事件 coordinator(跟 Pass 3 同款最小骨架)
+
 private actor Pass4Coordinator {
-    private var buffer = ""
+    private var buffer: String = ""
+    private var currentID: String?
     private var pending: CheckedContinuation<String, Never>?
-    func startTurn(id: String) { buffer = ""; pending = nil }
-    func awaitTurn() async -> String {
-        await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in pending = c }
+    private var lastError: String?
+
+    func startTurn(id: String) {
+        buffer = ""; currentID = id; pending = nil; lastError = nil
     }
+    func awaitTurn() async -> String {
+        await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+            pending = cont
+        }
+    }
+    func consumeError() -> String? { lastError }
     func handle(_ event: PiAgent.Event) {
         switch event {
         case .textDelta(let d): buffer.append(d)
         case .assistantFinalText(let t): if buffer.isEmpty { buffer = t }
-        case .agentEnd: if let p = pending { pending = nil; p.resume(returning: buffer) }
-        case .error: if let p = pending { pending = nil; p.resume(returning: buffer) }
+        case .agentEnd:
+            if let p = pending { pending = nil; p.resume(returning: buffer) }
+        case .error(let msg):
+            lastError = msg
+            if let p = pending { pending = nil; p.resume(returning: buffer) }
         default: break
         }
     }

@@ -3,7 +3,7 @@ import os.log
 
 private let canvasLog = Logger(subsystem: "com.myportrait.memory", category: "writing-canvas")
 
-/// Canvas 文档(Google Docs 等,AX 拿不到正文)的 Pass 2 替代路径。
+/// Canvas 文档(Google Docs 等,AX 拿不到正文)的 Pass 3 替代路径。
 ///
 /// 一个 canvas group = 一篇文档,但快照可能很多(整天编辑)。一次性喂给一个
 /// LLM 会撑爆 prompt 卡死。改成:**按 token 预算把快照切成重叠窗口,每窗一个
@@ -13,8 +13,8 @@ private let canvasLog = Logger(subsystem: "com.myportrait.memory", category: "wr
 /// - 窗间重叠 1 帧 → 跨边界编辑不漏
 /// - 合并:edits 按 ts 排序去重;最终 body 取各窗最长
 ///
-/// 输出 `WritingCapturePass2Agent.Output`(records:[一条]),无缝接入现有
-/// Pass 2 → Pass 3 → staging 流程。
+/// 输出 `WritingCapturePass3Agent.Output`(records:[一条]),无缝接入现有
+/// Pass 3 → Pass 4 → staging 流程。
 @MainActor
 final class WritingCaptureCanvasAgent {
 
@@ -57,16 +57,16 @@ final class WritingCaptureCanvasAgent {
         }
     }
 
-    /// 跑一个 canvas group → 一条 record(包在 Pass2 Output 里)。
+    /// 跑一个 canvas group → 一条 record(包在 Pass3 Output 里)。
     func run(
         groupApp: String,
         groupUrl: String?,
         session: WritingCaptureRawSession,
         contextSummary: String?
-    ) async throws -> WritingCapturePass2Agent.Output {
+    ) async throws -> WritingCapturePass3Agent.Output {
         let snaps = session.ocrFrames.sorted { $0.startTs < $1.startTs }
         guard !snaps.isEmpty else {
-            return WritingCapturePass2Agent.Output(
+            return WritingCapturePass3Agent.Output(
                 prompt: "(canvas: no frames)", rawResponse: "", records: [], discarded: [])
         }
 
@@ -105,7 +105,7 @@ final class WritingCaptureCanvasAgent {
         let body = results.map(\.bodyText).max(by: { $0.count < $1.count }) ?? ""
 
         guard !body.isEmpty else {
-            return WritingCapturePass2Agent.Output(
+            return WritingCapturePass3Agent.Output(
                 prompt: "(canvas: empty body)", rawResponse: "", records: [], discarded: [])
         }
 
@@ -124,7 +124,7 @@ final class WritingCaptureCanvasAgent {
             referenceFrameIds: snaps.map(\.frameId),
             referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)
         )
-        return WritingCapturePass2Agent.Output(
+        return WritingCapturePass3Agent.Output(
             prompt: "(canvas window fanout: \(windows.count) windows)",
             rawResponse: "",
             records: [record],
@@ -200,7 +200,7 @@ final class WritingCaptureCanvasAgent {
             g.cancelAll()
             return r
         }
-        guard let json = WritingCapturePass2Agent.extractFirstBalancedJSONObject(collected),
+        guard let json = WritingCapturePass3Agent.extractFirstBalancedJSONObject(collected),
               let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(WindowResult.self, from: data)
     }
