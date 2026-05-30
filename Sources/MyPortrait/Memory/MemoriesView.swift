@@ -146,29 +146,36 @@ struct MemoriesView: View {
 
     // MARK: - Folders-grouped events list
 
-    /// events 视图的 folder 分组渲染。读 _folders/*.json,把 visibleEntries 按
-    /// folder 归类,按 folder 内事件数倒序展示。剩下不属任何 folder 的 entries
-    /// 折进末尾的 "Ungrouped" 区。
+    /// events 视图的 folder 分组渲染。读 _folders/*.json:
+    ///   - 有 folder → 渲染成可展开 DisclosureRow,按内部事件数倒序
+    ///   - 没归任何 folder 的 → 平铺到 folder 区之后(用户原话:"ungrouped 不
+    ///     需要打包,直接展示就好了")
     @ViewBuilder
     private var foldersGroupedList: some View {
-        let groups = makeFolderGroups()
-        ForEach(groups, id: \.id) { g in
+        let split = makeFolderSplit()
+        // folders 先
+        ForEach(split.folders, id: \.id) { g in
             FolderDisclosureRow(
                 title: g.title,
                 count: g.entries.count,
-                isUngrouped: g.isUngrouped,
                 entries: g.entries,
                 selected: selected,
                 onSelect: handleSelect
             )
             Divider().background(Color.primary.opacity(0.08))
         }
+        // ungrouped 平铺
+        ForEach(split.ungrouped) { entry in
+            EntryRow(entry: entry, selected: selected == entry.id)
+                .contentShape(Rectangle())
+                .onTapGesture { handleSelect(entry: entry) }
+            Divider().background(Color.primary.opacity(0.08))
+        }
     }
 
-    /// 计算分组结果。Entry.id 是 URL,得换算成 "yyyy-MM-dd/foo.md" 相对路径
-    /// 跟 folder.events 对齐。
-    private func makeFolderGroups() -> [FolderGroup] {
-        // Entry → 相对路径
+    /// 把 visibleEntries 拆成 (folders, ungrouped)。Entry.id 是 URL,得换算
+    /// 成 "yyyy-MM-dd/foo.md" 相对路径跟 folder.events 对齐。
+    private func makeFolderSplit() -> (folders: [FolderGroup], ungrouped: [Entry]) {
         let prefix = Storage.eventsDir.path + "/"
         func relPath(of url: URL) -> String {
             url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
@@ -177,35 +184,24 @@ struct MemoriesView: View {
             visibleEntries.map { (relPath(of: $0.id), $0) }
         )
 
-        let folders = EventFolderStore.loadAll()
-        var groups: [FolderGroup] = folders
+        let allFolders = EventFolderStore.loadAll()
+        let folderGroups: [FolderGroup] = allFolders
             .map { f -> FolderGroup in
-                // 保 folder.events 的顺序,filter 出还在 visibleEntries 里的
                 let entries = f.events.compactMap { byPath[$0] }
-                return FolderGroup(id: "folder:" + f.slug,
-                                   title: f.name,
-                                   entries: entries,
-                                   isUngrouped: false)
+                return FolderGroup(id: "folder:" + f.slug, title: f.name, entries: entries)
             }
             .filter { !$0.entries.isEmpty }
             .sorted { $0.entries.count > $1.entries.count }
 
-        let classifiedPaths = Set(folders.flatMap { $0.events })
+        let classifiedPaths = Set(allFolders.flatMap { $0.events })
         let ungrouped = visibleEntries.filter { !classifiedPaths.contains(relPath(of: $0.id)) }
-        if !ungrouped.isEmpty {
-            groups.append(FolderGroup(id: "ungrouped",
-                                      title: "Ungrouped",
-                                      entries: ungrouped,
-                                      isUngrouped: true))
-        }
-        return groups
+        return (folderGroups, ungrouped)
     }
 
     private struct FolderGroup {
         let id: String
         let title: String
         let entries: [Entry]
-        let isUngrouped: Bool
     }
 
     // MARK: - Detail (right)
@@ -492,12 +488,12 @@ struct MemoriesView: View {
 }
 
 /// folder 行 = 可展开标题(folder 图标 + name + count 徽章),展开后是
-/// 该 folder 内 entries 的 EntryRow 列表。Ungrouped 用同一个组件,把图标和
-/// 颜色稍微调灰一点暗示"未分类"。
+/// 该 folder 内 entries 的 EntryRow 列表。
+/// **只给真 folder 用**。Ungrouped events 现在直接平铺渲染 EntryRow
+/// (用户原话:"ungrouped event 不需要打包,直接展示就好了")。
 private struct FolderDisclosureRow: View {
     let title: String
     let count: Int
-    let isUngrouped: Bool
     let entries: [MemoriesView.Entry]
     let selected: URL?
     let onSelect: (MemoriesView.Entry) -> Void
@@ -505,8 +501,7 @@ private struct FolderDisclosureRow: View {
     @State private var expanded: Bool = false
 
     /// 给 folder 名稳定挑一个柔和的色相,跟 macOS Finder 自带 tag 颜色一脉。
-    /// hash 取模 → 同名 folder 每次都同色,UI 视觉一致。Ungrouped 不参与,
-    /// 用统一灰色处理。
+    /// hash 取模 → 同名 folder 每次都同色,UI 视觉一致。
     private static let folderTints: [Color] = [
         Color(red: 0.36, green: 0.55, blue: 0.91),   // 蓝
         Color(red: 0.46, green: 0.74, blue: 0.50),   // 绿
@@ -517,7 +512,6 @@ private struct FolderDisclosureRow: View {
         Color(red: 0.86, green: 0.74, blue: 0.36),   // 金
     ]
     private var tint: Color {
-        if isUngrouped { return .secondary }
         let h = abs(title.hashValue) % Self.folderTints.count
         return Self.folderTints[h]
     }
@@ -534,19 +528,15 @@ private struct FolderDisclosureRow: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 12)
                     // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
-                    // (跟 Finder 文件夹观感一致)。Ungrouped 用 tray.fill,
-                    // 视觉上立刻区分"未归类的杂物筐"。
-                    Image(systemName: isUngrouped ? "tray.fill" : "folder.fill")
+                    // (跟 Finder 文件夹观感一致)。
+                    Image(systemName: "folder.fill")
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(
-                            tint.opacity(isUngrouped ? 0.55 : 0.95),
-                            tint.opacity(0.35)
-                        )
+                        .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
                         .font(.system(size: 14))
                         .frame(width: 18)
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isUngrouped ? .secondary : .primary)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     Text("\(count)")
