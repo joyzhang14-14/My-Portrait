@@ -24,6 +24,56 @@ enum EventClassifierCLI {
         RunLoop.main.run()
     }
 
+    /// 真跑(写盘)入口。等价于 UI Run now 按钮 —— 调 scheduler runClassifierJob,
+    /// 它会持锁 + 心跳 + 自动循环到 unclassified 清空。结果同时落进
+    /// MemoryScheduler.lastClassifyResult,UI 打开 Memory→Scheduler 就能看见。
+    static func runAll() {
+        Task {
+            do {
+                try await runAllImpl()
+                exit(0)
+            } catch {
+                fputs("[classify-run] ERROR: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
+    @MainActor
+    private static func runAllImpl() async throws {
+        print("[classify-run] kicking MemoryScheduler.runClassifierJob…")
+        let outcome = await MemoryScheduler.shared.runClassifierJob()
+        switch outcome {
+        case .busy:
+            print("[classify-run] scheduler reports busy — another classify task is already running")
+            return
+        case .noWork:
+            print("[classify-run] no unclassified events — nothing to do")
+            return
+        case .ran:
+            guard let r = MemoryScheduler.shared.lastClassifyResult else {
+                print("[classify-run] ran but no result was recorded (likely failed mid-run — see scheduler log)")
+                return
+            }
+            print("")
+            print("=== classify-run summary ===")
+            print("total-unclassified-at-start: \(r.totalUnclassified)")
+            print("classified-this-run:        \(r.classifiedInThisRun)")
+            print("new-folders-created:        \(r.newFoldersCreated)")
+            print("existing-folders-updated:   \(r.existingFoldersUpdated)")
+            print("still-ungrouped:            \(r.stillUngrouped)")
+            print("")
+            print("=== folder deltas (sorted by count) ===")
+            for d in r.folderDeltas {
+                let marker = d.kind == .created ? "NEW    " : "UPDATED"
+                print("  \(marker)  \(d.name.padding(toLength: 32, withPad: " ", startingAt: 0))  +\(d.addedCount)")
+            }
+            print("")
+            print("Folders live at: ~/.portrait/events/_folders/*.json")
+        }
+    }
+
     @MainActor
     private static func runImpl() async throws {
         // 用跟 scheduler 一样的 provider/model。
