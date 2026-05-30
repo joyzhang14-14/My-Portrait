@@ -118,9 +118,12 @@ final class EventClassifier {
         var skippedPathsByFailure: Set<String> = []   // 失败批的事件 → 这次跳过,不无限重试同一批
         var aggregatedDeltas: [String: FolderDelta] = [:]   // slug → 合并的 delta
 
+        // .md 在本次 classify 内不变(classify 只写 _folders/,且 scheduler 顺序跑、
+        // 期间无并发写新事件)→ 全扫一次,循环里复用,省掉每批重读+解析 ~600 个 .md。
+        let allEvents = scanAllEvents()
+
         for batchIdx in 0..<Self.maxBatchesPerCall {
-            // 1) 扫盘(每批重扫,因为上一批刚写过 _folders/)
-            let allEvents = scanAllEvents()
+            // 每批只刷新 folder 状态(上一批刚写过 _folders/);.md 扫描已提到循环外。
             let classified = EventFolderStore.classifiedEventPaths()
             // 排除"已跳过的失败批"事件 → 避免下批又抓同一批撞同样的 parse fail。
             let unclassified = allEvents.filter {
