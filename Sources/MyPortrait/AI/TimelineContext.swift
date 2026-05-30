@@ -405,16 +405,17 @@ extension TimelineDB {
 
         let fromMs = Int64(from.timeIntervalSince1970 * 1000)
         let toMs   = Int64(to.timeIntervalSince1970 * 1000)
-        // No `speakers` table yet (Phase 2). Display name falls back to
-        // "Speaker N". Window by recording time, not transcription time
+        // 命名簇出真名(LEFT JOIN speakers,hallucination=0),匿名/误判回退
+        // "Speaker N"。Window by recording time, not transcription time
         // (WhisperKit lag would otherwise misalign the audio panel).
         let sql = """
             SELECT ac.recorded_at_ms,
-                   'Speaker ' || COALESCE(t.speaker_id, 0),
+                   COALESCE(s.name, 'Speaker ' || COALESCE(t.speaker_id, 0)),
                    t.text,
                    ac.is_input
             FROM audio_transcriptions t
             JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            LEFT JOIN speakers s ON s.id = t.speaker_id AND s.hallucination = 0
             WHERE ac.recorded_at_ms BETWEEN ? AND ?
             ORDER BY ac.recorded_at_ms ASC
             LIMIT 500
@@ -457,12 +458,51 @@ extension TimelineDB {
                           lineCount: lines.count, speakers: speakers)
     }
 
-    /// Last hour of transcripts from a particular speaker.
-    /// Returns "" until speaker diarisation lands in Phase 2 — the capture
-    /// schema has no `speakers` table to look up names through.
+    /// 某个已命名说话人(按名字 case-insensitive)最近的转录,时间升序拼成
+    /// `[HH:MM:SS] 文本`。给 chat 的 `@speaker:<name>` context 用。
+    /// 取最近的(DESC)直到 maxChars,再翻回正序读着顺。匿名/误判簇没名字,
+    /// 自然查不到 → 返 ""。
     func speakerTranscripts(name: String, maxChars: Int = 6000) -> String {
-        _ = (name, maxChars)
-        return ""
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return "" }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT ac.recorded_at_ms, t.text
+            FROM audio_transcriptions t
+            JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            JOIN speakers s ON s.id = t.speaker_id
+            WHERE s.hallucination = 0 AND LOWER(s.name) = LOWER(?)
+              AND t.text IS NOT NULL AND t.text != ''
+            ORDER BY ac.recorded_at_ms DESC
+            LIMIT 500
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            ctxLog.error("speakerTranscripts prepare failed: \(ctxSqlErr(db), privacy: .public)")
+            return ""
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, trimmed, -1, SQLITE_TRANSIENT)
+
+        var lines: [String] = []
+        var total = 0
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let tsMs = sqlite3_column_int64(stmt, 0)
+            let text = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
+            let t = text.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty else { continue }
+            let timeOnly = Self.timeFmt.string(from: Date(timeIntervalSince1970: TimeInterval(tsMs) / 1000))
+            let line = "[\(timeOnly)] \(t)"
+            lines.append(line)
+            total += line.count + 1
+            if total >= maxChars { break }
+        }
+        // DESC 取的是最近的,翻回时间正序读着顺。
+        return lines.reversed().joined(separator: "\n")
     }
 
     nonisolated(unsafe) static let fmt: DateFormatter = {
