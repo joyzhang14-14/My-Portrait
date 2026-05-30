@@ -53,12 +53,18 @@ struct AIModelsSettingsView: View {
 
             SettingsCard(
                 title: "Local capture models",
-                footnote: "Speaker models (~40 MB) download on first launch. Whisper transcription models download on demand — hit Download to fetch one; your selected model is fetched automatically. Voice features stay disabled until ready."
+                footnote: "Speaker models (~40 MB) download on first launch. Whisper transcription models download on demand — hit Download to fetch one; your selected model is fetched automatically. Qwen3-ASR models must be downloaded here before the Qwen engine can be selected. Voice features stay disabled until ready."
             ) {
                 // Whisper 转录模型 —— 跟 Audio Capture 的 model picker 同一份目录。
                 // 没装的这里点 Download 下载,装好后才能在 picker 里选。
                 ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { _, m in
                     transcriptionModelRow(m)
+                    SettingsDivider()
+                }
+                // Qwen3-ASR 模型 —— 走手动下载（不随 app 启动自动下）。下好后才能在
+                // Audio Capture 里选 Qwen 引擎 + 对应 model。
+                ForEach(Array(Qwen3ASRWrapper.allQwenModels.enumerated()), id: \.offset) { _, m in
+                    qwenModelRow(m)
                     SettingsDivider()
                 }
                 localModelRow("Voice signature", detail: "wespeaker CAM++ (~30 MB)",
@@ -146,6 +152,56 @@ struct AIModelsSettingsView: View {
         downloading.insert(name)
         Task { @MainActor in
             await WhisperKitWrapper.downloadModel(name)
+            downloading.remove(name)
+            localModelTick &+= 1
+        }
+    }
+
+    /// Qwen3-ASR 模型行 —— 结构同 transcriptionModelRow，用 Qwen3ASRWrapper。
+    private func qwenModelRow(_ m: (name: String, label: String, size: String)) -> some View {
+        let ready = Qwen3ASRWrapper.isOnDisk(modelId: m.name)
+        let isDownloading = downloading.contains(m.name)
+        return HStack(spacing: 12) {
+            Image(systemName: ready ? "checkmark.circle.fill" : "arrow.down.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(ready ? Color.green.opacity(0.85) : Color.orange.opacity(0.85))
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Transcription (Qwen)")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                Text("\(m.label) (\(m.size))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            Spacer(minLength: 8)
+            if ready {
+                Text("Ready")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.green.opacity(0.85))
+            } else if isDownloading {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading…")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.orange.opacity(0.85))
+                }
+            } else {
+                Button("Download") { downloadQwenModel(m.name) }
+                    .font(.system(size: 11, weight: .medium))
+                    .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .onAppear { startLocalModelPolling() }
+    }
+
+    /// 点 Download:后台拉 Qwen 模型(~2.3 GB),完成后刷新让状态变 Ready。
+    private func downloadQwenModel(_ name: String) {
+        guard !downloading.contains(name), !Qwen3ASRWrapper.isOnDisk(modelId: name) else { return }
+        downloading.insert(name)
+        Task { @MainActor in
+            await Qwen3ASRWrapper.downloadModel(modelId: name)
             downloading.remove(name)
             localModelTick &+= 1
         }

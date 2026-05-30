@@ -87,6 +87,10 @@ final class Services {
             modelName: ConfigStore.shared.current.capture.audio.whisperModel
         )
         self.whisper = whisperWrapper
+        // Qwen3-ASR 走手动下载（不在启动 prefetch）；模型 id 由设置 qwenModel 决定。
+        let qwenWrapper = Qwen3ASRWrapper(
+            modelId: ConfigStore.shared.current.capture.audio.qwenModel
+        )
         self.transcriber = TranscriptionScheduler(
             db: dbImpl,
             audio: audioSvc,
@@ -94,6 +98,7 @@ final class Services {
             reporter: reporter,
             power: pw,
             whisper: whisperWrapper,
+            qwen: qwenWrapper,
             speaker: OnnxSpeakerDiarizer(db: dbImpl)
         )
         self.retentionWorker = RetentionWorker(db: dbImpl)
