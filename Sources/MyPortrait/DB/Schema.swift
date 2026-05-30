@@ -858,6 +858,21 @@ enum DBSchema {
             try db.execute(sql: "UPDATE speakers SET trained_at_ms = NULL")
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v34 — processing_log.classify_status:event classifier 阶段
+        // ═══════════════════════════════════════════════════════════
+        //
+        // event 之后、distill 之前的新阶段。把 events 按项目维度归到
+        // ~/.portrait/events/_folders/*.json,纯 metadata,不动 .md 文件。
+        // anchor-row 模式跟 distill / personality 一致(`_classify_anchor` 行,
+        // 只用 `classify_status` 列)。
+        // NOT NULL DEFAULT 'idle':现有行自动 idle。
+        m.registerMigration("v34_processing_log_classify") { db in
+            try db.alter(table: "processing_log") { t in
+                t.add(column: "classify_status", .text).notNull().defaults(to: "idle")
+            }
+        }
+
         return m
     }
 }

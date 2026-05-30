@@ -466,7 +466,10 @@ final class EventBuilder {
 
 // MARK: - Coordinator
 
-private actor ResponseCoordinator {
+/// LLM agent 事件流协调器:开 turn、收 chunk 拼最终回答、捕获 error 行。
+/// 原本是 `private actor`,改成模块内可见以供 EventClassifier 复用(同一套
+/// agent 协议、避免复制粘贴 60 行)。
+actor ResponseCoordinator {
     private var buffer: String = ""
     private var currentID: String?
     private var pending: CheckedContinuation<String, Never>?
