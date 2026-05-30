@@ -580,13 +580,20 @@ enum WritingCapturePrompts {
       keystroke_count, ocr_excerpt.
 
     TASK 0 — WHERE IS THE REAL CONTENT: "ax" or "ocr" (session-level)
-    - "ax": the typing_events ARE the user's real content (chat messages, an input
-      the user composed). Even if short, they are complete/coherent. Pick "ax" when
-      typing_events read as real user writing that keystroke roughly supports.
-    - "ocr": the typing_events are JUNK fragments ("i", "a", a stray char) while the
-      real content the user wrote lives only on screen (ocr_excerpt) — e.g. a web
-      document editor (Google Docs) where the field exposes nothing useful but the
-      OCR shows a full essay the keystrokes support. Pick "ocr" then.
+    DEFAULT IS "ax". Only pick "ocr" in the narrow case below.
+    - "ax" (almost always): the typing_events contain ANY coherent message / sentence
+      / phrase in the user's language. Chat & messaging apps (WeChat, Discord, iMessage,
+      Slack, Claude/ChatGPT desktop, etc.) are ALWAYS "ax" — their typing_events ARE
+      the messages the user typed. A short message still counts. If ANY typing_event
+      reads as something the user wrote, pick "ax". (The OCR may show extra stuff —
+      received messages, an AI's reply, the rest of the screen — IGNORE that; it is
+      NOT the user's input. We only want what's in typing_events.)
+    - "ocr" (rare): EVERY typing_event is junk — single chars ("i","a"), stray
+      symbols, nothing coherent — AND a full coherent piece the user wrote lives only
+      in ocr_excerpt (a web document editor like Google Docs whose field exposes
+      nothing). Only then pick "ocr".
+    - When unsure → "ax". Routing a chat session to "ocr" is a BUG: it would grab the
+      AI's reply / received messages off the screen instead of the user's own input.
     - Decide this FIRST. If "ocr", you may leave units empty — the OCR path handles
       reconstruction. If "ax", do TASK 1 + TASK 2 below.
 
