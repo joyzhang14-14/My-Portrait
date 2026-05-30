@@ -801,11 +801,11 @@ enum DBSchema {
             let now = Int64(Date().timeIntervalSince1970 * 1000)
             try db.execute(sql: """
                 UPDATE writing_records
-                SET speech_style_processed_at = ?
+                SET speech_style_processed_at = :now
                 WHERE speech_style_processed_at IS NULL
                   AND id <= (SELECT MAX(id) FROM writing_records WHERE speech_style_processed_at IS NOT NULL)
                 """,
-                arguments: [now])
+                arguments: ["now": now])
         }
 
         return m
