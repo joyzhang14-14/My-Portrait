@@ -100,6 +100,7 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         let home = NSHomeDirectory()
         let extraPaths = [
             URL(fileURLWithPath: bin).deletingLastPathComponent().path,  // claude 二进制目录,优先
+            AIPaths.binDir.path,  // ~/.portrait/bin —— mp-query wrapper 在这
             "/opt/homebrew/bin", "/opt/homebrew/sbin",
             "/usr/local/bin",
             "\(home)/.claude/local",
