@@ -238,7 +238,7 @@ final class WritingCaptureWorker {
         let groups = Self.groupRawSessionsByApp(refinedSessions)
         workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
 
-        // 5. **每组一个 subagent 并发跑 Pass 2**(sonnet[1m])。
+        // 5. **每组一个 subagent 并发跑 Pass 2**(默认 sonnet)。
         // 失败 group 单独标错,不阻塞其他 group。最多 5 并发,防止 Anthropic
         // 限流 + 本机 CPU 打爆。每个并发任务都创建一个全新的 Pass2Agent,
         // 不复用(每 agent 有 subprocess 状态)。
@@ -842,7 +842,7 @@ final class WritingCaptureWorker {
         "unit_" + String(format: "%llx", UInt64(bitPattern: startTs &* 31 &+ Int64(app.hashValue & 0xffff)))
     }
 
-    /// 并发跑多 group 的 Pass 2 —— sonnet[1m] subagent 一组一个。
+    /// 并发跑多 group 的 Pass 2 —— 默认 sonnet subagent 一组一个。
     /// 限流 `concurrency` 道闸,防止瞬间 spawn 30 个 claude 子进程。
     enum Pass2GroupResult {
         case success(WritingCapturePass2Agent.Output)

@@ -41,7 +41,7 @@ enum PiInstaller {
 
     /// Pi 0.60 起内置 catalog 覆盖 openai-codex / openai / anthropic / google
     /// 等主流 provider —— 这些**不需要** models.json。这个方法现在只为
-    /// **非内置** provider(ollama / perplexity)写自定义 entry,schema 走
+    /// **非内置** provider(ollama / perplexity / deepseek)写自定义 entry,schema 走
     /// Pi 0.60 的 ModelsConfigSchema:
     ///   { providers: { <name>: { baseUrl, api, apiKey, models: [...] } } }
     /// apiKey 值是个 env var 名(resolveConfigValue 会拿 process.env 去解析),

@@ -412,8 +412,8 @@ enum PortraitFileIO {
     // MARK: - Date format helpers
     //
     // We emit two formats:
-    //   - date-only:  2026-05-17       (created, access_history items)
-    //   - date+time:  2026-05-17T14:20:00Z (occurrences, archived_at)
+    //   - date-only:  2026-05-17       (created, access_history items, occurrences)
+    //   - date+time:  2026-05-17T14:20:00Z (archived_at)
     //
     // The parser accepts either, falling back through both formatters.
 

@@ -3,7 +3,7 @@ import SwiftUI
 /// Three-column view of the memory system:
 ///   [scope picker]  [file list]  [detail]
 ///
-///   scope picker → 9 portrait categories + "Events"
+///   scope picker → portrait categories + "Events"
 ///   file list    → portrait files in selected category (or events stream)
 ///   detail       → selected file's YAML metadata + body
 ///

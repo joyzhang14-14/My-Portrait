@@ -661,7 +661,6 @@ actor PortraitDBImpl: PortraitDB {
         let endMs = ms + Int64(afterSeconds * 1000)
 
         return try await dbPool.read { db in
-            // PortraitDB schema 还没有 speakers 表（NoopSpeakerDiarizer 永远 nil）。
             // 直接 JOIN audio_chunks 拿 recorded_at_ms + device，speakerId/name 留 nil。
             let sql = """
             SELECT c.recorded_at_ms AS ts_ms,

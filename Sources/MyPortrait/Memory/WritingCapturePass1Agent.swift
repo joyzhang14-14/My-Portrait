@@ -33,7 +33,7 @@ private struct Pass1Response: Codable {
 
 /// 写作采集 Pass 1 —— Context Timeline 提取。
 ///
-/// 整天 OCR 帧 → LLM(gpt-5.4-mini)→ 时间轴分段 [{start_ts, end_ts, app, url,
+/// 整天 OCR 帧 → LLM(默认 sonnet)→ 时间轴分段 [{start_ts, end_ts, app, url,
 /// intent_type, summary}, ...]。Pass 2 拿这个 timeline 当 anchor 判合并 +
 /// throwaway。
 ///

@@ -25,9 +25,9 @@ import os.log
 ///         按结果 ids 调 db.framesByIds 拿元数据 → 返回前 `limit` 个
 /// ```
 ///
-/// **降级**：embedder 抛错（如 `BGEM3VectorEmbedder` 推理未实现 → throw
-/// notImplemented）时，跳过 Layer 2 + Layer 3，直接返回 FTS 结果。这样在
-/// Phase 4 模型接通前 UI 用 Hybrid 也是可用的（实际上就是 FTS）。
+/// **降级**：embedder 抛错（如 bge-m3 权重还在下载、模型未就绪）时，跳过
+/// Layer 2 + Layer 3，直接返回 FTS 结果。这样在模型接通前 UI 用 Hybrid
+/// 也是可用的（实际上就是 FTS）。
 final class HybridSearchEngine: SearchEngine, @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.myportrait.db", category: "hybrid")

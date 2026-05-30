@@ -31,7 +31,7 @@ enum ProcessingStatus: String, Sendable {
     }
 }
 
-/// processing_log 的四个处理阶段，对应四个 `_status` 列。
+/// processing_log 的五个处理阶段，对应五个 `_status` 列。
 ///
 /// 行的语义分两类（见 `ProcessingLogRow.isAnchor`）：
 ///   - 日期行（date = "yyyy-MM-dd"）：用 `raw` / `event` / `impact` 三列。

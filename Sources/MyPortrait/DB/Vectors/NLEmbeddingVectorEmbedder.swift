@@ -17,9 +17,9 @@ import os.log
 /// | 依赖 | 0 | MLX-Swift + ~2 GB 模型 + tokenizer 集成 |
 /// | 集成代价 | 这一个文件 | 单独 session 真机调试 |
 ///
-/// 当前选定：**先用 NLEmbedding 上线**。Phase 4 完整闭环（Hybrid → vector
-/// → RRF 融合）就此可用 + 验证。bge-m3 升级是后续 `BGEM3VectorEmbedder.embed`
-/// 的事，VectorEmbedder 协议这一层零变化。
+/// 当前激活路径已切到 **`BGEM3VectorEmbedder`**（bge-m3 真推理已实现，见
+/// `Services.activeEmbedder`）。本类作为 fallback 保留，VectorEmbedder 协议这一层
+/// 零变化；因 macOS 26 Apple Intelligence entitlement 缺失会 crash，目前禁用。
 ///
 /// **限制 / 已知**：
 ///   - 英语句向量是 512 维；中文是 300 维。HybridSearchEngine 用 cosine，**所有

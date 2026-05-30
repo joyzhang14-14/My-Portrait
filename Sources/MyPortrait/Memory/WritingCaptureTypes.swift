@@ -35,7 +35,7 @@ struct WritingCaptureRawOcr: Sendable, Equatable {
 // MARK: - 预压缩后的 OCR 帧
 
 /// Step 0 Jaccard dedupe 后的 OCR 帧。`start_ts ~ end_ts` 是合并的时间区间
-/// (从多个 raw 帧合来,文本相似度 > 95%)。
+/// (从多个 raw 帧合来,文本相似度 > 50%,见 WritingCaptureStep0.ocrJaccardThreshold)。
 struct WritingCaptureOcrFrame: Sendable, Equatable, Codable {
     let frameId: Int64        // 保留最早那帧的 id 当代表
     let startTs: Int64
@@ -67,7 +67,7 @@ struct WritingCaptureOcrFrame: Sendable, Equatable, Codable {
 /// 注:不实现 Equatable —— TypingEvent / KeystrokeEntry 没有 Equatable
 /// (避开 Codable 字段对比的歧义)。测试时按需对比具体字段。
 struct WritingCaptureRawSession: Sendable {
-    /// "sess_<8 char hex>" 形态。Step 0 生成,跨 session 唯一。
+    /// "sess_<6 char hex>" 形态。Step 0 生成,跨 session 唯一。
     let id: String
     let app: String
     let url: String?

@@ -181,7 +181,7 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         // 不 finish events 流 —— conversation 还能继续。
     }
 
-    /// 先 SIGTERM 给 1.5s 优雅退出窗口,还活着就 SIGKILL 强杀。
+    /// 先 SIGTERM 给 2s 优雅退出窗口,还活着就 SIGKILL 强杀。
     /// claude --print 在大 prompt 时对 SIGTERM 响应可能 10s+,timeout 不能等。
     private func forceKillCurrentProcess() {
         guard let proc = currentProcess, proc.isRunning else { return }
