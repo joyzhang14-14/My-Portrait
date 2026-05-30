@@ -432,7 +432,11 @@ private struct IdentifiedRow: View {
 
             Spacer()
 
-            if hover, !editing {
+            // **hover 或 popover 打开都显示 actions**。之前只看 hover,
+            // 用户鼠标从 person.2 滑到 popover 的瞬间 hover 变 false →
+            // actions 直接消失 → popover 跟着 dismiss,merge 永远点不到。
+            // 把 popover 状态也算进可见条件,popover 关之前 actions 不收。
+            if (hover || showMerge), !editing {
                 Button {
                     draft = row.name ?? ""; editing = true
                 } label: {
