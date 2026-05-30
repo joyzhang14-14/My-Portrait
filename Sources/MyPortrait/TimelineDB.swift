@@ -373,9 +373,11 @@ struct TimelineDB: Sendable {
                    t.text,
                    COALESCE(ac.device, ''),
                    COALESCE(ac.is_input, 1),
-                   t.speaker_id
+                   t.speaker_id,
+                   s.name
             FROM audio_transcriptions t
             JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            LEFT JOIN speakers s ON s.id = t.speaker_id AND s.hallucination = 0
             WHERE ac.recorded_at_ms >= ? AND ac.recorded_at_ms <= ?
               AND t.text IS NOT NULL AND t.text != ''
             ORDER BY ac.recorded_at_ms ASC
@@ -400,6 +402,8 @@ struct TimelineDB: Sendable {
             let isInput = sqlite3_column_int(stmt, 3) != 0
             let speakerIdRaw = sqlite3_column_int64(stmt, 4)
             let speakerId: Int? = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : Int(speakerIdRaw)
+            let speakerName: String? = sqlite3_column_type(stmt, 5) == SQLITE_NULL
+                ? nil : sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
 
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
@@ -410,7 +414,7 @@ struct TimelineDB: Sendable {
                 device: device,
                 isInput: isInput,
                 speakerId: speakerId,
-                speakerName: nil    // capture schema doesn't have a speakers table yet
+                speakerName: speakerName    // LEFT JOIN speakers(hallucination=0):命名簇出名字,匿名/误判出 nil
             ))
         }
         return out
