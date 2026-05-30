@@ -301,20 +301,37 @@ struct NotificationCardView: View {
                 onDismiss()
             }
         }
-        .onAppear {
-            // 进度条 ticker:50ms 一次更新 elapsed,驱动条收缩
-            let start = Date()
-            let timeout = notification.timeout
-            tickTask = Task { @MainActor in
-                while !Task.isCancelled {
-                    let dt = Date().timeIntervalSince(start)
-                    elapsed = dt
-                    if dt >= timeout { break }
-                    try? await Task.sleep(nanoseconds: 50_000_000)
+        // 进度条 + 自动消失由这个(可暂停)tick 驱动:hover 时暂停累加 elapsed
+        // (见下面 onChange),跑满 timeout → service.timeoutReached 触发
+        // onTimeout + dismiss。原来用墙钟,hover 停不下来。
+        .onAppear { startTick() }
+        .onDisappear { stopTick() }
+        .onChange(of: hover) { _, hovering in
+            // 鼠标悬停 → 暂停倒计时 + 进度条;移开 → 从当前进度继续。
+            if hovering { stopTick() } else { startTick() }
+        }
+    }
+
+    /// 启动/继续进度条 tick:每 50ms 累加 0.05s。hover 暂停后 resume 时
+    /// 从当前 elapsed 续跑(不重置)。跑满 → 回调 service 完成消失。
+    private func startTick() {
+        guard tickTask == nil else { return }   // 已在跑就别重复起
+        tickTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                if Task.isCancelled { return }
+                elapsed += 0.05
+                if elapsed >= notification.timeout {
+                    tickTask = nil
+                    NotificationCenterService.shared.timeoutReached(notification.id)
+                    return
                 }
             }
         }
-        .onDisappear { tickTask?.cancel(); tickTask = nil }
+    }
+    private func stopTick() {
+        tickTask?.cancel()
+        tickTask = nil
     }
 }
 
