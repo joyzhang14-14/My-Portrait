@@ -98,6 +98,10 @@ final class ChatStore {
 
     // MARK: - Message CRUD
 
+    /// m.parts 编码器复用 —— saveMessages 每条消息都 encode 一次(流式 persist
+    /// 反复调),别每次新建。
+    private static let partsEncoder = JSONEncoder()
+
     /// Replace stored messages for `convId` with `messages`. Cheap because we
     /// expect modest message counts per conv (~hundreds at worst). Called from
     /// ChatController after each turn ends.
@@ -111,7 +115,7 @@ final class ChatStore {
         }
         for m in messages {
             let partsJSON: String? = m.parts.isEmpty ? nil :
-                (try? JSONEncoder().encode(m.parts)).flatMap { String(data: $0, encoding: .utf8) }
+                (try? Self.partsEncoder.encode(m.parts)).flatMap { String(data: $0, encoding: .utf8) }
             execute(
                 "INSERT INTO messages(id,conv_id,role,text,parts_json,time) VALUES(?,?,?,?,?,?)"
             ) { stmt in

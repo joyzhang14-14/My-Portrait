@@ -750,6 +750,10 @@ actor PortraitDBImpl: PortraitDB {
 
     // MARK: - 私有
 
+    /// ocr.words 编码器复用 —— updateFrameOCR 每帧 OCR 写盘都调一次,别每次新建。
+    /// JSONEncoder 默认配置,encode 线程安全。
+    private static let ocrWordsEncoder = JSONEncoder()
+
     /// 把 OCRResult 拆成 4 个列要存的字符串/数字。失败抛错（JSON encode 不应该失败）。
     private static func encodeOCRFields(_ ocr: OCRResult?) throws -> OCRFields? {
         guard let ocr else { return nil }
@@ -757,7 +761,7 @@ actor PortraitDBImpl: PortraitDB {
         if ocr.words.isEmpty {
             wordsJson = nil   // 空数组省一行 JSON ("[]")，让 NULL 表示"无 bbox"
         } else {
-            let data = try JSONEncoder().encode(ocr.words)
+            let data = try Self.ocrWordsEncoder.encode(ocr.words)
             wordsJson = String(data: data, encoding: .utf8)
         }
         return OCRFields(
