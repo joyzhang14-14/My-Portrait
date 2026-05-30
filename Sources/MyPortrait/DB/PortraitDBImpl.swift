@@ -75,15 +75,16 @@ actor PortraitDBImpl: PortraitDB {
             try db.execute(
                 sql: """
                 UPDATE frames
-                SET full_text = ?, ocr_words_json = ?, ocr_confidence = ?, text_source = ?
-                WHERE id = ?
+                SET full_text = :fullText, ocr_words_json = :wordsJson,
+                    ocr_confidence = :confidence, text_source = :textSource
+                WHERE id = :frameId
                 """,
                 arguments: [
-                    ocrFields?.fullText,
-                    ocrFields?.wordsJson,
-                    ocrFields?.confidence,
-                    ocrFields?.textSource,
-                    frameId,
+                    "fullText": ocrFields?.fullText,
+                    "wordsJson": ocrFields?.wordsJson,
+                    "confidence": ocrFields?.confidence,
+                    "textSource": ocrFields?.textSource,
+                    "frameId": frameId,
                 ]
             )
         }
