@@ -452,8 +452,11 @@ final class MemoryScheduler {
         defer { classifyRunning = false }
 
         _ = store.ensureRow(for: classifyAnchor)
-        let st = store.row(for: classifyAnchor)?.classify ?? .idle
-        guard st.needsWork else {
+        // 用 classifierJobHasWork() 而不是裸 anchor.needsWork ——
+        // anchor=complete + 用户手动 rm _folders/*.json / 改 weight 阈值后,
+        // 文件系统有未分组事件但 anchor 误以为没活。fallback 扫盘兜底。
+        guard classifierJobHasWork() else {
+            let st = store.row(for: classifyAnchor)?.classify ?? .idle
             schedLog.info("classify job: \(st.rawValue, privacy: .public) — skip")
             return .noWork
         }
