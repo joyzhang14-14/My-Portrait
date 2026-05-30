@@ -32,7 +32,6 @@ final class SpeakerAudioPlayer: NSObject {
             stop()
             return
         }
-        // 切换 speaker → 老的先停
         stop()
         let trainingPath = Storage.voiceTrainingDir
             .appendingPathComponent("\(speakerId).wav").path
@@ -42,20 +41,25 @@ final class SpeakerAudioPlayer: NSObject {
         } else if let p = TimelineDB().latestAudioPath(forSpeakerId: speakerId) {
             path = p
         } else {
+            NSLog("[SpeakerAudioPlayer] no source for speaker \(speakerId)")
             return
         }
         let url = URL(fileURLWithPath: path)
-        guard FileManager.default.fileExists(atPath: path) else { return }
+        guard FileManager.default.fileExists(atPath: path) else {
+            NSLog("[SpeakerAudioPlayer] file missing: \(path)")
+            return
+        }
+        NSLog("[SpeakerAudioPlayer] play \(path)")
         do {
             let p = try AVAudioPlayer(contentsOf: url)
             p.delegate = self
             p.prepareToPlay()
-            p.play()
+            let ok = p.play()
+            NSLog("[SpeakerAudioPlayer] play()=\(ok) duration=\(p.duration)s volume=\(p.volume)")
             self.player = p
             self.playingId = speakerId
         } catch {
-            // 文件存在但格式不识别(.mp4 但 codec 怪)等等 —— 静默失败,
-            // 不弹错保持 UI 干净。
+            NSLog("[SpeakerAudioPlayer] AVAudioPlayer init FAILED: \(error.localizedDescription)")
             self.player = nil
             self.playingId = nil
         }
