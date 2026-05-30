@@ -188,7 +188,7 @@ final class SpeechStyleAgent {
     // MARK: - Parse
 
     /// LLM 顶层返回 JSON array(不是 wrapping object)。先抽第一个平衡 array。
-    /// 套用 Pass2 的 extractFirstBalancedJSONObject 思路,改成 `[ ]`。
+    /// 套用 Pass3 的 extractFirstBalancedJSONObject 思路,改成 `[ ]`。
     static func parse(from response: String) throws -> [SpeechStyleDraft] {
         guard let jsonStr = extractFirstBalancedJSONArray(response) else {
             let preview = String(response.prefix(500))
@@ -237,7 +237,7 @@ final class SpeechStyleAgent {
     }
 
     /// 从 LLM 响应里抽第一个**括号平衡 + string-aware** 的 JSON array。
-    /// 跟 WritingCapturePass2Agent.extractFirstBalancedJSONObject 同套路,
+    /// 跟 WritingCapturePass3Agent.extractFirstBalancedJSONObject 同套路,
     /// 改成方括号。
     static func extractFirstBalancedJSONArray(_ s: String) -> String? {
         let chars = Array(s)

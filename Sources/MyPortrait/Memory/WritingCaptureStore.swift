@@ -15,7 +15,7 @@ enum WritingCaptureRunStatus: String, Sendable {
     case failed
 }
 
-/// 一条用户手动拒绝的 record(给 Pass 2 prompt 当 few-shot 用)。
+/// 一条用户手动拒绝的 record(给 Pass 3 prompt 当 few-shot 用)。
 struct UserRejectionRow: Sendable, Equatable {
     let text: String
     let app: String
@@ -429,14 +429,14 @@ struct WritingCaptureStore: Sendable {
 
     // MARK: - staged 写 / 读 / 清
 
-    /// 把 Pass 2 输出落到 writing_records_staged。
+    /// 把 Pass 3 输出落到 writing_records_staged。
     func insertStaged(
         date: String,
         runId: String,
         promptId: String,
         records: [WritingCaptureRecord],
         rawPass1Output: String,
-        rawPass2Output: String
+        rawPass3Output: String
     ) throws {
         let createdAt = Int64(Date().timeIntervalSince1970 * 1000)
         try dbPool.write { db in
@@ -445,7 +445,7 @@ struct WritingCaptureStore: Sendable {
                 let refTypingJSON = Self.encodeJSON(r.referenceTypingEventIds) ?? "[]"
                 let refFrameJSON = Self.encodeJSON(r.referenceFrameIds) ?? "[]"
                 let refRangeJSON = Self.encodeJSON(r.referenceKeystrokeRange) ?? "{}"
-                // raw_output:每条 record 都重复存一份 prompt + pass1 + pass2 raw?
+                // raw_output:每条 record 都重复存一份 prompt + pass1 + pass3 raw?
                 // 太冗余,只在第一条 record 上挂全 raw。其他 record 的 raw_output
                 // 留空,DB 查询时按 worker_run_id JOIN 拿同一份。
                 let rawOut: String? = nil  // 暂时简化:不在 staged 上存 raw,
@@ -471,11 +471,11 @@ struct WritingCaptureStore: Sendable {
                         "promptId": promptId, "createdAt": createdAt, "runId": runId
                     ])
             }
-            _ = rawPass1Output; _ = rawPass2Output
+            _ = rawPass1Output; _ = rawPass3Output
         }
     }
 
-    /// 把 Pass 2 输出的 discarded[] 落到 writing_records_discarded 表(staged 阶段)。
+    /// 把 Pass 3 输出的 discarded[] 落到 writing_records_discarded 表(staged 阶段)。
     /// Approve 时拷成 kind='committed',Reject 时跟 staged records 一起清。
     func insertStagedDiscarded(
         date: String,
@@ -517,7 +517,7 @@ struct WritingCaptureStore: Sendable {
     }
 
     /// 用户手动拒一条 staged record:写到 user_rejected 表 + 标 hidden_at,
-    /// 下次跑 Pass 2 时把它当 few-shot 例子塞 prompt,让 LLM 自动判类似 candidate。
+    /// 下次跑 Pass 3 时把它当 few-shot 例子塞 prompt,让 LLM 自动判类似 candidate。
     func rejectStagedRecord(
         stagedId: Int64,
         reasonCategory: String,
@@ -561,7 +561,7 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
-    /// 拉最近 N 天内最多 M 条用户拒绝记录,给 Pass 2 prompt 当 few-shot。
+    /// 拉最近 N 天内最多 M 条用户拒绝记录,给 Pass 3 prompt 当 few-shot。
     /// 90 天 / 100 条,哪个小用哪个。
     func fetchRecentUserRejections(maxCount: Int = 100, withinDays: Int = 90)
         throws -> [UserRejectionRow]

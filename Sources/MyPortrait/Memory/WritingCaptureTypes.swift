@@ -62,7 +62,7 @@ struct WritingCaptureOcrFrame: Sendable, Equatable, Codable {
 // MARK: - 一个 raw_session
 
 /// 写作采集的基本处理单元 —— (app, url, 时间窗) 内的多源数据聚合。
-/// Step 0 切分输出,Pass 2 喂给 LLM 当原料。
+/// Step 0 切分输出,Pass 3 喂给 LLM 当原料。
 ///
 /// 注:不实现 Equatable —— TypingEvent / KeystrokeEntry 没有 Equatable
 /// (避开 Codable 字段对比的歧义)。测试时按需对比具体字段。
@@ -87,8 +87,8 @@ struct WritingCaptureRawSession: Sendable {
     /// 自适应 chrome 词表(跨帧频率 >85% 的 token)。**纯 hint** —— 只在 OCR
     /// 路径喂给 CanvasAgent,让它检测正文编辑时忽略这些 UI 词。不参与路由。
     let chromeTokens: [String]
-    /// 路由:"ax"(信 typing_events,走 Pass2Agent 清洗)| "ocr"(真内容在屏幕,
-    /// 走 CanvasAgent 重建)。Step 0 给默认值,Pass 4 用三源裁决覆盖。
+    /// 路由:"ax"(信 typing_events,走 Pass3Agent 清洗)| "ocr"(真内容在屏幕,
+    /// 走 CanvasAgent 重建)。Step 0 给默认值,Pass 2 用三源裁决覆盖。
     let route: String
 
     init(
@@ -117,18 +117,18 @@ struct WritingCaptureRawSession: Sendable {
 
 // MARK: - Step 0 输出
 
-/// Step 0 算法预压缩的产物 —— 给 Pass 1 / Pass 2 用。
+/// Step 0 算法预压缩的产物 —— 给 Pass 1 / Pass 3 用。
 struct WritingCaptureStep0Output: Sendable {
     /// 切分 + dedupe 完的 sessions(throwaway 已过滤掉)。
     let rawSessions: [WritingCaptureRawSession]
     /// throwaway 丢掉的 session(还保留 id + 短预览给 discarded 列表用)。
     let throwawaySessions: [WritingCaptureThrowaway]
-    /// Pass 2 合并候选集 —— 每组 = 同 app + 同 url + 间隔 < 30min 的 session_id 数组。
+    /// Pass 3 合并候选集 —— 每组 = 同 app + 同 url + 间隔 < 30min 的 session_id 数组。
     /// 单 session 也会自己成一组([session_id])。
     let mergeCandidates: [[String]]
 }
 
-/// throwaway 短 session 的占位记录 —— 给 Pass 2 的 discarded 列表当材料。
+/// throwaway 短 session 的占位记录 —— 给 Pass 3 的 discarded 列表当材料。
 struct WritingCaptureThrowaway: Sendable, Equatable {
     let id: String
     let app: String

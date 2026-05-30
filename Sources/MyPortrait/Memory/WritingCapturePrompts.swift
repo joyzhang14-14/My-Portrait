@@ -106,9 +106,9 @@ enum WritingCapturePrompts {
     - Single-frame stretch with clear intent → still emit a segment
     """#
 
-    // MARK: - Pass 2 —— per-(app, URL) group 多源融合 → writing_records
+    // MARK: - Pass 3 —— per-(app, URL) group 多源融合 → writing_records
 
-    static let pass2Fusion = #"""
+    static let pass3Fusion = #"""
     You consolidate one user's activity within ONE (app, url) group on a single UTC day
     into final writing_records. You judge what's a complete record on your own — no
     hard rule about length or "short response".
@@ -224,11 +224,11 @@ enum WritingCapturePrompts {
                         a single creative word/phrase the user typed deliberately).
 
     3. DO NOT DISCARD ANYTHING IN THIS PASS
-       Translate every session you receive into a record. A separate Pass 3
+       Translate every session you receive into a record. A separate Pass 4
        gate decides what to drop based on keystroke-support evidence. Your
        job here is purely transcription + segmentation + cleanup.
        - If a session looks like noise / external paste / keystroke residue,
-         STILL emit a record for it. Pass 3 will drop it.
+         STILL emit a record for it. Pass 4 will drop it.
        - Do not include `discarded` in your output. Output `records` only.
        - Every input session_id must appear in at least one record's
          `reference_*_ids`.
@@ -366,7 +366,7 @@ enum WritingCapturePrompts {
       as `\"`. Same for `\` (escape as `\\`) and newlines (escape as `\n`). User
       content containing nested quotes will break the parser if unescaped.
     - Every input session_id from raw_sessions MUST appear in at least one
-      record's `reference_*_ids` (no `discarded` in this pass — Pass 3 handles it)
+      record's `reference_*_ids` (no `discarded` in this pass — Pass 4 handles it)
     - "kind" is EXACTLY one of: "long_form" | "short_form" | "other"
     - "source" is EXACTLY one of: "ax_cleaned" | "canvas_fusion" | "merged"
     - "context_summary" ≤ 100 chars per record
@@ -377,7 +377,7 @@ enum WritingCapturePrompts {
 
     EDGE CASES
     - Group has only OCR (no typing/keystroke) → still try to reconstruct from OCR
-      and emit a record (Pass 3 will judge if it's user-produced)
+      and emit a record (Pass 4 will judge if it's user-produced)
     - One session contains multiple distinct sent messages → split into multiple
       records
 
@@ -428,18 +428,18 @@ enum WritingCapturePrompts {
       → KEEP. Code identifier / version tag in user's language.
     """#
 
-    // MARK: - Pass 3 —— keystroke 支撑度过滤(records → kept / discarded)
+    // MARK: - Pass 4 —— keystroke 支撑度过滤(records → kept / discarded)
 
-    static let pass3KeystrokeSupport = #"""
-    You are the FINAL filter gate. You receive writing_records that Pass 2 produced
-    (Pass 2 translates without filtering — you decide what survives).
+    static let pass4KeystrokeSupport = #"""
+    You are the FINAL filter gate. You receive writing_records that Pass 3 produced
+    (Pass 3 translates without filtering — you decide what survives).
 
     Your single job: for each record, decide whether the period's KEYSTROKE
     EVIDENCE actually supports the user having produced this text. If not,
     DISCARD it. If yes, KEEP it.
 
     INPUT
-    - records: array of candidate records from Pass 2. Per record you see:
+    - records: array of candidate records from Pass 3. Per record you see:
       { record_id, text, kind, source, app, url, start_ts, end_ts,
         keystroke_text, keystroke_count, typing_events_text,
         has_paste_event, has_cut_event,
@@ -567,11 +567,11 @@ enum WritingCapturePrompts {
     - Respond with ONLY the JSON object, no prose / code fences.
     """#
 
-    // MARK: - Pass 4 —— 切割 + AX 真伪判断(judgment only)
+    // MARK: - Pass 2 —— 切割 + AX 真伪判断(judgment only)
 
-    /// Pass 4 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条
+    /// Pass 2 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条
     /// AX 真伪。轻量模型可胜任。keystroke + OCR 是不会说谎的对照物,只判 AX。
-    static let pass4Segment = #"""
+    static let pass2Segment = #"""
     You are a JUDGE, not a writer. For ONE activity session you decide:
     (1) CUT the typing_events into units the user produced, and
     (2) for each unit pick a ROUTE, or DROP it.

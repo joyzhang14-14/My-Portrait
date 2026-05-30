@@ -9,7 +9,7 @@ import Foundation
 /// 1. 切 session(idle > 5min / app 切 / url 切)
 /// 2. 每 session 内 OCR Jaccard dedupe(> 95% 相似度合并)
 /// 3. throwaway 短内容过滤(总字数 < 20 丢)
-/// 4. Pass 2 合并候选集(同 app + url + 间隔 < 30min 一组)
+/// 4. Pass 3 合并候选集(同 app + url + 间隔 < 30min 一组)
 ///
 /// 纯函数 + 静态方法,便于单测。
 ///
@@ -20,7 +20,7 @@ struct WritingCaptureStep0 {
 
     /// 键盘 idle 超过这个时长就切 session
     static let idleThresholdMs: Int64 = 5 * 60 * 1000
-    /// Pass 2 合并候选:同 app + url + 间隔小于这个的相邻 session 算一组
+    /// Pass 3 合并候选:同 app + url + 间隔小于这个的相邻 session 算一组
     static let mergeWindowMs: Int64 = 30 * 60 * 1000
     /// throwaway 最小字数
     static let throwawayMinChars = 20
@@ -56,7 +56,7 @@ struct WritingCaptureStep0 {
             ocrFrames: rawOcrFrames
         )
 
-        // 切割 + AX 真伪判断改到 Pass 4(LLM 判,非 canvas session)。Step 0 只切
+        // 切割 + AX 真伪判断改到 Pass 2(LLM 判,非 canvas session)。Step 0 只切
         // session,不按消息再切。见 memory: project_local_model_target。
         let allSessions = segmented
 
@@ -81,7 +81,7 @@ struct WritingCaptureStep0 {
             }
         }
 
-        // 3. Pass 2 合并候选集
+        // 3. Pass 3 合并候选集
         let candidates = computeMergeCandidates(kept)
 
         return WritingCaptureStep0Output(
@@ -114,7 +114,7 @@ struct WritingCaptureStep0 {
 
         // **只用 typing + keystroke 作锚切 session**,OCR 不参与切分。
         // OCR 是被反向 join 进来当上下文的 —— 没 typing/keystroke 锚点的纯 OCR
-        // 时段(仅浏览/阅读)不该形成 session 跑 Pass 2。
+        // 时段(仅浏览/阅读)不该形成 session 跑 Pass 3。
         // keystroke 不带 url —— canvas 打字(击键多、AX typing_event 少)会被切进
         // url=nil 的 session,跟真正的 url-session(如 Google Doc)分家。
         // 修法:按时间戳给每个 keystroke join "打字当时屏幕上的 URL" ——
@@ -215,8 +215,8 @@ struct WritingCaptureStep0 {
             let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
             // canvas(真·自绘文档编辑器)判定:typing 极少 **且 OCR 内容远超
             // typing**(OCR 才是真内容,typing 只是 "i"/"a" 之类残渣)。
-            // 这里只是**帧预处理 + 默认路由**的启发式;真正路由由 Pass 4 三源裁决
-            // 覆盖(Discord/聊天 这里可能误判 ocr,Pass 4 会改回 ax)。
+            // 这里只是**帧预处理 + 默认路由**的启发式;真正路由由 Pass 2 三源裁决
+            // 覆盖(Discord/聊天 这里可能误判 ocr,Pass 2 会改回 ax)。
             // OCR 主导 → 粗快照(留编辑进程)+ 算 chrome hint + 默认 route=ocr。
             let typingTotalChars = sessionTyping.map { $0.text.count }.reduce(0, +)
             let ocrMaxChars = sessionFrames.map { $0.text.count }.max() ?? 0
@@ -527,19 +527,19 @@ struct WritingCaptureStep0 {
         return String(src.prefix(throwawayPreviewLen))
     }
 
-    // MARK: - Pass 2 合并候选集
+    // MARK: - Pass 3 合并候选集
 
     /// 把 raw_sessions 按 mergeCandidates 群组**算法层合并**成 mega-sessions。
     /// 同候选组(同 app + 同 URL + < 30min)的所有 sessions 拼成一条 ——
     /// typing_events / keystrokes / ocr_frames 都按 ts 排序拼起来。
     ///
-    /// 原本 Pass 2 prompt 会把所有 raw_sessions 都喂给 LLM,让 LLM 在候选组
+    /// 原本 Pass 3 prompt 会把所有 raw_sessions 都喂给 LLM,让 LLM 在候选组
     /// 内决合不合 —— 重活动日 774 sessions 直接撑爆 context。算法层先合,
     /// LLM 看到的是 ~20 个 mega-session,空间 / token 都省一大截。
     ///
     /// trade-off:LLM 失去「同 doc 里换主题就拆开」的能力。重活动日的反复
-    /// 切换 + 主题断裂场景,Pass 2 输出会少一些细分 record(可能合在一条
-    /// 里覆盖多个子主题)。可接受 —— Pass 2 一条 record 可以是「这段时间
+    /// 切换 + 主题断裂场景,Pass 3 输出会少一些细分 record(可能合在一条
+    /// 里覆盖多个子主题)。可接受 —— Pass 3 一条 record 可以是「这段时间
     /// 在写文章 + 改稿」,粒度够分析风格用。
     static func mergeByCandidates(
         rawSessions: [WritingCaptureRawSession],
