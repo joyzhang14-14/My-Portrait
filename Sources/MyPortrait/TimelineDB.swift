@@ -759,6 +759,34 @@ struct TimelineDB: Sendable {
 
     /// 给说话人改名。
     @discardableResult
+    /// 该 speaker 最近一条转录所属 audio chunk 的绝对文件路径,用于试听。
+    /// nil = 没数据 / 文件已被清理。
+    func latestAudioPath(forSpeakerId speakerId: Int64) -> String? {
+        guard exists else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT c.file_path
+            FROM audio_transcriptions t
+            JOIN audio_chunks c ON c.id = t.audio_chunk_id
+            WHERE t.speaker_id = ?
+              AND t.text IS NOT NULL AND t.text != ''
+            ORDER BY c.recorded_at_ms DESC
+            LIMIT 1
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, speakerId)
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let cstr = sqlite3_column_text(stmt, 0) else { return nil }
+        let raw = String(cString: cstr)
+        // file_path 通常是相对 ~/.portrait/ 的 raw_data/audio/xxx.mp4。
+        // resolve 到绝对路径,文件不存在就当无音频。
+        return AssetPath.resolve(raw)
+    }
+
     func renameSpeaker(id speakerId: Int64, to name: String) -> Bool {
         runSpeakerWrite(
             sql: "UPDATE speakers SET name = ?, updated_at_ms = ? WHERE id = ?",
