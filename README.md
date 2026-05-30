@@ -1,189 +1,56 @@
-# My-Portrait
+<div align="center">
+  <img src=".github/icon.png" alt="My Portrait" width="128" height="128" />
 
-A local-first AI memory system for macOS. My Portrait watches what you do, listens to what you say, reads what you write — and builds a long-term portrait that, given enough time, becomes a digital version of you. **Everything stays on your Mac.**
+  <h1>My Portrait</h1>
+
+  <p>A local-first AI memory system for macOS. It watches what you do, hears what you say, reads what you write — and builds a long-term portrait that, over time, becomes a digital version of you. <b>Everything stays on your Mac.</b></p>
+
+  <a href="https://github.com/joyzhang14-14/My-Portrait/releases/latest">
+    <img src="https://img.shields.io/github/v/release/joyzhang14-14/My-Portrait?label=download&style=flat-square" alt="latest release" />
+  </a>
+</div>
 
 ---
+
+## What it does
+
+- **Captures your day** — screen (OCR), microphone + system audio, and what you type, continuously in the background.
+- **Transcribes on-device** — Whisper or Qwen3-ASR with speaker diarization. No audio ever leaves your Mac.
+- **Builds a portrait** — distills it all into an evolving picture of who you are: personality, habits, writing style.
+- **Chat with your memory** — ask across everything you've seen, said, and written, using your own LLM keys.
+- **Yours, locally** — one SQLite file under `~/.portrait/`. No cloud, no account.
 
 ## Install
 
-1. Grab the latest **`MyPortrait-x.x.x.dmg`** from [Releases](https://github.com/joyzhang14-14/My-Portrait/releases).
-2. **Before opening the `.dmg`**, strip Gatekeeper's quarantine flag from it in Terminal:
+1. Download `MyPortrait-X.Y.Z.dmg` from [the latest release](https://github.com/joyzhang14-14/My-Portrait/releases/latest).
+2. The app is self-signed, so Gatekeeper will block it. Pick one:
 
+   **Option A — strip quarantine (no prompts):**
    ```bash
-   xattr -d com.apple.quarantine ~/Downloads/MyPortrait-*.dmg
+   xattr -dr com.apple.quarantine ~/Downloads/MyPortrait-*.dmg
    ```
+   Open the DMG, drag **My Portrait** into `Applications` — first launch just works.
 
-3. Open the `.dmg`, drag **My Portrait** into **Applications**, launch normally.
+   **Option B — approve once:**
+   Open the DMG, drag into `Applications`, then **right-click the app → Open → Open** in the warning dialog.
 
-> **Alternative**: If you skip step 2 and just double-click the app, macOS will refuse with "can't verify the developer". Open **System Settings → Privacy & Security**, scroll down to "MyPortrait was blocked", click **Open Anyway**.
-
-
-> Requires macOS 15+ on Apple Silicon (M).
-
----
-
-## Inspired by [screenpipe](https://github.com/screenpipe/screenpipe)
-
-My-Portrait owes its architecture and philosophy to **[screenpipe](https://github.com/screenpipe/screenpipe)**
-by mediar-ai. screenpipe pioneered the "24/7 local-first context layer" idea
-and proved the engineering pattern — continuous screen + audio capture, on-device
-OCR / transcription, an FTS-indexed SQLite store, and LLM integrations on top.
-
-Key things borrowed:
-
-- **Capture pipeline shape** — frame comparer → snapshot writer → async OCR →
-  event stream, mirrors screenpipe's Rust pipeline
-- **Storage model** — SQLite + WAL + FTS5 for full-text search across frames,
-  transcripts, and UI events (screenpipe uses SQLx, we use GRDB)
-- **Two-stage frame storage** — JPG hot tier → background MP4 compaction
-- **Ignored-apps / system-privacy defaults** — `IgnoredAppPicker`'s system
-  entry list is taken straight from screenpipe's default ignore list
-- **The whole "your data is yours" stance** — everything local, no cloud
-  required, user owns the database file
-
-If you want a mature, cross-platform, well-tested version of this idea, use
-screenpipe. My-Portrait is a Swift-native take focused on macOS + personal
-portrait distillation.
-
----
-
-## Run it
-
-**Prerequisites:** macOS 15+, Xcode 16+, [xcodegen](https://github.com/yonaskolb/XcodeGen)
-(`brew install xcodegen`).
-
-```bash
-xcodegen generate          # generates .xcodeproj from project.yml
-./build-app.sh --run       # builds + launches the .app standalone
-```
-
-### ⚠️ First-time: override the signing team
-
-`Support/Signing.xcconfig` hard-codes `DEVELOPMENT_TEAM = VYHNX2Y2AL` (the
-original author's team). On your machine, Xcode can't sign with someone
-else's team ID, so without override you'll either see a signing error or —
-worse — Xcode silently falls back to "Sign to Run Locally" (ad-hoc). Ad-hoc
-signing puts the binary's **cdhash** into the designated requirement, which
-changes on every rebuild → macOS TCC sees a "different app" each time →
-screen recording / mic / accessibility permissions you grant on one build
-don't carry over to the next one (you can even grant them in System Settings
-and they still won't unlock the next build).
-
-To get stable permissions, create `Support/Signing.local.xcconfig` (it's
-gitignored) with your own team ID:
-
-```text
-DEVELOPMENT_TEAM = YOURTEAMID
-```
-
-Find your team ID at
-[Apple Developer Account → Membership](https://developer.apple.com/account)
-(a free Apple ID works — it shows up as your *Personal Team*; the 10-char
-team ID is what you want).
-
-Then regenerate the project so Xcode picks up the override:
-
-```bash
-xcodegen generate
-```
-
-`Signing.xcconfig` includes `Signing.local.xcconfig` via `#include?`, so your
-team ID wins. Your signature becomes an `Apple Development: <your_email>`
-cert; its designated requirement is identifier + your cert subject (no
-cdhash), so TCC tracks permissions cross-rebuild.
-
-You'll still hit Gatekeeper the first time you launch the standalone .app —
-right-click → **Open** to allow it once.
-
-### Why launch standalone, not Xcode ⌘R
-
-⚠️ **Must launch standalone** (not Xcode's ⌘R). When the app runs under the
-Xcode debugger, macOS TCC attributes screen-recording / microphone permission
-prompts to Xcode itself — My-Portrait never gets authorized.
-`build-app.sh` handles this correctly.
-
-Day-to-day, ⌘B in Xcode is fine for compile checks; just use `./build-app.sh --run`
-when you actually need Capture to work.
-
-### After adding / removing / renaming a `.swift` file
-
-```bash
-xcodegen generate
-```
-
-SwiftPM auto-scans `Sources/`, but `.xcodeproj` carries a static file list —
-without regenerating, Xcode builds fail with `Cannot find 'Xxx' in scope`.
-
----
+> Requires macOS 15+ on Apple Silicon (M). Updates ship automatically via [Sparkle](https://sparkle-project.org).
 
 ## Configuration
 
-User config lives at `~/.portrait/config.toml` (template:
-`docs/config.example.toml`). The UI and direct file edits are equivalent — both
-sync.
+Tune everything in the app's Settings, or edit `~/.portrait/config.toml` directly — the two stay in sync. All your data lives under `~/.portrait/`.
 
-Data locations:
+## Inspired by screenpipe
 
-- `~/.portrait/` — config, cron jobs, portraits, conversations, secrets, caches, DB
-
----
-
-## Code map
-
-```
-Sources/MyPortrait/
-├── Capture/      Screen / audio / typing / focus capture (perf-first, mirrors screenpipe)
-├── Memory/       Event → portrait distillation (personality, portrait, Tier1 merge, impression EMA)
-├── AI/           Multi-provider chat, cron scheduling, agents, PII redaction, OAuth, SMTP
-├── DB/           GRDB + SQLite + WAL + FTS5
-├── Settings/     Settings panes + TOML config read/write
-├── Typing/       Typing capture & replay
-├── Notifications/ Notifications / push
-├── DesignSystem.swift   Glass + blue-gradient theme tokens
-├── ContentView.swift    Main window (sidebar + main pane)
-├── HomeView.swift / TimelineView.swift / ConnectionsView.swift / ...
-└── App.swift            Entry point
-```
-
-Most subdirectories carry their own `README.md` with deeper detail (e.g.
-`Capture/README.md` has the full call graph).
-
----
-
-## Tech stack
-
-| Purpose | Dependency |
-|---|---|
-| SQLite ORM (persistence) | [GRDB.swift](https://github.com/groue/GRDB.swift) |
-| On-device speech-to-text | [WhisperKit](https://github.com/argmaxinc/WhisperKit) |
-| On-device LLM / embeddings | [mlx-swift](https://github.com/ml-explore/mlx-swift) + [mlx-embeddings](https://github.com/mzbac/mlx.embeddings) |
-| Speaker diarization (pyannote + wespeaker) | [onnxruntime](https://github.com/microsoft/onnxruntime-swift-package-manager) |
-| TOML config | [TOMLKit](https://github.com/LebJe/TOMLKit) |
-| Tokenizer | [swift-transformers](https://github.com/huggingface/swift-transformers) |
-
-UI: SwiftUI + `.ultraThinMaterial` (glass) + `.symbolEffect(.bounce)` (icon
-animations).
-
----
-
-## Dual build system
-
-| | Used for | Entry point |
-|---|---|---|
-| **SwiftPM** | `swift build` / CI / compile checks | `Package.swift` |
-| **Xcode** | Real signed `.app`, TCC, daily use | `MyPortrait.xcodeproj` (generated from `project.yml` by XcodeGen — do not edit by hand) |
-
-Same source, both build. The one gotcha: `.xcodeproj` doesn't auto-detect
-filesystem changes — adding, removing, or renaming any `.swift` requires
-`xcodegen generate`.
-
----
+My Portrait owes its architecture and "your data is yours" philosophy to **[screenpipe](https://github.com/screenpipe/screenpipe)** by mediar-ai — the 24/7 local-first context layer, the capture-pipeline shape, the FTS-indexed SQLite store, and the default app-ignore list. If you want a mature, cross-platform take on the idea, use screenpipe. Go star it.
 
 ## Credits
 
-- **[screenpipe](https://github.com/screenpipe/screenpipe)** (MIT) — architecture,
-  capture pipeline shape, FTS storage model, "your data is yours" stance, and
-  the default system-app ignore list (see `IgnoredAppPicker.systemEntries`).
-  This project would not exist without it. Go star it.
-- All the upstream libraries listed under [Tech stack](#tech-stack) — especially
-  WhisperKit, MLX-Swift, and GRDB, which make on-device AI on macOS practical.
+- **[screenpipe](https://github.com/screenpipe/screenpipe)** (MIT) — the foundation this is built on.
+- **[WhisperKit](https://github.com/argmaxinc/WhisperKit)** · **[Qwen3-ASR](https://github.com/ivan-digital/qwen3-asr-swift)** · **[mlx-swift](https://github.com/ml-explore/mlx-swift)** · **[GRDB](https://github.com/groue/GRDB.swift)** — on-device AI on macOS, made practical.
+
+---
+
+<div align="center">
+  <sub>Building from source or contributing? See <a href="DEVELOPER.md">DEVELOPER.md</a>.</sub>
+</div>
