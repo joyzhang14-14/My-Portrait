@@ -39,6 +39,11 @@ final class StallDetector {
     private let audioBacklogPendingThreshold = 20
     private let audioBacklogOldestAgeMs: Int64 = 20 * 60 * 1000
 
+    /// audioNeverCaptured 单独 warmup 30 分钟 —— 短期内 (~12 分钟) 没新 chunk
+    /// 完全正常 (静音房间 / 没开会 / mic 远离说话人)。只有真的 30 分钟还一
+    /// 段没出才像是设备 / 权限问题。
+    private let audioNeverCapturedWarmupMs: Int64 = 30 * 60 * 1000
+
     /// 同 kind 的 warn 节流间隔。Driver 30s 一次 evaluate,这里再用 60s
     /// 抑制重复推送给 NotificationCenterService。
     private let warnThrottleSec: TimeInterval = 60
@@ -51,6 +56,9 @@ final class StallDetector {
     private var lastWarnAt: [StallVerdict.Kind: Date] = [:]
     /// 上次 evaluate 拍下的 vision snapshot,用来算 silent_loss 增量。
     private var prevVision: VisionSnapshot?
+    /// 上次 evaluate 看到的 pending 数,用来判 backlog 是否在增长。
+    /// nil = 还没记录过(第一轮 evaluate 时不报 backlog,等下一轮有 baseline)。
+    private var prevPendingCount: Int?
 
     private init() {}
 
@@ -127,37 +135,43 @@ final class StallDetector {
             }
         }
 
-        // —— audio 类 stall。要求 audioEngineEnabled + 过 warmup +
+        // —— audio 类 stall。要求 audioEngineEnabled +
         // 转录没被电池模式 gate 住(pause.audioTranscriptionPaused)。
         // 电池下 mic 段仍入库 → pending 堆是预期,不是 stall。
         if audioEngineEnabled,
            !pause.audioTranscriptionPaused,
-           audio.startedAtMs > 0,
-           nowMs - audio.startedAtMs > warmupMs {
-            // 3. audioNeverCaptured:启动 > warmup 但一段都没出。设备权限 / VAD
-            //    全否决 / 设备未连之类。
-            if audio.chunksProduced == 0 {
+           audio.startedAtMs > 0 {
+            // 3. audioNeverCaptured:启动 > 30min 但 chunksProduced=0。短期内
+            //    没出段完全正常(静音房间 / 没说话 / mic 远),30 分钟还一段
+            //    没出才像是设备 / 权限问题。
+            if nowMs - audio.startedAtMs > audioNeverCapturedWarmupMs,
+               audio.chunksProduced == 0 {
                 if let v = makeVerdict(
                     kind: .audioNeverCaptured,
-                    reason: "Audio capture started but no chunks have been recorded. Check microphone permission and device selection.",
+                    reason: "Audio capture started but no chunks have been recorded in 30 min. Check microphone permission and device selection.",
                     cause: "uptime=\(Int(audio.uptimeSec))s, chunksProduced=0", now: now
                 ) { fresh.append(v) }
             }
-            // 4. audioBacklog:pending > 阈值 + 最老 chunk 比 freshness 还老。
-            //    在转的设备本来就累 — 但只要 pendingCount 涨过 20 + 最老超 20min
-            //    肯定是 worker 落后,不是节奏问题。
-            if pendingAudio.count > audioBacklogPendingThreshold,
+            // 4. audioBacklog:**队列在长且超阈值**才报。pending 大但在缩 →
+            //    transcriber 正在追赶历史积压,不是 stall。只有当
+            //    "增长 + 已超阈值 + 最老超 freshness" 三条同时成立,才说明
+            //    转录确实落后于输入。
+            if nowMs - audio.startedAtMs > warmupMs,
+               let prev = prevPendingCount,
+               pendingAudio.count > prev,
+               pendingAudio.count > audioBacklogPendingThreshold,
                pendingAudio.oldestAgeMs > audioBacklogOldestAgeMs {
-                let cause = "pending=\(pendingAudio.count), oldest \(pendingAudio.oldestAgeMs / 1000)s old"
+                let cause = "pending=\(pendingAudio.count) (was \(prev)), oldest \(pendingAudio.oldestAgeMs / 1000)s old"
                 if let v = makeVerdict(
                     kind: .audioBacklog,
-                    reason: "Audio transcription is falling behind (\(pendingAudio.count) pending). Check WhisperKit model load and CPU.",
+                    reason: "Audio transcription falling behind: queue growing (\(pendingAudio.count) pending). Check WhisperKit model load and CPU.",
                     cause: cause, now: now
                 ) { fresh.append(v) }
             }
         }
 
         prevVision = vision
+        prevPendingCount = pendingAudio.count
         return fresh
     }
 
