@@ -39,25 +39,51 @@ final class EventClassifier {
         self.perCallTimeout = perCallTimeout
     }
 
-    /// 一次 classify 跑的汇总结果,UI 拿去显示。
-    struct Result: Sendable {
+    /// 一次 classify 跑的汇总结果,UI 拿去显示。落盘到
+    /// `~/.portrait/events/_folders/_last_run.json` 让别的进程(UI vs CLI)
+    /// 也能读到 —— scheduler.lastClassifyResult 只在本进程内存活。
+    struct Result: Sendable, Codable {
         var totalUnclassified: Int = 0     // 跑前未分组 event 数
         var classifiedInThisRun: Int = 0   // 本次被归类的 event 数
         var newFoldersCreated: Int = 0
         var existingFoldersUpdated: Int = 0
         var stillUngrouped: Int = 0        // 本次没归类成功 / 数量不足开 folder
+        var ranAtMs: Int64 = 0             // UTC ms;UI 显示"跑于多久前"
         /// 本次落地的 folder 改动,UI 列表显示。
         var folderDeltas: [FolderDelta] = []
     }
 
-    struct FolderDelta: Sendable, Identifiable {
-        enum Kind: String, Sendable { case created, updated }
-        let id = UUID()
+    struct FolderDelta: Sendable, Identifiable, Codable {
+        enum Kind: String, Sendable, Codable { case created, updated }
+        var id = UUID()
         let slug: String
         let name: String
         let kind: Kind
         /// 本次被加进来的事件数(不含 folder 原有事件)。
         let addedCount: Int
+    }
+
+    /// 落盘:写最近一次 Result 到 _folders/_last_run.json。失败 swallow ——
+    /// UI 没读到只是没看 banner,不影响数据。
+    static var lastRunFileURL: URL {
+        EventFolderStore.foldersDir.appendingPathComponent("_last_run.json")
+    }
+    static func saveLastResult(_ r: Result) {
+        do {
+            try FileManager.default.createDirectory(
+                at: EventFolderStore.foldersDir, withIntermediateDirectories: true
+            )
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try enc.encode(r)
+            try data.write(to: lastRunFileURL, options: .atomic)
+        } catch {
+            print("[EventClassifier] saveLastResult failed: \(error.localizedDescription)")
+        }
+    }
+    static func loadLastResult() -> Result? {
+        guard let data = try? Data(contentsOf: lastRunFileURL) else { return nil }
+        return try? JSONDecoder().decode(Result.self, from: data)
     }
 
     enum ClassifierError: LocalizedError {
@@ -77,79 +103,157 @@ final class EventClassifier {
 
     // MARK: - Public entry
 
-    /// 执行一次分类。返回 Result;若没未分组 event 直接返回零值 result(不调 LLM)。
+    /// 安全上限:一次 classify 调用最多跑多少批 LLM。防止 LLM 死循环
+    /// (一直提相同 batch 但 0 改动)烧 token。512 events / 80 per batch
+    /// = ~7 batches,留 10 倍余量。
+    private static let maxBatchesPerCall = 20
+
+    /// 执行分类。**自动循环**直到 unclassified 清空,或 LLM 连续两批 0 改动
+    /// (stuck),或撞到 maxBatchesPerCall 上限。
+    /// Result 聚合所有批次的改动(同 folder 多批改动会合并显示)。
     func classify() async throws -> Result {
         var result = Result()
+        var consecutiveNoOp = 0
+        var consecutiveBatchFailures = 0
+        var skippedPathsByFailure: Set<String> = []   // 失败批的事件 → 这次跳过,不无限重试同一批
+        var aggregatedDeltas: [String: FolderDelta] = [:]   // slug → 合并的 delta
 
-        // 1) 扫盘列出所有 events 的 relativePath + 拉对应 PortraitFile metadata
-        let allEvents = scanAllEvents()
-        let classified = EventFolderStore.classifiedEventPaths()
-        let unclassified = allEvents.filter { !classified.contains($0.path) }
-        result.totalUnclassified = unclassified.count
-        guard !unclassified.isEmpty else { return result }
+        for batchIdx in 0..<Self.maxBatchesPerCall {
+            // 1) 扫盘(每批重扫,因为上一批刚写过 _folders/)
+            let allEvents = scanAllEvents()
+            let classified = EventFolderStore.classifiedEventPaths()
+            // 排除"已跳过的失败批"事件 → 避免下批又抓同一批撞同样的 parse fail。
+            let unclassified = allEvents.filter {
+                !classified.contains($0.path) && !skippedPathsByFailure.contains($0.path)
+            }
+            if batchIdx == 0 { result.totalUnclassified = unclassified.count }
+            guard !unclassified.isEmpty else { break }
 
-        // 2) 切批
-        let batch = Array(unclassified.prefix(batchCap))
-        let existing = EventFolderStore.loadAll()
+            // 2) 切批
+            let batch = Array(unclassified.prefix(batchCap))
+            let existing = EventFolderStore.loadAll()
 
-        // 3) 调 LLM
-        let prompt = Self.buildPrompt(
-            unclassified: batch,
-            existingFolders: existing,
-            minNewFolderEvents: minEventsForNewFolder
-        )
-        let raw = try await runLLM(prompt: prompt)
-        let decision = try Self.parseDecision(from: raw)
+            // 3) 调 LLM。单批失败(parse / spawn / timeout)→ 跳本批 + 继续下一批。
+            //    BudgetExhaustedError 例外 —— 撞额度上抛终止整轮(不该烧更多 token)。
+            //    连续 3 批都失败 → 当 LLM 真的废了,中止。
+            let prompt = Self.buildPrompt(
+                unclassified: batch,
+                existingFolders: existing,
+                minNewFolderEvents: minEventsForNewFolder
+            )
+            let decision: Decision
+            do {
+                let raw = try await runLLM(prompt: prompt)
+                decision = try Self.parseDecision(from: raw)
+                consecutiveBatchFailures = 0
+            } catch let e as BudgetExhaustedError {
+                throw e
+            } catch {
+                print("[EventClassifier] batch \(batchIdx + 1) failed: \(error.localizedDescription)")
+                consecutiveBatchFailures += 1
+                // 把这批事件标记跳过,下次 loop 不再抓到它们。
+                for ev in batch { skippedPathsByFailure.insert(ev.path) }
+                if consecutiveBatchFailures >= 3 {
+                    print("[EventClassifier] 3 consecutive batch failures — bail out")
+                    break
+                }
+                continue
+            }
 
-        // 4) 落地 _folders/*.json
+            // 4) 落地 + 累加这一批的 deltas
+            let batchResult = try applyDecision(
+                decision: decision,
+                batchPaths: Set(batch.map(\.path)),
+                existing: existing
+            )
+            result.classifiedInThisRun += batchResult.classified
+            // 合并 deltas:同 slug 跨批累加。第一次出现按当批的 kind,
+            // 后续都按 .updated(slug 已经存在)。
+            for d in batchResult.deltas {
+                if var prev = aggregatedDeltas[d.slug] {
+                    aggregatedDeltas[d.slug] = .init(
+                        slug: prev.slug, name: prev.name, kind: prev.kind,
+                        addedCount: prev.addedCount + d.addedCount
+                    )
+                    _ = prev
+                } else {
+                    aggregatedDeltas[d.slug] = d
+                }
+            }
+
+            // stuck 检测:连续两批 0 改动 → LLM 不愿/不能再分组 → 停。
+            if batchResult.classified == 0 {
+                consecutiveNoOp += 1
+                if consecutiveNoOp >= 2 { break }
+            } else {
+                consecutiveNoOp = 0
+            }
+        }
+
+        // 把 aggregated deltas 拍平成 Result 的 folderDeltas + 重算 new/updated 计数
+        result.folderDeltas = aggregatedDeltas.values.sorted {
+            $0.addedCount > $1.addedCount
+        }
+        result.newFoldersCreated = result.folderDeltas.filter { $0.kind == .created }.count
+        result.existingFoldersUpdated = result.folderDeltas.filter { $0.kind == .updated }.count
+        result.stillUngrouped = max(0, result.totalUnclassified - result.classifiedInThisRun)
+        result.ranAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 写盘 → UI 哪怕重启 / 跨进程也能看到上一次跑的摘要。
+        Self.saveLastResult(result)
+        return result
+    }
+
+    /// 把一批 LLM decision 真正写到 _folders/*.json,返回这批的 classified 数 +
+    /// folder deltas。classify() 调,**dry-run 不调**。
+    private struct BatchOutcome {
+        let classified: Int
+        let deltas: [FolderDelta]
+    }
+    private func applyDecision(
+        decision: Decision,
+        batchPaths: Set<String>,
+        existing: [EventFolder]
+    ) throws -> BatchOutcome {
+        var deltas: [FolderDelta] = []
+        var classifiedCount = 0
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let allPaths = Set(batch.map(\.path))   // 防 LLM 输出未知 path
-
-        // 4a) append 到现有 folder
         var existingBySlug = Dictionary(uniqueKeysWithValues: existing.map { ($0.slug, $0) })
+
+        // append 到现有 folder
         for assign in decision.appendToExisting {
             guard var folder = existingBySlug[assign.folderSlug] else { continue }
-            let toAdd = assign.eventPaths.filter { allPaths.contains($0) && !folder.events.contains($0) }
+            let toAdd = assign.eventPaths.filter { batchPaths.contains($0) && !folder.events.contains($0) }
             guard !toAdd.isEmpty else { continue }
             folder.events.append(contentsOf: toAdd)
             folder.updatedAtMs = nowMs
             try EventFolderStore.save(folder)
             existingBySlug[folder.slug] = folder
-            result.existingFoldersUpdated += 1
-            result.classifiedInThisRun += toAdd.count
-            result.folderDeltas.append(.init(slug: folder.slug, name: folder.name,
-                                             kind: .updated, addedCount: toAdd.count))
+            classifiedCount += toAdd.count
+            deltas.append(.init(slug: folder.slug, name: folder.name,
+                                kind: .updated, addedCount: toAdd.count))
         }
 
-        // 4b) 创建新 folder(≥ minEventsForNewFolder 才创)
+        // 创建新 folder(≥ minEventsForNewFolder 才创)
         for newF in decision.newFolders {
-            let filtered = newF.eventPaths.filter { allPaths.contains($0) }
+            let filtered = newF.eventPaths.filter { batchPaths.contains($0) }
             guard filtered.count >= minEventsForNewFolder else { continue }
             var slug = EventFolderStore.makeSlug(from: newF.name)
-            // 防 slug 冲突(LLM 可能给跟现有重的 name)
             if existingBySlug[slug] != nil {
                 var i = 2
                 while existingBySlug["\(slug)-\(i)"] != nil { i += 1 }
                 slug = "\(slug)-\(i)"
             }
             let folder = EventFolder(
-                slug: slug,
-                name: newF.name,
-                description: newF.description,
-                events: filtered,
-                createdAtMs: nowMs,
-                updatedAtMs: nowMs
+                slug: slug, name: newF.name, description: newF.description,
+                events: filtered, createdAtMs: nowMs, updatedAtMs: nowMs
             )
             try EventFolderStore.save(folder)
             existingBySlug[slug] = folder
-            result.newFoldersCreated += 1
-            result.classifiedInThisRun += filtered.count
-            result.folderDeltas.append(.init(slug: slug, name: folder.name,
-                                             kind: .created, addedCount: filtered.count))
+            classifiedCount += filtered.count
+            deltas.append(.init(slug: slug, name: folder.name,
+                                kind: .created, addedCount: filtered.count))
         }
-
-        result.stillUngrouped = result.totalUnclassified - result.classifiedInThisRun
-        return result
+        return BatchOutcome(classified: classifiedCount, deltas: deltas)
     }
 
     // MARK: - Dry-run hooks (CLI 用,生产路径完全不触发)
@@ -348,6 +452,7 @@ final class EventClassifier {
     }
 
     /// 找 JSON 物体 + 解析。LLM 偶尔吐 markdown ```json fence,做点宽容处理。
+    /// 解析失败时把 raw 前 500 字符附在 error 里,方便诊断 prompt。
     private static func parseDecision(from raw: String) throws -> Decision {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // 去掉可能的 ``` 包围
@@ -360,12 +465,24 @@ final class EventClassifier {
         }()
         guard let startIdx = inner.firstIndex(of: "{"),
               let endIdx = inner.lastIndex(of: "}") else {
-            throw ClassifierError.noJSONInResponse
+            let preview = String(trimmed.prefix(500))
+            throw ClassifierError.malformedJSON("no JSON object in response. raw head: \(preview)")
         }
         let json = String(inner[startIdx...endIdx])
-        guard let data = json.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClassifierError.malformedJSON("not a JSON object")
+        guard let data = json.data(using: .utf8) else {
+            throw ClassifierError.malformedJSON("response bytes not utf8")
+        }
+        let obj: Any
+        do {
+            obj = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            let preview = String(json.prefix(500))
+            throw ClassifierError.malformedJSON("JSONSerialization: \(error.localizedDescription). raw head: \(preview)")
+        }
+        guard let root = obj as? [String: Any] else {
+            let kind = String(describing: type(of: obj))
+            let preview = String(json.prefix(500))
+            throw ClassifierError.malformedJSON("expected object at root, got \(kind). raw head: \(preview)")
         }
 
         var appends: [Decision.AppendAssignment] = []
