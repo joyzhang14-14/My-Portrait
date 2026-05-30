@@ -357,13 +357,15 @@ struct CronJobQuickEditor: View {
                     .toggleStyle(.switch)
             }
 
-            // 静音通知。任务照常跑、写 conv 历史,只是 banner 不弹。
-            // 单独一行,跟上面 Context/Schedule/Enabled 那行的 picker 错开,
-            // 避免长 label 被宽度挤成多行。
-            Toggle("Mute notifications", isOn: $initial.muted)
-                .toggleStyle(.switch)
-
-            connectionsSelector
+            // Connections 和 Mute notifications 放同一行:左边 selector
+            // 撑开,右边 toggle 贴齐。避免 Mute 单独一行显得空。
+            HStack(alignment: .bottom, spacing: 16) {
+                connectionsSelector
+                Spacer(minLength: 8)
+                Toggle("Mute notifications", isOn: $initial.muted)
+                    .toggleStyle(.switch)
+                    .fixedSize()
+            }
         }
         .padding(20)
         .frame(width: 480)
