@@ -22,6 +22,11 @@ struct ImportSettingsView: View {
     /// 当前进度(running 时实时更新)。
     @State private var progress: ScreenpipeImporter.Progress? = nil
 
+    // CLI 导入(Claude Code / Codex)状态。
+    @State private var cliScan: CLIInputImporter.ScanResult? = nil
+    @State private var cliRunning: Bool = false
+    @State private var cliStatus: String? = nil
+
     var body: some View {
         SettingsPage(
             "Import",
@@ -55,8 +60,88 @@ struct ImportSettingsView: View {
                     errorBlock(err)
                 }
             }
+
+            SettingsCard(
+                title: "Import from Claude Code / Codex CLI",
+                footnote: "Reads the prompts you typed into Claude Code (~/.claude/projects) and Codex CLI (~/.codex/history.jsonl) and adds them to your writing records — straight from the session logs, no OCR. Tool results, slash commands, and system messages are skipped. Re-importing never creates duplicates."
+            ) {
+                cliBlock
+            }
         }
-        .task { await rescan() }
+        .task { await rescan(); await rescanCLI() }
+    }
+
+    // MARK: CLI 导入 UI
+
+    @ViewBuilder
+    private var cliBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal.fill")
+                    .foregroundStyle(.green)
+                Text("Claude Code + Codex CLI")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Re-scan") { Task { await rescanCLI() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(cliRunning)
+            }
+            if let s = cliScan {
+                statRow("Claude Code", "\(s.claudeCode.formatted()) typed prompts", mono: false)
+                statRow("Codex CLI",   "\(s.codex.formatted()) typed prompts", mono: false)
+            }
+            if let st = cliStatus {
+                Text(st)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button(cliRunning ? "Importing…" : "Import") {
+                    Task { await runCLIImport() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(cliRunning || (cliScan?.total ?? 0) == 0)
+            }
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func rescanCLI() async {
+        let result = await Task.detached(priority: .userInitiated) {
+            CLIInputImporter.scan()
+        }.value
+        cliScan = result
+    }
+
+    private func runCLIImport() async {
+        cliRunning = true
+        cliStatus = "Reading session logs…"
+        defer { cliRunning = false }
+        guard let dbImpl = services?.db as? PortraitDBImpl else {
+            cliStatus = "Portrait DB not available."
+            return
+        }
+        let dbPool = dbImpl.dbPool
+        let result: (inserted: Int, skipped: Int)
+        do {
+            result = try await Task.detached(priority: .userInitiated) {
+                let rows = CLIInputImporter.collectAll()
+                let store = WritingCaptureStore(dbPool: dbPool)
+                return try store.insertCLIImported(rows)
+            }.value
+        } catch {
+            cliStatus = "Failed: \(error.localizedDescription)"
+            return
+        }
+        cliStatus = "Done. \(result.inserted) imported, \(result.skipped) already present."
+        await rescanCLI()
     }
 
     // MARK: scan UI

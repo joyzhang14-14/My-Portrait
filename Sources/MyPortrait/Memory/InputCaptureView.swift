@@ -392,6 +392,12 @@ struct InputCaptureView: View {
 
     /// bundle_id 末段当友好名(com.tencent.xinWeChat → xinWeChat)。
     static func appLabel(_ bundleId: String) -> String {
+        // CLI 导入的两个源 —— 显示成可读名,标注 (Imported)。
+        switch bundleId {
+        case "claude-code": return "Claude Code CLI (Imported)"
+        case "codex-cli":   return "Codex CLI (Imported)"
+        default: break
+        }
         let last = bundleId.split(separator: ".").last.map(String.init)
         return (last?.isEmpty == false ? last : nil) ?? bundleId
     }

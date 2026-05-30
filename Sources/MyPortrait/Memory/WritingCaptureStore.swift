@@ -475,6 +475,50 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// CLI 导入:把 Claude Code / Codex 手打 prompt **直接**写进 writing_records
+    /// (不走 staged / 不审查 —— 地面真值)。按 (app, start_ts, text) 去重,
+    /// 重复导入不重复入库。返回 (新增, 跳过重复)。
+    func insertCLIImported(_ rows: [CLIInputImporter.Imported]) throws -> (inserted: Int, skipped: Int) {
+        guard !rows.isEmpty else { return (0, 0) }
+        let createdAt = Int64(Date().timeIntervalSince1970 * 1000)
+        return try dbPool.write { db in
+            // 已导入的去重 key —— 只看 source='cli_import' 的历史。
+            var seen = Set<String>()
+            let existing = try Row.fetchAll(
+                db, sql: "SELECT app, start_ts, text FROM writing_records WHERE source = 'cli_import'")
+            for r in existing {
+                let app: String = r["app"] ?? ""
+                let ts: Int64 = r["start_ts"] ?? 0
+                let text: String = r["text"] ?? ""
+                seen.insert("\(app)\t\(ts)\t\(text)")
+            }
+            var inserted = 0, skipped = 0
+            for row in rows {
+                let key = "\(row.app)\t\(row.tsMs)\t\(row.text)"
+                if seen.contains(key) { skipped += 1; continue }
+                seen.insert(key)
+                try db.execute(sql: """
+                    INSERT INTO writing_records
+                        (start_ts, end_ts, app, url, text, edit_log, confidence,
+                         context_summary, source, kind, reference_typing_event_ids,
+                         reference_frame_ids, reference_keystroke_range, raw_output,
+                         prompt_id, created_at, worker_run_id)
+                    VALUES (:ts, :ts, :app, :url, :text, '[]', 1.0,
+                            NULL, 'cli_import', :kind, '[]',
+                            '[]', '{}', NULL,
+                            'cli_import', :createdAt, 'cli_import')
+                    """,
+                    arguments: [
+                        "ts": row.tsMs, "app": row.app, "url": row.url, "text": row.text,
+                        "kind": CLIInputImporter.classifyKind(row.text),
+                        "createdAt": createdAt,
+                    ])
+                inserted += 1
+            }
+            return (inserted, skipped)
+        }
+    }
+
     /// 把 Pass 3 输出的 discarded[] 落到 writing_records_discarded 表(staged 阶段)。
     /// Approve 时拷成 kind='committed',Reject 时跟 staged records 一起清。
     func insertStagedDiscarded(
