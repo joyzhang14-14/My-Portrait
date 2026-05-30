@@ -99,7 +99,12 @@ struct ImportSettingsView: View {
                 )
             }
         }
-        .task { await rescan(); await rescanCLI() }
+        .task {
+            // screenpipe 与 CLI 两边同时扫,互不等待。
+            async let sp: Void = rescan()
+            async let cli: Void = rescanCLI()
+            _ = await (sp, cli)
+        }
     }
 
     // MARK: CLI 导入 UI(Claude Code / Codex 各一张卡片,共用此 block)
