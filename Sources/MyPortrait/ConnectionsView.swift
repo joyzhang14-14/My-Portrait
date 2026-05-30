@@ -145,8 +145,11 @@ struct ConnectionsView: View {
                         .foregroundStyle(Theme.textPrimary.opacity(0.5))
                 }
                 if appState.isConnected(integration.id) {
+                    // CONNECTED 之前钉死 .white.opacity(0.6),light 模式下浅紫底
+                    // 上完全看不见。改用 Theme.textSecondary 跟 colorScheme 切。
+                    // ACTIVE 仍用绿色(语义色,跨主题都看得清)。
                     StatusPill(text: appState.activeAIId == integration.id ? "ACTIVE" : "CONNECTED",
-                               color: appState.activeAIId == integration.id ? .green : .white.opacity(0.6))
+                               color: appState.activeAIId == integration.id ? .green : Theme.textSecondary)
                 }
                 Spacer()
                 Button { selectedId = nil } label: {
