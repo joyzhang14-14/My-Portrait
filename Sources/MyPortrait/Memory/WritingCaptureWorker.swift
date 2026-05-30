@@ -889,36 +889,47 @@ final class WritingCaptureWorker {
         userRejections: [UserRejectionRow] = []
     ) async -> [Pass3GroupResult] {
         // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
-        // fanout;普通组走 Pass 3 单调用。
+        // fanout;普通组走 Pass 3 单调用。LLM 偶发 socket 断/超时常见,失败退避
+        // 重试最多 3 次(吸收瞬时错误);重试还失败才算 group failure。
+        @Sendable func runOnce(_ g: WritingCaptureGroup) async throws -> WritingCapturePass3Agent.Output {
+            let isCanvas = g.sessions.contains { $0.route == "ocr" }
+            if isCanvas {
+                let merged = Self.mergeCanvasSessions(g.sessions)
+                let ctx = contextTimeline.first {
+                    $0.app == g.app && $0.startTs <= merged.endTs && $0.endTs >= merged.startTs
+                }?.summary
+                let agent = await makeCanvas()
+                return try await agent.run(
+                    groupApp: g.app, groupUrl: g.url, session: merged, contextSummary: ctx)
+            } else {
+                let agent = await makePass3()
+                return try await agent.run(
+                    contextTimeline: contextTimeline,
+                    groupApp: g.app, groupUrl: g.url,
+                    rawSessions: g.sessions,
+                    includeAxText: includeAxText,
+                    userLanguages: userLanguages,
+                    userRejections: userRejections)
+            }
+        }
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
             let g = groups[idx]
-            let isCanvas = g.sessions.contains { $0.route == "ocr" }
-            do {
-                if isCanvas {
-                    let merged = Self.mergeCanvasSessions(g.sessions)
-                    let ctx = contextTimeline.first {
-                        $0.app == g.app && $0.startTs <= merged.endTs && $0.endTs >= merged.startTs
-                    }?.summary
-                    let agent = await makeCanvas()
-                    let out = try await agent.run(
-                        groupApp: g.app, groupUrl: g.url,
-                        session: merged, contextSummary: ctx)
-                    return (idx, .success(out))
-                } else {
-                    let agent = await makePass3()
-                    let out = try await agent.run(
-                        contextTimeline: contextTimeline,
-                        groupApp: g.app, groupUrl: g.url,
-                        rawSessions: g.sessions,
-                        includeAxText: includeAxText,
-                        userLanguages: userLanguages,
-                        userRejections: userRejections
-                    )
-                    return (idx, .success(out))
+            var lastErr: Error = Pass3GroupError.missing
+            for attempt in 0..<3 {
+                do { return (idx, .success(try await runOnce(g))) }
+                catch is BudgetExhaustedError {
+                    // 预算耗尽重试无意义,直接失败
+                    return (idx, .failure(Pass3GroupError.missing))
                 }
-            } catch {
-                return (idx, .failure(error))
+                catch {
+                    lastErr = error
+                    if attempt < 2 {
+                        // 退避 1s / 3s 再试,给瞬时网络/限流恢复
+                        try? await Task.sleep(nanoseconds: UInt64((attempt + 1) * 2 - 1) * 1_000_000_000)
+                    }
+                }
             }
+            return (idx, .failure(lastErr))
         }
 
         return await withTaskGroup(of: (Int, Pass3GroupResult).self) { taskGroup in
