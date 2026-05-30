@@ -214,7 +214,10 @@ actor TranscriptionScheduler {
     private static func transcriptionConfig() async -> TranscribeSettings {
         await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
-            let lang = a.languages.first.flatMap { $0.isEmpty ? nil : $0 }
+            // 转录语言来自 Personal Info 的 languages(单一来源,不再单独配)。中英双语等
+            // 多语言 → 自动检测(nil),强制单一会把另一种转错;只填一种 → 用该语言码提示。
+            let pi = ConfigStore.shared.current.personalInfo
+            let lang: String? = pi.languages.count == 1 ? Self.whisperLanguageCode(pi.languages[0]) : nil
             func secret(_ ref: String) -> String {
                 guard !ref.isEmpty, let d = SecretStore.shared.get(ref) else { return "" }
                 return String(data: d, encoding: .utf8) ?? ""
@@ -230,6 +233,28 @@ actor TranscriptionScheduler {
                 customKey: secret(a.customApiKeyRef)
             )
         }
+    }
+
+    /// Personal Info 的语言全名/码 → Whisper 语言码。未知 → nil(自动检测)。
+    /// 已是 2 字母码的直接透传(en/zh/...)。
+    private static func whisperLanguageCode(_ raw: String) -> String? {
+        let s = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !s.isEmpty else { return nil }
+        let map: [String: String] = [
+            "chinese": "zh", "mandarin": "zh", "中文": "zh", "zh": "zh",
+            "english": "en", "en": "en",
+            "japanese": "ja", "日本語": "ja", "ja": "ja",
+            "korean": "ko", "한국어": "ko", "ko": "ko",
+            "spanish": "es", "español": "es", "es": "es",
+            "french": "fr", "français": "fr", "fr": "fr",
+            "german": "de", "deutsch": "de", "de": "de",
+            "russian": "ru", "ru": "ru",
+            "portuguese": "pt", "pt": "pt",
+            "italian": "it", "it": "it",
+            "arabic": "ar", "ar": "ar",
+            "hindi": "hi", "hi": "hi",
+        ]
+        return map[s] ?? (s.count == 2 ? s : nil)
     }
 
     /// 按设置里选的引擎转录一段样本。disabled → 空串。
