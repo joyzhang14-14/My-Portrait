@@ -22,16 +22,20 @@ struct SpeakersSettingsView: View {
         guard !q.isEmpty else { return rows }
         return rows.filter { ($0.name ?? "").lowercased().contains(q) }
     }
-    /// 用户语义的"已训练"= 用户给了名字的簇(name != ""),包括:
-    ///   - voice training 直接命名的
-    ///   - diarization 自动建后用户手动 rename 的(也是"我认这个是某人")
+    /// "已命名簇"(name != "") —— 驱动下面 IDENTIFIED 列表。含 voice training
+    /// 命名的 + diarization 自动建后用户手动 rename 的。**有名字 ≠ 训练过**:
+    /// 头部"X speakers trained"另算(见 voiceTrainedCount)。
     /// "未识别"= 真匿名簇(name == "")
     private var identified:   [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty == false } }
     private var unidentified: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
+    /// 真·语音训练过的数量 —— 只数 trained_at_ms 非空(用户真跑过 voice training),
+    /// 不是"有名字的簇数"。跟 search / 簇总数无关(绝对数)。loadSpeakers 已过滤
+    /// hallucination=0,被"删除"软删的训练声纹不计入(它已不参与匹配)。
+    private var voiceTrainedCount: Int { rows.filter { $0.trainedAt != nil }.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            ProgressHeader(trainedCount: identified.count)
+            ProgressHeader(trainedCount: voiceTrainedCount)
 
             VoiceTrainingCard(
                 existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty }
