@@ -20,9 +20,10 @@ enum CLIInputImporter {
     struct Imported: Sendable {
         let text: String
         let app: String        // "claude-code" | "codex-cli"
-        let url: String?       // cwd / 项目路径(Codex history 无,留 nil)
+        let url: String?       // cli_import 一律 nil —— 避免前端按目录炸窗
         let tsMs: Int64
         let session: String?   // sessionId(CC) / session_id(Codex),用于数 session
+        let location: String?  // 会话/项目目录(cwd),只作元数据,不参与分组
     }
 
     /// 扫盘结果 —— 各源的 session 数 + prompt 数(未去重前)。
@@ -165,7 +166,9 @@ enum CLIInputImporter {
         let tsMs = l.timestamp.flatMap { iso.date(from: $0) }
             .map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0
         guard tsMs > 0 else { return nil }
-        return Imported(text: trimmed, app: "claude-code", url: l.cwd, tsMs: tsMs, session: l.sessionId)
+        // url 留 nil(不炸窗),cwd 进 location。
+        return Imported(text: trimmed, app: "claude-code", url: nil, tsMs: tsMs,
+                        session: l.sessionId, location: l.cwd)
     }
 
     // MARK: - Codex 解析
@@ -176,9 +179,54 @@ enum CLIInputImporter {
         let session_id: String?
     }
 
+    /// rollout 文件首行 session_meta —— 取 session_id → cwd。
+    private struct CodexRolloutMeta: Decodable {
+        struct Payload: Decodable { let id: String?; let cwd: String? }
+        let payload: Payload?
+    }
+
+    /// 扫 ~/.codex/sessions 与 archived_sessions 下所有 rollout-*.jsonl,
+    /// 读首行 session_meta,建 session_id → cwd 映射(history.jsonl 没存 cwd)。
+    private static func codexSessionCwd() -> [String: String] {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let roots = [home.appendingPathComponent(".codex/sessions", isDirectory: true),
+                     home.appendingPathComponent(".codex/archived_sessions", isDirectory: true)]
+        var map: [String: String] = [:]
+        for root in roots {
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
+            for case let url as URL in en
+            where url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension == "jsonl" {
+                guard let first = firstLine(of: url),
+                      let data = first.data(using: .utf8),
+                      let meta = try? JSONDecoder().decode(CodexRolloutMeta.self, from: data),
+                      let id = meta.payload?.id, let cwd = meta.payload?.cwd
+                else { continue }
+                map[id] = cwd
+            }
+        }
+        return map
+    }
+
+    /// 只读文件首行(rollout session_meta 很小),避免整文件载入。
+    private static func firstLine(of url: URL) -> String? {
+        guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? h.close() }
+        var buf = Data()
+        while buf.count < 65536 {
+            guard let chunk = try? h.read(upToCount: 4096), !chunk.isEmpty else { break }
+            buf.append(chunk)
+            if let nl = buf.firstIndex(of: 0x0A) {
+                return String(data: buf[..<nl], encoding: .utf8)
+            }
+        }
+        return String(data: buf, encoding: .utf8)
+    }
+
     private static func parseCodex() -> [Imported] {
         guard let content = try? String(contentsOf: codexHistoryFile, encoding: .utf8)
         else { return [] }
+        let cwdMap = codexSessionCwd()
         var out: [Imported] = []
         for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let data = line.data(using: .utf8),
@@ -187,7 +235,9 @@ enum CLIInputImporter {
                   let text = l.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.isEmpty
             else { continue }
-            out.append(Imported(text: text, app: "codex-cli", url: nil, tsMs: secs * 1000, session: l.session_id))
+            let loc = l.session_id.flatMap { cwdMap[$0] }
+            out.append(Imported(text: text, app: "codex-cli", url: nil, tsMs: secs * 1000,
+                                session: l.session_id, location: loc))
         }
         cliImportLog.info("Codex: parsed \(out.count) user messages")
         return out
