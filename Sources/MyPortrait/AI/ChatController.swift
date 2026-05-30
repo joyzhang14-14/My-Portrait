@@ -1019,6 +1019,16 @@ final class ChatController {
         }
     }
 
+    /// cron job 在后台跑、把流式增量写进 DB 时调(CronJobExecutor.onConvUpdated)。
+    /// 只有当用户**正在看这条 conv**、且 ChatController 自己没在跑 agent
+    /// (cron conv 由 executor 驱动,ChatController 这边 agent==nil / 不
+    /// streaming)时,从磁盘重读 → UI 像普通 chat 一样逐段刷出 thinking / bash。
+    /// 自己在 streaming 的话绝不动 messages,免得踩自己的 live 状态。
+    func liveReloadIfViewing(_ convId: UUID) {
+        guard currentConvId == convId, !isStreaming, agent == nil else { return }
+        messages = store.loadMessages(for: convId)
+    }
+
     /// Flush the current message list to disk under `currentConvId`.
     private func persist() {
         guard let convId = currentConvId else { return }
