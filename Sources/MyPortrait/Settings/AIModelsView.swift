@@ -16,6 +16,8 @@ struct AIModelsSettingsView: View {
     /// 本地模型 ready 状态轮询(SpeakerModelStore.isOnDisk / WhisperKitWrapper.isOnDisk
     /// 都是同步 fs check,2s 轮一次)。view 可见时跑,disappear 后停。
     @State private var localModelTick: Int = 0
+    /// 轮询重入 guard —— 7 行 onAppear + .id 重渲染会重复触发,没它会每 2s 增殖一批 Task。
+    @State private var isPollingLocalModels = false
 
     /// connections 里已连上的 AI provider(category .ai + .local 且能映射到
     /// 实际的 Provider)。disabled 状态不影响这个列表 —— 这里列的是"能用的",
@@ -115,8 +117,12 @@ struct AIModelsSettingsView: View {
     /// 时 Timer 不再被 SwiftUI 持有自然停。
     private func startLocalModelPolling() {
         // 简单实现:每次 onAppear 启动一个 Task 短轮询(只在所有模型都还没
-        // ready 时才反复轮,全 ready 之后停)。
+        // ready 时才反复轮,全 ready 之后停)。guard 保证全程只有一个轮询 Task,
+        // 否则 7 行 onAppear + .id 重渲染会每 2s 成倍 spawn。
+        guard !isPollingLocalModels else { return }
+        isPollingLocalModels = true
         Task { @MainActor in
+            defer { isPollingLocalModels = false }
             while !allLocalModelsReady {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 localModelTick &+= 1
