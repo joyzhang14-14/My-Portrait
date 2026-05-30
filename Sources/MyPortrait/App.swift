@@ -13,44 +13,8 @@ struct MyPortraitApp: App {
         // 任何模式下读路径前都已经搬完。Idempotent,重复跑不出错。
         PathMigration.runOnceIfNeeded()
 
-        // CLI 模式：`--embed-dump <text>` 跑 bge-m3 推理 → stdout 拷向量 → exit。
-        // 用于跟 Python FlagEmbedding 数值对齐（要求 cosine ≥ 0.999）。
-        // 必须在任何 SwiftUI / AppDelegate 设置之前拦截，否则会被窗口初始化拖慢。
+        // CLI 调试命令在任何 SwiftUI / AppDelegate 设置之前拦截，否则会被窗口初始化拖慢。
         let args = ProcessInfo.processInfo.arguments
-        if let idx = args.firstIndex(of: "--embed-dump") {
-            let userText: String? = (idx + 1 < args.count) ? args[idx + 1] : nil
-            EmbedDumpCLI.run(userText: userText)
-            // EmbedDumpCLI.run 内部 exit(0/1)，不会返回。
-        }
-        if args.contains("--embed-batch-test") {
-            EmbedDumpCLI.runBatchTest()
-        }
-        if args.contains("--embed-profile") {
-            EmbedDumpCLI.runProfile()
-        }
-        // 真实路径 profile：跟正常 app 一样起 Services（DB + capture / compaction /
-        // transcribe / retention 都空载跑着），但不显示窗口。
-        if args.contains("--embed-profile-from-db") {
-            print("=== bootstrap baseline ===")
-            print("RSS before Services init: \(rssEarlyMB()) MB")
-            fflush(stdout)
-            let services = Services()
-            print("RSS after Services init: \(rssEarlyMB()) MB")
-            fflush(stdout)
-            services.startManagedLifecycle()
-            print("RSS after startManagedLifecycle: \(rssEarlyMB()) MB")
-            fflush(stdout)
-            EmbedDumpCLI.runProfileFromDB(services: services)
-            // exit inside
-        }
-        if let idx = args.firstIndex(of: "--capture-profile"), idx + 1 < args.count {
-            let scenario = args[idx + 1]
-            print("=== capture profile scenario \(scenario) ===")
-            fflush(stdout)
-            let services = Services()
-            services.startManagedLifecycle()
-            EmbedDumpCLI.runCaptureProfile(services: services, scenario: scenario)
-        }
         if args.contains("--rebuild-frames-fts") {
             print("=== rebuild-frames-fts ===")
             fflush(stdout)
@@ -64,15 +28,6 @@ struct MyPortraitApp: App {
             let services = Services()
             services.startManagedLifecycle()
             EmbedDumpCLI.runSearchTest(services: services)
-        }
-        if args.contains("--embed-backfill") {
-            print("=== backfill mode ===")
-            print("RSS: \(rssEarlyMB()) MB")
-            fflush(stdout)
-            let services = Services()
-            services.startManagedLifecycle()
-            EmbedDumpCLI.runBackfill(services: services)
-            // exit inside
         }
         // DEV-ONLY: `--event-prompt-test <yyyy-MM-dd>` validates the proposed
         // per-event clustering prompt against one day's data. stdout only,
@@ -681,17 +636,4 @@ enum AppKeyboard {
 extension Notification.Name {
     static let leftArrowPressed = Notification.Name("MyPortrait.LeftArrow")
     static let rightArrowPressed = Notification.Name("MyPortrait.RightArrow")
-}
-
-/// 启动期快速读 RSS（不依赖 EmbedDumpCLI，免循环依赖）。
-private func rssEarlyMB() -> Int {
-    var info = mach_task_basic_info()
-    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
-    let kr = withUnsafeMutablePointer(to: &info) { ptr -> kern_return_t in
-        ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
-            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), intPtr, &count)
-        }
-    }
-    guard kr == KERN_SUCCESS else { return -1 }
-    return Int(info.resident_size) / 1024 / 1024
 }
