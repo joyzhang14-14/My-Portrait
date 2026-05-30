@@ -489,7 +489,10 @@ struct WritingCaptureStore: Sendable {
     /// CLI 导入:把 Claude Code / Codex 手打 prompt **直接**写进 writing_records
     /// (不走 staged / 不审查 —— 地面真值)。按 (app, start_ts, text) 去重,
     /// 重复导入不重复入库。返回 (新增, 跳过重复)。
-    func insertCLIImported(_ rows: [CLIInputImporter.Imported]) throws -> (inserted: Int, skipped: Int) {
+    func insertCLIImported(
+        _ rows: [CLIInputImporter.Imported],
+        onProgress: (@Sendable (_ current: Int, _ total: Int) -> Void)? = nil
+    ) throws -> (inserted: Int, skipped: Int) {
         guard !rows.isEmpty else { return (0, 0) }
         let createdAt = Int64(Date().timeIntervalSince1970 * 1000)
         return try dbPool.write { db in
@@ -504,7 +507,10 @@ struct WritingCaptureStore: Sendable {
                 seen.insert("\(app)\t\(ts)\t\(text)")
             }
             var inserted = 0, skipped = 0
-            for row in rows {
+            let total = rows.count
+            for (i, row) in rows.enumerated() {
+                // 每 100 条(及最后一条)报一次进度,避免回调过密。
+                if let onProgress, i % 100 == 0 || i == total - 1 { onProgress(i + 1, total) }
                 let key = "\(row.app)\t\(row.tsMs)\t\(row.text)"
                 if seen.contains(key) { skipped += 1; continue }
                 seen.insert(key)
