@@ -127,8 +127,11 @@ final class StallDetector {
             }
         }
 
-        // —— audio 类 stall。要求 audioEngineEnabled + 过 warmup。
+        // —— audio 类 stall。要求 audioEngineEnabled + 过 warmup +
+        // 转录没被电池模式 gate 住(pause.audioTranscriptionPaused)。
+        // 电池下 mic 段仍入库 → pending 堆是预期,不是 stall。
         if audioEngineEnabled,
+           !pause.audioTranscriptionPaused,
            audio.startedAtMs > 0,
            nowMs - audio.startedAtMs > warmupMs {
             // 3. audioNeverCaptured:启动 > warmup 但一段都没出。设备权限 / VAD

@@ -86,12 +86,14 @@ struct CaptureHealthView: View {
 
     private var pauseCard: some View {
         SettingsCard(title: "Pause signals",
-                     footnote: "Any signal ON suppresses stall verdicts — by design.") {
-            kv("DRM active",       pauseState.drmActive ? "ON" : "off")
+                     footnote: "Top three ON suppress all stall verdicts. Last one only suppresses audio backlog.") {
+            kv("DRM active",                pauseState.drmActive ? "ON" : "off")
             SettingsDivider()
-            kv("Screen asleep",    pauseState.screenAsleep ? "ON" : "off")
+            kv("Screen asleep",             pauseState.screenAsleep ? "ON" : "off")
             SettingsDivider()
-            kv("Capture disabled", pauseState.captureDisabled ? "ON" : "off")
+            kv("Capture disabled",          pauseState.captureDisabled ? "ON" : "off")
+            SettingsDivider()
+            kv("Audio transcribe (battery)", pauseState.audioTranscriptionPaused ? "ON" : "off")
         }
     }
 
