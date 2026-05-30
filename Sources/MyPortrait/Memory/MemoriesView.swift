@@ -187,7 +187,11 @@ struct MemoriesView: View {
         let allFolders = EventFolderStore.loadAll()
         let folderGroups: [FolderGroup] = allFolders
             .map { f -> FolderGroup in
+                // 内部事件按 currentWeight 倒序 —— 用户原话:"folder 里的词条
+                // 按 weight 从高到低排"。folder.events 的原序(LLM 输出顺序)
+                // 信息量低,weight 排在前更符合"重要的事先看见"直觉。
                 let entries = f.events.compactMap { byPath[$0] }
+                    .sorted { $0.currentWeight > $1.currentWeight }
                 return FolderGroup(id: "folder:" + f.slug, title: f.name, entries: entries)
             }
             .filter { !$0.entries.isEmpty }
