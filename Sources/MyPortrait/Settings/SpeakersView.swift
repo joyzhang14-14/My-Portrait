@@ -295,7 +295,9 @@ private struct UnidentifiedCard: View {
             SpeakerAvatar(letter: "?", color: Color.orange, animating: true)
                 .frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Cluster \(row.id.prefix(8))")
+                // 已有 name(用户 rename 过 / 老版本 voice training)优先显示,
+                // 真未命名的簇才显示 "Cluster <id>" 占位。
+                Text(row.name ?? "Cluster \(row.id.prefix(8))")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 HStack(spacing: 6) {
