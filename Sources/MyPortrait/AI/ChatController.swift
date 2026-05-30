@@ -513,9 +513,38 @@ final class ChatController {
         switch provider {
         case .claudeCode:
             // 不走 Pi,直接 spawn `claude` CLI 子进程。
-            a = ClaudeCodeAgent(model: model)
+            // 从 store 读上次抓到的 sid → 切走再切回不丢上下文。回调把
+            // 新 sid(以及 Claude 自动 fork session 时换的 sid)写回 store。
+            let storedSid = currentConvId.flatMap { store.claudeSessionId(for: $0) }
+            let convId = currentConvId
+            a = ClaudeCodeAgent(
+                model: model,
+                initialSessionId: storedSid,
+                onSessionId: { [weak self] sid in
+                    Task { @MainActor [weak self] in
+                        guard let self, let convId else { return }
+                        self.store.updateClaudeSessionId(convId, sid)
+                    }
+                }
+            )
         default:
-            a = try PiAgent(provider: provider, model: model, apiKeyRefOverride: apiKeyRef)
+            // 每条 conv 一个 pi session jsonl。首次没记录 → 现派一个,写回
+            // store(后续切走再切回直接用)。pi 拿到 --session <path>:
+            // 文件存在 → SessionManager.open() replay 历史;不存在 → 按
+            // 这个路径建新 session。所以双向都 ok。
+            var sessionPath: String? = nil
+            if let convId = currentConvId {
+                if let p = store.piSessionPath(for: convId) {
+                    sessionPath = p
+                } else {
+                    let p = AIPaths.piSessionPath(for: convId).path
+                    store.updatePiSessionPath(convId, p)
+                    sessionPath = p
+                }
+            }
+            a = try PiAgent(provider: provider, model: model,
+                            apiKeyRefOverride: apiKeyRef,
+                            sessionPath: sessionPath)
         }
         try await a.start()
         agent = a

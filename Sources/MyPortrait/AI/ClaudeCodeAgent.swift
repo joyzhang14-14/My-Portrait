@@ -21,7 +21,13 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     /// prompt 是独立任务,串上下文反而污染);false = 多轮续会话(chat 用)。
     private let oneshot: Bool
     /// 多轮续会话:第一次响应里抓出来,后续 sendPrompt 用 `-r <sid>` 续。
+    /// init 时如果上层传了已有 sid(从 ChatStore 读),直接拿来用 —— 切走
+    /// 再切回时不丢上下文。
     private var sessionId: String?
+    /// 抓到新 sid / sid 变化时通知上层 —— ChatController 把它写回
+    /// ChatStore 的 `claude_session_id` 列。closure 在调用 sendPrompt
+    /// 的 actor 上下文跑,需要自己 hop 回 main。
+    private let onSessionId: ((String) -> Void)?
 
     private var currentProcess: Process?
     private var stdoutBuffer = Data()
@@ -46,10 +52,14 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     /// 跟 PiAgent.extraEnv 等价。空 = 走继承的 ProcessInfo 环境。
     private let extraEnv: [String: String]
 
-    init(model: String, oneshot: Bool = false, extraEnv: [String: String] = [:]) {
+    init(model: String, oneshot: Bool = false, extraEnv: [String: String] = [:],
+         initialSessionId: String? = nil,
+         onSessionId: ((String) -> Void)? = nil) {
         self.model = model.isEmpty ? "sonnet" : model
         self.oneshot = oneshot
         self.extraEnv = extraEnv
+        self.sessionId = initialSessionId
+        self.onSessionId = onSessionId
         var c: AsyncStream<PiAgent.Event>.Continuation!
         self.events = AsyncStream { cont in c = cont }
         self.eventContinuation = c
@@ -244,7 +254,12 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             if !oneshot,
                (obj["subtype"] as? String) == "init",
                let sid = obj["session_id"] as? String {
-                sessionId = sid
+                // Claude Code 在 context 自动压缩 / 长会话 fork 时偶尔会换
+                // sid,所以这里不能只抓第一次,要持续同步给 ChatStore。
+                if sid != sessionId {
+                    sessionId = sid
+                    onSessionId?(sid)
+                }
             }
             // 其它 system subtype(status / heartbeat 等)忽略。
 
