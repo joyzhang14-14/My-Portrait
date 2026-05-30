@@ -662,15 +662,18 @@ actor PortraitDBImpl: PortraitDB {
         let endMs = ms + Int64(afterSeconds * 1000)
 
         return try await dbPool.read { db in
-            // 直接 JOIN audio_chunks 拿 recorded_at_ms + device，speakerId/name 留 nil。
+            // JOIN audio_chunks 拿 recorded_at_ms + device；LEFT JOIN speakers 拿名字
+            // (hallucination=0 才出名,匿名/误判簇出 NULL → 上层回退 "Speaker <id>")。
             let sql = """
             SELECT c.recorded_at_ms AS ts_ms,
                    t.text,
                    c.device,
                    c.is_input,
-                   t.speaker_id
+                   t.speaker_id,
+                   s.name AS speaker_name
             FROM audio_transcriptions t
             JOIN audio_chunks c ON c.id = t.audio_chunk_id
+            LEFT JOIN speakers s ON s.id = t.speaker_id AND s.hallucination = 0
             WHERE c.recorded_at_ms >= :startMs AND c.recorded_at_ms <= :endMs
               AND t.text IS NOT NULL AND t.text != ''
             ORDER BY c.recorded_at_ms ASC
@@ -685,13 +688,14 @@ actor PortraitDBImpl: PortraitDB {
                 let device: String = row["device"] ?? ""
                 let isInput: Bool = row["is_input"] ?? true
                 let speakerId: Int? = row["speaker_id"]
+                let speakerName: String? = row["speaker_name"]
                 return AudioTranscriptEntry(
                     timestamp: Date(timeIntervalSince1970: TimeInterval(tsMs) / 1000),
                     text: text,
                     device: device,
                     isInput: isInput,
                     speakerId: speakerId,
-                    speakerName: nil
+                    speakerName: speakerName
                 )
             }
         }
