@@ -378,6 +378,23 @@ private struct IdentifiedRow: View {
     @State private var showMerge = false
     @State private var similar: [SimilarSpeaker] = []
     @State private var loadingSimilar = false
+    @State private var audioPlayer = SpeakerAudioPlayer.shared
+
+    /// 波形 pill —— 点击试听该 speaker 最近一段录音(若有)。
+    /// 之前是纯 label 看着像按钮但点没反应。
+    /// row.id 是 String(DB Int64 转的字符串),还原回 Int64 给 player。
+    private var playButton: some View {
+        let dbId: Int64 = Int64(row.id) ?? -1
+        let isPlaying = audioPlayer.playingId == dbId
+        let icon = isPlaying ? "pause.fill" : "waveform"
+        return Button {
+            SpeakerAudioPlayer.shared.toggle(speakerId: dbId)
+        } label: {
+            StatPill(icon: icon, text: "\(row.sampleCount)")
+        }
+        .buttonStyle(.plain)
+        .help("Play a recent clip of this speaker")
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -407,7 +424,7 @@ private struct IdentifiedRow: View {
             }
 
             HStack(spacing: 4) {
-                StatPill(icon: "waveform", text: "\(row.sampleCount)")
+                playButton
                 if let last = row.lastHeard {
                     StatPill(icon: "clock", text: relative(last))
                 }
