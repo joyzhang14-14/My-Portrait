@@ -2027,9 +2027,10 @@ private struct AttachmentThumb: View {
         .onHover { hover = $0 }
     }
     @ViewBuilder private var content: some View {
-        if attachment.kind == .image, let img = NSImage(contentsOf: attachment.url) {
-            Image(nsImage: img)
-                .resizable().scaledToFill()
+        if attachment.kind == .image {
+            // 异步降采样 + NSCache 缓存,避免 body 里同步全分辨率解码(流式时
+            // 每帧重渲染都会重解一次)。AsyncDiskThumbnail 内部已 scaledToFill。
+            AsyncDiskThumbnail(path: attachment.url.path, targetPixelSize: 52)
                 .frame(width: 52, height: 52)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
