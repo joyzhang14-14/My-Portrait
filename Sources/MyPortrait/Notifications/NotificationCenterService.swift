@@ -102,7 +102,9 @@ final class NotificationCenterService {
         // 有通知 → 浮窗 show(lazy install + orderFront)。
         NotificationOverlay.shared.show()
 
-        scheduleDismiss(notif.id, after: timeout)
+        // 不再用独立计时器自动消失 —— 改由 NotificationCardView 的(可暂停)
+        // 进度条 tick 驱动:倒计时跑满时卡片回调 timeoutReached(id)。这样
+        // hover 暂停进度条时,自动消失也跟着暂停(单一时钟,两个计时器不会打架)。
     }
 
     func dismiss(_ id: UUID) {
@@ -113,18 +115,16 @@ final class NotificationCenterService {
         }
     }
 
-    private func scheduleDismiss(_ id: UUID, after: TimeInterval) {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
-            guard let self else { return }
-            // 还在 active 里 = 用户没点掉 → 触发 onTimeout(updateCountdown
-            // 倒计时到点要 install)。注意先 fire 再 dismiss,因为 onTimeout
-            // 可能调 NSApp.terminate,Sparkle 会接管,dismiss 那行不一定跑到。
-            if let notif = self.active.first(where: { $0.id == id }) {
-                notif.onTimeout?()
-            }
-            self.dismiss(id)
+    /// 卡片的(可暂停)进度条倒计时跑满时调 —— 由 NotificationCardView 驱动。
+    /// hover 暂停 tick 时不会触发,所以暂停期间通知不会消失。
+    /// 还在 active 里 = 用户没点掉 → 触发 onTimeout(updateCountdown 倒计时到点要
+    /// install)。先 fire 再 dismiss,因为 onTimeout 可能调 NSApp.terminate,
+    /// Sparkle 会接管,dismiss 那行不一定跑到。
+    func timeoutReached(_ id: UUID) {
+        if let notif = active.first(where: { $0.id == id }) {
+            notif.onTimeout?()
         }
+        dismiss(id)
     }
 }
 
