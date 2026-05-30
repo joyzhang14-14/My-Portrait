@@ -407,7 +407,12 @@ actor SystemAudioCaptureService {
         let state = InputBlockState()
         let status = converter.convert(to: output, error: &error) { _, statusPtr in
             if state.consumed {
-                statusPtr.pointee = .endOfStream
+                // ⚠ **必须 .noDataNow,不能 .endOfStream**。converter 被
+                // 复用(`if converter == nil` 才重建);.endOfStream 会
+                // 让它进入"流结束"内部状态,**之后所有 convert() 永远
+                // 返回 0 帧**。整个系统音频 capture 只能出第一帧后哑火。
+                // 跟麦克风 AudioCaptureService:233 / VoiceTrainer 同款修法。
+                statusPtr.pointee = .noDataNow
                 return nil
             }
             state.consumed = true
