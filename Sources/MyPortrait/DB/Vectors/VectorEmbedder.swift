@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 实现按需要换：
 ///   - `BGEM3VectorEmbedder` — bge-m3 真推理，跨语言、1024 维（**当前激活路径**）
-///   - `NLEmbeddingVectorEmbedder` — Apple NLEmbedding（注：macOS 26 Apple
+///   - `NLEmbeddingVectorEmbedder` — Apple NLEmbedding fallback（注：macOS 26 Apple
 ///     Intelligence entitlement 缺失会 crash，目前禁用）
 protocol VectorEmbedder: Sendable {
 

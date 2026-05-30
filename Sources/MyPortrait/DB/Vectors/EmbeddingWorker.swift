@@ -1,11 +1,10 @@
 import Foundation
 import os.log
 
-// TODO(Phase 4.1): audio_transcriptions embedding pipeline.
-// Schema v4 已给 audio_transcriptions 预留 embedding + embedding_model 列 +
-// idx_transcriptions_embedding_null 部分索引（Schema.swift:148-158），本 worker
-// 只处理 frames，HybridSearchEngine.searchTranscriptions 走 FTS-only。接入时
-// 复制 framesNeedingEmbedding / setFrameEmbedding 对照 transcription 版本即可。
+// Schema v4 给 audio_transcriptions 预留 embedding + embedding_model 列 +
+// idx_transcriptions_embedding_null 部分索引（Schema.swift:148-158）。本 worker
+// 同时处理 frames 和 audio_transcriptions 两条 embedding 流水线
+// （processFrames / processTranscriptions）。
 
 /// 后台 worker：把 frames.full_text 没 embed 的行批量喂给 embedder → 存 BLOB。
 ///

@@ -8,12 +8,15 @@ import IOKit.hid
 /// 首次启动引导。**当前未自动接入** —— 在 Settings → General → Maintenance
 /// 有个 "Preview onboarding" 按钮可以手动唤起。等流程跑顺再切到首启自动弹。
 ///
-/// 5 步:
+/// 8 步:
 ///   1. Welcome
-///   2. Permissions(6 项)
+///   2. Permissions(5 项)
 ///   3. Personal info(全选填)
 ///   4. Connect an AI(可跳过)
-///   5. Done
+///   5. Memory provider
+///   6. Scheduler
+///   7. Speaker training
+///   8. Done
 ///
 /// 所有步都允许 Skip;最后一步 Finish **永远可点**(用户连不连都能过)。
 struct OnboardingView: View {
@@ -209,7 +212,7 @@ private struct WelcomeStep: View {
 
 // MARK: - Step 2: Permissions
 
-/// macOS TCC permissions onboarding 关心的 6 项。每项有:
+/// macOS TCC permissions onboarding 关心的 5 项。每项有:
 ///   - 状态(granted / denied / unknown)实时刷新
 ///   - 一键请求按钮(没 API 的就跳系统设置)
 private struct PermissionsStep: View {

@@ -11,7 +11,7 @@ import os.log
 ///        2. .discard → 删 wav + meta，返回
 ///        3. .keep   → DB.insertAudioChunk(status=pending)
 ///
-///   B. Transcribe loop：5 秒一轮（轻量），插电时干活
+///   B. Transcribe loop：60 秒一轮（兜底防漏，轻量），插电时干活
 ///        - 电池 → sleep
 ///        - 查 DB.pendingAudioChunks(limit=N)
 ///        - 每个 chunk：WhisperKit.transcribe → DB.insertTranscription → 更新 status=done

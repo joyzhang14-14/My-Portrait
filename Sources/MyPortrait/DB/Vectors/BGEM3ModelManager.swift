@@ -26,7 +26,7 @@ actor BGEM3ModelManager {
 
     /// 启动期必下的文件（**只下 tokenizer + 配置**，约 ~17 MB 总共）。
     /// 重 ~2.27 GB 的权重文件 `pytorch_model.bin` **不在这里**——
-    /// 等 BGEM3VectorEmbedder.embed 的 MLX 推理实现时按需调 `ensureWeightsDownloaded()`。
+    /// 由 BGEM3VectorEmbedder.embed 首次 MLX 推理时按需调 `ensureWeightsDownloaded()` 拉取。
     ///
     /// 之前列了 `model.safetensors` 是错的：BAAI/bge-m3 实际只发布
     /// `pytorch_model.bin`，没有 safetensors 版本（用户日志: 404）。

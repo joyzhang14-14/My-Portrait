@@ -9,7 +9,7 @@ import os.log
 ///   1. 电池模式 → 跳过
 ///   2. db.framesToCompact(olderThanMs: now - 10min, limit: 5000)
 ///   3. 按 deviceName 分组
-///   4. 每组按时间排序，切成 ≤ 100 帧的 chunk
+///   4. 每组按时间排序，切成 ≤ 60s 时长的 chunk（≤ 100 帧为安全帽）
 ///   5. 每个 chunk：
 ///       - 探第一帧拿尺寸
 ///       - HEVCEncoder 编码 → 写 raw_data/video/YYYY-MM-DD/m{id}_{startTs}.mp4

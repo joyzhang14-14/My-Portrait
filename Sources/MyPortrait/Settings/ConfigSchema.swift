@@ -281,7 +281,7 @@ struct SchedulerSettings: Codable, Equatable {
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    /// 写作采集 worker(Step 0 + Pass 1 + Pass 2)。默认 off 因为它需要用户
+    /// 写作采集 worker(Step 0 + Pass 1 + Pass 2 + Pass 3)。默认 off 因为它需要用户
     /// 在 Pending review 里手动 Approve,完全无人值守不合适。用户开了之后
     /// 自动跑只是「先把 staged 准备好」,等用户审核。
     var writingCapture: SchedulerConfig = .init(frequency: .off,    timeOfDay: "03:30",

@@ -18,7 +18,7 @@ import Foundation
 ///
 /// MVP characteristics:
 ///   - Manual trigger from the Memories UI button
-///   - One LLM call per category (9 calls per full run)
+///   - One LLM call per category (6 calls per full run, see PortraitPaths.distillCategories)
 ///   - LLM gets the events relevant to a category (by category field) +
 ///     the existing portrait files in that category
 ///   - LLM returns: list of {action: "create"|"update"|"noop",
@@ -67,7 +67,7 @@ final class PortraitDistiller {
         self.perCategoryTimeout = perCategoryTimeout
     }
 
-    /// Run a full distillation pass across all 9 categories.
+    /// Run a full distillation pass across all distill categories.
     func distill(progress: ((Progress) -> Void)? = nil) async throws -> Result {
         let napGuard = AppNapGuard.acquire(reason: "Portrait distillation")
         defer { napGuard.release() }

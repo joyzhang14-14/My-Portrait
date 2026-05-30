@@ -6,7 +6,7 @@ import Foundation
 ///   1. chromeTokens:跨帧频率法识别 UI chrome 词(tab 名/菜单/"正在保存"等)。
 ///      出现在 > 85% 帧里的 token 判为 chrome。纯频率驱动,任何分辨率/窗口/
 ///      浏览器/语言自适应。**只当提示给 LLM**,不剥原文(避免误删正文常用词)。
-///   2. coarseSnapshots:按时间桶(默认 3min)取每桶最长一帧,塌缩 OCR 抖动 +
+///   2. coarseSnapshots:按时间桶(默认 90s)取每桶最长一帧,塌缩 OCR 抖动 +
 ///      降帧数。时间分桶是自适应的,不是写死坐标。
 enum CanvasFrameCleaner {
 
