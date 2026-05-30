@@ -24,6 +24,9 @@ final class SpeakerAudioPlayer: NSObject {
     private override init() { super.init() }
 
     /// 切换:在播这个 id → 停;否则起播。找不到音频静默返。
+    /// 播放优先级:
+    ///   1. ~/.portrait/voice_training/<id>.wav(用户训练录的那 30s)
+    ///   2. audio_chunks 里最近一条带转录的会议音频(fallback)
     func toggle(speakerId: Int64) {
         if playingId == speakerId {
             stop()
@@ -31,7 +34,14 @@ final class SpeakerAudioPlayer: NSObject {
         }
         // 切换 speaker → 老的先停
         stop()
-        guard let path = TimelineDB().latestAudioPath(forSpeakerId: speakerId) else {
+        let trainingPath = Storage.voiceTrainingDir
+            .appendingPathComponent("\(speakerId).wav").path
+        let path: String
+        if FileManager.default.fileExists(atPath: trainingPath) {
+            path = trainingPath
+        } else if let p = TimelineDB().latestAudioPath(forSpeakerId: speakerId) {
+            path = p
+        } else {
             return
         }
         let url = URL(fileURLWithPath: path)

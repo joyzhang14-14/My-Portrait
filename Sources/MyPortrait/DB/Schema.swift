@@ -808,6 +808,19 @@ enum DBSchema {
                 arguments: ["now": now])
         }
 
+        // v31 — speakers.trained_at_ms:用户真正 voice training 过的标记。
+        //
+        // 之前 SpeakersView 数 "identified" = "name 非空",但 diarization
+        // 阶段被用户 rename 的也算 → 数 dupe / unverified 簇 → 计数偏高。
+        // 改用 trained_at_ms 严格只数"用户跑过 voice training 留下 fresh
+        // embedding 的"。NULL = 没训练过(diarization 自动建,或仅 rename)。
+        // upsertVoiceTrainedSpeaker 写入时 SET trained_at_ms = nowMs。
+        m.registerMigration("v31_speakers_trained_at") { db in
+            try db.alter(table: "speakers") { t in
+                t.add(column: "trained_at_ms", .integer)   // nullable
+            }
+        }
+
         return m
     }
 }

@@ -177,6 +177,10 @@ final class VoiceTrainer {
                     self.phase = .failure("Couldn't extract voice embedding — try again with more speech.")
                     return
                 }
+                // 保存训练录音到 ~/.portrait/voice_training/<id>.wav,SpeakerAudio
+                // Player 试听优先放这条(用户能自查训练质量)。失败 swallow,
+                // 不影响主流程。
+                Self.persistTrainingClip(samples: samples, speakerId: speakerId)
                 self.logger.info("voice training: trained speaker \(speakerId) ('\(trimmed, privacy: .public)') with \(samples.count) samples")
                 self.phase = .success(name: trimmed)
             } catch {
@@ -299,6 +303,45 @@ final class VoiceTrainer {
         guard frames > 0, let ch = buf.floatChannelData else { return nil }
         let ptr = ch[0]
         return Array(UnsafeBufferPointer(start: ptr, count: frames))
+    }
+
+    /// 把训练 buffer 写到 ~/.portrait/voice_training/<speakerId>.wav,SpeakerAudio
+    /// Player 试听优先放这条。samples 是 16kHz mono Float32 ——直接走 AVAudioFile
+    /// 写 LinearPCM Float32 wav,不重采样。
+    nonisolated static func persistTrainingClip(samples: [Float], speakerId: Int64) {
+        // targetSampleRate 是 MainActor-isolated,nonisolated 里不能引用 →
+        // 写死 16000(跟 targetSampleRate 同值,wespeaker CAM++ 训练采样率)。
+        let sampleRate: Double = 16_000
+        let dir = Storage.voiceTrainingDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(speakerId).wav")
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else { return }
+        // AVAudioFile 的 settings 默认 caf;显式给 wav 文件 settings 让它写 wav 容器。
+        var settings = format.settings
+        settings[AVFormatIDKey] = kAudioFormatLinearPCM
+        do {
+            let file = try AVAudioFile(
+                forWriting: url, settings: settings,
+                commonFormat: .pcmFormatFloat32, interleaved: false
+            )
+            guard let buf = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            ) else { return }
+            buf.frameLength = AVAudioFrameCount(samples.count)
+            samples.withUnsafeBufferPointer { src in
+                guard let dst = buf.floatChannelData?[0], let base = src.baseAddress else { return }
+                dst.update(from: base, count: samples.count)
+            }
+            try file.write(from: buf)
+        } catch {
+            // 写盘失败不影响主流程,只是没 wav 备份。
+        }
     }
 }
 

@@ -14,6 +14,10 @@ struct SpeakerListRow: Sendable {
     let name: String?
     let sampleCount: Int
     let lastHeardMs: Int64?
+    /// 用户真正跑过 voice training 留下 fresh embedding 的时间。nil =
+    /// 仅 diarization / 仅 rename(没真训过)。SpeakersView "identified"
+    /// 计数只数这个非 nil 的,才是"我训过几条"的本意。
+    let trainedAtMs: Int64?
 }
 
 /// 声音相似的说话人候选（用于建议合并）。
@@ -728,7 +732,8 @@ struct TimelineDB: Sendable {
             SELECT s.id, s.name,
                    COUNT(t.id) AS sample_count,
                    MAX(t.transcribed_at_ms) AS last_transcribed,
-                   s.updated_at_ms AS speaker_updated
+                   s.updated_at_ms AS speaker_updated,
+                   s.trained_at_ms AS trained_at
             FROM speakers s
             LEFT JOIN audio_transcriptions t ON t.speaker_id = s.id
             WHERE s.hallucination = 0
@@ -749,10 +754,15 @@ struct TimelineDB: Sendable {
             let lastTranscribed: Int64? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
                 ? nil : sqlite3_column_int64(stmt, 3)
             let speakerUpdated: Int64 = sqlite3_column_int64(stmt, 4)
+            let trainedAt: Int64? = sqlite3_column_type(stmt, 5) == SQLITE_NULL
+                ? nil : sqlite3_column_int64(stmt, 5)
             // 取较大者:重训过的 speaker 没新转录时 lastTranscribed 老,
             // speakerUpdated 新;反之亦然。
             let lastHeard: Int64 = max(lastTranscribed ?? 0, speakerUpdated)
-            out.append(SpeakerListRow(id: id, name: name, sampleCount: count, lastHeardMs: lastHeard))
+            out.append(SpeakerListRow(
+                id: id, name: name, sampleCount: count,
+                lastHeardMs: lastHeard, trainedAtMs: trainedAt
+            ))
         }
         return out
     }
@@ -905,11 +915,11 @@ struct TimelineDB: Sendable {
             timelineLog.warning("upsertVoiceTrainedSpeaker: merged \(duplicateIds.count - 1) duplicate '\(name, privacy: .public)' row(s) into id=\(keeperId)")
         }
 
-        // 2) upsert speakers row
+        // 2) upsert speakers row(trained_at_ms = nowMs 标记"用户真训过")
         if speakerId == nil {
             guard let ins = prepare(db, """
-                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms)
-                VALUES (?, ?, 1, 0, ?, ?)
+                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, trained_at_ms)
+                VALUES (?, ?, 1, 0, ?, ?, ?)
                 """) else { return nil }
             sqlite3_bind_text(ins, 1, name, -1, transient)
             blob.withUnsafeBytes { rawBuf in
@@ -917,20 +927,24 @@ struct TimelineDB: Sendable {
             }
             sqlite3_bind_int64(ins, 3, nowMs)
             sqlite3_bind_int64(ins, 4, nowMs)
+            sqlite3_bind_int64(ins, 5, nowMs)   // trained_at_ms
             let ok = sqlite3_step(ins) == SQLITE_DONE
             sqlite3_finalize(ins)
             guard ok else { return nil }
             speakerId = sqlite3_last_insert_rowid(db)
         } else if let id = speakerId {
             guard let upd = prepare(db, """
-                UPDATE speakers SET centroid = ?, embedding_count = 1, hallucination = 0, updated_at_ms = ?
+                UPDATE speakers
+                SET centroid = ?, embedding_count = 1, hallucination = 0,
+                    updated_at_ms = ?, trained_at_ms = ?
                 WHERE id = ?
                 """) else { return nil }
             blob.withUnsafeBytes { rawBuf in
                 sqlite3_bind_blob(upd, 1, rawBuf.baseAddress, Int32(rawBuf.count), transient)
             }
             sqlite3_bind_int64(upd, 2, nowMs)
-            sqlite3_bind_int64(upd, 3, id)
+            sqlite3_bind_int64(upd, 3, nowMs)   // trained_at_ms
+            sqlite3_bind_int64(upd, 4, id)
             let ok = sqlite3_step(upd) == SQLITE_DONE
             sqlite3_finalize(upd)
             guard ok else { return nil }
