@@ -577,6 +577,11 @@ final class ChatController {
                 appendEditDraftBlock(originalRelPath: rel)
             }
             pendingDraftRelPathsThisTurn.removeAll()
+            // 防御:agent 在 .agentEnd 之前偶尔会漏发对应的 .thinkingEnd /
+            // .toolEnd(Pi 自动压 context、Claude 直接 final 等),让前端永远
+            // 卡在 "Thinking…" / "Running…" 转圈。这里把仍在 running 的块
+            // 强制 close。
+            closeRunningPartsOnCurrentAssistant()
             isStreaming = false
             endStreamingActivity()
             assistantMessageID = nil
@@ -586,6 +591,7 @@ final class ChatController {
             flushPending()
             lastError = msg
             appendErrorBlock(msg)
+            closeRunningPartsOnCurrentAssistant()
             isStreaming = false
             endStreamingActivity()
             persist()
@@ -990,6 +996,25 @@ final class ChatController {
                 b.durationMs = durationMs
                 messages[mIdx].parts[pIdx] = .thinking(b)
                 return
+            }
+        }
+    }
+
+    /// 兜底:把当前 assistant 消息里仍处于 running 状态的 thinking / tool block
+    /// 强制收尾。.agentEnd / .error 时调一次,防 agent 漏发 thinkingEnd/toolEnd
+    /// 导致 UI 永远停在 "Thinking…" / "Running…" 的转圈。
+    private func closeRunningPartsOnCurrentAssistant() {
+        guard let msgID = assistantMessageID,
+              let mIdx = messages.firstIndex(where: { $0.id == msgID }) else { return }
+        for pIdx in messages[mIdx].parts.indices {
+            switch messages[mIdx].parts[pIdx] {
+            case .thinking(var b) where b.isRunning:
+                b.isRunning = false
+                messages[mIdx].parts[pIdx] = .thinking(b)
+            case .tool(var b) where b.isRunning:
+                b.isRunning = false
+                messages[mIdx].parts[pIdx] = .tool(b)
+            default: break
             }
         }
     }
