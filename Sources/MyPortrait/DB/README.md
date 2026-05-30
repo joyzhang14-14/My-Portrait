@@ -1,7 +1,10 @@
 # DB/ — 持久层
 
-`PortraitDB`：屏幕帧 + 视频块 + 音频段 + 转录的本地 SQLite 持久层 + 全文搜索 +
-（未来）语义检索。
+`PortraitDB`：屏幕帧 + 视频块 + 音频段 + 转录的本地 SQLite 持久层 + 全文搜索（FTS5）。
+
+> **语义/向量搜索已移除。** 旧版蓝图里的 bge-m3 向量、`HybridSearchEngine`、RRF 融合、
+> `NLEmbedding` / `VectorEmbedder` / `EmbeddingWorker` 全部下线。**当前搜索 = 纯
+> FTS5 关键词检索**，由 `FTSSearchEngine` 一肩挑。
 
 ## 技术栈
 
@@ -15,7 +18,6 @@
 ## 文件位置
 
 数据库：`~/.portrait/portrait.sqlite`（+ `.wal` / `.shm` 同目录）。
-模型缓存：`~/.portrait/models/bge-m3/`（~2.5 GB，首启自动下载）。
 
 ## Schema（migrations）
 
@@ -27,75 +29,63 @@ v3_transcriptions_fts     transcriptions_fts (FTS5 + same tokenizer)
 
 详见 [Schema.swift](Schema.swift)。**Migration 一旦发布就不改**，新 schema 加新 migration。
 
+> **残留列说明：** `frames.embedding` / `audio_transcriptions.embedding`（BLOB）及其
+> `embedding_model`（TEXT）列、对应的 `*_embedding_null` 部分索引，是已移除的语义搜索
+> 子系统留下的（v4_embeddings / v5_embedding_model）。migration 只能追加、不能回删，所以
+> 列还在，但**没有任何代码写入或读取它们**（BLOB 落 overflow page，不读 = 0 成本）。
+> `PortraitDB` 协议里同名的 6 个 embedding 方法
+> （`framesNeedingEmbedding` / `setFrameEmbedding` / `allFrameEmbeddings` /
+> 转录三连）同样是无人调用的死代码。
+> （注意：v7_speakers 的 `speakers.centroid` / `speaker_embeddings.embedding` 属于
+> **说话人声纹**系统，正在使用，跟这里的文本 embedding 残留无关。）
+
 ## 模块文件
 
 | 文件 | 职责 |
 |---|---|
-| `Schema.swift` | DatabaseMigrator —— v1/v2/v3 |
+| `Schema.swift` | DatabaseMigrator —— v1/v2/v3 起，含残留的 v4/v5 embedding 列 |
 | `PortraitDBImpl.swift` | `PortraitDB` 协议实现，actor + DatabasePool (WAL) |
 | `FoundationTokenizer.swift` | 自定义 FTS5 分词器（ICU 通过 Foundation 借道） |
-| `RetentionWorker.swift` | 自动删除，24h cadence，读 SettingsKeys.retentionDays/autoDeleteMode |
-| `Records/*.swift` | 4 个 GRDB record struct（Codable + Persistable，**不是 Record 子类**） |
+| `RetentionWorker.swift` | 自动删除，24h cadence，读 ConfigStore.snapshot 的 retentionDays / autoDeleteMode |
+| `ScreenpipeImporter.swift` | 从 screenpipe 库导入历史数据（只读 copy，不动源库） |
+| `ScreenpipeImportCLI.swift` | 上面导入流程的 CLI 入口 |
+| `Records/*.swift` | GRDB record struct（Codable + Persistable，**不是 Record 子类**） |
 | `Search/SearchEngine.swift` | 搜索协议 + result 类型 |
-| `Search/FTSSearchEngine.swift` | Phase 2：纯 FTS5 + bm25 + snippet |
-| `Vectors/VectorEmbedder.swift` | 向量化协议（推理待 Phase 4） |
-| `Vectors/BGEM3ModelManager.swift` | bge-m3 模型下载 + 本地缓存 |
-| `Vectors/BGEM3VectorEmbedder.swift` | bge-m3 embedder stub（下载 OK，推理 Phase 4） |
+| `Search/FTSSearchEngine.swift` | 纯 FTS5 + bm25 + snippet，搜 frames / transcriptions |
+| `Vectors/VectorMath.swift` | Accelerate(vDSP) cosine + Float32 BLOB 编解码（**活跃工具**：说话人声纹系统的 cosine 与 BLOB 编解码底座，被 PortraitDBImpl / TimelineDB / SpeakerOnnx / SileroVAD 多处调用） |
+| `Vectors/EmbedDumpCLI.swift` | 调试 CLI：`--rebuild-frames-fts` 重建 FTS5 表 + `--embed-search-test` eyeball 召回 |
 
-## 搜索分层（Q2 蓝图）
+## 搜索：单层 FTS5
 
 ```
 query
   │
-  ├─→ Layer 1: FTS (字面)        ← 当前：FTSSearchEngine 已实现
-  │       ↓
-  │   命中文档集 A
-  │
-  ├─→ Layer 2: 向量 (语义)        ← Phase 3-4：bge-m3 + cosine
-  │       ↓
-  │   语义近文档集 B
-  │
-  └─→ Layer 3: RRF 融合            ← Phase 4：HybridSearchEngine
+  └─→ FTS5 (字面匹配) ← FTSSearchEngine：bm25 排序 + snippet 高亮
           ↓
-      最终结果（A ∪ B 按 RRF 排序）
+      [FrameSearchResult] / [TranscriptionSearchResult]（按 score 倒序）
 ```
 
-UI 调 `services.searchEngine.searchFrames(...)`。Phase 4 把 `searchEngine`
-从 `FTSSearchEngine` 换成 `HybridSearchEngine`，**UI 零改动**。
+`searchEngine` 类型声明为 `SearchEngine` 协议，`Services.init` 里实例化的是
+`FTSSearchEngine(dbPool: dbImpl.dbPool)`——**和 DB 共用同一个 GRDB `DatabasePool`**。
+保留协议这层抽象的意义：UI 永远只调 `services.searchEngine.searchFrames(...)`，
+将来若换实现，UI 零改动。（当前唯一实现就是 `FTSSearchEngine`，不再有 Hybrid。）
+
+> **`Vectors/` 目录为什么还在**：`VectorMath.swift` 不是残留——它是**说话人声纹系统**
+> （`matchSpeaker` / `enrollSpeaker` / `addEmbeddingToSpeaker` / `VoiceTrainer` / `SpeakerOnnx`）
+> 的 cosine 与 Float32 BLOB 编解码底座（`Data(floats:)` / `.asFloats`），被
+> `PortraitDBImpl` / `TimelineDB` / `SpeakerOnnx` / `SileroVAD` 等多处调用，**正在使用**。
+> 它跟**文本**语义搜索的移除无关——死掉的是文本 embedding 那条线，VectorMath 本身没死。
+> `EmbedDumpCLI.swift` 名义上在 `Vectors/` 下，实际干的是 **重建 `frames_fts`（FTS5 表）** 和跑搜索召回测试，
+> **不再依赖 bge-m3 embedder**，但文件仍 `import MLX` 并在入口 `eval(MLXArray(0))` 预热；
+> 由 `App.swift` 的 `--rebuild-frames-fts` / `--embed-search-test` 两个命令调起，**仍然 live**。
 
 ## 实施阶段
 
 | Phase | 任务 | 状态 |
 |---|---|---|
 | 1 | 建库 + schema + GRDB 7 | ✅ |
-| 2 | FTSSearchEngine + UI 能搜 | ✅ |
-| 3 | 向量后端 + 历史回灌 (EmbeddingWorker) | ✅（NLEmbedding，英文 512 维）；bge-m3 模型下载 ✅；MLX 推理 ⏸ |
-| 4 | HybridSearchEngine + RRF 排序 | ✅ |
-
-### 向量后端 (Phase 3-4) 当前状态
-
-**已激活的 embedder**：`NLEmbeddingVectorEmbedder` — Apple `NLEmbedding.sentenceEmbedding(for: .english)`。
-- 零依赖：macOS 自带，无需下载，无需 MLX
-- 英文 512 维 / 中文 300 维 / 等。**HybridSearchEngine 要求同维**，所以当前固定走 `.english`
-- 中文 OCR / 转录 → embedder throw → Hybrid 自动降级 FTS-only
-
-**已 staged 但未激活**：`BGEM3VectorEmbedder` + `BGEM3ModelManager`
-- 模型 (~2.5 GB) 已实现自动下载到 `~/.portrait/models/bge-m3/`
-- `embed()` 方法仍是 stub（throws notImplemented），**MLX 推理待下个 session**
-- 升级路径：完成 `BGEM3VectorEmbedder.embed`（参考实现思路：用 `mlx-swift` 加载
-  safetensors → `swift-transformers` 的 `Tokenizers` 分词 → forward → mean pool
-  → L2 norm），然后在 `Services.init` 把 `activeEmbedder` 从 NLEmbedding
-  换成 BGEM3。**HybridSearchEngine / EmbeddingWorker / 协议 / schema 都不动**。
-
-**为什么 sqlite-vec 不用**：系统 sqlite3 编进了 `OMIT_LOAD_EXTENSION`，不能 load。
-替代：BLOB 列存 packed Float32，Swift 端 Accelerate vDSP 暴力 cosine
-（7000 行 × 维度 ≈ 几十 MB，全内存几毫秒）。
-
-### Phase 4 RRF 融合
-
-公式：`RRF(d) = Σ 1 / (k + rank_i(d))`，k=60。两路排序列表（FTS bm25 + 向量
-cosine），分数无需可比。命中两路的文档自然排前。HybridSearchEngine =
-FTSSearchEngine + (NLEmbedding | BGEM3) embedder + RRF 融合。
+| 2 | `FTSSearchEngine` + UI 能搜 | ✅ |
+| — | 语义/向量后端（bge-m3 / NLEmbedding / Hybrid / RRF） | ❌ 已移除 |
 
 ## 几个非显然的约定
 
@@ -104,7 +94,8 @@ FTSSearchEngine + (NLEmbedding | BGEM3) embedder + RRF 融合。
    SQLite overflow page 机制让"不读 = 0 成本"，明确列名拿到性能
 3. **`focused` 字段保留** —— 即使单显示器，它仍然区分"主动操作"和"背景常驻"
 4. **`StubPortraitDB` 已删** —— 仅在未来的 Tests target 中重建。Sources/ 永远是真 DB
-5. **`~/.portrait/imported/timeline/` 是只读 snapshot** —— 历史数据冻结在此，写盘只动 `portrait.sqlite` / `raw_data/`
+5. **screenpipe 历史数据直接 import 进 `portrait.sqlite` 的 `frames` 表** —— 用
+   `device_name='imported'` 标记区分（不复制媒体文件），写盘只动 `portrait.sqlite` / `raw_data/`
 
 ## 调用方进入点
 
@@ -132,6 +123,6 @@ sqlite3 ~/.portrait/portrait.sqlite
 # 看 FTS5 内部
 > SELECT * FROM frames_fts WHERE frames_fts MATCH '"hello"';
 
-# 调试模型下载
-log stream --predicate 'subsystem == "com.myportrait.db" AND category == "model"' --level info
+# 重建 frames_fts（migration / import 把它丢了时）
+# 通过 app 的 --rebuild-frames-fts 命令走 EmbedDumpCLI.runRebuildFramesFts
 ```
