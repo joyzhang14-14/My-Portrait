@@ -636,18 +636,20 @@ enum MPQueryCLI {
         let rows = db.audioTranscripts(around: mid, before: half, after: half)
         var out: [TranscriptResult] = []
         let qLower = q?.lowercased()
+        let wantSpeaker = speakerName?.trimmingCharacters(in: .whitespaces).lowercased()
         for r in rows {
             if let qLower, !r.text.lowercased().contains(qLower) { continue }
-            // speakerName 暂不可用(audioTranscripts 没 JOIN speakers),先返 nil。
-            // 后续如果要支持 --speaker 过滤,需在 TimelineDB 加 JOIN。
-            _ = speakerName
+            // --speaker 过滤:按名字 case-insensitive(audioTranscripts 现已 JOIN speakers)。
+            if let want = wantSpeaker, !want.isEmpty {
+                guard let nm = r.speakerName?.lowercased(), nm == want else { continue }
+            }
             out.append(.init(
                 timestamp: r.timestamp,
                 text: r.text,
                 device: r.device,
                 isInput: r.isInput,
                 speakerId: r.speakerId,
-                speakerName: nil
+                speakerName: r.speakerName
             ))
             if out.count >= limit { break }
         }
