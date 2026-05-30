@@ -873,6 +873,17 @@ enum DBSchema {
             }
         }
 
+        // v35 — writing_records.location:CLI 导入数据的会话/项目目录。
+        //
+        // cli_import(Claude Code / Codex)的 url 一律留空 → 前端按 (app,url)
+        // 聚成单一窗口,不再按文件夹炸出一堆窗口。文件夹路径改存这一列,只作
+        // 元数据展示,不参与分组。其它来源(OCR 采集)此列 NULL。
+        m.registerMigration("v35_writing_records_location") { db in
+            try db.alter(table: "writing_records") { t in
+                t.add(column: "location", .text)
+            }
+        }
+
         return m
     }
 }

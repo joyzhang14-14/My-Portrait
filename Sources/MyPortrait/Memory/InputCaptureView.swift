@@ -296,6 +296,7 @@ struct InputCaptureView: View {
     private func metadataRows(_ rec: WritingRecordViewRow) -> [(String, String)] {
         var rows: [(String, String)] = [("app", rec.app)]
         if let u = rec.url, !u.isEmpty { rows.append(("url", u)) }
+        if let loc = rec.location, !loc.isEmpty { rows.append(("location", loc)) }
         rows.append(("source", rec.source))
         rows.append(("confidence", String(format: "%.2f", rec.confidence)))
         rows.append(("start_ts", Self.timeString(rec.startTs)))

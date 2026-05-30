@@ -516,17 +516,18 @@ struct WritingCaptureStore: Sendable {
                 seen.insert(key)
                 try db.execute(sql: """
                     INSERT INTO writing_records
-                        (start_ts, end_ts, app, url, text, edit_log, confidence,
+                        (start_ts, end_ts, app, url, location, text, edit_log, confidence,
                          context_summary, source, kind, reference_typing_event_ids,
                          reference_frame_ids, reference_keystroke_range, raw_output,
                          prompt_id, created_at, worker_run_id)
-                    VALUES (:ts, :ts, :app, :url, :text, '[]', 1.0,
+                    VALUES (:ts, :ts, :app, :url, :location, :text, '[]', 1.0,
                             NULL, 'cli_import', :kind, '[]',
                             '[]', '{}', NULL,
                             'cli_import', :createdAt, 'cli_import')
                     """,
                     arguments: [
-                        "ts": row.tsMs, "app": row.app, "url": row.url, "text": row.text,
+                        "ts": row.tsMs, "app": row.app, "url": row.url,
+                        "location": row.location, "text": row.text,
                         "kind": CLIInputImporter.classifyKind(row.text),
                         "createdAt": createdAt,
                     ])
@@ -714,7 +715,7 @@ struct WritingCaptureStore: Sendable {
             return try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, start_ts, end_ts, app, url, text, edit_log, confidence,
+                    SELECT id, start_ts, end_ts, app, url, location, text, edit_log, confidence,
                            context_summary, source, kind, worker_run_id, created_at
                     FROM writing_records
                     WHERE app = :app \(urlMatch)
@@ -773,6 +774,7 @@ struct WritingCaptureStore: Sendable {
             id: r["id"],
             startTs: r["start_ts"], endTs: r["end_ts"],
             app: r["app"], url: r["url"],
+            location: r["location"],     // staged 表无此列 → GRDB 返回 nil
             text: r["text"], editLog: r["edit_log"],
             confidence: r["confidence"],
             contextSummary: r["context_summary"],
@@ -888,6 +890,7 @@ struct WritingRecordViewRow: Sendable, Identifiable {
     let endTs: Int64
     let app: String
     let url: String?
+    let location: String?            // cli_import 的会话/项目目录;其它来源 nil
     let text: String
     let editLog: String              // JSON
     let confidence: Double
