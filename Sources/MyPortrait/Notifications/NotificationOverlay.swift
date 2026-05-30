@@ -212,6 +212,21 @@ struct NotificationCardView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
+                // Mute 按钮:只对 cron job 通知出现,hover 才显形(跟 dismiss 同款)。
+                // 点击后把这条 cron job 标 muted=true,本条 banner 也一并 dismiss。
+                if let jobId = notification.cronJobId {
+                    Button {
+                        CronJobStore.shared.setMuted(jobId, true)
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textPrimary.opacity(hover ? 0.85 : 0.0))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Mute this cron job")
+                    .animation(.easeOut(duration: 0.15), value: hover)
+                }
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 13))

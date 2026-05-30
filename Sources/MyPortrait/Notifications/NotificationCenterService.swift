@@ -16,7 +16,7 @@ final class NotificationCenterService {
     static let shared = NotificationCenterService()
 
     enum Kind: Sendable {
-        case cronJobRun(jobName: String, body: String, convId: UUID)
+        case cronJobRun(jobId: UUID, jobName: String, body: String, convId: UUID)
         case appUpdate(version: String)
         case captureStall(reason: String)
         /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
@@ -50,17 +50,22 @@ final class NotificationCenterService {
         var onTap: (() -> Void)?
         var onTimeout: (() -> Void)? = nil
         var timeout = defaultTimeout
+        var cronJobId: UUID? = nil
 
         switch kind {
-        case let .cronJobRun(jobName, body_, convId):
+        case let .cronJobRun(jobId, jobName, body_, convId):
             guard n.cronJobAlerts else {
                 log.notice("post skipped: cronJobAlerts is OFF"); return
             }
-            guard !n.mutedCronJobs.contains(jobName) else {
-                log.notice("post skipped: '\(jobName, privacy: .public)' is muted"); return
+            // Mute 拦截:按 cron job id 查 CronJobStore.cronJobs.muted。
+            // 改名不丢状态,跟旧 byName 名单完全脱钩。
+            let muted = CronJobStore.shared.cronJobs.first { $0.id == jobId }?.muted ?? false
+            guard !muted else {
+                log.notice("post skipped: '\(jobName, privacy: .public)' muted by user"); return
             }
             title = "🛰️ \(jobName)"
             body = body_
+            cronJobId = jobId
             onTap = { [weak self] in self?.onCronJobTap(convId) }
 
         case let .appUpdate(version):
@@ -87,6 +92,7 @@ final class NotificationCenterService {
             body: body,
             createdAt: Date(),
             timeout: timeout,
+            cronJobId: cronJobId,
             onTap: onTap,
             onTimeout: onTimeout
         )
@@ -130,6 +136,9 @@ struct InAppNotification: Identifiable {
     let body: String
     let createdAt: Date
     let timeout: TimeInterval
+    /// 非 nil = 这条通知是 cron job 跑出来的,jobId 是源任务 id。
+    /// NotificationCardView 用它决定是否在 banner 上画 "Mute" 按钮。
+    let cronJobId: UUID?
     let onTap: (() -> Void)?
     /// 倒计时跑完(用户没 dismiss 也没 tap)时调。给 updateCountdown 用 ——
     /// 触发 NSApp.terminate → Sparkle install-on-quit 链路。

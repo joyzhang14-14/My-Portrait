@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NotificationsSettingsView: View {
     @State private var config = ConfigStore.shared
+    @State private var cronStore = CronJobStore.shared
 
     var body: some View {
         SettingsPage("Notifications",
@@ -39,21 +40,23 @@ struct NotificationsSettingsView: View {
                 title: "Muted cronJobs",
                 footnote: "Cron jobs added here won't trigger any notifications, no matter their configuration."
             ) {
-                if config.current.notifications.mutedCronJobs.isEmpty {
+                // 数据源切到 CronJobStore.muted。改名不丢状态、跟 ConfigStore
+                // 的老 mutedCronJobs(byName)名单完全脱钩。
+                let muted = cronStore.cronJobs.filter { $0.muted }
+                if muted.isEmpty {
                     Text("No muted cronJobs.")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textPrimary.opacity(0.5))
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
-                    ForEach(config.current.notifications.mutedCronJobs, id: \.self) { name in
-                        SettingsRow(name, icon: "speaker.slash") {
+                    ForEach(muted) { job in
+                        SettingsRow(job.name, icon: "speaker.slash") {
                             Button("Unmute") {
-                                config.mutate { $0.notifications.mutedCronJobs.removeAll { $0 == name } }
-                                
+                                cronStore.setMuted(job.id, false)
                             }
                             .font(.system(size: 11))
                         }
-                        if name != config.current.notifications.mutedCronJobs.last { SettingsDivider() }
+                        if job.id != muted.last?.id { SettingsDivider() }
                     }
                 }
             }
