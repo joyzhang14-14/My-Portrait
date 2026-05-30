@@ -208,6 +208,12 @@ struct MyPortraitApp: App {
         if args.contains("--wipe-personality-concepts") {
             WipePersonalityCLI.run()
         }
+        // DEV-ONLY: `--classify-dry-run` —— 跑 EventClassifier 但不写
+        // _folders/*.json。看看 LLM 会怎么分,有问题随手回滚(不需要回滚,
+        // dry-run 本来就不落盘)。
+        if args.contains("--classify-dry-run") {
+            EventClassifierCLI.dryRun()
+        }
         // `--import-default-cron-jobs` seeds the two built-in cronJobs into
         // CronJobStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-cron-jobs") {

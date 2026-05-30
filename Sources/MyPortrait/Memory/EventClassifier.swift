@@ -13,6 +13,9 @@ import Foundation
 /// **跑在 event job 之后、distill 之前**:有新事件就分,分完 distill。
 @MainActor
 final class EventClassifier {
+    /// dry-run CLI 等地方需要的默认值。生产 classifier 一律用 init 时传入。
+    static let defaultMinNewFolderEvents = 3
+
     /// 单批喂给 LLM 的未分组 event 上限。批太大 LLM 容易漏 / JSON 截断。
     /// 剩下的下一轮调度自然消化。
     let batchCap: Int
@@ -149,6 +152,49 @@ final class EventClassifier {
         return result
     }
 
+    // MARK: - Dry-run hooks (CLI 用,生产路径完全不触发)
+
+    /// dry-run 用:暴露 scan 结果(已分类计数 + 未分组事件列表),不调 LLM。
+    struct DryRunScan {
+        let classifiedCount: Int
+        let unclassified: [EventSummary]
+    }
+    func dryRunScan() -> DryRunScan {
+        let all = scanAllEvents()
+        let classified = EventFolderStore.classifiedEventPaths()
+        let unclassified = all.filter { !classified.contains($0.path) }
+        return DryRunScan(classifiedCount: classified.count, unclassified: unclassified)
+    }
+
+    /// dry-run 用:跟生产 classify() 一样调一次 LLM,返回**解析后的 Decision**
+    /// (不落盘、不删 LLM 提的未知 path)。
+    struct DryRunDecision {
+        struct Append { let folderSlug: String; let eventPaths: [String] }
+        struct New { let name: String; let description: String; let eventPaths: [String] }
+        let appendToExisting: [Append]
+        let newFolders: [New]
+    }
+    func dryRunLLM(
+        unclassified: [EventSummary],
+        existingFolders: [EventFolder]
+    ) async throws -> DryRunDecision {
+        let prompt = Self.buildPrompt(
+            unclassified: unclassified,
+            existingFolders: existingFolders,
+            minNewFolderEvents: minEventsForNewFolder
+        )
+        let raw = try await runLLM(prompt: prompt)
+        let parsed = try Self.parseDecision(from: raw)
+        return DryRunDecision(
+            appendToExisting: parsed.appendToExisting.map {
+                .init(folderSlug: $0.folderSlug, eventPaths: $0.eventPaths)
+            },
+            newFolders: parsed.newFolders.map {
+                .init(name: $0.name, description: $0.description, eventPaths: $0.eventPaths)
+            }
+        )
+    }
+
     // MARK: - Disk scan
 
     /// `events/<day>/*.md` 全扫。relativePath + title + summary + tags + day。
@@ -180,7 +226,8 @@ final class EventClassifier {
     }
 
     /// LLM 喂的 event 索引行 —— 不含全文,只索引。
-    private struct EventSummary: Sendable {
+    /// internal(默认)而非 private,让 dry-run CLI 也能拿到。
+    struct EventSummary: Sendable {
         let path: String     // "2026-05-26/foo.md"
         let title: String
         let summary: String
