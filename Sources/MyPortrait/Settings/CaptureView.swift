@@ -54,6 +54,44 @@ struct AudioCaptureSettingsView: View {
         ("ro","Romanian"),("ms","Malay"),("ta","Tamil"),("bg","Bulgarian"),("ca","Catalan"),
     ].map { TranscriptionLanguage(code: $0.0, name: $0.1) }
 
+    /// code → 显示名(在 whisper/deepgram 表里找,找不到回退大写 code)。
+    private static func displayName(for code: String) -> String {
+        whisperLanguages.first { $0.code == code }?.name
+            ?? deepgramLanguages.first { $0.code == code }?.name
+            ?? code.uppercased()
+    }
+
+    /// 勾选/取消某语言。
+    private func toggleLanguage(_ code: String, _ on: Bool) {
+        config.mutate {
+            var ls = $0.capture.audio.languages
+            if on { if !ls.contains(code) { ls.append(code) } }
+            else { ls.removeAll { $0 == code } }
+            $0.capture.audio.languages = ls
+        }
+    }
+
+    /// 选中语言的 chips(下方显示,点 × 移除)。
+    private var selectedLanguageChips: some View {
+        HStack(spacing: 6) {
+            ForEach(config.current.capture.audio.languages, id: \.self) { code in
+                HStack(spacing: 4) {
+                    Text(Self.displayName(for: code)).font(.system(size: 11))
+                    Button { toggleLanguage(code, false) } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.5))
+                    }.buttonStyle(.plain)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color.white.opacity(0.06))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 0.7)))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 48).padding(.bottom, 12)
+    }
+
     var body: some View {
         SettingsPage("Audio Capture", subtitle: "Microphone + transcription",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
@@ -222,21 +260,32 @@ struct AudioCaptureSettingsView: View {
                         }
                     }
                     SettingsDivider()
-                    SettingsRow("Language",
-                                description: "Whisper language hint. Auto-detect handles multilingual / mixed speech.",
+                    SettingsRow("Languages",
+                                description: "Pick the languages you speak. One → used as a Whisper hint; multiple or none → auto-detect.",
                                 icon: "character.bubble") {
-                        Picker("", selection: Binding(
-                            get: { config.current.capture.audio.languages.first ?? "" },
-                            set: { code in config.mutate {
-                                $0.capture.audio.languages = code.isEmpty ? [] : [code]
-                            } }
-                        )) {
-                            Text("Auto-detect").tag("")
+                        Menu {
                             ForEach(Self.languageOptions(for: engine)) { lang in
-                                Text(lang.name).tag(lang.code)
+                                Toggle(lang.name, isOn: Binding(
+                                    get: { config.current.capture.audio.languages.contains(lang.code) },
+                                    set: { on in toggleLanguage(lang.code, on) }
+                                ))
                             }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(config.current.capture.audio.languages.isEmpty
+                                     ? "Auto-detect"
+                                     : "\(config.current.capture.audio.languages.count) selected")
+                                    .font(.system(size: 12))
+                                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                            }
+                            .foregroundStyle(Theme.textPrimary.opacity(0.85))
                         }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
+                    // 选中的语言 chips 显示在下方,点 × 移除。
+                    if !config.current.capture.audio.languages.isEmpty {
+                        selectedLanguageChips
                     }
                         SettingsDivider()
                         SettingsRow("Batch transcription",

@@ -214,7 +214,10 @@ actor TranscriptionScheduler {
     private static func transcriptionConfig() async -> TranscribeSettings {
         await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
-            let lang = a.languages.first.flatMap { $0.isEmpty ? nil : $0 }
+            // 多选语言(来自 CaptureView):恰好选 1 种 → 用作 Whisper 提示;0 种或多种
+            // (如中英双语)→ nil = 自动检测(Whisper 无法同时提示多种语言)。
+            let langs = a.languages.filter { !$0.isEmpty }
+            let lang: String? = langs.count == 1 ? langs[0] : nil
             func secret(_ ref: String) -> String {
                 guard !ref.isEmpty, let d = SecretStore.shared.get(ref) else { return "" }
                 return String(data: d, encoding: .utf8) ?? ""
