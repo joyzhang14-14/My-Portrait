@@ -7,6 +7,14 @@ import GRDB
 /// 找不到 → 提示"未找到" + Pick folder 兜底。
 ///
 /// 只导比 My-Portrait 最早数据老的部分,从不动当前数据。
+/// CLI 导入进度 —— 读日志阶段 indeterminate,写库阶段 current/total。
+struct CLIImportProgress {
+    var label: String
+    var current: Int
+    var total: Int
+    var indeterminate: Bool
+}
+
 struct ImportSettingsView: View {
 
     @Environment(\.services) private var services
@@ -32,6 +40,9 @@ struct ImportSettingsView: View {
     // 上次导入时刻(= 该源已导记录的 MAX(start_ts)),卡片底部加粗显示。
     @State private var ccLastTs: Int64? = nil
     @State private var codexLastTs: Int64? = nil
+    // 导入进度(running 时实时更新);indeterminate=读日志阶段。
+    @State private var ccProgress: CLIImportProgress? = nil
+    @State private var codexProgress: CLIImportProgress? = nil
 
     var body: some View {
         SettingsPage(
@@ -78,6 +89,7 @@ struct ImportSettingsView: View {
                     count: cliScan?.claudeCode,
                     lastTs: ccLastTs,
                     running: ccRunning,
+                    progress: ccProgress,
                     status: ccStatus,
                     importAction: { await runImport(app: "claude-code") }
                 )
@@ -94,6 +106,7 @@ struct ImportSettingsView: View {
                     count: cliScan?.codex,
                     lastTs: codexLastTs,
                     running: codexRunning,
+                    progress: codexProgress,
                     status: codexStatus,
                     importAction: { await runImport(app: "codex-cli") }
                 )
@@ -117,6 +130,7 @@ struct ImportSettingsView: View {
         count: Int?,
         lastTs: Int64?,
         running: Bool,
+        progress: CLIImportProgress?,
         status: String?,
         importAction: @escaping () async -> Void
     ) -> some View {
@@ -132,7 +146,9 @@ struct ImportSettingsView: View {
                     .controlSize(.small)
                     .disabled(running || cliScanning)
             }
-            if cliScanning {
+            if running, let p = progress {
+                cliProgressBlock(p)              // 导入中:进度条优先
+            } else if cliScanning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Scanning session logs …")
@@ -173,6 +189,32 @@ struct ImportSettingsView: View {
         .padding(.vertical, 10)
     }
 
+    @ViewBuilder
+    private func cliProgressBlock(_ p: CLIImportProgress) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text(p.label)
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                if !p.indeterminate, p.total > 0 {
+                    Text("\(p.current.formatted()) / \(p.total.formatted())")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            if !p.indeterminate, p.total > 0 {
+                ProgressView(value: Double(p.current), total: Double(p.total))
+                    .progressViewStyle(.linear)
+                    .tint(Color.accentColor)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(Color.accentColor)
+            }
+        }
+    }
+
     private static func dateTimeString(_ ms: Int64) -> String {
         let d = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
         let fmt = DateFormatter()
@@ -181,8 +223,8 @@ struct ImportSettingsView: View {
         return fmt.string(from: d)
     }
 
-    private func rescanCLI() async {
-        cliScanning = true
+    private func rescanCLI(quiet: Bool = false) async {
+        if !quiet { cliScanning = true }
         let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
         let (result, sinceCC, sinceCodex) = await Task.detached(priority: .userInitiated) {
             var sinceCC: Int64? = nil, sinceCodex: Int64? = nil
@@ -203,13 +245,19 @@ struct ImportSettingsView: View {
     /// 单源导入 —— app 取 "claude-code" 或 "codex-cli"。
     private func runImport(app: String) async {
         let isCC = app == "claude-code"
-        if isCC { ccRunning = true; ccStatus = "Reading session logs…" }
-        else { codexRunning = true; codexStatus = "Reading history…" }
-        defer { if isCC { ccRunning = false } else { codexRunning = false } }
+        func setStatus(_ s: String?) { if isCC { ccStatus = s } else { codexStatus = s } }
+        func setProgress(_ p: CLIImportProgress?) { if isCC { ccProgress = p } else { codexProgress = p } }
+
+        if isCC { ccRunning = true } else { codexRunning = true }
+        setStatus(nil)
+        setProgress(CLIImportProgress(label: "Reading session logs…", current: 0, total: 0, indeterminate: true))
+        defer {
+            if isCC { ccRunning = false } else { codexRunning = false }
+            setProgress(nil)
+        }
 
         guard let dbImpl = services?.db as? PortraitDBImpl else {
-            let msg = "Portrait DB not available."
-            if isCC { ccStatus = msg } else { codexStatus = msg }
+            setStatus("Portrait DB not available.")
             return
         }
         let dbPool = dbImpl.dbPool
@@ -221,16 +269,21 @@ struct ImportSettingsView: View {
                 let rows = isCC
                     ? CLIInputImporter.collectClaudeCode(since: since)
                     : CLIInputImporter.collectCodex(since: since)
-                return try store.insertCLIImported(rows)
+                // 写库阶段:确定性进度条。回调跳回 MainActor 更新 @State。
+                return try store.insertCLIImported(rows) { current, total in
+                    Task { @MainActor in
+                        let p = CLIImportProgress(
+                            label: "Importing…", current: current, total: total, indeterminate: false)
+                        if isCC { self.ccProgress = p } else { self.codexProgress = p }
+                    }
+                }
             }.value
         } catch {
-            let msg = "Failed: \(error.localizedDescription)"
-            if isCC { ccStatus = msg } else { codexStatus = msg }
+            setStatus("Failed: \(error.localizedDescription)")
             return
         }
-        let msg = "Done. \(result.inserted) imported, \(result.skipped) already present."
-        if isCC { ccStatus = msg } else { codexStatus = msg }
-        await rescanCLI()
+        setStatus("Done. \(result.inserted) imported, \(result.skipped) already present.")
+        await rescanCLI(quiet: true)   // 静默刷新游标/计数,不再闪 scan spinner
     }
 
     // MARK: scan UI
