@@ -26,15 +26,12 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(
                 title: "Diagnostics",
-                footnote: "May produce false positives — useful while iterating on the capture engine."
+                footnote: "Backed by StallDetector (Capture → Health for live metrics). 60s throttle per stall kind."
             ) {
                 SettingsRow("Capture stalls",
                             description: "Alert when audio or screen capture stops unexpectedly.",
                             icon: "exclamationmark.triangle") {
-                    HStack(spacing: 6) {
-                        NotWiredBadge()
-                        Toggle("", isOn: config.binding(\.notifications.captureStalls)).labelsHidden().toggleStyle(.switch)
-                    }
+                    Toggle("", isOn: config.binding(\.notifications.captureStalls)).labelsHidden().toggleStyle(.switch)
                 }
             }
 
@@ -64,18 +61,3 @@ struct NotificationsSettingsView: View {
     }
 }
 
-/// Pill that flags a toggle whose backend isn't connected yet. Currently
-/// only used for `captureStalls` —— `appUpdates` 已经接到 Sparkle
-/// didFindValidUpdate。capture stall watchdog 还没写,等 capture 引擎加
-/// 心跳检测后这块也能去掉。
-private struct NotWiredBadge: View {
-    var body: some View {
-        Text("NOT WIRED")
-            .font(.system(size: 8, weight: .bold, design: .monospaced))
-            .tracking(0.8)
-            .foregroundStyle(Color.orange.opacity(0.85))
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(Capsule().stroke(Color.orange.opacity(0.45), lineWidth: 0.8))
-            .help("UI saves the setting; no backend hooked up yet.")
-    }
-}
