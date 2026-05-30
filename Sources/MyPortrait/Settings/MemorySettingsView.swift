@@ -514,7 +514,18 @@ struct MemorySettingsView: View {
     /// 不走 MemoryStaging(没什么好审的,folder 改错改 json 一行就回)。
     @ViewBuilder
     private var classifierBlock: some View {
-        let pendingReview = MemoryStaging.hasPending(.classify)
+        // 三状态分离:
+        //   schedulerRunning — MemoryScheduler 持有的"在跑"flag。前端 View
+        //     没显式触发时,scheduler tick 也可能在后台跑(@Observable 自动重渲)。
+        //   hasStagingSnap — beginRun 拍了快照(可能跑中,可能跑完等审)。
+        //   pendingReviewBanner — 真有非空改动可审 → Approve/Reject 按钮才出。
+        //     跑中不出 banner (横幅 "0/0" 误导用户以为啥也没发生)。
+        let schedulerRunning = MemoryScheduler.shared.classifyRunning
+        let hasStagingSnap = MemoryStaging.hasPending(.classify)
+        let isRunning = classifyRunning || schedulerRunning
+        let pendingReviewBanner = hasStagingSnap
+            && !isRunning
+            && (classifyLastResult?.classifiedInThisRun ?? 0) > 0
         VStack(spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -527,18 +538,17 @@ struct MemorySettingsView: View {
                 }
                 Spacer(minLength: 12)
                 let disabledReason: String? = {
-                    if classifyRunning { return "Event classifier is already running." }
-                    if pendingReview { return "Pending review — Approve / Reject first." }
+                    if isRunning { return "Event classifier is already running." }
+                    if pendingReviewBanner { return "Pending review — Approve / Reject first." }
                     if !hasClassifyWork { return "All events already classified — nothing to do." }
-                    // 跟 event job 互斥,跟 distill/personality 不挡。
                     if runningTriggers.contains(.eventProcessing) {
                         return "Waiting for event job to finish."
                     }
                     return nil
                 }()
                 let label: String = {
-                    if classifyRunning { return "Running…" }
-                    if pendingReview { return "Pending review" }
+                    if isRunning { return "Running…" }
+                    if pendingReviewBanner { return "Pending review" }
                     return "Run"
                 }()
                 Button(label) {
@@ -551,10 +561,20 @@ struct MemorySettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Pending review 横幅 —— 跟 reviewSection 那种"per-file 行"不同,
-            // classify 的 diff 已经在下面 deltas 那个卡片里画出来了,这里只
-            // 出 Approve/Reject 两个按钮。
-            if pendingReview {
+            // 跑中:spinner + 解释,不出 banner。
+            if isRunning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Classifying events into folders… can take several minutes for the full catalog.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 6)
+            }
+
+            // Pending review:跑完 + 有真改动 + 不在跑 才显示 Approve/Reject。
+            if pendingReviewBanner {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -574,17 +594,6 @@ struct MemorySettingsView: View {
                 )
                 .padding(.top, 4)
             }
-
-            if classifyRunning {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Single LLM call — usually 10-30 seconds.")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, 6)
-            }
             if !classifyStatus.isEmpty {
                 Text(classifyStatus)
                     .font(.system(size: 11, design: .monospaced))
@@ -599,7 +608,7 @@ struct MemorySettingsView: View {
             // **只在 Pending review 期间显示** —— 一旦 Approve 提交,这些就是
             // "已入库的历史改动",在 Run now 区再挂着就是噪音(用户原话:
             // "如果已经入库了就不要在 run now 区域显示改动了")。
-            if pendingReview, let r = classifyLastResult {
+            if pendingReviewBanner, let r = classifyLastResult {
                 Divider().padding(.vertical, 4)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 12) {
