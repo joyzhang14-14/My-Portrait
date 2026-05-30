@@ -22,15 +22,17 @@ struct SpeakersSettingsView: View {
         guard !q.isEmpty else { return rows }
         return rows.filter { ($0.name ?? "").lowercased().contains(q) }
     }
-    /// "已命名簇"(name != "") —— 驱动下面 IDENTIFIED 列表。含 voice training
-    /// 命名的 + diarization 自动建后用户手动 rename 的。**有名字 ≠ 训练过**:
-    /// 头部"X speakers trained"另算(见 voiceTrainedCount)。
-    /// "未识别"= 真匿名簇(name == "")
-    private var identified:   [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty == false } }
-    private var unidentified: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
-    /// 真·语音训练过的数量 —— 只数 trained_at_ms 非空(用户真跑过 voice training),
-    /// 不是"有名字的簇数"。跟 search / 簇总数无关(绝对数)。loadSpeakers 已过滤
-    /// hallucination=0,被"删除"软删的训练声纹不计入(它已不参与匹配)。
+    /// 三段切分(trained_at_ms / name 两条正交轴):
+    ///   - trainedVoices:你真跑过 voice training 的声纹(资产,要保护、删要确认)。
+    ///   - namedClusters:diarization 自动建后被命名、但没训练过的簇(可随意管理)。
+    ///   - unidentified:真匿名簇(name == "")。
+    /// trained 一定有名字(训练强制先输名),所以从"有名"里按 trainedAt 再切一刀。
+    private var trainedVoices: [SpeakerRow] { filtered.filter { $0.trainedAt != nil } }
+    private var namedClusters: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty == false && $0.trainedAt == nil } }
+    private var unidentified:  [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
+    /// 真·语音训练过的数量 —— 只数 trained_at_ms 非空(用户真跑过 voice training)。
+    /// 绝对数,不受 search 影响。loadSpeakers 已过滤 hallucination=0,被软删的训练
+    /// 声纹不计入(它已不参与匹配)。
     private var voiceTrainedCount: Int { rows.filter { $0.trainedAt != nil }.count }
 
     var body: some View {
@@ -41,9 +43,21 @@ struct SpeakersSettingsView: View {
                 existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty }
             )
 
-            if !unidentified.isEmpty {
-                AttentionBanner(count: unidentified.count)
+            // ① 你训练的声纹 —— 资产,置顶。删除走二次确认(IdentifiedRow.trained)。
+            if !trainedVoices.isEmpty {
+                SectionLabel("YOUR TRAINED VOICES",
+                             subtitle: "Voiceprints you recorded — used to recognise you in transcripts. Removal is confirmed.")
+                VStack(spacing: 6) {
+                    ForEach(trainedVoices) { r in
+                        IdentifiedRow(row: r, trained: true,
+                                      onRename: { newName in rename(r, to: newName) },
+                                      onDelete: { markHallucination(r) },
+                                      onMerge: { similarId in merge(r, with: similarId) })
+                    }
+                }
             }
+
+            toolbar
 
             if let err = organizeError {
                 Text(err)
@@ -51,9 +65,25 @@ struct SpeakersSettingsView: View {
                     .foregroundStyle(Color.red.opacity(0.85))
             }
 
-            toolbar
+            // ② diarization 自动识别 + 你命名、但没训练过的簇 —— 可随意管理。
+            SectionLabel("DETECTED SPEAKERS",
+                         subtitle: namedClusters.isEmpty
+                            ? "Auto-detected voices you've named will show up here."
+                            : "\(namedClusters.count) named cluster\(namedClusters.count == 1 ? "" : "s") from auto-detection.")
+            if !namedClusters.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(namedClusters) { r in
+                        IdentifiedRow(row: r, trained: false,
+                                      onRename: { newName in rename(r, to: newName) },
+                                      onDelete: { markHallucination(r) },
+                                      onMerge: { similarId in merge(r, with: similarId) })
+                    }
+                }
+            }
 
+            // ③ 真匿名簇 —— 给名字或标为误判。
             if !unidentified.isEmpty {
+                AttentionBanner(count: unidentified.count)
                 SectionLabel("UNIDENTIFIED CLUSTERS",
                              subtitle: "Name these voice clusters so they're linked across recordings.")
                 VStack(spacing: 8) {
@@ -61,21 +91,6 @@ struct SpeakersSettingsView: View {
                         UnidentifiedCard(row: r,
                                          onName: { newName in rename(r, to: newName) },
                                          onHallucination: { markHallucination(r) })
-                    }
-                }
-            }
-
-            SectionLabel("IDENTIFIED",
-                         subtitle: identified.isEmpty
-                            ? "None yet — name your first cluster above."
-                            : "\(identified.count) speaker\(identified.count == 1 ? "" : "s") recognised.")
-            if !identified.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(identified) { r in
-                        IdentifiedRow(row: r,
-                                      onRename: { newName in rename(r, to: newName) },
-                                      onDelete: { markHallucination(r) },
-                                      onMerge: { similarId in merge(r, with: similarId) })
                     }
                 }
             }
@@ -371,6 +386,9 @@ private struct UnidentifiedCard: View {
 
 private struct IdentifiedRow: View {
     let row: SpeakerRow
+    /// 这行是不是用户真训练过的声纹(trained_at_ms 非空)。true → 加 Trained 徽标 +
+    /// 删除要二次确认,防误删训练资产。
+    var trained: Bool = false
     let onRename: (String) -> Void
     let onDelete: () -> Void
     /// 把参数指定的相似说话人合并进本行说话人。
@@ -378,6 +396,7 @@ private struct IdentifiedRow: View {
     @State private var editing = false
     @State private var draft = ""
     @State private var hover = false
+    @State private var confirmingDelete = false
     @State private var showMerge = false
     @State private var similar: [SimilarSpeaker] = []
     @State private var loadingSimilar = false
@@ -421,9 +440,19 @@ private struct IdentifiedRow: View {
                     }
                     .onExitCommand { editing = false }
             } else {
-                Text(row.name ?? "Unknown")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                HStack(spacing: 6) {
+                    Text(row.name ?? "Unknown")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                    if trained {
+                        Text("Trained")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.green.opacity(0.95))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.green.opacity(0.15))
+                                .overlay(Capsule().stroke(Color.green.opacity(0.40), lineWidth: 0.6)))
+                    }
+                }
             }
 
             HStack(spacing: 4) {
@@ -458,7 +487,10 @@ private struct IdentifiedRow: View {
                 }
                 .buttonStyle(.bouncyIcon)
                 .popover(isPresented: $showMerge, arrowEdge: .bottom) { mergePopover }
-                Button(role: .destructive, action: onDelete) {
+                Button(role: .destructive) {
+                    // 训练声纹:先确认,防误删资产。普通簇:沿用原行为直接软删。
+                    if trained { confirmingDelete = true } else { onDelete() }
+                } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textPrimary.opacity(0.70))
@@ -474,6 +506,15 @@ private struct IdentifiedRow: View {
                     .stroke(Color.white.opacity(0.10), lineWidth: 0.7))
         )
         .onHover { hover = $0 }
+        .confirmationDialog(
+            "Remove trained voiceprint?",
+            isPresented: $confirmingDelete, titleVisibility: .visible
+        ) {
+            Button("Remove voiceprint", role: .destructive) { onDelete() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("“\(row.name ?? "This voice")” will stop being used to recognise you in transcripts, and your trained count drops by one. The recording stays on disk — re-run Voice Training to set it up again.")
+        }
     }
 
     @ViewBuilder private var mergePopover: some View {
