@@ -525,7 +525,9 @@ private struct FolderDisclosureRow: View {
     var body: some View {
         VStack(spacing: 0) {
             // 头部:点击切换展开。整行可点。
-            Button(action: { withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() } }) {
+            // **不 withAnimation** —— 同时动画 N 个 EntryRow 的 opacity/transform
+            // 在 N=40+ 时帧预算爆炸,scroll 完全卡死。瞬时切换无肉眼可见瑕疵。
+            Button(action: { expanded.toggle() }) {
                 HStack(spacing: 10) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
@@ -564,15 +566,21 @@ private struct FolderDisclosureRow: View {
             }
             .buttonStyle(.plain)
 
-            // 展开后的事件列表 —— 每行左侧多留一点缩进对齐 chevron。
+            // 展开后的事件列表 —— **嵌一层 LazyVStack** 让子项也按需渲染。
+            // folder 大的能去到 40+ events,外层 LazyVStack 只 lazy 到
+            // FolderDisclosureRow 这一层,内部 ForEach 默认 eager 全 materialize
+            // 一上来 scroll 时 SwiftUI 算整个子树 layout → 100% 卡死。
+            // 嵌套 LazyVStack 在 macOS 12+ 完全支持。
             if expanded {
-                ForEach(entries) { entry in
-                    EntryRow(entry: entry, selected: selected == entry.id)
-                        .padding(.leading, 22)   // 跟 chevron 缩对齐
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelect(entry) }
-                    Divider().background(Color.primary.opacity(0.05))
-                        .padding(.leading, 22)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(entries) { entry in
+                        EntryRow(entry: entry, selected: selected == entry.id)
+                            .padding(.leading, 22)   // 跟 chevron 缩对齐
+                            .contentShape(Rectangle())
+                            .onTapGesture { onSelect(entry) }
+                        Divider().background(Color.primary.opacity(0.05))
+                            .padding(.leading, 22)
+                    }
                 }
             }
         }

@@ -301,8 +301,13 @@ final class EventClassifier {
 
     // MARK: - Disk scan
 
+    /// 低于这个权重的事件不进 classifier —— 都是日常零碎(查 wechat / 听音乐 /
+    /// 短暂浏览),进 folder 是噪音。用户原话:"weight 低于 3 的不需要分 folder"。
+    static let minWeightForClassification: Double = 3.0
+
     /// `events/<day>/*.md` 全扫。relativePath + title + summary + tags + day。
     /// 跳 `_folders` / `_archive` 等下划线开头的目录(metadata,不是事件)。
+    /// **过滤掉 weight < minWeightForClassification 的事件**。
     private func scanAllEvents() -> [EventSummary] {
         let fm = FileManager.default
         let root = Storage.eventsDir
@@ -314,6 +319,8 @@ final class EventClassifier {
             for name in files where name.hasSuffix(".md") {
                 let url = dayURL.appendingPathComponent(name)
                 guard let file = try? PortraitFileIO.read(from: url) else { continue }
+                // 权重门槛:程序化过滤,LLM 看不到这些事件。
+                guard file.weight >= Self.minWeightForClassification else { continue }
                 // body 头几十字符兜底,极少数老文件 eventTitle/eventSummary 为空。
                 let fallback = String(file.body.prefix(120))
                     .trimmingCharacters(in: .whitespacesAndNewlines)

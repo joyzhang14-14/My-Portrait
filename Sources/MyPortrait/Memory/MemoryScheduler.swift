@@ -336,8 +336,10 @@ final class MemoryScheduler {
         return !allEvents.subtracting(classified).isEmpty
     }
 
-    /// 给 classifierJobHasWork 用的轻量扫盘 —— 只列 events/<day>/*.md 的
-    /// 相对路径,不读文件内容。
+    /// 给 classifierJobHasWork 用的扫盘 —— 列 events/<day>/*.md 的相对路径。
+    /// **过滤 weight < EventClassifier.minWeightForClassification 的事件** ——
+    /// 跟 EventClassifier.scanAllEvents 用同一门槛,否则会假阳判定"有活",
+    /// 但 classifier 实跑发现 0 个未分组高权重事件 → 空跑烧 token。
     private func scanAllEventPaths() -> Set<String> {
         let fm = FileManager.default
         let root = Storage.eventsDir
@@ -347,6 +349,10 @@ final class MemoryScheduler {
             let dayURL = root.appendingPathComponent(day, isDirectory: true)
             guard let files = try? fm.contentsOfDirectory(atPath: dayURL.path) else { continue }
             for name in files where name.hasSuffix(".md") {
+                let url = dayURL.appendingPathComponent(name)
+                guard let file = try? PortraitFileIO.read(from: url),
+                      file.weight >= EventClassifier.minWeightForClassification
+                else { continue }
                 out.insert("\(day)/\(name)")
             }
         }
