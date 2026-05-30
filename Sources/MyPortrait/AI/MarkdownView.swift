@@ -298,7 +298,25 @@ enum MDBlock {
 }
 
 enum MarkdownParser {
+    /// 流式渲染时整条 transcript 每帧重渲染(ChatBubble 非 Equatable),已定稿
+    /// 消息的 source 不变 → 按 source memo,避免每帧重解析所有历史消息。只有
+    /// 正在流的那条 source 在变会重解析(单条,可接受)。NSCache 有界 + 线程安全。
+    private final class BlocksBox { let blocks: [MDBlock]; init(_ b: [MDBlock]) { self.blocks = b } }
+    nonisolated(unsafe) private static let cache: NSCache<NSString, BlocksBox> = {
+        let c = NSCache<NSString, BlocksBox>()
+        c.countLimit = 128
+        return c
+    }()
+
     static func parse(_ source: String) -> [MDBlock] {
+        let key = source as NSString
+        if let hit = cache.object(forKey: key) { return hit.blocks }
+        let blocks = parseUncached(source)
+        cache.setObject(BlocksBox(blocks), forKey: key)
+        return blocks
+    }
+
+    static func parseUncached(_ source: String) -> [MDBlock] {
         var blocks: [MDBlock] = []
         let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var i = 0
