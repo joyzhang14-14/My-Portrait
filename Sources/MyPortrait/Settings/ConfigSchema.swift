@@ -277,6 +277,11 @@ struct SchedulerConfig: Codable, Equatable {
 struct SchedulerSettings: Codable, Equatable {
     var event:          SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
+    /// EventClassifier:event 之后 / distill 之前的项目分组(_folders/*.json)。
+    /// 默认 daily 跟 event 同节奏 —— event 跑完就有新事件等着分组,等到下一
+    /// 个 portrait/personality 触发再 distill 完整,链条对齐。
+    var classify:       SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:30",
+                                                dayOfWeek: 0, dayOfMonth: 1)
     var portrait:       SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
@@ -292,7 +297,7 @@ struct SchedulerSettings: Codable, Equatable {
                                                 dayOfWeek: 0, dayOfMonth: 1)
     init() {}
     enum CodingKeys: String, CodingKey {
-        case event, portrait, personality
+        case event, classify, portrait, personality
         case writingCapture = "writing_capture"
         case speechStyle    = "speech_style"
     }
@@ -300,6 +305,7 @@ struct SchedulerSettings: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         event          = c.dflt(SchedulerConfig.self, .event,          event)
+        classify       = c.dflt(SchedulerConfig.self, .classify,       classify)
         portrait       = c.dflt(SchedulerConfig.self, .portrait,       portrait)
         personality    = c.dflt(SchedulerConfig.self, .personality,    personality)
         writingCapture = c.dflt(SchedulerConfig.self, .writingCapture, writingCapture)

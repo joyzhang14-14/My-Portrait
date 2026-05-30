@@ -42,6 +42,7 @@ enum ProcessingStage: String, CaseIterable, Sendable {
     case raw
     case event
     case impact
+    case classify     // event 之后 / distill 之前:按项目归 events 到 _folders/*.json
     case distill
     case personality
 
@@ -54,6 +55,7 @@ struct ProcessingLogRow: Sendable {
     var raw: ProcessingStatus = .idle
     var event: ProcessingStatus = .idle
     var impact: ProcessingStatus = .idle
+    var classify: ProcessingStatus = .idle    // 仅 _classify_anchor 行有意义
     var distill: ProcessingStatus = .idle
     var personality: ProcessingStatus = .idle
     var activeProcessor: String? = nil   // 非空 = 有处理器持锁
@@ -64,19 +66,21 @@ struct ProcessingLogRow: Sendable {
 
     func status(of stage: ProcessingStage) -> ProcessingStatus {
         switch stage {
-        case .raw:     return raw
-        case .event:   return event
-        case .impact:  return impact
-        case .distill: return distill
+        case .raw:         return raw
+        case .event:       return event
+        case .impact:      return impact
+        case .classify:    return classify
+        case .distill:     return distill
         case .personality: return personality
         }
     }
 
-    /// 是否为 distill 锚行（而非某个数据日的行）。锚行只用 `distill` 列；
+    /// 是否为锚行（而非某个数据日的行）。锚行只用对应阶段列;
     /// 日期行只用 `raw` / `event` / `impact` 列。
     var isAnchor: Bool {
         date == ProcessingLogStore.distillAnchorDate
             || date == ProcessingLogStore.personalityAnchorDate
+            || date == ProcessingLogStore.classifyAnchorDate
     }
 }
 
@@ -92,6 +96,11 @@ struct ProcessingLogStore: Sendable {
     /// personality 锚行的 `date` 值。personality 是 distill 后一站、一次性整体
     /// 操作(非 per-day),锁 / 状态 / retry 记在这一行的 `personality_status` 列。
     static let personalityAnchorDate = "_personality_anchor"
+
+    /// classify 锚行的 `date` 值。classify(EventClassifier)是 event 后 /
+    /// distill 前的整体操作,把未分组 events 归到 _folders/*.json。锁 / 状态 /
+    /// retry 记在这一行的 `classify_status` 列。
+    static let classifyAnchorDate = "_classify_anchor"
 
     let dbPath: String
 
@@ -134,7 +143,7 @@ struct ProcessingLogStore: Sendable {
 
         let sql = """
             SELECT date, raw_status, event_status, impact_status, distill_status,
-                   personality_status,
+                   personality_status, classify_status,
                    active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms
             FROM processing_log WHERE date = ?
             """
@@ -156,7 +165,7 @@ struct ProcessingLogStore: Sendable {
 
         let sql = """
             SELECT date, raw_status, event_status, impact_status, distill_status,
-                   personality_status,
+                   personality_status, classify_status,
                    active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms
             FROM processing_log ORDER BY date ASC
             """
@@ -183,15 +192,16 @@ struct ProcessingLogStore: Sendable {
         row.impact  = status(3)
         row.distill = status(4)
         row.personality = status(5)
-        row.activeProcessor = text(6)
-        if let cp = text(7), let data = cp.data(using: .utf8),
+        row.classify = status(6)
+        row.activeProcessor = text(7)
+        if let cp = text(8), let data = cp.data(using: .utf8),
            let ids = try? JSONDecoder().decode([String].self, from: data) {
             row.checkpoint = ids
         }
-        row.heartbeatMs = sqlite3_column_type(stmt, 8) == SQLITE_NULL
-            ? nil : sqlite3_column_int64(stmt, 8)
-        row.retryCount = Int(sqlite3_column_int64(stmt, 9))
-        row.updatedAtMs = sqlite3_column_int64(stmt, 10)
+        row.heartbeatMs = sqlite3_column_type(stmt, 9) == SQLITE_NULL
+            ? nil : sqlite3_column_int64(stmt, 9)
+        row.retryCount = Int(sqlite3_column_int64(stmt, 10))
+        row.updatedAtMs = sqlite3_column_int64(stmt, 11)
         return row
     }
 
@@ -204,9 +214,9 @@ struct ProcessingLogStore: Sendable {
             let sql = """
                 INSERT OR REPLACE INTO processing_log
                   (date, raw_status, event_status, impact_status, distill_status,
-                   personality_status,
+                   personality_status, classify_status,
                    active_processor, checkpoint, heartbeat_ms, retry_count, updated_at_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
@@ -218,21 +228,22 @@ struct ProcessingLogStore: Sendable {
             sqlite3_bind_text(stmt, 4, row.impact.rawValue, -1, PL_SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 5, row.distill.rawValue, -1, PL_SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 6, row.personality.rawValue, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 7, row.classify.rawValue, -1, PL_SQLITE_TRANSIENT)
             if let p = row.activeProcessor {
-                sqlite3_bind_text(stmt, 7, p, -1, PL_SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 8, p, -1, PL_SQLITE_TRANSIENT)
             } else {
-                sqlite3_bind_null(stmt, 7)
+                sqlite3_bind_null(stmt, 8)
             }
             let cpJSON = (try? JSONEncoder().encode(row.checkpoint))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-            sqlite3_bind_text(stmt, 8, cpJSON, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 9, cpJSON, -1, PL_SQLITE_TRANSIENT)
             if let hb = row.heartbeatMs {
-                sqlite3_bind_int64(stmt, 9, hb)
+                sqlite3_bind_int64(stmt, 10, hb)
             } else {
-                sqlite3_bind_null(stmt, 9)
+                sqlite3_bind_null(stmt, 10)
             }
-            sqlite3_bind_int64(stmt, 10, Int64(row.retryCount))
-            sqlite3_bind_int64(stmt, 11, Self.nowMs())
+            sqlite3_bind_int64(stmt, 11, Int64(row.retryCount))
+            sqlite3_bind_int64(stmt, 12, Self.nowMs())
             return sqlite3_step(stmt) == SQLITE_DONE
         }
     }
