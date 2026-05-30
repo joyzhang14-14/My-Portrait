@@ -1170,7 +1170,7 @@ private struct ThinkingCard: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.82))
                 Spacer()
                 if block.isRunning {
-                    ProgressView().controlSize(.small).tint(.white.opacity(0.7))
+                    ProgressView().controlSize(.small).tint(Theme.textSecondary)
                 }
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
@@ -1342,7 +1342,7 @@ private struct ToolCard: View {
             ProgressView()
                 .progressViewStyle(.circular)
                 .controlSize(.small)
-                .tint(.white.opacity(0.7))
+                .tint(Theme.textSecondary)
         } else if block.isError {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 13)).foregroundStyle(Color.red.opacity(0.85))
