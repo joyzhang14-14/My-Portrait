@@ -494,6 +494,16 @@ enum WritingCapturePrompts {
     keep it — autocorrect/predictive/IME mean real typing rarely matches exactly.
     Only drop when the keystrokes have nothing to do with the text at all.
 
+    ALSO DISCARD — CODE / COMMANDS (not natural-language writing):
+    We only want the user's NATURAL-LANGUAGE writing (messages, notes, essays,
+    prose). DISCARD a record whose text is source code, shell/terminal commands,
+    config, or programming output — even if the user typed it. Tells: shell
+    commands (`uv install ...`, `cd`, `git ...`, `npm`, `pip`, `pre-commit`),
+    code syntax (brackets/semicolons/`def`/`func`/`import`/`=>`/JSON/YAML),
+    file paths, an IDE/terminal app (e.g. VS Code, Terminal, iTerm), or text that
+    reads as code rather than a sentence. Mixed: if it's mostly prose with an
+    inline code token, KEEP; if it's mostly code/commands, DISCARD.
+
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
       "kept": ["<record_id>", ...],

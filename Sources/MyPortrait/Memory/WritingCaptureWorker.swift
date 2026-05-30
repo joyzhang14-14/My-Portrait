@@ -287,7 +287,7 @@ final class WritingCaptureWorker {
 
         // 6a. edit_log 重建 + authoring 过滤(确定性):ax edit_log 从 typing_events
         // 补全;没有 commit/delete 的(粘贴/OCR/AI)直接丢。
-        let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing)
+        let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing, keys: raw.keys)
         recordsByGroupIdx = editLogFilter.records
         let editLogDropped = editLogFilter.dropped
         workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
@@ -625,7 +625,7 @@ final class WritingCaptureWorker {
         }
 
         // 6a. edit_log 重建 + authoring 过滤(确定性)
-        let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing)
+        let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing, keys: raw.keys)
         recordsByGroupIdx = editLogFilter.records
         let editLogDropped = editLogFilter.dropped
         workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
@@ -957,7 +957,8 @@ final class WritingCaptureWorker {
     ///    delete)留;纯粘贴一坨(paste-only / 空)→ 丢。
     nonisolated static func refineAndFilterByEditLog(
         _ recordsByGroupIdx: [[WritingCaptureRecord]],
-        typing: [TypingEvent]
+        typing: [TypingEvent],
+        keys: [KeystrokeEntry]
     ) -> (records: [[WritingCaptureRecord]], dropped: [WritingCaptureDiscarded]) {
         struct RawEntry: Decodable { let ts: Int64?; let kind: String?; let text: String? }
         let byId = Dictionary(typing.compactMap { e in e.id.map { ($0, e) } },
@@ -981,17 +982,63 @@ final class WritingCaptureWorker {
                     if !entries.isEmpty { editLog = entries.sorted { $0.ts < $1.ts } }
                 }
                 let hasAuthoring = editLog.contains { $0.kind == "commit" || $0.kind == "delete" }
-                if hasAuthoring {
+                // canvas(OCR 重建)record:keystroke 跟 text 必须有对应。窗口击键拼成
+                // 的串和 record.text 一个 ≥3 长公共子串都没有 = OCR 抓了无关屏幕内容
+                // (弹窗/页面文字),haiku 偶尔判不出 → 算法层兜底丢。中文 IME 情形
+                // (text 含 CJK 且击键有 ascii 字母)放过,不硬判。
+                let canvasOrphan = (rec.source == "canvas_fusion" || rec.source == "merged")
+                    && Self.keystrokeOrphan(rec: rec, keys: keys)
+                if hasAuthoring && !canvasOrphan {
                     keptGroup.append(Self.withEditLog(rec, editLog))
                 } else {
                     dropped.append(WritingCaptureDiscarded(
-                        reason: "no authoring edits in edit_log (pasted / OCR / AI content, not typed)",
+                        reason: canvasOrphan
+                            ? "canvas OCR text has no keystroke correspondence (unrelated on-screen text)"
+                            : "no authoring edits in edit_log (pasted / OCR / AI content, not typed)",
                         sessionIds: [], preview: String(rec.text.prefix(200))))
                 }
             }
             outRecs.append(keptGroup)
         }
         return (outRecs, dropped)
+    }
+
+    /// canvas record 的窗口击键跟 record.text 是否"完全对不上"(零对应)。
+    /// 保守:只在极端情形返回 true —— 窗口里有击键(≥5)、但击键串与 text 没有
+    /// 任何 ≥3 长公共子串,且非中文 IME 情形(text 含 CJK + 击键含 ascii 字母 →
+    /// 放过,拼音对汉字字符层面本就不重叠)。
+    nonisolated static func keystrokeOrphan(
+        rec: WritingCaptureRecord, keys: [KeystrokeEntry]
+    ) -> Bool {
+        let windowKeys = keys.filter {
+            $0.tsMs >= rec.startTs && $0.tsMs <= rec.endTs && $0.bundleId == rec.app
+                && ($0.modifiers & 0x7) == 0 && $0.isBackspace == 0
+        }
+        guard windowKeys.count >= 5 else { return false }   // 击键太少不判(可能 IME/吞键)
+        let kText = windowKeys.sorted { $0.tsMs < $1.tsMs }
+            .compactMap { $0.char }.joined().lowercased()
+        guard kText.count >= 5 else { return false }
+        let text = rec.text.lowercased()
+        // 中文 IME 放过:text 含 CJK 且击键含 ascii 字母(拼音)
+        let hasCJK = text.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+        let hasAsciiLetter = kText.contains { $0.isASCII && $0.isLetter }
+        if hasCJK && hasAsciiLetter { return false }
+        // 有任何 ≥3 长公共子串就算"有对应",不是 orphan
+        return !Self.hasCommonSubstring(kText, text, minLen: 3)
+    }
+
+    /// a、b 是否存在长度 ≥ minLen 的公共子串(滑窗,a 通常短)。
+    nonisolated static func hasCommonSubstring(_ a: String, _ b: String, minLen: Int) -> Bool {
+        let ac = Array(a), bc = Array(b)
+        guard ac.count >= minLen, bc.count >= minLen else { return false }
+        let bSet = b
+        var i = 0
+        while i + minLen <= ac.count {
+            let sub = String(ac[i..<i+minLen])
+            if bSet.contains(sub) { return true }
+            i += 1
+        }
+        return false
     }
 
     /// 用新 editLog 重建一条 record(其余字段不变)。
