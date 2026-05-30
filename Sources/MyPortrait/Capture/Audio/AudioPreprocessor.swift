@@ -132,13 +132,20 @@ enum AudioPreprocessor {
     /// **安全护栏**：FFT 走 vDSP（1600 帧补零到 2048 这个 2 的幂），正逆变换的
     /// 缩放约定容易出错且无法离线验证 —— 每帧处理后检查结果有限且能量没暴涨，
     /// 任一异常就退回该帧的原始样本。最坏情况是 no-op，绝不会让音频变差。
+    /// FFT 的 twiddle 表只跟 log2n 有关、只读,跨段复用免每段重建。进程生命周期
+    /// 持有不销毁(同 FbankExtractor 的做法)。spectralSubtract 用 log2n=11,
+    /// spectralFlatness 用 12。
+    nonisolated(unsafe) private static let fftSetupLog2n11 =
+        vDSP_create_fftsetup(11, FFTRadix(kFFTRadix2))
+    nonisolated(unsafe) private static let fftSetupLog2n12 =
+        vDSP_create_fftsetup(12, FFTRadix(kFFTRadix2))
+
     private static func spectralSubtract(_ audio: [Float]) -> [Float] {
         let frameSize = 1600
         let fftSize = 2048
         let log2n: vDSP_Length = 11
         guard audio.count >= frameSize else { return audio }
-        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return audio }
-        defer { vDSP_destroy_fftsetup(setup) }
+        guard let setup = Self.fftSetupLog2n11 else { return audio }
 
         let numFrames = audio.count / frameSize
         // 噪声功率估计：取最安静帧的平均功率（近似 screenpipe 的非语音帧噪声谱）。
@@ -219,8 +226,7 @@ enum AudioPreprocessor {
         let n = 4096
         guard window.count >= n else { return 1.0 }
         let log2n: vDSP_Length = 12
-        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return 1.0 }
-        defer { vDSP_destroy_fftsetup(setup) }
+        guard let setup = Self.fftSetupLog2n12 else { return 1.0 }
 
         let slice = Array(window[0..<n])
         var realp = [Float](repeating: 0, count: n / 2)

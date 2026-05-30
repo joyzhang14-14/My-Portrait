@@ -59,9 +59,13 @@ enum PortraitWeight {
 
     /// SpeechStyleDistiller 的 link 格式 —— body 末尾 inline
     /// `[[wr:<id>]], [[wr:<id>]], ...`。不 cap(speech_style render 也不 cap)。
+    /// `[[wr:<id>]]` 正则只编译一次 —— refresh 时每个文件都调,别每次重编译
+    /// (正则编译比 DateFormatter 分配贵得多)。
+    private static let speechStyleRefRegex =
+        try? NSRegularExpression(pattern: #"\[\[wr:(\d+)\]\]"#)
+
     static func extractSpeechStyleRefCount(from body: String) -> Int {
-        let pattern = #"\[\[wr:(\d+)\]\]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
+        guard let regex = Self.speechStyleRefRegex else { return 0 }
         let ns = body as NSString
         return regex.numberOfMatches(in: body, range: NSRange(location: 0, length: ns.length))
     }
