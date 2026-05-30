@@ -514,6 +514,7 @@ struct MemorySettingsView: View {
     /// 不走 MemoryStaging(没什么好审的,folder 改错改 json 一行就回)。
     @ViewBuilder
     private var classifierBlock: some View {
+        let pendingReview = MemoryStaging.hasPending(.classify)
         VStack(spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -527,6 +528,7 @@ struct MemorySettingsView: View {
                 Spacer(minLength: 12)
                 let disabledReason: String? = {
                     if classifyRunning { return "Event classifier is already running." }
+                    if pendingReview { return "Pending review — Approve / Reject first." }
                     if !hasClassifyWork { return "All events already classified — nothing to do." }
                     // 跟 event job 互斥,跟 distill/personality 不挡。
                     if runningTriggers.contains(.eventProcessing) {
@@ -534,7 +536,12 @@ struct MemorySettingsView: View {
                     }
                     return nil
                 }()
-                Button(classifyRunning ? "Running…" : "Run") {
+                let label: String = {
+                    if classifyRunning { return "Running…" }
+                    if pendingReview { return "Pending review" }
+                    return "Run"
+                }()
+                Button(label) {
                     classifyConfirm = true
                 }
                 .buttonStyle(.bordered)
@@ -543,6 +550,30 @@ struct MemorySettingsView: View {
                 .help(disabledReason ?? "Run event classifier now.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Pending review 横幅 —— 跟 reviewSection 那种"per-file 行"不同,
+            // classify 的 diff 已经在下面 deltas 那个卡片里画出来了,这里只
+            // 出 Approve/Reject 两个按钮。
+            if pendingReview {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Text("Pending review — \(classifyLastResult?.classifiedInThisRun ?? 0) event(s) into \(classifyLastResult?.folderDeltas.count ?? 0) folders.")
+                        .font(.system(size: 11))
+                    Spacer(minLength: 8)
+                    Button("Reject") { rejectClassify() }
+                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                    Button("Approve") { approveClassify() }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.orange.opacity(0.08))
+                )
+                .padding(.top, 4)
+            }
 
             if classifyRunning {
                 HStack(spacing: 8) {
@@ -608,34 +639,69 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// 跑 classifier:跟 MemoryScheduler.runClassifierJob 同入口,但前端
-    /// 自己管 running flag + status + lastResult 镜像(MemoryScheduler 那
-    /// 边也会写 lastClassifyResult,但 view 自己 @State 一份更新更跟手)。
+    /// 跑 classifier:跟 MemoryScheduler.runClassifierJob 同入口。**手动 Run**
+    /// 走 staging:beginRun 拍 _folders/ 快照,跑完进 Pending review,
+    /// Approve = 删快照,Reject = 用快照整树还原。auto scheduler tick 不走
+    /// 这条 —— 它见 hasPending 直接 skip,所以 staging 流程不影响 auto。
     @MainActor
     private func runClassifier() async {
         guard !classifyRunning else { return }
+        guard !MemoryStaging.hasPending(.classify) else {
+            classifyStatus = "Pending review — Approve / Reject first."
+            return
+        }
         classifyRunning = true
         defer { classifyRunning = false }
+        do { try MemoryStaging.beginRun(.classify) }
+        catch { classifyStatus = "Can't start: \(error.localizedDescription)"; return }
+
         classifyStatus = "Classifying events…"
         let outcome = await MemoryScheduler.shared.runClassifierJob()
         switch outcome {
         case .ran:
+            try? MemoryStaging.markRan(.classify, days: [ProcessingLogStore.classifyAnchorDate])
             classifyLastResult = MemoryScheduler.shared.lastClassifyResult
-            if let r = classifyLastResult {
-                if r.classifiedInThisRun > 0 {
-                    classifyStatus = "Run complete."
-                } else if r.totalUnclassified == 0 {
-                    classifyStatus = "All events already classified — nothing to do."
-                } else {
-                    classifyStatus = "LLM proposed no changes this round (try again after more events accumulate)."
-                }
+                ?? EventClassifier.loadLastResult()
+            if let r = classifyLastResult, r.classifiedInThisRun > 0 {
+                classifyStatus = "Run complete — review below, Approve / Reject."
             } else {
-                classifyStatus = "Run complete."
+                // LLM 没动任何东西 → 没必要让用户审核空 diff,直接 approve 收尾。
+                try? MemoryStaging.approve(.classify)
+                classifyStatus = "LLM proposed no changes this round (try again after more events accumulate)."
             }
         case .noWork:
+            try? MemoryStaging.approve(.classify)   // 没活就丢快照
             classifyStatus = "All events already classified — nothing to do."
         case .busy:
+            try? MemoryStaging.approve(.classify)
             classifyStatus = "Classifier is already running."
+        }
+        refreshClassifyWork()
+    }
+
+    /// Approve = 接受跑结果(_folders/*.json 维持现状,删 backup)。
+    @MainActor
+    private func approveClassify() {
+        do {
+            try MemoryStaging.approve(.classify)
+            classifyStatus = "Approved — folder assignments committed."
+        } catch {
+            classifyStatus = "Approve failed: \(error.localizedDescription)"
+        }
+        refreshClassifyWork()
+    }
+
+    /// Reject = 用 backup 整目录还原 _folders/,然后把 classify anchor 拨回
+    /// pending 让 scheduler 知道得重跑(否则 anchor=complete 永远不会再跑)。
+    @MainActor
+    private func rejectClassify() {
+        MemoryScheduler.shared.resetDay(ProcessingLogStore.classifyAnchorDate)
+        do {
+            try MemoryStaging.reject(.classify)
+            classifyStatus = "Rejected — folders restored to pre-run state."
+            classifyLastResult = nil   // 清掉 UI 上那份"被拒绝的快照"
+        } catch {
+            classifyStatus = "Reject failed: \(error.localizedDescription)"
         }
         refreshClassifyWork()
     }

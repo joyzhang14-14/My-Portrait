@@ -10,7 +10,7 @@ import Foundation
 /// 调用方拿 `pendingDays` 自己做。
 enum MemoryStaging {
     enum Kind: String, Sendable, CaseIterable {
-        case events, portrait, personality
+        case events, portrait, personality, classify
     }
 
     enum StagingError: LocalizedError {
@@ -49,6 +49,7 @@ enum MemoryStaging {
         case .events:      return Storage.eventsDir
         case .portrait:    return Storage.portraitDir
         case .personality: return Storage.portraitDir.appendingPathComponent("personality", isDirectory: true)
+        case .classify:    return EventFolderStore.foldersDir
         }
     }
 

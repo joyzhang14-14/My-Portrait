@@ -147,6 +147,7 @@ final class MemoryScheduler {
         guard !MemoryStaging.hasPending(.events),
               !MemoryStaging.hasPending(.portrait),
               !MemoryStaging.hasPending(.personality),
+              !MemoryStaging.hasPending(.classify),
               !EditDraft.hasAnyPending() else {
             schedLog.info("tick: manual run / AI edit draft pending — skip")
             return
