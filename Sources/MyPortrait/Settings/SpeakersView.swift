@@ -22,13 +22,12 @@ struct SpeakersSettingsView: View {
         guard !q.isEmpty else { return rows }
         return rows.filter { ($0.name ?? "").lowercased().contains(q) }
     }
-    /// "Identified" = 用户真跑过 voice training 的(trainedAt != nil)。
-    /// **不数仅 diarization 自动建 + 用户 rename 的**——之前那么数会数到
-    /// dupe / 还没训练的簇,UI 100% 但实际很多没经过训练。
-    /// rename-only / diarization 自动建的有名字但没 train 的归 unidentified
-    /// (用户能在那看到候选,merge 或者 Start training 转正)。
-    private var identified:   [SpeakerRow] { filtered.filter { $0.trainedAt != nil } }
-    private var unidentified: [SpeakerRow] { filtered.filter { $0.trainedAt == nil } }
+    /// 用户语义的"已训练"= 用户给了名字的簇(name != ""),包括:
+    ///   - voice training 直接命名的
+    ///   - diarization 自动建后用户手动 rename 的(也是"我认这个是某人")
+    /// "未识别"= 真匿名簇(name == "")
+    private var identified:   [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty == false } }
+    private var unidentified: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -288,9 +287,9 @@ private struct UnidentifiedCard: View {
             SpeakerAvatar(letter: "?", color: Color.orange, animating: true)
                 .frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 3) {
-                // 已有 name(用户 rename 过 / 老版本 voice training)优先显示,
-                // 真未命名的簇才显示 "Cluster <id>" 占位。
-                Text(row.name ?? "Cluster \(row.id.prefix(8))")
+                // Unidentified 区只放 name == "" 的真匿名簇,
+                // 显示 "Cluster <id>" 占位。
+                Text("Cluster \(row.id.prefix(8))")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 HStack(spacing: 6) {
