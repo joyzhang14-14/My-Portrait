@@ -5,46 +5,24 @@ private let pass4Log = Logger(subsystem: "com.myportrait.memory", category: "wri
 
 // MARK: - Pass 4 输入 / 输出类型
 
-/// Pass 4 收到的一条 candidate record(已由 Worker 从 Pass 3 records 加上
-/// 每条的 keystroke / AX 证据)。
+/// Pass 4 收到的一条 candidate record —— 纯内容审查,不带 keystroke。
+/// keystroke 对应度的把关在算法层(edit_log 过滤 / canvas 零对应)已做完,
+/// Pass 4 只看内容语义 + context + 历史拒绝 + 规则,判断该不该留。
 struct WritingCapturePass4InputRecord: Encodable, Sendable {
-    /// Worker 临时分配的 record_id —— Pass 3 的 records 数组里没显式 id,
-    /// Worker fanout 时按 "g<group>_r<idx>" 形态生成,Pass 4 用此引用回。
+    /// Worker 临时分配的 record_id —— "g<group>_r<idx>" 形态,Pass 4 用此引用回。
     let recordId: String
     let text: String
     let kind: String
     let source: String
     let app: String
     let url: String?
-    let startTs: Int64
-    let endTs: Int64
-
-    /// 用户在 [startTs, endTs] 真实敲键拼成的字符串(跳过 modifier-only /
-    /// shortcut)。
-    let keystrokeText: String
-    /// 同窗口的 raw 键击总数。
-    let keystrokeCount: Int
-    /// 同窗口里 typing_events.text 拼接(空字符串表示没有 AX)。
-    let typingEventsText: String
-    /// 同窗口里出现过 ⌘V > 100 字 的 paste 事件。
-    let hasPasteEvent: Bool
-    /// 同窗口里出现过 ⌘X 的 cut 事件(用户剪了自己的内容)。
-    let hasCutEvent: Bool
-    /// keystroke 形态像 IME pinyin / 假名:大量 ASCII 小写字母 + 偶发数字
-    /// (IME 候选选择)+ record.text 含 CJK。
-    let imeLikely: Bool
+    /// Pass 1 给这条 record 的场景背景(用户在哪、在干啥)。
+    let contextSummary: String?
 
     enum CodingKeys: String, CodingKey {
-        case recordId           = "record_id"
+        case recordId       = "record_id"
         case text, kind, source, app, url
-        case startTs            = "start_ts"
-        case endTs              = "end_ts"
-        case keystrokeText      = "keystroke_text"
-        case keystrokeCount     = "keystroke_count"
-        case typingEventsText   = "typing_events_text"
-        case hasPasteEvent      = "has_paste_event"
-        case hasCutEvent        = "has_cut_event"
-        case imeLikely          = "ime_likely"
+        case contextSummary = "context_summary"
     }
 }
 
@@ -125,9 +103,12 @@ final class WritingCapturePass4Agent {
     }
 
     /// 跑 Pass 4 —— **每个 (app, url) group 一次调用**(并发由 worker 在
-    /// 外层 fan out)。
-    func run(records: [WritingCapturePass4InputRecord]) async throws -> Output {
-        let prompt = Self.buildPrompt(records: records)
+    /// 外层 fan out)。`userRejections`:用户历史拒绝的 record,当 few-shot。
+    func run(
+        records: [WritingCapturePass4InputRecord],
+        userRejections: [UserRejectionRow] = []
+    ) async throws -> Output {
+        let prompt = Self.buildPrompt(records: records, userRejections: userRejections)
 
         // 空输入短路 —— Pass 3 该组没出 record,无需调用 LLM。
         if records.isEmpty {
@@ -184,9 +165,24 @@ final class WritingCapturePass4Agent {
 
     // MARK: - Prompt
 
-    static func buildPrompt(records: [WritingCapturePass4InputRecord]) -> String {
-        var lines: [String] = [WritingCapturePrompts.pass4KeystrokeSupport]
+    static func buildPrompt(
+        records: [WritingCapturePass4InputRecord],
+        userRejections: [UserRejectionRow] = []
+    ) -> String {
+        var lines: [String] = [WritingCapturePrompts.pass4ContentReview]
         lines.append("")
+        if !userRejections.isEmpty {
+            // 用户历史拒过的 record(few-shot):看到新 candidate 跟这些形态/类别
+            // 相似就丢。
+            let payload = userRejections.map { r -> [String: String?] in
+                ["text": String(r.text.prefix(300)), "app": r.app,
+                 "kind": r.kind, "reason": r.reasonText ?? r.reasonCategory]
+            }
+            lines.append("user_rejected_examples:")
+            lines.append((try? JSONSerialization.data(withJSONObject: payload))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]")
+            lines.append("")
+        }
         lines.append("records:")
         lines.append(encodeJSON(records) ?? "[]")
         return lines.joined(separator: "\n")

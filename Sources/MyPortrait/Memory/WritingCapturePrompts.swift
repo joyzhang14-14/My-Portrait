@@ -428,81 +428,44 @@ enum WritingCapturePrompts {
       → KEEP. Code identifier / version tag in user's language.
     """#
 
-    // MARK: - Pass 4 —— keystroke 支撑度过滤(records → kept / discarded)
+    // MARK: - Pass 4 —— 内容审查(records → kept / discarded)
 
-    static let pass4KeystrokeSupport = #"""
-    You are the FINAL filter gate. You receive writing_records that Pass 3 produced
-    (Pass 3 translates without filtering — you decide what survives).
+    static let pass4ContentReview = #"""
+    You are the FINAL content-review gate. Earlier algorithmic steps already removed
+    pasted / OCR-orphan / no-edit content. Your job now is purely SEMANTIC: read each
+    record's TEXT and decide whether it is the user's own natural-language writing
+    worth keeping. You do NOT see keystrokes — judge by the content itself + context.
 
-    Your single job: for each record, decide whether the period's KEYSTROKE
-    EVIDENCE actually supports the user having produced this text. If not,
-    DISCARD it. If yes, KEEP it.
+    We want to KEEP the user's natural-language writing: messages, chat replies,
+    notes, essays, posts, questions, journal-like prose — anything the user composed
+    in words. Be GENEROUS: short messages count, casual replies count, mixed
+    Chinese/English counts. When a record reads as something a person wrote, KEEP it.
 
     INPUT
-    - records: array of candidate records from Pass 3. Per record you see:
-      { record_id, text, kind, source, app, url, start_ts, end_ts,
-        keystroke_text, keystroke_count, typing_events_text,
-        has_paste_event, has_cut_event,
-        ime_likely  // true if keystroke pattern looks like IME pinyin / kana }
-      - keystroke_text  : every physical key the user pressed in the record's
-                          window (sorted; <BS> shown for backspace; shortcut
-                          presses excluded).
-      - keystroke_count : total raw key presses in the window.
-      - typing_events_text: AX-path text in the window (if any; "" if absent).
-      - has_paste_event : ⌘V pressed > 100 chars (potentially external paste).
-      - has_cut_event   : ⌘X pressed (user cut their OWN content).
-      - ime_likely      : the keystroke pattern matches IME composition style.
+    - records: [{ record_id, text, kind, source, app, url, context_summary }]
+      context_summary = what the user was doing then (scene), from Pass 1.
+    - user_rejected_examples (optional): records the user manually rejected before,
+      with their reason. Treat new records that match these patterns the same way.
 
-    JUDGEMENT RULES — the single test is CORRESPONDENCE, not volume.
+    DISCARD a record when its TEXT is any of:
+    1. CODE / COMMANDS / CONFIG — source code, shell/terminal commands, config, or
+       program output. Tells: `uv install`, `cd`, `git`, `npm`, `pip`, brackets/
+       semicolons/`def`/`func`/`import`/`=>`, JSON/YAML, file paths, IDE/terminal
+       apps (VS Code, Terminal). We only want natural-language writing, so drop code
+       even though the user typed it. (Mostly-prose with an inline code token → KEEP.)
+    2. NOT THE USER'S WRITING — an AI assistant's reply / coaching addressed to the
+       user, a received chat message from someone else, a UI label / username banner
+       / tab name / app chrome, or an article/page the user was only reading. Use
+       context_summary + the text's voice (is it the user speaking, or something
+       shown TO them?).
+    3. NOT REAL LANGUAGE — uncomposed IME residue (loose pinyin/romaji that never
+       became words, e.g. "ei qu a xi", "uan x b sei"), random char soup, masked
+       secrets ("•••"), a bare autofilled email/name, empty / whitespace-only /
+       single stray char / repeated gibberish.
+    4. MATCHES a user_rejected_example pattern (same kind of junk the user rejected
+       before).
 
-    The deciding question: does keystroke_text CORRESPOND to record.text AT ALL?
-    Keystrokes will NEVER match the text character-for-character — the Apple
-    keyboard does predictive text + autocorrect (it rewrites/completes words), and
-    IME turns pinyin keystrokes into different composed characters. So PARTIAL,
-    loose, fuzzy correspondence is NORMAL and means the user typed it → KEEP.
-    Only when there is essentially ZERO correspondence is the text not the user's.
-
-    KEEP a record when ANY of:
-    - keystroke_text has ANY loose correspondence to record.text — some of the
-      letters/words/pinyin line up, even roughly, even if autocorrect/predictive
-      changed them. A few keystrokes for a longer text is FINE (predictive text
-      completes words; the user accepted suggestions). KEEP.
-    - ime_likely is true and the keystroke pinyin loosely maps to the CJK text.
-    - typing_events_text contains or roughly matches record.text (AX confirms the
-      user typed into the field), regardless of keystroke count.
-    - has_cut_event and the text matches what was cut (user moved their own text).
-    - The content is a coherent message/sentence in the user's language and the
-      keystrokes are non-trivially present (the user was typing here).
-
-    DISCARD only when keystroke has ZERO correspondence to the text AND no AX
-    support — i.e. the text was NOT typed here at all:
-    - keystroke_count ≈ 0 (or only Enter/shortcuts) for meaningful text, and
-      typing_events_text does not match → it appeared without typing: AUTOFILL
-      (form email, saved name, password mask "•••"), EXTERNAL PASTE of someone
-      else's content, an AI assistant's reply, a received chat message, or an
-      article the user is reading.
-    - keystroke_text is clearly about something ELSE entirely than record.text
-      (no overlapping words/pinyin at all) AND no AX match → OCR grabbed unrelated
-      on-screen content, not what the user wrote.
-
-    ALSO DISCARD (independent of correspondence):
-    - Empty / whitespace-only / single stray char / pure repeated gibberish.
-    - Pure shortcut/Enter presses with no resulting text.
-    - OCR-only UI chrome (menu labels, "•••" masks, app-chrome strings).
-
-    Bias toward KEEP. If there is SOME correspondence (even loose) or AX support,
-    keep it — autocorrect/predictive/IME mean real typing rarely matches exactly.
-    Only drop when the keystrokes have nothing to do with the text at all.
-
-    ALSO DISCARD — CODE / COMMANDS (not natural-language writing):
-    We only want the user's NATURAL-LANGUAGE writing (messages, notes, essays,
-    prose). DISCARD a record whose text is source code, shell/terminal commands,
-    config, or programming output — even if the user typed it. Tells: shell
-    commands (`uv install ...`, `cd`, `git ...`, `npm`, `pip`, `pre-commit`),
-    code syntax (brackets/semicolons/`def`/`func`/`import`/`=>`/JSON/YAML),
-    file paths, an IDE/terminal app (e.g. VS Code, Terminal, iTerm), or text that
-    reads as code rather than a sentence. Mixed: if it's mostly prose with an
-    inline code token, KEEP; if it's mostly code/commands, DISCARD.
+    Otherwise KEEP. Bias toward KEEP for anything that reads as the user's own words.
 
     OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
     {
