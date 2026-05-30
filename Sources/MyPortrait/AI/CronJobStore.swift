@@ -41,6 +41,16 @@ final class CronJobStore {
         cronJobs[i].isEnabled.toggle(); save()
     }
 
+    /// 静音/解静音指定 cron job 的通知。任务执行不受影响,只是 banner 不弹。
+    /// 调用方:CronJobsView 详情 toggle、通知 banner 的 Mute 按钮、Settings →
+    /// Notifications 的 Unmute、ConfigStore 的老名单迁移。
+    func setMuted(_ id: UUID, _ muted: Bool) {
+        guard let i = cronJobs.firstIndex(where: { $0.id == id }) else { return }
+        guard cronJobs[i].muted != muted else { return }
+        cronJobs[i].muted = muted
+        save()
+    }
+
     /// Record a run on a cronJob. Caps the runs list at `runsCap` so the JSON
     /// blob doesn't grow forever.
     ///
@@ -138,6 +148,23 @@ final class CronJobStore {
             loaded.append(job)
         }
         cronJobs = loaded
+        migrateLegacyMutedNames()
+    }
+
+    /// 老版本把 muted 名单存在 `ConfigStore.notifications.mutedCronJobs`(byName)。
+    /// 现在迁移到 per-CronJob.muted 字段:按名字匹配回填 muted=true,然后清空老名单。
+    /// 重启后这条迁移就是 no-op(mutedCronJobs 已空)。
+    private func migrateLegacyMutedNames() {
+        let names = ConfigStore.shared.current.notifications.mutedCronJobs
+        guard !names.isEmpty else { return }
+        let set = Set(names)
+        var changed = false
+        for i in cronJobs.indices where set.contains(cronJobs[i].name) && !cronJobs[i].muted {
+            cronJobs[i].muted = true
+            changed = true
+        }
+        if changed { save() }
+        ConfigStore.shared.mutate { $0.notifications.mutedCronJobs.removeAll() }
     }
 
     /// One-time migration: decode the legacy `[CronJob]` JSON, write it out
@@ -207,13 +234,19 @@ struct CronJob: Identifiable, Hashable, Codable {
     /// time their credentials are injected into the agent process as env
     /// vars. Old stored cronJobs without this key decode to `[]`.
     var connections: [String] = []
+    /// 用户在 banner 上点 Mute / 详情面板 toggle 标这条 = 任务照常跑,
+    /// 但 NotificationCenterService 拦掉它的 .cronJobRun 通知。老 cron_job.md
+    /// 没这字段时 parseMarkdown 默认 false。
+    var muted: Bool = false
 
     init(id: UUID = UUID(), name: String, prompt: String, window: ContextWindow,
          schedule: Cadence = .everyMinutes(60), isEnabled: Bool = true,
-         runs: [CronJobRun] = [], lastRunAt: Date? = nil, connections: [String] = []) {
+         runs: [CronJobRun] = [], lastRunAt: Date? = nil, connections: [String] = [],
+         muted: Bool = false) {
         self.id = id; self.name = name; self.prompt = prompt; self.window = window
         self.schedule = schedule; self.isEnabled = isEnabled
         self.runs = runs; self.lastRunAt = lastRunAt; self.connections = connections
+        self.muted = muted
     }
 }
 

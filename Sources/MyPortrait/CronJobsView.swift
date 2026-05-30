@@ -212,6 +212,8 @@ private struct CronJobDetailView: View {
             metaRow("Context", cronJob.window.label, icon: "viewfinder")
             metaRow("Status", cronJob.isEnabled ? "enabled" : "paused",
                     icon: cronJob.isEnabled ? "checkmark.circle" : "pause.circle")
+            metaRow("Notify", cronJob.muted ? "muted" : "on",
+                    icon: cronJob.muted ? "bell.slash" : "bell")
             VStack(alignment: .leading, spacing: 4) {
                 Text("PROMPT")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -352,6 +354,9 @@ struct CronJobQuickEditor: View {
                     .pickerStyle(.menu).labelsHidden()
                 }
                 Toggle("Enabled", isOn: $initial.isEnabled)
+                    .toggleStyle(.switch)
+                // 静音通知。任务照常跑、写 conv 历史,只是 banner 不弹。
+                Toggle("Mute notifications", isOn: $initial.muted)
                     .toggleStyle(.switch)
             }
 

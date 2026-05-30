@@ -91,6 +91,7 @@ enum CronJobFile {
         fm += "id: \(p.id.uuidString)\n"
         fm += "title: \(p.name)\n"
         fm += "enabled: \(p.isEnabled)\n"
+        fm += "muted: \(p.muted)\n"
         fm += "schedule: \(encode(p.schedule))\n"
         fm += "window: \(encode(p.window))\n"
         if p.connections.isEmpty {
@@ -148,12 +149,14 @@ enum CronJobFile {
         let id = scalars["id"].flatMap { UUID(uuidString: $0) } ?? UUID()
         let name = scalars["title"] ?? fallbackName
         let enabled = (scalars["enabled"] ?? "true") == "true"
+        // 老 cron_job.md 没 muted 字段 → default false。
+        let muted = (scalars["muted"] ?? "false") == "true"
         let schedule = decodeCadence(scalars["schedule"] ?? "never")
         let window = decodeWindow(scalars["window"] ?? "none")
 
         return CronJob(id: id, name: name, prompt: prompt, window: window,
                        schedule: schedule, isEnabled: enabled,
-                       connections: connections)
+                       connections: connections, muted: muted)
     }
 
     // MARK: - slug
