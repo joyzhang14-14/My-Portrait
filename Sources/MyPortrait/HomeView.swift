@@ -814,7 +814,7 @@ private struct EditDraftCard: View {
                 }
                 .padding(.horizontal, 14)
             }
-            Divider().background(Color.white.opacity(0.08)).padding(.horizontal, 14)
+            Divider().background(Color.primary.opacity(0.12)).padding(.horizontal, 14)
             afterBlock
             originalDisclosure
             footer
@@ -1033,7 +1033,7 @@ private struct ErrorCard: View {
             .padding(12)
 
             if showDetails {
-                Divider().background(Color.white.opacity(0.10))
+                Divider().background(Color.primary.opacity(0.14))
                 ScrollView {
                     Text(block.message)
                         .font(.system(size: 11, design: .monospaced))
@@ -1120,7 +1120,7 @@ private struct ThinkingCard: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if expanded, !block.text.isEmpty {
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.12))
                 ScrollView {
                     Text(block.text)
                         .font(.system(size: 12, design: .default))
@@ -1193,7 +1193,10 @@ private struct ThinkingCard: View {
     }
 
     private var accentStroke: Color {
-        block.isRunning ? Color.cyan.opacity(0.40) : Color.white.opacity(0.10)
+        // running 用 cyan(语义色,跨主题都看得清);idle 用 Color.primary
+        // (= 系统 labelColor,light 下黑、dark 下白,自动跟 colorScheme 切)。
+        // 之前钉死 Color.white.opacity(0.10),light 模式下完全看不见框线。
+        block.isRunning ? Color.cyan.opacity(0.40) : Color.primary.opacity(0.18)
     }
 }
 
@@ -1216,7 +1219,7 @@ private struct ToolCard: View {
             header
             if expanded {
                 if !block.command.isEmpty {
-                    Divider().background(Color.white.opacity(0.08))
+                    Divider().background(Color.primary.opacity(0.12))
                     Text(block.command)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(Theme.textPrimary.opacity(0.88))
@@ -1226,7 +1229,7 @@ private struct ToolCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !block.output.isEmpty {
-                    Divider().background(Color.white.opacity(0.08))
+                    Divider().background(Color.primary.opacity(0.12))
                     ScrollView {
                         Text(block.output)
                             .font(.system(size: 11.5, design: .monospaced))
@@ -1332,9 +1335,11 @@ private struct ToolCard: View {
     }
 
     private var accentStroke: Color {
+        // error / running 用语义色(红 / 紫,跨主题都看得清);idle 用
+        // Color.primary 自动跟 colorScheme,light 下黑边 dark 下白边。
         if block.isError    { return Color.red.opacity(0.40) }
         if block.isRunning  { return Color.purple.opacity(0.45) }
-        return Color.white.opacity(0.12)
+        return Color.primary.opacity(0.18)
     }
 
     @ViewBuilder private var statusBadge: some View {
@@ -2393,7 +2398,7 @@ private struct PickerPopover: View {
 
             if let activeId = effectiveActiveProviderId,
                let provider = Provider.from(integrationId: activeId) {
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.12))
                     .padding(.vertical, 4)
                 sectionHeader("MODEL")
                 // AI Models 页的 model 多选过滤 —— 没勾的不出现。
