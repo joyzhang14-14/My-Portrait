@@ -295,15 +295,13 @@ final class WritingCaptureWorker {
         // 6b. Pass 4 —— keystroke 支撑度过滤(每组一次,跟 Pass 3 同 provider/model)
         let pass4Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
             recs.enumerated().map { (ri, rec) in
-                WritingCapturePass4Builders.buildInput(
-                    recordId: "g\(gi)_r\(ri)",
-                    record: rec, typing: raw.typing, keys: raw.keys
-                )
+                WritingCapturePass4Builders.buildInput(recordId: "g\(gi)_r\(ri)", record: rec)
             }
         }
         let pass4Results = await WritingCapturePass4Builders.runConcurrently(
             inputsByGroupIdx: pass4Inputs,
             concurrency: 5,
+            userRejections: userRejections,
             makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass3Provider, model: pass3Model) }
         )
         var allRecords: [WritingCaptureRecord] = []
@@ -635,15 +633,13 @@ final class WritingCaptureWorker {
         ui.statusMessage = "Pass 4: validating \(pass3Total) candidate record(s)…"
         let pass4Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
             recs.enumerated().map { (ri, rec) in
-                WritingCapturePass4Builders.buildInput(
-                    recordId: "g\(gi)_r\(ri)",
-                    record: rec, typing: raw.typing, keys: raw.keys
-                )
+                WritingCapturePass4Builders.buildInput(recordId: "g\(gi)_r\(ri)", record: rec)
             }
         }
         let pass4Results = await WritingCapturePass4Builders.runConcurrently(
             inputsByGroupIdx: pass4Inputs,
             concurrency: 5,
+            userRejections: userRejections,
             makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass3Provider, model: pass3Model) }
         )
         var allRecords: [WritingCaptureRecord] = []
