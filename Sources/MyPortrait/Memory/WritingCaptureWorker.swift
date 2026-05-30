@@ -276,6 +276,15 @@ final class WritingCaptureWorker {
         let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
         workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
 
+        // Pass 2 group 失败 = 那个 (app,url) 时间窗的写作数据被吞空。若放任,
+        // 这天照常进 pending_review → approve 后标 'approved' → unprocessedDays
+        // 不再返回这天(store:80) → 这段 raw 永不重跑 = 永久丢。故失败即整次 abort:
+        // catch 标 'failed'('failed' 会被 unprocessedDays 重新捞起,raw 不删,下次重跑)。
+        // Pass 3 / Pass 4 失败是 fail-open(保留记录),不在此列。
+        if failedGroups > 0 {
+            throw BacklogError.pass2GroupsFailed(count: failedGroups)
+        }
+
         // 6a. edit_log 重建 + authoring 过滤(确定性):ax edit_log 从 typing_events
         // 补全;没有 commit/delete 的(粘贴/OCR/AI)直接丢。
         let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing)
@@ -373,6 +382,7 @@ final class WritingCaptureWorker {
     enum BacklogError: LocalizedError {
         case pendingReviewExists(records: Int)
         case alreadyProcessing
+        case pass2GroupsFailed(count: Int)
         var errorDescription: String? {
             switch self {
             case .pendingReviewExists(let n):
@@ -380,6 +390,9 @@ final class WritingCaptureWorker {
                        "Approve or reject them first before running again."
             case .alreadyProcessing:
                 return "Backlog run already in progress. Wait for it to finish."
+            case .pass2GroupsFailed(let n):
+                return "\(n) Pass 2 group(s) failed (LLM error/timeout). " +
+                       "Run aborted so no data window is skipped — try again."
             }
         }
     }
@@ -602,6 +615,14 @@ final class WritingCaptureWorker {
         }
         let pass2Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
         workerLog.info("pass2 fanout: \(pass2Total) records, \(failedGroups) failed groups")
+
+        // Pass 2 group 失败 = 那个 (app,url) 时间窗的写作数据被吞空。若放任,
+        // approve 会无条件把 cursor 推过整个窗(approveBacklog setCursor) → 这段 raw
+        // 永不重跑 = 永久丢。故失败即整次 abort:catch 标 'failed'、不进 pending_review、
+        // cursor 不动,下次同范围重跑(raw 不删)。Pass 3 / Pass 4 失败 fail-open,不在此列。
+        if failedGroups > 0 {
+            throw BacklogError.pass2GroupsFailed(count: failedGroups)
+        }
 
         // 6a. edit_log 重建 + authoring 过滤(确定性)
         let editLogFilter = Self.refineAndFilterByEditLog(recordsByGroupIdx, typing: raw.typing)
