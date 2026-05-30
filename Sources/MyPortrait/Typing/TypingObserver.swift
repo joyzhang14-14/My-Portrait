@@ -400,7 +400,7 @@ final class TypingObserver {
         }
 
         guard let att = attachment else { return }
-        let key = ElementKey(pid: att.pid, elementHash: Int(CFHash(focused)))
+        let key = ElementKey(pid: att.pid, elementHash: Int(bitPattern: CFHash(focused)))
         writer.beginSession(key: key, bundleId: att.bundleId, baseline: baseline, url: url)
     }
 
@@ -431,7 +431,7 @@ final class TypingObserver {
         switch name {
         case kAXFocusedUIElementChangedNotification:
             if let att = attachment, let old = att.focusedElement {
-                let oldKey = ElementKey(pid: att.pid, elementHash: Int(CFHash(old)))
+                let oldKey = ElementKey(pid: att.pid, elementHash: Int(bitPattern: CFHash(old)))
                 writer.flushElement(oldKey)
             }
             await subscribeFocusedElement()
@@ -466,7 +466,7 @@ final class TypingObserver {
         // await 期间 focus / app 可能已变 —— 重核仍是同一 element。
         guard running, let att2 = attachment, let focused2 = att2.focusedElement,
               CFHash(focused2) == CFHash(focused), let newValue else { return }
-        let key = ElementKey(pid: att2.pid, elementHash: Int(CFHash(focused2)))
+        let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
         writer.noteValueChange(key: key, newValue: newValue)
     }
 }
