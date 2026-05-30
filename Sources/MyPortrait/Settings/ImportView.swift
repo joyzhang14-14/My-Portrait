@@ -29,6 +29,9 @@ struct ImportSettingsView: View {
     @State private var ccStatus: String? = nil
     @State private var codexRunning: Bool = false
     @State private var codexStatus: String? = nil
+    // 上次导入时刻(= 该源已导记录的 MAX(start_ts)),卡片底部加粗显示。
+    @State private var ccLastTs: Int64? = nil
+    @State private var codexLastTs: Int64? = nil
 
     var body: some View {
         SettingsPage(
@@ -73,6 +76,7 @@ struct ImportSettingsView: View {
                     title: "Claude Code",
                     sessions: cliScan?.claudeCodeSessions,
                     count: cliScan?.claudeCode,
+                    lastTs: ccLastTs,
                     running: ccRunning,
                     status: ccStatus,
                     importAction: { await runImport(app: "claude-code") }
@@ -88,6 +92,7 @@ struct ImportSettingsView: View {
                     title: "Codex CLI",
                     sessions: cliScan?.codexSessions,
                     count: cliScan?.codex,
+                    lastTs: codexLastTs,
                     running: codexRunning,
                     status: codexStatus,
                     importAction: { await runImport(app: "codex-cli") }
@@ -105,6 +110,7 @@ struct ImportSettingsView: View {
         title: String,
         sessions: Int?,
         count: Int?,
+        lastTs: Int64?,
         running: Bool,
         status: String?,
         importAction: @escaping () async -> Void
@@ -152,25 +158,40 @@ struct ImportSettingsView: View {
                 .disabled(running || (count ?? 0) == 0)
             }
             .padding(.top, 4)
+            Text(lastTs.map { "Last imported: \(Self.dateTimeString($0))" } ?? "Last imported: never")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
+    private static func dateTimeString(_ ms: Int64) -> String {
+        let d = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        return fmt.string(from: d)
+    }
+
     private func rescanCLI() async {
         cliScanning = true
         let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
-        let result = await Task.detached(priority: .userInitiated) {
+        let (result, sinceCC, sinceCodex) = await Task.detached(priority: .userInitiated) {
             var sinceCC: Int64? = nil, sinceCodex: Int64? = nil
             if let dbPool {
                 let store = WritingCaptureStore(dbPool: dbPool)
                 sinceCC = try? store.cliImportLastTs(app: "claude-code")
                 sinceCodex = try? store.cliImportLastTs(app: "codex-cli")
             }
-            return CLIInputImporter.scan(sinceClaudeCode: sinceCC, sinceCodex: sinceCodex)
+            let r = CLIInputImporter.scan(sinceClaudeCode: sinceCC, sinceCodex: sinceCodex)
+            return (r, sinceCC, sinceCodex)
         }.value
         cliScan = result
+        ccLastTs = sinceCC
+        codexLastTs = sinceCodex
         cliScanning = false
     }
 
