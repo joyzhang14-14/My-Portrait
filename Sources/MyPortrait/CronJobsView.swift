@@ -355,10 +355,13 @@ struct CronJobQuickEditor: View {
                 }
                 Toggle("Enabled", isOn: $initial.isEnabled)
                     .toggleStyle(.switch)
-                // 静音通知。任务照常跑、写 conv 历史,只是 banner 不弹。
-                Toggle("Mute notifications", isOn: $initial.muted)
-                    .toggleStyle(.switch)
             }
+
+            // 静音通知。任务照常跑、写 conv 历史,只是 banner 不弹。
+            // 单独一行,跟上面 Context/Schedule/Enabled 那行的 picker 错开,
+            // 避免长 label 被宽度挤成多行。
+            Toggle("Mute notifications", isOn: $initial.muted)
+                .toggleStyle(.switch)
 
             connectionsSelector
         }
