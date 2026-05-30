@@ -235,6 +235,21 @@ enum CronJobExecutor {
 
         // 终态落盘(防 throttle 把最后一波 delta 丢了)。
         flushPending()
+        // 把所有还卡在 running 的 thinking / tool block 强制 close ——
+        // agent 在 .agentEnd 之前偶尔会漏发对应的 .thinkingEnd / .toolEnd
+        // (Pi context 压缩、Claude 最后块直接 final 等场景),否则前端永远
+        // 停在 "Thinking…" / "Running…" 转圈,即使通知都发出来了。
+        for i in assistant.parts.indices {
+            switch assistant.parts[i] {
+            case .thinking(var b) where b.isRunning:
+                b.isRunning = false
+                assistant.parts[i] = .thinking(b)
+            case .tool(var b) where b.isRunning:
+                b.isRunning = false
+                assistant.parts[i] = .tool(b)
+            default: break
+            }
+        }
         persistNow(true)
 
         // 4. LLM 跑完了 —— 用真 preview 更新已有 run(占位 run 在 step 2 已建好)。
