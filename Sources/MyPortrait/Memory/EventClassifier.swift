@@ -302,8 +302,9 @@ final class EventClassifier {
     // MARK: - Disk scan
 
     /// 低于这个权重的事件不进 classifier —— 都是日常零碎(查 wechat / 听音乐 /
-    /// 短暂浏览),进 folder 是噪音。用户原话:"weight 低于 3 的不需要分 folder"。
-    static let minWeightForClassification: Double = 3.0
+    /// 短暂浏览),进 folder 是噪音。3.0 实测过严(542 events 几乎全过滤),
+    /// 落到 2.0 作折中。
+    static let minWeightForClassification: Double = 2.0
 
     /// `events/<day>/*.md` 全扫。relativePath + title + summary + tags + day。
     /// 跳 `_folders` / `_archive` 等下划线开头的目录(metadata,不是事件)。
