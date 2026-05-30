@@ -561,7 +561,7 @@ struct MemorySettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // 跑中:spinner + 解释,不出 banner。
+            // 跑中:spinner + 解释 + Stop。跟 writingCaptureBlock 同形态。
             if isRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -569,6 +569,10 @@ struct MemorySettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
+                    Button("Stop") { stopClassifier() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.red)
                 }
                 .padding(.top, 6)
             }
@@ -688,6 +692,23 @@ struct MemorySettingsView: View {
             try? MemoryStaging.approve(.classify)
             classifyStatus = "Classifier is already running."
         }
+        refreshClassifyWork()
+    }
+
+    /// 强停:杀所有 LLM 子进程 → runStep 内部的 await throws → 标 failed +
+    /// 释放锁。跟 writing capture 的 Stop 按钮同形态。当前一批可能已经写了
+    /// 几个 _folders/*.json,backup 还在 .staging/,用户可以 Reject 整树还原
+    /// 或 Approve 接受到目前为止的部分结果。
+    @MainActor
+    private func stopClassifier() {
+        let n = PiAgentRegistry.shared.stopAll()
+        classifyTask?.cancel()
+        classifyTask = nil
+        classifyRunning = false
+        // scheduler 的 classifyRunning 由 runClassifierJob defer 自然清。
+        // anchor in_progress → failed 由 runStep catch 处理(LLM 进程被杀
+        // → await 抛 → applyOutcome(.failed) → setStatus + releaseLock)。
+        classifyStatus = "Stopped — killed \(n) LLM process(es)."
         refreshClassifyWork()
     }
 
