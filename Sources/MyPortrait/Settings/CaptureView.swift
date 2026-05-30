@@ -7,6 +7,32 @@ struct AudioCaptureSettingsView: View {
     private var audioRec: Bool { config.current.capture.audio.enabled }
     private var engine: String { config.current.capture.audio.engine }
 
+    /// Whisper 支持的语言(code → 英文名)。给转录 Language 下拉菜单用 —— 用户从
+    /// 列表里选,不手输,避免乱七八糟的值喂给 Whisper。
+    private struct WhisperLang: Identifiable, Hashable { let code, name: String; var id: String { code } }
+    private static let whisperLanguages: [WhisperLang] = [
+        ("af","Afrikaans"),("sq","Albanian"),("am","Amharic"),("ar","Arabic"),("hy","Armenian"),
+        ("as","Assamese"),("az","Azerbaijani"),("ba","Bashkir"),("eu","Basque"),("be","Belarusian"),
+        ("bn","Bengali"),("bs","Bosnian"),("br","Breton"),("bg","Bulgarian"),("my","Burmese"),
+        ("ca","Catalan"),("zh","Chinese"),("hr","Croatian"),("cs","Czech"),("da","Danish"),
+        ("nl","Dutch"),("en","English"),("et","Estonian"),("fo","Faroese"),("fi","Finnish"),
+        ("fr","French"),("gl","Galician"),("ka","Georgian"),("de","German"),("el","Greek"),
+        ("gu","Gujarati"),("ht","Haitian Creole"),("ha","Hausa"),("haw","Hawaiian"),("he","Hebrew"),
+        ("hi","Hindi"),("hu","Hungarian"),("is","Icelandic"),("id","Indonesian"),("it","Italian"),
+        ("ja","Japanese"),("jw","Javanese"),("kn","Kannada"),("kk","Kazakh"),("km","Khmer"),
+        ("ko","Korean"),("lo","Lao"),("la","Latin"),("lv","Latvian"),("ln","Lingala"),
+        ("lt","Lithuanian"),("lb","Luxembourgish"),("mk","Macedonian"),("mg","Malagasy"),("ms","Malay"),
+        ("ml","Malayalam"),("mt","Maltese"),("mi","Maori"),("mr","Marathi"),("mn","Mongolian"),
+        ("ne","Nepali"),("no","Norwegian"),("nn","Nynorsk"),("oc","Occitan"),("ps","Pashto"),
+        ("fa","Persian"),("pl","Polish"),("pt","Portuguese"),("pa","Punjabi"),("ro","Romanian"),
+        ("ru","Russian"),("sa","Sanskrit"),("sr","Serbian"),("sn","Shona"),("sd","Sindhi"),
+        ("si","Sinhala"),("sk","Slovak"),("sl","Slovenian"),("so","Somali"),("es","Spanish"),
+        ("su","Sundanese"),("sw","Swahili"),("sv","Swedish"),("tl","Tagalog"),("tg","Tajik"),
+        ("ta","Tamil"),("tt","Tatar"),("te","Telugu"),("th","Thai"),("bo","Tibetan"),
+        ("tr","Turkish"),("tk","Turkmen"),("uk","Ukrainian"),("ur","Urdu"),("uz","Uzbek"),
+        ("vi","Vietnamese"),("cy","Welsh"),("yi","Yiddish"),("yo","Yoruba"),
+    ].map { WhisperLang(code: $0.0, name: $0.1) }
+
     var body: some View {
         SettingsPage("Audio Capture", subtitle: "Microphone + transcription",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
@@ -175,11 +201,22 @@ struct AudioCaptureSettingsView: View {
                         }
                     }
                     SettingsDivider()
-                    SettingsRow("Languages",
-                                description: "Models to load for transcription.",
-                                icon: "character.bubble") { EmptyView() }
-                    VStack { TagListEditor(tags: config.binding(\.capture.audio.languages), placeholder: "e.g. en, zh, ja") }
-                        .padding(.horizontal, 48).padding(.bottom, 12)
+                    SettingsRow("Language",
+                                description: "Whisper language hint. Auto-detect handles multilingual / mixed speech.",
+                                icon: "character.bubble") {
+                        Picker("", selection: Binding(
+                            get: { config.current.capture.audio.languages.first ?? "" },
+                            set: { code in config.mutate {
+                                $0.capture.audio.languages = code.isEmpty ? [] : [code]
+                            } }
+                        )) {
+                            Text("Auto-detect").tag("")
+                            ForEach(Self.whisperLanguages) { lang in
+                                Text(lang.name).tag(lang.code)
+                            }
+                        }
+                        .pickerStyle(.menu).labelsHidden().frame(width: 200)
+                    }
                         SettingsDivider()
                         SettingsRow("Batch transcription",
                                     description: "Process audio chunks together for higher throughput. Slight latency cost.",
