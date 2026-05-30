@@ -22,8 +22,13 @@ struct SpeakersSettingsView: View {
         guard !q.isEmpty else { return rows }
         return rows.filter { ($0.name ?? "").lowercased().contains(q) }
     }
-    private var identified:   [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty == false } }
-    private var unidentified: [SpeakerRow] { filtered.filter { ($0.name ?? "").isEmpty } }
+    /// "Identified" = 用户真跑过 voice training 的(trainedAt != nil)。
+    /// **不数仅 diarization 自动建 + 用户 rename 的**——之前那么数会数到
+    /// dupe / 还没训练的簇,UI 100% 但实际很多没经过训练。
+    /// rename-only / diarization 自动建的有名字但没 train 的归 unidentified
+    /// (用户能在那看到候选,merge 或者 Start training 转正)。
+    private var identified:   [SpeakerRow] { filtered.filter { $0.trainedAt != nil } }
+    private var unidentified: [SpeakerRow] { filtered.filter { $0.trainedAt == nil } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -871,6 +876,9 @@ private struct SpeakerRow: Identifiable, Hashable {
     var name: String?
     let sampleCount: Int
     let lastHeard: Date?
+    /// 用户真跑过 voice training 的标记。nil = 仅 diarization / 仅 rename。
+    /// SpeakersView "identified" 计数只数 trainedAt != nil 的。
+    let trainedAt: Date?
 }
 
 private enum SpeakerLoader {
@@ -880,7 +888,8 @@ private enum SpeakerLoader {
                 id: String(r.id),
                 name: r.name,
                 sampleCount: r.sampleCount,
-                lastHeard: r.lastHeardMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+                lastHeard: r.lastHeardMs.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                trainedAt: r.trainedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }
             )
         }
     }

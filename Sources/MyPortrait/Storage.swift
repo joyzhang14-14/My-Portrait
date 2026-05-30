@@ -67,12 +67,19 @@ enum Storage {
     /// `~/.portrait/cron_jobs/`.
     static var cronJobsDir: URL { rootURL.appendingPathComponent("cron_jobs", isDirectory: true) }
 
+    /// Voice training 录音 WAV (`<speaker_id>.wav`)。每次重训覆盖。
+    /// 给 SpeakersView 试听 + 给 maintainer 排查训练质量用。
+    static var voiceTrainingDir: URL {
+        rootURL.appendingPathComponent("voice_training", isDirectory: true)
+    }
+
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
     static func ensureExists() throws {
         let fm = FileManager.default
         for url in [
             rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
-            journalDir, personalityDailyDir, rawDataDir, framesDir, videoDir
+            journalDir, personalityDailyDir, rawDataDir, framesDir, videoDir,
+            voiceTrainingDir,
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
