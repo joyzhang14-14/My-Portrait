@@ -547,7 +547,7 @@ struct AudioConfig: Codable, Equatable {
     /// 也可以两边填不一样的(比如 "Joy" vs "Joy Zhang")。
     var userName:                String   = ""
     var engine:                  String   = "whisper"
-    var whisperModel:            String   = "openai_whisper-base"
+    var whisperModel:            String   = "openai_whisper-large-v3-v20240930"
     var deepgramApiKeyRef:       String   = ""
     var languages:               [String] = []
     var microphonesSelected:     [String] = []
@@ -559,6 +559,8 @@ struct AudioConfig: Codable, Equatable {
     /// 从源头不录。两者都开时此项优先）。
     var pauseOnMusicApp:         Bool     = false
     var batchTranscription:      Bool     = true
+    /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
+    var transcribeOnACOnly:      Bool     = true
     var autoSelectAudioDevices:  Bool     = true
     var customVocabulary:        [String] = []
     /// engine = "custom" 时用：OpenAI 兼容转录服务端点 / 模型 / API key 引用。
@@ -583,6 +585,7 @@ struct AudioConfig: Codable, Equatable {
         case filterMusic             = "filter_music"
         case pauseOnMusicApp         = "pause_on_music_app"
         case batchTranscription      = "batch_transcription"
+        case transcribeOnACOnly      = "transcribe_on_ac_only"
         case autoSelectAudioDevices  = "auto_select_audio_devices"
         case customVocabulary        = "custom_vocabulary"
     }
@@ -605,6 +608,7 @@ struct AudioConfig: Codable, Equatable {
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
         pauseOnMusicApp        = c.dflt(Bool.self,     .pauseOnMusicApp, pauseOnMusicApp)
         batchTranscription     = c.dflt(Bool.self,     .batchTranscription, batchTranscription)
+        transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
         autoSelectAudioDevices = c.dflt(Bool.self,     .autoSelectAudioDevices, autoSelectAudioDevices)
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
     }

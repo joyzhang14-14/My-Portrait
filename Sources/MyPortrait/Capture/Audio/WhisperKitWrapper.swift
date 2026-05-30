@@ -76,9 +76,7 @@ final class WhisperKitWrapper: @unchecked Sendable {
     /// 启动时一次性 prefetch 全部,让用户在 Settings → Capture 切换模型不用
     /// 再等下载;AIModelsView 也照这张表显示每个的 ready 状态。
     static let allTranscriptionModels: [(name: String, label: String, size: String)] = [
-        ("openai_whisper-tiny",                "Whisper Tiny",         "~75 MB"),
-        ("openai_whisper-base",                "Whisper Base",         "~150 MB"),
-        ("openai_whisper-small",               "Whisper Small",        "~500 MB"),
+        ("openai_whisper-small",               "Whisper Small",          "~500 MB"),
         ("openai_whisper-large-v3-v20240930",  "Whisper Large v3 Turbo", "~1.5 GB"),
     ]
 
