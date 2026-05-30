@@ -16,10 +16,10 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     case data(DataPrivacy)
 
     enum App: String, Hashable, CaseIterable {
-        case display, general, aiModels, connections, notifications
+        case display, general, aiModels, connections, notifications, health
     }
     enum Capture: String, Hashable, CaseIterable {
-        case screen, audio, typing, health
+        case screen, audio, typing
     }
     enum Memory: String, Hashable, CaseIterable {
         case parameter, scheduler, changelog
@@ -53,10 +53,10 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .app(.aiModels):          return "AI models"
         case .app(.connections):       return "Connections"
         case .app(.notifications):     return "Notifications"
+        case .app(.health):            return "Health"
         case .capture(.screen):        return "Screen Capture"
         case .capture(.audio):         return "Audio Capture"
         case .capture(.typing):        return "Typing Capture"
-        case .capture(.health):        return "Health"
         case .memory(.parameter):      return "Parameter"
         case .memory(.scheduler):      return "Scheduler"
         case .memory(.changelog):      return "Changelog"
@@ -73,10 +73,10 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .app(.aiModels):          return "brain"
         case .app(.connections):       return "powerplug"
         case .app(.notifications):     return "bell"
+        case .app(.health):            return "stethoscope"
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
-        case .capture(.health):        return "stethoscope"
         case .memory(.parameter):      return "slider.horizontal.3"
         case .memory(.scheduler):      return "calendar.badge.clock"
         case .memory(.changelog):      return "list.bullet.rectangle"

@@ -21,7 +21,7 @@ struct CaptureHealthView: View {
     @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
-        SettingsPage("Capture health",
+        SettingsPage("Health",
                      subtitle: "Live metrics for the capture engine. Auto-refreshes while this page is open.",
                      onResetCurrentPage: nil) {
 
