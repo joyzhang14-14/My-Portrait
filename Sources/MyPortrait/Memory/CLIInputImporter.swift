@@ -85,11 +85,13 @@ enum CLIInputImporter {
         }
     }
 
-    /// 以这些标记开头的 content 是系统注入 / slash 命令 / bash `!` 输出,排除。
+    /// 以这些标记开头的 content 是系统注入 / slash 命令 / bash `!` 输出 /
+    /// `/compact` 后自动注入的 AI 会话摘要 —— 都不是用户手打,排除。
     private static let ccNoisePrefixes = [
         "<command-name>", "<command-message>", "<command-args>",
         "<local-command-caveat>", "<local-command-stdout>",
         "<system-reminder>",
+        "This session is being continued from a previous conversation that ran out of context",
     ]
 
     private static func makeISOFormatter() -> ISO8601DateFormatter {
