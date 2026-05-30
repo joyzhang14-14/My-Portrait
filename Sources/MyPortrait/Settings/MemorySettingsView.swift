@@ -441,7 +441,7 @@ struct MemorySettingsView: View {
             Divider().padding(.vertical, 4)
             schedulerBlock(
                 title: "Writing capture",
-                desc: "Runs Pass 1 (context) + Pass 2 (segment + route) + Pass 3 (multi-source fusion) + Pass 4 (keystroke filter) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
+                desc: "Runs Pass 1 (context) + Pass 2 (segment + route) + Pass 3 (multi-source fusion) + Pass 4 (content review) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
                 config: \.scheduler.writingCapture)
             Divider().padding(.vertical, 4)
             schedulerBlock(
@@ -502,7 +502,7 @@ struct MemorySettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Process writing capture")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 (context) + Pass 2 (segment + route) + Pass 3 (per-app+url fanout) + Pass 4 (keystroke filter). Stages writing_records for review — Approve advances the cursor.")
+                    Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 (context) + Pass 2 (segment + route) + Pass 3 (per-app+url fanout) + Pass 4 (content review). Stages writing_records for review — Approve advances the cursor.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1027,7 +1027,7 @@ struct MemorySettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (route) + Pass 3 (fanout) + Pass 4 (filter) LLM calls. Output is staged for review.")
+            Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (route) + Pass 3 (fanout) + Pass 4 (content review) LLM calls. Output is staged for review.")
         }
         .alert("Run speech style distillation?", isPresented: $speechStyleConfirm) {
             Button("Run", role: .none) {
