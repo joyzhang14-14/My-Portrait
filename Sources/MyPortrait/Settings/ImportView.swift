@@ -160,8 +160,15 @@ struct ImportSettingsView: View {
 
     private func rescanCLI() async {
         cliScanning = true
+        let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
         let result = await Task.detached(priority: .userInitiated) {
-            CLIInputImporter.scan()
+            var sinceCC: Int64? = nil, sinceCodex: Int64? = nil
+            if let dbPool {
+                let store = WritingCaptureStore(dbPool: dbPool)
+                sinceCC = try? store.cliImportLastTs(app: "claude-code")
+                sinceCodex = try? store.cliImportLastTs(app: "codex-cli")
+            }
+            return CLIInputImporter.scan(sinceClaudeCode: sinceCC, sinceCodex: sinceCodex)
         }.value
         cliScan = result
         cliScanning = false
@@ -183,10 +190,11 @@ struct ImportSettingsView: View {
         let result: (inserted: Int, skipped: Int)
         do {
             result = try await Task.detached(priority: .userInitiated) {
-                let rows = isCC
-                    ? CLIInputImporter.collectClaudeCode()
-                    : CLIInputImporter.collectCodex()
                 let store = WritingCaptureStore(dbPool: dbPool)
+                let since = try? store.cliImportLastTs(app: app)
+                let rows = isCC
+                    ? CLIInputImporter.collectClaudeCode(since: since)
+                    : CLIInputImporter.collectCodex(since: since)
                 return try store.insertCLIImported(rows)
             }.value
         } catch {

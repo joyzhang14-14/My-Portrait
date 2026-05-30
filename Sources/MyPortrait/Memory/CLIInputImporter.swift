@@ -47,16 +47,26 @@ enum CLIInputImporter {
 
     // MARK: - 对外:收集全部
 
-    /// 单独解析 Claude Code 的用户输入(未去重 —— 去重在 store 落库时做)。
-    static func collectClaudeCode() -> [Imported] { parseClaudeCode() }
+    /// 单独解析 Claude Code 的用户输入。`since`:增量游标(ms),只取发送时刻
+    /// 晚于它的;nil → 全量。去重在 store 落库时还会再兜一道。
+    static func collectClaudeCode(since: Int64? = nil) -> [Imported] {
+        filterSince(parseClaudeCode(), since)
+    }
 
-    /// 单独解析 Codex 的用户输入。
-    static func collectCodex() -> [Imported] { parseCodex() }
+    /// 单独解析 Codex 的用户输入。`since` 同上。
+    static func collectCodex(since: Int64? = nil) -> [Imported] {
+        filterSince(parseCodex(), since)
+    }
 
-    /// 只数数 —— 给 UI scan 用,prompt 数 + 涉及的 session 数。
-    static func scan() -> ScanResult {
-        let cc = parseClaudeCode()
-        let codex = parseCodex()
+    private static func filterSince(_ rows: [Imported], _ since: Int64?) -> [Imported] {
+        guard let since else { return rows }
+        return rows.filter { $0.tsMs > since }
+    }
+
+    /// 只数数 —— 给 UI scan 用,只计 `since` 之后的增量(prompt 数 + session 数)。
+    static func scan(sinceClaudeCode: Int64?, sinceCodex: Int64?) -> ScanResult {
+        let cc = filterSince(parseClaudeCode(), sinceClaudeCode)
+        let codex = filterSince(parseCodex(), sinceCodex)
         return ScanResult(
             claudeCode: cc.count,
             codex: codex.count,
