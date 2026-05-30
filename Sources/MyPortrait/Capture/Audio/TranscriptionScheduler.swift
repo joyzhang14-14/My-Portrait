@@ -166,8 +166,11 @@ actor TranscriptionScheduler {
         guard PowerMonitor.isOnAC else {
             // 电池模式不转录 → 释放 Whisper 模型,别白占内存。
             whisper.unload()
+            // 通知 StallDetector:audio pending 堆积是故意的,不要报 backlog。
+            await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = true }
             return
         }
+        await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = false }
 
         let chunks: [AudioChunkRecord]
         do {
