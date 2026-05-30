@@ -32,7 +32,7 @@ struct SpeakersSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            ProgressHeader(identified: identified.count, total: rows.count)
+            ProgressHeader(trainedCount: identified.count)
 
             VoiceTrainingCard(
                 existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty }
@@ -196,31 +196,24 @@ struct SpeakersSettingsView: View {
 // MARK: - Header banners
 
 private struct ProgressHeader: View {
-    let identified: Int; let total: Int
-    private var pct: Double {
-        guard total > 0 else { return 0 }
-        return Double(identified) / Double(total)
-    }
+    /// 用户真训练过的 speaker 数(只数 trained_at_ms 非空的)。
+    /// 不带分母 —— "训练了几个"是绝对数,跟 diarization 簇的总数无关。
+    let trainedCount: Int
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(identified) of \(total) speakers identified")
+                    Text(trainedCount == 1
+                         ? "1 speaker trained"
+                         : "\(trainedCount) speakers trained")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                    Text("Identified speakers are searchable as \(token: "@speaker:<name>") in chat.")
+                    Text("Trained speakers are searchable as \(token: "@speaker:<name>") in chat.")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 Spacer()
-                Text("\(Int(pct * 100))%")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
             }
-            ProgressView(value: pct)
-                .tint(LinearGradient(
-                    colors: [Color.purple, Color.blue],
-                    startPoint: .leading, endPoint: .trailing))
         }
         .padding(16)
         .background(
