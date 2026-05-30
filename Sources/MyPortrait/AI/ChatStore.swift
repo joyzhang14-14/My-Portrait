@@ -57,6 +57,12 @@ final class ChatStore {
     }
 
     func deleteConversation(_ id: UUID) {
+        // Pi session 文件落在 ~/.portrait/agent_sessions/ —— 跟 conv 一起删,
+        // 否则该目录越攒越多死文件。Claude Code 的 session 在 ~/.claude/
+        // 内部托管,我们不动。
+        if let path = conversations.first(where: { $0.id == id })?.piSessionPath {
+            try? FileManager.default.removeItem(atPath: path)
+        }
         execute("DELETE FROM messages WHERE conv_id=?") { sqlite3_bind_text($0, 1, id.uuidString, -1, Self.SQLITE_TRANSIENT) }
         execute("DELETE FROM conversations WHERE id=?") { sqlite3_bind_text($0, 1, id.uuidString, -1, Self.SQLITE_TRANSIENT) }
         reloadConversations()
@@ -166,7 +172,7 @@ final class ChatStore {
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         let sql = """
-            SELECT id, title, pinned, created_at, updated_at, provider_id, model
+            SELECT id, title, pinned, created_at, updated_at, provider_id, model, claude_session_id, pi_session_path
             FROM conversations
             ORDER BY pinned DESC, updated_at DESC
         """
@@ -186,10 +192,13 @@ final class ChatStore {
             // map 给个 nil(fallback 读全局 AppState)。
             let providerId = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
             let model = sqlite3_column_text(stmt, 6).map { String(cString: $0) }
+            let claudeSid = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
+            let piPath = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
             rows.append(Conversation(
                 id: id, title: title, pinned: pinned,
                 createdAt: created, updatedAt: updated,
-                providerId: providerId, model: model
+                providerId: providerId, model: model,
+                claudeSessionId: claudeSid, piSessionPath: piPath
             ))
         }
         self.conversations = rows
@@ -224,6 +233,58 @@ final class ChatStore {
     func conversationModel(id: UUID) -> (providerId: String?, model: String?) {
         guard let conv = conversations.first(where: { $0.id == id }) else { return (nil, nil) }
         return (conv.providerId, conv.model)
+    }
+
+    /// Claude Code session id 持久化。每条 conv 一个 sid:第一次 sendPrompt
+    /// 后 ClaudeCodeAgent 从响应里抓出 sid,通过 ChatController 调这个落盘;
+    /// 切回该 conv 时 ChatController 把 sid 喂给新 spawn 的 agent,用
+    /// `claude --print -r <sid>` 续上下文。
+    ///
+    /// **不动 updated_at** —— 跟 updateConversationModel 同样原因,session
+    /// 元数据写入不应该把 conv bump 到 RECENTS 顶部。
+    func updateClaudeSessionId(_ id: UUID, _ sid: String?) {
+        execute("UPDATE conversations SET claude_session_id=? WHERE id=?") { stmt in
+            if let sid {
+                sqlite3_bind_text(stmt, 1, sid, -1, Self.SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            sqlite3_bind_text(stmt, 2, id.uuidString, -1, Self.SQLITE_TRANSIENT)
+        }
+        // **不 reload**:sidebar 的 conv list 不显示 sid,reload 没意义,反而
+        // 让每个 token 抓到 sid 都触发 conversations 数组重建 → SwiftUI diff
+        // 把整列重画一遍。手动改下内存 cache 里那一条就够。
+        if let i = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[i].claudeSessionId = sid
+        }
+    }
+
+    func claudeSessionId(for id: UUID) -> String? {
+        conversations.first { $0.id == id }?.claudeSessionId
+    }
+
+    /// Pi session 文件路径持久化。空 → 该 conv 还没分配过 session,
+    /// ChatController 起 PiAgent 时给它派一个 `~/.portrait/agent_sessions/<convId>.jsonl`
+    /// 并写回这里。后续切走再切回直接复用,pi `--session <path>` 把整段
+    /// jsonl replay 回上下文。
+    ///
+    /// **不动 updated_at**(同 updateClaudeSessionId 注释)。
+    func updatePiSessionPath(_ id: UUID, _ path: String?) {
+        execute("UPDATE conversations SET pi_session_path=? WHERE id=?") { stmt in
+            if let path {
+                sqlite3_bind_text(stmt, 1, path, -1, Self.SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            sqlite3_bind_text(stmt, 2, id.uuidString, -1, Self.SQLITE_TRANSIENT)
+        }
+        if let i = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[i].piSessionPath = path
+        }
+    }
+
+    func piSessionPath(for id: UUID) -> String? {
+        conversations.first { $0.id == id }?.piSessionPath
     }
 
     // MARK: - DB plumbing
@@ -266,6 +327,15 @@ final class ChatStore {
         // 我们忽略错误,跑不跑都得正确。
         sqlite3_exec(db, "ALTER TABLE conversations ADD COLUMN provider_id TEXT", nil, nil, nil)
         sqlite3_exec(db, "ALTER TABLE conversations ADD COLUMN model TEXT",       nil, nil, nil)
+        // v3:claude code session id。每条 conv 一个 sid,ClaudeCodeAgent
+        // 用 `claude --print -r <sid>` 续上下文。不存的话切走再切回 AI
+        // 不记得之前聊过什么(claude --print 默认起新 session)。
+        sqlite3_exec(db, "ALTER TABLE conversations ADD COLUMN claude_session_id TEXT", nil, nil, nil)
+        // v3.1:pi-coding-agent session 文件绝对路径。每条 conv 一个 jsonl,
+        // PiAgent 启动时 `--session <path>` 加载,pi 内部把每轮 prompt /
+        // assistant 消息 append 进去。同 conv 内多轮上下文 + 切走再切回
+        // 都靠这条恢复。
+        sqlite3_exec(db, "ALTER TABLE conversations ADD COLUMN pi_session_path TEXT", nil, nil, nil)
     }
 
     private func execute(_ sql: String, bind: ((OpaquePointer?) -> Void)? = nil) {
@@ -292,4 +362,11 @@ struct Conversation: Identifiable, Hashable {
     var providerId: String? = nil
     /// 同上,锁定 model 名(provider 的 availableModels 之一)。
     var model: String? = nil
+    /// Claude Code 的 session id —— 让切走再切回不丢上下文。
+    /// Pi / 其它 provider 用不到这条。
+    var claudeSessionId: String? = nil
+    /// Pi 的 session 文件绝对路径 —— 切走再切回时 PiAgent
+    /// `--session <path>` 让 pi 把 jsonl replay 回上下文。
+    /// Claude Code 用不到这条(它走自家 -r <sid>)。
+    var piSessionPath: String? = nil
 }

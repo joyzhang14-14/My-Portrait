@@ -90,9 +90,16 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
     /// to the agent — mirrors screenpipe's `cmd.env(...)` injection.
     private let extraEnv: [String: String]
 
+    /// Pi session jsonl 路径。非 nil → spawn 时挂 `--session <path>`,pi 把
+    /// 历史 message replay 回 agent 上下文(同 conv 多轮 / 切走再切回都靠
+    /// 这条)。nil → pi 起新 session,本进程退出就丢。chat 路径必传,memory
+    /// pipeline / cron job 的一次性任务保持 nil。
+    private let sessionPath: String?
+
     init(provider: Provider = .chatgpt, model: String? = nil,
          apiKeyRefOverride: String? = nil,
-         extraEnv: [String: String] = [:]) throws {
+         extraEnv: [String: String] = [:],
+         sessionPath: String? = nil) throws {
         guard BunInstaller.isInstalled else { throw SpawnError.missingBun }
         guard PiInstaller.isInstalled else { throw SpawnError.missingPi }
 
@@ -100,6 +107,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
         self.model = model ?? provider.defaultModel
         self.apiKeyRefOverride = apiKeyRefOverride
         self.extraEnv = extraEnv
+        self.sessionPath = sessionPath
         self.process = Process()
         self.stdoutPipe = Pipe()
         self.stderrPipe = Pipe()
@@ -139,12 +147,19 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
 
         let stdinPipe = Pipe()
         process.executableURL = AIPaths.bunBinary
-        process.arguments = [
+        var piArgs: [String] = [
             AIPaths.piCliJS.path,
             "--mode", "rpc",
             "--provider", provider.piName,
             "--model", model
         ]
+        // chat 路径每条 conv 一个固定 session jsonl。pi 的 SessionManager.open
+        // 会在文件存在时 replay 历史 message,不存在时按这个路径创建新 session。
+        // 双向都覆盖到 → 不用提前 touch 文件。
+        if let sessionPath {
+            piArgs.append(contentsOf: ["--session", sessionPath])
+        }
+        process.arguments = piArgs
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe

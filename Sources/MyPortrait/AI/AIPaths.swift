@@ -21,10 +21,21 @@ enum AIPaths {
     static var binDir: URL { supportDir.appendingPathComponent("bin", isDirectory: true) }
     static var mpQueryLink: URL { binDir.appendingPathComponent("mp-query") }
 
+    /// AI agent 的对话 session 文件目录。每条 chat conv 对应一个文件,
+    /// PiAgent 启动时 `--session <file>` 加载,ClaudeCodeAgent 走自己的
+    /// `-r <sid>` 不落这里。conv 删除时连带删。
+    static var agentSessionsDir: URL { supportDir.appendingPathComponent("agent_sessions", isDirectory: true) }
+    /// 给一条 conv 派一个固定的 pi session jsonl 路径。pi 启动时如果文件
+    /// 不存在会自动创建,存在就 open。
+    static func piSessionPath(for convId: UUID) -> URL {
+        agentSessionsDir.appendingPathComponent("\(convId.uuidString).jsonl")
+    }
+
     static func ensureExists() throws {
         let fm = FileManager.default
         try fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: binDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: agentSessionsDir, withIntermediateDirectories: true)
     }
 
     /// 启动时调一次。在 `~/.portrait/bin/mp-query` 写一个 shell wrapper,
