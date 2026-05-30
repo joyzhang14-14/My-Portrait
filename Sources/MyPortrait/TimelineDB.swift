@@ -831,14 +831,50 @@ struct TimelineDB: Sendable {
         let blob = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-        // 1) find existing by name
-        var speakerId: Int64?
-        if let stmt = prepare(db, "SELECT id FROM speakers WHERE name = ? LIMIT 1") {
+        // 1) 找所有同名(case-insensitive,排除 hallucination)。
+        //    历史 bug:有时 diarization 自动建的 speaker 在用户改名前先被
+        //    rename,name 时机错位 → 上次 upsert 没命中老条目,又 INSERT
+        //    一条新的,造成两个 "Joy"。这里取所有同名,**保留 id 最小**
+        //    (= 最老 = sample 累计最多的那条)作为 keeper,后面的 dupe
+        //    合并进 keeper 后删掉,保证 voice training 之后只有一条同名。
+        var duplicateIds: [Int64] = []
+        if let stmt = prepare(db, """
+            SELECT id FROM speakers
+            WHERE LOWER(name) = LOWER(?)
+              AND hallucination = 0
+            ORDER BY id ASC
+            """) {
             sqlite3_bind_text(stmt, 1, name, -1, transient)
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                speakerId = sqlite3_column_int64(stmt, 0)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                duplicateIds.append(sqlite3_column_int64(stmt, 0))
             }
             sqlite3_finalize(stmt)
+        }
+        var speakerId: Int64? = duplicateIds.first
+        // 2a) 把后面的 dupe 合并进 keeper:把它们的 speaker_embeddings +
+        //     audio_transcriptions reassign,再删 dupe speakers 行。这样
+        //     keeper 拿到所有历史样本和转录归属。
+        if duplicateIds.count > 1, let keeperId = speakerId {
+            for dupeId in duplicateIds.dropFirst() {
+                if let stmt = prepare(db, "UPDATE speaker_embeddings SET speaker_id = ? WHERE speaker_id = ?") {
+                    sqlite3_bind_int64(stmt, 1, keeperId)
+                    sqlite3_bind_int64(stmt, 2, dupeId)
+                    _ = sqlite3_step(stmt)
+                    sqlite3_finalize(stmt)
+                }
+                if let stmt = prepare(db, "UPDATE audio_transcriptions SET speaker_id = ? WHERE speaker_id = ?") {
+                    sqlite3_bind_int64(stmt, 1, keeperId)
+                    sqlite3_bind_int64(stmt, 2, dupeId)
+                    _ = sqlite3_step(stmt)
+                    sqlite3_finalize(stmt)
+                }
+                if let stmt = prepare(db, "DELETE FROM speakers WHERE id = ?") {
+                    sqlite3_bind_int64(stmt, 1, dupeId)
+                    _ = sqlite3_step(stmt)
+                    sqlite3_finalize(stmt)
+                }
+            }
+            timelineLog.warning("upsertVoiceTrainedSpeaker: merged \(duplicateIds.count - 1) duplicate '\(name, privacy: .public)' row(s) into id=\(keeperId)")
         }
 
         // 2) upsert speakers row
