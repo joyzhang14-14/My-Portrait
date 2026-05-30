@@ -244,8 +244,10 @@ struct MemorySettingsView: View {
         personalityChanges = MemoryStaging.changes(.personality)
         refreshHasWork()
         refreshClassifyWork()
-        // 镜像一次 scheduler 持有的最近一次 classify result。
+        // 优先取本进程 scheduler 持有的;没有(app 重启 / CLI 跨进程跑过)就
+        // 从 _folders/_last_run.json 读盘兜底。
         classifyLastResult = MemoryScheduler.shared.lastClassifyResult
+            ?? EventClassifier.loadLastResult()
     }
 
     /// 重新算三个 job 当前有没有活。off-main 跑(扫 timeline+processing_log)。
