@@ -44,10 +44,11 @@ enum CLIInputImporter {
 
     // MARK: - 对外:收集全部
 
-    /// 解析两个源的全部用户输入(未去重 —— 去重在 store 落库时做)。
-    static func collectAll() -> [Imported] {
-        parseClaudeCode() + parseCodex()
-    }
+    /// 单独解析 Claude Code 的用户输入(未去重 —— 去重在 store 落库时做)。
+    static func collectClaudeCode() -> [Imported] { parseClaudeCode() }
+
+    /// 单独解析 Codex 的用户输入。
+    static func collectCodex() -> [Imported] { parseCodex() }
 
     /// 只数数,不构造完整数组 —— 给 UI scan 用。
     static func scan() -> ScanResult {

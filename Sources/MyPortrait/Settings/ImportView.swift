@@ -22,10 +22,12 @@ struct ImportSettingsView: View {
     /// 当前进度(running 时实时更新)。
     @State private var progress: ScreenpipeImporter.Progress? = nil
 
-    // CLI 导入(Claude Code / Codex)状态。
+    // CLI 导入状态 —— Claude Code 与 Codex 各自独立。
     @State private var cliScan: CLIInputImporter.ScanResult? = nil
-    @State private var cliRunning: Bool = false
-    @State private var cliStatus: String? = nil
+    @State private var ccRunning: Bool = false
+    @State private var ccStatus: String? = nil
+    @State private var codexRunning: Bool = false
+    @State private var codexStatus: String? = nil
 
     var body: some View {
         SettingsPage(
@@ -62,36 +64,63 @@ struct ImportSettingsView: View {
             }
 
             SettingsCard(
-                title: "Import from Claude Code / Codex CLI",
-                footnote: "Reads the prompts you typed into Claude Code (~/.claude/projects) and Codex CLI (~/.codex/history.jsonl) and adds them to your writing records — straight from the session logs, no OCR. Tool results, slash commands, and system messages are skipped. Re-importing never creates duplicates."
+                title: "Import from Claude Code",
+                footnote: "Reads the prompts you typed into Claude Code (~/.claude/projects) and adds them to your writing records — straight from the session logs, no OCR. Tool results, slash commands, /compact summaries, and system messages are skipped. Re-importing never creates duplicates."
             ) {
-                cliBlock
+                cliSourceBlock(
+                    icon: "terminal.fill",
+                    title: "Claude Code",
+                    count: cliScan?.claudeCode,
+                    running: ccRunning,
+                    status: ccStatus,
+                    importAction: { await runImport(app: "claude-code") }
+                )
+            }
+
+            SettingsCard(
+                title: "Import from Codex CLI",
+                footnote: "Reads the prompts you typed into Codex CLI (~/.codex/history.jsonl) and adds them to your writing records — straight from the typed-command history, no OCR. Re-importing never creates duplicates."
+            ) {
+                cliSourceBlock(
+                    icon: "chevron.left.forwardslash.chevron.right",
+                    title: "Codex CLI",
+                    count: cliScan?.codex,
+                    running: codexRunning,
+                    status: codexStatus,
+                    importAction: { await runImport(app: "codex-cli") }
+                )
             }
         }
         .task { await rescan(); await rescanCLI() }
     }
 
-    // MARK: CLI 导入 UI
+    // MARK: CLI 导入 UI(Claude Code / Codex 各一张卡片,共用此 block)
 
     @ViewBuilder
-    private var cliBlock: some View {
+    private func cliSourceBlock(
+        icon: String,
+        title: String,
+        count: Int?,
+        running: Bool,
+        status: String?,
+        importAction: @escaping () async -> Void
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "terminal.fill")
+                Image(systemName: icon)
                     .foregroundStyle(.green)
-                Text("Claude Code + Codex CLI")
+                Text(title)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("Re-scan") { Task { await rescanCLI() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(cliRunning)
+                    .disabled(running)
             }
-            if let s = cliScan {
-                statRow("Claude Code", "\(s.claudeCode.formatted()) typed prompts", mono: false)
-                statRow("Codex CLI",   "\(s.codex.formatted()) typed prompts", mono: false)
+            if let c = count {
+                statRow("Typed prompts", "\(c.formatted()) to import", mono: false)
             }
-            if let st = cliStatus {
+            if let st = status {
                 Text(st)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.textSecondary)
@@ -99,12 +128,12 @@ struct ImportSettingsView: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                Button(cliRunning ? "Importing…" : "Import") {
-                    Task { await runCLIImport() }
+                Button(running ? "Importing…" : "Import") {
+                    Task { await importAction() }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(cliRunning || (cliScan?.total ?? 0) == 0)
+                .disabled(running || (count ?? 0) == 0)
             }
             .padding(.top, 4)
         }
@@ -120,27 +149,35 @@ struct ImportSettingsView: View {
         cliScan = result
     }
 
-    private func runCLIImport() async {
-        cliRunning = true
-        cliStatus = "Reading session logs…"
-        defer { cliRunning = false }
+    /// 单源导入 —— app 取 "claude-code" 或 "codex-cli"。
+    private func runImport(app: String) async {
+        let isCC = app == "claude-code"
+        if isCC { ccRunning = true; ccStatus = "Reading session logs…" }
+        else { codexRunning = true; codexStatus = "Reading history…" }
+        defer { if isCC { ccRunning = false } else { codexRunning = false } }
+
         guard let dbImpl = services?.db as? PortraitDBImpl else {
-            cliStatus = "Portrait DB not available."
+            let msg = "Portrait DB not available."
+            if isCC { ccStatus = msg } else { codexStatus = msg }
             return
         }
         let dbPool = dbImpl.dbPool
         let result: (inserted: Int, skipped: Int)
         do {
             result = try await Task.detached(priority: .userInitiated) {
-                let rows = CLIInputImporter.collectAll()
+                let rows = isCC
+                    ? CLIInputImporter.collectClaudeCode()
+                    : CLIInputImporter.collectCodex()
                 let store = WritingCaptureStore(dbPool: dbPool)
                 return try store.insertCLIImported(rows)
             }.value
         } catch {
-            cliStatus = "Failed: \(error.localizedDescription)"
+            let msg = "Failed: \(error.localizedDescription)"
+            if isCC { ccStatus = msg } else { codexStatus = msg }
             return
         }
-        cliStatus = "Done. \(result.inserted) imported, \(result.skipped) already present."
+        let msg = "Done. \(result.inserted) imported, \(result.skipped) already present."
+        if isCC { ccStatus = msg } else { codexStatus = msg }
         await rescanCLI()
     }
 
