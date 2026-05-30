@@ -100,6 +100,11 @@ struct ContentView: View {
             // CronJobExecutor 不属于任何 conv,永远走全局(nil convId 让
             // resolver 跳过 per-conv lock 那条分支)。
             CronJobExecutor.providerResolver = { resolver(nil) }
+            // cron 跑的时候每次落盘 → 若用户正看这条 conv,live 重读让前端
+            // 像普通 chat 一样逐段刷 thinking / 指令。
+            CronJobExecutor.onConvUpdated = { convId in
+                chat.liveReloadIfViewing(convId)
+            }
             ScheduleRunner.shared.start()
 
             // 点 cron job 通知卡片 → 切 conv + 主窗口拉到前台。

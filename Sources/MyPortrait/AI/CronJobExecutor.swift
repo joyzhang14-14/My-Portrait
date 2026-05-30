@@ -15,6 +15,11 @@ enum CronJobExecutor {
         (.chatgpt, Provider.chatgpt.defaultModel, nil)
     }
 
+    /// Override at boot(ContentView)。cron 每次把流式增量落盘后调一次,
+    /// 让正在前端查看这条 conv 的 ChatController live 重读 —— 否则用户点进
+    /// 正在跑的 cron conv 只看到点进去那一刻的快照(永远卡在 Thinking)。
+    static var onConvUpdated: (UUID) -> Void = { _ in }
+
     static func run(_ cronJob: CronJob) {
         Task { await execute(cronJob) }
     }
@@ -121,6 +126,8 @@ enum CronJobExecutor {
             if !force, now.timeIntervalSince(lastPersist) < persistThrottle { return }
             lastPersist = now
             store.saveMessages([userMsg, assistant], for: conv.id)
+            // 通知前端:若正在看这条 conv,live 重读(像普通 chat 一样逐段刷)。
+            Self.onConvUpdated(conv.id)
         }
 
         let (_, model, refOverride) = providerResolver()
