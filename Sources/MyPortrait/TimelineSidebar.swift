@@ -28,7 +28,6 @@ struct TimelineSidebar: View {
     @State private var activeApps: [ActiveAppEntry] = []
     @State private var audioItems: [AudioTranscriptEntry] = []
     @State private var loading: Bool = false
-    @State private var reloadTask: Task<Void, Never>?
     @State private var recentsSearch: String = ""
     @State private var recentsSearchOpen: Bool = false
     @State private var renamingConvId: UUID? = nil
@@ -596,10 +595,6 @@ struct TimelineSidebar: View {
     // MARK: reload
 
     private func reload() {
-        // 按住方向键时 focusIndex 连发,每次都会调到这里。取消上一次在飞的
-        // reload + 120ms 防抖 → 只有停下来那次真正发两条 DB 查询,中间的全被
-        // 取消掉,不查库。
-        reloadTask?.cancel()
         guard selection == .timeline, let moment = focusedTimestamp else {
             activeApps = []
             audioItems = []
@@ -611,16 +606,13 @@ struct TimelineSidebar: View {
             return
         }
         loading = true
-        reloadTask = Task {
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            if Task.isCancelled { return }
+        Task {
             let apps = (try? await db.activeAppsAround(
                 timestamp: moment, windowSeconds: 45
             )) ?? []
             let audio = (try? await db.audioTranscriptsAround(
                 timestamp: moment, beforeSeconds: 120, afterSeconds: 30
             )) ?? []
-            if Task.isCancelled { return }
             await MainActor.run {
                 self.activeApps = apps
                 self.audioItems = audio
