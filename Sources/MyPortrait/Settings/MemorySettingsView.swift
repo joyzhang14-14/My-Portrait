@@ -596,7 +596,10 @@ struct MemorySettingsView: View {
 
             // 跑完结果:小卡片显示 "X events into Y folders (Z new) — leftover N",
             // 然后每个 folder 一行 (created/updated +N)。
-            if let r = classifyLastResult {
+            // **只在 Pending review 期间显示** —— 一旦 Approve 提交,这些就是
+            // "已入库的历史改动",在 Run now 区再挂着就是噪音(用户原话:
+            // "如果已经入库了就不要在 run now 区域显示改动了")。
+            if pendingReview, let r = classifyLastResult {
                 Divider().padding(.vertical, 4)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 12) {
