@@ -59,6 +59,15 @@ struct MemorySettingsView: View {
     @State private var hasWritingCaptureWork: Bool = true
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
+    // EventClassifier 状态(独立于上面的 ManualTrigger 体系 —— classifier
+    // 不走 staging,直接落 _folders/*.json,跟 writing capture 同模式)。
+    @State private var classifyRunning: Bool = false
+    @State private var classifyStatus: String = ""
+    @State private var classifyConfirm: Bool = false
+    @State private var classifyTask: Task<Void, Never>? = nil
+    @State private var hasClassifyWork: Bool = true
+    @State private var classifyLastResult: EventClassifier.Result? = nil
+
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
     // —— 不共用 MemoryStaging,自己一套)
     // Running / status / summary / task 全走 UIState.shared,view 切走再回来
@@ -234,6 +243,9 @@ struct MemorySettingsView: View {
         portraitChanges = MemoryStaging.changes(.portrait)
         personalityChanges = MemoryStaging.changes(.personality)
         refreshHasWork()
+        refreshClassifyWork()
+        // 镜像一次 scheduler 持有的最近一次 classify result。
+        classifyLastResult = MemoryScheduler.shared.lastClassifyResult
     }
 
     /// 重新算三个 job 当前有没有活。off-main 跑(扫 timeline+processing_log)。
@@ -430,6 +442,11 @@ struct MemorySettingsView: View {
                 config: \.scheduler.event)
             Divider().padding(.vertical, 4)
             schedulerBlock(
+                title: "Event classifier",
+                desc: "Groups events by project / big endeavor into folders. Metadata only — actual event files don't move. Runs after Event processing, before Distillation.",
+                config: \.scheduler.classify)
+            Divider().padding(.vertical, 4)
+            schedulerBlock(
                 title: "Portrait distillation",
                 desc: "Distills events into long-term portrait entries.",
                 config: \.scheduler.portrait)
@@ -486,6 +503,148 @@ struct MemorySettingsView: View {
                 dayOfMonthRow("Day of month", value: cfg.binding(kp.appending(path: \.dayOfMonth)))
                 timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
             }
+        }
+    }
+
+    // MARK: - Event Classifier(metadata-only,落 _folders/*.json)
+
+    /// 项目级 event 分组的 Run now 块。跟 writing capture 同模式 —— 独立状态、
+    /// 不走 MemoryStaging(没什么好审的,folder 改错改 json 一行就回)。
+    @ViewBuilder
+    private var classifierBlock: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Classify events into folders")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("LLM groups events by PROJECT (e.g. \"My Portrait\", \"Valis\"). Needs at least 3 similar events to open a new folder; fewer stay ungrouped. Output: events/_folders/<slug>.json. Doesn't touch .md files.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                let disabledReason: String? = {
+                    if classifyRunning { return "Event classifier is already running." }
+                    if !hasClassifyWork { return "All events already classified — nothing to do." }
+                    // 跟 event job 互斥,跟 distill/personality 不挡。
+                    if runningTriggers.contains(.eventProcessing) {
+                        return "Waiting for event job to finish."
+                    }
+                    return nil
+                }()
+                Button(classifyRunning ? "Running…" : "Run") {
+                    classifyConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(disabledReason != nil)
+                .help(disabledReason ?? "Run event classifier now.")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if classifyRunning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Single LLM call — usually 10-30 seconds.")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 6)
+            }
+            if !classifyStatus.isEmpty {
+                Text(classifyStatus)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+            }
+
+            // 跑完结果:小卡片显示 "X events into Y folders (Z new) — leftover N",
+            // 然后每个 folder 一行 (created/updated +N)。
+            if let r = classifyLastResult {
+                Divider().padding(.vertical, 4)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        Text("\(r.classifiedInThisRun) events into \(r.newFoldersCreated + r.existingFoldersUpdated) folders")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer(minLength: 12)
+                        Text("\(r.newFoldersCreated) new · \(r.existingFoldersUpdated) updated · \(r.stillUngrouped) left ungrouped")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    if r.folderDeltas.isEmpty {
+                        Text("No folders touched in the last run.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        ForEach(r.folderDeltas) { d in
+                            HStack(spacing: 8) {
+                                Image(systemName: d.kind == .created
+                                      ? "folder.badge.plus" : "folder")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(d.kind == .created ? .green : .secondary)
+                                Text(d.name)
+                                    .font(.system(size: 12))
+                                Spacer(minLength: 8)
+                                Text("+\(d.addedCount)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                Text(d.kind.rawValue)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(
+                                        Capsule().fill(Color.secondary.opacity(0.10))
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 跑 classifier:跟 MemoryScheduler.runClassifierJob 同入口,但前端
+    /// 自己管 running flag + status + lastResult 镜像(MemoryScheduler 那
+    /// 边也会写 lastClassifyResult,但 view 自己 @State 一份更新更跟手)。
+    @MainActor
+    private func runClassifier() async {
+        guard !classifyRunning else { return }
+        classifyRunning = true
+        defer { classifyRunning = false }
+        classifyStatus = "Classifying events…"
+        let outcome = await MemoryScheduler.shared.runClassifierJob()
+        switch outcome {
+        case .ran:
+            classifyLastResult = MemoryScheduler.shared.lastClassifyResult
+            if let r = classifyLastResult {
+                if r.classifiedInThisRun > 0 {
+                    classifyStatus = "Run complete."
+                } else if r.totalUnclassified == 0 {
+                    classifyStatus = "All events already classified — nothing to do."
+                } else {
+                    classifyStatus = "LLM proposed no changes this round (try again after more events accumulate)."
+                }
+            } else {
+                classifyStatus = "Run complete."
+            }
+        case .noWork:
+            classifyStatus = "All events already classified — nothing to do."
+        case .busy:
+            classifyStatus = "Classifier is already running."
+        }
+        refreshClassifyWork()
+    }
+
+    /// classify 有没有活 —— scheduler 的 classifierJobHasWork() 兜底两路:
+    /// anchor needsWork 或盘上未分组 events。
+    private func refreshClassifyWork() {
+        Task.detached(priority: .userInitiated) {
+            let s = await MemoryScheduler.shared
+            let has = await s.classifierJobHasWork()
+            await MainActor.run { hasClassifyWork = has }
         }
     }
 
@@ -1002,6 +1161,11 @@ struct MemorySettingsView: View {
                     .padding(.top, 6)
             }
 
+            // —— Event classifier(metadata only:落 _folders/*.json,
+            //    不动 .md;跟 memory pipeline 锁互斥但不走 staging)
+            Divider().padding(.vertical, 2)
+            classifierBlock
+
             // —— Writing capture(独立链路,跟 memory pipeline 不互锁)
             Divider().padding(.vertical, 2)
             writingCaptureBlock
@@ -1020,6 +1184,14 @@ struct MemorySettingsView: View {
         // Per-draft sheet:点单条 NEW/CHANGED 行打开,只显示这一条 draft 详情。
         .sheet(item: $speechStylePreviewDraft) { draft in
             SpeechStyleDraftDetail(draft: draft)
+        }
+        .alert("Run event classifier?", isPresented: $classifyConfirm) {
+            Button("Run", role: .none) {
+                classifyTask = Task { @MainActor in await runClassifier() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Group unclassified events into project-level folders. Metadata only — no event files are moved. Uses one LLM call.")
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
