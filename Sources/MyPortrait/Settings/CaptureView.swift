@@ -16,6 +16,7 @@ struct AudioCaptureSettingsView: View {
     private static func languageOptions(for engine: String) -> [TranscriptionLanguage] {
         switch engine {
         case AudioEngine.deepgram.rawValue: return deepgramLanguages
+        case AudioEngine.qwen.rawValue:     return qwenLanguages
         default:                            return whisperLanguages   // whisper / custom 默认用 Whisper 集
         }
     }
@@ -54,32 +55,57 @@ struct AudioCaptureSettingsView: View {
         ("ro","Romanian"),("ms","Malay"),("ta","Tamil"),("bg","Bulgarian"),("ca","Catalan"),
     ].map { TranscriptionLanguage(code: $0.0, name: $0.1) }
 
+    /// Qwen3-ASR(on-device)支持的语言(常用子集；用 ISO 码，同 Whisper 格式）。
+    /// 跟 whisper 分开维护 —— 选中的存进 `qwenLanguages`，不混 `languages`。
+    private static let qwenLanguages: [TranscriptionLanguage] = [
+        ("zh","Chinese"),("en","English"),("ja","Japanese"),("ko","Korean"),("es","Spanish"),
+        ("fr","French"),("de","German"),("ru","Russian"),("pt","Portuguese"),("it","Italian"),
+        ("ar","Arabic"),("hi","Hindi"),("nl","Dutch"),("tr","Turkish"),("pl","Polish"),
+        ("vi","Vietnamese"),("th","Thai"),("id","Indonesian"),("uk","Ukrainian"),("cs","Czech"),
+        ("sv","Swedish"),("da","Danish"),("fi","Finnish"),("no","Norwegian"),("el","Greek"),
+        ("he","Hebrew"),("ro","Romanian"),("hu","Hungarian"),("ms","Malay"),("ca","Catalan"),
+    ].map { TranscriptionLanguage(code: $0.0, name: $0.1) }
+
     /// 当前 whisperModel code → 显示标签(Menu 闭合态用)。找不到回退 code 本身。
     private static func whisperModelLabel(_ code: String) -> String {
         WhisperKitWrapper.allTranscriptionModels.first { $0.name == code }?.label ?? code
     }
 
-    /// code → 显示名(在 whisper/deepgram 表里找,找不到回退大写 code)。
+    /// 当前 qwenModel code → 显示标签。找不到回退 code 本身。
+    private static func qwenModelLabel(_ code: String) -> String {
+        Qwen3ASRWrapper.allQwenModels.first { $0.name == code }?.label ?? code
+    }
+
+    /// code → 显示名(在 whisper/deepgram/qwen 表里找,找不到回退大写 code)。
     private static func displayName(for code: String) -> String {
         whisperLanguages.first { $0.code == code }?.name
             ?? deepgramLanguages.first { $0.code == code }?.name
+            ?? qwenLanguages.first { $0.code == code }?.name
             ?? code.uppercased()
     }
 
-    /// 勾选/取消某语言。
+    /// 当前引擎选中的语言列表。Qwen 用 qwenLanguages，其余用 languages。
+    private var selectedLangs: [String] {
+        engine == AudioEngine.qwen.rawValue
+            ? config.current.capture.audio.qwenLanguages
+            : config.current.capture.audio.languages
+    }
+
+    /// 勾选/取消某语言。按当前引擎写进对应字段(Qwen 跟 whisper 分开存)。
     private func toggleLanguage(_ code: String, _ on: Bool) {
         config.mutate {
-            var ls = $0.capture.audio.languages
+            let useQwen = $0.capture.audio.engine == AudioEngine.qwen.rawValue
+            var ls = useQwen ? $0.capture.audio.qwenLanguages : $0.capture.audio.languages
             if on { if !ls.contains(code) { ls.append(code) } }
             else { ls.removeAll { $0 == code } }
-            $0.capture.audio.languages = ls
+            if useQwen { $0.capture.audio.qwenLanguages = ls } else { $0.capture.audio.languages = ls }
         }
     }
 
     /// 选中语言的 chips(下方显示,点 × 移除)。
     private var selectedLanguageChips: some View {
         HStack(spacing: 6) {
-            ForEach(config.current.capture.audio.languages, id: \.self) { code in
+            ForEach(selectedLangs, id: \.self) { code in
                 HStack(spacing: 4) {
                     Text(Self.displayName(for: code)).font(.system(size: 11))
                     Button { toggleLanguage(code, false) } label: {
@@ -170,7 +196,9 @@ struct AudioCaptureSettingsView: View {
                         ? "Deepgram sends audio to the cloud. Audio leaves this Mac."
                         : (engine == AudioEngine.whisper.rawValue
                             ? "Whisper runs entirely on-device. Audio stays on this Mac."
-                            : "Pick an engine to enable speech-to-text.")
+                            : (engine == AudioEngine.qwen.rawValue
+                                ? "Qwen3-ASR runs entirely on-device (MLX). Audio stays on this Mac."
+                                : "Pick an engine to enable speech-to-text."))
                 ) {
                     // 转译总开关 —— 关掉就把 engine 设成 disabled,下面引擎/模型/语言全隐藏。
                     SettingsRow("Transcription",
@@ -210,6 +238,34 @@ struct AudioCaptureSettingsView: View {
                             } label: {
                                 HStack(spacing: 4) {
                                     Text(Self.whisperModelLabel(config.current.capture.audio.whisperModel))
+                                        .font(.system(size: 12))
+                                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                                }
+                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                        }
+                    }
+                    if engine == AudioEngine.qwen.rawValue {
+                        SettingsDivider()
+                        SettingsRow("Qwen model",
+                                    description: "Download models in AI models. Uninstalled models can't be selected here.",
+                                    icon: "cpu") {
+                            Menu {
+                                ForEach(Qwen3ASRWrapper.allQwenModels, id: \.name) { m in
+                                    let installed = Qwen3ASRWrapper.isOnDisk(modelId: m.name)
+                                    Button {
+                                        config.mutate { $0.capture.audio.qwenModel = m.name }
+                                    } label: {
+                                        Text(installed ? "\(m.label) (\(m.size))"
+                                                       : "\(m.label) — uninstalled")
+                                    }
+                                    .disabled(!installed)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(Self.qwenModelLabel(config.current.capture.audio.qwenModel))
                                         .font(.system(size: 12))
                                     Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
                                 }
@@ -281,20 +337,20 @@ struct AudioCaptureSettingsView: View {
                     }
                     SettingsDivider()
                     SettingsRow("Languages",
-                                description: "Pick the languages you speak. One → used as a Whisper hint; multiple or none → auto-detect.",
+                                description: "Pick the languages you speak. One → used as a hint; multiple or none → auto-detect.",
                                 icon: "character.bubble") {
                         Menu {
                             ForEach(Self.languageOptions(for: engine)) { lang in
                                 Toggle(lang.name, isOn: Binding(
-                                    get: { config.current.capture.audio.languages.contains(lang.code) },
+                                    get: { selectedLangs.contains(lang.code) },
                                     set: { on in toggleLanguage(lang.code, on) }
                                 ))
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(config.current.capture.audio.languages.isEmpty
+                                Text(selectedLangs.isEmpty
                                      ? "Auto-detect"
-                                     : "\(config.current.capture.audio.languages.count) selected")
+                                     : "\(selectedLangs.count) selected")
                                     .font(.system(size: 12))
                                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
                             }
@@ -304,7 +360,7 @@ struct AudioCaptureSettingsView: View {
                         .fixedSize()
                     }
                     // 选中的语言 chips 显示在下方,点 × 移除。
-                    if !config.current.capture.audio.languages.isEmpty {
+                    if !selectedLangs.isEmpty {
                         selectedLanguageChips
                     }
                         SettingsDivider()

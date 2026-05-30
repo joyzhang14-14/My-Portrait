@@ -548,8 +548,12 @@ struct AudioConfig: Codable, Equatable {
     var userName:                String   = ""
     var engine:                  String   = "whisper"
     var whisperModel:            String   = "openai_whisper-large-v3-v20240930"
+    /// engine = "qwen" 时用的模型 variant（HF id）。默认 1.7B-8bit（实测质量达标）。
+    var qwenModel:               String   = "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"
     var deepgramApiKeyRef:       String   = ""
     var languages:               [String] = []
+    /// Qwen 引擎的语言选择，跟 whisper 的 `languages` 分开存（两者支持的语言集不同）。
+    var qwenLanguages:           [String] = []
     var microphonesSelected:     [String] = []
     var captureSystemAudio:      Bool     = true
     var useCoreAudioCapture:     Bool     = true
@@ -573,11 +577,13 @@ struct AudioConfig: Codable, Equatable {
         case userName                = "user_name"
         case engine
         case whisperModel            = "whisper_model"
+        case qwenModel               = "qwen_model"
         case deepgramApiKeyRef       = "deepgram_api_key_ref"
         case customEndpoint          = "custom_endpoint"
         case customModel             = "custom_model"
         case customApiKeyRef         = "custom_api_key_ref"
         case languages
+        case qwenLanguages           = "qwen_languages"
         case microphonesSelected     = "microphones_selected"
         case captureSystemAudio      = "capture_system_audio"
         case useCoreAudioCapture     = "use_core_audio_capture"
@@ -596,11 +602,13 @@ struct AudioConfig: Codable, Equatable {
         userName               = c.dflt(String.self,   .userName, userName)
         engine                 = c.dflt(String.self,   .engine, engine)
         whisperModel           = c.dflt(String.self,   .whisperModel, whisperModel)
+        qwenModel              = c.dflt(String.self,   .qwenModel, qwenModel)
         deepgramApiKeyRef      = c.dflt(String.self,   .deepgramApiKeyRef, deepgramApiKeyRef)
         customEndpoint         = c.dflt(String.self,   .customEndpoint, customEndpoint)
         customModel            = c.dflt(String.self,   .customModel, customModel)
         customApiKeyRef        = c.dflt(String.self,   .customApiKeyRef, customApiKeyRef)
         languages              = c.dflt([String].self, .languages, languages)
+        qwenLanguages          = c.dflt([String].self, .qwenLanguages, qwenLanguages)
         microphonesSelected    = c.dflt([String].self, .microphonesSelected, microphonesSelected)
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
         useCoreAudioCapture    = c.dflt(Bool.self,     .useCoreAudioCapture, useCoreAudioCapture)

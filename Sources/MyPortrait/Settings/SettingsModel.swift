@@ -113,12 +113,13 @@ enum AppTheme: String, CaseIterable, Identifiable {
 }
 
 enum AudioEngine: String, CaseIterable, Identifiable {
-    case disabled, whisper, deepgram, custom
+    case disabled, whisper, qwen, deepgram, custom
     var id: String { rawValue }
     var label: String {
         switch self {
         case .disabled: return "Disabled"
         case .whisper:  return "Whisper (on-device)"
+        case .qwen:     return "Qwen3-ASR (on-device)"
         case .deepgram: return "Deepgram (cloud)"
         case .custom:   return "Custom endpoint"
         }

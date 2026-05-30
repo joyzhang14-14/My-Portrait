@@ -14,6 +14,9 @@ let package = Package(
         .package(url: "https://github.com/microsoft/onnxruntime-swift-package-manager", from: "1.24.0"),
         // Sparkle 自动更新（GitHub Pages 托管 appcast.xml）
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+        // Qwen3-ASR 原生转录引擎（MLX）。0.0.x 快速 churn —— pin exact 保证可复现。
+        // 只用 Qwen3ASR 库产品（不碰它附带的 TTS / hummingbird server 那一坨）。
+        .package(url: "https://github.com/ivan-digital/qwen3-asr-swift.git", exact: "0.0.19"),
     ],
     targets: [
         // ObjC helper —— Swift 不接 NSException,AVAudioEngine.installTap /
@@ -36,6 +39,7 @@ let package = Package(
                 .product(name: "TOMLKit", package: "TOMLKit"),
                 .product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "Qwen3ASR", package: "qwen3-asr-swift"),
             ],
             path: "Sources/MyPortrait",
             exclude: [

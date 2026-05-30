@@ -25,12 +25,9 @@ packages:
   mlx-swift:
     url: https://github.com/ml-explore/mlx-swift.git
     from: 0.21.3
-  swift-transformers:
-    url: https://github.com/huggingface/swift-transformers.git
-    from: 0.1.24
-  mlx-embeddings:
-    url: https://github.com/mzbac/mlx.embeddings.git
-    from: 0.1.1
+  qwen3-asr-swift:
+    url: https://github.com/ivan-digital/qwen3-asr-swift.git
+    exactVersion: 0.0.19
   TOMLKit:
     url: https://github.com/LebJe/TOMLKit.git
     from: 0.6.0
@@ -64,10 +61,8 @@ targets:
         product: MLXNN
       - package: mlx-swift
         product: MLXFast
-      - package: swift-transformers
-        product: Transformers
-      - package: mlx-embeddings
-        product: mlx_embeddings
+      - package: qwen3-asr-swift
+        product: Qwen3ASR
       - package: TOMLKit
         product: TOMLKit
       - package: onnxruntime

@@ -29,6 +29,7 @@ actor TranscriptionScheduler {
 
     private let vad: VADSegmenter
     private let whisper: WhisperKitWrapper
+    private let qwen: Qwen3ASRWrapper
     private let power: PowerWatcher
     private let speaker: any SpeakerDiarizer
 
@@ -58,6 +59,7 @@ actor TranscriptionScheduler {
         power: PowerWatcher,
         vad: VADSegmenter = VADSegmenter(),
         whisper: WhisperKitWrapper = WhisperKitWrapper(),
+        qwen: Qwen3ASRWrapper = Qwen3ASRWrapper(),
         speaker: any SpeakerDiarizer = NoopSpeakerDiarizer()
     ) {
         self.db = db
@@ -67,6 +69,7 @@ actor TranscriptionScheduler {
         self.power = power
         self.vad = vad
         self.whisper = whisper
+        self.qwen = qwen
         self.speaker = speaker
     }
 
@@ -125,6 +128,7 @@ actor TranscriptionScheduler {
         transcribeTask = nil
         powerTask = nil
         whisper.unload()
+        qwen.unload()
         logger.info("TranscriptionScheduler stopped")
     }
 
@@ -166,8 +170,9 @@ actor TranscriptionScheduler {
         // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
         let acOnly = await MainActor.run { ConfigStore.shared.current.capture.audio.transcribeOnACOnly }
         if acOnly && !PowerMonitor.isOnAC {
-            // 电池模式不转录 → 释放 Whisper 模型,别白占内存。
+            // 电池模式不转录 → 释放本地模型,别白占内存。
             whisper.unload()
+            qwen.unload()
             // 通知 StallDetector:audio pending 堆积是故意的,不要报 backlog。
             await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = true }
             return
@@ -183,8 +188,9 @@ actor TranscriptionScheduler {
         }
 
         guard !chunks.isEmpty else {
-            // 队列空 → 没有转录任务 → 释放 Whisper 模型。
+            // 队列空 → 没有转录任务 → 释放本地模型。
             whisper.unload()
+            qwen.unload()
             return
         }
 
@@ -214,9 +220,10 @@ actor TranscriptionScheduler {
     private static func transcriptionConfig() async -> TranscribeSettings {
         await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
-            // 多选语言(来自 CaptureView):恰好选 1 种 → 用作 Whisper 提示;0 种或多种
-            // (如中英双语)→ nil = 自动检测(Whisper 无法同时提示多种语言)。
-            let langs = a.languages.filter { !$0.isEmpty }
+            // 多选语言(来自 CaptureView):恰好选 1 种 → 用作模型语言提示;0 种或多种
+            // (如中英双语)→ nil = 自动检测。Qwen 用独立的 qwenLanguages。
+            let langSource = a.engine == "qwen" ? a.qwenLanguages : a.languages
+            let langs = langSource.filter { !$0.isEmpty }
             let lang: String? = langs.count == 1 ? langs[0] : nil
             func secret(_ ref: String) -> String {
                 guard !ref.isEmpty, let d = SecretStore.shared.get(ref) else { return "" }
@@ -248,6 +255,11 @@ actor TranscriptionScheduler {
             return try await CloudTranscriber.openAICompatible(
                 samples: processed, endpoint: s.customEndpoint, model: s.customModel,
                 apiKey: s.customKey, language: s.language, vocabulary: s.vocabulary)
+        case "qwen":
+            // Qwen3-ASR（本地，MLX）。预处理在 wrapper 内部做，跟 whisper 一致。
+            return try await qwen.transcribe(
+                samples: samples, language: s.language,
+                vocabulary: s.vocabulary, filterMusic: s.filterMusic)
         case "disabled":
             return ""
         default:   // whisper（本地）
