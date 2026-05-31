@@ -160,20 +160,6 @@ struct AudioCaptureSettingsView: View {
             }
 
             if audioRec {
-                SettingsCard(title: "Microphones") {
-                    SettingsRow("Auto-select audio devices",
-                                description: "Records all default devices. Turn off to exclude Bluetooth headphones or pick specific devices below.",
-                                icon: "speaker.wave.3") {
-                        Toggle("", isOn: config.binding(\.capture.audio.autoSelectAudioDevices)).labelsHidden().toggleStyle(.switch)
-                    }
-                    SettingsDivider()
-                    SettingsRow("Microphones",
-                                description: "Devices to capture from. Used when auto-select is off.",
-                                icon: "mic.fill") { EmptyView() }
-                    VStack { TagListEditor(tags: config.binding(\.capture.audio.microphonesSelected), placeholder: "device name…") }
-                        .padding(.horizontal, 48).padding(.bottom, 12)
-                                        }
-
                 SettingsCard(title: "System audio") {
                     SettingsRow("Capture system audio",
                                 description: "What you hear (loopback).",
