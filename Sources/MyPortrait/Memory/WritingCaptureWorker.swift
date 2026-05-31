@@ -805,12 +805,12 @@ final class WritingCaptureWorker {
                 ?? WritingCapturePass2Agent.Result(
                     primarySource: "ax",
                     units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
-            if result.primarySource == "ocr" {
-                return (idx, [Self.ensureOcrPrepped(s)])
-            }
-            // ax 路:按 LLM 切的 units 重建(LLM 判 return 还是时间边界)。
-            // **不丢 event** —— LLM 没分配到的(含它判 dropped 的)各自单独成单元,
-            // 交给 Pass 3(补 AX 小瑕疵)/ Pass 4(审核)。Pass 2 只切+路由,不丢。
+            // 路由确定性:有 typing_events = AX 有料 → 一律 ax 路。**忽略 LLM 的
+            // primary_source** —— LLM 路由不可靠(会把 Discord/Claude Desktop 这种
+            // AX 好用的 chat 误判 ocr,导致抓 AI 回复、丢真消息)。canvas(无
+            // typing_events)的路由在外层按 keystroke 判。
+            // Pass 2 的 LLM 只用来做"切分":result.units 是它判的消息边界(权衡
+            // return / 时间)。没分配到的 event 各自单独成单元,不丢。
             let assigned = Set(result.units.flatMap { $0 })
             var unitIds = result.units
             unitIds.append(contentsOf: s.typingEvents.compactMap { $0.id }
