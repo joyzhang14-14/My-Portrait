@@ -563,25 +563,34 @@ enum WritingCapturePrompts {
     /// Pass 2 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条
     /// AX 真伪。轻量模型可胜任。keystroke + OCR 是不会说谎的对照物,只判 AX。
     static let axCleanup = #"""
-    You FIX small input-capture flaws in short user messages. Each item gives the
-    captured `text` and the `keystroke` the user physically pressed (<BS>=backspace,
-    <CR>=Return; for IME this is the latin phonetic the user typed).
+    You CLEAN UP captured user input. Each item gives the captured `text` and the
+    `keystroke` the user physically pressed (<BS>=backspace, <CR>=Return; for IME this
+    is the latin phonetic). For each item do TWO things:
 
-    The ONLY thing you fix: IME phonetic that never composed into a character — the
-    text shows a latin pinyin/romaji fragment where a character belongs. Using the
-    keystrokes, COMPLETE it to the character the user clearly meant.
-      e.g. text "这是一家什么dian", keystroke "...shi yi jia shen me dian" → "这是一家什么店"
-    Also drop abandoned trailing phonetic residue the keystrokes show was deleted.
+    1) FIX IME residue: phonetic that never composed into a character — the text shows
+       latin pinyin/romaji where a character belongs. Using the keystrokes, COMPLETE
+       it to the character the user clearly meant.
+         e.g. "这是一家什么dian" + keystroke "...shen me dian" → "这是一家什么店"
+       Drop abandoned trailing phonetic residue the keystrokes show was deleted.
 
-    HARD limits — do NOT do anything else:
-    - Do NOT translate, rephrase, summarize, reorder, merge, split, censor, or
-      "improve". Keep the user's EXACT wording, typos, punctuation, language, emoji.
-    - Fix ONLY what the keystrokes clearly support. If unsure, leave it UNCHANGED.
-    - If nothing needs fixing, return the text UNCHANGED.
-    - Return EVERY input id exactly once with its (fixed or unchanged) text.
+    2) SPLIT IF MULTIPLE MESSAGES: sometimes ONE captured text actually holds SEVERAL
+       separate messages the user sent in sequence (the input field accumulated them).
+       If the text clearly reads as multiple distinct sent messages, split it into
+       those individual messages (each becomes one output string). If it is a single
+       message — even a long multi-line one (a numbered list, a multi-paragraph note) —
+       keep it as ONE. Use meaning to decide; when unsure, keep as one.
+
+    HARD limits:
+    - Do NOT translate, rephrase, summarize, reorder, censor, or "improve". Keep the
+      user's EXACT wording, typos, punctuation, language, emoji.
+    - The concatenation of your output messages for an item MUST cover its original
+      content — never drop or invent content.
+    - Return EVERY input id exactly once.
 
     OUTPUT — respond with ONLY this JSON object, no prose / fences:
-    { "fixed": [ { "id": "<id>", "text": "<text>" }, ... ] }
+    { "results": [ { "id": "<id>", "messages": ["<msg>", ...] }, ... ] }
+    - "messages" is the cleaned message(s) for that id — one element normally, more
+      only when you split.
     - JSON escaping: `"` → `\"`, `\` → `\\`, newlines → `\n`.
     """#
 
