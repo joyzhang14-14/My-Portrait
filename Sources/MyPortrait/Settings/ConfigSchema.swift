@@ -320,7 +320,6 @@ struct DisplayConfig: Codable, Equatable {
     var chatAlwaysOnTop:         Bool   = false
     var translucentSidebar:      Bool   = true
     var hideModelReasoning:      Bool   = false
-    var showOverlayInRecording:  Bool   = true
     var appName:                 String = "My Portrait"
     var customDockIcon:          String = ""
     var customTrayIcon:          String = ""
@@ -332,7 +331,6 @@ struct DisplayConfig: Codable, Equatable {
         case chatAlwaysOnTop          = "chat_always_on_top"
         case translucentSidebar       = "translucent_sidebar"
         case hideModelReasoning       = "hide_model_reasoning"
-        case showOverlayInRecording   = "show_overlay_in_recording"
         case appName                  = "app_name"
         case customDockIcon           = "custom_dock_icon"
         case customTrayIcon           = "custom_tray_icon"
@@ -345,7 +343,6 @@ struct DisplayConfig: Codable, Equatable {
         chatAlwaysOnTop         = c.dflt(Bool.self,   .chatAlwaysOnTop, chatAlwaysOnTop)
         translucentSidebar      = c.dflt(Bool.self,   .translucentSidebar, translucentSidebar)
         hideModelReasoning      = c.dflt(Bool.self,   .hideModelReasoning, hideModelReasoning)
-        showOverlayInRecording  = c.dflt(Bool.self,   .showOverlayInRecording, showOverlayInRecording)
         appName                 = c.dflt(String.self, .appName, appName)
         customDockIcon          = c.dflt(String.self, .customDockIcon, customDockIcon)
         customTrayIcon          = c.dflt(String.self, .customTrayIcon, customTrayIcon)
@@ -702,7 +699,6 @@ struct UsageConfig: Codable, Equatable {
 
 struct PrivacyConfig: Codable, Equatable {
     var ignoreIncognito:        Bool     = true
-    var captureClipboard:       Bool     = false
     var recordAudioWhileLocked: Bool     = false
     var piiRemoval:             Bool     = true
     /// Default blacklist applied to every new install.
@@ -748,7 +744,6 @@ struct PrivacyConfig: Codable, Equatable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
-        case captureClipboard        = "capture_clipboard"
         case recordAudioWhileLocked  = "record_audio_while_locked"
         case piiRemoval              = "pii_removal"
         case ignoredApps             = "ignored_apps"
@@ -763,7 +758,6 @@ struct PrivacyConfig: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ignoreIncognito        = c.dflt(Bool.self,     .ignoreIncognito, ignoreIncognito)
-        captureClipboard       = c.dflt(Bool.self,     .captureClipboard, captureClipboard)
         recordAudioWhileLocked = c.dflt(Bool.self,     .recordAudioWhileLocked, recordAudioWhileLocked)
         piiRemoval             = c.dflt(Bool.self,     .piiRemoval, piiRemoval)
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
