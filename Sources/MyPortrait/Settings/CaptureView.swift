@@ -468,12 +468,6 @@ struct ScreenCaptureSettingsView: View {
                 Toggle("", isOn: config.binding(\.privacy.ignoreIncognito)).labelsHidden().toggleStyle(.switch)
             }
             SettingsDivider()
-            SettingsRow("Capture clipboard",
-                        description: "Include text you copy in the activity log.",
-                        icon: "doc.on.clipboard") {
-                Toggle("", isOn: config.binding(\.privacy.captureClipboard)).labelsHidden().toggleStyle(.switch)
-            }
-            SettingsDivider()
             SettingsRow("Record audio while screen is locked",
                         description: "Keep listening even when your Mac is locked.",
                         icon: "lock.shield") {
