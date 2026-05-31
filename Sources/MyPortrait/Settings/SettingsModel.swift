@@ -138,12 +138,6 @@ enum OCREngine: String, CaseIterable, Identifiable {
     }
 }
 
-enum RecordingQuality: String, CaseIterable, Identifiable {
-    case low, medium, high
-    var id: String { rawValue }
-    var label: String { rawValue.capitalized }
-}
-
 enum VideoFormat: String, CaseIterable, Identifiable {
     case h264, h265, prores
     var id: String { rawValue }

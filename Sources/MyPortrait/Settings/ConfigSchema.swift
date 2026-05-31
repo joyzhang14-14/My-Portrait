@@ -618,17 +618,13 @@ struct ScreenConfig: Codable, Equatable {
     var enabled:         Bool   = true
     var ocrEngine:       String = "tesseract"
     var videoFps:        Int    = 1
-    var quality:         String = "medium"
     var videoFormat:     String = "h264"
-    var frameIntervalMs: Int    = 1000
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
         case ocrEngine       = "ocr_engine"
         case videoFps        = "video_fps"
-        case quality
         case videoFormat     = "video_format"
-        case frameIntervalMs = "frame_interval_ms"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -636,9 +632,7 @@ struct ScreenConfig: Codable, Equatable {
         enabled         = c.dflt(Bool.self,   .enabled, enabled)
         ocrEngine       = c.dflt(String.self, .ocrEngine, ocrEngine)
         videoFps        = c.dflt(Int.self,    .videoFps, videoFps)
-        quality         = c.dflt(String.self, .quality, quality)
         videoFormat     = c.dflt(String.self, .videoFormat, videoFormat)
-        frameIntervalMs = c.dflt(Int.self,    .frameIntervalMs, frameIntervalMs)
     }
 }
 
