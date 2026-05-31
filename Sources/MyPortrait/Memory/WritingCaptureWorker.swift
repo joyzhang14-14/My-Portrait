@@ -1099,8 +1099,12 @@ final class WritingCaptureWorker {
         keys: [KeystrokeEntry], k: Double
     ) -> Bool {
         guard textLen > 0 else { return false }
+        // 窗口两侧放宽 60s:打字常发生在 AX value-change 之前一段时间(Electron 等
+        // 合成后才一次性 fire,typing_event 窗口很窄)。放宽以覆盖真实击键期;
+        // 读笔记/AI回复/收到消息 附近本就 0 击键,放宽也照样毙,不误伤。
+        let pad: Int64 = 60_000
         let typed = keys.lazy.filter {
-            $0.tsMs >= startTs && $0.tsMs <= endTs
+            $0.tsMs >= startTs - pad && $0.tsMs <= endTs + pad
                 && $0.bundleId == app && ($0.modifiers & 0x07) == 0
         }.count
         return Double(typed) >= k * Double(textLen)
