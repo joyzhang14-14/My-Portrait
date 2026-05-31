@@ -799,6 +799,16 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// 清掉**所有** staged(不限 date_utc)。backlog 是唯一规范入口,任何残留
+    /// staged —— 包括历史 day-mode(date_utc='2026-..')的孤儿 —— 都该清,否则
+    /// 它们永远卡在 Pending review 里、backlog 的 clearStaged(date='all') 删不到。
+    func clearAllStaged() throws {
+        try dbPool.write { db in
+            try db.execute(sql: "DELETE FROM writing_records_staged")
+            try db.execute(sql: "DELETE FROM writing_records_discarded WHERE kind = 'staged'")
+        }
+    }
+
     /// Approve:把某日 staged 拷到 writing_records,清 staged,标 runs.status = approved。
     /// 原子事务。
     func approveStaged(date: String) throws -> Int {

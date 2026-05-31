@@ -453,7 +453,7 @@ final class WritingCaptureWorker {
         // 跑之前清 staged(approved / failed / rejected 状态下的残留),
         // 上一步 gate 已经挡掉 pending_review,这里安全。
         try await Task.detached(priority: .userInitiated) { [store] in
-            try store.clearStaged(date: Self.backlogDateKey)
+            try store.clearAllStaged()   // 清整张表(含 day-mode 孤儿),防残留卡 review
             try store.upsertRunStatus(
                 date: Self.backlogDateKey, status: .processing,
                 runId: runId, startedAt: startedAtMs
@@ -725,7 +725,7 @@ final class WritingCaptureWorker {
     /// reject backlog:清 staged,cursor 不动(下次 run 同样范围重跑)。
     func rejectBacklog() async throws {
         try await Task.detached(priority: .userInitiated) { [store] in
-            try store.clearStaged(date: Self.backlogDateKey)
+            try store.clearAllStaged()   // 含 day-mode 孤儿,根除残留
             try store.upsertRunStatus(
                 date: Self.backlogDateKey, status: .rejectedForRerun,
                 completedAt: Int64(Date().timeIntervalSince1970 * 1000)
