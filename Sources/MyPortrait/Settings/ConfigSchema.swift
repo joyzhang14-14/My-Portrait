@@ -694,7 +694,6 @@ struct UsageConfig: Codable, Equatable {
 struct PrivacyConfig: Codable, Equatable {
     var ignoreIncognito:        Bool     = true
     var recordAudioWhileLocked: Bool     = false
-    var piiRemoval:             Bool     = true
     /// Default blacklist applied to every new install.
     ///
     /// Case-insensitive substring match against a window's app name or
@@ -736,7 +735,6 @@ struct PrivacyConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case ignoreIncognito         = "ignore_incognito"
         case recordAudioWhileLocked  = "record_audio_while_locked"
-        case piiRemoval              = "pii_removal"
         case ignoredApps             = "ignored_apps"
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
@@ -749,7 +747,6 @@ struct PrivacyConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ignoreIncognito        = c.dflt(Bool.self,     .ignoreIncognito, ignoreIncognito)
         recordAudioWhileLocked = c.dflt(Bool.self,     .recordAudioWhileLocked, recordAudioWhileLocked)
-        piiRemoval             = c.dflt(Bool.self,     .piiRemoval, piiRemoval)
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)

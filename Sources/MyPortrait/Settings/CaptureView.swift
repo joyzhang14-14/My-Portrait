@@ -484,17 +484,6 @@ struct ScreenCaptureSettingsView: View {
         }
 
         SettingsCard(
-            title: "Data protection",
-            footnote: "Applied to OCR text before it's pasted into chat prompts. Matches emails, phone numbers, credit cards, SSNs, JWTs, and common API keys."
-        ) {
-            SettingsRow("PII removal",
-                        description: "Redact personally-identifying info before sending to AI.",
-                        icon: "shield.lefthalf.filled") {
-                Toggle("", isOn: config.binding(\.privacy.piiRemoval)).labelsHidden().toggleStyle(.switch)
-            }
-        }
-
-        SettingsCard(
             title: "Ignored apps",
             footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Case-insensitive substring match against the window's app name or title."
         ) {

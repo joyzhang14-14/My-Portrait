@@ -338,7 +338,6 @@ final class ConfigStore {
         // — Privacy
         c.privacy.ignoreIncognito        = bool(ud, "Settings.ignoreIncognito",        default: c.privacy.ignoreIncognito)
         c.privacy.recordAudioWhileLocked = bool(ud, "Settings.recordAudioWhileLocked", default: c.privacy.recordAudioWhileLocked)
-        c.privacy.piiRemoval             = bool(ud, "Settings.piiRemoval",             default: c.privacy.piiRemoval)
         c.privacy.ignoredApps            = stringArray(ud, "Settings.ignoredApps")
         c.privacy.ignoredUrls            = stringArray(ud, "Settings.ignoredURLs")
 
