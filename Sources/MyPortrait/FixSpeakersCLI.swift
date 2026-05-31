@@ -66,12 +66,16 @@ enum FixSpeakersCLI {
         }
 
         do {
-            // 备份
+            // 默认不再做 2GB+ 全库备份(用户原话:"bak 文件占内存空间")。
+            // 真有需要回滚就开 MYPORTRAIT_KEEP_BAK=1 — 否则就靠 git / Time
+            // Machine 这种 app 外的备份。
             try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
-            let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let bak = base.appendingPathComponent("portrait.sqlite.bak-speakers-\(ts)")
-            try FileManager.default.copyItem(at: src, to: bak)
-            print("DB 备份: \(bak.lastPathComponent)\n")
+            if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
+                let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                let bak = base.appendingPathComponent("portrait.sqlite.bak-speakers-\(ts)")
+                try FileManager.default.copyItem(at: src, to: bak)
+                print("DB 备份: \(bak.lastPathComponent)\n")
+            }
 
             printState("BEFORE")
             print("")
@@ -90,7 +94,7 @@ enum FixSpeakersCLI {
             print("")
 
             printState("AFTER")
-            print("\n✅ 完成。匹配池(hall=0)现在应为 Joy#13 + Stan#15。备份: \(bak.lastPathComponent)")
+            print("\n✅ 完成。匹配池(hall=0)现在应为 Joy#13 + Stan#15。")
         } catch {
             FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
             exit(1)
@@ -129,10 +133,12 @@ enum FixSpeakersCLI {
         }
         do {
             try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
-            let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let bak = base.appendingPathComponent("portrait.sqlite.bak-consolidate-\(ts)")
-            try FileManager.default.copyItem(at: src, to: bak)
-            print("DB 备份: \(bak.lastPathComponent)\n")
+            if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
+                let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                let bak = base.appendingPathComponent("portrait.sqlite.bak-consolidate-\(ts)")
+                try FileManager.default.copyItem(at: src, to: bak)
+                print("DB 备份: \(bak.lastPathComponent)\n")
+            }
             printState("BEFORE"); print("")
 
             // keep = 训练过的 speaker(应只有一个 = Joy);targets = 其余所有 hall=0 非训练簇。
@@ -163,7 +169,7 @@ enum FixSpeakersCLI {
                 print("  #\(mid) \(name) → #\(keepId):归并 \(moved) 段")
             }
             print(""); printState("AFTER")
-            print("\n✅ 纠正完成。匹配池(hall=0)现在应只剩干净的 Joy#13。备份: \(bak.lastPathComponent)")
+            print("\n✅ 纠正完成。匹配池(hall=0)现在应只剩干净的 Joy#13。")
         } catch {
             FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
             exit(1)
