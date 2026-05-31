@@ -189,13 +189,16 @@ enum RetranscribeQwenCLI {
                     return
                 }
 
-                // 5. APPLY：备份 + 只替换 text（GRDB，FTS 安全）
+                // 5. APPLY:默认跳过 2GB+ 全库备份(用户原话:bak 占空间)。
+                // 真要回滚开 MYPORTRAIT_KEEP_BAK=1。
                 try await pool.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
-                let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                let src = base.appendingPathComponent("portrait.sqlite")
-                let bak = base.appendingPathComponent("portrait.sqlite.bak-\(ts)")
-                do { try FileManager.default.copyItem(at: src, to: bak); print("DB 备份: \(bak.path)") }
-                catch { print("ERROR: 备份失败，中止 apply: \(error)"); state.code = 1; return }
+                if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
+                    let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                    let src = base.appendingPathComponent("portrait.sqlite")
+                    let bak = base.appendingPathComponent("portrait.sqlite.bak-\(ts)")
+                    do { try FileManager.default.copyItem(at: src, to: bak); print("DB 备份: \(bak.path)") }
+                    catch { print("ERROR: 备份失败,中止 apply: \(error)"); state.code = 1; return }
+                }
 
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                 // 空转录(近静音)不覆盖，避免清空原文本 —— 先过滤成自包含的 let 数组，
@@ -215,7 +218,7 @@ enum RetranscribeQwenCLI {
                     return toUpdate.count
                 }
                 print("✅ 已替换 \(updated) 段 text（engine=qwen）；空结果跳过 \(skippedEmpty) 段。speaker_id 未动。")
-                print("   FTS 已随 GRDB 触发器同步。备份在 \(bak.lastPathComponent)。")
+                print("   FTS 已随 GRDB 触发器同步。")
             } catch {
                 FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
                 state.code = 1
