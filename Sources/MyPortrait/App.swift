@@ -43,6 +43,14 @@ struct MyPortraitApp: App {
             VoiceTrainingTestCLI.run(audioPath: args[idx + 1])
             // run() exits the process internally.
         }
+        // 维护 CLI: `--retranscribe-qwen [--apply]` 用 Qwen 重转已有 wav 音频段 +
+        // 重新匹配 speaker(只读评估)。默认 dry-run;--apply 只替换 text(先备份)。
+        if args.contains("--retranscribe-qwen") {
+            var lim: Int? = nil
+            if let i = args.firstIndex(of: "--limit"), i + 1 < args.count { lim = Int(args[i + 1]) }
+            RetranscribeQwenCLI.run(apply: args.contains("--apply"), limit: lim)
+            // run() exits the process internally.
+        }
         // `mp-query` 给 AI agent 用的本地数据查询接口(端口自 screenpipe
         // SKILL.md REST API,改成 CLI + JSON stdout)。app 启动时会把自身
         // symlink 成 ~/.portrait/bin/mp-query,pi-coding-agent / Claude
