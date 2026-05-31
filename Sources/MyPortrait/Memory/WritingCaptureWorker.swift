@@ -1050,11 +1050,10 @@ final class WritingCaptureWorker {
                         }
                     }
                     if !entries.isEmpty { editLog = entries.sorted { $0.ts < $1.ts } }
-                    // 根治:text = 用户真打的 commit 增量拼接(ts 序),丢弃整篇 AX
-                    // 快照。`typing_event.text` 存的是整个字段的值 —— 在已有大文档里
-                    // 只打一句,也会把整篇当成 text。改成只留真打的那几段。
-                    // 读笔记 / 打开文档 = 0 commit → text 空 → 下面被毙。
-                    text = editLog.filter { $0.kind == "commit" }.map(\.text).joined()
+                    // text 用 AX 快照(typing_event.text,Pass 3 已给)——短消息=
+                    // 用户全打的,快照就是干净的合成结果("你真找啊?");不用 commit
+                    // 增量拼接(那会拼出 IME 合成中途态 "你真zhao找啊")。读笔记那种
+                    // "快照长但没打几个字"的,靠下面的击键覆盖闸门毙(快照长/击键≈0)。
                 }
 
                 // 确定性击键覆盖闸门(K=1.0):字数须有等量真实击键撑得起(用上面
