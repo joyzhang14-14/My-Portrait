@@ -873,15 +873,28 @@ final class WritingCaptureWorker {
         _ sessions: [WritingCaptureRawSession]
     ) -> [WritingCaptureRawSession] {
         var out: [WritingCaptureRawSession] = []
+        // 按 typing_event id 全局去重 —— Step 0 偶发把同一段消息切进多个重叠
+        // session,同一个 typing_event 会被切成多份。一个 event 只产一个单元。
+        var seenEventIds = Set<Int64>()
         for s in sessions {
             if s.route == "ocr" || s.typingEvents.isEmpty {
                 out.append(s)
                 continue
             }
-            let units = s.typingEvents.compactMap { ev -> WritingCaptureRawSession? in
-                ev.id.flatMap { Self.rebuildUnitSession(from: s, eventIds: [$0]) }
+            var units: [WritingCaptureRawSession] = []
+            for ev in s.typingEvents {
+                guard let id = ev.id, !seenEventIds.contains(id) else { continue }
+                seenEventIds.insert(id)
+                if let unit = Self.rebuildUnitSession(from: s, eventIds: [id]) {
+                    units.append(unit)
+                }
             }
-            out.append(contentsOf: units.isEmpty ? [s] : units)
+            // 整 session 的 event 都已在别处出过 → 这个 session 不再重复产单元。
+            if units.isEmpty, s.typingEvents.allSatisfy({ $0.id == nil }) {
+                out.append(s)
+            } else {
+                out.append(contentsOf: units)
+            }
         }
         return out
     }
