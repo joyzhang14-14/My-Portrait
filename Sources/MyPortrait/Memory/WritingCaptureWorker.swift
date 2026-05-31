@@ -977,6 +977,17 @@ final class WritingCaptureWorker {
         for group in recordsByGroupIdx {
             var keptGroup: [WritingCaptureRecord] = []
             for rec in group {
+                // 确定性击键覆盖闸门(K=1.0):一条 record 的字数必须有等量真实击键
+                // 撑得起。读笔记(0 击键)/ AI 回复 / 收到的消息 / OCR 幻觉 / 程序
+                // 写入(AX 文档加载) —— 击键远不够 —— 全在此算法层毙掉,不靠 LLM
+                // 自觉。对 CJK 同样成立(比击键数量,不做拼音子串匹配)。
+                if !Self.keystrokeCovered(rec: rec, keys: keys, k: Self.keystrokeCoverageK) {
+                    dropped.append(WritingCaptureDiscarded(
+                        reason: "keystroke coverage below \(Self.keystrokeCoverageK)× text length "
+                            + "(reading / received / pasted / hallucinated — not typed by user)",
+                        sessionIds: [], preview: String(rec.text.prefix(200))))
+                    continue
+                }
                 var editLog = rec.editLog
                 if rec.source == "ax_cleaned", !rec.referenceTypingEventIds.isEmpty {
                     var entries: [EditEntry] = []
@@ -1010,6 +1021,25 @@ final class WritingCaptureWorker {
             outRecs.append(keptGroup)
         }
         return (outRecs, dropped)
+    }
+
+    /// 击键覆盖闸门系数:窗口内真实击键数须 ≥ K × record 字数,否则毙。
+    /// K=1.0 = 最严(不豁免粘贴):中文拼音 ~2 击键/字、英文 ~1 击键/字,真打字
+    /// 远超;读/AI回复/幻觉 ≈ 0 击键 → 必毙。调这个数即可整体收紧/放松。
+    nonisolated static let keystrokeCoverageK: Double = 1.0
+
+    /// record 的字数是否有足够真实击键撑得起(窗口内、同 app、非 cmd/opt/ctrl
+    /// 快捷键的物理按键;shift/退格/空格/回车都算打字)。空 text 直接判不通过。
+    nonisolated static func keystrokeCovered(
+        rec: WritingCaptureRecord, keys: [KeystrokeEntry], k: Double
+    ) -> Bool {
+        let textLen = rec.text.count
+        guard textLen > 0 else { return false }
+        let typed = keys.lazy.filter {
+            $0.tsMs >= rec.startTs && $0.tsMs <= rec.endTs
+                && $0.bundleId == rec.app && ($0.modifiers & 0x07) == 0
+        }.count
+        return Double(typed) >= k * Double(textLen)
     }
 
     /// canvas record 的窗口击键跟 record.text 是否"完全对不上"(零对应)。
