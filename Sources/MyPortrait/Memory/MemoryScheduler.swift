@@ -464,8 +464,11 @@ final class MemoryScheduler {
 
         await runStep(date: classifyAnchor, stage: .classify, processor: "classify", rollbackDay: nil) {
             let cfg = self.memoryCfg
+            // 用 light model:classifier prompt 是 title-only + 简单
+            // 选 folder / 建 folder 决策,机械度高,不需要 main 模型的推理深度。
+            // 跟 writing capture / personality cluster 一脉。
             let classifier = EventClassifier(
-                provider: cfg.resolvedProvider, model: cfg.resolvedModel
+                provider: cfg.resolvedProvider, model: cfg.resolvedModelLight
             )
             let r = try await classifier.classify()
             self.lastClassifyResult = r
