@@ -199,17 +199,15 @@ enum WritingCapturePrompts {
 
     Look at this entire (app, url) group on this day, then produce writing_records.
 
-    1. SEGMENT EACH SESSION YOURSELF, AND TRANSCRIBE ONLY WHAT THE USER TYPED
-       Sessions are NOT pre-segmented. A session may contain one message, several
-       distinct messages, or none of the user's own writing at all. Your job is to
-       find every distinct thing THE USER actually composed and emit one record per
-       distinct input.
-       - First read keystroke_text / keystroke_log: that is the ground truth for
-         what the user physically produced. Use it to GUESS the user's input, then
-         confirm/refine against AX and OCR.
-       - Split a session into separate records on real message boundaries:
-         kind="submit"/Return, long typing pauses, clear-and-restart. Keep one
-         record per sent message.
+    1. ONE UNIT = ONE RECORD (pre-segmented), TRANSCRIBE ONLY WHAT THE USER TYPED
+       Each AX-path session has ALREADY been segmented (pass2-2, by typing_event)
+       to ONE unit the user produced — one sent message. Canvas/OCR sessions are
+       whole documents. So:
+       - DEFAULT: emit ONE record per session. Do not merge sessions. Only split a
+         session into 2+ records in the RARE case its single unit obviously holds
+         multiple distinct sent messages.
+       - First read keystroke_text / keystroke_log — ground truth for what the user
+         physically produced. Use it to anchor the record, then confirm against AX.
        - AUTHORSHIP TEST — only the user's own input becomes a record. In chat /
          canvas / any app whose screen also shows text the user did NOT type — an
          assistant's reply, a received message, earlier conversation history, a
