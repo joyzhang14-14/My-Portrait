@@ -468,12 +468,6 @@ struct ScreenCaptureSettingsView: View {
                 Toggle("", isOn: config.binding(\.privacy.ignoreIncognito)).labelsHidden().toggleStyle(.switch)
             }
             SettingsDivider()
-            SettingsRow("Record audio while screen is locked",
-                        description: "Keep listening even when your Mac is locked.",
-                        icon: "lock.shield") {
-                Toggle("", isOn: config.binding(\.privacy.recordAudioWhileLocked)).labelsHidden().toggleStyle(.switch)
-            }
-            SettingsDivider()
             SettingsRow("Mask ignored windows",
                         description: "Exclude windows matching the ignore lists below from the screenshot — the frame is still captured, those windows just go transparent.",
                         icon: "rectangle.dashed") {
@@ -502,20 +496,6 @@ struct ScreenCaptureSettingsView: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps), discovered: discoveredApps)
-                    .padding(.horizontal, 14).padding(.bottom, 12)
-            }
-        }
-
-        SettingsCard(
-            title: "Included apps (allowlist)",
-            footnote: "If non-empty, ONLY frames from these apps are captured. Leave empty to capture everything except the ignored list."
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Only capture these apps (optional)…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TagListEditor(tags: config.binding(\.privacy.includedApps), placeholder: "app name")
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }

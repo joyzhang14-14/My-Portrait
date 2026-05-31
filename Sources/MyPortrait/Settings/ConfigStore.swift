@@ -290,7 +290,6 @@ final class ConfigStore {
         c.display.chatAlwaysOnTop         = bool(ud, "Settings.chatAlwaysOnTop",       default: c.display.chatAlwaysOnTop)
         c.display.translucentSidebar      = bool(ud, "Settings.translucentSidebar",    default: c.display.translucentSidebar)
         c.display.hideModelReasoning      = bool(ud, "Settings.hideModelReasoning",    default: c.display.hideModelReasoning)
-        c.display.showOverlayInRecording  = bool(ud, "Settings.showOverlayInRecording",default: c.display.showOverlayInRecording)
         if let v = ud.string(forKey: "Settings.appName")                { c.display.appName = v }
         if let v = ud.string(forKey: "Settings.customDockIcon")         { c.display.customDockIcon = v }
         if let v = ud.string(forKey: "Settings.customTrayIcon")         { c.display.customTrayIcon = v }
@@ -344,7 +343,6 @@ final class ConfigStore {
         c.privacy.recordAudioWhileLocked = bool(ud, "Settings.recordAudioWhileLocked", default: c.privacy.recordAudioWhileLocked)
         c.privacy.piiRemoval             = bool(ud, "Settings.piiRemoval",             default: c.privacy.piiRemoval)
         c.privacy.ignoredApps            = stringArray(ud, "Settings.ignoredApps")
-        c.privacy.includedApps           = stringArray(ud, "Settings.includedApps")
         c.privacy.ignoredUrls            = stringArray(ud, "Settings.ignoredURLs")
 
         // — Storage

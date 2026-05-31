@@ -53,15 +53,6 @@ struct DisplaySettingsView: View {
                         .labelsHidden().toggleStyle(.switch)
                 }
             }
-
-            SettingsCard(title: "Recording overlays") {
-                SettingsRow("Show overlay in screen recording",
-                            description: "Include the chat overlay in captured frames.",
-                            icon: "rectangle.dashed") {
-                    Toggle("", isOn: config.binding(\.display.showOverlayInRecording))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-            }
         }
     }
 }
