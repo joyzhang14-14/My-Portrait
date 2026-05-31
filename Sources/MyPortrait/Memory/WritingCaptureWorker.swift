@@ -977,18 +977,8 @@ final class WritingCaptureWorker {
         for group in recordsByGroupIdx {
             var keptGroup: [WritingCaptureRecord] = []
             for rec in group {
-                // 确定性击键覆盖闸门(K=1.0):一条 record 的字数必须有等量真实击键
-                // 撑得起。读笔记(0 击键)/ AI 回复 / 收到的消息 / OCR 幻觉 / 程序
-                // 写入(AX 文档加载) —— 击键远不够 —— 全在此算法层毙掉,不靠 LLM
-                // 自觉。对 CJK 同样成立(比击键数量,不做拼音子串匹配)。
-                if !Self.keystrokeCovered(rec: rec, keys: keys, k: Self.keystrokeCoverageK) {
-                    dropped.append(WritingCaptureDiscarded(
-                        reason: "keystroke coverage below \(Self.keystrokeCoverageK)× text length "
-                            + "(reading / received / pasted / hallucinated — not typed by user)",
-                        sessionIds: [], preview: String(rec.text.prefix(200))))
-                    continue
-                }
                 var editLog = rec.editLog
+                var text = rec.text
                 if rec.source == "ax_cleaned", !rec.referenceTypingEventIds.isEmpty {
                     var entries: [EditEntry] = []
                     for tid in rec.referenceTypingEventIds {
@@ -1000,22 +990,37 @@ final class WritingCaptureWorker {
                         }
                     }
                     if !entries.isEmpty { editLog = entries.sorted { $0.ts < $1.ts } }
+                    // 根治:text = 用户真打的 commit 增量拼接(ts 序),丢弃整篇 AX
+                    // 快照。`typing_event.text` 存的是整个字段的值 —— 在已有大文档里
+                    // 只打一句,也会把整篇当成 text。改成只留真打的那几段。
+                    // 读笔记 / 打开文档 = 0 commit → text 空 → 下面被毙。
+                    text = editLog.filter { $0.kind == "commit" }.map(\.text).joined()
                 }
+
+                // 确定性击键覆盖闸门(K=1.0):字数须有等量真实击键撑得起(用上面
+                // 重建后的 text)。读笔记/AI回复/收到消息/OCR幻觉/程序写入 ≈ 0 击键
+                // → 全在此算法层毙掉,不靠 LLM 自觉。对 CJK 同样成立(比击键数量)。
+                if !Self.keystrokeCovered(startTs: rec.startTs, endTs: rec.endTs, app: rec.app,
+                                          textLen: text.count, keys: keys, k: Self.keystrokeCoverageK) {
+                    dropped.append(WritingCaptureDiscarded(
+                        reason: "keystroke coverage below \(Self.keystrokeCoverageK)× text length "
+                            + "(reading / received / pasted / hallucinated — not typed by user)",
+                        sessionIds: [], preview: String(text.prefix(200))))
+                    continue
+                }
+
                 let hasAuthoring = editLog.contains { $0.kind == "commit" || $0.kind == "delete" }
-                // canvas(OCR 重建)record:keystroke 跟 text 必须有对应。窗口击键拼成
-                // 的串和 record.text 一个 ≥3 长公共子串都没有 = OCR 抓了无关屏幕内容
-                // (弹窗/页面文字),haiku 偶尔判不出 → 算法层兜底丢。中文 IME 情形
-                // (text 含 CJK 且击键有 ascii 字母)放过,不硬判。
+                // canvas(OCR 重建)record:keystroke 跟 text 必须有对应(零对应兜底)。
                 let canvasOrphan = (rec.source == "canvas_fusion" || rec.source == "merged")
                     && Self.keystrokeOrphan(rec: rec, keys: keys)
                 if hasAuthoring && !canvasOrphan {
-                    keptGroup.append(Self.withEditLog(rec, editLog))
+                    keptGroup.append(Self.withTextAndEditLog(rec, text, editLog))
                 } else {
                     dropped.append(WritingCaptureDiscarded(
                         reason: canvasOrphan
                             ? "canvas OCR text has no keystroke correspondence (unrelated on-screen text)"
                             : "no authoring edits in edit_log (pasted / OCR / AI content, not typed)",
-                        sessionIds: [], preview: String(rec.text.prefix(200))))
+                        sessionIds: [], preview: String(text.prefix(200))))
                 }
             }
             outRecs.append(keptGroup)
@@ -1028,16 +1033,16 @@ final class WritingCaptureWorker {
     /// 远超;读/AI回复/幻觉 ≈ 0 击键 → 必毙。调这个数即可整体收紧/放松。
     nonisolated static let keystrokeCoverageK: Double = 1.0
 
-    /// record 的字数是否有足够真实击键撑得起(窗口内、同 app、非 cmd/opt/ctrl
-    /// 快捷键的物理按键;shift/退格/空格/回车都算打字)。空 text 直接判不通过。
+    /// textLen 是否有足够真实击键撑得起(窗口内、同 app、非 cmd/opt/ctrl 快捷键
+    /// 的物理按键;shift/退格/空格/回车都算打字)。textLen=0 直接判不通过。
     nonisolated static func keystrokeCovered(
-        rec: WritingCaptureRecord, keys: [KeystrokeEntry], k: Double
+        startTs: Int64, endTs: Int64, app: String, textLen: Int,
+        keys: [KeystrokeEntry], k: Double
     ) -> Bool {
-        let textLen = rec.text.count
         guard textLen > 0 else { return false }
         let typed = keys.lazy.filter {
-            $0.tsMs >= rec.startTs && $0.tsMs <= rec.endTs
-                && $0.bundleId == rec.app && ($0.modifiers & 0x07) == 0
+            $0.tsMs >= startTs && $0.tsMs <= endTs
+                && $0.bundleId == app && ($0.modifiers & 0x07) == 0
         }.count
         return Double(typed) >= k * Double(textLen)
     }
@@ -1084,8 +1089,15 @@ final class WritingCaptureWorker {
     nonisolated static func withEditLog(
         _ r: WritingCaptureRecord, _ editLog: [EditEntry]
     ) -> WritingCaptureRecord {
+        withTextAndEditLog(r, r.text, editLog)
+    }
+
+    /// 同时替换 text + editLog(ax_cleaned 把 text 改成真打的 commit 增量时用)。
+    nonisolated static func withTextAndEditLog(
+        _ r: WritingCaptureRecord, _ text: String, _ editLog: [EditEntry]
+    ) -> WritingCaptureRecord {
         WritingCaptureRecord(
-            text: r.text, editLog: editLog, kind: r.kind, source: r.source,
+            text: text, editLog: editLog, kind: r.kind, source: r.source,
             confidence: r.confidence, contextSummary: r.contextSummary,
             app: r.app, url: r.url, startTs: r.startTs, endTs: r.endTs,
             referenceTypingEventIds: r.referenceTypingEventIds,
