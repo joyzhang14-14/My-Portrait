@@ -159,23 +159,6 @@ final class CronJobStore {
             loaded.append(job)
         }
         cronJobs = loaded
-        migrateLegacyMutedNames()
-    }
-
-    /// 老版本把 muted 名单存在 `ConfigStore.notifications.mutedCronJobs`(byName)。
-    /// 现在迁移到 per-CronJob.muted 字段:按名字匹配回填 muted=true,然后清空老名单。
-    /// 重启后这条迁移就是 no-op(mutedCronJobs 已空)。
-    private func migrateLegacyMutedNames() {
-        let names = ConfigStore.shared.current.notifications.mutedCronJobs
-        guard !names.isEmpty else { return }
-        let set = Set(names)
-        var changed = false
-        for i in cronJobs.indices where set.contains(cronJobs[i].name) && !cronJobs[i].muted {
-            cronJobs[i].muted = true
-            changed = true
-        }
-        if changed { save() }
-        ConfigStore.shared.mutate { $0.notifications.mutedCronJobs.removeAll() }
     }
 
     /// One-time migration: decode the legacy `[CronJob]` JSON, write it out
