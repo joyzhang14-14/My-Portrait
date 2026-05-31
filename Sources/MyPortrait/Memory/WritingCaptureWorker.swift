@@ -1057,6 +1057,14 @@ final class WritingCaptureWorker {
                     // 文字一大堆 → 丢。conf = 击键覆盖度(不再死写 1.00)。
                     let kc = s.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
                     if text.count > 20 && kc < text.count / 4 { continue }   // 读/加载/粘贴
+                    let ks = await WritingCapturePass2Agent.assembleKeystrokeText(s.keystrokes)
+                    // slash 命令(/play 等):用户打 "/" 唤起命令面板,AX 把斜杠吞了只留
+                    // 命令名("play"),但 keystroke 仍以 "/" 起头 → slash 命令,不是写作
+                    // → 丢。app 无关(slash 命令是 chat app 通用约定)。
+                    let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
+                        .replacingOccurrences(of: "<BS>", with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if ksTrim.hasPrefix("/") { continue }
                     // CJK 拼音 ~1.5–3 击键/字,英文 ~1。除以 2 归一,clamp [0.5,1]。
                     let conf = min(1.0, max(0.5, Double(kc) / (Double(text.count) * 2.0)))
                     let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
@@ -1071,9 +1079,7 @@ final class WritingCaptureWorker {
                         app: g.app, url: g.url, startTs: startTs, endTs: endTs,
                         referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
                         referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
-                    items.append(WritingCaptureAxCleanupAgent.Item(
-                        id: rid, text: text,
-                        keystroke: await WritingCapturePass2Agent.assembleKeystrokeText(s.keystrokes)))
+                    items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
                 }
                 let fixes = await makeCleanup().run(items: items)
                 let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
