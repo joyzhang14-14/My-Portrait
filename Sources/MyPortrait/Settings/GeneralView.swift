@@ -69,15 +69,6 @@ struct GeneralSettingsView: View {
                 UpdaterService.shared.applyConfig()
             }
 
-            SettingsCard(title: "System") {
-                SettingsRow("Chinese mirror",
-                            description: "Use a CN-region mirror for model downloads.",
-                            icon: "globe.asia.australia") {
-                    Toggle("", isOn: config.binding(\.capture.system.chineseMirror))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-            }
-
             // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
             SettingsCard(title: "Cron Jobs",

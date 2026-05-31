@@ -547,13 +547,11 @@ struct AudioConfig: Codable, Equatable {
     /// Qwen 引擎的语言选择，跟 whisper 的 `languages` 分开存（两者支持的语言集不同）。
     var qwenLanguages:           [String] = []
     var captureSystemAudio:      Bool     = true
-    var useCoreAudioCapture:     Bool     = true
     var speakerIdEnabled:        Bool     = true
     var filterMusic:             Bool     = false
     /// 检测到「音乐类」app 在输出音频时,整体暂停音频采集（比 filterMusic 更彻底,
     /// 从源头不录。两者都开时此项优先）。
     var pauseOnMusicApp:         Bool     = false
-    var batchTranscription:      Bool     = true
     /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
     var transcribeOnACOnly:      Bool     = true
     var customVocabulary:        [String] = []
@@ -575,11 +573,9 @@ struct AudioConfig: Codable, Equatable {
         case languages
         case qwenLanguages           = "qwen_languages"
         case captureSystemAudio      = "capture_system_audio"
-        case useCoreAudioCapture     = "use_core_audio_capture"
         case speakerIdEnabled        = "speaker_id_enabled"
         case filterMusic             = "filter_music"
         case pauseOnMusicApp         = "pause_on_music_app"
-        case batchTranscription      = "batch_transcription"
         case transcribeOnACOnly      = "transcribe_on_ac_only"
         case customVocabulary        = "custom_vocabulary"
     }
@@ -598,11 +594,9 @@ struct AudioConfig: Codable, Equatable {
         languages              = c.dflt([String].self, .languages, languages)
         qwenLanguages          = c.dflt([String].self, .qwenLanguages, qwenLanguages)
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
-        useCoreAudioCapture    = c.dflt(Bool.self,     .useCoreAudioCapture, useCoreAudioCapture)
         speakerIdEnabled       = c.dflt(Bool.self,     .speakerIdEnabled, speakerIdEnabled)
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
         pauseOnMusicApp        = c.dflt(Bool.self,     .pauseOnMusicApp, pauseOnMusicApp)
-        batchTranscription     = c.dflt(Bool.self,     .batchTranscription, batchTranscription)
         transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
     }
@@ -610,38 +604,29 @@ struct AudioConfig: Codable, Equatable {
 
 struct ScreenConfig: Codable, Equatable {
     var enabled:         Bool   = true
-    var ocrEngine:       String = "tesseract"
     var videoFps:        Int    = 1
-    var videoFormat:     String = "h264"
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
-        case ocrEngine       = "ocr_engine"
         case videoFps        = "video_fps"
-        case videoFormat     = "video_format"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled         = c.dflt(Bool.self,   .enabled, enabled)
-        ocrEngine       = c.dflt(String.self, .ocrEngine, ocrEngine)
         videoFps        = c.dflt(Int.self,    .videoFps, videoFps)
-        videoFormat     = c.dflt(String.self, .videoFormat, videoFormat)
     }
 }
 
 struct SystemConfig: Codable, Equatable {
-    var chineseMirror: Bool   = false
     var powerMode:     String = "auto"
     init() {}
     enum CodingKeys: String, CodingKey {
-        case chineseMirror = "chinese_mirror"
         case powerMode     = "power_mode"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        chineseMirror = c.dflt(Bool.self,   .chineseMirror, chineseMirror)
         powerMode     = c.dflt(String.self, .powerMode, powerMode)
     }
 }
