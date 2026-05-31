@@ -57,6 +57,11 @@ struct MyPortraitApp: App {
             FixSpeakersCLI.run()
             // run() exits the process internally.
         }
+        // 纠正:把所有检测簇合并进训练的 Joy(确认这批数据基本全是本人时用)。
+        if args.contains("--consolidate-joy") {
+            FixSpeakersCLI.consolidateNoisyJoy()
+            // 内部 exit。
+        }
         // `mp-query` 给 AI agent 用的本地数据查询接口(端口自 screenpipe
         // SKILL.md REST API,改成 CLI + JSON stdout)。app 启动时会把自身
         // symlink 成 ~/.portrait/bin/mp-query,pi-coding-agent / Claude

@@ -13,6 +13,8 @@ import GRDB
 /// 触发的 FTS5 同步触发器能正常跑。写前自动备份。⚠️ 跑前先退出 app（避免 WAL 写冲突）。
 enum FixSpeakersCLI {
 
+    private enum FixError: Error { case noTrainedKeep }
+
     static func run() {
         let base = Storage.rootURL
         let src = base.appendingPathComponent("portrait.sqlite")
@@ -89,6 +91,79 @@ enum FixSpeakersCLI {
 
             printState("AFTER")
             print("\n✅ 完成。匹配池(hall=0)现在应为 Joy#13 + Stan#15。备份: \(bak.lastPathComponent)")
+        } catch {
+            FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
+            exit(1)
+        }
+        exit(0)
+    }
+
+    /// 后续纠正(`--consolidate-joy`):试听确认那些被聚成"别人"的簇其实都是 Joy
+    /// (只是嘈杂/远场)。把所有非训练、非噪声测试的簇**合并进训练的 Joy#13**(转录 +
+    /// 样本向量都搬过去,样本进 Joy 的 fallback 池让它更耐噪、减少将来再碎),删掉这些簇。
+    /// matchSpeaker 是质心优先,Joy 的干净质心不被这些样本带偏(质心 merge 时不重算)。
+    /// 动态扫描当前所有 hall=0 且非训练的簇(不再 hardcode id),稳健。
+    static func consolidateNoisyJoy() {
+        let base = Storage.rootURL
+        let src = base.appendingPathComponent("portrait.sqlite")
+        var config = Configuration()
+        config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
+        let queue: DatabaseQueue
+        do { queue = try DatabaseQueue(path: src.path, configuration: config) }
+        catch { print("ERROR: open DB: \(error)"); exit(1) }
+
+        func printState(_ label: String) {
+            print("--- \(label) ---")
+            if let rows = try? queue.read({ db in try Row.fetchAll(db, sql: """
+                SELECT s.id AS id, COALESCE(s.name,'?') AS name, s.hallucination AS h,
+                       (s.trained_at_ms IS NOT NULL) AS tr, COUNT(se.id) AS n
+                FROM speakers s LEFT JOIN speaker_embeddings se ON se.speaker_id = s.id
+                GROUP BY s.id ORDER BY s.id
+                """) }) {
+                for r in rows {
+                    let id: Int64 = r["id"]; let name: String = r["name"]
+                    let h: Int = r["h"]; let tr: Int = r["tr"]; let n: Int = r["n"]
+                    print("  #\(id) \(name)  hall=\(h) trained=\(tr) samples=\(n)")
+                }
+            }
+        }
+        do {
+            try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
+            let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let bak = base.appendingPathComponent("portrait.sqlite.bak-consolidate-\(ts)")
+            try FileManager.default.copyItem(at: src, to: bak)
+            print("DB 备份: \(bak.lastPathComponent)\n")
+            printState("BEFORE"); print("")
+
+            // keep = 训练过的 speaker(应只有一个 = Joy);targets = 其余所有 hall=0 非训练簇。
+            // 动态扫描,不 hardcode id(app 会不断重聚出新的嘈杂簇)。
+            let keepId: Int64
+            let targets: [(Int64, String)]
+            (keepId, targets) = try queue.read { db -> (Int64, [(Int64, String)]) in
+                guard let kid: Int64 = try Row.fetchOne(db, sql:
+                    "SELECT id FROM speakers WHERE trained_at_ms IS NOT NULL AND hallucination = 0 ORDER BY id LIMIT 1")?["id"]
+                else { throw FixError.noTrainedKeep }
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT id, COALESCE(name,'?') AS name FROM speakers
+                    WHERE hallucination = 0 AND trained_at_ms IS NULL AND id != :k ORDER BY id
+                    """, arguments: ["k": kid])
+                return (kid, rows.map { ($0["id"], $0["name"]) })
+            }
+            print("keep(训练) = #\(keepId);把 \(targets.count) 个检测簇合并进它(样本一并搬入)\n")
+            for (mid, name) in targets {
+                let moved = try queue.write { db -> Int in
+                    try db.execute(sql: "UPDATE audio_transcriptions SET speaker_id = :k WHERE speaker_id = :m",
+                                   arguments: ["k": keepId, "m": mid])
+                    let m = db.changesCount
+                    try db.execute(sql: "UPDATE speaker_embeddings SET speaker_id = :k WHERE speaker_id = :m",
+                                   arguments: ["k": keepId, "m": mid])
+                    try db.execute(sql: "DELETE FROM speakers WHERE id = :m", arguments: ["m": mid])
+                    return m
+                }
+                print("  #\(mid) \(name) → #\(keepId):归并 \(moved) 段")
+            }
+            print(""); printState("AFTER")
+            print("\n✅ 纠正完成。匹配池(hall=0)现在应只剩干净的 Joy#13。备份: \(bak.lastPathComponent)")
         } catch {
             FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
             exit(1)
