@@ -26,8 +26,10 @@ final class StallDetectorDriver {
     private var activeFaults: Set<StallVerdict.Kind> = []
 
     /// 恢复窗口:某 kind 连续这么久没新 verdict → 视为已恢复,清状态栏黄标。
-    /// 5 min 跟 HealthView "5 minutes" 状态判定对齐。
-    private let recoveryWindowSec: TimeInterval = 5 * 60
+    /// 60s 跟 StallDetector.warnThrottleSec 对齐 —— 条件持续存在时每 60s
+    /// 会有一条新 verdict 进 recent,recoveryWindow 永远刷不到尾;条件真消失
+    /// 后 ~1-1.5 个 driver tick(30s 一次)就能 clear,体感"亮一会儿就灭"。
+    private let recoveryWindowSec: TimeInterval = 60
 
     init(db: PortraitDB, permissions: PermissionMonitor) {
         self.db = db
