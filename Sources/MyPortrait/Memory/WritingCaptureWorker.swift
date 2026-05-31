@@ -940,6 +940,35 @@ final class WritingCaptureWorker {
         case success(WritingCapturePass3Agent.Output)
         case failure(Error)
     }
+    /// AX 路确定性记录构造(不用 LLM)。每个 typing_event = 一条 record,
+    /// text = typing_event.text(干净合成结果)。edit_log 留空,由 6a 从
+    /// typing_events 重建;text 真伪/读vs写 由击键覆盖闸门把关。
+    nonisolated static func buildAxRecordsDeterministic(
+        group g: WritingCaptureGroup,
+        contextTimeline: [WritingCaptureContextSegment]
+    ) -> WritingCapturePass3Agent.Output {
+        var records: [WritingCaptureRecord] = []
+        for s in g.sessions {
+            for ev in s.typingEvents {
+                let text = ev.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty, let id = ev.id else { continue }
+                let ctx = contextTimeline.first {
+                    $0.app == g.app && $0.startTs <= ev.endedAt && $0.endTs >= ev.startedAt
+                }?.summary
+                records.append(WritingCaptureRecord(
+                    text: text, editLog: [],
+                    kind: text.count >= 140 ? "long_form" : "short_form",
+                    source: "ax_cleaned", confidence: 1.0, contextSummary: ctx,
+                    app: g.app, url: g.url, startTs: ev.startedAt, endTs: ev.endedAt,
+                    referenceTypingEventIds: [id], referenceFrameIds: [],
+                    referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
+            }
+        }
+        return WritingCapturePass3Agent.Output(
+            prompt: "(deterministic ax — no LLM)", rawResponse: "(deterministic)",
+            records: records, discarded: [])
+    }
+
     static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
@@ -964,14 +993,11 @@ final class WritingCaptureWorker {
                 return try await agent.run(
                     groupApp: g.app, groupUrl: g.url, session: merged, contextSummary: ctx)
             } else {
-                let agent = await makePass3()
-                return try await agent.run(
-                    contextTimeline: contextTimeline,
-                    groupApp: g.app, groupUrl: g.url,
-                    rawSessions: g.sessions,
-                    includeAxText: includeAxText,
-                    userLanguages: userLanguages,
-                    userRejections: userRejections)
+                // AX 路:确定性构造,**不走 LLM**。typing_event.text 就是干净消息
+                // ("你真找啊?"),切分已由 pass2-2(算法)完成。让 Pass3 LLM 转写
+                // 只会引入随机漏写(同数据上次 40 条这次 16 条)。把关交给下游算法层
+                // (6a edit_log + 击键覆盖闸门)+ Pass 4 内容审查。
+                return Self.buildAxRecordsDeterministic(group: g, contextTimeline: contextTimeline)
             }
         }
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
