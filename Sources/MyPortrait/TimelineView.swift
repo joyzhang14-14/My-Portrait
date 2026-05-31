@@ -538,7 +538,15 @@ private struct TimelineSlider: View {
             // Bigger bars + bigger icons — matches the original Orphies scale.
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .bottom, spacing: 6) {
+                    // **LazyHStack(原来是 eager HStack)** —— 一天的帧现在是
+                    // 全量加载(framesForDay 去了 limit),实测一天 3000~9000 帧。
+                    // eager HStack 会把这几千个 FrameColumn 一次性全建出来常驻,
+                    // 且每按一次方向键(focusIndex 变)就 diff 全部列 → 按住
+                    // 方向键回放时主线程卡顿。改 lazy 后只渲染可见的几十列,
+                    // diff 量从数千降到数十,内存也跟着降。
+                    // 列宽固定(FrameColumn 锁 12pt),lazy 能正确算 content 宽度;
+                    // ScrollViewReader.scrollTo 对未渲染 id 仍可定位。
+                    LazyHStack(alignment: .bottom, spacing: 6) {
                         ForEach(state.frames.indices, id: \.self) { idx in
                             FrameColumn(
                                 frame: state.frames[idx],
