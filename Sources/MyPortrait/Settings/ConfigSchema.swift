@@ -719,9 +719,6 @@ struct PrivacyConfig: Codable, Equatable {
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
         "My Portrait", "Wallpaper", "Trash",
     ]
-    /// Reserved, not enforced yet. Schema / UI / TOML round-trip work, but
-    /// IgnoreGate has no allowlist logic — setting this currently does nothing.
-    var includedApps:           [String] = []
     var ignoredUrls:            [String] = []
     /// Window-title substrings (case-insensitive contains). A window whose
     /// title contains any of these is masked out of the capture.
@@ -747,7 +744,6 @@ struct PrivacyConfig: Codable, Equatable {
         case recordAudioWhileLocked  = "record_audio_while_locked"
         case piiRemoval              = "pii_removal"
         case ignoredApps             = "ignored_apps"
-        case includedApps            = "included_apps"
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
         case maskIgnoredApps         = "mask_ignored_apps"
@@ -761,7 +757,6 @@ struct PrivacyConfig: Codable, Equatable {
         recordAudioWhileLocked = c.dflt(Bool.self,     .recordAudioWhileLocked, recordAudioWhileLocked)
         piiRemoval             = c.dflt(Bool.self,     .piiRemoval, piiRemoval)
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
-        includedApps           = c.dflt([String].self, .includedApps, includedApps)
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
