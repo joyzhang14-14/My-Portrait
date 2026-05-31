@@ -20,6 +20,15 @@ final class StallDetectorDriver {
 
     private var task: Task<Void, Never>?
 
+    /// 当前 active stall fault 的 kind 集合 → 用来配 HealthMonitor 自动 clear。
+    /// 加进来的时机:report() 那一刻;清掉的时机:该 kind 在 `recoveryWindowSec`
+    /// 秒内没有任何新 verdict 出现。
+    private var activeFaults: Set<StallVerdict.Kind> = []
+
+    /// 恢复窗口:某 kind 连续这么久没新 verdict → 视为已恢复,清状态栏黄标。
+    /// 5 min 跟 HealthView "5 minutes" 状态判定对齐。
+    private let recoveryWindowSec: TimeInterval = 5 * 60
+
     init(db: PortraitDB, permissions: PermissionMonitor) {
         self.db = db
         self.permissions = permissions
@@ -79,20 +88,39 @@ final class StallDetectorDriver {
             pendingAudio: pendingAudio
         )
 
-        guard !fresh.isEmpty else { return }
-
         // 4) 写 log + (开关亮时) 发通知。HealthMonitor.report 同时拨红状态栏。
-        let notify = ConfigStore.shared.notifications.captureStalls
-        for v in fresh {
-            logger.warning(
-                "stall: \(v.kind.rawValue, privacy: .public) — \(v.reason, privacy: .public)\(v.cause.map { " (\($0))" } ?? "", privacy: .public)"
-            )
-            HealthMonitor.shared.report(
-                component: "stall.\(v.kind.rawValue)",
-                reason: v.cause ?? v.reason
-            )
-            if notify {
-                NotificationCenterService.shared.post(.captureStall(reason: v.reason))
+        if !fresh.isEmpty {
+            let notify = ConfigStore.shared.notifications.captureStalls
+            for v in fresh {
+                logger.warning(
+                    "stall: \(v.kind.rawValue, privacy: .public) — \(v.reason, privacy: .public)\(v.cause.map { " (\($0))" } ?? "", privacy: .public)"
+                )
+                HealthMonitor.shared.report(
+                    component: "stall.\(v.kind.rawValue)",
+                    reason: v.cause ?? v.reason
+                )
+                activeFaults.insert(v.kind)
+                if notify {
+                    NotificationCenterService.shared.post(.captureStall(reason: v.reason))
+                }
+            }
+        }
+
+        // 5) 自动恢复:某 kind 已经 recoveryWindowSec 没新 verdict → 视为
+        // 解除,清 HealthMonitor 让状态栏黄标变回。原本只 report 不 clear,
+        // 一次警告之后图标永久卡在黄色。
+        let now = Date()
+        let recent = StallDetector.shared.recent
+        for kind in activeFaults {
+            let latest = recent.last { $0.kind == kind }?.detectedAt
+            let stale: Bool = {
+                guard let latest else { return true }
+                return now.timeIntervalSince(latest) > recoveryWindowSec
+            }()
+            if stale {
+                HealthMonitor.shared.clear(component: "stall.\(kind.rawValue)")
+                activeFaults.remove(kind)
+                logger.info("stall \(kind.rawValue, privacy: .public): recovered after \(Int(self.recoveryWindowSec))s without recurrence")
             }
         }
     }
