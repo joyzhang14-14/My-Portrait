@@ -799,24 +799,12 @@ final class WritingCaptureWorker {
         // app 的输入在 AX,绝不该为了 OCR 丢掉它。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
-            let s = sessions[idx]
-            let agent = await makePass2()
-            let result = (try? await agent.run(session: s))
-                ?? WritingCapturePass2Agent.Result(
-                    primarySource: "ax",
-                    units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
-            // 路由确定性:有 typing_events = AX 有料 → 一律 ax 路。**忽略 LLM 的
-            // primary_source** —— LLM 路由不可靠(会把 Discord/Claude Desktop 这种
-            // AX 好用的 chat 误判 ocr,导致抓 AI 回复、丢真消息)。canvas(无
-            // typing_events)的路由在外层按 keystroke 判。
-            // Pass 2 的 LLM 只用来做"切分":result.units 是它判的消息边界(权衡
-            // return / 时间)。没分配到的 event 各自单独成单元,不丢。
-            let assigned = Set(result.units.flatMap { $0 })
-            var unitIds = result.units
-            unitIds.append(contentsOf: s.typingEvents.compactMap { $0.id }
-                .filter { !assigned.contains($0) }.map { [$0] })
-            let rebuilt = unitIds.compactMap { Self.rebuildUnitSession(from: s, eventIds: $0) }
-            return (idx, rebuilt.isEmpty ? [Self.ensureAxRoute(s)] : rebuilt)
+            // 路由 + 切分都确定性(LLM 实测两者都不可靠:路由把 AX 好用的 chat 误判
+            // ocr → 抓 AI 回复;切分把 38 条独立消息合并/漏成 1 条)。有 typing_events
+            // = AX 有料 → ax 路;切分按 typing_event(一条 = 一次 send/clear = 一条消息,
+            // 天生精准)在 buildAxRecordsDeterministic 里做。文字润色(dian→店)留给
+            // Pass 3 的 LLM(混合,不许增删 record)。
+            return (idx, [Self.ensureAxRoute(sessions[idx])])
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
@@ -833,18 +821,21 @@ final class WritingCaptureWorker {
                 }
             }
         }
-        // 重组:被判过的(有 typing_events)→ ax 单元。无 typing_events 的 session
-        // 按 keystroke 判路由(根据 keystroke,不看 app):
-        //   有实打击键(用户写了字但 AX 失灵 = 真 canvas,如 Google Docs)→ ocr 重建;
-        //   无击键(用户没动键盘 = 屏上是 AI 回复 / 收到的消息 / 在读的内容)→ 丢。
+        // 无 typing_events 的 session 怎么处理(数据驱动,不写 app 名):
+        //  - 该 app 本次出现过 typing_events(= AX 对它有效)→ 这个无输入 session 是
+        //    纯阅读 / AI 回复 / 收到的消息(用户的输入早已由它的 ax session 捕获)→ 丢。
+        //  - 该 app 从不产 typing_events(= AX 对它失灵,真 canvas 如 Google Docs)
+        //    且这个 session 有实打击键(用户确实写了字)→ ocr 重建。
+        let axWorkingApps = Set(sessions.filter { !$0.typingEvents.isEmpty }.map { $0.app })
         var out: [WritingCaptureRawSession] = []
         for (i, s) in sessions.enumerated() {
             if let r = refinedByIdx[i] {
                 out.append(contentsOf: r)
-            } else {
-                let typedKeys = s.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
-                if typedKeys >= 10 { out.append(s) }   // 真 canvas 写作;else 丢(没打字)
+            } else if !axWorkingApps.contains(s.app),
+                      s.keystrokes.filter({ ($0.modifiers & 0x07) == 0 }).count >= 10 {
+                out.append(s)            // 真 canvas 写作 → ocr
             }
+            // else: AX 有效 app 的无输入 session(AI 回复/阅读)或 没打字 → 丢
         }
         return out
     }
