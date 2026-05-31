@@ -597,6 +597,11 @@ enum WritingCapturePrompts {
     TASK 1 — CUT INTO UNITS (when route = "ax"):
     - One unit = one thing the user produced: usually ONE sent message, or ONE
       continuously-edited piece.
+    - DEFAULT: each typing_event is its OWN unit (one event = one sent message).
+      Two distinct messages are NEVER merged, even if sent seconds apart. MERGE two
+      events into one unit ONLY when a later event is literally the SAME text growing
+      (an unsent draft being extended — later text starts with / contains the earlier).
+      When in doubt, DO NOT merge (more units is safer than fewer).
     - Decide each boundary YOURSELF from the evidence. Do NOT assume Return always
       ends a unit, and do NOT assume only time gaps separate units. Weigh BOTH:
       · a Return/submit (<CR> in keystroke_text, or the field clears afterward) often
