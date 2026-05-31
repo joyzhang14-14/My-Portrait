@@ -28,6 +28,9 @@ actor CaptureCoordinator {
     private let ocrCache: OCRCache
     private let ocr: OCRService
     private let drm: DRMGate
+    private let incognito = IncognitoGate()
+    /// ConfigStore.privacy.ignoreIncognito 的快照。Services 在变化时推。
+    private var ignoreIncognito: Bool = true
     private let ignore: IgnoreGate
     private let events: EventSources
     private let drmWatcher: DRMWatcher
@@ -93,6 +96,11 @@ actor CaptureCoordinator {
     /// Services 在 ConfigStore.privacy.maskIgnoredApps 变化时调。
     nonisolated func setMaskingEnabled(_ enabled: Bool) {
         ignore.setMaskingEnabled(enabled)
+    }
+
+    /// Services 在 ConfigStore.privacy.ignoreIncognito 变化时调。
+    func setIgnoreIncognito(_ on: Bool) {
+        ignoreIncognito = on
     }
 
     /// Services 在功耗档位变化时调(电源/低电量/热状态/用户改 powerMode)。
@@ -259,6 +267,11 @@ actor CaptureCoordinator {
         if drm.isBlocked(focusInfo) {
             drmActive = true
             await screen.invalidateStream()
+            return
+        }
+
+        // 2b. 无痕浏览窗口 → 整帧跳过(不截图/OCR/入库)。三层检测见 IncognitoGate。
+        if await incognito.isPrivate(focusInfo, enabled: ignoreIncognito) {
             return
         }
 
