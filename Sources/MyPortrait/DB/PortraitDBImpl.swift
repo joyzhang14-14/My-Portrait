@@ -282,7 +282,23 @@ actor PortraitDBImpl: PortraitDB {
     func matchSpeaker(embedding: [Float]) async throws -> Int64? {
         try await dbPool.read { db in
             var best: (id: Int64, sim: Float)?
-            // 1. 先比对每个说话人的样本向量。
+            // 1. 先比对 centroid（每人一个稳定的运行平均向量）—— **质心优先**。
+            //    样本级匹配在某 speaker 样本多时会被 outlier 样本带偏:任何声音总能
+            //    蒙中它众多样本里的某一个 > 阈值 → 过度归到该人(实测某人样本多时
+            //    几乎所有段都被吸过去)。质心是均值,outlier-robust,不会这样。
+            let cRows = try Row.fetchAll(db, sql: """
+                SELECT id, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
+                """)
+            for row in cRows {
+                guard let blob: Data = row["centroid"], let vec = blob.asFloats,
+                      vec.count == embedding.count else { continue }
+                let sim = VectorMath.cosineSimilarity(embedding, vec)
+                if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
+                    best = (row["id"], sim)
+                }
+            }
+            if let b = best { return b.id }
+            // 2. 质心没命中(如刚 enroll、还没攒出质心的 speaker)再比对样本向量兜底。
             let embRows = try Row.fetchAll(db, sql: """
                 SELECT se.speaker_id AS sid, se.embedding AS emb
                 FROM speaker_embeddings se
@@ -295,19 +311,6 @@ actor PortraitDBImpl: PortraitDB {
                 let sim = VectorMath.cosineSimilarity(embedding, vec)
                 if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
                     best = (row["sid"], sim)
-                }
-            }
-            if let b = best { return b.id }
-            // 2. 样本没命中再比对 centroid（运行平均向量）。
-            let cRows = try Row.fetchAll(db, sql: """
-                SELECT id, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
-                """)
-            for row in cRows {
-                guard let blob: Data = row["centroid"], let vec = blob.asFloats,
-                      vec.count == embedding.count else { continue }
-                let sim = VectorMath.cosineSimilarity(embedding, vec)
-                if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
-                    best = (row["id"], sim)
                 }
             }
             return best?.id
