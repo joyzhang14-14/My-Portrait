@@ -70,15 +70,14 @@ enum WritingCapturePrompts {
           headings, no UI chrome), web article (article body + nav chrome),
           terminal (prompt + command output), search results (link list +
           snippets), email (inbox / thread), settings / preferences pane, etc.
-        • If the app is a known platform, name it ("chatting on Discord",
-          "drafting in Apple Notes", "browsing a GitHub repo page", "running
-          shell commands in Terminal"). For unknown apps, describe the surface
-          type ("conversational chat window", "long-form document editor",
-          "code editor with multiple tabs").
+        • You may name the actual app from the given app metadata, but describe the
+          SURFACE generically — do NOT special-case or assume any particular app in
+          this prompt ("a messaging window", "a long-form document editor", "a code
+          editor with multiple tabs", "a repo page on a code host", "a terminal").
         • DO NOT include the user's typed content, the conversation topic,
           or what their document is about.
           BAD: "Says it can store years of data" / "Discussing AI usage limits"
-          GOOD: "Chatting on Discord with one peer"
+          GOOD: "Chatting with one peer in a messaging window"
           BAD: "Writing Python packaging notes"
           GOOD: "Drafting a long note in Apple Notes"
 
@@ -156,7 +155,7 @@ enum WritingCapturePrompts {
           don't re-derive from char+mods.
         - Shortcut presses are NOT user "typing" the literal letter.
 
-    CANVAS EDIT-HISTORY RECONSTRUCTION (Google Docs / Figma / web editors, no AX)
+    CANVAS EDIT-HISTORY RECONSTRUCTION (document-style editors where AX exposes nothing)
       When typing_events is empty/sparse, reconstruct the edit_log YOURSELF by
       comparing the DOCUMENT BODY across consecutive ocr_frames over time:
         - ocr_frames here are COARSE time-bucketed snapshots (~one every few
@@ -329,8 +328,17 @@ enum WritingCapturePrompts {
        the user can reject again, and that's faster than missing real content.
 
     4. CONTENT RECONSTRUCTION
-       For AX path (typing_events.text non-empty):
-       - text = typing_events.text (DO NOT modify — already cleaned)
+       For AX path (typing_events.text is the source):
+       - text = typing_events.text, but FIX small AX-capture flaws using the
+         keystroke evidence (keystroke is ground truth for what was typed):
+         * IME phonetic that never composed: if the field shows a latin pinyin
+           fragment where a character belongs (e.g. text ends "...什么dian" while the
+           keystrokes show the user typed the pinyin for 店), COMPLETE it to the
+           character the user clearly meant → "...什么店".
+         * Drop stray trailing phonetic residue / half-composed tokens the keystrokes
+           show were abandoned.
+         Only fix what the keystrokes CLEARLY support. Do NOT invent, rephrase, or
+         "improve" wording — keep the user's exact phrasing and typos.
        - edit_log = filter typing_events.edit_log:
          * DROP ASCII-letter commits immediately followed by an IME composition
            commit (IME middle state)
@@ -351,8 +359,9 @@ enum WritingCapturePrompts {
        - context_summary ≤ 100 chars: describe the SCENE / SURFACE the user is
          on (inherit + refine from context_timeline's summary). Describe WHERE
          and WHAT KIND OF interface, NOT what the typed text says.
-         GOOD: "Chatting on Discord with one peer" / "Drafting a long note in
-               Apple Notes" / "Replying in a Slack channel" / "Editing Swift
+         Describe the surface generically — do NOT special-case any app.
+         GOOD: "Chatting with one peer in a messaging app" / "Drafting a long note
+               in a notes app" / "Replying in a team chat channel" / "Editing Swift
                file in Xcode"
          BAD:  "Says it can store years of data" / "Discussing AI limits" /
                "Writing Python packaging notes" (these are CONTENT, not scene)
@@ -465,9 +474,10 @@ enum WritingCapturePrompts {
     DISCARD a record when its TEXT is any of:
     1. CODE / COMMANDS / CONFIG — source code, shell/terminal commands, config, or
        program output. Tells: `uv install`, `cd`, `git`, `npm`, `pip`, brackets/
-       semicolons/`def`/`func`/`import`/`=>`, JSON/YAML, file paths, IDE/terminal
-       apps (VS Code, Terminal). We only want natural-language writing, so drop code
-       even though the user typed it. (Mostly-prose with an inline code token → KEEP.)
+       semicolons/`def`/`func`/`import`/`=>`, JSON/YAML, file paths, or text clearly
+       inside a code editor / terminal surface. We only want natural-language writing,
+       so drop code even though the user typed it. (Mostly-prose with an inline code
+       token → KEEP.)
     2. NOT THE USER'S WRITING — an AI assistant's reply / coaching addressed to the
        user, a received chat message from someone else, a UI label / username banner
        / tab name / app chrome, or an article/page the user was only reading. Use
@@ -504,8 +514,9 @@ enum WritingCapturePrompts {
     /// 一个 subagent 只看 ONE canvas 文档的几张连续时间快照,产出这段的编辑
     /// 片段 + 最完整 body。多窗并发跑、结果合并(见 WritingCaptureCanvasAgent)。
     static let canvasWindow = #"""
-    You are reconstructing the EDIT HISTORY of ONE document (Google Docs / Notion /
-    web editor) from a few consecutive screen snapshots over time.
+    You are reconstructing the EDIT HISTORY of ONE document (a document-style editor
+    whose field exposes no accessibility text) from a few consecutive screen
+    snapshots over time.
 
     INPUT
     - chrome_tokens: words that appear in nearly every snapshot (tab names, menu /
@@ -550,74 +561,63 @@ enum WritingCapturePrompts {
     /// Pass 2 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条
     /// AX 真伪。轻量模型可胜任。keystroke + OCR 是不会说谎的对照物,只判 AX。
     static let pass2Segment = #"""
-    You are a JUDGE, not a writer. For ONE activity session you decide:
-    (1) CUT the typing_events into units the user produced, and
-    (2) for each unit pick a ROUTE, or DROP it.
-    You output ids + route only — you do NOT rewrite or produce final text.
+    You are a JUDGE for ONE activity session. You decide two things:
+    (1) ROUTE — is the user's real input in AX (typing_events) or only on screen (OCR)?
+    (2) CUT — split the user's input into individual units (one sent message, or one
+        continuously-composed piece).
+    You output event_ids + route ONLY. You do NOT rewrite or produce final text.
 
-    THREE SOURCES (use all to decide):
-    - typing_events (AX): what accessibility reported in the input field. Usually the
-      user's typing, BUT can be a lie — autofill, paste, or program-inserted text
-      shows up here too, as if typed.
+    SOURCES:
+    - typing_events (AX): [{id, ts, text}] in time order — what the input field
+      exposed. Usually the user's typing, but can be autofill / paste / program-
+      inserted text shown as if typed.
     - keystroke_text / keystroke_count: physical keys the user actually pressed
-      (sorted; <BS>=backspace; shortcuts excluded). For IME (Chinese pinyin) this is
-      the LATIN phonetic, ~1.5–3× the composed CJK char count. keystroke CANNOT lie.
-    - ocr_excerpt: text seen on screen (cross-check). Cannot lie about what showed.
+      (<BS>=backspace, <CR>=Return/Enter/submit; pure shortcuts excluded). For IME
+      (e.g. pinyin) this is the LATIN phonetic, ~1.5–3× the composed CJK length.
+      Keystrokes cannot lie about what was physically typed.
+    - ocr_excerpt: text seen on screen (cross-check).
 
-    INPUT (one session): app, url, typing_events:[{id,text}], keystroke_text,
-      keystroke_count, ocr_excerpt.
+    Judge everything from the EVIDENCE (AX vs keystroke vs OCR correspondence).
+    NEVER decide from which app it is — the same rules apply to every app.
 
-    TASK 0 — WHERE IS THE REAL CONTENT: "ax" or "ocr" (session-level)
-    DEFAULT IS "ax". Only pick "ocr" in the narrow case below.
-    - "ax" (almost always): the typing_events contain ANY coherent message / sentence
-      / phrase in the user's language. Chat & messaging apps (WeChat, Discord, iMessage,
-      Slack, Claude/ChatGPT desktop, etc.) are ALWAYS "ax" — their typing_events ARE
-      the messages the user typed. A short message still counts. If ANY typing_event
-      reads as something the user wrote, pick "ax". (The OCR may show extra stuff —
-      received messages, an AI's reply, the rest of the screen — IGNORE that; it is
-      NOT the user's input. We only want what's in typing_events.)
-    - "ocr" (rare): EVERY typing_event is junk — single chars ("i","a"), stray
-      symbols, nothing coherent — AND a full coherent piece the user wrote lives only
-      in ocr_excerpt (a web document editor like Google Docs whose field exposes
-      nothing). Only then pick "ocr".
-    - When unsure → "ax". Routing a chat session to "ocr" is a BUG: it would grab the
-      AI's reply / received messages off the screen instead of the user's own input.
-    - Decide this FIRST. If "ocr", you may leave units empty — the OCR path handles
-      reconstruction. If "ax", do TASK 1 + TASK 2 below.
+    TASK 0 — ROUTE ("ax" | "ocr"), decide FIRST:
+    - "ax" (the normal case): typing_events contain coherent text in the user's
+      language that the keystrokes plausibly account for (ASCII ≈ length; IME latin
+      phonetic ≈ 1.5–3× CJK chars). The field exposed what the user typed. The OCR may
+      ALSO show received messages / an assistant's reply / other on-screen text —
+      IGNORE all of that; only typing_events are the user's own input.
+    - "ocr": typing_events are empty OR incoherent junk (stray/invisible chars,
+      mojibake, fragments) that does NOT correspond to the keystrokes, AND the user
+      clearly composed real content that appears only in ocr_excerpt — i.e. AX failed
+      for a document-style editor and the real writing is on screen.
+    - When unsure → "ax".
 
-    TASK 1 — CUT INTO UNITS (only when primary_source = "ax")
-    - One unit = one thing the user produced: usually ONE sent message (chat), or
-      ONE continuously-edited piece (a note/doc edited across a few events).
-    - DEFAULT: each typing_event is its own unit. MERGE consecutive events only if
-      clearly the same growing text (later extends earlier).
+    TASK 1 — CUT INTO UNITS (when route = "ax"):
+    - One unit = one thing the user produced: usually ONE sent message, or ONE
+      continuously-edited piece.
+    - Decide each boundary YOURSELF from the evidence. Do NOT assume Return always
+      ends a unit, and do NOT assume only time gaps separate units. Weigh BOTH:
+      · a Return/submit (<CR> in keystroke_text, or the field clears afterward) often
+        ends a sent message — but a multi-line message contains Returns mid-unit;
+      · a large TIME GAP between consecutive events' ts often separates two messages —
+        but two quick messages may have almost no gap;
+      · consecutive events whose text GROWS the same piece (later extends earlier) are
+        ONE unit.
+      Use the actual content to judge which signal wins for each boundary.
+    - Every typing_event id goes into exactly one unit. Do NOT drop anything here;
+      cleanup and discarding happen in later passes.
 
-    TASK 2 — ROUTE each unit (or DROP)
-    - route "ax": the AX text is the user's real input — keystroke_count plausibly
-      accounts for it (ASCII: ≈ length; IME: latin phonetic ≈ 1.5–3× CJK chars). A
-      chat message typed via pinyin belongs here. Most units are "ax".
-    - route "ocr": AX text is missing/poor but the user clearly composed content
-      that OCR shows — reconstruct from OCR+keystroke instead of AX.
-    - DROP: AX text looks meaningful BUT keystroke_count is ~0 and it isn't IME-
-      explained → it was AUTOFILLED / pasted / program-written, NOT typed (e.g. a
-      form email, saved name, password mask "•••", a received message the field
-      exposed). Also drop empty / single stray char / pure gibberish / invisible
-      chars / UI-label noise.
-    - When a unit has real keystrokes behind it, KEEP it (route "ax") — do not drop
-      the user's own messages (Discord / WeChat IME chat counts as real typing).
-
-    OUTPUT — respond with ONLY this JSON object. No prose, no markdown fences:
+    OUTPUT — respond with ONLY this JSON object, no prose / markdown fences:
     {
       "primary_source": "ax" | "ocr",
-      "units": [ { "event_ids": [<id>, ...] } ],
-      "dropped": [ { "event_id": <id>, "reason": "<≤120 chars>" } ]
+      "units": [ { "event_ids": [<id>, ...] } ]
     }
-    - If primary_source = "ocr": units may be []; put junk typing_event ids in
-      dropped (or omit). The OCR path reconstructs the real content.
-    - If primary_source = "ax": every typing_event id appears EXACTLY ONCE — in a
-      unit's event_ids OR in dropped. A unit's event_ids are time-ordered.
+    - route "ocr": units may be [] — the OCR path reconstructs the content.
+    - route "ax": every typing_event id appears EXACTLY ONCE across units;
+      each unit's event_ids are time-ordered.
 
     HARD RULES
-    - JSON string escaping: escape `"` → `\"`, `\` → `\\`, newlines → `\n`.
+    - JSON string escaping: `"` → `\"`, `\` → `\\`, newlines → `\n`.
     - Respond with ONLY the JSON object, no prose / code fences.
     """#
 }

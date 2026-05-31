@@ -83,10 +83,10 @@ final class WritingCapturePass2Agent {
     // MARK: - Prompt
 
     static func buildPrompt(session s: WritingCaptureRawSession) -> String {
-        struct EventPayload: Encodable { let id: Int64; let text: String }
+        struct EventPayload: Encodable { let id: Int64; let ts: Int64; let text: String }
         let events = s.typingEvents.compactMap { e -> EventPayload? in
             guard let id = e.id else { return nil }
-            return EventPayload(id: id, text: e.text)
+            return EventPayload(id: id, ts: e.startedAt, text: e.text)
         }
         var lines = [WritingCapturePrompts.pass2Segment, ""]
         let meta: [String: String?] = ["app": s.app, "url": s.url]
@@ -116,7 +116,9 @@ final class WritingCapturePass2Agent {
             let m = k.modifiers
             if (m & 0x01) != 0 || (m & 0x02) != 0 || (m & 0x04) != 0 { continue }
             if k.isBackspace != 0 { out += "<BS>"; continue }
-            if let c = k.char, !c.isEmpty { out += c }
+            if let c = k.char, !c.isEmpty {
+                out += (c == "\n" || c == "\r") ? "<CR>" : c   // Return/submit 标记,给切分判断用
+            }
         }
         return String(out.prefix(2000))
     }
