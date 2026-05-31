@@ -228,11 +228,15 @@ final class WritingCaptureWorker {
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 
-        // Pass 2 已杀:不再用 LLM 做二选一路由 / 单元切分 / autofill 丢弃。
-        // 三源(keystroke / AX / OCR)随 raw session 直接进 Pass 3,由 Pass 3
-        // 自己融合(先 keystroke 猜 → AX 有料看 AX → AX 空走 OCR canvas)。
-        // 路由沿用 Step 0 的确定性 route(ocrDominant 启发式)。
-        let refinedSessions = step0.rawSessions
+        // 3.5 Pass 2 —— 路由(AX vs OCR)+ 切割 + AX 真伪。判断活,轻量模型。
+        // 关键作用:chat app(Discord/微信等)真内容在 AX/keystroke,Pass 2 把它们
+        // 留在 AX 路,不让 Step 0 粗启发式误送进 OCR canvas → 避免 OCR 整屏桌面垃圾。
+        let routedSessions = await Self.applyPass2(
+            step0.rawSessions, concurrency: 5,
+            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
+        // pass2-2:确定性消息切分(按 typing_event,不用 LLM、不丢 event)。
+        let refinedSessions = Self.applyPass2Segment(routedSessions)
+        workerLog.info("pass2: \(step0.rawSessions.count) sessions → route \(routedSessions.count) → segment \(refinedSessions.count) units")
 
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
         let groups = Self.groupRawSessionsByApp(refinedSessions)
@@ -568,9 +572,17 @@ final class WritingCaptureWorker {
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 
-        // Pass 2 已杀:不再 LLM 二选一路由 / 单元切分 / autofill 丢弃。三源随
-        // raw session 直接进 Pass 3,由 Pass 3 自己融合;路由沿用 Step 0 确定性 route。
-        let refinedSessions = step0.rawSessions
+        // 3.5 Pass 2 —— 路由(AX vs OCR)+ 切割 + AX 真伪。判断活,轻量模型。
+        // chat app(Discord/微信等)短消息真内容在 AX/keystroke,Pass 2 把它们留在
+        // AX 路并按消息切,不让 Step 0 粗启发式误送进 OCR canvas(否则 OCR 整屏桌面)。
+        ui.stage = "Pass 2"
+        ui.statusMessage = "Pass 2: routing \(step0.rawSessions.count) sessions (AX vs OCR)…"
+        let routedSessions = await Self.applyPass2(
+            step0.rawSessions, concurrency: 5,
+            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
+        // pass2-2:确定性消息切分(按 typing_event,不用 LLM、不丢 event)。
+        let refinedSessions = Self.applyPass2Segment(routedSessions)
+        workerLog.info("pass2: \(step0.rawSessions.count) sessions → route \(routedSessions.count) → segment \(refinedSessions.count) units")
 
         // 4. group + 5. Pass 3 并发
         let groups = Self.groupRawSessionsByApp(refinedSessions)
@@ -800,10 +812,10 @@ final class WritingCaptureWorker {
                 let ocrSession = Self.ensureOcrPrepped(s)
                 return (idx, [ocrSession])
             }
-            // primary=ax:按单元重建(chromeTokens 清空 → 走 Pass3Agent);
-            // dropped 的 event(autofill/垃圾)不进任何单元;全空 = 整 session 丢。
-            let rebuilt = result.units.compactMap { rebuildUnitSession(from: s, eventIds: $0) }
-            return (idx, rebuilt)
+            // primary=ax:Pass 2 只做路由 —— 整 session 原样交给 Pass 3(route=ax,
+            // chromeTokens 清空 → 走 Pass3Agent)。**不切单元、不丢 event**:切分/
+            // 过滤交给 Pass 3 + 算法层闸门(之前在这里丢 event 把 Discord 短消息丢了)。
+            return (idx, [Self.ensureAxRoute(s)])
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
@@ -850,6 +862,41 @@ final class WritingCaptureWorker {
                                  frames.map { $0.text.count }.max() ?? 0),
             axFrameCount: 0, chromeTokens: []
         )
+    }
+
+    /// pass2-2 —— 确定性消息切分(不用 LLM)。Pass 2 路由后,把 ax 路 session
+    /// 按 typing_event(一条 = 一次 send/clear = 一条消息)切成多个单元,每个单元
+    /// 带其 ±10s 内的 keystrokes/frames。**不丢任何 event**:每个 typing_event 都
+    /// 进一个单元。ocr 路(canvas)整篇不切。无 typing_event 的 ax session 原样留
+    /// (Pass 3 凭 keystroke/OCR 处理)。
+    nonisolated static func applyPass2Segment(
+        _ sessions: [WritingCaptureRawSession]
+    ) -> [WritingCaptureRawSession] {
+        var out: [WritingCaptureRawSession] = []
+        for s in sessions {
+            if s.route == "ocr" || s.typingEvents.isEmpty {
+                out.append(s)
+                continue
+            }
+            let units = s.typingEvents.compactMap { ev -> WritingCaptureRawSession? in
+                ev.id.flatMap { Self.rebuildUnitSession(from: s, eventIds: [$0]) }
+            }
+            out.append(contentsOf: units.isEmpty ? [s] : units)
+        }
+        return out
+    }
+
+    /// 把一个 session 标成走 AX 路径(route="ax" → dispatch 去 Pass3Agent)。
+    /// 整 session 原样保留(typingEvents/keystrokes/ocrFrames 都给 Pass 3),
+    /// 只清 chromeTokens(canvas hint)并定 route=ax。Pass 2 路由用。
+    nonisolated static func ensureAxRoute(
+        _ s: WritingCaptureRawSession
+    ) -> WritingCaptureRawSession {
+        WritingCaptureRawSession(
+            id: s.id, app: s.app, url: s.url, startTs: s.startTs, endTs: s.endTs,
+            typingEvents: s.typingEvents, keystrokes: s.keystrokes, ocrFrames: s.ocrFrames,
+            maxContentChars: s.maxContentChars, axFrameCount: s.axFrameCount,
+            chromeTokens: [], route: "ax")
     }
 
     /// 把一个 session 标成走 OCR 路径(route="ocr" → dispatch 去 CanvasAgent)。
