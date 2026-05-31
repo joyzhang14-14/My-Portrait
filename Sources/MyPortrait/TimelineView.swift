@@ -121,6 +121,10 @@ struct TimelineView: View {
                 ? Self.nextAppBoundary(in: state.frames, from: state.focusIndex)
                 : min(state.frames.count - 1, state.focusIndex + 1)
         }
+        // 按方向键 focusIndex 一变,预取前后各 5 帧进缓存 —— 快速划过时
+        // 图片已解码好,不用现等。已缓存的帧 prefetch 内部直接跳过,所以
+        // 按住方向键时实际只新解码移动方向边缘的那几帧。
+        .onChange(of: state.focusIndex) { prefetchAround() }
         .task(id: state.selectedDay) { reload() }
         // Background workers (CompactionWorker, RetentionWorker, …) mutate
         // the frames table and delete JPGs they've embedded into MP4s.
@@ -150,6 +154,19 @@ struct TimelineView: View {
         var i = idx + 1
         while i < frames.count, frames[i].appName == current { i += 1 }
         return min(frames.count - 1, i)
+    }
+
+    /// 预取当前 focusIndex 前后各 5 帧。targetPixelSize 跟 FramePreview 主图
+    /// 一致(1800),命中同一 cache key。
+    private func prefetchAround() {
+        let frames = state.frames
+        guard !frames.isEmpty else { return }
+        let radius = 5
+        let lo = max(0, state.focusIndex - radius)
+        let hi = min(frames.count - 1, state.focusIndex + radius)
+        for i in lo...hi where i != state.focusIndex {
+            ImageThumbnailCache.shared.prefetch(frames[i], targetPixelSize: 1800)
+        }
     }
 
     private func reload() {

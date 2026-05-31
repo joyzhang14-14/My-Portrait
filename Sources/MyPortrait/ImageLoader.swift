@@ -17,6 +17,37 @@ final class ImageThumbnailCache {
 
     func cached(_ key: String) -> NSImage? { cache.object(forKey: key as NSString) }
     func store(_ image: NSImage, for key: String) { cache.setObject(image, forKey: key as NSString) }
+
+    /// 预解码一帧进缓存(若还没缓存)。给 timeline 按方向键时提前解码前后
+    /// 几帧用 —— 快速划过时图片已就绪,不用现等 MP4 抽帧/JPG downsample。
+    /// cache key / pixelSize 跟 AsyncDiskThumbnail / AsyncMP4FrameThumbnail
+    /// **完全一致**,这样预取的结果它们的 .task 直接命中。
+    /// 优先级 .utility(低于当前帧的 .userInitiated),不抢当前帧的解码。
+    func prefetch(_ frame: TimelineFrame, targetPixelSize: CGFloat) {
+        guard frame.hasViewableMedia else { return }
+        let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
+        if let path = frame.snapshotPath {
+            let key = "\(path)|\(Int(targetPixelSize))"
+            if cache.object(forKey: key as NSString) != nil { return }
+            Task.detached(priority: .utility) {
+                guard FileManager.default.fileExists(atPath: path),
+                      let img = AsyncDiskThumbnail.downsample(path: path, maxPixel: pixelSize)
+                else { return }
+                await MainActor.run { ImageThumbnailCache.shared.store(img, for: key) }
+            }
+        } else if let vpath = frame.videoPath {
+            let key = "mp4:\(vpath)#\(frame.videoOffsetMs)|\(Int(targetPixelSize))"
+            if cache.object(forKey: key as NSString) != nil { return }
+            let ms = frame.videoOffsetMs
+            let f = frame.videoFps
+            Task.detached(priority: .utility) {
+                guard let img = await AsyncMP4FrameThumbnail.extract(
+                    videoPath: vpath, offsetMs: ms, fps: f, maxPixel: pixelSize)
+                else { return }
+                await MainActor.run { ImageThumbnailCache.shared.store(img, for: key) }
+            }
+        }
+    }
 }
 
 /// Background-loaded thumbnail view. Drop-in for `Image(...)` — gives a placeholder while
