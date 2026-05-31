@@ -392,9 +392,6 @@ struct GeneralConfig: Codable, Equatable {
 
 struct AIModelsConfig: Codable, Equatable {
     var presets: [AIPresetSpec] = []
-    /// 语义搜索索引（bge-m3 向量化）开关。默认关 —— 开着 EmbeddingWorker 会把
-    /// 历史文本全转成向量，常驻 ~1.15GB 内存;关掉则只用关键词搜索。
-    var semanticIndexEnabled: Bool = false
 
     /// Integration id (chatgpt / anthropic-api / gemini / ollama) → 是否在
     /// chat picker 里隐藏。Connections 里照常连着,只是聊天选不到。
@@ -408,7 +405,6 @@ struct AIModelsConfig: Codable, Equatable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case presets
-        case semanticIndexEnabled       = "semantic_index_enabled"
         case disabledProviderIds        = "disabled_provider_ids"
         case enabledModelsByProvider    = "enabled_models_by_provider"
     }
@@ -416,7 +412,6 @@ struct AIModelsConfig: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         presets                  = c.dflt([AIPresetSpec].self,        .presets, presets)
-        semanticIndexEnabled     = c.dflt(Bool.self,                  .semanticIndexEnabled, semanticIndexEnabled)
         disabledProviderIds      = c.dflt([String].self,              .disabledProviderIds, disabledProviderIds)
         enabledModelsByProvider  = c.dflt([String: [String]].self,    .enabledModelsByProvider, enabledModelsByProvider)
     }

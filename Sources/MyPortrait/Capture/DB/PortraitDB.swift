@@ -119,47 +119,6 @@ protocol PortraitDB: Sendable {
         beforeSeconds: TimeInterval,
         afterSeconds: TimeInterval
     ) async throws -> [AudioTranscriptEntry]
-
-    // MARK: - 向量（Phase 4 Hybrid 搜索）
-
-    /// 拉一批还没 embed 的 frame id（按时间倒序，新数据优先 embed）。
-    /// EmbeddingWorker 后台调，一次几百个一批避开内存峰值。
-    /// `model` 是当前激活 embedder 的 `modelIdentifier`；
-    /// 返回 `embedding IS NULL OR embedding_model != model` 的行 —— 换模型时旧向量自动列入"待重算"。
-    func framesNeedingEmbedding(model: String, limit: Int) async throws -> [Int64]
-
-    /// 写 frame 的向量。`vector` 应该已 L2 归一化（cosine == dot 的前提）。
-    /// 同时把 `model` 写到 `embedding_model` 列，标记这条向量是哪个 embedder 生成的。
-    func setFrameEmbedding(frameId: Int64, vector: [Float], model: String) async throws
-
-    /// 拉所有已 embed 的 (id, vector)。HybridSearchEngine 做 brute-force cosine 用。
-    /// 数据量大时考虑分页或 sample；7000 行 × 1024 维 ≈ 28 MB，内存可承受。
-    /// `model` 过滤：只返回 `embedding_model = model` 的行，跨模型向量永远不混在一起算 cosine。
-    func allFrameEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])]
-
-    /// 按 id 拉一批 frame 的元数据（HybridSearchEngine 拿到 RRF 结果后获取
-    /// 显示字段）。返回顺序与 ids 顺序无关；调用方按 id 自己 reorder。
-    func framesByIds(_ ids: [Int64]) async throws -> [FrameMetadata]
-
-    // MARK: - 向量：转录（跟上面 frames 一一对应）
-
-    func transcriptionsNeedingEmbedding(model: String, limit: Int) async throws -> [Int64]
-    func setTranscriptionEmbedding(transcriptionId: Int64, vector: [Float], model: String) async throws
-    func allTranscriptionEmbeddings(model: String, limit: Int) async throws -> [(id: Int64, vector: [Float])]
-    func transcriptionsByIds(_ ids: [Int64]) async throws -> [TranscriptionMetadata]
-}
-
-public struct TranscriptionMetadata: Sendable, Hashable {
-    public let id: Int64
-    public let audioChunkId: Int64
-    public let recordedAtMs: Int64
-    public let text: String
-    public init(id: Int64, audioChunkId: Int64, recordedAtMs: Int64, text: String) {
-        self.id = id
-        self.audioChunkId = audioChunkId
-        self.recordedAtMs = recordedAtMs
-        self.text = text
-    }
 }
 
 // MARK: - Records
@@ -287,27 +246,6 @@ struct RetentionStats: Sendable {
         self.framesAffected = framesAffected
         self.videoChunksDeleted = videoChunksDeleted
         self.audioChunksDeleted = audioChunksDeleted
-    }
-}
-
-/// HybridSearchEngine 拿 RRF 排序结果后查元数据用的最小字段集。
-/// 比 TimelineFrame 轻量：不带 videoPath/offsetIndex/fps 那一套（搜索结果不需要抠帧）。
-struct FrameMetadata: Sendable {
-    let id: Int64
-    let timestampMs: Int64
-    let appName: String
-    let windowName: String?
-    let browserUrl: String?
-    let fullText: String?
-
-    init(id: Int64, timestampMs: Int64, appName: String,
-         windowName: String?, browserUrl: String?, fullText: String?) {
-        self.id = id
-        self.timestampMs = timestampMs
-        self.appName = appName
-        self.windowName = windowName
-        self.browserUrl = browserUrl
-        self.fullText = fullText
     }
 }
 

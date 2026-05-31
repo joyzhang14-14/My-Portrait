@@ -33,9 +33,8 @@ v3_transcriptions_fts     transcriptions_fts (FTS5 + same tokenizer)
 > `embedding_model`（TEXT）列、对应的 `*_embedding_null` 部分索引，是已移除的语义搜索
 > 子系统留下的（v4_embeddings / v5_embedding_model）。migration 只能追加、不能回删，所以
 > 列还在，但**没有任何代码写入或读取它们**（BLOB 落 overflow page，不读 = 0 成本）。
-> `PortraitDB` 协议里同名的 6 个 embedding 方法
-> （`framesNeedingEmbedding` / `setFrameEmbedding` / `allFrameEmbeddings` /
-> 转录三连）同样是无人调用的死代码。
+> （`PortraitDB` 协议里那批 embedding 读写方法 + `FrameMetadata`/`TranscriptionMetadata`
+> 已随子系统一并删除，只剩这几列因 migration 锁定而保留。）
 > （注意：v7_speakers 的 `speakers.centroid` / `speaker_embeddings.embedding` 属于
 > **说话人声纹**系统，正在使用，跟这里的文本 embedding 残留无关。）
 
