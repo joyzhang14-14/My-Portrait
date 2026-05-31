@@ -76,17 +76,17 @@ enum EventClassifierCLI {
 
     @MainActor
     private static func runImpl() async throws {
-        // 用跟 scheduler 一样的 provider/model。
+        // 用跟 scheduler 一样的 provider/model —— light(跟生产对齐)。
         let cfg = ConfigStore.shared.current.memory
         let classifier = EventClassifierDryRunner(
             provider: cfg.resolvedProvider,
-            model: cfg.resolvedModel
+            model: cfg.resolvedModelLight
         )
         let decision = try await classifier.dryRun()
 
         print("")
         print("=== EventClassifier dry-run ===")
-        print("provider=\(cfg.resolvedProvider.rawValue)  model=\(cfg.resolvedModel)")
+        print("provider=\(cfg.resolvedProvider.rawValue)  model=\(cfg.resolvedModelLight)")
         print("classified-already=\(decision.alreadyClassifiedCount)")
         print("unclassified-total=\(decision.totalUnclassified)")
         print("batched-this-run=\(decision.batchedThisRun)")
