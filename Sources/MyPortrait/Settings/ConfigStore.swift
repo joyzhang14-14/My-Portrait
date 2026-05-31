@@ -307,21 +307,16 @@ final class ConfigStore {
         if let v = ud.string(forKey: "Settings.audioEngine")           { c.capture.audio.engine = v }
         c.capture.audio.languages              = stringArray(ud, "Settings.audioLanguages")
         c.capture.audio.captureSystemAudio     = bool(ud, "Settings.captureSystemAudio",     default: c.capture.audio.captureSystemAudio)
-        c.capture.audio.useCoreAudioCapture    = bool(ud, "Settings.useCoreAudioCapture",    default: c.capture.audio.useCoreAudioCapture)
         c.capture.audio.speakerIdEnabled       = bool(ud, "Settings.speakerIdEnabled",       default: c.capture.audio.speakerIdEnabled)
         c.capture.audio.filterMusic            = bool(ud, "Settings.filterMusic",            default: c.capture.audio.filterMusic)
-        c.capture.audio.batchTranscription     = bool(ud, "Settings.batchTranscription",     default: c.capture.audio.batchTranscription)
         c.capture.audio.customVocabulary       = stringArray(ud, "Settings.customVocabulary")
 
         // — Recording / screen
         c.capture.screen.enabled               = bool(ud, "Settings.screenRecordingEnabled", default: c.capture.screen.enabled)
-        if let v = ud.string(forKey: "Settings.ocrEngine")             { c.capture.screen.ocrEngine = v }
         let fps = ud.integer(forKey: "Settings.videoFps")
         if fps > 0 { c.capture.screen.videoFps = fps }
-        if let v = ud.string(forKey: "Settings.videoFormat")           { c.capture.screen.videoFormat = v }
 
         // — Recording / system
-        c.capture.system.chineseMirror = bool(ud, "Settings.chineseMirror", default: c.capture.system.chineseMirror)
         if let v = ud.string(forKey: "Settings.powerMode") { c.capture.system.powerMode = v }
 
         // — Notifications

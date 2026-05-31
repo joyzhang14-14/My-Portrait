@@ -166,12 +166,6 @@ struct AudioCaptureSettingsView: View {
                                 icon: "speaker.wave.2") {
                         Toggle("", isOn: config.binding(\.capture.audio.captureSystemAudio)).labelsHidden().toggleStyle(.switch)
                     }
-                    SettingsDivider()
-                    SettingsRow("CoreAudio system audio capture",
-                                description: "Lower-overhead path. Requires macOS 14+.",
-                                icon: "rectangle.connected.to.line.below") {
-                        Toggle("", isOn: config.binding(\.capture.audio.useCoreAudioCapture)).labelsHidden().toggleStyle(.switch)
-                    }
                 }
             }   // 关闭 if audioRec —— Mic / System audio 仅采集开启时显示
 
@@ -340,12 +334,6 @@ struct AudioCaptureSettingsView: View {
                     if !selectedLangs.isEmpty {
                         selectedLanguageChips
                     }
-                        SettingsDivider()
-                        SettingsRow("Batch transcription",
-                                    description: "Process audio chunks together for higher throughput. Slight latency cost.",
-                                    icon: "tray.full") {
-                            Toggle("", isOn: config.binding(\.capture.audio.batchTranscription)).labelsHidden().toggleStyle(.switch)
-                        }
                         SettingsDivider()
                         SettingsRow("Only transcribe while plugged in",
                                     description: "Saves battery — audio still records on battery and transcribes once you're back on AC power. Off = transcribe regardless of power.",
@@ -535,13 +523,6 @@ struct ScreenCaptureSettingsView: View {
                 }
                 if screenRec {
                     SettingsDivider()
-                    SettingsRow("Output video format", icon: "rectangle.compress.vertical") {
-                        Picker("", selection: config.binding(\.capture.screen.videoFormat)) {
-                            ForEach(VideoFormat.allCases) { f in Text(f.label).tag(f.rawValue) }
-                        }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 110)
-                    }
-                    SettingsDivider()
                     SettingsRow("Video FPS",
                                 description: "Frames per second to capture into the video chunks.",
                                 icon: "speedometer") {
@@ -555,15 +536,6 @@ struct ScreenCaptureSettingsView: View {
                                 .foregroundStyle(Theme.textPrimary.opacity(0.55))
                                 .frame(width: 50, alignment: .trailing)
                         }
-                    }
-                    SettingsDivider()
-                    SettingsRow("OCR engine",
-                                description: "Convert captured frames into searchable text.",
-                                icon: "doc.text.viewfinder") {
-                        Picker("", selection: config.binding(\.capture.screen.ocrEngine)) {
-                            ForEach(OCREngine.allCases) { o in Text(o.label).tag(o.rawValue) }
-                        }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 160)
                     }
                 }
             }

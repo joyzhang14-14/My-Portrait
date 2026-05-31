@@ -126,30 +126,6 @@ enum AudioEngine: String, CaseIterable, Identifiable {
     }
 }
 
-enum OCREngine: String, CaseIterable, Identifiable {
-    case disabled, tesseract, cloud
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .disabled:  return "Disabled"
-        case .tesseract: return "Tesseract (on-device)"
-        case .cloud:     return "Cloud"
-        }
-    }
-}
-
-enum VideoFormat: String, CaseIterable, Identifiable {
-    case h264, h265, prores
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .h264:   return "H.264"
-        case .h265:   return "H.265"
-        case .prores: return "ProRes"
-        }
-    }
-}
-
 enum UsageRange: String, CaseIterable, Identifiable {
     case last24h, last7d, last30d, all
     var id: String { rawValue }
