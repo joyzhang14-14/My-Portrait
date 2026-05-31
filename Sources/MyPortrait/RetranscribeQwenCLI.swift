@@ -20,9 +20,10 @@ enum RetranscribeQwenCLI {
         let startS: Double; let endS: Double; let oldText: String; let oldSpeaker: Int64?
     }
 
-    static func run(apply: Bool, limit: Int? = nil) {
+    static func run(apply: Bool, limit: Int? = nil, speakerOnly: Bool = false) {
         let state = ExitState()
-        print("=== retranscribe-qwen (\(apply ? "APPLY — 只替换 text" : "dry-run"))\(limit.map { " limit=\($0)" } ?? "") ===")
+        let doApply = apply && !speakerOnly   // speaker-only 是只读重匹配,不写库
+        print("=== retranscribe-qwen (\(speakerOnly ? "speaker-only" : (doApply ? "APPLY — 只替换 text" : "dry-run")))\(limit.map { " limit=\($0)" } ?? "") ===")
         fflush(stdout)
 
         let dbImpl: PortraitDBImpl
@@ -43,14 +44,21 @@ enum RetranscribeQwenCLI {
                 print("model: \(modelId)  lang: \(lang ?? "auto")  filterMusic: \(filterMusic)")
                 fflush(stdout)
 
-                guard Qwen3ASRWrapper.isOnDisk(modelId: modelId) else {
-                    print("ERROR: Qwen 模型未下载: \(modelId) —— 先去 AI models 页下载")
-                    state.code = 1; return
+                // speakerOnly = 只重匹配 speaker,跳过 Qwen(不需要 metallib,ONNX 嵌入很快)。
+                let qwen: Qwen3ASRWrapper?
+                if speakerOnly {
+                    qwen = nil
+                    print("(speaker-only：跳过 Qwen,只重匹配 speaker)")
+                } else {
+                    guard Qwen3ASRWrapper.isOnDisk(modelId: modelId) else {
+                        print("ERROR: Qwen 模型未下载: \(modelId) —— 先去 AI models 页下载")
+                        state.code = 1; return
+                    }
+                    // 紧凑循环跑几百段时 MLX 的 Metal buffer 缓存会按 shape 累积到 10G+。
+                    // 给缓存上限压到 512MB —— 峰值降到 ~4GB(模型 3.3G + 临时 + ≤512M)。
+                    MLX.GPU.set(cacheLimit: 512 * 1024 * 1024)
+                    qwen = Qwen3ASRWrapper(modelId: modelId)
                 }
-                // 紧凑循环跑几百段时 MLX 的 Metal buffer 缓存会按 shape 累积到 10G+。
-                // 给缓存上限压到 512MB —— 峰值降到 ~4GB(模型 3.3G + 临时 + ≤512M)。
-                MLX.GPU.set(cacheLimit: 512 * 1024 * 1024)
-                let qwen = Qwen3ASRWrapper(modelId: modelId)
 
                 // 2. speaker 模型（只读匹配用）+ 名字映射
                 let extractor: SpeakerEmbeddingExtractor? = await {
@@ -107,9 +115,14 @@ enum RetranscribeQwenCLI {
                     for s in chunkSegs {
                         let a = max(0, Int(s.startS * 16000)), b = min(n, Int(s.endS * 16000))
                         let slice = (a < b) ? Array(all[a..<b]) : []
-                        let newText = ((try? await qwen.transcribe(
-                            samples: slice, language: lang, vocabulary: vocabulary, filterMusic: filterMusic)) ?? "")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let newText: String
+                        if let qwen {
+                            newText = ((try? await qwen.transcribe(
+                                samples: slice, language: lang, vocabulary: vocabulary, filterMusic: filterMusic)) ?? "")
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                        } else {
+                            newText = s.oldText.trimmingCharacters(in: .whitespacesAndNewlines)  // speaker-only: 文本不变
+                        }
                         var newSpeaker: Int64? = nil
                         if let ex = extractor, var v = ex.embed(slice) {
                             VectorMath.l2Normalize(&v)
@@ -117,15 +130,14 @@ enum RetranscribeQwenCLI {
                         }
                         results.append(Res(seg: s, newText: newText, newSpeaker: newSpeaker))
                         done += 1
-                        // 每 25 段显式清 MLX Metal buffer 缓存,防 RSS 累积。
                         if done % 25 == 0 {
-                            MLX.GPU.clearCache()
+                            if qwen != nil { MLX.GPU.clearCache() }   // 清 MLX 缓存防 RSS 累积
                             print("  \(done)/\(segs.count)… (RSS \(rssGB()) GB)"); fflush(stdout)
                         }
                     }
                 }
-                qwen.unload()
-                MLX.GPU.clearCache()
+                qwen?.unload()
+                if qwen != nil { MLX.GPU.clearCache() }
 
                 // 4. 报告
                 let reportPath = "/tmp/retranscribe_qwen_report.txt"
@@ -169,8 +181,11 @@ enum RetranscribeQwenCLI {
                 }
                 fflush(stdout)
 
-                if !apply {
-                    print("\n[dry-run] 没写库。看着行就 --apply 重跑（只替换 text，先备份 DB）。speaker_id 始终不动。")
+                if !doApply {
+                    let hint = speakerOnly
+                        ? "[speaker-only] 只读重匹配,没写库。"
+                        : "[dry-run] 没写库。看着行就 --apply 重跑（只替换 text，先备份 DB）。speaker_id 始终不动。"
+                    print("\n\(hint)")
                     return
                 }
 
