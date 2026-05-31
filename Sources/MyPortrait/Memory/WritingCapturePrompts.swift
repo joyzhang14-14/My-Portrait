@@ -199,18 +199,30 @@ enum WritingCapturePrompts {
 
     Look at this entire (app, url) group on this day, then produce writing_records.
 
-    1. ONE SESSION = ONE RECORD (segmentation already done for you)
-       Each session in raw_sessions has ALREADY been split to ONE unit the user
-       produced (one sent message / one input). Step 0 cut on the real message
-       boundaries (typing_event = one send/clear). So:
-       - DEFAULT: emit EXACTLY ONE record per session. Do not merge sessions. Do
-         not merge a session's content with another's.
-       - Only split a session into 2+ records in the RARE case its single
-         typing_event text obviously contains multiple distinct sent messages.
-       - Pull content from ocr_frames only when typing_events is empty (canvas /
-         keystroke-swallowing apps).
-       Do NOT decide boundaries yourself — they are pre-cut. Your job is to CLEAN
-       and TRANSCRIBE each unit, not to re-segment.
+    1. SEGMENT EACH SESSION YOURSELF, AND TRANSCRIBE ONLY WHAT THE USER TYPED
+       Sessions are NOT pre-segmented. A session may contain one message, several
+       distinct messages, or none of the user's own writing at all. Your job is to
+       find every distinct thing THE USER actually composed and emit one record per
+       distinct input.
+       - First read keystroke_text / keystroke_log: that is the ground truth for
+         what the user physically produced. Use it to GUESS the user's input, then
+         confirm/refine against AX and OCR.
+       - Split a session into separate records on real message boundaries:
+         kind="submit"/Return, long typing pauses, clear-and-restart. Keep one
+         record per sent message.
+       - AUTHORSHIP TEST — only the user's own input becomes a record. In chat /
+         canvas / any app whose screen also shows text the user did NOT type — an
+         assistant's reply, a received message, earlier conversation history, a
+         page being read — that text has little or no backing keystroke activity.
+         Do NOT transcribe it. A record's text must be a stretch that
+         keystroke_text / typing_events actually account for.
+       - Source priority per stretch: keystroke (truth of what was typed) →
+         typing_events.text when AX has meaningful content matching the keystrokes
+         (trust AX text, lightly fix only where it disagrees with keystrokes) →
+         ocr_frames only when typing_events is empty (canvas / keystroke-swallowing
+         apps), and even then keep ONLY the portion the user authored (keystroke
+         volume in that window confirms authorship; on-screen text with zero
+         corresponding keystrokes is reading/received content, not the user's).
 
     2. CLASSIFY EACH RECORD'S `kind`
        - "long_form"  — substantive writing: article, essay, code, document, long
@@ -227,11 +239,16 @@ enum WritingCapturePrompts {
        Translate every session you receive into a record. A separate Pass 4
        gate decides what to drop based on keystroke-support evidence. Your
        job here is purely transcription + segmentation + cleanup.
-       - If a session looks like noise / external paste / keystroke residue,
-         STILL emit a record for it. Pass 4 will drop it.
+       - If a session is noisy BUT user-typed (keystroke residue, odd/short
+         wording, self-paste): STILL emit a record — Pass 4 decides quality.
+         "Noisy user input" ≠ "not the user's content".
+       - A session that is PURELY non-user content (assistant reply, received
+         message, a page being read — zero user authorship per the AUTHORSHIP
+         TEST above) yields NO record. That is not discarding the user's writing;
+         it was never the user's writing.
        - Do not include `discarded` in your output. Output `records` only.
-       - Every input session_id must appear in at least one record's
-         `reference_*_ids`.
+       - Every session WHERE THE USER AUTHORED SOMETHING must appear in at least
+         one record's `reference_*_ids`.
 
     3a. KEYSTROKE-EVENT TIMELINE (self-paste vs external paste)
 
