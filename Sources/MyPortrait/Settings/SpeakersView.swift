@@ -699,8 +699,11 @@ struct VoiceTrainingCard: View {
     /// 训练前的 audio.enabled / speakerIdEnabled,完成时还原。
     @State private var prevAudioEnabled: Bool? = nil
     @State private var prevSpeakerIdEnabled: Bool? = nil
+    /// 训练用的 speaker 名字 —— 跟持久化的 userName(「本人」身份,diarizer 用它自动
+    /// 起名)解耦,这样训练别人不会覆盖你自己的名字。onAppear 默认填 userName。
+    @State private var trainingName: String = ""
 
-    private var name: String { cfg.current.capture.audio.userName }
+    private var name: String { trainingName }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
     private var micGranted: Bool { monitor.microphone == .granted }
     private var blocked: Bool {
@@ -731,10 +734,10 @@ struct VoiceTrainingCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Text("Your name")
+                Text("Speaker name")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textPrimary.opacity(0.70))
-                TextField("e.g. Louis", text: cfg.binding(\.capture.audio.userName))
+                TextField("e.g. Louis", text: $trainingName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .padding(.horizontal, 10).padding(.vertical, 6)
@@ -752,7 +755,7 @@ struct VoiceTrainingCard: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.textPrimary.opacity(0.40))
                     ForEach(suggestions, id: \.self) { s in
-                        Button(s) { cfg.mutate { $0.capture.audio.userName = s } }
+                        Button(s) { trainingName = s }
                             .buttonStyle(.plain)
                             .font(.system(size: 10))
                             .foregroundStyle(Color.blue.opacity(0.85))
@@ -793,7 +796,10 @@ struct VoiceTrainingCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.white.opacity(0.12), lineWidth: 0.7))
         )
-        .onAppear { monitor.start() }
+        .onAppear {
+            monitor.start()
+            if trainingName.isEmpty { trainingName = cfg.current.capture.audio.userName }
+        }
         .onDisappear { monitor.stop() }
         // trainer.phase 变 success/failure → 还原 audio toggle。
         .onChange(of: phaseKey(trainer.phase)) { _, newKey in

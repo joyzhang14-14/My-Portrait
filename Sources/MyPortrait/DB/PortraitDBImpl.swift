@@ -282,10 +282,11 @@ actor PortraitDBImpl: PortraitDB {
     func matchSpeaker(embedding: [Float]) async throws -> Int64? {
         try await dbPool.read { db in
             var best: (id: Int64, sim: Float)?
-            // 1. 先比对 centroid（每人一个稳定的运行平均向量）—— **质心优先**。
-            //    样本级匹配在某 speaker 样本多时会被 outlier 样本带偏:任何声音总能
-            //    蒙中它众多样本里的某一个 > 阈值 → 过度归到该人(实测某人样本多时
-            //    几乎所有段都被吸过去)。质心是均值,outlier-robust,不会这样。
+            // **纯质心匹配**:每人一个稳定的运行平均向量(enroll / 训练时即建)。
+            // 不做样本级匹配 —— "单个最相似样本 > 阈值"会被 outlier 带偏:某人样本多
+            // 时任何声音总能蒙中某一个 → 过度归一,还把"别人 / 嘈杂的你"误吸成已知人。
+            // 质心是均值、outlier-robust、判别力强:清晰的你匹配你的质心;嘈杂的你 /
+            // 真正的别人跟你的干净质心不像 → 不匹配 → 落 unknown 凸显出来(可去命名)。
             let cRows = try Row.fetchAll(db, sql: """
                 SELECT id, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
                 """)
@@ -295,22 +296,6 @@ actor PortraitDBImpl: PortraitDB {
                 let sim = VectorMath.cosineSimilarity(embedding, vec)
                 if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
                     best = (row["id"], sim)
-                }
-            }
-            if let b = best { return b.id }
-            // 2. 质心没命中(如刚 enroll、还没攒出质心的 speaker)再比对样本向量兜底。
-            let embRows = try Row.fetchAll(db, sql: """
-                SELECT se.speaker_id AS sid, se.embedding AS emb
-                FROM speaker_embeddings se
-                JOIN speakers s ON s.id = se.speaker_id
-                WHERE s.hallucination = 0
-                """)
-            for row in embRows {
-                guard let blob: Data = row["emb"], let vec = blob.asFloats,
-                      vec.count == embedding.count else { continue }
-                let sim = VectorMath.cosineSimilarity(embedding, vec)
-                if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
-                    best = (row["sid"], sim)
                 }
             }
             return best?.id
