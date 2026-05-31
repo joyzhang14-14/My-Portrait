@@ -410,16 +410,23 @@ final class EventClassifier {
         lines.append("""
         You are grouping events into PROJECT-level folders for a personal-memory app.
 
+        What counts as a folder:
+        - A SUSTAINED endeavor: a project, course, trip, application, ongoing
+          relationship, recurring routine, etc. Something the user returns to
+          across multiple sessions / days.
+        - Use a name a person would actually call it (proper noun if there is one).
+        - NOT a topic, action, or tool. "Debugging" is not a folder. "Audio" is not
+          a folder. "Email" is not a folder. The same topic can span many projects.
+
         Rules:
-        - Folder granularity = PROJECT or BIG ENDEAVOR (e.g. "My Portrait", "Valis",
-          "UCI Application", "Family Trip 2026"). NOT topic-level
-          (e.g. NOT "audio bugs", NOT "settings UI").
-        - One event = at most one folder.
+        - One event belongs to AT MOST one folder.
         - Only propose a NEW folder if you have at least \(minNewFolderEvents) events
-          for it. Fewer = leave them ungrouped (they may pool with future events).
-        - Prefer appending to an EXISTING folder when the project matches.
-        - Conservative bias: when unsure, leave ungrouped. Wrong assignment is
-          costlier than missed assignment.
+          that clearly belong together. Fewer = leave them ungrouped (they may
+          pool with future events on later runs).
+        - Prefer APPENDING to an EXISTING folder over creating a similar new one.
+          Check the slug/name/description of existing folders before opening a new one.
+        - Conservative bias: when unsure, leave ungrouped. A wrong assignment is
+          worse than a missed assignment.
 
         Output: a SINGLE JSON object, no prose. Schema:
         {
