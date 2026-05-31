@@ -1075,16 +1075,12 @@ final class WritingCaptureWorker {
                         id: rid, text: text,
                         keystroke: await WritingCapturePass2Agent.assembleKeystrokeText(s.keystrokes)))
                 }
-                // Pass 3 补齐:补 IME(dian→店)+ 把"挤在一条里的多条消息"按语义切开。
-                // LLM 返回 id → 清洗后的消息数组;漏/空 → 保留原条(绝不丢)。
                 let fixes = await makeCleanup().run(items: items)
-                var cleaned: [WritingCaptureRecord] = []
-                for (i, rec) in records.enumerated() {
-                    guard let msgs = fixes["r\(i)"], !msgs.isEmpty else { cleaned.append(rec); continue }
-                    for (j, m) in msgs.enumerated() {
-                        // 切出的每条一个 record;editLog(编辑历史)只挂第一条。
-                        cleaned.append(Self.withTextAndEditLog(rec, m, j == 0 ? rec.editLog : []))
-                    }
+                let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
+                    guard let t = fixes["r\(i)"],
+                          !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else { return rec }
+                    return Self.withTextAndEditLog(rec, t, rec.editLog)
                 }
                 return WritingCapturePass3Agent.Output(
                     prompt: "(ax cleanup)", rawResponse: "", records: cleaned, discarded: [])

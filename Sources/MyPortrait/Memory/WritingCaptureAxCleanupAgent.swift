@@ -24,9 +24,8 @@ final class WritingCaptureAxCleanupAgent {
         self.perRunTimeout = perRunTimeout
     }
 
-    /// 返回 id → 清洗后的消息数组(补 IME + 可能切成多条)。只含 LLM 实际给出的;
-    /// 调用方对缺的 / 空的保留原文,绝不丢。
-    func run(items: [Item]) async -> [String: [String]] {
+    /// 返回 id → 修好的 text。只含 LLM 实际给出的;调用方对缺的保留原文。
+    func run(items: [Item]) async -> [String: String] {
         guard !items.isEmpty else { return [:] }
         let prompt = Self.buildPrompt(items: items)
         guard let agent = try? MemoryAgentFactory.make(provider: provider, model: model) else { return [:] }
@@ -65,21 +64,19 @@ final class WritingCaptureAxCleanupAgent {
     }
 
     private struct Resp: Decodable {
-        struct R: Decodable { let id: String; let messages: [String] }
-        let results: [R]
+        struct Fixed: Decodable { let id: String; let text: String }
+        let fixed: [Fixed]
     }
 
-    static func parse(_ s: String) -> [String: [String]] {
+    static func parse(_ s: String) -> [String: String] {
         guard let json = WritingCapturePass3Agent.extractFirstBalancedJSONObject(s),
               let data = json.data(using: .utf8),
               let r = try? JSONDecoder().decode(Resp.self, from: data)
         else { cleanupLog.warning("ax-cleanup parse fail"); return [:] }
-        var out: [String: [String]] = [:]
-        for item in r.results {
-            let msgs = item.messages
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            if !msgs.isEmpty { out[item.id] = msgs }
+        var out: [String: String] = [:]
+        for f in r.fixed {
+            let t = f.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { out[f.id] = f.text }
         }
         return out
     }
