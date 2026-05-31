@@ -320,10 +320,7 @@ final class ConfigStore {
         if let v = ud.string(forKey: "Settings.ocrEngine")             { c.capture.screen.ocrEngine = v }
         let fps = ud.integer(forKey: "Settings.videoFps")
         if fps > 0 { c.capture.screen.videoFps = fps }
-        if let v = ud.string(forKey: "Settings.recordingQuality")      { c.capture.screen.quality = v }
         if let v = ud.string(forKey: "Settings.videoFormat")           { c.capture.screen.videoFormat = v }
-        let fim = ud.integer(forKey: "Settings.frameIntervalMs")
-        if fim > 0 { c.capture.screen.frameIntervalMs = fim }
 
         // — Recording / system
         c.capture.system.chineseMirror = bool(ud, "Settings.chineseMirror", default: c.capture.system.chineseMirror)

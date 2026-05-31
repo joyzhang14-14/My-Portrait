@@ -569,15 +569,6 @@ struct ScreenCaptureSettingsView: View {
                 }
                 if screenRec {
                     SettingsDivider()
-                    SettingsRow("Recording quality",
-                                description: "Higher quality means larger snapshots.",
-                                icon: "rectangle.stack") {
-                        Picker("", selection: config.binding(\.capture.screen.quality)) {
-                            ForEach(RecordingQuality.allCases) { q in Text(q.label).tag(q.rawValue) }
-                        }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 110)
-                    }
-                    SettingsDivider()
                     SettingsRow("Output video format", icon: "rectangle.compress.vertical") {
                         Picker("", selection: config.binding(\.capture.screen.videoFormat)) {
                             ForEach(VideoFormat.allCases) { f in Text(f.label).tag(f.rawValue) }
@@ -597,27 +588,6 @@ struct ScreenCaptureSettingsView: View {
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(Theme.textPrimary.opacity(0.55))
                                 .frame(width: 50, alignment: .trailing)
-                        }
-                    }
-                    SettingsDivider()
-                    SettingsRow("Frame interval",
-                                description: "Milliseconds between standalone snapshots.",
-                                icon: "timer") {
-                        HStack(spacing: 4) {
-                            TextField("", value: config.binding(\.capture.screen.frameIntervalMs), formatter: NumberFormatter())
-                                .textFieldStyle(.plain)
-                                .multilineTextAlignment(.trailing)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(.horizontal, 8).padding(.vertical, 5)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
-                                        .overlay(RoundedRectangle(cornerRadius: 6)
-                                            .stroke(Color.white.opacity(0.10), lineWidth: 1))
-                                )
-                                .frame(width: 70)
-                            Text("ms")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
                         }
                     }
                     SettingsDivider()
