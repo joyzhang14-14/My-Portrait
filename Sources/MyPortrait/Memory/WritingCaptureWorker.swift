@@ -978,6 +978,22 @@ final class WritingCaptureWorker {
             records: records, discarded: [])
     }
 
+    /// AX 路混合:确定性 record 集 + LLM 文字润色。每条确定性 record(单
+    /// typing_event id)去 LLM 输出里找引用了该 id 的 record,用其清洗后的 text;
+    /// 找不到 / LLM 没出 → 保留确定性原文。**record 集永远是确定性的,绝不增删。**
+    nonisolated static func mergeAxCleanup(
+        deterministic: [WritingCaptureRecord], llm: [WritingCaptureRecord]?
+    ) -> [WritingCaptureRecord] {
+        guard let llm, !llm.isEmpty else { return deterministic }
+        return deterministic.map { det in
+            guard let id = det.referenceTypingEventIds.first,
+                  let m = llm.first(where: { $0.referenceTypingEventIds.contains(id) }),
+                  !m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return det }
+            return Self.withTextAndEditLog(det, m.text, det.editLog)
+        }
+    }
+
     static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
@@ -1002,16 +1018,24 @@ final class WritingCaptureWorker {
                 return try await agent.run(
                     groupApp: g.app, groupUrl: g.url, session: merged, contextSummary: ctx)
             } else {
-                // AX 路:Pass 3(LLM)按 keystroke 补 AX 小瑕疵(如 IME 没上屏的
-                // "dian"→"店")、清残留。切分已由 Pass 2 完成,Pass 3 只逐单元清洗。
-                let agent = await makePass3()
-                return try await agent.run(
+                // AX 路 = 混合:record 集**确定性产出**(每个 typing_event 一条,
+                // text=AX 快照)→ 保证所有消息都在,不被 LLM 随机漏写。然后 LLM
+                // **只润色文字**(按 keystroke 补 IME 没上屏的 "dian"→"店"、清残留),
+                // 按 typing_event id 合并:LLM 有对应就用它清洗后的 text,没有/漏了
+                // 就保留确定性原文。LLM 失败也不抛(ax 组永不 fail)。
+                let det = Self.buildAxRecordsDeterministic(group: g, contextTimeline: contextTimeline)
+                let llm = try? await makePass3().run(
                     contextTimeline: contextTimeline,
                     groupApp: g.app, groupUrl: g.url,
                     rawSessions: g.sessions,
                     includeAxText: includeAxText,
                     userLanguages: userLanguages,
                     userRejections: userRejections)
+                let merged = Self.mergeAxCleanup(deterministic: det.records, llm: llm?.records)
+                return WritingCapturePass3Agent.Output(
+                    prompt: llm?.prompt ?? "(deterministic ax)",
+                    rawResponse: llm?.rawResponse ?? "(deterministic)",
+                    records: merged, discarded: [])
             }
         }
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
