@@ -1068,17 +1068,17 @@ final class WritingCaptureWorker {
                     continue
                 }
 
-                let hasAuthoring = editLog.contains { $0.kind == "commit" || $0.kind == "delete" }
-                // canvas(OCR 重建)record:keystroke 跟 text 必须有对应(零对应兜底)。
+                // 击键覆盖闸门(上面)已保证"是用户打的"(AI回复/读=0击键被毙)。
+                // 不再要求 edit_log 必须有 commit —— 那条老过滤太严,很多真消息的 AX
+                // edit_log 没记成 commit(如 Claude Desktop / Obsidian 里打的字)被误丢。
+                // 只对 canvas OCR 再查"零对应"兜底(OCR 抓了无关屏幕文字)。
                 let canvasOrphan = (rec.source == "canvas_fusion" || rec.source == "merged")
                     && Self.keystrokeOrphan(rec: rec, keys: keys)
-                if hasAuthoring && !canvasOrphan {
+                if !canvasOrphan {
                     keptGroup.append(Self.withTextAndEditLog(rec, text, editLog))
                 } else {
                     dropped.append(WritingCaptureDiscarded(
-                        reason: canvasOrphan
-                            ? "canvas OCR text has no keystroke correspondence (unrelated on-screen text)"
-                            : "no authoring edits in edit_log (pasted / OCR / AI content, not typed)",
+                        reason: "canvas OCR text has no keystroke correspondence (unrelated on-screen text)",
                         sessionIds: [], preview: String(text.prefix(200))))
                 }
             }
