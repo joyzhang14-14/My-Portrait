@@ -24,6 +24,11 @@ actor SnapshotWriter {
     private let reporter: UnimplementedReporter
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "snapshot")
 
+    /// 运行时可调的 JPG 质量(功耗档位变化时改)。init 取 config 基线,
+    /// 之后由 setJpegQuality 覆盖。config 整体保持 let(里面 framesDir /
+    /// monitorId 等被 nonisolated 路径计算方法读,不能变 actor-isolated var)。
+    private var currentJpegQuality: Double
+
     /// 已确认存在的日期目录（一天一条）。免重复调 `createDirectory`。
     private var ensuredDayDirs: Set<String> = []
 
@@ -39,6 +44,12 @@ actor SnapshotWriter {
     init(config: CaptureConfig, reporter: UnimplementedReporter) {
         self.config = config
         self.reporter = reporter
+        self.currentJpegQuality = config.jpegQuality
+    }
+
+    /// 功耗档位变化时由 coordinator 调,更新 JPG 压缩质量。
+    func setJpegQuality(_ q: Double) {
+        currentJpegQuality = q
     }
 
     /// 同步计算文件路径。不创建任何目录、不做 IO。
@@ -75,7 +86,7 @@ actor SnapshotWriter {
         }
 
         let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: config.jpegQuality
+            kCGImageDestinationLossyCompressionQuality: currentJpegQuality
         ]
         CGImageDestinationAddImage(dest, toEncode, options as CFDictionary)
 

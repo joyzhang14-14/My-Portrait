@@ -16,7 +16,7 @@ import os.log
 actor CaptureCoordinator {
 
     private let db: PortraitDB
-    private let config: CaptureConfig
+    private var config: CaptureConfig
     private let reporter: UnimplementedReporter
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "coordinator")
 
@@ -93,6 +93,15 @@ actor CaptureCoordinator {
     /// Services 在 ConfigStore.privacy.maskIgnoredApps 变化时调。
     nonisolated func setMaskingEnabled(_ enabled: Bool) {
         ignore.setMaskingEnabled(enabled)
+    }
+
+    /// Services 在功耗档位变化时调(电源/低电量/热状态/用户改 powerMode)。
+    /// 更新抓帧间隔(下一轮 loop 立即生效)+ 推 JPG 质量给 SnapshotWriter。
+    func applyPowerProfile(_ profile: PowerProfile) {
+        // minCaptureIntervalMs 只在本 actor 的 loop(line ~236)读,改这里即生效。
+        config.minCaptureIntervalMs = profile.minCaptureIntervalMs
+        let q = profile.jpegQuality
+        Task { await snapshot.setJpegQuality(q) }
     }
 
     /// 启动采集流水线。幂等。
