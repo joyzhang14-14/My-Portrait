@@ -48,7 +48,13 @@ struct MyPortraitApp: App {
         if args.contains("--retranscribe-qwen") {
             var lim: Int? = nil
             if let i = args.firstIndex(of: "--limit"), i + 1 < args.count { lim = Int(args[i + 1]) }
-            RetranscribeQwenCLI.run(apply: args.contains("--apply"), limit: lim)
+            RetranscribeQwenCLI.run(apply: args.contains("--apply"), limit: lim,
+                                    speakerOnly: args.contains("--speaker-only"))
+            // run() exits the process internally.
+        }
+        // 一次性数据修复:按声纹 cosine 整理被 bug 版本打乱的说话人簇。
+        if args.contains("--fix-speakers") {
+            FixSpeakersCLI.run()
             // run() exits the process internally.
         }
         // `mp-query` 给 AI agent 用的本地数据查询接口(端口自 screenpipe
