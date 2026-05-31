@@ -562,6 +562,29 @@ enum WritingCapturePrompts {
 
     /// Pass 2 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条
     /// AX 真伪。轻量模型可胜任。keystroke + OCR 是不会说谎的对照物,只判 AX。
+    static let axCleanup = #"""
+    You FIX small input-capture flaws in short user messages. Each item gives the
+    captured `text` and the `keystroke` the user physically pressed (<BS>=backspace,
+    <CR>=Return; for IME this is the latin phonetic the user typed).
+
+    The ONLY thing you fix: IME phonetic that never composed into a character — the
+    text shows a latin pinyin/romaji fragment where a character belongs. Using the
+    keystrokes, COMPLETE it to the character the user clearly meant.
+      e.g. text "这是一家什么dian", keystroke "...shi yi jia shen me dian" → "这是一家什么店"
+    Also drop abandoned trailing phonetic residue the keystrokes show was deleted.
+
+    HARD limits — do NOT do anything else:
+    - Do NOT translate, rephrase, summarize, reorder, merge, split, censor, or
+      "improve". Keep the user's EXACT wording, typos, punctuation, language, emoji.
+    - Fix ONLY what the keystrokes clearly support. If unsure, leave it UNCHANGED.
+    - If nothing needs fixing, return the text UNCHANGED.
+    - Return EVERY input id exactly once with its (fixed or unchanged) text.
+
+    OUTPUT — respond with ONLY this JSON object, no prose / fences:
+    { "fixed": [ { "id": "<id>", "text": "<text>" }, ... ] }
+    - JSON escaping: `"` → `\"`, `\` → `\\`, newlines → `\n`.
+    """#
+
     static let pass2Segment = #"""
     You are a JUDGE for ONE activity session. You decide two things:
     (1) ROUTE — is the user's real input in AX (typing_events) or only on screen (OCR)?
