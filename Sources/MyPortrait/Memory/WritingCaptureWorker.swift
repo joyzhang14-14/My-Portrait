@@ -1051,6 +1051,14 @@ final class WritingCaptureWorker {
                     let text = evs.map { $0.text }.joined(separator: "\n")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { continue }
+                    // 按 keystroke 把关:统计该 unit 窗口内用户实打的键(非 cmd/opt/
+                    // ctrl 快捷键)。AX 在"打开文档/粘贴/程序写入"时会把一大段没打过的
+                    // 文字报成 typing_event(如 Obsidian 你只是打开来看)→ 击键≈0 而
+                    // 文字一大堆 → 丢。conf = 击键覆盖度(不再死写 1.00)。
+                    let kc = s.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
+                    if text.count > 20 && kc < text.count / 4 { continue }   // 读/加载/粘贴
+                    // CJK 拼音 ~1.5–3 击键/字,英文 ~1。除以 2 归一,clamp [0.5,1]。
+                    let conf = min(1.0, max(0.5, Double(kc) / (Double(text.count) * 2.0)))
                     let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
                     let ctx = contextTimeline.first {
                         $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
@@ -1059,7 +1067,7 @@ final class WritingCaptureWorker {
                     records.append(WritingCaptureRecord(
                         text: text, editLog: [],
                         kind: text.count >= 140 ? "long_form" : "short_form",
-                        source: "ax_cleaned", confidence: 1.0, contextSummary: ctx,
+                        source: "ax_cleaned", confidence: conf, contextSummary: ctx,
                         app: g.app, url: g.url, startTs: startTs, endTs: endTs,
                         referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
                         referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
