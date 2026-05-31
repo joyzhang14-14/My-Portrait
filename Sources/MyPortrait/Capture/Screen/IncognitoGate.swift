@@ -25,10 +25,12 @@ actor IncognitoGate {
         // Tier 3:标题关键词(即时纯函数)
         if Self.isTitlePrivate(focus.windowTitle) { return true }
 
-        // Tier 2:Chromium AppleScript(慢,带 2s 缓存)
-        if Self.isChromiumBrowser(focus.appName), let title = focus.windowTitle {
-            let privateTitles = await incognitoTitles(forApp: focus.appName)
-            if privateTitles.contains(title) { return true }
+        // Tier 2:Chromium 直接问 frontmost 窗口是否无痕。
+        //   不靠 title 比对 —— macOS 26 上 Chrome 的 AX window title 经常取不到
+        //   (空),screenpipe 那套"无痕窗口标题集合 ∋ 当前 title"在这里永远不
+        //   命中。改成 AppleScript 直接查 front window 的 mode/incognito。
+        if Self.isChromiumBrowser(focus.appName) {
+            if await isFrontWindowIncognito(forApp: focus.appName) { return true }
         }
 
         return false
@@ -43,20 +45,20 @@ actor IncognitoGate {
 
     // MARK: - Tier 2:Chromium AppleScript + 2s 缓存
 
-    private struct CacheEntry { let titles: Set<String>; let at: Date }
+    private struct CacheEntry { let incognito: Bool; let at: Date }
     private var cache: [String: CacheEntry] = [:]
     private let cacheTTL: TimeInterval = 2.0
 
-    /// 查某 Chromium app 当前所有无痕窗口的标题集合。2s 内同 app 走缓存,
+    /// 查某 Chromium app 当前 frontmost 窗口是否无痕。2s 内同 app 走缓存,
     /// 避免每帧跑 osascript(单次 ~150-200ms)。
-    private func incognitoTitles(forApp app: String) async -> Set<String> {
+    private func isFrontWindowIncognito(forApp app: String) async -> Bool {
         let key = app.lowercased()
         if let e = cache[key], Date().timeIntervalSince(e.at) < cacheTTL {
-            return e.titles
+            return e.incognito
         }
-        let titles = await Self.runAppleScript(appName: app)
-        cache[key] = CacheEntry(titles: titles, at: Date())
-        return titles
+        let incog = await Self.runAppleScript(appName: app)
+        cache[key] = CacheEntry(incognito: incog, at: Date())
+        return incog
     }
 
     /// Chromium 系 app 名(小写)。只对这些跑 Tier 2。
@@ -79,42 +81,34 @@ actor IncognitoGate {
         }
     }
 
-    /// 跑 osascript 拿无痕窗口标题集合。脚本端口自 screenpipe(verbatim):
-    /// 先试 `mode of w is "incognito"`(Chrome/Edge/Vivaldi/Opera),再 fallback
-    /// `incognito of w`(Brave/Comet)。返回 "~~~" 分隔的标题串 / "none" /
-    /// "not_running"。任何错误(权限拒绝/超时)→ 空集。
-    nonisolated static func runAppleScript(appName: String) async -> Set<String> {
+    /// 跑 osascript 查 front window 是否无痕。先试 `mode of w is "incognito"`
+    /// (Chrome/Edge/Vivaldi/Opera),再 fallback `incognito of w`(Brave/Comet)。
+    /// 返回 "incognito" / "normal" / "no_window" / "not_running"。
+    /// 任何错误(权限拒绝/超时)→ false。
+    nonisolated static func runAppleScript(appName: String) async -> Bool {
         let target = applescriptAppName(appName)
         let script = """
         if application "\(target)" is running then
             tell application "\(target)"
-                set result_list to ""
-                repeat with w in every window
-                    set dominated to false
+                if (count of windows) is 0 then return "no_window"
+                set w to front window
+                set is_incog to false
+                try
+                    if mode of w is "incognito" then set is_incog to true
+                end try
+                if not is_incog then
                     try
-                        if mode of w is "incognito" then set dominated to true
+                        if incognito of w then set is_incog to true
                     end try
-                    if not dominated then
-                        try
-                            if incognito of w then set dominated to true
-                        end try
-                    end if
-                    if dominated then
-                        if result_list is "" then
-                            set result_list to name of w
-                        else
-                            set result_list to result_list & "~~~" & name of w
-                        end if
-                    end if
-                end repeat
-                if result_list is "" then return "none"
-                return result_list
+                end if
+                if is_incog then return "incognito"
+                return "normal"
             end tell
         else
             return "not_running"
         end if
         """
-        return await withCheckedContinuation { (cont: CheckedContinuation<Set<String>, Never>) in
+        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             DispatchQueue.global(qos: .utility).async {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -122,15 +116,12 @@ actor IncognitoGate {
                 let outPipe = Pipe()
                 p.standardOutput = outPipe
                 p.standardError = Pipe()
-                do { try p.run() } catch { cont.resume(returning: []); return }
+                do { try p.run() } catch { cont.resume(returning: false); return }
                 let data = outPipe.fileHandleForReading.readDataToEndOfFile()
                 p.waitUntilExit()
                 let out = String(data: data, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if out.isEmpty || out == "none" || out == "not_running" {
-                    cont.resume(returning: []); return
-                }
-                cont.resume(returning: Set(out.components(separatedBy: "~~~")))
+                cont.resume(returning: out == "incognito")
             }
         }
     }
