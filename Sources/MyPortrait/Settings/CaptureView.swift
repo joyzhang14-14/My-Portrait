@@ -375,6 +375,14 @@ struct AudioCaptureSettingsView: View {
                                     icon: "powerplug") {
                             Toggle("", isOn: config.binding(\.capture.audio.transcribeOnACOnly)).labelsHidden().toggleStyle(.switch)
                         }
+                        SettingsDivider()
+                        // 原本误放在 Screen Capture 的 Capture rules 里 —— 实际是
+                        // 麦克风 / 系统音频开关,跟屏幕无关。挪过来。
+                        SettingsRow("Record audio while screen is locked",
+                                    description: "Keep listening even when your Mac is locked.",
+                                    icon: "lock.shield") {
+                            Toggle("", isOn: config.binding(\.privacy.recordAudioWhileLocked)).labelsHidden().toggleStyle(.switch)
+                        }
                     }
                 }
 
