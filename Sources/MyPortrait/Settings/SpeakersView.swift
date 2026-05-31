@@ -144,8 +144,8 @@ struct SpeakersSettingsView: View {
                 )
             }
             .buttonStyle(.bouncyIcon)
-            .disabled(unidentified.isEmpty)
-            .opacity(unidentified.isEmpty ? 0.45 : 1)
+            .disabled(!canOrganize)
+            .opacity(canOrganize ? 1 : 0.45)
         }
     }
 
@@ -163,26 +163,70 @@ struct SpeakersSettingsView: View {
     /// apply each suggested label through the existing `rename` path
     /// (persistence is a no-op today — the speakers table is read-only
     /// from `TimelineDB` — but the names show up in the UI right away).
+    /// "Organize with AI"：① 用 LLM 给匿名簇起名；② 把同名簇(同一个人的重复
+    /// cluster，如碎成 6 个的 Joy)合并成一个,优先保留训练过的 voiceprint。
     private func runOrganize() {
         guard !organizing else { return }
         organizeError = nil
-        let ids = unidentified.map { $0.id }
-        guard !ids.isEmpty else { return }
+        guard canOrganize else { return }
         organizing = true
         Task {
             defer { organizing = false }
             do {
-                let proposals = try await SpeakerOrganizer.run(unidentifiedIds: ids)
-                for p in proposals where !p.label.isEmpty {
-                    if let row = rows.first(where: { $0.id == p.speakerId }) {
-                        rename(row, to: p.label)
+                // ① 匿名簇 → LLM 起名(改 rows[] + 异步写库)。
+                let unnamedIds = unidentified.map { $0.id }
+                if !unnamedIds.isEmpty {
+                    let proposals = try await SpeakerOrganizer.run(unidentifiedIds: unnamedIds)
+                    for p in proposals where !p.label.isEmpty {
+                        if let row = rows.first(where: { $0.id == p.speakerId }) {
+                            rename(row, to: p.label)
+                        }
                     }
+                }
+                // ② 同名簇合并(同名 = 同人,确定性操作,不让 LLM 瞎合不同人)。
+                let plan = mergePlan()
+                if !plan.isEmpty {
+                    await Task.detached(priority: .userInitiated) {
+                        for (keepId, mergeIds) in plan {
+                            for mid in mergeIds { _ = TimelineDB().mergeSpeakers(keep: keepId, merge: mid) }
+                        }
+                    }.value
+                    reload()
                 }
             } catch {
                 organizeError = error.localizedDescription
             }
         }
     }
+
+    /// 同名簇合并计划:`[(keepId, [mergeId...])]`。把 name 相同(忽略大小写/首尾空白)
+    /// 的多个簇并成一个;keep 优先选训练过的 voiceprint,否则选样本最多的。
+    private func mergePlan() -> [(Int64, [Int64])] {
+        let named = rows.filter { !($0.name ?? "").isEmpty }
+        let groups = Dictionary(grouping: named) {
+            ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        }
+        var out: [(Int64, [Int64])] = []
+        for (_, group) in groups where group.count > 1 {
+            let keep = group.first(where: { $0.trainedAt != nil })
+                ?? group.max(by: { $0.sampleCount < $1.sampleCount })
+                ?? group[0]
+            guard let keepId = Int64(keep.id) else { continue }
+            let mergeIds = group.compactMap { $0.id == keep.id ? nil : Int64($0.id) }
+            if !mergeIds.isEmpty { out.append((keepId, mergeIds)) }
+        }
+        return out
+    }
+
+    /// 有同名的多个簇时为 true(忽略大小写/首尾空白)。
+    private var hasDuplicateNames: Bool {
+        let names = rows.filter { !($0.name ?? "").isEmpty }
+            .map { ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() }
+        return names.count != Set(names).count
+    }
+
+    /// Organize 按钮可用:有匿名簇要起名,或有同名簇要合并。
+    private var canOrganize: Bool { !unidentified.isEmpty || hasDuplicateNames }
     private func rename(_ r: SpeakerRow, to newName: String) {
         let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
