@@ -46,6 +46,8 @@ final class Services {
     let stallDriver: StallDetectorDriver
     /// 音乐播放监测 —— 开启 pauseOnMusicApp 后,音乐类 app 出声时暂停音频采集。
     let musicMonitor: MusicPlaybackMonitor
+    /// 锁屏监听 —— Record audio while locked 关时,锁屏暂停音频采集。
+    let screenLockMonitor: ScreenLockMonitor
     /// 打字采集：把用户在输入框里最终打出的文字写库（学习写作风格）。
     let typingStore: TypingEventStore
     let typingObserver: TypingObserver
@@ -110,6 +112,7 @@ final class Services {
         self.permissions = permissions
         self.stallDriver = StallDetectorDriver(db: dbImpl, permissions: permissions)
         self.musicMonitor = MusicPlaybackMonitor()
+        self.screenLockMonitor = ScreenLockMonitor()
 
         // 打字采集。共用同一个 DatabasePool（WAL 多 reader 安全）。
         // 启停由 startManagedLifecycle 按 recording.typingCaptureEnabled 驱动。
@@ -167,6 +170,9 @@ final class Services {
 
         // 音乐播放监测（每 5s 轮询；pauseOnMusicApp 关闭时空转）。
         musicMonitor.start()
+
+        // 锁屏监听（事件驱动）。Record audio while locked 关时锁屏暂停音频。
+        screenLockMonitor.start()
 
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
@@ -310,16 +316,19 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 音频采集订阅。effective = enabled && microphone granted && !music。
+        // 音频采集订阅。effective = enabled && mic granted && !music && !锁屏暂停。
         // music 在播 → 整体暂停采集（pauseOnMusicApp；关闭时 musicDetected 恒 false）。
-        Publishers.CombineLatest3(
+        // 锁屏 且 recordAudioWhileLocked 关 → 暂停（解锁后 sink 重评估自动恢复）。
+        Publishers.CombineLatest4(
             settings.$audioCaptureEnabled,
             permissions.$microphone,
-            musicMonitor.$musicDetected
+            musicMonitor.$musicDetected,
+            screenLockMonitor.$screenLocked
         )
-            .map { [logger] enabled, perm, music in
-                let effective = !music && perm.isGranted && enabled
-                logger.notice("audio sink: enabled=\(enabled, privacy: .public) micPerm=\(perm.isGranted, privacy: .public) music=\(music, privacy: .public) → effective=\(effective, privacy: .public)")
+            .map { [logger] enabled, perm, music, locked in
+                let lockPause = locked && !ConfigStore.shared.privacy.recordAudioWhileLocked
+                let effective = !music && !lockPause && perm.isGranted && enabled
+                logger.notice("audio sink: enabled=\(enabled, privacy: .public) micPerm=\(perm.isGranted, privacy: .public) music=\(music, privacy: .public) lockPause=\(lockPause, privacy: .public) → effective=\(effective, privacy: .public)")
                 return effective
             }
             .removeDuplicates()
@@ -329,13 +338,15 @@ final class Services {
             .store(in: &settingsCancellables)
 
         // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
-        Publishers.CombineLatest3(
+        Publishers.CombineLatest4(
             settings.$systemAudioCaptureEnabled,
             permissions.$microphone,
-            musicMonitor.$musicDetected
+            musicMonitor.$musicDetected,
+            screenLockMonitor.$screenLocked
         )
-            .map { enabled, perm, music in
+            .map { enabled, perm, music, locked in
                 if music { return false }
+                if locked && !ConfigStore.shared.privacy.recordAudioWhileLocked { return false }
                 guard perm.isGranted else { return false }
                 return enabled
             }
@@ -503,6 +514,7 @@ final class Services {
     /// AppDelegate 在 `applicationWillTerminate` 调，停所有子系统。
     func stopManagedLifecycle() async {
         powerProfileTask?.cancel()
+        screenLockMonitor.stop()
         await coordinator.stop()
         await audio.stop()
         await systemAudio.stop()
