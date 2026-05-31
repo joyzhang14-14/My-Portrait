@@ -795,27 +795,16 @@ final class WritingCaptureWorker {
         concurrency: Int,
         makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent
     ) async -> [WritingCaptureRawSession] {
-        // 需要判的:有 typing_events 的 session(无论 Step 0 有没有 canvas 标记)。
-        // —— Pass 2 用三源做 session 级判断:真内容在 AX(ax,按消息切)还是 OCR
-        // (ocr,整 session 走重建)。这取代 Step 0 死检测的路由作用。
+        // Pass 2 = 确定性路由(根据 AX,不用 LLM、不硬编码 app):
+        //   AX 有料(session 有 typing_events)→ ax 路 → 走确定性构造
+        //   AX 空(真 canvas,如 Google Docs:AX 失灵,内容只在屏幕)→ 保留 Step 0
+        //     的 route(默认 ocr)→ 走 CanvasAgent OCR 重建。
+        // 之前用 LLM 判,把有干净 AX prompt 的 Claude Desktop 误判成 ocr →
+        // ensureOcrPrepped 清掉 typingEvents → 用户 prompt 直接消失。chat/Electron
+        // app 的输入在 AX,绝不该为了 OCR 丢掉它。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
-            let s = sessions[idx]
-            let agent = await makePass2()
-            let result = (try? await agent.run(session: s))
-                ?? WritingCapturePass2Agent.Result(
-                    primarySource: "ax",
-                    units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
-            if result.primarySource == "ocr" {
-                // 真内容在 OCR:整 session 走 CanvasAgent。确保带 chromeTokens +
-                // 粗快照(Step 0 若没 canvas-prep 过,这里补)。
-                let ocrSession = Self.ensureOcrPrepped(s)
-                return (idx, [ocrSession])
-            }
-            // primary=ax:Pass 2 只做路由 —— 整 session 原样交给 Pass 3(route=ax,
-            // chromeTokens 清空 → 走 Pass3Agent)。**不切单元、不丢 event**:切分/
-            // 过滤交给 Pass 3 + 算法层闸门(之前在这里丢 event 把 Discord 短消息丢了)。
-            return (idx, [Self.ensureAxRoute(s)])
+            return (idx, [Self.ensureAxRoute(sessions[idx])])
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
