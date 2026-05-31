@@ -176,16 +176,7 @@ struct AudioCaptureSettingsView: View {
             }   // 关闭 if audioRec —— Mic / System audio 仅采集开启时显示
 
             // 转译配置常驻显示 —— 关着采集也能预先配好引擎/模型/语言/批量。
-                SettingsCard(
-                    title: "Transcription",
-                    footnote: engine == AudioEngine.deepgram.rawValue
-                        ? "Deepgram sends audio to the cloud. Audio leaves this Mac."
-                        : (engine == AudioEngine.whisper.rawValue
-                            ? "Whisper runs entirely on-device. Audio stays on this Mac."
-                            : (engine == AudioEngine.qwen.rawValue
-                                ? "Qwen3-ASR runs entirely on-device (MLX). Audio stays on this Mac."
-                                : "Pick an engine to enable speech-to-text."))
-                ) {
+                SettingsCard(title: "Transcription") {
                     // 转译总开关 —— 关掉就把 engine 设成 disabled,下面引擎/模型/语言全隐藏。
                     SettingsRow("Transcription",
                                 description: "Turn speech-to-text on or off.",
