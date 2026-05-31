@@ -2,7 +2,7 @@
 ///
 ///   1. **App 黑名单**（按 bundle id）：密码管理器 / 机密类 app 整体不订阅 AX。
 ///      hardcode 一组默认值 ∪ 用户在 config 里加的
-///      `privacy.typing_blacklist_bundle_ids`。
+///      `privacy.typing_blacklist_entries`。
 ///   2. **secure field 检测**：focused 元素 role == `AXSecureTextField`
 ///      （密码输入框）—— 不快照、不 diff。
 ///

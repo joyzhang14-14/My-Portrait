@@ -214,12 +214,11 @@ final class ConfigStore {
             let raw = try String(contentsOf: path, encoding: .utf8)
             // 一次性 key 迁移。下次保存即写新 key,此后这些 replace 是 no-op。
             //   [recording.*] → [capture.*]
-            //   pipe_alerts / muted_pipes → cron_job_alerts / muted_cron_jobs
+            //   pipe_alerts → cron_job_alerts
             let migrated = raw
                 .replacingOccurrences(of: "[recording]",  with: "[capture]")
                 .replacingOccurrences(of: "[recording.", with: "[capture.")
                 .replacingOccurrences(of: "pipe_alerts",  with: "cron_job_alerts")
-                .replacingOccurrences(of: "muted_pipes",  with: "muted_cron_jobs")
             let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: migrated)
             current = applySchemaMigration(decoded)
             loadError = nil
@@ -323,7 +322,6 @@ final class ConfigStore {
         c.notifications.appUpdates       = bool(ud, "Settings.notifyAppUpdates",      default: c.notifications.appUpdates)
         c.notifications.cronJobAlerts       = bool(ud, "Settings.notifyPipeAlerts",      default: c.notifications.cronJobAlerts)
         c.notifications.captureStalls    = bool(ud, "Settings.notifyCaptureStalls",   default: c.notifications.captureStalls)
-        c.notifications.mutedCronJobs       = stringArray(ud, "Settings.mutedCronJobs")
 
         // — Usage
         if let v = ud.string(forKey: "Settings.usageRange") { c.usage.range = v }

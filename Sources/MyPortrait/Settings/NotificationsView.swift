@@ -40,8 +40,7 @@ struct NotificationsSettingsView: View {
                 title: "Muted cronJobs",
                 footnote: "Cron jobs added here won't trigger any notifications, no matter their configuration."
             ) {
-                // 数据源切到 CronJobStore.muted。改名不丢状态、跟 ConfigStore
-                // 的老 mutedCronJobs(byName)名单完全脱钩。
+                // 数据源是 CronJobStore 的 per-CronJob.muted 字段。
                 let muted = cronStore.cronJobs.filter { $0.muted }
                 if muted.isEmpty {
                     Text("No muted cronJobs.")
