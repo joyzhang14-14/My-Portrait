@@ -546,7 +546,6 @@ struct AudioConfig: Codable, Equatable {
     var languages:               [String] = []
     /// Qwen 引擎的语言选择，跟 whisper 的 `languages` 分开存（两者支持的语言集不同）。
     var qwenLanguages:           [String] = []
-    var microphonesSelected:     [String] = []
     var captureSystemAudio:      Bool     = true
     var useCoreAudioCapture:     Bool     = true
     var speakerIdEnabled:        Bool     = true
@@ -557,7 +556,6 @@ struct AudioConfig: Codable, Equatable {
     var batchTranscription:      Bool     = true
     /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
     var transcribeOnACOnly:      Bool     = true
-    var autoSelectAudioDevices:  Bool     = true
     var customVocabulary:        [String] = []
     /// engine = "custom" 时用：OpenAI 兼容转录服务端点 / 模型 / API key 引用。
     var customEndpoint:          String   = ""
@@ -576,7 +574,6 @@ struct AudioConfig: Codable, Equatable {
         case customApiKeyRef         = "custom_api_key_ref"
         case languages
         case qwenLanguages           = "qwen_languages"
-        case microphonesSelected     = "microphones_selected"
         case captureSystemAudio      = "capture_system_audio"
         case useCoreAudioCapture     = "use_core_audio_capture"
         case speakerIdEnabled        = "speaker_id_enabled"
@@ -584,7 +581,6 @@ struct AudioConfig: Codable, Equatable {
         case pauseOnMusicApp         = "pause_on_music_app"
         case batchTranscription      = "batch_transcription"
         case transcribeOnACOnly      = "transcribe_on_ac_only"
-        case autoSelectAudioDevices  = "auto_select_audio_devices"
         case customVocabulary        = "custom_vocabulary"
     }
     init(from decoder: Decoder) throws {
@@ -601,7 +597,6 @@ struct AudioConfig: Codable, Equatable {
         customApiKeyRef        = c.dflt(String.self,   .customApiKeyRef, customApiKeyRef)
         languages              = c.dflt([String].self, .languages, languages)
         qwenLanguages          = c.dflt([String].self, .qwenLanguages, qwenLanguages)
-        microphonesSelected    = c.dflt([String].self, .microphonesSelected, microphonesSelected)
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
         useCoreAudioCapture    = c.dflt(Bool.self,     .useCoreAudioCapture, useCoreAudioCapture)
         speakerIdEnabled       = c.dflt(Bool.self,     .speakerIdEnabled, speakerIdEnabled)
@@ -609,7 +604,6 @@ struct AudioConfig: Codable, Equatable {
         pauseOnMusicApp        = c.dflt(Bool.self,     .pauseOnMusicApp, pauseOnMusicApp)
         batchTranscription     = c.dflt(Bool.self,     .batchTranscription, batchTranscription)
         transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
-        autoSelectAudioDevices = c.dflt(Bool.self,     .autoSelectAudioDevices, autoSelectAudioDevices)
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
     }
 }

@@ -306,13 +306,11 @@ final class ConfigStore {
         if let v = ud.string(forKey: "Settings.userName")              { c.capture.audio.userName = v }
         if let v = ud.string(forKey: "Settings.audioEngine")           { c.capture.audio.engine = v }
         c.capture.audio.languages              = stringArray(ud, "Settings.audioLanguages")
-        c.capture.audio.microphonesSelected    = stringArray(ud, "Settings.microphonesSelected")
         c.capture.audio.captureSystemAudio     = bool(ud, "Settings.captureSystemAudio",     default: c.capture.audio.captureSystemAudio)
         c.capture.audio.useCoreAudioCapture    = bool(ud, "Settings.useCoreAudioCapture",    default: c.capture.audio.useCoreAudioCapture)
         c.capture.audio.speakerIdEnabled       = bool(ud, "Settings.speakerIdEnabled",       default: c.capture.audio.speakerIdEnabled)
         c.capture.audio.filterMusic            = bool(ud, "Settings.filterMusic",            default: c.capture.audio.filterMusic)
         c.capture.audio.batchTranscription     = bool(ud, "Settings.batchTranscription",     default: c.capture.audio.batchTranscription)
-        c.capture.audio.autoSelectAudioDevices = bool(ud, "Settings.autoSelectAudioDevices", default: c.capture.audio.autoSelectAudioDevices)
         c.capture.audio.customVocabulary       = stringArray(ud, "Settings.customVocabulary")
 
         // — Recording / screen
