@@ -821,10 +821,20 @@ final class WritingCaptureWorker {
                 }
             }
         }
-        // 重组:被判过的 session 替换成它的单元;其余原样。保持原顺序。
+        // 某 app 只要本次出现过 typing_events,就说明它的 AX 是好的(chat/Electron
+        // 如 Discord/Claude Desktop/微信)。它那些"没有 typing_events 的 session" =
+        // 用户没在里面打字,屏幕上是 AI 回复 / 收到的消息 / 在读的内容 → 丢,绝不
+        // OCR(否则 CanvasAgent 把 AI 回复拍下来,且 canvas 大窗口骗过击键闸门)。
+        // 真 canvas(Google Docs:AX 从不工作,从头到尾无 typing_events)才 OCR。
+        let axWorkingApps = Set(sessions.filter { !$0.typingEvents.isEmpty }.map { $0.app })
         var out: [WritingCaptureRawSession] = []
         for (i, s) in sessions.enumerated() {
-            if let r = refinedByIdx[i] { out.append(contentsOf: r) } else { out.append(s) }
+            if let r = refinedByIdx[i] {
+                out.append(contentsOf: r)              // ax 路单元
+            } else if !axWorkingApps.contains(s.app) {
+                out.append(s)                          // 真 canvas → OCR 重建
+            }
+            // else: AX 有效 app 的无输入 session(纯阅读/AI回复)→ 丢
         }
         return out
     }
