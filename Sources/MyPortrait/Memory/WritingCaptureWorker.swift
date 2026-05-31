@@ -228,11 +228,11 @@ final class WritingCaptureWorker {
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 
-        // 3.5 Pass 2 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
-        let refinedSessions = await Self.applyPass2(
-            step0.rawSessions, concurrency: 5,
-            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
-        workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
+        // Pass 2 已杀:不再用 LLM 做二选一路由 / 单元切分 / autofill 丢弃。
+        // 三源(keystroke / AX / OCR)随 raw session 直接进 Pass 3,由 Pass 3
+        // 自己融合(先 keystroke 猜 → AX 有料看 AX → AX 空走 OCR canvas)。
+        // 路由沿用 Step 0 的确定性 route(ocrDominant 启发式)。
+        let refinedSessions = step0.rawSessions
 
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
         let groups = Self.groupRawSessionsByApp(refinedSessions)
@@ -568,13 +568,9 @@ final class WritingCaptureWorker {
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 
-        // 3.5 Pass 2 —— 切割 + AX 真伪(非 canvas session)。判断活,轻量模型。
-        ui.stage = "Pass 2"
-        ui.statusMessage = "Pass 2: judging \(step0.rawSessions.count) sessions (cut + AX validity)…"
-        let refinedSessions = await Self.applyPass2(
-            step0.rawSessions, concurrency: 5,
-            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
-        workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
+        // Pass 2 已杀:不再 LLM 二选一路由 / 单元切分 / autofill 丢弃。三源随
+        // raw session 直接进 Pass 3,由 Pass 3 自己融合;路由沿用 Step 0 确定性 route。
+        let refinedSessions = step0.rawSessions
 
         // 4. group + 5. Pass 3 并发
         let groups = Self.groupRawSessionsByApp(refinedSessions)
