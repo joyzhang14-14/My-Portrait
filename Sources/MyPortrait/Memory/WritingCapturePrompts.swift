@@ -462,8 +462,10 @@ enum WritingCapturePrompts {
 
     We want to KEEP the user's natural-language writing: messages, chat replies,
     notes, essays, posts, questions, journal-like prose — anything the user composed
-    in words. Be GENEROUS: short messages count, casual replies count, mixed
-    Chinese/English counts. When a record reads as something a person wrote, KEEP it.
+    in words. Be GENEROUS: short messages count, casual replies count, text that
+    naturally mixes the user's languages counts. When a record reads as something a
+    person wrote, KEEP it. (Judge "real language" by whether it reads as coherent
+    human writing in ANY language — never assume one specific language.)
 
     INPUT
     - records: [{ record_id, text, kind, source, app, url, context_summary }]
