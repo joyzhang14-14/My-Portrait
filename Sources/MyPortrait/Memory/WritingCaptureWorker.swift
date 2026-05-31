@@ -799,12 +799,23 @@ final class WritingCaptureWorker {
         // app 的输入在 AX,绝不该为了 OCR 丢掉它。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
-            // 路由 + 切分都确定性(LLM 实测两者都不可靠:路由把 AX 好用的 chat 误判
-            // ocr → 抓 AI 回复;切分把 38 条独立消息合并/漏成 1 条)。有 typing_events
-            // = AX 有料 → ax 路;切分按 typing_event(一条 = 一次 send/clear = 一条消息,
-            // 天生精准)在 buildAxRecordsDeterministic 里做。文字润色(dian→店)留给
-            // Pass 3 的 LLM(混合,不许增删 record)。
-            return (idx, [Self.ensureAxRoute(sessions[idx])])
+            // 路由确定性(有 typing_events=AX有料→ax;LLM 路由不可靠不用)。
+            // 切分交给 LLM(权衡 return / 时间判消息边界)——这是 Pass 2 的职责。
+            // **不丢 event**:LLM 没分配到的各自单独成单元。record 集仍由算法定死
+            // (用 LLM 的 units 建 unit-session,Pass 3 每个 unit 一条 record,不靠
+            // LLM 决定增删)。
+            let s = sessions[idx]
+            let agent = await makePass2()
+            let result = (try? await agent.run(session: s))
+                ?? WritingCapturePass2Agent.Result(
+                    primarySource: "ax",
+                    units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
+            let assigned = Set(result.units.flatMap { $0 })
+            var unitIds = result.units.filter { !$0.isEmpty }
+            unitIds.append(contentsOf: s.typingEvents.compactMap { $0.id }
+                .filter { !assigned.contains($0) }.map { [$0] })
+            let rebuilt = unitIds.compactMap { Self.rebuildUnitSession(from: s, eventIds: $0) }
+            return (idx, rebuilt.isEmpty ? [Self.ensureAxRoute(s)] : rebuilt)
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
@@ -940,32 +951,35 @@ final class WritingCaptureWorker {
         case success(WritingCapturePass3Agent.Output)
         case failure(Error)
     }
-    /// AX 路确定性记录构造(不用 LLM)。每个 typing_event = 一条 record,
-    /// text = typing_event.text(干净合成结果)。edit_log 留空,由 6a 从
-    /// typing_events 重建;text 真伪/读vs写 由击键覆盖闸门把关。
+    /// AX 路确定性记录构造:**一个 unit-session(Pass 2 LLM 切的一条消息)= 一条
+    /// record**,反映 LLM 的 return/time 切分。text = 该 unit 各 typing_event.text 按
+    /// 时间拼(单 event 时即它本身)。record 集由算法定死,不靠 LLM 增删。
     nonisolated static func buildAxRecordsDeterministic(
         group g: WritingCaptureGroup,
         contextTimeline: [WritingCaptureContextSegment]
     ) -> WritingCapturePass3Agent.Output {
         var records: [WritingCaptureRecord] = []
         for s in g.sessions {
-            for ev in s.typingEvents {
-                let text = ev.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty, let id = ev.id else { continue }
-                let ctx = contextTimeline.first {
-                    $0.app == g.app && $0.startTs <= ev.endedAt && $0.endTs >= ev.startedAt
-                }?.summary
-                records.append(WritingCaptureRecord(
-                    text: text, editLog: [],
-                    kind: text.count >= 140 ? "long_form" : "short_form",
-                    source: "ax_cleaned", confidence: 1.0, contextSummary: ctx,
-                    app: g.app, url: g.url, startTs: ev.startedAt, endTs: ev.endedAt,
-                    referenceTypingEventIds: [id], referenceFrameIds: [],
-                    referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
-            }
+            let evs = s.typingEvents.filter { $0.id != nil }
+                .sorted { $0.startedAt < $1.startedAt }
+            guard !evs.isEmpty else { continue }
+            let text = evs.map { $0.text }.joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
+            let ctx = contextTimeline.first {
+                $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
+            }?.summary
+            records.append(WritingCaptureRecord(
+                text: text, editLog: [],
+                kind: text.count >= 140 ? "long_form" : "short_form",
+                source: "ax_cleaned", confidence: 1.0, contextSummary: ctx,
+                app: g.app, url: g.url, startTs: startTs, endTs: endTs,
+                referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
+                referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
         }
         return WritingCapturePass3Agent.Output(
-            prompt: "(deterministic ax — no LLM)", rawResponse: "(deterministic)",
+            prompt: "(deterministic ax record set)", rawResponse: "(deterministic)",
             records: records, discarded: [])
     }
 
@@ -976,12 +990,25 @@ final class WritingCaptureWorker {
         deterministic: [WritingCaptureRecord], llm: [WritingCaptureRecord]?
     ) -> [WritingCaptureRecord] {
         guard let llm, !llm.isEmpty else { return deterministic }
+        func nonEmpty(_ r: WritingCaptureRecord) -> Bool {
+            !r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         return deterministic.map { det in
-            guard let id = det.referenceTypingEventIds.first,
-                  let m = llm.first(where: { $0.referenceTypingEventIds.contains(id) }),
-                  !m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else { return det }
-            return Self.withTextAndEditLog(det, m.text, det.editLog)
+            // 1) 按 typing_event id 精确匹配
+            if let id = det.referenceTypingEventIds.first,
+               let m = llm.first(where: { $0.referenceTypingEventIds.contains(id) }), nonEmpty(m) {
+                return Self.withTextAndEditLog(det, m.text, det.editLog)
+            }
+            // 2) 兜底:LLM 重切分导致 id 对不上 → 按文字高度重叠匹配(共同子串
+            //    ≥ 原文一半)。让 "这是一家什么dian" 对上清洗后的 "这是一家什么店"。
+            let dt = det.text
+            let need = max(4, dt.count / 2)
+            if let m = llm.first(where: {
+                nonEmpty($0) && Self.hasCommonSubstring($0.text, dt, minLen: need)
+            }) {
+                return Self.withTextAndEditLog(det, m.text, det.editLog)
+            }
+            return det   // 找不到清洗版 → 保留确定性原文
         }
     }
 
