@@ -24,6 +24,9 @@ struct SpeechStyleStore: Sendable {
     /// 读 writing_records(approved)里 speech_style_processed_at IS NULL 的行,
     /// 按 start_ts 升序,上限 `limit`。LLM 喂这一批,Approve / auto-commit 后
     /// 调 `markRecordsProcessed` 标完。
+    /// **过滤 edit_log 空的记录** —— CLI import / paste 路径写入的
+    /// records 没 keystroke 时序,会让 SpeechStyle LLM 错下"用户一次成稿"的
+    /// 结论。空 edit_log 一律跳过(它们已经在 unprocessedCount 也跳了)。
     func unprocessedRecords(limit: Int) throws -> [SpeechStyleRecordInput] {
         try dbPool.read { db in
             let rows = try Row.fetchAll(
@@ -32,6 +35,9 @@ struct SpeechStyleStore: Sendable {
                     SELECT id, start_ts, app, url, text, edit_log, kind, context_summary
                     FROM writing_records
                     WHERE speech_style_processed_at IS NULL
+                      AND edit_log IS NOT NULL
+                      AND edit_log != ''
+                      AND edit_log != '[]'
                     ORDER BY start_ts ASC
                     LIMIT :lim
                     """,
@@ -136,11 +142,18 @@ struct SpeechStyleStore: Sendable {
     }
 
     /// 还有多少未处理 record(UI Run 按钮文案 + 灰按钮判断)。
+    /// **过滤同 unprocessedRecords** —— 空 edit_log 的 records 不算"待处理"。
     func unprocessedCount() throws -> Int {
         try dbPool.read { db in
             try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM writing_records WHERE speech_style_processed_at IS NULL"
+                sql: """
+                    SELECT COUNT(*) FROM writing_records
+                    WHERE speech_style_processed_at IS NULL
+                      AND edit_log IS NOT NULL
+                      AND edit_log != ''
+                      AND edit_log != '[]'
+                    """
             ) ?? 0
         }
     }
