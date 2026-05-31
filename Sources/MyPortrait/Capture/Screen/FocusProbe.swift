@@ -147,6 +147,7 @@ actor FocusProbe {
         var windowTitle: String?
         var browserUrl: String?
         var axText: String?
+        var axIdentifier: String?
 
         // AX 查询。若无权限就只返回 app 名。
         if AXIsProcessTrusted() {
@@ -154,11 +155,12 @@ actor FocusProbe {
             // AXUIElementCopyAttributeValue 会 _dispatch_assert_queue_fail 崩。
             // refresh 由 app 切换触发(不频繁)，遍历有 depth/char/超时三重
             // 上限，主线程上的停顿可忽略。
-            let result: (title: String?, url: String?, axText: String?) =
+            let result: (title: String?, url: String?, axText: String?, axId: String?) =
                 await MainActor.run { self.queryAX(pid: pid, bundleId: bundleId) }
             windowTitle = result.title
             browserUrl = result.url
             axText = result.axText
+            axIdentifier = result.axId
         } else if !axPermissionWarned {
             logger.warning("Accessibility permission not granted — window title / browser URL / AX text will be nil. Grant in System Settings → Privacy & Security → Accessibility.")
             axPermissionWarned = true
@@ -170,6 +172,7 @@ actor FocusProbe {
             windowTitle: windowTitle,
             browserUrl: browserUrl,
             axText: axText,
+            axIdentifier: axIdentifier,
             isFocused: true
         )
     }
@@ -177,7 +180,7 @@ actor FocusProbe {
     /// 调 AX 抓窗口标题 + URL（仅浏览器）+ AX tree 文本子树。
     /// AX API 是跨进程同步 XPC，可能 10–50ms（AX text 走到 100ms+ 时降级让出）。
     /// 仅在 refresh() 内调用，不在采集热路径上。
-    nonisolated private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?) {
+    nonisolated private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?, axId: String?) {
         let axApp = AXUIElementCreateApplication(pid)
         // 卡死时单次调用最多等 1.5s —— 共用串行队列,一个慢调用别拖垮全局。
         AXUIElementSetMessagingTimeout(axApp, 1.5)
@@ -193,7 +196,7 @@ actor FocusProbe {
               let focusedWindowRef,
               CFGetTypeID(focusedWindowRef) == AXUIElementGetTypeID()
         else {
-            return (nil, nil, nil)
+            return (nil, nil, nil, nil)
         }
         // swiftlint:disable:next force_cast
         let focusedWindow = focusedWindowRef as! AXUIElement
@@ -203,6 +206,14 @@ actor FocusProbe {
         var titleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(focusedWindow, kAXTitleAttribute as CFString, &titleRef) == .success {
             title = titleRef as? String
+        }
+
+        // 2b. AXIdentifier —— IncognitoGate Tier 1 用(Arc 等无痕窗口含
+        //     "incognito"/"private")。多数 app/窗口为 nil,读不到不影响。
+        var axId: String?
+        var axIdRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedWindow, kAXIdentifierAttribute as CFString, &axIdRef) == .success {
+            axId = axIdRef as? String
         }
 
         // 3. URL（仅浏览器）。
@@ -242,7 +253,7 @@ actor FocusProbe {
             }
         }
 
-        return (title, url, axText)
+        return (title, url, axText, axId)
     }
 
     /// 浏览器 URL 抽取。fallback 链:
@@ -386,17 +397,22 @@ public struct FocusInfo: Equatable, Sendable {
     /// 当前焦点窗口 AX tree 文本子树（去重 + 拼接）。
     /// nil = 无 AX 权限 / 是终端 app / 抓不到内容。OCRService 用它走快路。
     public let axText: String?
+    /// 焦点窗口的 AXIdentifier。Arc 等浏览器的无痕窗口这里含
+    /// "incognito"/"private" —— IncognitoGate Tier 1 用。其它情况多为 nil。
+    public let axIdentifier: String?
     public let isFocused: Bool
 
     public init(
         appName: String, bundleId: String?, windowTitle: String?,
-        browserUrl: String?, axText: String?, isFocused: Bool
+        browserUrl: String?, axText: String?, axIdentifier: String? = nil,
+        isFocused: Bool
     ) {
         self.appName = appName
         self.bundleId = bundleId
         self.windowTitle = windowTitle
         self.browserUrl = browserUrl
         self.axText = axText
+        self.axIdentifier = axIdentifier
         self.isFocused = isFocused
     }
 }

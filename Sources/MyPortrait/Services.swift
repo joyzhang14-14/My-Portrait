@@ -445,6 +445,7 @@ final class Services {
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
         coordinator.setIgnoredWindowTitles(p.ignoredWindowTitles)
         coordinator.setMaskingEnabled(p.maskIgnoredApps)
+        Task { await coordinator.setIgnoreIncognito(p.ignoreIncognito) }
     }
 
     /// 监听 ConfigStore.privacy 的 ignore 字段（vim 改 TOML / UI 编辑都走它），
@@ -456,6 +457,7 @@ final class Services {
             _ = store.privacy.ignoredUrls
             _ = store.privacy.ignoredWindowTitles
             _ = store.privacy.maskIgnoredApps
+            _ = store.privacy.ignoreIncognito
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
