@@ -259,6 +259,7 @@ final class WritingCaptureWorker {
         // 6. 收集 Pass 3 输出(按 group 索引保留分组),给 Pass 4 用
         var recordsByGroupIdx: [[WritingCaptureRecord]] = []
         var failedGroups = 0
+        var firstError: String?
         var rawResponses: [String] = []
         var firstPrompt: String?
         for r in pass3Results {
@@ -270,7 +271,9 @@ final class WritingCaptureWorker {
             case .failure(let err):
                 recordsByGroupIdx.append([])
                 failedGroups += 1
-                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public)")
+                let desc = (err as? LocalizedError)?.errorDescription ?? String(describing: err)
+                if firstError == nil { firstError = desc }
+                workerLog.warning("pass3 group failed: \(desc, privacy: .public)")
             }
         }
         let pass3Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
@@ -282,7 +285,7 @@ final class WritingCaptureWorker {
         // catch 标 'failed'('failed' 会被 unprocessedDays 重新捞起,raw 不删,下次重跑)。
         // Pass 4 / Pass 2 失败是 fail-open(保留记录),不在此列。
         if failedGroups > 0 {
-            throw BacklogError.pass3GroupsFailed(count: failedGroups)
+            throw BacklogError.pass3GroupsFailed(count: failedGroups, sample: firstError ?? "unknown")
         }
 
         // 6a. edit_log 重建 + authoring 过滤(确定性):ax edit_log 从 typing_events
@@ -380,7 +383,7 @@ final class WritingCaptureWorker {
     enum BacklogError: LocalizedError {
         case pendingReviewExists(records: Int)
         case alreadyProcessing
-        case pass3GroupsFailed(count: Int)
+        case pass3GroupsFailed(count: Int, sample: String)
         var errorDescription: String? {
             switch self {
             case .pendingReviewExists(let n):
@@ -388,8 +391,8 @@ final class WritingCaptureWorker {
                        "Approve or reject them first before running again."
             case .alreadyProcessing:
                 return "Backlog run already in progress. Wait for it to finish."
-            case .pass3GroupsFailed(let n):
-                return "\(n) Pass 3 group(s) failed (LLM error/timeout). " +
+            case .pass3GroupsFailed(let n, let sample):
+                return "\(n) Pass 3 group(s) failed: \(sample). " +
                        "Run aborted so no data window is skipped — try again."
             }
         }
@@ -597,6 +600,7 @@ final class WritingCaptureWorker {
         // 6. 收集 Pass 3 输出(按 group 索引保留)
         var recordsByGroupIdx: [[WritingCaptureRecord]] = []
         var failedGroups = 0
+        var firstError: String?
         var rawResponses: [String] = []
         var firstPrompt: String?
         for r in pass3Results {
@@ -608,7 +612,9 @@ final class WritingCaptureWorker {
             case .failure(let err):
                 recordsByGroupIdx.append([])
                 failedGroups += 1
-                workerLog.warning("pass3 group failed: \(String(describing: err), privacy: .public)")
+                let desc = (err as? LocalizedError)?.errorDescription ?? String(describing: err)
+                if firstError == nil { firstError = desc }
+                workerLog.warning("pass3 group failed: \(desc, privacy: .public)")
             }
         }
         let pass3Total = recordsByGroupIdx.reduce(0) { $0 + $1.count }
@@ -619,7 +625,7 @@ final class WritingCaptureWorker {
         // 永不重跑 = 永久丢。故失败即整次 abort:catch 标 'failed'、不进 pending_review、
         // cursor 不动,下次同范围重跑(raw 不删)。Pass 4 / Pass 2 失败 fail-open,不在此列。
         if failedGroups > 0 {
-            throw BacklogError.pass3GroupsFailed(count: failedGroups)
+            throw BacklogError.pass3GroupsFailed(count: failedGroups, sample: firstError ?? "unknown")
         }
 
         // 6a. edit_log 重建 + authoring 过滤(确定性)
@@ -917,9 +923,9 @@ final class WritingCaptureWorker {
             var lastErr: Error = Pass3GroupError.missing
             for attempt in 0..<3 {
                 do { return (idx, .success(try await runOnce(g))) }
-                catch is BudgetExhaustedError {
-                    // 预算耗尽重试无意义,直接失败
-                    return (idx, .failure(Pass3GroupError.missing))
+                catch let e as BudgetExhaustedError {
+                    // 预算耗尽重试无意义,直接失败(保留真实错误供 UI 展示)
+                    return (idx, .failure(e))
                 }
                 catch {
                     lastErr = error
