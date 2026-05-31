@@ -35,6 +35,10 @@ final class Services {
     /// WhisperKit 模型 wrapper —— 启动时 prefetch + transcriber 持引用复用。
     let whisper: WhisperKitWrapper
     let powerWatcher: PowerWatcher
+    /// 订阅 powerWatcher.states 重算屏幕采集功耗档位的常驻 task。
+    private var powerProfileTask: Task<Void, Never>?
+    /// 上一次应用的 profile —— 没变就不重复推给 coordinator,省无谓的 actor 调用。
+    private var lastPowerProfile: PowerProfile?
     let retentionWorker: RetentionWorker
     let permissions: PermissionMonitor
     /// Stall 检测后台 driver(30s 一次 evaluate)。startManagedLifecycle 启,
@@ -347,6 +351,13 @@ final class Services {
         pushIgnoreRules()
         observeIgnoreRules()
 
+        // 屏幕采集功耗档位(Settings → Screen Capture → Power mode)。三个触发源:
+        //   ① powerWatcher.states:插拔电源 / 电量变化(IOKit 事件)
+        //   ② NSProcessInfoPowerStateDidChange:系统低电量模式开关
+        //   ③ ConfigStore.capture.system.powerMode:用户在 UI 改档位
+        // 任一变化都重算 profile,变了才推给 coordinator。
+        startPowerProfileSync()
+
         // 打字采集。escape hatch：MYPORTRAIT_NO_TYPING=1 完全不启。
         // 否则按 ConfigStore.capture.typingCaptureEnabled 动态启停 ——
         // TypingObserver 自身还有 AX / Input Monitoring 权限门禁，没授权会自己 idle。
@@ -443,8 +454,55 @@ final class Services {
         }
     }
 
+    // MARK: - 功耗档位
+
+    /// 起 powerWatcher.states 订阅 + 低电量通知 + powerMode 设置监听,
+    /// 任一信号触发就重算并应用 profile。
+    private func startPowerProfileSync() {
+        // ① 电源/电量变化(PowerWatcher 启动时也会立刻 yield 一次 baseline)。
+        powerProfileTask = Task { [weak self] in
+            guard let self else { return }
+            for await _ in self.powerWatcher.states {
+                await MainActor.run { self.recomputePowerProfile() }
+            }
+        }
+        // ② 系统低电量模式开关。
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.recomputePowerProfile() }
+        }
+        // ③ 用户在 UI 改 powerMode。
+        observePowerMode()
+    }
+
+    /// 监听 ConfigStore.capture.system.powerMode,变化时重算(仿 observeIgnoreRules)。
+    private func observePowerMode() {
+        let store = ConfigStore.shared
+        withObservationTracking {
+            _ = store.current.capture.system.powerMode
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.recomputePowerProfile()
+                self.observePowerMode()
+            }
+        }
+    }
+
+    /// 读 用户档位 + 系统快照 → PowerProfile.resolve → 变了才推给 coordinator。
+    private func recomputePowerProfile() {
+        let raw = ConfigStore.shared.current.capture.system.powerMode
+        let mode = PowerMode(rawValue: raw) ?? .auto
+        let profile = PowerProfile.resolve(userMode: mode, snapshot: PowerMonitor.snapshot())
+        guard profile != lastPowerProfile else { return }
+        lastPowerProfile = profile
+        Task { await coordinator.applyPowerProfile(profile) }
+    }
+
     /// AppDelegate 在 `applicationWillTerminate` 调，停所有子系统。
     func stopManagedLifecycle() async {
+        powerProfileTask?.cancel()
         await coordinator.stop()
         await audio.stop()
         await systemAudio.stop()

@@ -8,6 +8,18 @@ public enum PowerState: String, Sendable {
     case unknown
 }
 
+/// 一次电源/系统状态快照 —— 给 PowerProfile.resolve 的 auto 决策用。
+/// 仿 screenpipe power/monitor.rs 收集的几项。
+public struct PowerSnapshot: Sendable {
+    public let state: PowerState
+    /// 电池电量百分比 0–100。台式机 / 取不到时 nil。
+    public let batteryPercent: Int?
+    /// 系统「低电量模式」开关(设置 → 电池)。
+    public let isLowPowerMode: Bool
+    /// 热压力等级。.serious / .critical 时 auto 降到 saver。
+    public let thermalState: ProcessInfo.ThermalState
+}
+
 /// 当前电源状态查询（同步、无副作用）。
 ///
 /// P3 用：CompactionWorker 跳过电池模式。
@@ -35,5 +47,37 @@ public enum PowerMonitor {
     /// 便利属性。电池或未知都按"非 AC"对待，最保守。
     public static var isOnAC: Bool {
         currentState() == .ac
+    }
+
+    /// 完整快照：电源状态 + 电池百分比 + 低电量模式 + 热压力。
+    /// PowerProfile.resolve 的 auto 决策用。
+    public static func snapshot() -> PowerSnapshot {
+        var resolvedState: PowerState = .unknown
+        var pct: Int? = nil
+
+        if let snapshotRef = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+           let sources = IOPSCopyPowerSourcesList(snapshotRef)?.takeRetainedValue() as? [CFTypeRef] {
+            for source in sources {
+                guard let info = IOPSGetPowerSourceDescription(snapshotRef, source)?
+                        .takeUnretainedValue() as? [String: Any] else { continue }
+                if let s = info[kIOPSPowerSourceStateKey] as? String {
+                    if s == kIOPSACPowerValue { resolvedState = .ac }
+                    else if s == kIOPSBatteryPowerValue { resolvedState = .battery }
+                }
+                // 电量 = 当前容量 / 最大容量 × 100。多数机型 cur 已是 0–100。
+                if let cur = info[kIOPSCurrentCapacityKey] as? Int,
+                   let max = info[kIOPSMaxCapacityKey] as? Int, max > 0 {
+                    pct = Int((Double(cur) / Double(max) * 100).rounded())
+                }
+            }
+        }
+
+        let pi = ProcessInfo.processInfo
+        return PowerSnapshot(
+            state: resolvedState,
+            batteryPercent: pct,
+            isLowPowerMode: pi.isLowPowerModeEnabled,
+            thermalState: pi.thermalState
+        )
     }
 }
