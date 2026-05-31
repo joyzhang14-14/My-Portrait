@@ -40,7 +40,8 @@ struct SpeakersSettingsView: View {
             ProgressHeader(trainedCount: voiceTrainedCount)
 
             VoiceTrainingCard(
-                existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty }
+                existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty },
+                onTrained: { reload() }
             )
 
             // ① 你训练的声纹 —— 资产,置顶。删除走二次确认(IdentifiedRow.trained)。
@@ -161,8 +162,8 @@ struct SpeakersSettingsView: View {
 
     /// Ask the LLM to propose names for every unidentified cluster, then
     /// apply each suggested label through the existing `rename` path
-    /// (persistence is a no-op today — the speakers table is read-only
-    /// from `TimelineDB` — but the names show up in the UI right away).
+    /// (persists via `TimelineDB.renameSpeaker` — and the names show up
+    /// in the UI right away).
     /// "Organize with AI"：① 用 LLM 给匿名簇起名；② 把同名簇(同一个人的重复
     /// cluster，如碎成 6 个的 Joy)合并成一个,优先保留训练过的 voiceprint。
     private func runOrganize() {
@@ -691,6 +692,8 @@ private struct StatPill: View {
 /// 普通 view 放进去就行。
 struct VoiceTrainingCard: View {
     let existingNames: [String]
+    /// 训练成功(新声纹已落库)后回调一次,让父视图重新加载列表。
+    var onTrained: () -> Void = {}
 
     @State private var cfg = ConfigStore.shared
     @StateObject private var monitor = PermissionMonitor()
@@ -806,6 +809,8 @@ struct VoiceTrainingCard: View {
             if newKey == "success" || newKey == "failure" {
                 restoreAudioState()
             }
+            // 训练成功 = 新声纹已写进 speakers 表,通知父视图 reload。
+            if newKey == "success" { onTrained() }
         }
         // 倒计时 sheet 自己持有,SpeakersView 不再管它。
         .sheet(isPresented: $showCountdown) {
