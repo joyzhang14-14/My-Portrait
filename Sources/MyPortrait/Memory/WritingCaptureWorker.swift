@@ -228,15 +228,12 @@ final class WritingCaptureWorker {
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 
-        // 3.5 Pass 2 —— 路由(AX vs OCR)+ 切割 + AX 真伪。判断活,轻量模型。
-        // 关键作用:chat app(Discord/微信等)真内容在 AX/keystroke,Pass 2 把它们
-        // 留在 AX 路,不让 Step 0 粗启发式误送进 OCR canvas → 避免 OCR 整屏桌面垃圾。
-        let routedSessions = await Self.applyPass2(
+        // Pass 2(LLM):精准切 session(LLM 判 return 还是时间边界)+ 路由(ax/ocr)。
+        // 不丢 event。chat app 真内容在 AX → ax 路;真 canvas(AX 乱码/空)→ ocr 路。
+        let refinedSessions = await Self.applyPass2(
             step0.rawSessions, concurrency: 5,
             makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
-        // pass2-2:确定性消息切分(按 typing_event,不用 LLM、不丢 event)。
-        let refinedSessions = Self.applyPass2Segment(routedSessions)
-        workerLog.info("pass2: \(step0.rawSessions.count) sessions → route \(routedSessions.count) → segment \(refinedSessions.count) units")
+        workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
 
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
         let groups = Self.groupRawSessionsByApp(refinedSessions)
@@ -573,16 +570,14 @@ final class WritingCaptureWorker {
         let pass3Model = pass3Cfg.resolvedModelLight
 
         // 3.5 Pass 2 —— 路由(AX vs OCR)+ 切割 + AX 真伪。判断活,轻量模型。
-        // chat app(Discord/微信等)短消息真内容在 AX/keystroke,Pass 2 把它们留在
-        // AX 路并按消息切,不让 Step 0 粗启发式误送进 OCR canvas(否则 OCR 整屏桌面)。
+        // Pass 2(LLM):精准切 session(LLM 判 return 还是时间边界)+ 路由(ax/ocr),
+        // 不丢 event。chat app 真内容在 AX → ax;真 canvas(AX 乱码/空)→ ocr。
         ui.stage = "Pass 2"
-        ui.statusMessage = "Pass 2: routing \(step0.rawSessions.count) sessions (AX vs OCR)…"
-        let routedSessions = await Self.applyPass2(
+        ui.statusMessage = "Pass 2: segment + route \(step0.rawSessions.count) sessions…"
+        let refinedSessions = await Self.applyPass2(
             step0.rawSessions, concurrency: 5,
             makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
-        // pass2-2:确定性消息切分(按 typing_event,不用 LLM、不丢 event)。
-        let refinedSessions = Self.applyPass2Segment(routedSessions)
-        workerLog.info("pass2: \(step0.rawSessions.count) sessions → route \(routedSessions.count) → segment \(refinedSessions.count) units")
+        workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
 
         // 4. group + 5. Pass 3 并发
         let groups = Self.groupRawSessionsByApp(refinedSessions)
@@ -804,7 +799,24 @@ final class WritingCaptureWorker {
         // app 的输入在 AX,绝不该为了 OCR 丢掉它。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
-            return (idx, [Self.ensureAxRoute(sessions[idx])])
+            let s = sessions[idx]
+            let agent = await makePass2()
+            let result = (try? await agent.run(session: s))
+                ?? WritingCapturePass2Agent.Result(
+                    primarySource: "ax",
+                    units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
+            if result.primarySource == "ocr" {
+                return (idx, [Self.ensureOcrPrepped(s)])
+            }
+            // ax 路:按 LLM 切的 units 重建(LLM 判 return 还是时间边界)。
+            // **不丢 event** —— LLM 没分配到的(含它判 dropped 的)各自单独成单元,
+            // 交给 Pass 3(补 AX 小瑕疵)/ Pass 4(审核)。Pass 2 只切+路由,不丢。
+            let assigned = Set(result.units.flatMap { $0 })
+            var unitIds = result.units
+            unitIds.append(contentsOf: s.typingEvents.compactMap { $0.id }
+                .filter { !assigned.contains($0) }.map { [$0] })
+            let rebuilt = unitIds.compactMap { Self.rebuildUnitSession(from: s, eventIds: $0) }
+            return (idx, rebuilt.isEmpty ? [Self.ensureAxRoute(s)] : rebuilt)
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
@@ -821,20 +833,18 @@ final class WritingCaptureWorker {
                 }
             }
         }
-        // 某 app 只要本次出现过 typing_events,就说明它的 AX 是好的(chat/Electron
-        // 如 Discord/Claude Desktop/微信)。它那些"没有 typing_events 的 session" =
-        // 用户没在里面打字,屏幕上是 AI 回复 / 收到的消息 / 在读的内容 → 丢,绝不
-        // OCR(否则 CanvasAgent 把 AI 回复拍下来,且 canvas 大窗口骗过击键闸门)。
-        // 真 canvas(Google Docs:AX 从不工作,从头到尾无 typing_events)才 OCR。
-        let axWorkingApps = Set(sessions.filter { !$0.typingEvents.isEmpty }.map { $0.app })
+        // 重组:被判过的(有 typing_events)→ ax 单元。无 typing_events 的 session
+        // 按 keystroke 判路由(根据 keystroke,不看 app):
+        //   有实打击键(用户写了字但 AX 失灵 = 真 canvas,如 Google Docs)→ ocr 重建;
+        //   无击键(用户没动键盘 = 屏上是 AI 回复 / 收到的消息 / 在读的内容)→ 丢。
         var out: [WritingCaptureRawSession] = []
         for (i, s) in sessions.enumerated() {
             if let r = refinedByIdx[i] {
-                out.append(contentsOf: r)              // ax 路单元
-            } else if !axWorkingApps.contains(s.app) {
-                out.append(s)                          // 真 canvas → OCR 重建
+                out.append(contentsOf: r)
+            } else {
+                let typedKeys = s.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
+                if typedKeys >= 10 { out.append(s) }   // 真 canvas 写作;else 丢(没打字)
             }
-            // else: AX 有效 app 的无输入 session(纯阅读/AI回复)→ 丢
         }
         return out
     }
@@ -992,11 +1002,16 @@ final class WritingCaptureWorker {
                 return try await agent.run(
                     groupApp: g.app, groupUrl: g.url, session: merged, contextSummary: ctx)
             } else {
-                // AX 路:确定性构造,**不走 LLM**。typing_event.text 就是干净消息
-                // ("你真找啊?"),切分已由 pass2-2(算法)完成。让 Pass3 LLM 转写
-                // 只会引入随机漏写(同数据上次 40 条这次 16 条)。把关交给下游算法层
-                // (6a edit_log + 击键覆盖闸门)+ Pass 4 内容审查。
-                return Self.buildAxRecordsDeterministic(group: g, contextTimeline: contextTimeline)
+                // AX 路:Pass 3(LLM)按 keystroke 补 AX 小瑕疵(如 IME 没上屏的
+                // "dian"→"店")、清残留。切分已由 Pass 2 完成,Pass 3 只逐单元清洗。
+                let agent = await makePass3()
+                return try await agent.run(
+                    contextTimeline: contextTimeline,
+                    groupApp: g.app, groupUrl: g.url,
+                    rawSessions: g.sessions,
+                    includeAxText: includeAxText,
+                    userLanguages: userLanguages,
+                    userRejections: userRejections)
             }
         }
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
@@ -1062,8 +1077,10 @@ final class WritingCaptureWorker {
         for group in recordsByGroupIdx {
             var keptGroup: [WritingCaptureRecord] = []
             for rec in group {
+                // 6a:ax_cleaned 的 edit_log 从 typing_events 重建(准确编辑历史)。
+                // 不在此丢任何 record —— AI回复/阅读的过滤交给 Pass 3(keystroke 重建)
+                // + Pass 4(最终审核)。text 保留 Pass 3(LLM)清洗后的结果。
                 var editLog = rec.editLog
-                var text = rec.text
                 if rec.source == "ax_cleaned", !rec.referenceTypingEventIds.isEmpty {
                     var entries: [EditEntry] = []
                     for tid in rec.referenceTypingEventIds {
@@ -1075,38 +1092,10 @@ final class WritingCaptureWorker {
                         }
                     }
                     if !entries.isEmpty { editLog = entries.sorted { $0.ts < $1.ts } }
-                    // text 用 AX 快照(typing_event.text,Pass 3 已给)——短消息=
-                    // 用户全打的,快照就是干净的合成结果("你真找啊?");不用 commit
-                    // 增量拼接(那会拼出 IME 合成中途态 "你真zhao找啊")。读笔记那种
-                    // "快照长但没打几个字"的,靠下面的击键覆盖闸门毙(快照长/击键≈0)。
                 }
-
-                // 确定性击键覆盖闸门(K=1.0):字数须有等量真实击键撑得起(用上面
-                // 重建后的 text)。读笔记/AI回复/收到消息/OCR幻觉/程序写入 ≈ 0 击键
-                // → 全在此算法层毙掉,不靠 LLM 自觉。对 CJK 同样成立(比击键数量)。
-                if !Self.keystrokeCovered(startTs: rec.startTs, endTs: rec.endTs, app: rec.app,
-                                          textLen: text.count, keys: keys, k: Self.keystrokeCoverageK) {
-                    dropped.append(WritingCaptureDiscarded(
-                        reason: "keystroke coverage below \(Self.keystrokeCoverageK)× text length "
-                            + "(reading / received / pasted / hallucinated — not typed by user)",
-                        sessionIds: [], preview: String(text.prefix(200))))
-                    continue
-                }
-
-                // 击键覆盖闸门(上面)已保证"是用户打的"(AI回复/读=0击键被毙)。
-                // 不再要求 edit_log 必须有 commit —— 那条老过滤太严,很多真消息的 AX
-                // edit_log 没记成 commit(如 Claude Desktop / Obsidian 里打的字)被误丢。
-                // 只对 canvas OCR 再查"零对应"兜底(OCR 抓了无关屏幕文字)。
-                let canvasOrphan = (rec.source == "canvas_fusion" || rec.source == "merged")
-                    && Self.keystrokeOrphan(rec: rec, keys: keys)
-                if !canvasOrphan {
-                    keptGroup.append(Self.withTextAndEditLog(rec, text, editLog))
-                } else {
-                    dropped.append(WritingCaptureDiscarded(
-                        reason: "canvas OCR text has no keystroke correspondence (unrelated on-screen text)",
-                        sessionIds: [], preview: String(text.prefix(200))))
-                }
+                keptGroup.append(Self.withEditLog(rec, editLog))
             }
+            _ = keys
             outRecs.append(keptGroup)
         }
         return (outRecs, dropped)
