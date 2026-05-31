@@ -253,6 +253,7 @@ final class WritingCaptureWorker {
             concurrency: 5,
             makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass3Provider, model: pass3Model) },
             makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
+            makeCleanup: { @MainActor in WritingCaptureAxCleanupAgent(provider: pass3Provider, model: pass3Model) },
             userLanguages: userLanguages,
             userRejections: userRejections
         )
@@ -595,6 +596,7 @@ final class WritingCaptureWorker {
             contextTimeline: pass1Out.timeline, groups: groups, concurrency: 5,
             makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass3Provider, model: pass3Model) },
             makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
+            makeCleanup: { @MainActor in WritingCaptureAxCleanupAgent(provider: pass3Provider, model: pass3Model) },
             includeAxText: includeAxText,
             userLanguages: userLanguages,
             userRejections: userRejections
@@ -1018,6 +1020,7 @@ final class WritingCaptureWorker {
         concurrency: Int,
         makePass3: @escaping @MainActor @Sendable () -> WritingCapturePass3Agent,
         makeCanvas: @escaping @MainActor @Sendable () -> WritingCaptureCanvasAgent,
+        makeCleanup: @escaping @MainActor @Sendable () -> WritingCaptureAxCleanupAgent,
         includeAxText: Bool = true,
         userLanguages: [String] = [],
         userRejections: [UserRejectionRow] = []
@@ -1036,24 +1039,43 @@ final class WritingCaptureWorker {
                 return try await agent.run(
                     groupApp: g.app, groupUrl: g.url, session: merged, contextSummary: ctx)
             } else {
-                // AX 路 = 混合:record 集**确定性产出**(每个 typing_event 一条,
-                // text=AX 快照)→ 保证所有消息都在,不被 LLM 随机漏写。然后 LLM
-                // **只润色文字**(按 keystroke 补 IME 没上屏的 "dian"→"店"、清残留),
-                // 按 typing_event id 合并:LLM 有对应就用它清洗后的 text,没有/漏了
-                // 就保留确定性原文。LLM 失败也不抛(ax 组永不 fail)。
-                let det = Self.buildAxRecordsDeterministic(group: g, contextTimeline: contextTimeline)
-                let llm = try? await makePass3().run(
-                    contextTimeline: contextTimeline,
-                    groupApp: g.app, groupUrl: g.url,
-                    rawSessions: g.sessions,
-                    includeAxText: includeAxText,
-                    userLanguages: userLanguages,
-                    userRejections: userRejections)
-                let merged = Self.mergeAxCleanup(deterministic: det.records, llm: llm?.records)
+                // AX 路:record 集确定性(一 unit-session = 一条,反映 Pass 2 的
+                // return/time 切分)+ 专职 LLM **只补 AX 小瑕疵**(dian→店)。补齐按
+                // record id 精确回填;LLM 漏某条/失败 → 保留确定性原文,绝不增删。
+                var records: [WritingCaptureRecord] = []
+                var items: [WritingCaptureAxCleanupAgent.Item] = []
+                for s in g.sessions {
+                    let evs = s.typingEvents.filter { $0.id != nil }
+                        .sorted { $0.startedAt < $1.startedAt }
+                    guard !evs.isEmpty else { continue }
+                    let text = evs.map { $0.text }.joined(separator: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { continue }
+                    let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
+                    let ctx = contextTimeline.first {
+                        $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
+                    }?.summary
+                    let rid = "r\(records.count)"
+                    records.append(WritingCaptureRecord(
+                        text: text, editLog: [],
+                        kind: text.count >= 140 ? "long_form" : "short_form",
+                        source: "ax_cleaned", confidence: 1.0, contextSummary: ctx,
+                        app: g.app, url: g.url, startTs: startTs, endTs: endTs,
+                        referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
+                        referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
+                    items.append(WritingCaptureAxCleanupAgent.Item(
+                        id: rid, text: text,
+                        keystroke: await WritingCapturePass2Agent.assembleKeystrokeText(s.keystrokes)))
+                }
+                let fixes = await makeCleanup().run(items: items)
+                let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
+                    guard let t = fixes["r\(i)"],
+                          !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else { return rec }
+                    return Self.withTextAndEditLog(rec, t, rec.editLog)
+                }
                 return WritingCapturePass3Agent.Output(
-                    prompt: llm?.prompt ?? "(deterministic ax)",
-                    rawResponse: llm?.rawResponse ?? "(deterministic)",
-                    records: merged, discarded: [])
+                    prompt: "(ax cleanup)", rawResponse: "", records: cleaned, discarded: [])
             }
         }
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
