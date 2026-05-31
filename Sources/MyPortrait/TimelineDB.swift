@@ -1155,6 +1155,25 @@ struct TimelineDB: Sendable {
         }
     }
 
+    /// 各 speaker 的质心向量（id → centroid）。给 "Organize with AI" 的声纹护栏用：
+    /// 同名簇只有质心 cosine 够高才合并，挡住"名同声不同"(如 #20 名叫 Joy 实为 Stan)。
+    func speakerCentroids() -> [Int64: [Float]] {
+        guard exists else { return [:] }
+        do {
+            let queue = try DatabaseQueue(path: dbPath)
+            return try queue.read { db in
+                var out: [Int64: [Float]] = [:]
+                for r in try Row.fetchAll(db, sql: "SELECT id, centroid FROM speakers WHERE centroid IS NOT NULL") {
+                    if let blob: Data = r["centroid"], let v = blob.asFloats { out[r["id"]] = v }
+                }
+                return out
+            }
+        } catch {
+            timelineLog.error("speakerCentroids failed: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
+    }
+
     /// speakers 表的单语句写入小工具。
     private func runSpeakerWrite(sql: String, bind: (OpaquePointer?) -> Void) -> Bool {
         guard exists else { return false }

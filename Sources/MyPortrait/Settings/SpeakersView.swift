@@ -183,8 +183,11 @@ struct SpeakersSettingsView: View {
                         }
                     }
                 }
-                // ② 同名簇合并(同名 = 同人,确定性操作,不让 LLM 瞎合不同人)。
-                let plan = mergePlan()
+                // ② 同名簇合并,带声纹护栏:同名 + 质心相似才合(挡住"名同声不同")。
+                let centroids = await Task.detached(priority: .userInitiated) {
+                    TimelineDB().speakerCentroids()
+                }.value
+                let plan = mergePlan(centroids: centroids)
                 if !plan.isEmpty {
                     await Task.detached(priority: .userInitiated) {
                         for (keepId, mergeIds) in plan {
@@ -201,7 +204,12 @@ struct SpeakersSettingsView: View {
 
     /// 同名簇合并计划:`[(keepId, [mergeId...])]`。把 name 相同(忽略大小写/首尾空白)
     /// 的多个簇并成一个;keep 优先选训练过的 voiceprint,否则选样本最多的。
-    private func mergePlan() -> [(Int64, [Int64])] {
+    ///
+    /// **声纹护栏**:同名还不够 —— 只合并质心 cosine ≥ `simThreshold` 的簇。挡住
+    /// "名同声不同"(如 diarization 把别人的声音误标成你的名字),避免把不同人合一起。
+    /// 缺质心的簇保守跳过(不合)。
+    private func mergePlan(centroids: [Int64: [Float]]) -> [(Int64, [Int64])] {
+        let simThreshold: Float = 0.5
         let named = rows.filter { !($0.name ?? "").isEmpty }
         let groups = Dictionary(grouping: named) {
             ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
@@ -211,8 +219,11 @@ struct SpeakersSettingsView: View {
             let keep = group.first(where: { $0.trainedAt != nil })
                 ?? group.max(by: { $0.sampleCount < $1.sampleCount })
                 ?? group[0]
-            guard let keepId = Int64(keep.id) else { continue }
-            let mergeIds = group.compactMap { $0.id == keep.id ? nil : Int64($0.id) }
+            guard let keepId = Int64(keep.id), let kc = centroids[keepId] else { continue }
+            let mergeIds: [Int64] = group.compactMap { r in
+                guard r.id != keep.id, let rid = Int64(r.id), let rc = centroids[rid] else { return nil }
+                return VectorMath.cosineSimilarity(kc, rc) >= simThreshold ? rid : nil
+            }
             if !mergeIds.isEmpty { out.append((keepId, mergeIds)) }
         }
         return out
