@@ -62,7 +62,18 @@ final class AudioDevicesMonitor {
     private(set) var activeUID: String = ""
 
     /// AudioCaptureService 启停时调,更新 UI live indicator。
-    func setActiveUID(_ uid: String) { activeUID = uid }
+    ///
+    /// CoreAudio 走 system audio tap / loopback 路径时,会用一个内部
+    /// aggregate device 包装"当前系统默认输入",UID 形如
+    /// `CADefaultDeviceAggregate-92270-0`——数字随机,对用户毫无意义。
+    /// 这里 normalize 到背后真实的系统默认 UID,UI 就直接看到物理设备名。
+    func setActiveUID(_ uid: String) {
+        if uid.hasPrefix("CADefaultDeviceAggregate") {
+            activeUID = systemDefaultUID
+        } else {
+            activeUID = uid
+        }
+    }
 
     private let log = Logger(subsystem: "com.myportrait.capture", category: "devices-monitor")
 

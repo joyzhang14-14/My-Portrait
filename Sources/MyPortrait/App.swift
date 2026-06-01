@@ -218,6 +218,11 @@ struct MyPortraitApp: App {
         if args.contains("--sched-budget-strings") {
             SchedulerTestCLI.budgetStrings()
         }
+        // DEV-ONLY: 跟 UI Run Events 按钮等价 —— 走 staging,跑完进 Pending
+        // review,**不入库**;UI 用户 Approve / Reject 拍板。
+        if args.contains("--event-staged") {
+            EventJobStagedCLI.run()
+        }
         if args.contains("--sched-trigger-test") {
             SchedulerTestCLI.triggerTest()
         }

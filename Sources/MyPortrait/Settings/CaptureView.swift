@@ -140,23 +140,6 @@ struct AudioCaptureSettingsView: View {
                             icon: "mic") {
                     Toggle("", isOn: config.binding(\.capture.audio.enabled)).labelsHidden().toggleStyle(.switch)
                 }
-                if audioRec {
-                    SettingsDivider()
-                    SettingsRow("Your name",
-                                description: "Used so the assistant knows when you're the speaker.",
-                                icon: "person.text.rectangle") {
-                        TextField("e.g. Louis", text: config.binding(\.capture.audio.userName))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
-                                    .overlay(RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color.white.opacity(0.10), lineWidth: 1))
-                            )
-                            .frame(width: 180)
-                    }
-                }
             }
 
             if audioRec {
