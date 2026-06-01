@@ -1,44 +1,55 @@
 import Foundation
+import os
 
-/// DRM 内容黑名单。命中则跳过该帧（P1）。
+/// 屏幕采集「暂停名单」闸门。焦点落在名单里的 app(名字子串)或 URL(子串)上
+/// → 停整条 SCStream(macOS 会主动黑掉受保护内容,不及时停 stream 会导致用户
+/// 自己正在看的 Netflix 等播放也黑屏)。
 ///
-/// P5 升级：检测到 DRM 时停整条 SCStream（macOS 会主动黑掉受保护内容，
-/// 不及时停 stream 会导致 Netflix 等播放黑屏）。
+/// 与 IgnoreGate 的区别:IgnoreGate 命中只把窗口遮成透明(帧照拍);DRMGate
+/// 命中停整条流水线 + invalidate SCStream。
 ///
-/// 名单抄 My-Orphies drm_detector.rs。所有比较小写化 + substring。
-/// "max" 必须精确匹配，避免误伤"max headroom"之类的窗口标题。
-struct DRMGate: Sendable {
+/// 名单从 `ConfigStore.privacy.pauseCaptureApps / pauseCaptureUrls` 来(默认预填
+/// 主流流媒体,用户可在 Settings 增删),由 Services → CaptureCoordinator
+/// .setPauseCaptureList 推进来。`final class` + 锁:本实例被 coordinator 与
+/// DRMWatcher 共享,config 变化要同时对两边生效。匹配全小写化 + substring。
+final class DRMGate: @unchecked Sendable {
 
-    private static let blockedAppNames: Set<String> = [
+    /// 出厂默认(= ConfigSchema 的默认值,小写)。Services 还没把 config 推进来
+    /// 之前先用它兜底,保证启动早期也有保护。注:不含裸 "max"(子串会误伤
+    /// "max headroom" 之类标题;HBO Max 走 "hbo max" + url "play.max.com")。
+    private static let defaultApps: [String] = [
         "netflix", "disney+", "hulu", "prime video", "apple tv",
         "peacock", "paramount+", "hbo max", "crunchyroll", "dazn",
-        "horizon client"
+        "horizon client",
     ]
-
-    /// 精确匹配（不做 substring），避免 false positive。
-    private static let blockedAppNamesExact: Set<String> = ["max"]
-
-    private static let blockedUrlDomains: Set<String> = [
+    private static let defaultUrls: [String] = [
         "netflix.com", "disneyplus.com", "hulu.com", "primevideo.com",
         "tv.apple.com", "peacocktv.com", "paramountplus.com",
-        "play.max.com", "crunchyroll.com", "dazn.com"
+        "play.max.com", "crunchyroll.com", "dazn.com", "amazon.com/gp/video/",
     ]
 
-    /// 当前焦点是否在 DRM 内容上。`true` → 跳过这一帧（P1）。
+    private struct State {
+        var apps: [String]
+        var urls: [String]
+    }
+    private let state = OSAllocatedUnfairLock<State>(
+        initialState: State(apps: DRMGate.defaultApps, urls: DRMGate.defaultUrls))
+
+    /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时推。
+    func setPauseList(apps: [String], urls: [String]) {
+        let a = apps.map { $0.lowercased() }.filter { !$0.isEmpty }
+        let u = urls.map { $0.lowercased() }.filter { !$0.isEmpty }
+        state.withLock { $0 = State(apps: a, urls: u) }
+    }
+
+    /// 当前焦点是否在暂停名单内容上。`true` → 停整条采集。
     func isBlocked(_ focus: FocusInfo) -> Bool {
+        let snap = state.withLock { $0 }
         let app = focus.appName.lowercased()
-
-        if Self.blockedAppNamesExact.contains(app) { return true }
-        for name in Self.blockedAppNames where app.contains(name) { return true }
-
+        for name in snap.apps where app.contains(name) { return true }
         if let url = focus.browserUrl?.lowercased() {
-            for domain in Self.blockedUrlDomains where url.contains(domain) {
-                return true
-            }
-            // Amazon Prime Video 走特殊路径
-            if url.contains("amazon.com/gp/video/") { return true }
+            for sub in snap.urls where url.contains(sub) { return true }
         }
-
         return false
     }
 }

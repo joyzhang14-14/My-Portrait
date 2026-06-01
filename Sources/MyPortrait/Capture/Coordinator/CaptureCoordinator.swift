@@ -98,6 +98,12 @@ actor CaptureCoordinator {
         ignore.setMaskingEnabled(enabled)
     }
 
+    /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时调。
+    /// drm 是共享的 class 实例(coordinator 与 drmWatcher 同一个),一次更新两边生效。
+    nonisolated func setPauseCaptureList(apps: [String], urls: [String]) {
+        drm.setPauseList(apps: apps, urls: urls)
+    }
+
     /// Services 在 ConfigStore.privacy.ignoreIncognito 变化时调。
     func setIgnoreIncognito(_ on: Bool) {
         ignoreIncognito = on

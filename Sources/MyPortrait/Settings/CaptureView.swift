@@ -619,6 +619,27 @@ struct ScreenCaptureSettingsView: View {
         }
 
         SettingsCard(
+            title: "Pause capture for protected video",
+            footnote: "While a listed app is focused or a listed site is open, screen capture STOPS entirely (the SCStream is released) — stronger than masking. This keeps your own DRM-protected playback (Netflix, Disney+, etc.) from blacking out and skips useless black frames. Apps match by name, sites by URL substring; both case-insensitive. Pre-filled with common streaming services; edit freely."
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Apps — pick from installed apps…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                PauseCaptureAppPicker(apps: config.binding(\.privacy.pauseCaptureApps))
+                    .padding(.horizontal, 14).padding(.bottom, 10)
+                SettingsDivider()
+                Text("Sites — hostnames or substrings…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                TagListEditor(tags: config.binding(\.privacy.pauseCaptureUrls), placeholder: "e.g. netflix.com, hbomax.com")
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+        }
+
+        SettingsCard(
             title: "Ignored apps",
             footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Case-insensitive substring match against the window's app name or title."
         ) {

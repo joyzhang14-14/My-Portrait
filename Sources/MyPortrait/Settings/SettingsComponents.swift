@@ -751,6 +751,91 @@ struct PauseAudioListPicker: View {
 }
 
 
+// MARK: - PauseCaptureAppPicker —— 屏幕采集「暂停名单」的 app 选择器
+
+/// 从**已安装** app 里选,按 **app 名字** 存(DRMGate 匹配 focus.appName 子串)。
+/// 流媒体 app 本就不被采集,不会出现在「采集到的 app」里,所以从已安装列表选。
+/// 选中以 chip 显示,点 × 移除。URL 那半在卡片里用 TagListEditor。
+struct PauseCaptureAppPicker: View {
+    @Binding var apps: [String]     // app 显示名(子串匹配)
+    @State private var installed: [InstalledAppEntry] = []
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Color.white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            appDropdown
+            if !apps.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(apps, id: \.self) { name in
+                        chip(name) { apps.removeAll { $0 == name } }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .task {
+            if installed.isEmpty {
+                installed = await Task.detached(priority: .userInitiated) { InstalledApps.scan() }.value
+            }
+        }
+    }
+
+    private var appDropdown: some View {
+        Menu {
+            if installed.isEmpty {
+                Text("Scanning installed apps…")
+            } else {
+                ForEach(installed) { app in
+                    Button { toggle(app.name) } label: {
+                        if apps.contains(app.name) {
+                            Label(app.name, systemImage: "checkmark")
+                        } else { Text(app.name) }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "plus.circle.fill").font(.system(size: 11))
+                Text("App").font(.system(size: 12))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(boxBackground)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+    }
+
+    @ViewBuilder
+    private func chip(_ name: String, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "app.fill")
+                .font(.system(size: 8)).foregroundStyle(Theme.textPrimary.opacity(0.5))
+            Text(name)
+                .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.textPrimary.opacity(0.85))
+            Button(action: remove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold)).foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            .buttonStyle(.bouncyIcon)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .background(
+            Capsule().fill(.ultraThinMaterial)
+                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+        )
+    }
+
+    private func toggle(_ name: String) {
+        if let i = apps.firstIndex(of: name) { apps.remove(at: i) } else { apps.append(name) }
+    }
+}
+
+
 // MARK: - TypingBlacklistEntryPicker —— 支持 (bundle, urlPrefix) 双层 entry
 
 /// 像 TypingAppPicker 但每个 entry 可带可选 urlPrefix。

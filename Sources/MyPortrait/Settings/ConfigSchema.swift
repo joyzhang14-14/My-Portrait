@@ -705,6 +705,21 @@ struct PrivacyConfig: Codable, Equatable {
     /// excluded from the ScreenCaptureKit buffer (transparent in the frame).
     /// The frame itself is always captured.
     var maskIgnoredApps:        Bool     = true
+    /// 屏幕采集「暂停名单」。焦点落在这些 app(名字子串)或 URL(子串)上时,
+    /// **暂停整条屏幕采集**(DRMGate)。区别于 ignoredApps(只把窗口遮成透明,
+    /// 帧照拍):受保护视频(Netflix 等)在录屏时会被系统黑掉,不停整条 SCStream
+    /// 会把用户自己正在看的播放也搞黑屏,所以停整条流。默认预填主流流媒体 app /
+    /// 站点,用户可在 Settings → Screen Capture → Pause capture 增删。
+    var pauseCaptureApps:       [String] = [
+        "Netflix", "Disney+", "Hulu", "Prime Video", "Apple TV",
+        "Peacock", "Paramount+", "HBO Max", "Crunchyroll", "DAZN",
+        "Horizon Client",
+    ]
+    var pauseCaptureUrls:       [String] = [
+        "netflix.com", "disneyplus.com", "hulu.com", "primevideo.com",
+        "tv.apple.com", "peacocktv.com", "paramountplus.com",
+        "play.max.com", "crunchyroll.com", "dazn.com", "amazon.com/gp/video/",
+    ]
     /// 黑名单 entries —— 每条要么 (bundle_id) 整 app 屏蔽,要么 (bundle_id,
     /// urlPrefix) 屏蔽该 app 下匹配 URL 前缀的页面。前缀比对 case-sensitive,
     /// urlPrefix 留空字符串 = 整个 app(等价老 bundle 列表)。
@@ -719,6 +734,8 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
         case maskIgnoredApps         = "mask_ignored_apps"
+        case pauseCaptureApps        = "pause_capture_apps"
+        case pauseCaptureUrls        = "pause_capture_urls"
         case typingBlacklistEntries   = "typing_blacklist_entries"
     }
     init(from decoder: Decoder) throws {
@@ -730,6 +747,8 @@ struct PrivacyConfig: Codable, Equatable {
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
+        pauseCaptureApps       = c.dflt([String].self, .pauseCaptureApps, pauseCaptureApps)
+        pauseCaptureUrls       = c.dflt([String].self, .pauseCaptureUrls, pauseCaptureUrls)
         typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, typingBlacklistEntries)
     }
 }
