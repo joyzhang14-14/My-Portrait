@@ -136,8 +136,9 @@ actor CaptureCoordinator {
         let stream = await events.start()
 
         // 4. DRM watcher（后台 3s 一次轮询；命中 → drmActive=true → 跳过所有帧）。
-        await drmWatcher.start()
-        let drmStates = drmWatcher.states
+        //    start() 重建并返回新流 —— 复用 coordinator 实例跨 toggle 时旧流已被上次
+        //    stop() finish 掉,必须拿新流,否则 DRM 恢复信号送不出。
+        let drmStates = await drmWatcher.start()
         drmTask = Task.detached(priority: .background) { [weak self] in
             for await blocked in drmStates {
                 await self?.handleDRMState(blocked)
@@ -264,9 +265,12 @@ actor CaptureCoordinator {
         let focusInfo = await focus.snapshot()
 
         // 2. DRM 即时检测兜底（DRMWatcher 3s 才轮询一次，可能错过短暂打开 Netflix 等场景）。
+        //    走 handleDRMState(true)(统一置 drmActive + IntentionalPauseState +
+        //    invalidateStream),并给轮询器补记 lastBlocked —— 否则 DRM 内容在一个
+        //    轮询间隔内开了又关,轮询器没见过 blocked,永远不发 clear,drmActive 锁死。
         if drm.isBlocked(focusInfo) {
-            drmActive = true
-            await screen.invalidateStream()
+            await handleDRMState(true)
+            await drmWatcher.noteInlineBlock()
             return
         }
 
