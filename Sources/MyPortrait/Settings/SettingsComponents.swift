@@ -562,6 +562,195 @@ struct TypingAppPicker: View {
 }
 
 
+// MARK: - Pause-audio list picker（音频暂停名单：app + 类别）
+
+/// 已安装 app 的 (bundle id, 显示名)。
+struct InstalledAppEntry: Identifiable, Hashable, Sendable {
+    let id: String      // bundle id
+    let name: String
+}
+
+/// 扫标准 app 目录列出已安装 app（给「暂停名单」的 app 下拉用）。
+/// 纯文件 IO —— 放后台 Task 调,别卡主线程。
+enum InstalledApps {
+    static func scan() -> [InstalledAppEntry] {
+        let fm = FileManager.default
+        let dirs = [
+            "/Applications", "/Applications/Utilities",
+            "/System/Applications", "/System/Applications/Utilities",
+            NSHomeDirectory() + "/Applications",
+        ]
+        var seen = Set<String>()
+        var result: [InstalledAppEntry] = []
+        for dir in dirs {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for entry in entries where entry.hasSuffix(".app") {
+                guard let bundle = Bundle(path: dir + "/" + entry),
+                      let bid = bundle.bundleIdentifier, !seen.contains(bid) else { continue }
+                seen.insert(bid)
+                let name = (bundle.infoDictionary?["CFBundleDisplayName"] as? String)
+                    ?? (bundle.infoDictionary?["CFBundleName"] as? String)
+                    ?? String(entry.dropLast(4))
+                result.append(InstalledAppEntry(id: bid, name: name))
+            }
+        }
+        return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// `LSApplicationCategoryType` 主类别（音频相关的排前面）。值是完整标识符,
+/// 直接跟 app 自报的类别比对。`games` 在检测侧特殊处理：匹配任意 `*-games`。
+enum AppCategory {
+    static let all: [(id: String, label: String)] = [
+        ("public.app-category.music", "Music"),
+        ("public.app-category.video", "Video"),
+        ("public.app-category.entertainment", "Entertainment"),
+        ("public.app-category.games", "Games (all)"),
+        ("public.app-category.social-networking", "Social Networking"),
+        ("public.app-category.productivity", "Productivity"),
+        ("public.app-category.business", "Business"),
+        ("public.app-category.developer-tools", "Developer Tools"),
+        ("public.app-category.education", "Education"),
+        ("public.app-category.finance", "Finance"),
+        ("public.app-category.graphics-design", "Graphics & Design"),
+        ("public.app-category.healthcare-fitness", "Health & Fitness"),
+        ("public.app-category.lifestyle", "Lifestyle"),
+        ("public.app-category.medical", "Medical"),
+        ("public.app-category.news", "News"),
+        ("public.app-category.photography", "Photography"),
+        ("public.app-category.reference", "Reference"),
+        ("public.app-category.sports", "Sports"),
+        ("public.app-category.travel", "Travel"),
+        ("public.app-category.utilities", "Utilities"),
+        ("public.app-category.weather", "Weather"),
+    ]
+    static func label(_ id: String) -> String {
+        all.first { $0.id == id }?.label
+            ?? id.replacingOccurrences(of: "public.app-category.", with: "")
+    }
+}
+
+/// 音频「暂停名单」选择器 —— Category 下拉 + App 下拉,选中项以 chip 显示。
+/// 命中名单的 app 出声时暂停采集(MusicPlaybackMonitor 消费)。
+struct PauseAudioListPicker: View {
+    @Binding var apps: [String]         // bundle ids
+    @Binding var categories: [String]   // 完整 LSApplicationCategoryType 值
+    @State private var installed: [InstalledAppEntry] = []
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Color.white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    private func appName(_ bid: String) -> String {
+        installed.first { $0.id == bid }?.name
+            ?? bid.split(separator: ".").last.map(String.init)
+            ?? bid
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                categoryDropdown
+                appDropdown
+            }
+            if !categories.isEmpty || !apps.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(categories, id: \.self) { c in
+                        chip(icon: "square.grid.2x2.fill", text: AppCategory.label(c), help: c) {
+                            categories.removeAll { $0 == c }
+                        }
+                    }
+                    ForEach(apps, id: \.self) { a in
+                        chip(icon: "app.fill", text: appName(a), help: a) {
+                            apps.removeAll { $0 == a }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .task {
+            if installed.isEmpty {
+                installed = await Task.detached(priority: .userInitiated) { InstalledApps.scan() }.value
+            }
+        }
+    }
+
+    private var categoryDropdown: some View {
+        Menu {
+            ForEach(AppCategory.all, id: \.id) { cat in
+                Button { toggleCategory(cat.id) } label: {
+                    if categories.contains(cat.id) {
+                        Label(cat.label, systemImage: "checkmark")
+                    } else { Text(cat.label) }
+                }
+            }
+        } label: { dropdownLabel("Category", icon: "square.grid.2x2") }
+        .menuStyle(.borderlessButton).fixedSize()
+    }
+
+    private var appDropdown: some View {
+        Menu {
+            if installed.isEmpty {
+                Text("Scanning installed apps…")
+            } else {
+                ForEach(installed) { app in
+                    Button { toggleApp(app.id) } label: {
+                        if apps.contains(app.id) {
+                            Label(app.name, systemImage: "checkmark")
+                        } else { Text(app.name) }
+                    }
+                }
+            }
+        } label: { dropdownLabel("App", icon: "plus.circle.fill") }
+        .menuStyle(.borderlessButton).fixedSize()
+    }
+
+    private func dropdownLabel(_ title: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 11))
+            Text(title).font(.system(size: 12))
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(boxBackground)
+    }
+
+    @ViewBuilder
+    private func chip(icon: String, text: String, help: String, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 8))
+                .foregroundStyle(Theme.textPrimary.opacity(0.5))
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+            Button(action: remove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            .buttonStyle(.bouncyIcon)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .help(help)
+        .background(
+            Capsule().fill(.ultraThinMaterial)
+                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+        )
+    }
+
+    private func toggleCategory(_ id: String) {
+        if let i = categories.firstIndex(of: id) { categories.remove(at: i) } else { categories.append(id) }
+    }
+    private func toggleApp(_ id: String) {
+        if let i = apps.firstIndex(of: id) { apps.remove(at: i) } else { apps.append(id) }
+    }
+}
+
+
 // MARK: - TypingBlacklistEntryPicker —— 支持 (bundle, urlPrefix) 双层 entry
 
 /// 像 TypingAppPicker 但每个 entry 可带可选 urlPrefix。
