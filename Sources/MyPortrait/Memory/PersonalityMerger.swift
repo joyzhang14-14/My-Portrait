@@ -411,7 +411,10 @@ final class PersonalityMerger {
         }
 
         // head → cluster 索引,防 LLM 错配 / 漏配。
-        let byHead = Dictionary(uniqueKeysWithValues: clusters.map { ($0.head, $0) })
+        // uniquingKeysWith「首个胜」:重复 head 不再 fatalError(parseClusters /
+        // orphan 兜底都可能产生同名 head);被丢的重复项由下面 orphan 循环重新
+        // 兜成 createNew,applyActions 按 slug 归并,数据不丢。
+        let byHead = Dictionary(clusters.map { ($0.head, $0) }, uniquingKeysWith: { first, _ in first })
         var decided = Set<String>()
         var out: [PersonalityMergeAction] = []
         for obj in arr {
