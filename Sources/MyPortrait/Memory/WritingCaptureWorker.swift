@@ -440,13 +440,16 @@ final class WritingCaptureWorker {
         // cursor:上次 approve 处理到的 max ts(exclusive)。
         // 首次跑(cursor=0)从**第一条 typing_event 的 ts** 开始 —— 没 typing 的
         // 历史天纯 OCR 重建意义不大,白烧 token。
-        let (cursor, startMs) = try await Task.detached(priority: .userInitiated) { [store] in
+        let (cursor, startMs0) = try await Task.detached(priority: .userInitiated) { [store] in
             let c = try store.getCursor()
             if c > 0 { return (c, c) }
             let first = (try? store.firstTypingEventTs()) ?? nil
             return (c, first ?? 0)
         }.value
-        let endMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // [TEST] 临时:env 覆盖范围(对比验证用,不动 cursor)。删除前确认。
+        let startMs = ProcessInfo.processInfo.environment["WC_START"].flatMap { Int64($0) } ?? startMs0
+        let endMs = ProcessInfo.processInfo.environment["WC_END"].flatMap { Int64($0) }
+            ?? Int64(Date().timeIntervalSince1970 * 1000)
         workerLog.info("backlog: cursor=\(cursor, privacy: .public), startMs=\(startMs, privacy: .public)")
         // 跑之前清 staged(approved / failed / rejected 状态下的残留),
         // 上一步 gate 已经挡掉 pending_review,这里安全。

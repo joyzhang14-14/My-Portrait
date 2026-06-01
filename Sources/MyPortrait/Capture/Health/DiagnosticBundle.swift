@@ -43,10 +43,11 @@ enum DiagnosticBundle {
         try? writeProcessingLog(to: workDir.appendingPathComponent("processing_log.json"))
         try? writeDbStats(to: workDir.appendingPathComponent("db_stats.json"))
         try? writeOSLog24h(to: workDir.appendingPathComponent("oslog-24h.jsonl"))
+        copyDiagnosticLogs(to: workDir)
 
-        // 3) zip 到桌面
-        let desktop = try desktopURL()
-        let zipURL = desktop.appendingPathComponent("My-Portrait-diagnostic-\(ts).zip")
+        // 3) zip 到 Downloads(用户原话:放在 download 里)
+        let downloads = try downloadsURL()
+        let zipURL = downloads.appendingPathComponent("My-Portrait-diagnostic-\(ts).zip")
         try? FileManager.default.removeItem(at: zipURL)
         try runZip(srcDir: workDir, dstZip: zipURL)
         return zipURL
@@ -71,6 +72,7 @@ enum DiagnosticBundle {
       - processing_log.json    memory-pipeline state table
       - db_stats.json          row counts per table, disk usage per dir
       - oslog-24h.jsonl        com.myportrait.* unified-log entries
+      - diagnostic.log[.1-.5]  structured DiagLog history (rotating)
 
     NOT INCLUDED (your data stays local):
       - any .md file (events, portrait, personality)
@@ -141,6 +143,18 @@ enum DiagnosticBundle {
             out = out.replacingOccurrences(of: "\"\(v)\"", with: "\"<set>\"")
         }
         return out
+    }
+
+    /// DiagLog rolling files: diagnostic.log + diagnostic.log.1 ... .5。
+    /// 全 copy 进 bundle —— rotating 加起来 ≤ 25MB,zip 后通常 ≤ 5MB。
+    private static func copyDiagnosticLogs(to workDir: URL) {
+        let fm = FileManager.default
+        let base = DiagLog.logFileURL
+        let candidates = [base] + (1...5).map { base.appendingPathExtension("\($0)") }
+        for src in candidates where fm.fileExists(atPath: src.path) {
+            let dst = workDir.appendingPathComponent(src.lastPathComponent)
+            try? fm.copyItem(at: src, to: dst)
+        }
     }
 
     /// 健康度日志:直接 copy ~/.portrait/logs/health.log。
@@ -318,11 +332,11 @@ enum DiagnosticBundle {
         }
     }
 
-    private static func desktopURL() throws -> URL {
-        let urls = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)
+    private static func downloadsURL() throws -> URL {
+        let urls = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)
         guard let url = urls.first else {
             throw NSError(domain: "DiagnosticBundle", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "Couldn't locate Desktop directory"])
+                          userInfo: [NSLocalizedDescriptionKey: "Couldn't locate Downloads directory"])
         }
         return url
     }

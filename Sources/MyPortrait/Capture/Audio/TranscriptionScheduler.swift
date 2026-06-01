@@ -295,6 +295,14 @@ actor TranscriptionScheduler {
                 text = try await transcribeSamples(samples, settings)
             } catch {
                 logger.error("transcribe failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
+                DiagLog.error("transcribe.failed", ctx: [
+                    "chunkId":   chunkId,
+                    "path":      (chunk.filePath as NSString).lastPathComponent,
+                    "durationS": chunk.durationS,
+                    "device":    chunk.device,
+                    "engine":    settings.engine,
+                    "err":       String(describing: error),
+                ])
                 try? await db.recordAudioChunkFailure(chunkId: chunkId)
                 return
             }

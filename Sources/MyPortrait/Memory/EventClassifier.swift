@@ -153,6 +153,12 @@ final class EventClassifier {
                 throw e
             } catch {
                 print("[EventClassifier] batch \(batchIdx + 1) failed: \(error.localizedDescription)")
+                DiagLog.error("classify.batch.failed", ctx: [
+                    "batchIdx":     batchIdx + 1,
+                    "batchSize":    batch.count,
+                    "err":          error.localizedDescription,
+                    "consecutive":  consecutiveBatchFailures + 1,
+                ])
                 consecutiveBatchFailures += 1
                 // 把这批事件标记跳过,下次 loop 不再抓到它们。
                 for ev in batch { skippedPathsByFailure.insert(ev.path) }
