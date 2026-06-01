@@ -328,26 +328,27 @@ struct AudioCaptureSettingsView: View {
                     }
                 }
 
-            if audioRec {
-                // 录音行为相关 —— 只在采集开启时显示。
-                SettingsCard(title: "Music handling") {
-                    SettingsRow("Filter music",
-                                description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
-                                icon: "music.note.list") {
-                        Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
-                    }
-                    SettingsDivider()
-                    SettingsRow("Pause capture for these apps / categories",
-                                description: "Stop recording entirely while any app on this list is outputting audio — solves it at the source (more thorough than Filter music; takes priority). Pick specific apps and/or App-Store-style categories. Empty = never pause. \"Games (all)\" matches every game subcategory.",
-                                icon: "pause.circle") { EmptyView() }
-                    VStack(alignment: .leading) {
-                        PauseAudioListPicker(
-                            apps: config.binding(\.capture.audio.pauseAudioApps),
-                            categories: config.binding(\.capture.audio.pauseAudioCategories))
-                            .padding(.horizontal, 14).padding(.bottom, 12)
-                    }
+            // 「Filtering & pausing」常显示 —— 不 gate audioRec(跟 Speakers 一样,
+            // 采集关着也能先配好过滤 / 暂停规则,等开采集即生效)。
+            SettingsCard(title: "Filtering & pausing") {
+                SettingsRow("Filter music",
+                            description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
+                            icon: "music.note.list") {
+                    Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                SettingsRow("Pause capture for these apps / categories",
+                            description: "Stop recording entirely while any app on this list is outputting audio — solves it at the source (more thorough than Filter music; takes priority). Pick specific apps and/or App-Store-style categories. Empty = never pause. \"Games (all)\" matches every game subcategory.",
+                            icon: "pause.circle") { EmptyView() }
+                VStack(alignment: .leading) {
+                    PauseAudioListPicker(
+                        apps: config.binding(\.capture.audio.pauseAudioApps),
+                        categories: config.binding(\.capture.audio.pauseAudioCategories))
+                        .padding(.horizontal, 14).padding(.bottom, 12)
+                }
+            }
 
+            if audioRec {
                 SettingsCard(
                     title: "Custom vocabulary",
                     footnote: "Boost recognition of names, jargon, and brand terms."
@@ -356,8 +357,7 @@ struct AudioCaptureSettingsView: View {
                         TagListEditor(tags: config.binding(\.capture.audio.customVocabulary), placeholder: "term · optional replacement")
                             .padding(.horizontal, 14).padding(.vertical, 12)
                     }
-                                    }
-
+                }
             }
 
             // Speakers 部分(toggle + 训练 + 簇管理)。**故意放在 audioRec
