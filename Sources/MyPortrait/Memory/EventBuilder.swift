@@ -107,10 +107,12 @@ final class EventBuilder {
             return DayClustering(events: [], skippedIndices: [])
         }
         if sessions.count <= batchSize {
+            // 单批模式没有 carry —— earlierToday 空数组即可。
             return try await clusterOneBatch(
                 date: date,
                 sessions: sessions,
                 globalOffset: 0,
+                earlierToday: [],
                 activeEvents: activeEvents
             )
         }
@@ -123,21 +125,26 @@ final class EventBuilder {
 
     /// Cluster one batch. `globalOffset` shifts the 1-based session ids the
     /// LLM sees so they stay unique across batches.
+    /// `earlierToday` 是本次 day 内 prior batch 已建的 temp events(强 join
+    /// 候选),`activeEvents` 是 cross-day historical(弱 join 候选)。两者在
+    /// prompt 里分两段呈现,LLM 优先 join earlierToday。
     private func clusterOneBatch(
         date: Date,
         sessions: [EnrichedSession],
         globalOffset: Int,
+        earlierToday: [ActiveEvent],
         activeEvents: [ActiveEvent]
     ) async throws -> DayClustering {
         let lo = globalOffset + 1
         let hi = globalOffset + sessions.count
-        let validActiveIds = Set(activeEvents.map { $0.id })
+        let validActiveIds = Set((earlierToday + activeEvents).map { $0.id })
         // 在 MainActor 拿 personal info snapshot,传给 nonisolated buildPrompt。
         let personal = ConfigStore.shared.current.personalInfo
         let prompt = Self.buildPrompt(
             date: date,
             sessions: sessions,
             globalOffset: globalOffset,
+            earlierToday: earlierToday,
             activeEvents: activeEvents,
             personal: personal
         )
@@ -234,17 +241,21 @@ final class EventBuilder {
             let offset = ci * batchSize
 
             // Carry: prior chunks' new events become join candidates.
+            // **不过 rankActive 截断** —— 同一天的 temp 永远比跨日 historical
+            // 更相关,5/30 housing case 就是 carry 被 top-20 截掉导致后续 batch
+            // 看不见 "我们 batch 3 已经建了 chatted_about_housing" 又另起新名。
             let carry: [ActiveEvent] = tempOrder.map { tid in
                 let c = tempClusters[tid]!
                 return ActiveEvent(id: tid, title: c.title, summary: c.summary,
                                    type: c.type, tags: c.tags, lastOccurredOn: date)
             }
-            let active = Self.rankActive(activeEvents + carry,
-                                         for: chunk).prefix(20)
+            // historical 跨日的 active 保持 top-20 截断 + rankActive 排序。
+            let historicalRanked = Self.rankActive(activeEvents, for: chunk).prefix(20)
 
             let batch = try await clusterOneBatch(
                 date: date, sessions: chunk, globalOffset: offset,
-                activeEvents: Array(active)
+                earlierToday: carry,
+                activeEvents: Array(historicalRanked)
             )
             allSkipped.append(contentsOf: batch.skippedIndices)
 
@@ -334,23 +345,35 @@ final class EventBuilder {
         date: Date,
         sessions: [EnrichedSession],
         globalOffset: Int,
+        earlierToday: [ActiveEvent],
         activeEvents: [ActiveEvent],
         personal: PersonalInfoConfig
     ) -> String {
         let dayStr = isoDay(date)
 
-        let activeBlock: String
+        // 两段:earlier today (强 join 候选) 在前 + 跨日 active (弱候选) 在后。
+        // LLM 看到 earlier today + 同主题 → 必须 join,不要起新 event。
+        var blocks: [String] = []
+        if !earlierToday.isEmpty {
+            var rows: [String] = ["EARLIER TODAY (already created in this same day — PREFER joining over creating a new event when the subject overlaps):"]
+            for e in earlierToday {
+                let tagStr = e.tags.isEmpty ? "—" : e.tags.joined(separator: ",")
+                rows.append("  [\(e.id)] \(e.title) | tags=[\(tagStr)]")
+            }
+            blocks.append(rows.joined(separator: "\n"))
+        }
         if activeEvents.isEmpty {
-            activeBlock = "ACTIVE EVENTS (join candidates): (none)"
+            blocks.append("PAST DAYS (active events from earlier days — join if the new sessions continue the same thread across days): (none)")
         } else {
-            var rows: [String] = ["ACTIVE EVENTS (join candidates):"]
+            var rows: [String] = ["PAST DAYS (active events from earlier days — join if the new sessions continue the same thread across days):"]
             for e in activeEvents {
                 let last = relativeDay(from: e.lastOccurredOn, on: date)
                 let tagStr = e.tags.isEmpty ? "—" : e.tags.joined(separator: ",")
                 rows.append("  [\(e.id)] \(e.title) | tags=[\(tagStr)] | last=\(last)")
             }
-            activeBlock = rows.joined(separator: "\n")
+            blocks.append(rows.joined(separator: "\n"))
         }
+        let activeBlock = blocks.joined(separator: "\n\n")
 
         var sessionRows: [String] = ["SESSIONS TO CLUSTER (use the id shown):"]
         for (i, item) in sessions.enumerated() {
