@@ -141,6 +141,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     private func rebuildInputDeviceSubmenu() {
         let monitor = AudioDevicesMonitor.shared
         let preferred = ConfigStore.shared.current.capture.audio.preferredInputDeviceUID
+        let systemAudioOn = ConfigStore.shared.current.capture.audio.captureSystemAudio
         let activeUID = monitor.activeUID
         let devices = monitor.devices
 
@@ -177,15 +178,33 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             submenu.addItem(item)
         }
 
-        // 顶部标题加 "(锁定 → name)" / "(跟系统)" 让用户一眼知道当前状态
-        let summary: String
-        if preferred.isEmpty {
-            summary = "Input device  (follow system)"
-        } else if let d = devices.first(where: { $0.id == preferred }) {
-            summary = "Input device  (\(d.name))"
-        } else {
-            summary = "Input device  (locked, disconnected)"
+        // System audio 是并行 loopback 路 —— 跟 mic 同时存在,不是替代。
+        // 放在分隔线下方,文案用 "Also" 强调"叠加"语义,避免被当成单选项。
+        submenu.addItem(.separator())
+        let sysItem = NSMenuItem(
+            title: "Also capture system audio",
+            action: #selector(toggleSystemAudio(_:)), keyEquivalent: ""
+        )
+        sysItem.target = self
+        sysItem.state = systemAudioOn ? .on : .off
+        if let img = NSImage(systemSymbolName: "speaker.wave.2", accessibilityDescription: nil) {
+            img.isTemplate = true
+            sysItem.image = img
         }
+        submenu.addItem(sysItem)
+
+        // 顶部标题既反映 mic 选择,也反映 system audio 是否在录
+        let micPart: String
+        if preferred.isEmpty {
+            micPart = "follow system"
+        } else if let d = devices.first(where: { $0.id == preferred }) {
+            micPart = d.name
+        } else {
+            micPart = "locked, disconnected"
+        }
+        let summary = systemAudioOn
+            ? "Input  (\(micPart) + system audio)"
+            : "Input  (\(micPart))"
         inputDeviceMenuItem.title = summary
         inputDeviceMenuItem.submenu = submenu
     }
@@ -194,6 +213,13 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         let uid = (sender.representedObject as? String) ?? ""
         ConfigStore.shared.mutate { $0.capture.audio.preferredInputDeviceUID = uid }
         // Services.observePreferredInputDevice 会自动重启 audio engine。
+    }
+
+    @objc private func toggleSystemAudio(_ sender: NSMenuItem) {
+        ConfigStore.shared.mutate {
+            $0.capture.audio.captureSystemAudio.toggle()
+        }
+        // Services 已有 observe → 会自动重启 audio engine 应用新设置。
     }
 
     // MARK: - 菜单构造

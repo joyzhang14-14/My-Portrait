@@ -144,13 +144,6 @@ struct AudioCaptureSettingsView: View {
 
             if audioRec {
                 inputDeviceCard
-                SettingsCard(title: "System audio") {
-                    SettingsRow("Capture system audio",
-                                description: "What you hear (loopback).",
-                                icon: "speaker.wave.2") {
-                        Toggle("", isOn: config.binding(\.capture.audio.captureSystemAudio)).labelsHidden().toggleStyle(.switch)
-                    }
-                }
             }   // 关闭 if audioRec —— Mic / System audio 仅采集开启时显示
 
             // 转译配置常驻显示 —— 关着采集也能预先配好引擎/模型/语言/批量。
@@ -394,7 +387,8 @@ struct AudioCaptureSettingsView: View {
     /// 跟 ProgressView 的脉动 —— 真在录时绿点 pulse,没在录就 hide。
     @State private var pulseOn: Bool = false
 
-    /// 锁定输入设备 card。Menu picker + 实时 active device + disconnect 警告。
+    /// 输入源 card。Mic picker + 实时 active device + 并行 system audio loopback。
+    /// 用户视角:这些都是"声音从哪进来" → 都归 Input。
     @ViewBuilder private var inputDeviceCard: some View {
         let preferred = config.current.capture.audio.preferredInputDeviceUID
         let devices = devicesMonitor.devices
@@ -405,10 +399,10 @@ struct AudioCaptureSettingsView: View {
             && !devices.contains(where: { $0.id == preferred })
 
         SettingsCard(
-            title: "Input device",
+            title: "Input",
             footnote: preferred.isEmpty
-                ? "Follow system default — macOS will switch the mic when you plug in headphones, AirPods, etc."
-                : "Locked to your chosen device. Headphone/AirPods plug-in won't change the mic. Disconnect → temporary fallback to system default until the device returns."
+                ? "Follow system default — macOS will switch the mic when you plug in headphones, AirPods, etc. System audio is a parallel loopback track."
+                : "Locked to your chosen device. Headphone/AirPods plug-in won't change the mic. Disconnect → temporary fallback to system default until the device returns. System audio is a parallel loopback track."
         ) {
             SettingsRow("Microphone",
                         description: "Pick which mic My Portrait records from.",
@@ -478,6 +472,16 @@ struct AudioCaptureSettingsView: View {
                 .frame(maxWidth: 240, alignment: .trailing)
                 .onAppear { pulseOn = !activeUID.isEmpty }
                 .onChange(of: activeUID) { _, new in pulseOn = !new.isEmpty }
+            }
+
+            // System audio 是并行 loopback 路 —— 跟 mic 同时存在,不互斥。
+            // 跟 mic 放一张卡里:用户视角"都是声音从哪进来"。
+            SettingsDivider()
+            SettingsRow("Also capture system audio",
+                        description: "What you hear (loopback) — meeting partner's voice, video, music.",
+                        icon: "speaker.wave.2") {
+                Toggle("", isOn: config.binding(\.capture.audio.captureSystemAudio))
+                    .labelsHidden().toggleStyle(.switch)
             }
 
             // 锁定设备掉线 → 橙色警告 banner。
