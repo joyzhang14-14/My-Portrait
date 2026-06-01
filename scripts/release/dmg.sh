@@ -2,7 +2,7 @@
 # 用 dmgbuild 把 .app 打成 .dmg(带布局:左 app 图标 + 右 Applications 快捷方式)。
 #
 # 输出:
-#   build/MyPortrait-<version>.dmg
+#   build/MyPortrait_<version>_arm64.dmg
 #
 # 版本号从 .app 的 Info.plist CFBundleShortVersionString 读。
 #
@@ -17,7 +17,7 @@ APP_PATH="build/export/MyPortrait.app"
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
     "$APP_PATH/Contents/Info.plist")
-DMG_NAME="MyPortrait-${VERSION}.dmg"
+DMG_NAME="MyPortrait_${VERSION}_arm64.dmg"
 DMG_PATH="build/$DMG_NAME"
 
 # 1) 准备 dmgbuild venv(只第一次跑要)
@@ -36,7 +36,7 @@ for icns in "$APP_PATH/Contents/Resources/"*.icns; do
 done
 
 # 3) 通过环境变量 + dmgbuild_settings.py 出 .dmg
-echo "→ dmgbuild MyPortrait-${VERSION}.dmg"
+echo "→ dmgbuild $DMG_NAME"
 rm -f "$DMG_PATH"
 DMG_APP_PATH="$(cd "$(dirname "$APP_PATH")" && pwd)/$(basename "$APP_PATH")" \
 DMG_VOLUME_NAME="My Portrait ${VERSION}" \

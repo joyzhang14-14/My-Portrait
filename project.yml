@@ -119,6 +119,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
+        # arm64-only:核心转录/语音功能依赖 MLX(仅 Apple Silicon)。x86_64 既跑不了
+        # 这些功能,也编不过(SpeechVAD whole-module 优化 x86_64 交叉编爆内存)。
+        # 放弃 Intel 支持。
+        ARCHS: arm64
         MARKETING_VERSION: "1.2.0"
         CURRENT_PROJECT_VERSION: "161"
         # **签名相关 build settings 全部走 Support/Signing.xcconfig**

@@ -64,6 +64,7 @@ xcodebuild \
     -configuration Release \
     -archivePath "$ARCHIVE" \
     -destination "generic/platform=macOS" \
+    ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
     archive | tail -20
 
 # 3) export(Apple Development 签名,作为中间产物;下一步会用自签 cert 重签)
