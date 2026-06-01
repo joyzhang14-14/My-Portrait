@@ -223,6 +223,12 @@ final class ConfigStore {
             let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: migrated)
             current = applySchemaMigration(decoded)
             loadError = nil
+            // pauseOnMusicApp 已迁移到 pauseAudioCategories(见 AudioConfig.init(from:))。
+            // 旧 flag 为 true 说明本次解码刚迁移过 → 立刻写回,把死键 pause_on_music_app
+            // 从 TOML 清掉。否则它赖到下次 mutate 才消失,且每次启动空跑一次迁移。
+            if migrated.range(of: #"pause_on_music_app\s*=\s*true"#, options: .regularExpression) != nil {
+                scheduleWrite()
+            }
         } catch {
             loadError = "Couldn't read config.toml: \(error.localizedDescription) — using defaults."
             // Keep `current` as whatever it was (defaults on fresh launch).
