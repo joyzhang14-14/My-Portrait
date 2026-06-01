@@ -840,7 +840,8 @@ struct VoiceTrainingCard: View {
         )
         .onAppear {
             monitor.start()
-            if trainingName.isEmpty { trainingName = cfg.current.capture.audio.userName }
+            // 不预填名字 —— 没训练的说话人就保持 "Cluster <id>" 显示;
+            // 训练时用户自己输名字。不注入 firstName。
         }
         .onDisappear { monitor.stop() }
         // trainer.phase 变 success/failure → 还原 audio toggle。

@@ -309,7 +309,6 @@ final class ConfigStore {
 
         // — Recording / audio
         c.capture.audio.enabled                = bool(ud, "Settings.audioRecordingEnabled",  default: c.capture.audio.enabled)
-        if let v = ud.string(forKey: "Settings.userName")              { c.capture.audio.userName = v }
         if let v = ud.string(forKey: "Settings.audioEngine")           { c.capture.audio.engine = v }
         c.capture.audio.languages              = stringArray(ud, "Settings.audioLanguages")
         c.capture.audio.captureSystemAudio     = bool(ud, "Settings.captureSystemAudio",     default: c.capture.audio.captureSystemAudio)
