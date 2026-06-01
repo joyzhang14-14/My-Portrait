@@ -98,9 +98,14 @@ enum MemoryPrompts {
     - "type": "experience" (default, 99%) or "emotion" (only a clear emotional
       signal in the OCR — frustration, joy, conflict, anxiety).
     - "session_ids": non-empty list of the ids this event covers.
-    - "join_existing": if this event continues an ACTIVE EVENT listed above, put
-      its id (e.g. "evt_03" or a path id); otherwise null. Only join when the
-      subject matter is genuinely the same thread of work / conversation.
+    - "join_existing": if this event continues a candidate listed in EARLIER
+      TODAY or PAST DAYS above, put its id (e.g. "_b3" or a path id);
+      otherwise null. **PREFER joining over creating a new event** whenever the
+      subject overlaps — same person + same topic, same project, same task
+      thread. EARLIER TODAY events deserve especially strong join preference
+      (they are by definition same-day activity that was split across batches);
+      do not invent a new event just because the wording differs slightly
+      ("chatted with X" vs "talked with X about Y" → same event).
     - "skipped": sessions with no real content (idle glance, no meaningful OCR).
 
     portrait_facets — optional, default []. Only attach when the event reflects a
