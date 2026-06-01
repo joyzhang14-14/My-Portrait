@@ -1067,13 +1067,30 @@ final class WritingCaptureWorker {
         editLogJSON.contains("\"kind\":\"submit\"")
     }
 
-    /// 解析 edit_log,返回最长的一条 entry text(commit 或 delete 都算)。
-    /// 发送清空时整条消息会作为一条 delete 落进 edit_log → 用它取回原文。
+    /// 解析 edit_log,返回最长的一条**用户敲出来的**(commit/delete,排除 paste)
+    /// entry text。发送清空时整条消息作为一条 delete 落进 edit_log → 用它取回原文;
+    /// **排除 paste** —— paste 是突然贴上来、零击键的(占位符 / autofill / 收到内容),
+    /// 不是用户打的,绝不能当成消息原文。
     nonisolated static func longestEditLogText(_ editLogJSON: String) -> String? {
-        struct E: Decodable { let text: String? }
+        struct E: Decodable { let kind: String?; let text: String? }
         guard let data = editLogJSON.data(using: .utf8),
               let arr = try? JSONDecoder().decode([E].self, from: data) else { return nil }
-        return arr.compactMap { $0.text }.max(by: { $0.count < $1.count })
+        return arr.filter { $0.kind != "paste" }.compactMap { $0.text }
+            .max(by: { $0.count < $1.count })
+    }
+
+    /// 这个 event 的 endValue 是不是"贴上来的"(== edit_log 里某条 paste 文本)。
+    /// 输入框清空后显示的占位符("Write a message…" / "请输入文本")就是这样作为一条
+    /// paste 冒出来、变成 endValue 的 —— 零击键、不是用户打的字。**跟输入法无关**
+    /// (只看 paste 标记,不比对击键内容,所以拼音/五笔/双拼都不影响)。
+    nonisolated static func isPastedValue(_ ev: TypingEvent) -> Bool {
+        let v = ev.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty else { return false }
+        struct E: Decodable { let kind: String?; let text: String? }
+        guard let data = ev.editLog.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([E].self, from: data) else { return false }
+        return arr.contains { $0.kind == "paste"
+            && ($0.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == v }
     }
 
     /// 这个 event 是不是"发送清空":聊天 app(如 ChatGPT)发送后输入框清空,
@@ -1095,14 +1112,18 @@ final class WritingCaptureWorker {
         }
     }
 
-    /// 取一条消息组里**最完整**的文本。常态取末事件 endValue(累积全文);但聊天
-    /// app 发送会清空输入框 → 末事件 endValue 空,此时整条消息落在它 edit_log 的
-    /// 清空 delete 里 → 取该 edit_log 里最长那条;再不行退回组里最后一个非空 endValue。
+    /// 取一条消息组里**最完整**的文本。常态取末事件 endValue(累积全文);但两种
+    /// 情况 endValue 不是用户的字:
+    ///   1. 发送清空 → endValue 空(ChatGPT 等);
+    ///   2. 发送后输入框显示**占位符**("Write a message…" / "请输入文本")→ endValue
+    ///      是贴上来的占位符(isPastedValue),零击键、不是用户打的。
+    /// 这两种都改用 edit_log 里**用户敲出来**的最长那条(发送时被整条 delete 的原文,
+    /// longestEditLogText 已排除 paste);再不行退回组里最后一个**非占位符**的非空 endValue。
     nonisolated static func bestGroupText(_ grp: [TypingEvent]) -> String {
         guard let last = grp.last else { return "" }
-        if !last.endValue.isEmpty { return last.endValue }
+        if !last.endValue.isEmpty, !Self.isPastedValue(last) { return last.endValue }
         if let t = Self.longestEditLogText(last.editLog), !t.isEmpty { return t }
-        return grp.last(where: { !$0.endValue.isEmpty })?.endValue ?? ""
+        return grp.last(where: { !$0.endValue.isEmpty && !Self.isPastedValue($0) })?.endValue ?? ""
     }
 
     /// 确定性前缀合并(原 Pass2 LLM 切分里的"草稿增长合并",改算法层实现)。
