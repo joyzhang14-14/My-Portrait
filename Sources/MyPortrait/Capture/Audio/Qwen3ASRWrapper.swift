@@ -1,5 +1,6 @@
 import Accelerate
 import Foundation
+import MLX
 import Qwen3ASR
 import os.log
 
@@ -33,6 +34,9 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
 
     init(modelId: String = defaultModelId) {
         self.modelId = modelId.isEmpty ? Self.defaultModelId : modelId
+        // MLX Metal buffer cache 上限。不设的话实时转录跨 chunk 累积到十几 GB
+        // (用户实测撑爆 24G 内存)。跟 RetranscribeQwenCLI 同款兜底。
+        MLX.GPU.set(cacheLimit: 512 * 1024 * 1024)
     }
 
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "qwen-asr")
@@ -108,10 +112,15 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
         // App Nap 防护：后台跑长段在 throttle 下能拖到分钟级。
         let napGuard = AppNapGuard.acquire(reason: "Qwen3-ASR transcription")
         defer { napGuard.release() }
-        let text = model!.transcribe(
-            audio: processed, sampleRate: 16000,
-            language: language, context: Self.contextHint(from: vocabulary)
-        )
+        let text = autoreleasepool {
+            let t = model!.transcribe(
+                audio: processed, sampleRate: 16000,
+                language: language, context: Self.contextHint(from: vocabulary)
+            )
+            // 清 Metal buffer cache —— 否则跨 chunk RSS 一路涨到十几 GB。
+            MLX.GPU.clearCache()
+            return t
+        }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
