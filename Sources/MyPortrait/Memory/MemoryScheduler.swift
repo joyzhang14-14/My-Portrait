@@ -380,6 +380,10 @@ final class MemoryScheduler {
             return .noWork
         }
         print("[Scheduler] event job — \(days.count) day(s) to process")
+        DiagLog.event("scheduler.event.start", ctx: [
+            "days":  days.map { ProcessingLogStore.dayString($0) },
+            "count": days.count,
+        ])
 
         for day in days {
             let ds = ProcessingLogStore.dayString(day)
@@ -461,6 +465,7 @@ final class MemoryScheduler {
             return .noWork
         }
         print("[Scheduler] classify job — grouping events into folders")
+        DiagLog.event("scheduler.classify.start")
 
         await runStep(date: classifyAnchor, stage: .classify, processor: "classify", rollbackDay: nil) {
             let cfg = self.memoryCfg
@@ -473,6 +478,13 @@ final class MemoryScheduler {
             let r = try await classifier.classify()
             self.lastClassifyResult = r
             print("[Scheduler] classify done: total=\(r.totalUnclassified) classified=\(r.classifiedInThisRun) new=\(r.newFoldersCreated) updated=\(r.existingFoldersUpdated) leftover=\(r.stillUngrouped)")
+            DiagLog.event("scheduler.classify.end", ctx: [
+                "total":     r.totalUnclassified,
+                "classified": r.classifiedInThisRun,
+                "new":        r.newFoldersCreated,
+                "updated":    r.existingFoldersUpdated,
+                "leftover":   r.stillUngrouped,
+            ])
             return .success
         }
         return .ran(days: [classifyAnchor])
@@ -496,6 +508,7 @@ final class MemoryScheduler {
             return .noWork
         }
         print("[Scheduler] portrait job — distilling")
+        DiagLog.event("scheduler.distill.start")
 
         await runStep(date: distillAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
             let cfg = self.memoryCfg
@@ -523,6 +536,9 @@ final class MemoryScheduler {
             return .noWork
         }
         print("[Scheduler] personality job — \(days.count) day(s) to process")
+        DiagLog.event("scheduler.personality.start", ctx: [
+            "days": days.map { ProcessingLogStore.dayString($0) },
+        ])
 
         for day in days {
             let ds = ProcessingLogStore.dayString(day)
@@ -599,9 +615,15 @@ final class MemoryScheduler {
             if n >= maxRetries {
                 store.setStatus(date: date, stage: stage, status: .deadLetter)
                 print("[Scheduler] \(date)/\(stage.rawValue): dead_letter (retry_count=\(n))")
+                DiagLog.error("scheduler.stage.dead_letter", ctx: [
+                    "date": date, "stage": stage.rawValue, "retry": n,
+                ])
             } else {
                 store.setStatus(date: date, stage: stage, status: .failed)
                 print("[Scheduler] \(date)/\(stage.rawValue): failed (retry_count=\(n))")
+                DiagLog.warn("scheduler.stage.failed", ctx: [
+                    "date": date, "stage": stage.rawValue, "retry": n,
+                ])
             }
         }
     }

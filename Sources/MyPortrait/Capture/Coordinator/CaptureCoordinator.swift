@@ -330,6 +330,12 @@ actor CaptureCoordinator {
             // JPG 已经落盘了，可以通过 compactor / 手动 SQL 回补。
             // 不调 recordPersisted —— silent_loss 自动 +1 反映真"沉默丢失"。
             logger.error("DB insertFrameWithOCR failed: \(String(describing: error), privacy: .public)")
+            DiagLog.error("capture.frame.db_insert_failed", ctx: [
+                "trigger":  trigger.rawValue,
+                "snapshot": url.lastPathComponent,
+                "app":      focusInfo.appName,
+                "err":      String(describing: error),
+            ])
             return
         }
         // 健康度埋点:真落库成功 → lastDbWriteMs 跳。StallDetector 拿这个
