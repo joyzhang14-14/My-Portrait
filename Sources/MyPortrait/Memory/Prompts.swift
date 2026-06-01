@@ -100,12 +100,20 @@ enum MemoryPrompts {
     - "session_ids": non-empty list of the ids this event covers.
     - "join_existing": if this event continues a candidate listed in EARLIER
       TODAY or PAST DAYS above, put its id (e.g. "_b3" or a path id);
-      otherwise null. **PREFER joining over creating a new event** whenever the
-      subject overlaps — same person + same topic, same project, same task
-      thread. EARLIER TODAY events deserve especially strong join preference
-      (they are by definition same-day activity that was split across batches);
-      do not invent a new event just because the wording differs slightly
-      ("chatted with X" vs "talked with X about Y" → same event).
+      otherwise null.
+      The two sections have different semantics — apply different thresholds:
+        • EARLIER TODAY → joining MERGES the new sessions into the existing
+          same-day event (one event, more sessions). Be AGGRESSIVE: join
+          whenever subject / person / project overlaps at all. Same-day
+          fragments of one conversation or task with slightly different
+          wording ("chatted with X" vs "talked with X about Y") → same event,
+          MUST join. Creating two separate events for the same same-day
+          subject is a bug.
+        • PAST DAYS → joining adds ONE OCCURRENCE to a recurring activity.
+          Be SELECTIVE: only join when this really IS a continuation —
+          same recurring routine, same multi-day project session, same
+          ongoing conversation. A different episode of similar activity →
+          NEW event, do NOT join (otherwise occurrences become noise).
     - "skipped": sessions with no real content (idle glance, no meaningful OCR).
 
     portrait_facets — optional, default []. Only attach when the event reflects a
