@@ -233,7 +233,7 @@ struct ConnectionsView: View {
                     Button(action: { startConnect(integration) }) {
                         HStack(spacing: 6) {
                             if connecting == integration.id {
-                                ProgressView().controlSize(.small).tint(.white)
+                                ProgressView().controlSize(.small).tint(Self.readableForeground(on: integration.accent))
                             } else {
                                 Image(systemName: signInIcon(for: integration))
                                     .font(.system(size: 11, weight: .semibold))
@@ -241,7 +241,7 @@ struct ConnectionsView: View {
                             Text(signInLabel(for: integration))
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Self.readableForeground(on: integration.accent))
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(RoundedRectangle(cornerRadius: 7).fill(integration.accent.opacity(0.85)))
                     }
@@ -253,6 +253,16 @@ struct ConnectionsView: View {
         }
         .padding(16)
         .glassCard()
+    }
+
+    /// connect 按钮文字 / spinner 的对比色。按钮底色是 `integration.accent`
+    /// (固定,不随系统主题变),所以不能钉死白字 —— ollama(accent 0.92)/
+    /// notion(0.95)是近白底,白字看不见。改成按 accent 亮度选:亮底深字、
+    /// 暗底白字,亮/暗主题下都可读,彩色 accent 按钮保持白字不变。
+    private static func readableForeground(on accent: Color) -> Color {
+        let ns = NSColor(accent).usingColorSpace(.sRGB) ?? .white
+        let lum = 0.299 * ns.redComponent + 0.587 * ns.greenComponent + 0.114 * ns.blueComponent
+        return lum > 0.6 ? Color.black.opacity(0.85) : .white
     }
 
     /// Route the connect button to the right backend:
