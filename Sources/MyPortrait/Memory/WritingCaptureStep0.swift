@@ -158,11 +158,15 @@ struct WritingCaptureStep0 {
         for p in points.dropFirst() {
             let gap = p.ts - cur.lastTs
             let appChanged = p.app != cur.app
-            // url 切:p 有非空 url 且 != 当前 session 的 url
+            // url 切:p 有非空 url 且跟当前 session **不是同一页**才算切。
             // (p.url == nil 时不算切,因为是 keystroke 没带 url)
+            // **同页容忍**:截屏抓的 browser_url 对 SPA(如 ChatGPT 切对话不刷新)
+            // 只报根域名 "chatgpt.com/",而 AX 读到全路径 "chatgpt.com/c/X"。
+            // 这俩是同一页,不能当成换 url —— 否则击键(根)和打字(全路径)交替
+            // 触发切分,把一条连续消息剁成每个 typing_event 一个 session。
             let urlChanged: Bool = {
                 guard let pu = p.url, !pu.isEmpty else { return false }
-                return pu != (cur.url ?? "")
+                return !Self.urlSamePage(pu, cur.url ?? "")
             }()
 
             if gap > idleThresholdMs || appChanged || urlChanged {
@@ -173,10 +177,13 @@ struct WritingCaptureStep0 {
                 )
             } else {
                 cur.lastTs = p.ts
-                // 如果当前 session url 是 nil(从 keystroke 起头)但 p 带了 url
-                // → 把 url 填上(这种情况是 typing observer 还没起来,先抓到键)
-                if cur.url == nil, let pu = p.url, !pu.isEmpty {
-                    cur.url = pu
+                // session url 升级到**更具体**的那个(根 → 全路径):击键先来带根
+                // url,随后的 typing_event 带全路径,要把 session 升到全路径,后面
+                // 全路径的 typing_event/frame 才归得进来(见 urlMatch)。
+                if let pu = p.url, !pu.isEmpty {
+                    if cur.url == nil || (Self.urlSamePage(pu, cur.url!) && pu.count > cur.url!.count) {
+                        cur.url = pu
+                    }
                 }
             }
         }
@@ -281,12 +288,27 @@ struct WritingCaptureStep0 {
     }
 
     /// 一个 url 是否匹配一个 session 的 url。session url == nil 时,任意 url
-    /// 都算匹配(包括 nil);session url 非空时,严格相等(或 raw 是 nil)。
-    /// 用于 raw 数据归属到 session 时容错。
+    /// 都算匹配(包括 nil);session url 非空时,**同页**即匹配(前缀容忍,
+    /// 见 urlSamePage),或 raw 是 nil。用于 raw 数据归属到 session 时容错。
     private static func urlMatch(_ raw: String?, _ session: String?) -> Bool {
         guard let s = session, !s.isEmpty else { return true }
         guard let r = raw, !r.isEmpty else { return true }
-        return r == s
+        return Self.urlSamePage(r, s)
+    }
+
+    /// 两个非空 url 是否算"同一页"(session 切分/归属用)。
+    /// 完全相等,或**同源且一方是另一方的路径前缀**(前缀须落在 "/" 边界):
+    /// 截屏抓的根 "chatgpt.com/" vs AX 抓的全路径 "chatgpt.com/c/X" —— SPA 切
+    /// 对话不刷新,截屏 url 跟不上 → 视为同页。但 "chatgpt.com/c/AAA" vs
+    /// "chatgpt.com/c/BBB"(不同对话)互不为前缀 → 仍是两页;"/a" 也不会误并
+    /// "/ab"(前缀不在 "/" 边界)。
+    static func urlSamePage(_ a: String, _ b: String) -> Bool {
+        if a == b { return true }
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        let (short, long) = a.count <= b.count ? (a, b) : (b, a)
+        guard long.hasPrefix(short) else { return false }
+        if short.hasSuffix("/") { return true }
+        return long.dropFirst(short.count).first == "/"
     }
 
     // MARK: - OCR dedupe(per session,window-aware)
