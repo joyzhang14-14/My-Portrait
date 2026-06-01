@@ -801,10 +801,17 @@ final class WritingCaptureWorker {
         // app 的输入在 AX,绝不该为了 OCR 丢掉它。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
-            // 路由确定性(有 typing_events=AX有料→ax)。**Pass 2 不再切分** ——
-            // LLM 切分会把一条连续消息拆成十几条(My Meeting 草稿)。整 session 原样
-            // 给 Pass 3,消息边界在 buildAxRecordsDeterministic 里按 submit(发送)切。
-            return (idx, [Self.ensureAxRoute(sessions[idx])])
+            let s = sessions[idx]
+            // 路由确定性(不用 LLM、不硬编码 app):
+            //   AX 接住了字 → ax 路,整 session 原样给 Pass 3。**不在 Pass 2 切**
+            //     ——LLM 切分会把一条连续消息拆成十几条(My Meeting 草稿);消息边界
+            //     在 buildAxRecordsDeterministic 里按 submit(发送)切。
+            //   AX 失灵(用户狂敲键但 typing_event 只有零宽残渣,如 Google Docs
+            //     自绘编辑器只给 "​Wi​")→ 真内容只在屏幕 OCR → ocr 重建,不采信坏 AX。
+            if Self.isAxBroken(s) {
+                return (idx, [Self.ensureOcrPrepped(s)])
+            }
+            return (idx, [Self.ensureAxRoute(s)])
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
@@ -928,6 +935,42 @@ final class WritingCaptureWorker {
             typingEvents: [], keystrokes: s.keystrokes, ocrFrames: s.ocrFrames,
             maxContentChars: s.maxContentChars, axFrameCount: s.axFrameCount,
             chromeTokens: tokens, route: "ocr")
+    }
+
+    /// AX 对这个 session 是否失灵 —— 确定性判定,**无 app/语言硬编码**。
+    /// 自绘文本编辑器(如 Google Docs)对 Accessibility 失灵:用户狂敲键写了
+    /// 整篇文章,可 typing_event 只接住 "​Wi​" 这种零宽残渣。这种 session 真内容
+    /// 只在屏幕 OCR 里,必须走 ocr 重建,绝不能采信坏 AX(否则整篇塌成几个字)。
+    ///
+    /// 判据(三者同时):
+    ///   1. meaningfulKeys ≥ 120 —— 用户确实大量手打(canvas 写作)。
+    ///      短聊天消息(击键少)永远不触发,保护 chat app 的 AX 输入不被误丢。
+    ///   2. AX **整 session 累计**接住的有效字符(去零宽/空白,逐 typing_event
+    ///      求和)≤ 击键量的 1/20 —— AX 几乎没接住字。健康 AX(含中文 IME)累计
+    ///      字数与击键同数量级,远超此比。**必须求和不能取单条最大**:聊天 app
+    ///      一个 session 发几十条短消息、每条发完输入框就清空,单条 endValue 只
+    ///      几个字,但累计内容很多 → 取 max 会把聊天误判成坏 AX(Discord 26 条
+    ///      消息被整组吞进 canvas)。求和后 Discord ~200 字 vs Google Docs ~20 字
+    ///      零宽残渣,干净分开。
+    ///   3. 有足够 OCR 内容可重建(maxFrame ≥ 200 字)。
+    nonisolated static func isAxBroken(_ s: WritingCaptureRawSession) -> Bool {
+        let minKeys = 120, keyRatio = 20
+        let meaningfulKeys = s.keystrokes.reduce(0) { acc, k in
+            (k.isBackspace == 0 && (k.modifiers & 0x07) == 0
+                && (k.char?.isEmpty == false)) ? acc + 1 : acc
+        }
+        guard meaningfulKeys >= minKeys else { return false }
+        let zeroWidth: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]
+        let axCaptured = s.typingEvents.reduce(0) { total, e -> Int in
+            let v = e.endValue.isEmpty ? e.text : e.endValue
+            return total + v.reduce(0) { c, ch in
+                if ch.isWhitespace { return c }
+                if ch.unicodeScalars.allSatisfy({ zeroWidth.contains($0.value) }) { return c }
+                return c + 1
+            }
+        }
+        let ocrChars = s.ocrFrames.map { $0.text.count }.max() ?? 0
+        return axCaptured <= meaningfulKeys / keyRatio && ocrChars >= 200
     }
 
     nonisolated static func makeUnitSessionId(startTs: Int64, app: String) -> String {
