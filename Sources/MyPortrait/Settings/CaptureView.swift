@@ -360,10 +360,14 @@ struct AudioCaptureSettingsView: View {
                         Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                     }
                     SettingsDivider()
-                    SettingsRow("Pause when a music app is playing",
-                                description: "Stop recording entirely while a music app is playing audio — solves it at the source. Detected via the app's category; call apps (Zoom, etc.) aren't affected. Takes priority over Filter music.",
-                                icon: "pause.circle") {
-                        Toggle("", isOn: config.binding(\.capture.audio.pauseOnMusicApp)).labelsHidden().toggleStyle(.switch)
+                    SettingsRow("Pause capture for these apps / categories",
+                                description: "Stop recording entirely while any app on this list is outputting audio — solves it at the source (more thorough than Filter music; takes priority). Pick specific apps and/or App-Store-style categories. Empty = never pause. \"Games (all)\" matches every game subcategory.",
+                                icon: "pause.circle") { EmptyView() }
+                    VStack(alignment: .leading) {
+                        PauseAudioListPicker(
+                            apps: config.binding(\.capture.audio.pauseAudioApps),
+                            categories: config.binding(\.capture.audio.pauseAudioCategories))
+                            .padding(.horizontal, 14).padding(.bottom, 12)
                     }
                 }
 

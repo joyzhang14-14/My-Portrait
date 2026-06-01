@@ -4,50 +4,62 @@ import CoreAudio
 import Foundation
 import os.log
 
-/// 检测当前是否有「音乐类」app 在输出音频。
+/// 检测当前是否有「暂停名单里的」app 在输出音频。
 ///
 /// 用 Core Audio 进程对象接口（macOS 14.4+，公开 API，不需要额外权限）枚举
-/// 正在输出音频的进程，再读各 app 自己在 Info.plist 声明的应用类别
-/// (`LSApplicationCategoryType`)，只有声明为 `public.app-category.music` 的
-/// 才算「音乐软件」—— 这样能区分音乐 app 和通话 app（Zoom 等是 business 类，
-/// 不会误触发，电话/会议照常录）。
+/// 正在输出音频的进程，对每个进程取它的 bundle id + 自报的应用类别
+/// (`LSApplicationCategoryType`)，命中用户配置的 `pauseAudioApps`(bundle id) 或
+/// `pauseAudioCategories`(类别) 即判定要暂停。类别 `public.app-category.games`
+/// 特殊：匹配任意 `*-games` 子类。
 ///
-/// actor 隔离 —— 分类结果缓存避免每次轮询都读 Info.plist。
+/// actor 隔离 —— 类别查询结果缓存避免每次轮询都读 Info.plist。
 actor MusicAudioDetector {
 
-    private static let musicCategory = "public.app-category.music"
-
-    /// bundleID → 是否音乐类 app。读过一次就缓存。
-    private var categoryCache: [String: Bool] = [:]
+    /// bundleID → LSApplicationCategoryType（读过一次就缓存;空串 = 没声明/查不到）。
+    private var categoryCache: [String: String] = [:]
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "music-detector")
 
-    /// 当前是否有音乐类 app 正在输出音频。
-    func isMusicPlaying() -> Bool {
+    /// 当前是否有「命中暂停名单」的 app 正在输出音频。
+    func shouldPause(apps: Set<String>, categories: Set<String>) -> Bool {
         var verdict = false
         var report: [String] = []
         for process in Self.audioProcessObjects() {
             guard Self.isRunningOutput(process) else { continue }
             let bundleID = Self.bundleID(of: process)
-            let music = bundleID.map { isMusicApp($0) } ?? false
-            report.append("\(bundleID ?? "<no-bundle>")\(music ? " [MUSIC]" : "")")
-            if music { verdict = true }
+            let cat = bundleID.map { category(of: $0) }
+            let hit: Bool = {
+                if let b = bundleID, apps.contains(b) { return true }
+                if let c = cat, Self.categoryMatches(c, selected: categories) { return true }
+                return false
+            }()
+            let catLabel = (cat?.isEmpty == false) ? "(\(cat!))" : ""
+            report.append("\(bundleID ?? "<no-bundle>")\(catLabel)\(hit ? " [PAUSE]" : "")")
+            if hit { verdict = true }
         }
-        logger.notice("isMusicPlaying: outputting=[\(report.joined(separator: ", "), privacy: .public)] → \(verdict, privacy: .public)")
+        logger.notice("shouldPause: outputting=[\(report.joined(separator: ", "), privacy: .public)] → \(verdict, privacy: .public)")
         return verdict
     }
 
-    private func isMusicApp(_ bundleID: String) -> Bool {
+    /// 读 app 自报的 LSApplicationCategoryType（缓存）。空串 = 没声明/查不到。
+    private func category(of bundleID: String) -> String {
         if let cached = categoryCache[bundleID] { return cached }
-        var category = "<none>"
+        var category = ""
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
            let bundle = Bundle(url: url),
            let cat = bundle.infoDictionary?["LSApplicationCategoryType"] as? String {
             category = cat
         }
-        let isMusic = (category == Self.musicCategory)
-        logger.notice("category lookup: \(bundleID, privacy: .public) = \(category, privacy: .public) → music=\(isMusic)")
-        categoryCache[bundleID] = isMusic
-        return isMusic
+        logger.notice("category lookup: \(bundleID, privacy: .public) = \(category.isEmpty ? "<none>" : category, privacy: .public)")
+        categoryCache[bundleID] = category
+        return category
+    }
+
+    /// 命中判定：精确匹配,或 `games` 选中时匹配任意 `*-games` 子类。
+    private static func categoryMatches(_ declared: String, selected: Set<String>) -> Bool {
+        guard !declared.isEmpty, !selected.isEmpty else { return false }
+        if selected.contains(declared) { return true }
+        if selected.contains("public.app-category.games"), declared.hasSuffix("-games") { return true }
+        return false
     }
 
     // MARK: - Core Audio 进程对象
@@ -105,7 +117,8 @@ actor MusicAudioDetector {
 @MainActor
 final class MusicPlaybackMonitor {
 
-    /// 当前是否有音乐类 app 在输出音频。`pauseOnMusicApp` 关闭时恒为 false。
+    /// 当前是否有「命中暂停名单」的 app 在输出音频(→ 暂停采集)。两个名单都
+    /// 空时恒为 false。沿用 `musicDetected` 名字 —— Services 的采集 sink 订阅它。
     @Published private(set) var musicDetected = false
 
     private let logger = Logger(subsystem: "com.myportrait", category: "music-monitor")
@@ -129,17 +142,19 @@ final class MusicPlaybackMonitor {
     }
 
     private func tick() async {
-        let enabled = ConfigStore.shared.current.capture.audio.pauseOnMusicApp
-        guard enabled else {
-            logger.notice("tick: pauseOnMusicApp=false → musicDetected forced false")
+        let audio = ConfigStore.shared.current.capture.audio
+        let apps = Set(audio.pauseAudioApps)
+        let cats = Set(audio.pauseAudioCategories)
+        guard !apps.isEmpty || !cats.isEmpty else {
+            logger.notice("tick: pause list empty → musicDetected forced false")
             if musicDetected { musicDetected = false }
             return
         }
-        let playing = await detector.isMusicPlaying()
-        logger.notice("tick: pauseOnMusicApp=true playing=\(playing, privacy: .public) musicDetected(before)=\(self.musicDetected, privacy: .public)")
+        let playing = await detector.shouldPause(apps: apps, categories: cats)
+        logger.notice("tick: apps=\(apps.count, privacy: .public) cats=\(cats.count, privacy: .public) playing=\(playing, privacy: .public) before=\(self.musicDetected, privacy: .public)")
         if musicDetected != playing {
             musicDetected = playing
-            logger.notice("music \(playing ? "started" : "stopped", privacy: .public) — audio capture \(playing ? "paused" : "resumed", privacy: .public)")
+            logger.notice("pause-audio \(playing ? "started" : "stopped", privacy: .public) — capture \(playing ? "paused" : "resumed", privacy: .public)")
         }
     }
 }
