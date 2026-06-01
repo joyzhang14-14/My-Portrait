@@ -633,59 +633,66 @@ struct TimelineDB: Sendable {
     }
 
     /// Delete frames + audio transcriptions strictly before `cutoff`.
+    /// 在注册了 `FoundationTokenizer` 的 GRDB 写连接上执行写事务,返回闭包结果
+    /// (失败返回 nil)。
+    ///
+    /// **凡是写 `frames` / `audio_transcriptions`(及其 FTS5 同步触发器)都必须
+    /// 走这里。** 这两张表各挂一张 `synchronize` 的 FTS5 表(`frames_fts` /
+    /// `transcriptions_fts`),用自定义分词器 `foundation_icu`。裸 sqlite3 连接
+    /// 没注册这个分词器 → AFTER INSERT/UPDATE/DELETE 触发器重新分词时报错 →
+    /// 整条语句连同事务回滚,写入静默失败(详见 `mergeSpeakers` 的长注释)。
+    /// GRDB 连接通过 `prepareDatabase` 注册分词器,触发器才能跑通。
+    @discardableResult
+    private func withTokenizerWrite<T>(_ body: (Database) throws -> T) -> T? {
+        guard exists else { return nil }
+        do {
+            var config = Configuration()
+            config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
+            let queue = try DatabaseQueue(path: dbPath, configuration: config)
+            return try queue.write { db in try body(db) }
+        } catch {
+            timelineLog.error("withTokenizerWrite failed: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
     func deleteBefore(_ cutoff: Date, mediaOnly: Bool) -> DeleteResult {
         guard exists else { return DeleteResult() }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
-            return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
-        }
-        defer { sqlite3_close(db) }
-
         let cutoffMs = Self.dbMs(cutoff)
-        var result = DeleteResult()
-
-        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp_ms < ?") {
-            sqlite3_bind_int64(stmt, 1, cutoffMs)
-            if sqlite3_step(stmt) == SQLITE_DONE {
-                result.frames = Int(sqlite3_changes(db))
+        // frames + audio_transcriptions 都挂 foundation_icu 的 FTS5 触发器 ——
+        // 必须走带分词器的 GRDB 连接,否则两条 DELETE 都会触发器报错回滚。
+        let r = withTokenizerWrite { db -> DeleteResult in
+            var res = DeleteResult()
+            try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms < :ms",
+                           arguments: ["ms": cutoffMs])
+            res.frames = db.changesCount
+            if !mediaOnly {
+                try db.execute(sql: "DELETE FROM audio_transcriptions WHERE transcribed_at_ms < :ms",
+                               arguments: ["ms": cutoffMs])
+                res.audio = db.changesCount
             }
-            sqlite3_finalize(stmt)
+            return res
         }
-
-        if !mediaOnly,
-           let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE transcribed_at_ms < ?") {
-            sqlite3_bind_int64(stmt, 1, cutoffMs)
-            if sqlite3_step(stmt) == SQLITE_DONE {
-                result.audio = Int(sqlite3_changes(db))
-            }
-            sqlite3_finalize(stmt)
-        }
-
-        return result
+        return r ?? DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
     }
 
     /// Delete frames + audio transcriptions strictly *after* `cutoff`.
     @discardableResult
     func deleteAfter(_ cutoff: Date) -> DeleteResult {
         guard exists else { return DeleteResult() }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
-            return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
-        }
-        defer { sqlite3_close(db) }
         let cutoffMs = Self.dbMs(cutoff)
-        var result = DeleteResult()
-        if let stmt = prepare(db, "DELETE FROM frames WHERE timestamp_ms >= ?") {
-            sqlite3_bind_int64(stmt, 1, cutoffMs)
-            if sqlite3_step(stmt) == SQLITE_DONE { result.frames = Int(sqlite3_changes(db)) }
-            sqlite3_finalize(stmt)
+        // 同 deleteBefore:两条 DELETE 都触发 FTS5,必须走带分词器的 GRDB 连接。
+        let r = withTokenizerWrite { db -> DeleteResult in
+            var res = DeleteResult()
+            try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms >= :ms",
+                           arguments: ["ms": cutoffMs])
+            res.frames = db.changesCount
+            try db.execute(sql: "DELETE FROM audio_transcriptions WHERE transcribed_at_ms >= :ms",
+                           arguments: ["ms": cutoffMs])
+            res.audio = db.changesCount
+            return res
         }
-        if let stmt = prepare(db, "DELETE FROM audio_transcriptions WHERE transcribed_at_ms >= ?") {
-            sqlite3_bind_int64(stmt, 1, cutoffMs)
-            if sqlite3_step(stmt) == SQLITE_DONE { result.audio = Int(sqlite3_changes(db)) }
-            sqlite3_finalize(stmt)
-        }
-        return result
+        return r ?? DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
     }
 
     /// Speakers: pull a few representative transcripts so the LLM-driven
@@ -866,120 +873,70 @@ struct TimelineDB: Sendable {
     ///
     /// 不依赖 diarization、不依赖 transcription —— 纯 DB 写。返回 speaker_id。
     func upsertVoiceTrainedSpeaker(name: String, embedding: [Float]) -> Int64? {
-        guard exists else { return nil }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_close(db) }
-
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let blob = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-
-        // 1) 找所有同名(case-insensitive,排除 hallucination)。
-        //    历史 bug:有时 diarization 自动建的 speaker 在用户改名前先被
-        //    rename,name 时机错位 → 上次 upsert 没命中老条目,又 INSERT
-        //    一条新的,造成两个 "Joy"。这里取所有同名,**保留 id 最小**
-        //    (= 最老 = sample 累计最多的那条)作为 keeper,后面的 dupe
-        //    合并进 keeper 后删掉,保证 voice training 之后只有一条同名。
-        var duplicateIds: [Int64] = []
-        if let stmt = prepare(db, """
-            SELECT id FROM speakers
-            WHERE LOWER(name) = LOWER(?)
-              AND hallucination = 0
-            ORDER BY id ASC
-            """) {
-            sqlite3_bind_text(stmt, 1, name, -1, transient)
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                duplicateIds.append(sqlite3_column_int64(stmt, 0))
-            }
-            sqlite3_finalize(stmt)
-        }
-        var speakerId: Int64? = duplicateIds.first
-        // 2a) 把后面的 dupe 合并进 keeper:把它们的 speaker_embeddings +
-        //     audio_transcriptions reassign,再删 dupe speakers 行。这样
-        //     keeper 拿到所有历史样本和转录归属。
-        if duplicateIds.count > 1, let keeperId = speakerId {
-            for dupeId in duplicateIds.dropFirst() {
-                if let stmt = prepare(db, "UPDATE speaker_embeddings SET speaker_id = ? WHERE speaker_id = ?") {
-                    sqlite3_bind_int64(stmt, 1, keeperId)
-                    sqlite3_bind_int64(stmt, 2, dupeId)
-                    _ = sqlite3_step(stmt)
-                    sqlite3_finalize(stmt)
+        // 整个 upsert 走单个 GRDB 写事务:① 下面对 audio_transcriptions 的 UPDATE
+        // 会触发 FTS5 同步触发器,必须带 foundation_icu 分词器(裸 sqlite 会回滚、
+        // dupe 合并静默失败);② 跨 speakers / speaker_embeddings /
+        // audio_transcriptions 的多条写放进一个事务,避免中途失败留下半合并脏状态。
+        let result: Int64?? = withTokenizerWrite { db -> Int64? in
+            // 1) 找所有同名(case-insensitive,排除 hallucination)。
+            //    历史 bug:有时 diarization 自动建的 speaker 在用户改名前先被
+            //    rename,name 时机错位 → 上次 upsert 没命中老条目,又 INSERT
+            //    一条新的,造成两个 "Joy"。这里取所有同名,**保留 id 最小**
+            //    (= 最老 = sample 累计最多的那条)作为 keeper,后面的 dupe
+            //    合并进 keeper 后删掉,保证 voice training 之后只有一条同名。
+            let duplicateIds = try Int64.fetchAll(db, sql: """
+                SELECT id FROM speakers
+                WHERE LOWER(name) = LOWER(:name)
+                  AND hallucination = 0
+                ORDER BY id ASC
+                """, arguments: ["name": name])
+            var speakerId: Int64? = duplicateIds.first
+            // 2a) 把后面的 dupe 合并进 keeper:把它们的 speaker_embeddings +
+            //     audio_transcriptions reassign,再删 dupe speakers 行。这样
+            //     keeper 拿到所有历史样本和转录归属。
+            if duplicateIds.count > 1, let keeperId = speakerId {
+                for dupeId in duplicateIds.dropFirst() {
+                    try db.execute(sql: "UPDATE speaker_embeddings SET speaker_id = :keep WHERE speaker_id = :dupe",
+                                   arguments: ["keep": keeperId, "dupe": dupeId])
+                    try db.execute(sql: "UPDATE audio_transcriptions SET speaker_id = :keep WHERE speaker_id = :dupe",
+                                   arguments: ["keep": keeperId, "dupe": dupeId])
+                    try db.execute(sql: "DELETE FROM speakers WHERE id = :dupe",
+                                   arguments: ["dupe": dupeId])
                 }
-                if let stmt = prepare(db, "UPDATE audio_transcriptions SET speaker_id = ? WHERE speaker_id = ?") {
-                    sqlite3_bind_int64(stmt, 1, keeperId)
-                    sqlite3_bind_int64(stmt, 2, dupeId)
-                    _ = sqlite3_step(stmt)
-                    sqlite3_finalize(stmt)
-                }
-                if let stmt = prepare(db, "DELETE FROM speakers WHERE id = ?") {
-                    sqlite3_bind_int64(stmt, 1, dupeId)
-                    _ = sqlite3_step(stmt)
-                    sqlite3_finalize(stmt)
-                }
+                timelineLog.warning("upsertVoiceTrainedSpeaker: merged \(duplicateIds.count - 1) duplicate '\(name, privacy: .public)' row(s) into id=\(keeperId)")
             }
-            timelineLog.warning("upsertVoiceTrainedSpeaker: merged \(duplicateIds.count - 1) duplicate '\(name, privacy: .public)' row(s) into id=\(keeperId)")
+            // 2) upsert speakers row(trained_at_ms = nowMs 标记"用户真训过")
+            if speakerId == nil {
+                try db.execute(sql: """
+                    INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, trained_at_ms)
+                    VALUES (:name, :centroid, 1, 0, :now, :now, :now)
+                    """, arguments: ["name": name, "centroid": blob, "now": nowMs])
+                speakerId = db.lastInsertedRowID
+            } else if let id = speakerId {
+                try db.execute(sql: """
+                    UPDATE speakers
+                    SET centroid = :centroid, embedding_count = 1, hallucination = 0,
+                        updated_at_ms = :now, trained_at_ms = :now
+                    WHERE id = :id
+                    """, arguments: ["centroid": blob, "now": nowMs, "id": id])
+                // 重训:清掉这个 speaker 的所有旧样本向量。否则 matchSpeaker 第 1 步
+                // 遍历 speaker_embeddings 时,旧的(可能采到的是别人 / 是脏样本)
+                // 余弦可能压过新训练的样本,导致重训后说话还被错配回原聚类。
+                try db.execute(sql: "DELETE FROM speaker_embeddings WHERE speaker_id = :id",
+                               arguments: ["id": id])
+            }
+            // 3) append sample to speaker_embeddings(matchSpeaker 也比对这张表)
+            if let id = speakerId {
+                try db.execute(sql: """
+                    INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms)
+                    VALUES (:id, :emb, :now)
+                    """, arguments: ["id": id, "emb": blob, "now": nowMs])
+            }
+            return speakerId
         }
-
-        // 2) upsert speakers row(trained_at_ms = nowMs 标记"用户真训过")
-        if speakerId == nil {
-            guard let ins = prepare(db, """
-                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, trained_at_ms)
-                VALUES (?, ?, 1, 0, ?, ?, ?)
-                """) else { return nil }
-            sqlite3_bind_text(ins, 1, name, -1, transient)
-            blob.withUnsafeBytes { rawBuf in
-                sqlite3_bind_blob(ins, 2, rawBuf.baseAddress, Int32(rawBuf.count), transient)
-            }
-            sqlite3_bind_int64(ins, 3, nowMs)
-            sqlite3_bind_int64(ins, 4, nowMs)
-            sqlite3_bind_int64(ins, 5, nowMs)   // trained_at_ms
-            let ok = sqlite3_step(ins) == SQLITE_DONE
-            sqlite3_finalize(ins)
-            guard ok else { return nil }
-            speakerId = sqlite3_last_insert_rowid(db)
-        } else if let id = speakerId {
-            guard let upd = prepare(db, """
-                UPDATE speakers
-                SET centroid = ?, embedding_count = 1, hallucination = 0,
-                    updated_at_ms = ?, trained_at_ms = ?
-                WHERE id = ?
-                """) else { return nil }
-            blob.withUnsafeBytes { rawBuf in
-                sqlite3_bind_blob(upd, 1, rawBuf.baseAddress, Int32(rawBuf.count), transient)
-            }
-            sqlite3_bind_int64(upd, 2, nowMs)
-            sqlite3_bind_int64(upd, 3, nowMs)   // trained_at_ms
-            sqlite3_bind_int64(upd, 4, id)
-            let ok = sqlite3_step(upd) == SQLITE_DONE
-            sqlite3_finalize(upd)
-            guard ok else { return nil }
-
-            // 重训:清掉这个 speaker 的所有旧样本向量。否则 matchSpeaker 第 1 步
-            // 遍历 speaker_embeddings 时,旧的(可能采到的是别人 / 是脏样本)
-            // 余弦可能压过新训练的样本,导致重训后说话还被错配回原聚类。
-            if let del = prepare(db, "DELETE FROM speaker_embeddings WHERE speaker_id = ?") {
-                sqlite3_bind_int64(del, 1, id)
-                _ = sqlite3_step(del)
-                sqlite3_finalize(del)
-            }
-        }
-
-        // 3) append sample to speaker_embeddings(matchSpeaker 也比对这张表)
-        if let id = speakerId, let ins2 = prepare(db, """
-            INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms)
-            VALUES (?, ?, ?)
-            """) {
-            sqlite3_bind_int64(ins2, 1, id)
-            blob.withUnsafeBytes { rawBuf in
-                sqlite3_bind_blob(ins2, 2, rawBuf.baseAddress, Int32(rawBuf.count), transient)
-            }
-            sqlite3_bind_int64(ins2, 3, nowMs)
-            _ = sqlite3_step(ins2)
-            sqlite3_finalize(ins2)
-        }
-
-        return speakerId
+        return result ?? nil
     }
 
     /// 窗口内**已转录**(audio_transcriptions 有行)的输入音频条数。
@@ -1037,26 +994,20 @@ struct TimelineDB: Sendable {
     func reassignInputTranscriptionsToSpeaker(
         _ speakerId: Int64, fromMs: Int64, toMs: Int64
     ) -> Int {
-        guard exists else { return 0 }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_close(db) }
-        let sql = """
-            UPDATE audio_transcriptions
-            SET speaker_id = ?
-            WHERE audio_chunk_id IN (
-                SELECT id FROM audio_chunks
-                WHERE is_input = 1 AND recorded_at_ms BETWEEN ? AND ?
-            )
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, speakerId)
-        sqlite3_bind_int64(stmt, 2, fromMs)
-        sqlite3_bind_int64(stmt, 3, toMs)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { return 0 }
-        return Int(sqlite3_changes(db))
+        // UPDATE audio_transcriptions 触发 FTS5 同步触发器 —— 必须走带分词器的
+        // GRDB 连接,裸 sqlite 会触发器报错回滚(改不动 speaker_id)。
+        let r = withTokenizerWrite { db -> Int in
+            try db.execute(sql: """
+                UPDATE audio_transcriptions
+                SET speaker_id = :sid
+                WHERE audio_chunk_id IN (
+                    SELECT id FROM audio_chunks
+                    WHERE is_input = 1 AND recorded_at_ms BETWEEN :from AND :to
+                )
+                """, arguments: ["sid": speakerId, "from": fromMs, "to": toMs])
+            return db.changesCount
+        }
+        return r ?? 0
     }
 
     /// 窗口内还在处理中（status 不是 done/failed）的输入（麦克风）音频块数。
