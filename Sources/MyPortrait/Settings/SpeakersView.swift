@@ -357,21 +357,51 @@ private struct UnidentifiedCard: View {
     @State private var draft: String = ""
     @State private var hover = false
     @State private var audioPlayer = SpeakerAudioPlayer.shared
+    /// 播放中向外扩散并淡出的脉冲环动画开关。
+    @State private var playPulse = false
 
-    /// 波形 pill —— 点击试听该匿名簇最近一段录音(跟 IdentifiedRow 一致)。
-    /// 之前是纯静态 label,未命名簇没法试听(命名后才有按钮)。
+    /// 专门的试听按钮 —— 圆形渐变底 + play/pause 图标,一眼是按钮。波形
+    /// "N samples" pill 仍是纯统计标签(那个可爱图标留着)。播放时圆环外扩脉冲。
     /// row.id 是 String(DB Int64 转的字符串),还原回 Int64 给 player。
     private var playButton: some View {
         let dbId: Int64 = Int64(row.id) ?? -1
         let isPlaying = audioPlayer.playingId == dbId
-        let icon = isPlaying ? "pause.fill" : "waveform"
         return Button {
             SpeakerAudioPlayer.shared.toggle(speakerId: dbId)
         } label: {
-            StatPill(icon: icon, text: "\(row.sampleCount) samples")
+            ZStack {
+                // 播放中:向外扩散并淡出的脉冲环。
+                if isPlaying {
+                    Circle()
+                        .stroke(Color.purple.opacity(0.55), lineWidth: 2)
+                        .scaleEffect(playPulse ? 1.65 : 0.9)
+                        .opacity(playPulse ? 0 : 0.7)
+                }
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.purple.opacity(0.85), Color.blue.opacity(0.6)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.7))
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    // play 三角形视觉重心偏左,微调居中(pause 不偏)。
+                    .offset(x: isPlaying ? 0 : 1)
+            }
+            .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
         .help("Play a recent clip of this cluster")
+        .onChange(of: isPlaying) { _, playing in
+            if playing {
+                playPulse = false
+                withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) {
+                    playPulse = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.2)) { playPulse = false }
+            }
+        }
     }
 
     var body: some View {
@@ -385,13 +415,15 @@ private struct UnidentifiedCard: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 HStack(spacing: 6) {
-                    playButton
+                    StatPill(icon: "waveform", text: "\(row.sampleCount) samples")
                     if let last = row.lastHeard {
                         StatPill(icon: "clock", text: relative(last))
                     }
                 }
             }
             Spacer(minLength: 14)
+
+            playButton
 
             TextField("Name this speaker…", text: $draft)
                 .textFieldStyle(.plain)
