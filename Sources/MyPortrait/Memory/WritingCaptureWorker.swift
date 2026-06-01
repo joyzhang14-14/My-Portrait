@@ -801,23 +801,10 @@ final class WritingCaptureWorker {
         // app 的输入在 AX,绝不该为了 OCR 丢掉它。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
-            // 路由确定性(有 typing_events=AX有料→ax;LLM 路由不可靠不用)。
-            // 切分交给 LLM(权衡 return / 时间判消息边界)——这是 Pass 2 的职责。
-            // **不丢 event**:LLM 没分配到的各自单独成单元。record 集仍由算法定死
-            // (用 LLM 的 units 建 unit-session,Pass 3 每个 unit 一条 record,不靠
-            // LLM 决定增删)。
-            let s = sessions[idx]
-            let agent = await makePass2()
-            let result = (try? await agent.run(session: s))
-                ?? WritingCapturePass2Agent.Result(
-                    primarySource: "ax",
-                    units: s.typingEvents.compactMap { $0.id }.map { [$0] }, dropped: [])
-            let assigned = Set(result.units.flatMap { $0 })
-            var unitIds = result.units.filter { !$0.isEmpty }
-            unitIds.append(contentsOf: s.typingEvents.compactMap { $0.id }
-                .filter { !assigned.contains($0) }.map { [$0] })
-            let rebuilt = unitIds.compactMap { Self.rebuildUnitSession(from: s, eventIds: $0) }
-            return (idx, rebuilt.isEmpty ? [Self.ensureAxRoute(s)] : rebuilt)
+            // 路由确定性(有 typing_events=AX有料→ax)。**Pass 2 不再切分** ——
+            // LLM 切分会把一条连续消息拆成十几条(My Meeting 草稿)。整 session 原样
+            // 给 Pass 3,消息边界在 buildAxRecordsDeterministic 里按 submit(发送)切。
+            return (idx, [Self.ensureAxRoute(sessions[idx])])
         }
         var refinedByIdx: [Int: [WritingCaptureRawSession]] = [:]
         await withTaskGroup(of: (Int, [WritingCaptureRawSession]).self) { tg in
@@ -1014,6 +1001,11 @@ final class WritingCaptureWorker {
         }
     }
 
+    /// typing_event 的 edit_log 里有没有 submit(用户按回车发送了)。消息边界。
+    nonisolated static func editLogHasSubmit(_ editLogJSON: String) -> Bool {
+        editLogJSON.contains("\"kind\":\"submit\"")
+    }
+
     static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
@@ -1048,38 +1040,53 @@ final class WritingCaptureWorker {
                     let evs = s.typingEvents.filter { $0.id != nil }
                         .sorted { $0.startedAt < $1.startedAt }
                     guard !evs.isEmpty else { continue }
-                    let text = evs.map { $0.text }.joined(separator: "\n")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { continue }
-                    // 按 keystroke 把关:统计该 unit 窗口内用户实打的键(非 cmd/opt/
-                    // ctrl 快捷键)。AX 在"打开文档/粘贴/程序写入"时会把一大段没打过的
-                    // 文字报成 typing_event(如 Obsidian 你只是打开来看)→ 击键≈0 而
-                    // 文字一大堆 → 丢。conf = 击键覆盖度(不再死写 1.00)。
-                    let kc = s.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
-                    if text.count > 20 && kc < text.count / 4 { continue }   // 读/加载/粘贴
-                    let ks = await WritingCapturePass2Agent.assembleKeystrokeText(s.keystrokes)
-                    // slash 命令(/play 等):用户打 "/" 唤起命令面板,AX 把斜杠吞了只留
-                    // 命令名("play"),但 keystroke 仍以 "/" 起头 → slash 命令,不是写作
-                    // → 丢。app 无关(slash 命令是 chat app 通用约定)。
-                    let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
-                        .replacingOccurrences(of: "<BS>", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    if ksTrim.hasPrefix("/") { continue }
-                    // CJK 拼音 ~1.5–3 击键/字,英文 ~1。除以 2 归一,clamp [0.5,1]。
-                    let conf = min(1.0, max(0.5, Double(kc) / (Double(text.count) * 2.0)))
-                    let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
-                    let ctx = contextTimeline.first {
-                        $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
-                    }?.summary
-                    let rid = "r\(records.count)"
-                    records.append(WritingCaptureRecord(
-                        text: text, editLog: [],
-                        kind: text.count >= 140 ? "long_form" : "short_form",
-                        source: "ax_cleaned", confidence: conf, contextSummary: ctx,
-                        app: g.app, url: g.url, startTs: startTs, endTs: endTs,
-                        referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
-                        referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
-                    items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
+                    // **按 submit(发送)切消息** —— 一次发送 = 一条消息。连续没 submit
+                    // 的事件(My Meeting 长草稿)合成一条。每组取最后事件的 endValue =
+                    // 发送/草稿那一刻输入框的完整内容(累积值,无需拼增量)。
+                    var msgGroups: [[TypingEvent]] = []
+                    var cur: [TypingEvent] = []
+                    for ev in evs {
+                        cur.append(ev)
+                        if Self.editLogHasSubmit(ev.editLog) { msgGroups.append(cur); cur = [] }
+                    }
+                    if !cur.isEmpty { msgGroups.append(cur) }    // 末尾未发送的草稿
+                    for grp in msgGroups {
+                        let last = grp.last!
+                        let text = (last.endValue.isEmpty
+                            ? grp.map { $0.text }.joined() : last.endValue)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { continue }
+                        let startTs = grp.first!.startedAt, endTs = grp.last!.endedAt
+                        // 该消息组窗口内的击键(±10s)。
+                        let pad: Int64 = 10_000
+                        let grpKeys = s.keystrokes.filter { $0.tsMs >= startTs - pad && $0.tsMs <= endTs + pad }
+                        // 按 keystroke 把关:文字一大段但几乎没击键 = 读/打开文档/纯外部
+                        // 粘贴 → 丢(Obsidian 你只是打开来看)。短粘贴(<30字)混在大量
+                        // 打字里 → 击键多 → 留。conf = 击键覆盖度(不再死写 1.00)。
+                        let kc = grpKeys.filter { ($0.modifiers & 0x07) == 0 }.count
+                        if text.count > 20 && kc < text.count / 4 { continue }
+                        let ks = await WritingCapturePass2Agent.assembleKeystrokeText(grpKeys)
+                        // slash 命令(/play 等):AX 吞了斜杠只留命令名,keystroke 仍以
+                        // "/" 起头 → 丢。app 无关(slash 命令是 chat app 通用约定)。
+                        let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
+                            .replacingOccurrences(of: "<BS>", with: "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if ksTrim.hasPrefix("/") { continue }
+                        // CJK 拼音 ~1.5–3 击键/字,英文 ~1。除以 2 归一,clamp [0.5,1]。
+                        let conf = min(1.0, max(0.5, Double(kc) / (Double(text.count) * 2.0)))
+                        let ctx = contextTimeline.first {
+                            $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
+                        }?.summary
+                        let rid = "r\(records.count)"
+                        records.append(WritingCaptureRecord(
+                            text: text, editLog: [],
+                            kind: text.count >= 140 ? "long_form" : "short_form",
+                            source: "ax_cleaned", confidence: conf, contextSummary: ctx,
+                            app: g.app, url: g.url, startTs: startTs, endTs: endTs,
+                            referenceTypingEventIds: grp.compactMap { $0.id }, referenceFrameIds: [],
+                            referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
+                        items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
+                    }
                 }
                 let fixes = await makeCleanup().run(items: items)
                 let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
