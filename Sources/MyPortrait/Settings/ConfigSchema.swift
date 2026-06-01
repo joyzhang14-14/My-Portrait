@@ -549,12 +549,23 @@ struct AudioConfig: Codable, Equatable {
     var captureSystemAudio:      Bool     = true
     var speakerIdEnabled:        Bool     = true
     var filterMusic:             Bool     = false
-    /// 检测到「音乐类」app 在输出音频时,整体暂停音频采集（比 filterMusic 更彻底,
-    /// 从源头不录。两者都开时此项优先）。
+    /// 暂停名单（黑名单）：这些 app(bundle id) 或 类别(LSApplicationCategoryType,
+    /// 如 public.app-category.music) 在输出音频时,整体暂停音频采集（比 filterMusic
+    /// 更彻底,从源头不录。命中任一即暂停;两个名单都空 = 不暂停。`games` 类别特殊:
+    /// 匹配任意 *-games 子类）。
+    var pauseAudioApps:          [String] = []
+    var pauseAudioCategories:    [String] = []
+    /// DEPRECATED → 迁移到 pauseAudioCategories(music)。只为解码老 config 保留。
     var pauseOnMusicApp:         Bool     = false
     /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
     var transcribeOnACOnly:      Bool     = true
     var customVocabulary:        [String] = []
+    /// 用户**锁定**的输入设备 UID (CoreAudio kAudioDevicePropertyDeviceUID)。
+    /// 空 = 跟随系统默认(插耳机会跟着切,macOS 标准行为)。
+    /// 非空 = AudioCaptureService 启 engine 时把 AUHAL inputNode 绑到这个
+    /// device,**不受系统 default 变化影响** —— 解 issue #10。
+    /// 设备拔了 fallback 系统默认 + UI 报警。
+    var preferredInputDeviceUID: String   = ""
     /// engine = "custom" 时用：OpenAI 兼容转录服务端点 / 模型 / API key 引用。
     var customEndpoint:          String   = ""
     var customModel:             String   = "whisper-1"
@@ -575,9 +586,12 @@ struct AudioConfig: Codable, Equatable {
         case captureSystemAudio      = "capture_system_audio"
         case speakerIdEnabled        = "speaker_id_enabled"
         case filterMusic             = "filter_music"
+        case pauseAudioApps          = "pause_audio_apps"
+        case pauseAudioCategories    = "pause_audio_categories"
         case pauseOnMusicApp         = "pause_on_music_app"
         case transcribeOnACOnly      = "transcribe_on_ac_only"
         case customVocabulary        = "custom_vocabulary"
+        case preferredInputDeviceUID = "preferred_input_device_uid"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -596,9 +610,17 @@ struct AudioConfig: Codable, Equatable {
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
         speakerIdEnabled       = c.dflt(Bool.self,     .speakerIdEnabled, speakerIdEnabled)
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
+        pauseAudioApps         = c.dflt([String].self, .pauseAudioApps, pauseAudioApps)
+        pauseAudioCategories   = c.dflt([String].self, .pauseAudioCategories, pauseAudioCategories)
         pauseOnMusicApp        = c.dflt(Bool.self,     .pauseOnMusicApp, pauseOnMusicApp)
+        // 老开关迁移:pauseOnMusicApp=true 且新名单为空 → 预填 music 类别,保住行为。
+        if pauseOnMusicApp, pauseAudioApps.isEmpty, pauseAudioCategories.isEmpty {
+            pauseAudioCategories = ["public.app-category.music"]
+            pauseOnMusicApp = false
+        }
         transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
+        preferredInputDeviceUID = c.dflt(String.self,  .preferredInputDeviceUID, preferredInputDeviceUID)
     }
 }
 

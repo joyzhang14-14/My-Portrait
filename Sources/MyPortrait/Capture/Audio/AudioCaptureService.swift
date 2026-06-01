@@ -167,6 +167,10 @@ actor AudioCaptureService {
         }()
 
         let inputNode = engine.inputNode
+        // 用户在 Settings 锁定输入设备 → 绑定 AUHAL.CurrentDevice。**必须在
+        // 读 outputFormat / installTap 之前** —— 这两步会触发 AU initialize,
+        // 之后再改 CurrentDevice 已晚。空字符串 = follow system default (跳过)。
+        Self.bindPreferredInputDevice(inputNode: inputNode, logger: logger)
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
         guard let target = AVAudioFormat(
@@ -203,12 +207,98 @@ actor AudioCaptureService {
 
         try engine.start()
 
+        // 通知 AudioDevicesMonitor:app 现在在录哪个 device(UI live status)。
+        // 不阻塞主路径,fire-and-forget。
+        let activeUID = Self.currentInputDeviceUID(inputNode: inputNode)
+        Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID(activeUID) }
+
         let recorder = vadRecorder
         samplesTask = Task {
             for await samples in stream {
                 await recorder?.feed(samples)
             }
         }
+    }
+
+    /// 把 inputNode 底层 AUHAL 的 CurrentDevice 绑到用户在 Settings 锁定
+    /// 的 UID。空 UID / 设备不存在(拔了)/ 绑定失败 → 让它 fallback 系统
+    /// default(AVAudioEngine 默认行为),不抛错。
+    nonisolated private static func bindPreferredInputDevice(
+        inputNode: AVAudioInputNode, logger: Logger
+    ) {
+        let uid = ConfigStore.snapshot.preferredInputDeviceUID
+        guard !uid.isEmpty else { return }   // follow system
+
+        // AudioDevicesMonitor 是 @MainActor —— 这里在 actor 外,直接查
+        // CoreAudio 同步 API(避免引 hop 复杂度)。
+        guard let deviceID = currentDeviceID(forUID: uid) else {
+            logger.warning("preferred input device UID '\(uid, privacy: .public)' not found — falling back to system default")
+            return
+        }
+
+        guard let au = inputNode.audioUnit else {
+            logger.warning("inputNode.audioUnit unavailable — falling back to system default")
+            return
+        }
+        var did = deviceID
+        let status = AudioUnitSetProperty(
+            au, kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0,
+            &did, UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status != noErr {
+            logger.warning("AudioUnitSetProperty(CurrentDevice) failed: \(status) — falling back to system default")
+        } else {
+            logger.info("bound mic input to device UID '\(uid, privacy: .public)'")
+        }
+    }
+
+    /// 查当前 inputNode 实际在用的 device UID(给 UI live status)。
+    nonisolated private static func currentInputDeviceUID(inputNode: AVAudioInputNode) -> String {
+        guard let au = inputNode.audioUnit else { return "" }
+        var did = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioUnitGetProperty(
+            au, kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0, &did, &size
+        )
+        guard status == noErr, did != 0 else { return "" }
+        return deviceUID(forID: did) ?? ""
+    }
+
+    /// AudioDeviceID → UID(同步 CoreAudio query)。
+    nonisolated private static func deviceUID(forID id: AudioDeviceID) -> String? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var cf: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &cf) == noErr else { return nil }
+        return cf as String
+    }
+
+    /// UID → AudioDeviceID(扫所有设备找匹配,同步)。
+    nonisolated private static func currentDeviceID(forUID uid: String) -> AudioDeviceID? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size
+        ) == noErr, size > 0 else { return nil }
+        let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+        var ids = [AudioDeviceID](repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids
+        ) == noErr else { return nil }
+        for id in ids {
+            if deviceUID(forID: id) == uid { return id }
+        }
+        return nil
     }
 
     private func performConversion(buffer: AVAudioPCMBuffer) {
