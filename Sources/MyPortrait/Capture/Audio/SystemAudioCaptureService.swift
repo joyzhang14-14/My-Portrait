@@ -16,12 +16,26 @@ import MyPortraitObjC
 /// 链路：
 ///   1. CATapDescription 描述要捕获什么（所有进程的 stereo 混合，排除自身）
 ///   2. AudioHardwareCreateProcessTap → 拿到 tap AudioObjectID
-///   3. 用 tap UID 构造 aggregate device（让标准音频 API 能读它）
+///   3. 用 tap UID + **当前默认输出设备 UID** 构造 aggregate device。
+///      ⚠ aggregate 必须同时含一个真实输出设备 sub-device(并设为 main
+///      sub-device)+ tap_auto_start,否则裸 global tap 的 delivery 路径是
+///      哑的:callback 在跑但每个 buffer 全是 0 → VAD 当静音全丢 → 一条都采
+///      不到。(对标 screenpipe `core/process_tap.rs` 的 build_capture。)
 ///   4. **设 AVAudioEngine.inputNode 的 underlying AudioUnit 用 aggregateID
 ///      作为 input device**（这一步是 macOS HAL 唯一支持的方式）
 ///   5. inputNode tap → AVAudioConverter 转 16kHz mono Float32 → VADRecorder
 ///
+/// **自适应**（缺了就采不到,本服务最早的 bug 根因）：
+///   - 监听 `kAudioHardwarePropertyDefaultOutputDevice` —— 默认输出设备一变
+///     (扬声器→AirPods 等)就 teardown + rebuild,把 tap 重锚到新设备。
+///     不重锚的话 aggregate 一直绑旧设备,切设备后只能采到静音。
+///   - 静音看门狗 —— tap callback 在响、但连续 45s 全 0 振幅就重建一次。
+///     修 "per-app 路由到耳机绕过了 aggregate 锚定的系统默认输出" 这种
+///     tap 在跑却全 0 的场景。
+///
 /// VAD/写盘和 AudioCaptureService 共用 VADRecorder（设备标签 `system_loopback`）。
+/// VADRecorder / forwardTask / segmentEvents 跨 rebuild 稳定存活,只有
+/// tap+aggregate+engine 绑定那一层在重建。
 ///
 /// macOS 14.4+ 才有这个能力。
 ///
@@ -38,12 +52,14 @@ actor SystemAudioCaptureService {
     // Core Audio 资源
     private var tapID: AudioObjectID = 0
     private var aggregateID: AudioDeviceID = 0
+    /// 当前 aggregate 锚定的输出设备 UID —— 用来判断默认输出有没有变。
+    private var currentOutputUID: String = ""
 
     // AVFoundation
     //
     // **懒构造**：见 AudioCaptureService.engine 注释 ——
     // AVAudioEngine() 构造即拉起 caulk XPC 通道，是其他无关代码崩 dispatch_assert
-    // 的根因之一。
+    // 的根因之一。engine 实例跨 rebuild 复用(只重新绑定 inputNode device)。
     private var engine: AVAudioEngine?
     private var targetFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
@@ -57,6 +73,20 @@ actor SystemAudioCaptureService {
     private var isRunning: Bool = false
     /// 见 AudioCaptureService.tapInstalled 注释 —— 防 -10877 + dispatch_assert 崩。
     private var tapInstalled: Bool = false
+    /// rebuild 守卫 —— 防设备监听与看门狗并发触发重复重建。
+    private var rebuilding: Bool = false
+
+    // 设备热插拔 + 看门狗
+    private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
+    private var restartTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?
+    /// 看门狗窗口内累计的 callback 次数 + 峰值振幅(performConversion 里更新,
+    /// actor 隔离)。每 tick 读后清零。
+    private var wdCallbacks: Int = 0
+    private var wdPeak: Float = 0
+    /// 连续静音的 tick 数(每 tick ≈ 500ms)+ 重建冷却剩余 tick 数。
+    private var wdSilenceTicks: Int = 0
+    private var wdCooldownTicks: Int = 0
 
     /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。见 AudioCaptureService 同名注释。
     nonisolated let segmentEventStream: AsyncStream<AudioSegmentEvent>
@@ -89,7 +119,81 @@ actor SystemAudioCaptureService {
             return
         }
 
-        // 1. CATapDescription
+        // VADRecorder + 转发任务 —— **跨 rebuild 稳定存活**,不随 tap 重建。
+        let recorder = VADRecorder(deviceLabel: "system_loopback", audioDir: audioDir)
+        vadRecorder = recorder
+        let cont = segmentEventCont
+        forwardTask = Task {
+            for await seg in recorder.segmentEvents { cont.yield(seg) }
+        }
+
+        do {
+            try buildCapture()
+        } catch {
+            logger.error("system audio buildCapture failed: \(String(describing: error), privacy: .public)")
+            forwardTask?.cancel()
+            forwardTask = nil
+            await vadRecorder?.flush()
+            vadRecorder = nil
+            cleanupCoreAudio()
+            return
+        }
+
+        registerOutputDeviceListener()
+        startSilenceWatchdog()
+
+        isRunning = true
+        logger.info("SystemAudioCaptureService started (tap=\(self.tapID), aggregate=\(self.aggregateID), output=\(self.currentOutputUID, privacy: .public))")
+    }
+
+    func stop() async {
+        // engine 没构造 → 整条 start() 没跑过 → 直接退。同 AudioCaptureService.stop 注释。
+        guard engine != nil else {
+            logger.info("SystemAudioCaptureService stopped (was never started)")
+            isRunning = false
+            return
+        }
+
+        // 先把 isRunning 置否 —— 任何在途的设备监听/看门狗 tick 进到 rebuild
+        // 都会因 guard isRunning 直接 no-op,避免 stop 的 await 挂起期间又重建。
+        isRunning = false
+
+        // 先停自适应,免得 teardown 过程中设备监听/看门狗又触发 rebuild。
+        unregisterOutputDeviceListener()
+        restartTask?.cancel()
+        restartTask = nil
+        stopSilenceWatchdog()
+
+        // 拆 tap/aggregate/engine 绑定(严格按顺序,见 teardownCapture 注释)。
+        teardownCapture()
+
+        // 收尾稳定基础设施(跨 rebuild 存活的那层)。
+        forwardTask?.cancel()
+        forwardTask = nil
+        await vadRecorder?.flush()
+        vadRecorder = nil
+
+        // 同 AudioCaptureService.stop:置 nil 触发 AVAudioEngine dealloc。
+        // teardownCapture 已解绑 inputNode device,这步现在是安全的。还是包一层兜底。
+        let deallocErr = MyPortraitObjCTryCatch {
+            self.engine = nil
+        }
+        if let deallocErr {
+            logger.error("SystemAudio stop: engine dealloc threw: \(deallocErr.localizedDescription, privacy: .public)")
+        }
+
+        isRunning = false
+        logger.info("SystemAudioCaptureService stopped")
+    }
+
+    // MARK: - 私有 — 采集构建 / 重建
+
+    /// 建一套全新的 tap + aggregate(锚到当前默认输出设备)+ engine 绑定 +
+    /// installTap + engine.start。可重复调用(初次 start / 设备切换 / 看门狗触发)。
+    /// 失败抛错并已自清 CoreAudio 资源。**不碰** vadRecorder / forwardTask /
+    /// segmentEvents（那是 start() 的一次性基础设施）。
+    private func buildCapture() throws {
+        // 1. CATapDescription —— 全进程 stereo 混音,排除自身。
         let description = CATapDescription(stereoMixdownOfProcesses: [])
         description.muteBehavior = .unmuted
         description.isPrivate = true
@@ -99,24 +203,42 @@ actor SystemAudioCaptureService {
         var tap: AudioObjectID = 0
         let tapStatus = AudioHardwareCreateProcessTap(description, &tap)
         guard tapStatus == kAudioHardwareNoError else {
-            logger.error("AudioHardwareCreateProcessTap failed: status=\(tapStatus)")
-            return
+            throw NSError(domain: "SystemAudio", code: Int(tapStatus), userInfo: [
+                NSLocalizedDescriptionKey: "AudioHardwareCreateProcessTap failed: status=\(tapStatus)"
+            ])
         }
         tapID = tap
 
-        // 3. Aggregate device 包住 tap
-        let tapUIDStr = try? Self.readTapUID(tap: tap)
-        guard let uid = tapUIDStr else {
-            logger.error("could not read tap UID")
+        // 3. tap UID(aggregate 的 sub-tap list 要引用它)
+        guard let uid = try? Self.readTapUID(tap: tap) else {
             cleanupCoreAudio()
-            return
+            throw NSError(domain: "SystemAudio", code: -11, userInfo: [
+                NSLocalizedDescriptionKey: "could not read tap UID"
+            ])
         }
 
+        // 4. 当前默认输出设备 UID —— aggregate 必须锚在一个真实输出设备上,
+        //    否则裸 global tap 的 delivery 是哑的(callback 在跑但 buffer 全 0)。
+        guard let outputUID = Self.defaultOutputDeviceUID() else {
+            cleanupCoreAudio()
+            throw NSError(domain: "SystemAudio", code: -12, userInfo: [
+                NSLocalizedDescriptionKey: "no default output device"
+            ])
+        }
+
+        // 5. Aggregate device —— 同时含 [真实输出设备 sub-device] + [tap],
+        //    main sub-device 指向输出设备,tap auto-start。
         let aggregateUID = "com.myportrait.aggregate.systemTap.\(UUID().uuidString)"
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "MyPortraitSystemTapDevice",
             kAudioAggregateDeviceUIDKey: aggregateUID,
             kAudioAggregateDeviceIsPrivateKey: 1,
+            kAudioAggregateDeviceIsStackedKey: 0,
+            kAudioAggregateDeviceTapAutoStartKey: 1,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceSubDeviceListKey: [[
+                kAudioSubDeviceUIDKey: outputUID,
+            ]],
             kAudioAggregateDeviceTapListKey: [[
                 kAudioSubTapUIDKey: uid,
                 kAudioSubTapDriftCompensationKey: 1,
@@ -125,67 +247,50 @@ actor SystemAudioCaptureService {
         var aggregate: AudioDeviceID = 0
         let aggStatus = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregate)
         guard aggStatus == kAudioHardwareNoError else {
-            logger.error("AudioHardwareCreateAggregateDevice failed: status=\(aggStatus)")
             cleanupCoreAudio()
-            return
+            throw NSError(domain: "SystemAudio", code: Int(aggStatus), userInfo: [
+                NSLocalizedDescriptionKey: "AudioHardwareCreateAggregateDevice failed: status=\(aggStatus)"
+            ])
         }
         aggregateID = aggregate
 
-        // 4. 把 AVAudioEngine 的 input device 切到 aggregate
-        //    真正录之前才构造 engine（懒构造，见 engine 字段注释）。
+        // 6. 把 AVAudioEngine 的 input device 切到 aggregate
+        //    真正录之前才构造 engine（懒构造,见 engine 字段注释）。engine 实例
+        //    跨 rebuild 复用,只换它 inputNode 绑的 device。
         if engine == nil { engine = AVAudioEngine() }
         do {
             try bindAggregateToEngine(aggregateID: aggregate)
         } catch {
-            logger.error("bind aggregate to engine failed: \(String(describing: error), privacy: .public)")
             cleanupCoreAudio()
-            return
+            throw error
         }
 
-        // 5. VADRecorder + tap + 转换 + start
-        let recorder = VADRecorder(deviceLabel: "system_loopback", audioDir: audioDir)
-        vadRecorder = recorder
-        let cont = segmentEventCont
-        forwardTask = Task {
-            for await seg in recorder.segmentEvents { cont.yield(seg) }
-        }
-
+        // 7. installTap + 转换 + start(喂稳定的 vadRecorder)
         do {
             try configureTapAndStart()
         } catch {
-            logger.error("engine start failed: \(String(describing: error), privacy: .public)")
-            forwardTask?.cancel()
-            forwardTask = nil
-            await vadRecorder?.flush()
-            vadRecorder = nil
+            unbindInputNodeToDefault()
             cleanupCoreAudio()
-            return
+            throw error
         }
 
-        isRunning = true
-        logger.info("SystemAudioCaptureService started (tap=\(self.tapID), aggregate=\(self.aggregateID))")
+        currentOutputUID = outputUID
     }
 
-    func stop() async {
-        // engine 没构造 → 整条 start() 没跑过 → 直接退。同 AudioCaptureService.stop 注释。
-        guard let engine else {
-            logger.info("SystemAudioCaptureService stopped (was never started)")
-            isRunning = false
-            return
-        }
+    /// 拆掉当前这套 tap/aggregate/engine 绑定,保留 engine 实例 + vadRecorder +
+    /// forwardTask + segmentEvents 供 rebuild 复用。
+    ///
+    /// ⚠ **必须严格按顺序拆**,任何一步反了就 SIGTRAP(同 stop() 原注释):
+    ///   1. 先 stop engine + 摘 tap —— 让 audio thread 不再有新 callback 进来
+    ///   2. finish/cancel 本次构建的 samples 流 —— inflight drain 干净
+    ///   3. **engine.inputNode 解绑 aggregate device**(切回系统默认),这样
+    ///      AUHAL 不再持有 aggregate IOProcID
+    ///   4. cleanupCoreAudio 销毁 aggregate + tap
+    /// 漏第 3 步 → engine 之后引用一个已销毁的 device → IOProcID destroy 断言 →
+    /// SIGTRAP。整条用 ObjC try/catch 兜底 NSException。
+    private func teardownCapture() {
+        guard let engine else { return }
 
-        // ⚠ **必须严格按顺序拆**,任何一步反了就 SIGTRAP:
-        //   1. 先 stop engine + 摘 tap —— 让 audio thread 不再有新 callback 进来
-        //   2. cancel sample/forward tasks + flush vadRecorder —— 把 inflight
-        //      drain 干净
-        //   3. **engine.inputNode 解绑 aggregate device**(切回系统默认),
-        //      这样 AUHAL 不再持有 aggregate IOProcID。漏这一步 → engine
-        //      dealloc 时 HALC 去 destroy IOProcID → 但 aggregate 已经被
-        //      下面 cleanupCoreAudio 销毁 → assertion → SIGTRAP
-        //   4. cleanupCoreAudio 销毁 aggregate + tap
-        //   5. self.engine = nil 触发 dealloc(此时无 device 关联,安全)
-        // 整条用 ObjC try/catch 包一层兜底 NSException(AVAudioEngine
-        // dealloc / engine.stop 在 macOS 26 偶发抛 NSException 杀进程)。
         let cleanupErr = MyPortraitObjCTryCatch {
             if engine.isRunning { engine.stop() }
             if self.tapInstalled {
@@ -194,7 +299,7 @@ actor SystemAudioCaptureService {
             }
         }
         if let cleanupErr {
-            logger.error("SystemAudio stop: tap/engine stop threw: \(cleanupErr.localizedDescription, privacy: .public)")
+            logger.error("SystemAudio teardown: tap/engine stop threw: \(cleanupErr.localizedDescription, privacy: .public)")
         }
 
         samplesContinuation?.finish()
@@ -202,14 +307,18 @@ actor SystemAudioCaptureService {
         samplesTask?.cancel()
         samplesTask = nil
 
-        forwardTask?.cancel()
-        forwardTask = nil
-        await vadRecorder?.flush()
-        vadRecorder = nil
+        unbindInputNodeToDefault()
+        cleanupCoreAudio()
 
-        // 关键:解绑 inputNode 从 aggregate device 切回系统默认输入,
-        // 这样 cleanupCoreAudio 销毁 aggregate 后 engine dealloc 不会再
-        // 引用一个已不存在的 device → IOProcID destroy 不会断言。
+        converter = nil
+        targetFormat = nil
+    }
+
+    /// 把 engine.inputNode 从 aggregate 解绑回系统默认输入设备。**必须在销毁
+    /// aggregate 之前**调,否则 engine 之后引用已销毁 device → IOProcID destroy
+    /// 断言 → SIGTRAP。
+    private func unbindInputNodeToDefault() {
+        guard let engine else { return }
         let unbindErr = MyPortraitObjCTryCatch {
             if let au = engine.inputNode.audioUnit {
                 // 0 = use default device
@@ -225,24 +334,158 @@ actor SystemAudioCaptureService {
             }
         }
         if let unbindErr {
-            logger.error("SystemAudio stop: inputNode unbind threw: \(unbindErr.localizedDescription, privacy: .public)")
+            logger.error("SystemAudio unbind inputNode threw: \(unbindErr.localizedDescription, privacy: .public)")
         }
+    }
 
-        cleanupCoreAudio()
+    /// 重建采集(默认输出设备切换 / 静音看门狗触发)。teardown 当前这套 →
+    /// buildCapture 新的。actor 串行化 + rebuilding 守卫防并发/重入。
+    private func rebuild(reason: String) async {
+        guard isRunning, !rebuilding else { return }
+        rebuilding = true
+        defer { rebuilding = false }
 
-        // 同 AudioCaptureService.stop:置 nil 触发 AVAudioEngine dealloc。
-        // 上面已经解绑 inputNode device,这步现在是安全的。还是包一层兜底。
-        let deallocErr = MyPortraitObjCTryCatch {
-            self.engine = nil
+        logger.info("rebuilding system audio capture (\(reason, privacy: .public))")
+        teardownCapture()
+        do {
+            try buildCapture()
+            wdSilenceTicks = 0
+            logger.info("system audio re-anchored (output=\(self.currentOutputUID, privacy: .public), tap=\(self.tapID))")
+        } catch {
+            // 留在已拆状态;下次设备变化再试。记下这次想锚的设备,避免同一
+            // 设备(如蓝牙握手未就绪)被反复重试(参照 screenpipe process_tap)。
+            currentOutputUID = Self.defaultOutputDeviceUID() ?? currentOutputUID
+            logger.error("system audio rebuild failed (\(reason, privacy: .public)): \(String(describing: error), privacy: .public)")
         }
-        if let deallocErr {
-            logger.error("SystemAudio stop: engine dealloc threw: \(deallocErr.localizedDescription, privacy: .public)")
-        }
-        self.converter = nil
-        self.targetFormat = nil
+    }
 
-        isRunning = false
-        logger.info("SystemAudioCaptureService stopped")
+    // MARK: - 私有 — 默认输出设备监听
+
+    private static func defaultOutputAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
+    /// 当前默认输出设备的 UID(拿不到返回 nil)。
+    private static func defaultOutputDeviceUID() -> String? {
+        var deviceID = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var addr = defaultOutputAddress()
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID
+        ) == noErr, deviceID != 0 else { return nil }
+
+        var uidAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uidSize = UInt32(MemoryLayout<CFString>.size)
+        var cfstr: Unmanaged<CFString>? = nil
+        guard AudioObjectGetPropertyData(deviceID, &uidAddr, 0, nil, &uidSize, &cfstr) == noErr,
+              let unmanaged = cfstr else { return nil }
+        return unmanaged.takeRetainedValue() as String
+    }
+
+    /// 注册「默认输出设备变更」监听 —— 戴耳机 / 切扬声器时重锚 tap。
+    private func registerOutputDeviceListener() {
+        guard deviceListenerBlock == nil else { return }
+        let block: AudioObjectPropertyListenerBlock = { @Sendable [weak self] _, _ in
+            Task { await self?.handleOutputDeviceChange() }
+        }
+        var addr = Self.defaultOutputAddress()
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main, block
+        )
+        if status == noErr {
+            deviceListenerBlock = block
+        } else {
+            logger.warning("failed to register output device-change listener: \(status)")
+        }
+    }
+
+    private func unregisterOutputDeviceListener() {
+        guard let block = deviceListenerBlock else { return }
+        var addr = Self.defaultOutputAddress()
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main, block
+        )
+        deviceListenerBlock = nil
+    }
+
+    /// 设备变更回调。防抖:0.8 秒内的连续变更合并(拔插/蓝牙握手常爆发多个事件)。
+    private func handleOutputDeviceChange() {
+        restartTask?.cancel()
+        restartTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.reanchorIfOutputChanged()
+        }
+    }
+
+    private func reanchorIfOutputChanged() async {
+        guard isRunning else { return }
+        let newUID = Self.defaultOutputDeviceUID() ?? ""
+        guard newUID != currentOutputUID else { return }
+        logger.info("default output changed (\(self.currentOutputUID, privacy: .public) → \(newUID, privacy: .public)) — re-anchoring system audio")
+        await rebuild(reason: "output-device-change")
+    }
+
+    // MARK: - 私有 — 静音看门狗
+
+    private func startSilenceWatchdog() {
+        watchdogTask?.cancel()
+        wdCallbacks = 0
+        wdPeak = 0
+        wdSilenceTicks = 0
+        wdCooldownTicks = 0
+        watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self else { return }
+                await self.watchdogTick()
+            }
+        }
+    }
+
+    private func stopSilenceWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
+    }
+
+    /// 每 ~500ms 一跳。callback 在响、但连续 45s 全 0 振幅 → 重建一次(冷却 60s)。
+    /// 修 "per-app 音频路由到耳机绕过了 aggregate 锚定的系统默认输出 → tap 在跑
+    /// 但 buffer 全 0" 这种场景(对标 screenpipe process_tap 的 silence watchdog)。
+    private func watchdogTick() async {
+        if wdCooldownTicks > 0 { wdCooldownTicks -= 1 }
+
+        let callbacks = wdCallbacks
+        let peak = wdPeak
+        wdCallbacks = 0
+        wdPeak = 0
+
+        // 真实音频:有 callback 且峰值高于阈值(0.002 只滤掉真零 buffer,
+        // 不误伤轻声说话,正常通话峰值在 0.05–0.5)。
+        let gotRealAudio = callbacks > 0 && peak > 0.002
+        if gotRealAudio {
+            wdSilenceTicks = 0
+        } else if callbacks > 0 {
+            // callback 在跑,只是 buffer 静音 → 累计静音窗口。
+            wdSilenceTicks += 1
+        }
+        // callbacks == 0:IO proc 根本没在跑,是另一类故障(设备变化路径覆盖),
+        // 不在这里重建(设备真睡着时重建只会失败)。
+
+        let silentLongEnough = Double(wdSilenceTicks) * 0.5 >= 45
+        guard silentLongEnough, wdCooldownTicks == 0 else { return }
+
+        logger.warning("system audio: callbacks firing but silent for 45s — rebuilding (per-app routing bypass?)")
+        wdSilenceTicks = 0
+        wdCooldownTicks = 120  // 60s 冷却,避免没在通话(本就无音频)时反复重建
+        await rebuild(reason: "silence-watchdog")
     }
 
     // MARK: - 私有 — Core Audio
@@ -366,6 +609,11 @@ actor SystemAudioCaptureService {
                             userInfo: nil).raise()
             }
         }) {
+            // engine.start 失败 → 就地摘掉刚装的 tap,不留给后续 teardown 补救。
+            if tapInstalled {
+                _ = MyPortraitObjCTryCatch { inputNode.removeTap(onBus: 0) }
+                tapInstalled = false
+            }
             throw NSError(domain: "SystemAudio", code: -31, userInfo: [
                 NSLocalizedDescriptionKey: "engine.start failed: \(startErr.localizedDescription)"
             ])
@@ -380,6 +628,10 @@ actor SystemAudioCaptureService {
     }
 
     private func performConversion(buffer: AVAudioPCMBuffer) {
+        // 看门狗:每次 tap callback 都记一笔(不管转换成没成),用来区分
+        // "IO proc 没在跑" vs "在跑但全 0"。
+        wdCallbacks += 1
+
         guard let targetFormat, let cont = samplesContinuation else { return }
 
         // **converter 按真实 buffer.format 懒建**(see configureTapAndStart
@@ -426,6 +678,15 @@ actor SystemAudioCaptureService {
         }
         let count = Int(output.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
+
+        // 看门狗峰值振幅 —— 判 "callback 在跑但全 0"。
+        var localPeak: Float = 0
+        for s in samples {
+            let a = abs(s)
+            if a > localPeak { localPeak = a }
+        }
+        if localPeak > wdPeak { wdPeak = localPeak }
+
         cont.yield(samples)
     }
 }
