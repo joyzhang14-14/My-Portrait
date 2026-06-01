@@ -123,7 +123,8 @@ final class ConfigStore {
          let next = ConfigSnapshot(
              dataDirectory: current.storage.dataDirectory,
              retentionDays: current.storage.retentionDays,
-             autoDeleteMode: current.storage.autoDeleteMode
+             autoDeleteMode: current.storage.autoDeleteMode,
+             preferredInputDeviceUID: current.capture.audio.preferredInputDeviceUID
          )
          Self.snapshotLock.withLock { Self.snapshotValue = next }
      }

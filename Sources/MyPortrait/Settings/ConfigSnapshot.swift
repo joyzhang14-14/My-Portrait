@@ -7,4 +7,7 @@ struct ConfigSnapshot: Sendable {
     var dataDirectory: String = ""
     var retentionDays: String = "d30"
     var autoDeleteMode: String = "mediaOnly"
+    /// 用户锁定的输入设备 UID(empty = follow system)。AudioCaptureService
+    /// 在 actor 外起 AVAudioEngine 时同步读这个,所以放进 snapshot。
+    var preferredInputDeviceUID: String = ""
 }
