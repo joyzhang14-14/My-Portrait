@@ -558,6 +558,29 @@ enum WritingCapturePrompts {
     - Respond with ONLY the JSON object, no prose / code fences.
     """#
 
+    /// Canvas 多窗 body 合并 —— 各窗只看到文档一个滚动片段(标题在早窗、结尾在
+    /// 晚窗),把它们拼成整篇。只合并/去重,不发明。
+    static let canvasMerge = #"""
+    You are given several reconstructions of the SAME document. Each was recovered
+    from a different time-window of screen snapshots; because the user scrolled while
+    writing, each fragment may be PARTIAL — one holds the opening (title / heading /
+    intro), another the middle paragraphs, another the ending. They overlap.
+
+    Produce the SINGLE most COMPLETE version of the document body:
+    - UNION all distinct prose, in natural reading order: title/heading first (if any
+      fragment has one), then the body paragraphs in order, then the ending.
+    - Where fragments overlap (the same passage appears in two), MERGE them into one —
+      never duplicate a repeated sentence/paragraph.
+    - Keep the user's EXACT wording, punctuation, language, line breaks. Do NOT
+      translate, rephrase, summarize, reorder sentences, or INVENT any sentence that is
+      not present in at least one fragment. Accuracy beats completeness.
+    - Drop any leftover UI / chrome lines (menu labels, tab names, URLs, "saving…").
+
+    OUTPUT — respond with ONLY this JSON object, no prose / markdown fences:
+    { "body_text": "<the single most complete document body>" }
+    - JSON escaping: `"` → `\"`, `\` → `\\`, newlines → `\n`.
+    """#
+
     // MARK: - Pass 2 —— 切割 + AX 真伪判断(judgment only)
 
     /// Pass 2 只判断、不转写:把一个 session 的 typing_events 切成单元 + 判每条

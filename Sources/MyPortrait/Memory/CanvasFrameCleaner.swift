@@ -54,7 +54,15 @@ enum CanvasFrameCleaner {
         var snaps = byBucket.keys.sorted().map { byBucket[$0]! }
         if snaps.count > maxSnapshots {
             let total = snaps.count
-            snaps = (0..<maxSnapshots).map { snaps[($0 * total) / maxSnapshots] }
+            var sampled = (0..<maxSnapshots).map { snaps[($0 * total) / maxSnapshots] }
+            // 均匀采样可能恰好漏掉**内容最完整的那一帧**(用户滚动 review 整篇文档
+            // 的快照)—— canvas 的标题/结尾常只在这种帧里。保证 session 窗内最长帧
+            // 一定入选(最长 OCR 帧 ≈ 文档最完整状态;chrome 由 LLM 逐帧剥离)。
+            if let longest = snaps.max(by: { $0.text.count < $1.text.count }),
+               !sampled.contains(where: { $0.id == longest.id }) {
+                sampled[sampled.count - 1] = longest
+            }
+            snaps = sampled.sorted { $0.tsMs < $1.tsMs }
         }
         return snaps.map {
             WritingCaptureOcrFrame(

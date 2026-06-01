@@ -828,16 +828,34 @@ final class WritingCaptureWorker {
                 }
             }
         }
+        // **canvas 文档是 (app, url) 级实体,不是单时间 session**。一篇 Google Docs
+        // 随笔跨整天、被 idle>5min 切成多个 session:只有打字密集那段触发 isAxBroken
+        // 走 ocr,稀疏续写 / 滚动 review 段会被判 ax 而割裂,整篇塌成局部(GDoc 丢
+        // 标题+尾)。修法:任一 session 被判坏 AX canvas → 该 (app,url) 整篇都是
+        // canvas,所有同 url session(含稀疏、含无输入 review)一律并入 ocr,帧合并
+        // 重建。判据仍是确定性的 isAxBroken,不硬编码 app/语言。
+        func urlKey(_ s: WritingCaptureRawSession) -> String { s.app + "\u{1}" + (s.url ?? "") }
+        var canvasUrls = Set<String>()
+        for (i, r) in refinedByIdx where r.first?.route == "ocr" {
+            canvasUrls.insert(urlKey(sessions[i]))
+        }
         // 无 typing_events 的 session 怎么处理(数据驱动,不写 app 名):
-        //  - 该 app 本次出现过 typing_events(= AX 对它有效)→ 这个无输入 session 是
-        //    纯阅读 / AI 回复 / 收到的消息(用户的输入早已由它的 ax session 捕获)→ 丢。
-        //  - 该 app 从不产 typing_events(= AX 对它失灵,真 canvas 如 Google Docs)
-        //    且这个 session 有实打击键(用户确实写了字)→ ocr 重建。
+        //  - 属于 canvas url(同篇文档的 review 帧)→ 保留走 ocr。
+        //  - 该 app 本次出现过 typing_events(= AX 对它有效)→ 纯阅读 / AI 回复 /
+        //    收到的消息(用户输入早已由它的 ax session 捕获)→ 丢。
+        //  - 该 app 从不产 typing_events(AX 对它失灵)且有实打击键 → ocr 重建。
         let axWorkingApps = Set(sessions.filter { !$0.typingEvents.isEmpty }.map { $0.app })
         var out: [WritingCaptureRawSession] = []
         for (i, s) in sessions.enumerated() {
+            let isCanvasUrl = canvasUrls.contains(urlKey(s))
             if let r = refinedByIdx[i] {
-                out.append(contentsOf: r)
+                if isCanvasUrl {
+                    out.append(Self.ensureOcrPrepped(s))   // 同篇文档的稀疏段也并入 canvas
+                } else {
+                    out.append(contentsOf: r)
+                }
+            } else if isCanvasUrl {
+                out.append(Self.ensureOcrPrepped(s))        // 同篇文档的 review 帧 → ocr
             } else if !axWorkingApps.contains(s.app),
                       s.keystrokes.filter({ ($0.modifiers & 0x07) == 0 }).count >= 10 {
                 out.append(s)            // 真 canvas 写作 → ocr

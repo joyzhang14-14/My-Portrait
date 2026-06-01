@@ -196,42 +196,43 @@ struct WritingCaptureStep0 {
                 $0.bundleId == acc.app
                     && $0.tsMs >= acc.start && $0.tsMs <= acc.lastTs
             }
-            // OCR 反向 join:session 窗 + 同 app + url 匹配 + **靠近 typing/
-            // keystroke 锚点**(±ocrAnchorWindowMs)。session 窗内但远离任何键击
-            // 的帧丢掉 —— 用户在看东西不是在写。
-            let anchorTimestamps: [Int64] = sessionTyping.flatMap { e in
-                [e.startedAt, e.endedAt]
-            } + sessionKeys.map(\.tsMs)
-            let sortedAnchors = anchorTimestamps.sorted()
-            let sessionFrames = ocrFrames.filter { f in
-                guard f.app == acc.app,
-                      f.tsMs >= acc.start, f.tsMs <= acc.lastTs,
-                      urlMatch(f.url, acc.url) else { return false }
-                return Self.hasAnchorNearby(
-                    ts: f.tsMs, sortedAnchors: sortedAnchors,
-                    windowMs: ocrAnchorWindowMs
-                )
+            // OCR 反向 join:session 窗 + 同 app + url 匹配 内的所有帧。
+            let windowFrames = ocrFrames.filter { f in
+                f.app == acc.app
+                    && f.tsMs >= acc.start && f.tsMs <= acc.lastTs
+                    && urlMatch(f.url, acc.url)
             }
-            let axCount = sessionFrames.filter { $0.textSource == "ax" }.count
+            // ax 路:OCR 只当上下文 → 只留**靠近 typing/keystroke 锚点**
+            // (±ocrAnchorWindowMs)的帧,远离任何键击的帧丢掉(在看不在写)。
+            // canvas 路:OCR **就是正文** → 全留。用户写完滚动 review 整篇文档的
+            // 快照(标题/结尾往往只在这种 0 击键的 review 帧里)绝不能按击键锚丢,
+            // 否则整篇塌成正在编辑的局部(GDoc 随笔丢标题+尾)。
+            let sortedAnchors = (sessionTyping.flatMap { [$0.startedAt, $0.endedAt] }
+                + sessionKeys.map(\.tsMs)).sorted()
+            let anchoredFrames = windowFrames.filter {
+                Self.hasAnchorNearby(ts: $0.tsMs, sortedAnchors: sortedAnchors,
+                                     windowMs: ocrAnchorWindowMs)
+            }
             // canvas(真·自绘文档编辑器)判定:typing 极少 **且 OCR 内容远超
-            // typing**(OCR 才是真内容,typing 只是 "i"/"a" 之类残渣)。
-            // 这里只是**帧预处理 + 默认路由**的启发式;真正路由由 Pass 2 三源裁决
-            // 覆盖(Discord/聊天 这里可能误判 ocr,Pass 2 会改回 ax)。
-            // OCR 主导 → 粗快照(留编辑进程)+ 算 chrome hint + 默认 route=ocr。
+            // typing**(OCR 才是真内容,typing 只是 "i"/"a" 之类残渣)。用**全窗帧**
+            // 判定(canvas 内容不依赖击键锚)。这里只是帧预处理 + 默认路由的启发式;
+            // 真正路由由 Pass 2 三源裁决覆盖(Discord/聊天 这里可能误判,Pass 2 改回 ax)。
             let typingTotalChars = sessionTyping.map { $0.text.count }.reduce(0, +)
-            let ocrMaxChars = sessionFrames.map { $0.text.count }.max() ?? 0
+            let ocrMaxChars = windowFrames.map { $0.text.count }.max() ?? 0
             let ocrDominant = typingTotalChars <= canvasTypingThreshold
                 && ocrMaxChars > typingTotalChars * 10
                 && ocrMaxChars >= 200
             let outFrames: [WritingCaptureOcrFrame]
             let chromeTokens: [String]
             if ocrDominant {
-                outFrames = CanvasFrameCleaner.coarseSnapshots(sessionFrames)
-                chromeTokens = CanvasFrameCleaner.chromeTokens(sessionFrames)
+                // canvas:全窗帧(含 review),粗快照(留编辑进程)+ 算 chrome hint。
+                outFrames = CanvasFrameCleaner.coarseSnapshots(windowFrames)
+                chromeTokens = CanvasFrameCleaner.chromeTokens(windowFrames)
             } else {
-                outFrames = jaccardDedupe(sessionFrames)
+                outFrames = jaccardDedupe(anchoredFrames)
                 chromeTokens = []
             }
+            let axCount = anchoredFrames.filter { $0.textSource == "ax" }.count
             let maxChars = computeMaxContentChars(
                 typingEvents: sessionTyping,
                 ocrFrames: outFrames
