@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Settings → Capture → Health。
@@ -20,6 +21,9 @@ struct CaptureHealthView: View {
     @State private var recent: [StallVerdict] = []
     @State private var refreshTask: Task<Void, Never>?
 
+    @State private var diagBundleBusy = false
+    @State private var diagBundleStatus: String = ""
+
     var body: some View {
         SettingsPage("Health",
                      subtitle: "Live metrics for the capture engine. Auto-refreshes while this page is open.",
@@ -30,9 +34,48 @@ struct CaptureHealthView: View {
             audioCard
             pauseCard
             recentCard
+            diagnosticCard
         }
         .onAppear { startRefresh() }
         .onDisappear { stopRefresh() }
+    }
+
+    /// 一键导出诊断 zip。无 PII,纯结构 + 日志 + 状态。
+    private var diagnosticCard: some View {
+        SettingsCard(title: "Diagnostic export",
+                     footnote: "Bundles config (redacted), health log, recent stalls, processing-log state, DB stats, and the last 24h of app log lines into a zip on your Desktop. NO captured content (OCR / transcripts / typing / audio) is included.") {
+            SettingsRow("Export diagnostic bundle",
+                        description: "Use this when reporting a bug. Open the zip to review before sharing.",
+                        icon: "ladybug") {
+                Button(diagBundleBusy ? "Working…" : "Export") {
+                    runDiagnosticExport()
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(diagBundleBusy)
+            }
+            if !diagBundleStatus.isEmpty {
+                Text(diagBundleStatus)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
+                    .padding(.horizontal, 14).padding(.bottom, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func runDiagnosticExport() {
+        diagBundleBusy = true
+        diagBundleStatus = "Collecting…"
+        Task { @MainActor in
+            do {
+                let url = try await DiagnosticBundle.build()
+                diagBundleStatus = "Saved: \(url.path)"
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                diagBundleStatus = "Export failed: \(error.localizedDescription)"
+            }
+            diagBundleBusy = false
+        }
     }
 
     // MARK: - Cards
