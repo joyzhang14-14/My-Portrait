@@ -21,31 +21,51 @@ actor DRMWatcher {
     private var task: Task<Void, Never>?
     private var lastBlocked: Bool = false
 
-    nonisolated let states: AsyncStream<Bool>
-    private let _continuation: AsyncStream<Bool>.Continuation
+    /// 当前轮询循环用的 continuation。每次 start() 重建(见下)。
+    private var _continuation: AsyncStream<Bool>.Continuation?
 
     init(focus: FocusProbe, gate: DRMGate = DRMGate(), intervalSeconds: TimeInterval = 3) {
         self.focus = focus
         self.gate = gate
         self.intervalSeconds = intervalSeconds
-        var c: AsyncStream<Bool>.Continuation!
-        self.states = AsyncStream<Bool> { cont in c = cont }
-        self._continuation = c
     }
 
-    func start() {
-        guard task == nil else { return }
+    /// 启动轮询,返回一条**新的** DRM 状态流。
+    ///
+    /// **每次 start 都重建流**:本 watcher 实例被 CaptureCoordinator 跨 capture
+    /// off/on toggle 复用,而 stop() 会 `finish()` 掉旧流。复用同一条已 finish 的流
+    /// 再 start,信号永远送不出去 → DRM 命中后无法恢复采集。镜像 EventSources.start()
+    /// / SleepWakeBox.start() 的「start 返回新流」模式。
+    ///
+    /// `lastBlocked` 故意不重置:它和 CaptureCoordinator.drmActive 跨 toggle 一起保留、
+    /// 始终镜像当前 DRM 状态;重建的只是信号通道,下一次状态翻转照常发出。
+    func start() -> AsyncStream<Bool> {
+        task?.cancel()
+        _continuation?.finish()
+        var c: AsyncStream<Bool>.Continuation!
+        let stream = AsyncStream<Bool> { cont in c = cont }
+        _continuation = c
         task = Task.detached(priority: .background) { [weak self] in
             await self?.loop()
         }
         logger.info("DRMWatcher started (interval=\(self.intervalSeconds)s)")
+        return stream
     }
 
     func stop() {
         task?.cancel()
         task = nil
-        _continuation.finish()
+        _continuation?.finish()
+        _continuation = nil
         logger.info("DRMWatcher stopped")
+    }
+
+    /// CaptureCoordinator 的即时兜底路径(captureOneFrame 里 3s 轮询来不及时直接
+    /// 把 drmActive 置 true)调用 —— 给轮询器补记一笔 `lastBlocked = true`。否则
+    /// 轮询器的 lastBlocked 还停在 false,等 DRM 内容消失时 `false != false` 不成立、
+    /// 永远不发 clear 事件 → drmActive 永久锁死、采集再也不恢复。
+    func noteInlineBlock() {
+        lastBlocked = true
     }
 
     // MARK: - 私有
@@ -58,7 +78,7 @@ actor DRMWatcher {
             if blocked != lastBlocked {
                 lastBlocked = blocked
                 logger.info("DRM state changed → \(blocked ? "BLOCKED" : "CLEAR", privacy: .public)")
-                _continuation.yield(blocked)
+                _continuation?.yield(blocked)
             }
             try? await Task.sleep(nanoseconds: intervalNs)
         }
