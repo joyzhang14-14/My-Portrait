@@ -38,6 +38,12 @@ actor AudioCaptureService {
     private var samplesContinuation: AsyncStream<[Float]>.Continuation?
     private var samplesTask: Task<Void, Never>?
 
+    /// start() 第一行的 `await requestMicrophonePermission` 是 actor 让位点;
+    /// 在它返回前 samplesTask 还是 nil → 另一个 restart 入队时 guard 会以为
+    /// "没在跑"放它进去 → 跑到 installTap 时撞 `nullptr == Tap()` 崩。
+    /// 在第一个 await 之前**同步**置位这个 flag,作为重入闸。
+    private var starting: Bool = false
+
     /// 跟踪 inputNode 上 tap 是否真装过。**stop() 必须检查这个再调 removeTap**：
     /// 没装过 tap 就 removeTap，AudioToolbox 内部抛 `-10877`
     /// (`kAudioUnitErr_InvalidElement`)，紧接着 caulk.messenger 把这个错误投递
@@ -81,7 +87,9 @@ actor AudioCaptureService {
     // MARK: - 生命周期
 
     func start() async {
-        guard samplesTask == nil else { return }
+        guard samplesTask == nil, !starting else { return }
+        starting = true
+        defer { starting = false }
 
         permissionGranted = await Self.requestMicrophonePermission()
         if !permissionGranted {
@@ -196,6 +204,10 @@ actor AudioCaptureService {
 
         // 蓝牙输入设备投递抖动大（±200ms），用更大的 tap 缓冲吸收抖动。
         let bufferSize: AVAudioFrameCount = Self.defaultInputIsBluetooth() ? 8192 : 4096
+        // 防御:install 前先 remove 任何残留 tap。Apple 文档保证没 tap 时
+        // 是 no-op。撞 `nullptr == Tap()` 的根因是重复 install,这里兜底。
+        inputNode.removeTap(onBus: 0)
+        tapInstalled = false
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
             [weak self] buffer, _ in
             guard let self else { return }
