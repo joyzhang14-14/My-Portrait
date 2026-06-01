@@ -88,11 +88,6 @@ actor CaptureCoordinator {
         ignore.setIgnoredUrlPatterns(patterns)
     }
 
-    /// Services 在 ConfigStore.privacy.ignoredWindowTitles 变化时调。
-    nonisolated func setIgnoredWindowTitles(_ titles: [String]) {
-        ignore.setIgnoredWindowTitles(titles)
-    }
-
     /// Services 在 ConfigStore.privacy.maskIgnoredApps 变化时调。
     nonisolated func setMaskingEnabled(_ enabled: Bool) {
         ignore.setMaskingEnabled(enabled)

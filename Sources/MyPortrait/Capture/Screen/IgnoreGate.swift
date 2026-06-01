@@ -17,8 +17,7 @@ final class IgnoreGate: @unchecked Sendable {
 
     private struct State {
         var appsLower: Set<String> = []           // 小写,子串匹配（app 名 / 标题）
-        var windowTitleSubstrings: [String] = []  // 小写,窗口标题子串
-        var urlSubstrings: [String] = []          // 小写,URL / 标题子串
+        var urlSubstrings: [String] = []          // 小写,URL / 标题子串(也收并进来的旧 ignoredWindowTitles)
         var maskingEnabled: Bool = true
     }
 
@@ -27,13 +26,11 @@ final class IgnoreGate: @unchecked Sendable {
     init(
         initialApps: Set<String> = [],
         initialUrlPatterns: [String] = [],
-        initialWindowTitles: [String] = [],
         maskingEnabled: Bool = true
     ) {
         state.withLock { s in
             s.appsLower = Set(initialApps.map { $0.lowercased() })
             s.urlSubstrings = initialUrlPatterns.map { $0.lowercased() }
-            s.windowTitleSubstrings = initialWindowTitles.map { $0.lowercased() }
             s.maskingEnabled = maskingEnabled
         }
     }
@@ -50,11 +47,6 @@ final class IgnoreGate: @unchecked Sendable {
         state.withLock { $0.urlSubstrings = normalized }
     }
 
-    func setIgnoredWindowTitles(_ titles: [String]) {
-        let normalized = titles.map { $0.lowercased() }
-        state.withLock { $0.windowTitleSubstrings = normalized }
-    }
-
     func setMaskingEnabled(_ enabled: Bool) {
         state.withLock { $0.maskingEnabled = enabled }
     }
@@ -65,7 +57,7 @@ final class IgnoreGate: @unchecked Sendable {
     ///   - masking 关 → 永不抹
     ///   - ignoredApps 子串命中窗口 app 名**或**标题 → 抹
     ///     （壁纸窗口标题是 "Wallpaper-<UUID>"，"wallpaper" 子串即命中它本身）
-    ///   - 窗口标题子串命中 ignoredWindowTitles / ignoredUrls → 抹
+    ///   - 窗口标题子串命中 ignoredUrls → 抹
     func shouldMaskWindow(appName: String, title: String?) -> Bool {
         let app = appName.lowercased()
         if Self.builtinIgnored.contains(app) { return true }
@@ -79,11 +71,8 @@ final class IgnoreGate: @unchecked Sendable {
         for term in snap.appsLower where !term.isEmpty {
             if app.contains(term) || t.contains(term) { return true }
         }
-        // ignoredWindowTitles / ignoredUrls：子串匹配窗口标题。
+        // ignoredUrls(含并进来的旧 ignoredWindowTitles)：子串匹配窗口标题。
         if !t.isEmpty {
-            for sub in snap.windowTitleSubstrings where !sub.isEmpty && t.contains(sub) {
-                return true
-            }
             for sub in snap.urlSubstrings where !sub.isEmpty && t.contains(sub) {
                 return true
             }
