@@ -548,6 +548,16 @@ enum WritingCapturePrompts {
       DESTROYS it.
     - "Strip chrome" means remove UI furniture only (menus / tabs / URLs); it does NOT
       mean grammar-correct, rephrase, pluralize, re-number, or improve readability.
+    - NARROW OCR EXCEPTION — repair ONLY pure glyph-shape misreads, never the user's
+      words. The scanner sometimes garbles letter SHAPES, yielding a NON-WORD whose
+      intended common word is obvious: e.g. "rn"↔"m", "l"↔"I"↔"1", "cl"↔"d", a doubled
+      letter, a quote / paren scanned as a stray symbol, or full-width vs half-width
+      punctuation. You MAY repair such a glyph-mangle with a MINIMAL character swap.
+      You may NOT touch anything a person could plausibly have typed themselves — real
+      typos (wrong tense, a missing / extra word), grammar, word choice, a digit vs.
+      spelled-out number, casual punctuation. Test each oddity: "could a human have
+      typed THIS on purpose or by a normal slip?" If yes → KEEP verbatim. Only when it
+      reads as the scanner mangling letter shapes → repair. When unsure → KEEP.
 
     CRITICAL — DO NOT INVENT. Accuracy beats completeness:
     - If a change might be OCR jitter, word-order scramble, scrolling, or chrome
