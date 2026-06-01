@@ -24,8 +24,11 @@ final class WritingCaptureAxCleanupAgent {
         self.perRunTimeout = perRunTimeout
     }
 
-    /// 返回 id → 修好的 text。只含 LLM 实际给出的;调用方对缺的保留原文。
-    func run(items: [Item]) async -> [String: String] {
+    struct Fix: Sendable { let text: String; let confidence: Double }
+
+    /// 返回 id → (修好的 text, LLM 判的 confidence)。只含 LLM 实际给出的;
+    /// 调用方对缺的保留原文 + 默认 conf。
+    func run(items: [Item]) async -> [String: Fix] {
         guard !items.isEmpty else { return [:] }
         let prompt = Self.buildPrompt(items: items)
         guard let agent = try? MemoryAgentFactory.make(provider: provider, model: model) else { return [:] }
@@ -64,19 +67,21 @@ final class WritingCaptureAxCleanupAgent {
     }
 
     private struct Resp: Decodable {
-        struct Fixed: Decodable { let id: String; let text: String }
+        struct Fixed: Decodable { let id: String; let text: String; let confidence: Double? }
         let fixed: [Fixed]
     }
 
-    static func parse(_ s: String) -> [String: String] {
+    static func parse(_ s: String) -> [String: Fix] {
         guard let json = WritingCapturePass3Agent.extractFirstBalancedJSONObject(s),
               let data = json.data(using: .utf8),
               let r = try? JSONDecoder().decode(Resp.self, from: data)
         else { cleanupLog.warning("ax-cleanup parse fail"); return [:] }
-        var out: [String: String] = [:]
+        var out: [String: Fix] = [:]
         for f in r.fixed {
             let t = f.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { out[f.id] = f.text }
+            if !t.isEmpty {
+                out[f.id] = Fix(text: f.text, confidence: min(1, max(0, f.confidence ?? 0.9)))
+            }
         }
         return out
     }

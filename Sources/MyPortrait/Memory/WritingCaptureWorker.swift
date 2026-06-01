@@ -1093,8 +1093,9 @@ final class WritingCaptureWorker {
                             .replacingOccurrences(of: "<BS>", with: "")
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         if ksTrim.hasPrefix("/") { continue }
-                        // conf = 输入干净度(commit vs delete 字符),自然浮动。
-                        let conf = Self.axConfidence(grp)
+                        // conf 默认值;下面补齐 agent(LLM)会给真实判定覆盖(跟几天前
+                        // 一样由 LLM 判 confidence)。LLM 漏/失败 → 留默认 0.9。
+                        let conf = 0.9
                         let ctx = contextTimeline.first {
                             $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
                         }?.summary
@@ -1111,10 +1112,15 @@ final class WritingCaptureWorker {
                 }
                 let fixes = await makeCleanup().run(items: items)
                 let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
-                    guard let t = fixes["r\(i)"],
-                          !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    else { return rec }
-                    return Self.withTextAndEditLog(rec, t, rec.editLog)
+                    // LLM(补齐 agent)给的 text + confidence 覆盖默认值;漏/失败 → 原文+默认。
+                    guard let fix = fixes["r\(i)"] else { return rec }
+                    return WritingCaptureRecord(
+                        text: fix.text, editLog: rec.editLog, kind: rec.kind, source: rec.source,
+                        confidence: fix.confidence, contextSummary: rec.contextSummary,
+                        app: rec.app, url: rec.url, startTs: rec.startTs, endTs: rec.endTs,
+                        referenceTypingEventIds: rec.referenceTypingEventIds,
+                        referenceFrameIds: rec.referenceFrameIds,
+                        referenceKeystrokeRange: rec.referenceKeystrokeRange)
                 }
                 return WritingCapturePass3Agent.Output(
                     prompt: "(ax cleanup)", rawResponse: "", records: cleaned, discarded: [])
