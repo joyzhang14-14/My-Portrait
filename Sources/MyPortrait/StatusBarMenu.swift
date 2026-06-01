@@ -33,6 +33,9 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // 菜单项缓存（要在状态变化时更新它们的 state / title）。
     private let screenToggle: NSMenuItem
     private let audioToggle: NSMenuItem
+    /// Audio Capture 行下面挂的"Input device →"子菜单。菜单展开时
+    /// (menuNeedsUpdate)动态重建,以反映最新设备列表 + 当前选中。
+    private let inputDeviceMenuItem: NSMenuItem
     private let typingToggle: NSMenuItem
     private let statusHeader: NSMenuItem
     private let devModeBanner: NSMenuItem
@@ -46,6 +49,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         self.statusHeader.isEnabled = false
         self.screenToggle = NSMenuItem(title: "Screen Capture", action: nil, keyEquivalent: "")
         self.audioToggle = NSMenuItem(title: "Audio Capture", action: nil, keyEquivalent: "")
+        self.inputDeviceMenuItem = NSMenuItem(title: "Input device", action: nil, keyEquivalent: "")
         self.typingToggle = NSMenuItem(title: "Typing Capture", action: nil, keyEquivalent: "")
         self.devModeBanner = NSMenuItem(title: "⚠ Dev Mode (stub hits)", action: nil, keyEquivalent: "")
         self.devModeBanner.isEnabled = false
@@ -129,6 +133,67 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     /// AppKit 在菜单显示前调用 —— 此刻强制按 ConfigStore 当前值重算所有 state。
     func menuNeedsUpdate(_ menu: NSMenu) {
         refreshMenuState()
+        rebuildInputDeviceSubmenu()
+    }
+
+    /// 用 AudioDevicesMonitor 的最新设备列表 + 当前 preferredUID 重建子菜单。
+    /// menuNeedsUpdate 每次菜单展开都调,保证显示最新插拔状态。
+    private func rebuildInputDeviceSubmenu() {
+        let monitor = AudioDevicesMonitor.shared
+        let preferred = ConfigStore.shared.current.capture.audio.preferredInputDeviceUID
+        let activeUID = monitor.activeUID
+        let devices = monitor.devices
+
+        let submenu = NSMenu()
+
+        // Follow system default 项 —— 空 UID 时打勾。
+        let followItem = NSMenuItem(
+            title: "Follow system default",
+            action: #selector(pickInputDevice(_:)), keyEquivalent: ""
+        )
+        followItem.target = self
+        followItem.representedObject = ""   // 空 UID = follow system
+        followItem.state = preferred.isEmpty ? .on : .off
+        submenu.addItem(followItem)
+
+        if !devices.isEmpty { submenu.addItem(.separator()) }
+
+        for d in devices {
+            // 名称 + 在录的设备右边加 "● recording" 视觉提示
+            let title: String = (d.id == activeUID && !activeUID.isEmpty)
+                ? "\(d.name)  ● recording"
+                : d.name
+            let item = NSMenuItem(title: title,
+                                  action: #selector(pickInputDevice(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = d.id
+            item.state = (preferred == d.id) ? .on : .off
+            // SF Symbol icon
+            if let img = NSImage(systemSymbolName: d.transport.icon, accessibilityDescription: nil) {
+                img.isTemplate = true
+                item.image = img
+            }
+            submenu.addItem(item)
+        }
+
+        // 顶部标题加 "(锁定 → name)" / "(跟系统)" 让用户一眼知道当前状态
+        let summary: String
+        if preferred.isEmpty {
+            summary = "Input device  (follow system)"
+        } else if let d = devices.first(where: { $0.id == preferred }) {
+            summary = "Input device  (\(d.name))"
+        } else {
+            summary = "Input device  (locked, disconnected)"
+        }
+        inputDeviceMenuItem.title = summary
+        inputDeviceMenuItem.submenu = submenu
+    }
+
+    @objc private func pickInputDevice(_ sender: NSMenuItem) {
+        let uid = (sender.representedObject as? String) ?? ""
+        ConfigStore.shared.mutate { $0.capture.audio.preferredInputDeviceUID = uid }
+        // Services.observePreferredInputDevice 会自动重启 audio engine。
     }
 
     // MARK: - 菜单构造
@@ -139,6 +204,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(screenToggle)
         menu.addItem(audioToggle)
+        menu.addItem(inputDeviceMenuItem)   // → submenu(每次 menuNeedsUpdate 重建)
         menu.addItem(typingToggle)
         menu.addItem(.separator())
 
