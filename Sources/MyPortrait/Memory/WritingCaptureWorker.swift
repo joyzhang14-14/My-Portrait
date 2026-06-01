@@ -1067,6 +1067,35 @@ final class WritingCaptureWorker {
         editLogJSON.contains("\"kind\":\"submit\"")
     }
 
+    /// 解析 edit_log,返回最长的一条 entry text(commit 或 delete 都算)。
+    /// 发送清空时整条消息会作为一条 delete 落进 edit_log → 用它取回原文。
+    nonisolated static func longestEditLogText(_ editLogJSON: String) -> String? {
+        struct E: Decodable { let text: String? }
+        guard let data = editLogJSON.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([E].self, from: data) else { return nil }
+        return arr.compactMap { $0.text }.max(by: { $0.count < $1.count })
+    }
+
+    /// 这个 event 是不是"发送清空":聊天 app(如 ChatGPT)发送后输入框清空,
+    /// TypingObserver 把整框内容作为一条 delete 记下、endValue 变空。它**不带
+    /// submit 标记**(不同于 Discord/微信的回车),所以单独识别,同样当消息边界。
+    nonisolated static func isSendClear(_ ev: TypingEvent) -> Bool {
+        guard ev.endValue.isEmpty else { return false }
+        let t = (Self.longestEditLogText(ev.editLog) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.count >= 2
+    }
+
+    /// 取一条消息组里**最完整**的文本。常态取末事件 endValue(累积全文);但聊天
+    /// app 发送会清空输入框 → 末事件 endValue 空,此时整条消息落在它 edit_log 的
+    /// 清空 delete 里 → 取该 edit_log 里最长那条;再不行退回组里最后一个非空 endValue。
+    nonisolated static func bestGroupText(_ grp: [TypingEvent]) -> String {
+        guard let last = grp.last else { return "" }
+        if !last.endValue.isEmpty { return last.endValue }
+        if let t = Self.longestEditLogText(last.editLog), !t.isEmpty { return t }
+        return grp.last(where: { !$0.endValue.isEmpty })?.endValue ?? ""
+    }
+
     /// 一条消息的置信度 = 输入干净度:commit 字符 / (commit + delete 字符)。
     /// 干净直打(删得少)→ ~0.95+;反复改 / IME 多次重组 → 0.8 左右。自然浮动,
     /// 不再是死的 1.00。
@@ -1122,20 +1151,23 @@ final class WritingCaptureWorker {
                     let evs = s.typingEvents.filter { $0.id != nil }
                         .sorted { $0.startedAt < $1.startedAt }
                     guard !evs.isEmpty else { continue }
-                    // **按 submit(发送)切消息** —— 一次发送 = 一条消息。连续没 submit
-                    // 的事件(My Meeting 长草稿)合成一条。每组取最后事件的 endValue =
-                    // 发送/草稿那一刻输入框的完整内容(累积值,无需拼增量)。
+                    // **按发送切消息** —— 一次发送 = 一条消息。发送有两种记法:
+                    // Discord/微信回车 = submit 标记;ChatGPT 等发送后清空输入框 =
+                    // isSendClear(整框作为一条 delete + endValue 空)。两者都当边界。
+                    // 连续没发送的事件(IME 逐字快照 / 长草稿)合成一条。
                     var msgGroups: [[TypingEvent]] = []
                     var cur: [TypingEvent] = []
                     for ev in evs {
                         cur.append(ev)
-                        if Self.editLogHasSubmit(ev.editLog) { msgGroups.append(cur); cur = [] }
+                        if Self.editLogHasSubmit(ev.editLog) || Self.isSendClear(ev) {
+                            msgGroups.append(cur); cur = []
+                        }
                     }
                     if !cur.isEmpty { msgGroups.append(cur) }    // 末尾未发送的草稿
                     for grp in msgGroups {
-                        let last = grp.last!
-                        let text = (last.endValue.isEmpty
-                            ? grp.map { $0.text }.joined() : last.endValue)
+                        // 取组里最完整文本:常态 = 末事件 endValue;发送清空 = 那条
+                        // 清空 delete 里的整条原文(末 endValue 为空时)。
+                        let text = Self.bestGroupText(grp)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !text.isEmpty else { continue }
                         let startTs = grp.first!.startedAt, endTs = grp.last!.endedAt
