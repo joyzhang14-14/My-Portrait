@@ -242,9 +242,15 @@ final class TypingRecordWriter {
         } else if hadPaste || pasteboardMatch {
             // paste(⌘V / 剪贴板匹配)
             if !added.isEmpty {
-                let kind = added.count <= pasteShortThreshold ? "commit" : "paste"
+                // 剪贴板镜像命中:用剪贴板确切原文当内容,kind 一律 "paste"(不再
+                // 按 100 字折叠成 commit)—— 让下游统一按 <30 留 / ≥30 丢处理短
+                // 粘贴。仅 ⌘V、镜像没命中(被 app 转格式等)才退回旧逻辑。
+                let pasteText = pasteboardMatch ? (pasteboard.currentText ?? added) : added
+                let kind = pasteboardMatch
+                    ? "paste"
+                    : (added.count <= pasteShortThreshold ? "commit" : "paste")
                 if recordPasteEvents || kind == "commit" {
-                    rec.editLog.append(EditEntry(ts: nowMs, kind: kind, text: added))
+                    rec.editLog.append(EditEntry(ts: nowMs, kind: kind, text: pasteText))
                 } else {
                     blacklist[key, default: [:]][added] = CACurrentMediaTime()
                     onDevLog?("paste→blacklist bundle=\(rec.bundleId) \(added.count) chars")
