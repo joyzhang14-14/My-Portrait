@@ -39,3 +39,6 @@ scripts/release/dmg/.venv/
 
 # Claude Code 会话本地文件
 .claude/
+
+# 本地发版 runbook(私人备忘,不进仓库)
+RELEASE.md
