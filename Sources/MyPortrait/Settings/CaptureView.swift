@@ -160,6 +160,7 @@ struct AudioCaptureSettingsView: View {
             }
 
             if audioRec {
+                inputDeviceCard
                 SettingsCard(title: "System audio") {
                     SettingsRow("Capture system audio",
                                 description: "What you hear (loopback).",
@@ -404,6 +405,118 @@ struct AudioCaptureSettingsView: View {
         }
     }
 
+    // MARK: - Input device card (Issue #10)
+
+    @State private var devicesMonitor = AudioDevicesMonitor.shared
+    /// 跟 ProgressView 的脉动 —— 真在录时绿点 pulse,没在录就 hide。
+    @State private var pulseOn: Bool = false
+
+    /// 锁定输入设备 card。Menu picker + 实时 active device + disconnect 警告。
+    @ViewBuilder private var inputDeviceCard: some View {
+        let preferred = config.current.capture.audio.preferredInputDeviceUID
+        let devices = devicesMonitor.devices
+        let activeUID = devicesMonitor.activeUID
+        let activeDevice = devices.first { $0.id == activeUID }
+        // 用户锁了一个设备,但当前 devices 列表里没有 → 设备被拔了。
+        let preferredDisconnected = !preferred.isEmpty
+            && !devices.contains(where: { $0.id == preferred })
+
+        SettingsCard(
+            title: "Input device",
+            footnote: preferred.isEmpty
+                ? "Follow system default — macOS will switch the mic when you plug in headphones, AirPods, etc."
+                : "Locked to your chosen device. Headphone/AirPods plug-in won't change the mic. Disconnect → temporary fallback to system default until the device returns."
+        ) {
+            SettingsRow("Microphone",
+                        description: "Pick which mic My Portrait records from.",
+                        icon: "mic.circle") {
+                Menu {
+                    Button {
+                        config.mutate { $0.capture.audio.preferredInputDeviceUID = "" }
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark")
+                                .opacity(preferred.isEmpty ? 1 : 0)
+                            Text("Follow system default")
+                        }
+                    }
+                    Divider()
+                    ForEach(devices) { d in
+                        Button {
+                            config.mutate { $0.capture.audio.preferredInputDeviceUID = d.id }
+                        } label: {
+                            HStack {
+                                Image(systemName: "checkmark")
+                                    .opacity(preferred == d.id ? 1 : 0)
+                                Image(systemName: d.transport.icon)
+                                Text(d.name)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        let label = preferred.isEmpty
+                            ? "Follow system"
+                            : (devices.first { $0.id == preferred }?.name ?? preferred)
+                        Text(label)
+                            .font(.system(size: 12))
+                            .lineLimit(1).truncationMode(.middle)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9))
+                    }
+                    .frame(maxWidth: 240, alignment: .trailing)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+
+            // 实时状态行 —— 真在录显示绿点 pulse + device 名,没录灰显示。
+            SettingsDivider()
+            SettingsRow("Currently recording from",
+                        description: activeDevice?.transport == .bluetooth
+                            ? "Bluetooth — slightly higher latency (~200ms jitter); we buffer to compensate."
+                            : nil,
+                        icon: activeDevice?.transport.icon ?? "waveform") {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(activeUID.isEmpty ? Color.gray.opacity(0.3) : Color.green)
+                        .frame(width: 7, height: 7)
+                        .scaleEffect(pulseOn ? 1.3 : 1.0)
+                        .opacity(pulseOn ? 0.55 : 1.0)
+                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                                   value: pulseOn)
+                    Text(activeUID.isEmpty
+                         ? "Not capturing"
+                         : (activeDevice?.name ?? activeUID))
+                        .font(.system(size: 12))
+                        .foregroundStyle(activeUID.isEmpty ? .secondary : .primary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                .frame(maxWidth: 240, alignment: .trailing)
+                .onAppear { pulseOn = !activeUID.isEmpty }
+                .onChange(of: activeUID) { _, new in pulseOn = !new.isEmpty }
+            }
+
+            // 锁定设备掉线 → 橙色警告 banner。
+            if preferredDisconnected {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Text("Selected device disconnected — recording from system default. Will rebind when it returns.")
+                        .font(.system(size: 11))
+                    Spacer(minLength: 0)
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.orange.opacity(0.08))
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+            }
+        }
+    }
 }
 
 // MARK: - Screen Recording

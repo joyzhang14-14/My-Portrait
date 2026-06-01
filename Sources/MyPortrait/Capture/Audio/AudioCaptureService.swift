@@ -408,6 +408,15 @@ actor AudioCaptureService {
         }
     }
 
+    /// 用户在 Settings 改了 preferredInputDeviceUID → Services 调这个,
+    /// 在跑的话立刻重新绑定新设备。没在跑就 no-op(下次 start() 自然绑)。
+    func restartIfRunning() async {
+        guard samplesTask != nil else { return }
+        logger.info("config change: preferredInputDeviceUID → restart")
+        await stop()
+        await start()
+    }
+
     /// 决定要不要重启:
     /// - follow-system(preferredUID=""):default 变 → 重启(切新 default)
     /// - 锁定 UID:绑的设备消失(被拔)→ 重启 fallback;绑的设备**回来**了
