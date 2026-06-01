@@ -621,14 +621,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // 进程退出前尽量优雅停止所有子系统（刷盘、关 SCStream、停 compaction、停录音）。
-        // 同步等最多 ~1s，超时由系统 ~5s 后强制 kill 兜底。
-        let sem = DispatchSemaphore(value: 0)
+        // **两半分开**避免死锁:主线程那半(取消 task / 停 MainActor 监听)本就在主
+        // 线程,直接同步跑;actor 那半放 detached task 等 —— 它们不碰主线程,主线程
+        // 在 sem.wait 也不会跟它们死锁。
+        //   (原来把整个 @MainActor 的 stopManagedLifecycle 丢进 detached task,要
+        //    hop 回被 sem.wait 卡死的主线程 → 永远跑不完,清理白等 1s 一行没执行。)
         let services = self.services
+        services?.stopMainActorParts()
+        let sem = DispatchSemaphore(value: 0)
         Task.detached(priority: .userInitiated) {
-            await services?.stopManagedLifecycle()
+            await services?.stopActorParts()
             sem.signal()
         }
-        _ = sem.wait(timeout: .now() + 1.0)
+        // 现在清理真会执行,给足时间刷盘/关流(仍远低于系统 ~5s 强杀兜底)。
+        _ = sem.wait(timeout: .now() + 3.0)
     }
 }
 

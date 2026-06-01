@@ -530,20 +530,28 @@ final class Services {
         Task { await coordinator.applyPowerProfile(profile) }
     }
 
-    /// AppDelegate 在 `applicationWillTerminate` 调，停所有子系统。
-    func stopManagedLifecycle() async {
+    /// 退出清理:**必须在主线程同步跑**的部分(取消 task + 停 MainActor 监听)。
+    /// AppDelegate.applicationWillTerminate 本就在主线程,直接同步调 —— 不能丢进
+    /// detached task 再 hop 回主线程,那会和卡在 sem.wait 的主线程死锁。
+    func stopMainActorParts() {
         powerProfileTask?.cancel()
         screenLockMonitor.stop()
+        typingObserver.stop()
+        powerWatcher.stop()
+        permissions.stop()
+        settingsCancellables.removeAll()
+    }
+
+    /// 退出清理:各子系统 **actor** 的 stop()(刷盘 / 关 SCStream / 停录音压缩)。
+    /// `nonisolated` —— 不碰主线程,可在 detached task 里 await 完成,即使主线程
+    /// 在 sem.wait 等它也不死锁。
+    nonisolated func stopActorParts() async {
         await coordinator.stop()
         await audio.stop()
         await systemAudio.stop()
         await compactor.stop()
         await transcriber.stop()
         await retentionWorker.stop()
-        typingObserver.stop()
-        powerWatcher.stop()
-        permissions.stop()
-        settingsCancellables.removeAll()
     }
 
     // MARK: - 私有：权限
