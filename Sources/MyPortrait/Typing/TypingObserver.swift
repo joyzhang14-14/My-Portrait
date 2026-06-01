@@ -156,8 +156,11 @@ final class TypingObserver {
 
         writer.flushAll()
         pasteboardMonitor.stop()
-        ledger.charLogger = nil
+        // 先 ledger.stop()(关 tap 并 wait 到 tap 线程 RunLoop 退出),再清
+        // charLogger。否则 charLogger=nil 跟仍在跑的 tap 线程读 charLogger
+        // (KeystrokeLedger:441)对同一指针并发 retain/release → 数据竞争。
         ledger.stop()
+        ledger.charLogger = nil
         // detach 串进 op 链 —— 等在飞的 AX op 跑完再清，避免 CFRelease 撞用。
         enqueueAXOp { [weak self] in self?.detach() }
         print("[TypingObserver] stopped")
