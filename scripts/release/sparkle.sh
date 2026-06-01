@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-DMG_GLOB="build/MyPortrait-*.dmg"
+DMG_GLOB="build/MyPortrait_*_arm64.dmg"
 DMG_PATH=$(ls -t $DMG_GLOB 2>/dev/null | head -1 || true)
 [[ -n "$DMG_PATH" && -f "$DMG_PATH" ]] || {
     echo "ERROR: no DMG found in build/. Run scripts/release/dmg.sh first." >&2
@@ -32,7 +32,8 @@ if [[ -z "$SIGN_UPDATE" ]]; then
     fi
 fi
 
-VERSION=$(basename "$DMG_PATH" .dmg | sed 's/MyPortrait-//')
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
+    "build/export/MyPortrait.app/Contents/Info.plist")
 # **Sparkle 比较版本用 build number(CFBundleVersion),不是 marketing
 # version(CFBundleShortVersionString)**。早期 sparkle:version 直接塞
 # "1.0.82" → Sparkle 字符串比较 "1.0.82" vs running CFBundleVersion="82"
