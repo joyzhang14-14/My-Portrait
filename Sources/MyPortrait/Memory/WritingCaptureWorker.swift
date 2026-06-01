@@ -1079,11 +1079,20 @@ final class WritingCaptureWorker {
     /// 这个 event 是不是"发送清空":聊天 app(如 ChatGPT)发送后输入框清空,
     /// TypingObserver 把整框内容作为一条 delete 记下、endValue 变空。它**不带
     /// submit 标记**(不同于 Discord/微信的回车),所以单独识别,同样当消息边界。
+    /// **排除自撤销**:同一 event 里刚 commit 又 delete 掉同一段(用户打了"ba"
+    /// 又删掉,净零)不是发送 —— 只有删掉的是**累积内容**(本 event 没 commit 过的)
+    /// 才算发送清空。否则 IME 残渣的自撤销会被误判成发送、切出幽灵半成品。
     nonisolated static func isSendClear(_ ev: TypingEvent) -> Bool {
         guard ev.endValue.isEmpty else { return false }
-        let t = (Self.longestEditLogText(ev.editLog) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.count >= 2
+        struct E: Decodable { let kind: String?; let text: String? }
+        guard let data = ev.editLog.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([E].self, from: data) else { return false }
+        let commits = Set(arr.filter { $0.kind == "commit" }.compactMap { $0.text })
+        return arr.contains { e in
+            guard e.kind == "delete", let raw = e.text else { return false }
+            let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.count >= 2 && !commits.contains(raw)   // 删的不是自己刚打的
+        }
     }
 
     /// 取一条消息组里**最完整**的文本。常态取末事件 endValue(累积全文);但聊天
@@ -1094,6 +1103,39 @@ final class WritingCaptureWorker {
         if !last.endValue.isEmpty { return last.endValue }
         if let t = Self.longestEditLogText(last.editLog), !t.isEmpty { return t }
         return grp.last(where: { !$0.endValue.isEmpty })?.endValue ?? ""
+    }
+
+    /// 确定性前缀合并(原 Pass2 LLM 切分里的"草稿增长合并",改算法层实现)。
+    /// 同 (app,url) 组内,一条**未发送草稿**(其引用的 typing_events 里没有任何
+    /// 发送 = submit / send-clear)的文字若是更晚某条 record 的前缀 → 它只是那条
+    /// 草稿的早期快照,丢掉。**发送过的不丢**:先发"好的"再发"好的开始吧"是两条
+    /// 独立消息,即使前者是后者前缀。
+    nonisolated static func mergePrefixDrafts(
+        _ records: [WritingCaptureRecord], rawTyping: [TypingEvent]
+    ) -> [WritingCaptureRecord] {
+        guard records.count > 1 else { return records }
+        let evById = Dictionary(rawTyping.compactMap { e in e.id.map { ($0, e) } },
+                                uniquingKeysWith: { a, _ in a })
+        func hasSend(_ r: WritingCaptureRecord) -> Bool {
+            r.referenceTypingEventIds.contains { id in
+                guard let e = evById[id] else { return false }
+                return Self.editLogHasSubmit(e.editLog) || Self.isSendClear(e)
+            }
+        }
+        func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var drop = Set<Int>()
+        for (i, r) in records.enumerated() {
+            guard !hasSend(r) else { continue }          // 只合"未发送草稿"
+            let a = norm(r.text)
+            guard !a.isEmpty else { continue }
+            // 有没有更晚的、严格以 a 为前缀的更完整 record
+            let isStaleDraft = records.enumerated().contains { (j, o) in
+                j != i && o.startTs >= r.startTs && norm(o.text) != a && norm(o.text).hasPrefix(a)
+            }
+            if isStaleDraft { drop.insert(i) }
+        }
+        guard !drop.isEmpty else { return records }
+        return records.enumerated().filter { !drop.contains($0.offset) }.map { $0.element }
     }
 
     /// 一条消息的置信度 = 输入干净度:commit 字符 / (commit + delete 字符)。
@@ -1215,8 +1257,12 @@ final class WritingCaptureWorker {
                         referenceFrameIds: rec.referenceFrameIds,
                         referenceKeystrokeRange: rec.referenceKeystrokeRange)
                 }
+                // 确定性前缀合并:跨 session(切走 app 又回来接着打同一条草稿,
+                // Step0 按 app 切成两条)的草稿增长在这并回去。
+                let merged = Self.mergePrefixDrafts(
+                    cleaned, rawTyping: g.sessions.flatMap { $0.typingEvents })
                 return WritingCapturePass3Agent.Output(
-                    prompt: "(ax cleanup)", rawResponse: "", records: cleaned, discarded: [])
+                    prompt: "(ax cleanup)", rawResponse: "", records: merged, discarded: [])
             }
         }
         @Sendable func runOne(_ idx: Int) async -> (Int, Pass3GroupResult) {
