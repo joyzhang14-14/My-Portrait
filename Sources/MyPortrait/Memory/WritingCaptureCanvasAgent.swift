@@ -96,13 +96,25 @@ final class WritingCaptureCanvasAgent {
             }
         }
 
-        // 合并:edits 排序去重;body 取最长
+        // 合并:edits 排序去重
         var allEdits: [EditEntry] = results.flatMap { wr in
             wr.edits.map { EditEntry(ts: $0.ts, kind: $0.kind == "delete" ? "delete" : "commit", text: $0.text) }
         }
         allEdits.sort { $0.ts < $1.ts }
         allEdits = Self.dedupEdits(allEdits)
-        let body = results.map(\.bodyText).max(by: { $0.count < $1.count }) ?? ""
+        // body:各窗只看到文档一个滚动片段(标题在早窗、结尾在晚窗)。取最长单窗会
+        // 丢标题/结尾 —— 用一个 LLM 把各窗 body 拼成整篇(并集、去重叠、不发明)。
+        // 单窗 / 合并失败 → 退回最长单窗(绝不空)。
+        let bodies = results.map(\.bodyText)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let longest = bodies.max(by: { $0.count < $1.count }) ?? ""
+        let body: String
+        if bodies.count <= 1 {
+            body = longest
+        } else {
+            body = await Self.mergeBodies(bodies, provider: provider, model: model,
+                                          timeout: perWindowTimeout) ?? longest
+        }
 
         guard !body.isEmpty else {
             return WritingCapturePass3Agent.Output(
@@ -218,6 +230,55 @@ final class WritingCaptureCanvasAgent {
         let snData = try? JSONSerialization.data(withJSONObject: payload)
         lines.append(snData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]")
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - 多窗 body 合并
+
+    /// 把多窗 body 拼成整篇文档(并集去重叠,不发明)。失败 / 超时 → nil(调用方
+    /// 退回最长单窗)。一篇文档一次调用,token / 延迟可控。
+    static func mergeBodies(
+        _ bodies: [String], provider: Provider, model: String, timeout: TimeInterval
+    ) async -> String? {
+        var lines = [WritingCapturePrompts.canvasMerge, "", "fragments:"]
+        for (i, b) in bodies.enumerated() {
+            lines.append("--- fragment \(i + 1) ---")
+            lines.append(b)
+        }
+        let prompt = lines.joined(separator: "\n")
+        guard let agent = try? MemoryAgentFactory.make(provider: provider, model: model) else { return nil }
+        do { try await agent.start() } catch { return nil }
+        defer { agent.stop() }
+
+        let coord = CanvasWindowCoordinator()
+        let consumer = Task { [events = agent.events] in
+            for await ev in events { await coord.handle(ev) }
+        }
+        defer { consumer.cancel() }
+
+        let reqID = UUID().uuidString
+        await coord.startTurn(id: reqID)
+        do { try agent.sendPrompt(prompt, id: reqID) } catch { return nil }
+
+        let collected: String = await withTaskGroup(of: String.self) { g in
+            g.addTask { await coord.awaitTurn() }
+            g.addTask {
+                (try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))) ?? ()
+                return ""
+            }
+            let r = await g.next() ?? ""
+            g.cancelAll()
+            return r
+        }
+        guard let json = WritingCapturePass3Agent.extractFirstBalancedJSONObject(collected),
+              let data = json.data(using: .utf8) else { return nil }
+        struct Resp: Decodable {
+            let bodyText: String?
+            enum CodingKeys: String, CodingKey { case bodyText = "body_text" }
+        }
+        guard let r = try? JSONDecoder().decode(Resp.self, from: data),
+              let t = r.bodyText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !t.isEmpty else { return nil }
+        return t
     }
 }
 
