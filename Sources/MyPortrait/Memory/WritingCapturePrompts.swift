@@ -580,8 +580,14 @@ enum WritingCapturePrompts {
     - If nothing needs fixing, return the text UNCHANGED.
     - Return EVERY input id exactly once with its (fixed or unchanged) text.
 
+    Also rate `confidence` ∈ [0,1] — how sure you are this is clean, complete user
+    writing that the keystrokes account for. ~0.95+ when the keystrokes clearly
+    produced the text and it reads as a finished message; ~0.75–0.9 with IME
+    ambiguity / some residue you had to judge; ~0.6 when keystroke support is thin or
+    the text looks like an unfinished fragment.
+
     OUTPUT — respond with ONLY this JSON object, no prose / fences:
-    { "fixed": [ { "id": "<id>", "text": "<text>" }, ... ] }
+    { "fixed": [ { "id": "<id>", "text": "<text>", "confidence": <0..1> }, ... ] }
     - JSON escaping: `"` → `\"`, `\` → `\\`, newlines → `\n`.
     """#
 
