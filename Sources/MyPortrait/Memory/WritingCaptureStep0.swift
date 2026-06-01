@@ -110,6 +110,7 @@ struct WritingCaptureStep0 {
             let ts: Int64
             let app: String
             let url: String?
+            let elementHash: Int?   // typing 带输入框身份;keystroke 为 nil
         }
 
         // **只用 typing + keystroke 作锚切 session**,OCR 不参与切分。
@@ -130,12 +131,12 @@ struct WritingCaptureStep0 {
         for e in typingEvents {
             points.append(ActivityPoint(
                 ts: e.startedAt, app: e.bundleId,
-                url: e.url.isEmpty ? nil : e.url))
+                url: e.url.isEmpty ? nil : e.url, elementHash: e.elementHash))
         }
         for k in keystrokes {
             let url = Self.nearestFrameURL(
                 ts: k.tsMs, app: k.bundleId, urlByApp: urlByApp)
-            points.append(ActivityPoint(ts: k.tsMs, app: k.bundleId, url: url))
+            points.append(ActivityPoint(ts: k.tsMs, app: k.bundleId, url: url, elementHash: nil))
         }
         points.sort { $0.ts < $1.ts }
         guard !points.isEmpty else { return [] }
@@ -148,23 +149,34 @@ struct WritingCaptureStep0 {
             var url: String?
             var start: Int64
             var lastTs: Int64
+            var elementHash: Int?   // 当前 session 正在打的输入框身份
         }
 
         var rawBoundaries: [SessionAcc] = []
         var cur = SessionAcc(
             app: points[0].app, url: points[0].url,
-            start: points[0].ts, lastTs: points[0].ts
+            start: points[0].ts, lastTs: points[0].ts, elementHash: points[0].elementHash
         )
         for p in points.dropFirst() {
             let gap = p.ts - cur.lastTs
             let appChanged = p.app != cur.app
-            // url 切:p 有非空 url 且跟当前 session **不是同一页**才算切。
-            // (p.url == nil 时不算切,因为是 keystroke 没带 url)
-            // **同页容忍**:截屏抓的 browser_url 对 SPA(如 ChatGPT 切对话不刷新)
-            // 只报根域名 "chatgpt.com/",而 AX 读到全路径 "chatgpt.com/c/X"。
-            // 这俩是同一页,不能当成换 url —— 否则击键(根)和打字(全路径)交替
-            // 触发切分,把一条连续消息剁成每个 typing_event 一个 session。
+            // **同一个输入框(element_hash)的连续打字绝不切**。AX 给的 url 会陈旧/
+            // 错误(实测:在 claude.ai 打字,AX 却报上一个 github 页的 url),frame
+            // 的 url 又是另一个 —— 纯靠 url 切会把同一个框的连续消息剁碎、最完整那
+            // 条还被覆盖闸门毙掉。element_hash = 输入框身份,最可靠。
+            let sameElement: Bool = {
+                guard let pe = p.elementHash, let ce = cur.elementHash else { return false }
+                return pe == ce
+            }()
+            // url 切:p 有非空 url 且跟当前 session **不是同一页**才算切。同一个输入框
+            // (sameElement)时 url 噪声不切;keystroke(p.url=nil / element=nil)不切。
+            // **同页容忍**:SPA 截屏只报根域名而 AX 报全路径,视为同页(见 urlSamePage)。
             let urlChanged: Bool = {
+                if sameElement { return false }
+                // 击键点(无 element)且当前正在某输入框打字(session 有 element)→
+                // 击键属于这个框,不靠它不可靠的 frame-url 切;纯击键 session(canvas)
+                // 没 element,保留原 url 切分(让 Google Doc 等按 url 分家)。
+                if p.elementHash == nil, cur.elementHash != nil { return false }
                 guard let pu = p.url, !pu.isEmpty else { return false }
                 return !Self.urlSamePage(pu, cur.url ?? "")
             }()
@@ -173,10 +185,11 @@ struct WritingCaptureStep0 {
                 rawBoundaries.append(cur)
                 cur = SessionAcc(
                     app: p.app, url: p.url,
-                    start: p.ts, lastTs: p.ts
+                    start: p.ts, lastTs: p.ts, elementHash: p.elementHash
                 )
             } else {
                 cur.lastTs = p.ts
+                if cur.elementHash == nil, let pe = p.elementHash { cur.elementHash = pe }
                 // session url 升级到**更具体**的那个(根 → 全路径):击键先来带根
                 // url,随后的 typing_event 带全路径,要把 session 升到全路径,后面
                 // 全路径的 typing_event/frame 才归得进来(见 urlMatch)。
