@@ -12,45 +12,6 @@
         -->
 
         <item>
-            <title>Version 1.2.0</title>
-            <pubDate>Mon, 01 Jun 2026 18:59:19 +0000</pubDate>
-            <sparkle:version>161</sparkle:version>
-            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <h3>Features</h3>
-                <ul>
-                    <li>New on-device <strong>Qwen3-ASR</strong> transcription engine — better Chinese, no extra setup. Download models on demand.</li>
-                    <li><strong>Faster &amp; lighter</strong> — removed the memory-heavy semantic search; search now runs on FTS5.</li>
-                    <li><strong>Pick your microphone</strong> (or follow the system default) with auto-fallback when devices unplug, plus a live "recording from" indicator.</li>
-                    <li><strong>Reliable system-audio capture</strong> — records the other side of calls and what you hear, even after switching output devices.</li>
-                    <li><strong>Pause capture for chosen apps or categories</strong> while they're playing audio (configurable, not just music).</li>
-                    <li><strong>Voice ID, reworked</strong> — train your voice (and others), listen to a clip of any detected voice, and auto-organize clusters. Trained speakers are searchable as <code>@speaker:&lt;name&gt;</code> in chat.</li>
-                    <li><strong>Auto-organize events into project folders</strong> (Event classifier) on a schedule.</li>
-                    <li><strong>Import conversations</strong> from Claude Code CLI and Codex CLI.</li>
-                    <li><strong>Manage scheduled jobs from chat</strong> — create, list, and delete them; live streaming; per-job mute; drag-and-drop &amp; paste images.</li>
-                    <li><strong>Health &amp; diagnostics</strong> — stall detection in the menu bar + one-click diagnostic export.</li>
-                    <li>Multi-language transcription picker and "only transcribe while plugged in".</li>
-                </ul>
-                <h3>Bug fixes</h3>
-                <ul>
-                    <li>System audio no longer goes silent shortly after recording starts.</li>
-                    <li>Fixed an occasional app freeze caused by a database deadlock.</li>
-                    <li>ChatGPT login no longer breaks under concurrent token refresh.</li>
-                    <li>Crash fixes in the audio-capture restart path and typing capture.</li>
-                    <li>Writing capture is more verbatim and accurate.</li>
-                    <li>Light-theme visibility fixes across chat and connection views.</li>
-                    <li>Removed a batch of dead or misleading settings.</li>
-                    <li>Privacy controls: ignore incognito windows, record while screen is locked, and Power mode.</li>
-                </ul>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.0/MyPortrait-1.2.0.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="K799mtTXUhVGuHhTuFLd/u7uzx5UZY5vPov+SRQNIxUYveY3+XjNfrhGsmbd3FFyXR3ZUim7B+4/z7oCGQIeCw==" length="44948638" />
-        </item>
-
-        <item>
             <title>Version 1.1.16</title>
             <pubDate>Fri, 29 May 2026 03:30:00 +0000</pubDate>
             <sparkle:version>160</sparkle:version>
