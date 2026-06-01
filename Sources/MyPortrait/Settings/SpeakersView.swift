@@ -350,24 +350,20 @@ private struct SectionLabel: View {
 
 // MARK: - Unidentified cluster card
 
-private struct UnidentifiedCard: View {
-    let row: SpeakerRow
-    let onName: (String) -> Void
-    let onHallucination: () -> Void
-    @State private var draft: String = ""
-    @State private var hover = false
+/// 试听按钮 —— 圆形渐变 play/pause + 播放时外扩脉冲环。Identified /
+/// Unidentified 行共用,避免两边各改各的漂移(本次 bug 就是只给 IdentifiedRow
+/// 修了播放、漏了 UnidentifiedCard)。
+private struct SpeakerPlayButton: View {
+    let speakerId: Int64
+    var helpText: String = "Play a recent clip"
     @State private var audioPlayer = SpeakerAudioPlayer.shared
     /// 播放中向外扩散并淡出的脉冲环动画开关。
     @State private var playPulse = false
 
-    /// 专门的试听按钮 —— 圆形渐变底 + play/pause 图标,一眼是按钮。波形
-    /// "N samples" pill 仍是纯统计标签(那个可爱图标留着)。播放时圆环外扩脉冲。
-    /// row.id 是 String(DB Int64 转的字符串),还原回 Int64 给 player。
-    private var playButton: some View {
-        let dbId: Int64 = Int64(row.id) ?? -1
-        let isPlaying = audioPlayer.playingId == dbId
-        return Button {
-            SpeakerAudioPlayer.shared.toggle(speakerId: dbId)
+    var body: some View {
+        let isPlaying = audioPlayer.playingId == speakerId
+        Button {
+            SpeakerAudioPlayer.shared.toggle(speakerId: speakerId)
         } label: {
             ZStack {
                 // 播放中:向外扩散并淡出的脉冲环。
@@ -391,7 +387,7 @@ private struct UnidentifiedCard: View {
             .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
-        .help("Play a recent clip of this cluster")
+        .help(helpText)
         .onChange(of: isPlaying) { _, playing in
             if playing {
                 playPulse = false
@@ -403,6 +399,14 @@ private struct UnidentifiedCard: View {
             }
         }
     }
+}
+
+private struct UnidentifiedCard: View {
+    let row: SpeakerRow
+    let onName: (String) -> Void
+    let onHallucination: () -> Void
+    @State private var draft: String = ""
+    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -423,7 +427,8 @@ private struct UnidentifiedCard: View {
             }
             Spacer(minLength: 14)
 
-            playButton
+            SpeakerPlayButton(speakerId: Int64(row.id) ?? -1,
+                              helpText: "Play a recent clip of this cluster")
 
             TextField("Name this speaker…", text: $draft)
                 .textFieldStyle(.plain)
@@ -505,23 +510,6 @@ private struct IdentifiedRow: View {
     @State private var showMerge = false
     @State private var similar: [SimilarSpeaker] = []
     @State private var loadingSimilar = false
-    @State private var audioPlayer = SpeakerAudioPlayer.shared
-
-    /// 波形 pill —— 点击试听该 speaker 最近一段录音(若有)。
-    /// 之前是纯 label 看着像按钮但点没反应。
-    /// row.id 是 String(DB Int64 转的字符串),还原回 Int64 给 player。
-    private var playButton: some View {
-        let dbId: Int64 = Int64(row.id) ?? -1
-        let isPlaying = audioPlayer.playingId == dbId
-        let icon = isPlaying ? "pause.fill" : "waveform"
-        return Button {
-            SpeakerAudioPlayer.shared.toggle(speakerId: dbId)
-        } label: {
-            StatPill(icon: icon, text: "\(row.sampleCount)")
-        }
-        .buttonStyle(.plain)
-        .help("Play a recent clip of this speaker")
-    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -561,7 +549,9 @@ private struct IdentifiedRow: View {
             }
 
             HStack(spacing: 4) {
-                playButton
+                StatPill(icon: "waveform", text: "\(row.sampleCount)")
+                SpeakerPlayButton(speakerId: Int64(row.id) ?? -1,
+                                  helpText: "Play a recent clip of this speaker")
                 if let last = row.lastHeard {
                     StatPill(icon: "clock", text: relative(last))
                 }
