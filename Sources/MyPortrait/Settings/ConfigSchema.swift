@@ -498,6 +498,9 @@ struct RecordingConfig: Codable, Equatable {
     /// 默认 true —— 用户工作流常粘贴大段(笔记 / Claude Desktop),不记会丢内容。
     /// false → 旧行为:粘贴段进黑名单不进 editLog。
     var typingRecordPasteEvents: Bool = true
+    /// 纯剪贴板粘贴(没打字、整段贴上来的)字数 < 此值才保留写作记录,≥ 则丢弃。
+    /// 因人而异:想多留剪贴内容调大,想少留调小。
+    var typingPasteKeepMaxChars: Int = 30
     init() {}
     enum CodingKeys: String, CodingKey {
         case audio, screen, system
@@ -508,6 +511,7 @@ struct RecordingConfig: Codable, Equatable {
         case typingSubmitWindowMs = "typing_submit_window_ms"
         case typingPasteMinChars  = "typing_paste_min_chars"
         case typingRecordPasteEvents = "typing_record_paste_events"
+        case typingPasteKeepMaxChars = "typing_paste_keep_max_chars"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -522,6 +526,7 @@ struct RecordingConfig: Codable, Equatable {
         typingSubmitWindowMs = c.dflt(Int.self, .typingSubmitWindowMs, typingSubmitWindowMs)
         typingPasteMinChars  = c.dflt(Int.self, .typingPasteMinChars, typingPasteMinChars)
         typingRecordPasteEvents = c.dflt(Bool.self, .typingRecordPasteEvents, typingRecordPasteEvents)
+        typingPasteKeepMaxChars = c.dflt(Int.self, .typingPasteKeepMaxChars, typingPasteKeepMaxChars)
     }
 }
 

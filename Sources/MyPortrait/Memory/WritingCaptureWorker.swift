@@ -255,7 +255,8 @@ final class WritingCaptureWorker {
             makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
             makeCleanup: { @MainActor in WritingCaptureAxCleanupAgent(provider: pass3Provider, model: pass3Model) },
             userLanguages: userLanguages,
-            userRejections: userRejections
+            userRejections: userRejections,
+            pasteKeepMaxChars: ConfigStore.shared.capture.typingPasteKeepMaxChars
         )
 
         // 6. 收集 Pass 3 输出(按 group 索引保留分组),给 Pass 4 用
@@ -599,7 +600,8 @@ final class WritingCaptureWorker {
             makeCleanup: { @MainActor in WritingCaptureAxCleanupAgent(provider: pass3Provider, model: pass3Model) },
             includeAxText: includeAxText,
             userLanguages: userLanguages,
-            userRejections: userRejections
+            userRejections: userRejections,
+            pasteKeepMaxChars: ConfigStore.shared.capture.typingPasteKeepMaxChars
         )
 
         // 6. 收集 Pass 3 输出(按 group 索引保留)
@@ -1119,18 +1121,19 @@ final class WritingCaptureWorker {
     ///      是贴上来的占位符(isPastedValue),零击键、不是用户打的。
     /// 这两种都改用 edit_log 里**用户敲出来**的最长那条(发送时被整条 delete 的原文,
     /// longestEditLogText 已排除 paste);再不行退回组里最后一个**非占位符**的非空 endValue。
-    nonisolated static func bestGroupText(_ grp: [TypingEvent]) -> String {
+    nonisolated static func bestGroupText(_ grp: [TypingEvent], keepMaxChars: Int = 30) -> String {
         guard let last = grp.last else { return "" }
         if !last.endValue.isEmpty, !Self.isPastedValue(last) { return last.endValue }
         if let t = Self.longestEditLogText(last.editLog), !t.isEmpty { return t }
         if let prev = grp.last(where: { !$0.endValue.isEmpty && !Self.isPastedValue($0) }) {
             return prev.endValue
         }
-        // 没有任何打字内容 = 纯剪切板粘贴(or 占位符):短(<30)放过,长(≥30)漏。
-        // (占位符通常 <30 会在这放过,但它零击键 → Pass 4 仍会按"非用户输入"丢;
-        // 真·剪切板短粘贴零击键也留 —— 靠下面 source=ax_paste 让 Pass 4 放它过。)
+        // 没有任何打字内容 = 纯剪切板粘贴(or 占位符):短(<keepMaxChars)放过,长漏。
+        // 阈值是前端可调参数(typing_paste_keep_max_chars,默认 30):想多留剪贴内容
+        // 调大、想少留调小。(占位符通常 < 阈值会在这放过,但它零击键 → Pass 4 仍会
+        // 按"非用户输入"丢;真·剪切板短粘贴零击键也留 —— 靠 source=ax_paste 放它过。)
         let pasted = last.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return pasted.count < 30 ? pasted : ""
+        return pasted.count < keepMaxChars ? pasted : ""
     }
 
     /// 这条消息组是不是"纯剪切板粘贴"(没有任何打字内容,文字就是贴上来的那条)。
@@ -1203,7 +1206,8 @@ final class WritingCaptureWorker {
         makeCleanup: @escaping @MainActor @Sendable () -> WritingCaptureAxCleanupAgent,
         includeAxText: Bool = true,
         userLanguages: [String] = [],
-        userRejections: [UserRejectionRow] = []
+        userRejections: [UserRejectionRow] = [],
+        pasteKeepMaxChars: Int = 30
     ) async -> [Pass3GroupResult] {
         // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
         // fanout;普通组走 Pass 3 单调用。LLM 偶发 socket 断/超时常见,失败退避
@@ -1244,7 +1248,7 @@ final class WritingCaptureWorker {
                     for grp in msgGroups {
                         // 取组里最完整文本:常态 = 末事件 endValue;发送清空 = 那条
                         // 清空 delete 里的整条原文(末 endValue 为空时)。
-                        let text = Self.bestGroupText(grp)
+                        let text = Self.bestGroupText(grp, keepMaxChars: pasteKeepMaxChars)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !text.isEmpty else { continue }
                         // 纯剪切板粘贴(没打字、文字就是贴上来的):走"大小规则"——
