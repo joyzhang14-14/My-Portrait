@@ -361,6 +361,7 @@ final class Services {
         // 递归重注册——跟 CaptureSettings.startObservingConfig 一个套路。
         pushIgnoreRules()
         observeIgnoreRules()
+        observePreferredInputDevice()
 
         // 屏幕采集功耗档位(Settings → Screen Capture → Power mode)。三个触发源:
         //   ① powerWatcher.states:插拔电源 / 电量变化(IOKit 事件)
@@ -463,6 +464,21 @@ final class Services {
                 guard let self else { return }
                 self.pushIgnoreRules()
                 self.observeIgnoreRules()
+            }
+        }
+    }
+
+    /// 用户在 Settings 改了锁定的输入设备 UID → 跑步中重启 AudioCaptureService
+    /// 重新绑定。withObservationTracking 一次性,onChange 后递归重订阅。
+    private func observePreferredInputDevice() {
+        let store = ConfigStore.shared
+        withObservationTracking {
+            _ = store.capture.audio.preferredInputDeviceUID
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                await self.audio.restartIfRunning()
+                self.observePreferredInputDevice()
             }
         }
     }
