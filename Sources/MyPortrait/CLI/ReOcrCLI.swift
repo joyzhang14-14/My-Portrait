@@ -48,7 +48,12 @@ enum ReOcrCLI {
     private static func reocrToday() async throws -> Int {
         // 1. 打开 DB
         let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
-        let dbPool = try DatabasePool(path: dbPath)
+        // 注册 foundation_icu 分词器 —— UPDATE frames 触发的 frames_fts 同步触发器
+        // 就能正常分词,不必再 drop/recreate 触发器(那会留下索引过时 + 中断时触发器
+        // 永久消失、连累主 app 搜索的坑)。
+        var config = Configuration()
+        config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
+        let dbPool = try DatabasePool(path: dbPath, configuration: config)
 
         // 2. 查 jpg-alive 的今日 Google Doc Safari 帧
         struct FrameTodo: Sendable {
@@ -72,13 +77,6 @@ enum ReOcrCLI {
         print("[re-ocr] \(todos.count) frame(s) to re-OCR")
 
         let langs = ["zh-Hans", "zh-Hant", "en-US"]
-
-        // 3. 临时 DROP FTS update trigger(避免 foundation_icu tokenizer 在
-        //    sqlite3 CLI 上下文里找不到 —— 这里用 GRDB 直连也一样需要)。
-        //    SwiftPM 这边没注册 FoundationTokenizer。
-        try await dbPool.write { db in
-            try db.execute(sql: "DROP TRIGGER IF EXISTS __frames_fts_au")
-        }
 
         var updated = 0
         for (idx, todo) in todos.enumerated() {
@@ -107,15 +105,6 @@ enum ReOcrCLI {
             }
         }
 
-        // 4. 重建 FTS update trigger(跟 schema 一致)
-        try await dbPool.write { db in
-            try db.execute(sql: """
-                CREATE TRIGGER __frames_fts_au AFTER UPDATE ON "frames" BEGIN
-                  INSERT INTO "frames_fts"("frames_fts", "rowid", "app_name", "window_name", "browser_url", "full_text") VALUES('delete', OLD."rowid", OLD."app_name", OLD."window_name", OLD."browser_url", OLD."full_text");
-                  INSERT INTO "frames_fts"("rowid", "app_name", "window_name", "browser_url", "full_text") VALUES (NEW."rowid", NEW."app_name", NEW."window_name", NEW."browser_url", NEW."full_text");
-                END
-                """)
-        }
         return updated
     }
 
@@ -127,7 +116,11 @@ enum ReOcrCLI {
 
     private static func reocrTodayMP4() async throws -> Int {
         let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
-        let dbPool = try DatabasePool(path: dbPath)
+        // 注册 foundation_icu 分词器(同 reocrToday),frames_fts 同步触发器照常分词,
+        // 无需 drop/recreate 触发器。
+        var config = Configuration()
+        config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
+        let dbPool = try DatabasePool(path: dbPath, configuration: config)
 
         // 今日 Google Doc 的 MP4 帧 + 视频路径 + offset,按视频文件分组
         let todos: [MP4Todo] = try await dbPool.read { db in
@@ -151,10 +144,6 @@ enum ReOcrCLI {
 
         let langs = ["zh-Hans", "zh-Hant", "en-US"]
         let root = NSString(string: "~/.portrait").expandingTildeInPath
-
-        try await dbPool.write { db in
-            try db.execute(sql: "DROP TRIGGER IF EXISTS __frames_fts_au")
-        }
 
         // 按视频文件分组,一个 asset 抽多帧(省去反复开文件)
         let byVideo = Dictionary(grouping: todos) { $0.videoPath }
@@ -191,15 +180,6 @@ enum ReOcrCLI {
                     print("[re-ocr-mp4] \(done)/\(todos.count) done")
                 }
             }
-        }
-
-        try await dbPool.write { db in
-            try db.execute(sql: """
-                CREATE TRIGGER __frames_fts_au AFTER UPDATE ON "frames" BEGIN
-                  INSERT INTO "frames_fts"("frames_fts", "rowid", "app_name", "window_name", "browser_url", "full_text") VALUES('delete', OLD."rowid", OLD."app_name", OLD."window_name", OLD."browser_url", OLD."full_text");
-                  INSERT INTO "frames_fts"("rowid", "app_name", "window_name", "browser_url", "full_text") VALUES (NEW."rowid", NEW."app_name", NEW."window_name", NEW."browser_url", NEW."full_text");
-                END
-                """)
         }
         return updated
     }
