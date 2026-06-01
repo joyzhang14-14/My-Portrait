@@ -51,34 +51,23 @@
         </item>
 
         <item>
-            <title>Version 1.1.16</title>
+            <title>1.1.16</title>
             <pubDate>Fri, 29 May 2026 03:30:00 +0000</pubDate>
             <sparkle:version>160</sparkle:version>
             <sparkle:shortVersionString>1.1.16</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <p>Writing capture got a major rebuild this week. Plus a system-audio crash fix.</p>
-                <h3>Writing capture — accuracy overhaul</h3>
+                <h3>Features</h3>
                 <ul>
-                    <li><strong>Browser writing is now captured properly.</strong> Safari / Chrome / Arc force a Vision OCR pass instead of trusting the accessibility tree's "fast path" (which would routinely report empty / stale text for Google Docs, Notion, browser textareas). A one-shot backfill CLI re-OCR'd today's Safari + Google Doc frames so the new pipeline has clean source data.</li>
-                    <li><strong>Canvas editor support.</strong> Google Docs, Notion, browser-based editors — Pass 2 now reconstructs your edit history by fanning out per-window subagents with adaptive chrome-token filtering. The output matches the document's native version history.</li>
-                    <li><strong>Pass 4: three-source router.</strong> Each writing record now has an explicit route field that says where the source text came from — accessibility-cleaned, canvas-fusion, or merged. The router decides per (app, url) which source to trust, with AX authenticity checks for cases where the accessibility tree is partial.</li>
-                    <li><strong>Pass 3 keystroke-support filter improvements.</strong> Records require actual typing evidence in their time window — but canvas editors get an exemption based on keystroke count (not text patterns), so long-form writing in Google Docs isn't filtered out just because the OCR text doesn't repeat the typed characters verbatim. The canvas exemption also now excludes "AI replies you read" and "content you only scrolled through".</li>
-                    <li><strong>Frame URL attribution for keystrokes.</strong> Every keystroke is now attributed to the URL of the frame active at that moment — so writing in tab A and tab B doesn't get merged.</li>
+                    <li><strong>Browser &amp; canvas writing capture</strong> — properly captures what you write in Safari/Chrome/Arc and canvas editors (Google Docs, Notion), reconstructing edit history to match the document's own version history.</li>
+                    <li><strong>Ask the AI about what you wrote</strong> — chat now answers from your distilled writing records, and search returns the exact matching frame with a snippet.</li>
+                    <li><strong>Paste &amp; drag-and-drop</strong> images and files straight into the chat input.</li>
+                    <li><strong>Daily scheduled jobs catch up</strong> — if the app was closed at a job's scheduled time, it runs on next launch instead of waiting another 24 hours.</li>
                 </ul>
-                <h3>System audio</h3>
+                <h3>Bug fixes</h3>
                 <ul>
-                    <li>Toggling system audio off no longer crashes the app. The shutdown sequence now properly unbinds the AVAudioEngine from the aggregate device before destroying it, and every step is wrapped in an ObjC NSException guard so HAL-level errors gracefully log instead of killing the process.</li>
-                </ul>
-                <h3>AI chat / mp-query</h3>
-                <ul>
-                    <li>The AI can now query <code>writing_records</code> directly via a new <code>mp-query writing</code> subcommand. When you ask "find the answer I wrote about X", the model goes to the LLM-distilled writing records first instead of guessing from raw OCR.</li>
-                    <li><code>mp-query search</code> rewritten to use per-frame SQL LIKE on <code>frames.full_text</code>. Previously the OCR for the whole time window was merged into a 200k blob before substring-matching, which threw away which frame actually matched. Now each match returns its real frame + a 600-char snippet centered on the query.</li>
-                    <li>Chat input box accepts ⌘V paste and drag-drop for images / files. Paperclip button still works the same way.</li>
-                </ul>
-                <h3>Scheduler</h3>
-                <ul>
-                    <li>Daily-frequency cron jobs now have a catch-up branch: if the app was closed during a job's scheduled time (e.g. 23:45), it runs as soon as the app comes back up the next day, instead of waiting another 24 hours.</li>
+                    <li>Toggling system audio off no longer crashes the app.</li>
+                    <li>Writing capture is more accurate — keystroke-gated, attributed per browser tab, with far fewer false positives.</li>
                 </ul>
             ]]></description>
             <enclosure
@@ -88,39 +77,25 @@
         </item>
 
         <item>
-            <title>Version 1.1.0</title>
+            <title>1.1.0</title>
             <pubDate>Thu, 28 May 2026 05:20:00 +0000</pubDate>
             <sparkle:version>144</sparkle:version>
             <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <p>Big release — the AI chat now actually knows what you've been doing.</p>
-                <h3>AI chat: agent-driven screen context</h3>
+                <h3>Features</h3>
                 <ul>
-                    <li><strong>Chat answers based on your real screen activity now.</strong> Ask "summarize my yesterday" / "what was I writing in Cursor" / "what did I do on May 21" and the model autonomously queries your local timeline. No more "I don't have visibility into your day."</li>
-                    <li>Under the hood: a local CLI (<code>mp-query</code>) exposes your captured data; a SKILL preamble teaches the AI when and how to call it (inspired by screenpipe's REST + SKILL.md pattern). All data stays on your Mac.</li>
-                    <li><strong>Time accounting fixed.</strong> Activity totals now match macOS Screen Time within ~10% (previously off by 7×).</li>
+                    <li><strong>Chat now knows what you've been doing</strong> — ask "summarize my yesterday" or "what was I writing in Cursor" and it answers from your real screen activity, all queried on-device.</li>
+                    <li><strong>Mode-aware Quick Actions</strong> — the suggestion cards adapt to whether you've been coding, browsing, in a meeting, or writing, and send the relevant context along.</li>
+                    <li><strong>Pre-downloaded transcription models</strong> — all 4 Whisper sizes ship on first launch, so switching size is instant.</li>
+                    <li><strong>Local capture models</strong> card shows ready / downloading status for each on-device model.</li>
                 </ul>
-                <h3>AI chat: input + bubble UX</h3>
+                <h3>Bug fixes</h3>
                 <ul>
-                    <li>Input box grows with your message up to 4 lines, then scrolls inside (two-finger scroll). No more truncated long prompts.</li>
-                    <li>Hovering a message no longer shifts it down. Copy / edit / regenerate buttons trigger from anywhere on the message rectangle, not just on the text.</li>
-                    <li>"Quick Actions" cards under the greeting are now mode-aware — they change based on whether you've been coding, browsing, in a meeting, writing notes, etc. Clicking a card sends along the relevant context window automatically.</li>
-                </ul>
-                <h3>Voice training</h3>
-                <ul>
-                    <li><strong>Voice training is finally usable.</strong> Three crashes and two correctness bugs fixed in this cycle: the audio callback no longer trips Swift 6's isolation check, the input format actually delivers Float32 samples, and the resampler stays alive across the 30s window. Re-training a name truly replaces the old samples instead of stacking on top of them.</li>
-                    <li>"Trained as Joy" now shows "just now" instead of "5 days ago" — speaker list uses speaker.updated_at as the activity timestamp.</li>
-                </ul>
-                <h3>Local models</h3>
-                <ul>
-                    <li>All 4 Whisper transcription sizes (tiny / base / small / large-v3-turbo) are pre-downloaded on first launch, ~2.2 GB total. Switching sizes in Settings → Capture is now instant.</li>
-                    <li>New <strong>Local capture models</strong> card in Settings → AI models shows ready / downloading status for each of the 7 local AI models.</li>
-                </ul>
-                <h3>Light theme</h3>
-                <ul>
-                    <li>Timeline workspace forces dark internally (it shows your screen recordings on a black canvas) — the toolbar and calendar popover are no longer invisible white-on-black in Light mode.</li>
-                    <li>Memory and Input views' middle column no longer renders as a dark grey block on Light theme.</li>
+                    <li><strong>Voice training works</strong> — fixed three crashes and two correctness bugs; re-training a name now replaces the old samples.</li>
+                    <li>Time accounting now matches macOS Screen Time (was off by ~7×).</li>
+                    <li>Chat input grows to 4 lines then scrolls; hovering a message no longer shifts it, and copy/edit/regenerate work from anywhere on the bubble.</li>
+                    <li>Light-theme fixes for the timeline toolbar/calendar and the Memory/Input middle column.</li>
                 </ul>
             ]]></description>
             <enclosure
@@ -130,16 +105,16 @@
         </item>
 
         <item>
-            <title>Version 1.0.113</title>
+            <title>1.0.113</title>
             <pubDate>Thu, 28 May 2026 03:30:00 +0000</pubDate>
             <sparkle:version>113</sparkle:version>
             <sparkle:shortVersionString>1.0.113</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <p>Hotfix for 1.0.112.</p>
+                <h3>Bug fixes</h3>
                 <ul>
-                    <li><strong>Voice training no longer crashes.</strong> Clicking "Start training" on 1.0.112 hard-crashed the app — Swift 6 runtime caught a microphone callback touching main-actor state from the audio thread. Fixed by routing the callback through the singleton without capturing self.</li>
-                    <li>Memory page middle column: the dark grey overlay that made it look out of place against the rest of the Light theme is gone. Light mode now flows cleanly across all three columns; Dark mode looks the same as before.</li>
+                    <li>Voice training no longer crashes when you click "Start training".</li>
+                    <li>The Memory page's middle column now matches the Light theme (no more out-of-place dark grey panel).</li>
                 </ul>
             ]]></description>
             <enclosure
@@ -149,21 +124,18 @@
         </item>
 
         <item>
-            <title>Version 1.0.112</title>
+            <title>1.0.112</title>
             <pubDate>Thu, 28 May 2026 03:01:26 +0000</pubDate>
             <sparkle:version>112</sparkle:version>
             <sparkle:shortVersionString>1.0.112</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <p>Light-mode visibility patch.</p>
+                <h3>Bug fixes</h3>
                 <ul>
-                    <li>AI chat: input text, the @ / shield / paperclip icons, and the setup banner are all readable on a light background again — they used to render white-on-white.</li>
-                    <li>Timeline calendar: dates, month switcher and the selected-day highlight are now visible in Light theme (the popover content used to vanish entirely).</li>
-                    <li>Connections: "Disconnect" / subtle buttons text and borders no longer disappear in Light.</li>
-                    <li>Memory search bar: input text and box outline visible in Light.</li>
-                    <li>Settings → Capture / Storage / Usage: the non-selected tab icons and range chips now adapt to Light theme.</li>
+                    <li>Light theme: chat input, the @ / shield / paperclip icons, and the setup banner are readable again (were white-on-white).</li>
+                    <li>Light theme: timeline calendar dates, month switcher and selected-day highlight are visible again.</li>
+                    <li>Light theme: Connections buttons, the Memory search bar, and Settings tab icons / range chips now adapt correctly.</li>
                 </ul>
-                <p>Borders and dividers across other surfaces are still on the polish list — this patch covers the spots where text or interactive controls actually disappeared.</p>
             ]]></description>
             <enclosure
                 url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.112/MyPortrait-1.0.112.dmg"
@@ -172,41 +144,22 @@
         </item>
 
         <item>
-            <title>Version 1.0.111</title>
+            <title>1.0.111</title>
             <pubDate>Thu, 28 May 2026 02:35:18 +0000</pubDate>
             <sparkle:version>111</sparkle:version>
             <sparkle:shortVersionString>1.0.111</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <h3>Voice training, rebuilt</h3>
+                <h3>Features</h3>
                 <ul>
-                    <li><strong>No longer needs power.</strong> Voice training is now fully decoupled from transcription — record 30s, the voice signature is extracted on-device, done. Battery is fine.</li>
-                    <li><strong>Re-training a name actually replaces the old samples</strong> instead of stacking on top of them (which used to make your voice get matched back to the older clustering).</li>
-                    <li>Quality fix: audio converter is reused across the 30s window instead of rebuilt every frame — the embedding is far more stable.</li>
-                    <li>Main mic capture is paused while training so two engines don't fight for the microphone.</li>
-                    <li>Start training pre-checks the AI voice model is on disk; if it's still downloading you get told <em>before</em> the 30s recording, not after.</li>
-                    <li>Mic-start failure message now points at <em>System Settings → Privacy → Microphone</em>.</li>
+                    <li><strong>Voice training, rebuilt</strong> — fully decoupled from transcription (record 30s on-device, no power needed); re-training replaces the old samples; it pre-checks the voice model is downloaded before recording.</li>
+                    <li><strong>Cleaner writing capture</strong> — strips window chrome, far fewer duplicates, no truncation of long writing, better per-record summaries, and keystroke-gated so it's signal-only.</li>
+                    <li><strong>Local capture models</strong> card in Settings → AI models shows ready / downloading status for each on-device model.</li>
                 </ul>
-                <h3>System audio capture</h3>
+                <h3>Bug fixes</h3>
                 <ul>
-                    <li><strong>Crash fix.</strong> Toggling system audio on certain Macs threw an audio-format mismatch that killed the app. Caught via an ObjC try/catch shim — failure now gracefully disables system audio instead of crashing.</li>
-                </ul>
-                <h3>Writing capture</h3>
-                <ul>
-                    <li>Captured text is cleaner — toolbars, tab bars and other window chrome no longer end up in your writing records.</li>
-                    <li>Far fewer duplicates across consecutive frames; the same paragraph shouldn't repeat in your records anymore.</li>
-                    <li>Long-form writing isn't truncated — the per-frame cap was raised, and sessions where the editor can't expose its full text get the cap dropped entirely.</li>
-                    <li>The summary that gets stored alongside each writing record is now a real description of <em>where</em> you were writing (which app, what kind of document) rather than a generic blurb.</li>
-                    <li>Records require actual typing evidence — frames where nothing was typed get filtered out, so your writing history is signal-only.</li>
-                </ul>
-                <h3>Notification overlay</h3>
-                <ul>
-                    <li>Light theme: banner colors fixed; progress bar no longer leaks past the corner radius.</li>
-                    <li>Panel height now matches the SwiftUI content — multi-line bodies aren't clipped, single-line bodies aren't padded into a giant box.</li>
-                </ul>
-                <h3>UI</h3>
-                <ul>
-                    <li>New <strong>Local capture models</strong> card in Settings → AI models. Shows ready / downloading status for Whisper transcription, voice signature (CAM++), voice segmentation (pyannote), and voice activity (Silero VAD). New installs can see exactly what's still downloading.</li>
+                    <li>Toggling system audio no longer crashes on an audio-format mismatch.</li>
+                    <li>Notification overlay: Light-theme colors fixed, and the panel height now matches its content.</li>
                 </ul>
             ]]></description>
             <enclosure
@@ -216,25 +169,21 @@
         </item>
 
         <item>
-            <title>Version 1.0.89</title>
+            <title>1.0.89</title>
             <pubDate>Wed, 27 May 2026 01:30:00 +0000</pubDate>
             <sparkle:version>89</sparkle:version>
             <sparkle:shortVersionString>1.0.89</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <p>Rolled-up release covering everything since 1.0.81 — fully silent auto-update + a handful of UI polish.</p>
-                <h3>Auto-update</h3>
+                <h3>Features</h3>
                 <ul>
-                    <li><strong>Fully silent install.</strong> With <em>Settings → General → Auto-update app</em> on, new versions download in the background, then a small "Updating to 1.0.X — click to postpone" banner appears top-right. 10 s without interaction → install + relaunch on its own. Click banner to skip this round.</li>
-                    <li><strong>Update check interval</strong> really respects what you pick — Sparkle's hard-coded 1-hour minimum no longer applies.</li>
-                    <li><strong>Check now</strong> always opens Sparkle's native modal so a manual click gives an explicit yes/no answer.</li>
+                    <li><strong>Fully silent auto-update</strong> — new versions download in the background, show a small "click to postpone" banner, and install on their own after 10 seconds.</li>
+                    <li>The update-check interval now respects your setting, and "Check now" always gives an explicit yes/no.</li>
+                    <li>The installed version now shows in Settings → General and the menu-bar dropdown.</li>
                 </ul>
-                <h3>UI</h3>
+                <h3>Bug fixes</h3>
                 <ul>
-                    <li>Settings → General shows the currently-installed version. Light-theme aware.</li>
-                    <li>Menu bar dropdown shows the current version between Typing Capture and Open My Portrait.</li>
-                    <li>Notification overlay panel shrunk to a sane size.</li>
-                    <li>Settings → Display → Translucent sidebar: dropped the redundant "(macOS only)" suffix.</li>
+                    <li>Notification overlay panel resized to a sane height.</li>
                 </ul>
             ]]></description>
             <enclosure
@@ -244,40 +193,31 @@
         </item>
 
         <item>
-            <title>Version 1.0.81</title>
+            <title>1.0.81</title>
             <pubDate>Tue, 26 May 2026 22:37:53 +0000</pubDate>
             <sparkle:version>81</sparkle:version>
             <sparkle:shortVersionString>1.0.81</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
-                <h3>New features</h3>
+                <h3>Features</h3>
                 <ul>
-                    <li>Screenpipe data import (auto-scan disks, copy MP4 / audio metadata, recompute cutoff, progress bar + live byte counter)</li>
-                    <li>Pre-fetch local models (WhisperKit / pyannote / wespeaker / Silero VAD) on launch — first-run no longer stalls</li>
-                    <li>Proper Light theme: warm-white → lavender gradient + dynamic glass</li>
-                    <li>App customize: dock icon auto-cropped to macOS squircle template</li>
-                    <li>Speakers page folded into Audio Capture</li>
-                    <li>"New version available" toggle wired to Sparkle didFindValidUpdate</li>
+                    <li><strong>Import your existing Screenpipe data</strong> — auto-scans disks and imports MP4 / audio metadata, with a progress bar.</li>
+                    <li>Local models pre-fetch on launch, so the first run no longer stalls.</li>
+                    <li>Proper <strong>Light theme</strong> — warm-white → lavender gradient with dynamic glass.</li>
+                    <li>Custom dock icon, auto-cropped to the macOS squircle.</li>
+                    <li>Speakers folded into the Audio Capture page.</li>
                 </ul>
                 <h3>Bug fixes</h3>
                 <ul>
-                    <li>Chat: provider / model locked per-conversation; RECENTS ordering fixed; empty assistant placeholder hidden (#6)</li>
-                    <li>Onboarding: window resize before flag flip; permissions never proactively requested; Input Monitoring CGEventTap side-effect registers app in System Settings</li>
-                    <li>Scheduler UI: 24-hour picker; Time row uses menu Pickers for visual alignment</li>
-                    <li>Connections: bundled brand icons for DeepSeek / Ollama / Anthropic / Obsidian / Notion; Claude Code "Connect" actually sends "hi" and reads the reply</li>
-                    <li>Cron jobs: trimmed conversations are deleted, no longer leak into RECENTS</li>
-                    <li>Sidebar: Memories rows fully clickable (#7); Translucent sidebar toggle takes effect</li>
-                    <li>Integration icons: NSImage(named:) loading + letter fallback when assets fail; DeepSeek icon flood-filled to remove iOS-style black border</li>
-                    <li>App customize bugs fixed; tray icon renders in colour</li>
-                    <li>Memory Settings + Connections page title layout consistent with rest of Settings</li>
-                    <li>Swift 6 data-race warning fix; main window pinned to min size</li>
+                    <li>Chat: provider/model locked per conversation; RECENTS ordering fixed; empty placeholder hidden.</li>
+                    <li>Onboarding no longer proactively requests permissions; window-resize fix.</li>
+                    <li>Scheduler: 24-hour time picker with aligned controls.</li>
+                    <li>Connections: brand icons for DeepSeek / Ollama / Anthropic / Obsidian / Notion; Claude Code "Connect" actually verifies the link.</li>
+                    <li>Cron jobs: trimmed conversations no longer leak into RECENTS.</li>
+                    <li>Sidebar: Memories rows fully clickable; translucent-sidebar toggle takes effect.</li>
+                    <li>Assorted icon, layout, and Swift 6 data-race fixes.</li>
                 </ul>
-                <h3>Under-the-hood</h3>
-                <ul>
-                    <li>Code-signing identity moved to a local self-signed cert (MyPortraitDev) — keeps TCC permissions + Sparkle auto-update stable across versions, no Apple ID dependency</li>
-                    <li>Support/Signing.local.xcconfig lets contributors override signing without touching committed defaults</li>
-                </ul>
-                <p><strong>⚠️ Upgrade from v1.0.0:</strong> Sparkle auto-update is rejected this once because the code-signing identity changed. Please download this .dmg and install manually. macOS TCC treats the new build as a new app, so re-grant Screen Recording / Microphone / Accessibility / Input Monitoring / Full Disk Access. After v1.0.81, future Sparkle auto-updates will work normally.</p>
+                <p><strong>⚠️ Upgrading from 1.0.0:</strong> install this .dmg manually and re-grant Screen Recording / Microphone / Accessibility / Input Monitoring / Full Disk Access — the code-signing identity changed, so this one update can't go through Sparkle and macOS treats it as a new app. Auto-updates work normally after 1.0.81.</p>
             ]]></description>
             <enclosure
                 url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.0.81/MyPortrait-1.0.81.dmg"
@@ -286,14 +226,14 @@
         </item>
 
         <item>
-            <title>Version 1.0.0</title>
+            <title>1.0.0</title>
             <pubDate>Tue, 26 May 2026 03:23:10 +0000</pubDate>
             <sparkle:version>1</sparkle:version>
             <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
                 <ul>
-                    <li>First release — see GitHub release page for full notes.</li>
+                    <li>First release — see the GitHub release page for full notes.</li>
                 </ul>
             ]]></description>
             <enclosure
