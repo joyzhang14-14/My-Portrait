@@ -353,33 +353,52 @@ actor AudioCaptureService {
         )
     }
 
-    /// 注册「默认输入设备变更」监听 —— 拔耳机 / 插 USB 麦时自动重启采集。
+    /// 注册「输入设备变化」监听。订阅两个事件:
+    ///   - default input device 变(系统层切默认 —— follow-system 模式重启)
+    ///   - 设备列表变(插拔 —— 锁定模式可能要 fallback / 回切)
     private func registerDeviceChangeListener() {
         guard deviceListenerBlock == nil else { return }
         let block: AudioObjectPropertyListenerBlock = { @Sendable [weak self] _, _ in
             Task { await self?.handleDeviceChange() }
         }
-        var addr = Self.defaultInputAddress()
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main, block
-        )
-        if status == noErr {
+        var defAddr = Self.defaultInputAddress()
+        var listAddr = Self.devicesListAddress()
+        var ok = true
+        if AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &defAddr, DispatchQueue.main, block
+        ) != noErr { ok = false }
+        if AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &listAddr, DispatchQueue.main, block
+        ) != noErr { ok = false }
+        if ok {
             deviceListenerBlock = block
         } else {
-            logger.warning("failed to register device-change listener: \(status)")
+            logger.warning("failed to register one or both device listeners")
         }
     }
 
     private func unregisterDeviceChangeListener() {
         guard let block = deviceListenerBlock else { return }
-        var addr = Self.defaultInputAddress()
+        var defAddr = Self.defaultInputAddress()
+        var listAddr = Self.devicesListAddress()
         AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main, block
+            AudioObjectID(kAudioObjectSystemObject), &defAddr, DispatchQueue.main, block
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &listAddr, DispatchQueue.main, block
         )
         deviceListenerBlock = nil
     }
 
-    /// 设备变更回调。防抖：1 秒内的连续变更合并成一次重启（拔插常爆发多个事件）。
+    nonisolated private static func devicesListAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
+    /// 设备变更回调。防抖：1 秒内的连续变更合并成一次决策（拔插常爆发多个事件）。
     private func handleDeviceChange() {
         restartTask?.cancel()
         restartTask = Task { [weak self] in
@@ -389,9 +408,39 @@ actor AudioCaptureService {
         }
     }
 
+    /// 决定要不要重启:
+    /// - follow-system(preferredUID=""):default 变 → 重启(切新 default)
+    /// - 锁定 UID:绑的设备消失(被拔)→ 重启 fallback;绑的设备**回来**了
+    ///   (之前 fallback 的)→ 重启重绑;其他变化(无关设备插拔)→ 不动
     private func restartForDeviceChange() async {
         guard samplesTask != nil else { return }   // 没在采集就不重启
-        logger.info("default input device changed — restarting mic capture")
+        let preferredUID = ConfigStore.snapshot.preferredInputDeviceUID
+        let nowActiveUID = await MainActor.run { AudioDevicesMonitor.shared.activeUID }
+        let availableUIDs = Set(AudioDevicesMonitor.enumerateInputDevices().map { $0.id })
+
+        let shouldRestart: Bool
+        let reason: String
+        if preferredUID.isEmpty {
+            // follow-system 模式 —— 任意 default 变都重启
+            shouldRestart = true
+            reason = "default input changed (follow-system)"
+        } else {
+            let preferredNowAvailable = availableUIDs.contains(preferredUID)
+            let alreadyOnPreferred = (nowActiveUID == preferredUID)
+            if preferredNowAvailable && !alreadyOnPreferred {
+                shouldRestart = true; reason = "preferred device '\(preferredUID)' is back — rebinding"
+            } else if !preferredNowAvailable && alreadyOnPreferred {
+                shouldRestart = true; reason = "preferred device '\(preferredUID)' disconnected — falling back to system default"
+            } else {
+                shouldRestart = false; reason = "no-op (preferred=\(preferredUID), active=\(nowActiveUID))"
+            }
+        }
+
+        guard shouldRestart else {
+            logger.info("device change: \(reason, privacy: .public)")
+            return
+        }
+        logger.info("device change: \(reason, privacy: .public) — restarting mic capture")
         await stop()
         await start()
     }
