@@ -6,7 +6,6 @@ struct StallVerdict: Sendable, Identifiable, Equatable {
         case visionDbWrite       // 抓得到帧但写库停了
         case visionFrozenCapture // 抓帧本身停了 (TCC 撤权 / 显示器睡眠等)
         case audioBacklog        // pending 队列堆积
-        case audioNeverCaptured  // 启动 > 120s 但 produced == 0
         case permissionRevoked   // ScreenRecording 权限被撤
     }
 
@@ -38,11 +37,6 @@ final class StallDetector {
     /// 给重型场景留余量。
     private let audioBacklogPendingThreshold = 20
     private let audioBacklogOldestAgeMs: Int64 = 20 * 60 * 1000
-
-    /// audioNeverCaptured 单独 warmup 30 分钟 —— 短期内 (~12 分钟) 没新 chunk
-    /// 完全正常 (静音房间 / 没开会 / mic 远离说话人)。只有真的 30 分钟还一
-    /// 段没出才像是设备 / 权限问题。
-    private let audioNeverCapturedWarmupMs: Int64 = 30 * 60 * 1000
 
     /// 同 kind 的 warn 节流间隔。Driver 30s 一次 evaluate,这里再用 60s
     /// 抑制重复推送给 NotificationCenterService。
@@ -138,21 +132,13 @@ final class StallDetector {
         // —— audio 类 stall。要求 audioEngineEnabled +
         // 转录没被电池模式 gate 住(pause.audioTranscriptionPaused)。
         // 电池下 mic 段仍入库 → pending 堆是预期,不是 stall。
+        // **不再报 audioNeverCaptured** —— 静音房间 / 用户不开会 = 真的没东西
+        // 录,弹"30 min no chunks"是干扰而非诊断。真权限掉了由 PermissionMonitor
+        // 单独捕获(permissionRevoked 那条还在)。
         if audioEngineEnabled,
            !pause.audioTranscriptionPaused,
            audio.startedAtMs > 0 {
-            // 3. audioNeverCaptured:启动 > 30min 但 chunksProduced=0。短期内
-            //    没出段完全正常(静音房间 / 没说话 / mic 远),30 分钟还一段
-            //    没出才像是设备 / 权限问题。
-            if nowMs - audio.startedAtMs > audioNeverCapturedWarmupMs,
-               audio.chunksProduced == 0 {
-                if let v = makeVerdict(
-                    kind: .audioNeverCaptured,
-                    reason: "Audio capture started but no chunks have been recorded in 30 min. Check microphone permission and device selection.",
-                    cause: "uptime=\(Int(audio.uptimeSec))s, chunksProduced=0", now: now
-                ) { fresh.append(v) }
-            }
-            // 4. audioBacklog:**队列在长且超阈值**才报。pending 大但在缩 →
+            // 3. audioBacklog:**队列在长且超阈值**才报。pending 大但在缩 →
             //    transcriber 正在追赶历史积压,不是 stall。只有当
             //    "增长 + 已超阈值 + 最老超 freshness" 三条同时成立,才说明
             //    转录确实落后于输入。
