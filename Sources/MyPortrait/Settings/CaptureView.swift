@@ -666,20 +666,6 @@ struct ScreenCaptureSettingsView: View {
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }
-
-        SettingsCard(
-            title: "Ignored window titles",
-            footnote: "Case-insensitive substring match against each window's title. e.g. \"Incognito\" masks every private-browsing window out of the screenshot."
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Window title substrings…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TagListEditor(tags: config.binding(\.privacy.ignoredWindowTitles), placeholder: "e.g. Incognito, Private")
-                    .padding(.horizontal, 14).padding(.bottom, 12)
-            }
-        }
     }
 
     /// Off-main scan of `frames.app_name` for the ignored-apps dropdown.

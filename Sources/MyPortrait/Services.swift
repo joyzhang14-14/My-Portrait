@@ -444,7 +444,6 @@ final class Services {
         let p = ConfigStore.shared.privacy
         coordinator.setIgnoredApps(Set(p.ignoredApps))
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
-        coordinator.setIgnoredWindowTitles(p.ignoredWindowTitles)
         coordinator.setMaskingEnabled(p.maskIgnoredApps)
         coordinator.setPauseCaptureList(apps: p.pauseCaptureApps, urls: p.pauseCaptureUrls)
         Task { await coordinator.setIgnoreIncognito(p.ignoreIncognito) }
@@ -457,7 +456,6 @@ final class Services {
         withObservationTracking {
             _ = store.privacy.ignoredApps
             _ = store.privacy.ignoredUrls
-            _ = store.privacy.ignoredWindowTitles
             _ = store.privacy.maskIgnoredApps
             _ = store.privacy.ignoreIncognito
             _ = store.privacy.pauseCaptureApps

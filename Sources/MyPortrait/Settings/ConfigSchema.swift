@@ -698,10 +698,10 @@ struct PrivacyConfig: Codable, Equatable {
         "My Portrait", "Wallpaper", "Trash",
     ]
     var ignoredUrls:            [String] = []
-    /// Window-title substrings (case-insensitive contains). A window whose
-    /// title contains any of these is masked out of the capture.
+    /// DEPRECATED —— 与 ignoredUrls 在 IgnoreGate 里行为完全相同(都按窗口标题
+    /// 子串遮挡)。只为解码老 config 保留:decode 时把条目并进 ignoredUrls 后清空。
     var ignoredWindowTitles:    [String] = []
-    /// When true, windows matching ignoredApps / ignoredWindowTitles are
+    /// When true, windows matching ignoredApps / ignoredUrls are
     /// excluded from the ScreenCaptureKit buffer (transparent in the frame).
     /// The frame itself is always captured.
     var maskIgnoredApps:        Bool     = true
@@ -746,6 +746,12 @@ struct PrivacyConfig: Codable, Equatable {
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
+        // DEPRECATED 迁移:ignoredWindowTitles 与 ignoredUrls 行为相同(IgnoreGate
+        // 都按窗口标题子串遮挡)→ 老条目并进 ignoredUrls,字段废弃。
+        if !ignoredWindowTitles.isEmpty {
+            for t in ignoredWindowTitles where !ignoredUrls.contains(t) { ignoredUrls.append(t) }
+            ignoredWindowTitles = []
+        }
         maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
         pauseCaptureApps       = c.dflt([String].self, .pauseCaptureApps, pauseCaptureApps)
         pauseCaptureUrls       = c.dflt([String].self, .pauseCaptureUrls, pauseCaptureUrls)
