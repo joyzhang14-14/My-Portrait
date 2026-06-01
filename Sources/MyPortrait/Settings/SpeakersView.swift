@@ -356,6 +356,23 @@ private struct UnidentifiedCard: View {
     let onHallucination: () -> Void
     @State private var draft: String = ""
     @State private var hover = false
+    @State private var audioPlayer = SpeakerAudioPlayer.shared
+
+    /// 波形 pill —— 点击试听该匿名簇最近一段录音(跟 IdentifiedRow 一致)。
+    /// 之前是纯静态 label,未命名簇没法试听(命名后才有按钮)。
+    /// row.id 是 String(DB Int64 转的字符串),还原回 Int64 给 player。
+    private var playButton: some View {
+        let dbId: Int64 = Int64(row.id) ?? -1
+        let isPlaying = audioPlayer.playingId == dbId
+        let icon = isPlaying ? "pause.fill" : "waveform"
+        return Button {
+            SpeakerAudioPlayer.shared.toggle(speakerId: dbId)
+        } label: {
+            StatPill(icon: icon, text: "\(row.sampleCount) samples")
+        }
+        .buttonStyle(.plain)
+        .help("Play a recent clip of this cluster")
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -368,7 +385,7 @@ private struct UnidentifiedCard: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 HStack(spacing: 6) {
-                    StatPill(icon: "waveform", text: "\(row.sampleCount) samples")
+                    playButton
                     if let last = row.lastHeard {
                         StatPill(icon: "clock", text: relative(last))
                     }
