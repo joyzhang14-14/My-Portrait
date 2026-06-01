@@ -1397,9 +1397,19 @@ struct MemorySettingsView: View {
 
     @ViewBuilder
     private var reviewSection: some View {
-        let hasEvents = MemoryStaging.hasPending(.events)
-        let hasPortrait = MemoryStaging.hasPending(.portrait)
-        let hasPersonality = MemoryStaging.hasPending(.personality)
+        // **跑步中不显示 Pending review 卡片** —— beginRun 拍快照那一刻
+        // hasPending=true,但 runEventJob 还没产 .md,卡片显示"No content
+        // changes" + Reject/Approve 误导用户。等真跑完(scheduler 标 idle +
+        // 本 View 触发器集合也空)才呈现可审核状态。
+        let eventsRunning = runningTriggers.contains(.eventProcessing)
+            || MemoryScheduler.shared.eventRunning
+        let portraitRunning = runningTriggers.contains(.distill)
+            || MemoryScheduler.shared.distillRunning
+        let personalityRunning = runningTriggers.contains(.personality)
+            || MemoryScheduler.shared.personalityRunning
+        let hasEvents = MemoryStaging.hasPending(.events) && !eventsRunning
+        let hasPortrait = MemoryStaging.hasPending(.portrait) && !portraitRunning
+        let hasPersonality = MemoryStaging.hasPending(.personality) && !personalityRunning
         if hasEvents || hasPortrait || hasPersonality {
             section(
                 title: "Pending review",
