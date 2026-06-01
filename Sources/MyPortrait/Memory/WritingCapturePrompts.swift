@@ -535,9 +535,19 @@ enum WritingCapturePrompts {
        - "delete": a sentence/paragraph of real prose that was present is now gone,
          net removal > ~15 chars. text = the removed prose.
        Use the LATER snapshot's ts for each edit.
-    2. body_text: the single most COMPLETE, CLEAN document body you can read across
-       these snapshots (usually the last/longest). Strip ALL chrome — output only
-       the user's prose, paragraphs in order.
+    2. body_text: the single most COMPLETE document body you can read across these
+       snapshots (usually the last/longest). Strip ONLY chrome (menus / tabs / URLs);
+       keep the user's prose, paragraphs in order.
+
+    CRITICAL — TRANSCRIBE VERBATIM. Do NOT "fix" or polish the user's writing:
+    - Copy the body EXACTLY as it appears on screen. Preserve the user's spelling,
+      grammar, typos, capitalization, numerals, contractions, and punctuation as shown.
+      Do NOT correct grammar, fix misspellings, spell digits out into words, add /
+      remove / reorder words, change capitalization, or otherwise "improve" the prose.
+      The user's imperfect wording and style ARE the data we want — normalizing it
+      DESTROYS it.
+    - "Strip chrome" means remove UI furniture only (menus / tabs / URLs); it does NOT
+      mean grammar-correct, rephrase, pluralize, re-number, or improve readability.
 
     CRITICAL — DO NOT INVENT. Accuracy beats completeness:
     - If a change might be OCR jitter, word-order scramble, scrolling, or chrome
@@ -574,6 +584,10 @@ enum WritingCapturePrompts {
     - Keep the user's EXACT wording, punctuation, language, line breaks. Do NOT
       translate, rephrase, summarize, reorder sentences, or INVENT any sentence that is
       not present in at least one fragment. Accuracy beats completeness.
+    - TRANSCRIBE VERBATIM — never grammar-correct or polish. Preserve the user's exact
+      spelling, typos, capitalization, and numerals as written; do not add, remove, or
+      reorder words. When two fragments render the same passage differently, prefer the
+      one matching the user's raw imperfect wording, NOT the "cleaner" / corrected one.
     - Drop any leftover UI / chrome lines (menu labels, tab names, URLs, "saving…").
 
     OUTPUT — respond with ONLY this JSON object, no prose / markdown fences:
@@ -595,6 +609,14 @@ enum WritingCapturePrompts {
     keystrokes, COMPLETE it to the character the user clearly meant.
       e.g. text "这是一家什么dian", keystroke "...shi yi jia shen me dian" → "这是一家什么店"
     Also drop abandoned trailing phonetic residue the keystrokes show was deleted.
+
+    DO NOT "complete" a latin token that is plausibly a PROPER NAME (person / place /
+    product), an English word the user wrote ON PURPOSE, or an intentional romanization
+    — leave those EXACTLY as typed. Only complete when the latin is UNAMBIGUOUSLY
+    leftover pinyin the IME failed to turn into the ONE obviously-intended common word
+    in context. A romanized foreign name stays as typed — NEVER guess it into homophone
+    characters. When in ANY doubt whether a latin run is residue vs. intended latin,
+    LEAVE IT UNCHANGED (a kept romanization beats a wrong guess).
 
     HARD limits — do NOT do anything else:
     - Do NOT translate, rephrase, summarize, reorder, merge, split, censor, or
