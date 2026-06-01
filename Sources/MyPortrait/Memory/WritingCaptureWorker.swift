@@ -1006,6 +1006,24 @@ final class WritingCaptureWorker {
         editLogJSON.contains("\"kind\":\"submit\"")
     }
 
+    /// 一条消息的置信度 = 输入干净度:commit 字符 / (commit + delete 字符)。
+    /// 干净直打(删得少)→ ~0.95+;反复改 / IME 多次重组 → 0.8 左右。自然浮动,
+    /// 不再是死的 1.00。
+    nonisolated static func axConfidence(_ events: [TypingEvent]) -> Double {
+        struct E: Decodable { let kind: String?; let text: String? }
+        var commit = 0, del = 0
+        for ev in events {
+            guard let data = ev.editLog.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([E].self, from: data) else { continue }
+            for e in arr {
+                let n = (e.text ?? "").count
+                if e.kind == "commit" { commit += n } else if e.kind == "delete" { del += n }
+            }
+        }
+        guard commit + del > 0 else { return 0.9 }
+        return (max(0.5, min(0.99, Double(commit) / Double(commit + del))) * 100).rounded() / 100
+    }
+
     static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
@@ -1072,8 +1090,8 @@ final class WritingCaptureWorker {
                             .replacingOccurrences(of: "<BS>", with: "")
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         if ksTrim.hasPrefix("/") { continue }
-                        // CJK 拼音 ~1.5–3 击键/字,英文 ~1。除以 2 归一,clamp [0.5,1]。
-                        let conf = min(1.0, max(0.5, Double(kc) / (Double(text.count) * 2.0)))
+                        // conf = 输入干净度(commit vs delete 字符),自然浮动。
+                        let conf = Self.axConfidence(grp)
                         let ctx = contextTimeline.first {
                             $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
                         }?.summary
