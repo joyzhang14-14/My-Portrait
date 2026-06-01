@@ -12,10 +12,10 @@
         -->
 
         <item>
-            <title>1.2.0</title>
-            <pubDate>Mon, 01 Jun 2026 19:26:13 +0000</pubDate>
-            <sparkle:version>161</sparkle:version>
-            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
+            <title>1.2.1</title>
+            <pubDate>Mon, 01 Jun 2026 19:38:56 +0000</pubDate>
+            <sparkle:version>162</sparkle:version>
+            <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <description><![CDATA[
                 <h3>Features</h3>
@@ -45,9 +45,9 @@
                 </ul>
             ]]></description>
             <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.0/MyPortrait_1.2.0_arm64.dmg"
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.1/MyPortrait_1.2.1_arm64.dmg"
                 type="application/octet-stream"
-                sparkle:edSignature="0v8Lim8/QZc4/kixNFIzyjD5z4wqUtuVgmNHYa2PlZomZyOIRZrrm6FGOf7ycdAQB3r5FrslLJY197nMQ51TBg==" length="25808874" />
+                sparkle:edSignature="+h7gsuFui31SeQmWEz2uCzi2ANJRQpN0BNiQTR7jAQh1vwcJbKWmehhHWsNnhNXEDbQ++98a/cw3JIKqVbBLBg==" length="25806514" />
         </item>
 
         <item>
