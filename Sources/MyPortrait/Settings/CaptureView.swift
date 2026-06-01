@@ -744,6 +744,7 @@ struct TypingCaptureSettingsView: View {
                              $0.capture.typingSubmitWindowMs         = def.typingSubmitWindowMs
                              $0.capture.typingPasteMinChars          = def.typingPasteMinChars
                              $0.capture.typingRecordPasteEvents      = def.typingRecordPasteEvents
+                             $0.capture.typingPasteKeepMaxChars      = def.typingPasteKeepMaxChars
                          }
                      }) {
             typingSection
@@ -867,6 +868,17 @@ struct TypingCaptureSettingsView: View {
                             icon: "doc.on.doc") {
                     Toggle("", isOn: config.binding(\.capture.typingRecordPasteEvents))
                         .labelsHidden().toggleStyle(.switch)
+                }
+                SettingsDivider()
+                SettingsRow("Keep pasted text under",
+                            description: "Pure clipboard pastes (no typing, pasted in whole) are kept as writing only if shorter than this — longer pastes (likely external content) are dropped. Raise to keep more of what you paste, lower to keep less.",
+                            icon: "arrow.down.doc") {
+                    Stepper(value: config.binding(\.capture.typingPasteKeepMaxChars),
+                            in: 0...300, step: 5) {
+                        Text("\(config.current.capture.typingPasteKeepMaxChars) chars")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                    }
                 }
             }
         }
