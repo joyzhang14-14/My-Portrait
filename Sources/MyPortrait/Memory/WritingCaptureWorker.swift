@@ -1021,7 +1021,10 @@ final class WritingCaptureWorker {
             }
         }
         guard commit + del > 0 else { return 0.9 }
-        return (max(0.5, min(0.99, Double(commit) / Double(commit + del))) * 100).rounded() / 100
+        // ratio∈[0,1] → conf∈[0.80,0.99]。中文 IME 组词天然多删,不该把正常中文
+        // 拉到 0.5;映射到高位区间,浮动但不显假。干净直打≈0.99,反复改≈0.85。
+        let ratio = Double(commit) / Double(commit + del)
+        return ((0.80 + 0.19 * ratio) * 100).rounded() / 100
     }
 
     static func runPass3Concurrently(
