@@ -123,6 +123,70 @@ struct AudioCaptureSettingsView: View {
         .padding(.horizontal, 48).padding(.bottom, 12)
     }
 
+    // MARK: - 转录实时状态(队列 + 内存)
+
+    /// 待转录队列长度(audio_chunks 里 status 非 done/failed)。~1Hz 刷。
+    @State private var statusPending = 0
+    /// app 当前 resident memory（GB）。转录(尤其 Qwen/MLX)时会明显抬高。
+    @State private var statusMemGB = 0.0
+    /// 后台刷新循环句柄,行可见时跑、消失时取消。
+    @State private var statusRefresh: Task<Void, Never>?
+
+    /// 当前进程 resident memory（GB）。镜像 RetranscribeQwenCLI.rssGB()。
+    /// nonisolated —— 无 actor 状态,给后台刷新循环直接调。
+    private nonisolated static func residentMemGB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return 0 }
+        return Double(info.resident_size) / 1024 / 1024 / 1024
+    }
+
+    /// 转录实时状态行。暂停态直接读 @Observable 单例(自动响应);
+    /// 队列长度 + 内存走 ~1Hz 后台轮询。
+    private var transcriptionStatusRow: some View {
+        let paused = IntentionalPauseState.shared.audioTranscriptionPaused
+        let active = !paused && statusPending > 0
+        let stateText = paused ? "Paused on battery"
+                      : active ? "Transcribing…"
+                      :          "Up to date"
+        let stateColor: Color = paused ? .orange : active ? .green : Theme.textPrimary.opacity(0.5)
+        let detail = (statusPending > 0
+                        ? "\(statusPending) clip\(statusPending == 1 ? "" : "s") in queue"
+                        : "Queue empty")
+                   + String(format: " · %.1f GB memory", statusMemGB)
+        return SettingsRow("Status", description: detail, icon: "waveform.badge.magnifyingglass") {
+            HStack(spacing: 6) {
+                if active {
+                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                } else {
+                    Circle().fill(stateColor).frame(width: 7, height: 7)
+                }
+                Text(stateText).font(.system(size: 12)).foregroundStyle(stateColor)
+            }
+        }
+        .onAppear { startStatusRefresh() }
+        .onDisappear { statusRefresh?.cancel(); statusRefresh = nil }
+    }
+
+    /// 队列长度 + 内存的 ~1Hz 刷新循环。DB 读走 detached(避免占主线程),
+    /// 回主线程写 @State。
+    private func startStatusRefresh() {
+        statusRefresh?.cancel()
+        statusRefresh = Task.detached {
+            while !Task.isCancelled {
+                let pending = TimelineDB().pendingAudioCount()
+                let mem = Self.residentMemGB()
+                await MainActor.run { statusPending = pending; statusMemGB = mem }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
     var body: some View {
         SettingsPage("Audio Capture", subtitle: "Microphone + transcription",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
@@ -160,6 +224,8 @@ struct AudioCaptureSettingsView: View {
                         )).labelsHidden().toggleStyle(.switch)
                     }
                     if engine != AudioEngine.disabled.rawValue {
+                        SettingsDivider()
+                        transcriptionStatusRow
                         SettingsDivider()
                         SettingsRow("Transcription engine", icon: "waveform.path") {
                             Picker("", selection: config.binding(\.capture.audio.engine)) {
