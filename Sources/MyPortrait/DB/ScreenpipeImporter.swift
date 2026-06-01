@@ -346,10 +346,10 @@ struct ScreenpipeImporter: Sendable {
         }.value
 
         // 6. 导 audio_chunks + audio_transcriptions
-        let (chunksIn, transcriptsIn) = try await Task.detached(priority: .userInitiated) {
+        let (chunksIn, transcriptsIn) = try await Task.detached(priority: .userInitiated) { [sourceDir] in
             try Self.importAudio(
                 source: source, target: target, cutoffMs: cutoffMs,
-                onProgress: onProgress
+                sourceDir: sourceDir, onProgress: onProgress
             )
         }.value
 
@@ -703,6 +703,7 @@ struct ScreenpipeImporter: Sendable {
         source: DatabaseQueue,
         target: DatabasePool,
         cutoffMs: Int64?,
+        sourceDir: URL,
         onProgress: (@Sendable (Progress) -> Void)? = nil
     ) throws -> (chunks: Int, transcripts: Int) {
         var importedChunks = 0
@@ -789,6 +790,48 @@ struct ScreenpipeImporter: Sendable {
         }
         importLog.info("screenpipe audio: chunks=\(chunks.count) transcripts=\(transcripts.count)")
 
+        // 把每条 chunk 的音频文件拷进 ~/.portrait/raw_data/audio/<day>/,记录相对路径。
+        // **为什么拷而不是直接存 screenpipe 路径**:~/.screenpipe 只读,且
+        // RetentionWorker 到期会 removeItem(file_path) —— 直接存原路径会删掉用户的
+        // screenpipe 原始录音。拷成副本后 DB 存 ~/.portrait 相对路径,retention 只删
+        // 副本。源文件缺失/拷贝失败 → 不记 map,下面 INSERT 存空串(只留转录文本,
+        // file_path 走 AssetPath.resolve → nil,retention 自动跳过)。
+        let fm = FileManager.default
+        let audioRoot = Storage.audioDir
+        try? fm.createDirectory(at: audioRoot, withIntermediateDirectories: true)
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "yyyy-MM-dd"
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+        dayFmt.timeZone = TimeZone(identifier: "UTC")
+        var relPathByOldId: [Int64: String] = [:]
+        var copiedFiles = 0
+        for c in chunks {
+            guard c.firstTsMs > 0 else { continue }
+            let srcAbs: URL = c.filePath.hasPrefix("/")
+                ? URL(fileURLWithPath: c.filePath)
+                : sourceDir.appendingPathComponent(c.filePath)
+            guard fm.fileExists(atPath: srcAbs.path) else {
+                importLog.warning("audio source missing: \(srcAbs.path, privacy: .public) — import transcript only")
+                continue
+            }
+            let day = dayFmt.string(from: Date(timeIntervalSince1970: TimeInterval(c.firstTsMs) / 1000))
+            let dayDir = audioRoot.appendingPathComponent(day, isDirectory: true)
+            try? fm.createDirectory(at: dayDir, withIntermediateDirectories: true)
+            let destName = "imported_\(srcAbs.lastPathComponent)"
+            let destAbs = dayDir.appendingPathComponent(destName)
+            if !fm.fileExists(atPath: destAbs.path) {
+                do {
+                    try fm.copyItem(at: srcAbs, to: destAbs)
+                    copiedFiles += 1
+                } catch {
+                    importLog.warning("audio copy failed \(srcAbs.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                    continue
+                }
+            }
+            relPathByOldId[c.oldId] = "raw_data/audio/\(day)/\(destName)"
+        }
+        importLog.info("audio files copied=\(copiedFiles, privacy: .public)")
+
         // INSERT。先插 chunks 攒 old→new id map,再插 transcripts。
         let totalChunks = chunks.count
         let totalTranscripts = transcripts.count
@@ -810,7 +853,7 @@ struct ScreenpipeImporter: Sendable {
                     VALUES (:fp, :ts, :dur, 'imported', 1, 'done', :now)
                     """,
                     arguments: [
-                        "fp": c.filePath, "ts": c.firstTsMs,
+                        "fp": relPathByOldId[c.oldId] ?? "", "ts": c.firstTsMs,
                         "dur": c.durationS, "now": nowMs
                     ])
                 idMap[c.oldId] = db.lastInsertedRowID

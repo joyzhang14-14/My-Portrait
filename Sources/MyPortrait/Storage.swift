@@ -56,6 +56,12 @@ enum Storage {
     /// `~/.portrait/raw_data/video/YYYY-MM-DD/m{id}_{startTs}.mp4`.
     static var videoDir: URL { rawDataDir.appendingPathComponent("video", isDirectory: true) }
 
+    /// Per-day imported-audio directory. Path:
+    /// `~/.portrait/raw_data/audio/YYYY-MM-DD/imported_<basename>`.
+    /// 只放 screenpipe import 拷进来的音频副本 —— 让 retention 只删 ~/.portrait
+    /// 里的副本,永不碰只读的 ~/.screenpipe 原始文件。
+    static var audioDir: URL { rawDataDir.appendingPathComponent("audio", isDirectory: true) }
+
     /// SQLite written by the capture layer (frames / video_chunks / OCR / audio).
     static var portraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
 
