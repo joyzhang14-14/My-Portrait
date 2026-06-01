@@ -446,6 +446,7 @@ final class Services {
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
         coordinator.setIgnoredWindowTitles(p.ignoredWindowTitles)
         coordinator.setMaskingEnabled(p.maskIgnoredApps)
+        coordinator.setPauseCaptureList(apps: p.pauseCaptureApps, urls: p.pauseCaptureUrls)
         Task { await coordinator.setIgnoreIncognito(p.ignoreIncognito) }
     }
 
@@ -459,6 +460,8 @@ final class Services {
             _ = store.privacy.ignoredWindowTitles
             _ = store.privacy.maskIgnoredApps
             _ = store.privacy.ignoreIncognito
+            _ = store.privacy.pauseCaptureApps
+            _ = store.privacy.pauseCaptureUrls
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
