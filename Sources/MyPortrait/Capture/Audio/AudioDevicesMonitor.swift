@@ -150,6 +150,10 @@ final class AudioDevicesMonitor {
             guard inputCh > 0 else { continue }
             let uid = stringProperty(id, selector: kAudioDevicePropertyDeviceUID) ?? ""
             guard !uid.isEmpty else { continue }
+            // 排除 CoreAudio 内部"系统默认包装" aggregate
+            // (UID 形如 CADefaultDeviceAggregate-92935-0,数字每次变,
+            // 让用户锁它毫无意义)。
+            if uid.hasPrefix("CADefaultDeviceAggregate") { continue }
             let name = stringProperty(id, selector: kAudioObjectPropertyName) ?? "(unknown)"
             let transport = transportType(of: id)
             out.append(Device(id: uid, coreAudioId: id, name: name,
