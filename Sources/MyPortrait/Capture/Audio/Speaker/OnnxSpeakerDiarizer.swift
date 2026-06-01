@@ -64,16 +64,8 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
             ))
         }
 
-        // 麦克风输入 + 全程单一说话人 → 多半是用户本人，自动命名。
-        if isInput, localToDB.count == 1, let onlyId = localToDB.values.first {
-            let userName = await MainActor.run {
-                ConfigStore.shared.current.capture.audio.userName
-            }
-            let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                try? await db.nameSpeakerIfUnnamed(speakerId: onlyId, name: trimmed)
-            }
-        }
+        // 说话人识别完全靠声纹匹配 + Voice Training（读 30s 建干净声纹）。
+        // 不再用「麦克风+单人 → 按名字自动命名」那条粗启发式（已删 audio.userName）。
 
         return out
     }

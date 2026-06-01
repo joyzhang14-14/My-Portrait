@@ -83,9 +83,8 @@ enum PersonalInfoGender: String, Codable, Equatable, CaseIterable {
 }
 
 struct PersonalInfoConfig: Codable, Equatable {
-    /// 注:跟 `capture.audio.userName` 不是同一个字段。`firstName` 用在 LLM
-    /// prompt 注入(memory pipeline 通过 `aboutUserBlock(_:)`);`audio.userName`
-    /// 用在 Speaker DB 给「本人」声纹簇起 label。详见 AudioConfig.userName 的注释。
+    /// LLM prompt 注入用 —— memory pipeline 各 agent 通过 `aboutUserBlock(_:)`
+    /// 拼到 system prompt 顶部。跟 Voice Training 训练声纹用的名字是两回事。
     var firstName:   String = ""
     var middleName:  String = ""
     var lastName:    String = ""
@@ -528,16 +527,6 @@ struct RecordingConfig: Codable, Equatable {
 
 struct AudioConfig: Codable, Equatable {
     var enabled:                 Bool     = true
-    /// Speaker DB 给「用户本人」声纹簇起的 label —— 跟 `personalInfo.firstName`
-    /// **不是同一个字段**:
-    ///   - `audio.userName`:VoiceTrainer.assign(name:) 用,会写进 timeline DB
-    ///     的 `speakers` 表;改了不会自动 rename 历史 speaker row(原项目设计如此)
-    ///   - `personalInfo.firstName`:LLM prompt 注入用(memory pipeline 各 agent
-    ///     的 buildPrompt 通过 `aboutUserBlock(_:)` 拼到顶)
-    /// 两者**没有 sync 关系** —— UI 上 Voice Training 卡跟 Personal Info 卡分别
-    /// 编辑各自的字段。Onboarding 默认会用 firstName 初始化这里(便利),但用户
-    /// 也可以两边填不一样的(比如 "Joy" vs "Joy Zhang")。
-    var userName:                String   = ""
     var engine:                  String   = "whisper"
     var whisperModel:            String   = "openai_whisper-large-v3-v20240930"
     /// engine = "qwen" 时用的模型 variant（HF id）。默认 1.7B-8bit（实测质量达标）。
@@ -573,7 +562,6 @@ struct AudioConfig: Codable, Equatable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
-        case userName                = "user_name"
         case engine
         case whisperModel            = "whisper_model"
         case qwenModel               = "qwen_model"
@@ -597,7 +585,6 @@ struct AudioConfig: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled                = c.dflt(Bool.self,     .enabled, enabled)
-        userName               = c.dflt(String.self,   .userName, userName)
         engine                 = c.dflt(String.self,   .engine, engine)
         whisperModel           = c.dflt(String.self,   .whisperModel, whisperModel)
         qwenModel              = c.dflt(String.self,   .qwenModel, qwenModel)
