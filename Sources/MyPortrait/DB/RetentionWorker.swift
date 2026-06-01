@@ -116,24 +116,34 @@ actor RetentionWorker {
     private func deleteFiles(_ files: RetentionFileList) {
         let fm = FileManager.default
 
-        // 屏幕快照 jpg
-        for path in files.snapshotPaths {
+        // 硬护栏:retention 只删 ~/.portrait 树内的文件。早期 screenpipe import 的
+        // audio_chunks 行 file_path 可能指向只读的 ~/.screenpipe 原始录音 —— 绝不能
+        // 删(那是用户原始数据,且 ~/.screenpipe 全程只读)。任何 ~/.portrait 之外的
+        // 路径直接跳过 + 警告。新导入已改成拷贝进 ~/.portrait,这道护栏兜底历史行。
+        let root = Storage.rootURL.path
+        let rootPrefix = root.hasSuffix("/") ? root : root + "/"
+        func safeRemove(_ path: String) {
+            guard path.hasPrefix(rootPrefix) else {
+                logger.warning("retention skipped out-of-tree path (not under ~/.portrait): \(path, privacy: .public)")
+                return
+            }
             try? fm.removeItem(atPath: path)
         }
 
+        // 屏幕快照 jpg
+        for path in files.snapshotPaths { safeRemove(path) }
+
         // 视频块 mp4
-        for path in files.videoChunkPaths {
-            try? fm.removeItem(atPath: path)
-        }
+        for path in files.videoChunkPaths { safeRemove(path) }
 
         // 音频 wav + 配套 sidecar
         for path in files.audioPaths {
-            try? fm.removeItem(atPath: path)
+            safeRemove(path)
             // 同时删 .meta.json 和 .transcript.json（同名兄弟）
             let url = URL(fileURLWithPath: path)
             let base = url.deletingPathExtension()
-            try? fm.removeItem(at: base.appendingPathExtension("meta.json"))
-            try? fm.removeItem(at: base.appendingPathExtension("transcript.json"))
+            safeRemove(base.appendingPathExtension("meta.json").path)
+            safeRemove(base.appendingPathExtension("transcript.json").path)
         }
     }
 }
