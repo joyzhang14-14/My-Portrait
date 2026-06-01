@@ -16,12 +16,16 @@ struct WritingCapturePass4InputRecord: Encodable, Sendable {
     let source: String
     let app: String
     let url: String?
+    /// 这条 record 时间窗内用户的物理击键数(±10s,非快捷键)。> 0 = 用户**亲手
+    /// 敲的**(不是屏上显示的页面/标题文字);判"是不是用户自己的字"的硬证据。
+    let keystrokeCount: Int
     /// Pass 1 给这条 record 的场景背景(用户在哪、在干啥)。
     let contextSummary: String?
 
     enum CodingKeys: String, CodingKey {
         case recordId       = "record_id"
         case text, kind, source, app, url
+        case keystrokeCount = "keystroke_count"
         case contextSummary = "context_summary"
     }
 }

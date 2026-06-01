@@ -49,19 +49,28 @@ enum WritingCapturePass4Builders {
         }
     }
 
-    /// 从 record 构造一条 Pass 4 输入 —— 纯内容审查,不带 keystroke。
+    /// 从 record 构造一条 Pass 4 输入。带上该 record 时间窗内的物理击键数 ——
+    /// 让 Pass 4 能分辨"用户亲手敲的"(有击键)vs"屏上显示的页面/标题文字"(零击)。
     /// recordId 由 Worker 按 "g<groupIdx>_r<recIdx>" 编号传入。
     static func buildInput(
         recordId: String,
-        record: WritingCaptureRecord
+        record: WritingCaptureRecord,
+        keys: [KeystrokeEntry]
     ) -> WritingCapturePass4InputRecord {
-        WritingCapturePass4InputRecord(
+        let pad: Int64 = 10_000
+        let kc = keys.lazy.filter {
+            $0.bundleId == record.app
+                && $0.tsMs >= record.startTs - pad && $0.tsMs <= record.endTs + pad
+                && ($0.modifiers & 0x07) == 0
+        }.count
+        return WritingCapturePass4InputRecord(
             recordId: recordId,
             text: record.text,
             kind: record.kind,
             source: record.source,
             app: record.app,
             url: record.url,
+            keystrokeCount: kc,
             contextSummary: record.contextSummary
         )
     }

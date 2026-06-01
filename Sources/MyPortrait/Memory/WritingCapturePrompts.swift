@@ -458,7 +458,8 @@ enum WritingCapturePrompts {
     You are the FINAL content-review gate. Earlier algorithmic steps already removed
     pasted / OCR-orphan / no-edit content. Your job now is purely SEMANTIC: read each
     record's TEXT and decide whether it is the user's own natural-language writing
-    worth keeping. You do NOT see keystrokes — judge by the content itself + context.
+    worth keeping. Each record also carries `keystroke_count` = how many keys the user
+    physically pressed to produce it — use it as hard evidence of authorship.
 
     We want to KEEP the user's natural-language writing: messages, chat replies,
     notes, essays, posts, questions, journal-like prose — anything the user composed
@@ -468,10 +469,25 @@ enum WritingCapturePrompts {
     human writing in ANY language — never assume one specific language.)
 
     INPUT
-    - records: [{ record_id, text, kind, source, app, url, context_summary }]
+    - records: [{ record_id, text, kind, source, app, url, keystroke_count,
+      context_summary }]
       context_summary = what the user was doing then (scene), from Pass 1.
+      keystroke_count = physical keys the user pressed in this record's time window.
     - user_rejected_examples (optional): records the user manually rejected before,
       with their reason. Treat new records that match these patterns the same way.
+
+    AUTHORSHIP — keystroke_count is decisive for "is this the user's own writing":
+    - keystroke_count > 0 means the user PHYSICALLY TYPED this text. Then it IS the
+      user's own writing — KEEP it even if it LOOKS like a heading / title / short
+      label / page-like phrase (e.g. a doc title the user is typing). A typed title is
+      still the user's writing. NEVER discard a typed record as "page/title text shown
+      in the browser" or "something shown to them" — that only applies to text the
+      user did NOT type.
+    - keystroke_count ≈ 0 means the text appeared on screen without the user typing
+      (a page title, a received message, an AI reply, an article being read) → that is
+      what rule 2 below targets.
+    - (This does NOT override rules 1/3/4: typed CODE/commands, typed gibberish, or
+      typed matches of a rejected pattern are still discarded.)
 
     DISCARD a record when its TEXT is any of:
     1. CODE / COMMANDS / CONFIG — source code, shell/terminal commands, config, or
@@ -480,11 +496,13 @@ enum WritingCapturePrompts {
        inside a code editor / terminal surface. We only want natural-language writing,
        so drop code even though the user typed it. (Mostly-prose with an inline code
        token → KEEP.)
-    2. NOT THE USER'S WRITING — an AI assistant's reply / coaching addressed to the
-       user, a received chat message from someone else, a UI label / username banner
-       / tab name / app chrome, or an article/page the user was only reading. Use
-       context_summary + the text's voice (is it the user speaking, or something
-       shown TO them?).
+    2. NOT THE USER'S WRITING (almost always keystroke_count ≈ 0) — an AI assistant's
+       reply / coaching addressed to the user, a received chat message from someone
+       else, a UI label / username banner / tab name / app chrome / page or document
+       title shown on screen, or an article/page the user was only reading. Use
+       context_summary + the text's voice + keystroke_count (did the user TYPE it, or
+       was it shown TO them?). If keystroke_count > 0, it was typed → do NOT discard
+       under this rule.
     3. NOT REAL LANGUAGE — uncomposed IME residue (loose pinyin/romaji that never
        became words, e.g. "ei qu a xi", "uan x b sei"), random char soup, masked
        secrets ("•••"), a bare autofilled email/name, empty / whitespace-only /
