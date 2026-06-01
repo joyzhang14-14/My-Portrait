@@ -119,8 +119,9 @@ final class AudioDevicesMonitor {
 
     // MARK: - CoreAudio 查询
 
-    /// 列出所有 input devices(channels > 0)。
-    static func enumerateInputDevices() -> [Device] {
+    /// 列出所有 input devices(channels > 0)。CoreAudio 同步 API,nonisolated
+    /// 让 AudioCaptureService(actor)能直接调,不用跨 actor hop。
+    nonisolated static func enumerateInputDevices() -> [Device] {
         var addr = devicesListAddr
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(
@@ -151,7 +152,7 @@ final class AudioDevicesMonitor {
         }
     }
 
-    static func currentSystemDefaultInputUID() -> String {
+    nonisolated static func currentSystemDefaultInputUID() -> String {
         var deviceID = AudioObjectID(0)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         var addr = defaultInputAddr
@@ -162,13 +163,13 @@ final class AudioDevicesMonitor {
     }
 
     /// uid → 当前 AudioDeviceID(进程内,设备拔插可能失效)。
-    static func deviceID(forUID uid: String) -> AudioDeviceID? {
+    nonisolated static func deviceID(forUID uid: String) -> AudioDeviceID? {
         enumerateInputDevices().first { $0.id == uid }?.coreAudioId
     }
 
     // MARK: - 底层 CoreAudio 属性读取
 
-    private static func inputChannels(of id: AudioDeviceID) -> Int {
+    nonisolated private static func inputChannels(of id: AudioDeviceID) -> Int {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
             mScope: kAudioDevicePropertyScopeInput,
@@ -188,7 +189,7 @@ final class AudioDevicesMonitor {
         return channels
     }
 
-    private static func stringProperty(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
+    nonisolated private static func stringProperty(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
         var addr = AudioObjectPropertyAddress(
             mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -200,7 +201,7 @@ final class AudioDevicesMonitor {
         return cf as String
     }
 
-    private static func transportType(of id: AudioDeviceID) -> Device.Transport {
+    nonisolated private static func transportType(of id: AudioDeviceID) -> Device.Transport {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyTransportType,
             mScope: kAudioObjectPropertyScopeGlobal,
