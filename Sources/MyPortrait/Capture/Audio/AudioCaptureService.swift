@@ -454,6 +454,14 @@ actor AudioCaptureService {
         logger.info("config change: preferredInputDeviceUID → restart")
         DiagLog.event("audio.restart.config")
         await stop()
+        // ⚠️ stop()→start() 不原子。stop 的 await 期间用户可能关了 Audio Capture 主开关。
+        // 重新确认主开关还开着才 start,否则重启的 start 会在"关"之后把引擎拉起来 →
+        // 关了橙色 mic 灯还亮(日志铁证)。
+        let masterOn = await MainActor.run { ConfigStore.shared.current.capture.audio.enabled }
+        guard masterOn else {
+            DiagLog.event("audio.restart.aborted", ctx: ["path": "config", "why": "master off mid-restart"])
+            return
+        }
         await start()
     }
 
@@ -501,6 +509,13 @@ actor AudioCaptureService {
         }
         logger.info("device change: \(reason, privacy: .public) — restarting mic capture")
         await stop()
+        // 同 restartIfRunning:重启的 stop→start 不原子,期间用户可能关了主开关 →
+        // 再确认开着才 start,否则关了引擎被重启拉回来 → 橙灯卡住。
+        let masterOn = await MainActor.run { ConfigStore.shared.current.capture.audio.enabled }
+        guard masterOn else {
+            DiagLog.event("audio.restart.aborted", ctx: ["path": "devicechange", "why": "master off mid-restart"])
+            return
+        }
         await start()
     }
 
