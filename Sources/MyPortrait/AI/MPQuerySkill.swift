@@ -37,8 +37,27 @@ enum MPQuerySkill {
         mp-query audio --start "1h ago" [--end "now"] [--limit 60]
           → audio transcriptions in a range (microphone + system audio).
 
-        mp-query memories --q "keyword" [--limit 20]
-          → search the user's curated notes / event journals.
+        mp-query memories --q "keyword" [--scope portrait|events] [--limit 20]
+          → search the user's curated knowledge base — TWO scopes by default:
+            * `portrait/` — long-term distilled profile: who the user is,
+              their personality concepts, persistent preferences, recurring
+              themes ("curiosity", "writing style", "people"). This is the
+              high-signal source for "what kind of person am I / what do I
+              care about / what do you know about me" questions.
+            * `events/<day>/*.md` — individual day-clustered events:
+              one .md per discrete activity ("worked on auth flow",
+              "talked to Sarah about housing"). The history-of-what-happened.
+            Returns snippet (first 300 chars) per hit. Use `--scope portrait`
+            or `--scope events` to limit. Combine with `mp-query read` for
+            full text.
+
+        mp-query read --path <rel>
+          → read a single .md file's FULL CONTENT. `<rel>` is the relative
+            path returned by `mp-query memories` (the `path` field),
+            e.g. `portrait/personality/curiosity.md` or
+            `events/2026-05-16/cluster-foo.md`. Use this after `memories`
+            when you need the whole note, not just the 300-char snippet.
+            Only files under `portrait/` and `events/` are readable.
 
         mp-query writing --start "30d ago" [--end "now"] [--q "..."]
                          [--app "..."] [--limit 10]
