@@ -50,7 +50,7 @@ enum CronJobFile {
             if parts.count == 3, let h = Int(parts[2]) { return .dailyAt(hour: h) }
         case "weekly":
             // "weekly 2 at 9"
-            if parts.count == 4, let d = Int(parts[1]), let h = Int(parts[3]) {
+            if parts.count == 4, let d = Int(parts[1]), (1...7).contains(d), let h = Int(parts[3]) {
                 return .weeklyOn(weekday: d, hour: h)
             }
         default: break

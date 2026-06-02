@@ -222,7 +222,11 @@ struct SpeakersSettingsView: View {
                 ?? group[0]
             guard let keepId = Int64(keep.id), let kc = centroids[keepId] else { continue }
             let mergeIds: [Int64] = group.compactMap { r in
-                guard r.id != keep.id, let rid = Int64(r.id), let rc = centroids[rid] else { return nil }
+                // rc.count == kc.count:不同 embedding 引擎(whisper/qwen/旧 bge-m3)
+                // 维度不同,cosineSimilarity 的 precondition 会崩整个 app —— 维度不
+                // 一致就保守跳过(同 TimelineDB:1081 / PortraitDBImpl 的护栏)。
+                guard r.id != keep.id, let rid = Int64(r.id), let rc = centroids[rid],
+                      rc.count == kc.count else { return nil }
                 return VectorMath.cosineSimilarity(kc, rc) >= simThreshold ? rid : nil
             }
             if !mergeIds.isEmpty { out.append((keepId, mergeIds)) }

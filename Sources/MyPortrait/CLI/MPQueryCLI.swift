@@ -633,7 +633,7 @@ enum MPQueryCLI {
     ) -> [TranscriptResult] {
         let mid = start.addingTimeInterval(end.timeIntervalSince(start) / 2)
         let half = end.timeIntervalSince(start) / 2
-        let rows = db.audioTranscripts(around: mid, before: half, after: half)
+        let rows = db.audioTranscripts(around: mid, before: half, after: half, limit: limit)
         var out: [TranscriptResult] = []
         let qLower = q?.lowercased()
         let wantSpeaker = speakerName?.trimmingCharacters(in: .whitespaces).lowercased()

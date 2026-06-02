@@ -196,9 +196,12 @@ actor TranscriptionScheduler {
 
         for chunk in chunks {
             if Task.isCancelled { return }
-            // 中途变电池 → 当前段跑完即停(仅 AC-only 模式下)。
+            // 中途变电池 → 立即停批(仅 AC-only 模式下)。剩余 chunk 仍是 pending,
+            // 下次 tick(line 172-178 电池 guard)再处理。原来只 log 不 break,会继续
+            // 在电池上把整批转完,跟注释相悖。
             if acOnly && !PowerMonitor.isOnAC {
-                logger.info("power switched to battery mid-batch, stopping after current segment")
+                logger.info("power switched to battery mid-batch, stopping batch")
+                break
             }
             await transcribeOne(chunk: chunk)
         }
@@ -340,7 +343,7 @@ actor TranscriptionScheduler {
 
         // 3. 写 sidecar JSON（多段时合并成一份全文）。
         let fullText = records.map(\.text).joined(separator: " ")
-        writeTranscriptSidecar(wavPath: chunk.filePath, text: fullText, chunk: chunk, transcribedAtMs: nowMs)
+        writeTranscriptSidecar(wavPath: chunk.filePath, text: fullText, chunk: chunk, engine: settings.engine, transcribedAtMs: nowMs)
 
         // 4. 写转录行到 DB（每段一行）。
         do {
@@ -363,6 +366,7 @@ actor TranscriptionScheduler {
         wavPath: String,
         text: String,
         chunk: AudioChunkRecord,
+        engine: String,
         transcribedAtMs: Int64
     ) {
         let wavURL = URL(fileURLWithPath: wavPath)
@@ -375,7 +379,7 @@ actor TranscriptionScheduler {
             "recorded_at_ms": chunk.recordedAtMs,
             "duration_s": chunk.durationS,
             "device": chunk.device,
-            "engine": "whisperkit",
+            "engine": engine,
             "transcribed_at_ms": transcribedAtMs,
             "text": text,
         ]
