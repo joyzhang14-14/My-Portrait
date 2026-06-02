@@ -1064,6 +1064,13 @@ final class WritingCaptureWorker {
         }
     }
 
+    /// typing_event 的 edit_log 里有没有 submit(按回车 + 输入框清空)。**消息边界用**
+    /// —— 区分同 session 连发的不同消息(如"修好了"/"修了一晚上")。注意:它**不代表
+    /// "已发送"**(回车未必真发出、app 会假清空),所以前缀合并的 hasSend 不看它。
+    nonisolated static func editLogHasSubmit(_ editLogJSON: String) -> Bool {
+        editLogJSON.contains("\"kind\":\"submit\"")
+    }
+
     /// 解析 edit_log,返回最长的一条**用户敲出来的**(commit/delete,排除 paste)
     /// entry text。发送清空时整条消息作为一条 delete 落进 edit_log → 用它取回原文;
     /// **排除 paste** —— paste 是突然贴上来、零击键的(占位符 / autofill / 收到内容),
@@ -1149,10 +1156,13 @@ final class WritingCaptureWorker {
         guard records.count > 1 else { return records }
         let evById = Dictionary(rawTyping.compactMap { e in e.id.map { ($0, e) } },
                                 uniquingKeysWith: { a, _ in a })
+        // "已发送"只认 isSendClear(输入框**真清空**)。submit 标记**不算已发送**:
+        // 回车未必真发出、app 会假清空(claudefordesktop:989"那个图…"带 submit 但
+        // 990 仍带该前缀=没真发),这种假 submit 不该挡住前缀合并把早期草稿并进后续。
         func hasSend(_ r: WritingCaptureRecord) -> Bool {
             r.referenceTypingEventIds.contains { id in
                 guard let e = evById[id] else { return false }
-                return Self.isSendClear(e)   // 回车 submit 标记已弃用,只认输入框真清空
+                return Self.isSendClear(e)
             }
         }
         func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1227,16 +1237,17 @@ final class WritingCaptureWorker {
                     let evs = s.typingEvents.filter { $0.id != nil }
                         .sorted { $0.startedAt < $1.startedAt }
                     guard !evs.isEmpty else { continue }
-                    // **按发送切消息** —— 一次发送 = 一条消息。发送以**输入框真的清空**
-                    // (isSendClear:整框作为一条 delete + endValue 空)为唯一判据。
-                    // 回车 submit 标记**已弃用**:回车未必真发送、app 还会假清空,实测只
-                    // 把一条消息误切成两条(见 claudefordesktop 假 submit),净是反效果。
-                    // 连续没清空的事件(IME 逐字快照 / 长草稿)合成一条。
+                    // **按发送切消息** —— 一次发送 = 一条消息。两种记法都当边界:
+                    // submit 标记(回车 + 清空)分开**连发的不同消息**(如"修好了"/
+                    // "修了一晚上");isSendClear(整框作为一条 delete + endValue 空)。
+                    // submit 偶有假阳性(回车没真发出、字段没清空),那种切出来的早期
+                    // 草稿由后面的前缀合并兜回去(它不把 submit 当"已发送")。
+                    // 连续没发送的事件(IME 逐字快照 / 长草稿)合成一条。
                     var msgGroups: [[TypingEvent]] = []
                     var cur: [TypingEvent] = []
                     for ev in evs {
                         cur.append(ev)
-                        if Self.isSendClear(ev) {
+                        if Self.editLogHasSubmit(ev.editLog) || Self.isSendClear(ev) {
                             msgGroups.append(cur); cur = []
                         }
                     }
