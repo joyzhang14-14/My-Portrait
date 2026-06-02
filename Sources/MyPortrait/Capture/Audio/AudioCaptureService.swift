@@ -207,7 +207,7 @@ actor AudioCaptureService {
         samplesContinuation = c
 
         // 蓝牙输入设备投递抖动大（±200ms），用更大的 tap 缓冲吸收抖动。
-        let bufferSize: AVAudioFrameCount = Self.defaultInputIsBluetooth() ? 8192 : 4096
+        let bufferSize: AVAudioFrameCount = Self.boundInputIsBluetooth(inputNode: inputNode) ? 8192 : 4096
         // 防御:install 前先 remove 任何残留 tap。Apple 文档保证没 tap 时
         // 是 no-op。撞 `nullptr == Tap()` 的根因是重复 install,这里兜底。
         inputNode.removeTap(onBus: 0)
@@ -470,15 +470,16 @@ actor AudioCaptureService {
         await start()
     }
 
-    /// 查默认输入设备是不是蓝牙（CoreAudio transport type，不碰 AVAudioEngine）。
-    private static func defaultInputIsBluetooth() -> Bool {
+    /// tap **实际绑定**的输入设备是不是蓝牙(读 AUHAL CurrentDevice,不是系统默认)。
+    /// 用户锁了非默认设备时,buffer 大小要按真正在用的设备判 —— 原来查系统默认会判错。
+    /// 蓝牙投递抖动大(±200ms),命中时用更大 tap 缓冲吸收。
+    private static func boundInputIsBluetooth(inputNode: AVAudioInputNode) -> Bool {
+        guard let au = inputNode.audioUnit else { return false }
         var deviceID = AudioObjectID(0)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var addr = defaultInputAddress()
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &addr, 0, nil, &size, &deviceID
-        ) == noErr, deviceID != 0 else { return false }
+        guard AudioUnitGetProperty(au, kAudioOutputUnitProperty_CurrentDevice,
+                                   kAudioUnitScope_Global, 0, &deviceID, &size) == noErr,
+              deviceID != 0 else { return false }
 
         var transport: UInt32 = 0
         var tsize = UInt32(MemoryLayout<UInt32>.size)

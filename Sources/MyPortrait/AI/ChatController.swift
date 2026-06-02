@@ -121,17 +121,20 @@ final class ChatController {
 
     /// Rewrite a previous user message and re-run. Drops every message at or
     /// after its index, then re-sends with `newText`.
-    func editAndResend(_ messageId: UUID, newText: String) {
+    func editAndResend(_ messageId: UUID, newText: String,
+                       chips: [ContextChip] = [], attachments: [Attachment] = [],
+                       redactPII: Bool = false) {
         guard let uIdx = messages.firstIndex(where: { $0.id == messageId }),
               messages[uIdx].role == .user else { return }
-        let chips = contextChipsByMessage[messageId] ?? []
         let removed = messages[uIdx...].map { $0.id }
         removed.forEach { contextChipsByMessage.removeValue(forKey: $0) }
         messages.removeSubrange(uIdx...)
 
         agent?.stop()
         agent = nil
-        send(newText, chips: chips)
+        // 转发用户在编辑态实际带的 chips/附件/PII 开关(caller 是真相来源),
+        // 不再丢掉编辑时新加的附件和改过的 chips。
+        send(newText, chips: chips, attachments: attachments, redactPII: redactPII)
     }
 
     /// Abort the current streaming response. Pi keeps the conversation alive

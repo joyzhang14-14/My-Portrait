@@ -180,7 +180,14 @@ struct TimelineView: View {
         Task { @MainActor in
             let fetched = (try? await db.framesForDay(day)) ?? []
             state.frames = fetched
-            state.focusIndex = max(fetched.count - 1, 0)
+            // 跨天 seek:换天加载完后吸附到目标时刻;否则才默认落到当天最后一帧。
+            // 原来无条件覆盖 focusIndex,pendingSeek 永远被忽略 → 跨天定位失效。
+            if let target = state.pendingSeek {
+                state.snapFocus(to: target)   // 最近帧;空帧内部 guard
+                state.pendingSeek = nil        // 清掉,免得后续同天 reload 又吸到旧目标
+            } else {
+                state.focusIndex = max(fetched.count - 1, 0)
+            }
             state.loading = false
         }
     }

@@ -462,7 +462,12 @@ private final class STARTTLSSession: SMTPSession, @unchecked Sendable {
     }
 
     func close() {
-        if let ctx = sslContext { SSLClose(ctx) }
-        if fd >= 0 { Darwin.close(fd) }
+        if let ctx = sslContext { SSLClose(ctx); sslContext = nil }
+        if fd >= 0 { Darwin.close(fd); fd = -1 }   // 置 -1 → 幂等,deinit + defer 重复调不会 double-close
     }
+
+    // init() 在 TCP 连上后抛错(凭证/STARTTLS/TLS 失败)时,没有 defer 兜底会泄漏
+    // fd。deinit 保证被 drop 也释放;close() 幂等使「成功路径 defer close + deinit」
+    // 不会重复关 fd。
+    deinit { close() }
 }
