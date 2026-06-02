@@ -12,7 +12,11 @@ final class TemplateLibrary {
 
     private(set) var templates: [SummaryTemplate] = []
 
-    private let key = "MyPortrait.summaryTemplates.v1"
+    // v2 = adapted for My-Portrait data model (uses mp-query memories /
+    // mp-folders skills + portrait/ + events/). v1 was the screenpipe-style
+    // generic "screen activity" set. Old v1 UserDefaults data is kept
+    // (not deleted), but the app reads v2 only — users see the new seeds.
+    private let key = "MyPortrait.summaryTemplates.v2"
 
     private init() {
         load()
@@ -63,30 +67,80 @@ final class TemplateLibrary {
     // MARK: - Seed defaults
 
     static let seeds: [SummaryTemplate] = [
-        .init(emoji: "⚡️", title: "Automate My Work",
-              subtitle: "Analyze your habits and find time-savers",
-              prompt: "Look at my recent screen activity and suggest 3 specific automations or shortcuts that would save me time. Be concrete.",
+        .init(emoji: "⚡️", title: "Schedule a Cron Job",
+              subtitle: "Spot something repetitive and automate it",
+              prompt: """
+                Start with `mp-query activity-summary --start "8h ago"` to \
+                see what apps + windows I've been bouncing between. Pick ONE \
+                recurring chore I'm clearly doing by hand (e.g. daily \
+                Obsidian inbox cleanup, checking specific Slack channels, \
+                pulling git logs) that a scheduled AI cron job could \
+                shoulder. Briefly propose it (name, schedule, prompt body, \
+                window) and confirm with me before running \
+                `mp-query cronjob add`. One proposal, not three.
+                """,
               window: .lastHours(8)),
+
         .init(emoji: "📋", title: "Day Recap",
-              subtitle: "Today's accomplishments, key moments, next steps",
-              prompt: "Summarize what I worked on today across all apps. Group by topic, highlight key accomplishments, flag anything unfinished.",
+              subtitle: "Today's accomplishments grouped by project",
+              prompt: """
+                Recap my day. First call \
+                `mp-query memories --scope events --start today` to read \
+                the LLM-distilled events from today (these are higher signal \
+                than raw OCR — already grouped + summarized). For long ones \
+                you want to quote, follow up with \
+                `mp-query read --path events/<day>/<file>.md` for the full \
+                body. Group accomplishments by project / folder, highlight \
+                what shipped, flag anything unfinished. Cite event titles.
+                """,
               window: .today),
+
         .init(emoji: "🏢", title: "Standup Update",
               subtitle: "Yesterday + today + blockers, ready to paste",
-              prompt: "Generate a standup update: 'Yesterday I...' / 'Today I'll...' / 'Blockers:'. Be terse and actionable. Use bullet points.",
+              prompt: """
+                Write a standup update I can paste into Slack. Pull facts \
+                from `mp-query memories --scope events --start yesterday` \
+                (covers yesterday + today) and \
+                `mp-query writing --start yesterday` (what I actually typed \
+                — way more reliable than OCR for "what did I write about \
+                X"). Format:
+                  *Yesterday:* terse bullets
+                  *Today:* terse bullets
+                  *Blockers:* bullets, or "none"
+                No fluff. No emoji.
+                """,
               window: .today),
-        .init(emoji: "💡", title: "What's Top of Mind",
-              subtitle: "Recurring topics + themes from your activity",
-              prompt: "What topics keep coming up in my recent activity? List 3-5 themes, each with a one-sentence explanation of why I might be focused on it.",
-              window: .lastHours(8)),
-        .init(emoji: "✨", title: "Custom Summary",
-              subtitle: "Build your own",
-              prompt: "Summarize my recent activity. Highlight what you think is most important.",
-              window: .lastHours(2)),
-        .init(emoji: "🔍", title: "Discover",
-              subtitle: "Surface something I didn't notice",
-              prompt: "Look at my recent screen activity and tell me one thing I might have missed — a pattern, a topic that recurs, or something I started but didn't finish.",
-              window: .today)
+
+        .init(emoji: "💡", title: "My Portrait Update",
+              subtitle: "What today's events suggest about my long-term profile",
+              prompt: """
+                Compare today's events against my long-term portrait. First \
+                read the portrait: `mp-query memories --scope portrait \
+                --limit 30` (use `mp-query read --path portrait/...` for \
+                anything you want to quote in full). Then read today's \
+                events: `mp-query memories --scope events --start today`. \
+                Surface 2-3 signals from today that either (a) reinforce an \
+                existing portrait concept, or (b) suggest a new concept / \
+                preference / pattern I haven't captured yet. Cite both \
+                portrait file paths and event titles.
+                """,
+              window: .today),
+
+        .init(emoji: "🔍", title: "Folder Suggestions",
+              subtitle: "Unclassified events that look like a real project",
+              prompt: """
+                Help me tidy up. Call \
+                `mp-query memories --scope events --start "7d ago"` to scan \
+                the last week of events. Then run \
+                `mp-folders list` to see what folders already exist, and \
+                `mp-folders search-events --unclassified --start "30d ago" \
+                --limit 50` to pull events not yet in any folder. Spot \
+                clusters of **≥3 events** that look like the same project \
+                or initiative. Propose 1-2 new folders (name, description, \
+                event list) and confirm with me before calling \
+                `mp-folders create`.
+                """,
+              window: .none),
     ]
 }
 
