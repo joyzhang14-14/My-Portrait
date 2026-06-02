@@ -431,7 +431,10 @@ struct AudioCaptureSettingsView: View {
                 }
             }
 
-            if audioRec {
+            // Custom vocabulary 是转译器的 hint(prompt 给 Whisper/Qwen/
+             // Deepgram 让它认对专有名词),逻辑上属 Transcription。只在转译
+             // 开着时才有意义显示。
+            if engine != AudioEngine.disabled.rawValue {
                 SettingsCard(
                     title: "Custom vocabulary",
                     footnote: "Boost recognition of names, jargon, and brand terms."
