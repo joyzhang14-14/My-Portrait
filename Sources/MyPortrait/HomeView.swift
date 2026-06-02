@@ -368,9 +368,7 @@ private struct ChatTranscript: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // LazyVStack:只渲染可见区域的 bubble。消息多时切窗口回来不再
-                // 一次性重建整段历史(每个 ChatBubble 都会重新解析 Markdown)。
-                LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
                     let visible = displayMessages
                     ForEach(Array(visible.enumerated()), id: \.element.id) { idx, msg in
                         // The streaming assistant bubble is always the last
