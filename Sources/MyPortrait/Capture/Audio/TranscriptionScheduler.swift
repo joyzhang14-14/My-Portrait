@@ -50,6 +50,9 @@ actor TranscriptionScheduler {
     private var ingestSysTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
     private var powerTask: Task<Void, Never>?
+    /// drain 重入守卫 —— 同一时刻只允许一轮连续转录。WhisperKitWrapper 是
+    /// serial-call 契约,并发转录会 data race(见 queueBatchLimit 注释)。
+    private var isDraining = false
 
     init(
         db: PortraitDB,
@@ -169,60 +172,71 @@ actor TranscriptionScheduler {
     // MARK: - B. Transcribe
 
     private func processQueueOnce() async {
+        // 重入守卫:tight drain 期间(可能跑几十分钟)power 事件 / 60s poll 会再次
+        // 触发本函数 —— 同一时刻只允许一轮,否则并发转录 data race。
+        guard !isDraining else { return }
+        isDraining = true
+        defer { isDraining = false }
+
         // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
         // 防休眠开关:开 → 有积压且在 AC 时阻止系统空闲睡眠,把积压跑完再放行睡眠。
         let (acOnly, keepAwake) = await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
             return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing)
         }
-        let onAC = PowerMonitor.isOnAC
-        if acOnly && !onAC {
-            // 电池模式不转录 → 释放本地模型,别白占内存;放行睡眠(防休眠只在 AC 生效)。
-            whisper.unload()
-            qwen.unload()
-            // 通知 StallDetector:audio pending 堆积是故意的,不要报 backlog。
-            await MainActor.run {
-                IntentionalPauseState.shared.audioTranscriptionPaused = true
-                KeepAwakeAssertion.shared.refresh(false)
-            }
-            return
-        }
-        await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = false }
 
-        let chunks: [AudioChunkRecord]
-        do {
-            chunks = try await db.pendingAudioChunks(limit: queueBatchLimit)
-        } catch {
-            logger.warning("pendingAudioChunks failed: \(String(describing: error), privacy: .public)")
-            await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
-            return
-        }
+        // 无进展保护:某个 chunk 因 DB 写失败(如磁盘满)一直标不掉 pending 时,tight
+        // 循环会卡在队首空转(每轮还白跑一次模型 + 不放睡眠)。记住上轮队首 id,没变
+        // 就停,交给下次 tick / 修盘后重试。
+        var lastFrontId: Int64? = nil
 
-        guard !chunks.isEmpty else {
-            // 队列空 → 没有转录任务 → 释放本地模型;积压清完 → 放行系统睡眠。
-            whisper.unload()
-            qwen.unload()
-            await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
-            return
-        }
-
-        // 有积压 + 在 AC + 开关开 → 阻止空闲睡眠,让机器把积压跑完再睡。
-        await MainActor.run { KeepAwakeAssertion.shared.refresh(keepAwake && onAC) }
-
-        for chunk in chunks {
-            if Task.isCancelled {
-                await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
+        // 连续转录直到队列清空 —— 不再「转 2 个睡 60s」。60s poll 退化成纯兜底:
+        // 只在本轮 drain 结束后捡那期间 ingest 进来的新段。积压一口气在本调用清完。
+        while !Task.isCancelled {
+            // 电池 + AC-only → 不转录:释放模型 + 放行睡眠 + 标记 intentional pause
+            //(让 StallDetector 知道 pending 堆积是故意的,不报 backlog)。
+            if acOnly && !PowerMonitor.isOnAC {
+                whisper.unload()
+                qwen.unload()
+                await MainActor.run {
+                    IntentionalPauseState.shared.audioTranscriptionPaused = true
+                    KeepAwakeAssertion.shared.refresh(false)
+                }
                 return
             }
-            // 中途变电池 → 立即停批(仅 AC-only 模式下)。剩余 chunk 仍是 pending,
-            // 下次 tick(line 172-178 电池 guard)再处理。原来只 log 不 break,会继续
-            // 在电池上把整批转完,跟注释相悖。
-            if acOnly && !PowerMonitor.isOnAC {
-                logger.info("power switched to battery mid-batch, stopping batch")
+            await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = false }
+
+            let chunks: [AudioChunkRecord]
+            do {
+                chunks = try await db.pendingAudioChunks(limit: queueBatchLimit)
+            } catch {
+                logger.warning("pendingAudioChunks failed: \(String(describing: error), privacy: .public)")
                 break
             }
-            await transcribeOne(chunk: chunk)
+            guard !chunks.isEmpty else { break }   // 清空 → 退出循环
+
+            let frontId = chunks.first?.id
+            if frontId == lastFrontId {
+                logger.warning("drain stalled on chunk id \(frontId ?? -1, privacy: .public) (DB write failing? disk full?), stopping pass")
+                break
+            }
+            lastFrontId = frontId
+
+            // 有积压 + 在 AC + 开关开 → 阻止空闲睡眠,让机器把积压跑完再睡。
+            await MainActor.run { KeepAwakeAssertion.shared.refresh(keepAwake && PowerMonitor.isOnAC) }
+
+            for chunk in chunks {
+                if Task.isCancelled { break }
+                // 中途变电池(仅 AC-only)→ 停批;回 while 顶命中电池分支收尾。
+                if acOnly && !PowerMonitor.isOnAC { break }
+                await transcribeOne(chunk: chunk)
+            }
         }
+
+        // 退出 drain(清空 / 取消 / 出错 / 无进展)→ 释放模型 + 放行系统睡眠。
+        whisper.unload()
+        qwen.unload()
+        await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
     }
 
     /// 转录设置快照（引擎 + 语言 + 词汇 + 云引擎凭据）。
