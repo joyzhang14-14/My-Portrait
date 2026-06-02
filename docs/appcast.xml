@@ -12,6 +12,38 @@
         -->
 
         <item>
+            <title>1.2.51</title>
+            <pubDate>Tue, 02 Jun 2026 10:08:55 +0000</pubDate>
+            <sparkle:version>164</sparkle:version>
+            <sparkle:shortVersionString>1.2.51</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Keep Mac awake while transcribing</strong> — On AC power, My Portrait can keep your Mac from idle-sleeping while there's a transcription backlog, so it finishes instead of dozing off. New toggle in Audio Capture (off by default).</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Microphone selection now works</strong> — Picking a specific input device (instead of "Follow system default") now actually records from that mic.</li>
+                    <li><strong>Audio Capture fully releases the mic when turned off</strong> — No more lingering "microphone in use"; system-audio capture stops with it.</li>
+                    <li><strong>Mic no longer gets stuck on</strong> after toggling Audio Capture off.</li>
+                    <li><strong>Faster transcription catch-up</strong> — A large backlog now transcribes continuously instead of a couple of clips per minute.</li>
+                    <li><strong>Memory freed after transcribing</strong> — The on-device model fully releases its memory once the queue empties.</li>
+                    <li><strong>Better speaker recognition</strong> — Fewer mix-ups between similar voices; uncertain segments are left unlabeled instead of mislabeled.</li>
+                    <li><strong>"Organize speakers with AI" works without an AI provider</strong> — Merging duplicate voice clusters no longer fails when no AI is configured.</li>
+                    <li><strong>Input-device picker no longer flickers</strong> while audio capture starts.</li>
+                    <li><strong>"Only transcribe while plugged in" applies instantly</strong> instead of after a delay.</li>
+                    <li>Fixed a false "transcription backlog stalled" health alert during normal catch-up.</li>
+                    <li>Transcription memory usage is now reported accurately.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.51/MyPortrait_1.2.51_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="89/gSg+pPD0qhIxQLuBi2Fjos5PZkJzGnCxWDseGFJgSyA+914jFka3L8OBjqcSPZkzsSl1GR71oPziJ7kAKCA==" length="25809125" />
+        </item>
+
+        <item>
             <title>1.2.39</title>
             <pubDate>Tue, 02 Jun 2026 04:24:33 +0000</pubDate>
             <sparkle:version>163</sparkle:version>
