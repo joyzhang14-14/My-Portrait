@@ -42,3 +42,6 @@ scripts/release/dmg/.venv/
 
 # 本地发版 runbook(私人备忘,不进仓库)
 RELEASE.md
+
+# 项目 CLAUDE.md 留本地,不上传 GitHub
+/CLAUDE.md
