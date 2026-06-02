@@ -256,16 +256,23 @@ actor AudioCaptureService {
             logger.warning("inputNode.audioUnit unavailable — falling back to system default")
             return
         }
+        // ⚠️ 关键:AVAudioEngine 一访问 inputNode 就已按**系统默认输入**把这个 AUHAL
+        // initialize 了。对**已 initialize** 的 AUHAL 直接设 CurrentDevice 会被静默忽略
+        // —— 设备号变了但引擎仍渲染旧默认(症状:绑了内置麦却不亮黄灯、啥也没录,尤其
+        // 系统默认是蓝牙耳机 16k、内置麦 96k 这种采样率还不一样的情况)。
+        // 正确做法:uninitialize → 设 CurrentDevice → 重新 initialize,引擎才真换设备。
+        AudioUnitUninitialize(au)
         var did = deviceID
         let status = AudioUnitSetProperty(
             au, kAudioOutputUnitProperty_CurrentDevice,
             kAudioUnitScope_Global, 0,
             &did, UInt32(MemoryLayout<AudioDeviceID>.size)
         )
+        let initStatus = AudioUnitInitialize(au)
         if status != noErr {
             logger.warning("AudioUnitSetProperty(CurrentDevice) failed: \(status) — falling back to system default")
         } else {
-            logger.info("bound mic input to device UID '\(uid, privacy: .public)'")
+            logger.notice("bound mic input to device UID '\(uid, privacy: .public)' (uninit→set→reinit, init=\(initStatus))")
         }
     }
 
