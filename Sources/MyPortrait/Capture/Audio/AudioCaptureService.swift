@@ -278,16 +278,14 @@ actor AudioCaptureService {
         guard !engine.isRunning else { return }   // 没真停就不处理(防误触)
 
         let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, let target = targetFormat else {
-            logger.warning("reconfigure skipped: bad input format \(inputFormat.sampleRate, privacy: .public)Hz")
-            return
-        }
-        converter = AVAudioConverter(from: inputFormat, to: target)
-
-        let bufferSize: AVAudioFrameCount = Self.boundInputIsBluetooth(inputNode: inputNode) ? 8192 : 4096
+        // ⚠️ 不传显式格式 —— config change 期间 inputNode.outputFormat 可能跟节点实际
+        // 格式不一致(实测读到 44100 但节点不是),传给 installTap 会 "format mismatch"
+        // 直接 NSException **崩 app**。format: nil 让引擎用节点当前真实格式,绝不
+        // mismatch;converter 置 nil,由 performConversion 按首个 buffer 的真实格式懒构建。
         if tapInstalled { inputNode.removeTap(onBus: 0); tapInstalled = false }
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
+        converter = nil
+        let bufferSize: AVAudioFrameCount = Self.boundInputIsBluetooth(inputNode: inputNode) ? 8192 : 4096
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: nil) {
             [weak self] buffer, _ in
             guard let self else { return }
             Task { [weak self] in await self?.performConversion(buffer: buffer) }
@@ -295,7 +293,7 @@ actor AudioCaptureService {
         tapInstalled = true
         do {
             try engine.start()
-            logger.notice("reconfigured after config change @ \(inputFormat.sampleRate, privacy: .public)Hz")
+            logger.notice("reconfigured after config change")
         } catch {
             logger.error("reconfigure restart failed: \(String(describing: error), privacy: .public)")
         }
@@ -379,7 +377,13 @@ actor AudioCaptureService {
     }
 
     private func performConversion(buffer: AVAudioPCMBuffer) {
-        guard let converter, let targetFormat, let cont = samplesContinuation else { return }
+        guard let targetFormat, let cont = samplesContinuation else { return }
+        // converter 为 nil(reconfigure 用 format:nil 后)→ 用首个 buffer 的**真实**格式
+        // 懒构建,避免依赖可能陈旧的 inputNode.outputFormat。主路径已预建则跳过。
+        if converter == nil {
+            converter = AVAudioConverter(from: buffer.format, to: targetFormat)
+        }
+        guard let converter else { return }
 
         let inputFrames = AVAudioFrameCount(buffer.frameLength)
         let outputCapacity = AVAudioFrameCount(
