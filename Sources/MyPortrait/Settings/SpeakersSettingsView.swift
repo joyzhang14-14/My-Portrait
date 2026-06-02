@@ -173,33 +173,38 @@ struct SpeakersSettingsView: View {
         organizing = true
         Task {
             defer { organizing = false }
-            do {
-                // ① 匿名簇 → LLM 起名(改 rows[] + 异步写库)。
-                let unnamedIds = unidentified.map { $0.id }
-                if !unnamedIds.isEmpty {
+            // ① 匿名簇 → LLM 起名(要 AI provider)。失败(如没配 provider)**不致命** ——
+            //    记下错误但继续做 ② 合并。合并是纯本地 cosine,不需要 AI,不该被起名连累。
+            var namingError: String? = nil
+            let unnamedIds = unidentified.map { $0.id }
+            if !unnamedIds.isEmpty {
+                do {
                     let proposals = try await SpeakerOrganizer.run(unidentifiedIds: unnamedIds)
                     for p in proposals where !p.label.isEmpty {
                         if let row = rows.first(where: { $0.id == p.speakerId }) {
                             rename(row, to: p.label)
                         }
                     }
+                } catch {
+                    namingError = error.localizedDescription
                 }
-                // ② 同名簇合并,带声纹护栏:同名 + 质心相似才合(挡住"名同声不同")。
-                let centroids = await Task.detached(priority: .userInitiated) {
-                    TimelineDB().speakerCentroids()
-                }.value
-                let plan = mergePlan(centroids: centroids)
-                if !plan.isEmpty {
-                    await Task.detached(priority: .userInitiated) {
-                        for (keepId, mergeIds) in plan {
-                            for mid in mergeIds { _ = TimelineDB().mergeSpeakers(keep: keepId, merge: mid) }
-                        }
-                    }.value
-                    reload()
-                }
-            } catch {
-                organizeError = error.localizedDescription
             }
+            // ② 同名簇合并,带声纹护栏:同名 + 质心相似才合(挡住"名同声不同")。
+            //    即使 ① 起名失败也照做。
+            let centroids = await Task.detached(priority: .userInitiated) {
+                TimelineDB().speakerCentroids()
+            }.value
+            let plan = mergePlan(centroids: centroids)
+            if !plan.isEmpty {
+                await Task.detached(priority: .userInitiated) {
+                    for (keepId, mergeIds) in plan {
+                        for mid in mergeIds { _ = TimelineDB().mergeSpeakers(keep: keepId, merge: mid) }
+                    }
+                }.value
+                reload()
+            }
+            // 起名失败的提示最后给 —— 合并已经做了,只是没 AI 起名而已。
+            organizeError = namingError
         }
     }
 
