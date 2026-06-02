@@ -274,32 +274,54 @@ actor PortraitDBImpl: PortraitDB {
 
     /// 余弦相似度阈值。> 此值判定同一说话人（对齐 screenpipe 的 0.45）。
     private static let speakerMatchThreshold: Float = 0.45
+    /// 判别裕度:命中者必须比「最强异名候选」高出这么多,否则判 ambiguous —— 防
+    /// Joy/Stan 声纹接近时把边界段标反(宁可留空也别认错)。
+    private static let speakerMargin: Float = 0.10
     /// 每个说话人最多保留的样本向量数。
     private static let maxEmbeddingsPerSpeaker = 10
     /// centroid 指数移动平均的有效计数上限——防止老说话人 centroid 僵化。
     private static let centroidEMACap = 50
 
-    func matchSpeaker(embedding: [Float]) async throws -> Int64? {
+    func matchSpeaker(embedding: [Float]) async throws -> SpeakerMatch {
         try await dbPool.read { db in
-            var best: (id: Int64, sim: Float)?
             // **纯质心匹配**:每人一个稳定的运行平均向量(enroll / 训练时即建)。
             // 不做样本级匹配 —— "单个最相似样本 > 阈值"会被 outlier 带偏:某人样本多
             // 时任何声音总能蒙中某一个 → 过度归一,还把"别人 / 嘈杂的你"误吸成已知人。
             // 质心是均值、outlier-robust、判别力强:清晰的你匹配你的质心;嘈杂的你 /
             // 真正的别人跟你的干净质心不像 → 不匹配 → 落 unknown 凸显出来(可去命名)。
             let cRows = try Row.fetchAll(db, sql: """
-                SELECT id, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
+                SELECT id, name, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
                 """)
+            var cands: [(id: Int64, name: String?, sim: Float)] = []
             for row in cRows {
                 guard let blob: Data = row["centroid"], let vec = blob.asFloats,
                       vec.count == embedding.count else { continue }
                 let sim = VectorMath.cosineSimilarity(embedding, vec)
-                if sim > Self.speakerMatchThreshold, sim > (best?.sim ?? Self.speakerMatchThreshold) {
-                    best = (row["id"], sim)
+                if sim > Self.speakerMatchThreshold {
+                    cands.append((row["id"], row["name"], sim))
                 }
             }
-            return best?.id
+            guard let winner = cands.max(by: { $0.sim < $1.sim }) else { return .none }
+            // 判别裕度:找「跟 winner 不同名(= 不同人)」的最强候选。同名簇(同一人被
+            // 拆成多簇)不算竞争。异名候选跟 winner 的相似度差 < margin → 两人分不开
+            // → .ambiguous(别硬猜、也别当新人 enroll,留空标签)。
+            let rival = cands
+                .filter { $0.id != winner.id && !Self.sameSpeakerName($0.name, winner.name) }
+                .map(\.sim).max()
+            if let rival, winner.sim - rival < Self.speakerMargin {
+                return .ambiguous
+            }
+            return .matched(winner.id)
         }
+    }
+
+    /// 两个 speaker 名是否同一人(忽略大小写/首尾空白)。任一无名 → 当作不同人
+    /// (保守:无名簇不跟具名簇算"同人")。
+    private static func sameSpeakerName(_ a: String?, _ b: String?) -> Bool {
+        guard let x = a?.trimmingCharacters(in: .whitespaces).lowercased(), !x.isEmpty,
+              let y = b?.trimmingCharacters(in: .whitespaces).lowercased(), !y.isEmpty
+        else { return false }
+        return x == y
     }
 
     func enrollSpeaker(embedding: [Float]) async throws -> Int64 {
