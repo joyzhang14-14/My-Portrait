@@ -2514,32 +2514,37 @@ final class ImageLightboxController {
 
     func show(attachment: Attachment) {
         close()   // 旧的先关
-        guard let screen = NSScreen.main else { return }
-        // 用 LightboxWindow 子类,override canBecomeKey/Main 让 borderless
-        // window 能拿键盘焦点 → SwiftUI 的 .keyboardShortcut(.escape) 才响应。
+        // 找到主 app window —— lightbox 只覆盖它的 frame,不占整个 screen。
+        // 仿 Claude desktop:模态盒子限在 app 内,周围系统 UI 仍可见。
+        // keyWindow 在 inactive app 切回来那一瞬可能为 nil,回退 mainWindow。
+        guard let host = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first else { return }
         let w = LightboxWindow(
-            contentRect: screen.frame,
+            contentRect: host.frame,
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
         w.isOpaque = false
         w.backgroundColor = .clear
-        w.level = .floating              // 盖住 app + 大部分系统 UI
-        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        w.level = host.level             // 跟随父窗口层级,不抢系统其它 UI
+        w.collectionBehavior = [.transient, .ignoresCycle]
         w.ignoresMouseEvents = false
         w.hasShadow = false
         w.isReleasedWhenClosed = false   // 我们自己持引用 + 复用 close()
         w.contentView = NSHostingView(rootView:
             ImageLightboxView(attachment: attachment) { [weak self] in self?.close() }
         )
+        // 加成 child window:lightbox 自动跟随主 window 的 move / minimize / close,
+        // 不用我们另起监听。
+        host.addChildWindow(w, ordered: .above)
         w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
         self.window = w
     }
 
     func close() {
+        if let w = window, let parent = w.parent {
+            parent.removeChildWindow(w)
+        }
         window?.orderOut(nil)
         window = nil
     }
