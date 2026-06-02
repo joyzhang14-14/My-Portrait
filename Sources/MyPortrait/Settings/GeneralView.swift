@@ -92,15 +92,6 @@ struct GeneralSettingsView: View {
                 CronJobStore.shared.applyHistoryLimit()
             }
 
-            SettingsCard(title: "Chat",
-                         footnote: "Experimental. Skips re-rendering chat messages that haven't changed — when switching back to a long conversation, or while a reply streams. In rare cases a message may briefly show stale content; turn this off if you notice it.") {
-                SettingsRow("Optimize chat rendering",
-                            description: "Faster scrolling and window-switching in long conversations.",
-                            icon: "bolt") {
-                    Toggle("", isOn: config.binding(\.general.optimizeChatRendering)).labelsHidden().toggleStyle(.switch)
-                }
-            }
-
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。
