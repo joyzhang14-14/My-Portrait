@@ -134,7 +134,9 @@ actor FocusProbe {
         // 节流:NSWorkspace 通知风暴(Mission Control / 快速 Cmd-Tab)会瞬间
         // 派发七八条 didActivateApplication,跳过 refreshMinIntervalMs 内的
         // 重复触发,避免主线程被 AX walk 串行队列堵死。
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 单调时钟:用 wall-clock 的话 NTP/手动回拨会让 delta 变负 → 永远早退、
+        // focus 卡在旧 app(本文件别处 238/342/379 也用 uptime)。
+        let nowMs = Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
         if nowMs - lastRefreshAtMs < refreshMinIntervalMs { return }
         lastRefreshAtMs = nowMs
 

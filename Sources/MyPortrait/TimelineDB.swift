@@ -353,7 +353,8 @@ struct TimelineDB: Sendable {
     func audioTranscripts(
         around moment: Date,
         before: TimeInterval = 120,
-        after: TimeInterval = 30
+        after: TimeInterval = 30,
+        limit: Int = 60
     ) -> [AudioTranscriptEntry] {
         guard exists else { return [] }
 
@@ -381,7 +382,7 @@ struct TimelineDB: Sendable {
             WHERE ac.recorded_at_ms >= ? AND ac.recorded_at_ms <= ?
               AND t.text IS NOT NULL AND t.text != ''
             ORDER BY ac.recorded_at_ms ASC
-            LIMIT 60
+            LIMIT ?
             """
 
         var stmt: OpaquePointer?
@@ -393,6 +394,7 @@ struct TimelineDB: Sendable {
 
         sqlite3_bind_int64(stmt, 1, startMs)
         sqlite3_bind_int64(stmt, 2, endMs)
+        sqlite3_bind_int(stmt, 3, Int32(limit))
 
         var out: [AudioTranscriptEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {

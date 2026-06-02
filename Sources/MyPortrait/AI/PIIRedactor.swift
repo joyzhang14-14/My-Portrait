@@ -27,8 +27,8 @@ enum PIIRedactor {
 
     private static let rules: [Rule] = [
         // — API keys / tokens (run first so they aren't shredded by smaller patterns)
-        .init(label: "openai-key",    pattern: #"sk-[A-Za-z0-9_-]{20,}"#),
         .init(label: "anthropic-key", pattern: #"sk-ant-[A-Za-z0-9_-]{20,}"#),
+        .init(label: "openai-key",    pattern: #"sk-[A-Za-z0-9_-]{20,}"#),
         .init(label: "github-token",  pattern: #"gh[pousr]_[A-Za-z0-9]{36,}"#),
         .init(label: "aws-key-id",    pattern: #"AKIA[0-9A-Z]{16}"#),
         .init(label: "jwt",           pattern: #"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"#),
