@@ -18,6 +18,9 @@ struct HomeView: View {
         configStore.mutate { $0.chat.redactPii = v }
     }
     @State private var attachments: [Attachment] = []
+    /// 非 nil 时在最上层 overlay 一个全屏 lightbox 大图查看(点消息里的图片
+    /// 缩略图触发)。点背景 / 右上角 × / ESC 关闭。仿 Claude desktop。
+    @State private var lightboxImage: Attachment? = nil
     @State private var templates = TemplateLibrary.shared
     @State private var editingTemplate: SummaryTemplate? = nil
 
@@ -92,7 +95,8 @@ struct HomeView: View {
                         prompt = msg.text
                         contextChips = chat.contextChipsByMessage[msg.id] ?? []
                         editingMessageId = msg.id
-                    }
+                    },
+                    onImageTap: { att in lightboxImage = att }
                 )
             }
 
@@ -126,6 +130,15 @@ struct HomeView: View {
             )
         }
         .background(AmbientBackground())
+        // 图片 lightbox 全屏查看(消息里的缩略图点击触发)。macOS SwiftUI 没有
+        // fullScreenCover,用 ZStack overlay 盖在 VStack 之上等效。
+        .overlay {
+            if let att = lightboxImage {
+                ImageLightbox(attachment: att) { lightboxImage = nil }
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: lightboxImage?.id)
         .task {
             AISetup.shared.ensureInstalled()
         }
@@ -355,6 +368,9 @@ private struct ChatTranscript: View {
     var onCopy: (ChatMessage) -> Void = { _ in }
     var onRegenerate: (UUID) -> Void = { _ in }
     var onEdit: (ChatMessage) -> Void = { _ in }
+    /// 点消息里的图片附件 → 父层弹 lightbox 全屏查看。nil = 不响应点击
+    /// (老行为保留兼容)。
+    var onImageTap: ((Attachment) -> Void)? = nil
 
     /// 过滤空 assistant placeholder —— ChatController streaming 一启动就先
     /// 插入一条 content="" 的 assistant message,但 thinking 状态由底下独立
@@ -382,7 +398,8 @@ private struct ChatTranscript: View {
                             citations: citationsLookup?(msg.id) ?? [],
                             onCopy: { onCopy(msg) },
                             onRegenerate: { onRegenerate(msg.id) },
-                            onEdit: { onEdit(msg) }
+                            onEdit: { onEdit(msg) },
+                            onImageTap: onImageTap
                         )
                         .id(msg.id)
                     }
@@ -415,6 +432,8 @@ private struct ChatBubble: View {
     let onCopy: () -> Void
     let onRegenerate: () -> Void
     let onEdit: () -> Void
+    /// 父层 lightbox callback,由 ChatTranscript 透传过来。
+    var onImageTap: ((Attachment) -> Void)? = nil
     @State private var appear = false
     @State private var hover = false
     var body: some View {
@@ -453,10 +472,14 @@ private struct ChatBubble: View {
                 if !attachments.isEmpty {
                     HStack(spacing: 6) {
                         ForEach(attachments) { att in
-                            AttachmentThumb(attachment: att, onRemove: {})
+                            // 图片 → 点开全屏 lightbox(交父层 onImageTap);
+                            // 非图片(文件)→ 暂时仍只展示,不响应点击。
+                            // onRemove 传空 closure —— 已发出消息的附件不可删。
+                            AttachmentThumb(attachment: att,
+                                            onRemove: {},
+                                            onImageTap: onImageTap)
                                 .scaleEffect(0.78, anchor: .leading)
                                 .frame(width: 42, height: 42)
-                                .allowsHitTesting(false)
                         }
                         Spacer(minLength: 0)
                     }
@@ -2010,10 +2033,21 @@ private struct AttachmentStrip: View {
 private struct AttachmentThumb: View {
     let attachment: Attachment
     let onRemove: () -> Void
+    /// 非 nil + 图片 → 缩略图整体可点,弹父层 lightbox 全屏查看。
+    /// nil(input bar 还在编辑时)→ 只展示,不响应点击,保留旧行为。
+    var onImageTap: ((Attachment) -> Void)? = nil
     @State private var hover = false
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            content
+            // 图片有 tap callback → 包成 Button,光标变成手型 + 提示放大查看。
+            // 文件 / 没 callback → 裸 content,保留旧观感。
+            if attachment.kind == .image, let tap = onImageTap {
+                Button { tap(attachment) } label: { content }
+                    .buttonStyle(.plain)
+                    .help("Click to view full size")
+            } else {
+                content
+            }
             if hover {
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
@@ -2477,5 +2511,75 @@ private struct PickerPopover: View {
             )
         }
         .buttonStyle(.bouncyIcon)
+    }
+}
+
+// MARK: - Image Lightbox
+
+/// 全屏图片查看器,仿 Claude desktop。
+/// 触发:点击聊天消息里的图片缩略图。关闭:点背景 / 右上角 × / ESC。
+///
+/// 直接同步 NSImage(contentsOf:) —— 一次性查看不需要 AsyncDiskThumbnail
+/// 那套异步降采样(那个为了流式重渲染优化,这里是模态视图渲一次)。
+private struct ImageLightbox: View {
+    let attachment: Attachment
+    let onClose: () -> Void
+    private var image: NSImage? { NSImage(contentsOf: attachment.url) }
+
+    var body: some View {
+        ZStack {
+            // 整屏深色背景 — 点哪儿都关闭。文件夹模态 lightbox 常见手势。
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { onClose() }
+
+            VStack(spacing: 10) {
+                if let img = image {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        // 大图限 90% 视口,留点边给关闭按钮 + 文件名。
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(40)
+                        // 阻断点击穿透 — 不让点图片本身关闭(只点背景才关)。
+                        .contentShape(Rectangle())
+                        .onTapGesture { /* 吞掉 */ }
+                } else {
+                    // 极少见:文件被删 / 损坏。
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.white.opacity(0.6))
+                        Text("Could not load image")
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+                Text(attachment.displayName)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .padding(.bottom, 18)
+            }
+
+            // 右上角关闭按钮(visible + 带 ESC 快捷键)。
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Color.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .help("Close (Esc)")
+                    .padding(20)
+                }
+                Spacer()
+            }
+        }
     }
 }
