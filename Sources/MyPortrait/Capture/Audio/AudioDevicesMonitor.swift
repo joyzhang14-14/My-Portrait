@@ -89,8 +89,14 @@ final class AudioDevicesMonitor {
     // MARK: - 强制重扫
 
     func refresh() {
-        devices = Self.enumerateInputDevices()
-        systemDefaultUID = Self.currentSystemDefaultInputUID()
+        // 只在**真的变了**才赋值 —— @Observable 不比较新旧,无条件赋值会触发 UI 重渲染。
+        // 开启采集时 AVAudioEngine 建内部聚合设备(CADefaultDeviceAggregate,已被
+        // enumerateInputDevices 过滤掉),会狂发设备列表变更通知,但过滤后列表其实没变。
+        // 不加等值判断,picker 就会"闪一下"(每条通知都重渲染)。
+        let newDevices = Self.enumerateInputDevices()
+        if newDevices != devices { devices = newDevices }
+        let newDefault = Self.currentSystemDefaultInputUID()
+        if newDefault != systemDefaultUID { systemDefaultUID = newDefault }
     }
 
     // MARK: - Listeners
