@@ -37,7 +37,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .portrait("background"):   return "books.vertical.fill"
         case .portrait("experiences"):  return "map.fill"
         case .portrait("interests"):    return "sparkles"
-        case .portrait("speech_style"): return "text.bubble.fill"
+        case .portrait("writing_style"): return "text.bubble.fill"
         case .portrait("skills"):       return "wrench.adjustable.fill"
         case .portrait("emotions"):     return "heart.fill"
         case .portrait:                 return "doc.text"

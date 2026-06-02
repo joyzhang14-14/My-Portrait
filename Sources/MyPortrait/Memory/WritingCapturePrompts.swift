@@ -114,7 +114,7 @@ enum WritingCapturePrompts {
 
     The user wants to PRESERVE almost every piece of MEANINGFUL input they produced —
     brief replies, quick posts, terse commit-style messages, ⌘+Enter-sent fragments —
-    these all matter as behavior / speech-style signal. Only drop input that has NO
+    these all matter as behavior / writing-style signal. Only drop input that has NO
     meaningful content (an accidental keystroke, a single space, repeated test gibberish).
 
     INPUT

@@ -137,16 +137,21 @@ final class Services {
             print("[writing-capture] startup recovery: marked \(zombies) zombie run(s) as failed")
         }
 
-        // speech_style 提炼链路(独立于写作采集 + memory pipeline)。也共用
-        // 同一 DatabasePool。注册到 SpeechStyleDistiller.shared 给 UI / scheduler 用。
-        let ssStore = SpeechStyleStore(dbPool: dbImpl.dbPool)
-        SpeechStyleDistiller.shared = SpeechStyleDistiller(store: ssStore)
+        // 一次性把老的 portrait/speech_style/ 文件夹 + .md frontmatter 迁到
+        // writing_style/(配套 DB 的 v36 改名 + config 旧 key 回退)。幂等,跑过即
+        // no-op。放在 UI / pipeline 读 portrait 之前。
+        PortraitPaths.migrateSpeechStyleToWritingStyle()
+
+        // writing_style 提炼链路(独立于写作采集 + memory pipeline)。也共用
+        // 同一 DatabasePool。注册到 WritingStyleDistiller.shared 给 UI / scheduler 用。
+        let ssStore = WritingStyleStore(dbPool: dbImpl.dbPool)
+        WritingStyleDistiller.shared = WritingStyleDistiller(store: ssStore)
         // 启动时清残留 zombie processing 行 —— 上次进程崩 / 用户硬退之后
         // 没改回 final status 的 run。
         if let zombies = try? ssStore.markStuckProcessingAsFailed(
             message: "process exited before run completed"
         ), zombies > 0 {
-            print("[speech-style] startup recovery: marked \(zombies) zombie run(s) as failed")
+            print("[writing-style] startup recovery: marked \(zombies) zombie run(s) as failed")
         }
     }
 

@@ -1,18 +1,18 @@
 import Foundation
 
-/// speech_style 提炼链路的内存类型 —— 跨 Distiller / Agent / Store 用。
+/// writing_style 提炼链路的内存类型 —— 跨 Distiller / Agent / Store 用。
 /// 不入 DB,运行时载体。
 
 // MARK: - 模式
 
-enum SpeechStyleMode: String, Sendable {
+enum WritingStyleMode: String, Sendable {
     case manual    // UI Run 按钮触发 —— staged + pending review
-    case auto      // scheduler 自动 —— 直接 commit portrait/speech_style/
+    case auto      // scheduler 自动 —— 直接 commit portrait/writing_style/
 }
 
 // MARK: - Run 状态
 
-enum SpeechStyleRunStatus: String, Sendable {
+enum WritingStyleRunStatus: String, Sendable {
     case processing
     case pendingReview     = "pending_review"
     case approved
@@ -23,8 +23,8 @@ enum SpeechStyleRunStatus: String, Sendable {
 
 // MARK: - 输入给 LLM 的 record
 
-/// 喂给 LLM 的一条 writing_record(裁剪后只留 speech_style 关心的字段)。
-struct SpeechStyleRecordInput: Sendable, Equatable {
+/// 喂给 LLM 的一条 writing_record(裁剪后只留 writing_style 关心的字段)。
+struct WritingStyleRecordInput: Sendable, Equatable {
     let id: Int64
     let startTs: Int64
     let app: String
@@ -41,9 +41,9 @@ struct SpeechStyleRecordInput: Sendable, Equatable {
 
 // MARK: - LLM 输出 / staged 行
 
-/// LLM 单条决策。staged 时落 speech_style_staged 表,Approve 时按 action
-/// 写 portrait/speech_style/<slug>.md。
-struct SpeechStyleDraft: Sendable, Equatable {
+/// LLM 单条决策。staged 时落 writing_style_staged 表,Approve 时按 action
+/// 写 portrait/writing_style/<slug>.md。
+struct WritingStyleDraft: Sendable, Equatable {
     enum Action: String, Sendable {
         case create
         case update
@@ -59,10 +59,10 @@ struct SpeechStyleDraft: Sendable, Equatable {
 
 // MARK: - 一次 Run 摘要
 
-struct SpeechStyleRunSummary: Sendable {
+struct WritingStyleRunSummary: Sendable {
     let runId: String
-    let mode: SpeechStyleMode
-    let status: SpeechStyleRunStatus
+    let mode: WritingStyleMode
+    let status: WritingStyleRunStatus
     let recordsCount: Int            // 输入 record 数
     let draftsCount: Int             // LLM 返回 draft 数
     let errorMessage: String?
@@ -70,11 +70,11 @@ struct SpeechStyleRunSummary: Sendable {
 
 // MARK: - Staged 行(查 pending review 用)
 
-struct SpeechStyleStagedRow: Sendable, Identifiable, Equatable {
+struct WritingStyleStagedRow: Sendable, Identifiable, Equatable {
     let id: Int64
     let runId: String
     let createdAt: Int64
-    let action: SpeechStyleDraft.Action
+    let action: WritingStyleDraft.Action
     let slug: String
     let title: String
     let body: String
@@ -84,11 +84,11 @@ struct SpeechStyleStagedRow: Sendable, Identifiable, Equatable {
 
 // MARK: - Run 行(查 pending review 列表用)
 
-struct SpeechStyleRunRow: Sendable, Identifiable, Equatable {
+struct WritingStyleRunRow: Sendable, Identifiable, Equatable {
     let id: Int64
     let runId: String
-    let mode: SpeechStyleMode
-    let status: SpeechStyleRunStatus
+    let mode: WritingStyleMode
+    let status: WritingStyleRunStatus
     let startedAt: Int64
     let completedAt: Int64?
     let recordsCount: Int?

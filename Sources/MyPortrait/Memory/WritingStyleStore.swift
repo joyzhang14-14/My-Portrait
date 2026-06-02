@@ -2,16 +2,16 @@ import Foundation
 import GRDB
 import os.log
 
-private let speechStoreLog = Logger(subsystem: "com.myportrait.memory", category: "speech-style-store")
+private let writingStyleStoreLog = Logger(subsystem: "com.myportrait.memory", category: "writing-style-store")
 
-/// speech_style 提炼链路的 DAO ——
-///   - 读 writing_records 里 speech_style_processed_at IS NULL 的行
+/// writing_style 提炼链路的 DAO ——
+///   - 读 writing_records 里 writing_style_processed_at IS NULL 的行
 ///   - 标 completed(单条或批量)
-///   - speech_style_runs CRUD
-///   - speech_style_staged CRUD(manual 模式 staged → Approve → 落盘 + 标 completed)
+///   - writing_style_runs CRUD
+///   - writing_style_staged CRUD(manual 模式 staged → Approve → 落盘 + 标 completed)
 ///
 /// GRDB arguments 一律 dict 形式(避开 Swift runtime existential 转换 bug)。
-struct SpeechStyleStore: Sendable {
+struct WritingStyleStore: Sendable {
 
     let dbPool: DatabasePool
 
@@ -21,20 +21,20 @@ struct SpeechStyleStore: Sendable {
 
     // MARK: - 读未处理 records
 
-    /// 读 writing_records(approved)里 speech_style_processed_at IS NULL 的行,
+    /// 读 writing_records(approved)里 writing_style_processed_at IS NULL 的行,
     /// 按 start_ts 升序,上限 `limit`。LLM 喂这一批,Approve / auto-commit 后
     /// 调 `markRecordsProcessed` 标完。
     /// **过滤 edit_log 空的记录** —— CLI import / paste 路径写入的
-    /// records 没 keystroke 时序,会让 SpeechStyle LLM 错下"用户一次成稿"的
+    /// records 没 keystroke 时序,会让 WritingStyle LLM 错下"用户一次成稿"的
     /// 结论。空 edit_log 一律跳过(它们已经在 unprocessedCount 也跳了)。
-    func unprocessedRecords(limit: Int) throws -> [SpeechStyleRecordInput] {
+    func unprocessedRecords(limit: Int) throws -> [WritingStyleRecordInput] {
         try dbPool.read { db in
             let rows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT id, start_ts, app, url, text, edit_log, kind, context_summary
                     FROM writing_records
-                    WHERE speech_style_processed_at IS NULL
+                    WHERE writing_style_processed_at IS NULL
                       AND edit_log IS NOT NULL
                       AND edit_log != ''
                       AND edit_log != '[]'
@@ -44,7 +44,7 @@ struct SpeechStyleStore: Sendable {
                 arguments: ["lim": Int64(limit)]
             )
             return rows.map {
-                SpeechStyleRecordInput(
+                WritingStyleRecordInput(
                     id: $0["id"],
                     startTs: $0["start_ts"],
                     app: $0["app"],
@@ -111,7 +111,7 @@ struct SpeechStyleStore: Sendable {
 
     /// 按 id list 拉 writing_records —— UI Draft sheet 展开"N refs"用。
     /// 跟 unprocessedRecords 同投影,只是 WHERE 条件不一样。
-    func fetchRecordsByIds(_ ids: [Int64]) throws -> [SpeechStyleRecordInput] {
+    func fetchRecordsByIds(_ ids: [Int64]) throws -> [WritingStyleRecordInput] {
         guard !ids.isEmpty else { return [] }
         return try dbPool.read { db in
             let placeholders = ids.map { _ in "?" }.joined(separator: ",")
@@ -127,7 +127,7 @@ struct SpeechStyleStore: Sendable {
                 arguments: StatementArguments(args)
             )
             return rows.map {
-                SpeechStyleRecordInput(
+                WritingStyleRecordInput(
                     id: $0["id"],
                     startTs: $0["start_ts"],
                     app: $0["app"],
@@ -149,7 +149,7 @@ struct SpeechStyleStore: Sendable {
                 db,
                 sql: """
                     SELECT COUNT(*) FROM writing_records
-                    WHERE speech_style_processed_at IS NULL
+                    WHERE writing_style_processed_at IS NULL
                       AND edit_log IS NOT NULL
                       AND edit_log != ''
                       AND edit_log != '[]'
@@ -168,7 +168,7 @@ struct SpeechStyleStore: Sendable {
             try db.execute(
                 sql: """
                     UPDATE writing_records
-                    SET speech_style_processed_at = ?
+                    SET writing_style_processed_at = ?
                     WHERE id IN (\(placeholders))
                     """,
                 arguments: StatementArguments(args)
@@ -184,7 +184,7 @@ struct SpeechStyleStore: Sendable {
         let json = Self.encodeJSON(ids) ?? "[]"
         try dbPool.write { db in
             try db.execute(
-                sql: "UPDATE speech_style_runs SET input_record_ids = :ids WHERE run_id = :rid",
+                sql: "UPDATE writing_style_runs SET input_record_ids = :ids WHERE run_id = :rid",
                 arguments: ["ids": json, "rid": runId]
             )
         }
@@ -195,7 +195,7 @@ struct SpeechStyleStore: Sendable {
         try dbPool.read { db in
             let json: String? = try String.fetchOne(
                 db,
-                sql: "SELECT input_record_ids FROM speech_style_runs WHERE run_id = :rid",
+                sql: "SELECT input_record_ids FROM writing_style_runs WHERE run_id = :rid",
                 arguments: ["rid": runId]
             )
             guard let s = json, let data = s.data(using: .utf8),
@@ -206,17 +206,17 @@ struct SpeechStyleStore: Sendable {
     }
 
     func insertRun(
-        runId: String, mode: SpeechStyleMode, startedAt: Int64
+        runId: String, mode: WritingStyleMode, startedAt: Int64
     ) throws {
         try dbPool.write { db in
             try db.execute(sql: """
-                INSERT INTO speech_style_runs
+                INSERT INTO writing_style_runs
                     (run_id, mode, status, started_at)
                 VALUES (:rid, :mode, :status, :started)
                 """,
                 arguments: [
                     "rid": runId, "mode": mode.rawValue,
-                    "status": SpeechStyleRunStatus.processing.rawValue,
+                    "status": WritingStyleRunStatus.processing.rawValue,
                     "started": startedAt
                 ])
         }
@@ -224,7 +224,7 @@ struct SpeechStyleStore: Sendable {
 
     func updateRun(
         runId: String,
-        status: SpeechStyleRunStatus,
+        status: WritingStyleRunStatus,
         completedAt: Int64? = nil,
         errorMessage: String? = nil,
         recordsCount: Int? = nil,
@@ -233,7 +233,7 @@ struct SpeechStyleStore: Sendable {
     ) throws {
         try dbPool.write { db in
             try db.execute(sql: """
-                UPDATE speech_style_runs SET
+                UPDATE writing_style_runs SET
                     status         = :status,
                     completed_at   = COALESCE(:completed, completed_at),
                     error_message  = COALESCE(:err, error_message),
@@ -254,11 +254,11 @@ struct SpeechStyleStore: Sendable {
         }
     }
 
-    func fetchRun(runId: String) throws -> SpeechStyleRunRow? {
+    func fetchRun(runId: String) throws -> WritingStyleRunRow? {
         try dbPool.read { db in
             try Row.fetchOne(
                 db,
-                sql: "SELECT * FROM speech_style_runs WHERE run_id = :rid",
+                sql: "SELECT * FROM writing_style_runs WHERE run_id = :rid",
                 arguments: ["rid": runId]
             ).map(Self.rowToRun)
         }
@@ -271,14 +271,14 @@ struct SpeechStyleStore: Sendable {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         return try dbPool.write { db in
             try db.execute(sql: """
-                UPDATE speech_style_runs
+                UPDATE writing_style_runs
                 SET status        = :status,
                     completed_at  = :now,
                     error_message = :msg
                 WHERE status = 'processing'
                 """,
                 arguments: [
-                    "status": SpeechStyleRunStatus.failed.rawValue,
+                    "status": WritingStyleRunStatus.failed.rawValue,
                     "now": now, "msg": message
                 ])
             return db.changesCount
@@ -286,12 +286,12 @@ struct SpeechStyleStore: Sendable {
     }
 
     /// status = pending_review 的所有 run,新到旧。
-    func fetchPendingReviewRuns() throws -> [SpeechStyleRunRow] {
+    func fetchPendingReviewRuns() throws -> [WritingStyleRunRow] {
         try dbPool.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT * FROM speech_style_runs
+                    SELECT * FROM writing_style_runs
                     WHERE status = 'pending_review'
                     ORDER BY started_at DESC
                     """
@@ -301,13 +301,13 @@ struct SpeechStyleStore: Sendable {
 
     // MARK: - staged
 
-    func insertStaged(runId: String, drafts: [SpeechStyleDraft]) throws {
+    func insertStaged(runId: String, drafts: [WritingStyleDraft]) throws {
         let createdAt = Int64(Date().timeIntervalSince1970 * 1000)
         try dbPool.write { db in
             for d in drafts {
                 let idsJSON = Self.encodeJSON(d.sourceRecordIds) ?? "[]"
                 try db.execute(sql: """
-                    INSERT INTO speech_style_staged
+                    INSERT INTO writing_style_staged
                         (run_id, created_at, action, slug, title, body,
                          source_record_ids, existing_slug)
                     VALUES (:rid, :created, :action, :slug, :title, :body,
@@ -325,12 +325,12 @@ struct SpeechStyleStore: Sendable {
     }
 
     /// 某 run 的 staged drafts(hidden 排除)。
-    func fetchStaged(runId: String) throws -> [SpeechStyleStagedRow] {
+    func fetchStaged(runId: String) throws -> [WritingStyleStagedRow] {
         try dbPool.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT * FROM speech_style_staged
+                    SELECT * FROM writing_style_staged
                     WHERE run_id = :rid AND hidden_at IS NULL
                     ORDER BY id ASC
                     """,
@@ -344,7 +344,7 @@ struct SpeechStyleStore: Sendable {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         try dbPool.write { db in
             try db.execute(
-                sql: "UPDATE speech_style_staged SET hidden_at = :now WHERE id = :id",
+                sql: "UPDATE writing_style_staged SET hidden_at = :now WHERE id = :id",
                 arguments: ["now": now, "id": stagedId]
             )
         }
@@ -356,16 +356,16 @@ struct SpeechStyleStore: Sendable {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         try dbPool.write { db in
             try db.execute(
-                sql: "DELETE FROM speech_style_staged WHERE run_id = :rid",
+                sql: "DELETE FROM writing_style_staged WHERE run_id = :rid",
                 arguments: ["rid": runId]
             )
             try db.execute(sql: """
-                UPDATE speech_style_runs
+                UPDATE writing_style_runs
                 SET status = :status, completed_at = :now
                 WHERE run_id = :rid
                 """,
                 arguments: [
-                    "status": SpeechStyleRunStatus.rejectedForRerun.rawValue,
+                    "status": WritingStyleRunStatus.rejectedForRerun.rawValue,
                     "now": now, "rid": runId
                 ])
         }
@@ -377,16 +377,16 @@ struct SpeechStyleStore: Sendable {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         try dbPool.write { db in
             try db.execute(
-                sql: "DELETE FROM speech_style_staged WHERE run_id = :rid",
+                sql: "DELETE FROM writing_style_staged WHERE run_id = :rid",
                 arguments: ["rid": runId]
             )
             try db.execute(sql: """
-                UPDATE speech_style_runs
+                UPDATE writing_style_runs
                 SET status = :status, completed_at = :now
                 WHERE run_id = :rid
                 """,
                 arguments: [
-                    "status": SpeechStyleRunStatus.approved.rawValue,
+                    "status": WritingStyleRunStatus.approved.rawValue,
                     "now": now, "rid": runId
                 ])
         }
@@ -394,12 +394,12 @@ struct SpeechStyleStore: Sendable {
 
     // MARK: - Helpers
 
-    private static func rowToRun(_ r: Row) -> SpeechStyleRunRow {
-        SpeechStyleRunRow(
+    private static func rowToRun(_ r: Row) -> WritingStyleRunRow {
+        WritingStyleRunRow(
             id: r["id"],
             runId: r["run_id"],
-            mode: SpeechStyleMode(rawValue: (r["mode"] as String?) ?? "manual") ?? .manual,
-            status: SpeechStyleRunStatus(rawValue: (r["status"] as String?) ?? "failed") ?? .failed,
+            mode: WritingStyleMode(rawValue: (r["mode"] as String?) ?? "manual") ?? .manual,
+            status: WritingStyleRunStatus(rawValue: (r["status"] as String?) ?? "failed") ?? .failed,
             startedAt: r["started_at"],
             completedAt: r["completed_at"],
             recordsCount: (r["records_count"] as Int64?).map { Int($0) },
@@ -408,14 +408,14 @@ struct SpeechStyleStore: Sendable {
         )
     }
 
-    private static func rowToStaged(_ r: Row) -> SpeechStyleStagedRow {
+    private static func rowToStaged(_ r: Row) -> WritingStyleStagedRow {
         let idsJSON = (r["source_record_ids"] as String?) ?? "[]"
         let ids: [Int64] = (try? JSONDecoder().decode([Int64].self, from: Data(idsJSON.utf8))) ?? []
-        return SpeechStyleStagedRow(
+        return WritingStyleStagedRow(
             id: r["id"],
             runId: r["run_id"],
             createdAt: r["created_at"],
-            action: SpeechStyleDraft.Action(rawValue: (r["action"] as String?) ?? "noop") ?? .noop,
+            action: WritingStyleDraft.Action(rawValue: (r["action"] as String?) ?? "noop") ?? .noop,
             slug: r["slug"],
             title: r["title"],
             body: r["body"],

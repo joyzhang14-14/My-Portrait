@@ -290,16 +290,20 @@ struct SchedulerSettings: Codable, Equatable {
     /// 自动跑只是「先把 staged 准备好」,等用户审核。
     var writingCapture: SchedulerConfig = .init(frequency: .off,    timeOfDay: "03:30",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    /// speech_style 提炼链路。auto 模式 → 直接落 portrait/speech_style/,不审。
+    /// writing_style 提炼链路。auto 模式 → 直接落 portrait/writing_style/,不审。
     /// 默认 off。
-    var speechStyle:    SchedulerConfig = .init(frequency: .off,    timeOfDay: "04:30",
+    var writingStyle:    SchedulerConfig = .init(frequency: .off,    timeOfDay: "04:30",
                                                 dayOfWeek: 0, dayOfMonth: 1)
     init() {}
     enum CodingKeys: String, CodingKey {
         case event, classify, portrait, personality
         case writingCapture = "writing_capture"
-        case speechStyle    = "speech_style"
+        case writingStyle    = "writing_style"
     }
+    /// 旧 key:1.2.x 之前这条链路叫 speech_style,老 config.toml 仍写
+    /// [scheduler.speech_style]。单独放,避免污染合成的 encode(to:)
+    ///(无对应属性的 CodingKey 会让 Encodable 合成失败)。
+    private enum LegacyKeys: String, CodingKey { case speechStyle = "speech_style" }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -308,7 +312,10 @@ struct SchedulerSettings: Codable, Equatable {
         portrait       = c.dflt(SchedulerConfig.self, .portrait,       portrait)
         personality    = c.dflt(SchedulerConfig.self, .personality,    personality)
         writingCapture = c.dflt(SchedulerConfig.self, .writingCapture, writingCapture)
-        speechStyle    = c.dflt(SchedulerConfig.self, .speechStyle,    speechStyle)
+        // 读不到新 writing_style key 时回退旧 speech_style key,设置不丢
+        let legacy = try? decoder.container(keyedBy: LegacyKeys.self)
+        writingStyle   = c.dflt(SchedulerConfig.self, .writingStyle,
+                                legacy?.dflt(SchedulerConfig.self, .speechStyle, writingStyle) ?? writingStyle)
     }
 }
 

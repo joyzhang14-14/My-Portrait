@@ -1,15 +1,15 @@
 import Foundation
 import os.log
 
-private let ssLog = Logger(subsystem: "com.myportrait.memory", category: "speech-style")
+private let ssLog = Logger(subsystem: "com.myportrait.memory", category: "writing-style")
 
 /// 全局单例 UI 状态。Distiller 跑时更新这里,view 订阅。
 /// 切换 sidebar 时 view 被销毁,但 state 在这里活着,回来时直接读。
-/// 跟 WritingCaptureUIState 同模式 —— speech_style 也是长任务,view 切走
+/// 跟 WritingCaptureUIState 同模式 —— writing_style 也是长任务,view 切走
 /// 再回来要保持状态可见 + Stop 按钮可点。
 @MainActor
-final class SpeechStyleUIState: ObservableObject {
-    static let shared = SpeechStyleUIState()
+final class WritingStyleUIState: ObservableObject {
+    static let shared = WritingStyleUIState()
     @Published var isRunning: Bool = false
     @Published var statusMessage: String = ""
     /// 跑 distiller 的 Task 句柄 —— Stop 按钮 cancel 用。挂单例上,view 切走
@@ -18,40 +18,40 @@ final class SpeechStyleUIState: ObservableObject {
     private init() {}
 }
 
-/// speech_style 提炼链路的 orchestrator —— 两个入口:
-///   - `runManual()` —— UI Run 按钮触发。LLM 决策落 speech_style_staged,
+/// writing_style 提炼链路的 orchestrator —— 两个入口:
+///   - `runManual()` —— UI Run 按钮触发。LLM 决策落 writing_style_staged,
 ///                      run.status = pending_review。用户在 UI Approve 后
-///                      才落 portrait/speech_style/ 文件 + 标 records completed。
-///   - `runAuto()`   —— scheduler 自动。LLM 决策直接落 portrait/speech_style/
+///                      才落 portrait/writing_style/ 文件 + 标 records completed。
+///   - `runAuto()`   —— scheduler 自动。LLM 决策直接落 portrait/writing_style/
 ///                      文件 + 标 records completed,run.status = auto_committed。
 ///
 /// 两条路径共用 `prepareAndCallLLM()`:拉未处理 records → 截断到上限 →
-/// 读现存 portrait/speech_style/ 摘要 → 调 Agent → 解析。
+/// 读现存 portrait/writing_style/ 摘要 → 调 Agent → 解析。
 @MainActor
-final class SpeechStyleDistiller {
+final class WritingStyleDistiller {
 
     /// 全局单例,Services init 时填上。UI(MemorySettingsView)+ scheduler 用。
     /// 同 WritingCaptureWorker.shared 模式。
-    static var shared: SpeechStyleDistiller?
+    static var shared: WritingStyleDistiller?
 
     /// 单次 LLM 调用最多喂多少 record —— 防止上下文爆。可经 env
-    /// MYPORTRAIT_SPEECH_STYLE_BATCH 覆盖(测试用)。剩下的下一次 run 接着跑。
+    /// MYPORTRAIT_WRITING_STYLE_BATCH 覆盖(测试用)。剩下的下一次 run 接着跑。
     static let defaultBatchCap: Int = {
-        if let s = ProcessInfo.processInfo.environment["MYPORTRAIT_SPEECH_STYLE_BATCH"],
+        if let s = ProcessInfo.processInfo.environment["MYPORTRAIT_WRITING_STYLE_BATCH"],
            let v = Int(s), v > 0 {
             return v
         }
         return 600
     }()
 
-    let store: SpeechStyleStore
-    let agentProvider: () -> SpeechStyleAgent
+    let store: WritingStyleStore
+    let agentProvider: () -> WritingStyleAgent
     let batchCap: Int
 
     init(
-        store: SpeechStyleStore,
-        batchCap: Int = SpeechStyleDistiller.defaultBatchCap,
-        agentProvider: (() -> SpeechStyleAgent)? = nil
+        store: WritingStyleStore,
+        batchCap: Int = WritingStyleDistiller.defaultBatchCap,
+        agentProvider: (() -> WritingStyleAgent)? = nil
     ) {
         self.store = store
         self.batchCap = batchCap
@@ -60,7 +60,7 @@ final class SpeechStyleDistiller {
         } else {
             self.agentProvider = {
                 let cfg = ConfigStore.shared.current.memory
-                return SpeechStyleAgent(provider: cfg.resolvedProvider,
+                return WritingStyleAgent(provider: cfg.resolvedProvider,
                                         model: cfg.resolvedModelLight)
             }
         }
@@ -68,43 +68,43 @@ final class SpeechStyleDistiller {
 
     // MARK: - Manual
 
-    /// 手动跑:LLM 决策落 speech_style_staged。返回 RunSummary 给 UI / CLI。
+    /// 手动跑:LLM 决策落 writing_style_staged。返回 RunSummary 给 UI / CLI。
     @discardableResult
-    func runManual() async throws -> SpeechStyleRunSummary {
+    func runManual() async throws -> WritingStyleRunSummary {
         try await runCore(mode: .manual)
     }
 
     // MARK: - Auto
 
-    /// 自动跑:LLM 决策直接落 portrait/speech_style/ 文件 + 标 records
+    /// 自动跑:LLM 决策直接落 portrait/writing_style/ 文件 + 标 records
     /// completed,run.status = auto_committed。
     @discardableResult
-    func runAuto() async throws -> SpeechStyleRunSummary {
+    func runAuto() async throws -> WritingStyleRunSummary {
         try await runCore(mode: .auto)
     }
 
     // MARK: - 共用核心
 
-    private func runCore(mode: SpeechStyleMode) async throws -> SpeechStyleRunSummary {
-        let napGuard = AppNapGuard.acquire(reason: "Speech style distillation")
+    private func runCore(mode: WritingStyleMode) async throws -> WritingStyleRunSummary {
+        let napGuard = AppNapGuard.acquire(reason: "Writing style distillation")
         defer { napGuard.release() }
         return try await runCoreImpl(mode: mode)
     }
 
-    private func runCoreImpl(mode: SpeechStyleMode) async throws -> SpeechStyleRunSummary {
+    private func runCoreImpl(mode: WritingStyleMode) async throws -> WritingStyleRunSummary {
         // 入口先 refresh 一次 —— 即使本轮无新 record(short-circuit 提前返回)
         // 也让现有 entry 按当前时间衰减一次。
         Self.refreshAllWeights()
 
-        // **dependency gate**:speech_style 是 writing_capture 的下游 ——
+        // **dependency gate**:writing_style 是 writing_capture 的下游 ——
         // 没新 writing_records 可消费就别建 run 行 / 不调 LLM,直接返回 noop。
-        // 避免 0-record run 把 speech_style_runs 表灌满 + 避免 scheduler
+        // 避免 0-record run 把 writing_style_runs 表灌满 + 避免 scheduler
         // 每天定时跑出一堆空 auto_committed 记录。
         let unprocessedCount = try store.unprocessedCount()
         if unprocessedCount == 0 {
             ssLog.info("runCore(\(mode.rawValue, privacy: .public)): 0 unprocessed records — noop, no run row created")
-            let status: SpeechStyleRunStatus = (mode == .auto) ? .autoCommitted : .approved
-            return SpeechStyleRunSummary(
+            let status: WritingStyleRunStatus = (mode == .auto) ? .autoCommitted : .approved
+            return WritingStyleRunSummary(
                 runId: "", mode: mode, status: status,
                 recordsCount: 0, draftsCount: 0,
                 errorMessage: nil
@@ -134,7 +134,7 @@ final class SpeechStyleDistiller {
             // OCR 最多 200 字 × 短 record 数 ≈ 5-15k extra tokens,可控。
             // 双匹配:app(bundle id → localized name)+ ts ±30s。
             let enriched = try await Task.detached(priority: .userInitiated) { [store] in
-                records.map { r -> SpeechStyleRecordInput in
+                records.map { r -> WritingStyleRecordInput in
                     guard r.text.count < 100 else { return r }
                     let mid = (r.startTs + r.startTs + Int64(r.text.count * 100)) / 2
                     // text 没有自己的 endTs,用 startTs + 估算时长当 mid。
@@ -154,19 +154,19 @@ final class SpeechStyleDistiller {
                 // 比如用户同时手动 reject 了某 run 但 records 标 completed
                 // 状态被另一进程改了。直接 noop 返回,不抛错。
                 ssLog.warning("runCore(\(mode.rawValue, privacy: .public)): empty after insertRun — race?")
-                let status: SpeechStyleRunStatus = (mode == .auto) ? .autoCommitted : .approved
+                let status: WritingStyleRunStatus = (mode == .auto) ? .autoCommitted : .approved
                 try store.updateRun(
                     runId: runId, status: status,
                     completedAt: Int64(Date().timeIntervalSince1970 * 1000),
                     recordsCount: 0, draftsCount: 0
                 )
-                return SpeechStyleRunSummary(
+                return WritingStyleRunSummary(
                     runId: runId, mode: mode, status: status,
                     recordsCount: 0, draftsCount: 0, errorMessage: nil
                 )
             }
 
-            // 2. 读现存 portrait/speech_style/ 摘要
+            // 2. 读现存 portrait/writing_style/ 摘要
             let existing = Self.loadExistingEntries()
             ssLog.info("runCore(\(mode.rawValue, privacy: .public)): records=\(records.count) existing=\(existing.count)")
 
@@ -188,7 +188,7 @@ final class SpeechStyleDistiller {
                     recordsCount: records.count,
                     draftsCount: out.drafts.count
                 )
-                return SpeechStyleRunSummary(
+                return WritingStyleRunSummary(
                     runId: runId, mode: mode, status: .pendingReview,
                     recordsCount: records.count, draftsCount: out.drafts.count,
                     errorMessage: nil
@@ -207,7 +207,7 @@ final class SpeechStyleDistiller {
                     recordsCount: records.count,
                     draftsCount: out.drafts.count
                 )
-                return SpeechStyleRunSummary(
+                return WritingStyleRunSummary(
                     runId: runId, mode: mode, status: .autoCommitted,
                     recordsCount: records.count, draftsCount: out.drafts.count,
                     errorMessage: nil
@@ -228,14 +228,14 @@ final class SpeechStyleDistiller {
     // MARK: - Approve(manual)
 
     /// UI Approve 一个 pending_review run:把 staged drafts 落 portrait/
-    /// speech_style/ 文件 + 标 records completed + run.status = approved。
+    /// writing_style/ 文件 + 标 records completed + run.status = approved。
     @discardableResult
     func approveStaged(runId: String) throws -> Int {
         guard let _ = try store.fetchRun(runId: runId) else { return 0 }
         let staged = try store.fetchStaged(runId: runId)
         // 落盘
         let drafts = staged.map {
-            SpeechStyleDraft(
+            WritingStyleDraft(
                 action: $0.action, slug: $0.slug,
                 title: $0.title, body: $0.body,
                 sourceRecordIds: $0.sourceRecordIds,
@@ -271,11 +271,11 @@ final class SpeechStyleDistiller {
 
     // MARK: - 落盘 helpers
 
-    /// 把一批 drafts 写到 portrait/speech_style/<slug>.md。
+    /// 把一批 drafts 写到 portrait/writing_style/<slug>.md。
     /// create / update 都用 PortraitFile + PortraitFileIO,noop 跳过。
     /// **slug 冲突**(create 的 slug 已存在)→ 走 update 分支。
-    nonisolated static func applyDrafts(_ drafts: [SpeechStyleDraft]) {
-        let dir = PortraitPaths.categoryDir("speech_style")
+    nonisolated static func applyDrafts(_ drafts: [WritingStyleDraft]) {
+        let dir = PortraitPaths.categoryDir("writing_style")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for d in drafts {
             switch d.action {
@@ -302,22 +302,22 @@ final class SpeechStyleDistiller {
         }
     }
 
-    /// 新建 portrait/speech_style/<slug>.md。复刻 PortraitDistiller.writeNewPortrait
+    /// 新建 portrait/writing_style/<slug>.md。复刻 PortraitDistiller.writeNewPortrait
     /// 的极简版:不持有 impact / weight 的 event-only 字段,只填 portrait 那套。
-    nonisolated static func writeNew(at url: URL, draft: SpeechStyleDraft) {
+    nonisolated static func writeNew(at url: URL, draft: WritingStyleDraft) {
         let now = Date()
         var file = PortraitFile(
             created: now,
             body: renderBody(title: draft.title, body: draft.body,
                              sourceIds: draft.sourceRecordIds),
-            source: "speech_style",
-            tags: ["speech_style", "portrait"],
+            source: "writing_style",
+            tags: ["writing_style", "portrait"],
             firstOccurrence: now,
             eventTitle: draft.title,
             eventSummary: draft.body,
             eventType: "experience",
             portraitFacets: [],
-            category: "speech_style",
+            category: "writing_style",
             memberFrameIds: []
         )
         file.weight = PortraitWeight.compute(refCount: draft.sourceRecordIds.count, lastModified: now, now: now)
@@ -327,9 +327,9 @@ final class SpeechStyleDistiller {
         catch { ssLog.error("writeNew failed for \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)") }
     }
 
-    /// 更新现有 portrait/speech_style/<slug>.md。body 用 LLM 返回的合并后正文
+    /// 更新现有 portrait/writing_style/<slug>.md。body 用 LLM 返回的合并后正文
     /// (prompt 已要求 LLM 返回 final state),溯源 ids 累积。
-    nonisolated static func writeUpdate(at url: URL, draft: SpeechStyleDraft, slug: String) {
+    nonisolated static func writeUpdate(at url: URL, draft: WritingStyleDraft, slug: String) {
         do {
             var file = try PortraitFileIO.read(from: url)
             // 清掉旧文件可能残留的 event-only 字段
@@ -369,9 +369,9 @@ final class SpeechStyleDistiller {
         return out
     }
 
-    /// 对 portrait/speech_style/ 下所有 .md 重算 weight。委托给共享 helper。
+    /// 对 portrait/writing_style/ 下所有 .md 重算 weight。委托给共享 helper。
     nonisolated static func refreshAllWeights() {
-        PortraitWeight.refreshSpeechStyle()
+        PortraitWeight.refreshWritingStyle()
     }
 
     /// 从 body 抽出 `[[wr:<id>]]` 形态的引用 —— update 合并溯源用。
@@ -392,18 +392,18 @@ final class SpeechStyleDistiller {
         return out
     }
 
-    /// 读 portrait/speech_style/*.md → ExistingEntry。出错 / 没目录返回 []。
-    nonisolated static func loadExistingEntries() -> [SpeechStyleAgent.ExistingEntry] {
-        let dir = PortraitPaths.categoryDir("speech_style")
+    /// 读 portrait/writing_style/*.md → ExistingEntry。出错 / 没目录返回 []。
+    nonisolated static func loadExistingEntries() -> [WritingStyleAgent.ExistingEntry] {
+        let dir = PortraitPaths.categoryDir("writing_style")
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: dir.path) else { return [] }
-        var out: [SpeechStyleAgent.ExistingEntry] = []
+        var out: [WritingStyleAgent.ExistingEntry] = []
         for name in items where name.hasSuffix(".md") && name != "INDEX.md" {
             let url = dir.appendingPathComponent(name)
             guard let file = try? PortraitFileIO.read(from: url) else { continue }
             let slug = String(name.dropLast(3))   // .md
-            let excerpt = String(file.body.prefix(SpeechStyleAgent.existingBodyExcerptChars))
-            out.append(SpeechStyleAgent.ExistingEntry(
+            let excerpt = String(file.body.prefix(WritingStyleAgent.existingBodyExcerptChars))
+            out.append(WritingStyleAgent.ExistingEntry(
                 slug: slug,
                 title: file.eventTitle.isEmpty ? slug : file.eventTitle,
                 bodyExcerpt: excerpt
