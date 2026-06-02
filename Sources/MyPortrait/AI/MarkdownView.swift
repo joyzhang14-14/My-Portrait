@@ -304,10 +304,7 @@ enum MarkdownParser {
     private final class BlocksBox { let blocks: [MDBlock]; init(_ b: [MDBlock]) { self.blocks = b } }
     nonisolated(unsafe) private static let cache: NSCache<NSString, BlocksBox> = {
         let c = NSCache<NSString, BlocksBox>()
-        // 不设条数上限(countLimit=0)—— 解析结果很小(每条 ~KB,整段会话也就几
-        // MB),没必要为省内存而淘汰历史消息(淘汰了切回窗口就要重解析、卡)。
-        // 靠 NSCache 的内存压力自动淘汰兜底,关 app 即清空。
-        c.countLimit = 0
+        c.countLimit = 128
         return c
     }()
 

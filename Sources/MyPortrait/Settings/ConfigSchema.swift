@@ -365,10 +365,6 @@ struct GeneralConfig: Codable, Equatable {
     /// 0 = no limit(runs.json 会无限增长,慎选)。
     /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
     var cronJobHistoryLimit: Int = 20
-    /// 聊天渲染优化(实验性)。开 → 内容没变的消息 bubble 跳过 SwiftUI 重建
-    /// (ChatBubble: Equatable + .equatable())。长会话切窗口回来 / 流式输出更顺;
-    /// 极少数情况下若 == 漏判内容变化,可能短暂显示旧内容,故**默认关**,用户主动开。
-    var optimizeChatRendering: Bool = false
     init() {}
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
@@ -376,7 +372,6 @@ struct GeneralConfig: Codable, Equatable {
         case updateCheckMinutes   = "update_check_minutes"
         case onboardingCompleted  = "onboarding_completed"
         case cronJobHistoryLimit  = "cron_job_history_limit"
-        case optimizeChatRendering = "optimize_chat_rendering"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -386,7 +381,6 @@ struct GeneralConfig: Codable, Equatable {
         updateCheckMinutes  = c.dflt(Int.self,  .updateCheckMinutes, updateCheckMinutes)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
         cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
-        optimizeChatRendering = c.dflt(Bool.self, .optimizeChatRendering, optimizeChatRendering)
     }
 }
 
