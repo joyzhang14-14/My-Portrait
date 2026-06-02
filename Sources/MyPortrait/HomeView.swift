@@ -2059,7 +2059,7 @@ private struct AttachmentThumb: View {
             // 异步降采样 + NSCache 缓存,避免 body 里同步全分辨率解码(流式时
             // 每帧重渲染都会重解一次)。AsyncDiskThumbnail 内部已 scaledToFill。
             // targetPixelSize 给屏幕 px(× 2 retina),稍大避免缩放糊。
-            AsyncDiskThumbnail(path: attachment.url.path, targetPixelSize: Int(size * 2))
+            AsyncDiskThumbnail(path: attachment.url.path, targetPixelSize: size * 2)
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
