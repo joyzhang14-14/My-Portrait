@@ -92,9 +92,13 @@ actor AudioCaptureService {
     // MARK: - 生命周期
 
     func start() async {
-        guard samplesTask == nil, !starting else { return }
+        guard samplesTask == nil, !starting else {
+            DiagLog.event("audio.start.skip", ctx: ["hasTask": samplesTask != nil, "starting": starting])
+            return
+        }
         starting = true
         defer { starting = false }
+        DiagLog.event("audio.start.begin", ctx: ["preferredUID": ConfigStore.snapshot.preferredInputDeviceUID])
 
         permissionGranted = await Self.requestMicrophonePermission()
         if !permissionGranted {
@@ -128,6 +132,7 @@ actor AudioCaptureService {
     }
 
     func stop() async {
+        DiagLog.event("audio.stop.begin", ctx: ["hasEngine": engine != nil, "hasTask": samplesTask != nil])
         restartTask?.cancel()
         restartTask = nil
         unregisterDeviceChangeListener()
@@ -170,6 +175,7 @@ actor AudioCaptureService {
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID("") }
 
         logger.info("AudioCaptureService stopped")
+        DiagLog.event("audio.stop.done")
     }
 
     // MARK: - 引擎配置 + tap
@@ -234,6 +240,7 @@ actor AudioCaptureService {
         // 不阻塞主路径,fire-and-forget。
         let activeUID = Self.currentInputDeviceUID(inputNode: inputNode)
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID(activeUID) }
+        DiagLog.event("audio.engine.started", ctx: ["activeUID": activeUID])
 
         let recorder = vadRecorder
         samplesTask = Task {
@@ -445,6 +452,7 @@ actor AudioCaptureService {
     func restartIfRunning() async {
         guard samplesTask != nil else { return }
         logger.info("config change: preferredInputDeviceUID → restart")
+        DiagLog.event("audio.restart.config")
         await stop()
         await start()
     }
@@ -486,6 +494,7 @@ actor AudioCaptureService {
             }
         }
 
+        DiagLog.event("audio.restart.devicechange", ctx: ["shouldRestart": shouldRestart, "reason": reason])
         guard shouldRestart else {
             logger.info("device change: \(reason, privacy: .public)")
             return
