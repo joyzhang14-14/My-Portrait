@@ -231,9 +231,13 @@ enum MemoryBudget {
             return     // no change
         case .protected:
             file.impact = plan.newImpact
-        case .rebalanced, .restored:
+        case .rebalanced:
             file.impact = plan.newImpact
             file.rebalanceCount = (file.rebalanceCount ?? 0) + 1
+        case .restored:
+            // 把原始 impact 写回,但 restore 是 no-op 不算一次 rebalance —— 否则
+            // 没真正压缩的天也累加 rebalanceCount,提前把 event 冻结。
+            file.impact = plan.newImpact
         }
     }
 }

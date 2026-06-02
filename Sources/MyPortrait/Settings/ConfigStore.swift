@@ -431,14 +431,17 @@ final class ConfigStore {
     }
 
     private func handleFileChange() {
-        if suppressNextWatchEvent {
-            suppressNextWatchEvent = false
-            return
-        }
-        // The file might have been atomically replaced — re-arm the watcher.
+        // 原子写(atomically: true)会 rename-replace inode,把这个 fd 变孤儿 ——
+        // 无论是谁写的(包括我们自己被 suppress 的写),都必须**每次事件都重挂**
+        // 监听,否则第一次保存后热重载就死了。startWatching 在新的 live config.toml
+        // 上开新 fd(cancelHandler 关旧 fd,不泄漏),且它不写文件,无回环。
         watchSource?.cancel()
         watchSource = nil
         startWatching()
+        if suppressNextWatchEvent {
+            suppressNextWatchEvent = false
+            return     // 内存里已是最新,跳过重读
+        }
         loadFromDisk()
     }
 

@@ -503,9 +503,12 @@ struct TimelineSidebar: View {
             isPresented: $confirmingClearCronHistory,
             titleVisibility: .visible
         ) {
-            Button("Clear \(cronJobHistoryConversations.count) run(s)", role: .destructive) {
+            Button("Clear \(Set(chatStore.conversations.map(\.id)).intersection(cronJobConvIds).count) run(s)", role: .destructive) {
+                // 删**全部** cron-run 对话(uncapped/unfiltered),不只是分页/搜索后那
+                // 一截 —— 否则超 cronJobHistoryLimit 的那些删不掉、UI 看不到却仍占库,
+                // 跟对话框承诺的「删除全部」相悖。
                 let active = chat.currentConvId
-                let ids = cronJobHistoryConversations.map { $0.id }
+                let ids = Set(chatStore.conversations.map(\.id)).intersection(cronJobConvIds)
                 for id in ids { chatStore.deleteConversation(id) }
                 if let a = active, ids.contains(a) { chat.switchTo(nil) }
             }

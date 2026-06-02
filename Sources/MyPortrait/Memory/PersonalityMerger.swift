@@ -339,7 +339,8 @@ final class PersonalityMerger {
             file.evidenceEventIds = evIds.isEmpty ? nil : evIds
             file.recordOccurrence(on: today)
             file.mergeCount = (file.mergeCount ?? 0) + group.count
-            file.lastModified = today
+            // 先按「上次修改」算 EMA 衰减,再把 lastModified 推到今天 —— 顺序反了
+            // 的话 daysSinceModified 永远是 0,衰减被绕过。
             if exists {
                 file.weight = ema.afterMerge(
                     stored: file.weight,
@@ -347,6 +348,7 @@ final class PersonalityMerger {
             } else {
                 file.weight = 1.0
             }
+            file.lastModified = today
             try PortraitFileIO.write(file, to: url)
             if exists { result.merged += 1 } else { result.created += 1 }
             result.writtenSlugs.append(slug)
