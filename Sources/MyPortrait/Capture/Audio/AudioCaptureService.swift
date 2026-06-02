@@ -183,8 +183,11 @@ actor AudioCaptureService {
         // 读 outputFormat / installTap 之前** —— 这两步会触发 AU initialize,
         // 之后再改 CurrentDevice 已晚。空字符串 = follow system default (跳过)。
         Self.bindPreferredInputDevice(inputNode: inputNode, logger: logger)
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-
+        // ⚠️ 不要读 inputNode.outputFormat(forBus:0) —— 切到非默认输入设备后它返回的是
+        // **旧默认设备的陈旧格式**(切设备不刷新它),用它建 converter / 装 tap 会把 IO
+        // 钉死在错的采样率(如蓝牙 16k vs 内置麦 96k)→ 引擎不渲染、不亮 mic 灯、零
+        // buffer。改用 format: nil 让引擎给出选中设备的真实硬件格式,converter 在首个
+        // tap buffer 到来时按 buffer.format 懒构建(见 performConversion)。
         guard let target = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16_000,
@@ -195,12 +198,7 @@ actor AudioCaptureService {
                           userInfo: [NSLocalizedDescriptionKey: "Cannot create 16kHz target format"])
         }
         targetFormat = target
-
-        guard let conv = AVAudioConverter(from: inputFormat, to: target) else {
-            throw NSError(domain: "AudioCaptureService", code: -2,
-                          userInfo: [NSLocalizedDescriptionKey: "Cannot create converter"])
-        }
-        converter = conv
+        converter = nil   // 懒构建:首个 tap buffer 到来时按真实硬件格式建
 
         var c: AsyncStream<[Float]>.Continuation!
         let stream = AsyncStream<[Float]> { cont in c = cont }
@@ -212,7 +210,9 @@ actor AudioCaptureService {
         // 是 no-op。撞 `nullptr == Tap()` 的根因是重复 install,这里兜底。
         inputNode.removeTap(onBus: 0)
         tapInstalled = false
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
+        // format: nil —— 引擎按 inputNode 当前真实硬件格式投递,自动适配选中设备,
+        // 彻底避开 outputFormat 陈旧 + 采样率不匹配。
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: nil) {
             [weak self] buffer, _ in
             guard let self else { return }
             Task { [weak self] in
@@ -325,7 +325,14 @@ actor AudioCaptureService {
     }
 
     private func performConversion(buffer: AVAudioPCMBuffer) {
-        guard let converter, let targetFormat, let cont = samplesContinuation else { return }
+        guard let targetFormat, let cont = samplesContinuation else { return }
+        // 懒构建 converter —— 用首个 buffer 的**真实**格式(选中设备的硬件格式,如内置麦
+        // 96k),而不是切设备后陈旧的 inputNode.outputFormat。设备变 → stop() 置 nil → 重建。
+        if converter == nil {
+            converter = AVAudioConverter(from: buffer.format, to: targetFormat)
+            logger.notice("tap input format: \(buffer.format.sampleRate, privacy: .public) Hz \(buffer.format.channelCount, privacy: .public)ch → converter built")
+        }
+        guard let converter else { return }
 
         let inputFrames = AVAudioFrameCount(buffer.frameLength)
         let outputCapacity = AVAudioFrameCount(
