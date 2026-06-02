@@ -12,6 +12,41 @@
         -->
 
         <item>
+            <title>1.2.39</title>
+            <pubDate>Tue, 02 Jun 2026 04:24:33 +0000</pubDate>
+            <sparkle:version>163</sparkle:version>
+            <sparkle:shortVersionString>1.2.39</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Image lightbox</strong> — click an image in chat to view it full-screen.</li>
+                    <li><strong>AI folder organization</strong> — the assistant can now tidy your memory folders (new <code>mp-folders</code> tool + skill).</li>
+                    <li><strong>Per-engine transcription languages</strong> — each transcription engine keeps its own language selection; switching engines no longer wipes it.</li>
+                    <li><strong>Editable "pause capture" list</strong> — pick which apps/sites pause screen recording (Netflix, Disney+, etc.), right in Screen Capture settings.</li>
+                    <li><strong>Live transcription status</strong> — Audio Capture settings now show the transcription queue and memory use in real time.</li>
+                    <li><strong>Tunable paste capture</strong> — control how clipboard pastes are kept (or dropped) in writing capture.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Fixed a chat hang</strong> — the assistant could occasionally get stuck on "thinking…" forever.</li>
+                    <li><strong>Stopped deletion of your original Screenpipe recordings</strong> — imported audio is now copied into the app's own data, and cleanup never touches read-only Screenpipe files.</li>
+                    <li><strong>"Delete recent data" now actually deletes</strong> — it was silently failing to remove transcripts and frames.</li>
+                    <li><strong>Fixed a memory blow-up during live transcription</strong> (Qwen/MLX) that could exhaust RAM.</li>
+                    <li><strong>Graceful quit fixed</strong> — shutdown cleanup (flush to disk, close capture) now actually runs when you quit.</li>
+                    <li><strong>DRM detection no longer freezes screen capture</strong> — recording resumes correctly after protected video.</li>
+                    <li><strong>Microphone picker</strong> — fixed phantom checkmarks (now a native picker).</li>
+                    <li><strong>AI setup no longer hangs</strong> while installing the Pi agent.</li>
+                    <li>Many smaller crash, data-race, memory, and correctness fixes across capture, memory, and writing capture.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.39/MyPortrait_1.2.39_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="nvvTtT0IxfWtujxhn8PzUxxBQxiboHkZCCDVj5U9k1jnywT2Qv2C9pCkECgsfthFoupz3FB3d0J7dCD5Sl4qDA==" length="25795547" />
+        </item>
+
+        <item>
             <title>1.2.1</title>
             <pubDate>Mon, 01 Jun 2026 19:38:56 +0000</pubDate>
             <sparkle:version>162</sparkle:version>
