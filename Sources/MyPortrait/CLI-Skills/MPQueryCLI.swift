@@ -30,6 +30,7 @@ enum MPQueryCLI {
         case "search":            runSearch(args: rest)
         case "activity-summary":  runActivitySummary(args: rest)
         case "memories":          runMemories(args: rest)
+        case "read":              runRead(args: rest)
         case "audio":             runAudio(args: rest)
         case "writing":           runWriting(args: rest)
         case "cronjob":           MPQueryCronJobCLI.run(args: rest)
@@ -251,47 +252,118 @@ enum MPQueryCLI {
         ])
     }
 
-    /// `memories` —— 列出 / 搜索 portrait + events 知识库文件。
+    /// `memories` —— 列出 / 搜索 portrait + events 知识库 .md 文件。
+    ///
+    /// 默认两根都扫(portrait/ 长期画像 + events/<day>/*.md 单次事件)。
+    /// `--scope portrait` 或 `--scope events` 二选一限制范围。snippet 只是
+    /// 前 300 字符,AI 要看全文调 `mp-query read --path <rel>`。
     private static func runMemories(args: [String]) -> Never {
         let opts = parseOpts(args)
         let q = opts["q"]?.lowercased()
         let limit = Int(opts["limit"] ?? "20") ?? 20
+        let scope = opts["scope"]?.lowercased()   // "portrait" | "events" | nil
 
-        let root = Storage.portraitDir
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: root.path) else {
-            emitJSON(["data": [Any](), "result_count": 0])
+        var roots: [(URL, String)] = []
+        if scope == nil || scope == "portrait" {
+            roots.append((Storage.portraitDir, "portrait"))
+        }
+        if scope == nil || scope == "events" {
+            roots.append((Storage.eventsDir, "events"))
         }
 
+        let fm = FileManager.default
         var out: [[String: Any]] = []
-        let enumer = fm.enumerator(at: root,
-                                   includingPropertiesForKeys: [.contentModificationDateKey])
-        while let url = enumer?.nextObject() as? URL {
-            guard url.pathExtension == "md" else { continue }
-            let attrs = try? fm.attributesOfItem(atPath: url.path)
-            let modified = attrs?[.modificationDate] as? Date ?? Date.distantPast
-            let body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 
-            if let q, !body.lowercased().contains(q),
-               !url.lastPathComponent.lowercased().contains(q) {
-                continue
+        outer: for (root, scopeLabel) in roots {
+            guard fm.fileExists(atPath: root.path) else { continue }
+            let enumer = fm.enumerator(at: root,
+                                       includingPropertiesForKeys: [.contentModificationDateKey])
+            while let url = enumer?.nextObject() as? URL {
+                guard url.pathExtension == "md" else { continue }
+                // events/_folders/*.json 不会命中(扩展名不对);events/<day>/
+                // 下的 .md 才进来。`_` 前缀目录(_folders)Manager 也会进,但
+                // 里头没 .md 所以天然跳过。
+                let attrs = try? fm.attributesOfItem(atPath: url.path)
+                let modified = attrs?[.modificationDate] as? Date ?? Date.distantPast
+                let body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+
+                if let q, !body.lowercased().contains(q),
+                   !url.lastPathComponent.lowercased().contains(q) {
+                    continue
+                }
+                let title = url.deletingPathExtension().lastPathComponent
+                let snippet = body.prefix(300).description
+                // rel 是相对 ~/.portrait/ 的路径,跟 `mp-query read --path` 接的格式一致。
+                let rel = relPath(url)
+                out.append([
+                    "title": title,
+                    "path": rel,
+                    "scope": scopeLabel,
+                    "modified": iso8601(modified),
+                    "snippet": snippet
+                ])
+                if out.count >= limit { break outer }
             }
-            let title = url.deletingPathExtension().lastPathComponent
-            let snippet = body.prefix(300).description
-            out.append([
-                "title": title,
-                "path": url.path,
-                "scope": url.deletingLastPathComponent().lastPathComponent,
-                "modified": iso8601(modified),
-                "snippet": snippet
-            ])
-            if out.count >= limit { break }
         }
         emitJSON([
             "data": out,
             "result_count": out.count,
             "query": q ?? NSNull()
         ])
+    }
+
+    /// `read --path <rel>` —— 读 portrait/ 或 events/ 下一个 .md 的全文。
+    /// `<rel>` 是相对 `~/.portrait/` 的路径(memories 返回的 `path` 字段
+    /// 就是这种,可直接传)。
+    ///
+    /// 安全:**只允许 portrait/ 或 events/ 开头的相对路径**,标准化后再校验,
+    /// 防 AI 用 `../../` 跳出去读任意文件。
+    private static func runRead(args: [String]) -> Never {
+        let opts = parseOpts(args)
+        guard let rel = opts["path"], !rel.isEmpty else {
+            errJSON("--path required, e.g. `mp-query read --path portrait/personality/foo.md`")
+        }
+        // 拒绝绝对路径 + `..` 段
+        if rel.hasPrefix("/") || rel.contains("..") {
+            errJSON("path must be relative, no `..`: \(rel)")
+        }
+        let url = Storage.rootURL.appendingPathComponent(rel)
+        let normalized = url.standardizedFileURL.path
+        let allowedRoots = [
+            Storage.eventsDir.standardizedFileURL.path + "/",
+            Storage.portraitDir.standardizedFileURL.path + "/",
+        ]
+        guard allowedRoots.contains(where: { normalized.hasPrefix($0) }) else {
+            errJSON("path not under events/ or portrait/: \(rel)")
+        }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: normalized) else {
+            errJSON("file not found: \(rel)")
+        }
+        guard normalized.hasSuffix(".md") else {
+            errJSON("only .md files are readable, got: \(rel)")
+        }
+        guard let body = try? String(contentsOfFile: normalized, encoding: .utf8) else {
+            errJSON("could not read file: \(rel)")
+        }
+        let attrs = try? fm.attributesOfItem(atPath: normalized)
+        let modified = attrs?[.modificationDate] as? Date ?? Date.distantPast
+        emitJSON([
+            "path":     rel,
+            "title":    url.deletingPathExtension().lastPathComponent,
+            "modified": iso8601(modified),
+            "bytes":    body.utf8.count,
+            "content":  body,
+        ])
+    }
+
+    /// 把绝对 URL 转成 `~/.portrait/` 下的相对路径(memories `path` 字段 +
+    /// read `--path` 接的格式)。
+    private static func relPath(_ url: URL) -> String {
+        let root = Storage.rootURL.standardizedFileURL.path + "/"
+        let abs  = url.standardizedFileURL.path
+        if abs.hasPrefix(root) { return String(abs.dropFirst(root.count)) }
+        return abs   // 不在根下(理论上不会):退回绝对路径
     }
 
     /// `audio` —— 时间段内 / 按 speaker 过滤的转录条目。
@@ -457,7 +529,10 @@ enum MPQueryCLI {
         SUBCOMMANDS
           search            full-text search across OCR + audio
           activity-summary  top apps / windows over a time range
-          memories          search the user's portrait notes / events
+          memories          search the user's portrait notes + event .md files
+                            (default: both scopes; `--scope portrait|events` limits)
+          read              read a single .md file's full content
+                            (--path <rel> from a `memories` hit; portrait/ or events/ only)
           audio             audio transcriptions over a time range
           writing           search LLM-distilled writing records (what the user typed)
           cronjob           manage scheduled AI cron jobs (add / list / remove)
@@ -469,12 +544,16 @@ enum MPQueryCLI {
           --app "<name>"    e.g. "Cursor", "Google Chrome"
           --limit <n>       default 10 (search) / 20 (memories) / 60 (audio)
           --content <type>  search: all | ocr | audio (default: all)
+          --scope <s>       memories: portrait | events  (default: both)
+          --path <rel>      read: relative path under ~/.portrait/, e.g.
+                            portrait/personality/curiosity.md
           --speaker "<n>"   audio: filter by speaker name
 
         EXAMPLES
           mp-query activity-summary --start "1h ago"
           mp-query search --start "today" --q "deadline" --content ocr
-          mp-query memories --q "preference"
+          mp-query memories --q "preference" --scope portrait
+          mp-query read --path portrait/personality/curiosity.md
           mp-query audio --start "30m ago" --speaker "Joy"
         """
         FileHandle.standardError.write(Data((usage + "\n").utf8))
