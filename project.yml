@@ -123,8 +123,8 @@ targets:
         # 这些功能,也编不过(SpeechVAD whole-module 优化 x86_64 交叉编爆内存)。
         # 放弃 Intel 支持。
         ARCHS: arm64
-        MARKETING_VERSION: "1.2.1"
-        CURRENT_PROJECT_VERSION: "162"
+        MARKETING_VERSION: "1.2.39"
+        CURRENT_PROJECT_VERSION: "163"
         # **签名相关 build settings 全部走 Support/Signing.xcconfig**
         # —— `settings.base` 在 xcodegen / Xcode 里**优先级高于 xcconfig**,
         # 写在这里会盖掉 contributor 的 Signing.local.xcconfig 覆盖。
