@@ -62,12 +62,6 @@ actor AudioCaptureService {
     private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
     /// 设备变更后的防抖重启任务。
     private var restartTask: Task<Void, Never>?
-    /// AVAudioEngineConfigurationChange 观察者。setDeviceID / 输入路由变化会让引擎
-    /// **自动 stop** —— 不监听就表现为"黄灯闪一下就灭、停住"。监听到 → 原地重配
-    /// 重启**同一个**引擎(不重建、不重设设备),收敛不死循环。
-    private var engineConfigObserver: NSObjectProtocol?
-    /// reconfigure 重入闸。
-    private var reconfiguring: Bool = false
 
     /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。VADRecorder 每次
     /// start/stop、设备热插拔都会换新实例，但消费方订阅这条稳定流即可，不会断。
@@ -157,13 +151,6 @@ actor AudioCaptureService {
         await vadRecorder?.flush()
         vadRecorder = nil
 
-        // 先摘掉 config 观察者(它绑在这个 engine 上),否则换 engine 后旧观察者悬空,
-        // 多轮 start/stop 累积 → 触发风暴。
-        if let obs = engineConfigObserver {
-            NotificationCenter.default.removeObserver(obs)
-            engineConfigObserver = nil
-        }
-
         // 关键:把 engine / converter / targetFormat 都置 nil,让 ARC 回收
         // AVAudioEngine 实例。否则即使调了 engine.stop(),内部 AUHAL 仍持着
         // 麦克风硬件连接,macOS 还把这个 app 当"正在录",蓝牙耳机会被强切到
@@ -236,10 +223,6 @@ actor AudioCaptureService {
 
         try engine.start()
 
-        // 监听引擎配置变更:setDeviceID / 输入路由变化会触发,引擎随后**自动 stop**。
-        // 不监听 → 引擎停了没人重启 → "黄灯闪一下就灭"。监听到就原地重配重启同一引擎。
-        registerEngineConfigObserver(engine: engine)
-
         // 通知 AudioDevicesMonitor:app 现在在录哪个 device(UI live status)。
         // 不阻塞主路径,fire-and-forget。
         let activeUID = Self.currentInputDeviceUID(inputNode: inputNode)
@@ -250,52 +233,6 @@ actor AudioCaptureService {
             for await samples in stream {
                 await recorder?.feed(samples)
             }
-        }
-    }
-
-    /// 注册 .AVAudioEngineConfigurationChange 观察者(绑这个 engine)。先摘旧的再装,
-    /// 避免重复。通知在任意线程投递,闭包 hop 回 actor 处理。
-    private func registerEngineConfigObserver(engine: AVAudioEngine) {
-        if let obs = engineConfigObserver {
-            NotificationCenter.default.removeObserver(obs)
-            engineConfigObserver = nil
-        }
-        engineConfigObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { [weak self] _ in
-            Task { await self?.reconfigureAfterConfigChange() }
-        }
-    }
-
-    /// 引擎被 .AVAudioEngineConfigurationChange 自动停后,原地重配重启**同一个**引擎:
-    /// 重读(切换后的真实)格式 + 重建 converter + 重装 tap + start。不重建引擎、不
-    /// 重设设备 → 不会再触发新的 config change → 收敛,不死循环。这正是"黄灯闪一下
-    /// 就灭"的解:引擎自动停后没人拉起,加这个就拉得起来。
-    private func reconfigureAfterConfigChange() async {
-        guard samplesTask != nil, !reconfiguring, let engine else { return }
-        reconfiguring = true
-        defer { reconfiguring = false }
-        guard !engine.isRunning else { return }   // 没真停就不处理(防误触)
-
-        let inputNode = engine.inputNode
-        // ⚠️ 不传显式格式 —— config change 期间 inputNode.outputFormat 可能跟节点实际
-        // 格式不一致(实测读到 44100 但节点不是),传给 installTap 会 "format mismatch"
-        // 直接 NSException **崩 app**。format: nil 让引擎用节点当前真实格式,绝不
-        // mismatch;converter 置 nil,由 performConversion 按首个 buffer 的真实格式懒构建。
-        if tapInstalled { inputNode.removeTap(onBus: 0); tapInstalled = false }
-        converter = nil
-        let bufferSize: AVAudioFrameCount = Self.boundInputIsBluetooth(inputNode: inputNode) ? 8192 : 4096
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: nil) {
-            [weak self] buffer, _ in
-            guard let self else { return }
-            Task { [weak self] in await self?.performConversion(buffer: buffer) }
-        }
-        tapInstalled = true
-        do {
-            try engine.start()
-            logger.notice("reconfigured after config change")
-        } catch {
-            logger.error("reconfigure restart failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -377,13 +314,7 @@ actor AudioCaptureService {
     }
 
     private func performConversion(buffer: AVAudioPCMBuffer) {
-        guard let targetFormat, let cont = samplesContinuation else { return }
-        // converter 为 nil(reconfigure 用 format:nil 后)→ 用首个 buffer 的**真实**格式
-        // 懒构建,避免依赖可能陈旧的 inputNode.outputFormat。主路径已预建则跳过。
-        if converter == nil {
-            converter = AVAudioConverter(from: buffer.format, to: targetFormat)
-        }
-        guard let converter else { return }
+        guard let converter, let targetFormat, let cont = samplesContinuation else { return }
 
         let inputFrames = AVAudioFrameCount(buffer.frameLength)
         let outputCapacity = AVAudioFrameCount(
