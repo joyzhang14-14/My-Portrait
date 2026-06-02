@@ -283,7 +283,8 @@ struct HomeView: View {
         attachments = []
         if let id = editingMessageId {
             editingMessageId = nil
-            chat.editAndResend(id, newText: trimmed.isEmpty ? "(attachments only)" : trimmed)
+            chat.editAndResend(id, newText: trimmed.isEmpty ? "(attachments only)" : trimmed,
+                               chips: chipsToSend, attachments: attachmentsToSend, redactPII: redact)
         } else {
             chat.send(trimmed.isEmpty ? "(see attachments)" : trimmed,
                       chips: chipsToSend, attachments: attachmentsToSend, redactPII: redact)

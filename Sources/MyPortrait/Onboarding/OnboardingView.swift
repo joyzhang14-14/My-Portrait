@@ -377,7 +377,7 @@ private struct PermissionsStep: View {
         }
     }
 
-    private func checkInputMonitoring() -> PermStatus {
+    private func checkInputMonitoring(forceProbe: Bool = false) -> PermStatus {
         // **两层检查**:
         //   1. IOHIDCheckAccess —— 标准 API,但 hidd 后台 daemon 内存里有
         //      stale cache(tccutil reset 后 TCC db 清了 daemon 还说 granted),
@@ -389,6 +389,13 @@ private struct PermissionsStep: View {
         // 重新走 Allow 流程。
         let api = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
         if api == kIOHIDAccessTypeDenied { return .denied }
+
+        // 稳态短路:已确认 granted 后,3s 轮询信任 IOHIDCheckAccess==granted,不再每
+        // 次重进 run loop 跑 tap probe(那会每 3s 卡 UI ~100ms)。首次(.unknown)仍跑
+        // 一次 probe;tccutil reset 后 api 会翻 denied/notDeterm,自然重新探。
+        if api == kIOHIDAccessTypeGranted && !forceProbe && inputMonitoring == .granted {
+            return .granted
+        }
 
         // probe 实际 tap 能不能 round-trip 收事件
         let tapWorks = probeInputMonitoringTap()

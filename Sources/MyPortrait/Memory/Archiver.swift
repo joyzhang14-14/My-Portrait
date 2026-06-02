@@ -126,20 +126,35 @@ enum Archiver {
             plans.append(Plan(source: url, destination: destURL, reason: reason))
         }
 
-        // Execute: stamp archived_at, write back, then move.
+        // Execute: 每条 plan 独立处理 —— 撞重名 / 读写 / 移动失败只跳过该条并回滚
+        // archived_at 戳(避免「标记已归档但文件还在」的 ghost),不再中止整轮。
+        var done: [Plan] = []
         for plan in plans {
-            var file = try PortraitFileIO.read(from: plan.source)
-            file.archivedAt = now
-            try PortraitFileIO.write(file, to: plan.source)
-            try fm.createDirectory(
-                at: plan.destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try fm.moveItem(at: plan.source, to: plan.destination)
+            // 目标已存在(上轮已归档同 slug)→ 跳过,不重复戳、不抛错。
+            if fm.fileExists(atPath: plan.destination.path) { continue }
+            do {
+                var file = try PortraitFileIO.read(from: plan.source)
+                file.archivedAt = now
+                try PortraitFileIO.write(file, to: plan.source)
+                try fm.createDirectory(
+                    at: plan.destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                do {
+                    try fm.moveItem(at: plan.source, to: plan.destination)
+                    done.append(plan)
+                } catch {
+                    // 移动失败 → 回滚 archived_at,不留 ghost,继续下一条。
+                    file.archivedAt = nil
+                    try? PortraitFileIO.write(file, to: plan.source)
+                }
+            } catch {
+                continue   // 读/写本条失败 → 跳过,不影响其余
+            }
         }
 
-        try writeJournal(plans: plans, now: now)
-        return Result(archivedCount: plans.count, skippedCount: skipped, plans: plans)
+        try writeJournal(plans: done, now: now)
+        return Result(archivedCount: done.count, skippedCount: skipped, plans: done)
     }
 
     // MARK: - Journal append
