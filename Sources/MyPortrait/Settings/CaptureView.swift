@@ -409,6 +409,12 @@ struct AudioCaptureSettingsView: View {
                                     icon: "powerplug") {
                             Toggle("", isOn: config.binding(\.capture.audio.transcribeOnACOnly)).labelsHidden().toggleStyle(.switch)
                         }
+                        SettingsDivider()
+                        SettingsRow("Keep Mac awake while transcribing",
+                                    description: "On AC power, prevent the Mac from idle-sleeping while there's a transcription backlog, so it finishes instead of dozing off. Lid-close sleep can't be prevented. Off = let it sleep.",
+                                    icon: "zzz") {
+                            Toggle("", isOn: config.binding(\.capture.audio.keepAwakeWhileTranscribing)).labelsHidden().toggleStyle(.switch)
+                        }
                     }
                 }
 

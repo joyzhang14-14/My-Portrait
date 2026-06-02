@@ -129,6 +129,8 @@ actor TranscriptionScheduler {
         powerTask = nil
         whisper.unload()
         qwen.unload()
+        // 任务取消后不会再有 processQueueOnce 来 refresh —— 这里显式放行睡眠。
+        Task { @MainActor in KeepAwakeAssertion.shared.refresh(false) }
         logger.info("TranscriptionScheduler stopped")
     }
 
@@ -168,13 +170,21 @@ actor TranscriptionScheduler {
 
     private func processQueueOnce() async {
         // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
-        let acOnly = await MainActor.run { ConfigStore.shared.current.capture.audio.transcribeOnACOnly }
-        if acOnly && !PowerMonitor.isOnAC {
-            // 电池模式不转录 → 释放本地模型,别白占内存。
+        // 防休眠开关:开 → 有积压且在 AC 时阻止系统空闲睡眠,把积压跑完再放行睡眠。
+        let (acOnly, keepAwake) = await MainActor.run {
+            let a = ConfigStore.shared.current.capture.audio
+            return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing)
+        }
+        let onAC = PowerMonitor.isOnAC
+        if acOnly && !onAC {
+            // 电池模式不转录 → 释放本地模型,别白占内存;放行睡眠(防休眠只在 AC 生效)。
             whisper.unload()
             qwen.unload()
             // 通知 StallDetector:audio pending 堆积是故意的,不要报 backlog。
-            await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = true }
+            await MainActor.run {
+                IntentionalPauseState.shared.audioTranscriptionPaused = true
+                KeepAwakeAssertion.shared.refresh(false)
+            }
             return
         }
         await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = false }
@@ -184,18 +194,26 @@ actor TranscriptionScheduler {
             chunks = try await db.pendingAudioChunks(limit: queueBatchLimit)
         } catch {
             logger.warning("pendingAudioChunks failed: \(String(describing: error), privacy: .public)")
+            await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
             return
         }
 
         guard !chunks.isEmpty else {
-            // 队列空 → 没有转录任务 → 释放本地模型。
+            // 队列空 → 没有转录任务 → 释放本地模型;积压清完 → 放行系统睡眠。
             whisper.unload()
             qwen.unload()
+            await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
             return
         }
 
+        // 有积压 + 在 AC + 开关开 → 阻止空闲睡眠,让机器把积压跑完再睡。
+        await MainActor.run { KeepAwakeAssertion.shared.refresh(keepAwake && onAC) }
+
         for chunk in chunks {
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
+                return
+            }
             // 中途变电池 → 立即停批(仅 AC-only 模式下)。剩余 chunk 仍是 pending,
             // 下次 tick(line 172-178 电池 guard)再处理。原来只 log 不 break,会继续
             // 在电池上把整批转完,跟注释相悖。

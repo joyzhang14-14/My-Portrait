@@ -558,6 +558,9 @@ struct AudioConfig: Codable, Equatable {
     var pauseOnMusicApp:         Bool     = false
     /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
     var transcribeOnACOnly:      Bool     = true
+    /// 转录有积压且在 AC 供电时,阻止系统空闲睡眠,把积压跑完再放行睡眠
+    /// (只挡空闲睡眠,合盖睡眠挡不住——那是 macOS 强制行为)。默认关。
+    var keepAwakeWhileTranscribing: Bool  = false
     var customVocabulary:        [String] = []
     /// 用户**锁定**的输入设备 UID (CoreAudio kAudioDevicePropertyDeviceUID)。
     /// 空 = 跟随系统默认(插耳机会跟着切,macOS 标准行为)。
@@ -590,6 +593,7 @@ struct AudioConfig: Codable, Equatable {
         case pauseAudioCategories    = "pause_audio_categories"
         case pauseOnMusicApp         = "pause_on_music_app"
         case transcribeOnACOnly      = "transcribe_on_ac_only"
+        case keepAwakeWhileTranscribing = "keep_awake_while_transcribing"
         case customVocabulary        = "custom_vocabulary"
         case preferredInputDeviceUID = "preferred_input_device_uid"
     }
@@ -620,6 +624,7 @@ struct AudioConfig: Codable, Equatable {
             pauseOnMusicApp = false
         }
         transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
+        keepAwakeWhileTranscribing = c.dflt(Bool.self, .keepAwakeWhileTranscribing, keepAwakeWhileTranscribing)
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
         preferredInputDeviceUID = c.dflt(String.self,  .preferredInputDeviceUID, preferredInputDeviceUID)
     }
