@@ -93,7 +93,7 @@ struct GeneralSettingsView: View {
             }
 
             SettingsCard(title: "Chat",
-                         footnote: "Experimental. Skips re-rendering chat messages that haven't changed — when switching back to a long conversation, or while a reply streams. In rare cases a message may briefly show stale content; turn this off if you notice it.") {
+                         footnote: "Experimental. Keeps the chat view alive when you switch to other sections, so coming back to a long conversation is instant (instead of rebuilding it), and skips re-rendering unchanged messages while a reply streams. In rare cases a message may briefly show stale content; turn this off if you notice it.") {
                 SettingsRow("Optimize chat rendering",
                             description: "Faster scrolling and window-switching in long conversations.",
                             icon: "bolt") {
