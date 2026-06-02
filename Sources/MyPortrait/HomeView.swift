@@ -18,9 +18,6 @@ struct HomeView: View {
         configStore.mutate { $0.chat.redactPii = v }
     }
     @State private var attachments: [Attachment] = []
-    /// 非 nil 时在最上层 overlay 一个全屏 lightbox 大图查看(点消息里的图片
-    /// 缩略图触发)。点背景 / 右上角 × / ESC 关闭。仿 Claude desktop。
-    @State private var lightboxImage: Attachment? = nil
     @State private var templates = TemplateLibrary.shared
     @State private var editingTemplate: SummaryTemplate? = nil
 
@@ -96,7 +93,7 @@ struct HomeView: View {
                         contextChips = chat.contextChipsByMessage[msg.id] ?? []
                         editingMessageId = msg.id
                     },
-                    onImageTap: { att in lightboxImage = att }
+                    onImageTap: { att in ImageLightboxController.shared.show(attachment: att) }
                 )
             }
 
@@ -130,15 +127,6 @@ struct HomeView: View {
             )
         }
         .background(AmbientBackground())
-        // 图片 lightbox 全屏查看(消息里的缩略图点击触发)。macOS SwiftUI 没有
-        // fullScreenCover,用 ZStack overlay 盖在 VStack 之上等效。
-        .overlay {
-            if let att = lightboxImage {
-                ImageLightbox(attachment: att) { lightboxImage = nil }
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.18), value: lightboxImage?.id)
         .task {
             AISetup.shared.ensureInstalled()
         }
@@ -475,11 +463,12 @@ private struct ChatBubble: View {
                             // 图片 → 点开全屏 lightbox(交父层 onImageTap);
                             // 非图片(文件)→ 暂时仍只展示,不响应点击。
                             // onRemove 传空 closure —— 已发出消息的附件不可删。
+                            // size=42 显小,直接传比外面 scaleEffect 包稳
+                            // (scaleEffect 改视觉不改 hit-test region)。
                             AttachmentThumb(attachment: att,
                                             onRemove: {},
-                                            onImageTap: onImageTap)
-                                .scaleEffect(0.78, anchor: .leading)
-                                .frame(width: 42, height: 42)
+                                            onImageTap: onImageTap,
+                                            size: 42)
                         }
                         Spacer(minLength: 0)
                     }
@@ -2036,6 +2025,10 @@ private struct AttachmentThumb: View {
     /// 非 nil + 图片 → 缩略图整体可点,弹父层 lightbox 全屏查看。
     /// nil(input bar 还在编辑时)→ 只展示,不响应点击,保留旧行为。
     var onImageTap: ((Attachment) -> Void)? = nil
+    /// 缩略图边长。默认 52(input bar 用),消息 bubble 里传 42 显小。
+    /// 直接给 size 参数比外面套 scaleEffect+frame 稳 —— scaleEffect 只改
+    /// 渲染不改 hit-test layout,Button 点击区域会跟视觉错位。
+    var size: CGFloat = 52
     @State private var hover = false
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -2065,24 +2058,25 @@ private struct AttachmentThumb: View {
         if attachment.kind == .image {
             // 异步降采样 + NSCache 缓存,避免 body 里同步全分辨率解码(流式时
             // 每帧重渲染都会重解一次)。AsyncDiskThumbnail 内部已 scaledToFill。
-            AsyncDiskThumbnail(path: attachment.url.path, targetPixelSize: 52)
-                .frame(width: 52, height: 52)
+            // targetPixelSize 给屏幕 px(× 2 retina),稍大避免缩放糊。
+            AsyncDiskThumbnail(path: attachment.url.path, targetPixelSize: Int(size * 2))
+                .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color.white.opacity(0.15), lineWidth: 0.7))
         } else {
             VStack(spacing: 4) {
                 Image(systemName: "doc.text.fill")
-                    .font(.system(size: 18))
+                    .font(.system(size: size * 0.35))
                     .foregroundStyle(Theme.textPrimary.opacity(0.7))
                 Text(attachment.displayName)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: max(8, size * 0.17), design: .monospaced))
                     .foregroundStyle(Theme.textPrimary.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(width: 50)
+                    .frame(width: size - 6)
             }
-            .frame(width: 56, height: 52)
+            .frame(width: size + 4, height: size)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(.ultraThinMaterial)
@@ -2514,22 +2508,68 @@ private struct PickerPopover: View {
     }
 }
 
-// MARK: - Image Lightbox
+// MARK: - Image Lightbox (full-screen, borderless NSWindow)
 
-/// 全屏图片查看器,仿 Claude desktop。
-/// 触发:点击聊天消息里的图片缩略图。关闭:点背景 / 右上角 × / ESC。
+/// 单例:负责开 / 关全屏图片查看器。仿 Claude desktop —— 一个独立的
+/// borderless NSWindow 盖在整个 screen 上,不受 SwiftUI view tree
+/// 父布局限制(之前用 .overlay 只能盖 HomeView 区,侧栏还露出来)。
 ///
-/// 直接同步 NSImage(contentsOf:) —— 一次性查看不需要 AsyncDiskThumbnail
-/// 那套异步降采样(那个为了流式重渲染优化,这里是模态视图渲一次)。
-private struct ImageLightbox: View {
+/// 关闭路径:点黑底背景 / 点右上角 × / 按 ESC / 调 close()。
+@MainActor
+final class ImageLightboxController {
+    static let shared = ImageLightboxController()
+    private var window: NSWindow?
+    private init() {}
+
+    func show(attachment: Attachment) {
+        close()   // 旧的先关
+        guard let screen = NSScreen.main else { return }
+        // 用 LightboxWindow 子类,override canBecomeKey/Main 让 borderless
+        // window 能拿键盘焦点 → SwiftUI 的 .keyboardShortcut(.escape) 才响应。
+        let w = LightboxWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.level = .floating              // 盖住 app + 大部分系统 UI
+        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        w.ignoresMouseEvents = false
+        w.hasShadow = false
+        w.isReleasedWhenClosed = false   // 我们自己持引用 + 复用 close()
+        w.contentView = NSHostingView(rootView:
+            ImageLightboxView(attachment: attachment) { [weak self] in self?.close() }
+        )
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.window = w
+    }
+
+    func close() {
+        window?.orderOut(nil)
+        window = nil
+    }
+}
+
+/// borderless NSWindow 默认 canBecomeKey=false,override 让它能接键盘事件。
+private final class LightboxWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+/// Lightbox 的 SwiftUI 内容。被 NSHostingView 装进 LightboxWindow。
+private struct ImageLightboxView: View {
     let attachment: Attachment
     let onClose: () -> Void
     private var image: NSImage? { NSImage(contentsOf: attachment.url) }
 
     var body: some View {
         ZStack {
-            // 整屏深色背景 — 点哪儿都关闭。文件夹模态 lightbox 常见手势。
-            Color.black.opacity(0.85)
+            // 整屏深色背景 — 点哪儿都关闭。
+            Color.black.opacity(0.88)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { onClose() }
@@ -2540,14 +2580,12 @@ private struct ImageLightbox: View {
                         .resizable()
                         .interpolation(.high)
                         .scaledToFit()
-                        // 大图限 90% 视口,留点边给关闭按钮 + 文件名。
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(40)
-                        // 阻断点击穿透 — 不让点图片本身关闭(只点背景才关)。
+                        // 吞 tap —— 只点背景才关闭。
                         .contentShape(Rectangle())
-                        .onTapGesture { /* 吞掉 */ }
+                        .onTapGesture { /* swallow */ }
                 } else {
-                    // 极少见:文件被删 / 损坏。
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 32))
