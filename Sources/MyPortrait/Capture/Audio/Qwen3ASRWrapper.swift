@@ -61,6 +61,9 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
     func unload() {
         guard model != nil else { return }
         model = nil
+        // 只置 nil 不够 —— 权重 buffer 会留在 MLX 的 GPU buffer cache 里不还给系统
+        // (实测残留 ~1.4G)。跟 transcribe() 一样显式清缓存,才真正 free。
+        MLX.GPU.clearCache()
         logger.info("Qwen3-ASR model unloaded — freed memory")
     }
 
