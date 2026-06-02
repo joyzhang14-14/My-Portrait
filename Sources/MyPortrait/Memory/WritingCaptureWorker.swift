@@ -1064,11 +1064,6 @@ final class WritingCaptureWorker {
         }
     }
 
-    /// typing_event 的 edit_log 里有没有 submit(用户按回车发送了)。消息边界。
-    nonisolated static func editLogHasSubmit(_ editLogJSON: String) -> Bool {
-        editLogJSON.contains("\"kind\":\"submit\"")
-    }
-
     /// 解析 edit_log,返回最长的一条**用户敲出来的**(commit/delete,排除 paste)
     /// entry text。发送清空时整条消息作为一条 delete 落进 edit_log → 用它取回原文;
     /// **排除 paste** —— paste 是突然贴上来、零击键的(占位符 / autofill / 收到内容),
@@ -1145,7 +1140,7 @@ final class WritingCaptureWorker {
 
     /// 确定性前缀合并(原 Pass2 LLM 切分里的"草稿增长合并",改算法层实现)。
     /// 同 (app,url) 组内,一条**未发送草稿**(其引用的 typing_events 里没有任何
-    /// 发送 = submit / send-clear)的文字若是更晚某条 record 的前缀 → 它只是那条
+    /// 发送 = send-clear 输入框清空)的文字若是更晚某条 record 的前缀 → 它只是那条
     /// 草稿的早期快照,丢掉。**发送过的不丢**:先发"好的"再发"好的开始吧"是两条
     /// 独立消息,即使前者是后者前缀。
     nonisolated static func mergePrefixDrafts(
@@ -1157,7 +1152,7 @@ final class WritingCaptureWorker {
         func hasSend(_ r: WritingCaptureRecord) -> Bool {
             r.referenceTypingEventIds.contains { id in
                 guard let e = evById[id] else { return false }
-                return Self.editLogHasSubmit(e.editLog) || Self.isSendClear(e)
+                return Self.isSendClear(e)   // 回车 submit 标记已弃用,只认输入框真清空
             }
         }
         func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1232,15 +1227,16 @@ final class WritingCaptureWorker {
                     let evs = s.typingEvents.filter { $0.id != nil }
                         .sorted { $0.startedAt < $1.startedAt }
                     guard !evs.isEmpty else { continue }
-                    // **按发送切消息** —— 一次发送 = 一条消息。发送有两种记法:
-                    // Discord/微信回车 = submit 标记;ChatGPT 等发送后清空输入框 =
-                    // isSendClear(整框作为一条 delete + endValue 空)。两者都当边界。
-                    // 连续没发送的事件(IME 逐字快照 / 长草稿)合成一条。
+                    // **按发送切消息** —— 一次发送 = 一条消息。发送以**输入框真的清空**
+                    // (isSendClear:整框作为一条 delete + endValue 空)为唯一判据。
+                    // 回车 submit 标记**已弃用**:回车未必真发送、app 还会假清空,实测只
+                    // 把一条消息误切成两条(见 claudefordesktop 假 submit),净是反效果。
+                    // 连续没清空的事件(IME 逐字快照 / 长草稿)合成一条。
                     var msgGroups: [[TypingEvent]] = []
                     var cur: [TypingEvent] = []
                     for ev in evs {
                         cur.append(ev)
-                        if Self.editLogHasSubmit(ev.editLog) || Self.isSendClear(ev) {
+                        if Self.isSendClear(ev) {
                             msgGroups.append(cur); cur = []
                         }
                     }
