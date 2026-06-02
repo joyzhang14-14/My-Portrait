@@ -139,6 +139,10 @@ final class ChatController {
     func abort() {
         try? agent?.abort()
         flushPending()
+        // 强制收尾在飞的 tool/thinking block(同 .agentEnd/.error 处理)。必须在
+        // assistantMessageID 置 nil **之前**调 —— 它在 id 为 nil 时早退。否则这些
+        // block 卡在 isRunning=true 还被 persist 落库。
+        closeRunningPartsOnCurrentAssistant()
         isStreaming = false
         endStreamingActivity()
         assistantMessageID = nil

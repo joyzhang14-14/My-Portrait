@@ -145,6 +145,9 @@ actor CompactionWorker {
 
         // 第一帧已加载，直接喂。
         try await encoder.append(image: firstImage, timestampMs: firstFrame.timestampMs)
+        // 只追踪**真正编进 MP4** 的帧。跳过的帧若仍写元数据,offset_ms 会指向 MP4
+        // 里不含它的位置,加上 JPG 被删 → 画面永久错位/丢失。
+        var encoded = [firstFrame]
 
         // 其余帧逐个加载 + append（一次只持一帧）。
         for frame in frames.dropFirst() {
@@ -153,6 +156,7 @@ actor CompactionWorker {
                 continue
             }
             try await encoder.append(image: img, timestampMs: frame.timestampMs)
+            encoded.append(frame)
         }
 
         try await encoder.finalize()
@@ -170,7 +174,7 @@ actor CompactionWorker {
             endTsMs: lastFrame.timestampMs,
             frameCount: encoder.frameCount
         )
-        let frameOffsets: [(frameId: Int64, offsetMs: Int)] = frames.map { frame in
+        let frameOffsets: [(frameId: Int64, offsetMs: Int)] = encoded.map { frame in
             (frame.id, Int(frame.timestampMs - firstFrame.timestampMs))
         }
 
@@ -187,8 +191,9 @@ actor CompactionWorker {
 
         logger.info("video_chunk \(chunkId) written: \(encoder.frameCount) frames, \(durationMs)ms, \(mp4Path.lastPathComponent, privacy: .public)")
 
-        // DB 事务完成后，删 JPG 文件。删失败不抛错（DB 已正确，JPG 残留无害）。
-        for frame in frames {
+        // DB 事务完成后，删 JPG 文件。只删真正编进 MP4 的帧 —— 跳过的帧 JPG 留着
+        // (下轮还能重试)。删失败不抛错（DB 已正确，JPG 残留无害）。
+        for frame in encoded {
             try? FileManager.default.removeItem(atPath: frame.snapshotPath)
         }
 

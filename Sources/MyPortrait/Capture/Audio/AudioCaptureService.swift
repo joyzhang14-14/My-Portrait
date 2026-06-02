@@ -160,6 +160,10 @@ actor AudioCaptureService {
         self.converter = nil
         self.targetFormat = nil
 
+        // 清掉 activeUID,否则 UI 一直显示「recording from <设备>」幻影(start
+        // 时在 line 225 设过)。"" 走 else 分支干净置空。
+        Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID("") }
+
         logger.info("AudioCaptureService stopped")
     }
 
