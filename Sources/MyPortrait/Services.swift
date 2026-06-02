@@ -599,50 +599,26 @@ final class Services {
         }
     }
 
-    /// 最新一次"想要的"麦克风 / 系统音频采集开关状态(开关时被反复覆盖)。
-    private var audioDesiredEnabled = false
-    private var audioReconciling = false
-    private var sysAudioDesiredEnabled = false
-    private var sysAudioReconciling = false
-
     private func applyAudioCapture(enabled: Bool) {
         logger.notice("applyAudioCapture(enabled: \(enabled, privacy: .public))")
-        // 不能"每次开关派一个 detached task" —— detached task 不保证执行顺序,开关时
-        // 最后一次的 stop 可能跟某次还没跑完的 start 乱序 → 引擎停在错状态(关了灯还亮)。
-        // 改为记录最新 desired,单个串行 reconcile 把实际状态收敛到**最后一次开关**的值。
-        audioDesiredEnabled = enabled
-        guard !audioReconciling else { return }
-        audioReconciling = true
         let audio = self.audio
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            var applied: Bool? = nil
-            while applied != self.audioDesiredEnabled {
-                let want = self.audioDesiredEnabled
-                if want { await audio.start() } else { await audio.stop() }
-                applied = want
+        Task.detached(priority: .userInitiated) {
+            if enabled {
+                await audio.start()
+            } else {
+                await audio.stop()
             }
-            self.audioReconciling = false
         }
     }
 
     private func applySystemAudioCapture(enabled: Bool) {
-        // 同 applyAudioCapture 的 coalesce。系统音频 start 更慢(建 process tap +
-        // aggregate device),detached 乱序窗口更大 —— 关 master 时 stop 跟没跑完的
-        // start 乱序会让 tap 没被销毁 → 系统级橙色 mic 灯卡住(关了还亮)。
-        sysAudioDesiredEnabled = enabled
-        guard !sysAudioReconciling else { return }
-        sysAudioReconciling = true
         let sysAudio = self.systemAudio
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            var applied: Bool? = nil
-            while applied != self.sysAudioDesiredEnabled {
-                let want = self.sysAudioDesiredEnabled
-                if want { await sysAudio.start() } else { await sysAudio.stop() }
-                applied = want
+        Task.detached(priority: .userInitiated) {
+            if enabled {
+                await sysAudio.start()
+            } else {
+                await sysAudio.stop()
             }
-            self.sysAudioReconciling = false
         }
     }
 }
