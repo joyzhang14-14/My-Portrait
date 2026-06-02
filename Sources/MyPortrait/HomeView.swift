@@ -92,8 +92,7 @@ struct HomeView: View {
                         prompt = msg.text
                         contextChips = chat.contextChipsByMessage[msg.id] ?? []
                         editingMessageId = msg.id
-                    },
-                    onImageTap: { att in ImageLightboxController.shared.show(attachment: att) }
+                    }
                 )
             }
 
@@ -356,9 +355,6 @@ private struct ChatTranscript: View {
     var onCopy: (ChatMessage) -> Void = { _ in }
     var onRegenerate: (UUID) -> Void = { _ in }
     var onEdit: (ChatMessage) -> Void = { _ in }
-    /// 点消息里的图片附件 → 父层弹 lightbox 全屏查看。nil = 不响应点击
-    /// (老行为保留兼容)。
-    var onImageTap: ((Attachment) -> Void)? = nil
 
     /// 过滤空 assistant placeholder —— ChatController streaming 一启动就先
     /// 插入一条 content="" 的 assistant message,但 thinking 状态由底下独立
@@ -386,8 +382,7 @@ private struct ChatTranscript: View {
                             citations: citationsLookup?(msg.id) ?? [],
                             onCopy: { onCopy(msg) },
                             onRegenerate: { onRegenerate(msg.id) },
-                            onEdit: { onEdit(msg) },
-                            onImageTap: onImageTap
+                            onEdit: { onEdit(msg) }
                         )
                         .id(msg.id)
                     }
@@ -420,8 +415,6 @@ private struct ChatBubble: View {
     let onCopy: () -> Void
     let onRegenerate: () -> Void
     let onEdit: () -> Void
-    /// 父层 lightbox callback,由 ChatTranscript 透传过来。
-    var onImageTap: ((Attachment) -> Void)? = nil
     @State private var appear = false
     @State private var hover = false
     var body: some View {
@@ -460,14 +453,12 @@ private struct ChatBubble: View {
                 if !attachments.isEmpty {
                     HStack(spacing: 6) {
                         ForEach(attachments) { att in
-                            // 图片 → 点开全屏 lightbox(交父层 onImageTap);
-                            // 非图片(文件)→ 暂时仍只展示,不响应点击。
+                            // 图片可点开 lightbox 由 AttachmentThumb 内部处理。
                             // onRemove 传空 closure —— 已发出消息的附件不可删。
                             // size=42 显小,直接传比外面 scaleEffect 包稳
                             // (scaleEffect 改视觉不改 hit-test region)。
                             AttachmentThumb(attachment: att,
                                             onRemove: {},
-                                            onImageTap: onImageTap,
                                             size: 42)
                         }
                         Spacer(minLength: 0)
@@ -2022,9 +2013,6 @@ private struct AttachmentStrip: View {
 private struct AttachmentThumb: View {
     let attachment: Attachment
     let onRemove: () -> Void
-    /// 非 nil + 图片 → 缩略图整体可点,弹父层 lightbox 全屏查看。
-    /// nil(input bar 还在编辑时)→ 只展示,不响应点击,保留旧行为。
-    var onImageTap: ((Attachment) -> Void)? = nil
     /// 缩略图边长。默认 52(input bar 用),消息 bubble 里传 42 显小。
     /// 直接给 size 参数比外面套 scaleEffect+frame 稳 —— scaleEffect 只改
     /// 渲染不改 hit-test layout,Button 点击区域会跟视觉错位。
@@ -2032,10 +2020,13 @@ private struct AttachmentThumb: View {
     @State private var hover = false
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // 图片有 tap callback → 包成 Button,光标变成手型 + 提示放大查看。
-            // 文件 / 没 callback → 裸 content,保留旧观感。
-            if attachment.kind == .image, let tap = onImageTap {
-                Button { tap(attachment) } label: { content }
+            // 图片 → 缩略图整体可点,直接调 ImageLightboxController 弹全屏。
+            // 内部自管,调用方零参数(input bar / message bubble 都自动可点)。
+            // 文件附件 → 裸 content,不响应点击。
+            if attachment.kind == .image {
+                Button {
+                    ImageLightboxController.shared.show(attachment: attachment)
+                } label: { content }
                     .buttonStyle(.plain)
                     .help("Click to view full size")
             } else {
