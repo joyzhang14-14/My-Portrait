@@ -501,13 +501,14 @@ struct RealAppIcon: View {
 
     private func load() async {
         if let cached = AppNameIconCache.shared.get(appName) { self.realIcon = cached; return }
-        if AppNameIconCache.shared.isKnownMiss(appName) { return }
+        if AppNameIconCache.shared.isKnownMiss(appName) { self.realIcon = nil; return }
+        self.realIcon = nil   // 复用到新 app 名时先清,避免闪现上一个 app 的图标
         let name = appName
         let img = await Task.detached(priority: .userInitiated) {
             AppIconLoader.icon(forAppName: name)
         }.value
         AppNameIconCache.shared.store(img, for: appName)
-        if let img { self.realIcon = img }
+        self.realIcon = img   // 无条件赋值,nil 自然回退占位图
     }
 }
 

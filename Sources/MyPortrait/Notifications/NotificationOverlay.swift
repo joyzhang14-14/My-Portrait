@@ -308,6 +308,9 @@ struct NotificationCardView: View {
         .onDisappear { stopTick() }
         .onChange(of: hover) { _, hovering in
             // 鼠标悬停 → 暂停倒计时 + 进度条;移开 → 从当前进度继续。
+            // 但 update 自动安装倒计时(唯一 onTimeout != nil 的通知)不受 hover 影响
+            // —— 否则鼠标停在卡片上,安装倒计时被无限暂停、永不到点。
+            guard notification.onTimeout == nil else { return }
             if hovering { stopTick() } else { startTick() }
         }
     }
