@@ -322,6 +322,11 @@ final class TypingRecordWriter {
     /// 不能在 MainActor 上跑）。
     func flushElement(_ key: ElementKey) {
         guard let rec = state[key] else { return }
+        // 还有未落定的 value-change(debounce 在飞)→ 先按正常流程把它折进
+        // edit_log + lastValueSnapshot 再 flush。否则 flush 读的是上一拍 snapshot,
+        // 会丢掉最后这一拍 —— IME 组词 + 回车"提交+发送+清空"挤在一个回车里时,
+        // 尾巴(如"发给我")常卡在 pendingValue 还没落定就被 flush 抢走。
+        if rec.pendingValue != nil { fireDebounce(key) }
         rec.debounceTimer?.invalidate()
         rec.flushTimer?.invalidate()
         // URL 级黑名单:整 app 屏蔽已经在 TypingObserver.attach 拦住,这里
