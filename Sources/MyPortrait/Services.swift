@@ -339,17 +339,25 @@ final class Services {
             .store(in: &settingsCancellables)
 
         // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
-        Publishers.CombineLatest4(
-            settings.$systemAudioCaptureEnabled,
-            permissions.$microphone,
-            musicMonitor.$musicDetected,
-            screenLockMonitor.$screenLocked
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                settings.$systemAudioCaptureEnabled,
+                permissions.$microphone,
+                musicMonitor.$musicDetected,
+                screenLockMonitor.$screenLocked
+            ),
+            settings.$audioCaptureEnabled
         )
-            .map { enabled, perm, music, locked in
+            .map { tuple, masterEnabled in
+                let (sysEnabled, perm, music, locked) = tuple
+                // 系统音频是 Audio Capture 的子功能 —— master 关掉时也必须停。
+                // 否则关了 Audio Capture,loopback tap(走 CATapDescription,要 mic
+                // 权限)仍在跑,菜单栏 mic 指示灯一直亮。
+                guard masterEnabled else { return false }
                 if music { return false }
                 if locked && !ConfigStore.shared.privacy.recordAudioWhileLocked { return false }
                 guard perm.isGranted else { return false }
-                return enabled
+                return sysEnabled
             }
             .removeDuplicates()
             .sink { [weak self] effective in
