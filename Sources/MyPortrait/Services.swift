@@ -371,6 +371,7 @@ final class Services {
         pushIgnoreRules()
         observeIgnoreRules()
         observePreferredInputDevice()
+        observeTranscribeOnACOnly()
 
         // 屏幕采集功耗档位(Settings → Screen Capture → Power mode)。三个触发源:
         //   ① powerWatcher.states:插拔电源 / 电量变化(IOKit 事件)
@@ -489,6 +490,22 @@ final class Services {
                 guard let self else { return }
                 await self.audio.restartIfRunning()
                 self.observePreferredInputDevice()
+            }
+        }
+    }
+
+    /// 监听 "Only transcribe while plugged in"(transcribeOnACOnly)变化,变了立刻让
+    /// 转录调度器重评一轮 —— 否则用户拨开关后要等最多 60s 的兜底 poll 才生效 + Status
+    /// 才刷新("Paused on battery" ↔ 转录)。withObservationTracking 一次性,onChange 递归重注册。
+    private func observeTranscribeOnACOnly() {
+        let store = ConfigStore.shared
+        withObservationTracking {
+            _ = store.capture.audio.transcribeOnACOnly
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                await self.transcriber.reevaluate()
+                self.observeTranscribeOnACOnly()
             }
         }
     }
