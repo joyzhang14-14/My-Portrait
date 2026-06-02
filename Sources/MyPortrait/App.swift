@@ -182,16 +182,9 @@ struct MyPortraitApp: App {
         if args.contains("--wipe-personality-concepts") {
             WipePersonalityCLI.run()
         }
-        // DEV-ONLY: `--classify-dry-run` —— 跑 EventClassifier 但不写
-        // _folders/*.json。看看 LLM 会怎么分,有问题随手回滚(不需要回滚,
-        // dry-run 本来就不落盘)。
-        if args.contains("--classify-dry-run") {
-            EventClassifierCLI.dryRun()
-        }
-        // 真跑(写盘),自动循环到 unclassified 清空。等价于 UI Run now。
-        if args.contains("--classify-run") {
-            EventClassifierCLI.runAll()
-        }
+        // EventClassifier 自动分 folder 已下线 —— chat AI 通过 mp-folders
+        // 按用户对话需求手动整理。--classify-dry-run / --classify-run dispatch
+        // 也跟着删了。
         // `--import-default-cron-jobs` seeds the two built-in cronJobs into
         // CronJobStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-cron-jobs") {

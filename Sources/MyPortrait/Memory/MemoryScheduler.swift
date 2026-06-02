@@ -60,8 +60,9 @@ final class MemoryScheduler {
     /// distill 锚行的 date 值。anchor 是 distill 这个 processor 的锁身份，与
     /// 运行频率无关。定义 / 语义见 `ProcessingLogStore.distillAnchorDate`。
     private let distillAnchor = ProcessingLogStore.distillAnchorDate
-    /// classify 锚行的 date 值。语义同 distill anchor —— 一次性整体操作的锁身份。
-    private let classifyAnchor = ProcessingLogStore.classifyAnchorDate
+    // classify(EventClassifier 自动分 folder)已下线 —— 改成 chat AI 通过
+    // mp-folders 按用户对话需求手动整理。anchor case 在 ProcessingLog 里保留
+    // (DB 历史值 + 崩溃恢复仍需识别老 inProgress),不再有 scheduler hook。
     // personality 不用 anchor —— 它是 per-day 流水线(每天的 events 各自有
     // 各自的 personality_status 列),进度直接落在日期行里。
 
@@ -78,7 +79,8 @@ final class MemoryScheduler {
     /// 四把分离的锁。View 侧 @Observable 跟踪它们,Run 按钮根据 canRunXxx
     /// 实时灰掉 + tooltip 说理由。
     private(set) var eventRunning = false
-    private(set) var classifyRunning = false
+    // classifyRunning 已下线(EventClassifier 砍掉了)。canRunEvent 不再需要
+    // classify 锁。
     private(set) var distillRunning = false
     private(set) var personalityRunning = false
     /// tick() 自身的可重入防护(timer 与 startup 并发触发时只跑一次)。
@@ -89,14 +91,11 @@ final class MemoryScheduler {
     /// 当前是否有事件家族(distill or personality)在跑。
     var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
 
-    /// 能不能现在起 event job(必须自己空闲 + portrait/personality/classify 都空闲)。
-    var canRunEvent: Bool { !eventRunning && !portraitFamilyRunning && !classifyRunning }
-    /// classify 跟 distill / personality 写盘不冲突(只动 _folders/*.json),
-    /// 只跟 event(可能新增事件被 classify 漏看)互斥 + 自己不重入。
-    var canRunClassify: Bool { !eventRunning && !classifyRunning }
+    /// 能不能现在起 event job(必须自己空闲 + portrait/personality 都空闲)。
+    var canRunEvent: Bool { !eventRunning && !portraitFamilyRunning }
     /// 能不能现在起 distill(必须 event 空闲 + 自己空闲;personality/classify 不挡)。
     var canRunDistill: Bool { !eventRunning && !distillRunning }
-    /// 能不能现在起 personality(必须 event 空闲 + 自己空闲;distill/classify 不挡)。
+    /// 能不能现在起 personality(必须 event 空闲 + 自己空闲;distill 不挡)。
     var canRunPersonality: Bool { !eventRunning && !personalityRunning }
 
     /// 当前 memory pipeline 的 provider/model — 从 ConfigStore 读。每次需要时
@@ -105,15 +104,12 @@ final class MemoryScheduler {
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
     private let kLastEvent          = "scheduler.lastEventRun"
-    private let kLastClassify       = "scheduler.lastClassifyRun"
+    // kLastClassify 已下线(EventClassifier 砍掉)。老 UserDefaults key 保留
+    // 不读 = 静默忽略。
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
     private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
     private let kLastSpeechStyle    = "scheduler.lastSpeechStyleRun"
-
-    /// 最近一次 classifier 跑完的结果 —— UI 直接读这个显示。
-    /// nil = 从未跑过 / 上次还在跑。
-    private(set) var lastClassifyResult: EventClassifier.Result?
 
     private init() {}
 
@@ -147,7 +143,6 @@ final class MemoryScheduler {
         guard !MemoryStaging.hasPending(.events),
               !MemoryStaging.hasPending(.portrait),
               !MemoryStaging.hasPending(.personality),
-              !MemoryStaging.hasPending(.classify),
               !EditDraft.hasAnyPending() else {
             schedLog.info("tick: manual run / AI edit draft pending — skip")
             return
@@ -169,23 +164,8 @@ final class MemoryScheduler {
             await runEventJob()
             ranEvent = true
         }
-        // classify 在 event 之后 / distill 之前。跑完才把新事件分组,distiller
-        // 拿到的是已组织的画面。失败 / budget defer 不影响 distill 推进
-        // (folder 只是辅助 metadata)。
-        var ranClassify = false
-        let classifyToday   = lastRunDay(kLastClassify) != localDayString(now)
-        let classifyCatchUp = s.classify.frequency == .daily && classifierJobHasWork()
-        if classifyToday,
-           Self.shouldTriggerNow(config: s.classify, now: now) || classifyCatchUp {
-            setLastRun(kLastClassify, now)
-            await runClassifierJob()
-            ranClassify = true
-        } else if ranEvent, s.classify.frequency != .off, classifierNeedsRetry() {
-            await runClassifierJob()
-            ranClassify = true
-        }
-        _ = ranClassify   // 留着供未来 chain 决策使用
-
+        // classify(自动 EventClassifier 分 folder)已下线 —— chat AI 通过
+        // mp-folders 手动整理。tick 不再有 classify 分支。
         var ranPortrait = false
         let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
         let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
@@ -324,40 +304,7 @@ final class MemoryScheduler {
         return (store.row(for: distillAnchor)?.distill ?? .idle).needsWork
     }
 
-    /// classifier job 有没有活干 —— anchor needsWork 或盘上有未分组 event。
-    /// 两个条件 OR:user 手动 rm _folders/*.json 也能立刻判定有活。
-    func classifierJobHasWork() -> Bool {
-        _ = store.ensureRow(for: classifyAnchor)
-        let st = (store.row(for: classifyAnchor)?.classify ?? .idle)
-        if st.needsWork { return true }
-        // 兜底:就算 anchor 是 complete,只要盘上有事件没被分类,就还有活。
-        let classified = EventFolderStore.classifiedEventPaths()
-        let allEvents = scanAllEventPaths()
-        return !allEvents.subtracting(classified).isEmpty
-    }
-
-    /// 给 classifierJobHasWork 用的扫盘 —— 列 events/<day>/*.md 的相对路径。
-    /// **过滤 weight < EventClassifier.minWeightForClassification 的事件** ——
-    /// 跟 EventClassifier.scanAllEvents 用同一门槛,否则会假阳判定"有活",
-    /// 但 classifier 实跑发现 0 个未分组高权重事件 → 空跑烧 token。
-    private func scanAllEventPaths() -> Set<String> {
-        let fm = FileManager.default
-        let root = Storage.eventsDir
-        guard let dayDirs = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
-        var out: Set<String> = []
-        for day in dayDirs where !day.hasPrefix("_") {
-            let dayURL = root.appendingPathComponent(day, isDirectory: true)
-            guard let files = try? fm.contentsOfDirectory(atPath: dayURL.path) else { continue }
-            for name in files where name.hasSuffix(".md") {
-                let url = dayURL.appendingPathComponent(name)
-                guard let file = try? PortraitFileIO.read(from: url),
-                      file.weight >= EventClassifier.minWeightForClassification
-                else { continue }
-                out.insert("\(day)/\(name)")
-            }
-        }
-        return out
-    }
+    // classifierJobHasWork / scanAllEventPaths 已下线(EventClassifier 砍掉)。
 
     /// personality job 现在有没有活干（per-day 待处理列表非空）。
     func personalityJobHasWork() -> Bool {
@@ -422,11 +369,8 @@ final class MemoryScheduler {
         // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
         _ = MemoryBudget_applyToDisk()
 
-        // 新事件到了 → classify 锚点 + distill 锚点 都重新标 pending。
-        // classify 先跑 → 把新事件归到 _folders/*.json;distill 再跑用 events
-        // 全文蒸馏。两个 anchor 设 pending 后,下一次 tick 自动 catch up。
-        _ = store.ensureRow(for: classifyAnchor)
-        store.setStatus(date: classifyAnchor, stage: .classify, status: .pending)
+        // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
+        // (老 classify anchor 不再 mark pending —— EventClassifier 已下线。)
         _ = store.ensureRow(for: distillAnchor)
         store.setStatus(date: distillAnchor, stage: .distill, status: .pending)
 
@@ -444,51 +388,8 @@ final class MemoryScheduler {
         return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 
-    // MARK: - classify job:把未分组 events 归到 _folders/*.json
-
-    /// 跑一次 EventClassifier。anchor-row 模式(同 distill / personality)。
-    /// classify 失败/budget defer 不阻塞 distill —— folder 只是辅助 metadata,
-    /// distill 用全文蒸馏不依赖它。
-    @discardableResult
-    func runClassifierJob() async -> JobOutcome {
-        guard canRunClassify else { return .busy }
-        classifyRunning = true
-        defer { classifyRunning = false }
-
-        _ = store.ensureRow(for: classifyAnchor)
-        // 用 classifierJobHasWork() 而不是裸 anchor.needsWork ——
-        // anchor=complete + 用户手动 rm _folders/*.json / 改 weight 阈值后,
-        // 文件系统有未分组事件但 anchor 误以为没活。fallback 扫盘兜底。
-        guard classifierJobHasWork() else {
-            let st = store.row(for: classifyAnchor)?.classify ?? .idle
-            schedLog.info("classify job: \(st.rawValue, privacy: .public) — skip")
-            return .noWork
-        }
-        print("[Scheduler] classify job — grouping events into folders")
-        DiagLog.event("scheduler.classify.start")
-
-        await runStep(date: classifyAnchor, stage: .classify, processor: "classify", rollbackDay: nil) {
-            let cfg = self.memoryCfg
-            // 用 light model:classifier prompt 是 title-only + 简单
-            // 选 folder / 建 folder 决策,机械度高,不需要 main 模型的推理深度。
-            // 跟 writing capture / personality cluster 一脉。
-            let classifier = EventClassifier(
-                provider: cfg.resolvedProvider, model: cfg.resolvedModelLight
-            )
-            let r = try await classifier.classify()
-            self.lastClassifyResult = r
-            print("[Scheduler] classify done: total=\(r.totalUnclassified) classified=\(r.classifiedInThisRun) new=\(r.newFoldersCreated) updated=\(r.existingFoldersUpdated) leftover=\(r.stillUngrouped)")
-            DiagLog.event("scheduler.classify.end", ctx: [
-                "total":     r.totalUnclassified,
-                "classified": r.classifiedInThisRun,
-                "new":        r.newFoldersCreated,
-                "updated":    r.existingFoldersUpdated,
-                "leftover":   r.stillUngrouped,
-            ])
-            return .success
-        }
-        return .ran(days: [classifyAnchor])
-    }
+    // classify job(自动 EventClassifier 跑 LLM 分 folder)已整段下线 ——
+    // 改成 chat AI 通过 mp-folders 手动按用户对话需求整理。
 
     // MARK: - portrait job：distill
 
@@ -764,14 +665,6 @@ final class MemoryScheduler {
     /// distill 是否处于待重试态（failed / budget_deferred）。
     private func portraitNeedsRetry() -> Bool {
         switch store.row(for: distillAnchor)?.distill {
-        case .failed, .budgetDeferred: return true
-        default: return false
-        }
-    }
-
-    /// classify 是否处于待重试态(同 portraitNeedsRetry 模式)。
-    private func classifierNeedsRetry() -> Bool {
-        switch store.row(for: classifyAnchor)?.classify {
         case .failed, .budgetDeferred: return true
         default: return false
         }
