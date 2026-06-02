@@ -273,7 +273,7 @@ final class ChatController {
                 }
 
                 // What Pi actually sees:
-                //   [first turn only] SKILL preamble teaching it about `mp-query`
+                //   [first turn only] SKILL preambles for `mp-query` + `mp-folders`
                 //   + chip-pinned context block (if user used @-picker)
                 //   + attachment refs
                 //   + user question
@@ -281,6 +281,7 @@ final class ChatController {
                 let isFirstTurnOfConv = (self.messages.count == 1)
                 if isFirstTurnOfConv {
                     sections.append(MPQuerySkill.preamble)
+                    sections.append(FoldersSkill.preamble)
                 }
                 if !context.markdown.isEmpty { sections.append(context.markdown) }
                 if !attachments.isEmpty {
