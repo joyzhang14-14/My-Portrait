@@ -171,6 +171,12 @@ actor TranscriptionScheduler {
 
     // MARK: - B. Transcribe
 
+    /// 立刻重评一轮(读最新设置 + 决定转/停/更新 "Paused on battery")。给 Services 在
+    /// transcribeOnACOnly 等设置变化时调 —— 否则用户拨开关后要等最多 60s 的兜底 poll 才生效。
+    func reevaluate() async {
+        await processQueueOnce()
+    }
+
     private func processQueueOnce() async {
         // 重入守卫:tight drain 期间(可能跑几十分钟)power 事件 / 60s poll 会再次
         // 触发本函数 —— 同一时刻只允许一轮,否则并发转录 data race。
