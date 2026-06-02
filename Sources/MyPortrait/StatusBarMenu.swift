@@ -282,36 +282,27 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
     private func refreshIcon() {
         let unhealthy = HealthMonitor.shared.unhealthy
-        if unhealthy {
-            // 健康异常 —— 用红色感叹号 SF Symbol 替代默认 icon,**最显眼**。
-            let conf = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
-            if let warn = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
-                                  accessibilityDescription: "MyPortrait health warning")?
-                              .withSymbolConfiguration(conf) {
-                warn.isTemplate = false
-                statusItem.button?.image = warn
-                statusItem.button?.contentTintColor = .systemRed
-            }
-        } else {
-            statusItem.button?.contentTintColor = nil
-            // User-supplied icon takes precedence.
-            if !customIconPath.isEmpty,
-               let img = NSImage(contentsOfFile: customIconPath) {
-                img.size = NSSize(width: 18, height: 18)
-                // **isTemplate = false** 关键 —— template 模式系统把图当 alpha
-                // mask 用文字色绘制(黑/白),用户上传的彩色 PNG 会被压成剪影。
-                // 跟默认 character icon 同款处理,彩图原样渲染。仿 My-Orphies
-                // customize.rs:222 "Force template OFF so colours render"。
-                img.isTemplate = false
-                statusItem.button?.image = img
-            } else if let character = NSImage(named: "MenuBarIcon") {
-                // 默认菜单栏图标：项目角色立绘。
-                // **isTemplate = false 是关键**：角色图是彩色的，设 true 会被系统
-                // 压成黑白剪影。彩图直接原样渲染。
-                character.size = NSSize(width: 18, height: 18)
-                character.isTemplate = false
-                statusItem.button?.image = character
-            }
+        // 菜单栏图标永远保持角色图 / 用户自定义图,**不再**因健康异常(stall 等)
+        // 切成红色惊叹号 —— 用户不喜欢那个刺眼图标。健康状态仍由下面的 tooltip
+        // 表达(hover 才看到,不打扰)。
+        statusItem.button?.contentTintColor = nil
+        // User-supplied icon takes precedence.
+        if !customIconPath.isEmpty,
+           let img = NSImage(contentsOfFile: customIconPath) {
+            img.size = NSSize(width: 18, height: 18)
+            // **isTemplate = false** 关键 —— template 模式系统把图当 alpha
+            // mask 用文字色绘制(黑/白),用户上传的彩色 PNG 会被压成剪影。
+            // 跟默认 character icon 同款处理,彩图原样渲染。仿 My-Orphies
+            // customize.rs:222 "Force template OFF so colours render"。
+            img.isTemplate = false
+            statusItem.button?.image = img
+        } else if let character = NSImage(named: "MenuBarIcon") {
+            // 默认菜单栏图标：项目角色立绘。
+            // **isTemplate = false 是关键**：角色图是彩色的，设 true 会被系统
+            // 压成黑白剪影。彩图直接原样渲染。
+            character.size = NSSize(width: 18, height: 18)
+            character.isTemplate = false
+            statusItem.button?.image = character
         }
         // 采集状态不再压进图标本身（角色图是固定的），改由 tooltip 表达。
 
