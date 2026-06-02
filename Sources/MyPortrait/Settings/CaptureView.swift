@@ -473,44 +473,20 @@ struct AudioCaptureSettingsView: View {
             SettingsRow("Microphone",
                         description: "Pick which mic My Portrait records from.",
                         icon: "mic.circle") {
-                Menu {
-                    Button {
-                        config.mutate { $0.capture.audio.preferredInputDeviceUID = "" }
-                    } label: {
-                        HStack {
-                            Image(systemName: "checkmark")
-                                .opacity(preferred.isEmpty ? 1 : 0)
-                            Text("Follow system default")
-                        }
-                    }
+                // 用原生 Picker —— macOS Menu 不认 Image.opacity,所以
+                // 之前自己画 checkmark 会导致每个选项都显示打勾(Issue #11)。
+                // Picker 让系统自己给选中项画 ✓,避免这个坑。
+                Picker("", selection: config.binding(\.capture.audio.preferredInputDeviceUID)) {
+                    Text("Follow system default").tag("")
                     Divider()
                     ForEach(devices) { d in
-                        Button {
-                            config.mutate { $0.capture.audio.preferredInputDeviceUID = d.id }
-                        } label: {
-                            HStack {
-                                Image(systemName: "checkmark")
-                                    .opacity(preferred == d.id ? 1 : 0)
-                                Image(systemName: d.transport.icon)
-                                Text(d.name)
-                            }
-                        }
+                        Label(d.name, systemImage: d.transport.icon).tag(d.id)
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        let label = preferred.isEmpty
-                            ? "Follow system"
-                            : (devices.first { $0.id == preferred }?.name ?? preferred)
-                        Text(label)
-                            .font(.system(size: 12))
-                            .lineLimit(1).truncationMode(.middle)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 9))
-                    }
-                    .frame(maxWidth: 240, alignment: .trailing)
                 }
-                .menuStyle(.borderlessButton)
+                .labelsHidden()
+                .pickerStyle(.menu)
                 .fixedSize()
+                .frame(maxWidth: 240, alignment: .trailing)
             }
 
             // 实时状态行 —— 真在录显示绿点 pulse + device 名,没录灰显示。
