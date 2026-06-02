@@ -355,6 +355,9 @@ private struct ChatTranscript: View {
     var onCopy: (ChatMessage) -> Void = { _ in }
     var onRegenerate: (UUID) -> Void = { _ in }
     var onEdit: (ChatMessage) -> Void = { _ in }
+    /// 「聊天渲染优化」开关(General → Chat,默认关)。@State 绑 ConfigStore,
+    /// 让 toggle 变化时本视图重算。
+    @State private var config = ConfigStore.shared
 
     /// 过滤空 assistant placeholder —— ChatController streaming 一启动就先
     /// 插入一条 content="" 的 assistant message,但 thinking 状态由底下独立
@@ -370,11 +373,12 @@ private struct ChatTranscript: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     let visible = displayMessages
+                    let optimize = config.current.general.optimizeChatRendering
                     ForEach(Array(visible.enumerated()), id: \.element.id) { idx, msg in
                         // The streaming assistant bubble is always the last
                         // assistant message; only it should glow.
                         let isLastAssistant = idx == visible.count - 1 && msg.role == .assistant
-                        ChatBubble(
+                        let bubble = ChatBubble(
                             message: msg,
                             isStreaming: isLastAssistant && isThinking,
                             chips: chipsLookup?(msg.id) ?? [],
@@ -384,10 +388,13 @@ private struct ChatTranscript: View {
                             onRegenerate: { onRegenerate(msg.id) },
                             onEdit: { onEdit(msg) }
                         )
-                        // 内容没变的 bubble 让 SwiftUI 跳过重建(切窗口回来、流式收
-                        // 新 token 时,只重渲染真正变了的那条)。见 ChatBubble: Equatable。
-                        .equatable()
-                        .id(msg.id)
+                        // 开关开 → 内容没变的 bubble 跳过重建(.equatable(),切窗口/流式
+                        // 更顺);关 → 总是重建(安全行为)。见 General → Chat。
+                        if optimize {
+                            bubble.equatable().id(msg.id)
+                        } else {
+                            bubble.id(msg.id)
+                        }
                     }
                     if isThinking {
                         ChatThinking()
