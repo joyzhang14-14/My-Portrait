@@ -53,6 +53,9 @@ final class StallDetector {
     /// 上次 evaluate 看到的 pending 数,用来判 backlog 是否在增长。
     /// nil = 还没记录过(第一轮 evaluate 时不报 backlog,等下一轮有 baseline)。
     private var prevPendingCount: Int?
+    /// 上次 evaluate 看到的已转录数,用来判转录是否还在出活。队列虽涨,但只要转录
+    /// 在增长 = 转译只是慢、没卡,不报 backlog(后台慢慢追是设计,不是故障)。
+    private var prevTranscribedCount: Int?
 
     private init() {}
 
@@ -84,6 +87,8 @@ final class StallDetector {
         // permission 那条已经早 return 前评估过 —— 它本来就和 pause 互斥意义。
         guard !pause.anyPaused else {
             prevVision = vision
+            prevPendingCount = pendingAudio.count
+            prevTranscribedCount = Int(audio.chunksTranscribed)
             return fresh
         }
 
@@ -138,19 +143,21 @@ final class StallDetector {
         if audioEngineEnabled,
            !pause.audioTranscriptionPaused,
            audio.startedAtMs > 0 {
-            // 3. audioBacklog:**队列在长且超阈值**才报。pending 大但在缩 →
-            //    transcriber 正在追赶历史积压,不是 stall。只有当
-            //    "增长 + 已超阈值 + 最老超 freshness" 三条同时成立,才说明
-            //    转录确实落后于输入。
+            // 3. audioBacklog:**队列在长 + 这段时间转录一条都没出活** 才报 = 转译
+            //    真卡死。只要转录还在出活(chunksTranscribed 在涨),哪怕慢 = 后台
+            //    正常追赶 / 延迟转录,**不报**——那本就是设计,不该当 stall 弹用户。
+            //    队列大但在缩,或转录在出活 → 都不是 stall。
             if nowMs - audio.startedAtMs > warmupMs,
-               let prev = prevPendingCount,
-               pendingAudio.count > prev,
+               let prevPending = prevPendingCount,
+               let prevTrans = prevTranscribedCount,
+               pendingAudio.count > prevPending,                  // 队列在涨
+               Int(audio.chunksTranscribed) <= prevTrans,         // 且这段时间一条都没转出来 = 卡死
                pendingAudio.count > audioBacklogPendingThreshold,
                pendingAudio.oldestAgeMs > audioBacklogOldestAgeMs {
-                let cause = "pending=\(pendingAudio.count) (was \(prev)), oldest \(pendingAudio.oldestAgeMs / 1000)s old"
+                let cause = "pending=\(pendingAudio.count) (was \(prevPending)), transcribed stuck at \(prevTrans), oldest \(pendingAudio.oldestAgeMs / 1000)s old"
                 if let v = makeVerdict(
                     kind: .audioBacklog,
-                    reason: "Audio transcription falling behind: queue growing (\(pendingAudio.count) pending). Check WhisperKit model load and CPU.",
+                    reason: "Audio transcription appears stuck — the queue is growing but nothing is being transcribed. Check WhisperKit model load and CPU.",
                     cause: cause, now: now
                 ) { fresh.append(v) }
             }
@@ -158,6 +165,7 @@ final class StallDetector {
 
         prevVision = vision
         prevPendingCount = pendingAudio.count
+        prevTranscribedCount = Int(audio.chunksTranscribed)
         return fresh
     }
 
