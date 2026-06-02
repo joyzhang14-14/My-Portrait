@@ -1,10 +1,10 @@
 import Foundation
 
-/// speech_style 提炼链路的 LLM prompt 模板。
+/// writing_style 提炼链路的 LLM prompt 模板。
 ///
-/// 输入数据由 SpeechStyleAgent.buildPrompt 拼接 —— records / edit_log /
-/// 已有 portrait/speech_style/ 现存条目。
-enum SpeechStylePrompts {
+/// 输入数据由 WritingStyleAgent.buildPrompt 拼接 —— records / edit_log /
+/// 已有 portrait/writing_style/ 现存条目。
+enum WritingStylePrompts {
 
     /// 主提炼 prompt —— 让 LLM 看一批 records(含 edit_log 时序),归纳出
     /// "用户的写作 / 表达风格" 维度的多个独立 facet,每个 facet 一个文件。
@@ -12,9 +12,9 @@ enum SpeechStylePrompts {
     static let distill = #"""
     You analyze a batch of writing_records — every record is a piece of TEXT
     the user actually typed (chat reply, doc paragraph, commit message, etc.)
-    — and extract long-term SPEECH STYLE entries about the user.
+    — and extract long-term WRITING STYLE entries about the user.
 
-    SPEECH STYLE = how the user TALKS / WRITES across contexts:
+    WRITING STYLE = how the user WRITES across contexts:
       - register & tone (casual / formal / terse / verbose)
       - language mixing (Chinese + English code-switching patterns)
       - signature phrasings, recurring openers / closers, emoji habits
@@ -36,7 +36,7 @@ enum SpeechStylePrompts {
     THE EDIT_LOG IS UNIQUE SIGNAL — pure OCR / final text cannot show
     revision rhythm. Read it carefully; behaviors like "writes a draft,
     deletes half, rewrites differently" or "types continuously without
-    deletes" are real speech-style traits worth capturing when consistent.
+    deletes" are real writing-style traits worth capturing when consistent.
 
     APP + CONTEXT ARE DIFFERENT VOICES — critical for accurate facets:
     The SAME user uses different voices in different contexts. Treat them

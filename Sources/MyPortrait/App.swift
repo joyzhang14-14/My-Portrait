@@ -301,19 +301,19 @@ struct MyPortraitApp: App {
         if args.contains("--writing-capture-backlog-reject") {
             WritingCaptureCLI.rejectBacklog()
         }
-        // `--speech-style-*` 独立提炼链路 CLI 入口。详见 SpeechStyleCLI。
-        if args.contains("--speech-style-run") {
-            let mode: SpeechStyleMode = args.contains("--auto") ? .auto : .manual
-            SpeechStyleCLI.run(mode: mode)
+        // `--writing-style-*` 独立提炼链路 CLI 入口。详见 WritingStyleCLI。
+        if args.contains("--writing-style-run") {
+            let mode: WritingStyleMode = args.contains("--auto") ? .auto : .manual
+            WritingStyleCLI.run(mode: mode)
         }
-        if args.contains("--speech-style-list") {
-            SpeechStyleCLI.list()
+        if args.contains("--writing-style-list") {
+            WritingStyleCLI.list()
         }
-        if let idx = args.firstIndex(of: "--speech-style-approve"), idx + 1 < args.count {
-            SpeechStyleCLI.approve(runId: args[idx + 1])
+        if let idx = args.firstIndex(of: "--writing-style-approve"), idx + 1 < args.count {
+            WritingStyleCLI.approve(runId: args[idx + 1])
         }
-        if let idx = args.firstIndex(of: "--speech-style-reject"), idx + 1 < args.count {
-            SpeechStyleCLI.reject(runId: args[idx + 1])
+        if let idx = args.firstIndex(of: "--writing-style-reject"), idx + 1 < args.count {
+            WritingStyleCLI.reject(runId: args[idx + 1])
         }
         // `--import-screenpipe [path]` 从 ~/.screenpipe 把历史 frames + audio
         // transcripts 搬到 My-Portrait,只导比当前最早数据老的部分。
@@ -325,11 +325,11 @@ struct MyPortraitApp: App {
         }
         // 一次性触发 PortraitWeight.refreshDistillCategories() —— 不调 LLM,
         // 只按当前公式重算 social/background/experiences/interests/skills/
-        // emotions 下所有 .md 的 weight。speech_style 顺手刷一遍。
+        // emotions 下所有 .md 的 weight。writing_style 顺手刷一遍。
         if args.contains("--portrait-weight-refresh") {
             PortraitWeight.refreshDistillCategories()
-            PortraitWeight.refreshSpeechStyle()
-            print("[portrait-weight] refreshed distill categories + speech_style")
+            PortraitWeight.refreshWritingStyle()
+            print("[portrait-weight] refreshed distill categories + writing_style")
             exit(0)
         }
         AppKeyboard.install()

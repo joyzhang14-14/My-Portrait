@@ -109,7 +109,7 @@ final class MemoryScheduler {
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
     private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
-    private let kLastSpeechStyle    = "scheduler.lastSpeechStyleRun"
+    private let kLastWritingStyle    = "scheduler.lastWritingStyleRun"
 
     private init() {}
 
@@ -197,21 +197,21 @@ final class MemoryScheduler {
             await runWritingCaptureJob()
         }
 
-        // speech_style:auto 模式 → 直接落 portrait/speech_style/,不审核。
+        // writing_style:auto 模式 → 直接落 portrait/writing_style/,不审核。
         // 跟 writing capture 一样不参与 event/portrait/personality 三锁。
-        if Self.shouldTriggerNow(config: s.speechStyle, now: now),
-           lastRunDay(kLastSpeechStyle) != localDayString(now) {
-            setLastRun(kLastSpeechStyle, now)
-            await runSpeechStyleJob()
+        if Self.shouldTriggerNow(config: s.writingStyle, now: now),
+           lastRunDay(kLastWritingStyle) != localDayString(now) {
+            setLastRun(kLastWritingStyle, now)
+            await runWritingStyleJob()
         }
     }
 
-    /// 跑 speech_style auto —— 跟 writing capture 同模式:失败 swallow + log,
-    /// 不阻塞下一次 tick。dependency gate:speech_style 是 writing_capture 的
+    /// 跑 writing_style auto —— 跟 writing capture 同模式:失败 swallow + log,
+    /// 不阻塞下一次 tick。dependency gate:writing_style 是 writing_capture 的
     /// 下游,没新 writing_records 可消费就早退,避免空跑。
-    func runSpeechStyleJob() async {
-        guard let distiller = SpeechStyleDistiller.shared else {
-            schedLog.warning("speechStyle tick: distiller not initialized — skip")
+    func runWritingStyleJob() async {
+        guard let distiller = WritingStyleDistiller.shared else {
+            schedLog.warning("writingStyle tick: distiller not initialized — skip")
             return
         }
         // dependency gate:0 unprocessed → 跳本次 tick,不调 distiller。
@@ -219,14 +219,14 @@ final class MemoryScheduler {
         // 的 nap-guard / refresh-weights 一连串开销。
         let unprocessed = (try? distiller.store.unprocessedCount()) ?? 0
         guard unprocessed > 0 else {
-            schedLog.info("speechStyle tick: 0 unprocessed writing_records — skip (waiting for writing_capture)")
+            schedLog.info("writingStyle tick: 0 unprocessed writing_records — skip (waiting for writing_capture)")
             return
         }
         do {
             let s = try await distiller.runAuto()
-            schedLog.info("speechStyle auto: status=\(s.status.rawValue, privacy: .public) records=\(s.recordsCount) drafts=\(s.draftsCount)")
+            schedLog.info("writingStyle auto: status=\(s.status.rawValue, privacy: .public) records=\(s.recordsCount) drafts=\(s.draftsCount)")
         } catch {
-            schedLog.warning("speechStyle auto failed: \(String(describing: error), privacy: .public)")
+            schedLog.warning("writingStyle auto failed: \(String(describing: error), privacy: .public)")
         }
     }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 所有 portrait 文件(包括 speech_style)共享的 weight 计算 + 衰减刷新。
+/// 所有 portrait 文件(包括 writing_style)共享的 weight 计算 + 衰减刷新。
 ///
 /// 公式:weight = ref_count × exp(-Δt / τ),τ = halfLifeDays / ln(2)
 /// 半衰期 30 天 = 一个月没新 ref → 权重砍半,180 天 ≈ 1.5%,永不归零。
@@ -57,15 +57,15 @@ enum PortraitWeight {
         return count
     }
 
-    /// SpeechStyleDistiller 的 link 格式 —— body 末尾 inline
-    /// `[[wr:<id>]], [[wr:<id>]], ...`。不 cap(speech_style render 也不 cap)。
+    /// WritingStyleDistiller 的 link 格式 —— body 末尾 inline
+    /// `[[wr:<id>]], [[wr:<id>]], ...`。不 cap(writing_style render 也不 cap)。
     /// `[[wr:<id>]]` 正则只编译一次 —— refresh 时每个文件都调,别每次重编译
     /// (正则编译比 DateFormatter 分配贵得多)。
-    private static let speechStyleRefRegex =
+    private static let writingStyleRefRegex =
         try? NSRegularExpression(pattern: #"\[\[wr:(\d+)\]\]"#)
 
-    static func extractSpeechStyleRefCount(from body: String) -> Int {
-        guard let regex = Self.speechStyleRefRegex else { return 0 }
+    static func extractWritingStyleRefCount(from body: String) -> Int {
+        guard let regex = Self.writingStyleRefRegex else { return 0 }
         let ns = body as NSString
         return regex.numberOfMatches(in: body, range: NSRange(location: 0, length: ns.length))
     }
@@ -80,9 +80,9 @@ enum PortraitWeight {
         }
     }
 
-    /// 刷 portrait/speech_style/ 下的 weight。SpeechStyleDistiller 入口调。
-    static func refreshSpeechStyle() {
-        refresh(in: PortraitPaths.categoryDir("speech_style"),
-                extractRefCount: extractSpeechStyleRefCount)
+    /// 刷 portrait/writing_style/ 下的 weight。WritingStyleDistiller 入口调。
+    static func refreshWritingStyle() {
+        refresh(in: PortraitPaths.categoryDir("writing_style"),
+                extractRefCount: extractWritingStyleRefCount)
     }
 }

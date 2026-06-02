@@ -888,9 +888,9 @@ private struct SchedulerStep: View {
                     desc: "Stages writing records from your typing for review. Approval is always manual.",
                     config: \.scheduler.writingCapture)
                 schedulerCard(
-                    title: "Speech style",
-                    desc: "Distills how you talk and write (formality, language mix, recurring phrases) into the Speech Style portrait.",
-                    config: \.scheduler.speechStyle)
+                    title: "Writing style",
+                    desc: "Distills how you write (formality, language mix, recurring phrases) into the Writing Style portrait.",
+                    config: \.scheduler.writingStyle)
 
                 Color.clear.frame(height: 8)
             }

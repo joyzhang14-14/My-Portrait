@@ -509,7 +509,7 @@ enum DBSchema {
         // v20 — writing_records:LLM 融合后的最终写作记录
         // ═══════════════════════════════════════════════════════════
         //
-        // Pass 2 Approve 后落地的表。Personality / Speech Style 分析以这里
+        // Pass 2 Approve 后落地的表。Personality / Writing Style 分析以这里
         // 为输入源。raw 三张表(typing_events / keystroke_log / frames)仍各自
         // 独立保留,通过 reference_*_ids 反向链当训练对。
         //
@@ -882,6 +882,35 @@ enum DBSchema {
             try db.alter(table: "writing_records") { t in
                 t.add(column: "location", .text)
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // v36 — speech_style → writing_style 全量改名
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 「speech_style」链路实际吃 writing_records(打字数据)提炼,名不副实。
+        // 全量改名 writing_style:表 / 列 / 索引一次 RENAME。v29/v30 历史迁移
+        // 保持原样(已在老用户 DB 上跑过,不能改)。SQLite 3.25+ 支持 RENAME
+        // TABLE / RENAME COLUMN,会自动改依赖的 index 定义;索引名本身不变,
+        // 这里顺手 DROP + 重建成新名,保持彻底一致。
+        //
+        // portrait/speech_style/ 文件夹 + 每个 .md frontmatter + config 旧 key
+        // 的迁移在文件系统层,不在 DB migration 里(见
+        // PortraitPaths.migrateSpeechStyleToWritingStyle / ConfigSchema 旧 key 回退)。
+        m.registerMigration("v36_rename_speech_style_to_writing_style") { db in
+            try db.execute(sql: "ALTER TABLE speech_style_runs RENAME TO writing_style_runs")
+            try db.execute(sql: "ALTER TABLE speech_style_staged RENAME TO writing_style_staged")
+            try db.execute(sql:
+                "ALTER TABLE writing_records RENAME COLUMN speech_style_processed_at TO writing_style_processed_at")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_writing_records_ss_pending")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_speech_style_runs_status")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_speech_style_staged_run")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_records_ws_pending ON writing_records(writing_style_processed_at)")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_style_runs_status ON writing_style_runs(status, started_at)")
+            try db.execute(sql:
+                "CREATE INDEX idx_writing_style_staged_run ON writing_style_staged(run_id)")
         }
 
         return m

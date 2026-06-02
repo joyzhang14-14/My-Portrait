@@ -78,16 +78,16 @@ struct MemorySettingsView: View {
     @State private var writingCaptureExpandedRecords: [String: [StagedRecordRow]] = [:]
     @State private var writingCaptureExpandedError: [String: String] = [:]
 
-    // speech_style 提炼链路的 UI 状态(独立于上面所有 pipeline)。
+    // writing_style 提炼链路的 UI 状态(独立于上面所有 pipeline)。
     // Running / status / task 走 UIState.shared,跟 writing capture 同模式。
-    @ObservedObject private var speechStyleUI = SpeechStyleUIState.shared
-    @State private var speechStyleConfirm: Bool = false
-    @State private var speechStylePending: [SpeechStyleRunRow] = []
-    @State private var speechStyleUnprocessed: Int = 0
-    @State private var speechStylePreviewRun: String? = nil
+    @ObservedObject private var writingStyleUI = WritingStyleUIState.shared
+    @State private var writingStyleConfirm: Bool = false
+    @State private var writingStylePending: [WritingStyleRunRow] = []
+    @State private var writingStyleUnprocessed: Int = 0
+    @State private var writingStylePreviewRun: String? = nil
     /// 点击某一行 draft 时打开的 sheet,只显示这一条 draft 详情。
-    @State private var speechStylePreviewDraft: SpeechStyleStagedRow? = nil
-    @State private var speechStyleExpandedDrafts: [String: [SpeechStyleStagedRow]] = [:]
+    @State private var writingStylePreviewDraft: WritingStyleStagedRow? = nil
+    @State private var writingStyleExpandedDrafts: [String: [WritingStyleStagedRow]] = [:]
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -177,7 +177,7 @@ struct MemorySettingsView: View {
         }
         refreshStaging()
         refreshWritingCapture()
-        refreshSpeechStyle()
+        refreshWritingStyle()
     }
 
     /// 重新从 DB 拉 backlog pending row(date_utc='all')。
@@ -448,9 +448,9 @@ struct MemorySettingsView: View {
                 config: \.scheduler.writingCapture)
             Divider().padding(.vertical, 4)
             schedulerBlock(
-                title: "Speech style distillation",
-                desc: "Reads approved writing_records (unprocessed) and distills speech-style facets (register, voice, edit rhythm) into portrait/speech_style/. Auto-run commits drafts directly — manual run from the section below stages drafts for review.",
-                config: \.scheduler.speechStyle)
+                title: "Writing style distillation",
+                desc: "Reads approved writing_records (unprocessed) and distills writing-style facets (register, voice, edit rhythm) into portrait/writing_style/. Auto-run commits drafts directly — manual run from the section below stages drafts for review.",
+                config: \.scheduler.writingStyle)
             Divider().padding(.vertical, 4)
             intRow("Days processed per run",
                    value: cfg.binding(\.memory.eventDayCap),
@@ -625,62 +625,62 @@ struct MemorySettingsView: View {
         }
     }
 
-    // MARK: - Speech style(独立链路,跟 writing capture 同模式)
+    // MARK: - Writing style(独立链路,跟 writing capture 同模式)
 
-    /// speech_style 提炼链路的 inline 子区块。manual 模式 = staged + pending
-    /// review;auto 模式由 scheduler 自动跑,直接落 portrait/speech_style/。
+    /// writing_style 提炼链路的 inline 子区块。manual 模式 = staged + pending
+    /// review;auto 模式由 scheduler 自动跑,直接落 portrait/writing_style/。
     /// alert / sheet 由 runNowSection 顶端挂。跟其它 triggerRow 同形。
     @ViewBuilder
-    private var speechStyleBlock: some View {
+    private var writingStyleBlock: some View {
         VStack(spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Distill speech style")
+                    Text("Distill writing style")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("**Downstream of writing capture** — reads approved writing_records marked as unprocessed and extracts speech-style facets (register, voice, edit rhythm) into portrait/speech_style/. Up to \(SpeechStyleDistiller.defaultBatchCap) records per run · \(speechStyleUnprocessed) unprocessed remaining. Manual run stages drafts; auto schedule writes directly.")
+                    Text("**Downstream of writing capture** — reads approved writing_records marked as unprocessed and extracts writing-style facets (register, voice, edit rhythm) into portrait/writing_style/. Up to \(WritingStyleDistiller.defaultBatchCap) records per run · \(writingStyleUnprocessed) unprocessed remaining. Manual run stages drafts; auto schedule writes directly.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
-                let ssHasPending = !speechStylePending.isEmpty
+                let ssHasPending = !writingStylePending.isEmpty
                 let ssDisabledReason: String? = {
-                    if SpeechStyleDistiller.shared == nil { return "Speech style distiller is not available." }
-                    if speechStyleUI.isRunning { return "Speech style is already running." }
+                    if WritingStyleDistiller.shared == nil { return "Writing style distiller is not available." }
+                    if writingStyleUI.isRunning { return "Writing style is already running." }
                     if ssHasPending { return "Pending review — Approve / Reject first." }
-                    if speechStyleUnprocessed == 0 {
+                    if writingStyleUnprocessed == 0 {
                         return "Nothing to distill — run writing capture first to produce writing_records."
                     }
                     return nil
                 }()
-                Button(speechStyleUI.isRunning ? "Running…" : "Run") {
-                    speechStyleConfirm = true
+                Button(writingStyleUI.isRunning ? "Running…" : "Run") {
+                    writingStyleConfirm = true
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(ssDisabledReason != nil)
-                .help(ssDisabledReason ?? "Run speech style distillation (manual mode, staged for review).")
+                .help(ssDisabledReason ?? "Run writing style distillation (manual mode, staged for review).")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if speechStyleUI.isRunning {
+            if writingStyleUI.isRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("LLM analyzing speech style — may take a few minutes…")
+                    Text("LLM analyzing writing style — may take a few minutes…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Button("Stop") {
                         let n = PiAgentRegistry.shared.stopAll()
-                        speechStyleUI.task?.cancel()
-                        speechStyleUI.task = nil
-                        speechStyleUI.isRunning = false
+                        writingStyleUI.task?.cancel()
+                        writingStyleUI.task = nil
+                        writingStyleUI.isRunning = false
                         // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
                         // 启动时 unprocessedCount / pending 判断会被僵尸行误导。
-                        let zombies = (try? SpeechStyleDistiller.shared?.store
+                        let zombies = (try? WritingStyleDistiller.shared?.store
                             .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-                        speechStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
-                        refreshSpeechStyle()
+                        writingStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+                        refreshWritingStyle()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -688,8 +688,8 @@ struct MemorySettingsView: View {
                 }
                 .padding(.top, 6)
             }
-            if !speechStyleUI.statusMessage.isEmpty {
-                Text(speechStyleUI.statusMessage)
+            if !writingStyleUI.statusMessage.isEmpty {
+                Text(writingStyleUI.statusMessage)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -699,9 +699,9 @@ struct MemorySettingsView: View {
 
             // Pending review:直接展开 drafts(NEW/CHANGED 行),不藏 chevron。
             // 跟 reviewSection 同形态:左侧 ForEach 行 + 右侧 Approve/Reject 按钮。
-            if !speechStylePending.isEmpty {
+            if !writingStylePending.isEmpty {
                 Divider().padding(.vertical, 6)
-                ForEach(speechStylePending, id: \.runId) { run in
+                ForEach(writingStylePending, id: \.runId) { run in
                     VStack(alignment: .leading, spacing: 6) {
                         // 头部行:run 元信息 + Approve/Reject
                         HStack(alignment: .center, spacing: 12) {
@@ -715,18 +715,18 @@ struct MemorySettingsView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Reject") {
-                                Task { @MainActor in await rejectSpeechStyle(runId: run.runId) }
+                                Task { @MainActor in await rejectWritingStyle(runId: run.runId) }
                             }
                             .buttonStyle(.bordered).controlSize(.small).tint(.red)
                             Button("Approve") {
-                                Task { @MainActor in await approveSpeechStyle(runId: run.runId) }
+                                Task { @MainActor in await approveWritingStyle(runId: run.runId) }
                             }
                             .buttonStyle(.borderedProminent).controlSize(.small)
                         }
                         // drafts 直接展开,跟 event/portrait/personality 的 reviewBlock 同款。
                         // 第一次出现时按需加载。
-                        inlineSpeechStyleDrafts(runId: run.runId)
-                            .onAppear { ensureSpeechStyleDraftsLoaded(runId: run.runId) }
+                        inlineWritingStyleDrafts(runId: run.runId)
+                            .onAppear { ensureWritingStyleDraftsLoaded(runId: run.runId) }
                     }
                 }
             }
@@ -734,13 +734,13 @@ struct MemorySettingsView: View {
     }
 
     /// 第一次展示 drafts 时按需 fetch(避免每帧重查 DB)。
-    private func ensureSpeechStyleDraftsLoaded(runId: String) {
-        if speechStyleExpandedDrafts[runId] != nil { return }
-        guard let distiller = SpeechStyleDistiller.shared else { return }
+    private func ensureWritingStyleDraftsLoaded(runId: String) {
+        if writingStyleExpandedDrafts[runId] != nil { return }
+        guard let distiller = WritingStyleDistiller.shared else { return }
         let store = distiller.store
         Task.detached(priority: .userInitiated) {
             let rows = (try? store.fetchStaged(runId: runId)) ?? []
-            await MainActor.run { speechStyleExpandedDrafts[runId] = rows }
+            await MainActor.run { writingStyleExpandedDrafts[runId] = rows }
         }
     }
 
@@ -748,15 +748,15 @@ struct MemorySettingsView: View {
     /// 标签 + 单行标题 + chevron → 点击直接打开 Detail sheet 看完整 body。
     /// 之前的卡片样式预览只截 200 字 + 没 diff,update 看着像没变化。
     @ViewBuilder
-    private func inlineSpeechStyleDrafts(runId: String) -> some View {
-        if let rows = speechStyleExpandedDrafts[runId] {
+    private func inlineWritingStyleDrafts(runId: String) -> some View {
+        if let rows = writingStyleExpandedDrafts[runId] {
             if rows.isEmpty {
                 Text("(no drafts)")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows, id: \.id) { d in
-                        speechStyleDraftRow(d, parentRunId: runId)
+                        writingStyleDraftRow(d, parentRunId: runId)
                     }
                 }
             }
@@ -768,7 +768,7 @@ struct MemorySettingsView: View {
 
     /// 一条 draft 的行:`[NEW|CHANGED|NOOP] <title>` + chevron → 整行点击
     /// 打开 detail sheet,跟 changeRow 视觉一致。
-    private func speechStyleDraftRow(_ d: SpeechStyleStagedRow, parentRunId: String) -> some View {
+    private func writingStyleDraftRow(_ d: WritingStyleStagedRow, parentRunId: String) -> some View {
         let (label, color): (String, Color) = {
             switch d.action {
             case .create: return ("NEW", .green)
@@ -778,7 +778,7 @@ struct MemorySettingsView: View {
         }()
         _ = parentRunId    // 不再用 —— 改成 per-draft preview。
         return Button {
-            speechStylePreviewDraft = d
+            writingStylePreviewDraft = d
         } label: {
             HStack(spacing: 8) {
                 Text(label)
@@ -799,63 +799,63 @@ struct MemorySettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func refreshSpeechStyle() {
-        guard let distiller = SpeechStyleDistiller.shared else { return }
+    private func refreshWritingStyle() {
+        guard let distiller = WritingStyleDistiller.shared else { return }
         let store = distiller.store
         Task.detached(priority: .userInitiated) {
             let pending = (try? store.fetchPendingReviewRuns()) ?? []
             let unprocessed = (try? store.unprocessedCount()) ?? 0
             await MainActor.run {
-                speechStylePending = pending
-                speechStyleUnprocessed = unprocessed
+                writingStylePending = pending
+                writingStyleUnprocessed = unprocessed
             }
         }
     }
 
     @MainActor
-    private func runSpeechStyleManual() async {
-        guard let distiller = SpeechStyleDistiller.shared else {
-            speechStyleUI.statusMessage = "Distiller not initialized."
+    private func runWritingStyleManual() async {
+        guard let distiller = WritingStyleDistiller.shared else {
+            writingStyleUI.statusMessage = "Distiller not initialized."
             return
         }
-        speechStyleUI.isRunning = true
-        speechStyleUI.statusMessage = "Running speech style distillation…"
+        writingStyleUI.isRunning = true
+        writingStyleUI.statusMessage = "Running writing style distillation…"
         defer {
-            speechStyleUI.isRunning = false
-            refreshSpeechStyle()
+            writingStyleUI.isRunning = false
+            refreshWritingStyle()
         }
         do {
             let s = try await distiller.runManual()
-            speechStyleUI.statusMessage = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
+            writingStyleUI.statusMessage = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
         } catch {
-            speechStyleUI.statusMessage = "Failed: \(error.localizedDescription)"
+            writingStyleUI.statusMessage = "Failed: \(error.localizedDescription)"
         }
     }
 
     @MainActor
-    private func approveSpeechStyle(runId: String) async {
-        guard let distiller = SpeechStyleDistiller.shared else { return }
+    private func approveWritingStyle(runId: String) async {
+        guard let distiller = WritingStyleDistiller.shared else { return }
         do {
             let n = try distiller.approveStaged(runId: runId)
-            speechStyleUI.statusMessage = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/speech_style/."
-            speechStyleExpandedDrafts.removeValue(forKey: runId)
+            writingStyleUI.statusMessage = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/writing_style/."
+            writingStyleExpandedDrafts.removeValue(forKey: runId)
         } catch {
-            speechStyleUI.statusMessage = "Approve failed: \(error.localizedDescription)"
+            writingStyleUI.statusMessage = "Approve failed: \(error.localizedDescription)"
         }
-        refreshSpeechStyle()
+        refreshWritingStyle()
     }
 
     @MainActor
-    private func rejectSpeechStyle(runId: String) async {
-        guard let distiller = SpeechStyleDistiller.shared else { return }
+    private func rejectWritingStyle(runId: String) async {
+        guard let distiller = WritingStyleDistiller.shared else { return }
         do {
             try distiller.rejectStaged(runId: runId)
-            speechStyleUI.statusMessage = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
-            speechStyleExpandedDrafts.removeValue(forKey: runId)
+            writingStyleUI.statusMessage = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
+            writingStyleExpandedDrafts.removeValue(forKey: runId)
         } catch {
-            speechStyleUI.statusMessage = "Reject failed: \(error.localizedDescription)"
+            writingStyleUI.statusMessage = "Reject failed: \(error.localizedDescription)"
         }
-        refreshSpeechStyle()
+        refreshWritingStyle()
     }
 
     /// 展开 / 折叠某天的内联 record 列表。第一次展开时异步加载。
@@ -961,7 +961,7 @@ struct MemorySettingsView: View {
     // MARK: - Memory pipeline 的 manualRunSection(原有)
 
     /// 统一的 Run now 卡片 —— 把 memory pipeline 3 个 trigger + writing capture
-     /// + speech style distillation 全揉进一张卡,用 divider 分组。各自的 sheet /
+     /// + writing style distillation 全揉进一张卡,用 divider 分组。各自的 sheet /
      /// alert 全部挂在这张卡的最外层。
     private var runNowSection: some View {
         section(
@@ -991,20 +991,20 @@ struct MemorySettingsView: View {
             Divider().padding(.vertical, 2)
             writingCaptureBlock
 
-            // —— Speech style distillation(独立链路)
+            // —— Writing style distillation(独立链路)
             Divider().padding(.vertical, 2)
-            speechStyleBlock
+            writingStyleBlock
         }
         // 三种 sheet / alert 统一挂在最外层 —— 内层 block 只负责触发对应 @State。
         .sheet(item: $writingCapturePreviewDate.mappedToIdentifiable) { wrapped in
             WritingCapturePreview(date: wrapped.id)
         }
-        .sheet(item: $speechStylePreviewRun.mappedToIdentifiable) { wrapped in
-            SpeechStylePreview(runId: wrapped.id)
+        .sheet(item: $writingStylePreviewRun.mappedToIdentifiable) { wrapped in
+            WritingStylePreview(runId: wrapped.id)
         }
         // Per-draft sheet:点单条 NEW/CHANGED 行打开,只显示这一条 draft 详情。
-        .sheet(item: $speechStylePreviewDraft) { draft in
-            SpeechStyleDraftDetail(draft: draft)
+        .sheet(item: $writingStylePreviewDraft) { draft in
+            WritingStyleDraftDetail(draft: draft)
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
@@ -1014,13 +1014,13 @@ struct MemorySettingsView: View {
         } message: {
             Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (route + segment) + Pass 3 (multi-source fusion) + Pass 4 (content review) LLM calls. Output is staged for review.")
         }
-        .alert("Run speech style distillation?", isPresented: $speechStyleConfirm) {
+        .alert("Run writing style distillation?", isPresented: $writingStyleConfirm) {
             Button("Run", role: .none) {
-                speechStyleUI.task = Task { @MainActor in await runSpeechStyleManual() }
+                writingStyleUI.task = Task { @MainActor in await runWritingStyleManual() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Analyze up to \(SpeechStyleDistiller.defaultBatchCap) unprocessed writing_records with the LLM. Drafts are staged for review.")
+            Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed writing_records with the LLM. Drafts are staged for review.")
         }
     }
 
@@ -1920,7 +1920,7 @@ private struct RejectReasonSheet: View {
     }
 }
 
-// MARK: - SpeechStylePreview sheet
+// MARK: - WritingStylePreview sheet
 
 /// 单条 draft 的详情 sheet。布局:
 ///  - 顶部紧凑 header(action badge + slug + refs link + Close)
@@ -1928,11 +1928,11 @@ private struct RejectReasonSheet: View {
 ///  - 标题
 ///  - 正文:update 时 BEFORE / AFTER 两栏 diff,create / noop 时单栏
 ///
-/// refs 点击 → 弹二级 sheet 列源 records 全文(SpeechStyleRefsSheet)
-private struct SpeechStyleDraftDetail: View {
-    let draft: SpeechStyleStagedRow
+/// refs 点击 → 弹二级 sheet 列源 records 全文(WritingStyleRefsSheet)
+private struct WritingStyleDraftDetail: View {
+    let draft: WritingStyleStagedRow
     @Environment(\.dismiss) private var dismiss
-    @State private var runMeta: SpeechStyleRunRow? = nil
+    @State private var runMeta: WritingStyleRunRow? = nil
     @State private var existingBody: String? = nil
     @State private var showRefs: Bool = false
 
@@ -1957,7 +1957,7 @@ private struct SpeechStyleDraftDetail: View {
         .frame(width: 780, height: 540)
         .task { await load() }
         .sheet(isPresented: $showRefs) {
-            SpeechStyleRefsSheet(ids: draft.sourceRecordIds)
+            WritingStyleRefsSheet(ids: draft.sourceRecordIds)
         }
     }
 
@@ -2061,18 +2061,18 @@ private struct SpeechStyleDraftDetail: View {
     }
 
     /// approve 后落盘的最终 body —— LLM body + derived 块。
-    /// 跟 SpeechStyleDistiller.renderBody 的 update 路径行为一致(union 旧 ids)。
+    /// 跟 WritingStyleDistiller.renderBody 的 update 路径行为一致(union 旧 ids)。
     private var finalAfterBody: String {
         // update 时 derived ids = 旧 .md 抽出的 ids ∪ 这次 draft 的 sourceRecordIds
         // create / noop 时 = 这次 draft 的 sourceRecordIds
         var ids: [Int64] = []
         if draft.action == .update, let prior = existingBody {
-            ids = SpeechStyleDistiller.extractDerivedIds(from: prior)
+            ids = WritingStyleDistiller.extractDerivedIds(from: prior)
         }
         for id in draft.sourceRecordIds where !ids.contains(id) {
             ids.append(id)
         }
-        return SpeechStyleDistiller.renderBody(
+        return WritingStyleDistiller.renderBody(
             title: draft.title, body: draft.body, sourceIds: ids
         )
     }
@@ -2135,13 +2135,13 @@ private struct SpeechStyleDraftDetail: View {
             ? (draft.existingSlug ?? draft.slug)
             : nil
         // Run 元数据
-        if let store = SpeechStyleDistiller.shared?.store {
+        if let store = WritingStyleDistiller.shared?.store {
             let r = (try? store.fetchRun(runId: runIdLocal)) ?? nil
             runMeta = r
         }
-        // 现有 portrait/speech_style/<slug>.md 的 body
+        // 现有 portrait/writing_style/<slug>.md 的 body
         if let slug = slugLocal {
-            let url = PortraitPaths.categoryDir("speech_style")
+            let url = PortraitPaths.categoryDir("writing_style")
                 .appendingPathComponent(slug + ".md")
             let body = (try? PortraitFileIO.read(from: url))?.body
             existingBody = body
@@ -2150,11 +2150,11 @@ private struct SpeechStyleDraftDetail: View {
 }
 
 /// 二级 sheet:展示一组 source writing_records 的全文。
-/// 点 SpeechStyleDraftDetail 顶部 "N refs" 按钮打开。
-private struct SpeechStyleRefsSheet: View {
+/// 点 WritingStyleDraftDetail 顶部 "N refs" 按钮打开。
+private struct WritingStyleRefsSheet: View {
     let ids: [Int64]
     @Environment(\.dismiss) private var dismiss
-    @State private var records: [SpeechStyleRecordInput] = []
+    @State private var records: [WritingStyleRecordInput] = []
     @State private var loaded = false
 
     var body: some View {
@@ -2192,7 +2192,7 @@ private struct SpeechStyleRefsSheet: View {
         }
         .frame(width: 720, height: 540)
         .task {
-            if let store = SpeechStyleDistiller.shared?.store {
+            if let store = WritingStyleDistiller.shared?.store {
                 let rows = (try? store.fetchRecordsByIds(ids)) ?? []
                 records = rows
             }
@@ -2200,7 +2200,7 @@ private struct SpeechStyleRefsSheet: View {
         }
     }
 
-    private func recordCard(_ r: SpeechStyleRecordInput) -> some View {
+    private func recordCard(_ r: WritingStyleRecordInput) -> some View {
         let dt = Date(timeIntervalSince1970: TimeInterval(r.startTs) / 1000)
         let fmt: DateFormatter = {
             let f = DateFormatter()
@@ -2255,16 +2255,16 @@ private struct SpeechStyleRefsSheet: View {
     }
 }
 
-private struct SpeechStylePreview: View {
+private struct WritingStylePreview: View {
     let runId: String
     @Environment(\.dismiss) private var dismiss
-    @State private var drafts: [SpeechStyleStagedRow] = []
+    @State private var drafts: [WritingStyleStagedRow] = []
     @State private var loadError: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Speech style · run \(String(runId.prefix(8)))")
+                Text("Writing style · run \(String(runId.prefix(8)))")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button("Close") { dismiss() }
@@ -2297,7 +2297,7 @@ private struct SpeechStylePreview: View {
         .task { load() }
     }
 
-    private func draftCard(_ d: SpeechStyleStagedRow) -> some View {
+    private func draftCard(_ d: WritingStyleStagedRow) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(d.action.rawValue).font(.system(size: 10))
@@ -2328,7 +2328,7 @@ private struct SpeechStylePreview: View {
     }
 
     private func load() {
-        guard let distiller = SpeechStyleDistiller.shared else {
+        guard let distiller = WritingStyleDistiller.shared else {
             loadError = "Distiller not initialized"
             return
         }

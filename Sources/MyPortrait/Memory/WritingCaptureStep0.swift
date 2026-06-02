@@ -61,7 +61,7 @@ struct WritingCaptureStep0 {
         let allSessions = segmented
 
         // 2. throwaway 过滤 —— 只过滤"纯 OCR 噪音"(0 typing + OCR 太短)。
-        // 任何 typing_events 一律直通(短输出是 speech-style 信号,LLM 判 kind)。
+        // 任何 typing_events 一律直通(短输出是 writing-style 信号,LLM 判 kind)。
         var kept: [WritingCaptureRawSession] = []
         var thrown: [WritingCaptureThrowaway] = []
         for s in allSessions {

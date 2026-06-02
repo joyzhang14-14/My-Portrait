@@ -1,14 +1,14 @@
 import Foundation
 import os.log
 
-private let ssAgentLog = Logger(subsystem: "com.myportrait.memory", category: "speech-style-agent")
+private let ssAgentLog = Logger(subsystem: "com.myportrait.memory", category: "writing-style-agent")
 
-/// speech_style 提炼 Agent —— 把一批 records + 现存 portrait/speech_style/
-/// 文件喂 LLM,返回 [SpeechStyleDraft] 决策列表。
+/// writing_style 提炼 Agent —— 把一批 records + 现存 portrait/writing_style/
+/// 文件喂 LLM,返回 [WritingStyleDraft] 决策列表。
 ///
 /// LLM 走 PiAgent / ClaudeCodeAgent(跟 PortraitDistiller 同套路)。
 @MainActor
-final class SpeechStyleAgent {
+final class WritingStyleAgent {
 
     enum AgentError: LocalizedError {
         case agentSpawn(String)
@@ -28,10 +28,10 @@ final class SpeechStyleAgent {
     struct Output {
         let prompt: String
         let rawResponse: String
-        let drafts: [SpeechStyleDraft]
+        let drafts: [WritingStyleDraft]
     }
 
-    /// 现存 portrait/speech_style/<slug>.md 的轻量摘要 —— 喂 LLM 当 "已有
+    /// 现存 portrait/writing_style/<slug>.md 的轻量摘要 —— 喂 LLM 当 "已有
     /// 条目" 让它判 update vs create。
     struct ExistingEntry: Sendable {
         let slug: String
@@ -52,7 +52,7 @@ final class SpeechStyleAgent {
     }
 
     func run(
-        records: [SpeechStyleRecordInput],
+        records: [WritingStyleRecordInput],
         existing: [ExistingEntry]
     ) async throws -> Output {
         let prompt = Self.buildPrompt(records: records, existing: existing)
@@ -66,7 +66,7 @@ final class SpeechStyleAgent {
         catch { throw AgentError.agentSpawn(error.localizedDescription) }
         defer { agent.stop() }
 
-        let coordinator = SpeechStyleCoordinator()
+        let coordinator = WritingStyleCoordinator()
         let consumerTask = Task { [events = agent.events] in
             for await event in events { await coordinator.handle(event) }
         }
@@ -95,7 +95,7 @@ final class SpeechStyleAgent {
 
         if let err = await coordinator.consumeError() {
             if BudgetSignal.isExhausted(err) {
-                throw BudgetExhaustedError(processor: "SpeechStyleAgent", message: err)
+                throw BudgetExhaustedError(processor: "WritingStyleAgent", message: err)
             }
             if collected.isEmpty {
                 throw AgentError.agentSpawn("LLM error: \(err)")
@@ -119,12 +119,12 @@ final class SpeechStyleAgent {
     nonisolated static let existingBodyExcerptChars = 400
 
     static func buildPrompt(
-        records: [SpeechStyleRecordInput],
+        records: [WritingStyleRecordInput],
         existing: [ExistingEntry]
     ) -> String {
-        var lines: [String] = [SpeechStylePrompts.distill]
+        var lines: [String] = [WritingStylePrompts.distill]
         lines.append("")
-        lines.append("EXISTING ENTRIES (under portrait/speech_style/, may be empty):")
+        lines.append("EXISTING ENTRIES (under portrait/writing_style/, may be empty):")
         if existing.isEmpty {
             lines.append("(none yet)")
         } else {
@@ -189,7 +189,7 @@ final class SpeechStyleAgent {
 
     /// LLM 顶层返回 JSON array(不是 wrapping object)。先抽第一个平衡 array。
     /// 套用 Pass3 的 extractFirstBalancedJSONObject 思路,改成 `[ ]`。
-    static func parse(from response: String) throws -> [SpeechStyleDraft] {
+    static func parse(from response: String) throws -> [WritingStyleDraft] {
         guard let jsonStr = extractFirstBalancedJSONArray(response) else {
             let preview = String(response.prefix(500))
             throw AgentError.malformedJSON("noJSONInResponse — raw[:500]=\(preview)")
@@ -200,7 +200,7 @@ final class SpeechStyleAgent {
         do {
             let parsed = try JSONDecoder().decode([RawDecision].self, from: data)
             return try parsed.map { raw in
-                guard let act = SpeechStyleDraft.Action(rawValue: raw.action) else {
+                guard let act = WritingStyleDraft.Action(rawValue: raw.action) else {
                     throw AgentError.malformedJSON("invalid action: \(raw.action)")
                 }
                 let slugClean = raw.slug.lowercased()
@@ -209,7 +209,7 @@ final class SpeechStyleAgent {
                 guard !slugClean.isEmpty, slugClean.count <= 60 else {
                     throw AgentError.malformedJSON("invalid slug: \(raw.slug)")
                 }
-                return SpeechStyleDraft(
+                return WritingStyleDraft(
                     action: act,
                     slug: slugClean,
                     title: raw.title,
@@ -221,9 +221,9 @@ final class SpeechStyleAgent {
         } catch let e as AgentError {
             throw e
         } catch {
-            try? response.write(toFile: "/tmp/speech-style-last-response.txt",
+            try? response.write(toFile: "/tmp/writing-style-last-response.txt",
                                 atomically: false, encoding: .utf8)
-            throw AgentError.malformedJSON("\(error.localizedDescription) — full response dumped /tmp/speech-style-last-response.txt")
+            throw AgentError.malformedJSON("\(error.localizedDescription) — full response dumped /tmp/writing-style-last-response.txt")
         }
     }
 
@@ -270,7 +270,7 @@ final class SpeechStyleAgent {
 
 // MARK: - Coordinator
 
-private actor SpeechStyleCoordinator {
+private actor WritingStyleCoordinator {
     private var buffer: String = ""
     private var currentID: String?
     private var pending: CheckedContinuation<String, Never>?

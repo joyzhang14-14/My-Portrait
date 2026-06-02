@@ -79,7 +79,7 @@ final class PortraitDistiller {
         let start = Date()
 
         // 入口先刷一次 weight —— 即使本轮 LLM 没动某条 entry,也按当前时间
-        // 让它的 weight 随 lastModified 衰减。跟 SpeechStyle 同套路。
+        // 让它的 weight 随 lastModified 衰减。跟 WritingStyle 同套路。
         PortraitWeight.refreshDistillCategories()
 
         // 1. Group events by category from disk.

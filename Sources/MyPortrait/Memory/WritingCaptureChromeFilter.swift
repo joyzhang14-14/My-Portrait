@@ -13,7 +13,7 @@ import os.log
 ///
 /// 只对 `text_source == "ocr"` 生效;AX 帧 word list 为空,自然不会动。
 ///
-/// 仅 writing capture 调用 —— 其他 pipeline(personality/speech-style)继续用
+/// 仅 writing capture 调用 —— 其他 pipeline(personality/writing-style)继续用
 /// 原始 full_text。
 enum WritingCaptureChromeFilter {
     static let menubarTopMax: Double = 0.035
