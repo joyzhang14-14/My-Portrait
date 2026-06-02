@@ -36,18 +36,11 @@ enum SpeakerOrganizer {
     static func run(unidentifiedIds: [String]) async throws -> [Proposal] {
         guard !unidentifiedIds.isEmpty else { throw OrganizeError.noUnidentified }
 
-        // 1. Resolve provider from the default preset (same as chat).
-        let pres = ConfigStore.shared.aiModels.presets.first(where: { $0.isDefault })
-        let provider: Provider
-        let model: String
-        let refOverride: String?
-        if let p = pres, let prov = Provider(rawValue: p.provider) {
-            provider = prov
-            model = p.model
-            refOverride = p.apiKeyRef.isEmpty ? nil : p.apiKeyRef
-        } else {
-            throw OrganizeError.noProvider
-        }
+        // 1. 解析 provider —— 跟 chat / cron 同源。原来只读 legacy presets(新用户为空),
+        //    在 Connections 连了 provider 也看不见 → 误报 "No AI provider configured"。
+        //    CronJobExecutor.providerResolver 在 boot(ContentView)被接到真 resolver:
+        //    优先 default preset,否则回退 appState.activeAIId(= Connections 连接的 AI)。
+        let (provider, model, refOverride) = CronJobExecutor.providerResolver()
 
         // 2. Collect samples per speaker off the main actor (SQLite reads).
         let samples = await Task.detached(priority: .userInitiated) {
