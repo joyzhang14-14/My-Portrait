@@ -974,27 +974,41 @@ struct MemorySettingsView: View {
             triggerRow(.distill)
             Divider().padding(.vertical, 2)
             triggerRow(.personality)
-            if !runningTriggers.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(runningTriggers.count == 1
-                         ? "1 job running…"
-                         : "\(runningTriggers.count) jobs running…")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("Stop all") {
-                        let n = PiAgentRegistry.shared.stopAll()
-                        for (_, task) in runTasks { task.cancel() }
-                        runTasks.removeAll()
-                        runningTriggers.removeAll()
-                        actionStatus = "Stopped — killed \(n) LLM process(es)."
+            // spinner + Stop 区:同时考虑本 View 触发的 + scheduler 后台
+             // 触发的 run。之前只看 runningTriggers,scheduler tick 跑起来时
+             // 按钮显示 Running… 但没 spinner / 没 Stop —— 用户看着像卡死。
+            do {
+                let sched = MemoryScheduler.shared
+                var schedRunning: [String] = []
+                if sched.eventRunning       { schedRunning.append("events") }
+                if sched.distillRunning     { schedRunning.append("distill") }
+                if sched.personalityRunning { schedRunning.append("personality") }
+                let totalRunning = runningTriggers.count + schedRunning.count
+                if totalRunning > 0 {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(totalRunning == 1
+                             ? "1 job running…"
+                             : "\(totalRunning) jobs running…")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button("Stop all") {
+                            // PiAgentRegistry.stopAll() 杀所有 LLM 子进程 ——
+                            // scheduler 那边的 `try await` 会抛 → runStep catch
+                            // → applyOutcome(failed) → @Observable flag 自然清。
+                            let n = PiAgentRegistry.shared.stopAll()
+                            for (_, task) in runTasks { task.cancel() }
+                            runTasks.removeAll()
+                            runningTriggers.removeAll()
+                            actionStatus = "Stopped — killed \(n) LLM process(es)."
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.red)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.red)
+                    .padding(.top, 6)
                 }
-                .padding(.top, 6)
             }
             if !actionStatus.isEmpty {
                 Text(actionStatus)
