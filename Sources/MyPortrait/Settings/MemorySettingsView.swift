@@ -1058,6 +1058,19 @@ struct MemorySettingsView: View {
             let pending = MemoryStaging.hasPending(t.kind)
             // 自己是不是正在跑(本 View 自己的并发 token 集合 = runningTriggers).
             let selfRunning = runningTriggers.contains(t)
+            // scheduler 后台 catch-up 触发的 run 不经过本 View click → 不在
+            // runningTriggers 里。但它跑的瞬间 beginRun 已拍了 staging snapshot
+            // → hasPending=true → 之前的 label 误显 "Pending review"。
+            // 只看本 trigger 对应的 scheduler flag(不跨类型 OR),即使某一
+            // @Observable flag 卡住也只影响那一个按钮,不会三按钮连锁灰。
+            let schedulerSelfRunning: Bool = {
+                switch t {
+                case .eventProcessing: return MemoryScheduler.shared.eventRunning
+                case .distill:         return MemoryScheduler.shared.distillRunning
+                case .personality:     return MemoryScheduler.shared.personalityRunning
+                }
+            }()
+            let actuallyRunning = selfRunning || schedulerSelfRunning
             // scheduler 侧的"能不能起"原因。读 MemoryScheduler.shared 的
             // @Observable 属性,跑/结束自动重渲染。手动 run 调 setupRun() 前
             // scheduler 还没置 flag,所以也要 OR 本 View 自己的 runningTrigger.
@@ -1078,14 +1091,14 @@ struct MemorySettingsView: View {
                 }
             }()
             let disabledReason: String? = {
-                if selfRunning { return "\(t.title) is already running." }
+                if actuallyRunning { return "\(t.title) is already running." }
                 if pending     { return "Pending review — Approve / Reject first." }
                 if let r = schedulerReason { return r }
                 if !hasWork    { return noWorkReason }
                 return nil
             }()
             let label: String = {
-                if selfRunning { return "Running…" }
+                if actuallyRunning { return "Running…" }
                 if pending     { return "Pending review" }
                 return "Run"
             }()
