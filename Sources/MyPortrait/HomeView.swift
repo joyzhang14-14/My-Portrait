@@ -384,6 +384,9 @@ private struct ChatTranscript: View {
                             onRegenerate: { onRegenerate(msg.id) },
                             onEdit: { onEdit(msg) }
                         )
+                        // 内容没变的 bubble 让 SwiftUI 跳过重建(切窗口回来、流式收
+                        // 新 token 时,只重渲染真正变了的那条)。见 ChatBubble: Equatable。
+                        .equatable()
                         .id(msg.id)
                     }
                     if isThinking {
@@ -502,6 +505,19 @@ private struct ChatBubble: View {
         // hover state 直接切换,不再裹 withAnimation —— actions 走 overlay
         // 已经不会影响布局,加动画反而引入"消息下滑"错觉。
         .onHover { hover = $0 }
+    }
+}
+
+extension ChatBubble: Equatable {
+    /// 只比数据输入,忽略 3 个闭包(每次父 body 求值都新建,但内容不变时不该触发
+    /// 重渲染)。内容相等 → `.equatable()` 让 SwiftUI 跳过这条 bubble 的 body 重建。
+    /// 流式那条 message.text 每 token 变 → 不相等 → 照常重渲染,正确。
+    nonisolated static func == (lhs: ChatBubble, rhs: ChatBubble) -> Bool {
+        lhs.isStreaming == rhs.isStreaming
+            && lhs.message == rhs.message
+            && lhs.chips == rhs.chips
+            && lhs.attachments == rhs.attachments
+            && lhs.citations == rhs.citations
     }
 }
 
