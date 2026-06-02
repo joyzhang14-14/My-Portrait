@@ -974,42 +974,7 @@ struct MemorySettingsView: View {
             triggerRow(.distill)
             Divider().padding(.vertical, 2)
             triggerRow(.personality)
-            // spinner + Stop 区:同时考虑本 View 触发的 + scheduler 后台
-             // 触发的 run。之前只看 runningTriggers,scheduler tick 跑起来时
-             // 按钮显示 Running… 但没 spinner / 没 Stop —— 用户看着像卡死。
-            do {
-                let sched = MemoryScheduler.shared
-                var schedRunning: [String] = []
-                if sched.eventRunning       { schedRunning.append("events") }
-                if sched.distillRunning     { schedRunning.append("distill") }
-                if sched.personalityRunning { schedRunning.append("personality") }
-                let totalRunning = runningTriggers.count + schedRunning.count
-                if totalRunning > 0 {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text(totalRunning == 1
-                             ? "1 job running…"
-                             : "\(totalRunning) jobs running…")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                        Button("Stop all") {
-                            // PiAgentRegistry.stopAll() 杀所有 LLM 子进程 ——
-                            // scheduler 那边的 `try await` 会抛 → runStep catch
-                            // → applyOutcome(failed) → @Observable flag 自然清。
-                            let n = PiAgentRegistry.shared.stopAll()
-                            for (_, task) in runTasks { task.cancel() }
-                            runTasks.removeAll()
-                            runningTriggers.removeAll()
-                            actionStatus = "Stopped — killed \(n) LLM process(es)."
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .tint(.red)
-                    }
-                    .padding(.top, 6)
-                }
-            }
+            runningStatusRow
             if !actionStatus.isEmpty {
                 Text(actionStatus)
                     .font(.system(size: 11, design: .monospaced))
@@ -1125,6 +1090,41 @@ struct MemorySettingsView: View {
             .help(disabledReason ?? "Trigger \(t.title) now.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// spinner + "N jobs running…" + Stop all 行。同时考虑本 View 触发的 +
+    /// scheduler 后台触发的 run —— 之前只看 runningTriggers,scheduler tick
+    /// 跑起来时按钮显示 Running… 但没 spinner / 没 Stop,看着像卡死。
+    @ViewBuilder
+    private var runningStatusRow: some View {
+        let sched = MemoryScheduler.shared
+        let schedCount = (sched.eventRunning ? 1 : 0)
+            + (sched.distillRunning ? 1 : 0)
+            + (sched.personalityRunning ? 1 : 0)
+        let total = runningTriggers.count + schedCount
+        if total > 0 {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(total == 1 ? "1 job running…" : "\(total) jobs running…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button("Stop all") {
+                    // PiAgentRegistry.stopAll() 杀所有 LLM 子进程 ——
+                    // scheduler 那边的 `try await` 会抛 → runStep catch
+                    // → applyOutcome(failed) → @Observable flag 自然清。
+                    let n = PiAgentRegistry.shared.stopAll()
+                    for (_, task) in runTasks { task.cancel() }
+                    runTasks.removeAll()
+                    runningTriggers.removeAll()
+                    actionStatus = "Stopped — killed \(n) LLM process(es)."
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+            }
+            .padding(.top, 6)
+        }
     }
 
     /// UI 阻塞原因 —— 只看本 View 自己的 `runningTriggers`(用户点击驱动,
