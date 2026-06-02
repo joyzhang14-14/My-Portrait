@@ -208,13 +208,11 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
 
         process.terminationHandler = { [weak self] proc in
             guard let self else { return }
-            // 先摘 stdout readabilityHandler + 同步排空剩余缓冲 —— 否则 agent_end/
-            // message_end 可能还在管道里没解析,下面 sawTurnEnd 读到 stale false。
-            self.stdoutPipe.fileHandleForReading.readabilityHandler = nil
-            let trailing = self.stdoutPipe.fileHandleForReading.availableData
-            if !trailing.isEmpty { self.appendStdout(trailing) }
-            // 在 bufLock 下读 sawTurnEnd(它的写也在 appendStdout 里持锁),建立
-            // happens-before,消除跟 stdout handler 的数据竞争 / UB。
+            // 在 bufLock 下读 sawTurnEnd(它的写在 appendStdout 里也持锁),建立
+            // happens-before,消除跟 stdout readabilityHandler 的数据竞争 / UB。
+            // ⚠️ 不要在这里 `availableData` 排空 stdout —— 父进程仍持有管道写端时
+            // availableData 会永久阻塞等 EOF,导致 terminationHandler 挂死、
+            // eventContinuation 永不 finish、chat 永远卡「thinking…」(概率性)。
             self.bufLock.lock()
             let done = self.sawTurnEnd
             self.bufLock.unlock()
