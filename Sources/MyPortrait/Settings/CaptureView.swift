@@ -150,18 +150,19 @@ struct AudioCaptureSettingsView: View {
     /// 后台刷新循环句柄,行可见时跑、消失时取消。
     @State private var statusRefresh: Task<Void, Never>?
 
-    /// 当前进程 resident memory（GB）。镜像 RetranscribeQwenCLI.rssGB()。
-    /// nonisolated —— 无 actor 状态,给后台刷新循环直接调。
-    private nonisolated static func residentMemGB() -> Double {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size)
+    /// 当前进程的 physical footprint（GB）—— 跟 Activity Monitor 的 Memory 列一致。
+    /// 用 phys_footprint 而非 resident_size:后者会漏报 mmap 进来的模型权重(Qwen
+    /// /MLX 的 ~2GB 大头),导致显示远低于实际。nonisolated,给后台刷新循环直接调。
+    private nonisolated static func appMemoryGB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
         let kr = withUnsafeMutablePointer(to: &info) { ptr in
             ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
         guard kr == KERN_SUCCESS else { return 0 }
-        return Double(info.resident_size) / 1024 / 1024 / 1024
+        return Double(info.phys_footprint) / 1024 / 1024 / 1024
     }
 
     /// 转录实时状态行。暂停态直接读 @Observable 单例(自动响应);
@@ -198,7 +199,7 @@ struct AudioCaptureSettingsView: View {
         statusRefresh = Task.detached {
             while !Task.isCancelled {
                 let pending = TimelineDB().pendingAudioCount()
-                let mem = Self.residentMemGB()
+                let mem = Self.appMemoryGB()
                 await MainActor.run { statusPending = pending; statusMemGB = mem }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
