@@ -173,10 +173,31 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainPane: some View {
-        switch selection ?? .home {
-        case .home:          HomeView()
+        let sel = selection ?? .home
+        if configStore.current.general.optimizeChatRendering {
+            // 「聊天渲染优化」开 → 保活 HomeView:切到别的区块只隐藏不销毁,切回来
+            // 零重建(长 chat 切窗口回来不再卡 —— 根因就是原来 switch 把 HomeView
+            // 整个销毁、切回从零重建上百个 bubble)。代价:HomeView 的 60s
+            // quick-action 刷新 task 在别的区块时也不取消(开销很小)。
+            ZStack {
+                HomeView()
+                    .opacity(sel == .home ? 1 : 0)
+                    .allowsHitTesting(sel == .home)
+                if sel != .home { otherPane(sel) }
+            }
+        } else {
+            // 默认:原样 switch(切走销毁、切回重建)。
+            if sel == .home { HomeView() } else { otherPane(sel) }
+        }
+    }
+
+    /// 非 home 的区块。保活分支和默认分支共用,避免重复 switch。
+    @ViewBuilder
+    private func otherPane(_ sel: SidebarSection) -> some View {
+        switch sel {
+        case .home:          EmptyView()
         case .timeline:      TimelineView(state: timeline)
-        case .cronJobs:         CronJobsView(selection: $cronJobSelection)
+        case .cronJobs:      CronJobsView(selection: $cronJobSelection)
         case .memories:      MemoriesView(scope: $memoryScope,
                                           onEditEntity: { url in
                                               chat.startEditConversation(originalURL: url)
