@@ -4,7 +4,7 @@ import SQLite3
 /// Speakers — voices captured from your microphone + system audio.
 /// Progress header, attention banner for unidentified clusters, a dense
 /// identified roster with avatar + sample count + last heard + hover
-/// actions, search + "Organize w/ AI" button.
+/// actions, search + "Merge duplicates" button.
 ///
 /// Reads `speakers JOIN audio_transcriptions` live from timeline DB.
 ///
@@ -15,7 +15,6 @@ struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
     @State private var organizing = false
-    @State private var organizeError: String? = nil
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -59,12 +58,6 @@ struct SpeakersSettingsView: View {
             }
 
             toolbar
-
-            if let err = organizeError {
-                Text(err)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.red.opacity(0.85))
-            }
 
             // ② diarization 自动识别 + 你命名、但没训练过的簇 —— 可随意管理。
             SectionLabel("DETECTED SPEAKERS",
@@ -125,13 +118,9 @@ struct SpeakersSettingsView: View {
                 runOrganize()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: organizing ? "wand.and.stars.inverse" : "wand.and.stars")
+                    Image(systemName: "arrow.triangle.merge")
                         .font(.system(size: 11, weight: .medium))
-                        .rotationEffect(.degrees(organizing ? 360 : 0))
-                        .animation(organizing
-                            ? .linear(duration: 1.0).repeatForever(autoreverses: false)
-                            : .default, value: organizing)
-                    Text("Organize with AI")
+                    Text("Merge duplicates")
                         .font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(Theme.textPrimary.opacity(0.95))
@@ -160,37 +149,14 @@ struct SpeakersSettingsView: View {
         }
     }
 
-    /// Ask the LLM to propose names for every unidentified cluster, then
-    /// apply each suggested label through the existing `rename` path
-    /// (persists via `TimelineDB.renameSpeaker` — and the names show up
-    /// in the UI right away).
-    /// "Organize with AI"：① 用 LLM 给匿名簇起名；② 把同名簇(同一个人的重复
-    /// cluster，如碎成 6 个的 Joy)合并成一个,优先保留训练过的 voiceprint。
+    /// 合并重复的同名声音簇 —— 同名 + 质心相似(cosine ≥ 阈值)才合,挡住"名同声不同"。
+    /// 纯本地向量计算,不用 AI;优先保留训练过的 voiceprint。
     private func runOrganize() {
         guard !organizing else { return }
-        organizeError = nil
         guard canOrganize else { return }
         organizing = true
         Task {
             defer { organizing = false }
-            // ① 匿名簇 → LLM 起名(要 AI provider)。失败(如没配 provider)**不致命** ——
-            //    记下错误但继续做 ② 合并。合并是纯本地 cosine,不需要 AI,不该被起名连累。
-            var namingError: String? = nil
-            let unnamedIds = unidentified.map { $0.id }
-            if !unnamedIds.isEmpty {
-                do {
-                    let proposals = try await SpeakerOrganizer.run(unidentifiedIds: unnamedIds)
-                    for p in proposals where !p.label.isEmpty {
-                        if let row = rows.first(where: { $0.id == p.speakerId }) {
-                            rename(row, to: p.label)
-                        }
-                    }
-                } catch {
-                    namingError = error.localizedDescription
-                }
-            }
-            // ② 同名簇合并,带声纹护栏:同名 + 质心相似才合(挡住"名同声不同")。
-            //    即使 ① 起名失败也照做。
             let centroids = await Task.detached(priority: .userInitiated) {
                 TimelineDB().speakerCentroids()
             }.value
@@ -203,8 +169,6 @@ struct SpeakersSettingsView: View {
                 }.value
                 reload()
             }
-            // 起名失败的提示最后给 —— 合并已经做了,只是没 AI 起名而已。
-            organizeError = namingError
         }
     }
 
@@ -246,8 +210,8 @@ struct SpeakersSettingsView: View {
         return names.count != Set(names).count
     }
 
-    /// Organize 按钮可用:有匿名簇要起名,或有同名簇要合并。
-    private var canOrganize: Bool { !unidentified.isEmpty || hasDuplicateNames }
+    /// "Merge duplicates" 按钮可用:有同名重复簇可合并。
+    private var canOrganize: Bool { hasDuplicateNames }
     private func rename(_ r: SpeakerRow, to newName: String) {
         let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
@@ -319,7 +283,7 @@ private struct AttentionBanner: View {
                 Text("\(count) unidentified \(count == 1 ? "cluster" : "clusters")")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                Text("Give each a name below, or click Organize with AI to group similar voices.")
+                Text("Give each a name below so they're linked across recordings.")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.60))
                     .fixedSize(horizontal: false, vertical: true)
