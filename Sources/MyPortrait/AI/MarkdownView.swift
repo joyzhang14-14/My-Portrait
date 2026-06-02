@@ -304,7 +304,9 @@ enum MarkdownParser {
     private final class BlocksBox { let blocks: [MDBlock]; init(_ b: [MDBlock]) { self.blocks = b } }
     nonisolated(unsafe) private static let cache: NSCache<NSString, BlocksBox> = {
         let c = NSCache<NSString, BlocksBox>()
-        c.countLimit = 128
+        // 装得下整段长会话 —— 128 太小,消息过多时切回窗口会有大量历史消息已被
+        // 淘汰、需重解析 → 卡。NSCache 仍会在内存吃紧时自动淘汰,关 app 即清空。
+        c.countLimit = 1024
         return c
     }()
 
