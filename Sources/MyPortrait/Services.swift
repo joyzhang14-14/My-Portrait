@@ -156,10 +156,11 @@ final class Services {
     /// - 订阅 settings 变化 → 启停 coordinator / audio
     /// - 用初始 settings 值同步对齐一次状态（默认都 OFF，所以两者都不启）
     func startManagedLifecycle() {
-        // 启动一次把 ~/.portrait/bin/mp-query symlink 到当前 app 主二进制,
-        // 给 pi-coding-agent 用 bash 调本地数据查询接口(SKILL.md 风格)。
-        // app 升级路径变后这里会重链。
+        // 启动一次把 ~/.portrait/bin/{mp-query,mp-folders} shell wrapper 写好,
+        // 给 pi-coding-agent 用 bash 调本地数据查询 / folder 整理(SKILL.md 风格)。
+        // app 升级路径变后这里会重写。
         _ = AIPaths.installMpQueryLink()
+        _ = AIPaths.installMpFoldersLink()
 
         // PowerWatcher 必须在 main thread 注册 IOPS run loop source。
         powerWatcher.start()

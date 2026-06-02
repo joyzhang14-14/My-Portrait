@@ -72,6 +72,13 @@ struct MyPortraitApp: App {
             MPQueryCLI.run(args: rest)
             // run() exits the process internally.
         }
+        // `mp-folders` —— chat AI 整理 event folder 的工具面。同 mp-query 模式
+        // (shell wrapper 在 ~/.portrait/bin/ 下,exec 主二进制 + --mp-folders)。
+        if args.contains("--mp-folders") {
+            let idx = args.firstIndex(of: "--mp-folders")!
+            let rest = Array(args.dropFirst(idx + 1))
+            MPFoldersCLI.run(args: rest)
+        }
         // DEV-ONLY: `--backfill-day <yyyy-MM-dd>` runs the real Backfill for a
         // single day. Disposable — remove with EventPromptTest.swift.
         if let idx = args.firstIndex(of: "--backfill-day"), idx + 1 < args.count {
