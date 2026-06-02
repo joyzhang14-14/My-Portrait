@@ -62,11 +62,6 @@ actor AudioCaptureService {
     private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
     /// 设备变更后的防抖重启任务。
     private var restartTask: Task<Void, Never>?
-    /// follow-system 模式下最近一次实际生效的系统默认输入 UID。用来过滤
-    /// AVAudioEngine 自建聚合设备(CADefaultDeviceAggregate)反复建毁引发的设备列表
-    /// 抖动 —— 那不是真默认设备变更,不该触发重启(否则自己喂自己重启循环,实测一秒
-    /// 几十条设备变更通知 → 每秒一次假重启)。
-    private var lastDefaultInputUID: String?
 
     /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。VADRecorder 每次
     /// start/stop、设备热插拔都会换新实例，但消费方订阅这条稳定流即可，不会断。
@@ -92,13 +87,9 @@ actor AudioCaptureService {
     // MARK: - 生命周期
 
     func start() async {
-        guard samplesTask == nil, !starting else {
-            DiagLog.event("audio.start.skip", ctx: ["hasTask": samplesTask != nil, "starting": starting])
-            return
-        }
+        guard samplesTask == nil, !starting else { return }
         starting = true
         defer { starting = false }
-        DiagLog.event("audio.start.begin", ctx: ["preferredUID": ConfigStore.snapshot.preferredInputDeviceUID])
 
         permissionGranted = await Self.requestMicrophonePermission()
         if !permissionGranted {
@@ -132,7 +123,6 @@ actor AudioCaptureService {
     }
 
     func stop() async {
-        DiagLog.event("audio.stop.begin", ctx: ["hasEngine": engine != nil, "hasTask": samplesTask != nil])
         restartTask?.cancel()
         restartTask = nil
         unregisterDeviceChangeListener()
@@ -175,7 +165,6 @@ actor AudioCaptureService {
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID("") }
 
         logger.info("AudioCaptureService stopped")
-        DiagLog.event("audio.stop.done")
     }
 
     // MARK: - 引擎配置 + tap
@@ -188,9 +177,6 @@ actor AudioCaptureService {
             self.engine = e
             return e
         }()
-
-        conversionCount = 0   // 每次 start 归零,让 performConversion 的"首个 buffer"诊断每次都触发
-        lastDefaultInputUID = Self.currentDefaultInputUID()   // 记下启动时的真实默认,供 follow-system 过滤抖动
 
         let inputNode = engine.inputNode
         // 用户在 Settings 锁定输入设备 → 绑定 AUHAL.CurrentDevice。**必须在
@@ -241,12 +227,6 @@ actor AudioCaptureService {
         // 不阻塞主路径,fire-and-forget。
         let activeUID = Self.currentInputDeviceUID(inputNode: inputNode)
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID(activeUID) }
-        DiagLog.event("audio.engine.started", ctx: [
-            "preferredUID": ConfigStore.snapshot.preferredInputDeviceUID,
-            "activeUID": activeUID,
-            "inputRate": inputFormat.sampleRate,
-            "inputCh": Int(inputFormat.channelCount),
-        ])
 
         let recorder = vadRecorder
         samplesTask = Task {
@@ -269,7 +249,6 @@ actor AudioCaptureService {
         // CoreAudio 同步 API(避免引 hop 复杂度)。
         guard let deviceID = currentDeviceID(forUID: uid) else {
             logger.warning("preferred input device UID '\(uid, privacy: .public)' not found — falling back to system default")
-            DiagLog.warn("audio.bind.notfound", ctx: ["uid": uid])
             return
         }
 
@@ -281,10 +260,8 @@ actor AudioCaptureService {
         do {
             try inputNode.auAudioUnit.setDeviceID(deviceID)
             logger.notice("bound mic input to device UID '\(uid, privacy: .public)' via setDeviceID")
-            DiagLog.event("audio.bind.ok", ctx: ["uid": uid, "deviceID": Int(deviceID)])
         } catch {
             logger.warning("setDeviceID failed: \(String(describing: error), privacy: .public) — falling back to system default")
-            DiagLog.warn("audio.bind.fail", ctx: ["uid": uid, "deviceID": Int(deviceID), "err": String(describing: error)])
         }
     }
 
@@ -373,28 +350,10 @@ actor AudioCaptureService {
         if conversionCount == 1 || conversionCount % 150 == 0 {
             logger.notice("tap buffer converted: count=\(self.conversionCount, privacy: .public) samples=\(count, privacy: .public)")
         }
-        if conversionCount == 1 {
-            // 关键诊断:这次 start 的麦克风**真的有数据流出来**(对应黄灯该亮)。
-            // 只有 audio.engine.started 没有 audio.tap.first = 引擎起了但麦没流。
-            DiagLog.event("audio.tap.first", ctx: ["bufRate": buffer.format.sampleRate, "samples": count])
-        }
         cont.yield(samples)
     }
 
     // MARK: - 设备热插拔
-
-    /// 读系统当前默认输入设备的 UID(不是 app 绑的设备,也不是 AVAudioEngine 自建的
-    /// 聚合设备 CADefaultDeviceAggregate)。follow-system 判断"默认是否真变了"用,
-    /// 过滤聚合设备抖动。
-    nonisolated private static func currentDefaultInputUID() -> String {
-        var addr = defaultInputAddress()
-        var did = AudioDeviceID(0)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        guard AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &did
-        ) == noErr, did != 0 else { return "" }
-        return deviceUID(forID: did) ?? ""
-    }
 
     /// 默认输入设备的属性地址（系统对象上）。CoreAudio API 要 `&` 指针，
     /// 调用处各自拷一份本地 var 传入。
@@ -453,7 +412,6 @@ actor AudioCaptureService {
 
     /// 设备变更回调。防抖：1 秒内的连续变更合并成一次决策（拔插常爆发多个事件）。
     private func handleDeviceChange() {
-        DiagLog.event("audio.devicechange.fired")
         restartTask?.cancel()
         restartTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -465,12 +423,8 @@ actor AudioCaptureService {
     /// 用户在 Settings 改了 preferredInputDeviceUID → Services 调这个,
     /// 在跑的话立刻重新绑定新设备。没在跑就 no-op(下次 start() 自然绑)。
     func restartIfRunning() async {
-        guard samplesTask != nil else {
-            DiagLog.event("audio.restart.config.skip", ctx: ["reason": "not running"])
-            return
-        }
+        guard samplesTask != nil else { return }
         logger.info("config change: preferredInputDeviceUID → restart")
-        DiagLog.event("audio.restart.config", ctx: ["preferredUID": ConfigStore.snapshot.preferredInputDeviceUID])
         await stop()
         await start()
     }
@@ -488,18 +442,9 @@ actor AudioCaptureService {
         let shouldRestart: Bool
         let reason: String
         if preferredUID.isEmpty {
-            // follow-system:只在**真实系统默认输入设备**变了时重启。AVAudioEngine 自建的
-            // 聚合设备(CADefaultDeviceAggregate)反复建毁会狂发设备列表变更通知,但真实
-            // 默认没变 —— 不能跟着重启,否则自己喂自己重启循环(实测一秒几十条 → 每秒一次)。
-            let curDefault = Self.currentDefaultInputUID()
-            if curDefault == lastDefaultInputUID {
-                shouldRestart = false
-                reason = "follow-system default unchanged (\(curDefault)) — ignoring device-list churn"
-            } else {
-                shouldRestart = true
-                reason = "default input changed: \(lastDefaultInputUID ?? "nil") → \(curDefault)"
-                lastDefaultInputUID = curDefault
-            }
+            // follow-system 模式 —— 任意 default 变都重启
+            shouldRestart = true
+            reason = "default input changed (follow-system)"
         } else {
             let preferredNowAvailable = availableUIDs.contains(preferredUID)
             let alreadyOnPreferred = (nowActiveUID == preferredUID)
@@ -512,10 +457,6 @@ actor AudioCaptureService {
             }
         }
 
-        DiagLog.event("audio.restart.devicechange", ctx: [
-            "preferredUID": preferredUID, "activeUID": nowActiveUID,
-            "shouldRestart": shouldRestart, "reason": reason,
-        ])
         guard shouldRestart else {
             logger.info("device change: \(reason, privacy: .public)")
             return
