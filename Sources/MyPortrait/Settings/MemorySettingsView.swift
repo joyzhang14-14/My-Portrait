@@ -59,14 +59,8 @@ struct MemorySettingsView: View {
     @State private var hasWritingCaptureWork: Bool = true
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
-    // EventClassifier 状态(独立于上面的 ManualTrigger 体系 —— classifier
-    // 不走 staging,直接落 _folders/*.json,跟 writing capture 同模式)。
-    @State private var classifyRunning: Bool = false
-    @State private var classifyStatus: String = ""
-    @State private var classifyConfirm: Bool = false
-    @State private var classifyTask: Task<Void, Never>? = nil
-    @State private var hasClassifyWork: Bool = true
-    @State private var classifyLastResult: EventClassifier.Result? = nil
+    // EventClassifier 已下线 —— folder 整理改由 chat AI 通过 mp-folders 按用户
+    // 对话需求触发,UI 这里不再挂"Run classifier"按钮。
 
     // 写作采集 worker 的 UI 状态(独立于 Memory pipeline 的 ManualTrigger 体系
     // —— 不共用 MemoryStaging,自己一套)
@@ -243,11 +237,6 @@ struct MemorySettingsView: View {
         portraitChanges = MemoryStaging.changes(.portrait)
         personalityChanges = MemoryStaging.changes(.personality)
         refreshHasWork()
-        refreshClassifyWork()
-        // 优先取本进程 scheduler 持有的;没有(app 重启 / CLI 跨进程跑过)就
-        // 从 _folders/_last_run.json 读盘兜底。
-        classifyLastResult = MemoryScheduler.shared.lastClassifyResult
-            ?? EventClassifier.loadLastResult()
     }
 
     /// 重新算三个 job 当前有没有活。off-main 跑(扫 timeline+processing_log)。
@@ -444,11 +433,6 @@ struct MemorySettingsView: View {
                 config: \.scheduler.event)
             Divider().padding(.vertical, 4)
             schedulerBlock(
-                title: "Event classifier",
-                desc: "Groups events by project / big endeavor into folders. Metadata only — actual event files don't move. Runs after Event processing, before Distillation.",
-                config: \.scheduler.classify)
-            Divider().padding(.vertical, 4)
-            schedulerBlock(
                 title: "Portrait distillation",
                 desc: "Distills events into long-term portrait entries.",
                 config: \.scheduler.portrait)
@@ -505,247 +489,6 @@ struct MemorySettingsView: View {
                 dayOfMonthRow("Day of month", value: cfg.binding(kp.appending(path: \.dayOfMonth)))
                 timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
             }
-        }
-    }
-
-    // MARK: - Event Classifier(metadata-only,落 _folders/*.json)
-
-    /// 项目级 event 分组的 Run now 块。跟 writing capture 同模式 —— 独立状态、
-    /// 不走 MemoryStaging(没什么好审的,folder 改错改 json 一行就回)。
-    @ViewBuilder
-    private var classifierBlock: some View {
-        // 三状态分离:
-        //   schedulerRunning — MemoryScheduler 持有的"在跑"flag。前端 View
-        //     没显式触发时,scheduler tick 也可能在后台跑(@Observable 自动重渲)。
-        //   hasStagingSnap — beginRun 拍了快照(可能跑中,可能跑完等审)。
-        //   pendingReviewBanner — 真有非空改动可审 → Approve/Reject 按钮才出。
-        //     跑中不出 banner (横幅 "0/0" 误导用户以为啥也没发生)。
-        let schedulerRunning = MemoryScheduler.shared.classifyRunning
-        let hasStagingSnap = MemoryStaging.hasPending(.classify)
-        let isRunning = classifyRunning || schedulerRunning
-        let pendingReviewBanner = hasStagingSnap
-            && !isRunning
-            && (classifyLastResult?.classifiedInThisRun ?? 0) > 0
-        VStack(spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Classify events into folders")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("LLM groups events by PROJECT (e.g. \"My Portrait\", \"Valis\"). Needs at least 3 similar events to open a new folder; fewer stay ungrouped. Output: events/_folders/<slug>.json. Doesn't touch .md files.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                let disabledReason: String? = {
-                    if isRunning { return "Event classifier is already running." }
-                    if pendingReviewBanner { return "Pending review — Approve / Reject first." }
-                    if !hasClassifyWork { return "All events already classified — nothing to do." }
-                    if runningTriggers.contains(.eventProcessing) {
-                        return "Waiting for event job to finish."
-                    }
-                    return nil
-                }()
-                let label: String = {
-                    if isRunning { return "Running…" }
-                    if pendingReviewBanner { return "Pending review" }
-                    return "Run"
-                }()
-                Button(label) {
-                    classifyConfirm = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(disabledReason != nil)
-                .help(disabledReason ?? "Run event classifier now.")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // 跑中:spinner + 解释 + Stop。跟 writingCaptureBlock 同形态。
-            if isRunning {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Classifying events into folders… can take several minutes for the full catalog.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("Stop") { stopClassifier() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .tint(.red)
-                }
-                .padding(.top, 6)
-            }
-
-            // Pending review:跑完 + 有真改动 + 不在跑 才显示 Approve/Reject。
-            if pendingReviewBanner {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                    Text("Pending review — \(classifyLastResult?.classifiedInThisRun ?? 0) event(s) into \(classifyLastResult?.folderDeltas.count ?? 0) folders.")
-                        .font(.system(size: 11))
-                    Spacer(minLength: 8)
-                    Button("Reject") { rejectClassify() }
-                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
-                    Button("Approve") { approveClassify() }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                }
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.orange.opacity(0.08))
-                )
-                .padding(.top, 4)
-            }
-            if !classifyStatus.isEmpty {
-                Text(classifyStatus)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
-            }
-
-            // 跑完结果:小卡片显示 "X events into Y folders (Z new) — leftover N",
-            // 然后每个 folder 一行 (created/updated +N)。
-            // **只在 Pending review 期间显示** —— 一旦 Approve 提交,这些就是
-            // "已入库的历史改动",在 Run now 区再挂着就是噪音(用户原话:
-            // "如果已经入库了就不要在 run now 区域显示改动了")。
-            if pendingReviewBanner, let r = classifyLastResult {
-                Divider().padding(.vertical, 4)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 12) {
-                        Text("\(r.classifiedInThisRun) events into \(r.newFoldersCreated + r.existingFoldersUpdated) folders")
-                            .font(.system(size: 12, weight: .semibold))
-                        Spacer(minLength: 12)
-                        Text("\(r.newFoldersCreated) new · \(r.existingFoldersUpdated) updated · \(r.stillUngrouped) left ungrouped")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    if r.folderDeltas.isEmpty {
-                        Text("No folders touched in the last run.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        ForEach(r.folderDeltas) { d in
-                            HStack(spacing: 8) {
-                                Image(systemName: d.kind == .created
-                                      ? "folder.badge.plus" : "folder")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(d.kind == .created ? .green : .secondary)
-                                Text(d.name)
-                                    .font(.system(size: 12))
-                                Spacer(minLength: 8)
-                                Text("+\(d.addedCount)")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                Text(d.kind.rawValue)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tertiary)
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(
-                                        Capsule().fill(Color.secondary.opacity(0.10))
-                                    )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// 跑 classifier:跟 MemoryScheduler.runClassifierJob 同入口。**手动 Run**
-    /// 走 staging:beginRun 拍 _folders/ 快照,跑完进 Pending review,
-    /// Approve = 删快照,Reject = 用快照整树还原。auto scheduler tick 不走
-    /// 这条 —— 它见 hasPending 直接 skip,所以 staging 流程不影响 auto。
-    @MainActor
-    private func runClassifier() async {
-        guard !classifyRunning else { return }
-        guard !MemoryStaging.hasPending(.classify) else {
-            classifyStatus = "Pending review — Approve / Reject first."
-            return
-        }
-        classifyRunning = true
-        defer { classifyRunning = false }
-        do { try MemoryStaging.beginRun(.classify) }
-        catch { classifyStatus = "Can't start: \(error.localizedDescription)"; return }
-
-        classifyStatus = "Classifying events…"
-        let outcome = await MemoryScheduler.shared.runClassifierJob()
-        switch outcome {
-        case .ran:
-            try? MemoryStaging.markRan(.classify, days: [ProcessingLogStore.classifyAnchorDate])
-            classifyLastResult = MemoryScheduler.shared.lastClassifyResult
-                ?? EventClassifier.loadLastResult()
-            if let r = classifyLastResult, r.classifiedInThisRun > 0 {
-                classifyStatus = "Run complete — review below, Approve / Reject."
-            } else {
-                // LLM 没动任何东西 → 没必要让用户审核空 diff,直接 approve 收尾。
-                try? MemoryStaging.approve(.classify)
-                classifyStatus = "LLM proposed no changes this round (try again after more events accumulate)."
-            }
-        case .noWork:
-            try? MemoryStaging.approve(.classify)   // 没活就丢快照
-            classifyStatus = "All events already classified — nothing to do."
-        case .busy:
-            try? MemoryStaging.approve(.classify)
-            classifyStatus = "Classifier is already running."
-        }
-        refreshClassifyWork()
-    }
-
-    /// 强停:杀所有 LLM 子进程 → runStep 内部的 await throws → 标 failed +
-    /// 释放锁。跟 writing capture 的 Stop 按钮同形态。当前一批可能已经写了
-    /// 几个 _folders/*.json,backup 还在 .staging/,用户可以 Reject 整树还原
-    /// 或 Approve 接受到目前为止的部分结果。
-    @MainActor
-    private func stopClassifier() {
-        let n = PiAgentRegistry.shared.stopAll()
-        classifyTask?.cancel()
-        classifyTask = nil
-        classifyRunning = false
-        // scheduler 的 classifyRunning 由 runClassifierJob defer 自然清。
-        // anchor in_progress → failed 由 runStep catch 处理(LLM 进程被杀
-        // → await 抛 → applyOutcome(.failed) → setStatus + releaseLock)。
-        classifyStatus = "Stopped — killed \(n) LLM process(es)."
-        refreshClassifyWork()
-    }
-
-    /// Approve = 接受跑结果(_folders/*.json 维持现状,删 backup)。
-    @MainActor
-    private func approveClassify() {
-        do {
-            try MemoryStaging.approve(.classify)
-            classifyStatus = "Approved — folder assignments committed."
-        } catch {
-            classifyStatus = "Approve failed: \(error.localizedDescription)"
-        }
-        refreshClassifyWork()
-    }
-
-    /// Reject = 用 backup 整目录还原 _folders/,然后把 classify anchor 拨回
-    /// pending 让 scheduler 知道得重跑(否则 anchor=complete 永远不会再跑)。
-    @MainActor
-    private func rejectClassify() {
-        MemoryScheduler.shared.resetDay(ProcessingLogStore.classifyAnchorDate)
-        do {
-            try MemoryStaging.reject(.classify)
-            classifyStatus = "Rejected — folders restored to pre-run state."
-            classifyLastResult = nil   // 清掉 UI 上那份"被拒绝的快照"
-        } catch {
-            classifyStatus = "Reject failed: \(error.localizedDescription)"
-        }
-        refreshClassifyWork()
-    }
-
-    /// classify 有没有活 —— scheduler 的 classifierJobHasWork() 兜底两路:
-    /// anchor needsWork 或盘上未分组 events。
-    private func refreshClassifyWork() {
-        Task.detached(priority: .userInitiated) {
-            let s = await MemoryScheduler.shared
-            let has = await s.classifierJobHasWork()
-            await MainActor.run { hasClassifyWork = has }
         }
     }
 
@@ -1262,10 +1005,8 @@ struct MemorySettingsView: View {
                     .padding(.top, 6)
             }
 
-            // —— Event classifier(metadata only:落 _folders/*.json,
-            //    不动 .md;跟 memory pipeline 锁互斥但不走 staging)
-            Divider().padding(.vertical, 2)
-            classifierBlock
+            // Event classifier(自动分 folder)已下线 —— chat AI 通过 mp-folders
+            // 按用户对话需求整理,UI 不再挂 Run 按钮。
 
             // —— Writing capture(独立链路,跟 memory pipeline 不互锁)
             Divider().padding(.vertical, 2)
@@ -1285,14 +1026,6 @@ struct MemorySettingsView: View {
         // Per-draft sheet:点单条 NEW/CHANGED 行打开,只显示这一条 draft 详情。
         .sheet(item: $speechStylePreviewDraft) { draft in
             SpeechStyleDraftDetail(draft: draft)
-        }
-        .alert("Run event classifier?", isPresented: $classifyConfirm) {
-            Button("Run", role: .none) {
-                classifyTask = Task { @MainActor in await runClassifier() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Group unclassified events into project-level folders. Metadata only — no event files are moved. Uses one LLM call.")
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
