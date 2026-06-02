@@ -599,29 +599,15 @@ final class Services {
         }
     }
 
-    /// 最新一次"想要的"麦克风采集开关状态(快速开关时被反复覆盖)。
-    private var audioDesiredEnabled = false
-    /// reconcile 是否在跑 —— 同一时刻只跑一个,循环收敛到最新 desired。
-    private var audioReconciling = false
-
     private func applyAudioCapture(enabled: Bool) {
         logger.notice("applyAudioCapture(enabled: \(enabled, privacy: .public))")
-        // 快速开关不能"每次派一个 detached task" —— detached task 不保证执行顺序,
-        // 最后一次"关"的 stop 可能比某次"开"的 start 先跑,引擎停在错状态(黄灯卡住)。
-        // 改为:记录最新 desired,单个串行 reconcile 把实际状态拉到**最后一次开关**的值。
-        audioDesiredEnabled = enabled
-        guard !audioReconciling else { return }   // 已有 reconcile 在跑,它会读到最新 desired
-        audioReconciling = true
         let audio = self.audio
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            var applied: Bool? = nil
-            while applied != self.audioDesiredEnabled {
-                let want = self.audioDesiredEnabled
-                if want { await audio.start() } else { await audio.stop() }
-                applied = want
+        Task.detached(priority: .userInitiated) {
+            if enabled {
+                await audio.start()
+            } else {
+                await audio.stop()
             }
-            self.audioReconciling = false
         }
     }
 
