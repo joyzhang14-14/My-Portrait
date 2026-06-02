@@ -28,6 +28,8 @@ struct TimelineSidebar: View {
     @State private var activeApps: [ActiveAppEntry] = []
     @State private var audioItems: [AudioTranscriptEntry] = []
     @State private var loading: Bool = false
+    /// reload 代际号 —— 丢弃慢的旧结果,避免盖掉新的(防 stale clobber)。
+    @State private var reloadToken = 0
     @State private var recentsSearch: String = ""
     @State private var recentsSearchOpen: Bool = false
     @State private var renamingConvId: UUID? = nil
@@ -608,6 +610,8 @@ struct TimelineSidebar: View {
             audioItems = []
             return
         }
+        reloadToken &+= 1
+        let token = reloadToken
         loading = true
         Task {
             let apps = (try? await db.activeAppsAround(
@@ -617,6 +621,7 @@ struct TimelineSidebar: View {
                 timestamp: moment, beforeSeconds: 120, afterSeconds: 30
             )) ?? []
             await MainActor.run {
+                guard token == reloadToken else { return }   // 已有更新的 reload,丢弃这次旧结果
                 self.activeApps = apps
                 self.audioItems = audio
                 self.loading = false

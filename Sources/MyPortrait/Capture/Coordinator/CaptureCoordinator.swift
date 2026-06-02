@@ -44,8 +44,11 @@ actor CaptureCoordinator {
     /// DRM 命中时为 true —— captureOneFrame 全部跳过。
     private var drmActive: Bool = false
 
-    nonisolated let frameEvents: AsyncStream<FrameEvent>
-    private let _continuation: AsyncStream<FrameEvent>.Continuation
+    /// 帧入库事件输出流。stop() 会 finish 它;coordinator 被 Services 跨 capture
+    /// off/on toggle 复用,故 start() 每次重建(镜像 EventSources/DRMWatcher),否则
+    /// toggle 一次后订阅方收不到事件。当前无订阅方,此改为前瞻性正确。
+    private(set) var frameEvents: AsyncStream<FrameEvent>
+    private var _continuation: AsyncStream<FrameEvent>.Continuation
 
     init(db: PortraitDB, reporter: UnimplementedReporter, config: CaptureConfig = .default) {
         self.db = db
@@ -117,6 +120,13 @@ actor CaptureCoordinator {
     /// 失败抛错；调用方 catch 后状态栏会自动亮红点。
     func start() async throws {
         guard captureTask == nil else { return }
+
+        // 重建 stop() finish 掉的输出流 —— 复用 coordinator 跨 toggle 时旧流已死。
+        // 镜像 EventSources.start() / DRMWatcher.start() 的「start 重建流」模式。
+        _continuation.finish()
+        var fc: AsyncStream<FrameEvent>.Continuation!
+        frameEvents = AsyncStream<FrameEvent> { cont in fc = cont }
+        _continuation = fc
 
         // 健康度起点。StallDetector 需要 uptime > 120s 才会判 stall(warmup)。
         await VisionMetrics.shared.markStarted()

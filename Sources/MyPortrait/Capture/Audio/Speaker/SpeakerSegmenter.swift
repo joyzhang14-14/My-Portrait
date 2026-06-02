@@ -125,6 +125,12 @@ enum SpeakerSegmenter {
                         // 相邻同说话人段合并。
                         if var prev = current {
                             if prev.localSpeaker == seg.localSpeaker {
+                                // 合并段采用「贡献样本更多」那一段的声纹,跟合并后用
+                                // max-samples 评判一致(原来只留第一段的,样本变长后
+                                // enroll 长度护栏被架空)。比较要在 append 之前。
+                                if seg.samples.count > prev.samples.count {
+                                    prev.embedding = seg.embedding
+                                }
                                 prev.end = seg.end
                                 prev.samples.append(contentsOf: seg.samples)
                                 current = prev

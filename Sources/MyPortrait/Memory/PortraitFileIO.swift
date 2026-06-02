@@ -404,9 +404,21 @@ enum PortraitFileIO {
         guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else { return [] }
         let inner = trimmed.dropFirst().dropLast().trimmingCharacters(in: .whitespaces)
         if inner.isEmpty { return [] }
-        return inner.split(separator: ",").map {
-            $0.trimmingCharacters(in: .whitespaces)
+        // 引号感知扫描:只在**引号外**的逗号切分。否则 LLM 给的自由文本 tag /
+        // alias 里带逗号(如 "Tokyo, Japan")会被切成两半 + 残留引号,数据损坏。
+        var out: [String] = []
+        var cur = ""
+        var inQuotes = false
+        for c in inner {
+            if c == "\"" { inQuotes.toggle(); cur.append(c); continue }
+            if c == "," && !inQuotes {
+                out.append(cur.trimmingCharacters(in: .whitespaces)); cur = ""
+            } else {
+                cur.append(c)
+            }
         }
+        out.append(cur.trimmingCharacters(in: .whitespaces))
+        return out
     }
 
     // MARK: - Date format helpers

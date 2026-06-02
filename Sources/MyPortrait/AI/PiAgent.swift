@@ -208,9 +208,19 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
 
         process.terminationHandler = { [weak self] proc in
             guard let self else { return }
+            // 先摘 stdout readabilityHandler + 同步排空剩余缓冲 —— 否则 agent_end/
+            // message_end 可能还在管道里没解析,下面 sawTurnEnd 读到 stale false。
+            self.stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            let trailing = self.stdoutPipe.fileHandleForReading.availableData
+            if !trailing.isEmpty { self.appendStdout(trailing) }
+            // 在 bufLock 下读 sawTurnEnd(它的写也在 appendStdout 里持锁),建立
+            // happens-before,消除跟 stdout handler 的数据竞争 / UB。
+            self.bufLock.lock()
+            let done = self.sawTurnEnd
+            self.bufLock.unlock()
             // 进程异常退出且没发过 turn-end 事件 → ChatController 不知道
             // 怎么收尾,会一直转圈。补一个 .error 把 stderr tail 带回去。
-            if !self.sawTurnEnd {
+            if !done {
                 self.stderrLock.lock()
                 let tail = String(data: self.stderrTail, encoding: .utf8) ?? ""
                 self.stderrLock.unlock()
