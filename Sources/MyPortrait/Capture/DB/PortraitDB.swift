@@ -8,6 +8,16 @@ import Foundation
 /// 这是"依赖倒置"：高层（采集）定义需求，低层（DB）满足。
 ///
 /// 见 memory: project-module-layout。
+
+/// `matchSpeaker` 的三态结果。区分「明确命中」「模糊」「全不像」—— 后两者含义不同:
+/// `.ambiguous`(跟两个**不同人**都接近,判别不开)不能 enroll 新人,否则边界段会
+/// 变成新碎簇、反而加剧碎片化;只有 `.none`(跟谁都不像)才是真·新人。
+enum SpeakerMatch: Sendable {
+    case matched(Int64)
+    case ambiguous
+    case none
+}
+
 protocol PortraitDB: Sendable {
 
     // MARK: - P1: 屏幕帧
@@ -75,9 +85,10 @@ protocol PortraitDB: Sendable {
 
     // MARK: - 说话人识别（speaker diarization）
 
-    /// 找匹配的说话人：`embedding`（须已 L2 归一化）与已有 speaker 的样本 / centroid
-    /// 余弦相似度 > 0.45 → 返回其 id。无匹配返回 nil。
-    func matchSpeaker(embedding: [Float]) async throws -> Int64?
+    /// 找匹配的说话人。`embedding` 须已 L2 归一化。质心余弦 > 阈值才算候选;
+    /// 命中需明显比「最强异名候选」更近(裕度),否则判 `.ambiguous`(防 Joy/Stan
+    /// 声纹接近时把边界段标反)。详见 `SpeakerMatch`。
+    func matchSpeaker(embedding: [Float]) async throws -> SpeakerMatch
 
     /// 新建说话人：centroid = `embedding`，写入首个样本，返回新 speaker id。
     func enrollSpeaker(embedding: [Float]) async throws -> Int64

@@ -98,17 +98,25 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
     /// embedding → DB 持久 speaker id。
     ///
     /// 命中已有说话人 → 复用 id；只有足够长的段才把向量并进去（保持 centroid 干净）。
-    /// 未命中 → 仅足够长的段才新建说话人；短段不够可靠，返回 nil（留空标签）。
+    /// 模糊(跟两个不同人都接近)→ 留空标签,不并入也不新建。
+    /// 全不像 → 仅足够长的段才新建说话人；短段不够可靠，返回 nil（留空标签）。
     private func resolveSpeaker(embedding: [Float], speechSamples: Int) async -> Int64? {
         let longEnough = speechSamples >= Self.minEnrollSamples
-        if let matched = try? await db.matchSpeaker(embedding: embedding) {
+        guard let match = try? await db.matchSpeaker(embedding: embedding) else { return nil }
+        switch match {
+        case .matched(let id):
             if longEnough {
-                try? await db.addEmbeddingToSpeaker(speakerId: matched, embedding: embedding)
+                try? await db.addEmbeddingToSpeaker(speakerId: id, embedding: embedding)
             }
-            return matched
+            return id
+        case .ambiguous:
+            // 跟两个不同人都接近,判别不开 —— 留空标签,既不并进任何人(防污染),
+            // 也不新建簇(否则边界段会变成新碎簇,反而加剧碎片化)。
+            return nil
+        case .none:
+            guard longEnough else { return nil }
+            return try? await db.enrollSpeaker(embedding: embedding)
         }
-        guard longEnough else { return nil }
-        return try? await db.enrollSpeaker(embedding: embedding)
     }
 
     /// 读 wav → 16kHz mono float 样本。AVAudioFile 的 processingFormat 总是

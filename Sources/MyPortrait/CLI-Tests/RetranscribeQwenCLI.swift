@@ -126,7 +126,9 @@ enum RetranscribeQwenCLI {
                         var newSpeaker: Int64? = nil
                         if let ex = extractor, var v = ex.embed(slice) {
                             VectorMath.l2Normalize(&v)
-                            newSpeaker = try? await dbImpl.matchSpeaker(embedding: v)
+                            if case .matched(let sid)? = try? await dbImpl.matchSpeaker(embedding: v) {
+                                newSpeaker = sid
+                            }
                         }
                         results.append(Res(seg: s, newText: newText, newSpeaker: newSpeaker))
                         done += 1
