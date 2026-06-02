@@ -84,21 +84,39 @@ struct AudioCaptureSettingsView: View {
             ?? code.uppercased()
     }
 
-    /// 当前引擎选中的语言列表。Qwen 用 qwenLanguages，其余用 languages。
+    /// 当前引擎选中的语言列表。**每个 engine 独立存** —— 切 engine 不会
+    /// 把别的引擎的选择带过来。whisper 沿用历史字段名 `languages`。
     private var selectedLangs: [String] {
-        engine == AudioEngine.qwen.rawValue
-            ? config.current.capture.audio.qwenLanguages
-            : config.current.capture.audio.languages
+        let a = config.current.capture.audio
+        switch a.engine {
+        case AudioEngine.qwen.rawValue:     return a.qwenLanguages
+        case AudioEngine.deepgram.rawValue: return a.deepgramLanguages
+        case AudioEngine.custom.rawValue:   return a.customLanguages
+        default:                            return a.languages
+        }
     }
 
-    /// 勾选/取消某语言。按当前引擎写进对应字段(Qwen 跟 whisper 分开存)。
+    /// 勾选/取消某语言。按当前引擎写进对应字段。
     private func toggleLanguage(_ code: String, _ on: Bool) {
         config.mutate {
-            let useQwen = $0.capture.audio.engine == AudioEngine.qwen.rawValue
-            var ls = useQwen ? $0.capture.audio.qwenLanguages : $0.capture.audio.languages
-            if on { if !ls.contains(code) { ls.append(code) } }
-            else { ls.removeAll { $0 == code } }
-            if useQwen { $0.capture.audio.qwenLanguages = ls } else { $0.capture.audio.languages = ls }
+            switch $0.capture.audio.engine {
+            case AudioEngine.qwen.rawValue:
+                var ls = $0.capture.audio.qwenLanguages
+                if on { if !ls.contains(code) { ls.append(code) } } else { ls.removeAll { $0 == code } }
+                $0.capture.audio.qwenLanguages = ls
+            case AudioEngine.deepgram.rawValue:
+                var ls = $0.capture.audio.deepgramLanguages
+                if on { if !ls.contains(code) { ls.append(code) } } else { ls.removeAll { $0 == code } }
+                $0.capture.audio.deepgramLanguages = ls
+            case AudioEngine.custom.rawValue:
+                var ls = $0.capture.audio.customLanguages
+                if on { if !ls.contains(code) { ls.append(code) } } else { ls.removeAll { $0 == code } }
+                $0.capture.audio.customLanguages = ls
+            default:
+                var ls = $0.capture.audio.languages
+                if on { if !ls.contains(code) { ls.append(code) } } else { ls.removeAll { $0 == code } }
+                $0.capture.audio.languages = ls
+            }
         }
     }
 

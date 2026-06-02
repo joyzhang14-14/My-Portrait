@@ -224,8 +224,16 @@ actor TranscriptionScheduler {
         await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
             // 多选语言(来自 CaptureView):恰好选 1 种 → 用作模型语言提示;0 种或多种
-            // (如中英双语)→ nil = 自动检测。Qwen 用独立的 qwenLanguages。
-            let langSource = a.engine == "qwen" ? a.qwenLanguages : a.languages
+            // (如中英双语)→ nil = 自动检测。**每个 engine 用独立字段** ——
+            // 切 engine 不应该把另一个 engine 的语言选择带过去。
+            let langSource: [String] = {
+                switch a.engine {
+                case "qwen":     return a.qwenLanguages
+                case "deepgram": return a.deepgramLanguages
+                case "custom":   return a.customLanguages
+                default:         return a.languages   // whisper(老字段名)
+                }
+            }()
             let langs = langSource.filter { !$0.isEmpty }
             let lang: String? = langs.count == 1 ? langs[0] : nil
             func secret(_ ref: String) -> String {

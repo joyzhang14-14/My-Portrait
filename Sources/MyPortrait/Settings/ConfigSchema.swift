@@ -537,9 +537,14 @@ struct AudioConfig: Codable, Equatable {
     /// engine = "qwen" 时用的模型 variant（HF id）。默认 1.7B-8bit（实测质量达标）。
     var qwenModel:               String   = "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"
     var deepgramApiKeyRef:       String   = ""
+    /// Whisper 引擎的语言选择(历史字段名 `languages` 保留,免迁移)。
     var languages:               [String] = []
     /// Qwen 引擎的语言选择，跟 whisper 的 `languages` 分开存（两者支持的语言集不同）。
     var qwenLanguages:           [String] = []
+    /// Deepgram 引擎的语言选择,独立存 —— 切 engine 不该把 whisper 的选择带过去。
+    var deepgramLanguages:       [String] = []
+    /// Custom endpoint 引擎的语言选择,独立存。
+    var customLanguages:         [String] = []
     var captureSystemAudio:      Bool     = true
     var speakerIdEnabled:        Bool     = true
     var filterMusic:             Bool     = false
@@ -576,6 +581,8 @@ struct AudioConfig: Codable, Equatable {
         case customApiKeyRef         = "custom_api_key_ref"
         case languages
         case qwenLanguages           = "qwen_languages"
+        case deepgramLanguages       = "deepgram_languages"
+        case customLanguages         = "custom_languages"
         case captureSystemAudio      = "capture_system_audio"
         case speakerIdEnabled        = "speaker_id_enabled"
         case filterMusic             = "filter_music"
@@ -599,6 +606,8 @@ struct AudioConfig: Codable, Equatable {
         customApiKeyRef        = c.dflt(String.self,   .customApiKeyRef, customApiKeyRef)
         languages              = c.dflt([String].self, .languages, languages)
         qwenLanguages          = c.dflt([String].self, .qwenLanguages, qwenLanguages)
+        deepgramLanguages      = c.dflt([String].self, .deepgramLanguages, deepgramLanguages)
+        customLanguages        = c.dflt([String].self, .customLanguages, customLanguages)
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
         speakerIdEnabled       = c.dflt(Bool.self,     .speakerIdEnabled, speakerIdEnabled)
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
