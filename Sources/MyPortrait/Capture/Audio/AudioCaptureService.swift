@@ -87,9 +87,13 @@ actor AudioCaptureService {
     // MARK: - 生命周期
 
     func start() async {
-        guard samplesTask == nil, !starting else { return }
+        guard samplesTask == nil, !starting else {
+            DiagLog.event("audio.start.skip", ctx: ["hasTask": samplesTask != nil, "starting": starting])
+            return
+        }
         starting = true
         defer { starting = false }
+        DiagLog.event("audio.start.begin", ctx: ["preferredUID": ConfigStore.snapshot.preferredInputDeviceUID])
 
         permissionGranted = await Self.requestMicrophonePermission()
         if !permissionGranted {
@@ -123,6 +127,7 @@ actor AudioCaptureService {
     }
 
     func stop() async {
+        DiagLog.event("audio.stop.begin", ctx: ["hasEngine": engine != nil, "hasTask": samplesTask != nil])
         restartTask?.cancel()
         restartTask = nil
         unregisterDeviceChangeListener()
@@ -165,6 +170,7 @@ actor AudioCaptureService {
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID("") }
 
         logger.info("AudioCaptureService stopped")
+        DiagLog.event("audio.stop.done")
     }
 
     // MARK: - 引擎配置 + tap
@@ -177,6 +183,8 @@ actor AudioCaptureService {
             self.engine = e
             return e
         }()
+
+        conversionCount = 0   // 每次 start 归零,让 performConversion 的"首个 buffer"诊断每次都触发
 
         let inputNode = engine.inputNode
         // 用户在 Settings 锁定输入设备 → 绑定 AUHAL.CurrentDevice。**必须在
@@ -227,6 +235,12 @@ actor AudioCaptureService {
         // 不阻塞主路径,fire-and-forget。
         let activeUID = Self.currentInputDeviceUID(inputNode: inputNode)
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID(activeUID) }
+        DiagLog.event("audio.engine.started", ctx: [
+            "preferredUID": ConfigStore.snapshot.preferredInputDeviceUID,
+            "activeUID": activeUID,
+            "inputRate": inputFormat.sampleRate,
+            "inputCh": Int(inputFormat.channelCount),
+        ])
 
         let recorder = vadRecorder
         samplesTask = Task {
@@ -249,6 +263,7 @@ actor AudioCaptureService {
         // CoreAudio 同步 API(避免引 hop 复杂度)。
         guard let deviceID = currentDeviceID(forUID: uid) else {
             logger.warning("preferred input device UID '\(uid, privacy: .public)' not found — falling back to system default")
+            DiagLog.warn("audio.bind.notfound", ctx: ["uid": uid])
             return
         }
 
@@ -260,8 +275,10 @@ actor AudioCaptureService {
         do {
             try inputNode.auAudioUnit.setDeviceID(deviceID)
             logger.notice("bound mic input to device UID '\(uid, privacy: .public)' via setDeviceID")
+            DiagLog.event("audio.bind.ok", ctx: ["uid": uid, "deviceID": Int(deviceID)])
         } catch {
             logger.warning("setDeviceID failed: \(String(describing: error), privacy: .public) — falling back to system default")
+            DiagLog.warn("audio.bind.fail", ctx: ["uid": uid, "deviceID": Int(deviceID), "err": String(describing: error)])
         }
     }
 
@@ -350,6 +367,11 @@ actor AudioCaptureService {
         if conversionCount == 1 || conversionCount % 150 == 0 {
             logger.notice("tap buffer converted: count=\(self.conversionCount, privacy: .public) samples=\(count, privacy: .public)")
         }
+        if conversionCount == 1 {
+            // 关键诊断:这次 start 的麦克风**真的有数据流出来**(对应黄灯该亮)。
+            // 只有 audio.engine.started 没有 audio.tap.first = 引擎起了但麦没流。
+            DiagLog.event("audio.tap.first", ctx: ["bufRate": buffer.format.sampleRate, "samples": count])
+        }
         cont.yield(samples)
     }
 
@@ -412,6 +434,7 @@ actor AudioCaptureService {
 
     /// 设备变更回调。防抖：1 秒内的连续变更合并成一次决策（拔插常爆发多个事件）。
     private func handleDeviceChange() {
+        DiagLog.event("audio.devicechange.fired")
         restartTask?.cancel()
         restartTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -423,8 +446,12 @@ actor AudioCaptureService {
     /// 用户在 Settings 改了 preferredInputDeviceUID → Services 调这个,
     /// 在跑的话立刻重新绑定新设备。没在跑就 no-op(下次 start() 自然绑)。
     func restartIfRunning() async {
-        guard samplesTask != nil else { return }
+        guard samplesTask != nil else {
+            DiagLog.event("audio.restart.config.skip", ctx: ["reason": "not running"])
+            return
+        }
         logger.info("config change: preferredInputDeviceUID → restart")
+        DiagLog.event("audio.restart.config", ctx: ["preferredUID": ConfigStore.snapshot.preferredInputDeviceUID])
         await stop()
         await start()
     }
@@ -457,6 +484,10 @@ actor AudioCaptureService {
             }
         }
 
+        DiagLog.event("audio.restart.devicechange", ctx: [
+            "preferredUID": preferredUID, "activeUID": nowActiveUID,
+            "shouldRestart": shouldRestart, "reason": reason,
+        ])
         guard shouldRestart else {
             logger.info("device change: \(reason, privacy: .public)")
             return
