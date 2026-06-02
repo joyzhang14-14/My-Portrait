@@ -62,6 +62,12 @@ actor AudioCaptureService {
     private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
     /// 设备变更后的防抖重启任务。
     private var restartTask: Task<Void, Never>?
+    /// AVAudioEngineConfigurationChange 观察者。setDeviceID / 输入路由变化会让引擎
+    /// **自动 stop** —— 不监听就表现为"黄灯闪一下就灭、停住"。监听到 → 原地重配
+    /// 重启**同一个**引擎(不重建、不重设设备),收敛不死循环。
+    private var engineConfigObserver: NSObjectProtocol?
+    /// reconfigure 重入闸。
+    private var reconfiguring: Bool = false
 
     /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。VADRecorder 每次
     /// start/stop、设备热插拔都会换新实例，但消费方订阅这条稳定流即可，不会断。
@@ -151,6 +157,13 @@ actor AudioCaptureService {
         await vadRecorder?.flush()
         vadRecorder = nil
 
+        // 先摘掉 config 观察者(它绑在这个 engine 上),否则换 engine 后旧观察者悬空,
+        // 多轮 start/stop 累积 → 触发风暴。
+        if let obs = engineConfigObserver {
+            NotificationCenter.default.removeObserver(obs)
+            engineConfigObserver = nil
+        }
+
         // 关键:把 engine / converter / targetFormat 都置 nil,让 ARC 回收
         // AVAudioEngine 实例。否则即使调了 engine.stop(),内部 AUHAL 仍持着
         // 麦克风硬件连接,macOS 还把这个 app 当"正在录",蓝牙耳机会被强切到
@@ -223,6 +236,10 @@ actor AudioCaptureService {
 
         try engine.start()
 
+        // 监听引擎配置变更:setDeviceID / 输入路由变化会触发,引擎随后**自动 stop**。
+        // 不监听 → 引擎停了没人重启 → "黄灯闪一下就灭"。监听到就原地重配重启同一引擎。
+        registerEngineConfigObserver(engine: engine)
+
         // 通知 AudioDevicesMonitor:app 现在在录哪个 device(UI live status)。
         // 不阻塞主路径,fire-and-forget。
         let activeUID = Self.currentInputDeviceUID(inputNode: inputNode)
@@ -233,6 +250,54 @@ actor AudioCaptureService {
             for await samples in stream {
                 await recorder?.feed(samples)
             }
+        }
+    }
+
+    /// 注册 .AVAudioEngineConfigurationChange 观察者(绑这个 engine)。先摘旧的再装,
+    /// 避免重复。通知在任意线程投递,闭包 hop 回 actor 处理。
+    private func registerEngineConfigObserver(engine: AVAudioEngine) {
+        if let obs = engineConfigObserver {
+            NotificationCenter.default.removeObserver(obs)
+            engineConfigObserver = nil
+        }
+        engineConfigObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            Task { await self?.reconfigureAfterConfigChange() }
+        }
+    }
+
+    /// 引擎被 .AVAudioEngineConfigurationChange 自动停后,原地重配重启**同一个**引擎:
+    /// 重读(切换后的真实)格式 + 重建 converter + 重装 tap + start。不重建引擎、不
+    /// 重设设备 → 不会再触发新的 config change → 收敛,不死循环。这正是"黄灯闪一下
+    /// 就灭"的解:引擎自动停后没人拉起,加这个就拉得起来。
+    private func reconfigureAfterConfigChange() async {
+        guard samplesTask != nil, !reconfiguring, let engine else { return }
+        reconfiguring = true
+        defer { reconfiguring = false }
+        guard !engine.isRunning else { return }   // 没真停就不处理(防误触)
+
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, let target = targetFormat else {
+            logger.warning("reconfigure skipped: bad input format \(inputFormat.sampleRate, privacy: .public)Hz")
+            return
+        }
+        converter = AVAudioConverter(from: inputFormat, to: target)
+
+        let bufferSize: AVAudioFrameCount = Self.boundInputIsBluetooth(inputNode: inputNode) ? 8192 : 4096
+        if tapInstalled { inputNode.removeTap(onBus: 0); tapInstalled = false }
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
+            [weak self] buffer, _ in
+            guard let self else { return }
+            Task { [weak self] in await self?.performConversion(buffer: buffer) }
+        }
+        tapInstalled = true
+        do {
+            try engine.start()
+            logger.notice("reconfigured after config change @ \(inputFormat.sampleRate, privacy: .public)Hz")
+        } catch {
+            logger.error("reconfigure restart failed: \(String(describing: error), privacy: .public)")
         }
     }
 
