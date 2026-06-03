@@ -129,7 +129,9 @@ final class WritingCaptureWorker {
         defer { napGuard.release() }
         do {
             // App Nap 防护:Pass 1 + Pass 3 fanout 长任务,后台跑能拖到 10x。
-            let summary = try await runDayCore(date: date, runId: runId)
+            let summary = try await PiAgentRegistry.$owner.withValue(PipelineOwner.writingCapture) {
+                try await runDayCore(date: date, runId: runId)
+            }
             return summary
         } catch {
             let msg = error.localizedDescription
@@ -463,10 +465,12 @@ final class WritingCaptureWorker {
         defer { napGuard.release() }
         do {
             // App Nap 防护:backlog 跑全历史时间窗,LLM fanout 可能跑几分钟。
-            let summary = try await runBacklogCore(
-                runId: runId, startMs: startMs, endMs: endMs,
-                includeAxText: includeAxText
-            )
+            let summary = try await PiAgentRegistry.$owner.withValue(PipelineOwner.writingCapture) {
+                try await runBacklogCore(
+                    runId: runId, startMs: startMs, endMs: endMs,
+                    includeAxText: includeAxText
+                )
+            }
             ui.lastSummary = summary
             ui.stage = "done"
             ui.statusMessage = summary.status == .pendingReview

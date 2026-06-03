@@ -487,9 +487,17 @@ final class MemoryScheduler {
         store.setStatus(date: date, stage: stage, status: .inProgress)
         let hb = startHeartbeat(for: date)
 
+        // 按 stage 派 pipeline owner —— Stop 时只杀本 pipeline 的 LLM 子进程。
+        let owner: String = {
+            switch stage {
+            case .distill:     return PipelineOwner.distill
+            case .personality: return PipelineOwner.personality
+            default:           return PipelineOwner.event   // raw / event / impact / classify
+            }
+        }()
         let outcome: StepOutcome
         do {
-            outcome = try await work()
+            outcome = try await PiAgentRegistry.$owner.withValue(owner) { try await work() }
         } catch let e as BudgetExhaustedError {
             schedLog.notice("\(date)/\(processor): budget exhausted — \(e.message, privacy: .public)")
             outcome = .budgetExhausted

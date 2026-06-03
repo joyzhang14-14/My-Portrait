@@ -89,7 +89,9 @@ final class WritingStyleDistiller {
     private func runCore(mode: WritingStyleMode) async throws -> WritingStyleRunSummary {
         let napGuard = AppNapGuard.acquire(reason: "Writing style distillation")
         defer { napGuard.release() }
-        return try await runCoreImpl(mode: mode)
+        return try await PiAgentRegistry.$owner.withValue(PipelineOwner.writingStyle) {
+            try await runCoreImpl(mode: mode)
+        }
     }
 
     private func runCoreImpl(mode: WritingStyleMode) async throws -> WritingStyleRunSummary {
