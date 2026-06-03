@@ -284,22 +284,41 @@ actor PortraitDBImpl: PortraitDB {
 
     func matchSpeaker(embedding: [Float]) async throws -> SpeakerMatch {
         try await dbPool.read { db in
-            // **纯质心匹配**:每人一个稳定的运行平均向量(enroll / 训练时即建)。
-            // 不做样本级匹配 —— "单个最相似样本 > 阈值"会被 outlier 带偏:某人样本多
-            // 时任何声音总能蒙中某一个 → 过度归一,还把"别人 / 嘈杂的你"误吸成已知人。
-            // 质心是均值、outlier-robust、判别力强:清晰的你匹配你的质心;嘈杂的你 /
-            // 真正的别人跟你的干净质心不像 → 不匹配 → 落 unknown 凸显出来(可去命名)。
+            // **best-of-N 匹配**(对齐 screenpipe `get_speaker_from_embedding`):
+            // 每个说话人取「存的多条 embedding + 质心」里**最接近的一条**的相似度。
+            //
+            // 为什么不只用质心:质心是平均值,太严。同一个人在不同条件下(干净训练
+            // 录音 vs 嘈杂真实采集 vs 系统音频)声纹方差大,跟平均质心的余弦会掉到
+            // 阈值以下 → 不匹配 → 不停建新簇(碎片化)。比「某条同条件样本」才抓得住。
+            // screenpipe #2969 治的就是这个「输出音频堆出一堆重复簇」。
+            // 过度合并的风险用下面的判别裕度(margin)挡:跟两个不同人都接近就留空。
+            var best: [Int64: (name: String?, sim: Float)] = [:]
+            // 1) 质心 —— 覆盖没存样本的说话人(刚训练 / seeded)。
             let cRows = try Row.fetchAll(db, sql: """
                 SELECT id, name, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
                 """)
-            var cands: [(id: Int64, name: String?, sim: Float)] = []
             for row in cRows {
                 guard let blob: Data = row["centroid"], let vec = blob.asFloats,
                       vec.count == embedding.count else { continue }
+                let id: Int64 = row["id"]
                 let sim = VectorMath.cosineSimilarity(embedding, vec)
-                if sim > Self.speakerMatchThreshold {
-                    cands.append((row["id"], row["name"], sim))
-                }
+                if sim > (best[id]?.sim ?? -2) { best[id] = (row["name"], sim) }
+            }
+            // 2) 每条存的样本,取最接近的(best-of-N)。
+            let eRows = try Row.fetchAll(db, sql: """
+                SELECT e.speaker_id AS sid, s.name AS name, e.embedding AS emb
+                FROM speaker_embeddings e JOIN speakers s ON s.id = e.speaker_id
+                WHERE s.hallucination = 0
+                """)
+            for row in eRows {
+                guard let blob: Data = row["emb"], let vec = blob.asFloats,
+                      vec.count == embedding.count else { continue }
+                let id: Int64 = row["sid"]
+                let sim = VectorMath.cosineSimilarity(embedding, vec)
+                if sim > (best[id]?.sim ?? -2) { best[id] = (row["name"], sim) }
+            }
+            let cands: [(id: Int64, name: String?, sim: Float)] = best.compactMap {
+                $0.value.sim > Self.speakerMatchThreshold ? ($0.key, $0.value.name, $0.value.sim) : nil
             }
             guard let winner = cands.max(by: { $0.sim < $1.sim }) else { return .none }
             // 判别裕度:找「跟 winner 不同名(= 不同人)」的最强候选。同名簇(同一人被
