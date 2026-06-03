@@ -1297,6 +1297,16 @@ struct MemorySettingsView: View {
                     Text("\(kind.shortLabel) · \(problemText)")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.secondary)
+                    // 完整 raw error reason(LLM / 网络 / DB 的原始 message)
+                    // — 用户可以对症下药 / 复制反馈。
+                    if let reason = kind.reasonDetail, !reason.isEmpty {
+                        Text(reason)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
+                            .padding(.top, 2)
+                    }
                 }
                 Spacer()
                 Button("Problem solved") {
@@ -1329,6 +1339,14 @@ struct MemorySettingsView: View {
                     Text("\(kind.shortLabel) · \(problemText)")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
+                    if let reason = kind.reasonDetail, !reason.isEmpty {
+                        Text(reason)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
+                            .padding(.top, 2)
+                    }
                 }
                 Spacer()
                 Text("retry \(item.retryCount)")

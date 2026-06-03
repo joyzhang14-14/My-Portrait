@@ -90,6 +90,28 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         }
     }
 
+    /// 折叠在 attention row 下方的 raw error 详情 —— 让用户能看到完整的
+    /// LLM/网络/DB error message,而不只是泛文案。`nil` = 该 case 没有 reason
+    /// (e.g. dbBusy / rateLimit / appInterruptionRestarted)。
+    var reasonDetail: String? {
+        switch self {
+        case .transientNetwork(let r),
+             .streamTruncated(let r),
+             .schemaViolation(let r),
+             .unknownTransient(let r),
+             .dbCorrupt(let r),
+             .agentSpawnFailed(let r),
+             .contextOverflow(let r):
+            return r
+        case .quotaExhausted(_, let r),
+             .authRevoked(_, let r),
+             .modelDeprecated(_, let r):
+            return r
+        case .rateLimitThrottle, .dbBusy, .appInterruptionRestarted:
+            return nil
+        }
+    }
+
     /// 简短分类标签,用在 attention row 的角标 / 通知 emoji。
     var shortLabel: String {
         switch self {
