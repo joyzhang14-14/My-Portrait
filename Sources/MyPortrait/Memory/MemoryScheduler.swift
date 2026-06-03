@@ -96,15 +96,78 @@ final class MemoryScheduler {
     private var tickRunning = false
     private var timer: Timer?
 
-    /// 每行每阶段最近一次失败的分类(per-process 内存,进程重启丢失)。
-    /// runStep catch 时由 ErrorClassifier 写入,UI(NeedAttention)读出来决定
-    /// banner 文案 + 是否显示 "Problem solved" 按钮。
-    /// 丢失也安全:status=failed 永远在 DB,UI 退化到泛泛的 "failed" 文案。
+    /// 每行每阶段最近一次失败的分类。**持久化到 ~/.portrait/scheduler/
+    /// last_failures.json** —— 进程重启不丢,UI 一直能显示具体 kind。
+    /// 单一真相:in-memory dict,任何写都同步落盘;启动时从盘加载。
+    /// 文件格式:`{ "<date>": { "<stage.rawValue>": <LLMFailureKind json> } }`
     private var lastFailureByRowStage: [String: [ProcessingStage: LLMFailureKind]] = [:]
+    /// 持久化文件 url。`~/.portrait/scheduler/last_failures.json`。
+    private static var lastFailuresURL: URL {
+        Storage.rootURL.appendingPathComponent("scheduler", isDirectory: true)
+            .appendingPathComponent("last_failures.json")
+    }
 
-    /// UI / 通知层查最近失败 kind。nil = 没有失败记录(进程刚启动 / 从未失败)。
+    /// UI / 通知层查最近失败 kind。nil = 没有失败记录。
     func lastFailureKind(date: String, stage: ProcessingStage) -> LLMFailureKind? {
         lastFailureByRowStage[date]?[stage]
+    }
+
+    /// 写一条 failure kind,内存 + 落盘。所有失败写入点(runStep catch /
+    /// recoverStaleLocks / recoverPausedJobs)的统一入口。
+    private func recordFailure(date: String, stage: ProcessingStage, kind: LLMFailureKind) {
+        lastFailureByRowStage[date, default: [:]][stage] = kind
+        persistLastFailures()
+    }
+
+    /// 清掉某 stage 的 failure 记录(success 时调),内存 + 落盘。
+    private func clearFailure(date: String, stage: ProcessingStage) {
+        lastFailureByRowStage[date]?.removeValue(forKey: stage)
+        if lastFailureByRowStage[date]?.isEmpty == true {
+            lastFailureByRowStage.removeValue(forKey: date)
+        }
+        persistLastFailures()
+    }
+
+    /// 启动时从盘加载。失败 / 不存在 → 内存留空,后续写入仍会建文件。
+    private func loadLastFailures() {
+        let url = Self.lastFailuresURL
+        guard let data = try? Data(contentsOf: url),
+              let raw = try? JSONDecoder().decode([String: [String: LLMFailureKind]].self, from: data)
+        else { return }
+        var out: [String: [ProcessingStage: LLMFailureKind]] = [:]
+        for (date, stageMap) in raw {
+            var inner: [ProcessingStage: LLMFailureKind] = [:]
+            for (sName, kind) in stageMap {
+                if let stage = ProcessingStage(rawValue: sName) {
+                    inner[stage] = kind
+                }
+            }
+            if !inner.isEmpty { out[date] = inner }
+        }
+        lastFailureByRowStage = out
+    }
+
+    /// 写盘:序列化 in-memory dict 到 JSON。最佳努力,失败只 log。
+    private func persistLastFailures() {
+        let url = Self.lastFailuresURL
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            // 翻译 ProcessingStage → rawValue 让 JSON encode。
+            var raw: [String: [String: LLMFailureKind]] = [:]
+            for (date, stageMap) in lastFailureByRowStage {
+                var inner: [String: LLMFailureKind] = [:]
+                for (stage, kind) in stageMap {
+                    inner[stage.rawValue] = kind
+                }
+                raw[date] = inner
+            }
+            let data = try JSONEncoder().encode(raw)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            schedLog.error("persist last_failures.json failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// 给 UI(NeedAttention)拿一行 DB row,算 nextRetryLabel 用。
@@ -142,6 +205,8 @@ final class MemoryScheduler {
 
     /// App 启动调用：先回收死锁，立刻 tick 一次，再起周期 timer。
     func start() {
+        loadLastFailures()   // 必须在 recoverStaleLocks 之前 — recover 写 kind 时
+                             // 会读老值(避免覆盖更早的 user-required kind)
         recoverStaleLocks()
         timer?.invalidate()
         let t = Timer.scheduledTimer(withTimeInterval: tickInterval, repeats: true) { _ in
@@ -648,11 +713,11 @@ final class MemoryScheduler {
             // 让 classifier 分一下 — 区分 transient throttle vs permanent quota
             // exhaustion,供 UI banner 区分 "auto-recovering" vs "Top up & click
             // Problem solved"。
-            lastFailureByRowStage[date, default: [:]][stage] = ErrorClassifier.classify(e)
+            recordFailure(date: date, stage: stage, kind: ErrorClassifier.classify(e))
             outcome = .budgetExhausted
         } catch {
             let kind = ErrorClassifier.classify(error)
-            lastFailureByRowStage[date, default: [:]][stage] = kind
+            recordFailure(date: date, stage: stage, kind: kind)
             schedLog.error("\(date)/\(processor) failed [\(kind.shortLabel, privacy: .public)]: \(error.localizedDescription, privacy: .public)")
             outcome = .failed
         }
@@ -675,10 +740,7 @@ final class MemoryScheduler {
         case .success:
             store.setStatus(date: date, stage: stage, status: .complete)
             // 成功 → 清掉这 stage 的 last failure(UI 不再显示陈旧 kind)
-            lastFailureByRowStage[date]?.removeValue(forKey: stage)
-            if lastFailureByRowStage[date]?.isEmpty == true {
-                lastFailureByRowStage.removeValue(forKey: date)
-            }
+            clearFailure(date: date, stage: stage)
             print("[Scheduler] \(date)/\(stage.rawValue): complete")
 
         case .budgetExhausted:
@@ -815,6 +877,11 @@ final class MemoryScheduler {
             store.releaseLock(date: row.date)
 
             let day = ProcessingLogStore.day(from: row.date)
+            // 真崩溃路径(SIGKILL / 断电 / force quit)— 跟 paused 一样,用户
+            // 视角都是"上次没跑完",写同一个 kind。recordFailure 同时落盘,
+            // UI 重启后仍能显示"interrupted"banner。
+            let stagesAffected: [ProcessingStage] = [.event, .impact, .classify, .distill, .personality]
+                .filter { row.status(of: $0) == .inProgress }
             if row.event == .inProgress {
                 applyOutcome(date: row.date, stage: .event, outcome: .failed, rollbackDay: day)
             }
@@ -829,6 +896,9 @@ final class MemoryScheduler {
             }
             if row.personality == .inProgress {
                 applyOutcome(date: row.date, stage: .personality, outcome: .failed, rollbackDay: nil)
+            }
+            for stage in stagesAffected {
+                recordFailure(date: row.date, stage: stage, kind: .appInterruptionRestarted)
             }
         }
 
@@ -870,10 +940,10 @@ final class MemoryScheduler {
                 hadPausedStages.append(.personality)
                 pausedPipelines.insert("Personality refresh")
             }
-            // 写 in-memory kind 让 attention UI 显示 "Auto-recovering · interrupted"
+            // 持久化 kind 让 attention UI 显示 "Auto-recovering · interrupted"
             // + UI 的 "Auto-recovering · next retry next tick"(retry=0 → backoffReady true)。
             for stage in hadPausedStages {
-                lastFailureByRowStage[row.date, default: [:]][stage] = .appInterruptionRestarted
+                recordFailure(date: row.date, stage: stage, kind: .appInterruptionRestarted)
             }
             if !hadPausedStages.isEmpty {
                 schedLog.notice("resumed paused row \(row.date, privacy: .public) → failed + appInterruptionRestarted (no retry++)")
