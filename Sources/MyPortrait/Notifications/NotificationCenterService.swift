@@ -23,6 +23,13 @@ final class NotificationCenterService {
         /// personality / writing / speech)时发。`success=false` 走失败样式。
         /// `summary` 一行人话:"processed 3 days" / "12 records"。
         case schedulerRun(pipeline: String, success: Bool, summary: String)
+        /// pipeline 失败但**需要用户介入**(quota exhausted / auth revoked /
+        /// model deprecated / DB corrupt / agent spawn failed)。红色 banner +
+        /// 自动跳转 Settings → Scheduler。`kindLabel` 是 LLMFailureKind.shortLabel。
+        case pipelineNeedsFix(pipeline: String, kindLabel: String, userMessage: String)
+        /// pipeline 失败但 scheduler 会**自动重试**(transient network / rate
+        /// limit / truncated / DB busy / schema)。灰色,告知"retrying in Xh"。
+        case pipelineAutoRecovering(pipeline: String, kindLabel: String, nextRetryLabel: String)
         /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
         /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
         /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
@@ -96,6 +103,22 @@ final class NotificationCenterService {
             // ⚙️ 跑完 / ⚠️ 失败 —— 跟 cron job 的 🛰️ 区分,一眼看出是 scheduler。
             title = success ? "⚙️ \(pipeline)" : "⚠️ \(pipeline) failed"
             body = summary
+
+        case let .pipelineNeedsFix(pipeline, kindLabel, userMessage):
+            guard n.schedulerAlerts else {
+                log.notice("post skipped: schedulerAlerts is OFF"); return
+            }
+            // 🛑 = action required from user;桶 B。
+            title = "🛑 \(pipeline) needs attention"
+            body = "\(userMessage) [\(kindLabel)]"
+
+        case let .pipelineAutoRecovering(pipeline, kindLabel, nextRetryLabel):
+            guard n.schedulerAlerts else {
+                log.notice("post skipped: schedulerAlerts is OFF"); return
+            }
+            // 🔁 = auto-recovering;桶 A。低优先,信息性。
+            title = "🔁 \(pipeline) retrying \(nextRetryLabel)"
+            body = "Auto-recovering from \(kindLabel) — no action needed."
         }
 
         let notif = InAppNotification(
