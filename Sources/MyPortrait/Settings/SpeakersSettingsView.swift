@@ -847,6 +847,11 @@ struct VoiceTrainingCard: View {
             // 训练时用户自己输名字。不注入 firstName。
         }
         .onDisappear { monitor.stop() }
+        // 换说话人模型 → 清掉上一次训练(在别的模型下)留下的 "✓ Trained as …"
+        // 成功/失败提示 —— 它属于旧模型,对新模型不适用。训练进行中不打断。
+        .onChange(of: cfg.current.capture.audio.speakerEmbeddingModel) { _, _ in
+            if !trainer.isRunning { trainer.reset() }
+        }
         // trainer.phase 变 success/failure → 还原 audio toggle。
         .onChange(of: phaseKey(trainer.phase)) { _, newKey in
             if newKey == "success" || newKey == "failure" {
