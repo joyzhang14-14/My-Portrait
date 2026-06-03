@@ -98,6 +98,8 @@ struct SpeakersSettingsView: View {
             }
         }
         .task { reload() }
+        // 换说话人模型 → 重新加载列表(声纹按模型隔离,列表只显示当前模型的人)。
+        .onChange(of: config.current.capture.audio.speakerEmbeddingModel) { _, _ in reload() }
     }
 
     // MARK: - Toolbar
