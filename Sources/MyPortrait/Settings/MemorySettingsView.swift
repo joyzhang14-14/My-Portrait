@@ -1268,9 +1268,9 @@ struct MemorySettingsView: View {
 
     private func attentionRow(_ item: MemoryScheduler.AttentionItem) -> some View {
         let problemText = item.problems
-            .map { "\($0.stage.rawValue): \($0.status.rawValue)" }
+            .map { "\(Self.stageLabel($0.stage)): \(Self.statusLabel($0.status))" }
             .joined(separator: " · ")
-        let title = item.date == "_distill_anchor" ? "Portrait distillation" : item.date
+        let title = Self.attentionTitle(item.date)
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -1289,6 +1289,39 @@ struct MemorySettingsView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+        }
+    }
+
+    /// 把内部阶段名翻成给用户看的人话(「Needs attention」行用)。
+    private static func stageLabel(_ s: ProcessingStage) -> String {
+        switch s {
+        case .raw:         return "Data prep"
+        case .event:       return "Events"
+        case .impact:      return "Scoring"
+        case .classify:    return "Organizing"
+        case .distill:     return "Portrait"
+        case .personality: return "Personality"
+        }
+    }
+
+    /// 把内部状态翻成人话。failed / budget_deferred / dead_letter 是这里唯一
+    /// 会出现的三种(见 MemoryScheduler.attentionItems)。
+    private static func statusLabel(_ s: ProcessingStatus) -> String {
+        switch s {
+        case .failed:         return "Failed"
+        case .budgetDeferred: return "Paused (daily budget)"
+        case .deadLetter:     return "Gave up after retries"
+        default:              return s.rawValue
+        }
+    }
+
+    /// anchor 行标题翻译。三个 anchor 都处理,否则会原样显示 _xxx_anchor。
+    private static func attentionTitle(_ date: String) -> String {
+        switch date {
+        case ProcessingLogStore.distillAnchorDate:     return "Portrait update"
+        case ProcessingLogStore.personalityAnchorDate: return "Personality update"
+        case ProcessingLogStore.classifyAnchorDate:    return "Organizing events"
+        default:                                        return date
         }
     }
 
