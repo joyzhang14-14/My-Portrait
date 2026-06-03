@@ -1267,29 +1267,95 @@ struct MemorySettingsView: View {
         }
     }
 
+    @ViewBuilder
     private func attentionRow(_ item: MemoryScheduler.AttentionItem) -> some View {
+        // 拿这 row 任一 problem stage 的 last failure kind(in-memory,进程重启丢)。
+        // 优先 user-required kind,没有取第一个 transient kind,都没就 nil。
+        let scheduler = MemoryScheduler.shared
+        let kinds: [LLMFailureKind] = item.problems.compactMap {
+            scheduler.lastFailureKind(date: item.date, stage: $0.stage)
+        }
+        let userKind = kinds.first { $0.isUserRequired }
+        let transientKind = kinds.first { !$0.isUserRequired }
+        let title = Self.attentionTitle(item.date)
         let problemText = item.problems
             .map { "\(Self.stageLabel($0.stage)): \(Self.statusLabel($0.status))" }
             .joined(separator: " · ")
-        let title = Self.attentionTitle(item.date)
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                Text(problemText)
-                    .font(.system(size: 10, design: .monospaced))
+
+        // 行号 row 的精确状态(找最新 updated row,给 nextRetryLabel 用)。
+        let dbRow = scheduler.attentionRow(date: item.date)
+
+        if let kind = userKind {
+            // ─── 桶 B:user-required → 红 banner + Problem solved 按钮 ───
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .semibold))
+                    Text(kind.userMessage)
+                        .font(.system(size: 11)).foregroundStyle(.primary)
+                    Text("\(kind.shortLabel) · \(problemText)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Problem solved") {
+                    MemoryScheduler.shared.resetDay(item.date)
+                    reload()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.red)
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.red.opacity(0.08))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.red.opacity(0.25), lineWidth: 0.7))
+            )
+        } else if let kind = transientKind {
+            // ─── 桶 A:auto-recovering → 灰色信息行 + 无按钮 ───
+            let nextLabel = dbRow.map {
+                scheduler.nextRetryLabel(retryCount: $0.retryCount, updatedAtMs: $0.updatedAtMs)
+            } ?? "next tick"
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath")
                     .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .medium))
+                    Text("Auto-recovering · next retry \(nextLabel)")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("\(kind.shortLabel) · \(problemText)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Text("retry \(item.retryCount)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
-            Spacer()
-            Text("retry \(item.retryCount)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-            Button("Reset") {
-                MemoryScheduler.shared.resetDay(item.date)
-                reload()
+            .padding(.vertical, 2)
+        } else {
+            // ─── Fallback:没 kind 信息(进程刚重启 / DB 老行)→ 老样式 + Reset ───
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .medium))
+                    Text(problemText)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("retry \(item.retryCount)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Button("Reset") {
+                    MemoryScheduler.shared.resetDay(item.date)
+                    reload()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
     }
 

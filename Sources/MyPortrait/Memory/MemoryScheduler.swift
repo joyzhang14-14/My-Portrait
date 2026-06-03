@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import Network
 import Observation
 import os.log
 
@@ -105,6 +107,11 @@ final class MemoryScheduler {
         lastFailureByRowStage[date]?[stage]
     }
 
+    /// 给 UI(NeedAttention)拿一行 DB row,算 nextRetryLabel 用。
+    nonisolated func attentionRow(date: String) -> ProcessingLogRow? {
+        store.row(for: date)
+    }
+
     // MARK: - View bindings(canRunXxx + 解释文案)
     /// 当前是否有事件家族(distill or personality)在跑。
     var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
@@ -141,12 +148,73 @@ final class MemoryScheduler {
             Task { @MainActor in await MemoryScheduler.shared.tick() }
         }
         timer = t
+        registerSleepWakeHooks()
+        registerNetworkMonitor()
         Task { await tick() }
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        sleepObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        wakeObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        sleepObserver = nil
+        wakeObserver = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
+    }
+
+    // MARK: - Sleep/Wake + Network hooks
+
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var pathMonitor: NWPathMonitor?
+    private var lastPathSatisfied: Bool = true
+
+    private func registerSleepWakeHooks() {
+        // 系统休眠前 → pause 所有 in_progress(跟 applicationWillTerminate 同
+        // 路径,不计 retry)。LLM 服务不支持续接 → pause 比"被 macOS suspend
+        // 然后心跳冻结被当 stale lock 失败回收"安全。
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObserver = nc.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in
+                schedLog.notice("system willSleep → pausing in-progress jobs")
+                MemoryScheduler.shared.pauseInProgressJobs()
+            }
+        }
+        // 唤醒后立刻 tick 一次(不等下个 15min)— 让 paused 行立刻被 recover
+        // 转 pending,该跑的下次重启不要等。
+        wakeObserver = nc.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in
+                schedLog.notice("system didWake → recovering paused + immediate tick")
+                MemoryScheduler.shared.recoverStaleLocks()
+                await MemoryScheduler.shared.tick()
+            }
+        }
+    }
+
+    private func registerNetworkMonitor() {
+        let mon = NWPathMonitor()
+        mon.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                guard let self else { return }
+                let nowOk = (path.status == .satisfied)
+                let wasOk = self.lastPathSatisfied
+                self.lastPathSatisfied = nowOk
+                // 从 unsatisfied → satisfied:网络回来了,立刻 tick(让 transient
+                // network 失败的 row 不用等 backoff 完整窗口)。
+                if !wasOk && nowOk {
+                    schedLog.notice("network came back online → immediate tick")
+                    await self.tick()
+                }
+            }
+        }
+        mon.start(queue: DispatchQueue(label: "scheduler.network-monitor"))
+        pathMonitor = mon
     }
 
     /// 周期检查：每个调度器按各自频率到点、且今天还没跑过就跑。
@@ -454,12 +522,13 @@ final class MemoryScheduler {
             }
         }
 
-        let outcome: JobOutcome = .ran(days: days.map { ProcessingLogStore.dayString($0) })
-        NotificationCenterService.shared.post(.schedulerRun(
+        let dayStrings = days.map { ProcessingLogStore.dayString($0) }
+        let outcome: JobOutcome = .ran(days: dayStrings)
+        postPipelineOutcomeAlert(
             pipeline: "Event processing",
-            success: true,
-            summary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")"
-        ))
+            dates: dayStrings,
+            successSummary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")"
+        )
         return outcome
     }
 
@@ -493,14 +562,11 @@ final class MemoryScheduler {
             let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
-        // 看最终 anchor 状态:complete = success,其它(failed/budget_deferred)= 失败通知。
-        let finalDistill = store.row(for: distillAnchor)?.distill ?? .idle
-        let ok = (finalDistill == .complete)
-        NotificationCenterService.shared.post(.schedulerRun(
+        postPipelineOutcomeAlert(
             pipeline: "Portrait distillation",
-            success: ok,
-            summary: ok ? "Long-term portrait updated" : "Status: \(finalDistill.rawValue)"
-        ))
+            dates: [distillAnchor],
+            successSummary: "Long-term portrait updated"
+        )
         return .ran(days: [distillAnchor])
     }
 
@@ -538,12 +604,13 @@ final class MemoryScheduler {
                 return .success
             }
         }
-        NotificationCenterService.shared.post(.schedulerRun(
+        let dayStrings = days.map { ProcessingLogStore.dayString($0) }
+        postPipelineOutcomeAlert(
             pipeline: "Personality refresh",
-            success: true,
-            summary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")"
-        ))
-        return .ran(days: days.map { ProcessingLogStore.dayString($0) })
+            dates: dayStrings,
+            successSummary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")"
+        )
+        return .ran(days: dayStrings)
     }
 
     // MARK: - 单步执行（持锁 + 心跳 + 结果落库）
@@ -646,6 +713,77 @@ final class MemoryScheduler {
         case 3:     return 6 * 60 * 60 * 1000       // 6 h
         default:    return 24 * 60 * 60 * 1000      // 24 h cap
         }
+    }
+
+    // MARK: - 通知收口 helper
+
+    /// 5 个 runXxxJob 末尾共用:扫该次涉及的 days × stages,按 last failure
+    /// kind 决定发一条通知(success / needs-fix / auto-recovering),避免一次 run
+    /// 弹两条噪音。
+    /// - `pipeline`:UI 名 (e.g. "Event processing")
+    /// - `dates`:本次 run 涉及的 ProcessingLog row date(锚行也算 1 个)
+    /// - `successSummary`:全成功时用的 summary 文案
+    func postPipelineOutcomeAlert(pipeline: String, dates: [String], successSummary: String) {
+        // 扫 dates 找最严重的 failure kind:优先 user-required > auto-transient。
+        var userRequired: LLMFailureKind?
+        var autoTransient: (kind: LLMFailureKind, retry: Int, updatedAtMs: Int64)?
+        for date in dates {
+            guard let row = store.row(for: date) else { continue }
+            for stage in ProcessingStage.allCases where row.status(of: stage) == .failed
+                || row.status(of: stage) == .budgetDeferred
+                || row.status(of: stage) == .deadLetter {
+                if let kind = lastFailureByRowStage[date]?[stage] {
+                    if kind.isUserRequired, userRequired == nil {
+                        userRequired = kind
+                    } else if !kind.isUserRequired, autoTransient == nil {
+                        autoTransient = (kind, row.retryCount, row.updatedAtMs)
+                    }
+                }
+            }
+        }
+        if let kind = userRequired {
+            NotificationCenterService.shared.post(.pipelineNeedsFix(
+                pipeline: pipeline,
+                kindLabel: kind.shortLabel,
+                userMessage: kind.userMessage
+            ))
+            return
+        }
+        if let auto = autoTransient {
+            NotificationCenterService.shared.post(.pipelineAutoRecovering(
+                pipeline: pipeline,
+                kindLabel: auto.kind.shortLabel,
+                nextRetryLabel: nextRetryLabel(retryCount: auto.retry, updatedAtMs: auto.updatedAtMs)
+            ))
+            return
+        }
+        // 全 complete / 无失败 kind → 老 success 通知。
+        NotificationCenterService.shared.post(.schedulerRun(
+            pipeline: pipeline,
+            success: true,
+            summary: successSummary
+        ))
+    }
+
+    /// 给 UI / 通知用的人话:"in 10 min" / "in 1 h" / "in 6 h" / "in 24 h" /
+    /// "now"。基于 row 的 retry_count + updatedAtMs 算从现在还要等多久。
+    nonisolated func nextRetryLabel(retryCount: Int, updatedAtMs: Int64) -> String {
+        let backoff: Int64 = {
+            switch retryCount {
+            case 0:     return 0
+            case 1:     return  10 * 60 * 1000
+            case 2:     return  60 * 60 * 1000
+            case 3:     return 6 * 60 * 60 * 1000
+            default:    return 24 * 60 * 60 * 1000
+            }
+        }()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let remainingMs = max(0, (updatedAtMs + backoff) - now)
+        if remainingMs == 0 { return "next tick" }
+        let mins = remainingMs / 60_000
+        if mins < 60 { return "~\(max(1, mins)) min" }
+        let hrs = mins / 60
+        return "~\(hrs) h"
     }
 
     /// 一行 stage 现在是否到点该重试。failed/budgetDeferred/deadLetter 才需要
