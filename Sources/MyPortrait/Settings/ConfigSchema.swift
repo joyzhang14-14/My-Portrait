@@ -549,6 +549,10 @@ struct AudioConfig: Codable, Equatable {
     var customLanguages:         [String] = []
     var captureSystemAudio:      Bool     = true
     var speakerIdEnabled:        Bool     = true
+    /// 说话人识别用的声纹模型:`en_campplus`(英文 512维,默认)/ `zh_campplus`
+    /// (中文 192维)/ `zh_eres2netv2`(中文 192维)。⚠️ 切换会让现有声纹登记
+    /// (维度不同)全部失配,需重训说话人 + 重跑历史识别。
+    var speakerEmbeddingModel:   String   = "en_campplus"
     var filterMusic:             Bool     = false
     /// 暂停名单（黑名单）：这些 app(bundle id) 或 类别(LSApplicationCategoryType,
     /// 如 public.app-category.music) 在输出音频时,整体暂停音频采集（比 filterMusic
@@ -590,6 +594,7 @@ struct AudioConfig: Codable, Equatable {
         case customLanguages         = "custom_languages"
         case captureSystemAudio      = "capture_system_audio"
         case speakerIdEnabled        = "speaker_id_enabled"
+        case speakerEmbeddingModel   = "speaker_embedding_model"
         case filterMusic             = "filter_music"
         case pauseAudioApps          = "pause_audio_apps"
         case pauseAudioCategories    = "pause_audio_categories"
@@ -616,6 +621,7 @@ struct AudioConfig: Codable, Equatable {
         customLanguages        = c.dflt([String].self, .customLanguages, customLanguages)
         captureSystemAudio     = c.dflt(Bool.self,     .captureSystemAudio, captureSystemAudio)
         speakerIdEnabled       = c.dflt(Bool.self,     .speakerIdEnabled, speakerIdEnabled)
+        speakerEmbeddingModel  = c.dflt(String.self,   .speakerEmbeddingModel, speakerEmbeddingModel)
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
         pauseAudioApps         = c.dflt([String].self, .pauseAudioApps, pauseAudioApps)
         pauseAudioCategories   = c.dflt([String].self, .pauseAudioCategories, pauseAudioCategories)

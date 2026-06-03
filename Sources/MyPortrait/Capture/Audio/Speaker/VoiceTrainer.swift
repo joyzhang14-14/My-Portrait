@@ -162,7 +162,8 @@ final class VoiceTrainer {
         assignTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let modelPath = try await SpeakerModelStore.shared.path(for: .embedding).path
+                let embChoice = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                let modelPath = try await SpeakerModelStore.shared.path(for: SpeakerModel.embedding(forChoice: embChoice)).path
                 let fbank = FbankExtractor()
                 let extractor = try SpeakerEmbeddingExtractor(modelPath: modelPath, fbank: fbank)
                 // SpeakerEmbeddingExtractor.embed 不 Sendable,但只在 detached task

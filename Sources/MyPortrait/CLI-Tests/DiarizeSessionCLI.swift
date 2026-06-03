@@ -45,7 +45,10 @@ enum DiarizeSessionCLI {
                 do {
                     let mp: String
                     if let custom = modelPath { mp = custom }
-                    else { mp = try await SpeakerModelStore.shared.path(for: .embedding).path }
+                    else {
+                        let embChoice = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                        mp = try await SpeakerModelStore.shared.path(for: SpeakerModel.embedding(forChoice: embChoice)).path
+                    }
                     print("声纹模型: \((mp as NSString).lastPathComponent)")
                     ex = try SpeakerEmbeddingExtractor(modelPath: mp, fbank: FbankExtractor())
                 } catch { print("ERROR: 声纹模型加载失败: \(error)"); state.code = 1; return }
@@ -94,14 +97,21 @@ enum DiarizeSessionCLI {
 
                 // dump:每行 device(mic/sys),duration,512 维声纹 —— 供 Python 跑分类器找天花板。
                 if let dp = dumpPath {
+                    let tf = DateFormatter(); tf.dateFormat = "HH:mm:ss"
                     var csv = ""
                     for gi in valid {
                         let lab = segs[gi].device.contains("microphone") ? "mic" : "sys"
                         let dur = segs[gi].endS - segs[gi].startS
-                        csv += "\(lab),\(String(format: "%.2f", dur))," + embs[gi]!.map { String($0) }.joined(separator: ",") + "\n"
+                        let cjk = segs[gi].text.unicodeScalars.filter { $0.value >= 0x4E00 && $0.value <= 0x9FFF }.count
+                        let latin = segs[gi].text.unicodeScalars.contains { ($0.value >= 0x41 && $0.value <= 0x5A) || ($0.value >= 0x61 && $0.value <= 0x7A) }
+                        let lang = cjk >= 2 ? "zh" : (latin ? "en" : "other")
+                        let t = tf.string(from: Date(timeIntervalSince1970: Double(segs[gi].recordedMs)/1000 + segs[gi].startS))
+                        let txt = segs[gi].text.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
+                        // 格式:label,lang,dur,<floats>  \t 时间 \t 文本(文本放最后,tab 分隔免逗号冲突)
+                        csv += "\(lab),\(lang),\(String(format: "%.2f", dur))," + embs[gi]!.map { String($0) }.joined(separator: ",") + "\t\(t)\t\(txt)\n"
                     }
                     try? csv.write(toFile: dp, atomically: true, encoding: .utf8)
-                    print("dump 写入: \(dp)(\(valid.count) 行 × 512 维)")
+                    print("dump 写入: \(dp)(\(valid.count) 行)")
                 }
 
                 // 4. 离线全局聚类(AHC 平均连接,纯声纹)
