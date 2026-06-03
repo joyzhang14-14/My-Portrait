@@ -282,7 +282,7 @@ actor PortraitDBImpl: PortraitDB {
     /// centroid 指数移动平均的有效计数上限——防止老说话人 centroid 僵化。
     private static let centroidEMACap = 50
 
-    func matchSpeaker(embedding: [Float]) async throws -> SpeakerMatch {
+    func matchSpeaker(embedding: [Float], model: String) async throws -> SpeakerMatch {
         try await dbPool.read { db in
             // **best-of-N 匹配**(对齐 screenpipe `get_speaker_from_embedding`):
             // 每个说话人取「存的多条 embedding + 质心」里**最接近的一条**的相似度。
@@ -295,8 +295,9 @@ actor PortraitDBImpl: PortraitDB {
             var best: [Int64: (name: String?, sim: Float)] = [:]
             // 1) 质心 —— 覆盖没存样本的说话人(刚训练 / seeded)。
             let cRows = try Row.fetchAll(db, sql: """
-                SELECT id, name, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL
-                """)
+                SELECT id, name, centroid FROM speakers
+                WHERE hallucination = 0 AND centroid IS NOT NULL AND embedding_model = :model
+                """, arguments: ["model": model])
             for row in cRows {
                 guard let blob: Data = row["centroid"], let vec = blob.asFloats,
                       vec.count == embedding.count else { continue }
@@ -308,8 +309,8 @@ actor PortraitDBImpl: PortraitDB {
             let eRows = try Row.fetchAll(db, sql: """
                 SELECT e.speaker_id AS sid, s.name AS name, e.embedding AS emb
                 FROM speaker_embeddings e JOIN speakers s ON s.id = e.speaker_id
-                WHERE s.hallucination = 0
-                """)
+                WHERE s.hallucination = 0 AND s.embedding_model = :model
+                """, arguments: ["model": model])
             for row in eRows {
                 guard let blob: Data = row["emb"], let vec = blob.asFloats,
                       vec.count == embedding.count else { continue }
@@ -343,14 +344,14 @@ actor PortraitDBImpl: PortraitDB {
         return x == y
     }
 
-    func enrollSpeaker(embedding: [Float]) async throws -> Int64 {
+    func enrollSpeaker(embedding: [Float], model: String) async throws -> Int64 {
         let blob = Data(floats: embedding)
         let now = Self.nowMs()
         return try await dbPool.write { db in
             try db.execute(sql: """
-                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms)
-                VALUES (NULL, :blob, 1, 0, :createdAt, :updatedAt)
-                """, arguments: ["blob": blob, "createdAt": now, "updatedAt": now])
+                INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, embedding_model)
+                VALUES (NULL, :blob, 1, 0, :createdAt, :updatedAt, :model)
+                """, arguments: ["blob": blob, "createdAt": now, "updatedAt": now, "model": model])
             let sid = db.lastInsertedRowID
             try db.execute(sql: """
                 INSERT INTO speaker_embeddings (speaker_id, embedding, created_at_ms) VALUES (:sid, :blob, :createdAt)

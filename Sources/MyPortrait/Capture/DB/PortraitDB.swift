@@ -88,10 +88,12 @@ protocol PortraitDB: Sendable {
     /// 找匹配的说话人。`embedding` 须已 L2 归一化。质心余弦 > 阈值才算候选;
     /// 命中需明显比「最强异名候选」更近(裕度),否则判 `.ambiguous`(防 Joy/Stan
     /// 声纹接近时把边界段标反)。详见 `SpeakerMatch`。
-    func matchSpeaker(embedding: [Float]) async throws -> SpeakerMatch
+    /// `model` = 当前 embedding 模型 id（`en_campplus`/`zh_campplus`/...）—— 只跟
+    /// 同一模型产的声纹比对(不同模型向量空间不兼容)。
+    func matchSpeaker(embedding: [Float], model: String) async throws -> SpeakerMatch
 
-    /// 新建说话人：centroid = `embedding`，写入首个样本，返回新 speaker id。
-    func enrollSpeaker(embedding: [Float]) async throws -> Int64
+    /// 新建说话人：centroid = `embedding`，写入首个样本，绑定 `model`，返回新 speaker id。
+    func enrollSpeaker(embedding: [Float], model: String) async throws -> Int64
 
     /// 给已有说话人追加一个样本：更新 centroid（指数移动平均，有效计数上限 50），
     /// 样本数超 10 时轮换掉最接近 centroid 的（保多样性）。

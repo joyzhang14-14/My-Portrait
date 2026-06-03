@@ -46,11 +46,13 @@ enum RematchSpeakersCLI {
         Task.detached {
             defer { state.done = true }
             do {
-                // 1. 加载所有 speakers + 各自 stored 声纹
+                // 当前选用的声纹模型 —— 只处理这个模型绑定的 speakers(声纹按模型隔离)。
+                let curModel = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                // 1. 加载当前模型的 speakers + 各自 stored 声纹
                 struct Spk { let id: Int64; let name: String?; let hall: Bool; let centroid: [Float]?; var stored: [[Float]] }
                 var spkById: [Int64: Spk] = try await pool.read { db in
                     var m: [Int64: Spk] = [:]
-                    for r in try Row.fetchAll(db, sql: "SELECT id, name, hallucination, centroid FROM speakers") {
+                    for r in try Row.fetchAll(db, sql: "SELECT id, name, hallucination, centroid FROM speakers WHERE embedding_model = :model", arguments: ["model": curModel]) {
                         let id: Int64 = r["id"]
                         let cen: Data? = r["centroid"]
                         let hall: Int = r["hallucination"] ?? 0

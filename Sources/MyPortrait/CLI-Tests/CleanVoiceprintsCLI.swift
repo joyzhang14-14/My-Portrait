@@ -34,14 +34,16 @@ enum CleanVoiceprintsCLI {
         Task.detached {
             defer { state.done = true }
             do {
-                // 1. 拉所有非幻听具名簇的样本(id + 向量)。
+                let curModel = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                // 1. 拉当前模型的非幻听具名簇的样本(id + 向量)—— 只洗当前模型的。
                 var byId: [Int64: Cluster] = try await pool.read { db in
                     var m: [Int64: Cluster] = [:]
                     for r in try Row.fetchAll(db, sql: """
                         SELECT s.id AS sid, s.name AS name, e.id AS eid, e.embedding AS emb
                         FROM speaker_embeddings e JOIN speakers s ON s.id = e.speaker_id
                         WHERE s.hallucination = 0 AND s.name IS NOT NULL AND s.name <> ''
-                        """) {
+                          AND s.embedding_model = :model
+                        """, arguments: ["model": curModel]) {
                         guard let blob: Data = r["emb"], let v = blob.asFloats else { continue }
                         let sid: Int64 = r["sid"]
                         if m[sid] == nil { m[sid] = Cluster(id: sid, name: r["name"], samples: []) }

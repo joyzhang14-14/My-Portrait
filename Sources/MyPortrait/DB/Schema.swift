@@ -913,6 +913,17 @@ enum DBSchema {
                 "CREATE INDEX idx_writing_style_staged_run ON writing_style_staged(run_id)")
         }
 
+        // 给说话人声纹绑定模型:每个 speaker 行属于产它向量的那个 embedding 模型。
+        // 不同模型(英文 512 / 中文 192;甚至两个 192 维中文模型)向量空间不兼容,
+        // 必须按模型隔离匹配。现存声纹全是英文 CAM++ → 回填 en_campplus。
+        m.registerMigration("v37_speakers_embedding_model") { db in
+            try db.alter(table: "speakers") { t in
+                t.add(column: "embedding_model", .text)   // nullable;NULL 视同 en_campplus
+            }
+            try db.execute(sql:
+                "UPDATE speakers SET embedding_model = 'en_campplus' WHERE embedding_model IS NULL")
+        }
+
         return m
     }
 }

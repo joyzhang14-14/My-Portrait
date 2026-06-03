@@ -730,7 +730,8 @@ struct TimelineDB: Sendable {
     }
 
     /// 所有未隐藏的说话人 + 转录条数 + 最后听到时间。SpeakersView 列表用。
-    func loadSpeakers() -> [SpeakerListRow] {
+    /// `forModel` 非空时只列该 embedding 模型绑定的说话人(声纹按模型隔离)。
+    func loadSpeakers(forModel model: String? = nil) -> [SpeakerListRow] {
         guard exists else { return [] }
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
@@ -744,6 +745,8 @@ struct TimelineDB: Sendable {
         // 现在严格走 transcribed_at:行展示的"X ago"就是你最后听到这个人的
         // 时间,跟 UI 操作无关。ORDER BY 用 transcribed_at,没转录的(刚训
         // 完没说话)用 created_at 当 secondary 排序兜底。
+        // model 是受控的固定枚举值(en_campplus/zh_campplus/...),内联安全。
+        let modelFilter = model.map { " AND s.embedding_model = '\($0)'" } ?? ""
         let sql = """
             SELECT s.id, s.name,
                    COUNT(t.id) AS sample_count,
@@ -752,7 +755,7 @@ struct TimelineDB: Sendable {
                    s.trained_at_ms AS trained_at
             FROM speakers s
             LEFT JOIN audio_transcriptions t ON t.speaker_id = s.id
-            WHERE s.hallucination = 0
+            WHERE s.hallucination = 0\(modelFilter)
             GROUP BY s.id
             ORDER BY COALESCE(last_transcribed, s.created_at_ms) DESC, s.id DESC
         """
@@ -874,7 +877,7 @@ struct TimelineDB: Sendable {
     /// - 不存在 → INSERT 新行
     ///
     /// 不依赖 diarization、不依赖 transcription —— 纯 DB 写。返回 speaker_id。
-    func upsertVoiceTrainedSpeaker(name: String, embedding: [Float]) -> Int64? {
+    func upsertVoiceTrainedSpeaker(name: String, embedding: [Float], model: String) -> Int64? {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let blob = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
         // 整个 upsert 走单个 GRDB 写事务:① 下面对 audio_transcriptions 的 UPDATE
@@ -888,12 +891,14 @@ struct TimelineDB: Sendable {
             //    一条新的,造成两个 "Joy"。这里取所有同名,**保留 id 最小**
             //    (= 最老 = sample 累计最多的那条)作为 keeper,后面的 dupe
             //    合并进 keeper 后删掉,保证 voice training 之后只有一条同名。
+            // 同名只在**同一模型**内 dedup —— 英文 Joy 和中文 Joy 是两套独立声纹,不合并。
             let duplicateIds = try Int64.fetchAll(db, sql: """
                 SELECT id FROM speakers
                 WHERE LOWER(name) = LOWER(:name)
                   AND hallucination = 0
+                  AND embedding_model = :model
                 ORDER BY id ASC
-                """, arguments: ["name": name])
+                """, arguments: ["name": name, "model": model])
             var speakerId: Int64? = duplicateIds.first
             // 2a) 把后面的 dupe 合并进 keeper:把它们的 speaker_embeddings +
             //     audio_transcriptions reassign,再删 dupe speakers 行。这样
@@ -912,17 +917,17 @@ struct TimelineDB: Sendable {
             // 2) upsert speakers row(trained_at_ms = nowMs 标记"用户真训过")
             if speakerId == nil {
                 try db.execute(sql: """
-                    INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, trained_at_ms)
-                    VALUES (:name, :centroid, 1, 0, :now, :now, :now)
-                    """, arguments: ["name": name, "centroid": blob, "now": nowMs])
+                    INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, trained_at_ms, embedding_model)
+                    VALUES (:name, :centroid, 1, 0, :now, :now, :now, :model)
+                    """, arguments: ["name": name, "centroid": blob, "now": nowMs, "model": model])
                 speakerId = db.lastInsertedRowID
             } else if let id = speakerId {
                 try db.execute(sql: """
                     UPDATE speakers
                     SET centroid = :centroid, embedding_count = 1, hallucination = 0,
-                        updated_at_ms = :now, trained_at_ms = :now
+                        updated_at_ms = :now, trained_at_ms = :now, embedding_model = :model
                     WHERE id = :id
-                    """, arguments: ["centroid": blob, "now": nowMs, "id": id])
+                    """, arguments: ["centroid": blob, "now": nowMs, "id": id, "model": model])
                 // 重训:清掉这个 speaker 的所有旧样本向量。否则 matchSpeaker 第 1 步
                 // 遍历 speaker_embeddings 时,旧的(可能采到的是别人 / 是脏样本)
                 // 余弦可能压过新训练的样本,导致重训后说话还被错配回原聚类。

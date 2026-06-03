@@ -53,7 +53,7 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
             guard let best = segs.max(by: { $0.samples.count < $1.samples.count })
             else { continue }
             if let id = await resolveSpeaker(
-                embedding: best.embedding, speechSamples: best.samples.count
+                embedding: best.embedding, speechSamples: best.samples.count, model: embChoice
             ) {
                 localToDB[local] = id
             }
@@ -107,9 +107,9 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
     /// 命中已有说话人 → 复用 id；只有足够长的段才把向量并进去（保持 centroid 干净）。
     /// 模糊(跟两个不同人都接近)→ 留空标签,不并入也不新建。
     /// 全不像 → 仅足够长的段才新建说话人；短段不够可靠，返回 nil（留空标签）。
-    private func resolveSpeaker(embedding: [Float], speechSamples: Int) async -> Int64? {
+    private func resolveSpeaker(embedding: [Float], speechSamples: Int, model: String) async -> Int64? {
         let longEnough = speechSamples >= Self.minEnrollSamples
-        guard let match = try? await db.matchSpeaker(embedding: embedding) else { return nil }
+        guard let match = try? await db.matchSpeaker(embedding: embedding, model: model) else { return nil }
         switch match {
         case .matched(let id):
             if longEnough {
@@ -122,7 +122,7 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
             return nil
         case .none:
             guard longEnough else { return nil }
-            return try? await db.enrollSpeaker(embedding: embedding)
+            return try? await db.enrollSpeaker(embedding: embedding, model: model)
         }
     }
 

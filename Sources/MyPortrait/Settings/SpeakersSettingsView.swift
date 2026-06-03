@@ -15,6 +15,7 @@ struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
     @State private var organizing = false
+    @State private var config = ConfigStore.shared
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -33,10 +34,17 @@ struct SpeakersSettingsView: View {
     /// 绝对数,不受 search 影响。loadSpeakers 已过滤 hallucination=0,被软删的训练
     /// 声纹不计入(它已不参与匹配)。
     private var voiceTrainedCount: Int { rows.filter { $0.trainedAt != nil }.count }
+    /// 被命名(具名)的说话人数 —— name 非空(含训练过的 + 仅命名的)。
+    private var namedCount: Int { rows.filter { !($0.name ?? "").isEmpty }.count }
+    /// 当前选用的声纹模型显示名。
+    private var currentModelLabel: String {
+        let id = config.current.capture.audio.speakerEmbeddingModel
+        return SpeakerModel.embeddingOptions.first { $0.id == id }?.label ?? id
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            ProgressHeader(trainedCount: voiceTrainedCount)
+            ProgressHeader(trainedCount: voiceTrainedCount, namedCount: namedCount, modelLabel: currentModelLabel)
 
             VoiceTrainingCard(
                 existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty },
@@ -143,8 +151,10 @@ struct SpeakersSettingsView: View {
 
     private func reload() {
         // loadSpeakers 同步 sqlite JOIN + GROUP BY,主线程跑会卡(切到这页就触发)。
+        // 只列当前选用模型绑定的说话人(声纹按模型隔离)。
+        let model = config.current.capture.audio.speakerEmbeddingModel
         Task.detached(priority: .userInitiated) {
-            let loaded = SpeakerLoader.loadAll()
+            let loaded = SpeakerLoader.loadAll(forModel: model)
             await MainActor.run { rows = loaded }
         }
     }
@@ -256,17 +266,23 @@ struct SpeakersSettingsView: View {
 
 private struct ProgressHeader: View {
     /// 用户真训练过的 speaker 数(只数 trained_at_ms 非空的)。
-    /// 不带分母 —— "训练了几个"是绝对数,跟 diarization 簇的总数无关。
     let trainedCount: Int
+    /// 被命名的 speaker 数(name 非空)。
+    let namedCount: Int
+    /// 当前选用的声纹模型名(声纹按模型隔离 → 计数也按模型)。
+    let modelLabel: String
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(trainedCount == 1
-                         ? "1 speaker trained"
-                         : "\(trainedCount) speakers trained")
+                    Text((trainedCount == 1
+                          ? "1 speaker trained"
+                          : "\(trainedCount) speakers trained") + " for \(modelLabel)")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                    Text(namedCount == 1 ? "1 speaker named" : "\(namedCount) speakers named")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.75))
                     Text("Trained speakers are searchable as \(token: "@speaker:<name>") in chat.")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textPrimary.opacity(0.55))
@@ -1012,8 +1028,8 @@ private struct SpeakerRow: Identifiable, Hashable {
 }
 
 private enum SpeakerLoader {
-    static func loadAll() -> [SpeakerRow] {
-        TimelineDB().loadSpeakers().map { r in
+    static func loadAll(forModel model: String) -> [SpeakerRow] {
+        TimelineDB().loadSpeakers(forModel: model).map { r in
             SpeakerRow(
                 id: String(r.id),
                 name: r.name,
