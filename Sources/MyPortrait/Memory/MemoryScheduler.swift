@@ -51,8 +51,9 @@ final class MemoryScheduler {
     /// 每次触发处理的数据日上限。
     /// 每次 event-processing 跑最多处理几个未处理日 —— 由 Settings 配置。
     private var dayCap: Int { ConfigStore.shared.current.memory.eventDayCap }
-    /// 失败重试上限：retry_count ≥ 此值转 dead_letter。
-    private let maxRetries = 3
+    // maxRetries 已下线 —— 用户方向是"永不放弃"。失败永远会自动重试,但用
+    // long-backoff 控制频率,避免一直挂的 LLM 烧 token。见 backoffMs(retry:)。
+    // dead_letter case 仍保留(老 DB 行兼容),但不再产生 + needsWork=true。
     /// 原始数据"收齐"判定：数据日结束（UTC 次日 0 点）后再等这么久。
     private let rawGraceSeconds: TimeInterval = 10 * 60
     /// tick 周期。
@@ -600,20 +601,39 @@ final class MemoryScheduler {
             if let day = rollbackDay {
                 deleteEvents(on: day)
             }
+            // 永远走 .failed —— 不再升级 .deadLetter。retry_count++ 仍记录,但只
+            // 用来算 backoff 间隔,不作为"放弃"门槛。频率由 backoffMs(retry:) 控制。
             let n = store.bumpRetry(date: date)
-            if n >= maxRetries {
-                store.setStatus(date: date, stage: stage, status: .deadLetter)
-                print("[Scheduler] \(date)/\(stage.rawValue): dead_letter (retry_count=\(n))")
-                DiagLog.error("scheduler.stage.dead_letter", ctx: [
-                    "date": date, "stage": stage.rawValue, "retry": n,
-                ])
-            } else {
-                store.setStatus(date: date, stage: stage, status: .failed)
-                print("[Scheduler] \(date)/\(stage.rawValue): failed (retry_count=\(n))")
-                DiagLog.warn("scheduler.stage.failed", ctx: [
-                    "date": date, "stage": stage.rawValue, "retry": n,
-                ])
-            }
+            store.setStatus(date: date, stage: stage, status: .failed)
+            print("[Scheduler] \(date)/\(stage.rawValue): failed (retry_count=\(n), next retry in \(backoffMs(retry: n) / 1000)s)")
+            DiagLog.warn("scheduler.stage.failed", ctx: [
+                "date": date, "stage": stage.rawValue, "retry": n,
+            ])
+        }
+    }
+
+    /// 失败后到下次允许重试的最小间隔。retry_count 越大,等得越久,封顶 24h。
+    /// 0 → 立刻;1 → 10min;2 → 1h;3 → 6h;4+ → 24h。
+    /// 用户主动点 "Reset" 会把 retry_count 归零 → 立即重试。
+    private func backoffMs(retry: Int) -> Int64 {
+        switch retry {
+        case 0:     return 0
+        case 1:     return  10 * 60 * 1000          // 10 min
+        case 2:     return  60 * 60 * 1000          // 1 h
+        case 3:     return 6 * 60 * 60 * 1000       // 6 h
+        default:    return 24 * 60 * 60 * 1000      // 24 h cap
+        }
+    }
+
+    /// 一行 stage 现在是否到点该重试。failed/budgetDeferred/deadLetter 才需要
+    /// 算 backoff;pending/idle/paused 立即 ready。
+    private func backoffReady(status: ProcessingStatus, retryCount: Int, updatedAtMs: Int64) -> Bool {
+        switch status {
+        case .idle, .pending, .paused: return true
+        case .failed, .budgetDeferred, .deadLetter:
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            return now >= updatedAtMs + backoffMs(retry: retryCount)
+        case .inProgress, .complete, .partial: return false
         }
     }
 
@@ -805,28 +825,39 @@ final class MemoryScheduler {
         isEventCandidate(store.row(for: date))
     }
 
-    /// 一天是否需要 event job 处理（event 或 impact 阶段还有活）。
+    /// 一天是否需要 event job 处理(event 或 impact 阶段还有活 + 已过 backoff 窗口)。
     private func isEventCandidate(_ row: ProcessingLogRow?) -> Bool {
         guard let row else { return true }              // 无行 = idle = 需 event
-        if row.event.needsWork { return true }          // event 待处理
-        if row.event == .complete, row.impact.needsWork { return true }  // 待 impact
-        return false                                    // complete / in_progress / dead_letter
+        if row.event.needsWork,
+           backoffReady(status: row.event, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs) {
+            return true
+        }
+        if row.event == .complete, row.impact.needsWork,
+           backoffReady(status: row.impact, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs) {
+            return true
+        }
+        return false
     }
 
-    /// distill 是否处于待重试态（failed / budget_deferred）。
+    /// distill 是否处于待重试态(failed / budget_deferred / dead_letter)+ backoff 到点。
     private func portraitNeedsRetry() -> Bool {
-        switch store.row(for: distillAnchor)?.distill {
-        case .failed, .budgetDeferred: return true
+        guard let row = store.row(for: distillAnchor) else { return false }
+        switch row.distill {
+        case .failed, .budgetDeferred, .deadLetter:
+            return backoffReady(status: row.distill, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs)
         default: return false
         }
     }
 
-    /// personality 是否处于待重试态(任一天的 personality 失败/撞额度)。
+    /// personality 是否处于待重试态(任一天的 personality 失败/撞额度,且 backoff 到点)。
     private func personalityNeedsRetry() -> Bool {
         for row in store.allRows() {
             if row.isAnchor { continue }
             switch row.personality {
-            case .failed, .budgetDeferred: return true
+            case .failed, .budgetDeferred, .deadLetter:
+                if backoffReady(status: row.personality, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs) {
+                    return true
+                }
             default: continue
             }
         }
@@ -834,8 +865,8 @@ final class MemoryScheduler {
     }
 
     /// personality job 的候选天:event+impact 都 complete、personality 还
-    /// 需做(idle / pending / failed / budget_deferred);跳 in_progress /
-    /// complete / dead_letter。按日期升序、上限 `cap`。
+    /// 需做(idle / pending / failed / budget_deferred / dead_letter)+ 已过 backoff
+    /// 窗口。跳 in_progress / complete。按日期升序、上限 `cap`。
     func pendingPersonalityDays(cap: Int) -> [Date] {
         let cal = utcCalendar()
         var days: [Date] = TimelineDB().availableDays(monthsBack: 3)
@@ -847,7 +878,9 @@ final class MemoryScheduler {
             let ds = ProcessingLogStore.dayString(day)
             guard let row = store.row(for: ds) else { continue }
             guard row.event == .complete, row.impact == .complete else { continue }
-            guard row.personality.needsWork else { continue }
+            guard row.personality.needsWork,
+                  backoffReady(status: row.personality, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs)
+            else { continue }
             out.append(day)
             if out.count >= cap { break }
         }
