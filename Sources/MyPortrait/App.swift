@@ -60,6 +60,14 @@ struct MyPortraitApp: App {
             RematchSpeakersCLI.run(apply: args.contains("--apply"), limit: lim)
             // run() exits the process internally.
         }
+        // 维护 CLI: `--clean-voiceprints [--apply] [--threshold 0.5]` 对具名簇做 medoid
+        // 剪枝去污(丢离群脏样本 + 重算质心)。默认 dry-run;--apply 前自动整表备份。
+        if args.contains("--clean-voiceprints") {
+            var thr: Float = 0.5
+            if let i = args.firstIndex(of: "--threshold"), i + 1 < args.count, let v = Float(args[i + 1]) { thr = v }
+            CleanVoiceprintsCLI.run(apply: args.contains("--apply"), threshold: thr)
+            // run() exits the process internally.
+        }
         // 一次性数据修复:按声纹 cosine 整理被 bug 版本打乱的说话人簇。
         if args.contains("--fix-speakers") {
             FixSpeakersCLI.run()
