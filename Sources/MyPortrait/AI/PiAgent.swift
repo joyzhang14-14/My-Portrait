@@ -348,9 +348,16 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             // the final message.content array, or surface errorMessage.
             guard let msg = obj["message"] as? [String: Any],
                   (msg["role"] as? String) == "assistant" else { break }
-            if (msg["stopReason"] as? String) == "error" {
+            let stopReason = msg["stopReason"] as? String
+            if stopReason == "error" {
                 let err = (msg["errorMessage"] as? String) ?? "LLM error"
                 emit(.error(err))
+            } else if stopReason == "length" {
+                // 输出被截断(碰 max_tokens / 模型自己 stop=length)。**不能**当
+                // 完整结果处理 —— partial buffer 会让 downstream parser 拿到半截
+                // JSON 解出畸形 / 缺字段结构污染落盘。一律当 error,ErrorClassifier
+                // 会把这归到 .streamTruncated(桶 A,scheduler 自动 backoff 重跑)。
+                emit(.error("output truncated (stopReason=length)"))
             } else if let text = Self.extractAssistantText(msg) {
                 emit(.assistantFinalText(text))
             }
