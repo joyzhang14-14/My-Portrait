@@ -83,6 +83,12 @@ final class MemoryScheduler {
     // classify 锁。
     private(set) var distillRunning = false
     private(set) var personalityRunning = false
+
+    /// 当前子阶段(给 Settings 的 Run now 实时显示)。空 = 没跑那一步。
+    /// @Observable 自动跟踪,view 直接读。
+    private(set) var eventStage = ""
+    private(set) var distillStage = ""
+    private(set) var personalityStage = ""
     /// tick() 自身的可重入防护(timer 与 startup 并发触发时只跑一次)。
     private var tickRunning = false
     private var timer: Timer?
@@ -320,6 +326,8 @@ final class MemoryScheduler {
         guard canRunEvent else { return .busy }
         eventRunning = true
         defer { eventRunning = false }
+        eventStage = "Reading timeline"
+        defer { eventStage = "" }
 
         let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
@@ -332,7 +340,7 @@ final class MemoryScheduler {
             "count": days.count,
         ])
 
-        for day in days {
+        for (idx, day) in days.enumerated() {
             let ds = ProcessingLogStore.dayString(day)
             _ = store.ensureRow(for: ds)
 
@@ -346,6 +354,7 @@ final class MemoryScheduler {
             // event 步。
             var row = store.row(for: ds) ?? ProcessingLogRow(date: ds)
             if row.event.needsWork {
+                eventStage = "Building events (\(idx + 1)/\(days.count))"
                 await runStep(date: ds, stage: .event, processor: "event", rollbackDay: day) {
                     let nb = self.daysBackToCover(day)
                     let r = try await Backfill.run(daysBack: nb, onlyDay: day)
@@ -356,6 +365,7 @@ final class MemoryScheduler {
 
             // impact 步：仅当 event 已 complete。按日扫 events/<day>/ 下的 unscored。
             if row.event == .complete, row.impact.needsWork {
+                eventStage = "Scoring impact (\(idx + 1)/\(days.count))"
                 await runStep(date: ds, stage: .impact, processor: "impact", rollbackDay: nil) {
                     let dir = PortraitPaths.eventsDayDir(for: day)
                     let cfg = self.memoryCfg
@@ -367,6 +377,7 @@ final class MemoryScheduler {
 
         // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
         // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
+        eventStage = "Rebalancing"
         _ = MemoryBudget_applyToDisk()
 
         // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
@@ -401,6 +412,8 @@ final class MemoryScheduler {
         guard canRunDistill else { return .busy }
         distillRunning = true
         defer { distillRunning = false }
+        distillStage = "Distilling portrait"
+        defer { distillStage = "" }
 
         _ = store.ensureRow(for: distillAnchor)
         let distill = store.row(for: distillAnchor)?.distill ?? .idle
@@ -430,6 +443,7 @@ final class MemoryScheduler {
         guard canRunPersonality else { return .busy }
         personalityRunning = true
         defer { personalityRunning = false }
+        defer { personalityStage = "" }
 
         let days = pendingPersonalityDays(cap: dayCap)
         guard !days.isEmpty else {
@@ -441,8 +455,9 @@ final class MemoryScheduler {
             "days": days.map { ProcessingLogStore.dayString($0) },
         ])
 
-        for day in days {
+        for (idx, day) in days.enumerated() {
             let ds = ProcessingLogStore.dayString(day)
+            personalityStage = "Refreshing personality (\(idx + 1)/\(days.count))"
             await runStep(date: ds, stage: .personality,
                           processor: "personality", rollbackDay: nil) {
                 let cfg = self.memoryCfg

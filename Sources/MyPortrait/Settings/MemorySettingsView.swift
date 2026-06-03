@@ -532,97 +532,81 @@ struct MemorySettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if writingCaptureUI.isRunning {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Pass 1 + Pass 2 + Pass 3 + Pass 4 — may take a few minutes…")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("Stop") {
-                        let n = PiAgentRegistry.shared.stopAll()
-                        writingCaptureUI.task?.cancel()
-                        writingCaptureUI.task = nil
-                        writingCaptureUI.isRunning = false
-                        // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
-                        // runBacklog 会报 "Backlog run already in progress" 拒绝。
-                        let zombies = (try? WritingCaptureWorker.shared?.store
-                            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-                        writingCaptureUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
-                        refreshWritingCapture()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.red)
-                }
-                .padding(.top, 6)
+                runningIndicator(writingCaptureUI.stage, onStop: { stopWritingCapture() })
             }
             if !writingCaptureUI.statusMessage.isEmpty {
                 Text(writingCaptureUI.statusMessage)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
             }
-            if let s = writingCaptureUI.lastSummary {
-                Divider().padding(.vertical, 4)
-                HStack {
-                    Text(s.date).font(.system(size: 12, design: .monospaced))
-                    Spacer(minLength: 12)
-                    Text("\(s.recordsCount) records / \(s.discardedCount) discarded")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Text(s.status.rawValue)
-                        .font(.system(size: 11))
-                        .foregroundStyle(s.status == .failed ? .red : .secondary)
-                }
-            }
+        }
+    }
 
-            // Pending review:每天一行,Approve / Reject 按钮 + 点击 preview
-            if !writingCapturePending.isEmpty {
-                Divider().padding(.vertical, 6)
-                Text("Pending review")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                ForEach(writingCapturePending, id: \.dateUtc) { run in
-                    let expanded = writingCaptureExpanded.contains(run.dateUtc)
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .center, spacing: 12) {
-                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 10))
+    /// 停 writing capture:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
+    private func stopWritingCapture() {
+        let n = PiAgentRegistry.shared.stopAll()
+        writingCaptureUI.task?.cancel()
+        writingCaptureUI.task = nil
+        writingCaptureUI.isRunning = false
+        // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次 runBacklog 会报
+        // "Backlog run already in progress" 拒绝。
+        let zombies = (try? WritingCaptureWorker.shared?.store
+            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
+        writingCaptureUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+        refreshWritingCapture()
+    }
+
+    /// Writing capture 的结果区块 —— 由 reviewSection(统一 Pending 区)渲染,
+    /// 不再 inline 在 Run now。字体跟 memory reviewBlock 对齐(普通字体)。
+    @ViewBuilder
+    private var writingCaptureResultBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Writing capture").font(.system(size: 13, weight: .semibold))
+            if let s = writingCaptureUI.lastSummary {
+                Text("Last run: \(s.recordsCount) records · \(s.discardedCount) discarded · \(s.status.rawValue)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(s.status == .failed ? .red : .secondary)
+            }
+            ForEach(writingCapturePending, id: \.dateUtc) { run in
+                let expanded = writingCaptureExpanded.contains(run.dateUtc)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            let title = run.dateUtc == WritingCaptureWorker.backlogDateKey
+                                ? "Backlog" : run.dateUtc
+                            Text(title).font(.system(size: 12, weight: .medium))
+                            Text("\(run.recordsCount ?? 0) records · \(run.discardedCount ?? 0) discarded — click to \(expanded ? "collapse" : "expand")")
+                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                let title = run.dateUtc == WritingCaptureWorker.backlogDateKey
-                                    ? "Backlog (cursor → now)" : run.dateUtc
-                                Text(title).font(.system(size: 12, design: .monospaced))
-                                Text("\(run.recordsCount ?? 0) records / \(run.discardedCount ?? 0) discarded — click to \(expanded ? "collapse" : "expand")")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                toggleWritingCaptureExpand(date: run.dateUtc)
-                            }
-                            Button("Detail") { writingCapturePreviewDate = run.dateUtc }
-                                .buttonStyle(.bordered).controlSize(.small)
-                            Button("Reject") {
-                                Task { @MainActor in await rejectWritingCapture(date: run.dateUtc) }
-                            }
-                            .buttonStyle(.bordered).controlSize(.small).tint(.red)
-                            Button("Approve") {
-                                Task { @MainActor in await approveWritingCapture(date: run.dateUtc) }
-                            }
-                            .buttonStyle(.borderedProminent).controlSize(.small)
                         }
-                        if expanded {
-                            inlineRecordsList(date: run.dateUtc)
-                                .padding(.leading, 18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { toggleWritingCaptureExpand(date: run.dateUtc) }
+                        Button("Detail") { writingCapturePreviewDate = run.dateUtc }
+                            .buttonStyle(.bordered).controlSize(.small)
+                        Button("Reject") {
+                            Task { @MainActor in await rejectWritingCapture(date: run.dateUtc) }
                         }
+                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                        Button("Approve") {
+                            Task { @MainActor in await approveWritingCapture(date: run.dateUtc) }
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                    if expanded {
+                        inlineRecordsList(date: run.dateUtc)
+                            .padding(.leading, 18)
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Writing style(独立链路,跟 writing capture 同模式)
@@ -664,73 +648,59 @@ struct MemorySettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if writingStyleUI.isRunning {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("LLM analyzing writing style — may take a few minutes…")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("Stop") {
-                        let n = PiAgentRegistry.shared.stopAll()
-                        writingStyleUI.task?.cancel()
-                        writingStyleUI.task = nil
-                        writingStyleUI.isRunning = false
-                        // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次
-                        // 启动时 unprocessedCount / pending 判断会被僵尸行误导。
-                        let zombies = (try? WritingStyleDistiller.shared?.store
-                            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-                        writingStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
-                        refreshWritingStyle()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.red)
-                }
-                .padding(.top, 6)
+                runningIndicator(writingStyleUI.stage, onStop: { stopWritingStyle() })
             }
             if !writingStyleUI.statusMessage.isEmpty {
                 Text(writingStyleUI.statusMessage)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
             }
+        }
+    }
 
-            // Pending review:直接展开 drafts(NEW/CHANGED 行),不藏 chevron。
-            // 跟 reviewSection 同形态:左侧 ForEach 行 + 右侧 Approve/Reject 按钮。
-            if !writingStylePending.isEmpty {
-                Divider().padding(.vertical, 6)
-                ForEach(writingStylePending, id: \.runId) { run in
-                    VStack(alignment: .leading, spacing: 6) {
-                        // 头部行:run 元信息 + Approve/Reject
-                        HStack(alignment: .center, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Pending review")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
+    /// 停 writing style:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
+    private func stopWritingStyle() {
+        let n = PiAgentRegistry.shared.stopAll()
+        writingStyleUI.task?.cancel()
+        writingStyleUI.task = nil
+        writingStyleUI.isRunning = false
+        let zombies = (try? WritingStyleDistiller.shared?.store
+            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
+        writingStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+        refreshWritingStyle()
+    }
+
+    /// Writing style 的结果区块 —— 由 reviewSection 统一渲染。字体跟
+    /// memory reviewBlock 对齐。
+    @ViewBuilder
+    private var writingStyleResultBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Writing style").font(.system(size: 13, weight: .semibold))
+            ForEach(writingStylePending, id: \.runId) { run in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            Button("Reject") {
-                                Task { @MainActor in await rejectWritingStyle(runId: run.runId) }
-                            }
-                            .buttonStyle(.bordered).controlSize(.small).tint(.red)
-                            Button("Approve") {
-                                Task { @MainActor in await approveWritingStyle(runId: run.runId) }
-                            }
-                            .buttonStyle(.borderedProminent).controlSize(.small)
+                        Button("Reject") {
+                            Task { @MainActor in await rejectWritingStyle(runId: run.runId) }
                         }
-                        // drafts 直接展开,跟 event/portrait/personality 的 reviewBlock 同款。
-                        // 第一次出现时按需加载。
-                        inlineWritingStyleDrafts(runId: run.runId)
-                            .onAppear { ensureWritingStyleDraftsLoaded(runId: run.runId) }
+                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                        Button("Approve") {
+                            Task { @MainActor in await approveWritingStyle(runId: run.runId) }
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
                     }
+                    inlineWritingStyleDrafts(runId: run.runId)
+                        .onAppear { ensureWritingStyleDraftsLoaded(runId: run.runId) }
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 第一次展示 drafts 时按需 fetch(避免每帧重查 DB)。
@@ -819,9 +789,11 @@ struct MemorySettingsView: View {
             return
         }
         writingStyleUI.isRunning = true
-        writingStyleUI.statusMessage = "Running writing style distillation…"
+        writingStyleUI.stage = "Analyzing writing"
+        writingStyleUI.statusMessage = ""
         defer {
             writingStyleUI.isRunning = false
+            writingStyleUI.stage = ""
             refreshWritingStyle()
         }
         do {
@@ -936,8 +908,11 @@ struct MemorySettingsView: View {
             return
         }
         writingCaptureUI.isRunning = true
-        writingCaptureUI.statusMessage = "Running backlog (cursor → now)…"
-        defer { writingCaptureUI.isRunning = false }
+        writingCaptureUI.statusMessage = ""
+        defer {
+            writingCaptureUI.isRunning = false
+            writingCaptureUI.stage = ""
+        }
         do {
             let s = try await worker.runBacklog()
             writingCaptureUI.lastSummary = s
@@ -974,7 +949,6 @@ struct MemorySettingsView: View {
             triggerRow(.distill)
             Divider().padding(.vertical, 2)
             triggerRow(.personality)
-            runningStatusRow
             if !actionStatus.isEmpty {
                 Text(actionStatus)
                     .font(.system(size: 11, design: .monospaced))
@@ -1025,69 +999,70 @@ struct MemorySettingsView: View {
     }
 
     private func triggerRow(_ t: ManualTrigger) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(t.title).font(.system(size: 13, weight: .semibold))
-                Text(t.desc)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        // 自己是不是正在跑(本 View 自己的并发 token 集合 = runningTriggers)。
+        let selfRunning = runningTriggers.contains(t)
+        // scheduler 后台 catch-up 触发的 run 不经过本 View click → 不在
+        // runningTriggers 里。只看本 trigger 对应的 scheduler flag(不跨类型 OR),
+        // 即使某一 @Observable flag 卡住也只影响那一个按钮,不会三按钮连锁灰。
+        let schedulerSelfRunning: Bool = {
+            switch t {
+            case .eventProcessing: return MemoryScheduler.shared.eventRunning
+            case .distill:         return MemoryScheduler.shared.distillRunning
+            case .personality:     return MemoryScheduler.shared.personalityRunning
             }
-            Spacer(minLength: 12)
-            let pending = MemoryStaging.hasPending(t.kind)
-            // 自己是不是正在跑(本 View 自己的并发 token 集合 = runningTriggers).
-            let selfRunning = runningTriggers.contains(t)
-            // scheduler 后台 catch-up 触发的 run 不经过本 View click → 不在
-            // runningTriggers 里。但它跑的瞬间 beginRun 已拍了 staging snapshot
-            // → hasPending=true → 之前的 label 误显 "Pending review"。
-            // 只看本 trigger 对应的 scheduler flag(不跨类型 OR),即使某一
-            // @Observable flag 卡住也只影响那一个按钮,不会三按钮连锁灰。
-            let schedulerSelfRunning: Bool = {
-                switch t {
-                case .eventProcessing: return MemoryScheduler.shared.eventRunning
-                case .distill:         return MemoryScheduler.shared.distillRunning
-                case .personality:     return MemoryScheduler.shared.personalityRunning
+        }()
+        let actuallyRunning = selfRunning || schedulerSelfRunning
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t.title).font(.system(size: 13, weight: .semibold))
+                    Text(t.desc)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }()
-            let actuallyRunning = selfRunning || schedulerSelfRunning
-            // scheduler 侧的"能不能起"原因。读 MemoryScheduler.shared 的
-            // @Observable 属性,跑/结束自动重渲染。手动 run 调 setupRun() 前
-            // scheduler 还没置 flag,所以也要 OR 本 View 自己的 runningTrigger.
-            let schedulerReason = schedulerBlockReason(for: t)
-            // 有没有活要干 —— 全 complete / dead_letter 时按钮该灰,避免误点。
-            let hasWork: Bool = {
-                switch t {
-                case .eventProcessing: return hasEventWork
-                case .distill:         return hasDistillWork
-                case .personality:     return hasPersonalityWork
+                Spacer(minLength: 12)
+                let pending = MemoryStaging.hasPending(t.kind)
+                let schedulerReason = schedulerBlockReason(for: t)
+                // 有没有活要干 —— 全 complete / dead_letter 时按钮该灰,避免误点。
+                let hasWork: Bool = {
+                    switch t {
+                    case .eventProcessing: return hasEventWork
+                    case .distill:         return hasDistillWork
+                    case .personality:     return hasPersonalityWork
+                    }
+                }()
+                let noWorkReason: String? = {
+                    switch t {
+                    case .eventProcessing: return "All processed days are already complete — nothing to run."
+                    case .distill:         return "Portrait is already up to date — nothing to distill."
+                    case .personality:     return "Personality is already up to date — nothing to refresh."
+                    }
+                }()
+                let disabledReason: String? = {
+                    if actuallyRunning { return "\(t.title) is already running." }
+                    if pending     { return "Pending review — Approve / Reject first." }
+                    if let r = schedulerReason { return r }
+                    if !hasWork    { return noWorkReason }
+                    return nil
+                }()
+                let label: String = {
+                    if actuallyRunning { return "Running…" }
+                    if pending     { return "Pending review" }
+                    return "Run"
+                }()
+                Button(label) {
+                    confirmTrigger = t
                 }
-            }()
-            let noWorkReason: String? = {
-                switch t {
-                case .eventProcessing: return "All processed days are already complete — nothing to run."
-                case .distill:         return "Portrait is already up to date — nothing to distill."
-                case .personality:     return "Personality is already up to date — nothing to refresh."
-                }
-            }()
-            let disabledReason: String? = {
-                if actuallyRunning { return "\(t.title) is already running." }
-                if pending     { return "Pending review — Approve / Reject first." }
-                if let r = schedulerReason { return r }
-                if !hasWork    { return noWorkReason }
-                return nil
-            }()
-            let label: String = {
-                if actuallyRunning { return "Running…" }
-                if pending     { return "Pending review" }
-                return "Run"
-            }()
-            Button(label) {
-                confirmTrigger = t
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(disabledReason != nil)
+                .help(disabledReason ?? "Trigger \(t.title) now.")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(disabledReason != nil)
-            .help(disabledReason ?? "Trigger \(t.title) now.")
+            // 每条 trigger 自己的 inline 运行指示(实时阶段 + Stop)。
+            if actuallyRunning {
+                runningIndicator(triggerStage(t), onStop: { stopTrigger(t) })
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1095,36 +1070,42 @@ struct MemorySettingsView: View {
     /// spinner + "N jobs running…" + Stop all 行。同时考虑本 View 触发的 +
     /// scheduler 后台触发的 run —— 之前只看 runningTriggers,scheduler tick
     /// 跑起来时按钮显示 Running… 但没 spinner / 没 Stop,看着像卡死。
+    /// 统一的运行指示:spinner + 当前阶段文案 + Stop。三类 pipeline 共用 ——
+    /// 字体 / 布局 / 按钮一致。
     @ViewBuilder
-    private var runningStatusRow: some View {
-        let sched = MemoryScheduler.shared
-        let schedCount = (sched.eventRunning ? 1 : 0)
-            + (sched.distillRunning ? 1 : 0)
-            + (sched.personalityRunning ? 1 : 0)
-        let total = runningTriggers.count + schedCount
-        if total > 0 {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(total == 1 ? "1 job running…" : "\(total) jobs running…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Button("Stop all") {
-                    // PiAgentRegistry.stopAll() 杀所有 LLM 子进程 ——
-                    // scheduler 那边的 `try await` 会抛 → runStep catch
-                    // → applyOutcome(failed) → @Observable flag 自然清。
-                    let n = PiAgentRegistry.shared.stopAll()
-                    for (_, task) in runTasks { task.cancel() }
-                    runTasks.removeAll()
-                    runningTriggers.removeAll()
-                    actionStatus = "Stopped — killed \(n) LLM process(es)."
-                }
+    private func runningIndicator(_ stage: String, onStop: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(stage.isEmpty ? "Running…" : stage)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("Stop", action: onStop)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
-            }
-            .padding(.top, 6)
         }
+        .padding(.top, 6)
+    }
+
+    /// 某 memory trigger 当前阶段(scheduler 实时发布,跑时逐步推进)。
+    private func triggerStage(_ t: ManualTrigger) -> String {
+        let s = MemoryScheduler.shared
+        switch t {
+        case .eventProcessing: return s.eventStage
+        case .distill:         return s.distillStage
+        case .personality:     return s.personalityStage
+        }
+    }
+
+    /// 停某个 memory trigger:杀 LLM 子进程 + cancel 它的 task + 清运行态。
+    /// PiAgentRegistry.stopAll 会杀全部 LLM(无法只杀单条),跟 writing block 一致。
+    private func stopTrigger(_ t: ManualTrigger) {
+        let n = PiAgentRegistry.shared.stopAll()
+        runTasks[t]?.cancel()
+        runTasks[t] = nil
+        runningTriggers.remove(t)
+        actionStatus = "Stopped — killed \(n) LLM process(es)."
     }
 
     /// UI 阻塞原因 —— 只看本 View 自己的 `runningTriggers`(用户点击驱动,
@@ -1170,10 +1151,15 @@ struct MemorySettingsView: View {
         let hasEvents = MemoryStaging.hasPending(.events) && !eventsRunning
         let hasPortrait = MemoryStaging.hasPending(.portrait) && !portraitRunning
         let hasPersonality = MemoryStaging.hasPending(.personality) && !personalityRunning
-        if hasEvents || hasPortrait || hasPersonality {
+        // Writing capture / style 也归这里(同 memory 一样,跑步中不显示)。
+        let hasWritingCapture = (!writingCapturePending.isEmpty || writingCaptureUI.lastSummary != nil)
+            && !writingCaptureUI.isRunning
+        let hasWritingStyle = !writingStylePending.isEmpty && !writingStyleUI.isRunning
+        let anyMemory = hasEvents || hasPortrait || hasPersonality
+        if anyMemory || hasWritingCapture || hasWritingStyle {
             section(
                 title: "Pending review",
-                blurb: "Results from a manual run are staged, not saved yet. Click a file to compare before and after. Approve keeps it; Reject discards it and queues those days to run again."
+                blurb: "Results from a run are staged, not saved yet. Click an item to preview. Approve keeps it; Reject discards it."
             ) {
                 if hasEvents {
                     reviewBlock(.events, "Process events", eventsChanges)
@@ -1189,6 +1175,14 @@ struct MemorySettingsView: View {
                 }
                 if hasPersonality {
                     reviewBlock(.personality, "Refresh personality", personalityChanges)
+                }
+                if hasWritingCapture {
+                    if anyMemory { Divider().padding(.vertical, 6) }
+                    writingCaptureResultBlock
+                }
+                if hasWritingStyle {
+                    if anyMemory || hasWritingCapture { Divider().padding(.vertical, 6) }
+                    writingStyleResultBlock
                 }
             }
         }
