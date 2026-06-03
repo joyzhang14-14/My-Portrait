@@ -170,7 +170,7 @@ final class VoiceTrainer {
                 // 内部使用,出来只带 [Float] / Int64,所以可以 detached + 立刻回 MainActor
                 let result: (Int64, [Float])? = await Task.detached {
                     guard let embedding = extractor.embed(samples), !embedding.isEmpty else { return nil }
-                    let id = TimelineDB().upsertVoiceTrainedSpeaker(name: trimmed, embedding: embedding)
+                    let id = TimelineDB().upsertVoiceTrainedSpeaker(name: trimmed, embedding: embedding, model: embChoice)
                     return id.map { ($0, embedding) }
                 }.value
 

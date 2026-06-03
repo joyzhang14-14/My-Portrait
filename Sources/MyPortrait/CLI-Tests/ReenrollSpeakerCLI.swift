@@ -30,20 +30,21 @@ enum ReenrollSpeakerCLI {
         Task.detached {
             defer { state.done = true }
             do {
-                // 0. 目标说话人(按名字,非幻听)
+                let embChoice = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                // 0. 目标说话人(按名字,非幻听,且**绑定当前模型**)
                 let target: (id: Int64, name: String)? = try await pool.read { db in
                     let r = try Row.fetchOne(db, sql: """
                         SELECT id, name FROM speakers
-                        WHERE hallucination = 0 AND LOWER(TRIM(name)) = LOWER(TRIM(:n)) ORDER BY embedding_count DESC LIMIT 1
-                        """, arguments: ["n": name])
+                        WHERE hallucination = 0 AND embedding_model = :model
+                          AND LOWER(TRIM(name)) = LOWER(TRIM(:n)) ORDER BY embedding_count DESC LIMIT 1
+                        """, arguments: ["n": name, "model": embChoice])
                     return r.map { ($0["id"], $0["name"]) }
                 }
-                guard let target else { print("ERROR: 库里找不到非幻听说话人 '\(name)'。先在 app 里训练/命名。"); state.code = 1; return }
+                guard let target else { print("ERROR: 当前模型(\(embChoice))下找不到说话人 '\(name)'。先在 app 里训练/命名(用当前模型)。"); state.code = 1; return }
 
                 // 1. 声纹模型
                 let ex: SpeakerEmbeddingExtractor
                 do {
-                    let embChoice = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
                     let p = try await SpeakerModelStore.shared.path(for: SpeakerModel.embedding(forChoice: embChoice))
                     ex = try SpeakerEmbeddingExtractor(modelPath: p.path, fbank: FbankExtractor())
                 } catch { print("ERROR: 声纹模型加载失败: \(error)"); state.code = 1; return }
@@ -99,7 +100,8 @@ enum ReenrollSpeakerCLI {
                         SELECT s.id AS sid, s.name AS name, e.embedding AS emb FROM speaker_embeddings e
                         JOIN speakers s ON s.id = e.speaker_id
                         WHERE s.hallucination = 0 AND s.id <> :tid AND s.name IS NOT NULL AND s.name <> ''
-                        """, arguments: ["tid": target.id]) {
+                          AND s.embedding_model = :model
+                        """, arguments: ["tid": target.id, "model": embChoice]) {
                         guard let blob: Data = r["emb"], let v = blob.asFloats else { continue }
                         let sid: Int64 = r["sid"]
                         if m[sid] == nil { m[sid] = (r["name"], []) }

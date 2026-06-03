@@ -72,7 +72,7 @@ enum VoiceTrainingTestCLI {
         print("  first 8: \(embedding.prefix(8).map { String(format: "%.4f", $0) }.joined(separator: ", "))")
 
         // 写 DB(测试用 speaker 名 "Test-CLI")。
-        guard let speakerId = TimelineDB().upsertVoiceTrainedSpeaker(name: "Test-CLI", embedding: embedding) else {
+        guard let speakerId = TimelineDB().upsertVoiceTrainedSpeaker(name: "Test-CLI", embedding: embedding, model: "en_campplus") else {
             print("ERROR: DB upsert failed (DB exists? path: \(TimelineDB().dbPath))")
             exit(6)
         }
