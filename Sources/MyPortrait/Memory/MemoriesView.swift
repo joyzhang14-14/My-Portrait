@@ -160,7 +160,8 @@ struct MemoriesView: View {
                 count: g.entries.count,
                 entries: g.entries,
                 selected: selected,
-                onSelect: handleSelect
+                onSelect: handleSelect,
+                onDelete: { Task { await deleteFolder(slug: g.slug, name: g.title) } }
             )
             Divider().background(Color.primary.opacity(0.08))
         }
@@ -192,7 +193,7 @@ struct MemoriesView: View {
                 // 信息量低,weight 排在前更符合"重要的事先看见"直觉。
                 let entries = f.events.compactMap { byPath[$0] }
                     .sorted { $0.currentWeight > $1.currentWeight }
-                return FolderGroup(id: "folder:" + f.slug, title: f.name, entries: entries)
+                return FolderGroup(id: "folder:" + f.slug, slug: f.slug, title: f.name, entries: entries)
             }
             .filter { !$0.entries.isEmpty }
             .sorted { $0.entries.count > $1.entries.count }
@@ -204,6 +205,7 @@ struct MemoriesView: View {
 
     private struct FolderGroup {
         let id: String
+        let slug: String
         let title: String
         let entries: [Entry]
     }
@@ -406,6 +408,20 @@ struct MemoriesView: View {
         }
     }
 
+    /// 删一个 folder —— 只删 `_folders/<slug>.json`(取消分组),folder 里的
+    /// 事件 .md **不动**,删完落回 ungrouped 平铺区。reload() 重扫触发
+    /// makeFolderSplit 重读 _folders/,该 folder 自然消失。
+    @MainActor
+    private func deleteFolder(slug: String, name: String) async {
+        do {
+            try EventFolderStore.delete(slug: slug)
+            await reload()
+            actionStatus = "Removed folder: \(name)"
+        } catch {
+            actionStatus = "Remove folder failed: \(error.localizedDescription)"
+        }
+    }
+
     @MainActor
     private func reload() async {
         loading = true
@@ -501,8 +517,12 @@ private struct FolderDisclosureRow: View {
     let entries: [MemoriesView.Entry]
     let selected: URL?
     let onSelect: (MemoriesView.Entry) -> Void
+    /// 点删除按钮 + 确认后调。只取消分组(删 _folders json),不删事件。
+    let onDelete: () -> Void
 
     @State private var expanded: Bool = false
+    @State private var hover: Bool = false
+    @State private var confirmingDelete: Bool = false
 
     /// 给 folder 名稳定挑一个柔和的色相,跟 macOS Finder 自带 tag 颜色一脉。
     /// hash 取模 → 同名 folder 每次都同色,UI 视觉一致。
@@ -525,40 +545,60 @@ private struct FolderDisclosureRow: View {
             // 头部:点击切换展开。整行可点。
             // **不 withAnimation** —— 同时动画 N 个 EntryRow 的 opacity/transform
             // 在 N=40+ 时帧预算爆炸,scroll 完全卡死。瞬时切换无肉眼可见瑕疵。
-            Button(action: { expanded.toggle() }) {
-                HStack(spacing: 12) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14)
-                    // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
-                    // (跟 Finder 文件夹观感一致)。
-                    Image(systemName: "folder.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
-                        .font(.system(size: 17))
-                        .frame(width: 22)
-                    Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text("\(count)")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(tint.opacity(0.9))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(
-                            Capsule().fill(tint.opacity(0.13))
-                                .overlay(
-                                    Capsule().stroke(tint.opacity(0.25), lineWidth: 0.5)
-                                )
-                        )
+            // 头部用 onTapGesture 切换展开(不再用 Button 包裹整行),好让
+            // 末尾的删除按钮作为独立 Button 单独接 tap、不触发展开。
+            HStack(spacing: 12) {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+                // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
+                // (跟 Finder 文件夹观感一致)。
+                Image(systemName: "folder.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
+                    .font(.system(size: 17))
+                    .frame(width: 22)
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text("\(count)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tint.opacity(0.9))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(
+                        Capsule().fill(tint.opacity(0.13))
+                            .overlay(
+                                Capsule().stroke(tint.opacity(0.25), lineWidth: 0.5)
+                            )
+                    )
+                // 删除按钮 —— 放在数字右边。常驻但低调,hover 变亮。
+                // 只取消分组,不删事件。
+                Button { confirmingDelete = true } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary.opacity(hover ? 0.9 : 0.4))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help("Delete folder (ungroups its events; the events are kept)")
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+            .onTapGesture { expanded.toggle() }
+            .onHover { hover = $0 }
+            .confirmationDialog(
+                "Delete folder “\(title)”?",
+                isPresented: $confirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete folder", role: .destructive) { onDelete() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Removes the grouping only. The \(count) event(s) inside are kept and move back to ungrouped.")
+            }
 
             // 展开后的事件列表 —— **嵌一层 LazyVStack** 让子项也按需渲染。
             // folder 大的能去到 40+ events,外层 LazyVStack 只 lazy 到
