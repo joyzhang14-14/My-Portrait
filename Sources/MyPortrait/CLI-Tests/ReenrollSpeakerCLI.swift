@@ -43,7 +43,8 @@ enum ReenrollSpeakerCLI {
                 // 1. 声纹模型
                 let ex: SpeakerEmbeddingExtractor
                 do {
-                    let p = try await SpeakerModelStore.shared.path(for: .embedding)
+                    let embChoice = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                    let p = try await SpeakerModelStore.shared.path(for: SpeakerModel.embedding(forChoice: embChoice))
                     ex = try SpeakerEmbeddingExtractor(modelPath: p.path, fbank: FbankExtractor())
                 } catch { print("ERROR: 声纹模型加载失败: \(error)"); state.code = 1; return }
 

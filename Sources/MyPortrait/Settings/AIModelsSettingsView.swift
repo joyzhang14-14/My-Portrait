@@ -67,8 +67,13 @@ struct AIModelsSettingsView: View {
                     qwenModelRow(m)
                     SettingsDivider()
                 }
-                localModelRow("Voice signature", detail: "wespeaker CAM++ (~30 MB)",
-                              ready: SpeakerModelStore.isOnDisk(.embedding))
+                // 说话人识别声纹模型 —— 3 选 1(英文 / 中文 CAM++ / 中文 ERes2NetV2)。
+                // 中文模型对中文说话人准确率远高(实测 74%→95%)。换模型见下方警告。
+                speakerModelPicker()
+                Text("⚠️ 换模型会让现有声纹登记失配(维度不同),需重新训练说话人 + 重跑历史识别。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.orange.opacity(0.85))
+                    .padding(.horizontal, 14).padding(.bottom, 8)
                 SettingsDivider()
                 localModelRow("Voice segmentation", detail: "pyannote segmentation-3.0 (~6 MB)",
                               ready: SpeakerModelStore.isOnDisk(.segmentation))
@@ -105,6 +110,77 @@ struct AIModelsSettingsView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .onAppear { startLocalModelPolling() }
+    }
+
+    // MARK: - 说话人识别模型选择器(3 选 1)
+
+    private struct SpkModelOption { let id: String; let label: String; let detail: String; let model: SpeakerModel }
+    private static let spkModelOptions: [SpkModelOption] = [
+        .init(id: "en_campplus",   label: "English CAM++",      detail: "wespeaker VoxCeleb · 512维 · 默认(英文)", model: .embedding),
+        .init(id: "zh_campplus",   label: "Chinese CAM++",      detail: "3D-Speaker zh-cn · 192维 · 中文",        model: .embeddingZhCampp),
+        .init(id: "zh_eres2netv2", label: "Chinese ERes2NetV2", detail: "3D-Speaker zh-cn · 192维 · 中文(略强)", model: .embeddingZhEres2),
+    ]
+
+    private func speakerModelPicker() -> some View {
+        let current = config.current.capture.audio.speakerEmbeddingModel
+        return VStack(spacing: 0) {
+            ForEach(Array(Self.spkModelOptions.enumerated()), id: \.offset) { idx, m in
+                let ready = SpeakerModelStore.isOnDisk(m.model)
+                let isDownloading = downloading.contains(m.id)
+                let selected = current == m.id
+                HStack(spacing: 12) {
+                    Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(selected ? Color.purple.opacity(0.9) : Color.white.opacity(0.45))
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("说话人识别 · \(m.label)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                        Text(m.detail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                    }
+                    Spacer(minLength: 8)
+                    if isDownloading {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("下载中…").font(.system(size: 11, weight: .medium)).foregroundStyle(Color.orange.opacity(0.85))
+                        }
+                    } else if ready {
+                        if selected {
+                            Text("使用中").font(.system(size: 11, weight: .medium)).foregroundStyle(Color.green.opacity(0.85))
+                        } else {
+                            Button("选用") { selectSpeakerModel(m.id) }
+                                .font(.system(size: 11, weight: .medium)).buttonStyle(.borderless)
+                        }
+                    } else {
+                        Button("下载") { downloadSpeakerModel(m) }
+                            .font(.system(size: 11, weight: .medium)).buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .contentShape(Rectangle())
+                .onTapGesture { if ready { selectSpeakerModel(m.id) } }
+                .onAppear { startLocalModelPolling() }
+                if idx != Self.spkModelOptions.count - 1 { SettingsDivider() }
+            }
+        }
+    }
+
+    private func selectSpeakerModel(_ id: String) {
+        config.mutate { $0.capture.audio.speakerEmbeddingModel = id }
+        localModelTick &+= 1
+    }
+
+    private func downloadSpeakerModel(_ m: SpkModelOption) {
+        guard !downloading.contains(m.id), !SpeakerModelStore.isOnDisk(m.model) else { return }
+        downloading.insert(m.id)
+        Task { @MainActor in
+            _ = try? await SpeakerModelStore.shared.path(for: m.model)
+            downloading.remove(m.id)
+            localModelTick &+= 1
+        }
     }
 
     /// Whisper 转录模型行 —— 没装显示 Download 按钮,下载中显示进度,装好显示 Ready。

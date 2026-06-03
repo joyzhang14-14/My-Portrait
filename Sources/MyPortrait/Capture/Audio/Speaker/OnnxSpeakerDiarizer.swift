@@ -18,19 +18,22 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
     private var embModel: SpeakerEmbeddingExtractor?
     /// 模型加载失败后不再反复重试（下载失败 / 文件损坏）。
     private var loadFailed = false
+    /// 当前已加载的 embedding 模型选择 —— 用户在设置里换模型后,下次 diarize 自动重载。
+    private var loadedEmbChoice: String?
 
     init(db: PortraitDB) {
         self.db = db
     }
 
     func diarize(wavPath: String, isInput: Bool) async -> [DiarizedSegment] {
-        // 设置里的 speaker_id_enabled 开关 —— 关掉直接退化。
-        let enabled = await MainActor.run {
-            ConfigStore.shared.current.capture.audio.speakerIdEnabled
+        // 设置里的 speaker_id_enabled 开关 + 选用的声纹模型。
+        let (enabled, embChoice) = await MainActor.run {
+            let a = ConfigStore.shared.current.capture.audio
+            return (a.speakerIdEnabled, a.speakerEmbeddingModel)
         }
         guard enabled else { return [] }
 
-        guard let (seg, emb) = await ensureModels() else { return [] }
+        guard let (seg, emb) = await ensureModels(embChoice: embChoice) else { return [] }
         guard let samples = Self.readWav16k(wavPath) else {
             logger.warning("diarize: cannot read wav \(wavPath, privacy: .public)")
             return []
@@ -72,17 +75,21 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
 
     // MARK: - 私有
 
-    private func ensureModels() async -> (SpeakerSegmentationModel, SpeakerEmbeddingExtractor)? {
+    private func ensureModels(embChoice: String) async -> (SpeakerSegmentationModel, SpeakerEmbeddingExtractor)? {
+        // 模型选择变了 → 丢掉已加载的,用新模型重载(并清掉失败标记允许重试)。
+        if embChoice != loadedEmbChoice {
+            segModel = nil; embModel = nil; loadFailed = false; loadedEmbChoice = embChoice
+        }
         if let s = segModel, let e = embModel { return (s, e) }
         guard !loadFailed else { return nil }
         do {
             let segPath = try await SpeakerModelStore.shared.path(for: .segmentation)
-            let embPath = try await SpeakerModelStore.shared.path(for: .embedding)
+            let embPath = try await SpeakerModelStore.shared.path(for: SpeakerModel.embedding(forChoice: embChoice))
             let s = try SpeakerSegmentationModel(modelPath: segPath.path)
             let e = try SpeakerEmbeddingExtractor(modelPath: embPath.path, fbank: FbankExtractor())
             segModel = s
             embModel = e
-            logger.info("speaker models loaded")
+            logger.info("speaker models loaded (emb=\(embChoice, privacy: .public))")
             return (s, e)
         } catch {
             logger.error("speaker model load failed: \(String(describing: error), privacy: .public)")

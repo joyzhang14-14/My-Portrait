@@ -115,7 +115,9 @@ enum RematchSpeakersCLI {
                 // 3. 加载 speaker 声纹模型
                 let extractor: SpeakerEmbeddingExtractor
                 do {
-                    let p = try await SpeakerModelStore.shared.path(for: .embedding)
+                    let embChoice = await MainActor.run { ConfigStore.shared.current.capture.audio.speakerEmbeddingModel }
+                    let p = try await SpeakerModelStore.shared.path(for: SpeakerModel.embedding(forChoice: embChoice))
+                    print("声纹模型: \(p.lastPathComponent)")
                     extractor = try SpeakerEmbeddingExtractor(modelPath: p.path, fbank: FbankExtractor())
                 } catch { print("ERROR: speaker 模型加载失败: \(error)"); state.code = 1; return }
 

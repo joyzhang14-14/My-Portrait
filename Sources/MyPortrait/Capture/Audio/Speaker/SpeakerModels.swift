@@ -9,15 +9,22 @@ import os.log
 /// 两个模型直接复用 screenpipe 仓库托管的副本。
 enum SpeakerModel: Sendable {
     case segmentation
+    /// 英文 wespeaker CAM++(VoxCeleb 训练,512 维)—— 历史默认。
     case embedding
+    /// 中文 3D-Speaker CAM++(zh-cn 200k 说话人,192 维)。
+    case embeddingZhCampp
+    /// 中文 3D-Speaker ERes2NetV2(zh-cn 200k 说话人,192 维,略强)。
+    case embeddingZhEres2
     /// Silero VAD v5 —— 语音活动检测（不属于说话人,但同样是可下载的音频 ONNX 模型）。
     case vadSilero
 
     var filename: String {
         switch self {
-        case .segmentation: return "segmentation-3.0.onnx"
-        case .embedding:    return "wespeaker_en_voxceleb_CAM++.onnx"
-        case .vadSilero:    return "silero_vad.onnx"
+        case .segmentation:     return "segmentation-3.0.onnx"
+        case .embedding:        return "wespeaker_en_voxceleb_CAM++.onnx"
+        case .embeddingZhCampp: return "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+        case .embeddingZhEres2: return "3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx"
+        case .vadSilero:        return "silero_vad.onnx"
         }
     }
 
@@ -26,8 +33,21 @@ enum SpeakerModel: Sendable {
         case .segmentation, .embedding:
             let base = "https://github.com/screenpipe/screenpipe/raw/refs/heads/main/crates/screenpipe-audio/models/pyannote"
             return "\(base)/\(filename)"
+        case .embeddingZhCampp, .embeddingZhEres2:
+            // 注意 release tag 拼写就是 recongition(上游笔误)。
+            return "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/\(filename)"
         case .vadSilero:
             return "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
+        }
+    }
+
+    /// config 里 `speaker_embedding_model` 字符串 → embedding 模型 case。
+    /// 未知 / "en_campplus" / 旧 config 缺字段 → 英文 CAM++(保持历史默认)。
+    static func embedding(forChoice choice: String) -> SpeakerModel {
+        switch choice {
+        case "zh_campplus":   return .embeddingZhCampp
+        case "zh_eres2netv2": return .embeddingZhEres2
+        default:              return .embedding
         }
     }
 }
