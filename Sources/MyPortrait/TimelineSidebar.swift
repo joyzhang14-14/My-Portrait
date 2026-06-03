@@ -98,9 +98,10 @@ struct TimelineSidebar: View {
                 .padding(.top, Theme.Space.md)
                 .padding(.bottom, Theme.Space.xl)
             }
-            // 切帧 → audio 重查(audioItems 每次新 UUID 必变)→ 把高亮转录行
-            // 滚到视口中心,长列表时不再沉到看不见的底端 / 顶端。
-            .onChange(of: audioItems) { scrollActiveAudioToCenter(proxy) }
+            // 高亮转录行换了(切帧导致最近行变 / 列表更新)→ 滚到视口中心,
+            // 长列表时不再沉到看不见的底端 / 顶端。entry id 已稳定,内容/高亮
+            // 没变时这个值不变,不触发无谓滚动。
+            .onChange(of: activeAudioId) { scrollActiveAudioToCenter(proxy) }
             }
         }
         .background(sidebarBackground.ignoresSafeArea())
@@ -228,6 +229,10 @@ struct TimelineSidebar: View {
             .filter { abs($0.timestamp.timeIntervalSince(ft)) < 8 }
             .min { abs($0.timestamp.timeIntervalSince(ft)) < abs($1.timestamp.timeIntervalSince(ft)) }
     }
+
+    /// 滚动触发用:高亮行的稳定 id。**只在它变化时**滚动(onChange 比这个) ——
+    /// 现在 entry id 稳定了,窗口内容没变 / 高亮行没换时不触发滚动,免无谓动效。
+    private var activeAudioId: AudioTranscriptEntry.ID? { activeAudioEntry()?.id }
 
     /// 把高亮转录行滚到视口中心。下一拍执行 —— 等新 audioItems 的行布局好,
     /// scrollTo 才能命中 id。

@@ -63,23 +63,31 @@ struct TimelineFrame: Identifiable, Hashable {
 /// Distinct app + window that was active within a small time window
 /// around the focused frame. Used in the Timeline sidebar's "Active Apps" panel.
 struct ActiveAppEntry: Identifiable, Hashable {
-    let id = UUID()
     let appName: String
     let windowName: String
     let browserUrl: String?
     let lastSeen: Date
+    /// 稳定 id = app + window(查询就是按这两个 GROUP BY,天然唯一)。
+    /// **不含 lastSeen** —— 它每滑一帧就变,含进 id 会让行每帧重建闪屏。
+    var id: String { appName + "|" + windowName }
 }
 
 /// One audio transcription chunk near the focused frame's timestamp.
 /// Used in the Timeline sidebar's "Audio" panel.
 struct AudioTranscriptEntry: Identifiable, Hashable {
-    let id = UUID()
     let timestamp: Date
     let text: String
     let device: String
     let isInput: Bool
     let speakerId: Int?
     let speakerName: String?
+    /// 稳定 id —— 由内容(录制时刻 + 设备 + 方向 + 文本)决定。同一条转录在
+    /// 连续 reload 里 id 不变,SwiftUI 的 ForEach 复用行、不整列重建。原来
+    /// `let id = UUID()` 每次新建 → 切帧时全列表 teardown+rebuild → 闪屏。
+    /// **不含 speaker** —— 说话人重命名 / 再识别只更新行内容,不让行重建。
+    var id: String {
+        "\(Int(timestamp.timeIntervalSince1970 * 1000))|\(device)|\(isInput ? 1 : 0)|\(text)"
+    }
 }
 
 struct TimelineDB: Sendable {
