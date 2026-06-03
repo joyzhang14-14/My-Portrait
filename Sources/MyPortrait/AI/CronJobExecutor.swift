@@ -145,9 +145,16 @@ enum CronJobExecutor {
                                     extraEnv: envInjection)
             }
             try await agent.start()
-            let pasted = context.markdown.isEmpty
+            // 跟 ChatController.send 一致,首条 user message 前注入两个
+            // SKILL preamble — cron agent 也需要知道 mp-query / mp-folders
+            // 子命令存在,否则它只能用注入的固定时间窗,没法跨日/跨模态查
+            // (e.g. mp-query memories --scope portrait / mp-query writing)。
+            // 之前没注入是 cron 路径"惊艳感缺失"的主要原因之一。
+            let skillPreamble = "\(MPQuerySkill.preamble)\n\n\(FoldersSkill.preamble)\n\n"
+            let body = context.markdown.isEmpty
                 ? cronJob.prompt
                 : "\(context.markdown)\n\nUser question:\n\(cronJob.prompt)"
+            let pasted = skillPreamble + body
             try agent.sendPrompt(pasted)
 
             // 跟普通 chat 一样接所有事件:text / tool / thinking / error。
