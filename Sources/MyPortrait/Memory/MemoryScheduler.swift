@@ -834,38 +834,59 @@ final class MemoryScheduler {
 
         // ─── paused 行回收 ───
         // 用户主动退出(applicationWillTerminate)留下的 paused 行 —— 跟 stale
-        // lock 不同,**不计 retry**,直接回 pending 等下次 tick 重跑。event 步
-        // 仍需 deleteEvents 回滚(可能写了一半 .md),其他步幂等。
+        // lock 不同,**不计 retry**(retry_count 不动 → backoff=0 → 下个 tick
+        // 立即跑)。但标 .failed 不是 .pending,这样:
+        //   - attentionItems 自动捡到(failed/budget_deferred/dead_letter 都算)
+        //   - lastFailureByRowStage 写 .appInterruptionRestarted 让 UI / 通知
+        //     正确显示"上次中断,自动续跑"
+        //   - 退出时 reject 过 staging,UI 不会显示假 "Pending review"
+        // event 步仍需 deleteEvents 回滚(可能写了一半 .md),其他步幂等。
+        var pausedPipelines: Set<String> = []
         for row in store.allRows() {
-            // anchor 行(_distill_anchor 等)day=nil,event 步用不上 deleteEvents;
-            // 真日期行才有日期对象,event 步会回滚。
             let day = ProcessingLogStore.day(from: row.date)
-            var hadPaused = false
+            var hadPausedStages: [ProcessingStage] = []
             if row.event == .paused {
-                if let day { deleteEvents(on: day) }   // 写了一半的 .md 删干净
-                store.setStatus(date: row.date, stage: .event, status: .pending)
-                hadPaused = true
+                if let day { deleteEvents(on: day) }
+                store.setStatus(date: row.date, stage: .event, status: .failed)
+                hadPausedStages.append(.event)
+                pausedPipelines.insert("Event processing")
             }
             if row.impact == .paused {
-                store.setStatus(date: row.date, stage: .impact, status: .pending)
-                hadPaused = true
+                store.setStatus(date: row.date, stage: .impact, status: .failed)
+                hadPausedStages.append(.impact)
+                pausedPipelines.insert("Event processing")
             }
             if row.classify == .paused {
-                store.setStatus(date: row.date, stage: .classify, status: .pending)
-                hadPaused = true
+                store.setStatus(date: row.date, stage: .classify, status: .failed)
+                hadPausedStages.append(.classify)
             }
             if row.distill == .paused {
-                store.setStatus(date: row.date, stage: .distill, status: .pending)
-                hadPaused = true
+                store.setStatus(date: row.date, stage: .distill, status: .failed)
+                hadPausedStages.append(.distill)
+                pausedPipelines.insert("Portrait distillation")
             }
             if row.personality == .paused {
-                store.setStatus(date: row.date, stage: .personality, status: .pending)
-                hadPaused = true
+                store.setStatus(date: row.date, stage: .personality, status: .failed)
+                hadPausedStages.append(.personality)
+                pausedPipelines.insert("Personality refresh")
             }
-            if hadPaused {
-                schedLog.notice("resumed paused row \(row.date, privacy: .public) — will retry on next tick (no retry++)")
-                print("[Scheduler] resume paused: \(row.date) → pending")
+            // 写 in-memory kind 让 attention UI 显示 "Auto-recovering · interrupted"
+            // + UI 的 "Auto-recovering · next retry next tick"(retry=0 → backoffReady true)。
+            for stage in hadPausedStages {
+                lastFailureByRowStage[row.date, default: [:]][stage] = .appInterruptionRestarted
             }
+            if !hadPausedStages.isEmpty {
+                schedLog.notice("resumed paused row \(row.date, privacy: .public) → failed + appInterruptionRestarted (no retry++)")
+                print("[Scheduler] resume paused: \(row.date) → failed (interrupted, immediate retry)")
+            }
+        }
+        // 每个被中断的 pipeline 弹一条通知 — 让用户知道"上次中断已自动续跑"。
+        for pipeline in pausedPipelines {
+            NotificationCenterService.shared.post(.pipelineAutoRecovering(
+                pipeline: pipeline,
+                kindLabel: LLMFailureKind.appInterruptionRestarted.shortLabel,
+                nextRetryLabel: "next tick"
+            ))
         }
     }
 
@@ -875,14 +896,21 @@ final class MemoryScheduler {
     /// 退出。下次启动 recoverStaleLocks 末尾会把 paused 转回 pending 重跑。
     ///
     /// LLM 本身不支持续接 → 重跑 = 从头跑,event 步靠 deleteEvents 保证幂等。
+    /// 同时 reject 对应 staging snapshot —— 用户主动退出 ≠ "run done",拍的
+    /// snapshot 没完整结果可审,留着会让重启 UI 显示"假 Pending review"
+    /// (events 已删但 staging 还在)卡死流程。
     func pauseInProgressJobs() {
         var pausedCount = 0
+        var pausedKinds: Set<MemoryStaging.Kind> = []
         for row in store.allRows() {
             var pausedThisRow = false
             for stage in ProcessingStage.allCases {
                 if row.status(of: stage) == .inProgress {
                     store.setStatus(date: row.date, stage: stage, status: .paused)
                     pausedThisRow = true
+                    if let k = Self.stagingKind(for: stage) {
+                        pausedKinds.insert(k)
+                    }
                 }
             }
             if pausedThisRow {
@@ -893,6 +921,29 @@ final class MemoryScheduler {
         }
         if pausedCount > 0 {
             schedLog.notice("paused \(pausedCount) in-progress row(s) on shutdown — will resume on next launch")
+        }
+        // Reject 任何被 paused 牵连的 staging snapshot(restore backup + 清单)。
+        // 多 row 同 stage 也只 reject 一次(MemoryStaging 是 kind-级)。
+        for k in pausedKinds where MemoryStaging.hasPending(k) {
+            do {
+                try MemoryStaging.reject(k)
+                print("[Scheduler] rejected staging '\(k.rawValue)' on pause (restored backup)")
+            } catch {
+                schedLog.error("staging \(k.rawValue, privacy: .public) reject failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// 把 ProcessingStage 翻成它写 staging snapshot 时用的 MemoryStaging.Kind。
+    /// raw 不走 staging(直接读 timeline);classify 已下线但 enum 还在。
+    private static func stagingKind(for stage: ProcessingStage) -> MemoryStaging.Kind? {
+        switch stage {
+        case .raw:         return nil
+        case .event:       return .events
+        case .impact:      return .events
+        case .classify:    return .classify
+        case .distill:     return .portrait
+        case .personality: return .personality
         }
     }
 

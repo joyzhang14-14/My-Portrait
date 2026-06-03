@@ -34,6 +34,11 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
     case schemaViolation(reason: String)
     /// 没分到具体类的瞬态错。fallback 桶,默认重试。
     case unknownTransient(reason: String)
+    /// 用户在 pipeline 跑到一半主动退出 / 关电脑 / 关 app(applicationWillTerminate
+    /// 触发 pauseInProgressJobs)。重启时 recoverPausedJobs 标 failed 但
+    /// retry_count 不动 → 下个 tick 立即从头重跑(LLM 不支持续接),不计入
+    /// retry 配额。attention 行 + 通知让用户知道"上次中断已自动续跑"。
+    case appInterruptionRestarted
 
     // ─── 桶 B — user-required(NeedAttention 加 Problem solved 按钮) ───
     /// 真额度用完(billing 欠费 / 月度 quota 烧光)。需要用户充值 / 升级 tier
@@ -75,6 +80,7 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         case .dbBusy:                     return "Local DB busy"
         case .schemaViolation(let r):     return "Model output couldn't be parsed (\(r))"
         case .unknownTransient(let r):    return "Transient error (\(r))"
+        case .appInterruptionRestarted:   return "App was closed mid-run — pipeline will restart from scratch on next tick"
         case .quotaExhausted(let p, _):   return "Provider quota exhausted — top up \(p) and click Problem solved"
         case .authRevoked(let p, _):      return "Auth failed — reconnect \(p) in Settings → Connections"
         case .modelDeprecated(let m, _):  return "Model \(m) unavailable — pick another in Settings → AI models"
@@ -93,6 +99,7 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         case .dbBusy:                     return "db-busy"
         case .schemaViolation:            return "schema"
         case .unknownTransient:           return "transient"
+        case .appInterruptionRestarted:   return "interrupted"
         case .quotaExhausted:             return "quota"
         case .authRevoked:                return "auth"
         case .modelDeprecated:            return "model-gone"
