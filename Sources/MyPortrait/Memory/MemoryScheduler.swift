@@ -880,13 +880,13 @@ final class MemoryScheduler {
                 print("[Scheduler] resume paused: \(row.date) → failed (interrupted, immediate retry)")
             }
         }
-        // 每个被中断的 pipeline 弹一条通知 — 让用户知道"上次中断已自动续跑"。
+        // 每个被中断的 pipeline 弹一条独立通知 — 让用户知道"上次中断已自动续跑"。
+        // 用独立 kind 而非 .pipelineAutoRecovering,这样可以单独 toggle off
+        // (频繁关电脑的用户不想每次开机都弹这个,但保留其它 scheduler 通知)。
         for pipeline in pausedPipelines {
-            NotificationCenterService.shared.post(.pipelineAutoRecovering(
-                pipeline: pipeline,
-                kindLabel: LLMFailureKind.appInterruptionRestarted.shortLabel,
-                nextRetryLabel: "next tick"
-            ))
+            NotificationCenterService.shared.post(
+                .pipelineInterruptionRestarted(pipeline: pipeline)
+            )
         }
     }
 

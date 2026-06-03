@@ -30,6 +30,11 @@ final class NotificationCenterService {
         /// pipeline 失败但 scheduler 会**自动重试**(transient network / rate
         /// limit / truncated / DB busy / schema)。灰色,告知"retrying in Xh"。
         case pipelineAutoRecovering(pipeline: String, kindLabel: String, nextRetryLabel: String)
+        /// 用户主动退出 / 关电脑 / 合盖被 sigkill,pipeline 跑到一半被中断 →
+        /// 重启时 recoverPausedJobs 自动续跑。独立 toggle
+        /// `pipelineInterruptionAlerts` 控制,跟 .pipelineAutoRecovering 分开 ——
+        /// 频繁关电脑的用户可能想静音它但保留其它 scheduler 通知。
+        case pipelineInterruptionRestarted(pipeline: String)
         /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
         /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
         /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
@@ -119,6 +124,15 @@ final class NotificationCenterService {
             // 🔁 = auto-recovering;桶 A。低优先,信息性。
             title = "🔁 \(pipeline) retrying \(nextRetryLabel)"
             body = "Auto-recovering from \(kindLabel) — no action needed."
+
+        case let .pipelineInterruptionRestarted(pipeline):
+            guard n.pipelineInterruptionAlerts else {
+                log.notice("post skipped: pipelineInterruptionAlerts is OFF"); return
+            }
+            // 🔁 + 区分文案:让用户一眼知道这是"上次没跑完,这次自动续上",
+            // 跟普通 transient retry 区分(那个还会再失败,这个是干净从头跑)。
+            title = "🔁 \(pipeline) resumed after interruption"
+            body = "App was closed mid-run — pipeline will restart from scratch on next tick."
         }
 
         let notif = InAppNotification(
