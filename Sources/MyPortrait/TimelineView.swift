@@ -132,10 +132,11 @@ struct TimelineView: View {
         // so the in-memory `state.frames` doesn't keep pointing at dead
         // snapshot paths.
         .onReceive(NotificationCenter.default.publisher(for: .timelineFramesChanged)) { note in
-            guard let changedDay = note.object as? Date else { reload(); return }
+            // 后台 compaction 触发 → preserveFocus,保住用户正看的帧,不甩到最新。
+            guard let changedDay = note.object as? Date else { reload(preserveFocus: true); return }
             let cal = Calendar(identifier: .gregorian)
             if cal.isDate(changedDay, inSameDayAs: state.selectedDay) {
-                reload()
+                reload(preserveFocus: true)
             }
         }
     }
@@ -169,9 +170,14 @@ struct TimelineView: View {
         }
     }
 
-    private func reload() {
+    /// `preserveFocus`:后台 compaction 顺带触发的刷新传 true —— 保住用户正看
+    /// 的那一帧(按时间戳吸附回最近帧),不把人甩到最新帧。主动切天 / 手动刷新
+    /// 传 false(默认),落到当天最后一帧。
+    private func reload(preserveFocus: Bool = false) {
         state.loading = true
         let day = state.selectedDay
+        // 异步 fetch 前先记下当前帧时间戳(读的是旧 frames/focusIndex)。
+        let keepTimestamp: Date? = preserveFocus ? currentFrame?.timestamp : nil
         guard let db = services?.db else {
             state.frames = []
             state.loading = false
@@ -180,11 +186,13 @@ struct TimelineView: View {
         Task { @MainActor in
             let fetched = (try? await db.framesForDay(day)) ?? []
             state.frames = fetched
-            // 跨天 seek:换天加载完后吸附到目标时刻;否则才默认落到当天最后一帧。
+            // 优先级:跨天 seek > 后台刷新保焦点 > 默认落最后一帧。
             // 原来无条件覆盖 focusIndex,pendingSeek 永远被忽略 → 跨天定位失效。
             if let target = state.pendingSeek {
                 state.snapFocus(to: target)   // 最近帧;空帧内部 guard
                 state.pendingSeek = nil        // 清掉,免得后续同天 reload 又吸到旧目标
+            } else if let keep = keepTimestamp, !fetched.isEmpty {
+                state.snapFocus(to: keep)      // 后台刷新:吸附回原来那一帧
             } else {
                 state.focusIndex = max(fetched.count - 1, 0)
             }
