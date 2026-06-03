@@ -149,18 +149,18 @@ struct SpeakersSettingsView: View {
         }
     }
 
-    /// 合并重复的同名声音簇 —— 同名 + 质心相似(cosine ≥ 阈值)才合,挡住"名同声不同"。
-    /// 纯本地向量计算,不用 AI;优先保留训练过的 voiceprint。
+    /// 合并重复的同名声音簇 —— 同名 + 样本相似(best-of-N cosine ≥ 阈值)才合,挡住
+    /// "名同声不同"。纯本地向量计算,不用 AI;优先保留训练过的 voiceprint。
     private func runOrganize() {
         guard !organizing else { return }
         guard canOrganize else { return }
         organizing = true
         Task {
             defer { organizing = false }
-            let centroids = await Task.detached(priority: .userInitiated) {
-                TimelineDB().speakerCentroids()
+            let samples = await Task.detached(priority: .userInitiated) {
+                TimelineDB().speakerSampleEmbeddings()
             }.value
-            let plan = mergePlan(centroids: centroids)
+            let plan = mergePlan(samples: samples)
             if !plan.isEmpty {
                 await Task.detached(priority: .userInitiated) {
                     for (keepId, mergeIds) in plan {
@@ -175,11 +175,14 @@ struct SpeakersSettingsView: View {
     /// 同名簇合并计划:`[(keepId, [mergeId...])]`。把 name 相同(忽略大小写/首尾空白)
     /// 的多个簇并成一个;keep 优先选训练过的 voiceprint,否则选样本最多的。
     ///
-    /// **声纹护栏**:同名还不够 —— 只合并质心 cosine ≥ `simThreshold` 的簇。挡住
-    /// "名同声不同"(如 diarization 把别人的声音误标成你的名字),避免把不同人合一起。
-    /// 缺质心的簇保守跳过(不合)。
-    private func mergePlan(centroids: [Int64: [Float]]) -> [(Int64, [Int64])] {
-        let simThreshold: Float = 0.5
+    /// **声纹护栏(best-of-N)**:同名还不够 —— 只合并跟 keep「最接近的一条样本」
+    /// cosine ≥ `simThreshold` 的簇。**不用质心**:质心是平均值,在被拆散的簇上极不
+    /// 可靠(实测同一人两簇质心 cosine 可低至 −0.06,比跨人还低),用它当护栏会把真·
+    /// 同人挡在外面(就是 "Merge duplicates 点了没用" 的原因)。改比样本对齐 matchSpeaker。
+    /// 仍挡住"名同声不同":真·不同人没有任何一对样本够像,best-of-N 过不了阈值。
+    /// 缺样本的簇保守跳过(不合)。
+    private func mergePlan(samples: [Int64: [[Float]]]) -> [(Int64, [Int64])] {
+        let simThreshold: Float = 0.45   // 对齐 PortraitDBImpl.matchSpeaker
         let named = rows.filter { !($0.name ?? "").isEmpty }
         let groups = Dictionary(grouping: named) {
             ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
@@ -189,18 +192,27 @@ struct SpeakersSettingsView: View {
             let keep = group.first(where: { $0.trainedAt != nil })
                 ?? group.max(by: { $0.sampleCount < $1.sampleCount })
                 ?? group[0]
-            guard let keepId = Int64(keep.id), let kc = centroids[keepId] else { continue }
+            guard let keepId = Int64(keep.id), let ks = samples[keepId], !ks.isEmpty else { continue }
             let mergeIds: [Int64] = group.compactMap { r in
-                // rc.count == kc.count:不同 embedding 引擎(whisper/qwen/旧 bge-m3)
-                // 维度不同,cosineSimilarity 的 precondition 会崩整个 app —— 维度不
-                // 一致就保守跳过(同 TimelineDB:1081 / PortraitDBImpl 的护栏)。
-                guard r.id != keep.id, let rid = Int64(r.id), let rc = centroids[rid],
-                      rc.count == kc.count else { return nil }
-                return VectorMath.cosineSimilarity(kc, rc) >= simThreshold ? rid : nil
+                guard r.id != keep.id, let rid = Int64(r.id), let rs = samples[rid], !rs.isEmpty else { return nil }
+                return bestOfN(rs, ks) >= simThreshold ? rid : nil
             }
             if !mergeIds.isEmpty { out.append((keepId, mergeIds)) }
         }
         return out
+    }
+
+    /// 两簇样本间「最接近的一对」cosine(best-of-N)。维度不一致的样本对(不同
+    /// embedding 引擎)跳过 —— cosineSimilarity 的 precondition 维度不等会崩 app。
+    private func bestOfN(_ a: [[Float]], _ b: [[Float]]) -> Float {
+        var best: Float = -2
+        for x in a {
+            for y in b where y.count == x.count {
+                let s = VectorMath.cosineSimilarity(x, y)
+                if s > best { best = s }
+            }
+        }
+        return best
     }
 
     /// 有同名的多个簇时为 true(忽略大小写/首尾空白)。
