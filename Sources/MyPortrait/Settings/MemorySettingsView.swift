@@ -407,8 +407,8 @@ struct MemorySettingsView: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
             Spacer()
-            Button("Reveal in Finder") {
-                cfg.revealInFinder()
+            Button("Open ~/.portrait") {
+                cfg.openPortraitDir()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
