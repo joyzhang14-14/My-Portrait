@@ -469,6 +469,8 @@ struct AudioCaptureSettingsView: View {
                             icon: "person.wave.2") {
                     Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
                 }
+                // 关掉识别 → 隐藏模型选择(没在识别就不用选模型)。
+                if config.current.capture.audio.speakerIdEnabled {
                 SettingsDivider()
                 SettingsRow("Speaker model",
                             description: "Chinese models are far more accurate for Chinese speakers. Download in AI models. Switching invalidates existing voice profiles — retrain speakers after changing.",
@@ -494,13 +496,14 @@ struct AudioCaptureSettingsView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                 }
+                }   // if speakerIdEnabled
             }
 
-            // 原来独立的 Speakers 分页(训练 + 簇管理 + Organize w/ AI)。
-            // **不再 gate** —— 训练入口要随时可达;speakerId 关 / DB 空
-            // 时下面列表自然就是 "0 of 0 identified",VoiceTrainingCard
-            // 仍可点。SpeakersSettingsView 自带懒加载 + task 触发。
-            SpeakersSettingsView()
+            // Speakers 分页(训练 + 簇管理 + Organize w/ AI)。识别关掉时整块隐藏
+            // —— 没在识别就没必要展示模型/训练/簇。
+            if config.current.capture.audio.speakerIdEnabled {
+                SpeakersSettingsView()
+            }
         }
     }
 
