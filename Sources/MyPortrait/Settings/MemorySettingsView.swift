@@ -547,7 +547,7 @@ struct MemorySettingsView: View {
 
     /// 停 writing capture:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
     private func stopWritingCapture() {
-        let n = PiAgentRegistry.shared.stopAll()
+        let n = PiAgentRegistry.shared.stopGroup(PipelineOwner.writingCapture)
         writingCaptureUI.task?.cancel()
         writingCaptureUI.task = nil
         writingCaptureUI.isRunning = false
@@ -663,7 +663,7 @@ struct MemorySettingsView: View {
 
     /// 停 writing style:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
     private func stopWritingStyle() {
-        let n = PiAgentRegistry.shared.stopAll()
+        let n = PiAgentRegistry.shared.stopGroup(PipelineOwner.writingStyle)
         writingStyleUI.task?.cancel()
         writingStyleUI.task = nil
         writingStyleUI.isRunning = false
@@ -1101,7 +1101,14 @@ struct MemorySettingsView: View {
     /// 停某个 memory trigger:杀 LLM 子进程 + cancel 它的 task + 清运行态。
     /// PiAgentRegistry.stopAll 会杀全部 LLM(无法只杀单条),跟 writing block 一致。
     private func stopTrigger(_ t: ManualTrigger) {
-        let n = PiAgentRegistry.shared.stopAll()
+        let owner: String = {
+            switch t {
+            case .eventProcessing: return PipelineOwner.event
+            case .distill:         return PipelineOwner.distill
+            case .personality:     return PipelineOwner.personality
+            }
+        }()
+        let n = PiAgentRegistry.shared.stopGroup(owner)
         runTasks[t]?.cancel()
         runTasks[t] = nil
         runningTriggers.remove(t)
