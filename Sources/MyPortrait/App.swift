@@ -52,6 +52,14 @@ struct MyPortraitApp: App {
                                     speakerOnly: args.contains("--speaker-only"))
             // run() exits the process internally.
         }
+        // 维护 CLI: `--rematch-speakers [--apply] [--limit N]` 先合并同名簇,再用新
+        // best-of-N 对已有 wav 段重算 speaker_id(文字不动)。默认 dry-run;--apply 才写库。
+        if args.contains("--rematch-speakers") {
+            var lim: Int? = nil
+            if let i = args.firstIndex(of: "--limit"), i + 1 < args.count { lim = Int(args[i + 1]) }
+            RematchSpeakersCLI.run(apply: args.contains("--apply"), limit: lim)
+            // run() exits the process internally.
+        }
         // 一次性数据修复:按声纹 cosine 整理被 bug 版本打乱的说话人簇。
         if args.contains("--fix-speakers") {
             FixSpeakersCLI.run()
