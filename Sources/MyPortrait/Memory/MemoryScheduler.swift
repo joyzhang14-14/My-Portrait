@@ -231,8 +231,18 @@ final class MemoryScheduler {
         do {
             let s = try await distiller.runAuto()
             schedLog.info("writingStyle auto: status=\(s.status.rawValue, privacy: .public) records=\(s.recordsCount) drafts=\(s.draftsCount)")
+            NotificationCenterService.shared.post(.schedulerRun(
+                pipeline: "Speech style",
+                success: true,
+                summary: "\(s.recordsCount) record\(s.recordsCount == 1 ? "" : "s") · \(s.draftsCount) draft\(s.draftsCount == 1 ? "" : "s")"
+            ))
         } catch {
             schedLog.warning("writingStyle auto failed: \(String(describing: error), privacy: .public)")
+            NotificationCenterService.shared.post(.schedulerRun(
+                pipeline: "Speech style",
+                success: false,
+                summary: error.localizedDescription
+            ))
         }
     }
 
@@ -248,8 +258,22 @@ final class MemoryScheduler {
         do {
             let summary = try await worker.runBacklog()
             schedLog.info("writingCapture backlog: status=\(summary.status.rawValue, privacy: .public) records=\(summary.recordsCount) discarded=\(summary.discardedCount)")
+            // recordsCount == 0 = 没新写作可处理,跟 .noWork 等价 → 静默,不弹噪音。
+            if summary.recordsCount > 0 {
+                NotificationCenterService.shared.post(.schedulerRun(
+                    pipeline: "Writing capture",
+                    success: true,
+                    summary: "\(summary.recordsCount) record\(summary.recordsCount == 1 ? "" : "s")"
+                        + (summary.discardedCount > 0 ? " · \(summary.discardedCount) discarded" : "")
+                ))
+            }
         } catch {
             schedLog.warning("writingCapture backlog failed: \(String(describing: error), privacy: .public)")
+            NotificationCenterService.shared.post(.schedulerRun(
+                pipeline: "Writing capture",
+                success: false,
+                summary: error.localizedDescription
+            ))
         }
     }
 
@@ -396,7 +420,13 @@ final class MemoryScheduler {
             }
         }
 
-        return .ran(days: days.map { ProcessingLogStore.dayString($0) })
+        let outcome: JobOutcome = .ran(days: days.map { ProcessingLogStore.dayString($0) })
+        NotificationCenterService.shared.post(.schedulerRun(
+            pipeline: "Event processing",
+            success: true,
+            summary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")"
+        ))
+        return outcome
     }
 
     // classify job(自动 EventClassifier 跑 LLM 分 folder)已整段下线 ——
@@ -429,6 +459,14 @@ final class MemoryScheduler {
             let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
+        // 看最终 anchor 状态:complete = success,其它(failed/budget_deferred)= 失败通知。
+        let finalDistill = store.row(for: distillAnchor)?.distill ?? .idle
+        let ok = (finalDistill == .complete)
+        NotificationCenterService.shared.post(.schedulerRun(
+            pipeline: "Portrait distillation",
+            success: ok,
+            summary: ok ? "Long-term portrait updated" : "Status: \(finalDistill.rawValue)"
+        ))
         return .ran(days: [distillAnchor])
     }
 
@@ -466,6 +504,11 @@ final class MemoryScheduler {
                 return .success
             }
         }
+        NotificationCenterService.shared.post(.schedulerRun(
+            pipeline: "Personality refresh",
+            success: true,
+            summary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")"
+        ))
         return .ran(days: days.map { ProcessingLogStore.dayString($0) })
     }
 

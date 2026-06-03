@@ -673,11 +673,17 @@ struct NotificationsConfig: Codable, Equatable {
     var appUpdates:             Bool     = true
     var cronJobAlerts:             Bool     = true
     var captureStalls:          Bool     = false
+    /// scheduler 自动跑的五条 memory pipeline(event / portrait / personality /
+    /// writing capture / speech style)每次成功或失败时弹通知。默认 ON ——
+    /// 用户开 app 是要"知道画像在动",看到通知能确认 pipeline 在跑。
+    /// 噪音控制:只在真跑了(.ran 或 throw)才发,.noWork/.busy 静默。
+    var schedulerAlerts:        Bool     = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case appUpdates             = "app_updates"
         case cronJobAlerts             = "cron_job_alerts"
         case captureStalls          = "capture_stalls"
+        case schedulerAlerts        = "scheduler_alerts"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -685,6 +691,7 @@ struct NotificationsConfig: Codable, Equatable {
         appUpdates             = c.dflt(Bool.self,     .appUpdates, appUpdates)
         cronJobAlerts             = c.dflt(Bool.self,     .cronJobAlerts, cronJobAlerts)
         captureStalls          = c.dflt(Bool.self,     .captureStalls, captureStalls)
+        schedulerAlerts        = c.dflt(Bool.self,     .schedulerAlerts, schedulerAlerts)
     }
 }
 

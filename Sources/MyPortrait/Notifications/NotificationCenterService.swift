@@ -19,6 +19,10 @@ final class NotificationCenterService {
         case cronJobRun(jobId: UUID, jobName: String, body: String, convId: UUID)
         case appUpdate(version: String)
         case captureStall(reason: String)
+        /// scheduler 自动跑完一条 memory pipeline(event / portrait /
+        /// personality / writing / speech)时发。`success=false` 走失败样式。
+        /// `summary` 一行人话:"processed 3 days" / "12 records"。
+        case schedulerRun(pipeline: String, success: Bool, summary: String)
         /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
         /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
         /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
@@ -84,6 +88,14 @@ final class NotificationCenterService {
             timeout = seconds
             onTap = { onPostpone() }
             onTimeout = { onTimeoutCb() }
+
+        case let .schedulerRun(pipeline, success, summary):
+            guard n.schedulerAlerts else {
+                log.notice("post skipped: schedulerAlerts is OFF"); return
+            }
+            // ⚙️ 跑完 / ⚠️ 失败 —— 跟 cron job 的 🛰️ 区分,一眼看出是 scheduler。
+            title = success ? "⚙️ \(pipeline)" : "⚠️ \(pipeline) failed"
+            body = summary
         }
 
         let notif = InAppNotification(
