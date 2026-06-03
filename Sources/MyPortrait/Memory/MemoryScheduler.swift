@@ -650,6 +650,69 @@ final class MemoryScheduler {
                 applyOutcome(date: row.date, stage: .personality, outcome: .failed, rollbackDay: nil)
             }
         }
+
+        // ─── paused 行回收 ───
+        // 用户主动退出(applicationWillTerminate)留下的 paused 行 —— 跟 stale
+        // lock 不同,**不计 retry**,直接回 pending 等下次 tick 重跑。event 步
+        // 仍需 deleteEvents 回滚(可能写了一半 .md),其他步幂等。
+        for row in store.allRows() {
+            // anchor 行(_distill_anchor 等)day=nil,event 步用不上 deleteEvents;
+            // 真日期行才有日期对象,event 步会回滚。
+            let day = ProcessingLogStore.day(from: row.date)
+            var hadPaused = false
+            if row.event == .paused {
+                if let day { deleteEvents(on: day) }   // 写了一半的 .md 删干净
+                store.setStatus(date: row.date, stage: .event, status: .pending)
+                hadPaused = true
+            }
+            if row.impact == .paused {
+                store.setStatus(date: row.date, stage: .impact, status: .pending)
+                hadPaused = true
+            }
+            if row.classify == .paused {
+                store.setStatus(date: row.date, stage: .classify, status: .pending)
+                hadPaused = true
+            }
+            if row.distill == .paused {
+                store.setStatus(date: row.date, stage: .distill, status: .pending)
+                hadPaused = true
+            }
+            if row.personality == .paused {
+                store.setStatus(date: row.date, stage: .personality, status: .pending)
+                hadPaused = true
+            }
+            if hadPaused {
+                schedLog.notice("resumed paused row \(row.date, privacy: .public) — will retry on next tick (no retry++)")
+                print("[Scheduler] resume paused: \(row.date) → pending")
+            }
+        }
+    }
+
+    /// 用户主动退出时调(applicationWillTerminate)。扫所有 row,把任一 stage
+    /// 处于 in_progress 的标为 paused + 释放锁,**不计 retry** —— 跟真崩溃
+    /// (SIGKILL / 断电)的 stale-lock 路径区分开。同步 DB 写,毫秒级,不阻塞
+    /// 退出。下次启动 recoverStaleLocks 末尾会把 paused 转回 pending 重跑。
+    ///
+    /// LLM 本身不支持续接 → 重跑 = 从头跑,event 步靠 deleteEvents 保证幂等。
+    func pauseInProgressJobs() {
+        var pausedCount = 0
+        for row in store.allRows() {
+            var pausedThisRow = false
+            for stage in ProcessingStage.allCases {
+                if row.status(of: stage) == .inProgress {
+                    store.setStatus(date: row.date, stage: stage, status: .paused)
+                    pausedThisRow = true
+                }
+            }
+            if pausedThisRow {
+                store.releaseLock(date: row.date)
+                pausedCount += 1
+                print("[Scheduler] pause on shutdown: \(row.date) (active stages → paused)")
+            }
+        }
+        if pausedCount > 0 {
+            schedLog.notice("paused \(pausedCount) in-progress row(s) on shutdown — will resume on next launch")
+        }
     }
 
     // MARK: - UI 支持：重置 / 待处理列表
