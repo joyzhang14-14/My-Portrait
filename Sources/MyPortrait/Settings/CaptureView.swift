@@ -76,6 +76,11 @@ struct AudioCaptureSettingsView: View {
         Qwen3ASRWrapper.allQwenModels.first { $0.name == code }?.label ?? code
     }
 
+    /// 当前 speakerEmbeddingModel id → 显示标签。找不到回退 id 本身。
+    private static func speakerModelLabel(_ id: String) -> String {
+        SpeakerModel.embeddingOptions.first { $0.id == id }?.label ?? id
+    }
+
     /// code → 显示名(在 whisper/deepgram/qwen 表里找,找不到回退大写 code)。
     private static func displayName(for code: String) -> String {
         whisperLanguages.first { $0.code == code }?.name
@@ -463,6 +468,31 @@ struct AudioCaptureSettingsView: View {
                             description: "Detect and cluster distinct voices.",
                             icon: "person.wave.2") {
                     Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
+                }
+                SettingsDivider()
+                SettingsRow("Speaker model",
+                            description: "Chinese models are far more accurate for Chinese speakers. Download in AI models. Switching invalidates existing voice profiles — retrain speakers after changing.",
+                            icon: "cpu") {
+                    Menu {
+                        ForEach(SpeakerModel.embeddingOptions) { m in
+                            let installed = SpeakerModelStore.isOnDisk(m.model)
+                            Button {
+                                config.mutate { $0.capture.audio.speakerEmbeddingModel = m.id }
+                            } label: {
+                                Text(installed ? m.label : "\(m.label) — uninstalled")
+                            }
+                            .disabled(!installed)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(Self.speakerModelLabel(config.current.capture.audio.speakerEmbeddingModel))
+                                .font(.system(size: 12))
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                        }
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
             }
 
