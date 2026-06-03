@@ -87,6 +87,8 @@ actor SystemAudioCaptureService {
     /// 连续静音的 tick 数(每 tick ≈ 500ms)+ 重建冷却剩余 tick 数。
     private var wdSilenceTicks: Int = 0
     private var wdCooldownTicks: Int = 0
+    /// IO proc 连续无 callback 的 tick 数(蓝牙 A2DP→HFP 切换常把 IO proc 干停)。
+    private var wdNoCallbackTicks: Int = 0
 
     /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。见 AudioCaptureService 同名注释。
     nonisolated let segmentEventStream: AsyncStream<AudioSegmentEvent>
@@ -226,6 +228,18 @@ actor SystemAudioCaptureService {
             ])
         }
 
+        // 4b. 选 aggregate 的锚定设备。蓝牙通话(HFP)时默认输出在 SCO 语音
+        //     通道上,锚它 tap 会哑 → 改锚稳定的内建输出(CATap 抓全进程渲染
+        //     混音,锚哪只为给 IO 稳定时钟)。A2DP 音乐不切(只低采样率才切)。
+        let anchorUID: String
+        if Self.defaultOutputIsBluetoothCall(), let builtIn = Self.builtInOutputDeviceUID() {
+            anchorUID = builtIn
+            DiagLog.event("system_audio.anchor.builtin_for_bt_call",
+                          ctx: ["output": outputUID, "anchor": builtIn])
+        } else {
+            anchorUID = outputUID
+        }
+
         // 5. Aggregate device —— 同时含 [真实输出设备 sub-device] + [tap],
         //    main sub-device 指向输出设备,tap auto-start。
         let aggregateUID = "com.myportrait.aggregate.systemTap.\(UUID().uuidString)"
@@ -235,9 +249,9 @@ actor SystemAudioCaptureService {
             kAudioAggregateDeviceIsPrivateKey: 1,
             kAudioAggregateDeviceIsStackedKey: 0,
             kAudioAggregateDeviceTapAutoStartKey: 1,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceMainSubDeviceKey: anchorUID,
             kAudioAggregateDeviceSubDeviceListKey: [[
-                kAudioSubDeviceUIDKey: outputUID,
+                kAudioSubDeviceUIDKey: anchorUID,
             ]],
             kAudioAggregateDeviceTapListKey: [[
                 kAudioSubTapUIDKey: uid,
@@ -390,6 +404,90 @@ actor SystemAudioCaptureService {
         return unmanaged.takeRetainedValue() as String
     }
 
+    /// 默认输出设备的 AudioObjectID(拿不到返回 nil)。
+    private static func defaultOutputDeviceID() -> AudioObjectID? {
+        var deviceID = AudioObjectID(0)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var addr = defaultOutputAddress()
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID
+        ) == noErr, deviceID != 0 else { return nil }
+        return deviceID
+    }
+
+    /// 读设备 transport type。
+    private static func transportType(of id: AudioObjectID) -> UInt32 {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        _ = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &transport)
+        return transport
+    }
+
+    /// 读设备名义采样率。HFP(蓝牙通话)≈8k/16k,A2DP(音乐)≈44.1k/48k。
+    private static func nominalSampleRate(of id: AudioObjectID) -> Double {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var rate: Double = 0
+        var size = UInt32(MemoryLayout<Double>.size)
+        _ = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &rate)
+        return rate
+    }
+
+    /// 默认输出是不是「蓝牙 + 通话(HFP)模式」。这种情况通话音频走 HFP SCO
+    /// 语音通道,绕过普通输出流,聚合设备锚它 → tap 哑。A2DP 音乐(高采样率)不算。
+    private static func defaultOutputIsBluetoothCall() -> Bool {
+        guard let id = defaultOutputDeviceID() else { return false }
+        let t = transportType(of: id)
+        let isBT = (t == kAudioDeviceTransportTypeBluetooth || t == kAudioDeviceTransportTypeBluetoothLE)
+        guard isBT else { return false }
+        let rate = nominalSampleRate(of: id)
+        return rate > 0 && rate <= 24_000   // HFP 通话档
+    }
+
+    /// 找内建输出设备 UID —— 蓝牙通话时把聚合设备锚到它(稳定,不切 HFP)。
+    /// CATap 抓的是全进程渲染混音,锚哪个真实设备只为给 IO 一个稳定时钟。
+    private static func builtInOutputDeviceUID() -> String? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &dataSize) == noErr else { return nil }
+        let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return nil }
+        var ids = [AudioObjectID](repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &dataSize, &ids) == noErr else { return nil }
+
+        for id in ids where transportType(of: id) == kAudioDeviceTransportTypeBuiltIn {
+            // 必须有输出流
+            var streamsAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyStreams,
+                mScope: kAudioObjectPropertyScopeOutput,
+                mElement: kAudioObjectPropertyElementMain)
+            var streamsSize: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(id, &streamsAddr, 0, nil, &streamsSize) == noErr,
+                  streamsSize > 0 else { continue }
+            var uidAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            var uidSize = UInt32(MemoryLayout<CFString>.size)
+            var cfstr: Unmanaged<CFString>? = nil
+            guard AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &cfstr) == noErr,
+                  let unmanaged = cfstr else { continue }
+            return unmanaged.takeRetainedValue() as String
+        }
+        return nil
+    }
+
     /// 注册「默认输出设备变更」监听 —— 戴耳机 / 切扬声器时重锚 tap。
     private func registerOutputDeviceListener() {
         guard deviceListenerBlock == nil else { return }
@@ -442,6 +540,7 @@ actor SystemAudioCaptureService {
         wdPeak = 0
         wdSilenceTicks = 0
         wdCooldownTicks = 0
+        wdNoCallbackTicks = 0
         watchdogTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 500_000_000)
@@ -472,12 +571,28 @@ actor SystemAudioCaptureService {
         let gotRealAudio = callbacks > 0 && peak > 0.002
         if gotRealAudio {
             wdSilenceTicks = 0
+            wdNoCallbackTicks = 0
         } else if callbacks > 0 {
             // callback 在跑,只是 buffer 静音 → 累计静音窗口。
             wdSilenceTicks += 1
+            wdNoCallbackTicks = 0
+        } else {
+            // callbacks == 0:IO proc 停了。蓝牙 A2DP→HFP 切换常把聚合设备的
+            // IO proc 干停,而设备 UID 没变 → 设备监听不触发重锚 → 这里兜底。
+            wdNoCallbackTicks += 1
         }
-        // callbacks == 0:IO proc 根本没在跑,是另一类故障(设备变化路径覆盖),
-        // 不在这里重建(设备真睡着时重建只会失败)。
+
+        // IO proc 连续无 callback ≥10s → rebuild(rebuild 里按当前是否蓝牙通话
+        // 重选 anchor;rebuild 失败也无妨,冷却后再来)。
+        if Double(wdNoCallbackTicks) * 0.5 >= 10, wdCooldownTicks == 0 {
+            logger.warning("system audio: IO proc no callbacks 10s — rebuilding (bluetooth HFP switch?)")
+            DiagLog.warn("system_audio.rebuild.io_proc_dead")
+            wdNoCallbackTicks = 0
+            wdSilenceTicks = 0
+            wdCooldownTicks = 120
+            await rebuild(reason: "io-proc-dead")
+            return
+        }
 
         let silentLongEnough = Double(wdSilenceTicks) * 0.5 >= 45
         guard silentLongEnough, wdCooldownTicks == 0 else { return }
