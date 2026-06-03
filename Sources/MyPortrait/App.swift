@@ -60,6 +60,18 @@ struct MyPortraitApp: App {
             RematchSpeakersCLI.run(apply: args.contains("--apply"), limit: lim)
             // run() exits the process internally.
         }
+        // 测试 CLI: `--diarize-session [--hours N] [--threshold 0.4]` 纯声音离线 diarization
+        // (AHC 聚类 + AS-norm 撞库),拿 device 当答案验准确率,结果写桌面。只读。
+        if args.contains("--diarize-session") {
+            var hrs: Double? = nil
+            if let i = args.firstIndex(of: "--hours"), i + 1 < args.count { hrs = Double(args[i + 1]) }
+            var thr: Float = 0.4
+            if let i = args.firstIndex(of: "--threshold"), i + 1 < args.count, let v = Float(args[i + 1]) { thr = v }
+            var minDur: Double = 0
+            if let i = args.firstIndex(of: "--min-dur"), i + 1 < args.count, let v = Double(args[i + 1]) { minDur = v }
+            DiarizeSessionCLI.run(hours: hrs, threshold: thr, minDur: minDur)
+            // run() exits the process internally.
+        }
         // 维护 CLI: `--clean-voiceprints [--apply] [--threshold 0.5]` 对具名簇做 medoid
         // 剪枝去污(丢离群脏样本 + 重算质心)。默认 dry-run;--apply 前自动整表备份。
         if args.contains("--clean-voiceprints") {
