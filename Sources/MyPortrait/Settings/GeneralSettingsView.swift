@@ -95,7 +95,7 @@ struct GeneralSettingsView: View {
              // 只是临时显示一次 sheet。
             SettingsCard(title: "Onboarding") {
                 SettingsRow("Replay onboarding",
-                            description: "Open the onboarding sheet again — useful to grant a permission you skipped, or change your AI provider.",
+                            description: "Opens the setup steps again — handy for granting a permission you skipped or switching your AI provider.",
                             icon: "sparkles") {
                     Button("Show") {
                         // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。

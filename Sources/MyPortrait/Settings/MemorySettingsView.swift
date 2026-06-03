@@ -425,7 +425,7 @@ struct MemorySettingsView: View {
     private var schedulerSection: some View {
         section(
             title: "Automatic processing",
-            blurb: "Two independent schedulers. Each can run off (manual only), daily, weekly, or monthly. Times are local. Each run handles the oldest unprocessed days first, up to the per-run cap below; failed days retry on the next run."
+            blurb: "Choose when each kind of processing runs: off, daily, weekly, or monthly. Times are local, and the oldest unprocessed days are handled first."
         ) {
             schedulerBlock(
                 title: "Event processing",
@@ -966,7 +966,7 @@ struct MemorySettingsView: View {
     private var runNowSection: some View {
         section(
             title: "Run now",
-            blurb: "Trigger a pipeline stage manually instead of waiting for the scheduler. Each uses LLM tokens, so you'll be asked to confirm. The weekly budget rebalance runs automatically after every impact rescore."
+            blurb: "Run a step now instead of waiting for the schedule. Each one uses AI, so you'll be asked to confirm first."
         ) {
             // Memory pipeline 三个 trigger
             triggerRow(.eventProcessing)
@@ -1173,7 +1173,7 @@ struct MemorySettingsView: View {
         if hasEvents || hasPortrait || hasPersonality {
             section(
                 title: "Pending review",
-                blurb: "Manual-run output is staged, not yet committed. Click a file to preview before vs after. Approve keeps it; Reject discards it and puts those days back to pending so they can be re-run."
+                blurb: "Results from a manual run are staged, not saved yet. Click a file to compare before and after. Approve keeps it; Reject discards it and queues those days to run again."
             ) {
                 if hasEvents {
                     reviewBlock(.events, "Process events", eventsChanges)
@@ -1246,7 +1246,7 @@ struct MemorySettingsView: View {
     private var attentionSection: some View {
         section(
             title: "Needs attention",
-            blurb: "Days whose processing failed, hit a model budget limit, or gave up after repeated failures (dead_letter). Reset puts the day back to pending and zeroes its retry count so the next run retries it."
+            blurb: "Days that failed, hit a budget limit, or gave up after repeated tries. Reset moves a day back to pending so the next run tries it again."
         ) {
             if attention.isEmpty {
                 HStack(spacing: 8) {
@@ -1319,7 +1319,7 @@ struct MemorySettingsView: View {
 
         return section(
             title: "AI provider",
-            blurb: "Which model runs the memory pipeline (impact scoring, event clustering, portrait distillation, personality refresh). Choices come from Settings → AI Models — disable a provider or hide a model there to remove it from here. Changes apply on the next scheduled run."
+            blurb: "Which AI model powers the memory features. The list comes from Settings → AI Models, so disable a provider or hide a model there to remove it here. Changes take effect on the next run."
         ) {
             if availableProviders.isEmpty {
                 Text("All AI providers are disabled in Settings → AI Models. Enable at least one to run the memory pipeline.")
@@ -1379,7 +1379,7 @@ struct MemorySettingsView: View {
     private var budgetSection: some View {
         section(
             title: "Daily consolidation budget",
-            blurb: "Mirrors the brain's nightly consolidation cap. Each day's events are scaled independently — when a day's LLM-given impacts sum above the budget, that day is compressed proportionally. Quiet days are left alone."
+            blurb: "A daily cap on how much each day can add to your memory. Busy days are trimmed back to the cap, while quiet days are left alone."
         ) {
             doubleRow("Daily budget (sum of impacts per day)",
                       value: cfg.binding(\.memory.dailyBudget),
@@ -1399,7 +1399,7 @@ struct MemorySettingsView: View {
     private var decaySection: some View {
         section(
             title: "Weight decay",
-            blurb: "Controls how quickly older memories fade. Higher = the app forgets faster."
+            blurb: "Controls how quickly older memories fade. A higher value forgets faster."
         ) {
             doubleRow("α (decay exponent)",
                       value: cfg.binding(\.memory.alpha),
@@ -1413,7 +1413,7 @@ struct MemorySettingsView: View {
     private var archiveSection: some View {
         section(
             title: "Archival rule",
-            blurb: "When a memory falls below both limits below and isn't pinned, it's moved to the archive instead of staying active."
+            blurb: "When a memory falls below both limits and isn't pinned, it's moved to the archive."
         ) {
             doubleRow("Max weight",
                       value: cfg.binding(\.memory.archiveMaxWeight),
@@ -1427,7 +1427,7 @@ struct MemorySettingsView: View {
     private var distillationSection: some View {
         section(
             title: "Distillation",
-            blurb: "How much new evidence is needed before a portrait section is updated. Lower = more responsive. Higher = more stable."
+            blurb: "How much new evidence is needed before a portrait section updates. A lower value reacts faster; a higher value stays more stable."
         ) {
             intRow("Portrait evidence threshold",
                    value: cfg.binding(\.memory.distillEvidenceThreshold),

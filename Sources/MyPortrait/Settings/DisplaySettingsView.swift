@@ -29,7 +29,7 @@ struct DisplaySettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Show in menu bar",
-                            description: "Adds a quick-access menu next to the clock for capture toggles (Screen / Audio / Typing) and opening ~/.portrait/. Useful when the main window is closed.",
+                            description: "Adds a menu bar icon so you can switch Screen, Audio, and Typing capture on or off without opening the main window.",
                             icon: "menubar.rectangle") {
                     Toggle("", isOn: config.binding(\.display.showInMenuBar))
                         .labelsHidden().toggleStyle(.switch)
@@ -38,7 +38,7 @@ struct DisplaySettingsView: View {
 
             SettingsCard(title: "Window") {
                 SettingsRow("Keep app window on top",
-                            description: "Pin the entire My Portrait window above other apps. Useful when watching a video or reading docs while chatting in the side.",
+                            description: "Keeps the My Portrait window above other apps. Handy for chatting on the side while you watch a video or read.",
                             icon: "macwindow.on.rectangle") {
                     Toggle("", isOn: config.binding(\.display.chatAlwaysOnTop))
                         .labelsHidden().toggleStyle(.switch)
