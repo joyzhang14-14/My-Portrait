@@ -20,7 +20,7 @@ enum DiarizeSessionCLI {
         let device: String; let recordedMs: Int64
     }
 
-    static func run(hours: Double?, threshold: Float, minDur: Double) {
+    static func run(hours: Double?, threshold: Float, minDur: Double, reenroll: Bool = false) {
         let state = ExitState()
         let dbImpl: PortraitDBImpl
         do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
@@ -261,6 +261,61 @@ enum DiarizeSessionCLI {
                     md += "**老实说上限:\(oP) 本身是「可用但不完美」** —— 通话音被编码降质,CAM++(VoxCeleb 宽带训练)在窄带通话音上吃亏。要再往上得换**抗窄带/电话域**的声纹模型 + 短段合并。但先把库的域对齐,就能从 \(gP) 大幅回血。\n"
                 } else {
                     md += "连 oracle 上限都只有 \(oP) —— 今天这段音频确实缺乏可分信号(编码降质/采集太差),换库也救不回多少,得从采集质量入手。\n"
+                }
+
+                // 6f. 域内重登记测试:今天数据按时间交替分两半,一半当"重新登记的库"
+                // (通话音登记通话音),另一半测试。验证"域对齐的库"能否把 61% 拉向 83%。
+                if reenroll {
+                    let enrollIdx = valid.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element }
+                    let testIdx = valid.enumerated().filter { $0.offset % 2 == 1 }.map { $0.element }
+                    let joyP = enrollIdx.filter { segs[$0].device.contains("microphone") }.map { embs[$0]! }
+                    let stanP = enrollIdx.filter { !segs[$0].device.contains("microphone") }.map { embs[$0]! }
+                    let coh = enrollIdx.map { embs[$0]! }
+                    let (jmu, jsd) = joyP.isEmpty ? (0, 1) : topKStats(of: joyP[medoid(joyP)], against: coh)
+                    let (smu, ssd) = stanP.isEmpty ? (0, 1) : topKStats(of: stanP[medoid(stanP)], against: coh)
+                    func id2(_ e: [Float]) -> String {
+                        let (tmu, tsd) = topKStats(of: e, against: coh)
+                        let rj = joyP.map { VectorMath.cosineSimilarity(e, $0) }.max() ?? -2
+                        let rs = stanP.map { VectorMath.cosineSimilarity(e, $0) }.max() ?? -2
+                        let aj = 0.5 * ((rj - tmu)/max(tsd,1e-4) + (rj - jmu)/max(jsd,1e-4))
+                        let as_ = 0.5 * ((rs - tmu)/max(tsd,1e-4) + (rs - smu)/max(ssd,1e-4))
+                        return aj >= as_ ? "Joy" : "Stan"
+                    }
+                    // 质心(平均)匹配:嘈杂音上比 best-of-N 稳。
+                    func mean(_ A: [[Float]]) -> [Float]? {
+                        guard let d = A.first?.count, d > 0 else { return nil }
+                        var s = [Float](repeating: 0, count: d)
+                        for v in A { for i in 0..<d { s[i] += v[i] } }
+                        for i in 0..<d { s[i] /= Float(A.count) }
+                        VectorMath.l2Normalize(&s); return s
+                    }
+                    let jCen = mean(joyP), sCen = mean(stanP)
+                    func idCen(_ e: [Float]) -> String {
+                        let rj = jCen.map { VectorMath.cosineSimilarity(e, $0) } ?? -2
+                        let rs = sCen.map { VectorMath.cosineSimilarity(e, $0) } ?? -2
+                        return rj >= rs ? "Joy" : "Stan"
+                    }
+                    var cN = 0, wN = 0, cC = 0, wC = 0
+                    var cf: [String: [String: Int]] = [:]
+                    for gi in testIdx {
+                        let truth = segs[gi].device.contains("microphone") ? "Joy" : "Stan"
+                        if id2(embs[gi]!) == truth { cN += 1 } else { wN += 1 }
+                        let pc = idCen(embs[gi]!)
+                        cf[truth, default: [:]][pc, default: 0] += 1
+                        if pc == truth { cC += 1 } else { wC += 1 }
+                    }
+                    let accN = (cN+wN) > 0 ? Double(cN)/Double(cN+wN) : 0
+                    let accC = (cC+wC) > 0 ? Double(cC)/Double(cC+wC) : 0
+                    md += "\n## F. 域内重登记测试(今天通话音自己登记自己,交替分半,无泄漏)\n\n"
+                    md += "登记: Joy \(joyP.count) 条 / Stan \(stanP.count) 条;测试 \(testIdx.count) 条。\n\n"
+                    md += "| 匹配法 | 准确率 |\n|---|---|\n"
+                    md += "| 撞旧库(best-of-N)| \(String(format: "%.0f%%", 100*galleryAcc)) |\n"
+                    md += "| 重登记 best-of-N | \(String(format: "%.0f%%", 100*accN)) |\n"
+                    md += "| **重登记 质心(平均)** | **\(String(format: "%.0f%%", 100*accC))** |\n"
+                    md += "| oracle 上限 | \(String(format: "%.0f%%", 100*oracleAcc)) |\n\n"
+                    md += "质心匹配混淆 | 答案＼判定 | Joy | Stan |\n|---|---|---|\n"
+                    for t in ["Joy", "Stan"] { let r = cf[t] ?? [:]; md += "| \(t) | \(r["Joy"] ?? 0) | \(r["Stan"] ?? 0) |\n" }
+                    print("[reenroll] best-of-N \(String(format: "%.0f%%", 100*accN)) | 质心 \(String(format: "%.0f%%", 100*accC)) | 旧库 \(String(format: "%.0f%%", 100*galleryAcc)) | oracle \(String(format: "%.0f%%", 100*oracleAcc))")
                 }
 
                 let out = "/Users/joyzhang14/Desktop/diarize_session_result.md"
