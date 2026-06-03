@@ -404,7 +404,9 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     }
 
     @objc private func openPortraitDir() {
-        NSWorkspace.shared.open(Storage.rootURL)
+        // 复用 ConfigStore 的单一实现(MemorySettingsView footer 按钮也用它),
+        // 避免两处各写一份 NSWorkspace.open(Storage.rootURL)。
+        ConfigStore.shared.openPortraitDir()
     }
 
     @objc private func quit() {
