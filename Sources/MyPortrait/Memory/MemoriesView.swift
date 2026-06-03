@@ -154,7 +154,7 @@ struct MemoriesView: View {
     private var foldersGroupedList: some View {
         let split = makeFolderSplit()
         // folders 先
-        ForEach(split.folders, id: \.id) { g in
+        ForEach(Array(split.folders.enumerated()), id: \.element.id) { idx, g in
             FolderDisclosureRow(
                 title: g.title,
                 count: g.entries.count,
@@ -163,7 +163,11 @@ struct MemoriesView: View {
                 onSelect: handleSelect,
                 onDelete: { Task { await deleteFolder(slug: g.slug, name: g.title) } }
             )
-            Divider().background(Color.primary.opacity(0.08))
+            // 最后一个 folder 后面**不画**这条细 Divider —— 紧接着就是下面那条
+            // 10px 粗线,两条线之间会被 VStack spacing 撑出间距让粗线偏下。
+            if idx < split.folders.count - 1 || split.ungrouped.isEmpty {
+                Divider().background(Color.primary.opacity(0.08))
+            }
         }
         // folders 区 与 ungrouped 区之间的粗灰分隔线 —— 放在 folders ForEach
         // 之后,所有 folder(含展开后的 event)天然都在它上方,ungrouped 在下方。
