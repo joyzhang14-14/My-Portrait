@@ -68,6 +68,7 @@ struct TimelineSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.md) {
                     if selection == .timeline {
@@ -96,6 +97,10 @@ struct TimelineSidebar: View {
                 .padding(.horizontal, Theme.Space.md)
                 .padding(.top, Theme.Space.md)
                 .padding(.bottom, Theme.Space.xl)
+            }
+            // 切帧 → audio 重查(audioItems 每次新 UUID 必变)→ 把高亮转录行
+            // 滚到视口中心,长列表时不再沉到看不见的底端 / 顶端。
+            .onChange(of: audioItems) { scrollActiveAudioToCenter(proxy) }
             }
         }
         .background(sidebarBackground.ignoresSafeArea())
@@ -208,8 +213,29 @@ struct TimelineSidebar: View {
                 VStack(spacing: Theme.Space.xs) {
                     ForEach(audioItems) { entry in
                         AudioRow(entry: entry, focusTime: focusedTimestamp ?? Date())
+                            .id(entry.id)
                     }
                 }
+            }
+        }
+    }
+
+    /// 当前焦点时刻附近(<8s,跟 AudioRow 高亮阈值一致)最接近的转录行 ——
+    /// 切帧后把它滚到视口中心。焦点离所有转录都远(没高亮行)→ nil,不滚。
+    private func activeAudioEntry() -> AudioTranscriptEntry? {
+        guard let ft = focusedTimestamp else { return nil }
+        return audioItems
+            .filter { abs($0.timestamp.timeIntervalSince(ft)) < 8 }
+            .min { abs($0.timestamp.timeIntervalSince(ft)) < abs($1.timestamp.timeIntervalSince(ft)) }
+    }
+
+    /// 把高亮转录行滚到视口中心。下一拍执行 —— 等新 audioItems 的行布局好,
+    /// scrollTo 才能命中 id。
+    private func scrollActiveAudioToCenter(_ proxy: ScrollViewProxy) {
+        guard selection == .timeline, let active = activeAudioEntry() else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(active.id, anchor: .center)
             }
         }
     }
