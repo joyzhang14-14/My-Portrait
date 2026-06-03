@@ -377,7 +377,7 @@ struct AudioCaptureSettingsView: View {
                     }
                     SettingsDivider()
                     SettingsRow("Languages",
-                                description: "Pick the languages you speak. One → used as a hint; multiple or none → auto-detect.",
+                                description: "Pick the languages you speak. One is used as a hint; pick several or none to auto-detect.",
                                 icon: "character.bubble") {
                         Menu {
                             ForEach(Self.languageOptions(for: engine)) { lang in
@@ -405,13 +405,13 @@ struct AudioCaptureSettingsView: View {
                     }
                         SettingsDivider()
                         SettingsRow("Only transcribe while plugged in",
-                                    description: "Saves battery — audio still records on battery and transcribes once you're back on AC power. Off = transcribe regardless of power.",
+                                    description: "Audio still records on battery, but transcribing waits until you're plugged in.",
                                     icon: "powerplug") {
                             Toggle("", isOn: config.binding(\.capture.audio.transcribeOnACOnly)).labelsHidden().toggleStyle(.switch)
                         }
                         SettingsDivider()
                         SettingsRow("Keep Mac awake while transcribing",
-                                    description: "On AC power, prevent the Mac from idle-sleeping while there's a transcription backlog, so it finishes instead of dozing off. Lid-close sleep can't be prevented. Off = let it sleep.",
+                                    description: "While plugged in, it keeps the Mac awake until the transcription backlog finishes instead of letting it sleep. Closing the lid still puts it to sleep.",
                                     icon: "zzz") {
                             Toggle("", isOn: config.binding(\.capture.audio.keepAwakeWhileTranscribing)).labelsHidden().toggleStyle(.switch)
                         }
@@ -422,13 +422,13 @@ struct AudioCaptureSettingsView: View {
             // 采集关着也能先配好过滤 / 暂停规则,等开采集即生效)。
             SettingsCard(title: "Filtering & pausing") {
                 SettingsRow("Filter music",
-                            description: "Detect and skip music-dominant audio (Spotify, YouTube, etc.) so transcription doesn't get poisoned by lyrics.",
+                            description: "Skips audio that's mostly music, so song lyrics don't end up in your transcripts.",
                             icon: "music.note.list") {
                     Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Pause capture for these apps / categories",
-                            description: "Stop recording entirely while any app on this list is outputting audio — solves it at the source (more thorough than Filter music; takes priority). Pick specific apps and/or App-Store-style categories. Empty = never pause. \"Games (all)\" matches every game subcategory.",
+                            description: "Stops recording whenever an app on this list is playing audio. It's more thorough than filtering music and takes priority. Pick specific apps or categories, or leave it empty to never pause.",
                             icon: "pause.circle") { EmptyView() }
                 VStack(alignment: .leading) {
                     PauseAudioListPicker(
@@ -615,7 +615,7 @@ struct ScreenCaptureSettingsView: View {
             }
             SettingsDivider()
             SettingsRow("Mask ignored windows",
-                        description: "Exclude windows matching the ignore lists below from the screenshot — the frame is still captured, those windows just go transparent.",
+                        description: "Windows on the lists below are hidden from the screenshot. The screenshot is still taken; those windows just go transparent.",
                         icon: "rectangle.dashed") {
                 Toggle("", isOn: config.binding(\.privacy.maskIgnoredApps)).labelsHidden().toggleStyle(.switch)
             }
@@ -623,7 +623,7 @@ struct ScreenCaptureSettingsView: View {
 
         SettingsCard(
             title: "Ignored apps",
-            footnote: "Windows from these apps are masked out of the screenshot (transparent). The frame itself is still captured. Case-insensitive substring match against the window's app name or title."
+            footnote: "Windows from these apps are blanked out of the screenshot, but the screenshot itself is still taken. Matching ignores case and checks the app name or window title."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Pick from captured apps or the system / privacy list…")
@@ -651,7 +651,7 @@ struct ScreenCaptureSettingsView: View {
 
         SettingsCard(
             title: "Pause capture for protected video",
-            footnote: "While a listed app is focused or a listed site is open, screen capture STOPS entirely (the SCStream is released) — stronger than masking. This keeps your own DRM-protected playback (Netflix, Disney+, etc.) from blacking out and skips useless black frames. Apps match by name, sites by URL substring; both case-insensitive. Pre-filled with common streaming services; edit freely."
+            footnote: "When a listed app or site is active, screen capture stops completely instead of just masking. This keeps DRM playback like Netflix or Disney+ from going black in your screenshots. Apps match by name and sites by URL, both ignoring case. Common services are filled in already, and you can edit the list."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Apps — pick from installed apps…")
@@ -773,7 +773,7 @@ struct TypingCaptureSettingsView: View {
     private var blacklistSection: some View {
         SettingsCard(
             title: "Typing blacklist",
-            footnote: "Password managers and terminals are always excluded. Pick an app to block the whole app, or pick a specific URL inside a browser to block only pages with that URL prefix."
+            footnote: "Password managers and terminals are always excluded. Pick an app to block all of it, or a URL to block only pages under that address."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Pick an app (and optionally a URL prefix)…")
@@ -805,14 +805,14 @@ struct TypingCaptureSettingsView: View {
     private var typingSection: some View {
         SettingsCard(title: "Typing Capture") {
             SettingsRow("Typing Capture",
-                        description: "Reads the text you finish typing into input fields, used to learn your writing style. All data stays on this Mac and is never uploaded. Password fields and secure inputs are never read.",
+                        description: "Reads what you finish typing into input fields to learn your writing style. Everything stays on this Mac and is never uploaded, and password fields are never read.",
                         icon: "keyboard") {
                 Toggle("", isOn: config.binding(\.capture.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)
             }
             if config.current.capture.typingCaptureEnabled {
                 SettingsDivider()
                 SettingsRow("Keyboard correlation window",
-                            description: "Only text changes that happen within this long after a keystroke count as your typing (filters out terminal output, incoming messages, etc.).",
+                            description: "Only text that changes within this time after a keystroke counts as your typing, which filters out things like terminal output and incoming messages.",
                             icon: "timer") {
                     Stepper(value: config.binding(\.capture.typingKeyCorrelationWindowMs),
                             in: 50...500, step: 50) {
@@ -823,7 +823,7 @@ struct TypingCaptureSettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Edit-log debounce",
-                            description: "Edits that settle within this long collapse into one edit-log step. Higher = coarser log; also collapses IME (pinyin) intermediate states.",
+                            description: "Edits made within this window are merged into one step. A higher value records fewer, coarser steps.",
                             icon: "hourglass") {
                     Stepper(value: config.binding(\.capture.typingDebounceMs),
                             in: 100...1000, step: 50) {
@@ -834,7 +834,7 @@ struct TypingCaptureSettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Session flush idle",
-                            description: "After this long without typing, the current input is saved as a record. Continuous edits keep merging into the same record.",
+                            description: "When you stop typing for this long, what you wrote is saved. Keep typing and it stays a single entry.",
                             icon: "tray.and.arrow.down") {
                     Stepper(value: config.binding(\.capture.typingFlushIdleSec),
                             in: 2...30, step: 1) {
@@ -845,7 +845,7 @@ struct TypingCaptureSettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Enter-to-send window",
-                            description: "After pressing Return, the input box must clear within this long to count as a sent message rather than a deletion.",
+                            description: "After you press Return, the box must clear within this time to count as a sent message rather than a deletion.",
                             icon: "paperplane") {
                     Stepper(value: config.binding(\.capture.typingSubmitWindowMs),
                             in: 200...3000, step: 100) {
@@ -856,7 +856,7 @@ struct TypingCaptureSettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Paste match minimum",
-                            description: "Clipboard content shorter than this isn't used to detect pastes — avoids flagging short typed text that happens to equal the clipboard.",
+                            description: "Clipboard text shorter than this is ignored when detecting pastes, so short typing isn't mistaken for a paste.",
                             icon: "doc.on.clipboard") {
                     Stepper(value: config.binding(\.capture.typingPasteMinChars),
                             in: 2...50, step: 1) {
@@ -867,14 +867,14 @@ struct TypingCaptureSettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Record paste events",
-                            description: "On: pastes (⌘V / clipboard match / burst) are recorded as 'paste' entries in edit log — LLM decides what counts as user input. Off: pastes are stripped from the record.",
+                            description: "When it's on, text you paste is kept and marked as pasted. When it's off, pasted text is left out of what's saved.",
                             icon: "doc.on.doc") {
                     Toggle("", isOn: config.binding(\.capture.typingRecordPasteEvents))
                         .labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Keep pasted text under",
-                            description: "Pure clipboard pastes (no typing, pasted in whole) are kept as writing only if shorter than this — longer pastes (likely external content) are dropped. Raise to keep more of what you paste, lower to keep less.",
+                            description: "Pasted text is kept as your writing only when it's shorter than this; longer pastes are treated as outside content and dropped. Raise it to keep more of what you paste.",
                             icon: "arrow.down.doc") {
                     Stepper(value: config.binding(\.capture.typingPasteKeepMaxChars),
                             in: 0...300, step: 5) {

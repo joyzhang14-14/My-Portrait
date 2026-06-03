@@ -51,7 +51,7 @@ struct ImportSettingsView: View {
         ) {
             SettingsCard(
                 title: "Import from screenpipe",
-                footnote: "Brings in your older screenpipe history — screen text and what was said — from before My Portrait started recording. Your current data is left untouched, and the original video and audio files stay where they are. After importing, run Process events in Memory settings to turn it into memories."
+                footnote: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording. Your current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
             ) {
                 if scanning {
                     scanningRow
@@ -80,7 +80,7 @@ struct ImportSettingsView: View {
 
             SettingsCard(
                 title: "Import from Claude Code",
-                footnote: "Reads the prompts you typed into Claude Code (~/.claude/projects) and adds them to your writing records — straight from the session logs, no OCR. Tool results, slash commands, /compact summaries, and system messages are skipped. Re-importing never creates duplicates."
+                footnote: "Brings in the prompts you typed into Claude Code and counts them toward your writing. Only your own messages are imported, and importing again won't create duplicates."
             ) {
                 cliSourceBlock(
                     icon: "terminal.fill",
@@ -97,7 +97,7 @@ struct ImportSettingsView: View {
 
             SettingsCard(
                 title: "Import from Codex CLI",
-                footnote: "Reads the prompts you typed into Codex CLI (~/.codex/history.jsonl) and adds them to your writing records — straight from the typed-command history, no OCR. Re-importing never creates duplicates."
+                footnote: "Brings in the prompts you typed into Codex CLI and counts them toward your writing. Importing again won't create duplicates."
             ) {
                 cliSourceBlock(
                     icon: "chevron.left.forwardslash.chevron.right",

@@ -46,7 +46,7 @@ struct SpeakersSettingsView: View {
             // ① 你训练的声纹 —— 资产,置顶。删除走二次确认(IdentifiedRow.trained)。
             if !trainedVoices.isEmpty {
                 SectionLabel("YOUR TRAINED VOICES",
-                             subtitle: "Voiceprints you recorded — used to recognise you in transcripts. Removal is confirmed.")
+                             subtitle: "Voice recordings used to recognize you in transcripts. You'll be asked before any is removed.")
                 VStack(spacing: 6) {
                     ForEach(trainedVoices) { r in
                         IdentifiedRow(row: r, trained: true,

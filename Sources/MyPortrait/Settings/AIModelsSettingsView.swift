@@ -39,7 +39,7 @@ struct AIModelsSettingsView: View {
 
             SettingsCard(
                 title: "Connected providers",
-                footnote: "Connect services in Settings → Connections first. Toggle a provider off here to hide it from the chat input picker (the connection itself stays alive)."
+                footnote: "Connect services in Settings → Connections first. Turning a provider off here hides it from the chat picker without disconnecting it."
             ) {
                 if connectedAIIntegrations.isEmpty {
                     emptyState
