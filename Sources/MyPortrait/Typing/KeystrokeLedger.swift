@@ -74,6 +74,11 @@ final class KeystrokeLedger {
     /// 生产路径由 TypingObserver 注入;dev/observe 模式不带。
     var charLogger: KeystrokeCharLogger?
 
+    /// 可选回车回调 —— 回车 keyDown 时同步触发一次,给 TypingObserver 做「摇读」
+    /// (回车一按抢读焦点字段现值,救 IME 末尾落字)。跟 charLogger 同款:生产路径
+    /// start() 前注入一次,之后只读,无锁。
+    var onSubmitKey: (() -> Void)?
+
     // MARK: - 生命周期
 
     init() {}
@@ -432,8 +437,8 @@ private func keystrokeLedgerTapCallback(
         ledger.recordUndo()
     } else {
         ledger.record()
-        // 回车既是普通击键，也是「提交/发送」信号 —— 额外记一笔。
-        if isReturn { ledger.recordSubmit() }
+        // 回车既是普通击键，也是「提交/发送」信号 —— 额外记一笔 + 触发摇读。
+        if isReturn { ledger.recordSubmit(); ledger.onSubmitKey?() }
     }
 
     // L3 字符日志 —— 挂了 charLogger 就同步派一份。kVK_Delete 是退格(后退),
