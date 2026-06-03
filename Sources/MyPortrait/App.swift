@@ -69,7 +69,7 @@ struct MyPortraitApp: App {
             if let i = args.firstIndex(of: "--threshold"), i + 1 < args.count, let v = Float(args[i + 1]) { thr = v }
             var minDur: Double = 0
             if let i = args.firstIndex(of: "--min-dur"), i + 1 < args.count, let v = Double(args[i + 1]) { minDur = v }
-            DiarizeSessionCLI.run(hours: hrs, threshold: thr, minDur: minDur)
+            DiarizeSessionCLI.run(hours: hrs, threshold: thr, minDur: minDur, reenroll: args.contains("--reenroll"))
             // run() exits the process internally.
         }
         // 维护 CLI: `--clean-voiceprints [--apply] [--threshold 0.5]` 对具名簇做 medoid
