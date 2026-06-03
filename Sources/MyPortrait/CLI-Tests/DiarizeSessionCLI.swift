@@ -223,25 +223,44 @@ enum DiarizeSessionCLI {
                 md += "| 麦内部(Joy 自己)| \(String(format: "%.3f", intraMic)) |\n"
                 md += "| 系统内部(Stan 自己)| \(String(format: "%.3f", intraSys)) |\n"
                 md += "| **跨声道(Joy↔Stan)** | **\(String(format: "%.3f", cross))** |\n\n"
-                let entangled = cross >= min(intraMic, intraSys) - 0.03
-                md += entangled
-                    ? "→ **跨声道 ≈ 各自内部 ⇒ 两条声道声音纠缠(串音/编码降质),物理上分不开。** 不是算法问题。\n"
-                    : "→ 跨声道明显低于内部 ⇒ 声音可分,问题在匹配/阈值层。\n"
+                // 决定性:用今天自己的数据当标准(oracle 中心),最近中心分类准确率上限。
+                // 若连这个都≈50%,说明今天的音频里 Joy/Stan 根本没有可分信号(硬上限)。
+                func centroid(_ A: [[Float]]) -> [Float]? {
+                    guard let d = A.first?.count, d > 0 else { return nil }
+                    var s = [Float](repeating: 0, count: d)
+                    for v in A { for i in 0..<d { s[i] += v[i] } }
+                    for i in 0..<d { s[i] /= Float(A.count) }
+                    VectorMath.l2Normalize(&s); return s
+                }
+                var oracleAcc = 0.0
+                if let jc = centroid(micE), let sc = centroid(sysE) {
+                    var oracleCorrect = 0
+                    for gi in valid {
+                        let e = embs[gi]!
+                        let toJoy = VectorMath.cosineSimilarity(e, jc), toStan = VectorMath.cosineSimilarity(e, sc)
+                        let pred = toJoy >= toStan ? "Joy" : "Stan"
+                        if (segs[gi].device.contains("microphone") && pred == "Joy") || (!segs[gi].device.contains("microphone") && pred == "Stan") { oracleCorrect += 1 }
+                    }
+                    oracleAcc = Double(oracleCorrect) / Double(valid.count)
+                    md += "**今天自己数据当标准(oracle 中心)最近中心分类:\(oracleCorrect)/\(valid.count) = \(String(format: "%.0f%%", 100*oracleAcc))** —— 这是今天这段音频的理论可分上限。\n\n"
+                }
+                md += "→ 跨声道 \(String(format: "%.3f", cross)) vs 各自内部 \(String(format: "%.3f", intraMic))/\(String(format: "%.3f", intraSys));但 oracle 上限 \(String(format: "%.0f%%", 100*oracleAcc)) —— 见 E 段结论。\n"
 
-                // 6e. 结论与建议
+                // 6e. 结论与建议(基于 oracle 上限 vs 撞库准确率)
+                let galleryAcc = decided > 0 ? Double(correct) / Double(decided) : 0
+                let oP = String(format: "%.0f%%", 100*oracleAcc)
+                let gP = String(format: "%.0f%%", 100*galleryAcc)
                 md += "\n## E. 结论与建议\n\n"
-                if entangled {
-                    md += "**今天这段录音,纯声音无法可靠区分 Joy/Stan(准确率 ~\(decided > 0 ? String(format: "%.0f%%", 100*Double(correct)/Double(decided)) : "?"),接近瞎猜)。**\n\n"
-                    md += "**根因不是算法。** 离线全局聚类(AHC 平均连接)+ AS-norm 撞库 + 时长门全试过,最大簇仍把麦/系统混在一起;声道纠缠度显示跨声道相似度(\(String(format: "%.3f", cross)))≈ 各自内部(\(String(format: "%.3f", intraMic)) / \(String(format: "%.3f", intraSys)))——两条声道的声纹**本质上分不开**。而干净声纹库的留一法是 100% 可分的,所以问题在**今天这段录音的采集条件**,不在模型/算法。\n\n"
-                    md += "最可能:免提通话**串音**(Stan 的声音经你音箱 → 你麦克风;你的声音 → 回流系统音)+ 通话**编码降质** + 闲聊**超短句**(中位 1.6s,62% <2s)。三者叠加,声纹提出来是一团糊(全场相似度只有 ~0.37-0.40,同一个人本该 0.7+)。\n\n"
-                    md += "**能真正改善的方向(按性价比):**\n"
-                    md += "1. 通话戴**耳机** —— 从源头消串音,单条最大改善;\n"
-                    md += "2. 采集端把**同一说话回合的多个短段先合并**成 ≥3-5s 再提声纹(短句声纹不可靠);\n"
-                    md += "3. 用**真实通话音**给 Stan 多条件重新登记(治域不匹配);\n"
-                    md += "4. 物理串音的段任何模型都救不了,要先做**语音分离**(重,暂不建议)。\n\n"
-                    md += "架构升级(离线聚类 + AS-norm + 时长门)本身是对的,在**干净音**(当面 / 戴耳机通话)上才发挥得出来 —— 但救不了物理上已经混在一起的音。\n"
+                if oracleAcc >= 0.72 {
+                    md += "**今天这段音频里 Joy/Stan 有可分信号(oracle 上限 \(oP))—— 不是无解、不是串音、不是糊成一团。**\n\n"
+                    md += "瓶颈是**声纹库**:用今天自己的数据当标准能分到 \(oP),但撞现有库只有 \(gP)。差的这 \(String(format: "%.0f", 100*(oracleAcc-galleryAcc))) 个点 = **库的域不匹配** —— 你登记的 Joy/Stan 档案跟今天的音频(尤其 Stan 的通话音)来源条件不同,撞不上。\n\n"
+                    md += "**修法(可落地,按性价比):**\n"
+                    md += "1. **用代表性真实音重新登记 Joy / Stan**,尤其 Stan 从**真实通话音**多条件登记 —— 让库匹配上「今天这种」域。这是把 \(gP) 拉向 \(oP) 的关键。\n"
+                    md += "2. 同一说话回合的**短段先合并**成 ≥3s 再提声纹(中位才 1.6s,短句声纹不可靠)。\n"
+                    md += "3. AS-norm 阈值按域校准 + 平衡两人样本数(现在 Joy 样本远多于 Stan,best-of-N 偏向 Joy)。\n\n"
+                    md += "**老实说上限:\(oP) 本身是「可用但不完美」** —— 通话音被编码降质,CAM++(VoxCeleb 宽带训练)在窄带通话音上吃亏。要再往上得换**抗窄带/电话域**的声纹模型 + 短段合并。但先把库的域对齐,就能从 \(gP) 大幅回血。\n"
                 } else {
-                    md += "跨声道明显低于各自内部 ⇒ 声音可分,瓶颈在匹配/阈值层,继续调 AS-norm 阈值即可。\n"
+                    md += "连 oracle 上限都只有 \(oP) —— 今天这段音频确实缺乏可分信号(编码降质/采集太差),换库也救不回多少,得从采集质量入手。\n"
                 }
 
                 let out = "/Users/joyzhang14/Desktop/diarize_session_result.md"
