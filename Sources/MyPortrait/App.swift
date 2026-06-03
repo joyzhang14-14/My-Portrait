@@ -85,7 +85,11 @@ struct MyPortraitApp: App {
             if let h = args.firstIndex(of: "--hours"), h + 1 < args.count { hrs = Double(args[h + 1]) }
             var thr: Float = 0.5
             if let t = args.firstIndex(of: "--threshold"), t + 1 < args.count, let v = Float(args[t + 1]) { thr = v }
-            ReenrollSpeakerCLI.run(name: args[i + 1], channel: chan, hours: hrs, threshold: thr, apply: args.contains("--apply"))
+            var fromMs: Int64? = nil, toMs: Int64? = nil
+            if let f = args.firstIndex(of: "--from"), f + 1 < args.count { fromMs = Int64(args[f + 1]) }
+            if let t = args.firstIndex(of: "--to"), t + 1 < args.count { toMs = Int64(args[t + 1]) }
+            ReenrollSpeakerCLI.run(name: args[i + 1], channel: chan, hours: hrs, threshold: thr,
+                                   apply: args.contains("--apply"), fromMs: fromMs, toMs: toMs)
             // run() exits the process internally.
         }
         // 维护 CLI: `--clean-voiceprints [--apply] [--threshold 0.5]` 对具名簇做 medoid
