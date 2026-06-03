@@ -26,16 +26,16 @@ struct NotificationsSettingsView: View {
             }
 
             SettingsCard(title: "Memory pipelines") {
-                SettingsRow("Scheduler run notifications",
-                            description: "Show in-app banners for every automated pipeline event (event processing, portrait distillation, personality refresh, writing capture, speech style):\n  ⚙️  Run finished — what was processed\n  🛑  Needs attention — action required (quota exhausted, auth revoked, model gone, DB corrupt)\n  🔁  Auto-recovering — transient failure, scheduler will retry (network blip, rate limit, schema)\nSilent when there was nothing to process.",
+                SettingsRow("Pipeline progress",
+                            description: "Informational banners — no action needed:\n  ⚙️  Run finished — what was processed (event processing, portrait distillation, personality refresh, writing capture, speech style)\n  🔁  Resumed after interruption — app was closed mid-run, restarting on next tick",
                             icon: "gearshape.2") {
                     Toggle("", isOn: config.binding(\.notifications.schedulerAlerts)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
-                SettingsRow("Interruption restart notifications",
-                            description: "Show a banner when a pipeline was running while you closed the app / shut down / went to sleep, and it auto-restarts from scratch on next launch. Turn off if you frequently close the app and don't need the reminder.",
-                            icon: "arrow.triangle.2.circlepath") {
-                    Toggle("", isOn: config.binding(\.notifications.pipelineInterruptionAlerts)).labelsHidden().toggleStyle(.switch)
+                SettingsRow("Pipeline errors",
+                            description: "Failure banners — may need your attention:\n  🛑  Needs attention — action required (quota exhausted, auth revoked, model gone, DB corrupt, context overflow)\n  🔁  Auto-recovering — transient failure (network blip, rate limit, schema parse), scheduler will retry on its own\n  ⚠️  Run failed — what was processed has problems",
+                            icon: "exclamationmark.triangle") {
+                    Toggle("", isOn: config.binding(\.notifications.pipelineErrorAlerts)).labelsHidden().toggleStyle(.switch)
                 }
             }
 

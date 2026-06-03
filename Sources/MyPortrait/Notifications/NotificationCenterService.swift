@@ -102,35 +102,36 @@ final class NotificationCenterService {
             onTimeout = { onTimeoutCb() }
 
         case let .schedulerRun(pipeline, success, summary):
-            guard n.schedulerAlerts else {
-                log.notice("post skipped: schedulerAlerts is OFF"); return
+            // ⚙️ 跑完 = progress 通知;⚠️ 失败 = error 通知。两个 toggle 区分。
+            let toggleOn = success ? n.schedulerAlerts : n.pipelineErrorAlerts
+            guard toggleOn else {
+                log.notice("post skipped: \(success ? "schedulerAlerts" : "pipelineErrorAlerts", privacy: .public) is OFF")
+                return
             }
-            // ⚙️ 跑完 / ⚠️ 失败 —— 跟 cron job 的 🛰️ 区分,一眼看出是 scheduler。
             title = success ? "⚙️ \(pipeline)" : "⚠️ \(pipeline) failed"
             body = summary
 
         case let .pipelineNeedsFix(pipeline, kindLabel, userMessage):
-            guard n.schedulerAlerts else {
-                log.notice("post skipped: schedulerAlerts is OFF"); return
+            // 🛑 = error 通知。
+            guard n.pipelineErrorAlerts else {
+                log.notice("post skipped: pipelineErrorAlerts is OFF"); return
             }
-            // 🛑 = action required from user;桶 B。
             title = "🛑 \(pipeline) needs attention"
             body = "\(userMessage) [\(kindLabel)]"
 
         case let .pipelineAutoRecovering(pipeline, kindLabel, nextRetryLabel):
-            guard n.schedulerAlerts else {
-                log.notice("post skipped: schedulerAlerts is OFF"); return
+            // 🔁 transient (network/429/schema) = error 通知。
+            guard n.pipelineErrorAlerts else {
+                log.notice("post skipped: pipelineErrorAlerts is OFF"); return
             }
-            // 🔁 = auto-recovering;桶 A。低优先,信息性。
             title = "🔁 \(pipeline) retrying \(nextRetryLabel)"
             body = "Auto-recovering from \(kindLabel) — no action needed."
 
         case let .pipelineInterruptionRestarted(pipeline):
-            guard n.pipelineInterruptionAlerts else {
-                log.notice("post skipped: pipelineInterruptionAlerts is OFF"); return
+            // 🔁 中断后重启 = progress 通知(告知性,不是 error)。
+            guard n.schedulerAlerts else {
+                log.notice("post skipped: schedulerAlerts is OFF"); return
             }
-            // 🔁 + 区分文案:让用户一眼知道这是"上次没跑完,这次自动续上",
-            // 跟普通 transient retry 区分(那个还会再失败,这个是干净从头跑)。
             title = "🔁 \(pipeline) resumed after interruption"
             body = "App was closed mid-run — pipeline will restart from scratch on next tick."
         }
