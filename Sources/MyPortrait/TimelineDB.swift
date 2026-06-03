@@ -1142,6 +1142,28 @@ struct TimelineDB: Sendable {
         }
     }
 
+    /// 各 speaker 存的多条样本向量(id → [embedding...])。给 "Merge duplicates"
+    /// 的声纹护栏用:质心在被拆散的簇上不可靠(同人不同簇 cosine 可低至负数),改比
+    /// 「两簇最接近的一条样本」(best-of-N),对齐 matchSpeaker 的判据。
+    func speakerSampleEmbeddings() -> [Int64: [[Float]]] {
+        guard exists else { return [:] }
+        do {
+            let queue = try DatabaseQueue(path: dbPath)
+            return try queue.read { db in
+                var out: [Int64: [[Float]]] = [:]
+                for r in try Row.fetchAll(db, sql: "SELECT speaker_id, embedding FROM speaker_embeddings") {
+                    if let blob: Data = r["embedding"], let v = blob.asFloats {
+                        out[r["speaker_id"], default: []].append(v)
+                    }
+                }
+                return out
+            }
+        } catch {
+            timelineLog.error("speakerSampleEmbeddings failed: \(String(describing: error), privacy: .public)")
+            return [:]
+        }
+    }
+
     /// speakers 表的单语句写入小工具。
     private func runSpeakerWrite(sql: String, bind: (OpaquePointer?) -> Void) -> Bool {
         guard exists else { return false }
