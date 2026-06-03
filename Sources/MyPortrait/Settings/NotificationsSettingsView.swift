@@ -25,6 +25,14 @@ struct NotificationsSettingsView: View {
                 }
             }
 
+            SettingsCard(title: "Memory pipelines") {
+                SettingsRow("Scheduler run notifications",
+                            description: "Show a banner each time an automated pipeline finishes (event processing, portrait distillation, personality refresh, writing capture, speech style). Silent when there was nothing to process.",
+                            icon: "gearshape.2") {
+                    Toggle("", isOn: config.binding(\.notifications.schedulerAlerts)).labelsHidden().toggleStyle(.switch)
+                }
+            }
+
             SettingsCard(
                 title: "Diagnostics"
             ) {
