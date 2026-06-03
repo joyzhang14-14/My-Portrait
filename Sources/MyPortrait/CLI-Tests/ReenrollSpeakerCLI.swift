@@ -17,7 +17,8 @@ enum ReenrollSpeakerCLI {
 
     private final class ExitState: @unchecked Sendable { var code: Int32 = 0; var done = false }
 
-    static func run(name: String, channel: String, hours: Double?, threshold: Float, apply: Bool) {
+    static func run(name: String, channel: String, hours: Double?, threshold: Float, apply: Bool,
+                    fromMs: Int64? = nil, toMs: Int64? = nil) {
         let state = ExitState()
         print("=== reenroll-speaker '\(name)' channel=\(channel) \(apply ? "APPLY" : "dry-run") threshold=\(threshold) ===")
         fflush(stdout)
@@ -25,7 +26,8 @@ enum ReenrollSpeakerCLI {
         do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
         let pool = dbImpl.dbPool
         let base = Storage.rootURL
-        let rangeStartMs: Int64 = hours.map { Int64(Date().timeIntervalSince1970 * 1000) - Int64($0 * 3600 * 1000) } ?? 0
+        let rangeStartMs: Int64 = fromMs ?? hours.map { Int64(Date().timeIntervalSince1970 * 1000) - Int64($0 * 3600 * 1000) } ?? 0
+        let rangeEndMs: Int64 = toMs ?? Int64.max
 
         Task.detached {
             defer { state.done = true }
@@ -57,10 +59,11 @@ enum ReenrollSpeakerCLI {
                     try Row.fetchAll(db, sql: """
                         SELECT t.audio_chunk_id AS cid, ac.file_path AS path, t.start_s AS s, t.end_s AS e, t.text AS txt
                         FROM audio_transcriptions t JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
-                        WHERE ac.file_path LIKE '%.wav' AND ac.device LIKE :chan AND ac.recorded_at_ms >= :start
+                        WHERE ac.file_path LIKE '%.wav' AND ac.device LIKE :chan
+                          AND ac.recorded_at_ms >= :start AND ac.recorded_at_ms <= :end
                           AND (t.end_s - t.start_s) >= 2.0
                         ORDER BY ac.recorded_at_ms, t.start_s
-                        """, arguments: ["chan": chanLike, "start": rangeStartMs]).map {
+                        """, arguments: ["chan": chanLike, "start": rangeStartMs, "end": rangeEndMs]).map {
                         Seg(chunkId: $0["cid"], path: $0["path"], startS: $0["s"], endS: $0["e"], text: $0["txt"])
                     }
                 }

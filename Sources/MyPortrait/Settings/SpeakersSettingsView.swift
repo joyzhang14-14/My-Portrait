@@ -16,6 +16,8 @@ struct SpeakersSettingsView: View {
     @State private var search = ""
     @State private var organizing = false
     @State private var config = ConfigStore.shared
+    @State private var reidentifyTask: Task<Void, Never>? = nil
+    @State private var reidentifying = false
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -45,6 +47,16 @@ struct SpeakersSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ProgressHeader(trainedCount: voiceTrainedCount, namedCount: namedCount, modelLabel: currentModelLabel)
+
+            if reidentifying {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Re-identifying today's audio with the named speakers…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.65))
+                }
+                .padding(.horizontal, 4)
+            }
 
             VoiceTrainingCard(
                 existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty },
@@ -244,6 +256,21 @@ struct SpeakersSettingsView: View {
         Task.detached(priority: .userInitiated) {
             _ = TimelineDB().renameSpeaker(id: sid, to: v)
         }
+        scheduleReidentify()   // 命名后重扫今天,把同人散段归拢
+    }
+
+    /// 命名 / 合并后,防抖(1.2s)触发"重扫今天" —— 用当前 gallery 重新匹配今天的 wav 段,
+    /// 把刚命名的人当天散落 / 未匹配的同人段重新归到 ta 名下。多次操作只跑最后一次。
+    private func scheduleReidentify() {
+        reidentifyTask?.cancel()
+        reidentifyTask = Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if Task.isCancelled { return }
+            reidentifying = true
+            _ = await SpeakerReidentifier.shared.reidentifyToday()
+            reidentifying = false
+            reload()
+        }
     }
     private func markHallucination(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
@@ -260,6 +287,7 @@ struct SpeakersSettingsView: View {
                 TimelineDB().mergeSpeakers(keep: keepId, merge: similarId)
             }.value
             reload()
+            scheduleReidentify()   // 合并后也重扫今天
         }
     }
 }
