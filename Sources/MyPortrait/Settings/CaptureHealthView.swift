@@ -43,7 +43,7 @@ struct CaptureHealthView: View {
     /// 一键导出诊断 zip。无 PII,纯结构 + 日志 + 状态。
     private var diagnosticCard: some View {
         SettingsCard(title: "Diagnostic export",
-                     footnote: "Bundles config (redacted), health log, recent stalls, processing-log state, DB stats, and the last 24h of app log lines into a zip on your Desktop. NO captured content (OCR / transcripts / typing / audio) is included.") {
+                     footnote: "Saves a diagnostics file to your Desktop to help with bug reports. It contains only technical status and logs — none of your captured content (screen text, audio, or typing).") {
             SettingsRow("Export diagnostic bundle",
                         description: "Use this when reporting a bug. Open the zip to review before sharing.",
                         icon: "ladybug") {
@@ -96,7 +96,7 @@ struct CaptureHealthView: View {
     }
 
     private var visionCard: some View {
-        SettingsCard(title: "Vision", footnote: "silent_loss = attempts - persisted - dedup. Climbing = captured frames not landing in DB.") {
+        SettingsCard(title: "Vision", footnote: "If \"Silent loss\" keeps rising, some screenshots aren't being saved.") {
             kv("Uptime",         Self.uptimeStr(vision.uptimeSec))
             SettingsDivider()
             kv("Capture attempts", "\(vision.captureAttempts)")
@@ -128,8 +128,8 @@ struct CaptureHealthView: View {
     }
 
     private var pauseCard: some View {
-        SettingsCard(title: "Pause signals",
-                     footnote: "Top three ON suppress all stall verdicts. Last one only suppresses audio backlog.") {
+        SettingsCard(title: "Why capture is paused",
+                     footnote: "When any of these is on, capture pauses on purpose — this isn't a problem.") {
             kv("DRM active",                pauseState.drmActive ? "ON" : "off")
             SettingsDivider()
             kv("Screen asleep",             pauseState.screenAsleep ? "ON" : "off")

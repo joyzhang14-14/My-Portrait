@@ -11,7 +11,7 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(title: "App") {
                 SettingsRow("New version available",
-                            description: "Show a banner when Sparkle finds a new build on the GitHub appcast.",
+                            description: "Show a banner when a new version of My Portrait is available.",
                             icon: "bell.badge") {
                     Toggle("", isOn: config.binding(\.notifications.appUpdates)).labelsHidden().toggleStyle(.switch)
                 }
@@ -27,7 +27,7 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(
                 title: "Diagnostics",
-                footnote: "Backed by StallDetector (Capture → Health for live metrics). 60s throttle per stall kind."
+                footnote: "You won't get repeat alerts for the same problem within a minute."
             ) {
                 SettingsRow("Capture stalls",
                             description: "Alert when audio or screen capture stops unexpectedly.",

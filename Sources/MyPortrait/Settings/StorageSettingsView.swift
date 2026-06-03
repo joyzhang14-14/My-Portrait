@@ -94,7 +94,7 @@ struct StorageSettingsView: View {
 
             SettingsCard(
                 title: "Delete recent data",
-                footnote: "Instantly purges every frame, OCR row, and audio chunk captured in the chosen window."
+                footnote: "Permanently deletes everything captured in the chosen time range. This can't be undone."
             ) {
                 HStack(spacing: 8) {
                     DeleteButton(label: "Last 15 min") { purge(seconds: 15 * 60) }
@@ -281,9 +281,7 @@ private struct SummaryRow: View {
     private var headline: String {
         let f = ByteCountFormatter(); f.allowedUnits = [.useGB]; f.countStyle = .file
         let s = f.string(fromByteCount: max(stats.dataBytes, 0))
-        let monthGB = max(stats.dataBytes, 1) / 1
-        _ = monthGB
-        return "1 month of memory in \(s)"
+        return "\(s) of memory stored"
     }
 
     private var fillFraction: Double {

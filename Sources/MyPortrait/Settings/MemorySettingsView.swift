@@ -444,15 +444,15 @@ struct MemorySettingsView: View {
             Divider().padding(.vertical, 4)
             schedulerBlock(
                 title: "Writing capture",
-                desc: "Runs Pass 1 (context) + Pass 2 (route + segment) + Pass 3 (multi-source fusion: keystroke → AX → OCR) + Pass 4 (content review) on unprocessed UTC days. Output is staged for review — auto-run only prepares the staged batch, you still Approve/Reject it manually below.",
+                desc: "Finds the writing you did and prepares it for review. Automatic runs only prepare it — you still approve or reject it below.",
                 config: \.scheduler.writingCapture)
             Divider().padding(.vertical, 4)
             schedulerBlock(
                 title: "Writing style distillation",
-                desc: "Reads approved writing_records (unprocessed) and distills writing-style facets (register, voice, edit rhythm) into portrait/writing_style/. Auto-run commits drafts directly — manual run from the section below stages drafts for review.",
+                desc: "Learns your writing style (tone, voice, editing habits) from approved writing. Automatic runs save directly; manual runs stage drafts for review.",
                 config: \.scheduler.writingStyle)
             Divider().padding(.vertical, 4)
-            intRow("Days processed per run",
+            intRow("Max days processed per run (event and personality)",
                    value: cfg.binding(\.memory.eventDayCap),
                    range: 1...30)
         }
@@ -505,7 +505,7 @@ struct MemorySettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Process writing capture")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("Reads typing_events / keystroke_log / OCR frames from cursor → now. Runs Pass 1 (context) + Pass 2 (route AX vs OCR + segment) + Pass 3 (multi-source fusion: keystroke → AX → OCR, per-app+url fanout) + Pass 4 (content review). Stages writing_records for review — Approve advances the cursor.")
+                    Text("Processes the writing you've done since the last approved batch and stages it for review.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -637,7 +637,7 @@ struct MemorySettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Distill writing style")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("**Downstream of writing capture** — reads approved writing_records marked as unprocessed and extracts writing-style facets (register, voice, edit rhythm) into portrait/writing_style/. Up to \(WritingStyleDistiller.defaultBatchCap) records per run · \(writingStyleUnprocessed) unprocessed remaining. Manual run stages drafts; auto schedule writes directly.")
+                    Text("Learns your writing style (tone, voice, editing habits) from approved writing. Up to \(WritingStyleDistiller.defaultBatchCap) pieces per run · \(writingStyleUnprocessed) still to process. Manual runs stage drafts; automatic runs save directly.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1012,7 +1012,7 @@ struct MemorySettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Process everything since the last approved cursor with Pass 1 (context) + Pass 2 (route + segment) + Pass 3 (multi-source fusion) + Pass 4 (content review) LLM calls. Output is staged for review.")
+            Text("Process all your writing since the last approved batch. This uses AI and the results are staged for you to review.")
         }
         .alert("Run writing style distillation?", isPresented: $writingStyleConfirm) {
             Button("Run", role: .none) {
@@ -1020,7 +1020,7 @@ struct MemorySettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed writing_records with the LLM. Drafts are staged for review.")
+            Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed pieces of your writing with AI. Drafts are staged for you to review.")
         }
     }
 
@@ -1399,7 +1399,7 @@ struct MemorySettingsView: View {
     private var decaySection: some View {
         section(
             title: "Weight decay",
-            blurb: "weight = impact × (1 + days_since_last_occurrence)^-α × (1 + log(1 + occurrence_days)). Higher α → faster forgetting."
+            blurb: "Controls how quickly older memories fade. Higher = the app forgets faster."
         ) {
             doubleRow("α (decay exponent)",
                       value: cfg.binding(\.memory.alpha),
@@ -1413,7 +1413,7 @@ struct MemorySettingsView: View {
     private var archiveSection: some View {
         section(
             title: "Archival rule",
-            blurb: "Programmatic, no LLM. All three thresholds must be met (and the file must not live under skills/ or be pinned) for the file to move into _archive/."
+            blurb: "When a memory falls below both limits below and isn't pinned, it's moved to the archive instead of staying active."
         ) {
             doubleRow("Max weight",
                       value: cfg.binding(\.memory.archiveMaxWeight),
@@ -1437,11 +1437,11 @@ struct MemorySettingsView: View {
 
     private var changelogSection: some View {
         section(
-            title: "Distillation changelog",
-            blurb: "Portrait body changes made by the distiller, newest first. Recorded for debugging and rollback."
+            title: "Portrait change history",
+            blurb: "A record of automatic updates the app made to your portrait, newest first."
         ) {
             if changelog.isEmpty {
-                Text("No distillation changes recorded yet.")
+                Text("No portrait changes recorded yet.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
