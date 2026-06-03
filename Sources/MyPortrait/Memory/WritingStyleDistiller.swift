@@ -11,6 +11,7 @@ private let ssLog = Logger(subsystem: "com.myportrait.memory", category: "writin
 final class WritingStyleUIState: ObservableObject {
     static let shared = WritingStyleUIState()
     @Published var isRunning: Bool = false
+    @Published var stage: String = ""        // 当前阶段(Run now 实时显示)
     @Published var statusMessage: String = ""
     /// 跑 distiller 的 Task 句柄 —— Stop 按钮 cancel 用。挂单例上,view 切走
     /// 再回来 Stop 仍可点。
