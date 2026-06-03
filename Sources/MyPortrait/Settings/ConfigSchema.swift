@@ -678,12 +678,18 @@ struct NotificationsConfig: Codable, Equatable {
     /// 用户开 app 是要"知道画像在动",看到通知能确认 pipeline 在跑。
     /// 噪音控制:只在真跑了(.ran 或 throw)才发,.noWork/.busy 静默。
     var schedulerAlerts:        Bool     = true
+    /// pipeline 跑到一半 app 被关(Cmd+Q / shutdown / 合盖被 sigkill)→ 重启时
+    /// recoverPausedJobs 把 paused 转 failed + 自动重跑。这一类弹独立通知,
+    /// 跟普通 scheduler 通知分开开关 —— 用户可能想关掉(每次关电脑都弹)
+    /// 但保留 needs-fix / success 通知。默认 ON。
+    var pipelineInterruptionAlerts: Bool = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case appUpdates             = "app_updates"
         case cronJobAlerts             = "cron_job_alerts"
         case captureStalls          = "capture_stalls"
         case schedulerAlerts        = "scheduler_alerts"
+        case pipelineInterruptionAlerts = "pipeline_interruption_alerts"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -692,6 +698,7 @@ struct NotificationsConfig: Codable, Equatable {
         cronJobAlerts             = c.dflt(Bool.self,     .cronJobAlerts, cronJobAlerts)
         captureStalls          = c.dflt(Bool.self,     .captureStalls, captureStalls)
         schedulerAlerts        = c.dflt(Bool.self,     .schedulerAlerts, schedulerAlerts)
+        pipelineInterruptionAlerts = c.dflt(Bool.self, .pipelineInterruptionAlerts, pipelineInterruptionAlerts)
     }
 }
 
