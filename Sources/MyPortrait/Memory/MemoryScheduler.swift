@@ -94,6 +94,17 @@ final class MemoryScheduler {
     private var tickRunning = false
     private var timer: Timer?
 
+    /// 每行每阶段最近一次失败的分类(per-process 内存,进程重启丢失)。
+    /// runStep catch 时由 ErrorClassifier 写入,UI(NeedAttention)读出来决定
+    /// banner 文案 + 是否显示 "Problem solved" 按钮。
+    /// 丢失也安全:status=failed 永远在 DB,UI 退化到泛泛的 "failed" 文案。
+    private var lastFailureByRowStage: [String: [ProcessingStage: LLMFailureKind]] = [:]
+
+    /// UI / 通知层查最近失败 kind。nil = 没有失败记录(进程刚启动 / 从未失败)。
+    func lastFailureKind(date: String, stage: ProcessingStage) -> LLMFailureKind? {
+        lastFailureByRowStage[date]?[stage]
+    }
+
     // MARK: - View bindings(canRunXxx + 解释文案)
     /// 当前是否有事件家族(distill or personality)在跑。
     var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
@@ -566,9 +577,16 @@ final class MemoryScheduler {
             outcome = try await PiAgentRegistry.$owner.withValue(owner) { try await work() }
         } catch let e as BudgetExhaustedError {
             schedLog.notice("\(date)/\(processor): budget exhausted — \(e.message, privacy: .public)")
+            // BudgetExhaustedError 仍走 .budgetExhausted(老路径不动),但同时
+            // 让 classifier 分一下 — 区分 transient throttle vs permanent quota
+            // exhaustion,供 UI banner 区分 "auto-recovering" vs "Top up & click
+            // Problem solved"。
+            lastFailureByRowStage[date, default: [:]][stage] = ErrorClassifier.classify(e)
             outcome = .budgetExhausted
         } catch {
-            schedLog.error("\(date)/\(processor): \(error.localizedDescription, privacy: .public)")
+            let kind = ErrorClassifier.classify(error)
+            lastFailureByRowStage[date, default: [:]][stage] = kind
+            schedLog.error("\(date)/\(processor) failed [\(kind.shortLabel, privacy: .public)]: \(error.localizedDescription, privacy: .public)")
             outcome = .failed
         }
         hb.cancel()
@@ -589,6 +607,11 @@ final class MemoryScheduler {
         switch outcome {
         case .success:
             store.setStatus(date: date, stage: stage, status: .complete)
+            // 成功 → 清掉这 stage 的 last failure(UI 不再显示陈旧 kind)
+            lastFailureByRowStage[date]?.removeValue(forKey: stage)
+            if lastFailureByRowStage[date]?.isEmpty == true {
+                lastFailureByRowStage.removeValue(forKey: date)
+            }
             print("[Scheduler] \(date)/\(stage.rawValue): complete")
 
         case .budgetExhausted:
