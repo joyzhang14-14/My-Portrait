@@ -20,21 +20,25 @@ enum ProcessingStatus: String, Sendable {
     case failed
     case partial
     case budgetDeferred = "budget_deferred"
+    /// **DEPRECATED**:不再产生(用户方向是"永不放弃")。老 DB 行仍存在,
+    /// 升级 needsWork=true 让 scheduler 把它当 .failed 同样重试。
+    /// 保留 case 是为了不破坏 SQLite 已有数据的解码。
     case deadLetter = "dead_letter"
     /// 用户主动退出(Cmd+Q / shutdown / 关 app)时,把跑到一半的步从 inProgress
     /// 改成 paused,不计 retry。重启时被 recoverPausedJobs 转回 pending 重跑。
-    /// 跟真崩溃(SIGKILL / 断电 / force quit)的 inProgress→failed+bumpRetry 路径区分,
-    /// 这样反复正常关电脑不会让某天累积 retry 进 dead_letter。
+    /// 跟真崩溃(SIGKILL / 断电 / force quit)的 inProgress→failed+bumpRetry 路径区分。
     /// LLM 服务本身不支持续接,所以重跑 = 从头跑(event 步会 deleteEvents 回滚)。
     case paused
 
     /// 该状态是否还需要（自动）处理。pendingDays 据此筛选。
     /// `paused` 算需要 —— 防御性:万一启动时漏跑 recoverPausedJobs,pendingDays
     /// 仍会捡到这天再次处理。
+    /// `deadLetter` 算需要 —— 删了 dead_letter 放弃机制,老数据也无限重试,
+    /// 由 backoff 控制频率。
     var needsWork: Bool {
         switch self {
-        case .idle, .pending, .failed, .budgetDeferred, .paused: return true
-        case .inProgress, .complete, .partial, .deadLetter: return false
+        case .idle, .pending, .failed, .budgetDeferred, .paused, .deadLetter: return true
+        case .inProgress, .complete, .partial: return false
         }
     }
 }
