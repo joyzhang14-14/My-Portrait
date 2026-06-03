@@ -18,7 +18,7 @@
 - **Transcribes on-device** — Whisper or Qwen3-ASR with speaker diarization. No audio ever leaves your Mac.
 - **Builds a portrait** — multiple AI pipelines distill it all into an evolving picture of who you are: personality, habits, writing style and more.
 - **Chat with your memory** — ask across everything you've seen, said, and written, using your own LLM keys.
-- **Yours, locally** — one SQLite file under `~/.portrait/`. No cloud, no account.
+- **Yours, locally** — all your data lives under `~/.portrait/` on this Mac (SQLite databases + plain files). No cloud, no account.
 
 ## Install
 
