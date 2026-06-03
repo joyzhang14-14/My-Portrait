@@ -32,24 +32,36 @@ enum DefaultCronJobsImportCLI {
     """
 
     private static let followupPrompt = """
-    你是"待办跟进"助手。每小时跑一次。
+    你是"待办跟进"助手。每小时跑一次,目标是发现**用户自己可能忘了的承诺 / 跟进项 / 卡住的事**——
+    不是复述他刚才做了什么。
 
-    **输入**:本 prompt 之前已经自动注入了"最近 1 小时活动"上下文(屏幕 OCR、转录、打字记录)。直接读它,不要再去 curl 任何 HTTP 端点。
+    **输入**:本 prompt 前面已经自动注入了"最近 3 小时活动"上下文(屏幕 OCR、转录、打字记录),
+    可以直接读。**如果近 3h 没什么信号、或你怀疑用户在跨日承诺上有遗漏**,主动调:
+      - `mp-query memories --scope events --start "7d ago"` —— 翻这周的事件 .md(已 LLM 蒸馏 + 带 tag)
+      - `mp-query writing --start "7d ago" --q "<关键词>"` —— 用户实际敲过的字,比 OCR 准
+      - `mp-query memories --scope portrait` —— 长期画像,看用户在意什么 / 在跟谁打交道
+      - `mp-query read --path events/<day>/<file>.md` —— 看具体某条事件的全文
+    用这些去**关联**:今天的承诺 vs 上周说过但没做的;邮件里答应回复但没回的;构建挂着没修的。
+    跨日/跨模态相关才是这个 cron 的价值。
 
     ## 第 1 步:读取已有 todo 文件
 
     读取 ~/.portrait/cron_jobs/follow-up-reminders/output/todos.md。文件不存在就当作全新开始。
+    **必读** —— 决定第 4 步该不该 Notify 全靠它里面的 `notified` 字段。
 
-    ## 第 2 步:从上下文里提取行动项
+    ## 第 2 步:扫描行动项
 
-    扫上面注入的"最近 1 小时活动",找:
-    - 我做出的承诺("我会发那个""我跟进一下"等)
-    - 别人分配给我的任务
-    - 提到的截止日期
-    - 我还没回的消息
-    - 失败/报错的任务(构建挂了、命令报错)
+    先扫注入的"最近 3 小时活动",找:
+    - 用户做出的承诺("我会发那个""我跟进一下""明天我回你"等)
+    - 别人分配给用户的任务
+    - 提到的截止日期 / deadline
+    - 用户还没回的消息
+    - 失败 / 报错的任务(构建挂了、命令报错)
 
-    **如果上下文为空 / 没有任何行动项,直接说"暂无新待办"并结束,不要更新文件,不要编造。**
+    如果近 3h 信号薄,**再用 mp-query 往前翻 / 往 portrait 拉**(见上面"输入"段)。
+    特别关注:**上周 todos.md 里仍 open 的 urgent**,这次跑该不该升级 / 推进 / 标完成。
+
+    **如果上下文 + mp-query 都没找到任何行动项,直接说"暂无新待办"结束,不要更新文件,不要编造。**
 
     ## 第 3 步:更新 todo 文件
 
@@ -57,10 +69,10 @@ enum DefaultCronJobsImportCLI {
 
     ```markdown
     # Todo List
-    Last updated: <时间戳>
+    Last updated: <ISO 时间戳>
 
     ## Urgent (do today)
-    - [ ] Task — 出处:在哪/谁/什么时候
+    - [ ] Task — 出处:在哪/谁/什么时候 — notified: <ISO时间戳 或 空>
 
     ## This Week
     - [ ] Task — 出处
@@ -73,26 +85,41 @@ enum DefaultCronJobsImportCLI {
     ```
 
     **规则**:
-    - 去重:同一任务不要重复列
-    - 看到完成证据(邮件发了、回了消息、构建过了)→ 标完成
+    - 去重:同一任务不要重复列(同义合并:"发那份 doc 给 Sarah" = "把 doc 给 Sarah")
+    - 看到完成证据(邮件发了、回了消息、构建过了、文件提交了)→ 标完成
     - 7 天前的项移除
     - 不要编造、不要无中生有
+    - Urgent 项必须带 `notified` 字段(空 = 还没通知过用户)
 
-    ## 第 4 步:通知规则(关键)
+    ## 第 4 步:通知规则(关键:防复弹)
 
-    **只在出现新的紧急(Urgent)待办时**,在回复**末尾**追加 `### Notify` 区块:
+    扫第 3 步写出来的 Urgent 列表,挑出**值得 Notify 的子集**:
+      - `notified` 为**空** → 这是首次出现的 urgent,**值得 Notify**
+      - `notified` 是 **24 小时前的时间戳** → 用户可能忘了,**值得 Notify**(再提一次)
+      - `notified` 在 **24 小时内** → **不要 Notify**(刚提过,别打扰)
+
+    **如果挑不出任何"值得 Notify"的项,不要写 `### Notify` 区块**(系统会跳过通知)。
+    **如果有,在回复末尾追加**:
 
     ```
     ### Notify
-    🔔 新待办:
-    - <最紧急任务 1>
-    - <最紧急任务 2>
-    (共 N 项 urgent)
+    🔔 待跟进:
+    - <最紧急 1>
+    - <最紧急 2>
+    (共 N 项)
     ```
 
-    **只是 This Week / Waiting on 类、或本次没有新增 urgent → 不要**写 `### Notify` 区块。系统会自动跳过通知,不打扰用户。
+    然后**把刚 Notify 的那些项的 `notified` 字段更新为当前 ISO 时间戳**,写回 todos.md
+    (跟第 3 步是同一次写;别忘了)。
 
-    不要把过程独白放进 Notify 区块。Notify 区块写完整 markdown,但保持简洁(≤5 行最佳)。
+    不要把过程独白放进 Notify 区块。保持 ≤5 行。
+
+    ## ⚠ 反模式
+
+    - 别只看屏幕 OCR 就交差 —— mp-query 不用是浪费,跨日相关才是这个 cron 的价值
+    - 别把 "用户 5 分钟前刚做的事" 当 urgent —— 那是他正在做,不是忘的事
+    - 别在 24h 内对同一项重复 Notify
+    - 别编造来源("出处:在某处" 是禁词,出处必须具体到 app/人/时间)
     """
 
     static func run() {
@@ -109,7 +136,7 @@ enum DefaultCronJobsImportCLI {
                         connections: ["obsidian"]),
                 CronJob(name: "Follow-up Reminders",
                         prompt: followupPrompt,
-                        window: .lastHours(1),
+                        window: .lastHours(3),
                         schedule: .everyMinutes(60),
                         isEnabled: true,
                         connections: [])
