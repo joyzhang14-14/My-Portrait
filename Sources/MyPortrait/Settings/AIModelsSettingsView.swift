@@ -53,7 +53,7 @@ struct AIModelsSettingsView: View {
 
             SettingsCard(
                 title: "Local capture models",
-                footnote: "Speaker models (~40 MB) download on first launch. Whisper transcription models download on demand — hit Download to fetch one; your selected model is fetched automatically. Qwen3-ASR models must be downloaded here before the Qwen engine can be selected. Voice features stay disabled until ready."
+                footnote: "These power voice features. Some download automatically; others have a Download button. Each stays disabled until it shows Ready."
             ) {
                 // Whisper 转录模型 —— 跟 Audio Capture 的 model picker 同一份目录。
                 // 没装的这里点 Download 下载,装好后才能在 picker 里选。

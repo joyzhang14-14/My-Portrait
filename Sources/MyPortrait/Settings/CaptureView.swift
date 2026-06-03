@@ -681,7 +681,7 @@ struct ScreenCaptureSettingsView: View {
     private var powerModeCard: some View {
         SettingsCard(
             title: "Power mode",
-            footnote: "Switches capture FPS, transcription cadence, and OCR aggressiveness based on the profile you pick."
+            footnote: "Trades screen-capture detail for battery life based on the profile you pick."
         ) {
             ForEach(PowerMode.allCases) { mode in
                 PowerModeRow(mode: mode,

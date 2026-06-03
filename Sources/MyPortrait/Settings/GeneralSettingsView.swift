@@ -20,7 +20,7 @@ struct GeneralSettingsView: View {
             }
 
             SettingsCard(title: "Updates",
-                         footnote: "Sparkle checks GitHub for new releases. EdDSA-signed appcast, hardened-runtime verified.") {
+                         footnote: "Checks GitHub for new versions. Updates are signature-verified before installing.") {
                 SettingsRow("Current version",
                             description: "Build currently installed. \"Check now\" below queries GitHub appcast for newer builds.",
                             icon: "info.circle") {
@@ -72,7 +72,7 @@ struct GeneralSettingsView: View {
             // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
             SettingsCard(title: "Cron Jobs",
-                         footnote: "Affects both the sidebar list and the on-disk runs.json. \"No limit\" lets runs.json grow forever — handy if you want a full log, costly otherwise.") {
+                         footnote: "Controls how much run history is kept. \"No limit\" keeps every run, which uses more disk over time.") {
                 SettingsRow("History per cron job",
                             description: "How many recent runs to keep for each cron job.",
                             icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
@@ -116,7 +116,7 @@ struct GeneralSettingsView: View {
 
             SettingsCard(title: "Maintenance") {
                 SettingsRow("Clear cache",
-                            description: "Remove AI agent cache, old logs, and recovery artifacts.",
+                            description: "Remove temporary files left by chat attachments and the AI runtime.",
                             icon: "trash") {
                     Button(scanResults == nil ? "Scan" : "Re-scan") {
                         scanCache()

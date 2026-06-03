@@ -51,7 +51,7 @@ struct ImportSettingsView: View {
         ) {
             SettingsCard(
                 title: "Import from screenpipe",
-                footnote: "Copies frames (OCR text + app + URL) and audio transcripts that are OLDER than the earliest data My Portrait already has. Existing My Portrait data is never touched. Media files (MP4 / WAV / JPG) are NOT imported — only the searchable metadata. After import you can run Settings → Memory → Scheduler → Process events to distill the new data into events."
+                footnote: "Brings in your older screenpipe history — screen text and what was said — from before My Portrait started recording. Your current data is left untouched, and the original video and audio files stay where they are. After importing, run Process events in Memory settings to turn it into memories."
             ) {
                 if scanning {
                     scanningRow
@@ -470,12 +470,12 @@ struct ImportSettingsView: View {
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .tracking(0.6)
                 .foregroundStyle(Theme.textTertiary)
-            statRow("Frames",            "\(r.framesImported) new · \(r.framesBackfilled) backfilled · \(r.skippedFramesNoOCR) skipped (no OCR)", mono: false)
+            statRow("Screen text",       "\(r.framesImported + r.framesBackfilled) added · \(r.skippedFramesNoOCR) skipped (no text found)", mono: false)
             statRow("Video chunks",      "\(r.videoChunksImported) MP4(s) copied · \(Self.bytesHuman(r.videoBytesCopied))", mono: false)
             statRow("Audio chunks",      "\(r.audioChunksImported) imported", mono: false)
             statRow("Audio transcripts", "\(r.audioTranscriptsImported) imported", mono: false)
             statRow("Cutoff",            Self.cutoffDescription(r.cutoffMs), mono: false)
-            Text("Next: Settings → Memory → Scheduler → Process events to distill the new data into events.")
+            Text("Next: run Process events in Memory settings to turn this into memories.")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 4)
