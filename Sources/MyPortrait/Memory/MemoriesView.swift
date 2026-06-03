@@ -620,13 +620,17 @@ private struct FolderDisclosureRow: View {
             // 嵌套 LazyVStack 在 macOS 12+ 完全支持。
             if expanded {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(entries) { entry in
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
                         EntryRow(entry: entry, selected: selected == entry.id)
                             .padding(.leading, 22)   // 跟 chevron 缩对齐
                             .contentShape(Rectangle())
                             .onTapGesture { onSelect(entry) }
-                        Divider().background(Color.primary.opacity(0.05))
-                            .padding(.leading, 22)
+                        // 最后一个 event 不画尾部细线 —— 否则它会漏在外层
+                        // folders↔ungrouped 的 10px 粗线上方,显得多一道线。
+                        if idx < entries.count - 1 {
+                            Divider().background(Color.primary.opacity(0.05))
+                                .padding(.leading, 22)
+                        }
                     }
                 }
             }
