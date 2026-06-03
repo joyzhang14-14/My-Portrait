@@ -69,7 +69,23 @@ struct MyPortraitApp: App {
             if let i = args.firstIndex(of: "--threshold"), i + 1 < args.count, let v = Float(args[i + 1]) { thr = v }
             var minDur: Double = 0
             if let i = args.firstIndex(of: "--min-dur"), i + 1 < args.count, let v = Double(args[i + 1]) { minDur = v }
-            DiarizeSessionCLI.run(hours: hrs, threshold: thr, minDur: minDur, reenroll: args.contains("--reenroll"))
+            var dump: String? = nil
+            if let i = args.firstIndex(of: "--dump"), i + 1 < args.count { dump = args[i + 1] }
+            var mdl: String? = nil
+            if let i = args.firstIndex(of: "--model"), i + 1 < args.count { mdl = args[i + 1] }
+            DiarizeSessionCLI.run(hours: hrs, threshold: thr, minDur: minDur, reenroll: args.contains("--reenroll"), dumpPath: dump, modelPath: mdl)
+            // run() exits the process internally.
+        }
+        // 维护 CLI: `--reenroll-speaker <name> [--channel mic|system] [--hours N] [--apply]`
+        // 用真实采集音给已知说话人补充域对齐声纹。默认 dry-run,--apply 前自动备份。
+        if let i = args.firstIndex(of: "--reenroll-speaker"), i + 1 < args.count {
+            var chan = "any"
+            if let c = args.firstIndex(of: "--channel"), c + 1 < args.count { chan = args[c + 1] }
+            var hrs: Double? = nil
+            if let h = args.firstIndex(of: "--hours"), h + 1 < args.count { hrs = Double(args[h + 1]) }
+            var thr: Float = 0.5
+            if let t = args.firstIndex(of: "--threshold"), t + 1 < args.count, let v = Float(args[t + 1]) { thr = v }
+            ReenrollSpeakerCLI.run(name: args[i + 1], channel: chan, hours: hrs, threshold: thr, apply: args.contains("--apply"))
             // run() exits the process internally.
         }
         // 维护 CLI: `--clean-voiceprints [--apply] [--threshold 0.5]` 对具名簇做 medoid

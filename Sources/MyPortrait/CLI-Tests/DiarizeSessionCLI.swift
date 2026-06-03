@@ -20,7 +20,7 @@ enum DiarizeSessionCLI {
         let device: String; let recordedMs: Int64
     }
 
-    static func run(hours: Double?, threshold: Float, minDur: Double, reenroll: Bool = false) {
+    static func run(hours: Double?, threshold: Float, minDur: Double, reenroll: Bool = false, dumpPath: String? = nil, modelPath: String? = nil) {
         let state = ExitState()
         let dbImpl: PortraitDBImpl
         do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
@@ -43,8 +43,11 @@ enum DiarizeSessionCLI {
                 // 1. 加载声纹模型
                 let ex: SpeakerEmbeddingExtractor
                 do {
-                    let p = try await SpeakerModelStore.shared.path(for: .embedding)
-                    ex = try SpeakerEmbeddingExtractor(modelPath: p.path, fbank: FbankExtractor())
+                    let mp: String
+                    if let custom = modelPath { mp = custom }
+                    else { mp = try await SpeakerModelStore.shared.path(for: .embedding).path }
+                    print("声纹模型: \((mp as NSString).lastPathComponent)")
+                    ex = try SpeakerEmbeddingExtractor(modelPath: mp, fbank: FbankExtractor())
                 } catch { print("ERROR: 声纹模型加载失败: \(error)"); state.code = 1; return }
 
                 // 2. 拉范围内 wav 段(带 device 仅作答案,不参与算法)
@@ -88,6 +91,18 @@ enum DiarizeSessionCLI {
                 }
                 let valid = (0..<segs.count).filter { embs[$0] != nil }
                 print("成功提声纹: \(valid.count)/\(segs.count)")
+
+                // dump:每行 device(mic/sys),duration,512 维声纹 —— 供 Python 跑分类器找天花板。
+                if let dp = dumpPath {
+                    var csv = ""
+                    for gi in valid {
+                        let lab = segs[gi].device.contains("microphone") ? "mic" : "sys"
+                        let dur = segs[gi].endS - segs[gi].startS
+                        csv += "\(lab),\(String(format: "%.2f", dur))," + embs[gi]!.map { String($0) }.joined(separator: ",") + "\n"
+                    }
+                    try? csv.write(toFile: dp, atomically: true, encoding: .utf8)
+                    print("dump 写入: \(dp)(\(valid.count) 行 × 512 维)")
+                }
 
                 // 4. 离线全局聚类(AHC 平均连接,纯声纹)
                 let labels = ahc(valid.map { embs[$0]! }, threshold: threshold)
