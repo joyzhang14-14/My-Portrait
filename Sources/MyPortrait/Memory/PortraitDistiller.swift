@@ -287,11 +287,15 @@ final class PortraitDistiller {
     // MARK: - Response parsing
 
     nonisolated private static func parseDecisions(from response: String) throws -> [ParsedDecision] {
-        guard let firstBracket = response.firstIndex(of: "["),
-              let lastBracket = response.lastIndex(of: "]") else {
+        // 用 LLMJSON 抽 balanced array(去 fence + 尊重字符串内的 bracket),
+        // 比原来的 first/last bracket 抽法稳一档:模型在数组前后的散文 / fence /
+        // 字符串字面量里出现 `]` 都不会被错抽。
+        let jsonStr: String
+        do {
+            jsonStr = try LLMJSON.extract(response, expecting: .array)
+        } catch {
             throw DistillError.noJSONInResponse
         }
-        let jsonStr = String(response[firstBracket...lastBracket])
         guard let data = jsonStr.data(using: .utf8) else {
             throw DistillError.malformedJSON("could not encode response as UTF-8")
         }
@@ -316,15 +320,40 @@ final class PortraitDistiller {
                 }
                 throw DistillError.malformedJSON("entry \(idx + 1) action=\(action) missing slug")
             }
+            // derivedFromEventIds 引用回查 —— LLM 可能编造 id(EventBuilder 有
+            // defendJoins 机制做同样事,这里给 distill 路径补上)。把不存在的
+            // 剔除 + log,避免在 portrait 文件 body 里渲染死链。
+            let (kept, dropped) = Self.validateDerivedIds(derived)
+            if !dropped.isEmpty {
+                print("[PortraitDistiller] decision \(slug): dropped \(dropped.count) hallucinated event id(s): \(dropped.prefix(5).joined(separator: ", "))\(dropped.count > 5 ? "…" : "")")
+            }
             out.append(ParsedDecision(
                 action: action,
                 slug: slug,
                 title: title,
                 body: body,
-                derivedFromEventIds: derived
+                derivedFromEventIds: kept
             ))
         }
         return out
+    }
+
+    /// 把 LLM 给出的 event id 数组逐个回查 events/ 下是否真存在,丢掉编造的。
+    /// id 形式跟 markEventsDistilled 一致:相对 Storage.eventsDir 的 path
+    /// (e.g. "2026-05-16/cluster-foo.md")。
+    nonisolated private static func validateDerivedIds(_ ids: [String]) -> (kept: [String], dropped: [String]) {
+        let fm = FileManager.default
+        var kept: [String] = []
+        var dropped: [String] = []
+        for id in ids {
+            let url = Storage.eventsDir.appendingPathComponent(id)
+            if fm.fileExists(atPath: url.path) {
+                kept.append(id)
+            } else {
+                dropped.append(id)
+            }
+        }
+        return (kept, dropped)
     }
 
     // MARK: - Disk writes
