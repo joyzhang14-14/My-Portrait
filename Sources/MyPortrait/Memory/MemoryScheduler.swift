@@ -54,7 +54,7 @@ final class MemoryScheduler {
     /// 失败重试上限：retry_count ≥ 此值转 dead_letter。
     private let maxRetries = 3
     /// 原始数据"收齐"判定：数据日结束（UTC 次日 0 点）后再等这么久。
-    private let rawGraceSeconds: TimeInterval = 2 * 3600
+    private let rawGraceSeconds: TimeInterval = 10 * 60
     /// tick 周期。
     private let tickInterval: TimeInterval = 15 * 60
     /// distill 锚行的 date 值。anchor 是 distill 这个 processor 的锁身份，与
@@ -156,55 +156,76 @@ final class MemoryScheduler {
         let s = ConfigStore.shared.current.scheduler
         let now = Date()
 
-        // **追赶分支**:除了"到点 + 今天没跑过"的 scheduled 触发,daily 频率
-        // 下只要有 pending 活 + 今天还没跑过,任何 tick 都触发(catchUp)。
-        // 解决"电脑半夜睡着,23:45 scheduled tick 错过 → 整天跳过"的滞后:
-        // 用户白天开机,首次 tick 就能把昨晚没跑成的活捡起来。weekly/monthly
-        // 维持原语义(只在 scheduled 日 + 到点跑),不被追赶逻辑破坏。
-        var ranEvent = false
-        let eventToday    = lastRunDay(kLastEvent) != localDayString(now)
-        let eventCatchUp  = s.event.frequency == .daily && eventJobHasWork()
+        // **两级触发顺序**(每个 job 仍按各自频率 + 一天一次去重):
+        //   Tier 1 = event / writing-capture —— 上游,生产 events / writing_records。
+        //   Tier 2 = portrait / personality / writing-style —— 下游,消费 Tier 1
+        //            写出来的东西。
+        // 规则:**本 tick 只要有任何 Tier-1 job 跑过,就直接 return,Tier-2 推迟
+        // 到下一个 tick**。原因:
+        //   ① 数据依赖 —— event 的 rebalance 会重写整个 events/,portrait/personality
+        //      读它,必须等 event 完全收尾(下个 tick)才读到稳定状态。
+        //   ② 资源 —— 避免一个 tick 内把上下游所有 LLM 流水线背靠背堆满,撞 budget。
+        // Tier-1 内部(event ↔ writing-capture)彼此无先后,可同 tick 一起跑。
+        //
+        // **追赶分支(catchUp)**:daily 频率下,只要有 pending 活 + 今天没跑过,
+        // 任何 tick 都触发(不必等到点)。解决"电脑半夜睡着 → scheduled tick
+        // 错过 → 整天跳过"的滞后。weekly/monthly 维持"scheduled 日 + 到点"语义。
+        //
+        // **重试(needsRetry)**:failed / budget_deferred 的下游(weekly/monthly
+        // 频率没 catchUp 兜底)合进同一按天分支,跟着每天触发一次重试 —— 不单
+        // 开每-tick 重试,否则 budget_deferred 会每 15 分钟真打一次 LLM(429)。
+
+        // ===== Tier 1 =====
+        var tier1Ran = false
+
+        let eventToday   = lastRunDay(kLastEvent) != localDayString(now)
+        let eventCatchUp = s.event.frequency == .daily && eventJobHasWork()
         if eventToday,
            Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp {
             setLastRun(kLastEvent, now)
             await runEventJob()
-            ranEvent = true
-        }
-        // classify(自动 EventClassifier 分 folder)已下线 —— chat AI 通过
-        // mp-folders 手动整理。tick 不再有 classify 分支。
-        var ranPortrait = false
-        let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
-        let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
-        if portraitToday,
-           Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp {
-            setLastRun(kLastPortrait, now)
-            await runPortraitJob()
-            ranPortrait = true
-        } else if ranEvent, s.portrait.frequency != .off, portraitNeedsRetry() {
-            // distill 之前被 defer / failed —— 借 event job 触发的节流顺带重试。
-            await runPortraitJob()
-            ranPortrait = true
-        }
-        let personalityToday   = lastRunDay(kLastPersonality) != localDayString(now)
-        let personalityCatchUp = s.personality.frequency == .daily && personalityJobHasWork()
-        if personalityToday,
-           Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp {
-            setLastRun(kLastPersonality, now)
-            await runPersonalityJob()
-        } else if ranPortrait, s.personality.frequency != .off, personalityNeedsRetry() {
-            await runPersonalityJob()
+            tier1Ran = true
         }
 
         // 写作采集:自动只是「把 staged 准备好」,等用户在 Pending review
-        // 里 Approve/Reject,不直接 commit 到 writing_records。
+        // 里 Approve/Reject,不直接 commit 到 writing_records。Tier 1(上游)。
         if Self.shouldTriggerNow(config: s.writingCapture, now: now),
            lastRunDay(kLastWritingCapture) != localDayString(now) {
             setLastRun(kLastWritingCapture, now)
             await runWritingCaptureJob()
+            tier1Ran = true
+        }
+
+        // 有 Tier-1 跑过 → Tier-2 让位,等下一个 tick(见上方规则)。
+        if tier1Ran {
+            schedLog.info("tick: tier-1 (event/writing-capture) ran — deferring tier-2 to next tick")
+            return
+        }
+
+        // classify(自动 EventClassifier 分 folder)已下线 —— chat AI 通过
+        // mp-folders 手动整理。tick 不再有 classify 分支。
+
+        // ===== Tier 2 =====
+        let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
+        let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
+        let portraitRetry   = s.portrait.frequency != .off && portraitNeedsRetry()
+        if portraitToday,
+           Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp || portraitRetry {
+            setLastRun(kLastPortrait, now)
+            await runPortraitJob()
+        }
+
+        let personalityToday   = lastRunDay(kLastPersonality) != localDayString(now)
+        let personalityCatchUp = s.personality.frequency == .daily && personalityJobHasWork()
+        let personalityRetry   = s.personality.frequency != .off && personalityNeedsRetry()
+        if personalityToday,
+           Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp || personalityRetry {
+            setLastRun(kLastPersonality, now)
+            await runPersonalityJob()
         }
 
         // writing_style:auto 模式 → 直接落 portrait/writing_style/,不审核。
-        // 跟 writing capture 一样不参与 event/portrait/personality 三锁。
+        // 跟 writing capture 一样不参与 event/portrait/personality 三锁。Tier 2(下游)。
         if Self.shouldTriggerNow(config: s.writingStyle, now: now),
            lastRunDay(kLastWritingStyle) != localDayString(now) {
             setLastRun(kLastWritingStyle, now)
