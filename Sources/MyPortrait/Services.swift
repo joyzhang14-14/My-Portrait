@@ -565,6 +565,12 @@ final class Services {
     /// AppDelegate.applicationWillTerminate 本就在主线程,直接同步调 —— 不能丢进
     /// detached task 再 hop 回主线程,那会和卡在 sem.wait 的主线程死锁。
     func stopMainActorParts() {
+        // 先 pause memory pipeline:把所有 in_progress 行标 paused + 释放锁。
+        // 跟真崩溃区分 —— 重启时 recoverStaleLocks 把 paused 转 pending 重跑,
+        // **不 bumpRetry**。这样反复正常关电脑不会让某天累积进 dead_letter。
+        // 同步 DB 写,毫秒级,先于其它 stop 跑(免得 services 关掉后 DB 访问异常)。
+        MemoryScheduler.shared.pauseInProgressJobs()
+
         powerProfileTask?.cancel()
         screenLockMonitor.stop()
         typingObserver.stop()
