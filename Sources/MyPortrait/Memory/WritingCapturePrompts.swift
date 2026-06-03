@@ -486,11 +486,6 @@ enum WritingCapturePrompts {
     - keystroke_count ≈ 0 means the text appeared on screen without the user typing
       (a page title, a received message, an AI reply, an article being read) → that is
       what rule 2 below targets.
-    - EXCEPTION — source = "ax_paste": the user PASTED this from their clipboard into an
-      input field (so keystroke_count ≈ 0 is normal and expected). It is content the
-      user deliberately chose to include — KEEP it, do NOT discard it for low
-      keystroke_count. (It already passed a size filter upstream.) Still discard it only
-      if it is itself code/commands, masked secrets, or pure gibberish (rules 1/3).
     - (This does NOT override rules 1/3/4: typed CODE/commands, typed gibberish, or
       typed matches of a rejected pattern are still discarded.)
 
