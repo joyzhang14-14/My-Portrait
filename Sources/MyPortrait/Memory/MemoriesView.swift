@@ -165,6 +165,15 @@ struct MemoriesView: View {
             )
             Divider().background(Color.primary.opacity(0.08))
         }
+        // folders 区 与 ungrouped 区之间的粗灰分隔线 —— 放在 folders ForEach
+        // 之后,所有 folder(含展开后的 event)天然都在它上方,ungrouped 在下方。
+        // 只在两边都非空时画,避免孤线。
+        if !split.folders.isEmpty, !split.ungrouped.isEmpty {
+            Rectangle()
+                .fill(Color.primary.opacity(0.12))
+                .frame(height: 10)
+                .frame(maxWidth: .infinity)
+        }
         // ungrouped 平铺
         ForEach(split.ungrouped) { entry in
             EntryRow(entry: entry, selected: selected == entry.id)
