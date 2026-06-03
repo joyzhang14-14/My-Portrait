@@ -188,12 +188,12 @@ private struct ConfigToolbar: View {
     let onResetCurrentPage: (() -> Void)?
     var body: some View {
         Button {
-            config.revealInFinder()
+            config.openPortraitDir()
         } label: {
-            Label("config.toml", systemImage: "arrow.up.right.square")
+            Label("Open ~/.portrait", systemImage: "arrow.up.right.square")
                 .font(.system(size: 11, weight: .medium))
         }
-        .help("Open ~/.portrait/config.toml in Finder")
+        .help("Open the ~/.portrait data folder in Finder")
     }
 }
 
