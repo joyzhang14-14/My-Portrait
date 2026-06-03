@@ -53,9 +53,9 @@ enum SpeakerModel: Sendable {
 
     /// 用户可选的说话人识别声纹模型(UI 单一数据源:Audio Capture 选用 / AI models 下载)。
     static let embeddingOptions: [EmbeddingOption] = [
-        .init(id: "en_campplus",   label: "English CAM++",      detail: "wespeaker VoxCeleb · 512-dim · default", model: .embedding),
-        .init(id: "zh_campplus",   label: "Chinese CAM++",      detail: "3D-Speaker zh-cn · 192-dim",            model: .embeddingZhCampp),
-        .init(id: "zh_eres2netv2", label: "Chinese ERes2NetV2", detail: "3D-Speaker zh-cn · 192-dim · stronger", model: .embeddingZhEres2),
+        .init(id: "en_campplus",   label: "English CAM++",      detail: "wespeaker VoxCeleb · 512-dim · ~29 MB · default", model: .embedding),
+        .init(id: "zh_campplus",   label: "Chinese CAM++",      detail: "3D-Speaker zh-cn · 192-dim · ~28 MB",            model: .embeddingZhCampp),
+        .init(id: "zh_eres2netv2", label: "Chinese ERes2NetV2", detail: "3D-Speaker zh-cn · 192-dim · ~71 MB · stronger", model: .embeddingZhEres2),
     ]
 
     struct EmbeddingOption: Sendable, Identifiable {
