@@ -107,6 +107,17 @@ final class TypingObserver {
             ledger.charLogger = charLogger
         }
 
+        // 回车摇读:回车一按,延迟几 ms 抢读焦点字段现值喂回 writer —— 救 IME 末尾
+        // 落字被「发送清空/跳页」抢在采集前(聊天 app 字段发送前会短暂显示落定值,
+        // 可能救回;搜索跳页字段没显示过落定值,通常仍救不了)。实验性,延迟需真机调。
+        ledger.onSubmitKey = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.running else { return }
+                try? await Task.sleep(nanoseconds: Self.submitRaceDelayNs)
+                await self.submitRaceRead()
+            }
+        }
+
         do {
             try ledger.start()
         } catch {
@@ -471,5 +482,36 @@ final class TypingObserver {
               CFHash(focused2) == CFHash(focused), let newValue else { return }
         let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
         writer.noteValueChange(key: key, newValue: newValue)
+    }
+
+    // MARK: - 回车摇读(IME 末尾落字救援,实验性)
+
+    /// 回车后延迟多久再抢读。太短=读到落定前的拼音/双拼;太长=读到清空后。
+    /// 5ms 是起手实验值,救不回就真机调(聊天 app 字段落定→清空窗口约几~几十 ms)。
+    private static let submitRaceDelayNs: UInt64 = 5_000_000
+
+    /// 回车一按,延迟后抢读焦点字段现值喂回 writer —— 趁「发送清空/跳页」前把 IME
+    /// 末尾落定的字截下来。复用 processValueChange 同款安全读法(secure 跳过、读后重核
+    /// 仍是同一 element)。读到空/清空态则不喂(`!value.isEmpty`)。
+    @MainActor
+    private func submitRaceRead() async {
+        guard running, let att = attachment, let focused = att.focusedElement else { return }
+        let focBox = SendableBox(v: focused)
+        let role: String? = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(focBox.v, kAXRoleAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil)
+        }
+        if TypingPrivacyFilter.isSecureRole(role) { return }
+        let value: String? = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(focBox.v, kAXValueAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil)
+        }
+        guard running, let att2 = attachment, let focused2 = att2.focusedElement,
+              CFHash(focused2) == CFHash(focused),
+              let value, !value.isEmpty else { return }
+        let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
+        writer.noteValueChange(key: key, newValue: value)
     }
 }
