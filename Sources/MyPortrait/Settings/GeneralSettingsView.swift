@@ -19,8 +19,7 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Updates",
-                         footnote: "Checks GitHub for new versions. Updates are signature-verified before installing.") {
+            SettingsCard(title: "Updates") {
                 SettingsRow("Current version",
                             description: "Build currently installed. \"Check now\" below queries GitHub appcast for newer builds.",
                             icon: "info.circle") {
@@ -71,8 +70,7 @@ struct GeneralSettingsView: View {
 
             // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
-            SettingsCard(title: "Cron Jobs",
-                         footnote: "Controls how much run history is kept. \"No limit\" keeps every run, which uses more disk over time.") {
+            SettingsCard(title: "Cron Jobs") {
                 SettingsRow("History per cron job",
                             description: "How many recent runs to keep for each cron job.",
                             icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
@@ -95,8 +93,7 @@ struct GeneralSettingsView: View {
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。
-            SettingsCard(title: "Onboarding",
-                         footnote: "Re-open the welcome / permissions / personal info / connect flow. Settings already entered (API keys, etc.) stay as-is — this doesn't reset anything.") {
+            SettingsCard(title: "Onboarding") {
                 SettingsRow("Replay onboarding",
                             description: "Open the onboarding sheet again — useful to grant a permission you skipped, or change your AI provider.",
                             icon: "sparkles") {

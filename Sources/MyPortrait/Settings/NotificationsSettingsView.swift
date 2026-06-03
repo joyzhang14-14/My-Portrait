@@ -26,8 +26,7 @@ struct NotificationsSettingsView: View {
             }
 
             SettingsCard(
-                title: "Diagnostics",
-                footnote: "You won't get repeat alerts for the same problem within a minute."
+                title: "Diagnostics"
             ) {
                 SettingsRow("Capture stalls",
                             description: "Alert when audio or screen capture stops unexpectedly.",
@@ -37,8 +36,7 @@ struct NotificationsSettingsView: View {
             }
 
             SettingsCard(
-                title: "Muted cronJobs",
-                footnote: "Cron jobs added here won't trigger any notifications, no matter their configuration."
+                title: "Muted cronJobs"
             ) {
                 // 数据源是 CronJobStore 的 per-CronJob.muted 字段。
                 let muted = cronStore.cronJobs.filter { $0.muted }
