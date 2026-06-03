@@ -160,11 +160,10 @@ final class MemoryScheduler {
         //   Tier 1 = event / writing-capture —— 上游,生产 events / writing_records。
         //   Tier 2 = portrait / personality / writing-style —— 下游,消费 Tier 1
         //            写出来的东西。
-        // 规则:**本 tick 只要有任何 Tier-1 job 跑过,就直接 return,Tier-2 推迟
-        // 到下一个 tick**。原因:
-        //   ① 数据依赖 —— event 的 rebalance 会重写整个 events/,portrait/personality
-        //      读它,必须等 event 完全收尾(下个 tick)才读到稳定状态。
-        //   ② 资源 —— 避免一个 tick 内把上下游所有 LLM 流水线背靠背堆满,撞 budget。
+        // 规则:Tier-1 先跑(已 await 完成,保证收尾);若本 tick 有 Tier-1 跑过,
+        // **不等下一个 tick,而是留 10s 缓冲后在本 tick 接着跑 Tier-2** —— 上游
+        // 一跑完下游马上接力,不必干等 15 分钟。10s 缓冲让 event rebalance 重写
+        // 的 events/ 盘上写入 / DB 落定,Tier-2 读到稳定状态。
         // Tier-1 内部(event ↔ writing-capture)彼此无先后,可同 tick 一起跑。
         //
         // **追赶分支(catchUp)**:daily 频率下,只要有 pending 活 + 今天没跑过,
@@ -196,10 +195,12 @@ final class MemoryScheduler {
             tier1Ran = true
         }
 
-        // 有 Tier-1 跑过 → Tier-2 让位,等下一个 tick(见上方规则)。
+        // 有 Tier-1 跑过 → **本 tick 接着跑 Tier-2**(不等下一个 tick),只在
+        // 中间留 10s 缓冲:让 event rebalance 的盘上写入 / DB 落定,Tier-2 读到
+        // 稳定状态。Tier-1 已 await 完成(顺序保证),缓冲只是 settle time。
         if tier1Ran {
-            schedLog.info("tick: tier-1 (event/writing-capture) ran — deferring tier-2 to next tick")
-            return
+            schedLog.info("tick: tier-1 (event/writing-capture) ran — 10s buffer, then tier-2 in this tick")
+            try? await Task.sleep(nanoseconds: 10 * 1_000_000_000)
         }
 
         // classify(自动 EventClassifier 分 folder)已下线 —— chat AI 通过
