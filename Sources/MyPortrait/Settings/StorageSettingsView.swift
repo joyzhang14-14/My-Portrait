@@ -112,8 +112,7 @@ struct StorageSettingsView: View {
 
     private var autoDeleteCard: some View {
         SettingsCard(
-            title: "Auto-delete old data",
-            footnote: "Frees disk without you having to think about it. Recommended setting keeps your timeline searchable forever."
+            title: "Auto-delete old data"
         ) {
             SettingsRow("Retention window",
                         description: "Data older than this is eligible for auto-delete.",

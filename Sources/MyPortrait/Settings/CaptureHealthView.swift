@@ -141,8 +141,7 @@ struct CaptureHealthView: View {
     }
 
     private var recentCard: some View {
-        SettingsCard(title: "Recent stalls",
-                     footnote: "Up to 50 most recent verdicts kept in memory; cleared on app restart.") {
+        SettingsCard(title: "Recent stalls") {
             if recent.isEmpty {
                 Text("No stalls recorded.")
                     .font(.system(size: 12))
