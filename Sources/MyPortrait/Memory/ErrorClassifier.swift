@@ -27,9 +27,6 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
     case rateLimitThrottle(retryAfterMs: Int64?)
     /// SSE 中途断 / stopReason=length 截断 / pi 子进程异常退。重跑可能 OK。
     case streamTruncated(reason: String)
-    /// 单 prompt 超模型 ctx。pipeline 内可能要 chunking,但先按 transient 重试
-    /// (有时是数据日异常大)。
-    case contextOverflow(reason: String)
     /// SQLITE_BUSY / IOERR 短暂性 — busyTimeout + 退避就过。
     case dbBusy
     /// JSON 解析失败 / schema 不匹配 / 模型 refusal。LLMJSON 的 repair pass
@@ -53,11 +50,15 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
     /// pi-coding-agent / claude CLI 自身没装好 / 找不到 / 跑不起来。
     /// 用户需要重装 AI runtime。
     case agentSpawnFailed(reason: String)
+    /// 单 prompt 超模型 ctx。同 prompt 同模型重试永远超 —— 必须换大 ctx 模型。
+    /// 桶 B 让用户去 Settings → AI models 切;pipeline 内 chunking 是后续大改。
+    case contextOverflow(reason: String)
 
     /// 桶 B 的统一判定。
     var isUserRequired: Bool {
         switch self {
-        case .quotaExhausted, .authRevoked, .modelDeprecated, .dbCorrupt, .agentSpawnFailed:
+        case .quotaExhausted, .authRevoked, .modelDeprecated, .dbCorrupt,
+             .agentSpawnFailed, .contextOverflow:
             return true
         default: return false
         }
@@ -71,7 +72,6 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
             if let ms { return "Rate-limited (retry after \(ms / 1000)s)" }
             return "Rate-limited"
         case .streamTruncated(let r):     return "Response cut off (\(r))"
-        case .contextOverflow(let r):     return "Prompt too long for model context (\(r))"
         case .dbBusy:                     return "Local DB busy"
         case .schemaViolation(let r):     return "Model output couldn't be parsed (\(r))"
         case .unknownTransient(let r):    return "Transient error (\(r))"
@@ -80,6 +80,7 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         case .modelDeprecated(let m, _):  return "Model \(m) unavailable — pick another in Settings → AI models"
         case .dbCorrupt:                  return "Local DB looks corrupt — click Problem solved to quarantine + rebuild"
         case .agentSpawnFailed(let r):    return "AI runtime didn't start (\(r)) — re-install from Settings → AI"
+        case .contextOverflow(let r):     return "Prompt exceeds model context window (\(r)) — switch to a larger-context model in Settings → AI models, then click Problem solved"
         }
     }
 
@@ -89,7 +90,6 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         case .transientNetwork:           return "network"
         case .rateLimitThrottle:          return "rate-limit"
         case .streamTruncated:            return "truncated"
-        case .contextOverflow:            return "ctx-overflow"
         case .dbBusy:                     return "db-busy"
         case .schemaViolation:            return "schema"
         case .unknownTransient:           return "transient"
@@ -98,6 +98,7 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         case .modelDeprecated:            return "model-gone"
         case .dbCorrupt:                  return "db-corrupt"
         case .agentSpawnFailed:           return "spawn"
+        case .contextOverflow:            return "ctx-overflow"
         }
     }
 }
