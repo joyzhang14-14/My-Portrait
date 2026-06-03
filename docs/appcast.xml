@@ -12,6 +12,36 @@
         -->
 
         <item>
+            <title>1.2.62</title>
+            <pubDate>Wed, 03 Jun 2026 03:16:20 +0000</pubDate>
+            <sparkle:version>165</sparkle:version>
+            <sparkle:shortVersionString>1.2.62</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Live progress for Memory jobs</strong> — each manual run now shows the stage it's on (building events, scoring, analyzing your writing, …), and every job's staged results collect in one <strong>Pending review</strong> area.</li>
+                    <li><strong>Stop one job, not all of them</strong> — when several Memory jobs run at once, Stop now only stops the one you picked, and never touches your chats.</li>
+                    <li><strong>Follow-up Reminders</strong> now remembers items still open from previous runs and follows up on them, instead of starting fresh each time.</li>
+                    <li>Speakers settings: the old AI "Organize" is now a simpler <strong>Merge duplicates</strong>.</li>
+                    <li>A new <strong>Open ~/.portrait</strong> shortcut in Settings, plus a tidier sidebar order.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li>Pasted text no longer leaks stray placeholder characters into your captured writing.</li>
+                    <li>Fixed the last character of pinyin / IME input occasionally getting dropped.</li>
+                    <li>More reliable detection of when you've finished and sent a message.</li>
+                    <li>Memory's <strong>Needs attention</strong> list now shows plain-language status instead of internal codes.</li>
+                    <li>Fixed several Settings descriptions that didn't match what the control actually does, and trimmed a lot of jargon.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.62/MyPortrait_1.2.62_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="ND/tpFszt0cpp/4lBGNWh7sIzhbIiVXN3/B/hzg48OB2id/cgeKzyqJ68/CERulVhpuzH6K9iyh3f5eqht5vAQ==" length="25787556" />
+        </item>
+
+        <item>
             <title>1.2.51</title>
             <pubDate>Tue, 02 Jun 2026 10:08:55 +0000</pubDate>
             <sparkle:version>164</sparkle:version>
