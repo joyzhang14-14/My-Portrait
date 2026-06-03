@@ -187,6 +187,11 @@ final class ConfigStore {
         NSWorkspace.shared.activateFileViewerSelecting([path])
     }
 
+    /// 在 Finder 里打开整个 `~/.portrait` 数据目录(MemorySettingsView footer 按钮)。
+    func openPortraitDir() {
+        NSWorkspace.shared.open(Storage.rootURL)
+    }
+
     /// Read-only accessor used by tests / utilities.
     var fileURL: URL { path }
 

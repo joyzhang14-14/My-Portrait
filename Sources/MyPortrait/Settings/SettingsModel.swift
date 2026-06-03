@@ -16,7 +16,9 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     case data(DataPrivacy)
 
     enum App: String, Hashable, CaseIterable {
-        case display, general, aiModels, connections, notifications, health
+        // 显示顺序 = case 顺序(rawValue 仍是各自名字,改序不影响持久化的
+        // 选中 id)。General 在 Display 上、Connections 在 AI models 上。
+        case general, display, connections, aiModels, notifications, health
     }
     enum Capture: String, Hashable, CaseIterable {
         case screen, audio, typing
