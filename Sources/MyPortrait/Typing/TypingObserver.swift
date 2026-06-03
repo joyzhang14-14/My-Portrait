@@ -113,8 +113,7 @@ final class TypingObserver {
         ledger.onSubmitKey = { [weak self] in
             Task { @MainActor in
                 guard let self, self.running else { return }
-                try? await Task.sleep(nanoseconds: Self.submitRaceDelayNs)
-                await self.submitRaceRead()
+                await self.submitRaceBurst()
             }
         }
 
@@ -486,15 +485,17 @@ final class TypingObserver {
 
     // MARK: - 回车摇读(IME 末尾落字救援,实验性)
 
-    /// 回车后延迟多久再抢读。太短=读到落定前的拼音/双拼;太长=读到清空后。
-    /// 5ms 是起手实验值,救不回就真机调(聊天 app 字段落定→清空窗口约几~几十 ms)。
-    private static let submitRaceDelayNs: UInt64 = 5_000_000
+    /// 摇读的多档延迟(从回车起算的**累计 ms**):从极短扫到约一帧多。
+    /// 太短读到落字前的拼音/双拼、太长读到清空后,确切窗口因 app 而异 —— 所以扫一遍:
+    /// 最早读到非空值即喂(= 实际可行的最短延迟),一读到空(字段已清空)立即停,
+    /// 别再读到后面的占位符。研究参照:一帧 ~16ms,IME 落字传播大概率在一帧内。
+    private static let submitRaceDelaysMs: [UInt64] = [2, 5, 9, 14, 20]
 
-    /// 回车一按,延迟后抢读焦点字段现值喂回 writer —— 趁「发送清空/跳页」前把 IME
-    /// 末尾落定的字截下来。复用 processValueChange 同款安全读法(secure 跳过、读后重核
-    /// 仍是同一 element)。读到空/清空态则不喂(`!value.isEmpty`)。
+    /// 回车一按,按上面多档延迟连读焦点字段现值喂回 writer —— 趁「发送清空/跳页」前
+    /// 把 IME 末尾落定的字截下来。复用 processValueChange 同款安全读(secure 跳过、
+    /// 每读重核仍是同一 element)。读到空 → 停(已清空,别喂占位符)。
     @MainActor
-    private func submitRaceRead() async {
+    private func submitRaceBurst() async {
         guard running, let att = attachment, let focused = att.focusedElement else { return }
         let focBox = SendableBox(v: focused)
         let role: String? = await axCall {
@@ -503,15 +504,21 @@ final class TypingObserver {
             return (e == .success ? (ref as? String) : nil)
         }
         if TypingPrivacyFilter.isSecureRole(role) { return }
-        let value: String? = await axCall {
-            var ref: CFTypeRef?
-            let e = AXUIElementCopyAttributeValue(focBox.v, kAXValueAttribute as CFString, &ref)
-            return (e == .success ? (ref as? String) : nil)
+        var slept: UInt64 = 0
+        for target in Self.submitRaceDelaysMs {
+            try? await Task.sleep(nanoseconds: (target - slept) * 1_000_000)
+            slept = target
+            guard running, let att2 = attachment, let focused2 = att2.focusedElement,
+                  CFHash(focused2) == CFHash(focused) else { return }
+            let value: String? = await axCall {
+                var ref: CFTypeRef?
+                let e = AXUIElementCopyAttributeValue(focBox.v, kAXValueAttribute as CFString, &ref)
+                return (e == .success ? (ref as? String) : nil)
+            }
+            guard let value else { return }
+            if value.isEmpty { return }   // 字段已清空 → 停,别喂占位符
+            let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
+            writer.noteValueChange(key: key, newValue: value)
         }
-        guard running, let att2 = attachment, let focused2 = att2.focusedElement,
-              CFHash(focused2) == CFHash(focused),
-              let value, !value.isEmpty else { return }
-        let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
-        writer.noteValueChange(key: key, newValue: value)
     }
 }
