@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os.log
 
@@ -79,6 +80,11 @@ final class StallDetectorDriver {
             pendingAudio = (0, 0)
         }
 
+        // App 是否被遮挡(后台不可见)。遮挡 = macOS App Nap 领地,30s idle
+        // 心跳的 Task.sleep 会被拖长 → vision frozen 误判,故传给 evaluate 跳过。
+        // .visible 不在 occlusionState 里 = 完全被挡 / 最小化 / 退后台。
+        let appOccluded = !NSApp.occlusionState.contains(.visible)
+
         // 3) 判定。
         let fresh = StallDetector.shared.evaluate(
             vision: visionSnap,
@@ -87,7 +93,8 @@ final class StallDetectorDriver {
             permissionGranted: permissionGranted,
             captureEnabled: captureEnabled,
             audioEngineEnabled: audioEngineEnabled,
-            pendingAudio: pendingAudio
+            pendingAudio: pendingAudio,
+            appOccluded: appOccluded
         )
 
         // 4) 写 log + (开关亮时) 发通知。HealthMonitor.report 同时拨红状态栏。

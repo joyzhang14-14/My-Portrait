@@ -70,6 +70,7 @@ final class StallDetector {
         captureEnabled: Bool,
         audioEngineEnabled: Bool,
         pendingAudio: (count: Int, oldestAgeMs: Int64),
+        appOccluded: Bool = false,
         now: Date = Date()
     ) -> [StallVerdict] {
         var fresh: [StallVerdict] = []
@@ -100,7 +101,14 @@ final class StallDetector {
            nowMs - vision.startedAtMs > warmupMs {
             // 1. visionFrozenCapture:连续 60s+ 无任何抓帧尝试 (capture loop 卡死)。
             //    必须 attempts > 0 才报(否则就是 audio-only 用户根本没在抓)。
-            if vision.captureAttempts > 0,
+            //    **App 被遮挡(后台不可见)时跳过** —— 采集是事件驱动 + 30s idle
+            //    心跳,但后台被 macOS App Nap 时 Task.sleep(30s) 会被拖到 60-90s,
+            //    心跳漂移属预期,不是真冻结(用户一切回前台就立刻恢复)。这就是
+            //    health.log 反复 "no capture attempt in 64-93s" 假报的根因。
+            //    前台可见时照常检测 —— 那时本就有活动,也不会假报。真权限掉了
+            //    由 permissionRevoked 独立兜底,不受这条影响。
+            if !appOccluded,
+               vision.captureAttempts > 0,
                vision.lastAttemptMs > 0,
                nowMs - vision.lastAttemptMs > stallThresholdMs {
                 let cause = "no capture attempt in \(secAgo(vision.lastAttemptMs, now: nowMs))s"
