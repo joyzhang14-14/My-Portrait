@@ -27,7 +27,7 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(title: "Memory pipelines") {
                 SettingsRow("Scheduler run notifications",
-                            description: "Show a banner each time an automated pipeline finishes (event processing, portrait distillation, personality refresh, writing capture, speech style). Silent when there was nothing to process.",
+                            description: "Show in-app banners for every automated pipeline event (event processing, portrait distillation, personality refresh, writing capture, speech style):\n  ⚙️  Run finished — what was processed\n  🛑  Needs attention — action required (quota exhausted, auth revoked, model gone, DB corrupt)\n  🔁  Auto-recovering — transient failure, scheduler will retry (network blip, rate limit, app was closed mid-run)\nSilent when there was nothing to process.",
                             icon: "gearshape.2") {
                     Toggle("", isOn: config.binding(\.notifications.schedulerAlerts)).labelsHidden().toggleStyle(.switch)
                 }
