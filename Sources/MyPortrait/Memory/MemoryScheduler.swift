@@ -828,6 +828,15 @@ final class MemoryScheduler {
             // 用来算 backoff 间隔,不作为"放弃"门槛。频率由 backoffMs(retry:) 控制。
             let n = store.bumpRetry(date: date)
             store.setStatus(date: date, stage: stage, status: .failed)
+            // work() **返回** .failed(而非 throw,如部分天 llmFailedDays>0)时,
+            // runStep 的 catch 没触发 → recordFailure 没被调用,kind 为空 →
+            // postPipelineOutcomeAlert / attention 这套现成失败逻辑识别不到,会误判
+            // 成功(误记 success)。补 fallback kind(.unknownTransient 就是为"没分到
+            // 具体类的失败"设计的桶)。已有 kind(throw 路径写过)则不覆盖。
+            if lastFailureKind(date: date, stage: stage) == nil {
+                recordFailure(date: date, stage: stage,
+                              kind: .unknownTransient(reason: "\(stage.rawValue) step reported failure"))
+            }
             print("[Scheduler] \(date)/\(stage.rawValue): failed (retry_count=\(n), next retry in \(backoffMs(retry: n) / 1000)s)")
             DiagLog.warn("scheduler.stage.failed", ctx: [
                 "date": date, "stage": stage.rawValue, "retry": n,
