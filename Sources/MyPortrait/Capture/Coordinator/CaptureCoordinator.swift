@@ -302,6 +302,18 @@ actor CaptureCoordinator {
 
         lastCaptureAt = now
 
+        // 5b. active app 即时校正:focusInfo 来自 FocusProbe 缓存,靠 app 切换通知
+        //     刷新(节流 + 主线程 AX 遍历),滞后于实时截图 —— 切换瞬间会"画面是 B、
+        //     记录还是 A"。frontmostApplication 系统实时维护,据它校正 app 名/图标;
+        //     若确实切换了,旧的 windowTitle/url/axText 属于上一个 app,一并作废
+        //     (宁可空也别张冠李戴,下一帧缓存追上就有了)。
+        var recordFocus = focusInfo
+        if let live = await focus.liveFrontmostApp(), live.name != focusInfo.appName {
+            recordFocus = FocusInfo(appName: live.name, bundleId: live.bundleId,
+                                    windowTitle: nil, browserUrl: nil, axText: nil,
+                                    axIdentifier: nil, isFocused: true)
+        }
+
         // 6. JPG 路径（同步纯计算，立即可用）。
         let url = snapshot.predictURL(timestamp: now)
 
@@ -319,7 +331,7 @@ actor CaptureCoordinator {
         // 8. OCR（同步，主路径）。失败只 log，不阻塞入库。
         var ocrResult: OCRResult?
         do {
-            ocrResult = try await ocr.recognize(image: image, focus: focusInfo)
+            ocrResult = try await ocr.recognize(image: image, focus: recordFocus)
         } catch {
             logger.warning("OCR failed: \(String(describing: error), privacy: .public)")
             ocrResult = nil
@@ -328,10 +340,10 @@ actor CaptureCoordinator {
         // 9. 入库。
         let record = FrameRecord(
             timestampMs: Int64(now.timeIntervalSince1970 * 1000),
-            appName: focusInfo.appName,
-            windowName: focusInfo.windowTitle,
-            browserUrl: focusInfo.browserUrl,
-            focused: focusInfo.isFocused,
+            appName: recordFocus.appName,
+            windowName: recordFocus.windowTitle,
+            browserUrl: recordFocus.browserUrl,
+            focused: recordFocus.isFocused,
             deviceName: config.monitorId,
             snapshotPath: url.path,
             captureTrigger: trigger.rawValue
