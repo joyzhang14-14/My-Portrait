@@ -409,6 +409,7 @@ final class MemoryScheduler {
         let unprocessed = (try? distiller.store.unprocessedCount()) ?? 0
         guard unprocessed > 0 else {
             schedLog.info("writingStyle tick: 0 unprocessed writing_records — skip (waiting for writing_capture)")
+            store.appendPipelineRun(trigger: "scheduler", pipeline: "Speech style", outcome: "no-work", reason: nil)
             return
         }
         do {
@@ -419,6 +420,7 @@ final class MemoryScheduler {
                 success: true,
                 summary: "\(s.recordsCount) record\(s.recordsCount == 1 ? "" : "s") · \(s.draftsCount) draft\(s.draftsCount == 1 ? "" : "s")"
             ))
+            store.appendPipelineRun(trigger: "scheduler", pipeline: "Speech style", outcome: "success", reason: nil)
         } catch {
             schedLog.warning("writingStyle auto failed: \(String(describing: error), privacy: .public)")
             NotificationCenterService.shared.post(.schedulerRun(
@@ -426,6 +428,7 @@ final class MemoryScheduler {
                 success: false,
                 summary: error.localizedDescription
             ))
+            store.appendPipelineRun(trigger: "scheduler", pipeline: "Speech style", outcome: "failure", reason: error.localizedDescription)
         }
     }
 
@@ -449,6 +452,9 @@ final class MemoryScheduler {
                     summary: "\(summary.recordsCount) record\(summary.recordsCount == 1 ? "" : "s")"
                         + (summary.discardedCount > 0 ? " · \(summary.discardedCount) discarded" : "")
                 ))
+                store.appendPipelineRun(trigger: "scheduler", pipeline: "Writing capture", outcome: "success", reason: nil)
+            } else {
+                store.appendPipelineRun(trigger: "scheduler", pipeline: "Writing capture", outcome: "no-work", reason: nil)
             }
         } catch {
             schedLog.warning("writingCapture backlog failed: \(String(describing: error), privacy: .public)")
@@ -457,6 +463,7 @@ final class MemoryScheduler {
                 success: false,
                 summary: error.localizedDescription
             ))
+            store.appendPipelineRun(trigger: "scheduler", pipeline: "Writing capture", outcome: "failure", reason: error.localizedDescription)
         }
     }
 
