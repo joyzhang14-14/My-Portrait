@@ -924,6 +924,21 @@ enum DBSchema {
                 "UPDATE speakers SET embedding_model = 'en_campplus' WHERE embedding_model IS NULL")
         }
 
+        // memory pipeline 每次运行的历史(Run now / 定时;成功 / 失败 / 自动恢复 /
+        // 空跑都记)。Changelog 页展示最近 50 条。
+        m.registerMigration("v38_pipeline_runs") { db in
+            try db.create(table: "pipeline_runs") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("timestamp_ms", .integer).notNull()
+                t.column("trigger", .text).notNull()    // "run-now" | "scheduler"
+                t.column("pipeline", .text).notNull()   // UI 名,如 "Event processing"
+                t.column("outcome", .text).notNull()    // success | failure | auto-recovering | no-work
+                t.column("reason", .text)               // 失败原因;成功 / 空跑为 NULL
+            }
+            try db.create(index: "idx_pipeline_runs_ts",
+                          on: "pipeline_runs", columns: ["timestamp_ms"])
+        }
+
         return m
     }
 }

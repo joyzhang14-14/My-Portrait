@@ -505,6 +505,12 @@ final class MemoryScheduler {
         case busy          // 调度器或另一次触发正在跑
     }
 
+    /// 一次 pipeline 运行的触发来源 —— 记进 pipeline_runs(Changelog 页展示)。
+    enum RunTrigger: String, Sendable {
+        case runNow = "run-now"
+        case scheduler = "scheduler"
+    }
+
     /// event job 现在有没有活干（有未处理的天）。手动触发拍快照前先 check，
     /// 没活就直接罢工、不浪费快照。
     func eventJobHasWork() -> Bool {
@@ -529,7 +535,7 @@ final class MemoryScheduler {
     /// 处理至多 `dayCap` 个未完成的数据日（旧 → 新）。每天 event → impact
     /// 顺序跑，各自持锁 + 心跳。手动触发与定时触发走同一个函数。
     @discardableResult
-    func runEventJob() async -> JobOutcome {
+    func runEventJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
         guard canRunEvent else { return .busy }
         eventRunning = true
         defer { eventRunning = false }
@@ -539,6 +545,7 @@ final class MemoryScheduler {
         let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
             schedLog.info("event job: no pending days")
+            store.appendPipelineRun(trigger: trigger.rawValue, pipeline: "Event processing", outcome: "no-work", reason: nil)
             return .noWork
         }
         print("[Scheduler] event job — \(days.count) day(s) to process")
@@ -608,7 +615,8 @@ final class MemoryScheduler {
         postPipelineOutcomeAlert(
             pipeline: "Event processing",
             dates: dayStrings,
-            successSummary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")"
+            successSummary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")",
+            trigger: trigger
         )
         return outcome
     }
@@ -622,7 +630,7 @@ final class MemoryScheduler {
     /// 崩溃可恢复）。distiller 扫盘上所有非归档事件 —— 失败日的事件已被 event
     /// job 清除，所以盘上事件天然只来自 event 处理成功的日。
     @discardableResult
-    func runPortraitJob() async -> JobOutcome {
+    func runPortraitJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
         guard canRunDistill else { return .busy }
         distillRunning = true
         defer { distillRunning = false }
@@ -633,6 +641,7 @@ final class MemoryScheduler {
         let distill = store.row(for: distillAnchor)?.distill ?? .idle
         guard distill.needsWork else {
             schedLog.info("portrait job: distill is \(distill.rawValue, privacy: .public) — skip")
+            store.appendPipelineRun(trigger: trigger.rawValue, pipeline: "Portrait distillation", outcome: "no-work", reason: nil)
             return .noWork
         }
         print("[Scheduler] portrait job — distilling")
@@ -646,7 +655,8 @@ final class MemoryScheduler {
         postPipelineOutcomeAlert(
             pipeline: "Portrait distillation",
             dates: [distillAnchor],
-            successSummary: "Long-term portrait updated"
+            successSummary: "Long-term portrait updated",
+            trigger: trigger
         )
         return .ran(days: [distillAnchor])
     }
@@ -658,7 +668,7 @@ final class MemoryScheduler {
     /// distill(anchor 模式)不同 —— personality 跟 events 一样按天滚动,
     /// 进度落在每天那行的 `personality_status` 列。
     @discardableResult
-    func runPersonalityJob() async -> JobOutcome {
+    func runPersonalityJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
         guard canRunPersonality else { return .busy }
         personalityRunning = true
         defer { personalityRunning = false }
@@ -667,6 +677,7 @@ final class MemoryScheduler {
         let days = pendingPersonalityDays(cap: dayCap)
         guard !days.isEmpty else {
             schedLog.info("personality job: no pending days")
+            store.appendPipelineRun(trigger: trigger.rawValue, pipeline: "Personality refresh", outcome: "no-work", reason: nil)
             return .noWork
         }
         print("[Scheduler] personality job — \(days.count) day(s) to process")
@@ -698,7 +709,8 @@ final class MemoryScheduler {
         postPipelineOutcomeAlert(
             pipeline: "Personality refresh",
             dates: dayStrings,
-            successSummary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")"
+            successSummary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")",
+            trigger: trigger
         )
         return .ran(days: dayStrings)
     }
@@ -837,7 +849,7 @@ final class MemoryScheduler {
     /// - `pipeline`:UI 名 (e.g. "Event processing")
     /// - `dates`:本次 run 涉及的 ProcessingLog row date(锚行也算 1 个)
     /// - `successSummary`:全成功时用的 summary 文案
-    func postPipelineOutcomeAlert(pipeline: String, dates: [String], successSummary: String) {
+    func postPipelineOutcomeAlert(pipeline: String, dates: [String], successSummary: String, trigger: RunTrigger = .scheduler) {
         // 扫 dates 找最严重的 failure kind:优先 user-required > auto-transient。
         var userRequired: LLMFailureKind?
         var autoTransient: (kind: LLMFailureKind, retry: Int, updatedAtMs: Int64)?
@@ -861,6 +873,7 @@ final class MemoryScheduler {
                 kindLabel: kind.shortLabel,
                 userMessage: kind.userMessage
             ))
+            store.appendPipelineRun(trigger: trigger.rawValue, pipeline: pipeline, outcome: "failure", reason: kind.shortLabel)
             return
         }
         if let auto = autoTransient {
@@ -869,6 +882,7 @@ final class MemoryScheduler {
                 kindLabel: auto.kind.shortLabel,
                 nextRetryLabel: nextRetryLabel(retryCount: auto.retry, updatedAtMs: auto.updatedAtMs)
             ))
+            store.appendPipelineRun(trigger: trigger.rawValue, pipeline: pipeline, outcome: "auto-recovering", reason: auto.kind.shortLabel)
             return
         }
         // 全 complete / 无失败 kind → 老 success 通知。
@@ -877,6 +891,7 @@ final class MemoryScheduler {
             success: true,
             summary: successSummary
         ))
+        store.appendPipelineRun(trigger: trigger.rawValue, pipeline: pipeline, outcome: "success", reason: nil)
     }
 
     /// 给 UI / 通知用的人话:"in 10 min" / "in 1 h" / "in 6 h" / "in 24 h" /

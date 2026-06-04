@@ -9,7 +9,7 @@ struct MemorySettingsView: View {
     @Environment(AppState.self) private var appState
 
     @State private var attention: [MemoryScheduler.AttentionItem] = []
-    @State private var changelog: [ProcessingLogStore.ChangelogEntry] = []
+    @State private var changelog: [ProcessingLogStore.PipelineRunRecord] = []
 
     /// 手动触发的 pipeline 阶段（都烧 LLM token）。两个，对齐调度器的两个
     /// scheduler。Rebalance 不在列 —— 程序化的，已挂成 hook 在 rescore 后自动跑。
@@ -169,7 +169,7 @@ struct MemorySettingsView: View {
         Task.detached(priority: .userInitiated) {
             let scheduler = await MemoryScheduler.shared
             let att = scheduler.attentionDays()
-            let log = ProcessingLogStore().recentChangelog(limit: 50)
+            let log = ProcessingLogStore().recentPipelineRuns(limit: 50)
             await MainActor.run {
                 attention = att
                 changelog = log
@@ -279,7 +279,7 @@ struct MemorySettingsView: View {
         catch { actionStatus = "Can't start: \(error.localizedDescription)"; return }
 
         actionStatus = "Processing events… (Backfill + impact rescore)"
-        let outcome = await MemoryScheduler.shared.runEventJob()
+        let outcome = await MemoryScheduler.shared.runEventJob(trigger: .runNow)
         switch outcome {
         case .ran(let days):
             try? MemoryStaging.markRan(.events, days: days)
@@ -305,7 +305,7 @@ struct MemorySettingsView: View {
         catch { actionStatus = "Can't start: \(error.localizedDescription)"; return }
 
         actionStatus = "Distilling portrait from events…"
-        let outcome = await MemoryScheduler.shared.runPortraitJob()
+        let outcome = await MemoryScheduler.shared.runPortraitJob(trigger: .runNow)
         switch outcome {
         case .ran(let days):
             try? MemoryStaging.markRan(.portrait, days: days)
@@ -331,7 +331,7 @@ struct MemorySettingsView: View {
         catch { actionStatus = "Can't start: \(error.localizedDescription)"; return }
 
         actionStatus = "Refreshing personality (events + portraits + OCR)…"
-        let outcome = await MemoryScheduler.shared.runPersonalityJob()
+        let outcome = await MemoryScheduler.shared.runPersonalityJob(trigger: .runNow)
         switch outcome {
         case .ran(let days):
             try? MemoryStaging.markRan(.personality, days: days)
@@ -1571,11 +1571,11 @@ struct MemorySettingsView: View {
 
     private var changelogSection: some View {
         section(
-            title: "Portrait change history",
-            blurb: "A record of automatic updates the app made to your portrait, newest first."
+            title: "Pipeline run history",
+            blurb: "The last 50 memory-pipeline runs — Run now and scheduled, newest first."
         ) {
             if changelog.isEmpty {
-                Text("No portrait changes recorded yet.")
+                Text("No pipeline runs recorded yet.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1587,17 +1587,41 @@ struct MemorySettingsView: View {
         }
     }
 
-    private func changelogRow(_ entry: ProcessingLogStore.ChangelogEntry) -> some View {
+    /// outcome → (展示文案, 颜色)。
+    private static func runOutcomeStyle(_ outcome: String) -> (label: String, color: Color) {
+        switch outcome {
+        case "success":         return ("success", .green)
+        case "failure":         return ("failure", .red)
+        case "auto-recovering": return ("auto-recovering", .orange)
+        case "no-work":         return ("no work", .gray)
+        default:                return (outcome, .gray)
+        }
+    }
+
+    private func changelogRow(_ entry: ProcessingLogStore.PipelineRunRecord) -> some View {
         let date = Date(timeIntervalSince1970: Double(entry.timestampMs) / 1000)
-        let triggerCount = entry.triggeredByEventId?
-            .split(separator: ",").count ?? 0
+        let style = Self.runOutcomeStyle(entry.outcome)
+        let triggerLabel = entry.trigger == "run-now" ? "Run now" : "Scheduled"
         return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.entityId)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                Text("\(Self.changelogDateFmt.string(from: date)) · \(triggerCount) event(s)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(triggerLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
+                    Text(entry.pipeline)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                HStack(spacing: 4) {
+                    Text(Self.changelogDateFmt.string(from: date))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text("·").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(style.label + (entry.reason.map { " · \($0)" } ?? ""))
+                        .font(.system(size: 10))
+                        .foregroundStyle(style.color)
+                }
             }
             Spacer()
         }
