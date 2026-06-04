@@ -280,14 +280,25 @@ enum CronJobExecutor {
         }
     }
 
-    /// 抓回复里最后一个 `### Notify` 区块之后到结尾的文本。容忍大小写差异
-    /// 和首尾空白。返回 nil = LLM 没写 → 跳过通知。
+    /// 抓回复里最后一个 `### Notify` **区块标题(行首 markdown heading)** 之后
+    /// 到结尾的文本。返回 nil = LLM 没写真正的区块 → 跳过通知。
+    ///
+    /// ⚠️ 必须限定**行首 heading**,不能裸 `range(of: "### Notify")`:LLM 解释
+    /// 自己"这次不追加 ### Notify"时,那句话里**字面含** `### Notify`,旧逻辑会
+    /// 把那句尾巴(一个句号/空白)当通知内容发出去 → 空/乱码通知。再要求提取出
+    /// 的 body 含**实质字符**(字母/数字/CJK),只剩标点空白也不发。
     static func extractNotifyBody(from buf: String) -> String? {
-        guard let range = buf.range(of: "### Notify",
-                                    options: [.caseInsensitive, .backwards])
+        // (?m)^ 行首(可有缩进)+ 2~6 个 # + Notify 词界 + 可选冒号。
+        let pattern = "(?m)^[ \\t]*#{2,6}[ \\t]*Notify\\b[ \\t]*:?[ \\t]*"
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         else { return nil }
-        let tail = buf[range.upperBound...]
+        let ns = buf as NSString
+        let matches = re.matches(in: buf, range: NSRange(location: 0, length: ns.length))
+        guard let last = matches.last else { return nil }
+        let tail = ns.substring(from: last.range.location + last.range.length)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return tail.isEmpty ? nil : tail
+        // 实质内容:至少一个字母/数字(Character.isLetter 含 CJK)。否则是空通知,不发。
+        guard tail.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
+        return tail
     }
 }
