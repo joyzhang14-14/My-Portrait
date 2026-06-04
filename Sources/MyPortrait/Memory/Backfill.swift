@@ -132,8 +132,12 @@ enum Backfill {
             if sessions.isEmpty { continue }
 
             // Enrich + drop OCR-poor sessions (no OCR → nothing to summarise).
+            // maxOcrChars 2000→600:每个 session 的 OCR 前 ~600 字才有聚类信号(app
+            // 名 / 任务上下文),尾巴是重复噪音。session 主导 prompt,砍它直接把
+            // reasoning 模型在大 prompt 上的思考时间 + 额度都压下来(event 步太慢的
+            // 主因)。质量影响要跑几天对比 event 数 / dropped 率(下面那行日志)确认。
             let minOcrChars = 60
-            let maxOcrChars = 2000
+            let maxOcrChars = 600
             var enriched: [EventBuilder.EnrichedSession] = []
             for s in sessions {
                 let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: maxOcrChars)
