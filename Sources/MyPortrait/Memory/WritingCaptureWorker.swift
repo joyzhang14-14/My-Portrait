@@ -1077,11 +1077,19 @@ final class WritingCaptureWorker {
     /// entry text。发送清空时整条消息作为一条 delete 落进 edit_log → 用它取回原文;
     /// **排除 paste** —— paste 是突然贴上来、零击键的(占位符 / autofill / 收到内容),
     /// 不是用户打的,绝不能当成消息原文。
-    nonisolated static func longestEditLogText(_ editLogJSON: String) -> String? {
+    /// `excluding`(可选):排除掉等于此文本(trim 后)的 entry —— 用来剔除占位符。
+    /// 发送后输入框回到占位符,占位符会作为 commit/delete 落进 edit_log,且常比真消息
+    /// 还长(如 "Write a message…\n" 16字 > "用人脑来复制人的意识难度有多高" 13字),
+    /// 不排除就会被当成最长原文。传 sessionStart 进来即可剔掉它(占位符 == 开局值)。
+    nonisolated static func longestEditLogText(_ editLogJSON: String, excluding: String = "") -> String? {
         struct E: Decodable { let kind: String?; let text: String? }
         guard let data = editLogJSON.data(using: .utf8),
               let arr = try? JSONDecoder().decode([E].self, from: data) else { return nil }
-        return arr.filter { $0.kind != "paste" }.compactMap { $0.text }
+        let ex = excluding.trimmingCharacters(in: .whitespacesAndNewlines)
+        return arr.filter {
+            $0.kind != "paste"
+                && (ex.isEmpty || ($0.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) != ex)
+        }.compactMap { $0.text }
             .max(by: { $0.count < $1.count })
     }
 
@@ -1127,9 +1135,24 @@ final class WritingCaptureWorker {
     /// longestEditLogText 已排除 paste);再不行退回组里最后一个**非占位符**的非空 endValue。
     nonisolated static func bestGroupText(_ grp: [TypingEvent]) -> String {
         guard let last = grp.last else { return "" }
-        if !last.endValue.isEmpty, !Self.isPastedValue(last) { return last.endValue }
-        if let t = Self.longestEditLogText(last.editLog), !t.isEmpty { return t }
-        if let prev = grp.last(where: { !$0.endValue.isEmpty && !Self.isPastedValue($0) }) {
+        // 字段「回到开局」(endValue == sessionStart)= 发送/清空后回到初始态(占位符 or
+        // 原内容),endValue 不是这次写的字 —— 别用它。claudefordesktop 发送后回到
+        // "Write a message…":开局占位符、结尾又是占位符,return 后蹦出来的就是它。
+        func backToStart(_ e: TypingEvent) -> Bool {
+            let s = e.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !s.isEmpty
+                && e.endValue.trimmingCharacters(in: .whitespacesAndNewlines) == s
+        }
+        if !last.endValue.isEmpty, !Self.isPastedValue(last), !backToStart(last) {
+            return last.endValue
+        }
+        // 取打字内容:排除 paste + 排除占位符(== sessionStart)的最长 commit/delete。
+        if let t = Self.longestEditLogText(last.editLog, excluding: last.sessionStart), !t.isEmpty {
+            return t
+        }
+        if let prev = grp.last(where: {
+            !$0.endValue.isEmpty && !Self.isPastedValue($0) && !backToStart($0)
+        }) {
             return prev.endValue
         }
         // 没有任何打字内容 = 纯剪切板粘贴 / 占位符 / autofill → **一律丢**(返回空)。
