@@ -128,6 +128,17 @@ actor FocusProbe {
         cached
     }
 
+    /// 即时读系统**最前台 app**(名 + bundleId)。`NSWorkspace.frontmostApplication`
+    /// 由系统实时维护,**无 refresh 节流 / AX 遍历延迟**。采集帧用它校正 active app:
+    /// 缓存 `FocusInfo` 靠 didActivateApplication 通知刷新,会滞后于实时截图,切换
+    /// 瞬间会出现"画面是 B、缓存还是 A"。
+    func liveFrontmostApp() async -> (name: String, bundleId: String?)? {
+        await MainActor.run {
+            guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+            return (app.localizedName ?? "Unknown", app.bundleIdentifier)
+        }
+    }
+
     // MARK: - 私有
 
     private func refresh() async {
