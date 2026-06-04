@@ -23,6 +23,8 @@ struct CaptureHealthView: View {
 
     @State private var diagBundleBusy = false
     @State private var diagBundleStatus: String = ""
+    @State private var exportedBundleURL: URL?
+    @State private var showUploadGuide = false
 
     var body: some View {
         SettingsPage("Health",
@@ -38,6 +40,63 @@ struct CaptureHealthView: View {
         }
         .onAppear { startRefresh() }
         .onDisappear { stopRefresh() }
+        .sheet(isPresented: $showUploadGuide) {
+            if let url = exportedBundleURL { uploadGuideSheet(url: url) }
+        }
+    }
+
+    /// 导出诊断包后弹的引导:包路径 + 打开 GitHub Issues + 3 步简易教程。
+    private func uploadGuideSheet(url: URL) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "ladybug.fill").foregroundStyle(.orange)
+                Text("Diagnostic bundle ready").font(.system(size: 15, weight: .semibold))
+            }
+            Text("Saved to your Downloads folder:\n\(url.lastPathComponent)")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Text("Send it for a bug report — 3 steps:")
+                .font(.system(size: 12, weight: .medium))
+            VStack(alignment: .leading, spacing: 7) {
+                uploadStep(1, "Click \u{201C}Open GitHub Issues\u{201D} below — it opens a new issue in your browser.")
+                uploadStep(2, "Write one line: what happened, and how to trigger it.")
+                uploadStep(3, "Drag this zip from Downloads into the issue, then submit.")
+            }
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                Button("Open GitHub Issues") {
+                    if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new") {
+                        NSWorkspace.shared.open(issue)
+                    }
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+                Spacer()
+                Button("Done") { showUploadGuide = false }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+    }
+
+    private func uploadStep(_ n: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(n).")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// 一键导出诊断 zip。无 PII,纯结构 + 日志 + 状态。
@@ -70,7 +129,8 @@ struct CaptureHealthView: View {
             do {
                 let url = try await DiagnosticBundle.build()
                 diagBundleStatus = "Saved: \(url.path)"
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+                exportedBundleURL = url
+                showUploadGuide = true   // 弹引导窗口:去 GitHub Issues 上传 + 教程
             } catch {
                 diagBundleStatus = "Export failed: \(error.localizedDescription)"
             }
