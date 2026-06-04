@@ -282,6 +282,10 @@ final class ChatController {
                 if isFirstTurnOfConv {
                     sections.append(MPQuerySkill.preamble)
                     sections.append(FoldersSkill.preamble)
+                } else {
+                    // 第 2 轮起 session 还在,但完整 SKILL 只第 1 轮发过 —— 补一句精简
+                    // 提醒,否则模型"忘了"自己能查数据,会直接答"不知道"(用户痛点)。
+                    sections.append(MPQuerySkill.reminder)
                 }
                 if !context.markdown.isEmpty { sections.append(context.markdown) }
                 if !attachments.isEmpty {
