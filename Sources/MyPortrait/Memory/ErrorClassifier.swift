@@ -137,6 +137,11 @@ enum ErrorClassifier {
     /// 把任意 Swift Error 翻成 LLMFailureKind。**保守** —— 没匹配上 user-required
     /// 模式时一律 .unknownTransient,宁可吵一点也别假装"已修复"骗用户。
     static func classify(_ error: Error) -> LLMFailureKind {
+        // 0. runStep 60min 兜底 timeout(scheduler 主动杀子进程后抛的)。
+        //    归 unknownTransient + 详细 reason,backoff 自然推迟下次重试。
+        if let te = error as? StepTimeoutError {
+            return .unknownTransient(reason: te.errorDescription ?? "step timed out")
+        }
         // 1. Budget signal:已有 BudgetExhaustedError(MemoryScheduler 也在外面单独
         //    catch 一次走 budget_deferred 分支,这里走到说明走到通用 catch 了)。
         if let be = error as? BudgetExhaustedError {

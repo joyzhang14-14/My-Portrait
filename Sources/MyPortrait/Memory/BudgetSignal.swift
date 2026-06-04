@@ -36,3 +36,16 @@ struct BudgetExhaustedError: LocalizedError {
         "LLM budget exhausted (\(processor)): \(message)"
     }
 }
+
+/// runStep 包了一个 60min 兜底 timeout —— 如果 LLM call 死 hang(没自己
+/// timeout),scheduler 主动认输,杀子进程 + 标 failed,避免 in-memory
+/// eventRunning flag 永远 stale 让 UI 卡死 "Running"。
+struct StepTimeoutError: LocalizedError {
+    let stage: String
+    let date: String
+    let timeoutMinutes: Int
+
+    var errorDescription: String? {
+        "Pipeline step '\(stage)' on \(date) exceeded \(timeoutMinutes) min hard timeout — killed LLM process and marked failed."
+    }
+}

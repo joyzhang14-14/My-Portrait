@@ -682,6 +682,15 @@ final class MemoryScheduler {
                 let cfg = self.memoryCfg
                 let r = try await PersonalityRefresh(provider: cfg.resolvedProvider, model: cfg.resolvedModel, clusterModel: cfg.resolvedModelLight).refresh(day: day)
                 print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
+                // **可疑空值 → .failed 触发重试**,别静默标 complete 永久锁死。
+                // 只针对"有高权重事件 + LLM 提了 tag,却被 OCR 验证全丢光"这一种 ——
+                // 这是真 bug 现场(配合 minOCRFrames 降到 15,重试有机会通过)。
+                // 真低活跃日(eventsAboveWeight==0)或 LLM 判断无特质(snapshotTags==0)
+                // 是合法的空,照常 .success,不重试、不噪音。
+                if r.eventsAboveWeight > 0, r.snapshotTags > 0, r.ocrKept == 0 {
+                    schedLog.notice("personality \(ds, privacy: .public): \(r.snapshotTags) tag(s) all dropped at OCR gate → .failed (will retry)")
+                    return .failed
+                }
                 return .success
             }
         }
@@ -720,6 +729,20 @@ final class MemoryScheduler {
             default:           return PipelineOwner.event   // raw / event / impact / classify
             }
         }()
+        // 60min 兜底 timeout —— detached timer task,到点杀 owner 的 LLM
+        // 子进程。PiAgent 的 stdin/stdout 断开 → work() 内 await 抛错 →
+        // catch 走 .failed → defer 自然清 eventRunning,UI 不再卡死 "Running"。
+        // work() 正常返回 → defer 取消 timer。
+        let stageRaw = stage.rawValue
+        let timeoutTask = Task.detached(priority: .background) {
+            try? await Task.sleep(nanoseconds: 60 * 60 * 1_000_000_000)
+            if !Task.isCancelled {
+                schedLog.error("\(date, privacy: .public)/\(stageRaw, privacy: .public): timeout after 60min — killing LLM children")
+                await MemoryScheduler.shared._fireStepTimeout()
+            }
+        }
+        defer { timeoutTask.cancel() }
+
         let outcome: StepOutcome
         do {
             outcome = try await PiAgentRegistry.$owner.withValue(owner) { try await work() }
@@ -741,6 +764,12 @@ final class MemoryScheduler {
 
         applyOutcome(date: date, stage: stage, outcome: outcome, rollbackDay: rollbackDay)
         store.releaseLock(date: date)
+    }
+
+    /// runStep 60min timer 到点回调 —— 杀 LLM 子进程,defer 自然清 in-memory
+    /// flag。@MainActor 因为 PiAgentRegistry.shared.stopAll 也 @MainActor。
+    func _fireStepTimeout() {
+        _ = PiAgentRegistry.shared.stopAll()
     }
 
     /// 把一个步的结果落库：成功 → complete；撞额度 → budget_deferred（不计
