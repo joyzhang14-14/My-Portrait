@@ -534,7 +534,8 @@ private struct FolderDisclosureRow: View {
     let onDelete: () -> Void
 
     @State private var expanded: Bool = false
-    @State private var hover: Bool = false
+    /// 只跟踪指针是否在删除按钮本身上(不是整行)。
+    @State private var trashHover: Bool = false
     @State private var confirmingDelete: Bool = false
 
     /// 给 folder 名稳定挑一个柔和的色相,跟 macOS Finder 自带 tag 颜色一脉。
@@ -587,21 +588,21 @@ private struct FolderDisclosureRow: View {
                                 Capsule().stroke(tint.opacity(0.25), lineWidth: 0.5)
                             )
                     )
-                // 删除按钮 —— 放在数字右边。常驻但低调,hover 变亮。
-                // 只取消分组,不删事件。
+                // 删除按钮 —— 放在数字右边。常驻但低调,**只有指针碰到按钮本身**
+                // 才变亮(用独立 trashHover,不跟整行 hover 走)。只取消分组,不删事件。
                 Button { confirmingDelete = true } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary.opacity(hover ? 0.9 : 0.4))
+                        .foregroundStyle(.secondary.opacity(trashHover ? 0.9 : 0.4))
                 }
                 .buttonStyle(.plain)
+                .onHover { trashHover = $0 }
                 .help("Delete folder (ungroups its events; the events are kept)")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
             .contentShape(Rectangle())
             .onTapGesture { expanded.toggle() }
-            .onHover { hover = $0 }
             .confirmationDialog(
                 "Delete folder “\(title)”?",
                 isPresented: $confirmingDelete,
