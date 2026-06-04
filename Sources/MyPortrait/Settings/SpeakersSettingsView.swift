@@ -60,6 +60,18 @@ struct SpeakersSettingsView: View {
                         .foregroundStyle(Color.orange.opacity(0.9))
                 }
                 .padding(.horizontal, 4)
+            } else if let msg = reidentify.lastResultMessage {
+                // 重扫跑完的一次性反馈(绿勾)。用户离开本页(.onDisappear)即清掉,下次进来不再显示。
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.green.opacity(0.85))
+                    Text(msg)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.65))
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
             }
 
             // 重扫期间整块编辑禁用(直到跑完 / Stop)。Stop 按钮在上面指示条里,不受影响。
@@ -122,6 +134,8 @@ struct SpeakersSettingsView: View {
         .onChange(of: config.current.capture.audio.speakerEmbeddingModel) { _, _ in reload() }
         // 重扫跑完(isRunning true→false)→ 重新加载列表,反映归拢结果。
         .onChange(of: reidentify.isRunning) { _, running in if !running { reload() } }
+        // 离开 Speakers 页 → 清掉完成反馈(一次性:用户看到后,下次进来不再显示)。
+        .onDisappear { reidentify.clearResult() }
     }
 
     // MARK: - Toolbar
@@ -1078,6 +1092,8 @@ private enum SpeakerLoader {
 final class SpeakerReidentifyCoordinator {
     static let shared = SpeakerReidentifyCoordinator()
     private(set) var isRunning = false
+    /// 重扫**正常跑完**的一次性反馈(绿勾)。用户离开 Speakers 页再进来即清空。
+    private(set) var lastResultMessage: String?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// 待提交的"改名落库"动作 —— 重扫**跑完才执行**;Stop 则丢弃(= 改名作废)。
     @ObservationIgnored private var pendingCommit: (@Sendable () -> Void)?
@@ -1093,20 +1109,29 @@ final class SpeakerReidentifyCoordinator {
             if Task.isCancelled { return }
             guard let self else { return }
             self.isRunning = true
-            _ = await SpeakerReidentifier.shared.reidentifyToday()
+            self.lastResultMessage = nil
+            let outcome = await SpeakerReidentifier.shared.reidentifyToday()
+            if Task.isCancelled { return }   // Stop:不提交、不给完成反馈
             if let c = self.pendingCommit { await Task.detached { c() }.value; self.pendingCommit = nil }
             self.isRunning = false
+            self.lastResultMessage = outcome.updated > 0
+                ? "Re-identified today's audio — \(outcome.updated) clip\(outcome.updated == 1 ? "" : "s") re-grouped."
+                : "Re-identified today's audio — no changes."
         }
     }
 
     /// Stop:取消重扫(写库前退出 = 段全不变)+ **丢弃待提交的改名**(= 改名撤销,
-    /// 视图随后 reload 读回旧名字)。
+    /// 视图随后 reload 读回旧名字)。不给完成反馈。
     func cancel() {
         task?.cancel()
         task = nil
         pendingCommit = nil
         isRunning = false
+        lastResultMessage = nil
     }
+
+    /// 用户离开 Speakers 页时清掉反馈 —— 下次进来不再显示(一次性)。
+    func clearResult() { lastResultMessage = nil }
 }
 
 // Workaround for the inline string interpolation used in ProgressHeader
