@@ -12,6 +12,30 @@
         -->
 
         <item>
+            <title>1.2.89</title>
+            <pubDate>Thu, 04 Jun 2026 19:53:15 +0000</pubDate>
+            <sparkle:version>168</sparkle:version>
+            <sparkle:shortVersionString>1.2.89</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Better bug reporting</strong> — When something goes wrong, the diagnostic bundle (Settings → Health → "Export diagnostic bundle") now includes crash and out-of-memory reports, and exporting one walks you through filing a bug report — complete with a GitHub issue template that asks for the bundle.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Fixed an audio-capture crash</strong> — Rapidly toggling Audio Capture on/off, or a Bluetooth mic switching mid-session, no longer crashes the app.</li>
+                    <li><strong>No more empty Follow-up Reminders notifications</strong> — When there's nothing urgent to flag, the reminder stays quiet instead of sending a blank notification.</li>
+                    <li><strong>Cleaner wording</strong> — Tidied the empty-state text for portrait categories, and the diagnostic export note now correctly says Downloads (not Desktop).</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.89/MyPortrait_1.2.89_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="HEt3Gn0mGxg2lUm0gsk/UVrcvWmJKotBNYdYnvHyfE8Mi645AT5Yt7NR6Dl8Ujb76BOCSoEj9sVzJwRXoOoFDQ==" length="26106853" />
+        </item>
+
+        <item>
             <title>1.2.85</title>
             <pubDate>Thu, 04 Jun 2026 17:04:28 +0000</pubDate>
             <sparkle:version>167</sparkle:version>
