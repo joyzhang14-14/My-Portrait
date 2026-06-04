@@ -372,7 +372,10 @@ enum MPQueryCLI {
         let start = parseTime(opts["start"], anchor: .start) ?? Date().addingTimeInterval(-3600)
         let end = parseTime(opts["end"], anchor: .end) ?? Date()
         let speaker = opts["speaker"]
-        let limit = Int(opts["limit"] ?? "60") ?? 60
+        // 默认 500(原 60 太小):会议转译每分钟几十条,60 条只够 ~4 分钟,
+        // 后半段(audioTranscripts 是 ASC 取最早 N 条)会被截掉 —— 模型据此误判
+        // "没讨论"。500 覆盖一整场典型会议,一次拉全,弱模型也不用自己重拉。
+        let limit = Int(opts["limit"] ?? "500") ?? 500
 
         let db = TimelineDB()
         guard db.exists else { errJSON("timeline DB not found at \(db.dbPath)") }
@@ -393,7 +396,10 @@ enum MPQueryCLI {
             "data": out,
             "start_time": iso8601(start),
             "end_time": iso8601(end),
-            "result_count": out.count
+            "result_count": out.count,
+            // 触达上限 = 这段时间内还有更多没拉到(ASC 取最早 N 条,后半段会漏)。
+            // 模型据此缩小时间窗口分段续拉,或加大 --limit —— 别把"没拉到"当"没发生"。
+            "truncated": out.count >= limit
         ])
     }
 

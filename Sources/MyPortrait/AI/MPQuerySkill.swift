@@ -16,7 +16,9 @@ enum MPQuerySkill {
         worked on, run mp-query BEFORE answering — never say you don't know without \
         checking. Start with `mp-query activity-summary --start today` (widen if \
         needed: `1h ago` / `2d ago` / `7d ago`), then `mp-query audio` for transcripts \
-        or `mp-query search --content ocr` for on-screen text.
+        or `mp-query search --content ocr` for on-screen text. To summarize a meeting, \
+        read its FULL time range; if a result is `"truncated": true` you missed the later \
+        part — pull the rest before answering, never say it "wasn't discussed".
         """
 
     /// 拼到每个 conversation 第一条用户消息前。新 conv = 新 Pi 进程 = SKILL
@@ -48,8 +50,14 @@ enum MPQuerySkill {
           → matching screen frames + audio transcripts. Drop --q to get
             recent frames in the range; use --q for keyword filter.
 
-        mp-query audio --start "1h ago" [--end "now"] [--limit 60]
-          → audio transcriptions in a range (microphone + system audio).
+        mp-query audio --start "1h ago" [--end "now"] [--limit 500]
+          → audio transcriptions in a range (microphone + system audio),
+            oldest-first. Default pulls up to 500 — enough for a whole
+            meeting. **To summarize a meeting, bracket its full time range
+            and read ALL of it.** If the response has `"truncated": true`
+            you only got the EARLIEST slice (later parts missing) — narrow
+            the window and pull the rest, or raise --limit. NEVER conclude
+            something "wasn't discussed" from a truncated result.
 
         mp-query memories --q "keyword" [--scope portrait|events] [--limit 20]
           → search the user's curated knowledge base — TWO scopes by default:
