@@ -171,10 +171,15 @@ enum DiagnosticBundle {
             at: reportsDir,
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]) else { return }
-        // 进程名 = CFBundleExecutable = "MyPortrait";崩溃文件 MyPortrait-<date>-…ips。
+        // 两类都要:
+        //   - MyPortrait-<date>-….ips/.crash —— app 自己的代码崩溃(进程名 = MyPortrait)
+        //   - JetsamEvent-<date>-….ips —— **OOM**:进程被系统 SIGKILL,不生成
+        //     MyPortrait-*.ips,只进系统级 jetsam 报告。**闪退却没 .ips 多半是这个**,
+        //     jetsam 报告里有被杀进程清单(含 MyPortrait + 内存占用)。
         let crashes = items.filter {
-            $0.lastPathComponent.hasPrefix("MyPortrait")
-                && ["ips", "crash"].contains($0.pathExtension.lowercased())
+            let n = $0.lastPathComponent
+            return ["ips", "crash"].contains($0.pathExtension.lowercased())
+                && (n.hasPrefix("MyPortrait") || n.hasPrefix("JetsamEvent"))
         }
         guard !crashes.isEmpty else { return }
         let recent = crashes.sorted {
@@ -183,7 +188,7 @@ enum DiagnosticBundle {
             let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
             return a > b
-        }.prefix(5)
+        }.prefix(8)
         let dstDir = workDir.appendingPathComponent("crash-reports", isDirectory: true)
         try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
         for src in recent {
