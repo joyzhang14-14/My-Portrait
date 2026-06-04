@@ -74,7 +74,7 @@ struct CaptureHealthView: View {
                 }
                 .buttonStyle(.bordered).controlSize(.small)
                 Button("Open GitHub Issues") {
-                    if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new") {
+                    if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
                         NSWorkspace.shared.open(issue)
                     }
                 }
