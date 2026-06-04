@@ -121,6 +121,19 @@ final class WritingCaptureCanvasAgent {
                 prompt: "(canvas: empty body)", rawResponse: "", records: [], discarded: [])
         }
 
+        // 击键覆盖闸门(跟 AX 分支同款)：OCR 重建出一大段文字,但本 session 里几乎
+        // 没有击键 = 屏上显示的**别人内容**(AI 回复 / 文章 / 页面),不是用户写的 → 丢。
+        // 真文章是一个字一个字敲的(击键 ≥ 字数);AI 回复零敲(几十击键产不出几百字)。
+        // 实测:Notes 1917字/2890击键、Safari 2770字/5082击键(留);systempref AI 回复
+        // 几百字/47击键(丢)。短文(≤20字)不卡,跟 AX 分支保持一致。
+        let kc = session.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
+        if body.count > 20 && kc < body.count / 4 {
+            canvasLog.info("canvas \(groupApp, privacy: .public): dropped — \(kc) keys vs \(body.count) chars (屏上非用户内容)")
+            return WritingCapturePass3Agent.Output(
+                prompt: "(canvas: dropped, keystroke coverage \(kc)/\(body.count))",
+                rawResponse: "", records: [], discarded: [])
+        }
+
         let record = WritingCaptureRecord(
             text: body,
             editLog: allEdits,
