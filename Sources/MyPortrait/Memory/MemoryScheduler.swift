@@ -719,6 +719,13 @@ final class MemoryScheduler {
         // 发现并释放锁。
         store.acquireLock(date: date, processor: processor)
         store.setStatus(date: date, stage: stage, status: .inProgress)
+        // 清掉这 stage 的旧 failure kind —— 准备让本次 run 的结果覆盖。
+        // 防 bug:上次 paused recovery 写 .appInterruptionRestarted,
+        // 之后 LLM 跑也失败但 kind 没被新错误覆盖(例如 isRawReady 跳过 /
+        // Backfill 早期 throw before 写 kind)→ postPipelineOutcomeAlert
+        // 拿到 stale "interrupted" → 每次启动都弹"中断了"通知,即使本次
+        // 根本没在跑中断。
+        clearFailure(date: date, stage: stage)
         let hb = startHeartbeat(for: date)
 
         // 按 stage 派 pipeline owner —— Stop 时只杀本 pipeline 的 LLM 子进程。
