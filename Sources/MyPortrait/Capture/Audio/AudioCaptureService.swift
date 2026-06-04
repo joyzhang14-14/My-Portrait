@@ -2,6 +2,10 @@
 import CoreAudio
 import Foundation
 import os.log
+#if canImport(MyPortraitObjC)
+import MyPortraitObjC   // ObjC try/catch wrapper:SwiftPM 当独立 module 要 import;
+                       // Xcode 走 bridging header 时 canImport 为 false,helper 全局可见。
+#endif
 
 /// 麦克风常开录音。**实时 VAD 切段**（设计文档"VAD 分段：检测到静音超过
 /// 阈值时切断当前音频，开始新一段"）。
@@ -191,6 +195,16 @@ actor AudioCaptureService {
         // 之后再改 CurrentDevice 已晚。空字符串 = follow system default (跳过)。
         Self.bindPreferredInputDevice(inputNode: inputNode, logger: logger)
         let inputFormat = inputNode.outputFormat(forBus: 0)
+        // 设备不可用/切换瞬间(疯狂开关 audio capture、蓝牙断连),outputFormat 会是
+        // sampleRate=0 的无效格式,后面 installTap 拿它会抛 NSException → SIGABRT
+        // 闪退(线上崩溃栈正是 installTap → NSException → abort)。前置挡掉,让
+        // start() 优雅失败而不是杀进程。
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw NSError(domain: "AudioCaptureService", code: -3, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Input device has no valid format (sampleRate=\(inputFormat.sampleRate), ch=\(inputFormat.channelCount)) — device unavailable or switching",
+            ])
+        }
 
         guard let target = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -219,16 +233,36 @@ actor AudioCaptureService {
         // 是 no-op。撞 `nullptr == Tap()` 的根因是重复 install,这里兜底。
         inputNode.removeTap(onBus: 0)
         tapInstalled = false
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
-            [weak self] buffer, _ in
-            guard let self else { return }
-            Task { [weak self] in
-                await self?.performConversion(buffer: buffer)
+        // installTap / engine.start 在格式不匹配 / aggregate device 异常时用
+        // **NSException** 报错,Swift 接不住 → 直接 SIGABRT 闪退(线上崩溃就是这个)。
+        // 用 MyPortraitObjC 的 try/catch helper(本就是为这俩造的,之前没接线)兜住,
+        // 转成 Swift error 让 start() 优雅失败。block 只碰 local 变量,避开 actor 隔离;
+        // tapInstalled 在成功后于 block 外置位。
+        var startError: Error?
+        let nsErr = MyPortraitObjCTryCatch {
+            inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
+                [weak self] buffer, _ in
+                guard let self else { return }
+                Task { [weak self] in
+                    await self?.performConversion(buffer: buffer)
+                }
             }
+            do { try engine.start() } catch { startError = error }
+        }
+        if let nsErr {
+            inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+            throw NSError(domain: "AudioCaptureService", code: -4, userInfo: [
+                NSLocalizedDescriptionKey: "audio tap/engine failed (NSException): \(nsErr.localizedDescription)",
+                "underlying": nsErr,
+            ])
+        }
+        if let startError {
+            inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+            throw startError
         }
         tapInstalled = true
-
-        try engine.start()
 
         // 通知 AudioDevicesMonitor:app 现在在录哪个 device(UI live status)。
         // 不阻塞主路径,fire-and-forget。
