@@ -128,7 +128,7 @@ final class WritingCaptureCanvasAgent {
         // 几百字/47击键(丢)。短文(≤20字)不卡,跟 AX 分支保持一致。
         let kc = session.keystrokes.filter { ($0.modifiers & 0x07) == 0 }.count
         if body.count > 20 && kc < body.count / 4 {
-            canvasLog.info("canvas \(groupApp, privacy: .public): dropped — \(kc) keys vs \(body.count) chars (屏上非用户内容)")
+            canvasLog.info("canvas \(groupApp, privacy: .public): dropped — \(kc) keys vs \(body.count) chars (on-screen non-user content)")
             return WritingCapturePass3Agent.Output(
                 prompt: "(canvas: dropped, keystroke coverage \(kc)/\(body.count))",
                 rawResponse: "", records: [], discarded: [])
