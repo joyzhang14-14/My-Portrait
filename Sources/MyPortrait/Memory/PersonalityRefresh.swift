@@ -21,8 +21,10 @@ final class PersonalityRefresh {
     /// "随手刷一下"和"做了件正经事"的差距。
     nonisolated static let minEventWeight: Double = 3.0
     /// OCR 验证门槛: tag.ocr_keywords 命中的当天帧数 ≥ 这个值才落盘。
-    /// 20 帧 ~= 1 分钟的屏幕时间(15s/帧抽样),够说明"不是偶然飘过一眼"。
-    nonisolated static let minOCRFrames: Int = 20
+    /// 15 帧 ~= 45 秒屏幕时间(15s/帧抽样),仍够说明"不是偶然飘过一眼"。
+    /// 原来 20(=1min)太严:LLM 常提抽象/概念关键词,逐字命中难凑够 20 帧,
+    /// 导致整天 tag 全被丢、personality 返回空。降到 15 减少误丢。
+    nonisolated static let minOCRFrames: Int = 15
 
     struct Report: Sendable {
         let day: Date
