@@ -799,8 +799,10 @@ struct MemorySettingsView: View {
         do {
             let s = try await distiller.runManual()
             writingStyleUI.statusMessage = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
+            recordWritingRun("Speech style", s.recordsCount > 0 ? "success" : "no-work")
         } catch {
             writingStyleUI.statusMessage = "Failed: \(error.localizedDescription)"
+            recordWritingRun("Speech style", "failure", reason: error.localizedDescription)
         }
     }
 
@@ -902,6 +904,14 @@ struct MemorySettingsView: View {
     }
 
     @MainActor
+    /// run-now writing 路径记一条 pipeline_runs(trigger=run-now)。off-main 写,
+    /// 跟 reload 的 recentPipelineRuns 同一张表 → Changelog 页能看到。
+    private func recordWritingRun(_ pipeline: String, _ outcome: String, reason: String? = nil) {
+        Task.detached {
+            ProcessingLogStore().appendPipelineRun(trigger: "run-now", pipeline: pipeline, outcome: outcome, reason: reason)
+        }
+    }
+
     private func runWritingCapture() async {
         guard let worker = WritingCaptureWorker.shared else {
             writingCaptureUI.statusMessage = "Worker not initialized (Services not started yet?)."
@@ -919,16 +929,21 @@ struct MemorySettingsView: View {
             switch s.status {
             case .approved:
                 writingCaptureUI.statusMessage = "No new data since last cursor — nothing staged."
+                recordWritingRun("Writing capture", "no-work")
             case .pendingReview:
                 writingCaptureUI.statusMessage =
                     "Done. \(s.recordsCount) record(s) / \(s.discardedCount) discarded — pending review below."
+                recordWritingRun("Writing capture", "success")
             case .failed:
                 writingCaptureUI.statusMessage = "Failed: \(s.errorMessage ?? "(unknown)")"
+                recordWritingRun("Writing capture", "failure", reason: s.errorMessage)
             default:
                 writingCaptureUI.statusMessage = "Status: \(s.status.rawValue)"
+                recordWritingRun("Writing capture", "success")
             }
         } catch {
             writingCaptureUI.statusMessage = "Run failed: \(error.localizedDescription)"
+            recordWritingRun("Writing capture", "failure", reason: error.localizedDescription)
         }
         refreshWritingCapture()
     }
