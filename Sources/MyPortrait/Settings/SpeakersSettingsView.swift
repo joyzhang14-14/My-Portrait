@@ -1114,9 +1114,10 @@ final class SpeakerReidentifyCoordinator {
             if Task.isCancelled { return }   // Stop:不提交、不给完成反馈
             if let c = self.pendingCommit { await Task.detached { c() }.value; self.pendingCommit = nil }
             self.isRunning = false
+            // 0 改动是改名常态,不打扰;只有真归拢了段才给绿勾。
             self.lastResultMessage = outcome.updated > 0
                 ? "Re-identified today's audio — \(outcome.updated) clip\(outcome.updated == 1 ? "" : "s") re-grouped."
-                : "Re-identified today's audio — no changes."
+                : nil
         }
     }
 
