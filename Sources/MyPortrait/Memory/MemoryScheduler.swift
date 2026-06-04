@@ -175,6 +175,22 @@ final class MemoryScheduler {
         store.row(for: date)
     }
 
+    /// 给 UI 用的"真有 stage 在跑" probe —— 读 DB,不信 in-memory eventRunning
+    /// (如果 runStep 内 await 死 hang,defer 不跑 → in-memory flag 永远 stale)。
+    /// 任一 row 的指定 stages 是 in_progress → true。
+    /// - event/impact 共属 "event processing" pipeline,任一 in_progress 都算
+    /// - distill 单独
+    /// - personality 单独
+    nonisolated func hasInProgressRowForEvent() -> Bool {
+        store.allRows().contains { $0.event == .inProgress || $0.impact == .inProgress }
+    }
+    nonisolated func hasInProgressRowForDistill() -> Bool {
+        store.allRows().contains { $0.distill == .inProgress }
+    }
+    nonisolated func hasInProgressRowForPersonality() -> Bool {
+        store.allRows().contains { $0.personality == .inProgress }
+    }
+
     // MARK: - View bindings(canRunXxx + 解释文案)
     /// 当前是否有事件家族(distill or personality)在跑。
     var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
