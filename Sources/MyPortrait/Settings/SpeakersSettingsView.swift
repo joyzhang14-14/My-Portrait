@@ -261,16 +261,11 @@ struct SpeakersSettingsView: View {
     private func rename(_ r: SpeakerRow, to newName: String) {
         let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
-        rows[i].name = v
+        rows[i].name = v   // 乐观显示新名字
         guard let sid = Int64(r.id) else { return }
-        // ⚠️ 改名必须**先落库再触发重扫**:重扫是 ONNX 重活会抢线程,若改名还在异步
-        // 队列里没写完,Stop/完成触发的 reload 会读回旧名(看着像"改名被撤销")。
-        Task {
-            await Task.detached(priority: .userInitiated) {
-                _ = TimelineDB().renameSpeaker(id: sid, to: v)
-            }.value
-            reidentify.schedule()
-        }
+        // 改名"落库"**推迟到重扫跑完才执行**;按 Stop 就不落库 = 改名作废,
+        // 重扫结束触发的 reload 自动读回旧名字(实现"Stop 撤销改名")。
+        reidentify.schedule(commit: { _ = TimelineDB().renameSpeaker(id: sid, to: v) })
     }
     private func markHallucination(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
@@ -1084,24 +1079,32 @@ final class SpeakerReidentifyCoordinator {
     static let shared = SpeakerReidentifyCoordinator()
     private(set) var isRunning = false
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// 待提交的"改名落库"动作 —— 重扫**跑完才执行**;Stop 则丢弃(= 改名作废)。
+    @ObservationIgnored private var pendingCommit: (@Sendable () -> Void)?
 
-    /// 防抖 1.2s 触发重扫。多次调用只跑最后一次。
-    func schedule() {
+    /// 防抖 1.2s 触发重扫。`commit` 是改名落库动作,只在重扫**正常跑完**时执行。
+    func schedule(commit: (@Sendable () -> Void)? = nil) {
+        // 连续改名:上一个待提交的先落库,别丢。
+        if let prev = pendingCommit { Task.detached { prev() } }
         task?.cancel()
+        pendingCommit = commit
         task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             if Task.isCancelled { return }
             guard let self else { return }
             self.isRunning = true
             _ = await SpeakerReidentifier.shared.reidentifyToday()
+            if let c = self.pendingCommit { await Task.detached { c() }.value; self.pendingCommit = nil }
             self.isRunning = false
         }
     }
 
-    /// Stop:取消重扫。reidentifyToday 会在循环里看 Task.isCancelled,写库前退出 → 不留半成品。
+    /// Stop:取消重扫(写库前退出 = 段全不变)+ **丢弃待提交的改名**(= 改名撤销,
+    /// 视图随后 reload 读回旧名字)。
     func cancel() {
         task?.cancel()
         task = nil
+        pendingCommit = nil
         isRunning = false
     }
 }
