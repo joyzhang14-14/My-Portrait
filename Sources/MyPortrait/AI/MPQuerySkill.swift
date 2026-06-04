@@ -10,15 +10,17 @@ enum MPQuerySkill {
     /// 轮起根本不再注入 —— 于是它"忘了"自己能查数据,张口就"不知道"。每轮补这
     /// 一句让它始终记得 mp-query 在手 + 默认查 today。
     static let reminder = """
-        [Reminder] You have `mp-query` on PATH (call it via your bash tool) to read \
-        the user's OWN captured data — meeting/audio transcripts, screen OCR, app \
-        activity. For ANY question about what the user did, saw, heard, discussed, or \
-        worked on, run mp-query BEFORE answering — never say you don't know without \
-        checking. Start with `mp-query activity-summary --start today` (widen if \
-        needed: `1h ago` / `2d ago` / `7d ago`), then `mp-query audio` for transcripts \
-        or `mp-query search --content ocr` for on-screen text. To summarize a meeting, \
-        read its FULL time range; if a result is `"truncated": true` you missed the later \
-        part — pull the rest before answering, never say it "wasn't discussed".
+        [Reminder] You have `mp-query` on PATH (via your bash tool) — your gateway to \
+        ALL of the user's own captured data and knowledge base, NOT just transcripts. \
+        Subcommands: `activity-summary` (what they were doing), `search` (screen OCR + \
+        audio by keyword / app / time), `audio` (meeting & voice transcripts), \
+        `writing` (their own drafts / writing), `memories` (curated profile + past \
+        events — who they are, preferences, people), `read` (one specific item). For \
+        ANY question about the user's activity, history, meetings, work, writing, or \
+        who they are, pick the right subcommand and run it BEFORE answering — never say \
+        you don't know without checking first. Default time scope is `today`; widen as \
+        needed. When summarizing a meeting, read its FULL time range — if a result is \
+        `"truncated": true`, pull the rest before concluding anything "wasn't discussed".
         """
 
     /// 拼到每个 conversation 第一条用户消息前。新 conv = 新 Pi 进程 = SKILL
