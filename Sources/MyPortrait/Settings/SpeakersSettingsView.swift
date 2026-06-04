@@ -263,10 +263,14 @@ struct SpeakersSettingsView: View {
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
         rows[i].name = v
         guard let sid = Int64(r.id) else { return }
-        Task.detached(priority: .userInitiated) {
-            _ = TimelineDB().renameSpeaker(id: sid, to: v)
+        // ⚠️ 改名必须**先落库再触发重扫**:重扫是 ONNX 重活会抢线程,若改名还在异步
+        // 队列里没写完,Stop/完成触发的 reload 会读回旧名(看着像"改名被撤销")。
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                _ = TimelineDB().renameSpeaker(id: sid, to: v)
+            }.value
+            reidentify.schedule()
         }
-        reidentify.schedule()   // 命名后重扫今天,把同人散段归拢(状态在单例,切视图不丢)
     }
     private func markHallucination(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
