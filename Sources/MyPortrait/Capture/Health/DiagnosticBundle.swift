@@ -44,6 +44,7 @@ enum DiagnosticBundle {
         try? writeDbStats(to: workDir.appendingPathComponent("db_stats.json"))
         try? writeOSLog24h(to: workDir.appendingPathComponent("oslog-24h.jsonl"))
         copyDiagnosticLogs(to: workDir)
+        copyCrashReports(to: workDir)
 
         // 3) zip 到 Downloads(用户原话:放在 download 里)
         let downloads = try downloadsURL()
@@ -73,6 +74,7 @@ enum DiagnosticBundle {
       - db_stats.json          row counts per table, disk usage per dir
       - oslog-24h.jsonl        com.myportrait.* unified-log entries
       - diagnostic.log[.1-.5]  structured DiagLog history (rotating)
+      - crash-reports/         recent MyPortrait crash reports (.ips), if any
 
     NOT INCLUDED (your data stays local):
       - any .md file (events, portrait, personality)
@@ -154,6 +156,38 @@ enum DiagnosticBundle {
         for src in candidates where fm.fileExists(atPath: src.path) {
             let dst = workDir.appendingPathComponent(src.lastPathComponent)
             try? fm.copyItem(at: src, to: dst)
+        }
+    }
+
+    /// 系统崩溃报告:~/Library/Logs/DiagnosticReports/ 下最近 5 份
+    /// `MyPortrait-*.ips`(+ 老格式 `.crash`)拷进 bundle 的 `crash-reports/`。
+    /// **排查闪退最关键的东西** —— 之前 bundle 漏了它,用户报闪退却没崩溃栈可看。
+    /// 读真实 ~/Library(非容器),跟读 ~/.portrait 一致;读不到就 swallow。
+    private static func copyCrashReports(to workDir: URL) {
+        let fm = FileManager.default
+        let reportsDir = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        guard let items = try? fm.contentsOfDirectory(
+            at: reportsDir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]) else { return }
+        // 进程名 = CFBundleExecutable = "MyPortrait";崩溃文件 MyPortrait-<date>-…ips。
+        let crashes = items.filter {
+            $0.lastPathComponent.hasPrefix("MyPortrait")
+                && ["ips", "crash"].contains($0.pathExtension.lowercased())
+        }
+        guard !crashes.isEmpty else { return }
+        let recent = crashes.sorted {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return a > b
+        }.prefix(5)
+        let dstDir = workDir.appendingPathComponent("crash-reports", isDirectory: true)
+        try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+        for src in recent {
+            try? fm.copyItem(at: src, to: dstDir.appendingPathComponent(src.lastPathComponent))
         }
     }
 
