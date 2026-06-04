@@ -5,6 +5,20 @@ import Foundation
 /// `mp-query` 视为普通可执行,通过 bash tool 调用拿 JSON 数据。
 enum MPQuerySkill {
 
+    /// 第 2 轮起每轮补发的一句话提醒。完整 `preamble` 只第 1 轮发,但 Pi/Claude
+    /// session 跨轮持续后,模型对早期那条 user-message 指令的注意力会衰减,且第 2
+    /// 轮起根本不再注入 —— 于是它"忘了"自己能查数据,张口就"不知道"。每轮补这
+    /// 一句让它始终记得 mp-query 在手 + 默认查 today。
+    static let reminder = """
+        [Reminder] You have `mp-query` on PATH (call it via your bash tool) to read \
+        the user's OWN captured data — meeting/audio transcripts, screen OCR, app \
+        activity. For ANY question about what the user did, saw, heard, discussed, or \
+        worked on, run mp-query BEFORE answering — never say you don't know without \
+        checking. Start with `mp-query activity-summary --start today` (widen if \
+        needed: `1h ago` / `2d ago` / `7d ago`), then `mp-query audio` for transcripts \
+        or `mp-query search --content ocr` for on-screen text.
+        """
+
     /// 拼到每个 conversation 第一条用户消息前。新 conv = 新 Pi 进程 = SKILL
     /// 必须重发一次让模型看到。
     static var preamble: String {
