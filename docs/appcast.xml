@@ -12,6 +12,39 @@
         -->
 
         <item>
+            <title>1.2.75</title>
+            <pubDate>Thu, 04 Jun 2026 03:10:48 +0000</pubDate>
+            <sparkle:version>166</sparkle:version>
+            <sparkle:shortVersionString>1.2.75</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Switchable speaker‑ID model</strong> — Choose between English and Chinese voice models in Audio Capture → Speakers. The Chinese models are far more accurate at telling Chinese speakers apart. Each trained voice is tied to its model, so switching back and forth never loses your enrollments.</li>
+                    <li><strong>Smart re‑grouping after you name a speaker</strong> — Name or merge a detected voice and today's audio is re‑scanned automatically, so that person's other clips get pulled together.</li>
+                    <li><strong>Memory pipeline notifications</strong> — Optional notifications when each memory pipeline finishes, plus a separate alert if the app had to restart after an interruption.</li>
+                    <li><strong>"Needs attention" for memory processing</strong> — When a memory step can't finish on its own it now surfaces clearly with the reason, and keeps retrying with long backoff instead of silently giving up.</li>
+                    <li><strong>Delete a folder</strong> — Remove a memory folder (ungroups its events) without deleting anything.</li>
+                    <li><strong>Auto‑scroll to who's talking</strong> — Scrubbing the timeline now scrolls the matching transcript line into view.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Bluetooth call audio now records</strong> — System audio capture moved to ScreenCaptureKit, so the other side of a call is captured even on Bluetooth headphones.</li>
+                    <li><strong>Better speaker separation</strong> — Voice matching no longer over‑splits one person into many, and "Merge duplicates" actually merges now.</li>
+                    <li><strong>No more false "screen capture frozen"</strong> when the window is covered by another app.</li>
+                    <li><strong>Timeline stays put</strong> — Background refreshes don't yank you to the newest frame, and switching frames no longer flickers.</li>
+                    <li><strong>Steadier memory scheduler</strong> — Accurate "Running" status, better stuck‑step detection, and clearer failure reasons.</li>
+                    <li><strong>Folder list polish</strong> — Cleaner separators and a reliable folder delete button.</li>
+                    <li>Better writing capture algorithm and higher accuracy</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.75/MyPortrait_1.2.75_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="tljjVhbAnVIrj7cdeWe2+gGIzyhD5YoHKMZeFtrJtx5DuzvFB6gOgXzDNYkDpdWiaCg7iGgLhStEjguyU0/UCQ==" length="26055610" />
+        </item>
+
+        <item>
             <title>1.2.62</title>
             <pubDate>Wed, 03 Jun 2026 03:16:20 +0000</pubDate>
             <sparkle:version>165</sparkle:version>
