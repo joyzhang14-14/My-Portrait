@@ -286,7 +286,10 @@ actor CaptureCoordinator {
         }
 
         // 2b. 无痕浏览窗口 → 整帧跳过(不截图/OCR/入库)。三层检测见 IncognitoGate。
+        //     记 intentionalSkip:这帧是**故意**不写库,别让 StallDetector 把它算进
+        //     silent_loss,误报 "Capturing screen but DB writes have stopped"。
         if await incognito.isPrivate(focusInfo, enabled: ignoreIncognito) {
+            await VisionMetrics.shared.recordIntentionalSkip()
             return
         }
 
