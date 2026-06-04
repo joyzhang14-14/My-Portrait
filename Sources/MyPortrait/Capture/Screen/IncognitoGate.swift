@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// 无痕 / 隐身浏览窗口检测。命中则跳过该帧（不截图、不 OCR、不入库）。
@@ -25,15 +26,34 @@ actor IncognitoGate {
         // Tier 3:标题关键词(即时纯函数)
         if Self.isTitlePrivate(focus.windowTitle) { return true }
 
-        // Tier 2:Chromium 直接问 frontmost 窗口是否无痕。
-        //   不靠 title 比对 —— macOS 26 上 Chrome 的 AX window title 经常取不到
-        //   (空),screenpipe 那套"无痕窗口标题集合 ∋ 当前 title"在这里永远不
-        //   命中。改成 AppleScript 直接查 front window 的 mode/incognito。
-        if Self.isChromiumBrowser(focus.appName) {
-            if await isFrontWindowIncognito(forApp: focus.appName) { return true }
+        // Tier 2:屏幕上**任何可见的** Chromium 浏览器有无痕窗口 → 跳整帧。
+        //   不再只看焦点窗口 —— 覆盖"无痕小窗摆一边、人在别的 app 工作"的场景:
+        //   焦点窗非无痕,但屏上有可见无痕窗,整屏截图照样把它拍进去。
+        //   不靠 title 比对(macOS 26 上 Chrome AX window title 常空),AppleScript
+        //   直接遍历各浏览器窗口查 mode/incognito。per-app 2s 缓存防每帧 osascript。
+        for app in Self.visibleChromiumApps() {
+            if await appHasIncognitoWindow(forApp: app) { return true }
         }
 
         return false
+    }
+
+    /// CGWindowList 枚举**在屏可见**(layer 0 普通窗口层、alpha>0)的 Chromium
+    /// 浏览器 app 名(去重,原始大小写,供 AppleScript)。决定 Tier 2 要查哪些。
+    nonisolated static func visibleChromiumApps() -> Set<String> {
+        let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infos = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+        var apps: Set<String> = []
+        for w in infos {
+            guard let owner = w[kCGWindowOwnerName as String] as? String,
+                  Self.isChromiumBrowser(owner) else { continue }
+            let layer = (w[kCGWindowLayer as String] as? Int) ?? 0
+            let alpha = (w[kCGWindowAlpha as String] as? Double) ?? 1
+            guard layer == 0, alpha > 0.01 else { continue }   // 普通窗口层 + 可见
+            apps.insert(owner)
+        }
+        return apps
     }
 
     // MARK: - Tier 1:AXIdentifier
@@ -49,9 +69,9 @@ actor IncognitoGate {
     private var cache: [String: CacheEntry] = [:]
     private let cacheTTL: TimeInterval = 2.0
 
-    /// 查某 Chromium app 当前 frontmost 窗口是否无痕。2s 内同 app 走缓存,
+    /// 查某 Chromium app 是否**存在(非最小化的)无痕窗口**。2s 内同 app 走缓存,
     /// 避免每帧跑 osascript(单次 ~150-200ms)。
-    private func isFrontWindowIncognito(forApp app: String) async -> Bool {
+    private func appHasIncognitoWindow(forApp app: String) async -> Bool {
         let key = app.lowercased()
         if let e = cache[key], Date().timeIntervalSince(e.at) < cacheTTL {
             return e.incognito
@@ -81,27 +101,34 @@ actor IncognitoGate {
         }
     }
 
-    /// 跑 osascript 查 front window 是否无痕。先试 `mode of w is "incognito"`
-    /// (Chrome/Edge/Vivaldi/Opera),再 fallback `incognito of w`(Brave/Comet)。
-    /// 返回 "incognito" / "normal" / "no_window" / "not_running"。
-    /// 任何错误(权限拒绝/超时)→ false。
+    /// 跑 osascript 遍历某 app **所有非最小化窗口**,任一无痕即命中。先试
+    /// `mode of w is "incognito"`(Chrome/Edge/Vivaldi/Opera),再 fallback
+    /// `incognito of w`(Brave/Comet)。返回 "incognito" / "normal" /
+    /// "not_running"。任何错误(权限拒绝/超时)→ false。
     nonisolated static func runAppleScript(appName: String) async -> Bool {
         let target = applescriptAppName(appName)
         let script = """
         if application "\(target)" is running then
             tell application "\(target)"
-                if (count of windows) is 0 then return "no_window"
-                set w to front window
-                set is_incog to false
-                try
-                    if mode of w is "incognito" then set is_incog to true
-                end try
-                if not is_incog then
+                set n to count of windows
+                if n is 0 then return "normal"
+                repeat with i from 1 to n
+                    set w to window i
                     try
-                        if incognito of w then set is_incog to true
+                        if miniaturized of w is false then
+                            set is_incog to false
+                            try
+                                if mode of w is "incognito" then set is_incog to true
+                            end try
+                            if not is_incog then
+                                try
+                                    if incognito of w then set is_incog to true
+                                end try
+                            end if
+                            if is_incog then return "incognito"
+                        end if
                     end try
-                end if
-                if is_incog then return "incognito"
+                end repeat
                 return "normal"
             end tell
         else
