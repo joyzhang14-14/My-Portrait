@@ -1004,13 +1004,26 @@ struct MemorySettingsView: View {
         // scheduler 后台 catch-up 触发的 run 不经过本 View click → 不在
         // runningTriggers 里。只看本 trigger 对应的 scheduler flag(不跨类型 OR),
         // 即使某一 @Observable flag 卡住也只影响那一个按钮,不会三按钮连锁灰。
-        let schedulerSelfRunning: Bool = {
+        // 真实运行状态 = in-memory flag **AND** DB 真有 in_progress row。
+        // in-memory 单飞会被 stale 欺骗(runStep 内 await 死 hang → defer
+        // eventRunning=false 不执行 → 用户永远看到 "Running"),DB 是真相。
+        // 两者 AND:in-memory 抑制并发 + DB 抑制 stale。
+        let s = MemoryScheduler.shared
+        let memFlag: Bool = {
             switch t {
-            case .eventProcessing: return MemoryScheduler.shared.eventRunning
-            case .distill:         return MemoryScheduler.shared.distillRunning
-            case .personality:     return MemoryScheduler.shared.personalityRunning
+            case .eventProcessing: return s.eventRunning
+            case .distill:         return s.distillRunning
+            case .personality:     return s.personalityRunning
             }
         }()
+        let dbInProgress: Bool = {
+            switch t {
+            case .eventProcessing: return s.hasInProgressRowForEvent()
+            case .distill:         return s.hasInProgressRowForDistill()
+            case .personality:     return s.hasInProgressRowForPersonality()
+            }
+        }()
+        let schedulerSelfRunning = memFlag && dbInProgress
         let actuallyRunning = selfRunning || schedulerSelfRunning
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
@@ -1149,12 +1162,15 @@ struct MemorySettingsView: View {
         // hasPending=true,但 runEventJob 还没产 .md,卡片显示"No content
         // changes" + Reject/Approve 误导用户。等真跑完(scheduler 标 idle +
         // 本 View 触发器集合也空)才呈现可审核状态。
+        // 跟 triggerRow 同口径:in-memory flag AND DB 真有 in_progress
+        // (避免 stale flag 让 reviewSection 误以为还在跑而藏住 pending review)。
+        let s = MemoryScheduler.shared
         let eventsRunning = runningTriggers.contains(.eventProcessing)
-            || MemoryScheduler.shared.eventRunning
+            || (s.eventRunning && s.hasInProgressRowForEvent())
         let portraitRunning = runningTriggers.contains(.distill)
-            || MemoryScheduler.shared.distillRunning
+            || (s.distillRunning && s.hasInProgressRowForDistill())
         let personalityRunning = runningTriggers.contains(.personality)
-            || MemoryScheduler.shared.personalityRunning
+            || (s.personalityRunning && s.hasInProgressRowForPersonality())
         let hasEvents = MemoryStaging.hasPending(.events) && !eventsRunning
         let hasPortrait = MemoryStaging.hasPending(.portrait) && !portraitRunning
         let hasPersonality = MemoryStaging.hasPending(.personality) && !personalityRunning
