@@ -732,7 +732,7 @@ private struct EmptyHint: View {
             // 不会走到 —— .personalInfo 路由直接进 PersonalInfoView,不走 list 列。
             return ""
         case .portrait:
-            return "No portrait entries in this category yet.\nRun events backfill first, then 🪄 to distill."
+            return "No portrait entries in this category yet.\nRun events backfill first."
         }
     }
 }
