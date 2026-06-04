@@ -102,7 +102,7 @@ struct CaptureHealthView: View {
     /// 一键导出诊断 zip。无 PII,纯结构 + 日志 + 状态。
     private var diagnosticCard: some View {
         SettingsCard(title: "Diagnostic export",
-                     footnote: "Saves a diagnostics file to your Desktop for bug reports. It includes only technical status and logs, none of your captured content.") {
+                     footnote: "Saves a diagnostics file to your Downloads for bug reports. It includes only technical status and logs, none of your captured content.") {
             SettingsRow("Export diagnostic bundle",
                         description: "Use this when reporting a bug. Open the zip to review before sharing.",
                         icon: "ladybug") {
