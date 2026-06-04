@@ -65,6 +65,19 @@ final class UpdaterService: NSObject {
     /// 自动 timer 路径仍走 silent(用 applyConfig 里那条 Timer 调
     /// checkForUpdatesInBackground)。手动 ≠ 自动。
     func checkForUpdates() {
+        // Sparkle 在已有更新会话进行时(canCheckForUpdates=false)会**直接吞掉**
+        // checkForUpdates(nil) → 用户点 "Check now" 毫无反应。最常见:后台已发现
+        // 新版、正在下载 / 等重启安装,会话还挂着。这时不静默 no-op,给个明确提示
+        // 告诉用户更新已在处理 + 怎么装。
+        guard controller.updater.canCheckForUpdates else {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "An update is already in progress"
+            alert.informativeText = "My Portrait already found a newer version and is downloading or preparing it. Quit and reopen to finish installing."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
         controller.checkForUpdates(nil)
     }
 
