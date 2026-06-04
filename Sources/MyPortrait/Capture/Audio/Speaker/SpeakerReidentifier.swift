@@ -80,6 +80,8 @@ actor SpeakerReidentifier {
             for s in segs { byChunk[s.chunkId, default: []].append(s) }
             var changes: [(id: Int64, sp: Int64?)] = []   // 只收有变化的
             for (_, cs) in byChunk {
+                // Stop:写库前任何时候取消 = 一个字都不改(全不变)。
+                if Task.isCancelled { return Outcome(updated: 0, total: segs.count) }
                 let abs = cs[0].path.hasPrefix("/") ? cs[0].path : base.appendingPathComponent(cs[0].path).path
                 guard let all = autoreleasepool(invoking: { AudioWAV.readSamples(path: abs) }) else { continue }
                 let n = all.count
@@ -95,8 +97,8 @@ actor SpeakerReidentifier {
                 }
             }
 
-            // 5. 写回(FTS 安全)
-            guard !changes.isEmpty else { return Outcome(updated: 0, total: segs.count) }
+            // 5. 写回(FTS 安全)。写库前最后一道:取消了就不写,全不变。
+            guard !changes.isEmpty, !Task.isCancelled else { return Outcome(updated: 0, total: segs.count) }
             let toWrite = changes
             try await q.write { db in
                 for w in toWrite {

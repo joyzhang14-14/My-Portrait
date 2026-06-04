@@ -53,10 +53,17 @@ struct SpeakersSettingsView: View {
                     Text("Re-identifying today's audio with the named speakers…")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textPrimary.opacity(0.65))
+                    Spacer()
+                    Button("Stop") { reidentify.cancel() }
+                        .font(.system(size: 11, weight: .medium))
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Color.orange.opacity(0.9))
                 }
                 .padding(.horizontal, 4)
             }
 
+            // 重扫期间整块编辑禁用(直到跑完 / Stop)。Stop 按钮在上面指示条里,不受影响。
+            Group {
             VoiceTrainingCard(
                 existingNames: rows.compactMap { $0.name }.filter { !$0.isEmpty },
                 onTrained: { reload() }
@@ -107,6 +114,8 @@ struct SpeakersSettingsView: View {
                     }
                 }
             }
+            }
+            .disabled(reidentify.isRunning)   // 重扫时禁用编辑(Stop 不受影响,在指示条里)
         }
         .task { reload() }
         // 换说话人模型 → 重新加载列表(声纹按模型隔离,列表只显示当前模型的人)。
@@ -1083,6 +1092,13 @@ final class SpeakerReidentifyCoordinator {
             _ = await SpeakerReidentifier.shared.reidentifyToday()
             self.isRunning = false
         }
+    }
+
+    /// Stop:取消重扫。reidentifyToday 会在循环里看 Task.isCancelled,写库前退出 → 不留半成品。
+    func cancel() {
+        task?.cancel()
+        task = nil
+        isRunning = false
     }
 }
 
