@@ -457,6 +457,75 @@ struct ProcessingLogStore: Sendable {
         }
     }
 
+    // MARK: - pipeline_runs(Changelog 页:memory pipeline 运行历史)
+
+    /// pipeline_runs 的一行。
+    struct PipelineRunRecord: Identifiable, Sendable {
+        let id: Int64
+        let timestampMs: Int64
+        let trigger: String      // "run-now" | "scheduler"
+        let pipeline: String     // UI 名,如 "Event processing"
+        let outcome: String      // "success" | "failure" | "auto-recovering" | "no-work"
+        let reason: String?
+    }
+
+    /// 最近的 pipeline 运行(按时间倒序)。
+    func recentPipelineRuns(limit: Int = 50) -> [PipelineRunRecord] {
+        guard exists else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_close(db) }
+        let sql = """
+            SELECT id, timestamp_ms, trigger, pipeline, outcome, reason
+            FROM pipeline_runs ORDER BY timestamp_ms DESC LIMIT ?
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+        var out: [PipelineRunRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            func text(_ i: Int32) -> String? {
+                sqlite3_column_type(stmt, i) == SQLITE_NULL
+                    ? nil : sqlite3_column_text(stmt, i).flatMap { String(cString: $0) }
+            }
+            out.append(PipelineRunRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                timestampMs: sqlite3_column_int64(stmt, 1),
+                trigger: text(2) ?? "",
+                pipeline: text(3) ?? "",
+                outcome: text(4) ?? "",
+                reason: text(5)
+            ))
+        }
+        return out
+    }
+
+    /// 记一条 pipeline 运行,并把表裁到最近 50 条。
+    func appendPipelineRun(trigger: String, pipeline: String, outcome: String, reason: String?) {
+        _ = runWrite { db in
+            let sql = """
+                INSERT INTO pipeline_runs (timestamp_ms, trigger, pipeline, outcome, reason)
+                VALUES (?, ?, ?, ?, ?)
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, Self.nowMs())
+            sqlite3_bind_text(stmt, 2, trigger, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, pipeline, -1, PL_SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 4, outcome, -1, PL_SQLITE_TRANSIENT)
+            if let r = reason { sqlite3_bind_text(stmt, 5, r, -1, PL_SQLITE_TRANSIENT) }
+            else { sqlite3_bind_null(stmt, 5) }
+            guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+            sqlite3_exec(db, """
+                DELETE FROM pipeline_runs WHERE id NOT IN
+                  (SELECT id FROM pipeline_runs ORDER BY timestamp_ms DESC LIMIT 50)
+                """, nil, nil, nil)
+            return true
+        }
+    }
+
     // MARK: - 私有
 
     private func runWrite(_ body: (OpaquePointer?) -> Bool) -> Bool {
