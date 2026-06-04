@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os.log
 
 /// 无痕 / 隐身浏览窗口检测。命中则跳过该帧（不截图、不 OCR、不入库）。
 ///
@@ -12,6 +13,8 @@ import Foundation
 /// 任一层命中即判定无痕。Tier 3(即时)放 Tier 2(慢 osascript)前面优化性能,
 /// 结果与 screenpipe 一致(任一命中即 true)。
 actor IncognitoGate {
+
+    private static let logger = Logger(subsystem: "com.myportrait.capture", category: "incognito")
 
     // MARK: - 主入口
 
@@ -26,34 +29,47 @@ actor IncognitoGate {
         // Tier 3:标题关键词(即时纯函数)
         if Self.isTitlePrivate(focus.windowTitle) { return true }
 
-        // Tier 2:屏幕上**任何可见的** Chromium 浏览器有无痕窗口 → 跳整帧。
-        //   不再只看焦点窗口 —— 覆盖"无痕小窗摆一边、人在别的 app 工作"的场景:
-        //   焦点窗非无痕,但屏上有可见无痕窗,整屏截图照样把它拍进去。
-        //   不靠 title 比对(macOS 26 上 Chrome AX window title 常空),AppleScript
-        //   直接遍历各浏览器窗口查 mode/incognito。per-app 2s 缓存防每帧 osascript。
-        for app in Self.visibleChromiumApps() {
+        // Tier 2:扫**采集显示器(主屏)内**所有可见浏览器窗口,任一命中即跳整帧:
+        //   (a) 窗口标题含无痕关键词 → 覆盖 Safari/Firefox/Arc 等**非 Chromium**
+        //       (靠 CGWindowList 的 kCGWindowName,本 app 有屏幕录制权限读得到)。
+        //   (b) Chromium app → AppleScript 遍历窗口查 mode/incognito 兜底(标题常空)。
+        //   只看落在主屏内的窗口:副屏/别的显示器的无痕窗不该拖累主屏这一帧
+        //   (采集走 CGMainDisplayID,见 ScreenCaptureService.captureMainDisplay)。
+        let scan = Self.scanVisibleBrowserWindows(onDisplay: CGDisplayBounds(CGMainDisplayID()))
+        if scan.titleHit { return true }
+        for app in scan.chromiumApps {
             if await appHasIncognitoWindow(forApp: app) { return true }
         }
 
         return false
     }
 
-    /// CGWindowList 枚举**在屏可见**(layer 0 普通窗口层、alpha>0)的 Chromium
-    /// 浏览器 app 名(去重,原始大小写,供 AppleScript)。决定 Tier 2 要查哪些。
-    nonisolated static func visibleChromiumApps() -> Set<String> {
+    /// 扫 CGWindowList 里落在 `bounds`(采集显示器)内、可见(layer 0、alpha>0)的窗口。
+    /// 返回:(是否存在标题含无痕关键词的窗口, 在屏的 Chromium 浏览器 app 名集合)。
+    nonisolated static func scanVisibleBrowserWindows(onDisplay bounds: CGRect)
+        -> (titleHit: Bool, chromiumApps: Set<String>) {
         let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]
-        else { return [] }
+        else { return (false, []) }
         var apps: Set<String> = []
+        var titleHit = false
         for w in infos {
-            guard let owner = w[kCGWindowOwnerName as String] as? String,
-                  Self.isChromiumBrowser(owner) else { continue }
             let layer = (w[kCGWindowLayer as String] as? Int) ?? 0
             let alpha = (w[kCGWindowAlpha as String] as? Double) ?? 1
             guard layer == 0, alpha > 0.01 else { continue }   // 普通窗口层 + 可见
-            apps.insert(owner)
+            // 只算与主屏相交的窗口 —— 跨屏的无痕窗不拖累主屏帧。
+            if let bd = w[kCGWindowBounds as String] as? [String: Any],
+               let r = CGRect(dictionaryRepresentation: bd as CFDictionary),
+               !r.intersects(bounds) { continue }
+            // (a) 标题关键词:覆盖任何浏览器(含非 Chromium)的无痕窗。
+            if let title = w[kCGWindowName as String] as? String, Self.isTitlePrivate(title) {
+                titleHit = true
+            }
+            // (b) Chromium app 收集,后面 AppleScript 查属性兜底。
+            if let owner = w[kCGWindowOwnerName as String] as? String,
+               Self.isChromiumBrowser(owner) { apps.insert(owner) }
         }
-        return apps
+        return (titleHit, apps)
     }
 
     // MARK: - Tier 1:AXIdentifier
@@ -135,20 +151,56 @@ actor IncognitoGate {
             return "not_running"
         end if
         """
+        // Process + resume-once 状态 + continuation 全装进 box,跨 watchdog 闭包
+        // 并发安全传递(Process/NSLock/Continuation 均非 Sendable)。
+        final class Ctx: @unchecked Sendable {
+            let proc = Process()
+            private let lock = NSLock()
+            private var resumed = false
+            private var cont: CheckedContinuation<Bool, Never>?
+            func arm(_ c: CheckedContinuation<Bool, Never>) { cont = c }
+            func finish(_ v: Bool) {
+                lock.lock(); defer { lock.unlock() }
+                if resumed { return }
+                resumed = true
+                cont?.resume(returning: v); cont = nil
+            }
+        }
+        let ctx = Ctx()
+
         return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            ctx.arm(cont)
             DispatchQueue.global(qos: .utility).async {
-                let p = Process()
+                let p = ctx.proc
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
                 p.arguments = ["-e", script]
                 let outPipe = Pipe()
                 p.standardOutput = outPipe
                 p.standardError = Pipe()
-                do { try p.run() } catch { cont.resume(returning: false); return }
+
+                // 1.8s watchdog:osascript 卡死(首次授权 modal / 浏览器无响应)→
+                //   kill + 降级放行,绝不让采集热路径(isPrivate)永久 await 挂死。
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.8) {
+                    if ctx.proc.isRunning {
+                        ctx.proc.terminate()
+                        Self.logger.warning("osascript 查 \(appName, privacy: .public) 超时 1.8s,kill;本帧无痕检测降级放行")
+                        ctx.finish(false)
+                    }
+                }
+
+                do { try p.run() } catch {
+                    Self.logger.warning("osascript 启动失败(\(appName, privacy: .public)):\(error.localizedDescription, privacy: .public)")
+                    ctx.finish(false); return
+                }
                 let data = outPipe.fileHandleForReading.readDataToEndOfFile()
                 p.waitUntilExit()
                 let out = String(data: data, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                cont.resume(returning: out == "incognito")
+                // 非预期输出(自动化/Apple Events 权限被撤销等)WARN 一次,别静默失效。
+                if out != "incognito", out != "normal", out != "not_running", out != "" {
+                    Self.logger.warning("osascript(\(appName, privacy: .public)) 异常输出 '\(out, privacy: .public)';检查 自动化/Apple Events 权限")
+                }
+                ctx.finish(out == "incognito")
             }
         }
     }
