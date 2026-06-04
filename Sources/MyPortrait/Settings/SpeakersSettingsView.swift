@@ -16,8 +16,7 @@ struct SpeakersSettingsView: View {
     @State private var search = ""
     @State private var organizing = false
     @State private var config = ConfigStore.shared
-    @State private var reidentifyTask: Task<Void, Never>? = nil
-    @State private var reidentifying = false
+    @State private var reidentify = SpeakerReidentifyCoordinator.shared
 
     private var filtered: [SpeakerRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -48,7 +47,7 @@ struct SpeakersSettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             ProgressHeader(trainedCount: voiceTrainedCount, namedCount: namedCount, modelLabel: currentModelLabel)
 
-            if reidentifying {
+            if reidentify.isRunning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Re-identifying today's audio with the named speakers…")
@@ -112,6 +111,8 @@ struct SpeakersSettingsView: View {
         .task { reload() }
         // 换说话人模型 → 重新加载列表(声纹按模型隔离,列表只显示当前模型的人)。
         .onChange(of: config.current.capture.audio.speakerEmbeddingModel) { _, _ in reload() }
+        // 重扫跑完(isRunning true→false)→ 重新加载列表,反映归拢结果。
+        .onChange(of: reidentify.isRunning) { _, running in if !running { reload() } }
     }
 
     // MARK: - Toolbar
@@ -256,21 +257,7 @@ struct SpeakersSettingsView: View {
         Task.detached(priority: .userInitiated) {
             _ = TimelineDB().renameSpeaker(id: sid, to: v)
         }
-        scheduleReidentify()   // 命名后重扫今天,把同人散段归拢
-    }
-
-    /// 命名 / 合并后,防抖(1.2s)触发"重扫今天" —— 用当前 gallery 重新匹配今天的 wav 段,
-    /// 把刚命名的人当天散落 / 未匹配的同人段重新归到 ta 名下。多次操作只跑最后一次。
-    private func scheduleReidentify() {
-        reidentifyTask?.cancel()
-        reidentifyTask = Task {
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if Task.isCancelled { return }
-            reidentifying = true
-            _ = await SpeakerReidentifier.shared.reidentifyToday()
-            reidentifying = false
-            reload()
-        }
+        reidentify.schedule()   // 命名后重扫今天,把同人散段归拢(状态在单例,切视图不丢)
     }
     private func markHallucination(_ r: SpeakerRow) {
         rows.removeAll { $0.id == r.id }
@@ -287,7 +274,7 @@ struct SpeakersSettingsView: View {
                 TimelineDB().mergeSpeakers(keep: keepId, merge: similarId)
             }.value
             reload()
-            scheduleReidentify()   // 合并后也重扫今天
+            reidentify.schedule()   // 合并后也重扫今天
         }
     }
 }
@@ -1072,6 +1059,29 @@ private enum SpeakerLoader {
                 lastHeard: r.lastHeardMs.map { Date(timeIntervalSince1970: Double($0) / 1000) },
                 trainedAt: r.trainedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }
             )
+        }
+    }
+}
+
+/// "重扫今天"的协调器(命名 / 合并触发)。状态 + 任务放**单例**上 —— 视图切走再回来
+/// 被重建也不丢指示、任务也不中断(之前放视图 @State,切界面就没了)。
+@MainActor
+@Observable
+final class SpeakerReidentifyCoordinator {
+    static let shared = SpeakerReidentifyCoordinator()
+    private(set) var isRunning = false
+    @ObservationIgnored private var task: Task<Void, Never>?
+
+    /// 防抖 1.2s 触发重扫。多次调用只跑最后一次。
+    func schedule() {
+        task?.cancel()
+        task = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if Task.isCancelled { return }
+            guard let self else { return }
+            self.isRunning = true
+            _ = await SpeakerReidentifier.shared.reidentifyToday()
+            self.isRunning = false
         }
     }
 }
