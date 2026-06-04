@@ -12,6 +12,36 @@
         -->
 
         <item>
+            <title>1.2.85</title>
+            <pubDate>Thu, 04 Jun 2026 17:04:28 +0000</pubDate>
+            <sparkle:version>167</sparkle:version>
+            <sparkle:shortVersionString>1.2.85</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>The assistant reads your captured data reliably</strong> — Ask about a meeting, your screen history, or what you've been working on, and the in-app assistant now consistently pulls the real data to answer — the full meeting transcript (not just the first few minutes), and it knows all of its data tools on every turn instead of forgetting after the first message.</li>
+                    <li><strong>Pipeline run history</strong> — The Changelog page now shows your last 50 memory-pipeline runs (Run now and scheduled, with success / failure / auto-recovering outcomes), instead of raw portrait edits.</li>
+                    <li><strong>Faster memory processing</strong> — Event building now uses a tighter context window, cutting per-day processing time and AI usage.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Incognito windows stay private</strong> — A visible incognito / private browser window is never recorded now — even a small one off to the side, on a second monitor, or when it isn't the focused window.</li>
+                    <li><strong>No false "capture stalled" while incognito is open</strong> — Keeping an incognito window open no longer trips a false health alert.</li>
+                    <li><strong>The captured app matches the screen</strong> — When you switch apps, the app and icon recorded for that moment now match what was actually on screen, instead of briefly showing the previous app.</li>
+                    <li><strong>"Check for updates" always responds</strong> — Clicking Check now while an update is already downloading no longer does nothing; it now tells you the update is in progress.</li>
+                    <li><strong>Memory runs report their outcome accurately</strong> — A partly-failed memory run is no longer reported as a success.</li>
+                    <li><strong>No stale "interrupted" alert on launch</strong> — The memory scheduler stopped showing a leftover "interrupted" notification every time the app starts.</li>
+                    <li><strong>Writing capture accuracy</strong> — Pasted and placeholder text no longer leaks into your captured writing, and canvas capture now drops on-screen content you didn't actually type.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.85/MyPortrait_1.2.85_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="HEpA3cL5F1Pp9e5kgbNYrFKs34Uj4MPudwMLj+YnUraY3sjKRlGmPW8oKRbIzsxm3GK3+2T7S2Z6RCZy50m2DQ==" length="26105225" />
+        </item>
+
+        <item>
             <title>1.2.75</title>
             <pubDate>Thu, 04 Jun 2026 03:10:48 +0000</pubDate>
             <sparkle:version>166</sparkle:version>
