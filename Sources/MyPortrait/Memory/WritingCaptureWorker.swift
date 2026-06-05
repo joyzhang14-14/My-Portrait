@@ -1176,6 +1176,44 @@ final class WritingCaptureWorker {
         return ""
     }
 
+    /// 去零宽(0x200B/C/D + 0xFEFF)再去首尾空白;只剩零宽/空白 → 空串。
+    /// `trimmingCharacters(.whitespacesAndNewlines)` **不**去零宽,Discord 发送后
+    /// 残留的 "﻿\n" 会 trim 成 "﻿"(非空)→ 不挡掉会生出只含零宽的垃圾记录。
+    nonisolated static func cleanVisible(_ s: String) -> String {
+        let zw: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]
+        let stripped = String(String.UnicodeScalarView(s.unicodeScalars.filter { !zw.contains($0.value) }))
+        return stripped.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 从一个 typing_event 的 edit_log 里拆出**每一条发出去的消息**。
+    /// 聊天里连发多条会挤进同一个 typing_event:发送后输入框留下零宽残留
+    /// (如 Discord 的 "﻿\n"),不被当成 flush 边界,于是 N 条消息共用一个 event,
+    /// bestGroupText 只取得到一条、其余全丢 —— 这正是用户早指出的"同框第二条 invalid"。
+    /// 救法:每次发送 = 一条把**整框内容整条删掉**的 delete,且其**相邻项只剩零宽/空白**
+    /// (发送后那一瞬的字段态)。纠正型删除(改字、退格)旁边没有这种空标记 → 排除。
+    nonisolated static func extractSentMessages(_ editLogJSON: String) -> [String] {
+        struct E: Decodable { let kind: String?; let text: String? }
+        guard let data = editLogJSON.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([E].self, from: data) else { return [] }
+        let zw: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]   // 零宽空格/连接符/BOM
+        func effEmpty(_ s: String) -> Bool {
+            s.unicodeScalars.allSatisfy { $0.properties.isWhitespace || zw.contains($0.value) }
+        }
+        func stripZW(_ s: String) -> String {
+            String(String.UnicodeScalarView(s.unicodeScalars.filter { !zw.contains($0.value) }))
+        }
+        var msgs: [String] = []
+        for (i, e) in arr.enumerated() where e.kind == "delete" {
+            guard let raw = e.text, !effEmpty(raw) else { continue }
+            let prevEmpty = i > 0 && (arr[i - 1].text.map(effEmpty) ?? false)
+            let nextEmpty = i + 1 < arr.count && (arr[i + 1].text.map(effEmpty) ?? false)
+            guard prevEmpty || nextEmpty else { continue }     // 旁边没有发送标记 = 普通纠正删除
+            let t = stripZW(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.count >= 2 { msgs.append(t) }
+        }
+        return msgs
+    }
+
     /// 确定性前缀合并(原 Pass2 LLM 切分里的"草稿增长合并",改算法层实现)。
     /// 同 (app,url) 组内,一条**未发送草稿**(其引用的 typing_events 里没有任何
     /// 发送 = send-clear 输入框清空)的文字若是更晚某条 record 的前缀 → 它只是那条
@@ -1283,45 +1321,61 @@ final class WritingCaptureWorker {
                     }
                     if !cur.isEmpty { msgGroups.append(cur) }    // 末尾未发送的草稿
                     for grp in msgGroups {
-                        // 取组里最完整文本:常态 = 末事件 endValue;发送清空 = 那条
-                        // 清空 delete 里的整条原文(末 endValue 为空时)。
-                        // 取组里最完整文本:常态 = 末事件 endValue;发送清空 = 那条
-                        // 清空 delete 里的整条原文。纯剪切板粘贴 / 占位符 → bestGroupText
-                        // 返回空 → 这里直接 continue 丢掉(用户决定:纯粘贴不留)。
-                        let text = Self.bestGroupText(grp)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !text.isEmpty else { continue }
+                        // 拆出组里**每一条发出去的消息**:连发挤进一个 event 时,
+                        // extractSentMessages 把每条整框删除救回来(否则只取末条、其余丢
+                        // = 用户早指出的"同框第二条 invalid")。+ 末尾**未发送的草稿**
+                        // (末事件 endValue 是真草稿:非空、非占位符、没回到开局)。
+                        var texts: [String] = []
+                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog)) }
+                        if let last = grp.last, !last.endValue.isEmpty, !Self.isPastedValue(last),
+                           last.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                               != last.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines) {
+                            texts.append(last.endValue.trimmingCharacters(in: .whitespacesAndNewlines))
+                        }
+                        // 一条都没拆出(常态:单条草稿组 / 占位符 / 纯粘贴)→ 退回
+                        // bestGroupText 保底:它返回空表示纯粘贴/占位符 → 整组丢。
+                        if texts.isEmpty {
+                            let t = Self.bestGroupText(grp).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !t.isEmpty { texts.append(t) }
+                        }
+                        var seen = Set<String>()
+                        let messages = texts
+                            .map { Self.cleanVisible($0) }
+                            .filter { !$0.isEmpty && seen.insert($0).inserted }     // 去零宽 + 去重保序
+                        guard !messages.isEmpty else { continue }
+
                         let startTs = grp.first!.startedAt, endTs = grp.last!.endedAt
                         // 该消息组窗口内的击键(±10s)。
                         let pad: Int64 = 10_000
                         let grpKeys = s.keystrokes.filter { $0.tsMs >= startTs - pad && $0.tsMs <= endTs + pad }
                         // 按 keystroke 把关:文字一大段但几乎没击键 = 读/打开文档/纯外部
                         // 粘贴 → 丢(Obsidian 你只是打开来看)。短粘贴(<30字)混在大量
-                        // 打字里 → 击键多 → 留。conf = 击键覆盖度(不再死写 1.00)。
+                        // 打字里 → 击键多 → 留。组级击键总量(连发的多条共享)。
                         let kc = grpKeys.filter { ($0.modifiers & 0x07) == 0 }.count
-                        if text.count > 20 && kc < text.count / 4 { continue }
                         let ks = await WritingCapturePass2Agent.assembleKeystrokeText(grpKeys)
                         // slash 命令(/play 等):AX 吞了斜杠只留命令名,keystroke 仍以
                         // "/" 起头 → 丢。app 无关(slash 命令是 chat app 通用约定)。
                         let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
                             .replacingOccurrences(of: "<BS>", with: "")
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if ksTrim.hasPrefix("/") { continue }
-                        // conf 默认值;下面补齐 agent(LLM)会给真实判定覆盖(跟几天前
-                        // 一样由 LLM 判 confidence)。LLM 漏/失败 → 留默认 0.9。
-                        let conf = 0.9
                         let ctx = contextTimeline.first {
                             $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
                         }?.summary
-                        let rid = "r\(records.count)"
-                        records.append(WritingCaptureRecord(
-                            text: text, editLog: [],
-                            kind: text.count >= 140 ? "long_form" : "short_form",
-                            source: "ax_cleaned", confidence: conf, contextSummary: ctx,
-                            app: g.app, url: g.url, startTs: startTs, endTs: endTs,
-                            referenceTypingEventIds: grp.compactMap { $0.id }, referenceFrameIds: [],
-                            referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
-                        items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
+                        for text in messages {
+                            if text.count > 20 && kc < text.count / 4 { continue }
+                            if ksTrim.hasPrefix("/") { continue }
+                            // conf 默认值;下面补齐 agent(LLM)给真实判定覆盖。漏/失败 → 0.9。
+                            let conf = 0.9
+                            let rid = "r\(records.count)"
+                            records.append(WritingCaptureRecord(
+                                text: text, editLog: [],
+                                kind: text.count >= 140 ? "long_form" : "short_form",
+                                source: "ax_cleaned", confidence: conf, contextSummary: ctx,
+                                app: g.app, url: g.url, startTs: startTs, endTs: endTs,
+                                referenceTypingEventIds: grp.compactMap { $0.id }, referenceFrameIds: [],
+                                referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
+                            items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
+                        }
                     }
                 }
                 let fixes = await makeCleanup().run(items: items)
