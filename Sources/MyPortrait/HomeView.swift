@@ -634,31 +634,210 @@ private struct AssistantBody: View {
             if parts.isEmpty && !fallbackText.isEmpty {
                 MarkdownView(source: fallbackText)
             }
-            ForEach(parts) { part in
-                switch part {
-                case .text(_, let value):
-                    MarkdownView(source: value)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                case .tool(let block):
-                    ToolCard(block: block)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-                case .thinking(let block):
-                    // Skip the chain-of-thought card entirely when the user
-                    // has flipped Display → "Hide thinking blocks".
-                    if !ConfigStore.shared.display.hideModelReasoning {
-                        ThinkingCard(block: block)
+            if ConfigStore.shared.display.compactToolBlocks {
+                // 把连续的过程块(thinking/tool/error/editDraft)折叠成一个汇总栏,
+                // 最终文本(.text)正常显示。collapsed 时不渲染内部块 → 历史消息更快。
+                ForEach(compactSegments) { seg in
+                    switch seg.kind {
+                    case .text(let value):
+                        MarkdownView(source: value)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    case .group(let blocks):
+                        CompactStepsBar(blocks: blocks)
                             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
                     }
-                case .error(let block):
-                    ErrorCard(block: block)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
-                case .editDraft(let block):
-                    EditDraftCard(block: block)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+                }
+            } else {
+                ForEach(parts) { part in
+                    renderPart(part)
                 }
             }
         }
         .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+
+    /// 把 parts 切成 segments:连续的非文本块归入一个 group,文本块独立 ——
+    /// 保持原始顺序(过程块在前 / 最终回答在后是常见结构,交错也能正确处理)。
+    private var compactSegments: [CompactSegment] {
+        var result: [CompactSegment] = []
+        var buffer: [ContentPart] = []
+        func flush() {
+            guard let first = buffer.first else { return }
+            result.append(CompactSegment(id: "g-\(first.id)", kind: .group(buffer)))
+            buffer.removeAll()
+        }
+        for part in parts {
+            if case .text(let pid, let value) = part {
+                flush()
+                result.append(CompactSegment(id: "t-\(pid)", kind: .text(value)))
+            } else {
+                buffer.append(part)
+            }
+        }
+        flush()
+        return result
+    }
+
+    @ViewBuilder
+    private func renderPart(_ part: ContentPart) -> some View {
+        switch part {
+        case .text(_, let value):
+            MarkdownView(source: value)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        case .tool(let block):
+            ToolCard(block: block)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+        case .thinking(let block):
+            // Skip the chain-of-thought card entirely when the user
+            // has flipped Display → "Hide thinking blocks".
+            if !ConfigStore.shared.display.hideModelReasoning {
+                ThinkingCard(block: block)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+            }
+        case .error(let block):
+            ErrorCard(block: block)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+        case .editDraft(let block):
+            EditDraftCard(block: block)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
+        }
+    }
+}
+
+/// 一段渲染单元:要么一段最终文本,要么一组被折叠的过程块。
+private struct CompactSegment: Identifiable {
+    enum Kind {
+        case text(String)
+        case group([ContentPart])
+    }
+    let id: String
+    let kind: Kind
+}
+
+/// 把一条回复里连续的「过程块」(thinking + tool + error + editDraft)折叠成一个
+/// 汇总栏。collapsed 时只渲染统计 header(read/ran/failed),**不渲染内部块** ——
+/// 历史消息因此不必一次性渲染几十张 card,前端流畅很多;展开后才 lazy 加载具体块。
+/// 流式生成中(有 running 块)默认展开看实时进度,完成后自动折叠。
+private struct CompactStepsBar: View {
+    let blocks: [ContentPart]
+    @State private var expanded: Bool
+    @State private var didAutoCollapse = false
+
+    init(blocks: [ContentPart]) {
+        self.blocks = blocks
+        _expanded = State(initialValue: blocks.contains { CompactStepsBar.isRunning($0) })
+    }
+
+    private static func isRunning(_ p: ContentPart) -> Bool {
+        switch p {
+        case .tool(let b):     return b.isRunning
+        case .thinking(let b): return b.isRunning
+        default:               return false
+        }
+    }
+    private var anyRunning: Bool { blocks.contains { CompactStepsBar.isRunning($0) } }
+
+    private var readCount: Int {
+        blocks.filter { if case .tool(let b) = $0 { return b.name == "read" } else { return false } }.count
+    }
+    private var ranCount: Int {
+        blocks.filter { if case .tool(let b) = $0 { return b.name != "read" } else { return false } }.count
+    }
+    private var failedCount: Int {
+        blocks.filter { if case .tool(let b) = $0 { return b.isError } else { return false } }.count
+    }
+
+    private var summaryText: String {
+        var segs: [String] = []
+        if readCount > 0 { segs.append("read \(readCount) file\(readCount == 1 ? "" : "s")") }
+        if ranCount  > 0 { segs.append("ran \(ranCount) command\(ranCount == 1 ? "" : "s")") }
+        var s = segs.joined(separator: " · ")
+        if failedCount > 0 { s += (s.isEmpty ? "" : " · ") + "failed \(failedCount)" }
+        if s.isEmpty {
+            // 这组只有 thinking,没有工具调用。
+            let n = blocks.count
+            s = anyRunning ? "Working…" : "\(n) step\(n == 1 ? "" : "s")"
+        }
+        return s
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(blocks) { part in
+                        blockView(part)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .opacity(0.85)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
+                )
+        )
+        .onChange(of: anyRunning) {
+            // 流式完成 → 自动折叠成汇总栏(像 ToolCard 那样)。
+            if !anyRunning, !didAutoCollapse {
+                didAutoCollapse = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    withAnimation(.easeOut(duration: 0.25)) { expanded = false }
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.20)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.7))
+                Text(summaryText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                    .lineLimit(1).truncationMode(.tail)
+                if anyRunning {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                        .frame(width: 12, height: 12)
+                }
+                Spacer()
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12).padding(.vertical, 9)
+        }
+        .buttonStyle(.bouncyIcon)
+    }
+
+    @ViewBuilder
+    private func blockView(_ part: ContentPart) -> some View {
+        switch part {
+        case .text(_, let value):
+            MarkdownView(source: value)
+        case .tool(let block):
+            ToolCard(block: block)
+        case .thinking(let block):
+            if !ConfigStore.shared.display.hideModelReasoning {
+                ThinkingCard(block: block)
+            }
+        case .error(let block):
+            ErrorCard(block: block)
+        case .editDraft(let block):
+            EditDraftCard(block: block)
+        }
     }
 }
 
