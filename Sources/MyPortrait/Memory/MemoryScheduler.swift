@@ -368,21 +368,27 @@ final class MemoryScheduler {
         // mp-folders 手动整理。tick 不再有 classify 分支。
 
         // ===== Tier 2 =====
+        // **portraitToday 只挡 daily-scheduled trigger,不挡 retry** ——
+        // retry 已被 backoffMs(10min→1h→6h→24h)节流,daily 双重 guard 会让
+        // 中午跑失败的 row 等到第二天才再试。bug:6-03 personality 13:08 失败
+        // → portraitToday=false → 不再触发 → attention 行 9 小时都在显示。
         let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
         let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
         let portraitRetry   = s.portrait.frequency != .off && portraitNeedsRetry()
-        if portraitToday,
-           Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp || portraitRetry {
-            setLastRun(kLastPortrait, now)
+        let portraitScheduled = portraitToday
+            && (Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp)
+        if portraitScheduled || portraitRetry {
+            if portraitScheduled { setLastRun(kLastPortrait, now) }   // retry 不更新 lastRun
             await runPortraitJob()
         }
 
         let personalityToday   = lastRunDay(kLastPersonality) != localDayString(now)
         let personalityCatchUp = s.personality.frequency == .daily && personalityJobHasWork()
         let personalityRetry   = s.personality.frequency != .off && personalityNeedsRetry()
-        if personalityToday,
-           Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp || personalityRetry {
-            setLastRun(kLastPersonality, now)
+        let personalityScheduled = personalityToday
+            && (Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp)
+        if personalityScheduled || personalityRetry {
+            if personalityScheduled { setLastRun(kLastPersonality, now) }
             await runPersonalityJob()
         }
 
