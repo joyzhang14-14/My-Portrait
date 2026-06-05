@@ -983,13 +983,28 @@ final class WritingCaptureWorker {
         }
         guard meaningfulKeys >= minKeys else { return false }
         let zeroWidth: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]
-        let axCaptured = s.typingEvents.reduce(0) { total, e -> Int in
-            let v = e.endValue.isEmpty ? e.text : e.endValue
-            return total + v.reduce(0) { c, ch in
+        func realChars(_ str: String) -> Int {
+            str.reduce(0) { c, ch in
                 if ch.isWhitespace { return c }
                 if ch.unicodeScalars.allSatisfy({ zeroWidth.contains($0.value) }) { return c }
                 return c + 1
             }
+        }
+        struct E: Decodable { let kind: String?; let text: String? }
+        // AX 实际接住多少字:每个 event 取「末值/净增量」和「edit_log commit 流水」里
+        // 更大的那个。聊天(Discord 等)发送后输入框清空、净值归零,但真消息全在 commit
+        // 流水里 —— 只看末值会把聊天误判成"AX 坏掉的文档"而错走 OCR(把整段对话含对方
+        // 消息重建)。真坏 AX 的 canvas(Google Docs 自绘编辑器)commit 是零宽残渣,
+        // 过滤后仍≈0,照常判坏、走 OCR 重建。
+        let axCaptured = s.typingEvents.reduce(0) { total, e -> Int in
+            let fromValue = realChars(e.endValue.isEmpty ? e.text : e.endValue)
+            var fromCommits = 0
+            if let data = e.editLog.data(using: .utf8),
+               let arr = try? JSONDecoder().decode([E].self, from: data) {
+                fromCommits = arr.filter { $0.kind == "commit" }.compactMap { $0.text }
+                    .reduce(0) { $0 + realChars($1) }
+            }
+            return total + max(fromValue, fromCommits)
         }
         let ocrChars = s.ocrFrames.map { $0.text.count }.max() ?? 0
         return axCaptured <= meaningfulKeys / keyRatio && ocrChars >= 200
