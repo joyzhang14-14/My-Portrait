@@ -478,19 +478,24 @@ final class TypingRecordWriter {
     /// 真发送后 value 表现:
     ///   (a) 清空(`newValue` empty)
     ///   (b) 回到 session 初始值(placeholder 模式;`newValue == sessionStart`)
-    ///   (c) 长消息 + 长度断崖下降(`message ≥ 30` 且 `newValue < 30`)
+    ///   (c) 长消息发出后只剩**极少**残渣(`message ≥ 30` 且 `newValue ≤ 4`)
     ///
     /// 不像被清空的(应当返回 false):
     /// - Enter = 换行 的 app (多行编辑器、开了 Enter-newline 设置的 Slack)
     ///   → `newValue = message + "\n"`
-    /// - IME commit Enter(commit raw pinyin)→ `newValue` 长度差不多
+    /// - IME commit Enter(commit raw pinyin)→ `newValue` 仍是落定后的整条文字
     /// - 用户连按 Enter 但 value 几乎没变
+    ///
+    /// ⚠️ (c) 早先写的是「`newValue < 30`」绝对断崖,IME 落字会跨界误判
+    /// (拼音 31 字 → 落定 29 字,29 < 30 被当成发送把消息劈两半)。改判「残渣绝对
+    /// 极少」:发送后留下的是**小常量**(Discord 的 `﻿\n`=2 字;占位符已被 (b) 接走),
+    /// 跟消息多长无关。IME 落定留的是整条真文字(≥30 消息远不止 4 字)→ 不会命中。
     nonisolated static func looksLikeSubmitClear(
         message: String, newValue: String, sessionStart: String
     ) -> Bool {
         if newValue.isEmpty { return true }
         if newValue == sessionStart { return true }
-        if message.count >= 30 && newValue.count < 30 { return true }
+        if message.count >= 30 && newValue.count <= 4 { return true }
         return false
     }
 
