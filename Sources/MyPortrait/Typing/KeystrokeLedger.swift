@@ -422,9 +422,12 @@ private func keystrokeLedgerTapCallback(
     let isUndoOrRedo = hasCmd && keyCode == Int64(kVK_ANSI_Z)
     let isRedo   = isUndoOrRedo && hasShift
     let isUndo   = isUndoOrRedo && !hasShift
-    // Shift+Return 在多数 app 里是换行，不是发送 —— 不算提交信号。
+    // 提交信号只认「单独敲」的 Return:任何修饰键 + Return 都不算 ——
+    // Shift+Return 多是换行，⌘/⌥/⌃+Return 是 app 快捷键，不是裸回车发送。
+    // (incidental flags 如 numericPad / capsLock / nonCoalesced 不在判定集内，不误伤。)
+    let returnMods: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate]
     let isReturn = (keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter))
-        && !hasShift
+        && flags.intersection(returnMods).isEmpty
     if isPaste {
         ledger.recordPaste()
     } else if isCut {
