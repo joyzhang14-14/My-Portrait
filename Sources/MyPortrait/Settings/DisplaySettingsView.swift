@@ -46,6 +46,13 @@ struct DisplaySettingsView: View {
             }
 
             SettingsCard(title: "Chat") {
+                SettingsRow("Compact tool blocks",
+                            description: "Collapse a reply's thinking + tool steps into one expandable summary bar. Faster to load.",
+                            icon: "rectangle.compress.vertical") {
+                    Toggle("", isOn: config.binding(\.display.compactToolBlocks))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                SettingsDivider()
                 SettingsRow("Hide thinking blocks",
                             description: "Don't show the model's reasoning trace in the transcript.",
                             icon: "brain") {
