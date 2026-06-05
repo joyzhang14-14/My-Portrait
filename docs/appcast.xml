@@ -12,6 +12,32 @@
         -->
 
         <item>
+            <title>1.2.95</title>
+            <pubDate>Fri, 05 Jun 2026 06:37:34 +0000</pubDate>
+            <sparkle:version>169</sparkle:version>
+            <sparkle:shortVersionString>1.2.95</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Compact tool blocks in chat</strong> — A reply's thinking and tool steps collapse into one expandable summary bar; long chats load faster. Click to expand the details. Toggle in Settings → Display → Chat.</li>
+                    <li><strong>Dismiss a stuck "Needs attention" day</strong> — You can accept a day as-is so it stops being flagged.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Cleaner chat copy</strong> — The copy button now copies only the assistant's final answer, not its thinking or the commands it ran.</li>
+                    <li><strong>Higher writing capture accuracy</strong></li>
+                    <li><strong>"Needs attention" clears after a successful retry</strong> — The row no longer lingers once the day reprocesses.</li>
+                    <li><strong>"Needs attention" retries promptly</strong> — Retry now skips the once-a-day guard instead of staying stuck for ~9 hours.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.95/MyPortrait_1.2.95_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="uSNyHE/0AEFZx+siKqTa9g0Y3NBDwxtVIsgPiJAGdMds9W94e02PiJmBhgr2YH7NdBnfr2Ze8VN+W2HX1HvaAQ==" length="26139955" />
+        </item>
+
+        <item>
             <title>1.2.89</title>
             <pubDate>Thu, 04 Jun 2026 19:53:15 +0000</pubDate>
             <sparkle:version>168</sparkle:version>
