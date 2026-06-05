@@ -117,6 +117,7 @@ final class MemoryScheduler {
     private func recordFailure(date: String, stage: ProcessingStage, kind: LLMFailureKind) {
         lastFailureByRowStage[date, default: [:]][stage] = kind
         persistLastFailures()
+        attentionVersion &+= 1
     }
 
     /// 清掉某 stage 的 failure 记录(success 时调),内存 + 落盘。
@@ -126,7 +127,15 @@ final class MemoryScheduler {
             lastFailureByRowStage.removeValue(forKey: date)
         }
         persistLastFailures()
+        attentionVersion &+= 1
     }
+
+    /// @Observable 计数 —— attention 列表需重读时增。UI 通过引用此属性
+    /// 让 SwiftUI 跟踪,scheduler 内部 status / kind 变化触发自动 reload,
+    /// 否则 retry 成功后 attention 行不会主动消失(attentionDays 是
+    /// nonisolated DB 读,UI 不知道该重查)。
+    /// 包装溢出(&+=)而非 +=,避免 Int max 边界(实际上跑几辈子也到不了)。
+    private(set) var attentionVersion: Int = 0
 
     /// 启动时从盘加载。失败 / 不存在 → 内存留空,后续写入仍会建文件。
     private func loadLastFailures() {
