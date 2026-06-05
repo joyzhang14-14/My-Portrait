@@ -1276,7 +1276,12 @@ struct MemorySettingsView: View {
     }
 
     private var attentionSection: some View {
-        section(
+        // scheduler.attentionVersion 是 @Observable 计数 —— runStep success /
+        // failed / recoverPausedJobs / dismissDay 等都会 bump 它。下面 .task(id:)
+        // 监听这个版本号,变化时自动 reload(),retry 成功后 attention 行不再
+        // 卡死,自动消失。
+        let version = MemoryScheduler.shared.attentionVersion
+        return section(
             title: "Needs attention",
             blurb: "Days that failed, hit a budget limit, or gave up after repeated tries. Reset moves a day back to pending so the next run tries it again."
         ) {
@@ -1295,6 +1300,12 @@ struct MemorySettingsView: View {
                     attentionRow(item)
                 }
             }
+        }
+        // 版本号变 → 自动 reload。version 引用让 SwiftUI 跟踪 @Observable。
+        .task(id: version) {
+            // 首次 mount(version=0)init 时已被 main task 调过 reload();
+            // 但 version 变化时这条会重跑,刷新 attention 列表。
+            reload()
         }
     }
 
