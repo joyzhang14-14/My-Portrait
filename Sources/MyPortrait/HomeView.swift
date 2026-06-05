@@ -1284,8 +1284,17 @@ private struct ErrorCard: View {
 /// `isRunning`; collapses to a one-line "Thought for Ns" once done.
 private struct ThinkingCard: View {
     let block: ThinkingBlock
-    @State private var expanded: Bool = true
-    @State private var didAutoCollapse: Bool = false
+    @State private var expanded: Bool
+    @State private var didAutoCollapse: Bool
+
+    init(block: ThinkingBlock) {
+        self.block = block
+        // 运行中默认展开看进度;已完成的(历史 / 折叠汇总栏里 lazy 插入)初始就
+        // collapsed —— 避免「首帧展开再 onAppear 收起」的高度闪烁(在 ScrollView
+        // 里会把视角向上弹)。
+        _expanded = State(initialValue: block.isRunning)
+        _didAutoCollapse = State(initialValue: !block.isRunning)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1377,13 +1386,22 @@ private struct ThinkingCard: View {
 ///     ("Ran `pwd && ls`", "Read App.swift") that the user can click to expand.
 private struct ToolCard: View {
     let block: ToolBlock
-    @State private var expanded: Bool = true
+    @State private var expanded: Bool
     /// Set to true once we've kicked off the auto-collapse so we don't run the
     /// timer every time SwiftUI rebuilds the view.
-    @State private var didScheduleAutoCollapse: Bool = false
+    @State private var didScheduleAutoCollapse: Bool
 
     /// Delay between a tool finishing and the card collapsing to a one-liner.
     private static let autoCollapseDelay: TimeInterval = 2.0
+
+    init(block: ToolBlock) {
+        self.block = block
+        // 运行中默认展开看进度;已完成的(历史 / 折叠汇总栏里 lazy 插入)初始就
+        // collapsed —— 避免「首帧展开再 onAppear 收起」的高度闪烁(在 ScrollView
+        // 里会把视角向上弹)。
+        _expanded = State(initialValue: block.isRunning)
+        _didScheduleAutoCollapse = State(initialValue: !block.isRunning)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
