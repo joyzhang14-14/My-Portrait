@@ -1380,8 +1380,12 @@ final class WritingCaptureWorker {
                 }
                 let fixes = await makeCleanup().run(items: items)
                 let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
-                    // LLM(补齐 agent)给的 text + confidence 覆盖默认值;漏/失败 → 原文+默认。
-                    guard let fix = fixes["r\(i)"] else { return rec }
+                    // LLM(补齐 agent)给的 text + confidence 覆盖默认值;漏/失败/给空 → 原文+默认。
+                    // 给空守卫:小模型清不动带 IME 残渣的碎片(如「你得抓住mei」)时会返回空,
+                    // 没这道守卫就把确定性原文覆盖成空、整条静默丢失(对齐 mergeAxCleanup 的 nonEmpty)。
+                    guard let fix = fixes["r\(i)"],
+                          !fix.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    else { return rec }
                     return WritingCaptureRecord(
                         text: fix.text, editLog: rec.editLog, kind: rec.kind, source: rec.source,
                         confidence: fix.confidence, contextSummary: rec.contextSummary,
