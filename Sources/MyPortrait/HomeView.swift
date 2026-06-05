@@ -300,27 +300,15 @@ private func formatTokens(_ n: Int) -> String {
     return String(format: "%.1fM", Double(n) / 1_000_000)
 }
 
-/// Flatten an assistant `ChatMessage`'s mixed parts (text + tool blocks +
-/// thinking) into one plain-text string suitable for the clipboard.
+/// Extract an assistant `ChatMessage`'s final text output for the clipboard.
+/// Copies **only** the `.text` parts — the model's actual answer — and drops
+/// thinking, tool commands/output, errors, and edit drafts. Users want the
+/// clean reply, not the whole reasoning + execution trace.
 private func plainTextOf(_ m: ChatMessage) -> String {
     if m.role == .user || m.parts.isEmpty { return m.text }
-    var out: [String] = []
-    for part in m.parts {
-        switch part {
-        case .text(_, let v):
-            out.append(v)
-        case .tool(let b):
-            out.append("$ \(b.command)")
-            if !b.output.isEmpty { out.append(b.output) }
-        case .thinking(let b):
-            if !b.text.isEmpty { out.append("[thinking] \(b.text)") }
-        case .error(let b):
-            out.append("[error] \(b.message)")
-        case .editDraft(let b):
-            out.append("[edit draft \(b.state.rawValue)] \(b.originalRelPath) — \(b.summary ?? b.request)")
-        }
-    }
-    return out.joined(separator: "\n\n")
+    return m.parts
+        .compactMap { if case .text(_, let v) = $0 { return v } else { return nil } }
+        .joined(separator: "\n\n")
 }
 
 /// Slim banner shown above the chat when AI setup is in progress or failed.
