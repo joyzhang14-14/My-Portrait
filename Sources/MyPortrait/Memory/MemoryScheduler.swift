@@ -1126,6 +1126,26 @@ final class MemoryScheduler {
         print("[Scheduler] reset \(date) → pending, retry_count=0")
     }
 
+    /// "我接受现状,不再跑" —— 用户 Dismiss attention 行时调。把 failed /
+    /// budget_deferred / dead_letter 阶段标 complete + 清 last failure kind,
+    /// 从 attention 列表永久消失。跟 resetDay 区分:
+    ///   - resetDay → 阶段回 pending,下次 tick 重试(用户:再试一次)
+    ///   - dismissDay → 阶段标 complete,scheduler 不再碰它(用户:不在乎了)
+    func dismissDay(_ date: String) {
+        guard let row = store.row(for: date) else { return }
+        for stage in ProcessingStage.allCases {
+            switch row.status(of: stage) {
+            case .failed, .deadLetter, .budgetDeferred:
+                store.setStatus(date: date, stage: stage, status: .complete)
+                clearFailure(date: date, stage: stage)
+            default:
+                break
+            }
+        }
+        store.releaseLock(date: date)
+        print("[Scheduler] dismiss \(date) → complete, kind cleared")
+    }
+
     /// 需要用户关注的日：任一阶段处于 failed / dead_letter / budget_deferred。
     /// nonisolated:纯 DB 读 + 数据变换,不碰 MainActor 状态,可在后台调用
     /// 避免阻塞 UI(被 MemorySettingsView.reload 从 detached task 调)。

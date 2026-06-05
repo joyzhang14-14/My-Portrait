@@ -1340,6 +1340,13 @@ struct MemorySettingsView: View {
                     }
                 }
                 Spacer()
+                Button("Dismiss") {
+                    MemoryScheduler.shared.dismissDay(item.date)
+                    reload()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Mark complete — stop retrying this day")
                 Button("Problem solved") {
                     MemoryScheduler.shared.resetDay(item.date)
                     reload()
@@ -1347,6 +1354,7 @@ struct MemorySettingsView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.red)
+                .help("Reset to pending — scheduler will retry on next tick")
             }
             .padding(8)
             .background(
@@ -1383,6 +1391,13 @@ struct MemorySettingsView: View {
                 Text("retry \(item.retryCount)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
+                Button("Dismiss") {
+                    MemoryScheduler.shared.dismissDay(item.date)
+                    reload()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Mark complete — stop retrying this day")
             }
             .padding(.vertical, 2)
         } else {
@@ -1398,12 +1413,20 @@ struct MemorySettingsView: View {
                 Text("retry \(item.retryCount)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
+                Button("Dismiss") {
+                    MemoryScheduler.shared.dismissDay(item.date)
+                    reload()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Mark complete — stop retrying this day")
                 Button("Reset") {
                     MemoryScheduler.shared.resetDay(item.date)
                     reload()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .help("Reset to pending — scheduler will retry on next tick")
             }
         }
     }
