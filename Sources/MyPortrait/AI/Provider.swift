@@ -64,10 +64,10 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     var availableModels: [String] {
         switch self {
         case .chatgpt:    return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
-        case .openaiBYOK: return ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini", "gpt-4-turbo"]
+        case .openaiBYOK: return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
         case .anthropic:  return ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
         case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
-        case .gemini:     return ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
+        case .gemini:     return ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
         case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
         case .deepseek:   return ["deepseek-v4-pro", "deepseek-v4-flash"]
         // claude CLI 接受 alias(sonnet/opus/haiku 自动取最新)或完整 model id。
