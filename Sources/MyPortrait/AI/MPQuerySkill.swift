@@ -148,9 +148,31 @@ enum MPQuerySkill {
         my git changes"). Each run spawns a fresh agent conversation
         with the saved prompt and optional captured-data context window.
 
-        When the user expresses an intent like "create a task that runs
-        every X" / "make it remind me to Y every morning" / "set up a
-        background job that Z" — use `mp-query cronjob add` to create it.
+        **Recognize cron-job intent broadly** — don't wait for the user to
+        say the exact words "cron job" or "schedule". Treat ANY of these as a
+        cron-job request and proceed with `mp-query cronjob add`:
+
+        - Explicit recurrence: "every hour / day / morning / week / Monday",
+          "daily", "weekly", "periodically", "regularly", "on a schedule",
+          "from now on", "going forward", "keep doing X".
+        - Automation / standing-order phrasing: "automatically ...",
+          "always ...", "remind me to ...", "keep an eye on ...", "watch for
+          ...", "notify me when/whenever ...", "check ... for me", "keep my
+          ... updated / in sync", "summarize my ... each ...", "make a habit
+          of ...", "set this up so ...", "have it run ...".
+        - Any language (the user may write in Chinese / Japanese / etc.):
+          e.g. 「每天/每周/定时/以后每次/帮我定期/自动/提醒我」,「毎日/定期的に」.
+          Map the meaning, not the exact English keyword.
+        - **Implicit recurrence**: if the user asks for something that only
+          makes sense repeated ("summarize what I did today" said in a way
+          that implies every day, "push my git changes" as an ongoing
+          chore) — surface the option: ask "want me to set this up to run
+          automatically every day?" rather than just doing it once.
+
+        When in doubt whether the user wants a one-off vs. a recurring job,
+        **ask one short clarifying question** — err toward offering to make
+        it a cron job. Only skip cron creation when the request is clearly a
+        single immediate action ("summarize my last hour" right now).
 
         Workflow:
 
