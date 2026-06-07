@@ -682,6 +682,16 @@ enum WritingCapturePrompts {
       e.g. text "这是一家什么dian", keystroke "...shi yi jia shen me dian" → "这是一家什么店"
     Also drop abandoned trailing phonetic residue the keystrokes show was deleted.
 
+    The captured text can also be CUT OFF at its very end — the user's final IME segment
+    was committed but the field's accessibility value never updated before the message
+    sent, leaving only a leading pinyin fragment (or stopping mid-phrase). The keystroke
+    holds the FULL phonetic the user typed through that point. When the keystroke runs
+    CLEANLY PAST where the text ends — complete syllables, ending with a candidate-pick /
+    space / <CR> — decode that ENTIRE trailing run to the intended common characters and
+    APPEND the whole missing tail (not just the one fragment shown). But if the trailing
+    keystroke phonetic is itself UNFINISHED (a half-typed syllable with no candidate pick
+    after it), the user never finished it — leave the text as captured, do NOT guess.
+
     DO NOT "complete" a latin token that is plausibly a PROPER NAME (person / place /
     product), an English word the user wrote ON PURPOSE, or an intentional romanization
     — leave those EXACTLY as typed. Only complete when the latin is UNAMBIGUOUSLY
