@@ -1479,10 +1479,30 @@ final class WritingCaptureWorker {
                 let deduped = cleaned.filter {
                     seenText.insert(Self.cleanVisible($0.text)).inserted
                 }
+                // 同组「拼音残尾被取代」:A 以**短拉丁残尾**(≤3字,如「…70度l」的 l)结束,
+                // 去掉残尾后是同组另一条更长 B 的前缀 → A 是 B 的残缺早期版(先打残、又补全),
+                // 丢 A 留 B。残尾限 ≤3 字:不碰故意的英文词(python/today)、也不碰结尾是汉字
+                // 的短消息(好的/today可以让)—— 那些不是残尾,避免误并真消息。
+                func trimLatinTail(_ s: String) -> String {
+                    var v = Substring(s); var n = 0
+                    while let c = v.last, c.isASCII, c.isLetter || c == " " { v = v.dropLast(); n += 1 }
+                    return (1...3).contains(n) ? String(v).trimmingCharacters(in: .whitespaces) : s
+                }
+                let dedTexts = deduped.map { Self.cleanVisible($0.text) }
+                var superseded = Set<Int>()
+                for (i, a) in dedTexts.enumerated() {
+                    let stripped = trimLatinTail(a)
+                    guard stripped.count >= 2, stripped != a else { continue }
+                    if dedTexts.enumerated().contains(where: { (j, b) in
+                        j != i && b.count > stripped.count && b.hasPrefix(stripped)
+                    }) { superseded.insert(i) }
+                }
+                let survivors = superseded.isEmpty ? deduped
+                    : deduped.enumerated().filter { !superseded.contains($0.offset) }.map { $0.element }
                 // 确定性前缀合并:跨 session(切走 app 又回来接着打同一条草稿,
                 // Step0 按 app 切成两条)的草稿增长在这并回去。
                 let merged = Self.mergePrefixDrafts(
-                    deduped, rawTyping: g.sessions.flatMap { $0.typingEvents })
+                    survivors, rawTyping: g.sessions.flatMap { $0.typingEvents })
                 return WritingCapturePass3Agent.Output(
                     prompt: "(ax cleanup)", rawResponse: "", records: merged, discarded: [])
             }
