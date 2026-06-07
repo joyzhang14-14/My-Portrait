@@ -135,7 +135,7 @@ struct MemoriesView: View {
                                 EntryRow(entry: entry, selected: selected == entry.id)
                                     .contentShape(Rectangle())
                                     .onTapGesture { handleSelect(entry: entry) }
-                                    .contextMenu { if isEvents { eventContextMenu(entry) } }
+                                    .contextHighlight { if isEvents { eventContextMenu(entry) } }
                                 Divider().background(Color.primary.opacity(0.08))
                             }
                         }
@@ -226,7 +226,7 @@ struct MemoriesView: View {
             EntryRow(entry: entry, selected: selected == entry.id)
                 .contentShape(Rectangle())
                 .onTapGesture { handleSelect(entry: entry) }
-                .contextMenu { eventContextMenu(entry) }
+                .contextHighlight { eventContextMenu(entry) }
             Divider().background(Color.primary.opacity(0.08))
         }
     }
@@ -783,8 +783,8 @@ private struct FolderDisclosureRow: View {
             .padding(.vertical, 12)
             .contentShape(Rectangle())
             .onTapGesture { expanded.toggle() }
-            // 右键菜单:改名 / 改颜色(预设色板)/ 删除。
-            .contextMenu {
+            // 右键菜单:改名 / 改颜色(预设色板)/ 删除。右键时蓝框框住标题行。
+            .contextHighlight(cornerRadius: 8) {
                 Button("Rename…") { renameDraft = title; renaming = true }
                 Menu("Change color") {
                     ForEach(FolderPalette.swatches, id: \.hex) { sw in
@@ -829,7 +829,7 @@ private struct FolderDisclosureRow: View {
                             .padding(.leading, 22)   // 跟 chevron 缩对齐
                             .contentShape(Rectangle())
                             .onTapGesture { onSelect(entry) }
-                            .contextMenu { eventMenu(entry) }
+                            .contextHighlight(cornerRadius: 6) { eventMenu(entry) }
                         // 最后一个 event 不画尾部细线 —— 否则它会漏在外层
                         // folders↔ungrouped 的 10px 粗线上方,显得多一道线。
                         if idx < entries.count - 1 {
