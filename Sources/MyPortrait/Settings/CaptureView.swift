@@ -618,8 +618,6 @@ struct ScreenCaptureSettingsView: View {
     /// 用 frames.app_name 装填 ignored apps 下拉,page task 触发加载。
     @State private var discoveredApps: [String] = []
 
-    private var screenRec: Bool { config.current.capture.screen.enabled }
-
     var body: some View {
         SettingsPage("Screen Capture", subtitle: "Screenshots + OCR + Privacy",
                      onResetCurrentPage: {
@@ -733,23 +731,6 @@ struct ScreenCaptureSettingsView: View {
                             description: "Capture periodic snapshots of your screen.",
                             icon: "display") {
                     Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
-                }
-                if screenRec {
-                    SettingsDivider()
-                    SettingsRow("Video FPS",
-                                description: "Frames per second to capture into the video chunks.",
-                                icon: "speedometer") {
-                        HStack(spacing: 8) {
-                            Slider(value: Binding(
-                                get: { Double(config.current.capture.screen.videoFps) },
-                                set: { v in config.mutate { $0.capture.screen.videoFps = Int(v) } }
-                            ), in: 1...30, step: 1).frame(width: 140)
-                            Text("\(config.current.capture.screen.videoFps) fps")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                                .frame(width: 50, alignment: .trailing)
-                        }
-                    }
                 }
             }
         }

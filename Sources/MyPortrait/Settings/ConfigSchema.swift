@@ -645,17 +645,14 @@ struct AudioConfig: Codable, Equatable {
 
 struct ScreenConfig: Codable, Equatable {
     var enabled:         Bool   = true
-    var videoFps:        Int    = 1
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
-        case videoFps        = "video_fps"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled         = c.dflt(Bool.self,   .enabled, enabled)
-        videoFps        = c.dflt(Int.self,    .videoFps, videoFps)
     }
 }
 
