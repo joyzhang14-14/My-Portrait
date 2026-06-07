@@ -27,6 +27,11 @@ struct EventFolder: Codable, Sendable, Identifiable, Equatable {
     let createdAtMs: Int64
     /// 上次有事件被分进来(或被移走)的时间。
     var updatedAtMs: Int64
+    /// 用户在 UI 设的固定颜色(hex,如 "#5C8DE8")。nil = 没设过 → UI 用按
+    /// name hash 出来的默认色("第一次随机")。可选 + 旧 JSON 没这字段 decode
+    /// 成 nil,完全向后兼容。所有写入(mp-folders add/remove/rename 都走
+    /// load→save)会原样保留它 —— cron job 自动分组不会覆盖用户设的颜色。
+    var colorHex: String? = nil
 
     var id: String { slug }
 

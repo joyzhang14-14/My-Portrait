@@ -907,40 +907,33 @@ private struct SchedulerStep: View {
         desc: String,
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
     ) -> some View {
+        // 单一 Auto-run toggle —— 跟 Settings → Scheduler 同口径,砍 Frequency
+        // / Time / Day 三档死配置(实际行为由 catchUp + backoff 接管,Time
+        // 没生效)。toml 老字段保留兼容。
         let freq = config.binding(kp.appending(path: \.frequency))
+        let autoRun = Binding<Bool>(
+            get: { freq.wrappedValue != .off },
+            set: { freq.wrappedValue = $0 ? .daily : .off }
+        )
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(desc)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 12) {
-                Text("Frequency")
-                    .font(.system(size: 12))
-                    .frame(width: 90, alignment: .leading)
-                Picker("", selection: freq) {
-                    Text("Off (manual only)").tag(SchedulerFrequency.off)
-                    Text("Daily").tag(SchedulerFrequency.daily)
-                    Text("Weekly").tag(SchedulerFrequency.weekly)
-                    Text("Monthly").tag(SchedulerFrequency.monthly)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    Text(desc)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .labelsHidden()
-                .frame(maxWidth: 220)
-                Spacer(minLength: 0)
+                Spacer(minLength: 12)
+                Toggle("", isOn: autoRun)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
             }
-
-            if freq.wrappedValue != .off {
-                HStack(spacing: 12) {
-                    Text("Time")
-                        .font(.system(size: 12))
-                        .frame(width: 90, alignment: .leading)
-                    timeOfDayPicker(binding: config.binding(kp.appending(path: \.timeOfDay)))
-                    Spacer(minLength: 0)
-                }
-            }
+            Text(autoRun.wrappedValue
+                ? "Auto — scheduler picks it up when there's pending work, retries failures with backoff."
+                : "Manual only — runs only when you trigger it.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
         }
         .padding(14)
         .background(

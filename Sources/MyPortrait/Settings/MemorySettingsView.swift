@@ -464,31 +464,39 @@ struct MemorySettingsView: View {
         desc: String,
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
     ) -> some View {
+        // 单一 Auto-run toggle —— 砍掉 Frequency/Time/Day 配置(它们对实际
+        // 行为没影响:tick 周期 15min 固定,catchUp + backoff 自动接管 retry,
+        // Time 只在"全 complete + 无 pending"才生效,基本是死配置)。
+        // 老 ConfigSchema 字段(timeOfDay/dayOfWeek/dayOfMonth)留着不动 —
+        // toml 向后兼容,UI 只暴露 on/off。
         let freq = cfg.binding(kp.appending(path: \.frequency))
+        let autoRun = Binding<Bool>(
+            get: { freq.wrappedValue != .off },
+            set: { freq.wrappedValue = $0 ? .daily : .off }
+        )
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 13, weight: .semibold))
-            Text(desc)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            frequencyRow("Frequency", value: freq)
-
-            switch freq.wrappedValue {
-            case .off:
-                Text("Manual only — runs only when you trigger it.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            case .daily:
-                timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
-            case .weekly:
-                weekdayRow("Day of week", value: cfg.binding(kp.appending(path: \.dayOfWeek)))
-                timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
-            case .monthly:
-                dayOfMonthRow("Day of month", value: cfg.binding(kp.appending(path: \.dayOfMonth)))
-                timeRow("Time", value: cfg.binding(kp.appending(path: \.timeOfDay)))
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    Text(desc)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Toggle("", isOn: autoRun)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .help(autoRun.wrappedValue
+                        ? "Scheduler runs this pipeline automatically (15-min tick + backoff for retries)."
+                        : "Manual only — runs only when you trigger it from Run now.")
             }
+            Text(autoRun.wrappedValue
+                ? "Auto — scheduler picks it up when there's pending work, retries failures with backoff."
+                : "Manual only — runs only when you trigger it.")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
