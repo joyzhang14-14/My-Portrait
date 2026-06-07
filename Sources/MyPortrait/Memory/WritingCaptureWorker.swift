@@ -1381,10 +1381,13 @@ final class WritingCaptureWorker {
                         // 该消息组窗口内的击键(±10s)。
                         let pad: Int64 = 10_000
                         let grpKeys = s.keystrokes.filter { $0.tsMs >= startTs - pad && $0.tsMs <= endTs + pad }
-                        // 按 keystroke 把关:文字一大段但几乎没击键 = 读/打开文档/纯外部
-                        // 粘贴 → 丢(Obsidian 你只是打开来看)。短粘贴(<30字)混在大量
-                        // 打字里 → 击键多 → 留。组级击键总量(连发的多条共享)。
+                        // 按 keystroke 把关:文字一大段但几乎没击键 = 读/打开文档/编辑
+                        // 预先存在的内容(如改 AI 写的文档)→ 丢。**按该组消息总长度判,
+                        // 不按单条**:否则一份大文档被拆成多条、每条各自蹭满组 kc 蒙混过关
+                        // (Obsidian 改 3115 字的 AI 文档只敲 384 键,逐条判时 1160 字那条漏过)。
+                        // 真打的(中文拼音击键数 ≥ 字数)永远过;短粘贴混大量打字也过。
                         let kc = grpKeys.filter { ($0.modifiers & 0x07) == 0 }.count
+                        let totalLen = messages.reduce(0) { $0 + $1.count }   // 该组所有消息总字数
                         let ks = await WritingCapturePass2Agent.assembleKeystrokeText(grpKeys)
                         // slash 命令(/play 等):AX 吞了斜杠只留命令名,keystroke 仍以
                         // "/" 起头 → 丢。app 无关(slash 命令是 chat app 通用约定)。
@@ -1395,7 +1398,7 @@ final class WritingCaptureWorker {
                             $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
                         }?.summary
                         for text in messages {
-                            if text.count > 20 && kc < text.count / 4 { continue }
+                            if totalLen > 20 && kc < totalLen / 4 { continue }   // 组级击键支撑度
                             if ksTrim.hasPrefix("/") { continue }
                             // conf 默认值;下面补齐 agent(LLM)给真实判定覆盖。漏/失败 → 0.9。
                             let conf = 0.9
