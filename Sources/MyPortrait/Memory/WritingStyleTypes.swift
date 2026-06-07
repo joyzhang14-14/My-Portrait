@@ -32,11 +32,10 @@ struct WritingStyleRecordInput: Sendable, Equatable {
     let text: String
     let editLog: String              // JSON 原文,LLM 自己看时序
     let kind: String                 // long_form / short_form / other
+    /// 写作时的语境(由 writing capture Pass 3 LLM 生成,在 writing_records 表
+    /// 自带)。distiller 直接信它 + app + url 让下游 LLM 推断 voice,不再
+    /// 额外抓 OCR。
     let contextSummary: String?
-    /// midpoint OCR snippet —— 这条 record 时间窗中间那帧的屏幕 OCR 文本,
-    /// 截到 ~200 字。给 LLM 当语境辅助:消除"短消息归到 chat 还是 prompt"
-    /// 这种歧义。可选 —— 只对短文本 record enrich,长 record 自身够看。
-    var ocrContext: String? = nil
 }
 
 // MARK: - LLM 输出 / staged 行

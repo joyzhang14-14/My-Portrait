@@ -42,14 +42,15 @@ enum WritingStylePrompts {
     The SAME user uses different voices in different contexts. Treat them
     as separate signals, don't conflate.
 
-    Each record carries `app` (bundle id), often `url`, and an
-    `ocr_context` snippet (what was on screen at the time — given for
-    short text records to disambiguate the situation). Use these to infer
-    the situation yourself — DO NOT rely on a fixed app-to-context
-    mapping. The same app can host different contexts (a code editor used
-    to write a blog post, a browser used for both chat and search), and
-    the user's app stack changes over time. Read `app` + `url` +
-    `ocr_context` together each time.
+    Each record carries `app` (bundle id), often `url`, and a `context`
+    line (a short one-sentence summary of what the user was doing —
+    produced upstream by writing capture's own LLM pass over the typing
+    + AX tree, so it already reflects the actual situation). Use
+    `app` + `url` + `context` together to infer the voice/situation —
+    DO NOT rely on a fixed app-to-context mapping. The same app can host
+    different contexts (a code editor used to write a blog post, a
+    browser used for both chat and search), and the user's app stack
+    changes over time.
 
     Once you've inferred the situation, group records that share a
     coherent voice into the same facet, and keep records from clearly
