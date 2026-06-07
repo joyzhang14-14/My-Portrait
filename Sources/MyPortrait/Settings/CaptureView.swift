@@ -615,6 +615,8 @@ struct AudioCaptureSettingsView: View {
 /// 是同一条思路,放一起省一次跳转)。
 struct ScreenCaptureSettingsView: View {
     @State private var config = ConfigStore.shared
+    /// Auto 模式当前实际解析出的档位(显示 "Auto — Balanced")。
+    @State private var powerState = PowerProfileState.shared
     /// 用 frames.app_name 装填 ignored apps 下拉,page task 触发加载。
     @State private var discoveredApps: [String] = []
 
@@ -716,7 +718,8 @@ struct ScreenCaptureSettingsView: View {
         ) {
             ForEach(PowerMode.allCases) { mode in
                 PowerModeRow(mode: mode,
-                             isActive: config.current.capture.system.powerMode == mode.rawValue) {
+                             isActive: config.current.capture.system.powerMode == mode.rawValue,
+                             autoActiveLabel: mode == .auto ? powerState.activeProfileName : nil) {
                     config.mutate { $0.capture.system.powerMode = mode.rawValue }
                 }
                 if mode != PowerMode.allCases.last { SettingsDivider() }
@@ -895,8 +898,17 @@ struct TypingCaptureSettingsView: View {
 private struct PowerModeRow: View {
     let mode: PowerMode
     let isActive: Bool
+    var autoActiveLabel: String? = nil
     let onTap: () -> Void
     @State private var hover = false
+
+    /// Auto 行显示当前实际解析出的档位:"Auto — Balanced";其余行用 mode.label。
+    private var displayLabel: String {
+        if mode == .auto, let active = autoActiveLabel, !active.isEmpty {
+            return "Auto — \(active)"
+        }
+        return mode.label
+    }
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
@@ -915,7 +927,7 @@ private struct PowerModeRow: View {
                 }
                 .frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(mode.label)
+                    Text(displayLabel)
                         .font(.system(size: 13, weight: isActive ? .semibold : .regular))
                         .foregroundStyle(Theme.textPrimary.opacity(0.95))
                     Text(mode.subtitle)
