@@ -377,6 +377,9 @@ struct GeneralConfig: Codable, Equatable {
     /// 0 = no limit(runs.json 会无限增长,慎选)。
     /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
     var cronJobHistoryLimit: Int = 20
+    /// Import 页打开时是否自动扫描所有来源(screenpipe / Claude Code / Codex)。
+    /// 关 → Import 页每个来源显示「未扫描」+ Scan 按钮,点了才扫。默认开(保持现状)。
+    var autoScanImports:     Bool = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
@@ -384,6 +387,7 @@ struct GeneralConfig: Codable, Equatable {
         case updateCheckMinutes   = "update_check_minutes"
         case onboardingCompleted  = "onboarding_completed"
         case cronJobHistoryLimit  = "cron_job_history_limit"
+        case autoScanImports      = "auto_scan_imports"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -393,6 +397,7 @@ struct GeneralConfig: Codable, Equatable {
         updateCheckMinutes  = c.dflt(Int.self,  .updateCheckMinutes, updateCheckMinutes)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
         cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
+        autoScanImports     = c.dflt(Bool.self, .autoScanImports, autoScanImports)
     }
 }
 

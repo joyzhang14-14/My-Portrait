@@ -90,6 +90,14 @@ struct GeneralSettingsView: View {
                 CronJobStore.shared.applyHistoryLimit()
             }
 
+            SettingsCard(title: "Imports") {
+                SettingsRow("Auto-scan everything from imports",
+                            description: "Scan all import sources (screenpipe, Claude Code, Codex) automatically when you open the Import page. Off → each source waits until you press its Scan button.",
+                            icon: "arrow.triangle.2.circlepath") {
+                    Toggle("", isOn: config.binding(\.general.autoScanImports)).labelsHidden().toggleStyle(.switch)
+                }
+            }
+
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。
