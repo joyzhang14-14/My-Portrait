@@ -1247,6 +1247,85 @@ final class WritingCaptureWorker {
         return msgs
     }
 
+    // MARK: - 统一提取(字段状态时间线模型)
+    //
+    // 替掉散落互相打架的 6 个启发式。核心一句话:维护「当前跨事件草稿 cur」,字段每次
+    // reset(空/零宽/占位符)就把 cur 吐成一条消息;末尾没 reset 的是草稿。reset 用
+    // 「下一个事件起点是不是 reset 态」判 —— **绝不用前缀比对**(CJK 拼音↔汉字、中途改字
+    // 会把前缀判炸成逐字爆炸,那次 194 条就是这么来的)。event 内连发由 withinEventSends
+    // 拆。占位符按 run 级「整段跳变复现」识别,不认 app/语言/长度。
+
+    /// 字段是不是「reset 态」:空/纯空白/零宽,或 run 级识别出的占位符。
+    nonisolated static func isResetState(_ s: String, placeholders: Set<String>) -> Bool {
+        let zw: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]
+        if s.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || zw.contains($0.value) }) { return true }
+        return placeholders.contains(Self.cleanVisible(s))
+    }
+
+    /// run 级占位符识别:某 endValue **作为单条 commit/paste 一次性跳变出现**(app 注入、
+    /// 非逐字打出)且复现 ≥3 次。逐字堆出来的真草稿没有「整段=单条目」,不会误判;
+    /// 不限长度、不认 app/语言。所有待处理事件扫一遍,只算一次。
+    nonisolated static func collectPlaceholders(_ groups: [WritingCaptureGroup]) -> Set<String> {
+        struct E: Decodable { let kind: String?; let text: String? }
+        var counts: [String: Int] = [:]
+        for g in groups {
+            for s in g.sessions {
+                for ev in s.typingEvents {
+                    let evn = Self.cleanVisible(ev.endValue)
+                    guard !evn.isEmpty,
+                          let data = ev.editLog.data(using: .utf8),
+                          let arr = try? JSONDecoder().decode([E].self, from: data) else { continue }
+                    if arr.contains(where: {
+                        ($0.kind == "commit" || $0.kind == "paste") && Self.cleanVisible($0.text ?? "") == evn
+                    }) { counts[evn, default: 0] += 1 }
+                }
+            }
+        }
+        return Set(counts.filter { $0.value >= 3 }.keys)
+    }
+
+    /// event **内部**连发(挤进一个 event,如 Discord):整框 delete 紧挨 reset 态 = 一条发出。
+    nonisolated static func withinEventSends(_ ev: TypingEvent, placeholders: Set<String>) -> [String] {
+        struct E: Decodable { let kind: String?; let text: String? }
+        guard let data = ev.editLog.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([E].self, from: data) else { return [] }
+        func marker(_ s: String) -> Bool { Self.isResetState(s, placeholders: placeholders) }
+        var out: [String] = []
+        for (i, e) in arr.enumerated() where e.kind == "delete" {
+            guard let raw = e.text, !marker(raw) else { continue }
+            let pm = i > 0 && (arr[i - 1].text.map(marker) ?? false)
+            let nm = i + 1 < arr.count && (arr[i + 1].text.map(marker) ?? false)
+            guard pm || nm else { continue }
+            let t = Self.cleanVisible(raw)
+            if t.count >= 2 { out.append(t) }
+        }
+        return out
+    }
+
+    /// 一个 session 的事件序列 → 用户发出的每条消息(+末尾草稿)。
+    nonisolated static func unifiedExtract(_ evs: [TypingEvent], placeholders: Set<String>) -> [String] {
+        var msgs: [String] = []
+        var cur: String? = nil
+        for (k, e) in evs.enumerated() {
+            let we = Self.withinEventSends(e, placeholders: placeholders)
+            msgs.append(contentsOf: we)
+            let ev = Self.cleanVisible(e.endValue)
+            let evReset = Self.isResetState(e.endValue, placeholders: placeholders)
+            if !evReset && !ev.isEmpty { cur = ev }     // 非 reset = 当前草稿的最新内容
+            let nextReset = (k + 1 < evs.count)
+                && Self.isResetState(evs[k + 1].sessionStart, placeholders: placeholders)
+            if nextReset {                               // 两事件间字段 reset → 本条发出去了
+                if let c = cur { msgs.append(c); cur = nil }
+            } else if evReset {                          // 本事件末尾 reset(发送)
+                if let c = cur, we.isEmpty { msgs.append(c) }   // within 抓到就用它,否则 cur 兜
+                cur = nil
+            }
+        }
+        if let c = cur { msgs.append(c) }                // 末尾未发送草稿
+        var seen = Set<String>()
+        return msgs.filter { !$0.isEmpty && seen.insert($0).inserted }   // 去重保序
+    }
+
     /// 确定性前缀合并(原 Pass2 LLM 切分里的"草稿增长合并",改算法层实现)。
     /// 同 (app,url) 组内,一条**未发送草稿**(其引用的 typing_events 里没有任何
     /// 发送 = send-clear 输入框清空)的文字若是更晚某条 record 的前缀 → 它只是那条
@@ -1318,6 +1397,8 @@ final class WritingCaptureWorker {
         // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
         // fanout;普通组走 Pass 3 单调用。LLM 偶发 socket 断/超时常见,失败退避
         // 重试最多 3 次(吸收瞬时错误);重试还失败才算 group failure。
+        // run 级占位符:所有待处理事件扫一遍算一次,各组共享(单组事件少时也能认出占位符)。
+        let placeholders = Self.collectPlaceholders(groups)
         @Sendable func runOnce(_ g: WritingCaptureGroup) async throws -> WritingCapturePass3Agent.Output {
             let isCanvas = g.sessions.contains { $0.route == "ocr" }
             if isCanvas {
@@ -1338,80 +1419,40 @@ final class WritingCaptureWorker {
                     let evs = s.typingEvents.filter { $0.id != nil }
                         .sorted { $0.startedAt < $1.startedAt }
                     guard !evs.isEmpty else { continue }
-                    // **按发送切消息** —— 一次发送 = 一条消息。两种记法都当边界:
-                    // submit 标记(回车 + 清空)分开**连发的不同消息**(如"修好了"/
-                    // "修了一晚上");isSendClear(整框作为一条 delete + endValue 空)。
-                    // submit 偶有假阳性(回车没真发出、字段没清空),那种切出来的早期
-                    // 草稿由后面的前缀合并兜回去(它不把 submit 当"已发送")。
-                    // 连续没发送的事件(IME 逐字快照 / 长草稿)合成一条。
-                    var msgGroups: [[TypingEvent]] = []
-                    var cur: [TypingEvent] = []
-                    for ev in evs {
-                        cur.append(ev)
-                        if Self.editLogHasSubmit(ev.editLog) || Self.isSendClear(ev) {
-                            msgGroups.append(cur); cur = []
-                        }
-                    }
-                    if !cur.isEmpty { msgGroups.append(cur) }    // 末尾未发送的草稿
-                    for grp in msgGroups {
-                        // 拆出组里**每一条发出去的消息**:连发挤进一个 event 时,
-                        // extractSentMessages 把每条整框删除救回来(否则只取末条、其余丢
-                        // = 用户早指出的"同框第二条 invalid")。+ 末尾**未发送的草稿**
-                        // (末事件 endValue 是真草稿:非空、非占位符、没回到开局)。
-                        var texts: [String] = []
-                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog, sessionStart: ev.sessionStart, endValue: ev.endValue)) }
-                        if let last = grp.last, !last.endValue.isEmpty, !Self.isPastedValue(last),
-                           last.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                               != last.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines) {
-                            texts.append(last.endValue.trimmingCharacters(in: .whitespacesAndNewlines))
-                        }
-                        // 一条都没拆出(常态:单条草稿组 / 占位符 / 纯粘贴)→ 退回
-                        // bestGroupText 保底:它返回空表示纯粘贴/占位符 → 整组丢。
-                        if texts.isEmpty {
-                            let t = Self.bestGroupText(grp).trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !t.isEmpty { texts.append(t) }
-                        }
-                        var seen = Set<String>()
-                        let messages = texts
-                            .map { Self.cleanVisible($0) }
-                            .filter { !$0.isEmpty && seen.insert($0).inserted }     // 去零宽 + 去重保序
-                        guard !messages.isEmpty else { continue }
-
-                        let startTs = grp.first!.startedAt, endTs = grp.last!.endedAt
-                        // 该消息组窗口内的击键(±10s)。
-                        let pad: Int64 = 10_000
-                        let grpKeys = s.keystrokes.filter { $0.tsMs >= startTs - pad && $0.tsMs <= endTs + pad }
-                        // 按 keystroke 把关:文字一大段但几乎没击键 = 读/打开文档/编辑
-                        // 预先存在的内容(如改 AI 写的文档)→ 丢。**按该组消息总长度判,
-                        // 不按单条**:否则一份大文档被拆成多条、每条各自蹭满组 kc 蒙混过关
-                        // (Obsidian 改 3115 字的 AI 文档只敲 384 键,逐条判时 1160 字那条漏过)。
-                        // 真打的(中文拼音击键数 ≥ 字数)永远过;短粘贴混大量打字也过。
-                        let kc = grpKeys.filter { ($0.modifiers & 0x07) == 0 }.count
-                        let totalLen = messages.reduce(0) { $0 + $1.count }   // 该组所有消息总字数
-                        let ks = await WritingCapturePass2Agent.assembleKeystrokeText(grpKeys)
-                        // slash 命令(/play 等):AX 吞了斜杠只留命令名,keystroke 仍以
-                        // "/" 起头 → 丢。app 无关(slash 命令是 chat app 通用约定)。
-                        let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
-                            .replacingOccurrences(of: "<BS>", with: "")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        let ctx = contextTimeline.first {
-                            $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
-                        }?.summary
-                        for text in messages {
-                            if totalLen > 20 && kc < totalLen / 4 { continue }   // 组级击键支撑度
-                            if ksTrim.hasPrefix("/") { continue }
-                            // conf 默认值;下面补齐 agent(LLM)给真实判定覆盖。漏/失败 → 0.9。
-                            let conf = 0.9
-                            let rid = "r\(records.count)"
-                            records.append(WritingCaptureRecord(
-                                text: text, editLog: [],
-                                kind: text.count >= 140 ? "long_form" : "short_form",
-                                source: "ax_cleaned", confidence: conf, contextSummary: ctx,
-                                app: g.app, url: g.url, startTs: startTs, endTs: endTs,
-                                referenceTypingEventIds: grp.compactMap { $0.id }, referenceFrameIds: [],
-                                referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
-                            items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
-                        }
+                    // **统一提取(字段状态时间线)**:维护跨事件草稿 cur,字段一 reset(空/
+                    // 零宽/占位符)就把 cur 吐成一条;reset 用「下一个事件起点是否 reset 态」判,
+                    // 不用前缀比对(CJK 拼音/改字会把它判炸成逐字爆炸)。event 内连发由
+                    // withinEventSends 拆。占位符按 run 级「整段跳变复现」识别,不认 app/语言。
+                    let messages = Self.unifiedExtract(evs, placeholders: placeholders)
+                    guard !messages.isEmpty else { continue }
+                    let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
+                    let pad: Int64 = 10_000
+                    let grpKeys = s.keystrokes.filter { $0.tsMs >= startTs - pad && $0.tsMs <= endTs + pad }
+                    // 组级击键 gate:消息总量远超击键 = 编辑预先存在内容/纯粘贴 → 整组丢
+                    // (中文拼音击键 ≥ 字数,真打的永远过;短粘贴混大量打字也过)。
+                    let kc = grpKeys.filter { ($0.modifiers & 0x07) == 0 }.count
+                    let totalLen = messages.reduce(0) { $0 + $1.count }
+                    if totalLen > 20 && kc < totalLen / 4 { continue }
+                    let ks = await WritingCapturePass2Agent.assembleKeystrokeText(grpKeys)
+                    // slash 命令(/play 等):keystroke 起头 "/" → 整组丢(chat app 通用约定)。
+                    let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
+                        .replacingOccurrences(of: "<BS>", with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if ksTrim.hasPrefix("/") { continue }
+                    let ctx = contextTimeline.first {
+                        $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
+                    }?.summary
+                    for text in messages {
+                        // conf 默认 0.9;下面 AxCleanup(LLM)给真实判定覆盖。漏/失败 → 0.9。
+                        let rid = "r\(records.count)"
+                        records.append(WritingCaptureRecord(
+                            text: text, editLog: [],
+                            kind: text.count >= 140 ? "long_form" : "short_form",
+                            source: "ax_cleaned", confidence: 0.9, contextSummary: ctx,
+                            app: g.app, url: g.url, startTs: startTs, endTs: endTs,
+                            referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
+                            referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
+                        items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
                     }
                 }
                 let fixes = await makeCleanup().run(items: items)
