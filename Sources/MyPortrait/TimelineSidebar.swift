@@ -451,11 +451,11 @@ struct TimelineSidebar: View {
                     }
                     // 整个标题行(含右侧空白)都可点折叠 —— Button 默认 hit-test
                     // 只在 chevron+文字像素上,点标题右边的空白没反应,显得"不灵敏"。
-                    // 撑满 + 上下 padding 把命中区在 y 轴也撑高(标题本身只一行小字,
-                    // 不加 padding 竖直方向很难点中)+ contentShape 让整块都是命中区。
-                    // 跟 scopeRow / RecentRow 同款 (#7)。
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
+                    // 撑满 + contentShape 让整条都是命中区。y 轴命中区靠下面
+                    // header HStack 的 minHeight(24)撑出来,**不再用 padding 撑高
+                    // 卡片本身** —— padding 会把卡片实际变高(用户反馈)。
+                    // 命中形状用 minHeight 高度的 Rectangle,撑满整个 header 行。
+                    .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
