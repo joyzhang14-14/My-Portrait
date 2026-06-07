@@ -703,6 +703,34 @@ enum FolderPalette {
             blue:  Double(v & 0xFF) / 255
         )
     }
+
+    /// 给菜单项用的彩色圆点。**预渲染成真彩 NSImage** —— SwiftUI `Menu` 里
+    /// `Label(systemImage:)` 的 SF Symbol 会被系统当 template 统一染成文字色
+    /// (全灰),`.foregroundStyle` 被吞。画一张 isTemplate=false 的实心圆图,
+    /// `Image(nsImage:)` 才能在菜单里显示对应颜色。
+    static func dotImage(hex: String, diameter: CGFloat = 11) -> NSImage {
+        let ns = nsColor(fromHex: hex) ?? .systemGray
+        let size = NSSize(width: diameter, height: diameter)
+        let img = NSImage(size: size)
+        img.lockFocus()
+        ns.setFill()
+        NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)).fill()
+        img.unlockFocus()
+        img.isTemplate = false   // 关键:别被菜单当 template 重染
+        return img
+    }
+
+    private static func nsColor(fromHex hex: String) -> NSColor? {
+        var s = hex.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        return NSColor(
+            srgbRed: CGFloat((v >> 16) & 0xFF) / 255,
+            green:   CGFloat((v >> 8) & 0xFF) / 255,
+            blue:    CGFloat(v & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 private struct FolderDisclosureRow: View {
@@ -789,11 +817,13 @@ private struct FolderDisclosureRow: View {
                 Menu("Change color") {
                     ForEach(FolderPalette.swatches, id: \.hex) { sw in
                         Button { onSetColor(sw.hex) } label: {
-                            Label(sw.name, systemImage: "circle.fill")
+                            // 彩色圆点(预渲染 NSImage,菜单里才不被染成灰)+ 颜色名。
+                            Image(nsImage: FolderPalette.dotImage(hex: sw.hex))
+                            Text(sw.name)
                         }
                     }
                     Divider()
-                    Button("Default (auto)") { onSetColor(nil) }
+                    Button("Default (random)") { onSetColor(nil) }
                 }
                 Divider()
                 Button("Delete folder", role: .destructive) { confirmingDelete = true }
