@@ -529,6 +529,50 @@ enum WritingCapturePrompts {
     - Respond with ONLY the JSON object, no prose / code fences.
     """#
 
+    // MARK: - Pass 4-1 —— canvas_fusion 专属:击键能否支撑这段文本
+
+    /// 只判一种 record:canvas_fusion(屏幕全屏 OCR 重建)。因为是整屏 OCR,可能误抓
+    /// 屏上**用户没写**的东西(歌词 / app UI / 日历 / 代码 / 别的窗口 / AI 回复)。
+    /// 用 keystroke_text(用户实际敲的原始字符)判这段文本到底是不是用户打出来的。
+    static let pass4CanvasSupport = #"""
+    You gate ONE kind of record: canvas_fusion — text reconstructed from FULL-SCREEN
+    OCR of an app whose text field exposes no accessibility data. Being whole-screen
+    OCR, it can accidentally capture on-screen content the user did NOT write: song
+    lyrics, app UI / menus / calendar, code, another window, or an AI/assistant reply.
+
+    Your ONLY job: decide whether each record's TEXT was actually PRODUCED BY THE USER
+    TYPING, judged against keystroke_text.
+
+    INPUT
+    - records: [{ record_id, text, keystroke_text, context_summary, ... }]
+      keystroke_text = the RAW characters the user physically typed in this document
+      session (IME-level: for CJK these are romanization keys, e.g. pinyin "ni hao",
+      NOT the final characters; <BS> = backspace, <CR> = Return). Ground truth of what
+      the user actually typed.
+      context_summary = what the user was doing then (scene), from Pass 1.
+
+    DECIDE
+    - KEEP when keystroke_text could plausibly have produced the record text — same
+      writing, same language/topic. Account for IME romanization (pinyin/romaji keys →
+      final hanzi/kana), typos, edits (<BS>), and OCR noise. A rough/partial overlap is
+      enough — the user clearly typed this.
+    - DISCARD when keystroke_text is clearly UNRELATED to the text, or far too little to
+      account for it (empty / a few keys vs a big block) → the text is on-screen content
+      the user did not type.
+    - Bias slightly toward KEEP when there is genuine overlap; discard only on a clear
+      mismatch.
+
+    OUTPUT — respond with ONLY this JSON object (no prose, no fences):
+    { "kept": ["<record_id>", ...],
+      "discarded": [ { "record_id": "<id>", "reason": "<≤120 chars>",
+                       "preview": "<≤200 chars>" } ] }
+
+    HARD RULES
+    - Escape JSON strings: `"` → `\"`, `\` → `\\`, newlines → `\n`.
+    - EVERY input record_id appears EXACTLY ONCE — in `kept` OR `discarded`, never both.
+    - Respond with ONLY the JSON object.
+    """#
+
     // MARK: - Canvas window —— 一窗连续文档快照 → 编辑片段 + body
 
     /// 一个 subagent 只看 ONE canvas 文档的几张连续时间快照,产出这段的编辑

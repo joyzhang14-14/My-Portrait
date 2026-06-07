@@ -21,12 +21,18 @@ struct WritingCapturePass4InputRecord: Encodable, Sendable {
     let keystrokeCount: Int
     /// Pass 1 给这条 record 的场景背景(用户在哪、在干啥)。
     let contextSummary: String?
+    /// **仅 canvas_fusion 记录带**:用户在这段里实际敲出的原始字符(IME 级 —— CJK
+    /// 是拼音/罗马字键,不是最终汉字)。canvas 是屏幕 OCR 重建,可能误抓屏上别人的
+    /// 内容(歌词/UI/AI 回复);给 Pass 4 判「这段击键能不能产出这段文本」。非 canvas
+    /// 为 nil(text 本来就来自击键、上游已把过关,省 token)。
+    let keystrokeText: String?
 
     enum CodingKeys: String, CodingKey {
         case recordId       = "record_id"
         case text, kind, source, app, url
         case keystrokeCount = "keystroke_count"
         case contextSummary = "context_summary"
+        case keystrokeText  = "keystroke_text"
     }
 }
 
@@ -112,7 +118,13 @@ final class WritingCapturePass4Agent {
         records: [WritingCapturePass4InputRecord],
         userRejections: [UserRejectionRow] = []
     ) async throws -> Output {
-        let prompt = Self.buildPrompt(records: records, userRejections: userRejections)
+        // pass4-1 分派:整组都是 canvas_fusion(屏幕 OCR 重建)→ 走 canvas 专属 prompt
+        // (只判击键能否支撑文本);否则走通用内容审查。group 是 (app,url) 级、source
+        // 同质,故按整组判;主 prompt 完全不动、不被撑长。
+        let isCanvasGroup = !records.isEmpty && records.allSatisfy { $0.source == "canvas_fusion" }
+        let prompt = isCanvasGroup
+            ? Self.buildCanvasPrompt(records: records)
+            : Self.buildPrompt(records: records, userRejections: userRejections)
 
         // 空输入短路 —— Pass 3 该组没出 record,无需调用 LLM。
         if records.isEmpty {
@@ -188,6 +200,14 @@ final class WritingCapturePass4Agent {
             lines.append("")
         }
         lines.append("records:")
+        lines.append(encodeJSON(records) ?? "[]")
+        return lines.joined(separator: "\n")
+    }
+
+    /// pass4-1:canvas_fusion 专属 prompt —— 只判「击键(keystroke_text)能否支撑这段
+    /// 文本」。短、独立,不掺进通用内容审查 prompt。
+    static func buildCanvasPrompt(records: [WritingCapturePass4InputRecord]) -> String {
+        var lines: [String] = [WritingCapturePrompts.pass4CanvasSupport, "", "records:"]
         lines.append(encodeJSON(records) ?? "[]")
         return lines.joined(separator: "\n")
     }
