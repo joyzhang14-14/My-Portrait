@@ -17,6 +17,14 @@ struct PowerProfile: Sendable, Equatable {
     static let balanced    = PowerProfile(minCaptureIntervalMs: 500,  jpegQuality: 0.60)
     static let saver       = PowerProfile(minCaptureIntervalMs: 1000, jpegQuality: 0.40)
 
+    /// 给 UI 显示用的档位名(Auto 行显示 "Auto — Balanced" 用)。
+    var displayName: String {
+        if self == .performance { return "Performance" }
+        if self == .balanced    { return "Balanced" }
+        if self == .saver       { return "Battery saver" }
+        return "Custom"
+    }
+
     /// 把用户选的模式 + 当前系统快照,解析成实际生效的 profile。
     /// auto 决策仿 screenpipe `Profile::for_state`:
     ///   1. 热压力 serious/critical → saver
@@ -27,6 +35,8 @@ struct PowerProfile: Sendable, Equatable {
         switch userMode {
         case .performance:
             return .performance
+        case .balanced:
+            return .balanced
         case .batterySaver:
             return .saver
         case .auto:

@@ -140,12 +140,13 @@ enum UsageRange: String, CaseIterable, Identifiable {
 }
 
 enum PowerMode: String, CaseIterable, Identifiable {
-    case auto, performance, batterySaver
+    case auto, performance, balanced, batterySaver
     var id: String { rawValue }
     var label: String {
         switch self {
         case .auto:         return "Auto"
         case .performance:  return "Performance"
+        case .balanced:     return "Balanced"
         case .batterySaver: return "Battery saver"
         }
     }
@@ -153,6 +154,7 @@ enum PowerMode: String, CaseIterable, Identifiable {
         switch self {
         case .auto:         return "Adjusts based on battery state"
         case .performance:  return "Full quality, ignore battery"
+        case .balanced:     return "Balanced detail and battery"
         case .batterySaver: return "Maximum power saving"
         }
     }
@@ -160,9 +162,22 @@ enum PowerMode: String, CaseIterable, Identifiable {
         switch self {
         case .auto:         return "wand.and.stars"
         case .performance:  return "bolt.fill"
+        case .balanced:     return "gauge.medium"
         case .batterySaver: return "leaf.fill"
         }
     }
+}
+
+/// 当前 Auto 模式实际解析出的档位名(Performance / Balanced / Battery saver)——
+/// 给 Settings 的 Power mode 卡片在 Auto 行显示 "Auto — Balanced"。
+/// `Services.recomputePowerProfile` 在电源/电量/低电量模式/设置变化时更新。
+@MainActor
+@Observable
+final class PowerProfileState {
+    static let shared = PowerProfileState()
+    private init() {}
+    /// 空串 = 还没算过(capture 未启动)。
+    var activeProfileName: String = ""
 }
 
 enum RetentionDays: String, CaseIterable, Identifiable {

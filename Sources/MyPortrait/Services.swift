@@ -556,6 +556,9 @@ final class Services {
         let raw = ConfigStore.shared.current.capture.system.powerMode
         let mode = PowerMode(rawValue: raw) ?? .auto
         let profile = PowerProfile.resolve(userMode: mode, snapshot: PowerMonitor.snapshot())
+        // UI 显示当前实际档位(Auto 行 "Auto — Balanced")。无条件更新 —— 即使
+        // profile 没变(电量在同档内波动),displayName 也保持对。
+        PowerProfileState.shared.activeProfileName = profile.displayName
         guard profile != lastPowerProfile else { return }
         lastPowerProfile = profile
         Task { await coordinator.applyPowerProfile(profile) }
