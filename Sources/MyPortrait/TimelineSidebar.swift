@@ -451,8 +451,11 @@ struct TimelineSidebar: View {
                     }
                     // 整个标题行(含右侧空白)都可点折叠 —— Button 默认 hit-test
                     // 只在 chevron+文字像素上,点标题右边的空白没反应,显得"不灵敏"。
-                    // 撑满 + contentShape 让整条都是命中区。跟 scopeRow / RecentRow 同款 (#7)。
+                    // 撑满 + 上下 padding 把命中区在 y 轴也撑高(标题本身只一行小字,
+                    // 不加 padding 竖直方向很难点中)+ contentShape 让整块都是命中区。
+                    // 跟 scopeRow / RecentRow 同款 (#7)。
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -473,6 +476,10 @@ struct TimelineSidebar: View {
                     }
                 }
             }
+            // header 行锁定最小高 24(= SidebarIconButton 高)。展开时搜索/垃圾桶
+            // 图标(24pt)才出现,不锁高度的话 header 会从"一行小字"撑到 24pt,
+            // 把下面内容往下顶 —— 就是用户说的"展开往下蹭一点"。
+            .frame(minHeight: 24)
 
             if !cronJobHistoryCollapsed {
                 if cronHistorySearchOpen {
@@ -492,7 +499,9 @@ struct TimelineSidebar: View {
                             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
                                 .strokeBorder(Theme.stroke, lineWidth: 0.7))
                     )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    // 纯淡入,不要 .move(edge:.top) —— 位移会让展开瞬间整块往下
+                    // "蹭"一下再回弹。opacity 只渐显不移位。
+                    .transition(.opacity)
                 }
 
                 if cronJobHistoryConversations.isEmpty {
