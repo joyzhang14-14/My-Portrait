@@ -1392,12 +1392,13 @@ final class WritingCaptureWorker {
                                != last.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines) {
                             texts.append(last.endValue.trimmingCharacters(in: .whitespacesAndNewlines))
                         }
-                        // 一条都没拆出(常态:单条草稿组 / 占位符 / 纯粘贴)→ 退回
-                        // bestGroupText 保底:它返回空表示纯粘贴/占位符 → 整组丢。
-                        if texts.isEmpty {
-                            let t = Self.bestGroupText(grp).trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !t.isEmpty { texts.append(t) }
-                        }
+                        // bestGroupText = 组里最完整的**末尾内容**(末事件 endValue / 最长
+                        // edit_log 文本;纯粘贴/占位符返回空)。**总是加**(下面去重兜底):
+                        // extractSentMessages + 边界发送拿的是中间各条;**末尾这条**(可能是
+                        // 跨事件续写、落在占位符事件里的草稿,如 1153→1154)只有 bestGroupText
+                        // 兜得到 —— 早先只在 texts 空时兜,边界发送一非空它就不触发、整条丢。
+                        let tail = Self.bestGroupText(grp).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !tail.isEmpty { texts.append(tail) }
                         var seen = Set<String>()
                         let messages = texts
                             .map { Self.cleanVisible($0) }
