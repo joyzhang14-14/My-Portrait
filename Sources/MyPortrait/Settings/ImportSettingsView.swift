@@ -155,6 +155,9 @@ struct ImportSettingsView: View {
         rescanAction: @escaping () async -> Void,
         importAction: @escaping () async -> Void
     ) -> some View {
+        // 未扫描(手动模式还没点 Scan):卡片缩到只剩 header + 提示,
+        // 不显示 Import 按钮和 Last imported 时间。
+        let notScanned = sessions == nil && count == nil && !running && !scanning
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
@@ -195,20 +198,22 @@ struct ImportSettingsView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 8) {
-                Spacer()
-                Button(running ? "Importing…" : "Import") {
-                    Task { await importAction() }
+            if !notScanned {
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(running ? "Importing…" : "Import") {
+                        Task { await importAction() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(running || (count ?? 0) == 0)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(running || (count ?? 0) == 0)
+                .padding(.top, 4)
+                Text(lastTs.map { "Last imported: \(Self.dateTimeString($0))" } ?? "Last imported: never")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.top, 2)
             }
-            .padding(.top, 4)
-            Text(lastTs.map { "Last imported: \(Self.dateTimeString($0))" } ?? "Last imported: never")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
