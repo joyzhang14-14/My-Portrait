@@ -100,7 +100,9 @@ struct SettingsRow<Trailing: View>: View {
 struct SettingsDivider: View {
     var body: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.06))
+            // Color.primary 跟 colorScheme 切:dark≈白、light≈黑,light 模式下
+            // 才看得见(原来钉死 white.opacity 在浅底上隐身)。
+            .fill(Color.primary.opacity(0.10))
             .frame(height: 1)
             .padding(.leading, 48)
     }

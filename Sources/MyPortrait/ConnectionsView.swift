@@ -159,7 +159,7 @@ struct ConnectionsView: View {
                 .buttonStyle(.bouncyIcon)
             }
 
-            Divider().background(Color.white.opacity(0.08))
+            Divider().background(Color.primary.opacity(0.08))
 
             Text(descriptionFor(integration))
                 .font(.system(size: 12))

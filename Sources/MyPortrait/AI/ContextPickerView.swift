@@ -54,14 +54,14 @@ struct ContextPickerView: View {
         VStack(spacing: 0) {
             if showingAppList {
                 searchField(placeholder: "Filter apps…", text: $appQuery)
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.08))
             }
             if showingSearchInput {
                 searchField(placeholder: "OCR search query…", text: $searchQuery, onSubmit: {
                     let q = searchQuery.trimmingCharacters(in: .whitespaces)
                     if !q.isEmpty { onPick(ContextChip(spec: .search(q))) }
                 })
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.08))
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { idx, row in

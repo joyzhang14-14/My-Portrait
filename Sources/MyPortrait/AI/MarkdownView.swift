@@ -93,7 +93,7 @@ struct MarkdownView: View {
             TableView(headers: headers, rows: rows)
 
         case .horizontalRule:
-            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+            Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 1)
                 .padding(.vertical, 4)
         }
     }
@@ -128,7 +128,7 @@ private struct CodeBlockView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
 
-            Divider().background(Color.white.opacity(0.08))
+            Divider().background(Color.primary.opacity(0.08))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
@@ -168,11 +168,11 @@ private struct TableView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             row(cells: headers, isHeader: true)
-            Divider().background(Color.white.opacity(0.10))
+            Divider().background(Color.primary.opacity(0.10))
             ForEach(Array(rows.enumerated()), id: \.offset) { idx, r in
                 row(cells: r, isHeader: false)
                 if idx < rows.count - 1 {
-                    Divider().background(Color.white.opacity(0.06))
+                    Divider().background(Color.primary.opacity(0.06))
                 }
             }
         }
