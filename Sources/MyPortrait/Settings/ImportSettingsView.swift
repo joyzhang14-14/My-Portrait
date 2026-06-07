@@ -352,8 +352,10 @@ struct ImportSettingsView: View {
         // 跟 Claude Code / Codex 的未扫描卡片一致:绿色 source 图标 + 名 + 灰 Scan 按钮 + 简短提示。
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "record.circle")
-                    .foregroundStyle(.green)
+                Image("Screenpipe")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
                 Text("screenpipe")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
