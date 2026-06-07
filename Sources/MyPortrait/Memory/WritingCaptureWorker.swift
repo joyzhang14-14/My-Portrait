@@ -1247,22 +1247,6 @@ final class WritingCaptureWorker {
         return msgs
     }
 
-    /// 下一个 event 的起始字段(sessionStart)是不是「接续」本 event 的 endValue ——
-    /// 即用户在同一条草稿上继续写/改(字段没被清空)。去零宽 + **去所有空白**(防
-    /// `\n` 差异破坏前缀比对)后双向前缀:一方是另一方前缀 = 接续(末尾追加 or 删尾改字)。
-    /// 都不是(下一个起点为空/占位符/另起新内容)= 字段被清空 → 本条已在边界发出去。
-    nonisolated static func continuesInto(_ endValue: String, _ nextSessionStart: String) -> Bool {
-        let zw: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]
-        func normW(_ s: String) -> String {
-            String(String.UnicodeScalarView(s.unicodeScalars.filter {
-                !$0.properties.isWhitespace && !zw.contains($0.value)
-            }))
-        }
-        let a = normW(endValue), b = normW(nextSessionStart)
-        guard b.count >= 2 else { return false }   // 下一个起点空/极短 = 已清空,不算接续
-        return a.hasPrefix(b) || b.hasPrefix(a)
-    }
-
     /// 确定性前缀合并(原 Pass2 LLM 切分里的"草稿增长合并",改算法层实现)。
     /// 同 (app,url) 组内,一条**未发送草稿**(其引用的 typing_events 里没有任何
     /// 发送 = send-clear 输入框清空)的文字若是更晚某条 record 的前缀 → 它只是那条
@@ -1370,23 +1354,12 @@ final class WritingCaptureWorker {
                     }
                     if !cur.isEmpty { msgGroups.append(cur) }    // 末尾未发送的草稿
                     for grp in msgGroups {
-                        // 拆出组里**每一条发出去的消息**,三种来源缺一不可:
-                        // ① event **内部**连发(挤进一个 event)→ extractSentMessages 按整框
-                        //    删除拆(用户早指出的"同框第二条 invalid")。
-                        // ② **边界发送**:一条消息占一个 event、在 event 末尾发出去 —— 下一个
-                        //    event 字段已清空/另起、没接续本条 endValue → 本条发过了,取其
-                        //    endValue。早先漏了这块:连发的「每条各占一个 event」整条整条丢。
-                        // ③ 末尾**未发送草稿**(末事件 endValue,下面单独加)。
+                        // 拆出组里**每一条发出去的消息**:连发挤进一个 event 时,
+                        // extractSentMessages 把每条整框删除救回来(否则只取末条、其余丢
+                        // = 用户早指出的"同框第二条 invalid")。+ 末尾**未发送的草稿**
+                        // (末事件 endValue 是真草稿:非空、非占位符、没回到开局)。
                         var texts: [String] = []
-                        for (i, ev) in grp.enumerated() {
-                            texts.append(contentsOf: Self.extractSentMessages(
-                                ev.editLog, sessionStart: ev.sessionStart, endValue: ev.endValue))
-                            if i + 1 < grp.count, !Self.isPastedValue(ev),
-                               !Self.continuesInto(ev.endValue, grp[i + 1].sessionStart) {
-                                let m = Self.cleanVisible(ev.endValue)
-                                if m.count >= 2 { texts.append(m) }     // ② 边界发送的整条消息
-                            }
-                        }
+                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog, sessionStart: ev.sessionStart, endValue: ev.endValue)) }
                         if let last = grp.last, !last.endValue.isEmpty, !Self.isPastedValue(last),
                            last.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
                                != last.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines) {
