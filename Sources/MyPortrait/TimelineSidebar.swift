@@ -274,7 +274,7 @@ struct TimelineSidebar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // 展开时才显示搜索 / 新建,折叠态只留标题(同 cron history)。
+                // 搜索只在展开时显示(折叠态搜索无意义)。
                 if !recentsCollapsed {
                     SidebarIconButton(
                         systemName: recentsSearchOpen ? "xmark" : "magnifyingglass",
@@ -285,9 +285,10 @@ struct TimelineSidebar: View {
                             if !recentsSearchOpen { recentsSearch = "" }
                         }
                     }
-                    SidebarIconButton(systemName: "plus", help: "New chat") {
-                        chat.switchTo(nil)
-                    }
+                }
+                // 新建 ➕ 常驻 —— 折叠态也能直接开新对话,不跟着折叠隐藏。
+                SidebarIconButton(systemName: "plus", help: "New chat") {
+                    chat.switchTo(nil)
                 }
             }
             .frame(minHeight: 24)
