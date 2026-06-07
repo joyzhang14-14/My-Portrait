@@ -449,9 +449,15 @@ struct TimelineSidebar: View {
                             .frame(width: 10)
                         SectionHeader(title: "CRON JOB HISTORY", count: cronJobHistoryConversations.count)
                     }
+                    // 整个标题行(含右侧空白)都可点折叠 —— Button 默认 hit-test
+                    // 只在 chevron+文字像素上,点标题右边的空白没反应,显得"不灵敏"。
+                    // 撑满 + contentShape 让整条都是命中区。跟 scopeRow / RecentRow 同款 (#7)。
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Spacer(minLength: 0)
+                // 折叠 Button 已 maxWidth:.infinity 撑满左侧,这里不再加贪婪
+                // Spacer —— 两个都贪婪会平分宽度,把 button 命中区压到半行。
                 if !cronJobHistoryCollapsed {
                     SidebarIconButton(
                         systemName: cronHistorySearchOpen ? "xmark" : "magnifyingglass",
