@@ -181,7 +181,7 @@ private struct CronJobDetailView: View {
 
                 metaGrid
 
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.08))
 
                 Text("RUNS")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))

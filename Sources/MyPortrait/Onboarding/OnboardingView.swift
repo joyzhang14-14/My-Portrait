@@ -795,7 +795,7 @@ private struct MemoryProviderStep: View {
                 .labelsHidden()
                 .frame(maxWidth: 280)
             }
-            Divider().overlay(Color.white.opacity(0.08))
+            Divider().overlay(Color.primary.opacity(0.08))
             row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
                 Picker("", selection: config.binding(\.memory.model)) {
                     ForEach(models, id: \.self) { m in Text(m).tag(m) }
@@ -803,7 +803,7 @@ private struct MemoryProviderStep: View {
                 .labelsHidden()
                 .frame(maxWidth: 280)
             }
-            Divider().overlay(Color.white.opacity(0.08))
+            Divider().overlay(Color.primary.opacity(0.08))
             row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
                 Picker("", selection: config.binding(\.memory.modelLight)) {
                     ForEach(models, id: \.self) { m in Text(m).tag(m) }

@@ -148,7 +148,7 @@ private struct AppCustomizeCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.08))
 
                 IconSlot(
                     title: "Dock icon",
@@ -164,7 +164,7 @@ private struct AppCustomizeCard: View {
                     fileName: "tray.png"
                 )
 
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(Color.primary.opacity(0.08))
 
                 HStack(spacing: 10) {
                     Text("Saving restarts My Portrait so the new name + icons take effect.")

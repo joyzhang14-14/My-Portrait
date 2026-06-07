@@ -78,7 +78,7 @@ struct TimelineView: View {
                 .padding(.horizontal, 80)
                 .padding(.bottom, 10)
 
-            Divider().background(Color.white.opacity(0.06))
+            Divider().background(Color.primary.opacity(0.06))
 
             ZStack {
                 if state.frames.isEmpty {
