@@ -32,9 +32,13 @@ struct ImportSettingsView: View {
     /// 当前进度(running 时实时更新)。
     @State private var progress: ScreenpipeImporter.Progress? = nil
 
-    // CLI 导入状态 —— Claude Code 与 Codex 各自独立。
-    @State private var cliScan: CLIInputImporter.ScanResult? = nil
-    @State private var cliScanning: Bool = false
+    // CLI 导入状态 —— Claude Code 与 Codex 各自独立(分开扫描,互不触发)。
+    @State private var ccCount: Int? = nil
+    @State private var ccSessions: Int? = nil
+    @State private var ccScanning: Bool = false
+    @State private var codexCount: Int? = nil
+    @State private var codexSessions: Int? = nil
+    @State private var codexScanning: Bool = false
     @State private var ccRunning: Bool = false
     @State private var ccStatus: String? = nil
     @State private var codexRunning: Bool = false
@@ -89,12 +93,14 @@ struct ImportSettingsView: View {
                 cliSourceBlock(
                     icon: "terminal.fill",
                     title: "Claude Code",
-                    sessions: cliScan?.claudeCodeSessions,
-                    count: cliScan?.claudeCode,
+                    sessions: ccSessions,
+                    count: ccCount,
                     lastTs: ccLastTs,
                     running: ccRunning,
                     progress: ccProgress,
                     status: ccStatus,
+                    scanning: ccScanning,
+                    rescanAction: { await rescanClaudeCode() },
                     importAction: { await runImport(app: "claude-code") }
                 )
             }
@@ -106,12 +112,14 @@ struct ImportSettingsView: View {
                 cliSourceBlock(
                     icon: "chevron.left.forwardslash.chevron.right",
                     title: "Codex CLI",
-                    sessions: cliScan?.codexSessions,
-                    count: cliScan?.codex,
+                    sessions: codexSessions,
+                    count: codexCount,
                     lastTs: codexLastTs,
                     running: codexRunning,
                     progress: codexProgress,
                     status: codexStatus,
+                    scanning: codexScanning,
+                    rescanAction: { await rescanCodex() },
                     importAction: { await runImport(app: "codex-cli") }
                 )
             }
@@ -123,10 +131,11 @@ struct ImportSettingsView: View {
                 scanning = false
                 return
             }
-            // screenpipe 与 CLI 两边同时扫,互不等待。
+            // 三个来源同时扫,互不等待。
             async let sp: Void = rescan()
-            async let cli: Void = rescanCLI()
-            _ = await (sp, cli)
+            async let cc: Void = rescanClaudeCode()
+            async let cx: Void = rescanCodex()
+            _ = await (sp, cc, cx)
         }
     }
 
@@ -142,6 +151,8 @@ struct ImportSettingsView: View {
         running: Bool,
         progress: CLIImportProgress?,
         status: String?,
+        scanning: Bool,
+        rescanAction: @escaping () async -> Void,
         importAction: @escaping () async -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -151,14 +162,14 @@ struct ImportSettingsView: View {
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Button(cliScan == nil ? "Scan" : "Re-scan") { Task { await rescanCLI() } }
+                Button(count == nil ? "Scan" : "Re-scan") { Task { await rescanAction() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(running || cliScanning)
+                    .disabled(running || scanning)
             }
             if running, let p = progress {
                 cliProgressBlock(p)              // 导入中:进度条优先
-            } else if cliScanning {
+            } else if scanning {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Scanning session logs …")
@@ -238,23 +249,38 @@ struct ImportSettingsView: View {
         return fmt.string(from: d)
     }
 
-    private func rescanCLI(quiet: Bool = false) async {
-        if !quiet { cliScanning = true }
+    private func rescanClaudeCode(quiet: Bool = false) async {
+        if !quiet { ccScanning = true }
         let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
-        let (result, sinceCC, sinceCodex) = await Task.detached(priority: .userInitiated) {
-            var sinceCC: Int64? = nil, sinceCodex: Int64? = nil
+        let (count, sessions, since) = await Task.detached(priority: .userInitiated) {
+            var since: Int64? = nil
             if let dbPool {
-                let store = WritingCaptureStore(dbPool: dbPool)
-                sinceCC = try? store.cliImportLastTs(app: "claude-code")
-                sinceCodex = try? store.cliImportLastTs(app: "codex-cli")
+                since = try? WritingCaptureStore(dbPool: dbPool).cliImportLastTs(app: "claude-code")
             }
-            let r = CLIInputImporter.scan(sinceClaudeCode: sinceCC, sinceCodex: sinceCodex)
-            return (r, sinceCC, sinceCodex)
+            let r = CLIInputImporter.scanClaudeCode(since: since)
+            return (r.count, r.sessions, since)
         }.value
-        cliScan = result
-        ccLastTs = sinceCC
-        codexLastTs = sinceCodex
-        cliScanning = false
+        ccCount = count
+        ccSessions = sessions
+        ccLastTs = since
+        ccScanning = false
+    }
+
+    private func rescanCodex(quiet: Bool = false) async {
+        if !quiet { codexScanning = true }
+        let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
+        let (count, sessions, since) = await Task.detached(priority: .userInitiated) {
+            var since: Int64? = nil
+            if let dbPool {
+                since = try? WritingCaptureStore(dbPool: dbPool).cliImportLastTs(app: "codex-cli")
+            }
+            let r = CLIInputImporter.scanCodex(since: since)
+            return (r.count, r.sessions, since)
+        }.value
+        codexCount = count
+        codexSessions = sessions
+        codexLastTs = since
+        codexScanning = false
     }
 
     /// 单源导入 —— app 取 "claude-code" 或 "codex-cli"。
@@ -298,7 +324,8 @@ struct ImportSettingsView: View {
             return
         }
         setStatus("Done. \(result.inserted) imported, \(result.skipped) already present.")
-        await rescanCLI(quiet: true)   // 静默刷新游标/计数,不再闪 scan spinner
+        // 静默刷新该源的游标/计数,不再闪 scan spinner。只刷新刚导入的那个源。
+        if isCC { await rescanClaudeCode(quiet: true) } else { await rescanCodex(quiet: true) }
     }
 
     // MARK: scan UI
