@@ -63,6 +63,12 @@ enum WritingCapturePass4Builders {
                 && $0.tsMs >= record.startTs - pad && $0.tsMs <= record.endTs + pad
                 && ($0.modifiers & 0x07) == 0
         }.count
+        // canvas_fusion(屏幕 OCR 重建)单独带「击键文字」:它的时间窗常塌成单帧瞬刻,
+        // 改用该组(=该文档 session)全部击键,让 Pass 4 判「击键能否产出这段文本」。
+        // 非 canvas 不带(text 本就来自击键、已被上游覆盖闸门把过关,省 token)。
+        let keystrokeText: String? = record.source == "canvas_fusion"
+            ? Self.assembleKeys(keys.filter { $0.bundleId == record.app })
+            : nil
         return WritingCapturePass4InputRecord(
             recordId: recordId,
             text: record.text,
@@ -71,7 +77,20 @@ enum WritingCapturePass4Builders {
             app: record.app,
             url: record.url,
             keystrokeCount: kc,
-            contextSummary: record.contextSummary
+            contextSummary: record.contextSummary,
+            keystrokeText: keystrokeText
         )
+    }
+
+    /// 把击键拼成原始字符串(同 Pass2/3 的 assembleKeystrokeText:跳修饰组合键,
+    /// 退格→<BS>,回车→<CR>)。在此内联因 Pass2Agent 那份是 @MainActor、本函数同步。
+    private static func assembleKeys(_ keys: [KeystrokeEntry]) -> String {
+        var out = ""
+        for k in keys.sorted(by: { $0.tsMs < $1.tsMs }) {
+            if (k.modifiers & 0x07) != 0 { continue }
+            if k.isBackspace != 0 { out += "<BS>"; continue }
+            if let c = k.char, !c.isEmpty { out += (c == "\n" || c == "\r") ? "<CR>" : c }
+        }
+        return String(out.prefix(800))
     }
 }
