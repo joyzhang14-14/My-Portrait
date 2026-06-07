@@ -323,8 +323,6 @@ final class ConfigStore {
 
         // — Recording / screen
         c.capture.screen.enabled               = bool(ud, "Settings.screenRecordingEnabled", default: c.capture.screen.enabled)
-        let fps = ud.integer(forKey: "Settings.videoFps")
-        if fps > 0 { c.capture.screen.videoFps = fps }
 
         // — Recording / system
         if let v = ud.string(forKey: "Settings.powerMode") { c.capture.system.powerMode = v }
