@@ -485,11 +485,13 @@ final class TypingObserver {
 
     // MARK: - 回车摇读(IME 末尾落字救援,实验性)
 
-    /// 摇读的多档延迟(从回车起算的**累计 ms**):从极短扫到约一帧多。
-    /// 太短读到落字前的拼音/双拼、太长读到清空后,确切窗口因 app 而异 —— 所以扫一遍:
-    /// 最早读到非空值即喂(= 实际可行的最短延迟),一读到空(字段已清空)立即停,
-    /// 别再读到后面的占位符。研究参照:一帧 ~16ms,IME 落字传播大概率在一帧内。
-    private static let submitRaceDelaysMs: [UInt64] = [2, 5, 9, 14, 20]
+    /// 摇读的多档延迟(从回车起算的**累计 ms**):**每 5ms 一读、一直读到 200ms**。
+    /// Electron app(claudefordesktop)的 AX 在 IME 落字时传播很慢(实测落字后 500ms
+    /// AX 还停在拼音),短延迟根本抢不到落定的汉字 —— 所以密集扫到 200ms,赌这窗口里
+    /// AX 总会冒出落定值。读到空(字段清空)立即停;同值不重复喂、但继续读(落定值一
+    /// 出现就喂,占位符只喂一次触发发送,不 spam)。研究参照:macism 称 CJK race 完全
+    /// 稳定要 ~150ms。
+    private static let submitRaceDelaysMs: [UInt64] = Array(stride(from: 5, through: 200, by: 5))
 
     /// 回车一按,按上面多档延迟连读焦点字段现值喂回 writer —— 趁「发送清空/跳页」前
     /// 把 IME 末尾落定的字截下来。复用 processValueChange 同款安全读(secure 跳过、
@@ -505,6 +507,7 @@ final class TypingObserver {
         }
         if TypingPrivacyFilter.isSecureRole(role) { return }
         var slept: UInt64 = 0
+        var lastFed: String? = nil
         for target in Self.submitRaceDelaysMs {
             try? await Task.sleep(nanoseconds: (target - slept) * 1_000_000)
             slept = target
@@ -516,9 +519,11 @@ final class TypingObserver {
                 return (e == .success ? (ref as? String) : nil)
             }
             guard let value else { return }
-            if value.isEmpty { return }   // 字段已清空 → 停,别喂占位符
+            if value.isEmpty { return }       // 字段已清空 → 停
+            if value == lastFed { continue }  // 同值不重复喂,但继续读(等落定值/清空冒出来)
             let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
             writer.noteValueChange(key: key, newValue: value)
+            lastFed = value
         }
     }
 }
