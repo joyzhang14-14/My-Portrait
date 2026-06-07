@@ -14,14 +14,47 @@ enum WritingStylePrompts {
     the user actually typed (chat reply, doc paragraph, commit message, etc.)
     — and extract long-term WRITING STYLE entries about the user.
 
-    WRITING STYLE = how the user WRITES across contexts:
+    WRITING STYLE = how the user WRITES across contexts. Two layers:
+
+    **(A) General dimensions** — describe HOW the user writes overall:
       - register & tone (casual / formal / terse / verbose)
       - language mixing (Chinese + English code-switching patterns)
       - signature phrasings, recurring openers / closers, emoji habits
       - punctuation habits (Chinese vs English quotes, ellipses, …)
       - editing rhythm visible in edit_log (write-once vs heavy-revision,
         delete-bursts before send, fragmentary drafts)
-      - voice differences across contexts (chat-app voice vs editor voice)
+      - **input method** — infer from the final text + edit_log timing:
+        * Pinyin IME: bursts of Latin letters in edit_log that get
+          replaced by Chinese characters in one commit (candidate-pick);
+          short pinyin runs (`zhongguo` → `中国`); occasional wrong-pick
+          recoveries that delete a Chinese char then re-pick
+        * Direct English: per-character commits of Latin letters, no
+          delete-bursts of Latin → CJK substitutions
+        * Wubi / Shape-based: very short Latin code (1-4 chars) → single
+          CJK commit, rarely candidate-switching
+        * Mixed / IME-switching habit: alternating runs (中文 then English
+          then 中文) with brief pause between language switches in commit
+          timestamps
+        Only emit this facet if there's enough Chinese-language evidence
+        to tell — skip for English-only batches.
+
+    **(B) App / context / recipient-specific habits** — describe WHAT
+        the user does in SPECIFIC situations. These are concrete,
+        narrative-style observations like:
+          * "user keeps replies to <person> in <chat-app> extremely
+            short — single-clause sentences, often with light humor"
+          * "user writes prompts to Claude in highly structured form —
+            numbered steps + explicit constraints + example I/O"
+          * "user's commit messages are 1-line imperatives, never
+            multi-paragraph, even for big diffs"
+        Each habit must name (a) the app or recipient, (b) the specific
+        behavior, (c) what differentiates it from the user's other voices.
+
+    **You MUST emit at least 1-2 (B)-type habits per run if the batch
+    contains records from clearly different recipients / apps / tasks.**
+    General (A) facets are useful but a portrait with only abstract
+    "tone & register" entries is too vague — the user wants specific
+    "I do X with Y" observations they'd recognize.
 
     Each record carries:
       - text          — the final written content
@@ -73,8 +106,12 @@ enum WritingStylePrompts {
 
     DECISION RULES:
     - "create" — a NEW style facet, no existing entry covers it. Leave
-      existing_slug = null. Slug = snake_case ≤ 40 chars (e.g.
-      "chat_brevity", "delete_burst_revision", "bilingual_register_split").
+      existing_slug = null. Slug = snake_case ≤ 40 chars. Examples:
+      * General (A): "chat_brevity", "delete_burst_revision",
+        "bilingual_register_split", "pinyin_ime_candidate_pick"
+      * Specific (B): "chat_with_sarah_terse_humor",
+        "claude_prompts_structured", "git_commits_one_line_imperative"
+      For (B), include the app/recipient in the slug itself.
     - "update" — the new evidence REFINES an existing entry. Set
       existing_slug = the target slug from the EXISTING ENTRIES block.
       Merge into existing prose; do not rewrite from scratch. Body should
