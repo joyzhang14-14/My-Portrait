@@ -1191,7 +1191,7 @@ final class WritingCaptureWorker {
     /// bestGroupText 只取得到一条、其余全丢 —— 这正是用户早指出的"同框第二条 invalid"。
     /// 救法:每次发送 = 一条把**整框内容整条删掉**的 delete,且其**相邻项只剩零宽/空白**
     /// (发送后那一瞬的字段态)。纠正型删除(改字、退格)旁边没有这种空标记 → 排除。
-    nonisolated static func extractSentMessages(_ editLogJSON: String) -> [String] {
+    nonisolated static func extractSentMessages(_ editLogJSON: String, sessionStart: String) -> [String] {
         struct E: Decodable { let kind: String?; let text: String? }
         guard let data = editLogJSON.data(using: .utf8),
               let arr = try? JSONDecoder().decode([E].self, from: data) else { return [] }
@@ -1202,6 +1202,10 @@ final class WritingCaptureWorker {
         func stripZW(_ s: String) -> String {
             String(String.UnicodeScalarView(s.unicodeScalars.filter { !zw.contains($0.value) }))
         }
+        // 基线 = session 开始时字段里已有的内容。只记**用户这次打出来的新字**:删掉「本来
+        // 就在基线里」的文字 = 在编辑器里删除预先存在的内容(如改 AI 写的 release note 草稿),
+        // 那是删除、不是发送。聊天里 sessionStart 是空/占位符,发出去的消息绝不会是它的子串。
+        let baseline = stripZW(sessionStart)
         var msgs: [String] = []
         for (i, e) in arr.enumerated() where e.kind == "delete" {
             guard let raw = e.text, !effEmpty(raw) else { continue }
@@ -1209,7 +1213,9 @@ final class WritingCaptureWorker {
             let nextEmpty = i + 1 < arr.count && (arr[i + 1].text.map(effEmpty) ?? false)
             guard prevEmpty || nextEmpty else { continue }     // 旁边没有发送标记 = 普通纠正删除
             let t = stripZW(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-            if t.count >= 2 { msgs.append(t) }
+            guard t.count >= 2 else { continue }
+            if !baseline.isEmpty && baseline.contains(t) { continue }   // 预先存在的内容,非这次所写
+            msgs.append(t)
         }
         return msgs
     }
@@ -1326,7 +1332,7 @@ final class WritingCaptureWorker {
                         // = 用户早指出的"同框第二条 invalid")。+ 末尾**未发送的草稿**
                         // (末事件 endValue 是真草稿:非空、非占位符、没回到开局)。
                         var texts: [String] = []
-                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog)) }
+                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog, sessionStart: ev.sessionStart)) }
                         if let last = grp.last, !last.endValue.isEmpty, !Self.isPastedValue(last),
                            last.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
                                != last.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines) {
