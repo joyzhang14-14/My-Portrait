@@ -76,6 +76,16 @@ enum CLIInputImporter {
         )
     }
 
+    /// 单源扫描 —— Import 页每个来源各自 Scan 用(分开扫,互不触发)。
+    static func scanClaudeCode(since: Int64?) -> (count: Int, sessions: Int) {
+        let cc = filterSince(parseClaudeCode(), since)
+        return (cc.count, Set(cc.compactMap { $0.session }).count)
+    }
+    static func scanCodex(since: Int64?) -> (count: Int, sessions: Int) {
+        let codex = filterSince(parseCodex(), since)
+        return (codex.count, Set(codex.compactMap { $0.session }).count)
+    }
+
     /// 用户在 session 里以 `!` 开头打的 shell 转义指令(Codex 裸存 `!cmd`,
     /// Claude Code 也可能裸文本)——不是自然语言写作,丢。半角 `!` 起头的自然
     /// 语言几乎不存在(中文用全角「！」且不会句首),误伤可忽略。
