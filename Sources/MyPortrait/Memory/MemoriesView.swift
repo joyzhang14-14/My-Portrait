@@ -23,6 +23,11 @@ struct MemoriesView: View {
     @State private var confirmingDelete: Bool = false
     /// 标题模糊搜(case-insensitive)。空 = 不过滤。切 scope 时清空。
     @State private var searchText: String = ""
+    /// event 右键 "Move to new folder…" 弹窗状态。
+    @State private var movingEntry: Entry? = nil
+    @State private var newFolderDraft: String = ""
+    /// event 右键 "Delete" 确认。
+    @State private var deletingEntry: Entry? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     struct Entry: Identifiable {
@@ -125,10 +130,12 @@ struct MemoriesView: View {
                             // 匹配,折叠成 group 会反直觉。
                             foldersGroupedList
                         } else {
+                            let isEvents = { if case .events = scope { return true } else { return false } }()
                             ForEach(visibleEntries) { entry in
                                 EntryRow(entry: entry, selected: selected == entry.id)
                                     .contentShape(Rectangle())
                                     .onTapGesture { handleSelect(entry: entry) }
+                                    .contextMenu { if isEvents { eventContextMenu(entry) } }
                                 Divider().background(Color.primary.opacity(0.08))
                             }
                         }
@@ -142,6 +149,38 @@ struct MemoriesView: View {
         // 上变成大灰块,跟左右两列格格不入。light 下用极淡 black 透出底色,
         // dark 下保留原本的 0.28 暗化效果。
         .background(Color.black.opacity(colorScheme == .light ? 0.03 : 0.28))
+        // event 右键 "New folder…" → 输入新 folder 名。
+        .alert("New folder", isPresented: Binding(
+            get: { movingEntry != nil },
+            set: { if !$0 { movingEntry = nil } }
+        )) {
+            TextField("Folder name", text: $newFolderDraft)
+            Button("Create & move") {
+                let n = newFolderDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let e = movingEntry, !n.isEmpty {
+                    Task { await assignEventToNewFolder(e, name: n) }
+                }
+                movingEntry = nil
+            }
+            Button("Cancel", role: .cancel) { movingEntry = nil }
+        }
+        // event 右键 "Delete event" → 确认后删 .md + 摘掉 folder 引用。
+        .confirmationDialog(
+            "Delete this event?",
+            isPresented: Binding(
+                get: { deletingEntry != nil },
+                set: { if !$0 { deletingEntry = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete event", role: .destructive) {
+                if let e = deletingEntry { Task { await deleteEntry(e) } }
+                deletingEntry = nil
+            }
+            Button("Cancel", role: .cancel) { deletingEntry = nil }
+        } message: {
+            Text(deletingEntry.map { "“\($0.title)” will be permanently deleted from disk." } ?? "")
+        }
     }
 
     // MARK: - Folders-grouped events list
@@ -164,7 +203,8 @@ struct MemoriesView: View {
                 onSelect: handleSelect,
                 onDelete: { Task { await deleteFolder(slug: g.slug, name: g.title) } },
                 onRename: { newName in Task { await renameFolder(slug: g.slug, to: newName) } },
-                onSetColor: { hex in Task { await setFolderColor(slug: g.slug, hex: hex) } }
+                onSetColor: { hex in Task { await setFolderColor(slug: g.slug, hex: hex) } },
+                eventMenu: { entry in AnyView(eventContextMenu(entry)) }
             )
             // 最后一个 folder 后面**不画**这条细 Divider —— 紧接着就是下面那条
             // 10px 粗线,两条线之间会被 VStack spacing 撑出间距让粗线偏下。
@@ -186,6 +226,7 @@ struct MemoriesView: View {
             EntryRow(entry: entry, selected: selected == entry.id)
                 .contentShape(Rectangle())
                 .onTapGesture { handleSelect(entry: entry) }
+                .contextMenu { eventContextMenu(entry) }
             Divider().background(Color.primary.opacity(0.08))
         }
     }
@@ -512,6 +553,32 @@ struct MemoriesView: View {
             ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
     }
 
+    /// event 行的右键菜单:分到 folder(列出现有 folder + 新建)/ 删除。
+    /// 只在 events scope 有意义 —— 其它 scope 的行不挂这个。
+    @ViewBuilder
+    private func eventContextMenu(_ entry: Entry) -> some View {
+        Menu("Move to folder") {
+            // 当前所有 folder(读盘,轻量;folder 数量很小)。
+            let folders = EventFolderStore.loadAll()
+            if folders.isEmpty {
+                Text("No folders yet")
+            } else {
+                ForEach(folders) { f in
+                    Button(f.name) {
+                        Task { await assignEventToFolder(entry, slug: f.slug) }
+                    }
+                }
+            }
+            Divider()
+            Button("New folder…") {
+                newFolderDraft = ""
+                movingEntry = entry
+            }
+        }
+        Divider()
+        Button("Delete event", role: .destructive) { deletingEntry = entry }
+    }
+
     @MainActor
     private func reload() async {
         loading = true
@@ -651,6 +718,8 @@ private struct FolderDisclosureRow: View {
     let onRename: (String) -> Void
     /// 右键 Change color → 选了预设色(hex)回调;nil = 恢复默认色。
     let onSetColor: (String?) -> Void
+    /// 展开后每个 event 行的右键菜单(分 folder / 删除)。由 MemoriesView 构造。
+    @ViewBuilder let eventMenu: (MemoriesView.Entry) -> AnyView
 
     @State private var expanded: Bool = false
     /// 只跟踪指针是否在删除按钮本身上(不是整行)。
@@ -760,6 +829,7 @@ private struct FolderDisclosureRow: View {
                             .padding(.leading, 22)   // 跟 chevron 缩对齐
                             .contentShape(Rectangle())
                             .onTapGesture { onSelect(entry) }
+                            .contextMenu { eventMenu(entry) }
                         // 最后一个 event 不画尾部细线 —— 否则它会漏在外层
                         // folders↔ungrouped 的 10px 粗线上方,显得多一道线。
                         if idx < entries.count - 1 {
