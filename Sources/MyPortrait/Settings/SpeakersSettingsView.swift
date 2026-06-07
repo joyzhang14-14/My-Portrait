@@ -924,6 +924,10 @@ struct VoiceTrainingCard: View {
 
     private func startTraining() {
         guard !blocked else { return }
+        // 上次训练失败(故意的 "got 0s" 太短保护等)后 phase 停在 .failure,
+        // VoiceTrainer.start() 的 `guard case .idle` 会拒绝重新起来 → 卡住。
+        // 每次点 Start 先 reset 回 idle,让用户能直接重试。
+        trainer.reset()
         prevAudioEnabled = cfg.current.capture.audio.enabled
         prevSpeakerIdEnabled = cfg.current.capture.audio.speakerIdEnabled
         // **训练期间临时关掉主 mic capture** —— 两个 AVAudioEngine 同时 access
