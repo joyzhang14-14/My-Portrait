@@ -20,7 +20,9 @@ struct ImportSettingsView: View {
     @Environment(\.services) private var services
 
     @State private var scan: ScreenpipeImporter.ScanResult? = nil
-    @State private var scanning: Bool = true
+    /// 初始值绑开关:自动模式 → true(直接进扫描态);手动模式 → false(初始「未扫描」,
+    /// 不闪一下 Scanning…)。
+    @State private var scanning: Bool = ConfigStore.shared.general.autoScanImports
     @State private var running: Bool = false
     @State private var statusLines: [String] = []
     @State private var lastReport: ScreenpipeImporter.Report? = nil
@@ -55,6 +57,8 @@ struct ImportSettingsView: View {
             ) {
                 if scanning {
                     scanningRow
+                } else if scan == nil {
+                    notScannedBlock          // 手动模式:还没扫过
                 } else if let s = scan, s.exists {
                     foundBlock(s)
                 } else {
@@ -113,6 +117,12 @@ struct ImportSettingsView: View {
             }
         }
         .task {
+            // 手动模式(General → Imports → Auto-scan off):不自动扫,每个来源显示
+            // 「未扫描」+ Scan 按钮,用户点了才扫。
+            guard ConfigStore.shared.general.autoScanImports else {
+                scanning = false
+                return
+            }
             // screenpipe 与 CLI 两边同时扫,互不等待。
             async let sp: Void = rescan()
             async let cli: Void = rescanCLI()
@@ -141,7 +151,7 @@ struct ImportSettingsView: View {
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Button("Re-scan") { Task { await rescanCLI() } }
+                Button(cliScan == nil ? "Scan" : "Re-scan") { Task { await rescanCLI() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(running || cliScanning)
@@ -155,6 +165,11 @@ struct ImportSettingsView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.textSecondary)
                 }
+            } else if sessions == nil && count == nil {
+                // 手动模式:还没扫过这个来源。
+                Text("Not scanned — press Scan above.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textSecondary)
             } else {
                 if let s = sessions {
                     statRow("Sessions", "\(s.formatted())", mono: false)
@@ -294,6 +309,29 @@ struct ImportSettingsView: View {
             Text("Scanning ~/.screenpipe / Library / Documents …")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// 手动模式(Auto-scan off)下还没扫过 —— 提示 + Scan 按钮。
+    private var notScannedBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass.circle")
+                    .foregroundStyle(Theme.textSecondary)
+                Text("Not scanned")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Scan") { Task { await rescan() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+            Text("Auto-scan is off (General → Imports). Press Scan to check for importable screenpipe history.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
