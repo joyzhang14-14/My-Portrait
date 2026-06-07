@@ -1471,10 +1471,18 @@ final class WritingCaptureWorker {
                         referenceFrameIds: rec.referenceFrameIds,
                         referenceKeystrokeRange: rec.referenceKeystrokeRange)
                 }
+                // recomposition 去重:用户反复用拼音合成同一条(jiu s s / jiu shi /
+                // jiu shi shuo,边打边删),within 各抓一条、AxCleanup 又都补成同一个汉字
+                // (就是说)→ 同组重复。按**清洗后文本**去重(同 runOnce 内),把这些
+                // "反复合成同一条"的 churn 收成一条。同组完全相同文本几乎必是 churn,安全。
+                var seenText = Set<String>()
+                let deduped = cleaned.filter {
+                    seenText.insert(Self.cleanVisible($0.text)).inserted
+                }
                 // 确定性前缀合并:跨 session(切走 app 又回来接着打同一条草稿,
                 // Step0 按 app 切成两条)的草稿增长在这并回去。
                 let merged = Self.mergePrefixDrafts(
-                    cleaned, rawTyping: g.sessions.flatMap { $0.typingEvents })
+                    deduped, rawTyping: g.sessions.flatMap { $0.typingEvents })
                 return WritingCapturePass3Agent.Output(
                     prompt: "(ax cleanup)", rawResponse: "", records: merged, discarded: [])
             }
