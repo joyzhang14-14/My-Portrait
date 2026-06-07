@@ -349,21 +349,21 @@ struct ImportSettingsView: View {
 
     /// 手动模式(Auto-scan off)下还没扫过 —— 提示 + Scan 按钮。
     private var notScannedBlock: some View {
+        // 跟 Claude Code / Codex 的未扫描卡片一致:绿色 source 图标 + 名 + 灰 Scan 按钮 + 简短提示。
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass.circle")
-                    .foregroundStyle(Theme.textSecondary)
-                Text("Not scanned")
+                Image(systemName: "record.circle")
+                    .foregroundStyle(.green)
+                Text("screenpipe")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("Scan") { Task { await rescan() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-            Text("Auto-scan is off (General → Imports). Press Scan to check for importable screenpipe history.")
+            Text("Not scanned — press Scan above.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
