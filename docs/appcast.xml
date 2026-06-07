@@ -12,6 +12,39 @@
         -->
 
         <item>
+            <title>1.2.108</title>
+            <pubDate>Sun, 07 Jun 2026 08:33:42 +0000</pubDate>
+            <sparkle:version>170</sparkle:version>
+            <sparkle:shortVersionString>1.2.108</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Automatic or manual import scanning</strong> — A new "Auto-scan everything from imports" toggle in General lets the Import page wait until you press Scan on each source, instead of scanning screenpipe / Claude Code / Codex automatically every time you open it.</li>
+                    <li><strong>Collapse the RECENTS list</strong> — The sidebar's RECENTS section now collapses with a chevron, and the New chat button stays available even when it's collapsed.</li>
+                    <li><strong>Right-click menus in Memories</strong> — Right-click a folder to rename, recolor, or delete it; right-click an event to move it into a folder (or a new one) or delete it. The item you right-click is highlighted so it's clear which one the menu applies to.</li>
+                    <li><strong>Balanced power mode</strong> — You can now pick Balanced directly (between Performance and Battery saver), and Auto shows the tier it's currently running, e.g. "Auto — Balanced".</li>
+                    <li><strong>Simpler scheduler control</strong> — The Memory scheduler now has a single Auto-run on/off toggle instead of the Frequency / Time / Day pickers, which didn't actually change when pipelines ran.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Claude Code and Codex scan independently</strong></li>
+                    <li><strong>Folder color swatches show their real colors</strong> — The Change color menu used to render every swatch gray; each now shows its actual color, and the default is labeled "Default (random)".</li>
+                    <li><strong>CRON JOB HISTORY collapse header</strong> — The header is now clickable across the whole row, and toggling it no longer changes the card height or nudges the content below.</li>
+                    <li><strong>Voice training can be retried after a failure</strong> — A failed attempt (such as the too-short recording warning) no longer leaves the card stuck on a stale error with a disabled Start button.</li>
+                    <li><strong>Stuck transcription queue clears itself</strong> — An audio clip whose file went missing no longer jams the queue forever at "1 clip in queue · Transcribing…".</li>
+                    <li><strong>AI model pickers updated</strong> — The OpenAI (your-own-key) and Gemini model lists now offer current 2026 models instead of retired ones that failed when selected.</li>
+                    <li><strong>Divider lines visible in Light mode</strong> — Separator lines across Settings, chat, Connections, Cron Jobs, Timeline, and Onboarding no longer disappear on a light background.</li>
+                    <li><strong>More accurate writing capture</strong></li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.108/MyPortrait_1.2.108_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="n5tdErmJ4UF+bjLymYfwE/pe2HkI31ftLhnzKt3zflWZM3mX+/Pc4aO73/RXcnDX9U8QZkOy20wPJT0d7ZRMAw==" length="26330201" />
+        </item>
+
+        <item>
             <title>1.2.95</title>
             <pubDate>Fri, 05 Jun 2026 06:37:34 +0000</pubDate>
             <sparkle:version>169</sparkle:version>
