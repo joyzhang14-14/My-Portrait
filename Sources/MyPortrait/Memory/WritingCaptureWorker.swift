@@ -1118,8 +1118,14 @@ final class WritingCaptureWorker {
         struct E: Decodable { let kind: String?; let text: String? }
         guard let data = ev.editLog.data(using: .utf8),
               let arr = try? JSONDecoder().decode([E].self, from: data) else { return false }
-        return arr.contains { $0.kind == "paste"
-            && ($0.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == v }
+        func trim(_ s: String?) -> String { (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        // (1) 占位符作为 paste 冒出来:endValue == 某条 paste 文本。
+        if arr.contains(where: { $0.kind == "paste" && trim($0.text) == v }) { return true }
+        // (2) 占位符作为 commit 回填(claudefordesktop 发送后字段回到 "Write a message…",
+        //     不是 paste)。endValue **既匹配 commit 又匹配 delete** = 字段反复回填/清掉的
+        //     占位符,零击键、非用户草稿 —— 跟 extractSentMessages 的占位符判据一致。
+        return arr.contains(where: { $0.kind == "commit" && trim($0.text) == v })
+            && arr.contains(where: { $0.kind == "delete" && trim($0.text) == v })
     }
 
     /// 这个 event 是不是"发送清空":聊天 app(如 ChatGPT)发送后输入框清空,
@@ -1191,7 +1197,9 @@ final class WritingCaptureWorker {
     /// bestGroupText 只取得到一条、其余全丢 —— 这正是用户早指出的"同框第二条 invalid"。
     /// 救法:每次发送 = 一条把**整框内容整条删掉**的 delete,且其**相邻项只剩零宽/空白**
     /// (发送后那一瞬的字段态)。纠正型删除(改字、退格)旁边没有这种空标记 → 排除。
-    nonisolated static func extractSentMessages(_ editLogJSON: String, sessionStart: String) -> [String] {
+    nonisolated static func extractSentMessages(
+        _ editLogJSON: String, sessionStart: String, endValue: String
+    ) -> [String] {
         struct E: Decodable { let kind: String?; let text: String? }
         guard let data = editLogJSON.data(using: .utf8),
               let arr = try? JSONDecoder().decode([E].self, from: data) else { return [] }
@@ -1202,17 +1210,28 @@ final class WritingCaptureWorker {
         func stripZW(_ s: String) -> String {
             String(String.UnicodeScalarView(s.unicodeScalars.filter { !zw.contains($0.value) }))
         }
+        func norm(_ s: String) -> String { stripZW(s).trimmingCharacters(in: .whitespacesAndNewlines) }
+        // 占位符识别:有些 app(如 claudefordesktop)发送后输入框**不清空、而是回填占位符**
+        // ("Write a message…"),不是空/零宽,于是「相邻 effEmpty = 发送」判据失效、消息全丢。
+        // 占位符特征:它是字段静止态 endValue,且在 edit_log 里**既作为 commit 出现(字段回到它)
+        // 又作为 delete 出现(打字时被清掉)**。认出后把它跟零宽一样当**清空/发送标记**:相邻的
+        // delete = 一条发出的消息,占位符本身不抓。Discord 清成空/零宽 → endValue 空 → 不触发。
+        let endN = norm(endValue)
+        let endIsPlaceholder = !endN.isEmpty
+            && arr.contains { $0.kind == "commit" && norm($0.text ?? "") == endN }
+            && arr.contains { $0.kind == "delete" && norm($0.text ?? "") == endN }
+        func isMarker(_ s: String) -> Bool { effEmpty(s) || (endIsPlaceholder && norm(s) == endN) }
         // 基线 = session 开始时字段里已有的内容。只记**用户这次打出来的新字**:删掉「本来
         // 就在基线里」的文字 = 在编辑器里删除预先存在的内容(如改 AI 写的 release note 草稿),
         // 那是删除、不是发送。聊天里 sessionStart 是空/占位符,发出去的消息绝不会是它的子串。
         let baseline = stripZW(sessionStart)
         var msgs: [String] = []
         for (i, e) in arr.enumerated() where e.kind == "delete" {
-            guard let raw = e.text, !effEmpty(raw) else { continue }
-            let prevEmpty = i > 0 && (arr[i - 1].text.map(effEmpty) ?? false)
-            let nextEmpty = i + 1 < arr.count && (arr[i + 1].text.map(effEmpty) ?? false)
-            guard prevEmpty || nextEmpty else { continue }     // 旁边没有发送标记 = 普通纠正删除
-            let t = stripZW(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let raw = e.text, !isMarker(raw) else { continue }   // 占位符/空 本身是标记,不抓
+            let prevMarker = i > 0 && (arr[i - 1].text.map(isMarker) ?? false)
+            let nextMarker = i + 1 < arr.count && (arr[i + 1].text.map(isMarker) ?? false)
+            guard prevMarker || nextMarker else { continue }     // 旁边没有清空标记 = 普通纠正删除
+            let t = norm(raw)
             guard t.count >= 2 else { continue }
             if !baseline.isEmpty && baseline.contains(t) { continue }   // 预先存在的内容,非这次所写
             msgs.append(t)
@@ -1332,7 +1351,7 @@ final class WritingCaptureWorker {
                         // = 用户早指出的"同框第二条 invalid")。+ 末尾**未发送的草稿**
                         // (末事件 endValue 是真草稿:非空、非占位符、没回到开局)。
                         var texts: [String] = []
-                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog, sessionStart: ev.sessionStart)) }
+                        for ev in grp { texts.append(contentsOf: Self.extractSentMessages(ev.editLog, sessionStart: ev.sessionStart, endValue: ev.endValue)) }
                         if let last = grp.last, !last.endValue.isEmpty, !Self.isPastedValue(last),
                            last.endValue.trimmingCharacters(in: .whitespacesAndNewlines)
                                != last.sessionStart.trimmingCharacters(in: .whitespacesAndNewlines) {
