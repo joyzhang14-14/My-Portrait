@@ -208,13 +208,15 @@ actor PortraitDBImpl: PortraitDB {
                 .order(Column("recorded_at_ms"))
                 .limit(limit)
                 .fetchAll(db)
-            return rows.compactMap { row -> AudioChunkRecord? in
-                // resolve filePath; skip if file is missing (worker can't
-                // transcribe / play what isn't on disk).
-                guard let resolved = AssetPath.resolve(row.filePath) else { return nil }
+            return rows.map { row -> AudioChunkRecord in
+                // 文件存在 → resolve 出绝对路径;不存在 → 用原始路径放行。
+                // **绝不静默过滤缺文件的 chunk** —— 否则它的 status 永远不变、永远卡在
+                // pending 占着队列计数(僵尸 chunk)。放行让它进 transcribeOne,读不出
+                // → 标 done 退出队列。
+                let path = AssetPath.resolve(row.filePath) ?? row.filePath
                 return AudioChunkRecord(
                     id: row.id,
-                    filePath: resolved,
+                    filePath: path,
                     recordedAtMs: row.recordedAtMs,
                     durationS: row.durationS,
                     device: row.device,

@@ -335,8 +335,10 @@ actor TranscriptionScheduler {
         if segments.isEmpty {
             // 退化路径：整段一次转录，无说话人归属。
             guard let samples = AudioWAV.readSamples(path: chunk.filePath) else {
-                logger.error("cannot read wav for transcription: \(chunk.filePath, privacy: .public)")
-                try? await db.recordAudioChunkFailure(chunkId: chunkId)
+                // 文件不存在 / 读不出(损坏)—— 都没法转,标 done 退出队列(**不重试**,
+                // 文件不会自己回来 / 修复)。否则缺文件的 chunk 会永远卡在 pending。
+                logger.warning("audio chunk unreadable (missing/corrupt), marking done: \(chunk.filePath, privacy: .public)")
+                try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
                 return
             }
             let text: String
