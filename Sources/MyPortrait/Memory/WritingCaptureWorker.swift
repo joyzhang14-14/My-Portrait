@@ -1383,6 +1383,34 @@ final class WritingCaptureWorker {
         return ((0.80 + 0.19 * ratio) * 100).rounded() / 100
     }
 
+    // DEBUG dump:把 AX-cleanup 这一步的**真实输入**(已被 unifiedExtract 确定性切好的
+    // 单条消息 + 击键)和**真实输出**(补完拼音残留的文本)落盘成 JSON,每组一个文件。
+    // 只在 `~/.portrait/llm_dump.on` 存在时才写 —— 平时不开、零开销。给本地小模型在
+    // 「真实切好的输入」上做公平复测用(scratch 测试用 DB 反推拿不到这个切好的输入)。
+    nonisolated static func dumpAxCleanupIfEnabled(
+        app: String, url: String,
+        items: [WritingCaptureAxCleanupAgent.Item],
+        fixes: [String: WritingCaptureAxCleanupAgent.Fix]
+    ) {
+        let home = NSHomeDirectory()
+        guard FileManager.default.fileExists(atPath: home + "/.portrait/llm_dump.on"),
+              !items.isEmpty else { return }
+        let dir = home + "/.portrait/llm_dump"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let payload: [String: Any] = [
+            "pass": "ax_cleanup", "app": app, "url": url,
+            "items": items.map { ["id": $0.id, "text": $0.text, "keystroke": $0.keystroke] },
+            "fixes": fixes.reduce(into: [String: [String: Any]]()) {
+                $0[$1.key] = ["text": $1.value.text, "confidence": $1.value.confidence]
+            },
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+        else { return }
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        let name = "ax_\(stamp)_\(UUID().uuidString.prefix(8)).json"
+        try? data.write(to: URL(fileURLWithPath: dir + "/" + name))
+    }
+
     static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
@@ -1456,6 +1484,7 @@ final class WritingCaptureWorker {
                     }
                 }
                 let fixes = await makeCleanup().run(items: items)
+                Self.dumpAxCleanupIfEnabled(app: g.app, url: g.url ?? "", items: items, fixes: fixes)
                 let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
                     // LLM(补齐 agent)给的 text + confidence 覆盖默认值;漏/失败/给空 → 原文+默认。
                     // 给空守卫:小模型清不动带 IME 残渣的碎片(如「你得抓住mei」)时会返回空,
