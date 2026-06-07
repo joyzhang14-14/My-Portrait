@@ -861,10 +861,18 @@ final class WritingCaptureWorker {
             } else if isCanvasUrl {
                 out.append(Self.ensureOcrPrepped(s))        // 同篇文档的 review 帧 → ocr
             } else if !axWorkingApps.contains(s.app),
-                      s.keystrokes.filter({ ($0.modifiers & 0x07) == 0 }).count >= 10 {
-                out.append(s)            // 真 canvas 写作 → ocr
+                      s.keystrokes.reduce(0, { acc, k in
+                          (k.isBackspace == 0 && (k.modifiers & 0x07) == 0
+                              && (k.char?.isEmpty == false)) ? acc + 1 : acc
+                      }) >= 120 {
+                // 真 canvas 写作 → ocr。门槛对齐 isAxBroken(≥120 有效击键、同一套
+                // meaningfulKeys 定义):AX 对这 app 失灵(从不产 typing_event)**且用户
+                // 确实大量手打** = 在写文档。旧门槛 10 太低,把"Spotify 等前台时顺手打
+                // 几个字"的纯屏 OCR 误当文档(36 个环境击键 ≥ 10 就进 canvas,LLM 把屏上
+                // 歌词/别处窗口文字拼成假记录)。
+                out.append(s)
             }
-            // else: AX 有效 app 的无输入 session(AI 回复/阅读)或 没打字 → 丢
+            // else: AX 有效 app 的无输入 session(AI 回复/阅读)或 击键不足 → 丢
         }
         return out
     }
