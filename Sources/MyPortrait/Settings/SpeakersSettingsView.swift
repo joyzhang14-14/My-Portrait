@@ -880,6 +880,11 @@ struct VoiceTrainingCard: View {
         )
         .onAppear {
             monitor.start()
+            // 清掉上次训练残留的 failure/success —— VoiceTrainer 是全局单例,上次在
+            // 别处(Settings / 之前的 onboarding)失败的 "got 0s" 报错会一直挂在
+            // trainer.phase 上;加上 trainingName 是新的空 @State → Start disabled,
+            // 用户打开就看到旧红报错 + 灰按钮,以为这次卡住了。训练中不打断。
+            if !trainer.isRunning { trainer.reset() }
             // 不预填名字 —— 没训练的说话人就保持 "Cluster <id>" 显示;
             // 训练时用户自己输名字。不注入 firstName。
         }
