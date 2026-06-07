@@ -64,6 +64,55 @@ enum EventFolderStore {
         }
     }
 
+    /// UI 改名:只改 `name`,**不动 slug**(slug 是文件名 + cron job/AI 引用
+    /// folder 的 stable id;改 slug 会让 cron 下次 add 找不到、分裂出重复
+    /// folder)。跟 `mp-folders rename` 同语义。
+    static func rename(slug: String, to newName: String) throws {
+        guard var f = load(slug: slug) else { return }
+        f.name = newName
+        f.updatedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+        try save(f)
+    }
+
+    /// UI 改颜色:写 colorHex(load→改→save,保留其它字段)。nil = 清掉回默认色。
+    static func setColor(slug: String, hex: String?) throws {
+        guard var f = load(slug: slug) else { return }
+        f.colorHex = hex
+        f.updatedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+        try save(f)
+    }
+
+    /// 把一个 event 移到目标 folder:先从**所有**别的 folder 移除(模型约束 ——
+    /// 一个 event 只属一个 folder),再加进 target。target 不存在静默不做。
+    static func assignEvent(_ rel: String, toSlug target: String) throws {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for var f in loadAll() {
+            if f.slug == target { continue }
+            if f.events.contains(rel) {
+                f.events.removeAll { $0 == rel }
+                f.updatedAtMs = now
+                try save(f)
+            }
+        }
+        guard var t = load(slug: target) else { return }
+        if !t.events.contains(rel) {
+            t.events.append(rel)
+            t.updatedAtMs = now
+            try save(t)
+        }
+    }
+
+    /// 某 event 被删除时,从所有 folder 的 events[] 摘掉它的引用(避免 folder
+    /// 指向死路径 + count 虚高)。
+    static func removeEventEverywhere(_ rel: String) throws {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        for var f in loadAll() where f.events.contains(rel) {
+            f.events.removeAll { $0 == rel }
+            f.updatedAtMs = now
+            try save(f)
+        }
+    }
+
     /// 当前已被任意 folder 索引的 event relativePath 集合。EventClassifier 用它
     /// 算"哪些事件还没分组",只跑增量。
     static func classifiedEventPaths() -> Set<String> {

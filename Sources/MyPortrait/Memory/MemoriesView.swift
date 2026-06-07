@@ -158,10 +158,13 @@ struct MemoriesView: View {
             FolderDisclosureRow(
                 title: g.title,
                 count: g.entries.count,
+                colorHex: g.colorHex,
                 entries: g.entries,
                 selected: selected,
                 onSelect: handleSelect,
-                onDelete: { Task { await deleteFolder(slug: g.slug, name: g.title) } }
+                onDelete: { Task { await deleteFolder(slug: g.slug, name: g.title) } },
+                onRename: { newName in Task { await renameFolder(slug: g.slug, to: newName) } },
+                onSetColor: { hex in Task { await setFolderColor(slug: g.slug, hex: hex) } }
             )
             // 最后一个 folder 后面**不画**这条细 Divider —— 紧接着就是下面那条
             // 10px 粗线,两条线之间会被 VStack spacing 撑出间距让粗线偏下。
@@ -206,7 +209,8 @@ struct MemoriesView: View {
                 // 信息量低,weight 排在前更符合"重要的事先看见"直觉。
                 let entries = f.events.compactMap { byPath[$0] }
                     .sorted { $0.currentWeight > $1.currentWeight }
-                return FolderGroup(id: "folder:" + f.slug, slug: f.slug, title: f.name, entries: entries)
+                return FolderGroup(id: "folder:" + f.slug, slug: f.slug, title: f.name,
+                                   colorHex: f.colorHex, entries: entries)
             }
             .filter { !$0.entries.isEmpty }
             .sorted { $0.entries.count > $1.entries.count }
@@ -220,6 +224,7 @@ struct MemoriesView: View {
         let id: String
         let slug: String
         let title: String
+        let colorHex: String?
         let entries: [Entry]
     }
 
@@ -413,6 +418,9 @@ struct MemoriesView: View {
     private func deleteEntry(_ entry: Entry) async {
         do {
             try FileManager.default.removeItem(at: entry.id)
+            // 顺手从所属 folder 摘掉引用,避免 folder 指向死路径 + count 虚高。
+            // events scope 才有 folder 概念;其它 scope rel 不匹配,no-op。
+            try? EventFolderStore.removeEventEverywhere(Self.eventRelPath(of: entry.id))
             entries.removeAll { $0.id == entry.id }
             selected = nil
             actionStatus = "Deleted: \(entry.title)"
@@ -433,6 +441,75 @@ struct MemoriesView: View {
         } catch {
             actionStatus = "Remove folder failed: \(error.localizedDescription)"
         }
+    }
+
+    /// 改名:只改 name,slug 不动(cron job/AI 仍用老 slug 引用,不分裂)。
+    @MainActor
+    private func renameFolder(slug: String, to newName: String) async {
+        do {
+            try EventFolderStore.rename(slug: slug, to: newName)
+            await reload()
+            actionStatus = "Renamed folder → \(newName)"
+        } catch {
+            actionStatus = "Rename failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// 改颜色:写 colorHex(nil = 恢复默认 hash 色)。
+    @MainActor
+    private func setFolderColor(slug: String, hex: String?) async {
+        do {
+            try EventFolderStore.setColor(slug: slug, hex: hex)
+            await reload()
+            actionStatus = hex == nil ? "Folder color reset" : "Folder color updated"
+        } catch {
+            actionStatus = "Color change failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// event 分到某 folder:assignEvent 内部先从别的 folder 移除再加入。
+    @MainActor
+    private func assignEventToFolder(_ entry: Entry, slug: String) async {
+        let rel = Self.eventRelPath(of: entry.id)
+        do {
+            try EventFolderStore.assignEvent(rel, toSlug: slug)
+            await reload()
+            actionStatus = "Moved to folder"
+        } catch {
+            actionStatus = "Move failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// event 分到一个**新建** folder(名字 = 用户输入)。
+    @MainActor
+    private func assignEventToNewFolder(_ entry: Entry, name: String) async {
+        let rel = Self.eventRelPath(of: entry.id)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var slug = EventFolderStore.makeSlug(from: name)
+        // slug 冲突 → 加 -2/-3 后缀。
+        if EventFolderStore.load(slug: slug) != nil {
+            var n = 2
+            while EventFolderStore.load(slug: "\(slug)-\(n)") != nil { n += 1 }
+            slug = "\(slug)-\(n)"
+        }
+        do {
+            // 先从旧 folder 摘掉,再建新 folder 放进去。
+            try EventFolderStore.removeEventEverywhere(rel)
+            let f = EventFolder(slug: slug, name: name, description: "",
+                                events: [rel], createdAtMs: now, updatedAtMs: now)
+            try EventFolderStore.save(f)
+            await reload()
+            actionStatus = "Moved to new folder: \(name)"
+        } catch {
+            actionStatus = "Create folder failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Entry.id(绝对 URL)→ "yyyy-MM-dd/foo.md" 相对路径,跟 folder.events 对齐。
+    static func eventRelPath(of url: URL) -> String {
+        let prefix = Storage.eventsDir.path + "/"
+        return url.path.hasPrefix(prefix)
+            ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
     }
 
     @MainActor
@@ -524,34 +601,68 @@ struct MemoriesView: View {
 /// 该 folder 内 entries 的 EntryRow 列表。
 /// **只给真 folder 用**。Ungrouped events 现在直接平铺渲染 EntryRow
 /// (用户原话:"ungrouped event 不需要打包,直接展示就好了")。
+/// folder 颜色:预设色板 + hex 解析 + 默认 hash 色。UI 改色存 hex 到
+/// EventFolder.colorHex;没设过按 name hash 出默认色("第一次随机")。
+enum FolderPalette {
+    struct Swatch { let name: String; let hex: String }
+
+    /// 右键 Change color 菜单里列的预设色。hex 跟下面默认 tint 同系。
+    static let swatches: [Swatch] = [
+        Swatch(name: "Blue",    hex: "#5C8DE8"),
+        Swatch(name: "Green",   hex: "#76BD80"),
+        Swatch(name: "Orange",  hex: "#E6944D"),
+        Swatch(name: "Purple",  hex: "#B87BDC"),
+        Swatch(name: "Pink",    hex: "#EB7390"),
+        Swatch(name: "Teal",    hex: "#57B5C7"),
+        Swatch(name: "Gold",    hex: "#DBBC5C"),
+        Swatch(name: "Red",     hex: "#E0605F"),
+        Swatch(name: "Gray",    hex: "#9AA0A6"),
+    ]
+
+    /// 默认色:按 folder name hash 稳定取一个预设色(同名每次同色)。
+    static func defaultTint(for title: String) -> Color {
+        let idx = abs(title.hashValue) % swatches.count
+        return color(fromHex: swatches[idx].hex) ?? .blue
+    }
+
+    /// "#RRGGBB" → Color。失败返回 nil。
+    static func color(fromHex hex: String) -> Color? {
+        var s = hex.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        return Color(
+            red:   Double((v >> 16) & 0xFF) / 255,
+            green: Double((v >> 8) & 0xFF) / 255,
+            blue:  Double(v & 0xFF) / 255
+        )
+    }
+}
+
 private struct FolderDisclosureRow: View {
     let title: String
     let count: Int
+    let colorHex: String?
     let entries: [MemoriesView.Entry]
     let selected: URL?
     let onSelect: (MemoriesView.Entry) -> Void
     /// 点删除按钮 + 确认后调。只取消分组(删 _folders json),不删事件。
     let onDelete: () -> Void
+    /// 右键 Rename → 拿到新名字回调。
+    let onRename: (String) -> Void
+    /// 右键 Change color → 选了预设色(hex)回调;nil = 恢复默认色。
+    let onSetColor: (String?) -> Void
 
     @State private var expanded: Bool = false
     /// 只跟踪指针是否在删除按钮本身上(不是整行)。
     @State private var trashHover: Bool = false
     @State private var confirmingDelete: Bool = false
+    @State private var renaming: Bool = false
+    @State private var renameDraft: String = ""
 
-    /// 给 folder 名稳定挑一个柔和的色相,跟 macOS Finder 自带 tag 颜色一脉。
-    /// hash 取模 → 同名 folder 每次都同色,UI 视觉一致。
-    private static let folderTints: [Color] = [
-        Color(red: 0.36, green: 0.55, blue: 0.91),   // 蓝
-        Color(red: 0.46, green: 0.74, blue: 0.50),   // 绿
-        Color(red: 0.90, green: 0.58, blue: 0.30),   // 橙
-        Color(red: 0.72, green: 0.48, blue: 0.86),   // 紫
-        Color(red: 0.92, green: 0.45, blue: 0.55),   // 玫红
-        Color(red: 0.34, green: 0.71, blue: 0.78),   // 青
-        Color(red: 0.86, green: 0.74, blue: 0.36),   // 金
-    ]
     private var tint: Color {
-        let h = abs(title.hashValue) % Self.folderTints.count
-        return Self.folderTints[h]
+        // 用户设过颜色 → 用它;否则按 name hash 出默认色("第一次随机")。
+        if let hex = colorHex, let c = FolderPalette.color(fromHex: hex) { return c }
+        return FolderPalette.defaultTint(for: title)
     }
 
     var body: some View {
@@ -603,6 +714,21 @@ private struct FolderDisclosureRow: View {
             .padding(.vertical, 12)
             .contentShape(Rectangle())
             .onTapGesture { expanded.toggle() }
+            // 右键菜单:改名 / 改颜色(预设色板)/ 删除。
+            .contextMenu {
+                Button("Rename…") { renameDraft = title; renaming = true }
+                Menu("Change color") {
+                    ForEach(FolderPalette.swatches, id: \.hex) { sw in
+                        Button { onSetColor(sw.hex) } label: {
+                            Label(sw.name, systemImage: "circle.fill")
+                        }
+                    }
+                    Divider()
+                    Button("Default (auto)") { onSetColor(nil) }
+                }
+                Divider()
+                Button("Delete folder", role: .destructive) { confirmingDelete = true }
+            }
             .confirmationDialog(
                 "Delete folder “\(title)”?",
                 isPresented: $confirmingDelete,
@@ -612,6 +738,14 @@ private struct FolderDisclosureRow: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Removes the grouping only. The \(count) event(s) inside are kept and move back to ungrouped.")
+            }
+            .alert("Rename folder", isPresented: $renaming) {
+                TextField("Folder name", text: $renameDraft)
+                Button("Save") {
+                    let n = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !n.isEmpty, n != title { onRename(n) }
+                }
+                Button("Cancel", role: .cancel) {}
             }
 
             // 展开后的事件列表 —— **嵌一层 LazyVStack** 让子项也按需渲染。
