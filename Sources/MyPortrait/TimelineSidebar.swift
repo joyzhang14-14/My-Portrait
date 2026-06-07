@@ -32,6 +32,9 @@ struct TimelineSidebar: View {
     @State private var reloadToken = 0
     @State private var recentsSearch: String = ""
     @State private var recentsSearchOpen: Bool = false
+    /// RECENTS 折叠态。默认展开(false)—— 它是侧栏主入口,不像 cron history 那样
+    /// 默认收起。
+    @State private var recentsCollapsed: Bool = false
     @State private var renamingConvId: UUID? = nil
     @State private var renameDraft: String = ""
     @State private var cronJobHistoryCollapsed: Bool = true
@@ -250,22 +253,47 @@ struct TimelineSidebar: View {
     private var recentsSection: some View {
         sectionCard {
             HStack(spacing: Theme.Space.sm) {
-                SectionHeader(title: "RECENTS", count: filteredConversations.count)
-                SidebarIconButton(
-                    systemName: recentsSearchOpen ? "xmark" : "magnifyingglass",
-                    help: "Search chats"
-                ) {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        recentsSearchOpen.toggle()
-                        if !recentsSearchOpen { recentsSearch = "" }
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        recentsCollapsed.toggle()
+                        if recentsCollapsed {
+                            recentsSearchOpen = false
+                            recentsSearch = ""
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: recentsCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 10)
+                        SectionHeader(title: "RECENTS", count: filteredConversations.count)
+                    }
+                    // 整行可点折叠 + y 轴命中区靠 minHeight 撑(同 CRON JOB HISTORY)。
+                    .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // 展开时才显示搜索 / 新建,折叠态只留标题(同 cron history)。
+                if !recentsCollapsed {
+                    SidebarIconButton(
+                        systemName: recentsSearchOpen ? "xmark" : "magnifyingglass",
+                        help: "Search chats"
+                    ) {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            recentsSearchOpen.toggle()
+                            if !recentsSearchOpen { recentsSearch = "" }
+                        }
+                    }
+                    SidebarIconButton(systemName: "plus", help: "New chat") {
+                        chat.switchTo(nil)
                     }
                 }
-                SidebarIconButton(systemName: "plus", help: "New chat") {
-                    chat.switchTo(nil)
-                }
             }
+            .frame(minHeight: 24)
 
-            if recentsSearchOpen {
+            if !recentsCollapsed {
+              if recentsSearchOpen {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 10))
@@ -282,14 +310,14 @@ struct TimelineSidebar: View {
                         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
                             .strokeBorder(Theme.stroke, lineWidth: 0.7))
                 )
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+                .transition(.opacity)
+              }
 
-            if filteredConversations.isEmpty {
+              if filteredConversations.isEmpty {
                 EmptyRow(text: recentsSearch.isEmpty
                          ? "No chats yet — start typing below."
                          : "No chats match \"\(recentsSearch)\".")
-            } else {
+              } else {
                 VStack(spacing: 2) {
                     ForEach(filteredConversations) { conv in
                         RecentRow(
@@ -324,7 +352,8 @@ struct TimelineSidebar: View {
                         )
                     }
                 }
-            }
+              }
+            }   // if !recentsCollapsed
         }
     }
 
