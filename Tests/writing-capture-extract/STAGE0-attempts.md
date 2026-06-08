@@ -117,8 +117,24 @@
   → guard: 模型新增汉字必须∈候选/原文,英文字面保留,否则回退(防幻觉)
 ```
 
+## 类4/5a/5b 进展(2026-06-08)
+
+- **类4(乱 event 重复/截断态泄漏)+ 类5a(长文增量没合并)= `dedup_truncated` 解决** ✅
+  - `event_sends_with_ts` 带 `is_send` 标记(真发送 vs endValue 截断态)。
+  - `dedup_truncated(records, cover)`:丢掉 **is_send=False 且内容被某更长记录覆盖(literal 前缀 OR `cover≥0.8`)** 的草稿快照。
+  - 实测:类5a ev604-607 的 87/91/115 截断快照全丢、留 463 完整;类4 `他骂你你也不会`(截断态)丢、留
+    `他骂你你也不会和他继续了`。**只丢 is_send=False,真发送("明天"这种前缀)永不误伤。**
+  - ⚠️ 中段编辑会让字面前缀断(115 vs 463 第46字分叉),所以用**内容覆盖率 cover≥0.8**(不是纯前缀)。
+- **类5b(canvas 重建丢尾)= 需 canvas 云端重跑,不是确定性 append** ⏳
+  - 确定性兜底找到了真续文("also be my first entrepreneurial project…"),但 "it can" 之后是**整屏
+    OCR(34k字,含 UI 噪声)**,append 会带垃圾。根因(R5):随笔**跨 app 写**(Safari 起草→Notes 续写),
+    canvas 按 app 切 group,Safari 那条天生缺尾。**正解=canvas 重跑时跨 app 合池**(把 Notes 帧也喂进去)。
+    canvas 本走云端,独立任务,优先级低。
+
 ## 下一步
 
-1. 把 **thinking 消歧**接进 `decode_run`(替掉约束 JSON),重跑 e2e 验 A→睡的、E→卖个惨。
-2. 查 H/I 截断尾巴为什么没找到(击键窗 vs 发送 ts 的 race)。
-3. 全 A–N 过了再把 supersede/merge(类4/5a)、canvas(类5b)补上,然后才谈 Swift 移植(阶段2)。
+1. **集成**:把 `rebuild.py`(IME 重建)+ `dedup_truncated` + is_residue 接进 `faithful_pipeline.py`,
+   全量重跑(14b disambig),regenerate 对照文档,看 A–N 整体改善。
+2. H/I 截断尾巴(send-boundary race)、的/得后规则、卖个惨自定义词典 —— 用户先跳过,回头再想。
+3. 类5b canvas 跨 app 合池重跑(云端,独立)。
+4. 全部 harness 验过 → 才谈 Swift 移植(阶段2)。
