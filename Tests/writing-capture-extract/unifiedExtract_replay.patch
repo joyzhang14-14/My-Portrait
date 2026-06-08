@@ -1,0 +1,166 @@
+commit b01ff1f32f2ba45804742664b1c9a9754511b96a
+Author: Joy Zhang <184820595+joyzhang14-14@users.noreply.github.com>
+Date:   Sun Jun 7 22:39:14 2026 -0400
+
+    fix(writing): unifiedExtract 改 edit_log 回放,解决占位符泄漏+消息切碎+演进消息覆盖
+    
+    旧逻辑用「占位符集合(≥3复现) + 字段reset启发式」切消息,三类 bug:
+    - #5 占位符泄漏+切碎:collectPlaceholders 漏掉只出现1-2次的占位符
+      (Describe a task…),既泄漏成记录、又当边界把会话切成碎片
+    - #3 演进消息丢失:连续消息间缺 reset 边界 → cur 被一条条覆盖,只剩最后一条
+    
+    改为完整 edit_log 回放:submit=干净发送;非空 endValue=commit 背书的演进草稿
+    (相似度判边界,不相似=新消息);占位符靠「无 commit 背书 / 同事件显示又被删」识别,
+    不再用 run 级集合;send-clear 仅在 endValue 空时用(Discord 同框多发送)。
+    
+    6 个真实会话 harness 验证:占位符零泄漏、演进长消息正确合并、Discord 多发送不受影响。
+    残留拼音碎片(末尾生拼音)留给后续 A组判废开关。collectPlaceholders/isResetState/
+    withinEventSends 不再被调用(暂留定义)。
+    
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+diff --git a/Sources/MyPortrait/Memory/WritingCaptureWorker.swift b/Sources/MyPortrait/Memory/WritingCaptureWorker.swift
+index 5f5c091..e76153a 100644
+--- a/Sources/MyPortrait/Memory/WritingCaptureWorker.swift
++++ b/Sources/MyPortrait/Memory/WritingCaptureWorker.swift
+@@ -1303,25 +1303,102 @@ final class WritingCaptureWorker {
+     }
+ 
+     /// 一个 session 的事件序列 → 用户发出的每条消息(+末尾草稿)。
+-    nonisolated static func unifiedExtract(_ evs: [TypingEvent], placeholders: Set<String>) -> [String] {
++    /// **完整 edit_log 回放**(替代旧的占位符集合 + 字段reset启发式):
++    ///   - `submit` = 干净发送,直接成一条;
++    ///   - 非空 `endValue` = commit 背书的演进草稿(`related` 相似就接着长,不相似=新消息边界);
++    ///   - 占位符不靠集合识别 —— 两种都当 reset:① 无 commit 背书(粘贴注入)② 同事件里
++    ///     「显示又被整条删」(app 静止占位符,如 claudefordesktop 的 "Write a message…");
++    ///   - `send-clear`(整框删掉的 commit 背书内容)**仅在 endValue 为空时**用(Discord 同框
++    ///     多发送);endValue 是真消息时,事件内的删除是草稿编辑、不当发送(否则吐 Spiffy 这类碎片)。
++    /// 一并解决占位符泄漏(#5)、消息切碎(#5)、演进消息互相覆盖丢失(#3)。
++    nonisolated static func unifiedExtract(_ evs: [TypingEvent]) -> [String] {
++        struct E: Decodable { let kind: String?; let text: String? }
++        let zw: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0xFEFF]
++        func emptyZW(_ s: String) -> Bool {
++            s.unicodeScalars.allSatisfy { $0.properties.isWhitespace || zw.contains($0.value) }
++        }
++        // 有序最长公共子序列长度(滚动数组);两边裁到尾部上限控成本。
++        func lcs(_ a: [Character], _ b: [Character]) -> Int {
++            if a.isEmpty || b.isEmpty { return 0 }
++            var dp = [Int](repeating: 0, count: b.count + 1)
++            for ca in a {
++                var prev = 0
++                for j in 0..<b.count {
++                    let keep = dp[j + 1]
++                    dp[j + 1] = ca == b[j] ? prev + 1 : max(dp[j + 1], dp[j])
++                    prev = keep
++                }
++            }
++            return dp[b.count]
++        }
++        func simRatio(_ a: String, _ b: String) -> Double {
++            if a.isEmpty || b.isEmpty { return 0 }
++            let ca = Array(a.suffix(500)), cb = Array(b.suffix(500))
++            return 2.0 * Double(lcs(ca, cb)) / Double(ca.count + cb.count)
++        }
++        func coverage(_ val: String, _ cs: String) -> Double {
++            if val.isEmpty || cs.isEmpty { return 0 }
++            let cv = Array(val.suffix(500)), cc = Array(cs.suffix(1500))
++            return Double(lcs(cv, cc)) / Double(cv.count)
++        }
++        func related(_ a: String, _ b: String) -> Bool {
++            a.hasPrefix(b) || b.hasPrefix(a) || simRatio(a, b) >= 0.5
++        }
++        func entries(_ log: String) -> [E] {
++            guard let d = log.data(using: .utf8) else { return [] }
++            return (try? JSONDecoder().decode([E].self, from: d)) ?? []
++        }
++
+         var msgs: [String] = []
+         var cur: String? = nil
++        func emit(_ m: String) { if !m.isEmpty { msgs.append(m) } }
++
+         for (k, e) in evs.enumerated() {
+-            let we = Self.withinEventSends(e, placeholders: placeholders)
+-            msgs.append(contentsOf: we)
+-            let ev = Self.cleanVisible(e.endValue)
+-            let evReset = Self.isResetState(e.endValue, placeholders: placeholders)
+-            if !evReset && !ev.isEmpty { cur = ev }     // 非 reset = 当前草稿的最新内容
+-            let nextReset = (k + 1 < evs.count)
+-                && Self.isResetState(evs[k + 1].sessionStart, placeholders: placeholders)
+-            if nextReset {                               // 两事件间字段 reset → 本条发出去了
+-                if let c = cur { msgs.append(c); cur = nil }
+-            } else if evReset {                          // 本事件末尾 reset(发送)
+-                if let c = cur, we.isEmpty { msgs.append(c) }   // within 抓到就用它,否则 cur 兜
++            let arr = entries(e.editLog)
++            let cs = arr.filter { $0.kind == "commit" }
++                .map { Self.cleanVisible($0.text ?? "") }.joined()
++            let endv = Self.cleanVisible(e.endValue)
++            let endEmpty = emptyZW(e.endValue)
++            let delSet = Set(arr.filter { $0.kind == "delete" }.map { Self.cleanVisible($0.text ?? "") })
++            // 1) submit = 干净发送(与 cur 不相似 → 先把 cur 那条发掉)
++            for x in arr where x.kind == "submit" {
++                let st = Self.cleanVisible(x.text ?? "")
++                guard st.count >= 2 else { continue }
++                if let c = cur, !related(st, c) { emit(c) }
++                emit(st); cur = nil
++            }
++            if endEmpty {
++                // 2) 发送清空型(Discord 同框多发送):整框删掉的 commit 背书内容 = 一次发送
++                for (i, x) in arr.enumerated() where x.kind == "delete" {
++                    let t = Self.cleanVisible(x.text ?? "")
++                    guard t.count >= 2 else { continue }
++                    let nbr = (i + 1 < arr.count && emptyZW(arr[i + 1].text ?? "")) ||
++                              (i > 0 && emptyZW(arr[i - 1].text ?? ""))
++                    guard nbr, coverage(t, cs) >= 0.5 else { continue }
++                    if let c = cur, !related(t, c) { emit(c); cur = nil }
++                    emit(t)
++                }
+                 cur = nil
++            } else if !endv.isEmpty {
++                // 3) 草稿型:endValue 是 commit 背书、且非「显示又被删」的占位符 → 演进草稿
++                let injected = coverage(endv, cs) < 0.5     // 无 commit 背书 = 粘贴注入
++                let resting = delSet.contains(endv)         // 同事件被整条删 = 静止占位符
++                if !injected && !resting {
++                    if let c = cur, !related(endv, c) { emit(c) }   // 跳到不相似内容 = 旧草稿已发
++                    cur = endv
++                } else if let c = cur {                     // 占位符/注入 → reset,先发 cur
++                    emit(c); cur = nil
++                }
++            }
++            // 4) 边界:下个事件开局与 cur 不相似(或空)= 本条已发出
++            if k + 1 < evs.count, let c = cur {
++                let ns = Self.cleanVisible(evs[k + 1].sessionStart)
++                if emptyZW(evs[k + 1].sessionStart) || !related(ns, c) {
++                    emit(c); cur = nil
++                }
+             }
+         }
+-        if let c = cur { msgs.append(c) }                // 末尾未发送草稿
++        if let c = cur { emit(c) }                       // 末尾未发送草稿
+         var seen = Set<String>()
+         return msgs.filter { !$0.isEmpty && seen.insert($0).inserted }   // 去重保序
+     }
+@@ -1425,8 +1502,7 @@ final class WritingCaptureWorker {
+         // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
+         // fanout;普通组走 Pass 3 单调用。LLM 偶发 socket 断/超时常见,失败退避
+         // 重试最多 3 次(吸收瞬时错误);重试还失败才算 group failure。
+-        // run 级占位符:所有待处理事件扫一遍算一次,各组共享(单组事件少时也能认出占位符)。
+-        let placeholders = Self.collectPlaceholders(groups)
++        // (占位符不再靠 run 级集合识别 —— unifiedExtract 已改为 edit_log 回放 + 相似度判边界。)
+         @Sendable func runOnce(_ g: WritingCaptureGroup) async throws -> WritingCapturePass3Agent.Output {
+             let isCanvas = g.sessions.contains { $0.route == "ocr" }
+             if isCanvas {
+@@ -1447,11 +1523,9 @@ final class WritingCaptureWorker {
+                     let evs = s.typingEvents.filter { $0.id != nil }
+                         .sorted { $0.startedAt < $1.startedAt }
+                     guard !evs.isEmpty else { continue }
+-                    // **统一提取(字段状态时间线)**:维护跨事件草稿 cur,字段一 reset(空/
+-                    // 零宽/占位符)就把 cur 吐成一条;reset 用「下一个事件起点是否 reset 态」判,
+-                    // 不用前缀比对(CJK 拼音/改字会把它判炸成逐字爆炸)。event 内连发由
+-                    // withinEventSends 拆。占位符按 run 级「整段跳变复现」识别,不认 app/语言。
+-                    let messages = Self.unifiedExtract(evs, placeholders: placeholders)
++                    // **统一提取(edit_log 回放)**:submit=发送、endValue=commit 背书的演进草稿、
++                    // 相似度判边界;占位符靠「无 commit 背书 / 显示又被删」识别,不再用 run 级集合。
++                    let messages = Self.unifiedExtract(evs)
+                     guard !messages.isEmpty else { continue }
+                     let startTs = evs.first!.startedAt, endTs = evs.last!.endedAt
+                     let pad: Int64 = 10_000
