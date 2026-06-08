@@ -17,8 +17,13 @@ def cstream(arr): return ''.join(cv(e.get('text', '') or '') for e in arr if e.g
 def loadev(ids):
     out = []
     for e in ids:
-        r = con.execute("SELECT id,session_start,end_value,edit_log FROM typing_events WHERE id=?", (e,)).fetchone()
-        if r: out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=json.loads(r[3])))
+        r = con.execute("SELECT id,session_start,end_value,edit_log,bundle_id,started_at,ended_at FROM typing_events WHERE id=?", (e,)).fetchone()
+        if not r: continue
+        # 本事件窗内的「回车键」时间戳(区分真发送 vs 退格删的草稿)
+        rets = [x[0] for x in con.execute(
+            "SELECT ts_ms FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? AND char IN (?, ?)",
+            (r[4], r[5]-2000, r[6]+2000, "\n", "\r")).fetchall()]
+        out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=json.loads(r[3]), bundle=r[4], returns=rets))
     return out
 
 # ---- 旧版(占位符集合 ≥3) ----
@@ -62,11 +67,14 @@ def oldExtract(evs, PH):
 
 # ---- 新版 v2 ----
 def phMarkers(arr):
+    # 占位符 = app **paste** 注入(不是用户 commit 敲的)又被 delete 清掉的值。
+    # 只认 paste:否则把"打了又删的普通词"(sonnet/fang dao)误当占位符标记,
+    # 导致紧挨它的中途删除(这边有/生成)被误判成发送。
     inj, dele = set(), set()
     for e in arr:
         k = e.get('kind'); t = cv(e.get('text', '') or '')
         if not t: continue
-        if k in ('paste', 'commit'): inj.add(t)
+        if k == 'paste': inj.add(t)
         elif k == 'delete': dele.add(t)
     return {t for t in (inj & dele) if len(t) >= 6 and re.search(r'[A-Za-z一-鿿]', t)}
 
@@ -85,19 +93,22 @@ def runPlaceholders():
 RUNPH = runPlaceholders()
 EMPTY_OK = {0x200B, 0x200C, 0x200D, 0xFEFF, 0x0A, 0x0D, 0x09, 0x20}  # 零宽/换行/制表/普通空格,**不含 \xa0**
 def emptyBox(s): return all(ord(c) in EMPTY_OK for c in (s or ''))   # 严格"输入框空"(\xa0 不算)
-def withinSends(arr, endEmpty, ph):
+def withinSends(arr, endEmpty, ph, returns=()):
     cs = cstream(arr); out = []
     def isMark(j):
         if j < 0 or j >= len(arr): return False
         raw = arr[j].get('text', '') or ''
         return emptyBox(raw) or cv(raw) in ph or cv(raw) in RUNPH   # 严格空 或 占位符
-
+    def sent(ts):   # 这条 delete 前 ~1.8s 有回车键 = 真发送;没有(退格删的)= 草稿
+        return ts is not None and any(ts-1800 <= rt <= ts+200 for rt in returns)
     for i, e in enumerate(arr):
         if e.get('kind') != 'delete': continue
         t = cv(e.get('text', '') or '')
-        if len(t) < 2 or t in ph: continue
+        if len(t) < 2 or t in ph or t in RUNPH: continue   # 占位符的 delete 本身不抓
         if not (isMark(i-1) or isMark(i+1)): continue
-        if cover(t, cs) >= 0.5: out.append(t)
+        if cover(t, cs) < 0.5: continue
+        if not sent(e.get('ts')): continue                 # 没回车 = 打了又删的草稿,不当发送
+        out.append(t)
     return out
 def newExtract(evs):
     msgs = []; cur = None
@@ -112,7 +123,7 @@ def newExtract(evs):
                 if len(st) >= 2:
                     if cur and not related(st, cur): emit(cur)
                     emit(st); cur = None
-        for t in withinSends(arr, endEmpty, ph):
+        for t in withinSends(arr, endEmpty, ph, e.get('returns', ())):
             if cur and not related(t, cur): emit(cur); cur = None
             emit(t)
         if endEmpty:

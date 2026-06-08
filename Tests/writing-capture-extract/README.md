@@ -1,47 +1,35 @@
-# 写作采集 · unifiedExtract 消息切分 测试存档
+# 写作采集 pipeline · scratch harness 存档
 
-scratch 测试脚本(Python),验证 `WritingCaptureWorker.unifiedExtract`(把一个 session 的
-typing_events 切成"用户发出的每条消息")的改写。**不是 SwiftPM 单测**——直接读真实库
-`~/.portrait/portrait.sqlite`,跑算法逻辑在真实数据上对照。SwiftPM 测试 target 只扫
-`Tests/MyPortraitTests`,这个目录不会被 Swift 构建碰到。
+Python scratch 脚本,在真实库 `~/.portrait/portrait.sqlite` 上跑写作采集 pipeline 的算法逻辑,
+**改 Swift 前先在这里验**。不是 SwiftPM 单测(Swift 构建不碰这个目录)。
 
-## 背景:为什么要改 unifiedExtract
+## 文件
 
-旧版用「占位符集合(`collectPlaceholders`,某 endValue 作为单条 commit/paste 复现 ≥3 次)+
-字段 reset 启发式」切消息,导致桌面问题清单(`~/Desktop/Pipeline问题清单.md`)里的:
-- **#5 占位符泄漏 + 消息切碎**:漏掉只出现 1-2 次的占位符(如 `Describe a task…`),既泄漏成
-  记录、又被当成边界把会话切成碎片(`然后`/`Spiffy`/`每次都`…)。
-- **#3 演进消息丢失**:连续消息之间缺 reset 边界 → 跨事件草稿 `cur` 被一条条覆盖,一串里
-  只剩最后一条。
+| 文件 | 作用 |
+|---|---|
+| `extract_compare_v2.py` | unifiedExtract v2(edit_log 回放)+ **回车检测**(查 keystroke_log `\r`/`\n` 区分真发送 vs 退格草稿)+ 全量对照旧版 |
+| `faithful_pipeline.py` | 忠实全本地 MLX pipeline(`1.7b\|4b\|8b`):v2 切分 + 组级击键 gate + slash gate + **librime AxCleanup** + supersede + merge + 完整记录 Pass4 + is_residue → 写 `Pipeline成品-新pipeline-<size>.md` |
+| `gen_raw.py` / `gen_local_fusion.py` / `merge_final.py` | 原始切分 / librime+MLX fusion 重建 / 合并云端 canvas |
+| `harness.py` / `mlx_constrained.py` / `llm.py` | 基础设施(读 Swift prompt、MLX 约束解码、本地模型调用) |
+| `librime-tools/cands.c` `lattice.c` | librime C 桥源码(`cands <连写拼音> <n>` 出候选;`lattice` 出 TOP+逐音节)。编译:`clang cands.c -o cands -I/opt/homebrew/opt/librime/include -L/opt/homebrew/opt/librime/lib -lrime` |
+| `PIPELINE-ALGORITHM.md` | 整条 pipeline 算法 spec(给 Claude 自己看,§12 有 A–N 退步表) |
+| `RESEARCH-ime-fix.md` | **IME 重建修复调研报告**(老靠 sonnet/新断在 gate;全本地路线=librime+选字数字+MLX消歧+防幻觉guard) |
+| `extract_compare.py` / `handtyped_audit.py` / `unifiedExtract_replay.patch` | 早期版本(历史存档) |
 
-## 改写方案:edit_log 回放(见 `unifiedExtract_replay.patch`)
+## 当前状态(2026-06-08):优化前检查点
 
-`submit` = 干净发送;非空 `endValue` = commit 背书的演进草稿(相似度判边界,不相似=新消息);
-占位符靠「无 commit 背书(粘贴注入)/ 同事件里显示又被整条删(静止占位符)」识别,不再用集合;
-`send-clear`(整框删掉的 commit 背书内容)**仅在 endValue 为空时**用。
-
-## ⚠️ 当前状态:**未合入,已撤回**(2026-06-07)
-
-- 改写曾 commit 为 `b01ff1f`,但用户要求"先测好再接",已 `git reset --hard` 撤回。
-  实现保存在 `unifiedExtract_replay.patch`(`git apply` 可重新打上)。
-- **`extract_compare.py` 全量对照(四天所有会话,旧版 vs 新版)抓到严重回归**:
-  - 新版正确丢掉拼音残渣(`w1`/`xiang`/`p s`…)—— 是改进;
-  - 但**误丢一大批真消息**(`OCR合成为什么那么难？` / `那你问Claude啊` / `AMFI（boot-arg）是什么？`
-    / 英文 `I usually use AI…` 等,~15-20 条)。
-  - **根因**:一条 typing_event 里**连发多条消息、输入框每次回到「占位符」(非空)**的情况
-    (claudefordesktop 尤其多)。旧版靠"占位符当标记"在 `withinEventSends` 里拆;新版把
-    send-clear 限制成「只在 endValue 空时用」(为干掉 Spiffy 草稿碎片),把这类真·事件内
-    多发送一起干掉了。
-- **下一步**:新版需补「事件内、占位符为标记的多发送」拆分,且与"打了又删的草稿"区分开
-  (两者都是 commit 背书的删除,差别在后面是否真发出 / 字段是否回到占位符静止态)。把
-  `extract_compare.py` 报告的回归逐条对到"该留/该丢"全部正确,再考虑合入。
+- 回车检测已验证(旧 193→新 169,清 24 条草稿碎片,0 回归);8b 跑批产出 `Pipeline成品-新pipeline-8b.md`。
+- 用户逐条对照发现 **A–N 共 14 处"老 pipeline 比新的全"** 的退步(详见 `RESEARCH-ime-fix.md` + `~/Desktop/Pipeline问题清单.md`),
+  根因主旋律 = **IME 尾巴重建**(类1/3):老 pipeline 靠 sonnet 读击键脑补汉字,新 harness 一道 gate 把 LLM 屏蔽了 + 本地模型弱。
+- **下一步 = 阶段0 优化**(本目录内):改 `faithful_pipeline.py::axcleanup`(砍 gate + librime+选字数字确定性重建 +
+  英文拦截 + 防幻觉 guard + 按 Enter 分段)+ 改 `extract_compare_v2.py` 的 supersede/merge(类4/5a),A–N 回归 0 幻觉。
+  **Swift 移植(阶段2)推迟,先在 harness 测好。**
 
 ## 怎么跑
 
 ```bash
-python3 extract_compare.py     # 旧版 vs 新版 全量对照,打印回归/占位符泄漏
-python3 handtyped_audit.py     # 按 commit 背书审计:哪些记录不是手打(粘贴/草稿/中途态)
+python3 extract_compare_v2.py            # v2 切分 + 回车检测,全量对照旧版(0 回归校验)
+python3 faithful_pipeline.py 8b          # 忠实全本地 MLX 8b pipeline → 写产出 md
 ```
 
-依赖:`~/.portrait/portrait.sqlite`(真实库)、Python3 标准库(`sqlite3`/`difflib`)。
-脚本里两个 `*Extract` 函数是 Swift `unifiedExtract` 的 Python 复刻,改 Swift 前先在这里验。
+依赖:`~/.portrait/portrait.sqlite`、Python3、MLX(`mlx_lm`)、homebrew librime(`/tmp/rime-test/cands`)。
