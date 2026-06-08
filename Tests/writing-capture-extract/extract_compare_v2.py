@@ -23,7 +23,8 @@ def loadev(ids):
         rets = [x[0] for x in con.execute(
             "SELECT ts_ms FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? AND char IN (?, ?)",
             (r[4], r[5]-2000, r[6]+2000, "\n", "\r")).fetchall()]
-        out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=json.loads(r[3]), bundle=r[4], returns=rets))
+        out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=json.loads(r[3]), bundle=r[4],
+                        returns=rets, started_at=r[5], ended_at=r[6]))
     return out
 
 # ---- 旧版(占位符集合 ≥3) ----

@@ -1,0 +1,2529 @@
+{
+ "2026-05-27": {
+  "ax": [
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "你大概能从我上传的信息中了解我吗？",
+    "kc": 81,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我在做UCI的writing placement portfolio，现在要我上传这个第二个writing sample，我找不到。我希望你能给我出一个题，然后我直接现写",
+    "kc": 261,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "w1",
+    "kc": 261,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我这个情况很尴尬：\nAI出现之前我是在中国的公立初中，没怎么写过英文，作文都是老师给模板，然后死记硬背的\nAI出现之后我是先去了中国的国际学校，后来转到了美国，这个你也是知道的\n然后我是一个纯粹的科技狂，理科生。文科的东西一窍不通，所以所有的这些写作的作业都是用AI辅助完成的（肯定不是直接copy paste），我发明了一个可以自己写，然后老师也查不出AI的方法：就是先让AI写一遍，然后我自己再在AI写的基础上重新写一遍，换成自己的写作风格，这样既保留了google doc里面的trace，又一看就是人的风格。不过关于写作这件事，我从来没有过自己的一个独创的思考和想法。就是如果只给我一支笔，一张纸，一个题目，然后其他什么都不给我，我是从来没试过的。\n不过很反差的是，我托福写作还是4项里面最高的.\n所以总的来说，我还真不知道该怎么做",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我想写我的project，做一个介绍，你觉得怎么样？",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "有些事情不可能写到600字，要想那种能写很多字的topic很难",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "w1",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "xiang",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "就是My Portrait",
+    "kc": 18,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "就是My Portrait\nhttps://github.com/joyzhang14-14/My-Portrait\n你可以瞅一眼\n接着回答问题：\n1.这是我第一次用swift写项目，我原来在用screenpipe，不过放在mac上，运行这个rust+tuari程序直接吃掉了我1G的运存，然后screenpipe的UI我也不是很喜欢\n然后我还想加一些新功能，所以从零开始用swift写了一个新项目\n2.我完全没有想过重新换方向，这个项目我想了很久了，谋划了很久\n3.如果现在重做一遍，我觉得我不会换掉哪些决定，我会绕过一些已经遇到的坑\n4.没有\n5.我不确定是否应该熬夜通宵的去做，还是说应该把节奏放缓",
+    "kc": 927,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我感觉我不是那种很擅长捕捉小事物，这些哲学理论的人。我只是想做一个电子分身，如果我死了就可以直接顶替我",
+    "kc": 927,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我不觉得年龄是一个问题。然后我觉得如果拿收集到的数据去训练AI模型，这个模型就完全可以复制我。如果不够好就是数据不够多，我收集个10年，20年，这个ai就会和我的想法，说出来的话，一模一样。我相信未来一定有这样的数字人复制能力，而且现在已经有很多人在做了，只是数据不够多。",
+    "kc": 446,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样\n阶段12先拆分视频，然后输出json格式的拆分报告\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，不填图片，生成蓝图，前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标\n然后用户亲自去跑（测试阶段）看一下生产出的问题有没有问题",
+    "kc": 563,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样\n阶段12先拆分视频，然后输出json格式的拆分报告\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，不填图片，生成蓝图，前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标公寓，数据储存在\n然后用户亲自去跑（测试阶段）看一下生产出的问题有没有问题",
+    "kc": 836,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样：\n先用apify找到爆款视频（ins点赞量大于1000，评论数大于50），然后把视频下载下来，mp4格式\n阶段12先拆分视频，然后输出json格式的拆分报告\n使用gemini（可以直接读视频数据，不需要拆分）进行4个阶段的视频提炼\n3.1 pro模型stage1：逐秒分析\n3.5 flash模型stage2: 镜头分组\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，可以留一些空之后的agent可以往里填信息，不填图片，生成蓝图。前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标公寓，数据储存在/Users/joyzhang14/Projects/Valis/valis-vcd/data/mockdata/default\n阶段5，agent会调出公寓的图片，需要能看懂图片的模型，我倾向Claude sonnet（不1000%确定这个模型能不能看懂图片），然后填在对应的位置用于图片的生成，然后微调prompt，确保蓝图可以用于这个公寓，这个蓝图不保存，然后agent会直接跑这个蓝图，产出的内容交给用户审核，放到前端的审核区http://localhost:5173/admin/content-review\n然后用户审批之后发布，pipeline完全走通\nnote：所以说积木块不需要很复杂，纯粹为了视频内容生成",
+    "kc": 836,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "p s",
+    "kc": 836,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这是什么图片",
+    "kc": 37,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "writing placement",
+    "kc": 30,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "google doc",
+    "kc": 15,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "55",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ming t",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ji d",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "准确来说6点",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "今天mei li",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我今天早上5",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我的app终于做好了",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "不过只有mac版本",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "还没做手机版",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这几天基本上每天就吃一顿饭",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "然后睡的很少",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "起床就是做",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "没事，也是做完了",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "昨天今天修了一下bug",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "问题不大",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "肯定是还有bug的",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "不过我没发现",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "没发现就继续用呗",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "赛博永生",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "数字人化身",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "如何呢",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "不过这个是v1版本",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "之后有新想法肯定会更新",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "zhi bo guo",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "还好了",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我做了多层ya suo",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "20天的数据只有6个G",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你可以买外接硬盘",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "之后还会优化的",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "如果算上1个月7G",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "z m",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "那12月就是84G",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你买一个2T的硬盘",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "能存好几年数据",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "sha",
+    "kc": 17,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mei kan d",
+    "kc": 17,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这是什么",
+    "kc": 16,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "writingample 2",
+    "kc": 164,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "writingSample2",
+    "kc": 164,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "irvine",
+    "kc": 23,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "OCR优化，当其中一个period的AX数量*10 < typing event的时候，那个OCR的文字全部都保留\n然后pass1优化：现在我看背景是通过文字来分配的\n比如说：我说“能存好几年数据”，ai分析的context是：“",
+    "kc": 1074,
+    "ctx": "Chatting in a messaging window"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "oc",
+    "kc": 1074,
+    "ctx": "Chatting in a messaging window"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "OCR优化，当其中一个period的AX数量*10 < typing event的时候，那个period的OCR的文字全部都保留，然后如果是AX数量*10 >= typing event的时候，那个period的OCR文字只保留100个，最多\n\n然后pass1优化：现在我看背景是通过文字来分配的，需要改成纯粹用OCR来识别\n比如说：我说“能存好几年数据”，ai分析的context是：“Says it can store years of data”，而我希望是“user is chatting on discord”\n\n加pass3:\n给pass3传入之前标记为“失败”的案例，而不是给pass2传，然后给让pass3分辨这个period的typing event能不能支撑出user打这些字。如果是不行的话就在这一步筛掉\n就是pass1过滤ocr的垃圾数据（保留用户输入数据）+生成context（根据app和OCR识别到的背景）\npass2正式进行转译优化+合并session\npass3做最后的过滤\n接着呈现给用户",
+    "kc": 1074,
+    "ctx": "Chatting in a messaging window"
+   }
+  ],
+  "canvas": [],
+  "final": [
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "你大概能从我上传的信息中了解我吗？",
+    "kc": 81,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我在做UCI的writing placement portfolio，现在要我上传这个第二个writing sample，我找不到。我希望你能给我出一个题，然后我直接现写",
+    "kc": 261,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我这个情况很尴尬：\nAI出现之前我是在中国的公立初中，没怎么写过英文，作文都是老师给模板，然后死记硬背的\nAI出现之后我是先去了中国的国际学校，后来转到了美国，这个你也是知道的\n然后我是一个纯粹的科技狂，理科生。文科的东西一窍不通，所以所有的这些写作的作业都是用AI辅助完成的（肯定不是直接copy paste），我发明了一个可以自己写，然后老师也查不出AI的方法：就是先让AI写一遍，然后我自己再在AI写的基础上重新写一遍，换成自己的写作风格，这样既保留了google doc里面的trace，又一看就是人的风格。不过关于写作这件事，我从来没有过自己的一个独创的思考和想法。就是如果只给我一支笔，一张纸，一个题目，然后其他什么都不给我，我是从来没试过的。\n不过很反差的是，我托福写作还是4项里面最高的.\n所以总的来说，我还真不知道该怎么做",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我想写我的project，做一个介绍，你觉得怎么样？",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "有些事情不可能写到600字，要想那种能写很多字的topic很难",
+    "kc": 1290,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "就是My Portrait",
+    "kc": 18,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "就是My Portrait\nhttps://github.com/joyzhang14-14/My-Portrait\n你可以瞅一眼\n接着回答问题：\n1.这是我第一次用swift写项目，我原来在用screenpipe，不过放在mac上，运行这个rust+tuari程序直接吃掉了我1G的运存，然后screenpipe的UI我也不是很喜欢\n然后我还想加一些新功能，所以从零开始用swift写了一个新项目\n2.我完全没有想过重新换方向，这个项目我想了很久了，谋划了很久\n3.如果现在重做一遍，我觉得我不会换掉哪些决定，我会绕过一些已经遇到的坑\n4.没有\n5.我不确定是否应该熬夜通宵的去做，还是说应该把节奏放缓",
+    "kc": 927,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我感觉我不是那种很擅长捕捉小事物，这些哲学理论的人。我只是想做一个电子分身，如果我死了就可以直接顶替我",
+    "kc": 927,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我不觉得年龄是一个问题。然后我觉得如果拿收集到的数据去训练AI模型，这个模型就完全可以复制我。如果不够好就是数据不够多，我收集个10年，20年，这个ai就会和我的想法，说出来的话，一模一样。我相信未来一定有这样的数字人复制能力，而且现在已经有很多人在做了，只是数据不够多。",
+    "kc": 446,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样\n阶段12先拆分视频，然后输出json格式的拆分报告\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，不填图片，生成蓝图，前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标\n然后用户亲自去跑（测试阶段）看一下生产出的问题有没有问题",
+    "kc": 563,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样\n阶段12先拆分视频，然后输出json格式的拆分报告\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，不填图片，生成蓝图，前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标公寓，数据储存在\n然后用户亲自去跑（测试阶段）看一下生产出的问题有没有问题",
+    "kc": 836,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样：\n先用apify找到爆款视频（ins点赞量大于1000，评论数大于50），然后把视频下载下来，mp4格式\n阶段12先拆分视频，然后输出json格式的拆分报告\n使用gemini（可以直接读视频数据，不需要拆分）进行4个阶段的视频提炼\n3.1 pro模型stage1：逐秒分析\n3.5 flash模型stage2: 镜头分组\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，可以留一些空之后的agent可以往里填信息，不填图片，生成蓝图。前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标公寓，数据储存在/Users/joyzhang14/Projects/Valis/valis-vcd/data/mockdata/default\n阶段5，agent会调出公寓的图片，需要能看懂图片的模型，我倾向Claude sonnet（不1000%确定这个模型能不能看懂图片），然后填在对应的位置用于图片的生成，然后微调prompt，确保蓝图可以用于这个公寓，这个蓝图不保存，然后agent会直接跑这个蓝图，产出的内容交给用户审核，放到前端的审核区http://localhost:5173/admin/content-review\n然后用户审批之后发布，pipeline完全走通\nnote：所以说积木块不需要很复杂，纯粹为了视频内容生成",
+    "kc": 836,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "p s",
+    "kc": 836,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这是什么图片",
+    "kc": 37,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "writing placement",
+    "kc": 30,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "google doc",
+    "kc": 15,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "55",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ming t",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ji d",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "准确来说6点",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "今天mei li",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我今天早上5",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我的app终于做好了",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "不过只有mac版本",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "还没做手机版",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这几天基本上每天就吃一顿饭",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "然后睡的很少",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "起床就是做",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "没事，也是做完了",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "昨天今天修了一下bug",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "问题不大",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "肯定是还有bug的",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "不过我没发现",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "没发现就继续用呗",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "赛博永生",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "数字人化身",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "如何呢",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "不过这个是v1版本",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "之后有新想法肯定会更新",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "zhi bo guo",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "还好了",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我做了多层ya suo",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "20天的数据只有6个G",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你可以买外接硬盘",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "之后还会优化的",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "如果算上1个月7G",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "那12月就是84G",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你买一个2T的硬盘",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "能存好几年数据",
+    "kc": 2060,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这是什么",
+    "kc": 16,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "writingample 2",
+    "kc": 164,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "irvine",
+    "kc": 23,
+    "ctx": "Browsing a website with multiple tabs and a document interface"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "OCR优化，当其中一个period的AX数量*10 < typing event的时候，那个OCR的文字全部都保留\n然后pass1优化：现在我看背景是通过文字来分配的\n比如说：我说“能存好几年数据”，ai分析的context是：“",
+    "kc": 1074,
+    "ctx": "Chatting in a messaging window"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "oc",
+    "kc": 1074,
+    "ctx": "Chatting in a messaging window"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "OCR优化，当其中一个period的AX数量*10 < typing event的时候，那个period的OCR的文字全部都保留，然后如果是AX数量*10 >= typing event的时候，那个period的OCR文字只保留100个，最多\n\n然后pass1优化：现在我看背景是通过文字来分配的，需要改成纯粹用OCR来识别\n比如说：我说“能存好几年数据”，ai分析的context是：“Says it can store years of data”，而我希望是“user is chatting on discord”\n\n加pass3:\n给pass3传入之前标记为“失败”的案例，而不是给pass2传，然后给让pass3分辨这个period的typing event能不能支撑出user打这些字。如果是不行的话就在这一步筛掉\n就是pass1过滤ocr的垃圾数据（保留用户输入数据）+生成context（根据app和OCR识别到的背景）\npass2正式进行转译优化+合并session\npass3做最后的过滤\n接着呈现给用户",
+    "kc": 1074,
+    "ctx": "Chatting in a messaging window"
+   }
+  ]
+ },
+ "2026-05-28": {
+  "ax": [
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这个pipeline是和vcd有关，和vos无关。\napify脚本在vcd中已经实现了，直接沿用+改进即可。\nagent12的prompt，我已经记录下来了，改一改，帮我直接粘贴上去就好了。\nagent4的prompt写详细一点\nblock需要写的更详细一些\ncheckpoint不用设置，直接一口气做完就好了",
+    "kc": 531,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "现在可以了吗？",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "p撇里呢",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "pipeline A改为现在的爬取+蓝图制作\n可以查询确认Beatoven.ai\n可以我来下载，如果你能下载是最好的了\nsonnet4.6，现在没有4.7\n可以升级SDK名\n确定，不用ASR\n可以强制重编码\n你说的的对，Runner 跑起来后会在 work_dir 写 snapshot 用于失败恢复。",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望那就把pipeline A做一个单独的页面吧，放在operation板块下，里面的Pipeline A 就是直接跑apify+三个agents\n然后加上通道，可以单独选择Pipeline A - Apify，Pipeline A - 1, Pipeline A - 2, Pipeline A - 3，",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "定时任务这个可以，反正有停止按键\n关于operations，板块如图所示",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "Pipeline A",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "er",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "然后",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "每次都",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "一次性做完吧",
+    "kc": 16,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "删老，这需要你跳过测试文件在",
+    "kc": 231,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "你跳过测试文件在",
+    "kc": 231,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "ba",
+    "kc": 231,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "把beatoven先禁用吧，暂时用不了。然后测试的话先跳过apify api，你帮我用目前的pipeline测试一下，测试文件在",
+    "kc": 231,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "VALIS_BEATOVEN_API_KEY= 我没在env里面找到，这个需要我自己填是吗",
+    "kc": 70,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "换一个试试吧",
+    "kc": 72,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "可以试试",
+    "kc": 72,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "0.38是不是有点低",
+    "kc": 72,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "ok",
+    "kc": 4,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "还没好？",
+    "kc": 80,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "haim",
+    "kc": 80,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "还没好吗",
+    "kc": 80,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "writing sample",
+    "kc": 14,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "15分钟，写的不是很好吧",
+    "kc": 35,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "怎么说？",
+    "kc": 14,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "beatoven",
+    "kc": 13,
+    "ctx": ""
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "现在鼠标hover在消息上的时候会让消息下滑，有个动画，这个设计实在是太狗屎了，删掉吧\n现在输入框没办法打长文，如果超出了输入框的限制需要加一个滚轮\n现在light模式下memory在input界面，中间还是灰色状态，UI没有全部改完",
+    "kc": 321,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我用你seedance余额跑一次测试",
+    "kc": 62,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "希望是gou de",
+    "kc": 62,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "qun",
+    "kc": 78,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "k k",
+    "kc": 78,
+    "ctx": ""
+   },
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "全自动化的，抓取，生成制作视频的通用模版，然后根据公寓方素材制作视频，跑通！目前的问题是公寓网站抓的素材不是很够，给到这个视频制作，这个视频是我能找到最符合的了，只有73%的匹配度",
+    "kc": 551,
+    "ctx": ""
+   },
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "这是这个pipeline第一个生成的视频，用的素材是ins上dreamhouse这个hashtag排名第一的视频格式，然后生成出的模版，最后用公寓那边能爬到的数据做的视频",
+    "kc": 551,
+    "ctx": ""
+   },
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "这个没办法，没办法一次性作出一条内容，如果仿照别人的话，人家视频都是1min起步",
+    "kc": 118,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "v1.1.0",
+    "kc": 2,
+    "ctx": ""
+   }
+  ],
+  "canvas": [],
+  "final": [
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这个pipeline是和vcd有关，和vos无关。\napify脚本在vcd中已经实现了，直接沿用+改进即可。\nagent12的prompt，我已经记录下来了，改一改，帮我直接粘贴上去就好了。\nagent4的prompt写详细一点\nblock需要写的更详细一些\ncheckpoint不用设置，直接一口气做完就好了",
+    "kc": 531,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "现在可以了吗？",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我希望那就把pipeline A做一个单独的页面吧，放在operation板块下，里面的Pipeline A 就是直接跑apify+三个agents\n然后加上通道，可以单独选择Pipeline A - Apify，Pipeline A - 1, Pipeline A - 2, Pipeline A - 3，",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "定时任务这个可以，反正有停止按键\n关于operations，板块如图所示",
+    "kc": 1195,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "一次性做完吧",
+    "kc": 16,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "删老，这需要你跳过测试文件在",
+    "kc": 231,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "把beatoven先禁用吧，暂时用不了。然后测试的话先跳过apify api，你帮我用目前的pipeline测试一下，测试文件在",
+    "kc": 231,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "VALIS_BEATOVEN_API_KEY= 我没在env里面找到，这个需要我自己填是吗",
+    "kc": 70,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "换一个试试吧",
+    "kc": 72,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "可以试试",
+    "kc": 72,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "0.38是不是有点低",
+    "kc": 72,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "ok",
+    "kc": 4,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "还没好？",
+    "kc": 80,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "haim",
+    "kc": 80,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "还没好吗",
+    "kc": 80,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "writing sample",
+    "kc": 14,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "15分钟，写的不是很好吧",
+    "kc": 35,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "怎么说？",
+    "kc": 14,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "beatoven",
+    "kc": 13,
+    "ctx": ""
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "现在鼠标hover在消息上的时候会让消息下滑，有个动画，这个设计实在是太狗屎了，删掉吧\n现在输入框没办法打长文，如果超出了输入框的限制需要加一个滚轮\n现在light模式下memory在input界面，中间还是灰色状态，UI没有全部改完",
+    "kc": 321,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我用你seedance余额跑一次测试",
+    "kc": 62,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "希望是gou de",
+    "kc": 62,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "qun",
+    "kc": 78,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "k k",
+    "kc": 78,
+    "ctx": ""
+   },
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "全自动化的，抓取，生成制作视频的通用模版，然后根据公寓方素材制作视频，跑通！目前的问题是公寓网站抓的素材不是很够，给到这个视频制作，这个视频是我能找到最符合的了，只有73%的匹配度",
+    "kc": 551,
+    "ctx": ""
+   },
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "这是这个pipeline第一个生成的视频，用的素材是ins上dreamhouse这个hashtag排名第一的视频格式，然后生成出的模版，最后用公寓那边能爬到的数据做的视频",
+    "kc": 551,
+    "ctx": ""
+   },
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "这个没办法，没办法一次性作出一条内容，如果仿照别人的话，人家视频都是1min起步",
+    "kc": 118,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "v1.1.0",
+    "kc": 2,
+    "ctx": ""
+   }
+  ]
+ },
+ "2026-05-29": {
+  "ax": [
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "其实这个haichen这段不是本意，我没想这样写。只是说改一下wealthy的那个例子，我还是想focus在这个项目上的",
+    "kc": 171,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我是不是还需要加什么header之类的东西",
+    "kc": 43,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这两篇你觉得我能交吗，都是我手写的，不过我挺怕被识别成ai的，第一篇是有ai帮我找reference",
+    "kc": 138,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "liang pian",
+    "kc": 138,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "18. Were you encouraged to use generative AI in the classroom? What were the guidelines or expectations?\n这个我怎么写比较好？",
+    "kc": 153,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "就是很模糊，这块。就是别用AI写文章就行了，Google doc有那个trace吗不是",
+    "kc": 153,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这咋写啊",
+    "kc": 21,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "帮我看一下这个worksheet是否是根据教科书完成的，给出你的理由和修改建议",
+    "kc": 247,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "你帮我OCR成电子版，加上问题，图片的问题不需要OCR",
+    "kc": 247,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这个location C是不是错了",
+    "kc": 31,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "El Nino重写了一遍，这个有什么解法吗？",
+    "kc": 49,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "deepseek API便宜还是qwen API便宜？\n最便宜的是哪个？",
+    "kc": 88,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "I usually use AI to help me brainstorm ideas and correct grammar. I think AI has boosted my efficiency a lot in finishing coursework (e.g., I use AI to help me find references and polish my grammar and structure). But I believe that if I just copy and paste without any editing, it is hard to learn from it, so I never do it.",
+    "kc": 241,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "The guidelines were not very clear at my school. The main expectation was simply that we should not use AI to write our essays. My own understanding s that AI was fine as a research or thinking tool, as long as the actual writing and ideas were mine",
+    "kc": 127,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Chinese",
+    "kc": 127,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Chinese, English",
+    "kc": 127,
+    "ctx": ""
+   }
+  ],
+  "canvas": [],
+  "final": [
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "其实这个haichen这段不是本意，我没想这样写。只是说改一下wealthy的那个例子，我还是想focus在这个项目上的",
+    "kc": 171,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我是不是还需要加什么header之类的东西",
+    "kc": 43,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这两篇你觉得我能交吗，都是我手写的，不过我挺怕被识别成ai的，第一篇是有ai帮我找reference",
+    "kc": 138,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "liang pian",
+    "kc": 138,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "18. Were you encouraged to use generative AI in the classroom? What were the guidelines or expectations?\n这个我怎么写比较好？",
+    "kc": 153,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "就是很模糊，这块。就是别用AI写文章就行了，Google doc有那个trace吗不是",
+    "kc": 153,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这咋写啊",
+    "kc": 21,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "帮我看一下这个worksheet是否是根据教科书完成的，给出你的理由和修改建议",
+    "kc": 247,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "你帮我OCR成电子版，加上问题，图片的问题不需要OCR",
+    "kc": 247,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这个location C是不是错了",
+    "kc": 31,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "El Nino重写了一遍，这个有什么解法吗？",
+    "kc": 49,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "deepseek API便宜还是qwen API便宜？\n最便宜的是哪个？",
+    "kc": 88,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "I usually use AI to help me brainstorm ideas and correct grammar. I think AI has boosted my efficiency a lot in finishing coursework (e.g., I use AI to help me find references and polish my grammar and structure). But I believe that if I just copy and paste without any editing, it is hard to learn from it, so I never do it.",
+    "kc": 241,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "The guidelines were not very clear at my school. The main expectation was simply that we should not use AI to write our essays. My own understanding s that AI was fine as a research or thinking tool, as long as the actual writing and ideas were mine",
+    "kc": 127,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Chinese",
+    "kc": 127,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Chinese, English",
+    "kc": 127,
+    "ctx": ""
+   }
+  ]
+ },
+ "2026-06-05": {
+  "ax": [
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "ok",
+    "kc": 4,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "123",
+    "kc": 3,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Z",
+    "kc": 24,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "J",
+    "kc": 24,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Joy",
+    "kc": 24,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "ikeyrent",
+    "kc": 23,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "https://www.ikeyrent.com",
+    "kc": 23,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mei w t",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mai ge c",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mai ge can",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你fa shao",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "gemini 3 做视频分析很强啊，反应很快，Google的GUI做的很不错",
+    "kc": 135,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "基本上我问一些日常的问题都是gemini",
+    "kc": 135,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "那我就不知道了，",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ni tian",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "单看模型的话，除了coding都挺不错的",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "脱敏jiu hao l",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "他骂你你也不会",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "他骂你你也不会和他继续了",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "quick question和固定化的一些视频图片任务还可以，每个ai有自己的te d",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "那你问Claude啊",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我一般问Gemini就是“这首歌的背景怎么样",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我的",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "就是你有什么问题就问",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "取长补短啊",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这个转的挺快，而且有Google的sheng tai",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这个转的挺快，",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "大多数人都很喜欢",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "notebookLM",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "g mai l",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我觉得notebookLM是大加分",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我当时啥ai啥模型都不懂",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "用notebookLM硬啃attention",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ken xia lai",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我就拿那个k n",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ting bu cuo d",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "shuo shi h",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "反正总的来说就是都有te dian",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你得抓住mei",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "看你怎么yo",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "总结",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "苹果mou xie",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "苹果的API可以监听到用户的输入法吗现在？",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "xiang",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "删s m",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会选中输入法（在后台），然后用户输入什么，app就输入什么，用户删什么，app就删什么，zhe y",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "librime这个是一个输入法吧，我想在不干扰用户的前提下做，这个是需要用他们的那个输入法，有点烦\n还有就是如果我用canvas，比如说google doc这类的，这类文字是实时渲染的，这样的话AX是没用的，而且AX抓输入还是有一定的实效性，就是说他只能录到“我喜欢吃mif”总是漏最后一两个字母。",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会选中输入法（在后台），然后用户输入什么，app就输入什么，用户删什么，app就删什么，这样的话是不是可以完美监听出用户的最终输入？\n就比如说我输入“我喜欢吃米饭”，那么CGEventTap就会死“wo1xhuan1chi1mifan1\" 然后我在后台的这样的一个输入法直接模拟用户，得到原文\n你觉得怎么样",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这个是目前的pipeline，用了4层LLM过滤，你觉得有什么可以优化的地方？评价一下",
+    "kc": 237,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "ze",
+    "kc": 237,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "主要是判断这活我得交给LLM，固定逻辑很难判断说实话\n那个输入法我hen bu x",
+    "kc": 237,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "主要是判断这活我得交给LLM，固定逻辑很难判断说实话，\n我100%不想切换输入法，然后之后可能还要给日语，德语，阿拉伯语用户用，所以不能封死两种语言\n这个模型我想收集一定的数据后用这些数据去微调小模型，看看能做到一个什么程度\n现在还有一个问题就是输入法如果确定的很快的话，比如说打字很快就发出去，就不会被记录下来，有些延迟，很麻烦，所以才出此下策（用双输入法的方式）",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "OCR合成为什么那么难？用小模型会怎么样",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "Canvas其实是有keystroke的",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "可以改一下OCR逻辑其实，你说的对",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "guan",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "关SIP能不能饶过这个限制，jiu s s",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "关SIP能不能饶过这个限制，就是说。现在这个越搞越复杂，越复杂修起来越麻烦，你这个提案我就看出不少问题来。",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "AMFI（boot-arg）是什么？",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "windows上会简单不少吧",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我是想做全环境覆盖的，现在也没有一个现成的方案给我参考主要是，挺烦的。\n接着说说LLM本地化的问题：\npass1还真不能删，这个其实不是纯粹的为了给其他的pass，是为了提供一个语境供后续的writing style的一个分析。\n我在想如果有一个实时运行的LLM进行一个输入分析会不会好一点？如果可以的话你可以给我一个方案，我希望采集到的准确度yue gao yue h",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "现在github做meeting转译相关的项目做的比较好的有哪些",
+    "kc": 211,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "转译质量最高的本地部署模型和云端服务有哪些？",
+    "kc": 211,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "都是swift写的项目，用XPC",
+    "kc": 45,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我在mac上用whisperkit做转译，大概需要500m运存，如果是1.5G的v3 turbo的话\n我在想qwen为什么bu x",
+    "kc": 147,
+    "ctx": ""
+   },
+   {
+    "app": "obsidian",
+    "source": "ax_cleaned",
+    "text": "帮我push",
+    "kc": 69,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "cleanupbody",
+    "kc": 19,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "仔细研究这个项目。最终产出一个md文档，用自然语言描述这个项目，杜绝复制源代码，使用代码块进行描述（json格式和数\n据库描述除外）确保我可以把这个文档作为prompt发给一个claude code实例，然后它可以根据这个文档上的内容为我1:1完美复刻此项目。最终的文档存在/Users/joyzhang14/Desktop/Obsidian",
+    "kc": 187,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "cleanup boddy",
+    "kc": 19,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "finder",
+    "source": "ax_cleaned",
+    "text": "My-Meeting",
+    "kc": 10,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "f",
+    "kc": 96,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "jeff",
+    "kc": 96,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "jeff chang 是谁？",
+    "kc": 96,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "My-Meeting",
+    "kc": 100,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "This project is affiliated with My Portrait",
+    "kc": 100,
+    "ctx": "Browsing news articles in a web browser"
+   }
+  ],
+  "canvas": [],
+  "final": [
+   {
+    "app": "xinWeChat",
+    "source": "ax_cleaned",
+    "text": "ok",
+    "kc": 4,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "123",
+    "kc": 3,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Z",
+    "kc": 24,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "J",
+    "kc": 24,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "Joy",
+    "kc": 24,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "ikeyrent",
+    "kc": 23,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "https://www.ikeyrent.com",
+    "kc": 23,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mei w t",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mai ge c",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "mai ge can",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你fa shao",
+    "kc": 96,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "gemini 3 做视频分析很强啊，反应很快，Google的GUI做的很不错",
+    "kc": 135,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "基本上我问一些日常的问题都是gemini",
+    "kc": 135,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "那我就不知道了，",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ni tian",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "单看模型的话，除了coding都挺不错的",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "脱敏jiu hao l",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "他骂你你也不会",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "他骂你你也不会和他继续了",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "quick question和固定化的一些视频图片任务还可以，每个ai有自己的te d",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "那你问Claude啊",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我一般问Gemini就是“这首歌的背景怎么样",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我的",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "就是你有什么问题就问",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "取长补短啊",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这个转的挺快，而且有Google的sheng tai",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "这个转的挺快，",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "大多数人都很喜欢",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "notebookLM",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "g mai l",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我觉得notebookLM是大加分",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我当时啥ai啥模型都不懂",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "用notebookLM硬啃attention",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ken xia lai",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "我就拿那个k n",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "ting bu cuo d",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "shuo shi h",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "反正总的来说就是都有te dian",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "你得抓住mei",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "看你怎么yo",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "Discord",
+    "source": "ax_cleaned",
+    "text": "总结",
+    "kc": 1085,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "苹果mou xie",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "苹果的API可以监听到用户的输入法吗现在？",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "xiang",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "删s m",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会选中输入法（在后台），然后用户输入什么，app就输入什么，用户删什么，app就删什么，zhe y",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "librime这个是一个输入法吧，我想在不干扰用户的前提下做，这个是需要用他们的那个输入法，有点烦\n还有就是如果我用canvas，比如说google doc这类的，这类文字是实时渲染的，这样的话AX是没用的，而且AX抓输入还是有一定的实效性，就是说他只能录到“我喜欢吃mif”总是漏最后一两个字母。",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会选中输入法（在后台），然后用户输入什么，app就输入什么，用户删什么，app就删什么，这样的话是不是可以完美监听出用户的最终输入？\n就比如说我输入“我喜欢吃米饭”，那么CGEventTap就会死“wo1xhuan1chi1mifan1\" 然后我在后台的这样的一个输入法直接模拟用户，得到原文\n你觉得怎么样",
+    "kc": 1518,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "这个是目前的pipeline，用了4层LLM过滤，你觉得有什么可以优化的地方？评价一下",
+    "kc": 237,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "主要是判断这活我得交给LLM，固定逻辑很难判断说实话，\n我100%不想切换输入法，然后之后可能还要给日语，德语，阿拉伯语用户用，所以不能封死两种语言\n这个模型我想收集一定的数据后用这些数据去微调小模型，看看能做到一个什么程度\n现在还有一个问题就是输入法如果确定的很快的话，比如说打字很快就发出去，就不会被记录下来，有些延迟，很麻烦，所以才出此下策（用双输入法的方式）",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "OCR合成为什么那么难？用小模型会怎么样",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "Canvas其实是有keystroke的",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "可以改一下OCR逻辑其实，你说的对",
+    "kc": 1081,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "关SIP能不能饶过这个限制，就是说。现在这个越搞越复杂，越复杂修起来越麻烦，你这个提案我就看出不少问题来。",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "AMFI（boot-arg）是什么？",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "windows上会简单不少吧",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我是想做全环境覆盖的，现在也没有一个现成的方案给我参考主要是，挺烦的。\n接着说说LLM本地化的问题：\npass1还真不能删，这个其实不是纯粹的为了给其他的pass，是为了提供一个语境供后续的writing style的一个分析。\n我在想如果有一个实时运行的LLM进行一个输入分析会不会好一点？如果可以的话你可以给我一个方案，我希望采集到的准确度yue gao yue h",
+    "kc": 750,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "现在github做meeting转译相关的项目做的比较好的有哪些",
+    "kc": 211,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "转译质量最高的本地部署模型和云端服务有哪些？",
+    "kc": 211,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "都是swift写的项目，用XPC",
+    "kc": 45,
+    "ctx": ""
+   },
+   {
+    "app": "claudefordesktop",
+    "source": "ax_cleaned",
+    "text": "我在mac上用whisperkit做转译，大概需要500m运存，如果是1.5G的v3 turbo的话\n我在想qwen为什么bu x",
+    "kc": 147,
+    "ctx": ""
+   },
+   {
+    "app": "obsidian",
+    "source": "ax_cleaned",
+    "text": "帮我push",
+    "kc": 69,
+    "ctx": ""
+   },
+   {
+    "app": "Notes",
+    "source": "ax_cleaned",
+    "text": "仔细研究这个项目。最终产出一个md文档，用自然语言描述这个项目，杜绝复制源代码，使用代码块进行描述（json格式和数\n据库描述除外）确保我可以把这个文档作为prompt发给一个claude code实例，然后它可以根据这个文档上的内容为我1:1完美复刻此项目。最终的文档存在/Users/joyzhang14/Desktop/Obsidian",
+    "kc": 187,
+    "ctx": ""
+   },
+   {
+    "app": "finder",
+    "source": "ax_cleaned",
+    "text": "My-Meeting",
+    "kc": 10,
+    "ctx": ""
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "f",
+    "kc": 96,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "jeff",
+    "kc": 96,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "jeff chang 是谁？",
+    "kc": 96,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "My-Meeting",
+    "kc": 100,
+    "ctx": "Browsing news articles in a web browser"
+   },
+   {
+    "app": "Safari",
+    "source": "ax_cleaned",
+    "text": "This project is affiliated with My Portrait",
+    "kc": 100,
+    "ctx": "Browsing news articles in a web browser"
+   }
+  ]
+ }
+}

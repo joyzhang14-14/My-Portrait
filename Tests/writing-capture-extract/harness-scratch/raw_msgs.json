@@ -1,0 +1,605 @@
+{
+ "2026-05-27": [
+  {
+   "app": "claudefordesktop",
+   "keystroke": "ni1dag1neng1con<BS><BS><BS>liao<BS><BS><BS><BS>congwo1d1zheg1<BS><BS><BS>shangchuand1xinxi1zhong1liaojiewo1m1?<CR>",
+   "messages": [
+    "你大概能从我上传的信息中了解我吗？"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "w1<BS><BS>w1zai1zuo1UCI1d1writing1 plave<BS><BS>cement1 profolio<BS><BS><BS><BS>o<BS>iolio<BS><BS><BS><BS><BS>olio<BS><BS><BS><BS><BS>tfolio1，xz1zuodao1l1zheg1w<BS>cr<BS><BS><BS><BS><BS><BS><BS>yaow1shangchuan1zheg1dierg1writign1 sample1，w1buzhid1gai2zmz1<BS><BS><BS><BS><BS><BS><BS><BS>w1zhaobudao1。w1xiw1ni1neng1geiwo1chu1yig1di<BS><BS>ti1，ranh1w1zhijie1xianxie<BS><BS><BS>4xie1<CR>",
+   "messages": [
+    "我在做UCI的writing placement portfolio，现在要我上传这个第二个writing sample，我找不到。我希望你能给我出一个题，然后我直接现写",
+    "w1"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "w1zheg1qingk1hen1ganga1:<CR>AI1chuxian1zhiq1w1shi1zai1zhongg1d1gongli3chuz1,meizm1xieguo1yingwen1,gengmeiy1xieguo1<BS><BS><BS><BS><BS>zuowen1dous1laos1gei1moban1,ranh1sijiyingbei1d1<CR>AI1z<BS>chux1zhihou1w1shi1xian1qul1gongli<BS><BS><BS><BS><BS><BS>guojigaoz1<BS><BS>xuex1zg1d1,houlai1zhuandao1d1<BS>l1meiguo1,zheg1niyeshi1zhid1d1<CR>ranh1w1shi1yig1chuncun<BS>i1d1kejikuang2,likes2,suoyou1d1zhexie1w<BS>xiezuo1d1zuoye1dous1yong1AI1fuzhu1wanc1d1(kend1bus1zhij2copy1 paste1),da<BS><BS>w1fam1l1yig1ky1ziji1xie1,ranh1laos1ye1chabud<BS>chu1AI1d1<BS>d1fangfa1.jius1xianrang1<BS><BS>xian1rang1AI1xie1yibian",
+   "messages": [
+    "我这个情况很尴尬：\nAI出现之前我是在中国的公立初中，没怎么写过英文，作文都是老师给模版，然后死记硬背的\nAI出现之后我是先去了中国的国际学校，后来转到了美国，这个你也是知道的\n然后我是一个纯粹的科技狂，理科生。文科的东西一窍不通，所以所有的这些写作的作业都是用AI辅助完成的（肯定不是直接copy paste），我发明了一个可以自己写，然后老师也查不出AI的方法：就是先让AI写一遍，然后我自己再在AI写的基础上重新写一遍，换成自己的写作风格，这样既保留了google doc里面的trace，又一看就是人的风格。不过关于写作这件事，我从来没有过自己的一个独创的思考和想法。就是如果只给我一支笔，一张纸，一个题目，然后其他什么都不给我，我是从来没试过的。\n不过很反差的是，我托福写作还是4项里面最高的.\n所以总的来说，我还真不知道该怎么做",
+    "我想写我的project，做一个介绍，你觉得怎么样？",
+    "有些事情不可能写到600字，要想那种能写很多字的topic很难",
+    "w1",
+    "xiang"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "jius1My Portrait<CR>",
+   "messages": [
+    "就是My Portrait"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "<CR>ni1ky1chouyiyan1<CR><CR>jiezhe1huifa<BS><BS>da1wenti1:<CR>1.zheshi1w1diyici1yong1swift1xie1xiangmu1,yu<BS><BS>w1yuanlai1zai1yong1screenpipe<CR>,bug1fangzai1mac<CR>shang1,yunx1zheg1ru<BS>ust<CR>+tur<BS>ari<CR>h<BS>chengxu1zhijie1chidiao1l1w11G1d1yuncun2,ranh1screenpipe<CR>d1UI1he1sheji<BS><BS><BS><BS><BS><BS>w1yebus1henxih1<CR><BS><CR>ranh1w1d1bendi<BS><BS><BS><BS><BS><BS>haixiang1jia1yixie1xingongnneg1,suoyi1jiu1yo<BS><BS>lais<BS><BS><BS><BS>kais1<BS><BS><BS>conglingkais1yong1w<BS>si<BS>wift1xie1l1yig1ixn1xiangmu1<CR>2.w1wanq1meiy1xiangguo1chongx1huanfangx1,zheg1xiangmu1w1xiang1l1henj1l1,m",
+   "messages": [
+    "就是My Portrait\nhttps://github.com/joyzhang14-14/My-Portrait\n你可以瞅一眼\n接着回答问题：\n1.这是我第一次用swift写项目，我原来在用screenpipe，不过放在mac上，运行这个rust+tuari程序直接吃掉了我1G的运存，然后screenpipe的UI我也不是很喜欢\n然后我还想加一些新功能，所以从零开始用swift写了一个新项目\n2.我完全没有想过重新换方向，这个项目我想了很久了，谋划了很久\n3.如果现在重做一遍，我觉得我不会换掉哪些决定，我会绕过一些已经遇到的坑\n4.没有\n5.我不确定是否应该熬夜通宵的去做，还是说应该把节奏放缓",
+    "我感觉我不是那种很擅长捕捉小事物，这些哲学理论的人。我只是想做一个电子分身，如果我死了就可以直接顶替我"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "w1bus1<BS><BS><BS>w1bujued1nianling1shiyig1wenti1.ranh1w1jued1<BS><BS>juede1rug1na2shoujidao1d1<BS><BS><BS><BS>shouji3dao1d1shuju1qu1xunlian1AI1mox1,zheg1mox1jiu1wanq1ky1fuzhiwo1.rug1bugouhao1jius1huju1<BS><BS>shuju1bugouduo1,w1shoujige4110nian1,20nian1,zheg1ai<CR>jiuhui1hew1d1xiangfa1,shuochulai1d1hua1,yibuyi<BS><BS><BS><BS>muyiy1.w1jue<BS><BS><BS>xiangxi1<BS><BS>xiangxin1weilai1yiding1yao<BS><BS>ou1zhey1d1shuziren1fuzhi1nengli1,erq1xz1yij1you1yig1<BS><BS>hendo1<BS><BS>henduo1ren1zai1zuo1l1.<BS>,zhishi1shuju1bugoudon<BS><BS>uo1.<CR>",
+   "messages": [
+    "我不觉得年龄是一个问题。然后我觉得如果拿收集到的数据去训练AI模型，这个模型就完全可以复制我。如果不够好就是数据不够多，我收集个10年，20年，这个ai就会和我的想法，说出来的话，一模一样。我相信未来一定有这样的数字人复制能力，而且现在已经有很多人在做了，只是数据不够多。"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": ",ranh1shuchu1json<CR>ges1d1chaifen4baogao1<CR>ranh1jieu<BS>duan14jiu1zhijie1kais1bianji1jimukuai1,meige1jii<BS>mukuaizhong1tian2xinxi1<CR>ranh1yonghu1qinzi1qu1pao1(zanshi1<BS><BS>zan<BS><BS><BS>ceshijieduan1(<BS>)kanyixia1shengche<BS>an1chu1d1went1youe<BS>meiy1went1,shengchen1lantu1,qan<BS><BS><BS>qianduan1keshihua1zhanshi1,houduan1zuo1chucun1<BS><BS>s<BS>json<CR>geshi1wenjian1d1chucun1,chucun1lantu1,zhihou1ky1zai1<BS><BS><BS><BS><BS><BS>.<BS>.zhihou1ky1zai1<BS>zai2qianduan1fenxi1<BS><BS>qiehuan1lantu1,shengg<BS>c1butong1fengge1d1ship1<CR>ranh1agent15genj1<BS><BS><BS><BS><BS><BS><BS><BS><BS><B",
+   "messages": [
+    "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样\n阶段12先拆分视频，然后输出json格式的拆分报告\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，不填图片，生成蓝图，前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标\n然后用户亲自去跑（测试阶段）看一下生产出的问题有没有问题"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "<BS><BS>gongyu1,shuju1chucun1zai1  diaochu1u<BS>tup1,xuy1neng1kandong1tup1,ranh1tian1zai1duiying1d1weizhi1yongyu1tup1d1shengc1<CR><BS><BS>jied<BS><BS><BS><BS><CR>jieduan15,agent1hui1gongyu1d1,ranh1weitiao1prompt1,quebao1lantu1ky1yongyu1zheg1gongyu1<CR>d1mox1,zheb1you1sonnet1,<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>w1qingxiang1claude1 sonnet1(bu1100%queding1nbn1kandong1tup1)zheg1mox1,zheg1lantu1bu1baocui<BS>n1,zhijie1yunx1,<BS><BS><BS><BS><BS>ranh1agent1hui1zhijie1pao1zheg1lantu1,chanchu1d1neir1you<BS><BS><BS>jiaogei1yonghu1shenhe1,fangdao1qianduan1d1shenhe1qu2ky1gei1<BS>liu1yixie1kong1zhihou1d",
+   "messages": [
+    "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样\n阶段12先拆分视频，然后输出json格式的拆分报告\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，不填图片，生成蓝图，前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标公寓，数据储存在\n然后用户亲自去跑（测试阶段）看一下生产出的问题有没有问题",
+    "我希望是n8n的那种ui，然后再配合上你这个ui，工作流里的积木块可以点开查看prompt\n然后就不给skills了，就让ai去排这个积木块，然后给积木块里面填写prompt和图片\n和我一开始的构想一样：\n先用apify找到爆款视频（ins点赞量大于1000，评论数大于50），然后把视频下载下来，mp4格式\n阶段12先拆分视频，然后输出json格式的拆分报告\n使用gemini（可以直接读视频数据，不需要拆分）进行4个阶段的视频提炼\n3.1 pro模型stage1：逐秒分析\n3.5 flash模型stage2: 镜头分组\n然后阶段4就直接开始编辑积木块，每个积木块中填prompt，可以留一些空之后的agent可以往里填信息，不填图片，生成蓝图。前端可视化展示，后端做json格式文件的储存，储存蓝图。之后可以在前端切换蓝图，生成不同风格的视频\n然后用户选中目标公寓，数据储存在/Users/joyzhang14/Projects/Valis/valis-vcd/data/mockdata/default\n阶段5，agent会调出公寓的图片，需要能看懂图片的模型，我倾向Claude sonnet（不100%确定这个模型能不能看懂图片），然后填在对应的位置用于图片的生成，然后微调prompt，确保蓝图可以用于这个公寓，这个蓝图不保存，然后agent会直接跑这个蓝图，产出的内容交给用户审核，放到前端的审核区http://localhost:5173/admin/content-review\n然后用户审批之后发布，pipeline完全走通\nnote：所以说积木块不需要很复杂，纯粹为了视频内容生成",
+    "p s"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zhes1zaina1d1tup1<BS><BS><BS><BS><BS>sm1tup1,zai1<BS><BS><CR>",
+   "messages": [
+    "这是什么图片"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "wriging1 okace<BS><BS><BS><BS><BS>place1ment<CR>",
+   "messages": [
+    "writing placement"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "google<CR> doc<CR><CR>",
+   "messages": [
+    "google doc"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "<CR>5555<CR><CR>mmiinnggtt1<CR>jid1<CR>jint1meili<BS>ai1<CR>w1jint1zaos15dian1shuide1<CR>zhunq1laiss1166ddiiaann11<CR><CR>w1d1app<CR>zhongyyuu11zzuuoohhaaooll11<CR><CR>bbuugg11zzhhiyou1mmaacc<CR><CR>bbaannbbeenn11<CR><CR>mmeeii11<BS>a<BS>a<BS>haimeizuo11sshhoouujjiibbaann11<CR><CR>e<BS>zhejit1jibs1meit1jiu1chi1yyiidduunnffaann11<CR><CR>ranh1bushuij1<BS><BS><BS>shuiddee11hheennsshhaaoo11<CR><CR>qichong1<BS><BS>qichuuaanngg11jjiiuuss11zzuuoo11<CR><CR>meis1,yyeess11zzuuoowwaannllee11<CR><CR>jin<BS><BS><BS>zuot1jint1s<BS>xiu1l11yyiixxiiaa11bbuugg<CR><CR><CR><CR>wwttbbdd11<CR><CR>kend1shi1haiyy11bb",
+   "messages": [
+    "55",
+    "ming t",
+    "ji d",
+    "准确来说6点",
+    "今天mei li",
+    "我今天早上5",
+    "我的app终于做好了",
+    "不过只有mac版本",
+    "还没做手机版",
+    "这几天基本上每天就吃一顿饭",
+    "然后睡的很少",
+    "起床就是做",
+    "没事，也是做完了",
+    "昨天今天修了一下bug",
+    "问题不大",
+    "肯定是还有bug的",
+    "不过我没发现",
+    "没发现就继续用呗",
+    "赛博永生",
+    "数字人化身",
+    "如何呢",
+    "不过这个是v1版本",
+    "之后有新想法肯定会更新",
+    "zhi bo guo",
+    "还好了",
+    "我做了多层ya suo",
+    "20天的数据只有6个G",
+    "你可以买外接硬盘",
+    "之后还会优化的",
+    "如果算上1个月7G",
+    "z m",
+    "那12月就是84G",
+    "你买一个2T的硬盘",
+    "能存好几年数据"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "sha1<CR>meikandong1<CR>",
+   "messages": [
+    "sha",
+    "mei kan d"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "shima1<CR><CR>",
+   "messages": [
+    "shi ma"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "writtiinngg111   sssaaammmpppllleee111   222<BS><BS><BS><BS>22<BS><BS>  22<BS><BS><BS><BS><BS><BS>SS11\u001c\u001c<BS><BS>\u001d\u001d\u001d\u001d\u001d\u001d\u001d<BS>",
+   "messages": [
+    "writingample 2",
+    "writingSample2"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "irvine<BS>irvine",
+   "messages": [
+    "irvine"
+   ]
+  },
+  {
+   "app": "Notes",
+   "keystroke": "<BS>OCR1youhua1,dang1AX1<BS><BS>ng1period1d1<BS><BS>qiz1<BS><BS>qizhong1yig1AX1shuliang1xiaoyu1<BS><BS>*10 ,<BS><  <BS>typing1 <BS>event1d1shih1，nag1OCR1d1s<BS>wenzi1quanbu1dou1baoliu1<CR>ranh1ps<BS>ass<CR>1youhua1：xz1w1kan1beijing1shi1tongg1wenzi1lai1p<BS>fenlei1d<BS><BS><BS>fenpei1d1<CR>birus1:ww11sshhuuoo11\"\"\"\",,ai<CR>fenxi1d1context1shi1<BS>shi3:\"\"\"\",erbus1,xuy1gaicheng1yong<BS><BS><BS><BS>chuncui1yong1OCR1lai1shibie1period1d1,rah1rug1period<BS><BS><BS><BS><BS><BS>shi1AX1shuliang1><BS>*10><BS> > <BS>= typing1 event1d1shih1，ng1period1d1OCR1wenzi1zhi3baoliu1100ge1，zuiduo1\"user1 is<CR> chatti",
+   "messages": [
+    "OCR优化，当其中一个period的AX数量*10 < typing event的时候，那个OCR的文字全部都保留 然后pass1优化：现在我看背景是通过文字来分配的\n比如说：我说“能存好几年数据”，ai分析的context是：“",
+    "oc",
+    "OCR优化，当其中一个period的AX数量*10 < typing event的时候，那个period的OCR的文字全部都保留，然后如果是AX数量*10 >= typing event的时候，那个period的OCR文字只保留100个，最多 \n然后pass1优化：现在我看背景是通过文字来分配的，需要改成纯粹用OCR来识别\n比如说：我说“能存好几年数据”，ai分析的context是：“Says it can store years of data”，而我希望是“user is chatting on discord”\n\n加pass3:\n给pass3传入之前标记为“失败”的案例，而不是给pass2传，然后给让pass3分辨这个period的typing event能不能支撑出user打这些字。如果是不行的话就在这一步筛掉\n就是pass1过滤ocr的垃圾数据（保留用户输入数据）+生成context（根据app和OCR识别到的背景）\npass2正式进行转译优化+合并session\npass3做最后的过滤\n接着呈现给用户"
+   ]
+  }
+ ],
+ "2026-05-28": [
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zheg1pipeline1h<BS>shi1he1vos<CR>youguan1,he1vcd<CR>wuguan1..aappiiffyy<CR><CR>jiaoben1zai1vcd<CR>zhong1yij1shixian1l1,,zzhhiijjiiee11yyaannyyoouu<BS>ng1_<BS><BS>+gaijin1jike1<CR>prompt1agent112d1,w1yij1jiluyi<BS><BS>xialail1,zh<BS><BS>bangw1z<BS>zhijie1zhanshangqu<BS><BS><BS><BS><BS><BS><BS>t1z<BS>shangq1jiuhao1l1.<CR>.<CR>ggaaiiyyiiggaaii11,agebt<BS><BS>b<BS>nt14d1prompt1xie1xiangxiyidian1<CR>checkpoint1buyongshezhi1,zhijie1yikouqi1zuowan1jiuhao1l1<CR><CR>blokc<BS><BS>ck1xuy1xied1e<BS>gengxiangxi1i<BS>yixie1<CR><CR><CR><CR><CR><CR><CR><CR>zhijie1geiw1shengc1yig1md<CR>wendang1jike1<CR><BS><BS",
+   "messages": [
+    "这个pipeline是和vos有关，和vcd无关。\napify脚本在vcd中已经实现了，直接沿用+改进即可。\nagent12的prompt，我已经记录下来了，改一改，帮我直接粘贴上去就好了。\nagent4的prompt写详细一点\nblock需要写的更详细一些\ncheckpoint不用设置，直接一口气做完就好了",
+    "这个pipeline是和vcd有关，和vos无关。\napify脚本在vcd中已经实现了，直接沿用+改进即可。\nagent12的prompt，我已经记录下来了，改一改，帮我直接粘贴上去就好了。\nagent4的prompt写详细一点\nblock需要写的更详细一些\ncheckpoint不用设置，直接一口气做完就好了\n\n直接给我生成一个md文档即可"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "<CR>xz1kym1<BS>l1m1?<CR>po<BS>ipeline1<BS><BS><BS><BS><BS>piep<BS><BS>peline Agaiw1xz1d1paqu33+lantu1zhizuo1<CR>ky1queren1<BS><BS>chaxun1queren1<CR>ky1w1lai<BS><BS><BS><BS>w2lai1xiazai1,rug1nineng1xiaa<BS>zai1shi1zuihao1d1l1<CR>sonnet14.6,xz1meiy14.7<CR>ky1shengji1SDK1ming2<CR>queding1<CR>,buyong1ASK<BS>R1<CR>\u001f<BS>ky1qin<BS>angzhi1chongmianb<BS><BS><BS><BS><BS>bianma<BS><BS><BS><BS><BS><BS>4bianma1<CR>d<BS>tashuo1<CR><CR>nniisshhuuooddee11dd11uuii<BS><BS><BS>dd1<BS>dui1,<CR>..<CR><CR>w1xiw1pipeline1A1ky1she<BS><BS><BS>jia1<BS>s<BS>yit<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>",
+   "messages": [
+    "现在可以了吗？",
+    "p撇里呢",
+    "pipeline A改为现在的爬取+蓝图制作\n可以查询确认Beatoven.ai\n可以我来下载，如果你能下载是最好的了\nsonnet4.6，现在没有4.7\n可以升级SDK名\n确定，不用ASR\n可以强制重编码",
+    "pipeline A改为现在的爬取+蓝图制作\n可以查询确认Beatoven.ai\n可以我来下载，如果你能下载是最好的了\nsonnet4.6，现在没有4.7\n可以升级SDK名\n确定，不用ASR\n可以强制重编码\n你说的的对，Runner 跑起来后会在 work_dir 写 snapshot 用于失败恢复。",
+    "我希望那就把pipeline A做一个单独的页面吧，放在operation板块下，里面的Pipeline A 就是直接跑apify+三个agents\n然后加上通道，可以单独选择Pipeline A - Apify，Pipeline A - 1, Pipeline A - 2, Pipeline A - 3，",
+    "定时任务这个可以，反正有停止按键\n关于operations，板块如图所示",
+    "Pipeline A",
+    "er",
+    "然后",
+    "每次都"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "k<BS>yicix1zuow1b1<CR>",
+   "messages": [
+    "一次性做完吧"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "shan3lao1<BS><BS><BS>ni1tiaoguo1<BS><BS><BS><BS><BS>zhaod1，zheg1xuyw1ziji1tian1shim1<CR>ba2beatoven<CR>xian1jinyong2b1,x<BS>zans1yo<BS><BS><BS><BS>zanshi2yongbuliao1.ranh1w1<BS>ces1d1hua1yong1<BS>xian1tiaoguo1apify<CR> api<CR>,nibangw1yong1m<BS>muq1d1pipeline1ceshi1yixia1,ceshi1wenjian1zai1",
+   "messages": [
+    "删老",
+    "你跳过",
+    "ba",
+    "把beatoven先禁用吧，暂时用不了。然后测试的话先跳过apify api，你帮我用目前的pipeline测试一下，测试文件在"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "<BS><BS>zzhhaaoodd11，，zzheg1xuyw1ziji1tian1shim1<CR>",
+   "messages": [
+    "VALIS_BEATOVEN_API_KEY= 我没在env里面找到，这个需要我自己填是吗"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "kys<BS>1shishi1<BS><BS><BS><BS><BS>0.38shibus1youdiandi1<CR>haiyig1s<BS><BS><BS><BS>huanyig1shsh<BS><BS>ishib1<CR>",
+   "messages": [
+    "换一个试试吧",
+    "可以试试",
+    "0.38是不是有点低"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "ok<CR><CR>",
+   "messages": [
+    "ok"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "hhaaiimm<BS><BS><BS><BS><BS><BS><BS><BS>hhaaiimmeeiihhaaoo11mm11<CR><CR>hhaaiimmeeiihhaaoo11mm11<CR><CR>haimeihao1?<CR>",
+   "messages": [
+    "还没好？",
+    "haim",
+    "还没好吗"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "writing sample",
+   "messages": [
+    "writing sample"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "xie<BS><BS><BS>15fz<BS><BS>fz1，xieb<BS>d1bus1henh1b1<CR>",
+   "messages": [
+    "15分钟，写的不是很好吧"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zmy<BS><BS><BS>zmy<BS>s1？<CR>",
+   "messages": [
+    "怎么说？"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "beatoven<CR>.ai<CR>",
+   "messages": [
+    "beatoven"
+   ]
+  },
+  {
+   "app": "Notes",
+   "keystroke": "x<BS><CR>xz1shub1hover1zai1xiaoxi1shang1d1shih1hui1rang1xiaoxi1xiahua1,youge1donghua1,zheg1shi<BS>eji1shizai1shi1tai1goushi1l1,shandiao1b1<CR>xz1shuruk1meibanf1da1chang3wen1,rug1chaohu<BS><BS>chul1shuruk1d1xianzhi1xuy1jia1yig1gunlun1<CR>xz1light1mos1xia1memory1zai1input1jiemian1hais1hui<BS><BS><BS><BS><BS>,zhongj1hais1huise1zhuagt1,meiy1quanb1gaiwan1UI<CR>\u001f<BS>",
+   "messages": [
+    "现在鼠标hover在消息上的时候会让消息下滑，有个动画，这个设计实在是太狗屎了，删掉吧\n现在输入框没办法打长文，如果超出了输入框的限制需要加一个滚轮\n现在light模式下memory在input界面，中间还是灰色状态，UI没有全部改完"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "w1<BS>w1yongni1seedance<CR>yuud<BS><BS>e<BS><BS>uepao1yix1ceshi1<CR>xiw1shi1goude2<CR>",
+   "messages": [
+    "我用你seedance余额跑yi x",
+    "希望是gou de"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "qun1<CR>kk1<CR>pipeline1e<BS>eee<BS><CR>tongle<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>",
+   "messages": [
+    "qun",
+    "k k"
+   ]
+  },
+  {
+   "app": "xinWeChat",
+   "keystroke": "quanzidonghua1zhuaqu1<BS><BS>zhuqu<BS><BS>aqu3+zhizuo1ship1.<BS>,muq1d1went1shi1gongyu1wangzhan1zhua1d1sucai1g<BS>bugou1<BS><BS>,<BS>\u001d<BS>,shengcheng1tongyong1moban1,a<BS>ranh1<BS>.,paotog1d1,zhizuoship1d1genj1y<BS>gongyufang24sucai1<BS>!bus1hengou1,gei1dao1ship1zhizuo1zheg1,ru<BS><BS>zheg1ship1shiw1nengzhaodao1zi<BS><BS>zuifuhe1d1le1hh3,zhiyou173%d1fuhe1<BS><BS>pipeidu1<BS><BS><CR>zhes1zheg1pipeline1diyig1shengc1d1ship1,yongd1sua<BS>cai1shi1ins<CR>shang13000<BS><BS><BS><BS>paimingdiyi1d1yig1ship1d1geshi1dreamhouse<CR>zheg1hashtag<CR><BS><BS><BS>,ranh1shengcheng1chu1d1moban1,zuihou1to<BS><BS><",
+   "messages": [
+    "￼￼全自动化的，抓取，生成制作视频的通用模版，然后根据公寓方素材制作视频，跑通！目前的问题是公寓网站抓的素材不是很够，给到这个视频制作，这个视频是我能找到最符合的了，只有73%的匹配度",
+    "这是这个pipeline第一个生成的视频，用的素材是ins上dreamhouse这个hashtag排名第一的视频格式，然后生成出的模版，最后用公寓那边能爬到的数据做的视频"
+   ]
+  },
+  {
+   "app": "xinWeChat",
+   "keystroke": "zheg1meibanf1,meibanf1yicix1zuochu1yitiaon<BS>1neir1,rug1fangzhao1bieren1d1hua1,renj1dous<BS><BS><BS><BS><BS><BS>renj2ship1dous11min<CR>qibu1<CR>",
+   "messages": [
+    "这个没办法，没办法一次性作出一条内容，如果仿照别人的话，人家视频都是1min起步"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "<BS><BS>",
+   "messages": [
+    "v1.1.0"
+   ]
+  }
+ ],
+ "2026-05-29": [
+  {
+   "app": "claudefordesktop",
+   "keystroke": "qis1zheg1haichen<CR>zheduan1bus1benyi1,ers1<BS><BS>w1meixiangzhey1xie1.zhe<BS>is1shuo1gaiyixia1wealthy1d1ng1lizi1,zheg1haichen<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>,w1hais1xing<BS><BS>ang1foc<BS>cus1zai1zheg1xiangmus1d1<CR>",
+   "messages": [
+    "其实这个haichen这段不是本意，我没想这样写。只是说改一下wealthy的那个例子，我还是想focus在这个项目上的"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "w1shibus1haixuy1jia1sm1header1zhilei1d1dx1<CR>",
+   "messages": [
+    "我是不是还需要加什么header之类的东西"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zhe1liangpian2nijued1w1nengjiao3m1,dous1w1shouxied1,bug1w1tingpa1bei1<BS>ei<BS><BS>bei3shibiec1ai<CR>d1,diyip1<BS>ppian2shi1you1ai<CR>bangw1zhao1reference1<CR>",
+   "messages": [
+    "这两篇你觉得我能交吗，都是我手写的，不过我挺怕被识别成ai的，第一篇是有ai帮我找reference",
+    "liang pian"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "<CR><CR>zheg<BS><BS><BS><BS>zheg1w1yin<BS><BS><BS>zm1xie1bijh1？<CR>jius1hen1mok<BS>hu1,zhekuai1,<BS>,<BS>.jius1bie1rang1<BS>quan1yo<BS><BS><BS>yong1AI1xie1wenz1jiux1l1,google1 doc<CR>you1ng1trace1m1bis<BS><BS>us1<CR>",
+   "messages": [
+    "18. Were you encouraged to use generative AI in the classroom? What were the guidelines or expectations?\n这个我怎么写比较好？",
+    "就是很模糊，这块。就是别用AI写文章就行了，Google doc有那个trace吗不是"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zhe<BS><BS><BS>zhezaxie1d1<BS>a1<CR>",
+   "messages": [
+    "这咋写啊"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "jioa<BS><BS><BS><BS>jioakeshu<BS><BS><BS><BS><BS><BS><BS>aokeshu1<BS><BS><BS><BS>bangw1kanyixia1zheg1worksheet1shig<BS>f1shi1genj1zheg1<BS><BS>jioak<BS><BS><BS>aokeshu1wac1<BS><BS>wancheng1d1,e<BS>gechu<BS><BS><BS>ichu1id<BS><BS>nid1liyou1he1xiu<BS><BS><BS>xiugaijianyi1<CR>ni1bangw1OCR1cheng1dianziban1b1<BS>,jias1went1,tup1d1buxuy1OCR1\u001c\u001c\u001c\u001c\u001c\u001cwent1<CR>",
+   "messages": [
+    "帮我看一下这个worksheet是否是根据教科书完成的，给出你的理由和修改建议",
+    "你帮我OCR成电子版，加上问题，图片的问题不需要OCR"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zheg1location1 C1shibus1cuole1<CR>",
+   "messages": [
+    "这个location C是不是错了"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "El<CR> Nino<CR>chongxie1l1yibian1,zheg1yousm1jiefa1m1?<CR>",
+   "messages": [
+    "El Nino重写了一遍，这个有什么解法吗？"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "deekseek<BS><BS><BS><BS><BS>pd<BS>seek<CR>p<BS> API1pianyi1hais1qwen<CR> API1q<BS>py1?<CR>youmei<BS><BS><BS><BS><BS><BS>zuipiany1d1shing2?<CR>",
+   "messages": [
+    "deepseek API便宜还是qwen API便宜？\n最便宜的是哪个？"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>II  bbeelliieve that if I <BS><BS>people, <BS><BS> (e.g\u001d I used Ai<BS>I to help me find references <BS>, , use <BS><BS><BS><BS><BS><BS>; <BS>I <BS><BS><BS><BS> <BS>, make the <BS><BS><BS><BS><BS><BS><BS><BS><BS>polih<BS>sh my gramea<BS><BS>mar,  nad <BS><BS><BS><BS>and structor<BS><BS>ure<BS><BS><BS><BS><BS><BS>I<BS>, si<BS>o I never do it.<BS>. ",
+   "messages": [
+    "I usually use AI to help me brainstorm ideas and correct grammar. I think AI has boosted my efficiency a lot in finishing coursework (e.g., I use AI to help me find references and polish my grammar and structure). But I believe that if I just copy and paste without any editing, it is hard to learn from it, so I never do it."
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": ".<BS>\u001c<BS><BS><BS><BS><BS><BS><BS><BS><BS>iChinesseeChinesseeChinese, Engil<BS><BS>lli<BS><BS>ishChinese <BS>, English",
+   "messages": [
+    "The guidelines were not very clear at my school. The main expectation was simply that we should not use AI to write our essays. My own understanding s that AI was fine as a research or thinking tool, as long as the actual writing and ideas were mine",
+    "Chinese",
+    "Chinese, English"
+   ]
+  }
+ ],
+ "2026-06-05": [
+  {
+   "app": "xinWeChat",
+   "keystroke": "ok<CR><CR>",
+   "messages": [
+    "ok"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "123",
+   "messages": [
+    "123"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "ZZZ<BS><BS><BS>JJJ<BS><BS><BS>JJJooy<CR>",
+   "messages": [
+    "Z",
+    "J",
+    "Joy"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "ikeyrent<CR><CR>ikey<CR>ins<CR><BS><BS><BS><BS>",
+   "messages": [
+    "ikeyrent",
+    "https://www.ikeyrent.com"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "w1zhid1<CR>meiwt1<CR>mmaaiiggeeccaann11<CR><CR>nnii1fashao1<CR><CR><CR>",
+   "messages": [
+    "mei w t",
+    "mai ge c",
+    "mai ge can",
+    "你fa shao"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "gemini<CR> 3 zuo2ship1fenxi1henqiang1a1,xz1<BS><BS>fanyin1henkuai1,googol<BS><BS><BS>gle1d1GUI1zuod1h<BS>henbuc1<CR>jibs1w1f<BS>wen1yixie1ric1d1went1dous1gemini<CR><CR>",
+   "messages": [
+    "gemini 3 做视频分析很强啊，反应很快，Google的GUI做的很不错",
+    "基本上我问一些日常的问题都是gemini"
+   ]
+  },
+  {
+   "app": "Discord",
+   "keystroke": "naw1jiubuzd1l1,w1meiyudaoguo1<CR><CR>nit1<BS><BS>nitian1<CR>dankan71mox1d1hua1,chule1coding1dou1tingbuc1d1shuoshih1<CR>tuomin1jiuhaol1<CR>ta1ma8nnii11nniiyyeebbuuhhuuii11hheettaa11jjiixxuu11ll1<CR>w1<BS>quick1 question1he1gudinghua1d1yixie1sshhiipp11ttuubb11<BS><BS><BS>tub<BS>p1renwu1<BS><BS>renwu2haiky1,meige1ai<CR>you1ziji1d1ted1<CR>nnaanni1wen1lc<BS><BS>claude1a1<CR>w1<BS>w1yiban1<BS><BS>yiban2wen1gemini1jius1\"sm<BS><BS>Y<BS>zheshouge1d1beij1zmy1\"<CR>w1d1<BS><BS>w1d1yisi1<CR>jius1ni1you1sm1went1jiu1wen1tedingderen1<CR>q<BS>quchangbuduan1a1<CR>zhuan<BS><BS><BS><BS><BS>zheg1zhuan2d1tingkuai1,",
+   "messages": [
+    "那我就不知道了，",
+    "ni tian",
+    "单看模型的话，除了coding都挺不错的",
+    "脱敏jiu hao l",
+    "他骂你你也不会",
+    "他骂你你也不会和他继续了",
+    "quick question和固定化的一些视频图片任务还可以，每个ai有自己的te d",
+    "那你问Claude啊",
+    "我一般问Gemini就是“这首歌的背景怎么样",
+    "我的",
+    "就是你有什么问题就问",
+    "取长补短啊",
+    "这个转的挺快，而且有Google的sheng tai",
+    "这个转的挺快，",
+    "大多数人都很喜欢",
+    "notebookLM",
+    "g mai l",
+    "我觉得notebookLM是大加分",
+    "我当时啥ai啥模型都不懂",
+    "用notebookLM硬啃attention",
+    "ken xia lai",
+    "我就拿那个k n",
+    "ting bu cuo d",
+    "shuo shi h",
+    "反正总的来说就是都有te dian",
+    "你得抓住mei",
+    "看你怎么yo",
+    "总结"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "pg1xz1ky1jianting1d<BS><BS><BS><BS><BS><BS><BS>nnoo<BS><BS><BS><BS>mmoouuxxiiee11<BS><BS><BS><BS>dd11AAPI1ky1jiantingdao1yonghu1s<BS>d1shurufa1m1xz1?<CR>w1xiangzuo1yig1xa<BS>iangmu1b<BS>m<BS>,baw1s<BS>d1shru1wanmeif<BS>d1fukechulai1,<BS>,w1youyigsil1,e<BS>geiinniijjiiaannggjjiiaanngg11<CR><CR>jjiiuussss1dag1<BS><BS>dang1yonghu1zai1u<BS>xunzhong<BS><BS><BS><BS><BS><BS>anzhong1moue<BS>ge1shuru1fa2d1shih1,jiu1<BS>w1dd11aapppp<CR><CR>yyee11hhuuii11xxuuaannzzhhoonngg11sshuruf1(zaihoutai1),ranh1yonghu1shuru1sm1,app<CR>jiu1shuru1sm1,yonghu1shan3<BS>shan4sm<CR><BS><BS>sm2<BS><BS>s<BS>shan1sm1,app<CR>j",
+   "messages": [
+    "苹果mou xie",
+    "苹果的API可以监听到用户的输入法吗现在？",
+    "xiang",
+    "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会",
+    "删s m",
+    "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会选中输入法（在后台），然后用户输入什么，app就输入什么，用户删什么，app就删什么，zhe y",
+    "librime这个是一个输入法吧，我想在不干扰用户的前提下做，这个是需要用他们的那个输入法，有点烦\n还有就是如果我用canvas，比如说google doc这类的，这类文字是实时渲染的，这样的话AX是没用的，而且AX抓输入还是有一定的实效性，就是说他只能录到“我喜欢吃mif”总是漏最后一两个字母。",
+    "我想做一个项目，把我的输入完美的复刻出来，我有一个思路，给你讲讲\n就是说当用户在选中某个输入法的时候，我的app也会选中输入法（在后台），然后用户输入什么，app就输入什么，用户删什么，app就删什么，这样的话是不是可以完美监听出用户的最终输入？\n就比如说我输入“我喜欢吃米饭”，那么CGEventTap就会死“wo1xhuan1chi1mifan1\" 然后我在后台的这样的一个输入法直接模拟用户，得到原文\n你觉得怎么样"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "zheg1shi1muq1d1pipeline1,yongle14ceng1LLM1guolv1,nijued1yousm1ky1youhua1d1dif1?pjyix<BS><BS><BS><BS>ingj1yixi<BS><BS>xia1?<CR>zhuyaos1panduan1ze1huo1w1dei1jiaogei1LLM1,ziji1hennan1panduan1shuoshih1<BS><BS>guding1luoji1<CR>g<BS>ng1shuruf1w1henbuxi1<BS><BS><BS>",
+   "messages": [
+    "这个是目前的pipeline，用了4层LLM过滤，你觉得有什么可以优化的地方？评价一下",
+    "ze",
+    "主要是判断这活我得交给LLM，固定逻辑很难判断说实话\n那个输入法我hen bu x"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "henbuxi1<BS><BS><BS><BS><BS><BS><BS><BS><BS>w1100%buxiang1qiehuan1shuruf1,ranh1zhihou1kn1ha<BS><BS><BS><BS>kn2haiyao1gei1riyu1,deyu1,aallaabbooyyuu11yyoonngghhuu11yyoonngg11,suoyi1buneng1fengsi2liangzhong1yuy1<CR>zheg1mox1w1xiang1shouji1<BS><BS>shouji3yidingde1shuju1hou1zhua<BS><BS><BS><BS>yong1zhexie1shuju1qu1weitiao1xiaomox1,kk1neng1zuodao1yig1sm1chengdu1<CR>xz1haiy1yig1went1jius1yonghu1d1shuru1<BS><BS><BS><BS><BS>shuruf1rug1quedinngg11dd11hheennkkuuaaii11dd11uuaa11<BS><BS><BS><BS>hhuuaa1,birus1dazi1hek1<BS><BS>henkuai1jiu1fachuqu,jiu1buhi1bei1jiluxial1,youxie1yanh<BS>chi1,e<BS>henmaf1,suoyi",
+   "messages": [
+    "主要是判断这活我得交给LLM，固定逻辑很难判断说实话，\n我100%不想切换输入法，然后之后可能还要给日语，德语，阿拉伯语用户用，所以不能封死两种语言\n这个模型我想收集一定的数据后用这些数据去微调小模型，看看能做到一个什么程度\n现在还有一个问题就是输入法如果确定的很快的话，比如说打字很快就发出去，就不会被记录下来，有些延迟，很麻烦，所以才出此下策（用双输入法的方式）",
+    "OCR合成为什么那么难？用小模型会怎么样",
+    "Canvas其实是有keystroke的",
+    "可以改一下OCR逻辑其实，你说的对",
+    "guan",
+    "关SIP能不能饶过这个限制，jiu s s"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": ".xz1zheg1yuegaoyuefuza1,yuefuza1xiuqilai1yuemaf1.<BS>,i<BS>nizheg1tida<BS><BS>an<BS><BS>an8w1jiu1kanchu1bushao1went1a<BS>lai1,<BS>.<CR>shism1?<CR>windows1shang1hu<BS><BS><BS>sang2hui1jiandan1bushao1b1<CR>w1shi1xiangzuo1quanfugai1d1,<BS>,pass<CR>1hai1zhen1bun<BS><BS><BS><BS>zhen2buneng1shan3,zheg1qis1bus1<BS><BS>bushi1weile1gei1pa<BS><BS>qia<BS>tad1pass<CR>,shiweile1chuncui1d1tig1<BS><BS>tigong1yig1yujing1gong4houxu1d1writing1 style1d1yig1fenxi1.bug1<BS><BS><BS>.\u001c\u001d<CR><CR><CR><CR>\u001e\u001ehuanjing1,xz1ye1meiy1s<BS>yig1xiancheng3d1app<BS><BS><BS>fangan1geiw1cankao1zhuyaos1,tingfand1jiez1shuoshuo1LLM1be",
+   "messages": [
+    "关SIP能不能饶过这个限制，就是说。现在这个越搞越复杂，越复杂修起来越麻烦，你这个提案我就看出不少问题来。",
+    "AMFI（boot-arg）是什么？",
+    "windows上会简单不少吧",
+    "我是想做全环境覆盖的，现在也没有一个现成的方案给我参考主要是，挺烦的。\n接着说说LLM本地化的问题：\npass1还真不能删，这个其实不是纯粹的为了给其他的pass，是为了提供一个语境供后续的writing style的一个分析。\n我在想如果有一个实时运行的LLM进行一个输入分析会不会好一点？如果可以的话你可以给我一个方案，我希望采集到的准确度yue gao yue h"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "xz<BS><BS>xz1github<CR>zuo1meeting1zhuanyi1xiangguan1d1xangm<BS><BS><BS><BS>iangmu1zuod1bij1haod1you1naxie1<CR>zhuanyi1zhiliang1zuigao1d1bendi1bushu1mox1he1yuduan1<BS><BS>yunduan1f<BS>wu<BS><BS>fuwu1you1naxie1?<CR>muq1zuiqiang1d1yunduan1fuwu1jius1shib1<CR>",
+   "messages": [
+    "xz",
+    "现在github做meeting转译相关的项目做的比较好的有哪些",
+    "转译质量最高的本地部署模型和云端服务有哪些？"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "dous1swift1xie1d1xiangmu1,yong1tongxin1zmy1?<CR>",
+   "messages": [
+    "都是swift写的项目，用XPC"
+   ]
+  },
+  {
+   "app": "claudefordesktop",
+   "keystroke": "w1zai1mac<CR>shang1yong1whisper1kit<CR>zuo1zhuanyi1,dag1yuc<BS><BS><BS>xuy1500m<CR>yuc<BS>ncun1,rug1shi11.5G<CR>d1t<BS>v<CR>3 turbo<CR>d1hua1<CR>w1zaixiang1qwen<CR>wsm1bux1<BS><BS>bune<BS><BS>xing1<CR>",
+   "messages": [
+    "我在mac上用whisperkit做转译，大概需要500m运存，如果是1.5G的v3 turbo的话\n我在想qwen为什么bu x"
+   ]
+  },
+  {
+   "app": "obsidian",
+   "keystroke": "pus<BS><BS><BS>bangw1push<CR><CR>bangw1b<BS>ba1cangku1push<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>bangw1push<CR><CR>",
+   "messages": [
+    "帮我push"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "clean <BS>up <BS>boddy<CR>",
+   "messages": [
+    "cleanupboddy"
+   ]
+  },
+  {
+   "app": "Notes",
+   "keystroke": "<BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS><BS>",
+   "messages": [
+    "仔细研究这个项目。最终产出一个md文档，用自然语言描述这个项目，杜绝复制源代码，使用代码块进行描述（json格式和数  \n据库描述除外）确保我可以把这个文档作为prompt发给一个claude code实例，然后它可以根据这个文档上的内容为我1:1完美复刻此项目。最终的文档存在/Users/joyzhang14/Desktop/Obsidian"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": " <CR>",
+   "messages": [
+    "cleanup boddy"
+   ]
+  },
+  {
+   "app": "finder",
+   "keystroke": "My-Meeting",
+   "messages": [
+    "My-Meeting"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "ff<BS><BS><BS>jjjeeeffffff<CR><CR>   chang shishe<BS><BS><BS><BS>hheeii11??<CR><CR>",
+   "messages": [
+    "f",
+    "jeff",
+    "jeff chang 是谁？"
+   ]
+  },
+  {
+   "app": "Safari",
+   "keystroke": "My-MeetiinnggAffilica<BS><BS>ate with My <BS> Portrait<BS>This porjec<BS><BS><BS><BS><BS>roject is ad. <BS><BS>",
+   "messages": [
+    "My-Meeting",
+    "This project is affiliated with My Portrait"
+   ]
+  }
+ ]
+}

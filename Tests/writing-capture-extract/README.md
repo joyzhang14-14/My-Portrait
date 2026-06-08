@@ -14,7 +14,13 @@ Python scratch 脚本,在真实库 `~/.portrait/portrait.sqlite` 上跑写作采
 | `librime-tools/cands.c` `lattice.c` | librime C 桥源码(`cands <连写拼音> <n>` 出候选;`lattice` 出 TOP+逐音节)。编译:`clang cands.c -o cands -I/opt/homebrew/opt/librime/include -L/opt/homebrew/opt/librime/lib -lrime` |
 | `PIPELINE-ALGORITHM.md` | 整条 pipeline 算法 spec(给 Claude 自己看,§12 有 A–N 退步表) |
 | `RESEARCH-ime-fix.md` | **IME 重建修复调研报告**(老靠 sonnet/新断在 gate;全本地路线=librime+选字数字+MLX消歧+防幻觉guard) |
+| `rebuild.py` | **阶段0 IME 重建核心**:event_sends_with_ts(回车检测真发送)/ reconstruct_message(残渣调和 + run级音节匹配 + 多行)/ decode_run(librime TOP + 14b 消歧)/ dedup_truncated(类4/5a)/ guard(防幻觉) |
+| `e2e_rebuild.py` / `det_test.py` / `test_rebuild.py` | A–N 端到端(接 14b 消歧)/ 确定性快测(不烧 MLX)/ 确定性单元测试 |
+| `faithful_v2.py` | **阶段0 集成全量跑**(librime+14b disambig+dedup+is_residue+8b Pass4)⚠️ 有 6 个 regression(#40-#45,见问题总集),未修 |
+| `harness-scratch/` | 完整临时文件快照:所有 dbg_*.py 消歧调试 + 早期实验脚本(run/fusion/gen_*)+ 数据 json(faithful_*/canvas_*/raw_msgs 等) |
 | `extract_compare.py` / `handtyped_audit.py` / `unifiedExtract_replay.patch` | 早期版本(历史存档) |
+
+> 📋 **所有问题/决策/约束的权威清单 + 算法详解在桌面**:`~/Desktop/写作采集-问题总集.md`、`~/Desktop/写作采集-算法详解.md`。
 
 ## 当前状态(2026-06-08):优化前检查点
 
