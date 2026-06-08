@@ -290,3 +290,30 @@ a Copy of Myself"、05-29 Notes "Natural Monopoly Analysis")。
    - 移植后必须 `swift build` 通过 + `xcodegen generate`(新增文件的话)+ 提醒用户 Xcode 重开
 4. **剩余结构性问题** #2/#3/#5:分段/合并 —— 占位符剔除、IME 闪动不当边界、演进消息合并。
 5. #7 IME 尾巴:把 librime 兜底接进 Swift(目前只 submitRaceBurst,克隆输入法已放弃,内嵌 librime 待接)。
+
+---
+
+## 12. ⚠️ 老 vs 新逐条对照发现的退步(2026-06-08,A–K)
+
+用户拿老 pipeline 产出逐条对照新 8b,发现 **11 处新 pipeline 比老 pipeline 差**(详见
+`~/Desktop/Pipeline问题清单.md`)。**之前"新 pipeline 更全"只在「碎片」维度成立;一旦涉及
+IME 输入的中文消息,老 pipeline 明显更全更准**——老的有 keystroke_log + librime 尾巴重建,
+新 harness 弱化/没接。归 5 类:
+
+| 类 | 病症 | 案例 | 根因 | 修复 |
+|---|---|---|---|---|
+| **1 IME 尾巴丢失** | 汉字没进 edit_log,截断/整条丢 | 我今天早上5(点睡的丢)/啥/没看懂/就问(特定的人丢)/大多数人都很喜欢(Google的生态丢) | Return race:拼音秒选字秒发送,350ms debounce 没快照到汉字;keystroke_log **有**原始击键可恢复 | 接 keystroke_log + librime 重建 |
+| **2 重建挑错/幻觉** | 逆天→你替;**gmail→购买了** | F/J | AxCleanup 模型挑错候选(librime #0=逆天却挑#3)/ 英文当拼音**硬造** | 击键选字序号优先;无高分候选**绝不脑补**;英文不送 librime |
+| **3 残渣泄漏** | te dian(特点)/yo(用)/你fa shao 当记录留 | E/K | 该重建没重建,is_residue 又拦不住("dian"4字母、单组拼音逃过正则) | 治本=重建,别靠 is_residue 正则补 |
+| **4 乱 event 重复/误切** | 他骂你…截断版+完整版都留 | G(ev1128) | 多消息连发边界 + endValue 截断态都当记录 | 按发送边界干净切;前缀/截断态合并取最长 |
+| **5 长文/canvas 截断** | OCR优化长文拆+截;My Portrait 随笔停"it can…" | C/D | 增量长文没合并取最长;canvas 重建漏尾窗(OCR 帧里**有**尾巴) | 同输入框连续 event 合并取最终;canvas 覆盖到最后一帧 |
+
+**最高优先级 = 把 IME 重建补回来(类 1/2/3)**,且重建**宁可保守(不全)也绝不幻觉**
+(类 2 的 J:gmail→购买了 最危险 —— 往记忆里塞用户没说的话)。这条直接抬升 §11 待办里
+"librime 兜底接进 Swift" 的优先级:它不是可选优化,是**新 pipeline 上线前必须补的能力**。
+
+**关键证据(都已验证,DB 可复现)**:
+- 尾巴在 keystroke_log:ev523 `dian1shuide1\r`(点睡的)、ev596 `sha1meikandong1`(啥/没看懂)。
+- librime 数据没错:`nitian` 候选 #0=逆天(模型却挑了 #3 你替)。
+- canvas 尾巴在 OCR 帧:`it can also be my first entrepreneurial project…`(重建却停在 it can…)。
+- 老 pipeline 全部正确重建:staged #3256/#3285/#3286/#3143/#3153 等。
