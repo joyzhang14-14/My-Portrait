@@ -4,14 +4,16 @@
 librime 候选 + 击键选字数字 = 确定性主力;MLX 仅在歧义(同音)时于候选集内消歧;
 防幻觉硬 guard:英文不送 librime;模型新增的中文必须能追溯到 librime 候选,否则回滚。
 设计依据见 Tests/writing-capture-extract/RESEARCH-ime-fix.md(R2/R4)。"""
-import subprocess, re
+import subprocess, re, os
 
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
 def cv(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip()
 HAN = re.compile(r'[一-鿿]')
 def has_han(s): return bool(HAN.search(s or ''))
 
-CANDS = "/tmp/rime-test/cands"; LATTICE = "/tmp/rime-test/lattice"
+# librime 已搬进项目(不再用 /tmp)。词库 rime/ice + ice-cands 大→gitignore;源码 rime/*.c 入库,重编见 rime/build.sh。
+_RIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rime")
+CANDS = os.path.join(_RIME, "cands"); LATTICE = os.path.join(_RIME, "lattice")
 _cc = {}; _lc = {}
 def cands(py, n=8):
     py = py.replace(" ", "").lower()

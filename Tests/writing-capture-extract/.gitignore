@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+# librime 词库(大,各机器本地准备)+ 编译产物;源码 rime/*.c + build.sh 入库
+rime/ice/
+rime/ice-cands/
+rime/cands
+rime/lattice
