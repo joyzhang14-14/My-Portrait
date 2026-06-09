@@ -73,16 +73,18 @@ def parse_picks(seg):
     return out
 
 # ---- 分类:english / incomplete / chinese ----
+# 单元完整性由部署词库判(ime_schema),不硬编码 'aeiouv' —— 换五笔/双拼/日韩方案不用改代码。
+import ime_schema as SCH
 def classify(py, picked):
     c = cands(py, 8)
     if c and c[0].lower() == py.lower():           # 信号B:rime 英文词典(attention/coding/google/gemini)
         return ('english', [])
     _, syls = lattice(py)
-    single = [s for s, _ in syls if len(s) == 1 and s not in 'aeiouv']  # 单辅音音节
+    single = [s for s, _ in syls if not SCH.is_complete_unit(s)]   # 残缺单元(g/l/x;a/e/o 在词库=完整)
     if picked is None:                              # 无选字数字(直接上屏 / 残尾)
         if len(single) >= 2:                        # gmail(g,l) / xpc(x,p,c) = 英文逐字
             return ('english', [])
-        if syls and len(syls[-1][0]) == 1 and syls[-1][0] not in 'aeiouv':  # henbux 末尾 'x'
+        if syls and not SCH.is_complete_unit(syls[-1][0]):          # henbux 末尾 'x' 残缺
             return ('incomplete', [])
         if not c or not has_han(c[0]):              # 解不出中文
             return ('english', [])

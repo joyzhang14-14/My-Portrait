@@ -16,57 +16,53 @@ con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
 cv = R.cv
 HAN = R.HAN
 
-# 合法音节表:从雾凇词库提取(每行带拼音,去重即全量),不探不存在的组合 → librime 调用数骤降。
-import glob, functools
-@functools.lru_cache(maxsize=1)
-def valid_syls():
-    s = set()
-    for f in glob.glob(os.path.join(R._RIME, 'ice', 'cn_dicts', '*.dict.yaml')):
-        for line in open(f, encoding='utf-8', errors='ignore'):
-            parts = line.rstrip('\n').split('\t')
-            if len(parts) >= 2 and parts[0] and HAN.match(parts[0][0]):
-                for syl in parts[1].split():
-                    if syl.isalpha(): s.add(syl.lower())
-    return s
-
-@functools.lru_cache(maxsize=2048)
-def syls_with_prefix(p):
-    """以击键剩余字母 p 开头的真实音节(前缀松弛:yo→yo/you/yong)。短的优先。"""
-    return tuple(sorted((s for s in valid_syls() if s.startswith(p)), key=len))
+# 方案知识(单元表/输出字符集)全部来自部署词库 —— 零硬编码,换五笔/双拼/日韩 = 换 rime 目录。
+import functools
+import ime_schema as S
 
 @functools.lru_cache(maxsize=2048)
 def syl_cands(p):
-    """p 若能整体解析成一个音节,返回其候选字集;否则 None。"""
+    """p 若能整体解析成一个编码单元,返回其候选字集;否则 None(由部署的 rime 方案决定)。"""
     if not p or not p.isalpha(): return None
     top, syls = R.lattice(p)
     if len(syls) == 1:
-        return frozenset(ch for c in syls[0][1] for ch in c if HAN.match(ch))
+        return frozenset(ch for c in syls[0][1] for ch in c if S.is_output_char(ch))
     return None
 
-def verify_tail(cont, leftover):
-    """续文 cont 逐字过击键账 leftover(字母串)。返回验证通过的尾巴前缀。"""
-    L = leftover.replace(' ', '').lower()
+def _verify_at(cont, L):
+    """从击键账 L 的当前位置逐字验证续文 cont。返回 (验证通过的尾巴, 剩余账)。"""
     out = []
     for ch in cont:
         if ch in '，。！？、…,.!? ':                     # 标点放行不消费(IME 标点不在字母账里)
             out.append(ch); continue
         if ch.isascii():
-            if L and L[0].lower() == ch.lower():
+            if L and L[0] == ch.lower():
                 out.append(ch); L = L[1:]; continue
             break
-        if not HAN.match(ch): break
+        if not S.is_output_char(ch): break               # 非本输入方案能产出的字符 = 屏幕噪声
         matched = False
         for plen in range(min(6, len(L)), 0, -1):        # 贪心:先试最长击键前缀
             p = L[:plen]
-            for syl in syls_with_prefix(p):               # 只探真实音节(词库提取)
+            for syl in S.units_with_prefix(p):            # 只探真实编码单元(词库提取)
                 cs = syl_cands(syl)
                 if cs and ch in cs:
                     out.append(ch); L = L[plen:]; matched = True; break
             if matched: break
         if not matched: break
-    # 去掉尾部悬空标点
     while out and out[-1] in '，。！？、…,.!? ': out.pop()
     return ''.join(out), L
+
+def verify_tail(cont, leftover):
+    """续文 cont 过击键账。账先剥选字数字/空格;账开头可能是 base 部分的击键(对不上尾巴),
+    用「跳过前缀」搜索:从每个偏移试验证,取验证出最长尾巴的那个锁定点。"""
+    L0 = re.sub(r'[^a-z]', '', (leftover or '').lower())
+    best = ('', L0)
+    for off in range(len(L0)):
+        tail, rem = _verify_at(cont, L0[off:])
+        if len(tail) > len(best[0]):
+            best = (tail, rem)
+        if len(tail) >= len(cont) - 2: break             # 几乎全验上了,够了
+    return best
 
 APP_PAT = {'Discord': '%iscord%', 'claudefordesktop': '%laude%', 'xinWeChat': '%eChat%',
            'Safari': '%afari%', 'Notes': '%otes%'}
@@ -83,10 +79,10 @@ def complete_tail(app_short, text, send_ts, leftover_keys, post_s=120):
     # 干净前缀 = 去掉尾部 latin 残渣;锚 = 前缀末 3-6 字
     m = R.LATIN_TAIL.search(text)
     base = text[:m.start()].rstrip() if m else text
-    residue = (m.group().strip() if m else '')
     if len(cv(base)) < 3:
         return text, {'why': 'base太短无法锚定'}
-    leftover = (residue.replace(' ', '') + leftover_keys).lower()
+    # 击键账只用 leftover_keys(调用方给的窗已覆盖残渣的击键;残渣字母再拼会双计错位)
+    leftover = leftover_keys
     best = ('', None)
     for ts, ft in ocr_frames(app_short, send_ts - 2000, send_ts + post_s * 1000):
         ft = ft or ''
@@ -106,14 +102,28 @@ def complete_tail(app_short, text, send_ts, leftover_keys, post_s=120):
 
 
 # ---- 标注案例测试 ----
-def keys_after(bundle, t0, t1):
-    rows = con.execute("SELECT char,is_backspace,modifiers FROM keystroke_log WHERE bundle_id=? "
-                       "AND ts_ms BETWEEN ? AND ? ORDER BY ts_ms", (bundle, t0, t1)).fetchall()
-    o = ''
-    for c, bs, md in rows:
-        if bs or (md & 7) != 0 or not c or c in ('\n', '\r'): continue
-        o += c
-    return o
+def keys_segment(bundle, send_ts):
+    """该消息的击键 <CR> 段(消息边界天然在 <CR>):取最后一键最接近 send_ts(±6s)的段。
+    复用账本分段洞察 —— 段即消息,验证不会窜进下一条。"""
+    rows = con.execute("SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log WHERE bundle_id=? "
+                       "AND ts_ms BETWEEN ? AND ? ORDER BY ts_ms", (bundle, send_ts - 60000, send_ts + 10000)).fetchall()
+    segs, cur = [], []
+    for ts, c, bs, md in rows:
+        if (md & 7) != 0: continue
+        if bs:
+            if cur: cur.pop()
+            continue
+        if not c: continue
+        if c in ('\n', '\r'):
+            if cur: segs.append(cur); cur = []
+        else:
+            cur.append((ts, c))
+    if cur: segs.append(cur)
+    best, bd = '', 6001
+    for seg in segs:
+        d = abs(seg[-1][0] - send_ts)
+        if d < bd: bd, best = d, ''.join(c for _, c in seg)
+    return best
 
 CASES = [
     # (案例名, ev, 记录文本substring, 期望尾巴)
@@ -128,22 +138,26 @@ CASES = [
 
 if __name__ == "__main__":
     import extract_compare_v2 as X
-    def find_send(substr, evid=None, day=None):
-        q = "SELECT id,bundle_id FROM typing_events WHERE edit_log LIKE ?" + (" AND id=?" if evid else "")
-        args = (f'%{substr[:10]}%',) + ((evid,) if evid else ())
-        for eid, bundle in con.execute(q, args).fetchall():
+    def find_send(substr, evid=None):
+        """在事件的真实发送里找含 substr 的记录;返回 (app,bundle,text,t0,t1,next_t0)。
+        next_t0 = 同 bundle 下一条发送的起点 —— 击键账以它截断,防验证窜进下一条消息。"""
+        if evid: rows = [(evid,)]
+        else: rows = con.execute("SELECT id FROM typing_events ORDER BY id").fetchall()
+        for (eid,) in rows:
             evs = X.loadev([eid])
             for ev in evs:
-                for text, t0, t1, is_send in R.event_sends_with_ts(ev, X):
-                    if substr[:8] in text:
-                        return ev['bundle'].split('.')[-1], ev['bundle'], text, t1
+                sends = R.event_sends_with_ts(ev, X)
+                for i, (text, t0, t1, is_send) in enumerate(sends):
+                    if substr[:8] in text or substr.replace(' ', '')[:8] in text.replace(' ', ''):
+                        nxt = sends[i + 1][1] if i + 1 < len(sends) else None
+                        return ev['bundle'].split('.')[-1], ev['bundle'], text, t0, t1, nxt
         return None
     for name, evid, substr, want in CASES:
         hit = find_send(substr, evid)
         if not hit:
             print(f"✗ {name}: 找不到对应发送记录"); continue
-        app, bundle, text, ts = hit
-        lk = keys_after(bundle, ts - 1500, ts + 8000)      # race 区击键(尾巴可能在发送后落账)
-        fixed, info = complete_tail(app, text, ts, lk)
+        app, bundle, text, t0, t1, nxt = hit
+        lk = keys_segment(bundle, t1)                     # 击键账 = 本消息的 <CR> 段
+        fixed, info = complete_tail(app, text, t1, lk)
         ok = want in fixed
         print(f"{'✓' if ok else '✗'} {name}: {text[:24]!r} → {fixed[:40]!r}  {info if not ok else ''}")
