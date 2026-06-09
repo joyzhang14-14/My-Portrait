@@ -186,23 +186,9 @@ actor TranscriptionScheduler {
 
         // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
         // 防休眠开关:开 → 有积压且在 AC 时阻止系统空闲睡眠,把积压跑完再放行睡眠。
-        let (acOnly, keepAwake, engine) = await MainActor.run {
+        let (acOnly, keepAwake) = await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
-            return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing, a.engine)
-        }
-
-        // 引擎 disabled → 不消费队列:chunk 留在 pending,等用户重新启用引擎后
-        // 由 reevaluate / 60s poll 接着转。旧行为会把每个 chunk 跑一遍空转录
-        //(transcribeSamples 返回 "")然后标 done —— 转录机会永久丢失,之后
-        // 重新开启引擎也补不回来。
-        if engine == "disabled" {
-            whisper.unload()
-            qwen.unload()
-            await MainActor.run {
-                IntentionalPauseState.shared.audioTranscriptionPaused = true
-                KeepAwakeAssertion.shared.refresh(false)
-            }
-            return
+            return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing)
         }
 
         // 无进展保护:某个 chunk 因 DB 写失败(如磁盘满)一直标不掉 pending 时,tight
@@ -213,6 +199,23 @@ actor TranscriptionScheduler {
         // 连续转录直到队列清空 —— 不再「转 2 个睡 60s」。60s poll 退化成纯兜底:
         // 只在本轮 drain 结束后捡那期间 ingest 进来的新段。积压一口气在本调用清完。
         while !Task.isCancelled {
+            // 引擎 disabled → 不消费队列:chunk 留在 pending,等用户重新启用引擎
+            // 后由 60s poll 接着转。旧行为会把每个 chunk 跑一遍空转录
+            //(transcribeSamples 返回 "")然后标 done —— 转录机会永久丢失。
+            // **必须每轮活读**(不能像 acOnly 那样进循环前读一次):tight drain
+            // 可跑几十分钟,重积压烧 CPU 时正是用户去关转录的时刻;期间新一轮
+            // processQueueOnce 被 isDraining 守卫挡在门外,入口 gate 执行不到,
+            // 只有这里能看到中途切换。
+            let engine = await MainActor.run { ConfigStore.shared.current.capture.audio.engine }
+            if engine == "disabled" {
+                whisper.unload()
+                qwen.unload()
+                await MainActor.run {
+                    IntentionalPauseState.shared.audioTranscriptionPaused = true
+                    KeepAwakeAssertion.shared.refresh(false)
+                }
+                return
+            }
             // 电池 + AC-only → 不转录:释放模型 + 放行睡眠 + 标记 intentional pause
             //(让 StallDetector 知道 pending 堆积是故意的,不报 backlog)。
             if acOnly && !PowerMonitor.isOnAC {
