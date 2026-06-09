@@ -150,33 +150,43 @@ actor AudioCaptureService {
             tapInstalled = false
         }
 
+        // **同步摘下全部 session 状态再排干** —— 下面每个 await 都是 actor
+        // 重入窗口,start() 若在窗口内插入会重建这些字段:旧 stop 恢复后会
+        // flush 错新 recorder(把新 session 的段流 finish 掉 → 孤儿 wav 换
+        // 路径回归)、或 await 到永不结束的新 forwardTask(stop 永久 park,
+        // restartIfRunning / 退出清理跟着卡死)。摘成 local copy 后排干只碰
+        // 本次 session 的对象,交错的 start 不受影响。
+        //
+        // engine / converter / targetFormat 也在这里同步置 nil,让 ARC 回收
+        // AVAudioEngine 实例。否则即使调了 engine.stop(),内部 AUHAL 仍持着
+        // 麦克风硬件连接,macOS 还把这个 app 当"正在录",蓝牙耳机会被强切到
+        // HFP(低音质双向)→ 音乐音质明显下降。
+        // 代价:下次 start() 要重建 engine(拉起 caulk),~50ms 额外开销。
+        let doomedCont = samplesContinuation
+        let doomedSamplesTask = samplesTask
+        let doomedForwardTask = forwardTask
+        let doomedRecorder = vadRecorder
+        samplesContinuation = nil
+        samplesTask = nil
+        forwardTask = nil
+        vadRecorder = nil
+        self.engine = nil
+        self.converter = nil
+        self.targetFormat = nil
+
         // 排干顺序(防丢正在说的最后一段):
         // ① 样本流 finish → **等** samplesTask 把已缓冲样本喂完 VADRecorder
         //   (不 cancel —— cancel 会让 for-await 立即返回,缓冲样本丢失);
         // ② flush 当前段(写盘 + yield 段事件 + finish 段流);
         // ③ **等** forwardTask 把段事件(含 flush 刚关的这段)转发给
         //    TranscriptionScheduler 后自然退出。
-        // 旧顺序先 cancel forwardTask 再 flush:flush yield 的段事件无人接收
+        // 先 cancel forwardTask 再 flush 会让 flush yield 的段事件无人接收
         // → wav 留盘成孤儿、DB 无行、永不转录 —— 每次 stop(音乐暂停 / 锁屏 /
         // 设备热插拔 / 退出)都丢用户正在说的最后一段。
-        samplesContinuation?.finish()
-        samplesContinuation = nil
-        await samplesTask?.value
-        samplesTask = nil
-
-        await vadRecorder?.flush()
-        await forwardTask?.value
-        forwardTask = nil
-        vadRecorder = nil
-
-        // 关键:把 engine / converter / targetFormat 都置 nil,让 ARC 回收
-        // AVAudioEngine 实例。否则即使调了 engine.stop(),内部 AUHAL 仍持着
-        // 麦克风硬件连接,macOS 还把这个 app 当"正在录",蓝牙耳机会被强切到
-        // HFP(低音质双向)→ 音乐音质明显下降。
-        // 代价:下次 start() 要重建 engine(拉起 caulk),~50ms 额外开销。
-        self.engine = nil
-        self.converter = nil
-        self.targetFormat = nil
+        doomedCont?.finish()
+        await doomedSamplesTask?.value
+        await doomedRecorder?.flush()
+        await doomedForwardTask?.value
 
         // 清掉 activeUID,否则 UI 一直显示「recording from <设备>」幻影(start
         // 时在 line 225 设过)。"" 走 else 分支干净置空。

@@ -124,28 +124,38 @@ actor SystemAudioCaptureService {
         output.onStopped = nil
         output.continuation = nil
 
-        if let s = stream {
-            try? await s.stopCapture()
-            stream = nil
-        }
-
+        // 同步摘下 stream 再 await —— stopCapture / teardown 的 await 是 actor
+        // 重入窗口,start() 若插入会 buildStream 出新 stream,旧 stop 恢复后
+        // 不能把新 stream 关掉。output.continuation 已同步置 nil,SCK 后续回调
+        // 不再有样本落进来,先排干管线再异步关流是安全的。
+        let doomedStream = stream
+        stream = nil
         await teardownInfra()
+        if let doomedStream { try? await doomedStream.stopCapture() }
         logger.info("SystemAudioCaptureService stopped")
     }
 
     /// 拆掉跨重建存活的那层(recorder / forwardTask / samplesTask / continuation)。
+    /// **入口同步摘成 local copy 再排干** —— 每个 await 都是 actor 重入窗口,
+    /// 交错的 start() 会重建这些字段;摘下后只拆本次 session 的对象,不会
+    /// flush 错新 recorder / await 到永不结束的新 forwardTask。
     /// 排干顺序同 AudioCaptureService.stop():先等 samplesTask 喂完缓冲样本,
     /// 再 flush 当前段,最后等 forwardTask 把段事件转发完自然退出 —— 先 cancel
     /// 再 flush 会让 flush yield 的最后一段无人接收,wav 成孤儿永不转录。
     private func teardownInfra() async {
-        samplesContinuation?.finish()
+        let doomedCont = samplesContinuation
+        let doomedSamplesTask = samplesTask
+        let doomedForwardTask = forwardTask
+        let doomedRecorder = vadRecorder
         samplesContinuation = nil
-        await samplesTask?.value
         samplesTask = nil
-        await vadRecorder?.flush()
-        await forwardTask?.value
         forwardTask = nil
         vadRecorder = nil
+
+        doomedCont?.finish()
+        await doomedSamplesTask?.value
+        await doomedRecorder?.flush()
+        await doomedForwardTask?.value
     }
 
     // MARK: - SCK 采集
