@@ -127,5 +127,22 @@ print("=== 14. parse_patches 容错解析 ===")
 ps = parse_patches('{"patches":[{"replace_range":[3,3],"replacement_text":"海报","operation":"inserted"},{"bad":1}]}')
 check("解析出 1 个合法 patch(坏项跳过)", len(ps) == 1 and ps[0].replacement_text == "海报")
 
+print("=== 15. rule6b 反幻觉:中文须 commit 背书(海报合法 / 海豹·购买了 拒)===")
+# 骨架 '介绍的haibao',commit 含 '海报';重建尾巴
+g15 = {"skeleton": "介绍的haibao", "event_ids": [1], "commits": ["介绍的", "海报"],
+       "deletes": ["haibao"], "reinput": [], "keystrokes": ks("haibao"), "boundaries": [],
+       "segment_range": [0, 10_000], "require_cjk_commit_backed": True}
+def tail_patch(repl):  # 替换残渣 'haibao'(在骨架 index 3..9)为 repl
+    return Patch(replace_range=(3, 9), replacement_text=repl, operation="replaced",
+                 anchor_before="的", anchor_after="", supporting_event_ids=[1],
+                 supporting_keystrokes=[0, 1, 2, 3, 4, 5], source_range=(0, 6),
+                 pinyin_candidates=[set("海报豹") for _ in repl])
+check("海报(已提交)→ 通过", verify_patch(tail_patch("海报"), g15)[0])
+ok, r = verify_patch(tail_patch("海豹"), g15)   # 同音字,未提交
+check("海豹(同音未提交)→ 拒(rule6b)", (not ok) and r == "rule6b_cjk_not_committed")
+# 无 require 标志时 rule6b 不生效(海豹仍过 rule6,因在候选集)
+g15b = {**g15, "require_cjk_commit_backed": False}
+check("未开 require_cjk_commit_backed 时 rule6b 不生效", verify_patch(tail_patch("海豹"), g15b)[0])
+
 print(f"\n=== {len(FAILS)} 失败 ===")
 sys.exit(1 if FAILS else 0)
