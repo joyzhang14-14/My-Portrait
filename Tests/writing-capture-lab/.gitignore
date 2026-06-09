@@ -1,12 +1,2 @@
 __pycache__/
 *.pyc
-# 阶段一 raw fixture 含未脱敏真实消息(隐私);可由 extract_fixtures.py 从活库重生。
-# 脱敏版在阶段二提交。
-fixtures/send_signals.json
-# 阶段四 librime:词库 65M + 编译产物,各机器本地准备(见 rime/README.md)
-rime/ice/
-rime/ice-cands/
-rime/cands
-rime/lattice
-# #41/#42 重建真数据 fixture(含真实聊天内容,gitignore;用户决策)
-fixtures/recon_cases.json
