@@ -10,6 +10,7 @@ import json, re, time
 from rime_cands import candidates
 from patch import Patch
 from verifier import verify_patch
+from trigger import reconstruction_triggered, decide_outcome
 
 MODEL_ID = "mlx-community/Qwen3-1.7B-4bit"
 _M = None
@@ -131,8 +132,34 @@ def show(name, group, expect_must_not=None):
         print(f"  反幻觉检查: {expect_must_not!r} {'❌ 泄漏!' if leaked else '✓ 未出现'}")
     return r
 
+def reconstruct_40(group):
+    """阶段五 #40 流程:先判触发(§6.1,不按长度),触发才重建,再按 §6.2 决定回退/状态。"""
+    triggered, reason = reconstruction_triggered(group)
+    if not triggered:
+        return {"text": group["skeleton"], "completeness": "complete", "trigger": reason, "fallback": False}
+    out = decide_outcome(group, reconstruct(group))
+    out["trigger"] = reason
+    return out
+
+# #40 回退案例:残渣 'xyz' 既无 commit 背书也非干净拼音 → 重建失败 → 回退 captured 标 partial
+FALLBACK = {
+    "skeleton": "记录xyz", "residue": "xyz", "pinyin": "xyz", "typed": "xyz",
+    "event_ids": [1], "commits": ["记录"], "deletes": ["xyz"], "reinput": [],
+    "keystrokes": ks("xyz"), "boundaries": [], "segment_range": [0, 10_000],
+    "require_cjk_commit_backed": True,
+}
+
+def show40(name, group):
+    print(f"\n{'='*60}\n【{name}】骨架={group['skeleton']!r}  commit={group['commits']}")
+    o = reconstruct_40(group)
+    print(f"  触发: {o['trigger']}")
+    print(f"  ▶ 结果: text={o['text']!r}  completeness={o['completeness']}  fallback={o.get('fallback')}")
+
 if __name__ == "__main__":
     print("加载 Qwen3-1.7B-4bit...")
     _model()
     show("#42 gmail 反幻觉", GMAIL, expect_must_not="购买了")
     show("#41 海报尾巴重建", HAIBAO)
+    print("\n" + "#" * 60 + "\n# 阶段五 #40 触发+回退流程")
+    show40("#40 触发→重建成功(海报)", HAIBAO)
+    show40("#40 触发→重建失败→回退 partial", FALLBACK)
