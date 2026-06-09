@@ -53,11 +53,16 @@ def convo_ctx(ev):
     return f"app:{app}\n最近对话:\n" + "\n".join(f"  - {t[:40]}" for t in rows[:24])
 
 def is_residue(t):
+    """#41 修复:只丢「整条几乎全是残渣」的。中文主体 + 小拼音尾渣 → **保留整条**
+    (最大保留用户最终输入;尾渣重建失败就带渣展示,不丢真话)。"""
     c = cv(t)
     if not c: return True
     if re.fullmatch(r'[a-zA-Z0-9]{1,4}', c): return True
     if re.fullmatch(r'[a-z]{1,4}( [a-z]{1,5}){1,}', c): return True
-    if re.search(r'[一-鿿]\s*[a-z]{1,3}(?: [a-z]{1,3})+$', c) and len(c) <= 25: return True
+    # 原③条(中文+尾渣 ≤25字 整条丢)误杀真消息(#41 '我用你seedance余额跑yi x'):
+    # 收窄为 汉字≤2 才丢('你fa shao' 这类几乎全渣);汉字≥3 = 真消息主体,保留。
+    if (re.search(r'[一-鿿]\s*[a-z]{1,3}(?: [a-z]{1,3})+$', c) and len(c) <= 25
+            and sum(1 for ch in c if '一' <= ch <= '鿿') <= 2): return True
     return False
 def kind_of(t): return "long_form" if len(t) >= 140 else "short_form"
 def rec_md(n, src, kind, app, text): return f"**{n}.** `[{src}/{kind}]` 📍 `{app}`\n\n> " + text.replace("\n", "\n> ") + "\n"
@@ -107,7 +112,8 @@ for day in DAYS:
     keepset = set((t, s, a) for t, s, a in drecs)
     out, seen = [], set()
     for app, t, s, kc in dayrecs:
-        if (t, s, app) in keepset and not is_residue(t) and t not in seen:
+        # #44/#45:占位符过滤(is_ph)搬回输出层 —— 集成时漏搬导致 'Type / for commands' 泄漏
+        if (t, s, app) in keepset and not is_residue(t) and not X.is_ph(t) and t not in seen:
             seen.add(t); out.append((app, t, kc))
     RAW[day] = out
     print(f"  {day}: {len(out)} 条(14b disambig 调用累计 {R.DISAMBIG_CALLS[0]})", flush=True)

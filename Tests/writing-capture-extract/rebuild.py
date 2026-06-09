@@ -143,7 +143,13 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
         # captured 残渣是击键 run 前缀(captured 截断)→ 用击键(更完整,带选字数字);否则用 captured 残渣(免击键前导噪声)
         use_py = py_ks if (py_ks and r_cap and py_ks.startswith(r_cap)) else r_cap
         use_pick = pick_ks if use_py == py_ks else None
-        if use_py and not _is_eng_tail(use_py):
+        if use_py and _is_eng_tail(use_py):
+            # #42 英文截断:击键里的英文词比 captured 残渣更全(AX 漏末字,pipelin→pipeline)
+            # → 击键背书补全:保留 captured 原文大小写,只追加缺的尾字母。确定性,零模型。
+            if use_py == py_ks and py_ks != r_cap and py_ks.startswith(r_cap):
+                return cap + py_ks[len(r_cap):], {'reason': 'eng_tail_completed', 'use_py': use_py}
+            return cap, {'reason': 'residue_skip'}   # 完整英文词:原样,绝不脑补
+        if use_py:
             kind, _ = classify(use_py, use_pick)
             if kind == 'chinese':
                 base = cap[:m.start()].rstrip()
@@ -153,7 +159,7 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
                     fin = guard(cap, result, set(ch for ch in cap if HAN.match(ch)) |
                                 set(ch for c in lattice(use_py)[1] for cand in c[1] for ch in cand if HAN.match(ch)), set())
                     return fin, {'reason': 'residue', 'use_py': use_py, 'han': han}
-            return cap, {'reason': 'residue_skip'}   # 英文/残缺:保留原样,绝不脑补
+            return cap, {'reason': 'residue_skip'}   # 残缺:保留原样,绝不脑补
     # ---- 路 ②:无残渣,击键 run 级补尾 ----
     picks = parse_picks(kseg)
     runs = []   # (py, kind, syls)  syls=[(音节,[候选…])]
@@ -217,10 +223,12 @@ def event_sends_with_ts(ev, X):
     """返回 [(text, ks_start_ts, ks_end_ts, is_send)]:真 within-event 发送(占位符/空框夹+回车背书)
     + submit + 末尾未发送 endValue。X = extract_compare_v2 模块(借 cstream/phMarkers/emptyBox/cover/RUNPH)。"""
     arr = ev['arr']; cs = X.cstream(arr); ph = X.phMarkers(arr); returns = ev.get('returns', ())
+    # #44/#45:已知占位符(KNOWN_PH)即使是 commit 注入(非 paste)也认作占位符标记/过滤——
+    # phMarkers 只认 paste(防普通词误判),known 列表是白名单,commit 注入也安全。
     def isMark(j):
         if j < 0 or j >= len(arr): return False
         raw = arr[j].get('text', '') or ''
-        return X.emptyBox(raw) or X.cv(raw) in ph or X.cv(raw) in X.RUNPH
+        return X.emptyBox(raw) or X.cv(raw) in ph or X.cv(raw) in X.RUNPH or X.is_ph(X.cv(raw))
     def sent(ts):
         return ts is not None and any(ts - 1800 <= rt <= ts + 200 for rt in returns)
     out = []
@@ -231,13 +239,13 @@ def event_sends_with_ts(ev, X):
         if k == 'submit' and len(t) >= 2:
             out.append((t, prev_ts, ts, True)); prev_ts = ts
         elif k == 'delete':
-            if len(t) < 2 or t in ph or t in X.RUNPH: continue
+            if len(t) < 2 or t in ph or t in X.RUNPH or X.is_ph(t): continue
             if not (isMark(i - 1) or isMark(i + 1)): continue
             if X.cover(t, cs) < 0.5: continue
             if not sent(ts): continue                    # 回车检测:无回车=IME改写删除/草稿,不是发送
             out.append((t, prev_ts, ts, True)); prev_ts = ts
     endv = X.cv(ev['endv'])
-    if endv and not X.emptyZW(ev['endv']):
+    if endv and not X.emptyZW(ev['endv']) and not X.is_ph(endv):   # 占位符 endValue(含拼接如"…他说")整条不出
         out.append((endv, prev_ts, ev.get('ended_at') or prev_ts, False))
     return out
 
