@@ -12,25 +12,18 @@ def _is_latin(c): return c.isascii() and c.isalpha()
 
 
 def pinyin_residue_spans(skeleton: str):
-    """骨架里紧邻 CJK 的 latin 连续段 = AX 没转换的拼音残渣(区别于纯英文消息)。
-    返回 [(start, end, text)]。纯 latin、无 CJK 的串(如 gmail 消息)不算残渣(那是 #42 英文,非 #40)。"""
+    """**只认尾巴残渣**:最后一个 CJK 之后的 latin 连续段 = IME 尾巴截断的签名(#41)。
+    中间的合法英文(header/ai/focus/OCR)不算残渣;纯 latin 无 CJK(gmail)也不算(那是 #42)。
+    返回 [(start, end, text)](至多一段尾巴)。"""
     if not _has_cjk(skeleton):
         return []
-    spans, i, n = [], 0, len(skeleton)
-    while i < n:
-        if _is_latin(skeleton[i]):
-            j = i
-            while j < n and (_is_latin(skeleton[j]) or skeleton[j] == " "):
-                j += 1
-            seg = skeleton[i:j].strip()
-            # 紧邻 CJK(前或后有中文)才算残渣
-            near_cjk = (i > 0 and "一" <= skeleton[i - 1] <= "鿿") or (j < n and "一" <= skeleton[j] <= "鿿")
-            if len(seg) >= 2 and near_cjk:
-                spans.append((i, j, seg))
-            i = j
-        else:
-            i += 1
-    return spans
+    last_cjk = max(i for i, c in enumerate(skeleton) if "一" <= c <= "鿿")
+    tail = skeleton[last_cjk + 1:]
+    seg = tail.strip()
+    if len(seg) >= 2 and all(_is_latin(c) or c == " " for c in seg):
+        start = skeleton.find(seg, last_cjk + 1)
+        return [(start, start + len(seg), seg)]
+    return []
 
 
 def reconstruction_triggered(group):
