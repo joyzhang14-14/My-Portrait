@@ -10,6 +10,7 @@ python3 test_evidence.py    # 阶段零
 python3 test_signals.py     # 阶段一(读 gitignore 的 send_signals.json;先跑 extract_fixtures.py 重生)
 python3 test_fixtures.py    # 阶段二(完全离线,读已提交的脱敏 cases.json);失败返回非零退出码
 python3 test_placeholder.py # 阶段三(占位符规则 §4 + #44/#45);失败返回非零退出码
+python3 test_verifier.py    # 阶段四(确定性 patch 验证器 §5;纯算法无模型);失败返回非零退出码
 # 重生 fixture(需活库):python3 extract_fixtures.py(阶段一原始信号) / python3 export_fixtures.py(阶段二脱敏)
 ```
 
@@ -26,7 +27,13 @@ python3 test_placeholder.py # 阶段三(占位符规则 §4 + #44/#45);失败返
   - #44/#45 修复:占位符靠「是占位符串 + 无物理击键」判 app 注入(**不分 commit/paste**,堵 commit 注入泄漏);
     占位符整体删或整体留,**绝不剥前缀造「他说X」**。known 占位符受「有击键 + 有发送证据」例外保护。
   - #41/#42(IME 重建/反幻觉)→ 延后阶段四(用户已确认)。
-- 阶段四(patch+验证器+#41/#42)→ 五(#40)→ 六(Pass4/Canvas)。待做。
+- **阶段四(确定性 patch 验证器 §5)**:`patch.py`(schema+解析)+ `verifier.py`(九条规则 + 多 patch 冲突/倒序应用
+  + 骨架哈希二次确认 + completeness 独立计算)+ `test_verifier.py`。✅(**纯算法、零模型**)
+  - 核心铁律:模型只提局部 patch、**不信模型自报**;每个 replacement 字符可追溯到击键(英文顺序)/拼音候选(中文)/
+    commit(标点),否则拒整个 patch。verification_passed ≠ completeness。反幻觉=rule6 拒 CJK 非候选。
+  - **待做(#41/#42 端到端重建子任务)**:接小 MLX 模型提 patch + 项目内置 librime 出候选 + 真数据 fixture(gitignore),
+    跑通 ev1132(gmail 反幻觉)/IME 尾巴真案例。决策已定(MLX / rime 搬进项目 / gitignore)。
+- 阶段五(#40)→ 六(Pass4/Canvas)。待做。
 
 ## 阶段一 · 发送证据三分判据(2026-06 对抗工作流校准)
 真正判据 = **清空机制**(不是占位符 reset——草稿退光后框也出占位符):
