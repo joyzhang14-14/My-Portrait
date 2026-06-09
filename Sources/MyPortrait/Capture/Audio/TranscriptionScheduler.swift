@@ -186,9 +186,23 @@ actor TranscriptionScheduler {
 
         // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
         // 防休眠开关:开 → 有积压且在 AC 时阻止系统空闲睡眠,把积压跑完再放行睡眠。
-        let (acOnly, keepAwake) = await MainActor.run {
+        let (acOnly, keepAwake, engine) = await MainActor.run {
             let a = ConfigStore.shared.current.capture.audio
-            return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing)
+            return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing, a.engine)
+        }
+
+        // 引擎 disabled → 不消费队列:chunk 留在 pending,等用户重新启用引擎后
+        // 由 reevaluate / 60s poll 接着转。旧行为会把每个 chunk 跑一遍空转录
+        //(transcribeSamples 返回 "")然后标 done —— 转录机会永久丢失,之后
+        // 重新开启引擎也补不回来。
+        if engine == "disabled" {
+            whisper.unload()
+            qwen.unload()
+            await MainActor.run {
+                IntentionalPauseState.shared.audioTranscriptionPaused = true
+                KeepAwakeAssertion.shared.refresh(false)
+            }
+            return
         }
 
         // 无进展保护:某个 chunk 因 DB 写失败(如磁盘满)一直标不掉 pending 时,tight
