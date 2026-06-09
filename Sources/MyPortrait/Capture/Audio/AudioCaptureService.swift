@@ -150,14 +150,23 @@ actor AudioCaptureService {
             tapInstalled = false
         }
 
+        // 排干顺序(防丢正在说的最后一段):
+        // ① 样本流 finish → **等** samplesTask 把已缓冲样本喂完 VADRecorder
+        //   (不 cancel —— cancel 会让 for-await 立即返回,缓冲样本丢失);
+        // ② flush 当前段(写盘 + yield 段事件 + finish 段流);
+        // ③ **等** forwardTask 把段事件(含 flush 刚关的这段)转发给
+        //    TranscriptionScheduler 后自然退出。
+        // 旧顺序先 cancel forwardTask 再 flush:flush yield 的段事件无人接收
+        // → wav 留盘成孤儿、DB 无行、永不转录 —— 每次 stop(音乐暂停 / 锁屏 /
+        // 设备热插拔 / 退出)都丢用户正在说的最后一段。
         samplesContinuation?.finish()
         samplesContinuation = nil
-        samplesTask?.cancel()
+        await samplesTask?.value
         samplesTask = nil
 
-        forwardTask?.cancel()
-        forwardTask = nil
         await vadRecorder?.flush()
+        await forwardTask?.value
+        forwardTask = nil
         vadRecorder = nil
 
         // 关键:把 engine / converter / targetFormat 都置 nil,让 ARC 回收
