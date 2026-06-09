@@ -169,7 +169,24 @@ private actor Pass2Coordinator {
     private var pending: CheckedContinuation<String, Never>?
     func startTurn(id: String) { buffer = ""; pending = nil }
     func awaitTurn() async -> String {
-        await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in pending = c }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+                pending = cont
+            }
+        } onCancel: {
+            Task { await self.cancelTurn() }
+        }
+    }
+
+    /// 被取消(如超时子任务触发 cancelAll)→ 用已收到的部分 buffer resume 等待者,
+    /// 让 task group 能 drain、调用方抛错/返回,defer 里的 agent.stop() 才真去杀
+    /// 卡住的子进程。否则 awaitTurn 的 continuation 永不 resume → 整条 pipeline
+    /// 永久 hang(同 EventBuilder.ResponseCoordinator 的既有修法)。
+    func cancelTurn() {
+        if let p = pending {
+            pending = nil
+            p.resume(returning: buffer)
+        }
     }
     func handle(_ event: PiAgent.Event) {
         switch event {
