@@ -457,9 +457,10 @@ struct TimelineDB: Sendable {
 
         var out: Set<DateComponents> = []
         // 必须 UTC —— SQL 的 DATE(...,'unixepoch') 和下面的 formatter 都是 UTC,
-        // 提取 year/month/day 的日历若用本地时区(UTC-4),所有日期会错位到前一天:
-        // 最新一天永远晚一天进 memory pipeline,且空档日(关机/休假)后第一天
-        // 永不被处理。同 frames(on:) 的既有注释。
+        // 提取 year/month/day 的日历若用本地时区(UTC-4),所有日期会错位到前一天
+        //("X 是候选 ⇔ X+1 有帧"):最新一天永远晚一天进 memory pipeline,且
+        // 空档(关机/休假)**前的最后一天**永不被处理 —— 它要进候选集得靠
+        // 下一天有帧。同 frames(on:) 的既有注释。
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(secondsFromGMT: 0)!
         let f = DateFormatter()
