@@ -101,23 +101,26 @@ for day in DAYS:
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X):
                 kw = R.keys_in_window(con, ev['bundle'], t0, t1)
                 fixed, _ = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
-                if cv(fixed): grp.append((app, cv(fixed), is_send))
-        total = sum(len(t) for _, t, _ in grp)
+                # 审计要求:event id + 时间窗随 record 全程传递(Pass4 丢弃要标 event 时间)
+                if cv(fixed): grp.append((app, cv(fixed), is_send, ev['id'], t0, t1))
+        total = sum(len(t) for _, t, *_ in grp)
         if total > 20 and kc < total // 4: continue                 # 组级击键 gate
         kst = ks_full.replace("<CR>", "").replace("<BS>", "").strip()
         if kst.startswith("/"): continue                            # slash gate
-        for app, t, s in grp: dayrecs.append((app, t, s, kc))
+        for app, t, s, evid, t0, t1 in grp: dayrecs.append((app, t, s, kc, evid, t0, t1))
     # dedup_truncated(类4/5a)+ is_residue + 精确去重
-    drecs = R.dedup_truncated([(t, s, a) for a, t, s, _ in dayrecs], X.cover)
+    drecs = R.dedup_truncated([(t, s, a) for a, t, s, *_ in dayrecs], X.cover)
     keepset = set((t, s, a) for t, s, a in drecs)
     out, seen = [], set()
-    for app, t, s, kc in dayrecs:
+    for app, t, s, kc, evid, t0, t1 in dayrecs:
         # #44/#45:占位符过滤(is_ph)搬回输出层 —— 集成时漏搬导致 'Type / for commands' 泄漏
         if (t, s, app) in keepset and not is_residue(t) and not X.is_ph(t) and t not in seen:
-            seen.add(t); out.append((app, t, kc))
+            seen.add(t); out.append((app, t, kc, evid, t0, t1))
     RAW[day] = out
     print(f"  {day}: {len(out)} 条(14b disambig 调用累计 {R.DISAMBIG_CALLS[0]})", flush=True)
-json.dump(RAW, open("/tmp/rime-test/eval/v2_rebuilt.json", "w"), ensure_ascii=False)
+EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
+os.makedirs(EVAL, exist_ok=True)
+json.dump(RAW, open(os.path.join(EVAL, "v2_rebuilt.json"), "w"), ensure_ascii=False)
 del m14, tok14; gc.collect()
 print(f"Phase1 完成,14b disambig 共调用 {R.DISAMBIG_CALLS[0]} 次", flush=True)
 
@@ -135,30 +138,42 @@ rej = con.execute("SELECT text,app,kind,reason_category,reason_text FROM writing
 rejex = [{"text": (r[0] or '')[:200], "app": r[1], "kind": r[2], "reason": r[4] or r[3]} for r in rej]
 P4_SCHEMA = {"type": "object", "properties": {"kept": {"type": "array", "items": {"type": "string"}}, "discarded": {"type": "array", "items": {"type": "object", "properties": {"record_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["record_id", "reason"]}}}, "required": ["kept", "discarded"]}
 def pass4(recs):
-    if not recs: return []
-    Rr = [{"record_id": f"p{i}", "text": t, "kind": kind_of(t), "source": "ax_cleaned", "app": a, "url": None, "keystroke_count": kc, "context_summary": None} for i, (a, t, kc) in enumerate(recs)]
+    """返回 (kept, discarded)。discarded=[(rec, reason)] —— 审计要求:丢了什么+为什么,不再扔 reason。"""
+    if not recs: return [], []
+    Rr = [{"record_id": f"p{i}", "text": t, "kind": kind_of(t), "source": "ax_cleaned", "app": a, "url": None, "keystroke_count": kc, "context_summary": None} for i, (a, t, kc, *_ ) in enumerate(recs)]
     user = P4 + "\n\nuser_rejected_examples:\n" + json.dumps(rejex, ensure_ascii=False) + "\n\nrecords:\n" + json.dumps(Rr, ensure_ascii=False)
     d = gen(P4_SCHEMA, user, 2000)
-    disc = {x["record_id"] for x in (d or {}).get("discarded", [])}
-    return [recs[i] for i in range(len(recs)) if f"p{i}" not in disc]
-FINAL = {}
+    disc = {x["record_id"]: (x.get("reason") or "") for x in (d or {}).get("discarded", []) if isinstance(x, dict)}
+    kept = [recs[i] for i in range(len(recs)) if f"p{i}" not in disc]
+    dropped = [(recs[i], disc[f"p{i}"]) for i in range(len(recs)) if f"p{i}" in disc]
+    return kept, dropped
+FINAL = {}; DISCARDED = {}
 for day in DAYS:
-    recs = RAW[day]; kept = []
-    for i in range(0, len(recs), 12): kept += pass4(recs[i:i+12])
-    FINAL[day] = kept
-    print(f"  {day}: {len(recs)} → Pass4 后 {len(kept)}", flush=True)
+    recs = RAW[day]; kept = []; dropped = []
+    for i in range(0, len(recs), 12):
+        k, dd = pass4(recs[i:i+12]); kept += k; dropped += dd
+    FINAL[day] = kept; DISCARDED[day] = dropped
+    print(f"  {day}: {len(recs)} → Pass4 后 {len(kept)}(丢 {len(dropped)})", flush=True)
 
-# ===== 写 Obsidian 文档 =====
-CV = json.load(open("/tmp/rime-test/eval/canvas_cloud.json"))
+# ===== 写 Obsidian 文档(含 Pass4 丢弃审计:丢了什么+为什么+event 时间)=====
+import datetime
+def fmt_ts(ms):
+    return datetime.datetime.fromtimestamp(ms / 1000).strftime('%m-%d %H:%M:%S') if ms else '?'
+CV = json.load(open(os.path.join(EVAL, "canvas_cloud.json")))
 nd = ["# 新 pipeline·成品(阶段0 集成:librime + 14b disambig 重建)\n",
       "**全本地 IME 重建**:event_sends_with_ts(回车检测真发送)+ rebuild(librime 确定性打底 + 14b 同音消歧 + 残渣/击键调和)",
       "+ 组级击键 gate + slash gate + **dedup_truncated**(类4/5a 去截断态)+ is_residue + **8b Pass4**。Canvas=云端。\n",
       "⚠️ 已知小瑕疵(待修):的/得(睡得 vs 睡的)、librime 词库无的 slang(卖个惨)、H/I 截断尾巴、canvas 跨app尾巴。\n",
       f"天数:{', '.join(DAYS)}\n", "---\n"]
 for day in DAYS:
-    out = [("ax_cleaned", t, a) for a, t, kc in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
+    out = [("ax_cleaned", t, a) for a, t, kc, *_ in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
+    dd = DISCARDED.get(day, [])
+    nd.append(f"\n### 🗑️ Pass4 丢弃（{len(dd)}）\n")
+    if not dd: nd.append("（无）\n")
+    for (a, t, kc, evid, t0, t1), reason in dd:
+        nd.append(f"- 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` · 原因:{reason or '(模型未给)'}\n  > {t[:160]}\n")
     nd.append("\n---\n")
 path = "/Users/joyzhang14/Desktop/Obsidian/Pipeline成品-新pipeline-阶段0.md"
 open(path, "w").write("\n".join(nd))

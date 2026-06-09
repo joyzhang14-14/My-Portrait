@@ -143,11 +143,14 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
         # captured 残渣是击键 run 前缀(captured 截断)→ 用击键(更完整,带选字数字);否则用 captured 残渣(免击键前导噪声)
         use_py = py_ks if (py_ks and r_cap and py_ks.startswith(r_cap)) else r_cap
         use_pick = pick_ks if use_py == py_ks else None
+        # #42 英文截断:击键里的英文 run 比 captured 残渣更全(AX 漏末字,pipelin→pipeline)
+        # → 击键背书补全。⚠️ IME 开着时选字数字会把英文 run 切进前面的 pick
+        # (pipeline1ee → ('pipeline',选1)+('ee',残尾)),所以扫**全部** picks 找前缀匹配,不只看末位。
+        comp = [p for p, _, _ in kpicks if r_cap and p != r_cap and p.startswith(r_cap) and _is_eng_tail(p)]
+        if comp:
+            best = max(comp, key=len)
+            return cap + best[len(r_cap):], {'reason': 'eng_tail_completed', 'use_py': best}
         if use_py and _is_eng_tail(use_py):
-            # #42 英文截断:击键里的英文词比 captured 残渣更全(AX 漏末字,pipelin→pipeline)
-            # → 击键背书补全:保留 captured 原文大小写,只追加缺的尾字母。确定性,零模型。
-            if use_py == py_ks and py_ks != r_cap and py_ks.startswith(r_cap):
-                return cap + py_ks[len(r_cap):], {'reason': 'eng_tail_completed', 'use_py': use_py}
             return cap, {'reason': 'residue_skip'}   # 完整英文词:原样,绝不脑补
         if use_py:
             kind, _ = classify(use_py, use_pick)
