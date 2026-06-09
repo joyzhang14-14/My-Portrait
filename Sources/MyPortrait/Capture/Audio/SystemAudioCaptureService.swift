@@ -134,14 +134,17 @@ actor SystemAudioCaptureService {
     }
 
     /// 拆掉跨重建存活的那层(recorder / forwardTask / samplesTask / continuation)。
+    /// 排干顺序同 AudioCaptureService.stop():先等 samplesTask 喂完缓冲样本,
+    /// 再 flush 当前段,最后等 forwardTask 把段事件转发完自然退出 —— 先 cancel
+    /// 再 flush 会让 flush yield 的最后一段无人接收,wav 成孤儿永不转录。
     private func teardownInfra() async {
         samplesContinuation?.finish()
         samplesContinuation = nil
-        samplesTask?.cancel()
+        await samplesTask?.value
         samplesTask = nil
-        forwardTask?.cancel()
-        forwardTask = nil
         await vadRecorder?.flush()
+        await forwardTask?.value
+        forwardTask = nil
         vadRecorder = nil
     }
 
