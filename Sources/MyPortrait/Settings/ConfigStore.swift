@@ -99,7 +99,7 @@ final class ConfigStore {
 
     /// Force-flush any pending debounced write immediately (caller awaits it).
     func saveNow() {
-        Task { await writeNow() }
+        writeNow()
     }
 
     /// 阻塞版的 saveNow —— 真正等磁盘写完才返回。saveAndRestart 这种
@@ -107,7 +107,7 @@ final class ConfigStore {
     /// 会被 NSApp.terminate 杀掉,配置没落盘,新 instance 启动后看到的
     /// 还是老值。
     func saveNowAndWait() async {
-        await writeNow()
+        writeNow()
     }
 
     /// Cross-actor read for non-MainActor callers (TimelineDB, background
@@ -182,7 +182,7 @@ final class ConfigStore {
     /// hand-edit it. Creates the file first if it doesn't exist yet.
     func revealInFinder() {
         if !FileManager.default.fileExists(atPath: path.path) {
-            Task { await writeNow() }
+            writeNow()
         }
         NSWorkspace.shared.activateFileViewerSelecting([path])
     }
@@ -257,11 +257,22 @@ final class ConfigStore {
         writeTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
-            await self?.writeNow()
+            self?.writeNow()
+            self?.writeTask = nil   // 写完清掉,flushPendingWrite 据此判断有无待写
         }
     }
 
-    private func writeNow() async {
+    /// 退出前同步刷盘:把还在 250ms debounce 窗口里的待写配置立即写出去。
+    /// applicationWillTerminate 调 —— 否则退出前最后一刻的改动(刚拨的开关 /
+    /// 刚改的设置)落不了盘,下次启动静默丢失。没有待写时是 no-op。
+    func flushPendingWrite() {
+        guard writeTask != nil else { return }
+        writeTask?.cancel()
+        writeTask = nil
+        writeNow()
+    }
+
+    private func writeNow() {
         do {
             try FileManager.default.createDirectory(
                 at: path.deletingLastPathComponent(),

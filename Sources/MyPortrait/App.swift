@@ -668,6 +668,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             typingObserver?.stop()
             return
         }
+        // 把还在 250ms debounce 窗口里的待写配置同步刷盘 —— 否则退出前最后
+        // 一刻的设置改动(刚拨的开关)落不了盘,下次启动静默丢失。
+        ConfigStore.shared.flushPendingWrite()
         // 进程退出前尽量优雅停止所有子系统（刷盘、关 SCStream、停 compaction、停录音）。
         // **两半分开**避免死锁:主线程那半(取消 task / 停 MainActor 监听)本就在主
         // 线程,直接同步跑;actor 那半放 detached task 等 —— 它们不碰主线程,主线程
