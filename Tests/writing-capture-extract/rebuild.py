@@ -101,10 +101,16 @@ def decode_run(py, context="", model_fn=None):
     words = cands(py, 6)
     # 触发 disambig 的门:词级候选 ≥2 个「不同首字」的中文词(纯助词/emoji 变体不算真歧义),才值得问 14b
     realalt = [w for w in words if w != top and HAN.match(w[:1]) and w[:1] != top[:1]]
-    if model_fn and len(realalt) >= 1:
+    # 低置信:TOP 不在词级候选里 = 逐字拼装非真词(卖个惨→买个参)→ 也要问模型(给逃生门机会)
+    lowconf = bool(top) and top not in words
+    if model_fn and (len(realalt) >= 1 or lowconf):
         DISAMBIG_CALLS[0] += 1
         picked = cv(model_fn({'mode': 'disambig', 'py': py, 'top': top, 'words': words,
-                              'syls': [(s, c[:8]) for s, c in syls], 'context': context}) or '')
+                              'syls': [(s, c[:8]) for s, c in syls], 'context': context,
+                              'lowconf': lowconf}) or '')
+        # 逃生门:模型判「所有候选都不通顺」(没打完/词库外)→ 不解码,留残渣给口3(OCR三路)
+        if picked == 'NONE':
+            return (None, syls)
         # 硬校验:字数==音节数 且 每字∈对应音节候选集;默认 TOP,只有合法才覆盖
         if picked and len(picked) == len(syls) and all(picked[i] in syls[i][1] for i in range(len(syls))):
             han = picked
@@ -205,6 +211,7 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
         elif kind == 'chinese' and syls:
             han, _ = decode_run(py, (base + tail_text + " ‖ " + context), model_fn)
             if han: tail_text += han
+            else: tail_text += py   # 逃生门 NONE:留拼音残渣(击键背书的字面),给口3 修
         # incomplete: 丢(宁缺毋错)
     result = base + tail_text
     final = guard(cap, result, _allowed(runs, cap), {r[0] for r in runs if r[1] == 'english'})

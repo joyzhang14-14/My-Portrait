@@ -77,10 +77,12 @@ def disambig(p):
             "对就保留,只在明显选错(同音字不合语境)时才换。\n"
             f"上下文(当前句已确定的前文 + app + 最近对话):\n{p['context'][:400]}\n"
             f"拼音「{p['py']}」默认上屏=「{top}」。其他同音候选: {' / '.join(alt[:6])}\n"
-            "输出这里最合理的那个词(默认合理就输出默认那个)。只输出一个词,别的不要。")
+            "输出这里最合理的那个词(默认合理就输出默认那个)。只输出一个词,别的不要。\n"
+            "⚠️ 若所有候选放进语境都不通顺(没打完的拼音/词库里没有的词),只输出 NONE——宁可保留拼音原样也不要选个错词。")
     pr = tok14.apply_chat_template([{"role": "user", "content": user}], add_generation_prompt=True, tokenize=False, enable_thinking=False)
     try:
         out = re.sub(r'<think>.*?</think>', '', generate(m14, tok14, prompt=pr, max_tokens=24, verbose=False), flags=re.S).strip()
+        if re.search(r'\bNONE\b', out.upper()): return 'NONE'   # 逃生门:留残渣给口3
         mm = re.search(r'[一-鿿]+', out); return mm.group(0) if mm else None
     except Exception:
         return None
@@ -102,24 +104,24 @@ for day in DAYS:
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X):
                 kw = R.keys_in_window(con, ev['bundle'], t0, t1)
                 fixed, _ = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
-                # 审计要求:event id + 时间窗随 record 全程传递(Pass4 丢弃要标 event 时间)
-                if cv(fixed): grp.append((app, cv(fixed), is_send, ev['id'], t0, t1))
+                # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
+                if cv(fixed): grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
         total = sum(len(t) for _, t, *_ in grp)
         if total > 20 and kc < total // 4:                          # 组级击键 gate
-            for a, t, s, evid, t0, t1 in grp:
+            for a, t, s, evid, t0, t1, b in grp:
                 drops.append(("组级击键gate", a, t, evid, t0, t1, f"组内容{total}字>击键{kc}×4,疑粘贴/预存"))
             continue
         kst = ks_full.replace("<CR>", "").replace("<BS>", "").strip()
         if kst.startswith("/"):                                     # slash gate
-            for a, t, s, evid, t0, t1 in grp:
+            for a, t, s, evid, t0, t1, b in grp:
                 drops.append(("slash gate", a, t, evid, t0, t1, "组击键以/开头(命令输入)"))
             continue
-        for app, t, s, evid, t0, t1 in grp: dayrecs.append((app, t, s, kc, evid, t0, t1))
+        for app, t, s, evid, t0, t1, b in grp: dayrecs.append((app, t, s, kc, evid, t0, t1, b))
     # dedup_truncated(类4/5a)+ is_residue + 占位符 + 精确去重 —— 每道闸的丢弃都记审计
     drecs = R.dedup_truncated([(t, s, a) for a, t, s, *_ in dayrecs], X.cover)
     keepset = set((t, s, a) for t, s, a in drecs)
     out, seen = [], set()
-    for app, t, s, kc, evid, t0, t1 in dayrecs:
+    for app, t, s, kc, evid, t0, t1, b in dayrecs:
         if (t, s, app) not in keepset:
             drops.append(("dedup_truncated", app, t, evid, t0, t1, "截断态草稿,内容被更长记录覆盖"))
         elif is_residue(t):
@@ -129,7 +131,49 @@ for day in DAYS:
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
-            seen.add(t); out.append((app, t, kc, evid, t0, t1))
+            seen.add(t); out.append((app, t, kc, evid, t0, t1, "ax_cleaned"))
+    # ===== 击键账本恢复(用户铁律:有击键就记录)=====
+    # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
+    # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
+    bundles = {b: a for a, t, s, kc, evid, t0, t1, b in dayrecs}
+    for b, a in bundles.items():
+        recs_b = [(t, t0, t1) for app2, t, s, kc, evid, t0, t1, b2 in dayrecs if b2 == b]
+        rows = con.execute("SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log "
+                           "WHERE bundle_id=? AND strftime('%Y-%m-%d',ts_ms/1000,'unixepoch')=? ORDER BY ts_ms",
+                           (b, day)).fetchall()
+        segs, curseg, dirty = [], [], False
+        for ts, c, bs, md in rows:
+            if (md & 7) != 0: continue
+            if bs:
+                # 选字数字后的退格删的是**已上屏汉字**(1BS=1字),按字母弹会产生乱拼音(ninitian→你你天)
+                # → 标脏段,整段跳过(宁缺毋错)
+                if curseg and curseg[-1][1].isdigit(): dirty = True
+                if curseg: curseg.pop()
+                continue
+            if not c: continue
+            if c in ("\n", "\r"):
+                if curseg: segs.append((curseg, dirty))
+                curseg, dirty = [], False
+            else:
+                curseg.append((ts, c))
+        # 尾段无 <CR> = 未发送,不收(草稿保护)
+        for seg, is_dirty in segs:
+            if is_dirty: continue
+            st0, st1 = seg[0][0], seg[-1][0]
+            s = ''.join(c for _, c in seg)
+            if len(s) < 4: continue
+            # 无选字数字(IME确认)且无≥4字母英文词:不敢解,跳过
+            if not any(ch.isdigit() for ch in s) and not re.search(r'[A-Za-z]{4,}', s): continue
+            fixed, _ = R.reconstruct_message('', s, model_fn=disambig)
+            ft = cv(fixed)
+            if len(ft) < 2 or not (R.has_han(ft) or re.search(r'[A-Za-z]{4,}', ft)): continue
+            # 消费判定(空格不敏感):文本被某记录包含 且 时间窗落在该记录窗内(±3s)→ 已消费
+            ftn = ft.replace(' ', '')
+            consumed = any(ftn in rt.replace(' ', '') and st0 >= (rt0 or 0) - 3000 and st1 <= (rt1 or 0) + 3000
+                           for rt, rt0, rt1 in recs_b)
+            if consumed or X.is_ph(ft) or is_residue(ft) or ft in seen: continue
+            seen.add(ft)
+            out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered"))
     RAW[day] = out; DROP[day] = drops
     print(f"  {day}: {len(out)} 条(14b disambig 调用累计 {R.DISAMBIG_CALLS[0]})", flush=True)
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
@@ -180,7 +224,7 @@ nd = ["# 新 pipeline·成品(阶段0 集成:librime + 14b disambig 重建)\n",
       "⚠️ 已知小瑕疵(待修):的/得(睡得 vs 睡的)、librime 词库无的 slang(卖个惨)、H/I 截断尾巴、canvas 跨app尾巴。\n",
       f"天数:{', '.join(DAYS)}\n", "---\n"]
 for day in DAYS:
-    out = [("ax_cleaned", t, a) for a, t, kc, *_ in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
+    out = [(rec[6], rec[1], rec[0]) for rec in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
     # 丢弃审计:漏斗每道闸 + Pass4,丢了什么 + 为什么 + event 时间
@@ -189,7 +233,7 @@ for day in DAYS:
     if not dr and not dd: nd.append("（无）\n")
     for stage, a, t, evid, t0, t1, reason in dr:
         nd.append(f"- `[{stage}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}` — {reason}\n  > {(t or '')[:300]}\n")
-    for (a, t, kc, evid, t0, t1), reason in dd:
+    for (a, t, kc, evid, t0, t1, *_), reason in dd:
         nd.append(f"- `[Pass4]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` — {reason or '(模型未给原因)'}\n  > {(t or '')[:300]}\n")
     nd.append("\n---\n")
 path = "/Users/joyzhang14/Desktop/Obsidian/Pipeline成品-新pipeline-阶段0.md"
