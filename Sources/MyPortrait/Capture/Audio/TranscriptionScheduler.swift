@@ -406,16 +406,18 @@ actor TranscriptionScheduler {
             return
         }
 
-        // 3. 写 sidecar JSON（多段时合并成一份全文）。
-        let fullText = records.map(\.text).joined(separator: " ")
-        writeTranscriptSidecar(wavPath: chunk.filePath, text: fullText, chunk: chunk, engine: settings.engine, transcribedAtMs: nowMs)
-
-        // 4. 写转录行到 DB（每段一行）。
+        // 3. 写转录行到 DB（每段一行），**成功后才写 sidecar JSON**。
+        //    顺序很重要:隐私删除(deleteAfter)会删掉窗口内 audio_chunks 行,
+        //    外键让迟到的 insertTranscription 失败 —— sidecar 若先写,刚被
+        //    用户删除的敏感全文会以 .transcript.json 复活在盘上。DB 是真相
+        //    镜像,sidecar 跟着 DB 走:insert 被拒就什么都不留。
         do {
             for record in records {
                 try await db.insertTranscription(record)
             }
             try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
+            let fullText = records.map(\.text).joined(separator: " ")
+            writeTranscriptSidecar(wavPath: chunk.filePath, text: fullText, chunk: chunk, engine: settings.engine, transcribedAtMs: nowMs)
             // 健康度埋点:成功转录并落 DB。Driver 比 chunksProduced 跟 chunksTranscribed
             // 拉差,持续走宽 → audio 路径正常。
             await AudioMetrics.shared.recordChunkTranscribed()
