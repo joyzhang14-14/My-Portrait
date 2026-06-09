@@ -95,6 +95,10 @@ def _verify_sources(patch: Patch, group: dict):
         elif _is_cjk(ch):                            # 规则6:中文每字过对应音节候选
             if ci >= len(cands) or ch not in cands[ci]:
                 return False, "rule6_cjk_not_in_candidate"
+            # 规则6b 反幻觉(可选):中文必须有真实「中文 commit」背书,不许从英文/latin 重解成中文
+            #   (gmail 只有 latin commit → 购买了 被拒;海报有 commit '海报' → 合法)
+            if group.get("require_cjk_commit_backed") and ch not in "".join(group.get("commits", [])):
+                return False, "rule6b_cjk_not_committed"
             ci += 1
         elif ch.isspace():
             continue
