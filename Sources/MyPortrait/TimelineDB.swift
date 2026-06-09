@@ -687,22 +687,71 @@ struct TimelineDB: Sendable {
     }
 
     /// Delete frames + audio transcriptions strictly *after* `cutoff`.
+    ///
+    /// 隐私删除("Delete last 15m/30m/1h")。只删 DB 行不够:
+    ///   - 截图 JPG / 录音 WAV 会留盘成孤儿(敏感内容还在磁盘上);
+    ///   - 窗口内还没转录的 audio_chunks 行不删的话,稍后被 TranscriptionScheduler
+    ///     转录,敏感文本会在"删除"之后重新出现。
+    /// 限制:跨 cutoff 的 MP4(开始于窗口之前)无法部分重编码,保留 —— 只删
+    /// 完整落在窗口内的 MP4(它的帧本来就全在删除范围里)。
     @discardableResult
     func deleteAfter(_ cutoff: Date) -> DeleteResult {
         guard exists else { return DeleteResult() }
         let cutoffMs = Self.dbMs(cutoff)
         // 同 deleteBefore:两条 DELETE 都触发 FTS5,必须走带分词器的 GRDB 连接。
+        var doomedMedia: [String] = []
+        var doomedAudio: [String] = []
         let r = withTokenizerWrite { db -> DeleteResult in
             var res = DeleteResult()
+            // 先收集窗口内媒体文件路径 —— 事务提交后再删盘(文件删除无法回滚,
+            // 不能在事务里做)。resolve 失败 = 文件已不在,没东西可删。
+            let snaps = try String.fetchAll(db, sql: """
+                SELECT snapshot_path FROM frames
+                WHERE snapshot_path IS NOT NULL AND timestamp_ms >= :ms
+                """, arguments: ["ms": cutoffMs])
+            let mp4s = try String.fetchAll(db, sql: """
+                SELECT file_path FROM video_chunks WHERE start_ts_ms >= :ms
+                """, arguments: ["ms": cutoffMs])
+            let wavs = try String.fetchAll(db, sql: """
+                SELECT file_path FROM audio_chunks WHERE recorded_at_ms >= :ms
+                """, arguments: ["ms": cutoffMs])
+            doomedMedia = (snaps + mp4s).compactMap(AssetPath.resolve)
+            doomedAudio = wavs.compactMap(AssetPath.resolve)
+
             try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms >= :ms",
                            arguments: ["ms": cutoffMs])
             res.frames = db.changesCount
+            try db.execute(sql: "DELETE FROM video_chunks WHERE start_ts_ms >= :ms",
+                           arguments: ["ms": cutoffMs])
+            try db.execute(sql: "DELETE FROM audio_chunks WHERE recorded_at_ms >= :ms",
+                           arguments: ["ms": cutoffMs])
             try db.execute(sql: "DELETE FROM audio_transcriptions WHERE transcribed_at_ms >= :ms",
                            arguments: ["ms": cutoffMs])
             res.audio = db.changesCount
             return res
         }
-        return r ?? DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
+        guard let result = r else {
+            return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
+        }
+        // 删盘(事务已提交)。硬护栏同 RetentionWorker.deleteFiles:只删
+        // ~/.portrait 树内文件 —— 历史 screenpipe import 的 audio_chunks 行
+        // 可能指向只读的 ~/.screenpipe 原始录音,绝不能删。
+        let fm = FileManager.default
+        let root = Storage.rootURL.path
+        let rootPrefix = root.hasSuffix("/") ? root : root + "/"
+        func safeRemove(_ path: String) {
+            guard path.hasPrefix(rootPrefix) else { return }
+            try? fm.removeItem(atPath: path)
+        }
+        for p in doomedMedia { safeRemove(p) }
+        for p in doomedAudio {
+            safeRemove(p)
+            // 同时删 .meta.json / .transcript.json(同名兄弟,sidecar 里有转录全文)。
+            let base = URL(fileURLWithPath: p).deletingPathExtension()
+            safeRemove(base.appendingPathExtension("meta.json").path)
+            safeRemove(base.appendingPathExtension("transcript.json").path)
+        }
+        return result
     }
 
     /// Speakers: pull a few representative transcripts so the LLM-driven
