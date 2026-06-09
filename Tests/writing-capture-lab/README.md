@@ -9,6 +9,7 @@ cd Tests/writing-capture-lab
 python3 test_evidence.py    # 阶段零
 python3 test_signals.py     # 阶段一(读 gitignore 的 send_signals.json;先跑 extract_fixtures.py 重生)
 python3 test_fixtures.py    # 阶段二(完全离线,读已提交的脱敏 cases.json);失败返回非零退出码
+python3 test_placeholder.py # 阶段三(占位符规则 §4 + #44/#45);失败返回非零退出码
 # 重生 fixture(需活库):python3 extract_fixtures.py(阶段一原始信号) / python3 export_fixtures.py(阶段二脱敏)
 ```
 
@@ -20,7 +21,12 @@ python3 test_fixtures.py    # 阶段二(完全离线,读已提交的脱敏 cases
   - 已导出:7 labeled / 12 草稿负样本 / 2 短真消息 / 2 粘贴 / 2 占位符 / 1 高频。
   - **延后阶段四**(LLM/重建依赖真数据,脱敏会破坏语义):`#41`(IME 尾巴重建)、`#42`(gmail→购买了 反幻觉)、
     AI 回复负样本。见规范"阻塞与决策"。
-- 阶段三(占位符+#44/45)→ 四(patch+验证器+#41/#42)→ 五(#40)→ 六(Pass4/Canvas)。待做。
+- **阶段三(占位符规则 §4 + #44/#45)**:`placeholder.py`(known 配置/匹配 + §4.2 决策表 + learned 审计-only)
+  + `test_placeholder.py`。✅
+  - #44/#45 修复:占位符靠「是占位符串 + 无物理击键」判 app 注入(**不分 commit/paste**,堵 commit 注入泄漏);
+    占位符整体删或整体留,**绝不剥前缀造「他说X」**。known 占位符受「有击键 + 有发送证据」例外保护。
+  - #41/#42(IME 重建/反幻觉)→ 延后阶段四(用户已确认)。
+- 阶段四(patch+验证器+#41/#42)→ 五(#40)→ 六(Pass4/Canvas)。待做。
 
 ## 阶段一 · 发送证据三分判据(2026-06 对抗工作流校准)
 真正判据 = **清空机制**(不是占位符 reset——草稿退光后框也出占位符):
