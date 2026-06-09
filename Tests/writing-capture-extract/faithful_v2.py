@@ -85,9 +85,10 @@ def disambig(p):
     except Exception:
         return None
 
-RAW = {}   # day -> [(app, text, is_send, kc)]
+RAW = {}   # day -> [(app, text, kc, evid, t0, t1)]
+DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每道闸丢弃的全记录(审计)
 for day in DAYS:
-    dayrecs = []
+    dayrecs = []; drops = []
     for (refs,) in con.execute("SELECT DISTINCT reference_typing_event_ids FROM writing_records_staged WHERE date_utc=? AND source IN('ax_cleaned','merged')", (day,)).fetchall():
         try: ids = [int(x) for x in json.loads(refs or '[]')]
         except: ids = []
@@ -104,19 +105,32 @@ for day in DAYS:
                 # 审计要求:event id + 时间窗随 record 全程传递(Pass4 丢弃要标 event 时间)
                 if cv(fixed): grp.append((app, cv(fixed), is_send, ev['id'], t0, t1))
         total = sum(len(t) for _, t, *_ in grp)
-        if total > 20 and kc < total // 4: continue                 # 组级击键 gate
+        if total > 20 and kc < total // 4:                          # 组级击键 gate
+            for a, t, s, evid, t0, t1 in grp:
+                drops.append(("组级击键gate", a, t, evid, t0, t1, f"组内容{total}字>击键{kc}×4,疑粘贴/预存"))
+            continue
         kst = ks_full.replace("<CR>", "").replace("<BS>", "").strip()
-        if kst.startswith("/"): continue                            # slash gate
+        if kst.startswith("/"):                                     # slash gate
+            for a, t, s, evid, t0, t1 in grp:
+                drops.append(("slash gate", a, t, evid, t0, t1, "组击键以/开头(命令输入)"))
+            continue
         for app, t, s, evid, t0, t1 in grp: dayrecs.append((app, t, s, kc, evid, t0, t1))
-    # dedup_truncated(类4/5a)+ is_residue + 精确去重
+    # dedup_truncated(类4/5a)+ is_residue + 占位符 + 精确去重 —— 每道闸的丢弃都记审计
     drecs = R.dedup_truncated([(t, s, a) for a, t, s, *_ in dayrecs], X.cover)
     keepset = set((t, s, a) for t, s, a in drecs)
     out, seen = [], set()
     for app, t, s, kc, evid, t0, t1 in dayrecs:
-        # #44/#45:占位符过滤(is_ph)搬回输出层 —— 集成时漏搬导致 'Type / for commands' 泄漏
-        if (t, s, app) in keepset and not is_residue(t) and not X.is_ph(t) and t not in seen:
+        if (t, s, app) not in keepset:
+            drops.append(("dedup_truncated", app, t, evid, t0, t1, "截断态草稿,内容被更长记录覆盖"))
+        elif is_residue(t):
+            drops.append(("is_residue", app, t, evid, t0, t1, "纯残渣(无中文主体)"))
+        elif X.is_ph(t):
+            drops.append(("占位符", app, t, evid, t0, t1, "known 占位符"))
+        elif t in seen:
+            drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
+        else:
             seen.add(t); out.append((app, t, kc, evid, t0, t1))
-    RAW[day] = out
+    RAW[day] = out; DROP[day] = drops
     print(f"  {day}: {len(out)} 条(14b disambig 调用累计 {R.DISAMBIG_CALLS[0]})", flush=True)
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
 os.makedirs(EVAL, exist_ok=True)
@@ -169,11 +183,14 @@ for day in DAYS:
     out = [("ax_cleaned", t, a) for a, t, kc, *_ in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
-    dd = DISCARDED.get(day, [])
-    nd.append(f"\n### 🗑️ Pass4 丢弃（{len(dd)}）\n")
-    if not dd: nd.append("（无）\n")
+    # 丢弃审计:漏斗每道闸 + Pass4,丢了什么 + 为什么 + event 时间
+    dr = DROP.get(day, []); dd = DISCARDED.get(day, [])
+    nd.append(f"\n### 🗑️ 丢弃审计（漏斗 {len(dr)} + Pass4 {len(dd)}）\n")
+    if not dr and not dd: nd.append("（无）\n")
+    for stage, a, t, evid, t0, t1, reason in dr:
+        nd.append(f"- `[{stage}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}` — {reason}\n  > {(t or '')[:300]}\n")
     for (a, t, kc, evid, t0, t1), reason in dd:
-        nd.append(f"- 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` · 原因:{reason or '(模型未给)'}\n  > {t[:160]}\n")
+        nd.append(f"- `[Pass4]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` — {reason or '(模型未给原因)'}\n  > {(t or '')[:300]}\n")
     nd.append("\n---\n")
 path = "/Users/joyzhang14/Desktop/Obsidian/Pipeline成品-新pipeline-阶段0.md"
 open(path, "w").write("\n".join(nd))
