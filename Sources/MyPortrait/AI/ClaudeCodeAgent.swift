@@ -166,8 +166,6 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         // 把 prompt 通过 stdin 喂给 claude --print 然后关掉 stdin(EOF
         // 触发 claude 开始处理)。写大块可能 block,派后台线程做。
         let stdinHandle = stdinPipe.fileHandleForWriting
-        // DEBUG: 把实际发的 prompt 一份转到 /tmp 方便排查
-        try? text.write(toFile: "/tmp/claude-agent-last-stdin.txt", atomically: false, encoding: .utf8)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 if let data = text.data(using: .utf8) {
