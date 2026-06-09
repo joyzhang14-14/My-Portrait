@@ -61,8 +61,8 @@ def withinSends(arr, ph, returns=()):    # [复用 extract_compare_v2.withinSend
 
 def newExtract(evs):    # [复用 extract_compare_v2.newExtract;返回 (text, 来源ev_id, ts) 便于建组]
     msgs = []; cur = None; cur_ev = None
-    def emit(m, ev, ts=None):
-        if m and len(m) >= 1: msgs.append({"text": m, "ev": ev, "ts": ts})
+    def emit(m, ev, ts=None, sent=True):   # sent=True:withinSends/reset 发出=已发送;False:末尾未发送草稿
+        if m and len(m) >= 1: msgs.append({"text": m, "ev": ev, "ts": ts, "sent": sent})
     for k, e in enumerate(evs):
         arr = e['arr']; cs = cstream(arr); endv = cv(e['endv']); endEmpty = emptyZW(e['endv'])
         ph = phMarkers(arr); delset = {cv(x.get('text', '') or '') for x in arr if x.get('kind') == 'delete'}
@@ -90,7 +90,7 @@ def newExtract(evs):    # [复用 extract_compare_v2.newExtract;返回 (text, �
             ns = cv(evs[k + 1]['ss'])
             if emptyZW(evs[k + 1]['ss']) or not related(ns, cur['text']):
                 emit(cur['text'], cur['ev'], cur['ts']); cur = None
-    if cur: emit(cur['text'], cur['ev'], cur['ts'])
+    if cur: emit(cur['text'], cur['ev'], cur['ts'], sent=False)   # 末尾未 reset 的 cur = 未发送草稿
     # 去重保序
     seen = set(); return [m for m in msgs if not (m['text'] in seen or seen.add(m['text']))]
 
@@ -202,7 +202,7 @@ def assemble_day(date):
                 out.append({"text": kept, "ev": m['ev'], "app": app, "url": url, "dropped": "not_handtyped"})
                 continue
             out.append({"text": kept, "raw_text": m['text'], "ev": m['ev'], "ts": m['ts'],
-                        "app": app, "url": url, "paste_removed": removed})
+                        "app": app, "url": url, "paste_removed": removed, "sent": m.get("sent", True)})
     return out
 
 if __name__ == "__main__":
