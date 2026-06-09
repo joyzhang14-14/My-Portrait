@@ -81,3 +81,26 @@ def box_clears_from_raw(edit_log, keystrokes, app, started):
         if ts is not None:
             out.append(_sig(app, acc, ts, prev_clear, "", False, 0, keystrokes))
     return out
+
+
+def author_evidence_from_entry(edit_log, idx, keystrokes):
+    """从某条 edit_log entry 提取作者证据(铁律:只记手打)。返回 AuthorEvidence 字段 dict。
+    - paste_detected:该 entry 是 paste(粘贴,非手打)
+    - app_injected:占位符 commit 且附近几乎无物理击键(app 注入,非用户输入)
+    - physical_key_backed:足够物理击键背书(用户亲手打)"""
+    e = edit_log[idx]
+    content = cv(e.get("text", "") or "")
+    kind = e.get("kind"); ts = e.get("ts")
+    paste = (kind == "paste")
+    prev = edit_log[idx - 1].get("ts") if idx > 0 and edit_log[idx - 1].get("ts") is not None else \
+           ((ts - 6000) if ts is not None else 0)
+    nbs = nonbs_keys(keystrokes, prev, ts) if ts is not None else 0
+    app_inj = is_ph(content) and nbs < 2
+    physical = (not paste) and (not app_inj) and nbs >= max(1, len(content) // 2)
+    return {
+        "physical_key_backed": physical,
+        "commit_backed": kind in ("commit", "paste"),
+        "paste_detected": paste,
+        "app_injected": app_inj,
+        "unknown_origin": False,
+    }
