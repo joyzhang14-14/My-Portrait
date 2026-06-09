@@ -137,6 +137,10 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
     m = LATIN_TAIL.search(cap)
     if m:
         residue = m.group().strip()
+        # 字面残渣保护(宁缺毋错):含大写字母(IME 拼音必是小写;G/Joyzhang14 是字面)
+        # 或单字母(g→个/e→呃 太险)→ 不解码,原样保留。AX 采到什么就是什么。
+        if any(c.isupper() for c in residue) or len(residue.replace(' ', '')) <= 1:
+            return cap, {'reason': 'literal_residue'}
         r_cap = residue.replace(' ', '').lower()
         kpicks = parse_picks(kseg)
         py_ks, pick_ks = (kpicks[-1][0], kpicks[-1][1]) if kpicks else ('', None)
