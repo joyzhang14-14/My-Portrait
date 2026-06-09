@@ -16,17 +16,31 @@ con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
 cv = R.cv
 HAN = R.HAN
 
-# 拼音前缀松弛:用户没打完(yo→yong),续文汉字的完整音节须以剩余字母开头。
-EXTS = ['', 'g', 'n', 'ng', 'i', 'u', 'o', 'e', 'a', 'ai', 'ei', 'ao', 'ou', 'an', 'en',
-        'ang', 'eng', 'ong', 'ia', 'ie', 'iao', 'iu', 'ian', 'in', 'iang', 'ing', 'iong',
-        'ua', 'uo', 'uai', 'ui', 'uan', 'un', 'uang', 'ue']
+# 合法音节表:从雾凇词库提取(每行带拼音,去重即全量),不探不存在的组合 → librime 调用数骤降。
+import glob, functools
+@functools.lru_cache(maxsize=1)
+def valid_syls():
+    s = set()
+    for f in glob.glob(os.path.join(R._RIME, 'ice', 'cn_dicts', '*.dict.yaml')):
+        for line in open(f, encoding='utf-8', errors='ignore'):
+            parts = line.rstrip('\n').split('\t')
+            if len(parts) >= 2 and parts[0] and HAN.match(parts[0][0]):
+                for syl in parts[1].split():
+                    if syl.isalpha(): s.add(syl.lower())
+    return s
 
+@functools.lru_cache(maxsize=2048)
+def syls_with_prefix(p):
+    """以击键剩余字母 p 开头的真实音节(前缀松弛:yo→yo/you/yong)。短的优先。"""
+    return tuple(sorted((s for s in valid_syls() if s.startswith(p)), key=len))
+
+@functools.lru_cache(maxsize=2048)
 def syl_cands(p):
     """p 若能整体解析成一个音节,返回其候选字集;否则 None。"""
     if not p or not p.isalpha(): return None
     top, syls = R.lattice(p)
     if len(syls) == 1:
-        return set(ch for c in syls[0][1] for ch in c if HAN.match(ch))
+        return frozenset(ch for c in syls[0][1] for ch in c if HAN.match(ch))
     return None
 
 def verify_tail(cont, leftover):
@@ -44,8 +58,8 @@ def verify_tail(cont, leftover):
         matched = False
         for plen in range(min(6, len(L)), 0, -1):        # 贪心:先试最长击键前缀
             p = L[:plen]
-            for ext in EXTS:                              # 完整音节 或 前缀松弛(yo→yong)
-                cs = syl_cands(p + ext)
+            for syl in syls_with_prefix(p):               # 只探真实音节(词库提取)
+                cs = syl_cands(syl)
                 if cs and ch in cs:
                     out.append(ch); L = L[plen:]; matched = True; break
             if matched: break
