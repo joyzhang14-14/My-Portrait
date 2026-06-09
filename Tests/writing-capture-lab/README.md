@@ -12,6 +12,7 @@ python3 test_fixtures.py    # 阶段二(完全离线,读已提交的脱敏 cases
 python3 test_placeholder.py # 阶段三(占位符规则 §4 + #44/#45);失败返回非零退出码
 python3 test_verifier.py    # 阶段四(确定性 patch 验证器 §5;纯算法无模型);失败返回非零退出码
 python3 test_trigger.py     # 阶段五(#40 触发判定/回退/击键去重 §6;确定性);失败返回非零退出码
+python3 test_stage6.py      # 阶段六(Pass4 状态机 + Canvas 约束 §7;确定性);失败返回非零退出码
 # 重生 fixture(需活库):python3 extract_fixtures.py(阶段一原始信号) / python3 export_fixtures.py(阶段二脱敏)
 ```
 
@@ -43,7 +44,17 @@ python3 test_trigger.py     # 阶段五(#40 触发判定/回退/击键去重 §6
   - **仅明确数据不一致触发**(AX漏已提交中文/拼音残渣/跨事件互补/逐段无法对齐),**长度只进风险分不单独触发**。
   - 所有重建走阶段四验证器;无法安全应用 → **回退 captured 标 partial/unrecoverable,绝不伪装 complete**(宁缺毋错)。
   - 跑通:`介绍的haibao→介绍的海报`(complete)/ `记录xyz→记录xyz`(重建失败回退 partial)。零云端。
-- 阶段六(Pass4/Canvas)。待做。
+- **阶段六(Pass4 状态机 + Canvas 约束 §7)**:`pass4.py`(按 (app,url) 分组 + 每条输入恰好覆盖一次校验 +
+  四状态)+ `canvas.py`(Canvas 约束)+ `test_stage6.py`。✅
+  - Pass4:accepted→最终 / rejected→discarded / 调用·解析·覆盖失败→**review_failed 留 staged 不删(绝不默认全留)**
+    / partial·draft·unknown·unrecoverable→not_applicable。每条输入恰好一个状态。
+  - Canvas(唯一允许云端路径):跨 app 合池只做候选发现 / 新增需帧演进+击键+文档身份 / 不用最长 OCR 补尾 /
+    不绕过 Canvas 专用 Pass4 / 同一 EvidenceResult 契约。
+
+## ✅ v5 规范六阶段(零~六)全部完成,7 套测试全离线绿
+零数据契约 / 一发送三分判据 / 二脱敏fixture / 三占位符+#44/#45 / 四确定性验证器 / 五#40触发回退 / 六Pass4+Canvas。
+\#41/#42 重建 harness(librime+Qwen3-1.7B MLX+验证器)端到端跑通。**全程 Python 实验室,未碰生产 Swift**
+(Swift 迁移是后续独立阶段,需用户批准)。
 
 ## 阶段一 · 发送证据三分判据(2026-06 对抗工作流校准)
 真正判据 = **清空机制**(不是占位符 reset——草稿退光后框也出占位符):
