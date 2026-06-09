@@ -139,35 +139,41 @@ LABELED = [
 # clean-clear 真发送正样本:取各 event 最长内容那条框清空(=主消息发送)
 CLEAN_SENT_EVENTS = [907, 423, 790]
 
-out = {"labeled": [], "draft_negatives": []}
-for name, ev, content, exp in LABELED:
-    c = pick(ev, content)
-    if c: out["labeled"].append(dict(c, name=name, expected=exp))
-    else: print(f"⚠️ 没找到 {name} ({content!r} in ev{ev})")
+def collect_labeled():
+    res = []
+    for name, ev, content, exp in LABELED:
+        c = pick(ev, content)
+        if c: res.append(dict(c, name=name, expected=exp))
+        else: print(f"⚠️ 没找到 {name} ({content!r} in ev{ev})")
+    for ev in CLEAN_SENT_EVENTS:
+        cs = [c for c in box_clears(ev) if c["ocr_label"] == "sent" or has_cjk(c["content"])]
+        if not cs: print(f"⚠️ ev{ev} 无框清空"); continue
+        c = max(cs, key=lambda x: x["content_len"])
+        res.append(dict(c, name=f"clean_sent_ev{ev}", expected="probable_sent"))
+    return res
 
-for ev in CLEAN_SENT_EVENTS:
-    cs = box_clears(ev)
-    cs = [c for c in cs if c["ocr_label"] == "sent" or has_cjk(c["content"])]
-    if not cs: print(f"⚠️ ev{ev} 无框清空"); continue
-    c = max(cs, key=lambda x: x["content_len"])
-    out["labeled"].append(dict(c, name=f"clean_sent_ev{ev}", expected="probable_sent"))
+def collect_draft_negatives(exclude_keys):
+    """全库 claude 扫:OCR 确认 draft 且 delete_pattern=backspace_erase 的干净草稿。"""
+    seen = set(exclude_keys); neg = []
+    for (ev,) in con.execute("SELECT id FROM typing_events WHERE bundle_id='com.anthropic.claudefordesktop' ORDER BY id"):
+        for c in box_clears(ev):
+            if c["ocr_label"] != "draft" or c["delete_pattern"] != "backspace_erase": continue
+            k = (c["ev_id"], c["content"])
+            if k in seen: continue
+            seen.add(k); neg.append(c)
+    return neg
 
-# ---- 草稿负样本:全库 claude 扫,OCR 确认 draft 且 delete_pattern=backspace_erase ----
-seen = {(c["ev_id"], c["content"]) for c in out["labeled"]}
-neg = []
-for (ev,) in con.execute("SELECT id FROM typing_events WHERE bundle_id='com.anthropic.claudefordesktop' ORDER BY id"):
-    for c in box_clears(ev):
-        if c["ocr_label"] != "draft": continue
-        if c["delete_pattern"] != "backspace_erase": continue
-        k = (c["ev_id"], c["content"])
-        if k in seen: continue
-        seen.add(k); neg.append(c)
-out["draft_negatives"] = neg
+def main():
+    labeled = collect_labeled()
+    neg = collect_draft_negatives({(c["ev_id"], c["content"]) for c in labeled})
+    out = {"labeled": labeled, "draft_negatives": neg}
+    os.makedirs(os.path.join(os.path.dirname(__file__), "fixtures"), exist_ok=True)
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "send_signals.json")
+    json.dump(out, open(path, "w"), ensure_ascii=False, indent=1)
+    print(f"导出:labeled {len(labeled)} 条,draft_negatives {len(neg)} 条 → {path}")
+    for c in labeled:
+        print(f"  {c['name']}: pattern={c['delete_pattern']} return={c['return_key']} "
+              f"ph={c['physical_key_support']} ocr={c['ocr_label']} 期望={c['expected']}")
 
-os.makedirs(os.path.join(os.path.dirname(__file__), "fixtures"), exist_ok=True)
-path = os.path.join(os.path.dirname(__file__), "fixtures", "send_signals.json")
-json.dump(out, open(path, "w"), ensure_ascii=False, indent=1)
-print(f"导出:labeled {len(out['labeled'])} 条,draft_negatives {len(out['draft_negatives'])} 条 → {path}")
-for c in out["labeled"]:
-    print(f"  {c['name']}: pattern={c['delete_pattern']} return={c['return_key']} "
-          f"ph={c['physical_key_support']} ocr={c['ocr_label']} 期望={c['expected']}")
+if __name__ == "__main__":
+    main()
