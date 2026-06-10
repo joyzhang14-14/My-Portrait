@@ -23,6 +23,26 @@ enum PortraitPaths {
         Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
     }
 
+    /// 消毒 LLM 返回的 slug 里的路径危险成分,**不改写合法 slug**(全量
+    /// slugify 会把已有文件的下划线名 `swift_ui` 改写成 `swift-ui`,
+    /// update 反而永远 miss):
+    ///  - 取路径最后一段:prompt 里的已有条目按目录组织,LLM 偶发照抄出
+    ///    "skills/swift_ui" 这类相对路径 —— 真正的概念名是叶子,这也跟
+    ///    扫描端取 `lastPathComponent` 当 slug 的口径一致
+    ///  - 去掉反斜杠、首部的 "."(".." 遍历 / 隐藏文件)和首尾空白
+    /// 清完为空 → nil,调用方按"缺 slug"处理。
+    static func sanitizeSlug(_ raw: String) -> String? {
+        // omittingEmptySubsequences: false → "skills/"(尾斜杠)的叶子是空串,
+        // 判 nil 让条目按"缺 slug"报错,而不是把目录名当概念名建出 skills.md。
+        let leaf = raw.split(separator: "/", omittingEmptySubsequences: false)
+            .last.map(String.init) ?? raw
+        var s = leaf.replacingOccurrences(of: "\\", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasPrefix(".") { s.removeFirst() }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
+    }
+
     /// 一次性迁移:portrait/speech_style/ → portrait/writing_style/。
     ///
     /// 1.2.x 之前 writing-style 链路叫 speech_style,文件夹 + 每个 .md 的
