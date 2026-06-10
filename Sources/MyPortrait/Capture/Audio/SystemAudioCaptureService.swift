@@ -48,6 +48,17 @@ actor SystemAudioCaptureService {
 
     private var isRunning: Bool = false
 
+    /// start() 重入闸(同 AudioCaptureService.starting):buildStream 里两个长
+    /// await(SCShareableContent 枚举 + startCapture)期间 isRunning 仍是 false,
+    /// `guard !isRunning` 挡不住重入 —— 没这道闸,effective 快速 true→false→true
+    /// 会放进第二个 start(),造出双 SCStream:先建好的那个引用被覆盖,永远没人
+    /// stopCapture(持续抓系统音频),两路样本还交错灌进同一个 VADRecorder。
+    /// 第一个 await 之前**同步**置位。
+    private var starting: Bool = false
+    /// stop() 落在 start() 的 await 窗口里时(starting=true,stream/infra 都是
+    /// start 正在建的,不能拆),记下"要停",由 start() 收尾后自行补一次 stop()。
+    private var stopRequestedWhileStarting: Bool = false
+
     /// 长期稳定的段事件流 —— 与 VADRecorder 生命周期解耦。见 AudioCaptureService 同名注释。
     nonisolated let segmentEventStream: AsyncStream<AudioSegmentEvent>
     private let segmentEventCont: AsyncStream<AudioSegmentEvent>.Continuation
@@ -69,7 +80,10 @@ actor SystemAudioCaptureService {
     // MARK: - 生命周期
 
     func start() async {
-        guard !isRunning else { return }
+        guard !isRunning, !starting else { return }
+        starting = true
+        stopRequestedWhileStarting = false   // 清上一轮可能残留的标志
+        defer { starting = false }
 
         do {
             try FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
@@ -110,9 +124,24 @@ actor SystemAudioCaptureService {
 
         isRunning = true
         logger.info("SystemAudioCaptureService started (ScreenCaptureKit)")
+
+        // start 挂在 buildStream 期间有 stop() 进来过 → 这里补执行,
+        // 否则开关已关而流还在跑。先解闸,stop() 的 starting 分支才不会误判。
+        if stopRequestedWhileStarting {
+            stopRequestedWhileStarting = false
+            starting = false
+            await stop()
+        }
     }
 
     func stop() async {
+        // start() 还挂在 buildStream 的 await 上:此刻无 stream 可关,infra
+        // 是 start 正在用的,直接拆会撕掉它脚下的东西。记标志让 start()
+        // 完成后自己调 stop() 收尾。
+        if starting {
+            stopRequestedWhileStarting = true
+            return
+        }
         guard isRunning || stream != nil else {
             isRunning = false
             return

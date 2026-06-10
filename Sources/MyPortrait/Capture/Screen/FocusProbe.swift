@@ -66,6 +66,8 @@ actor FocusProbe {
     /// 遍历,主线程当场跪。
     private let refreshMinIntervalMs: Int64 = 300
     private var lastRefreshAtMs: Int64 = 0
+    /// 节流命中后是否已调度尾沿补刷。防止通知风暴期间重复调度。
+    private var trailingRefreshScheduled = false
 
     private var cached: FocusInfo = FocusInfo(
         appName: "Unknown",
@@ -148,7 +150,22 @@ actor FocusProbe {
         // 单调时钟:用 wall-clock 的话 NTP/手动回拨会让 delta 变负 → 永远早退、
         // focus 卡在旧 app(本文件别处 238/342/379 也用 uptime)。
         let nowMs = Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
-        if nowMs - lastRefreshAtMs < refreshMinIntervalMs { return }
+        let elapsedMs = nowMs - lastRefreshAtMs
+        if elapsedMs < refreshMinIntervalMs {
+            // 尾沿补刷:节流是前沿丢弃,若直接 return,风暴里最后一条通知
+            // (快速 Cmd-Tab A→B→C 的 C)会被永久吞掉 —— cached 停在旧 app,
+            // DRMGate / 暂停名单读到过期焦点,直到下次 app 切换才恢复。
+            // 这里调度一次延迟刷新兜底,保证风暴结束后 cached 收敛到真实前台。
+            if !trailingRefreshScheduled {
+                trailingRefreshScheduled = true
+                let delayMs = refreshMinIntervalMs - elapsedMs + 10   // +10ms 余量,防边界再次命中节流
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                    await self?.consumeTrailingRefresh()
+                }
+            }
+            return
+        }
         lastRefreshAtMs = nowMs
 
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
@@ -188,6 +205,13 @@ actor FocusProbe {
             axIdentifier: axIdentifier,
             isFocused: true
         )
+    }
+
+    /// 尾沿补刷入口:清掉调度标记再走正常 refresh()。若期间又有前沿刷新把
+    /// lastRefreshAtMs 推后、导致这次再被节流,refresh 会重新调度尾沿,最终必刷。
+    private func consumeTrailingRefresh() async {
+        trailingRefreshScheduled = false
+        await refresh()
     }
 
     /// 调 AX 抓窗口标题 + URL（仅浏览器）+ AX tree 文本子树。

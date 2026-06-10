@@ -201,7 +201,12 @@ actor CompactionWorker {
         // array (with snapshotPath still pointing at JPGs we just deleted)
         // to refetch from DB.
         let affectedDay = Date(timeIntervalSince1970: TimeInterval(firstFrame.timestampMs) / 1000)
-        NotificationCenter.default.post(name: .timelineFramesChanged, object: affectedDay)
+        // NotificationCenter 观察者在 post 所在线程同步执行;这里是后台 actor
+        // 线程,而 TimelineView 的 onReceive 没有 receive(on: main),会在非主
+        // 线程改 SwiftUI state。切回主线程再 post。
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .timelineFramesChanged, object: affectedDay)
+        }
     }
 
     /// 读 JPG → CGImage。失败返回 nil。

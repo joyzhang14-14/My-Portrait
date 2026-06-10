@@ -39,7 +39,12 @@ actor AudioCaptureService {
     // VAD/写盘后端
     private var vadRecorder: VADRecorder?
 
-    private var samplesContinuation: AsyncStream<[Float]>.Continuation?
+    /// tap 回调 → samplesTask 的有序通道(单生产者 FIFO,保证样本顺序;同
+    /// SystemAudioCaptureService.sampleStream pattern)。tap 回调线程上只做
+    /// 非阻塞 yield 原始 buffer,转换在 samplesTask 里串行做 —— 旧实现每个
+    /// buffer 起独立非结构化 Task,无任何顺序保证,高载(转录把 CPU 打满)时
+    /// buffer 乱序过 converter(内部带重采样状态)→ wav 样本错位、转录乱文。
+    private var samplesContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private var samplesTask: Task<Void, Never>?
 
     /// start() 第一行的 `await requestMicrophonePermission` 是 actor 让位点;
@@ -242,8 +247,8 @@ actor AudioCaptureService {
         }
         converter = conv
 
-        var c: AsyncStream<[Float]>.Continuation!
-        let stream = AsyncStream<[Float]> { cont in c = cont }
+        var c: AsyncStream<AVAudioPCMBuffer>.Continuation!
+        let stream = AsyncStream<AVAudioPCMBuffer> { cont in c = cont }
         samplesContinuation = c
 
         // 蓝牙输入设备投递抖动大（±200ms），用更大的 tap 缓冲吸收抖动。
@@ -260,11 +265,10 @@ actor AudioCaptureService {
         var startError: Error?
         let nsErr = MyPortraitObjCTryCatch {
             inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
-                [weak self] buffer, _ in
-                guard let self else { return }
-                Task { [weak self] in
-                    await self?.performConversion(buffer: buffer)
-                }
+                [cont = c!] buffer, _ in
+                // 实时回调:只做非阻塞 yield 进有序通道,转换由 samplesTask
+                // 串行消费。stop() finish 通道后 yield 自动变 no-op。
+                cont.yield(buffer)
             }
             do { try engine.start() } catch { startError = error }
         }
@@ -289,8 +293,14 @@ actor AudioCaptureService {
         Task { @MainActor in AudioDevicesMonitor.shared.setActiveUID(activeUID) }
 
         let recorder = vadRecorder
-        samplesTask = Task {
-            for await samples in stream {
+        // conv/target 按值捕获:stop() 会同步把 self.converter 置 nil,但排干
+        // 阶段(finish 之后)仍要把通道里剩余 buffer 转完喂给 recorder,防丢
+        // 正在说的最后一段 —— 不能依赖 actor 字段。
+        samplesTask = Task { [weak self] in
+            for await buffer in stream {
+                guard let samples = await self?.performConversion(
+                    buffer: buffer, converter: conv, targetFormat: target
+                ) else { continue }
                 await recorder?.feed(samples)
             }
         }
@@ -373,15 +383,17 @@ actor AudioCaptureService {
         return nil
     }
 
-    private func performConversion(buffer: AVAudioPCMBuffer) {
-        guard let converter, let targetFormat, let cont = samplesContinuation else { return }
-
+    /// 单个 tap buffer → 16kHz mono [Float]。只被 samplesTask 串行调用
+    /// (converter 内部带重采样状态,必须单消费者按序使用)。
+    private func performConversion(
+        buffer: AVAudioPCMBuffer, converter: AVAudioConverter, targetFormat: AVAudioFormat
+    ) -> [Float]? {
         let inputFrames = AVAudioFrameCount(buffer.frameLength)
         let outputCapacity = AVAudioFrameCount(
             Double(inputFrames) * 16_000 / buffer.format.sampleRate
         ) + 256
         guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputCapacity) else {
-            return
+            return nil
         }
 
         var error: NSError?
@@ -402,7 +414,7 @@ actor AudioCaptureService {
         guard status != .error, error == nil, output.frameLength > 0,
               let channelData = output.floatChannelData
         else {
-            return
+            return nil
         }
         let count = Int(output.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: count))
@@ -410,7 +422,7 @@ actor AudioCaptureService {
         if conversionCount == 1 || conversionCount % 150 == 0 {
             logger.notice("tap buffer converted: count=\(self.conversionCount, privacy: .public) samples=\(count, privacy: .public)")
         }
-        cont.yield(samples)
+        return samples
     }
 
     // MARK: - 设备热插拔
