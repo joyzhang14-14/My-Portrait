@@ -128,14 +128,20 @@ protocol PortraitDB: Sendable {
 
     /// 早于 `ms` 的所有媒体文件路径快照。
     /// RetentionWorker 先用这个清单删盘上文件，再调 `applyRetention(...)` 清 DB。
-    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList
+    /// `excludeUntranscribedAudio` 开(wait_for_transcription 设置,默认开)→
+    /// 还没转录完的音频(pending / in_progress / 还会重试的 failed)不进清单,
+    /// 等转录产出文本后下一轮再删 —— 否则转录积压超过保留期时,mediaOnly
+    /// 承诺保留的文本随文件一起永久丢失。
+    func mediaPathsBefore(ms: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionFileList
 
     /// 按 `mode` 清 DB：
     /// - `.mediaOnly`：NULL 掉 frames.snapshot_path / video_chunk_id；DELETE 旧 video_chunks。
     ///   保留 frames 行（含 OCR 文本）和 audio_chunks 行（含转录）。
     /// - `.everything`：DELETE frames / video_chunks / audio_chunks 三表所有早于 ms 的行。
     ///   audio_chunks DELETE CASCADE 到 audio_transcriptions。
-    func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats
+    /// `excludeUntranscribedAudio` 开 → `.everything` 也不删未转录 chunk 的行
+    /// (与 `mediaPathsBefore` 保持行/文件一致,否则文件留着行没了 → 永久孤儿)。
+    func applyRetention(mode: RetentionMode, beforeMs: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionStats
 
     // MARK: - 读 (UI 用)
 

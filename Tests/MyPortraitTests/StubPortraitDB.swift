@@ -103,11 +103,11 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.nameSpeakerIfUnnamed")
     }
 
-    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
+    func mediaPathsBefore(ms: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionFileList {
         throw reporter.notImplemented("StubPortraitDB.mediaPathsBefore")
     }
 
-    func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats {
+    func applyRetention(mode: RetentionMode, beforeMs: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionStats {
         throw reporter.notImplemented("StubPortraitDB.applyRetention")
     }
 

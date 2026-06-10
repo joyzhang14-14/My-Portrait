@@ -53,7 +53,7 @@ actor RetentionWorker {
 
     /// 立即跑一轮（调试 / 手动按钮 / 测试用）。
     func runOnce() async {
-        let (days, mode) = readSettings()
+        let (days, mode, waitForTranscription) = readSettings()
         guard let cutoffDays = days, mode != .off else {
             // forever 或 off → 不动数据
             return
@@ -62,13 +62,14 @@ actor RetentionWorker {
         let cutoffMs = Int64(now.timeIntervalSince1970 * 1000) - Int64(cutoffDays * 86400 * 1000)
         let modeRetention: RetentionMode = (mode == .mediaOnly) ? .mediaOnly : .everything
 
-        logger.info("retention pass starting: mode=\(mode.rawValue, privacy: .public), cutoff_days=\(cutoffDays), cutoff_ms=\(cutoffMs)")
+        logger.info("retention pass starting: mode=\(mode.rawValue, privacy: .public), cutoff_days=\(cutoffDays), cutoff_ms=\(cutoffMs), wait_for_transcription=\(waitForTranscription, privacy: .public)")
         let started = Date()
 
-        // 1. 拿文件清单
+        // 1. 拿文件清单(wait_for_transcription 开 → 未转录音频不进清单,
+        //    等转录产出文本后下一轮再删)
         let files: RetentionFileList
         do {
-            files = try await db.mediaPathsBefore(ms: cutoffMs)
+            files = try await db.mediaPathsBefore(ms: cutoffMs, excludeUntranscribedAudio: waitForTranscription)
         } catch {
             logger.error("mediaPathsBefore failed: \(String(describing: error), privacy: .public)")
             return
@@ -81,7 +82,7 @@ actor RetentionWorker {
         // 3. 清 DB
         let stats: RetentionStats
         do {
-            stats = try await db.applyRetention(mode: modeRetention, beforeMs: cutoffMs)
+            stats = try await db.applyRetention(mode: modeRetention, beforeMs: cutoffMs, excludeUntranscribedAudio: waitForTranscription)
         } catch {
             logger.error("applyRetention failed: \(String(describing: error), privacy: .public)")
             return
@@ -93,7 +94,7 @@ actor RetentionWorker {
 
     // MARK: - 私有
 
-    private func readSettings() -> (days: Int?, mode: AutoDeleteMode) {
+    private func readSettings() -> (days: Int?, mode: AutoDeleteMode, waitForTranscription: Bool) {
         let s = ConfigStore.snapshot
 
         let retention = RetentionDays(rawValue: s.retentionDays) ?? .d30
@@ -110,7 +111,7 @@ actor RetentionWorker {
 
         let mode = AutoDeleteMode(rawValue: s.autoDeleteMode) ?? .off
 
-        return (days, mode)
+        return (days, mode, s.waitForTranscription)
     }
 
     private func deleteFiles(_ files: RetentionFileList) {

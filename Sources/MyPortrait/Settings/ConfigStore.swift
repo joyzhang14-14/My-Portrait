@@ -124,6 +124,7 @@ final class ConfigStore {
              dataDirectory: current.storage.dataDirectory,
              retentionDays: current.storage.retentionDays,
              autoDeleteMode: current.storage.autoDeleteMode,
+             waitForTranscription: current.storage.waitForTranscription,
              preferredInputDeviceUID: current.capture.audio.preferredInputDeviceUID
          )
          Self.snapshotLock.withLock { Self.snapshotValue = next }

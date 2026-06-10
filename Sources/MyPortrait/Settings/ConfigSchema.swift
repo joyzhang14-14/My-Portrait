@@ -824,11 +824,16 @@ struct StorageConfig: Codable, Equatable {
     var dataDirectory:  String = ""
     var retentionDays:  String = "d30"
     var autoDeleteMode: String = "mediaOnly"
+    /// 自动删除时,还没转录的音频文件先留着,等转录完成后下一轮再删 ——
+    /// 否则转录积压超过保留期时,mediaOnly 承诺保留的文本永久丢失。
+    /// 关掉 = 到期无条件删。
+    var waitForTranscription: Bool = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case dataDirectory  = "data_directory"
         case retentionDays  = "retention_days"
         case autoDeleteMode = "auto_delete_mode"
+        case waitForTranscription = "wait_for_transcription"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -836,6 +841,7 @@ struct StorageConfig: Codable, Equatable {
         dataDirectory  = c.dflt(String.self, .dataDirectory, dataDirectory)
         retentionDays  = c.dflt(String.self, .retentionDays, retentionDays)
         autoDeleteMode = c.dflt(String.self, .autoDeleteMode, autoDeleteMode)
+        waitForTranscription = c.dflt(Bool.self, .waitForTranscription, waitForTranscription)
     }
 }
 
