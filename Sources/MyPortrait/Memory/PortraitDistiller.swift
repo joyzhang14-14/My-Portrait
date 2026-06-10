@@ -315,7 +315,15 @@ final class PortraitDistiller {
         var out: [ParsedDecision] = []
         for (idx, entry) in arr.enumerated() {
             let action = (entry["action"] as? String) ?? "noop"
-            let slug = (entry["slug"] as? String) ?? ""
+            let rawSlug = (entry["slug"] as? String) ?? ""
+            // 写盘前消毒:LLM 偶发照抄目录化路径("skills/swift_ui")或带遍历
+            // 成分("../")—— 不消毒的话文件落进嵌套子目录(甚至画像树外),
+            // update 按 categoryDir+slug 拼路径永远 miss,同一概念反复 create
+            // 分叉。详见 PortraitPaths.sanitizeSlug。
+            let slug = PortraitPaths.sanitizeSlug(rawSlug) ?? ""
+            if !rawSlug.isEmpty, slug != rawSlug {
+                print("[PortraitDistiller] sanitized LLM slug '\(rawSlug)' → '\(slug)'")
+            }
             let title = (entry["title"] as? String) ?? ""
             let body = (entry["body"] as? String) ?? ""
             let derived = (entry["derived_from"] as? [String]) ?? []

@@ -436,7 +436,10 @@ final class PersonalityMerger {
             let description: String? = (descRaw?.isEmpty ?? true) ? nil : descRaw
             switch action {
             case "mergeInto":
-                guard let slug = obj["conceptSlug"] as? String, !slug.isEmpty else { continue }
+                // conceptSlug 是 LLM 原样返回的,跟 createNew 的 slugify 产物
+                // 不同 —— 消毒路径危险成分(带 "/" 会写出 personality 目录外)。
+                guard let rawSlug = obj["conceptSlug"] as? String,
+                      let slug = PortraitPaths.sanitizeSlug(rawSlug) else { continue }
                 out.append(.mergeInto(conceptSlug: slug, cluster: cluster, description: description))
             case "createNew":
                 out.append(.createNew(cluster: cluster, description: description))
