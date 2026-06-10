@@ -133,6 +133,47 @@ def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts
     return text, {'why': '所有帧锚定/击键验证未过'}
 
 
+def proofread_tail(app_short, text, model_tail, send_ts, leftover_keys, url=None, other_texts=()):
+    """校对模式:Phase1 **模型参与重建**的尾巴,用 OCR 渲染事实核对(的/得、哟/用、同音错一族)。
+    base = text 去掉模型尾;锚定 base;OCR 续文过击键验证后若与模型尾不同 → 以屏幕为准。
+    护栏同补尾:不变短 / 不粘下一条 / 验证不过不动。"""
+    mt = cv(model_tail).replace(' ', '')
+    if not mt or not cv(text).endswith(mt):
+        return text, {'why': '无模型尾/对不上'}
+    base = text[:len(text) - len(model_tail)]
+    if len(cv(base)) < 3:
+        return text, {'why': 'base太短无法锚定(全残渣需前条锚,待建)'}
+    frames = pick_frames(app_short, url, send_ts)
+    if not frames:
+        return text, {'why': '无同app/url帧'}
+    others = [cv(o).replace(' ', '') for o in other_texts if o]
+    han_mt = sum(1 for ch in mt if not ch.isascii())
+    for ts, ft in frames:
+        ft = ft or ''
+        for k in (6, 5, 4, 3):
+            anchor = cv(base)[-k:]
+            if len(anchor) < 3: continue
+            idx = ft.find(anchor)
+            if idx < 0: continue
+            cont = ft[idx + len(anchor): idx + len(anchor) + len(model_tail) + 12]
+            tail, consumed = verify_tail(cont, leftover_keys)
+            tn = cv(tail).replace(' ', '')
+            if tn == mt:
+                return text, {'why': 'OCR与模型一致,校对通过'}
+            # 替换护栏(不过 → 换下一帧再看,不轻举妄动):
+            # 长度不短于模型尾 / 消费 ≥2×汉字数(哟 来自2字母,杂讯 g 消费1 拒)/
+            # 同类(汉字尾不能换成纯ASCII)/ 不粘下一条
+            ok = (tn and len(tn) >= len(mt)
+                  and consumed >= max(2, 2 * han_mt)
+                  and (han_mt == 0 or any(not ch.isascii() for ch in tn))
+                  and not any(o.startswith(tn) for o in others))
+            if ok:
+                return base + tail, {'fixed': True, 'via': '校对', 'frame_ts': ts,
+                                     'model_tail': model_tail, 'ocr_tail': tail, 'consumed': consumed}
+            break                                         # 本帧不行,换下一帧
+    return text, {'why': '所有帧校对未过(或与模型一致性未确认),保守不动'}
+
+
 # ---- 标注案例测试 ----
 def keys_segment(bundle, send_ts):
     """该消息的击键 <CR> 段(消息边界天然在 <CR>):取最后一键最接近 send_ts(±6s)的段。

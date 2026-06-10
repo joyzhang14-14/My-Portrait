@@ -103,6 +103,7 @@ def disambig(p):
 RAW = {}   # day -> [(app, text, kc, evid, t0, t1)]
 DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每道闸丢弃的全记录(审计)
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
+PROOF = {}  # (evid, text) -> 模型重建的尾巴 —— 凡模型参与选字的尾巴,Phase1.5 强制 OCR 校对(的/得、哟/用一族)
 for day in DAYS:
     dayrecs = []; drops = []; c3fix = []
     for (refs,) in con.execute("SELECT DISTINCT reference_typing_event_ids FROM writing_records_staged WHERE date_utc=? AND source IN('ax_cleaned','merged')", (day,)).fetchall():
@@ -119,9 +120,15 @@ for day in DAYS:
                 kw = R.keys_in_window(con, ev['bundle'], t0, t1)
                 # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
                 ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)
-                fixed, _ = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
+                fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
                 # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
-                if cv(fixed): grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
+                if cv(fixed):
+                    grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
+                    mt = ''
+                    for li in rinfo.get('lines', []):
+                        if li.get('reason') == 'rebuilt' and li.get('tail_text'): mt = li['tail_text']
+                        elif li.get('reason') == 'residue' and li.get('han'): mt = li['han']
+                    if mt: PROOF[(ev['id'], cv(fixed))] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
         total = sum(len(t) for _, t, *_ in grp)
         if total > 20 and kc < total // 4:                          # 组级击键 gate
             for a, t, s, evid, t0, t1, b in grp:
@@ -206,16 +213,22 @@ for day in DAYS:
             letters = len(re.sub(r'[^a-zA-Z]', '', seg0))
             need_est = sum(3 if not ch.isascii() else 1 for ch in cv(t))   # CJK≈3字母/字(拼音)
             needs = letters > need_est + 6
-        if not needs:
+        mt = PROOF.get((evid, t), '')
+        if not needs and not mt:
             out2.append(rec); continue
         u = None
         if evid:
             ur = con.execute("SELECT url FROM typing_events WHERE id=:i", {"i": evid}).fetchone()
             u = ur[0] if ur else None
         others = [r2[1] for j, r2 in enumerate(recs_sorted) if j != i and r2[7] == b]
-        nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0),
-                                    url=u, other_texts=others)
-        via = "口3-OCR"
+        if needs:
+            nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0),
+                                        url=u, other_texts=others)
+            via = "口3-OCR"
+        else:   # 机器选字尾 → OCR 校对(渲染事实覆盖模型选字:睡得→睡的)
+            nt, info = C3.proofread_tail(a, t, mt, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0),
+                                         url=u, other_texts=others)
+            via = "口3-校对"
         if nt == t:                                      # OCR 没修上 → 双向语境重试 14B
             ctx2 = f"app:{a}\n邻近消息:\n" + ctx_window(timeline[:i], t0 or 0, after=timeline[i + 1:])
             kw2 = R.keys_in_window(con, b, t0, t1)
