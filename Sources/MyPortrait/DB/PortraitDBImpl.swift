@@ -272,6 +272,58 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 跨通道转录去重(外放回录,见 TranscriptDeduper)
+
+    func transcriptionsForDedup(isInput: Bool, fromMs: Int64, toMs: Int64) async throws -> [TranscriptDeduper.Segment] {
+        try await dbPool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT t.id AS tid, t.text AS text, t.speaker_id AS speakerId,
+                       ac.recorded_at_ms AS recMs, t.start_s AS startS, t.end_s AS endS
+                FROM audio_transcriptions t
+                JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+                WHERE ac.is_input = :isInput
+                  AND ac.recorded_at_ms >= :fromMs AND ac.recorded_at_ms <= :toMs
+                """, arguments: ["isInput": isInput, "fromMs": fromMs, "toMs": toMs])
+            return rows.map { row in
+                let recMs: Int64 = row["recMs"]
+                let startS: Double = row["startS"]
+                let endS: Double = row["endS"]
+                return TranscriptDeduper.Segment(
+                    id: row["tid"],
+                    absStartMs: recMs + Int64(startS * 1000),
+                    absEndMs: recMs + Int64(endS * 1000),
+                    speakerId: row["speakerId"],
+                    text: row["text"]
+                )
+            }
+        }
+    }
+
+    func deleteTranscriptions(ids: [Int64]) async throws {
+        guard !ids.isEmpty else { return }
+        try await dbPool.write { db in
+            // 动态变长 IN 子句:显式 StatementArguments 包装(铁律,不能用数组字面量)。
+            // dbPool 在 init 时注册了 FoundationTokenizer,transcriptions_fts 的
+            // 同步删除触发器在这条连接上能跑。
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            try db.execute(
+                sql: "DELETE FROM audio_transcriptions WHERE id IN (\(placeholders))",
+                arguments: StatementArguments(ids)
+            )
+        }
+    }
+
+    func audioChunkTimeRangeMs() async throws -> (minMs: Int64, maxMs: Int64)? {
+        try await dbPool.read { db in
+            let row = try Row.fetchOne(db, sql: "SELECT MIN(recorded_at_ms) AS lo, MAX(recorded_at_ms) AS hi FROM audio_chunks")
+            guard let row else { return nil }
+            let lo: Int64? = row["lo"]
+            let hi: Int64? = row["hi"]
+            guard let lo, let hi else { return nil }   // 空表时 MIN/MAX 为 NULL
+            return (lo, hi)
+        }
+    }
+
     // MARK: - 说话人识别（speaker diarization）
 
     /// 余弦相似度阈值。> 此值判定同一说话人（对齐 screenpipe 的 0.45）。

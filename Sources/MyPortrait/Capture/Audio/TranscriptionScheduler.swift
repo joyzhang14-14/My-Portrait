@@ -414,6 +414,17 @@ actor TranscriptionScheduler {
             return
         }
 
+        // 2.5 跨通道去重:外放通话时对方声音从扬声器出来,loopback 数字直录一份、
+        //     mic 隔空拾取又一份 → 同句双行。mic 段撞已落库的 loopback 段 → 丢
+        //     mic 段;loopback 段撞已落库的 mic 段 → 删那些 mic 行、本段照常入库
+        //     (loopback 直录质量好,保留它)。详见 TranscriptDeduper。
+        records = await dedupCrossChannel(chunk: chunk, records: records)
+        guard !records.isEmpty else {
+            // mic 份全部是 loopback 已录内容 → 本 chunk 不留文本,标 done。
+            try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .done)
+            return
+        }
+
         // 3. 写转录行到 DB（每段一行），**成功后才写 sidecar JSON**。
         //    顺序很重要:隐私删除(deleteAfter)会删掉窗口内 audio_chunks 行,
         //    外键让迟到的 insertTranscription 失败 —— sidecar 若先写,刚被
@@ -432,6 +443,72 @@ actor TranscriptionScheduler {
         } catch {
             logger.error("DB insertTranscription failed: \(String(describing: error), privacy: .public)")
             try? await db.recordAudioChunkFailure(chunkId: chunkId)
+        }
+    }
+
+    /// 跨通道去重(transcribeOne 的 2.5 步)。查询/删除失败 → 原样放行,
+    /// 宁可留重复也不丢转录。
+    ///
+    /// 注:被删 mic 行所属 chunk 的 .transcript.json sidecar 不回写 ——
+    /// sidecar 只是调试镜像,DB 才是真相。
+    private func dedupCrossChannel(
+        chunk: AudioChunkRecord,
+        records: [TranscriptionRecord]
+    ) async -> [TranscriptionRecord] {
+        let chunkEndMs = chunk.recordedAtMs + Int64(chunk.durationS * 1000)
+        let newSegs = records.map { rec in
+            TranscriptDeduper.Segment(
+                id: nil,
+                absStartMs: chunk.recordedAtMs + Int64(rec.startS * 1000),
+                absEndMs: chunk.recordedAtMs + Int64(rec.endS * 1000),
+                speakerId: rec.speakerId,
+                text: rec.text
+            )
+        }
+        let candidates: [TranscriptDeduper.Segment]
+        do {
+            candidates = try await db.transcriptionsForDedup(
+                isInput: !chunk.isInput,
+                fromMs: chunk.recordedAtMs - TranscriptDeduper.lookbackMs,
+                toMs: chunkEndMs + TranscriptDeduper.slackMs
+            )
+        } catch {
+            logger.warning("cross-channel dedup query failed, keeping all segments: \(String(describing: error), privacy: .public)")
+            return records
+        }
+        guard !candidates.isEmpty else { return records }
+
+        if chunk.isInput {
+            // mic 新段:对上 loopback 已有段 → 丢弃。
+            var kept: [TranscriptionRecord] = []
+            for (i, rec) in records.enumerated() {
+                if candidates.contains(where: { TranscriptDeduper.isDuplicate(newSegs[i], $0) }) {
+                    continue
+                }
+                kept.append(rec)
+            }
+            let dropped = records.count - kept.count
+            if dropped > 0 {
+                logger.info("cross-channel dedup: dropped \(dropped, privacy: .public) mic segment(s) already captured via system_loopback")
+            }
+            return kept
+        } else {
+            // loopback 新段:对上 mic 已有段 → 删 mic 行,本段照常入库。
+            var doomedIds = Set<Int64>()
+            for seg in newSegs {
+                for cand in candidates where TranscriptDeduper.isDuplicate(seg, cand) {
+                    if let id = cand.id { doomedIds.insert(id) }
+                }
+            }
+            if !doomedIds.isEmpty {
+                do {
+                    try await db.deleteTranscriptions(ids: Array(doomedIds))
+                    logger.info("cross-channel dedup: deleted \(doomedIds.count, privacy: .public) mic segment(s) superseded by system_loopback")
+                } catch {
+                    logger.warning("cross-channel dedup delete failed (duplicates remain): \(String(describing: error), privacy: .public)")
+                }
+            }
+            return records
         }
     }
 

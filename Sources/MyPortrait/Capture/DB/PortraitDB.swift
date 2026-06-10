@@ -83,6 +83,20 @@ protocol PortraitDB: Sendable {
     /// 返回受影响的行数。
     func resetRetryableFailedAudioChunks() async throws -> Int
 
+    // MARK: - 跨通道转录去重(外放回录,见 TranscriptDeduper)
+
+    /// 取某一通道在 [fromMs, toMs](按 chunk recorded_at_ms)内的全部转录段,
+    /// 换算成绝对时间的去重视图。`isInput` true=麦克风,false=系统音频。
+    func transcriptionsForDedup(isInput: Bool, fromMs: Int64, toMs: Int64) async throws -> [TranscriptDeduper.Segment]
+
+    /// 删指定转录行(去重判定出的 mic 重复份)。
+    /// 实现必须走注册了 FTS 分词器的连接(transcriptions_fts 同步触发器)。
+    func deleteTranscriptions(ids: [Int64]) async throws
+
+    /// audio_chunks 全表时间范围(MIN/MAX recorded_at_ms)。空表 → nil。
+    /// 历史去重扫描用来分窗。
+    func audioChunkTimeRangeMs() async throws -> (minMs: Int64, maxMs: Int64)?
+
     // MARK: - 说话人识别（speaker diarization）
 
     /// 找匹配的说话人。`embedding` 须已 L2 归一化。质心余弦 > 阈值才算候选;

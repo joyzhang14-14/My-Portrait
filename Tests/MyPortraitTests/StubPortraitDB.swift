@@ -67,6 +67,18 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.resetRetryableFailedAudioChunks")
     }
 
+    func transcriptionsForDedup(isInput: Bool, fromMs: Int64, toMs: Int64) async throws -> [TranscriptDeduper.Segment] {
+        throw reporter.notImplemented("StubPortraitDB.transcriptionsForDedup")
+    }
+
+    func deleteTranscriptions(ids: [Int64]) async throws {
+        throw reporter.notImplemented("StubPortraitDB.deleteTranscriptions")
+    }
+
+    func audioChunkTimeRangeMs() async throws -> (minMs: Int64, maxMs: Int64)? {
+        throw reporter.notImplemented("StubPortraitDB.audioChunkTimeRangeMs")
+    }
+
     func matchSpeaker(embedding: [Float]) async throws -> Int64? {
         throw reporter.notImplemented("StubPortraitDB.matchSpeaker")
     }
