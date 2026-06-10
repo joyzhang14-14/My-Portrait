@@ -174,6 +174,47 @@ def proofread_tail(app_short, text, model_tail, send_ts, leftover_keys, url=None
     return text, {'why': '所有帧校对未过(或与模型一致性未确认),保守不动'}
 
 
+def ocr_snippet(app_short, url, text, send_ts, prev_text=None, seg='', fwd_s=60, width=70):
+    """审核取证(Phase1.75 referee 用):返回 (OCR片段, 帧ts, 锚定模式 self/prev/before)。
+    锚定优先级:① 记录自身前缀(原文+空白归一双试)② 前一条消息锚(自身是错字时自锚必失败,
+    真身渲染在前一条之后——卖个惨 的关键;须过击键预检防截到 chrome/他人消息,且跳过发送前帧)。
+    无锚 → ('', None, '')。"""
+    base = cv(text).replace('\n', ' ')
+    width = max(width, min(len(base) + 20, 200))           # 宽度随记录伸缩(审查修)
+    frames = pick_frames(app_short, url, send_ts, fwd_s=fwd_s)
+    for ts, ft in frames:
+        ft = ft or ''
+        ftn = re.sub(r'\s', '', ft)
+        for k in (8, 6, 4, 3):
+            anchor = base[:k].strip()
+            if len(anchor) < 3: continue
+            mode = 'self' if ts >= send_ts else 'before'
+            idx = ft.find(anchor)
+            if idx >= 0:
+                return ft[max(0, idx - 12): idx + width], ts, mode
+            an = anchor.replace(' ', '')                   # 空白归一再试(OCR 常乱插空格,审查修)
+            idx = ftn.find(an)
+            if idx >= 0:
+                return ftn[max(0, idx - 12): idx + width], ts, mode
+    if prev_text:
+        pb = cv(prev_text).replace('\n', ' ')
+        for ts, ft in frames:
+            if ts < send_ts: continue                      # prev 锚只看发送后帧(审查修)
+            ft = ft or ''
+            for k in (8, 6, 4):
+                anchor = pb[-k:].strip() if len(pb) >= k else pb
+                if len(anchor) < 3: continue
+                idx = ft.find(anchor)
+                if idx < 0: continue
+                cont = ft[idx + len(anchor): idx + len(anchor) + width + 20]
+                # 确定性预检(审查修):真身必有若干字过击键验证;chrome/他人消息验不上
+                vt, _c = verify_tail(cont, seg)
+                if len(cv(vt).replace(' ', '')) >= 2:
+                    return cont, ts, 'prev'
+    return '', None, ''
+
+
+
 # ---- 标注案例测试 ----
 def keys_segment(bundle, send_ts):
     """该消息的击键 <CR> 段(消息边界天然在 <CR>):取最后一键最接近 send_ts(±6s)的段。
@@ -196,6 +237,11 @@ def keys_segment(bundle, send_ts):
     for seg in segs:
         d = abs(seg[-1][0] - send_ts)
         if d < bd: bd, best = d, ''.join(c for _, c in seg)
+    if not best:                                           # 空段回退:打完停顿>6s才回车的消息(审查修)
+        bd = 60001
+        for seg in segs:
+            d = abs(seg[-1][0] - send_ts)
+            if d < bd: bd, best = d, ''.join(c for _, c in seg)
     return best
 
 CASES = [

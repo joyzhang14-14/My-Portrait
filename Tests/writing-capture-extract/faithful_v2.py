@@ -100,10 +100,39 @@ def disambig(p):
     except Exception:
         return None
 
+def referee(text, snip, keys, mode='self'):
+    """Phase1.75 审核员(用户设计:审核而非丢弃)。**只有 PASS/打回 权,无写权**——
+    打回时给的 hint 只是指路,采纳前仍须逐字过击键验证(写权永远在确定性链路)。"""
+    mode_note = {"self": "OCR片段锚定到了记录本身的位置,可信度高",
+                 "prev": "OCR片段是上一条消息之后的屏幕区域,可能混入界面元素/他人消息,仅当看到与记录明显矛盾的同义内容才 REJECT",
+                 "before": "OCR片段来自发送前的帧,内容可能还没渲染,弱证据"}.get(mode, "")
+    long_note = "(记录较长,OCR片段只覆盖开头——开头一致即可 PASS)" if len(text) > 60 and snip else ""
+    user = ("你是写作采集的审核员。判断「记录」是否真实可信(用户真的发送/写下的文字)。\n"
+            f"记录:{text[:200]}\n"
+            f"屏幕OCR片段({mode_note}){long_note}:{snip[:300] if snip else '(无帧证据)'}\n"
+            f"击键串(用户物理按键,数字是IME选字):{keys[:300] if keys else '(未取到击键段)'}\n"
+            "规则:OCR与记录一致,或OCR无证据但击键能支撑记录 → 只输出 PASS;"
+            "OCR上明显是别的文字(记录是错字/幻觉/与屏幕矛盾)→ 输出 REJECT|OCR上看到的正确片段;"
+            "证据矛盾无法判断 → 输出 UNSURE。只输出一行,不解释。")
+    pr = tok14.apply_chat_template([{"role": "user", "content": user}], add_generation_prompt=True, tokenize=False, enable_thinking=False)
+    try:
+        o = re.sub(r'<think>.*?</think>', '', generate(m14, tok14, prompt=pr, max_tokens=64, verbose=False), flags=re.S).strip()
+        line = cv((o.splitlines() or [''])[0])
+        mm = re.search(r'\b(PASS|REJECT|UNSURE)\b', line.upper())
+        verdict = mm.group(1) if mm else 'UNSURE'
+        if verdict == 'REJECT':
+            parts = re.split(r'[|｜:：]', line, 1)
+            return 'REJECT', (parts[1].strip() if len(parts) > 1 else '')
+        return verdict, ''
+    except Exception:
+        return 'UNSURE', ''
+
 RAW = {}   # day -> [(app, text, kc, evid, t0, t1)]
 DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每道闸丢弃的全记录(审计)
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
 PROOF = {}  # (evid, text) -> 模型重建的尾巴 —— 凡模型参与选字的尾巴,Phase1.5 强制 OCR 校对(的/得、哟/用一族)
+PENDING = {}  # day -> [(app, text, src, evid, t0, 审核理由, OCR片段)] —— 未定区:审核未过,展示不入册(审核而非丢弃)
+LEDGER_MODE = os.environ.get('LEDGER_MODE', 'gated')  # gated=B(账本须审核PASS才入册)/ off=A(账本禁用)/ raw=旧行为
 for day in DAYS:
     dayrecs = []; drops = []; c3fix = []
     for (refs,) in con.execute("SELECT DISTINCT reference_typing_event_ids FROM writing_records_staged WHERE date_utc=? AND source IN('ax_cleaned','merged')", (day,)).fetchall():
@@ -158,7 +187,7 @@ for day in DAYS:
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
     # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
     # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
-    bundles = {b: a for a, t, s, kc, evid, t0, t1, b in dayrecs}
+    bundles = {} if LEDGER_MODE == 'off' else {b: a for a, t, s, kc, evid, t0, t1, b in dayrecs}
     for b, a in bundles.items():
         recs_b = [(t, t0, t1) for app2, t, s, kc, evid, t0, t1, b2 in dayrecs if b2 == b]
         rows = con.execute("SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log "
@@ -196,7 +225,8 @@ for day in DAYS:
                            for rt, rt0, rt1 in recs_b)
             if consumed or X.is_ph(ft) or is_residue(ft) or ft in seen: continue
             seen.add(ft)
-            out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered", b))
+            if LEDGER_MODE != 'off':
+                out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered", b))
     # ===== Phase1.5 口3:重建不确定的(残渣未清)drop 到此 =====
     # 此时全天消息已就位 → 有**下文**了(两遍式的时序红利)。
     # ① 确定性:OCR 锚定 + 击键 <CR> 段验证(零幻觉);② 还没修上 → 14B 双向语境重试(前文+后文)。
@@ -239,8 +269,69 @@ for day in DAYS:
             out2.append((a, cv(nt), kc2, evid, t0, t1, src + "+c3", b))
         else:
             out2.append(rec)
-    RAW[day] = out2; DROP[day] = drops; C3FIX[day] = list(c3fix)
-    print(f"  {day}: {len(out)} 条(14b disambig 调用累计 {R.DISAMBIG_CALLS[0]})", flush=True)
+    # ===== Phase1.75 审核(用户设计:审核而非丢弃,妙不可言版)=====
+    # 审核员只有 PASS/打回权;打回 hint 须逐字过击键验证才采纳(写权在确定性链路);
+    # 2 轮不过 → 未定区(文档展示,不入成品,绝不静默丢)。
+    # 不对称:keystroke_recovered 须 PASS 才入册(B门控,治22条重复污染);ax 路 REJECT 才动(默认信 AX+击键)。
+    pend = []; out3 = []
+    for i, rec in enumerate(out2):
+        a, t, kc2, evid, t0, t1, src_, b = rec
+        u = None
+        if evid:
+            ur = con.execute("SELECT url FROM typing_events WHERE id=:i", {"i": evid}).fetchone()
+            u = ur[0] if ur else None
+        is_ledger = src_.startswith("keystroke_recovered")
+        if LEDGER_MODE == 'raw':                           # raw=旧行为:无审核环(审查修:原先未实现)
+            out3.append(rec); continue
+        # prev 锚优先用已审核的修后文本(out3),回退 out2(审查修)
+        prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
+                or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
+        seg = C3.keys_segment(b, t1 or t0 or 0)
+        snip, _fts, smode = C3.ocr_snippet(a, u, t, t1 or t0 or 0, prev_text=prev, seg=seg)
+        snipn = re.sub(r'\s', '', snip or '')
+        tn0 = cv(t).replace(' ', '').replace('\n', '')[:60]
+        # 确定性快速通道(审查修):渲染与记录逐字一致 → 免 14B 直接过(判定在确定性链路)
+        if tn0 and len(tn0) >= 2 and tn0 in snipn:
+            out3.append(rec); continue
+        # ax 路 + 无任何帧证据:REJECT 不可能成立,免调用直接保留(审查修)
+        if not snip and not is_ledger:
+            out3.append(rec); continue
+        v, hint = referee(t, snip, seg, mode=smode)
+        if (v == 'PASS') if is_ledger else (v != 'REJECT'):
+            out3.append(rec); continue
+        # —— 第 2 轮 ——
+        used_snip = snip
+        fixed2 = None
+        if v == 'REJECT' and hint:
+            hn = cv(hint).replace(' ', '')
+            # ⚠️critical 修:hint 必须真出现在 OCR 证据里(屏幕渲染锚死),否则审核员=间接写权
+            if hn and hn in snipn:
+                vt, consumed = C3.verify_tail(hint, seg)   # hint 指路,击键逐字验
+                vtn = cv(vt).replace(' ', '')
+                others = [r2[1].replace(' ', '').replace('\n', '') for j, r2 in enumerate(out2) if j != i and r2[7] == b]
+                t_cmp = cv(t).replace(' ', '').rstrip('，。！？、…,.!? ')   # 标点同口径(审查修)
+                han_v = sum(1 for ch in vtn if not ch.isascii())
+                if (vtn and len(vtn) >= max(2, int(len(hn) * 0.8))
+                        and len(vtn) >= len(t_cmp)                        # 不准变短
+                        and consumed >= max(2, 2 * han_v)                 # 消费下限防标点凑数(审查修)
+                        and not any(vtn in o for o in others)):           # 等值/包含一律拦,防重复(审查修)
+                    fixed2 = vt
+        if fixed2 is not None:
+            v3, _ = referee(fixed2, snip, seg, mode=smode)               # 复审重修稿
+            if (v3 == 'PASS') if is_ledger else (v3 != 'REJECT'):        # 不对称门一致化(审查修)
+                c3fix.append((a, t, fixed2, "审核打回重修", evid, t0))
+                out3.append((a, cv(fixed2), kc2, evid, t0, t1, src_ + "+rev", b)); continue
+        if fixed2 is None:                                 # 第2轮:宽窗重取证复审(账本须PASS,ax须非REJECT)
+            snip2, _f2, smode2 = C3.ocr_snippet(a, u, t, t1 or t0 or 0, prev_text=prev, seg=seg, fwd_s=300)
+            if snip2 and snip2 != snip:
+                used_snip = snip2
+                v2, _ = referee(t, snip2, seg, mode=smode2)
+                if (v2 == 'PASS') if is_ledger else (v2 != 'REJECT'):
+                    out3.append(rec); continue
+        clean_snip = re.sub(r'\s+', ' ', used_snip or '').replace('`', chr(180))[:120]   # 文档转义(审查修)
+        pend.append((a, t, src_, evid, t0, (('OCR示:' + hint) if hint else v), clean_snip))
+    RAW[day] = out3; DROP[day] = drops; C3FIX[day] = list(c3fix); PENDING[day] = pend
+    print(f"  {day}: {len(out3)} 条(审核未定 {len(pend)};14b disambig 累计 {R.DISAMBIG_CALLS[0]})", flush=True)
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
 os.makedirs(EVAL, exist_ok=True)
 json.dump(RAW, open(os.path.join(EVAL, "v2_rebuilt.json"), "w"), ensure_ascii=False)
@@ -287,6 +378,14 @@ for day in DAYS:
     if not cf: nd.append("（无）\n")
     for a, old, new, via, evid, t0 in cf:
         nd.append(f"- `[{via}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}`\n  > {old[:120]!r} → **{new[:120]!r}**\n")
+    # 未定区:审核未过的展示(用户原则:宁可记录对的,也不拿错的填;不确定的必须看得见)
+    pd = PENDING.get(day, [])
+    nd.append(f"\n### ⚠️ 未定区(审核未过,展示不入册)({len(pd)})\n")
+    if not pd: nd.append("（无）\n")
+    for a, t, src_, evid, t0, why, snip in pd:
+        nd.append(f"- `[{src_}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}` — {why[:80]}\n  > "
+                  + (t or '')[:200].replace('\n', '\n  > ')
+                  + (f"\n  OCR证据:`{snip}`\n" if snip else "\n"))
     # 丢弃审计:漏斗每道闸 + Pass4,丢了什么 + 为什么 + event 时间
     dr = DROP.get(day, []); dd = DISCARDED.get(day, [])
     nd.append(f"\n### 🗑️ 丢弃审计（漏斗 {len(dr)} + Pass4 {len(dd)}）\n")
