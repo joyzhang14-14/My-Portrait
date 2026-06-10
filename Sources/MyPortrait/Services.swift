@@ -180,6 +180,11 @@ final class Services {
         // 锁屏监听（事件驱动）。Record audio while locked 关时锁屏暂停音频。
         screenLockMonitor.start()
 
+        // 崩溃兜底:上次声纹训练把 capture.audio.enabled 临时写 false 后 app
+        // 崩溃/退出的话,false 已持久化到 config.toml —— 按 UserDefaults 标记
+        // 还原,避免麦克风采集静默永久关闭。正常路径下是 no-op。
+        VoiceTrainer.shared.restoreMainCaptureIfNeeded()
+
         // 崩溃恢复 + 启动后台 worker。
         let db = self.db
         let logger = self.logger
@@ -188,20 +193,19 @@ final class Services {
         // 时直接拉满,避免用户在 onboarding / 真用某功能时才下载导致卡顿
         // 或失败:
         //   1. Speaker / VAD ONNX (~40MB):VoiceTrainer 依赖
-        //   2. WhisperKit 模型 (默认 base ~150MB):Audio Capture 第一段录音依赖
+        //   2. WhisperKit 模型 (默认 base ~150MB):在下面 transcriber 启动的
+        //      task 里、start() **之前**串行 prefetch —— 不能放这个并发 task
+        //      (WhisperKitWrapper 契约要求调用方串行,见下)
         //   3. Bun + Pi @mariozechner/pi-coding-agent (~30MB):Chat / cron job 依赖
-        Task.detached(priority: .utility) { [whisper] in
+        Task.detached(priority: .utility) {
             await SpeakerModelStore.shared.prefetchAll()
-            // 只预下「当前选中」的 Whisper 模型(whisper.modelName);其余在 AI models
-            // 页按需手动下载,避免启动一次拉满好几 GB。
-            await whisper.prefetch()
         }
         Task { @MainActor in
             // ensureInstalled 内部已 idempotent(已 ready 直接 return)。
             AISetup.shared.ensureInstalled()
         }
 
-        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, logger] in
+        Task.detached(priority: .utility) { [compactor, transcriber, retentionWorker, logger, whisper] in
             // 崩溃 / 强杀后某些 chunk 可能停在 in_progress，重启时回退为 pending
             // 让 TranscriptionScheduler 重新拾起。失败（如 stub）只 log，不阻塞启动。
             do {
@@ -229,6 +233,14 @@ final class Services {
             } else {
                 logger.info("CompactionWorker SKIPPED (MYPORTRAIT_NO_COMPACTOR=1)")
             }
+            // Whisper 模型 prefetch 必须在 transcriber.start() **之前**串行完成 ——
+            // 两者共用同一个 WhisperKitWrapper,其契约要求调用方串行。崩溃恢复刚把
+            // chunk 回退成 pending,start() 后转录立刻开跑(power baseline 触发
+            // processQueueOnce);若 prefetch 还在另一个 task 里并发跑,prefetch 读
+            // pipe 与 ensurePipe 写 pipe 数据竞争,且同一模型被两个 WhisperKit
+            // init 双重下载/加载。只预下「当前选中」的模型(whisper.modelName);
+            // 其余在 AI models 页按需手动下载,避免启动一次拉满好几 GB。
+            await whisper.prefetch()
             if env["MYPORTRAIT_NO_TRANSCRIBER"] != "1" {
                 await transcriber.start()
             } else {
@@ -412,13 +424,21 @@ final class Services {
     /// withObservationTracking 一次性，onChange 里递归重注册。
     private func observeTypingCapture() {
         let store = ConfigStore.shared
+        // 同 observePreferredInputDevice:@Observable 追踪粒度是整个 current,
+        // 任意无关设置变更都会进 onChange。必须 diff 真值再调 applyTypingCapture,
+        // 否则 typing 开着但 AX 未授权时,改任何设置(切主题 / vim 改 TOML)都会
+        // 重新 requestAccessibility + 弹 modal 权限对话框。
+        let seen = store.current.capture.typingCaptureEnabled
         withObservationTracking {
             _ = store.capture.typingCaptureEnabled
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.applyTypingCapture(enabled: ConfigStore.shared.capture.typingCaptureEnabled)
-                self.observeTypingCapture()
+                let now = ConfigStore.shared.capture.typingCaptureEnabled
+                if now != seen {
+                    self.applyTypingCapture(enabled: now)
+                }
+                self.observeTypingCapture()   // 重订阅时重新快照 seen
             }
         }
     }
