@@ -93,7 +93,7 @@ actor PortraitDBImpl: PortraitDB {
     // MARK: - P3: MP4 压缩
 
     func framesToCompact(olderThanMs: Int64, limit: Int) async throws -> [FrameForCompaction] {
-        try await dbPool.read { db in
+        let (frames, deadIds): ([FrameForCompaction], [Int64]) = try await dbPool.read { db in
             let sql = """
             SELECT id, timestamp_ms, snapshot_path, device_name
             FROM frames
@@ -109,21 +109,57 @@ actor PortraitDBImpl: PortraitDB {
             let rows = try Row.fetchAll(
                 db, sql: sql,
                 arguments: ["olderThanMs": olderThanMs, "limit": Int64(limit)])
-            return rows.compactMap { row -> FrameForCompaction? in
+            var frames: [FrameForCompaction] = []
+            var dead: [Int64] = []
+            for row in rows {
                 guard let id: Int64 = row["id"],
                       let ts: Int64 = row["timestamp_ms"],
                       let rawPath: String = row["snapshot_path"],
                       let device: String = row["device_name"]
-                else { return nil }
-                // resolve to absolute. Skip the frame if the file is
-                // missing on disk — compactor can't compact a JPG we can't
-                // read, and CompactionWorker no longer has its own resolve.
-                guard let path = AssetPath.resolve(rawPath) else { return nil }
-                return FrameForCompaction(
-                    id: id, timestampMs: ts, snapshotPath: path, deviceName: device
-                )
+                else { continue }
+                // resolve to absolute. File missing on disk → 死行:JPG 不会
+                // 自己回来(磁盘满期间写盘失败但行照插 / 损坏被跳过后删除 /
+                // 用户手动删过日目录),收集起来下面统一置 NULL。
+                if let path = AssetPath.resolve(rawPath) {
+                    frames.append(FrameForCompaction(
+                        id: id, timestampMs: ts, snapshotPath: path, deviceName: device
+                    ))
+                } else {
+                    dead.append(id)
+                }
+            }
+            return (frames, dead)
+        }
+
+        // 死行中和:不置 NULL 的话,死行按最老时间戳**永久霸占 LIMIT 窗口最
+        // 前端**,每 5 分钟被重复查出/stat/丢弃;攒满 limit 后查询永远返回空
+        // 的有效集 → 新 JPG 再也不被压缩,磁盘失控且无告警。置 NULL 后行上
+        // 的 OCR 文本保留(与 mediaOnly retention 的终态一致)。
+        //
+        // 护栏:这一批**全是**死行且量不小 → 八成是系统性的文件不可达(自定义
+        // 数据目录在外置盘上没挂载之类),不是真死行,不动,只告警。
+        if !deadIds.isEmpty {
+            if frames.isEmpty, deadIds.count > 50 {
+                logger.warning("framesToCompact: all \(deadIds.count, privacy: .public) candidate JPGs missing on disk — looks systemic (unmounted volume?), not marking dead rows")
+            } else {
+                try await dbPool.write { db in
+                    var start = 0
+                    while start < deadIds.count {
+                        let end = min(start + 500, deadIds.count)   // 999 绑定变量上限,分批
+                        let batch = Array(deadIds[start..<end])
+                        start = end
+                        let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ",")
+                        // 动态变长 IN 子句:显式 StatementArguments 包装(铁律)。
+                        try db.execute(
+                            sql: "UPDATE frames SET snapshot_path = NULL WHERE id IN (\(placeholders))",
+                            arguments: StatementArguments(batch)
+                        )
+                    }
+                }
+                logger.warning("framesToCompact: neutralized \(deadIds.count, privacy: .public) dead frame row(s) (snapshot_path set but file missing)")
             }
         }
+        return frames
     }
 
     func replaceFramesWithVideoChunk(
