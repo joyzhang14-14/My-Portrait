@@ -137,11 +137,12 @@ protocol PortraitDB: Sendable {
     /// 按 `mode` 清 DB：
     /// - `.mediaOnly`：NULL 掉 frames.snapshot_path / video_chunk_id；DELETE 旧 video_chunks。
     ///   保留 frames 行（含 OCR 文本）和 audio_chunks 行（含转录）。
-    /// - `.everything`：DELETE frames / video_chunks / audio_chunks 三表所有早于 ms 的行。
-    ///   audio_chunks DELETE CASCADE 到 audio_transcriptions。
-    /// `excludeUntranscribedAudio` 开 → `.everything` 也不删未转录 chunk 的行
-    /// (与 `mediaPathsBefore` 保持行/文件一致,否则文件留着行没了 → 永久孤儿)。
-    func applyRetention(mode: RetentionMode, beforeMs: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionStats
+    /// - `.everything`：DELETE frames / video_chunks 所有早于 ms 的行;
+    ///   audio_chunks 只删 `audioChunkIds` 这批 id(来自同一轮 `mediaPathsBefore`
+    ///   的快照,CASCADE 到 audio_transcriptions)。**不重新按 status 求值** ——
+    ///   文件清单与行删除之间转录管线在并发推进 status,两次独立求值会产生
+    ///   「行删了文件没删」的永久孤儿 wav。
+    func applyRetention(mode: RetentionMode, beforeMs: Int64, audioChunkIds: [Int64]) async throws -> RetentionStats
 
     // MARK: - 读 (UI 用)
 
@@ -269,11 +270,17 @@ struct RetentionFileList: Sendable {
     let snapshotPaths: [String]    // .jpg
     let videoChunkPaths: [String]  // .mp4
     let audioPaths: [String]       // .wav (+ 配套 .meta.json / .transcript.json 由 worker 推断)
+    /// 进清单那一刻命中删除条件的 audio_chunks 行 id 快照。applyRetention
+    /// (.everything) 按这批 id 删行,而不是再按 status 重新求值 —— 文件清单
+    /// 与行删除之间隔着耗时的 deleteFiles,期间转录管线会推进 status,
+    /// 两次独立求值会出现「行删了文件没删」的永久孤儿 wav。
+    let audioChunkIds: [Int64]
 
-    init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String]) {
+    init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String], audioChunkIds: [Int64]) {
         self.snapshotPaths = snapshotPaths
         self.videoChunkPaths = videoChunkPaths
         self.audioPaths = audioPaths
+        self.audioChunkIds = audioChunkIds
     }
 }
 

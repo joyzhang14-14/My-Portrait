@@ -79,10 +79,11 @@ actor RetentionWorker {
         let totalFiles = files.snapshotPaths.count + files.videoChunkPaths.count + files.audioPaths.count
         deleteFiles(files)
 
-        // 3. 清 DB
+        // 3. 清 DB(audio 行按步骤 1 的 id 快照删,与文件删除严格同批 ——
+        //    两次独立按 status 求值会因转录管线并发推进 status 产生孤儿 wav)
         let stats: RetentionStats
         do {
-            stats = try await db.applyRetention(mode: modeRetention, beforeMs: cutoffMs, excludeUntranscribedAudio: waitForTranscription)
+            stats = try await db.applyRetention(mode: modeRetention, beforeMs: cutoffMs, audioChunkIds: files.audioChunkIds)
         } catch {
             logger.error("applyRetention failed: \(String(describing: error), privacy: .public)")
             return

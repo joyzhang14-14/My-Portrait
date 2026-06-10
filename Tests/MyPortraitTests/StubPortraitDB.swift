@@ -107,7 +107,7 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.mediaPathsBefore")
     }
 
-    func applyRetention(mode: RetentionMode, beforeMs: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionStats {
+    func applyRetention(mode: RetentionMode, beforeMs: Int64, audioChunkIds: [Int64]) async throws -> RetentionStats {
         throw reporter.notImplemented("StubPortraitDB.applyRetention")
     }
 
