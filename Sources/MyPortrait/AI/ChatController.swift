@@ -162,6 +162,10 @@ final class ChatController {
         // 的 B 覆盖 → 切回来从磁盘读发现啥都没有。
         // 先 flushPending 把已 buffer 的 delta 落入 messages,再 persist。
         flushPending()
+        // 同 abort():persist 前强制收尾在飞的 tool/thinking block。下面
+        // agent 被 stop 后不会再有 toolEnd/agentEnd 来收尾,不关的话
+        // isRunning=true 被序列化落库 → 切回来永远显示 Running… 转圈。
+        closeRunningPartsOnCurrentAssistant()
         persist()
 
         agent?.stop()
@@ -174,6 +178,9 @@ final class ChatController {
         currentConvId = convId
         // 离开当前 conv → 编辑模式标记失效(未消费就丢)。
         pendingEditOriginalURL = nil
+        // 标题标记是 per-conv 的:send() 被切对话打断时不重置会泄漏到
+        // 下一个 conv,把人家的标题改成旧消息。
+        pendingTitleFromFirstMessage = false
         // 每个对话独立计数,新对话允许再次扫一次相关条目。
         relatedScanFiredThisConv = false
         if let convId {
@@ -247,6 +254,11 @@ final class ChatController {
             pendingTitleFromFirstMessage = true
         }
 
+        // 记下发送瞬间的 conv id —— chips 解析在后台 hop(可达数百毫秒),
+        // 期间用户可能 switchTo 别的对话;hop 回来校验,对不上就丢弃,
+        // 防止用户消息和 AI 回复落进错误的对话。
+        let convIdAtSend = currentConvId
+
         // Resolve chips → context block (heavy: SQLite read). Do it on a
         // background hop and then deliver from the main actor.
         Task { [weak self] in
@@ -256,6 +268,8 @@ final class ChatController {
             }.value
 
             await MainActor.run {
+                // 对话已被切走 → 整轮作废(消息不能落进现在显示的 conv)。
+                guard self.currentConvId == convIdAtSend else { return }
                 // User bubble carries display text + chips + attachments
                 // for visual receipt.
                 var msg = ChatMessage(role: .user, text: trimmed, time: Date())

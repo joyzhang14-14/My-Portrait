@@ -147,6 +147,10 @@ struct HomeView: View {
             guard let payload = note.object as? [Attachment] else { return }
             attachments.append(contentsOf: payload)
         }
+        // 编辑标记是 per-conv 的:切对话/新建对话后旧消息 id 在新会话里
+        // 不存在,残留会让 send() 走 editAndResend 静默 no-op,用户输入
+        // 被清空丢失。切换即清,后续发送落普通 send 路径。
+        .onChange(of: chat.currentConvId) { editingMessageId = nil }
     }
 
     /// 编辑会话提取出来的目标 entity slug。约定:会话标题形如
