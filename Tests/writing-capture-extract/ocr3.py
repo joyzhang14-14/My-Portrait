@@ -79,10 +79,24 @@ def pick_frames(app_short, url, send_ts, fwd_s=60):
     after = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
                         f"AND timestamp_ms >= :a AND timestamp_ms <= :b ORDER BY timestamp_ms",
                         {**args, "a": send_ts, "b": send_ts + fwd_s * 1000}).fetchall()
+    cands = list(after)
+    # 用户灵感:发完常秒切走 → 前向窗内可能没拍到/没渲染。前向窗内出现**异 app** 帧(=切走了)
+    # → 把「切走后第一次回到本 app(+url) 的帧」也纳入(采集切 app 时会拍,切回瞬间消息仍在对话区)。
+    # 检测窗=前向窗 60s(不用 5s:typing_pause=500ms 意味着只有秒切才漏帧,但异 app 首帧
+    # 出现时机不可控——app_switch 归属漂移 + 新 app 可能 idle 30s 才出帧;多一帧候选代价≈0,验证兜底)。
+    sw = con.execute("SELECT timestamp_ms FROM frames WHERE NOT (app_name LIKE :p) "
+                     "AND timestamp_ms > :a AND timestamp_ms <= :a5 ORDER BY timestamp_ms LIMIT 1",
+                     {"p": pat, "a": send_ts, "a5": send_ts + fwd_s * 1000}).fetchone()
+    if sw:
+        back = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
+                           f"AND timestamp_ms > :sw ORDER BY timestamp_ms LIMIT 1",
+                           {**args, "sw": sw[0]}).fetchone()
+        if back and all(back[0] != t for t, _ in cands):
+            cands.append(back)
     before = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
                          f"AND timestamp_ms < :a ORDER BY timestamp_ms DESC LIMIT 1",
                          {**args, "a": send_ts}).fetchall()
-    return list(after) + list(before)
+    return cands + list(before)
 
 def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts=()):
     """口3 主函数:OCR 锚定 + 击键验证补尾。返回 (fixed_text, info)。三护栏(宁缺毋错):
