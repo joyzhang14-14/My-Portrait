@@ -99,6 +99,21 @@ final class WritingStyleDistiller {
         // 也让现有 entry 按当前时间衰减一次。
         Self.refreshAllWeights()
 
+        // **pending_review gate**:manual run 落 staged 后 records 故意不标
+        // processed(等 Approve),unprocessedCount 仍 >0 —— auto tick 若放行,
+        // 同一批 records 会被二次喂 LLM 并直接 commit;之后用户 Approve 旧 run
+        // 又 applyDrafts 一次:slug 多半不同 → 重复 facet 文件,[[wr:id]] ref
+        // 重复计权,画像权重双倍灌水。有 run 等审核就什么都不跑(UI 的 Run
+        // 按钮已禁用,这里把 scheduler 路径也挡上)。
+        if let pending = try? store.fetchPendingReviewRuns(), !pending.isEmpty {
+            ssLog.info("runCore(\(mode.rawValue, privacy: .public)): pending_review run exists — skip until reviewed")
+            return WritingStyleRunSummary(
+                runId: "", mode: mode, status: .pendingReview,
+                recordsCount: 0, draftsCount: 0,
+                errorMessage: nil
+            )
+        }
+
         // **dependency gate**:writing_style 是 writing_capture 的下游 ——
         // 没新 writing_records 可消费就别建 run 行 / 不调 LLM,直接返回 noop。
         // 避免 0-record run 把 writing_style_runs 表灌满 + 避免 scheduler
@@ -186,7 +201,14 @@ final class WritingStyleDistiller {
 
             case .auto:
                 // 直接落盘 + 标 records completed + refresh 全量 weight。
-                Self.applyDrafts(out.drafts)
+                // 写盘失败必须抛(走 catch 标 run failed,records 留 unprocessed
+                // 下次重试),不能照常 commit —— 否则静默丢 LLM 产出。
+                let failedWrites = Self.applyDrafts(out.drafts)
+                if failedWrites > 0 {
+                    throw NSError(domain: "WritingStyle", code: -2, userInfo: [
+                        NSLocalizedDescriptionKey: "applyDrafts: \(failedWrites) draft(s) failed to write (disk full / permissions?)"
+                    ])
+                }
                 Self.refreshAllWeights()
                 // 标整批 input 为 completed —— recordIds 就是这次 input,
                 // 已经在上面 setInputRecordIds 持久化。
@@ -232,7 +254,14 @@ final class WritingStyleDistiller {
                 existingSlug: $0.existingSlug
             )
         }
-        Self.applyDrafts(drafts)
+        // 写盘失败必须抛 —— staged 保留、records 不标 processed,用户修好
+        // 磁盘/权限后可重新 Approve;照常往下走就是静默永久丢失。
+        let failedWrites = Self.applyDrafts(drafts)
+        if failedWrites > 0 {
+            throw NSError(domain: "WritingStyle", code: -3, userInfo: [
+                NSLocalizedDescriptionKey: "approve: \(failedWrites) draft(s) failed to write — staged kept, retry after fixing disk/permissions"
+            ])
+        }
         Self.refreshAllWeights()
         // 标整批 input 为 completed —— **不**只标 LLM 引用过的子集,否则
         // LLM 看完不归入任何 facet 的 records 下次 run 又被喂一次。
@@ -264,10 +293,16 @@ final class WritingStyleDistiller {
     /// 把一批 drafts 写到 portrait/writing_style/<slug>.md。
     /// create / update 都用 PortraitFile + PortraitFileIO,noop 跳过。
     /// **slug 冲突**(create 的 slug 已存在)→ 走 update 分支。
-    nonisolated static func applyDrafts(_ drafts: [WritingStyleDraft]) {
+    /// 返回**写盘失败的 draft 数** —— 调用方失败数 >0 必须抛错中止,不能照常
+    /// 标 records processed / 删 staged:那是纯静默数据丢失(磁盘满/权限异常时
+    /// 0 个文件写成,LLM 产出在 DB 和文件系统两边同时消失,且 records 永不再
+    /// 进 LLM)。违反本项目「错误高可见」纪律。
+    nonisolated static func applyDrafts(_ drafts: [WritingStyleDraft]) -> Int {
         let dir = PortraitPaths.categoryDir("writing_style")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var failed = 0
         for d in drafts {
+            let ok: Bool
             switch d.action {
             case .noop:
                 continue
@@ -275,26 +310,28 @@ final class WritingStyleDistiller {
                 let url = dir.appendingPathComponent(d.slug + ".md")
                 if FileManager.default.fileExists(atPath: url.path) {
                     // 冲突 → 当 update。把 existingSlug 临时 patch 成 slug 本身。
-                    writeUpdate(at: url, draft: d, slug: d.slug)
+                    ok = writeUpdate(at: url, draft: d, slug: d.slug)
                 } else {
-                    writeNew(at: url, draft: d)
+                    ok = writeNew(at: url, draft: d)
                 }
             case .update:
                 let target = d.existingSlug ?? d.slug
                 let url = dir.appendingPathComponent(target + ".md")
                 if FileManager.default.fileExists(atPath: url.path) {
-                    writeUpdate(at: url, draft: d, slug: target)
+                    ok = writeUpdate(at: url, draft: d, slug: target)
                 } else {
                     // 目标不存在 —— 当 create 兜底
-                    writeNew(at: url, draft: d)
+                    ok = writeNew(at: url, draft: d)
                 }
             }
+            if !ok { failed += 1 }
         }
+        return failed
     }
 
     /// 新建 portrait/writing_style/<slug>.md。复刻 PortraitDistiller.writeNewPortrait
     /// 的极简版:不持有 impact / weight 的 event-only 字段,只填 portrait 那套。
-    nonisolated static func writeNew(at url: URL, draft: WritingStyleDraft) {
+    nonisolated static func writeNew(at url: URL, draft: WritingStyleDraft) -> Bool {
         let now = Date()
         var file = PortraitFile(
             created: now,
@@ -313,13 +350,16 @@ final class WritingStyleDistiller {
         file.weight = PortraitWeight.compute(refCount: draft.sourceRecordIds.count, lastModified: now, now: now)
         file.mergeCount = 1
         file.lastModified = now
-        do { try PortraitFileIO.write(file, to: url) }
-        catch { ssLog.error("writeNew failed for \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)") }
+        do { try PortraitFileIO.write(file, to: url); return true }
+        catch {
+            ssLog.error("writeNew failed for \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            return false
+        }
     }
 
     /// 更新现有 portrait/writing_style/<slug>.md。body 用 LLM 返回的合并后正文
     /// (prompt 已要求 LLM 返回 final state),溯源 ids 累积。
-    nonisolated static func writeUpdate(at url: URL, draft: WritingStyleDraft, slug: String) {
+    nonisolated static func writeUpdate(at url: URL, draft: WritingStyleDraft, slug: String) -> Bool {
         do {
             var file = try PortraitFileIO.read(from: url)
             // 清掉旧文件可能残留的 event-only 字段
@@ -341,8 +381,10 @@ final class WritingStyleDistiller {
             file.lastModified = now
             file.weight = PortraitWeight.compute(refCount: merged.count, lastModified: now, now: now)
             try PortraitFileIO.write(file, to: url)
+            return true
         } catch {
             ssLog.error("writeUpdate failed for \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            return false
         }
     }
 
