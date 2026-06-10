@@ -125,14 +125,16 @@ final class ImpactScorer {
                 )
             } catch let e as BudgetExhaustedError {
                 // 撞额度：中止整个 rescore，调度器据此标 budget_deferred。
-                // 已写入的批次保留（幂等，下次只补未评分的）。
+                // 已写入的批次保留;重试按设计是**整天重评**(同一天的分数
+                // 必须来自同一轮校准,不做增量补评 —— 避免两轮 LLM 标准不一致),
+                // 重评不清 rebalanceCount,见 apply 处注释。
                 throw e
             } catch ScorerError.agentTimeout {
                 // 超时后该 agent 的事件流已错位:turn N 的迟到响应(事件不带
                 // turn id)会 resume 下一轮的 waiter,把 batch N 的分数按
                 // id→index 写进 batch N+1 的事件文件(off-by-one 写坏数据)。
                 // 不能 continue 复用同一 agent —— 中止整轮,已写入的批次
-                // 保留,调度器稍后重试只补未评分的。
+                // 保留,调度器稍后重试时整天重评(见上)。
                 throw ScorerError.agentTimeout
             } catch {
                 failed += batch.count
@@ -148,7 +150,11 @@ final class ImpactScorer {
                 let clamped = PortraitFile.clampImpact(s.impact)
                 file.impact = clamped
                 file.rawImpact = clamped         // preserve LLM's original
-                file.rebalanceCount = 0          // reset; MemoryBudget can re-touch
+                // ⚠️ 只在首评时置 0:整天重评(budget_deferred / 失败重试)会重写
+                // 已评分文件,清零会把 MemoryBudget 用 maxRebalances 冻结的事件
+                // 重新解冻 —— 每重试一次,已稳定的 impact 被多扰动一轮,额度紧张
+                // 的大日子变成反复解冻烧额度的循环。保留已有计数。
+                file.rebalanceCount = file.rebalanceCount ?? 0
                 file.impactSource = "llm:\(model)"
                 WeightCalculator.recompute(&file)
                 do {
