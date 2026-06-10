@@ -39,6 +39,14 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.replaceFramesWithVideoChunk")
     }
 
+    func referencedSnapshotPaths(in paths: [String]) async throws -> Set<String> {
+        throw reporter.notImplemented("StubPortraitDB.referencedSnapshotPaths")
+    }
+
+    func referencedVideoPaths(in paths: [String]) async throws -> Set<String> {
+        throw reporter.notImplemented("StubPortraitDB.referencedVideoPaths")
+    }
+
     func insertAudioChunk(_ record: AudioChunkRecord) async throws -> Int64 {
         throw reporter.notImplemented("StubPortraitDB.insertAudioChunk")
     }
