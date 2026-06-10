@@ -360,8 +360,12 @@ struct MemorySettingsView: View {
 
     private func rejectStaging(_ kind: MemoryStaging.Kind) {
         // 先把 ProcessingLog 那几天重置回 pending，再用快照还原文件树。
+        // 注意必须用 resetStagesForReject 而不是 resetDay:run **成功**后
+        // 阶段是 complete,resetDay 不碰 complete → 树回滚了状态没回,
+        // 这些天永不重跑(产出丢失 + Run 按钮灰死)。
+        let stages = Self.stagesOwned(by: kind)
         for day in MemoryStaging.pendingDays(kind) {
-            MemoryScheduler.shared.resetDay(day)
+            MemoryScheduler.shared.resetStagesForReject(date: day, stages: stages)
         }
         do {
             try MemoryStaging.reject(kind)
@@ -371,6 +375,17 @@ struct MemorySettingsView: View {
         }
         attention = MemoryScheduler.shared.attentionDays()
         refreshStaging()
+    }
+
+    /// 各 staging kind 对应的 ProcessingLog 阶段 —— Reject 回退只动这些,
+    /// 不跨 kind 误伤(比如 reject events 不该把 personality 翻回 pending)。
+    private static func stagesOwned(by kind: MemoryStaging.Kind) -> [ProcessingStage] {
+        switch kind {
+        case .events:      return [.raw, .event, .impact]
+        case .portrait:    return [.distill]
+        case .personality: return [.personality]
+        case .classify:    return [.classify]
+        }
     }
 
     /// 标题块直接用 SettingsPageTitle 跟其他 Settings 页对齐(尺寸 / 颜色
