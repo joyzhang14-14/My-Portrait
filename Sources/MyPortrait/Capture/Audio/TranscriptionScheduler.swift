@@ -108,7 +108,7 @@ actor TranscriptionScheduler {
         }
 
         // 事件驱动主路：power 状态变化（如 battery → AC）立刻唤起一轮处理。
-        let powerStream = power.states
+        let powerStream = power.subscribe()
         powerTask = Task.detached(priority: .utility) { [weak self] in
             for await _ in powerStream {
                 guard let self else { break }

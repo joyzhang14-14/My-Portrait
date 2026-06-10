@@ -5,8 +5,14 @@ import os.log
 /// 事件驱动的电源状态监听。基于 `IOPSNotificationCreateRunLoopSource`，
 /// 设计文档明确要求"IOKit 事件驱动、即时响应、不轮询"。
 ///
-/// 输出：`AsyncStream<PowerState>`。每次电源状态变化（包括启动时初始）都
-/// 推一个事件。订阅方应记住上一次值，自行判断真实变化。
+/// 输出:`subscribe()` 返回一条**每订阅者独立**的 `AsyncStream<PowerState>`,
+/// 订阅时立即推一次当前状态作 baseline,之后每次电源状态变化都广播给所有
+/// 订阅者。订阅方应记住上一次值,自行判断真实变化。
+///
+/// **为什么不是单条共享流**:AsyncStream 是单播(unicast)的,多个消费者
+/// for-await 同一条流时,每个事件只派发给其中一个 —— Services(屏幕采集
+/// 档位重算)和 TranscriptionScheduler(插电唤醒转录)曾共享一条流,插拔
+/// 电源事件被随机瓜分,各拿一半。
 ///
 /// 与 `PowerMonitor.currentState()` 的关系：
 ///   - PowerMonitor 是同步一次性查询，调用方按需问
@@ -17,15 +23,27 @@ final class PowerWatcher: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "power")
 
-    nonisolated let states: AsyncStream<PowerState>
-    private let _continuation: AsyncStream<PowerState>.Continuation
+    private let lock = NSLock()
+    private var continuations: [UUID: AsyncStream<PowerState>.Continuation] = [:]
 
     private var runLoopSource: CFRunLoopSource?
 
-    init() {
+    /// 订阅电源状态。返回的新流先立即收到一次当前状态(baseline),之后收到
+    /// 每次变化的广播。消费者 task 取消时自动退订(onTermination)。
+    func subscribe() -> AsyncStream<PowerState> {
+        let id = UUID()
         var c: AsyncStream<PowerState>.Continuation!
-        self.states = AsyncStream<PowerState> { cont in c = cont }
-        self._continuation = c
+        let stream = AsyncStream<PowerState> { cont in c = cont }
+        let cont = c!
+        cont.onTermination = { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock(); self.continuations[id] = nil; self.lock.unlock()
+        }
+        lock.lock()
+        continuations[id] = cont
+        lock.unlock()
+        cont.yield(PowerMonitor.currentState())
+        return stream
     }
 
     @MainActor
@@ -59,7 +77,11 @@ final class PowerWatcher: @unchecked Sendable {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
         }
         runLoopSource = nil
-        _continuation.finish()
+        lock.lock()
+        let conts = Array(continuations.values)
+        continuations.removeAll()
+        lock.unlock()
+        for c in conts { c.finish() }
         logger.info("PowerWatcher stopped")
     }
 
@@ -68,6 +90,9 @@ final class PowerWatcher: @unchecked Sendable {
     /// 由 C 回调调用（任意线程，多半是 main）。yield 是 thread-safe。
     private func deliverCurrentState() {
         let state = PowerMonitor.currentState()
-        _continuation.yield(state)
+        lock.lock()
+        let conts = Array(continuations.values)
+        lock.unlock()
+        for c in conts { c.yield(state) }
     }
 }

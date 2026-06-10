@@ -520,10 +520,10 @@ final class Services {
     /// 起 powerWatcher.states 订阅 + 低电量通知 + powerMode 设置监听,
     /// 任一信号触发就重算并应用 profile。
     private func startPowerProfileSync() {
-        // ① 电源/电量变化(PowerWatcher 启动时也会立刻 yield 一次 baseline)。
+        // ① 电源/电量变化(subscribe() 订阅时立刻 yield 一次 baseline)。
         powerProfileTask = Task { [weak self] in
             guard let self else { return }
-            for await _ in self.powerWatcher.states {
+            for await _ in self.powerWatcher.subscribe() {
                 await MainActor.run { self.recomputePowerProfile() }
             }
         }
