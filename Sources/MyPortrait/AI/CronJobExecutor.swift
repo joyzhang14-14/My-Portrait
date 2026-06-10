@@ -280,22 +280,61 @@ enum CronJobExecutor {
         }
     }
 
-    /// 抓回复里最后一个 `### Notify` **区块标题(行首 markdown heading)** 之后
-    /// 到结尾的文本。返回 nil = LLM 没写真正的区块 → 跳过通知。
+    /// 抓回复里最后一个 `### Notify` **区块标题(行首 markdown heading)** 的
+    /// 区块内容。返回 nil = LLM 没写真正的区块 → 跳过通知。
     ///
-    /// ⚠️ 必须限定**行首 heading**,不能裸 `range(of: "### Notify")`:LLM 解释
-    /// 自己"这次不追加 ### Notify"时,那句话里**字面含** `### Notify`,旧逻辑会
-    /// 把那句尾巴(一个句号/空白)当通知内容发出去 → 空/乱码通知。再要求提取出
-    /// 的 body 含**实质字符**(字母/数字/CJK),只剩标点空白也不发。
+    /// 三道边界(都来自真实翻车场景):
+    /// 1. **行首 heading**,不能裸 `range(of: "### Notify")`:LLM 解释自己
+    ///    "这次不追加 ### Notify"时那句话字面含它,旧逻辑把句尾当通知发出去。
+    /// 2. **fence 内不算**:cron prompt 教格式时 LLM 常在 ``` 代码块里写
+    ///    `### Notify\n<content>` 示例 —— fence 里的行首 heading 是引用,
+    ///    不是真区块,命中会发出一条由格式示例拼成的假通知。
+    /// 3. **到下一个 heading 为止**:LLM 把 Notify 放回复中间、后面还接
+    ///    `### Next steps` 等 section 时,不能把后续无关内容一并发出。
+    /// 最后要求 body 含**实质字符**(字母/数字/CJK),只剩标点空白也不发。
     static func extractNotifyBody(from buf: String) -> String? {
-        // (?m)^ 行首(可有缩进)+ 2~6 个 # + Notify 词界 + 可选冒号。
-        let pattern = "(?m)^[ \\t]*#{2,6}[ \\t]*Notify\\b[ \\t]*:?[ \\t]*"
-        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        // 行首(可有缩进)+ 2~6 个 # + Notify 词界 + 可选冒号(逐行匹配,锚定行首)。
+        guard let notifyRe = try? NSRegularExpression(
+            pattern: "^[ \\t]*#{2,6}[ \\t]*Notify\\b[ \\t]*:?[ \\t]*",
+            options: [.caseInsensitive]),
+            let headingRe = try? NSRegularExpression(pattern: "^[ \\t]*#{1,6}[ \\t]+\\S")
         else { return nil }
-        let ns = buf as NSString
-        let matches = re.matches(in: buf, range: NSRange(location: 0, length: ns.length))
-        guard let last = matches.last else { return nil }
-        let tail = ns.substring(from: last.range.location + last.range.length)
+
+        // 逐行算 fence 状态(``` / ~~~ 开闭行自身按"外部"处理,内容行算内部)。
+        let lines = buf.components(separatedBy: "\n")
+        var inFence = [Bool]()
+        inFence.reserveCapacity(lines.count)
+        var fence = false
+        for line in lines {
+            inFence.append(fence)
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("```") || t.hasPrefix("~~~") { fence.toggle() }
+        }
+
+        // 最后一个不在 fence 里的 Notify heading;heading 同行冒号后可带内容。
+        var notifyIdx: Int? = nil
+        var sameLineRest = ""
+        for (i, line) in lines.enumerated() where !inFence[i] {
+            let ns = line as NSString
+            if let m = notifyRe.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+                notifyIdx = i
+                sameLineRest = ns.substring(from: m.range.length)
+            }
+        }
+        guard let idx = notifyIdx else { return nil }
+
+        // 收区块体:到下一个不在 fence 里的 markdown heading 为止。
+        var bodyLines: [String] = sameLineRest.isEmpty ? [] : [sameLineRest]
+        for j in (idx + 1)..<lines.count {
+            if !inFence[j] {
+                let ns = lines[j] as NSString
+                if headingRe.firstMatch(in: lines[j], range: NSRange(location: 0, length: ns.length)) != nil {
+                    break
+                }
+            }
+            bodyLines.append(lines[j])
+        }
+        let tail = bodyLines.joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         // 实质内容:至少一个字母/数字(Character.isLetter 含 CJK)。否则是空通知,不发。
         guard tail.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
