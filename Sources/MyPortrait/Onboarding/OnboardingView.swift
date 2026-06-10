@@ -802,7 +802,10 @@ private struct MemoryProviderStep: View {
             }
             Divider().overlay(Color.primary.opacity(0.08))
             row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
+                // 空串 tag = "Provider default"(schema 约定),否则清空后
+                // picker 选中态显示空白。
                 Picker("", selection: config.binding(\.memory.model)) {
+                    Text("Provider default").tag("")
                     ForEach(models, id: \.self) { m in Text(m).tag(m) }
                 }
                 .labelsHidden()
@@ -811,6 +814,7 @@ private struct MemoryProviderStep: View {
             Divider().overlay(Color.primary.opacity(0.08))
             row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
                 Picker("", selection: config.binding(\.memory.modelLight)) {
+                    Text("Provider default").tag("")
                     ForEach(models, id: \.self) { m in Text(m).tag(m) }
                 }
                 .labelsHidden()
@@ -824,38 +828,30 @@ private struct MemoryProviderStep: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
         )
         .onAppear { normalizeMemoryProvider() }
-        .onChange(of: config.current.memory.providerId) { _, _ in
-            normalizeMemoryProvider()
+        .onChange(of: config.current.memory.providerId) { old, new in
+            // provider 真换了(用户拨 picker / 上面的归一落回)→ 旧 provider
+            // 的模型名失效,清回空串(schema 约定:空串 = provider 默认模型)。
+            // **只在 providerId 变化时清**:不能按硬编码模型清单当白名单去洗
+            // 合法配置 —— 用户 vim 手填的 ollama 自定义 tag(如 qwen3:1.7b)
+            // 不在清单里但完全可用,洗掉等于破坏配置。
+            guard old != new else { return }
+            config.mutate {
+                $0.memory.model = ""
+                $0.memory.modelLight = ""
+            }
         }
     }
 
-    /// 把 memory 配置归一到「已连接的 provider + 它名下的模型」:
-    ///  - providerId 指向未连接的 provider → 落回第一个已连接的
-    ///  - model / modelLight 不在该 provider 的可见模型列表里(换 provider
-    ///    后残留的旧名)→ 清成空串(schema 约定:空串 = provider 默认模型)
-    /// 不归一的话用户直接 Next,memory pipeline 拿到必然失败的组合。
+    /// 只修一种情况:providerId 指向**未连接**的 provider(新用户默认
+    /// chatgpt 没连 / 重放 onboarding 时原 provider 已断)→ 落回第一个已
+    /// 连接的,旧 provider 的模型名连带清空(由上面 onChange 完成)。
+    /// provider 合法时**什么都不动** —— 重放 onboarding 仅仅浏览页面不该
+    /// 改写用户配置。
     private func normalizeMemoryProvider() {
-        guard let first = availableProviders.first else { return }   // 一个都没连,picker 不展示
+        guard availableProviders.first != nil else { return }   // 一个都没连,picker 不展示
         let parsed = Provider(rawValue: config.current.memory.providerId)
-        let provider: Provider
-        if let p = parsed, availableProviders.contains(p) {
-            provider = p
-        } else {
-            provider = first
-            config.mutate { $0.memory.providerId = first.rawValue }
-        }
-        let models = config.current.aiModels.visibleModels(
-            forIntegrationId: provider.integrationId,
-            available: provider.availableModels
-        )
-        let model = config.current.memory.model
-        if !model.isEmpty, !models.contains(model) {
-            config.mutate { $0.memory.model = "" }
-        }
-        let light = config.current.memory.modelLight
-        if !light.isEmpty, !models.contains(light) {
-            config.mutate { $0.memory.modelLight = "" }
-        }
+        if let p = parsed, availableProviders.contains(p) { return }
+        config.mutate { $0.memory.providerId = availableProviders[0].rawValue }
     }
 
     @ViewBuilder
