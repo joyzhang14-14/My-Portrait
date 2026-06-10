@@ -346,7 +346,7 @@ for day in DAYS:
                 or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
         seg = C3.keys_segment(b, t1 or t0 or 0)
         snip, _fts, smode = C3.ocr_snippet(a, u, t, t1 or t0 or 0, prev_text=prev, seg=seg)
-        snipn = re.sub(r'\s', '', snip or '')
+        snipn = norm_t(snip)   # 两侧同口径(标点归一,离线对证实测:逗号挡匹配致误报)
         tn0 = cv(t).replace(' ', '').replace('\n', '')[:60]
         # 确定性快速通道(审查修):渲染与记录逐字一致 → 免 14B 直接过(判定在确定性链路)
         if tn0 and len(tn0) >= 2 and tn0 in snipn:
