@@ -187,17 +187,21 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
         // DerivedData "Build/Products/Debug" path.
         process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
 
-        // Stream stdout — line-delimited JSON.
+        // Stream stdout — line-delimited JSON。
+        // EOF(空 availableData)时 handler 自我清除 —— 否则 Pi crash 后(正常
+        // stop() 会清,crash 路径没人清)dispatch read source 以空 data 反复
+        // 回调,后台线程空转烧 CPU 直到用户切走对话。同 ClaudeCodeAgent。
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty { return }
+            if data.isEmpty { handle.readabilityHandler = nil; return }
             self?.appendStdout(data)
         }
         // stderr 留最近 ~8KB 在内存(ring buffer 模拟:超长就截到 tail),
         // 用于异常退出时给用户看为什么挂的。不写盘,无界增长是个大坑。
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let self else { return }
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            guard let self else { return }
             self.stderrLock.lock()
             self.stderrTail.append(data)
             if self.stderrTail.count > 8 * 1024 {
