@@ -30,8 +30,16 @@ enum TranscriptDeduper {
     static let lookbackMs: Int64 = maxSegmentMs + slackMs
     /// 编辑距离相似度阈值(1 - 距离/较长串长度)。
     static let similarityThreshold: Double = 0.75
-    /// 归一化后短于此长度的文本只接受完全相等(防 "en" 之类误命中包含)。
+    /// 包含匹配要求的最短归一化长度(防 "en" 之类误命中)。
     static let minContainmentLength = 4
+    /// 任一侧说话人为 nil 时,归一化文本必须达到这个长度才允许判重。
+    /// 挡掉「嗯」("ng")「好的」("haode")「对对对」("duiduidui")这类
+    /// 双方都常说的短应答 —— 它们恰好也是从不进声纹的 <2s 短段。
+    static let minNormLenWhenSpeakerUncertain = 10
+    /// mic 行参与「整行丢弃/删除」的时长上限(ms)。超过的多半是 diarize
+    /// 退化产出的整 chunk 大段(回录 + 我自己的话混在一行),整行删会
+    /// 连带丢我自己的话;只有 mic ⊂ loopback(无独有内容)豁免。
+    static let maxKillableMs: Int64 = 15_000
 
     /// 一段转录的去重视图(绝对时间,ms)。`norm` 在构造时算一次,
     /// 避免批量配对时反复跑拼音变换。
@@ -60,30 +68,61 @@ enum TranscriptDeduper {
         ))
     }
 
-    /// 两段是否判定为同一句话(调用方保证两段来自不同通道)。
-    static func isDuplicate(_ a: Segment, _ b: Segment) -> Bool {
+    /// mic 段是否判定为 loopback 段的回录。**方向有意义**:被丢/被删的永远
+    /// 是 mic 侧,所以所有"防误杀"门槛都围绕 mic 侧收紧。
+    ///
+    /// 防误杀的三层保护(对抗审查后收紧):
+    ///   - 说话人:都识别出来且不同 → 不是回录。任一侧 **nil**(<2s 短段从
+    ///     不进声纹、声纹关闭、ambiguous)→ 归一化文本必须 ≥ 10 字符才允许
+    ///     判重 —— 否则戴耳机(物理上无回录)时我和对方 5s 内都说「嗯」
+    ///     「好的」会被误删。
+    ///   - 时长上限:mic 行超过 maxKillableMs(典型 = diarize 退化时整个
+    ///     60s chunk 一条记录,回录和我自己的话混在一行)不许整行干掉 ——
+    ///     唯一例外是 mic 文本**完整包含于** loopback(mic 行没有独有内容,
+    ///     删了不丢任何东西)。
+    ///   - 包含比例:loopback ⊂ mic 方向(mic 比 loopback 长)要求 loopback
+    ///     至少占 mic 的 60% —— 防止「好的」("haode")作为子串命中长文本就
+    ///     把整行带走(去声调拼音串无词边界,子串碰撞率高)。
+    static func isDuplicate(mic: Segment, loopback: Segment) -> Bool {
         // 说话人都识别出来且不同 → 不是回录。
-        if let sa = a.speakerId, let sb = b.speakerId, sa != sb { return false }
+        if let sm = mic.speakerId, let sl = loopback.speakerId, sm != sl { return false }
         // 时间窗:±slack 内有重叠(先比时间,最便宜,挡掉绝大多数配对)。
-        guard a.absStartMs - slackMs <= b.absEndMs, b.absStartMs - slackMs <= a.absEndMs else {
+        guard mic.absStartMs - slackMs <= loopback.absEndMs,
+              loopback.absStartMs - slackMs <= mic.absEndMs else {
             return false
         }
-        return textsSimilar(a.norm, b.norm)
-    }
+        let nm = mic.norm, nl = loopback.norm
+        guard !nm.isEmpty, !nl.isEmpty else { return false }
 
-    /// 归一化文本近似:全等、包含(有长度门槛)或编辑距离相似度 ≥ 阈值。
-    static func textsSimilar(_ na: String, _ nb: String) -> Bool {
-        guard !na.isEmpty, !nb.isEmpty else { return false }
-        if na == nb { return true }
-        let (short, long) = na.count <= nb.count ? (na, nb) : (nb, na)
-        // 太短的文本(「嗯」→ "n")只认上面的全等,包含/编辑距离都易误命中。
-        guard short.count >= minContainmentLength else { return false }
-        // 包含:两路 VAD 分段边界不同,一侧常是另一侧的子句
-        //(mic「迪安福是嗎他這個是」⊇ loopback「是吗他这个是」)。
-        if long.contains(short) { return true }
-        // 编辑距离(Levenshtein):截 400 字符防极端长段 O(n²) 失控。
-        let ca = Array(na.unicodeScalars.prefix(400))
-        let cb = Array(nb.unicodeScalars.prefix(400))
+        // 说话人不确定(任一侧 nil)→ 短文本一律不判重(见上)。
+        let speakerUncertain = mic.speakerId == nil || loopback.speakerId == nil
+        if speakerUncertain, min(nm.count, nl.count) < minNormLenWhenSpeakerUncertain {
+            return false
+        }
+
+        // 全等 / mic ⊂ loopback:mic 行没有独有内容,删了不丢东西 —— 不受
+        // 时长上限约束。
+        if nm == nl { return true }
+        if nm.count >= minContainmentLength, nl.contains(nm) { return true }
+
+        // 以下分支 mic 行可能含独有内容(回录 + 我自己的话混录),只允许
+        // 短行参与整行判重,限制最坏情况的损失。
+        guard mic.absEndMs - mic.absStartMs <= maxKillableMs else { return false }
+
+        // loopback ⊂ mic:mic 多出来的部分通常是隔空拾取的垃圾音节
+        //(「迪安福是嗎他這個是」⊃「是吗他这个是」),但要求比例 ≥ 60%,
+        // 多出来的不能太多。
+        if nl.count >= minContainmentLength,
+           nl.count * 10 >= nm.count * 6,
+           nm.contains(nl) {
+            return true
+        }
+
+        // 编辑距离(Levenshtein)。超长串不截断比较(截断后按前缀算相似度
+        // 会把 400 字符之后的独有内容连带删掉)—— 直接判不重复。
+        let ca = Array(nm.unicodeScalars)
+        let cb = Array(nl.unicodeScalars)
+        guard max(ca.count, cb.count) <= 400 else { return false }
         let dist = levenshtein(ca, cb)
         let sim = 1.0 - Double(dist) / Double(max(ca.count, cb.count))
         return sim >= similarityThreshold
@@ -105,7 +144,7 @@ enum TranscriptDeduper {
             }
             var j = lo
             while j < loopSorted.count, loopSorted[j].absStartMs <= m.absEndMs + slackMs {
-                if isDuplicate(m, loopSorted[j]) {
+                if isDuplicate(mic: m, loopback: loopSorted[j]) {
                     if let id = m.id { ids.append(id) }
                     break
                 }
