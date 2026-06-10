@@ -14,6 +14,8 @@ def has_han(s): return bool(HAN.search(s or ''))
 # librime 已搬进项目(不再用 /tmp)。词库 rime/ice + ice-cands 大→gitignore;源码 rime/*.c 入库,重编见 rime/build.sh。
 _RIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rime")
 CANDS = os.path.join(_RIME, "cands"); LATTICE = os.path.join(_RIME, "lattice")
+# 粘贴政策(用户裁定 2026-06-10):消息内单段已知粘贴 ≤ 此值且非纯粘贴 → 整条留;用户可调。
+PASTE_MAX = 30
 _cc = {}; _lc = {}
 def cands(py, n=8):
     py = py.replace(" ", "").lower()
@@ -249,6 +251,17 @@ def event_sends_with_ts(ev, X):
         return ts is not None and any(ts - 1800 <= rt <= ts + 200 for rt in returns)
     out = []
     prev_ts = ev.get('started_at') or 0
+    # 粘贴政策(用户裁定,零LLM):消息含已知 paste 段时——单段 ≤PASTE_MAX(30,可调)且
+    # 粘贴占比 <100% → 整条留(跳过 cover 闸,粘贴术语如 'ElevenLabs Scribe v2 Realtime' 29字∈合法);
+    # 单段 >PASTE_MAX 或纯粘贴 → 不留。无已知 paste → 原 cover 闸(手打铁律兜底,防 autofill/程序写入)。
+    pastes = [X.cv(e.get('text', '') or '') for e in arr
+              if e.get('kind') == 'paste' and len(X.cv(e.get('text', '') or '')) >= 2]
+    def paste_verdict(t):
+        inb = [p for p in pastes if p and p in t]
+        if not inb: return None                          # 无已知粘贴 → 走原 cover 闸
+        if any(len(p) > PASTE_MAX for p in inb): return False
+        if sum(len(p) for p in inb) >= len(t): return False   # 纯粘贴
+        return True
     for i, e in enumerate(arr):
         k = e.get('kind'); t = X.cv(e.get('text', '') or ''); ts = e.get('ts')
         if ts is None: continue
@@ -257,7 +270,9 @@ def event_sends_with_ts(ev, X):
         elif k == 'delete':
             if len(t) < 2 or t in ph or t in X.RUNPH or X.is_ph(t): continue
             if not (isMark(i - 1) or isMark(i + 1)): continue
-            if X.cover(t, cs) < 0.5: continue
+            pv = paste_verdict(t)
+            if pv is False: continue                     # 大粘贴/纯粘贴:不留
+            if pv is None and X.cover(t, cs) < 0.5: continue   # 原手打铁律兜底
             if not sent(ts): continue                    # 回车检测:无回车=IME改写删除/草稿,不是发送
             out.append((t, prev_ts, ts, True)); prev_ts = ts
     endv = X.cv(ev['endv'])
