@@ -50,6 +50,7 @@ actor TranscriptionScheduler {
     private var ingestSysTask: Task<Void, Never>?
     private var transcribeTask: Task<Void, Never>?
     private var powerTask: Task<Void, Never>?
+    private var dedupHistoryTask: Task<Void, Never>?
     /// drain 重入守卫 —— 同一时刻只允许一轮连续转录。WhisperKitWrapper 是
     /// serial-call 契约,并发转录会 data race(见 queueBatchLimit 注释)。
     private var isDraining = false
@@ -119,6 +120,14 @@ actor TranscriptionScheduler {
         // 健康度起点。StallDetector 用 uptime > 120s 跳 warmup 误报。
         await AudioMetrics.shared.markStarted()
         logger.info("TranscriptionScheduler started (event-driven via PowerWatcher + 60s fallback)")
+
+        // 一次性清理跨通道去重上线前积累的历史双份(外放回录)。120s 冷启动
+        // 延迟避开启动高峰;纯 DB 读删,不碰模型,与 drain 循环并发安全
+        //(双方都只删 mic 重复份)。
+        dedupHistoryTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            await self?.dedupHistoryOnce()
+        }
     }
 
     func stop() {
@@ -126,10 +135,12 @@ actor TranscriptionScheduler {
         ingestSysTask?.cancel()
         transcribeTask?.cancel()
         powerTask?.cancel()
+        dedupHistoryTask?.cancel()
         ingestMicTask = nil
         ingestSysTask = nil
         transcribeTask = nil
         powerTask = nil
+        dedupHistoryTask = nil
         // ⚠️ drain 在飞时不能 unload:WhisperKit/Qwen wrapper 是「调用方保证串行」
         // 契约,而 transcribeOne 挂起在 transcribeSamples 时 actor 空闲,stop()
         // 可以插进来 —— unload 从另一线程把 pipe/model 置 nil,落在 transcribe
@@ -510,6 +521,64 @@ actor TranscriptionScheduler {
             }
             return records
         }
+    }
+
+    // MARK: - 历史跨通道去重(一次性)
+
+    /// 成功跑完整趟后置 true;中途取消/出错不置,下次启动重扫
+    ///(已删的行不会重删,重扫是幂等的)。
+    private static let historyDedupDoneKey = "transcriptCrossChannelDedupV1Done"
+    /// 每窗 24h(按 chunk recorded_at_ms 分窗),窗间歇 100ms 让出 DB。
+    private static let historyDedupWindowMs: Int64 = 24 * 3600 * 1000
+
+    /// 扫全库,删「与 loopback 段重复的 mic 段」—— 跨通道去重上线前积累的
+    /// 外放回录双份。逐窗处理,内存里同时只有一天的段。
+    private func dedupHistoryOnce() async {
+        guard !UserDefaults.standard.bool(forKey: Self.historyDedupDoneKey) else { return }
+
+        let range: (minMs: Int64, maxMs: Int64)?
+        do {
+            range = try await db.audioChunkTimeRangeMs()
+        } catch {
+            logger.warning("history dedup: time range query failed, will retry next launch: \(String(describing: error), privacy: .public)")
+            return
+        }
+        guard let range else {
+            // 空库:没历史可清,直接记完成。
+            UserDefaults.standard.set(true, forKey: Self.historyDedupDoneKey)
+            return
+        }
+
+        var lo = range.minMs
+        var totalDeleted = 0
+        while lo <= range.maxMs {
+            if Task.isCancelled { return }   // 不标完成,下次启动续扫
+            let hi = lo + Self.historyDedupWindowMs
+            do {
+                let mic = try await db.transcriptionsForDedup(isInput: true, fromMs: lo, toMs: hi - 1)
+                if !mic.isEmpty {
+                    // loopback 候选两侧各放宽 lookback:窗边界的 mic chunk
+                    // 的对侧 chunk 可能落在窗外。
+                    let loopback = try await db.transcriptionsForDedup(
+                        isInput: false,
+                        fromMs: lo - TranscriptDeduper.lookbackMs,
+                        toMs: hi + TranscriptDeduper.lookbackMs
+                    )
+                    let doomed = TranscriptDeduper.duplicateMicIds(mic: mic, loopback: loopback)
+                    if !doomed.isEmpty {
+                        try await db.deleteTranscriptions(ids: doomed)
+                        totalDeleted += doomed.count
+                    }
+                }
+            } catch {
+                logger.warning("history dedup: window failed, aborting (retry next launch): \(String(describing: error), privacy: .public)")
+                return
+            }
+            lo = hi
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        UserDefaults.standard.set(true, forKey: Self.historyDedupDoneKey)
+        logger.info("history cross-channel dedup complete: deleted \(totalDeleted, privacy: .public) duplicate mic segment(s)")
     }
 
     /// 写 `seg_<ts>.transcript.json` 到 wav 同目录。
