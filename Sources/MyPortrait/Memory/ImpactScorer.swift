@@ -127,6 +127,13 @@ final class ImpactScorer {
                 // 撞额度：中止整个 rescore，调度器据此标 budget_deferred。
                 // 已写入的批次保留（幂等，下次只补未评分的）。
                 throw e
+            } catch ScorerError.agentTimeout {
+                // 超时后该 agent 的事件流已错位:turn N 的迟到响应(事件不带
+                // turn id)会 resume 下一轮的 waiter,把 batch N 的分数按
+                // id→index 写进 batch N+1 的事件文件(off-by-one 写坏数据)。
+                // 不能 continue 复用同一 agent —— 中止整轮,已写入的批次
+                // 保留,调度器稍后重试只补未评分的。
+                throw ScorerError.agentTimeout
             } catch {
                 failed += batch.count
                 continue
