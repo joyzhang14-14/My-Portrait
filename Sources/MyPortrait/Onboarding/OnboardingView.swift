@@ -779,7 +779,12 @@ private struct MemoryProviderStep: View {
     @ViewBuilder
     private var providerCard: some View {
         let providerId = config.current.memory.providerId
-        let selectedProvider = Provider(rawValue: providerId) ?? availableProviders.first ?? .chatgpt
+        // 只认「已连接」的 provider:默认 providerId=chatgpt,新用户只连了别家
+        // 时 rawValue 解析照样成功,旧逻辑会选中未连接的 Codex → 模型列表错位,
+        // onboarding 结束留下必然失败的 memory 配置且无任何提示。
+        let parsed = Provider(rawValue: providerId)
+        let selectedProvider = parsed.flatMap { availableProviders.contains($0) ? $0 : nil }
+            ?? availableProviders.first ?? .chatgpt
         let models = config.current.aiModels.visibleModels(
             forIntegrationId: selectedProvider.integrationId,
             available: selectedProvider.availableModels
@@ -818,6 +823,39 @@ private struct MemoryProviderStep: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
         )
+        .onAppear { normalizeMemoryProvider() }
+        .onChange(of: config.current.memory.providerId) { _, _ in
+            normalizeMemoryProvider()
+        }
+    }
+
+    /// 把 memory 配置归一到「已连接的 provider + 它名下的模型」:
+    ///  - providerId 指向未连接的 provider → 落回第一个已连接的
+    ///  - model / modelLight 不在该 provider 的可见模型列表里(换 provider
+    ///    后残留的旧名)→ 清成空串(schema 约定:空串 = provider 默认模型)
+    /// 不归一的话用户直接 Next,memory pipeline 拿到必然失败的组合。
+    private func normalizeMemoryProvider() {
+        guard let first = availableProviders.first else { return }   // 一个都没连,picker 不展示
+        let parsed = Provider(rawValue: config.current.memory.providerId)
+        let provider: Provider
+        if let p = parsed, availableProviders.contains(p) {
+            provider = p
+        } else {
+            provider = first
+            config.mutate { $0.memory.providerId = first.rawValue }
+        }
+        let models = config.current.aiModels.visibleModels(
+            forIntegrationId: provider.integrationId,
+            available: provider.availableModels
+        )
+        let model = config.current.memory.model
+        if !model.isEmpty, !models.contains(model) {
+            config.mutate { $0.memory.model = "" }
+        }
+        let light = config.current.memory.modelLight
+        if !light.isEmpty, !models.contains(light) {
+            config.mutate { $0.memory.modelLight = "" }
+        }
     }
 
     @ViewBuilder
