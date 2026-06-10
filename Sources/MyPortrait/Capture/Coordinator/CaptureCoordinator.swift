@@ -107,6 +107,12 @@ actor CaptureCoordinator {
         ignoreIncognito = on
     }
 
+    /// Services 在 ConfigStore.capture.screen.ocrAccuracyBooster 变化时调。
+    /// 转给 ScreenCaptureService(@MainActor),下一帧即生效。
+    func setOCRBooster(_ on: Bool) async {
+        await screen.setOCRBooster(on)
+    }
+
     /// Services 在功耗档位变化时调(电源/低电量/热状态/用户改 powerMode)。
     /// 更新抓帧间隔(下一轮 loop 立即生效)+ 推 JPG 质量给 SnapshotWriter。
     func applyPowerProfile(_ profile: PowerProfile) {

@@ -734,6 +734,12 @@ struct ScreenCaptureSettingsView: View {
                             icon: "display") {
                     Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                SettingsRow("OCR accuracy booster",
+                            description: "Capture at full Retina resolution so on-screen text is read more accurately. Uses more GPU and battery; stored snapshots stay capped at the usual width.",
+                            icon: "text.viewfinder") {
+                    Toggle("", isOn: config.binding(\.capture.screen.ocrAccuracyBooster)).labelsHidden().toggleStyle(.switch)
+                }
             }
         }
     }
