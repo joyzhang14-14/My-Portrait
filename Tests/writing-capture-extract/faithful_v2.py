@@ -201,6 +201,12 @@ for day in DAYS:
         m = R.LATIN_TAIL.search(t)
         needs = bool(m) and not R._is_eng_tail(m.group().strip())
         if not needs:
+            # 干净文本但击键账大额未消费(H/I:尾巴整段没进 AX,文本无残渣)→ 也进口3
+            seg0 = C3.keys_segment(b, t1 or t0 or 0)
+            letters = len(re.sub(r'[^a-zA-Z]', '', seg0))
+            need_est = sum(3 if not ch.isascii() else 1 for ch in cv(t))   # CJK≈3字母/字(拼音)
+            needs = letters > need_est + 6
+        if not needs:
             out2.append(rec); continue
         nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0))
         via = "口3-OCR"
