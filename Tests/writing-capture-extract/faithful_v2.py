@@ -127,6 +127,23 @@ def referee(text, snip, keys, mode='self'):
     except Exception:
         return 'UNSURE', ''
 
+_PUNCT = re.compile(r'[\s，,。.!？?！…、:：;；"\'"“”‘’()（）]+')
+def norm_t(t): return _PUNCT.sub('', (t or ''))
+_CU = [None]
+def pyseq(t):
+    """文本 → 逐字符编码单元集序列(汉字→拼音集[多音字全收],ASCII→小写字母,标点跳过)。
+    用于拼音空间查重:肯下来了 vs 啃下来了 同序列。零硬编码,来自部署词库(ime_schema)。"""
+    if _CU[0] is None: _CU[0] = R.SCH.char_units()
+    seq = []
+    for ch in norm_t(t):
+        if ch.isascii(): seq.append(frozenset([ch.lower()]))
+        else: seq.append(_CU[0].get(ch, frozenset([ch])))
+    return seq
+def seq_in(a, b):
+    """短序列 a 是否(逐位集合相交)是 b 的连续子串。"""
+    if not a or len(a) > len(b): return False
+    return any(all(a[j] & b[i + j] for j in range(len(a))) for i in range(len(b) - len(a) + 1))
+
 RAW = {}   # day -> [(app, text, kc, evid, t0, t1)]
 DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每道闸丢弃的全记录(审计)
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
@@ -218,12 +235,17 @@ for day in DAYS:
             if not any(ch.isdigit() for ch in s) and not re.search(r'[A-Za-z]{4,}', s): continue
             fixed, _ = R.reconstruct_message('', s, model_fn=disambig)
             ft = cv(fixed)
-            if len(ft) < 2 or not (R.has_han(ft) or re.search(r'[A-Za-z]{4,}', ft)): continue
-            # 消费判定(空格不敏感):文本被某记录包含 且 时间窗落在该记录窗内(±3s)→ 已消费
-            ftn = ft.replace(' ', '')
-            consumed = any(ftn in rt.replace(' ', '') and st0 >= (rt0 or 0) - 3000 and st1 <= (rt1 or 0) + 3000
+            if len(ft) < 2 or not (R.has_han(ft) or re.search(r'[A-Za-z]{4,}', ft)):
+                if len(s) >= 6:                       # 蒸发审计(诊断:guard回退静默吞掉说实话)
+                    drops.append(("账本-解码蒸发", a, s[:60], None, st0, st1, "guard回退/解码过短"))
+                continue
+            # 消费判定(空格+标点归一,诊断:半角','vs全角'，'天然失配):文本被某记录包含 且 时间窗±3s → 已消费
+            ftn = norm_t(ft)
+            consumed = any(ftn in norm_t(rt) and st0 >= (rt0 or 0) - 3000 and st1 <= (rt1 or 0) + 3000
                            for rt, rt0, rt1 in recs_b)
-            if consumed or X.is_ph(ft) or is_residue(ft) or ft in seen: continue
+            if consumed: continue
+            if X.is_ph(ft) or is_residue(ft) or ft in seen:
+                drops.append(("账本-过滤", a, ft[:60], None, st0, st1, "占位符/残渣/重复")); continue
             seen.add(ft)
             if LEDGER_MODE != 'off':
                 out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered", b))
@@ -283,15 +305,31 @@ for day in DAYS:
         is_ledger = src_.startswith("keystroke_recovered")
         if LEDGER_MODE == 'raw':                           # raw=旧行为:无审核环(审查修:原先未实现)
             out3.append(rec); continue
-        # 账本查重闸(确定性,在快速通道**之前**):重复副本的文本本来就在屏幕上,OCR一致会被放行——
-        # 但 B 门控要杀的正是"重复"维度。账本记录与任何 AX 路记录互为子串(空白归一)→ 未定区展示。
+        # 账本路(诊断修):referee PASS 对账本是循环论证(记录由击键生成,"击键支撑"恒真)→退出;
+        # ① 拼音空间查重(肯/啃同音双胞胎,子串在汉字空间失配)+ 时间窗±10s
+        # ② 入册唯一通道 = 确定性渲染全文命中(60s→300s 宽窗);锚不上 → 未定区展示(审核而非丢弃)
         if is_ledger:
-            tn_ = cv(t).replace(' ', '').replace('\n', '')
+            pa = pyseq(t)
             dup = next((r2[1] for r2 in out2 if not r2[6].startswith("keystroke_recovered") and r2[7] == b
-                        and (tn_ in r2[1].replace(' ', '').replace('\n', '')
-                             or r2[1].replace(' ', '').replace('\n', '') in tn_)), None)
+                        and (seq_in(pa, pyseq(r2[1])) or seq_in(pyseq(r2[1]), pa))
+                        and (t0 or t1 or 0) <= (r2[5] or 0) + 10000
+                        and (t1 or t0 or 0) >= (r2[4] or 0) - 10000), None)
             if dup is not None:
-                pend.append((a, t, src_, evid, t0, "账本副本(与AX路记录重复)", cv(dup)[:80])); continue
+                pend.append((a, t, src_, evid, t0, "账本副本(拼音空间重复)", cv(dup)[:80])); continue
+            prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
+                    or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
+            seg = C3.keys_segment(b, t1 or t0 or 0)
+            tn0 = norm_t(t)[:60]
+            hit = False
+            for fw in (60, 300):
+                sn, _ts, _md = C3.ocr_snippet(a, u, t, t1 or t0 or 0, prev_text=prev, seg=seg, fwd_s=fw)
+                if tn0 and len(tn0) >= 2 and tn0 in re.sub(r'\s', '', sn or ''):
+                    hit = True; break
+            if hit:
+                out3.append(rec)
+            else:
+                pend.append((a, t, src_, evid, t0, "账本解码未获渲染全文确证", ''))
+            continue
         # prev 锚优先用已审核的修后文本(out3),回退 out2(审查修)
         prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
                 or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))

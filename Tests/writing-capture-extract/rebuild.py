@@ -174,7 +174,9 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
                 if han:
                     result = base + han
                     fin = guard(cap, result, set(ch for ch in cap if HAN.match(ch)) |
-                                set(ch for c in lattice(use_py)[1] for cand in c[1] for ch in cand if HAN.match(ch)), set())
+                                set(ch for c in lattice(use_py)[1] for cand in c[1] for ch in cand if HAN.match(ch)) |
+                                set(ch for ch in lattice(use_py)[0] if HAN.match(ch)) |
+                                set(ch for w in cands(use_py, 8) for ch in w if HAN.match(ch)), set())
                     return fin, {'reason': 'residue', 'use_py': use_py, 'han': han}
             return cap, {'reason': 'residue_skip'}   # 残缺:保留原样,绝不脑补
     # ---- 路 ②:无残渣,击键 run 级补尾 ----
@@ -234,6 +236,11 @@ def _allowed(runs, cap):
         if kind == 'chinese':
             for s, cl in syls:
                 for cand in cl: a |= set(ch for ch in cand if HAN.match(ch))
+            # librime 词级确定性输出也是合法来源(诊断:缩写音节 h/x/c 的前6单字候选
+            # 不含 话/型/错,guard 否决自家 TOP → 整条蒸发)。TOP/cands 来自用户击键的
+            # 确定性解码,非模型写权;模型选字仍被 decode_run 硬校验独立钳死。
+            a |= set(ch for ch in lattice(py)[0] if HAN.match(ch))
+            for w in cands(py, 8): a |= set(ch for ch in w if HAN.match(ch))
     return a
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----

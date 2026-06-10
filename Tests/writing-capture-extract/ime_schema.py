@@ -49,3 +49,22 @@ def is_complete_unit(s):
 def units_with_prefix(p):
     """以 p 开头的真实编码单元(前缀松弛:yo→yo/you/yong),短的优先。"""
     return tuple(sorted((s for s in valid_units() if s.startswith(p.lower())), key=len))
+
+
+@functools.lru_cache(maxsize=1)
+def char_units():
+    """字 → 编码单元集(单字词条提取:8105 等字表每行「字\t拼音」)。多音字=集合。
+    用于拼音空间查重(肯/啃 同音双胞胎)。零硬编码,随部署方案词库走。"""
+    m = {}
+    for f in glob.glob(DICT_GLOB):
+        try:
+            fh = open(f, encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2 and len(parts[0]) == 1 and not parts[0].isascii() and parts[1]:
+                u = parts[1].strip().lower()
+                if u.isalpha():
+                    m.setdefault(parts[0], set()).add(u)
+    return {k: frozenset(v) for k, v in m.items()}
