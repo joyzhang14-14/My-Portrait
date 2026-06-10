@@ -106,11 +106,12 @@ actor CompactionWorker {
     ///    崩溃/被 kill —— framesToCompact 只查 snapshot_path IS NOT NULL,
     ///    这些文件从此无人访问,永久残留
     ///  - MP4:编码中途崩溃留下的半成品 / 行被删后残留的文件
-    /// 只动 mtime 超过 1 小时的文件:新 JPG 先落盘、insertFrame 随后;
-    /// 在编 MP4 尚未入库 —— 都不能误删。screenpipe 导入的 MP4 有
-    /// video_chunks 行引用,不受影响。
+    /// 只动 mtime 超过 7 天的文件:(1) 新 JPG 先落盘、insertFrame 随后,
+    /// 在编 MP4 尚未入库 —— 都不能误删;(2) CaptureCoordinator 承诺
+    /// insertFrame 失败时已落盘的 JPG 可事后回补 —— 留一周回补窗口,
+    /// 孤儿本来就只在启动期清一次,不急。
     private func sweepOrphanMedia() async {
-        let cutoff = Date().addingTimeInterval(-3600)
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
         let jpg = await sweepDir(config.framesDir, ext: "jpg", olderThan: cutoff) { [db] paths in
             try await db.referencedSnapshotPaths(in: paths)
         }
@@ -122,8 +123,18 @@ actor CompactionWorker {
         }
     }
 
+    /// 单次启动每个目录最多删这么多文件。真实孤儿来源(崩溃窗口)单次最多
+    /// 100 个 JPG + 个位数 MP4,远超说明判定大概率不对(见 sweepDir 护栏注释)。
+    private static let sweepMaxRemovals = 500
+
     /// 枚举 `dir` 下指定扩展名、mtime 早于 `cutoff` 的文件,删掉 DB 不引用的。
     /// 返回删除数。查询失败 → 一个都不删(宁可留垃圾,不误删)。
+    ///
+    /// 两道大规模误删护栏 —— 数据树是 relocatable 的,portrait.sqlite 和
+    /// raw_data 是独立文件,用户删库重建 / 只迁移媒体目录时「DB 不引用」
+    /// 不等于「是孤儿」:
+    ///  1. 候选不少而 DB 引用为空 → 多半是新建/重置过的库,整目录跳过
+    ///  2. 单次删除量超过 sweepMaxRemovals → 只告警不删(误判宁可留垃圾)
     private func sweepDir(
         _ dir: URL, ext: String, olderThan cutoff: Date,
         referenced: ([String]) async throws -> Set<String>
@@ -140,8 +151,20 @@ actor CompactionWorker {
             logger.warning("orphan sweep query failed for \(dir.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
             return 0
         }
+        // 护栏 1:有一批候选文件但 DB 一条都不引用 → 库八成被重建/换过,
+        // 这些不是孤儿,是还没有(或不再有)行的真实数据。
+        if refs.isEmpty, absPaths.count > 20 {
+            logger.warning("orphan sweep skipped \(dir.lastPathComponent, privacy: .public): \(absPaths.count, privacy: .public) candidates but zero DB references (rebuilt/replaced DB?)")
+            return 0
+        }
+        let doomed = absPaths.filter { !refs.contains(AssetPath.normalize($0)) }
+        // 护栏 2:量级离谱 → 不删,留给人看。
+        if doomed.count > Self.sweepMaxRemovals {
+            logger.warning("orphan sweep skipped \(dir.lastPathComponent, privacy: .public): \(doomed.count, privacy: .public) unreferenced files exceeds cap \(Self.sweepMaxRemovals, privacy: .public), refusing bulk delete")
+            return 0
+        }
         var removed = 0
-        for abs in absPaths where !refs.contains(AssetPath.normalize(abs)) {
+        for abs in doomed {
             if (try? fm.removeItem(atPath: abs)) != nil { removed += 1 }
         }
         return removed
@@ -157,6 +180,10 @@ actor CompactionWorker {
         var absPaths: [String] = []
         for case let url as URL in it {
             guard url.pathExtension.lowercased() == ext else { continue }
+            // screenpipe 导入文件一律跳过:importer 先 copyItem 后 INSERT 行,
+            // 且 copyItem 保留源 mtime(历史录像落地即"很旧"),mtime 护栏对它
+            // 无效 —— 导入进行中撞上 sweep 会误删刚拷完、行还没插的文件。
+            guard !url.lastPathComponent.hasPrefix("imported_") else { continue }
             let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             guard let mtime, mtime < cutoff else { continue }
             absPaths.append(url.path)
