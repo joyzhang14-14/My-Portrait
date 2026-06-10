@@ -208,7 +208,13 @@ for day in DAYS:
             needs = letters > need_est + 6
         if not needs:
             out2.append(rec); continue
-        nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0))
+        u = None
+        if evid:
+            ur = con.execute("SELECT url FROM typing_events WHERE id=:i", {"i": evid}).fetchone()
+            u = ur[0] if ur else None
+        others = [r2[1] for j, r2 in enumerate(recs_sorted) if j != i and r2[7] == b]
+        nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0),
+                                    url=u, other_texts=others)
         via = "口3-OCR"
         if nt == t:                                      # OCR 没修上 → 双向语境重试 14B
             ctx2 = f"app:{a}\n邻近消息:\n" + ctx_window(timeline[:i], t0 or 0, after=timeline[i + 1:])
@@ -228,36 +234,25 @@ json.dump(RAW, open(os.path.join(EVAL, "v2_rebuilt.json"), "w"), ensure_ascii=Fa
 del m14, tok14; gc.collect()
 print(f"Phase1 完成,14b disambig 共调用 {R.DISAMBIG_CALLS[0]} 次", flush=True)
 
-# ===== Phase 2: Pass4(8b) =====
-print("=== Phase2: 加载 8b 做 Pass4 ===", flush=True)
-m8, tok8 = load("mlx-community/Qwen3-8B-4bit"); ted, vs = MC.tokenizer_data(tok8, "qwen3-8b")
-def gen(schema, user, mx):
-    pr = tok8.apply_chat_template([{"role": "user", "content": user}], add_generation_prompt=True, tokenize=False, enable_thinking=False)
-    try:
-        out = generate(m8, tok8, prompt=pr, max_tokens=mx, verbose=False, logits_processors=[MC.json_processor(schema, ted, vs)])
-        return json.loads(re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip())
-    except Exception: return None
-P4 = H.prompt("pass4ContentReview")
-rej = con.execute("SELECT text,app,kind,reason_category,reason_text FROM writing_records_user_rejected LIMIT 28").fetchall()
-rejex = [{"text": (r[0] or '')[:200], "app": r[1], "kind": r[2], "reason": r[4] or r[3]} for r in rej]
-P4_SCHEMA = {"type": "object", "properties": {"kept": {"type": "array", "items": {"type": "string"}}, "discarded": {"type": "array", "items": {"type": "object", "properties": {"record_id": {"type": "string"}, "reason": {"type": "string"}}, "required": ["record_id", "reason"]}}}, "required": ["kept", "discarded"]}
-def pass4(recs):
-    """返回 (kept, discarded)。discarded=[(rec, reason)] —— 审计要求:丢了什么+为什么,不再扔 reason。"""
-    if not recs: return [], []
-    Rr = [{"record_id": f"p{i}", "text": t, "kind": kind_of(t), "source": "ax_cleaned", "app": a, "url": None, "keystroke_count": kc, "context_summary": None} for i, (a, t, kc, *_ ) in enumerate(recs)]
-    user = P4 + "\n\nuser_rejected_examples:\n" + json.dumps(rejex, ensure_ascii=False) + "\n\nrecords:\n" + json.dumps(Rr, ensure_ascii=False)
-    d = gen(P4_SCHEMA, user, 2000)
-    disc = {x["record_id"]: (x.get("reason") or "") for x in (d or {}).get("discarded", []) if isinstance(x, dict)}
-    kept = [recs[i] for i in range(len(recs)) if f"p{i}" not in disc]
-    dropped = [(recs[i], disc[f"p{i}"]) for i in range(len(recs)) if f"p{i}" in disc]
+# ===== Phase 2: Pass4(固定逻辑;LLM 禁用 —— 用户指令:8B 误杀真消息)=====
+# 只丢两类:邮箱(.com 结尾)/ 密码(连续 ≥6 个掩码符号 •●* 等)。其余全留。
+print("=== Phase2: Pass4 固定逻辑(只滤 .com结尾 + 密码掩码;LLM 禁用)===", flush=True)
+PW_MASK = re.compile(r'[•●○◦＊*]{6}')
+def pass4_fixed(recs):
+    kept, dropped = [], []
+    for r in recs:
+        t = (r[1] or '').strip()
+        if t.lower().endswith('.com'):
+            dropped.append((r, "邮箱(.com 结尾)")); continue
+        if PW_MASK.search(t):
+            dropped.append((r, "密码(连续≥6掩码符号)")); continue
+        kept.append(r)
     return kept, dropped
 FINAL = {}; DISCARDED = {}
 for day in DAYS:
-    recs = RAW[day]; kept = []; dropped = []
-    for i in range(0, len(recs), 12):
-        k, dd = pass4(recs[i:i+12]); kept += k; dropped += dd
+    kept, dropped = pass4_fixed(RAW[day])
     FINAL[day] = kept; DISCARDED[day] = dropped
-    print(f"  {day}: {len(recs)} → Pass4 后 {len(kept)}(丢 {len(dropped)})", flush=True)
+    print(f"  {day}: {len(RAW[day])} → Pass4 后 {len(kept)}(丢 {len(dropped)})", flush=True)
 
 # ===== 写 Obsidian 文档(含 Pass4 丢弃审计:丢了什么+为什么+event 时间)=====
 import datetime

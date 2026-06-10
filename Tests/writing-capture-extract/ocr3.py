@@ -54,51 +54,69 @@ def _verify_at(cont, L):
 
 def verify_tail(cont, leftover):
     """续文 cont 过击键账。账先剥选字数字/空格;账开头可能是 base 部分的击键(对不上尾巴),
-    用「跳过前缀」搜索:从每个偏移试验证,取验证出最长尾巴的那个锁定点。"""
+    用「跳过前缀」搜索。返回 (tail, consumed=消费的账上字母数)。"""
     L0 = re.sub(r'[^a-z]', '', (leftover or '').lower())
-    best = ('', L0)
+    best = ('', 0)
     for off in range(len(L0)):
         tail, rem = _verify_at(cont, L0[off:])
-        if len(tail) > len(best[0]):
-            best = (tail, rem)
+        consumed = len(L0) - off - len(rem)
+        if len(tail) > len(best[0]) or (len(tail) == len(best[0]) and consumed > best[1]):
+            best = (tail, consumed)
         if len(tail) >= len(cont) - 2: break             # 几乎全验上了,够了
     return best
 
 APP_PAT = {'Discord': '%iscord%', 'claudefordesktop': '%laude%', 'xinWeChat': '%eChat%',
            'Safari': '%afari%', 'Notes': '%otes%'}
 
-def ocr_frames(app_short, t0, t1):
+def pick_frames(app_short, url, send_ts, fwd_s=60):
+    """帧规则(用户指令的工程化解释):同 app(+url);**return 后最早的可用帧优先**
+    (前向扫 ≤60s,因为紧邻的下一帧常还没渲染到该消息);都锚不上 → 回退发送前最近一帧;
+    再没有 → 空(跳过 OCR,不传)。早帧优先防"下一条消息粘连"。"""
     pat = APP_PAT.get(app_short, '%' + app_short[:6] + '%')
-    return con.execute("SELECT timestamp_ms, full_text FROM frames WHERE app_name LIKE ? "
-                       "AND timestamp_ms BETWEEN ? AND ? ORDER BY timestamp_ms",
-                       (pat, t0, t1)).fetchall()
+    cond, args = "app_name LIKE :p", {"p": pat}
+    if url:
+        cond += " AND browser_url = :u"; args["u"] = url
+    after = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
+                        f"AND timestamp_ms >= :a AND timestamp_ms <= :b ORDER BY timestamp_ms",
+                        {**args, "a": send_ts, "b": send_ts + fwd_s * 1000}).fetchall()
+    before = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
+                         f"AND timestamp_ms < :a ORDER BY timestamp_ms DESC LIMIT 1",
+                         {**args, "a": send_ts}).fetchall()
+    return list(after) + list(before)
 
-def complete_tail(app_short, text, send_ts, leftover_keys, post_s=120):
-    """口3 主函数:对一条疑似缺尾的记录,OCR 锚定 + 击键验证补尾。
-    返回 (fixed_text, info)。补不了 → 原样返回(宁缺毋错)。"""
-    # 干净前缀 = 去掉尾部 latin 残渣;锚 = 前缀末 3-6 字
+def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts=()):
+    """口3 主函数:OCR 锚定 + 击键验证补尾。返回 (fixed_text, info)。三护栏(宁缺毋错):
+    ① 残渣替换必须消费 ≥ 残渣字母数的击键(XPC→X 拒;yi x→一下测 放行)
+    ② 尾巴若是同 bundle 另一条记录的前缀 → 粘连,拒(赛博永生+数字人)
+    ③ 锚定/验证不过 → 原样返回。"""
     m = R.LATIN_TAIL.search(text)
     base = text[:m.start()].rstrip() if m else text
+    residue_letters = len(re.sub(r'[^a-zA-Z]', '', m.group())) if m else 0
     if len(cv(base)) < 3:
         return text, {'why': 'base太短无法锚定'}
-    # 击键账只用 leftover_keys(调用方给的窗已覆盖残渣的击键;残渣字母再拼会双计错位)
-    leftover = leftover_keys
-    best = ('', None)
-    for ts, ft in ocr_frames(app_short, send_ts - 2000, send_ts + post_s * 1000):
+    frames = pick_frames(app_short, url, send_ts)
+    if not frames:
+        return text, {'why': '无同app/url帧,跳过OCR'}
+    others = [cv(o).replace(' ', '') for o in other_texts if o]
+    for ts, ft in frames:                                 # 时间序:最早锚定命中即用
         ft = ft or ''
-        for k in (6, 5, 4, 3):                            # 锚从长到短
+        for k in (6, 5, 4, 3):
             anchor = cv(base)[-k:]
             if len(anchor) < 3: continue
             idx = ft.find(anchor)
             if idx < 0: continue
             cont = ft[idx + len(anchor): idx + len(anchor) + 30]
-            tail, rem = verify_tail(cont, leftover)
-            if len(cv(tail)) > len(cv(best[0])):
-                best = (tail, {'frame_ts': ts, 'anchor': anchor, 'cont': cont[:20], 'left_after': rem})
-            break                                         # 本帧已用最长可用锚
-    if best[0]:
-        return base + best[0], {'fixed': True, **best[1]}
-    return text, {'why': '无帧锚定命中或击键验证失败'}
+            tail, consumed = verify_tail(cont, leftover_keys)
+            tn = cv(tail).replace(' ', '')
+            if not tn:
+                break                                     # 本帧锚上了但验证空,换下一帧
+            if residue_letters and consumed < residue_letters:
+                return text, {'why': f'消费{consumed}<残渣{residue_letters}字母,拒(防截短)'}
+            if any(o.startswith(tn) for o in others):
+                return text, {'why': f'尾巴={tn[:10]}是另一条记录前缀,拒(防粘连)'}
+            return base + tail, {'fixed': True, 'frame_ts': ts, 'anchor': anchor,
+                                 'cont': cont[:20], 'consumed': consumed}
+    return text, {'why': '所有帧锚定/击键验证未过'}
 
 
 # ---- 标注案例测试 ----
