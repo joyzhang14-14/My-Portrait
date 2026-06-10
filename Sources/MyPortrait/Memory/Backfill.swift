@@ -282,11 +282,12 @@ enum Backfill {
         // the next calendar day (UTC) and make created > last occurrence.
         //
         // No placeholder impact — a new event is `unscored` until the LLM
-        // (ImpactScorer) gives it a real score. impact starts at the 1.0
-        // floor so an unscored event never outranks a scored one.
+        // (ImpactScorer) gives it a real score. impact starts at the 0.0
+        // floor so an unscored event never outranks a scored one (scored
+        // pointless 也能压到 0.0-0.9,占位必须贴地板)。
         var file = PortraitFile(
             created: PortraitFile.truncateToDay(day),
-            impact: 1.0,
+            impact: 0.0,
             body: renderBody(title: cluster.title, summary: cluster.summary),
             source: "timeline:event",
             tags: cluster.tags,
