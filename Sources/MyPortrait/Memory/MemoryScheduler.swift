@@ -1230,6 +1230,27 @@ final class MemoryScheduler {
         print("[Scheduler] reset \(date) → pending, retry_count=0")
     }
 
+    /// Reject staged run 专用:把这次 run **拥有的阶段**(含已 complete 的)
+    /// 翻回 pending。文件树已被快照还原,状态必须跟着回去 —— 否则一次成功
+    /// 且有产出的 run 被 Reject 后,"树回滚了、状态还 complete",这些天
+    /// 永不重跑,产出永久丢失,Run 按钮还灰着没法手动救。
+    /// 跟 resetDay 区分:resetDay 服务 attention 重试,只翻 failed 系状态、
+    /// 刻意不动 complete;这里只翻调用方指明的阶段,不跨 kind 误伤。
+    func resetStagesForReject(date: String, stages: [ProcessingStage]) {
+        guard let row = store.row(for: date) else { return }
+        for stage in stages {
+            switch row.status(of: stage) {
+            case .complete, .failed, .deadLetter, .budgetDeferred:
+                store.setStatus(date: date, stage: stage, status: .pending)
+            default:
+                break
+            }
+        }
+        store.setRetryCount(date: date, count: 0)
+        store.releaseLock(date: date)
+        print("[Scheduler] reject-reset \(date) stages=\(stages.map(\.rawValue)) → pending")
+    }
+
     /// "我接受现状,不再跑" —— 用户 Dismiss attention 行时调。把 failed /
     /// budget_deferred / dead_letter 阶段标 complete + 清 last failure kind,
     /// 从 attention 列表永久消失。跟 resetDay 区分:
