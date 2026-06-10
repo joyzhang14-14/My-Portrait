@@ -133,6 +133,8 @@ def reconstruct_message(captured, ks, context="", model_fn=None):
     for i in range(len(take)): seg_for[n - len(take) + i] = take[i]
     out_lines, infos = [], []
     for i, ln in enumerate(lines):
+        if not cv(ln) and len(lines) > 1:   # R4守卫:多行中的空行=用户有意空白,不重建(防植入)
+            out_lines.append(ln); infos.append({'reason': 'empty_line'}); continue
         fixed, info = _reconstruct_line(ln, seg_for[i] or [], context, model_fn)
         out_lines.append(fixed); infos.append(info)
     return '\n'.join(out_lines), {'lines': infos}
@@ -202,6 +204,10 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
     if not any(r[1] == 'chinese' and r[2] for r in runs):
         info['reason'] = 'no_chinese_run'; return cap, info   # 全英文/残缺:原样,绝不脑补
     cap_han = [c for c in cap if HAN.match(c)]
+    # 守卫(2026-06-10,v5-8回归):captured 非空但**无一个汉字**(纯英文行)→ 中文补尾不适用,
+    # 原样返回。对齐逻辑对 cap_han=[] 真空成立,否则全部击键 run 会被当尾巴贴上(英文长文+拼音垃圾)。
+    if cap and not cap_han:
+        info['reason'] = 'no_han_in_cap'; return cap, info
     # 按序匹配已 commit 的汉字(同音字按候选集判),第一个匹配不上的 chinese run 起 = 尾巴
     pos = 0; tail = []
     for py, kind, syls in runs:
