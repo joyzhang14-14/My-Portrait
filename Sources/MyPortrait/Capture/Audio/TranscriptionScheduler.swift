@@ -493,7 +493,7 @@ actor TranscriptionScheduler {
             // mic 新段:对上 loopback 已有段 → 丢弃。
             var kept: [TranscriptionRecord] = []
             for (i, rec) in records.enumerated() {
-                if candidates.contains(where: { TranscriptDeduper.isDuplicate(newSegs[i], $0) }) {
+                if candidates.contains(where: { TranscriptDeduper.isDuplicate(mic: newSegs[i], loopback: $0) }) {
                     continue
                 }
                 kept.append(rec)
@@ -507,7 +507,7 @@ actor TranscriptionScheduler {
             // loopback 新段:对上 mic 已有段 → 删 mic 行,本段照常入库。
             var doomedIds = Set<Int64>()
             for seg in newSegs {
-                for cand in candidates where TranscriptDeduper.isDuplicate(seg, cand) {
+                for cand in candidates where TranscriptDeduper.isDuplicate(mic: cand, loopback: seg) {
                     if let id = cand.id { doomedIds.insert(id) }
                 }
             }
@@ -534,6 +534,10 @@ actor TranscriptionScheduler {
     /// 扫全库,删「与 loopback 段重复的 mic 段」—— 跨通道去重上线前积累的
     /// 外放回录双份。逐窗处理,内存里同时只有一天的段。
     private func dedupHistoryOnce() async {
+        // 启动任务的 `try? await Task.sleep` 会吞掉 stop() 的取消(CancellationError
+        // 被 try? 吃掉后任务继续往下走)—— 这里显式拦住,别在退出路径上白跑
+        // actor hop + DB 查询(查询被取消还会打误导性 warning)。
+        if Task.isCancelled { return }
         guard !UserDefaults.standard.bool(forKey: Self.historyDedupDoneKey) else { return }
 
         let range: (minMs: Int64, maxMs: Int64)?
