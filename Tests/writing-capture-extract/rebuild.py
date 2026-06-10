@@ -149,7 +149,10 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
         residue = m.group().strip()
         # 字面残渣保护(宁缺毋错):含大写字母(IME 拼音必是小写;G/Joyzhang14 是字面)
         # 或单字母(g→个/e→呃 太险)→ 不解码,原样保留。AX 采到什么就是什么。
-        if any(c.isupper() for c in residue) or len(residue.replace(' ', '')) <= 1:
+        # 或前导字符是 ./:@-_(域名/路径/邮箱:ikeyrent.com 的 com 是字面,不是拼音——
+        # guard 放宽后 com→聪明 实锤回归,2026-06-10)
+        if (any(c.isupper() for c in residue) or len(residue.replace(' ', '')) <= 1
+                or (m.start() > 0 and cap[m.start() - 1] in './:@-_')):
             return cap, {'reason': 'literal_residue'}
         r_cap = residue.replace(' ', '').lower()
         kpicks = parse_picks(kseg)
