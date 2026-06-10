@@ -277,8 +277,8 @@ struct SpeakersSettingsView: View {
         guard !v.isEmpty, let i = rows.firstIndex(where: { $0.id == r.id }) else { return }
         rows[i].name = v   // 乐观显示新名字
         guard let sid = Int64(r.id) else { return }
-        // 改名"落库"**推迟到重扫跑完才执行**;按 Stop 就不落库 = 改名作废,
-        // 重扫结束触发的 reload 自动读回旧名字(实现"Stop 撤销改名")。
+        // 改名落库由 coordinator 在 debounce 结束、重扫**开始前**执行 ——
+        // 重扫的同名归拢(sameName rival 豁免)要在 DB 里看到新名字才生效。
         reidentify.schedule(commit: { _ = TimelineDB().renameSpeaker(id: sid, to: v) })
     }
     private func markHallucination(_ r: SpeakerRow) {
@@ -762,8 +762,9 @@ private struct StatPill: View {
 /// 声纹训练卡片。复刻 screenpipe 的格式：填名字 → Start training → 30s 倒计时
 /// 期间正常说话 → 后台把那段时间窗的麦克风声纹簇命名成你。
 /// 自洽的声纹训练 card —— 跟 onboarding 里 SpeakerTrainingStep 完全同款流程:
-/// 不依赖 audio.enabled / speakerIdEnabled 这两个 toggle 提前开,而是
-/// 点 Start 时临时强开,训练完(success/failure/cancel)恢复成原值。
+/// 不依赖 audio.enabled / speakerIdEnabled 这两个 toggle 提前开;训练期间
+/// 临时关主采集 + 训练完(success/failure/cancel)恢复原值由 VoiceTrainer
+/// 自己管(跟 phase 同生命周期,view 销毁/崩溃也不丢)。
 ///
 /// 只要求:mic 权限给了 + 名字填了。
 ///
@@ -778,9 +779,6 @@ struct VoiceTrainingCard: View {
     @StateObject private var monitor = PermissionMonitor()
     @State private var trainer = VoiceTrainer.shared
     @State private var showCountdown = false
-    /// 训练前的 audio.enabled / speakerIdEnabled,完成时还原。
-    @State private var prevAudioEnabled: Bool? = nil
-    @State private var prevSpeakerIdEnabled: Bool? = nil
     /// 训练用的 speaker 名字 —— 跟持久化的 userName(「本人」身份,diarizer 用它自动
     /// 起名)解耦,这样训练别人不会覆盖你自己的名字。onAppear 默认填 userName。
     @State private var trainingName: String = ""
@@ -888,17 +886,22 @@ struct VoiceTrainingCard: View {
             // 不预填名字 —— 没训练的说话人就保持 "Cluster <id>" 显示;
             // 训练时用户自己输名字。不注入 firstName。
         }
-        .onDisappear { monitor.stop() }
+        .onDisappear {
+            monitor.stop()
+            // 兜底:倒计时(录音中)直接关 Settings 窗口时 sheet 被 dismiss 但
+            // onCancel 不会触发 —— 录音 engine 会一直跑、audio.enabled 留在
+            // false。录音中 sheet 是 window-modal,view 消失只可能是关窗,
+            // 直接取消训练(cancel 内部还原 audio toggle)。processing 阶段
+            // 不取消 —— assign 在 trainer(单例)里继续跑,终态自己还原。
+            if case .recording = trainer.phase { trainer.cancel() }
+        }
         // 换说话人模型 → 清掉上一次训练(在别的模型下)留下的 "✓ Trained as …"
         // 成功/失败提示 —— 它属于旧模型,对新模型不适用。训练进行中不打断。
         .onChange(of: cfg.current.capture.audio.speakerEmbeddingModel) { _, _ in
             if !trainer.isRunning { trainer.reset() }
         }
-        // trainer.phase 变 success/failure → 还原 audio toggle。
+        // audio toggle 的还原由 VoiceTrainer 在 phase 终态自己做,view 只管回调。
         .onChange(of: phaseKey(trainer.phase)) { _, newKey in
-            if newKey == "success" || newKey == "failure" {
-                restoreAudioState()
-            }
             // 训练成功 = 新声纹已写进 speakers 表,通知父视图 reload。
             if newKey == "success" { onTrained() }
         }
@@ -912,9 +915,9 @@ struct VoiceTrainingCard: View {
                 },
                 onCancel: {
                     showCountdown = false
-                    // 用户取消 → 关 engine,清 buffer,回 idle。
+                    // 用户取消 → 关 engine,清 buffer,回 idle(audio toggle
+                    // 由 trainer 在回 idle 时还原)。
                     trainer.cancel()
-                    restoreAudioState()
                 }
             )
         }
@@ -928,35 +931,13 @@ struct VoiceTrainingCard: View {
         // VoiceTrainer.start() 的 `guard case .idle` 会拒绝重新起来 → 卡住。
         // 每次点 Start 先 reset 回 idle,让用户能直接重试。
         trainer.reset()
-        prevAudioEnabled = cfg.current.capture.audio.enabled
-        prevSpeakerIdEnabled = cfg.current.capture.audio.speakerIdEnabled
-        // **训练期间临时关掉主 mic capture** —— 两个 AVAudioEngine 同时 access
-        // 同一个 input 硬件会拿到 -10877 或者让蓝牙降到 HFP,训练录到的样本
-        // 会变质。assign/cancel/失败后 restoreAudioState() 还原成原值。
-        // (embedding-based 训练自己起独立 engine,不依赖全局 capture pipeline)
-        if cfg.current.capture.audio.enabled {
-            cfg.mutate { $0.capture.audio.enabled = false }
-        }
+        // 训练期间临时关主 mic capture + 完成后还原都在 VoiceTrainer 里做
+        // (跟 phase 同生命周期,view 销毁也不丢;原值记 UserDefaults 崩溃安全)。
         guard trainer.start() else {
             // 没起来就别弹 sheet,phase 自带错误描述给 statusLine 用。
-            // 立刻还原 audio toggle —— 没真正训练就别让主 capture 关着。
-            restoreAudioState()
             return
         }
         showCountdown = true
-    }
-
-    /// 恢复 audio.enabled / speakerIdEnabled 到训练前的值。idempotent —— 多次
-    /// 调用(cancel + phase change)只生效一次。
-    private func restoreAudioState() {
-        guard let prevAudio = prevAudioEnabled,
-              let prevSpk = prevSpeakerIdEnabled else { return }
-        cfg.mutate { c in
-            c.capture.audio.enabled = prevAudio
-            c.capture.audio.speakerIdEnabled = prevSpk
-        }
-        prevAudioEnabled = nil
-        prevSpeakerIdEnabled = nil
     }
 
     /// VoiceTrainer.Phase 不是 Equatable-keyed-by-case,onChange 要个稳定 key。
@@ -1104,10 +1085,11 @@ final class SpeakerReidentifyCoordinator {
     /// 重扫**正常跑完**的一次性反馈(绿勾)。用户离开 Speakers 页再进来即清空。
     private(set) var lastResultMessage: String?
     @ObservationIgnored private var task: Task<Void, Never>?
-    /// 待提交的"改名落库"动作 —— 重扫**跑完才执行**;Stop 则丢弃(= 改名作废)。
+    /// 待提交的"改名落库"动作 —— debounce 结束、重扫**开始前**落库
+    /// (重扫要在 DB 里看到新名字,同名归拢才生效)。
     @ObservationIgnored private var pendingCommit: (@Sendable () -> Void)?
 
-    /// 防抖 1.2s 触发重扫。`commit` 是改名落库动作,只在重扫**正常跑完**时执行。
+    /// 防抖 1.2s 触发重扫。`commit` 是改名落库动作,debounce 结束后、重扫开始前执行。
     func schedule(commit: (@Sendable () -> Void)? = nil) {
         // 连续改名:上一个待提交的先落库,别丢。
         if let prev = pendingCommit { Task.detached { prev() } }
@@ -1119,9 +1101,13 @@ final class SpeakerReidentifyCoordinator {
             guard let self else { return }
             self.isRunning = true
             self.lastResultMessage = nil
-            let outcome = await SpeakerReidentifier.shared.reidentifyToday()
-            if Task.isCancelled { return }   // Stop:不提交、不给完成反馈
+            // 改名**先落库**再重扫:reidentifyToday 的同名归拢(sameName rival
+            // 豁免)要在 DB 里看到新名字才生效。原先 commit 推迟到重扫后,重扫
+            // 期间 DB 还是旧名字,刚命名的簇与同名旧簇互为 rival → margin 判定
+            // 永不通过,改名触发的重扫等于 no-op。
             if let c = self.pendingCommit { await Task.detached { c() }.value; self.pendingCommit = nil }
+            let outcome = await SpeakerReidentifier.shared.reidentifyToday()
+            if Task.isCancelled { return }   // Stop:不给完成反馈
             self.isRunning = false
             // 0 改动是改名常态,不打扰;只有真归拢了段才给绿勾。
             self.lastResultMessage = outcome.updated > 0
@@ -1130,8 +1116,8 @@ final class SpeakerReidentifyCoordinator {
         }
     }
 
-    /// Stop:取消重扫(写库前退出 = 段全不变)+ **丢弃待提交的改名**(= 改名撤销,
-    /// 视图随后 reload 读回旧名字)。不给完成反馈。
+    /// Stop:取消重扫(写库前退出 = 段全不变)。重扫开始前改名已落库,**不回滚**;
+    /// 仅当还在 debounce 窗口内时丢弃待提交的改名。不给完成反馈。
     func cancel() {
         task?.cancel()
         task = nil

@@ -34,7 +34,17 @@ final class VoiceTrainer {
         case failure(String)
     }
 
-    private(set) var phase: Phase = .idle
+    private(set) var phase: Phase = .idle {
+        didSet {
+            // 训练到达终态 → 还原被临时关掉的主采集。挂在 trainer(单例,跟
+            // phase 同生命周期)而非 view 的 onChange 上 —— 训练中关窗/切页
+            // 把 view 销毁也照样恢复,不会让 audio.enabled 静默留在 false。
+            switch phase {
+            case .idle, .success, .failure: restoreMainCaptureIfNeeded()
+            case .recording, .processing: break
+            }
+        }
+    }
 
     /// 训练用的目标采样率(wespeaker CAM++ 训练时就是 16kHz)。
     private static let targetSampleRate: Double = 16_000
@@ -100,6 +110,11 @@ final class VoiceTrainer {
         // (SystemAudioCaptureService 不能用这条路,那边是 aggregate device
         // tap,outputFormat 跟实际 tap 流不匹配是它专属 bug;但 mic 普通
         // inputNode 走这条路是 Apple 文档的标准做法。)
+        // **训练期间临时关掉主 mic capture** —— 两个 AVAudioEngine 同时 access
+        // 同一个 input 硬件会拿到 -10877 或者让蓝牙降到 HFP,训练录到的样本
+        // 会变质。原值记在 UserDefaults(崩溃安全),终态 phase / 启动自检还原。
+        pauseMainCapture()
+
         let tapFormat = input.outputFormat(forBus: 0)
         // ⚠ tap callback 跑在 AVFAudio RealtimeMessenger 队列上,**不是 main**。
         // 1.0.112 和 1.0.113 都崩在这里(_swift_task_checkIsolatedSwift →
@@ -203,6 +218,45 @@ final class VoiceTrainer {
 
     /// 完全 reset,回 idle。跟 cancel 等价,语义上分开 UI 用。
     func reset() { cancel() }
+
+    // MARK: - 主采集临时暂停 / 还原(崩溃安全)
+
+    /// 训练前主采集状态的标记 key(UserDefaults)。训练把 audio.enabled 临时
+    /// 写 false 会持久化到 config.toml —— 若训练中 app 崩溃/退出,重启后采集
+    /// 就静默永久关闭。所以暂停前先把原值记进 UserDefaults,还原后清掉;
+    /// 启动时(Services.startManagedLifecycle)调一次 restoreMainCaptureIfNeeded()
+    /// 兜底。
+    private static let pausedMarkerKey = "VoiceTrainer.pausedMainCapture"
+    private static let prevAudioKey = "VoiceTrainer.prevAudioEnabled"
+    private static let prevSpeakerIdKey = "VoiceTrainer.prevSpeakerIdEnabled"
+
+    /// 训练期间临时关掉主 mic capture,原值记 UserDefaults。
+    private func pauseMainCapture() {
+        let cfg = ConfigStore.shared
+        let ud = UserDefaults.standard
+        ud.set(cfg.current.capture.audio.enabled, forKey: Self.prevAudioKey)
+        ud.set(cfg.current.capture.audio.speakerIdEnabled, forKey: Self.prevSpeakerIdKey)
+        ud.set(true, forKey: Self.pausedMarkerKey)
+        if cfg.current.capture.audio.enabled {
+            cfg.mutate { $0.capture.audio.enabled = false }
+        }
+    }
+
+    /// 恢复 audio.enabled / speakerIdEnabled 到训练前的值。idempotent ——
+    /// 标记不在就是 no-op。phase 终态(idle/success/failure)和启动兜底都走这。
+    func restoreMainCaptureIfNeeded() {
+        let ud = UserDefaults.standard
+        guard ud.bool(forKey: Self.pausedMarkerKey) else { return }
+        let prevAudio = ud.bool(forKey: Self.prevAudioKey)
+        let prevSpk = ud.bool(forKey: Self.prevSpeakerIdKey)
+        ConfigStore.shared.mutate { c in
+            c.capture.audio.enabled = prevAudio
+            c.capture.audio.speakerIdEnabled = prevSpk
+        }
+        ud.removeObject(forKey: Self.pausedMarkerKey)
+        ud.removeObject(forKey: Self.prevAudioKey)
+        ud.removeObject(forKey: Self.prevSpeakerIdKey)
+    }
 
     // MARK: - Internals
 

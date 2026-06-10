@@ -200,6 +200,7 @@ final class ConfigStore {
         try? FileManager.default.removeItem(at: path)
         current = .init()
         loadError = nil
+        diskFileUnparsed = false   // 文件已删,无可备份
     }
 
     /// Force a re-read from disk. Hot-reload calls this too.
@@ -209,10 +210,16 @@ final class ConfigStore {
 
     // MARK: - Load (fail-soft)
 
+    /// 上次 loadFromDisk **解析失败**:磁盘文件内容没进 `current`。此时直接写盘
+    /// 会用内存态(默认值/旧值)整文件覆盖用户手编的 config.toml —— writeNow
+    /// 写前先把原文件备份成 config.toml.bak。成功 load / 备份完成后清掉。
+    private var diskFileUnparsed = false
+
     private func loadFromDisk() {
         guard FileManager.default.fileExists(atPath: path.path) else {
             // No file yet — keep defaults; the migration step will seed one.
             loadError = nil
+            diskFileUnparsed = false
             refreshSnapshot()
             return
         }
@@ -228,6 +235,7 @@ final class ConfigStore {
             let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: migrated)
             current = applySchemaMigration(decoded)
             loadError = nil
+            diskFileUnparsed = false
             // pauseOnMusicApp 已迁移到 pauseAudioCategories(见 AudioConfig.init(from:))。
             // 旧 flag 为 true 说明本次解码刚迁移过 → 立刻写回,把死键 pause_on_music_app
             // 从 TOML 清掉。否则它赖到下次 mutate 才消失,且每次启动空跑一次迁移。
@@ -237,6 +245,7 @@ final class ConfigStore {
         } catch {
             loadError = "Couldn't read config.toml: \(error.localizedDescription) — using defaults."
             // Keep `current` as whatever it was (defaults on fresh launch).
+            diskFileUnparsed = true
         }
         refreshSnapshot()
     }
@@ -278,6 +287,16 @@ final class ConfigStore {
                 at: path.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            // 上次解析失败的原文件先备份成 .bak —— 否则这次写会用内存态
+            // (默认值)整文件覆盖用户手编的 config.toml,所有未解析的设置
+            // 全部丢失且不可恢复。备份失败(`try` 抛错)则放弃本次写盘。
+            if diskFileUnparsed, FileManager.default.fileExists(atPath: path.path) {
+                let bak = path.appendingPathExtension("bak")
+                try? FileManager.default.removeItem(at: bak)
+                try FileManager.default.copyItem(at: path, to: bak)
+                diskFileUnparsed = false
+                loadError = "config.toml couldn't be parsed — your original file was backed up to config.toml.bak before saving."
+            }
             let encoded = try TOMLEncoder().encode(current)
             let blob = headerComment + encoded
             suppressNextWatchEvent = true

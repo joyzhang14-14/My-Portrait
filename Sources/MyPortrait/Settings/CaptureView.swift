@@ -460,9 +460,8 @@ struct AudioCaptureSettingsView: View {
 
             // Speakers 部分(toggle + 训练 + 簇管理)。**故意放在 audioRec
             // 判断外面 —— audio capture 关着也能看到、能开始训练。**
-            // VoiceTrainingCard.startTraining 自己会临时强开
-            // audio.enabled + speakerIdEnabled,训练完(success/failure/
-            // cancel)还原回原值,跟之前的设计一致。
+            // VoiceTrainer 训练期间自己会临时调整 audio.enabled,训练完
+            // (success/failure/cancel)还原回原值,跟之前的设计一致。
             SettingsCard(title: "Speakers (Voice ID)") {
                 SettingsRow("Enable speaker identification",
                             description: "Detect and cluster distinct voices.",
