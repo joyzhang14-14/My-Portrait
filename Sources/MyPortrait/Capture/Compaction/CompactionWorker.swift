@@ -52,6 +52,8 @@ actor CompactionWorker {
         guard task == nil else { return }
         task = Task.detached(priority: .background) { [weak self] in
             try? await Task.sleep(nanoseconds: 60_000_000_000)  // 60s 冷启动延迟
+            if Task.isCancelled { return }
+            await self?.sweepOrphanMedia()   // 每次启动清一次历史孤儿
             while !Task.isCancelled {
                 await self?.runOnce()
                 try? await Task.sleep(nanoseconds: UInt64(300) * 1_000_000_000)
@@ -97,6 +99,71 @@ actor CompactionWorker {
         }
     }
 
+    // MARK: - 孤儿媒体清扫
+
+    /// 启动期清一次历史孤儿(基于 DB 引用,与文件名无关):
+    ///  - JPG:compactChunk 的 DB 事务提交(snapshot_path 置 NULL)后、删文件前
+    ///    崩溃/被 kill —— framesToCompact 只查 snapshot_path IS NOT NULL,
+    ///    这些文件从此无人访问,永久残留
+    ///  - MP4:编码中途崩溃留下的半成品 / 行被删后残留的文件
+    /// 只动 mtime 超过 1 小时的文件:新 JPG 先落盘、insertFrame 随后;
+    /// 在编 MP4 尚未入库 —— 都不能误删。screenpipe 导入的 MP4 有
+    /// video_chunks 行引用,不受影响。
+    private func sweepOrphanMedia() async {
+        let cutoff = Date().addingTimeInterval(-3600)
+        let jpg = await sweepDir(config.framesDir, ext: "jpg", olderThan: cutoff) { [db] paths in
+            try await db.referencedSnapshotPaths(in: paths)
+        }
+        let mp4 = await sweepDir(config.videoDir, ext: "mp4", olderThan: cutoff) { [db] paths in
+            try await db.referencedVideoPaths(in: paths)
+        }
+        if jpg + mp4 > 0 {
+            logger.info("orphan media sweep: removed \(jpg, privacy: .public) JPG + \(mp4, privacy: .public) MP4")
+        }
+    }
+
+    /// 枚举 `dir` 下指定扩展名、mtime 早于 `cutoff` 的文件,删掉 DB 不引用的。
+    /// 返回删除数。查询失败 → 一个都不删(宁可留垃圾,不误删)。
+    private func sweepDir(
+        _ dir: URL, ext: String, olderThan cutoff: Date,
+        referenced: ([String]) async throws -> Set<String>
+    ) async -> Int {
+        let fm = FileManager.default
+        let absPaths = Self.listFiles(in: dir, ext: ext, olderThan: cutoff)
+        guard !absPaths.isEmpty else { return 0 }
+
+        // DB 存的是相对 root 的路径(AssetPath),membership 按相对路径比。
+        let refs: Set<String>
+        do {
+            refs = try await referenced(absPaths.map(AssetPath.normalize))
+        } catch {
+            logger.warning("orphan sweep query failed for \(dir.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            return 0
+        }
+        var removed = 0
+        for abs in absPaths where !refs.contains(AssetPath.normalize(abs)) {
+            if (try? fm.removeItem(atPath: abs)) != nil { removed += 1 }
+        }
+        return removed
+    }
+
+    /// 同步枚举(DirectoryEnumerator 的迭代器不能在 async 上下文用)。
+    nonisolated private static func listFiles(in dir: URL, ext: String, olderThan cutoff: Date) -> [String] {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dir.path),
+              let it = fm.enumerator(at: dir, includingPropertiesForKeys: [.contentModificationDateKey],
+                                     options: [.skipsHiddenFiles], errorHandler: nil)
+        else { return [] }
+        var absPaths: [String] = []
+        for case let url as URL in it {
+            guard url.pathExtension.lowercased() == ext else { continue }
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let mtime, mtime < cutoff else { continue }
+            absPaths.append(url.path)
+        }
+        return absPaths
+    }
+
     // MARK: - 私有
 
     private func compactDevice(device: String, frames: [FrameForCompaction]) async {
@@ -139,27 +206,34 @@ actor CompactionWorker {
             .appendingPathComponent(day, isDirectory: true)
             .appendingPathComponent("m\(device)_\(firstFrame.timestampMs).mp4")
 
-        // 编码。
+        // 编码。中途抛错(磁盘满/热限流/appendFailed)时删掉写了一半的 .mp4 ——
+        // 否则错误传回 compactDevice 被吞,半成品残留;chunk 边界因坏帧移位后
+        // 文件名不再复现,HEVCEncoder 的同名兜底也删不到它。
         let encoder = try HEVCEncoder(url: mp4Path, size: size)
-        try encoder.start()
-
-        // 第一帧已加载，直接喂。
-        try await encoder.append(image: firstImage, timestampMs: firstFrame.timestampMs)
         // 只追踪**真正编进 MP4** 的帧。跳过的帧若仍写元数据,offset_ms 会指向 MP4
         // 里不含它的位置,加上 JPG 被删 → 画面永久错位/丢失。
         var encoded = [firstFrame]
+        do {
+            try encoder.start()
 
-        // 其余帧逐个加载 + append（一次只持一帧）。
-        for frame in frames.dropFirst() {
-            guard let img = loadJPG(at: frame.snapshotPath) else {
-                logger.warning("frame JPG unreadable: \(frame.snapshotPath, privacy: .public); skipping frame")
-                continue
+            // 第一帧已加载，直接喂。
+            try await encoder.append(image: firstImage, timestampMs: firstFrame.timestampMs)
+
+            // 其余帧逐个加载 + append（一次只持一帧）。
+            for frame in frames.dropFirst() {
+                guard let img = loadJPG(at: frame.snapshotPath) else {
+                    logger.warning("frame JPG unreadable: \(frame.snapshotPath, privacy: .public); skipping frame")
+                    continue
+                }
+                try await encoder.append(image: img, timestampMs: frame.timestampMs)
+                encoded.append(frame)
             }
-            try await encoder.append(image: img, timestampMs: frame.timestampMs)
-            encoded.append(frame)
-        }
 
-        try await encoder.finalize()
+            try await encoder.finalize()
+        } catch {
+            try? FileManager.default.removeItem(at: mp4Path)
+            throw error
+        }
 
         // 实际 fps = frame_count / duration_seconds
         let durationMs = max(1, lastFrame.timestampMs - firstFrame.timestampMs)

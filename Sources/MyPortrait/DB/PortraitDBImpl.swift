@@ -272,6 +272,40 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 孤儿媒体清扫(CompactionWorker 启动期)
+
+    func referencedSnapshotPaths(in paths: [String]) async throws -> Set<String> {
+        try await referencedPaths(column: "snapshot_path", table: "frames", paths: paths)
+    }
+
+    func referencedVideoPaths(in paths: [String]) async throws -> Set<String> {
+        try await referencedPaths(column: "file_path", table: "video_chunks", paths: paths)
+    }
+
+    /// column/table 由上面两个调用方写死,不接受外部输入(无注入面)。
+    private func referencedPaths(column: String, table: String, paths: [String]) async throws -> Set<String> {
+        guard !paths.isEmpty else { return [] }
+        return try await dbPool.read { db in
+            var found = Set<String>()
+            // SQLite 默认绑定变量上限 999 → 分批。动态变长 IN 子句显式
+            // StatementArguments 包装(铁律,不能用数组字面量)。
+            var start = 0
+            while start < paths.count {
+                let end = min(start + 500, paths.count)
+                let batch = Array(paths[start..<end])
+                start = end
+                let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ",")
+                let rows = try String.fetchAll(
+                    db,
+                    sql: "SELECT \(column) FROM \(table) WHERE \(column) IN (\(placeholders))",
+                    arguments: StatementArguments(batch)
+                )
+                found.formUnion(rows)
+            }
+            return found
+        }
+    }
+
     // MARK: - 跨通道转录去重(外放回录,见 TranscriptDeduper)
 
     func transcriptionsForDedup(isInput: Bool, fromMs: Int64, toMs: Int64) async throws -> [TranscriptDeduper.Segment] {

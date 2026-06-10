@@ -49,6 +49,13 @@ protocol PortraitDB: Sendable {
         frames: [(frameId: Int64, offsetMs: Int)]
     ) async throws -> Int64
 
+    /// 启动期孤儿媒体清扫用:给定一批 DB 存储格式(相对 root)的路径,
+    /// 返回其中仍被 frames.snapshot_path 引用的子集。
+    func referencedSnapshotPaths(in paths: [String]) async throws -> Set<String>
+
+    /// 同上,对 video_chunks.file_path。
+    func referencedVideoPaths(in paths: [String]) async throws -> Set<String>
+
     // MARK: - P4: 音频
 
     func insertAudioChunk(_ record: AudioChunkRecord) async throws -> Int64
