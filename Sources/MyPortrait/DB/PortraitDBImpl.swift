@@ -142,7 +142,16 @@ actor PortraitDBImpl: PortraitDB {
             if frames.isEmpty, deadIds.count > 50 {
                 logger.warning("framesToCompact: all \(deadIds.count, privacy: .public) candidate JPGs missing on disk — looks systemic (unmounted volume?), not marking dead rows")
             } else {
-                try await dbPool.write { db in
+                // best-effort + 每批独立小事务:
+                //  - 中和是幂等的(失败的行下一轮照样查得到),失败只告警,
+                //    **绝不连带作废本轮已查出的有效 frames** —— 磁盘满既是
+                //    死行的成因,也恰是这条写入最容易失败的时刻,抛错会把
+                //    最需要压缩释放空间的那一轮整个掐掉。
+                //  - 独立小事务避免 frames_fts 的无条件 AFTER UPDATE 触发器
+                //    在单个大事务里对最多 5000 行 OCR 全文重分词,长时间占住
+                //    WAL 唯一 writer,把采集层写入排队。
+                var neutralized = 0
+                do {
                     var start = 0
                     while start < deadIds.count {
                         let end = min(start + 500, deadIds.count)   // 999 绑定变量上限,分批
@@ -150,13 +159,18 @@ actor PortraitDBImpl: PortraitDB {
                         start = end
                         let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ",")
                         // 动态变长 IN 子句:显式 StatementArguments 包装(铁律)。
-                        try db.execute(
-                            sql: "UPDATE frames SET snapshot_path = NULL WHERE id IN (\(placeholders))",
-                            arguments: StatementArguments(batch)
-                        )
+                        try await dbPool.write { db in
+                            try db.execute(
+                                sql: "UPDATE frames SET snapshot_path = NULL WHERE id IN (\(placeholders))",
+                                arguments: StatementArguments(batch)
+                            )
+                        }
+                        neutralized += batch.count
                     }
+                    logger.warning("framesToCompact: neutralized \(neutralized, privacy: .public) dead frame row(s) (snapshot_path set but file missing)")
+                } catch {
+                    logger.warning("framesToCompact: dead-row neutralization stopped after \(neutralized, privacy: .public) row(s), will retry next pass: \(String(describing: error), privacy: .public)")
                 }
-                logger.warning("framesToCompact: neutralized \(deadIds.count, privacy: .public) dead frame row(s) (snapshot_path set but file missing)")
             }
         }
         return frames
