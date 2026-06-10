@@ -154,6 +154,13 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             endFired = false
             return endGeneration
         }()
+        // 清上一轮可能残留的半行:防御性 terminate 旧进程后,它的收尾回调被
+        // 代际校验丢弃,旧的 flush 不再执行(旧实现 termination 必 flush)——
+        // 残尾会黏到本轮第一个 chunk,第一行(常是带 session_id 的
+        // system/init)JSON 解析失败被静默丢弃,session 续接就断了。
+        bufLock.lock()
+        stdoutBuffer.removeAll()
+        bufLock.unlock()
         // EOF(空 availableData)时 handler **自我清除** —— 否则 dispatch read
         // source 在 EOF 后以空 data 反复回调,每轮子进程退出都留一个空转烧 CPU
         // 的后台线程,直到下一轮 sendPrompt 替换 Pipe(聊完不动 = 烧数小时)。
