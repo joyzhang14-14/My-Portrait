@@ -81,12 +81,17 @@ struct AudioTranscriptEntry: Identifiable, Hashable {
     let isInput: Bool
     let speakerId: Int?
     let speakerName: String?
-    /// 稳定 id —— 由内容(录制时刻 + 设备 + 方向 + 文本)决定。同一条转录在
-    /// 连续 reload 里 id 不变,SwiftUI 的 ForEach 复用行、不整列重建。原来
-    /// `let id = UUID()` 每次新建 → 切帧时全列表 teardown+rebuild → 闪屏。
-    /// **不含 speaker** —— 说话人重命名 / 再识别只更新行内容,不让行重建。
+    /// 段在 chunk 内的起始秒。timestamp 是 chunk 级的(同 chunk 各段相同),
+    /// 只有它能区分同 chunk 的多段 —— Whisper 重复幻觉(连续 "Thank you.")
+    /// 和中文短应答(连续 "嗯。")常在同 chunk 产出相同文本,不掺 startS
+    /// 的话两行 id 相同,SwiftUI ForEach 报重复 Identifiable id。
+    let startS: Double
+    /// 稳定 id —— 由内容(录制时刻 + 段内偏移 + 设备 + 方向 + 文本)决定。
+    /// 同一条转录在连续 reload 里 id 不变,SwiftUI 的 ForEach 复用行、不整列
+    /// 重建。原来 `let id = UUID()` 每次新建 → 切帧时全列表 teardown+rebuild
+    /// → 闪屏。**不含 speaker** —— 说话人重命名 / 再识别只更新行内容,不让行重建。
     var id: String {
-        "\(Int(timestamp.timeIntervalSince1970 * 1000))|\(device)|\(isInput ? 1 : 0)|\(text)"
+        "\(Int(timestamp.timeIntervalSince1970 * 1000))|\(Int(startS * 1000))|\(device)|\(isInput ? 1 : 0)|\(text)"
     }
 }
 
@@ -383,7 +388,8 @@ struct TimelineDB: Sendable {
                    COALESCE(ac.device, ''),
                    COALESCE(ac.is_input, 1),
                    t.speaker_id,
-                   s.name
+                   s.name,
+                   COALESCE(t.start_s, 0)
             FROM audio_transcriptions t
             JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
             LEFT JOIN speakers s ON s.id = t.speaker_id AND s.hallucination = 0
@@ -415,6 +421,8 @@ struct TimelineDB: Sendable {
             let speakerName: String? = sqlite3_column_type(stmt, 5) == SQLITE_NULL
                 ? nil : sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
 
+            let startS = sqlite3_column_double(stmt, 6)
+
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
@@ -424,7 +432,8 @@ struct TimelineDB: Sendable {
                 device: device,
                 isInput: isInput,
                 speakerId: speakerId,
-                speakerName: speakerName    // LEFT JOIN speakers(hallucination=0):命名簇出名字,匿名/误判出 nil
+                speakerName: speakerName,   // LEFT JOIN speakers(hallucination=0):命名簇出名字,匿名/误判出 nil
+                startS: startS
             ))
         }
         return out
