@@ -16,6 +16,10 @@ final class TimelineState {
     /// frames haven't loaded yet. TimelineView's frame loader will pull
     /// `focusIndex` to the closest frame once they arrive.
     var pendingSeek: Date? = nil
+    /// reload 代际计数(同 TimelineSidebar.reloadToken):快速切天时,帧多的
+    /// 旧天慢查询可能晚于新天空查询返回,把 frames 盖成旧天的 —— 取数前 +1
+    /// 记 token,回来对不上就丢弃。
+    var reloadToken = 0
 
     /// Navigate the Timeline to the moment `t`. If we're already on the right
     /// day, snap focusIndex to the nearest frame; otherwise switch days and
@@ -183,8 +187,13 @@ struct TimelineView: View {
             state.loading = false
             return
         }
+        state.reloadToken &+= 1
+        let token = state.reloadToken
         Task { @MainActor in
             let fetched = (try? await db.framesForDay(day)) ?? []
+            // 已有更新的 reload(快速切天),丢弃这次旧天结果 —— 否则慢的旧天
+            // 查询迟到会盖掉新天 frames,日期栏显示新天、画面却是旧天。
+            guard token == state.reloadToken else { return }
             state.frames = fetched
             // 优先级:跨天 seek > 后台刷新保焦点 > 默认落最后一帧。
             // 原来无条件覆盖 focusIndex,pendingSeek 永远被忽略 → 跨天定位失效。
