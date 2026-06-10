@@ -149,6 +149,7 @@ DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
 PROOF = {}  # (evid, text) -> 模型重建的尾巴 —— 凡模型参与选字的尾巴,Phase1.5 强制 OCR 校对(的/得、哟/用一族)
 PENDING = {}  # day -> [(app, text, src, evid, t0, 审核理由, OCR片段)] —— 未定区:审核未过,展示不入册(审核而非丢弃)
+REVIEW_MODE = os.environ.get('REVIEW_MODE', 'llm')  # llm=referee复查 / det=确定性对证器(用户提议,对照实验)
 LEDGER_MODE = os.environ.get('LEDGER_MODE', 'off')  # 用户裁定(2026-06-10):A胜出,账本独立源废除(~50%垃圾),
 # 击键只做 AX 修复辅助;gated/raw 代码留档可切
 for day in DAYS:
@@ -350,6 +351,23 @@ for day in DAYS:
         # ax 路 + 无任何帧证据:REJECT 不可能成立,免调用直接保留(审查修)
         if not snip and not is_ledger:
             out3.append(rec); continue
+        if REVIEW_MODE == 'det':
+            # ===== 确定性对证器(用户提议:复查=拿OCR对证,固定程序替代LLM)=====
+            # 规则:OCR无可证言→保留;击键滑窗搜索出渲染真身(verify_tail内建同音/前缀松弛)
+            # 与记录不同且过护栏→替换(渲染+击键双背书);矛盾且护栏不过→未定区展示。
+            tn = norm_t(t)
+            vt, consumed = C3.verify_tail(snip, seg)
+            vtn = norm_t(vt)
+            han_v = sum(1 for ch in vtn if not ch.isascii())
+            if not vtn or consumed < max(2, 2 * han_v) or vtn == tn:
+                out3.append(rec); continue                 # OCR 无证言/一致 → 信 librime+击键
+            others = [norm_t(r2[1]) for j, r2 in enumerate(out2) if j != i and r2[7] == b]
+            t_cmp = tn.rstrip('，,。.!？?！…、 ')
+            if (len(vtn) >= len(t_cmp) and not any(vtn in o for o in others)):
+                c3fix.append((a, t, vt, "确定性对证替换", evid, t0))
+                out3.append((a, cv(vt), kc2, evid, t0, t1, src_ + "+det", b)); continue
+            pend.append((a, t, src_, evid, t0, "OCR对证矛盾(渲染真身=" + vtn[:20] + ")", re.sub(r'\s+', ' ', snip)[:120]))
+            continue
         v, hint = referee(t, snip, seg, mode=smode)
         if (v == 'PASS') if is_ledger else (v != 'REJECT'):
             out3.append(rec); continue
