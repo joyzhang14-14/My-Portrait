@@ -27,7 +27,14 @@ final class TimelineState {
     func seek(to t: Date) {
         let cal = Calendar.current
         if cal.isDate(t, inSameDayAs: selectedDay) {
-            snapFocus(to: t)
+            if frames.isEmpty {
+                // 同天但帧还没加载(如从未打开过 Timeline):snapFocus 的空帧
+                // guard 会把目标直接丢掉 → 落到默认最后一帧。记到 pendingSeek,
+                // 等 reload 完成(token 校验通过那次)统一消费吸附。
+                pendingSeek = t
+            } else {
+                snapFocus(to: t)
+            }
         } else {
             selectedDay = cal.startOfDay(for: t)
             pendingSeek = t

@@ -94,7 +94,10 @@ struct AsyncDiskThumbnail: View {
         }.value
         if let loaded {
             ImageThumbnailCache.shared.store(loaded, for: key)
-            self.image = loaded
+            // .task(id:) 切帧时已 cancel 本 task,但 detached 解码不传播取消;
+            // await 回来若已取消说明 path 已换 —— 只进缓存不回写,防慢的旧帧
+            // 结果覆盖已显示的新帧。
+            if !Task.isCancelled { self.image = loaded }
         }
     }
 
@@ -157,7 +160,9 @@ struct AsyncMP4FrameThumbnail: View {
         }.value
         if let loaded {
             ImageThumbnailCache.shared.store(loaded, for: key)
-            self.image = loaded
+            // 同 AsyncDiskThumbnail:MP4 抽帧慢,切帧后迟到的旧结果只进缓存,
+            // 不回写 image,防错帧画面一直挂着。
+            if !Task.isCancelled { self.image = loaded }
         }
     }
 
