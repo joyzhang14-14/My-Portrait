@@ -363,6 +363,10 @@ struct InputCaptureView: View {
         let result = await Task.detached(priority: .userInitiated) {
             (try? store.writingRecordsForGroup(app: group.app, url: group.url)) ?? []
         }.value
+        // 快速连点两个分组时两次 openGroup 并发,慢查询晚归会把前一个分组的
+        // records 盖在当前分组名下(标题是 B 列表是 A)。回来后确认选中的
+        // 还是本次的分组才落地。
+        guard selectedGroup?.id == group.id else { return }
         records = result
     }
 
