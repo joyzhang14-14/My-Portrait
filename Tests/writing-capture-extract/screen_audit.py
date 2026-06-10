@@ -30,7 +30,7 @@ for day, recs in d.items():
         vt, consumed = C3.verify_tail(snip, seg)
         vtn = norm_t(vt)
         han_v = sum(1 for ch in vtn if not ch.isascii())
-        if not vtn or consumed < max(2, 2 * han_v) or vtn == tn:
+        if not vtn or consumed < max(2, han_v) or vtn == tn:
             rows.append((day, a, evid, t, "无可证言/击键一致", "")); continue
         rows.append((day, a, evid, t, "⚠️矛盾", f"渲染真身≈{vtn[:24]} | snip:{re.sub(chr(92)+'s+',' ',snip)[:60]}"))
 

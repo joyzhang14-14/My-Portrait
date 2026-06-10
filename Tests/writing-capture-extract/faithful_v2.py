@@ -362,7 +362,7 @@ for day in DAYS:
             vt, consumed = C3.verify_tail(snip, seg)
             vtn = norm_t(vt)
             han_v = sum(1 for ch in vtn if not ch.isascii())
-            if not vtn or consumed < max(2, 2 * han_v) or vtn == tn:
+            if not vtn or consumed < max(2, han_v) or vtn == tn:
                 out3.append(rec); continue                 # OCR 无证言/一致 → 信 librime+击键
             others = [norm_t(r2[1]) for j, r2 in enumerate(out2) if j != i and r2[7] == b]
             t_cmp = tn.rstrip('，,。.!？?！…、 ')
