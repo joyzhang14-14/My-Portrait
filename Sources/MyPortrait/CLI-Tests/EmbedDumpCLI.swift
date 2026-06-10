@@ -20,13 +20,9 @@ enum EmbedDumpCLI {
     /// 一次性恢复 `frames_fts` 虚拟表（如果某次 migration / import 把它丢了）。
     /// 重建后跑 FTS5 builtin 'rebuild' 命令，从 frames.content 重新索引所有行。
     @MainActor
-    static func runRebuildFramesFts(services: Services) {
+    static func runRebuildFramesFts(db impl: PortraitDBImpl) {
         eval(MLXArray(0))
         let state = ExitState()
-        guard let impl = services.db as? PortraitDBImpl else {
-            print("ERROR: db is not PortraitDBImpl")
-            exit(1)
-        }
         Task.detached {
             defer { state.done = true }
             do {
@@ -89,11 +85,12 @@ enum EmbedDumpCLI {
     /// E2E search test：跑几条 cross-lingual query 看搜索召回。
     /// 不做硬 assert（query 召回质量天然主观），打 top-5 给人看。
     @MainActor
-    static func runSearchTest(services: Services) {
+    static func runSearchTest(db: PortraitDBImpl) {
         eval(MLXArray(0))
         let state = ExitState()
 
-        let engine = services.searchEngine
+        // 直接用 DB pool 构造 FTS 引擎 —— 不需要完整 Services(避免与 GUI 双跑)。
+        let engine = FTSSearchEngine(dbPool: db.dbPool)
         let frameQueries: [(String, String)] = [
             ("EN→ZH", "music player"),
             ("ZH→EN", "聊天"),

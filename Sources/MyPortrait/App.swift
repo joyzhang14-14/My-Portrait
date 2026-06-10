@@ -15,19 +15,27 @@ struct MyPortraitApp: App {
 
         // CLI 调试命令在任何 SwiftUI / AppDelegate 设置之前拦截，否则会被窗口初始化拖慢。
         let args = ProcessInfo.processInfo.arguments
+        // ⚠️ 这两个维护 CLI 只开 DB,**不构造 Services / 不起后台生命周期** ——
+        // 否则与正在运行的 GUI app 双跑:Services.init 会把 app 在途的 writing run
+        // 标 failed、resetInProgressAudioChunks 把在转的 chunk 打回 pending 导致
+        // 重复转录,还会并发跑第二套 compactor/transcriber/scheduler worker。
         if args.contains("--rebuild-frames-fts") {
             print("=== rebuild-frames-fts ===")
             fflush(stdout)
-            let services = Services()
-            services.startManagedLifecycle()
-            EmbedDumpCLI.runRebuildFramesFts(services: services)
+            FileHandle.standardError.write(
+                "⚠️ 建议先退出正在运行的 My Portrait app(避免 WAL 写冲突)\n".data(using: .utf8)!)
+            let dbImpl: PortraitDBImpl
+            do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
+            EmbedDumpCLI.runRebuildFramesFts(db: dbImpl)
         }
         if args.contains("--embed-search-test") {
             print("=== embed-search-test ===")
             fflush(stdout)
-            let services = Services()
-            services.startManagedLifecycle()
-            EmbedDumpCLI.runSearchTest(services: services)
+            FileHandle.standardError.write(
+                "⚠️ 建议先退出正在运行的 My Portrait app(避免 WAL 写冲突)\n".data(using: .utf8)!)
+            let dbImpl: PortraitDBImpl
+            do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
+            EmbedDumpCLI.runSearchTest(db: dbImpl)
         }
         // DEV-ONLY: `--event-prompt-test <yyyy-MM-dd>` validates the proposed
         // per-event clustering prompt against one day's data. stdout only,
