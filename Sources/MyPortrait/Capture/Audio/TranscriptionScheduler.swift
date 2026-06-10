@@ -130,8 +130,16 @@ actor TranscriptionScheduler {
         ingestSysTask = nil
         transcribeTask = nil
         powerTask = nil
-        whisper.unload()
-        qwen.unload()
+        // ⚠️ drain 在飞时不能 unload:WhisperKit/Qwen wrapper 是「调用方保证串行」
+        // 契约,而 transcribeOne 挂起在 transcribeSamples 时 actor 空闲,stop()
+        // 可以插进来 —— unload 从另一线程把 pipe/model 置 nil,落在 transcribe
+        // 的同步窗口(预处理 FFT + 读 tokenizer 到 pipe!.transcribe 之间)就是
+        // 强解包崩溃(插电积压转录时退出 app 即触发)。在飞 drain 结束时
+        // processQueueOnce 的收尾路径自己会串行 unload,这里只管没 drain 的情况。
+        if !isDraining {
+            whisper.unload()
+            qwen.unload()
+        }
         // 任务取消后不会再有 processQueueOnce 来 refresh —— 这里显式放行睡眠。
         Task { @MainActor in KeepAwakeAssertion.shared.refresh(false) }
         logger.info("TranscriptionScheduler stopped")
