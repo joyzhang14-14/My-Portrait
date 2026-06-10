@@ -522,22 +522,28 @@ actor PortraitDBImpl: PortraitDB {
             // (failed 且重试次数耗尽,见 resetRetryableFailedAudioChunks 的
             // retry_count < 3)」的音频;pending / in_progress / 还会重试的
             // failed 留到转录产出文本后的下一轮。
+            // **id 一并取回**:applyRetention 按这批 id 快照删行,不二次求值
+            // status(文件清单与行删除之间 status 会被转录管线推进)。
             let audioFilter = excludeUntranscribedAudio
                 ? "AND (status = :done OR (status = :failed AND retry_count >= 3))"
                 : ""
-            let rawAudio = try String.fetchAll(db, sql: """
-                SELECT file_path FROM audio_chunks
+            let audioRows = try Row.fetchAll(db, sql: """
+                SELECT id, file_path FROM audio_chunks
                 WHERE recorded_at_ms < :ms \(audioFilter)
                 """, arguments: excludeUntranscribedAudio
                     ? ["ms": ms,
                        "done": AudioChunkStatus.done.rawValue,
                        "failed": AudioChunkStatus.failed.rawValue]
                     : ["ms": ms])
+            // id 不跟文件存在性挂钩:文件已丢的行照样要删(否则永远残留)。
+            let audioIds = audioRows.compactMap { $0["id"] as Int64? }
+            let rawAudio = audioRows.compactMap { $0["file_path"] as String? }
 
             return RetentionFileList(
                 snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
                 videoChunkPaths: rawVideoChunks.compactMap(AssetPath.resolve),
-                audioPaths: rawAudio.compactMap(AssetPath.resolve)
+                audioPaths: rawAudio.compactMap(AssetPath.resolve),
+                audioChunkIds: audioIds
             )
         }
     }
@@ -688,7 +694,7 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
-    func applyRetention(mode: RetentionMode, beforeMs: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionStats {
+    func applyRetention(mode: RetentionMode, beforeMs: Int64, audioChunkIds: [Int64]) async throws -> RetentionStats {
         try await dbPool.write { db in
             switch mode {
             case .mediaOnly:
@@ -724,20 +730,23 @@ actor PortraitDBImpl: PortraitDB {
                     """, arguments: ["beforeMs": beforeMs])
                 let videoChunksDeleted = db.changesCount
 
-                // CASCADE 删 transcriptions。wait_for_transcription 开 → 未转录
-                // chunk 的行也留着,与 mediaPathsBefore 的文件清单保持一致
-                //(行删了文件还在 = 永久孤儿,转录机会也没了)。
-                let audioFilter = excludeUntranscribedAudio
-                    ? "AND (status = :done OR (status = :failed AND retry_count >= 3))"
-                    : ""
-                try db.execute(sql: """
-                    DELETE FROM audio_chunks WHERE recorded_at_ms < :beforeMs \(audioFilter)
-                    """, arguments: excludeUntranscribedAudio
-                        ? ["beforeMs": beforeMs,
-                           "done": AudioChunkStatus.done.rawValue,
-                           "failed": AudioChunkStatus.failed.rawValue]
-                        : ["beforeMs": beforeMs])
-                let audioChunksDeleted = db.changesCount
+                // CASCADE 删 transcriptions。只删 mediaPathsBefore 同一轮快照
+                // 里的 id —— 不重新按 status/时间求值,保证「删的行」恰是
+                // 「文件清单里那批 chunk」,与盘上删除严格一致。
+                var audioChunksDeleted = 0
+                var start = 0
+                while start < audioChunkIds.count {
+                    let end = min(start + 500, audioChunkIds.count)   // 999 绑定变量上限,分批
+                    let batch = Array(audioChunkIds[start..<end])
+                    start = end
+                    let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ",")
+                    // 动态变长 IN 子句:显式 StatementArguments 包装(铁律)。
+                    try db.execute(
+                        sql: "DELETE FROM audio_chunks WHERE id IN (\(placeholders))",
+                        arguments: StatementArguments(batch)
+                    )
+                    audioChunksDeleted += db.changesCount
+                }
 
                 return RetentionStats(
                     framesAffected: framesAffected,
