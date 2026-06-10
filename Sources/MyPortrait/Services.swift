@@ -645,12 +645,24 @@ final class Services {
 
     // MARK: - 私有：响应 settings 变化
 
+    // 每个子系统一条串行 apply 链:新的 start/stop 接在上一次 apply 之后执行。
+    // 之前每次翻转各起一个独立 Task.detached,彼此没有顺序保证 —— 快速
+    // off→on(或权限 3s 轮询造成 denied→granted 抖动)时 start 可能先被调度,
+    // 撞上还没停的旧实例被 `guard == nil` 挡成 no-op,随后 stop 落地:终态
+    // 采集停止而 UI toggle 显示开启,且 removeDuplicates 吞掉后续事件,没有
+    // 任何信号再纠正。链式执行让落地顺序恒等于 toggle 顺序,最后一次必生效。
+    private var screenApplyChain: Task<Void, Never>?
+    private var audioApplyChain: Task<Void, Never>?
+    private var sysAudioApplyChain: Task<Void, Never>?
+
     private func applyScreenCapture(enabled: Bool) {
         let coordinator = self.coordinator
         let logger = self.logger
         // 通知 StallDetector:用户关 toggle 后无帧是预期。
         IntentionalPauseState.shared.captureDisabled = !enabled
-        Task.detached(priority: .userInitiated) {
+        let prev = screenApplyChain
+        screenApplyChain = Task.detached(priority: .userInitiated) {
+            await prev?.value
             if enabled {
                 do {
                     try await coordinator.start()
@@ -666,7 +678,9 @@ final class Services {
     private func applyAudioCapture(enabled: Bool) {
         logger.notice("applyAudioCapture(enabled: \(enabled, privacy: .public))")
         let audio = self.audio
-        Task.detached(priority: .userInitiated) {
+        let prev = audioApplyChain
+        audioApplyChain = Task.detached(priority: .userInitiated) {
+            await prev?.value
             if enabled {
                 await audio.start()
             } else {
@@ -677,7 +691,9 @@ final class Services {
 
     private func applySystemAudioCapture(enabled: Bool) {
         let sysAudio = self.systemAudio
-        Task.detached(priority: .userInitiated) {
+        let prev = sysAudioApplyChain
+        sysAudioApplyChain = Task.detached(priority: .userInitiated) {
+            await prev?.value
             if enabled {
                 await sysAudio.start()
             } else {
