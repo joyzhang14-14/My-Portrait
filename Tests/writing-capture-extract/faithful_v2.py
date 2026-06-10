@@ -283,6 +283,15 @@ for day in DAYS:
         is_ledger = src_.startswith("keystroke_recovered")
         if LEDGER_MODE == 'raw':                           # raw=旧行为:无审核环(审查修:原先未实现)
             out3.append(rec); continue
+        # 账本查重闸(确定性,在快速通道**之前**):重复副本的文本本来就在屏幕上,OCR一致会被放行——
+        # 但 B 门控要杀的正是"重复"维度。账本记录与任何 AX 路记录互为子串(空白归一)→ 未定区展示。
+        if is_ledger:
+            tn_ = cv(t).replace(' ', '').replace('\n', '')
+            dup = next((r2[1] for r2 in out2 if not r2[6].startswith("keystroke_recovered") and r2[7] == b
+                        and (tn_ in r2[1].replace(' ', '').replace('\n', '')
+                             or r2[1].replace(' ', '').replace('\n', '') in tn_)), None)
+            if dup is not None:
+                pend.append((a, t, src_, evid, t0, "账本副本(与AX路记录重复)", cv(dup)[:80])); continue
         # prev 锚优先用已审核的修后文本(out3),回退 out2(审查修)
         prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
                 or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
