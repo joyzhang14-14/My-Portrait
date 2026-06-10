@@ -131,14 +131,19 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         proc.standardError = stderr
 
         let cont = eventContinuation
+        // EOF(空 availableData)时 handler **自我清除** —— 否则 dispatch read
+        // source 在 EOF 后以空 data 反复回调,每轮子进程退出都留一个空转烧 CPU
+        // 的后台线程,直到下一轮 sendPrompt 替换 Pipe(聊完不动 = 烧数小时)。
+        // 不能在 terminationHandler 里清:termination 可能先于尾部数据派发,
+        // 提前清会丢回复结尾。EOF 空回调天然在全部数据之后,在这清恰好。
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty { return }
+            if data.isEmpty { handle.readabilityHandler = nil; return }
             self?.appendStdout(data)
         }
         // stderr 读完就丢,不写盘(防缓冲塞满阻塞子进程)。
         stderr.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
+            if handle.availableData.isEmpty { handle.readabilityHandler = nil }
         }
 
         proc.terminationHandler = { [weak self] p in
