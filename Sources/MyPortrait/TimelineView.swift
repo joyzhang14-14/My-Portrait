@@ -538,8 +538,13 @@ struct RealAppIcon: View {
         let img = await Task.detached(priority: .userInitiated) {
             AppIconLoader.icon(forAppName: name)
         }.value
-        AppNameIconCache.shared.store(img, for: appName)
-        self.realIcon = img   // 无条件赋值,nil 自然回退占位图
+        AppNameIconCache.shared.store(img, for: name)
+        // .task(id: appName) 在 appName 变化时取消本任务,但 detached 的加载
+        // 不跟着取消 —— 慢加载晚归时不能覆盖新 app 已经写好的图标(先清后写
+        // 挡不住乱序回写;同款修法见 ImageLoader)。缓存照常写,丢的只是这次展示。
+        if !Task.isCancelled {
+            self.realIcon = img   // nil 自然回退占位图
+        }
     }
 }
 
