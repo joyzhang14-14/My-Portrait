@@ -60,13 +60,9 @@ struct GeneralSettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
             }
-            // 两个字段改完同步给 SPUUpdater(否则 toggle 是死配置)。
-            .onChange(of: config.current.general.autoDownloadUpdates) { _, _ in
-                UpdaterService.shared.applyConfig()
-            }
-            .onChange(of: config.current.general.updateCheckMinutes) { _, _ in
-                UpdaterService.shared.applyConfig()
-            }
+            // 两个字段的同步由 UpdaterService.observeConfig() 常驻监听
+            //(这里以前挂过 onChange,但页面不在屏幕上时没人监听,vim 改
+            // TOML 热加载后配置就是死的 —— 已收编进 service 本体)。
 
             // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
