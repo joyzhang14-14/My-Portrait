@@ -53,6 +53,35 @@ final class UpdaterService: NSObject {
         // 把现有 config 接上。delegate 设置后调一次同步当前值,然后监听
         // config 变化(不会高频,只在用户改 toggle / TextField 时)。
         applyConfig()
+        observeConfig()
+    }
+
+    /// 上次应用过的两个字段值。@Observable 追踪粒度是整个 `current`,任意
+    /// config 变更都会触发 onChange —— 必须 diff 真值,只在这两个字段真变了
+    /// 才 applyConfig(否则随便改个别的设置都会重建 timer + 立即触发一次检查)。
+    private var observedGeneral: (minutes: Int, autoDownload: Bool) = (0, false)
+
+    /// 常驻监听 updateCheckMinutes / autoDownloadUpdates。之前重应用职责挂在
+    /// GeneralSettingsView 的 onChange 上 —— 页面不在屏幕上就没人监听,
+    /// vim 改 TOML(ConfigStore 热加载)后 SPUUpdater 和 checkTimer 仍按旧值
+    /// 跑到下次重启。其它模块(ConfigApplier / Services)都用常驻
+    /// withObservationTracking,updater 对齐。
+    private func observeConfig() {
+        let g = ConfigStore.shared.current.general
+        observedGeneral = (g.updateCheckMinutes, g.autoDownloadUpdates)
+        withObservationTracking {
+            _ = ConfigStore.shared.current.general.updateCheckMinutes
+            _ = ConfigStore.shared.current.general.autoDownloadUpdates
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let g = ConfigStore.shared.current.general
+                if (g.updateCheckMinutes, g.autoDownloadUpdates) != self.observedGeneral {
+                    self.applyConfig()
+                }
+                self.observeConfig()   // withObservationTracking 一次性,重订阅
+            }
+        }
     }
 
     /// 用户点菜单 / 设置里的 "Check Now" 按钮调这个 —— 永远走 Sparkle
