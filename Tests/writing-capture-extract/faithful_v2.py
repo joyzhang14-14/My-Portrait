@@ -13,6 +13,7 @@ import harness as H
 import rebuild as R
 import extract_compare_v2 as X
 import mlx_constrained as MC
+import ocr3 as C3
 from mlx_lm import load, generate
 
 con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
@@ -42,15 +43,27 @@ def assemble_keys(ids):
         if bs: o += "<BS>"; continue
         if c: o += "<CR>" if c in ("\n", "\r") else c
     return o[:700]
-def convo_ctx(ev):
-    r = con.execute("SELECT bundle_id FROM typing_events WHERE id=?", (ev['id'],)).fetchone()
-    if not r: return ""
-    bundle = r[0]; app = bundle.split('.')[-1]
-    day = con.execute("SELECT date_utc FROM writing_records_staged WHERE reference_typing_event_ids LIKE ? LIMIT 1", (f"%{ev['id']}%",)).fetchone()
-    rows = []
-    if day:
-        rows = [x[0] for x in con.execute("SELECT text FROM writing_records_staged WHERE date_utc=? AND app LIKE ? ORDER BY start_ts", (day[0], "%" + app + "%")).fetchall()]
-    return f"app:{app}\n最近对话:\n" + "\n".join(f"  - {t[:40]}" for t in rows[:24])
+def ctx_window(recent, ts, after=None, gap_ms=5 * 60 * 1000, max_n=6, max_chars=400):
+    """时间邻域上下文(替代旧 convo_ctx 的「旧staged全天」):
+    recent=[(ts,text)] 已按时间序;从 ts 向前逐条扩,**条间 gap >5min 停**(对话 session 边界),
+    每侧 ≤6 条,总 ≤400 字。after 给了(口3 阶段)再向后扩 —— 双向语境。"""
+    before_items = [(t, x) for t, x in recent if t is not None and t <= ts]
+    out_b, last = [], ts
+    for t, x in reversed(before_items):
+        if last - t > gap_ms or len(out_b) >= max_n: break
+        out_b.append(x); last = t
+    out_b.reverse()
+    out_a, last = [], ts
+    for t, x in (after or []):
+        if t is None or t < ts: continue
+        if t - last > gap_ms or len(out_a) >= max_n: break
+        out_a.append(x); last = t
+    s, total = [], 0
+    for x in out_b: s.append(f"  - {x[:60]}"); total += len(x[:60])
+    if out_a:
+        s.append("  (之后的消息:)")
+        for x in out_a: s.append(f"  - {x[:60]}"); total += len(x[:60])
+    return "\n".join(s[:1 + max_n * 2])[:max_chars]
 
 def is_residue(t):
     """#41 修复:只丢「整条几乎全是残渣」的。中文主体 + 小拼音尾渣 → **保留整条**
@@ -89,8 +102,9 @@ def disambig(p):
 
 RAW = {}   # day -> [(app, text, kc, evid, t0, t1)]
 DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每道闸丢弃的全记录(审计)
+C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
 for day in DAYS:
-    dayrecs = []; drops = []
+    dayrecs = []; drops = []; c3fix = []
     for (refs,) in con.execute("SELECT DISTINCT reference_typing_event_ids FROM writing_records_staged WHERE date_utc=? AND source IN('ax_cleaned','merged')", (day,)).fetchall():
         try: ids = [int(x) for x in json.loads(refs or '[]')]
         except: ids = []
@@ -100,9 +114,11 @@ for day in DAYS:
         kc = group_kc(ids); ks_full = assemble_keys(ids)
         grp = []
         for ev in evs:
-            ctx = convo_ctx(ev); app = ev['bundle'].split('.')[-1]
+            app = ev['bundle'].split('.')[-1]
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X):
                 kw = R.keys_in_window(con, ev['bundle'], t0, t1)
+                # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
+                ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)
                 fixed, _ = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
                 # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
                 if cv(fixed): grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
@@ -131,7 +147,7 @@ for day in DAYS:
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
-            seen.add(t); out.append((app, t, kc, evid, t0, t1, "ax_cleaned"))
+            seen.add(t); out.append((app, t, kc, evid, t0, t1, "ax_cleaned", b))
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
     # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
     # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
@@ -173,8 +189,32 @@ for day in DAYS:
                            for rt, rt0, rt1 in recs_b)
             if consumed or X.is_ph(ft) or is_residue(ft) or ft in seen: continue
             seen.add(ft)
-            out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered"))
-    RAW[day] = out; DROP[day] = drops
+            out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered", b))
+    # ===== Phase1.5 口3:重建不确定的(残渣未清)drop 到此 =====
+    # 此时全天消息已就位 → 有**下文**了(两遍式的时序红利)。
+    # ① 确定性:OCR 锚定 + 击键 <CR> 段验证(零幻觉);② 还没修上 → 14B 双向语境重试(前文+后文)。
+    recs_sorted = sorted(out, key=lambda r: (r[4] or r[5] or 0))
+    timeline = [(r[4] or r[5], r[1]) for r in recs_sorted]
+    out2 = []
+    for i, rec in enumerate(recs_sorted):
+        a, t, kc2, evid, t0, t1, src, b = rec
+        m = R.LATIN_TAIL.search(t)
+        needs = bool(m) and not R._is_eng_tail(m.group().strip())
+        if not needs:
+            out2.append(rec); continue
+        nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0))
+        via = "口3-OCR"
+        if nt == t:                                      # OCR 没修上 → 双向语境重试 14B
+            ctx2 = f"app:{a}\n邻近消息:\n" + ctx_window(timeline[:i], t0 or 0, after=timeline[i + 1:])
+            kw2 = R.keys_in_window(con, b, t0, t1)
+            nt, _ = R.reconstruct_message(t, kw2, context=ctx2, model_fn=disambig)
+            via = "口3-双向语境"
+        if cv(nt) and nt != t:
+            c3fix.append((a, t, nt, via, evid, t0))
+            out2.append((a, cv(nt), kc2, evid, t0, t1, src + "+c3", b))
+        else:
+            out2.append(rec)
+    RAW[day] = out2; DROP[day] = drops; C3FIX[day] = list(c3fix)
     print(f"  {day}: {len(out)} 条(14b disambig 调用累计 {R.DISAMBIG_CALLS[0]})", flush=True)
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
 os.makedirs(EVAL, exist_ok=True)
@@ -227,6 +267,12 @@ for day in DAYS:
     out = [(rec[6], rec[1], rec[0]) for rec in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
+    # 口3 修正审计:改了什么、怎么改的(OCR锚定/双向语境)
+    cf = C3FIX.get(day, [])
+    nd.append(f"\n### 🔧 口3 修正（{len(cf)}）\n")
+    if not cf: nd.append("（无）\n")
+    for a, old, new, via, evid, t0 in cf:
+        nd.append(f"- `[{via}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}`\n  > {old[:120]!r} → **{new[:120]!r}**\n")
     # 丢弃审计:漏斗每道闸 + Pass4,丢了什么 + 为什么 + event 时间
     dr = DROP.get(day, []); dd = DISCARDED.get(day, [])
     nd.append(f"\n### 🗑️ 丢弃审计（漏斗 {len(dr)} + Pass4 {len(dd)}）\n")
