@@ -149,7 +149,8 @@ DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
 PROOF = {}  # (evid, text) -> 模型重建的尾巴 —— 凡模型参与选字的尾巴,Phase1.5 强制 OCR 校对(的/得、哟/用一族)
 PENDING = {}  # day -> [(app, text, src, evid, t0, 审核理由, OCR片段)] —— 未定区:审核未过,展示不入册(审核而非丢弃)
-LEDGER_MODE = os.environ.get('LEDGER_MODE', 'gated')  # gated=B(账本须审核PASS才入册)/ off=A(账本禁用)/ raw=旧行为
+LEDGER_MODE = os.environ.get('LEDGER_MODE', 'off')  # 用户裁定(2026-06-10):A胜出,账本独立源废除(~50%垃圾),
+# 击键只做 AX 修复辅助;gated/raw 代码留档可切
 for day in DAYS:
     dayrecs = []; drops = []; c3fix = []
     for (refs,) in con.execute("SELECT DISTINCT reference_typing_event_ids FROM writing_records_staged WHERE date_utc=? AND source IN('ax_cleaned','merged')", (day,)).fetchall():
