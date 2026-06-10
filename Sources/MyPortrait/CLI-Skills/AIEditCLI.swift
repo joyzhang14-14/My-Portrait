@@ -190,7 +190,9 @@ enum AIEditCLI {
             while let url = en.nextObject() as? URL {
                 guard url.pathExtension == "md", url.lastPathComponent != "INDEX.md" else { continue }
                 guard let f = try? PortraitFileIO.read(from: url) else { continue }
-                if f.distilledInto.contains(slug)
+                // distilledInto 新格式为 "<category>/<slug>",老格式纯 slug ——
+                // 两种都按尾段匹配。
+                if f.distilledInto.contains(where: { $0 == slug || $0.hasSuffix("/" + slug) })
                     || (f.evidenceEventIds ?? []).contains(slug) {
                     out.append(relativePath(url))
                 }

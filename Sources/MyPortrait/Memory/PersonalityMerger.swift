@@ -281,6 +281,13 @@ final class PersonalityMerger {
                 body = ConceptBody.parse(file.body)
                 aliases = file.aliases ?? []
                 primaryLabel = file.primaryLabel ?? primaryLabel
+                // 本轮 actions 没带 description(LLM 漏给 / orphan 兜底固定
+                // nil)→ 保留已有的一句话定义。否则下面 render(description:)
+                // 和 eventSummary 赋值会把旧定义双双清空(ConceptBody.parse
+                // 不回读 `> desc` 行,清掉就再也找不回)。
+                if pickedDescription == nil, !file.eventSummary.isEmpty {
+                    pickedDescription = file.eventSummary
+                }
             } else {
                 file = PortraitFile(
                     created: today,
