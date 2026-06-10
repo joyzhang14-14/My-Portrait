@@ -24,7 +24,10 @@ struct PortraitFile: Equatable {
     /// Valid range for both `impact` and `rawImpact`. All writers (LLM
     /// scoring, budget rebalance, future JOIN micro-bumps) MUST clamp
     /// before assigning — see `clampImpact`. Schema-level invariant.
-    static let impactRange: ClosedRange<Double> = 1.0...5.0
+    /// 0.0-0.9 是评分 prompt 里的 "pointless" 锚定带 —— 下界 0.0 与 prompt
+    /// 对齐,别再夹回 1.0(impact=0 → weight=0,pointless 事件自然沉底:
+    /// 进不了 personality 的 weight 筛选,distiller 排序垫底)。
+    static let impactRange: ClosedRange<Double> = 0.0...5.0
 
     /// Use at every write site instead of raw assignment.
     static func clampImpact(_ v: Double) -> Double {
@@ -32,7 +35,7 @@ struct PortraitFile: Equatable {
     }
 
     var created: Date
-    /// **Event-only**：LLM 评出的 impact（1–5）。portrait 文件不再持有 impact
+    /// **Event-only**：LLM 评出的 impact（0–5）。portrait 文件不再持有 impact
     /// —— 语义上 impact 是事件强度，画像维度不依赖。portrait 文件读这个字段
     /// 永远 nil，序列化时整行 skip。
     var impact: Double?

@@ -5,7 +5,7 @@ import Foundation
 ///   weight = impact × power_decay(days_since_last_occurrence) × log(1 + occurrence_days)
 ///
 /// Three terms:
-///   - `impact`            (1-5, Double, may be micro-adjusted by LLM)
+///   - `impact`            (0-5, Double, may be micro-adjusted by LLM)
 ///   - `power_decay(d)`    = (1 + d) ^ -α     — power law, not exponential
 ///   - `freq_boost(n)`     = log(1 + n)        — n = number of distinct days
 ///                                              the event occurred (spacing
