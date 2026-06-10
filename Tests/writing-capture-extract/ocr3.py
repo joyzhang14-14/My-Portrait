@@ -201,9 +201,9 @@ def ocr_snippet(app_short, url, text, send_ts, prev_text=None, seg='', fwd_s=60,
         for ts, ft in frames:
             if ts < send_ts: continue                      # prev 锚只看发送后帧(审查修)
             ft = ft or ''
-            for k in (8, 6, 4):
+            for k in (8, 6, 4, 2):
                 anchor = pb[-k:].strip() if len(pb) >= k else pb
-                if len(anchor) < 3: continue
+                if len(anchor) < 2: continue   # prev锚放宽到2字(短消息如'明天';击键预检兜底,小修C)
                 idx = ft.find(anchor)
                 if idx < 0: continue
                 cont = ft[idx + len(anchor): idx + len(anchor) + width + 20]
