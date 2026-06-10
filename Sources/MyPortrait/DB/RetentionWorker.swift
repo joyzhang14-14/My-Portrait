@@ -112,7 +112,12 @@ actor RetentionWorker {
 
         let mode = AutoDeleteMode(rawValue: s.autoDeleteMode) ?? .off
 
-        return (days, mode, s.waitForTranscription)
+        // 「等转录」只在真的会有转录时才有意义:引擎 disabled = 没有可等的,
+        // 到期照删 —— 否则引擎长期关闭 + 采集照跑时,保留期对音频永久失效,
+        // 磁盘无限增长且无任何告警。
+        let wait = s.waitForTranscription && s.audioEngine != "disabled"
+
+        return (days, mode, wait)
     }
 
     private func deleteFiles(_ files: RetentionFileList) {
