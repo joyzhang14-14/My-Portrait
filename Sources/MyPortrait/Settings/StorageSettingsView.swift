@@ -136,7 +136,7 @@ struct StorageSettingsView: View {
             }
             SettingsDivider()
             SettingsRow("Wait for transcription",
-                        description: "Audio that hasn't been transcribed yet (transcription paused or backlogged) is kept past the retention window until it's transcribed, so its text isn't lost. Turn off to delete old audio on schedule regardless.",
+                        description: "Audio that hasn't been transcribed yet (transcription paused or backlogged) is kept past the retention window until it's transcribed, so its text isn't lost. Turn off to delete old audio on schedule regardless. If the transcription engine is set to Disabled, audio is deleted on schedule — there's nothing to wait for.",
                         icon: "text.bubble") {
                 Toggle("", isOn: config.binding(\.storage.waitForTranscription)).labelsHidden().toggleStyle(.switch)
             }
