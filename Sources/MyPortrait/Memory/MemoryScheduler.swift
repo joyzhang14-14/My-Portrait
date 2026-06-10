@@ -233,6 +233,7 @@ final class MemoryScheduler {
         loadLastFailures()   // 必须在 recoverStaleLocks 之前 — recover 写 kind 时
                              // 会读老值(避免覆盖更早的 user-required kind)
         recoverStaleLocks()
+        discardOrphanStagingSnapshots()
         timer?.invalidate()
         let t = Timer.scheduledTimer(withTimeInterval: tickInterval, repeats: true) { _ in
             Task { @MainActor in await MemoryScheduler.shared.tick() }
@@ -1058,6 +1059,31 @@ final class MemoryScheduler {
         }
     }
 
+    /// 启动时清理「孤儿 staging 快照」:有 backup 目录但 days 清单
+    /// (xxx_days.json)不存在 = 手动 staged run 在 markRan 之前真崩溃
+    /// (SIGKILL / 断电)。这种快照结果不完整、不可审,留着会让
+    /// hasPending 一直 true → tick() 顶部 guard 每 15 分钟直接 return,
+    /// 五条定时管线无限期停摆。只删 backup、不动 live 树(没有清单不知道
+    /// 哪些天动过,盲目回滚会丢已 complete 的天;崩溃那天的半成品由
+    /// recoverStaleLocks 的 stale-lock 回收 → 重跑负责清理)。
+    /// 清单存在 = run 跑完等审核,是合法 pending,不动。
+    ///
+    /// ⚠️ 只能在 start() 启动路径调,不能放进 recoverStaleLocks ——
+    /// 后者 didWake 也会调,而手动 run 可能正跨睡眠进行中(backup 在、
+    /// 清单还没写),在那里清会误杀活着的 run。
+    private func discardOrphanStagingSnapshots() {
+        for k in [MemoryStaging.Kind.events, .portrait, .personality]
+        where MemoryStaging.isOrphan(k) {
+            do {
+                try MemoryStaging.discardOrphan(k)
+                schedLog.notice("discarded orphan staging snapshot '\(k.rawValue, privacy: .public)' (run crashed before manifest) — scheduled jobs unblocked")
+                print("[Scheduler] discarded orphan staging snapshot '\(k.rawValue)' (run crashed mid-way; live tree kept)")
+            } catch {
+                schedLog.error("discard orphan staging '\(k.rawValue, privacy: .public)' failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     /// 用户主动退出时调(applicationWillTerminate)。扫所有 row,把任一 stage
     /// 处于 in_progress 的标为 paused + 释放锁,**不计 retry** —— 跟真崩溃
     /// (SIGKILL / 断电)的 stale-lock 路径区分开。同步 DB 写,毫秒级,不阻塞
@@ -1090,12 +1116,15 @@ final class MemoryScheduler {
         if pausedCount > 0 {
             schedLog.notice("paused \(pausedCount) in-progress row(s) on shutdown — will resume on next launch")
         }
-        // Reject 任何被 paused 牵连的 staging snapshot(restore backup + 清单)。
-        // 多 row 同 stage 也只 reject 一次(MemoryStaging 是 kind-级)。
+        // Reject 任何被 paused 牵连的 staging snapshot。run 还没跑完 → days
+        // 清单缺失 → reject 内部走孤儿路径:只丢 backup、保留 live 树(整树
+        // 回滚会抹掉多天 run 里已 complete 的天);中断那天的半成品由上面的
+        // paused 回收 deleteEvents + 重跑清理。多 row 同 stage 也只 reject
+        // 一次(MemoryStaging 是 kind-级)。
         for k in pausedKinds where MemoryStaging.hasPending(k) {
             do {
                 try MemoryStaging.reject(k)
-                print("[Scheduler] rejected staging '\(k.rawValue)' on pause (restored backup)")
+                print("[Scheduler] rejected staging '\(k.rawValue)' on pause (snapshot discarded, live tree kept)")
             } catch {
                 schedLog.error("staging \(k.rawValue, privacy: .public) reject failed: \(error.localizedDescription, privacy: .public)")
             }

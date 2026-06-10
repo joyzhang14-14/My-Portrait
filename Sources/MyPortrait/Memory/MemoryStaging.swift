@@ -125,15 +125,45 @@ enum MemoryStaging {
     }
 
     /// 拒绝：用快照整树还原 live，删快照 + 清单。
+    ///
+    /// ⚠️ days 清单缺失 = run 没跑完就中断了(markRan 从未执行)。此时**不能**
+    /// 用快照覆盖 live 树:多天 run 里先完成的天 events 已落盘、ProcessingLog
+    /// 已标 complete,盲目整树回滚会把这些天的 events 抹掉而状态仍 complete
+    /// → isEventCandidate 永远 false,这些天再也不重建,数据永久丢失。
+    /// 没有清单就不知道哪些天动过 → 只丢快照、保留 live 树(中断那天的
+    /// 半成品由调度器的崩溃恢复 deleteEvents + 重跑负责清理)。
     static func reject(_ k: Kind) throws {
         let fm = FileManager.default
         let backup = backupDir(k)
         let live = liveDir(k)
         guard fm.fileExists(atPath: backup.path) else { return }
+        guard fm.fileExists(atPath: daysManifest(k).path) else {
+            try discardOrphan(k)
+            return
+        }
         if fm.fileExists(atPath: live.path) { try fm.removeItem(at: live) }
         try fm.moveItem(at: backup, to: live)
         let manifest = daysManifest(k)
         if fm.fileExists(atPath: manifest.path) { try fm.removeItem(at: manifest) }
+    }
+
+    /// 孤儿快照 = 有 backup 目录但 days 清单不存在 —— staged run 在 markRan
+    /// 之前崩了(SIGKILL / 断电),结果不完整、不可审。清单存在 = run 跑完
+    /// 等审核,是合法 pending,不算孤儿。
+    static func isOrphan(_ k: Kind) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: backupDir(k).path)
+            && !fm.fileExists(atPath: daysManifest(k).path)
+    }
+
+    /// 丢弃孤儿快照:只删 backup,**不动 live 树**(理由见 reject 的注释——
+    /// 没有清单不知道哪些天动过,回滚必丢已 complete 的天)。删完
+    /// hasPending 变 false,被它卡住的定时调度恢复。
+    static func discardOrphan(_ k: Kind) throws {
+        let backup = backupDir(k)
+        if FileManager.default.fileExists(atPath: backup.path) {
+            try FileManager.default.removeItem(at: backup)
+        }
     }
 
     // MARK: - 工具
