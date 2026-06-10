@@ -336,7 +336,10 @@ for day in DAYS:
         # 纯 AX 原文(机器没碰过字)= AX+击键双背书,错字风险不存在,免审直接入册
         # (误伤面归零 + referee 调用大降)。判据:PROOF 有模型尾 / 口3 修过(+c3/+rev)。
         machine_touched = bool(PROOF.get((evid, t), '')) or ('+c3' in src_) or ('+rev' in src_)
-        if not machine_touched:
+        # 用户指令(2026-06-10):det 零LLM零幻觉 → AX 纯原文的**短消息**(≤20字,幻影/碎片域)
+        # 也对证筛一遍;但纯 AX 只筛不替换(AX+击键双背书,OCR 矛盾→未定区展示,不动字)。
+        screen_only = (not machine_touched) and len(cv(t)) <= 20 and REVIEW_MODE == 'det'
+        if not machine_touched and not screen_only:
             out3.append(rec); continue
         # prev 锚优先用已审核的修后文本(out3),回退 out2(审查修)
         prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
@@ -363,6 +366,11 @@ for day in DAYS:
                 out3.append(rec); continue                 # OCR 无证言/一致 → 信 librime+击键
             others = [norm_t(r2[1]) for j, r2 in enumerate(out2) if j != i and r2[7] == b]
             t_cmp = tn.rstrip('，,。.!？?！…、 ')
+            if screen_only:
+                # 纯 AX 短消息:只筛不替换。OCR 真身与记录矛盾 → 未定区展示(幻影/碎片筛查)
+                pend.append((a, t, src_, evid, t0, "AX短消息对证矛盾(渲染=" + vtn[:20] + ")",
+                             re.sub(r'\s+', ' ', snip)[:120]))
+                continue
             if (len(vtn) >= len(t_cmp) and not any(vtn in o for o in others)):
                 c3fix.append((a, t, vt, "确定性对证替换", evid, t0))
                 out3.append((a, cv(vt), kc2, evid, t0, t1, src_ + "+det", b)); continue
