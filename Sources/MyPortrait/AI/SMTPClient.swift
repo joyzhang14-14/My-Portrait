@@ -186,6 +186,8 @@ private final class NWImplicitTLSSession: SMTPSession {
     let expectsGreeting = true
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "smtp.nw")
+    /// 连接 / 读 / 写统一超时（秒）
+    private static let timeout: TimeInterval = 15
 
     init(host: String, port: Int) async throws {
         let params = NWParameters(tls: NWProtocolTLS.Options(), tcp: NWProtocolTCP.Options())
@@ -204,6 +206,14 @@ private final class NWImplicitTLSSession: SMTPSession {
                 switch state {
                 case .ready:
                     if resumed.claim() { cont.resume() }
+                case .waiting(let err):
+                    // 连接被拒 / 不可达时 NWConnection 进 .waiting 无限重试，永远不会
+                    // 转 .failed —— 必须在这里视为失败，否则 continuation 永不 resume，
+                    // UI 永久卡在 connecting
+                    if resumed.claim() {
+                        conn.cancel()
+                        cont.resume(throwing: SMTPClient.SMTPError(message: "Connect failed: \(err.localizedDescription)"))
+                    }
                 case .failed(let err):
                     if resumed.claim() {
                         cont.resume(throwing: SMTPClient.SMTPError(message: "TLS connect failed: \(err.localizedDescription)"))
@@ -216,13 +226,30 @@ private final class NWImplicitTLSSession: SMTPSession {
                     break
                 }
             }
+            // 连接超时兜底：15s 内既没 ready 也没 failed 就主动 cancel 并抛错
+            queue.asyncAfter(deadline: .now() + Self.timeout) {
+                if resumed.claim() {
+                    conn.cancel()
+                    cont.resume(throwing: SMTPClient.SMTPError(message: "Connect to \(host):\(port) timed out"))
+                }
+            }
             conn.start(queue: queue)
         }
     }
 
     func send(_ text: String) async throws {
+        let resumed = ResumeGuard()
+        let conn = connection
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            connection.send(content: Data(text.utf8), completion: .contentProcessed { err in
+            // 写超时：15s 没完成就 cancel 抛错，防止永久挂起
+            queue.asyncAfter(deadline: .now() + Self.timeout) {
+                if resumed.claim() {
+                    conn.cancel()
+                    cont.resume(throwing: SMTPClient.SMTPError(message: "send timed out"))
+                }
+            }
+            conn.send(content: Data(text.utf8), completion: .contentProcessed { err in
+                guard resumed.claim() else { return }
                 if let err {
                     cont.resume(throwing: SMTPClient.SMTPError(message: "send failed: \(err.localizedDescription)"))
                 } else {
@@ -233,8 +260,18 @@ private final class NWImplicitTLSSession: SMTPSession {
     }
 
     func receiveLine() async throws -> String {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { data, _, isComplete, err in
+        let resumed = ResumeGuard()
+        let conn = connection
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            // 读超时：15s 没收到任何字节就 cancel 抛错（服务器不发 greeting 等场景）
+            queue.asyncAfter(deadline: .now() + Self.timeout) {
+                if resumed.claim() {
+                    conn.cancel()
+                    cont.resume(throwing: SMTPClient.SMTPError(message: "receive timed out"))
+                }
+            }
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 8192) { data, _, isComplete, err in
+                guard resumed.claim() else { return }
                 if let err {
                     cont.resume(throwing: SMTPClient.SMTPError(message: "receive failed: \(err.localizedDescription)"))
                 } else if let data, !data.isEmpty {
@@ -296,6 +333,14 @@ private final class STARTTLSSession: SMTPSession, @unchecked Sendable {
         while let node = cur {
             sock = socket(node.pointee.ai_family, node.pointee.ai_socktype, node.pointee.ai_protocol)
             if sock >= 0 {
+                // 超时设置：读写 15s（SO_RCVTIMEO/SO_SNDTIMEO，超时后 read/write 返回
+                // -1 + EAGAIN）；connect 15s（Darwin 的 TCP_CONNECTIONTIMEOUT，不设则
+                // 系统默认约 75s）。防止服务器不可达 / 不回包时永久阻塞。
+                var tv = timeval(tv_sec: 15, tv_usec: 0)
+                _ = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+                _ = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+                var connTimeout: Int32 = 15
+                _ = setsockopt(sock, IPPROTO_TCP, TCP_CONNECTIONTIMEOUT, &connTimeout, socklen_t(MemoryLayout<Int32>.size))
                 if connect(sock, node.pointee.ai_addr, node.pointee.ai_addrlen) == 0 { break }
                 Darwin.close(sock)
                 sock = -1
@@ -354,7 +399,9 @@ private final class STARTTLSSession: SMTPSession, @unchecked Sendable {
             else if n == 0 { dataLength.pointee = total; return errSSLClosedGraceful }
             else {
                 dataLength.pointee = total
-                return (errno == EAGAIN || errno == EWOULDBLOCK) ? errSSLWouldBlock : errSSLClosedAbort
+                // socket 是阻塞模式，EAGAIN 只会因 SO_RCVTIMEO 超时出现；若映射成
+                // errSSLWouldBlock 上层 SSLHandshake/SSLRead 会无限重试，直接视为失败
+                return errSSLClosedAbort
             }
         }
         dataLength.pointee = total
@@ -371,7 +418,8 @@ private final class STARTTLSSession: SMTPSession, @unchecked Sendable {
             if n > 0 { total += n }
             else {
                 dataLength.pointee = total
-                return (errno == EAGAIN || errno == EWOULDBLOCK) ? errSSLWouldBlock : errSSLClosedAbort
+                // 同 tlsRead：阻塞 socket 的 EAGAIN = SO_SNDTIMEO 超时，视为失败
+                return errSSLClosedAbort
             }
         }
         dataLength.pointee = total
@@ -395,7 +443,13 @@ private final class STARTTLSSession: SMTPSession, @unchecked Sendable {
         var acc = ""
         while true {
             let n = Darwin.read(fd, &buf, buf.count)
-            guard n > 0 else { throw SMTPClient.SMTPError(message: "socket closed") }
+            guard n > 0 else {
+                // SO_RCVTIMEO 超时时 read 返回 -1 + EAGAIN（服务器不发 greeting 等）
+                if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    throw SMTPClient.SMTPError(message: "socket read timed out")
+                }
+                throw SMTPClient.SMTPError(message: "socket closed")
+            }
             acc += String(decoding: buf[0..<n], as: UTF8.self)
             if isFinalReply(acc) { return acc }
         }
@@ -451,8 +505,12 @@ private final class STARTTLSSession: SMTPSession, @unchecked Sendable {
             if processed > 0 {
                 return String(decoding: buf[0..<processed], as: UTF8.self)
             }
-            if status == errSSLClosedGraceful || status == errSSLClosedAbort {
+            if status == errSSLClosedGraceful {
                 throw SMTPClient.SMTPError(message: "server closed connection")
+            }
+            if status == errSSLClosedAbort {
+                // tlsRead 把 SO_RCVTIMEO 超时也映射成 abort，这里两种都可能
+                throw SMTPClient.SMTPError(message: "connection aborted or read timed out")
             }
             guard status == errSecSuccess else {
                 throw SMTPClient.SMTPError(message: "TLS read failed (status \(status))")
