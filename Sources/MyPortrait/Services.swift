@@ -488,13 +488,21 @@ final class Services {
     /// 重新绑定。withObservationTracking 一次性,onChange 后递归重订阅。
     private func observePreferredInputDevice() {
         let store = ConfigStore.shared
+        // ⚠️ @Observable 的追踪粒度是整个 current(ConfigStore 唯一存储属性,
+        // section 访问器都是 passthrough)—— 任何字段的 mutate(改主题 / appName
+        // 每个 keystroke / vim 编辑 TOML 触发 loadFromDisk)都会进 onChange。
+        // 必须 diff 真值再动作,否则只要在录音,每次无关设置变更都执行完整
+        // stop→start:当前 30s 段被切断 + 引擎重建出现采集缺口。
+        let seen = store.current.capture.audio.preferredInputDeviceUID
         withObservationTracking {
             _ = store.capture.audio.preferredInputDeviceUID
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                await self.audio.restartIfRunning()
-                self.observePreferredInputDevice()
+                if ConfigStore.shared.current.capture.audio.preferredInputDeviceUID != seen {
+                    await self.audio.restartIfRunning()
+                }
+                self.observePreferredInputDevice()   // 重订阅时重新快照 seen
             }
         }
     }
@@ -504,12 +512,17 @@ final class Services {
     /// 才刷新("Paused on battery" ↔ 转录)。withObservationTracking 一次性,onChange 递归重注册。
     private func observeTranscribeOnACOnly() {
         let store = ConfigStore.shared
+        // 同 observePreferredInputDevice:追踪粒度是整个 current,diff 真值
+        // 再 reevaluate,免得任意设置变更都白跑一轮队列处理。
+        let seen = store.current.capture.audio.transcribeOnACOnly
         withObservationTracking {
             _ = store.capture.audio.transcribeOnACOnly
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                await self.transcriber.reevaluate()
+                if ConfigStore.shared.current.capture.audio.transcribeOnACOnly != seen {
+                    await self.transcriber.reevaluate()
+                }
                 self.observeTranscribeOnACOnly()
             }
         }
