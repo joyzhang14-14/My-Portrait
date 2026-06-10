@@ -654,7 +654,8 @@ actor PortraitDBImpl: PortraitDB {
                    c.device,
                    c.is_input,
                    t.speaker_id,
-                   s.name AS speaker_name
+                   s.name AS speaker_name,
+                   COALESCE(t.start_s, 0) AS start_s
             FROM audio_transcriptions t
             JOIN audio_chunks c ON c.id = t.audio_chunk_id
             LEFT JOIN speakers s ON s.id = t.speaker_id AND s.hallucination = 0
@@ -673,13 +674,15 @@ actor PortraitDBImpl: PortraitDB {
                 let isInput: Bool = row["is_input"] ?? true
                 let speakerId: Int? = row["speaker_id"]
                 let speakerName: String? = row["speaker_name"]
+                let startS: Double = row["start_s"] ?? 0
                 return AudioTranscriptEntry(
                     timestamp: Date(timeIntervalSince1970: TimeInterval(tsMs) / 1000),
                     text: text,
                     device: device,
                     isInput: isInput,
                     speakerId: speakerId,
-                    speakerName: speakerName
+                    speakerName: speakerName,
+                    startS: startS
                 )
             }
         }
