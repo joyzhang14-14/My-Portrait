@@ -847,17 +847,34 @@ struct ScreenpipeImporter: Sendable {
             var idMap: [Int64: Int64] = [:]    // screenpipe.chunk_id → portrait.chunk_id
             for c in chunks {
                 guard c.firstTsMs > 0 else { continue }
-                try db.execute(sql: """
-                    INSERT INTO audio_chunks
-                        (file_path, recorded_at_ms, duration_s, device, is_input, status, created_at_ms)
-                    VALUES (:fp, :ts, :dur, 'imported', 1, 'done', :now)
-                    """,
-                    arguments: [
-                        "fp": relPathByOldId[c.oldId] ?? "", "ts": c.firstTsMs,
-                        "dur": c.durationS, "now": nowMs
-                    ])
-                idMap[c.oldId] = db.lastInsertedRowID
-                importedChunks += 1
+                let relPath = relPathByOldId[c.oldId] ?? ""
+                // 探重(仿 importFrames 的 UPSERT):同 (recorded_at_ms, file_path)
+                // 的 imported chunk 已存在 → 跳过,不进 idMap —— 它的 transcripts
+                // 在下面的 guard idMap[...] 处自动跟随跳过。没有这个检查,重复点
+                // Import 会把全部 audio_chunks + audio_transcriptions 翻倍写入。
+                let existingId: Int64? = try Int64.fetchOne(
+                    db,
+                    sql: """
+                        SELECT id FROM audio_chunks
+                        WHERE recorded_at_ms = :ts AND file_path = :fp
+                          AND device = 'imported'
+                        LIMIT 1
+                        """,
+                    arguments: ["ts": c.firstTsMs, "fp": relPath]
+                )
+                if existingId == nil {
+                    try db.execute(sql: """
+                        INSERT INTO audio_chunks
+                            (file_path, recorded_at_ms, duration_s, device, is_input, status, created_at_ms)
+                        VALUES (:fp, :ts, :dur, 'imported', 1, 'done', :now)
+                        """,
+                        arguments: [
+                            "fp": relPath, "ts": c.firstTsMs,
+                            "dur": c.durationS, "now": nowMs
+                        ])
+                    idMap[c.oldId] = db.lastInsertedRowID
+                    importedChunks += 1
+                }
                 ticked += 1
                 if ticked % tickEvery == 0 || ticked == totalTicks {
                     onProgress?(Progress(
