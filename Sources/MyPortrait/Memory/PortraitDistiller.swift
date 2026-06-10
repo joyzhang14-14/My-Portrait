@@ -145,6 +145,12 @@ final class PortraitDistiller {
                 // 撞额度：中止整轮 distill，调度器据此标 budget_deferred。
                 // 已写入 / 更新的分类保留（update 幂等，下次重跑覆盖）。
                 throw e
+            } catch DistillError.agentTimeout {
+                // 超时后该 agent 的事件流已错位:turn N 的迟到响应(事件不带
+                // turn id)会 resume 下一轮的 waiter,category N 的 create/update
+                // 决策会写进 category N+1 的目录。不能继续复用同一 agent ——
+                // 中止整轮,已写分类保留(update 幂等),调度器稍后重试。
+                throw DistillError.agentTimeout
             } catch {
                 failed += 1
             }
