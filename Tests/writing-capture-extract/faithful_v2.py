@@ -330,6 +330,12 @@ for day in DAYS:
             else:
                 pend.append((a, t, src_, evid, t0, "账本解码未获渲染全文确证", ''))
             continue
+        # 审核射程(用户裁定 2026-06-10):**只有 librime/14B 选过字的才走复查 LLM**——
+        # 纯 AX 原文(机器没碰过字)= AX+击键双背书,错字风险不存在,免审直接入册
+        # (误伤面归零 + referee 调用大降)。判据:PROOF 有模型尾 / 口3 修过(+c3/+rev)。
+        machine_touched = bool(PROOF.get((evid, t), '')) or ('+c3' in src_) or ('+rev' in src_)
+        if not machine_touched:
+            out3.append(rec); continue
         # prev 锚优先用已审核的修后文本(out3),回退 out2(审查修)
         prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
                 or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
