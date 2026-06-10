@@ -405,10 +405,10 @@ final class PortraitDistiller {
         file.mergeCount = 1
         file.lastModified = file.created
         try PortraitFileIO.write(file, to: url)
-        // 回写每个被消费的事件,标记"我已被蒸馏进 <slug>"。下次 distill
-        // 通过 distilledInto 跳过它们,LLM 只看新事件。
+        // 回写每个被消费的事件,标记"我已被蒸馏进 <category>/<slug>"。下次
+        // distill 通过 distilledInto 按 category 跳过它们,LLM 只看新事件。
         Self.markEventsDistilled(eventIds: decision.derivedFromEventIds,
-                                 into: decision.slug)
+                                 into: decision.slug, category: category)
     }
 
     /// Returns true if file existed and was updated; false if not found.
@@ -445,9 +445,9 @@ final class PortraitDistiller {
             lastModified: now, now: now
         )
         try PortraitFileIO.write(file, to: url)
-        // 回写每个被消费的事件,标记"我已被蒸馏进 <slug>"。
+        // 回写每个被消费的事件,标记"我已被蒸馏进 <category>/<slug>"。
         Self.markEventsDistilled(eventIds: decision.derivedFromEventIds,
-                                 into: decision.slug)
+                                 into: decision.slug, category: category)
 
         // 审计日志：body 实际变化才记一条 distill_changelog，供 debug / 回滚。
         if oldBody != newBody {
@@ -543,18 +543,23 @@ final class PortraitDistiller {
         }.value
     }
 
-    /// 把 portrait slug 追加到给定 event 文件的 distilledInto。已存在就跳。
-    /// 失败默默忽略 —— 单个事件回写失败不该让整个 distill 跑废。
+    /// 把 "<category>/<slug>" 追加到给定 event 文件的 distilledInto。已存在就跳。
+    /// **按 (event, category) 记录消费** —— 同一事件可路由进多个 category
+    /// (type 路由 + 每个 facet 一份),只记事件级布尔的话,某 category 先消费、
+    /// 后续 category 的 LLM 调用失败,重跑时事件会被全局跳过,该 facet 的信号
+    /// 永久丢失。失败默默忽略 —— 单个事件回写失败不该让整个 distill 跑废。
     nonisolated private static func markEventsDistilled(eventIds: [String],
-                                                        into portraitSlug: String) {
+                                                        into portraitSlug: String,
+                                                        category: String) {
         let fm = FileManager.default
+        let mark = category + "/" + portraitSlug
         for id in eventIds {
             let url = Storage.eventsDir.appendingPathComponent(id)
             guard fm.fileExists(atPath: url.path) else { continue }
             do {
                 var f = try PortraitFileIO.read(from: url)
-                if !f.distilledInto.contains(portraitSlug) {
-                    f.distilledInto.append(portraitSlug)
+                if !f.distilledInto.contains(mark) {
+                    f.distilledInto.append(mark)
                     try PortraitFileIO.write(f, to: url)
                 }
             } catch { continue }
@@ -576,10 +581,20 @@ final class PortraitDistiller {
             if url.pathComponents.contains("_quarantine") { continue }
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             if f.eventTitle.isEmpty && f.eventSummary.isEmpty { continue }
-            // 增量 distill:已被 distill 消费过的事件跳过(distilledInto 非空)。
-            // Backfill join-existing 会清空 distilledInto,让"事件又活了"的
-            // 文件重新进入 distill 视野。
-            if !f.distilledInto.isEmpty { continue }
+            // 增量 distill:**按 (event, category) 跳过**已消费的事件。
+            // distilledInto 存 "<category>/<slug>";老格式纯 slug 无法定位
+            // category,维持旧行为视为全局已消费。Backfill join-existing 会
+            // 清空 distilledInto,让"事件又活了"的文件重新进入 distill 视野。
+            var consumedCategories: Set<String> = []
+            var legacyConsumed = false
+            for mark in f.distilledInto {
+                if let slash = mark.firstIndex(of: "/") {
+                    consumedCategories.insert(String(mark[..<slash]))
+                } else {
+                    legacyConsumed = true
+                }
+            }
+            if legacyConsumed { continue }
             let rel = url.path
                 .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
             let entry = EventEntry(
@@ -598,14 +613,21 @@ final class PortraitDistiller {
             //   - every facet     → portrait/<facet name>/
             // (Same event can feed multiple portrait categories.)
             switch f.eventType.lowercased() {
-            case "emotion":     out["emotions", default: []].append(entry)
-            default:            out["experiences", default: []].append(entry)
+            case "emotion":
+                if !consumedCategories.contains("emotions") {
+                    out["emotions", default: []].append(entry)
+                }
+            default:
+                if !consumedCategories.contains("experiences") {
+                    out["experiences", default: []].append(entry)
+                }
             }
             for facet in f.portraitFacets {
                 let name = facet.facet.lowercased()
                 // Defensive — skip facets that look like routes already
                 // handled by type, or facets outside the 9 known buckets.
                 guard name != "experiences", name != "emotions" else { continue }
+                guard !consumedCategories.contains(name) else { continue }
                 out[name, default: []].append(entry)
             }
         }

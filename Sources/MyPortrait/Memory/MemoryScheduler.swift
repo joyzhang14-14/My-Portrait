@@ -95,6 +95,14 @@ final class MemoryScheduler {
     /// tick() 自身的可重入防护(timer 与 startup 并发触发时只跑一次)。
     private var tickRunning = false
     private var timer: Timer?
+    /// pause 代际计数。pauseInProgressJobs(willSleep / 用户退出)每次 +1;
+    /// runStep / runXxxJob 开跑时快照,跑完发现不一致 = 运行期间被 pause
+    /// 接管过(行已 paused + 锁已释放 + staging 已 reject)→ 结果作废:
+    /// 不 applyOutcome、不 releaseLock、不再处理剩余天。否则系统睡眠只
+    /// suspend 进程不杀任务,唤醒后复活的旧任务会跟 didWake 的 paused→failed
+    /// 回收竞态(failed 被覆盖成 complete / 双重 bumpRetry / 手动 staged run
+    /// 绕过审核直接落盘)。
+    private var pauseGeneration = 0
 
     /// 每行每阶段最近一次失败的分类。**持久化到 ~/.portrait/scheduler/
     /// last_failures.json** —— 进程重启不丢,UI 一直能显示具体 kind。
@@ -348,11 +356,17 @@ final class MemoryScheduler {
         // ===== Tier 1 =====
         var tier1Ran = false
 
+        // **eventToday 只挡 daily-scheduled trigger,不挡 retry** —— 跟下面
+        // portrait/personality 的 retry 分支同款修法(Tier-1 此前漏修):当天
+        // 跑过一次后某天 failed/budget_deferred,backoff 到点也要能当天重试,
+        // 否则 UI 显示 "~10 min" 实际要等到次日,Reset 按钮也形同虚设。
         let eventToday   = lastRunDay(kLastEvent) != localDayString(now)
         let eventCatchUp = s.event.frequency == .daily && eventJobHasWork()
-        if eventToday,
-           Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp {
-            setLastRun(kLastEvent, now)
+        let eventRetry   = s.event.frequency != .off && eventNeedsRetry()
+        let eventScheduled = eventToday
+            && (Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp)
+        if eventScheduled || eventRetry {
+            if eventScheduled { setLastRun(kLastEvent, now) }   // retry 不更新 lastRun
             await runEventJob()
             tier1Ran = true
         }
@@ -576,8 +590,14 @@ final class MemoryScheduler {
             "days":  days.map { ProcessingLogStore.dayString($0) },
             "count": days.count,
         ])
+        // pause 代际快照 —— 见 pauseGeneration 注释。
+        let pauseGen = pauseGeneration
 
         for (idx, day) in days.enumerated() {
+            // 运行期间被 pause 接管(willSleep / 退出)→ 立即中止剩余天。
+            // 手动 staged run 的快照已被 pause reject,继续写会绕过审核;
+            // 当 .busy 返回(不 markRan、不发 success 通知)。
+            guard pauseGen == pauseGeneration else { return .busy }
             let ds = ProcessingLogStore.dayString(day)
             _ = store.ensureRow(for: ds)
 
@@ -611,6 +631,10 @@ final class MemoryScheduler {
                 }
             }
         }
+
+        // 最后一天处理中被 pause 接管 → 同样中止收尾(rebalance / mark
+        // pending / markRan 都不该跑)。
+        guard pauseGen == pauseGeneration else { return .busy }
 
         // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
         // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
@@ -669,12 +693,16 @@ final class MemoryScheduler {
         }
         print("[Scheduler] portrait job — distilling")
         DiagLog.event("scheduler.distill.start")
+        // pause 代际快照 —— 见 pauseGeneration 注释。
+        let pauseGen = pauseGeneration
 
         await runStep(date: distillAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
             let cfg = self.memoryCfg
             let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill()
             return r.llmFailedCategories == 0 ? .success : .failed
         }
+        // 运行期间被 pause 接管 → 当 .busy 返回(不 markRan、不发通知)。
+        guard pauseGen == pauseGeneration else { return .busy }
         postPipelineOutcomeAlert(
             pipeline: "Portrait distillation",
             dates: [distillAnchor],
@@ -707,8 +735,13 @@ final class MemoryScheduler {
         DiagLog.event("scheduler.personality.start", ctx: [
             "days": days.map { ProcessingLogStore.dayString($0) },
         ])
+        // pause 代际快照 —— 见 pauseGeneration 注释。
+        let pauseGen = pauseGeneration
 
         for (idx, day) in days.enumerated() {
+            // 运行期间被 pause 接管 → 中止剩余天,当 .busy 返回
+            // (不 markRan、不发 success 通知)。
+            guard pauseGen == pauseGeneration else { return .busy }
             let ds = ProcessingLogStore.dayString(day)
             personalityStage = "Refreshing personality (\(idx + 1)/\(days.count))"
             await runStep(date: ds, stage: .personality,
@@ -728,6 +761,8 @@ final class MemoryScheduler {
                 return .success
             }
         }
+        // 最后一天处理中被 pause 接管 → 同样中止收尾。
+        guard pauseGen == pauseGeneration else { return .busy }
         let dayStrings = days.map { ProcessingLogStore.dayString($0) }
         postPipelineOutcomeAlert(
             pipeline: "Personality refresh",
@@ -762,15 +797,11 @@ final class MemoryScheduler {
         // 根本没在跑中断。
         clearFailure(date: date, stage: stage)
         let hb = startHeartbeat(for: date)
+        // pause 代际快照 —— 见 pauseGeneration 注释。
+        let pauseGen = pauseGeneration
 
         // 按 stage 派 pipeline owner —— Stop 时只杀本 pipeline 的 LLM 子进程。
-        let owner: String = {
-            switch stage {
-            case .distill:     return PipelineOwner.distill
-            case .personality: return PipelineOwner.personality
-            default:           return PipelineOwner.event   // raw / event / impact / classify
-            }
-        }()
+        let owner = Self.pipelineOwner(for: stage)
         // 60min 兜底 timeout —— detached timer task,到点杀 owner 的 LLM
         // 子进程。PiAgent 的 stdin/stdout 断开 → work() 内 await 抛错 →
         // catch 走 .failed → defer 自然清 eventRunning,UI 不再卡死 "Running"。
@@ -780,7 +811,7 @@ final class MemoryScheduler {
             try? await Task.sleep(nanoseconds: 60 * 60 * 1_000_000_000)
             if !Task.isCancelled {
                 schedLog.error("\(date, privacy: .public)/\(stageRaw, privacy: .public): timeout after 60min — killing LLM children")
-                await MemoryScheduler.shared._fireStepTimeout()
+                await MemoryScheduler.shared._fireStepTimeout(owner: owner)
             }
         }
         defer { timeoutTask.cancel() }
@@ -804,14 +835,34 @@ final class MemoryScheduler {
         }
         hb.cancel()
 
+        // 代际校验:work() 期间发生过 pauseInProgressJobs → 该行已被标
+        // paused + 释放锁,状态由 didWake 的 recoverStaleLocks 接管。这里
+        // 不能再 applyOutcome / releaseLock:否则唤醒后复活的本任务会把刚
+        // 恢复成 failed 的行覆盖成 complete、或再 bumpRetry 双重记账,甚至
+        // 释放掉之后新一次 run 持有的锁。
+        guard pauseGen == pauseGeneration else {
+            schedLog.notice("\(date, privacy: .public)/\(processor, privacy: .public): paused mid-flight — discarding outcome (recovery path owns this row)")
+            return
+        }
+
         applyOutcome(date: date, stage: stage, outcome: outcome, rollbackDay: rollbackDay)
         store.releaseLock(date: date)
     }
 
-    /// runStep 60min timer 到点回调 —— 杀 LLM 子进程,defer 自然清 in-memory
-    /// flag。@MainActor 因为 PiAgentRegistry.shared.stopAll 也 @MainActor。
-    func _fireStepTimeout() {
-        _ = PiAgentRegistry.shared.stopAll()
+    /// runStep 60min timer 到点回调 —— **只杀本 pipeline(owner)的 LLM 子进程**,
+    /// 不动并行 pipeline / 写作采集 worker / 用户 chat(stopAll 会一锅端,
+    /// stopGroup 才精准),defer 自然清 in-memory flag。
+    func _fireStepTimeout(owner: String) {
+        _ = PiAgentRegistry.shared.stopGroup(owner)
+    }
+
+    /// 按 stage 派 pipeline owner —— 超时 / pause 只杀本 pipeline 的 LLM 子进程。
+    private static func pipelineOwner(for stage: ProcessingStage) -> String {
+        switch stage {
+        case .distill:     return PipelineOwner.distill
+        case .personality: return PipelineOwner.personality
+        default:           return PipelineOwner.event   // raw / event / impact / classify
+        }
     }
 
     /// 把一个步的结果落库：成功 → complete；撞额度 → budget_deferred（不计
@@ -1094,8 +1145,12 @@ final class MemoryScheduler {
     /// snapshot 没完整结果可审,留着会让重启 UI 显示"假 Pending review"
     /// (events 已删但 staging 还在)卡死流程。
     func pauseInProgressJobs() {
+        // 代际 +1:让所有在飞 runStep / runXxxJob 恢复执行时发现自己已被
+        // 接管,丢弃结果、中止剩余天(见 pauseGeneration 注释)。
+        pauseGeneration += 1
         var pausedCount = 0
         var pausedKinds: Set<MemoryStaging.Kind> = []
+        var pausedOwners: Set<String> = []
         for row in store.allRows() {
             var pausedThisRow = false
             for stage in ProcessingStage.allCases {
@@ -1105,6 +1160,7 @@ final class MemoryScheduler {
                     if let k = Self.stagingKind(for: stage) {
                         pausedKinds.insert(k)
                     }
+                    pausedOwners.insert(Self.pipelineOwner(for: stage))
                 }
             }
             if pausedThisRow {
@@ -1115,6 +1171,16 @@ final class MemoryScheduler {
         }
         if pausedCount > 0 {
             schedLog.notice("paused \(pausedCount) in-progress row(s) on shutdown — will resume on next launch")
+        }
+        // 杀掉被 pause 的 pipeline 在飞的 LLM 子进程 —— 系统睡眠只 suspend
+        // 进程不杀子进程,不杀的话唤醒后任务复活继续写盘/打 LLM。只按 owner
+        // 杀本组,不动 writing-capture / chat。被杀的 work() 抛错后,runStep
+        // 的代际校验负责丢弃结果。
+        for owner in pausedOwners {
+            let n = PiAgentRegistry.shared.stopGroup(owner)
+            if n > 0 {
+                print("[Scheduler] pause: stopped \(n) LLM agent(s) of pipeline '\(owner)'")
+            }
         }
         // Reject 任何被 paused 牵连的 staging snapshot。run 还没跑完 → days
         // 清单缺失 → reject 内部走孤儿路径:只丢 backup、保留 live 树(整树
@@ -1264,6 +1330,23 @@ final class MemoryScheduler {
         if row.event == .complete, row.impact.needsWork,
            backoffReady(status: row.impact, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs) {
             return true
+        }
+        return false
+    }
+
+    /// event job 是否处于待重试态(任一天的 event/impact 失败/撞额度,且 backoff 到点)。
+    private func eventNeedsRetry() -> Bool {
+        for row in store.allRows() {
+            if row.isAnchor { continue }
+            for status in [row.event, row.impact] {
+                switch status {
+                case .failed, .budgetDeferred, .deadLetter:
+                    if backoffReady(status: status, retryCount: row.retryCount, updatedAtMs: row.updatedAtMs) {
+                        return true
+                    }
+                default: continue
+                }
+            }
         }
         return false
     }

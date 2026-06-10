@@ -65,11 +65,14 @@ struct PortraitFile: Equatable {
                                         // routes by this field.
     var memberFrameIds: [Int64]         // timeline frame IDs that contributed
                                         // to this event (across days + apps)
-    var distilledInto: [String]         // portrait slugs this event has already
-                                        // been distilled into — set by the
-                                        // distiller, lets later runs skip an
-                                        // already-consumed event + supports
-                                        // provenance. Empty for un-distilled.
+    var distilledInto: [String]         // "<category>/<slug>" marks — portrait
+                                        // entries this event has been distilled
+                                        // into, set by the distiller; lets later
+                                        // runs skip already-consumed (event,
+                                        // category) pairs + supports provenance.
+                                        // Legacy entries are bare slugs (treated
+                                        // as globally consumed). Empty for
+                                        // un-distilled.
     var source: String?                 // backward-compat origin reference
     var tags: [String]
     var supersededBy: String?           // relative path under portrait/
