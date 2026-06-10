@@ -505,7 +505,7 @@ actor PortraitDBImpl: PortraitDB {
 
     // MARK: - Retention
 
-    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
+    func mediaPathsBefore(ms: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionFileList {
         try await dbPool.read { db in
             // Pull raw paths from each table, then resolve. Files that
             // already vanished off disk are dropped — retention has
@@ -518,10 +518,21 @@ actor PortraitDBImpl: PortraitDB {
                 SELECT file_path FROM video_chunks
                 WHERE end_ts_ms < :ms
                 """, arguments: ["ms": ms])
+            // wait_for_transcription 开 → 只删「转录完(done)或永久放弃
+            // (failed 且重试次数耗尽,见 resetRetryableFailedAudioChunks 的
+            // retry_count < 3)」的音频;pending / in_progress / 还会重试的
+            // failed 留到转录产出文本后的下一轮。
+            let audioFilter = excludeUntranscribedAudio
+                ? "AND (status = :done OR (status = :failed AND retry_count >= 3))"
+                : ""
             let rawAudio = try String.fetchAll(db, sql: """
                 SELECT file_path FROM audio_chunks
-                WHERE recorded_at_ms < :ms
-                """, arguments: ["ms": ms])
+                WHERE recorded_at_ms < :ms \(audioFilter)
+                """, arguments: excludeUntranscribedAudio
+                    ? ["ms": ms,
+                       "done": AudioChunkStatus.done.rawValue,
+                       "failed": AudioChunkStatus.failed.rawValue]
+                    : ["ms": ms])
 
             return RetentionFileList(
                 snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
@@ -674,7 +685,7 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
-    func applyRetention(mode: RetentionMode, beforeMs: Int64) async throws -> RetentionStats {
+    func applyRetention(mode: RetentionMode, beforeMs: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionStats {
         try await dbPool.write { db in
             switch mode {
             case .mediaOnly:
@@ -710,10 +721,19 @@ actor PortraitDBImpl: PortraitDB {
                     """, arguments: ["beforeMs": beforeMs])
                 let videoChunksDeleted = db.changesCount
 
-                // CASCADE 删 transcriptions
+                // CASCADE 删 transcriptions。wait_for_transcription 开 → 未转录
+                // chunk 的行也留着,与 mediaPathsBefore 的文件清单保持一致
+                //(行删了文件还在 = 永久孤儿,转录机会也没了)。
+                let audioFilter = excludeUntranscribedAudio
+                    ? "AND (status = :done OR (status = :failed AND retry_count >= 3))"
+                    : ""
                 try db.execute(sql: """
-                    DELETE FROM audio_chunks WHERE recorded_at_ms < :beforeMs
-                    """, arguments: ["beforeMs": beforeMs])
+                    DELETE FROM audio_chunks WHERE recorded_at_ms < :beforeMs \(audioFilter)
+                    """, arguments: excludeUntranscribedAudio
+                        ? ["beforeMs": beforeMs,
+                           "done": AudioChunkStatus.done.rawValue,
+                           "failed": AudioChunkStatus.failed.rawValue]
+                        : ["beforeMs": beforeMs])
                 let audioChunksDeleted = db.changesCount
 
                 return RetentionStats(
