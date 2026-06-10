@@ -650,14 +650,19 @@ struct AudioConfig: Codable, Equatable {
 
 struct ScreenConfig: Codable, Equatable {
     var enabled:         Bool   = true
+    /// 按物理像素(Retina 2x)抓帧,OCR 吃满分辨率 —— 默认关(抓 1x point 分辨率)。
+    /// 只影响 OCR 输入;存盘 JPG 仍被 jpegMaxWidth cap,体积基本不变。
+    var ocrAccuracyBooster: Bool = false
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
+        case ocrAccuracyBooster = "ocr_accuracy_booster"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled         = c.dflt(Bool.self,   .enabled, enabled)
+        ocrAccuracyBooster = c.dflt(Bool.self, .ocrAccuracyBooster, ocrAccuracyBooster)
     }
 }
 

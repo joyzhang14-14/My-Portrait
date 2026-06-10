@@ -22,6 +22,17 @@ final class ScreenCaptureService {
 
     private let ignore: IgnoreGate
 
+    /// OCR accuracy booster（Settings → Screen Capture）。开 = 按物理像素
+    /// (Retina 2x) 抓帧，OCR 吃满分辨率；关 = 现状（SCDisplay.width 是 point
+    /// 坐标，只抓 1x）。每帧读取，切换即时生效，无需重启。
+    /// 代价：单帧瞬时内存 ~4x（2x 两维），帧是短命对象，OCR/存盘后即释放；
+    /// 存盘 JPG 仍被 jpegMaxWidth cap，体积基本不变。
+    private var ocrBoosterOn = false
+
+    func setOCRBooster(_ on: Bool) {
+        ocrBoosterOn = on
+    }
+
     /// 被排除窗口区域的填充色。`SCStreamConfiguration.backgroundColor` 是
     /// `unowned(unsafe)`，必须用长生命周期常量，否则临时 CGColor 立即释放成野指针。
     private static let maskBackground = CGColor(gray: 0, alpha: 1)
@@ -70,8 +81,17 @@ final class ScreenCaptureService {
                 }
                 let filter = SCContentFilter(display: display, excludingWindows: excluded)
                 let cfg = SCStreamConfiguration()
-                cfg.width = Int(display.width)
-                cfg.height = Int(display.height)
+                if ocrBoosterOn,
+                   let mode = CGDisplayCopyDisplayMode(display.displayID),
+                   mode.pixelWidth > display.width {
+                    // 物理像素抓帧（Retina 2x）。存盘仍被 jpegMaxWidth cap，
+                    // 只有 OCR 受益。非 Retina 屏 pixelWidth == point 宽，走 else。
+                    cfg.width = mode.pixelWidth
+                    cfg.height = mode.pixelHeight
+                } else {
+                    cfg.width = Int(display.width)
+                    cfg.height = Int(display.height)
+                }
                 cfg.scalesToFit = false
                 cfg.showsCursor = false
                 cfg.capturesAudio = false

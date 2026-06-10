@@ -390,6 +390,10 @@ final class Services {
         observePreferredInputDevice()
         observeTranscribeOnACOnly()
 
+        // OCR accuracy booster(Settings → Screen Capture):按物理像素抓帧。
+        pushOCRBooster()
+        observeOCRBooster()
+
         // 屏幕采集功耗档位(Settings → Screen Capture → Power mode)。三个触发源:
         //   ① powerWatcher.states:插拔电源 / 电量变化(IOKit 事件)
         //   ② NSProcessInfoPowerStateDidChange:系统低电量模式开关
@@ -500,6 +504,33 @@ final class Services {
                 guard let self else { return }
                 self.pushIgnoreRules()
                 self.observeIgnoreRules()
+            }
+        }
+    }
+
+    /// 把 ConfigStore.capture.screen.ocrAccuracyBooster 推给 coordinator。
+    private func pushOCRBooster() {
+        let on = ConfigStore.shared.current.capture.screen.ocrAccuracyBooster
+        Task { await coordinator.setOCRBooster(on) }
+    }
+
+    /// 监听 ocrAccuracyBooster(vim 改 TOML / UI 编辑都走它),变化时重推。
+    /// withObservationTracking 一次性,onChange 里递归重注册。@Observable 追踪
+    /// 粒度是整个 current,任意无关设置变更都会进 onChange —— 同
+    /// observeTypingCapture,快照 seen 真值 diff,变了才推。
+    private func observeOCRBooster() {
+        let store = ConfigStore.shared
+        let seen = store.current.capture.screen.ocrAccuracyBooster
+        withObservationTracking {
+            _ = store.capture.screen.ocrAccuracyBooster
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                let now = ConfigStore.shared.capture.screen.ocrAccuracyBooster
+                if now != seen {
+                    self.pushOCRBooster()
+                }
+                self.observeOCRBooster()   // 重订阅时重新快照 seen
             }
         }
     }
