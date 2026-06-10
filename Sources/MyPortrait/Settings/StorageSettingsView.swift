@@ -70,6 +70,18 @@ struct StorageSettingsView: View {
                         .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 }
                 SettingsDivider()
+                SettingsRow("Video", icon: "film") {
+                    Text(bytes(stats.videoBytes))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                }
+                SettingsDivider()
+                SettingsRow("Screenshots", icon: "photo.on.rectangle") {
+                    Text(bytes(stats.framesBytes))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                }
+                SettingsDivider()
                 SettingsRow("Total", icon: "rectangle.stack") {
                     Text(bytes(stats.mediaTotalBytes))
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -186,31 +198,46 @@ private struct StorageStats {
     var cacheBytes: Int64
     var freeBytes: Int64
     var audioBytes: Int64
+    var videoBytes: Int64
+    var framesBytes: Int64
     var mediaTotalBytes: Int64
     var otherBreakdown: [(label: String, size: Int64, icon: String)]
     var months: Double
 
     static let empty = StorageStats(
         dataBytes: 0, cacheBytes: 0, freeBytes: 0,
-        audioBytes: 0, mediaTotalBytes: 0,
+        audioBytes: 0, videoBytes: 0, framesBytes: 0, mediaTotalBytes: 0,
         otherBreakdown: [], months: 0
     )
 
     /// Walks the data directory and adds up sizes. Best-effort:
     /// missing dirs just contribute 0.
+    ///
+    /// 子目录名对齐本项目的真实落盘布局(曾照搬参考项目的 `data/`、
+    /// `cache/`、`cronJobs/`,全都不存在 → 字段恒为 0 显示 "—",
+    /// 字节全部落进兜底的 Other)。
     nonisolated static func scan(at path: String) -> StorageStats {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: path)
         let dataBytes  = directorySize(root)
-        let cacheBytes = directorySize(root.appendingPathComponent("cache"))
-        let audioBytes = directorySize(root.appendingPathComponent("data/audio"))
-        let mediaBytes = directorySize(root.appendingPathComponent("data"))
+        // Cache = 可再生内容(删了能重新下载,不是用户数据):
+        // 内嵌运行时 + agent 包 + 本地模型 + 工具二进制。
+        let cacheBytes = directorySize(root.appendingPathComponent("bun"))
+                       + directorySize(root.appendingPathComponent("pi-agent"))
+                       + directorySize(root.appendingPathComponent("models"))
+                       + directorySize(root.appendingPathComponent("bin"))
+        // 音频 = 转录后留存的 wav + 待转录队列。
+        let audioBytes = directorySize(root.appendingPathComponent("raw_data/audio"))
+                       + directorySize(root.appendingPathComponent("audio_queue"))
+        let videoBytes = directorySize(root.appendingPathComponent("raw_data/video"))
+        let frameBytes = directorySize(root.appendingPathComponent("raw_data/frames"))
+        let mediaBytes = audioBytes + videoBytes + frameBytes
 
         let dbBytes    = fileSize(root.appendingPathComponent("portrait.sqlite"))
                        + fileSize(root.appendingPathComponent("portrait.sqlite-wal"))
                        + fileSize(root.appendingPathComponent("portrait.sqlite-shm"))
         let logBytes   = directorySize(root.appendingPathComponent("logs"))
-        let pipeBytes  = directorySize(root.appendingPathComponent("cronJobs"))
+        let pipeBytes  = directorySize(root.appendingPathComponent("cron_jobs"))
         let otherBytes = max(0, dataBytes - cacheBytes - mediaBytes - dbBytes - logBytes - pipeBytes)
 
         var free: Int64 = 0
@@ -225,7 +252,8 @@ private struct StorageStats {
 
         return StorageStats(
             dataBytes: dataBytes, cacheBytes: cacheBytes, freeBytes: free,
-            audioBytes: audioBytes, mediaTotalBytes: mediaBytes,
+            audioBytes: audioBytes, videoBytes: videoBytes, framesBytes: frameBytes,
+            mediaTotalBytes: mediaBytes,
             otherBreakdown: [
                 (label: "Database", size: dbBytes,    icon: "cylinder"),
                 (label: "Logs",     size: logBytes,   icon: "doc.text"),
