@@ -44,8 +44,14 @@ final class CronJobStore {
     }
 
     func delete(_ id: UUID) {
+        // 记下 app 内主动删除的 id —— save() 合并磁盘真相时据此区分
+        // "app 刚删的 job(目录该 GC)"和"CLI 刚新建的 job(目录该保留)"。
+        deletedIds.insert(id)
         cronJobs.removeAll { $0.id == id }; save()
     }
+
+    /// 本次进程内 app 主动 delete 过的 job id。只在内存,不落盘。
+    private var deletedIds: Set<UUID> = []
 
     func toggleEnabled(_ id: UUID) {
         guard let i = cronJobs.firstIndex(where: { $0.id == id }) else { return }
@@ -142,7 +148,13 @@ final class CronJobStore {
         let withCronJobMd = subdirs.filter { fm.fileExists(atPath: $0.appendingPathComponent("cron_job.md").path) }
 
         guard !withCronJobMd.isEmpty else {
-            migrateFromUserDefaults()
+            // 磁盘一个 job 目录都没有:先试一次性迁移;legacy key 早已不存在时
+            // 迁移是 no-op,此时必须把内存清空 —— 否则 CLI `cronjob remove` 删掉
+            // 最后一个 job 后,内存旧值让它继续被调度,下次 save() 还会把它
+            // 原样写回磁盘(删除被静默撤销)。
+            if !migrateFromUserDefaults() {
+                cronJobs = []
+            }
             return
         }
 
@@ -163,12 +175,14 @@ final class CronJobStore {
 
     /// One-time migration: decode the legacy `[CronJob]` JSON, write it out
     /// in the new directory format, then drop the UserDefaults key.
-    private func migrateFromUserDefaults() {
+    /// 返回是否真的迁移了(legacy key 不存在 → false,调用方据此清空内存)。
+    private func migrateFromUserDefaults() -> Bool {
         guard let data = UserDefaults.standard.data(forKey: legacyKey),
-              let decoded = try? JSONDecoder().decode([CronJob].self, from: data) else { return }
+              let decoded = try? JSONDecoder().decode([CronJob].self, from: data) else { return false }
         cronJobs = decoded
         save()
         UserDefaults.standard.removeObject(forKey: legacyKey)
+        return true
     }
 
     /// Full rewrite of `~/.portrait/cronJobs/` (cronJob count is tiny). Each cronJob
@@ -178,6 +192,31 @@ final class CronJobStore {
         let fm = FileManager.default
         let root = Storage.cronJobsDir
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // **跨进程竞态兜底**:mp-query cronjob add 是另一个进程直接写盘,靠
+        // Darwin notification 异步通知本 store 重读。CLI 写完到 load() 真正执行
+        // 之间若发生任何 save()(updateRunPreview / appendRun / toggle…),下面的
+        // GC 会把内存不认识的新 job 目录当残留物理删掉 → 新 job 静默丢失。
+        // 所以重写前先扫一遍磁盘,把"内存没有、又不是 app 刚删的"job 合并进
+        // 内存(等同提前做了一次增量 load),GC 自然就不会碰它。
+        let knownIds = Set(cronJobs.map(\.id))
+        let preexisting = (try? fm.contentsOfDirectory(at: root,
+            includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+        for sub in preexisting {
+            guard (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+            let mdURL = sub.appendingPathComponent("cron_job.md")
+            guard let text = try? String(contentsOf: mdURL, encoding: .utf8),
+                  var job = CronJobFile.parseMarkdown(text, fallbackName: sub.lastPathComponent),
+                  !knownIds.contains(job.id),
+                  !deletedIds.contains(job.id) else { continue }
+            // runs.json sidecar 跟 load() 同款方式带上
+            if let rData = try? Data(contentsOf: sub.appendingPathComponent("runs.json")),
+               let sidecar = try? JSONDecoder().decode(RunsSidecar.self, from: rData) {
+                job.runs = sidecar.runs
+                job.lastRunAt = sidecar.lastRunAt
+            }
+            cronJobs.append(job)
+        }
 
         var usedSlugs: Set<String> = []
         var keepDirs: Set<String> = []

@@ -712,31 +712,99 @@ enum MPQueryCLI {
         return snip
     }
 
+    /// LIKE pattern 转义:用户 query 里的 `%` `_` `\` 按字面匹配,
+    /// 配合 SQL 端 `ESCAPE '\'` 使用。
+    private static func escapeLike(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "%", with: "\\%")
+         .replacingOccurrences(of: "_", with: "\\_")
+    }
+
     private static func searchTranscripts(
         db: TimelineDB, q: String?, start: Date, end: Date,
         limit: Int, speakerName: String? = nil
     ) -> [TranscriptResult] {
-        let mid = start.addingTimeInterval(end.timeIntervalSince(start) / 2)
-        let half = end.timeIntervalSince(start) / 2
-        let rows = db.audioTranscripts(around: mid, before: half, after: half, limit: limit)
-        var out: [TranscriptResult] = []
+        // **q / speaker 过滤下推进 SQL WHERE** —— 之前是先
+        // `audioTranscripts(... LIMIT n)` 取窗口内最早 n 条再在 Swift 侧过滤,
+        // 关键词不在最早 n 条里就永远查不到(LIMIT 截断在过滤之前)。
+        // 直查写法同本文件 searchFrames:read-only 打开 + sqlite3_bind。
+        var db_: OpaquePointer?
+        guard sqlite3_open_v2(db.dbPath, &db_, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_close(db_) }
+
         let qLower = q?.lowercased()
-        let wantSpeaker = speakerName?.trimmingCharacters(in: .whitespaces).lowercased()
-        for r in rows {
-            if let qLower, !r.text.lowercased().contains(qLower) { continue }
-            // --speaker 过滤:按名字 case-insensitive(audioTranscripts 现已 JOIN speakers)。
-            if let want = wantSpeaker, !want.isEmpty {
-                guard let nm = r.speakerName?.lowercased(), nm == want else { continue }
-            }
+        let wantSpeaker: String? = {
+            let s = speakerName?.trimmingCharacters(in: .whitespaces).lowercased()
+            return (s?.isEmpty == false) ? s : nil
+        }()
+
+        // SQL 同 TimelineDB.audioTranscripts(按 recording 时间窗 + speakers JOIN),
+        // 多了可选的 text LIKE / speaker name 子句。
+        var sql = """
+            SELECT ac.recorded_at_ms,
+                   t.text,
+                   COALESCE(ac.device, ''),
+                   COALESCE(ac.is_input, 1),
+                   t.speaker_id,
+                   s.name
+            FROM audio_transcriptions t
+            JOIN audio_chunks ac ON ac.id = t.audio_chunk_id
+            LEFT JOIN speakers s ON s.id = t.speaker_id AND s.hallucination = 0
+            WHERE ac.recorded_at_ms >= ? AND ac.recorded_at_ms <= ?
+              AND t.text IS NOT NULL AND t.text != ''
+            """
+        if qLower != nil {
+            sql += " AND LOWER(t.text) LIKE ? ESCAPE '\\'"
+        }
+        if wantSpeaker != nil {
+            // 名字 case-insensitive 精确匹配;s.name 为 NULL(匿名/误判)不命中,
+            // 跟原 Swift 侧 `guard let nm = speakerName` 行为一致。
+            sql += " AND LOWER(s.name) = ?"
+        }
+        sql += " ORDER BY ac.recorded_at_ms ASC LIMIT ?"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db_, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        let TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        var bindIdx: Int32 = 1
+        sqlite3_bind_int64(stmt, bindIdx, Int64(start.timeIntervalSince1970 * 1000))
+        bindIdx += 1
+        sqlite3_bind_int64(stmt, bindIdx, Int64(end.timeIntervalSince1970 * 1000))
+        bindIdx += 1
+        if let qLower {
+            sqlite3_bind_text(stmt, bindIdx, "%\(escapeLike(qLower))%", -1, TRANSIENT)
+            bindIdx += 1
+        }
+        if let wantSpeaker {
+            sqlite3_bind_text(stmt, bindIdx, wantSpeaker, -1, TRANSIENT)
+            bindIdx += 1
+        }
+        sqlite3_bind_int(stmt, bindIdx, Int32(limit))
+
+        var out: [TranscriptResult] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts = sqlite3_column_int64(stmt, 0)
+            let text = sqlite3_column_text(stmt, 1).flatMap { String(cString: $0) } ?? ""
+            let device = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) } ?? ""
+            let isInput = sqlite3_column_int(stmt, 3) != 0
+            let speakerId: Int? = sqlite3_column_type(stmt, 4) == SQLITE_NULL
+                ? nil : Int(sqlite3_column_int64(stmt, 4))
+            let speakerName: String? = sqlite3_column_type(stmt, 5) == SQLITE_NULL
+                ? nil : sqlite3_column_text(stmt, 5).flatMap { String(cString: $0) }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
             out.append(.init(
-                timestamp: r.timestamp,
-                text: r.text,
-                device: r.device,
-                isInput: r.isInput,
-                speakerId: r.speakerId,
-                speakerName: r.speakerName
+                timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
+                text: trimmed,
+                device: device,
+                isInput: isInput,
+                speakerId: speakerId,
+                speakerName: speakerName
             ))
-            if out.count >= limit { break }
         }
         return out
     }
