@@ -158,7 +158,16 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
         kpicks = parse_picks(kseg)
         py_ks, pick_ks = (kpicks[-1][0], kpicks[-1][1]) if kpicks else ('', None)
         # captured 残渣是击键 run 前缀(captured 截断)→ 用击键(更完整,带选字数字);否则用 captured 残渣(免击键前导噪声)
-        use_py = py_ks if (py_ks and r_cap and py_ks.startswith(r_cap)) else r_cap
+        def _cp(a, b):
+            n = 0
+            for x, y in zip(a, b):
+                if x != y: break
+                n += 1
+            return n
+        # 击键终态优先(小修B,2026-06-10):用户退格改字后(meili<BS>ai=meilai),AX 残渣(mei li)是
+        # 过期快照;py_ks 与残渣共同前缀≥3 且有选字数字确认上屏 → 信击键终态(最大保留最终输入)。
+        use_py = py_ks if (py_ks and r_cap and (py_ks.startswith(r_cap)
+                  or (pick_ks is not None and _cp(py_ks, r_cap) >= 3))) else r_cap
         use_pick = pick_ks if use_py == py_ks else None
         # #42 英文截断:击键里的英文 run 比 captured 残渣更全(AX 漏末字,pipelin→pipeline)
         # → 击键背书补全。⚠️ IME 开着时选字数字会把英文 run 切进前面的 pick
