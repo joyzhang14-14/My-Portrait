@@ -273,6 +273,9 @@ struct HomeView: View {
     }
 
     private func send() {
+        // 流式回复进行中 Enter 不发送(也**不清空输入框**,用户打的字留着,
+        // 等流式结束再发)。ChatController.send 里还有一层同样的 guard 兜底。
+        guard !chat.isStreaming else { return }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
         let chipsToSend = contextChips

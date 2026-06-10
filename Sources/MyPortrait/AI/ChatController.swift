@@ -218,6 +218,12 @@ final class ChatController {
     private var pendingCitations: [Citation] = []
 
     func send(_ text: String, chips: [ContextChip] = [], attachments: [Attachment] = [], redactPII: Bool = false) {
+        // 流式回复进行中不接受新 send(UI 的 Send 按钮已换成 Stop,但输入框的
+        // Enter onSubmit 不经过按钮)。放行会双重错乱:① deliver() 把
+        // assistantMessageID 重指到新 placeholder,上一轮在流的 delta 全写进新
+        // 气泡;② sendPrompt 杀旧进程,旧进程迟到的 agentEnd 把新一轮误判为
+        // 已结束 → 新回复的 delta 全被丢弃,气泡永远空白。
+        guard !isStreaming else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
