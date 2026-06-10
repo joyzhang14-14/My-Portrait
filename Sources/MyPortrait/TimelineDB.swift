@@ -663,6 +663,11 @@ struct TimelineDB: Sendable {
         guard exists else { return nil }
         do {
             var config = Configuration()
+            // 主 DatabasePool(capture 每帧写 / 转录写 / compaction 长事务)持有
+            // WAL 写锁时,GRDB 默认 busyMode = .immediateError 会让这边立刻抛
+            // SQLITE_BUSY → 声纹训练 / 说话人合并 / 隐私清除整笔静默失败。
+            // app 常驻采集 = 写流量持续存在,必须等锁(同 ChatStore 的 5s)。
+            config.busyMode = .timeout(5)
             config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
             let queue = try DatabaseQueue(path: dbPath, configuration: config)
             return try queue.write { db in try body(db) }
@@ -1037,6 +1042,8 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
+        // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败(同 ChatStore)。
+        sqlite3_exec(db, "PRAGMA busy_timeout=5000;", nil, nil, nil)
         // 先查
         if let stmt = prepare(db, "SELECT id FROM speakers WHERE name = ? LIMIT 1") {
             defer { sqlite3_finalize(stmt) }
@@ -1238,6 +1245,8 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
         defer { sqlite3_close(db) }
+        // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败(同 ChatStore)。
+        sqlite3_exec(db, "PRAGMA busy_timeout=5000;", nil, nil, nil)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             timelineLog.error("SQL prepare failed: \(sqlErr(db), privacy: .public) — sql=\(sql, privacy: .public)")
