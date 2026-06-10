@@ -45,6 +45,19 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     /// content_block_stop yield toolStart 时一起用)。
     private var pendingToolName: [String: String] = [:]
 
+    /// 本轮收尾闸门:`.agentEnd` 必须等「stdout 读到 EOF」和「进程退出」都
+    /// 发生后才发 —— 两个回调跑在不同 GCD 队列,先后无保证;termination 先
+    /// 到时内核管道里可能还压着最后一段 text_delta / result,提前 agentEnd
+    /// 会让 ChatController 把回复尾巴丢在 assistantMessageID==nil 守卫上
+    /// (表现:偶发回复末尾缺一截,回复越长越容易命中)。
+    /// `endGeneration` 防上一轮的迟到回调(防御性 terminate 旧进程时,它的
+    /// terminationHandler 可能晚于新一轮 reset 才跑)污染新一轮状态。
+    private let endLock = NSLock()
+    private var stdoutEOF = false
+    private var procExited = false
+    private var endFired = false
+    private var endGeneration = 0
+
     private var eventContinuation: AsyncStream<PiAgent.Event>.Continuation?
     let events: AsyncStream<PiAgent.Event>
 
@@ -131,14 +144,29 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         proc.standardError = stderr
 
         let cont = eventContinuation
+        // 重置本轮收尾闸门(见 endLock 注释),拿到本轮代际号。
+        let gen: Int = {
+            endLock.lock()
+            defer { endLock.unlock() }
+            endGeneration += 1
+            stdoutEOF = false
+            procExited = false
+            endFired = false
+            return endGeneration
+        }()
         // EOF(空 availableData)时 handler **自我清除** —— 否则 dispatch read
         // source 在 EOF 后以空 data 反复回调,每轮子进程退出都留一个空转烧 CPU
         // 的后台线程,直到下一轮 sendPrompt 替换 Pipe(聊完不动 = 烧数小时)。
         // 不能在 terminationHandler 里清:termination 可能先于尾部数据派发,
-        // 提前清会丢回复结尾。EOF 空回调天然在全部数据之后,在这清恰好。
+        // 提前清会丢回复结尾。EOF 空回调天然在全部数据之后,在这清恰好 ——
+        // 也因此由它报「stdout 这一侧收完了」。
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil; return }
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                self?.noteStreamClosed(.stdoutEOF, generation: gen, cont: cont)
+                return
+            }
             self?.appendStdout(data)
         }
         // stderr 读完就丢,不写盘(防缓冲塞满阻塞子进程)。
@@ -147,20 +175,26 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         }
 
         proc.terminationHandler = { [weak self] p in
-            self?.flushStdoutBuffer()
-            // 进程结束 = 本轮结束。Conversation 还活着(stop 之前 events 流
-            // 不 finish),下一次 sendPrompt 起新进程续上下文。
-            cont?.yield(.agentEnd)
-            // 子进程退出码 ≠ 0 且没在 result 里报错过 → 主动发个 error。
-            // result 事件正常会带 is_error,这里兜底。
+            // 子进程退出码 ≠ 0:result 事件正常会带 is_error,这里只记日志兜底。
             if p.terminationStatus != 0 {
                 self?.log.warning("claude CLI exited code \(p.terminationStatus, privacy: .public)")
             }
+            // 进程结束 = 本轮结束,但 `.agentEnd` 经 noteStreamClosed 闸门:
+            // 必须等 stdout EOF —— termination 与 readability 在不同队列,
+            // 先后无保证,先发 agentEnd 会丢内核管道里还没投递的回复尾巴。
+            // Conversation 还活着(stop 之前 events 流不 finish),下一次
+            // sendPrompt 起新进程续上下文。
+            self?.noteStreamClosed(.procExited, generation: gen, cont: cont)
         }
 
         do {
             try proc.run()
         } catch {
+            // 直接收尾(进程没跑起来,termination 不会来);标记 endFired
+            // 让可能到来的 EOF 回调(管道写端析构触发)不再做任何事。
+            endLock.lock()
+            endFired = true
+            endLock.unlock()
             cont?.yield(.error("Failed to spawn claude: \(error.localizedDescription)"))
             cont?.yield(.agentEnd)
             return
@@ -210,6 +244,53 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             }
             if proc.isRunning {
                 kill(pid, SIGKILL)
+            }
+        }
+    }
+
+    // MARK: - 收尾闸门(agentEnd gating)
+
+    private enum EndSignal { case stdoutEOF, procExited }
+
+    /// stdout EOF / 进程退出各报一次;两个都到齐才 flush 残行 + 发 `.agentEnd`。
+    /// EOF 回调在 FileHandle 串行队列上天然排在全部数据回调之后,所以此刻
+    /// flush 出的只可能是(罕见的)无换行残尾 —— 不会再与 appendStdout 并发
+    /// 解析(旧实现 terminationHandler 直接 flush,与 readability 队列并发改
+    /// 解析器状态)。
+    private func noteStreamClosed(_ signal: EndSignal, generation: Int,
+                                  cont: AsyncStream<PiAgent.Event>.Continuation?) {
+        endLock.lock()
+        guard generation == endGeneration else {   // 上一轮的迟到回调,丢弃
+            endLock.unlock()
+            return
+        }
+        switch signal {
+        case .stdoutEOF:  stdoutEOF = true
+        case .procExited: procExited = true
+        }
+        let fire = stdoutEOF && procExited && !endFired
+        if fire { endFired = true }
+        let needFallback = (signal == .procExited) && !fire && !endFired
+        endLock.unlock()
+
+        if fire {
+            flushStdoutBuffer()
+            cont?.yield(.agentEnd)
+            return
+        }
+        if needFallback {
+            // 进程已退但 EOF 未到:正常毫秒级就来;2s 还没来说明 read source
+            // 异常(handler 被换/挂死),强制收尾,别让聊天永远转圈。
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self else { return }
+                self.endLock.lock()
+                let lateFire = generation == self.endGeneration && !self.endFired
+                if lateFire { self.endFired = true }
+                self.endLock.unlock()
+                guard lateFire else { return }
+                self.log.warning("stdout EOF never arrived after process exit; forcing agentEnd")
+                self.flushStdoutBuffer()
+                cont?.yield(.agentEnd)
             }
         }
     }
