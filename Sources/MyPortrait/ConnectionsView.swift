@@ -411,6 +411,12 @@ struct ConnectionsView: View {
         }
         // From = username; To = test recipient, defaulting to self.
         let toTrimmed = smtpTestTo.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 防呆:填了但不像邮箱(没有 @)→ 直接提示,别白跑一次完整 SMTP 握手
+        // 再吃服务器的 "Invalid User" 报错。
+        if !toTrimmed.isEmpty && !toTrimmed.contains("@") {
+            loginError = "Test recipient isn't a valid email address — leave blank to send to yourself."
+            return
+        }
         let recipient = toTrimmed.isEmpty ? user : toTrimmed
 
         connecting = integration.id
