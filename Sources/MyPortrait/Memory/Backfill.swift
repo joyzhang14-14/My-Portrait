@@ -37,6 +37,13 @@ enum Backfill {
         let dayCount: Int
         let day: Date              // which day is being processed
         let phase: String
+        /// 进度条单元信号(nil = 该阶段无单元粒度,只有 phase 文案)。
+        var unit: Unit? = nil
+
+        enum Unit: Equatable {
+            case llmBatch(index: Int, count: Int)      // 1-based,batch 开始前发
+            case materialise(index: Int, count: Int)   // 1-based,每写完一个 cluster 发
+        }
     }
 
     /// Default: last 14 days. Idempotent + resumable — days whose
@@ -180,7 +187,12 @@ enum Backfill {
             let clustering: EventBuilder.DayClustering
             do {
                 clustering = try await builder.clusterDay(
-                    date: day, sessions: enriched, activeEvents: active
+                    date: day, sessions: enriched, activeEvents: active,
+                    onBatch: { i, n in
+                        progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day,
+                                        phase: "LLM clustering batch \(i)/\(n)",
+                                        unit: .llmBatch(index: i, count: n)))
+                    }
                 )
             } catch let e as BudgetExhaustedError {
                 // 撞额度不是"失败"——上抛让调度器标 budget_deferred 而非 failed，
@@ -194,7 +206,11 @@ enum Backfill {
             }
 
             // Materialise. `sessionIndices` are 1-based into `enriched`.
-            for ev in clustering.events {
+            let clusterCount = clustering.events.count
+            for (ci, ev) in clustering.events.enumerated() {
+                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day,
+                                phase: "writing event \(ci + 1)/\(clusterCount)",
+                                unit: .materialise(index: ci + 1, count: clusterCount)))
                 let members = ev.sessionIndices.compactMap { idx -> EventBuilder.EnrichedSession? in
                     let i = idx - 1
                     guard i >= 0, i < enriched.count else { return nil }
