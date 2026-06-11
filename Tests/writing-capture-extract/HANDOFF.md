@@ -169,6 +169,10 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 
 ## 怎么跑
 
+> ⚠️ **跑前必须先和用户确认**(2026-06-11 立规):全量跑会加载 MLX 14B,用户并行在跑
+> event-local-lab(同一块 GPU/统一内存)。实测每轮 26-38 分钟,全 4 天,无抽样模式。
+> 离线确定性脚本(screen_audit/compare_gold/不加载模型的回归)不受限。
+
 ```bash
 cd Tests/writing-capture-extract
 python3 faithful_v2.py          # 全量4天(14B Phase1≈30-60min,Pass4秒级),写 Obsidian/Pipeline成品-新pipeline-阶段0.md
