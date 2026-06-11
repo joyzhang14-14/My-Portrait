@@ -614,12 +614,42 @@ struct ScreenpipeImporter: Sendable {
             stage: .importingFrames, current: 0, total: total,
             bytesDone: 0, bytesTotal: 0
         ))
+
+        // 探重索引预拉:原来每行一次 SELECT 点查,几万行 = 几万次;进事务前
+        // 一次性把已导入帧的 (timestamp_ms, app_name) → id 拉成内存索引,
+        // 事务内 O(1) 判重。几万条 key 占内存 MB 级,可接受。
+        struct ImportedKey: Hashable { let ts: Int64; let app: String }
+        var existingByKey: [ImportedKey: Int64] = try target.read { db in
+            var m: [ImportedKey: Int64] = [:]
+            let existing = try Row.fetchAll(db, sql: """
+                SELECT id, timestamp_ms, app_name FROM frames
+                WHERE device_name = 'imported'
+                """)
+            for row in existing {
+                guard let id: Int64 = row["id"],
+                      let ts: Int64 = row["timestamp_ms"],
+                      let app: String = row["app_name"] else { continue }
+                m[ImportedKey(ts: ts, app: app)] = id
+            }
+            return m
+        }
+
         var processed = 0
-        try target.write { db in
-            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-            // 每 ~200 行回调一次 UI,避免 callback overhead 拖慢 INSERT。
-            let tickEvery = max(1, total / 50)
-            for r in rows {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 每 ~200 行回调一次 UI,避免 callback overhead 拖慢 INSERT。
+        let tickEvery = max(1, total / 50)
+        // 分批提交:原来全部源帧塞一个写事务(可持续数分钟),期间独占
+        // writer,实时采集 insertFrame / 转录写入全排队,TimelineDB 第二
+        // 连接全部 BUSY。每 1000 行一个事务,批间让出 writer;中途失败只
+        // 回滚当前批,已提交批次靠探重索引幂等(重导跳过)。
+        let batchSize = 1000
+        var batchStart = 0
+        while batchStart < rows.count {
+            let batchEnd = min(batchStart + batchSize, rows.count)
+            let batch = rows[batchStart..<batchEnd]
+            batchStart = batchEnd
+            try target.write { db in
+            for r in batch {
                 processed += 1
                 if processed % tickEvery == 0 || processed == total {
                     onProgress?(Progress(
@@ -644,16 +674,7 @@ struct ScreenpipeImporter: Sendable {
 
                 // UPSERT:同 (ts, app) 已存在 → UPDATE video_chunk_id / offset_ms
                 // (B 方案 backfill 场景)。否则 INSERT 新行。
-                let existingId: Int64? = try Int64.fetchOne(
-                    db,
-                    sql: """
-                        SELECT id FROM frames
-                        WHERE timestamp_ms = :ts AND app_name = :app
-                          AND device_name = 'imported'
-                        LIMIT 1
-                        """,
-                    arguments: ["ts": ts, "app": r.appName]
-                )
+                let existingId: Int64? = existingByKey[ImportedKey(ts: ts, app: r.appName)]
                 if let eid = existingId {
                     // 已有行:只补 video_chunk_id + offset_ms,别的字段保留
                     if let newChunkId = newChunkId {
@@ -688,8 +709,12 @@ struct ScreenpipeImporter: Sendable {
                             "text": text, "now": nowMs
                         ])
                     inserted += 1
+                    // 登记进探重索引:源数据里同 (ts, app) 的后续重复行
+                    // 走 UPDATE/skip 路径,与旧的逐行 SELECT 行为一致。
+                    existingByKey[ImportedKey(ts: ts, app: r.appName)] = db.lastInsertedRowID
                 }
             }
+            }   // target.write(本批)
         }
         importLog.info("frames inserted=\(inserted, privacy: .public) backfilled=\(backfilled, privacy: .public) skipped=\(skipped, privacy: .public)")
         return (inserted, backfilled, skipped)
