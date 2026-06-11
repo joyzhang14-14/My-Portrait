@@ -621,7 +621,9 @@ final class MemoryScheduler {
                 eventStage = "Building events (\(idx + 1)/\(days.count))"
                 await runStep(date: ds, stage: .event, processor: "event", rollbackDay: day) {
                     let nb = self.daysBackToCover(day)
-                    let r = try await Backfill.run(daysBack: nb, onlyDay: day)
+                    // skipWeightPass:weight pass 挪到 days 循环结束后只跑
+                    // 一次(下面),否则 dayCap=7 时全树重写 7 遍。
+                    let r = try await Backfill.run(daysBack: nb, onlyDay: day, skipWeightPass: true)
                     return r.llmFailedDays == 0 ? .success : .failed
                 }
                 row = store.row(for: ds) ?? row
@@ -642,6 +644,12 @@ final class MemoryScheduler {
         // 最后一天处理中被 pause 接管 → 同样中止收尾(rebalance / mark
         // pending / markRan 都不该跑)。
         guard pauseGen == pauseGeneration else { return .busy }
+
+        // weight pass：跟 rebalance 一样，整个 event 处理跑完只跑一次
+        // （逐天的 Backfill.run 传了 skipWeightPass）。pause 中止时跟
+        // rebalance 一起被上面的 guard 跳过；个别天失败不影响它跑。
+        eventStage = "Recomputing weights"
+        await Backfill.weightPass()
 
         // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
         // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。

@@ -44,22 +44,28 @@ enum Backfill {
     ///
     /// `onlyDay` (non-nil) restricts the run to that single calendar day —
     /// used by the `--backfill-day` dev entry point.
+    ///
+    /// `skipWeightPass`：MemoryScheduler.runEventJob 逐天循环调用时传 true，
+    /// 循环结束后统一调一次 `weightPass()`——否则 dayCap=7 时全树重写 7 遍
+    /// （跟 rebalance 从 per-day 挪到 job 末尾一次是同一个原因）。
     static func run(
         daysBack: Int = 14,
         activeWindowDays: Int = 14,
         onlyDay: Date? = nil,
+        skipWeightPass: Bool = false,
         progress: ((Progress) -> Void)? = nil
     ) async throws -> Result {
         let napGuard = AppNapGuard.acquire(reason: "Backfill / event clustering")
         defer { napGuard.release() }
         return try await runImpl(
             daysBack: daysBack, activeWindowDays: activeWindowDays,
-            onlyDay: onlyDay, progress: progress
+            onlyDay: onlyDay, skipWeightPass: skipWeightPass, progress: progress
         )
     }
 
     private static func runImpl(
         daysBack: Int, activeWindowDays: Int, onlyDay: Date?,
+        skipWeightPass: Bool,
         progress: ((Progress) -> Void)?
     ) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
@@ -227,7 +233,9 @@ enum Backfill {
         }
 
         // Weight pass across the events tree.
-        try await weightPass()
+        if !skipWeightPass {
+            await weightPass()
+        }
 
         // 归档不在这里跑 —— 它动的是 portrait/ 文件，挪到了
         // PortraitDistiller.distill 之后。
@@ -394,7 +402,9 @@ enum Backfill {
         return out
     }
 
-    nonisolated private static func weightPass() async throws {
+    /// 非 private —— MemoryScheduler.runEventJob 逐天循环传 skipWeightPass
+    /// 后,在 job 末尾单独调一次(跟 rebalance 同模式)。
+    nonisolated static func weightPass() async {
         await Task.detached(priority: .userInitiated) {
             weightPassSync()
         }.value
@@ -424,7 +434,11 @@ enum Backfill {
             if url.pathComponents.contains("_quarantine") { continue }
             do {
                 var f = try PortraitFileIO.read(from: url)
+                let oldWeight = f.weight
                 WeightCalculator.recompute(&f)
+                // 浮点容差 1e-6,对齐 PortraitWeight.refresh —— 值没变就不
+                // 写盘,避免全树文件被无条件改写(I/O + mtime 跳动)。
+                if abs(f.weight - oldWeight) < 1e-6 { continue }
                 try PortraitFileIO.write(f, to: url)
             } catch {
                 continue
