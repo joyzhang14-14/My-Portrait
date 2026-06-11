@@ -17,6 +17,12 @@ struct MemoriesView: View {
     var onEditEntity: ((URL) -> Void)? = nil
 
     @State private var entries: [Entry] = []
+    /// events 视图的 folder 分组缓存 —— 原来 foldersGroupedList 在 body 里
+    /// 每次重算都同步 EventFolderStore.loadAll()(枚举目录+逐 JSON 解码)
+    /// 在主线程。现在只在 reload()(folder 写操作成功后都会走 reload)和
+    /// deleteEntry 后后台重算,body 只读缓存。
+    @State private var folderGroups: [FolderGroup] = []
+    @State private var ungroupedEntries: [Entry] = []
     @State private var loading: Bool = false
     @State private var actionStatus: String = ""
     @State private var selected: Entry.ID?
@@ -191,7 +197,10 @@ struct MemoriesView: View {
     ///     需要打包,直接展示就好了")
     @ViewBuilder
     private var foldersGroupedList: some View {
-        let split = makeFolderSplit()
+        // 读缓存(reload / deleteEntry 后台重算),不在 body 里读盘重算。
+        // 分组视图只在搜索为空时渲染(visibleEntries == entries),所以
+        // 缓存按全量 entries 算就是对的。
+        let split = (folders: folderGroups, ungrouped: ungroupedEntries)
         // folders 先
         ForEach(Array(split.folders.enumerated()), id: \.element.id) { idx, g in
             FolderDisclosureRow(
@@ -231,15 +240,17 @@ struct MemoriesView: View {
         }
     }
 
-    /// 把 visibleEntries 拆成 (folders, ungrouped)。Entry.id 是 URL,得换算
+    /// 把 entries 拆成 (folders, ungrouped)。Entry.id 是 URL,得换算
     /// 成 "yyyy-MM-dd/foo.md" 相对路径跟 folder.events 对齐。
-    private func makeFolderSplit() -> (folders: [FolderGroup], ungrouped: [Entry]) {
+    /// static + nonisolated:EventFolderStore.loadAll() 读盘,在 reload 的
+    /// 后台任务里跑,不进 body。
+    nonisolated private static func makeFolderSplit(entries: [Entry]) -> (folders: [FolderGroup], ungrouped: [Entry]) {
         let prefix = Storage.eventsDir.path + "/"
         func relPath(of url: URL) -> String {
             url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
         }
         let byPath: [String: Entry] = Dictionary(uniqueKeysWithValues:
-            visibleEntries.map { (relPath(of: $0.id), $0) }
+            entries.map { (relPath(of: $0.id), $0) }
         )
 
         let allFolders = EventFolderStore.loadAll()
@@ -257,7 +268,7 @@ struct MemoriesView: View {
             .sorted { $0.entries.count > $1.entries.count }
 
         let classifiedPaths = Set(allFolders.flatMap { $0.events })
-        let ungrouped = visibleEntries.filter { !classifiedPaths.contains(relPath(of: $0.id)) }
+        let ungrouped = entries.filter { !classifiedPaths.contains(relPath(of: $0.id)) }
         return (folderGroups, ungrouped)
     }
 
@@ -463,6 +474,7 @@ struct MemoriesView: View {
             // events scope 才有 folder 概念;其它 scope rel 不匹配,no-op。
             try? EventFolderStore.removeEventEverywhere(Self.eventRelPath(of: entry.id))
             entries.removeAll { $0.id == entry.id }
+            refreshFolderSplit()
             selected = nil
             actionStatus = "Deleted: \(entry.title)"
         } catch {
@@ -584,11 +596,33 @@ struct MemoriesView: View {
         loading = true
         let currentScope = scope
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
-        let loaded = await Task.detached(priority: .userInitiated) {
-            Self.scan(scope: currentScope, halfLifeDays: halfLife)
+        // folder split(loadAll 读盘 + 分组排序)跟 scan 一起在后台算好,
+        // body 只消费缓存。非 events scope 用不上分组,不白读 _folders/。
+        let (loaded, split) = await Task.detached(priority: .userInitiated) {
+            () -> ([Entry], (folders: [FolderGroup], ungrouped: [Entry])) in
+            let loaded = Self.scan(scope: currentScope, halfLifeDays: halfLife)
+            guard currentScope == .events else { return (loaded, ([], [])) }
+            return (loaded, Self.makeFolderSplit(entries: loaded))
         }.value
         entries = loaded
+        folderGroups = split.folders
+        ungroupedEntries = split.ungrouped
         loading = false
+    }
+
+    /// 只重算 folder 分组缓存,不重扫 entries。deleteEntry 这种「直接改
+    /// entries、不走 reload」的路径用 —— folder 引用也变了(removeEventEverywhere),
+    /// 得重读 _folders/。
+    private func refreshFolderSplit() {
+        guard scope == .events else { return }
+        let snapshot = entries
+        Task.detached(priority: .userInitiated) {
+            let split = Self.makeFolderSplit(entries: snapshot)
+            await MainActor.run {
+                folderGroups = split.folders
+                ungroupedEntries = split.ungrouped
+            }
+        }
     }
 
     // MARK: - Disk scan
