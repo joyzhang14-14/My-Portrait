@@ -20,14 +20,19 @@ HAN = R.HAN
 import functools
 import ime_schema as S
 
+_UNIT_CHARS = [None]   # 编码单元 → 词库全集候选字(char_units 反查,一次构建)
 @functools.lru_cache(maxsize=2048)
 def syl_cands(p):
-    """p 若能整体解析成一个编码单元,返回其候选字集;否则 None(由部署的 rime 方案决定)。"""
+    """p 若是部署方案的编码单元,返回**词库全集**候选字;否则 None。
+    2026-06-11 yi x案:原用 lattice 候选窗(仅前6字),'试'在 shi 窗外 → 一下测试 验证断链只回一下测。
+    击键背书本义=这串键在部署方案下能产出的任何字,窗口截断是实现意外非设计护栏。"""
     if not p or not p.isalpha(): return None
-    top, syls = R.lattice(p)
-    if len(syls) == 1:
-        return frozenset(ch for c in syls[0][1] for ch in c if S.is_output_char(ch))
-    return None
+    if _UNIT_CHARS[0] is None:
+        rev = {}
+        for ch, units in S.char_units().items():
+            for u in units: rev.setdefault(u, set()).add(ch)
+        _UNIT_CHARS[0] = {u: frozenset(cs) for u, cs in rev.items()}
+    return _UNIT_CHARS[0].get(p)
 
 def _verify_at(cont, L):
     """从击键账 L 的当前位置逐字验证续文 cont。返回 (验证通过的尾巴, 剩余账)。"""
