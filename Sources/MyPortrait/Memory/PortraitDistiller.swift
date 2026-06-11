@@ -67,7 +67,11 @@ final class PortraitDistiller {
     private let model: String
     private let perCategoryTimeout: TimeInterval
 
-    init(provider: Provider = .chatgpt, model: String = "gpt-5.4", perCategoryTimeout: TimeInterval = 120) {
+    /// perCategoryTimeout 120→300:distill 的 prompt 是全 pipeline 最大的
+    /// (整个 portrait 正文 + 每类 50 事件),reasoning 模型(deepseek-v4-pro
+    /// 等)思考就要几分钟,120s 必超 → agentTimeout 中止整轮反复退避。
+    /// 300s × 6 类最坏 30min,仍在 runStep 的 60min 看门狗内。
+    init(provider: Provider = .chatgpt, model: String = "gpt-5.4", perCategoryTimeout: TimeInterval = 300) {
         self.provider = provider
         self.model = model
         self.perCategoryTimeout = perCategoryTimeout
