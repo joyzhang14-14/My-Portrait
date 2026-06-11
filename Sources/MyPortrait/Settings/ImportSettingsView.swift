@@ -612,8 +612,10 @@ struct ImportSettingsView: View {
         scanning = true
         defer { scanning = false }
         // 先从 My-Portrait DB 拿 cutoff,再扫盘按 cutoff 过滤源端 count。
-        // cutoff = 最早**带媒体**的 frame ts,允许 backfill 老 NULL-media
-        // imported frames(B 方案场景)。
+        // cutoff = 最早**原生采集**带媒体的 frame ts(与 ScreenpipeImporter.run
+        // 的定界完全一致):imported 行不参与定界 —— 无媒体的允许 backfill
+        // (B 方案),带媒体的若参与会在分批导入中途失败后把 cutoff 拉前,
+        // 剩余源帧被滤掉、重导静默 0 行。
         let dbImpl = services?.db as? PortraitDBImpl
         let dbPool = dbImpl?.dbPool
         let override = overrideDir
@@ -623,7 +625,8 @@ struct ImportSettingsView: View {
                 return (try? pool.read { db in
                     try Int64.fetchOne(db, sql: """
                         SELECT MIN(timestamp_ms) FROM frames
-                        WHERE snapshot_path IS NOT NULL OR video_chunk_id IS NOT NULL
+                        WHERE (snapshot_path IS NOT NULL OR video_chunk_id IS NOT NULL)
+                          AND device_name != 'imported'
                         """)
                 }) ?? nil
             }()

@@ -300,19 +300,26 @@ struct ScreenpipeImporter: Sendable {
             throw ImportError.sourceMissing(sourceDB.path)
         }
 
-        // 2. 算 cutoff:My-Portrait 最早**带媒体**的 frame ts。无媒体的老
-        // imported frames 不算,允许这次回头补 video_chunk(B 方案 backfill 场景)。
+        // 2. 算 cutoff:My-Portrait 最早**原生采集**带媒体的 frame ts。
+        //    imported 行一律不参与定界:
+        //    - 无媒体的老 imported frames 不算 —— 允许这次回头补 video_chunk
+        //      (B 方案 backfill 场景)。
+        //    - **带媒体的 imported frames 也不能算** —— 分批提交后若导入中途
+        //      失败,已提交的最老批会把 cutoff 拉到自己身上,剩余源帧全部被
+        //      `< cutoff` 滤掉,重导静默导 0 行,数据永久缺失。cutoff 的语义
+        //      是「本机原生采集从何时开始」;已导入行的去重交给探重索引。
         let cutoffMs = try await Task.detached(priority: .userInitiated) {
             try target.read { db in
                 try Int64.fetchOne(
                     db, sql: """
                         SELECT MIN(timestamp_ms) FROM frames
-                        WHERE snapshot_path IS NOT NULL OR video_chunk_id IS NOT NULL
+                        WHERE (snapshot_path IS NOT NULL OR video_chunk_id IS NOT NULL)
+                          AND device_name != 'imported'
                         """
                 )
             }
         }.value
-        importLog.info("cutoff_ms=\(cutoffMs.map(String.init) ?? "nil", privacy: .public) (MyPortrait earliest with media)")
+        importLog.info("cutoff_ms=\(cutoffMs.map(String.init) ?? "nil", privacy: .public) (MyPortrait earliest native with media)")
 
         // 3. read-only 打开 screenpipe DB(URI mode 加 mode=ro 防误写)。
         let roConfig: Configuration = {
