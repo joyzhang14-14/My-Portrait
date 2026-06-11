@@ -939,6 +939,23 @@ enum DBSchema {
                           on: "pipeline_runs", columns: ["timestamp_ms"])
         }
 
+        // frames_fts 的 AFTER UPDATE 触发器原本**不带列限定**(GRDB synchronize()
+        // 生成):frames 的任何 UPDATE —— compaction 置 snapshot_path、retention
+        // 每日置 NULL、死行中和 —— 都让每行几 KB 的 OCR 全文做一次 FTS
+        // delete+reinsert 重分词,纯白付(媒体列根本不在索引里)。换成列限定版:
+        // 只有真正进索引的 4 列被 UPDATE 才触发。触发器体逐字保留原文。
+        // ⚠️ 改触发器文本要连 EmbedDumpCLI --rebuild-frames-fts 一起改,否则
+        // 手动重建会把这条优化退回去。
+        m.registerMigration("v39_frames_fts_au_column_scoped") { db in
+            try db.execute(sql: "DROP TRIGGER IF EXISTS \"__frames_fts_au\"")
+            try db.execute(sql: """
+                CREATE TRIGGER "__frames_fts_au" AFTER UPDATE OF "app_name", "window_name", "browser_url", "full_text" ON "frames" BEGIN
+                  INSERT INTO "frames_fts"("frames_fts", "rowid", "app_name", "window_name", "browser_url", "full_text") VALUES('delete', OLD."rowid", OLD."app_name", OLD."window_name", OLD."browser_url", OLD."full_text");
+                  INSERT INTO "frames_fts"("rowid", "app_name", "window_name", "browser_url", "full_text") VALUES (NEW."rowid", NEW."app_name", NEW."window_name", NEW."browser_url", NEW."full_text");
+                END
+                """)
+        }
+
         return m
     }
 }

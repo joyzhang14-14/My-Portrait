@@ -748,11 +748,18 @@ actor PortraitDBImpl: PortraitDB {
         try await dbPool.write { db in
             switch mode {
             case .mediaOnly:
-                // 1. NULL 掉 frames 的媒体引用（保留 OCR 文本）
+                // 1. NULL 掉 frames 的媒体引用（保留 OCR 文本）。
+                //    只碰还有媒体引用的行:mediaOnly 模式下旧行永久保留,不加
+                //    过滤的话每天一轮 retention 把整个历史(几十万行)重写一遍
+                //    同样的 NULL 值 —— 白付一遍 UPDATE + FTS 触发器开销,写锁
+                //    被占数分钟,期间采集写入全排队。
                 try db.execute(sql: """
                     UPDATE frames
                     SET snapshot_path = NULL, video_chunk_id = NULL, offset_ms = NULL
                     WHERE timestamp_ms < :beforeMs
+                      AND (snapshot_path IS NOT NULL
+                           OR video_chunk_id IS NOT NULL
+                           OR offset_ms IS NOT NULL)
                     """, arguments: ["beforeMs": beforeMs])
                 let framesAffected = db.changesCount
 

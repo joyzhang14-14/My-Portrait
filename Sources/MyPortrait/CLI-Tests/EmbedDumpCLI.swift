@@ -58,8 +58,12 @@ enum EmbedDumpCLI {
                             VALUES('delete', old.id, old.app_name, old.window_name, old.browser_url, old.full_text);
                         END
                         """)
+                    // ⚠️ AU 触发器带列限定(与 Schema v39 一致):媒体列
+                    // (snapshot_path/video_chunk_id/offset_ms)的 UPDATE 不触发
+                    // FTS 重分词 —— 不带限定的话 retention/compaction 每次改媒体
+                    // 列都白付一次几 KB OCR 全文的 delete+reinsert。
                     try db.execute(sql: """
-                        CREATE TRIGGER __frames_fts_au AFTER UPDATE ON frames BEGIN
+                        CREATE TRIGGER __frames_fts_au AFTER UPDATE OF app_name, window_name, browser_url, full_text ON frames BEGIN
                             INSERT INTO frames_fts(frames_fts, rowid, app_name, window_name, browser_url, full_text)
                             VALUES('delete', old.id, old.app_name, old.window_name, old.browser_url, old.full_text);
                             INSERT INTO frames_fts(rowid, app_name, window_name, browser_url, full_text)
