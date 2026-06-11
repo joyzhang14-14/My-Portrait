@@ -134,8 +134,34 @@ final class ChatStore {
         // **不在 saveMessages 里 touch** —— saveMessages 也被「切走 persist」
         // 路径调,如果 touch 就等于"切走时把刚才那个 conv 顶上去",RECENTS
         // 永远跟着用户切对话动。touch 改成由 ChatController.send() 在真发
-        // 消息时显式调。这里只 reload 让 UI 反映 DELETE/INSERT 结果。
-        reloadConversations()
+        // 消息时显式调。
+        // **也不 reload** —— saveMessages 不碰 conversations 表,sidebar 只读
+        // conv 元数据(title/pinned/updatedAt),不显示消息内容;之前无条件
+        // reloadConversations() 只是让侧栏每次 persist 白白 re-diff 一遍
+        // (cron 流式期间 ~3Hz)。
+    }
+
+    /// 单条消息 upsert(messages.id 是 PRIMARY KEY → INSERT OR REPLACE 单行)。
+    /// 流式高频落盘路径用:只重写正在变化的那条 assistant 消息,不像
+    /// saveMessages 全量 DELETE+重插整个 conv(O(对话体积))。消息会被
+    /// 删除的路径(regenerate / editAndResend)仍走 saveMessages 全量重写。
+    func upsertMessage(_ m: ChatMessage, for convId: UUID) {
+        let partsJSON: String? = m.parts.isEmpty ? nil :
+            (try? Self.partsEncoder.encode(m.parts)).flatMap { String(data: $0, encoding: .utf8) }
+        execute(
+            "INSERT OR REPLACE INTO messages(id,conv_id,role,text,parts_json,time) VALUES(?,?,?,?,?,?)"
+        ) { stmt in
+            sqlite3_bind_text(stmt, 1, m.id.uuidString, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, convId.uuidString, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, m.role.rawValue, -1, Self.SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 4, m.text, -1, Self.SQLITE_TRANSIENT)
+            if let partsJSON {
+                sqlite3_bind_text(stmt, 5, partsJSON, -1, Self.SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 5)
+            }
+            sqlite3_bind_double(stmt, 6, m.time.timeIntervalSince1970)
+        }
     }
 
     func loadMessages(for convId: UUID) -> [ChatMessage] {
