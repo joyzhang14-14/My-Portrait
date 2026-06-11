@@ -283,7 +283,9 @@ struct MemorySettingsView: View {
         switch outcome {
         case .ran(let days):
             try? MemoryStaging.markRan(.events, days: days)
-            actionStatus = "Run complete — review the staged changes below."
+            if !autoFinishEmptyStaging(.events, days: days) {
+                actionStatus = "Run complete — review the staged changes below."
+            }
         case .noWork:
             try? MemoryStaging.approve(.events)   // race: 活没了，丢快照
             actionStatus = "All days already processed — nothing to run."
@@ -309,7 +311,9 @@ struct MemorySettingsView: View {
         switch outcome {
         case .ran(let days):
             try? MemoryStaging.markRan(.portrait, days: days)
-            actionStatus = "Run complete — review the staged changes below."
+            if !autoFinishEmptyStaging(.portrait, days: days) {
+                actionStatus = "Run complete — review the staged changes below."
+            }
         case .noWork:
             try? MemoryStaging.approve(.portrait)
             actionStatus = "Portrait is already up to date — nothing to distill."
@@ -335,7 +339,9 @@ struct MemorySettingsView: View {
         switch outcome {
         case .ran(let days):
             try? MemoryStaging.markRan(.personality, days: days)
-            actionStatus = "Run complete — review the staged changes below."
+            if !autoFinishEmptyStaging(.personality, days: days) {
+                actionStatus = "Run complete — review the staged changes below."
+            }
         case .noWork:
             try? MemoryStaging.approve(.personality)
             actionStatus = "Personality is already up to date — nothing to refresh."
@@ -347,6 +353,33 @@ struct MemorySettingsView: View {
     }
 
     // MARK: - 审核
+
+    /// `.ran` 收尾:审核列表为空时自动收掉,不留"空 Pending review"逼用户点。
+    ///   - 该 run 的天、该 kind 的阶段**全部 complete** → 只有机械重算 →
+    ///     自动 Approve(机械改动直接落盘,不值得人工审)
+    ///   - 有阶段没到 complete(LLM 失败 / raw 没收齐被跳过)→ 自动 Reject:
+    ///     还原文件树 + 未完成的天翻回 pending,Run 按钮立刻可重试
+    /// 有实质改动 → 返回 false,走正常人工审核。
+    private func autoFinishEmptyStaging(_ kind: MemoryStaging.Kind, days: [String]) -> Bool {
+        guard MemoryStaging.changes(kind).isEmpty else { return false }
+        let stages = Self.stagesOwned(by: kind)
+        let s = MemoryScheduler.shared
+        let incomplete = days.filter { !s.stagesComplete(date: $0, stages: stages) }
+        if incomplete.isEmpty {
+            try? MemoryStaging.approve(kind)
+            actionStatus = "Run complete — no content changes, nothing to review."
+        } else {
+            // 只重置没跑完的天;跑完但零产出的天保持 complete(树还原对它是 no-op)。
+            for day in incomplete {
+                s.resetStagesForReject(date: day, stages: stages)
+            }
+            try? MemoryStaging.reject(kind)
+            actionStatus = "Run didn't finish — staged changes discarded, unfinished days reset to pending."
+            attention = s.attentionDays()
+        }
+        refreshStaging()
+        return true
+    }
 
     private func approveStaging(_ kind: MemoryStaging.Kind) {
         do {
