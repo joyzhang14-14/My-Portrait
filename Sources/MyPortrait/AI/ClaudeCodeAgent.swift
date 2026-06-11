@@ -496,11 +496,38 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     ///      不含 ~/.local/bin / /opt/homebrew/bin / npm-global 等,直接
     ///      `which claude` 会假阴。走登录 shell 才能拿到用户实际 PATH。
     ///
-    /// `static let` = 进程内只探测一次(惰性求值且线程安全)。之前是
-    /// computed property,每次 send 至少调两次(precheck + sendPrompt),
-    /// 未命中候选路径时每次都在主线程同步 spawn 登录 shell(几百 ms 卡顿)。
-    /// 代价:app 跑着的时候装好 claude,需要重启 app 才能识别。
-    static let claudeBinaryPath: String? = {
+    /// 缓存策略:**成功路径**进程内只探测一次;**失败**带 5 分钟冷却后重探
+    /// —— 失败不能永久缓存:用户装好 claude / 修好 PATH 后,cron job 的
+    /// `guard isInstalled` 会静默 return(不留 conv 不留 run 记录),nil 黏到
+    /// 进程退出等于 cron 无痕消失。冷却避免未装用户每次 send 都付 shell 探测。
+    private static let probeLock = NSLock()
+    nonisolated(unsafe) private static var probedPath: String?
+    nonisolated(unsafe) private static var lastFailedProbeAt: Date?
+
+    static var claudeBinaryPath: String? {
+        probeLock.lock()
+        if let hit = probedPath {
+            probeLock.unlock()
+            return hit
+        }
+        if let failedAt = lastFailedProbeAt, Date().timeIntervalSince(failedAt) < 300 {
+            probeLock.unlock()
+            return nil
+        }
+        probeLock.unlock()
+        let resolved = Self.probeBinaryPath()
+        probeLock.lock()
+        if let resolved {
+            probedPath = resolved
+            lastFailedProbeAt = nil
+        } else {
+            lastFailedProbeAt = Date()
+        }
+        probeLock.unlock()
+        return resolved
+    }
+
+    private static func probeBinaryPath() -> String? {
         let fm = FileManager.default
         // 0. 终极兜底:用户在 ~/.portrait/config.toml 没办法表达完整路径
         // 时,用 env var MYPORTRAIT_CLAUDE_PATH 显式指定。能解奇葩装的
@@ -528,15 +555,23 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             return p
         }
 
-        // 兜底:让用户登录 shell 替我们解析 PATH。GUI app 子进程的 PATH
-        // 不包含用户 dotfile 加的 dev bin 路径,直接 `which` 失败。
-        // 用 `-l -c` 让 shell 加载 login 配置(~/.zprofile 等)拿到 PATH;
-        // 不开 `-i` —— 交互式 rc(~/.zshrc)对解析 PATH 没必要,还可能
-        // 慢几百 ms 甚至秒级(取决于用户 dotfile)。
+        // 兜底 1:login shell(`-l -c`,加载 ~/.zprofile 等)解析 PATH,快。
+        if let p = shellProbe(interactive: false) { return p }
+        // 兜底 2:交互式 shell(`-l -i -c`,加载 ~/.zshrc / ~/.bashrc)。
+        // nvm / asdf / mise / volta 的标准安装把 PATH 注入写在交互式 rc 里,
+        // login shell 读不到 —— 这类用户的 claude 在 ~/.nvm/versions/.../bin
+        // 下,只有 -i 能找到。可能几百 ms~秒级,但只在前面全部未命中(本来
+        // 就要报"未安装")时才付这一次。
+        return shellProbe(interactive: true)
+    }
+
+    /// 让用户的 shell 替我们解析 PATH 并 `command -v claude`。GUI app 子进程
+    /// 的 PATH 是 `/usr/bin:/bin:...`,不含 dotfile 加的 dev bin 路径。
+    private static func shellProbe(interactive: Bool) -> String? {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let proc = Process()
         proc.launchPath = shell
-        proc.arguments = ["-l", "-c", "command -v claude"]
+        proc.arguments = (interactive ? ["-l", "-i", "-c"] : ["-l", "-c"]) + ["command -v claude"]
         let out = Pipe()
         proc.standardOutput = out
         proc.standardError = Pipe()
@@ -548,10 +583,10 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
                 .split(separator: "\n").last
                 .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
                 ?? ""
-            if !path.isEmpty, fm.isExecutableFile(atPath: path) { return path }
+            if !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) { return path }
         } catch { }
         return nil
-    }()
+    }
 
     static var isInstalled: Bool { claudeBinaryPath != nil }
 

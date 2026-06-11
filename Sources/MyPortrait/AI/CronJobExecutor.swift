@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 /// Background executor for cronJobs. Each fire:
 ///   1. Builds the screen context (if cronJob.window != .none)
@@ -10,6 +11,8 @@ import Foundation
 /// Doesn't reuse the live ChatController so user's open chat is undisturbed.
 @MainActor
 enum CronJobExecutor {
+    private static let logger = Logger(subsystem: "com.myportrait", category: "cron")
+
     /// Override at boot — supplies the same provider+model as the chat.
     static var providerResolver: () -> (Provider, String, String?) = {
         (.chatgpt, Provider.chatgpt.defaultModel, nil)
@@ -53,11 +56,19 @@ enum CronJobExecutor {
     private static func execute(_ cronJob: CronJob) async {
         let (provider, _, _) = providerResolver()
         // Claude Code 不走 Pi,只要 CLI 装着就行;其它 provider 需要 Bun/Pi 装好。
+        // ⚠️ 这两个 guard 在 appendRun 之前 return —— 不留 conv 不留 run 记录,
+        // cron 等于无痕消失,必须至少留一条 WARN 让问题可诊断。
         switch provider {
         case .claudeCode:
-            guard ClaudeCodeAgent.isInstalled else { return }
+            guard ClaudeCodeAgent.isInstalled else {
+                logger.warning("cron '\(cronJob.name, privacy: .public)' skipped: claude CLI not found (probe retries in ≤5min; set MYPORTRAIT_CLAUDE_PATH to override)")
+                return
+            }
         default:
-            guard AISetup.shared.isReady else { return }
+            guard AISetup.shared.isReady else {
+                logger.warning("cron '\(cronJob.name, privacy: .public)' skipped: AI runtime (Bun/Pi) not ready")
+                return
+            }
         }
 
         let startedAt = Date()
