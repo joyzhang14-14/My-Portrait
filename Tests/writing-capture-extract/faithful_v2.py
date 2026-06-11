@@ -321,11 +321,11 @@ for day in DAYS:
             prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
                     or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
             seg = C3.keys_segment(b, t1 or t0 or 0)
-            tn0 = norm_t(t)[:60]
+            tn0 = norm_t(t)[-60:]   # 尾60对证(用户裁定:长文尾部恒可见/头部滚出窗;错也多在尾)
             hit = False
             for fw in (60, 300):
                 sn, _ts, _md = C3.ocr_snippet(a, u, t, t1 or t0 or 0, prev_text=prev, seg=seg, fwd_s=fw)
-                if tn0 and len(tn0) >= 2 and tn0 in re.sub(r'\s', '', sn or ''):
+                if tn0 and len(tn0) >= 2 and tn0 in norm_t(sn):
                     hit = True; break
             if hit:
                 out3.append(rec)
@@ -347,7 +347,7 @@ for day in DAYS:
         seg = C3.keys_segment(b, t1 or t0 or 0)
         snip, _fts, smode = C3.ocr_snippet(a, u, t, t1 or t0 or 0, prev_text=prev, seg=seg)
         snipn = norm_t(snip)   # 两侧同口径(标点归一,离线对证实测:逗号挡匹配致误报)
-        tn0 = cv(t).replace(' ', '').replace('\n', '')[:60]
+        tn0 = norm_t(t)[-60:]  # 尾60+同口径归一(用户裁定:尾部恒可见且错多在尾;头60会放过尾错)
         # 确定性快速通道(审查修):渲染与记录逐字一致 → 免 14B 直接过(判定在确定性链路)
         if tn0 and len(tn0) >= 2 and tn0 in snipn:
             out3.append(rec); continue
@@ -367,7 +367,7 @@ for day in DAYS:
             if not vtn or consumed < max(2, han_v) or vtn == tn:
                 # L7(2026-06-10):零回车草稿快照(~draft)且短(≤20字)且 OCR 无渲染确证 → 未定区
                 # (打了一半放弃的输入框残留,如'苹果某些';有渲染=真写过,照常保留)
-                if '~draft' in src_ and len(cv(t)) <= 20 and vtn != tn and tn[:60] not in snipn:
+                if '~draft' in src_ and len(cv(t)) <= 20 and vtn != tn and tn[-60:] not in snipn:
                     pend.append((a, t, src_, evid, t0, "短草稿快照无渲染确证(零回车背书)",
                                  re.sub(r'\s+', ' ', snip or '')[:120])); continue
                 out3.append(rec); continue                 # OCR 无证言/一致 → 信 librime+击键

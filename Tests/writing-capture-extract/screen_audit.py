@@ -25,7 +25,7 @@ for day, recs in d.items():
         snipn = norm_t(snip)   # 两侧同口径去标点(逗号挡匹配误报)
         if not snip:
             rows.append((day, a, evid, t, "无证言(无帧)", "")); continue
-        if tn[:60] in snipn:
+        if tn[-60:] in snipn:
             rows.append((day, a, evid, t, "✓渲染一致", "")); continue
         vt, consumed = C3.verify_tail(snip, seg)
         vtn = norm_t(vt)
