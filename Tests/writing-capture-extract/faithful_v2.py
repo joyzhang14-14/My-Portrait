@@ -162,22 +162,46 @@ for day in DAYS:
         if not evs: continue
         kc = group_kc(ids); ks_full = assemble_keys(ids)
         grp_cs = ''.join(X.cstream(e['arr']) for e in evs)   # 组级commit流:发送清空快照跨事件手打取证(#40)
-        grp = []
+        sends_raw = []
         for ev in evs:
-            app = ev['bundle'].split('.')[-1]
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
-                kw = R.keys_in_window(con, ev['bundle'], t0, t1)
-                # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
-                ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)
-                fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
-                # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
-                if cv(fixed):
-                    grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
-                    mt = ''
-                    for li in rinfo.get('lines', []):
-                        if li.get('reason') == 'rebuilt' and li.get('tail_text'): mt = li['tail_text']
-                        elif li.get('reason') == 'residue' and li.get('han'): mt = li['han']
-                    if mt: PROOF[(ev['id'], cv(fixed))] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
+                sends_raw.append([ev, text, t0, t1, is_send])
+        # 幻影发送降级(案 vos/vcd ev616=假submit / 关SIP ev1148=假delete快照):"发送"后框内容仍在——
+        # 同bundle 60s内后续事件(DB直查,不受staged分组限制)endValue 原样延续该文本为前缀、
+        # 且其 commit 流没重打过(cover<0.5,非重发)→ 框从没清过 = AX事件切分/重渲染幻影,
+        # 非真发送,降级草稿(dedup 会归并进真终稿)。submit 不豁免(ev616实证假submit存在;
+        # 真submit如ev633靠证人测试天然安全:真发送清空框,后续事件不可能原样延续未重打)。
+        # 前缀<10字不动(保护"好的"类短消息真发送);不用同事件endv相等判(真发送事件常恰好
+        # 收在发送瞬间,endv来不及清,会误杀)。
+        for sr in sends_raw:
+            ev, text, t0, t1, s = sr
+            if not s: continue
+            pre = cv(R.LATIN_TAIL.sub('', text)).replace('\n', '')
+            if len(pre) < 10: continue
+            wits = con.execute("SELECT end_value, edit_log FROM typing_events WHERE bundle_id=:b "
+                               "AND started_at > :a AND started_at <= :a2 ORDER BY started_at",
+                               {"b": ev['bundle'], "a": t1 or 0, "a2": (t1 or 0) + 60000}).fetchall()
+            for w_endv, w_el in wits:
+                e2v = cv(w_endv).replace('\n', '')
+                try: w_arr = json.loads(w_el or '[]')
+                except: w_arr = []
+                if e2v.startswith(pre) and X.cover(pre, X.cstream(w_arr)) < 0.5:
+                    sr[4] = False; break
+        grp = []
+        for ev, text, t0, t1, is_send in sends_raw:
+            app = ev['bundle'].split('.')[-1]
+            kw = R.keys_in_window(con, ev['bundle'], t0, t1)
+            # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
+            ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)
+            fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
+            # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
+            if cv(fixed):
+                grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
+                mt = ''
+                for li in rinfo.get('lines', []):
+                    if li.get('reason') == 'rebuilt' and li.get('tail_text'): mt = li['tail_text']
+                    elif li.get('reason') == 'residue' and li.get('han'): mt = li['han']
+                if mt: PROOF[(ev['id'], cv(fixed))] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
         total = sum(len(t) for _, t, *_ in grp)
         if total > 20 and kc < total // 4:                          # 组级击键 gate
             for a, t, s, evid, t0, t1, b in grp:
