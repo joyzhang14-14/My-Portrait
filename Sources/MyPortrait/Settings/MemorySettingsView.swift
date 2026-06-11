@@ -76,9 +76,21 @@ struct MemorySettingsView: View {
     // EventClassifier 已下线 —— folder 整理改由 chat AI 通过 mp-folders 按用户
     // 对话需求触发,UI 这里不再挂"Run classifier"按钮。
 
-    // Writing capture / writing style 的 UI 已整体搬到 Settings → Typing
-    // Capture(WritingPipelineSection,本文件底部)—— 数据源是 typing capture,
-    // 跟 memory pipeline 独立。
+    // Writing capture 的 UI 已搬到 Settings → Typing Capture
+    // (WritingPipelineSection,本文件底部)—— 数据源是 typing capture。
+    // Writing style **留在本页**:它是 portrait 侧 pipeline(typing 的下游,
+    // 提炼进 portrait/writing_style/),跟 distill/personality 同级。
+
+    // writing_style 提炼链路的 UI 状态。Running / status / task 走
+    // UIState.shared,view 切走再回来 Stop 按钮仍可点,状态不丢。
+    @ObservedObject private var writingStyleUI = WritingStyleUIState.shared
+    @State private var writingStyleConfirm: Bool = false
+    @State private var writingStylePending: [WritingStyleRunRow] = []
+    @State private var writingStyleUnprocessed: Int = 0
+    @State private var writingStylePreviewRun: String? = nil
+    /// 点击某一行 draft 时打开的 sheet,只显示这一条 draft 详情。
+    @State private var writingStylePreviewDraft: WritingStyleStagedRow? = nil
+    @State private var writingStyleExpandedDrafts: [String: [WritingStyleStagedRow]] = [:]
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
@@ -166,6 +178,7 @@ struct MemorySettingsView: View {
             }
         }
         refreshStaging()
+        refreshWritingStyle()
     }
 
     private func refreshStaging() {
@@ -466,8 +479,13 @@ struct MemorySettingsView: View {
                 desc: "Aggregates events / other portraits / OCR into personality tags.",
                 config: \.scheduler.personality)
             Divider().padding(.vertical, 4)
-            // Writing capture / writing style 的 auto-run 开关已搬到
-            // Settings → Typing Capture(WritingPipelineSection)。
+            schedulerBlock(
+                title: "Writing style distillation",
+                desc: "Learns your writing style (tone, voice, editing habits) from approved writing. Automatic runs save directly; manual runs stage drafts for review.",
+                config: \.scheduler.writingStyle)
+            Divider().padding(.vertical, 4)
+            // Writing capture 的 auto-run 开关已搬到 Settings → Typing Capture
+            // (WritingPipelineSection);writing style 是 portrait 侧 pipeline,留在本页。
             intRow("Max days processed per run (event and personality)",
                    value: cfg.binding(\.memory.eventDayCap),
                    range: 1...30)
@@ -518,8 +536,9 @@ struct MemorySettingsView: View {
 
     // MARK: - Memory pipeline 的 manualRunSection(原有)
 
-    /// 统一的 Run now 卡片 —— memory pipeline 3 个 trigger,divider 分组。
-    /// (writing capture / writing style 已搬到 Settings → Typing Capture。)
+    /// 统一的 Run now 卡片 —— memory pipeline 3 个 trigger + writing style
+    /// distillation(portrait 侧,typing 的下游),divider 分组。
+    /// (writing capture 已搬到 Settings → Typing Capture。)
     private var runNowSection: some View {
         section(
             title: "Run now",
@@ -542,6 +561,26 @@ struct MemorySettingsView: View {
 
             // Event classifier(自动分 folder)已下线 —— chat AI 通过 mp-folders
             // 按用户对话需求整理,UI 不再挂 Run 按钮。
+
+            // —— Writing style distillation(portrait 侧,消费 approved writing)
+            Divider().padding(.vertical, 2)
+            writingStyleBlock
+        }
+        // sheet / alert 挂在卡片最外层 —— 内层 block 只负责触发对应 @State。
+        .sheet(item: $writingStylePreviewRun.mappedToIdentifiable) { wrapped in
+            WritingStylePreview(runId: wrapped.id)
+        }
+        // Per-draft sheet:点单条 NEW/CHANGED 行打开,只显示这一条 draft 详情。
+        .sheet(item: $writingStylePreviewDraft) { draft in
+            WritingStyleDraftDetail(draft: draft)
+        }
+        .alert("Run writing style distillation?", isPresented: $writingStyleConfirm) {
+            Button("Run", role: .none) {
+                writingStyleUI.task = Task { @MainActor in await runWritingStyleManual() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed pieces of your writing with AI. Drafts are staged for you to review.")
         }
     }
 
@@ -768,8 +807,11 @@ struct MemorySettingsView: View {
         let hasEvents = pendingEvents && !eventsRunning
         let hasPortrait = pendingPortrait && !portraitRunning
         let hasPersonality = pendingPersonality && !personalityRunning
-        // (writing capture / style 的 Pending review 已搬到 Typing Capture 页。)
-        if hasEvents || hasPortrait || hasPersonality {
+        // Writing style 也归这里(portrait 侧;跑步中不显示)。
+        // (writing capture 的 Pending review 已搬到 Typing Capture 页。)
+        let hasWritingStyle = !writingStylePending.isEmpty && !writingStyleUI.isRunning
+        let anyMemory = hasEvents || hasPortrait || hasPersonality
+        if anyMemory || hasWritingStyle {
             section(
                 title: "Pending review",
                 blurb: "Results from a run are staged, not saved yet. Click an item to preview. Approve keeps it; Reject discards it."
@@ -788,6 +830,10 @@ struct MemorySettingsView: View {
                 }
                 if hasPersonality {
                     reviewBlock(.personality, "Refresh personality", personalityChanges)
+                }
+                if hasWritingStyle {
+                    if anyMemory { Divider().padding(.vertical, 6) }
+                    writingStyleResultBlock
                 }
             }
         }
@@ -1251,6 +1297,255 @@ struct MemorySettingsView: View {
         return f
     }()
 
+    // MARK: - Writing style(portrait 侧,typing 的下游;消费 approved writing)
+
+    /// writing_style 提炼链路的 inline 子区块。manual 模式 = staged + pending
+    /// review;auto 模式由 scheduler 自动跑,直接落 portrait/writing_style/。
+    /// alert / sheet 由 runNowSection 顶端挂。跟其它 triggerRow 同形。
+    @ViewBuilder
+    private var writingStyleBlock: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Distill writing style")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Learns your writing style (tone, voice, editing habits) from approved writing. Up to \(WritingStyleDistiller.defaultBatchCap) pieces per run · \(writingStyleUnprocessed) still to process. Manual runs stage drafts; automatic runs save directly.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                let ssHasPending = !writingStylePending.isEmpty
+                let ssDisabledReason: String? = {
+                    if WritingStyleDistiller.shared == nil { return "Writing style distiller is not available." }
+                    if writingStyleUI.isRunning { return "Writing style is already running." }
+                    if ssHasPending { return "Pending review — Approve / Reject first." }
+                    if writingStyleUnprocessed == 0 {
+                        return "Nothing to distill — run writing capture first to produce writing_records."
+                    }
+                    return nil
+                }()
+                Button(writingStyleUI.isRunning ? "Running…" : "Run") {
+                    writingStyleConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(ssDisabledReason != nil)
+                .help(ssDisabledReason ?? "Run writing style distillation (manual mode, staged for review).")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if writingStyleUI.isRunning {
+                writingStyleRunningIndicator(writingStyleUI.stage, onStop: { stopWritingStyle() })
+            }
+            if !writingStyleUI.statusMessage.isEmpty {
+                Text(writingStyleUI.statusMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+            }
+        }
+    }
+
+    /// spinner + 阶段文案 + Stop(writing style 暂无单元级进度信号,维持
+    /// indeterminate;有信号后换 progressIndicator)。
+    @ViewBuilder
+    private func writingStyleRunningIndicator(_ stage: String, onStop: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(stage.isEmpty ? "Running…" : stage)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("Stop", action: onStop)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+        }
+        .padding(.top, 6)
+    }
+
+    /// 停 writing style:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
+    private func stopWritingStyle() {
+        let n = PiAgentRegistry.shared.stopGroup(PipelineOwner.writingStyle)
+        writingStyleUI.task?.cancel()
+        writingStyleUI.task = nil
+        writingStyleUI.isRunning = false
+        let zombies = (try? WritingStyleDistiller.shared?.store
+            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
+        writingStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
+        refreshWritingStyle()
+    }
+
+    /// Writing style 的结果区块 —— 由 reviewSection 统一渲染。字体跟
+    /// memory reviewBlock 对齐。
+    @ViewBuilder
+    private var writingStyleResultBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Writing style").font(.system(size: 13, weight: .semibold))
+            ForEach(writingStylePending, id: \.runId) { run in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Reject") {
+                            Task { @MainActor in await rejectWritingStyle(runId: run.runId) }
+                        }
+                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                        Button("Approve") {
+                            Task { @MainActor in await approveWritingStyle(runId: run.runId) }
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                    inlineWritingStyleDrafts(runId: run.runId)
+                        .onAppear { ensureWritingStyleDraftsLoaded(runId: run.runId) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 第一次展示 drafts 时按需 fetch(避免每帧重查 DB)。
+    private func ensureWritingStyleDraftsLoaded(runId: String) {
+        if writingStyleExpandedDrafts[runId] != nil { return }
+        guard let distiller = WritingStyleDistiller.shared else { return }
+        let store = distiller.store
+        Task.detached(priority: .userInitiated) {
+            let rows = (try? store.fetchStaged(runId: runId)) ?? []
+            await MainActor.run { writingStyleExpandedDrafts[runId] = rows }
+        }
+    }
+
+    /// 跟 event/portrait/personality 的 changeRow 同样的形态:NEW/CHANGED
+    /// 标签 + 单行标题 + chevron → 点击直接打开 Detail sheet 看完整 body。
+    @ViewBuilder
+    private func inlineWritingStyleDrafts(runId: String) -> some View {
+        if let rows = writingStyleExpandedDrafts[runId] {
+            if rows.isEmpty {
+                Text("(no drafts)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows, id: \.id) { d in
+                        writingStyleDraftRow(d, parentRunId: runId)
+                    }
+                }
+            }
+        } else {
+            Text("Loading…")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    /// 一条 draft 的行:`[NEW|CHANGED|NOOP] <title>` + chevron → 整行点击
+    /// 打开 detail sheet。
+    private func writingStyleDraftRow(_ d: WritingStyleStagedRow, parentRunId: String) -> some View {
+        let (label, color): (String, Color) = {
+            switch d.action {
+            case .create: return ("NEW", .green)
+            case .update: return ("CHANGED", .orange)
+            case .noop:   return ("NOOP", .gray)
+            }
+        }()
+        _ = parentRunId    // 不再用 —— 改成 per-draft preview。
+        return Button {
+            writingStylePreviewDraft = d
+        } label: {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
+                    .frame(width: 62, alignment: .leading)
+                Text(d.title)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refreshWritingStyle() {
+        guard let distiller = WritingStyleDistiller.shared else { return }
+        let store = distiller.store
+        Task.detached(priority: .userInitiated) {
+            let pending = (try? store.fetchPendingReviewRuns()) ?? []
+            let unprocessed = (try? store.unprocessedCount()) ?? 0
+            await MainActor.run {
+                writingStylePending = pending
+                writingStyleUnprocessed = unprocessed
+            }
+        }
+    }
+
+    @MainActor
+    private func runWritingStyleManual() async {
+        guard let distiller = WritingStyleDistiller.shared else {
+            writingStyleUI.statusMessage = "Distiller not initialized."
+            return
+        }
+        writingStyleUI.isRunning = true
+        writingStyleUI.stage = "Analyzing writing"
+        writingStyleUI.statusMessage = ""
+        defer {
+            writingStyleUI.isRunning = false
+            writingStyleUI.stage = ""
+            refreshWritingStyle()
+        }
+        do {
+            let s = try await distiller.runManual()
+            writingStyleUI.statusMessage = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
+            recordWritingRun("Speech style", s.recordsCount > 0 ? "success" : "no-work")
+        } catch {
+            writingStyleUI.statusMessage = "Failed: \(error.localizedDescription)"
+            recordWritingRun("Speech style", "failure", reason: error.localizedDescription)
+        }
+    }
+
+    @MainActor
+    private func approveWritingStyle(runId: String) async {
+        guard let distiller = WritingStyleDistiller.shared else { return }
+        do {
+            let n = try distiller.approveStaged(runId: runId)
+            writingStyleUI.statusMessage = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/writing_style/."
+            writingStyleExpandedDrafts.removeValue(forKey: runId)
+        } catch {
+            writingStyleUI.statusMessage = "Approve failed: \(error.localizedDescription)"
+        }
+        refreshWritingStyle()
+    }
+
+    @MainActor
+    private func rejectWritingStyle(runId: String) async {
+        guard let distiller = WritingStyleDistiller.shared else { return }
+        do {
+            try distiller.rejectStaged(runId: runId)
+            writingStyleUI.statusMessage = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
+            writingStyleExpandedDrafts.removeValue(forKey: runId)
+        } catch {
+            writingStyleUI.statusMessage = "Reject failed: \(error.localizedDescription)"
+        }
+        refreshWritingStyle()
+    }
+
+    @MainActor
+    /// run-now writing 路径记一条 pipeline_runs(trigger=run-now)。off-main 写,
+    /// 跟 reload 的 recentPipelineRuns 同一张表 → Changelog 页能看到。
+    private func recordWritingRun(_ pipeline: String, _ outcome: String, reason: String? = nil) {
+        Task.detached {
+            ProcessingLogStore().appendPipelineRun(trigger: "run-now", pipeline: pipeline, outcome: outcome, reason: reason)
+        }
+    }
+
     // MARK: - Components
 
     @ViewBuilder
@@ -1498,13 +1793,14 @@ private struct StagedChangePreview: View {
     }
 }
 
-// MARK: - Writing pipeline(挂在 Settings → Typing Capture 页)
+// MARK: - Writing capture(挂在 Settings → Typing Capture 页)
 
-/// Writing capture + writing style 整条链路的设置区块。数据源是 typing
-/// capture,跟 memory pipeline 完全独立 —— 从 MemorySettingsView 的
-/// Scheduler 页整体搬来(auto-run 开关 + Run now + Pending review),之后
-/// 单独重设计。必须留在本文件:依赖 file-private 的 WritingCapturePreview /
-/// WritingStylePreview / WritingStyleDraftDetail / mappedToIdentifiable。
+/// Writing capture 链路的设置区块(auto-run 开关 + Run now + Pending
+/// review)。数据源是 typing capture —— 从 MemorySettingsView 的 Scheduler
+/// 页搬来,之后单独重设计。Writing style **不在这里**:它是 portrait 侧
+/// pipeline(typing 的下游),留在 Memory → Scheduler 页。
+/// 必须留在本文件:依赖 file-private 的 WritingCapturePreview /
+/// mappedToIdentifiable。
 struct WritingPipelineSection: View {
     private let cfg = ConfigStore.shared
 
@@ -1519,19 +1815,11 @@ struct WritingPipelineSection: View {
     @State private var writingCaptureExpandedError: [String: String] = [:]
     @State private var hasWritingCaptureWork: Bool = true
 
-    @ObservedObject private var writingStyleUI = WritingStyleUIState.shared
-    @State private var writingStyleConfirm: Bool = false
-    @State private var writingStylePending: [WritingStyleRunRow] = []
-    @State private var writingStyleUnprocessed: Int = 0
-    @State private var writingStylePreviewRun: String? = nil
-    @State private var writingStylePreviewDraft: WritingStyleStagedRow? = nil
-    @State private var writingStyleExpandedDrafts: [String: [WritingStyleStagedRow]] = [:]
-
     var body: some View {
         Group {
             SettingsCard(
-                title: "Writing pipeline",
-                footnote: "Writing capture finds what you typed and stages it for review; writing style distillation learns tone and habits from approved writing. Auto-run lets the scheduler pick each one up; Run now triggers it immediately."
+                title: "Writing capture",
+                footnote: "Finds what you typed and stages it for review. Auto-run lets the scheduler pick it up; Run now triggers it immediately."
             ) {
                 VStack(spacing: 12) {
                     autoRunRow(
@@ -1539,14 +1827,7 @@ struct WritingPipelineSection: View {
                         desc: "Finds the writing you did and prepares it for review. Automatic runs only prepare it — you still approve or reject it below.",
                         kp: \.scheduler.writingCapture)
                     Divider()
-                    autoRunRow(
-                        title: "Auto-run writing style distillation",
-                        desc: "Learns your writing style from approved writing. Automatic runs save directly; manual runs stage drafts for review.",
-                        kp: \.scheduler.writingStyle)
-                    Divider()
                     writingCaptureBlock
-                    Divider()
-                    writingStyleBlock
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -1555,29 +1836,19 @@ struct WritingPipelineSection: View {
             // Pending review(跑步中不显示 —— 跟 memory pipeline 同口径)。
             let hasWritingCapture = (!writingCapturePending.isEmpty || writingCaptureUI.lastSummary != nil)
                 && !writingCaptureUI.isRunning
-            let hasWritingStyle = !writingStylePending.isEmpty && !writingStyleUI.isRunning
-            if hasWritingCapture || hasWritingStyle {
+            if hasWritingCapture {
                 SettingsCard(
                     title: "Pending review",
                     footnote: "Results from a run are staged, not saved yet. Approve keeps them; Reject discards them."
                 ) {
-                    VStack(spacing: 12) {
-                        if hasWritingCapture {
-                            writingCaptureResultBlock
-                        }
-                        if hasWritingCapture && hasWritingStyle { Divider() }
-                        if hasWritingStyle {
-                            writingStyleResultBlock
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
+                    writingCaptureResultBlock
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
                 }
             }
         }
         .task {
             refreshWritingCapture()
-            refreshWritingStyle()
         }
         // 跑完 / approve / reject 改了 UIState 后自动刷新 Pending review 列表。
         .onChange(of: writingCaptureUI.isRunning) { _, newValue in
@@ -1586,16 +1857,8 @@ struct WritingPipelineSection: View {
         .onChange(of: writingCaptureUI.lastSummary?.runId) { _, _ in
             refreshWritingCapture()
         }
-        // writingStyle 不挂 onChange —— runWritingStyleManual 的 defer 已经
-        // refreshWritingStyle(),再挂一份是双重刷新(搬家前也没有)。
         .sheet(item: $writingCapturePreviewDate.mappedToIdentifiable) { wrapped in
             WritingCapturePreview(date: wrapped.id)
-        }
-        .sheet(item: $writingStylePreviewRun.mappedToIdentifiable) { wrapped in
-            WritingStylePreview(runId: wrapped.id)
-        }
-        .sheet(item: $writingStylePreviewDraft) { draft in
-            WritingStyleDraftDetail(draft: draft)
         }
         .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
             Button("Run", role: .none) {
@@ -1604,14 +1867,6 @@ struct WritingPipelineSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Process all your writing since the last approved batch. This uses AI and the results are staged for you to review.")
-        }
-        .alert("Run writing style distillation?", isPresented: $writingStyleConfirm) {
-            Button("Run", role: .none) {
-                writingStyleUI.task = Task { @MainActor in await runWritingStyleManual() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed pieces of your writing with AI. Drafts are staged for you to review.")
         }
     }
 
@@ -1944,222 +2199,6 @@ struct WritingPipelineSection: View {
         refreshWritingCapture()
     }
 
-    // MARK: Writing style
-
-    @ViewBuilder
-    private var writingStyleBlock: some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Distill writing style")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Learns your writing style (tone, voice, editing habits) from approved writing. Up to \(WritingStyleDistiller.defaultBatchCap) pieces per run · \(writingStyleUnprocessed) still to process. Manual runs stage drafts; automatic runs save directly.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                let ssHasPending = !writingStylePending.isEmpty
-                let ssDisabledReason: String? = {
-                    if WritingStyleDistiller.shared == nil { return "Writing style distiller is not available." }
-                    if writingStyleUI.isRunning { return "Writing style is already running." }
-                    if ssHasPending { return "Pending review — Approve / Reject first." }
-                    if writingStyleUnprocessed == 0 {
-                        return "Nothing to distill — run writing capture first to produce writing_records."
-                    }
-                    return nil
-                }()
-                Button(writingStyleUI.isRunning ? "Running…" : "Run") {
-                    writingStyleConfirm = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(ssDisabledReason != nil)
-                .help(ssDisabledReason ?? "Run writing style distillation (manual mode, staged for review).")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if writingStyleUI.isRunning {
-                runningIndicator(writingStyleUI.stage, onStop: { stopWritingStyle() })
-            }
-            if !writingStyleUI.statusMessage.isEmpty {
-                Text(writingStyleUI.statusMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
-            }
-        }
-    }
-
-    /// 停 writing style:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
-    private func stopWritingStyle() {
-        let n = PiAgentRegistry.shared.stopGroup(PipelineOwner.writingStyle)
-        writingStyleUI.task?.cancel()
-        writingStyleUI.task = nil
-        writingStyleUI.isRunning = false
-        let zombies = (try? WritingStyleDistiller.shared?.store
-            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-        writingStyleUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
-        refreshWritingStyle()
-    }
-
-    @ViewBuilder
-    private var writingStyleResultBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Writing style").font(.system(size: 13, weight: .semibold))
-            ForEach(writingStylePending, id: \.runId) { run in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .center, spacing: 12) {
-                        Text("\(run.recordsCount ?? 0) records · \(run.draftsCount ?? 0) drafts")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Reject") {
-                            Task { @MainActor in await rejectWritingStyle(runId: run.runId) }
-                        }
-                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
-                        Button("Approve") {
-                            Task { @MainActor in await approveWritingStyle(runId: run.runId) }
-                        }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                    }
-                    inlineWritingStyleDrafts(runId: run.runId)
-                        .onAppear { ensureWritingStyleDraftsLoaded(runId: run.runId) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 第一次展示 drafts 时按需 fetch(避免每帧重查 DB)。
-    private func ensureWritingStyleDraftsLoaded(runId: String) {
-        if writingStyleExpandedDrafts[runId] != nil { return }
-        guard let distiller = WritingStyleDistiller.shared else { return }
-        let store = distiller.store
-        Task.detached(priority: .userInitiated) {
-            let rows = (try? store.fetchStaged(runId: runId)) ?? []
-            await MainActor.run { writingStyleExpandedDrafts[runId] = rows }
-        }
-    }
-
-    /// 跟 event/portrait/personality 的 changeRow 同样的形态:NEW/CHANGED
-    /// 标签 + 单行标题 + chevron → 点击直接打开 Detail sheet 看完整 body。
-    @ViewBuilder
-    private func inlineWritingStyleDrafts(runId: String) -> some View {
-        if let rows = writingStyleExpandedDrafts[runId] {
-            if rows.isEmpty {
-                Text("(no drafts)")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows, id: \.id) { d in
-                        writingStyleDraftRow(d, parentRunId: runId)
-                    }
-                }
-            }
-        } else {
-            Text("Loading…")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-        }
-    }
-
-    /// 一条 draft 的行:`[NEW|CHANGED|NOOP] <title>` + chevron → 整行点击
-    /// 打开 detail sheet。
-    private func writingStyleDraftRow(_ d: WritingStyleStagedRow, parentRunId: String) -> some View {
-        let (label, color): (String, Color) = {
-            switch d.action {
-            case .create: return ("NEW", .green)
-            case .update: return ("CHANGED", .orange)
-            case .noop:   return ("NOOP", .gray)
-            }
-        }()
-        _ = parentRunId    // 不再用 —— 改成 per-draft preview。
-        return Button {
-            writingStylePreviewDraft = d
-        } label: {
-            HStack(spacing: 8) {
-                Text(label)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(color)
-                    .frame(width: 62, alignment: .leading)
-                Text(d.title)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
-            .padding(.vertical, 3)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func refreshWritingStyle() {
-        guard let distiller = WritingStyleDistiller.shared else { return }
-        let store = distiller.store
-        Task.detached(priority: .userInitiated) {
-            let pending = (try? store.fetchPendingReviewRuns()) ?? []
-            let unprocessed = (try? store.unprocessedCount()) ?? 0
-            await MainActor.run {
-                writingStylePending = pending
-                writingStyleUnprocessed = unprocessed
-            }
-        }
-    }
-
-    @MainActor
-    private func runWritingStyleManual() async {
-        guard let distiller = WritingStyleDistiller.shared else {
-            writingStyleUI.statusMessage = "Distiller not initialized."
-            return
-        }
-        writingStyleUI.isRunning = true
-        writingStyleUI.stage = "Analyzing writing"
-        writingStyleUI.statusMessage = ""
-        defer {
-            writingStyleUI.isRunning = false
-            writingStyleUI.stage = ""
-            refreshWritingStyle()
-        }
-        do {
-            let s = try await distiller.runManual()
-            writingStyleUI.statusMessage = "Done — status=\(s.status.rawValue) records=\(s.recordsCount) drafts=\(s.draftsCount)"
-            recordWritingRun("Speech style", s.recordsCount > 0 ? "success" : "no-work")
-        } catch {
-            writingStyleUI.statusMessage = "Failed: \(error.localizedDescription)"
-            recordWritingRun("Speech style", "failure", reason: error.localizedDescription)
-        }
-    }
-
-    @MainActor
-    private func approveWritingStyle(runId: String) async {
-        guard let distiller = WritingStyleDistiller.shared else { return }
-        do {
-            let n = try distiller.approveStaged(runId: runId)
-            writingStyleUI.statusMessage = "Approved \(String(runId.prefix(8))) — \(n) draft(s) applied to portrait/writing_style/."
-            writingStyleExpandedDrafts.removeValue(forKey: runId)
-        } catch {
-            writingStyleUI.statusMessage = "Approve failed: \(error.localizedDescription)"
-        }
-        refreshWritingStyle()
-    }
-
-    @MainActor
-    private func rejectWritingStyle(runId: String) async {
-        guard let distiller = WritingStyleDistiller.shared else { return }
-        do {
-            try distiller.rejectStaged(runId: runId)
-            writingStyleUI.statusMessage = "Rejected \(String(runId.prefix(8))) — staged cleared, records left unprocessed."
-            writingStyleExpandedDrafts.removeValue(forKey: runId)
-        } catch {
-            writingStyleUI.statusMessage = "Reject failed: \(error.localizedDescription)"
-        }
-        refreshWritingStyle()
-    }
 }
 
 // MARK: - Writing Capture Preview Sheet
