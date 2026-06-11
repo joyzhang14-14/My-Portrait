@@ -627,6 +627,17 @@ actor PortraitDBImpl: PortraitDB {
             let rows = try Row.fetchAll(
                 db, sql: sql,
                 arguments: ["startMs": startMs, "endMs": endMs])
+            // resolve 结果按原始相对路径缓存:一天 3000~9000 帧,每帧两次
+            // fileExists stat;压缩后同一 MP4 chunk 覆盖几百帧,同一 video_path
+            // 被反复 stat 几百次 —— 去重后一天 distinct 路径只有几十~几百个。
+            var resolveCache: [String: String?] = [:]
+            func cachedResolve(_ raw: String?) -> String? {
+                guard let raw, !raw.isEmpty else { return nil }
+                if let hit = resolveCache[raw] { return hit }
+                let resolved = AssetPath.resolve(raw)
+                resolveCache[raw] = resolved
+                return resolved
+            }
             return rows.map { row -> TimelineFrame in
                 let id: Int64 = row["id"] ?? 0
                 let ts: Int64 = row["timestamp_ms"] ?? 0
@@ -637,8 +648,8 @@ actor PortraitDBImpl: PortraitDB {
                 // AssetPath.resolve gives back absolute paths + nil-out
                 // anything whose file is missing — so callers can treat the
                 // value as "ready to load or nothing's there".
-                let snap: String? = AssetPath.resolve(row["snapshot_path"])
-                let vpath: String? = AssetPath.resolve(row["video_path"])
+                let snap: String? = cachedResolve(row["snapshot_path"])
+                let vpath: String? = cachedResolve(row["video_path"])
                 let offsetMs: Int = row["offset_ms"] ?? 0
                 let fps: Double = row["fps"] ?? 1.0
 
