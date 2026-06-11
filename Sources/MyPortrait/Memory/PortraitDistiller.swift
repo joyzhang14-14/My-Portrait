@@ -257,7 +257,7 @@ final class PortraitDistiller {
             }
         }
 
-        return try Self.parseDecisions(from: collected)
+        return try Self.parseDecisions(from: collected, category: category)
     }
 
     // MARK: - Prompt
@@ -324,7 +324,18 @@ final class PortraitDistiller {
 
     // MARK: - Response parsing
 
-    nonisolated private static func parseDecisions(from response: String) throws -> [ParsedDecision] {
+    /// 解析失败时把 LLM 原始响应落盘(~/.portrait/llm_dump/),修复逻辑跟不上
+    /// 模型格式新花样时,直接看原文排查。best-effort,失败静默。
+    nonisolated private static func dumpParseFailure(response: String, category: String) {
+        let dir = Storage.rootURL.appendingPathComponent("llm_dump", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let ms = Int64(Date().timeIntervalSince1970 * 1000)
+        let url = dir.appendingPathComponent("distill_parsefail_\(category)_\(ms).txt")
+        try? response.write(to: url, atomically: true, encoding: .utf8)
+        print("[Distill] \(category): parse failure raw response dumped → \(url.lastPathComponent)")
+    }
+
+    nonisolated private static func parseDecisions(from response: String, category: String) throws -> [ParsedDecision] {
         // 用 LLMJSON 抽 balanced array(去 fence + 尊重字符串内的 bracket),
         // 比原来的 first/last bracket 抽法稳一档:模型在数组前后的散文 / fence /
         // 字符串字面量里出现 `]` 都不会被错抽。
@@ -332,6 +343,7 @@ final class PortraitDistiller {
         do {
             jsonStr = try LLMJSON.extract(response, expecting: .array)
         } catch {
+            Self.dumpParseFailure(response: response, category: category)
             throw DistillError.noJSONInResponse
         }
         guard let data = jsonStr.data(using: .utf8) else {
@@ -339,7 +351,21 @@ final class PortraitDistiller {
         }
         let obj: Any
         do { obj = try JSONSerialization.jsonObject(with: data) }
-        catch { throw DistillError.malformedJSON(error.localizedDescription) }
+        catch {
+            // DeepSeek 等 reasoning 模型常给"几乎是 JSON":长 markdown body
+            // 字符串里裸换行、尾逗号(strict JSON 不允许)。机械修复后重试,
+            // .json5Allowed 顺带兜注释/单引号;仍失败才放弃,dump 原文到
+            // llm_dump 便于排查格式新花样。
+            let repaired = LLMJSON.repair(jsonStr)
+            guard let rdata = repaired.data(using: .utf8),
+                  let robj = try? JSONSerialization.jsonObject(with: rdata, options: [.json5Allowed])
+            else {
+                Self.dumpParseFailure(response: response, category: category)
+                throw DistillError.malformedJSON(error.localizedDescription)
+            }
+            print("[Distill] \(category): strict JSON parse failed, repaired parse succeeded")
+            obj = robj
+        }
         guard let arr = obj as? [[String: Any]] else {
             throw DistillError.malformedJSON("top-level was not an array of objects")
         }
