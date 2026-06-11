@@ -167,9 +167,12 @@ for day in DAYS:
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
                 sends_raw.append([ev, text, t0, t1, is_send])
         # 回车背书升格(ev1174 jeff chang案,用户证实网页Gemini真发送):endValue短草稿(≤20字,L7射程)
-        # 若事件收尾紧跟裸回车(晚于末笔编辑150ms+;IME确认回车必伴随commit,天然排除;
-        # yo竞速案回车在末笔commit前,天然不升格)→ 升格真发送。只收窄到L7射程:长文endValue
-        # 升格会让同消息过期中间态以真发送身份入册(ev1152/1153实测),不做。降级环在后,可否决误升。
+        # 条件A:事件收尾紧跟裸回车(晚于末笔编辑150ms+;IME确认回车必伴随commit,天然排除)。
+        # 条件B(yo案 ev1133,2026-06-11,用户证实真发送):AX时间不可信(迟到的'y' commit比物理
+        # 发送晚4.4s,把ended_at拖后,真回车反而在窗外)→ 纯击键判据:事件击键span内**最后一个
+        # 回车是终态**(其后无任何键)且**紧邻其前是选字数字**(≤2s;数字选字已清空组合区,
+        # 该回车不可能是IME确认,只能是发送)。只收窄到L7射程:长文endValue升格会让同消息
+        # 过期中间态以真发送身份入册(ev1152/1153实测),不做。降级环在后,可否决误升。
         for sr in sends_raw:
             ev, text, t0, t1, s = sr
             if s or len(cv(text)) > 20: continue
@@ -177,6 +180,16 @@ for day in DAYS:
             cr = con.execute("SELECT 1 FROM keystroke_log WHERE bundle_id=:b AND char IN (char(10),char(13)) "
                              "AND is_backspace=0 AND (modifiers&7)=0 AND ts_ms BETWEEN :a AND :c AND ts_ms >= :d LIMIT 1",
                              {"b": ev['bundle'], "a": (t1 or 0) - 1000, "c": (t1 or 0) + 2500, "d": last_ts + 150}).fetchone()
+            if not cr:
+                ks = con.execute("SELECT ts_ms, char, is_backspace FROM keystroke_log WHERE bundle_id=:b "
+                                 "AND (modifiers&7)=0 AND ts_ms BETWEEN :a AND :c ORDER BY ts_ms",
+                                 {"b": ev['bundle'], "a": (t0 or 0) - 2000,
+                                  "c": (ev.get('ended_at') or t1 or 0) + 2500}).fetchall()
+                ks = [(kts, kc, kbs) for kts, kc, kbs in ks if kbs or kc]
+                if (len(ks) >= 2 and not ks[-1][2] and ks[-1][1] in ('\r', '\n')
+                        and not ks[-2][2] and (ks[-2][1] or '').isdigit()
+                        and ks[-1][0] - ks[-2][0] <= 2000):
+                    cr = True
             if cr: sr[4] = True
         # 幻影发送降级(案 vos/vcd ev616=假submit / 关SIP ev1148=假delete快照):"发送"后框内容仍在——
         # 同bundle 60s内后续事件(DB直查,不受staged分组限制)endValue 原样延续该文本为前缀、
