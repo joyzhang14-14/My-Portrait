@@ -34,8 +34,19 @@ actor TranscriptionScheduler {
     private let speaker: any SpeakerDiarizer
 
     /// 后台兜底 poll 间隔。已有 PowerWatcher 事件驱动唤醒 +
-    /// 新段事件直接驱动，poll 仅作为"防漏"兜底，故拉长到 60s（vs 之前 5s）。
+    /// 新段事件直接驱动（ingest 成功入库后评估一轮），poll 仅作为"防漏"
+    /// 兜底，故拉长到 60s（vs 之前 5s）。
     private let fallbackPollSeconds: TimeInterval = 60
+
+    /// 攒批闸门:模型装载开销(GB 级读盘 + CoreML 编译)远超单段推理,
+    /// 稳态录音下「每 60s 装载 → 转 1-2 段 → 卸载」是纯浪费。改成:
+    /// 攒够 batchMinChunks 段,**或**最老的 pending 已等了 batchMaxWaitMs,
+    /// 才真正开一轮 drain;poll / 新段事件 / 电源事件都按这个闸门评估。
+    /// 代价:转录延迟最坏 ~5min + poll 间隔,换装载次数 ÷N(模型用完即卸,
+    /// 不常驻内存)。阈值远低于 StallDetector 的 backlog 告警线(20 段/20min),
+    /// 不会误报。
+    private let batchMinChunks = 5
+    private let batchMaxWaitMs: Int64 = 5 * 60_000
     /// 每轮 poll 从 DB 拉多少 chunk。设计文档要求"限并发数 1-2"。
     ///
     /// 注意：调用方 for 循环串行 await transcribeOne，**实际并发恒为 1**。
@@ -183,6 +194,9 @@ actor TranscriptionScheduler {
             // 健康度埋点:成功入库一段(VAD 已过)。chunksProduced > 0 即说明
             // 音频管线在真正出活,audioNeverCaptured stall 不会误报。
             await AudioMetrics.shared.recordChunkProduced()
+            // 事件驱动:新段入库立刻评估一轮(攒批闸门决定真开跑还是再等)。
+            // fire-and-forget —— drain 可能跑几分钟,绝不能阻塞 ingest 流。
+            Task { await self.processQueueOnce() }
         } catch {
             logger.error("DB insertAudioChunk failed (segment will be re-tried next launch via filesystem scan): \(String(describing: error), privacy: .public)")
         }
@@ -194,6 +208,19 @@ actor TranscriptionScheduler {
     /// transcribeOnACOnly 等设置变化时调 —— 否则用户拨开关后要等最多 60s 的兜底 poll 才生效。
     func reevaluate() async {
         await processQueueOnce()
+    }
+
+    /// 攒批闸门(见 batchMinChunks 注释)。查询失败 → 放行,宁可多装载一次
+    /// 模型,不能让队列积压。
+    private func drainGateOpen() async -> Bool {
+        guard let stats = try? await db.audioBacklogStats() else { return true }
+        guard stats.pendingCount > 0 else { return false }
+        if stats.pendingCount >= batchMinChunks { return true }
+        if let oldest = stats.oldestRecordedAtMs {
+            let ageMs = Int64(Date().timeIntervalSince1970 * 1000) - oldest
+            if ageMs >= batchMaxWaitMs { return true }
+        }
+        return false
     }
 
     private func processQueueOnce() async {
@@ -214,6 +241,10 @@ actor TranscriptionScheduler {
         // 循环会卡在队首空转(每轮还白跑一次模型 + 不放睡眠)。记住上轮队首 id,没变
         // 就停,交给下次 tick / 修盘后重试。
         var lastFrontId: Int64? = nil
+
+        // 攒批闸门只在 drain 开始前评估一次;开跑后把本轮捞干净(中途不再
+        // 因为"批又变小了"停手,模型已经装载,多转几段才划算)。
+        var gateEvaluated = false
 
         // 连续转录直到队列清空 —— 不再「转 2 个睡 60s」。60s poll 退化成纯兜底:
         // 只在本轮 drain 结束后捡那期间 ingest 进来的新段。积压一口气在本调用清完。
@@ -247,6 +278,13 @@ actor TranscriptionScheduler {
                 return
             }
             await MainActor.run { IntentionalPauseState.shared.audioTranscriptionPaused = false }
+
+            // 攒批闸门(放在 engine/电源检查之后:那两个分支的暂停状态标记
+            // 语义保持原样;闸门关闭只是推迟,不是暂停)。
+            if !gateEvaluated {
+                gateEvaluated = true
+                guard await drainGateOpen() else { return }
+            }
 
             let chunks: [AudioChunkRecord]
             do {
