@@ -207,7 +207,29 @@ private struct TableView: View {
 /// commonly appear inside assistant replies. Anything fancier (HTML, footnotes)
 /// renders as plain text.
 enum MDInline {
+    /// 结果按 source memo:流式期间每个 delta tick 都会让在屏 bubble 的全部
+    /// 段落/列表项/表格 cell 重新求值,逐字符扫描 + AttributedString 拼接是
+    /// 纯函数,直接缓存(对齐 MarkdownParser.blocks 的既有 memo)。嵌套
+    /// 片段(bold 内的 italic)经递归调用同样命中缓存。
+    private final class AttrBox {
+        let v: AttributedString
+        init(_ v: AttributedString) { self.v = v }
+    }
+    nonisolated(unsafe) private static let cache: NSCache<NSString, AttrBox> = {
+        let c = NSCache<NSString, AttrBox>()
+        c.countLimit = 4096
+        return c
+    }()
+
     static func attributed(_ s: String) -> AttributedString {
+        let key = s as NSString
+        if let hit = cache.object(forKey: key) { return hit.v }
+        let built = build(s)
+        cache.setObject(AttrBox(built), forKey: key)
+        return built
+    }
+
+    private static func build(_ s: String) -> AttributedString {
         var out = AttributedString()
         var i = s.startIndex
         var plain = ""
