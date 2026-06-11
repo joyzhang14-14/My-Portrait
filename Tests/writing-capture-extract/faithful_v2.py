@@ -242,6 +242,36 @@ for day in DAYS:
             seen.add(t)
             src = "ax_cleaned" + ("" if s else "~draft") + ("~residue" if is_residue(t) else "")
             out.append((app, t, kc, evid, t0, t1, src, b))
+    # 残渣副本去重(jeff chang 案,2026-06-11):~residue 的字母串与 ±10s 同bundle 邻条的
+    # 拼音平铺全等(多音字按词库全集回溯)→ 过期预上屏快照,真身胜,丢给审计。
+    # ev1173 'jeff chang shi shei'(IME 还没上屏的 AX 泄漏)vs ev1174 'jeff chang 是谁?'(上屏后)。
+    def _py_flat_eq(letters, text2):
+        if _CU[0] is None: _CU[0] = R.SCH.char_units()
+        cu = _CU[0]
+        tgt = [c for c in norm_t(text2).lower() if c.isalnum() or not c.isascii()]
+        def walk(i, s):
+            if i == len(tgt): return s == ''
+            ch = tgt[i]
+            if ch.isascii():
+                return s.startswith(ch) and walk(i + 1, s[1:])
+            for u in cu.get(ch, ()):
+                if s.startswith(u) and walk(i + 1, s[len(u):]): return True
+            return False
+        return bool(letters) and walk(0, letters)
+    out_f = []
+    for rec in out:
+        a_, t_, kc_, evid_, t0_, t1_, src0, b_ = rec
+        if '~residue' in src0:
+            letters = re.sub(r'[^a-z]', '', t_.lower())
+            twin = None
+            if len(letters) >= 4:
+                twin = next((r2 for r2 in out if r2 is not rec and r2[7] == b_ and '~residue' not in r2[6]
+                             and abs((r2[4] or r2[5] or 0) - (t0_ or t1_ or 0)) <= 10000
+                             and _py_flat_eq(letters, r2[1])), None)
+            if twin is not None:
+                drops.append(("残渣副本", a_, t_, evid_, t0_, t1_, f"拼音与真身重复:{cv(twin[1])[:30]}")); continue
+        out_f.append(rec)
+    out = out_f
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
     # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
     # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
