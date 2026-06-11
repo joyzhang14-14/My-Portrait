@@ -862,17 +862,37 @@ final class MemoryScheduler {
                 return .ran(days: days.prefix(idx).map { ProcessingLogStore.dayString($0) })
             }
             let ds = ProcessingLogStore.dayString(day)
-            // +0.15 = "这天已开跑"的视觉量 —— personality 没有 day 内子信号,
-            // 纯 idx/count 会让单天 run 全程停在 0%,看着像卡死。
-            personalityProgress = StepProgress(
-                fraction: (Double(idx) + 0.15) / Double(days.count),
-                stage: "Refreshing personality",
-                detail: "\(ds) · day \(idx + 1)/\(days.count)"
-            )
+            let dayLabel = "\(ds) · day \(idx + 1)/\(days.count)"
+            // day 内子进度:PersonalityRefresh.Phase → 当天预算带。带宽 ≈
+            // 各阶段典型耗时占比(snapshot 是最重的 LLM 调用,占大头)。
+            func setPersonalityProgress(_ dayFrac: Double, _ detail: String) {
+                personalityProgress = StepProgress(
+                    fraction: (Double(idx) + min(1, max(0, dayFrac))) / Double(days.count),
+                    stage: "Refreshing personality",
+                    detail: detail
+                )
+            }
+            setPersonalityProgress(0.02, dayLabel)
             await runStep(date: ds, stage: .personality,
                           processor: "personality", rollbackDay: nil) {
                 let cfg = self.memoryCfg
-                let r = try await PersonalityRefresh(provider: cfg.resolvedProvider, model: cfg.resolvedModel, clusterModel: cfg.resolvedModelLight).refresh(day: day)
+                let r = try await PersonalityRefresh(provider: cfg.resolvedProvider, model: cfg.resolvedModel, clusterModel: cfg.resolvedModelLight).refresh(day: day) { phase in
+                    switch phase {
+                    case .snapshot:
+                        setPersonalityProgress(0.05, "\(dayLabel) · daily snapshot (LLM)")
+                    case .ocrVerify(let i, let n) where n > 0:
+                        setPersonalityProgress(0.45 + 0.10 * Double(i) / Double(n),
+                                               "\(dayLabel) · OCR check tag \(i)/\(n)")
+                    case .ocrVerify:
+                        setPersonalityProgress(0.55, "\(dayLabel) · OCR check")
+                    case .cluster:
+                        setPersonalityProgress(0.58, "\(dayLabel) · clustering tags (LLM)")
+                    case .merge:
+                        setPersonalityProgress(0.72, "\(dayLabel) · merging concepts (LLM)")
+                    case .apply:
+                        setPersonalityProgress(0.95, "\(dayLabel) · writing concepts")
+                    }
+                }
                 print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
                 // **可疑空值 → .failed 触发重试**,别静默标 complete 永久锁死。
                 // 只针对"有高权重事件 + LLM 提了 tag,却被 OCR 验证全丢光"这一种 ——

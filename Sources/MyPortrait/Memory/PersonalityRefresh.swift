@@ -52,15 +52,29 @@ final class PersonalityRefresh {
         self.clusterModel = clusterModel
     }
 
-    func refresh(day: Date, writeDailySnapshot: Bool = true) async throws -> Report {
-        let napGuard = AppNapGuard.acquire(reason: "Personality refresh")
-        defer { napGuard.release() }
-        return try await refreshImpl(day: day, writeDailySnapshot: writeDailySnapshot)
+    /// 进度回调阶段(给 Run now 进度条按单元推进)。每个阶段开始时发一次;
+    /// OCR 验证逐 tag 发。
+    enum Phase {
+        case snapshot                            // LLM 日快照(最重的一步)
+        case ocrVerify(index: Int, count: Int)   // 逐 tag OCR 验证(1-based)
+        case cluster                             // LLM 语义聚类(轻模型)
+        case merge                               // LLM merge 决策
+        case apply                               // 落盘
     }
 
-    private func refreshImpl(day: Date, writeDailySnapshot: Bool) async throws -> Report {
+    func refresh(day: Date, writeDailySnapshot: Bool = true,
+                 progress: ((Phase) -> Void)? = nil) async throws -> Report {
+        let napGuard = AppNapGuard.acquire(reason: "Personality refresh")
+        defer { napGuard.release() }
+        return try await refreshImpl(day: day, writeDailySnapshot: writeDailySnapshot,
+                                     progress: progress)
+    }
+
+    private func refreshImpl(day: Date, writeDailySnapshot: Bool,
+                             progress: ((Phase) -> Void)?) async throws -> Report {
 
         // ── 1) events 源(weight > threshold) ──────────────────────────
+        progress?(.snapshot)
         let allEvents = await PersonalityAgent.readEvents(for: day)
         let highWeightEvents = allEvents.filter { $0.file.weight > Self.minEventWeight }
         prLog.notice("events: \(allEvents.count) total → \(highWeightEvents.count) with weight > \(Self.minEventWeight)")
@@ -75,7 +89,8 @@ final class PersonalityRefresh {
         let timeline = TimelineDB()
         var keptCandidates: [PersonalityTagCandidate] = []
         var kept = 0, dropped = 0
-        for tag in snapshot.tags {
+        for (ti, tag) in snapshot.tags.enumerated() {
+            progress?(.ocrVerify(index: ti + 1, count: snapshot.tags.count))
             guard !tag.ocrKeywords.isEmpty else {
                 prLog.notice("tag '\(tag.name, privacy: .public)': no ocr_keywords → drop")
                 dropped += 1
@@ -103,13 +118,16 @@ final class PersonalityRefresh {
         }
 
         // ── 3) 语义聚类(去重 + 收敛同义) ───────────────────────────
+        progress?(.cluster)
         let clusterAgent = PersonalityClusterAgent(provider: provider, model: clusterModel)
         let clusters = try await clusterAgent.cluster(candidates: keptCandidates)
 
         // ── 4) merge 决策(per-cluster) + 落盘 ──────────────────────
+        progress?(.merge)
         let existing = await PersonalityMerger.readConcepts()
         let merger = PersonalityMerger(provider: provider, model: model)
         let actions = try await merger.merge(clusters: clusters, existingConcepts: existing)
+        progress?(.apply)
         let apply = try merger.applyActions(actions, on: day)
 
         return Report(
