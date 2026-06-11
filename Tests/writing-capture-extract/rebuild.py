@@ -128,6 +128,15 @@ def reconstruct_message(captured, ks, context="", model_fn=None):
     lines = cap.split('\n')
     ksegs = [s for s in split_cr(ks) if any(c.isalnum() for c in s)] if isinstance(ks, str) else [ks]
     n = len(lines)
+    # 尾段防漏(ting bu cuo d案,2026-06-11):keys_in_window 尾 pad(300ms)会带进**下条消息的
+    # 前导键**(无<CR>收尾的残段),它抢走"尾部N段配N行"的对齐位,真run整段丢失→解码放弃。
+    # 段数>行数 且 kw无<CR>收尾 且 残段与末行残渣无关(非等值/前缀双向)→ 弃残段。
+    if (len(ksegs) > n and isinstance(ks, str) and not ks.rstrip().endswith('<CR>')):
+        m_t = LATIN_TAIL.search(cv(lines[-1]) if lines else '')
+        rl = m_t.group().replace(' ', '').lower().strip() if m_t else ''
+        last_letters = ''.join(c for c in ksegs[-1] if c.isalpha()).lower()
+        if not (rl and last_letters and (last_letters.startswith(rl) or rl.startswith(last_letters))):
+            ksegs = ksegs[:-1]
     seg_for = [None] * n
     take = ksegs[-n:] if n <= len(ksegs) else ksegs        # 尾部 N 段配 N 行(早段是别的消息/草稿)
     for i in range(len(take)): seg_for[n - len(take) + i] = take[i]
@@ -168,6 +177,14 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
             return n
         # 击键终态优先(小修B,2026-06-10):用户退格改字后(meili<BS>ai=meilai),AX 残渣(mei li)是
         # 过期快照;py_ks 与残渣共同前缀≥3 且有选字数字确认上屏 → 信击键终态(最大保留最终输入)。
+        # 末位失配再扫全部 picks(ting bu cuo d 案,2026-06-11):keys_in_window 尾 pad 会漏进
+        # 下条消息前导键(末位 pick='shuo'),残渣对应的 run 在更早位 → 逆序找等值/前缀 run,
+        # 取回其选字数字(同 #42 "扫全部 picks"原则;丢了数字 classify 不认,解码整段放弃)。
+        if r_cap and not (py_ks and (py_ks.startswith(r_cap)
+                  or (pick_ks is not None and _cp(py_ks, r_cap) >= 3))):
+            for p, pk, _cpl in reversed(kpicks):
+                if p == r_cap or p.startswith(r_cap):
+                    py_ks, pick_ks = p, pk; break
         use_py = py_ks if (py_ks and r_cap and (py_ks.startswith(r_cap)
                   or (pick_ks is not None and _cp(py_ks, r_cap) >= 3))) else r_cap
         use_pick = pick_ks if use_py == py_ks else None
