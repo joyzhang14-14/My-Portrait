@@ -134,6 +134,27 @@ struct MemorySettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { reload() }
+        // 调度器实时信号 → 刷新本页缓存。后台(定时)触发的 run 不经过本页
+        // 点击路径,没有这组 onChange 时:run 开始 dbInProgress 缓存还是
+        // false → 进度条不出现;run 结束 staging/attention/hasWork 全 stale
+        // → Pending review 不浮现 —— 页面看着是死的,要切页才刷新。
+        // running flag 翻转 = run 开始/结束;stage 变化兜底刷探测(开始
+        // 瞬间 in_progress 落库与首次 body 重算之间有窗口)。
+        .onChange(of: MemoryScheduler.shared.eventRunning) { _, running in
+            refreshProbes()
+            if !running { reload() }
+        }
+        .onChange(of: MemoryScheduler.shared.distillRunning) { _, running in
+            refreshProbes()
+            if !running { reload() }
+        }
+        .onChange(of: MemoryScheduler.shared.personalityRunning) { _, running in
+            refreshProbes()
+            if !running { reload() }
+        }
+        .onChange(of: MemoryScheduler.shared.eventProgress.stage) { _, _ in refreshProbes() }
+        .onChange(of: MemoryScheduler.shared.distillProgress.stage) { _, _ in refreshProbes() }
+        .onChange(of: MemoryScheduler.shared.personalityProgress.stage) { _, _ in refreshProbes() }
         .confirmationDialog(
             "Run this now?",
             isPresented: Binding(get: { confirmTrigger != nil },
@@ -752,11 +773,13 @@ struct MemorySettingsView: View {
             case .personality:     return PipelineOwner.personality
             }
         }()
-        let n = PiAgentRegistry.shared.stopGroup(owner)
+        // 走 scheduler 的 requestStop:杀当前 LLM 子进程 + 标记中止剩余天
+        // 循环(只 stopGroup 的话,day 循环会给剩余天起新 agent 继续跑)。
+        let n = MemoryScheduler.shared.requestStop(owner: owner)
         runTasks[t]?.cancel()
         runTasks[t] = nil
         runningTriggers.remove(t)
-        actionStatus = "Stopped — killed \(n) LLM process(es)."
+        actionStatus = "Stopping — killed \(n) LLM process(es), aborting remaining steps…"
     }
 
     /// UI 阻塞原因 —— 只看本 View 自己的 `runningTriggers`(用户点击驱动,

@@ -12,15 +12,19 @@ enum PipelineOwner {
     static let writingStyle   = "writing_style"
 }
 
-/// Tracks every live `PiAgent` subprocess so "Stop" can kill them — the
-/// emergency brake for runaway LLM token spend.
+/// Tracks every live LLM agent(`PiAgent` / `ClaudeCodeAgent` —— 任何
+/// `ChatAgent`)so "Stop" can kill them — the emergency brake for runaway
+/// LLM token spend.
 ///
-/// PiAgent registers itself once its process is running and unregisters on
-/// `stop()` / deinit. `stopAll()` terminates every agent; `stopGroup(owner)`
-/// only those tagged with a pipeline owner (chat agents have owner == nil,
-/// so a per-pipeline Stop never touches chat).
+/// Agent 在 start() 里注册、stop() 里注销。`stopAll()` terminates every
+/// agent; `stopGroup(owner)` only those tagged with a pipeline owner (chat
+/// agents have owner == nil, so a per-pipeline Stop never touches chat).
 ///
-/// Thread-safe (NSLock) because PiAgent is not actor-isolated and spawns from
+/// ⚠️ 别再按具体类型收窄:registry 曾只收 PiAgent,ClaudeCodeAgent 从不
+/// 注册 → memory provider 切到 claude-code 后 Stop / 60-min 兜底全是空枪
+/// ("killed 0 LLM process(es)"),任务杀不掉、进度条卡死。
+///
+/// Thread-safe (NSLock) because agents are not actor-isolated and spawn from
 /// whatever context the pipeline runs on.
 final class PiAgentRegistry: @unchecked Sendable {
     static let shared = PiAgentRegistry()
@@ -31,15 +35,15 @@ final class PiAgentRegistry: @unchecked Sendable {
     @TaskLocal static var owner: String?
 
     private final class WeakBox {
-        weak var agent: PiAgent?
+        weak var agent: (any ChatAgent)?
         let owner: String?
-        init(_ a: PiAgent, owner: String?) { agent = a; self.owner = owner }
+        init(_ a: any ChatAgent, owner: String?) { agent = a; self.owner = owner }
     }
 
     private let lock = NSLock()
     private var boxes: [WeakBox] = []
 
-    func register(_ agent: PiAgent) {
+    func register(_ agent: any ChatAgent) {
         lock.lock(); defer { lock.unlock() }
         boxes.removeAll { $0.agent == nil }
         // 登记时读 task-local owner —— register 在 agent 的 start() 内同步调用,
@@ -47,7 +51,7 @@ final class PiAgentRegistry: @unchecked Sendable {
         boxes.append(WeakBox(agent, owner: Self.owner))
     }
 
-    func unregister(_ agent: PiAgent) {
+    func unregister(_ agent: any ChatAgent) {
         lock.lock(); defer { lock.unlock() }
         boxes.removeAll { $0.agent == nil || $0.agent === agent }
     }

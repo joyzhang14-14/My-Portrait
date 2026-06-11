@@ -115,6 +115,33 @@ final class MemoryScheduler {
     /// 绕过审核直接落盘)。
     private var pauseGeneration = 0
 
+    /// 用户点了 Stop 的 pipeline owner 集合。requestStop 杀掉**当前**在飞的
+    /// LLM 子进程后,day 循环还会给剩余天起**新** agent 继续跑("根本杀不掉")
+    /// —— 各 runXxxJob 在循环顶部 consume 这个标记,中止剩余天。
+    private var stopRequestedOwners: Set<String> = []
+
+    /// UI 的 Stop 按钮入口:杀该 pipeline 当前的 LLM 子进程 + 标记中止剩余
+    /// 循环。返回杀掉的进程数(给 status 文案)。对应 job 没在跑就只杀进程
+    /// 不留标记(防 stale 标记把下一次 run 秒杀)。
+    @discardableResult
+    func requestStop(owner: String) -> Int {
+        let running: Bool = switch owner {
+        case PipelineOwner.event:       eventRunning
+        case PipelineOwner.distill:     distillRunning
+        case PipelineOwner.personality: personalityRunning
+        default:                        false
+        }
+        if running { stopRequestedOwners.insert(owner) }
+        let n = PiAgentRegistry.shared.stopGroup(owner)
+        schedLog.notice("requestStop(\(owner, privacy: .public)): killed \(n) agent(s), abort-flag=\(running)")
+        return n
+    }
+
+    /// 循环顶部消费 stop 标记。命中即清(一次 Stop 只中止一轮)。
+    private func consumeStopRequest(_ owner: String) -> Bool {
+        stopRequestedOwners.remove(owner) != nil
+    }
+
     /// 每行每阶段最近一次失败的分类。**持久化到 ~/.portrait/scheduler/
     /// last_failures.json** —— 进程重启不丢,UI 一直能显示具体 kind。
     /// 单一真相:in-memory dict,任何写都同步落盘;启动时从盘加载。
@@ -594,6 +621,7 @@ final class MemoryScheduler {
         guard canRunEvent else { return .busy }
         eventRunning = true
         defer { eventRunning = false }
+        stopRequestedOwners.remove(PipelineOwner.event)   // 清 stale 标记
         eventProgress = StepProgress(fraction: 0, stage: "Reading timeline")
         defer { eventProgress = StepProgress() }
 
@@ -616,6 +644,13 @@ final class MemoryScheduler {
             // 手动 staged run 的快照已被 pause reject,继续写会绕过审核;
             // 当 .busy 返回(不 markRan、不发 success 通知)。
             guard pauseGen == pauseGeneration else { return .busy }
+            // 用户点了 Stop → 当前步的 agent 已被杀(步已标 failed),这里
+            // 中止剩余天,别再起新 agent。返回 .ran(已动过的天):手动路径
+            // 的 autoFinishEmptyStaging 会把没跑完的天重置回 pending。
+            if consumeStopRequest(PipelineOwner.event) {
+                schedLog.notice("event job: stopped by user — aborting remaining days")
+                return .ran(days: days.prefix(idx).map { ProcessingLogStore.dayString($0) })
+            }
             let ds = ProcessingLogStore.dayString(day)
             _ = store.ensureRow(for: ds)
 
@@ -716,12 +751,15 @@ final class MemoryScheduler {
 
         let dayStrings = days.map { ProcessingLogStore.dayString($0) }
         let outcome: JobOutcome = .ran(days: dayStrings)
-        postPipelineOutcomeAlert(
-            pipeline: "Event processing",
-            dates: dayStrings,
-            successSummary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")",
-            trigger: trigger
-        )
+        // 最后一天处理中被 Stop → 不发通知(用户自己停的,别报"auto-recovering")。
+        if !consumeStopRequest(PipelineOwner.event) {
+            postPipelineOutcomeAlert(
+                pipeline: "Event processing",
+                dates: dayStrings,
+                successSummary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")",
+                trigger: trigger
+            )
+        }
         return outcome
     }
 
@@ -738,6 +776,7 @@ final class MemoryScheduler {
         guard canRunDistill else { return .busy }
         distillRunning = true
         defer { distillRunning = false }
+        stopRequestedOwners.remove(PipelineOwner.distill)   // 清 stale 标记
         distillProgress = StepProgress(fraction: 0, stage: "Distilling portrait")
         defer { distillProgress = StepProgress() }
 
@@ -772,12 +811,16 @@ final class MemoryScheduler {
         }
         // 运行期间被 pause 接管 → 当 .busy 返回(不 markRan、不发通知)。
         guard pauseGen == pauseGeneration else { return .busy }
-        postPipelineOutcomeAlert(
-            pipeline: "Portrait distillation",
-            dates: [distillAnchor],
-            successSummary: "Long-term portrait updated",
-            trigger: trigger
-        )
+        // 用户 Stop(agent 已被杀,步已标 failed)→ 不发通知。distill 单步,
+        // 无剩余循环要中止,consume 只为吞掉标记 + 静音。
+        if !consumeStopRequest(PipelineOwner.distill) {
+            postPipelineOutcomeAlert(
+                pipeline: "Portrait distillation",
+                dates: [distillAnchor],
+                successSummary: "Long-term portrait updated",
+                trigger: trigger
+            )
+        }
         return .ran(days: [distillAnchor])
     }
 
@@ -792,6 +835,7 @@ final class MemoryScheduler {
         guard canRunPersonality else { return .busy }
         personalityRunning = true
         defer { personalityRunning = false }
+        stopRequestedOwners.remove(PipelineOwner.personality)   // 清 stale 标记
         defer { personalityProgress = StepProgress() }
 
         let days = pendingPersonalityDays(cap: dayCap)
@@ -811,6 +855,12 @@ final class MemoryScheduler {
             // 运行期间被 pause 接管 → 中止剩余天,当 .busy 返回
             // (不 markRan、不发 success 通知)。
             guard pauseGen == pauseGeneration else { return .busy }
+            // 用户 Stop → 中止剩余天(同 event job;被杀那天已标 failed,
+            // autoFinishEmptyStaging 会重置它回 pending)。
+            if consumeStopRequest(PipelineOwner.personality) {
+                schedLog.notice("personality job: stopped by user — aborting remaining days")
+                return .ran(days: days.prefix(idx).map { ProcessingLogStore.dayString($0) })
+            }
             let ds = ProcessingLogStore.dayString(day)
             // +0.15 = "这天已开跑"的视觉量 —— personality 没有 day 内子信号,
             // 纯 idx/count 会让单天 run 全程停在 0%,看着像卡死。
@@ -839,12 +889,15 @@ final class MemoryScheduler {
         // 最后一天处理中被 pause 接管 → 同样中止收尾。
         guard pauseGen == pauseGeneration else { return .busy }
         let dayStrings = days.map { ProcessingLogStore.dayString($0) }
-        postPipelineOutcomeAlert(
-            pipeline: "Personality refresh",
-            dates: dayStrings,
-            successSummary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")",
-            trigger: trigger
-        )
+        // 最后一天处理中被 Stop → 不发通知(用户自己停的)。
+        if !consumeStopRequest(PipelineOwner.personality) {
+            postPipelineOutcomeAlert(
+                pipeline: "Personality refresh",
+                dates: dayStrings,
+                successSummary: "Refreshed \(days.count) day\(days.count == 1 ? "" : "s")",
+                trigger: trigger
+            )
+        }
         return .ran(days: dayStrings)
     }
 
