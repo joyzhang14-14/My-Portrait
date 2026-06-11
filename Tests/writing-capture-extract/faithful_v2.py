@@ -244,9 +244,16 @@ for day in DAYS:
                 if mt: PROOF[(ev['id'], cv(fixed))] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
         total = sum(len(t) for _, t, *_ in grp)
         if total > 20 and kc < total // 4:                          # 组级击键 gate
+            # 逐条复检(XPC案,2026-06-12:自家分组并桶后大粘贴拖累手打小消息整桶连坐)——
+            # gate 触发只定性"桶内有非手打",去留逐条判:条文本对桶 commit 流 cover≥0.5(手打)留。
+            kept_g = []
             for a, t, s, evid, t0, t1, b in grp:
-                drops.append(("组级击键gate", a, t, evid, t0, t1, f"组内容{total}字>击键{kc}×4,疑粘贴/预存"))
-            continue
+                if len(cv(t)) <= 20 or X.cover(cv(t), grp_cs) >= 0.5:
+                    kept_g.append((a, t, s, evid, t0, t1, b))
+                else:
+                    drops.append(("组级击键gate", a, t, evid, t0, t1, f"组内容{total}字>击键{kc}×4,条cover<0.5,疑粘贴/预存"))
+            grp = kept_g
+            if not grp: continue
         kst = ks_full.replace("<CR>", "").replace("<BS>", "").strip()
         if kst.startswith("/"):                                     # slash gate
             for a, t, s, evid, t0, t1, b in grp:
