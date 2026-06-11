@@ -320,6 +320,9 @@ def dedup_truncated(records, cover_fn):
                 ctb = cv(tb)
                 if len(ctb) > len(cta) and (ctb.startswith(cta) or cover_fn(cta, ctb) >= 0.8):
                     covered = True; break             # cta 是 ctb 的早期/截断态
+                # 等长编辑修正快照(vos↔vcd 互换案):同长高覆盖,时序靠后者=用户最终输入,前者丢
+                if j > i and len(ctb) == len(cta) and ctb != cta and cover_fn(cta, ctb) >= 0.9:
+                    covered = True; break
             if covered: continue
         keep.append((ta, sa, aa))
     return keep
