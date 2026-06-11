@@ -140,6 +140,10 @@ def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts
         return text, {'why': '无同app/url帧,跳过OCR'}
     others = [cv(o).replace(' ', '') for o in other_texts if o]
     for ts, ft in frames:                                 # 时间序:最早锚定命中即用
+        # 干净文本补尾(residue=0,竞速尾/单字母族)只认 return 后帧(用户裁定 2026-06-12:
+        # 没有就算了)——竞速尾在发送前不可能渲染,发送前兜底帧对这族是隐患。
+        if residue_letters == 0 and ts < send_ts:
+            continue
         ft = ft or ''
         for k in (6, 5, 4, 3):
             anchor = cv(base)[-k:]
