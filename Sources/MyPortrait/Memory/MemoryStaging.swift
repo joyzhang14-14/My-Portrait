@@ -44,6 +44,66 @@ enum MemoryStaging {
     private static func daysManifest(_ k: Kind) -> URL {
         stagingRoot.appendingPathComponent("\(k.rawValue)_days.json")
     }
+    /// distill 消费标记快照(relPath → distilledInto)。只对 .portrait 生成。
+    private static func marksManifest(_ k: Kind) -> URL {
+        stagingRoot.appendingPathComponent("\(k.rawValue)_marks.json")
+    }
+
+    // MARK: - distill 消费标记快照(.portrait 专属)
+
+    /// 主快照只盖 portrait/,但 distiller 还会把 "<category>/<slug>" 消费
+    /// 标记(distilledInto)写到 **events/** 的事件文件上。不随 Reject 回滚
+    /// 的话,重跑 distiller 会把上次已消费的事件当"已蒸馏"跳过 —— 产出
+    /// 变少、每 reject 一次缩一圈。
+    /// 不能整树快照 events/:staging pending 期间 event job 可能新建事件,
+    /// 整树回滚会把新事件删掉。所以只记/只还原 distilledInto 字段。
+    private static func snapshotDistillMarks() throws {
+        var map: [String: [String]] = [:]
+        forEachEventFile { rel, url in
+            if let f = try? PortraitFileIO.read(from: url) {
+                map[rel] = f.distilledInto
+            }
+        }
+        let data = try JSONEncoder().encode(map)
+        try data.write(to: marksManifest(.portrait), options: .atomic)
+    }
+
+    /// Reject 时调:把每个事件的 distilledInto 还原成快照值。读当前文件、
+    /// 只换这一个字段再写回 —— 快照之后新建的事件(map 里没有)不动,
+    /// 文件的其它新改动也保留。best-effort,单文件失败不阻塞其余。
+    private static func restoreDistillMarks() {
+        guard let data = try? Data(contentsOf: marksManifest(.portrait)),
+              let map = try? JSONDecoder().decode([String: [String]].self, from: data)
+        else { return }
+        var restored = 0
+        forEachEventFile { rel, url in
+            guard let recorded = map[rel] else { return }   // 快照后新建:不动
+            guard var f = try? PortraitFileIO.read(from: url),
+                  f.distilledInto != recorded else { return }
+            f.distilledInto = recorded
+            if (try? PortraitFileIO.write(f, to: url)) != nil { restored += 1 }
+        }
+        if restored > 0 {
+            print("[MemoryStaging] reject: restored distilledInto on \(restored) event file(s)")
+        }
+    }
+
+    /// 遍历 events/ 树的事件 .md(跳过 INDEX / _archive / _quarantine ——
+    /// 跟 distiller 的扫描口径一致,标记只会出现在这些文件上)。
+    private static func forEachEventFile(_ body: (String, URL) -> Void) {
+        let fm = FileManager.default
+        let root = Storage.eventsDir
+        guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil,
+                                     options: [.skipsHiddenFiles]) else { return }
+        let prefix = root.path + "/"
+        while let url = en.nextObject() as? URL {
+            guard url.pathExtension == "md" else { continue }
+            guard url.lastPathComponent != "INDEX.md" else { continue }
+            if url.pathComponents.contains("_archive") { continue }
+            if url.pathComponents.contains("_quarantine") { continue }
+            body(url.path.replacingOccurrences(of: prefix, with: ""), url)
+        }
+    }
     private static func liveDir(_ k: Kind) -> URL {
         switch k {
         case .events:      return Storage.eventsDir
@@ -79,6 +139,15 @@ enum MemoryStaging {
         let live = liveDir(k)
         try fm.createDirectory(at: live, withIntermediateDirectories: true)
         try fm.copyItem(at: live, to: backupDir(k))
+        if k == .portrait {
+            do { try snapshotDistillMarks() }
+            catch {
+                // 标记快照失败 → 撤掉主快照再抛,别留"主树能回滚、标记回滚
+                // 不了"的半套状态(正是这快照要修的坑)。
+                try? fm.removeItem(at: backupDir(k))
+                throw error
+            }
+        }
     }
 
     /// 跑完调：记下处理的天，供 reject 重置 ProcessingLog。
@@ -119,7 +188,8 @@ enum MemoryStaging {
     /// 批准：保留 live，删快照 + 清单。
     static func approve(_ k: Kind) throws {
         let fm = FileManager.default
-        for url in [backupDir(k), daysManifest(k)] where fm.fileExists(atPath: url.path) {
+        for url in [backupDir(k), daysManifest(k), marksManifest(k)]
+            where fm.fileExists(atPath: url.path) {
             try fm.removeItem(at: url)
         }
     }
@@ -143,8 +213,13 @@ enum MemoryStaging {
         }
         if fm.fileExists(atPath: live.path) { try fm.removeItem(at: live) }
         try fm.moveItem(at: backup, to: live)
-        let manifest = daysManifest(k)
-        if fm.fileExists(atPath: manifest.path) { try fm.removeItem(at: manifest) }
+        // distill 的消费标记(distilledInto)写在 events/ 树上,主快照盖不到
+        // —— 不还原的话重跑 distiller 会把上次已消费的事件当"已蒸馏"跳过。
+        if k == .portrait { restoreDistillMarks() }
+        for url in [daysManifest(k), marksManifest(k)]
+            where fm.fileExists(atPath: url.path) {
+            try fm.removeItem(at: url)
+        }
     }
 
     /// 孤儿快照 = 有 backup 目录但 days 清单不存在 —— staged run 在 markRan
@@ -160,9 +235,9 @@ enum MemoryStaging {
     /// 没有清单不知道哪些天动过,回滚必丢已 complete 的天)。删完
     /// hasPending 变 false,被它卡住的定时调度恢复。
     static func discardOrphan(_ k: Kind) throws {
-        let backup = backupDir(k)
-        if FileManager.default.fileExists(atPath: backup.path) {
-            try FileManager.default.removeItem(at: backup)
+        let fm = FileManager.default
+        for url in [backupDir(k), marksManifest(k)] where fm.fileExists(atPath: url.path) {
+            try fm.removeItem(at: url)
         }
     }
 
