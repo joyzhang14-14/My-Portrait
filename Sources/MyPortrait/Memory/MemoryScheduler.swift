@@ -807,7 +807,18 @@ final class MemoryScheduler {
                         + (p.written > 0 ? " · \(p.written) updated" : "")
                 )
             }
-            return r.llmFailedCategories == 0 ? .success : .failed
+            if r.llmFailedCategories > 0 {
+                // 记真因(第一个失败 category 的错误原文)。不记的话 applyOutcome
+                // 的 fallback 只写笼统的 "distill step reported failure",
+                // attention / 通知里看不出到底是限流、解析还是空响应。
+                self.recordFailure(
+                    date: self.distillAnchor, stage: .distill,
+                    kind: .unknownTransient(reason: r.firstFailureReason
+                        ?? "\(r.llmFailedCategories) category(ies) failed")
+                )
+                return .failed
+            }
+            return .success
         }
         // 运行期间被 pause 接管 → 当 .busy 返回(不 markRan、不发通知)。
         guard pauseGen == pauseGeneration else { return .busy }

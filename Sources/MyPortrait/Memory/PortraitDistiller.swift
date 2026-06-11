@@ -39,6 +39,10 @@ final class PortraitDistiller {
         let llmFailedCategories: Int
         let archivedCount: Int
         let elapsed: TimeInterval
+        /// 第一个失败 category 的具体原因("habits: LLM error: …")。
+        /// 调度器用它记 failure kind,让 attention / 通知显示真因而不是
+        /// 笼统的 "distill step reported failure"。nil = 没有失败。
+        var firstFailureReason: String? = nil
     }
 
     enum DistillError: LocalizedError {
@@ -46,6 +50,7 @@ final class PortraitDistiller {
         case agentTimeout
         case noJSONInResponse
         case malformedJSON(String)
+        case llmError(String)        // agent .error 事件携带的 API 错误原文
 
         var errorDescription: String? {
             switch self {
@@ -53,6 +58,7 @@ final class PortraitDistiller {
             case .agentTimeout:          return "LLM did not respond within timeout"
             case .noJSONInResponse:      return "LLM response contained no JSON"
             case .malformedJSON(let m):  return "LLM JSON parse failed: \(m)"
+            case .llmError(let m):       return "LLM error: \(m)"
             }
         }
     }
@@ -102,6 +108,7 @@ final class PortraitDistiller {
         var written = 0
         var updated = 0
         var failed = 0
+        var firstFailureReason: String? = nil
         // distillCategories 排除 personality —— personality 走独立的
         // PersonalityAgent / PersonalityMerger pipeline，不归通用 distiller。
         let categories = PortraitPaths.distillCategories
@@ -152,7 +159,20 @@ final class PortraitDistiller {
                 // 中止整轮,已写分类保留(update 幂等),调度器稍后重试。
                 throw DistillError.agentTimeout
             } catch {
+                // ⚠️ 别静默吞:这里曾经只 failed += 1,DeepSeek 等 API 后端
+                // 单类失败(限流/解析/空响应)时用户只看到"distill step
+                // reported failure",完全无从排查。落 DiagLog + 留第一条原因
+                // 给 Result,让 attention/通知显示真因。
                 failed += 1
+                let reason = (error as? LocalizedError)?.errorDescription
+                    ?? String(describing: error)
+                if firstFailureReason == nil {
+                    firstFailureReason = "\(category): \(reason)"
+                }
+                print("[Distill] category \(category) FAILED — \(reason)")
+                DiagLog.warn("distill.category.failed", ctx: [
+                    "category": category, "error": reason,
+                ])
             }
 
             progress?(.init(categoryIndex: idx + 1, categoryCount: categories.count, category: category, written: written))
@@ -169,7 +189,8 @@ final class PortraitDistiller {
             portraitFilesUpdated: updated,
             llmFailedCategories: failed,
             archivedCount: archive.archivedCount,
-            elapsed: Date().timeIntervalSince(start)
+            elapsed: Date().timeIntervalSince(start),
+            firstFailureReason: firstFailureReason
         )
     }
 
@@ -221,8 +242,15 @@ final class PortraitDistiller {
         }
 
         // 撞额度优先于解析失败：抛 BudgetExhaustedError 让上层走 budget_deferred。
-        if let err = await coordinator.consumeError(), BudgetSignal.isExhausted(err) {
-            throw BudgetExhaustedError(processor: "PortraitDistiller", message: err)
+        // 其它 .error(限流 / 余额 / 认证 / 网络)也显式抛原文 —— 否则 buffer
+        // 是空的,落到 parseDecisions 抛 noJSONInResponse,真因被掩盖。
+        if let err = await coordinator.consumeError() {
+            if BudgetSignal.isExhausted(err) {
+                throw BudgetExhaustedError(processor: "PortraitDistiller", message: err)
+            }
+            if collected.isEmpty {
+                throw DistillError.llmError(err)
+            }
         }
 
         return try Self.parseDecisions(from: collected)
