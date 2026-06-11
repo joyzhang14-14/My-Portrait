@@ -75,8 +75,13 @@ python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
 - [x] v1 脚手架(本文档 + 全部代码)—— 未跑过任何模型
 - [x] v1.1 多层清洗:clean_day.py(用户提议:时间换质量,数字越洗越准)
       ⚠️ 改了 OCR cap(600→2000),已 ingest 的天要 --reingest 才吃到新 cap
-- [ ] 烟雾测试(--limit 5,等用户确认 + faithful_v2.py 停)
-- [ ] 整天跑通 + inspect 对照
+- [x] 烟雾测试 + 整天跑通(06-07,2026-06-11):1126 sessions 全 completed,
+      **6 类 LLM 调用 9775 次零失败**;decide 258 事件 → merge 并 109 →
+      终态 149(新 44 + 老事件复现 105);云端同日 28 个新事件。
+      文档:~/Desktop/Obsidian/本地14B事件产出-2026-06-07.md + 云端事件产出-….md
+      ⚠️ 已知问题:① merge 兜底 O(n²) 烧 6823 调用/123min(decide join 率
+      不够狠是上游因)→ 下版改 top-K 邻居;② 产出粒度仍比云端碎(149 vs 28),
+      decide/merge prompt 要更激进;③ describe 语言混杂(英文为主夹中文)。
 - [ ] 质量结论 → 决定细化指标 / 改架构 / 换模型档位
 - [ ] (远期)移植 Swift + MLX 打包进 app —— 处理逻辑那时再改
       ⚠️ 移植时 join 路径要做全产出语义(用户点名):不建新文件,给老事件
