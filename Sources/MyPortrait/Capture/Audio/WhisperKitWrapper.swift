@@ -62,6 +62,13 @@ final class WhisperKitWrapper: @unchecked Sendable {
     /// 录音时。失败 swallow,真用到再走 ensurePipe 重试。
     func prefetch() async {
         guard pipe == nil else { return }
+        // 已在磁盘 → 直接返回。WhisperKit(model:) 不只是下载,是完整 pipeline
+        // 初始化(CoreML/ANE 编译 + 把 ~1.5GB 模型加载进内存)然后立刻丢弃 ——
+        // 不带这个守卫,每次冷启动都白付一次 GB 级瞬时内存峰值 + 数十秒编译。
+        guard !Self.isOnDisk(modelName: modelName) else {
+            logger.info("WhisperKit model already on disk, skipping prefetch init")
+            return
+        }
         logger.info("prefetching WhisperKit model: \(self.modelName, privacy: .public)")
         do {
             let temp = try await WhisperKit(model: modelName)
