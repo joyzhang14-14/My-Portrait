@@ -943,7 +943,10 @@ enum DBSchema {
         // 生成):frames 的任何 UPDATE —— compaction 置 snapshot_path、retention
         // 每日置 NULL、死行中和 —— 都让每行几 KB 的 OCR 全文做一次 FTS
         // delete+reinsert 重分词,纯白付(媒体列根本不在索引里)。换成列限定版:
-        // 只有真正进索引的 4 列被 UPDATE 才触发。触发器体逐字保留原文。
+        // 只有真正进索引的 4 列被 UPDATE 才触发。触发器体与 GRDB 生成版
+        // **语义等价**(GRDB 写 old."id",这里写 OLD."rowid" —— frames.id 是
+        // INTEGER PRIMARY KEY,即 rowid 别名,scratch DB 实测两者行为一致、
+        // FTS integrity-check 通过)。
         // ⚠️ 改触发器文本要连 EmbedDumpCLI --rebuild-frames-fts 一起改,否则
         // 手动重建会把这条优化退回去。
         m.registerMigration("v39_frames_fts_au_column_scoped") { db in
