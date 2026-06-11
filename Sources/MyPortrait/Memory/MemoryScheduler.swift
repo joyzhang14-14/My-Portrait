@@ -208,6 +208,13 @@ final class MemoryScheduler {
         store.allRows().contains { $0.personality == .inProgress }
     }
 
+    /// 指定 row 的指定 stages 是否全部 complete —— 手动 run 收尾时判断
+    /// "这次 run 真跑成了还是有阶段失败/被跳过"。row 不存在按未完成算。
+    nonisolated func stagesComplete(date: String, stages: [ProcessingStage]) -> Bool {
+        guard let row = store.row(for: date) else { return false }
+        return stages.allSatisfy { row.status(of: $0) == .complete }
+    }
+
     // MARK: - View bindings(canRunXxx + 解释文案)
     /// 当前是否有事件家族(distill or personality)在跑。
     var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
