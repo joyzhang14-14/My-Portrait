@@ -57,6 +57,20 @@ struct MemorySettingsView: View {
     @State private var hasPersonalityWork: Bool = true
     /// writing capture backlog 现在有没有未处理的 typing_event。
     @State private var hasWritingCaptureWork: Bool = true
+    /// body 渲染期间不再直接查 DB / 文件系统 —— 下面这些探测缓存在
+    /// reload()/refreshStaging() 既有刷新点后台重算,body 只读缓存。
+    /// (原来 triggerRow×3 + reviewSection×3 每次 body 求值各开一条 sqlite
+    /// 连接全表扫 processing_log,job 跑着时每帧 6 次;hasPending 是同步
+    /// fileExists;attentionRow 每行还各一次查询。)
+    @State private var dbInProgressEvent = false
+    @State private var dbInProgressDistill = false
+    @State private var dbInProgressPersonality = false
+    @State private var pendingEvents = false
+    @State private var pendingPortrait = false
+    @State private var pendingPersonality = false
+    /// Needs attention 每行的 DB row(nextRetryLabel 用),per-date,
+    /// 跟 attention 列表同一个 reload 后台任务里算好。
+    @State private var attentionDbRows: [String: ProcessingLogRow] = [:]
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
     // EventClassifier 已下线 —— folder 整理改由 chat AI 通过 mp-folders 按用户
@@ -169,9 +183,17 @@ struct MemorySettingsView: View {
         Task.detached(priority: .userInitiated) {
             let scheduler = await MemoryScheduler.shared
             let att = scheduler.attentionDays()
+            // 每行的 DB row 在这里一次算好,attentionRow(date:) 不再在 body 里逐行查。
+            let rows = Dictionary(
+                att.compactMap { item in
+                    scheduler.attentionRow(date: item.date).map { (item.date, $0) }
+                },
+                uniquingKeysWith: { a, _ in a }
+            )
             let log = ProcessingLogStore().recentPipelineRuns(limit: 50)
             await MainActor.run {
                 attention = att
+                attentionDbRows = rows
                 changelog = log
             }
         }
@@ -237,6 +259,31 @@ struct MemorySettingsView: View {
         portraitChanges = MemoryStaging.changes(.portrait)
         personalityChanges = MemoryStaging.changes(.personality)
         refreshHasWork()
+        refreshProbes()
+    }
+
+    /// 后台重算 body 要读的探测缓存:三个 in_progress bool(每个都是新开
+    /// sqlite 连接全表扫 processing_log)+ 三个 hasPending bool(fileExists)。
+    /// 跟 refreshHasWork 同模式,挂在 refreshStaging 这个既有刷新漏斗上
+    /// (reload / run 收尾 / approve / reject 都会经过)。
+    private func refreshProbes() {
+        Task.detached(priority: .userInitiated) {
+            let s = await MemoryScheduler.shared
+            let e = s.hasInProgressRowForEvent()
+            let d = s.hasInProgressRowForDistill()
+            let p = s.hasInProgressRowForPersonality()
+            let pe = MemoryStaging.hasPending(.events)
+            let pp = MemoryStaging.hasPending(.portrait)
+            let ps = MemoryStaging.hasPending(.personality)
+            await MainActor.run {
+                dbInProgressEvent = e
+                dbInProgressDistill = d
+                dbInProgressPersonality = p
+                pendingEvents = pe
+                pendingPortrait = pp
+                pendingPersonality = ps
+            }
+        }
     }
 
     /// 重新算三个 job 当前有没有活。off-main 跑(扫 timeline+processing_log)。
@@ -1087,11 +1134,12 @@ struct MemorySettingsView: View {
             case .personality:     return s.personalityRunning
             }
         }()
+        // 读缓存,不在 body 里现查 DB(refreshProbes 在既有刷新点后台重算)。
         let dbInProgress: Bool = {
             switch t {
-            case .eventProcessing: return s.hasInProgressRowForEvent()
-            case .distill:         return s.hasInProgressRowForDistill()
-            case .personality:     return s.hasInProgressRowForPersonality()
+            case .eventProcessing: return dbInProgressEvent
+            case .distill:         return dbInProgressDistill
+            case .personality:     return dbInProgressPersonality
             }
         }()
         let schedulerSelfRunning = memFlag && dbInProgress
@@ -1106,7 +1154,14 @@ struct MemorySettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
-                let pending = MemoryStaging.hasPending(t.kind)
+                // 读缓存,不在 body 里做 fileExists 同步 IO。
+                let pending: Bool = {
+                    switch t {
+                    case .eventProcessing: return pendingEvents
+                    case .distill:         return pendingPortrait
+                    case .personality:     return pendingPersonality
+                    }
+                }()
                 let schedulerReason = schedulerBlockReason(for: t)
                 // 有没有活要干 —— 全 complete / dead_letter 时按钮该灰,避免误点。
                 let hasWork: Bool = {
@@ -1235,16 +1290,18 @@ struct MemorySettingsView: View {
         // 本 View 触发器集合也空)才呈现可审核状态。
         // 跟 triggerRow 同口径:in-memory flag AND DB 真有 in_progress
         // (避免 stale flag 让 reviewSection 误以为还在跑而藏住 pending review)。
+        // in_progress / hasPending 都读缓存(refreshProbes 后台重算),
+        // 不在 body 里现查 DB / fileExists。
         let s = MemoryScheduler.shared
         let eventsRunning = runningTriggers.contains(.eventProcessing)
-            || (s.eventRunning && s.hasInProgressRowForEvent())
+            || (s.eventRunning && dbInProgressEvent)
         let portraitRunning = runningTriggers.contains(.distill)
-            || (s.distillRunning && s.hasInProgressRowForDistill())
+            || (s.distillRunning && dbInProgressDistill)
         let personalityRunning = runningTriggers.contains(.personality)
-            || (s.personalityRunning && s.hasInProgressRowForPersonality())
-        let hasEvents = MemoryStaging.hasPending(.events) && !eventsRunning
-        let hasPortrait = MemoryStaging.hasPending(.portrait) && !portraitRunning
-        let hasPersonality = MemoryStaging.hasPending(.personality) && !personalityRunning
+            || (s.personalityRunning && dbInProgressPersonality)
+        let hasEvents = pendingEvents && !eventsRunning
+        let hasPortrait = pendingPortrait && !portraitRunning
+        let hasPersonality = pendingPersonality && !personalityRunning
         // Writing capture / style 也归这里(同 memory 一样,跑步中不显示)。
         let hasWritingCapture = (!writingCapturePending.isEmpty || writingCaptureUI.lastSummary != nil)
             && !writingCaptureUI.isRunning
@@ -1381,7 +1438,8 @@ struct MemorySettingsView: View {
             .joined(separator: " · ")
 
         // 行号 row 的精确状态(找最新 updated row,给 nextRetryLabel 用)。
-        let dbRow = scheduler.attentionRow(date: item.date)
+        // 读缓存 —— reload 的后台任务跟 attention 列表一起算好,不在 body 里逐行查 DB。
+        let dbRow = attentionDbRows[item.date]
 
         if let kind = userKind {
             // ─── 桶 B:user-required → 红 banner + Problem solved 按钮 ───
