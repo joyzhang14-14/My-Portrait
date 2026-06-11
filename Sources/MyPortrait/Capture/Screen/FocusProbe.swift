@@ -78,9 +78,15 @@ actor FocusProbe {
         isFocused: true
     )
 
-    /// 仅在 `start()` 后非 nil。停止时反注册。
-    private var activationObserver: NSObjectProtocol?
-    private var deactivationObserver: NSObjectProtocol?
+    /// 通知 token 盒。`@unchecked Sendable` 是因为 tokens **只在主线程读写**
+    /// (start/stop 都经 MainActor.run),类型本身只是跨 actor 传递的句柄盒
+    /// (NSObjectProtocol 非 Sendable,不能直接当 MainActor.run 返回值带回)。
+    private final class WorkspaceObserverBox: @unchecked Sendable {
+        var tokens: [NSObjectProtocol] = []
+    }
+
+    private let observerTokens = WorkspaceObserverBox()
+    private var started = false
     private var axPermissionWarned = false
 
     init(reporter: UnimplementedReporter) {
@@ -88,41 +94,54 @@ actor FocusProbe {
     }
 
     /// 启动监听。注册 NSWorkspace 通知，立即做一次初次刷新。
+    ///
+    /// ⚠️ 注册必须钉在主线程:全工程其它 NSWorkspace 通知注册方
+    /// (WorkspaceWatcher / SleepWakeWatcher / TypingObserver)都是
+    /// @MainActor,唯独本 actor 曾在协作线程上注册 —— macOS 26(Tahoe)
+    /// 上偶发撞 AppKit 内部断言(EXC_BREAKPOINT / __CF_IS_OBJC,崩在
+    /// addObserver 内部,真机抓到过)。统一钉 main,与 SCK 钉主线程的
+    /// Tahoe 惯例一致(见 ScreenCaptureService 头注)。
     func start() async {
-        guard activationObserver == nil else { return }
+        guard !started else { return }
+        started = true
 
-        let center = NSWorkspace.shared.notificationCenter
+        let box = observerTokens
+        await MainActor.run {
+            let center = NSWorkspace.shared.notificationCenter
 
-        // 焦点 app 切换 → 立即刷新。
-        // 通知会派发到 main thread，我们在闭包里再切回 actor。
-        activationObserver = center.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            Task { await self.refresh() }
-        }
+            // 焦点 app 切换 → 立即刷新。
+            // 通知会派发到 main thread，我们在闭包里再切回 actor。
+            box.tokens.append(center.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                Task { await self.refresh() }
+            })
 
-        // 当前 app 被切走 → 重新刷一次（NSWorkspace.frontmostApplication 已更新）。
-        deactivationObserver = center.addObserver(
-            forName: NSWorkspace.didDeactivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            Task { await self.refresh() }
+            // 当前 app 被切走 → 重新刷一次（NSWorkspace.frontmostApplication 已更新）。
+            box.tokens.append(center.addObserver(
+                forName: NSWorkspace.didDeactivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                Task { await self.refresh() }
+            })
         }
 
         await refresh()
     }
 
     func stop() async {
-        let center = NSWorkspace.shared.notificationCenter
-        if let obs = activationObserver { center.removeObserver(obs) }
-        if let obs = deactivationObserver { center.removeObserver(obs) }
-        activationObserver = nil
-        deactivationObserver = nil
+        started = false
+        let box = observerTokens
+        await MainActor.run {
+            let center = NSWorkspace.shared.notificationCenter
+            for t in box.tokens { center.removeObserver(t) }
+            box.tokens.removeAll()
+        }
     }
 
     /// 当前焦点快照。O(1)。
