@@ -105,16 +105,22 @@ enum LLMJSON {
     // MARK: - Repair
 
     /// 把"几乎是 JSON"的 LLM 输出修成 JSONSerialization 能解析的形态。
-    /// 只修两类**机械**缺陷,对合法 JSON 是 no-op:
+    /// 修三类**机械**缺陷,对合法 JSON 是 no-op:
     ///   1. 字符串字面量**内**的裸控制字符(\n \r \t)→ 标准转义。reasoning
     ///      模型(deepseek-v4-pro 等)给长 markdown body 字符串时最常犯 ——
     ///      合法 JSON 字符串里本就不允许裸控制字符,所以转义不会破坏语义。
-    ///   2. 字符串**外**的尾逗号(`,]` / `,}`)→ 删除。
+    ///   2. 字符串**内**的裸 ASCII 引号 → 转义。模型写中文引用别人的话
+    ///      (`他说"原话"`)/引文件名时直接打 `"` 不转义。判定:`"` 后面的
+    ///      第一个非空白字符是 JSON 结构符(, : } ])才算字符串终结符,
+    ///      否则视为内容。合法 JSON 的终结引号后必然紧跟结构符 → no-op。
+    ///   3. 字符串**外**的尾逗号(`,]` / `,}`)→ 删除。
     /// 语义级缺陷(单引号 / 注释)不在这里修 —— caller 解析时配
-    /// `.json5Allowed` 兜。
+    /// `.json5Allowed` 兜。修不动的(如内容引号恰好后跟 ASCII 逗号)会
+    /// 产出不可解析的结果,caller 失败路径 dump 原文兜底。
     static func repair(_ json: String) -> String {
+        let chars = Array(json)
         var out = String()
-        out.reserveCapacity(json.count)
+        out.reserveCapacity(chars.count)
         var inString = false
         var escape = false
         /// 字符串外攒住的 "," + 其后空白 —— 看到 ]/} 时丢逗号,否则原样吐出。
@@ -129,14 +135,28 @@ enum LLMJSON {
             pending = ""
         }
 
-        for ch in json {
+        /// i 处的 `"`(在字符串内)是不是真正的终结符:看后面第一个非空白。
+        func isTerminatorQuote(at i: Int) -> Bool {
+            var j = i + 1
+            while j < chars.count, chars[j].isWhitespace { j += 1 }
+            if j >= chars.count { return true }
+            return chars[j] == "," || chars[j] == ":" || chars[j] == "}" || chars[j] == "]"
+        }
+
+        var i = 0
+        while i < chars.count {
+            let ch = chars[i]
             if inString {
                 if escape {
                     out.append(ch); escape = false
                 } else if ch == "\\" {
                     out.append(ch); escape = true
                 } else if ch == "\"" {
-                    out.append(ch); inString = false
+                    if isTerminatorQuote(at: i) {
+                        out.append(ch); inString = false
+                    } else {
+                        out.append("\\\"")   // 内容引号 → 转义留在串内
+                    }
                 } else if ch == "\n" {
                     out.append("\\n")
                 } else if ch == "\r" {
@@ -146,22 +166,23 @@ enum LLMJSON {
                 } else {
                     out.append(ch)
                 }
-                continue
+                i += 1; continue
             }
             // —— 字符串外 ——
             if !pending.isEmpty {
-                if ch.isWhitespace { pending.append(ch); continue }
+                if ch.isWhitespace { pending.append(ch); i += 1; continue }
                 if ch == "]" || ch == "}" {
                     flushPending(dropComma: true)
                     out.append(ch)
-                    continue
+                    i += 1; continue
                 }
                 flushPending(dropComma: false)
                 // fall through:ch 按正常字符继续处理
             }
-            if ch == "," { pending = ","; continue }
-            if ch == "\"" { inString = true; out.append(ch); continue }
+            if ch == "," { pending = ","; i += 1; continue }
+            if ch == "\"" { inString = true; out.append(ch); i += 1; continue }
             out.append(ch)
+            i += 1
         }
         if !pending.isEmpty { flushPending(dropComma: false) }
         return out
