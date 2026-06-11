@@ -1215,9 +1215,9 @@ struct MemorySettingsView: View {
                 .disabled(disabledReason != nil)
                 .help(disabledReason ?? "Trigger \(t.title) now.")
             }
-            // 每条 trigger 自己的 inline 运行指示(实时阶段 + Stop)。
+            // 每条 trigger 自己的 inline 运行指示(实时进度条 + Stop)。
             if actuallyRunning {
-                runningIndicator(triggerStage(t), onStop: { stopTrigger(t) })
+                progressIndicator(triggerProgress(t), onStop: { stopTrigger(t) })
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1244,14 +1244,50 @@ struct MemorySettingsView: View {
         .padding(.top, 6)
     }
 
-    /// 某 memory trigger 当前阶段(scheduler 实时发布,跑时逐步推进)。
-    private func triggerStage(_ t: ManualTrigger) -> String {
+    /// 某 memory trigger 当前进度(scheduler 实时发布,每个单元推进一格)。
+    private func triggerProgress(_ t: ManualTrigger) -> MemoryScheduler.StepProgress {
         let s = MemoryScheduler.shared
         switch t {
-        case .eventProcessing: return s.eventStage
-        case .distill:         return s.distillStage
-        case .personality:     return s.personalityStage
+        case .eventProcessing: return s.eventProgress
+        case .distill:         return s.distillProgress
+        case .personality:     return s.personalityProgress
         }
+    }
+
+    /// 真进度条版运行指示(memory pipeline 三个 trigger 用):
+    /// 阶段名 + 百分比 + Stop 一行,linear bar 一行,单元 detail 一行。
+    /// fraction == nil 时退化成 indeterminate 条(刚起步还没拿到单元信号)。
+    @ViewBuilder
+    private func progressIndicator(_ p: MemoryScheduler.StepProgress,
+                                   onStop: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(p.stage.isEmpty ? "Running…" : p.stage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if let f = p.fraction {
+                    Text("\(Int((f * 100).rounded()))%")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Button("Stop", action: onStop)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+            }
+            ProgressView(value: p.fraction, total: 1.0)
+                .progressViewStyle(.linear)
+                .controlSize(.small)
+            if !p.detail.isEmpty {
+                Text(p.detail)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.top, 8)
     }
 
     /// 停某个 memory trigger:杀 LLM 子进程 + cancel 它的 task + 清运行态。

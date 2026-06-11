@@ -87,11 +87,22 @@ final class MemoryScheduler {
     private(set) var distillRunning = false
     private(set) var personalityRunning = false
 
-    /// 当前子阶段(给 Settings 的 Run now 实时显示)。空 = 没跑那一步。
-    /// @Observable 自动跟踪,view 直接读。
-    private(set) var eventStage = ""
-    private(set) var distillStage = ""
-    private(set) var personalityStage = ""
+    /// 一个 pipeline 的实时进度(给 Settings 的 Run now 进度条)。
+    /// fraction = 0…1 的总体完成度,nil = 不确定(indeterminate 条);
+    /// stage = 当前阶段名;detail = 子单元说明("Day 2/3 · batch 1/4")。
+    struct StepProgress: Equatable {
+        var fraction: Double? = nil
+        var stage: String = ""
+        var detail: String = ""
+        var isIdle: Bool { stage.isEmpty }
+    }
+
+    /// 当前子阶段进度(给 Settings 的 Run now 实时显示)。stage 空 = 没跑。
+    /// @Observable 自动跟踪,view 直接读。LLM 调用期间条不动(没有 token 级
+    /// 信号),每完成一个单元(LLM batch / 落盘 cluster / category / day)进一格。
+    private(set) var eventProgress = StepProgress()
+    private(set) var distillProgress = StepProgress()
+    private(set) var personalityProgress = StepProgress()
     /// tick() 自身的可重入防护(timer 与 startup 并发触发时只跑一次)。
     private var tickRunning = false
     private var timer: Timer?
@@ -583,8 +594,8 @@ final class MemoryScheduler {
         guard canRunEvent else { return .busy }
         eventRunning = true
         defer { eventRunning = false }
-        eventStage = "Reading timeline"
-        defer { eventStage = "" }
+        eventProgress = StepProgress(fraction: 0, stage: "Reading timeline")
+        defer { eventProgress = StepProgress() }
 
         let days = pendingDays(cap: dayCap)
         guard !days.isEmpty else {
@@ -615,15 +626,41 @@ final class MemoryScheduler {
             }
             store.setStatus(date: ds, stage: .raw, status: .complete)
 
+            // 进度:总体 = (已完成天数 + 当天内部进度) / 总天数。当天内部
+            // 进度的分段:0-0.06 读帧,0.06-0.60 LLM 聚类(按 batch 推进),
+            // 0.60-0.68 落盘(按 cluster 推进),0.70 event 步完,0.70-0.98
+            // impact(按评分 batch 推进)。LLM 调用中条不动是预期(无 token 级信号)。
+            let dayN = Double(days.count)
+            let dayLabel = "Day \(idx + 1)/\(days.count)"
+            func setEventProgress(_ dayFrac: Double, _ stage: String, _ detail: String) {
+                eventProgress = StepProgress(
+                    fraction: (Double(idx) + min(1, max(0, dayFrac))) / dayN,
+                    stage: stage, detail: detail
+                )
+            }
+
             // event 步。
             var row = store.row(for: ds) ?? ProcessingLogRow(date: ds)
             if row.event.needsWork {
-                eventStage = "Building events (\(idx + 1)/\(days.count))"
+                setEventProgress(0, "Building events", dayLabel)
                 await runStep(date: ds, stage: .event, processor: "event", rollbackDay: day) {
                     let nb = self.daysBackToCover(day)
                     // skipWeightPass:weight pass 挪到 days 循环结束后只跑
                     // 一次(下面),否则 dayCap=7 时全树重写 7 遍。
-                    let r = try await Backfill.run(daysBack: nb, onlyDay: day, skipWeightPass: true)
+                    let r = try await Backfill.run(daysBack: nb, onlyDay: day, skipWeightPass: true) { p in
+                        switch p.unit {
+                        case .llmBatch(let i, let n) where n > 0:
+                            setEventProgress(0.06 + 0.54 * Double(i - 1) / Double(n),
+                                             "Building events",
+                                             "\(dayLabel) · clustering batch \(i)/\(n)")
+                        case .materialise(let i, let n) where n > 0:
+                            setEventProgress(0.60 + 0.08 * Double(i) / Double(n),
+                                             "Building events",
+                                             "\(dayLabel) · writing event \(i)/\(n)")
+                        default:
+                            setEventProgress(0.03, "Building events", "\(dayLabel) · \(p.phase)")
+                        }
+                    }
                     return r.llmFailedDays == 0 ? .success : .failed
                 }
                 row = store.row(for: ds) ?? row
@@ -631,11 +668,16 @@ final class MemoryScheduler {
 
             // impact 步：仅当 event 已 complete。按日扫 events/<day>/ 下的 unscored。
             if row.event == .complete, row.impact.needsWork {
-                eventStage = "Scoring impact (\(idx + 1)/\(days.count))"
+                setEventProgress(0.70, "Scoring impact", dayLabel)
                 await runStep(date: ds, stage: .impact, processor: "impact", rollbackDay: nil) {
                     let dir = PortraitPaths.eventsDayDir(for: day)
                     let cfg = self.memoryCfg
-                    let r = try await ImpactScorer(provider: cfg.resolvedProvider, model: cfg.resolvedModel).rescoreAll(root: dir)
+                    let r = try await ImpactScorer(provider: cfg.resolvedProvider, model: cfg.resolvedModel).rescoreAll(root: dir) { p in
+                        guard p.batchCount > 0 else { return }
+                        setEventProgress(0.70 + 0.28 * Double(p.batchIndex) / Double(p.batchCount),
+                                         "Scoring impact",
+                                         "\(dayLabel) · \(p.scoredCount)/\(p.totalCount) events scored")
+                    }
                     return r.failedCount == 0 ? .success : .failed
                 }
             }
@@ -648,12 +690,12 @@ final class MemoryScheduler {
         // weight pass：跟 rebalance 一样，整个 event 处理跑完只跑一次
         // （逐天的 Backfill.run 传了 skipWeightPass）。pause 中止时跟
         // rebalance 一起被上面的 guard 跳过；个别天失败不影响它跑。
-        eventStage = "Recomputing weights"
+        eventProgress = StepProgress(fraction: 0.98, stage: "Recomputing weights")
         await Backfill.weightPass()
 
         // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
         // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
-        eventStage = "Rebalancing"
+        eventProgress = StepProgress(fraction: 0.99, stage: "Rebalancing")
         _ = MemoryBudget_applyToDisk()
 
         // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
@@ -696,8 +738,8 @@ final class MemoryScheduler {
         guard canRunDistill else { return .busy }
         distillRunning = true
         defer { distillRunning = false }
-        distillStage = "Distilling portrait"
-        defer { distillStage = "" }
+        distillProgress = StepProgress(fraction: 0, stage: "Distilling portrait")
+        defer { distillProgress = StepProgress() }
 
         _ = store.ensureRow(for: distillAnchor)
         let distill = store.row(for: distillAnchor)?.distill ?? .idle
@@ -713,7 +755,17 @@ final class MemoryScheduler {
 
         await runStep(date: distillAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
             let cfg = self.memoryCfg
-            let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill()
+            let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill { p in
+                // categoryIndex:每个 category 开始前发 idx(0-based),结束后发
+                // idx+1 —— 条按 category 推进,detail 显示当前类目 + 已写条数。
+                guard p.categoryCount > 0 else { return }
+                self.distillProgress = StepProgress(
+                    fraction: Double(p.categoryIndex) / Double(p.categoryCount),
+                    stage: "Distilling portrait",
+                    detail: "\(p.category) · \(min(p.categoryIndex + 1, p.categoryCount))/\(p.categoryCount) categories"
+                        + (p.written > 0 ? " · \(p.written) updated" : "")
+                )
+            }
             return r.llmFailedCategories == 0 ? .success : .failed
         }
         // 运行期间被 pause 接管 → 当 .busy 返回(不 markRan、不发通知)。
@@ -738,7 +790,7 @@ final class MemoryScheduler {
         guard canRunPersonality else { return .busy }
         personalityRunning = true
         defer { personalityRunning = false }
-        defer { personalityStage = "" }
+        defer { personalityProgress = StepProgress() }
 
         let days = pendingPersonalityDays(cap: dayCap)
         guard !days.isEmpty else {
@@ -758,7 +810,11 @@ final class MemoryScheduler {
             // (不 markRan、不发 success 通知)。
             guard pauseGen == pauseGeneration else { return .busy }
             let ds = ProcessingLogStore.dayString(day)
-            personalityStage = "Refreshing personality (\(idx + 1)/\(days.count))"
+            personalityProgress = StepProgress(
+                fraction: Double(idx) / Double(days.count),
+                stage: "Refreshing personality",
+                detail: "\(ds) · day \(idx + 1)/\(days.count)"
+            )
             await runStep(date: ds, stage: .personality,
                           processor: "personality", rollbackDay: nil) {
                 let cfg = self.memoryCfg

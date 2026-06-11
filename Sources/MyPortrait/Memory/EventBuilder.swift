@@ -98,16 +98,20 @@ final class EventBuilder {
     }
 
     /// Cluster one day's sessions into semantic events.
+    /// `onBatch(index, count)`(1-based)在每个 LLM batch 开始前回调 ——
+    /// 给上游进度条按 batch 推进用。单批日也回调一次 (1, 1)。
     func clusterDay(
         date: Date,
         sessions: [EnrichedSession],
-        activeEvents: [ActiveEvent]
+        activeEvents: [ActiveEvent],
+        onBatch: ((Int, Int) -> Void)? = nil
     ) async throws -> DayClustering {
         guard !sessions.isEmpty else {
             return DayClustering(events: [], skippedIndices: [])
         }
         if sessions.count <= batchSize {
             // 单批模式没有 carry —— earlierToday 空数组即可。
+            onBatch?(1, 1)
             return try await clusterOneBatch(
                 date: date,
                 sessions: sessions,
@@ -117,7 +121,8 @@ final class EventBuilder {
             )
         }
         return try await clusterBatched(
-            date: date, sessions: sessions, activeEvents: activeEvents
+            date: date, sessions: sessions, activeEvents: activeEvents,
+            onBatch: onBatch
         )
     }
 
@@ -224,7 +229,8 @@ final class EventBuilder {
     private func clusterBatched(
         date: Date,
         sessions: [EnrichedSession],
-        activeEvents: [ActiveEvent]
+        activeEvents: [ActiveEvent],
+        onBatch: ((Int, Int) -> Void)? = nil
     ) async throws -> DayClustering {
         let chunks = stride(from: 0, to: sessions.count, by: batchSize).map {
             Array(sessions[$0..<min($0 + batchSize, sessions.count)])
@@ -238,6 +244,7 @@ final class EventBuilder {
         var tempSeq = 0
 
         for (ci, chunk) in chunks.enumerated() {
+            onBatch?(ci + 1, chunks.count)
             let offset = ci * batchSize
 
             // Carry: prior chunks' new events become join candidates.
