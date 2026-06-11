@@ -202,7 +202,7 @@ for day in DAYS:
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
-            seen.add(t); out.append((app, t, kc, evid, t0, t1, "ax_cleaned", b))
+            seen.add(t); out.append((app, t, kc, evid, t0, t1, "ax_cleaned" + ("" if s else "~draft"), b))
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
     # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
     # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
@@ -353,6 +353,8 @@ for day in DAYS:
             out3.append(rec); continue
         # ax 路 + 无任何帧证据:REJECT 不可能成立,免调用直接保留(审查修)
         if not snip and not is_ledger:
+            if '~draft' in src_ and len(cv(t)) <= 20:      # L7:短草稿连帧都没有 → 未定区
+                pend.append((a, t, src_, evid, t0, "短草稿快照无帧证据(零回车背书)", '')); continue
             out3.append(rec); continue
         if REVIEW_MODE == 'det':
             # ===== 确定性对证器(用户提议:复查=拿OCR对证,固定程序替代LLM)=====
@@ -363,6 +365,11 @@ for day in DAYS:
             vtn = norm_t(vt)
             han_v = sum(1 for ch in vtn if not ch.isascii())
             if not vtn or consumed < max(2, han_v) or vtn == tn:
+                # L7(2026-06-10):零回车草稿快照(~draft)且短(≤20字)且 OCR 无渲染确证 → 未定区
+                # (打了一半放弃的输入框残留,如'苹果某些';有渲染=真写过,照常保留)
+                if '~draft' in src_ and len(cv(t)) <= 20 and vtn != tn and tn[:60] not in snipn:
+                    pend.append((a, t, src_, evid, t0, "短草稿快照无渲染确证(零回车背书)",
+                                 re.sub(r'\s+', ' ', snip or '')[:120])); continue
                 out3.append(rec); continue                 # OCR 无证言/一致 → 信 librime+击键
             others = [norm_t(r2[1]) for j, r2 in enumerate(out2) if j != i and r2[7] == b]
             t_cmp = tn.rstrip('，,。.!？?！…、 ')
