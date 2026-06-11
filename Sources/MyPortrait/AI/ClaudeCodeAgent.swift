@@ -86,6 +86,10 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
         guard ClaudeCodeAgent.claudeBinaryPath != nil else {
             throw SpawnError.notInstalled
         }
+        // 注册进 kill registry(读 task-local owner,pipeline 的 runStep 已
+        // $owner.withValue 包住)—— 否则 Stop 按钮 / 60-min 兜底对 claude-code
+        // 后端是空枪:杀 0 个进程,任务杀不掉。stop() 里注销。
+        PiAgentRegistry.shared.register(self)
     }
 
     func sendPrompt(_ text: String) throws {
@@ -225,6 +229,7 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     }
 
     func stop() {
+        PiAgentRegistry.shared.unregister(self)
         forceKillCurrentProcess()
         currentProcess = nil
         eventContinuation?.finish()
