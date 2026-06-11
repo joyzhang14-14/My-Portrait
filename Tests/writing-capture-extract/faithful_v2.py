@@ -365,6 +365,13 @@ for day in DAYS:
             needs = letters > need_est + 6
         mt = PROOF.get((evid, t), '')
         if not needs and not mt:
+            # 简拼下界闸(A12特定的人/我的意思案,2026-06-12 用户截图实证):原闸按全拼3字母/字
+            # 高估需求,简拼用户(w=我,d=的)真尾巴(yisi1/特定的人)永远到不了线。下界=每汉字
+            # 至少1键+ascii字面1键;净剩≥4 → 给口3机会(锚定+击键验证+护栏把关,误入仅耗时)。
+            han_n = sum(1 for ch in cv(t) if not ch.isascii())
+            asc_n = len(re.sub(r'[^a-zA-Z]', '', cv(t)))
+            needs = letters - han_n - asc_n >= 4
+        if not needs and not mt:
             out2.append(rec); continue
         u = None
         if evid:
@@ -372,8 +379,9 @@ for day in DAYS:
             u = ur[0] if ur else None
         others = [r2[1] for j, r2 in enumerate(recs_sorted) if j != i and r2[7] == b]
         if needs:
+            prev_t = next((r2[1] for r2 in reversed(recs_sorted[:i]) if r2[7] == b), None)
             nt, info = C3.complete_tail(a, t, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0),
-                                        url=u, other_texts=others)
+                                        url=u, other_texts=others, prev_text=prev_t)
             via = "口3-OCR"
         else:   # 机器选字尾 → OCR 校对(渲染事实覆盖模型选字:睡得→睡的)
             nt, info = C3.proofread_tail(a, t, mt, t1 or t0 or 0, C3.keys_segment(b, t1 or t0 or 0),

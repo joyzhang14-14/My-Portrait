@@ -103,7 +103,7 @@ def pick_frames(app_short, url, send_ts, fwd_s=60):
                          {**args, "a": send_ts}).fetchall()
     return cands + list(before)
 
-def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts=()):
+def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts=(), prev_text=None):
     """口3 主函数:OCR 锚定 + 击键验证补尾。返回 (fixed_text, info)。三护栏(宁缺毋错):
     ① 残渣替换必须消费 ≥ 残渣字母数的击键(XPC→X 拒;yi x→一下测 放行)
     ② 尾巴若是同 bundle 另一条记录的前缀 → 粘连,拒(赛博永生+数字人)
@@ -112,6 +112,28 @@ def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts
     base = text[:m.start()].rstrip() if m else text
     residue_letters = len(re.sub(r'[^a-zA-Z]', '', m.group())) if m else 0
     if len(cv(base)) < 3:
+        # 短base前条锚(我的意思案,2026-06-12 用户截图实证):base<3字自锚不动 → 锚前一条消息尾,
+        # 验证续文须以 base 开头且更长 → 整条替换(替换模式;护栏:击键消费≥4/不粘下一条)。
+        bn = cv(base).replace(' ', '')
+        if prev_text and bn:
+            pb = cv(prev_text).replace('\n', ' ')
+            others0 = [cv(o).replace(' ', '') for o in other_texts if o]
+            for ts, ft in pick_frames(app_short, url, send_ts):
+                if ts < send_ts: continue                  # 前条锚只看发送后帧(同 ocr_snippet)
+                ft = ft or ''
+                for k in (8, 6, 4, 2):
+                    anchor = pb[-k:].strip() if len(pb) >= k else pb
+                    if len(anchor) < 2: continue
+                    idx = ft.find(anchor)
+                    if idx < 0: continue
+                    cont = ft[idx + len(anchor): idx + len(anchor) + 30]
+                    vt, consumed = verify_tail(cont, leftover_keys)
+                    vtn = cv(vt).replace(' ', '')
+                    if (vtn.startswith(bn) and len(vtn) > len(bn) and consumed >= 4
+                            and not any(o.startswith(vtn) for o in others0)):
+                        return cv(vt), {'fixed': True, 'via': '前条锚', 'frame_ts': ts,
+                                        'anchor': anchor, 'consumed': consumed}
+                    break
         return text, {'why': 'base太短无法锚定'}
     frames = pick_frames(app_short, url, send_ts)
     if not frames:
