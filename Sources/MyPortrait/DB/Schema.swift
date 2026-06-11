@@ -959,6 +959,18 @@ enum DBSchema {
                 """)
         }
 
+        // audio_transcriptions.speaker_id 从未建索引:SpeakersView 列表
+        // (LEFT JOIN + GROUP BY)、试听采样、合并、声纹重指派全是全表扫描,
+        // 转录表随常年采集无界增长(轻松几十万行),UPDATE ... WHERE
+        // speaker_id = ? 还会拉长写锁持有时间加剧 BUSY。复合
+        // (speaker_id, transcribed_at_ms) 顺带覆盖 sampleTranscripts /
+        // latestAudioPath 的 ORDER BY transcribed_at_ms DESC。
+        m.registerMigration("v40_transcriptions_speaker_index") { db in
+            try db.create(index: "idx_transcriptions_speaker",
+                          on: "audio_transcriptions",
+                          columns: ["speaker_id", "transcribed_at_ms"])
+        }
+
         return m
     }
 }
