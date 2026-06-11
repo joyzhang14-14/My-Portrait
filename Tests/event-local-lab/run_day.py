@@ -46,6 +46,8 @@ def main():
                     help="不加载模型:只 ingest + 打印每个 session 的检索候选")
     ap.add_argument("--force", action="store_true",
                     help="忽略 faithful_v2.py 正在跑的保护")
+    ap.add_argument("--reingest", action="store_true",
+                    help="删掉这天的 lab 数据重新 ingest(改了 tier1/OCR cap 后用)")
     args = ap.parse_args()
 
     if not args.dry_run and not args.force and other_lab_running():
@@ -53,6 +55,11 @@ def main():
         sys.exit(1)
 
     con = labdb.connect()
+    if args.reingest:
+        with con:
+            con.execute("DELETE FROM events WHERE day=?", (args.day,))
+            con.execute("DELETE FROM raw_sessions WHERE day=?", (args.day,))
+        print(f"[reingest] {args.day}: 旧数据已清")
     ensure_ingested(con, args.day)
 
     pend = labdb.pending_sessions(con, args.day)

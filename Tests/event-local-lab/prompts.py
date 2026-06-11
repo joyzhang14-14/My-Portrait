@@ -6,10 +6,18 @@ import json
 def _sess_card(row, ocr_chars=400):
     t0 = row["start_ms"] // 1000
     dur_min = max(1, (row["end_ms"] - row["start_ms"]) // 60000)
+    # Phase B 清洗过的 digest 优先(信号密度高);没有就退回原始 OCR。
+    body = ""
+    try:
+        body = row["digest"] or ""
+    except (KeyError, IndexError):
+        pass
+    label = "activity_digest" if body else "screen_text"
+    body = body or row["ocr"][:ocr_chars]
     return (f"app: {row['app']}\nwindow: {row['window'] or '(none)'}\n"
             f"url: {row['url'] or '(none)'}\n"
             f"start_epoch_s: {t0} · duration≈{dur_min}min\n"
-            f"screen_text: {row['ocr'][:ocr_chars]}")
+            f"{label}: {body}")
 
 
 def _event_card(row, summary_chars=200):
@@ -106,5 +114,32 @@ tags: {tags}
 Is today's event a CONTINUATION of that same ongoing activity/project \
 (not merely similar topic)?
 Answer JSON: {{"same_ongoing": true}} or {{"same_ongoing": false}}"""
+    return [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": user}]
+
+
+def clean(session_row):
+    """Phase B:原始 OCR → 活动 digest。小模型任务(默认 4B)。"""
+    t0 = session_row["start_ms"] // 1000
+    dur_min = max(1, (session_row["end_ms"] - session_row["start_ms"]) // 60000)
+    user = f"""Raw OCR text captured from the user's screen during one session:
+
+app: {session_row['app']}
+window: {session_row['window'] or '(none)'}
+url: {session_row['url'] or '(none)'}
+duration≈{dur_min}min · start_epoch_s: {t0}
+
+--- RAW OCR (noisy: UI chrome, menus, buttons, sidebars mixed in) ---
+{session_row['ocr']}
+--- END ---
+
+Distill what the user was actually DOING. Ignore UI chrome (menu bars, \
+buttons, timestamps, notification badges, sidebar lists). Keep concrete \
+signal: task/topic, key entities (project/file/person/site names), \
+content the user was reading or writing.
+
+Answer JSON:
+{{"doing": "<1-3 sentences, what the user did; '' if the screen is pure \
+chrome/noise with no real activity>", "keywords": ["3-8 lowercase terms"]}}"""
     return [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": user}]

@@ -16,7 +16,9 @@ EVENTS_DIR = os.path.expanduser("~/.portrait/events")
 
 GAP_MS = 5 * 60 * 1000
 MIN_OCR_CHARS = 60
-MAX_OCR_CHARS = 600
+# 2000(云端是 600):本地 token 免费,多读屏 —— Phase B 清洗 LLM 负责把
+# 2000 字原始 OCR 凝成 ~300 字 digest,信号密度反超云端。
+MAX_OCR_CHARS = 2000
 FRAME_LIMIT = 5000          # 镜像生产 frames(on:limit:)
 
 

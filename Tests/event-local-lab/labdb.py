@@ -71,7 +71,30 @@ def connect():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    # 迁移:Phase B(OCR 清洗)的 digest 列。老库无此列时补上。
+    cols = [r[1] for r in con.execute("PRAGMA table_info(raw_sessions)")]
+    if "digest" not in cols:
+        con.execute("ALTER TABLE raw_sessions ADD COLUMN digest TEXT")
     return con
+
+
+def sessions_needing_clean(con, day):
+    return con.execute(
+        "SELECT * FROM raw_sessions WHERE day=? AND status='pending' "
+        "AND digest IS NULL ORDER BY start_ms", (day,)
+    ).fetchall()
+
+
+def set_digest(con, sess_id, digest):
+    with con:
+        con.execute("UPDATE raw_sessions SET digest=?, updated_at_ms=? WHERE id=?",
+                    (digest, now_ms(), sess_id))
+
+
+def mark_noise(con, sess_id):
+    with con:
+        con.execute("UPDATE raw_sessions SET status='skipped_noise', "
+                    "updated_at_ms=? WHERE id=?", (now_ms(), sess_id))
 
 
 def day_ingested(con, day):

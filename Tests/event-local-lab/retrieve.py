@@ -16,7 +16,12 @@ def tokens(text: str):
 
 
 def session_tokens(row):
-    return tokens(f"{row['app']} {row['window']} {row['url']} {row['ocr']}")
+    digest = ""
+    try:
+        digest = row["digest"] or ""
+    except (KeyError, IndexError):
+        pass
+    return tokens(f"{row['app']} {row['window']} {row['url']} {digest or row['ocr']}")
 
 
 def event_tokens(row):

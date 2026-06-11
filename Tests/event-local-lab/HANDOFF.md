@@ -22,7 +22,11 @@
 ```
 portrait.sqlite(只读) frames(day)
 → source.py:Tier-1 规则 merge(app+window+5min 间隙)→ sessions → 入 lab.db(pending)
-→ run_day.py 主循环,每 session 一个事务:
+   OCR cap 2000 字(云端 600)—— 本地 token 免费,多读屏
+→ clean_day.py(Phase B,多层 OCR 清洗的 LLM 层,小模型默认 Qwen3-4B):
+   [LLM·clean] 原始 OCR → digest{doing, keywords};纯噪音 → skipped_noise
+   checkpoint = digest 列,每 session 独立事务;下游全部吃 digest
+→ run_day.py 主循环(Phase C,14B),每 session 一个事务:
    1. retrieve.py  候选检索(无 LLM):当天 open events 词法打分 top-K
    2. [LLM·decide]  session 卡片 + ≤K 个候选卡片 → 单选 {"join": id} 或 {"new": true}
    3. [LLM·describe] 仅 NEW:写 title/summary/type/facets/tags(小 JSON)
@@ -56,7 +60,8 @@ portrait.sqlite(只读) frames(day)
 
 ```bash
 cd Tests/event-local-lab
-python3 run_day.py --day 2026-06-07                  # 断点续跑,Ctrl-C 安全
+python3 clean_day.py --day 2026-06-07                # Phase B:OCR→digest(4B)
+python3 run_day.py --day 2026-06-07                  # Phase C:聚类(14B),断点续跑
 python3 run_day.py --day 2026-06-07 --limit 5        # 烟雾测试:只处理 5 个 session
 python3 finalize_day.py --day 2026-06-07
 python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
@@ -68,6 +73,8 @@ python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
 ## 状态
 
 - [x] v1 脚手架(本文档 + 全部代码)—— 未跑过任何模型
+- [x] v1.1 多层清洗:clean_day.py(用户提议:时间换质量,数字越洗越准)
+      ⚠️ 改了 OCR cap(600→2000),已 ingest 的天要 --reingest 才吃到新 cap
 - [ ] 烟雾测试(--limit 5,等用户确认 + faithful_v2.py 停)
 - [ ] 整天跑通 + inspect 对照
 - [ ] 质量结论 → 决定细化指标 / 改架构 / 换模型档位
