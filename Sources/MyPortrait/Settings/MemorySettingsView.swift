@@ -71,6 +71,8 @@ struct MemorySettingsView: View {
     /// Needs attention 每行的 DB row(nextRetryLabel 用),per-date,
     /// 跟 attention 列表同一个 reload 后台任务里算好。
     @State private var attentionDbRows: [String: ProcessingLogRow] = [:]
+    /// staging diff 的后台刷新 task —— 连续触发时 cancel 旧的合并成一次(debounce)。
+    @State private var stagingRefreshTask: Task<Void, Never>? = nil
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
     // EventClassifier 已下线 —— folder 整理改由 chat AI 通过 mp-folders 按用户
@@ -255,9 +257,24 @@ struct MemorySettingsView: View {
     }
 
     private func refreshStaging() {
-        eventsChanges = MemoryStaging.changes(.events)
-        portraitChanges = MemoryStaging.changes(.portrait)
-        personalityChanges = MemoryStaging.changes(.personality)
+        // changes() 有 pending snapshot 时递归读 backup+live 两棵树全部 .md
+        // 全文做 diff(events 树可达数千文件)—— 放后台跑,不卡主线程。
+        // 300ms debounce:manual run 期间 attentionVersion 反复 bump 触发
+        // reload→refreshStaging,连续触发合并成一次。
+        stagingRefreshTask?.cancel()
+        stagingRefreshTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            let (e, p, s) = await Task.detached(priority: .userInitiated) {
+                (MemoryStaging.changes(.events),
+                 MemoryStaging.changes(.portrait),
+                 MemoryStaging.changes(.personality))
+            }.value
+            guard !Task.isCancelled else { return }
+            eventsChanges = e
+            portraitChanges = p
+            personalityChanges = s
+        }
         refreshHasWork()
         refreshProbes()
     }
