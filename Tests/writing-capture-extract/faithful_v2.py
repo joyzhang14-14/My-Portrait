@@ -161,10 +161,11 @@ for day in DAYS:
         evs = X.loadev(ids)
         if not evs: continue
         kc = group_kc(ids); ks_full = assemble_keys(ids)
+        grp_cs = ''.join(X.cstream(e['arr']) for e in evs)   # 组级commit流:发送清空快照跨事件手打取证(#40)
         grp = []
         for ev in evs:
             app = ev['bundle'].split('.')[-1]
-            for text, t0, t1, is_send in R.event_sends_with_ts(ev, X):
+            for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
                 kw = R.keys_in_window(con, ev['bundle'], t0, t1)
                 # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
                 ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)

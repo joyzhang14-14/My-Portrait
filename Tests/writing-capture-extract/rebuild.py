@@ -262,9 +262,11 @@ def _allowed(runs, cap):
     return a
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
-def event_sends_with_ts(ev, X):
+def event_sends_with_ts(ev, X, group_cs=None):
     """返回 [(text, ks_start_ts, ks_end_ts, is_send)]:真 within-event 发送(占位符/空框夹+回车背书)
-    + submit + 末尾未发送 endValue。X = extract_compare_v2 模块(借 cstream/phMarkers/emptyBox/cover/RUNPH)。"""
+    + submit + 末尾未发送 endValue。X = extract_compare_v2 模块(借 cstream/phMarkers/emptyBox/cover/RUNPH)。
+    group_cs:组级 commit 流(#40 用户裁定:发送清空快照当成品)——跨事件长文(中段插入/补尾在后续事件,
+    Blueprint 案)的快照对单事件 commit 流只盖 ~35%,被手打闸误杀;组级取证 0.66 过。粘贴不进 commit 流,防 autofill 本意不变。"""
     arr = ev['arr']; cs = X.cstream(arr); ph = X.phMarkers(arr); returns = ev.get('returns', ())
     # #44/#45:已知占位符(KNOWN_PH)即使是 commit 注入(非 paste)也认作占位符标记/过滤——
     # phMarkers 只认 paste(防普通词误判),known 列表是白名单,commit 注入也安全。
@@ -297,7 +299,7 @@ def event_sends_with_ts(ev, X):
             if not (isMark(i - 1) or isMark(i + 1)): continue
             pv = paste_verdict(t)
             if pv is False: continue                     # 大粘贴/纯粘贴:不留
-            if pv is None and X.cover(t, cs) < 0.5: continue   # 原手打铁律兜底
+            if pv is None and X.cover(t, group_cs or cs) < 0.5: continue   # 手打铁律兜底(组级流取证,见 docstring)
             if not sent(ts): continue                    # 回车检测:无回车=IME改写删除/草稿,不是发送
             out.append((t, prev_ts, ts, True)); prev_ts = ts
     endv = X.cv(ev['endv'])
