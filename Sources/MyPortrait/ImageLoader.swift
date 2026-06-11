@@ -12,11 +12,17 @@ final class ImageThumbnailCache {
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
         c.countLimit = 600
+        c.totalCostLimit = 512 * 1024 * 1024  // 字节上限:主图一张解码后可达 ~25MB,只靠 countLimit 理论可膨胀 15GB
         return c
     }()
 
     func cached(_ key: String) -> NSImage? { cache.object(forKey: key as NSString) }
-    func store(_ image: NSImage, for key: String) { cache.setObject(image, forKey: key as NSString) }
+    func store(_ image: NSImage, for key: String) {
+        // cost = 解码后近似字节数(像素宽×高×4),让 totalCostLimit 生效
+        let rep = image.representations.first
+        let cost = (rep?.pixelsWide ?? Int(image.size.width)) * (rep?.pixelsHigh ?? Int(image.size.height)) * 4
+        cache.setObject(image, forKey: key as NSString, cost: cost)
+    }
 
     /// 预解码一帧进缓存(若还没缓存)。给 timeline 按方向键时提前解码前后
     /// 几帧用 —— 快速划过时图片已就绪,不用现等 MP4 抽帧/JPG downsample。
