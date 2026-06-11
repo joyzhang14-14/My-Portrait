@@ -125,7 +125,10 @@ enum CronJobExecutor {
             let now = Date()
             if !force, now.timeIntervalSince(lastPersist) < persistThrottle { return }
             lastPersist = now
-            store.saveMessages([userMsg, assistant], for: conv.id)
+            // userMsg 在上面已落盘一次且不再变;流式期间只有 assistant 在长,
+            // 单行 upsert 即可。之前每次全量 DELETE+重插整个 conv ——
+            // 不断变大的 parts_json 被重编码重写几百次,O(回复长度²) 写放大。
+            store.upsertMessage(assistant, for: conv.id)
             // 通知前端:若正在看这条 conv,live 重读(像普通 chat 一样逐段刷)。
             Self.onConvUpdated(conv.id)
         }
