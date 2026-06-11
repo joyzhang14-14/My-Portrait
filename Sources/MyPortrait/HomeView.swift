@@ -377,6 +377,7 @@ private struct ChatTranscript: View {
                         ChatBubble(
                             message: msg,
                             isStreaming: isLastAssistant && isThinking,
+                            animatesEntrance: idx == visible.count - 1,
                             chips: chipsLookup?(msg.id) ?? [],
                             attachments: attachmentsLookup?(msg.id) ?? [],
                             citations: citationsLookup?(msg.id) ?? [],
@@ -397,6 +398,10 @@ private struct ChatTranscript: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 26)
             }
+            // LazyVStack 下切到长会话时,目标 bubble 尚未实例化,scrollTo 只能
+            // 按估算高度滚,变高行(markdown)常落不准 —— defaultScrollAnchor
+            // 让初始定位由 ScrollView 自己钉在底部,不依赖估算。
+            .defaultScrollAnchor(.bottom)
             .onChange(of: messages.count) {
                 if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
@@ -410,6 +415,9 @@ private struct ChatTranscript: View {
 private struct ChatBubble: View, @MainActor Equatable {
     let message: ChatMessage
     let isStreaming: Bool
+    /// 只有最后一条(新追加的消息)播放入场动画;历史消息在 LazyVStack 下
+    /// 滚回视口时直接以最终状态呈现,不重播。
+    let animatesEntrance: Bool
     let chips: [ContextChip]
     let attachments: [Attachment]
     let citations: [Citation]
@@ -424,6 +432,7 @@ private struct ChatBubble: View, @MainActor Equatable {
     /// .equatable(),流式期间历史消息全部短路不重渲。
     static func == (a: ChatBubble, b: ChatBubble) -> Bool {
         a.message == b.message && a.isStreaming == b.isStreaming
+            && a.animatesEntrance == b.animatesEntrance
             && a.chips == b.chips && a.attachments == b.attachments
             && a.citations == b.citations
     }
@@ -507,7 +516,14 @@ private struct ChatBubble: View, @MainActor Equatable {
         // 都点不到。
         .contentShape(Rectangle())
         .onAppear {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
+            if animatesEntrance {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) { appear = true }
+            } else {
+                // 历史消息直接以最终状态呈现:LazyVStack 下向上滚历史时旧
+                // bubble 才首次 mount,重播淡入+上滑会逐条"弹入";入场动画
+                // 只留给最后一条(新追加的消息)。
+                appear = true
+            }
         }
         // hover state 直接切换,不再裹 withAnimation —— actions 走 overlay
         // 已经不会影响布局,加动画反而引入"消息下滑"错觉。
