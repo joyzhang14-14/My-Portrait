@@ -51,6 +51,19 @@ final class IgnoreGate: @unchecked Sendable {
         state.withLock { $0.maskingEnabled = enabled }
     }
 
+    /// 当前是否存在任何**用户配置的**遮罩规则。ScreenCaptureService 用它决定
+    /// 要不要每帧做全量窗口枚举(到 replayd 的 XPC,抓帧热路径最大单项开销):
+    /// 没规则 → 枚举出来的窗口列表完全用不上,跳过。
+    /// builtin(loginwindow)不算规则:它只在锁屏/登录界面在屏,为它每帧
+    /// 枚举不值得 —— 代价是无规则用户的锁屏帧不再抹 loginwindow(锁屏画面
+    /// 本身无敏感内容,密码框是圆点)。
+    var hasUserRules: Bool {
+        let snap = state.withLock { $0 }
+        guard snap.maskingEnabled else { return false }
+        return snap.appsLower.contains { !$0.isEmpty }
+            || snap.urlSubstrings.contains { !$0.isEmpty }
+    }
+
     /// 一个窗口是否应该从截图里抹掉。仿 screenpipe `is_valid` 取反——纯字符串
     /// 匹配，**只**排除名字命中的窗口，不按窗口层级扩大范围：
     ///   - builtin 系统进程永远抹

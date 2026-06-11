@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import ScreenCaptureKit
@@ -37,6 +38,28 @@ final class ScreenCaptureService {
     /// `unowned(unsafe)`，必须用长生命周期常量，否则临时 CGColor 立即释放成野指针。
     private static let maskBackground = CGColor(gray: 0, alpha: 1)
 
+    /// **无遮罩规则时**复用的主显示器缓存:SCShareableContent 枚举是到 replayd
+    /// 的全量 XPC 往返(枚举全部窗口+元数据,典型 20-100ms,抓帧热路径最大
+    /// 单项开销),没配任何 mask 规则时窗口列表完全用不上,只为拿 SCDisplay
+    /// 白付一次。显示器参数变化(接/拔屏、改分辨率)由
+    /// didChangeScreenParametersNotification 失效;抓帧失败重试/唤醒也失效兜底。
+    ///
+    /// **有规则时仍然每帧枚举,不缓存窗口列表** —— 遮罩的实时性是隐私语义:
+    /// 新弹出的 1Password 窗口必须在当帧就被抹掉,TTL 缓存意味着最多一个
+    /// TTL 周期的裸奔帧。
+    private var cachedDisplay: SCDisplay?
+    private var screenParamsObserver: NSObjectProtocol?
+
+    private func ensureScreenParamsObserver() {
+        guard screenParamsObserver == nil else { return }
+        screenParamsObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cachedDisplay = nil }
+        }
+    }
+
     /// `nonisolated` 让 CaptureCoordinator (actor) 的 init 不必是 @MainActor。
     /// 实际的 SCK 调用方法仍然在 @MainActor 上跑（绕开 macOS 26 SCK XPC bug）。
     nonisolated init(config: CaptureConfig, reporter: UnimplementedReporter, ignore: IgnoreGate) {
@@ -70,14 +93,33 @@ final class ScreenCaptureService {
 
         for attempt in 0..<3 {
             do {
-                let (display, windows) = try await fetchDisplayAndWindows()
-                // Content masking：命中 ignore 规则的窗口排除出捕获 buffer
-                // （帧照拍，那些窗口在帧里变透明）。
-                let excluded = windows.filter {
-                    ignore.shouldMaskWindow(
-                        appName: $0.owningApplication?.applicationName ?? "",
-                        title: $0.title
-                    )
+                let display: SCDisplay
+                let excluded: [SCWindow]
+                if ignore.hasUserRules {
+                    // 有遮罩规则 → 每帧重新枚举(实时性是隐私语义,见
+                    // cachedDisplay 注释),顺手刷新显示器缓存。
+                    let (d, windows) = try await fetchDisplayAndWindows()
+                    display = d
+                    cachedDisplay = d
+                    // Content masking：命中 ignore 规则的窗口排除出捕获 buffer
+                    // （帧照拍，那些窗口在帧里变透明）。
+                    excluded = windows.filter {
+                        ignore.shouldMaskWindow(
+                            appName: $0.owningApplication?.applicationName ?? "",
+                            title: $0.title
+                        )
+                    }
+                } else {
+                    // 无规则 → 跳过窗口枚举,复用显示器缓存(没有就取一次)。
+                    ensureScreenParamsObserver()
+                    if let cached = cachedDisplay {
+                        display = cached
+                    } else {
+                        let (d, _) = try await fetchDisplayAndWindows()
+                        display = d
+                        cachedDisplay = d
+                    }
+                    excluded = []
                 }
                 let filter = SCContentFilter(display: display, excludingWindows: excluded)
                 let cfg = SCStreamConfiguration()
@@ -119,6 +161,9 @@ final class ScreenCaptureService {
                     throw CaptureError.screenRecordingPermissionDenied
                 }
 
+                // 失败可能源于陈旧的 SCDisplay(replayd 重启等)→ 重试前丢缓存。
+                cachedDisplay = nil
+
                 // 重试前小睡（100ms），避免立即撞错。
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -128,9 +173,11 @@ final class ScreenCaptureService {
             ?? NSError(domain: "MyPortrait.Capture", code: -1))
     }
 
-    /// 旧的 SCDisplay 缓存已移除（masking 要每帧重新枚举窗口）。保留方法
-    /// 供 sleep/wake / DRM watcher 调用，现在是 no-op。
-    func invalidateStream() async {}
+    /// sleep/wake / DRM watcher 调用:丢掉显示器缓存(唤醒后显示器配置
+    /// 可能已变)。有遮罩规则时窗口列表本来就每帧重新枚举,无需失效。
+    func invalidateStream() async {
+        cachedDisplay = nil
+    }
 
     // MARK: - 私有
 
