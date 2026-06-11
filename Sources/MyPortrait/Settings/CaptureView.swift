@@ -773,8 +773,9 @@ struct TypingCaptureSettingsView: View {
                      }) {
             typingSection
             blacklistSection
-            // Writing pipeline(capture + style)—— 数据源是 typing capture,
-            // 从 Memory → Scheduler 页整体搬来,之后单独重设计。
+            // Writing capture —— 数据源是 typing capture,从 Memory →
+            // Scheduler 页搬来,之后单独重设计。(writing style 是 portrait
+            // 侧 pipeline,留在 Memory 页。)
             WritingPipelineSection()
         }
         .task {
