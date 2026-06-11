@@ -363,7 +363,12 @@ private struct ChatTranscript: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                // LazyVStack:历史 bubble 不再全部常驻(长会话首开/滚动时只建
+                // 可见部分)。配合 ChatBubble 的手写 Equatable + .equatable(),
+                // 流式期间每个 delta tick 只有正在长的那条重跑 body,历史消息
+                // 全部相等性短路 —— 之前闭包参数让 SwiftUI 无法自动短路,每个
+                // tick 整条历史(几十条 markdown)全量重渲染。
+                LazyVStack(alignment: .leading, spacing: 18) {
                     let visible = displayMessages
                     ForEach(Array(visible.enumerated()), id: \.element.id) { idx, msg in
                         // The streaming assistant bubble is always the last
@@ -379,6 +384,7 @@ private struct ChatTranscript: View {
                             onRegenerate: { onRegenerate(msg.id) },
                             onEdit: { onEdit(msg) }
                         )
+                        .equatable()
                         .id(msg.id)
                     }
                     if isThinking {
@@ -401,7 +407,7 @@ private struct ChatTranscript: View {
     }
 }
 
-private struct ChatBubble: View {
+private struct ChatBubble: View, @MainActor Equatable {
     let message: ChatMessage
     let isStreaming: Bool
     let chips: [ContextChip]
@@ -412,6 +418,15 @@ private struct ChatBubble: View {
     let onEdit: () -> Void
     @State private var appear = false
     @State private var hover = false
+
+    /// 闭包参数让 SwiftUI 无法自动做相等性比较(永远视为"变了"),手写 ==
+    /// 只比真正影响渲染的值字段;闭包身份不影响渲染结果。配合 ForEach 里的
+    /// .equatable(),流式期间历史消息全部短路不重渲。
+    static func == (a: ChatBubble, b: ChatBubble) -> Bool {
+        a.message == b.message && a.isStreaming == b.isStreaming
+            && a.chips == b.chips && a.attachments == b.attachments
+            && a.citations == b.citations
+    }
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             BubbleAvatar(role: message.role, glowing: message.role == .assistant && isStreaming)
