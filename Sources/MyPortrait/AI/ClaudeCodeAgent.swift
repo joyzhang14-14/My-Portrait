@@ -495,7 +495,12 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
     ///      subprocess 默认 PATH 是 `/usr/bin:/bin:/usr/sbin:/sbin`,
     ///      不含 ~/.local/bin / /opt/homebrew/bin / npm-global 等,直接
     ///      `which claude` 会假阴。走登录 shell 才能拿到用户实际 PATH。
-    static var claudeBinaryPath: String? {
+    ///
+    /// `static let` = 进程内只探测一次(惰性求值且线程安全)。之前是
+    /// computed property,每次 send 至少调两次(precheck + sendPrompt),
+    /// 未命中候选路径时每次都在主线程同步 spawn 登录 shell(几百 ms 卡顿)。
+    /// 代价:app 跑着的时候装好 claude,需要重启 app 才能识别。
+    static let claudeBinaryPath: String? = {
         let fm = FileManager.default
         // 0. 终极兜底:用户在 ~/.portrait/config.toml 没办法表达完整路径
         // 时,用 env var MYPORTRAIT_CLAUDE_PATH 显式指定。能解奇葩装的
@@ -525,11 +530,13 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
 
         // 兜底:让用户登录 shell 替我们解析 PATH。GUI app 子进程的 PATH
         // 不包含用户 dotfile 加的 dev bin 路径,直接 `which` 失败。
-        // 用 `-l -i -c` 让 shell 完整加载 ~/.zprofile / ~/.zshrc / ~/.bashrc。
+        // 用 `-l -c` 让 shell 加载 login 配置(~/.zprofile 等)拿到 PATH;
+        // 不开 `-i` —— 交互式 rc(~/.zshrc)对解析 PATH 没必要,还可能
+        // 慢几百 ms 甚至秒级(取决于用户 dotfile)。
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let proc = Process()
         proc.launchPath = shell
-        proc.arguments = ["-l", "-i", "-c", "command -v claude"]
+        proc.arguments = ["-l", "-c", "command -v claude"]
         let out = Pipe()
         proc.standardOutput = out
         proc.standardError = Pipe()
@@ -544,7 +551,7 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             if !path.isEmpty, fm.isExecutableFile(atPath: path) { return path }
         } catch { }
         return nil
-    }
+    }()
 
     static var isInstalled: Bool { claudeBinaryPath != nil }
 
