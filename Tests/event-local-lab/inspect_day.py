@@ -60,14 +60,25 @@ def main():
         lines.append(f"| {r['purpose']} | {r['n']} | {r['fails']} | "
                      f"{(r['avg_ms'] or 0)/1000:.1f}s |")
 
+    # 生产语义:join 历史事件 = 不建新文件,给老事件 +occurrence、追加
+    # frame ids、清 distilledInto。报告按此口径分区,跟云端产出可比
+    # (云端 events/<day>/ 目录里也只有"新事件",join 进了老文件)。
+    new_ev = [e for e in lab if not e["joined_rel"]]
+    occ_ev = [e for e in lab if e["joined_rel"]]
     lines.append("")
-    lines.append(f"## 本地 14B 产出({len(lab)} 个事件)")
-    for e in lab:
+    lines.append(f"## 本地 14B 产出 · 新事件({len(new_ev)})")
+    for e in new_ev:
         members = len(json.loads(e["member_ids"]))
-        joined = f" → 续 {e['joined_rel']}" if e["joined_rel"] else ""
-        lines.append(f"\n### [{e['id']}] {e['title']}  ({members} sessions){joined}")
+        lines.append(f"\n### [{e['id']}] {e['title']}  ({members} sessions)")
         lines.append(f"{e['summary']}")
         lines.append(f"tags: {', '.join(json.loads(e['tags']))}")
+    lines.append("")
+    lines.append(f"## 本地 14B 产出 · 老事件复现,occurrence+1({len(occ_ev)})")
+    lines.append("(移植生产时:不建新文件,recordOccurrence + 追加 frameIds + 清 distilledInto)")
+    for e in occ_ev:
+        members = len(json.loads(e["member_ids"]))
+        lines.append(f"\n### → {e['joined_rel']}")
+        lines.append(f"当天活动({members} sessions): {e['title']} — {e['summary'][:150]}")
 
     lines.append("")
     lines.append(f"## 生产(云端)产出({len(prod)} 个事件)")

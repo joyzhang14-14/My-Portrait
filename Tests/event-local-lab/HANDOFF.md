@@ -79,3 +79,7 @@ python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
 - [ ] 整天跑通 + inspect 对照
 - [ ] 质量结论 → 决定细化指标 / 改架构 / 换模型档位
 - [ ] (远期)移植 Swift + MLX 打包进 app —— 处理逻辑那时再改
+      ⚠️ 移植时 join 路径要做全产出语义(用户点名):不建新文件,给老事件
+      merge:recordOccurrence(+1,per-day 去重)+ 追加 memberFrameIds +
+      清 distilledInto(事件复活,重新进 distill 视野),标题/摘要冻结。
+      实验室只读生产数据,只在报告里按此口径分区(occ_ev),不真写。
