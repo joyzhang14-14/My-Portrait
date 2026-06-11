@@ -12,6 +12,71 @@
         -->
 
         <item>
+            <title>1.2.153</title>
+            <pubDate>Thu, 11 Jun 2026 22:14:46 +0000</pubDate>
+            <sparkle:version>171</sparkle:version>
+            <sparkle:shortVersionString>1.2.153</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Sharper on-screen text reading</strong> — A new OCR accuracy booster in Settings captures at full Retina resolution so text on screen is read more accurately, while your saved snapshots stay the same size on disk.</li>
+                    <li><strong>Keep audio until it's transcribed</strong> — A new Storage toggle (on by default) keeps audio that hasn't been transcribed yet past its delete-by date, so a transcription backlog can't silently erase text you wanted to keep.</li>
+                    <li><strong>Real, moving progress bars for Run now</strong> — Triggering event processing, portrait distillation, or personality refresh now shows a determinate progress bar with a percentage and the current step that glides through each stage, instead of a vague spinner that looks hung.</li>
+                    <li><strong>Writing-capture controls moved to Typing Capture</strong> — The writing-capture controls now live under Settings → Typing Capture, next to the data they act on; writing-style settings stay on the Memory page.</li>
+                </ul>
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Your prompts no longer leak to a temp file</strong> — Your messages, screen text, and personal memories are no longer written in plain text to a temp file that other apps on your Mac could read.</li>
+                    <li><strong>"Delete last 15m/30m/1h" now erases everything</strong> — Deleting recent activity also removes the screenshots, recordings, and video on disk, and clears audio that hadn't been transcribed yet, so deleted content can't come back as text later.</li>
+                    <li><strong>Settings changed right before quitting now save</strong> — A toggle you flip in the last moment before closing the app is saved to disk instead of silently disappearing on the next launch.</li>
+                    <li><strong>Fixed a startup crash on macOS 26 (Tahoe)</strong> — The app no longer randomly crashes on launch on macOS 26.</li>
+                    <li><strong>Quitting during audio transcription no longer crashes</strong> — Exiting while the app is catching up on a backlog of audio transcriptions no longer crashes it.</li>
+                    <li><strong>No audio lost when you pause or stop capture</strong> — The final segment you were speaking is saved and transcribed when capture stops, and turning transcription off temporarily keeps recordings waiting in the queue instead of marking them done with no text.</li>
+                    <li><strong>Old audio is cleaned up on schedule</strong> — With transcription turned off, old audio is now deleted on schedule instead of piling up and quietly filling your disk.</li>
+                    <li><strong>Speakerphone calls no longer transcribe twice</strong> — When a call plays through your speaker, your mic and the call audio used to both pick it up and produce two copies of the same words; duplicate transcripts across channels are now detected and merged into one.</li>
+                    <li><strong>Capture survives sleep, power changes, and quick toggles</strong> — After toggling capture off and on, the app keeps tracking screen sleep/wake; plugging or unplugging power reliably adjusts recording and transcription; and rapid on/off toggles run in order instead of racing.</li>
+                    <li><strong>Audio no longer garbles under heavy load</strong> — Recorded audio stays in order under heavy load, and rapidly toggling system-audio capture no longer spins up a duplicate stream.</li>
+                    <li><strong>Typing in Settings no longer interrupts recording</strong> — Changing an unrelated setting, or typing in a text field, no longer restarts the microphone and punches a gap in your recording.</li>
+                    <li><strong>No surprise Accessibility prompts, and voice training restores your mic</strong> — Changing a capture setting no longer triggers an unexpected Accessibility permission prompt, and a mic paused for voice training reliably turns back on afterward, even if you close the window or the app crashes mid-training.</li>
+                    <li><strong>Chat reply no longer vanishes mid-answer</strong> — Pressing Enter while the assistant is still typing no longer swallows the next reply into a blank bubble; your text stays put until the answer finishes.</li>
+                    <li><strong>Chat replies no longer lose their tail end</strong> — The last bit of a reply is no longer cut off, and continuing a conversation no longer silently breaks.</li>
+                    <li><strong>Switching conversations no longer gets stuck</strong> — Switching chats mid-answer no longer leaves a conversation stuck loading, and a reply you sent can no longer land in the wrong conversation if you switch away while it's preparing.</li>
+                    <li><strong>Claude Code detection is more reliable</strong> — My Portrait finds your Claude Code install even when your PATH is set up by nvm, asdf, or mise, and it re-checks a few minutes after a miss instead of staying blind until you restart.</li>
+                    <li><strong>Speaker edits and privacy deletes always save</strong> — Renaming or merging a speaker, saving voice training, or clearing memories before/after a date no longer silently fails when capture is busy writing.</li>
+                    <li><strong>Memory building is much more reliable</strong> — Building your daily memories now recovers from AI timeouts, crashes, sleep/wake, and partial failures instead of jamming all scheduled processing or mixing data between days, and the retry time it shows you is honest.</li>
+                    <li><strong>Stop actually stops a running pipeline</strong> — Hitting Stop on a memory run now kills every running AI process and aborts the remaining days, so a stopped pipeline doesn't keep churning in the background.</li>
+                    <li><strong>Rejecting a memory run behaves correctly</strong> — Turning down a finished run no longer permanently loses its output, greys out the Run button, or quietly shrinks your portrait, and a failed run resets itself so you can retry right away.</li>
+                    <li><strong>Portrait building stops failing silently</strong> — When the AI hits a snag while distilling your portrait, it recovers from messy model output and shows the real reason instead of looping forever or stalling with a vague error.</li>
+                    <li><strong>The latest day of activity gets remembered on time</strong> — Your most recent day, and the first day back after a break, now enter memory processing on the right date instead of being shifted a day off and skipped.</li>
+                    <li><strong>Memory files land in the right place</strong> — File names the AI generates that accidentally contain folder paths are cleaned up, so memories aren't scattered into stray sub-folders or duplicated.</li>
+                    <li><strong>Scheduled-task notifications come out clean</strong> — Notifications from your scheduled AI tasks no longer fire blank or garbled; the app reads only the real Notify section and ignores examples written inside code blocks.</li>
+                    <li><strong>The captured app matches the screen</strong> — When you switch apps quickly, a slow-loading icon for the previous app no longer overwrites the icon of the app you're actually looking at in the Timeline.</li>
+                    <li><strong>Fast day-switching shows the right day</strong> — Quickly jumping between days no longer leaves you looking at yesterday's screen while the date header says today.</li>
+                    <li><strong>Audio rows stop flickering in the Timeline</strong> — Repeated identical transcript snippets in the same clip no longer collide, so the audio list refreshes smoothly instead of glitching.</li>
+                    <li><strong>Captured-writing list shows the right group</strong> — Quickly clicking between captured-writing groups no longer shows one group's title over another group's entries.</li>
+                    <li><strong>Storage screen shows real numbers</strong> — The Storage page adds up the folders the app actually uses, so Audio, Video, and Screenshots show real sizes instead of a blank dash, plus a new Cache line for re-downloadable runtime and models.</li>
+                    <li><strong>Storage cleans up after itself</strong> — Captured snapshots and audio clean up more reliably: missing or broken files no longer leave orphaned data behind or jam the compaction queue, and an interrupted video compression no longer leaves a half-written file eating disk space.</li>
+                    <li><strong>Re-importing recovers missing screen history</strong> — If an import is interrupted partway, running it again now brings in the rest of your screen history instead of silently importing nothing.</li>
+                    <li><strong>AI can search your transcripts</strong> — Asking the AI to search spoken audio by keyword or speaker now actually finds matches instead of coming up empty, and re-importing your Screenpipe data no longer duplicates every transcript.</li>
+                    <li><strong>Email connection no longer hangs forever</strong> — When an email server is unreachable or refuses the connection, the Connections spinner fails cleanly instead of spinning forever and forcing a restart; a non-email test recipient is caught before any connection is made.</li>
+                    <li><strong>Setup picks a connected AI provider</strong> — During onboarding, the memory provider defaults to one you've actually connected instead of quietly selecting an unconnected one, and browsing provider options no longer wipes a custom model name you typed in.</li>
+                    <li><strong>Update settings edited by hand take effect immediately</strong> — If you change auto-update settings by editing the config file directly, the app picks up the change right away instead of needing a restart.</li>
+                    <li><strong>Faster, lighter transcription</strong> — Transcription loads its large model far less often (already-downloaded models skip re-initialization, and clips are batched), so it uses less memory and churns less in the background.</li>
+                    <li><strong>Smoother, lighter chat</strong> — Sending a message starts faster, the conversation no longer re-renders on every word as a reply streams in, and the app stops spinning a CPU core in the background after an answer finishes.</li>
+                    <li><strong>Snappier Memory pages</strong> — The Memory settings and Memories pages stay responsive while a pipeline runs, instead of hitting the database and disk on every redraw.</li>
+                    <li><strong>Faster timeline and speaker list</strong> — Opening your speakers and scrubbing the timeline are quicker, especially after a lot of recording has piled up.</li>
+                    <li><strong>Lighter background screen capture</strong> — Screen capture skips an expensive per-frame window scan when you have no privacy-mask rules set, doing less work on every captured frame.</li>
+                    <li><strong>Imports no longer stall live capture</strong> — Importing screen history now commits in small batches, so your live screen and audio capture keep running smoothly instead of freezing for minutes during a big import.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.153/MyPortrait_1.2.153_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="ecirWF42zN3bLfHcJhwIbUE7VsnzT968GZ6eUwQ8a1yOzG/WNYs13ALisSnKf6XJOdU2pFpgTVVqOsqEEIVWAQ==" length="26458574" />
+        </item>
+
+        <item>
             <title>1.2.108</title>
             <pubDate>Sun, 07 Jun 2026 08:33:42 +0000</pubDate>
             <sparkle:version>170</sparkle:version>
