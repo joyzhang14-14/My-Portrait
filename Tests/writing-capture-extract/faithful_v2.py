@@ -232,14 +232,16 @@ for day in DAYS:
     for app, t, s, kc, evid, t0, t1, b in dayrecs:
         if (t, s, app) not in keepset:
             drops.append(("dedup_truncated", app, t, evid, t0, t1, "截断态草稿,内容被更长记录覆盖"))
-        elif is_residue(t):
-            drops.append(("is_residue", app, t, evid, t0, t1, "纯残渣(无中文主体)"))
         elif X.is_ph(t):
             drops.append(("占位符", app, t, evid, t0, t1, "known 占位符"))
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
-            seen.add(t); out.append((app, t, kc, evid, t0, t1, "ax_cleaned" + ("" if s else "~draft"), b))
+            # 残渣不丢改标记(用户裁定 2026-06-11:ok/okay/oki 是语气表达,先标记入册);
+            # 顺带清旧账 L1:残渣保留后自动进口3,有 OCR 找回真身的机会(记得案当年死在丢弃)
+            seen.add(t)
+            src = "ax_cleaned" + ("" if s else "~draft") + ("~residue" if is_residue(t) else "")
+            out.append((app, t, kc, evid, t0, t1, src, b))
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
     # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
     # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
