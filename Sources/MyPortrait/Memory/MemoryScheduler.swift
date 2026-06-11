@@ -759,8 +759,10 @@ final class MemoryScheduler {
                 // categoryIndex:每个 category 开始前发 idx(0-based),结束后发
                 // idx+1 —— 条按 category 推进,detail 显示当前类目 + 已写条数。
                 guard p.categoryCount > 0 else { return }
+                // ×0.95:最后一个 category 完成 ≠ 整步结束(distill 内部还有
+                // Archiver 收尾),别提前顶到 100% 让人误以为卡住。
                 self.distillProgress = StepProgress(
-                    fraction: Double(p.categoryIndex) / Double(p.categoryCount),
+                    fraction: 0.95 * Double(p.categoryIndex) / Double(p.categoryCount),
                     stage: "Distilling portrait",
                     detail: "\(p.category) · \(min(p.categoryIndex + 1, p.categoryCount))/\(p.categoryCount) categories"
                         + (p.written > 0 ? " · \(p.written) updated" : "")
@@ -810,8 +812,10 @@ final class MemoryScheduler {
             // (不 markRan、不发 success 通知)。
             guard pauseGen == pauseGeneration else { return .busy }
             let ds = ProcessingLogStore.dayString(day)
+            // +0.15 = "这天已开跑"的视觉量 —— personality 没有 day 内子信号,
+            // 纯 idx/count 会让单天 run 全程停在 0%,看着像卡死。
             personalityProgress = StepProgress(
-                fraction: Double(idx) / Double(days.count),
+                fraction: (Double(idx) + 0.15) / Double(days.count),
                 stage: "Refreshing personality",
                 detail: "\(ds) · day \(idx + 1)/\(days.count)"
             )

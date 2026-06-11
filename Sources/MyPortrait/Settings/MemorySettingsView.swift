@@ -688,7 +688,8 @@ struct MemorySettingsView: View {
                     .controlSize(.small)
                     .tint(.red)
             }
-            ProgressView(value: p.fraction, total: 1.0)
+            // 不显式传 total —— value nil 走 documented indeterminate 路径。
+            ProgressView(value: p.fraction)
                 .progressViewStyle(.linear)
                 .controlSize(.small)
             if !p.detail.isEmpty {
@@ -1585,9 +1586,8 @@ struct WritingPipelineSection: View {
         .onChange(of: writingCaptureUI.lastSummary?.runId) { _, _ in
             refreshWritingCapture()
         }
-        .onChange(of: writingStyleUI.isRunning) { _, newValue in
-            if !newValue { refreshWritingStyle() }
-        }
+        // writingStyle 不挂 onChange —— runWritingStyleManual 的 defer 已经
+        // refreshWritingStyle(),再挂一份是双重刷新(搬家前也没有)。
         .sheet(item: $writingCapturePreviewDate.mappedToIdentifiable) { wrapped in
             WritingCapturePreview(date: wrapped.id)
         }
