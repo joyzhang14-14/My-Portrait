@@ -24,11 +24,16 @@ enum AudioWAV {
         u32(UInt32(sampleRate)); u32(byteRate); u16(blockAlign); u16(bits)
         str("data"); u32(dataLen)
 
-        for s in samples {
-            let clamped = max(-1, min(1, s))
-            var le = Int16(clamped * 32767).littleEndian
-            withUnsafeBytes(of: &le) { d.append(contentsOf: $0) }
+        // 批量转换:逐样本闭包 append(60s 段 = 96 万次 clamp + withUnsafeBytes
+        // + Data 边界检查)在云转录路径每个 chunk 都要付一遍。一次循环填好
+        // [Int16] 再整块 append,降一到两个数量级。littleEndian 在 arm64/x86
+        // 上是 no-op,保留以匹配 WAV 字节序约定。
+        var ints = [Int16](repeating: 0, count: samples.count)
+        for i in samples.indices {
+            let clamped = max(-1, min(1, samples[i]))
+            ints[i] = Int16(clamped * 32767).littleEndian
         }
+        ints.withUnsafeBufferPointer { d.append($0) }
         return d
     }
 
