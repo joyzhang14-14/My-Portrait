@@ -749,9 +749,12 @@ struct MemorySettingsView: View {
                     .tint(.red)
             }
             // 不显式传 total —— value nil 走 documented indeterminate 路径。
+            // 单元信号是离散跳变(batch/cluster/category 完成才发),easeOut
+            // 让条平滑滑到新位置而不是瞬移。
             ProgressView(value: p.fraction)
                 .progressViewStyle(.linear)
                 .controlSize(.small)
+                .animation(.easeOut(duration: 0.45), value: p.fraction)
             if !p.detail.isEmpty {
                 Text(p.detail)
                     .font(.system(size: 10, design: .monospaced))
