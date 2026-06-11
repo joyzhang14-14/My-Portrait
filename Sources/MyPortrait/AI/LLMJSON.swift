@@ -101,4 +101,69 @@ enum LLMJSON {
         }
         return s
     }
+
+    // MARK: - Repair
+
+    /// 把"几乎是 JSON"的 LLM 输出修成 JSONSerialization 能解析的形态。
+    /// 只修两类**机械**缺陷,对合法 JSON 是 no-op:
+    ///   1. 字符串字面量**内**的裸控制字符(\n \r \t)→ 标准转义。reasoning
+    ///      模型(deepseek-v4-pro 等)给长 markdown body 字符串时最常犯 ——
+    ///      合法 JSON 字符串里本就不允许裸控制字符,所以转义不会破坏语义。
+    ///   2. 字符串**外**的尾逗号(`,]` / `,}`)→ 删除。
+    /// 语义级缺陷(单引号 / 注释)不在这里修 —— caller 解析时配
+    /// `.json5Allowed` 兜。
+    static func repair(_ json: String) -> String {
+        var out = String()
+        out.reserveCapacity(json.count)
+        var inString = false
+        var escape = false
+        /// 字符串外攒住的 "," + 其后空白 —— 看到 ]/} 时丢逗号,否则原样吐出。
+        var pending = ""
+
+        func flushPending(dropComma: Bool) {
+            if dropComma, pending.first == "," {
+                out.append(contentsOf: pending.dropFirst())
+            } else {
+                out.append(pending)
+            }
+            pending = ""
+        }
+
+        for ch in json {
+            if inString {
+                if escape {
+                    out.append(ch); escape = false
+                } else if ch == "\\" {
+                    out.append(ch); escape = true
+                } else if ch == "\"" {
+                    out.append(ch); inString = false
+                } else if ch == "\n" {
+                    out.append("\\n")
+                } else if ch == "\r" {
+                    out.append("\\r")
+                } else if ch == "\t" {
+                    out.append("\\t")
+                } else {
+                    out.append(ch)
+                }
+                continue
+            }
+            // —— 字符串外 ——
+            if !pending.isEmpty {
+                if ch.isWhitespace { pending.append(ch); continue }
+                if ch == "]" || ch == "}" {
+                    flushPending(dropComma: true)
+                    out.append(ch)
+                    continue
+                }
+                flushPending(dropComma: false)
+                // fall through:ch 按正常字符继续处理
+            }
+            if ch == "," { pending = ","; continue }
+            if ch == "\"" { inString = true; out.append(ch); continue }
+            out.append(ch)
+        }
+        if !pending.isEmpty { flushPending(dropComma: false) }
+        return out
+    }
 }
