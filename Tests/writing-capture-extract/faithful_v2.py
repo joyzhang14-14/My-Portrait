@@ -270,6 +270,20 @@ for day in DAYS:
                              and _py_flat_eq(letters, r2[1])), None)
             if twin is not None:
                 drops.append(("残渣副本", a_, t_, evid_, t0_, t1_, f"拼音与真身重复:{cv(twin[1])[:30]}")); continue
+        # 中间态草稿折叠(ev1143 那个输入法我hen bu x 案,2026-06-11):~draft 与同bundle
+        # 15min内后续真发送共享长前缀(≥max(10,草稿norm一半))→ 同一消息的中间快照
+        # (中段被用户删改,cover<0.8 漏过 dedup_truncated),按最终输入原则折叠,丢审计。
+        if '~draft' in src0:
+            tn0 = norm_t(t_)
+            need = max(10, len(tn0) // 2)
+            if len(tn0) >= 10:
+                fin = next((r2 for r2 in out if r2 is not rec and r2[7] == b_ and '~draft' not in r2[6]
+                            and (r2[5] or r2[4] or 0) >= (t1_ or t0_ or 0) - 1000
+                            and (r2[5] or r2[4] or 0) - (t1_ or t0_ or 0) <= 15 * 60 * 1000
+                            and norm_t(r2[1])[:need] == tn0[:need]), None)
+                if fin is not None:
+                    drops.append(("中间态草稿", a_, t_, evid_, t0_, t1_,
+                                  f"与后续真发送共享前缀(中段被改写):{cv(fin[1])[:30]}")); continue
         out_f.append(rec)
     out = out_f
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
