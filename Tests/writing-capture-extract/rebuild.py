@@ -146,6 +146,15 @@ def reconstruct_message(captured, ks, context="", model_fn=None):
             out_lines.append(ln); infos.append({'reason': 'empty_line'}); continue
         fixed, info = _reconstruct_line(ln, seg_for[i] or [], context, model_fn)
         out_lines.append(fixed); infos.append(info)
+    # 竞速尾标点(反引号案 ev1131,2026-06-11):闭引号键落在选字与发送CR之间,AX快照晚一拍漏收
+    # ('"'键@28.940,CR@29.288,快照@29.666 无闭引号)。末行击键段以 '"' 收尾 + 全文 “ 多于 ”
+    # → 击键背书 + 配对信号双证,补 ”。只做双引号(本案);无配对信号不动。
+    joined = '\n'.join(out_lines)
+    last_seg = ''.join(seg_for[-1]) if (seg_for and seg_for[-1]) else ''   # split_cr 段=char列表
+    if (out_lines and last_seg.rstrip().endswith('"')
+            and joined.count('“') > joined.count('”')):
+        out_lines[-1] += '”'
+        infos[-1] = {**(infos[-1] or {}), 'quote_fixed': True}
     return '\n'.join(out_lines), {'lines': infos}
 
 def cv0(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip('　 \t\r')  # 保留 \n
@@ -203,11 +212,34 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
                 base = cap[:m.start()].rstrip()
                 han, _ = decode_run(use_py, (base + " ‖ " + context), model_fn)
                 if han:
+                    # 续接 run(看你怎么用了案,2026-06-11):匹配 run 之后、同段内(段尾=发送CR)
+                    # 还有带选字数字的 run('l'选1=了)→ 用户确认上屏的字,一并解码追加。
+                    # AX 残渣只泄漏到 yo,'l1'在射程外;选字数字=确认上屏,非脑补。
+                    allowed_extra = set()
+                    if use_py == py_ks:
+                        mi = next((i for i, (p, pk, _c) in enumerate(kpicks)
+                                   if p == py_ks and pk == pick_ks), None)
+                        if mi is not None:
+                            for p2, pk2, cpl2 in kpicks[mi + 1:]:
+                                # ≥2字母才续接:单字母候选序在live输入法与librime间分歧
+                                # (cands('l')=来里老啦了,用户输入法首位是了)→宁缺毋错不赌
+                                if pk2 is None or not cpl2 or len(p2) < 2 or not p2.isalpha():
+                                    break
+                                k2, _ = classify(p2, pk2)
+                                if k2 != 'chinese':
+                                    break
+                                h2, _ = decode_run(p2, (base + han + " ‖ " + context), model_fn)
+                                if not h2:
+                                    break
+                                han += h2
+                                allowed_extra |= set(ch for w in cands(p2, 8) for ch in w if HAN.match(ch))
+                                allowed_extra |= set(ch for ch in lattice(p2)[0] if HAN.match(ch))
                     result = base + han
                     fin = guard(cap, result, set(ch for ch in cap if HAN.match(ch)) |
                                 set(ch for c in lattice(use_py)[1] for cand in c[1] for ch in cand if HAN.match(ch)) |
                                 set(ch for ch in lattice(use_py)[0] if HAN.match(ch)) |
-                                set(ch for w in cands(use_py, 8) for ch in w if HAN.match(ch)), set())
+                                set(ch for w in cands(use_py, 8) for ch in w if HAN.match(ch)) |
+                                allowed_extra, set())
                     return fin, {'reason': 'residue', 'use_py': use_py, 'han': han}
             return cap, {'reason': 'residue_skip'}   # 残缺:保留原样,绝不脑补
     # ---- 路 ②:无残渣,击键 run 级补尾 ----
