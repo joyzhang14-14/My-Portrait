@@ -166,6 +166,18 @@ for day in DAYS:
         for ev in evs:
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
                 sends_raw.append([ev, text, t0, t1, is_send])
+        # 回车背书升格(ev1174 jeff chang案,用户证实网页Gemini真发送):endValue短草稿(≤20字,L7射程)
+        # 若事件收尾紧跟裸回车(晚于末笔编辑150ms+;IME确认回车必伴随commit,天然排除;
+        # yo竞速案回车在末笔commit前,天然不升格)→ 升格真发送。只收窄到L7射程:长文endValue
+        # 升格会让同消息过期中间态以真发送身份入册(ev1152/1153实测),不做。降级环在后,可否决误升。
+        for sr in sends_raw:
+            ev, text, t0, t1, s = sr
+            if s or len(cv(text)) > 20: continue
+            last_ts = max((e['ts'] for e in ev['arr'] if e.get('ts')), default=t0 or 0)
+            cr = con.execute("SELECT 1 FROM keystroke_log WHERE bundle_id=:b AND char IN (char(10),char(13)) "
+                             "AND is_backspace=0 AND (modifiers&7)=0 AND ts_ms BETWEEN :a AND :c AND ts_ms >= :d LIMIT 1",
+                             {"b": ev['bundle'], "a": (t1 or 0) - 1000, "c": (t1 or 0) + 2500, "d": last_ts + 150}).fetchone()
+            if cr: sr[4] = True
         # 幻影发送降级(案 vos/vcd ev616=假submit / 关SIP ev1148=假delete快照):"发送"后框内容仍在——
         # 同bundle 60s内后续事件(DB直查,不受staged分组限制)endValue 原样延续该文本为前缀、
         # 且其 commit 流没重打过(cover<0.5,非重发)→ 框从没清过 = AX事件切分/重渲染幻影,
