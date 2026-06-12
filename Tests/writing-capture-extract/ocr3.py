@@ -161,6 +161,11 @@ def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts
             # OCR 帧邻行单字杂讯可乘虚贴上 → 尾≥2字且消费≥4(同前条锚口径)。
             if residue_letters == 0 and (len(tn) < 2 or consumed < 4):
                 return text, {'why': f'干净文本尾过短/消费不足(tn={tn[:6]},consumed={consumed}),拒(防杂讯字)'}
+            # Writ案(2026-06-12 用户指认:writ无输入支持只有OCR):干净文本补的尾为纯ASCII
+            # ——OCR续文实测是聊天框占位符'Write a message…'前缀,击键消费被消息中段英文
+            # run(writign)偏移冒领。中文IME竞速尾必含汉字,纯ASCII尾一律拒。
+            if residue_letters == 0 and not any(not ch.isascii() for ch in tn):
+                return text, {'why': f'干净文本纯ASCII尾(tn={tn[:8]}),拒(Writ案:占位符/界面词风险)'}
             if any(o.startswith(tn) for o in others):
                 return text, {'why': f'尾巴={tn[:10]}是另一条记录前缀,拒(防粘连)'}
             return base + tail, {'fixed': True, 'frame_ts': ts, 'anchor': anchor,

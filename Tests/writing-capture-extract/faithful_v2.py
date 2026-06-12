@@ -248,7 +248,14 @@ for day in DAYS:
             # gate 触发只定性"桶内有非手打",去留逐条判:条文本对桶 commit 流 cover≥0.5(手打)留。
             kept_g = []
             for a, t, s, evid, t0, t1, b in grp:
-                if len(cv(t)) <= 20 or X.cover(cv(t), grp_cs) >= 0.5:
+                ok = len(cv(t)) <= 20 or X.cover(cv(t), grp_cs) >= 0.5
+                if not ok and len(cv(t)) <= 120:
+                    # 击键fallback(header案ev664,2026-06-12):IME整句上屏被AX记成paste,commit流
+                    # 只剩'header'6字cover=0.29冤杀;击键流拼音完整 → 简拼下界闸(字母≥汉字+ascii)背书
+                    letters_t = len(re.sub(r'[^a-zA-Z]', '', R.keys_in_window(con, b, t0, t1)))
+                    need_t = sum(1 for ch in cv(t) if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', cv(t)))
+                    ok = letters_t >= need_t
+                if ok:
                     kept_g.append((a, t, s, evid, t0, t1, b))
                 elif len(cv(t)) <= 120:
                     drops.append(("组级击键gate", a, t, evid, t0, t1, f"组内容{total}字>击键{kc}×4,条cover<0.5,疑粘贴/预存"))
@@ -270,6 +277,9 @@ for day in DAYS:
             drops.append(("dedup_truncated", app, t, evid, t0, t1, "截断态草稿,内容被更长记录覆盖"))
         elif X.is_ph(t):
             drops.append(("占位符", app, t, evid, t0, t1, "known 占位符"))
+        elif re.fullmatch(r'[•●○◦＊*\s]{4,}', t):
+            # 用户裁定 2026-06-12:≥4掩码字符且无任何汉字/字母 → 数据层直接丢(loginwindow密码框)
+            drops.append(("密码掩码", app, "(内容已过滤)", evid, t0, t1, "纯掩码字符≥4(密码框)"))
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
@@ -569,12 +579,14 @@ print(f"Phase1 完成,14b disambig 共调用 {R.DISAMBIG_CALLS[0]} 次", flush=T
 # 只丢两类:邮箱(.com 结尾)/ 密码(连续 ≥6 个掩码符号 •●* 等)。其余全留。
 print("=== Phase2: Pass4 固定逻辑(只滤 .com结尾 + 密码掩码;LLM 禁用)===", flush=True)
 PW_MASK = re.compile(r'[•●○◦＊*]{6}')
+URL_PAT = re.compile(r'(://|^localhost:\d|^[\w.-]+\.(com|org|net|io|ai|dev|cn|me|co|app|us|edu)(/\S*)?$)', re.I)
+EMAIL_PAT = re.compile(r'\S+@\S+\.\w+')   # 用户裁定 2026-06-12:邮箱不限.com,任何@形态直接扔(zzhang@…k12.nc.us)
 def pass4_fixed(recs):
     kept, dropped = [], []
     for r in recs:
         t = (r[1] or '').strip()
-        if t.lower().endswith('.com'):
-            dropped.append((r, "邮箱(.com 结尾)")); continue
+        if t.lower().endswith('.com') or URL_PAT.search(t) or EMAIL_PAT.search(t):
+            dropped.append((r, "网址/邮箱")); continue
         if PW_MASK.search(t):
             dropped.append((r, "密码(连续≥6掩码符号)")); continue
         kept.append(r)
