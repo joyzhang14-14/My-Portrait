@@ -48,6 +48,9 @@ GOLD = [
     ("B8 窄账本质量(独立行)", ["\n> 之类的\n", "\n> 还可以\n"],
      ["\n> 增加pass\n", "\n> 让pass\n", "\n> 就是pass\n", "\n> 给pass\n"]),   # 独立行口径:'给pass3传入…'真消息含子串,误报修正
     ("B9 竞速渣清零(独立行)", [], ["\n> 这\n", "\n> go\n", "\n> shi\n", "\n> zh\n"]),
+    # 2026-06-12 v19 用户标注两案(URL连坐/剥离腰斩)
+    ("B10 含链接真消息整条", ["https://github.com/joyzhang14-14/My-Portrait", "接着回答问题"], []),
+    ("B11 VALIS全文唯一", ["VALIS_BEATOVEN_API_KEY= 我没在env里面找到"], ["\n> 找到，这个需要我自己填是吗\n"]),
 ]
 # 全文档级隐私 ban(不只成品段:未定区/审计也不许出现——用户裁定:密码/邮箱/URL任何文档不展示)
 DOC_BAN = ["localhost:5173", "zzhang@students", "k12.nc.us", "●●●●●●", "joyzhang_14@163",
