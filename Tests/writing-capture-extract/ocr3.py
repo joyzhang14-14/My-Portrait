@@ -57,14 +57,19 @@ def _verify_at(cont, L):
     while out and out[-1] in '，。！？、…,.!? ': out.pop()
     return ''.join(out), L
 
-def verify_tail(cont, leftover):
+def verify_tail(cont, leftover, suffix_only=False):
     """续文 cont 过击键账。账先剥选字数字/空格;账开头可能是 base 部分的击键(对不上尾巴),
-    用「跳过前缀」搜索。返回 (tail, consumed=消费的账上字母数)。"""
+    用「跳过前缀」搜索。返回 (tail, consumed=消费的账上字母数)。
+    suffix_only(Writ案治本,2026-06-12):竞速尾的键必落在**账尾**(回车前最后一段没进AX的键)
+    ——消费须到达账尾(rem≤2 容错),否则是消息中段键冒领(writign 验 Writ)/占位符无键,拒。
+    中英文界面占位符一起治本:它们在账尾没有对应击键。"""
     L0 = re.sub(r'[^a-z]', '', (leftover or '').lower())
     best = ('', 0)
     for off in range(len(L0)):
         tail, rem = _verify_at(cont, L0[off:])
         consumed = len(L0) - off - len(rem)
+        if suffix_only and len(rem) > 2:
+            continue                                     # 消费没到账尾 = 中段冒领,此 off 作废
         if len(tail) > len(best[0]) or (len(tail) == len(best[0]) and consumed > best[1]):
             best = (tail, consumed)
         if len(tail) >= len(cont) - 2: break             # 几乎全验上了,够了
@@ -151,7 +156,8 @@ def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts
             idx = ft.find(anchor)
             if idx < 0: continue
             cont = ft[idx + len(anchor): idx + len(anchor) + 30]
-            tail, consumed = verify_tail(cont, leftover_keys)
+            # 干净文本(residue=0)= 竞速尾域:键必在账尾,suffix_only 防中段冒领/占位符(中英文通治)
+            tail, consumed = verify_tail(cont, leftover_keys, suffix_only=(residue_letters == 0))
             tn = cv(tail).replace(' ', '')
             if not tn:
                 break                                     # 本帧锚上了但验证空,换下一帧
