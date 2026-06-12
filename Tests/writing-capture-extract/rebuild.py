@@ -367,6 +367,11 @@ def event_sends_with_ts(ev, X, group_cs=None):
                                     "AND started_at > :a AND started_at <= :a2",
                                     {"b": ev['bundle'], "a": ts, "a2": ts + 60000}).fetchall()
                 if not any(t_n and t_n in re.sub(r'\s', '', X.cv(w or '')) for (w,) in nxt):
+                    # 剥离命中:同事件早先的回车竞速渣候选(zh/shi/go,IME改写删除+回车凑巧)
+                    # 是同一发送动作的中间残骸——留着会被重建解成错字版(shi→事态你帮我改变)
+                    # 与真身并存,清掉(只清短渣,不动多发送事件的其他真消息)
+                    out[:] = [o for o in out
+                              if not (o[3] and len(X.cv(o[0])) < max(4, len(txc) // 2))]
                     t = txc
             out.append((t, prev_ts, ts, True)); prev_ts = ts
         elif k == 'delete':
