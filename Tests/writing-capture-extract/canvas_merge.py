@@ -34,6 +34,20 @@ def clean_frame_text(words, kwords, line_freq=None):
             bl.append((y, t))
     return '\n'.join(t for _, t in sorted(bl))
 
+def is_history_frame(words):
+    """Google Docs 版本历史帧判据:界面词(Version history/版本记录/作者条目)或
+    删除线签名(词间连字符≥2 的行 ≥3:删除线穿词缝被 OCR 读成连字符)。
+    历史帧让旧版以干净文本重现,污染快照与终读仲裁,必须剔除。"""
+    n_strike = 0
+    for (y, x, t, n) in CL.frame_lines(words):
+        tl = t.lower()
+        if ('version history' in tl or '版本记录' in tl or 'restore this version' in tl
+                or '恢复此版本' in tl or re.search(r'•\s*joy zhang', tl)):
+            return True
+        if re.search(r'[a-z]{3,}-[a-z]{2,}', tl) and t.count('-') >= 2:
+            n_strike += 1
+    return n_strike >= 3
+
 def normx(s):
     s = (s or '').replace('（', '(').replace('）', ')').replace('“', '"').replace('”', '"').replace('’', "'")
     return re.sub(r'[^a-z0-9一-鿿]', '', s.lower())
@@ -55,21 +69,25 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
             continue
         if c: buf.append(c if c not in ('\n', '\r') else ' ')
     kwords = set(re.findall(r'[a-z]{4,}', ''.join(buf).lower()))
+    # 解析一次 + 剔除版本历史帧(旧版以干净文本重现的污染源)
+    frames = []
+    for ts, wj in rows:
+        try: words = json.loads(wj)
+        except Exception: continue
+        if is_history_frame(words): continue
+        frames.append((ts, words))
+    print(f"剔除历史帧 {len(rows) - len(frames)} 张", file=sys.stderr)
     # 代表帧:时间均匀取 max_snaps 张,每张去噪;太短(<200字)跳过
     from collections import Counter as _CF
     line_freq = _CF()
-    for ts, wj in rows[::3]:
-        try: words = json.loads(wj)
-        except Exception: continue
+    for ts, words in frames[::3]:
         for (y, x, t, n) in CL.frame_lines(words):
             if n >= 3:
                 line_freq[re.sub(r'[^a-z0-9一-鿿]', '', t.lower())[:30]] += 1
     snaps = []
-    step = max(1, len(rows) // max_snaps)
-    for i in range(0, len(rows), step):
-        ts, wj = rows[i]
-        try: words = json.loads(wj)
-        except Exception: continue
+    step = max(1, len(frames) // max_snaps)
+    for i in range(0, len(frames), step):
+        ts, words = frames[i]
         t = clean_frame_text(words, kwords, line_freq)
         if len(t) >= 200: snaps.append((ts, t))
     print(f"代表快照 {len(snaps)} 张", file=sys.stderr)
@@ -82,8 +100,11 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
             listing = f"【文本】\n{parts[0]}"
         else:
             listing = '\n\n'.join(f"【片段{i+1}】\n{p}" for i, p in enumerate(parts))
-        user = ("以下片段来自同一文档的滚动截屏 OCR,按时间顺序,相邻片段有重叠区,可能有 OCR 错字。"
-                "把它们拼成这一区域的完整文本:用重叠区对齐;重叠只保留一份(选更通顺的版本);"
+        user = ("以下片段来自同一文档的滚动截屏 OCR,**按拍摄时间先后排列**(片段越靠后越新),"
+                "相邻片段有重叠区,可能有 OCR 错字。作者写作中会反复修改:同一段落可能在不同片段里"
+                "出现新旧两个版本。把它们拼成这一区域的完整文本:用重叠区对齐;"
+                "**同一段落新旧版本冲突时,只保留时间更靠后的片段里的版本,旧版整段丢弃**;"
+                "重叠只保留一份,同一句话在输出里最多出现一次;"
                 "按文档顺序;**只能用片段里出现过的文字,禁止发明**。\n\n"
                 f"{listing}\n\n输出拼接后的完整文本,不解释。")
         pr = tok14.apply_chat_template([{"role": "user", "content": user}],
@@ -125,6 +146,25 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         cands = [c for c in set(cands) if kwfreq[c] >= 2]
         return max(cands, key=lambda c: kwfreq[c]) if cands else w
     body = re.sub(r'[A-Za-z]{5,}', fix_word, body)
+    # 终稿仲裁 trim(确定性):被重写的旧版在终读池(剔历史后会话末段帧)里缺席。
+    # 逐句对终读池半窗核验,命中率<0.5 = 旧版残留 → 剪掉(快照本身含早期草稿,guard 拦不住)
+    FINAL_READ_MS = 120 * 60000
+    cut = frames[-1][0] - FINAL_READ_MS if frames else 0
+    pool = [t for ts, words in frames if ts >= cut
+            for (y, x, t, n) in CL.frame_lines(words) if n >= 3]
+    hay = normx(' '.join(pool))
+    def in_final(s):
+        ns = normx(s)
+        if len(ns) < 24: return not ns or ns in hay
+        ws = [ns[i:i + 24] for i in range(0, len(ns) - 23, 12)]
+        ok = sum(1 for w in ws if w in hay or w[:12] in hay or w[12:] in hay)
+        return ok / len(ws) >= 0.5
+    kept, cut_n = [], 0
+    for sent in re.split(r'(?<=[。.!?!?\n])', body):
+        if in_final(sent): kept.append(sent)
+        else: cut_n += 1
+    body = ''.join(kept)
+    print(f"终稿仲裁剪句 {cut_n}", file=sys.stderr)
     json.dump({'final_text': body, 'timeline': [], 'frames': len(rows), 'chrome_lines': 0},
               open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
     print(f"拼接完成 字数 {len(body)}")
