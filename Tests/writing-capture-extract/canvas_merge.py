@@ -34,19 +34,7 @@ def clean_frame_text(words, kwords, line_freq=None):
             bl.append((y, t))
     return '\n'.join(t for _, t in sorted(bl))
 
-def is_history_frame(words):
-    """Google Docs 版本历史帧判据:界面词(Version history/版本记录/作者条目)或
-    删除线签名(词间连字符≥2 的行 ≥3:删除线穿词缝被 OCR 读成连字符)。
-    历史帧让旧版以干净文本重现,污染快照与终读仲裁,必须剔除。"""
-    n_strike = 0
-    for (y, x, t, n) in CL.frame_lines(words):
-        tl = t.lower()
-        if ('version history' in tl or '版本记录' in tl or 'restore this version' in tl
-                or '恢复此版本' in tl or re.search(r'•\s*joy zhang', tl)):
-            return True
-        if re.search(r'[a-z]{3,}-[a-z]{2,}', tl) and t.count('-') >= 2:
-            n_strike += 1
-    return n_strike >= 3
+is_history_frame = CL.is_history_frame   # 判据下沉 canvas_local,timeline 线共用
 
 def normx(s):
     s = (s or '').replace('（', '(').replace('）', ')').replace('“', '"').replace('”', '"').replace('’', "'")
@@ -146,26 +134,32 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         cands = [c for c in set(cands) if kwfreq[c] >= 2]
         return max(cands, key=lambda c: kwfreq[c]) if cands else w
     body = re.sub(r'[A-Za-z]{5,}', fix_word, body)
-    # 终稿仲裁 trim(确定性):被重写的旧版在终读池(剔历史后会话末段帧)里缺席。
-    # 逐句对终读池半窗核验,命中率<0.5 = 旧版残留 → 剪掉(快照本身含早期草稿,guard 拦不住)
-    FINAL_READ_MS = 120 * 60000
-    cut = frames[-1][0] - FINAL_READ_MS if frames else 0
-    pool = [t for ts, words in frames if ts >= cut
+    # 终稿仲裁 trim:被重写的旧版在终读池(剔历史后会话末段帧)里缺席 → 剪。
+    # 判据=与评测/guard 同口径的半窗容差(更严的判据已实证错位大开杀戒:
+    # 半窗口径天然原谅小幅改写,只有整段重写才该剪)。
+    # 终读池=末 25% 非历史帧(会话相对量,本样本≈115min;墙钟常数已废)。
+    # 安全阀:剪句>20% = 多半没有收尾通读,终读池不可信 → 整体放弃 trim(宁多勿错)。
+    k = max(1, int(len(frames) * 0.25))
+    pool = [t for ts, words in frames[-k:]
             for (y, x, t, n) in CL.frame_lines(words) if n >= 3]
     hay = normx(' '.join(pool))
     def in_final(s):
         ns = normx(s)
         if len(ns) < 24: return not ns or ns in hay
         ws = [ns[i:i + 24] for i in range(0, len(ns) - 23, 12)]
-        ok = sum(1 for w in ws if w in hay or w[:12] in hay or w[12:] in hay)
-        return ok / len(ws) >= 0.5
-    kept, cut_n = [], 0
-    for sent in re.split(r'(?<=[。.!?!?\n])', body):
-        if in_final(sent): kept.append(sent)
-        else: cut_n += 1
-    body = ''.join(kept)
-    print(f"终稿仲裁剪句 {cut_n}", file=sys.stderr)
-    json.dump({'final_text': body, 'timeline': [], 'frames': len(rows), 'chrome_lines': 0},
+        return sum(1 for w in ws if w in hay or w[:12] in hay or w[12:] in hay) / len(ws) >= 0.5
+    sents = re.split(r'(?<=[。.!?!?\n])', body)
+    kept = [s for s in sents if in_final(s)]
+    cut_n = len(sents) - len(kept)
+    if cut_n > 0.2 * len(sents):
+        print(f"终稿仲裁弃用(剪句 {cut_n}/{len(sents)} 超阀,疑无通读动作)", file=sys.stderr)
+    else:
+        body = ''.join(kept)
+        print(f"终稿仲裁剪句 {cut_n}", file=sys.stderr)
+    # diff 时间线:canvas_local 确定性线产出(用户硬需求),同样剔历史帧
+    print("生成 diff 时间线(canvas_local,剔历史帧)…", file=sys.stderr)
+    _, timeline, _, _ = CL.main(url_like, t0s, t1s, drop_history=True)
+    json.dump({'final_text': body, 'timeline': timeline, 'frames': len(rows), 'chrome_lines': 0},
               open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
     print(f"拼接完成 字数 {len(body)}")
     return body

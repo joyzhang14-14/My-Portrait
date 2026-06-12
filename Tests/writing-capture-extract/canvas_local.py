@@ -73,10 +73,24 @@ def key_of(t):
     """行的查重键:去空白小写前36字(OCR 错字容忍靠相似度合并,键只做粗桶)。"""
     return re.sub(r'[^a-z0-9一-鿿]', '', t.lower())[:36]
 
+def is_history_frame(words):
+    """Google Docs 版本历史帧判据:界面词(Version history/版本记录/作者条目)或
+    删除线签名(词间连字符≥2 的行 ≥3:删除线穿词缝被 OCR 读成连字符)。
+    历史帧让旧版以干净文本重现,污染快照/终稿仲裁/timeline,须剔除。"""
+    n_strike = 0
+    for (y, x, t, n) in frame_lines(words):
+        tl = t.lower()
+        if ('version history' in tl or '版本记录' in tl or 'restore this version' in tl
+                or '恢复此版本' in tl or re.search(r'•\s*joy zhang', tl)):
+            return True
+        if re.search(r'[a-z]{3,}-[a-z]{2,}', tl) and t.count('-') >= 2:
+            n_strike += 1
+    return n_strike >= 3
+
 def similar(a, b):
     return SequenceMatcher(None, a, b, autojunk=False).ratio()
 
-def main(url_like, t0s, t1s):
+def main(url_like, t0s, t1s, drop_history=False):
     T0 = int(datetime.datetime.strptime(t0s, '%Y-%m-%d %H:%M').timestamp() * 1000)
     T1 = int(datetime.datetime.strptime(t1s, '%Y-%m-%d %H:%M').timestamp() * 1000)
     rows = con.execute(
@@ -104,6 +118,7 @@ def main(url_like, t0s, t1s):
     for ts, wj in rows:
         try: words = json.loads(wj)
         except Exception: continue
+        if drop_history and is_history_frame(words): continue
         raw_fl.append((ts, frame_lines(words)))
     # 两遍法 x 锚:第一遍击键背书收行 → 正文列左缘众数(GitHub页/写作建议对话与essay同词,
     # 行级背书拦不住,但它们在别的窗口列——x 锚拦);第二遍 背书∧列锚 双闸
