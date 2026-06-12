@@ -51,34 +51,55 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         t = clean_frame_text(words, kwords)
         if len(t) >= 200: snaps.append((ts, t))
     print(f"代表快照 {len(snaps)} 张", file=sys.stderr)
-    # 14B 滚动拼接
+    # 层级归并(v2c):组内6张一次性拼→组块再拼一次。每层输出有界,无滚动膨胀/截断。
     from mlx_lm import load as _load, generate as _gen
     m14, tok14 = _load("mlx-community/Qwen3-14B-4bit")
     allsnap = normx(' '.join(t for _, t in snaps))
-    body = snaps[0][1] if snaps else ''
-    for ts, snap in snaps[1:]:
-        user = ("两段文本来自同一文档的滚动截屏 OCR(有重叠区,可能有 OCR 错字)。"
-                "找出【新视口】中【当前全文】还没有的**新增文字**(整句/整段,按文档顺序;"
-                "重叠的不要;只能抄【新视口】里出现过的文字,禁止发明)。\n\n"
-                f"【当前全文】\n{body}\n\n【新视口】\n{snap}\n\n"
-                "只输出新增文字;若没有新增,输出 NONE。不解释。")
+    def merge_once(parts, label):
+        if len(parts) == 1:
+            listing = f"【文本】\n{parts[0]}"
+        else:
+            listing = '\n\n'.join(f"【片段{i+1}】\n{p}" for i, p in enumerate(parts))
+        user = ("以下片段来自同一文档的滚动截屏 OCR,按时间顺序,相邻片段有重叠区,可能有 OCR 错字。"
+                "把它们拼成这一区域的完整文本:用重叠区对齐;重叠只保留一份(选更通顺的版本);"
+                "按文档顺序;**只能用片段里出现过的文字,禁止发明**。\n\n"
+                f"{listing}\n\n输出拼接后的完整文本,不解释。")
         pr = tok14.apply_chat_template([{"role": "user", "content": user}],
                                        add_generation_prompt=True, tokenize=False, enable_thinking=False)
-        out = _gen(m14, tok14, prompt=pr, max_tokens=1200, verbose=False)
+        out = _gen(m14, tok14, prompt=pr, max_tokens=3800, verbose=False)
         out = re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip()
-        if re.search(r'\bNONE\b', out) or len(out) < 8: continue
-        # 幻觉 guard:新增段每 24 字窗必须在快照全集;坏窗>10% → 拒
         nb = normx(out)
         wins = [nb[i:i + 24] for i in range(0, max(1, len(nb) - 24), 24)]
         bad = sum(1 for w in wins if w not in allsnap)
         if wins and bad / len(wins) > 0.10:
-            print(f"  拒新增(幻觉窗 {bad}/{len(wins)}) @{ts}", file=sys.stderr)
-            continue
-        # 防复述:新增与 body 重叠>50% → 拒(只要真新)
-        ov = sum(1 for w in wins if w in normx(body))
-        if wins and ov / len(wins) > 0.5:
-            continue
-        body = body.rstrip() + '\n' + out
+            print(f"  {label} 拒(幻觉窗 {bad}/{len(wins)}),回退片段直连", file=sys.stderr)
+            return '\n'.join(parts)
+        return out
+    G = 6
+    blocks = []
+    texts = [t for _, t in snaps]
+    for gi in range(0, len(texts), G):
+        grp = texts[gi:gi + G]
+        blocks.append(merge_once(grp, f"组{gi//G}") if len(grp) > 1 else grp[0])
+    body = merge_once(blocks, "顶层") if len(blocks) > 1 else (blocks[0] if blocks else '')
+    # 击键词典纠错(确定性,免费精确率;复用 canvas_local 频次仲裁思路)
+    from collections import Counter as _C3
+    kwfreq = _C3(re.findall(r'[a-z]{4,}', ''.join(buf).lower()))
+    def ed1(a, b):
+        if abs(len(a) - len(b)) > 1: return False
+        if len(a) == len(b): return sum(x != y for x, y in zip(a, b)) <= 1
+        s_, l_ = (a, b) if len(a) < len(b) else (b, a)
+        return any(s_ == l_[:i] + l_[i+1:] for i in range(len(l_)))
+    kw_by_len = {}
+    for w in kwfreq: kw_by_len.setdefault(len(w), set()).add(w)
+    def fix_word(m):
+        w = m.group(0); wl = w.lower()
+        if wl in kwfreq or len(wl) < 5: return w
+        cands = [c for L in (len(wl)-1, len(wl), len(wl)+1) for c in kw_by_len.get(L, ()) if ed1(wl, c)]
+        cands += [c for c in kwfreq if wl.replace('m', 'rn') == c or wl.replace('rn', 'm') == c]
+        cands = [c for c in set(cands) if kwfreq[c] >= 2]
+        return max(cands, key=lambda c: kwfreq[c]) if cands else w
+    body = re.sub(r'[A-Za-z]{5,}', fix_word, body)
     json.dump({'final_text': body, 'timeline': [], 'frames': len(rows), 'chrome_lines': 0},
               open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
     print(f"拼接完成 字数 {len(body)}")
