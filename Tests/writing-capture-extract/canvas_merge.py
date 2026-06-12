@@ -9,14 +9,28 @@ import canvas_local as CL
 
 con = CL.con
 
-def clean_frame_text(words, kwords):
-    """复用行级闸,拼回该帧的去噪文本(按 y 序)。"""
-    bl = []
+def clean_frame_text(words, kwords, line_freq=None):
+    """两遍式:strong 行(背书≥0.5)定**帧级 x 锚**(该帧文档列位置——窗口移动自适应);
+    低背书行须 跨帧频次≥2 ∧ x∈锚±0.08(GitHub/对话窗常驻行高频但列不同,锚拦)。"""
+    cand = []
     for (y, x, t, n) in CL.frame_lines(words):
         if n < 3: continue
         toks = re.findall(r'[a-z]{4,}', t.lower())
         if len(toks) < 2: continue
-        if sum(1 for w in toks if w in kwords) / len(toks) >= 0.5:
+        r = sum(1 for w in toks if w in kwords) / len(toks)
+        cand.append((y, x, t, r))
+    strong_x = [round(x / 0.02) for (_, x, _, r) in cand if r >= 0.5]
+    ax = None
+    if strong_x:
+        from collections import Counter as _CA
+        ax = _CA(strong_x).most_common(1)[0][0] * 0.02
+    bl = []
+    for (y, x, t, r) in cand:
+        k = re.sub(r'[^a-z0-9一-鿿]', '', t.lower())[:30]
+        if r >= 0.5:
+            bl.append((y, t))
+        elif (r >= 0.15 and len(t) >= 15 and (line_freq is None or line_freq.get(k, 0) >= 2)
+              and ax is not None and abs(x - ax) <= 0.08):
             bl.append((y, t))
     return '\n'.join(t for _, t in sorted(bl))
 
@@ -42,13 +56,21 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         if c: buf.append(c if c not in ('\n', '\r') else ' ')
     kwords = set(re.findall(r'[a-z]{4,}', ''.join(buf).lower()))
     # 代表帧:时间均匀取 max_snaps 张,每张去噪;太短(<200字)跳过
+    from collections import Counter as _CF
+    line_freq = _CF()
+    for ts, wj in rows[::3]:
+        try: words = json.loads(wj)
+        except Exception: continue
+        for (y, x, t, n) in CL.frame_lines(words):
+            if n >= 3:
+                line_freq[re.sub(r'[^a-z0-9一-鿿]', '', t.lower())[:30]] += 1
     snaps = []
     step = max(1, len(rows) // max_snaps)
     for i in range(0, len(rows), step):
         ts, wj = rows[i]
         try: words = json.loads(wj)
         except Exception: continue
-        t = clean_frame_text(words, kwords)
+        t = clean_frame_text(words, kwords, line_freq)
         if len(t) >= 200: snaps.append((ts, t))
     print(f"代表快照 {len(snaps)} 张", file=sys.stderr)
     # 层级归并(v2c):组内6张一次性拼→组块再拼一次。每层输出有界,无滚动膨胀/截断。
