@@ -119,18 +119,23 @@ def main(url_like, t0s, t1s):
                 xs[round(x / 0.02)] += 1
     anchor = xs.most_common(1)[0][0] * 0.02 if xs else None
     print(f"正文列锚 x={anchor}", file=sys.stderr)
+    USE_LLM = os.environ.get('CANVAS_LLM', '0') == '1'
     for ts, fl in raw_fl:
         bl = []
         for (y, x, t, n) in fl:
-            if anchor is not None and not (anchor - 0.02 <= x <= anchor + 0.08): continue   # 右缩进(列表/段首)合法,左出界=别的窗口
             if n < 3: continue
             if not kw_has_cjk:
                 t = re.sub(r'[一-鿿][一-鿿0-9个,，()（）:：\s]*', ' ', t)   # 弹窗中文段剥离(击键无中文→中文必非正文)
                 t = norm(t)
             toks = re.findall(r'[a-z]{4,}', t.lower())
             if len(toks) < 2: continue
-            if sum(1 for w in toks if w in kwords) / len(toks) >= 0.5:
-                bl.append((y, t))
+            ratio = sum(1 for w in toks if w in kwords) / len(toks)
+            in_anchor = anchor is not None and (anchor - 0.02 <= x <= anchor + 0.08)
+            if ratio >= 0.5 and in_anchor:
+                bl.append((y, t))                      # 强通过:背书+锚双证,免LLM
+            elif USE_LLM and ratio >= 0.3:
+                bl.append((y, '?' + t))                # 模糊带:LLM仲裁(窗口位置不定/中文canvas,
+                                                       # 用户裁定确定性闸不够泛化 2026-06-12)
         if bl: frames.append((ts, sorted(bl)))
     # ---- 跨帧 chrome 过滤:行键出现率 >60% 且短行 = 界面常驻(已保存/保存中/菜单) ----
     from collections import Counter, defaultdict
@@ -150,6 +155,8 @@ def main(url_like, t0s, t1s):
     for ts, bl in frames:
         cur_gids = []
         for y, t in bl:
+            weak = t.startswith('?')
+            if weak: t = t[1:]
             if not t or key_of(t) in chrome or len(t) < 4: continue
             # 找池中相似行(先键桶,再相似度)
             gid = None
@@ -178,6 +185,7 @@ def main(url_like, t0s, t1s):
                 timeline.append((ts, 'commit', t))
             pool[gid]['texts'][t] += 1
             pool[gid]['last'] = ts
+            pool[gid]['strong'] = pool[gid].get('strong', 0) + (0 if weak else 1)
             if len(t) > len(pool[gid]['key']):   # 键随更长版本更新(滚动中行被截断)
                 pool[gid]['key'] = key_of(t)
                 pool[gid]['words'] = frozenset(re.findall(r'[a-z]{4,}', t.lower()))
@@ -205,6 +213,37 @@ def main(url_like, t0s, t1s):
         # 低票淘汰:出现 <3 帧(正文行平均被拍 10+ 次)= OCR 交错/截断残余
         if sum(p['texts'].values()) < 3: continue
         final_gids.append(g)
+    # LLM 行级仲裁(零写权:只判正文Y/N,文本仍来自OCR投票+击键纠错;用户裁定:窗口位置
+    # 不定+中文canvas,确定性闸不够泛化)。强通过(背书+锚)免审;weak-only 行分批问 14B。
+    weak_gids = [g for g in final_gids if not pool[g].get('strong')]
+    if weak_gids and os.environ.get('CANVAS_LLM', '0') == '1':
+        from mlx_lm import load as _load, generate as _gen
+        m14, tok14 = _load("mlx-community/Qwen3-14B-4bit")
+        kws_sample = ' '.join(list(kwords)[:40])
+        keep = set()
+        B = 30
+        for bi in range(0, len(weak_gids), B):
+            batch = weak_gids[bi:bi + B]
+            listing = '\n'.join(f"{j+1}. {pool[g]['texts'].most_common(1)[0][0][:90]}"
+                                 for j, g in enumerate(batch))
+            user = ("以下是屏幕OCR提取的文本行,来自用户的一次写作会话(用户在文档里写文章)。"
+                    "判断每行是否属于用户文章的内容(含标题/副标题/作者行/日期行——文档自身的一切都算)。"
+                    "界面元素(菜单/按钮/字数统计/已保存/通知)、"
+                    "其他窗口内容(终端/代码/聊天/网页列表)、AI给的写作建议 都不是正文。\n"
+                    f"用户打字时出现过的词(主题线索):{kws_sample}\n\n{listing}\n\n"
+                    "逐行输出'序号:Y'或'序号:N',不解释。")
+            pr = tok14.apply_chat_template([{"role": "user", "content": user}],
+                                           add_generation_prompt=True, tokenize=False, enable_thinking=False)
+            out = _gen(m14, tok14, prompt=pr, max_tokens=8 * len(batch), verbose=False)
+            for j, g in enumerate(batch):
+                mm = re.search(rf'(?m)^\s*{j+1}\s*[.,:：、]\s*([YN])', out, re.I)
+                if mm and mm.group(1).upper() == 'Y':
+                    keep.add(g)
+        print(f"LLM仲裁: weak {len(weak_gids)} 行,保留 {len(keep)}", file=sys.stderr)
+        killed = {g for g in weak_gids if g not in keep}
+        kill_texts = {pool[g]['texts'].most_common(1)[0][0] for g in killed}
+        timeline[:] = [e for e in timeline if not (e[1] == 'commit' and e[2] in kill_texts)]
+        final_gids = [g for g in final_gids if pool[g].get('strong') or g in keep]
     # 版本组去重:order 近邻(≤4)两行词集 Jaccard≥0.45 = 改写关系(整段改写时邻居否决失灵:
     # 'Back then, we had…' vs 终稿 'Back to the time, we got…')→ 留 last_ts 晚者,早者进 delete
     # 时间线(=改写历史可见,diff feature 增强)。OCR 交错行(词集=两行并集)同被吸收。
