@@ -92,7 +92,10 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         out = re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip()
         nb = normx(out)
         wins = [nb[i:i + 24] for i in range(0, max(1, len(nb) - 24), 24)]
-        bad = sum(1 for w in wins if w not in allsnap)
+        # 半窗容差(98%假说):窗含1-2个OCR错字修复时整窗∉快照,但至少一半12字干净——
+        # 任一半∈快照=错字修复放行;两半都不在=真幻觉拒。释放14B隐性纠错,大幻觉仍拦。
+        bad = sum(1 for w in wins if w not in allsnap
+                  and w[:12] not in allsnap and w[12:] not in allsnap)
         if wins and bad / len(wins) > 0.10:
             print(f"  {label} 拒(幻觉窗 {bad}/{len(wins)}),回退片段直连", file=sys.stderr)
             return '\n'.join(parts)

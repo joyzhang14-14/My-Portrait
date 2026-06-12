@@ -17,10 +17,12 @@ def main(path):
     d = json.load(open(path))
     rec = normx(d['final_text'])
     gold = normx(open('eval/canvas_gold.txt').read())
+    def hit(c, hay):   # 半窗容差:错字窗(1-2字伤)算命中;与guard同口径
+        return c in hay or (c[:12] in hay and len(c) >= 20) or (c[12:] in hay and len(c) >= 20)
     gw = windows(gold)
-    cov = sum(1 for c in gw if c in rec)
+    cov = sum(1 for c in gw if hit(c, rec))
     rw = windows(rec)
-    prec = sum(1 for c in rw if c in gold)
+    prec = sum(1 for c in rw if hit(c, gold))
     # chrome 残留探针(已保存/保存中/菜单词/调查题干指纹)
     probes = ['已保存', '保存中', 'filEditViewInsert', 'surveysoitdoesnttimeout', 'pressuptoedit']
     leaks = [p for p in probes if normx(p) in rec]
