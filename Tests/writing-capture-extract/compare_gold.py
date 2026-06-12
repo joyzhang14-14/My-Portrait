@@ -38,7 +38,19 @@ GOLD = [
     # 2026-06-12 用户Discord截图三连(10:26 PM):闭引号竞速/我的意思尾竞速/特定的人(=A12)
     ("B3 闭引号(截图gold)", ["这首歌的背景怎么样”"], []),
     ("B4 我的意思(截图gold)", ["我的意思"], ["> 我的\n"]),
+    # 2026-06-12 v17/v18 用户标注批(存量框剥离/竞速渣/Writ/header/窄账本质量)
+    ("B5a 作文需求-可以吗", ["这样可以吗你觉得"], []),
+    ("B5b 作文需求-时态", ["时态你帮我改吧"], ["事态你帮我改变"]),
+    ("B5c 作文需求-第二问", ["这样可以吗？你觉得"], []),
+    ("B5d 作文需求-够了吧", ["够了吧"], []),
+    ("B6 Writ尾(占位符OCR渣)", ["然后我直接现写"], ["现写 Writ"]),
+    ("B7 header之类(IME整句paste)", ["我是不是还需要加什么header之类的东西"], []),
+    ("B8 窄账本质量(独立行)", ["\n> 之类的\n", "\n> 还可以\n"], ["增加pass", "让pass", "就是pass"]),
+    ("B9 竞速渣清零(独立行)", [], ["\n> 这\n", "\n> go\n", "\n> shi\n", "\n> zh\n"]),
 ]
+# 全文档级隐私 ban(不只成品段:未定区/审计也不许出现——用户裁定:密码/邮箱/URL任何文档不展示)
+DOC_BAN = ["localhost:5173", "zzhang@students", "k12.nc.us", "●●●●●●", "joyzhang_14@163",
+           "https://www.ikeyrent.com"]
 
 def main(path):
     D = open(path).read()
@@ -53,6 +65,11 @@ def main(path):
         extra = f"含:{b}" if b else ("" if w else f"缺:{[x for x in want if x not in prods][:2]}")
         rows.append((mark, name, extra))
         print(f"{mark} {name}  {extra}")
+    # 全文档级隐私 ban(密码/邮箱/URL 任何段落不展示)
+    leaks = [x for x in DOC_BAN if x in D]
+    mark = "✓" if not leaks else "✗"
+    sc[mark] += 1
+    print(f"{mark} P0 隐私零泄漏(全文档)  " + (f"泄漏:{leaks}" if leaks else ""))
     # 结构统计
     n_pend = re.findall(r'未定区[^（(]*[（(](\d+)[)）]', D)
     n_rev = D.count("审核打回重修")
