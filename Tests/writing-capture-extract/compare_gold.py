@@ -71,6 +71,12 @@ def main(path):
         print(f"{mark} {name}  {extra}")
     # 全文档级隐私 ban(密码/邮箱/URL 任何段落不展示)
     leaks = [x for x in DOC_BAN if x in D]
+    # 密码残留通用检查(用户裁定 2026-06-12:审核区密码残留也算):任何 '> 内容' 行
+    # 为纯符号/掩码≥4(无字母数字汉字;loginwindow 实测 PUA U+F79A,枚举字符类必漏)
+    for m in re.finditer(r'^\s*>\s*(\S{4,})\s*$', D, re.M):
+        s_ = m.group(1)
+        if not re.search(r'[A-Za-z0-9一-鿿]', s_):
+            leaks.append(f"掩码残留:{s_[:8]!r}")
     mark = "✓" if not leaks else "✗"
     sc[mark] += 1
     print(f"{mark} P0 隐私零泄漏(全文档)  " + (f"泄漏:{leaks}" if leaks else ""))
