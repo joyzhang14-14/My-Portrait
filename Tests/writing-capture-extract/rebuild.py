@@ -356,7 +356,12 @@ def event_sends_with_ts(ev, X, group_cs=None):
             # 存量框剥离(作文反馈案 ev692/694/699,2026-06-12 用户裁定:粘贴>30 消除,只留手打需求):
             # submit 全文=存量大文本(早先粘贴/前轮延续,无本事件击键背书)+手打增量(AX text)。
             # 全文对击键 cover<0.5(非本事件手打)而增量 cover≥0.4(简拼宽容)→ 只记增量。
+            stale = t[:max(0, len(t) - len(txc))] if txc else ''
+            unhand = len(stale) * (1 - X.cover(stale, group_cs or cs)) if stale else 0
             if (txc and len(t) > 2 * len(txc)
+                    # 小存量不剥(VALIS_BEATOVEN_API_KEY案):存量中**非手打**字符(组流盖不住的)
+                    # ≤PASTE_MAX → 粘贴政策'单段≤30整条留'优先;剥离只治大存量(作文案≈292)
+                    and unhand > PASTE_MAX
                     and sum(1 for ch in txc if not ch.isascii()) >= 3
                     and X.cover(t, group_cs or cs) < 0.5
                     and X.cover(txc, cs) >= 0.4):

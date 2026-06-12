@@ -579,13 +579,15 @@ print(f"Phase1 完成,14b disambig 共调用 {R.DISAMBIG_CALLS[0]} 次", flush=T
 # 只丢两类:邮箱(.com 结尾)/ 密码(连续 ≥6 个掩码符号 •●* 等)。其余全留。
 print("=== Phase2: Pass4 固定逻辑(只滤 .com结尾 + 密码掩码;LLM 禁用)===", flush=True)
 PW_MASK = re.compile(r'[•●○◦＊*]{6}')
-URL_PAT = re.compile(r'(://|^localhost:\d|^[\w.-]+\.(com|org|net|io|ai|dev|cn|me|co|app|us|edu)(/\S*)?$)', re.I)
-EMAIL_PAT = re.compile(r'\S+@\S+\.\w+')   # 用户裁定 2026-06-12:邮箱不限.com,任何@形态直接扔(zzhang@…k12.nc.us)
+# URL 整条匹配(ev563 教训:search('://')连坐'正文含github链接'的302字真消息——
+# 该丢的是'整条就是URL'的地址栏草稿,链接作为正文一部分保留)
+URL_FULL = re.compile(r'(https?://\S+|localhost:\d\S*|[\w.-]+\.(com|org|net|io|ai|dev|cn|me|co|app|us|edu)(/\S*)?)', re.I)
+EMAIL_PAT = re.compile(r'\S+@\S+\.\w+')   # 邮箱=PII,任意位置即扔(用户裁定;zzhang@…k12.nc.us)
 def pass4_fixed(recs):
     kept, dropped = [], []
     for r in recs:
         t = (r[1] or '').strip()
-        if t.lower().endswith('.com') or URL_PAT.search(t) or EMAIL_PAT.search(t):
+        if t.lower().endswith('.com') or URL_FULL.fullmatch(t) or EMAIL_PAT.search(t):
             dropped.append((r, "网址/邮箱")); continue
         if PW_MASK.search(t):
             dropped.append((r, "密码(连续≥6掩码符号)")); continue
