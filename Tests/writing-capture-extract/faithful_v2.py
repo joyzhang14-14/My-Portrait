@@ -610,7 +610,9 @@ for day in DAYS:
     # 与审计同样不展示(密码内容任何文档都不该出现),静默掉
     def sensitive(t_):
         t_ = (t_ or '').strip()
-        return bool(PW_MASK.search(t_)) or t_.lower().endswith('.com')
+        # 展示层掩码阈值收紧到≥3(•••也不展示);@邮箱/.com 同滤
+        return (bool(re.search(r'[•●○◦＊*]{3}', t_)) or t_.lower().endswith('.com')
+                or bool(re.search(r'\S+@\S+\.\w+', t_)))
     pd = [r for r in PENDING.get(day, []) if not sensitive(r[1])]
     nd.append(f"\n### ⚠️ 未定区(审核未过,展示不入册)({len(pd)})\n")
     if not pd: nd.append("（无）\n")
@@ -625,7 +627,8 @@ for day in DAYS:
     for stage, a, t, evid, t0, t1, reason in dr:
         nd.append(f"- `[{stage}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}` — {reason}\n  > {(t or '')[:300]}\n")
     for (a, t, kc, evid, t0, t1, *_), reason in dd:
-        nd.append(f"- `[Pass4]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` — {reason or '(模型未给原因)'}\n  > {(t or '')[:300]}\n")
+        # Pass4 丢的就是邮箱/密码——审计只留理由行,内容一律遮蔽(joyzhang_14@163.com 实锤泄漏)
+        nd.append(f"- `[Pass4]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` — {reason or '(模型未给原因)'}\n  > (内容已过滤)\n")
     nd.append("\n---\n")
 path = "/Users/joyzhang14/Desktop/Obsidian/Pipeline成品-新pipeline-阶段0.md"
 open(path, "w").write("\n".join(nd))
