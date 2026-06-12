@@ -75,7 +75,8 @@ def main(path):
     # 为纯符号/掩码≥4(无字母数字汉字;loginwindow 实测 PUA U+F79A,枚举字符类必漏)
     for m in re.finditer(r'^\s*>\s*(\S{4,})\s*$', D, re.M):
         s_ = m.group(1)
-        if not re.search(r'[A-Za-z0-9一-鿿]', s_):
+        MASK = set('•●○◦∙⋅・⬤⚫⚪🞄＊*※⁕▪▫■□◼◻●')
+        if all(ch in MASK or '\ue000' <= ch <= '\uf8ff' for ch in s_):
             leaks.append(f"掩码残留:{s_[:8]!r}")
     mark = "✓" if not leaks else "✗"
     sc[mark] += 1

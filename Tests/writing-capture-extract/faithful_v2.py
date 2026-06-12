@@ -21,6 +21,13 @@ DAYS = ['2026-05-27', '2026-05-28', '2026-05-29', '2026-06-05']
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
 def cv(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip()
 
+# 密码掩码判定(2026-06-12 用户裁定):宽枚举掩码字形 + 私用区(loginwindow 实测 U+F79A)。
+# 不用"无字母汉字"一刀切:(> -) 颜文字是真表达;假名/谚文/阿拉伯文等任何语言不当符号。
+MASK_CHARS = set('•●○◦∙⋅・⬤⚫⚪🞄＊*※⁕▪▫■□◼◻●')
+def is_mask(t, n=4):
+    c = cv(t).replace(' ', '')
+    return len(c) >= n and all(ch in MASK_CHARS or '\ue000' <= ch <= '\uf8ff' for ch in c)
+
 # ---- helpers ----
 def sess_events(ids):
     out = []
@@ -277,11 +284,11 @@ for day in DAYS:
             drops.append(("dedup_truncated", app, t, evid, t0, t1, "截断态草稿,内容被更长记录覆盖"))
         elif X.is_ph(t):
             drops.append(("占位符", app, t, evid, t0, t1, "known 占位符"))
-        elif len(cv(t)) >= 4 and not re.search(r'[A-Za-z0-9一-鿿]', t):
-            # 用户裁定 2026-06-12:≥4字符且无任何汉字/字母/数字 → 数据层直接丢。
-            # 不枚举掩码字符:loginwindow 实测用私用区 U+F79A 渲染圆点,字符类必漏;
-            # "无字母汉字数字的≥4字符串"=掩码/纯符号,无信息量
-            drops.append(("密码掩码", app, "(内容已过滤)", evid, t0, t1, "纯符号/掩码≥4(密码框)"))
+        elif is_mask(t):
+            # 用户裁定 2026-06-12:≥4掩码字符 → 数据层直接丢(loginwindow实测PUA U+F79A)。
+            # 宽枚举掩码集+PUA范围;不用"无字母汉字"一刀切(会误杀(> -)颜文字;假名/谚文/
+            # 阿拉伯文也不能当符号——语言判据一律用Unicode属性,不限死码点)
+            drops.append(("密码掩码", app, "(内容已过滤)", evid, t0, t1, "掩码字符≥4(密码框)"))
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
@@ -627,8 +634,7 @@ for day in DAYS:
     def sensitive(t_):
         t_ = (t_ or '').strip()
         # 展示层:掩码≥3/纯符号≥4(PUA如loginwindow U+F79A 也覆盖)/@邮箱/.com 同滤
-        return (bool(re.search(r'[•●○◦＊*]{3}', t_)) or t_.lower().endswith('.com')
-                or (len(t_) >= 4 and not re.search(r'[A-Za-z0-9一-鿿]', t_))
+        return (is_mask(t_, n=3) or t_.lower().endswith('.com')
                 or bool(re.search(r'\S+@\S+\.\w+', t_)))
     pd = [r for r in PENDING.get(day, []) if not sensitive(r[1])]
     nd.append(f"\n### ⚠️ 未定区(审核未过,展示不入册)({len(pd)})\n")
