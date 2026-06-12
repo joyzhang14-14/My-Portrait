@@ -58,6 +58,19 @@ CREATE TABLE IF NOT EXISTS llm_calls(
   latency_ms   INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS chapters(
+  id            INTEGER PRIMARY KEY,
+  day           TEXT NOT NULL,
+  seq           INTEGER NOT NULL,        -- 章节顺序
+  title         TEXT NOT NULL,
+  narrative     TEXT NOT NULL,           -- outline 写的章节叙事
+  session_ids   TEXT NOT NULL DEFAULT '[]',
+  event_id      INTEGER,                 -- Phase C 落成的事件
+  status        TEXT NOT NULL DEFAULT 'open',   -- open/eventized
+  created_at_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_chapters_day ON chapters(day, seq);
+
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -179,3 +192,37 @@ def log_call(con, day, purpose, session_id, prompt_chars, output, ok, latency_ms
             (now_ms(), day, purpose, session_id, prompt_chars,
              (output or "")[:2000], 1 if ok else 0, latency_ms),
         )
+
+
+# ---------------- v2 章节 ----------------
+
+def chapters_for_day(con, day):
+    return con.execute(
+        "SELECT * FROM chapters WHERE day=? ORDER BY seq", (day,)).fetchall()
+
+
+def insert_chapter(con, day, seq, title, narrative, session_ids):
+    with con:
+        con.execute(
+            "INSERT INTO chapters(day,seq,title,narrative,session_ids,created_at_ms)"
+            " VALUES(?,?,?,?,?,?)",
+            (day, seq, title, narrative, json.dumps(session_ids), now_ms()))
+
+
+def outline_progress(con, day):
+    """已被任一章节覆盖的 session id 集合(断点续跑:从未覆盖处继续)。"""
+    covered = set()
+    for ch in chapters_for_day(con, day):
+        covered.update(json.loads(ch["session_ids"]))
+    return covered
+
+
+def eventize_chapter(con, chapter_id, event_id, member_ids):
+    """章节 → 事件 + 全部成员 session 标 completed,单事务。"""
+    with con:
+        con.execute("UPDATE chapters SET event_id=?, status='eventized' WHERE id=?",
+                    (event_id, chapter_id))
+        for sid in member_ids:
+            con.execute(
+                "UPDATE raw_sessions SET status='completed', event_id=?, "
+                "updated_at_ms=? WHERE id=?", (event_id, now_ms(), sid))

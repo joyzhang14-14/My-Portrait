@@ -143,3 +143,71 @@ Answer JSON:
 chrome/noise with no real activity>", "keywords": ["3-8 lowercase terms"]}}"""
     return [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": user}]
+
+
+# ---------------- v2:day-outline(章节化) ----------------
+
+def outline_window(day, digest_lines, prev_chapters, carry_note):
+    """滑窗:~40 个 session digest + 上一窗章节接力 → 划章节。
+    digest_lines: [(session_id, "HH:MM app | digest首行")]"""
+    prev = "\n".join(f"- [{c['seq']}] {c['title']}: {c['narrative'][:120]}"
+                     for c in prev_chapters[-6:]) or "(none yet)"
+    sess = "\n".join(f"s{sid}: {line}" for sid, line in digest_lines)
+    user = f"""You are segmenting one day ({day}) of a user's screen activity into
+narrative chapters (coherent real-world activities, like diary sections).
+
+Chapters established so far (you may CONTINUE the last one):
+{prev}
+{carry_note}
+
+Next sessions in time order (sN = session id):
+{sess}
+
+Rules:
+- A chapter = one coherent activity (e.g. "developing My Meeting transcription,
+  including recording a TV show as test material"). Interleaved sessions of the
+  same activity belong to ONE chapter.
+- Infer the META-activity: if the user records/transcribes content inside a dev
+  tool, the activity is the dev/testing work — not the content on screen.
+- Typos / one-off glances / fleeting windows are NOT chapters; fold them into
+  the surrounding chapter.
+- continue_last=true means the first sessions extend the last established chapter.
+
+Answer JSON:
+{{"continue_last_with": ["s1", …] or [],
+  "chapters": [{{"title": "short_snake_case", "narrative": "1-3 sentences,
+what the user was really doing", "sessions": ["s2", "s3", …]}}]}}
+Every sN must appear exactly once (in continue_last_with or one chapter)."""
+    return [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": user}]
+
+
+def describe_chapter(chapter, member_rows, prev_ch, next_ch):
+    """章节 → 事件。带前后章上下文,孤证消失。"""
+    cards = "\n---\n".join(_sess_card(m, ocr_chars=200) for m in member_rows[:10])
+    ctx = ""
+    if prev_ch:
+        ctx += f"\nPrevious chapter: {prev_ch['title']} — {prev_ch['narrative'][:100]}"
+    if next_ch:
+        ctx += f"\nNext chapter: {next_ch['title']} — {next_ch['narrative'][:100]}"
+    user = f"""A chapter of the user's day ({len(member_rows)} sessions):
+
+chapter_narrative: {chapter['narrative']}{ctx}
+
+Sample sessions:
+{cards}
+
+Create the event record. The chapter narrative is the best statement of what
+the user was REALLY doing — session screen content may be material/test data.
+Rules:
+- title: short snake_case English identifier
+- summary: 1-3 sentences. Write in English; keep proper nouns as-is.
+- type: "experience" or "emotion"
+- tags: 3-6 lowercase keywords
+- facets: [] usually; only from [skills, habits, interests, social, background,
+  preferences, goals] for STABLE identity signals
+
+Answer JSON: {{"title": "...", "summary": "...", "type": "...",
+"tags": [...], "facets": [...]}}"""
+    return [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": user}]

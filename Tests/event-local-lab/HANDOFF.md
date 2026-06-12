@@ -56,12 +56,34 @@ portrait.sqlite(只读) frames(day)
 | `finalize_day.py` | 终态三步(summarize/merge/join)                              |
 | `inspect_day.py`  | 产出报告:lab 事件 vs 生产 events/<day>/                     |
 
+## v2(章节化)—— 解决单 session 孤证
+
+用户用真实案例定位 v1 根因:云端强在**整天上下文交叉印证**(打错字
+"胰腺癌"被当真实搜索;录 daily show 做转译测试被当看球)。v2 决策单元
+从 session 换成章节:
+
+```
+clean(同 v1)
+→ outline_day.py(Phase B2,14B):滑窗 ~40 digest/窗 + 上一窗章节接力
+   → 全天划成叙事章节;LLM 漏归的 session 兜进最近章(镜像 coverGaps)
+   checkpoint = chapters 表,断点续从未覆盖 session 接
+→ eventize_day.py(Phase C v2):significance gate(单 session <2min 折叠)
+   → 每章一次 describe_chapter(带前后章上下文)→ 事件;事务=章级
+→ finalize_day.py(同 v1):merge 兜底(章节数 ~30,O(n²) 无压力)+ 历史 join
+```
+
+v1 的 run_day.py 保留可跑(对照用)。同一天切换 v1/v2 要 --reingest 重置。
+
 ## 用法(每一步跑之前先问用户!)
 
 ```bash
 cd Tests/event-local-lab
 python3 clean_day.py --day 2026-06-07                # Phase B:OCR→digest(4B)
-python3 run_day.py --day 2026-06-07                  # Phase C:聚类(14B),断点续跑
+# —— v2 主线 ——
+python3 outline_day.py --day 2026-06-07              # B2:digest→章节(14B)
+python3 eventize_day.py --day 2026-06-07             # C:章节→事件(14B)
+# —— v1 对照线 ——
+python3 run_day.py --day 2026-06-07                  # per-session 聚类(14B)
 python3 run_day.py --day 2026-06-07 --limit 5        # 烟雾测试:只处理 5 个 session
 python3 finalize_day.py --day 2026-06-07
 python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
@@ -82,7 +104,9 @@ python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
       ⚠️ 已知问题:① merge 兜底 O(n²) 烧 6823 调用/123min(decide join 率
       不够狠是上游因)→ 下版改 top-K 邻居;② 产出粒度仍比云端碎(149 vs 28),
       decide/merge prompt 要更激进;③ describe 语言混杂(英文为主夹中文)。
-- [ ] 质量结论 → 决定细化指标 / 改架构 / 换模型档位
+- [x] v2 章节化搭建(outline/eventize,2026-06-12)—— 未跑
+- [ ] v2 烟雾测试(--limit-windows 2 → eventize --limit 3,等用户确认)
+- [ ] v2 整天 + 对照 v1/云端,质量结论 → 细化指标 / 换模型档位
 - [ ] (远期)移植 Swift + MLX 打包进 app —— 处理逻辑那时再改
       ⚠️ 移植时 join 路径要做全产出语义(用户点名):不建新文件,给老事件
       merge:recordOccurrence(+1,per-day 去重)+ 追加 memberFrameIds +
