@@ -338,16 +338,46 @@ def event_sends_with_ts(ev, X, group_cs=None):
         if any(len(p) > PASTE_MAX for p in inb): return False
         if sum(len(p) for p in inb) >= len(t): return False   # 纯粘贴
         return True
+    def strip_pastes(t):
+        """粘贴剥离(用户裁定 2026-06-12,作文反馈案 ev692/694/699):超限粘贴不再整条丢——
+        去掉已知 paste 段,保留手打需求('时态你帮我改吧'/'够了吧')。剩余须过 cover 手打闸。"""
+        rem = t
+        for p in sorted(pastes, key=len, reverse=True):
+            if p and p in rem: rem = rem.replace(p, '\n')
+        rem = '\n'.join(ln for ln in rem.split('\n') if X.cv(ln)).strip()
+        if len(X.cv(rem)) >= 2 and X.cover(X.cv(rem), group_cs or cs) >= 0.5:
+            return rem
+        return None
+    txc = X.cv(ev.get('text') or '')
     for i, e in enumerate(arr):
         k = e.get('kind'); t = X.cv(e.get('text', '') or ''); ts = e.get('ts')
         if ts is None: continue
         if k == 'submit' and len(t) >= 2:
+            # 存量框剥离(作文反馈案 ev692/694/699,2026-06-12 用户裁定:粘贴>30 消除,只留手打需求):
+            # submit 全文=存量大文本(早先粘贴/前轮延续,无本事件击键背书)+手打增量(AX text)。
+            # 全文对击键 cover<0.5(非本事件手打)而增量 cover≥0.4(简拼宽容)→ 只记增量。
+            if (txc and len(t) > 2 * len(txc)
+                    and sum(1 for ch in txc if not ch.isascii()) >= 3
+                    and X.cover(t, group_cs or cs) < 0.5
+                    and X.cover(txc, cs) >= 0.4):
+                # 假submit不剥(ev616 vos/vcd案):框清空证人——60s内后续事件endv仍延续本全文
+                # =框没清=幻影submit('写的更详细一些'是改稿动作非独立发送),保原文交主链幻影降级
+                t_n = re.sub(r'\s', '', t)
+                nxt = X.con.execute("SELECT end_value FROM typing_events WHERE bundle_id=:b "
+                                    "AND started_at > :a AND started_at <= :a2",
+                                    {"b": ev['bundle'], "a": ts, "a2": ts + 60000}).fetchall()
+                if not any(t_n and t_n in re.sub(r'\s', '', X.cv(w or '')) for (w,) in nxt):
+                    t = txc
             out.append((t, prev_ts, ts, True)); prev_ts = ts
         elif k == 'delete':
             if len(t) < 2 or t in ph or t in X.RUNPH or X.is_ph(t): continue
             if not (isMark(i - 1) or isMark(i + 1)): continue
             pv = paste_verdict(t)
-            if pv is False: continue                     # 大粘贴/纯粘贴:不留
+            if pv is False:                              # 大粘贴:剥离粘贴段,手打需求留
+                if not sent(ts): continue
+                rem = strip_pastes(t)
+                if rem: out.append((rem, prev_ts, ts, True)); prev_ts = ts
+                continue
             if pv is None and X.cover(t, group_cs or cs) < 0.5: continue   # 手打铁律兜底(组级流取证,见 docstring)
             if not sent(ts): continue                    # 回车检测:无回车=IME改写删除/草稿,不是发送
             out.append((t, prev_ts, ts, True)); prev_ts = ts

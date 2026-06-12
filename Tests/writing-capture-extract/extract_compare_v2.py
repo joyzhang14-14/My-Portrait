@@ -17,14 +17,14 @@ def cstream(arr): return ''.join(cv(e.get('text', '') or '') for e in arr if e.g
 def loadev(ids):
     out = []
     for e in ids:
-        r = con.execute("SELECT id,session_start,end_value,edit_log,bundle_id,started_at,ended_at FROM typing_events WHERE id=?", (e,)).fetchone()
+        r = con.execute("SELECT id,session_start,end_value,edit_log,bundle_id,started_at,ended_at,text FROM typing_events WHERE id=?", (e,)).fetchone()
         if not r: continue
         # 本事件窗内的「回车键」时间戳(区分真发送 vs 退格删的草稿)
         rets = [x[0] for x in con.execute(
             "SELECT ts_ms FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? AND char IN (?, ?)",
             (r[4], r[5]-2000, r[6]+2000, "\n", "\r")).fetchall()]
         out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=json.loads(r[3]), bundle=r[4],
-                        returns=rets, started_at=r[5], ended_at=r[6]))
+                        returns=rets, started_at=r[5], ended_at=r[6], text=r[7] or ''))
     return out
 
 # ---- 旧版(占位符集合 ≥3) ----

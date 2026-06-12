@@ -250,8 +250,9 @@ for day in DAYS:
             for a, t, s, evid, t0, t1, b in grp:
                 if len(cv(t)) <= 20 or X.cover(cv(t), grp_cs) >= 0.5:
                     kept_g.append((a, t, s, evid, t0, t1, b))
-                else:
+                elif len(cv(t)) <= 120:
                     drops.append(("组级击键gate", a, t, evid, t0, t1, f"组内容{total}字>击键{kc}×4,条cover<0.5,疑粘贴/预存"))
+                # >120字的大块非手打(Xcode/Obsidian预存文档):静默忽略,不刷审计(用户指令 2026-06-12,仿v14)
             grp = kept_g
             if not grp: continue
         kst = ks_full.replace("<CR>", "").replace("<BS>", "").strip()
@@ -369,6 +370,10 @@ for day in DAYS:
             if consumed: continue
             if X.is_ph(ft) or is_residue(ft) or ft in seen:
                 drops.append(("账本-过滤", a, ft[:60], None, st0, st1, "占位符/残渣/重复")); continue
+            # 质量门(用户指令 2026-06-12:'增加pass/给pass'类Notes碎片不应出现):汉字主体≥3
+            # ('之类的'/'还可以'=3✓);不足=半截碎片,静默掉(渲染确证过了也不入,宁缺勿碎)
+            if LEDGER_MODE == 'narrow' and sum(1 for ch in ft if not ch.isascii()) < 3:
+                continue
             seen.add(ft)
             if LEDGER_MODE != 'off':
                 out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered", b))
@@ -601,7 +606,12 @@ for day in DAYS:
     for a, old, new, via, evid, t0 in cf:
         nd.append(f"- `[{via}]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)}`\n  > {old[:120]!r} → **{new[:120]!r}**\n")
     # 未定区:审核未过的展示(用户原则:宁可记录对的,也不拿错的填;不确定的必须看得见)
-    pd = PENDING.get(day, [])
+    # 敏感过滤(用户指令 2026-06-12:密码/网址过滤没做是半成品):密码掩码/.com 在未定区
+    # 与审计同样不展示(密码内容任何文档都不该出现),静默掉
+    def sensitive(t_):
+        t_ = (t_ or '').strip()
+        return bool(PW_MASK.search(t_)) or t_.lower().endswith('.com')
+    pd = [r for r in PENDING.get(day, []) if not sensitive(r[1])]
     nd.append(f"\n### ⚠️ 未定区(审核未过,展示不入册)({len(pd)})\n")
     if not pd: nd.append("（无）\n")
     for a, t, src_, evid, t0, why, snip in pd:
@@ -609,7 +619,7 @@ for day in DAYS:
                   + (t or '')[:200].replace('\n', '\n  > ')
                   + (f"\n  OCR证据:`{snip}`\n" if snip else "\n"))
     # 丢弃审计:漏斗每道闸 + Pass4,丢了什么 + 为什么 + event 时间
-    dr = DROP.get(day, []); dd = DISCARDED.get(day, [])
+    dr = [r for r in DROP.get(day, []) if not sensitive(r[2])]; dd = DISCARDED.get(day, [])
     nd.append(f"\n### 🗑️ 丢弃审计（漏斗 {len(dr)} + Pass4 {len(dd)}）\n")
     if not dr and not dd: nd.append("（无）\n")
     for stage, a, t, evid, t0, t1, reason in dr:
