@@ -52,9 +52,11 @@ GOLD = [
     ("B10 含链接真消息整条", ["https://github.com/joyzhang14-14/My-Portrait", "接着回答问题"], []),
     ("B11 VALIS全文唯一", ["VALIS_BEATOVEN_API_KEY= 我没在env里面找到"], ["\n> 找到，这个需要我自己填是吗\n"]),
 ]
-# 全文档级隐私 ban(不只成品段:未定区/审计也不许出现——用户裁定:密码/邮箱/URL任何文档不展示)
-DOC_BAN = ["localhost:5173", "zzhang@students", "k12.nc.us", "●●●●●●", "joyzhang_14@163",
-           "https://www.ikeyrent.com"]
+# 全文档级隐私 ban(不只成品段:未定区/审计也不许出现)。
+# 邮箱/掩码=PII,任意位置 ban;URL 行级 ban(整条URL草稿才算——正文含链接是合法内容,
+# ev1158'审核区http://localhost:5173/…'真消息实证,2026-06-12)
+DOC_BAN = ["zzhang@students", "k12.nc.us", "●●●●●●", "joyzhang_14@163",
+           "\n> localhost:5173", "\n> https://www.ikeyrent.com"]
 
 def main(path):
     D = open(path).read()
