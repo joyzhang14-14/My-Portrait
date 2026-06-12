@@ -226,6 +226,14 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
   (行在哪个窗口),纯文本LLM看GitHub简介vs essay无从区分。两修:prompt标题/作者条款+解析bug
   (模型输出'1. Y'点号vs正则冒号;raw字符串\\s双反斜杠)。**下一步=喂空间上下文(x/y/邻行结构化)
   或VLM圈正文框(用户最初直觉)**;14B判断质量本身可以(单批测试:标题Y/作者Y/GitHub N/正文Y全对)
+- **VLM圈框实验(2026-06-12,用户授权)**:技术栈全通=mlx-vlm 0.4.4+torch/torchvision
+  (--break-system-packages 补装)+Qwen2.5-VL-7B-Instruct-4bit(已缓存~4.5GB)+抽帧链
+  (video_chunks.file_path 相对~/.portrait,ffmpeg -ss offset_ms/1000 抽帧,eval/vlm_test_frame.jpg)。
+  **但 7B-4bit 圈框质量不合格**:多窗复杂截图上,问法一=整屏当文档区([0,0,1511,980]);
+  问法二(原生grounding语态)=占位符胡说((10,10,100,100))。
+  **下一步候选**:①升级 Qwen3-VL 系(grounding 强,需升 mlx_vlm)②退而求其次:VLM 不出 bbox,
+  改判"屏幕左/中/右哪一块是文档"(粗分区,容错高)③结构化空间上下文喂14B文本模型(x/y/邻行,零新模型)。
+  **倾向③**:省内存(14B已驻留)+判断质量已验证,只缺空间信息——把坐标给它就是了
 
 ## 待做(优先级)
 
