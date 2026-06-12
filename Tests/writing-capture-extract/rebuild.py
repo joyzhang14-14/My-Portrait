@@ -349,6 +349,7 @@ def event_sends_with_ts(ev, X, group_cs=None):
             return rem
         return None
     txc = X.cv(ev.get('text') or '')
+    stripped_hit = [False]
     for i, e in enumerate(arr):
         k = e.get('kind'); t = X.cv(e.get('text', '') or ''); ts = e.get('ts')
         if ts is None: continue
@@ -378,6 +379,7 @@ def event_sends_with_ts(ev, X, group_cs=None):
                     out[:] = [o for o in out
                               if not (o[3] and len(X.cv(o[0])) < max(4, len(txc) // 2))]
                     t = txc
+                    stripped_hit[0] = True   # endv草稿同步废弃(见函数尾)
             out.append((t, prev_ts, ts, True)); prev_ts = ts
         elif k == 'delete':
             if len(t) < 2 or t in ph or t in X.RUNPH or X.is_ph(t): continue
@@ -392,6 +394,10 @@ def event_sends_with_ts(ev, X, group_cs=None):
             if not sent(ts): continue                    # 回车检测:无回车=IME改写删除/草稿,不是发送
             out.append((t, prev_ts, ts, True)); prev_ts = ts
     endv = X.cv(ev['endv'])
+    # 剥离命中的事件:endv草稿='存量+已入册真身'合成残影(这个我怎么写比较好案,2026-06-12)
+    # ——存量是本不该记的粘贴问题文本,增量已剥离入册,留着必成重复,废弃
+    if stripped_hit[0]:
+        return out
     if endv and not X.emptyZW(ev['endv']) and not X.is_ph(endv):   # 占位符 endValue(含拼接如"…他说")整条不出
         out.append((endv, prev_ts, ev.get('ended_at') or prev_ts, False))
     return out

@@ -51,6 +51,8 @@ GOLD = [
     # 2026-06-12 v19 用户标注两案(URL连坐/剥离腰斩)
     ("B10 含链接真消息整条", ["https://github.com/joyzhang14-14/My-Portrait", "接着回答问题"], []),
     ("B11 VALIS全文唯一", ["VALIS_BEATOVEN_API_KEY= 我没在env里面找到"], ["\n> 找到，这个需要我自己填是吗\n"]),
+    # 2026-06-12 v20 用户标注:剥离命中后endv残影(存量+真身合成)与真身重复
+    ("B12 怎么写比较好唯一", ["这个我怎么写比较好"], ["Were you encouraged to use generative AI"]),
 ]
 # 全文档级隐私 ban(不只成品段:未定区/审计也不许出现)。
 # 邮箱/掩码=PII,任意位置 ban;URL 行级 ban(整条URL草稿才算——正文含链接是合法内容,
