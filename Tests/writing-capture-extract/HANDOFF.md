@@ -234,6 +234,13 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
   **下一步候选**:①升级 Qwen3-VL 系(grounding 强,需升 mlx_vlm)②退而求其次:VLM 不出 bbox,
   改判"屏幕左/中/右哪一块是文档"(粗分区,容错高)③结构化空间上下文喂14B文本模型(x/y/邻行,零新模型)。
   **倾向③**:省内存(14B已驻留)+判断质量已验证,只缺空间信息——把坐标给它就是了
+- **大prompt拆解落地(431d20d,用户指令)**:生产云端canvas=sonnet大杂烩prompt(判正文+diff+拼接,
+  conf0.8硬编码,Explore agent摸底:WritingCapturePrompts.swift:577-620/CanvasAgent.swift)。
+  拆解=去噪/diff时间线/拼接三件归确定性(且diff可审计),唯一真模型任务=**T1正文行判别**
+  (weak行带坐标,prompt给同帧strong行坐标做空间参照,14B判Y/N零写权)。
+  本数据集79%/54%不及纯确定性81%/64%(x锚本就有效)——**T1真正战场=x锚失效场景**
+  (中文canvas/窗口移动过),CANVAS_LLM=1可开,待用户供中文canvas样本验证。
+  工程坑三连:?标记撞OCR真问号(→\x01)/负坐标正则/replace转义层级无assert骗过
 
 ## 待做(优先级)
 
