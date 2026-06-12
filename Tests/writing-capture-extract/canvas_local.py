@@ -120,6 +120,7 @@ def main(url_like, t0s, t1s):
     anchor = xs.most_common(1)[0][0] * 0.02 if xs else None
     print(f"正文列锚 x={anchor}", file=sys.stderr)
     USE_LLM = os.environ.get('CANVAS_LLM', '0') == '1'
+    frame_ref = {}
     for ts, fl in raw_fl:
         bl = []
         for (y, x, t, n) in fl:
@@ -133,9 +134,9 @@ def main(url_like, t0s, t1s):
             in_anchor = anchor is not None and (anchor - 0.02 <= x <= anchor + 0.08)
             if ratio >= 0.5 and in_anchor:
                 bl.append((y, t))                      # 强通过:背书+锚双证,免LLM
+                frame_ref.setdefault(ts, []).append((round(x, 2), round(y, 2), t[:60]))
             elif USE_LLM and ratio >= 0.3:
-                bl.append((y, '?' + t))                # 模糊带:LLM仲裁(窗口位置不定/中文canvas,
-                                                       # 用户裁定确定性闸不够泛化 2026-06-12)
+                bl.append((y, f'\x01{x:.2f},{y:.2f}\x01' + t))   # 模糊带:编码坐标,T1空间仲裁
         if bl: frames.append((ts, sorted(bl)))
     # ---- 跨帧 chrome 过滤:行键出现率 >60% 且短行 = 界面常驻(已保存/保存中/菜单) ----
     from collections import Counter, defaultdict
@@ -155,8 +156,12 @@ def main(url_like, t0s, t1s):
     for ts, bl in frames:
         cur_gids = []
         for y, t in bl:
-            weak = t.startswith('?')
-            if weak: t = t[1:]
+            weak = t.startswith('\x01')
+            wxy = None
+            if weak:
+                mm0 = re.match('\x01([-\\d.]+),([-\\d.]+)\x01(.*)', t, re.S)
+                wxy = (float(mm0.group(1)), float(mm0.group(2)))
+                t = mm0.group(3)
             if not t or key_of(t) in chrome or len(t) < 4: continue
             # 找池中相似行(先键桶,再相似度)
             gid = None
@@ -186,6 +191,8 @@ def main(url_like, t0s, t1s):
             pool[gid]['texts'][t] += 1
             pool[gid]['last'] = ts
             pool[gid]['strong'] = pool[gid].get('strong', 0) + (0 if weak else 1)
+            if weak and wxy and 'wxy' not in pool[gid]:
+                pool[gid]['wxy'] = wxy; pool[gid]['wts'] = ts
             if len(t) > len(pool[gid]['key']):   # 键随更长版本更新(滚动中行被截断)
                 pool[gid]['key'] = key_of(t)
                 pool[gid]['words'] = frozenset(re.findall(r'[a-z]{4,}', t.lower()))
@@ -226,12 +233,21 @@ def main(url_like, t0s, t1s):
             batch = weak_gids[bi:bi + B]
             listing = '\n'.join(f"{j+1}. {pool[g]['texts'].most_common(1)[0][0][:90]}"
                                  for j, g in enumerate(batch))
-            user = ("以下是屏幕OCR提取的文本行,来自用户的一次写作会话(用户在文档里写文章)。"
-                    "判断每行是否属于用户文章的内容(含标题/副标题/作者行/日期行——文档自身的一切都算)。"
-                    "界面元素(菜单/按钮/字数统计/已保存/通知)、"
-                    "其他窗口内容(终端/代码/聊天/网页列表)、AI给的写作建议 都不是正文。\n"
-                    f"用户打字时出现过的词(主题线索):{kws_sample}\n\n{listing}\n\n"
-                    "逐行输出'序号:Y'或'序号:N',不解释。")
+            ref_lines = []
+            for g in batch:
+                rts = pool[g].get('wts')
+                for (rx, ry, rt) in (frame_ref.get(rts) or [])[:3]:
+                    ref_lines.append(f"  ({rx},{ry}) {rt}")
+            refs = '\n'.join(sorted(set(ref_lines))[:6]) or '  (无)'
+            listing = '\n'.join(
+                f"{j+1}. ({pool[g].get('wxy', (0, 0))[0]:.2f},{pool[g].get('wxy', (0, 0))[1]:.2f}) "
+                f"{pool[g]['texts'].most_common(1)[0][0][:90]}" for j, g in enumerate(batch))
+            user = ("屏幕OCR一帧,多窗口并存(终端/聊天/浏览器/文档)。用户正在某个文档窗口写文章。\n"
+                    "下面给出**已确认的文档正文行**及其归一化坐标(x,y=左上角,0~1)作为参照——"
+                    "正文同属一个窗口,坐标列应一致:\n" + refs + "\n\n"
+                    "待判行(坐标+文本):\n" + listing + "\n\n"
+                    "逐行判断是否属于该文档的内容(含标题/副标题/作者/日期行;"
+                    "界面元素/其他窗口/终端/聊天/AI建议=N)。输出'序号:Y'或'序号:N',不解释。")
             pr = tok14.apply_chat_template([{"role": "user", "content": user}],
                                            add_generation_prompt=True, tokenize=False, enable_thinking=False)
             out = _gen(m14, tok14, prompt=pr, max_tokens=8 * len(batch), verbose=False)
