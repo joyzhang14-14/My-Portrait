@@ -12,6 +12,24 @@
         -->
 
         <item>
+            <title>1.2.154</title>
+            <pubDate>Sat, 13 Jun 2026 19:08:28 +0000</pubDate>
+            <sparkle:version>172</sparkle:version>
+            <sparkle:shortVersionString>1.2.154</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Bug fixes</h3>
+                <ul>
+                    <li><strong>Portrait entries always trace back to real events</strong> — Fixed a regression where some portrait entries could be created with no source events behind them, showing up with a weight of 0 and no "Derived from events" list. Distillation now ties every entry to the events it came from, so your portrait stays grounded in what actually happened.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.154/MyPortrait_1.2.154_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="4xhZCE3617M/UDmN7Cgcq1kJt4Ep+tHEvgowjmWJPXBvCQFyLzw1U0srU1Xb+Zr+ejUsh+m7lvdPYaV7ax7XBA==" length="26462689" />
+        </item>
+
+        <item>
             <title>1.2.153</title>
             <pubDate>Thu, 11 Jun 2026 22:14:46 +0000</pubDate>
             <sparkle:version>171</sparkle:version>
