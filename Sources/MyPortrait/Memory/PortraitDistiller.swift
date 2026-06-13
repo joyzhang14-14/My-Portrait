@@ -138,15 +138,17 @@ final class PortraitDistiller {
                 for decision in decisions {
                     switch decision.action {
                     case "create":
-                        try writeNewPortrait(category: category, decision: decision)
-                        written += 1
+                        if try writeNewPortrait(category: category, decision: decision) {
+                            written += 1
+                        }
                     case "update":
                         if try updateExistingPortrait(category: category, decision: decision) {
                             updated += 1
                         } else {
                             // Slug not found → treat as create.
-                            try writeNewPortrait(category: category, decision: decision)
-                            written += 1
+                            if try writeNewPortrait(category: category, decision: decision) {
+                                written += 1
+                            }
                         }
                     default:
                         break    // "noop" — nothing to do
@@ -399,6 +401,15 @@ final class PortraitDistiller {
             if !dropped.isEmpty {
                 print("[PortraitDistiller] decision \(slug): dropped \(dropped.count) hallucinated event id(s): \(dropped.prefix(5).joined(separator: ", "))\(dropped.count > 5 ? "…" : "")")
             }
+            // 取证:create/update 决策的 derived 落空持久化进 DiagLog —— 否则只在
+            // stdout,事后排查无据。llm_gave=0 → 模型一个 id 都没给;llm_gave>0
+            // 且 kept=0 → 给的全是编造 / 对不上、被回查剔光。写盘闸据此跳过空壳。
+            if action != "noop", kept.isEmpty {
+                DiagLog.warn("distill.derived.empty", ctx: [
+                    "category": category, "slug": slug, "action": action,
+                    "llm_gave": derived.count, "dropped": dropped.count,
+                ])
+            }
             out.append(ParsedDecision(
                 action: action,
                 slug: slug,
@@ -430,14 +441,24 @@ final class PortraitDistiller {
 
     // MARK: - Disk writes
 
-    private func writeNewPortrait(category: String, decision: ParsedDecision) throws {
+    /// 返回 true = 真写了一个新文件;false = 跳过(空溯源)或委托给 update。
+    private func writeNewPortrait(category: String, decision: ParsedDecision) throws -> Bool {
         let dir = PortraitPaths.categoryDir(category)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(decision.slug + ".md")
         // If slug collides with existing file, fall through to update.
         if FileManager.default.fileExists(atPath: url.path) {
-            _ = try updateExistingPortrait(category: category, decision: decision)
-            return
+            return try updateExistingPortrait(category: category, decision: decision)
+        }
+        // 不变量:全新 portrait 条目必须有 event 溯源。derived 为空 = 没有任何
+        // 来源事件 → 不能凭空创建(否则 weight = ref_count × decay = 0,落出一个
+        // 零溯源空壳条目)。跳过不写;事件没被标 distilled → 下轮 distill 重新
+        // 看到它,模型这次引用对了就能正常落地。
+        guard !decision.derivedFromEventIds.isEmpty else {
+            DiagLog.warn("distill.create.skipped_no_evidence", ctx: [
+                "category": category, "slug": decision.slug, "title": decision.title,
+            ])
+            return false
         }
         // Portrait files use `category` as the routing label (kept for human
         // readability inside the file). For type, "experiences" / "emotions"
@@ -475,6 +496,7 @@ final class PortraitDistiller {
         // distill 通过 distilledInto 按 category 跳过它们,LLM 只看新事件。
         Self.markEventsDistilled(eventIds: decision.derivedFromEventIds,
                                  into: decision.slug, category: category)
+        return true
     }
 
     /// Returns true if file existed and was updated; false if not found.
