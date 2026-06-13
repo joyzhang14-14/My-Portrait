@@ -180,49 +180,86 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
     body_pretrim = body
     sents = re.split(r'(?<=[。.!?!?\n])', body)
     kept = [s for s in sents if in_final(s)]
-    cut_n = len(sents) - len(kept)
+    cut_sents = [s for s in sents if not in_final(s)]   # 真删除内容(timeline delete 来源)
+    cut_n = len(cut_sents)
     pool_ok = cut_n <= 0.2 * len(sents)
     if not pool_ok:
         print(f"终稿仲裁弃用(剪句 {cut_n}/{len(sents)} 超阀,疑无通读动作)", file=sys.stderr)
     else:
         body = ''.join(kept)
         print(f"终稿仲裁剪句 {cut_n}", file=sys.stderr)
-    # 终愈=尾部续接(口3 complete_tail 思路移植):成品结尾若在某帧行里有 ≥12 字
-    # 重叠且向后延伸 → 接上延伸段,迭代至无延伸。
-    # ⚰️通用补行三败留档:①cnt≥2 频次闸选反(标签页像素稳定高频,真内容 OCR 抖动
+    # 终愈=尾部终态化:结尾以"尾区域最后一次出镜的帧"为唯一真相源。
+    # 从成品尾部向前找最近的有帧命中的 24 字锚,锚之后的一切(被删中间态如
+    # 'it can remember what…'、OCR 烂变体堆尾)整体替换为含锚最后一帧的文档列延续。
+    # ⚰️行池续接四败留档:①cnt≥2 频次闸选反(标签页像素稳定高频,真内容 OCR 抖动
     # 变体各 cnt=1)②击键背书背不动(survey/Claude 窗打的字同进词集)③同列邻居判据
-    # 被顶栏破功(标签题与文档列 x 重合,邻居=正文首行;一行进册即级联)。
-    # 续接判据天然防垃圾:须与正文结尾 12+ 字精确重叠
+    # 被顶栏破功 ④逐段续接+新颖度闸仍堆变体(中间态与终态在终读池里分不开,
+    # in_final 无力,唯一可靠=区域最后观测)
     if pool_ok:
-        for _ in range(6):
-            bodyn = normx(body)
-            tail = bodyn[-120:]
-            best = None
-            for nl, (fi, li, ln, nbs) in line_pool.items():
-                if len(nl) < 16 or nl in bodyn: continue
-                for ov in range(min(len(nl) - 4, 60), 11, -1):
-                    if nl[:ov] in tail:
-                        ext = nl[ov:]
-                        if len(ext) >= 4 and ext[:12] not in bodyn and in_final(ln):
-                            # 同一行的 OCR 变体择优:击键背书率优先,长度次之(tumn/turn 案)
-                            toks = re.findall(r'[a-z]{4,}', ln.lower())
-                            r_ = sum(1 for w in toks if w in kwfreq) / len(toks) if toks else 0
-                            sc = (round(r_, 1), len(ext))
-                            if best is None or sc > best[2]:
-                                best = (ln, ext, sc)
-                        break
-            if not best: break
-            ln, ext = best[0], best[1]
-            p, c, ov = 0, 0, len(normx(ln)) - len(ext)
-            for idx, ch in enumerate(ln):
-                if normx(ch): c += 1
-                if c >= ov: p = idx + 1; break
-            body = body + ln[p:]
-            print(f"终愈续尾 +{len(ext)} 字", file=sys.stderr)
-        body = re.sub(r'[A-Za-z]{5,}', fix_word, body)   # 续尾行没过词典纠错,补一遍
-    # diff 时间线:canvas_local 确定性线产出(用户硬需求),同样剔历史帧
-    print("生成 diff 时间线(canvas_local,剔历史帧)…", file=sys.stderr)
-    _, timeline, _, _ = CL.main(url_like, t0s, t1s, drop_history=True)
+        def norm_map(raw):
+            return [i for i, ch in enumerate(raw) if normx(ch)]
+        bodyn = normx(body)
+        # ① 真相帧 R:尾段(末300字)所有锚的"最后命中帧"取最大——单锚会锚进中间态
+        #   (实证:末24字含'it can'中间态,锚到idx462而非终态帧)
+        grams = [(off, bodyn[off:off + 24])
+                 for off in range(max(0, len(bodyn) - 300), len(bodyn) - 23, 6)]
+        best_fr = -1
+        for i, (ts, words) in enumerate(frames):
+            hay = normx(' '.join(t for (y, x, t, n) in CL.frame_lines(words) if n >= 3))
+            if i > best_fr and any(g in hay for _, g in grams):
+                best_fr = i
+        if best_fr >= 0:
+            # ② 剪点:成品里 R 支持的最靠后的锚;锚后(R 不支持=中间态/烂变体)整体替换为 R 的延续
+            ls = clean_frame_lines(frames[best_fr][1], kwords, line_freq)
+            jr = ' '.join(t for _, _, t in ls)
+            jn = normx(jr)
+            cutp = None
+            for off, g in reversed(grams):
+                p = jn.rfind(g)
+                if p >= 0: cutp = (off, p); break
+            if cutp:
+                off, p = cutp
+                mj, mb = norm_map(jr), norm_map(body)
+                keep = body[:mb[off + 23] + 1]
+                ext = jr[mj[p + 23] + 1:] if p + 24 < len(jn) else ''
+                ext = re.sub(r'[」\s]+$', '', ext)
+                print(f"尾部终态化:截后缀 {len(bodyn) - off - 24} 字→接真相帧续 "
+                      f"{len(normx(ext))} 字(帧idx{best_fr})", file=sys.stderr)
+                body = keep + ext
+        body = re.sub(r'[A-Za-z]{5,}', fix_word, body)   # 终态化段补词典纠错
+    # diff 时间线:从成品派生,与文章自洽(用户裁定:commit−delete 必须能合成最终文章)。
+    # commit=成品逐句+首次成稿帧时刻(逐句拼接=最终文章,构造保证);
+    # delete=终稿仲裁剪掉的旧版句+最后在场时刻(实证为真删除)。
+    # ⚰️行池启发式 timeline(canvas_local)退役:OCR 碎行不可读+假 delete(15条里8条
+    # 半窗命中 gold)+与拼接成品两条线天然合不回文章
+    fhays2 = [(ts, normx(' '.join(t for (y, x, t, n) in CL.frame_lines(words) if n >= 3)))
+              for ts, words in frames]
+    def seen_span(s):
+        ns = normx(s)
+        if len(ns) < 8: return (None, None)
+        ws = [ns[i:i + 24] for i in range(0, max(1, len(ns) - 23), 12)]
+        def pres(hay):
+            return sum(1 for w in ws if w in hay or (len(w) >= 20 and
+                       (w[:12] in hay or w[12:] in hay))) / len(ws) >= 0.5
+        idxs = [ts for ts, hay in fhays2 if pres(hay)]
+        return (idxs[0], idxs[-1]) if idxs else (None, None)
+    timeline, prev_ts = [], None
+    for sent in re.split(r'(?<=[。.!?!?\n])', body):
+        st = sent.strip()
+        if not st: continue
+        f, _ = seen_span(st)
+        ts_c = f or prev_ts or (frames[0][0] if frames else 0)
+        timeline.append((ts_c, 'commit', st))
+        prev_ts = ts_c
+    for sent in (cut_sents if pool_ok else []):
+        st = sent.strip()
+        if not st: continue
+        _, l = seen_span(st)
+        if l: timeline.append((l, 'delete', st))
+    # 不按时间重排:commit 段保持文档序(逐条拼接=最终文章,构造性自洽);
+    # 每条自带 ts,展示侧需要时间视图时自行排序
+    print(f"timeline:成品句 commit {sum(1 for e in timeline if e[1]=='commit')} "
+          f"+ delete {sum(1 for e in timeline if e[1]=='delete')}", file=sys.stderr)
     json.dump({'final_text': body, 'body_pretrim': body_pretrim, 'timeline': timeline,
                'frames': len(rows), 'chrome_lines': 0},
               open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
