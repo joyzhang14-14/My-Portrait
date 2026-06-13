@@ -971,6 +971,21 @@ enum DBSchema {
                           columns: ["speaker_id", "transcribed_at_ms"])
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v41 — keystroke_log.input_source(击键时所用的输入法)
+        // ═══════════════════════════════════════════════════════════
+        //
+        // keystroke 存的是物理击键字符:中文输入法下打"妈的"存的是拉丁 `made`,跟英文
+        // made 分不开(同 v19 注释:拿不到合成的汉字)。记录当时的输入源 ID
+        // (如 com.apple.keylayout.US=英文键盘 / im.rime.inputmethod.Squirrel=拼音),
+        // 让实验线判别"这串拉丁是英文字面还是拼音"从"猜"变"读"。
+        // 采集层只记这一个原始信号,所有判别逻辑都在实验线,不进 Swift。旧行 NULL。
+        m.registerMigration("v41_keystroke_log_input_source") { db in
+            try db.alter(table: "keystroke_log") { t in
+                t.add(column: "input_source", .text)
+            }
+        }
+
         return m
     }
 }

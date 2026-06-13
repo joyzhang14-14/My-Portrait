@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import Carbon            // TISCopyCurrentKeyboardInputSource(输入源/输入法)
 import GRDB
 import os.log
 
@@ -67,6 +68,10 @@ final class KeystrokeCharLogger {
         // `frontmostApplication` 实测在后台线程读 cached 值稳定(KeystrokeProbe 已验证)。
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 击键当时所用的输入源(如 keylayout.US=英文键盘 / inputmethod.Squirrel=拼音)。
+        // **必须在 callback 线程同步取** —— 异步到 writeQueue 再取会拿到之后切换的输入法。
+        // 只记这一个原始信号,判别"拉丁是英文字面还是拼音"的逻辑全在实验线,不进 Swift。
+        let inputSource = Self.currentInputSourceID()
 
         // 黑名单短路 —— 命中就不进队列了
         blacklistLock.lock()
@@ -85,13 +90,23 @@ final class KeystrokeCharLogger {
                     bundleId: app,
                     char: chars.isEmpty ? nil : chars,
                     isBackspace: isBackspace ? 1 : 0,
-                    modifiers: modifiers
+                    modifiers: modifiers,
+                    inputSource: inputSource
                 )
                 try store.insert(&entry)
             } catch {
                 logger.warning("insert failed: \(String(describing: error), privacy: .public)")
             }
         }
+    }
+
+    /// 当前键盘输入源 ID(如 `com.apple.keylayout.US` / `im.rime.inputmethod.Squirrel`)。
+    /// TIS API 线程安全,可在 CGEventTap callback 线程直接调。拿不到返回 nil。
+    private static func currentInputSourceID() -> String? {
+        guard let src = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let ptr = TISGetInputSourceProperty(src, kTISPropertyInputSourceID)
+        else { return nil }
+        return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
     }
 }
 
@@ -106,6 +121,10 @@ struct KeystrokeEntry: Codable, FetchableRecord, MutablePersistableRecord, Senda
     var isBackspace: Int           // 0 / 1
     /// Packed bit 字段:0x01=cmd, 0x02=opt, 0x04=ctrl, 0x08=shift。无修饰=0。
     var modifiers: Int = 0
+    /// 击键时所用的输入源 ID(如 `com.apple.keylayout.US`=英文键盘 /
+    /// `im.rime.inputmethod.Squirrel`=拼音)。用于实验线判别"拉丁是英文字面还是拼音";
+    /// 判别逻辑全在实验线,采集层只记这一个原始信号。旧行 / 拿不到时 nil。
+    var inputSource: String? = nil
 
     static let databaseTableName = "keystroke_log"
     static let databaseColumnEncodingStrategy: DatabaseColumnEncodingStrategy = .convertToSnakeCase
