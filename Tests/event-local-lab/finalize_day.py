@@ -5,6 +5,11 @@
   c. join:     每事件 top-K 历史事件 → 逐个二选一"同一持续活动?"
 
   python3 finalize_day.py --day 2026-06-07 [--model …] [--skip-join]
+
+三段可独立开关:--skip-summarize / --skip-merge / --skip-join。
+join-only(只补 occurrence,不动当天粒度):
+  python3 finalize_day.py --day … --force --skip-summarize --skip-merge
+join 幂等:重跑跳过 joined_rel 已非空的事件。
 """
 import argparse
 import json
@@ -22,7 +27,11 @@ def main():
     ap.add_argument("--merge-floor", type=float, default=0.25,
                     help="merge 候选对的最低检索分")
     ap.add_argument("--join-topk", type=int, default=3)
+    ap.add_argument("--skip-summarize", action="store_true")
+    ap.add_argument("--skip-merge", action="store_true")
     ap.add_argument("--skip-join", action="store_true")
+    ap.add_argument("--no-finalize-status", action="store_true",
+                    help="不把 open 事件翻 finalized(留待后续补 merge/join)")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
 
@@ -36,7 +45,7 @@ def main():
     engine.load(args.model or engine.DEFAULT_MODEL)
 
     # ── a. summarize ──────────────────────────────────────────────
-    events = labdb.open_events(con, args.day)
+    events = [] if args.skip_summarize else labdb.open_events(con, args.day)
     for e in events:
         members = json.loads(e["member_ids"])
         if len(members) < 2:
@@ -57,8 +66,8 @@ def main():
             print(f"  ✗ summarize [{e['id']}] {ex}(保留原摘要)")
 
     # ── b. merge ──────────────────────────────────────────────────
-    events = labdb.open_events(con, args.day)
-    idf = retrieve.build_idf([retrieve.event_tokens(e) for e in events])
+    events = [] if args.skip_merge else labdb.open_events(con, args.day)
+    idf = retrieve.build_idf([retrieve.event_tokens(e) for e in events]) if events else {}
     merged_away = set()
     for i, a in enumerate(events):
         if a["id"] in merged_away:
@@ -98,6 +107,8 @@ def main():
         idf_h = retrieve.build_idf([t for _, t in hist_tok])
         by_rel = {h["rel"]: h for h in hist}
         for e in labdb.open_events(con, args.day):
+            if e["joined_rel"]:
+                continue                   # 幂等:已 join 过的跳过(重跑安全)
             top = retrieve.top_k(retrieve.event_tokens(e), hist_tok, idf_h,
                                  k=args.join_topk, floor=0.10)
             for rel, _s in top:
@@ -116,10 +127,11 @@ def main():
                     print(f"  ✓ join [{e['id']}] {e['title']} → {rel}")
                     break                  # 第一个命中即定
 
-    with con:
-        con.execute("UPDATE events SET status='finalized', updated_at_ms=? "
-                    "WHERE day=? AND status='open'", (labdb.now_ms(), args.day))
-    print(f"[done] {args.day} finalized → inspect_day.py --day {args.day}")
+    if not args.no_finalize_status:
+        with con:
+            con.execute("UPDATE events SET status='finalized', updated_at_ms=? "
+                        "WHERE day=? AND status='open'", (labdb.now_ms(), args.day))
+    print(f"[done] {args.day} → inspect_day.py --day {args.day}")
 
 
 if __name__ == "__main__":
