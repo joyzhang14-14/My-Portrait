@@ -36,6 +36,10 @@ final class KeystrokeCharLogger {
     private var blacklist: Set<String> = []
     private let blacklistLock = NSLock()
 
+    /// 输入源缓存(锁保护的 Sendable 小类)。TIS API 只能主线程调,缓存对象在主线程
+    /// 初始化 + 监听切换刷新,callback 线程只读 `.current`。
+    private let inputSourceCache = InputSourceCache()
+
     init(store: KeystrokeStore) {
         self.store = store
     }
@@ -69,9 +73,9 @@ final class KeystrokeCharLogger {
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         // 击键当时所用的输入源(如 keylayout.US=英文键盘 / inputmethod.Squirrel=拼音)。
-        // **必须在 callback 线程同步取** —— 异步到 writeQueue 再取会拿到之后切换的输入法。
+        // 读主线程维护的缓存(TIS 不能在 callback 线程调,会崩);切换通知保证缓存跟手。
         // 只记这一个原始信号,判别"拉丁是英文字面还是拼音"的逻辑全在实验线,不进 Swift。
-        let inputSource = Self.currentInputSourceID()
+        let inputSource = inputSourceCache.current
 
         // 黑名单短路 —— 命中就不进队列了
         blacklistLock.lock()
@@ -100,13 +104,45 @@ final class KeystrokeCharLogger {
         }
     }
 
-    /// 当前键盘输入源 ID(如 `com.apple.keylayout.US` / `im.rime.inputmethod.Squirrel`)。
-    /// TIS API 线程安全,可在 CGEventTap callback 线程直接调。拿不到返回 nil。
-    private static func currentInputSourceID() -> String? {
+}
+
+// MARK: - InputSourceCache
+
+/// 输入源缓存。TIS/TSM API 内部 `dispatch_assert_queue(main)` —— **只能在主线程调**
+/// (callback/tap 线程同步调会崩,实测 EXC_BREAKPOINT in TSMGetInputSourceProperty)。
+/// 本对象在主线程初始化 + 监听输入法切换通知刷新缓存,callback 线程只读 `.current`。
+/// 锁保护 → `@unchecked Sendable`,可安全跨线程持有。
+final class InputSourceCache: @unchecked Sendable {
+    private var cached: String?
+    private let lock = NSLock()
+    private var observer: NSObjectProtocol?
+
+    init() {
+        DispatchQueue.main.async { [self] in
+            refresh()
+            observer = DistributedNotificationCenter.default().addObserver(
+                forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+                object: nil, queue: .main
+            ) { [self] _ in refresh() }
+        }
+    }
+
+    deinit {
+        if let o = observer { DistributedNotificationCenter.default().removeObserver(o) }
+    }
+
+    /// callback 线程读:击键当时的输入源 ID(切换通知保证缓存跟手)。
+    var current: String? {
+        lock.lock(); defer { lock.unlock() }; return cached
+    }
+
+    /// 主线程刷新缓存(TIS 要求主线程)。
+    private func refresh() {
         guard let src = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
               let ptr = TISGetInputSourceProperty(src, kTISPropertyInputSourceID)
-        else { return nil }
-        return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        else { lock.lock(); cached = nil; lock.unlock(); return }
+        let id = Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        lock.lock(); cached = id; lock.unlock()
     }
 }
 
