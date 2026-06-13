@@ -115,10 +115,53 @@ def main():
         except Exception as e:                          # noqa: BLE001
             print(f"  ✗ 章[{ch['seq']}] {ch['title']} ERROR {e}(保持 open,重跑续)")
 
+    demote_media_titles(con, args.day)
+
     left = len([c for c in labdb.chapters_for_day(con, args.day)
                 if c["status"] == "open"])
     print(f"[done] eventized {done};剩余 open 章 {left}"
           + ("" if left else f" → finalize_day.py --day {args.day}"))
+
+
+def demote_media_titles(con, day):
+    """v3 #6 确定性兜底(无 LLM):事件标题命名了媒体 app,但该 app 占成员
+    session <10% 且有非媒体 app 主导(≥30%)→ 从 snake_case 标题里摘掉媒体
+    token。最后一道防线:即使上游全失守,spotify_...(2/82)也会被改名。"""
+    import chrome
+    media_low = {a.lower() for a in chrome.BG_MEDIA_APPS}
+    fixed = 0
+    for e in con.execute("SELECT id, title, member_ids FROM events WHERE day=?",
+                         (day,)).fetchall():
+        mids = json.loads(e["member_ids"])
+        if not mids:
+            continue
+        apps = [r["app"] for r in con.execute(
+            f"SELECT app FROM raw_sessions WHERE id IN ({','.join('?'*len(mids))})",
+            mids).fetchall()]
+        n = len(apps)
+        from collections import Counter
+        cnt = Counter(apps)
+        title_toks = e["title"].split("_")
+        media_in_title = [t for t in title_toks if t in media_low]
+        if not media_in_title:
+            continue
+        # 标题里的媒体 app 占比 <10% 且有非媒体 app ≥30% → 摘掉媒体 token
+        dominant = cnt.most_common(1)[0]
+        dom_is_media = dominant[0].lower() in media_low
+        for mt in media_in_title:
+            share = sum(v for a, v in cnt.items() if a.lower() == mt) / n
+            if share < 0.10 and not dom_is_media and dominant[1] / n >= 0.30:
+                new_toks = [t for t in title_toks if t != mt]
+                new_title = "_".join(new_toks).strip("_") or f"{dominant[0].lower()}_activity"
+                with con:
+                    con.execute("UPDATE events SET title=?, updated_at_ms=? WHERE id=?",
+                                (new_title, labdb.now_ms(), e["id"]))
+                fixed += 1
+                print(f"  ⚖ #6 改名 [{e['id']}] '{e['title']}' → '{new_title}' "
+                      f"({mt} {share:.0%} < 10%, 主导 {dominant[0]} {dominant[1]/n:.0%})")
+                break
+    if fixed:
+        print(f"[#6] 媒体 app 误命名兜底:改名 {fixed} 个事件")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import chrome
+
 PORTRAIT_DB = os.path.expanduser("~/.portrait/portrait.sqlite")
 EVENTS_DIR = os.path.expanduser("~/.portrait/events")
 
@@ -73,10 +75,12 @@ def tier1_merge(frames):
 
 def finish_session(s):
     """texts 去重拼接 + 截断,落库形态。OCR 不足 60 字 → skipped_no_ocr
-    (仍入库留审计,镜像生产 dropped 统计)。"""
+    (仍入库留审计,镜像生产 dropped 统计)。
+    v3 #1:每帧进 LLM 前确定性剥 UI chrome(菜单栏/时钟/默认标签),让
+    4B 第一眼看到真实内容。v3 #2:媒体 app 空 window + dev 信号 → bg_media。"""
     seen, parts, total = set(), [], 0
     for t in s["texts"]:
-        t = (t or "").strip()
+        t = chrome.strip_session_text((t or "").strip())
         if not t or t in seen:
             continue
         seen.add(t)
@@ -89,6 +93,7 @@ def finish_session(s):
         "start_ms": s["start_ms"], "end_ms": s["end_ms"], "app": s["app"],
         "window": s["window"], "url": s["url"], "frame_ids": s["frame_ids"],
         "ocr": ocr,
+        "bg_media": 1 if chrome.is_background_media(s["app"], s["window"], ocr) else 0,
         "status": "pending" if len(ocr) >= MIN_OCR_CHARS else "skipped_no_ocr",
     }
 

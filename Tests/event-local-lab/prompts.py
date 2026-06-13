@@ -119,28 +119,41 @@ Answer JSON: {{"same_ongoing": true}} or {{"same_ongoing": false}}"""
 
 
 def clean(session_row):
-    """Phase B:原始 OCR → 活动 digest。小模型任务(默认 4B)。"""
+    """Phase B:原始 OCR → 活动 digest。小模型任务(默认 4B)。
+    v3 #4:加背景 app + chrome 标签的**具体**否定规则(4B 靠列举不靠推理)。"""
     t0 = session_row["start_ms"] // 1000
     dur_min = max(1, (session_row["end_ms"] - session_row["start_ms"]) // 60000)
-    user = f"""Raw OCR text captured from the user's screen during one session:
+    try:
+        bg = session_row["bg_media"]
+    except (KeyError, IndexError):
+        bg = 0
+    bg_note = ("\nNOTE: app is a media player but the screen shows real work — "
+               "music is BACKGROUND. Describe the work, NOT the music.\n"
+               if bg else "")
+    user = f"""Raw OCR text captured from the user's screen during one session.
+(UI chrome like menu bars and clocks was already stripped; text below is mostly
+real content.)
 
 app: {session_row['app']}
 window: {session_row['window'] or '(none)'}
 url: {session_row['url'] or '(none)'}
-duration≈{dur_min}min · start_epoch_s: {t0}
-
---- RAW OCR (noisy: UI chrome, menus, buttons, sidebars mixed in) ---
+duration≈{dur_min}min · start_epoch_s: {t0}{bg_note}
+--- SCREEN TEXT ---
 {session_row['ocr']}
 --- END ---
 
-Distill what the user was actually DOING. Ignore UI chrome (menu bars, \
-buttons, timestamps, notification badges, sidebar lists). Keep concrete \
-signal: task/topic, key entities (project/file/person/site names), \
-content the user was reading or writing.
+Distill what the user was actually DOING. Concrete rules:
+- If `app` is a media player (Spotify/Music/iTunes) but the text is code,
+  terminal output, file paths, or project names → the real activity is THAT
+  work; music is background. Do NOT say the user "used Spotify".
+- Generic UI labels are NOT user content, ignore them: "Public Playlist",
+  "Liked Songs", "Untitled", "No Title", "New Tab".
+- Keep concrete signal: task/topic, key entities (project/file/person/site
+  names), content the user was reading or writing.
 
 Answer JSON:
-{{"doing": "<1-3 sentences, what the user did; '' if the screen is pure \
-chrome/noise with no real activity>", "keywords": ["3-8 lowercase terms"]}}"""
+{{"doing": "<1-3 sentences, what the user did; '' if pure chrome/noise>",
+"keywords": ["3-8 lowercase terms"]}}"""
     return [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": user}]
 
@@ -169,9 +182,16 @@ Rules:
   same activity belong to ONE chapter.
 - Infer the META-activity: if the user records/transcribes content inside a dev
   tool, the activity is the dev/testing work — not the content on screen.
+- A session tagged [bg] is BACKGROUND music — never let it define a chapter
+  topic or title. A media app (Spotify/Music) appearing in only a few sessions
+  among many dev sessions is background; name the chapter after the dev work.
 - Typos / one-off glances / fleeting windows are NOT chapters; fold them into
   the surrounding chapter.
-- continue_last=true means the first sessions extend the last established chapter.
+- Do NOT pile unrelated activities into one giant chapter. When the activity
+  genuinely shifts (e.g. coding → a different project → reading docs), start a
+  NEW chapter. Prefer several focused chapters over one sprawling one.
+- continue_last only when the next sessions truly continue the SAME activity as
+  the last chapter — not just "also at the computer".
 
 Answer JSON:
 {{"continue_last_with": ["s1", …] or [],

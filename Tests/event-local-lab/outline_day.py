@@ -29,7 +29,17 @@ def hhmm(ms):
 
 def digest_line(s):
     d = (s["digest"] or "").split("\n")[0]
-    return f"{hhmm(s['start_ms'])} {s['app']} | {d[:150]}"
+    bg = ""
+    try:
+        bg = "[bg]" if s["bg_media"] else ""
+    except (KeyError, IndexError):
+        pass
+    return f"{hhmm(s['start_ms'])} {s['app']}{bg} | {d[:150]}"
+
+
+# v3 #3:章节软上限 —— 防 82-session 雪球。超过则 continue/leftover 不再
+# 往上堆,逼新章。soft = finalize 的 merge 能把过切的真长活动再合回去。
+CHAPTER_SOFT_CAP = 60
 
 
 def main():
@@ -103,9 +113,11 @@ def main():
 
         win_ids = {s["id"] for s in win}
         assigned = set()
-        # 接力:并进上一章
+        # 接力:并进上一章 —— 但软上限到了就不续(逼新章,防雪球)。
         cont = [x for x in ids_of(out.get("continue_last_with")) if x in win_ids]
-        if cont and chapters:
+        last_full = (chapters and
+                     len(json.loads(chapters[-1]["session_ids"])) >= CHAPTER_SOFT_CAP)
+        if cont and chapters and not last_full:
             last = chapters[-1]
             merged = json.loads(last["session_ids"]) + cont
             with con:
@@ -113,6 +125,9 @@ def main():
                             (json.dumps(merged), last["id"]))
             assigned.update(cont)
             print(f"  ↪ window {win_n}: {len(cont)} session(s) 续上章 [{last['title']}]")
+        elif cont and last_full:
+            print(f"  ⊘ window {win_n}: 上章已达 {CHAPTER_SOFT_CAP} 上限,"
+                  f"{len(cont)} session 不续 → 留给新章/兜底")
         # 新章节
         seq = (chapters[-1]["seq"] + 1) if chapters else 1
         for ch in out.get("chapters") or []:
@@ -125,20 +140,23 @@ def main():
             assigned.update(sids)
             print(f"  ✓ window {win_n}: 章节[{seq}] {ch['title']} ({len(sids)} sessions)")
             seq += 1
-        # LLM 漏掉的 → 兜进最近的章(保证覆盖完整,镜像生产 coverGaps)
+        # LLM 漏掉的 → 兜进最近的章(覆盖完整,镜像生产 coverGaps);但上章
+        # 到软上限就别再堆,新开 unassigned 章(防 leftover 喂雪球)。
         leftover = [s["id"] for s in win if s["id"] not in assigned]
         if leftover:
             chapters = labdb.chapters_for_day(con, args.day)
-            if chapters:
-                last = chapters[-1]
+            last = chapters[-1] if chapters else None
+            if last and len(json.loads(last["session_ids"])) < CHAPTER_SOFT_CAP:
                 merged = json.loads(last["session_ids"]) + leftover
                 with con:
                     con.execute("UPDATE chapters SET session_ids=? WHERE id=?",
                                 (json.dumps(merged), last["id"]))
                 print(f"  ⚠ window {win_n}: {len(leftover)} 漏归 → 兜进 [{last['title']}]")
             else:
-                labdb.insert_chapter(con, args.day, 1, "uncategorized",
+                seq2 = (chapters[-1]["seq"] + 1) if chapters else 1
+                labdb.insert_chapter(con, args.day, seq2, "uncategorized",
                                      "sessions the model failed to assign", leftover)
+                print(f"  ⚠ window {win_n}: {len(leftover)} 漏归 → 新 unassigned 章")
 
     n_ch = len(labdb.chapters_for_day(con, args.day))
     print(f"[done] outline 完成:{n_ch} 章 → eventize_day.py --day {args.day}")

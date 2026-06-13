@@ -111,7 +111,18 @@ python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
       ≥40 sessions,最大139。根因=outline 滑窗 continue_last 雪球。
       未跑 finalize merge(会加剧过粗,污染粒度评估)。
       文档:~/Desktop/Obsidian/event pipeline local/(v1/v2/云端三方)
-- [ ] v3:抑制 outline 雪球(章节软上限/不鼓励无脑 continue/二次切分超大章)
+- [x] v3 实现(2026-06-13,未跑模型)—— 6 项,针对 "spotify 82-session" 失败:
+      #1 chrome.py 确定性剥菜单栏/时钟/喇叭/默认标签(source.finish_session,
+         无条件剥+灾难安全网;test_chrome.py 真实样本验证)⭐最高杠杆
+      #2 bg_media 标记(媒体app+空window+dev信号;labdb 加列)
+      #3 outline 章节软上限 60(continue/leftover 到顶不再堆,防雪球;
+         ⚠️ 会过切真长活动,靠 finalize merge 合回——用户已接受 tradeoff)
+      #4 clean prompt 加背景app+chrome标签否定规则(4B 靠列举)
+      #5 outline prompt 加 [bg] 标记+反mega-chapter+meta-activity
+      #6 eventize 末尾确定性兜底:标题点了媒体app但占比<10%且非媒体主导→改名
+      废弃:frames.focused(全=1没用)、app重标(脆)、600cap(违设计)
+- [ ] v3 跑 06-07 对照 v2/云端(等用户确认 + faithful 停;先 --reingest 吃 chrome 剥离)
+- [ ] 现实预期:sonnet 的隐式消歧/全局连贯/未见chrome泛化 本地够不到,规则近似
 - [ ] (远期)移植 Swift + MLX 打包进 app —— 处理逻辑那时再改
       ⚠️ 移植时 join 路径要做全产出语义(用户点名):不建新文件,给老事件
       merge:recordOccurrence(+1,per-day 去重)+ 追加 memberFrameIds +

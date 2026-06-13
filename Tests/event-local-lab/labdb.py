@@ -84,10 +84,12 @@ def connect():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
-    # 迁移:Phase B(OCR 清洗)的 digest 列。老库无此列时补上。
+    # 迁移:Phase B(OCR 清洗)的 digest 列 + v3 的 bg_media 列。老库补。
     cols = [r[1] for r in con.execute("PRAGMA table_info(raw_sessions)")]
     if "digest" not in cols:
         con.execute("ALTER TABLE raw_sessions ADD COLUMN digest TEXT")
+    if "bg_media" not in cols:
+        con.execute("ALTER TABLE raw_sessions ADD COLUMN bg_media INTEGER DEFAULT 0")
     return con
 
 
@@ -122,10 +124,11 @@ def ingest_sessions(con, day, sessions):
         for s in sessions:
             con.execute(
                 "INSERT INTO raw_sessions(day,start_ms,end_ms,app,window,url,"
-                "frame_ids,ocr,status,updated_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "frame_ids,ocr,bg_media,status,updated_at_ms) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (day, s["start_ms"], s["end_ms"], s["app"], s.get("window"),
                  s.get("url"), json.dumps(s["frame_ids"]), s["ocr"],
-                 s.get("status", "pending"), now_ms()),
+                 s.get("bg_media", 0), s.get("status", "pending"), now_ms()),
             )
 
 
