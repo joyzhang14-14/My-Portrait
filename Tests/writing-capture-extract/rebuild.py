@@ -292,8 +292,16 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
     return final, info
 
 def _is_eng_tail(s):
-    s = s.strip().replace(' ', '')
+    s = s.strip()
     if not s: return False
+    words = s.split()
+    if len(words) >= 2:
+        # 多词拉丁尾:含 ≥1 个标准英文词(≥2字母且 rime 英文词典命中,cands 返回单词自己)
+        # = 英文短语(lemme check en),不解码;全是短拼音音节(te d/hen bu x/shang hai,
+        # 逐词解成中文)= 拼音简拼尾,放行解码。修 ev1013 英文被拼成'了么么车诚恳'。
+        return any(len(w) >= 2 and (c := cands(w, 1)) and c[0].lower() == w.lower()
+                   for w in words)
+    s = s.replace(' ', '')
     c = cands(s, 1)
     return bool(c and c[0].lower() == s.lower())
 

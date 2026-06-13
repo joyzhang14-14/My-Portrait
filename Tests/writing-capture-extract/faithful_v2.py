@@ -22,6 +22,36 @@ DAYS = os.environ.get('PORTRAIT_DAYS', '2026-05-27,2026-05-28,2026-05-29,2026-06
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
 def cv(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip()
 
+def literal_tail(ev, send_ts):
+    """字面数字尾补全(ev1081「全球排32」案,AX 末尾采集丢字里**唯一无歧义**的子集)。
+    时间对账:最后一个含汉字的成稿点(commit/submit)之后、发送之前的击键 = AX 漏记的尾巴。
+    三道约束缺一不可(逐条都是踩坑踩出来的):
+    ① **锚必须含汉字**:AX 会把未解码拼音残渣串也记成 commit(ev522「ji d」),拼音残渣
+       commit 当锚会把其后选字数字误当字面尾;锚回退到真汉字后,残渣字母进窗口被②挡。
+    ② **submit 也算成稿点**:「了」靠 submit 提交(ev1084),漏认会把「了」选字数字 1 误补。
+    ③ **只补 ≥2 位纯数字**:IME 选字一次只按 1 位(1-9),连续 ≥2 位数字不可能是选字,
+       必是字面(ev1081「32」)。单个数字尾有选字歧义,宁缺毋错不补;标点尾同理不补
+       (实测重复补问号/句界误判)。全范围 250 发送实测:仅 ev1081 命中,零误补。"""
+    arr = ev.get('arr') or []
+    commit_ts = None
+    for e in arr:
+        if (e.get('kind') in ('commit', 'submit') and e.get('ts')
+                and any('一' <= ch <= '鿿' for ch in cv(e.get('text') or ''))
+                and (send_ts is None or e['ts'] <= send_ts)):
+            commit_ts = e['ts']
+    if commit_ts is None: return ''
+    ks = con.execute("SELECT char, is_backspace FROM keystroke_log WHERE bundle_id=:b "
+                     "AND (modifiers&7)=0 AND ts_ms > :a AND ts_ms <= :c ORDER BY ts_ms",
+                     {"b": ev['bundle'], "a": commit_ts, "c": send_ts or commit_ts}).fetchall()
+    buf = []
+    for c, bs in ks:
+        if bs:
+            if buf: buf.pop()
+        elif c and c not in ('\r', '\n'):
+            buf.append(c)
+    s = ''.join(buf).strip()
+    return s if s.isdigit() and len(s) >= 2 else ''
+
 # 密码掩码判定(2026-06-12 用户裁定):宽枚举掩码字形 + 私用区(loginwindow 实测 U+F79A)。
 # 不用"无字母汉字"一刀切:(> -) 颜文字是真表达;假名/谚文/阿拉伯文等任何语言不当符号。
 MASK_CHARS = set('•●○◦∙⋅・⬤⚫⚪🞄＊*※⁕▪▫■□◼◻●')
@@ -244,12 +274,15 @@ for day in DAYS:
             fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
             # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
             if cv(fixed):
-                grp.append((app, cv(fixed), is_send, ev['id'], t0, t1, ev['bundle']))
+                fx = cv(fixed)
+                lt = literal_tail(ev, t1)                 # 字面数字/标点尾补全(全球排32案)
+                if lt and not fx.endswith(lt): fx += lt
+                grp.append((app, fx, is_send, ev['id'], t0, t1, ev['bundle']))
                 mt = ''
                 for li in rinfo.get('lines', []):
                     if li.get('reason') == 'rebuilt' and li.get('tail_text'): mt = li['tail_text']
                     elif li.get('reason') == 'residue' and li.get('han'): mt = li['han']
-                if mt: PROOF[(ev['id'], cv(fixed))] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
+                if mt: PROOF[(ev['id'], fx)] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
         total = sum(len(t) for _, t, *_ in grp)
         if total > 20 and kc < total // 4:                          # 组级击键 gate
             # 逐条复检(XPC案,2026-06-12:自家分组并桶后大粘贴拖累手打小消息整桶连坐)——
