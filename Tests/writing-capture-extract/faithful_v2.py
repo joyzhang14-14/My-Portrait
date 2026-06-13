@@ -17,7 +17,8 @@ import ocr3 as C3
 from mlx_lm import load, generate
 
 con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
-DAYS = ['2026-05-27', '2026-05-28', '2026-05-29', '2026-06-05']
+# DAYS 可由环境变量 PORTRAIT_DAYS 覆盖(逗号分隔),默认原四天;集成跑别天用
+DAYS = os.environ.get('PORTRAIT_DAYS', '2026-05-27,2026-05-28,2026-05-29,2026-06-05').split(',')
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
 def cv(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip()
 
@@ -612,7 +613,9 @@ for day in DAYS:
 import datetime
 def fmt_ts(ms):
     return datetime.datetime.fromtimestamp(ms / 1000).strftime('%m-%d %H:%M:%S') if ms else '?'
-CV = json.load(open(os.path.join(EVAL, "canvas_cloud.json")))
+# canvas 源可配:PORTRAIT_CANVAS 指本地判别+canvas_merge 产出(集成路),默认云端预存
+_CANVAS_SRC = os.environ.get('PORTRAIT_CANVAS', os.path.join(EVAL, "canvas_cloud.json"))
+CV = json.load(open(_CANVAS_SRC)) if os.path.exists(_CANVAS_SRC) else {}
 nd = ["# 新 pipeline·成品(阶段0 集成:librime + 14b disambig 重建)\n",
       "**全本地 IME 重建**:event_sends_with_ts(回车检测真发送)+ rebuild(librime 确定性打底 + 14b 同音消歧 + 残渣/击键调和)",
       "+ 组级击键 gate + slash gate + **dedup_truncated**(类4/5a 去截断态)+ is_residue + **8b Pass4**。Canvas=云端。\n",
@@ -653,6 +656,7 @@ for day in DAYS:
         # Pass4 丢的就是邮箱/密码——审计只留理由行,内容一律遮蔽(joyzhang_14@163.com 实锤泄漏)
         nd.append(f"- `[Pass4]` 📍 `{a}` · ev{evid} · `{fmt_ts(t0)} → {fmt_ts(t1)}` — {reason or '(模型未给原因)'}\n  > (内容已过滤)\n")
     nd.append("\n---\n")
-path = "/Users/joyzhang14/Desktop/Obsidian/Pipeline成品-新pipeline-阶段0.md"
+path = os.environ.get('PORTRAIT_OUT',
+                      "/Users/joyzhang14/Desktop/Obsidian/Pipeline成品-新pipeline-阶段0.md")
 open(path, "w").write("\n".join(nd))
 print(f"已写 {path}", flush=True)
