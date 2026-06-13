@@ -9,9 +9,10 @@ import canvas_local as CL
 
 con = CL.con
 
-def clean_frame_text(words, kwords, line_freq=None):
+def clean_frame_lines(words, kwords, line_freq=None):
     """两遍式:strong 行(背书≥0.5)定**帧级 x 锚**(该帧文档列位置——窗口移动自适应);
-    低背书行须 跨帧频次≥2 ∧ x∈锚±0.08(GitHub/对话窗常驻行高频但列不同,锚拦)。"""
+    低背书行须 跨帧频次≥2 ∧ x∈锚±0.08(GitHub/对话窗常驻行高频但列不同,锚拦)。
+    返回 [(y, x, t)](y 升序)。"""
     cand = []
     for (y, x, t, n) in CL.frame_lines(words):
         if n < 3: continue
@@ -28,11 +29,14 @@ def clean_frame_text(words, kwords, line_freq=None):
     for (y, x, t, r) in cand:
         k = re.sub(r'[^a-z0-9一-鿿]', '', t.lower())[:30]
         if r >= 0.5:
-            bl.append((y, t))
+            bl.append((y, x, t))
         elif (r >= 0.15 and len(t) >= 15 and (line_freq is None or line_freq.get(k, 0) >= 2)
               and ax is not None and abs(x - ax) <= 0.08):
-            bl.append((y, t))
-    return '\n'.join(t for _, t in sorted(bl))
+            bl.append((y, x, t))
+    return sorted(bl)
+
+def clean_frame_text(words, kwords, line_freq=None):
+    return '\n'.join(t for _, _, t in clean_frame_lines(words, kwords, line_freq))
 
 is_history_frame = CL.is_history_frame   # 判据下沉 canvas_local,timeline 线共用
 
@@ -72,13 +76,35 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         for (y, x, t, n) in CL.frame_lines(words):
             if n >= 3:
                 line_freq[re.sub(r'[^a-z0-9一-鿿]', '', t.lower())[:30]] += 1
+    # 拼接快照:均匀 22-24 张(实证最优形态;喂更多快照会撑爆 merge:
+    # 50-60张→顶层吞行→自愈拒→直连爆膨胀,滚动折叠同样雪球)。
+    # "昙花一现"区域(结尾只在1-2帧出镜)不靠加快照解决,靠末端终愈 pass 兜底
     snaps = []
     step = max(1, len(frames) // max_snaps)
     for i in range(0, len(frames), step):
         ts, words = frames[i]
         t = clean_frame_text(words, kwords, line_freq)
         if len(t) >= 200: snaps.append((ts, t))
-    print(f"代表快照 {len(snaps)} 张", file=sys.stderr)
+    # 全帧清洗行池(终愈素材):行 → [首见帧序, 行序, 原文, 同列邻居normx集]
+    # 邻居=同帧内 x 相近(±0.04)的 y 上下最近行——文档流连续性证据
+    line_pool = {}
+    for i, (ts, words) in enumerate(frames):
+        ls = clean_frame_lines(words, kwords, line_freq)
+        for li, (y, x, t) in enumerate(ls):
+            nl = normx(t)
+            if len(nl) < 12: continue
+            nbs = []
+            for k in range(li - 1, -1, -1):
+                if abs(ls[k][1] - x) <= 0.04:
+                    if len(normx(ls[k][2])) >= 12: nbs.append(normx(ls[k][2]))
+                    break
+            for k in range(li + 1, len(ls)):
+                if abs(ls[k][1] - x) <= 0.04:
+                    if len(normx(ls[k][2])) >= 12: nbs.append(normx(ls[k][2]))
+                    break
+            ent = line_pool.setdefault(nl, [i, li, t, set()])
+            ent[3].update(nbs)
+    print(f"代表快照 {len(snaps)} 张 | 终愈行池 {len(line_pool)} 行", file=sys.stderr)
     # 层级归并(v2c):组内6张一次性拼→组块再拼一次。每层输出有界,无滚动膨胀/截断。
     from mlx_lm import load as _load, generate as _gen
     m14, tok14 = _load("mlx-community/Qwen3-14B-4bit")
@@ -108,6 +134,9 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         if wins and bad / len(wins) > 0.10:
             print(f"  {label} 拒(幻觉窗 {bad}/{len(wins)}),回退片段直连", file=sys.stderr)
             return '\n'.join(parts)
+        # 注:merge 层不做完整性自愈——它与"旧版整段丢弃"指令天然冲突
+        # (实证:正确丢旧版被当吞行,踩 30% 阀误回退直连→爆膨胀)。
+        # 完整性由末端终愈 pass 统一兜底,merge 允许有损
         return out
     G = 6
     blocks = []
@@ -148,18 +177,54 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         if len(ns) < 24: return not ns or ns in hay
         ws = [ns[i:i + 24] for i in range(0, len(ns) - 23, 12)]
         return sum(1 for w in ws if w in hay or w[:12] in hay or w[12:] in hay) / len(ws) >= 0.5
+    body_pretrim = body
     sents = re.split(r'(?<=[。.!?!?\n])', body)
     kept = [s for s in sents if in_final(s)]
     cut_n = len(sents) - len(kept)
-    if cut_n > 0.2 * len(sents):
+    pool_ok = cut_n <= 0.2 * len(sents)
+    if not pool_ok:
         print(f"终稿仲裁弃用(剪句 {cut_n}/{len(sents)} 超阀,疑无通读动作)", file=sys.stderr)
     else:
         body = ''.join(kept)
         print(f"终稿仲裁剪句 {cut_n}", file=sys.stderr)
+    # 终愈=尾部续接(口3 complete_tail 思路移植):成品结尾若在某帧行里有 ≥12 字
+    # 重叠且向后延伸 → 接上延伸段,迭代至无延伸。
+    # ⚰️通用补行三败留档:①cnt≥2 频次闸选反(标签页像素稳定高频,真内容 OCR 抖动
+    # 变体各 cnt=1)②击键背书背不动(survey/Claude 窗打的字同进词集)③同列邻居判据
+    # 被顶栏破功(标签题与文档列 x 重合,邻居=正文首行;一行进册即级联)。
+    # 续接判据天然防垃圾:须与正文结尾 12+ 字精确重叠
+    if pool_ok:
+        for _ in range(6):
+            bodyn = normx(body)
+            tail = bodyn[-120:]
+            best = None
+            for nl, (fi, li, ln, nbs) in line_pool.items():
+                if len(nl) < 16 or nl in bodyn: continue
+                for ov in range(min(len(nl) - 4, 60), 11, -1):
+                    if nl[:ov] in tail:
+                        ext = nl[ov:]
+                        if len(ext) >= 4 and ext[:12] not in bodyn and in_final(ln):
+                            # 同一行的 OCR 变体择优:击键背书率优先,长度次之(tumn/turn 案)
+                            toks = re.findall(r'[a-z]{4,}', ln.lower())
+                            r_ = sum(1 for w in toks if w in kwfreq) / len(toks) if toks else 0
+                            sc = (round(r_, 1), len(ext))
+                            if best is None or sc > best[2]:
+                                best = (ln, ext, sc)
+                        break
+            if not best: break
+            ln, ext = best[0], best[1]
+            p, c, ov = 0, 0, len(normx(ln)) - len(ext)
+            for idx, ch in enumerate(ln):
+                if normx(ch): c += 1
+                if c >= ov: p = idx + 1; break
+            body = body + ln[p:]
+            print(f"终愈续尾 +{len(ext)} 字", file=sys.stderr)
+        body = re.sub(r'[A-Za-z]{5,}', fix_word, body)   # 续尾行没过词典纠错,补一遍
     # diff 时间线:canvas_local 确定性线产出(用户硬需求),同样剔历史帧
     print("生成 diff 时间线(canvas_local,剔历史帧)…", file=sys.stderr)
     _, timeline, _, _ = CL.main(url_like, t0s, t1s, drop_history=True)
-    json.dump({'final_text': body, 'timeline': timeline, 'frames': len(rows), 'chrome_lines': 0},
+    json.dump({'final_text': body, 'body_pretrim': body_pretrim, 'timeline': timeline,
+               'frames': len(rows), 'chrome_lines': 0},
               open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
     print(f"拼接完成 字数 {len(body)}")
     return body

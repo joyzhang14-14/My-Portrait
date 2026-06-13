@@ -11,7 +11,9 @@ def normx(s):
     return re.sub(r'[^a-z0-9一-鿿]', '', s.lower())
 
 def windows(s, w=24):
-    return [s[i:i + w] for i in range(0, max(1, len(s) - w), w)]
+    ws = [s[i:i + w] for i in range(0, max(1, len(s) - w), w)]
+    if len(s) > w: ws.append(s[-w:])   # 尾窗:不足一窗的结尾也要查(实证漏过"断在句中")
+    return ws
 
 def main(path):
     d = json.load(open(path))
