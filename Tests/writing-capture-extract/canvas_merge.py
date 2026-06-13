@@ -85,26 +85,15 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         ts, words = frames[i]
         t = clean_frame_text(words, kwords, line_freq)
         if len(t) >= 200: snaps.append((ts, t))
-    # 全帧清洗行池(终愈素材):行 → [首见帧序, 行序, 原文, 同列邻居normx集]
-    # 邻居=同帧内 x 相近(±0.04)的 y 上下最近行——文档流连续性证据
+    # 全帧清洗行池(delete 派生素材):行 → [首见帧序, 末见帧序, 原文]
     line_pool = {}
     for i, (ts, words) in enumerate(frames):
-        ls = clean_frame_lines(words, kwords, line_freq)
-        for li, (y, x, t) in enumerate(ls):
+        for (y, x, t) in clean_frame_lines(words, kwords, line_freq):
             nl = normx(t)
             if len(nl) < 12: continue
-            nbs = []
-            for k in range(li - 1, -1, -1):
-                if abs(ls[k][1] - x) <= 0.04:
-                    if len(normx(ls[k][2])) >= 12: nbs.append(normx(ls[k][2]))
-                    break
-            for k in range(li + 1, len(ls)):
-                if abs(ls[k][1] - x) <= 0.04:
-                    if len(normx(ls[k][2])) >= 12: nbs.append(normx(ls[k][2]))
-                    break
-            ent = line_pool.setdefault(nl, [i, li, t, set()])
-            ent[3].update(nbs)
-    print(f"代表快照 {len(snaps)} 张 | 终愈行池 {len(line_pool)} 行", file=sys.stderr)
+            ent = line_pool.setdefault(nl, [i, i, t])
+            ent[1] = i
+    print(f"代表快照 {len(snaps)} 张 | 行池 {len(line_pool)} 行", file=sys.stderr)
     # 层级归并(v2c):组内6张一次性拼→组块再拼一次。每层输出有界,无滚动膨胀/截断。
     from mlx_lm import load as _load, generate as _gen
     m14, tok14 = _load("mlx-community/Qwen3-14B-4bit")
@@ -251,11 +240,76 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
         ts_c = f or prev_ts or (frames[0][0] if frames else 0)
         timeline.append((ts_c, 'commit', st))
         prev_ts = ts_c
-    for sent in (cut_sents if pool_ok else []):
-        st = sent.strip()
-        if not st: continue
-        _, l = seen_span(st)
-        if l: timeline.append((l, 'delete', st))
+    # delete 派生(行池聚类;对齐生产 canvas_fusion 的删除事件——用户指认两案:
+    # ADHD 写后94秒删/China 21:13:53 改写,旧法"只记 trim 剪句"在拼接层就被
+    # 14B 选版淘汰的旧版根本到不了 trim,漏)。候选四闸:不在成品(maj<0.4)∧
+    # 不在终读池(maj<0.2,标签页/别窗常驻垃圾天然排除)∧ 击键16-gram背书
+    # (用户真打过;survey/Claude引用文被聚类吸收)∧ len≥24。
+    # 共享16-gram聚类+二次合并(代表互含),代表=击键覆盖率最高再取最长;
+    # 簇内最晚末见帧=删除时刻。gold 开发期校验:26簇 0 假删
+    if pool_ok:
+        bodyn3 = normx(body)
+        nbuf = normx(''.join(buf))
+        def maj(nl, hh):
+            ws = [nl[i:i + 24] for i in range(0, max(1, len(nl) - 23), 12)]
+            return sum(1 for w in ws if w in hh or (len(w) >= 20 and
+                       (w[:12] in hh or w[12:] in hh))) / len(ws)
+        cands = []
+        for nl, (fi, la, ln) in line_pool.items():
+            if len(nl) < 24: continue
+            if maj(nl, bodyn3) >= 0.4: continue
+            if maj(nl, hay) >= 0.2: continue
+            if not any(nl[q:q + 16] in nbuf for q in range(0, max(1, len(nl) - 15), 8)):
+                continue
+            cands.append((nl, la, ln))
+        parent = {}
+        def find(a):
+            while parent.get(a, a) != a: a = parent[a]
+            return a
+        gram_owner = {}
+        for idx, (nl, la, ln) in enumerate(cands):
+            parent.setdefault(idx, idx)
+            for q in range(0, max(1, len(nl) - 15), 8):
+                g = nl[q:q + 16]
+                if g in gram_owner: parent[find(idx)] = find(gram_owner[g])
+                else: gram_owner[g] = idx
+        from collections import defaultdict as _dd
+        clus = _dd(list)
+        for idx, c in enumerate(cands): clus[find(idx)].append(c)
+        def kwcov(nl):
+            gs = [nl[q:q + 16] for q in range(0, max(1, len(nl) - 15), 8)]
+            return sum(1 for g in gs if g in nbuf) / len(gs)
+        groups = []
+        for mem in clus.values():
+            rep = max(mem, key=lambda c: (round(kwcov(c[0]), 1), len(c[0])))
+            groups.append([rep, max(c[1] for c in mem), mem])
+        # 二次合并:代表互含(maj≥0.5)的碎簇并掉(同段落的截断变体/引用)
+        groups.sort(key=lambda g: -len(g[0][0]))
+        merged = []
+        for g in groups:
+            host = next((m for m in merged if maj(g[0][0], m[0][0]) >= 0.5), None)
+            if host: host[1] = max(host[1], g[1])
+            else: merged.append(g)
+        dels = {}
+        for rep, la, mem in merged:
+            nlr = rep[0]
+            # 击键可证存活闸:代表行里击键能背书的 16-gram 大半仍在成品 = 假删
+            # (烂OCR孤儿变体冒充删除;实证:huge idea 案 'wemmto srgurap' 三处都活)
+            tg = [nlr[q:q + 16] for q in range(0, max(1, len(nlr) - 15), 8)
+                  if nlr[q:q + 16] in nbuf]
+            if tg and sum(1 for g in tg if g in bodyn3) / len(tg) >= 0.5:
+                continue
+            txt = re.sub(r'[A-Za-z]{5,}', fix_word, rep[2]).strip()
+            # trim 剪句若与本簇同段,用其干净文本(出自 LLM 拼接体,可读性好)
+            for cs in cut_sents:
+                if maj(normx(cs), nlr) >= 0.5 or maj(nlr, normx(cs)) >= 0.5:
+                    txt = cs.strip(); break
+            key = normx(txt)
+            ts_d = frames[la][0]
+            if key not in dels or ts_d > dels[key][0]:   # 同文去重,取最晚=真删除时刻
+                dels[key] = (ts_d, txt)
+        for ts_d, txt in dels.values():
+            timeline.append((ts_d, 'delete', txt))
     # 不按时间重排:commit 段保持文档序(逐条拼接=最终文章,构造性自洽);
     # 每条自带 ts,展示侧需要时间视图时自行排序
     print(f"timeline:成品句 commit {sum(1 for e in timeline if e[1]=='commit')} "
