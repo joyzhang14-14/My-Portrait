@@ -106,7 +106,12 @@ python3 inspect_day.py --day 2026-06-07              # reports/2026-06-07.md
       decide/merge prompt 要更激进;③ describe 语言混杂(英文为主夹中文)。
 - [x] v2 章节化搭建(outline/eventize,2026-06-12)—— 未跑
 - [ ] v2 烟雾测试(--limit-windows 2 → eventize --limit 3,等用户确认)
-- [ ] v2 整天 + 对照 v1/云端,质量结论 → 细化指标 / 换模型档位
+- [x] v2 整天跑通(06-07,2026-06-12):149→46 events(云端28);两个孤证案例
+      (胰腺癌打错字/daily show转译测试)**都修复**,但摆向过粗:10 个事件
+      ≥40 sessions,最大139。根因=outline 滑窗 continue_last 雪球。
+      未跑 finalize merge(会加剧过粗,污染粒度评估)。
+      文档:~/Desktop/Obsidian/event pipeline local/(v1/v2/云端三方)
+- [ ] v3:抑制 outline 雪球(章节软上限/不鼓励无脑 continue/二次切分超大章)
 - [ ] (远期)移植 Swift + MLX 打包进 app —— 处理逻辑那时再改
       ⚠️ 移植时 join 路径要做全产出语义(用户点名):不建新文件,给老事件
       merge:recordOccurrence(+1,per-day 去重)+ 追加 memberFrameIds +
