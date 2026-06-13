@@ -426,7 +426,7 @@ enum MemoryPrompts {
             "slug": "snake_case_short",   // for update, must match an existing slug
             "title": "Human-readable title",
             "body": "Markdown body, multiple sentences, third person about the user. Cite specific evidence from events. Use \n for newlines.",
-            "derived_from": ["<event id>", "<event id>"]
+            "derived_from": ["E3", "E7"]   // handles of the source events this entry is built from
           }
 
         WEIGHTED MERGE — how to UPDATE a settled entry:
@@ -447,6 +447,12 @@ enum MemoryPrompts {
 
         Rules:
         - ONLY return entries the evidence actually supports. If nothing strong enough, return [].
+        - derived_from: list the [E#] handle of EVERY source event this entry is
+          built from, using the exact handles from the "Source events" list above
+          (e.g. "E3"). A "create" or "update" MUST cite at least one real handle.
+          NEVER invent a handle that is not listed. If you cannot point to any
+          source event, the entry is unsupported — return "noop" or omit it, do
+          NOT create it.
         - Prefer UPDATE over duplicate CREATE if an existing slug covers the same trait.
         - Multiple distinct portrait entries per category are fine.
         - Slugs use snake_case and ≤40 chars (e.g. swift_ui_development, personal_ai_research, late_night_focus).

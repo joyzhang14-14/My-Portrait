@@ -259,7 +259,8 @@ final class PortraitDistiller {
             }
         }
 
-        return try Self.parseDecisions(from: collected, category: category)
+        return try Self.parseDecisions(from: collected, category: category,
+                                       eventIds: events.map { $0.id })
     }
 
     // MARK: - Prompt
@@ -309,11 +310,15 @@ final class PortraitDistiller {
         if events.isEmpty {
             lines.append("No new events tagged with this category were captured.")
         } else {
-            lines.append("Source events (id | title | impact | weight | created | day-occurrences):")
-            for e in events {
+            // 事件用短句柄 [E1]/[E2]… 标识,不暴露真实文件路径 —— LLM 只需在
+            // derived_from 里回引句柄,无需原样背诵 80 字符长 id(reasoning 模型
+            // 极易背错 → validateDerivedIds 精确比对整条丢 → 溯源落空)。句柄序号
+            // = events 数组下标 + 1,parseDecisions 按同序映射回真实 id。
+            lines.append("Source events (handle | title | impact | weight | created | day-occurrences):")
+            for (i, e) in events.enumerated() {
                 let summary = e.summary.isEmpty ? "(no summary)" : e.summary
                 let trim = summary.count > 180 ? String(summary.prefix(180)) + "…" : summary
-                lines.append("  - [\(e.id)] \(e.title)  | impact=\(String(format: "%.1f", e.impact)), weight=\(String(format: "%.2f", e.weight)), created=\(dayFmt.string(from: e.created)), days=\(e.occurrenceDays)")
+                lines.append("  - [E\(i + 1)] \(e.title)  | impact=\(String(format: "%.1f", e.impact)), weight=\(String(format: "%.2f", e.weight)), created=\(dayFmt.string(from: e.created)), days=\(e.occurrenceDays)")
                 lines.append("    summary: \(trim.replacingOccurrences(of: "\n", with: " ⏎ "))")
             }
         }
@@ -337,7 +342,8 @@ final class PortraitDistiller {
         print("[Distill] \(category): parse failure raw response dumped → \(url.lastPathComponent)")
     }
 
-    nonisolated private static func parseDecisions(from response: String, category: String) throws -> [ParsedDecision] {
+    nonisolated private static func parseDecisions(from response: String, category: String,
+                                                   eventIds: [String]) throws -> [ParsedDecision] {
         // 用 LLMJSON 抽 balanced array(去 fence + 尊重字符串内的 bracket),
         // 比原来的 first/last bracket 抽法稳一档:模型在数组前后的散文 / fence /
         // 字符串字面量里出现 `]` 都不会被错抽。
@@ -386,7 +392,11 @@ final class PortraitDistiller {
             }
             let title = (entry["title"] as? String) ?? ""
             let body = (entry["body"] as? String) ?? ""
-            let derived = (entry["derived_from"] as? [String]) ?? []
+            // [E#] 句柄 → 真实 event id(按 buildPrompt 同序)。模型若直接给了
+            // 原始 path(老格式 / 困惑),resolveEventHandle 原样返回,走下面的
+            // 存在性校验兜底。
+            let rawDerived = (entry["derived_from"] as? [String]) ?? []
+            let derived = rawDerived.map { Self.resolveEventHandle($0, eventIds: eventIds) }
             guard !slug.isEmpty else {
                 if action == "noop" {
                     out.append(ParsedDecision(action: "noop", slug: "", title: "", body: "", derivedFromEventIds: []))
@@ -419,6 +429,17 @@ final class PortraitDistiller {
             ))
         }
         return out
+    }
+
+    /// 把 LLM 回引的句柄 [E12] / E12 / 12 映射回 buildPrompt 同序的真实 event id。
+    /// 不是句柄(模型直接给了原始 path)就原样返回,交给 validateDerivedIds 做
+    /// 存在性兜底。越界 / 非法序号同样原样返回 → 回查丢弃。
+    nonisolated private static func resolveEventHandle(_ token: String, eventIds: [String]) -> String {
+        var t = token.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("["), t.hasSuffix("]") { t = String(t.dropFirst().dropLast()) }
+        if t.first == "E" || t.first == "e" { t = String(t.dropFirst()) }
+        if let n = Int(t), n >= 1, n <= eventIds.count { return eventIds[n - 1] }
+        return token.trimmingCharacters(in: .whitespaces)
     }
 
     /// 把 LLM 给出的 event id 数组逐个回查 events/ 下是否真存在,丢掉编造的。
