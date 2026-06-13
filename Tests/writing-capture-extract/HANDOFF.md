@@ -359,6 +359,21 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
   ''(等价函数不存在)+ \_is_eng_tail('ji d')=False(与改前一致),ev522 解码路径字节级不经过
   我改的分支;A1 本就是 HANDOFF 独立待办(guard 拒 librime TOP),历来靠口3 OCR 偶然找回,
   本次没找回。⚠️v20「满分」产出文件已不存在,无法溯源 A1 当时为何✓(口3找回有方差)
+- **🎯 中英文判别设计 + input_source 采集落地(2026-06-13,用户主导头脑风暴)**:
+  详见 `输入法判别设计.md`。核心结论:**不判双关词,判用户当时的输入法**。
+  · **采集层(Swift,已落地+验证)**:`keystroke_log.input_source` 字段(Schema v41 +
+  KeystrokeCharLogger)。⚠️TIS/TSM API 必须主线程调(callback 线程同步调崩 EXC_BREAKPOINT,
+  已修=`InputSourceCache` 主线程缓存+监听切换通知,callback 只读)。commit e831791/e008894。
+  实测验证:英文键盘→`com.apple.keylayout.US`,中文拼音→`com.apple.inputmethod.SCIM.ITABC`,
+  同字母串 shurufaceshi 两种输入法干净分开。⚠️**只对重新 build 后的新采集生效,历史数据全 NULL**。
+  · **判别逻辑(全在实验线,Swift 不加 —— 用户裁定)**:input_source 是 keylayout=英文字面 /
+  inputmethod=拼音。其余信号(双 return/选字含空格/preedit 对账)见文档 5.5 节,各有边界,组合用。
+  · **多轮实证教训**:误判已≈0(修 ev1013 后,reconstruct 下游保护让英文短词留字面);
+  双 return 信号验证有效但精确接主链有边界(残渣误标),**无 failing case 不接主链**(逐案风格);
+  工作流量化误判 5.7% 是幻觉(只看中间判定没验产出),核实后真误判=0。
+  · **待接(下一步)**:实验线写 input_source 判别函数接进英文/拼音判定。⚠️约束=历史 gold 4天全
+  NULL,这步只对新数据生效(同用户裁定"input_source 放最后"),要攒够带 input_source 的真实写作
+  数据才验得到效果;接主链需全量 gold 验证防回归。
 - **Occasion 坏窗结案(用户问"为什么没被记录")**:它在 docx 里也在 gold 里——不是缺录,
   是**题头 -92min 被用户改过措辞**,我们留的是旧版;时间窗对它原理性无解(旧题头-92min改,
   而部分真区域最后一见在-90~-120min,无窗可分);整句剪掉会连坐共享真内容(净亏),裁定保留。
