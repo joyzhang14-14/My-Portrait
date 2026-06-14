@@ -371,9 +371,24 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
   · **多轮实证教训**:误判已≈0(修 ev1013 后,reconstruct 下游保护让英文短词留字面);
   双 return 信号验证有效但精确接主链有边界(残渣误标),**无 failing case 不接主链**(逐案风格);
   工作流量化误判 5.7% 是幻觉(只看中间判定没验产出),核实后真误判=0。
-  · **待接(下一步)**:实验线写 input_source 判别函数接进英文/拼音判定。⚠️约束=历史 gold 4天全
-  NULL,这步只对新数据生效(同用户裁定"input_source 放最后"),要攒够带 input_source 的真实写作
-  数据才验得到效果;接主链需全量 gold 验证防回归。
+  · **双 return 英文检测器(地基已落地,commit,验证通过)**:`enzh_double_return.py`。
+  历史数据 input_source=NULL,用**双 return 击键信号**:"拉丁 run + <CR><CR>"=中文 IME 打的英文字面。
+  ⚠️编码 return 别用 'R'(撞大写字母 R),用 '\n'。实测:gmail 案 ev1132「g mai l」残渣的击键
+  `gmail<CR><CR>` 抓出 ['notebookLM','gmail']✓,英文 bug/sparkle/doc/icon 抓对✓,纯拼音零误抓✓。
+
+  ## ⏳⏳ 下一步立即接手(compact 后从这里继续,用户已点 case)
+
+  **用户 case**:v20 文档(`~/Desktop/Obsidian/Pipeline成品归档/v20-...det.md`)第 21 条
+  `[ax_cleaned~residue]` Discord「g mai l」其实是英文 **gmail**,被当拼音解码成残渣。用双 return 修它。
+  **做法**(写在 enzh_double_return.py 注释里):faithful_v2 reconstruct 之后,对 ~residue 记录,
+  取该事件击键跑 `double_return_eng`,若残渣字母==某双 return 英文词 → **直接用击键字面替换**
+  (gmail 不用 LLM,击键 g-m-a-i-l 就是字面;Librime+LLM 只多词/歧义时才合并)。
+  **约束(用户原话)**:只改 ~residue 且匹配双 return 英文的记录 → 天然"不影响其他结果"。
+  **验证**:gmail 翻成 'gmail' + 38 gold 零回归(跑 faithful_v2 全量 14B,30+min,需先问用户/确认 GPU),
+  结果放 `~/Desktop/Obsidian/Pipeline成品归档/`。
+  **可恢复**:设计=`输入法判别设计.md`,地基=`enzh_double_return.py`(带接入点),全程=本 HANDOFF。
+  ⚠️工作流临时文件 `analyze_enzh*.py`×4 + `rime/cands_batch*` 待用户定夺清不清(基于错误量化,无价值)。
+
 - **Occasion 坏窗结案(用户问"为什么没被记录")**:它在 docx 里也在 gold 里——不是缺录,
   是**题头 -92min 被用户改过措辞**,我们留的是旧版;时间窗对它原理性无解(旧题头-92min改,
   而部分真区域最后一见在-90~-120min,无窗可分);整句剪掉会连坐共享真内容(净亏),裁定保留。
