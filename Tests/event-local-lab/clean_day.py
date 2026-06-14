@@ -15,7 +15,7 @@ Ctrl-C 安全,重跑续。⚠️ 跑之前先跟用户确认。
 import argparse
 import sys
 
-import labdb
+import labdb, redact
 from run_day import ensure_ingested, other_lab_running
 
 CLEAN_MODEL = "mlx-community/Qwen3-4B-4bit"
@@ -59,7 +59,11 @@ def main():
                 print(f"  ∅ #{s['id']} {s['app'][:20]:20s} → 纯噪音,skip")
                 continue
             kw = ", ".join(out.get("keywords") or [])
-            labdb.set_digest(con, s["id"], f"{doing}\nkeywords: {kw}")
+            # hybrid 脱敏闸:digest 上云前掩码残留 PII(原文不出本地,digest 才上云)
+            dig, hits = redact.redact(f"{doing}\nkeywords: {kw}")
+            if hits:
+                print(f"    [redact] #{s['id']} 掩码 {hits}")
+            labdb.set_digest(con, s["id"], dig)
             done += 1
             print(f"  ✓ #{s['id']} {s['app'][:20]:20s} → {doing[:60]}")
         except KeyboardInterrupt:

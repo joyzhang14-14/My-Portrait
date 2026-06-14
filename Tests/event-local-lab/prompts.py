@@ -150,6 +150,9 @@ Distill what the user was actually DOING. Concrete rules:
   "Liked Songs", "Untitled", "No Title", "New Tab".
 - Keep concrete signal: task/topic, key entities (project/file/person/site
   names), content the user was reading or writing.
+- PRIVACY: describe the ACTIVITY TYPE, do NOT reproduce sensitive specifics —
+  no message bodies, passwords, API keys, emails, phone numbers, or personal
+  identifiers. Say "replied to a message" not the message text.
 
 Answer JSON:
 {{"doing": "<1-3 sentences, what the user did; '' if pure chrome/noise>",
