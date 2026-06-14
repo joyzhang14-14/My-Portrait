@@ -14,6 +14,7 @@ import rebuild as R
 import extract_compare_v2 as X
 import mlx_constrained as MC
 import ocr3 as C3
+from enzh_double_return import double_return_eng, encode_keys   # 双 return 中文IME打英文判别(gmail案)
 from mlx_lm import load, generate
 
 con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
@@ -115,6 +116,21 @@ def is_residue(t):
     if (re.search(r'[一-鿿]\s*[a-z]{1,3}(?: [a-z]{1,3})+$', c) and len(c) <= 25
             and sum(1 for ch in c if '一' <= ch <= '鿿') <= 2): return True
     return False
+def double_return_literal(bundle, t0, t1, residue_text):
+    """双 return 英文修复(gmail 案,2026-06-13,用户主导)。中文输入法下打英文 =
+    字母 + return(把组合区上屏成字面)+ return(发送)= 双 return;第一个回车只上屏不发送。
+    残渣记录的击键窗里若有「拉丁 run + <CR><CR>」且该英文词(去空格小写)== 残渣字母 →
+    **直接用击键字面替换**(零 LLM,击键 g-m-a-i-l 就是字面)。只命中 ~residue 且精确匹配
+    双 return 的记录 → 天然「不影响其他结果」(纯拼音用选字数字/空格,无双回车,零误抓已验)。"""
+    letters = re.sub(r'[^a-z]', '', (residue_text or '').lower())
+    if len(letters) < 2: return None
+    rows = con.execute("SELECT char, is_backspace FROM keystroke_log WHERE bundle_id=:b "
+                       "AND ts_ms BETWEEN :a AND :c AND (modifiers&7)=0 ORDER BY ts_ms",
+                       {"b": bundle, "a": (t0 or 0) - 2000, "c": (t1 or 0) + 2000}).fetchall()
+    for w in double_return_eng(encode_keys(rows)):
+        if w.lower() == letters: return w
+    return None
+
 def kind_of(t): return "long_form" if len(t) >= 140 else "short_form"
 def rec_md(n, src, kind, app, text): return f"**{n}.** `[{src}/{kind}]` 📍 `{app}`\n\n> " + text.replace("\n", "\n> ") + "\n"
 
@@ -351,6 +367,14 @@ for day in DAYS:
     for rec in out:
         a_, t_, kc_, evid_, t0_, t1_, src0, b_ = rec
         if '~residue' in src0:
+            # 双 return 英文(gmail 案,2026-06-13):残渣击键窗有「拉丁 run+<CR><CR>」且英文词
+            # ==残渣字母 → 字面替换(零 LLM)。只命中 ~residue 精确匹配的记录,不影响其他;
+            # 改后记 C3FIX 审计可追溯。命中即定稿,跳过下游残渣副本去重/草稿折叠。
+            eng = double_return_literal(b_, t0_, t1_, t_)
+            if eng:
+                c3fix.append((a_, t_, eng, "双return英文", evid_, t0_))
+                out_f.append((a_, eng, kc_, evid_, t0_, t1_, src0.replace('~residue', ''), b_))
+                continue
             letters = re.sub(r'[^a-z]', '', t_.lower())
             twin = None
             if len(letters) >= 4:
