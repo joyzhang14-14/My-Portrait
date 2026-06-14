@@ -376,18 +376,27 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
   ⚠️编码 return 别用 'R'(撞大写字母 R),用 '\n'。实测:gmail 案 ev1132「g mai l」残渣的击键
   `gmail<CR><CR>` 抓出 ['notebookLM','gmail']✓,英文 bug/sparkle/doc/icon 抓对✓,纯拼音零误抓✓。
 
-  ## ⏳⏳ 下一步立即接手(compact 后从这里继续,用户已点 case)
+## ✅ 2026-06-13 v21 双 return 英文修复接入主链(gmail 案,**6 天全跑验证通过**)
 
-  **用户 case**:v20 文档(`~/Desktop/Obsidian/Pipeline成品归档/v20-...det.md`)第 21 条
-  `[ax_cleaned~residue]` Discord「g mai l」其实是英文 **gmail**,被当拼音解码成残渣。用双 return 修它。
-  **做法**(写在 enzh_double_return.py 注释里):faithful_v2 reconstruct 之后,对 ~residue 记录,
-  取该事件击键跑 `double_return_eng`,若残渣字母==某双 return 英文词 → **直接用击键字面替换**
-  (gmail 不用 LLM,击键 g-m-a-i-l 就是字面;Librime+LLM 只多词/歧义时才合并)。
-  **约束(用户原话)**:只改 ~residue 且匹配双 return 英文的记录 → 天然"不影响其他结果"。
-  **验证**:gmail 翻成 'gmail' + 38 gold 零回归(跑 faithful_v2 全量 14B,30+min,需先问用户/确认 GPU),
-  结果放 `~/Desktop/Obsidian/Pipeline成品归档/`。
-  **可恢复**:设计=`输入法判别设计.md`,地基=`enzh_double_return.py`(带接入点),全程=本 HANDOFF。
-  ⚠️工作流临时文件 `analyze_enzh*.py`×4 + `rime/cands_batch*` 待用户定夺清不清(基于错误量化,无价值)。
+- **接入(28d69c0)**:`faithful_v2` 加 `double_return_literal(bundle,t0,t1,residue_text)`,在 out_f 的
+  `if '~residue' in src0` 分支开头调用:残渣击键窗 `[t0-2000,t1+2000]` 跑 `double_return_eng`,
+  若双 return 英文词(去空格小写)== 残渣字母 → 字面替换 + 剥 ~residue 标记 + 记 C3FIX(via=双return英文)+ continue。
+  命中即跳过下游残渣副本去重/草稿折叠。**唯一行为变更**:~residue 精确匹配双 return 的记录被替换,其余字节级不变。
+- **运行**:`PORTRAIT_DAYS`=6 天 + `PORTRAIT_CANVAS=eval/canvas_merged_src.json`(复现上次 6 天跑,唯一 delta=本修复);
+  14B disambig 427 次,~30min;产物 `eval/v21_product.md`(gitignore),归档 = `Pipeline成品归档/v21-双return英文修复(gmail案,6天集成,det).md`。
+- **结果**:**gmail 翻绿**(6/5 第25条 ev1132「g mai l」→「gmail」,`[ax_cleaned]`);**Gold 38✓ 0🟡 1✗**,
+  唯一 ✗=A1「记得」(ev522 在 **5/27** 非 5/29!简拼 ji d 本轮 14B 解成「基地」,口3 未找回)——
+  **与 gmail 修复无关铁证**:ev522 是 `[ax_cleaned]` 非 ~residue,不进改的分支;且与上次 6 天跑一致(A1 一贯 14B 简拼方差)。
+- **零副作用实证**:**6/3、6/4 与上次产出逐字一致**(两天 7 条 ~residue 英文 Lab/open/Yep/okay/ok/100/UC 全不变=no-op);
+  5/27/28/29/6/5 差异全为 ~draft/~residue 碎片的 14B run-to-run 方差。saved v20 真实分=38✓**1🟡**(B12 含「Were you encouraged」存量草稿),
+  v21 该条已剥离转 ✓——v21 相对 v20 是「A1 失/B12 得」的方差对冲,非 gmail 所致。
+- 工具:`v21_compare.py`(解析 det 成品段+逐天 diff)/`assemble_v21.py`(组装归档文档),均已 commit。
+  ⚠️工作流临时文件 `analyze_enzh*.py`×4 + `rime/cands_batch*` 仍待用户定夺清不清(无价值)。
+
+  ### ⏳ 下一步候选(无 failing case 不接,逐案风格)
+  - 多词/歧义双 return 英文(gmail 是单词无歧义=零 LLM;若出现多词需 librime+LLM 合并,框架已留)。
+  - input_source 判别接实验线(待重新 build 后攒够新采集数据;历史数据全 NULL 只能靠双 return)。
+  - A1「记得」治本:ev522 简拼 ji d 的 guard 拒 librime TOP 问题(历来靠口3 OCR 偶然找回,方差大)。
 
 - **Occasion 坏窗结案(用户问"为什么没被记录")**:它在 docx 里也在 gold 里——不是缺录,
   是**题头 -92min 被用户改过措辞**,我们留的是旧版;时间窗对它原理性无解(旧题头-92min改,
