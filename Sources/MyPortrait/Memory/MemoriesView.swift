@@ -16,6 +16,10 @@ struct MemoriesView: View {
     /// 跳转到 Home。nil = 编辑按钮隐藏(测试 / 旧调用方兼容)。
     var onEditEntity: ((URL) -> Void)? = nil
 
+    /// Display 的 Memory sort order 改动要即时反映到列表 —— 持有 store 让
+    /// @Observable 依赖追踪生效(body 里读 memorySortOrder 建立观察)。
+    @State private var config = ConfigStore.shared
+
     @State private var entries: [Entry] = []
     /// events 视图的 folder 分组缓存 —— 原来 foldersGroupedList 在 body 里
     /// 每次重算都同步 EventFolderStore.loadAll()(枚举目录+逐 JSON 解码)
@@ -24,6 +28,10 @@ struct MemoriesView: View {
     @State private var folderGroups: [FolderGroup] = []
     @State private var ungroupedEntries: [Entry] = []
     @State private var loading: Bool = false
+    /// 代际 token —— reload / resort / refreshFolderSplit 都是「同步前缀 → await
+    /// detached → 写回 @State」两段式,完成顺序不确定。入口 bump+捕获,await 后
+    /// 写回前 guard,过期续体丢弃,避免后完成的盖掉新结果(stale 快照 / 旧排序)。
+    @State private var refreshGen: Int = 0
     @State private var actionStatus: String = ""
     @State private var selected: Entry.ID?
     @State private var confirmingDelete: Bool = false
@@ -70,7 +78,37 @@ struct MemoriesView: View {
                 searchText = ""
                 await reload()
             }
+            // 改 Display 的 Memory sort order → 就地重排已加载的列表(纯内存,
+            // 不重新读盘),主列表与 folder 分组同时刷新。
+            .onChange(of: config.current.display.memorySortOrder) {
+                Task { await resort() }
+            }
         }
+    }
+
+    /// 从 Display 设置读当前排序规则(非法值兜底 weight)。MainActor 上下文。
+    @MainActor
+    private var currentSortOrder: MemorySortOrder {
+        MemorySortOrder(rawValue: config.current.display.memorySortOrder) ?? .weight
+    }
+
+    /// 对已加载的 entries / folder 分组就地重排,跟随当前排序设置。entries 已在
+    /// 内存里,只是换比较器 —— folder split 仍要读 _folders/(loadAll 读盘),
+    /// 跟 reload 一样丢后台,主列表先排好。
+    @MainActor
+    private func resort() async {
+        refreshGen += 1
+        let gen = refreshGen
+        let order = currentSortOrder
+        entries = Self.sortedByConfig(entries, order: order)
+        guard scope == .events else { return }
+        let snapshot = entries
+        let split = await Task.detached(priority: .userInitiated) {
+            Self.makeFolderSplit(entries: snapshot, order: order)
+        }.value
+        guard gen == refreshGen else { return }   // 期间有更新的刷新 → 丢弃本次
+        folderGroups = split.folders
+        ungroupedEntries = split.ungrouped
     }
 
     // MARK: - List column (toolbar + list)
@@ -240,11 +278,29 @@ struct MemoriesView: View {
         }
     }
 
+    /// 按指定规则排序。weight 倒序 / created 新→旧 / 最新 occurrence 新→旧。
+    /// 主列表与 folder 内 event 共用,口径一致。order 由 MainActor 调用方读
+    /// config 传入(nonisolated 不能直接碰 ConfigStore.shared)。
+    nonisolated private static func sortedByConfig(_ entries: [Entry], order: MemorySortOrder) -> [Entry] {
+        switch order {
+        case .weight:
+            return entries.sorted { $0.currentWeight > $1.currentWeight }
+        case .created:
+            return entries.sorted { $0.file.created > $1.file.created }
+        case .lastOccurred:
+            // lastOccurrence 可能 nil(无 occurrence)→ 退回 created 当锚点,
+            // 保证全序稳定不丢条。
+            return entries.sorted {
+                ($0.file.lastOccurrence ?? $0.file.created) > ($1.file.lastOccurrence ?? $1.file.created)
+            }
+        }
+    }
+
     /// 把 entries 拆成 (folders, ungrouped)。Entry.id 是 URL,得换算
     /// 成 "yyyy-MM-dd/foo.md" 相对路径跟 folder.events 对齐。
     /// static + nonisolated:EventFolderStore.loadAll() 读盘,在 reload 的
     /// 后台任务里跑,不进 body。
-    nonisolated private static func makeFolderSplit(entries: [Entry]) -> (folders: [FolderGroup], ungrouped: [Entry]) {
+    nonisolated private static func makeFolderSplit(entries: [Entry], order: MemorySortOrder) -> (folders: [FolderGroup], ungrouped: [Entry]) {
         let prefix = Storage.eventsDir.path + "/"
         func relPath(of url: URL) -> String {
             url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
@@ -256,11 +312,10 @@ struct MemoriesView: View {
         let allFolders = EventFolderStore.loadAll()
         let folderGroups: [FolderGroup] = allFolders
             .map { f -> FolderGroup in
-                // 内部事件按 currentWeight 倒序 —— 用户原话:"folder 里的词条
-                // 按 weight 从高到低排"。folder.events 的原序(LLM 输出顺序)
-                // 信息量低,weight 排在前更符合"重要的事先看见"直觉。
-                let entries = f.events.compactMap { byPath[$0] }
-                    .sorted { $0.currentWeight > $1.currentWeight }
+                // 内部事件跟随 Display 的 Memory sort order(weight / created /
+                // last occurrence),与主列表口径一致。folder.events 的原序
+                // (LLM 输出顺序)信息量低,按设置排更符合直觉。
+                let entries = Self.sortedByConfig(f.events.compactMap { byPath[$0] }, order: order)
                 return FolderGroup(id: "folder:" + f.slug, slug: f.slug, title: f.name,
                                    colorHex: f.colorHex, entries: entries)
             }
@@ -593,17 +648,21 @@ struct MemoriesView: View {
 
     @MainActor
     private func reload() async {
+        refreshGen += 1
+        let gen = refreshGen
         loading = true
         let currentScope = scope
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
+        let order = currentSortOrder
         // folder split(loadAll 读盘 + 分组排序)跟 scan 一起在后台算好,
         // body 只消费缓存。非 events scope 用不上分组,不白读 _folders/。
         let (loaded, split) = await Task.detached(priority: .userInitiated) {
             () -> ([Entry], (folders: [FolderGroup], ungrouped: [Entry])) in
-            let loaded = Self.scan(scope: currentScope, halfLifeDays: halfLife)
+            let loaded = Self.scan(scope: currentScope, halfLifeDays: halfLife, order: order)
             guard currentScope == .events else { return (loaded, ([], [])) }
-            return (loaded, Self.makeFolderSplit(entries: loaded))
+            return (loaded, Self.makeFolderSplit(entries: loaded, order: order))
         }.value
+        guard gen == refreshGen else { return }   // 期间有更新的刷新 → 丢弃本次
         entries = loaded
         folderGroups = split.folders
         ungroupedEntries = split.ungrouped
@@ -615,10 +674,14 @@ struct MemoriesView: View {
     /// 得重读 _folders/。
     private func refreshFolderSplit() {
         guard scope == .events else { return }
+        refreshGen += 1
+        let gen = refreshGen
         let snapshot = entries
+        let order = currentSortOrder
         Task.detached(priority: .userInitiated) {
-            let split = Self.makeFolderSplit(entries: snapshot)
+            let split = Self.makeFolderSplit(entries: snapshot, order: order)
             await MainActor.run {
+                guard gen == refreshGen else { return }   // 期间有更新的刷新 → 丢弃
                 folderGroups = split.folders
                 ungroupedEntries = split.ungrouped
             }
@@ -629,7 +692,7 @@ struct MemoriesView: View {
 
     /// Walks the appropriate root (events/ or portrait/<cat>/) for the
     /// current scope. Off the main actor.
-    nonisolated private static func scan(scope: MemoryScope, halfLifeDays: Double) -> [Entry] {
+    nonisolated private static func scan(scope: MemoryScope, halfLifeDays: Double, order: MemorySortOrder) -> [Entry] {
         let fm = FileManager.default
         let root: URL
         switch scope {
@@ -674,8 +737,7 @@ struct MemoriesView: View {
                 currentWeight: cw
             ))
         }
-        out.sort { $0.currentWeight > $1.currentWeight }
-        return out
+        return Self.sortedByConfig(out, order: order)
     }
 
     nonisolated private static func extractTitle(from body: String) -> String? {

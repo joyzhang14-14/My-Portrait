@@ -333,6 +333,9 @@ struct DisplayConfig: Codable, Equatable {
     var customDockIcon:          String = ""
     var customTrayIcon:          String = ""
     var showInMenuBar:           Bool   = true
+    /// Memories 列表排序规则:weight(默认)/ created / last_occurred。
+    /// 文件夹分组内的 event 也跟随。值取自 MemorySortOrder.rawValue。
+    var memorySortOrder:         String = "weight"
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -345,6 +348,7 @@ struct DisplayConfig: Codable, Equatable {
         case customDockIcon           = "custom_dock_icon"
         case customTrayIcon           = "custom_tray_icon"
         case showInMenuBar            = "show_in_menu_bar"
+        case memorySortOrder          = "memory_sort_order"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -358,6 +362,7 @@ struct DisplayConfig: Codable, Equatable {
         customDockIcon          = c.dflt(String.self, .customDockIcon, customDockIcon)
         customTrayIcon          = c.dflt(String.self, .customTrayIcon, customTrayIcon)
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
+        memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
     }
 }
 

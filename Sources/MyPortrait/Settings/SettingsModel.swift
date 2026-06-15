@@ -114,6 +114,20 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
+/// Memories 列表(含 folder 内 event)的排序规则。folder 分组内的词条
+/// 也跟随这个规则,不再钉死 weight。
+enum MemorySortOrder: String, CaseIterable, Identifiable {
+    case weight, created, lastOccurred
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .weight:       return "Weight"
+        case .created:      return "Created"
+        case .lastOccurred: return "Last occurrence"
+        }
+    }
+}
+
 enum AudioEngine: String, CaseIterable, Identifiable {
     case disabled, whisper, qwen, deepgram, custom
     var id: String { rawValue }
