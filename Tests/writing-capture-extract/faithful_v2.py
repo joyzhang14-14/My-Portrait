@@ -203,7 +203,7 @@ DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
 PROOF = {}  # (evid, text) -> 模型重建的尾巴 —— 凡模型参与选字的尾巴,Phase1.5 强制 OCR 校对(的/得、哟/用一族)
 PENDING = {}  # day -> [(app, text, src, evid, t0, 审核理由, OCR片段)] —— 未定区:审核未过,展示不入册(审核而非丢弃)
-REVIEW_MODE = os.environ.get('REVIEW_MODE', 'llm')  # llm=referee复查 / det=确定性对证器(用户提议,对照实验)
+REVIEW_MODE = os.environ.get('REVIEW_MODE', 'det')  # det=确定性OCR对证(2026-06-14用户裁定默认,明显优于llm) / llm=referee复查(已退役,可env切回对照)
 LEDGER_MODE = os.environ.get('LEDGER_MODE', 'narrow')  # 2026-06-12 用户裁定开窄账本(之类的案:零AX痕迹纯击键消息):
 # narrow=窄射程(双回车包夹+选字数字+无脏退格+秒发≤10s)+入册唯一通道渲染确证,确证不过进丢弃审计不刷未定区;
 # off=2026-06-10 A裁定(全量账本~50%垃圾已废除);gated/raw 留档可切。
