@@ -518,15 +518,6 @@ for day in DAYS:
         is_ledger = src_.startswith("keystroke_recovered")
         if LEDGER_MODE == 'raw':                           # raw=旧行为:无审核环(审查修:原先未实现)
             out3.append(rec); continue
-        # 同音字 OCR 字形仲裁(类1,2026-06-15 用户标注 #13 站→占):det 的 verify_tail 靠击键拼音,
-        # 同拼音字(站/占都 zhan)分不出 → 漏纠;用 OCR 字形直接仲裁(前缀锚 + 拼音等价双闸 +
-        # pick_frames 切回帧,见 ocr3.ocr_homophone_fix)。在门控(559 把纯 AX 长记录直接放行)前
-        # 对所有 han 非账本记录跑一遍。只换同音位,改了记 C3FIX 可追溯。
-        if REVIEW_MODE == 'det' and not is_ledger and R.has_han(t):
-            hf = C3.ocr_homophone_fix(a, u, t, t1 or t0 or 0)
-            if hf and cv(hf) != cv(t):
-                c3fix.append((a, t, cv(hf), "同音OCR仲裁", evid, t0))
-                t = cv(hf); rec = (a, t, kc2, evid, t0, t1, src_, b)
         # 账本路(诊断修):referee PASS 对账本是循环论证(记录由击键生成,"击键支撑"恒真)→退出;
         # ① 拼音空间查重(肯/啃同音双胞胎,子串在汉字空间失配)+ 时间窗±10s
         # ② 入册唯一通道 = 确定性渲染全文命中(60s→300s 宽窗);锚不上 → 未定区展示(审核而非丢弃)
