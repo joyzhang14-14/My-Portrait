@@ -53,12 +53,18 @@ GOLD = [
     ("B11 VALIS全文唯一", ["VALIS_BEATOVEN_API_KEY= 我没在env里面找到"], ["\n> 找到，这个需要我自己填是吗\n"]),
     # 2026-06-12 v20 用户标注:剥离命中后endv残影(存量+真身合成)与真身重复
     ("B12 怎么写比较好唯一", ["这个我怎么写比较好"], ["Were you encouraged to use generative AI"]),
+    # 2026-06-14 用户查因批(REVIEW_MODE det 应把短碎片/微信@残片挡进未定区,不入成品):
+    # 这几条是 det/llm 复查路由的回归探针——det 跑应✓,llm 跑会✗(碎片涌进成品)。
+    ("B13 单@提及残片不入成品", [], ["\n> @\n"]),
+    ("B14 短残渣/零回车碎片不入成品", [],
+     ["\n> 123\n", "\n> Z\n", "\n> J\n", "\n> My-Meeting\n", "\n> clean up boddy\n"]),
 ]
 # 全文档级隐私 ban(不只成品段:未定区/审计也不许出现)。
 # 邮箱/掩码=PII,任意位置 ban;URL 行级 ban(整条URL草稿才算——正文含链接是合法内容,
 # ev1158'审核区http://localhost:5173/…'真消息实证,2026-06-12)
 DOC_BAN = ["zzhang@students", "k12.nc.us", "●●●●●●", "joyzhang_14@163",
-           "\n> localhost:5173", "\n> https://www.ikeyrent.com"]
+           "\n> localhost:5173", "\n> https://www.ikeyrent.com",
+           "\n> •••\n"]   # 2026-06-14 粘贴掩码密码(3圆点U+2022,is_mask数据层n=4漏网)
 
 def main(path):
     D = open(path).read()
