@@ -15,7 +15,7 @@ Ctrl-C 安全,重跑续。⚠️ 跑之前先跟用户确认。
 import argparse
 import sys
 
-import labdb, redact
+import labdb, redact, anchors
 from run_day import ensure_ingested, other_lab_running
 
 CLEAN_MODEL = "mlx-community/Qwen3-4B-4bit"
@@ -63,6 +63,11 @@ def main():
             dig, hits = redact.redact(f"{doing}\nkeywords: {kw}")
             if hits:
                 print(f"    [redact] #{s['id']} 掩码 {hits}")
+            # 确定性锚点采集:小模型抽象摘要会丢逐字锚点(commit/文件/ID),
+            # 正则从 OCR 直接采集**非敏感**技术锚点拼到尾部(在 redact 之后,不掩码锚点)
+            anc = anchors.harvest(s["ocr"])
+            if anc:
+                dig += "\nanchors: " + ", ".join(anc)
             labdb.set_digest(con, s["id"], dig)
             done += 1
             print(f"  ✓ #{s['id']} {s['app'][:20]:20s} → {doing[:60]}")
