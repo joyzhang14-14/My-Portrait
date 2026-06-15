@@ -36,6 +36,17 @@ struct DisplaySettingsView: View {
                 }
             }
 
+            SettingsCard(title: "Memory") {
+                SettingsRow("Memory sort order",
+                            description: "How entries in Memories are ordered — and the events inside each folder. Weight ranks by importance; Created and Last occurrence sort newest first.",
+                            icon: "arrow.up.arrow.down") {
+                    Picker("", selection: config.binding(\.display.memorySortOrder)) {
+                        ForEach(MemorySortOrder.allCases) { o in Text(o.label).tag(o.rawValue) }
+                    }
+                    .pickerStyle(.menu).labelsHidden().frame(width: 150)
+                }
+            }
+
             SettingsCard(title: "Window") {
                 SettingsRow("Keep app window on top",
                             description: "Keeps the My Portrait window above other apps. Handy for chatting on the side while you watch a video or read.",
