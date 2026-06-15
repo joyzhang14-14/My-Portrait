@@ -148,11 +148,15 @@ Distill what the user was actually DOING. Concrete rules:
   work; music is background. Do NOT say the user "used Spotify".
 - Generic UI labels are NOT user content, ignore them: "Public Playlist",
   "Liked Songs", "Untitled", "No Title", "New Tab".
-- Keep concrete signal: task/topic, key entities (project/file/person/site
-  names), content the user was reading or writing.
-- PRIVACY: describe the ACTIVITY TYPE, do NOT reproduce sensitive specifics —
-  no message bodies, passwords, API keys, emails, phone numbers, or personal
-  identifiers. Say "replied to a message" not the message text.
+- KEEP concrete technical anchors (high recall value, NOT sensitive): commit
+  hashes, file/function/class names, error strings, code identifiers, numeric
+  IDs (e.g. "chunk 3402"), line numbers, versions, and project/product names —
+  spell project/product names EXACTLY as written, never approximate or garble.
+- REDACT only genuinely sensitive specifics: OTHER people's real names, emails,
+  phone numbers, money amounts, passwords/API keys, postal addresses, and
+  message/chat body text. Describe the activity ("a WeChat transfer from a
+  contact", "replied to a message") WITHOUT the sensitive value — but always
+  record that the activity happened; never drop a whole interaction.
 
 Answer JSON:
 {{"doing": "<1-3 sentences, what the user did; '' if pure chrome/noise>",

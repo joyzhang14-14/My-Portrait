@@ -106,15 +106,24 @@ HARD RULES (violating any makes the whole output invalid):
   "session_ids", or in top-level "skipped".
 - "title": <=60 chars, describes what the user was DOING. NEVER "App — Window".
 - "summary": 2-4 sentences, third person ("the user"/"they"). Cite the concrete
-  topics/entities visible in the digests. The digests are already redacted —
-  do NOT invent specifics that aren't there; describe the activity faithfully.
+  topics/entities AND technical anchors visible in the digests (commit hashes,
+  file/function names, error strings, numeric IDs). The digests are already
+  redacted — do NOT invent specifics that aren't there; describe faithfully.
 - "type": "experience" (default) or "emotion" (only a clear emotional signal).
 - "tags": 3-6 lowercase keywords. "portrait_facets": [] unless a STABLE identity
   signal (each {{"facet": "<skills|habits|interests|social|background|\
 preferences|goals>", "value": "<short>"}}).
 - "session_ids": non-empty list of ids this event covers.
-- "join_existing": an "hN" handle from the list above if this event continues
-  that one; else null.
+- GRANULARITY: one event = ONE coherent accomplishment/topic, NOT a whole
+  project-day. If the user fixed bug A, then built feature B, then chatted —
+  that is THREE events, even in the same app/project. Prefer several focused
+  events over one mega-bucket; do NOT lump distinct accomplishments together.
+- Never bury a small but distinct activity (a brief social chat, a quick
+  purchase, a one-off lookup) inside a large coding event — give it its own
+  event so it stays visible.
+- "join_existing": an "hN" handle ONLY if this event continues the EXACT SAME
+  specific task as that one (same bug, same feature, same conversation). A
+  different bug/feature in the same project is a NEW event. When unsure, new.
 
 Answer ONLY this JSON:
 {{"events": [{{"title": "...", "summary": "...", "type": "experience",
