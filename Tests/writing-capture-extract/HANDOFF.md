@@ -414,7 +414,9 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
   实证:6/5 未定区 v20=**7 条** vs v21=**1 条**;123/Z/J/My-Meeting/clean up boddy 全从未定区涌进成品。
   苹果某些(ev1137,机器解的=machine_touched)两版都在未定区(referee 也拦),故 A18 仍✓。
 
-  ### ✅ det 重跑已验证(用户「可以重跑覆盖」,2026-06-14)
+  ### ✅ det 重跑已验证 —— **用户裁定:det 明显更好,定为 canonical / 当前最佳**(2026-06-14)
+  - **裁定**:`REVIEW_MODE=det` 版本明显优于 llm(用户「这版本明显更好」)。det = 复查正式口径,
+    所有后续全量跑一律 `REVIEW_MODE=det`(见「怎么跑」段);v21-det 归档文档 = 当前最佳基准。
   - `REVIEW_MODE=det` 重跑 6 天覆盖 v21(产物 `eval/v21_product.md`,归档同名 v21 文档已覆盖)。
     ⚠️首跑 det 命令因 **shell cwd 被重置**(redirect `eval/...` 找不到目录)EXIT=1 没跑成,第二次 cwd 已回正才成。
   - **Gold 41✓ 0🟡 0✗ 满分**(40 项 + P0):#1 记得✓(det verify_tail 从 OCR 帧捞回)/#3 单@✓(进未定区)/
@@ -464,6 +466,9 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 - 零硬编码语言知识(ime_schema);不用/tmp放文件;commit只add自己的文件(并行session);
 - AX全本地;Pass4 LLM禁用(8B乱咬实锤);.com副作用用户接受;切回帧窗=60s(拍照逻辑:typing_pause=500ms)
 - 传感器证据 > 用户记忆(可以试试=草稿、一次→一下,两次实证)
+- **复查模式 REVIEW_MODE=det(2026-06-14 裁定:det 明显更好)**:全量跑必带 `REVIEW_MODE=det`。
+  llm 会让无屏幕证据的短碎片/微信@残片/粘贴密码涌进成品,且丢确定性 OCR 对证(记得→基地不纠)。
+  ⚠️代码默认仍 `llm`(`faithful_v2:206`)没改,跑时务必显式带 det(或哪天改默认)。
 
 ## 怎么跑
 
@@ -473,8 +478,16 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 
 ```bash
 cd Tests/writing-capture-extract
-python3 faithful_v2.py          # 全量4天(14B Phase1≈30-60min,Pass4秒级),写 Obsidian/Pipeline成品-新pipeline-阶段0.md
+# ⚠️ 复查模式必须 REVIEW_MODE=det(用户 2026-06-14 裁定:det 明显优于 llm——
+#    llm 会让无屏幕证据的短碎片/微信@残片/粘贴密码涌进成品,且丢掉确定性 OCR 对证(记得→基地不纠))。
+# ⚠️ cwd 必须在本目录(脚本 import 本地模块 harness/rebuild/... + redirect 用相对 eval/);
+#    后台跑务必 redirect 用绝对路径,否则 cwd 漂移会 EXIT=1 静默没跑(2026-06-14 踩过)。
+REVIEW_MODE=det python3 faithful_v2.py    # 全量(14B Phase1≈30-60min);默认4天,PORTRAIT_DAYS 覆盖
+# 6 天集成跑(gmail案 v21 那版,canvas 合并源):
+# REVIEW_MODE=det PORTRAIT_DAYS=2026-05-27,2026-05-28,2026-05-29,2026-06-03,2026-06-04,2026-06-05 \
+#   PORTRAIT_CANVAS=<abs>/eval/canvas_merged_src.json PORTRAIT_OUT=<abs>/eval/v21_product.md python3 faithful_v2.py
 python3 ocr3.py                 # 口3七案例回归(H/I/yi x/te d/yo/k n/卖个惨)
+python3 compare_gold.py <产出路径>   # gold 40 项 + P0 隐私;det 跑应 41✓ 满分(含 B13/B14/密码 P0 探针)
 ```
 
-对照检查:用 `输出成品-改前的pipeline-修复标注版.md` 的标注逐条 grep 成品段(注意排除审计段引用的旧文本,只查 `### 🆕` 段)。
+对照检查:`compare_gold.py` 自动判分(gold 在脚本内);或用 `输出成品-改前的pipeline-修复标注版.md` 标注逐条 grep `### 🆕` 段(排除审计段引用的旧文本)。
