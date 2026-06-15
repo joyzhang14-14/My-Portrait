@@ -385,18 +385,39 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 - **运行**:`PORTRAIT_DAYS`=6 天 + `PORTRAIT_CANVAS=eval/canvas_merged_src.json`(复现上次 6 天跑,唯一 delta=本修复);
   14B disambig 427 次,~30min;产物 `eval/v21_product.md`(gitignore),归档 = `Pipeline成品归档/v21-双return英文修复(gmail案,6天集成,det).md`。
 - **结果**:**gmail 翻绿**(6/5 第25条 ev1132「g mai l」→「gmail」,`[ax_cleaned]`);**Gold 38✓ 0🟡 1✗**,
-  唯一 ✗=A1「记得」(ev522 在 **5/27** 非 5/29!简拼 ji d 本轮 14B 解成「基地」,口3 未找回)——
-  **与 gmail 修复无关铁证**:ev522 是 `[ax_cleaned]` 非 ~residue,不进改的分支;且与上次 6 天跑一致(A1 一贯 14B 简拼方差)。
-- **零副作用实证**:**6/3、6/4 与上次产出逐字一致**(两天 7 条 ~residue 英文 Lab/open/Yep/okay/ok/100/UC 全不变=no-op);
-  5/27/28/29/6/5 差异全为 ~draft/~residue 碎片的 14B run-to-run 方差。saved v20 真实分=38✓**1🟡**(B12 含「Were you encouraged」存量草稿),
-  v21 该条已剥离转 ✓——v21 相对 v20 是「A1 失/B12 得」的方差对冲,非 gmail 所致。
+  唯一 ✗=A1「记得」(ev522 在 **5/27** 非 5/29!)——**与 gmail 修复无关铁证**:ev522 是
+  `[ax_cleaned]` 非 ~residue,不进改的分支。⚠️**真因见下「查因」节,不是 14B 方差(我曾误判)**。
+- **零副作用实证(gmail 部分仍成立)**:**6/3、6/4 与上次产出逐字一致**(两天 7 条 ~residue 英文
+  Lab/open/Yep/okay/ok/100/UC 全不变=no-op)。gmail 改动确实零副作用。
 - 工具:`v21_compare.py`(解析 det 成品段+逐天 diff)/`assemble_v21.py`(组装归档文档),均已 commit。
   ⚠️工作流临时文件 `analyze_enzh*.py`×4 + `rime/cands_batch*` 仍待用户定夺清不清(无价值)。
 
-  ### ⏳ 下一步候选(无 failing case 不接,逐案风格)
-  - 多词/歧义双 return 英文(gmail 是单词无歧义=零 LLM;若出现多词需 librime+LLM 合并,框架已留)。
-  - input_source 判别接实验线(待重新 build 后攒够新采集数据;历史数据全 NULL 只能靠双 return)。
-  - A1「记得」治本:ev522 简拼 ji d 的 guard 拒 librime TOP 问题(历来靠口3 OCR 偶然找回,方差大)。
+## ⚠️ 2026-06-14 v21 三问题查因(用户逐条核出,**先不修先查因**)
+
+**统一真因:v21 用了默认 `REVIEW_MODE=llm`,v20 当时用 `REVIEW_MODE=det`**。两路在多处**确实有 diff**
+(HANDOFF 旧记「det=llm 零diff」对这些 case 不成立)。⚠️**代码 `faithful_v2.py:206` 默认仍是 `'llm'`,
+但 HANDOFF 终裁是「LLM 复查退役、det 为准」——默认值从没改成 det,我 v21 继承了过时默认**。
+⚠️**纠正**:我上一轮把 A1/碎片差异说成「14B run-to-run 方差」是**错的**,真因是 REVIEW_MODE(确定性可复现)。
+
+- **#1「记得→基地」= REVIEW_MODE**:`cands('jid')` TOP=「基地」(确定性,记得排2);ev522 窗口 OCR 帧
+  **有「记得」**(`M 55 明天 记得 吴承申…`×4 帧)。det 路 `verify_tail`(`line 576/599`,零14B)从帧捞回「记得」替换;
+  llm 路 referee 判「基地」可信留下。**det 跑就确定性回「记得」**,不靠运气。
+- **#2 密码「•••」= 独立 bug(非 REVIEW_MODE)**:ev603 `edit_log=[{kind:paste,text:"•••"}]`,**击键 0=粘贴**;
+  AX 抓掩码渲染就 3 个圆点(U+2022×3,"只有3字符"因为它是粘贴、AX 看不到真长度)。掩码闸 `is_mask(t,n=4)`
+  要 ≥4 才滤 → 3 个**差一个漏网**。修复方向:阈值降 3 / 纯粘贴掩码值一律滤 / 纯粘贴密码不入册。
+- **#3 单「@」= 微信@提及残片 + REVIEW_MODE**:ev704 击键`@ha`、ev706`@ta<BS><BS>`——打@唤微信提及弹窗
+  再打名字首字母筛人;人名由弹窗插入,AX 的 edit_log 只 commit 了「@」。det 路这俩进**未定区**(`line 574` 无帧短草稿);
+  llm 路 `line 559` 直接进成品。
+- **residue/短草稿碎片路由(用户「v20 更好」)= REVIEW_MODE**:残渣**标记逻辑两版完全一样**(标 ~residue/副本去重
+  /gmail 改动都不碰 123/Z/J——字母<2 直接跳)。差的是复查路由:纯 AX 短草稿(`end_value` 直接是 123/Z/J/My-Meeting,
+  非 machine_touched)→ **det 进未定区(`line 558` screen_only 只在 det 成立),llm 进成品**。
+  实证:6/5 未定区 v20=**7 条** vs v21=**1 条**;123/Z/J/My-Meeting/clean up boddy 全从未定区涌进成品。
+  苹果某些(ev1137,机器解的=machine_touched)两版都在未定区(referee 也拦),故 A18 仍✓。
+
+  ### ⏳ 修复方向(待用户定,本轮未动代码)
+  1. **`REVIEW_MODE` 默认改 `det`**(根治 #1/#3/碎片路由,符合「LLM 复查退役」终裁);或先 `REVIEW_MODE=det` 重跑 v21 验证。
+  2. **#2 掩码**:阈值 4→3 或纯粘贴掩码值一律滤(独立 bug,det 也未必拦)。
+  3. 远期:多词/歧义双 return 英文(框架已留)/ input_source 判别接实验线(待新采集数据)。
 
 - **Occasion 坏窗结案(用户问"为什么没被记录")**:它在 docx 里也在 gold 里——不是缺录,
   是**题头 -92min 被用户改过措辞**,我们留的是旧版;时间窗对它原理性无解(旧题头-92min改,
