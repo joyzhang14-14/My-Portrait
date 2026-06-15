@@ -281,19 +281,44 @@ struct MemoriesView: View {
     /// 按指定规则排序。weight 倒序 / created 新→旧 / 最新 occurrence 新→旧。
     /// 主列表与 folder 内 event 共用,口径一致。order 由 MainActor 调用方读
     /// config 传入(nonisolated 不能直接碰 ConfigStore.shared)。
+    ///
+    /// ⚠️ created / lastOccurred 的主键是**天级**(event 的 created / occurrence
+    /// 都截断到 UTC 当天),同一天会有大量并列。次级键用 member frame id(采集帧
+    /// 自增主键,递增≈真实时间)细分当天内时序:created 用最早一帧(起始时刻)、
+    /// lastOccurred 用最后一帧(最后活动)。无 frame(distill 出的 portrait)退
+    /// weight,再退文件名 —— 保证严格弱序 + 刷新不抖。
     nonisolated private static func sortedByConfig(_ entries: [Entry], order: MemorySortOrder) -> [Entry] {
         switch order {
         case .weight:
-            return entries.sorted { $0.currentWeight > $1.currentWeight }
-        case .created:
-            return entries.sorted { $0.file.created > $1.file.created }
-        case .lastOccurred:
-            // lastOccurrence 可能 nil(无 occurrence)→ 退回 created 当锚点,
-            // 保证全序稳定不丢条。
             return entries.sorted {
-                ($0.file.lastOccurrence ?? $0.file.created) > ($1.file.lastOccurrence ?? $1.file.created)
+                if $0.currentWeight != $1.currentWeight { return $0.currentWeight > $1.currentWeight }
+                return $0.id.path > $1.id.path   // 全序兜底,同 weight 刷新不抖
+            }
+        case .created:
+            return entries.sorted { a, b in
+                if a.file.created != b.file.created { return a.file.created > b.file.created }
+                return intraDayBefore(a, b, useEnd: false)
+            }
+        case .lastOccurred:
+            return entries.sorted { a, b in
+                // lastOccurrence 可能 nil → 退回 created 当锚点。
+                let la = a.file.lastOccurrence ?? a.file.created
+                let lb = b.file.lastOccurrence ?? b.file.created
+                if la != lb { return la > lb }
+                return intraDayBefore(a, b, useEnd: true)
             }
         }
+    }
+
+    /// 同一天(主键并列)内的细分:event 当天真实时刻(member frame id 递增≈时间)
+    /// 降序 —— useEnd=false 用最早帧(起始),true 用最后帧(最后活动)。无 frame
+    /// 退 weight,再退文件名,保证严格弱序 + 刷新确定。
+    nonisolated private static func intraDayBefore(_ a: Entry, _ b: Entry, useEnd: Bool) -> Bool {
+        let ta = useEnd ? a.file.memberFrameIds.max() : a.file.memberFrameIds.min()
+        let tb = useEnd ? b.file.memberFrameIds.max() : b.file.memberFrameIds.min()
+        if let ta, let tb, ta != tb { return ta > tb }
+        if a.currentWeight != b.currentWeight { return a.currentWeight > b.currentWeight }
+        return a.id.path > b.id.path
     }
 
     /// 把 entries 拆成 (folders, ungrouped)。Entry.id 是 URL,得换算
