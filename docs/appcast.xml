@@ -12,6 +12,24 @@
         -->
 
         <item>
+            <title>1.2.155</title>
+            <pubDate>Mon, 15 Jun 2026 05:09:10 +0000</pubDate>
+            <sparkle:version>173</sparkle:version>
+            <sparkle:shortVersionString>1.2.155</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Features</h3>
+                <ul>
+                    <li><strong>Sort your memories</strong> — A new <strong>Memory sort order</strong> option in Settings → Display lets you order the Memories list by weight (importance, the default), creation date, or last occurrence. The events inside each folder follow the same order, and entries from the same day are sub-ordered by when they actually happened.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.155/MyPortrait_1.2.155_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="MooKGROok0gWaIHlaS5jK8avwYbB8mGcvOHDgHeap46SpAwigA2A63442ktKg71a0yhcMTyZqT6lS782LmKHBw==" length="26483592" />
+        </item>
+
+        <item>
             <title>1.2.154</title>
             <pubDate>Sat, 13 Jun 2026 19:08:28 +0000</pubDate>
             <sparkle:version>172</sparkle:version>
