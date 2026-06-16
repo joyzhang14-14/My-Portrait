@@ -68,8 +68,9 @@ def _decrypt_secret(secret_key):
 
 # ---------------- chatgpt:Pi agent 一次性 ----------------
 
-def _pi_oneshot(messages, model, timeout):
+def _pi_oneshot(messages, model, timeout, thinking=None):
     """app 同款 Pi agent,非交互一次性。OAuth 走 ~/.pi/agent/auth.json。
+    thinking:off/minimal/low/medium/high,轻判定用低档大幅减 reasoning 延迟。
     返回 (assistant 文本, 延迟ms)。"""
     if not PI_AUTH.exists():
         raise RuntimeError("缺 ~/.pi/agent/auth.json(Codex OAuth)。先在 app 里跑一次 "
@@ -82,6 +83,8 @@ def _pi_oneshot(messages, model, timeout):
     args = [bun, str(PI_CLI), "-p", "--mode", "text", "--no-tools", "--no-session",
             "--no-extensions", "--no-skills", "--provider", "openai-codex",
             "--model", model, "--system-prompt", sys_msg]
+    if thinking:
+        args += ["--thinking", thinking]
     t0 = time.time()
     cp = subprocess.run(args, input=user_msg, capture_output=True, text=True,
                         timeout=timeout)
@@ -128,13 +131,13 @@ def _http_chat(provider, base, key, messages, model, max_tokens, temperature, ti
 
 
 def cloud_call(messages, *, model=None, max_tokens=4096, temperature=0.2,
-               timeout=240):
+               timeout=240, thinking=None):
     """一次云端调用。返回 (文本, 延迟ms)。provider/model 默认走 config,按 provider 派发。"""
     cfg = load_config()
     provider = cfg["provider"]
     model = model or cfg["model"]
     if provider == "chatgpt":
-        return _pi_oneshot(messages, model, timeout)
+        return _pi_oneshot(messages, model, timeout, thinking=thinking)
     base, key = _resolve(provider)
     return _http_chat(provider, base, key, messages, model, max_tokens,
                       temperature, timeout)

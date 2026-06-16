@@ -84,8 +84,8 @@ def main():
     if not rows:
         print(f"{args.day}: 无待打分事件(全部已有 impact 或无事件)。")
         return
-    print(f"[impact] {args.day}: {len(rows)} 事件待打分 · provider="
-          f"{cloud.load_config()['provider']}")
+    engine.load()   # Codex 限流时切本地:impact 打分只看事件摘要(已脱敏元数据)
+    print(f"[impact] {args.day}: {len(rows)} 事件待打分 · 本地 {engine.DEFAULT_MODEL}")
 
     occ_of = {}
     done = 0
@@ -98,10 +98,9 @@ def main():
         msgs = [{"role": "system", "content": "You are a strict importance scorer. "
                  "Answer with ONE JSON array only."},
                 {"role": "user", "content": RUBRIC + "\n\nEVENTS:\n" + "\n".join(cards)}]
-        pc = sum(len(m["content"]) for m in msgs)
         try:
-            raw, lat = cloud.cloud_call(msgs, max_tokens=2000)
-            arr = engine.parse_json(raw, "array")
+            arr = engine.call(con, args.day, "impact", msgs, expect="array",
+                              max_tokens=2500)
         except Exception as ex:                            # noqa: BLE001
             print(f"  ✗ 批 {i//args.batch} ERROR {ex}")
             continue
@@ -119,11 +118,7 @@ def main():
                             (imp, imp, (x.get("evidence") or "")[:300], round(w, 4),
                              e["id"]))
                 done += 1
-            con.execute("INSERT INTO llm_calls(ts_ms,day,purpose,session_id,prompt_chars,"
-                        "output,ok,latency_ms) VALUES(?,?,?,?,?,?,?,?)",
-                        (labdb.now_ms(), args.day, "impact", None, pc,
-                         (raw or "")[:2000], 1, lat))
-        print(f"  ✓ 批 {i//args.batch}: {len(chunk)} 事件打分 · {lat}ms")
+        print(f"  ✓ 批 {i//args.batch}: {len(chunk)} 事件打分")
 
     # 打分分布概览
     dist = con.execute("SELECT CASE WHEN impact<2 THEN '0-2' WHEN impact<3 THEN '2-3' "

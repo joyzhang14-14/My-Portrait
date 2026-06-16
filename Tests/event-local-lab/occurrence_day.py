@@ -80,10 +80,11 @@ def main():
     by_rel = {h["rel"]: h for h in hist}
     hist_tok = [(h["rel"], retrieve.hist_tokens(h)) for h in hist]
     idf = retrieve.build_idf([t for _, t in hist_tok]) if hist_tok else {}
-    cfg = cloud.load_config()
-    light = cfg["model_light"]   # 续接判定是轻任务,用 light model(生产同此口径,快得多)
+    # 续接判定是轻任务,只看事件标题/摘要(已脱敏元数据,不碰原始 OCR)。
+    # Codex 重度限流时切本地模型跑:GPU 空闲、无限流、~2s/次。
+    engine.load()
     print(f"[occurrence] {args.day}: 历史事件 {len(hist)} 个(前 {args.window} 天,只读)"
-          f" · provider={cfg['provider']} · model={light}(light)")
+          f" · 本地 {engine.DEFAULT_MODEL}")
 
     rows = con.execute("SELECT * FROM hybrid_events WHERE day=?"
                        + ("" if args.force else " AND occurrences IS NULL")
@@ -113,10 +114,8 @@ def main():
         chunk = items[i:i + args.evbatch]
         msgs = _batch_prompt(args.day, chunk, by_rel)
         try:
-            raw, lat = cloud.cloud_call(msgs, model=light, max_tokens=300, timeout=180)
-            out = engine.parse_json(raw, "object")
-            labdb.log_call(con, args.day, "occurrence", None,
-                           sum(len(m["content"]) for m in msgs), raw, True, lat)
+            out = engine.call(con, args.day, "occurrence", msgs, expect="object",
+                              max_tokens=400)
         except Exception as ex:                            # noqa: BLE001
             print(f"  ✗ 批 {i//args.evbatch} {ex} → 本批全当天独立")
             for e, _t in chunk:
@@ -134,7 +133,7 @@ def main():
                 print(f"    ✓ h{e['id']} {e['title'][:34]} → {ref} (occ {len(occ)}天)")
             else:
                 write(e, [args.day])
-        print(f"  批 {i//args.evbatch}: {len(chunk)} 事件 · {lat}ms")
+        print(f"  批 {i//args.evbatch}: {len(chunk)} 事件")
 
     print(f"[done] 跨天续接 {merged} · 当天独立 {solo + len(items) - merged} · 共 {len(rows)}")
 
