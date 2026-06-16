@@ -112,10 +112,6 @@ struct MemorySettingsView: View {
                 switch tab {
                 case .parameter:
                     providerSection
-                    budgetSection
-                    decaySection
-                    archiveSection
-                    distillationSection
                 case .scheduler:
                     schedulerSection
                     runNowSection
@@ -447,7 +443,7 @@ struct MemorySettingsView: View {
     private var headerBlurb: String {
         switch tab {
         case .parameter:
-            return "Tune how the memory system weighs, consolidates, and forgets events. Changes write to `~/.portrait/config.toml` (debounced)."
+            return "Choose the AI provider and models used by the memory pipeline."
         case .scheduler:
             return "Configure when the event and portrait pipelines run, and review days that need attention."
         case .changelog:
