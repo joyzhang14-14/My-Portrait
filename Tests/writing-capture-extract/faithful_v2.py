@@ -479,8 +479,11 @@ for day in DAYS:
                     drops.append(("账本-解码蒸发", a, s[:60], None, st0, st1, "guard回退/解码过短"))
                 continue
             # 消费判定(空格+标点归一,诊断:半角','vs全角'，'天然失配):文本被某记录包含 且 时间窗±3s → 已消费
+            # 发送清空(ChatGPT等网页)的AX记录时间戳在发送那刻,打字早它几十秒 → 长段(≥6字,
+            # 巧合被包含几无可能)起点回看放宽到60s,接住被它涵盖的击键碎片免重复(2026-06-16 hermes案)
             ftn = norm_t(ft)
-            consumed = any(ftn in norm_t(rt) and st0 >= (rt0 or 0) - 3000 and st1 <= (rt1 or 0) + 3000
+            back = 60000 if len(ftn) >= 6 else 3000
+            consumed = any(ftn in norm_t(rt) and st0 >= (rt0 or 0) - back and st1 <= (rt1 or 0) + 3000
                            for rt, rt0, rt1 in recs_b)
             if consumed: continue
             if X.is_ph(ft) or is_residue(ft) or ft in seen:

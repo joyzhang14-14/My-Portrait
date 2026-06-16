@@ -396,14 +396,20 @@ def event_sends_with_ts(ev, X, group_cs=None):
             out.append((t, prev_ts, ts, True)); prev_ts = ts
         elif k == 'delete':
             if len(t) < 2 or t in ph or t in X.RUNPH or X.is_ph(t): continue
-            if not (isMark(i - 1) or isMark(i + 1)): continue
+            # 发送清空(ChatGPT等网页:打字时AX没建任何typing_event,只在发送清空记一个光杆delete,
+            # text=完整消息+\n,end_value空)。delete原文以\n结尾(发送含回车)+附近击键有回车(sent)+
+            # 框已清空 → 真发送,即便无占位符标记/无commit背书也认(2026-06-16 ChatGPT ev734案);
+            # 草稿select-all-delete无\n、无回车,天然排除
+            send_clear = ((e.get('text', '') or '').endswith('\n') and sent(ts)
+                          and X.emptyZW(ev['endv']))
+            if not (isMark(i - 1) or isMark(i + 1) or send_clear): continue
             pv = paste_verdict(t)
             if pv is False:                              # 大粘贴:剥离粘贴段,手打需求留
                 if not sent(ts): continue
                 rem = strip_pastes(t)
                 if rem: out.append((rem, prev_ts, ts, True)); prev_ts = ts
                 continue
-            if pv is None and X.cover(t, group_cs or cs) < 0.5: continue   # 手打铁律兜底(组级流取证,见 docstring)
+            if pv is None and X.cover(t, group_cs or cs) < 0.5 and not send_clear: continue   # 手打铁律兜底(send_clear豁免:网页打字没进commit流)
             if not sent(ts): continue                    # 回车检测:无回车=IME改写删除/草稿,不是发送
             out.append((t, prev_ts, ts, True)); prev_ts = ts
     endv = X.cv(ev['endv'])
