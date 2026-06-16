@@ -300,7 +300,7 @@ private struct PermissionsStep: View {
                 permRow(
                     icon: "externaldrive",
                     title: "Full Disk Access",
-                    why: "Required so we can read your Screenpipe history (if you use it). macOS won't ever let an app auto-prompt for this — you'll have to add My Portrait in System Settings manually.",
+                    why: "Import data from Claude Code CLI, Codex CLI and Screenpipe.",
                     status: mapAppKit(monitor.fullDiskAccess),
                     action: nil,
                     openSettings: { monitor.openSettings(for: .fullDisk) }
