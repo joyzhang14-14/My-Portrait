@@ -579,8 +579,9 @@ struct AudioConfig: Codable, Equatable {
     var pauseOnMusicApp:         Bool     = false
     /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
     var transcribeOnACOnly:      Bool     = true
-    /// 转录有积压且在 AC 供电时,阻止系统空闲睡眠,把积压跑完再放行睡眠
-    /// (只挡空闲睡眠,合盖睡眠挡不住——那是 macOS 强制行为)。默认关。
+    /// 转录有积压且在 AC 供电时,阻止系统空闲睡眠,把积压全速跑完再放行睡眠
+    /// (只挡空闲睡眠;合盖走独立路径这条断言挡不住,但合盖后任务仍会在
+    /// DarkWake 窗口里继续推进,只是变慢)。默认关。
     var keepAwakeWhileTranscribing: Bool  = false
     var customVocabulary:        [String] = []
     /// 用户**锁定**的输入设备 UID (CoreAudio kAudioDevicePropertyDeviceUID)。

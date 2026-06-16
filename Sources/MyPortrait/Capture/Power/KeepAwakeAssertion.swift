@@ -4,9 +4,14 @@ import os.log
 
 /// 阻止系统**空闲睡眠**(idle sleep)的 IOPMAssertion 封装。
 ///
-/// 只挡空闲睡眠 —— 合盖(clamshell)睡眠和手动睡眠挡不住,那是 macOS 在系统/硬件层
-/// 强制的,公开 API 无法覆盖。所以这只能保证「插着电、盖子开着、有活干」时机器不会
-/// 自己打盹,把转录积压跑完再放行睡眠。
+/// 只挡空闲睡眠 —— 合盖(clamshell)和手动睡眠这条断言挡不住:合盖走 macOS 的
+/// IOPMrootDomain 独立路径,PreventUserIdleSystemSleep 类断言看不到它。它的作用是:
+/// 插着电、盖子开着、有活干时不让机器空闲打盹,把转录积压**全速**跑完再放行睡眠。
+///
+/// 别被「合盖即停」误导:实测 Apple Silicon + AC 下,合盖后机器进 Clamshell
+/// Sleep⇄DarkWake 循环,后台任务(零断言也行)仍会在 DarkWake 窗口里机会性继续推进,
+/// 只是被睡眠周期节流、明显变慢。要合盖还满速,得靠外接显示器进 clamshell 模式或
+/// `sudo pmset -c disablesleep`——不是这条断言能做的。
 ///
 /// 用法:`refresh(true)` 持有断言,`refresh(false)` 释放。幂等 —— 重复调同一状态
 /// 是 no-op。断言是进程级的,进程退出时系统自动回收(但我们仍在 scheduler stop()
