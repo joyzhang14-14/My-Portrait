@@ -793,6 +793,11 @@ struct IntegrationIcon: View {
         // bundleId / NSWorkspace 探不到时,不清就会一直显示上一个图(展开面
         // 板里选 Email 还看到 Spotify 的图标就是这个)。
         self.realIcon = nil
+        // 死规定:有 bundled asset 就强制用它,不再从 NSWorkspace 抓真 app icon。
+        // 取真 app icon 会随系统升级 / 应用换 icon 漂移,没装应用的用户体验割裂,
+        // 而且语义上 BYOK tile 跟桌面 app bundle 是两回事。bundleId 字段保留只
+        // 供 .localApp 探测(connectLocalApp 那条"装了没"判断)。
+        guard integration.assetName == nil else { return }
         let bid = integration.bundleId
         let img = await Task.detached(priority: .userInitiated) {
             AppIconLoader.icon(forBundleId: bid)
