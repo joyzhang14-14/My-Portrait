@@ -15,7 +15,7 @@ import Foundation
 /// support `keyEncodingStrategy`). Missing keys are tolerated via custom
 /// `init(from:)` that falls back to default-init values.
 struct MyPortraitConfig: Codable, Equatable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int   = currentSchemaVersion
     var display:       DisplayConfig       = .init()
@@ -142,7 +142,7 @@ struct MemoryConfig: Codable, Equatable {
     // Archiver — programmatic, no LLM. portrait 不持有 impact，归档只看
     // weight + days_idle（+ pin + protected-category 在代码里）。
     var archiveMaxWeight:      Double = 0.05
-    var archiveMinDaysIdle:    Int    = 90
+    var archiveMinDaysIdle:    Int    = 30
 
     // PortraitDistiller — weighted-merge evidence threshold. How many new
     // events must support a change before a settled portrait body is rewritten.
