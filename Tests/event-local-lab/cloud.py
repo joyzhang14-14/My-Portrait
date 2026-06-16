@@ -94,6 +94,24 @@ def _pi_oneshot(messages, model, timeout, thinking=None):
     return cp.stdout, lat
 
 
+# ---------------- Claude:claude CLI 一次性(走 ~/.claude 登录)----------------
+
+def _claude_cli(messages, model, timeout):
+    """Claude Code CLI 非交互一次性(haiku/sonnet/opus)。走 ~/.claude 登录,
+    与 Codex 不同账号/服务,不受其限流影响。返回 (文本, 延迟ms)。"""
+    claude = shutil.which("claude") or "claude"
+    sys_msg = next((m["content"] for m in messages if m["role"] == "system"), "")
+    user_msg = "\n\n".join(m["content"] for m in messages if m["role"] != "system")
+    args = [claude, "-p", "--model", model, "--append-system-prompt", sys_msg]
+    t0 = time.time()
+    cp = subprocess.run(args, input=user_msg, capture_output=True, text=True,
+                        timeout=timeout)
+    lat = int((time.time() - t0) * 1000)
+    if cp.returncode != 0:
+        raise RuntimeError(f"claude exit {cp.returncode}: {(cp.stderr or cp.stdout)[:300]}")
+    return cp.stdout, lat
+
+
 # ---------------- key 类:OpenAI 兼容 HTTP ----------------
 
 def _resolve(provider):
@@ -136,6 +154,9 @@ def cloud_call(messages, *, model=None, max_tokens=4096, temperature=0.2,
     cfg = load_config()
     provider = cfg["provider"]
     model = model or cfg["model"]
+    # model 以 claude 系开头 → 走 claude CLI(与配置 provider 无关,绕开 Codex 限流)
+    if model.split("-")[0] in ("haiku", "sonnet", "opus") or model.startswith("claude"):
+        return _claude_cli(messages, model, timeout)
     if provider == "chatgpt":
         return _pi_oneshot(messages, model, timeout, thinking=thinking)
     base, key = _resolve(provider)

@@ -67,6 +67,7 @@ def main():
     ap.add_argument("--window", type=int, default=90)
     ap.add_argument("--topk", type=int, default=5)
     ap.add_argument("--evbatch", type=int, default=8)
+    ap.add_argument("--model", default="haiku")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     con = labdb.connect()
@@ -81,10 +82,9 @@ def main():
     hist_tok = [(h["rel"], retrieve.hist_tokens(h)) for h in hist]
     idf = retrieve.build_idf([t for _, t in hist_tok]) if hist_tok else {}
     # 续接判定是轻任务,只看事件标题/摘要(已脱敏元数据,不碰原始 OCR)。
-    # Codex 重度限流时切本地模型跑:GPU 空闲、无限流、~2s/次。
-    engine.load()
+    # 用 Claude Haiku 云端(claude CLI,绕开 Codex 限流;比本地 14B 准、快)。
     print(f"[occurrence] {args.day}: 历史事件 {len(hist)} 个(前 {args.window} 天,只读)"
-          f" · 本地 {engine.DEFAULT_MODEL}")
+          f" · 云端 {args.model}")
 
     rows = con.execute("SELECT * FROM hybrid_events WHERE day=?"
                        + ("" if args.force else " AND occurrences IS NULL")
@@ -114,8 +114,11 @@ def main():
         chunk = items[i:i + args.evbatch]
         msgs = _batch_prompt(args.day, chunk, by_rel)
         try:
-            out = engine.call(con, args.day, "occurrence", msgs, expect="object",
-                              max_tokens=400)
+            raw, lat = cloud.cloud_call(msgs, model=args.model, max_tokens=400,
+                                        timeout=120)
+            out = engine.parse_json(raw, "object")
+            labdb.log_call(con, args.day, "occurrence", None,
+                           sum(len(m["content"]) for m in msgs), raw, True, lat)
         except Exception as ex:                            # noqa: BLE001
             print(f"  ✗ 批 {i//args.evbatch} {ex} → 本批全当天独立")
             for e, _t in chunk:
@@ -133,7 +136,7 @@ def main():
                 print(f"    ✓ h{e['id']} {e['title'][:34]} → {ref} (occ {len(occ)}天)")
             else:
                 write(e, [args.day])
-        print(f"  批 {i//args.evbatch}: {len(chunk)} 事件")
+        print(f"  批 {i//args.evbatch}: {len(chunk)} 事件 · {lat}ms")
 
     print(f"[done] 跨天续接 {merged} · 当天独立 {solo + len(items) - merged} · 共 {len(rows)}")
 
