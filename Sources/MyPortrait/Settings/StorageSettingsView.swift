@@ -11,6 +11,9 @@ struct StorageSettingsView: View {
     @State private var scanning = false
     @State private var lastScannedAt: Date? = nil
 
+    @State private var clearingCache = false
+    @State private var scanResults: ScanResults? = nil
+
     private var resolvedDataDir: String {
         if !config.current.storage.dataDirectory.isEmpty { return config.current.storage.dataDirectory }
         return NSString("~/.portrait").expandingTildeInPath
@@ -106,6 +109,8 @@ struct StorageSettingsView: View {
 
             waitForTranscriptionCard
 
+            clearCacheCard
+
             SettingsCard(
                 title: "Delete recent data",
                 footnote: "Permanently deletes everything captured in the chosen time range. This can't be undone."
@@ -154,6 +159,91 @@ struct StorageSettingsView: View {
                         icon: "text.bubble") {
                 Toggle("", isOn: config.binding(\.storage.waitForTranscription)).labelsHidden().toggleStyle(.switch)
             }
+        }
+    }
+
+    private var clearCacheCard: some View {
+        SettingsCard {
+            SettingsRow("Clear cache",
+                        description: "Remove temporary files left by chat attachments and the AI runtime.",
+                        icon: "trash") {
+                Button(scanResults == nil ? "Scan" : "Re-scan") {
+                    scanCache()
+                }
+                .font(.system(size: 12, weight: .medium))
+            }
+            if let r = scanResults {
+                SettingsDivider()
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(r.entries, id: \.path) { entry in
+                        HStack {
+                            Image(systemName: "doc")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                            Text(entry.displayPath)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.78))
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Text(entry.sizeLabel)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Delete all", role: .destructive) { runClearCache() }
+                            .font(.system(size: 12, weight: .medium))
+                            .disabled(clearingCache)
+                    }
+                    .padding(.top, 6)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+            }
+        }
+    }
+
+    // MARK: - Cache scan & clear (real filesystem)
+
+    private struct ScanResults {
+        struct Entry { let path: String; let displayPath: String; let bytes: Int64; let sizeLabel: String; let isDir: Bool }
+        let entries: [Entry]
+    }
+
+    /// Scan the known cache locations. Misses (file/dir doesn't exist) still
+    /// show with "—" so the user knows we looked.
+    private func scanCache() {
+        let targets: [(path: String, isDir: Bool)] = [
+            (AIPaths.supportDir.appendingPathComponent("attachments").path,         true),
+            (AIPaths.supportDir.appendingPathComponent("bun/install/cache").path,   true),
+        ]
+        let home = NSHomeDirectory()
+        let entries: [ScanResults.Entry] = targets.map { t in
+            let bytes = CacheScanner.size(at: t.path, isDir: t.isDir)
+            let display = t.path.hasPrefix(home) ? "~" + t.path.dropFirst(home.count) : t.path
+            return .init(
+                path: t.path,
+                displayPath: String(display),
+                bytes: bytes,
+                sizeLabel: CacheScanner.format(bytes),
+                isDir: t.isDir
+            )
+        }
+        scanResults = ScanResults(entries: entries)
+    }
+
+    /// Delete every scanned target. Files are removed outright; directories
+    /// are emptied but kept (so PiAgent / BunInstaller can still write into
+    /// them without recreating the dir).
+    private func runClearCache() {
+        guard let r = scanResults else { return }
+        clearingCache = true
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                for e in r.entries { CacheScanner.purge(path: e.path, isDir: e.isDir) }
+            }.value
+            clearingCache = false
+            scanCache()      // refresh, every row should now read 0 B / —
         }
     }
 
