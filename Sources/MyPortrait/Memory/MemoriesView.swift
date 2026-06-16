@@ -34,6 +34,13 @@ struct MemoriesView: View {
     @State private var refreshGen: Int = 0
     @State private var actionStatus: String = ""
     @State private var selected: Entry.ID?
+    /// 选中 portrait 条目「Derived from events」块解析出的可点击引用
+    /// （异步读盘填充；选中变更即清空，避免残留上一条目的 chip）。
+    @State private var derivedRefs: [DerivedRef] = []
+    /// 点 Derived chip 要跳转到的 event 相对路径（"yyyy-MM-dd/foo.md"）。切 scope
+    /// 到 .events 会清 selected，所以先存这，reload 后按 eventRelPath 匹配回 selected。
+    /// 存相对路径而非 URL：直接拿 entries 里真实的 Entry.id 比，绕开 URL 等值表示差异。
+    @State private var pendingEventRel: String? = nil
     @State private var confirmingDelete: Bool = false
     /// 标题模糊搜(case-insensitive)。空 = 不过滤。切 scope 时清空。
     @State private var searchText: String = ""
@@ -56,6 +63,14 @@ struct MemoriesView: View {
         let currentWeight: Double
     }
 
+    /// 一条「Derived from events」引用的解析结果 —— 渲染成可点击蓝色 chip。
+    struct DerivedRef: Identifiable {
+        let id: String     // 原始 [[id]] 相对路径（含 .md），导航 + 去重键
+        let date: String   // id 第一段 "yyyy-MM-dd"（非法则空）
+        let title: String  // event 人读标题（失效时空）
+        let exists: Bool   // 能读到真实 event .md → 可点击
+    }
+
     @ViewBuilder
     var body: some View {
         // .input scope 的数据源是 SQLite typing_events，不是 PortraitFile，
@@ -74,9 +89,19 @@ struct MemoriesView: View {
             }
             .background(SidebarBackdrop().ignoresSafeArea())
             .task(id: scope) {
-                selected = nil
                 searchText = ""
+                selected = nil
                 await reload()
+                // Derived chip 导航：reload 后 events 已加载，按相对路径匹配到真实
+                // Entry.id（绕开 URL 等值表示差异），detail 即显示该 event。
+                if let rel = pendingEventRel {
+                    pendingEventRel = nil
+                    selected = entries.first(where: { Self.eventRelPath(of: $0.id) == rel })?.id
+                }
+            }
+            // 选中条目变化 → 重新解析它的 Derived 引用为可点击 chip。
+            .task(id: selected) {
+                await loadDerivedRefs()
             }
             // 改 Display 的 Memory sort order → 就地重排已加载的列表(纯内存,
             // 不重新读盘),主列表与 folder 分组同时刷新。
@@ -390,7 +415,7 @@ struct MemoriesView: View {
                     // markdown 渲染:body 里 `**bold**` / `> quote` 这种标记
                     // 现在能正确显示。SwiftUI 原生 `Text(.init(...))` 走
                     // AttributedString 解析,够用且零依赖。
-                    markdownBody(entry.file.body)
+                    bodyWithDerived(entry)
                     if let notes = entry.file.editNotes, !notes.isEmpty {
                         Divider().background(Color.primary.opacity(0.10))
                         editNotesBlock(notes)
@@ -446,6 +471,141 @@ struct MemoriesView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    // MARK: - Derived events → clickable chips
+
+    /// 详情 body：prose 走原 markdownBody，末尾 `Derived from events` 块换成
+    /// 一排可点击蓝色 event chip。没有该块的老条目 → 整体照旧渲染。
+    @ViewBuilder
+    private func bodyWithDerived(_ entry: Entry) -> some View {
+        let split = Self.splitDerived(entry.file.body)
+        markdownBody(split.prose)
+        if !split.ids.isEmpty {
+            Divider().background(Color.primary.opacity(0.10))
+            derivedEventsBlock()
+        }
+    }
+
+    /// `Derived from events` 区：标题 + 流式排布的 chip。chip 内容来自异步解析的
+    /// derivedRefs（读盘期间可能短暂只有标题，毫秒级填充）。
+    @ViewBuilder
+    private func derivedEventsBlock() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DERIVED FROM EVENTS")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(0.6)
+                .foregroundStyle(.tertiary)
+            FlowLayout(spacing: 6) {
+                ForEach(derivedRefs) { ref in
+                    if ref.exists {
+                        Button { navigateToEvent(ref.id) } label: {
+                            derivedChip(ref)
+                        }
+                        .buttonStyle(.plain)
+                        .help(ref.id)
+                    } else {
+                        // 失效引用（已删 / 非 event 的 wr: 引用）：灰色纯文本，不可点。
+                        Text(ref.date.isEmpty ? ref.id : "\(ref.date)  \(ref.id)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 单个蓝色 event chip 的外观：日期 + 标题。
+    private func derivedChip(_ ref: DerivedRef) -> some View {
+        HStack(spacing: 5) {
+            if !ref.date.isEmpty {
+                Text(ref.date)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Theme.accent.opacity(0.75))
+            }
+            Text(ref.title.isEmpty ? ref.id : ref.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                .fill(Theme.accent.opacity(0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.25), lineWidth: 0.8)
+                )
+        )
+    }
+
+    /// 点 chip → 跳到对应 event。rel = "yyyy-MM-dd/foo.md"。切 scope 到 .events，
+    /// reload 后 `.task(id: scope)` 按 rel 匹配落到 selected，右侧 detail 显示该 event。
+    private func navigateToEvent(_ rel: String) {
+        if scope == .events {
+            // 防御：portrait detail 不会走这条；同 scope 时直接在已加载 entries 里选。
+            selected = entries.first(where: { Self.eventRelPath(of: $0.id) == rel })?.id
+        } else {
+            pendingEventRel = rel
+            scope = .events
+        }
+    }
+
+    /// 解析当前选中条目 body 的 Derived 引用 → derivedRefs（读盘在后台）。
+    /// 先清空避免残留上一条目；写回前 guard selected 未变，丢弃过期结果。
+    @MainActor
+    private func loadDerivedRefs() async {
+        derivedRefs = []
+        guard let id = selected,
+              let entry = entries.first(where: { $0.id == id }) else { return }
+        let ids = Self.splitDerived(entry.file.body).ids
+        guard !ids.isEmpty else { return }
+        let resolved = await Task.detached(priority: .userInitiated) {
+            ids.map { Self.resolveDerivedRef($0) }
+        }.value
+        guard selected == id else { return }   // 期间换了选中 → 丢弃
+        derivedRefs = resolved
+    }
+
+    /// 把 body 拆成 (prose, derivedIds)。只在 `**Derived from events:**` 处切断，
+    /// 不动 `# Title`（prose 渲染与原来完全一致）。没有标记 → (body, [])。
+    nonisolated private static func splitDerived(_ body: String) -> (prose: String, ids: [String]) {
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let marker = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("**Derived from events:**")
+        }) else { return (body, []) }
+        let prose = lines[..<marker].joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var ids: [String] = []
+        var seen = Set<String>()
+        for raw in lines[(marker + 1)...] {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("- [[") && line.hasSuffix("]]") else { continue }
+            let inner = String(line.dropFirst(4).dropLast(2))
+            // 去重：同一引用出现两次会让 ForEach 撞 id（DerivedRef.id = 这个串）。
+            if !inner.isEmpty, seen.insert(inner).inserted { ids.append(inner) }
+        }
+        return (prose, ids)
+    }
+
+    /// 单条 `[[id]]` → DerivedRef。能读到 event 文件即可点击；否则失效（灰文本）。
+    nonisolated private static func resolveDerivedRef(_ rawId: String) -> DerivedRef {
+        let url = URL(fileURLWithPath: Storage.eventsDir.path + "/" + rawId)
+        let date: String = {
+            let seg = rawId.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
+            return seg.count == 10 ? seg : ""
+        }()
+        if let file = try? PortraitFileIO.read(from: url) {
+            let title = file.eventTitle.isEmpty
+                ? (extractTitle(from: file.body) ?? url.deletingPathExtension().lastPathComponent)
+                : file.eventTitle
+            return DerivedRef(id: rawId, date: date, title: title, exists: true)
+        }
+        return DerivedRef(id: rawId, date: date, title: "", exists: false)
     }
 
     @ViewBuilder
