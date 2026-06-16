@@ -25,16 +25,27 @@ _SECRET_PREFIX = re.compile(
 # 裸长 hex/base64(≥32,疑似密钥/hash;但别误伤普通长单词 → 要求含数字+字母混合)
 _LONG_TOKEN = re.compile(r"\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])"
                          r"[A-Za-z0-9_-]{32,}\b")
+# referral / 邀请码:claude.ai/referral/CGzN8uyoKQ、invite/xxx、ref=xxx —— 可复用凭据
+_REFERRAL = re.compile(r"\b(?:referral|invite|ref)[/=]\s*[A-Za-z0-9_-]{6,}", re.I)
+# 货币金额:必须带货币标记(¥/$/元/RMB)或紧跟转账词才掩,避免误伤版本号(1.2.95)/
+# chunk-ID(chunk 3402)/impact 分数(2.3)等普通数字。保留"谁转了账"的人名+事件,
+# 只抹具体金额(对齐用户选的分级:中性事实留、敏感值掩)。
+_MONEY = re.compile(
+    r"(?:[¥$]|RMB|USD|US\$)\s?\d[\d,]*(?:\.\d{1,2})?"
+    r"|\d[\d,]*(?:\.\d{1,2})?\s*(?:元|人民币|美元|块钱?|RMB|USD)"
+    r"|(?:转账|已转账?|转了|收款|付款|红包)[^\d\n]{0,4}\d[\d,]*(?:\.\d{1,2})?", re.I)
 
-# 顺序有讲究:先掩码强模式(secret/card/id),再 email/phone,最后裸长 token
-# (避免裸 token 规则吃掉已掩码占位符里的内容 —— 占位符是 <xxx>,不匹配)
+# 顺序有讲究:先掩码强模式(secret/referral/card/id),再 email/phone/money,最后裸长
+# token(避免裸 token 规则吃掉已掩码占位符里的内容 —— 占位符是 <xxx>,不匹配)
 _RULES = [
     (_SECRET_PREFIX, "<secret>"),
+    (_REFERRAL, "<referral>"),
     (_IDCARD, "<id>"),
     (_CARD, "<card>"),
     (_EMAIL, "<email>"),
     (_PHONE_CN, "<phone>"),
     (_PHONE_US, "<phone>"),
+    (_MONEY, "<amount>"),
     (_LONG_TOKEN, "<token>"),
 ]
 

@@ -152,11 +152,16 @@ Distill what the user was actually DOING. Concrete rules:
   hashes, file/function/class names, error strings, code identifiers, numeric
   IDs (e.g. "chunk 3402"), line numbers, versions, and project/product names —
   spell project/product names EXACTLY as written, never approximate or garble.
-- REDACT only genuinely sensitive specifics: OTHER people's real names, emails,
-  phone numbers, money amounts, passwords/API keys, postal addresses, and
-  message/chat body text. Describe the activity ("a WeChat transfer from a
-  contact", "replied to a message") WITHOUT the sensitive value — but always
-  record that the activity happened; never drop a whole interaction.
+- For messaging / social apps (WeChat, Discord, Messages, …): record WHO the user
+  interacted with and WHAT happened, using the contact names AS THEY APPEAR on
+  screen (e.g. "received a money transfer from <contact>", "discussed the writing
+  pipeline with <contact> on Discord"). Never dismiss a real exchange as "too
+  small to note" or flatten it to "a personal conversation".
+- KEEP person names as written on screen. But never write these SENSITIVE
+  SPECIFICS — describe around them: exact money amounts, referral/invite codes,
+  passwords/API keys, emails, phone numbers, postal addresses, and verbatim
+  message bodies. So write "<contact> sent a transfer" (name yes, amount no),
+  "shared a referral link" (no code).
 
 Answer JSON:
 {{"doing": "<1-3 sentences, what the user did; '' if pure chrome/noise>",
