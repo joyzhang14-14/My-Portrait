@@ -80,8 +80,10 @@ def main():
     by_rel = {h["rel"]: h for h in hist}
     hist_tok = [(h["rel"], retrieve.hist_tokens(h)) for h in hist]
     idf = retrieve.build_idf([t for _, t in hist_tok]) if hist_tok else {}
+    cfg = cloud.load_config()
+    light = cfg["model_light"]   # 续接判定是轻任务,用 light model(生产同此口径,快得多)
     print(f"[occurrence] {args.day}: 历史事件 {len(hist)} 个(前 {args.window} 天,只读)"
-          f" · provider={cloud.load_config()['provider']}")
+          f" · provider={cfg['provider']} · model={light}(light)")
 
     rows = con.execute("SELECT * FROM hybrid_events WHERE day=?"
                        + ("" if args.force else " AND occurrences IS NULL")
@@ -111,7 +113,7 @@ def main():
         chunk = items[i:i + args.evbatch]
         msgs = _batch_prompt(args.day, chunk, by_rel)
         try:
-            raw, lat = cloud.cloud_call(msgs, max_tokens=300, timeout=180)
+            raw, lat = cloud.cloud_call(msgs, model=light, max_tokens=300, timeout=180)
             out = engine.parse_json(raw, "object")
             labdb.log_call(con, args.day, "occurrence", None,
                            sum(len(m["content"]) for m in msgs), raw, True, lat)
