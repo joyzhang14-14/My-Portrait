@@ -45,8 +45,8 @@ def main():
     xday = sum(1 for e in hev if g(e, "historical_ref"))
 
     L = [f"# hybrid 事件产出 · {day}", "",
-         "口径:本地清洗的**脱敏 digest** → Codex(gpt-5.4)全天分批聚类 + 下游 "
-         "impact 打分 + 跨天 occurrence(生产历史只读)。原始 OCR 未上云。", "",
+         "口径:本地清洗**脱敏 digest** → 云端聚类(gpt-5.4)+ 下游 impact 打分 / "
+         "跨天 occurrence(均 Claude Haiku,生产历史只读)。原始 OCR 未上云。", "",
          "## 三方对比", "",
          "| 方案 | 上云内容 | 事件数 | 覆盖 session |",
          "|---|---|---|---|",
