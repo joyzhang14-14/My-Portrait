@@ -49,6 +49,11 @@ struct MemoriesView: View {
     @State private var newFolderDraft: String = ""
     /// event 右键 "Delete" 确认。
     @State private var deletingEntry: Entry? = nil
+    /// 顶部 Create folder 按钮的 sheet 状态(跟上面 newFolderDraft 那条 event
+    /// 右键 New folder 路径分开 —— 这条是「空 folder 立刻可用」)。
+    @State private var creatingFolderSheet: Bool = false
+    @State private var creatingFolderName: String = ""
+    @State private var creatingFolderHex: String? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     struct Entry: Identifiable {
@@ -154,11 +159,22 @@ struct MemoriesView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
+                // Create folder 只在 events scope 有意义 —— 其他 scope
+                // (portrait / personalInfo / input) 没 folder 概念。
+                if case .events = scope {
+                    IconHoverButton(systemImage: "folder.badge.plus",
+                                    tooltip: "Create folder",
+                                    systemHelp: "Create a new empty folder") {
+                        creatingFolderName = ""
+                        creatingFolderHex = nil
+                        creatingFolderSheet = true
+                    }
+                }
+                IconHoverButton(systemImage: "arrow.clockwise",
+                                  tooltip: "Refresh",
+                                  systemHelp: "Reload from disk") {
                     Task { await reload() }
-                } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.bouncyIcon)
-                .help("Reload from disk")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 44)
@@ -249,6 +265,18 @@ struct MemoriesView: View {
             Button("Cancel", role: .cancel) { deletingEntry = nil }
         } message: {
             Text(deletingEntry.map { "“\($0.title)” will be permanently deleted from disk." } ?? "")
+        }
+        // 顶部 Create folder 按钮唤起的 sheet。Name + 颜色选择。空 folder
+        // 立刻可见,后续可右键 Move events into / 重命名 / 改色 / 删。
+        .sheet(isPresented: $creatingFolderSheet) {
+            NewFolderSheet(
+                name: $creatingFolderName,
+                hex: $creatingFolderHex,
+                onCancel: { creatingFolderSheet = false },
+                onCreate: {
+                    Task { await createEmptyFolder() }
+                }
+            )
         }
     }
 
@@ -828,6 +856,35 @@ struct MemoriesView: View {
         }
     }
 
+    /// 顶部 Create folder 按钮:建一个**空** folder(无 event),立刻可见。
+    /// 跟 `assignEventToNewFolder` 共享 slug 冲突解决 + reload + status 逻辑,
+    /// 只是不预塞 event。
+    @MainActor
+    private func createEmptyFolder() async {
+        let name = creatingFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var slug = EventFolderStore.makeSlug(from: name)
+        if EventFolderStore.load(slug: slug) != nil {
+            var n = 2
+            while EventFolderStore.load(slug: "\(slug)-\(n)") != nil { n += 1 }
+            slug = "\(slug)-\(n)"
+        }
+        do {
+            let f = EventFolder(slug: slug, name: name, description: "",
+                                events: [], createdAtMs: now, updatedAtMs: now,
+                                colorHex: creatingFolderHex)
+            try EventFolderStore.save(f)
+            await reload()
+            actionStatus = "Created folder: \(name)"
+        } catch {
+            actionStatus = "Create folder failed: \(error.localizedDescription)"
+        }
+        creatingFolderSheet = false
+        creatingFolderName = ""
+        creatingFolderHex = nil
+    }
+
     /// event 分到一个**新建** folder(名字 = 用户输入)。
     @MainActor
     private func assignEventToNewFolder(_ entry: Entry, name: String) async {
@@ -1304,5 +1361,142 @@ private struct EmptyHint: View {
         case .portrait:
             return "No portrait entries in this category yet."
         }
+    }
+}
+
+/// Refresh / icon-only Button + 即时 hover label。系统 .help() 要停留 ~2 秒,
+/// 跟 sidebar NavIconButton 同款做法:hover 时立刻在 button 下方浮一个小气泡 label,
+/// .help 留作 VoiceOver / 系统层 fallback。本地 struct 持有自己的 hover state
+/// 避免触发外层 MemoriesView body 重新 render。
+private struct IconHoverButton: View {
+    let systemImage: String
+    let tooltip: String
+    let systemHelp: String
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+        }
+        .buttonStyle(.bouncyIcon)
+        .help(systemHelp)
+        .onHover { hover = $0 }
+        .overlay(alignment: .bottom) {
+            if hover {
+                Text(tooltip)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.6))
+                    )
+                    .fixedSize()
+                    .offset(y: 22)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .zIndex(999)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: hover)
+    }
+}
+
+/// 顶部 Create folder 按钮唤起的 sheet。Name + 9 个预设色 + Default(随机 hash)。
+/// 颜色选项跟 FolderPalette.swatches 同源 —— 改色板这里自动跟随。
+private struct NewFolderSheet: View {
+    @Binding var name: String
+    @Binding var hex: String?
+    let onCancel: () -> Void
+    let onCreate: () -> Void
+
+    @FocusState private var nameFocused: Bool
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New folder")
+                .font(.system(size: 16, weight: .semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("e.g. My-Portrait", text: $name)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    )
+                    .focused($nameFocused)
+                    .onSubmit { if !trimmed.isEmpty { onCreate() } }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Color (optional)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                // 9 个预设色 swatch。不选 = nil = 按 name hash 出的默认色
+                //(跟 FolderPalette.defaultTint 一致,同名每次同色)。已选状态
+                // 再点一次同色 = 撤回回默认色。
+                FlowLayout(spacing: 8) {
+                    ForEach(FolderPalette.swatches, id: \.hex) { sw in
+                        if let c = FolderPalette.color(fromHex: sw.hex) {
+                            swatchDot(label: sw.name, color: c,
+                                      selected: hex == sw.hex) {
+                                hex = (hex == sw.hex) ? nil : sw.hex
+                            }
+                        }
+                    }
+                }
+                Text(hex == nil
+                     ? "No color picked — folder uses a color generated from its name."
+                     : "Tap the selected color again to clear.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { onCancel() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Create") { onCreate() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmed.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { nameFocused = true }
+    }
+
+    /// 一个圆点 swatch。selected 时加一圈 accent ring。
+    @ViewBuilder
+    private func swatchDot(label: String, color: Color, selected: Bool,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(color)
+                    .frame(width: 22, height: 22)
+                if selected {
+                    Circle()
+                        .strokeBorder(Theme.accent, lineWidth: 2)
+                        .frame(width: 28, height: 28)
+                }
+            }
+            .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.plain)
+        .help(label)
     }
 }
