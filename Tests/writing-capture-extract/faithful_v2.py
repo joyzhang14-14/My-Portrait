@@ -535,7 +535,9 @@ for day in DAYS:
         if nt == t:                                      # OCR 没修上 → 双向语境重试 14B
             ctx2 = f"app:{a}\n邻近消息:\n" + ctx_window(timeline[:i], t0 or 0, after=timeline[i + 1:])
             kw2 = R.keys_in_window(con, b, t0, t1)
-            nt, _ = R.reconstruct_message(t, kw2, context=ctx2, model_fn=disambig)
+            # eng_literals 与主 reconstruct(line 299)对称:防双向语境第二次过度解码(em→恶魔,2026-06-16)
+            nt, _ = R.reconstruct_message(t, kw2, context=ctx2, model_fn=disambig,
+                                          eng_literals=eng_literals_of(b, t0, t1))
             via = "口3-双向语境"
         if cv(nt) and nt != t:
             c3fix.append((a, t, nt, via, evid, t0))
