@@ -131,6 +131,15 @@ def double_return_literal(bundle, t0, t1, residue_text):
         if w.lower() == letters: return w
     return None
 
+def is_slash_command(t):
+    """Discord 斜杠命令(/play /s /stop + 自动补全 UI '/cmd … +N more')不是消息(v22,类5)。
+    只命中首段=/字母(命令形态);文件路径 /Users/… 首段含 / 分隔不 fullmatch,天然不中。"""
+    s = cv(t).lstrip()
+    if not s.startswith('/'): return False
+    head = (s.split() or [''])[0]
+    return bool(re.fullmatch(r'/[a-zA-Z]{1,20}', head)) and (
+        len(cv(s)) <= 30 or 'more' in s or '\n' in (t or '') or 'url' in s.lower())
+
 def kind_of(t): return "long_form" if len(t) >= 140 else "short_form"
 def rec_md(n, src, kind, app, text): return f"**{n}.** `[{src}/{kind}]` 📍 `{app}`\n\n> " + text.replace("\n", "\n> ") + "\n"
 
@@ -339,6 +348,8 @@ for day in DAYS:
             # 宽枚举掩码集+PUA范围;不用"无字母汉字"一刀切(会误杀(> -)颜文字;假名/谚文/
             # 阿拉伯文也不能当符号——语言判据一律用Unicode属性,不限死码点)
             drops.append(("密码掩码", app, "(内容已过滤)", evid, t0, t1, "掩码字符≥4(密码框)"))
+        elif is_slash_command(t):
+            drops.append(("slash命令", app, t, evid, t0, t1, "斜杠命令/补全UI(非消息)"))
         elif t in seen:
             drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
         else:
