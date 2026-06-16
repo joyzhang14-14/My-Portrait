@@ -47,24 +47,41 @@ def _batch_prompt(day, items, by_rel):
             for i, (rel, _s) in enumerate(top, 1))
         blocks.append(f"EVENT {e['id']}: {e['title']} — {e['summary'][:150]}\n"
                       f"  candidates:\n{cands}")
-    user = f"""Today is {day}. For EACH event below, decide whether it CONTINUES the
-SAME ongoing activity/project as ONE of ITS OWN listed past candidates — the same
-project/task/conversation carried across days, NOT merely a similar topic or app.
+    user = f"""Today is {day}. Each event below MIGHT continue an ongoing activity
+from a past day. Be SELECTIVE — MOST events are NEW, not continuations. Joining a
+past candidate adds ONE OCCURRENCE to a recurring activity, so a wrong join turns
+occurrences into noise.
+
+Join a candidate ONLY when this event genuinely IS the SAME thread carried across
+days:
+  • the same recurring routine, or
+  • the same specific multi-day task/SESSION — the same bug, the same feature, the
+    same document worked on again, or
+  • the same ongoing conversation with the same person about the same thing.
+
+A DIFFERENT episode of a similar activity is a NEW event — answer null:
+  • worked on the SAME project/repo but a DIFFERENT feature, bug, or file → NEW.
+  • chatted with the same person about a DIFFERENT topic → NEW.
+  • "debugged My-Portrait" today and "debugged My-Portrait" last week on unrelated
+    code are TWO events → NEW.
+Working on the same project again is NOT a continuation by itself. When unsure,
+answer null. Continuations are the exception, not the rule.
 
 {chr(10).join(blocks)}
 
 Answer ONLY one JSON object mapping each EVENT id to the matching candidate number,
-or null if none continues. Keys must be the EVENT ids shown above.
+or null if it is a NEW event. Keys must be the EVENT ids shown above.
 Example: {{"12": 2, "13": null}}"""
-    return [{"role": "system", "content": "You match today's events to their "
-             "cross-day ongoing-activity continuations. Answer ONE JSON object only."},
+    return [{"role": "system", "content": "You decide whether today's events continue "
+             "a SAME-thread cross-day activity. Be selective; default to NEW (null). "
+             "Answer ONE JSON object only."},
             {"role": "user", "content": user}]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", required=True)
-    ap.add_argument("--window", type=int, default=90)
+    ap.add_argument("--window", type=int, default=14)   # 对齐生产 Backfill activeWindowDays=14
     ap.add_argument("--topk", type=int, default=5)
     ap.add_argument("--evbatch", type=int, default=8)
     ap.add_argument("--model", default="haiku")
