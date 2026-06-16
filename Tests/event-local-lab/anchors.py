@@ -24,6 +24,27 @@ _SYMBOL = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Service|Worker|Agent|Manager|Model|
 
 _PATS = [_FILE, _HASH, _IDNUM, _VER, _SYMBOL]
 
+_HEX = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def _is_hash(tok: str) -> bool:
+    t = tok.lower()
+    return bool(_HEX.match(t)) and any(c.isalpha() for c in t) and any(c.isdigit() for c in t)
+
+
+def _twin_hashes(tokens):
+    """OCR 双胞胎 hash:同一 session 里同长、且只差 1-2 位的两个 hex,必是同一
+    commit 的 OCR 重影(如 6a238053/6a238853)。无法判哪个对 → 两个都删
+    (发错 commit hash 比不发更坏,用户照它去 git 找会扑空)。"""
+    hs = [t for t in tokens if _is_hash(t)]
+    bad = set()
+    for i in range(len(hs)):
+        for j in range(i + 1, len(hs)):
+            a, b = hs[i].lower(), hs[j].lower()
+            if a != b and len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 2:
+                bad.add(hs[i]); bad.add(hs[j])
+    return bad
+
 
 def harvest(ocr: str, limit: int = 8):
     """从 OCR 采集去重后的技术锚点列表(保留出现顺序)。无锚点返回 []。"""
@@ -37,6 +58,7 @@ def harvest(ocr: str, limit: int = 8):
             if key not in seen:
                 seen.add(key)
                 out.append(tok)
-            if len(out) >= limit:
-                return out
-    return out
+    bad = _twin_hashes(out)
+    if bad:
+        out = [t for t in out if t not in bad]
+    return out[:limit]
