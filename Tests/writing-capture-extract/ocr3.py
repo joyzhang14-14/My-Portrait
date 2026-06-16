@@ -79,42 +79,55 @@ APP_PAT = {'Discord': '%iscord%', 'claudefordesktop': '%laude%', 'xinWeChat': '%
            'Safari': '%afari%', 'Notes': '%otes%'}
 
 def pick_frames(app_short, url, send_ts, fwd_s=60):
-    """帧规则(用户指令的工程化解释):同 app(+url);**return 后最早的可用帧优先**
-    (前向扫 ≤60s,因为紧邻的下一帧常还没渲染到该消息);都锚不上 → 回退发送前最近一帧;
-    再没有 → 空(跳过 OCR,不传)。早帧优先防"下一条消息粘连"。"""
+    """帧降级链(2026-06-16 用户设计):按**优先级**返回候选帧,消费方(proofread/verify)逐帧试,
+    第一个过「锚定+击键验证」的即用;全不过 = 原样返回(用户接受)。级别(高→低,按帧不按秒):
+      ①+② return 后同 app(+url)帧(时间序,第一帧最先)③ 切回帧(切走后第一次回本 app 的帧)
+      ④ return 前一帧 ⑤ 异 app 转场漂移帧(切走后第一帧,**至多 1**,可能还带旧 app 画面)
+      ⑥ 切回点异 app 转场帧(回本 app 前最后一个异 app 帧,**至多 1**)。
+    异 app 级各只取 1 帧:切走只转场那第一帧可能留旧画面,取多了是抓串(用户裁定:不会两帧都异 app)。
+    每帧仍过锚+击键验证才采纳,异 app 级只在 ①-④ 全失败时兜底。**同 app = 同 host url**(SPA 路径容错)。"""
     pat = APP_PAT.get(app_short, '%' + app_short[:6] + '%')
     cond, args = "app_name LIKE :p", {"p": pat}
     if url:
-        # 同站匹配(2026-06-15 用户标注 #13 chatgpt.com 案):typing_events.url 常带 SPA 路径
-        # (chatgpt.com/c/<会话id>),而 frames.browser_url 只到域名(chatgpt.com/)→ 精确相等
-        # 把含真相的 OCR 帧全滤掉,校对/补尾静默失效。改 scheme+host 前缀 LIKE,容路径差异;
-        # 同站约束仍在(防串页/串站),且锚定+击键验证兜底。
+        # 同站匹配(2026-06-15 #13 chatgpt.com 案):typing_events.url 带 SPA 路径,frames.browser_url
+        # 常只到域名 → 精确相等把 OCR 帧滤光。改 scheme+host 前缀 LIKE,容路径差异;同站约束仍防串站。
         m = re.match(r'(https?://[^/]+)', url)
         if m:
             cond += " AND browser_url LIKE :u"; args["u"] = m.group(1) + '%'
         else:
             cond += " AND browser_url = :u"; args["u"] = url
-    after = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
-                        f"AND timestamp_ms >= :a AND timestamp_ms <= :b ORDER BY timestamp_ms",
-                        {**args, "a": send_ts, "b": send_ts + fwd_s * 1000}).fetchall()
-    cands = list(after)
-    # 用户灵感:发完常秒切走 → 前向窗内可能没拍到/没渲染。前向窗内出现**异 app** 帧(=切走了)
-    # → 把「切走后第一次回到本 app(+url) 的帧」也纳入(采集切 app 时会拍,切回瞬间消息仍在对话区)。
-    # 检测窗=前向窗 60s(不用 5s:typing_pause=500ms 意味着只有秒切才漏帧,但异 app 首帧
-    # 出现时机不可控——app_switch 归属漂移 + 新 app 可能 idle 30s 才出帧;多一帧候选代价≈0,验证兜底)。
-    sw = con.execute("SELECT timestamp_ms FROM frames WHERE NOT (app_name LIKE :p) "
+    cands, seen = [], set()
+    def add(row):
+        if row and row[0] not in seen:
+            cands.append(row); seen.add(row[0])
+    # ①+② return 后同 app(+url)帧,时间序(第一帧最优先)
+    for row in con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
+                           f"AND timestamp_ms >= :a AND timestamp_ms <= :b ORDER BY timestamp_ms",
+                           {**args, "a": send_ts, "b": send_ts + fwd_s * 1000}).fetchall():
+        add(row)
+    # 切走后第一个异 app 帧(转场)—— 切回帧(③)和异 app 兜底(⑤)都基于它
+    sw = con.execute("SELECT timestamp_ms, full_text FROM frames WHERE NOT (app_name LIKE :p) "
                      "AND timestamp_ms > :a AND timestamp_ms <= :a5 ORDER BY timestamp_ms LIMIT 1",
                      {"p": pat, "a": send_ts, "a5": send_ts + fwd_s * 1000}).fetchone()
+    # ③ 切回帧:切走后第一次回本 app(+url)的帧
+    back = None
     if sw:
         back = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
                            f"AND timestamp_ms > :sw ORDER BY timestamp_ms LIMIT 1",
                            {**args, "sw": sw[0]}).fetchone()
-        if back and all(back[0] != t for t, _ in cands):
-            cands.append(back)
-    before = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
-                         f"AND timestamp_ms < :a ORDER BY timestamp_ms DESC LIMIT 1",
-                         {**args, "a": send_ts}).fetchall()
-    return cands + list(before)
+        add(back)
+    # ④ return 前一帧(同 app)
+    add(con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
+                    f"AND timestamp_ms < :a ORDER BY timestamp_ms DESC LIMIT 1",
+                    {**args, "a": send_ts}).fetchone())
+    # ⑤ 异 app 转场漂移帧:切走后第一帧(至多 1,可能还带旧 app 画面)
+    add(sw)
+    # ⑥ 切回点异 app 转场帧:回本 app(back)前最后一个异 app 帧(至多 1)
+    if back:
+        add(con.execute("SELECT timestamp_ms, full_text FROM frames WHERE NOT (app_name LIKE :p) "
+                        "AND timestamp_ms < :bk AND timestamp_ms >= :a ORDER BY timestamp_ms DESC LIMIT 1",
+                        {"p": pat, "bk": back[0], "a": send_ts}).fetchone())
+    return cands
 
 def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts=(), prev_text=None):
     """口3 主函数:OCR 锚定 + 击键验证补尾。返回 (fixed_text, info)。三护栏(宁缺毋错):
