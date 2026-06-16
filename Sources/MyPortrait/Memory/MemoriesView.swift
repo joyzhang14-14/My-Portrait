@@ -479,11 +479,17 @@ struct MemoriesView: View {
     /// 一排可点击蓝色 event chip。没有该块的老条目 → 整体照旧渲染。
     @ViewBuilder
     private func bodyWithDerived(_ entry: Entry) -> some View {
-        let split = Self.splitDerived(entry.file.body)
-        markdownBody(split.prose)
-        if !split.ids.isEmpty {
+        let parsed = Self.splitDerivedSections(entry.file.body)
+        markdownBody(parsed.before)
+        if !parsed.eventRels.isEmpty {
             Divider().background(Color.primary.opacity(0.10))
             derivedEventsBlock()
+        }
+        // personality 概念：events 之后的 `## portraits` / `## ocr` 等小节保持
+        // 原样渲染（非 event，不做成 chip）。普通 portrait 这里恒为空。
+        if !parsed.after.isEmpty {
+            Divider().background(Color.primary.opacity(0.10))
+            markdownBody(parsed.after)
         }
     }
 
@@ -562,7 +568,7 @@ struct MemoriesView: View {
         derivedRefs = []
         guard let id = selected,
               let entry = entries.first(where: { $0.id == id }) else { return }
-        let ids = Self.splitDerived(entry.file.body).ids
+        let ids = Self.splitDerivedSections(entry.file.body).eventRels
         guard !ids.isEmpty else { return }
         let resolved = await Task.detached(priority: .userInitiated) {
             ids.map { Self.resolveDerivedRef($0) }
@@ -571,25 +577,74 @@ struct MemoriesView: View {
         derivedRefs = resolved
     }
 
-    /// 把 body 拆成 (prose, derivedIds)。只在 `**Derived from events:**` 处切断，
-    /// 不动 `# Title`（prose 渲染与原来完全一致）。没有标记 → (body, [])。
-    nonisolated private static func splitDerived(_ body: String) -> (prose: String, ids: [String]) {
+    /// 把 body 拆成 (before, eventRels, after)。eventRels 统一是 event 相对路径
+    /// "yyyy-MM-dd/foo.md"，无论来自哪种格式。两种格式：
+    ///   1. 普通 portrait：末尾 `**Derived from events:**` + `- [[relpath]]` 行。
+    ///      after 恒空（该块在 body 最后）。
+    ///   2. personality 概念：`## events` 小节 + 裸 slug 行（slug 以 yyyy-MM-dd 开头），
+    ///      转成 "<date>/<slug>.md"；events 之后的 `## portraits` / `## ocr` 落进
+    ///      after，保持原样渲染（非 event）。
+    /// 都不匹配 → (body, [], "")，整体照旧渲染。不动 `# Title`（prose 不变）。
+    nonisolated private static func splitDerivedSections(_ body: String)
+        -> (before: String, eventRels: [String], after: String) {
         let lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        guard let marker = lines.firstIndex(where: {
+
+        // Case 1：普通 portrait —— `**Derived from events:**` 块。
+        if let marker = lines.firstIndex(where: {
             $0.trimmingCharacters(in: .whitespaces).hasPrefix("**Derived from events:**")
-        }) else { return (body, []) }
-        let prose = lines[..<marker].joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        var ids: [String] = []
-        var seen = Set<String>()
-        for raw in lines[(marker + 1)...] {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard line.hasPrefix("- [[") && line.hasSuffix("]]") else { continue }
-            let inner = String(line.dropFirst(4).dropLast(2))
-            // 去重：同一引用出现两次会让 ForEach 撞 id（DerivedRef.id = 这个串）。
-            if !inner.isEmpty, seen.insert(inner).inserted { ids.append(inner) }
+        }) {
+            let before = lines[..<marker].joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var rels: [String] = []
+            var seen = Set<String>()
+            for raw in lines[(marker + 1)...] {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                guard line.hasPrefix("- [[") && line.hasSuffix("]]") else { continue }
+                let inner = String(line.dropFirst(4).dropLast(2))
+                // 去重：同一引用两次会让 ForEach 撞 id（DerivedRef.id = 这个串）。
+                if !inner.isEmpty, seen.insert(inner).inserted { rels.append(inner) }
+            }
+            return (before, rels, "")
         }
-        return (prose, ids)
+
+        // Case 2：personality 概念 —— `## events` 小节（裸 slug）。
+        if let evHeader = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("## events")
+        }) {
+            let before = lines[..<evHeader].joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var rels: [String] = []
+            var seen = Set<String>()
+            var afterStart = lines.count
+            var i = evHeader + 1
+            while i < lines.count {
+                let line = lines[i].trimmingCharacters(in: .whitespaces)
+                if line.hasPrefix("#") { afterStart = i; break }   // 下个 heading → events 段结束
+                if line.hasPrefix("- ") {
+                    let slug = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                    if slug != "(none)", let rel = eventRelFromSlug(slug),
+                       seen.insert(rel).inserted { rels.append(rel) }
+                }
+                i += 1
+            }
+            let after = afterStart < lines.count
+                ? lines[afterStart...].joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                : ""
+            return (before, rels, after)
+        }
+
+        return (body, [], "")
+    }
+
+    /// personality `## events` 裸 slug → event 相对路径 "<date>/<slug>.md"。
+    /// event 文件名以日期开头、所在文件夹即该日期，所以 slug 前 10 位 = 文件夹。
+    /// slug 不以 yyyy-MM-dd 开头 → 返回 nil（不当 event，不进 chip）。
+    nonisolated private static func eventRelFromSlug(_ slug: String) -> String? {
+        guard slug.count >= 10 else { return nil }
+        let date = Array(slug.prefix(10))
+        guard date[4] == "-", date[7] == "-" else { return nil }
+        return "\(String(date))/\(slug).md"
     }
 
     /// 单条 `[[id]]` → DerivedRef。能读到 event 文件即可点击；否则失效（灰文本）。
