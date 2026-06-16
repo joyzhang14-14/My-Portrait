@@ -13,13 +13,20 @@ sonnet 的关键:sonnet 靠世界常识认出 "Spotify File Edit View" 是菜单
 """
 import re
 
-# macOS 应用菜单栏:app 名 + File/Edit/View 三连(高精度 n-gram,不会误伤
-# 正文里孤立的 "View")。app 名可选(有时 OCR 漏掉),但 File Edit View 必须连。
+# macOS 菜单栏右侧那串菜单词(File 后面)。抽出来给 File-less 分支复用。
+_MENU_WORD = (r"(?:Playback|Window|Help|History|Bookmarks|Develop|Format|Go|Insert|"
+              r"Selection|Find|Navigate|Editor|Product|Debug|Source\s*Control|Terminal|"
+              r"Shell|Profiles|Tab|Speaker|Account)")
+# macOS 应用菜单栏。两条接受路径(OCR 常把 File 漏识成 ••• / 吞掉,如 Discord
+# "••• Edit View Window Help"):
+#   1. (app 名 +) File Edit View ...  —— 标准三连,高精度
+#   2. Edit View + 至少一个菜单词     —— File 缺失时靠尾随菜单词保精度
+#      (正文里 "Edit View" 后极少紧跟 Window/Help/Format,误伤可忽略)
+# app 名可选(OCR 有时漏)。
 _MENUBAR = re.compile(
-    r"\b([A-Z][\w.\- ]{0,20}?\s+)?File\s+Edit\s+View"
-    r"(\s+(Playback|Window|Help|History|Bookmarks|Develop|Format|Go|Insert|"
-    r"Selection|Find|Navigate|Editor|Product|Debug|Source\s*Control|Terminal|"
-    r"Shell|Profiles|Tab|Speaker|Account))*", re.I)
+    r"\b([A-Z][\w.\- ]{0,20}?\s+)?"
+    r"(?:File\s+Edit\s+View|Edit\s+View(?=\s+" + _MENU_WORD + r"))"
+    r"(\s+" + _MENU_WORD + r")*", re.I)
 
 # 菜单栏右侧时钟:Sat Jun 6 10:35 PM / Sat Jun 6 10:35
 _CLOCK = re.compile(
