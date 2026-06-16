@@ -29,7 +29,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
         // speakers 子项已折进 Audio Capture 页面尾部(2026-05-26)。
-        case usage, storage, imports
+        case storage, imports
     }
 
     var id: String {
@@ -62,7 +62,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .memory(.parameter):      return "Parameter"
         case .memory(.scheduler):      return "Scheduler"
         case .memory(.changelog):      return "Changelog"
-        case .data(.usage):            return "Usage"
         case .data(.storage):          return "Storage"
         case .data(.imports):          return "Import"
         }
@@ -82,7 +81,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .memory(.parameter):      return "slider.horizontal.3"
         case .memory(.scheduler):      return "calendar.badge.clock"
         case .memory(.changelog):      return "list.bullet.rectangle"
-        case .data(.usage):            return "chart.bar"
         case .data(.storage):          return "externaldrive"
         case .data(.imports):          return "tray.and.arrow.down"
         }

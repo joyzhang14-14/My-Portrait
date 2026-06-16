@@ -20,7 +20,6 @@ struct SettingsPane: View {
             case .memory(.parameter):  MemorySettingsView(tab: .parameter)
             case .memory(.scheduler):  MemorySettingsView(tab: .scheduler)
             case .memory(.changelog):  MemorySettingsView(tab: .changelog)
-            case .data(.usage):        UsageSettingsView()
             case .data(.storage):      StorageSettingsView()
             case .data(.imports):      ImportSettingsView()
             }
@@ -126,7 +125,6 @@ struct SettingsScene: View {
         case .memory(.parameter):  MemorySettingsView(tab: .parameter)
         case .memory(.scheduler):  MemorySettingsView(tab: .scheduler)
         case .memory(.changelog):  MemorySettingsView(tab: .changelog)
-        case .data(.usage):        UsageSettingsView()
         case .data(.storage):      StorageSettingsView()
         case .data(.imports):      ImportSettingsView()
         }
