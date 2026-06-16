@@ -122,8 +122,10 @@ def decode_run(py, context="", model_fn=None):
 
 LATIN_TAIL = re.compile(r'[a-zA-Z][a-zA-Z ]*$')
 # model_fn(payload)->str 可插拔。payload['mode']=='disambig' 走音节消歧;否则不调用。
-def reconstruct_message(captured, ks, context="", model_fn=None):
-    """多行消息按行对齐重建:captured 按 \\n 切行,击键按 <CR> 切段,取尾部 N 段配 N 行,逐行重建后拼回。"""
+def reconstruct_message(captured, ks, context="", model_fn=None, eng_literals=None):
+    """多行消息按行对齐重建:captured 按 \\n 切行,击键按 <CR> 切段,取尾部 N 段配 N 行,逐行重建后拼回。
+    eng_literals:该事件「英文字面」拉丁 run 集合(小写去空格,faithful 侧据双return/input_source 算),
+    guard 据此防过度解码(em→恶魔)。"""
     cap = cv0(captured)
     lines = cap.split('\n')
     ksegs = [s for s in split_cr(ks) if any(c.isalnum() for c in s)] if isinstance(ks, str) else [ks]
@@ -144,7 +146,7 @@ def reconstruct_message(captured, ks, context="", model_fn=None):
     for i, ln in enumerate(lines):
         if not cv(ln) and len(lines) > 1:   # R4守卫:多行中的空行=用户有意空白,不重建(防植入)
             out_lines.append(ln); infos.append({'reason': 'empty_line'}); continue
-        fixed, info = _reconstruct_line(ln, seg_for[i] or [], context, model_fn)
+        fixed, info = _reconstruct_line(ln, seg_for[i] or [], context, model_fn, eng_literals)
         out_lines.append(fixed); infos.append(info)
     # 竞速尾标点(反引号案 ev1131,2026-06-11):闭引号键落在选字与发送CR之间,AX快照晚一拍漏收
     # ('"'键@28.940,CR@29.288,快照@29.666 无闭引号)。末行击键段以 '"' 收尾 + 全文 “ 多于 ”
@@ -159,7 +161,7 @@ def reconstruct_message(captured, ks, context="", model_fn=None):
 
 def cv0(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip('　 \t\r')  # 保留 \n
 
-def _reconstruct_line(captured, kseg, context="", model_fn=None):
+def _reconstruct_line(captured, kseg, context="", model_fn=None, eng_literals=None):
     """两路:① captured 末尾有拼音残渣 → 直接解 captured 残渣(干净,免击键噪声);
     ② captured 是干净汉字、尾巴整段没进 captured → 用击键 run 级匹配补尾。"""
     cap = cv(captured)
@@ -171,8 +173,11 @@ def _reconstruct_line(captured, kseg, context="", model_fn=None):
         # 或单字母(g→个/e→呃 太险)→ 不解码,原样保留。AX 采到什么就是什么。
         # 或前导字符是 ./:@-_(域名/路径/邮箱:ikeyrent.com 的 com 是字面,不是拼音——
         # guard 放宽后 com→聪明 实锤回归,2026-06-10)
+        # 或 residue 是该事件的「英文字面」run(双return/input_source 背书:em→恶魔,2026-06-16)——
+        # 不靠长度(ni/wo 也是2字母小写拼音),靠输入法信号判中英文
         if (any(c.isupper() for c in residue) or len(residue.replace(' ', '')) <= 1
-                or (m.start() > 0 and cap[m.start() - 1] in './:@-_')):
+                or (m.start() > 0 and cap[m.start() - 1] in './:@-_')
+                or (eng_literals and residue.replace(' ', '').lower() in eng_literals)):
             return cap, {'reason': 'literal_residue'}
         r_cap = residue.replace(' ', '').lower()
         kpicks = parse_picks(kseg)

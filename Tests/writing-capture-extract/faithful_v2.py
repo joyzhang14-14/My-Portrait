@@ -131,6 +131,32 @@ def double_return_literal(bundle, t0, t1, residue_text):
         if w.lower() == letters: return w
     return None
 
+def eng_literals_of(bundle, t0, t1):
+    """事件击键窗里「英文字面」拉丁 run 集合(小写去空格),传给 reconstruct guard 防过度解码
+    (em→恶魔,2026-06-16 用户裁定)。两路并集,保历史又解未来:
+      ① 双 return(历史数据 input_source=NULL):拉丁 run + <CR><CR> = 中文输入法打的英文字面;
+      ② input_source(新采集):拉丁 run 击键全在 keylayout(英文键盘)= 字面;
+         inputmethod(拼音 IME)下不收 → ni/wo 等2字母拼音照常解码。"""
+    rows = con.execute("SELECT char, is_backspace, input_source FROM keystroke_log WHERE bundle_id=:b "
+                       "AND ts_ms BETWEEN :a AND :c AND (modifiers&7)=0 ORDER BY ts_ms",
+                       {"b": bundle, "a": (t0 or 0) - 2000, "c": (t1 or 0) + 2000}).fetchall()
+    lits = set()
+    for w in double_return_eng(encode_keys([(c, bs) for c, bs, _ in rows])):  # 路①
+        lits.add(w.lower())
+    buf = []  # 路②:[(char, 是否keylayout)],run 内全 keylayout 才算字面
+    def flush():
+        if buf and all(kl for _, kl in buf): lits.add(''.join(c for c, _ in buf).lower())
+        buf.clear()
+    for c, bs, isrc in rows:
+        if bs:
+            if buf: buf.pop()
+        elif c and c.isalpha():
+            buf.append((c, bool(isrc and isrc.startswith('com.apple.keylayout'))))
+        else:
+            flush()
+    flush()
+    return lits
+
 def is_slash_command(t):
     """Discord 斜杠命令(/play /s /stop + 自动补全 UI '/cmd … +N more')不是消息(v22,类5)。
     只命中首段=/字母(命令形态);文件路径 /Users/… 首段含 / 分隔不 fullmatch,天然不中。"""
@@ -294,9 +320,10 @@ for day in DAYS:
         for ev, text, t0, t1, is_send in sends_raw:
             app = ev['bundle'].split('.')[-1]
             kw = R.keys_in_window(con, ev['bundle'], t0, t1)
+            engl = eng_literals_of(ev['bundle'], t0, t1)   # 英文字面 run(双return/input_source)防过度解码
             # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
             ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)
-            fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig)
+            fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig, eng_literals=engl)
             # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
             if cv(fixed):
                 fx = cv(fixed)
