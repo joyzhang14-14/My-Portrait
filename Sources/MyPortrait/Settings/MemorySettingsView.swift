@@ -94,7 +94,6 @@ struct MemorySettingsView: View {
 
     /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
     enum Tab: String {
-        case parameter = "Parameter"
         case scheduler = "Scheduler"
         case changelog = "Changelog"
     }
@@ -110,12 +109,6 @@ struct MemorySettingsView: View {
                 header
 
                 switch tab {
-                case .parameter:
-                    providerSection
-                    budgetSection
-                    decaySection
-                    archiveSection
-                    distillationSection
                 case .scheduler:
                     schedulerSection
                     runNowSection
@@ -446,8 +439,6 @@ struct MemorySettingsView: View {
 
     private var headerBlurb: String {
         switch tab {
-        case .parameter:
-            return "Tune how the memory system weighs, consolidates, and forgets events. Changes write to `~/.portrait/config.toml` (debounced)."
         case .scheduler:
             return "Configure when the event and portrait pipelines run, and review days that need attention."
         case .changelog:
