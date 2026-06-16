@@ -104,6 +104,8 @@ struct StorageSettingsView: View {
 
             autoDeleteCard
 
+            waitForTranscriptionCard
+
             SettingsCard(
                 title: "Delete recent data",
                 footnote: "Permanently deletes everything captured in the chosen time range. This can't be undone."
@@ -134,12 +136,6 @@ struct StorageSettingsView: View {
                 }
                 .pickerStyle(.menu).labelsHidden().frame(width: 140)
             }
-            SettingsDivider()
-            SettingsRow("Wait for transcription",
-                        description: "Audio that hasn't been transcribed yet (transcription paused or backlogged) is kept past the retention window until it's transcribed, so its text isn't lost. Turn off to delete old audio on schedule regardless. If the transcription engine is set to Disabled, audio is deleted on schedule — there's nothing to wait for.",
-                        icon: "text.bubble") {
-                Toggle("", isOn: config.binding(\.storage.waitForTranscription)).labelsHidden().toggleStyle(.switch)
-            }
             ForEach(AutoDeleteMode.allCases) { mode in
                 SettingsDivider()
                 AutoDeleteModeRow(
@@ -147,6 +143,16 @@ struct StorageSettingsView: View {
                     isActive: config.current.storage.autoDeleteMode == mode.rawValue,
                     recommended: mode == .mediaOnly
                 ) { config.mutate { $0.storage.autoDeleteMode = mode.rawValue } }
+            }
+        }
+    }
+
+    private var waitForTranscriptionCard: some View {
+        SettingsCard {
+            SettingsRow("Wait for transcription",
+                        description: "Keep un-transcribed audio past the retention window until its text is saved.",
+                        icon: "text.bubble") {
+                Toggle("", isOn: config.binding(\.storage.waitForTranscription)).labelsHidden().toggleStyle(.switch)
             }
         }
     }
