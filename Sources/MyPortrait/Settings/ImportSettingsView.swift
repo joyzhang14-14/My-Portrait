@@ -19,6 +19,8 @@ struct ImportSettingsView: View {
 
     @Environment(\.services) private var services
 
+    @State private var config = ConfigStore.shared
+
     @State private var scan: ScreenpipeImporter.ScanResult? = nil
     /// 初始值绑开关:自动模式 → true(直接进扫描态);手动模式 → false(初始「未扫描」,
     /// 不闪一下 Scanning…)。
@@ -55,6 +57,14 @@ struct ImportSettingsView: View {
             "Import",
             subtitle: "Bring historical data from other capture tools into My Portrait."
         ) {
+            SettingsCard {
+                SettingsRow("Auto-scan everything from imports",
+                            description: "Scan all import sources (screenpipe, Claude Code, Codex) automatically when you open this page. Off → each source waits until you press its Scan button.",
+                            icon: "arrow.triangle.2.circlepath") {
+                    Toggle("", isOn: config.binding(\.general.autoScanImports)).labelsHidden().toggleStyle(.switch)
+                }
+            }
+
             SettingsCard(
                 title: "Import from screenpipe",
                 footnote: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording. Your current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
@@ -91,7 +101,7 @@ struct ImportSettingsView: View {
                 footnote: "Brings in the prompts you typed into Claude Code and counts them toward your writing. Only your own messages are imported, and importing again won't create duplicates."
             ) {
                 cliSourceBlock(
-                    icon: "terminal.fill",
+                    icon: "ClaudeCode",
                     title: "Claude Code",
                     sessions: ccSessions,
                     count: ccCount,
@@ -110,7 +120,7 @@ struct ImportSettingsView: View {
                 footnote: "Brings in the prompts you typed into Codex CLI and counts them toward your writing. Importing again won't create duplicates."
             ) {
                 cliSourceBlock(
-                    icon: "chevron.left.forwardslash.chevron.right",
+                    icon: "Codex",
                     title: "Codex CLI",
                     sessions: codexSessions,
                     count: codexCount,
@@ -160,8 +170,14 @@ struct ImportSettingsView: View {
         let notScanned = sessions == nil && count == nil && !running && !scanning
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(.green)
+                // 走 bundle asset(同 screenpipe 行的 Image("Screenpipe")),
+                // 不再用 SF Symbol —— 跟 Connections 页 tile 视觉对齐,语义也是
+                // 应用品牌 icon 而不是 OS 自带字符图。
+                Image(icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
