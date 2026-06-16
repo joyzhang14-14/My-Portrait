@@ -228,12 +228,14 @@ struct AudioCaptureSettingsView: View {
                             icon: "mic") {
                     Toggle("", isOn: config.binding(\.capture.audio.enabled)).labelsHidden().toggleStyle(.switch)
                 }
-                SettingsDivider()
-                // 锁屏录音是采集行为(决定要不要继续抓音频),不是转译选项。
-                SettingsRow("Record audio while screen is locked",
-                            description: "Keep listening even when your Mac is locked.",
-                            icon: "lock.shield") {
-                    Toggle("", isOn: config.binding(\.privacy.recordAudioWhileLocked)).labelsHidden().toggleStyle(.switch)
+                if audioRec {
+                    SettingsDivider()
+                    // 锁屏录音是采集行为(决定要不要继续抓音频),不是转译选项。
+                    SettingsRow("Record audio while screen is locked",
+                                description: "Keep listening even when your Mac is locked.",
+                                icon: "lock.shield") {
+                        Toggle("", isOn: config.binding(\.privacy.recordAudioWhileLocked)).labelsHidden().toggleStyle(.switch)
+                    }
                 }
             }
 
