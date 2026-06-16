@@ -24,7 +24,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case screen, audio, typing
     }
     enum Memory: String, Hashable, CaseIterable {
-        case scheduler, changelog
+        case parameter, scheduler, changelog
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
@@ -59,6 +59,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "Screen Capture"
         case .capture(.audio):         return "Audio Capture"
         case .capture(.typing):        return "Typing Capture"
+        case .memory(.parameter):      return "Parameter"
         case .memory(.scheduler):      return "Scheduler"
         case .memory(.changelog):      return "Changelog"
         case .data(.usage):            return "Usage"
@@ -78,6 +79,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
+        case .memory(.parameter):      return "slider.horizontal.3"
         case .memory(.scheduler):      return "calendar.badge.clock"
         case .memory(.changelog):      return "list.bullet.rectangle"
         case .data(.usage):            return "chart.bar"
