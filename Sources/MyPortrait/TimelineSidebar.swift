@@ -793,7 +793,29 @@ private struct NavIconButton: View {
         }
         .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
-        .help(section.label)
+        // 系统 .help() tooltip 要停留 ~2 秒才弹,太慢。hover 时直接在 icon
+        // 下方浮一个小气泡 label,即时反馈分区名。
+        .overlay(alignment: .bottom) {
+            if hover {
+                Text(section.label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.6))
+                    )
+                    .fixedSize()
+                    .offset(y: 26)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .zIndex(999)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: hover)
     }
 }
 

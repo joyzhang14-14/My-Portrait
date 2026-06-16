@@ -1,17 +1,17 @@
 {
   "images": [
     {
-      "filename": "obsidian.png",
+      "filename": "applecalendar.png",
       "idiom": "universal",
       "scale": "1x"
     },
     {
-      "filename": "obsidian@2x.png",
+      "filename": "applecalendar@2x.png",
       "idiom": "universal",
       "scale": "2x"
     },
     {
-      "filename": "obsidian@3x.png",
+      "filename": "applecalendar@3x.png",
       "idiom": "universal",
       "scale": "3x"
     }

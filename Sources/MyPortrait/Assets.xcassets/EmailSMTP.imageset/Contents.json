@@ -1,17 +1,17 @@
 {
   "images": [
     {
-      "filename": "obsidian.png",
+      "filename": "emailsmtp.png",
       "idiom": "universal",
       "scale": "1x"
     },
     {
-      "filename": "obsidian@2x.png",
+      "filename": "emailsmtp@2x.png",
       "idiom": "universal",
       "scale": "2x"
     },
     {
-      "filename": "obsidian@3x.png",
+      "filename": "emailsmtp@3x.png",
       "idiom": "universal",
       "scale": "3x"
     }

@@ -50,7 +50,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .home: return "Home"
+        case .home: return "AI helper"
         case .cronJobs: return "Cron Jobs"
         case .timeline: return "Timeline"
         case .memories: return "Memories"
@@ -284,16 +284,17 @@ enum IntegrationRegistry {
     /// (not Apple system colors, not SF Symbol tinting).
     static let all: [Integration] = [
         // AI providers
-        .init(id: "chatgpt",            name: "Codex",           bundleId: "com.openai.codex",                      letter: "G",  assetName: "Codex", accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
+        .init(id: "chatgpt",            name: "Codex",           bundleId: "com.openai.codex",                      letter: "G",  assetName: "Codex", assetFullBleed: true, accent: Color(red: 0.06, green: 0.65, blue: 0.51),  signInMethod: .oauth,        category: .ai),
         // 走 OpenAI 公共 API,不复用 Codex OAuth(那一档是 ChatGPT Plus 订阅
         // 走 Codex client_id 拿额度)。这一档纯 BYOK,贴 sk-... API key。
-        .init(id: "openai-byok",        name: "OpenAI API",      bundleId: "com.openai.chat",                       letter: "O",  assetName: "OpenAI", accent: Color(white: 0.10),                         signInMethod: .apiKey,       category: .ai),
-        .init(id: "claude-code",        name: "Claude Code",     bundleId: nil,                                     letter: ">",  iconSymbol: "terminal.fill", accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
-        // Anthropic API 复用 Claude Desktop 的 bundleId,NSWorkspace 装了 Claude
-        // app 就显示真 Claude.app icon(原"Claude Desktop"tile 拔了)。
-        // assetName: "Anthropic" —— 没装 Claude.app 的用户兜底,bundled brand 标识
-        // (simpleicons.org 的官方品牌 SVG,Anthropic brand 橙)。
-        .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: "com.anthropic.claudefordesktop",        letter: "A",  assetName: "Anthropic", accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
+        .init(id: "openai-byok",        name: "OpenAI API",      bundleId: "com.openai.chat",                       letter: "O",  assetName: "OpenAI", assetFullBleed: true, accent: Color(white: 0.10),                         signInMethod: .apiKey,       category: .ai),
+        .init(id: "claude-code",        name: "Claude Code",     bundleId: nil,                                     letter: ">",  assetName: "ClaudeCode", assetFullBleed: true, accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
+        // Anthropic API 用 bundled asset "Anthropic"(自带橙底圆角 A| logo)。
+        // 早期实现复用了 Claude Desktop 的 bundleId 让 NSWorkspace 抓真 app icon,
+        // 但那图标随 Claude.app 升级会变、没装 Claude.app 的用户看到的又是另一张 ——
+        // 系统级图标不在我们手里,语义上 Anthropic API(BYOK)也不该跟 Claude
+        // Desktop 绑定。已删 bundleId,永远走我们 bundle 自带的 asset。
+        .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: nil,                                     letter: "A",  assetName: "Anthropic", assetFullBleed: true, accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
         .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  assetName: "Gemini", accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
         // Perplexity:用 bundle 的 perplexity.svg 资源(从 screenpipe 引来的
         // 原版品牌 logo),iconSymbol asterisk 是再下一层兜底。
@@ -304,17 +305,17 @@ enum IntegrationRegistry {
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", assetName: "Ollama", assetFullBleed: true, accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
 
         // Productivity
-        .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  assetName: "Obsidian", accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
+        .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  assetName: "Obsidian", assetFullBleed: true, accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
         // Notion 走 Internal Integration Token(纯 API key)—— 不走 OAuth,因为
         // 原项目用的是「后端 proxy 转 client_secret」方案,My-Portrait 没那个
         // 后端。NotionConfig 在 ConnectionCredentials.swift。
         .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  assetName: "Notion", accent: Color(white: 0.95),                         signInMethod: .apiKey,       category: .productivity),
-        .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  iconSymbol: "envelope.fill", accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
+        .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  assetName: "EmailSMTP", assetFullBleed: true, accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
 
         // Media / Calendar
         // Spotify / Google Calendar / Voice Memos / Apple Intelligence 暂时下线
         //(原版要么不诚实地假绿点,要么 OAuth 没接)。等真要接的时候再放回。
-        .init(id: "apple-calendar",     name: "Apple Calendar",  bundleId: "com.apple.iCal",                        letter: "📅", accent: Color(red: 0.93, green: 0.27, blue: 0.27),  signInMethod: .systemAccess, category: .media),
+        .init(id: "apple-calendar",     name: "Apple Calendar",  bundleId: "com.apple.iCal",                        letter: "📅", assetName: "AppleCalendar", assetFullBleed: true, accent: Color(red: 0.93, green: 0.27, blue: 0.27),  signInMethod: .systemAccess, category: .media),
     ]
 }
 
