@@ -85,7 +85,15 @@ def pick_frames(app_short, url, send_ts, fwd_s=60):
     pat = APP_PAT.get(app_short, '%' + app_short[:6] + '%')
     cond, args = "app_name LIKE :p", {"p": pat}
     if url:
-        cond += " AND browser_url = :u"; args["u"] = url
+        # 同站匹配(2026-06-15 用户标注 #13 chatgpt.com 案):typing_events.url 常带 SPA 路径
+        # (chatgpt.com/c/<会话id>),而 frames.browser_url 只到域名(chatgpt.com/)→ 精确相等
+        # 把含真相的 OCR 帧全滤掉,校对/补尾静默失效。改 scheme+host 前缀 LIKE,容路径差异;
+        # 同站约束仍在(防串页/串站),且锚定+击键验证兜底。
+        m = re.match(r'(https?://[^/]+)', url)
+        if m:
+            cond += " AND browser_url LIKE :u"; args["u"] = m.group(1) + '%'
+        else:
+            cond += " AND browser_url = :u"; args["u"] = url
     after = con.execute(f"SELECT timestamp_ms, full_text FROM frames WHERE {cond} "
                         f"AND timestamp_ms >= :a AND timestamp_ms <= :b ORDER BY timestamp_ms",
                         {**args, "a": send_ts, "b": send_ts + fwd_s * 1000}).fetchall()
