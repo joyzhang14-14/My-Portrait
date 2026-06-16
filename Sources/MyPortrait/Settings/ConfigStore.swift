@@ -256,7 +256,10 @@ final class ConfigStore {
     /// changes shape we transform `decoded` in here based on its version.
     private func applySchemaMigration(_ decoded: MyPortraitConfig) -> MyPortraitConfig {
         var c = decoded
-        // Future: if c.schemaVersion < MyPortraitConfig.currentSchemaVersion { … }
+        if c.schemaVersion < 2 {
+            // v1→v2: archiveMinDaysIdle 默认从 90 降到 30，强制覆盖所有老用户。
+            c.memory.archiveMinDaysIdle = 30
+        }
         c.schemaVersion = MyPortraitConfig.currentSchemaVersion
         return c
     }
