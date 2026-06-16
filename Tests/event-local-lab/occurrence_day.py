@@ -5,9 +5,10 @@
 为每个 hybrid 事件找"同一持续活动"的历史事件:命中则记 occurrence 日期列表
 + 历史事件引用,只写进 lab.db。镜像生产 Backfill 的 join+occurrence,但只读。
 
-检索(IDF top-K)+ 一次云端判定(批候选,选续接的那个或 null)。
+检索(IDF top-K)+ **批处理**云端判定(一次判 N 个事件,各带自己的候选;
+每事件单独 spawn 太慢,故批量)。
 
-  python3 occurrence_day.py --day 2026-06-07 [--window 90] [--topk 5] [--force]
+  python3 occurrence_day.py --day 2026-06-07 [--window 90] [--topk 5] [--evbatch 8] [--force]
 断点续:occurrences 列已非空的跳过。⚠️ 云端调用,跑前确认。
 """
 import argparse
@@ -37,39 +38,35 @@ def _hist_occurrences(rel):
     return [d.strip().strip('"') for d in m.group(1).split(",") if d.strip()]
 
 
-def _match_prompt(day, e, cands):
-    tags = ", ".join(json.loads(e["tags"]))
-    lines = []
-    for i, (rel, _s) in enumerate(cands, 1):
-        h = by_rel[rel]
-        lines.append(f"[{i}] {h['title']} — {h['summary'][:120]} · tags: "
-                     f"{', '.join(h['tags'])} · ({h['day']})")
-    user = f"""Today's event ({day}):
-title: {e['title']}
-summary: {e['summary'][:300]}
-tags: {tags}
+def _batch_prompt(day, items, by_rel):
+    """items: [(event_row, top_list)]。一次判多个事件。"""
+    blocks = []
+    for e, top in items:
+        cands = "\n".join(
+            f"  [{i}] {by_rel[rel]['title']} — {by_rel[rel]['summary'][:90]} ({by_rel[rel]['day']})"
+            for i, (rel, _s) in enumerate(top, 1))
+        blocks.append(f"EVENT {e['id']}: {e['title']} — {e['summary'][:150]}\n"
+                      f"  candidates:\n{cands}")
+    user = f"""Today is {day}. For EACH event below, decide whether it CONTINUES the
+SAME ongoing activity/project as ONE of ITS OWN listed past candidates — the same
+project/task/conversation carried across days, NOT merely a similar topic or app.
 
-Past events from earlier days (candidates):
-{chr(10).join(lines)}
+{chr(10).join(blocks)}
 
-Is today's event a CONTINUATION of the SAME ongoing activity/project as ONE of
-these — the same project/task/conversation carried across days, NOT merely a
-similar topic or the same app? If yes, give that candidate's number; else null.
-Answer ONLY JSON: {{"match": <number> or null}}"""
-    return [{"role": "system", "content": "You decide if two events are the same "
-             "ongoing activity across days. Answer with ONE JSON object only."},
+Answer ONLY one JSON object mapping each EVENT id to the matching candidate number,
+or null if none continues. Keys must be the EVENT ids shown above.
+Example: {{"12": 2, "13": null}}"""
+    return [{"role": "system", "content": "You match today's events to their "
+             "cross-day ongoing-activity continuations. Answer ONE JSON object only."},
             {"role": "user", "content": user}]
 
 
-by_rel = {}
-
-
 def main():
-    global by_rel
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", required=True)
     ap.add_argument("--window", type=int, default=90)
     ap.add_argument("--topk", type=int, default=5)
+    ap.add_argument("--evbatch", type=int, default=8)
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
     con = labdb.connect()
@@ -81,10 +78,10 @@ def main():
 
     hist = source.load_historical_events(args.day, window_days=args.window)
     by_rel = {h["rel"]: h for h in hist}
-    print(f"[occurrence] {args.day}: 历史事件 {len(hist)} 个(前 {args.window} 天,只读)"
-          f" · provider={cloud.load_config()['provider']}")
     hist_tok = [(h["rel"], retrieve.hist_tokens(h)) for h in hist]
     idf = retrieve.build_idf([t for _, t in hist_tok]) if hist_tok else {}
+    print(f"[occurrence] {args.day}: 历史事件 {len(hist)} 个(前 {args.window} 天,只读)"
+          f" · provider={cloud.load_config()['provider']}")
 
     rows = con.execute("SELECT * FROM hybrid_events WHERE day=?"
                        + ("" if args.force else " AND occurrences IS NULL")
@@ -92,36 +89,52 @@ def main():
     if not rows:
         print("无待处理事件。"); return
 
-    merged = solo = 0
-    for e in rows:
-        occ_dates, ref, htitle = [args.day], None, None
-        top = retrieve.top_k(retrieve.event_tokens(e), hist_tok, idf,
-                             k=args.topk, floor=0.10) if hist_tok else []
-        if top:
-            try:
-                raw, lat = cloud.cloud_call(_match_prompt(args.day, e, top),
-                                            max_tokens=60)
-                out = engine.parse_json(raw, "object")
-                mi = out.get("match")
-                if isinstance(mi, int) and 1 <= mi <= len(top):
-                    ref = top[mi - 1][0]
-                    htitle = by_rel[ref]["title"]
-                    occ_dates = sorted(set(_hist_occurrences(ref) + [args.day]))
-                labdb.log_call(con, args.day, "occurrence", None,
-                               sum(len(m["content"]) for m in _match_prompt(args.day, e, top)),
-                               raw, True, lat)
-            except Exception as ex:                        # noqa: BLE001
-                print(f"  ✗ h{e['id']} {ex}")
+    def write(e, occ_dates, ref=None, htitle=None):
         with con:
             con.execute("UPDATE hybrid_events SET occurrences=?, historical_ref=?, "
                         "historical_title=? WHERE id=?",
                         (json.dumps(occ_dates), ref, htitle, e["id"]))
-        if ref:
-            merged += 1
-            print(f"  ✓ h{e['id']} {e['title'][:38]} → 续接 {ref}  occ={len(occ_dates)}天")
+
+    # 先检索;无候选的直接当天独立,有候选的攒批
+    items, solo = [], 0
+    for e in rows:
+        top = retrieve.top_k(retrieve.event_tokens(e), hist_tok, idf,
+                             k=args.topk, floor=0.10) if hist_tok else []
+        if top:
+            items.append((e, top))
         else:
-            solo += 1
-    print(f"[done] 跨天续接 {merged} · 当天独立 {solo} · 共 {len(rows)}")
+            write(e, [args.day]); solo += 1
+    print(f"  有历史候选 {len(items)} 个(批量判定),无候选当天独立 {solo} 个")
+
+    merged = 0
+    for i in range(0, len(items), args.evbatch):
+        chunk = items[i:i + args.evbatch]
+        msgs = _batch_prompt(args.day, chunk, by_rel)
+        try:
+            raw, lat = cloud.cloud_call(msgs, max_tokens=300, timeout=180)
+            out = engine.parse_json(raw, "object")
+            labdb.log_call(con, args.day, "occurrence", None,
+                           sum(len(m["content"]) for m in msgs), raw, True, lat)
+        except Exception as ex:                            # noqa: BLE001
+            print(f"  ✗ 批 {i//args.evbatch} {ex} → 本批全当天独立")
+            for e, _t in chunk:
+                write(e, [args.day])
+            continue
+        for e, top in chunk:
+            mi = out.get(str(e["id"]), out.get(e["id"]))
+            if isinstance(mi, bool):
+                mi = None
+            if isinstance(mi, int) and 1 <= mi <= len(top):
+                ref = top[mi - 1][0]
+                occ = sorted(set(_hist_occurrences(ref) + [args.day]))
+                write(e, occ, ref, by_rel[ref]["title"])
+                merged += 1
+                print(f"    ✓ h{e['id']} {e['title'][:34]} → {ref} (occ {len(occ)}天)")
+            else:
+                write(e, [args.day])
+        print(f"  批 {i//args.evbatch}: {len(chunk)} 事件 · {lat}ms")
+
+    print(f"[done] 跨天续接 {merged} · 当天独立 {solo + len(items) - merged} · 共 {len(rows)}")
 
 
 if __name__ == "__main__":
