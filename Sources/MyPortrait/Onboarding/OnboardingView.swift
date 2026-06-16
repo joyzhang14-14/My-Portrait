@@ -27,6 +27,34 @@ struct OnboardingView: View {
     @State private var step: Int = 0
     private let totalSteps = 8
 
+    /// Footer gating —— Permissions / ConnectAI 两步要求"做了点什么"才能 Next:
+    ///   - Permissions: 5 项 TCC 全 granted
+    ///   - ConnectAI:   至少连了 1 个 AI/local provider
+    /// 没满足时 Next 灰,Skip 出现兜底(用户决意"先跳过")。其他步无此约束。
+    @State private var permissionsAllGranted: Bool = false
+    @Environment(AppState.self) private var appState
+
+    private var aiConnectedCount: Int {
+        IntegrationRegistry.all.filter {
+            ($0.category == .ai || $0.category == .local) && appState.isConnected($0.id)
+        }.count
+    }
+
+    /// 当前 step 是否满足"做完"条件(决定 Next 灰不灰)。
+    private var canAdvance: Bool {
+        switch step {
+        case 1: return permissionsAllGranted
+        case 3: return aiConnectedCount > 0
+        default: return true
+        }
+    }
+
+    /// 当前 step 是否显示 Skip(只有 step 1/3 且 !canAdvance 时才显示)。
+    /// 字面意义:"我看到了重要性,但我决意跳过"。
+    private var showsSkip: Bool {
+        (step == 1 || step == 3) && !canAdvance
+    }
+
     /// Onboarding 期间 NSWindow 缩到的尺寸(比主 app 的 1200x835 小一截,
     /// 视觉上一看就知道是"setup wizard"而不是主 app)。
     private static let onboardingSize = NSSize(width: 720, height: 560)
@@ -126,7 +154,7 @@ struct OnboardingView: View {
     private var content: some View {
         switch step {
         case 0: WelcomeStep()
-        case 1: PermissionsStep()
+        case 1: PermissionsStep(allGranted: $permissionsAllGranted)
         case 2: PersonalInfoStep()
         case 3: ConnectAIStep()
         case 4: MemoryProviderStep()
@@ -146,7 +174,10 @@ struct OnboardingView: View {
                     .controlSize(.large)
             }
             Spacer(minLength: 0)
-            if step > 0 && step < totalSteps - 1 {
+            // Skip 只在 Permissions / ConnectAI 且条件没满足时出现 ——
+            // "我看到了这两步很重要,但我决意跳过"的明确逃生口。
+            // 条件满足后(全 grant / 至少连 1 个) Skip 自动隐藏,Next 接管。
+            if showsSkip {
                 Button("Skip") { advance() }
                     .buttonStyle(.borderless)
                     .controlSize(.large)
@@ -159,6 +190,7 @@ struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
+            .disabled(!canAdvance)
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 18)
@@ -212,16 +244,24 @@ private struct WelcomeStep: View {
 
 // MARK: - Step 2: Permissions
 
-/// macOS TCC permissions onboarding 关心的 5 项。每项有:
+/// macOS TCC permissions onboarding 关心的 4 项。每项有:
 ///   - 状态(granted / denied / unknown)实时刷新
 ///   - 一键请求按钮(没 API 的就跳系统设置)
 private struct PermissionsStep: View {
+    /// OnboardingView 顶层 footer 用,4 项是否全 granted —— 决定 Next 灰不灰 / Skip 出不出。
+    @Binding var allGranted: Bool
+
     @StateObject private var monitor = PermissionMonitor()
-    @State private var inputMonitoring: PermStatus = .unknown
-    /// UI 刷新 trigger —— Input Monitoring 不在 PermissionMonitor 里,用 timer 拉一次。
-    @State private var pollTask: Task<Void, Never>? = nil
 
     enum PermStatus { case granted, denied, unknown }
+
+    /// 4 项都 granted 才算"全过"。任何一项 .denied / .unknown 都阻塞 Next。
+    private var computedAllGranted: Bool {
+        mapAppKit(monitor.screenRecording) == .granted &&
+        mapAppKit(monitor.accessibility) == .granted &&
+        mapAppKit(monitor.microphone) == .granted &&
+        mapAppKit(monitor.fullDiskAccess) == .granted
+    }
 
     var body: some View {
         ScrollView {
@@ -250,14 +290,6 @@ private struct PermissionsStep: View {
                     openSettings: { monitor.openSettings(for: .accessibility) }
                 )
                 permRow(
-                    icon: "keyboard",
-                    title: "Input Monitoring",
-                    why: "Required for the keystroke ledger — Accessibility alone isn't enough for global CGEventTap on macOS.",
-                    status: inputMonitoring,
-                    action: { requestInputMonitoring() },
-                    openSettings: { openInputMonitoringSettings() }
-                )
-                permRow(
                     icon: "mic",
                     title: "Microphone",
                     why: "Required if you want voice transcription as part of memory.",
@@ -281,12 +313,16 @@ private struct PermissionsStep: View {
         }
         .onAppear {
             monitor.start()
-            refreshExtraPerms()
-            startPoll()
+            // 初次进 step 立刻 commit 一次,footer Next/Skip 立刻反映真实状态。
+            allGranted = computedAllGranted
         }
         .onDisappear {
             monitor.stop()
-            pollTask?.cancel()
+        }
+        // monitor 的 @Published 状态变化让 body 重 evaluate,
+        // computedAllGranted 跟着变 → 这里 onChange 把新值写回 binding。
+        .onChange(of: computedAllGranted) { _, new in
+            allGranted = new
         }
     }
 
@@ -361,138 +397,6 @@ private struct PermissionsStep: View {
         }
     }
 
-    // MARK: Input Monitoring & Notification — 不在 PermissionMonitor 里,自己查
-
-    private func refreshExtraPerms() {
-        inputMonitoring = checkInputMonitoring()
-    }
-
-    private func startPoll() {
-        pollTask?.cancel()
-        pollTask = Task { @MainActor in
-            while !Task.isCancelled {
-                refreshExtraPerms()
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-            }
-        }
-    }
-
-    private func checkInputMonitoring(forceProbe: Bool = false) -> PermStatus {
-        // **两层检查**:
-        //   1. IOHIDCheckAccess —— 标准 API,但 hidd 后台 daemon 内存里有
-        //      stale cache(tccutil reset 后 TCC db 清了 daemon 还说 granted),
-        //      自己一个人不可信
-        //   2. 真发个 null event + 自己装个 CGEventTap 看能不能收到 —— 这条
-        //      绕过 daemon cache,直接 round-trip 验证 tap 能不能跑
-        //
-        // 两条都过才算 .granted。哪条不过 → 显示 .denied / .unknown 让用户
-        // 重新走 Allow 流程。
-        let api = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
-        if api == kIOHIDAccessTypeDenied { return .denied }
-
-        // 稳态短路:已确认 granted 后,3s 轮询信任 IOHIDCheckAccess==granted,不再每
-        // 次重进 run loop 跑 tap probe(那会每 3s 卡 UI ~100ms)。首次(.unknown)仍跑
-        // 一次 probe;tccutil reset 后 api 会翻 denied/notDeterm,自然重新探。
-        if api == kIOHIDAccessTypeGranted && !forceProbe && inputMonitoring == .granted {
-            return .granted
-        }
-
-        // probe 实际 tap 能不能 round-trip 收事件
-        let tapWorks = probeInputMonitoringTap()
-        if tapWorks { return .granted }
-
-        // API 说 granted 但 tap 收不到事件 → daemon cache 撒谎,实际没权限
-        return api == kIOHIDAccessTypeGranted ? .denied : .unknown
-    }
-
-    /// 装一个临时 CGEventTap,自己 post 一个 null event,看 callback 能不
-    /// 能收到。能收到 → tap 真起来了,Input Monitoring 是 truly granted。
-    /// 收不到 → 即使 IOHIDCheckAccess 说 granted,实际 tap 也跑不动。
-    ///
-    /// 同步实现:run loop spin 至多 100 ms 等 callback。结束清理 tap。
-    private func probeInputMonitoringTap() -> Bool {
-        // 用 heap 分配的 box 把"received"标志传进 C-style callback。
-        // userInfo 直接传 &local 不行,callback 异步触发时 local 可能已出作用域。
-        final class FlagBox { var received = false }
-        let box = FlagBox()
-        let boxPtr = Unmanaged.passRetained(box).toOpaque()
-        defer { Unmanaged<FlagBox>.fromOpaque(boxPtr).release() }
-
-        // 监听 null event(类型 0)—— 没人用,不污染别的 app
-        let mask = CGEventMask(1 << CGEventType.null.rawValue)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: mask,
-            callback: { _, _, event, info in
-                if let info = info {
-                    Unmanaged<FlagBox>.fromOpaque(info).takeUnretainedValue().received = true
-                }
-                return Unmanaged.passUnretained(event)
-            },
-            userInfo: boxPtr)
-        else { return false }   // tap 创建直接失败 → 100% 没权限
-
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-
-        // post 一个 null event 给自己
-        if let nullEvent = CGEvent(source: nil) {
-            nullEvent.post(tap: .cgSessionEventTap)
-        }
-
-        // run loop spin 至多 100 ms 等 callback
-        let deadline = Date().addingTimeInterval(0.1)
-        while Date() < deadline && !box.received {
-            CFRunLoopRunInMode(.defaultMode, 0.01, false)
-        }
-
-        // 清理
-        CGEvent.tapEnable(tap: tap, enable: false)
-        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), src, .commonModes)
-        CFMachPortInvalidate(tap)
-
-        return box.received
-    }
-
-    private func requestInputMonitoring() {
-        // 1) 标准 API —— Apple-notarized 应用一般够,但自签 cert / 非
-        //    notarize app `IOHIDRequestAccess` 经常**静默返回 false**,系统
-        //    设置 → 隐私 → Input Monitoring 列表里**根本不出现 MyPortrait
-        //    那条**,用户没东西可 toggle。
-        _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-
-        // 2) **真正能把 app 注册进系统列表的副作用**:尝试创建一个
-        //    CGEventTap。macOS 不管 tap 实际有没有权限运行,只要进程"试图"
-        //    创建过 tap,就会把它写进 Input Monitoring 列表。
-        //    .listenOnly + 立刻 invalidate,纯触发副作用,不真起 tap。
-        let mask: CGEventMask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: mask,
-            callback: { _, _, event, _ in Unmanaged.passUnretained(event) },
-            userInfo: nil)
-        if let tap = tap {
-            // 拿到了说明已经有权限,直接 release 不留 tap
-            CFMachPortInvalidate(tap)
-        }
-        // tap == nil 也无所谓 —— 创建尝试本身已经把 app 注册进系统列表了
-
-        // 3) 直接跳到系统设置 Input Monitoring 面板,用户可以立刻看到
-        //    "MyPortrait" 那一行并 toggle。
-        openInputMonitoringSettings()
-
-        refreshExtraPerms()
-    }
-
-    private func openInputMonitoringSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent")!
-        NSWorkspace.shared.open(url)
-    }
 }
 
 // MARK: - Step 3: Personal info
