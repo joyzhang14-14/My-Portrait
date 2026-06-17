@@ -60,17 +60,61 @@ def _gap_min(s1, s2):
     return max(b0 - a1, a0 - b1) // 60000
 
 
+_LLM_PROMPT = """You de-duplicate one day's activity events for a personal memory
+system. Some events are FRAGMENTS of the SAME specific activity split across the day
+— the same feature/bug worked on at different times, the same account/usage check
+repeated, the same project thread revisited. Group those that should be ONE event.
+
+Group ONLY events that are the SAME specific task / topic / thread (same bug, same
+feature, same document, same recurring check). Do NOT group just because they share
+a project or app — a different feature in the same project is a DIFFERENT event.
+When unsure, keep separate. Judge from the content in ANY language.
+
+EVENTS:
+{lines}
+
+Answer ONLY a JSON object listing the groups to MERGE (2+ ids each), omit singletons:
+{{"groups": [[id, id, ...], ...]}}"""
+
+
+def _llm_groups(evs, meta, model):
+    """全局语义去重:把全部事件(标题/tags/时间/摘要片段)交给云端模型,返回应合并的
+    id 组。语言无关(模型读内容判),不卡时间——治"同主题全天分散"的近重复。"""
+    import time
+    import cloud, engine
+
+    def hhmm(ms):
+        t = time.gmtime(ms // 1000)
+        return f"{t.tm_hour:02d}:{t.tm_min:02d}"
+
+    lines = []
+    for e in evs:
+        dom, span, tags, _t, _m = meta[e["id"]]
+        summ = (e["summary"] or "").replace("\n", " ")[:90]
+        lines.append(f"{e['id']}. {e['title']} [{dom} {hhmm(span[0])}] "
+                     f"tags:[{', '.join(sorted(tags))}] — {summ}")
+    msgs = [{"role": "system", "content": "You de-duplicate activity events into "
+             "same-activity groups. Answer ONE JSON object only."},
+            {"role": "user", "content": _LLM_PROMPT.format(lines="\n".join(lines))}]
+    raw, lat = cloud.cloud_call(msgs, model=model, max_tokens=1500, timeout=180)
+    print(f"  [llm] 语义判定 {lat}ms")
+    return engine.parse_json(raw, "object").get("groups") or []
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", required=True)
-    ap.add_argument("--gap", type=int, default=15, help="相邻判定:span 间隔≤几分钟")
-    ap.add_argument("--tagj", type=float, default=0.6, help="标签 Jaccard 阈值")
-    ap.add_argument("--titlej", type=float, default=0.5, help="标题 Jaccard 阈值")
+    ap.add_argument("--llm", action="store_true",
+                    help="云端语义合并(不卡时间,治同主题分散近重复;推荐)")
+    ap.add_argument("--model", default=None, help="--llm 用的模型(默认 config=Codex)")
+    ap.add_argument("--gap", type=int, default=15, help="词法模式:相邻判定 span 间隔≤几分钟")
+    ap.add_argument("--tagj", type=float, default=0.6, help="词法模式:标签 Jaccard 阈值")
+    ap.add_argument("--titlej", type=float, default=0.5, help="词法模式:标题 Jaccard 阈值")
     ap.add_argument("--apply", action="store_true", help="落库(默认 dry-run)")
     args = ap.parse_args()
     con = labdb.connect()
 
-    evs = con.execute("SELECT id, title, tags, member_ids FROM hybrid_events "
+    evs = con.execute("SELECT id, title, summary, tags, member_ids FROM hybrid_events "
                       "WHERE day=? ORDER BY id", (args.day,)).fetchall()
     if not evs:
         print(f"{args.day} 无 hybrid 事件。")
@@ -91,21 +135,25 @@ def main():
     def union(a, b):
         parent[find(a)] = find(b)
 
-    pairs = []
-    for i in range(len(ids)):
-        for j in range(i + 1, len(ids)):
-            a, b = ids[i], ids[j]
-            da, sa, ta, na, _ = meta[a]
-            db, sb, tb, nb, _ = meta[b]
-            if not da or da != db:                         # 必须同主导 app
-                continue
-            gap = _gap_min(sa, sb)
-            if gap > args.gap:                             # 必须时间相邻/重叠
-                continue
-            tj, nj = _jaccard(ta, tb), _jaccard(na, nb)
-            if tj >= args.tagj or nj >= args.titlej:       # 标签 OR 标题高度重合
-                pairs.append((a, b, da, gap, round(tj, 2), round(nj, 2)))
-                union(a, b)
+    if args.llm:                                           # 全局语义去重(语言无关,推荐)
+        for g in _llm_groups(evs, meta, args.model):
+            v = [int(x) for x in g if str(x).isdigit() and int(x) in parent]
+            for k in range(1, len(v)):
+                union(v[0], v[k])
+        src = f"LLM({args.model or 'config'})语义"
+    else:                                                  # 确定性词法兜底(同app+相邻+高重合)
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                a, b = ids[i], ids[j]
+                da, sa, ta, na, _ = meta[a]
+                db, sb, tb, nb, _ = meta[b]
+                if not da or da != db:
+                    continue
+                if _gap_min(sa, sb) > args.gap:
+                    continue
+                if _jaccard(ta, tb) >= args.tagj or _jaccard(na, nb) >= args.titlej:
+                    union(a, b)
+        src = "词法(同app+相邻+高重合)"
 
     # 分组(>1 成员的组才需合并),组内最小 id 当幸存者
     groups = {}
@@ -113,10 +161,10 @@ def main():
         groups.setdefault(find(i), []).append(i)
     groups = {k: sorted(v) for k, v in groups.items() if len(v) > 1}
 
-    if not pairs:
-        print(f"[merge] {args.day}: 无近重复可合(同app+相邻+高重合)。")
+    if not groups:
+        print(f"[merge] {args.day}: 无近重复可合（{src}）。")
         return
-    print(f"[merge] {args.day}: 命中 {len(pairs)} 对近重复 → 合成 {len(groups)} 组:")
+    print(f"[merge] {args.day}: {src} → 合成 {len(groups)} 组:")
     for surv, members in groups.items():
         print(f"  组(幸存 h{surv}):")
         for hid in members:
