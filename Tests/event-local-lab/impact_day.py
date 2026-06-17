@@ -61,9 +61,27 @@ RULES
 - 3.0-3.5 uses verbs did/spent/read/chatted; 3.6-4.0 uses finished/decided/realized.
 - Repeated days (high occurrences_days) only MILDLY raise the score. A routine is still a routine.
 - "evidence" MUST quote/paraphrase a specific fragment of the summary. No specifics → score <= 2.0.
+- "kind": classify the activity from the SUMMARY content (works in ANY language):
+    "active"  = hands-on creation / coding / debugging / writing / a real decision,
+                or a genuine back-and-forth conversation.
+    "passive" = browsing, reading a dashboard, watching, skimming, or merely CHECKING
+                an account / usage / billing / limits / settings without changing them.
+    "idle"    = pointless glance, a background app, checking the time / notifications.
 
 OUTPUT — return ONLY a JSON array, no prose, no fences:
-[{"id": <int>, "evidence": "<quoted fragment>", "impact": <float>}, ...]"""
+[{"id": <int>, "kind": "active|passive|idle", "evidence": "<quoted fragment>", "impact": <float>}, ...]"""
+
+# #5 确定性降权:云端模型常给琐事虚高分(2+),不肯用低端量程。语言无关的修法
+# = 语义信号让模型出(下面 RUBRIC 要它给 "kind":active/passive/idle,它读内容判、
+# 跟标题语言无关),代码只按 kind 卡天花板。这是 A 排序干净的机制(琐事 impact 近 0
+# → weight 沉底),但不靠任何硬编码关键词。
+_KIND_CEIL = {"idle": 0.5, "passive": 1.2}   # active 不设顶,用模型原分
+
+
+def _demote(kind, imp):
+    """按模型给的 kind 卡上限:idle→≤0.5,passive→≤1.2,active→原分。"""
+    ceil = _KIND_CEIL.get((kind or "").strip().lower())
+    return min(imp, ceil) if ceil is not None else imp
 
 
 def _card(con, e):
@@ -130,11 +148,12 @@ def main():
                 if not x:
                     print(f"  ⚠ h{e['id']} 模型没给分,跳过")
                     continue
-                imp = max(0.0, min(5.0, float(x.get("impact", 0))))
+                raw_imp = max(0.0, min(5.0, float(x.get("impact", 0))))
+                imp = _demote(x.get("kind"), raw_imp)  # #5 按模型 kind 卡琐事天花板
                 w = imp * (1 + math.log(1 + occ_of[e["id"]]))   # 当天:衰减项=1
                 con.execute("UPDATE hybrid_events SET impact=?, raw_impact=?, "
                             "impact_evidence=?, weight=? WHERE id=?",
-                            (imp, imp, (x.get("evidence") or "")[:300], round(w, 4),
+                            (imp, raw_imp, (x.get("evidence") or "")[:300], round(w, 4),
                              e["id"]))
                 done += 1
         print(f"  ✓ 批 {i//args.batch}: {len(chunk)} 事件打分 · {lat}ms")
