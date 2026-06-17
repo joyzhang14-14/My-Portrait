@@ -200,6 +200,29 @@ def complete_tail(app_short, text, send_ts, leftover_keys, url=None, other_texts
     return text, {'why': '所有帧锚定/击键验证未过'}
 
 
+def _whole_residue_ocr(app_short, text, send_ts, leftover, url, others_n):
+    """全残渣(整条机器解码,无对前缀可自锚)的 OCR 救援(补 :212 待建,从哪找的案 2026-06-17):
+    机器猜首字(首音节通常可靠)锚 OCR 帧,取等长窗,要求 与机器猜同长 + 位置级重合≥半
+    (确保是同一条消息、只是解错)+ 击键验证(OCR 窗能被击键解释,防抓到别条消息)→ 以屏幕为准。
+    librime#1 与用户输入法#1 分歧(从那找到 vs 从哪找的,到/那 都同击键)时,OCR 是唯一裁判。"""
+    m = cv(text).replace(' ', '')
+    n = len(m)
+    L = re.sub(r'[^a-z]', '', (leftover or '').lower())
+    if n < 2 or n > 10 or len(L) < 2:                       # 只治短消息且有击键背书
+        return text, {'why': '全残渣:长度/击键不满足'}
+    for ts, ft in pick_frames(app_short, url, send_ts):
+        ft = ft or ''
+        for mt in re.finditer(re.escape(m[0]), ft):         # 机器猜首字锚(首音节通常可靠)
+            cand = cv(ft[mt.start(): mt.start() + n + 3]).replace(' ', '')[:n]
+            if len(cand) != n or cand == m:
+                continue
+            if sum(1 for i in range(n) if cand[i] == m[i]) < (n + 1) // 2:
+                continue                                    # 位置级重合<半 = 不是同一条消息
+            _, consumed = verify_tail(cand, leftover)        # OCR 窗须被击键解释(防抓别条消息)
+            if consumed >= len(L) - 1 and not any(o.startswith(cand) for o in others_n):
+                return cand, {'fixed': True, 'via': '全残渣OCR整句', 'frame_ts': ts, 'ocr_tail': cand}
+    return text, {'why': '全残渣:OCR无等长近似匹配'}
+
 def proofread_tail(app_short, text, model_tail, send_ts, leftover_keys, url=None, other_texts=()):
     """校对模式:Phase1 **模型参与重建**的尾巴,用 OCR 渲染事实核对(的/得、哟/用、同音错一族)。
     base = text 去掉模型尾;锚定 base;OCR 续文过击键验证后若与模型尾不同 → 以屏幕为准。
@@ -209,7 +232,9 @@ def proofread_tail(app_short, text, model_tail, send_ts, leftover_keys, url=None
         return text, {'why': '无模型尾/对不上'}
     base = text[:len(text) - len(model_tail)]
     if len(cv(base)) < 3:
-        return text, {'why': 'base太短无法锚定(全残渣需前条锚,待建)'}
+        # 全残渣(整条机器解码,无对前缀可自锚)→ 整句 OCR 匹配(2026-06-17 从哪找的案,补 :212 待建)
+        others_n = [cv(o).replace(' ', '') for o in other_texts if o]
+        return _whole_residue_ocr(app_short, text, send_ts, leftover_keys, url, others_n)
     frames = pick_frames(app_short, url, send_ts)
     if not frames:
         return text, {'why': '无同app/url帧'}
