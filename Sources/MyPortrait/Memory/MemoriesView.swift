@@ -12,6 +12,9 @@ import SwiftUI
 /// Settings → Memory → Scheduler.
 struct MemoriesView: View {
     @Binding var scope: MemoryScope
+    /// writing-style chip → Input 跳转目标 record id;writing record 文本预览缓存。
+    @State private var pendingInputRecordId: Int64? = nil
+    @State private var wrPreviews: [Int64: String] = [:]
     /// AI 编辑触发器。ContentView 注入:点击后把 chat 切到 edit 模式并
     /// 跳转到 Home。nil = 编辑按钮隐藏(测试 / 旧调用方兼容)。
     var onEditEntity: ((URL) -> Void)? = nil
@@ -83,7 +86,7 @@ struct MemoriesView: View {
         if scope == .personalInfo {
             PersonalInfoView()
         } else if scope == .input {
-            InputCaptureView()
+            InputCaptureView(jumpToRecordId: $pendingInputRecordId)
         } else {
             HSplitView {
                 listColumn
@@ -507,6 +510,14 @@ struct MemoriesView: View {
     /// 一排可点击蓝色 event chip。没有该块的老条目 → 整体照旧渲染。
     @ViewBuilder
     private func bodyWithDerived(_ entry: Entry) -> some View {
+        // writing-style:末尾 `**Derived from writing records:**` + [[wr:NNN]] →
+        // 蓝色 chip,点击跳到 Input 对应记录。其它 scope 走下面 event/personality 路径。
+        let wr = Self.splitWritingRecords(entry.file.body)
+        if !wr.wrIds.isEmpty {
+            markdownBody(wr.before)
+            Divider().background(Color.primary.opacity(0.10))
+            derivedWritingRecordsBlock(wr.wrIds)
+        } else {
         let parsed = Self.splitDerivedSections(entry.file.body)
         markdownBody(parsed.before)
         if !parsed.eventRels.isEmpty {
@@ -518,6 +529,7 @@ struct MemoriesView: View {
         if !parsed.after.isEmpty {
             Divider().background(Color.primary.opacity(0.10))
             markdownBody(parsed.after)
+        }
         }
     }
 
@@ -587,6 +599,63 @@ struct MemoriesView: View {
             pendingEventRel = rel
             scope = .events
         }
+    }
+
+    /// writing-style:`**Derived from writing records:**` 区 → 蓝色 chip 一排,
+    /// label 显示记录文本预览(无则 #id),点击跳到 Input 对应记录。
+    @ViewBuilder
+    private func derivedWritingRecordsBlock(_ ids: [Int64]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DERIVED FROM WRITING RECORDS")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(0.6).foregroundStyle(.tertiary)
+            FlowLayout(spacing: 6) {
+                ForEach(ids, id: \.self) { id in
+                    Button { pendingInputRecordId = id; scope = .input } label: {
+                        let p = wrPreviews[id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        let label = p.isEmpty ? "#\(id)" : String(p.prefix(40))
+                        Text(label)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                            .lineLimit(1).truncationMode(.tail)
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                                    .fill(Theme.accent.opacity(0.16))
+                                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                                        .strokeBorder(Theme.accent.opacity(0.25), lineWidth: 0.8)))
+                    }
+                    .buttonStyle(.plain).help("wr:\(id)")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: selected) { await loadWritingRecordPreviews(ids) }
+    }
+
+    /// 批量取 writing record 文本预览填 wrPreviews(后台 DB 查)。
+    @MainActor
+    private func loadWritingRecordPreviews(_ ids: [Int64]) async {
+        guard let store = WritingCaptureWorker.shared?.store else { return }
+        let sel = selected
+        let m = await Task.detached(priority: .userInitiated) { store.writingRecordPreviews(ids: ids) }.value
+        guard selected == sel else { return }
+        wrPreviews = m
+    }
+
+    /// 拆 writing-style body：`**Derived from writing records:**` 之前是 prose,
+    /// 之后(含同行)的 `[[wr:NNN]]` 全抽成 id。无该块 → (body, [])。
+    nonisolated private static func splitWritingRecords(_ body: String) -> (before: String, wrIds: [Int64]) {
+        guard let r = body.range(of: "**Derived from writing records:**") else { return (body, []) }
+        let before = String(body[..<r.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let tail = String(body[r.lowerBound...])
+        var ids: [Int64] = []; var seen = Set<Int64>()
+        guard let re = try? NSRegularExpression(pattern: #"\[\[wr:(\d+)\]\]"#) else { return (before, []) }
+        let ns = tail as NSString
+        for m in re.matches(in: tail, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges >= 2 {
+            if let id = Int64(ns.substring(with: m.range(at: 1))), seen.insert(id).inserted { ids.append(id) }
+        }
+        return (before, ids)
     }
 
     /// 解析当前选中条目 body 的 Derived 引用 → derivedRefs（读盘在后台）。

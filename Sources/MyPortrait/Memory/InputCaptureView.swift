@@ -13,6 +13,9 @@ import SwiftUI
 @MainActor
 struct InputCaptureView: View {
 
+    /// writing-style chip 跳转目标 record id。非 nil → appear/变更时定位到该 record。
+    var jumpToRecordId: Binding<Int64?>? = nil
+
     @State private var apps: [WritingCaptureAppSummary] = []
     @State private var selectedGroup: WritingCaptureAppSummary?
     @State private var records: [WritingRecordViewRow] = []
@@ -32,7 +35,23 @@ struct InputCaptureView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(SidebarBackdrop().ignoresSafeArea())
-        .task { await reloadApps() }
+        .task { await reloadApps(); await handleJump() }
+        .onChange(of: jumpToRecordId?.wrappedValue) { _, v in
+            if v != nil { Task { await handleJump() } }
+        }
+    }
+
+    /// writing-style chip 跳转:查 record 所属 (app,url) → 选中该 app 组 → 选中 record。
+    @MainActor
+    private func handleJump() async {
+        guard let target = jumpToRecordId?.wrappedValue, let store else { return }
+        jumpToRecordId?.wrappedValue = nil
+        guard let grp = store.groupForRecord(id: target),
+              let summary = apps.first(where: { $0.app == grp.app && $0.url == grp.url })
+        else { return }
+        await openGroup(summary)
+        guard selectedGroup?.id == summary.id else { return }
+        selectedRecordId = target
     }
 
     // MARK: - 左列:app 列表 / records 列表

@@ -726,6 +726,31 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// 按 record id 反查它所属的 (app, url) 分组 —— writing-style chip 跳转用。
+    func groupForRecord(id: Int64) -> (app: String, url: String)? {
+        try? dbPool.read { db -> (String, String)? in
+            guard let r = try Row.fetchOne(
+                db, sql: "SELECT app, url FROM writing_records WHERE id = :id",
+                arguments: ["id": id]) else { return nil }
+            let app: String? = r["app"]; let url: String? = r["url"]
+            return (app ?? "", url ?? "")
+        } ?? nil
+    }
+
+    /// 批量取 record 文本预览(chip label 用)。ids 是 Int64,直接内联安全(无注入)。
+    func writingRecordPreviews(ids: [Int64]) -> [Int64: String] {
+        guard !ids.isEmpty else { return [:] }
+        let inList = ids.map(String.init).joined(separator: ",")
+        return (try? dbPool.read { db -> [Int64: String] in
+            var out: [Int64: String] = [:]
+            for r in try Row.fetchAll(db, sql: "SELECT id, text FROM writing_records WHERE id IN (\(inList))") {
+                let id: Int64? = r["id"]; let t: String? = r["text"]
+                if let id, let t { out[id] = t }
+            }
+            return out
+        }) ?? [:]
+    }
+
     /// 删除某 (app, url) 分组的全部 writing_records(用户手动清除)。
     func deleteWritingRecordsForGroup(app: String, url: String) throws {
         try dbPool.write { db in
