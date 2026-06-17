@@ -184,6 +184,13 @@ struct MyPortraitApp: App {
             RescoreCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--distill-selftest` 确定性验证 occurrence-by-event-day +
+        // derived 不封顶(不调 LLM、不碰真实数据)。
+        if args.contains("--distill-selftest") {
+            _ = try? PortraitDBImpl()   // updateExistingPortrait 写 changelog 需要 DB
+            let ok = PortraitDistiller.runOccurrenceSelfTest()
+            exit(ok ? 0 : 1)
+        }
         // DEV-ONLY: `--distill-staged` runs the full PortraitDistiller pass but
         // snapshots portrait/ first → result lands in Pending review (Reject =
         // rollback, Approve = keep). Use to verify distill changes without

@@ -669,6 +669,65 @@ final class PortraitDistiller {
         let category: String
     }
 
+    /// `--distill-selftest` 用:确定性验证 occurrence-by-event-day + derived 不封顶。
+    /// 不调 LLM、不碰真实 event(用合成 id;markEventsDistilled 对不存在文件跳过)。
+    /// 造一个 _selftest 测试 portrait,走真 updateExistingPortrait,断言后删干净。
+    static func runOccurrenceSelfTest() -> Bool {
+        let fm = FileManager.default
+        let cat = "_selftest"
+        let slug = "zz_occurrence_selftest"
+        let dir = PortraitPaths.categoryDir(cat)
+        let url = dir.appendingPathComponent(slug + ".md")
+        func cleanup() { try? fm.removeItem(at: dir) }
+        func failLine(_ m: String) { FileHandle.standardError.write(Data("  ✗ \(m)\n".utf8)) }
+
+        cleanup()
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // 1. 现有 portrait:1 个旧 derived(2026-01-01),旧 derived 块
+        var existing = PortraitFile(
+            created: Date(),
+            body: "Old prose.\n\n**Derived from events:**\n- [[2026-01-01/old_event.md]]\n",
+            source: "distilled", tags: [cat, "portrait"], firstOccurrence: Date(),
+            eventTitle: "Selftest", eventSummary: "Selftest",
+            eventType: "experience", portraitFacets: [], category: cat, memberFrameIds: [])
+        existing.mergeCount = 1
+        existing.lastModified = Date()
+        guard (try? PortraitFileIO.write(existing, to: url)) != nil else { failLine("write existing 失败"); cleanup(); return false }
+
+        // 2. update decision:25 个新 event,跨两个 UTC 日 → 加旧 1 个 = 26 > 20
+        var newIds: [String] = []
+        for i in 1...13 { newIds.append("2026-05-16/selftest_a\(i).md") }
+        for i in 1...12 { newIds.append("2026-06-17/selftest_b\(i).md") }
+        let decision = ParsedDecision(action: "update", slug: slug, title: "Selftest",
+                                      body: "Updated prose.", derivedFromEventIds: newIds)
+
+        // 3. 走真 updateExistingPortrait
+        do { _ = try PortraitDistiller().updateExistingPortrait(category: cat, decision: decision) }
+        catch { failLine("updateExistingPortrait threw: \(error)"); cleanup(); return false }
+
+        // 4. 读回断言
+        guard let f = try? PortraitFileIO.read(from: url) else { failLine("读回失败"); cleanup(); return false }
+        let derivedCount = f.body.split(separator: "\n").filter { $0.hasPrefix("- [[") }.count
+        let dayFmt = DateFormatter()
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+        dayFmt.timeZone = TimeZone(identifier: "UTC")
+        dayFmt.dateFormat = "yyyy-MM-dd"
+        let occDays = Set(f.occurrences.map { dayFmt.string(from: $0) })
+
+        var pass = true
+        if derivedCount != 26 { pass = false; failLine("derived 行数 = \(derivedCount),期望 26(1旧+25新,>20 不截断)") }
+        for w in ["2026-05-16", "2026-06-17"] where !occDays.contains(w) { pass = false; failLine("occurrences 缺 \(w)") }
+        if occDays.contains("2026-01-01") { pass = false; failLine("不该给旧 derived(2026-01-01)记 occurrence") }
+
+        print("--- distill occurrence self-test ---")
+        print("derived 行数: \(derivedCount)  (期望 26,>20 不截断)")
+        print("occurrence 天: \(occDays.sorted())  (期望 = [2026-05-16, 2026-06-17],用 event 发生日)")
+        print(pass ? "✅ PASS" : "❌ FAIL")
+        cleanup()
+        return pass
+    }
+
     nonisolated private func collectEventsByCategory() async -> [String: [EventEntry]] {
         await Task.detached(priority: .userInitiated) {
             Self.scanEventsSync()
