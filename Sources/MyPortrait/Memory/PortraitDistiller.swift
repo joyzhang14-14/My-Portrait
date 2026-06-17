@@ -543,7 +543,13 @@ final class PortraitDistiller {
         file.eventSummary = decision.body
         let newBody = renderBody(decision: decision, derivedIds: mergedDerived)
         file.body = newBody
-        file.recordOccurrence(on: Date())    // mark as "still relevant today"
+        // occurrence 只在【真有新 event 加进 derived】时才 +1 —— 与 writeNewPortrait
+        // 的"无证据不落地"(line 478)对称。否则当 LLM 给空 derived / 给的全是编造被
+        // 剔光 / 给的全是已在 derived 里的 id 时,会出现"occurrence 凭空 +1,但 derived
+        // 没加当天 event、last occurrence 也跟着变,正文什么都没动"。
+        if mergedDerived.count > oldDerived.count {
+            file.recordOccurrence(on: Date())    // 当天有新 event 进 derived → 记一次 occurrence
+        }
         // body 改了 → 刷新 EMA 锚点 + merge 计数(老文件可能 nil,兜 1)。
         file.mergeCount = (file.mergeCount ?? 1) + 1
         let now = Date()
