@@ -184,6 +184,14 @@ struct MyPortraitApp: App {
             RescoreCLI.run()
             // run() exits the process internally.
         }
+        // DEV-ONLY: `--distill-staged` runs the full PortraitDistiller pass but
+        // snapshots portrait/ first → result lands in Pending review (Reject =
+        // rollback, Approve = keep). Use to verify distill changes without
+        // directly polluting live.
+        if args.contains("--distill-staged") {
+            DistillStagedCLI.run()
+            // run() exits the process internally.
+        }
         // DEV-ONLY: `--distill` runs the full PortraitDistiller pass.
         if args.contains("--distill") {
             DistillCLI.run()
