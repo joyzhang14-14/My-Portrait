@@ -460,6 +460,18 @@ final class PortraitDistiller {
         return (kept, dropped)
     }
 
+    /// 从 event id 取它的【发生日】。id 形如 `2026-05-16/cluster-foo.md`,首段就是
+    /// 事件落盘的 UTC 日期(events/ 按 UTC 切日)。用 UTC 解析,跟 recordOccurrence
+    /// 内部 truncateToDay(UTC startOfDay)对齐,occurrence 落在正确那天、不差一天。
+    nonisolated private static func eventDay(fromId id: String) -> Date? {
+        guard let seg = id.split(separator: "/").first else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: String(seg))
+    }
+
     // MARK: - Disk writes
 
     /// 返回 true = 真写了一个新文件;false = 跳过(空溯源)或委托给 update。
@@ -500,9 +512,15 @@ final class PortraitDistiller {
             category: category,
             memberFrameIds: []
         )
-        // weight = ref_count × exp(-Δt / τ);ref_count 跟 body 渲染保持一致
-        // 封顶在 20(renderBody 用 derivedIds.prefix(20)),防止单条超热 facet
-        // 把 weight 拉爆。
+        // occurrences 按每个来源 event 的【实际发生日】(event id 的 UTC 日期前缀)
+        // seed —— 新 portrait 的 occurrence 反映源事件发生的那些天,而非创建运行日。
+        for eid in decision.derivedFromEventIds {
+            if let day = Self.eventDay(fromId: eid) {
+                file.recordOccurrence(on: day)
+            }
+        }
+        // weight = ref_count × exp(-Δt / τ)。ref_count 仍封顶 20,防止单条超热 facet
+        // 把 weight 拉爆 ranking;derived 列表本身已不封顶(全展示)。
         file.weight = PortraitWeight.compute(
             refCount: min(decision.derivedFromEventIds.count, 20),
             lastModified: file.created, now: file.created
@@ -536,25 +554,30 @@ final class PortraitDistiller {
         // 并集（旧的在前、保序），否则 update 会把历史溯源链接抹掉。
         let oldDerived = Self.extractDerivedIds(from: file.body)
         var mergedDerived = oldDerived
+        var newlyAdded: [String] = []
         for id in decision.derivedFromEventIds where !mergedDerived.contains(id) {
             mergedDerived.append(id)
+            newlyAdded.append(id)
         }
         file.eventTitle = decision.title
         file.eventSummary = decision.body
         let newBody = renderBody(decision: decision, derivedIds: mergedDerived)
         file.body = newBody
-        // occurrence 只在【真有新 event 加进 derived】时才 +1 —— 与 writeNewPortrait
-        // 的"无证据不落地"(line 478)对称。否则当 LLM 给空 derived / 给的全是编造被
-        // 剔光 / 给的全是已在 derived 里的 id 时,会出现"occurrence 凭空 +1,但 derived
-        // 没加当天 event、last occurrence 也跟着变,正文什么都没动"。
-        if mergedDerived.count > oldDerived.count {
-            file.recordOccurrence(on: Date())    // 当天有新 event 进 derived → 记一次 occurrence
+        // occurrence 由【新加进 derived 的 event】驱动:每个新 event 按它【实际发生日】
+        //(event id 的 UTC 日期前缀)记一次,而不是 distill 运行日。没有新 event 就
+        // 不记(与 writeNewPortrait "无证据不落地" line 478 对称)—— 杜绝"occurrence
+        // 凭空 +1、last occurrence 跟着变,但 derived 没加当天 event、正文没动"。
+        for eid in newlyAdded {
+            if let day = Self.eventDay(fromId: eid) {
+                file.recordOccurrence(on: day)
+            }
         }
         // body 改了 → 刷新 EMA 锚点 + merge 计数(老文件可能 nil,兜 1)。
         file.mergeCount = (file.mergeCount ?? 1) + 1
         let now = Date()
         file.lastModified = now
-        // weight 用合并后的 ref 数(同样封顶 20,跟 render 一致)。
+        // weight 用合并后的 ref 数,仍封顶 20 防超热 facet 拉爆 ranking
+        //(derived 列表已不封顶,全展示)。
         file.weight = PortraitWeight.compute(
             refCount: min(mergedDerived.count, 20),
             lastModified: now, now: now
@@ -618,7 +641,7 @@ final class PortraitDistiller {
         if !derivedIds.isEmpty {
             lines.append("")
             lines.append("**Derived from events:**")
-            for eid in derivedIds.prefix(20) {
+            for eid in derivedIds {
                 lines.append("- [[\(eid)]]")
             }
         }
