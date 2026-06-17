@@ -105,7 +105,12 @@ final class MemoryScheduler {
     private(set) var personalityProgress = StepProgress()
     /// tick() 自身的可重入防护(timer 与 startup 并发触发时只跑一次)。
     private var tickRunning = false
-    private var timer: Timer?
+    /// 上次 tick 真正起跑的墙钟时刻。周期 catch-up 据此节流(距上次 ≥ tickInterval 才真跑)。
+    private var lastTickAt: Date = .distantPast
+    /// 合盖 / 开盖空闲都能 fire 的周期触发源(P0 探针实测 NSBackgroundActivityScheduler 最抗 DarkWake)。
+    private var bgScheduler: NSBackgroundActivityScheduler?
+    /// 兜底周期触发(DispatchSourceTimer 比 Foundation Timer 在后台略可靠)。
+    private var catchUpTimer: DispatchSourceTimer?
     /// pause 代际计数。pauseInProgressJobs(willSleep / 用户退出)每次 +1;
     /// runStep / runXxxJob 开跑时快照,跑完发现不一致 = 运行期间被 pause
     /// 接管过(行已 paused + 锁已释放 + staging 已 reject)→ 结果作废:
@@ -287,19 +292,17 @@ final class MemoryScheduler {
                              // 会读老值(避免覆盖更早的 user-required kind)
         recoverStaleLocks()
         discardOrphanStagingSnapshots()
-        timer?.invalidate()
-        let t = Timer.scheduledTimer(withTimeInterval: tickInterval, repeats: true) { _ in
-            Task { @MainActor in await MemoryScheduler.shared.tick() }
-        }
-        timer = t
+        startCatchUpTriggers()
         registerSleepWakeHooks()
         registerNetworkMonitor()
         Task { await tick() }
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        bgScheduler?.invalidate()
+        bgScheduler = nil
+        catchUpTimer?.cancel()
+        catchUpTimer = nil
         sleepObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         wakeObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         sleepObserver = nil
@@ -341,6 +344,53 @@ final class MemoryScheduler {
         }
     }
 
+    // MARK: - Catch-up triggers(合盖 / 开盖空闲都能推进)
+
+    /// 起周期触发源,替代原来的 15min Foundation Timer。普通 Timer 在合盖
+    /// DarkWake / 开盖 idle-sleep 里不 fire(P0 探针 scripts/darkwake-probe.swift
+    /// 实测),会让管线一睡就停到开盖。这里两路冗余,都汇到同一个幂等、节流的
+    /// periodicCatchUp:
+    ///   主:NSBackgroundActivityScheduler —— 探针实测在 DarkWake 里 fire 得最勤。
+    ///   兜底:DispatchSourceTimer —— 比 Foundation Timer 在后台略可靠。
+    /// 真正的 tick 仍按 tickInterval 节流,频繁 fire 只是多几次 no-op 检查。
+    /// ⚠️ 注意:合盖 DarkWake 窗口 ~45s,本地 MLX(进程内可续算)能跨窗口磨完,
+    /// 但单次 >45s 的云 RPC 被 suspend 会断、按 backoff 重试到开盖才成 —— 按工作
+    /// 类型分路处理留给 P2(本 P1 只修触发层,对现状严格不劣)。
+    private func startCatchUpTriggers() {
+        bgScheduler?.invalidate()
+        let bas = NSBackgroundActivityScheduler(identifier: "com.myportrait.scheduler.catchup")
+        bas.repeats = true
+        bas.interval = 60
+        bas.tolerance = 30
+        bas.qualityOfService = .utility
+        bas.schedule { [weak self] completion in
+            Task { @MainActor in
+                await self?.periodicCatchUp(reason: "bg-activity")
+                completion(NSBackgroundActivityScheduler.Result.finished)
+            }
+        }
+        bgScheduler = bas
+
+        catchUpTimer?.cancel()
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(10))
+        t.setEventHandler { [weak self] in
+            Task { @MainActor in await self?.periodicCatchUp(reason: "backup-timer") }
+        }
+        t.resume()
+        catchUpTimer = t
+    }
+
+    /// 周期源每分钟来一次,但只在距上次 tick ≥ tickInterval 才真跑(节流)。
+    /// 真跑前先 recoverStaleLocks() —— 跟 didWake 同款:把 willSleep 暂停的 /
+    /// 真崩溃残留的行恢复,这样合盖 DarkWake 窗口里也能续上,不再只等开盖 didWake。
+    private func periodicCatchUp(reason: String) async {
+        guard Date().timeIntervalSince(lastTickAt) >= tickInterval else { return }
+        schedLog.info("periodic catch-up (\(reason, privacy: .public)) — recover + tick")
+        recoverStaleLocks()
+        await tick()
+    }
+
     private func registerNetworkMonitor() {
         let mon = NWPathMonitor()
         mon.pathUpdateHandler = { [weak self] path in
@@ -368,6 +418,7 @@ final class MemoryScheduler {
         guard !tickRunning else { return }
         tickRunning = true
         defer { tickRunning = false }
+        lastTickAt = Date()   // 标记本次 tick 起跑;周期 catch-up 据此节流(见 periodicCatchUp)
         // 有手动触发的结果在等审核 / AI 编辑 draft 在等审 → 暂停定时调度,
         // 避免 distill / personality 跑完覆盖了用户没拍板的改动。
         guard !MemoryStaging.hasPending(.events),
