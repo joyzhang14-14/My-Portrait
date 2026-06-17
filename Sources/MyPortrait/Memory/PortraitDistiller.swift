@@ -498,13 +498,17 @@ final class PortraitDistiller {
         // map back to the underlying event types; other categories are
         // facet-driven portrait entries (treated as `experience` by default).
         let portraitType: String = (category == "emotions") ? "emotion" : "experience"
+        // firstOccurrence 传【最早的 event 发生日】—— 便捷 init 会用它 seed
+        // occurrences=[firstOccurrence],传 Date() 会塞个"今天"的幽灵 occurrence。
+        let firstEventDay = decision.derivedFromEventIds
+            .compactMap { Self.eventDay(fromId: $0) }.min() ?? Date()
         var file = PortraitFile(
             created: Date(),
             // impact: 不传 —— portrait 不持有 impact（event-only 字段）。
             body: renderBody(decision: decision, derivedIds: decision.derivedFromEventIds),
             source: "distilled",
             tags: [category, "portrait"],
-            firstOccurrence: Date(),
+            firstOccurrence: firstEventDay,
             eventTitle: decision.title,
             eventSummary: decision.body,
             eventType: portraitType,
