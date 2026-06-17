@@ -962,6 +962,44 @@ enum DistillCLI {
     }
 }
 
+/// `--distill-staged` — DEV-ONLY. 跟 `--distill` 一样跑全量 PortraitDistiller,
+/// 但**进 staging**:跑前给 portrait/ 拍快照,跑完留在 Pending review,可在 app
+/// 里 Reject(整树回滚)/ Approve(保留)。用来验证 distill 改动而不直接污染 live。
+enum DistillStagedCLI {
+    final class State: @unchecked Sendable {
+        var done = false
+        var code: Int32 = 0
+    }
+
+    static func run() {
+        print("=== distill (staged) ===")
+        let state = State()
+        Task.detached {
+            do {
+                try MemoryStaging.beginRun(.portrait)
+                print("snapshot: portrait/ → .staging/portrait_backup/")
+                let distiller = await PortraitDistiller()
+                let r = try await distiller.distill { p in
+                    print("category \(p.categoryIndex + 1)/\(p.categoryCount): \(p.category) — written so far \(p.written)")
+                }
+                try MemoryStaging.markRan(.portrait, days: [ProcessingLogStore.distillAnchorDate])
+                print("=== distill done (staged for review) ===")
+                print("written \(r.portraitFilesWritten) / updated \(r.portraitFilesUpdated) / archived \(r.archivedCount)")
+                print("LLM-failed categories: \(r.llmFailedCategories)")
+                print("→ 在 app 的 Pending review 审核;Reject 整树回滚,Approve 保留。")
+            } catch {
+                FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
+                state.code = 1
+            }
+            state.done = true
+        }
+        while !state.done {
+            RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
+        }
+        exit(state.code)
+    }
+}
+
 /// `--dump-day <yyyy-MM-dd>` — DEV-ONLY. Exports one day's enriched Tier-1
 /// sessions (id / time / app / window / url / OCR / frame ids) as JSON to
 /// `/tmp/dump_<day>.json`. No LLM call — used to hand data to a subagent
