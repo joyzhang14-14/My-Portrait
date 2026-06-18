@@ -722,7 +722,12 @@ nd = ["# 新 pipeline·成品(阶段0 集成:librime + 14b disambig 重建)\n",
       "⚠️ 已知小瑕疵(待修):的/得(睡得 vs 睡的)、librime 词库无的 slang(卖个惨)、H/I 截断尾巴、canvas 跨app尾巴。\n",
       f"天数:{', '.join(DAYS)}\n", "---\n"]
 for day in DAYS:
-    out = [(rec[6], rec[1], rec[0]) for rec in FINAL[day]] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
+    # 按发送时刻(t1=回车那刻)排序,匹配 Discord/IM 时间线——用户对着 app 按时间逐条核对。
+    # 修前按 t0(开始打字)排:边打边想的长消息会顶到前面错位(ev461「那比如说你就很重要」
+    # 打字 12:28:58、发送 12:31:24,中间先发了「那你真出生」「重要是相对的」,t0 排把它顶到第2位)。
+    # 纯展示层重排,不影响重建/去重/口3。canvas(整篇 essay 重建)非聊天流,仍附末尾。
+    day_final = sorted(FINAL[day], key=lambda r: (r[5] or r[4] or 0))
+    out = [(rec[6], rec[1], rec[0]) for rec in day_final] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
     # 口3 修正审计:改了什么、怎么改的(OCR锚定/双向语境)
