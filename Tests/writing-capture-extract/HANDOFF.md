@@ -477,6 +477,50 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 - 用户要的 **6/6-6/16 md**(看异app是否还在)没跑(一直在修取帧);6/6 巨大855events,可挑天。
 - 类2(尾巴/中间态折叠)/类3(AX末尾用击键兜底)/类4(em过度解码)/类5搜索碎片(v22方向A) 待做。
 
+## ✅ 2026-06-16/17 本 session 修复(em双路 / hermes发送清空 / 全残渣OCR)+ 连发拆分设计
+
+**逐案修(都 commit,原子可 revert)**:
+
+- **`266e13d`+`4f4dbff` em→恶魔 过度解码(双解码路)**:`em`(小写2字母,`cands('em')` TOP=恶魔,像合法拼音)躲过
+  guard 被 librime 当拼音解。两条路各解一次:① 主 `reconstruct`(`faithful_v2:299`)② 口3 OCR 锚不上
+  → 14B 双向语境重试(`faithful_v2:538`)。修=两处对称传 `eng_literals`(新增 `eng_literals_of`):
+  **双return(保历史,input_source=NULL)+ input_source=keylayout(解未来)**,不靠长度(`ni/wo` 照常解码)。
+  guard 在 `rebuild.py:174` 加一条 `residue∈eng_literals → 不解码`。
+- **`8d0abe6` hermes 整句丢(网页发送清空)**:ChatGPT 等网页打字 AX **不建 typing_event**,只在发送清空记一个
+  **光杆 delete**(text=完整消息+`\n`,end_value 空);旧 delete 分支要 `isMark` 占位符+`cover` 背书,光杆过不了
+  → 整句丢 → fallback 击键账本按 `<CR>` 切碎+漏段。修:① `rebuild.py` delete 分支加 `send_clear`
+  (原文以`\n`结尾+`sent()`回车+框空)豁免 isMark/cover ② `faithful_v2` 账本消费窗对长段(≥6字)回看放宽 60s
+  (接住被发送清空记录涵盖的击键碎片免重复)。验证:整句以 `[ax_cleaned]` 入册,碎片消费。
+- **`178b41f` 全残渣短消息 OCR 整句救援(从哪找的案)**:`congnazhaod1` 你输入法#1=**从哪找的**,librime#1=
+  **从那找到**(到/那 同击键,verify_tail 都过 → OCR 是唯一裁判)。OCR 帧有「从哪找的」但口3 用不上:
+  `proofread_tail` 的 `base`(可锚前缀)=空(整条机器解码)→ 「base太短无法锚定,待建」直接放弃。
+  修=补 `_whole_residue_ocr`(`ocr3.py`):机器猜首字锚 OCR 帧→取等长窗→同长+位置重合≥半+击键验证→以屏幕为准。
+  补上了 `ocr3:212` 明标的待建洞。离线验证 ev426 从那找到→从哪找的;ocr3 七案例零回归。
+- **`a5c0363` gold D4 探针**:ban「从那找到」。现 gold 有 D1(#60抢)/D2(#13占大头)/D3(斜杠)/D4(从哪找的)。
+
+**⚠️ 文档陈旧(下个 session 别被骗)**:
+
+- **REVIEW_MODE 默认已是 `det`**(`faithful_v2:241`,本 HANDOFF「怎么跑」段+429/511 行还写 llm/`:206` 是**陈旧**)。
+- `enzh_double_return.py` docstring 还写「⏳待接下一session」——**早接了**(`faithful_v2:411` double_return_literal)。
+- 临时文件 `analyze_enzh*.py`×4 + `rime/cands_batch*` 待清。
+
+**v23 产出(用户审核中)**:`Pipeline成品归档/v23-库中有的全date(5.24-6.5,det,本session全修).md`(本地全管线,
+含 5/28-29 canvas_merge 重建的 essay)+ `v23-库中产出对照(5.24-6.5).md`(生产 writing_records)。
+**生产写作采集只到 6/5**(之后转本地实验未跑生产),6/5 后无库中对照 → `v23延伸-6.6-6.17(库中无对照).md`。
+**采集起点 = 5/24 20:07**(typing_events 与写作采集同时起,5/24 之前无打字采集)。用户已逐条标 5/24(6处❌/✅)。
+
+**🎯 下个 session 主线 = 连发拆分(survey #42,用户设计)**:
+
+- **现象**:Discord 快速连发多条,AX 记成**一个 typing_event** 只 1 条 submit;commit 流里前面几条连发**全漏**。
+  5/25 Discord 实测 ~19 条漏(ev435/438/456「你能通过这个数据把我复活」/473/475/487… = 现成 failing case)。
+- **用户设计(方向对)**:**keystroke `<CR>` 为单位切**(发送即回车,连发天然拆开)+ **AX 多行(含`\n`)合并**
+  (Notes/shift+enter 的换行是消息内部,按 AX 并回)。两信号正交。
+- **三个坑**:① IME 上屏回车/选字确认 ≠ 发送回车(双return),切完丢 trivial 段 + AX 合并兜② Enter=换行的 app
+  靠 AX 多行兜③ AX 多行↔击键段映射按内容/拼音+时间对齐。⚠️ 动切分单元=架构级,send 检测改坏过,要小心。
+- **同族**:hermes(多发送)已治网页发送清空那一面;连发是「事件内多条」那一面。
+
+**⏳ 验证中**:`be273o06o`(5/25+gold天,验全残渣OCR修复:5/25 #31 从那找到→从哪找的 + D4✓ + gold 不回归)。
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
