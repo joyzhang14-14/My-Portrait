@@ -701,9 +701,16 @@ private struct MemoryProviderStep: View {
         let models = selectedProvider?.availableModels ?? []
 
         VStack(alignment: .leading, spacing: 12) {
+            // 没选有效 provider → 上方红字提示,picker 本身留空白
+            //(不在下拉里塞占位项)。
+            if selectedProvider == nil {
+                Text("Please select a provider")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             row("Provider", desc: "Which AI service to use.") {
                 Picker("", selection: providerBinding) {
-                    Text("Please select a provider").tag("")
                     ForEach(availableProviders, id: \.rawValue) { p in
                         Text(Self.providerDisplayName(p)).tag(p.rawValue)
                     }
