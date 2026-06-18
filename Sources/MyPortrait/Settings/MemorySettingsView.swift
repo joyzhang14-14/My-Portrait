@@ -1120,9 +1120,26 @@ struct MemorySettingsView: View {
         let availableProviders = Provider.allCases.filter {
             appState.isConnected($0.integrationId)
         }
-        let providerId = cfg.current.memory.providerId
-        let selectedProvider = Provider(rawValue: providerId) ?? .chatgpt
-        let models = selectedProvider.availableModels
+        // 选中的 provider 必须是「已连接」的;否则视为未选(空 / 已断开 →
+        // picker 显示 "Please select a provider")。
+        let selectedProvider: Provider? = {
+            guard let p = Provider(rawValue: cfg.current.memory.providerId),
+                  availableProviders.contains(p) else { return nil }
+            return p
+        }()
+        // provider picker 绑定:get 把无效/未连接的值归一成 "";set 换 provider
+        // 时清掉旧 model(可能不在新 provider 的列表里)。
+        let providerBinding = Binding<String>(
+            get: { selectedProvider?.rawValue ?? "" },
+            set: { newId in
+                cfg.mutate {
+                    $0.memory.providerId = newId
+                    $0.memory.model = ""
+                    $0.memory.modelLight = ""
+                }
+            }
+        )
+        let models = selectedProvider?.availableModels ?? []
 
         return section(
             title: "AI provider",
@@ -1138,7 +1155,8 @@ struct MemorySettingsView: View {
                     Text("Provider")
                         .font(.system(size: 12))
                         .frame(maxWidth: 280, alignment: .leading)
-                    Picker("", selection: cfg.binding(\.memory.providerId)) {
+                    Picker("", selection: providerBinding) {
+                        Text("Please select a provider").tag("")
                         ForEach(availableProviders, id: \.rawValue) { p in
                             Text(Self.providerDisplayName(p)).tag(p.rawValue)
                         }
@@ -1146,25 +1164,32 @@ struct MemorySettingsView: View {
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                HStack(spacing: 12) {
-                    Text("Main model (heavy tasks)")
-                        .font(.system(size: 12))
-                        .frame(maxWidth: 280, alignment: .leading)
-                    Picker("", selection: cfg.binding(\.memory.model)) {
-                        ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                // 选了有效 provider 才显示 model 行 —— "Please select" 状态下列空
+                // 模型没意义。空串 tag = "Provider default"(resolvedModel 映射到
+                // provider.defaultModel)。
+                if selectedProvider != nil {
+                    HStack(spacing: 12) {
+                        Text("Main model (heavy tasks)")
+                            .font(.system(size: 12))
+                            .frame(maxWidth: 280, alignment: .leading)
+                        Picker("", selection: cfg.binding(\.memory.model)) {
+                            Text("Provider default").tag("")
+                            ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                HStack(spacing: 12) {
-                    Text("Light model (clustering / writing capture)")
-                        .font(.system(size: 12))
-                        .frame(maxWidth: 280, alignment: .leading)
-                    Picker("", selection: cfg.binding(\.memory.modelLight)) {
-                        ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                    HStack(spacing: 12) {
+                        Text("Light model (clustering / writing capture)")
+                            .font(.system(size: 12))
+                            .frame(maxWidth: 280, alignment: .leading)
+                        Picker("", selection: cfg.binding(\.memory.modelLight)) {
+                            Text("Provider default").tag("")
+                            ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }

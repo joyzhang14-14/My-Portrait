@@ -680,18 +680,30 @@ private struct MemoryProviderStep: View {
 
     @ViewBuilder
     private var providerCard: some View {
-        let providerId = config.current.memory.providerId
-        // 只认「已连接」的 provider:默认 providerId=chatgpt,新用户只连了别家
-        // 时 rawValue 解析照样成功,旧逻辑会选中未连接的 Codex → 模型列表错位,
-        // onboarding 结束留下必然失败的 memory 配置且无任何提示。
-        let parsed = Provider(rawValue: providerId)
-        let selectedProvider = parsed.flatMap { availableProviders.contains($0) ? $0 : nil }
-            ?? availableProviders.first ?? .chatgpt
-        let models = selectedProvider.availableModels
+        // 选中的 provider 必须「已连接」;否则视为未选(空 / 已断开 → picker
+        // 显示 "Please select a provider")。不再自动落到第一家 —— 让用户主动选。
+        let selectedProvider: Provider? = {
+            guard let p = Provider(rawValue: config.current.memory.providerId),
+                  availableProviders.contains(p) else { return nil }
+            return p
+        }()
+        // provider picker 绑定:get 归一无效值成 "";set 换 provider 时清旧 model。
+        let providerBinding = Binding<String>(
+            get: { selectedProvider?.rawValue ?? "" },
+            set: { newId in
+                config.mutate {
+                    $0.memory.providerId = newId
+                    $0.memory.model = ""
+                    $0.memory.modelLight = ""
+                }
+            }
+        )
+        let models = selectedProvider?.availableModels ?? []
 
         VStack(alignment: .leading, spacing: 12) {
             row("Provider", desc: "Which AI service to use.") {
-                Picker("", selection: config.binding(\.memory.providerId)) {
+                Picker("", selection: providerBinding) {
+                    Text("Please select a provider").tag("")
                     ForEach(availableProviders, id: \.rawValue) { p in
                         Text(Self.providerDisplayName(p)).tag(p.rawValue)
                     }
@@ -699,25 +711,26 @@ private struct MemoryProviderStep: View {
                 .labelsHidden()
                 .frame(maxWidth: 280)
             }
-            Divider().overlay(Color.primary.opacity(0.08))
-            row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
-                // 空串 tag = "Provider default"(schema 约定),否则清空后
-                // picker 选中态显示空白。
-                Picker("", selection: config.binding(\.memory.model)) {
-                    Text("Provider default").tag("")
-                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+            // 选了有效 provider 才显示 model 行。空串 tag = "Provider default"。
+            if selectedProvider != nil {
+                Divider().overlay(Color.primary.opacity(0.08))
+                row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
+                    Picker("", selection: config.binding(\.memory.model)) {
+                        Text("Provider default").tag("")
+                        ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 280)
                 }
-                .labelsHidden()
-                .frame(maxWidth: 280)
-            }
-            Divider().overlay(Color.primary.opacity(0.08))
-            row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
-                Picker("", selection: config.binding(\.memory.modelLight)) {
-                    Text("Provider default").tag("")
-                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                Divider().overlay(Color.primary.opacity(0.08))
+                row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
+                    Picker("", selection: config.binding(\.memory.modelLight)) {
+                        Text("Provider default").tag("")
+                        ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 280)
                 }
-                .labelsHidden()
-                .frame(maxWidth: 280)
             }
         }
         .padding(14)
@@ -726,31 +739,6 @@ private struct MemoryProviderStep: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
         )
-        .onAppear { normalizeMemoryProvider() }
-        .onChange(of: config.current.memory.providerId) { old, new in
-            // provider 真换了(用户拨 picker / 上面的归一落回)→ 旧 provider
-            // 的模型名失效,清回空串(schema 约定:空串 = provider 默认模型)。
-            // **只在 providerId 变化时清**:不能按硬编码模型清单当白名单去洗
-            // 合法配置 —— 用户 vim 手填的 ollama 自定义 tag(如 qwen3:1.7b)
-            // 不在清单里但完全可用,洗掉等于破坏配置。
-            guard old != new else { return }
-            config.mutate {
-                $0.memory.model = ""
-                $0.memory.modelLight = ""
-            }
-        }
-    }
-
-    /// 只修一种情况:providerId 指向**未连接**的 provider(新用户默认
-    /// chatgpt 没连 / 重放 onboarding 时原 provider 已断)→ 落回第一个已
-    /// 连接的,旧 provider 的模型名连带清空(由上面 onChange 完成)。
-    /// provider 合法时**什么都不动** —— 重放 onboarding 仅仅浏览页面不该
-    /// 改写用户配置。
-    private func normalizeMemoryProvider() {
-        guard availableProviders.first != nil else { return }   // 一个都没连,picker 不展示
-        let parsed = Provider(rawValue: config.current.memory.providerId)
-        if let p = parsed, availableProviders.contains(p) { return }
-        config.mutate { $0.memory.providerId = availableProviders[0].rawValue }
     }
 
     @ViewBuilder
