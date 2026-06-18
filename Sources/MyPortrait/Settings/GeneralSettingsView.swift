@@ -30,27 +30,6 @@ struct GeneralSettingsView: View {
                     Toggle("", isOn: config.binding(\.general.autoDownloadUpdates)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
-                SettingsRow("Update check interval",
-                            description: "How often (in minutes) to look for a new build. Min 1, max 1440.",
-                            icon: "clock.arrow.circlepath") {
-                    HStack(spacing: 4) {
-                        TextField("", value: config.binding(\.general.updateCheckMinutes),
-                                  formatter: Self.minutesFormatter)
-                            .textFieldStyle(.plain)
-                            .multilineTextAlignment(.trailing)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
-                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.10), lineWidth: 1))
-                            )
-                            .frame(width: 70)
-                        Text("min")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                    }
-                }
-                SettingsDivider()
                 SettingsRow("Check for updates now",
                             description: "Force Sparkle to query the GitHub appcast immediately.",
                             icon: "arrow.clockwise.circle") {
@@ -58,9 +37,10 @@ struct GeneralSettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
             }
-            // 两个字段的同步由 UpdaterService.observeConfig() 常驻监听
+            // autoDownloadUpdates 的同步由 UpdaterService.observeConfig() 常驻监听
             //(这里以前挂过 onChange,但页面不在屏幕上时没人监听,vim 改
             // TOML 热加载后配置就是死的 —— 已收编进 service 本体)。
+            // 检查间隔已写死 10 分钟,不再可配。
 
             // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
@@ -106,12 +86,6 @@ struct GeneralSettingsView: View {
             }
         }
     }
-
-    private static let minutesFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.minimum = 1; f.maximum = 1440; f.allowsFloats = false
-        return f
-    }()
 
     /// 显示给用户的版本号 —— 只显示 marketing version
     /// (CFBundleShortVersionString,"1.0.82" 之类)。Build number

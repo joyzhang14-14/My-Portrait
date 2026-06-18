@@ -344,8 +344,7 @@ final class ConfigStore {
         // — General
         c.general.launchAtLogin           = bool(ud, "Settings.launchAtLogin",         default: c.general.launchAtLogin)
         c.general.autoDownloadUpdates     = bool(ud, "Settings.autoDownloadUpdates",   default: c.general.autoDownloadUpdates)
-        let mins = ud.integer(forKey: "Settings.updateCheckMinutes")
-        if mins > 0 { c.general.updateCheckMinutes = mins }
+        // updateCheckMinutes 字段已下线(检查间隔写死 10min),旧 UserDefaults 不再迁移。
 
         // — Recording / audio
         c.capture.audio.enabled                = bool(ud, "Settings.audioRecordingEnabled",  default: c.capture.audio.enabled)
