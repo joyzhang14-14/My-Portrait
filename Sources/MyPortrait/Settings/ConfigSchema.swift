@@ -411,41 +411,14 @@ struct GeneralConfig: Codable, Equatable {
 struct AIModelsConfig: Codable, Equatable {
     var presets: [AIPresetSpec] = []
 
-    /// Integration id (chatgpt / anthropic-api / gemini / ollama) → 是否在
-    /// chat picker 里隐藏。Connections 里照常连着,只是聊天选不到。
-    var disabledProviderIds: [String] = []
-
-    /// Integration id → 用户勾选的可见 model 子集。不在 map / 空数组 = "全部
-    /// model 都可见"(向后兼容默认值)。空 string array 等价于"一个都不留",
-    /// chat picker 里 model 列表会空 —— UI 不允许保存空数组。
-    var enabledModelsByProvider: [String: [String]] = [:]
-
     init() {}
     enum CodingKeys: String, CodingKey {
         case presets
-        case disabledProviderIds        = "disabled_provider_ids"
-        case enabledModelsByProvider    = "enabled_models_by_provider"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        presets                  = c.dflt([AIPresetSpec].self,        .presets, presets)
-        disabledProviderIds      = c.dflt([String].self,              .disabledProviderIds, disabledProviderIds)
-        enabledModelsByProvider  = c.dflt([String: [String]].self,    .enabledModelsByProvider, enabledModelsByProvider)
-    }
-
-    /// chat picker 用:某个 integration 是否可见。
-    func isProviderEnabled(_ integrationId: String) -> Bool {
-        !disabledProviderIds.contains(integrationId)
-    }
-
-    /// chat picker 用:某个 integration 应该列哪些 model。没配置过 = 全列。
-    func visibleModels(forIntegrationId id: String, available: [String]) -> [String] {
-        guard let picked = enabledModelsByProvider[id], !picked.isEmpty else {
-            return available
-        }
-        let set = Set(picked)
-        return available.filter { set.contains($0) }
+        presets = c.dflt([AIPresetSpec].self, .presets, presets)
     }
 }
 

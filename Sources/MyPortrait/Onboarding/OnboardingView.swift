@@ -633,10 +633,8 @@ private struct MemoryProviderStep: View {
     @State private var config = ConfigStore.shared
 
     private var availableProviders: [Provider] {
-        let aiCfg = config.current.aiModels
-        return Provider.allCases.filter {
+        Provider.allCases.filter {
             appState.isConnected($0.integrationId)
-            && !aiCfg.disabledProviderIds.contains($0.integrationId)
         }
     }
 
@@ -689,10 +687,7 @@ private struct MemoryProviderStep: View {
         let parsed = Provider(rawValue: providerId)
         let selectedProvider = parsed.flatMap { availableProviders.contains($0) ? $0 : nil }
             ?? availableProviders.first ?? .chatgpt
-        let models = config.current.aiModels.visibleModels(
-            forIntegrationId: selectedProvider.integrationId,
-            available: selectedProvider.availableModels
-        )
+        let models = selectedProvider.availableModels
 
         VStack(alignment: .leading, spacing: 12) {
             row("Provider", desc: "Which AI service to use.") {

@@ -1114,34 +1114,22 @@ struct MemorySettingsView: View {
     /// Memory pipeline 用哪个 AI provider + 哪两档 model。改完立即生效
     ///(scheduler 每次跑都现读 config),无需重启 app。
     ///
-    /// 可选项跟 Settings → AI Models 联动:在那边关掉的 provider 这里就不
-    /// 列;每个 provider 的 model 下拉也只列那边勾上的子集。AI Models 那边
-    /// 完全没勾过 = 走 provider 全量(向后兼容)。
+    /// 可选项直接读 Connections —— 连了就在列,所有 model 都可选。原 AI Models
+    /// 页那层 "禁用 provider / 隐藏 model" 已下线。
     private var providerSection: some View {
-        let aiCfg = cfg.current.aiModels
-        // Provider 列表:要同时满足
-        //   1) Connections 里已连上(appState.connectedIds 有 integrationId)
-        //   2) AI Models 那边没被 toggle off(disabledProviderIds 不含)
-        // 跟 Settings → AI Models 用同一套谓词,避免出现「没连接的 provider
-        // 也能选中给 memory pipeline 用」。
         let availableProviders = Provider.allCases.filter {
             appState.isConnected($0.integrationId)
-            && !aiCfg.disabledProviderIds.contains($0.integrationId)
         }
         let providerId = cfg.current.memory.providerId
         let selectedProvider = Provider(rawValue: providerId) ?? .chatgpt
-        // Model 列表:走 AIModelsConfig.visibleModels(空 / 缺省 = 全量)。
-        let models = aiCfg.visibleModels(
-            forIntegrationId: selectedProvider.integrationId,
-            available: selectedProvider.availableModels
-        )
+        let models = selectedProvider.availableModels
 
         return section(
             title: "AI provider",
-            blurb: "Which AI model powers the memory features. The list comes from Settings → AI Models, so disable a provider or hide a model there to remove it here. Changes take effect on the next run."
+            blurb: "Which AI model powers the memory features. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
         ) {
             if availableProviders.isEmpty {
-                Text("All AI providers are disabled in Settings → AI Models. Enable at least one to run the memory pipeline.")
+                Text("No AI providers connected. Open Settings → Connections to add ChatGPT, Anthropic, Gemini, Ollama, etc.")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
