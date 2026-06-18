@@ -11,13 +11,41 @@ HAN = re.compile(r'[一-鿿]')
 def han_n(s): return len(HAN.findall(s or ''))
 def cv(s): return re.sub(r'\s', '', s or '')
 
-def segment_keystrokes(con, bundle, day):
-    """按 <CR> 切击键段。返回 [{t0,t1,cr_ts,py,src,dirty}]。<BS> 即时回放;不丢任何段。"""
+def commit_marks(con, bundle, day):
+    """返回 (commit_times, send_times):commit 全部时刻 + ﻿\\n 框清空(真发送)标记时刻。"""
+    evs = con.execute(
+        "SELECT edit_log FROM typing_events WHERE bundle_id=? "
+        "AND strftime('%Y-%m-%d',started_at/1000,'unixepoch')=? ORDER BY started_at",
+        (bundle, day)).fetchall()
+    cts, sts = [], []
+    for (el,) in evs:
+        try:
+            arr = json.loads(el or '[]')
+        except Exception:
+            arr = []
+        for e in arr:
+            if e.get('kind') == 'commit':
+                ts = int(e.get('ts') or 0)
+                cts.append(ts)
+                if '\n' in (e.get('text') or '') or '\r' in (e.get('text') or ''):
+                    sts.append(ts)
+    return sorted(cts), sorted(sts)
+
+def segment_keystrokes(con, bundle, day, send_win=1500):
+    """每个 <CR> **默认是发送**(击键回车=Discord发送,zero-loss)。唯一例外=**IME 确认上屏英文**
+    (sandisk案):回车前那串键是**英文键盘**(input_source=keylayout)且无 ﻿\\n 框清空标记 → 确认回车,合并。
+    判英文只信 input_source(commit里拼音也是拉丁,分不开;﻿\\n 仅53个<回车123,太稀疏不能反推)。
+    ⚠️历史数据 input_source=NULL → 永远发送(回退 v2,sandisk 会拆,新数据才合并)。返回 [{...,py,dirty}]。"""
     rows = con.execute(
         "SELECT ts_ms,char,is_backspace,modifiers,input_source FROM keystroke_log "
         "WHERE bundle_id=? AND strftime('%Y-%m-%d',ts_ms/1000,'unixepoch')=? ORDER BY ts_ms",
         (bundle, day)).fetchall()
-    segs, cur, srcs, dirty = [], [], set(), False
+    _, sts = commit_marks(con, bundle, day)
+    import bisect
+    def near(arr, t):
+        i = bisect.bisect_left(arr, t - send_win)
+        return i < len(arr) and arr[i] <= t + send_win
+    segs, cur, srcs, dirty, last_isrc = [], [], set(), False, None
     for ts, c, bs, md, isrc in rows:
         if md & 7:
             continue
@@ -30,6 +58,10 @@ def segment_keystrokes(con, bundle, day):
         if not c:
             continue
         if c in ('\n', '\r'):
+            # 合并条件:回车前那串键是英文键盘(keylayout)+ 无框清空标记 = IME确认上屏英文(sandisk)
+            eng_confirm = (last_isrc and 'keylayout' in last_isrc) and not near(sts, ts)
+            if eng_confirm:
+                continue                                    # 确认回车 → 不切,合并
             if cur:
                 segs.append({'t0': cur[0][0], 't1': cur[-1][0], 'cr_ts': ts,
                              'py': ''.join(x[1] for x in cur), 'src': set(srcs), 'dirty': dirty})
@@ -37,7 +69,7 @@ def segment_keystrokes(con, bundle, day):
         else:
             cur.append((ts, c))
             if isrc:
-                srcs.add(isrc)
+                srcs.add(isrc); last_isrc = isrc
     if cur:
         segs.append({'t0': cur[0][0], 't1': cur[-1][0], 'cr_ts': None,
                      'py': ''.join(x[1] for x in cur), 'src': set(srcs), 'dirty': dirty, 'unsent': True})
@@ -108,30 +140,40 @@ def all_commits(con, bundle, day):
     cm.sort()
     return cm
 
-def build_sends(con, bundle, day, model_fn=None):
-    """两流合并:击键 <CR> = 权威发送边界(全);逐条 commit 按时间戳落进它所属的段
-    (prev_cr < ts ≤ cr+margin)→ 该段真字主体。reconstruct(真字, 击键):有真字根治同音,
-    无真字退 librime。返回 [{t0,t1,text,via,dirty}],按发送时刻排。"""
-    import rebuild as R
+def segment_sends(con, bundle, day):
+    """**给 faithful_v2 整合用**:只产发送边界 + commit 真字主体(captured),不解码。
+    每个真发送段配 commit 真字(按击键边界逐条落)。返回 [{t0,t1,captured,dirty}]。
+    下游由 faithful_v2 完整链(reconstruct + literal_tail + 口3 + 14B)做文字复原/补尾/消歧。"""
     ksegs = [s for s in segment_keystrokes(con, bundle, day) if not s.get('unsent')]
     ksegs.sort(key=lambda s: s['cr_ts'] or s['t1'])
     cm = all_commits(con, bundle, day)
-    out = []
-    ci = 0
-    prev = 0
-    for s in ksegs:
+    out, ci, prev = [], 0, 0
+    for i, s in enumerate(ksegs):
         cr = s['cr_ts'] or s['t1']
+        # 上界 = 下一条**开始打字**之前(IME commit 有滞后,本条末字「重要」的 commit 常落在 cr 之后、
+        # 下条打字之前;旧 AX 用事件 FINAL text 等所有 commit 落定才完整,这里同理收滞后尾)
+        upper = (ksegs[i + 1]['t0'] - 50) if i + 1 < len(ksegs) else (cr + 60000)
         chunk = []
-        while ci < len(cm) and cm[ci][0] <= cr + 300:
+        while ci < len(cm) and cm[ci][0] < upper:
             if cm[ci][0] > prev:
                 chunk.append(cm[ci][1])
             ci += 1
         prev = cr
-        raw = ''.join(chunk)
-        han = ''.join(c for c in raw if HAN.match(c))      # 真字主体(汉字优先,丢拼音残片)
-        txt, _ = R.reconstruct_message(han, s['py'], model_fn=model_fn)
-        out.append({'t0': s['t0'], 't1': cr, 'text': cv(txt),
-                    'via': 'AX真字' if han else 'librime', 'dirty': s['dirty']})
+        han = ''.join(c for c in ''.join(chunk) if HAN.match(c))   # 真字主体(汉字优先,丢拼音残片)
+        out.append({'t0': s['t0'], 't1': cr, 'captured': han, 'dirty': s['dirty']})
+    return out
+
+def build_sends(con, bundle, day, model_fn=None):
+    """独立原型用:segment_sends + 自己调 reconstruct(无补尾链,只看切分/复原雏形)。
+    整合进 faithful_v2 走 segment_sends(让完整链补尾/消歧)。"""
+    import rebuild as R
+    out = []
+    ksegs = {(s['t0']): s for s in segment_keystrokes(con, bundle, day) if not s.get('unsent')}
+    for s in segment_sends(con, bundle, day):
+        py = ksegs.get(s['t0'], {}).get('py', '')
+        txt, _ = R.reconstruct_message(s['captured'], py, model_fn=model_fn)
+        out.append({'t0': s['t0'], 't1': s['t1'], 'text': cv(txt),
+                    'via': 'AX真字' if s['captured'] else 'librime', 'dirty': s['dirty']})
     return out
 
 if __name__ == "__main__":
