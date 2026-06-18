@@ -1151,12 +1151,19 @@ struct MemorySettingsView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
+                // 没选有效 provider → 上方红字提示,picker 本身留空白
+                //(不在下拉里塞占位项)。
+                if selectedProvider == nil {
+                    Text("Please select a provider")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 HStack(spacing: 12) {
                     Text("Provider")
                         .font(.system(size: 12))
                         .frame(maxWidth: 280, alignment: .leading)
                     Picker("", selection: providerBinding) {
-                        Text("Please select a provider").tag("")
                         ForEach(availableProviders, id: \.rawValue) { p in
                             Text(Self.providerDisplayName(p)).tag(p.rawValue)
                         }
