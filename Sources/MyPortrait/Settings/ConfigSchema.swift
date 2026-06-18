@@ -159,10 +159,15 @@ struct MemoryConfig: Codable, Equatable {
     // LLM provider used by the memory pipeline. providerId 匹配 Provider 的
     // rawValue("chatgpt"/"anthropic"/"claude-code"/...);model 是主任务模型
     //(EventBuilder/Distiller/Personality 等),modelLight 是轻任务模型
-    //(Cluster/WritingPass1/Pass3)。空串 = 用 provider.defaultModel。
-    var providerId:            String = "chatgpt"
-    var model:                 String = "gpt-5.4"
-    var modelLight:            String = "gpt-5.4-mini"
+    //(Cluster/WritingPass1/Pass3)。
+    //
+    // **默认全空串 = 用户还没选**:UI(Settings → Parameter / Onboarding)显示
+    // "Please select a provider",不预选任何一家(用户原话:选哪个当默认都不
+    // 合适)。pipeline 侧 resolvedProvider 仍兜底到 chatgpt 防崩溃;真没连
+    // chatgpt 时该 run 自然 auth 失败,跟以前一样。model 空串 = provider.defaultModel。
+    var providerId:            String = ""
+    var model:                 String = ""
+    var modelLight:            String = ""
 
     init() {}
     enum CodingKeys: String, CodingKey {
