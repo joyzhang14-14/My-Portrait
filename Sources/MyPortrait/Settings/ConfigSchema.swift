@@ -376,7 +376,6 @@ struct DisplayConfig: Codable, Equatable {
 struct GeneralConfig: Codable, Equatable {
     var launchAtLogin:       Bool = false
     var autoDownloadUpdates: Bool = true
-    var updateCheckMinutes:  Int  = 60
     /// 首启 onboarding 是否走完(或被用户 Skip 到最后 Finish)。false → app
     /// 启动时 ContentView 弹 onboarding sheet 挡住主 UI;走完 sheet 自动关。
     /// 默认 false → 全新安装自动看到 onboarding。Settings → General → Onboarding
@@ -394,7 +393,6 @@ struct GeneralConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
         case autoDownloadUpdates  = "auto_download_updates"
-        case updateCheckMinutes   = "update_check_minutes"
         case onboardingCompleted  = "onboarding_completed"
         case cronJobHistoryLimit  = "cron_job_history_limit"
         case autoScanImports      = "auto_scan_imports"
@@ -404,7 +402,6 @@ struct GeneralConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         launchAtLogin       = c.dflt(Bool.self, .launchAtLogin, launchAtLogin)
         autoDownloadUpdates = c.dflt(Bool.self, .autoDownloadUpdates, autoDownloadUpdates)
-        updateCheckMinutes  = c.dflt(Int.self,  .updateCheckMinutes, updateCheckMinutes)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
         cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
         autoScanImports     = c.dflt(Bool.self, .autoScanImports, autoScanImports)

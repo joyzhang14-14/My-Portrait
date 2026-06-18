@@ -6,9 +6,9 @@ import Sparkle
 ///
 /// Sparkle 自己内部已经是个完整的 controller + delegate 体系,我们这里只做两件事:
 ///   1. 持有 SPUStandardUpdaterController 让它活着(否则 controller 销毁自动检查就停)
-///   2. 把 ConfigStore.general 里的两个用户设置接到 SPUUpdater 上:
-///        - autoDownloadUpdates → updater.automaticallyDownloadsUpdates
-///        - updateCheckMinutes  → updater.updateCheckInterval(秒)
+///   2. 把 ConfigStore.general.autoDownloadUpdates 接到 SPUUpdater 上
+///      (→ updater.automaticallyDownloadsUpdates)。检查间隔写死
+///      checkIntervalMinutes(10min),不再可配。
 ///
 /// 启动检查 + 后台轮询都由 Sparkle 自己跑(automaticallyChecksForUpdates=true)。
 /// 用户点 "Check for Updates" 菜单 → updater.checkForUpdates()。
@@ -26,11 +26,15 @@ final class UpdaterService: NSObject {
     /// Sparkle delegate(必须 strong 持有 —— Sparkle weak-ref delegate)。
     private let bannerDelegate = UpdateBannerDelegate()
 
+    /// 检查间隔(分钟)—— 写死,不再可配(原 General → Update check interval
+    /// 字段已下线)。
+    static let checkIntervalMinutes = 10
+
     /// 自己跑的 check timer。Sparkle 内部 scheduler 在 Release build 强制
     /// 最小检查间隔 1h(SPUUpdaterSettings.minimumUpdateCheckInterval 写死),
-    /// UI 设 1min 实际还是 1h 才 check。**我们关掉 Sparkle 自动 scheduler,
-    /// 自己驱动 checkForUpdatesInBackground()**(developer-facing API
-    /// 不被 minimum 拦),用户设多久就多久。
+    /// 实际还是 1h 才 check。**我们关掉 Sparkle 自动 scheduler,自己驱动
+    /// checkForUpdatesInBackground()**(developer-facing API 不被 minimum 拦),
+    /// 按 checkIntervalMinutes 跑。
     private var checkTimer: Timer?
 
     private override init() {
@@ -56,27 +60,24 @@ final class UpdaterService: NSObject {
         observeConfig()
     }
 
-    /// 上次应用过的两个字段值。@Observable 追踪粒度是整个 `current`,任意
-    /// config 变更都会触发 onChange —— 必须 diff 真值,只在这两个字段真变了
-    /// 才 applyConfig(否则随便改个别的设置都会重建 timer + 立即触发一次检查)。
-    private var observedGeneral: (minutes: Int, autoDownload: Bool) = (0, false)
+    /// 上次应用过的 autoDownloadUpdates 值。@Observable 追踪粒度是整个 `current`,
+    /// 任意 config 变更都会触发 onChange —— 必须 diff 真值,只在它真变了才
+    /// applyConfig(否则随便改个别的设置都会重建 timer + 立即触发一次检查)。
+    private var observedAutoDownload: Bool = false
 
-    /// 常驻监听 updateCheckMinutes / autoDownloadUpdates。之前重应用职责挂在
+    /// 常驻监听 autoDownloadUpdates。之前重应用职责挂在
     /// GeneralSettingsView 的 onChange 上 —— 页面不在屏幕上就没人监听,
     /// vim 改 TOML(ConfigStore 热加载)后 SPUUpdater 和 checkTimer 仍按旧值
     /// 跑到下次重启。其它模块(ConfigApplier / Services)都用常驻
     /// withObservationTracking,updater 对齐。
     private func observeConfig() {
-        let g = ConfigStore.shared.current.general
-        observedGeneral = (g.updateCheckMinutes, g.autoDownloadUpdates)
+        observedAutoDownload = ConfigStore.shared.current.general.autoDownloadUpdates
         withObservationTracking {
-            _ = ConfigStore.shared.current.general.updateCheckMinutes
             _ = ConfigStore.shared.current.general.autoDownloadUpdates
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let g = ConfigStore.shared.current.general
-                if (g.updateCheckMinutes, g.autoDownloadUpdates) != self.observedGeneral {
+                if ConfigStore.shared.current.general.autoDownloadUpdates != self.observedAutoDownload {
                     self.applyConfig()
                 }
                 self.observeConfig()   // withObservationTracking 一次性,重订阅
@@ -122,10 +123,9 @@ final class UpdaterService: NSObject {
         u.automaticallyChecksForUpdates = false
         u.automaticallyDownloadsUpdates = g.autoDownloadUpdates
 
-        // 重启 checkTimer 按新间隔跑
-        let clamped = max(1, min(1440, g.updateCheckMinutes))
+        // 检查间隔写死 10 分钟(原来可配,UI 已下线)。
         checkTimer?.invalidate()
-        let interval = TimeInterval(clamped * 60)
+        let interval = TimeInterval(Self.checkIntervalMinutes * 60)
         // **fires=true** 立刻先 check 一次,然后每 interval 再 check
         let t = Timer(timeInterval: interval, repeats: true) { _ in
             Task { @MainActor [weak self] in
