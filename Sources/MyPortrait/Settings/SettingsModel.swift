@@ -71,7 +71,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         switch self {
         case .app(.display):           return "display"
         case .app(.general):           return "gearshape"
-        case .app(.downloads):          return "brain"
+        case .app(.downloads):         return "arrow.down.circle"
         case .app(.connections):       return "powerplug"
         case .app(.notifications):     return "bell"
         case .app(.health):            return "stethoscope"
