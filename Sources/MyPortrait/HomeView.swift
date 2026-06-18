@@ -2563,14 +2563,12 @@ private struct PickerPopover: View {
     @Environment(ChatStore.self) private var chatStore
     let onDismiss: () -> Void
 
-    /// Connections 里已连接 + AI Models 页里没被用户关掉 的 provider。
-    /// 关 toggle 不会断开 Connections,只是从 chat picker 隐藏。
+    /// Connections 里已连接的 provider。连了就显示,不再有 AI Models 页那层
+    /// "可见性"过滤(已下线)。
     private var connectedProviders: [Integration] {
-        let cfg = ConfigStore.shared.current.aiModels
-        return IntegrationRegistry.all.filter {
+        IntegrationRegistry.all.filter {
             appState.isConnected($0.id)
             && Provider.from(integrationId: $0.id) != nil
-            && cfg.isProviderEnabled($0.id)
         }
     }
 
@@ -2645,10 +2643,8 @@ private struct PickerPopover: View {
                 Divider().background(Color.primary.opacity(0.12))
                     .padding(.vertical, 4)
                 sectionHeader("MODEL")
-                // AI Models 页的 model 多选过滤 —— 没勾的不出现。
-                let visibleModels = ConfigStore.shared.current.aiModels
-                    .visibleModels(forIntegrationId: activeId, available: provider.availableModels)
-                ForEach(visibleModels, id: \.self) { m in
+                // provider 的所有可用 model,不再过滤(AI Models 页的多选 UI 已下线)。
+                ForEach(provider.availableModels, id: \.self) { m in
                     pickerRow(
                         title: m,
                         subtitle: "",
