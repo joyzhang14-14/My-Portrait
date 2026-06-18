@@ -87,31 +87,51 @@ def commit_sends(con, bundle, day):
                     'han': ''.join(c for c in raw if HAN.match(c)), 'raw': raw})
     return out
 
+def all_commits(con, bundle, day):
+    """全天该 bundle 的逐条 commit(ts, text),按时间排。文字复原真字来源(不预切)。"""
+    evs = con.execute(
+        "SELECT edit_log FROM typing_events WHERE bundle_id=? "
+        "AND strftime('%Y-%m-%d',started_at/1000,'unixepoch')=? ORDER BY started_at",
+        (bundle, day)).fetchall()
+    cm = []
+    for (el,) in evs:
+        try:
+            arr = json.loads(el or '[]')
+        except Exception:
+            arr = []
+        for e in arr:
+            if e.get('kind') == 'commit':
+                t = (e.get('text') or '').replace('﻿', '')
+                t = re.sub(r'[\n\r]', '', t)              # 去发送标记换行,只留内容字
+                if t:
+                    cm.append((int(e.get('ts') or 0), t))
+    cm.sort()
+    return cm
+
 def build_sends(con, bundle, day, model_fn=None):
-    """两流合并:每个 <CR> 段配对时间最近的 commit 发送(取真字);commit 漏的退 librime。
-    返回 [{t0,t1,text,via,dirty}],按发送时间排。"""
+    """两流合并:击键 <CR> = 权威发送边界(全);逐条 commit 按时间戳落进它所属的段
+    (prev_cr < ts ≤ cr+margin)→ 该段真字主体。reconstruct(真字, 击键):有真字根治同音,
+    无真字退 librime。返回 [{t0,t1,text,via,dirty}],按发送时刻排。"""
     import rebuild as R
     ksegs = [s for s in segment_keystrokes(con, bundle, day) if not s.get('unsent')]
-    csends = commit_sends(con, bundle, day)
-    used = [False] * len(csends)
+    ksegs.sort(key=lambda s: s['cr_ts'] or s['t1'])
+    cm = all_commits(con, bundle, day)
     out = []
+    ci = 0
+    prev = 0
     for s in ksegs:
-        send_ts = s['cr_ts'] or s['t1']
-        # 配对:发送时刻 ±2s 内、未用过、commit 有汉字 的 commit 发送
-        best, bi = None, -1
-        for i, c in enumerate(csends):
-            if used[i] or not c['han']:
-                continue
-            if c['t1'] - 2500 <= send_ts <= c['t1'] + 2500:
-                if best is None or abs(c['t1'] - send_ts) < abs(best['t1'] - send_ts):
-                    best, bi = c, i
-        captured = best['han'] if best else ''
-        if best:
-            used[bi] = True
-        txt, _ = R.reconstruct_message(captured, s['py'], model_fn=model_fn)
-        out.append({'t0': s['t0'], 't1': send_ts, 'text': cv(txt),
-                    'via': 'AX真字' if captured else 'librime', 'dirty': s['dirty']})
-    out.sort(key=lambda r: r['t1'])
+        cr = s['cr_ts'] or s['t1']
+        chunk = []
+        while ci < len(cm) and cm[ci][0] <= cr + 300:
+            if cm[ci][0] > prev:
+                chunk.append(cm[ci][1])
+            ci += 1
+        prev = cr
+        raw = ''.join(chunk)
+        han = ''.join(c for c in raw if HAN.match(c))      # 真字主体(汉字优先,丢拼音残片)
+        txt, _ = R.reconstruct_message(han, s['py'], model_fn=model_fn)
+        out.append({'t0': s['t0'], 't1': cr, 'text': cv(txt),
+                    'via': 'AX真字' if han else 'librime', 'dirty': s['dirty']})
     return out
 
 if __name__ == "__main__":
