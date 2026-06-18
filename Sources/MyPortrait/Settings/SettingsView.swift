@@ -10,7 +10,7 @@ struct SettingsPane: View {
             switch subsection ?? .app(.display) {
             case .app(.display):       DisplaySettingsView()
             case .app(.general):       GeneralSettingsView()
-            case .app(.aiModels):      AIModelsSettingsView()
+            case .app(.downloads):     AIModelsSettingsView()
             case .app(.connections):   ConnectionsView()
             case .app(.notifications): NotificationsSettingsView()
             case .capture(.screen):    ScreenCaptureSettingsView()
@@ -109,7 +109,7 @@ struct SettingsScene: View {
         switch subsection {
         case .app(.display):       DisplaySettingsView()
         case .app(.general):       GeneralSettingsView()
-        case .app(.aiModels):      AIModelsSettingsView()
+        case .app(.downloads):     AIModelsSettingsView()
         case .app(.connections):
             // Unreachable from this window's rail (filtered out above);
             // the case only exists to keep the switch exhaustive.

@@ -16,12 +16,12 @@ struct AIModelsSettingsView: View {
     @State private var downloading: Set<String> = []
 
     var body: some View {
-        SettingsPage("AI models",
+        SettingsPage("Downloads",
                      subtitle: "On-device models that power your capture pipeline.",
                      onResetCurrentPage: { config.mutate { $0.aiModels = .init() } }) {
 
             SettingsCard(
-                title: "Local capture models",
+                title: "Audio transcript models",
                 footnote: "These power voice features. Some download automatically; others have a Download button. Each stays disabled until it shows Ready."
             ) {
                 // Whisper 转录模型 —— 跟 Audio Capture 的 model picker 同一份目录。
