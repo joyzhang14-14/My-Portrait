@@ -58,6 +58,10 @@ def segment_keystrokes(con, bundle, day, send_win=1500):
         if not c:
             continue
         if c in ('\n', '\r'):
+            # shift+return(mod 含 shift 位=8)= **消息内换行**,不是发送(用户实证:换行用 shift+return)。
+            # ⚠️md&7 只抓 cmd 组合(1/2/4),抓不到 shift(8);不修则 claudefordesktop 23个换行被当发送切碎。
+            if md & 8:
+                continue                                    # 换行,不切,内容续上(多行结构由 AX 真字提供)
             # 合并条件:回车前那串键是英文键盘(keylayout)+ 无框清空标记 = IME确认上屏英文(sandisk)
             eng_confirm = (last_isrc and 'keylayout' in last_isrc) and not near(sts, ts)
             if eng_confirm:
