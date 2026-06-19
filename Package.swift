@@ -54,6 +54,12 @@ let package = Package(
                 .linkedLibrary("sqlite3")
             ]
         ),
+        // 特权 root LaunchDaemon helper —— 跟 app 双轨并存(`swift build` 编译校验,
+        // Xcode 经 project.yml 出签名产物嵌进 .app)。只依赖 Foundation。
+        .executableTarget(
+            name: "PortraitSleepHelper",
+            path: "Sources/PortraitSleepHelper"
+        ),
         .testTarget(
             name: "MyPortraitTests",
             dependencies: ["MyPortrait"],
