@@ -398,7 +398,12 @@ final class MemoryScheduler {
     /// 在三个 job 的起止(running 标志翻转处)各调一次。
     private func refreshKeepAwake() {
         let active = eventRunning || distillRunning || personalityRunning
-        KeepAwakeAssertion.shared.set(active && PowerMonitor.isOnAC, owner: "memory")
+        let want = active && PowerMonitor.isOnAC
+        KeepAwakeAssertion.shared.set(want, owner: "memory")
+        // pmset turbo:让机器**合盖**也完全清醒(IOPMAssertion 挡不住 clamshell)。
+        // 只有用户开了 General ▸「合盖时保持运行」且 helper 已批准时才真正生效,
+        // 否则 SleepHelperClient 内部静默 no-op。
+        SleepHelperClient.shared.setKeepAwake(want)
     }
 
     private func registerNetworkMonitor() {
