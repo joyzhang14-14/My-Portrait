@@ -100,9 +100,28 @@ crashtest() {
   echo "→ 应显示 0 / 无 SleepDisabled 行。若仍为 1 = 崩溃安全没生效,把上面 watch 的日志发我。"
 }
 
+morning() {
+  HRS="${2:-12}"
+  echo "━━━ 合盖一夜后体检(回看最近 ${HRS}h)━━━"
+  echo ""
+  echo "1) helper 自己的记录(.notice 级,持久;期望看到 helper launched / setKeepAwake(true) / last client gone):"
+  log show --last "${HRS}h" --style compact \
+      --predicate "subsystem == \"$LABEL\"" 2>/dev/null | tail -50 \
+      || echo "   (查不到;若是合盖那晚之前的旧 build 仍 .info 级,记录不持久 —— 看 2/3 节)"
+  echo ""
+  echo "2) pmset 睡眠日志(铁证:任务时段机器有没有被 disablesleep 钉醒、没真睡):"
+  pmset -g log 2>/dev/null | grep -iE "SleepDisabled|Entering Sleep|Wake from|DarkWake" | tail -40
+  echo ""
+  echo "3) 当前 pmset(任务跑完应回 0):"
+  echo "   $(sleepdisabled)"
+  echo ""
+  echo "→ 另查:~/.portrait 下管线产物的 mtime 落在合盖时段 = 合盖时真干了活(最硬的证据)。"
+}
+
 case "${1:-status}" in
   status)    status ;;
   watch)     watch ;;
   crashtest) crashtest ;;
-  *) echo "用法: $0 status|watch|crashtest" ;;
+  morning)   morning "$@" ;;
+  *) echo "用法: $0 status|watch|crashtest|morning [小时数]" ;;
 esac
