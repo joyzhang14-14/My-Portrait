@@ -7,6 +7,8 @@ import SwiftUI
 struct MemorySettingsView: View {
     private let cfg = ConfigStore.shared
     @Environment(AppState.self) private var appState
+    /// Ollama 本地模型列表(observable),provider 选 Ollama 时给 model 下拉用。
+    @State private var ollamaStore = OllamaModelStore.shared
 
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.PipelineRunRecord] = []
@@ -1139,7 +1141,11 @@ struct MemorySettingsView: View {
                 }
             }
         )
-        let models = selectedProvider?.availableModels ?? []
+        // Ollama 的 model 列表是用户本地实际安装的(observable);其它 provider
+        // 走写死的 availableModels。
+        let models: [String] = selectedProvider == .ollama
+            ? ollamaStore.models
+            : (selectedProvider?.availableModels ?? [])
 
         return section(
             title: "AI provider",
@@ -1199,6 +1205,10 @@ struct MemorySettingsView: View {
                     }
                 }
             }
+        }
+        // 选中 Ollama(或一进来就是 Ollama)→ 拉一次本地模型列表刷新下拉。
+        .task(id: selectedProvider) {
+            if selectedProvider == .ollama { await ollamaStore.refresh() }
         }
     }
 

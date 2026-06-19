@@ -2561,6 +2561,8 @@ private struct PickerPopover: View {
     @Environment(AppState.self) private var appState
     @Environment(ChatController.self) private var chat
     @Environment(ChatStore.self) private var chatStore
+    /// Ollama 本地模型列表(observable),当前 provider 是 Ollama 时给 MODEL 段用。
+    @State private var ollamaStore = OllamaModelStore.shared
     let onDismiss: () -> Void
 
     /// Connections 里已连接的 provider。连了就显示,不再有 AI Models 页那层
@@ -2643,8 +2645,9 @@ private struct PickerPopover: View {
                 Divider().background(Color.primary.opacity(0.12))
                     .padding(.vertical, 4)
                 sectionHeader("MODEL")
-                // provider 的所有可用 model,不再过滤(AI Models 页的多选 UI 已下线)。
-                ForEach(provider.availableModels, id: \.self) { m in
+                // Ollama 读用户本地实际安装的模型(observable);其它走写死的。
+                let models = provider == .ollama ? ollamaStore.models : provider.availableModels
+                ForEach(models, id: \.self) { m in
                     pickerRow(
                         title: m,
                         subtitle: "",
@@ -2657,6 +2660,12 @@ private struct PickerPopover: View {
                         onDismiss()
                     }
                 }
+            }
+        }
+        // 当前 provider 是 Ollama → 拉一次本地模型列表。
+        .task(id: effectiveActiveProviderId) {
+            if effectiveActiveProviderId.flatMap(Provider.from(integrationId:)) == .ollama {
+                await ollamaStore.refresh()
             }
         }
         .frame(width: 240)
