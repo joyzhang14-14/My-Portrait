@@ -49,22 +49,10 @@ struct TimelineSidebar: View {
 
     private var focusedTimestamp: Date? { focusedFrame?.timestamp }
 
-    /// Frosted glass vs solid dark backdrop, controlled by
-    /// `config.display.translucentSidebar`. Either way the glass cards float
-    /// over it.
+    /// Solid dark backdrop. 原来还有个 translucent(毛玻璃)分支由
+    /// `translucentSidebar` toggle 切换,该开关已下线 —— 固定实色。
     @ViewBuilder private var sidebarBackground: some View {
-        if ConfigStore.shared.display.translucentSidebar {
-            // `.ignoresSafeArea()` must be inside this branch — the bare
-            // Rectangle would otherwise stop at the title-bar inset and leave
-            // a black strip across the top of the sidebar.
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                SidebarBackdrop().opacity(0.55)
-            }
-            .ignoresSafeArea()
-        } else {
-            SidebarBackdrop()
-        }
+        SidebarBackdrop()
     }
 
     var body: some View {
@@ -141,37 +129,30 @@ struct TimelineSidebar: View {
 
     // MARK: section card wrapper
 
-    /// Wraps a section's header + rows in a card。受 Settings → Display
-    /// "Translucent sidebar" toggle 控制:
-    ///   - ON  → Liquid Glass(macOS 26+ .glassEffect / 老系统 ultraThinMaterial)
-    ///   - OFF → solid 深色卡片(无半透明,可读性优先)
+    /// Wraps a section's header + rows in a solid 深色卡片。原来还有个
+    /// Liquid Glass 分支由 "Translucent sidebar" toggle 切换,该开关已下线 ——
+    /// 固定实色(可读性优先)。
     @ViewBuilder
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        let translucent = ConfigStore.shared.display.translucentSidebar
         let card = VStack(alignment: .leading, spacing: Theme.Space.sm) {
             content()
         }
         .padding(Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        if translucent {
-            card.liquidGlassCard()
-        } else {
-            // **fill / stroke 必须跟着 colorScheme 切** —— 之前钉死 white-on-X
-            // 在 Light 主题侧栏(奶白 + 浅薰衣草)上完全融成一片,看不见卡片
-            // 边界。Dark 仍是白底浮起,Light 改成 black 低透明做"压下去"的
-            // 卡边。
-            let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
-            let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
-            card.background(
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .fill(fill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                            .stroke(stroke, lineWidth: 0.8)
-                    )
-            )
-        }
+        // **fill / stroke 必须跟着 colorScheme 切** —— 之前钉死 white-on-X
+        // 在 Light 主题侧栏(奶白 + 浅薰衣草)上完全融成一片,看不见卡片
+        // 边界。Dark 仍是白底浮起,Light 改成 black 低透明做"压下去"的卡边。
+        let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
+        let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
+        card.background(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(fill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .stroke(stroke, lineWidth: 0.8)
+                )
+        )
     }
 
     private func placeholderCard(symbol: String, text: String) -> some View {

@@ -21,13 +21,6 @@ struct DisplaySettingsView: View {
                     .pickerStyle(.menu).labelsHidden().frame(width: 110)
                 }
                 SettingsDivider()
-                SettingsRow("Translucent sidebar",
-                            description: "Frosted glass effect on the left rail.",
-                            icon: "rectangle.lefthalf.inset.filled") {
-                    Toggle("", isOn: config.binding(\.display.translucentSidebar))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-                SettingsDivider()
                 SettingsRow("Show in menu bar",
                             description: "Adds a menu bar icon so you can switch Screen, Audio, and Typing capture on or off without opening the main window.",
                             icon: "menubar.rectangle") {

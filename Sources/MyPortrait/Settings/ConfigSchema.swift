@@ -329,7 +329,6 @@ struct SchedulerSettings: Codable, Equatable {
 struct DisplayConfig: Codable, Equatable {
     var theme:                   String = "system"
     var chatAlwaysOnTop:         Bool   = false
-    var translucentSidebar:      Bool   = true
     var hideModelReasoning:      Bool   = false
     /// AI chat:把一条回复里所有 thinking + 工具块压成一个可展开的汇总栏,
     /// 只留最终文本在外。默认开(减少历史消息一次性渲染的块数,更流畅)。
@@ -346,7 +345,6 @@ struct DisplayConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case theme
         case chatAlwaysOnTop          = "chat_always_on_top"
-        case translucentSidebar       = "translucent_sidebar"
         case hideModelReasoning       = "hide_model_reasoning"
         case compactToolBlocks        = "compact_tool_blocks"
         case appName                  = "app_name"
@@ -360,7 +358,6 @@ struct DisplayConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         theme                   = c.dflt(String.self, .theme, theme)
         chatAlwaysOnTop         = c.dflt(Bool.self,   .chatAlwaysOnTop, chatAlwaysOnTop)
-        translucentSidebar      = c.dflt(Bool.self,   .translucentSidebar, translucentSidebar)
         hideModelReasoning      = c.dflt(Bool.self,   .hideModelReasoning, hideModelReasoning)
         compactToolBlocks       = c.dflt(Bool.self,   .compactToolBlocks, compactToolBlocks)
         appName                 = c.dflt(String.self, .appName, appName)
