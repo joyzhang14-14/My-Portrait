@@ -202,6 +202,14 @@ targets:
         CREATE_INFOPLIST_SECTION_IN_BINARY: "YES"
         # 工具默认 SKIP_INSTALL=YES;显式 NO 让 app 的拷贝相位找得到产物。
         SKIP_INSTALL: "NO"
+        # ⚠️ EX_CONFIG(78) 修复 —— root daemon 必须**零 entitlement**,否则自签名
+        # (无 Team ID)下 SMAppService 的 LWCR/SpawnConstraint 无法授权,launchd 拒
+        # 启动、main() 前就挂。必须**两条都加**(实测少一个无效):
+        #   · 空 entitlements 文件 → 去掉 Xcode 按 bundle id 合成的无 team
+        #     application-identifier(受限 entitlement,无 profile 不授权)
+        CODE_SIGN_ENTITLEMENTS: Support/PortraitSleepHelper.entitlements
+        #   · 关掉 Debug 基础注入 → 去掉 get-task-allow(可调试的 root,同样不授权)
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: "NO"
 
   MyPortraitTests:
     type: bundle.unit-test
