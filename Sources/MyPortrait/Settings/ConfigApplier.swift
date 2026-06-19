@@ -6,7 +6,7 @@ import ServiceManagement
 #endif
 
 /// Watches `ConfigStore` and pushes every chrome-level setting (theme,
-/// always-on-top, window title, custom Dock icon, launch-at-login, …)
+/// window title, custom Dock icon, Dock-icon visibility, launch-at-login, …)
 /// into the system APIs that actually have effect. Lives for the app
 /// lifetime; installed once from `AppDelegate.applicationDidFinishLaunching`.
 @MainActor
@@ -30,6 +30,7 @@ final class ConfigApplier {
     private var lastDockIcon: String = ConfigApplier.unapplied
     private var lastTrayIcon: String = ConfigApplier.unapplied
     private var lastShowInMenuBar: Bool? = nil
+    private var lastShowDockIcon: Bool? = nil
     private var lastAppName: String = ConfigApplier.unapplied
     private var lastLaunchAtLogin: Bool? = nil
 
@@ -57,6 +58,7 @@ final class ConfigApplier {
             _ = ConfigStore.shared.display.customDockIcon
             _ = ConfigStore.shared.display.customTrayIcon
             _ = ConfigStore.shared.display.showInMenuBar
+            _ = ConfigStore.shared.display.showDockIcon
             _ = ConfigStore.shared.display.appName
             _ = ConfigStore.shared.general.launchAtLogin
         } onChange: { [weak self] in
@@ -87,6 +89,18 @@ final class ConfigApplier {
         if display.appName != lastAppName {
             lastAppName = display.appName
             mainWindow?.title = display.appName.isEmpty ? "" : display.appName
+        }
+
+        // Show Dock icon —— activation policy .regular(有 Dock)/ .accessory(无)。
+        if lastShowDockIcon != display.showDockIcon {
+            lastShowDockIcon = display.showDockIcon
+            NSApp.setActivationPolicy(display.showDockIcon ? .regular : .accessory)
+            // 切回 .regular 后 app 可能不在前台 + 窗口被压在后面 —— 主动激活并
+            // 把窗口拉到前。切到 .accessory 不用动:窗口留在原位继续可见可用。
+            if display.showDockIcon {
+                NSApp.activate(ignoringOtherApps: true)
+                mainWindow?.makeKeyAndOrderFront(nil)
+            }
         }
 
         // Custom Dock icon —— NSImage(contentsOfFile:) 是同步磁盘 IO,放主线程
