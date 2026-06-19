@@ -21,19 +21,29 @@ final class KeepAwakeAssertion {
     static let shared = KeepAwakeAssertion()
 
     private var assertionID: IOPMAssertionID?
+    /// 按 owner 的引用计数。任一 owner 持有 → 断言在;全部释放 → 撤。
+    /// 多个子系统(转录 owner "default" / 记忆管线 owner "memory")各自独立持有,
+    /// 互不踩 —— 否则单例 + 布尔 refresh 时,一方 refresh(false) 会误放另一方的断言。
+    private var owners: Set<String> = []
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "power")
 
     private init() {}
 
-    /// `hold == true` 且当前未持有 → 创建断言;`hold == false` 且当前持有 → 释放。
-    func refresh(_ hold: Bool) {
-        if hold {
+    /// 单 owner on/off(转录沿用此 API,等价 `set(hold, owner: "default")`)。
+    func refresh(_ hold: Bool) { set(hold, owner: "default") }
+
+    /// 多 owner 引用计数版:`hold` 把该 owner 加入/移出持有集,断言随"是否还有
+    /// 任一 owner"创建 / 释放。幂等 —— 已是目标状态是 no-op。
+    func set(_ hold: Bool, owner: String) {
+        if hold { owners.insert(owner) } else { owners.remove(owner) }
+        let want = !owners.isEmpty
+        if want {
             guard assertionID == nil else { return }
             var id: IOPMAssertionID = 0
             let r = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                "MyPortrait: transcribing audio backlog on AC power" as CFString,
+                "MyPortrait: background work on AC power" as CFString,
                 &id
             )
             if r == kIOReturnSuccess {

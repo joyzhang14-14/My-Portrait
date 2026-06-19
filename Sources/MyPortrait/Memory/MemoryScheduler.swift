@@ -303,6 +303,7 @@ final class MemoryScheduler {
         bgScheduler = nil
         catchUpTimer?.cancel()
         catchUpTimer = nil
+        KeepAwakeAssertion.shared.set(false, owner: "memory")
         sleepObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         wakeObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         sleepObserver = nil
@@ -389,6 +390,15 @@ final class MemoryScheduler {
         schedLog.info("periodic catch-up (\(reason, privacy: .public)) — recover + tick")
         recoverStaleLocks()
         await tick()
+    }
+
+    /// 有 memory 管线在跑 + 插电 → 持 idle-sleep 断言,让**开盖空闲**时机器不打盹、
+    /// 把活全速跑完(走开一会儿也不掉速)。合盖时此断言无效(挡不住 clamshell),
+    /// 自动回落 DarkWake 慢速,无害。用 owner "memory" 引用计数,不踩转录的断言。
+    /// 在三个 job 的起止(running 标志翻转处)各调一次。
+    private func refreshKeepAwake() {
+        let active = eventRunning || distillRunning || personalityRunning
+        KeepAwakeAssertion.shared.set(active && PowerMonitor.isOnAC, owner: "memory")
     }
 
     private func registerNetworkMonitor() {
@@ -671,7 +681,8 @@ final class MemoryScheduler {
     func runEventJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
         guard canRunEvent else { return .busy }
         eventRunning = true
-        defer { eventRunning = false }
+        refreshKeepAwake()
+        defer { eventRunning = false; refreshKeepAwake() }
         stopRequestedOwners.remove(PipelineOwner.event)   // 清 stale 标记
         eventProgress = StepProgress(fraction: 0, stage: "Reading timeline")
         defer { eventProgress = StepProgress() }
@@ -826,7 +837,8 @@ final class MemoryScheduler {
     func runPortraitJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
         guard canRunDistill else { return .busy }
         distillRunning = true
-        defer { distillRunning = false }
+        refreshKeepAwake()
+        defer { distillRunning = false; refreshKeepAwake() }
         stopRequestedOwners.remove(PipelineOwner.distill)   // 清 stale 标记
         distillProgress = StepProgress(fraction: 0, stage: "Distilling portrait")
         defer { distillProgress = StepProgress() }
@@ -896,7 +908,8 @@ final class MemoryScheduler {
     func runPersonalityJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
         guard canRunPersonality else { return .busy }
         personalityRunning = true
-        defer { personalityRunning = false }
+        refreshKeepAwake()
+        defer { personalityRunning = false; refreshKeepAwake() }
         stopRequestedOwners.remove(PipelineOwner.personality)   // 清 stale 标记
         defer { personalityProgress = StepProgress() }
 
