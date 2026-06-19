@@ -1178,15 +1178,16 @@ struct MemorySettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 // 选了有效 provider 才显示 model 行 —— "Please select" 状态下列空
-                // 模型没意义。空串 tag = "Provider default"(resolvedModel 映射到
-                // provider.defaultModel)。
+                // 模型没意义。没配置 model(="")时 picker 留空白;pipeline 侧
+                // resolvedModel 把空串映射到 provider.defaultModel。
                 if selectedProvider != nil {
                     HStack(spacing: 12) {
                         Text("Main model (heavy tasks)")
                             .font(.system(size: 12))
                             .frame(maxWidth: 280, alignment: .leading)
+                        // 不放 "Provider default" 占位项 —— 没配置(model="")时
+                        // picker 留空白。
                         Picker("", selection: cfg.binding(\.memory.model)) {
-                            Text("Provider default").tag("")
                             ForEach(models, id: \.self) { m in Text(m).tag(m) }
                         }
                         .labelsHidden()
@@ -1197,7 +1198,6 @@ struct MemorySettingsView: View {
                             .font(.system(size: 12))
                             .frame(maxWidth: 280, alignment: .leading)
                         Picker("", selection: cfg.binding(\.memory.modelLight)) {
-                            Text("Provider default").tag("")
                             ForEach(models, id: \.self) { m in Text(m).tag(m) }
                         }
                         .labelsHidden()

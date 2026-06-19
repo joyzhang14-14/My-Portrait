@@ -723,12 +723,12 @@ private struct MemoryProviderStep: View {
                 .labelsHidden()
                 .frame(maxWidth: 280)
             }
-            // 选了有效 provider 才显示 model 行。空串 tag = "Provider default"。
+            // 选了有效 provider 才显示 model 行。不放 "Provider default" 占位项
+            //(没配置 → picker 留空白)。
             if selectedProvider != nil {
                 Divider().overlay(Color.primary.opacity(0.08))
                 row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
                     Picker("", selection: config.binding(\.memory.model)) {
-                        Text("Provider default").tag("")
                         ForEach(models, id: \.self) { m in Text(m).tag(m) }
                     }
                     .labelsHidden()
@@ -737,7 +737,6 @@ private struct MemoryProviderStep: View {
                 Divider().overlay(Color.primary.opacity(0.08))
                 row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
                     Picker("", selection: config.binding(\.memory.modelLight)) {
-                        Text("Provider default").tag("")
                         ForEach(models, id: \.self) { m in Text(m).tag(m) }
                     }
                     .labelsHidden()
