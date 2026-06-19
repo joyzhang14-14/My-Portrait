@@ -63,7 +63,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     /// offline. User can still type custom strings via the "other…" field.
     var availableModels: [String] {
         switch self {
-        case .chatgpt:    return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
+        case .chatgpt:    return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
         case .openaiBYOK: return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
         case .anthropic:  return ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
         case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
