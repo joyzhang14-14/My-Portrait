@@ -104,7 +104,7 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelper
         newConnection.interruptionHandler = { [weak self] in if once.fire() { self?.clientGone(reason: "interrupted") } }
         lock.lock(); activeConnections += 1; let n = activeConnections; lock.unlock()
         newConnection.resume()
-        log.info("accepted client connection (active=\(n, privacy: .public))")
+        log.notice("accepted client connection (active=\(n, privacy: .public))")
         return true
     }
 
@@ -112,10 +112,10 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelper
     /// invalidation 与 interruption 可能都触发 → 计数 + 幂等复位保证安全。
     private func clientGone(reason: String) {
         lock.lock(); activeConnections -= 1; let n = activeConnections; lock.unlock()
-        log.info("client gone (\(reason, privacy: .public)), active=\(n, privacy: .public)")
+        log.notice("client gone (\(reason, privacy: .public)), active=\(n, privacy: .public)")
         guard n <= 0 else { return }
         let st = runPmset(disable: false)
-        log.info("last client gone → pmset disablesleep 0 (status=\(st, privacy: .public)); exiting for relaunch-on-demand")
+        log.notice("last client gone → pmset disablesleep 0 (status=\(st, privacy: .public)); exiting for relaunch-on-demand")
         exit(0)
     }
 
@@ -124,13 +124,13 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelper
     func setKeepAwake(_ enabled: Bool, withReply reply: @escaping (Bool, String) -> Void) {
         let st = runPmset(disable: enabled)
         let diag = "pmset -c disablesleep \(enabled ? 1 : 0) → status=\(st); \(currentSleepDisabled())"
-        log.info("setKeepAwake(\(enabled, privacy: .public)): \(diag, privacy: .public)")
+        log.notice("setKeepAwake(\(enabled, privacy: .public)): \(diag, privacy: .public)")
         reply(st == 0, diag)
     }
 
     func ping(withReply reply: @escaping (String) -> Void) {
         let msg = "helper uid=\(getuid()) (0=root); \(currentSleepDisabled())"
-        log.info("ping → \(msg, privacy: .public)")
+        log.notice("ping → \(msg, privacy: .public)")
         reply(msg)
     }
 }
@@ -138,7 +138,7 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelper
 // ── 进程入口 ──────────────────────────────────────────────────────────────
 // "first light" —— 第一行就 log,排查 probe2 那种"helper 到底有没有被拉起"的问题:
 //   没这行 = launchd 根本没启动它(签名/配置层);有这行但很快没了 = helper 崩了。
-log.info("helper launched (uid=\(getuid(), privacy: .public)) — reset-on-launch")
+log.notice("helper launched (uid=\(getuid(), privacy: .public)) — reset-on-launch")
 
 // 1) 兜底复位(必须在 listener.resume() 之前,避免和新连接的 setKeepAwake(true) 抢)。
 runPmset(disable: false)
@@ -150,5 +150,5 @@ let delegate = HelperDelegate()
 let listener = NSXPCListener(machServiceName: kMachServiceName)
 listener.delegate = delegate
 listener.resume()
-log.info("listener resumed on \(kMachServiceName, privacy: .public) — waiting for connections")
+log.notice("listener resumed on \(kMachServiceName, privacy: .public) — waiting for connections")
 RunLoop.main.run()
