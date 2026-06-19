@@ -489,6 +489,9 @@ struct ConnectionsView: View {
         connecting = integration.id
         Task {
             let ok = await probeOllama()
+            // 连上后先拉一次本地模型列表,这样 writeModelsJSON 写进 Pi 的
+            // models.json 是用户真实安装的模型(不是写死的)。
+            if ok { await OllamaModelStore.shared.refresh() }
             await MainActor.run {
                 connecting = nil
                 if ok {

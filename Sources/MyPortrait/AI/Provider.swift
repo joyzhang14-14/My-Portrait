@@ -66,7 +66,9 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .chatgpt:    return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
         case .openaiBYOK: return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
         case .anthropic:  return ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
-        case .ollama:     return ["qwen2.5:14b-instruct", "llama3.2", "mistral", "deepseek-coder"]
+        // 不写死 —— 读用户本地 Ollama 实际安装的模型(OllamaModelStore.refresh()
+        // 拉 /api/tags 填充)。还没拉过 / Ollama 没跑 → 空数组。
+        case .ollama:     return OllamaModelStore.cachedModels
         case .gemini:     return ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
         case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
         case .deepseek:   return ["deepseek-v4-pro", "deepseek-v4-flash"]

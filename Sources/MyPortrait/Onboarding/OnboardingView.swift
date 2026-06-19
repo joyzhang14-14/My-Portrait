@@ -631,6 +631,8 @@ private struct ConnectAIStep: View {
 private struct MemoryProviderStep: View {
     @Environment(AppState.self) private var appState
     @State private var config = ConfigStore.shared
+    /// Ollama 本地模型列表(observable),provider 选 Ollama 时给 model 下拉用。
+    @State private var ollamaStore = OllamaModelStore.shared
 
     private var availableProviders: [Provider] {
         Provider.allCases.filter {
@@ -698,7 +700,10 @@ private struct MemoryProviderStep: View {
                 }
             }
         )
-        let models = selectedProvider?.availableModels ?? []
+        // Ollama 读用户本地实际安装的模型(observable);其它走写死的。
+        let models: [String] = selectedProvider == .ollama
+            ? ollamaStore.models
+            : (selectedProvider?.availableModels ?? [])
 
         VStack(alignment: .leading, spacing: 12) {
             // 没选有效 provider → 上方红字提示,picker 本身留空白
@@ -746,6 +751,10 @@ private struct MemoryProviderStep: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
         )
+        // 选中 Ollama → 拉一次本地模型列表。
+        .task(id: selectedProvider) {
+            if selectedProvider == .ollama { await ollamaStore.refresh() }
+        }
     }
 
     @ViewBuilder
