@@ -68,6 +68,21 @@ func currentSleepDisabled() -> String {
         .map(String.init) ?? "(no SleepDisabled line)"
 }
 
+/// 一次性闸。invalidation 与 interruption 对**同一条**连接可能都触发,这个闸保证
+/// clientGone 每条连接只走一次 —— 否则两条连接短暂并存时(app 在 job 边界拆旧建新
+/// 的窗口里可达),旧连接的双触发会把 activeConnections 误减到 0,在另一条还持有
+/// disablesleep=1 时 exit + 复位 → 合盖跑到一半机器又开始睡。线程安全。
+final class ConnectionOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    func fire() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if fired { return false }
+        fired = true
+        return true
+    }
+}
+
 final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelperProtocol, @unchecked Sendable {
     // XPC delegate / handler 回调来自任意队列 → 用锁保护连接计数。
     private let lock = NSLock()
@@ -83,8 +98,10 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelper
         newConnection.exportedObject = self
         // 崩溃安全核心:app(client)进程因任何原因消失(正常退、Force Quit、SIGKILL、
         // panic)内核都会拆这条 XPC 连接 → 下面的 handler 触发 → 复位 + 退出。
-        newConnection.invalidationHandler = { [weak self] in self?.clientGone(reason: "invalidated") }
-        newConnection.interruptionHandler = { [weak self] in self?.clientGone(reason: "interrupted") }
+        // once 保证这条连接只把计数减一次(invalidation/interruption 可能都触发)。
+        let once = ConnectionOnce()
+        newConnection.invalidationHandler = { [weak self] in if once.fire() { self?.clientGone(reason: "invalidated") } }
+        newConnection.interruptionHandler = { [weak self] in if once.fire() { self?.clientGone(reason: "interrupted") } }
         lock.lock(); activeConnections += 1; let n = activeConnections; lock.unlock()
         newConnection.resume()
         log.info("accepted client connection (active=\(n, privacy: .public))")
