@@ -6,47 +6,50 @@
 本文件**独立**,不碰 faithful_v2。先在 5/25 Discord 验证,对了再整合(挂 PORTRAIT_ARCH 开关)。
 """
 import sqlite3, os, json, re
+import extract_compare_v2 as X   # 复用 AX 占位符/空框检测(is_ph/cv)判"回车后框是否清空=发送"
 DB = os.path.expanduser("~/.portrait/portrait.sqlite")
 HAN = re.compile(r'[一-鿿]')
 def han_n(s): return len(HAN.findall(s or ''))
 def cv(s): return re.sub(r'\s', '', s or '')
 
-def commit_marks(con, bundle, day):
-    """返回 (commit_times, send_times):commit 全部时刻 + ﻿\\n 框清空(真发送)标记时刻。"""
+def clear_times(con, bundle, day):
+    """**框清空/占位符出现的时刻**(复用 AX 发送逻辑,用户 2026-06-18 指令)。
+    edit_log 条目含 ﻿(空框 ZWSP 占位,Discord)或 是文字占位符(X.is_ph,如 claudefordesktop 的
+    'Reply to Claude…')= 框被清空 = 发生了发送。Notes 等编辑器纯 \\n 换行、框内容不消失 → 无占位符 → 0,天然不切。"""
     evs = con.execute(
         "SELECT edit_log FROM typing_events WHERE bundle_id=? "
         "AND strftime('%Y-%m-%d',started_at/1000,'unixepoch')=? ORDER BY started_at",
         (bundle, day)).fetchall()
-    cts, sts = [], []
+    ts = []
     for (el,) in evs:
         try:
             arr = json.loads(el or '[]')
         except Exception:
             arr = []
         for e in arr:
-            if e.get('kind') == 'commit':
-                ts = int(e.get('ts') or 0)
-                cts.append(ts)
-                if '\n' in (e.get('text') or '') or '\r' in (e.get('text') or ''):
-                    sts.append(ts)
-    return sorted(cts), sorted(sts)
+            t = e.get('text') or ''
+            cvt = X.cv(t)
+            # 框真空那一刻:﻿占位且无内容(﻿\n,排除﻿mai打字盖占位)或 纯文字占位符
+            if ('﻿' in t and not cvt) or (cvt and X.is_ph(cvt)):
+                ts.append(int(e.get('ts') or 0))
+    return sorted(ts)
 
-def segment_keystrokes(con, bundle, day, send_win=1500):
-    """每个 <CR> **默认是发送**(击键回车=Discord发送,zero-loss)。唯一例外=**IME 确认上屏英文**
-    (sandisk案):回车前那串键是**英文键盘**(input_source=keylayout)且无 ﻿\\n 框清空标记 → 确认回车,合并。
-    判英文只信 input_source(commit里拼音也是拉丁,分不开;﻿\\n 仅53个<回车123,太稀疏不能反推)。
-    ⚠️历史数据 input_source=NULL → 永远发送(回退 v2,sandisk 会拆,新数据才合并)。返回 [{...,py,dirty}]。"""
+def segment_keystrokes(con, bundle, day, win=2200):
+    """切段(用户 2026-06-18 设计:复用 AX 发送逻辑)。<BS> 即时回放;不丢任何段。
+    每个回车判是否真发送:① shift+return(mod&8)= 消息内换行,合并;② 普通回车 → **回车后框是否清空/
+    出现占位符**(clear_times,复用 X.is_ph)→ 有=发送(切),无=只是换行(合并,Notes/编辑器天然整条)。
+    连发(每条发完框都清空)天然每条都切;sandisk(确认英文后框没清)天然合并。返回 [{...,py,dirty}]。"""
     rows = con.execute(
-        "SELECT ts_ms,char,is_backspace,modifiers,input_source FROM keystroke_log "
+        "SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log "
         "WHERE bundle_id=? AND strftime('%Y-%m-%d',ts_ms/1000,'unixepoch')=? ORDER BY ts_ms",
         (bundle, day)).fetchall()
-    _, sts = commit_marks(con, bundle, day)
-    import bisect
-    def near(arr, t):
-        i = bisect.bisect_left(arr, t - send_win)
-        return i < len(arr) and arr[i] <= t + send_win
-    segs, cur, srcs, dirty, last_isrc = [], [], set(), False, None
-    for ts, c, bs, md, isrc in rows:
+    clr = clear_times(con, bundle, day)
+    # 该 bundle 是不是"会发送"的(聊天):有框清空/占位符 = 是(Discord79/claudefordesktop30);
+    # 0 = 编辑器(Notes/obsidian),回车=换行不发送。⚠️ per-return 的清空 AX 记得太稀疏(79<123回车)
+    # 不能反推单条;但 per-bundle 干净区分聊天vs编辑器(让 AX 判 app 行为,不硬编码 app 名)。
+    is_chat = len(clr) >= 3
+    segs, cur, dirty = [], [], False
+    for ts, c, bs, md in rows:
         if md & 7:
             continue
         if bs:
@@ -58,25 +61,21 @@ def segment_keystrokes(con, bundle, day, send_win=1500):
         if not c:
             continue
         if c in ('\n', '\r'):
-            # shift+return(mod 含 shift 位=8)= **消息内换行**,不是发送(用户实证:换行用 shift+return)。
-            # ⚠️md&7 只抓 cmd 组合(1/2/4),抓不到 shift(8);不修则 claudefordesktop 23个换行被当发送切碎。
+            # ① shift+return(mod&8)= 消息内换行(用户实证),不切
             if md & 8:
-                continue                                    # 换行,不切,内容续上(多行结构由 AX 真字提供)
-            # 合并条件:回车前那串键是英文键盘(keylayout)+ 无框清空标记 = IME确认上屏英文(sandisk)
-            eng_confirm = (last_isrc and 'keylayout' in last_isrc) and not near(sts, ts)
-            if eng_confirm:
-                continue                                    # 确认回车 → 不切,合并
+                continue
+            # ② 编辑器(无框清空)→ 普通回车也是换行,不切(Notes 整条交 AX);聊天 → 回车=发送(连发每条都切)
+            if not is_chat:
+                continue
             if cur:
                 segs.append({'t0': cur[0][0], 't1': cur[-1][0], 'cr_ts': ts,
-                             'py': ''.join(x[1] for x in cur), 'src': set(srcs), 'dirty': dirty})
-            cur, srcs, dirty = [], set(), False
+                             'py': ''.join(x[1] for x in cur), 'dirty': dirty})
+            cur, dirty = [], False
         else:
             cur.append((ts, c))
-            if isrc:
-                srcs.add(isrc); last_isrc = isrc
     if cur:
         segs.append({'t0': cur[0][0], 't1': cur[-1][0], 'cr_ts': None,
-                     'py': ''.join(x[1] for x in cur), 'src': set(srcs), 'dirty': dirty, 'unsent': True})
+                     'py': ''.join(x[1] for x in cur), 'dirty': dirty, 'unsent': True})
     return segs
 
 def commit_sends(con, bundle, day):

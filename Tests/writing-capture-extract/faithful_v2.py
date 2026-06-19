@@ -269,7 +269,9 @@ for day in DAYS:
         kc = group_kc(ids); ks_full = assemble_keys(ids)
         grp_cs = ''.join(X.cstream(e['arr']) for e in evs)   # 组级commit流:发送清空快照跨事件手打取证(#40)
         sends_raw = []
-        if ARCH == 'keystroke':
+        # 自动分流(用户 2026-06-18:不硬编码 app):聊天 app(有框清空/占位符)走 keystroke 主导;
+        # 编辑器(Notes/obsidian,纯换行无清空)走旧 AX 主导(event_sends_with_ts,长文整条由 AX 给)。
+        if ARCH == 'keystroke' and len(KP.clear_times(con, evs[0]['bundle'], day)) >= 3:
             # keystroke 主导(用户 2026-06-18):击键 <CR> 真发送边界(AX ﻿\n 判IME确认回车合并)
             # 切段,每段配 commit 真字主体(captured);下游 reconstruct + 补尾链 + 口3 + 14B 做复原。
             # 段归属到时间跨度覆盖它的事件(取 evid/url/bundle);零丢弃,不走 event_sends_with_ts 的闸。
