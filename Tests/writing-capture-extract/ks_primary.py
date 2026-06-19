@@ -162,7 +162,7 @@ def segment_sends(con, bundle, day):
                 chunk.append(cm[ci][1])
             ci += 1
         prev = cr
-        han = ''.join(c for c in ''.join(chunk) if HAN.match(c))   # 真字主体(汉字优先,丢拼音残片)
+        han = ''.join(c for c in ''.join(chunk) if HAN.match(c) or (not c.isascii() and not c.isspace()))   # 真字主体:汉字+中文标点(全角),滤ascii拼音残片与非ascii空白(\xa0)
         out.append({'t0': s['t0'], 't1': cr, 'captured': han, 'dirty': s['dirty']})
     return out
 
