@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    PortraitSleepHelper 的 LaunchDaemon plist。
+    XcodeGen 把这个文件**原样**拷进 MyPortrait.app/Contents/Library/LaunchDaemons/
+    (SMAppService 要求 daemon plist 在 app bundle 内)。
+    文件名 == Label == 传给 SMAppService.daemon(plistName:) 的字符串。
+
+    on-demand 模型:只声明 MachServices,**故意不写 RunAtLoad / KeepAlive** ——
+    app 连这个 mach service 名字时 launchd 才按需把 helper 以 root 拉起;app 连接
+    一断 helper 复位 disablesleep 后退出,launchd 不会重拉(KeepAlive 缺省 false)。
+    这正是崩溃安全的关键(参照 Pearcleaner 现网 helper;勿照 Tailscale 的常驻 daemon
+    加 KeepAlive)。也**绝不**混入老 SMJobBless 的 SMAuthorizedClients /
+    SMPrivilegedExecutables —— 跟 SMAppService 混用会报 error 108。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.joyzhang.myportrait.SleepHelper</string>
+
+    <!-- 相对 app bundle 根的可执行文件路径(不是 .app / 不是 Contents/)。
+         路径写错是经典的"helper 永不启动 / 0xd Permission denied"。
+         build 后须确认 .app/Contents/MacOS/PortraitSleepHelper 真实存在。 -->
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/PortraitSleepHelper</string>
+
+    <!-- 开启 on-demand 启动的整套机制。这个名字必须跟 app 端 NSXPCConnection 的
+         machServiceName 与 helper 里 NSXPCListener(machServiceName:) 逐字一致。 -->
+    <key>MachServices</key>
+    <dict>
+        <key>com.joyzhang.myportrait.SleepHelper</key>
+        <true/>
+    </dict>
+
+    <!-- 主 app 的 bundle id(不是 helper 的),让此项在「系统设置 ▸ 登录项」里
+         归到 app 名下,approval / unregister 跟着 app 走。 -->
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.joyzhang.myportrait</string>
+    </array>
+</dict>
+</plist>
