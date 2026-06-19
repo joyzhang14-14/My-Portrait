@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    PortraitSleepHelper(root LaunchDaemon)的 entitlements —— **故意全空**。
+    root daemon 不该带任何 entitlement;尤其不能带:
+      · com.apple.security.get-task-allow(Debug 默认注入,= 可调试的 root,
+        SMAppService 的 LWCR/SpawnConstraint 在自签名/无 profile 下无法授权)
+      · com.apple.application-identifier(无 entitlements 文件时 Xcode 会按 bundle id
+        自动合成一个**无 team 前缀**的,属"未授权的受限 entitlement")
+    这两个任一存在,launchd 在自签名(无 Team ID)root daemon 上下文里就拒绝 exec,
+    报 last exit code = 78(EX_CONFIG),进程在 main() 之前就被掐,无崩溃日志。
+    经实测:必须**同时**用这个空文件(去掉 application-identifier)+
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO(去掉 get-task-allow),少一个都不行。
+    Hardened runtime 与 entitlements 无关,仍保持开启。
+-->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>
