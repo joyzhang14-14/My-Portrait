@@ -27,6 +27,28 @@ struct DisplaySettingsView: View {
                     Toggle("", isOn: config.binding(\.display.showInMenuBar))
                         .labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                SettingsRow("Show Dock icon",
+                            description: "Keep My Portrait in the Dock. Turn off to run without a Dock icon (it also leaves Cmd-Tab and the top menu bar).",
+                            icon: "dock.rectangle") {
+                    Toggle("", isOn: config.binding(\.display.showDockIcon))
+                        .labelsHidden().toggleStyle(.switch)
+                }
+                // 危险组合:Dock 图标和菜单栏图标都关 → 关窗后没可见入口。
+                if !config.current.display.showDockIcon && !config.current.display.showInMenuBar {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                        Text("No Dock icon and no menu bar icon — once you close the window there's no quick way back. You'll have to relaunch My Portrait from Spotlight or Finder to reopen it.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             SettingsCard(title: "Memory") {

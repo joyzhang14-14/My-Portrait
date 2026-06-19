@@ -336,6 +336,11 @@ struct DisplayConfig: Codable, Equatable {
     var customDockIcon:          String = ""
     var customTrayIcon:          String = ""
     var showInMenuBar:           Bool   = true
+    /// 是否显示 Dock 图标。false → activation policy .accessory:app 照常后台跑,
+    /// 窗口照常能用,只是不出现在 Dock / Cmd-Tab / 顶部 app 菜单栏。默认 true。
+    /// ⚠️ 跟 showInMenuBar 都关 + 关窗 → 没可见入口,只能从 Spotlight/Finder
+    /// 重启唤回(applicationShouldHandleReopen 处理)。UI 有红字提醒该组合。
+    var showDockIcon:            Bool   = true
     /// Memories 列表排序规则:weight(默认)/ created / last_occurred。
     /// 文件夹分组内的 event 也跟随。值取自 MemorySortOrder.rawValue。
     var memorySortOrder:         String = "weight"
@@ -349,6 +354,7 @@ struct DisplayConfig: Codable, Equatable {
         case customDockIcon           = "custom_dock_icon"
         case customTrayIcon           = "custom_tray_icon"
         case showInMenuBar            = "show_in_menu_bar"
+        case showDockIcon             = "show_dock_icon"
         case memorySortOrder          = "memory_sort_order"
     }
     init(from decoder: Decoder) throws {
@@ -361,6 +367,7 @@ struct DisplayConfig: Codable, Equatable {
         customDockIcon          = c.dflt(String.self, .customDockIcon, customDockIcon)
         customTrayIcon          = c.dflt(String.self, .customTrayIcon, customTrayIcon)
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
+        showDockIcon            = c.dflt(Bool.self,   .showDockIcon, showDockIcon)
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
     }
 }

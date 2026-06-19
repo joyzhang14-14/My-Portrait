@@ -544,7 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lifecycleLog.error("Storage.ensureExists failed: \(error.localizedDescription, privacy: .public)")
         }
 
-        NSApp.setActivationPolicy(.regular)
+        // showDockIcon=false → .accessory(无 Dock 图标);否则 .regular。
+        // 启动就读 config,避免「先显示 Dock 再被 ConfigApplier 隐藏」的闪烁。
+        NSApp.setActivationPolicy(ConfigStore.shared.display.showDockIcon ? .regular : .accessory)
 
         window = ChromelessWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 835),
