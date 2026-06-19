@@ -334,7 +334,7 @@ final class ConfigStore {
         // — Display
         if let v = ud.string(forKey: "Settings.theme")                  { c.display.theme = v }
         c.display.chatAlwaysOnTop         = bool(ud, "Settings.chatAlwaysOnTop",       default: c.display.chatAlwaysOnTop)
-        c.display.translucentSidebar      = bool(ud, "Settings.translucentSidebar",    default: c.display.translucentSidebar)
+        // translucentSidebar 字段已下线(侧栏固定实色),旧 UserDefaults 不再迁移。
         c.display.hideModelReasoning      = bool(ud, "Settings.hideModelReasoning",    default: c.display.hideModelReasoning)
         if let v = ud.string(forKey: "Settings.appName")                { c.display.appName = v }
         if let v = ud.string(forKey: "Settings.customDockIcon")         { c.display.customDockIcon = v }
