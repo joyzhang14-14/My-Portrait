@@ -606,7 +606,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // Wire config → window/app chrome. Theme / always-on-top / app name
+        // Wire config → window/app chrome. Theme / app name
         // / Dock icon / launch-at-login all flow through this once ConfigStore
         // changes (vim edits or in-app toggles both fire the trampoline).
         ConfigApplier.shared.install(window: window, statusBar: statusBarMenu)

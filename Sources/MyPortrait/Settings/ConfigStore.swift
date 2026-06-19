@@ -140,7 +140,7 @@ final class ConfigStore {
     }
 
     /// Convenience two-way Binding for any value in the config tree.
-    /// Usage:  Toggle("", isOn: ConfigStore.shared.binding(\.display.chatAlwaysOnTop))
+    /// Usage:  Toggle("", isOn: ConfigStore.shared.binding(\.display.showInMenuBar))
     func binding<V>(_ kp: WritableKeyPath<MyPortraitConfig, V>) -> Binding<V> {
         Binding(
             get: { self.current[keyPath: kp] },
@@ -333,7 +333,7 @@ final class ConfigStore {
 
         // — Display
         if let v = ud.string(forKey: "Settings.theme")                  { c.display.theme = v }
-        c.display.chatAlwaysOnTop         = bool(ud, "Settings.chatAlwaysOnTop",       default: c.display.chatAlwaysOnTop)
+        // chatAlwaysOnTop 字段已下线(窗口固定 .normal 层级),旧 UserDefaults 不再迁移。
         // translucentSidebar 字段已下线(侧栏固定实色),旧 UserDefaults 不再迁移。
         c.display.hideModelReasoning      = bool(ud, "Settings.hideModelReasoning",    default: c.display.hideModelReasoning)
         if let v = ud.string(forKey: "Settings.appName")                { c.display.appName = v }

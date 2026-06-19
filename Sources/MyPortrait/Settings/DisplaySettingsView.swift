@@ -40,15 +40,6 @@ struct DisplaySettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Window") {
-                SettingsRow("Keep app window on top",
-                            description: "Keeps the My Portrait window above other apps. Handy for chatting on the side while you watch a video or read.",
-                            icon: "macwindow.on.rectangle") {
-                    Toggle("", isOn: config.binding(\.display.chatAlwaysOnTop))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-            }
-
             SettingsCard(title: "Chat") {
                 SettingsRow("Compact tool blocks",
                             description: "Collapse a reply's thinking + tool steps into one expandable summary bar. Faster to load.",

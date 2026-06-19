@@ -27,7 +27,6 @@ final class ConfigApplier {
     // 看着完全不生效。
     private static let unapplied = "<<UNAPPLIED>>"
     private var lastTheme: String = ConfigApplier.unapplied
-    private var lastAlwaysOnTop: Bool? = nil
     private var lastDockIcon: String = ConfigApplier.unapplied
     private var lastTrayIcon: String = ConfigApplier.unapplied
     private var lastShowInMenuBar: Bool? = nil
@@ -55,7 +54,6 @@ final class ConfigApplier {
         withObservationTracking {
             // READ every field we care about so the closure re-fires.
             _ = ConfigStore.shared.display.theme
-            _ = ConfigStore.shared.display.chatAlwaysOnTop
             _ = ConfigStore.shared.display.customDockIcon
             _ = ConfigStore.shared.display.customTrayIcon
             _ = ConfigStore.shared.display.showInMenuBar
@@ -83,12 +81,6 @@ final class ConfigApplier {
             case "dark":  NSApp.appearance = NSAppearance(named: .darkAqua)
             default:      NSApp.appearance = nil    // follow system
             }
-        }
-
-        // Always on top
-        if lastAlwaysOnTop != display.chatAlwaysOnTop {
-            lastAlwaysOnTop = display.chatAlwaysOnTop
-            mainWindow?.level = display.chatAlwaysOnTop ? .floating : .normal
         }
 
         // App name → window title
