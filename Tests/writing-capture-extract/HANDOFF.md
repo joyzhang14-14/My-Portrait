@@ -521,6 +521,40 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 
 **⏳ 验证中**:`be273o06o`(5/25+gold天,验全残渣OCR修复:5/25 #31 从那找到→从哪找的 + D4✓ + gold 不回归)。
 
+## 🚧 2026-06-18 keystroke 主导架构重构(用户设计,**进行中**,挂 `PORTRAIT_ARCH` 开关默认 ax 不变)
+
+**动机**:用户标 5/25 发现 Discord 漏很多(后查实=管线问题非采集:难绷/比如说你有一个公司等真消息击键都在,
+被窄账本「渲染确证」「汉字<3」「dirty」「去重」等闸丢)。用户拍板**架构倒置**:keystroke=完整发送骨架
+(每键都记,零丢弃),AX 退为辅助(分组重组 + 文字复原)。
+
+**已落地(`ks_primary.py` 独立模块 + `faithful_v2` 整合,commit `1e4a331/d62559c/63c6e43/c554898/4ade274`)**:
+
+- **切分(`segment_keystrokes`)**:按真发送回车切段。判发送复用 **AX 占位符逻辑**(用户指令「复用现在ax发送的逻辑」):
+  · **shift+return(mod&8)= 消息内换行**,不切(用户实证换行用 shift;⚠️`md&7` 只抓 cmd 组合 1/2/4,抓不到 shift=8,
+  不修则 claudefordesktop 23 个换行被当发送切碎)
+  · **`clear_times`**=框清空/占位符时刻:`﻿`(Discord 空框 ZWSP,且无内容)或 `X.is_ph`(claudefordesktop
+  "Reply to Claude…"文字占位)。⚠️per-return 清空 AX 记太稀疏(79<123 回车)不能反推单条 → 用 **per-bundle**:
+  `clear_times≥3`=聊天(回车=发送,连发每条都切)/ 0=编辑器(Notes/obsidian 纯`\n`换行无占位)→ 回车=换行整条
+- **文字复原(`segment_sends`)**:每发送段配 commit 真字主体(captured,按击键边界逐条落,收到「下一条开始打字」
+  含 IME 滞后尾),喂 `faithful_v2` 完整链(reconstruct+literal_tail+口3+14B);**不重解**(原型逐段重解=脏,教训)
+- **自动分流(`faithful_v2:272`,不硬编码 app)**:`ARCH=keystroke` 且 bundle 是聊天(clear_times≥3)→ 走击键;
+  否则(编辑器)→ 走旧 `event_sends_with_ts`(长文整条由 AX 给)。关掉重复账本(ARCH=keystroke)
+- **排序**:成品按 t1(发送时刻)排(commit `ff1d2bd`,独立小修,已对 IM 时间线;边打边想长消息 ev461 不再顶前)
+
+**5/25 实测(`eval/ksp_full.md`,REVIEW_MODE=det PORTRAIT_ARCH=keystroke PORTRAIT_DAYS=2026-05-25)**:
+
+- 聊天 Discord 106 / claudefordesktop 36(**连发拆分**:对啊×2、半年就翻40倍 等回来);编辑器 Notes 3 / obsidian 2(走 AX,**不再碎**);D4✓ P0✓
+- **零丢弃达成**:用户标的缺失(难绷/蝴蝶效应/比如说你有一个公司/可以简单的善后)全回(sonnet 逐条对照实证,见 Obsidian `v26-对照v24完整标记(5.25全app).md`)
+
+**⚠️ 残留/待办**:
+
+- **同音错字**(符号→复活、美丽→没了、爱→AI):commit 真字也没有、librime 猜错 → **#44**(OCR/14B),旧管线也有
+- **截断的正确残段**(那比如说你就很 缺重要):commit 没记下尾字,不强解=宁缺毋错(正确>残渣>错字),非 bug
+- **sandisk 类 IME 上屏英文**:历史 input_source=NULL 无法精判,聊天默认按发送切(拆开);新数据靠 input_source(keylayout)精合,待接
+- **gold 全量验证未做**(单天 5/25 跑 gold 13✓32✗=假象,探针多在其它天):**下一步必须全量多天跑 `compare_gold` 确认聊天路不回归**
+- **emoji 缺**(:emoji_xx: 点选非击键,keystroke 抓不到):符合「只记手打」,用户未裁定要不要补
+- **claudefordesktop 36 vs 库中 24**:多的是连发拆分,质量待用户逐条核(v26 文档已 sonnet 初标)
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
