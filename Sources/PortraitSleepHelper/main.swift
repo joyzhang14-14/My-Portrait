@@ -121,14 +121,14 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, PortraitSleepHelper
 
     // MARK: - PortraitSleepHelperProtocol
 
-    func setKeepAwake(_ enabled: Bool, withReply reply: @escaping (Bool, String) -> Void) {
+    func setKeepAwake(_ enabled: Bool, withReply reply: @escaping @Sendable (Bool, String) -> Void) {
         let st = runPmset(disable: enabled)
         let diag = "pmset -c disablesleep \(enabled ? 1 : 0) → status=\(st); \(currentSleepDisabled())"
         log.notice("setKeepAwake(\(enabled, privacy: .public)): \(diag, privacy: .public)")
         reply(st == 0, diag)
     }
 
-    func ping(withReply reply: @escaping (String) -> Void) {
+    func ping(withReply reply: @escaping @Sendable (String) -> Void) {
         let msg = "helper uid=\(getuid()) (0=root); \(currentSleepDisabled())"
         log.notice("ping → \(msg, privacy: .public)")
         reply(msg)
