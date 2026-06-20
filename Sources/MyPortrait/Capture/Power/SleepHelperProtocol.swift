@@ -17,8 +17,11 @@ protocol PortraitSleepHelperProtocol {
     /// 以 root 跑 `pmset -c disablesleep <0/1>`,让机器合盖+插电也完全清醒(`true`)
     /// 或恢复正常睡眠(`false`)。reply 回 (生效后的状态, 诊断串) 供 app 端 log。
     /// 幂等 —— 重复同一状态是 no-op。
-    func setKeepAwake(_ enabled: Bool, withReply reply: @escaping (Bool, String) -> Void)
+    /// ⚠️ reply 必须 `@Sendable` —— XPC 在**连接自己的队列**上回调它,不是主线程。
+    /// 不标的话,在 @MainActor 的调用方(SleepHelperClient)里会被推断成 @MainActor
+    /// 隔离,XPC 在非主队列回调时触发 `_dispatch_assert_queue_fail` 崩溃。
+    func setKeepAwake(_ enabled: Bool, withReply reply: @escaping @Sendable (Bool, String) -> Void)
 
     /// 轻量连通性探针:确认 helper 已被 launchd 拉起、XPC 通了、以什么 uid 在跑。
-    func ping(withReply reply: @escaping (String) -> Void)
+    func ping(withReply reply: @escaping @Sendable (String) -> Void)
 }
