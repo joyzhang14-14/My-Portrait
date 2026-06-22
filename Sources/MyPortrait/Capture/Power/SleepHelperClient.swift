@@ -91,16 +91,21 @@ final class SleepHelperClient {
         if connection == nil {
             let c = NSXPCConnection(machServiceName: Self.machServiceName, options: .privileged)
             c.remoteObjectInterface = NSXPCInterface(with: PortraitSleepHelperProtocol.self)
-            c.invalidationHandler = { [weak self] in
+            // ⚠️ 所有 handler 必须显式 `@Sendable`。它们由 XPC 在**连接自己的队列**
+            // 上回调;不标的话在 @MainActor 类里会被推断成 @MainActor 隔离,XPC 在非
+            // 主队列调用时触发 `_dispatch_assert_queue_fail` 崩溃(invalidate() 拆连接
+            // 时 invalidationHandler fire 实测崩)。@Sendable 闭包不可能 actor 隔离,
+            // 闭包体内仍 Task{@MainActor} 跳回主线程改状态。
+            c.invalidationHandler = { @Sendable [weak self] in
                 Task { @MainActor in self?.connection = nil; self?.holding = false }
             }
-            c.interruptionHandler = { [weak self] in
+            c.interruptionHandler = { @Sendable [weak self] in
                 Task { @MainActor in self?.connection = nil; self?.holding = false }
             }
             c.resume()
             connection = c
         }
-        return connection?.remoteObjectProxyWithErrorHandler { [weak self] error in
+        return connection?.remoteObjectProxyWithErrorHandler { @Sendable [weak self] error in
             Task { @MainActor in
                 self?.log.error("XPC error: \(error.localizedDescription, privacy: .public)")
                 self?.connection = nil; self?.holding = false
