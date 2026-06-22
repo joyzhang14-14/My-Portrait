@@ -162,8 +162,8 @@ def segment_sends(con, bundle, day):
                 chunk.append(cm[ci][1])
             ci += 1
         prev = cr
-        han = ''.join(c for c in ''.join(chunk) if HAN.match(c) or (not c.isascii() and not c.isspace()))   # 真字主体:汉字+中文标点(全角),滤ascii拼音残片与非ascii空白(\xa0)
-        out.append({'t0': s['t0'], 't1': cr, 'captured': han, 'dirty': s['dirty']})
+        cap = ''.join(chunk)   # 混合架构(2026-06-21):完整commit真字(含英文/数字/拼音/标点),交下游reconstruct解码拼音+保英文;ax漏的段靠它保英文(滤汉字会丢ElevenLabs/6个G)
+        out.append({'t0': s['t0'], 't1': cr, 'captured': cap, 'dirty': s['dirty']})
     return out
 
 def build_sends(con, bundle, day, model_fn=None):

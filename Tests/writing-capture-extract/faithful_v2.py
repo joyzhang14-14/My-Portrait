@@ -278,12 +278,30 @@ for day in DAYS:
             bundle = evs[0]['bundle']
             gt0 = min((e.get('started_at') or 0) for e in evs)
             gt1 = max((e.get('ended_at') or e.get('started_at') or 0) for e in evs)
-            for snd in KP.segment_sends(con, bundle, day):
-                if not (gt0 - 2000 <= (snd['t1'] or 0) <= gt1 + 2000):
-                    continue
-                ev = next((e for e in evs if (e.get('started_at') or 0) - 1500 <= snd['t1']
+            # 混合(用户 2026-06-21):keystroke 只分段(连发边界);文字优先借 ax(event_sends_with_ts,
+            # 文字全/含英文/粘贴术语 sandisk/ElevenLabs);ax 把多条连发合并(多k对1ax)或 ax 漏
+            # (密集连发只产几条,ev454 ax漏16条)→ 用 keystroke commit 真字(captured)兜底。两路都汇入
+            # sends_raw 走老逻辑(line 298+ 升格/降级/reconstruct/口3/Pass4/gate/去重)验证,keystroke 不碰下游。
+            ax_segs = []
+            for ev in evs:
+                for atext, at0, at1, a_is in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
+                    ax_segs.append({'text': atext, 't0': at0, 't1': at1, 'ev': ev, 'is': a_is, 'nk': 0})
+            ksegs = [s for s in KP.segment_sends(con, bundle, day)
+                     if gt0 - 2000 <= (s['t1'] or 0) <= gt1 + 2000]
+            for k in ksegs:                                       # 每个keystroke段落到哪个ax段(按发送时刻t1)
+                k['_ax'] = next((a for a in ax_segs
+                                 if (a['t0'] or 0) - 1500 <= (k['t1'] or 0) <= (a['t1'] or 0) + 1500), None)
+                if k['_ax'] is not None: k['_ax']['nk'] += 1
+            for k in ksegs:
+                a = k['_ax']
+                ev = next((e for e in evs if (e.get('started_at') or 0) - 1500 <= (k['t1'] or 0)
                            <= (e.get('ended_at') or e.get('started_at') or 0) + 2000), evs[-1])
-                sends_raw.append([ev, snd['captured'], snd['t0'], snd['t1'], True])
+                # ax 1对1(单条消息,ax文字全含英文/粘贴)→ 借 ax;ax合并多k 或 ax漏 → keystroke commit真字兜底
+                txt = a['text'] if (a is not None and a['nk'] == 1) else k['captured']
+                sends_raw.append([ev, txt, k['t0'], k['t1'], True])
+            for a in ax_segs:                                     # ax有但keystroke没切出的段(endValue/无回车草稿)也保留,去重交老逻辑
+                if a['nk'] == 0:
+                    sends_raw.append([a['ev'], a['text'], a['t0'], a['t1'], a['is']])
         else:
             for ev in evs:
                 for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
@@ -458,8 +476,9 @@ for day in DAYS:
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
     # 零 AX 痕迹的 IME 秒发消息(挺不错的/说实话/ElevenLabs):汉字从没进 edit_log,只在击键流里。
     # 对账:全天该 bundle 的 <CR> 段(已消化退格),没被任何已有记录「文本+时间」双重消费的 → 纯击键重建。
-    # keystroke 主导时击键已是一等公民(每段入册),无需独立账本补救(否则重复)
-    bundles = {} if (LEDGER_MODE == 'off' or ARCH == 'keystroke') else {b: a for a, t, s, kc, evid, t0, t1, b in dayrecs}
+    # keystroke 主导也开账本(用户 2026-06-22):切分只切有<CR>的发送,零AX痕迹纯击键消息(还可以/ElevenLabs)
+    # 切不到 → 账本补;查重(拼音空间+时间窗±10s)防与切分已入册的重复
+    bundles = {} if LEDGER_MODE == 'off' else {b: a for a, t, s, kc, evid, t0, t1, b in dayrecs}
     for b, a in bundles.items():
         recs_b = [(t, t0, t1) for app2, t, s, kc, evid, t0, t1, b2 in dayrecs if b2 == b]
         rows = con.execute("SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log "
