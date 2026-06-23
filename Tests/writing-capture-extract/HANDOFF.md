@@ -555,6 +555,52 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 - **emoji 缺**(:emoji_xx: 点选非击键,keystroke 抓不到):符合「只记手打」,用户未裁定要不要补
 - **claudefordesktop 36 vs 库中 24**:多的是连发拆分,质量待用户逐条核(v26 文档已 sonnet 初标)
 
+## ✅ 2026-06-22 混合架构 + per-return 三态切分(用户 4 次澄清定型,**当前 keystroke 路最佳**)
+
+**背景**:全量两版对比(ax 44✓ / 纯 keystroke 26✓)暴露纯 keystroke 暴跌——captured 滤光英文 + 关账本。
+用户裁定混合,经 4 次澄清逐步逼近最终设计。
+
+**最终架构(commit `59db51b` 混合 + `2bccdaa` 三态)**:
+
+```
+keystroke return(候选切点)
+ → ax 验证每个 return(ks_primary._is_send_return,只看回车那帧框内容):
+     框清空 / 无记录 / 换成不相似新内容 = 真发送 → 切
+     框没清空且与回车前相似(SequenceMatcher.ratio≥0.5:追加/改写/IME确认上屏)= 没发送 → 合并
+ → 每段文字:优先借 ax(event_sends_with_ts,含英文/粘贴 sandisk/ElevenLabs);
+     ax 把多条连发合并(nk>1)或 ax 漏(密集连发 ev454 漏16条)→ keystroke captured(完整commit真字)兜底
+ → 全走老逻辑(reconstruct/口3/Pass4/去重)+ 开窄账本
+```
+
+**三处实现**:
+
+- **A(`ks_primary` segment_sends captured)**:从"只留汉字"改**完整 commit 真字**(含英文/数字/拼音/标点),给 ax 漏的兜底段保英文(原 HAN-only 滤光 ElevenLabs/6个G)
+- **B(`faithful_v2:281` keystroke 分支)**:ax 1对1 借 ax 文字 / nk>1 或 ax漏则 captured 兜底 / ax 独有段(nk=0)也保留,去重交老逻辑
+- **C(`faithful_v2:480` 开账本)**:去掉 `ARCH=keystroke` 禁用,补切分够不到的零AX痕迹消息(查重防重复)
+- **三态切分(`ks_primary._is_send_return`/`_edit_entries`)**:替 per-bundle is_chat。逐 return 比"回车那帧框内容 vs 回车前"相似度;统一聊天/编辑器(编辑器换行天然相似→合并整条),不硬分
+
+**⚠️ 用户 4 次澄清(关键概念,别再搞错)**:
+
+1. keystroke 只分段,文字用 ax,走老逻辑(口3/Pass4)
+2. ax 根本没检测到的 session 不用管(keystroke 兜底),检测到的才合并
+3. return 不一定是发送:有时中文输入法打英文按 return **上屏确认**,或单纯换行;看 ax 框有没有清空
+4. 改写(vos→vcd)也该合并——**只看 return 那帧 ax 框内容与回车前是否相似**(不止前缀延续);
+   实证 Discord 123 return 真连发零误合并(追加/IME确认/重复正确合并)
+
+**gold 演进(全量 6 天,REVIEW_MODE=det)**:纯 keystroke 26✓ → 混合 40✓ → 混合+三态 40✓
+(切分更准:289→278 条,合并了中间态/IME确认/改写)。距 ax 44✓ 差 4 个**下游回归**(非切分):
+
+- **A1 记得 / A7 一下测**:简拼 ji d/yi x,口3 OCR 没找回(混合 captured 走口3但没救回)
+- **A6 Blueprint**:长消息 captured 简拼解码弱
+- **B1 vos/vcd**:下游 dedup 选了中间态「vos有关」而非终稿「vcd有关」(幻影发送/过期快照案,ax 路靠幻影降级选终稿)
+- A10 卖个惨:ax 也✗(librime 词库无此 slang,**非回归**)
+
+**产出**:Obsidian Pipeline成品归档/`v28-6天混合架构` / `v29-混合架构+三态切分` / `keystroke混合架构-验证报告`。
+基准 `eval/v_ax_6day.md`(ax 44✓)/ `eval/v_ksp_hybrid3.md`(三态 40✓)。
+**跑法**:`REVIEW_MODE=det PORTRAIT_ARCH=keystroke PORTRAIT_DAYS=2026-05-27,...,2026-06-05 PORTRAIT_CANVAS=eval/canvas_merged_src.json PORTRAIT_OUT=<abs> python3 faithful_v2.py`
+
+**⏳ 待做(下轮)**:逐个修 4 回归(A1/A7 简拼接口3 / A6 长文借ax / B1 vos/vcd 幻影降级)——都是下游独立问题,切分架构已正确。
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
