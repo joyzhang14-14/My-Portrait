@@ -6,6 +6,7 @@
 本文件**独立**,不碰 faithful_v2。先在 5/25 Discord 验证,对了再整合(挂 PORTRAIT_ARCH 开关)。
 """
 import sqlite3, os, json, re
+from difflib import SequenceMatcher
 import extract_compare_v2 as X   # 复用 AX 占位符/空框检测(is_ph/cv)判"回车后框是否清空=发送"
 DB = os.path.expanduser("~/.portrait/portrait.sqlite")
 HAN = re.compile(r'[一-鿿]')
@@ -34,20 +35,51 @@ def clear_times(con, bundle, day):
                 ts.append(int(e.get('ts') or 0))
     return sorted(ts)
 
+def _edit_entries(con, bundle, day):
+    """edit_log 框内容时序 [(ts, cv文本, 是否空框)]:判 return 后框是清空还是延续。"""
+    out = []
+    for (el,) in con.execute(
+            "SELECT edit_log FROM typing_events WHERE bundle_id=? "
+            "AND strftime('%Y-%m-%d',started_at/1000,'unixepoch')=? ORDER BY started_at",
+            (bundle, day)).fetchall():
+        try:
+            arr = json.loads(el or '[]')
+        except Exception:
+            arr = []
+        for e in arr:
+            cvt = cv((e.get('text') or '').replace('﻿', ''))
+            out.append((int(e.get('ts') or 0), cvt, (not cvt) or X.is_ph(cvt)))
+    out.sort()
+    return out
+
+def _is_send_return(ts, entries):
+    """三态(用户 2026-06-22):return 后 ax 框**清空 / 无记录 / 换成不相似的新内容** = 真发送(切);
+    框**没清空且与回车前相似**(同一条继续打——追加/改写/IME确认上屏:我的app→我的app终于做好了、
+    vos→vcd、爽zhuan→爽赚)= 没发送,合并。判据=只看回车那帧 ax 框内容与回车前的相似度
+    (SequenceMatcher.ratio≥0.5);实测 Discord 真连发全是新内容/框清空,零误合并,vos/vcd 改写正确合并。"""
+    pre, post = '', None
+    for ets, cvt, empty in entries:
+        if ets <= ts:
+            pre = cvt
+        elif ts < ets <= ts + 3000:
+            post = (cvt, empty); break
+    if post is None or post[1]:
+        return True                                       # ax 没检测到 / 框清空 → 发送
+    if len(pre) >= 3 and SequenceMatcher(None, pre, post[0]).ratio() >= 0.5:
+        return False                                      # 与回车前相似(追加/改写/IME确认)→ 同一条,合并
+    return True                                            # 不相似的新内容 → 发送
+
+
 def segment_keystrokes(con, bundle, day, win=2200):
-    """切段(用户 2026-06-18 设计:复用 AX 发送逻辑)。<BS> 即时回放;不丢任何段。
-    每个回车判是否真发送:① shift+return(mod&8)= 消息内换行,合并;② 普通回车 → **回车后框是否清空/
-    出现占位符**(clear_times,复用 X.is_ph)→ 有=发送(切),无=只是换行(合并,Notes/编辑器天然整条)。
-    连发(每条发完框都清空)天然每条都切;sandisk(确认英文后框没清)天然合并。返回 [{...,py,dirty}]。"""
+    """切段(用户 2026-06-18/22 设计)。<BS> 即时回放;不丢任何段。每个回车判是否真发送:
+    ① shift+return(mod&8)= 消息内换行,合并;② 普通回车 → **per-return 三态**(_is_send_return):
+    回车后 ax 框清空/无记录/换新内容=发送(切),框没清空且前缀延续=没发送(IME确认英文/换行/同条续写,合并)。
+    连发(每条发完框清空/换新内容)天然每条切;编辑器(换行后前缀延续)天然合并整条。返回 [{...,py,dirty}]。"""
     rows = con.execute(
         "SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log "
         "WHERE bundle_id=? AND strftime('%Y-%m-%d',ts_ms/1000,'unixepoch')=? ORDER BY ts_ms",
         (bundle, day)).fetchall()
-    clr = clear_times(con, bundle, day)
-    # 该 bundle 是不是"会发送"的(聊天):有框清空/占位符 = 是(Discord79/claudefordesktop30);
-    # 0 = 编辑器(Notes/obsidian),回车=换行不发送。⚠️ per-return 的清空 AX 记得太稀疏(79<123回车)
-    # 不能反推单条;但 per-bundle 干净区分聊天vs编辑器(让 AX 判 app 行为,不硬编码 app 名)。
-    is_chat = len(clr) >= 3
+    entries = _edit_entries(con, bundle, day)   # per-return 三态(用户 2026-06-22)判每个回车是否真发送
     segs, cur, dirty = [], [], False
     for ts, c, bs, md in rows:
         if md & 7:
@@ -64,8 +96,9 @@ def segment_keystrokes(con, bundle, day, win=2200):
             # ① shift+return(mod&8)= 消息内换行(用户实证),不切
             if md & 8:
                 continue
-            # ② 编辑器(无框清空)→ 普通回车也是换行,不切(Notes 整条交 AX);聊天 → 回车=发送(连发每条都切)
-            if not is_chat:
+            # ② per-return ax 验证(_is_send_return):框清空/无记录/不相似新内容=发送(切);
+            #    框没清空且与回车前相似(追加/改写/IME确认)=没发送(合并)。统一聊天/编辑器,不硬分。
+            if not _is_send_return(ts, entries):
                 continue
             if cur:
                 segs.append({'t0': cur[0][0], 't1': cur[-1][0], 'cr_ts': ts,
