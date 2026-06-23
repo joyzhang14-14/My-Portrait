@@ -297,10 +297,13 @@ for day in DAYS:
                 ev = next((e for e in evs if (e.get('started_at') or 0) - 1500 <= (k['t1'] or 0)
                            <= (e.get('ended_at') or e.get('started_at') or 0) + 2000), evs[-1])
                 # ax 1对1(单条消息,ax文字全含英文/粘贴)→ 借 ax;ax合并多k 或 ax漏 → keystroke commit真字兜底
-                txt = a['text'] if (a is not None and a['nk'] == 1) else k['captured']
+                if a is not None and a['nk'] == 1:
+                    a['_borrowed'] = True; txt = a['text']
+                else:
+                    txt = k['captured']
                 sends_raw.append([ev, txt, k['t0'], k['t1'], True])
-            for a in ax_segs:                                     # ax有但keystroke没切出的段(endValue/无回车草稿)也保留,去重交老逻辑
-                if a['nk'] == 0:
+            for a in ax_segs:                                     # 改动1(2026-06-23):ax 段只要没被任何 kseg 借走文本就保留,去重交老逻辑
+                if not a.get('_borrowed'):                        # (原 nk==0 太窄:nk>1 的正确终稿 ax 段被丢=A1明天/A6 222字/B1终稿/A7余额跑回归根因)
                     sends_raw.append([a['ev'], a['text'], a['t0'], a['t1'], a['is']])
         else:
             for ev in evs:
