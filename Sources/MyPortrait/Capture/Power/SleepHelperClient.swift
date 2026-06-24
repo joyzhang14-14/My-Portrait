@@ -115,8 +115,8 @@ final class SleepHelperClient {
 
     private func teardownConnection(resetFirst: Bool) {
         if resetFirst,
-           let proxy = connection?.remoteObjectProxyWithErrorHandler({ _ in }) as? PortraitSleepHelperProtocol {
-            proxy.setKeepAwake(false) { _, _ in }
+           let proxy = connection?.remoteObjectProxyWithErrorHandler({ @Sendable _ in }) as? PortraitSleepHelperProtocol {
+            proxy.setKeepAwake(false) { @Sendable _, _ in }
         }
         connection?.invalidate()
         connection = nil
