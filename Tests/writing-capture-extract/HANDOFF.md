@@ -555,7 +555,7 @@ k n→看论文、挺不错的/说实话(账本找回)、H特定的人(原型✓
 - **emoji 缺**(:emoji_xx: 点选非击键,keystroke 抓不到):符合「只记手打」,用户未裁定要不要补
 - **claudefordesktop 36 vs 库中 24**:多的是连发拆分,质量待用户逐条核(v26 文档已 sonnet 初标)
 
-## ✅ 2026-06-22 混合架构 + per-return 三态切分(用户 4 次澄清定型,**当前 keystroke 路最佳**)
+## ⚠️ 2026-06-22 混合架构 + per-return 三态切分(**已于 2026-06-24 整套回滚,见文末;只留教训,代码不在执行路径**)
 
 **背景**:全量两版对比(ax 44✓ / 纯 keystroke 26✓)暴露纯 keystroke 暴跌——captured 滤光英文 + 关账本。
 用户裁定混合,经 4 次澄清逐步逼近最终设计。
@@ -600,6 +600,29 @@ keystroke return(候选切点)
 **跑法**:`REVIEW_MODE=det PORTRAIT_ARCH=keystroke PORTRAIT_DAYS=2026-05-27,...,2026-06-05 PORTRAIT_CANVAS=eval/canvas_merged_src.json PORTRAIT_OUT=<abs> python3 faithful_v2.py`
 
 **⏳ 待做(下轮)**:逐个修 4 回归(A1/A7 简拼接口3 / A6 长文借ax / B1 vos/vcd 幻影降级)——都是下游独立问题,切分架构已正确。
+
+## ⚠️ 2026-06-24 keystroke 整套回滚(sonnet 逐条核翻盘 = 本轮最大教训)
+
+**翻盘**:gold 一路 26→40→43✓ 看着成功,但 **sonnet 逐条核(6 天对照 ax 基准)揭穿是假象**:
+
+- keystroke 混合(改动1=ax段未借走就保留)6 天多捞 83 条,**82 条是垃圾**(输入过程中间态:
+  IME 拼音裸露/截断快照/逐步追加版本/单字残渣),只 1 条存疑真内容,还带 12 处错字;6 天 verdict 全"更差/持平"。
+- **gold 探针测不出中间态垃圾涌入**——它只查"特定真消息在不在"(都在=43✓),不查噪声;
+  程序去重也抓不到(中间态文本各不相同)。**必须 sonnet 逐条人工核才看得出**(用户一直坚持的方法对)。
+- **ax 路 6 天 missing=0**(零漏真消息)且干净;**连发拆分(keystroke 核心卖点)零正向价值**
+  (ax 早把连发拆好了,keystroke 没多找回真消息,只多了垃圾)。根因:keystroke「零丢弃」保留
+  输入过程多个快照(借ax段 + captured IME 拼音),dedup 拦不住(is_send=True 不敢删/文本各异)。
+
+**回滚(用户裁定)**:`git checkout ff1d2bd -- faithful_v2.py`(回 keystroke 之前纯 ax 路);
+`ks_primary.py` 暂留不删(faithful_v2 不再 import)。全量 6 天重跑 diff `v_ax_6day.md` **逐字一致**,
+确认干净回到 ax 路 44✓。**working tree 回滚未 commit**(用户有新思路待展开)。
+⚠️ 关联 commit 仍在历史(1e4a331/d62559c/63c6e43/c554898/4ade274/177ee48/59db51b/2bccdaa/0fe4ca8),
+HANDOFF 上面 2026-06-18/22 两节描述的就是它们,**已是死路**。
+
+**教训(刻进下一步)**:① 质量看信噪比,不只看 gold;gold 高 ≠ 成品干净。② 新方案务必 sonnet 逐条核
+对照 ax,别信 gold 探针。③ ax 路(event_sends_with_ts 抓渲染完成的最终态)零漏且干净,是强基准;
+偏离它要先证明它真漏了什么(5/25 窄账本漏的那些,大概率是窄账本闸=渲染确证/汉字<3 的问题,
+非 ax 路本身漏——这点待新思路验证)。
 
 ## 待做(优先级)
 
