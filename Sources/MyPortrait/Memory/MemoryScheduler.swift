@@ -288,6 +288,9 @@ final class MemoryScheduler {
 
     /// App 启动调用：先回收死锁，立刻 tick 一次，再起周期 timer。
     func start() {
+        // 自愈 helper 注册:开关开着就刷新一次(rebuild 后 cdhash 变也能对上 LWCR,
+        // 不再"开关开着却 EX_CONFIG 起不来")。开关没开则 no-op,无副作用。
+        SleepHelperClient.shared.syncRegistration()
         loadLastFailures()   // 必须在 recoverStaleLocks 之前 — recover 写 kind 时
                              // 会读老值(避免覆盖更早的 user-required kind)
         recoverStaleLocks()

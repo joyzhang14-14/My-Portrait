@@ -59,6 +59,22 @@ final class SleepHelperClient {
         catch { log.error("unregister failed: \(error.localizedDescription, privacy: .public)") }
     }
 
+    /// app 启动时调一次的**自愈**:开关开着就 `register()` 刷新注册,让 rebuild 后
+    /// 变化的 cdhash 重新进 SMAppService 的 LWCR —— 否则自签名每次重编都让注册陈旧、
+    /// launchd 拒启 helper(EX_CONFIG / spawn failed)、"开关开着却悄悄失效"。
+    /// 无副作用:① 开关没开 → 直接返回,不注册;② **不弹系统设置**(首次批准仍由
+    /// enable() 负责);③ **不 unregister**(只 register,幂等;稳定 build 上 no-op,
+    /// 已批准的不需重新批准)。
+    func syncRegistration() {
+        guard ConfigStore.shared.current.general.keepAwakeLidClosed else { return }
+        do {
+            try service.register()
+            log.info("launch sync register OK, status=\(self.statusName, privacy: .public)")
+        } catch {
+            log.info("launch sync register threw code=\((error as NSError).code, privacy: .public), status=\(self.statusName, privacy: .public)")
+        }
+    }
+
     // MARK: - keep-awake(MemoryScheduler.refreshKeepAwake 驱动)
 
     /// 有任务在跑 + 插电 → `true` 让机器合盖也清醒;全停 → `false` 复位。
