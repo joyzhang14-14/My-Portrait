@@ -508,6 +508,7 @@ final class TypingObserver {
         if TypingPrivacyFilter.isSecureRole(role) { return }
         var slept: UInt64 = 0
         var lastFed: String? = nil
+        var lastNonEmpty: String? = nil   // 清空前摇读到的最后非空落定值(救发送黑洞+IME末尾丢字)
         for target in Self.submitRaceDelaysMs {
             try? await Task.sleep(nanoseconds: (target - slept) * 1_000_000)
             slept = target
@@ -519,9 +520,15 @@ final class TypingObserver {
                 return (e == .success ? (ref as? String) : nil)
             }
             guard let value else { return }
-            if value.isEmpty { return }       // 字段已清空 → 停
-            if value == lastFed { continue }  // 同值不重复喂,但继续读(等落定值/清空冒出来)
             let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
+            if value.isEmpty {
+                // 框清空 = 这次回车真发送了。把清空前摇读到的最完整落定值主动落 submit
+                // (绕过 AX value-change coalesce + debounce;摇读没抢到则 writer 内回退快照)
+                writer.submitFromRace(key: key, message: lastNonEmpty)
+                return
+            }
+            lastNonEmpty = value
+            if value == lastFed { continue }  // 同值不重复喂,但继续读(等落定值/清空冒出来)
             writer.noteValueChange(key: key, newValue: value)
             lastFed = value
         }

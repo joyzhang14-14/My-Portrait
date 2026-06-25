@@ -290,6 +290,19 @@ final class TypingRecordWriter {
 
     /// 回车发送 —— `message` = 发出的整条消息；`clearedValue` = 发送后输入框
     /// 当前内容（空串 / 占位符文字，作为下一段 session 的起点）。
+    /// 回车摇读捕获到「框清空」= 这次回车真发送了。主动落 submit，**绕过 debounce + 被动
+    /// value-change 检测**：AX value-change 在高频连发下被系统 coalesce、清空帧丢失，
+    /// `noteValueChange` 根本看不到发送 → edit_log 黑洞 + IME 末尾丢字。回车信号可靠（CGEventTap），
+    /// 由它主动驱动落库。`message` = 清空前摇读读到的最后非空落定值；摇读没抢到（回车后框瞬间
+    /// 就空）→ 回退 `pendingValue`/快照（打字时记的）；全空 → 放弃（AX 从没采到此条，物理极限）。
+    func submitFromRace(key: ElementKey, message: String?) {
+        guard let rec = state[key] else { return }
+        let fromRace = (message?.isEmpty == false) ? message : nil
+        let msg = fromRace ?? rec.pendingValue ?? rec.lastValueSnapshot
+        guard !msg.isEmpty, msg != rec.sessionStart else { return }
+        handleSubmit(key: key, rec: rec, message: msg, clearedValue: "")
+    }
+
     private func handleSubmit(key: ElementKey, rec: InProgressRecord,
                               message: String, clearedValue: String) {
         rec.debounceTimer?.invalidate()
