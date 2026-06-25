@@ -6,7 +6,12 @@
         <language>en</language>
 
         <!--
-            scripts/release/sparkle.sh 会打印新 <item>
+            scripts/release/sparkle.sh 会打印新 <item>。
+            手动粘到这里、commit + push 到 main(GitHub Pages 自动部署)。
+            最新版本放最上面。
+        -->
+
+        <item>
             <title>Version 1.2.168</title>
             <pubDate>Thu, 25 Jun 2026 05:39:45 +0000</pubDate>
             <sparkle:version>174</sparkle:version>
@@ -18,11 +23,6 @@
                 type="application/octet-stream"
                 sparkle:edSignature="IxuO+LAuMIofFzq6kgH8gY6LpUIX7eRmPH09tE6HDj3BOXO3ULrhepEJIe1Zhh+WsGq5x7antctNzDGTQ9HJCQ==" length="26763254" />
         </item>
-        <item>。
-            手动粘到这里、commit + push 到 main(GitHub Pages 自动部署)。
-            最新版本放最上面。
-        -->
-
         <item>
             <title>1.2.155</title>
             <pubDate>Mon, 15 Jun 2026 05:09:10 +0000</pubDate>
