@@ -491,7 +491,7 @@ struct RecordingConfig: Codable, Equatable {
     /// true → 正常 app 启动时 TypingObserver 跟随权限门禁运行。
     var typingCaptureEnabled: Bool = false
     /// AX 内容稳定多久（毫秒）才记一个编辑窗口 —— 收敛 IME 拼音中间态。
-    var typingDebounceMs: Int = 350
+    var typingDebounceMs: Int = 100
     /// 停打多久（秒）这段输入 session 落库。
     var typingFlushIdleSec: Int = 5
     /// 回车后多久内（毫秒）输入框清空才算「发送」。
