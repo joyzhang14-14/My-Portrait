@@ -68,13 +68,13 @@ xcodebuild \
     archive | tail -20
 
 # 3) export(Apple Development 签名,作为中间产物;下一步会用自签 cert 重签)
-rm -rf "$EXPORT_DIR"
-echo "→ xcodebuild exportArchive"
-xcodebuild \
-    -exportArchive \
-    -archivePath "$ARCHIVE" \
-    -exportPath "$EXPORT_DIR" \
-    -exportOptionsPlist scripts/release/ExportOptions.plist | tail -10
+rm -rf "$EXPORT_DIR"; mkdir -p "$EXPORT_DIR"
+# ⚠️ Xcode 16 的 xcodebuild -exportArchive 对自签(无 Developer ID)app 失效:
+#    "method" 无任何可用值,报 `expected one {} but found development/debugging`。
+#    但 export 本就只为把 .app 从 archive 取出来(下一步会用 MyPortraitDev 重签),
+#    所以直接 copy archive 里的 .app,绕过坏掉的 exportArchive。ExportOptions.plist 不再用。
+echo "→ copy .app from archive (绕过 Xcode16 坏掉的 exportArchive)"
+cp -R "$ARCHIVE/Products/Applications/MyPortrait.app" "$EXPORT_DIR/"
 
 APP_PATH="$EXPORT_DIR/MyPortrait.app"
 if [[ ! -d "$APP_PATH" ]]; then
