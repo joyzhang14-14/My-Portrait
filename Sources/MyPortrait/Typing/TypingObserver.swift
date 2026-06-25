@@ -521,7 +521,11 @@ final class TypingObserver {
             }
             guard let value else { return }
             let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
-            if value.isEmpty {
+            // 框清空判断:空串 或 仅 ZWSP/换行/空白 —— 聊天 app 发送后框回占位符
+            // (Discord 是 ⎵\n=﻿+换行,不是空串),不能只判 isEmpty。
+            let cleared = value.replacingOccurrences(of: "\u{feff}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if cleared {
                 // 框清空 = 这次回车真发送了。把清空前摇读到的最完整落定值主动落 submit
                 // (绕过 AX value-change coalesce + debounce;摇读没抢到则 writer 内回退快照)
                 writer.submitFromRace(key: key, message: lastNonEmpty)
