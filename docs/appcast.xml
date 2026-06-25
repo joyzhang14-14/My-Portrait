@@ -6,7 +6,21 @@
         <language>en</language>
 
         <!--
-            scripts/release/sparkle.sh 会打印新 <item>。
+            scripts/release/sparkle.sh 会打印新 <item>
+            <title>Version 1.2.168</title>
+            <pubDate>Thu, 25 Jun 2026 05:39:45 +0000</pubDate>
+            <sparkle:version>174</sparkle:version>
+            <sparkle:shortVersionString>1.2.168</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>Features</h3><ul><li><strong>Dock icon toggle</strong>: A new switch in Settings lets you hide My Portrait from the Dock, keeping it fully out of sight while running in the menu bar.</li><li><strong>Background processing while the lid is closed</strong>: My Portrait can now keep running memory pipelines when your Mac is asleep or the lid is shut. A lightweight background helper keeps the machine awake just long enough to finish each run, then lets it sleep again.</li><li><strong>Ollama model auto-detection</strong>: If you use a local Ollama server, My Portrait now reads your installed models directly from Ollama instead of a hardcoded list. New models you pull show up automatically.</li><li><strong>Trace memories back to their events</strong>: Memories derived from events now show clickable event buttons, so you can see exactly which events shaped a memory.</li><li><strong>Create folder entry point</strong>: A "Create folder" button is now available in the Memories view, with instant action labels when you hover over tiles.</li><li><strong>Settings reorganized &amp; onboarding simplified</strong>: Several settings moved to more logical homes (Auto-scan under Import, Clear cache under Storage, Wait for transcription as its own card), and the redundant Input Monitoring permission step was removed from onboarding — Accessibility access is all you need.</li></ul><h3>Bug fixes</h3><ul><li><strong>Rapid-fire messages no longer go missing</strong>: Quickly sending several chat messages in a row could silently drop some of them. Typing capture now records each message the moment you hit Return, closing the "burst black hole."</li><li><strong>Empty fields no longer mistaken for content</strong>: Some chat apps leave an invisible placeholder when the text box is empty. My Portrait was treating that as real input; captures now fire only on actual text.</li><li><strong>Unselected provider now warns clearly</strong>: Using a feature without picking an AI provider used to silently do nothing. It now highlights the provider field so you know what's missing.</li><li><strong>Memory model dropdown cleaned up</strong>: The empty "Provider default" placeholder is gone from the model picker — only real, selectable models appear.</li><li><strong>Lock-screen recording option hidden when audio is off</strong>: The "Record while screen is locked" toggle now only appears when Audio Capture is enabled, instead of always showing.</li><li><strong>Sleep helper stability</strong>: Fixed a background crash that could happen when the helper's connection was torn down and re-established, and the helper now re-registers itself automatically after an app rebuild instead of failing to start.</li><li><strong>Idle-speed boost</strong>: When your Mac is plugged in and the screen is off, the memory pipeline now runs at full speed without being interrupted partway through.</li></ul>]]></description>
+            <!-- sign_update 输出的 $SIG 已经包含 length="..." 和
+                 sparkle:edSignature="..." 两个属性,这里不重复指定 length。-->
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.2.168/MyPortrait_1.2.168_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="IxuO+LAuMIofFzq6kgH8gY6LpUIX7eRmPH09tE6HDj3BOXO3ULrhepEJIe1Zhh+WsGq5x7antctNzDGTQ9HJCQ==" length="26763254" />
+        </item>
+        <item>。
             手动粘到这里、commit + push 到 main(GitHub Pages 自动部署)。
             最新版本放最上面。
         -->
