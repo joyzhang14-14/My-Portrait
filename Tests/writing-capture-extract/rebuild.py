@@ -16,6 +16,12 @@ _RIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rime")
 CANDS = os.path.join(_RIME, "cands"); LATTICE = os.path.join(_RIME, "lattice")
 # 粘贴政策(用户裁定 2026-06-10):消息内单段已知粘贴 ≤ 此值且非纯粘贴 → 整条留;用户可调。
 PASTE_MAX = 30
+# librime 解码接线开关(2026-06-27 用户裁定):采集层摇读修复后 AX 直接给汉字,
+# librime「拼音→汉字」猜字(decode_run)成了误判隐患(猜错=错字,铁律里最坏类别)。
+# 默认**关**:不解码,留拼音残渣 → 现有逃生门把它路由给口3 OCR(屏幕真值,比猜可靠)。
+# 不影响:口3 拼音表匹配(不走 decode_run)、字面/英文/数字尾补全、guard。
+# 历史黑洞数据/对照跑可置 PORTRAIT_LIBRIME_DECODE=1 临时开。
+DECODE_LIBRIME = os.environ.get('PORTRAIT_LIBRIME_DECODE', '0') == '1'
 _cc = {}; _lc = {}
 def cands(py, n=8):
     py = py.replace(" ", "").lower()
@@ -99,6 +105,8 @@ DISAMBIG_CALLS = [0]   # 统计 14b 调用次数
 def decode_run(py, context="", model_fn=None):
     """返回 (hanzi, syls)。**默认 TOP**;仅当词级候选有歧义且 model 给出「合法且≠TOP」的词才覆盖
     (词级 TOP 偏置:模型只在明显同音选错时才推翻,字数=音节数 + 每字∈对应音节候选集 硬校验)。"""
+    if not DECODE_LIBRIME:
+        return (None, [])   # 接线已拔:不猜字,等同逃生门 → 调用方留拼音残渣给口3 OCR
     top, syls = lattice(py)
     if not syls: return (None, [])
     han = top
