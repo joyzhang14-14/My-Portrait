@@ -1,10 +1,29 @@
 import AppKit
 import Foundation
+import IOKit
+import IOKit.ps
 import Network
 import Observation
 import os.log
 
 private let schedLog = Logger(subsystem: "com.myportrait.memory", category: "scheduler")
+
+// MARK: - IOKit 合盖 / 电源 C 回调(开盖即断 helper)
+//
+// 由 IOServiceAddInterestNotification / IOPSNotificationCreateRunLoopSource 在
+// main runloop 上回调。无捕获的顶层函数 → 可直接当 C 函数指针。经单例跳回
+// @MainActor 调 onLidOrPowerChange,由它 refreshKeepAwake。
+
+private func portraitLidInterestCallback(
+    _ refcon: UnsafeMutableRawPointer?, _ service: io_service_t,
+    _ messageType: UInt32, _ messageArgument: UnsafeMutableRawPointer?
+) {
+    Task { @MainActor in MemoryScheduler.shared.onLidOrPowerChange("clamshell") }
+}
+
+private func portraitPowerSourceCallback(_ refcon: UnsafeMutableRawPointer?) {
+    Task { @MainActor in MemoryScheduler.shared.onLidOrPowerChange("power") }
+}
 
 /// 记忆流水线的调度器。两个 job（频率各自可配 off/daily/weekly/monthly）：
 ///   - event   ：跑当天及之前未处理日的 event 聚类 + impact 评分（per-day）。
@@ -297,6 +316,7 @@ final class MemoryScheduler {
         discardOrphanStagingSnapshots()
         startCatchUpTriggers()
         registerSleepWakeHooks()
+        registerLidPowerHooks()
         registerNetworkMonitor()
         Task { await tick() }
     }
@@ -311,6 +331,7 @@ final class MemoryScheduler {
         wakeObserver.map { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         sleepObserver = nil
         wakeObserver = nil
+        unregisterLidPowerHooks()
         pathMonitor?.cancel()
         pathMonitor = nil
     }
@@ -321,6 +342,12 @@ final class MemoryScheduler {
     private var wakeObserver: NSObjectProtocol?
     private var pathMonitor: NWPathMonitor?
     private var lastPathSatisfied: Bool = true
+
+    // IOKit 合盖 / 电源事件(开盖即断 helper):任一变化立即 refreshKeepAwake,
+    // 不等 60s 周期。这样开盖瞬间 disablesleep 立刻回 0。
+    private var clamshellNotifyPort: IONotificationPortRef?
+    private var clamshellNotifier: io_object_t = 0
+    private var powerSourceRunLoopSource: CFRunLoopSource?
 
     private func registerSleepWakeHooks() {
         // 系统休眠前 → pause 所有 in_progress(跟 applicationWillTerminate 同
@@ -346,6 +373,52 @@ final class MemoryScheduler {
                 await MemoryScheduler.shared.tick()
             }
         }
+    }
+
+    /// 合盖 / 电源变化的即时钩子 —— 让 helper「开盖即断」。
+    /// 合盖事件:IOPMrootDomain 的 general-interest 通知(盖子开合会发)。
+    /// 电源事件:IOPSNotification(拔/插电会发)。任一变化都 refreshKeepAwake,
+    /// 由它按 `active && isOnAC && isLidClosed` 重新决定是否持 disablesleep。
+    private func registerLidPowerHooks() {
+        // —— 合盖变化 ——
+        let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                     IOServiceMatching("IOPMrootDomain"))
+        if rootDomain != 0, let port = IONotificationPortCreate(kIOMainPortDefault) {
+            CFRunLoopAddSource(CFRunLoopGetMain(),
+                               IONotificationPortGetRunLoopSource(port).takeUnretainedValue(),
+                               .defaultMode)
+            var notifier: io_object_t = 0
+            IOServiceAddInterestNotification(port, rootDomain, kIOGeneralInterest,
+                                             portraitLidInterestCallback, nil, &notifier)
+            clamshellNotifyPort = port
+            clamshellNotifier = notifier
+        }
+        if rootDomain != 0 { IOObjectRelease(rootDomain) }
+
+        // —— 电源变化 ——
+        if let src = IOPSNotificationCreateRunLoopSource(portraitPowerSourceCallback, nil)?
+            .takeRetainedValue() {
+            CFRunLoopAddSource(CFRunLoopGetMain(), src, .defaultMode)
+            powerSourceRunLoopSource = src
+        }
+    }
+
+    private func unregisterLidPowerHooks() {
+        if let src = powerSourceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .defaultMode)
+            powerSourceRunLoopSource = nil
+        }
+        if clamshellNotifier != 0 { IOObjectRelease(clamshellNotifier); clamshellNotifier = 0 }
+        if let port = clamshellNotifyPort {
+            IONotificationPortDestroy(port)   // 一并移除其 runloop source
+            clamshellNotifyPort = nil
+        }
+    }
+
+    /// IOKit C 回调跳回主线程后调这里(fileprivate 让同文件顶层回调可达)。
+    fileprivate func onLidOrPowerChange(_ reason: String) {
+        schedLog.info("lid/power change (\(reason, privacy: .public)) → refreshKeepAwake")
+        refreshKeepAwake()
     }
 
     // MARK: - Catch-up triggers(合盖 / 开盖空闲都能推进)
@@ -402,11 +475,14 @@ final class MemoryScheduler {
     private func refreshKeepAwake() {
         let active = eventRunning || distillRunning || personalityRunning
         let want = active && PowerMonitor.isOnAC
+        // IOPMAssertion:开盖空闲也要防打盹,不加合盖门槛。
         KeepAwakeAssertion.shared.set(want, owner: "memory")
         // pmset turbo:让机器**合盖**也完全清醒(IOPMAssertion 挡不住 clamshell)。
         // 只有用户开了 General ▸「合盖时保持运行」且 helper 已批准时才真正生效,
         // 否则 SleepHelperClient 内部静默 no-op。
-        SleepHelperClient.shared.setKeepAwake(want)
+        // ⚠️ 只在**合盖**时才持有 —— 开盖瞬间(clamshell 事件触发本函数)立即松手,
+        // 不让 disablesleep 留在开盖状态(开盖本就有 IOPMAssertion 兜空闲睡眠)。
+        SleepHelperClient.shared.setKeepAwake(want && PowerMonitor.isLidClosed)
     }
 
     private func registerNetworkMonitor() {
