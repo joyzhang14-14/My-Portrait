@@ -644,6 +644,23 @@ HANDOFF 上面 2026-06-18/22 两节描述的就是它们,**已是死路**。
 **意义(整条线收口)**:ax 路从源头不漏连发 → keystroke 主导/减法找遗失**都不需要了**;
 难绷/蝴蝶那种漏以后不再发生。⚠️ 只对**新采集**生效,历史黑洞数据(5/25等)不回溯。
 
+## ⏳ 2026-06-27 canvas AX 失灵 + 通用判据(讨论中,用户有思路,下轮实现)
+
+**实测确认采集层 submit 已成**(承 06-25):连发 9 条 submit 9/9;分 session 干净(每条一 ev、无重叠);
+keystroke 边界处偶有归属歧义(IME 打英文/数字=确认回车+发送回车=2回车,但 submit 只记发送,采集对)。
+
+**canvas AX 失灵根因(查实)**:Google Docs 暴露给 AX 的**不是文档内容**,是 `​`(ZWSP)/`\xa0`
+填充的输入捕获区——ev662 写 8.7 分钟,end_value 只有一个 `\xa0`;打字碎片(`​ba​`/`​Sin​`)瞬间显示,
+提交后渲染进 canvas、捕获区清空回 ZWSP。**canvas 路必须 OCR,AX 在这儿原理上没用**(任何 canvas 编辑器同理)。
+
+**摇读对 canvas 的误判(待修)**:回车摇读 `cleared` 判断(去 `﻿`+trim 判空),Google Docs 的 `\xa0`
+会被 trim 当清空 → 误把 canvas **换行**当发送、产碎片 submit。影响小(碎片下游 `is_residue` 滤 + canvas 走 OCR),但该收紧。
+
+**⚠️ 通用判据(用户要的,别硬编码 URL/app/ZWSP)**:区分「聊天发送 vs canvas 换行」靠 **AX value 是否
+承载击键内容**——session 里 value 体量 vs 击键量:聊天相称(打 N 键 value≈N 字符)、canvas 远小于
+(打几千键 value 仍是碎片)→ AX value 不可信、回车不当发送。对**任何** canvas 编辑器通用。
+代码有影子(`isOversizedDelta` value跳变vs击键 / `windowHadKeystroke`)。下轮:rec 累积「value 承载率」+ 阈值,接 submitFromRace 前。
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
