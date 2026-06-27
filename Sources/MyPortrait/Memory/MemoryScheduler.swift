@@ -288,9 +288,6 @@ final class MemoryScheduler {
     /// 能不能现在起 personality(必须 event 空闲 + 自己空闲;distill 不挡)。
     var canRunPersonality: Bool { !eventRunning && !personalityRunning }
 
-    /// 当前 memory pipeline 的 provider/model — 从 ConfigStore 读。每次需要时
-    /// 现拉,这样用户在 Settings 改完无需重启 scheduler 立刻生效。
-    private var memoryCfg: MemoryConfig { ConfigStore.shared.current.memory }
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
     private let kLastEvent          = "scheduler.lastEventRun"
@@ -852,7 +849,7 @@ final class MemoryScheduler {
                 setEventProgress(0.70, "Scoring impact", dayLabel)
                 await runStep(date: ds, stage: .impact, processor: "impact", rollbackDay: nil) {
                     let dir = PortraitPaths.eventsDayDir(for: day)
-                    let cfg = self.memoryCfg
+                    let cfg = ConfigStore.shared.current.scheduler.event
                     let r = try await ImpactScorer(provider: cfg.resolvedProvider, model: cfg.resolvedModel).rescoreAll(root: dir) { p in
                         guard p.batchCount > 0 else { return }
                         setEventProgress(0.70 + 0.28 * Double(p.batchIndex) / Double(p.batchCount),
@@ -940,7 +937,7 @@ final class MemoryScheduler {
         let pauseGen = pauseGeneration
 
         await runStep(date: distillAnchor, stage: .distill, processor: "distill", rollbackDay: nil) {
-            let cfg = self.memoryCfg
+            let cfg = ConfigStore.shared.current.scheduler.portrait
             let r = try await PortraitDistiller(provider: cfg.resolvedProvider, model: cfg.resolvedModel).distill { p in
                 // categoryIndex:每个 category 开始前发 idx(0-based),结束后发
                 // idx+1 —— 条按 category 推进,detail 显示当前类目 + 已写条数。
@@ -1034,7 +1031,7 @@ final class MemoryScheduler {
             setPersonalityProgress(0.02, dayLabel)
             await runStep(date: ds, stage: .personality,
                           processor: "personality", rollbackDay: nil) {
-                let cfg = self.memoryCfg
+                let cfg = ConfigStore.shared.current.scheduler.personality
                 let r = try await PersonalityRefresh(provider: cfg.resolvedProvider, model: cfg.resolvedModel, clusterModel: cfg.resolvedModelLight).refresh(day: day) { phase in
                     switch phase {
                     case .snapshot:

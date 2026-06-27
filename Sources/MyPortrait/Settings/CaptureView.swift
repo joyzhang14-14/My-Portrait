@@ -779,6 +779,16 @@ struct TypingCaptureSettingsView: View {
             // Scheduler 页搬来,之后单独重设计。(writing style 是 portrait
             // 侧 pipeline,留在 Memory 页。)
             WritingPipelineSection()
+            // Writing capture 这条 pipeline 自己的 AI provider(各 pipeline
+            // 独立;memory 全局 provider 已下线)。复用 Memory pipeline 同款选择器。
+            SettingsCard(
+                title: "Writing capture AI",
+                footnote: "Which AI runs the writing capture passes (Pass 1 / Pass 3). Connect a service in Settings → Connections to use it here."
+            ) {
+                PipelineProviderPicker(pipeline: \.scheduler.writingCapture)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+            }
         }
         .task {
             discovered = await Self.loadDiscovered(services?.typingStore)

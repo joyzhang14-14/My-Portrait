@@ -60,7 +60,7 @@ final class WritingStyleDistiller {
             self.agentProvider = p
         } else {
             self.agentProvider = {
-                let cfg = ConfigStore.shared.current.memory
+                let cfg = ConfigStore.shared.current.scheduler.writingStyle
                 return WritingStyleAgent(provider: cfg.resolvedProvider,
                                         model: cfg.resolvedModelLight)
             }

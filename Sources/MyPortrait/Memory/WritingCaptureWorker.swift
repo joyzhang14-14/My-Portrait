@@ -69,12 +69,12 @@ final class WritingCaptureWorker {
 
     private var pass1: WritingCapturePass1Agent {
         if let o = pass1Override { return o }
-        let cfg = ConfigStore.shared.current.memory
+        let cfg = ConfigStore.shared.current.scheduler.writingCapture
         return WritingCapturePass1Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
     }
     private var pass3: WritingCapturePass3Agent {
         if let o = pass3Override { return o }
-        let cfg = ConfigStore.shared.current.memory
+        let cfg = ConfigStore.shared.current.scheduler.writingCapture
         return WritingCapturePass3Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
     }
 
@@ -226,7 +226,7 @@ final class WritingCaptureWorker {
         )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        let pass3Cfg = ConfigStore.shared.current.memory
+        let pass3Cfg = ConfigStore.shared.current.scheduler.writingCapture
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 
@@ -570,7 +570,7 @@ final class WritingCaptureWorker {
         )
         workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
 
-        let pass3Cfg = ConfigStore.shared.current.memory
+        let pass3Cfg = ConfigStore.shared.current.scheduler.writingCapture
         let pass3Provider = pass3Cfg.resolvedProvider
         let pass3Model = pass3Cfg.resolvedModelLight
 

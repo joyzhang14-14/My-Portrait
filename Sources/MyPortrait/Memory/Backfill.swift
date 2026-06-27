@@ -96,10 +96,10 @@ enum Backfill {
         // Pre-load existing files once; we mutate this cache as the day-loop
         // creates / appends to events.
         var fileCache = try await loadAllFiles()
-        // 从 config 读 memory provider/model,确保用户在 Settings 改完后
-        // scheduler 跑 backfill 时立刻用上新设置。
-        let memCfg = ConfigStore.shared.current.memory
-        let builder = EventBuilder(provider: memCfg.resolvedProvider, model: memCfg.resolvedModel)
+        // 从 Events Processor pipeline 的 config 读 provider/model,确保用户在
+        // Settings 改完后 scheduler 跑 backfill 时立刻用上新设置。
+        let evCfg = ConfigStore.shared.current.scheduler.event
+        let builder = EventBuilder(provider: evCfg.resolvedProvider, model: evCfg.resolvedModel)
 
         // Iterate oldest → newest so EventBuilder always has the most
         // relevant active events from prior days available.

@@ -156,18 +156,8 @@ struct MemoryConfig: Codable, Equatable {
     // (manual or automatic). Oldest first.
     var eventDayCap:           Int    = 7
 
-    // LLM provider used by the memory pipeline. providerId 匹配 Provider 的
-    // rawValue("chatgpt"/"anthropic"/"claude-code"/...);model 是主任务模型
-    //(EventBuilder/Distiller/Personality 等),modelLight 是轻任务模型
-    //(Cluster/WritingPass1/Pass3)。
-    //
-    // **默认全空串 = 用户还没选**:UI(Settings → Parameter / Onboarding)显示
-    // "Please select a provider",不预选任何一家(用户原话:选哪个当默认都不
-    // 合适)。pipeline 侧 resolvedProvider 仍兜底到 chatgpt 防崩溃;真没连
-    // chatgpt 时该 run 自然 auth 失败,跟以前一样。model 空串 = provider.defaultModel。
-    var providerId:            String = ""
-    var model:                 String = ""
-    var modelLight:            String = ""
+    // LLM provider/model 已**移到 per-pipeline**(SchedulerConfig.providerId/
+    // model/modelLight,各 pipeline 独立),memory 这层不再持有全局 provider。
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -182,9 +172,6 @@ struct MemoryConfig: Codable, Equatable {
         case distillEvidenceThreshold = "distill_evidence_threshold"
         case weightHalfLifeDays   = "weight_half_life_days"
         case eventDayCap          = "event_day_cap"
-        case providerId           = "provider_id"
-        case model
-        case modelLight           = "model_light"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -200,22 +187,6 @@ struct MemoryConfig: Codable, Equatable {
         distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)
         weightHalfLifeDays   = c.dflt(Int.self,    .weightHalfLifeDays,   weightHalfLifeDays)
         eventDayCap          = c.dflt(Int.self,    .eventDayCap,          eventDayCap)
-        providerId           = c.dflt(String.self, .providerId,           providerId)
-        model                = c.dflt(String.self, .model,                model)
-        modelLight           = c.dflt(String.self, .modelLight,           modelLight)
-    }
-
-    /// 把 providerId / model / modelLight 解析成 agent 调用方实际要用的值。
-    /// providerId 不认识就回落到 chatgpt;model 空就用 provider.defaultModel;
-    /// modelLight 空就跟 model 同档。
-    var resolvedProvider: Provider {
-        Provider(rawValue: providerId) ?? .chatgpt
-    }
-    var resolvedModel: String {
-        model.isEmpty ? resolvedProvider.defaultModel : model
-    }
-    var resolvedModelLight: String {
-        modelLight.isEmpty ? resolvedModel : modelLight
     }
 }
 
@@ -241,6 +212,13 @@ struct SchedulerConfig: Codable, Equatable {
     var dayOfWeek:  Int    = 0
     var dayOfMonth: Int    = 1
 
+    // 这条 pipeline 自己的 AI provider / 主模型 / 轻模型。**各 pipeline 独立**
+    //(原来全部共用 memory.providerId,已下线)。空串 = 未选 → UI 显示
+    // "Please select a provider";agent 侧 resolved* 兜底回 chatgpt。
+    var providerId:  String = ""
+    var model:       String = ""
+    var modelLight:  String = ""
+
     init() {}
     init(frequency: SchedulerFrequency, timeOfDay: String,
          dayOfWeek: Int, dayOfMonth: Int) {
@@ -254,6 +232,9 @@ struct SchedulerConfig: Codable, Equatable {
         case timeOfDay  = "time_of_day"
         case dayOfWeek  = "day_of_week"
         case dayOfMonth = "day_of_month"
+        case providerId = "provider_id"
+        case model
+        case modelLight = "model_light"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -262,6 +243,9 @@ struct SchedulerConfig: Codable, Equatable {
         timeOfDay  = c.dflt(String.self,             .timeOfDay,  timeOfDay)
         dayOfWeek  = c.dflt(Int.self,                .dayOfWeek,  dayOfWeek)
         dayOfMonth = c.dflt(Int.self,                .dayOfMonth, dayOfMonth)
+        providerId = c.dflt(String.self,             .providerId, providerId)
+        model      = c.dflt(String.self,             .model,      model)
+        modelLight = c.dflt(String.self,             .modelLight, modelLight)
     }
 
     /// "HH:mm" 拆出的小时。
@@ -272,6 +256,18 @@ struct SchedulerConfig: Codable, Equatable {
     var minute: Int {
         let parts = timeOfDay.split(separator: ":")
         return parts.count > 1 ? (Int(parts[1]) ?? 0) : 0
+    }
+
+    /// providerId 不认识就回落到 chatgpt;model 空就用 provider.defaultModel;
+    /// modelLight 空就跟 model 同档。agent 调用方用这三个解析实际值。
+    var resolvedProvider: Provider {
+        Provider(rawValue: providerId) ?? .chatgpt
+    }
+    var resolvedModel: String {
+        model.isEmpty ? resolvedProvider.defaultModel : model
+    }
+    var resolvedModelLight: String {
+        modelLight.isEmpty ? resolvedModel : modelLight
     }
 }
 
