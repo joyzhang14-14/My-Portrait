@@ -1,4 +1,5 @@
 import Foundation
+import IOKit
 import IOKit.ps
 
 /// 电源状态。
@@ -47,6 +48,20 @@ public enum PowerMonitor {
     /// 便利属性。电池或未知都按"非 AC"对待，最保守。
     public static var isOnAC: Bool {
         currentState() == .ac
+    }
+
+    /// 笔记本盖子是否合上。读 IORegistry `IOPMrootDomain` 的 `AppleClamshellState`
+    /// (实测:开盖=No/false，合盖=Yes/true；`AppleClamshellCausesSleep` 是另一回事，
+    /// 别用)。取不到时按"开盖"(false)最保守 —— 让 helper 宁可不持有 disablesleep。
+    public static var isLidClosed: Bool {
+        let entry = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                IOServiceMatching("IOPMrootDomain"))
+        guard entry != 0 else { return false }
+        defer { IOObjectRelease(entry) }
+        guard let prop = IORegistryEntryCreateCFProperty(
+            entry, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0
+        )?.takeRetainedValue() else { return false }
+        return (prop as? Bool) ?? false
     }
 
     /// 完整快照：电源状态 + 电池百分比 + 低电量模式 + 热压力。
