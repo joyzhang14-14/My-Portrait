@@ -624,6 +624,26 @@ HANDOFF 上面 2026-06-18/22 两节描述的就是它们,**已是死路**。
 偏离它要先证明它真漏了什么(5/25 窄账本漏的那些,大概率是窄账本闸=渲染确证/汉字<3 的问题,
 非 ax 路本身漏——这点待新思路验证)。
 
+## ✅ 2026-06-25 采集层根治连发黑洞(ax 路源头修复,实测 9/9 全中)
+
+**根因**(承 2026-06-24 调研):AX edit_log 黑洞 = 高频连发时 AX value-change 被系统 coalesce
+(清空帧丢)+ debounce 350ms 重排不 fire。回车摇读(`submitRaceBurst`)本来主动读 value 救 IME
+末尾字,但 ① 读到清空就 `return` 丢落定值 ② 判清空用 `value.isEmpty`,**Discord 发送后框是
+占位符 `﻿\n` 不是空串**,从没触发。
+
+**修复(3 commit,Swift 采集层 `Typing/`)**:
+
+- `a0fc280` 摇读捕获框清空 → `writer.submitFromRace` 主动落 submit(绕 debounce+coalesce;
+  记 lastNonEmpty 落定值,摇读没抢到回退 pendingValue/快照,治连发黑洞 + IME 末尾丢字)
+- `d79f6d8` debounce 350→100ms(打字中间态落库更密)
+- `1de33de` 清空判断认占位符(去 `﻿`+trim 判空,非 isEmpty)——**关键修复**
+
+**实测**(用户真机 build&run 连发9条:1919/测试/快速测试/how are u/1234/3/\*/$/15$):
+**submit 9/9 全中,一字不差**(修复前 ev2824 同样9条只记3 commit、0 submit)。
+
+**意义(整条线收口)**:ax 路从源头不漏连发 → keystroke 主导/减法找遗失**都不需要了**;
+难绷/蝴蝶那种漏以后不再发生。⚠️ 只对**新采集**生效,历史黑洞数据(5/25等)不回溯。
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
