@@ -56,6 +56,37 @@ struct MyPortraitConfig: Codable, Equatable {
         storage       = c.dflt(StorageConfig.self, .storage, storage)
         chat          = c.dflt(ChatConfig.self, .chat, chat)
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
+        migrateLegacyMemoryProvider(from: c)
+    }
+
+    /// 一次性迁移:per-pipeline 化之前,provider 存在全局 `[memory] provider_id`
+    /// /`model`/`model_light`。新 schema 已不读这仨 key —— 老用户升级会丢选择。
+    /// 这里直接从原始 TOML 把它们读出来,seed 进全部 5 个 pipeline(仅当所有
+    /// pipeline 都还没配过 provider 时,避免覆盖用户已自定义的)。读完不回写旧
+    /// key,下次保存自动从文件消失。
+    private mutating func migrateLegacyMemoryProvider(
+        from c: KeyedDecodingContainer<CodingKeys>
+    ) {
+        enum LegacyKeys: String, CodingKey {
+            case providerId = "provider_id"
+            case model
+            case modelLight = "model_light"
+        }
+        guard let mem = try? c.nestedContainer(keyedBy: LegacyKeys.self, forKey: .memory)
+        else { return }
+        let oldProvider = (try? mem.decode(String.self, forKey: .providerId)) ?? ""
+        guard !oldProvider.isEmpty else { return }
+        let pipelines: [WritableKeyPath<SchedulerSettings, SchedulerConfig>] = [
+            \.event, \.portrait, \.personality, \.writingCapture, \.writingStyle,
+        ]
+        guard pipelines.allSatisfy({ scheduler[keyPath: $0].providerId.isEmpty }) else { return }
+        let oldModel = (try? mem.decode(String.self, forKey: .model)) ?? ""
+        let oldModelLight = (try? mem.decode(String.self, forKey: .modelLight)) ?? ""
+        for kp in pipelines {
+            scheduler[keyPath: kp].providerId = oldProvider
+            scheduler[keyPath: kp].model = oldModel
+            scheduler[keyPath: kp].modelLight = oldModelLight
+        }
     }
 }
 
