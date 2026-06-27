@@ -24,7 +24,9 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case screen, audio, typing
     }
     enum Memory: String, Hashable, CaseIterable {
-        case parameter, scheduler, changelog
+        // 4 个 pipeline 各一页(原 Parameter / Scheduler 已拆掉,provider 配置
+        // 移进每个 pipeline)+ Changelog(含原 Scheduler 的 Needs attention)。
+        case eventsProcessor, portraitsDistiller, personalityRefresher, writingStyleDistiller, changelog
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
@@ -59,9 +61,11 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "Screen Capture"
         case .capture(.audio):         return "Audio Capture"
         case .capture(.typing):        return "Typing Capture"
-        case .memory(.parameter):      return "Parameter"
-        case .memory(.scheduler):      return "Scheduler"
-        case .memory(.changelog):      return "Changelog"
+        case .memory(.eventsProcessor):       return "Events Processor"
+        case .memory(.portraitsDistiller):    return "Portraits Distiller"
+        case .memory(.personalityRefresher):  return "Personality Refresher"
+        case .memory(.writingStyleDistiller): return "Writing Style Distiller"
+        case .memory(.changelog):             return "Changelog"
         case .data(.storage):          return "Storage"
         case .data(.imports):          return "Import"
         }
@@ -78,9 +82,11 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
-        case .memory(.parameter):      return "slider.horizontal.3"
-        case .memory(.scheduler):      return "calendar.badge.clock"
-        case .memory(.changelog):      return "list.bullet.rectangle"
+        case .memory(.eventsProcessor):       return "calendar.badge.clock"
+        case .memory(.portraitsDistiller):    return "person.text.rectangle"
+        case .memory(.personalityRefresher):  return "brain.head.profile"
+        case .memory(.writingStyleDistiller): return "pencil.line"
+        case .memory(.changelog):             return "list.bullet.rectangle"
         case .data(.storage):          return "externaldrive"
         case .data(.imports):          return "tray.and.arrow.down"
         }

@@ -680,25 +680,42 @@ private struct MemoryProviderStep: View {
         }
     }
 
+    /// provider 配置已 per-pipeline(SchedulerConfig)。onboarding 只让用户选一次,
+    /// **同一个选择 seed 进全部 5 个 pipeline**(event/portrait/personality/
+    /// writingCapture/writingStyle);用户之后可在 Settings 里给每个 pipeline 单独改。
+    private static let pipelineKPs: [WritableKeyPath<MyPortraitConfig, SchedulerConfig>] = [
+        \.scheduler.event, \.scheduler.portrait, \.scheduler.personality,
+        \.scheduler.writingCapture, \.scheduler.writingStyle,
+    ]
+
     @ViewBuilder
     private var providerCard: some View {
-        // 选中的 provider 必须「已连接」;否则视为未选(空 / 已断开 → picker
-        // 显示 "Please select a provider")。不再自动落到第一家 —— 让用户主动选。
+        // event 作代表读当前选中(5 个 seed 时一致);必须「已连接」否则视为未选。
         let selectedProvider: Provider? = {
-            guard let p = Provider(rawValue: config.current.memory.providerId),
+            guard let p = Provider(rawValue: config.current.scheduler.event.providerId),
                   availableProviders.contains(p) else { return nil }
             return p
         }()
-        // provider picker 绑定:get 归一无效值成 "";set 换 provider 时清旧 model。
+        // provider picker 绑定:set 把选择 seed 进全部 5 个 pipeline + 清旧 model。
         let providerBinding = Binding<String>(
             get: { selectedProvider?.rawValue ?? "" },
             set: { newId in
-                config.mutate {
-                    $0.memory.providerId = newId
-                    $0.memory.model = ""
-                    $0.memory.modelLight = ""
+                config.mutate { c in
+                    for kp in Self.pipelineKPs {
+                        c[keyPath: kp].providerId = newId
+                        c[keyPath: kp].model = ""
+                        c[keyPath: kp].modelLight = ""
+                    }
                 }
             }
+        )
+        let modelBinding = Binding<String>(
+            get: { config.current.scheduler.event.model },
+            set: { v in config.mutate { c in for kp in Self.pipelineKPs { c[keyPath: kp].model = v } } }
+        )
+        let modelLightBinding = Binding<String>(
+            get: { config.current.scheduler.event.modelLight },
+            set: { v in config.mutate { c in for kp in Self.pipelineKPs { c[keyPath: kp].modelLight = v } } }
         )
         // Ollama 读用户本地实际安装的模型(observable);其它走写死的。
         let models: [String] = selectedProvider == .ollama
@@ -714,7 +731,7 @@ private struct MemoryProviderStep: View {
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            row("Provider", desc: "Which AI service to use.") {
+            row("Provider", desc: "Which AI service to use. Applies to all memory pipelines — tune each later in Settings → Memory.") {
                 Picker("", selection: providerBinding) {
                     ForEach(availableProviders, id: \.rawValue) { p in
                         Text(Self.providerDisplayName(p)).tag(p.rawValue)
@@ -728,7 +745,7 @@ private struct MemoryProviderStep: View {
             if selectedProvider != nil {
                 Divider().overlay(Color.primary.opacity(0.08))
                 row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
-                    Picker("", selection: config.binding(\.memory.model)) {
+                    Picker("", selection: modelBinding) {
                         ForEach(models, id: \.self) { m in Text(m).tag(m) }
                     }
                     .labelsHidden()
@@ -736,7 +753,7 @@ private struct MemoryProviderStep: View {
                 }
                 Divider().overlay(Color.primary.opacity(0.08))
                 row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
-                    Picker("", selection: config.binding(\.memory.modelLight)) {
+                    Picker("", selection: modelLightBinding) {
                         ForEach(models, id: \.self) { m in Text(m).tag(m) }
                     }
                     .labelsHidden()

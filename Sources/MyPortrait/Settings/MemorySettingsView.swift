@@ -6,9 +6,8 @@ import SwiftUI
 /// archive run.
 struct MemorySettingsView: View {
     private let cfg = ConfigStore.shared
-    @Environment(AppState.self) private var appState
-    /// Ollama 本地模型列表(observable),provider 选 Ollama 时给 model 下拉用。
-    @State private var ollamaStore = OllamaModelStore.shared
+    // provider/model 选择器已抽到 PipelineProviderPicker(自带 AppState /
+    // OllamaModelStore),本 View 不再直接持有。
 
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.PipelineRunRecord] = []
@@ -94,11 +93,15 @@ struct MemorySettingsView: View {
     @State private var writingStylePreviewDraft: WritingStyleStagedRow? = nil
     @State private var writingStyleExpandedDrafts: [String: [WritingStyleStagedRow]] = [:]
 
-    /// Memory 区的三个子板块。由左侧栏选中项决定，不在页内切换。
+    /// Memory 区的子板块。由左侧栏选中项决定，不在页内切换。
+    /// 4 个 pipeline 各一页(每页:自动运行开关 + AI provider + Run now + 待审核)
+    /// + Changelog(含 Needs attention)。
     enum Tab: String {
-        case parameter = "Parameter"
-        case scheduler = "Scheduler"
-        case changelog = "Changelog"
+        case eventsProcessor       = "Events Processor"
+        case portraitsDistiller    = "Portraits Distiller"
+        case personalityRefresher  = "Personality Refresher"
+        case writingStyleDistiller = "Writing Style Distiller"
+        case changelog             = "Changelog"
     }
     /// 由 SettingsView 的路由根据侧栏选中的子分区注入。
     let tab: Tab
@@ -112,15 +115,34 @@ struct MemorySettingsView: View {
                 header
 
                 switch tab {
-                case .parameter:
-                    providerSection
-                case .scheduler:
-                    schedulerSection
-                    runNowSection
-                    reviewSection
-                    attentionSection
+                case .eventsProcessor:
+                    autoRunSection("Clusters captured activity into events and scores their impact.",
+                                   config: \.scheduler.event)
+                    providerSection(\.scheduler.event)
+                    runNowSectionFor(.eventProcessing)
+                    eventDayCapSection
+                    reviewSectionFor(.eventProcessing)
+                case .portraitsDistiller:
+                    autoRunSection("Distills events into long-term portrait entries.",
+                                   config: \.scheduler.portrait)
+                    providerSection(\.scheduler.portrait)
+                    runNowSectionFor(.distill)
+                    reviewSectionFor(.distill)
+                case .personalityRefresher:
+                    autoRunSection("Aggregates events, other portrait sections, and OCR into personality tags.",
+                                   config: \.scheduler.personality)
+                    providerSection(\.scheduler.personality)
+                    runNowSectionFor(.personality)
+                    reviewSectionFor(.personality)
+                case .writingStyleDistiller:
+                    autoRunSection("Learns your writing style (tone, voice, editing habits) from approved writing. Automatic runs save directly; manual runs stage drafts for review.",
+                                   config: \.scheduler.writingStyle)
+                    providerSection(\.scheduler.writingStyle)
+                    writingStyleRunNowSection
+                    writingStyleReviewSection
                 case .changelog:
                     changelogSection
+                    attentionSection
                 }
 
                 footer
@@ -444,12 +466,16 @@ struct MemorySettingsView: View {
 
     private var headerBlurb: String {
         switch tab {
-        case .parameter:
-            return "Choose the AI provider and models used by the memory pipeline."
-        case .scheduler:
-            return "Configure when the event and portrait pipelines run, and review days that need attention."
+        case .eventsProcessor:
+            return "Turns raw activity into scored events. Pick its AI, run it now, and review staged output."
+        case .portraitsDistiller:
+            return "Distills events into long-term portrait entries. Pick its AI, run it now, and review staged output."
+        case .personalityRefresher:
+            return "Refreshes personality tags from events, portraits, and OCR. Pick its AI, run it now, and review."
+        case .writingStyleDistiller:
+            return "Learns your writing style from approved writing. Pick its AI, run it now, and review drafts."
         case .changelog:
-            return "Portrait body changes made by the distiller, newest first."
+            return "Portrait body changes made by the distiller, newest first — plus days that need attention."
         }
     }
 
@@ -478,78 +504,44 @@ struct MemorySettingsView: View {
         "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
     ]
 
-    private var schedulerSection: some View {
-        section(
-            title: "Automatic processing",
-            blurb: "Choose when each kind of processing runs: off, daily, weekly, or monthly. Times are local, and the oldest unprocessed days are handled first."
-        ) {
-            schedulerBlock(
-                title: "Event processing",
-                desc: "Clusters captured activity into events and scores their impact.",
-                config: \.scheduler.event)
-            Divider().padding(.vertical, 4)
-            schedulerBlock(
-                title: "Portrait distillation",
-                desc: "Distills events into long-term portrait entries.",
-                config: \.scheduler.portrait)
-            Divider().padding(.vertical, 4)
-            schedulerBlock(
-                title: "Personality refresh",
-                desc: "Aggregates events / other portraits / OCR into personality tags.",
-                config: \.scheduler.personality)
-            Divider().padding(.vertical, 4)
-            schedulerBlock(
-                title: "Writing style distillation",
-                desc: "Learns your writing style (tone, voice, editing habits) from approved writing. Automatic runs save directly; manual runs stage drafts for review.",
-                config: \.scheduler.writingStyle)
-            Divider().padding(.vertical, 4)
-            // Writing capture 的 auto-run 开关已搬到 Settings → Typing Capture
-            // (WritingPipelineSection);writing style 是 portrait 侧 pipeline,留在本页。
-            intRow("Max days processed per run (event and personality)",
-                   value: cfg.binding(\.memory.eventDayCap),
-                   range: 1...30)
-        }
-    }
-
-    @ViewBuilder
-    private func schedulerBlock(
-        title: String,
-        desc: String,
+    /// 单 pipeline 的「自动运行」开关卡。原来 5 个 pipeline 挤在一张
+    /// schedulerSection 里,现在拆成每页一个。老字段(timeOfDay/dayOfWeek/
+    /// dayOfMonth)留着不动 —— toml 向后兼容,UI 只暴露 on/off。tick 周期 15min
+    /// 固定,catchUp + backoff 自动接管 retry。
+    private func autoRunSection(
+        _ desc: String,
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
     ) -> some View {
-        // 单一 Auto-run toggle —— 砍掉 Frequency/Time/Day 配置(它们对实际
-        // 行为没影响:tick 周期 15min 固定,catchUp + backoff 自动接管 retry,
-        // Time 只在"全 complete + 无 pending"才生效,基本是死配置)。
-        // 老 ConfigSchema 字段(timeOfDay/dayOfWeek/dayOfMonth)留着不动 —
-        // toml 向后兼容,UI 只暴露 on/off。
         let freq = cfg.binding(kp.appending(path: \.frequency))
         let autoRun = Binding<Bool>(
             get: { freq.wrappedValue != .off },
             set: { freq.wrappedValue = $0 ? .daily : .off }
         )
-        VStack(alignment: .leading, spacing: 8) {
+        return section(title: "Automatic processing", blurb: desc) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 13, weight: .semibold))
-                    Text(desc)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(autoRun.wrappedValue
+                    ? "Auto — the scheduler runs this when there's pending work and retries failures with backoff."
+                    : "Manual only — runs only when you click Run now below.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
                 Toggle("", isOn: autoRun)
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .help(autoRun.wrappedValue
-                        ? "Scheduler runs this pipeline automatically (15-min tick + backoff for retries)."
-                        : "Manual only — runs only when you trigger it from Run now.")
             }
-            Text(autoRun.wrappedValue
-                ? "Auto — scheduler picks it up when there's pending work, retries failures with backoff."
-                : "Manual only — runs only when you trigger it.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 每次最多处理多少天(event 和 personality 共用)。放 Events Processor 页。
+    private var eventDayCapSection: some View {
+        section(
+            title: "Processing limit",
+            blurb: "Caps how many unprocessed days a single run handles (event and personality). Oldest first."
+        ) {
+            intRow("Max days processed per run",
+                   value: cfg.binding(\.memory.eventDayCap),
+                   range: 1...30)
         }
     }
 
@@ -558,17 +550,13 @@ struct MemorySettingsView: View {
     /// 统一的 Run now 卡片 —— memory pipeline 3 个 trigger + writing style
     /// distillation(portrait 侧,typing 的下游),divider 分组。
     /// (writing capture 已搬到 Settings → Typing Capture。)
-    private var runNowSection: some View {
+    /// 单 pipeline 的「Run now」卡(memory 三个 trigger 之一)。
+    private func runNowSectionFor(_ t: ManualTrigger) -> some View {
         section(
             title: "Run now",
-            blurb: "Run a step now instead of waiting for the schedule. Each one uses AI, so you'll be asked to confirm first."
+            blurb: "Run this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first."
         ) {
-            // Memory pipeline 三个 trigger
-            triggerRow(.eventProcessing)
-            Divider().padding(.vertical, 2)
-            triggerRow(.distill)
-            Divider().padding(.vertical, 2)
-            triggerRow(.personality)
+            triggerRow(t)
             if !actionStatus.isEmpty {
                 Text(actionStatus)
                     .font(.system(size: 11, design: .monospaced))
@@ -577,19 +565,21 @@ struct MemorySettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
             }
+        }
+    }
 
-            // Event classifier(自动分 folder)已下线 —— chat AI 通过 mp-folders
-            // 按用户对话需求整理,UI 不再挂 Run 按钮。
-
-            // —— Writing style distillation(portrait 侧,消费 approved writing)
-            Divider().padding(.vertical, 2)
+    /// Writing Style Distiller 页的「Run now」卡 —— writing style 不走 ManualTrigger
+    /// (有自己的 staged-draft 审核流),sheets/alert 挂在这张卡上。
+    private var writingStyleRunNowSection: some View {
+        section(
+            title: "Run now",
+            blurb: "Run writing style distillation now. It uses AI, and manual runs stage drafts for review."
+        ) {
             writingStyleBlock
         }
-        // sheet / alert 挂在卡片最外层 —— 内层 block 只负责触发对应 @State。
         .sheet(item: $writingStylePreviewRun.mappedToIdentifiable) { wrapped in
             WritingStylePreview(runId: wrapped.id)
         }
-        // Per-draft sheet:点单条 NEW/CHANGED 行打开,只显示这一条 draft 详情。
         .sheet(item: $writingStylePreviewDraft) { draft in
             WritingStyleDraftDetail(draft: draft)
         }
@@ -811,54 +801,53 @@ struct MemorySettingsView: View {
         }
     }
 
+    /// 单 pipeline 的「Pending review」卡。**跑步中不显示** —— beginRun 拍快照
+    /// 那一刻 hasPending=true 但还没产 .md,显示会误导。等真跑完才呈现。
+    /// 跟 triggerRow 同口径:in-memory flag AND DB 真有 in_progress
+    /// (避免 stale flag 藏住 pending review)。in_progress / hasPending 都读缓存。
     @ViewBuilder
-    private var reviewSection: some View {
-        // **跑步中不显示 Pending review 卡片** —— beginRun 拍快照那一刻
-        // hasPending=true,但 runEventJob 还没产 .md,卡片显示"No content
-        // changes" + Reject/Approve 误导用户。等真跑完(scheduler 标 idle +
-        // 本 View 触发器集合也空)才呈现可审核状态。
-        // 跟 triggerRow 同口径:in-memory flag AND DB 真有 in_progress
-        // (避免 stale flag 让 reviewSection 误以为还在跑而藏住 pending review)。
-        // in_progress / hasPending 都读缓存(refreshProbes 后台重算),
-        // 不在 body 里现查 DB / fileExists。
+    private func reviewSectionFor(_ t: ManualTrigger) -> some View {
         let s = MemoryScheduler.shared
-        let eventsRunning = runningTriggers.contains(.eventProcessing)
-            || (s.eventRunning && dbInProgressEvent)
-        let portraitRunning = runningTriggers.contains(.distill)
-            || (s.distillRunning && dbInProgressDistill)
-        let personalityRunning = runningTriggers.contains(.personality)
-            || (s.personalityRunning && dbInProgressPersonality)
-        let hasEvents = pendingEvents && !eventsRunning
-        let hasPortrait = pendingPortrait && !portraitRunning
-        let hasPersonality = pendingPersonality && !personalityRunning
-        // Writing style 也归这里(portrait 侧;跑步中不显示)。
-        // (writing capture 的 Pending review 已搬到 Typing Capture 页。)
-        let hasWritingStyle = !writingStylePending.isEmpty && !writingStyleUI.isRunning
-        let anyMemory = hasEvents || hasPortrait || hasPersonality
-        if anyMemory || hasWritingStyle {
+        let running: Bool = {
+            switch t {
+            case .eventProcessing: return runningTriggers.contains(.eventProcessing) || (s.eventRunning && dbInProgressEvent)
+            case .distill:         return runningTriggers.contains(.distill) || (s.distillRunning && dbInProgressDistill)
+            case .personality:     return runningTriggers.contains(.personality) || (s.personalityRunning && dbInProgressPersonality)
+            }
+        }()
+        let pending: Bool = {
+            switch t {
+            case .eventProcessing: return pendingEvents
+            case .distill:         return pendingPortrait
+            case .personality:     return pendingPersonality
+            }
+        }()
+        let changes: [MemoryStaging.StagedChange] = {
+            switch t {
+            case .eventProcessing: return eventsChanges
+            case .distill:         return portraitChanges
+            case .personality:     return personalityChanges
+            }
+        }()
+        if pending && !running {
             section(
                 title: "Pending review",
                 blurb: "Results from a run are staged, not saved yet. Click an item to preview. Approve keeps it; Reject discards it."
             ) {
-                if hasEvents {
-                    reviewBlock(.events, "Process events", eventsChanges)
-                }
-                if hasEvents && (hasPortrait || hasPersonality) {
-                    Divider().padding(.vertical, 6)
-                }
-                if hasPortrait {
-                    reviewBlock(.portrait, "Distill portrait", portraitChanges)
-                }
-                if hasPortrait && hasPersonality {
-                    Divider().padding(.vertical, 6)
-                }
-                if hasPersonality {
-                    reviewBlock(.personality, "Refresh personality", personalityChanges)
-                }
-                if hasWritingStyle {
-                    if anyMemory { Divider().padding(.vertical, 6) }
-                    writingStyleResultBlock
-                }
+                reviewBlock(t.kind, t.title, changes)
+            }
+        }
+    }
+
+    /// Writing Style Distiller 页的待审核卡(staged drafts)。
+    @ViewBuilder
+    private var writingStyleReviewSection: some View {
+        if !writingStylePending.isEmpty && !writingStyleUI.isRunning {
+            section(
+                title: "Pending review",
+                blurb: "Distilled drafts are staged, not saved yet. Click to preview. Approve keeps it; Reject discards it."
+            ) {
+                writingStyleResultBlock
             }
         }
     }
@@ -1113,115 +1102,16 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// Memory pipeline 用哪个 AI provider + 哪两档 model。改完立即生效
-    ///(scheduler 每次跑都现读 config),无需重启 app。
-    ///
-    /// 可选项直接读 Connections —— 连了就在列,所有 model 都可选。原 AI Models
-    /// 页那层 "禁用 provider / 隐藏 model" 已下线。
-    private var providerSection: some View {
-        let availableProviders = Provider.allCases.filter {
-            appState.isConnected($0.integrationId)
-        }
-        // 选中的 provider 必须是「已连接」的;否则视为未选(空 / 已断开 →
-        // picker 显示 "Please select a provider")。
-        let selectedProvider: Provider? = {
-            guard let p = Provider(rawValue: cfg.current.memory.providerId),
-                  availableProviders.contains(p) else { return nil }
-            return p
-        }()
-        // provider picker 绑定:get 把无效/未连接的值归一成 "";set 换 provider
-        // 时清掉旧 model(可能不在新 provider 的列表里)。
-        let providerBinding = Binding<String>(
-            get: { selectedProvider?.rawValue ?? "" },
-            set: { newId in
-                cfg.mutate {
-                    $0.memory.providerId = newId
-                    $0.memory.model = ""
-                    $0.memory.modelLight = ""
-                }
-            }
-        )
-        // Ollama 的 model 列表是用户本地实际安装的(observable);其它 provider
-        // 走写死的 availableModels。
-        let models: [String] = selectedProvider == .ollama
-            ? ollamaStore.models
-            : (selectedProvider?.availableModels ?? [])
-
-        return section(
+    /// 单个 pipeline 的 AI provider 卡。内容走共享的 `PipelineProviderPicker`
+    /// (Typing Capture 页的 writing capture provider 也复用同一个)。
+    private func providerSection(
+        _ kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
+    ) -> some View {
+        section(
             title: "AI provider",
-            blurb: "Which AI model powers the memory features. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
+            blurb: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
         ) {
-            if availableProviders.isEmpty {
-                Text("No AI providers connected. Open Settings → Connections to add ChatGPT, Anthropic, Gemini, Ollama, etc.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                // 没选有效 provider → 上方红字提示,picker 本身留空白
-                //(不在下拉里塞占位项)。
-                if selectedProvider == nil {
-                    Text("Please select a provider")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                HStack(spacing: 12) {
-                    Text("Provider")
-                        .font(.system(size: 12))
-                        .frame(maxWidth: 280, alignment: .leading)
-                    Picker("", selection: providerBinding) {
-                        ForEach(availableProviders, id: \.rawValue) { p in
-                            Text(Self.providerDisplayName(p)).tag(p.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                // 选了有效 provider 才显示 model 行 —— "Please select" 状态下列空
-                // 模型没意义。没配置 model(="")时 picker 留空白;pipeline 侧
-                // resolvedModel 把空串映射到 provider.defaultModel。
-                if selectedProvider != nil {
-                    HStack(spacing: 12) {
-                        Text("Main model (heavy tasks)")
-                            .font(.system(size: 12))
-                            .frame(maxWidth: 280, alignment: .leading)
-                        // 不放 "Provider default" 占位项 —— 没配置(model="")时
-                        // picker 留空白。
-                        Picker("", selection: cfg.binding(\.memory.model)) {
-                            ForEach(models, id: \.self) { m in Text(m).tag(m) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    HStack(spacing: 12) {
-                        Text("Light model (clustering / writing capture)")
-                            .font(.system(size: 12))
-                            .frame(maxWidth: 280, alignment: .leading)
-                        Picker("", selection: cfg.binding(\.memory.modelLight)) {
-                            ForEach(models, id: \.self) { m in Text(m).tag(m) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-        }
-        // 选中 Ollama(或一进来就是 Ollama)→ 拉一次本地模型列表刷新下拉。
-        .task(id: selectedProvider) {
-            if selectedProvider == .ollama { await ollamaStore.refresh() }
-        }
-    }
-
-    private static func providerDisplayName(_ p: Provider) -> String {
-        switch p {
-        case .chatgpt:     return "Codex (ChatGPT Pro / Plus OAuth)"
-        case .openaiBYOK:  return "OpenAI (API key)"
-        case .anthropic:   return "Anthropic (API key)"
-        case .ollama:      return "Ollama (local)"
-        case .gemini:      return "Gemini (API key)"
-        case .perplexity:  return "Perplexity (API key)"
-        case .deepseek:    return "DeepSeek (API key)"
-        case .claudeCode:  return "Claude Code CLI (Pro / Max subscription)"
+            PipelineProviderPicker(pipeline: kp)
         }
     }
 
