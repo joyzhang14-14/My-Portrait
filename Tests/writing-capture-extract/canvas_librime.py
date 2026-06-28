@@ -11,9 +11,11 @@
 ⚠️ librime 同音错字风险(打的字→大的子)→ 输出**留给口3 OCR 校验**(口3 要 14B,本文件不跑模型,
 只出确定性 TOP 解码 model_fn=None)。英文字面(ok/wtf)reconstruct 的 _is_eng_tail 会自然保留不解。
 """
-import os, sys, time
+import os, sys, time, re, json
+from difflib import SequenceMatcher
 import rebuild as R          # 复用 reconstruct/keys_in_window,不改 rebuild.py
 import ax_bearing as B       # 复用 canvas_spans(承载率判别)
+import canvas_local as CL    # 复用 frame_lines(OCR 词→行)
 
 
 def _decode_segment(seg):
@@ -63,6 +65,81 @@ def bucket_b(con, t0, t1):
             continue              # 长文(C)走 OCR,不在这
         out.append({**sp, 'decoded': decode_span(con, sp['bundle'], sp['t0'], sp['t1'])})
     return out
+
+
+# ============ LLM 判别 canvas 最终内容(2026-06-28 用户裁定:确定性算法被「删除事件没记录」
+# 卡死——选择删/鼠标删 keystroke_log 抓不到,最终态不可确定性重建。改用本地 LLM 判别) ============
+
+def _anchor_len(lib, line):
+    """librime 候选与 OCR 行的最长公共子串(用 librime 打对的字锚,简拼免疫);≥2含中文 或 ≥3 才算。"""
+    m = SequenceMatcher(None, lib, line, autojunk=False).find_longest_match(0, len(lib), 0, len(line))
+    sub = lib[m.a:m.a + m.size]
+    if m.size >= 2 and any('一' <= c <= '鿿' for c in sub):
+        return m.size
+    return m.size if m.size >= 3 else 0
+
+
+def _session_end(con, bundle, t0):
+    """span 起点所属的「文档编辑 session」末键 ts(同 bundle 连续击键,gap<5min 算断)。
+    canvas 编辑被承载率 burst 切碎,OCR 证据要按整个 session 收集。"""
+    last = t0
+    for (t,) in con.execute("SELECT ts_ms FROM keystroke_log WHERE bundle_id=:b AND ts_ms>=:a ORDER BY ts_ms",
+                            {"b": bundle, "a": t0}):
+        if t - last > 5 * 60 * 1000:
+            break
+        last = t
+    return last
+
+
+def _ocr_evidence(con, bundle, t0, last, lib):
+    """跨 session 帧收集与 librime 候选锚定的 OCR 行(去重)。**不按 browser_url 过滤**——
+    实测干净帧的 browser_url 常是 NULL,过滤会把真值滤掉;改 app_name + 时间窗。
+    app_name 从 bundle 末段映射(com.google.Chrome→Chrome→帧 'Google Chrome')。"""
+    app_pat = '%' + bundle.rsplit('.', 1)[-1] + '%'
+    rows = con.execute("SELECT ocr_words_json FROM frames WHERE app_name LIKE :p AND ocr_words_json IS NOT NULL "
+                       "AND timestamp_ms BETWEEN :a AND :b", {"p": app_pat, "a": t0 - 30000, "b": last + 90000}).fetchall()
+    lines = set()
+    for (wj,) in rows:
+        try:
+            words = json.loads(wj)
+        except Exception:
+            continue
+        for (y, x, t, n) in CL.frame_lines(words):
+            if _anchor_len(lib, re.sub(r'\s', '', t)) > 0:
+                lines.add(t.strip())
+    return sorted(lines)
+
+
+def make_llm(model='mlx-community/Qwen3-14B-4bit'):
+    """惰性加载本地 LLM(MLX 14B,非 sonnet),返回 prompt->text 的 callable。
+    **GPU 占用时别调 make_llm**(会 OOM)。导入本模块不加载模型。"""
+    from mlx_lm import load, generate
+    m, tok = load(model)
+    def llm(prompt):
+        text = tok.apply_chat_template([{"role": "user", "content": prompt}], add_generation_prompt=True)
+        out = generate(m, tok, prompt=text, max_tokens=80, verbose=False)
+        return re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip()
+    return llm
+
+
+def ocr_correct_llm(con, sp, librime_text, llm=None):
+    """LLM 判别 canvas 短输入的最终干净内容:给 librime 候选 + OCR 锚定行,本地 LLM 输出最终内容
+    (用 OCR 纠同音错字、去掉中途打了又删/界面噪声)。
+    llm=None(默认,GPU 占用/不跑模型)或无 OCR 证据 → 回退 librime(残渣/错字可见,宁缺毋错)。"""
+    lib = re.sub(r'\s', '', librime_text)
+    if not lib:
+        return librime_text
+    last = _session_end(con, sp['bundle'], sp['t0'])
+    ev = _ocr_evidence(con, sp['bundle'], sp['t0'], last, lib)
+    if not ev or llm is None:
+        return librime_text
+    prompt = (f"用户用拼音输入法在文档里打了一段中文。\n"
+              f"击键解码候选(可能有同音错字,也可能含中途打了又删的内容):{librime_text}\n"
+              f"屏幕 OCR 在不同时刻看到的相关文字行(可能有界面噪声/不同编辑态):{' / '.join(ev)}\n"
+              f"请用 OCR 纠正同音错字、去掉只在中途出现最后没保留的内容和界面噪声,"
+              f"输出用户最终写下的干净内容。只输出内容本身,不要解释。")
+    out = llm(prompt)
+    return out or librime_text
 
 
 def _hhmm(ts): return time.strftime('%H:%M:%S', time.gmtime(ts / 1000 - 4 * 3600))
