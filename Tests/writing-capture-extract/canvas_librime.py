@@ -36,8 +36,9 @@ def _decode_segment(seg):
             buf += ch
         elif ch.isdigit() and buf and 1 <= int(ch) <= 9:
             flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏
-        else:
+        elif ch.isprintable():
             flush(); out.append(ch)               # 标点/空格/字面数字:先收尾,再原样保留(逗号!)
+        # else:控制键(ESC/US 等)= 非文字,丢(同 real_key correctness)
     flush()
     return ''.join(out)
 

@@ -32,8 +32,9 @@ BUCKET_KEYS  = 120      # B/C 分桶(用户裁定,按击键数):>120=长(C,走 O
 
 
 def real_key(char, is_bs):
-    """真内容击键:非退格、有字符、非纯控制符(回车/换行/Tab 不算内容)。"""
-    return bool(char) and not is_bs and char not in ('\r', '\n', '\t')
+    """真内容击键:非退格、是可打印字符(排除 \\r\\n\\t/ESC/US 等所有控制键——它们不是文字内容)。
+    注意:空格 isprintable()=True,算内容保留(非「内容过滤」,是控制键 correctness)。"""
+    return bool(char) and not is_bs and char.isprintable()
 
 
 def load_keystrokes(con, t0, t1):
