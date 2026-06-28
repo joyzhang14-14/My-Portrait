@@ -26,7 +26,7 @@ def route_day(con, day):
         app = sp['bundle'].rsplit('.', 1)[-1]
         if sp['bucket'] == 'B':
             text = CL.decode_span(con, sp['bundle'], sp['t0'], sp['t1'])
-            if text:
+            if text.strip():   # 纯空白不产成品(correctness);有内容哪怕一个「，」都留(用户裁定)
                 b_recs.append({'source': 'canvas_B', 'text': text, 'app': app})
         else:   # C 长文 → canvas_merge(要 GPU),本文件不跑
             c_pending.append({**sp, 'app': app})
