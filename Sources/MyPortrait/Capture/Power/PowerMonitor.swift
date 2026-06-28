@@ -50,19 +50,28 @@ public enum PowerMonitor {
         currentState() == .ac
     }
 
-    /// 笔记本盖子是否合上。读 IORegistry `IOPMrootDomain` 的 `AppleClamshellState`
-    /// (实测:开盖=No/false，合盖=Yes/true；`AppleClamshellCausesSleep` 是另一回事，
-    /// 别用)。取不到时按"开盖"(false)最保守 —— 让 helper 宁可不持有 disablesleep。
-    public static var isLidClosed: Bool {
+    /// 读 IORegistry `IOPMrootDomain` 的某个 Bool property(Yes/No)。
+    /// 取不到按 false 最保守。普通权限可读。
+    private static func rootDomainBool(_ key: String) -> Bool {
         let entry = IOServiceGetMatchingService(kIOMainPortDefault,
                                                 IOServiceMatching("IOPMrootDomain"))
         guard entry != 0 else { return false }
         defer { IOObjectRelease(entry) }
         guard let prop = IORegistryEntryCreateCFProperty(
-            entry, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0
+            entry, key as CFString, kCFAllocatorDefault, 0
         )?.takeRetainedValue() else { return false }
         return (prop as? Bool) ?? false
     }
+
+    /// 笔记本盖子是否合上。读 `AppleClamshellState`(实测:开盖=No/false，
+    /// 合盖=Yes/true；`AppleClamshellCausesSleep` 是另一回事，别用)。取不到时
+    /// 按"开盖"(false)最保守 —— 让 helper 宁可不持有 disablesleep。
+    public static var isLidClosed: Bool { rootDomainBool("AppleClamshellState") }
+
+    /// 系统当前是否处于 disablesleep(`pmset disablesleep 1`)。读 `SleepDisabled`
+    /// (普通权限可读、不可写)。用于检测 helper 异常死亡(SIGKILL/重启)留下、
+    /// 没人复位的残留 —— app 据此主动连 helper 清成 0。
+    public static var systemSleepDisabled: Bool { rootDomainBool("SleepDisabled") }
 
     /// 完整快照：电源状态 + 电池百分比 + 低电量模式 + 热压力。
     /// PowerProfile.resolve 的 auto 决策用。

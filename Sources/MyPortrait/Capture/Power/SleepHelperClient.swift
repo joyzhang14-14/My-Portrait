@@ -98,6 +98,25 @@ final class SleepHelperClient {
             // 拆连接 → helper invalidationHandler 复位 disablesleep 0 并退出
             //(跟崩溃安全同一条路径,最稳;空闲时不留 root 进程)。
             teardownConnection(resetFirst: true)
+        } else if PowerMonitor.systemSleepDisabled {
+            // 残留自愈:我们没在持有(holding=false),系统却钉着 disablesleep=1 ——
+            // 这是 helper 被异常杀死(SIGKILL/重启)、没走正常复位路径留下的残留。
+            // 主动连一次 helper 清成 0(连接会让 launchd 把死掉的 helper 重新拉起接这一下)。
+            reconcileResidual()
+        }
+    }
+
+    /// 清残留:连 helper 复位 disablesleep 0 再断开。仅在 `setKeepAwake(false)` 且
+    /// 检测到 `systemSleepDisabled` 时调(已 guard 开关开+helper 批准)。
+    private func reconcileResidual() {
+        log.notice("residual disablesleep=1 with holding=false → reconcile reset 0")
+        guard let proxy = proxy() else { return }
+        proxy.setKeepAwake(false) { [weak self] ok, diag in
+            Task { @MainActor in
+                self?.log.notice("reconcile reset → ok=\(ok, privacy: .public) \(diag, privacy: .public)")
+                // 清完断开 → helper 退出,空闲不留 root 进程。
+                self?.teardownConnection(resetFirst: false)
+            }
         }
     }
 

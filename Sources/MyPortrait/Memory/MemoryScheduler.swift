@@ -459,6 +459,12 @@ final class MemoryScheduler {
     /// 真跑前先 recoverStaleLocks() —— 跟 didWake 同款:把 willSleep 暂停的 /
     /// 真崩溃残留的行恢复,这样合盖 DarkWake 窗口里也能续上,不再只等开盖 didWake。
     private func periodicCatchUp(reason: String) async {
+        // 巡检兜底:idle(无任务)时核对一次 keep-awake —— 若系统残留 disablesleep=1
+        // (helper 异常死亡留下),refreshKeepAwake → setKeepAwake(false) 会主动清。
+        // 有任务在跑时本就该持有,跳过,不每分钟打扰 helper。
+        if !(eventRunning || distillRunning || personalityRunning) {
+            refreshKeepAwake()
+        }
         guard Date().timeIntervalSince(lastTickAt) >= tickInterval else { return }
         schedLog.info("periodic catch-up (\(reason, privacy: .public)) — recover + tick")
         recoverStaleLocks()
