@@ -17,7 +17,7 @@ import canvas_librime as CL
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'eval')
 
 
-def route_day(con, day):
+def route_day(con, day, llm=None):
     """一天的 canvas 会话路由。返回 (b_records 给 fusion, c_pending 待 GPU)。"""
     (t0,) = con.execute("SELECT strftime('%s', :d) * 1000", {"d": day}).fetchone()
     (t1,) = con.execute("SELECT strftime('%s', :d, '+1 day') * 1000", {"d": day}).fetchone()
@@ -26,6 +26,7 @@ def route_day(con, day):
         app = sp['bundle'].rsplit('.', 1)[-1]
         if sp['bucket'] == 'B':
             text = CL.decode_span(con, sp['bundle'], sp['t0'], sp['t1'])
+            text = CL.ocr_correct_llm(con, sp, text, llm)   # llm=None → 回退 librime(GPU 占用/不跑模型)
             if text.strip():   # 纯空白不产成品(correctness);有内容哪怕一个「，」都留(用户裁定)
                 b_recs.append({'source': 'canvas_B', 'text': text, 'app': app})
         else:   # C 长文 → canvas_merge(要 GPU),本文件不跑
@@ -35,8 +36,10 @@ def route_day(con, day):
 
 def main():
     con = sqlite3.connect(B.DB)
-    if len(sys.argv) > 1:
-        days = sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a != '--llm']
+    llm = CL.make_llm() if '--llm' in sys.argv else None   # 默认不跑模型;--llm 且 GPU 空时才开
+    if args:
+        days = args
     else:
         (tmax,) = con.execute("SELECT max(ts_ms) FROM keystroke_log").fetchone()
         (d,) = con.execute("SELECT date(:t/1000, 'unixepoch')", {"t": tmax}).fetchone()
@@ -44,7 +47,7 @@ def main():
 
     fusion, pending = {}, []
     for day in days:
-        b, c = route_day(con, day)
+        b, c = route_day(con, day, llm)
         fusion[day] = b
         for sp in c:
             pending.append((day, sp))
