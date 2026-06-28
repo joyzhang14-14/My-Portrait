@@ -790,6 +790,29 @@ faithful_v2 `PORTRAIT_CANVAS` 读。AX 承载段不在这(faithful 自己重建)
 **⏳ 仍待(GPU)**:① 口3 验证 bucket B(纠同音错字,要 14B)② `canvas_merge` 跑 C 长文(要 14B)
 ③ 6/25 前历史重构(`PORTRAIT_LIBRIME_DECODE=1`)。**确定性侧到此完整**:承载率判别 + bucket B 解码 + 接线 + 噪声 correctness 全部就绪、实测过。
 
+## ✅ 2026-06-28(续)游戏过滤 + bucket B OCR 矫正定为 LLM 判别(确定性证明不可行)
+
+**游戏/包装层不走 canvas(`ax_bearing.skip_canvas`,已 commit)**:游戏击键(WASD/技能/音游点击)无 AX→0承载,
+会污染 canvas 成品(canvas 绕过下游过滤)。判据**不靠键/内容**(WASD 不全、音游会蒙混),靠 ① 系统类别
+`LSApplicationCategoryType=games` ② **模拟/包装层 bundle 前缀**(CrossOver/Whisky/Wine/Parallels——跑非原生软件无
+Mac AX,用户裁定可硬编码「无非那么几种」)。实测 CrossOver 包的 VILLAGE 游戏(`wwddsd`)排除✓。⚠️Python 快版:
+走 AX 文本框的游戏聊天=承载走 AX 路不丢;非 AX 游戏聊天会丢(采集层「文本框焦点」闸=Swift 版才精准保)。
+
+**🔬 短 canvas OCR 矫正:确定性算法 9 次实证不可行,定为 LLM 判别(`canvas_librime.ocr_correct_llm`,搭好未跑)**。
+测试案 `Wtf↵逆天兄弟`(你写的)结论链:
+
+- librime 解 = `wtf↵泥土兄弟饿,好吧`(同音错字 泥土/逆天、饿/额 + 含**打了又删**的「额好吧」)。
+- **OCR 数据是好的**:`逆天兄弟` conf 1.0、frame_lines 干净给出。**关键 bug**:`browser_url LIKE` 过滤把干净帧滤掉了
+  ——干净帧的 `browser_url` 常是 **NULL**(带 url 的反是脏帧:额好吧/桌面/自指污染)。改 **app_name+时间窗,不过滤 url**。
+- 但 9 种确定性帧选择/锚/多帧全栽,**决定性根因**:`额好吧` 是**选择删/鼠标删**掉的,`keystroke_log` 只记单字符按键、
+  **抓不到选择删**(全 session decode 后 `额好吧` 还在)→ **最终态无法确定性重建**(同 keystroke 主导被回滚的根因)。
+  且删后没拍到干净帧,OCR 侧也无「最终态」锚。
+- **用户裁定:改 LLM 判别**。`ocr_correct_llm(con, sp, librime_text, llm)`:给 librime 候选 + OCR 锚定行(共享子串锚=简拼免疫;
+  `_ocr_evidence` 按 app+时间窗收集,**不过滤 url**),本地 **14B(MLX,非 sonnet)**输出最终干净内容。`make_llm` 惰性加载
+  (导入不 load);`llm=None`/无证据 → 回退 librime(残渣可见,宁缺毋错)。已接 `canvas_route`(`--llm` 旗标)。
+  **实测(不跑模型):OCR 证据正确含「逆天兄弟」**,GPU 空喂 LLM 应出「Wtf 逆天兄弟」。
+- **GPU 空了跑验证**:`python3 canvas_route.py --llm`(会 `make_llm` 加载 14B;⚠️ event-local-lab 占 GPU 时会 OOM,先确认)。
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
