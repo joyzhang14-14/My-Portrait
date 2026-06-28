@@ -16,16 +16,42 @@ import rebuild as R          # 复用 reconstruct/keys_in_window,不改 rebuild.
 import ax_bearing as B       # 复用 canvas_spans(承载率判别)
 
 
+def _decode_segment(seg):
+    """seg=char 列表(已消化退格)→ 文本。逐 run 装配:拼音→librime TOP;英文→字面(保大小写);
+    标点/空格/字面数字→原样保留(reconstruct 那条会丢标点+丢纯英文,故 bucket B 自己装)。"""
+    out, buf = [], ""
+    def flush(pick=None):
+        nonlocal buf
+        if not buf:
+            return
+        kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
+        if kind == 'chinese':
+            han, _ = R.decode_run(buf, model_fn=None)
+            out.append(han or buf)                # 解不出 → 留拼音残渣(宁缺毋错)
+        else:
+            out.append(buf)                       # english/incomplete → 字面(The/ok 保原样)
+        buf = ""
+    for ch in seg:
+        if ch.isalpha():
+            buf += ch
+        elif ch.isdigit() and buf and 1 <= int(ch) <= 9:
+            flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏
+        else:
+            flush(); out.append(ch)               # 标点/空格/字面数字:先收尾,再原样保留(逗号!)
+    flush()
+    return ''.join(out)
+
+
 def decode_span(con, bundle, t0, t1):
     """一个短 canvas 会话的击键 → librime 确定性重建(TOP,不跑模型)。"""
     kw = R.keys_in_window(con, bundle, t0, t1)
     prev = R.DECODE_LIBRIME
     R.DECODE_LIBRIME = True   # bucket B 这条路开 decode;AX 路保持关
     try:
-        text, _ = R.reconstruct_message('', kw, model_fn=None)
+        lines = [_decode_segment(seg) for seg in R.split_cr(kw)]
     finally:
         R.DECODE_LIBRIME = prev
-    return text
+    return '\n'.join(l for l in lines if l)
 
 
 def bucket_b(con, t0, t1):
