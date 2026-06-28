@@ -761,6 +761,35 @@ discriminate 三宗罪(① 硬编码 URL 白名单 ② 整 session 粒度,标题
 canvas_merge 要 14B,先只接判别、不跑提取 ② bucket B 短线性 librime 解码(确定性,口3 验证等 GPU)
 ③ 承载率噪声(finder/空键 standalone 0承载)是否要个最小真内容门——暂按最大保留留着,下游滤。
 
+## ✅ 2026-06-28 bucket B librime 落地 + 接线编排(确定性部分全通,新文件不改现有 .py)
+
+承上①②③全做完(确定性部分),GPU 部分留待。**三个新文件,都零模型/零硬编码/不碰 rebuild.py**:
+
+**`canvas_librime.py`(bucket B 短 canvas 解码)**:0承载且短(≤120键,`BUCKET_KEYS`)的会话 →
+`keys_in_window` + **逐 run 装配**(`_decode_segment`):拼音→`decode_run`(TOP)/英文→字面(保大小写)/
+标点空格→保留。**不用 `reconstruct('',kw)`**(它丢标点[parse_picks 把逗号当分隔符]+丢纯英文[无中文 run 返空])。
+与 AX 路共存:**运行时**临时置 `R.DECODE_LIBRIME=True` 再还原(AX 路默认关防误判,不改 rebuild.py 源码)。
+实测:`测试测试,canvas`✓、`ok`→ok✓(字面)、`wtf↵泥土兄弟饿,好吧`(`泥土`应"你它"/`饿`应"额"=同音错字,**待口3 OCR 纠**)。
+
+**`canvas_route.py`(接线,替 `integrated_run.discriminate` 流程)**:`canvas_spans` 逐段判别 →
+B 短走 `canvas_librime`(确定性可跑)/ C 长走 `canvas_merge`(要 GPU,留占位)。产出
+`eval/canvas_route_fusion.json`={day:[{source,text,app}]},格式同老 `canvas_local_fusion`,直接给
+faithful_v2 `PORTRAIT_CANVAS` 读。AX 承载段不在这(faithful 自己重建)。跑法:`python3 canvas_route.py [day…]`。
+
+**本轮用户裁定(都已落)**:
+
+- **B/C 按击键数分桶,阈值 120**(`BUCKET_KEYS`):>120=C 长走 OCR(实测长英文 librime=乱码,必须 OCR);≤120=B 短走 librime。
+- **承载率层不做内容过滤**(撤掉零真内容筛,纯最大保留):噪声照样出会话,价值判断交下游。
+- **但 canvas 成品绕过下游过滤**(faithful 里 canvas text 直接 append 进成品,**不走 AX 路的口3/质量门/dedup**)——
+  所以 `canvas_route` 加一道 **correctness 守卫**:`text.strip()` 空(纯空白)不产成品;有内容(哪怕单个`，`)就留。
+- **`real_key`/`_decode_segment` 用 `isprintable()`**:排 ESC(`\x1b`)/US(`\x1f`)等控制键(非文字,correctness,非内容过滤);空格保留。
+
+**⚠️ 关键差异(下个 session 记牢)**:**canvas 路 ≠ AX 路**——AX 噪声有下游(口3/质量门/dedup)兜底,canvas
+成品**直接进 faithful 成品、零下游过滤**。所以 canvas 侧的脏数据必须在 `canvas_route`/`canvas_librime` 这层就干净。
+
+**⏳ 仍待(GPU)**:① 口3 验证 bucket B(纠同音错字,要 14B)② `canvas_merge` 跑 C 长文(要 14B)
+③ 6/25 前历史重构(`PORTRAIT_LIBRIME_DECODE=1`)。**确定性侧到此完整**:承载率判别 + bucket B 解码 + 接线 + 噪声 correctness 全部就绪、实测过。
+
 ## 待做(优先级)
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
