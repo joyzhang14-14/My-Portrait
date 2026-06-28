@@ -23,8 +23,11 @@ def strip_zw(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip(
 
 # 调参(都可调,先用 Google Docs 校准出的保守值)
 BURST_GAP_MS = 60_000   # 同 app 内击键间隔 > 此 = 断成新窗(1 分钟停顿)
-MIN_KEYS     = 5        # 子段真内容击键 < 此 = 太短不判(发送残留/误触)
 AX_PAD_MS    = 3000     # 逐键判覆盖:键 ±此 内有 AX commit/submit 即「覆盖」(IME commit 滞后)
+GAP_KEYS     = 8        # 承载窗**内部**的短未覆盖段 < 此 = commit 时序空档(monkeytype chil/li 案),
+                        # 并回承载;真 canvas 段(测试1正文 19 键)在其上。整窗全未覆盖(ok)不受此限。
+# 不设击键数下限(最大保留:短到「ok」也照判,噪声留给下游口3 滤)。cmd/ctrl/opt 快捷键
+# (cmd+v 粘贴等)不是内容输入,在 load_keystrokes 用 modifiers&7=0 排除(shift 大写保留)。
 
 
 def real_key(char, is_bs):
@@ -36,7 +39,7 @@ def load_keystrokes(con, t0, t1):
     """按 app 分组的击键流。返回 {bundle: [(ts, char, is_bs), ...]}(已按 ts 升序)。"""
     rows = con.execute(
         "SELECT ts_ms, bundle_id, char, is_backspace FROM keystroke_log "
-        "WHERE ts_ms >= :a AND ts_ms <= :b ORDER BY ts_ms",
+        "WHERE ts_ms >= :a AND ts_ms <= :b AND (modifiers & 7) = 0 ORDER BY ts_ms",
         {"a": t0, "b": t1}).fetchall()
     by_app = {}
     for ts, b, ch, bs in rows:
@@ -83,7 +86,7 @@ def analyze(con, t0, t1):
     """返回每个「同覆盖态子段」的承载判定(按时间排序)。
     不按整窗求和(会被「标题有AX + 正文无AX」混在一窗里平均掉),而是**逐键看局部**:
     这个键 ±AX_PAD_MS 内有没有 AX commit/submit → 覆盖/未覆盖;连续同态的真内容击键聚成子段。
-    未覆盖且 ≥MIN_KEYS 的子段 = 0 承载(canvas);其余 = 承载(AX 路)。"""
+    未覆盖子段 = 0 承载(走 canvas:OCR/librime);覆盖子段 = 承载(走 AX 路)。"""
     keys_by = load_keystrokes(con, t0, t1)
     ax_by = load_ax_content(con, t0, t1)
     out = []
@@ -99,9 +102,20 @@ def analyze(con, t0, t1):
                     runs[-1][1].append((ts, ch))
                 else:
                     runs.append((covered, [(ts, ch)]))
+            # 承载窗内部的短未覆盖段 = commit 时序空档,并回承载(不是 canvas)。
+            # 仅当窗内本就有覆盖段(AX 在这 app-会话里活跃)时才合并;整窗全未覆盖(standalone
+            # canvas,如 ok)原样保留。
+            if any(c for c, _ in runs):
+                runs = [(True, seg) if (not c and len(seg) < GAP_KEYS) else (c, seg)
+                        for c, seg in runs]
+                merged = []
+                for c, seg in runs:
+                    if merged and merged[-1][0] == c:
+                        merged[-1][1].extend(seg)
+                    else:
+                        merged.append((c, list(seg)))
+                runs = merged
             for covered, seg in runs:
-                if len(seg) < MIN_KEYS:
-                    continue
                 out.append({
                     'bundle': bundle, 't0': seg[0][0], 't1': seg[-1][0],
                     'nkeys': len(seg), 'bearing': covered,
@@ -128,15 +142,15 @@ def main():
         label = "最近 24h"
     rows = analyze(con, t0, t1)
     print(f"承载率扫描 · {label} · {len(rows)} 个子段")
-    print(f"{'起':>8} {'app':<16} {'键':>4}  判定          内容预览")
+    print(f"{'起':>8} {'app':<16} {'键':>4}  路由          内容预览")
     print("-" * 78)
     for r in rows:
-        verdict = "承载" if r['bearing'] else "0承载→canvas"
+        verdict = "承载→AX路" if r['bearing'] else "0承载→canvas"
         print(f"{_hhmm(r['t0']):>8} {_short(r['bundle']):<16} {r['nkeys']:>4}  "
               f"{verdict:<12} {r['typed'][:40]}")
     n0 = sum(1 for r in rows if not r['bearing'])
     print("-" * 78)
-    print(f"承载 {len(rows) - n0} · 0承载(canvas) {n0}")
+    print(f"→AX路 {len(rows) - n0} · →canvas {n0}")
 
 
 if __name__ == '__main__':
