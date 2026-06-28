@@ -18,6 +18,9 @@ public enum CaptureTrigger: String, Sendable {
     /// rawValue 仍叫 typing_pause —— DB capture_trigger 列向后兼容,不改字符串。
     case typingPause = "typing_pause"
 
+    /// 持续打字爆发:10s 窗口内累计 ≥25 次按键(长段输入,即使没敲回车也抓一帧)。
+    case typingBurst = "typing_burst"
+
     /// 滚动停止 N ms。
     case scrollStop = "scroll_stop"
 
