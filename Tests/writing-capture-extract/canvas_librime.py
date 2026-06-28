@@ -131,16 +131,23 @@ def ocr_correct_llm(con, sp, librime_text, llm=None):
     lib = re.sub(r'\s', '', librime_text)
     if not lib:
         return librime_text
-    last = _session_end(con, sp['bundle'], sp['t0'])
-    ev = _ocr_evidence(con, sp['bundle'], sp['t0'], last, lib)
+    # 证据窗收紧到**打字当时**(span 末,非 5min-gap 长 session)——排掉很久之后的自指污染帧
+    # (实测干净帧在打字当下 23:18:14,污染帧在 1 小时后我讨论它时)。
+    ev = _ocr_evidence(con, sp['bundle'], sp['t0'], sp['t1'], lib)
     if not ev or llm is None:
         return librime_text
-    prompt = (f"任务:还原用户在文档里写的最终内容。\n"
-              f"【屏幕真值·以此为准】OCR 实际拍到的文字行(就是用户屏幕上真实显示的,含界面噪声):\n  {' / '.join(ev)}\n"
-              f"【参考·可能有错】拼音击键解码(同音字常解错,且可能含打了又删的字):{librime_text}\n"
-              f"规则:① 内容**以 OCR 屏幕真值为准**——OCR 里的汉字优先于击键候选(如击键'泥土'但 OCR 是'逆天',取'逆天')。"
-              f"② 只保留 OCR 里**真实存在**的用户文字,丢掉界面噪声(菜单/按钮/无关行)和击键候选里 OCR 没有的字(=打了又删)。\n"
-              f"只输出还原后的最终文字本身,不要解释、不要引号。")
+    ev_lines = '\n'.join(f"- {e}" for e in ev)
+    prompt = (
+        "从 OCR 文字行里还原用户在文档里写的那**一句**最终内容,合成成一句、不要照抄列表。\n"
+        "OCR 以屏幕为准(汉字优先于击键候选);丢掉界面行(菜单/标签页/按钮)和打了又删的字。\n\n"
+        "示例:\n"
+        "击键候选:wo de app zhong yu zuo hao le\n"
+        "OCR行:\n- 我的app终于做好了\n- 文件 编辑 视图\n- 分享\n"
+        "输出:我的app终于做好了\n\n"
+        "现在:\n"
+        f"击键候选(同音字常错,可能含已删的字):{librime_text}\n"
+        f"OCR行:\n{ev_lines}\n"
+        "输出:")
     out = llm(prompt)
     return out or librime_text
 
