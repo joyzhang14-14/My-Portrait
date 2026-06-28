@@ -116,7 +116,9 @@ def make_llm(model='mlx-community/Qwen3-14B-4bit'):
     from mlx_lm import load, generate
     m, tok = load(model)
     def llm(prompt):
-        text = tok.apply_chat_template([{"role": "user", "content": prompt}], add_generation_prompt=True)
+        # enable_thinking=False:Qwen3 思考模式会吃光 token 只输出 <think>,关掉直接出答案
+        text = tok.apply_chat_template([{"role": "user", "content": prompt}],
+                                       add_generation_prompt=True, enable_thinking=False)
         out = generate(m, tok, prompt=text, max_tokens=80, verbose=False)
         return re.sub(r'<think>.*?</think>', '', out, flags=re.S).strip()
     return llm
@@ -133,11 +135,12 @@ def ocr_correct_llm(con, sp, librime_text, llm=None):
     ev = _ocr_evidence(con, sp['bundle'], sp['t0'], last, lib)
     if not ev or llm is None:
         return librime_text
-    prompt = (f"用户用拼音输入法在文档里打了一段中文。\n"
-              f"击键解码候选(可能有同音错字,也可能含中途打了又删的内容):{librime_text}\n"
-              f"屏幕 OCR 在不同时刻看到的相关文字行(可能有界面噪声/不同编辑态):{' / '.join(ev)}\n"
-              f"请用 OCR 纠正同音错字、去掉只在中途出现最后没保留的内容和界面噪声,"
-              f"输出用户最终写下的干净内容。只输出内容本身,不要解释。")
+    prompt = (f"任务:还原用户在文档里写的最终内容。\n"
+              f"【屏幕真值·以此为准】OCR 实际拍到的文字行(就是用户屏幕上真实显示的,含界面噪声):\n  {' / '.join(ev)}\n"
+              f"【参考·可能有错】拼音击键解码(同音字常解错,且可能含打了又删的字):{librime_text}\n"
+              f"规则:① 内容**以 OCR 屏幕真值为准**——OCR 里的汉字优先于击键候选(如击键'泥土'但 OCR 是'逆天',取'逆天')。"
+              f"② 只保留 OCR 里**真实存在**的用户文字,丢掉界面噪声(菜单/按钮/无关行)和击键候选里 OCR 没有的字(=打了又删)。\n"
+              f"只输出还原后的最终文字本身,不要解释、不要引号。")
     out = llm(prompt)
     return out or librime_text
 
