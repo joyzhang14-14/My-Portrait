@@ -14,7 +14,8 @@ public enum CaptureTrigger: String, Sendable {
     /// 鼠标点击。
     case click
 
-    /// 键盘停顿 N ms（用户停止打字）。
+    /// 用户按下 Return / Enter 的瞬间(发消息 / 换行 / 提交 = 一个动作完成)。
+    /// rawValue 仍叫 typing_pause —— DB capture_trigger 列向后兼容,不改字符串。
     case typingPause = "typing_pause"
 
     /// 滚动停止 N ms。

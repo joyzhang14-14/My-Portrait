@@ -2,35 +2,37 @@ import AppKit
 import Foundation
 import os.log
 
-/// 全局键盘 / 鼠标事件 → debounced .typingPause / .scrollStop / .click。
+/// 全局键盘 / 鼠标事件 → .typingPause / .scrollStop / .click。
 ///
 /// 用 `NSEvent.addGlobalMonitorForEvents`（CGEventTap 的高层包装）。
 /// 需要"输入监控"权限（macOS 10.15+：System Settings → Privacy → Input Monitoring）。
 /// 权限缺失时静默降级 —— 只有 workspace 切换会触发抓帧。
 ///
-/// 防抖规则（抄 My-Orphies）：
-///   - 键盘按下后 500ms 内无新按下 → 发 .typingPause
+/// 规则：
+///   - 按下 Return / Enter → **立即**发 .typingPause(敲回车 = 一个动作完成,
+///     发消息 / 换行 / 提交,越快抓帧越好)。其它按键不触发。
+///     连发 / 长按回车的防抖交给 CaptureCoordinator 的 minCaptureIntervalMs
+///     (200ms)+ 画面去重,不在这里设计时器。
 ///   - 滚轮事件后 300ms 内无新滚轮 → 发 .scrollStop
 ///   - 左键点击 → 立即发 .click（无防抖）
 @MainActor
 final class InputWatcher {
 
     private let emit: @Sendable (CaptureTrigger) -> Void
-    private let typingPauseMs: Int
     private let scrollStopMs: Int
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "input")
 
     private var monitor: Any?
-    private var typingDebounceTask: Task<Void, Never>?
     private var scrollDebounceTask: Task<Void, Never>?
+
+    /// keyCode：36 = Return，76 = 小键盘 Enter。
+    private static let returnKeyCodes: Set<UInt16> = [36, 76]
 
     init(
         emit: @escaping @Sendable (CaptureTrigger) -> Void,
-        typingPauseMs: Int = 500,
         scrollStopMs: Int = 300
     ) {
         self.emit = emit
-        self.typingPauseMs = typingPauseMs
         self.scrollStopMs = scrollStopMs
     }
 
@@ -52,9 +54,7 @@ final class InputWatcher {
     func stop() {
         if let m = monitor { NSEvent.removeMonitor(m) }
         monitor = nil
-        typingDebounceTask?.cancel()
         scrollDebounceTask?.cancel()
-        typingDebounceTask = nil
         scrollDebounceTask = nil
     }
 
@@ -63,12 +63,9 @@ final class InputWatcher {
     private func handle(_ event: NSEvent) {
         switch event.type {
         case .keyDown:
-            typingDebounceTask?.cancel()
-            let ms = typingPauseMs
-            let e = emit
-            typingDebounceTask = Task {
-                try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
-                if !Task.isCancelled { e(.typingPause) }
+            // 只在 Return / Enter 的瞬间触发,立刻抓帧。其它按键不抓。
+            if Self.returnKeyCodes.contains(event.keyCode) {
+                emit(.typingPause)
             }
 
         case .leftMouseDown:
