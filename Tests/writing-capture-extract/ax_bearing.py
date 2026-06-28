@@ -148,9 +148,8 @@ def canvas_spans(con, t0, t1):
             sp['t1'] = s['t1']; sp['nkeys'] += s['nkeys']; sp['typed'] += s['typed']
         else:
             spans.append(dict(s))
-    # 噪声筛(承载率层唯一的内容筛):去掉「零真内容」会话——没有任何字母/汉字/数字
-    # (单独的「，」、空键等,连残渣都算不上)。有实字的(ok/wis)留,价值判断交下游口3/质量门。
-    spans = [sp for sp in spans if any(c.isalnum() for c in sp['typed'])]
+    # 承载率层不做任何内容过滤(纯最大保留,用户裁定):噪声(「，」/空键/finder 导航)照样
+    # 出会话,价值判断全交下游(口3/质量门),与 AX 路同一出口。
     for sp in spans:
         sp['bucket'] = 'C' if sp['nkeys'] > BUCKET_KEYS else 'B'
         sp['url'] = _doc_url(con, sp['bundle'], sp['t0'], sp['t1'])
