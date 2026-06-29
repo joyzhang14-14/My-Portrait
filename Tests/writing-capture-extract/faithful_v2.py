@@ -342,6 +342,20 @@ for day in DAYS:
                         and not ks[-2][2] and (ks[-2][1] or '').isdigit()
                         and ks[-1][0] - ks[-2][0] <= 2000):
                     cr = True
+            # 框清空否决(2026-06-29,这样的对吗?案):升格只认回车击键,会误升**表单内逐字 IME 态**
+            # ——textarea 里回车是换行不是发送,每段 endValue 都带 \n 被全升成发送(zhe y/这样d/
+            # 这样的dui ma/这样的对吗?)。真发送后框清空、同 element 不再延续;故查同 element_hash 60s 内
+            # 后续事件 value 是否**拼音延续**本段(_py_prefix 治 d/的 字符串对不上)→ 延续=框没清=非真发送,
+            # 不升格(保持 ~draft,交渐进草稿态折叠归并)。jeff chang 等真发送框会清、value 不延续 → 照常升格。
+            if cr:
+                nxt = con.execute(
+                    "SELECT t2.end_value FROM typing_events t1 JOIN typing_events t2 "
+                    "ON t2.element_hash = t1.element_hash AND t2.element_hash IS NOT NULL "
+                    "WHERE t1.id=:i AND t2.id != t1.id "
+                    "AND t2.started_at > t1.ended_at AND t2.started_at <= t1.ended_at + 60000",
+                    {"i": ev['id']}).fetchall()
+                if any(w and _py_prefix(cv(text), cv(w)) for (w,) in nxt):
+                    cr = False   # 框没清(value 延续)= 误升,否决
             if cr: sr[4] = True
         # 幻影发送降级(案 vos/vcd ev616=假submit / 关SIP ev1148=假delete快照):"发送"后框内容仍在——
         # 同bundle 60s内后续事件(DB直查,不受staged分组限制)endValue 原样延续该文本为前缀、
