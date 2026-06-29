@@ -223,8 +223,12 @@ def _whole_residue_ocr(app_short, text, send_ts, leftover, url, others_n, base='
                 continue
             if sum(1 for i in range(n) if cand[i] == m[i]) < (n + 1) // 2:
                 continue                                    # 位置级重合<半 = 不是同一条消息
-            _, consumed = verify_tail(cand, leftover)        # OCR 窗须被击键解释(防抓别条消息)
-            if consumed >= len(L) - 1 and not any(o.startswith(cand) for o in others_n):
+            tail, consumed = verify_tail(cand, leftover)     # OCR 窗须被击键解释(防抓别条消息)
+            # 全窗须逐字验上(看M案 2026-06-29:OCR 把第二个「看」误读成英文 M,M 无 m 击键,
+            # verify 只验上「看」,但 consumed≥len(L)-1 仍过 → 返回的 cand 仍含未验的 M)。
+            # 要求验证 tail 覆盖完整 cand:未验字符(OCR 噪声)一律拒。
+            if cv(tail).replace(' ', '') == cand and consumed >= len(L) - 1 \
+                    and not any(o.startswith(cand) for o in others_n):
                 return cand, {'fixed': True, 'via': '全残渣OCR整句', 'frame_ts': ts, 'ocr_tail': cand}
     return text, {'why': '全残渣:OCR无等长近似匹配'}
 
