@@ -233,6 +233,54 @@ def seq_in(a, b):
     if not a or len(a) > len(b): return False
     return any(all(a[j] & b[i + j] for j in range(len(a))) for i in range(len(b) - len(a) + 1))
 
+# 渐进 IME 草稿态折叠(2026-06-29):未发送草稿逐字打的进度态(zhe y/这样d/这样的dui ma/这样的对吗?)
+# 跨拼音↔汉字态对不上,seq_in 也治不了(逐字符 ascii vs 逐音节 / 简拼声母 d vs 全拼 de)。
+# 故拍平成**字母串**比前缀(简拼天然免疫:zheyangd 是 zheyangde… 的前缀;也免口3时序——
+# 这样的dui ma 与 这样的对吗 拼音相同,拼音空间里压根不分先后口3)。
+def _py_letters(text, cap=512):
+    """text → 所有可能的拼音/字面平铺串(小写;标点空格跳过;汉字按多音字展开;短文本枚举)。
+    多音字爆炸(>cap)返回 None(交由上层当不匹配,宁缺毋错)。"""
+    if _CU[0] is None: _CU[0] = R.SCH.char_units()
+    cu = _CU[0]
+    res = ['']
+    for ch in norm_t(text).lower():
+        if ch.isascii():
+            res = [r + ch for r in res]
+        else:
+            res = [r + u for r in res for u in (cu.get(ch) or (ch,))]
+        if len(res) > cap: return None
+    return [r for r in res if r]
+
+def _py_prefix(a_text, b_text):
+    """a 的拼音平铺是否为 b 的拼音平铺**前缀**(多音字回溯 + 简拼/混合态免疫;空 a 返 False)。"""
+    if _CU[0] is None: _CU[0] = R.SCH.char_units()
+    cu = _CU[0]
+    bt = norm_t(b_text).lower()
+    cand = _py_letters(a_text)
+    if not cand: return False
+    def walk(i, s):
+        if not s: return True               # a 字母全消费 = 前缀成立(不要求 b 走完)
+        if i >= len(bt): return False        # b 走完但 a 还有 → 不是前缀
+        ch = bt[i]
+        if ch.isascii():
+            return s.startswith(ch) and walk(i + 1, s[1:])
+        for u in cu.get(ch, (ch,)):
+            if s.startswith(u):
+                if walk(i + 1, s[len(u):]): return True
+            elif u.startswith(s):            # 简拼:s 是该音节前缀(a 末段)→ a 整体已是前缀
+                return True
+        return False
+    return any(walk(0, af) for af in cand)
+
+def _completeness(text, ts):
+    """草稿「完整度」排序键:(拼音字母总长, 汉字数, 时刻)。
+    拼音字母长=内容量同口径(这样的dui ma 与 这样的对吗 同为14,不被拼音残渣的字符数骗);
+    平局取汉字多者(更解码)、再取更晚者(更接近最终输入)。"""
+    cand = _py_letters(text)
+    plen = max((len(c) for c in cand), default=0) if cand else len(norm_t(text))  # 长文多音字爆炸 cand=None → 字数兜底
+    han = sum(1 for c in norm_t(text) if not c.isascii())
+    return (plen, han, ts or 0)
+
 RAW = {}   # day -> [(app, text, kc, evid, t0, t1)]
 DROP = {}  # day -> [(闸口, app, text, evid, t0, t1, 原因)] —— 漏斗每道闸丢弃的全记录(审计)
 C3FIX = {}  # day -> [(app, 原文, 修后, via, evid, t0)] —— 口3 修正审计(所有模型/OCR修改可复核)
@@ -435,6 +483,19 @@ for day in DAYS:
                 if fin is not None:
                     drops.append(("中间态草稿", a_, t_, evid_, t0_, t1_,
                                   f"与后续真发送共享前缀(中段被改写):{cv(fin[1])[:30]}")); continue
+        # 渐进 IME 草稿态折叠(2026-06-29:6/26 Safari 表单逐字打「这样的对吗?」漏的那族):
+        # 上面的块只折叠进**真发送**;未发送草稿的逐字进度态(zhe y/这样d/这样的dui ma/这样的对吗?)
+        # 全是 ~draft,无真发送可锚 → 这里折叠进**更完整的同 bundle 草稿**。跨拼音↔汉字态用 _py_prefix
+        # (字母前缀,简拼免疫),完整度按拼音字母长(免被拼音残渣字符数骗、免口3时序)。
+        if '~draft' in src0:
+            rk = _completeness(t_, t1_ or t0_)
+            sup = next((r2 for r2 in out if r2 is not rec and r2[7] == b_
+                        and abs((r2[5] or r2[4] or 0) - (t1_ or t0_ or 0)) <= 15 * 60 * 1000
+                        and _completeness(r2[1], r2[5] or r2[4]) > rk
+                        and _py_prefix(t_, r2[1])), None)
+            if sup is not None:
+                drops.append(("渐进草稿态", a_, t_, evid_, t0_, t1_,
+                              f"未发送草稿前缀态,折叠进更完整态:{cv(sup[1])[:30]}")); continue
         out_f.append(rec)
     out = out_f
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
