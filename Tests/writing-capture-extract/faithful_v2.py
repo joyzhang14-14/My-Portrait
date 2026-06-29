@@ -494,8 +494,11 @@ for day in DAYS:
                         and _completeness(r2[1], r2[5] or r2[4]) > rk
                         and _py_prefix(t_, r2[1])), None)
             if sup is not None:
+                # 审计 reason 嵌 survivor 预览前先遮蔽邮箱(survivor 可能是邮箱前缀态的最终态,
+                # P0「全文档」会扫到——同 8cdfb42 教训:审计内容遇敏感一律遮蔽,先 scrub 再截断)
+                prev = re.sub(r'\S+@\S+\.\w+', '⟨邮箱已遮蔽⟩', cv(sup[1]))[:30]
                 drops.append(("渐进草稿态", a_, t_, evid_, t0_, t1_,
-                              f"未发送草稿前缀态,折叠进更完整态:{cv(sup[1])[:30]}")); continue
+                              f"未发送草稿前缀态,折叠进更完整态:{prev}")); continue
         out_f.append(rec)
     out = out_f
     # ===== 击键账本恢复(用户铁律:有击键就记录)=====
