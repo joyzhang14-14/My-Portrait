@@ -847,7 +847,57 @@ keystroke_log/edit_log
 **实测验证**:测试1 `测试测试，canvas`✓全对;wtf `逆天兄弟，好吧`(泥土→逆天 OCR 修对✓,残留删掉的「好吧」=多帧稳定待迭代)。
 **整合跑 6/26-6/28 验证中**(`eval/integrated_run_0628.log` / `eval/integrated_0628.md`)。
 
-**剩余待迭代(非阻塞,本轮收)**:① 多帧稳定剔删除内容(去 wtf 的「好吧」)② C 长文 canvas_merge 实跑(本轮 6/26-28 多为短输入,C 少)③ 采集层「文本框焦点」闸(Swift,精准保游戏内聊天)④ 6/25 前历史重构(`PORTRAIT_LIBRIME_DECODE=1`)。⑤ **渐进 IME 草稿态去重漏**(6/26 Safari 表单逐字打「这样的对吗?」:`zhe y`/`这样d`/`这样的对吗`/`这样的对吗?` 四条没合并成一条——拼音态↔汉字态字符串对不上,现有截断/前缀去重不认;修向=未发送草稿同 element+时间相邻、后者更长且前者是其打字前缀→折叠成最终态。和 vos/vcd 过期快照同族)。
+**剩余待迭代(非阻塞,本轮收)**:① 多帧稳定剔删除内容(去 wtf 的「好吧」)② C 长文 canvas_merge 实跑(本轮 6/26-28 多为短输入,C 少)③ 采集层「文本框焦点」闸(Swift,精准保游戏内聊天)④ 6/25 前历史重构(`PORTRAIT_LIBRIME_DECODE=1`)。⑤ **渐进 IME 草稿态去重漏**(6/26 Safari 表单逐字打「这样的对吗?」:`zhe y`/`这样d`/`这样的对吗`/`这样的对吗?` 四条没合并成一条——拼音态↔汉字态字符串对不上,现有截断/前缀去重不认;修向=未发送草稿同 element+时间相邻、后者更长且前者是其打字前缀→折叠成最终态。和 vos/vcd 过期快照同族)。**✅ 2026-06-29 已修(框清空否决 + 拼音空间折叠),见下节。**
+
+## ✅ 2026-06-29 渐进IME草稿态合并 + 口3校对错字两修(全程 REVIEW_MODE=det,gold 6天 44✓ 1✗ 零回归)
+
+本轮修两类用户标注问题,**5 个原子 commit**,全在 AX 路实验线(faithful_v2/ocr3),不碰采集层/canvas。
+gold 基准跑法 = `REVIEW_MODE=det PORTRAIT_LIBRIME_DECODE=1`(旧采集 6 天**必须开 decode=1** 还原当时
+decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗ = **A10 卖个惨**(librime 词库缺词,预先存在)。
+
+### A. 渐进 IME 草稿态合并(待办⑤,「这样的对吗?」案)
+
+- **现象**:6/26 Safari 表单(同 element_hash 17521502)逐字打「这样的对吗?」,产出 4 条没合并:
+  `zhe y`/`这样d`/`这样的dui ma`(口3后→这样的对吗)/`这样的对吗?`。
+- **双根因**:① 三道现有闸全靠**字符串前缀/LCS**,拼音态↔汉字态对不上(`这样的dui ma` vs `这样的对吗?`)
+  ② DB 真相:4 条**只有 ev2848 有真 submit**,前 3 条只有 commit;但 end_value 都带尾随 `\n`,被
+  **「回车背书升格」(jeff chang 案)只认回车击键、不认框清空**误升成 is_send=True → 不是 ~draft → 折叠接不住。
+- **修**:
+  - `ac2caf7` **渐进草稿态折叠**(faithful_v2 out_f 循环,平行于「中间态草稿折叠」):未发送 `~draft` 前缀态
+    折叠进同 bundle ≤15min 更完整态。跨形态用新 helper **`_py_prefix`**(把文本拍平成**字母串**比前缀,
+    简拼免疫 `zheyangd⊂zheyangde`、免口3时序 `这样的dui ma` 与 `这样的对吗` 拼音相同);完整度 **`_completeness`**
+    按拼音字母长排序(不被拼音残渣字符数骗)。(注:`pyseq`/`seq_in` 是逐位**集合相交**,治不了逐字符ascii vs
+    逐音节、简拼声母 d vs 全拼 de,故另起字母串前缀。)
+  - `ac91ea3` **折叠审计行遮蔽邮箱**:reason 嵌 survivor 预览 `cv(sup[1])`,survivor 可能是邮箱最终态 →
+    P0「全文档」泄漏。预览前先 `re.sub(邮箱→⟨遮蔽⟩)`(EMAIL_PAT 在 line 756 运行时晚于此循环,内联 scrub)。
+  - `d3756c4` **回车背书升格加「框清空否决」**(根因修):升格前查**同 element_hash 60s 内后续事件 value
+    是否拼音延续本段**(`_py_prefix`,治 d/的)→ 延续=框没清=非真发送,不升格保持 ~draft。真发送(jeff
+    chang/yo/生态的)框会清、value 不延续 → 照常升格不回归。`ev['id']` 有,element_hash 靠 JOIN 查。
+- **验证**:6/26-28 成品只剩一条「这样的对吗?」;gold 44✓;jeff/yo/生态升格全保住。
+
+### B. 口3 校对引入错字两变体(用户审 gold 逐条发现,同族:`_whole_residue_ocr` 拿 OCR 覆盖了不该覆盖的)
+
+口3 `proofread_tail` 在 base<3 时走 `_whole_residue_ocr`(机器猜首字锚 OCR、整窗替换),丢了正常路的 base 锚保护。
+
+- **今天→今大**(`f83a6b4`,ev523):「今天」是 edit_log **字面 commit**(jint1→今天),OCR 把天误读成大。
+  **关键坑:大有多音字读音 `tai`,用户为天打的简拼 `t` 同时兼容大(tai)→ 击键分不开天/大,per-char 击键否决无效**;
+  只能靠**来源**。修=把 `base` 传进 `_whole_residue_ocr`,**OCR 候选须保留 commit 的 base 前缀**(今大≠今天则拒)。
+- **看看→看M**(`a2a19f8`,ev649):简拼 `k k`→librime 解码看看(base 空真全残渣),OCR 把第二个看误读成英文 M。
+  `verify_tail` 只验上「看」(M 是 ASCII 无 m 击键),但 `consumed≥len(L)-1` 仍过,**返回的却是完整 cand「看M」**。
+  修=**要求 verify_tail 的 tail 覆盖完整 cand**(未验字符=OCR 噪声拒)。
+- **两守卫互补**:今大经 tai 读音全验过、靠**前缀守卫**拦;看M 没全验、靠**整窗守卫**拦。
+- **不回归**:`从哪找的`(base 空真全残渣、全验上)仍救回;ocr3 七案例与 HEAD 零 diff。
+
+### ⚠️ 三条新坑(下次别重踩)
+
+1. **发送判定有两层且不一致**:采集层(Swift)用「回车后框清空」(→submit kind);pipeline 的「回车背书升格」
+   只认回车击键、**不认框清空** → textarea 换行 `\n` 被误当发送。已加框清空否决,但同类升格逻辑要警惕。
+2. **多音字简拼让击键无法分字**:大有 tai 读音 → 简拼 t 分不开天/大。凡「击键背书」判据遇多音字简拼会失效,
+   需退到来源(commit vs 机器猜)或屏幕。
+3. **`_whole_residue_ocr` 是 OCR 覆盖重灾区**:base<3 才走它、丢了 base 锚保护 + 接受未全验 cand。两道守卫已补,
+   但它本质是「整条机器解码时 OCR 当裁判」,任何 OCR 误读都可能进;后续若再出 口3 错字,优先查这条。
+
+产出:`eval/fold_gold_test.md`(6天 gold)/`eval/fold_newdays_test.md`(6/26-28);Obsidian `6.29-*` 两份(已手动反映翻正)。
 
 ## 待做(优先级)
 
