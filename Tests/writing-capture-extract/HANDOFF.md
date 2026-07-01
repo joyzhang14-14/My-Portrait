@@ -932,6 +932,13 @@ decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗
 - **输入法(双拼/五笔/日文)不影响粘贴/手打判别**:判据是 `cover(文字, commit流)`,`cstream` 只收 `kind='commit'`(上屏汉字)、不收 paste——上屏的字和输入法无关,真打的字一定在 commit 流→留,粘贴不在→丢。`kc<字数/4` 只是触发器,门槛低于任何输入法地板(五笔一级简码≈1键/字仍4×高于门槛),且联想上屏也是 commit→cover 救回。
 - **⚠️ 但 librime DECODE(`DECODE_LIBRIME=1`)假设全拼(雾凇)**:双拼/五笔/日文的击键它解不了。默认 decode=0(AX 给汉字)主路无关;只有击键账本/历史重构会踩→librime 篇边界。
 
+### ⑦ 同日去重升级:真重发 vs 采集副本(`faithful_v2`,`seen` 改 dict + `_retyped`)
+
+- 问题:旧「同日去重」是**纯文本精确匹配**(`t in seen`),会把用户**真发两遍**的相同消息(「哈哈」「?」)当重复丢——违最大保留。
+- 改:`seen` 从 set 升为 `文本→首条evid`;遇相同文本时判 `evid != 首条 且 _retyped`(本条时间窗独立击键 ≥ 字数)→ 真重发,留;否则(同事件 submit+endValue / 无键 re-render)→ 采集副本,丢。`_retyped` **只管击键**,「同事件」靠 `evid` 不等拦。阈值 `max(1, 字数)`(单字重打「?」1键也算,`max(2)` 会误杀单字——已修)。账本处(`ft in seen`)dict 照样成立。
+- **实测(gold 6天 decode=1,KC_GATE 默认开,含 ①②⑥⑦)**:成品 206(基线 203,+3=真重发/单字保留);71 条"采集副本"丢,抽验真消息(writing placement/我这个情况很尴尬)**都留着一份没误杀**;`compare_gold` **43✓ 1🟡 1✗**——✗=A10(老),🟡=**B14「My-Meeting」短碎片漏进成品**(submit≥1 或 dedup 连带,下轮收掉即干净)。
+- ⚠️ **注释坑**:我几处 Edit 把中文写成了字面 `\u` 转义(源码不可读),已用 Bash 解回真中文(保留 is_mask 的 PUA `/` + `￼`)。后续注意。
+
 ### 附:粘贴 vs ax吸附 判据
 
 真 paste = edit_log 有 `kind='paste'`;ax 吸附/存量 = 无 paste 且击键≈0 但文本很长。本轮那 35 条实测**全是真 paste**(有 paste kind),非吸附。
