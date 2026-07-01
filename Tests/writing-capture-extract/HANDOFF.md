@@ -926,6 +926,12 @@ decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗
 - **根因**:文档编辑器无"发送",内容全在 `end_value`,而 **`end_value` 出口(`rebuild:428`)不过粘贴政策的剥离** → **kc-gate 是唯一拦它们的闸**(几千字、~0 击键 → 触发)。直接 `paste` kind 只覆盖被标 paste 的,**漏了 endValue 路 / 存量框 / autofill**。
 - **结论(推翻我先前假设)**:**10min 分组 + kc-gate 承重,保留**。kc-gate 基线只咬垃圾(丢弃审计 5 条全是文档标题/`file://`/URL + 静默丢的 >120字大块),**零误杀真消息**。`KC_GATE=0` 死路,env 关即可不进生产。
 
+### ⑥ `PASTE_MAX` 旋钮(`rebuild:18`,`PORTRAIT_PASTE_MAX`,默认 30)+ 输入法无关性
+
+- 短粘贴保留上限改 env 可配(前端旋钮就绪,默认 30 行为不变)。用户裁定:粘贴阈值让用户自己调。
+- **输入法(双拼/五笔/日文)不影响粘贴/手打判别**:判据是 `cover(文字, commit流)`,`cstream` 只收 `kind='commit'`(上屏汉字)、不收 paste——上屏的字和输入法无关,真打的字一定在 commit 流→留,粘贴不在→丢。`kc<字数/4` 只是触发器,门槛低于任何输入法地板(五笔一级简码≈1键/字仍4×高于门槛),且联想上屏也是 commit→cover 救回。
+- **⚠️ 但 librime DECODE(`DECODE_LIBRIME=1`)假设全拼(雾凇)**:双拼/五笔/日文的击键它解不了。默认 decode=0(AX 给汉字)主路无关;只有击键账本/历史重构会踩→librime 篇边界。
+
 ### 附:粘贴 vs ax吸附 判据
 
 真 paste = edit_log 有 `kind='paste'`;ax 吸附/存量 = 无 paste 且击键≈0 但文本很长。本轮那 35 条实测**全是真 paste**(有 paste kind),非吸附。
