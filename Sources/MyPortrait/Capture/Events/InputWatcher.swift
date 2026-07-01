@@ -41,6 +41,8 @@ final class InputWatcher {
     private var burstCount = 0
     private var burstStartedAt: Date?
     private var lastKeyAt: Date?
+    /// 上一次按键的 keyCode —— 连续 Return 判定用(上一击也是 Return → 这次不拍)。
+    private var lastKeyCode: UInt16?
 
     init(
         emit: @escaping @Sendable (CaptureTrigger) -> Void,
@@ -91,12 +93,24 @@ final class InputWatcher {
     private func handle(_ event: NSEvent) {
         switch event.type {
         case .keyDown:
-            // ① Return / Enter 瞬间触发。
-            if Self.returnKeyCodes.contains(event.keyCode) {
+            let now = Date()
+            // 停手 >5s → 上一段结束:连续 Return 判定 + 持续打字计数都从头来。
+            if let last = lastKeyAt, now.timeIntervalSince(last) > Self.burstIdleResetSec {
+                resetBurst()
+            }
+            let prevKeyCode = lastKeyCode   // resetBurst 后为 nil
+            lastKeyAt = now
+            lastKeyCode = event.keyCode
+
+            // ① Return / Enter 瞬间触发 —— 但上一击键也是 Return 就跳过
+            //(防有人一直换行刷屏 / 卡 bug)。
+            let isReturn = Self.returnKeyCodes.contains(event.keyCode)
+            let prevWasReturn = prevKeyCode.map(Self.returnKeyCodes.contains) ?? false
+            if isReturn && !prevWasReturn {
                 emit(.typingPause)
             }
             // ② 所有按键(含 Return)都计入"持续打字爆发"。
-            countTypingBurst()
+            countTypingBurst(now)
 
         case .leftMouseDown:
             emit(.click)
@@ -115,15 +129,10 @@ final class InputWatcher {
         }
     }
 
-    /// 持续打字计数。停手 >5s → 这段作废从头数;10s 窗口内凑够 25 键 → 发
-    /// .typingBurst 并清零(下一段重新数)。
-    private func countTypingBurst() {
-        let now = Date()
-        // 停手超过 5s:上一段结束,从这一键重新开始。
-        if let last = lastKeyAt, now.timeIntervalSince(last) > Self.burstIdleResetSec {
-            resetBurst()
-        }
-        lastKeyAt = now
+    /// 持续打字计数(停手 >5s 的段落重置已在 handle 顶部做过)。10s 窗口内凑够
+    /// 25 键 → 发 .typingBurst 并清零(下一段重新数)。`now` 由 handle 传入,跟
+    /// 连续 Return 判定共用同一个时间戳。
+    private func countTypingBurst(_ now: Date) {
         if burstStartedAt == nil {
             burstStartedAt = now
             burstCount = 0
@@ -144,5 +153,6 @@ final class InputWatcher {
         burstCount = 0
         burstStartedAt = nil
         lastKeyAt = nil
+        lastKeyCode = nil
     }
 }
