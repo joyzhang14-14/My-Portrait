@@ -6,13 +6,16 @@ enum GraphConstants {
 
     // MARK: 连接线(橡皮筋:两端粗中间细)
 
-    /// 连接强度 → 端点半宽 系数
-    static let widthScale: Double = 0.35
-    /// 端点半宽下限 / 上限(世界单位 pt)
-    static let widthMin: Double = 0.8
-    static let widthMax: Double = 7.0
-    /// 腰部半宽 = 端点半宽均值 × 此比例
-    static let waistRatio: Double = 0.30
+    /// 端点半宽 = 所连球的半径(用户 2026-07-01 定稿:神经末端粗度=球半径),
+    /// 上限 15 —— 大球(主球 44/分区 30)不至于长出象腿。
+    static let edgeEndWidthMax: Double = 15
+    /// 腰部半宽 = 两端较细一侧 × 此比例(用户要求「中间细的地方更细一点」)
+    static let waistRatio: Double = 0.18
+
+    /// 球半径 → 端点半宽。
+    static func edgeEndWidth(ballRadius: Double) -> Double {
+        min(ballRadius, edgeEndWidthMax)
+    }
 
     // MARK: 球半径(世界单位)
 
@@ -44,9 +47,10 @@ enum GraphConstants {
 
     // MARK: 距离(弹簧自然长度,世界单位)
 
-    /// folder 等距环 / 分区等距环
-    static let folderRingDistance: Double = 300
-    static let categoryRingDistance: Double = 280
+    /// folder 等距环 / 分区等距环(2026-07-01 用户反馈:folder 环 300→100,
+    /// 分区环 280→140,两类 hub 都贴近主球)
+    static let folderRingDistance: Double = 100
+    static let categoryRingDistance: Double = 140
     /// last_occurred → 距离 的对数映射端点(event 画布)
     static let eventLeafDistanceNear: Double = 60
     static let eventLeafDistanceFar: Double = 200
@@ -55,6 +59,28 @@ enum GraphConstants {
     static let portraitLeafDistanceFar: Double = 140
     /// 时间窗:超过这么多天全部趴在 Far 外圈
     static let timeWindowDays: Double = 30
+
+    // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
+
+    /// 斥力强度(负=互斥)。「每个点分明」靠它:相邻球实时互相推开。
+    static let manyBodyStrength: Float = -30
+    /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
+    static let bhTheta2: Float = 0.81
+    /// 斥力最小距离²(防重叠点无穷大力)
+    static let bhDistanceMin2: Float = 1
+    /// 冷却:每 tick alpha += (target − alpha) × decay;< alphaMin 且 target=0 → 休眠
+    static let alphaDecay: Float = 0.0228
+    static let alphaMin: Float = 0.001
+    /// 速度阻尼(每 tick 乘;= 1 − d3 默认 velocityDecay 0.4)
+    static let velocityDamping: Float = 0.6
+    /// 向心力强度(把孤岛拉回原点方向)
+    static let centerStrength: Float = 0.05
+    /// 拖拽/交互 reheat 的 alphaTarget(d3 惯例 0.3)
+    static let dragAlphaTarget: Float = 0.3
+    /// 物理线程定步频率
+    static let physicsHz: Double = 120
+    /// 开场炸开:初始位置挤在中心这个半径内
+    static let explosionRadius: Float = 30
 
     // MARK: last_occurred → 距离 映射(两画布共用公式)
 
@@ -75,8 +101,4 @@ enum GraphConstants {
         return sq / sum + folderStrengthBase
     }
 
-    /// 连接强度 → 端点半宽
-    static func edgeWidth(strength: Double) -> Double {
-        min(max(strength * widthScale, widthMin), widthMax)
-    }
 }
