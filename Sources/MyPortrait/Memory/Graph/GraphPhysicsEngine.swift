@@ -24,8 +24,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var nodeRadius: [Float]
     private var edgesA: [Int32], edgesB: [Int32]
     private var linkStrength: [Float], linkBias: [Float], linkRest: [Float]
-    /// 180° 扇区约束对:leaf 必须待在 hub 背向主球的半圆(07-01 反馈)。
+    /// 扇区约束对:leaf 必须待在 hub 背向主球的楔形扇区里(07-01/02 反馈)。
+    /// cosLimit = cos(楔形半角),按 hub 叶数取档(30°~220°,装不下自动升档)。
     private var sectorLeaf: [Int32] = [], sectorHub: [Int32] = []
+    private var sectorCosLimit: [Float] = []
     /// 非主球 hub 的下标(folder/分区):互相硬碰撞不重合(07-01 反馈)。
     private var hubIndices: [Int32] = []
     /// 全部末端球下标 + 各自所属 hub(主球=0):扇区间排斥用(07-01 反馈)。
@@ -76,7 +78,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeRadius = scene.nodes.map { Float($0.radius) }
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
+        (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
         (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
 
@@ -161,7 +163,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
         nodeRadius = scene.nodes.map { Float($0.radius) }
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
+        (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
         (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
@@ -235,9 +237,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
     }
 
-    /// 180° 扇区软阻力(07-01 反馈):folder/分区的每个 leaf 应待在
-    /// 「hub 背向主球的半圆」里。越界(在朝主球一侧)时按越界深度施加
-    /// 沿外向的回正力 —— 是阻力不是硬墙,布局仍是有机的。
+    /// 楔形扇区软阻力(07-01/02 反馈):每个 leaf 应待在「hub 背向主球、
+    /// 全角按叶数取档(30°~220°)」的楔形里。角度越界时施加**角向**回正力
+    /// (朝外向轴转) —— 是阻力不是硬墙,布局仍是有机的。
     private func sectorPass() {
         guard !sectorLeaf.isEmpty else { return }
         // alpha 设下限:别的力冷却趋零后,扇区回正力仍温和存在 —— 否则
@@ -248,6 +250,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         vel.withUnsafeMutableBufferPointer { V in
         sectorLeaf.withUnsafeBufferPointer { L in
         sectorHub.withUnsafeBufferPointer { H in
+        sectorCosLimit.withUnsafeBufferPointer { COS in
             for i in 0..<L.count {
                 let hub = Int(H[i])
                 let hubPos = P[hub]
@@ -255,12 +258,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 guard d2 > 1 else { continue }          // hub 挤在原点,方向未定义
                 let outward = hubPos / d2.squareRoot()  // 主球(原点)→hub 的外向
                 let leaf = Int(L[i])
-                let proj = simd_dot(P[leaf] - hubPos, outward)
-                if proj < 0 {
-                    V[leaf] += outward * (-proj * strength * a)
+                let rel = P[leaf] - hubPos
+                let rlen = simd_length(rel)
+                guard rlen > 1e-4 else { continue }
+                let rhat = rel / rlen
+                let cosA = simd_dot(rhat, outward)
+                let lim = COS[i]
+                if cosA < lim {
+                    // 回正方向 = 外向轴在 rhat 垂面上的分量(角向转回楔形);
+                    // 正对背面(t≈0)时任选切向打破对称。
+                    var t = outward - rhat * cosA
+                    let tl = simd_length(t)
+                    t = tl > 1e-5 ? t / tl : SIMD2<Float>(-rhat.y, rhat.x)
+                    V[leaf] += t * ((lim - cosA) * rlen * strength * a)
                 }
             }
-        }}}}
+        }}}}}
     }
 
     // MARK: - Barnes-Hut 四叉树(P0 spike 验证:vs O(n²) 暴力误差中位 0.79%)
@@ -498,6 +511,26 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
+        // 末端球与 hub 硬碰撞(07-02 反馈:不许重叠,含自家 hub)。
+        // 叶×hub ≈ 万次量级,推叶不推 hub(hub 位置稳)。
+        if !leafIndices.isEmpty, !hubIndices.isEmpty {
+            let pad = GraphConstants.mainCollisionPadding
+            pos.withUnsafeMutableBufferPointer { P in
+                for li in 0..<leafIndices.count {
+                    let leaf = Int(leafIndices[li])
+                    for hi in 0..<hubIndices.count {
+                        let hub = Int(hubIndices[hi])
+                        let d = P[leaf] - P[hub]
+                        let dist = simd_length(d)
+                        let minD = nodeRadius[leaf] + nodeRadius[hub] + pad
+                        if dist < minD {
+                            let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                            P[leaf] = P[hub] + dir * minD
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - 静态助手
@@ -554,15 +587,23 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 叶 → 非主球 hub 的约束对(folder 的 event / 分区的 portrait 小球)。
-    /// 未分组 event 直连主球(b=0),没有扇区概念,不进这个表。
-    private static func sectorPairs(scene: GraphScene) -> ([Int32], [Int32]) {
-        var l: [Int32] = [], h: [Int32] = []
+    /// 直连主球的叶没有扇区概念,不进这个表。cosLimit = cos(该 hub 楔形半角),
+    /// 楔形全角按叶数取档(30°~220°,GraphConstants.sectorWedgeDegrees)。
+    private static func sectorPairs(scene: GraphScene) -> ([Int32], [Int32], [Float]) {
+        var countOf: [Int: Int] = [:]
+        for e in scene.edges
+        where e.b != 0 && scene.nodes[e.b].kind.isHub && !scene.nodes[e.a].kind.isHub {
+            countOf[e.b, default: 0] += 1
+        }
+        var l: [Int32] = [], h: [Int32] = [], cos: [Float] = []
         for e in scene.edges {
             if e.b != 0, scene.nodes[e.b].kind.isHub, !scene.nodes[e.a].kind.isHub {
                 l.append(Int32(e.a)); h.append(Int32(e.b))
+                let wedge = GraphConstants.sectorWedgeDegrees(leafCount: countOf[e.b] ?? 0)
+                cos.append(Float(Foundation.cos(wedge / 2 * .pi / 180)))
             }
         }
-        return (l, h)
+        return (l, h, cos)
     }
 
     /// 全部末端球 + 各自所属 hub(主球=0)。扇区间排斥用。

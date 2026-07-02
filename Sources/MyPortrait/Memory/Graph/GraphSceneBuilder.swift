@@ -45,8 +45,11 @@ enum GraphSceneBuilder {
     }
 
     private static func buildEvents(halfLifeDays: Double, userName: String) -> GraphScene {
+        // ⚠️ 必须排序:FileManager 枚举 / loadAll 的顺序不保证稳定,顺序一变
+        // 节点指纹就变 → 会话缓存永远 miss → 每次切换都重新炸开(07-02 bug)。
         let scanned = scanDir(Storage.eventsDir, halfLifeDays: halfLifeDays)
-        let folders = EventFolderStore.loadAll()
+            .sorted { $0.relPath < $1.relPath }
+        let folders = EventFolderStore.loadAll().sorted { $0.slug < $1.slug }
 
         // relPath → folder slug(一个 event 只归一个 folder;数据层保证不重叠)
         var folderOf: [String: String] = [:]
@@ -161,7 +164,9 @@ enum GraphSceneBuilder {
                                    springStrength: GraphConstants.hubSpringStrength))
 
             let dir = Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
-            for s in scanDir(dir, halfLifeDays: halfLifeDays) {
+            // 排序保证指纹稳定(同 buildEvents 的 07-02 缓存 bug 修复)。
+            for s in scanDir(dir, halfLifeDays: halfLifeDays)
+                .sorted(by: { $0.relPath < $1.relPath }) {
                 let idx = nodes.count
                 let capped = min(s.weight, GraphConstants.portraitStrengthMax)
                 let r = GraphConstants.portraitRadiusBase
