@@ -219,9 +219,10 @@ struct GraphCanvasView: View {
         let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
         dx /= len; dy /= len
         let nx = -dy, ny = dx
-        // 线宽锚定屏幕像素;上限 = 球的屏幕半径(缩远时线不比球粗)。
-        let wa = min(e.halfWidthA, scene.nodes[e.a].radius * zoom)
-        let wb = min(e.halfWidthB, scene.nodes[e.b].radius * zoom)
+        // 橡皮筋是实体,宽度随缩放走(世界单位×zoom,07-02 反馈:锚屏幕
+        // 像素的话缩得很小时连接处显得巨大);上限仍 = 球的屏幕半径。
+        let wa = min(e.halfWidthA, scene.nodes[e.a].radius) * zoom
+        let wb = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
         let wm = min(wa, wb) * GraphConstants.waistRatio
         let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
         var p = Path()
