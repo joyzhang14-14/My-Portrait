@@ -18,9 +18,10 @@ EVENTS_DIR = os.path.expanduser("~/.portrait/events")
 
 GAP_MS = 5 * 60 * 1000
 MIN_OCR_CHARS = 60
-# 2000(云端是 600):本地 token 免费,多读屏 —— Phase B 清洗 LLM 负责把
-# 2000 字原始 OCR 凝成 ~300 字 digest,信号密度反超云端。
-MAX_OCR_CHARS = 2000
+# 12000(原2000,云端是 600):质量线 7-02 实测 593/1200 条恰=2000 —— 截断自伤
+# (长对话正文保真仅 8%,且污染保真率基线测量)。本地 token 免费,放开到 12000
+# 基本等于不截,只兜病态长会话;下游消费者(digest LLM / OCR并集 / 锚点旁路)自行控量。
+MAX_OCR_CHARS = 12000
 FRAME_LIMIT = 5000          # 镜像生产 frames(on:limit:)
 
 
