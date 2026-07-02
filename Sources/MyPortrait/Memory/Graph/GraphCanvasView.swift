@@ -43,6 +43,9 @@ struct GraphCanvasView: View {
         /// 本段手势的起点(自愈用:手势被系统取消时 onEnded 不回调,
         /// 状态机会卡在上一段拖拽 —— 新手势起点变了即强制复位)。
         var startLoc: CGPoint? = nil
+        /// 被拖球是叶时 = 球径(>0 时目标位还要夹出全部 hub 球,07-02
+        /// 不重叠底线:指针不能把 event 球钉进任何 folder 球里)。
+        var leafBallR: Float = 0
     }
     @State private var dragWorldBox = DragWorldBox()
     @State private var lastMagnification: CGFloat = 1
@@ -356,6 +359,7 @@ struct GraphCanvasView: View {
                     dragMode = .idle
                     dragWorldBox.world = nil
                     dragWorldBox.minDist = 0
+                    dragWorldBox.leafBallR = 0
                     lastDragTranslation = .zero
                 }
                 if dragMode == .idle {
@@ -375,6 +379,7 @@ struct GraphCanvasView: View {
                         } else {
                             dragWorldBox.minDist = Float(GraphConstants.mainRadius + node.radius)
                                 + GraphConstants.mainCollisionPadding
+                            dragWorldBox.leafBallR = Float(node.radius)
                         }
                         engine.beginDrag(index: idx,
                                          at: camera.screenToWorld(v.location, viewSize: viewSize))
@@ -390,6 +395,21 @@ struct GraphCanvasView: View {
                     camera.pan(byScreen: delta)
                 case .node:
                     var w = camera.screenToWorld(v.location, viewSize: viewSize)
+                    // 叶拖拽:先夹出全部 folder/分区球(≤11 次距离检查/事件)
+                    let ballR = dragWorldBox.leafBallR
+                    if ballR > 0 {
+                        let snap = engine.readSnapshot()
+                        for h in hubNodes where h.id != 0 && h.id < snap.count {
+                            let c = snap[h.id]
+                            let minD = Float(h.radius) + ballR
+                                + GraphConstants.mainCollisionPadding
+                            let dv = w - c
+                            let dd = simd_length(dv)
+                            if dd < minD {
+                                w = dd > 1 ? c + dv / dd * minD : c + SIMD2<Float>(minD, 0)
+                            }
+                        }
+                    }
                     // 主球禁区:目标位按最小距离径向夹紧(见 DragWorldBox.minDist)
                     let m = dragWorldBox.minDist
                     let r = simd_length(w)
@@ -407,6 +427,7 @@ struct GraphCanvasView: View {
                 dragMode = .idle
                 dragWorldBox.world = nil
                 dragWorldBox.minDist = 0
+                dragWorldBox.leafBallR = 0
                 dragWorldBox.startLoc = nil
                 lastDragTranslation = .zero
             }

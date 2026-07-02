@@ -313,7 +313,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         linkPass()
         bubblePass()
         if heavy { familySpreadPass() }   // 匀布是慢整形力,拖拽中隔 tick 足够
-        if heavy { collidePass() }
+        // 碰撞每 tick 跑(07-02:不重叠是最基本要求)—— 轻 tick 复用上个
+        // tick 的树(位置只差一步,剪枝留了 pad 余量),省掉建树大头。
+        collidePass()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
         // 早停快照已删(07-02 终稿):布局没有"成品位",冷却到 alphaMin
@@ -329,6 +331,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         guard h > 0 else { return }
         let k = GraphConstants.bubbleCollideStrength
         let mainR = nodeRadius[0]
+        dragLock.lock()
+        let di = draggedIndex
+        dragLock.unlock()
         for ii in 0..<h {
             guard hubBubbleR[ii] > 0 else { continue }
             let i = Int(hubIndices[ii])
@@ -349,9 +354,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 let need = hubBubbleR[ii] + hubBubbleR[jj] + 2
                 if dist < need {
                     let push = (need - dist) / dist * k
-                    let wi = hubMass[jj] / (hubMass[ii] + hubMass[jj])
-                    vel[i] -= dv * (push * wi)
-                    vel[j] += dv * (push * (1 - wi))
+                    if i == di {
+                        vel[j] += dv * push
+                    } else if j == di {
+                        vel[i] -= dv * push
+                    } else {
+                        let wi = hubMass[jj] / (hubMass[ii] + hubMass[jj])
+                        vel[i] -= dv * (push * wi)
+                        vel[j] += dv * (push * (1 - wi))
+                    }
                 }
             }
         }
@@ -614,15 +625,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     for jj in (ii + 1)..<hubIndices.count {
                         guard hubBubbleR[jj] > 0 else { continue }
                         let i = Int(hubIndices[ii]), j = Int(hubIndices[jj])
-                        if i == di || j == di { continue }
                         let d = P[j] - P[i]
                         let dist = simd_length(d)
                         let minD = hubBubbleR[ii] + hubBubbleR[jj]
                         if dist < minD {
                             let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                            let push = (minD - dist) * 0.5
-                            P[i] -= dir * push
-                            P[j] += dir * push
+                            // 推土机(07-02 不重叠底线):被拖气泡不动,把对方
+                            // 全量推开 —— 圆永不相交,家隔离的叶才不会叠别家
+                            if i == di {
+                                P[j] += dir * (minD - dist)
+                            } else if j == di {
+                                P[i] -= dir * (minD - dist)
+                            } else {
+                                let push = (minD - dist) * 0.5
+                                P[i] -= dir * push
+                                P[j] += dir * push
+                            }
                         }
                     }
                 }
