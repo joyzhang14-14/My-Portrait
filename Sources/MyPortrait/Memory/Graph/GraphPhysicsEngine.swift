@@ -24,6 +24,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var nodeRadius: [Float]
     /// 分角色斥力电荷(主球/hub/叶不同强度,07-02 半边圆确诊)。
     private var nodeCharge: [Float]
+    /// 家籍(叶=自家 hub 节点下标;主球/hub=-1):07-02 用户定稿"正常时
+    /// 只受自家 folder 球和兄弟球影响,排除外部影响"—— 碰撞力按家隔离。
+    private var nodeFamily: [Int32]
     /// 向心力开关(1=hub,0=叶/主球):向心是"每节点→原点"的弹簧,对叶
     /// 施加会把整家压成朝主球的半月(07-02 半边圆的另一半根因)——
     /// 叶由自家 hub 弹簧锚定,不需要全局向心。
@@ -105,6 +108,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeRadius = scene.nodes.map { Float($0.radius) }
         nodeCharge = Self.chargeArray(scene: scene)
         nodeCenterScale = Self.centerScaleArray(scene: scene)
+        nodeFamily = Self.familyIdArray(scene: scene)
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
@@ -224,6 +228,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeRadius = scene.nodes.map { Float($0.radius) }
         nodeCharge = Self.chargeArray(scene: scene)
         nodeCenterScale = Self.centerScaleArray(scene: scene)
+        nodeFamily = Self.familyIdArray(scene: scene)
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
@@ -457,6 +462,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }}}}}}}
     }
 
+    /// ⚠️ 只有 hub 接收斥力(07-02 用户定稿:"小球不应受主球和其他
+    /// folder 球引力影响,这是关键点")—— 叶子的一切定位来自自家系统
+    ///(径向弹簧/家内碰撞/家内匀布/圈内夹钳),隔空电荷只会把整团云
+    /// 拽偏(F1/F2 质心偏移 23~27% 的最后来源)。接收方 962→~11,
+    /// 顺带物理大幅降载。叶子仍作为电荷源参与树(推开 hub 无妨)。
     private func manyBodyPass() {
         let a = alpha
         let theta2 = GraphConstants.bhTheta2
@@ -471,7 +481,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         qWidth.withUnsafeBufferPointer { W in
         nextPoint.withUnsafeBufferPointer { NP in
         stack.withUnsafeMutableBufferPointer { S in
-            for i in 0..<n {
+            for hi in 0..<hubIndices.count {
+                let i = Int(hubIndices[hi])
                 let p = P[i]
                 var f = SIMD2<Float>.zero
                 var sp = 0
@@ -577,8 +588,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
         // 气泡硬解算(07-02 气泡重构,取代等距钉/角向解算):圆与主球、
         // 圆与圆绝不重叠 —— bubblePass 的速度推开是柔化,这里一锤定音。
+        // 3 轮:三圆相切时单轮有 ~4pt 残余(跨家叶碰撞垫子删除后暴露)。
         // 被拖 hub 豁免圆-圆(指针优先),但仍被推出主球。
         if !hubIndices.isEmpty {
+            for _ in 0..<3 {
             pos.withUnsafeMutableBufferPointer { P in
                 let mainR = nodeRadius[0]
                 for ii in 0..<hubIndices.count {
@@ -609,23 +622,23 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     }
                 }
             }
+            }
         }
-        // 末端球与 hub 硬碰撞(07-02 反馈:不许重叠,含自家 hub)。
-        // 叶×hub ≈ 万次量级,推叶不推 hub(hub 位置稳)。
-        if !leafIndices.isEmpty, !hubIndices.isEmpty {
+        // 末端球与**自家** hub 硬碰撞(07-02 定稿:排除外部影响 —— 外家
+        // hub 由气泡隔离保证够不着,不再对叶施加任何力)。推叶不推 hub。
+        if !leafIndices.isEmpty {
             let pad = GraphConstants.mainCollisionPadding
             pos.withUnsafeMutableBufferPointer { P in
                 for li in 0..<leafIndices.count {
                     let leaf = Int(leafIndices[li])
-                    for hi in 0..<hubIndices.count {
-                        let hub = Int(hubIndices[hi])
-                        let d = P[leaf] - P[hub]
-                        let dist = simd_length(d)
-                        let minD = nodeRadius[leaf] + nodeRadius[hub] + pad
-                        if dist < minD {
-                            let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                            P[leaf] = P[hub] + dir * minD
-                        }
+                    let hub = Int(leafOwnHub[li])
+                    guard hub > 0 else { continue }
+                    let d = P[leaf] - P[hub]
+                    let dist = simd_length(d)
+                    let minD = nodeRadius[leaf] + nodeRadius[hub] + pad
+                    if dist < minD {
+                        let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                        P[leaf] = P[hub] + dir * minD
                     }
                 }
             }
@@ -682,7 +695,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 目标角)。全家适用,排序 O(Σk log k) ≈ 千级,忽略不计。
     private func familySpreadPass() {
         guard !familyRange.isEmpty else { return }
-        let a = max(alpha, 0.1)
+        // 不乘 alpha(07-02 拖后偏斜确诊):它本质是角向空间的碰撞力,
+        // 冷却尾声若被 alpha 压小,全力的 forceCollide 会把挤住的球
+        // "堵"在原地,拖拽扰动后的偏斜被冻结(实测质心偏移 27~37%)。
+        let a: Float = 1
         let k = GraphConstants.familySpreadStrength
         for fam in familyRange {
             let count = fam.hi - fam.lo
@@ -748,6 +764,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             pos.withUnsafeBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
             nodeRadius.withUnsafeBufferPointer { R in
+            nodeFamily.withUnsafeBufferPointer { FAM in
             qChild.withUnsafeBufferPointer { ch in
             qMaxR.withUnsafeBufferPointer { MR in
             nextPoint.withUnsafeBufferPointer { NP in
@@ -756,6 +773,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             cStackCY.withUnsafeMutableBufferPointer { SY in
             cStackHalf.withUnsafeMutableBufferPointer { SH in
                 for i in 0..<n {
+                    let fi = FAM[i]
+                    guard fi >= 0 else { continue }   // 只有叶参与(hub 归气泡/硬约束管)
                     let pi = P[i] + V[i]           // 预测位置(d3 语义)
                     let ri = R[i] + pad
                     let ri2 = ri * ri
@@ -781,7 +800,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             } else {
                                 var pj = Int(-c - 2)
                                 while pj >= 0 {
-                                    if pj > i {    // 每对只解算一次
+                                    // 每对一次 + 同家隔离(07-02:排除外部影响)
+                                    if pj > i, FAM[pj] == fi {
                                         let rj = R[pj] + pad
                                         let rsum = ri + rj
                                         var d = pi - (P[pj] + V[pj])
@@ -804,7 +824,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         }
                     }
                 }
-            }}}}}}}}}}
+            }}}}}}}}}}}
         }
     }
 
@@ -819,6 +839,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             case .eventLeaf, .portraitLeaf: return GraphConstants.leafBodyStrength
             }
         }
+    }
+
+    /// 家籍数组:叶 = 自家 hub 下标,主球/hub = -1(跨家碰撞隔离用)。
+    private static func familyIdArray(scene: GraphScene) -> [Int32] {
+        scene.nodes.map { $0.kind.isHub ? -1 : Int32(max($0.hubIndex, 0)) }
     }
 
     /// 向心力开关:只有 hub 受向心(把孤岛气泡拉回主球方向);叶=0
