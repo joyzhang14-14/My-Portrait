@@ -43,8 +43,8 @@ enum GraphConstants {
     // MARK: 球半径(世界单位)
 
     static let mainRadius: Double = 44
-    /// 分区球(portrait 画布,统一大小;07-01 反馈再减 10%:30→27)
-    static let categoryRadius: Double = 27
+    /// 分区球(portrait 画布,统一大小;07-02 反馈再缩:27→22)
+    static let categoryRadius: Double = 22
     /// folder 球 = f0 + kf·√count,clamp 到 [f0, folderRadiusMax]
     static let folderRadiusBase: Double = 14
     static let folderRadiusScale: Double = 1.4
@@ -70,11 +70,13 @@ enum GraphConstants {
 
     // MARK: 距离(弹簧自然长度,世界单位)
 
-    /// folder 等距环 / 分区等距环。folder 环 07-02 再缩至 25(用户:1/4)——
-    /// 远小于碰撞下限(主球44+folder36+4≈84),实际距离由硬碰撞决定,
-    /// 效果 = folder 紧贴主球表面。
-    static let folderRingDistance: Double = 25
-    static let categoryRingDistance: Double = 140
+    /// 完美圆算法(07-02 定稿,取代固定等距环):hub 距主球 =
+    /// outerRadius − 该 hub 最远叶的弹簧长 → 所有 fan 外缘落在同一大圆,
+    /// 末端球形成完美外圆。floor 到主球碰撞下限。
+    static let eventOuterRadius: Double = 320
+    static let portraitOuterRadius: Double = 300
+    /// hub 角度弹簧刚度:把 hub 拉向按份额分配的目标极角
+    static let hubAngleStrength: Float = 0.3
     /// last_occurred → 距离 的对数映射端点(event 画布)
     static let eventLeafDistanceNear: Double = 60
     static let eventLeafDistanceFar: Double = 200
