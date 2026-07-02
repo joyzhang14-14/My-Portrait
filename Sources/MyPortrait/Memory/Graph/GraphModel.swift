@@ -40,6 +40,9 @@ struct GraphNode: Identifiable, Sendable {
     /// 仅非主球 hub 有值;由 builder 按叶数份额分配,物理用角度弹簧拉过去。
     var hubTargetAngle: Double? = nil
     var hubWedgeDegrees: Double? = nil
+    /// 无缝圆填充(07-02 定稿):叶子的精确目标落位(逐环装填算法算出,
+    /// 物理用位置弹簧拉过去 —— 球不重叠、扇区无缝、外缘成圆)。
+    var targetPosition: SIMD2<Float>? = nil
 
     var color: Color {
         Color(red: colorRGB.x, green: colorRGB.y, blue: colorRGB.z)

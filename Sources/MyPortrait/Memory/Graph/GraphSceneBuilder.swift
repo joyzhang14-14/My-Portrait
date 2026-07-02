@@ -42,23 +42,13 @@ enum GraphSceneBuilder {
 
     // MARK: - 楔形份额分配
 
-    /// 按 count 占比分 360°,floor(30° 或 hub 太多时 360/n)/cap 220°,
-    /// 水填法把与 360 的差摊给未触界者。确定性、Σ≈360。
+    /// 纯按叶数占比分 360°(07-02 定稿:档位/保底/封顶全部删除 ——
+    /// 它们让份额和内容脱节,扇区间出缝隙,拼不成完整的圆)。
+    /// 空 folder 占 0°(hub 球本身仍由碰撞保证物理空间)。Σ=360。
     static func allocateWedges(counts: [Int]) -> [Double] {
         guard !counts.isEmpty else { return [] }
         let total = max(counts.reduce(0, +), 1)
-        let lo = min(14.0, 360.0 / Double(counts.count))   // 保底降 14°:纯连续份额,不做档位
-        let hi = 220.0
-        var deg = counts.map { min(max(Double($0) / Double(total) * 360, lo), hi) }
-        for _ in 0..<8 {
-            let diff = 360 - deg.reduce(0, +)
-            if abs(diff) < 0.5 { break }
-            let adjustable = deg.indices.filter { diff > 0 ? deg[$0] < hi : deg[$0] > lo }
-            guard !adjustable.isEmpty else { break }
-            let share = diff / Double(adjustable.count)
-            for i in adjustable { deg[i] = min(max(deg[i] + share, lo), hi) }
-        }
-        return deg
+        return counts.map { Double($0) / Double(total) * 360 }
     }
 
     // MARK: - Event 画布
@@ -214,9 +204,6 @@ enum GraphSceneBuilder {
             let dist = max(hubDistance,
                            GraphConstants.mainRadius + r
                                + Double(GraphConstants.mainCollisionPadding) + 2)
-            let span = outerRadius - dist
-            let maxRest = spec.members.map(leafRest).max() ?? span
-            let restScale = maxRest > 0 ? span / maxRest : 1
 
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
@@ -232,15 +219,43 @@ enum GraphSceneBuilder {
                                        ballRadius: GraphConstants.mainRadius),
                                    springStrength: GraphConstants.hubSpringStrength))
 
-            for m in spec.members {
+            // 无缝圆逐环装填(07-02 定稿):从外圆向内一环环 greedy 排位,
+            // 球不重叠、相邻扇区相接。旧 event 排外环、新排内环(保留时近语义)。
+            let centerRad = centerDeg * .pi / 180
+            let wedgeRad = wedge * .pi / 180
+            let hubPos = SIMD2<Double>(cos(centerRad) * dist, sin(centerRad) * dist)
+            var ringR = outerRadius
+            var cursor = centerRad - wedgeRad / 2
+            let endA = centerRad + wedgeRad / 2
+            let avgR = spec.members.isEmpty ? 6.0
+                : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)
+            let ringStep = avgR * 2 + GraphConstants.packRingGap
+            let minRingR = GraphConstants.mainRadius + 30
+            let ordered = spec.members.sorted { $0.daysAgo > $1.daysAgo }
+            for m in ordered {
                 let idx = nodes.count
                 let lr = leafRadius(m)
-                nodes.append(GraphNode(id: idx, kind: leafKind(m), title: m.title,
-                                       radius: lr, colorRGB: leafColor(spec, m),
-                                       fileURL: m.url, hubIndex: hubIdx))
+                let slotRad = (lr * 2 + GraphConstants.packSlotGap) / ringR
+                if cursor + slotRad > endA {
+                    // 本环装满 → 收进一环(楔形窄到一环一球时,球落楔形中线)
+                    if ringR - ringStep > minRingR { ringR -= ringStep }
+                    cursor = centerRad - wedgeRad / 2
+                }
+                let a = min(cursor + slotRad / 2, endA)
+                cursor += slotRad
+                let target = SIMD2<Double>(cos(a) * ringR, sin(a) * ringR)
+                var leafNode = GraphNode(id: idx, kind: leafKind(m), title: m.title,
+                                         radius: lr, colorRGB: leafColor(spec, m),
+                                         fileURL: m.url, hubIndex: hubIdx)
+                leafNode.targetPosition = SIMD2<Float>(Float(target.x), Float(target.y))
+                nodes.append(leafNode)
+                // rest = 目标位到 hub 目标位的几何距离(弹簧与落位一致,
+                // 叶距夹钳 rest×1.2 也随之成立)
+                let rest = ((target.x - hubPos.x) * (target.x - hubPos.x)
+                    + (target.y - hubPos.y) * (target.y - hubPos.y)).squareRoot()
                 edges.append(GraphEdge(a: idx, b: hubIdx,
                                        strength: leafStrength(m),
-                                       restLength: leafRest(m) * restScale,
+                                       restLength: max(rest, 20),
                                        halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }
