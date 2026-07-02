@@ -269,7 +269,7 @@ struct GraphRootView: View {
             // 数据没变:复用引擎,刷边参数后**重放展开动画**(07-02 用户
             // 定稿:每次打开都要展开效果;确定性物理 → 每次收敛到同一布局)
             cached.engine.updateScene(built)
-            cached.engine.explode()
+            cached.engine.explode(seed: UInt64.random(in: .min ... .max))
             GraphSession.shared.entries[z]?.scene = built
             scene = built
             if engine !== cached.engine {
@@ -280,7 +280,8 @@ struct GraphRootView: View {
         } else {
             // 数据变了 / 首次:新引擎,开场炸开(init 即高温挤中心态)
             GraphSession.shared.entries[z]?.engine.shutdown()
-            let fresh = GraphPhysicsEngine(scene: built)
+            let fresh = GraphPhysicsEngine(scene: built,
+                                           seed: UInt64.random(in: .min ... .max))
             GraphSession.shared.entries[z] = .init(scene: built, engine: fresh,
                                                    fingerprint: fp, camera: GraphCamera())
             scene = built

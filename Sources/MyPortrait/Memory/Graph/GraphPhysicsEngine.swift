@@ -54,6 +54,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var alphaTarget: Float = 0
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
     private var tickCount: UInt64 = 0
+    /// 叶子出生角的整体相位(随种子变,07-02:随机种子每次开花不同)。
+    private var seedPhase: Float = 0
     /// 拖拽钉住:index → 目标位置(每次 drag move 更新;d3 的 fx/fy 语义)。
     /// 主球恒钉原点,不进这个表(单独处理)。
     /// ⚠️ 由 dragLock(不是 simLock)保护:drag(to:) 在 120Hz 指针事件里跑,
@@ -104,6 +106,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         n = scene.nodes.count
         var rng = SplitMix64(seed: seed)
         pos = Self.explosionPositions(n: n, rng: &rng)
+        seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
         nodeRadius = scene.nodes.map { Float($0.radius) }
         nodeCharge = Self.chargeArray(scene: scene)
@@ -189,6 +192,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         simLock.lock()
         var rng = SplitMix64(seed: seed)
         pos = Self.explosionPositions(n: n, rng: &rng)
+        seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
         alpha = 1
@@ -211,8 +215,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             counter[hub] = j + 1
             let leaf = Int(leafIndices[li])
             let hubIdx = Int(hub)
-            // 家族错相:不同家的 0 号叶别都朝同一方向
-            let a = golden * Float(j) + Float(hubIdx) * 0.7
+            // 家族错相 + 种子相位(随机种子 → 每次开花方位不同)
+            let a = golden * Float(j) + Float(hubIdx) * 0.7 + seedPhase
             // 0.1×圈半径出生(07-02:展开效果再强烈一点)—— 贴着 hub 喷出
             let maxD = leafMaxDist[li]
             let r = maxD > 0 ? max(maxD * 0.1, nodeRadius[hubIdx] + 3)
