@@ -40,6 +40,9 @@ struct GraphCanvasView: View {
         /// 07-02 交互修:物理会把闯进来的球顶回去而渲染钉指针,两边打架
         /// 显示成"球在主球里、叶和线在外面";指针目标先夹出禁区,两边一致。
         var minDist: Float = 0
+        /// 本段手势的起点(自愈用:手势被系统取消时 onEnded 不回调,
+        /// 状态机会卡在上一段拖拽 —— 新手势起点变了即强制复位)。
+        var startLoc: CGPoint? = nil
     }
     @State private var dragWorldBox = DragWorldBox()
     @State private var lastMagnification: CGFloat = 1
@@ -346,7 +349,17 @@ struct GraphCanvasView: View {
     private func dragGesture(viewSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { v in
+                // 自愈(07-02:没停稳时再拖另一颗会卡):上一段手势被取消时
+                // onEnded 不来,dragMode 卡在旧球;起点变了 = 新手势,强制收尾。
+                if dragMode != .idle, dragWorldBox.startLoc != v.startLocation {
+                    if case .node = dragMode { engine.endDrag() }
+                    dragMode = .idle
+                    dragWorldBox.world = nil
+                    dragWorldBox.minDist = 0
+                    lastDragTranslation = .zero
+                }
                 if dragMode == .idle {
+                    dragWorldBox.startLoc = v.startLocation
                     // 起点定模式:球(非主球)= 拖球;空白/主球 = 平移。
                     // 主球钉死原点(大脑不动),拖它等于拖整个世界 → 归平移。
                     if let idx = hitTest(screen: v.startLocation, viewSize: viewSize), idx > 0 {
@@ -394,6 +407,7 @@ struct GraphCanvasView: View {
                 dragMode = .idle
                 dragWorldBox.world = nil
                 dragWorldBox.minDist = 0
+                dragWorldBox.startLoc = nil
                 lastDragTranslation = .zero
             }
     }
