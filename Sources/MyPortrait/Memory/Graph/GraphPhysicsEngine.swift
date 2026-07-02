@@ -63,6 +63,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 锁序纪律:dragLock 与 simLock 绝不嵌套,顺序获取。
     private var draggedIndex: Int? = nil
     private var draggedTo: SIMD2<Float> = .zero
+    /// 被拖球上一 tick 的钉位(扫掠清障用,防高速隧穿)+ 邻域缓冲。
+    private var dragPrevPos: SIMD2<Float>? = nil
+    private var dragNbr: [Int32] = []
     /// 挂号的 alphaTarget(dragLock 保护):beginDrag/endDrag 不再抢
     /// simLock —— 收敛中 tick 握锁 20~40ms(Debug),主线程"抓球那一下"
     /// 会顿一拍(07-02 实测);physics 线程下个循环自取自用。
@@ -698,25 +701,56 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
-        // 拖拽硬清障(07-02:拖太快仍重叠 —— 速度域阻力每 tick 只解一份
-        // 深度,指针一 tick 压进几十 pt 追不上;且被拖球速度被钉清零,
-        // 碰撞给它的份额白给):被拖球周边**位置级**全量推开,拖多快都
-        // 不叠。O(n) 距离检查/tick,忽略不计。
+        // 拖拽硬清障 v2(07-02:速度再快也不叠):
+        //   ① 扫掠胶囊 —— 沿「上 tick 钉位 → 本 tick 钉位」线段全程清障,
+        //     高速时一 tick 跳几十 pt,点清障会隧穿跳过中间的球;
+        //   ② 邻域堆积松解 —— 被推出的球压进旁边球里,速度域阻力追不上,
+        //     对胶囊邻域做 2 轮位置级两两推开,当场解干净。
+        // O(n) 扫 + 邻域 k²(k≈几十~百),忽略不计。
         if let di, di > 0, di < n {
             let pd = pos[di]
             let rd = nodeRadius[di]
             let pad = GraphConstants.collidePadding
+            let prev = dragPrevPos ?? pd
+            let seg = pd - prev
+            let segLen2 = simd_length_squared(seg)
+            dragNbr.removeAll(keepingCapacity: true)
             pos.withUnsafeMutableBufferPointer { P in
                 for j in 1..<n where j != di {
-                    let d = P[j] - pd
+                    var t: Float = 0
+                    if segLen2 > 1e-8 {
+                        t = max(0, min(1, simd_dot(P[j] - prev, seg) / segLen2))
+                    }
+                    let c = prev + seg * t
+                    let d = P[j] - c
                     let dist = simd_length(d)
                     let minD = rd + nodeRadius[j] + pad
                     if dist < minD {
                         let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                        P[j] = pd + dir * minD
+                        P[j] = c + dir * minD
+                    }
+                    if dist < minD + 24 { dragNbr.append(Int32(j)) }
+                }
+                for _ in 0..<2 {
+                    for a in 0..<max(dragNbr.count, 1) - 1 {
+                        for b in (a + 1)..<dragNbr.count {
+                            let i = Int(dragNbr[a]), j = Int(dragNbr[b])
+                            let d = P[j] - P[i]
+                            let dist = simd_length(d)
+                            let minD = nodeRadius[i] + nodeRadius[j] + pad
+                            if dist < minD {
+                                let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                                let push = (minD - dist) * 0.5
+                                P[i] -= dir * push
+                                P[j] += dir * push
+                            }
+                        }
                     }
                 }
             }
+            dragPrevPos = pd
+        } else {
+            dragPrevPos = nil
         }
     }
 
