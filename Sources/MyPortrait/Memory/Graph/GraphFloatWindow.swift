@@ -17,9 +17,11 @@ struct GraphFloatWindow: View {
 
     @State private var file: PortraitFile? = nil
     @State private var currentWeight: Double = 0
-    @State private var prose: String = ""
+    /// markdown 段落在 load() 里解析一次存好 —— 浮窗跟球走时 body 每帧
+    /// 重算,绝不能在 body 里逐帧重新解析 AttributedString。
+    @State private var proseBlocks: [AttributedString] = []
     /// personality 概念 `## events` 之后的小节(照旧渲染,非 chip)。
-    @State private var afterProse: String = ""
+    @State private var afterBlocks: [AttributedString] = []
     @State private var derivedRefs: [MemoriesView.DerivedRef] = []
     @State private var wrIds: [Int64] = []
     @State private var closeTask: Task<Void, Never>? = nil
@@ -45,7 +47,7 @@ struct GraphFloatWindow: View {
                 Divider().background(Color.primary.opacity(0.1))
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        markdown(prose)
+                        blocks(proseBlocks)
                         if !derivedRefs.isEmpty {
                             Divider().background(Color.primary.opacity(0.1))
                             derivedChips
@@ -54,9 +56,9 @@ struct GraphFloatWindow: View {
                             Divider().background(Color.primary.opacity(0.1))
                             wrChips
                         }
-                        if !afterProse.isEmpty {
+                        if !afterBlocks.isEmpty {
                             Divider().background(Color.primary.opacity(0.1))
-                            markdown(afterProse)
+                            blocks(afterBlocks)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,18 +117,11 @@ struct GraphFloatWindow: View {
         }
     }
 
-    // MARK: - markdown(逐段 AttributedString,同 text 模式口径)
+    // MARK: - markdown(load() 时解析好的段落,body 只渲染)
 
     @ViewBuilder
-    private func markdown(_ raw: String) -> some View {
-        let paragraphs = raw
-            .split(separator: "\n\n", omittingEmptySubsequences: true)
-            .map(String.init)
-        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
-            let attr = (try? AttributedString(
-                markdown: para,
-                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-            )) ?? AttributedString(para)
+    private func blocks(_ parsed: [AttributedString]) -> some View {
+        ForEach(Array(parsed.enumerated()), id: \.offset) { _, attr in
             Text(attr)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textPrimary.opacity(0.92))
@@ -134,6 +129,18 @@ struct GraphFloatWindow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// 逐段解析(同 text 模式口径:按空行分段,inline-only)。后台执行。
+    nonisolated private static func parseBlocks(_ raw: String) -> [AttributedString] {
+        raw.split(separator: "\n\n", omittingEmptySubsequences: true)
+            .map(String.init)
+            .map { para in
+                (try? AttributedString(
+                    markdown: para,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                )) ?? AttributedString(para)
+            }
     }
 
     // MARK: - 来源 chips
@@ -214,21 +221,23 @@ struct GraphFloatWindow: View {
         guard let url = node.fileURL else { return }
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let loaded = await Task.detached(priority: .userInitiated) {
-            () -> (PortraitFile, Double, String, String, [MemoriesView.DerivedRef], [Int64])? in
+            () -> (PortraitFile, Double, [AttributedString], [AttributedString],
+                   [MemoriesView.DerivedRef], [Int64])? in
             guard let f = try? PortraitFileIO.read(from: url) else { return nil }
             let w = WeightEMA(halfLifeDays: halfLife)
                 .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified())
             // writing_style 记录来源 → wr chips;其它 → event chips(同 text 模式)。
             let wr = MemoriesView.splitWritingRecords(f.body)
             if !wr.wrIds.isEmpty {
-                return (f, w, wr.before, "", [], wr.wrIds)
+                return (f, w, Self.parseBlocks(wr.before), [], [], wr.wrIds)
             }
             let parsed = MemoriesView.splitDerivedSections(f.body)
             let refs = parsed.eventRels.map { MemoriesView.resolveDerivedRef($0) }
-            return (f, w, parsed.before, parsed.after, refs, [])
+            return (f, w, Self.parseBlocks(parsed.before),
+                    Self.parseBlocks(parsed.after), refs, [])
         }.value
         guard let loaded, node.fileURL == url else { return }
-        (file, currentWeight, prose, afterProse, derivedRefs, wrIds) =
+        (file, currentWeight, proseBlocks, afterBlocks, derivedRefs, wrIds) =
             (loaded.0, loaded.1, loaded.2, loaded.3, loaded.4, loaded.5)
     }
 }
