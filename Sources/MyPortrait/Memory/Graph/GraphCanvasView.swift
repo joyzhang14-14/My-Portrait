@@ -187,41 +187,52 @@ struct GraphCanvasView: View {
                 let pa = camera.worldToScreen(snap[e.a], viewSize: size)
                 let pb = camera.worldToScreen(snap[e.b], viewSize: size)
                 if culled(pa, pb, size) { continue }
-                linePath.move(to: pa)
-                linePath.addLine(to: pb)
+                // hub↔主球 = 橡皮筋(07-02 用户点名恢复,仅这 ≤11 条;
+                // 当年卡顿是 960 条全锥形+离屏层,几条无感);叶边保持细线
+                if e.b == 0, scene.nodes[e.a].kind.isHub {
+                    drawTaperedEdge(ctx, e: e, pa: pa, pb: pb)
+                } else {
+                    linePath.move(to: pa)
+                    linePath.addLine(to: pb)
+                }
             }
             // 线宽锚定屏幕像素,拉近拉远等粗(Obsidian 式)。
             ctx.stroke(linePath, with: .color(.gray.opacity(0.45)),
                        lineWidth: GraphConstants.lineEdgeWidth)
 
         case .taperedFill:
-            // 锥形橡皮筋(两端粗中间细),保留可切回(GraphConstants.edgeStyle)。
-            let edgeShading = GraphicsContext.Shading.color(.gray.opacity(0.45))
-            let zoom = camera.zoom
+            // 全锥形模式(保留可切回:GraphConstants.edgeStyle)。
             for e in scene.edges {
                 let pa = camera.worldToScreen(snap[e.a], viewSize: size)
                 let pb = camera.worldToScreen(snap[e.b], viewSize: size)
                 if culled(pa, pb, size) { continue }
-                var dx = pb.x - pa.x, dy = pb.y - pa.y
-                let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
-                dx /= len; dy /= len
-                let nx = -dy, ny = dx
-                // 线宽锚定屏幕像素;上限 = 球的屏幕半径(缩远时线不比球粗)。
-                let wa = min(e.halfWidthA, scene.nodes[e.a].radius * zoom)
-                let wb = min(e.halfWidthB, scene.nodes[e.b].radius * zoom)
-                let wm = min(wa, wb) * GraphConstants.waistRatio
-                let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
-                var p = Path()
-                p.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
-                p.addQuadCurve(to: CGPoint(x: pb.x + nx * wb, y: pb.y + ny * wb),
-                               control: CGPoint(x: mx + nx * wm, y: my + ny * wm))
-                p.addLine(to: CGPoint(x: pb.x - nx * wb, y: pb.y - ny * wb))
-                p.addQuadCurve(to: CGPoint(x: pa.x - nx * wa, y: pa.y - ny * wa),
-                               control: CGPoint(x: mx - nx * wm, y: my - ny * wm))
-                p.closeSubpath()
-                ctx.fill(p, with: edgeShading)
+                drawTaperedEdge(ctx, e: e, pa: pa, pb: pb)
             }
         }
+    }
+
+    /// 锥形橡皮筋(两端粗中间细,二次贝塞尔腰身)。
+    private func drawTaperedEdge(_ ctx: GraphicsContext, e: GraphEdge,
+                                 pa: CGPoint, pb: CGPoint) {
+        let zoom = camera.zoom
+        var dx = pb.x - pa.x, dy = pb.y - pa.y
+        let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
+        dx /= len; dy /= len
+        let nx = -dy, ny = dx
+        // 线宽锚定屏幕像素;上限 = 球的屏幕半径(缩远时线不比球粗)。
+        let wa = min(e.halfWidthA, scene.nodes[e.a].radius * zoom)
+        let wb = min(e.halfWidthB, scene.nodes[e.b].radius * zoom)
+        let wm = min(wa, wb) * GraphConstants.waistRatio
+        let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
+        var p = Path()
+        p.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
+        p.addQuadCurve(to: CGPoint(x: pb.x + nx * wb, y: pb.y + ny * wb),
+                       control: CGPoint(x: mx + nx * wm, y: my + ny * wm))
+        p.addLine(to: CGPoint(x: pb.x - nx * wb, y: pb.y - ny * wb))
+        p.addQuadCurve(to: CGPoint(x: pa.x - nx * wa, y: pa.y - ny * wa),
+                       control: CGPoint(x: mx - nx * wm, y: my - ny * wm))
+        p.closeSubpath()
+        ctx.fill(p, with: .color(.gray.opacity(0.45)))
     }
 
     private func culled(_ pa: CGPoint, _ pb: CGPoint, _ size: CGSize) -> Bool {
