@@ -15,6 +15,7 @@ struct TimelineSidebar: View {
     @Binding var selection: SidebarSection?
     let chat: ChatController
     @Binding var memoryScope: MemoryScope
+    @Binding var memoryViewMode: MemoryViewMode
     @Binding var cronJobSelection: UUID?
     @Binding var settingsSubsection: SettingsSubsection?
 
@@ -76,6 +77,10 @@ struct TimelineSidebar: View {
                         cronJobHistorySection
                         recentsSection
                     } else if selection == .memories {
+                        // text/canvas 模式切换钮:独立小卡,放 scope 卡上方(需求 §3.1)
+                        sectionCard {
+                            MemoryViewModeToggle(mode: $memoryViewMode)
+                        }
                         memoryScopeSection
                     } else if selection == .settings {
                         settingsListSection
@@ -408,6 +413,9 @@ struct TimelineSidebar: View {
         let isOn = memoryScope == s
         return Button {
             memoryScope = s
+            // canvas 模式下点 Personal Info / Input(无图谱形态)→ 自动回 text
+            //(需求 §3.2)。
+            if !MemoryViewMode.supportsCanvas(s) { memoryViewMode = .text }
         } label: {
             HStack(spacing: Theme.Space.sm) {
                 Image(systemName: s.systemImage)
