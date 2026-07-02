@@ -34,7 +34,13 @@ struct GraphCanvasView: View {
     /// 120Hz 指针事件逐个写 @State 会在 TimelineView 60fps 之外再触发
     /// 全画布重绘+视图 diff —— 拖球卡而平移不卡的真凶(07-02 实测)。
     /// class 挂在 @State 上只保身份,改字段不惊动 SwiftUI,渲染每帧读。
-    private final class DragWorldBox { var world: SIMD2<Float>? }
+    private final class DragWorldBox {
+        var world: SIMD2<Float>?
+        /// 被拖球对主球的禁区半径(hub=主球+隐形圆+净空;叶=主球+球径+pad)。
+        /// 07-02 交互修:物理会把闯进来的球顶回去而渲染钉指针,两边打架
+        /// 显示成"球在主球里、叶和线在外面";指针目标先夹出禁区,两边一致。
+        var minDist: Float = 0
+    }
     @State private var dragWorldBox = DragWorldBox()
     @State private var lastMagnification: CGFloat = 1
 
@@ -345,6 +351,18 @@ struct GraphCanvasView: View {
                     // 主球钉死原点(大脑不动),拖它等于拖整个世界 → 归平移。
                     if let idx = hitTest(screen: v.startLocation, viewSize: viewSize), idx > 0 {
                         dragMode = .node(idx)
+                        let node = scene.nodes[idx]
+                        if let br = node.hubBubbleRadius {
+                            var maxLeafR = 0.0
+                            for n in scene.nodes where !n.kind.isHub && n.hubIndex == idx {
+                                maxLeafR = max(maxLeafR, n.radius)
+                            }
+                            dragWorldBox.minDist = Float(GraphConstants.mainRadius + br + maxLeafR)
+                                + GraphConstants.mainCollisionPadding
+                        } else {
+                            dragWorldBox.minDist = Float(GraphConstants.mainRadius + node.radius)
+                                + GraphConstants.mainCollisionPadding
+                        }
                         engine.beginDrag(index: idx,
                                          at: camera.screenToWorld(v.location, viewSize: viewSize))
                     } else {
@@ -358,7 +376,13 @@ struct GraphCanvasView: View {
                     lastDragTranslation = v.translation
                     camera.pan(byScreen: delta)
                 case .node:
-                    let w = camera.screenToWorld(v.location, viewSize: viewSize)
+                    var w = camera.screenToWorld(v.location, viewSize: viewSize)
+                    // 主球禁区:目标位按最小距离径向夹紧(见 DragWorldBox.minDist)
+                    let m = dragWorldBox.minDist
+                    let r = simd_length(w)
+                    if m > 0, r < m {
+                        w = r > 1 ? w / r * m : SIMD2<Float>(m, 0)
+                    }
                     dragWorldBox.world = w   // 引用盒:不触发 SwiftUI 更新
                     engine.drag(to: w)
                 case .idle:
@@ -369,6 +393,7 @@ struct GraphCanvasView: View {
                 if case .node = dragMode { engine.endDrag() }
                 dragMode = .idle
                 dragWorldBox.world = nil
+                dragWorldBox.minDist = 0
                 lastDragTranslation = .zero
             }
     }
