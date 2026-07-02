@@ -79,6 +79,11 @@ enum GraphConstants {
     static let portraitHubDistance: Double = 150
     /// hub 角度弹簧刚度:把 hub 拉向按份额分配的目标极角
     static let hubAngleStrength: Float = 0.3
+    /// 叶子位置弹簧刚度:拉向逐环装填算出的精确落位(无缝圆)
+    static let leafTargetStrength: Float = 0.12
+    /// 逐环装填:球间角向间隙 / 环间距附加(世界 pt)
+    static let packSlotGap: Double = 3
+    static let packRingGap: Double = 3
     /// last_occurred → 距离 的对数映射端点(event 画布)
     static let eventLeafDistanceNear: Double = 60
     static let eventLeafDistanceFar: Double = 200
@@ -126,19 +131,6 @@ enum GraphConstants {
     /// 叶距硬上限:dist(leaf, hub) ≤ rest × 此系数 —— 完美圆的外缘保证
     ///(否则各种持续力把叶子挤出 rest,fan 半径失控)。
     static let leafMaxStretch: Float = 1.2
-
-    /// 扇区档位(07-02 反馈):楔形全角按叶数自动升档 —— 30° 装不下升 60°,
-    /// 以此类推,最高 220°。容量阈值按"多圈排布,约 0.35 球/度"估算。
-    static func sectorWedgeDegrees(leafCount: Int) -> Double {
-        switch leafCount {
-        case ...6:   return 30
-        case ...14:  return 60
-        case ...24:  return 90
-        case ...40:  return 120
-        case ...80:  return 180
-        default:     return 220
-        }
-    }
 
     // MARK: 交互动画
 

@@ -32,6 +32,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var hubIndices: [Int32] = []
     /// 完美圆(07-02):有目标极角的 hub + 角度(builder 按份额分配)。
     private var angleHub: [Int32] = [], angleTarget: [Float] = []
+    /// 无缝圆:有精确目标落位的叶子(builder 逐环装填算出)。
+    private var targetIdx: [Int32] = [], targetPos: [SIMD2<Float>] = []
     /// 全部末端球下标 + 各自所属 hub(主球=0)+ 各自弹簧 rest:
     /// 扇区间排斥 + 叶距硬上限用。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
@@ -86,6 +88,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
+        (targetIdx, targetPos) = Self.targetArrays(scene: scene)
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
@@ -172,6 +175,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
+        (targetIdx, targetPos) = Self.targetArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -238,6 +242,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         manyBodyPass()
         linkPass()
         angularPass()
+        targetPass()
         sectorPass()
         sectorRepelPass()
         centerAndIntegrate()
@@ -654,13 +659,42 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         for e in scene.edges {
             if e.b != 0, scene.nodes[e.b].kind.isHub, !scene.nodes[e.a].kind.isHub {
                 l.append(Int32(e.a)); h.append(Int32(e.b))
-                // 完美圆:优先用 builder 按份额分配的楔形角;无(测试场景)退档位表
-                let wedge = scene.nodes[e.b].hubWedgeDegrees
-                    ?? GraphConstants.sectorWedgeDegrees(leafCount: countOf[e.b] ?? 0)
+                // 楔形角 = builder 按份额分配;无(测试场景)退半圆
+                let wedge = scene.nodes[e.b].hubWedgeDegrees ?? 180
+                _ = countOf   // countOf 仅为兼容测试场景保留统计
                 cos.append(Float(Foundation.cos(wedge / 2 * .pi / 180)))
             }
         }
         return (l, h, cos)
+    }
+
+    /// 无缝圆:位置弹簧把叶子拉向逐环装填的精确落位。被拖球豁免。
+    private func targetPass() {
+        guard !targetIdx.isEmpty else { return }
+        let a = max(alpha, 0.1)
+        let k = GraphConstants.leafTargetStrength
+        dragLock.lock()
+        let di = draggedIndex
+        dragLock.unlock()
+        pos.withUnsafeBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+        targetIdx.withUnsafeBufferPointer { I in
+        targetPos.withUnsafeBufferPointer { T in
+            for i in 0..<I.count {
+                let idx = Int(I[i])
+                if idx == di { continue }
+                V[idx] += (T[i] - P[idx]) * (k * a)
+            }
+        }}}}
+    }
+
+    /// 有精确目标落位的叶子(builder 赋值)。
+    private static func targetArrays(scene: GraphScene) -> ([Int32], [SIMD2<Float>]) {
+        var i: [Int32] = [], t: [SIMD2<Float>] = []
+        for node in scene.nodes {
+            if let tp = node.targetPosition { i.append(Int32(node.id)); t.append(tp) }
+        }
+        return (i, t)
     }
 
     /// 有目标极角的 hub(完美圆算法;builder 赋值)。
