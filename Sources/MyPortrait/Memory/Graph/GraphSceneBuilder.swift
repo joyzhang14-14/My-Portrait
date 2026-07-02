@@ -220,7 +220,10 @@ enum GraphSceneBuilder {
             let slotW = avgR * 2 + GraphConstants.packSlotGap
             let layerStep = avgR * 2 + GraphConstants.packRingGap
             var packed: [Packed] = []
-            var mainHalf = 0.06   // 最小主角半宽(空 folder 只占 hub 球本身)
+            // 半宽下限 = hub 球自身的角尺寸+缝(07-02 bug:小扇子比 hub 球窄,
+            // 排位宽度没算球本身 → 相邻 hub 目标位重叠且被快照钉死)
+            var mainHalf = asin(min((hubRadius(spec)
+                + GraphConstants.packSlotGap + 2) / dist, 0.9))
             var i = 0
             var arcR = 0.0
             while i < ordered.count {
@@ -242,13 +245,18 @@ enum GraphSceneBuilder {
             mainHalfAll.append(mainHalf)
         }
 
-        // 遍2:按实宽排开(缝 2°),归一化到 360°。
+        // 遍2:按实宽排开(缝 2°)。⚠️ 保底宽(hub 球角尺寸+缝)**不可压缩**,
+        // 只压缩扇子富余 —— 统一 scale 会把保底也压没,相邻 hub 重叠
+        //(07-02 自检 PNG 确诊,min gap -8.8 → +12.2)。
         let gapRad = 2.0 * .pi / 180
-        let total = mainHalfAll.reduce(0) { $0 + 2 * $1 } + Double(specs.count) * gapRad
-        let scale = 2 * .pi / total
+        let floors = hubRadii.map { 2 * asin(min(($0 + 3) / dist, 0.9)) + gapRad }
+        let excesses = specs.indices.map { max(0, 2 * mainHalfAll[$0] + gapRad - floors[$0]) }
+        let avail = 2 * .pi - floors.reduce(0, +)
+        let exSum = excesses.reduce(0, +)
+        let exScale = exSum > 0 ? min(1, avail / exSum) : 1
         var cursor = -Double.pi / 2
         for (k, spec) in specs.enumerated() {
-            let width = (2 * mainHalfAll[k] + gapRad) * scale
+            let width = floors[k] + excesses[k] * exScale
             let centerRad = cursor + width / 2
             cursor += width
             let r = hubRadii[k]
@@ -269,12 +277,14 @@ enum GraphSceneBuilder {
                                    springStrength: GraphConstants.hubSpringStrength))
 
             let hubPos = SIMD2<Double>(cos(centerRad) * dist, sin(centerRad) * dist)
+            let psiScale = mainHalfAll[k] > 0
+                ? min(1, (width - gapRad) / 2 / mainHalfAll[k]) : 1
             for pk in packedAll[k] {
                 let m = spec.members[pk.member]
                 let idx = nodes.count
                 let lr = leafRadius(m)
-                // ψ 也按 scale 压缩,扇子随份额缩放,相邻扇子不打架
-                let dirA = centerRad + pk.psi * min(scale, 1)
+                // ψ 按本家实际获得宽度压缩,相邻扇子不打架
+                let dirA = centerRad + pk.psi * psiScale
                 let target = SIMD2<Double>(hubPos.x + cos(dirA) * pk.arcR,
                                            hubPos.y + sin(dirA) * pk.arcR)
                 var leafNode = GraphNode(id: idx, kind: leafKind(m), title: m.title,
