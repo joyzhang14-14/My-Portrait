@@ -36,13 +36,12 @@ struct GraphNode: Identifiable, Sendable {
     let fileURL: URL?
     /// 所连接的 hub 的 index(主球为 -1)。
     let hubIndex: Int
-    /// 完美圆算法(07-02):hub 的目标极角(rad)与楔形份额(度)。
-    /// 仅非主球 hub 有值;由 builder 按叶数份额分配,物理用角度弹簧拉过去。
-    var hubTargetAngle: Double? = nil
+    /// 完美圆·物理化(07-02 终稿):hub 的楔形份额(度,按叶数占比)。
+    /// 仅非主球 hub 有值;一半 = hub 间角向碰撞的半宽 = 扇区墙的半角,
+    /// 扇区边界由碰撞平衡**涌现**,不预分配目标角。
     var hubWedgeDegrees: Double? = nil
-    /// 无缝圆填充(07-02 定稿):叶子的精确目标落位(逐环装填算法算出,
-    /// 物理用位置弹簧拉过去 —— 球不重叠、扇区无缝、外缘成圆)。
-    var targetPosition: SIMD2<Float>? = nil
+    /// hub 等距硬钉半径(用户硬需求:folder/分区球全体等距主球)。
+    var hubPinRadius: Double? = nil
 
     var color: Color {
         Color(red: colorRGB.x, green: colorRGB.y, blue: colorRGB.z)

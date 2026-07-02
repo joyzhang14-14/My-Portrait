@@ -77,13 +77,12 @@ enum GraphConstants {
     static let portraitOuterRadius: Double = 240   // 07-02:分区球太远,外圆收小→等距公式值≈100
     static let eventHubDistance: Double = 150
     static let portraitHubDistance: Double = 150
-    /// hub 角度弹簧刚度:把 hub 拉向按份额分配的目标极角
-    static let hubAngleStrength: Float = 0.3
-    /// 叶子位置弹簧刚度:拉向逐环装填算出的精确落位(无缝圆)
-    static let leafTargetStrength: Float = 0.25   // 07-02:加快收敛,减少可见漂移
-    /// 逐环装填:球间角向间隙 / 环间距附加(世界 pt;07-02 反馈:更密集)
-    static let packSlotGap: Double = 1
-    static let packRingGap: Double = 1
+    /// hub 间角向碰撞刚度(07-02 物理化,取代目标角弹簧):相邻 hub 的角向
+    /// "圆盘"(半宽 = 楔形份额/2)重叠时切向推开,权重 ∝ 叶数 ——
+    /// 大 folder 自然挤开邻居,扇区宽 ∝ 内容**涌现**,碰撞平衡处即边界。
+    /// 2.0:需压过大 folder 叶群斥力的扭矩 —— 弱了缺口被压 <80%,
+    /// 且大 folder 两侧被叶群推出 ~150% 的空洞(无缝圆被破)。
+    static let hubAngularStrength: Float = 2.0
     /// last_occurred → 距离 的对数映射端点(event 画布)
     static let eventLeafDistanceNear: Double = 60
     static let eventLeafDistanceFar: Double = 200
@@ -95,8 +94,10 @@ enum GraphConstants {
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
-    /// 斥力强度(负=互斥)。「每个点分明」靠它:相邻球实时互相推开。
-    static let manyBodyStrength: Float = -30
+    /// 斥力强度(负=互斥)。07-02 物理化减半:球距改由半径感知碰撞力管,
+    /// 点电荷斥力只提供松散感 —— 太强时大 folder 的叶群集体扭矩会把
+    /// 邻居 hub 推出碰撞盘接触距离,环上出现大空洞(无缝圆被破)。
+    static let manyBodyStrength: Float = -15
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
     static let bhTheta2: Float = 0.81
     /// 斥力最小距离²(防重叠点无穷大力)
@@ -121,9 +122,14 @@ enum GraphConstants {
     /// hub→主球弹簧刚度 override(d3 默认=1/度数,folder 度数几百 → 弹簧
     /// 太软被斥力推远;定为 1.0 让 folder/分区贴住等距环)
     static let hubSpringStrength: Double = 1.0
-    /// 扇区软阻力:hub 的末端球须待在背向主球的楔形扇区里,角度越界
-    /// ×此系数×alpha 的角向力回正。07-02 加强(边界更分明,fan 摊满楔形)。
-    static let sectorStrength: Float = 0.3
+    /// 领地墙力度(07-02 定稿:动态领地分割 —— 相邻 hub 极角间隙按份额
+    /// 加权定边界,叶子原点极角越界 → ×此系数×alpha 切向回正)。
+    /// 0.8:要打得过全力碰撞力的外推(0.3 时 12% 叶被挤过界)。
+    static let sectorStrength: Float = 0.8
+    /// 花瓣内聚力:叶子向自家 hub 轴线的弱角向弹簧(领地内全程存在,
+    /// 不只在边界)。稀疏 folder 靠它收拢成瓣不散开;密集 folder 碰撞力
+    /// 占优照样铺满楔形 —— 花瓣形态的两种密度自适应。
+    static let sectorCenterStrength: Float = 0.08
     /// 扇区间排斥:**只在边界起效**(07-02 三稿:排斥泡太大会造成扇区间
     /// 巨大空隙"护城河");半径只罩 hub 近旁,防别家叶贴脸。
     static let sectorRepelStrength: Float = 0.35
@@ -131,6 +137,15 @@ enum GraphConstants {
     /// 叶距硬上限:dist(leaf, hub) ≤ rest × 此系数 —— 完美圆的外缘保证
     ///(否则各种持续力把叶子挤出 rest,fan 半径失控)。
     static let leafMaxStretch: Float = 1.2
+    /// 半径感知碰撞力(d3 forceCollide 同款,07-02 物理化):球与球按
+    /// 半径之和互相推开 —— "每球清晰可见不重叠"的物理表达。
+    /// 点电荷斥力(manyBody)不认半径,这条才是缺的核心力。
+    /// 0.7:1.0 会过冲(残余震荡反而多 13% 重叠+更多越墙),实测最优
+    static let collideStrength: Float = 0.7
+    /// 碰撞附加间隙(世界 pt,让球之间留一线缝)
+    static let collidePadding: Float = 1
+    /// 每 tick 碰撞解算轮数(d3 默认 1;挤压重时可加,成本 ∝ 轮数)
+    static let collideIterations: Int = 3
 
     // MARK: 交互动画
 

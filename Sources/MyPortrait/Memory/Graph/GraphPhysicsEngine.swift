@@ -24,19 +24,18 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var nodeRadius: [Float]
     private var edgesA: [Int32], edgesB: [Int32]
     private var linkStrength: [Float], linkBias: [Float], linkRest: [Float]
-    /// 扇区约束对:leaf 必须待在 hub 背向主球的楔形扇区里(07-01/02 反馈)。
-    /// cosLimit = cos(楔形半角),按 hub 叶数取档(30°~220°,装不下自动升档)。
+    /// 领地约束对:leaf 必须待在自家 hub 的动态领地内(07-02 定稿:
+    /// 范围先算、与邻居比较调整、不进别家地盘 —— 边界每 tick 按 hub
+    /// 实际极角重算,见 territoryPass)。
     private var sectorLeaf: [Int32] = [], sectorHub: [Int32] = []
-    private var sectorCosLimit: [Float] = []
     /// 非主球 hub 的下标(folder/分区):互相硬碰撞不重合(07-01 反馈)。
     private var hubIndices: [Int32] = []
-    /// hub 的等距硬钉半径(=|targetPosition|;≤0 = 无)。07-02:等距必须硬保证,
+    /// hub 的等距硬钉半径(builder 公式值;≤0 = 无)。07-02:等距必须硬保证,
     /// 弹簧/碰撞的合力会让 hub 半径漂移。
     private var hubPinRadius: [Float] = []
-    /// 完美圆(07-02):有目标极角的 hub + 角度(builder 按份额分配)。
-    private var angleHub: [Int32] = [], angleTarget: [Float] = []
-    /// 无缝圆:有精确目标落位的叶子(builder 逐环装填算出)。
-    private var targetIdx: [Int32] = [], targetPos: [SIMD2<Float>] = []
+    /// 完美圆·物理化(07-02 终稿):hub 角向碰撞半宽(rad,=楔形份额/2)
+    /// 与质量(叶数+1,重的动得少)—— 扇区边界由碰撞平衡涌现。
+    private var hubHalfAngle: [Float] = [], hubMass: [Float] = []
     /// 全部末端球下标 + 各自所属 hub(主球=0)+ 各自弹簧 rest:
     /// 扇区间排斥 + 叶距硬上限用。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
@@ -57,8 +56,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var qMass: [Float] = []
     private var qCom: [SIMD2<Float>] = []
     private var qWidth: [Float] = []
+    /// 子树内最大球半径(forceCollide 剪枝用,聚合于 buildTree)。
+    private var qMaxR: [Float] = []
     private var qCount = 0
     private var nextPoint: [Int32] = []
+    /// 根节点几何(collide 遍历需要真实区域边界,不能用质心近似剪枝)。
+    private var rootCenter: SIMD2<Float> = .zero
+    private var rootHalf: Float = 0
 
     private let simLock = NSLock()
 
@@ -87,22 +91,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeRadius = scene.nodes.map { Float($0.radius) }
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
-        hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
-        hubPinRadius = hubIndices.map { i in
-            scene.nodes[Int(i)].targetPosition.map { simd_length($0) } ?? -1
-        }
+        (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
+        (hubIndices, hubPinRadius, hubHalfAngle, hubMass) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
-        (angleHub, angleTarget) = Self.angleArrays(scene: scene)
-        (targetIdx, targetPos) = Self.targetArrays(scene: scene)
-        // 07-02 三稿:开场**丝滑绽放** —— 从 78% 半径出生,目标弹簧
-        // 滑入成品位(约 2s),早停快照定格。不炸开也不瞬移。
-        if !targetIdx.isEmpty {
-            for i in 0..<targetIdx.count { pos[Int(targetIdx[i])] = targetPos[i] * 0.78 }
-            pos[0] = .zero
-            snapshot = pos
-            alpha = 0.3
-        }
+        // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
+        // 目标落位/绽放出生已删 —— 布局不再有"成品位",只有平衡态。
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
@@ -185,14 +178,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
         nodeRadius = scene.nodes.map { Float($0.radius) }
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
-        hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
-        hubPinRadius = hubIndices.map { i in
-            scene.nodes[Int(i)].targetPosition.map { simd_length($0) } ?? -1
-        }
+        (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
+        (hubIndices, hubPinRadius, hubHalfAngle, hubMass) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
-        (angleHub, angleTarget) = Self.angleArrays(scene: scene)
-        (targetIdx, targetPos) = Self.targetArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -258,92 +246,110 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         buildTree()
         manyBodyPass()
         linkPass()
-        angularPass()
-        targetPass()
-        sectorPass()
+        hubAngularPass()
+        territoryPass()
         sectorRepelPass()
+        collidePass()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
-        // 早停快照(07-02:根治收敛尾声的可见漂移):冷到阈值直接把所有
-        // 带落位目标的球(hub+叶)快照到精确位置并立即入睡。
-        if alpha < 0.02, alphaTarget == 0 {
-            dragLock.lock()
-            let dragging = draggedIndex != nil
-            dragLock.unlock()
-            if !dragging {
-                for i in 0..<targetIdx.count {
-                    let idx = Int(targetIdx[i])
-                    pos[idx] = targetPos[i]
-                    vel[idx] = .zero
-                }
-                pos[0] = .zero
-                alpha = 0
-            }
+        // 早停快照已删(07-02 终稿):布局没有"成品位",冷却到 alphaMin
+        // 自然 park —— 开场/收敛全程都是物理,本身即丝滑。
+    }
+
+    /// hub 间角向碰撞(07-02 物理化,取代固定目标角):每个 hub 占一段角向
+    /// "圆盘"(半宽 = 楔形份额/2),按当前极角排序后**相邻**两两查重叠,
+    /// 切向推开;权重 ∝ 叶数(大 folder 挤开邻居)。碰撞平衡处即扇区
+    /// 边界 —— 扇区宽 ∝ 内容涌现,外圈无缝。h ≤ ~11,O(h log h) 忽略不计。
+    private func hubAngularPass() {
+        let h = hubIndices.count
+        guard h > 1 else { return }
+        let a = max(alpha, 0.1)   // 同 sector:冷却尾声定位力仍在(力对称纪律)
+        let k = GraphConstants.hubAngularStrength
+        var theta = [Float](repeating: 0, count: h)
+        for i in 0..<h {
+            let p = pos[Int(hubIndices[i])]
+            theta[i] = atan2(p.y, p.x)
+        }
+        var order = Array(0..<h)
+        order.sort { theta[$0] < theta[$1] }
+        for s in 0..<h {
+            let ii = order[s], jj = order[(s + 1) % h]
+            let i = Int(hubIndices[ii]), j = Int(hubIndices[jj])
+            var d = theta[jj] - theta[ii]
+            if d < 0 { d += 2 * .pi }              // j 恒在 i 的逆时针侧
+            let overlap = hubHalfAngle[ii] + hubHalfAngle[jj] - d
+            guard overlap > 0 else { continue }
+            let pi = pos[i], pj = pos[j]
+            let ri = simd_length(pi), rj = simd_length(pj)
+            guard ri > 1, rj > 1 else { continue }
+            let wi = hubMass[jj] / (hubMass[ii] + hubMass[jj])   // 重的动得少
+            let tanI = SIMD2<Float>(-pi.y, pi.x) / ri
+            let tanJ = SIMD2<Float>(-pj.y, pj.x) / rj
+            vel[i] -= tanI * (overlap * ri * k * a * wi)
+            vel[j] += tanJ * (overlap * rj * k * a * (1 - wi))
         }
     }
 
-    /// 完美圆(07-02):角度弹簧把每个 hub 拉向 builder 按份额分配的目标极角
-    /// —— 每个 folder/分区占据圆的一段分明扇形,互不重叠。
-    private func angularPass() {
-        guard !angleHub.isEmpty else { return }
-        let a = max(alpha, 0.1)   // 同 sector:冷却尾声仍保持定位力
-        let k = GraphConstants.hubAngleStrength
-        pos.withUnsafeBufferPointer { P in
-        vel.withUnsafeMutableBufferPointer { V in
-        angleHub.withUnsafeBufferPointer { H in
-        angleTarget.withUnsafeBufferPointer { T in
-            for i in 0..<H.count {
-                let hub = Int(H[i])
-                let p = P[hub]
-                let r = simd_length(p)
-                guard r > 1 else { continue }
-                let theta = atan2(p.y, p.x)
-                var diff = T[i] - theta
-                while diff > .pi { diff -= 2 * .pi }
-                while diff < -.pi { diff += 2 * .pi }
-                let tangent = SIMD2<Float>(-p.y, p.x) / r
-                V[hub] += tangent * (diff * r * k * a)
-            }
-        }}}}
-    }
-
-    /// 楔形扇区软阻力(07-01/02 反馈):每个 leaf 应待在「hub 背向主球、
-    /// 全角按叶数取档(30°~220°)」的楔形里。角度越界时施加**角向**回正力
-    /// (朝外向轴转) —— 是阻力不是硬墙,布局仍是有机的。
-    private func sectorPass() {
-        guard !sectorLeaf.isEmpty else { return }
-        // alpha 设下限:别的力冷却趋零后,扇区回正力仍温和存在 —— 否则
-        // 收敛尾声被斥力挤过界的球推不回来(实测 14/80 漏网)。
+    /// 动态领地墙(07-02 用户定稿:"先算出扇形的范围,和别的扇形比较、
+    /// 调整,确保不到别的扇形的地盘"):每 tick 把 hub 按**当前**极角排序,
+    /// 相邻两家的地盘边界 = 极角间隙按楔形份额加权的分点(范围先算 →
+    /// 与邻居比较 → 调整);叶子的原点极角越过自家边界 → 切向回正力。
+    /// 领地角恒定 → 切向宽度随半径变大,fan 近窄远宽 = 花瓣形。
+    private func territoryPass() {
+        let h = hubIndices.count
+        guard h > 1, !sectorLeaf.isEmpty else { return }
+        // alpha 下限:冷却尾声回正力仍在,否则被碰撞挤过界的球推不回来
         let a = max(alpha, 0.1)
-        let strength = GraphConstants.sectorStrength
+        let k = GraphConstants.sectorStrength
+        let kc = GraphConstants.sectorCenterStrength
+        let margin: Float = 2 * .pi / 180
+        var theta = [Float](repeating: 0, count: h)
+        for i in 0..<h {
+            let p = pos[Int(hubIndices[i])]
+            theta[i] = atan2(p.y, p.x)
+        }
+        var order = Array(0..<h)
+        order.sort { theta[$0] < theta[$1] }
+        // 相对自家 hub 极角的允许区间 [loRel, hiRel](hiRel ≥ 0 ≥ loRel)
+        var loRel = [Float](repeating: 0, count: h)
+        var hiRel = [Float](repeating: 0, count: h)
+        for s in 0..<h {
+            let ii = order[s], jj = order[(s + 1) % h]
+            var gap = theta[jj] - theta[ii]
+            if gap <= 0 { gap += 2 * .pi }
+            let wi = hubHalfAngle[ii], wj = hubHalfAngle[jj]
+            let frac: Float = (wi + wj) > 0 ? wi / (wi + wj) : 0.5
+            let off = gap * frac                 // 边界(相对 ii 的偏移)
+            hiRel[ii] = max(off - margin, 0)
+            loRel[jj] = min(off - gap + margin, 0)
+        }
+        var slotOf = [Int32: Int](minimumCapacity: h)
+        for i in 0..<h { slotOf[hubIndices[i]] = i }
         pos.withUnsafeBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
         sectorLeaf.withUnsafeBufferPointer { L in
         sectorHub.withUnsafeBufferPointer { H in
-        sectorCosLimit.withUnsafeBufferPointer { COS in
-            for i in 0..<L.count {
-                let hub = Int(H[i])
-                let hubPos = P[hub]
-                let d2 = simd_length_squared(hubPos)
-                guard d2 > 1 else { continue }          // hub 挤在原点,方向未定义
-                let outward = hubPos / d2.squareRoot()  // 主球(原点)→hub 的外向
-                let leaf = Int(L[i])
-                let rel = P[leaf] - hubPos
-                let rlen = simd_length(rel)
-                guard rlen > 1e-4 else { continue }
-                let rhat = rel / rlen
-                let cosA = simd_dot(rhat, outward)
-                let lim = COS[i]
-                if cosA < lim {
-                    // 回正方向 = 外向轴在 rhat 垂面上的分量(角向转回楔形);
-                    // 正对背面(t≈0)时任选切向打破对称。
-                    var t = outward - rhat * cosA
-                    let tl = simd_length(t)
-                    t = tl > 1e-5 ? t / tl : SIMD2<Float>(-rhat.y, rhat.x)
-                    V[leaf] += t * ((lim - cosA) * rlen * strength * a)
+            for t in 0..<L.count {
+                guard let hIdx = slotOf[H[t]] else { continue }
+                let leaf = Int(L[t])
+                let p = P[leaf]
+                let r = simd_length(p)
+                guard r > 1 else { continue }
+                var d = atan2(p.y, p.x) - theta[hIdx]
+                while d > .pi { d -= 2 * .pi }
+                while d < -.pi { d += 2 * .pi }
+                var excess: Float = 0
+                if d > hiRel[hIdx] { excess = d - hiRel[hIdx] }
+                else if d < loRel[hIdx] { excess = d - loRel[hIdx] }
+                let tangent = SIMD2<Float>(-p.y, p.x) / r
+                if excess != 0 {
+                    V[leaf] -= tangent * (excess * r * k * a)
                 }
+                // 花瓣内聚:全程向自家轴线的弱角向弹簧(稀疏家收拢成瓣,
+                // 密集家被碰撞力顶开照样铺满楔形)
+                V[leaf] -= tangent * (d * r * kc * a)
             }
-        }}}}}
+        }}}}
     }
 
     // MARK: - Barnes-Hut 四叉树(P0 spike 验证:vs O(n²) 暴力误差中位 0.79%)
@@ -354,6 +360,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         qMass = .init(repeating: 0, count: cap)
         qCom = .init(repeating: .zero, count: cap)
         qWidth = .init(repeating: 0, count: cap)
+        qMaxR = .init(repeating: 0, count: cap)
         nextPoint = .init(repeating: -1, count: max(n, 1))
     }
 
@@ -362,6 +369,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         for p in pos { lo = simd_min(lo, p); hi = simd_max(hi, p) }
         let side = max(hi.x - lo.x, hi.y - lo.y) + 1e-3
         let rootCenter = (lo + hi) * 0.5
+        self.rootCenter = rootCenter
+        self.rootHalf = side * 0.5
         qCount = 1
         for i in 0..<4 { qChild[i] = -1 }
         qWidth[0] = side
@@ -415,15 +424,18 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             }
         }}}
 
-        // 自底向上聚合质量与质心(子节点 index 恒大于父,倒序扫即可)
+        // 自底向上聚合质量/质心/子树最大球半径(子节点 index 恒大于父,倒序扫)
         let s = GraphConstants.manyBodyStrength
         qChild.withUnsafeBufferPointer { ch in
         qMass.withUnsafeMutableBufferPointer { M in
         qCom.withUnsafeMutableBufferPointer { C in
+        qMaxR.withUnsafeMutableBufferPointer { MR in
+        nodeRadius.withUnsafeBufferPointer { R in
         pos.withUnsafeBufferPointer { P in
             for node in stride(from: qCount - 1, through: 0, by: -1) {
                 var m: Float = 0
                 var com = SIMD2<Float>.zero
+                var mr: Float = 0
                 for k in 0..<4 {
                     let c = ch[node * 4 + k]
                     if c == -1 { continue }
@@ -431,19 +443,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         let cm = M[Int(c)]
                         m += cm
                         com += C[Int(c)] * cm
+                        mr = max(mr, MR[Int(c)])
                     } else {
                         var pi = Int(-c - 2)
                         while pi >= 0 {
                             m += s
                             com += P[pi] * s
+                            mr = max(mr, R[pi])
                             pi = Int(nextPoint[pi])
                         }
                     }
                 }
                 M[node] = m
                 C[node] = m != 0 ? com / m : .zero
+                MR[node] = mr
             }
-        }}}}
+        }}}}}}
     }
 
     private func manyBodyPass() {
@@ -604,7 +619,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
-        // hub 等距硬钉(07-02):半径投影回公式值,角度不动(角度弹簧管)。
+        // hub 等距硬钉(07-02):半径投影回公式值,角度不动(角向碰撞管)。
         if !hubIndices.isEmpty {
             pos.withUnsafeMutableBufferPointer { P in
                 for hi in 0..<hubIndices.count {
@@ -614,6 +629,39 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     if h == di { continue }            // 拖拽豁免
                     let r = simd_length(P[h])
                     if r > 1 { P[h] = P[h] / r * pin }
+                }
+            }
+        }
+        // hub 间角向硬解算(07-02 物理化):等距硬钉后,球体重叠沿切向
+        // 旋开(半径不动,等距不破 —— 欧氏推开会被上面的钉重新引入重叠)。
+        // 只对成对带钉的 hub;弦长→角距用等半径公式(钉保证等半径)。
+        if hubIndices.count > 1 {
+            let pad = GraphConstants.mainCollisionPadding
+            pos.withUnsafeMutableBufferPointer { P in
+                for ii in 0..<(hubIndices.count - 1) {
+                    guard hubPinRadius[ii] > 0 else { continue }
+                    for jj in (ii + 1)..<hubIndices.count {
+                        guard hubPinRadius[jj] > 0 else { continue }
+                        let i = Int(hubIndices[ii]), j = Int(hubIndices[jj])
+                        if i == di || j == di { continue }
+                        let minD = nodeRadius[i] + nodeRadius[j] + pad
+                        guard simd_length(P[j] - P[i]) < minD else { continue }
+                        let ri = simd_length(P[i]), rj = simd_length(P[j])
+                        guard ri > 1, rj > 1 else { continue }
+                        var ti = atan2(P[i].y, P[i].x)
+                        var tj = atan2(P[j].y, P[j].x)
+                        var dth = tj - ti
+                        while dth > .pi { dth -= 2 * .pi }
+                        while dth < -.pi { dth += 2 * .pi }
+                        let need = 2 * asin(min(minD / (ri + rj), 0.99))
+                        let deficit = need - abs(dth)
+                        guard deficit > 0 else { continue }
+                        let sign: Float = dth >= 0 ? 1 : -1
+                        ti -= sign * deficit * 0.5
+                        tj += sign * deficit * 0.5
+                        P[i] = SIMD2<Float>(cos(ti), sin(ti)) * ri
+                        P[j] = SIMD2<Float>(cos(tj), sin(tj)) * rj
+                    }
                 }
             }
         }
@@ -693,65 +741,110 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 叶 → 非主球 hub 的约束对(folder 的 event / 分区的 portrait 小球)。
-    /// 直连主球的叶没有扇区概念,不进这个表。cosLimit = cos(该 hub 楔形半角),
-    /// 楔形全角按叶数取档(30°~220°,GraphConstants.sectorWedgeDegrees)。
-    private static func sectorPairs(scene: GraphScene) -> ([Int32], [Int32], [Float]) {
-        var countOf: [Int: Int] = [:]
-        for e in scene.edges
-        where e.b != 0 && scene.nodes[e.b].kind.isHub && !scene.nodes[e.a].kind.isHub {
-            countOf[e.b, default: 0] += 1
-        }
-        var l: [Int32] = [], h: [Int32] = [], cos: [Float] = []
+    /// 直连主球的叶没有领地概念,不进这个表。边界每 tick 动态算
+    /// (territoryPass),这里只收集配对。
+    private static func sectorPairs(scene: GraphScene) -> ([Int32], [Int32]) {
+        var l: [Int32] = [], h: [Int32] = []
         for e in scene.edges {
             if e.b != 0, scene.nodes[e.b].kind.isHub, !scene.nodes[e.a].kind.isHub {
                 l.append(Int32(e.a)); h.append(Int32(e.b))
-                // 楔形角 = builder 按份额分配;无(测试场景)退半圆
-                let wedge = scene.nodes[e.b].hubWedgeDegrees ?? 180
-                _ = countOf   // countOf 仅为兼容测试场景保留统计
-                cos.append(Float(Foundation.cos(wedge / 2 * .pi / 180)))
             }
         }
-        return (l, h, cos)
+        return (l, h)
     }
 
-    /// 无缝圆:位置弹簧把叶子拉向逐环装填的精确落位。被拖球豁免。
-    private func targetPass() {
-        guard !targetIdx.isEmpty else { return }
-        let a = max(alpha, 0.1)
-        let k = GraphConstants.leafTargetStrength
-        dragLock.lock()
-        let di = draggedIndex
-        dragLock.unlock()
-        pos.withUnsafeBufferPointer { P in
-        vel.withUnsafeMutableBufferPointer { V in
-        targetIdx.withUnsafeBufferPointer { I in
-        targetPos.withUnsafeBufferPointer { T in
-            for i in 0..<I.count {
-                let idx = Int(I[i])
-                if idx == di { continue }
-                V[idx] += (T[i] - P[idx]) * (k * a)
-            }
-        }}}}
-    }
-
-    /// 有精确目标落位的叶子(builder 赋值)。
-    private static func targetArrays(scene: GraphScene) -> ([Int32], [SIMD2<Float>]) {
-        var i: [Int32] = [], t: [SIMD2<Float>] = []
-        for node in scene.nodes {
-            if let tp = node.targetPosition { i.append(Int32(node.id)); t.append(tp) }
+    /// 半径感知碰撞力(d3 forceCollide 的零依赖移植,07-02 物理化的核心
+    /// 新力):任意两球圆心距 < r_i+r_j+缝 时按重叠深度推开(速度域,
+    /// 权重 = 对方半径² 占比,大球稳)。复用 manyBody 的四叉树 + qMaxR
+    /// 剪枝,O(n log n);d3 语义:不乘 alpha,重叠永远解算。
+    private func collidePass() {
+        guard n > 1 else { return }
+        let strength = GraphConstants.collideStrength
+        let pad = GraphConstants.collidePadding
+        var sNode = [Int32](repeating: 0, count: 256)
+        var sCX = [Float](repeating: 0, count: 256)
+        var sCY = [Float](repeating: 0, count: 256)
+        var sHalf = [Float](repeating: 0, count: 256)
+        for _ in 0..<GraphConstants.collideIterations {
+            pos.withUnsafeBufferPointer { P in
+            vel.withUnsafeMutableBufferPointer { V in
+            nodeRadius.withUnsafeBufferPointer { R in
+            qChild.withUnsafeBufferPointer { ch in
+            qMaxR.withUnsafeBufferPointer { MR in
+            nextPoint.withUnsafeBufferPointer { NP in
+            sNode.withUnsafeMutableBufferPointer { SN in
+            sCX.withUnsafeMutableBufferPointer { SX in
+            sCY.withUnsafeMutableBufferPointer { SY in
+            sHalf.withUnsafeMutableBufferPointer { SH in
+                for i in 0..<n {
+                    let pi = P[i] + V[i]           // 预测位置(d3 语义)
+                    let ri = R[i] + pad
+                    let ri2 = ri * ri
+                    SN[0] = 0; SX[0] = rootCenter.x; SY[0] = rootCenter.y
+                    SH[0] = rootHalf
+                    var sp = 1
+                    while sp > 0 {
+                        sp -= 1
+                        let node = Int(SN[sp])
+                        let cx = SX[sp], cy = SY[sp], h = SH[sp]
+                        let reach = ri + MR[node] + pad
+                        if pi.x < cx - h - reach || pi.x > cx + h + reach
+                            || pi.y < cy - h - reach || pi.y > cy + h + reach { continue }
+                        for k in 0..<4 {
+                            let c = ch[node * 4 + k]
+                            if c == -1 { continue }
+                            if c >= 0 {
+                                SN[sp] = c
+                                SX[sp] = cx + ((k & 1) == 1 ? h : -h) * 0.5
+                                SY[sp] = cy + ((k & 2) == 2 ? h : -h) * 0.5
+                                SH[sp] = h * 0.5
+                                sp += 1
+                            } else {
+                                var pj = Int(-c - 2)
+                                while pj >= 0 {
+                                    if pj > i {    // 每对只解算一次
+                                        let rj = R[pj] + pad
+                                        let rsum = ri + rj
+                                        var d = pi - (P[pj] + V[pj])
+                                        var l2 = simd_length_squared(d)
+                                        if l2 < rsum * rsum {
+                                            if l2 < 1e-6 {   // 重合:确定性微扰
+                                                d = SIMD2<Float>(1e-3, 1e-3)
+                                                l2 = simd_length_squared(d)
+                                            }
+                                            let l = l2.squareRoot()
+                                            let push = (rsum - l) / l * strength
+                                            let wj = rj * rj / (ri2 + rj * rj)
+                                            V[i] += d * (push * wj)
+                                            V[pj] -= d * (push * (1 - wj))
+                                        }
+                                    }
+                                    pj = Int(NP[pj])
+                                }
+                            }
+                        }
+                    }
+                }
+            }}}}}}}}}}
         }
-        return (i, t)
     }
 
-    /// 有目标极角的 hub(完美圆算法;builder 赋值)。
-    private static func angleArrays(scene: GraphScene) -> ([Int32], [Float]) {
-        var h: [Int32] = [], t: [Float] = []
+    /// 非主球 hub 的物理参数(builder 赋值):等距硬钉半径 / 角向碰撞
+    /// 半宽(=楔形份额一半)/ 质量(叶数+1)。四数组按同一顺序对齐。
+    private static func hubArrays(scene: GraphScene)
+        -> ([Int32], [Float], [Float], [Float]) {
+        var leafCount: [Int: Int] = [:]
+        for node in scene.nodes where !node.kind.isHub {
+            leafCount[node.hubIndex, default: 0] += 1
+        }
+        var idx: [Int32] = [], pin: [Float] = [], half: [Float] = [], mass: [Float] = []
         for node in scene.nodes where node.kind.isHub && node.id != 0 {
-            if let a = node.hubTargetAngle {
-                h.append(Int32(node.id)); t.append(Float(a))
-            }
+            idx.append(Int32(node.id))
+            pin.append(node.hubPinRadius.map(Float.init) ?? -1)
+            half.append(Float((node.hubWedgeDegrees ?? 0) / 2 * .pi / 180))
+            mass.append(Float(leafCount[node.id] ?? 0) + 1)
         }
-        return (h, t)
+        return (idx, pin, half, mass)
     }
 
     /// 全部末端球 + 各自所属 hub(主球=0)+ 弹簧 rest(每叶恰一条边)。
