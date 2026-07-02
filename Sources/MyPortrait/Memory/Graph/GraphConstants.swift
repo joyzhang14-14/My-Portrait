@@ -113,9 +113,17 @@ enum GraphConstants {
 
     // MARK: 交互动画
 
-    /// 神经脉冲沿边传播速度(世界 pt/s)与级联跳数
-    static let pulseSpeed: Double = 600
-    static let pulseMaxDepth: Int = 2
+    /// 神经脉冲沿边传播速度(世界 pt/s;07-01 反馈:快速)
+    static let pulseSpeed: Double = 1400
+    /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
+    static let pulseMaxDepthMain: Int = 2
+    static let pulseMaxDepthOther: Int = 1
+    /// 脉冲形态 = ||| 三条垂直于连线的细白杠,沿行进方向间隔(屏幕 pt)
+    static let pulseTickCount: Int = 3
+    static let pulseTickSpacing: Double = 5
+    /// 每条杠的长度 = 该处连线的概念粗细(锥形宽度函数),下限保证可见
+    static let pulseTickMinHalfLen: Double = 3
+    static let pulseTickStrokeWidth: Double = 1.2
     /// hover 白闪频率(Hz)
     static let hoverBlinkHz: Double = 2.2
     /// 浮窗:鼠标移出后自动关闭延迟(s)

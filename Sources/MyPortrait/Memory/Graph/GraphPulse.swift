@@ -21,7 +21,7 @@ enum GraphPulseScheduler {
                          scene: GraphScene,
                          positions: [SIMD2<Float>],
                          speed: Double = GraphConstants.pulseSpeed,
-                         maxDepth: Int = GraphConstants.pulseMaxDepth)
+                         maxDepth: Int)
         -> (pulses: [GraphPulse], total: TimeInterval) {
         guard origin >= 0, origin < scene.nodes.count, speed > 0 else { return ([], 0) }
 

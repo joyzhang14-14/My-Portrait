@@ -31,6 +31,17 @@ final class GraphSession {
     }
 }
 
+/// 图谱区域的「拖背景移动窗口」拦截器:AppKit 的窗口拖动机制会 hitTest 到
+/// 光标下最深的 NSView 并查它的 mouseDownCanMoveWindow —— 这里返回 false,
+/// SwiftUI 手势(平移/拖球)不受影响(走 hosting view 的手势识别)。
+private struct WindowDragBlocker: NSViewRepresentable {
+    final class BlockerView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
+    func makeNSView(context: Context) -> BlockerView { BlockerView() }
+    func updateNSView(_ nsView: BlockerView, context: Context) {}
+}
+
 /// 图谱模式的根视图:按 scope 决定画布(Events → event 图,portrait → portrait
 /// 图),负责数据加载、物理引擎生命周期、浮窗与神经脉冲、HUD。
 /// 渲染在主窗口右侧内容区(与 MemoriesView 同位置),不开新窗口。
@@ -105,6 +116,10 @@ struct GraphRootView: View {
             }
         }
         .background(SidebarBackdrop().ignoresSafeArea())
+        // 主窗口是 chromeless + isMovableByWindowBackground=true(全局设计),
+        // 但图谱里拖拽 = 平移/拖球,绝不能带动整个窗口(07-01 用户反馈)。
+        // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
+        .background(WindowDragBlocker())
         .task(id: zone) { await reload() }
         // park 事件 → 记录物理休眠态。engineGen 变化(引擎替换)重订阅。
         .task(id: engineGen) {
@@ -143,8 +158,14 @@ struct GraphRootView: View {
         guard let engine else { return }
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count else { return }
+        // 只有主球级联 2 跳(信号穿过 folder/分区抵达末端);
+        // 其它 hub 只传 1 跳到直接相连的球(07-01 反馈)。
+        let depth = scene.nodes[hub].kind == .main
+            ? GraphConstants.pulseMaxDepthMain
+            : GraphConstants.pulseMaxDepthOther
         let (list, total) = GraphPulseScheduler.schedule(from: hub, scene: scene,
-                                                         positions: snap)
+                                                         positions: snap,
+                                                         maxDepth: depth)
         pulses = list
         pulseStart = Date()
         pulseGen += 1
