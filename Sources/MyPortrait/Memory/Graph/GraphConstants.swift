@@ -104,7 +104,8 @@ enum GraphConstants {
     /// 邻居的**中点**回正(左右间隙相等时力归零)—— 局部弛豫链式传导,
     /// 挤的一侧流向疏的一侧,叶群质心回到 hub。全家适用(v1 只推不拉
     /// 且限 40 叶,大家云团仍偏半边:质心偏移实测 34%)。
-    static let familySpreadStrength: Float = 0.3
+    /// 0.15:不乘 alpha 后恒定生效,0.3 会过冲抖动
+    static let familySpreadStrength: Float = 0.2
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
     static let bhTheta2: Float = 0.81
     /// 斥力最小距离²(防重叠点无穷大力)
