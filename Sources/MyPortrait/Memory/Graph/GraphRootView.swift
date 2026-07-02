@@ -266,8 +266,10 @@ struct GraphRootView: View {
 
         let fp = GraphSession.fingerprint(of: built)
         if let cached = GraphSession.shared.entries[z], cached.fingerprint == fp {
-            // 数据没变:复用引擎(位置/布局保留),只刷边参数(rest 随天数漂移)
+            // 数据没变:复用引擎,刷边参数后**重放展开动画**(07-02 用户
+            // 定稿:每次打开都要展开效果;确定性物理 → 每次收敛到同一布局)
             cached.engine.updateScene(built)
+            cached.engine.explode()
             GraphSession.shared.entries[z]?.scene = built
             scene = built
             if engine !== cached.engine {

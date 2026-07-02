@@ -213,9 +213,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let hubIdx = Int(hub)
             // 家族错相:不同家的 0 号叶别都朝同一方向
             let a = golden * Float(j) + Float(hubIdx) * 0.7
+            // 0.1×圈半径出生(07-02:展开效果再强烈一点)—— 贴着 hub 喷出
             let maxD = leafMaxDist[li]
-            let r = maxD > 0 ? max(maxD * 0.35, nodeRadius[hubIdx] + 6)
-                             : nodeRadius[hubIdx] + 12
+            let r = maxD > 0 ? max(maxD * 0.1, nodeRadius[hubIdx] + 3)
+                             : nodeRadius[hubIdx] + 8
             pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
         }
     }
