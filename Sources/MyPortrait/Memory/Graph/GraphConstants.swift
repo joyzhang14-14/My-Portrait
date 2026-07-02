@@ -70,9 +70,10 @@ enum GraphConstants {
 
     // MARK: 距离(弹簧自然长度,世界单位)
 
-    /// folder 等距环 / 分区等距环(2026-07-01 用户反馈:folder 环 300→100,
-    /// 分区环 280→140,两类 hub 都贴近主球)
-    static let folderRingDistance: Double = 100
+    /// folder 等距环 / 分区等距环。folder 环 07-02 再缩至 25(用户:1/4)——
+    /// 远小于碰撞下限(主球44+folder36+4≈84),实际距离由硬碰撞决定,
+    /// 效果 = folder 紧贴主球表面。
+    static let folderRingDistance: Double = 25
     static let categoryRingDistance: Double = 140
     /// last_occurred → 距离 的对数映射端点(event 画布)
     static let eventLeafDistanceNear: Double = 60
@@ -111,13 +112,26 @@ enum GraphConstants {
     /// hub→主球弹簧刚度 override(d3 默认=1/度数,folder 度数几百 → 弹簧
     /// 太软被斥力推远;定为 1.0 让 folder/分区贴住等距环)
     static let hubSpringStrength: Double = 1.0
-    /// 180° 扇区软阻力(07-01 反馈):folder/分区的末端球须待在 hub 背向
-    /// 主球的半圆里,越界深度×此系数×alpha 的力推回。不是硬墙。
+    /// 扇区软阻力(07-01 反馈):hub 的末端球须待在背向主球的楔形扇区里,
+    /// 角度越界×此系数×alpha 的角向力回正。不是硬墙。
     static let sectorStrength: Float = 0.15
-    /// 扇区间排斥(07-01 反馈):末端球被**别家 hub** 近距推开,相邻扇形
-    /// 不互相渗透。线性衰减,radius 外无力。
-    static let sectorRepelStrength: Float = 0.6
-    static let sectorRepelRadius: Float = 200
+    /// 扇区间排斥(07-02 加强:a 家的末端球不得进 b 家范围,容易看混)。
+    /// 线性衰减,radius 外无力。
+    static let sectorRepelStrength: Float = 1.0
+    static let sectorRepelRadius: Float = 240
+
+    /// 扇区档位(07-02 反馈):楔形全角按叶数自动升档 —— 30° 装不下升 60°,
+    /// 以此类推,最高 220°。容量阈值按"多圈排布,约 0.35 球/度"估算。
+    static func sectorWedgeDegrees(leafCount: Int) -> Double {
+        switch leafCount {
+        case ...6:   return 30
+        case ...14:  return 60
+        case ...24:  return 90
+        case ...40:  return 120
+        case ...80:  return 180
+        default:     return 220
+        }
+    }
 
     // MARK: 交互动画
 
