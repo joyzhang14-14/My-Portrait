@@ -145,6 +145,18 @@ struct GraphCanvasView: View {
             // 物理 tick 慢时拖拽也不掉帧;从引用盒读,写入不惊动 SwiftUI
             if case .node(let di) = dragMode, let w = dragWorldBox.world, di < snap.count {
                 snap[di] = w
+                // 显示级清障(07-02:极速拖拽仍见重叠 —— 渲染位领先物理
+                // 一个 tick,清障还没赶到):画之前把与被拖球重叠的球在
+                // **本帧数据**里推出,与被画位置零时差;物理下 tick 跟上。
+                let rd = Float(scene.nodes[di].radius)
+                for j in 1..<snap.count where j != di {
+                    let d = snap[j] - w
+                    let dist = simd_length(d)
+                    let minD = rd + Float(scene.nodes[j].radius) + 1
+                    if dist < minD {
+                        snap[j] = w + (dist > 1 ? d / dist : SIMD2<Float>(1, 0)) * minD
+                    }
+                }
             }
             drawEdges(ctx, snap: snap, size: size)
             drawPulses(ctx, snap: snap, size: size, date: date)
