@@ -193,20 +193,26 @@ enum GraphSceneBuilder {
                                colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
 
         let wedges = allocateWedges(counts: specs.map(\.members.count))
+        // 07-02 终稿:hub 距主球**全体相等**,由公式算出 ——
+        //   ① 外圆补偿:outer − 全局最深 fan(让最深的一家外缘落在外圆)
+        //   ② 圆周装箱下限:所有 hub 球沿圆排开不重叠
+        //   ③ 主球碰撞下限
+        let hubRadii = specs.map(hubRadius)
+        let globalMaxRest = specs.flatMap { $0.members.map(leafRest) }.max()
+            ?? (outerRadius - hubDistance)
+        let packFloor = (hubRadii.map { $0 * 2 + 10 }.reduce(0, +)) / (2 * .pi)
+        let maxHubR = hubRadii.max() ?? 0
+        let uniformDist = max(outerRadius - globalMaxRest,
+                              packFloor,
+                              GraphConstants.mainRadius + maxHubR
+                                  + Double(GraphConstants.mainCollisionPadding) + 2)
         var cursor = -90.0   // 圆弧游标(度),从正上方开始顺时针分配
         for (k, spec) in specs.enumerated() {
             let wedge = wedges[k]
             let centerDeg = cursor + wedge / 2
             cursor += wedge
             let r = hubRadius(spec)
-            // 07-02 终稿:hub↔主球距离是唯一自由变量(用户定稿),
-            // = 外圆半径 − 该家最远叶距 → 各家 fan 外缘对齐同一圆;
-            // 叶距本身 = last_occurred 映射,不动。
-            let maxRest0 = spec.members.map(leafRest).max()
-                ?? (outerRadius - hubDistance)
-            let dist = max(outerRadius - maxRest0,
-                           GraphConstants.mainRadius + r
-                               + Double(GraphConstants.mainCollisionPadding) + 2)
+            let dist = uniformDist   // 全体 hub 等距(公式见上)
 
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,

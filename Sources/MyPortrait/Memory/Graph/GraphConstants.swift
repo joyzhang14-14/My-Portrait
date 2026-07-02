@@ -81,9 +81,9 @@ enum GraphConstants {
     static let hubAngleStrength: Float = 0.3
     /// 叶子位置弹簧刚度:拉向逐环装填算出的精确落位(无缝圆)
     static let leafTargetStrength: Float = 0.12
-    /// 逐环装填:球间角向间隙 / 环间距附加(世界 pt)
-    static let packSlotGap: Double = 3
-    static let packRingGap: Double = 3
+    /// 逐环装填:球间角向间隙 / 环间距附加(世界 pt;07-02 反馈:更密集)
+    static let packSlotGap: Double = 1
+    static let packRingGap: Double = 1
     /// last_occurred → 距离 的对数映射端点(event 画布)
     static let eventLeafDistanceNear: Double = 60
     static let eventLeafDistanceFar: Double = 200
