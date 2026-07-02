@@ -35,6 +35,9 @@ struct GraphCanvasView: View {
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
     /// nodes 做 filter 是每帧 O(n) 分配(07-01 拖拽卡顿优化)。
     private let hubNodes: [GraphNode]
+    /// 绘制顺序:半径降序 —— 大球先画、小球后画,末端小球永远不被挡
+    ///(07-02 反馈)。init 算一次。
+    private let ballOrder: [Int]
 
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
@@ -49,6 +52,9 @@ struct GraphCanvasView: View {
         self._hoveredId = hoveredId
         self.onTapNode = onTapNode
         self.hubNodes = scene.nodes.filter { $0.kind.isHub }
+        self.ballOrder = scene.nodes.indices.sorted {
+            scene.nodes[$0].radius > scene.nodes[$1].radius
+        }
     }
 
     var body: some View {
@@ -239,7 +245,8 @@ struct GraphCanvasView: View {
                            size: CGSize, date: Date) {
         let zoom = camera.zoom
         let now = date.timeIntervalSinceReferenceDate
-        for node in scene.nodes {
+        for oi in ballOrder {
+            let node = scene.nodes[oi]
             let c = camera.worldToScreen(snap[node.id], viewSize: size)
             let r = node.radius * zoom
             if c.x + r < 0 || c.x - r > size.width || c.y + r < 0 || c.y - r > size.height {

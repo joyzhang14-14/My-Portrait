@@ -207,6 +207,7 @@ enum GraphSceneBuilder {
 
         // 遍1:局部装填。每叶得 (ψ 绕hub角, arcR 距hub半径);层内居中排。
         struct Packed { let member: Int; let psi: Double; let arcR: Double }
+        var megaOf: [Double] = []
         let psiCap = 115.0 * .pi / 180
         var packedAll: [[Packed]] = []
         var mainHalfAll: [Double] = []
@@ -215,8 +216,11 @@ enum GraphSceneBuilder {
                 (leafRest(spec.members[$0]), spec.members[$0].relPath)
                     < (leafRest(spec.members[$1]), spec.members[$1].relPath)
             }
-            let avgR = spec.members.isEmpty ? 6.0
-                : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)
+            // 超大 folder(Unclassified 类,>100 叶)单独逻辑:球缩 0.72、
+            // 装填更密 —— 不霸屏(07-02 反馈)。
+            let mega = spec.members.count > 100 ? 0.72 : 1.0
+            let avgR = (spec.members.isEmpty ? 6.0
+                : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)) * mega
             let slotW = avgR * 2 + GraphConstants.packSlotGap
             let layerStep = avgR * 2 + GraphConstants.packRingGap
             var packed: [Packed] = []
@@ -248,6 +252,7 @@ enum GraphSceneBuilder {
             }
             packedAll.append(packed)
             mainHalfAll.append(mainHalf)
+            megaOf.append(mega)
         }
 
         // 遍2:按实宽排开(缝 2°)。⚠️ 保底宽(hub 球角尺寸+缝)**不可压缩**,
@@ -287,7 +292,7 @@ enum GraphSceneBuilder {
             for pk in packedAll[k] {
                 let m = spec.members[pk.member]
                 let idx = nodes.count
-                let lr = leafRadius(m)
+                let lr = leafRadius(m) * megaOf[k]
                 // ψ 按本家实际获得宽度压缩,相邻扇子不打架
                 let dirA = centerRad + pk.psi * psiScale
                 let target = SIMD2<Double>(hubPos.x + cos(dirA) * pk.arcR,

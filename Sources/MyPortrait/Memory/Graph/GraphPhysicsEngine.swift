@@ -95,13 +95,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
         (targetIdx, targetPos) = Self.targetArrays(scene: scene)
-        // 07-02 定稿:打开即成型 —— 有落位目标的场景直接在成品位置出生,
-        // 物理开局休眠(炸开动画取消;拖拽 reheat 的晃动手感保留)。
+        // 07-02 三稿:开场**丝滑绽放** —— 从 78% 半径出生,目标弹簧
+        // 滑入成品位(约 2s),早停快照定格。不炸开也不瞬移。
         if !targetIdx.isEmpty {
-            for i in 0..<targetIdx.count { pos[Int(targetIdx[i])] = targetPos[i] }
+            for i in 0..<targetIdx.count { pos[Int(targetIdx[i])] = targetPos[i] * 0.78 }
             pos[0] = .zero
             snapshot = pos
-            alpha = 0
+            alpha = 0.3
         }
 
         var continuation: AsyncStream<Bool>.Continuation?
