@@ -4,12 +4,11 @@ import Foundation
 /// 变成一张 GraphScene。纯读盘 + 纯函数,设计为在后台线程跑
 /// (调用方先在 MainActor 读好 ConfigStore 的参数传进来)。
 ///
-/// 完美圆算法(07-02 定稿):
-///   1. 每个 hub 按叶数占比分得一段圆弧(30° 保底/220° 封顶,水填归一 360°)
-///      → 相邻扇区角度上不重叠,分区/folder 分明
-///   2. hub 距主球 = outerRadius − 该 hub 最远叶的弹簧长(floor 到碰撞下限)
-///      → 每家 fan 的外缘落在同一大圆上,末端球形成完美外圆
-///   3. 物理用角度弹簧把 hub 拉到目标角,楔形扇区角 = 份额
+/// 完美圆·物理化(07-02 终稿,Handoff §二):builder 只产**参数**不产落位:
+///   1. hub 等距半径(公式:outer − 全局最深 day-rest,floor 到装箱/碰撞下限)
+///   2. 楔形份额 = 叶数占比(hub 间角向碰撞半宽 ×2,亦是扇区墙全角)
+///   3. 叶子弹簧 rest = 家内 last_occurred 排名铺 25%~100% 跨度(顶格=外圆)
+///   位置全部由力系统涌现(角向碰撞平衡处即扇区边界,外缘自然成圆)。
 enum GraphSceneBuilder {
 
     /// portrait 画布的 7 个分区(emotions 用户拍板不做)+ 各自颜色。
@@ -192,9 +191,9 @@ enum GraphSceneBuilder {
                                radius: GraphConstants.mainRadius,
                                colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
 
-        // 07-02 终稿(两遍法):先在局部坐标把每把扇子装填好、量出实际
-        // 角宽,再按「实宽 + 2° 缝」把 hub 沿圆排开 —— 扇形相接无大缝。
-        // hub 距主球全体相等(公式):
+        // 07-02 物理化终稿:builder 只给**参数**(等距半径/楔形份额/弹簧
+        // rest),不给落位 —— 位置全部由力系统涌现(Handoff §二)。
+        // hub 距主球全体相等(公式不变):
         let hubRadii = specs.map(hubRadius)
         let globalMaxRest = specs.flatMap { $0.members.map(leafRest) }.max()
             ?? (outerRadius - hubDistance)
@@ -204,80 +203,30 @@ enum GraphSceneBuilder {
                        packFloor,
                        GraphConstants.mainRadius + maxHubR
                            + Double(GraphConstants.mainCollisionPadding) + 2)
+        let span = max(outerRadius - dist, 40)
 
-        // 遍1:局部装填。每叶得 (ψ 绕hub角, arcR 距hub半径);层内居中排。
-        struct Packed { let member: Int; let psi: Double; let arcR: Double }
-        var megaOf: [Double] = []
-        let psiCap = 115.0 * .pi / 180
-        var packedAll: [[Packed]] = []
-        var mainHalfAll: [Double] = []
-        for spec in specs {
-            let ordered = spec.members.indices.sorted {
-                (leafRest(spec.members[$0]), spec.members[$0].relPath)
-                    < (leafRest(spec.members[$1]), spec.members[$1].relPath)
-            }
-            // 超大 folder(Unclassified 类,>100 叶)单独逻辑:球缩 0.72、
-            // 装填更密 —— 不霸屏(07-02 反馈)。
-            let mega = spec.members.count > 100 ? 0.72 : 1.0
-            let avgR = (spec.members.isEmpty ? 6.0
-                : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)) * mega
-            let slotW = avgR * 2 + GraphConstants.packSlotGap
-            let layerStep = avgR * 2 + GraphConstants.packRingGap
-            var packed: [Packed] = []
-            // 半宽下限 = hub 球自身的角尺寸+缝(07-02 bug:小扇子比 hub 球窄,
-            // 排位宽度没算球本身 → 相邻 hub 目标位重叠且被快照钉死)
-            var mainHalf = asin(min((hubRadius(spec)
-                + GraphConstants.packSlotGap + 2) / dist, 0.9))
-            // 线长 = 天数**排名**映射(07-02 定稿):真实数据大多 >30 天全贴
-            // 映射上限,长短失去区分度;按家内排名铺 25%~100% 跨度,
-            // 最新最短、最旧顶到外圆,长短永远可读。
-            let span = max(outerRadius - dist, 40)
-            let denom = Double(max(ordered.count - 1, 1))
-            var i = 0
-            var arcR = 0.0
-            while i < ordered.count {
-                let rankRest = span * (0.25 + 0.75 * Double(i) / denom)
-                arcR = max(arcR + (i == 0 ? 0 : layerStep), rankRest)
-                let cap = max(1, Int((2 * psiCap * arcR) / slotW))
-                let m = min(ordered.count - i, cap)
-                for k in 0..<m {
-                    let psi = (Double(k) - Double(m - 1) / 2) * slotW / arcR
-                    packed.append(Packed(member: ordered[i + k], psi: psi, arcR: arcR))
-                }
-                // 该层的主角半宽(绕主球):层最宽处换算
-                let psiHalf = Double(m) / 2 * slotW / arcR
-                let mh = atan2(arcR * sin(psiHalf), dist + arcR * cos(psiHalf))
-                mainHalf = max(mainHalf, mh)
-                i += m
-            }
-            packedAll.append(packed)
-            mainHalfAll.append(mainHalf)
-            megaOf.append(mega)
+        // 楔形份额 = 叶数占比(hub 间角向碰撞的直径,扇区墙的全角)。
+        // ⚠️ 保底宽(hub 球角尺寸+缝)**不可压缩**,只等比压缩份额富余
+        //(过订会让角向碰撞永远解不开,小 hub 被挤到重叠 —— 同 07-02
+        // 两遍法的教训,搬到碰撞盘宽度上)。归一化目标留每家 2° 余量:
+        // Σ 不必精确 360(用户 07-02 拍板),扇形间**绝不重叠**是硬约束,
+        // 满订时叶群扭矩会把相邻盘压到互渗 ~15%,余量吸收它。
+        let shares = allocateWedges(counts: specs.map { $0.members.count })
+        let floors = specs.indices.map { k in
+            (2 * asin(min((hubRadii[k] + 3) / dist, 0.9))) * 180 / .pi + 2
         }
-
-        // 遍2:按实宽排开(缝 2°)。⚠️ 保底宽(hub 球角尺寸+缝)**不可压缩**,
-        // 只压缩扇子富余 —— 统一 scale 会把保底也压没,相邻 hub 重叠
-        //(07-02 自检 PNG 确诊,min gap -8.8 → +12.2)。
-        let gapRad = 2.0 * .pi / 180
-        let floors = hubRadii.map { 2 * asin(min(($0 + 3) / dist, 0.9)) + gapRad }
-        let excesses = specs.indices.map { max(0, 2 * mainHalfAll[$0] + gapRad - floors[$0]) }
-        let avail = 2 * .pi - floors.reduce(0, +)
+        let excesses = specs.indices.map { max(0, shares[$0] - floors[$0]) }
+        let avail = max(0, 360 - 2 * Double(specs.count) - floors.reduce(0, +))
         let exSum = excesses.reduce(0, +)
         let exScale = exSum > 0 ? min(1, avail / exSum) : 1
-        var cursor = -Double.pi / 2
         for (k, spec) in specs.enumerated() {
-            let width = floors[k] + excesses[k] * exScale
-            let centerRad = cursor + width / 2
-            cursor += width
             let r = hubRadii[k]
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
                                     radius: r, colorRGB: spec.colorRGB,
                                     fileURL: nil, hubIndex: 0)
-            hubNode.hubTargetAngle = centerRad
-            hubNode.hubWedgeDegrees = width * 180 / .pi
-            hubNode.targetPosition = SIMD2<Float>(Float(cos(centerRad) * dist),
-                                                  Float(sin(centerRad) * dist))
+            hubNode.hubWedgeDegrees = floors[k] + excesses[k] * exScale
+            hubNode.hubPinRadius = dist
             nodes.append(hubNode)
             let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
             edges.append(GraphEdge(a: hubIdx, b: 0, strength: s, restLength: dist,
@@ -286,25 +235,47 @@ enum GraphSceneBuilder {
                                        ballRadius: GraphConstants.mainRadius),
                                    springStrength: GraphConstants.hubSpringStrength))
 
-            let hubPos = SIMD2<Double>(cos(centerRad) * dist, sin(centerRad) * dist)
-            let psiScale = mainHalfAll[k] > 0
-                ? min(1, (width - gapRad) / 2 / mainHalfAll[k]) : 1
-            for pk in packedAll[k] {
-                let m = spec.members[pk.member]
+            // 线长 = 排名 + 日期间隔压缩映射(07-02 用户定稿):家内按
+            // last_occurred 升序,相邻两条的线长差 = 1 + ln(1+日期差) 个
+            // 步进 —— 同日也分开 1 槽(可读);差 1 天 ≈1.7 槽、差 1 个月
+            // ≈4.5 槽:日期差大则变化被压缩,但绝不等同(纯排名=太过,
+            // 30 天硬窗=超窗全糊,两者都被否)。归一化铺 25%~100% 跨度,
+            // 最旧顶格 = span → 外缘成圆。
+            // 叶径自适应(取代固定 ×0.72):楔形环带面积装不下全部叶球时
+            // 按 √面积比全体等比缩球 —— 「清晰可见不重叠」先保证几何
+            // 可行,物理才有解;装得下则不缩。0.6 = 不规则装填经验密度。
+            let inner = dist + 0.25 * span
+            let areaAvail = (hubNode.hubWedgeDegrees! * .pi / 180) / 2
+                * (outerRadius * outerRadius - inner * inner) * 0.6
+            let areaNeed = spec.members.reduce(0.0) {
+                let lr = leafRadius($1) + 1
+                return $0 + .pi * lr * lr
+            }
+            let mega = min(1, max(0.4, (areaAvail / max(areaNeed, 1)).squareRoot()))
+            let ordered = spec.members.indices.sorted {
+                (spec.members[$0].daysAgo, spec.members[$0].relPath)
+                    < (spec.members[$1].daysAgo, spec.members[$1].relPath)
+            }
+            var cum: [Double] = []
+            var c = 0.0, prevDays = 0.0
+            for (j, mi) in ordered.enumerated() {
+                let d = spec.members[mi].daysAgo
+                if j > 0 { c += 1 + log(1 + max(0, d - prevDays)) }
+                prevDays = d
+                cum.append(c)
+            }
+            let cMax = max(cum.last ?? 0, 1e-9)
+            for (rank, mi) in ordered.enumerated() {
+                let m = spec.members[mi]
                 let idx = nodes.count
-                let lr = leafRadius(m) * megaOf[k]
-                // ψ 按本家实际获得宽度压缩,相邻扇子不打架
-                let dirA = centerRad + pk.psi * psiScale
-                let target = SIMD2<Double>(hubPos.x + cos(dirA) * pk.arcR,
-                                           hubPos.y + sin(dirA) * pk.arcR)
-                var leafNode = GraphNode(id: idx, kind: leafKind(m), title: m.title,
-                                         radius: lr, colorRGB: leafColor(spec, m),
-                                         fileURL: m.url, hubIndex: hubIdx)
-                leafNode.targetPosition = SIMD2<Float>(Float(target.x), Float(target.y))
-                nodes.append(leafNode)
+                let lr = leafRadius(m) * mega
+                let rest = span * (0.25 + 0.75 * cum[rank] / cMax)
+                nodes.append(GraphNode(id: idx, kind: leafKind(m), title: m.title,
+                                       radius: lr, colorRGB: leafColor(spec, m),
+                                       fileURL: m.url, hubIndex: hubIdx))
                 edges.append(GraphEdge(a: idx, b: hubIdx,
                                        strength: leafStrength(m),
-                                       restLength: pk.arcR,
+                                       restLength: rest,
                                        halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }
