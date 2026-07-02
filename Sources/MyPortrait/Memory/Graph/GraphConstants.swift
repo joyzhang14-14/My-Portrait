@@ -73,7 +73,8 @@ enum GraphConstants {
 
     /// 气泡内叶子的装填密度:π·气泡半径² ≥ hub球面积 + Σ叶面积/此值。
     /// 叶多圆大(1000 叶巨圆)、叶少圆小(10 叶小圆),完全由内容涌现。
-    static let bubbleFill: Double = 0.55
+    /// 07-02 扁圆反馈:0.55→0.42 再松一档,大家叶群不挤圆更分散。
+    static let bubbleFill: Double = 0.42
     /// 气泡半径的额外呼吸边距(世界 pt)
     static let bubblePadding: Double = 4
     /// hub→主球弹簧 rest = 主球半径 + 气泡半径 + 此间隙(气泡贴主球排布)
