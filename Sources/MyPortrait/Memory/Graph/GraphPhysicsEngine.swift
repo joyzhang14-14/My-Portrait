@@ -590,17 +590,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         let dt = draggedTo
         dragLock.unlock()
         if let di, di > 0, di < n {
-            let delta = dt - pos[di]
             pos[di] = dt
             vel[di] = .zero
-            // 拖 hub = 拖整家(07-02 反馈:快拖时叶子追不上,被圈内夹钳
-            // 全按到隐形圆后缘挤成一撮):家人随 hub 位移刚体平移,阵型
-            // 原样带走,弹簧只负责松弛。O(家人数),忽略不计。
-            if simd_length_squared(delta) > 1e-8, hubIndices.contains(Int32(di)) {
-                for li in 0..<leafIndices.count where Int(leafOwnHub[li]) == di {
-                    pos[Int(leafIndices[li])] += delta
-                }
-            }
         }
         // 主球碰撞硬约束:斥力是点电荷不认半径,低 weight 小球会在中心区
         // 平衡叠在主球上(2026-07-01 用户实测反馈)。径向推出,含被拖球。
@@ -693,9 +684,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 for li in 0..<leafIndices.count {
                     let leaf = Int(leafIndices[li])
                     if leaf == di { continue }
+                    let hub = Int(leafOwnHub[li])
+                    // 自家 hub 被拖时豁免(否则追不上的叶被硬按到圆后缘
+                    // 挤成一撮);此间重叠由拖拽期全局碰撞阻力兜底
+                    if hub == di { continue }
                     let maxD = leafMaxDist[li]
                     guard maxD > 0 else { continue }
-                    let hub = Int(leafOwnHub[li])
                     let d = P[leaf] - P[hub]
                     let dist = simd_length(d)
                     if dist > maxD, dist > 1e-4 {
@@ -849,6 +843,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             cStackCX.withUnsafeMutableBufferPointer { SX in
             cStackCY.withUnsafeMutableBufferPointer { SY in
             cStackHalf.withUnsafeMutableBufferPointer { SH in
+                // 家隔离只在**常态**(07-02 用户定稿:重叠必须被阻力挡住,
+                // 拖拽扰动期跨家也互为阻力;常态下气泡不相交,隔离无损)
+                let isolate = alphaTarget == 0
                 for i in 0..<n {
                     let fi = FAM[i]
                     guard fi >= 0 else { continue }   // 只有叶参与(hub 归气泡/硬约束管)
@@ -877,8 +874,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             } else {
                                 var pj = Int(-c - 2)
                                 while pj >= 0 {
-                                    // 每对一次 + 同家隔离(07-02:排除外部影响)
-                                    if pj > i, FAM[pj] == fi {
+                                    // 每对一次 + 常态同家隔离(拖拽期全局阻力)
+                                    if pj > i, FAM[pj] == fi || (!isolate && FAM[pj] >= 0) {
                                         let rj = R[pj] + pad
                                         let rsum = ri + rj
                                         var d = pi - (P[pj] + V[pj])
