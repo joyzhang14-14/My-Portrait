@@ -302,7 +302,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
         linkPass()
         bubblePass()
-        familySpreadPass()
+        if heavy { familySpreadPass() }   // 匀布是慢整形力,拖拽中隔 tick 足够
         if heavy { collidePass() }
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
