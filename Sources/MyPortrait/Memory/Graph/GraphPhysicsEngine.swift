@@ -583,8 +583,17 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         let dt = draggedTo
         dragLock.unlock()
         if let di, di > 0, di < n {
+            let delta = dt - pos[di]
             pos[di] = dt
             vel[di] = .zero
+            // 拖 hub = 拖整家(07-02 反馈:快拖时叶子追不上,被圈内夹钳
+            // 全按到隐形圆后缘挤成一撮):家人随 hub 位移刚体平移,阵型
+            // 原样带走,弹簧只负责松弛。O(家人数),忽略不计。
+            if simd_length_squared(delta) > 1e-8, hubIndices.contains(Int32(di)) {
+                for li in 0..<leafIndices.count where Int(leafOwnHub[li]) == di {
+                    pos[Int(leafIndices[li])] += delta
+                }
+            }
         }
         // 主球碰撞硬约束:斥力是点电荷不认半径,低 weight 小球会在中心区
         // 平衡叠在主球上(2026-07-01 用户实测反馈)。径向推出,含被拖球。
