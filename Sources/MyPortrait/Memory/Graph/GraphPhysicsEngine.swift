@@ -59,6 +59,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// (每 0.5s 与参考位置比一次),原地抖/慢环流放行,真位移才算动。
     private var quietRef: [SIMD2<Float>] = []
     private var quietFlag = false
+    /// 缓停比例(07-03 反馈:静止判定后一刀冻结太突兀):冷透+静止后
+    /// 位移按此比例逐 tick 指数衰减(×brakeDecay,~1.6s 滑到 0),速度
+    /// 一点点变慢到 0 才 park;任何 reheat 立即回 1。
+    private var brake: Float = 1
     /// 冷透但未静止的连续 tick 数(病态运动兜底,超时强制 park)。
     private var restlessTicks: Int = 0
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
@@ -278,7 +282,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
             // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
             let coldNow = alpha < GraphConstants.alphaMin && alphaTarget == 0
-            let quiet = quietFlag
+            let quiet = brake == 0   // 缓停滑完(速度已到 0)才真正入睡
             if coldNow && !quiet { restlessTicks += 1 } else { restlessTicks = 0 }
             let cooled = coldNow && (quiet || restlessTicks > GraphConstants.parkRestlessCap)
             simLock.unlock()
@@ -357,6 +361,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 quietFlag = false   // 场景刚换,等一个完整窗
             }
             quietRef = pos
+        }
+        // 缓停:冷透+静止 → 位移比例指数衰减到 0(速度一点点变慢);
+        // 否则(reheat/还在动)立即恢复全速。
+        if alpha < GraphConstants.alphaMin && alphaTarget == 0 && quietFlag {
+            brake *= GraphConstants.brakeDecay
+            if brake < 0.02 { brake = 0 }
+        } else {
+            brake = 1
         }
         // 早停快照已删(07-02 终稿):布局没有"成品位",冷却到 alphaMin
         // 自然 park —— 开场/收敛全程都是物理,本身即丝滑。
@@ -606,13 +618,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         let a = alpha
         let cs = GraphConstants.centerStrength
         let damping = GraphConstants.velocityDamping
+        let bk = brake
         pos.withUnsafeMutableBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
         nodeCenterScale.withUnsafeBufferPointer { CS in
             for i in 0..<n {
                 V[i] += (SIMD2<Float>.zero - P[i]) * (cs * a * CS[i])
                 V[i] *= damping
-                P[i] += V[i]
+                P[i] += V[i] * bk   // bk = 缓停比例(常态 1,入睡前滑向 0)
             }
         }}}
         // 钉住:主球恒原点;被拖球跟指针(d3 fx/fy 语义)
