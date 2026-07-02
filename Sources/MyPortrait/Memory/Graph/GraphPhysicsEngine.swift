@@ -28,6 +28,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 范围先算、与邻居比较调整、不进别家地盘 —— 边界每 tick 按 hub
     /// 实际极角重算,见 territoryPass)。
     private var sectorLeaf: [Int32] = [], sectorHub: [Int32] = []
+    /// sectorHub 对应的 hubIndices 下标(预计算,免得 territoryPass
+    /// 每 tick 建 Dictionary —— 物理线程上省一次分配)。
+    private var sectorHubSlot: [Int32] = []
     /// 非主球 hub 的下标(folder/分区):互相硬碰撞不重合(07-01 反馈)。
     private var hubIndices: [Int32] = []
     /// hub 的等距硬钉半径(builder 公式值;≤0 = 无)。07-02:等距必须硬保证,
@@ -63,6 +66,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 根节点几何(collide 遍历需要真实区域边界,不能用质心近似剪枝)。
     private var rootCenter: SIMD2<Float> = .zero
     private var rootHalf: Float = 0
+    /// collide 遍历栈(预分配复用,免得每 tick 4 次数组分配)。
+    private var cStackNode = [Int32](repeating: 0, count: 256)
+    private var cStackCX = [Float](repeating: 0, count: 256)
+    private var cStackCY = [Float](repeating: 0, count: 256)
+    private var cStackHalf = [Float](repeating: 0, count: 256)
 
     private let simLock = NSLock()
 
@@ -93,6 +101,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
         (hubIndices, hubPinRadius, hubHalfAngle, hubMass) = Self.hubArrays(scene: scene)
+        sectorHubSlot = Self.slotArray(sectorHub: sectorHub, hubIndices: hubIndices)
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
         // 目标落位/绽放出生已删 —— 布局不再有"成品位",只有平衡态。
@@ -180,6 +189,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
         (hubIndices, hubPinRadius, hubHalfAngle, hubMass) = Self.hubArrays(scene: scene)
+        sectorHubSlot = Self.slotArray(sectorHub: sectorHub, hubIndices: hubIndices)
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
@@ -301,8 +311,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         // alpha 下限:冷却尾声回正力仍在,否则被碰撞挤过界的球推不回来
         let a = max(alpha, 0.1)
         let k = GraphConstants.sectorStrength
-        let kc = GraphConstants.sectorCenterStrength
         let margin: Float = 2 * .pi / 180
+        // 花瓣内聚力随叶数滑动(07-02 反馈):k = scale×√叶数,clamp。
+        // hubMass = 叶数+1(hubArrays 预算好)。
+        var kcArr = [Float](repeating: 0, count: h)
+        for i in 0..<h {
+            kcArr[i] = min(max(GraphConstants.petalCohesionScale
+                                   * (hubMass[i] - 1).squareRoot(),
+                               GraphConstants.petalCohesionMin),
+                           GraphConstants.petalCohesionMax)
+        }
         var theta = [Float](repeating: 0, count: h)
         for i in 0..<h {
             let p = pos[Int(hubIndices[i])]
@@ -323,14 +341,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             hiRel[ii] = max(off - margin, 0)
             loRel[jj] = min(off - gap + margin, 0)
         }
-        var slotOf = [Int32: Int](minimumCapacity: h)
-        for i in 0..<h { slotOf[hubIndices[i]] = i }
         pos.withUnsafeBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
         sectorLeaf.withUnsafeBufferPointer { L in
-        sectorHub.withUnsafeBufferPointer { H in
+        sectorHubSlot.withUnsafeBufferPointer { HS in
             for t in 0..<L.count {
-                guard let hIdx = slotOf[H[t]] else { continue }
+                let slot = HS[t]
+                guard slot >= 0 else { continue }
+                let hIdx = Int(slot)
                 let leaf = Int(L[t])
                 let p = P[leaf]
                 let r = simd_length(p)
@@ -345,9 +363,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 if excess != 0 {
                     V[leaf] -= tangent * (excess * r * k * a)
                 }
-                // 花瓣内聚:全程向自家轴线的弱角向弹簧(稀疏家收拢成瓣,
-                // 密集家被碰撞力顶开照样铺满楔形)
-                V[leaf] -= tangent * (d * r * kc * a)
+                // 花瓣内聚:全程向自家轴线的弱角向弹簧,力度随叶数滑动
+                V[leaf] -= tangent * (d * r * kcArr[hIdx] * a)
             }
         }}}}
     }
@@ -753,6 +770,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return (l, h)
     }
 
+    /// sectorHub(节点下标)→ hubIndices 数组下标 的预计算映射(-1 = 无)。
+    private static func slotArray(sectorHub: [Int32], hubIndices: [Int32]) -> [Int32] {
+        var slotOf = [Int32: Int32](minimumCapacity: hubIndices.count)
+        for (i, hub) in hubIndices.enumerated() { slotOf[hub] = Int32(i) }
+        return sectorHub.map { slotOf[$0] ?? -1 }
+    }
+
     /// 半径感知碰撞力(d3 forceCollide 的零依赖移植,07-02 物理化的核心
     /// 新力):任意两球圆心距 < r_i+r_j+缝 时按重叠深度推开(速度域,
     /// 权重 = 对方半径² 占比,大球稳)。复用 manyBody 的四叉树 + qMaxR
@@ -761,21 +785,20 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         guard n > 1 else { return }
         let strength = GraphConstants.collideStrength
         let pad = GraphConstants.collidePadding
-        var sNode = [Int32](repeating: 0, count: 256)
-        var sCX = [Float](repeating: 0, count: 256)
-        var sCY = [Float](repeating: 0, count: 256)
-        var sHalf = [Float](repeating: 0, count: 256)
-        for _ in 0..<GraphConstants.collideIterations {
+        // 拖拽中(alphaTarget>0)降到 1 轮:布局本来就在被扰动,多轮解算
+        // 白费 tick 预算 —— tick 慢会让被拖球掉帧(07-02 卡顿反馈)。
+        let iters = alphaTarget > 0 ? 1 : GraphConstants.collideIterations
+        for _ in 0..<iters {
             pos.withUnsafeBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
             nodeRadius.withUnsafeBufferPointer { R in
             qChild.withUnsafeBufferPointer { ch in
             qMaxR.withUnsafeBufferPointer { MR in
             nextPoint.withUnsafeBufferPointer { NP in
-            sNode.withUnsafeMutableBufferPointer { SN in
-            sCX.withUnsafeMutableBufferPointer { SX in
-            sCY.withUnsafeMutableBufferPointer { SY in
-            sHalf.withUnsafeMutableBufferPointer { SH in
+            cStackNode.withUnsafeMutableBufferPointer { SN in
+            cStackCX.withUnsafeMutableBufferPointer { SX in
+            cStackCY.withUnsafeMutableBufferPointer { SY in
+            cStackHalf.withUnsafeMutableBufferPointer { SH in
                 for i in 0..<n {
                     let pi = P[i] + V[i]           // 预测位置(d3 语义)
                     let ri = R[i] + pad
