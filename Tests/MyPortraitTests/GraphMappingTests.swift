@@ -52,15 +52,14 @@ final class GraphMappingTests: XCTestCase {
         XCTAssertLessThan(d30 - d29, d2 - d1)
     }
 
-    // MARK: 连接强度 → 线宽:clamp
+    // MARK: 端点线宽 = 球半径,上限 15(2026-07-01 用户定稿)
 
-    func testEdgeWidthClamp() {
-        XCTAssertEqual(GraphConstants.edgeWidth(strength: 0),
-                       GraphConstants.widthMin, accuracy: 1e-9)
-        XCTAssertEqual(GraphConstants.edgeWidth(strength: 1000),
-                       GraphConstants.widthMax, accuracy: 1e-9)
-        // 中段线性:S=10 → 3.5
-        XCTAssertEqual(GraphConstants.edgeWidth(strength: 10), 3.5, accuracy: 1e-9)
+    func testEdgeEndWidthFollowsRadiusCapped() {
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 6), 6, accuracy: 1e-9)
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 14.9), 14.9, accuracy: 1e-9)
+        // 主球 44 / 分区球 30 → 全部截断到 15
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 30), 15, accuracy: 1e-9)
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 44), 15, accuracy: 1e-9)
     }
 
     // MARK: 命中网格
@@ -94,8 +93,8 @@ final class GraphMappingTests: XCTestCase {
                       colorRGB: .init(0.5, 0.5, 0.5), fileURL: nil, hubIndex: 1),
         ]
         let edges = [
-            GraphEdge(a: 1, b: 0, strength: 12, restLength: 300, halfWidth: 4),
-            GraphEdge(a: 2, b: 1, strength: 3, restLength: 100, halfWidth: 1),
+            GraphEdge(a: 1, b: 0, strength: 12, restLength: 300, halfWidthA: 4, halfWidthB: 15),
+            GraphEdge(a: 2, b: 1, strength: 3, restLength: 100, halfWidthA: 1, halfWidthB: 4),
         ]
         let scene = GraphScene(zone: .events, nodes: nodes, edges: edges)
         let p1 = GraphStaticLayout.layout(scene: scene)

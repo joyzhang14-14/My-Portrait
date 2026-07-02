@@ -46,12 +46,13 @@ struct GraphNode: Identifiable, Sendable {
 struct GraphEdge: Sendable {
     let a: Int
     let b: Int
-    /// 连接强度(线宽由它决定;物理弹簧刚度全局统一,不随它 —— 需求待确认#4)。
+    /// 连接强度(占位:物理弹簧刚度全局统一;线宽 2026-07-01 起改由球半径决定)。
     let strength: Double
     /// 弹簧自然长度(= §4.4 的距离映射结果)。
     let restLength: Double
-    /// 端点半宽(两端同宽:「连接处最粗,中间最细」)。
-    let halfWidth: Double
+    /// 端点半宽,逐端各自 = min(所连球半径, 15) —— 神经末梢从球上「长」出来。
+    let halfWidthA: Double
+    let halfWidthB: Double
 }
 
 /// 一张画布的完整图数据(不含位置 —— 位置归布局/物理层)。
