@@ -1,10 +1,26 @@
 import Foundation
 
+/// 边的渲染方式。
+enum GraphEdgeStyle {
+    /// 等宽细线(Obsidian 式),全部边一条 Path 一次 stroke
+    case line
+    /// 锥形橡皮筋(两端粗中间细),逐边填充
+    case taperedFill
+}
+
 /// 图谱视图的全部可调常数(旋钮)集中在这一处。
 /// 需求文档:~/Desktop/Obsidian/Memory图谱视图·需求与实现方案.md §8
 enum GraphConstants {
 
-    // MARK: 连接线(橡皮筋:两端粗中间细)
+    // MARK: 连接线
+
+    /// 边的画法。2026-07-01 反馈:锥形在实机上卡且视觉不明显,先用纯线;
+    /// taperedFill 代码保留,改这一行即可切回。
+    static let edgeStyle: GraphEdgeStyle = .line
+    /// 纯线模式线宽(屏幕 pt,不随 zoom —— Obsidian 式等粗)
+    static let lineEdgeWidth: Double = 1.3
+
+    // MARK: 连接线(橡皮筋:两端粗中间细,taperedFill 模式用)
 
     /// 端点半宽 = 所连球的半径(用户 2026-07-01 定稿:神经末端粗度=球半径)。
     /// hub↔主球的边上限 15;**末端球的边整条上限 7**(07-01 二次反馈:
