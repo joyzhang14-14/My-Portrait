@@ -30,6 +30,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var sectorCosLimit: [Float] = []
     /// 非主球 hub 的下标(folder/分区):互相硬碰撞不重合(07-01 反馈)。
     private var hubIndices: [Int32] = []
+    /// hub 的等距硬钉半径(=|targetPosition|;≤0 = 无)。07-02:等距必须硬保证,
+    /// 弹簧/碰撞的合力会让 hub 半径漂移。
+    private var hubPinRadius: [Float] = []
     /// 完美圆(07-02):有目标极角的 hub + 角度(builder 按份额分配)。
     private var angleHub: [Int32] = [], angleTarget: [Float] = []
     /// 无缝圆:有精确目标落位的叶子(builder 逐环装填算出)。
@@ -86,6 +89,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
+        hubPinRadius = hubIndices.map { i in
+            scene.nodes[Int(i)].targetPosition.map { simd_length($0) } ?? -1
+        }
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
         (targetIdx, targetPos) = Self.targetArrays(scene: scene)
@@ -173,6 +179,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
+        hubPinRadius = hubIndices.map { i in
+            scene.nodes[Int(i)].targetPosition.map { simd_length($0) } ?? -1
+        }
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
         (targetIdx, targetPos) = Self.targetArrays(scene: scene)
@@ -568,6 +577,19 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             P[j] += dir * push
                         }
                     }
+                }
+            }
+        }
+        // hub 等距硬钉(07-02):半径投影回公式值,角度不动(角度弹簧管)。
+        if !hubIndices.isEmpty {
+            pos.withUnsafeMutableBufferPointer { P in
+                for hi in 0..<hubIndices.count {
+                    let pin = hubPinRadius[hi]
+                    guard pin > 0 else { continue }
+                    let h = Int(hubIndices[hi])
+                    if h == di { continue }            // 拖拽豁免
+                    let r = simd_length(P[h])
+                    if r > 1 { P[h] = P[h] / r * pin }
                 }
             }
         }

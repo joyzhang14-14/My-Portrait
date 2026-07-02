@@ -74,13 +74,13 @@ enum GraphConstants {
     /// 改为按比例缩放每家的叶距,让所有 fan 外缘仍落同一大圆:
     /// rest' = rest × (outer − hubDist) / 该家最远 rest。
     static let eventOuterRadius: Double = 320
-    static let portraitOuterRadius: Double = 300
+    static let portraitOuterRadius: Double = 240   // 07-02:分区球太远,外圆收小→等距公式值≈100
     static let eventHubDistance: Double = 150
     static let portraitHubDistance: Double = 150
     /// hub 角度弹簧刚度:把 hub 拉向按份额分配的目标极角
     static let hubAngleStrength: Float = 0.3
     /// 叶子位置弹簧刚度:拉向逐环装填算出的精确落位(无缝圆)
-    static let leafTargetStrength: Float = 0.12
+    static let leafTargetStrength: Float = 0.25   // 07-02:加快收敛,减少可见漂移
     /// 逐环装填:球间角向间隙 / 环间距附加(世界 pt;07-02 反馈:更密集)
     static let packSlotGap: Double = 1
     static let packRingGap: Double = 1
