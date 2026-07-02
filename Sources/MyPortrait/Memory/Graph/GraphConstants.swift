@@ -129,6 +129,10 @@ enum GraphConstants {
     static let parkNetMove: Float = 6
     /// 净位移窗长(tick;30 = 0.5s@60Hz)
     static let parkQuietWindow: Int = 30
+    /// 缓停衰减(07-03 反馈:静止判定后一刀冻结太突兀):冷透+静止后每
+    /// tick 位移 × 此值,~1.6s 从全速指数滑到 0(先快后慢,像摩擦力),
+    /// 速度真正到 0 才 park;<0.02 归零。
+    static let brakeDecay: Float = 0.96
     /// 静止判定兜底(tick 数,≈30s):冷透后持续运动超过此数强制休眠,
     /// 防病态运动永不 park 烧 CPU。
     static let parkRestlessCap: Int = 1800
