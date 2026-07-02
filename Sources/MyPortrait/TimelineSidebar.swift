@@ -381,24 +381,46 @@ struct TimelineSidebar: View {
 
     private var memoryScopeSection: some View {
         sectionCard {
-            scopeHeader("PROFILE")
-            VStack(spacing: 2) {
-                scopeRow(.personalInfo)
-            }
-            Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
-            scopeHeader("PORTRAIT")
-            VStack(spacing: 2) {
-                ForEach(PortraitPaths.seedCategories, id: \.self) { cat in
-                    scopeRow(.portrait(category: cat))
+            if memoryViewMode == .canvas {
+                // canvas 模式只列三项(用户 2026-07-01 定稿):
+                // Personal Info(点击自动回 text)/ Portrait(整图)/ Events。
+                scopeHeader("GRAPH")
+                VStack(spacing: 2) {
+                    scopeRow(.personalInfo)
+                    scopeRowCustom(isOn: isPortraitScope,
+                                   icon: "person.fill",
+                                   title: "Portrait") {
+                        if !isPortraitScope {
+                            memoryScope = .portrait(category: PortraitPaths.seedCategories[0])
+                        }
+                    }
+                    scopeRow(.events)
+                }
+            } else {
+                scopeHeader("PROFILE")
+                VStack(spacing: 2) {
+                    scopeRow(.personalInfo)
+                }
+                Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
+                scopeHeader("PORTRAIT")
+                VStack(spacing: 2) {
+                    ForEach(PortraitPaths.seedCategories, id: \.self) { cat in
+                        scopeRow(.portrait(category: cat))
+                    }
+                }
+                Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
+                scopeHeader("DATA")
+                VStack(spacing: 2) {
+                    scopeRow(.events)
+                    scopeRow(.input)
                 }
             }
-            Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
-            scopeHeader("DATA")
-            VStack(spacing: 2) {
-                scopeRow(.events)
-                scopeRow(.input)
-            }
         }
+    }
+
+    private var isPortraitScope: Bool {
+        if case .portrait = memoryScope { return true }
+        return false
     }
 
     private func scopeHeader(_ title: String) -> some View {
@@ -410,19 +432,24 @@ struct TimelineSidebar: View {
     }
 
     private func scopeRow(_ s: MemoryScope) -> some View {
-        let isOn = memoryScope == s
-        return Button {
+        scopeRowCustom(isOn: memoryScope == s, icon: s.systemImage, title: s.displayName) {
             memoryScope = s
-            // canvas 模式下点 Personal Info / Input(无图谱形态)→ 自动回 text
-            //(需求 §3.2)。
-            if !MemoryViewMode.supportsCanvas(s) { memoryViewMode = .text }
-        } label: {
+            // canvas 模式下点 Personal Info **不**切回 text(用户 2026-07-01
+            // 定稿):toggle 保持 canvas,主面板由 ContentView 按「该 scope 无
+            // 图谱形态」自动落到表单;再点 Portrait/Events 直接回图谱。
+        }
+    }
+
+    /// scope 行的通用外观(canvas 模式的聚合 "Portrait" 行复用)。
+    private func scopeRowCustom(isOn: Bool, icon: String, title: String,
+                                action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: Theme.Space.sm) {
-                Image(systemName: s.systemImage)
+                Image(systemName: icon)
                     .font(.system(size: 11))
                     .frame(width: 16)
                     .foregroundStyle(isOn ? Theme.accent : Theme.textSecondary)
-                Text(s.displayName)
+                Text(title)
                     .font(.system(size: 12, weight: isOn ? .semibold : .regular))
                     .foregroundStyle(isOn ? Theme.textPrimary : Theme.textSecondary)
                 Spacer()
