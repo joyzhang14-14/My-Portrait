@@ -225,10 +225,13 @@ enum GraphSceneBuilder {
                 // 排列随机性(07-02 反馈):日期映射之上叠 ±jitter 的确定性
                 // 抖动(路径哈希,不是随机数 —— 同数据每次打开布局一致),
                 // 打破同心圆环的机械感;clamp 保证不出气泡边缘。
+                // 径向按 √ 映射(07-02 扁圆反馈):圆盘面积 ∝ 半径²,线性
+                // 铺内密外疏,大家叶群挤成厚环被压扁;√ = 面积均匀采样,
+                // 整盘匀铺(日期序保持单调)。
                 let j = (stableHash01(m.relPath) - 0.5) * 2 * GraphConstants.bubbleRestJitter
-                let rest = min(maxRest * (floorFrac + (1 - floorFrac) * cum[rank] / cMax)
-                                   * (1 + j),
-                               maxRest)
+                let f2 = floorFrac * floorFrac
+                let radial = (f2 + (1 - f2) * cum[rank] / cMax).squareRoot()
+                let rest = min(maxRest * radial * (1 + j), maxRest)
                 nodes.append(GraphNode(id: idx, kind: leafKind(m), title: m.title,
                                        radius: lr, colorRGB: leafColor(spec, m),
                                        fileURL: m.url, hubIndex: hubIdx))
