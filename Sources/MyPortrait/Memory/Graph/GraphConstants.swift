@@ -120,6 +120,18 @@ enum GraphConstants {
     static let centerStrength: Float = 0.05
     /// 拖拽/交互 reheat 的 alphaTarget(d3 惯例 0.3)
     static let dragAlphaTarget: Float = 0.3
+    /// park 静止阈值(净位移窗):每 parkQuietWindow tick 与参考位置比一次,
+    /// 全场最大净移动 < 此值(世界 pt)才算静止 —— 纯时间冷却会把"从远处
+    /// 回弹的球"半路冻住(07-02 实测:拉远松手,回来路上突然停)。
+    /// ⚠️ 不能用逐 tick 速度:冷却后恒定力(碰撞/匀布)有 ~0.3pt/tick 原地
+    /// 微抖 + 家级慢环流(实测全场最大 3.4~4.1pt/0.5s),永不归零。
+    /// 6 = 实测稳态 ×1.5 余量;回弹球慢于 12pt/s(肉眼近静止)即入睡。
+    static let parkNetMove: Float = 6
+    /// 净位移窗长(tick;30 = 0.5s@60Hz)
+    static let parkQuietWindow: Int = 30
+    /// 静止判定兜底(tick 数,≈30s):冷透后持续运动超过此数强制休眠,
+    /// 防病态运动永不 park 烧 CPU。
+    static let parkRestlessCap: Int = 1800
     /// 物理线程定步频率(60 = d3/Obsidian 的 rAF 同款;120 视觉无差但
     /// 背景 CPU 翻倍,07-01 拖拽卡顿优化降回 60)
     static let physicsHz: Double = 60

@@ -52,6 +52,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var familyRange: [(hub: Int32, lo: Int, hi: Int)] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
+    /// 静止判定(simLock 保护):alpha 是纯时间冷却,不看球到没到位 ——
+    /// 只看 alpha 会把"从远处回弹的球"半路冻住(07-02 实测:拉远松手,
+    /// 回来路上突然停)。⚠️ 不能用逐 tick 速度:冷却后碰撞/匀布等恒定力
+    /// 有 ~0.3pt/tick 原地微抖 + 家级慢环流,永不归零 —— 用净位移窗
+    /// (每 0.5s 与参考位置比一次),原地抖/慢环流放行,真位移才算动。
+    private var quietRef: [SIMD2<Float>] = []
+    private var quietFlag = false
+    /// 冷透但未静止的连续 tick 数(病态运动兜底,超时强制 park)。
+    private var restlessTicks: Int = 0
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
     private var tickCount: UInt64 = 0
     /// 叶子出生角的整体相位(随种子变,07-02:随机种子每次开花不同)。
@@ -265,7 +274,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 alphaTarget = p
                 if p > 0, alpha < p { alpha = p }
             }
-            let cooled = alpha < GraphConstants.alphaMin && alphaTarget == 0
+            // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
+            // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
+            // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
+            let coldNow = alpha < GraphConstants.alphaMin && alphaTarget == 0
+            let quiet = quietFlag
+            if coldNow && !quiet { restlessTicks += 1 } else { restlessTicks = 0 }
+            let cooled = coldNow && (quiet || restlessTicks > GraphConstants.parkRestlessCap)
             simLock.unlock()
             let sleeping = cooled && !dragging
             let stateChanged = parkedFlag != sleeping
@@ -328,6 +343,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         collidePass()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
+        // 静止判定净位移窗:每 parkQuietWindow tick 与参考位置比一次。
+        if tickCount % UInt64(GraphConstants.parkQuietWindow) == 0 {
+            if quietRef.count == n {
+                var m2: Float = 0
+                let t2 = GraphConstants.parkNetMove * GraphConstants.parkNetMove
+                for i in 1..<n {
+                    m2 = max(m2, simd_length_squared(pos[i] - quietRef[i]))
+                    if m2 >= t2 { break }
+                }
+                quietFlag = m2 < t2
+            } else {
+                quietFlag = false   // 场景刚换,等一个完整窗
+            }
+            quietRef = pos
+        }
         // 早停快照已删(07-02 终稿):布局没有"成品位",冷却到 alphaMin
         // 自然 park —— 开场/收敛全程都是物理,本身即丝滑。
     }
