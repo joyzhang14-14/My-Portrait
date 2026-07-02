@@ -706,12 +706,23 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let hp = pos[Int(fam.hub)]
             var items: [(t: Float, leaf: Int32)] = []
             items.reserveCapacity(count)
+            var cVec = SIMD2<Float>.zero          // 角向质心(单位向量和)
             for x in fam.lo..<fam.hi {
                 let leaf = familyLeaf[x]
                 let p = pos[Int(leaf)] - hp
-                items.append((atan2(p.y, p.x), leaf))
+                let t = atan2(p.y, p.x)
+                items.append((t, leaf))
+                cVec += SIMD2<Float>(cos(t), sin(t))
             }
             items.sort { $0.t < $1.t }
+            cVec /= Float(count)
+            let cMag = simd_length(cVec)          // 0=角向均匀,→1=全挤一边
+            let cAng = atan2(cVec.y, cVec.x)
+            let evenGap = 2 * Float.pi / Float(count)
+            // 大家(07-02 反馈:叶多的 folder 反而铺不匀):均分角随叶数
+            // 变小,邻居间隙差同步变小 → 力趋零。改按**相对失衡**放大
+            //(除以均分角,封顶 8×),大家的失衡与小家同力度回正。
+            let relBoost = min(1 + 0.03 / evenGap, 8)
             for i in 0..<count {
                 let tL = items[(i + count - 1) % count].t
                 let tC = items[i].t
@@ -720,13 +731,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 if gapL < 0 { gapL += 2 * .pi }
                 var gapR = tR - tC
                 if gapR < 0 { gapR += 2 * .pi }
-                let delta = (gapR - gapL) * 0.5
+                let delta = (gapR - gapL) * 0.5 * relBoost
                 let leaf = Int(items[i].leaf)
                 let p = pos[leaf] - hp
                 let r = simd_length(p)
                 guard r > 1 else { continue }
                 let tangent = SIMD2<Float>(-p.y, p.x) / r
-                vel[leaf] += tangent * (delta * r * k * a)
+                // 局部弛豫(邻居中点) + 全局一阶均衡(从拥挤方向切向散开,
+                // sin(φ−质心角) 定方向,质心归零时整项归零)。
+                // 只给大家(叶数渐入):小家会被推到对跖点堆成新团(188° 缺口实测)
+                let m1w = 0.4 * min(max(Float(count) - 16, 0) / 32, 1)
+                let mode1 = cMag * sin(tC - cAng) * m1w
+                // 限速 ±0.1 rad:防大家爆冲即可 —— 0.03 会把小家的大步
+                // 回正砍没(7 叶家转 90° 需 300+ tick,park 前转不完,189° 缺口实测)
+                let push = max(min(delta + mode1, 0.1), -0.1)
+                vel[leaf] += tangent * (push * r * k * a)
             }
         }
     }
