@@ -31,8 +31,8 @@ final class GraphSession {
     }
 }
 
-/// 图谱模式的根视图:按 scope 决定画布(Events → event 图,portrait 分类 →
-/// portrait 图),负责数据加载、物理引擎生命周期与 HUD。
+/// 图谱模式的根视图:按 scope 决定画布(Events → event 图,portrait → portrait
+/// 图),负责数据加载、物理引擎生命周期、浮窗与神经脉冲、HUD。
 /// 渲染在主窗口右侧内容区(与 MemoriesView 同位置),不开新窗口。
 /// 非图谱 scope(personalInfo/input)不会路由进来 —— ContentView 保证。
 struct GraphRootView: View {
@@ -42,47 +42,162 @@ struct GraphRootView: View {
     @State private var engine: GraphPhysicsEngine? = nil
     /// 引擎替换代际:驱动 park 订阅 task 重启(每个引擎的事件流只消费一次)。
     @State private var engineGen = 0
-    @State private var paused = false
+    /// 物理是否休眠(park 事件同步)。
+    @State private var physicsParked = false
     @State private var camera = GraphCamera()
     @State private var hoveredId: Int? = nil
     @State private var loading = false
     /// 加载代际 token:快速切 zone 时丢弃过期结果(同 MemoriesView.reload 模式)。
     @State private var loadGen = 0
 
+    // 浮窗(末端球点击)
+    @State private var floatNodeId: Int? = nil
+    /// 跨画布跳转目标:portrait 浮窗点 event chip → 切 events 画布后按 relPath
+    /// 定位到该球(reload 末尾消费)。
+    @State private var pendingFloatEventRel: String? = nil
+
+    // 神经脉冲(hub 点击)
+    @State private var pulses: [GraphPulse] = []
+    @State private var pulseStart: Date = .distantPast
+    @State private var pulseGen = 0
+
     private var zone: GraphZone {
         if case .portrait = scope { return .portrait }
         return .events
     }
 
+    /// 逐帧重绘只在需要时开:物理在动 / hover 白闪中 / 脉冲在跑。
+    /// 全静止 → TimelineView 暂停,重绘只由相机等状态变化触发(CPU≈0)。
+    private var renderPaused: Bool {
+        physicsParked && hoveredId == nil && pulses.isEmpty
+    }
+
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            if let engine {
-                GraphCanvasView(scene: scene,
-                                engine: engine,
-                                paused: paused,
-                                camera: $camera,
-                                hoveredId: $hoveredId)
-                    .background(Color.black.opacity(0.001))   // 空白处也接手势
-            } else {
-                Color.clear
+        GeometryReader { geo in
+            ZStack(alignment: .topTrailing) {
+                if let engine {
+                    GraphCanvasView(scene: scene,
+                                    engine: engine,
+                                    paused: renderPaused,
+                                    pulses: pulses,
+                                    pulseStart: pulseStart,
+                                    camera: $camera,
+                                    hoveredId: $hoveredId,
+                                    onTapNode: handleTap)
+                        .background(Color.black.opacity(0.001))   // 空白处也接手势
+
+                    // 浮窗:锚在球旁,物理在动时跟着球走(同一时钟)。
+                    if let fid = floatNodeId, fid < scene.nodes.count {
+                        SwiftUI.TimelineView(.animation(minimumInterval: nil,
+                                                        paused: renderPaused)) { _ in
+                            GraphFloatWindow(
+                                node: scene.nodes[fid],
+                                onClose: { floatNodeId = nil },
+                                onJumpToEvent: jumpToEvent)
+                            .position(floatPosition(for: fid, engine: engine,
+                                                    viewSize: geo.size))
+                        }
+                    }
+                } else {
+                    Color.clear
+                }
+                hud
             }
-            hud
         }
         .background(SidebarBackdrop().ignoresSafeArea())
         .task(id: zone) { await reload() }
-        // park 事件 → 暂停/恢复 TimelineView。engineGen 变化(引擎替换)重订阅。
+        // park 事件 → 记录物理休眠态。engineGen 变化(引擎替换)重订阅。
         .task(id: engineGen) {
             guard let engine else { return }
-            paused = engine.isParked
-            for await parked in engine.parkEvents { paused = parked }
+            physicsParked = engine.isParked
+            for await parked in engine.parkEvents { physicsParked = parked }
         }
-        // 换画布前把相机存回会话,回来还原视角。
+        // 换画布:相机存回会话;浮窗/脉冲不跨画布。
         .onChange(of: zone) { oldZone, _ in
             GraphSession.shared.entries[oldZone]?.camera = camera
+            floatNodeId = nil
+            pulses = []
         }
         .onDisappear {
             GraphSession.shared.entries[zone]?.camera = camera
         }
+    }
+
+    // MARK: - 交互路由
+
+    /// 点空白 = 关浮窗;点末端球 = 开浮窗;点 hub = 神经脉冲(无浮窗,需求 §5)。
+    private func handleTap(_ id: Int?) {
+        guard let id, id < scene.nodes.count else {
+            floatNodeId = nil
+            return
+        }
+        if scene.nodes[id].kind.isHub {
+            floatNodeId = nil
+            triggerPulse(from: id)
+        } else {
+            floatNodeId = id
+        }
+    }
+
+    private func triggerPulse(from hub: Int) {
+        guard let engine else { return }
+        let snap = engine.readSnapshot()
+        guard snap.count == scene.nodes.count else { return }
+        let (list, total) = GraphPulseScheduler.schedule(from: hub, scene: scene,
+                                                         positions: snap)
+        pulses = list
+        pulseStart = Date()
+        pulseGen += 1
+        let gen = pulseGen
+        // 动画走完自动清空(清空后 renderPaused 恢复休眠判定)。
+        Task {
+            try? await Task.sleep(for: .seconds(total + 0.2))
+            if gen == pulseGen { pulses = [] }
+        }
+    }
+
+    /// portrait 浮窗 event chip → 切 Event 画布 + 相机对准 + 打开该 event 浮窗。
+    private func jumpToEvent(_ relPath: String) {
+        floatNodeId = nil
+        pendingFloatEventRel = relPath
+        if zone == .events {
+            resolvePendingEventJump()
+        } else {
+            scope = .events   // 触发 .task(id: zone) → reload 末尾消费 pending
+        }
+    }
+
+    private func resolvePendingEventJump() {
+        guard let rel = pendingFloatEventRel else { return }
+        pendingFloatEventRel = nil
+        guard let idx = scene.nodes.firstIndex(where: {
+            if case .eventLeaf(let r) = $0.kind { return r == rel }
+            return false
+        }) else { return }
+        if let engine {
+            let snap = engine.readSnapshot()
+            if idx < snap.count { camera.center = snap[idx] }
+        }
+        floatNodeId = idx
+    }
+
+    /// 浮窗中心位置:球右侧偏移,clamp 进视口。
+    private func floatPosition(for id: Int, engine: GraphPhysicsEngine,
+                               viewSize: CGSize) -> CGPoint {
+        let snap = engine.readSnapshot()
+        guard id < snap.count, id < scene.nodes.count else {
+            return CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        }
+        let ball = camera.worldToScreen(snap[id], viewSize: viewSize)
+        let r = scene.nodes[id].radius * camera.zoom
+        let halfW = 190.0, halfH = 230.0
+        // 优先放球右侧;放不下换左侧。
+        var x = ball.x + r + 20 + halfW
+        if x + halfW > viewSize.width { x = ball.x - r - 20 - halfW }
+        var y = ball.y
+        x = min(max(x, halfW + 8), viewSize.width - halfW - 8)
+        y = min(max(y, halfH + 8), viewSize.height - halfH - 8)
+        return CGPoint(x: x, y: y)
     }
 
     // MARK: - HUD
@@ -151,6 +266,8 @@ struct GraphRootView: View {
             camera = GraphCamera()
         }
         hoveredId = nil
+        if floatNodeId.map({ $0 >= scene.nodes.count }) == true { floatNodeId = nil }
         loading = false
+        resolvePendingEventJump()   // 跨画布跳转:落到目标 event 球 + 开浮窗
     }
 }

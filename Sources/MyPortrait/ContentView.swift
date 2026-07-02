@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var memoryScope: MemoryScope = .events
     /// Memories 区 text/canvas 查看模式(切换钮在侧栏,内容在 mainPane)。
     @State private var memoryViewMode: MemoryViewMode = .text
+    /// 图谱浮窗 wr chip 跳转注入:切回 text/Input 后要定位的 record id。
+    @State private var memoryInputJump: Int64? = nil
     @State private var cronJobSelection: UUID? = nil
     @State private var settingsSubsection: SettingsSubsection? = .app(.general)
     /// 首启 onboarding 状态。绑定 ConfigStore.general.onboardingCompleted。
@@ -119,6 +121,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home
         }
+        // 图谱浮窗 wr chip → 切回 text 模式的 Input 并定位该 record(需求 §5.1)。
+        .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
+            guard let id = notif.object as? Int64 else { return }
+            selection = .memories
+            memoryViewMode = .text
+            memoryScope = .input
+            memoryInputJump = id
+        }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
             guard let date = notif.object as? Date else { return }
             selection = .timeline
@@ -190,7 +200,8 @@ struct ContentView: View {
                              onEditEntity: { url in
                                  chat.startEditConversation(originalURL: url)
                                  selection = .home
-                             })
+                             },
+                             externalInputJump: $memoryInputJump)
             }
         case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
