@@ -183,6 +183,9 @@ struct GraphCanvasView: View {
             // (天然不加深),无离屏层,像素量最小 —— 也是修卡顿的关键
             // (旧方案的 drawLayer 每帧强制全屏离屏合成)。
             var linePath = Path()
+            // 橡皮筋也全并**一条 Path 一次 fill**(07-02 反馈:带与带重叠
+            // 不加深;细线是另一次 stroke,线×带重叠照旧加深)。
+            var bandPath = Path()
             for e in scene.edges {
                 let pa = camera.worldToScreen(snap[e.a], viewSize: size)
                 let pb = camera.worldToScreen(snap[e.b], viewSize: size)
@@ -190,30 +193,33 @@ struct GraphCanvasView: View {
                 // hub↔主球 = 橡皮筋(07-02 用户点名恢复,仅这 ≤11 条;
                 // 当年卡顿是 960 条全锥形+离屏层,几条无感);叶边保持细线
                 if e.b == 0, scene.nodes[e.a].kind.isHub {
-                    drawTaperedEdge(ctx, e: e, pa: pa, pb: pb)
+                    appendTaperedEdge(&bandPath, e: e, pa: pa, pb: pb)
                 } else {
                     linePath.move(to: pa)
                     linePath.addLine(to: pb)
                 }
             }
+            ctx.fill(bandPath, with: .color(.gray.opacity(0.45)))
             // 线宽锚定屏幕像素,拉近拉远等粗(Obsidian 式)。
             ctx.stroke(linePath, with: .color(.gray.opacity(0.45)),
                        lineWidth: GraphConstants.lineEdgeWidth)
 
         case .taperedFill:
             // 全锥形模式(保留可切回:GraphConstants.edgeStyle)。
+            var bandPath = Path()
             for e in scene.edges {
                 let pa = camera.worldToScreen(snap[e.a], viewSize: size)
                 let pb = camera.worldToScreen(snap[e.b], viewSize: size)
                 if culled(pa, pb, size) { continue }
-                drawTaperedEdge(ctx, e: e, pa: pa, pb: pb)
+                appendTaperedEdge(&bandPath, e: e, pa: pa, pb: pb)
             }
+            ctx.fill(bandPath, with: .color(.gray.opacity(0.45)))
         }
     }
 
-    /// 锥形橡皮筋(两端粗中间细,二次贝塞尔腰身)。
-    private func drawTaperedEdge(_ ctx: GraphicsContext, e: GraphEdge,
-                                 pa: CGPoint, pb: CGPoint) {
+    /// 锥形橡皮筋(两端粗中间细,二次贝塞尔腰身),追加进合并 Path。
+    private func appendTaperedEdge(_ path: inout Path, e: GraphEdge,
+                                   pa: CGPoint, pb: CGPoint) {
         let zoom = camera.zoom
         var dx = pb.x - pa.x, dy = pb.y - pa.y
         let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
@@ -227,16 +233,19 @@ struct GraphCanvasView: View {
         let stretch = max(Double(len) / zoom / max(e.restLength, 1), 1)
         let wa = wb * GraphConstants.waistRatio / stretch
         let wm = wa
-        let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
-        var p = Path()
-        p.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
-        p.addQuadCurve(to: CGPoint(x: pb.x + nx * wb, y: pb.y + ny * wb),
-                       control: CGPoint(x: mx + nx * wm, y: my + ny * wm))
-        p.addLine(to: CGPoint(x: pb.x - nx * wb, y: pb.y - ny * wb))
-        p.addQuadCurve(to: CGPoint(x: pa.x - nx * wa, y: pa.y - ny * wa),
-                       control: CGPoint(x: mx - nx * wm, y: my - ny * wm))
-        p.closeSubpath()
-        ctx.fill(p, with: .color(.gray.opacity(0.45)))
+        // 粗端锚在主球**球面**不锚球心(07-02 反馈:拉伸时主球端视觉变粗
+        // —— 锚球心时可见根部 = 锥形在球缘处的采样,线越长采样越贴近
+        // 球心全宽;锚球面后可见根部恒 = wb,拉伸只动细端)。
+        let rim = min(scene.nodes[e.b].radius * zoom, Double(len) * 0.5)
+        let pbE = CGPoint(x: pb.x - dx * rim, y: pb.y - dy * rim)
+        let mx = (pa.x + pbE.x) / 2, my = (pa.y + pbE.y) / 2
+        path.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
+        path.addQuadCurve(to: CGPoint(x: pbE.x + nx * wb, y: pbE.y + ny * wb),
+                          control: CGPoint(x: mx + nx * wm, y: my + ny * wm))
+        path.addLine(to: CGPoint(x: pbE.x - nx * wb, y: pbE.y - ny * wb))
+        path.addQuadCurve(to: CGPoint(x: pa.x - nx * wa, y: pa.y - ny * wa),
+                          control: CGPoint(x: mx - nx * wm, y: my - ny * wm))
+        path.closeSubpath()
     }
 
     private func culled(_ pa: CGPoint, _ pb: CGPoint, _ size: CGSize) -> Bool {
@@ -301,10 +310,13 @@ struct GraphCanvasView: View {
                 let mainW = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
                 let stretch = max(Double(screenLen) / zoom / max(e.restLength, 1), 1)
                 let tipW = mainW * GraphConstants.waistRatio / stretch
-                let wFrom = fromNode == e.b ? mainW : tipW
-                let wTo = fromNode == e.b ? tipW : mainW
-                let u = 1 - t
-                return u * u * wFrom + 2 * u * t * tipW + t * t * wTo
+                // 带子锚在主球面:把球心跨度的 t 重映射到带参数
+                //(0 = 细端 a,1 = 主球面),与 appendTaperedEdge 几何一致
+                let rim = min(scene.nodes[e.b].radius * zoom, screenLen * 0.5)
+                let sFromA = (fromNode == e.b ? 1 - t : t) * screenLen
+                let tb = min(max(sFromA / max(screenLen - rim, 1), 0), 1)
+                let u = 1 - tb
+                return u * u * tipW + 2 * u * tb * tipW + tb * tb * mainW
             }
             return GraphConstants.lineEdgeWidth / 2
         case .taperedFill:
