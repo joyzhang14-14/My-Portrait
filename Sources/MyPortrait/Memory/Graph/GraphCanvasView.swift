@@ -233,10 +233,14 @@ struct GraphCanvasView: View {
         let stretch = max(Double(len) / zoom / max(e.restLength, 1), 1)
         let wa = wb * GraphConstants.waistRatio / stretch
         let wm = wa
-        // 粗端锚在主球**球面**不锚球心(07-02 反馈:拉伸时主球端视觉变粗
-        // —— 锚球心时可见根部 = 锥形在球缘处的采样,线越长采样越贴近
-        // 球心全宽;锚球面后可见根部恒 = wb,拉伸只动细端)。
-        let rim = min(scene.nodes[e.b].radius * zoom, Double(len) * 0.5)
+        // 粗端锚在主球**球面附近**不锚球心(07-02 反馈:拉伸时主球端视觉
+        // 变粗 —— 锚球心时可见根部 = 锥形在球缘处的采样,线越长采样越贴
+        // 近球心全宽);再往球心埋进弦深 √(R²−w²)(07-02 二次反馈:正锚球
+        // 面时平头切口两角在圆外,连接处清晰可见 —— 埋到弦上切口整个藏进
+        // 球里)。可见根部恒宽,拉伸只动细端。
+        let ballR = scene.nodes[e.b].radius * zoom
+        let bury = max(ballR * ballR - wb * wb, 0).squareRoot()
+        let rim = min(bury, Double(len) * 0.5)
         let pbE = CGPoint(x: pb.x - dx * rim, y: pb.y - dy * rim)
         let mx = (pa.x + pbE.x) / 2, my = (pa.y + pbE.y) / 2
         path.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
@@ -310,9 +314,11 @@ struct GraphCanvasView: View {
                 let mainW = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
                 let stretch = max(Double(screenLen) / zoom / max(e.restLength, 1), 1)
                 let tipW = mainW * GraphConstants.waistRatio / stretch
-                // 带子锚在主球面:把球心跨度的 t 重映射到带参数
-                //(0 = 细端 a,1 = 主球面),与 appendTaperedEdge 几何一致
-                let rim = min(scene.nodes[e.b].radius * zoom, screenLen * 0.5)
+                // 带子粗端埋进主球(弦深 √(R²−w²)):把球心跨度的 t 重映射
+                // 到带参数(0 = 细端 a,1 = 埋点),与 appendTaperedEdge 一致
+                let ballR = scene.nodes[e.b].radius * zoom
+                let bury = max(ballR * ballR - mainW * mainW, 0).squareRoot()
+                let rim = min(bury, screenLen * 0.5)
                 let sFromA = (fromNode == e.b ? 1 - t : t) * screenLen
                 let tb = min(max(sFromA / max(screenLen - rim, 1), 0), 1)
                 let u = 1 - tb
