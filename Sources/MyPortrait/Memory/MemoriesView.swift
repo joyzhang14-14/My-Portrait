@@ -18,6 +18,9 @@ struct MemoriesView: View {
     /// AI 编辑触发器。ContentView 注入:点击后把 chat 切到 edit 模式并
     /// 跳转到 Home。nil = 编辑按钮隐藏(测试 / 旧调用方兼容)。
     var onEditEntity: ((URL) -> Void)? = nil
+    /// 图谱浮窗 wr chip 跳转注入(ContentView 传):非 nil → Input 定位该 record。
+    /// nil = 无外部跳转,走内部 pendingInputRecordId(writing-style chip 路径)。
+    var externalInputJump: Binding<Int64?>? = nil
 
     /// Display 的 Memory sort order 改动要即时反映到列表 —— 持有 store 让
     /// @Observable 依赖追踪生效(body 里读 memorySortOrder 建立观察)。
@@ -86,7 +89,7 @@ struct MemoriesView: View {
         if scope == .personalInfo {
             PersonalInfoView()
         } else if scope == .input {
-            InputCaptureView(jumpToRecordId: $pendingInputRecordId)
+            InputCaptureView(jumpToRecordId: externalInputJump ?? $pendingInputRecordId)
         } else {
             HSplitView {
                 listColumn
@@ -645,7 +648,8 @@ struct MemoriesView: View {
 
     /// 拆 writing-style body：`**Derived from writing records:**` 之前是 prose,
     /// 之后(含同行)的 `[[wr:NNN]]` 全抽成 id。无该块 → (body, [])。
-    nonisolated private static func splitWritingRecords(_ body: String) -> (before: String, wrIds: [Int64]) {
+    /// internal:图谱浮窗(GraphFloatWindow)复用同一解析,与 text 模式行为一致。
+    nonisolated static func splitWritingRecords(_ body: String) -> (before: String, wrIds: [Int64]) {
         guard let r = body.range(of: "**Derived from writing records:**") else { return (body, []) }
         let before = String(body[..<r.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         let tail = String(body[r.lowerBound...])
@@ -682,7 +686,8 @@ struct MemoriesView: View {
     ///      转成 "<date>/<slug>.md"；events 之后的 `## portraits` / `## ocr` 落进
     ///      after，保持原样渲染（非 event）。
     /// 都不匹配 → (body, [], "")，整体照旧渲染。不动 `# Title`（prose 不变）。
-    nonisolated private static func splitDerivedSections(_ body: String)
+    /// internal:图谱浮窗(GraphFloatWindow)复用同一解析,与 text 模式行为一致。
+    nonisolated static func splitDerivedSections(_ body: String)
         -> (before: String, eventRels: [String], after: String) {
         let lines = body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
 
@@ -745,7 +750,8 @@ struct MemoriesView: View {
     }
 
     /// 单条 `[[id]]` → DerivedRef。能读到 event 文件即可点击；否则失效（灰文本）。
-    nonisolated private static func resolveDerivedRef(_ rawId: String) -> DerivedRef {
+    /// internal:图谱浮窗(GraphFloatWindow)复用。
+    nonisolated static func resolveDerivedRef(_ rawId: String) -> DerivedRef {
         let url = URL(fileURLWithPath: Storage.eventsDir.path + "/" + rawId)
         let date: String = {
             let seg = rawId.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""

@@ -6,22 +6,29 @@ enum GraphConstants {
 
     // MARK: 连接线(橡皮筋:两端粗中间细)
 
-    /// 端点半宽 = 所连球的半径(用户 2026-07-01 定稿:神经末端粗度=球半径),
-    /// 上限 15 —— 大球(主球 44/分区 30)不至于长出象腿。
+    /// 端点半宽 = 所连球的半径(用户 2026-07-01 定稿:神经末端粗度=球半径)。
+    /// hub↔主球的边上限 15;**末端球的边整条上限 7**(07-01 二次反馈:
+    /// hub 连接保持现状,末端连接减细)。
     static let edgeEndWidthMax: Double = 15
+    static let leafEdgeEndWidthMax: Double = 7
     /// 腰部半宽 = 两端较细一侧 × 此比例(用户要求「中间细的地方更细一点」)
     static let waistRatio: Double = 0.18
 
-    /// 球半径 → 端点半宽。
+    /// 球半径 → 端点半宽(hub↔主球的边)。
     static func edgeEndWidth(ballRadius: Double) -> Double {
         min(ballRadius, edgeEndWidthMax)
+    }
+
+    /// 球半径 → 端点半宽(连着末端球的边,整条上限 7)。
+    static func leafEdgeEndWidth(ballRadius: Double) -> Double {
+        min(ballRadius, leafEdgeEndWidthMax)
     }
 
     // MARK: 球半径(世界单位)
 
     static let mainRadius: Double = 44
-    /// 分区球(portrait 画布,统一大小)
-    static let categoryRadius: Double = 30
+    /// 分区球(portrait 画布,统一大小;07-01 反馈再减 10%:30→27)
+    static let categoryRadius: Double = 27
     /// folder 球 = f0 + kf·√count,clamp 到 [f0, folderRadiusMax]
     static let folderRadiusBase: Double = 14
     static let folderRadiusScale: Double = 1.4
@@ -81,6 +88,22 @@ enum GraphConstants {
     static let physicsHz: Double = 120
     /// 开场炸开:初始位置挤在中心这个半径内
     static let explosionRadius: Float = 30
+    /// 主球碰撞硬约束的额外间隙:任何球不得进入 主球半径+自身半径+此值
+    ///(斥力是点电荷模型不认半径,没这条低 weight 小球会叠在主球上)
+    static let mainCollisionPadding: Float = 4
+    /// hub→主球弹簧刚度 override(d3 默认=1/度数,folder 度数几百 → 弹簧
+    /// 太软被斥力推远;定为 1.0 让 folder/分区贴住等距环)
+    static let hubSpringStrength: Double = 1.0
+
+    // MARK: 交互动画
+
+    /// 神经脉冲沿边传播速度(世界 pt/s)与级联跳数
+    static let pulseSpeed: Double = 600
+    static let pulseMaxDepth: Int = 2
+    /// hover 白闪频率(Hz)
+    static let hoverBlinkHz: Double = 2.2
+    /// 浮窗:鼠标移出后自动关闭延迟(s)
+    static let floatWindowAutoCloseDelay: TimeInterval = 1.0
 
     // MARK: last_occurred → 距离 映射(两画布共用公式)
 

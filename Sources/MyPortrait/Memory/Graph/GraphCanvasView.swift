@@ -14,11 +14,14 @@ import simd
 struct GraphCanvasView: View {
     let scene: GraphScene
     let engine: GraphPhysicsEngine
-    /// 物理休眠 → true,暂停 TimelineView 的逐帧重绘。
+    /// 物理休眠且无进行中动画 → true,暂停 TimelineView 的逐帧重绘。
     let paused: Bool
+    /// 神经脉冲时间表(hub 点击时一次算好)+ 起跑时刻。空 = 无脉冲。
+    let pulses: [GraphPulse]
+    let pulseStart: Date
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
-    /// 点到球(nil = 点空白)。P3 接浮窗/神经脉冲。
+    /// 点到球(nil = 点空白)。root 据此开浮窗(leaf)或触发脉冲(hub)。
     var onTapNode: (Int?) -> Void = { _ in }
 
     /// 一次拖拽手势的模式:起点落在球上=拖球,否则=平移相机。
@@ -31,8 +34,8 @@ struct GraphCanvasView: View {
         GeometryReader { geo in
             let viewSize = geo.size
             // 显式 SwiftUI. 前缀:项目自己有个叫 TimelineView 的时间线视图,撞名。
-            SwiftUI.TimelineView(.animation(minimumInterval: nil, paused: paused)) { _ in
-                canvas(viewSize: viewSize)
+            SwiftUI.TimelineView(.animation(minimumInterval: nil, paused: paused)) { tl in
+                canvas(viewSize: viewSize, date: tl.date)
             }
             .contentShape(Rectangle())
             .gesture(dragGesture(viewSize: viewSize))
@@ -60,12 +63,17 @@ struct GraphCanvasView: View {
 
     // MARK: - Canvas
 
-    private func canvas(viewSize: CGSize) -> some View {
+    private func canvas(viewSize: CGSize, date: Date) -> some View {
         Canvas { ctx, size in
             let snap = engine.readSnapshot()
             guard snap.count == scene.nodes.count else { return }
             let zoom = camera.zoom
-            let edgeShading = GraphicsContext.Shading.color(.gray.opacity(0.45))
+            // 边画进独立透明层:层内不透明灰,整层 45% 合成 —— 连接处重叠
+            // 不会互相加深颜色(2026-07-01 用户反馈)。
+            let edgeShading = GraphicsContext.Shading.color(.gray)
+            var edgeCtx = ctx
+            edgeCtx.opacity = 0.45
+            edgeCtx.drawLayer { ctx in
 
             // --- 边(锥形橡皮筋:两端粗中间细) ---
             for e in scene.edges {
@@ -78,10 +86,11 @@ struct GraphCanvasView: View {
                 let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
                 dx /= len; dy /= len
                 let nx = -dy, ny = dx
-                // 端宽逐端不同(= 各自球半径,builder 已截断 15):
-                // 神经末梢从球体上「长」出来的视觉。腰部 = 细端 × waistRatio。
-                let wa = e.halfWidthA * zoom
-                let wb = e.halfWidthB * zoom
+                // 线宽锚定**屏幕像素**,不随 zoom 缩放(2026-07-01 反馈:
+                // 像 Obsidian,拉近拉远都是等粗细的线)。但上限仍是球的
+                // 屏幕半径 —— 缩得很远时线跟着球缩,不会比球粗。
+                let wa = min(e.halfWidthA, scene.nodes[e.a].radius * zoom)
+                let wb = min(e.halfWidthB, scene.nodes[e.b].radius * zoom)
                 let wm = min(wa, wb) * GraphConstants.waistRatio
                 let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
                 var p = Path()
@@ -95,7 +104,33 @@ struct GraphCanvasView: View {
                 ctx.fill(p, with: edgeShading)
             }
 
+            }   // edgeCtx.drawLayer
+
+            // --- 神经脉冲亮斑(边之上、球之下) ---
+            if !pulses.isEmpty {
+                let elapsed = date.timeIntervalSince(pulseStart)
+                for p in pulses {
+                    let t = (elapsed - p.start) / p.duration
+                    guard t >= 0, t <= 1 else { continue }
+                    let e = scene.edges[p.edgeIndex]
+                    let to = (e.a == p.fromNode) ? e.b : e.a
+                    let pa = camera.worldToScreen(snap[p.fromNode], viewSize: size)
+                    let pb = camera.worldToScreen(snap[to], viewSize: size)
+                    let x = pa.x + (pb.x - pa.x) * t
+                    let y = pa.y + (pb.y - pa.y) * t
+                    let glowR = max(6, 9 * zoom)
+                    let coreR = max(2.5, 3.5 * zoom)
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - glowR, y: y - glowR,
+                                                    width: glowR * 2, height: glowR * 2)),
+                             with: .color(.white.opacity(0.25)))
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - coreR, y: y - coreR,
+                                                    width: coreR * 2, height: coreR * 2)),
+                             with: .color(.white.opacity(0.9)))
+                }
+            }
+
             // --- 球 ---
+            let now = date.timeIntervalSinceReferenceDate
             for node in scene.nodes {
                 let c = camera.worldToScreen(snap[node.id], viewSize: size)
                 let r = node.radius * zoom
@@ -104,11 +139,10 @@ struct GraphCanvasView: View {
                 }
                 let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
                 ctx.fill(Path(ellipseIn: rect), with: .color(node.color))
-                // P2 的 hover 反馈:白色描边(P3 换成白色闪烁)
+                // hover 白色闪烁(正弦脉动,持续 hover 持续闪 —— 需求 §5)
                 if node.id == hoveredId {
-                    ctx.stroke(Path(ellipseIn: rect),
-                               with: .color(.white.opacity(0.85)),
-                               lineWidth: max(1.5, 2 * zoom))
+                    let a = 0.35 + 0.35 * sin(now * GraphConstants.hoverBlinkHz * 2 * .pi)
+                    ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
                 }
             }
 
@@ -122,6 +156,17 @@ struct GraphCanvasView: View {
                     }
                     ctx.draw(sym, at: CGPoint(x: c.x, y: y))
                 }
+            }
+
+            // --- 末端球 hover 标题(仅 1 个,inline resolve 无 batching 问题) ---
+            if let h = hoveredId, h < scene.nodes.count, !scene.nodes[h].kind.isHub {
+                let node = scene.nodes[h]
+                let c = camera.worldToScreen(snap[h], viewSize: size)
+                let label = ctx.resolve(
+                    Text(node.title)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95)))
+                ctx.draw(label, at: CGPoint(x: c.x, y: c.y + node.radius * zoom + 12))
             }
         } symbols: {
             ForEach(scene.nodes.filter { $0.kind.isHub }) { node in
