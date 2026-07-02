@@ -32,8 +32,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var hubIndices: [Int32] = []
     /// 完美圆(07-02):有目标极角的 hub + 角度(builder 按份额分配)。
     private var angleHub: [Int32] = [], angleTarget: [Float] = []
-    /// 全部末端球下标 + 各自所属 hub(主球=0):扇区间排斥用(07-01 反馈)。
+    /// 全部末端球下标 + 各自所属 hub(主球=0)+ 各自弹簧 rest:
+    /// 扇区间排斥 + 叶距硬上限用。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
+    private var leafRestArr: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
     /// 拖拽钉住:index → 目标位置(每次 drag move 更新;d3 的 fx/fy 语义)。
@@ -82,7 +84,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
-        (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
+        (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
 
         var continuation: AsyncStream<Bool>.Continuation?
@@ -168,7 +170,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
-        (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
+        (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
@@ -459,7 +461,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     private func linkPass() {
-        let a = alpha
+        // ⚠️ alpha 下限必须与 sector/angular 诸力一致:那些定位力在冷却尾声
+        // 仍存在(floor 0.1),弹簧若纯 alpha 缩放会先睡着 → 叶子被持续推出
+        // rest 距离,fan 半径失控(07-02 实机确诊)。力系统要么都睡要么都醒。
+        let a = max(alpha, 0.1)
         let e = edgesA.count
         pos.withUnsafeBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
@@ -503,6 +508,26 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         if let di, di > 0, di < n {
             pos[di] = dt
             vel[di] = .zero
+        }
+        // 叶距软夹钳(07-02 完美圆保证):dist(leaf, 自家hub) ≤ rest×1.2。
+        // 各种持续定位力会把叶子挤出 rest,fan 半径失控 → 外缘不再成圆。
+        // ⚠️ 必须在各硬碰撞**之前**跑(碰撞有最终发言权,否则夹钳会把球
+        // 拽回主球/hub 体内);被拖球豁免(d3 语义:指针钉住绝对优先)。
+        if !leafIndices.isEmpty {
+            let stretch = GraphConstants.leafMaxStretch
+            pos.withUnsafeMutableBufferPointer { P in
+                for li in 0..<leafIndices.count {
+                    let leaf = Int(leafIndices[li])
+                    if leaf == di { continue }
+                    let hub = Int(leafOwnHub[li])
+                    let d = P[leaf] - P[hub]
+                    let dist = simd_length(d)
+                    let maxD = leafRestArr[li] * stretch
+                    if dist > maxD, dist > 1e-4 {
+                        P[leaf] = P[hub] + d / dist * maxD
+                    }
+                }
+            }
         }
         // 主球碰撞硬约束:斥力是点电荷不认半径,低 weight 小球会在中心区
         // 平衡叠在主球上(2026-07-01 用户实测反馈)。径向推出,含被拖球。
@@ -649,14 +674,17 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return (h, t)
     }
 
-    /// 全部末端球 + 各自所属 hub(主球=0)。扇区间排斥用。
-    private static func leafArrays(scene: GraphScene) -> ([Int32], [Int32]) {
-        var l: [Int32] = [], h: [Int32] = []
+    /// 全部末端球 + 各自所属 hub(主球=0)+ 弹簧 rest(每叶恰一条边)。
+    private static func leafArrays(scene: GraphScene) -> ([Int32], [Int32], [Float]) {
+        var restOf: [Int: Float] = [:]
+        for e in scene.edges { restOf[e.a] = Float(e.restLength) }
+        var l: [Int32] = [], h: [Int32] = [], r: [Float] = []
         for node in scene.nodes where !node.kind.isHub {
             l.append(Int32(node.id))
             h.append(Int32(max(node.hubIndex, 0)))
+            r.append(restOf[node.id] ?? Float(GraphConstants.eventLeafDistanceFar))
         }
-        return (l, h)
+        return (l, h, r)
     }
 
     private static func explosionPositions(n: Int, rng: inout SplitMix64) -> [SIMD2<Float>] {

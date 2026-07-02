@@ -117,10 +117,14 @@ enum GraphConstants {
     /// 扇区软阻力(07-01 反馈):hub 的末端球须待在背向主球的楔形扇区里,
     /// 角度越界×此系数×alpha 的角向力回正。不是硬墙。
     static let sectorStrength: Float = 0.15
-    /// 扇区间排斥(07-02 加强:a 家的末端球不得进 b 家范围,容易看混)。
-    /// 线性衰减,radius 外无力。
-    static let sectorRepelStrength: Float = 1.0
-    static let sectorRepelRadius: Float = 240
+    /// 扇区间排斥(a 家的末端球不得进 b 家范围)。07-02 回调:1.0/240 会让
+    /// 11 个 hub 的排斥泡叠满中心区,把所有叶子往外挤爆圆(实机截图确诊);
+    /// 角度上的分离已由份额扇区保证,这里只需防 hub 近旁渗透。
+    static let sectorRepelStrength: Float = 0.25
+    static let sectorRepelRadius: Float = 150
+    /// 叶距硬上限:dist(leaf, hub) ≤ rest × 此系数 —— 完美圆的外缘保证
+    ///(否则各种持续力把叶子挤出 rest,fan 半径失控)。
+    static let leafMaxStretch: Float = 1.2
 
     /// 扇区档位(07-02 反馈):楔形全角按叶数自动升档 —— 30° 装不下升 60°,
     /// 以此类推,最高 220°。容量阈值按"多圈排布,约 0.35 球/度"估算。
