@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var chat = ChatController()
     @State private var chatStore = ChatStore.shared
     @State private var memoryScope: MemoryScope = .events
+    /// Memories 区 text/canvas 查看模式(切换钮在侧栏,内容在 mainPane)。
+    @State private var memoryViewMode: MemoryViewMode = .text
     @State private var cronJobSelection: UUID? = nil
     @State private var settingsSubsection: SettingsSubsection? = .app(.general)
     /// 首启 onboarding 状态。绑定 ConfigStore.general.onboardingCompleted。
@@ -142,6 +144,7 @@ struct ContentView: View {
                             selection: $selection,
                             chat: chat,
                             memoryScope: $memoryScope,
+                            memoryViewMode: $memoryViewMode,
                             cronJobSelection: $cronJobSelection,
                             settingsSubsection: $settingsSubsection)
                 .frame(width: 300)
@@ -177,11 +180,18 @@ struct ContentView: View {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
         case .cronJobs:         CronJobsView(selection: $cronJobSelection)
-        case .memories:      MemoriesView(scope: $memoryScope,
-                                          onEditEntity: { url in
-                                              chat.startEditConversation(originalURL: url)
-                                              selection = .home
-                                          })
+        case .memories:
+            // canvas 模式只覆盖 events/portrait;personalInfo/input 没有图谱
+            // 形态,即便 mode==canvas 也走列表(侧栏点击它们时会把 mode 拨回 text)。
+            if memoryViewMode == .canvas, MemoryViewMode.supportsCanvas(memoryScope) {
+                GraphRootView(scope: $memoryScope)
+            } else {
+                MemoriesView(scope: $memoryScope,
+                             onEditEntity: { url in
+                                 chat.startEditConversation(originalURL: url)
+                                 selection = .home
+                             })
+            }
         case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
     }

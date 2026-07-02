@@ -45,6 +45,20 @@ enum MemoryScope: Hashable, Identifiable {
     }
 }
 
+/// Memories 区的查看模式:text = 列表视图(现状),canvas = 图谱视图。
+/// 状态与 memoryScope 一样住在 ContentView,侧栏(切换钮)与主面板共享。
+enum MemoryViewMode: String, Hashable {
+    case text, canvas
+
+    /// personalInfo / input 没有 canvas 形态 —— canvas 模式下点它们自动回 text。
+    static func supportsCanvas(_ scope: MemoryScope) -> Bool {
+        switch scope {
+        case .events, .portrait:      return true
+        case .personalInfo, .input:   return false
+        }
+    }
+}
+
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case home, cronJobs, timeline, memories, settings
     var id: String { rawValue }
