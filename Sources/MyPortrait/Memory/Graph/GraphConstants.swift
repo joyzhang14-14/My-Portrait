@@ -49,13 +49,14 @@ enum GraphConstants {
     static let folderRadiusBase: Double = 14
     static let folderRadiusScale: Double = 1.4
     static let folderRadiusMax: Double = 36
-    /// event 球 = e0 + ke·currentWeight,上限不超过最小 folder 球
-    static let eventRadiusBase: Double = 4
+    /// event 球 = e0 + ke·currentWeight,上限不超过最小 folder 球。
+    /// 07-02 反馈:末端球下限降低,上限不变(低 weight 更小更细腻)。
+    static let eventRadiusBase: Double = 2.5
     static let eventRadiusScale: Double = 0.9
     static let eventRadiusMax: Double = 14
-    /// portrait 小球 = p0 + kp·min(weight, 18)
-    static let portraitRadiusBase: Double = 5
-    static let portraitRadiusScale: Double = 0.55
+    /// portrait 小球 = p0 + kp·min(weight, 18);下限降,斜率补偿保上限
+    static let portraitRadiusBase: Double = 2.5
+    static let portraitRadiusScale: Double = 0.69
 
     // MARK: 连接强度
 
@@ -81,13 +82,28 @@ enum GraphConstants {
     static let bubbleCollideStrength: Float = 0.5
     /// 线长档位:最新的叶贴 hub(此比例×最大线长),最旧顶到气泡边缘
     static let bubbleRestFloor: Double = 0.25
+    /// 线长抖动幅度(07-02 反馈:均匀排列之上加一点排列随机性,别太
+    /// 机械):每叶 ±此比例,由文件路径哈希决定 —— **确定性**,同一份
+    /// 数据每次打开布局一致(真随机会破坏会话缓存/可复现性)。
+    static let bubbleRestJitter: Double = 0.12
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
-    /// 斥力强度(负=互斥)。07-02 物理化减半:球距改由半径感知碰撞力管,
-    /// 点电荷斥力只提供松散感 —— 太强时大 folder 的叶群集体扭矩会把
-    /// 邻居 hub 推出碰撞盘接触距离,环上出现大空洞(无缝圆被破)。
+    /// 斥力电荷(负=互斥),分角色(07-02 用户确诊:主球斥力+跨圆叶叶
+    /// 斥力把整家叶子压到背面半圆,圈只用一半):
+    /// - hub:保持,负责 hub 间松散感
     static let manyBodyStrength: Float = -15
+    /// - 主球:大降 —— 球不叠靠主球硬碰撞,电荷只会把叶群推向圆的远端
+    static let mainBodyStrength: Float = -4
+    /// - 叶:近零 —— 圈内间距归半径感知碰撞力管,电荷大了跨圆互推,
+    ///   把彼此边界侧清空(半边圆元凶;-6 时邻家 569 叶的聚合电荷仍
+    ///   把 6 叶小家压进 121° 弧)
+    static let leafBodyStrength: Float = -2
+    /// 家内角向匀布力(07-02 半边圆终修):稀疏家的球彼此够不着,碰撞
+    /// 力铺不匀 —— 同家叶绕自家 hub 两两角向排斥,间距 = 均分角时力
+    /// 归零(纯涌现)。只对 ≤maxCount 的家(大家靠碰撞,O(k²) 也吃不消)。
+    static let familySpreadStrength: Float = 0.15
+    static let familySpreadMaxCount: Int = 40
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
     static let bhTheta2: Float = 0.81
     /// 斥力最小距离²(防重叠点无穷大力)

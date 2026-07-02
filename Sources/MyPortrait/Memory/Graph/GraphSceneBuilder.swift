@@ -222,7 +222,13 @@ enum GraphSceneBuilder {
                 let m = spec.members[mi]
                 let idx = nodes.count
                 let lr = leafRadius(m)
-                let rest = maxRest * (floorFrac + (1 - floorFrac) * cum[rank] / cMax)
+                // 排列随机性(07-02 反馈):日期映射之上叠 ±jitter 的确定性
+                // 抖动(路径哈希,不是随机数 —— 同数据每次打开布局一致),
+                // 打破同心圆环的机械感;clamp 保证不出气泡边缘。
+                let j = (stableHash01(m.relPath) - 0.5) * 2 * GraphConstants.bubbleRestJitter
+                let rest = min(maxRest * (floorFrac + (1 - floorFrac) * cum[rank] / cMax)
+                                   * (1 + j),
+                               maxRest)
                 nodes.append(GraphNode(id: idx, kind: leafKind(m), title: m.title,
                                        radius: lr, colorRGB: leafColor(spec, m),
                                        fileURL: m.url, hubIndex: hubIdx))
@@ -277,6 +283,17 @@ enum GraphSceneBuilder {
             }
         }
         return nil
+    }
+
+    // MARK: - 稳定哈希
+
+    /// 字符串 → [0,1) 的**跨启动稳定**哈希(djb2)。Swift 的 hashValue 每次
+    /// 启动随机化,不可用于布局 —— 抖动必须同数据恒同值,否则指纹没变
+    /// 布局却变(会话缓存名存实亡)。
+    static func stableHash01(_ s: String) -> Double {
+        var h: UInt32 = 5381
+        for b in s.utf8 { h = (h &* 33) &+ UInt32(b) }
+        return Double(h % 10007) / 10007
     }
 
     // MARK: - 颜色
