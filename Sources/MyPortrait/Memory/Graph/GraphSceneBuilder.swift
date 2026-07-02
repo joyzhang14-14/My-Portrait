@@ -224,11 +224,16 @@ enum GraphSceneBuilder {
             // 排位宽度没算球本身 → 相邻 hub 目标位重叠且被快照钉死)
             var mainHalf = asin(min((hubRadius(spec)
                 + GraphConstants.packSlotGap + 2) / dist, 0.9))
+            // 线长 = 天数**排名**映射(07-02 定稿):真实数据大多 >30 天全贴
+            // 映射上限,长短失去区分度;按家内排名铺 25%~100% 跨度,
+            // 最新最短、最旧顶到外圆,长短永远可读。
+            let span = max(outerRadius - dist, 40)
+            let denom = Double(max(ordered.count - 1, 1))
             var i = 0
             var arcR = 0.0
             while i < ordered.count {
-                arcR = max(arcR + (i == 0 ? 0 : layerStep),
-                           leafRest(spec.members[ordered[i]]))
+                let rankRest = span * (0.25 + 0.75 * Double(i) / denom)
+                arcR = max(arcR + (i == 0 ? 0 : layerStep), rankRest)
                 let cap = max(1, Int((2 * psiCap * arcR) / slotW))
                 let m = min(ordered.count - i, cap)
                 for k in 0..<m {
