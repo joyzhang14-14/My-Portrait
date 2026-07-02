@@ -47,7 +47,7 @@ enum GraphSceneBuilder {
     static func allocateWedges(counts: [Int]) -> [Double] {
         guard !counts.isEmpty else { return [] }
         let total = max(counts.reduce(0, +), 1)
-        let lo = min(30.0, 360.0 / Double(counts.count))
+        let lo = min(14.0, 360.0 / Double(counts.count))   // 保底降 14°:纯连续份额,不做档位
         let hi = 220.0
         var deg = counts.map { min(max(Double($0) / Double(total) * 360, lo), hi) }
         for _ in 0..<8 {
@@ -113,6 +113,7 @@ enum GraphSceneBuilder {
 
         return assemble(userName: userName, specs: specs,
                         outerRadius: GraphConstants.eventOuterRadius,
+                        hubDistance: GraphConstants.eventHubDistance,
                         hubRadius: { spec in
                             min(GraphConstants.folderRadiusBase
                                     + GraphConstants.folderRadiusScale
@@ -155,6 +156,7 @@ enum GraphSceneBuilder {
 
         return assemble(userName: userName, specs: specs,
                         outerRadius: GraphConstants.portraitOuterRadius,
+                        hubDistance: GraphConstants.portraitHubDistance,
                         hubRadius: { _ in GraphConstants.categoryRadius },
                         hubKind: { .category(name: $0.slug) },
                         leafKind: { s in
@@ -185,6 +187,7 @@ enum GraphSceneBuilder {
     private static func assemble(userName: String,
                                  specs: [HubSpec],
                                  outerRadius: Double,
+                                 hubDistance: Double,
                                  hubRadius: (HubSpec) -> Double,
                                  hubKind: (HubSpec) -> GraphNodeKind,
                                  leafKind: (ScannedFile) -> GraphNodeKind,
@@ -206,13 +209,14 @@ enum GraphSceneBuilder {
             let centerDeg = cursor + wedge / 2
             cursor += wedge
             let r = hubRadius(spec)
-            // 半径补偿:fan 外缘 = hubDist + maxLeafRest ≡ outerRadius。
-            // floor 到主球碰撞下限(碰撞约束会顶住,再小无意义)。
-            let maxRest = spec.members.map(leafRest).max()
-                ?? GraphConstants.eventLeafDistanceFar
-            let dist = max(outerRadius - maxRest,
+            // 完美圆 v2:hub 一律等距(07-02 用户反馈:距离不等很奇怪);
+            // 叶距按比例缩放,所有 fan 外缘仍落 outerRadius 圆。
+            let dist = max(hubDistance,
                            GraphConstants.mainRadius + r
                                + Double(GraphConstants.mainCollisionPadding) + 2)
+            let span = outerRadius - dist
+            let maxRest = spec.members.map(leafRest).max() ?? span
+            let restScale = maxRest > 0 ? span / maxRest : 1
 
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
@@ -236,7 +240,7 @@ enum GraphSceneBuilder {
                                        fileURL: m.url, hubIndex: hubIdx))
                 edges.append(GraphEdge(a: idx, b: hubIdx,
                                        strength: leafStrength(m),
-                                       restLength: leafRest(m),
+                                       restLength: leafRest(m) * restScale,
                                        halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }

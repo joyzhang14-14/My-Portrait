@@ -70,11 +70,13 @@ enum GraphConstants {
 
     // MARK: 距离(弹簧自然长度,世界单位)
 
-    /// 完美圆算法(07-02 定稿,取代固定等距环):hub 距主球 =
-    /// outerRadius − 该 hub 最远叶的弹簧长 → 所有 fan 外缘落在同一大圆,
-    /// 末端球形成完美外圆。floor 到主球碰撞下限。
+    /// 完美圆 v2(07-02 二稿):hub **等距**(用户:距离不等很奇怪),
+    /// 改为按比例缩放每家的叶距,让所有 fan 外缘仍落同一大圆:
+    /// rest' = rest × (outer − hubDist) / 该家最远 rest。
     static let eventOuterRadius: Double = 320
     static let portraitOuterRadius: Double = 300
+    static let eventHubDistance: Double = 150
+    static let portraitHubDistance: Double = 150
     /// hub 角度弹簧刚度:把 hub 拉向按份额分配的目标极角
     static let hubAngleStrength: Float = 0.3
     /// last_occurred → 距离 的对数映射端点(event 画布)
@@ -114,14 +116,13 @@ enum GraphConstants {
     /// hub→主球弹簧刚度 override(d3 默认=1/度数,folder 度数几百 → 弹簧
     /// 太软被斥力推远;定为 1.0 让 folder/分区贴住等距环)
     static let hubSpringStrength: Double = 1.0
-    /// 扇区软阻力(07-01 反馈):hub 的末端球须待在背向主球的楔形扇区里,
-    /// 角度越界×此系数×alpha 的角向力回正。不是硬墙。
-    static let sectorStrength: Float = 0.15
-    /// 扇区间排斥(a 家的末端球不得进 b 家范围)。07-02 回调:1.0/240 会让
-    /// 11 个 hub 的排斥泡叠满中心区,把所有叶子往外挤爆圆(实机截图确诊);
-    /// 角度上的分离已由份额扇区保证,这里只需防 hub 近旁渗透。
-    static let sectorRepelStrength: Float = 0.25
-    static let sectorRepelRadius: Float = 150
+    /// 扇区软阻力:hub 的末端球须待在背向主球的楔形扇区里,角度越界
+    /// ×此系数×alpha 的角向力回正。07-02 加强(边界更分明,fan 摊满楔形)。
+    static let sectorStrength: Float = 0.3
+    /// 扇区间排斥:**只在边界起效**(07-02 三稿:排斥泡太大会造成扇区间
+    /// 巨大空隙"护城河");半径只罩 hub 近旁,防别家叶贴脸。
+    static let sectorRepelStrength: Float = 0.35
+    static let sectorRepelRadius: Float = 80
     /// 叶距硬上限:dist(leaf, hub) ≤ rest × 此系数 —— 完美圆的外缘保证
     ///(否则各种持续力把叶子挤出 rest,fan 半径失控)。
     static let leafMaxStretch: Float = 1.2
