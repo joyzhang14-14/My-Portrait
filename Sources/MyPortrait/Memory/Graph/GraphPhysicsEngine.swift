@@ -256,6 +256,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         sectorRepelPass()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
+        // 早停快照(07-02:根治收敛尾声的可见漂移):冷到阈值直接把所有
+        // 带落位目标的球(hub+叶)快照到精确位置并立即入睡。
+        if alpha < 0.02, alphaTarget == 0 {
+            dragLock.lock()
+            let dragging = draggedIndex != nil
+            dragLock.unlock()
+            if !dragging {
+                for i in 0..<targetIdx.count {
+                    let idx = Int(targetIdx[i])
+                    pos[idx] = targetPos[i]
+                    vel[idx] = .zero
+                }
+                pos[0] = .zero
+                alpha = 0
+            }
+        }
     }
 
     /// 完美圆(07-02):角度弹簧把每个 hub 拉向 builder 按份额分配的目标极角

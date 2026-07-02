@@ -192,38 +192,74 @@ enum GraphSceneBuilder {
                                radius: GraphConstants.mainRadius,
                                colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
 
-        let wedges = allocateWedges(counts: specs.map(\.members.count))
-        // 07-02 终稿:hub 距主球**全体相等**,由公式算出 ——
-        //   ① 外圆补偿:outer − 全局最深 fan(让最深的一家外缘落在外圆)
-        //   ② 圆周装箱下限:所有 hub 球沿圆排开不重叠
-        //   ③ 主球碰撞下限
+        // 07-02 终稿(两遍法):先在局部坐标把每把扇子装填好、量出实际
+        // 角宽,再按「实宽 + 2° 缝」把 hub 沿圆排开 —— 扇形相接无大缝。
+        // hub 距主球全体相等(公式):
         let hubRadii = specs.map(hubRadius)
         let globalMaxRest = specs.flatMap { $0.members.map(leafRest) }.max()
             ?? (outerRadius - hubDistance)
         let packFloor = (hubRadii.map { $0 * 2 + 10 }.reduce(0, +)) / (2 * .pi)
         let maxHubR = hubRadii.max() ?? 0
-        let uniformDist = max(outerRadius - globalMaxRest,
-                              packFloor,
-                              GraphConstants.mainRadius + maxHubR
-                                  + Double(GraphConstants.mainCollisionPadding) + 2)
-        var cursor = -90.0   // 圆弧游标(度),从正上方开始顺时针分配
-        for (k, spec) in specs.enumerated() {
-            let wedge = wedges[k]
-            let centerDeg = cursor + wedge / 2
-            cursor += wedge
-            let r = hubRadius(spec)
-            let dist = uniformDist   // 全体 hub 等距(公式见上)
+        let dist = max(outerRadius - globalMaxRest,
+                       packFloor,
+                       GraphConstants.mainRadius + maxHubR
+                           + Double(GraphConstants.mainCollisionPadding) + 2)
 
+        // 遍1:局部装填。每叶得 (ψ 绕hub角, arcR 距hub半径);层内居中排。
+        struct Packed { let member: Int; let psi: Double; let arcR: Double }
+        let psiCap = 115.0 * .pi / 180
+        var packedAll: [[Packed]] = []
+        var mainHalfAll: [Double] = []
+        for spec in specs {
+            let ordered = spec.members.indices.sorted {
+                (leafRest(spec.members[$0]), spec.members[$0].relPath)
+                    < (leafRest(spec.members[$1]), spec.members[$1].relPath)
+            }
+            let avgR = spec.members.isEmpty ? 6.0
+                : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)
+            let slotW = avgR * 2 + GraphConstants.packSlotGap
+            let layerStep = avgR * 2 + GraphConstants.packRingGap
+            var packed: [Packed] = []
+            var mainHalf = 0.06   // 最小主角半宽(空 folder 只占 hub 球本身)
+            var i = 0
+            var arcR = 0.0
+            while i < ordered.count {
+                arcR = max(arcR + (i == 0 ? 0 : layerStep),
+                           leafRest(spec.members[ordered[i]]))
+                let cap = max(1, Int((2 * psiCap * arcR) / slotW))
+                let m = min(ordered.count - i, cap)
+                for k in 0..<m {
+                    let psi = (Double(k) - Double(m - 1) / 2) * slotW / arcR
+                    packed.append(Packed(member: ordered[i + k], psi: psi, arcR: arcR))
+                }
+                // 该层的主角半宽(绕主球):层最宽处换算
+                let psiHalf = Double(m) / 2 * slotW / arcR
+                let mh = atan2(arcR * sin(psiHalf), dist + arcR * cos(psiHalf))
+                mainHalf = max(mainHalf, mh)
+                i += m
+            }
+            packedAll.append(packed)
+            mainHalfAll.append(mainHalf)
+        }
+
+        // 遍2:按实宽排开(缝 2°),归一化到 360°。
+        let gapRad = 2.0 * .pi / 180
+        let total = mainHalfAll.reduce(0) { $0 + 2 * $1 } + Double(specs.count) * gapRad
+        let scale = 2 * .pi / total
+        var cursor = -Double.pi / 2
+        for (k, spec) in specs.enumerated() {
+            let width = (2 * mainHalfAll[k] + gapRad) * scale
+            let centerRad = cursor + width / 2
+            cursor += width
+            let r = hubRadii[k]
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
                                     radius: r, colorRGB: spec.colorRGB,
                                     fileURL: nil, hubIndex: 0)
-            hubNode.hubTargetAngle = centerDeg * .pi / 180
-            hubNode.hubWedgeDegrees = wedge
-            // 等距硬保证:引擎按 |targetPosition| 每 tick 把 hub 半径钉回公式值
-            hubNode.targetPosition = SIMD2<Float>(
-                Float(cos(centerDeg * .pi / 180) * dist),
-                Float(sin(centerDeg * .pi / 180) * dist))
+            hubNode.hubTargetAngle = centerRad
+            hubNode.hubWedgeDegrees = width * 180 / .pi
+            hubNode.targetPosition = SIMD2<Float>(Float(cos(centerRad) * dist),
+                                                  Float(sin(centerRad) * dist))
             nodes.append(hubNode)
             let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
             edges.append(GraphEdge(a: hubIdx, b: 0, strength: s, restLength: dist,
@@ -232,40 +268,15 @@ enum GraphSceneBuilder {
                                        ballRadius: GraphConstants.mainRadius),
                                    springStrength: GraphConstants.hubSpringStrength))
 
-            // 扇形装填(07-02 终稿):末端球**绕 folder/分区球**展开成扇形 ——
-            // hub 在扇形中心线上,叶子按 last_occurred 的 rest 当半径,
-            // 沿 ±fanHalf 弧 greedy 排位;同半径弧装满才外溢一层(+层距),
-            // 时近排序:近的贴 hub,旧的靠外。
-            let centerRad = centerDeg * .pi / 180
             let hubPos = SIMD2<Double>(cos(centerRad) * dist, sin(centerRad) * dist)
-            let meanRest = spec.members.isEmpty ? 1.0
-                : spec.members.map(leafRest).reduce(0, +) / Double(spec.members.count)
-            // 楔形(绕主球)换算到绕 hub 的张角,封顶 100°
-            let fanHalf = min(100.0 * .pi / 180,
-                              (wedge / 2 * .pi / 180) * (dist + meanRest) / max(meanRest, 1))
-            let avgR = spec.members.isEmpty ? 6.0
-                : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)
-            let layerStep = avgR * 2 + GraphConstants.packRingGap
-            var arcR = 0.0
-            var cursor = -fanHalf
-            let ordered = spec.members.sorted {
-                (leafRest($0), $0.relPath) < (leafRest($1), $1.relPath)
-            }
-            for m in ordered {
+            for pk in packedAll[k] {
+                let m = spec.members[pk.member]
                 let idx = nodes.count
                 let lr = leafRadius(m)
-                arcR = max(arcR, leafRest(m))          // 半径 = rest(时近),只增不减
-                var slotRad = (lr * 2 + GraphConstants.packSlotGap) / arcR
-                if cursor + slotRad > fanHalf {        // 本弧装满 → 外溢一层
-                    arcR += layerStep
-                    cursor = -fanHalf
-                    slotRad = (lr * 2 + GraphConstants.packSlotGap) / arcR
-                }
-                let psi = min(cursor + slotRad / 2, fanHalf)
-                cursor += slotRad
-                let dirA = centerRad + psi             // 绕 hub 的方向(外向为中线)
-                let target = SIMD2<Double>(hubPos.x + cos(dirA) * arcR,
-                                           hubPos.y + sin(dirA) * arcR)
+                // ψ 也按 scale 压缩,扇子随份额缩放,相邻扇子不打架
+                let dirA = centerRad + pk.psi * min(scale, 1)
+                let target = SIMD2<Double>(hubPos.x + cos(dirA) * pk.arcR,
+                                           hubPos.y + sin(dirA) * pk.arcR)
                 var leafNode = GraphNode(id: idx, kind: leafKind(m), title: m.title,
                                          radius: lr, colorRGB: leafColor(spec, m),
                                          fileURL: m.url, hubIndex: hubIdx)
@@ -273,7 +284,7 @@ enum GraphSceneBuilder {
                 nodes.append(leafNode)
                 edges.append(GraphEdge(a: idx, b: hubIdx,
                                        strength: leafStrength(m),
-                                       restLength: arcR,
+                                       restLength: pk.arcR,
                                        halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }
