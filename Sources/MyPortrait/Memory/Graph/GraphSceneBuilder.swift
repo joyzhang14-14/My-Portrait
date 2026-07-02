@@ -3,6 +3,13 @@ import Foundation
 /// 把磁盘上的 memory 数据(events/*.md + _folders/*.json + portrait/<cat>/*.md)
 /// 变成一张 GraphScene。纯读盘 + 纯函数,设计为在后台线程跑
 /// (调用方先在 MainActor 读好 ConfigStore 的参数传进来)。
+///
+/// 完美圆算法(07-02 定稿):
+///   1. 每个 hub 按叶数占比分得一段圆弧(30° 保底/220° 封顶,水填归一 360°)
+///      → 相邻扇区角度上不重叠,分区/folder 分明
+///   2. hub 距主球 = outerRadius − 该 hub 最远叶的弹簧长(floor 到碰撞下限)
+///      → 每家 fan 的外缘落在同一大圆上,末端球形成完美外圆
+///   3. 物理用角度弹簧把 hub 拉到目标角,楔形扇区角 = 份额
 enum GraphSceneBuilder {
 
     /// portrait 画布的 7 个分区(emotions 用户拍板不做)+ 各自颜色。
@@ -33,7 +40,28 @@ enum GraphSceneBuilder {
         }
     }
 
-    // MARK: - Event 画布(需求 §4.2)
+    // MARK: - 楔形份额分配
+
+    /// 按 count 占比分 360°,floor(30° 或 hub 太多时 360/n)/cap 220°,
+    /// 水填法把与 360 的差摊给未触界者。确定性、Σ≈360。
+    static func allocateWedges(counts: [Int]) -> [Double] {
+        guard !counts.isEmpty else { return [] }
+        let total = max(counts.reduce(0, +), 1)
+        let lo = min(30.0, 360.0 / Double(counts.count))
+        let hi = 220.0
+        var deg = counts.map { min(max(Double($0) / Double(total) * 360, lo), hi) }
+        for _ in 0..<8 {
+            let diff = 360 - deg.reduce(0, +)
+            if abs(diff) < 0.5 { break }
+            let adjustable = deg.indices.filter { diff > 0 ? deg[$0] < hi : deg[$0] > lo }
+            guard !adjustable.isEmpty else { break }
+            let share = diff / Double(adjustable.count)
+            for i in adjustable { deg[i] = min(max(deg[i] + share, lo), hi) }
+        }
+        return deg
+    }
+
+    // MARK: - Event 画布
 
     private struct ScannedFile {
         let url: URL
@@ -42,6 +70,14 @@ enum GraphSceneBuilder {
         let weight: Double        // currentWeight(EMA 衰减后)
         let occurrences: Int
         let daysAgo: Double       // 距 lastOccurrence ?? created 的天数
+    }
+
+    /// 一个待建 hub(真 folder 或虚拟 Unclassified)。
+    private struct HubSpec {
+        let slug: String
+        let name: String
+        let colorRGB: SIMD3<Double>
+        let members: [ScannedFile]
     }
 
     private static func buildEvents(halfLifeDays: Double, userName: String) -> GraphScene {
@@ -56,136 +92,156 @@ enum GraphSceneBuilder {
         for f in folders {
             for rel in f.events where folderOf[rel] == nil { folderOf[rel] = f.slug }
         }
-
-        var nodes: [GraphNode] = []
-        var edges: [GraphEdge] = []
-        nodes.append(GraphNode(id: 0, kind: .main, title: userName,
-                               radius: GraphConstants.mainRadius,
-                               colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
-
-        // folder 球:含空 folder(用户建的实体,消失会困惑;空的就是最小号)
-        var hubIndexOf: [String: Int] = [:]
-        let memberWeights: [String: [Double]] = {
-            var m: [String: [Double]] = [:]
-            for s in scanned {
-                if let slug = folderOf[s.relPath] { m[slug, default: []].append(s.weight) }
-            }
-            return m
-        }()
-        for f in folders {
-            let idx = nodes.count
-            hubIndexOf[f.slug] = idx
-            let count = memberWeights[f.slug]?.count ?? 0
-            let r = min(GraphConstants.folderRadiusBase
-                            + GraphConstants.folderRadiusScale * Double(count).squareRoot(),
-                        GraphConstants.folderRadiusMax)
-            let rgb = rgbFromHex(f.colorHex ?? defaultFolderHex(name: f.name))
-            nodes.append(GraphNode(id: idx, kind: .folder(slug: f.slug), title: f.name,
-                                   radius: r, colorRGB: rgb, fileURL: nil, hubIndex: 0))
-            let s = GraphConstants.folderStrength(memberWeights: memberWeights[f.slug] ?? [])
-            edges.append(GraphEdge(a: idx, b: 0, strength: s,
-                                   restLength: GraphConstants.folderRingDistance,
-                                   halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
-                                   halfWidthB: GraphConstants.edgeEndWidth(
-                                       ballRadius: GraphConstants.mainRadius),
-                                   springStrength: GraphConstants.hubSpringStrength))
-        }
-
-        // 虚拟 "Unclassified" folder 球(07-02 反馈):未分组 event 不再直连
-        // 主球到处散,统一挂到这个灰色 hub 下 —— 自动获得扇区约束/hub 碰撞/
-        // 按数量定大小。纯渲染实体,不写 EventFolderStore。
-        let unclassified = scanned.filter { folderOf[$0.relPath] == nil }
-        var unclassifiedIdx = 0
-        if !unclassified.isEmpty {
-            let idx = nodes.count
-            unclassifiedIdx = idx
-            let r = min(GraphConstants.folderRadiusBase
-                            + GraphConstants.folderRadiusScale
-                                * Double(unclassified.count).squareRoot(),
-                        GraphConstants.folderRadiusMax)
-            nodes.append(GraphNode(id: idx, kind: .folder(slug: unclassifiedSlug),
-                                   title: "Unclassified", radius: r,
-                                   colorRGB: ungroupedGray, fileURL: nil, hubIndex: 0))
-            let s = GraphConstants.folderStrength(memberWeights: unclassified.map(\.weight))
-            edges.append(GraphEdge(a: idx, b: 0, strength: s,
-                                   restLength: GraphConstants.folderRingDistance,
-                                   halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
-                                   halfWidthB: GraphConstants.edgeEndWidth(
-                                       ballRadius: GraphConstants.mainRadius),
-                                   springStrength: GraphConstants.hubSpringStrength))
-        }
-
-        // event 球:归组的连 folder(继承 folder 色),未归组连 Unclassified(灰)
+        var membersOf: [String: [ScannedFile]] = [:]
+        var unclassifiedMembers: [ScannedFile] = []
         for s in scanned {
-            let idx = nodes.count
-            let hub = folderOf[s.relPath].flatMap { hubIndexOf[$0] } ?? unclassifiedIdx
-            let rgb = hub == unclassifiedIdx ? ungroupedGray : nodes[hub].colorRGB
-            let r = min(GraphConstants.eventRadiusBase
-                            + GraphConstants.eventRadiusScale * s.weight,
-                        GraphConstants.eventRadiusMax)
-            nodes.append(GraphNode(id: idx, kind: .eventLeaf(relPath: s.relPath), title: s.title,
-                                   radius: r, colorRGB: rgb, fileURL: s.url, hubIndex: hub))
-            let strength = min(Double(s.occurrences), GraphConstants.eventStrengthMax)
-            let rest = GraphConstants.leafDistance(
-                daysAgo: s.daysAgo,
-                near: GraphConstants.eventLeafDistanceNear,
-                far: GraphConstants.eventLeafDistanceFar)
-            edges.append(GraphEdge(a: idx, b: hub, strength: strength, restLength: rest,
-                                   halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: r),
-                                   halfWidthB: GraphConstants.leafEdgeEndWidth(
-                                       ballRadius: nodes[hub].radius)))
+            if let slug = folderOf[s.relPath] { membersOf[slug, default: []].append(s) }
+            else { unclassifiedMembers.append(s) }
         }
-        return GraphScene(zone: .events, nodes: nodes, edges: edges)
+
+        // hub 列表(真 folder 含空的 + 虚拟 Unclassified),叶数降序定圆弧顺序
+        var specs: [HubSpec] = folders.map {
+            HubSpec(slug: $0.slug, name: $0.name,
+                    colorRGB: rgbFromHex($0.colorHex ?? defaultFolderHex(name: $0.name)),
+                    members: membersOf[$0.slug] ?? [])
+        }
+        if !unclassifiedMembers.isEmpty {
+            specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
+                                 colorRGB: ungroupedGray, members: unclassifiedMembers))
+        }
+        specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
+
+        return assemble(userName: userName, specs: specs,
+                        outerRadius: GraphConstants.eventOuterRadius,
+                        hubRadius: { spec in
+                            min(GraphConstants.folderRadiusBase
+                                    + GraphConstants.folderRadiusScale
+                                        * Double(spec.members.count).squareRoot(),
+                                GraphConstants.folderRadiusMax)
+                        },
+                        hubKind: { .folder(slug: $0.slug) },
+                        leafKind: { .eventLeaf(relPath: $0.relPath) },
+                        leafColor: { spec, _ in spec.colorRGB },
+                        leafRadius: { s in
+                            min(GraphConstants.eventRadiusBase
+                                    + GraphConstants.eventRadiusScale * s.weight,
+                                GraphConstants.eventRadiusMax)
+                        },
+                        leafRest: { s in
+                            GraphConstants.leafDistance(
+                                daysAgo: s.daysAgo,
+                                near: GraphConstants.eventLeafDistanceNear,
+                                far: GraphConstants.eventLeafDistanceFar)
+                        },
+                        leafStrength: { s in
+                            min(Double(s.occurrences), GraphConstants.eventStrengthMax)
+                        },
+                        zone: .events)
     }
 
-    // MARK: - Portrait 画布(需求 §4.3)
+    // MARK: - Portrait 画布
 
     private static func buildPortrait(halfLifeDays: Double, userName: String) -> GraphScene {
+        var specs: [HubSpec] = portraitCategories.map { (name, hex) in
+            let dir = Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
+            // 排序保证指纹稳定(同 buildEvents 的 07-02 缓存 bug 修复)。
+            let members = scanDir(dir, halfLifeDays: halfLifeDays)
+                .sorted { $0.relPath < $1.relPath }
+            return HubSpec(slug: name,
+                           name: name.replacingOccurrences(of: "_", with: " "),
+                           colorRGB: rgbFromHex(hex), members: members)
+        }
+        specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
+
+        return assemble(userName: userName, specs: specs,
+                        outerRadius: GraphConstants.portraitOuterRadius,
+                        hubRadius: { _ in GraphConstants.categoryRadius },
+                        hubKind: { .category(name: $0.slug) },
+                        leafKind: { s in
+                            // category 从 URL 倒数第二段取(portrait/<cat>/x.md)
+                            .portraitLeaf(category: s.url.deletingLastPathComponent()
+                                .lastPathComponent)
+                        },
+                        leafColor: { spec, _ in spec.colorRGB },
+                        leafRadius: { s in
+                            GraphConstants.portraitRadiusBase
+                                + GraphConstants.portraitRadiusScale
+                                    * min(s.weight, GraphConstants.portraitStrengthMax)
+                        },
+                        leafRest: { s in
+                            GraphConstants.leafDistance(
+                                daysAgo: s.daysAgo,
+                                near: GraphConstants.portraitLeafDistanceNear,
+                                far: GraphConstants.portraitLeafDistanceFar)
+                        },
+                        leafStrength: { s in
+                            max(min(s.weight, GraphConstants.portraitStrengthMax), 1)
+                        },
+                        zone: .portrait)
+    }
+
+    // MARK: - 组装(两画布共用:份额分配 + 半径补偿 + 建节点/边)
+
+    private static func assemble(userName: String,
+                                 specs: [HubSpec],
+                                 outerRadius: Double,
+                                 hubRadius: (HubSpec) -> Double,
+                                 hubKind: (HubSpec) -> GraphNodeKind,
+                                 leafKind: (ScannedFile) -> GraphNodeKind,
+                                 leafColor: (HubSpec, ScannedFile) -> SIMD3<Double>,
+                                 leafRadius: (ScannedFile) -> Double,
+                                 leafRest: (ScannedFile) -> Double,
+                                 leafStrength: (ScannedFile) -> Double,
+                                 zone: GraphZone) -> GraphScene {
         var nodes: [GraphNode] = []
         var edges: [GraphEdge] = []
         nodes.append(GraphNode(id: 0, kind: .main, title: userName,
                                radius: GraphConstants.mainRadius,
                                colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
 
-        for (name, hex) in portraitCategories {
+        let wedges = allocateWedges(counts: specs.map(\.members.count))
+        var cursor = -90.0   // 圆弧游标(度),从正上方开始顺时针分配
+        for (k, spec) in specs.enumerated() {
+            let wedge = wedges[k]
+            let centerDeg = cursor + wedge / 2
+            cursor += wedge
+            let r = hubRadius(spec)
+            // 半径补偿:fan 外缘 = hubDist + maxLeafRest ≡ outerRadius。
+            // floor 到主球碰撞下限(碰撞约束会顶住,再小无意义)。
+            let maxRest = spec.members.map(leafRest).max()
+                ?? GraphConstants.eventLeafDistanceFar
+            let dist = max(outerRadius - maxRest,
+                           GraphConstants.mainRadius + r
+                               + Double(GraphConstants.mainCollisionPadding) + 2)
+
             let hubIdx = nodes.count
-            let rgb = rgbFromHex(hex)
-            nodes.append(GraphNode(id: hubIdx, kind: .category(name: name),
-                                   title: name.replacingOccurrences(of: "_", with: " "),
-                                   radius: GraphConstants.categoryRadius,
-                                   colorRGB: rgb, fileURL: nil, hubIndex: 0))
-            edges.append(GraphEdge(a: hubIdx, b: 0,
-                                   strength: GraphConstants.categoryStrength,
-                                   restLength: GraphConstants.categoryRingDistance,
-                                   halfWidthA: GraphConstants.edgeEndWidth(
-                                       ballRadius: GraphConstants.categoryRadius),
+            var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
+                                    radius: r, colorRGB: spec.colorRGB,
+                                    fileURL: nil, hubIndex: 0)
+            hubNode.hubTargetAngle = centerDeg * .pi / 180
+            hubNode.hubWedgeDegrees = wedge
+            nodes.append(hubNode)
+            let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
+            edges.append(GraphEdge(a: hubIdx, b: 0, strength: s, restLength: dist,
+                                   halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
                                    halfWidthB: GraphConstants.edgeEndWidth(
                                        ballRadius: GraphConstants.mainRadius),
                                    springStrength: GraphConstants.hubSpringStrength))
 
-            let dir = Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
-            // 排序保证指纹稳定(同 buildEvents 的 07-02 缓存 bug 修复)。
-            for s in scanDir(dir, halfLifeDays: halfLifeDays)
-                .sorted(by: { $0.relPath < $1.relPath }) {
+            for m in spec.members {
                 let idx = nodes.count
-                let capped = min(s.weight, GraphConstants.portraitStrengthMax)
-                let r = GraphConstants.portraitRadiusBase
-                    + GraphConstants.portraitRadiusScale * capped
-                nodes.append(GraphNode(id: idx, kind: .portraitLeaf(category: name),
-                                       title: s.title, radius: r, colorRGB: rgb,
-                                       fileURL: s.url, hubIndex: hubIdx))
-                let rest = GraphConstants.leafDistance(
-                    daysAgo: s.daysAgo,
-                    near: GraphConstants.portraitLeafDistanceNear,
-                    far: GraphConstants.portraitLeafDistanceFar)
-                edges.append(GraphEdge(a: idx, b: hubIdx, strength: max(capped, 1),
-                                       restLength: rest,
-                                       halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: r),
-                                       halfWidthB: GraphConstants.leafEdgeEndWidth(
-                                           ballRadius: GraphConstants.categoryRadius)))
+                let lr = leafRadius(m)
+                nodes.append(GraphNode(id: idx, kind: leafKind(m), title: m.title,
+                                       radius: lr, colorRGB: leafColor(spec, m),
+                                       fileURL: m.url, hubIndex: hubIdx))
+                edges.append(GraphEdge(a: idx, b: hubIdx,
+                                       strength: leafStrength(m),
+                                       restLength: leafRest(m),
+                                       halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
+                                       halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }
         }
-        return GraphScene(zone: .portrait, nodes: nodes, edges: edges)
+        return GraphScene(zone: zone, nodes: nodes, edges: edges)
     }
 
     // MARK: - 目录扫描(与 MemoriesView.scan 同口径:跳 INDEX/_archive/_quarantine)

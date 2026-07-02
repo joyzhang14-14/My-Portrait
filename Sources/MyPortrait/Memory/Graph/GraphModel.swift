@@ -36,6 +36,10 @@ struct GraphNode: Identifiable, Sendable {
     let fileURL: URL?
     /// 所连接的 hub 的 index(主球为 -1)。
     let hubIndex: Int
+    /// 完美圆算法(07-02):hub 的目标极角(rad)与楔形份额(度)。
+    /// 仅非主球 hub 有值;由 builder 按叶数份额分配,物理用角度弹簧拉过去。
+    var hubTargetAngle: Double? = nil
+    var hubWedgeDegrees: Double? = nil
 
     var color: Color {
         Color(red: colorRGB.x, green: colorRGB.y, blue: colorRGB.z)

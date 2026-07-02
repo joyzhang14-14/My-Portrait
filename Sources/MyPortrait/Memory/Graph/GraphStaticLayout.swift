@@ -16,11 +16,13 @@ enum GraphStaticLayout {
         var edgeOf: [Int: GraphEdge] = [:]
         for e in scene.edges { edgeOf[e.a] = e }
 
-        // hub 环
+        // hub 环(fallback 距离:完美圆算法的 outer − far,folderRing 已废)
         let hubs = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }
+        let fallback = GraphConstants.eventOuterRadius - GraphConstants.eventLeafDistanceFar
         for (k, hub) in hubs.enumerated() {
-            let angle = 2 * Double.pi * Double(k) / Double(max(hubs.count, 1)) - .pi / 2
-            let r = edgeOf[hub.id]?.restLength ?? GraphConstants.folderRingDistance
+            let angle = hub.hubTargetAngle
+                ?? (2 * Double.pi * Double(k) / Double(max(hubs.count, 1)) - .pi / 2)
+            let r = edgeOf[hub.id]?.restLength ?? fallback
             pos[hub.id] = SIMD2<Float>(Float(cos(angle) * r), Float(sin(angle) * r))
         }
 

@@ -30,6 +30,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var sectorCosLimit: [Float] = []
     /// 非主球 hub 的下标(folder/分区):互相硬碰撞不重合(07-01 反馈)。
     private var hubIndices: [Int32] = []
+    /// 完美圆(07-02):有目标极角的 hub + 角度(builder 按份额分配)。
+    private var angleHub: [Int32] = [], angleTarget: [Float] = []
     /// 全部末端球下标 + 各自所属 hub(主球=0):扇区间排斥用(07-01 反馈)。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
     private var alpha: Float = 1
@@ -81,6 +83,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
         (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
+        (angleHub, angleTarget) = Self.angleArrays(scene: scene)
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
@@ -166,6 +169,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (sectorLeaf, sectorHub, sectorCosLimit) = Self.sectorPairs(scene: scene)
         hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
         (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
+        (angleHub, angleTarget) = Self.angleArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -231,10 +235,36 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         buildTree()
         manyBodyPass()
         linkPass()
+        angularPass()
         sectorPass()
         sectorRepelPass()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
+    }
+
+    /// 完美圆(07-02):角度弹簧把每个 hub 拉向 builder 按份额分配的目标极角
+    /// —— 每个 folder/分区占据圆的一段分明扇形,互不重叠。
+    private func angularPass() {
+        guard !angleHub.isEmpty else { return }
+        let a = max(alpha, 0.1)   // 同 sector:冷却尾声仍保持定位力
+        let k = GraphConstants.hubAngleStrength
+        pos.withUnsafeBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+        angleHub.withUnsafeBufferPointer { H in
+        angleTarget.withUnsafeBufferPointer { T in
+            for i in 0..<H.count {
+                let hub = Int(H[i])
+                let p = P[hub]
+                let r = simd_length(p)
+                guard r > 1 else { continue }
+                let theta = atan2(p.y, p.x)
+                var diff = T[i] - theta
+                while diff > .pi { diff -= 2 * .pi }
+                while diff < -.pi { diff += 2 * .pi }
+                let tangent = SIMD2<Float>(-p.y, p.x) / r
+                V[hub] += tangent * (diff * r * k * a)
+            }
+        }}}}
     }
 
     /// 楔形扇区软阻力(07-01/02 反馈):每个 leaf 应待在「hub 背向主球、
@@ -599,11 +629,24 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         for e in scene.edges {
             if e.b != 0, scene.nodes[e.b].kind.isHub, !scene.nodes[e.a].kind.isHub {
                 l.append(Int32(e.a)); h.append(Int32(e.b))
-                let wedge = GraphConstants.sectorWedgeDegrees(leafCount: countOf[e.b] ?? 0)
+                // 完美圆:优先用 builder 按份额分配的楔形角;无(测试场景)退档位表
+                let wedge = scene.nodes[e.b].hubWedgeDegrees
+                    ?? GraphConstants.sectorWedgeDegrees(leafCount: countOf[e.b] ?? 0)
                 cos.append(Float(Foundation.cos(wedge / 2 * .pi / 180)))
             }
         }
         return (l, h, cos)
+    }
+
+    /// 有目标极角的 hub(完美圆算法;builder 赋值)。
+    private static func angleArrays(scene: GraphScene) -> ([Int32], [Float]) {
+        var h: [Int32] = [], t: [Float] = []
+        for node in scene.nodes where node.kind.isHub && node.id != 0 {
+            if let a = node.hubTargetAngle {
+                h.append(Int32(node.id)); t.append(Float(a))
+            }
+        }
+        return (h, t)
     }
 
     /// 全部末端球 + 各自所属 hub(主球=0)。扇区间排斥用。
