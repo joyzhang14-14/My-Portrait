@@ -121,17 +121,17 @@ enum GraphConstants {
 
     // MARK: 交互动画
 
-    /// 神经脉冲沿边传播速度(世界 pt/s;07-01 二次反馈:1400 太快,减半)
-    static let pulseSpeed: Double = 700
+    /// 神经脉冲沿边传播速度(世界 pt/s;07-02 三次反馈:700 仍偏快,再降)
+    static let pulseSpeed: Double = 450
     /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
     static let pulseMaxDepthMain: Int = 2
     static let pulseMaxDepthOther: Int = 1
     /// 脉冲形态 = ||| 三条垂直于连线的细白杠,沿行进方向间隔(屏幕 pt)
     static let pulseTickCount: Int = 3
     static let pulseTickSpacing: Double = 5
-    /// 杠长 = 连线的**实际渲染粗细**×此倍数(07-01 二次反馈:必须跟画出来的
-    /// 线同量级,不能用锥形概念宽度 —— 线改细后那个超标太多)
-    static let pulseTickLengthScale: Double = 3
+    /// 杠长 = 连线的**实际渲染粗细**×此倍数。07-02 反馈定稿:=1,
+    /// 杠长与线宽完全贴合(此前 ×3 仍被指出"没有完美贴合")
+    static let pulseTickLengthScale: Double = 1
     static let pulseTickStrokeWidth: Double = 1.2
     /// hover 白闪频率(Hz)
     static let hoverBlinkHz: Double = 2.2
