@@ -750,9 +750,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
     }
 
-    /// 家分组(≥3 叶):familyLeaf 连续段 + 每家 (hub, 区间)。
+    /// 家分组 → **径向分层**(07-02 用户定稿:长线球堆一边、短线球堆
+    /// 另一边时,角向再均匀整体也显得偏 —— 每一段长度各自做均匀分布):
+    /// 每家按线长分位切 1~5 层(≥16 叶才分层),familyRange 的每条 =
+    /// 一层,匀布力在层内独立生效 → 每一圈各自均匀。
     private static func familyArrays(scene: GraphScene)
         -> ([Int32], [(hub: Int32, lo: Int, hi: Int)]) {
+        var restOf: [Int32: Float] = [:]
+        for e in scene.edges where !scene.nodes[e.a].kind.isHub {
+            restOf[Int32(e.a)] = Float(e.restLength)
+        }
         var byHub: [Int32: [Int32]] = [:]
         for node in scene.nodes where !node.kind.isHub && node.hubIndex > 0 {
             byHub[Int32(node.hubIndex), default: []].append(Int32(node.id))
@@ -761,9 +768,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         var ranges: [(hub: Int32, lo: Int, hi: Int)] = []
         for (hub, leaves) in byHub.sorted(by: { $0.key < $1.key })
         where leaves.count >= 3 {
-            let lo = leaf.count
-            leaf.append(contentsOf: leaves)
-            ranges.append((hub: hub, lo: lo, hi: leaf.count))
+            let sorted = leaves.sorted {
+                (restOf[$0] ?? 0, $0) < (restOf[$1] ?? 0, $1)
+            }
+            let bands = max(1, min(sorted.count / 16, 5))
+            let per = sorted.count / bands
+            var i = 0
+            for b in 0..<bands {
+                let hi = b == bands - 1 ? sorted.count : (b + 1) * per
+                if hi - i >= 3 {
+                    let lo = leaf.count
+                    leaf.append(contentsOf: sorted[i..<hi])
+                    ranges.append((hub: hub, lo: lo, hi: leaf.count))
+                }
+                i = hi
+            }
         }
         return (leaf, ranges)
     }
