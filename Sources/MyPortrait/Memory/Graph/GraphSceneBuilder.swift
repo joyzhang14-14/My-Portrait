@@ -220,6 +220,10 @@ enum GraphSceneBuilder {
                                     fileURL: nil, hubIndex: 0)
             hubNode.hubTargetAngle = centerDeg * .pi / 180
             hubNode.hubWedgeDegrees = wedge
+            // 等距硬保证:引擎按 |targetPosition| 每 tick 把 hub 半径钉回公式值
+            hubNode.targetPosition = SIMD2<Float>(
+                Float(cos(centerDeg * .pi / 180) * dist),
+                Float(sin(centerDeg * .pi / 180) * dist))
             nodes.append(hubNode)
             let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
             edges.append(GraphEdge(a: hubIdx, b: 0, strength: s, restLength: dist,
