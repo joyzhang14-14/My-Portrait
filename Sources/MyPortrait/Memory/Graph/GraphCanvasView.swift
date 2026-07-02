@@ -30,9 +30,12 @@ struct GraphCanvasView: View {
     private enum DragMode: Equatable { case idle, pan, node(Int) }
     @State private var dragMode: DragMode = .idle
     @State private var lastDragTranslation: CGSize = .zero
-    /// 被拖球的实时指针世界坐标:渲染直接用它画被拖球,不等物理 tick
-    ///(tick 重/Debug 慢时球才不掉帧 —— 07-02 拖拽卡顿反馈)。
-    @State private var dragWorld: SIMD2<Float>? = nil
+    /// 被拖球的实时指针世界坐标(引用盒)。⚠️ 不能用 @State 存值:
+    /// 120Hz 指针事件逐个写 @State 会在 TimelineView 60fps 之外再触发
+    /// 全画布重绘+视图 diff —— 拖球卡而平移不卡的真凶(07-02 实测)。
+    /// class 挂在 @State 上只保身份,改字段不惊动 SwiftUI,渲染每帧读。
+    private final class DragWorldBox { var world: SIMD2<Float>? }
+    @State private var dragWorldBox = DragWorldBox()
     @State private var lastMagnification: CGFloat = 1
 
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
@@ -127,8 +130,8 @@ struct GraphCanvasView: View {
             var snap = engine.readSnapshot()
             guard snap.count == scene.nodes.count else { return }
             // 被拖球直接钉在实时指针位置(球/边/标签同源一致),
-            // 物理 tick 慢时拖拽也不掉帧
-            if case .node(let di) = dragMode, let w = dragWorld, di < snap.count {
+            // 物理 tick 慢时拖拽也不掉帧;从引用盒读,写入不惊动 SwiftUI
+            if case .node(let di) = dragMode, let w = dragWorldBox.world, di < snap.count {
                 snap[di] = w
             }
             drawEdges(ctx, snap: snap, size: size)
@@ -356,7 +359,7 @@ struct GraphCanvasView: View {
                     camera.pan(byScreen: delta)
                 case .node:
                     let w = camera.screenToWorld(v.location, viewSize: viewSize)
-                    dragWorld = w
+                    dragWorldBox.world = w   // 引用盒:不触发 SwiftUI 更新
                     engine.drag(to: w)
                 case .idle:
                     break
@@ -365,7 +368,7 @@ struct GraphCanvasView: View {
             .onEnded { _ in
                 if case .node = dragMode { engine.endDrag() }
                 dragMode = .idle
-                dragWorld = nil
+                dragWorldBox.world = nil
                 lastDragTranslation = .zero
             }
     }
