@@ -68,43 +68,56 @@ struct GraphCanvasView: View {
             let snap = engine.readSnapshot()
             guard snap.count == scene.nodes.count else { return }
             let zoom = camera.zoom
-            // 边画进独立透明层:层内不透明灰,整层 45% 合成 —— 连接处重叠
-            // 不会互相加深颜色(2026-07-01 用户反馈)。
-            let edgeShading = GraphicsContext.Shading.color(.gray)
-            var edgeCtx = ctx
-            edgeCtx.opacity = 0.45
-            edgeCtx.drawLayer { ctx in
 
-            // --- 边(锥形橡皮筋:两端粗中间细) ---
-            for e in scene.edges {
-                let pa = camera.worldToScreen(snap[e.a], viewSize: size)
-                let pb = camera.worldToScreen(snap[e.b], viewSize: size)
-                // 视口剔除:两端都远在屏幕外的边跳过(粗略包围盒)
-                if max(pa.x, pb.x) < -50 || min(pa.x, pb.x) > size.width + 50 ||
-                   max(pa.y, pb.y) < -50 || min(pa.y, pb.y) > size.height + 50 { continue }
-                var dx = pb.x - pa.x, dy = pb.y - pa.y
-                let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
-                dx /= len; dy /= len
-                let nx = -dy, ny = dx
-                // 线宽锚定**屏幕像素**,不随 zoom 缩放(2026-07-01 反馈:
-                // 像 Obsidian,拉近拉远都是等粗细的线)。但上限仍是球的
-                // 屏幕半径 —— 缩得很远时线跟着球缩,不会比球粗。
-                let wa = min(e.halfWidthA, scene.nodes[e.a].radius * zoom)
-                let wb = min(e.halfWidthB, scene.nodes[e.b].radius * zoom)
-                let wm = min(wa, wb) * GraphConstants.waistRatio
-                let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
-                var p = Path()
-                p.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
-                p.addQuadCurve(to: CGPoint(x: pb.x + nx * wb, y: pb.y + ny * wb),
-                               control: CGPoint(x: mx + nx * wm, y: my + ny * wm))
-                p.addLine(to: CGPoint(x: pb.x - nx * wb, y: pb.y - ny * wb))
-                p.addQuadCurve(to: CGPoint(x: pa.x - nx * wa, y: pa.y - ny * wa),
-                               control: CGPoint(x: mx - nx * wm, y: my - ny * wm))
-                p.closeSubpath()
-                ctx.fill(p, with: edgeShading)
+            // --- 边 ---
+            switch GraphConstants.edgeStyle {
+            case .line:
+                // 纯线模式(2026-07-01 反馈:锥形卡顿且效果不明显,先试等宽细线)。
+                // 全部边合进**一条 Path 一次 stroke**:同一路径内重叠只画一遍
+                // (天然不加深),无离屏层,像素量最小 —— 也是修卡顿的关键
+                // (旧方案的 drawLayer 每帧强制全屏离屏合成)。
+                var linePath = Path()
+                for e in scene.edges {
+                    let pa = camera.worldToScreen(snap[e.a], viewSize: size)
+                    let pb = camera.worldToScreen(snap[e.b], viewSize: size)
+                    if max(pa.x, pb.x) < -50 || min(pa.x, pb.x) > size.width + 50 ||
+                       max(pa.y, pb.y) < -50 || min(pa.y, pb.y) > size.height + 50 { continue }
+                    linePath.move(to: pa)
+                    linePath.addLine(to: pb)
+                }
+                // 线宽锚定屏幕像素,拉近拉远等粗(Obsidian 式)。
+                ctx.stroke(linePath, with: .color(.gray.opacity(0.45)),
+                           lineWidth: GraphConstants.lineEdgeWidth)
+
+            case .taperedFill:
+                // 锥形橡皮筋(两端粗中间细),保留可切回(GraphConstants.edgeStyle)。
+                let edgeShading = GraphicsContext.Shading.color(.gray.opacity(0.45))
+                for e in scene.edges {
+                    let pa = camera.worldToScreen(snap[e.a], viewSize: size)
+                    let pb = camera.worldToScreen(snap[e.b], viewSize: size)
+                    // 视口剔除:两端都远在屏幕外的边跳过(粗略包围盒)
+                    if max(pa.x, pb.x) < -50 || min(pa.x, pb.x) > size.width + 50 ||
+                       max(pa.y, pb.y) < -50 || min(pa.y, pb.y) > size.height + 50 { continue }
+                    var dx = pb.x - pa.x, dy = pb.y - pa.y
+                    let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
+                    dx /= len; dy /= len
+                    let nx = -dy, ny = dx
+                    // 线宽锚定屏幕像素;上限 = 球的屏幕半径(缩远时线不比球粗)。
+                    let wa = min(e.halfWidthA, scene.nodes[e.a].radius * zoom)
+                    let wb = min(e.halfWidthB, scene.nodes[e.b].radius * zoom)
+                    let wm = min(wa, wb) * GraphConstants.waistRatio
+                    let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
+                    var p = Path()
+                    p.move(to: CGPoint(x: pa.x + nx * wa, y: pa.y + ny * wa))
+                    p.addQuadCurve(to: CGPoint(x: pb.x + nx * wb, y: pb.y + ny * wb),
+                                   control: CGPoint(x: mx + nx * wm, y: my + ny * wm))
+                    p.addLine(to: CGPoint(x: pb.x - nx * wb, y: pb.y - ny * wb))
+                    p.addQuadCurve(to: CGPoint(x: pa.x - nx * wa, y: pa.y - ny * wa),
+                                   control: CGPoint(x: mx - nx * wm, y: my - ny * wm))
+                    p.closeSubpath()
+                    ctx.fill(p, with: edgeShading)
+                }
             }
-
-            }   // edgeCtx.drawLayer
 
             // --- 神经脉冲亮斑(边之上、球之下) ---
             if !pulses.isEmpty {
