@@ -21,6 +21,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var n: Int
     private var pos: [SIMD2<Float>]
     private var vel: [SIMD2<Float>]
+    private var nodeRadius: [Float]
     private var edgesA: [Int32], edgesB: [Int32]
     private var linkStrength: [Float], linkBias: [Float], linkRest: [Float]
     private var alpha: Float = 1
@@ -62,6 +63,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         var rng = SplitMix64(seed: seed)
         pos = Self.explosionPositions(n: n, rng: &rng)
         vel = .init(repeating: .zero, count: n)
+        nodeRadius = scene.nodes.map { Float($0.radius) }
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
 
@@ -139,6 +141,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     func updateScene(_ scene: GraphScene) {
         simLock.lock()
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
+        nodeRadius = scene.nodes.map { Float($0.radius) }
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
@@ -401,6 +404,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             pos[di] = draggedTo
             vel[di] = .zero
         }
+        // 主球碰撞硬约束:斥力是点电荷不认半径,低 weight 小球会在中心区
+        // 平衡叠在主球上(2026-07-01 用户实测反馈)。径向推出,含被拖球。
+        if n > 1 {
+            let mainR = nodeRadius[0]
+            let pad = GraphConstants.mainCollisionPadding
+            pos.withUnsafeMutableBufferPointer { P in
+                for i in 1..<n {
+                    let d = simd_length(P[i])
+                    let minD = mainR + nodeRadius[i] + pad
+                    if d < minD {
+                        let dir = d > 1e-4 ? P[i] / d : SIMD2<Float>(1, 0)
+                        P[i] = dir * minD
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - 静态助手
@@ -415,8 +434,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         for e in scene.edges {
             ea.append(Int32(e.a)); eb.append(Int32(e.b))
             let da = Float(degree[e.a]), db = Float(degree[e.b])
-            // d3 默认:刚度 = 1/min(度数) —— hub 度数大,弹簧软,不被叶子拽爆
-            ls.append(1 / min(max(da, 1), max(db, 1)))
+            // d3 默认:刚度 = 1/min(度数) —— hub 度数大,弹簧软,不被叶子拽爆。
+            // hub→主球带 override(1.0):否则 folder 度数几百刚度趋零,被斥力推飞。
+            ls.append(e.springStrength.map(Float.init)
+                      ?? (1 / min(max(da, 1), max(db, 1))))
             lb.append(da / (da + db))
             lr.append(Float(e.restLength))
         }

@@ -77,10 +77,9 @@ struct TimelineSidebar: View {
                         cronJobHistorySection
                         recentsSection
                     } else if selection == .memories {
-                        // text/canvas 模式切换钮:独立小卡,放 scope 卡上方(需求 §3.1)
-                        sectionCard {
-                            MemoryViewModeToggle(mode: $memoryViewMode)
-                        }
+                        // text/canvas 模式切换钮:独立小卡,放 scope 卡上方(需求 §3.1)。
+                        // 卡比 sectionCard 更瘦(padding 6 vs 12,07-01 反馈),钮本身不变。
+                        memoryViewModeCard
                         memoryScopeSection
                     } else if selection == .settings {
                         settingsListSection
@@ -375,6 +374,24 @@ struct TimelineSidebar: View {
             return Array(filtered.prefix(cap))
         }
         return filtered
+    }
+
+    /// text/canvas 切换钮的瘦身卡:同 sectionCard 的 fill/stroke,padding 减半
+    ///(07-01 反馈:卡缩小,钮不变)。
+    private var memoryViewModeCard: some View {
+        let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
+        let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
+        return MemoryViewModeToggle(mode: $memoryViewMode)
+            .padding(6)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(stroke, lineWidth: 0.8)
+                    )
+            )
     }
 
     // MARK: Memories scope picker (shown when selection == .memories)

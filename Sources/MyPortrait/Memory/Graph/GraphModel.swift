@@ -50,9 +50,13 @@ struct GraphEdge: Sendable {
     let strength: Double
     /// 弹簧自然长度(= §4.4 的距离映射结果)。
     let restLength: Double
-    /// 端点半宽,逐端各自 = min(所连球半径, 15) —— 神经末梢从球上「长」出来。
+    /// 端点半宽,逐端各自 = min(所连球半径, 上限) —— 神经末梢从球上「长」出来。
+    /// hub↔主球上限 15;连末端球的边整条上限 7。
     let halfWidthA: Double
     let halfWidthB: Double
+    /// 弹簧刚度 override。nil = d3 默认(1/min(两端度数))。
+    /// hub→主球设 1.0:folder 度数几百导致默认刚度趋零,会被斥力推飞。
+    var springStrength: Double? = nil
 }
 
 /// 一张画布的完整图数据(不含位置 —— 位置归布局/物理层)。
