@@ -21,6 +21,8 @@ enum GraphSceneBuilder {
     static let mainBlue = SIMD3<Double>(0.29, 0.57, 0.98)
     /// 未归组 event 的中性灰。
     static let ungroupedGray = SIMD3<Double>(0.58, 0.60, 0.63)
+    /// 虚拟 Unclassified folder 的保留 slug(不落盘,仅图谱内部标识)。
+    static let unclassifiedSlug = "__unclassified__"
 
     // MARK: - 入口
 
@@ -86,11 +88,35 @@ enum GraphSceneBuilder {
                                    springStrength: GraphConstants.hubSpringStrength))
         }
 
-        // event 球:归组的连 folder(继承 folder 色),未归组连主球(灰)
+        // 虚拟 "Unclassified" folder 球(07-02 反馈):未分组 event 不再直连
+        // 主球到处散,统一挂到这个灰色 hub 下 —— 自动获得扇区约束/hub 碰撞/
+        // 按数量定大小。纯渲染实体,不写 EventFolderStore。
+        let unclassified = scanned.filter { folderOf[$0.relPath] == nil }
+        var unclassifiedIdx = 0
+        if !unclassified.isEmpty {
+            let idx = nodes.count
+            unclassifiedIdx = idx
+            let r = min(GraphConstants.folderRadiusBase
+                            + GraphConstants.folderRadiusScale
+                                * Double(unclassified.count).squareRoot(),
+                        GraphConstants.folderRadiusMax)
+            nodes.append(GraphNode(id: idx, kind: .folder(slug: unclassifiedSlug),
+                                   title: "Unclassified", radius: r,
+                                   colorRGB: ungroupedGray, fileURL: nil, hubIndex: 0))
+            let s = GraphConstants.folderStrength(memberWeights: unclassified.map(\.weight))
+            edges.append(GraphEdge(a: idx, b: 0, strength: s,
+                                   restLength: GraphConstants.folderRingDistance,
+                                   halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
+                                   halfWidthB: GraphConstants.edgeEndWidth(
+                                       ballRadius: GraphConstants.mainRadius),
+                                   springStrength: GraphConstants.hubSpringStrength))
+        }
+
+        // event 球:归组的连 folder(继承 folder 色),未归组连 Unclassified(灰)
         for s in scanned {
             let idx = nodes.count
-            let hub = folderOf[s.relPath].flatMap { hubIndexOf[$0] } ?? 0
-            let rgb = hub == 0 ? ungroupedGray : nodes[hub].colorRGB
+            let hub = folderOf[s.relPath].flatMap { hubIndexOf[$0] } ?? unclassifiedIdx
+            let rgb = hub == unclassifiedIdx ? ungroupedGray : nodes[hub].colorRGB
             let r = min(GraphConstants.eventRadiusBase
                             + GraphConstants.eventRadiusScale * s.weight,
                         GraphConstants.eventRadiusMax)
