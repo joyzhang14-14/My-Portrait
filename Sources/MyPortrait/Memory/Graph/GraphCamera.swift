@@ -8,7 +8,8 @@ struct GraphCamera: Equatable {
     var center: SIMD2<Float> = .zero
     var zoom: Double = 1.0
 
-    static let zoomRange: ClosedRange<Double> = 0.08...6.0
+    /// 下限 0.15(07-01 崩溃反馈:太小无意义且逼近数值边界)。
+    static let zoomRange: ClosedRange<Double> = 0.15...6.0
 
     func worldToScreen(_ w: SIMD2<Float>, viewSize: CGSize) -> CGPoint {
         CGPoint(x: (Double(w.x) - Double(center.x)) * zoom + viewSize.width / 2,
@@ -22,12 +23,17 @@ struct GraphCamera: Equatable {
 
     /// 平移:屏幕位移 delta(pt)→ 世界位移 delta/zoom。
     mutating func pan(byScreen delta: CGSize) {
+        guard delta.width.isFinite, delta.height.isFinite else { return }
         center.x -= Float(delta.width / zoom)
         center.y -= Float(delta.height / zoom)
     }
 
     /// 锚点缩放:缩放后 anchor 处的世界点仍停在 anchor 屏幕位置。
     mutating func zoom(by factor: Double, anchor: CGPoint, viewSize: CGSize) {
+        // ⚠️ 数值防御(07-01 崩溃反馈):MagnifyGesture 极端手势下会给 0/0=NaN,
+        // NaN 穿过 min/max 钳制永久污染 zoom → 下游坐标全 NaN
+        //(旧命中网格 Int32(NaN) 直接 fatal)。非有限或非正的因子一律丢弃。
+        guard factor.isFinite, factor > 0 else { return }
         let worldAtAnchor = screenToWorld(anchor, viewSize: viewSize)
         zoom = min(max(zoom * factor, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
         // 反解 center,使 worldAtAnchor 投影回 anchor

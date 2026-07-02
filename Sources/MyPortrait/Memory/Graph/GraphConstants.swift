@@ -100,8 +100,9 @@ enum GraphConstants {
     static let centerStrength: Float = 0.05
     /// 拖拽/交互 reheat 的 alphaTarget(d3 惯例 0.3)
     static let dragAlphaTarget: Float = 0.3
-    /// 物理线程定步频率
-    static let physicsHz: Double = 120
+    /// 物理线程定步频率(60 = d3/Obsidian 的 rAF 同款;120 视觉无差但
+    /// 背景 CPU 翻倍,07-01 拖拽卡顿优化降回 60)
+    static let physicsHz: Double = 60
     /// 开场炸开:初始位置挤在中心这个半径内
     static let explosionRadius: Float = 30
     /// 主球碰撞硬约束的额外间隙:任何球不得进入 主球半径+自身半径+此值
@@ -110,22 +111,33 @@ enum GraphConstants {
     /// hub→主球弹簧刚度 override(d3 默认=1/度数,folder 度数几百 → 弹簧
     /// 太软被斥力推远;定为 1.0 让 folder/分区贴住等距环)
     static let hubSpringStrength: Double = 1.0
+    /// 180° 扇区软阻力(07-01 反馈):folder/分区的末端球须待在 hub 背向
+    /// 主球的半圆里,越界深度×此系数×alpha 的力推回。不是硬墙。
+    static let sectorStrength: Float = 0.15
+    /// 扇区间排斥(07-01 反馈):末端球被**别家 hub** 近距推开,相邻扇形
+    /// 不互相渗透。线性衰减,radius 外无力。
+    static let sectorRepelStrength: Float = 0.6
+    static let sectorRepelRadius: Float = 200
 
     // MARK: 交互动画
 
-    /// 神经脉冲沿边传播速度(世界 pt/s;07-01 反馈:快速)
-    static let pulseSpeed: Double = 1400
+    /// 神经脉冲沿边传播速度(世界 pt/s;07-01 二次反馈:1400 太快,减半)
+    static let pulseSpeed: Double = 700
     /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
     static let pulseMaxDepthMain: Int = 2
     static let pulseMaxDepthOther: Int = 1
     /// 脉冲形态 = ||| 三条垂直于连线的细白杠,沿行进方向间隔(屏幕 pt)
     static let pulseTickCount: Int = 3
     static let pulseTickSpacing: Double = 5
-    /// 每条杠的长度 = 该处连线的概念粗细(锥形宽度函数),下限保证可见
-    static let pulseTickMinHalfLen: Double = 3
+    /// 杠长 = 连线的**实际渲染粗细**×此倍数(07-01 二次反馈:必须跟画出来的
+    /// 线同量级,不能用锥形概念宽度 —— 线改细后那个超标太多)
+    static let pulseTickLengthScale: Double = 3
     static let pulseTickStrokeWidth: Double = 1.2
     /// hover 白闪频率(Hz)
     static let hoverBlinkHz: Double = 2.2
+    /// hub/主球标签 LOD 淡出(07-01 反馈):zoom ≥ Hi 全显,≤ Lo 消失,间上线性
+    static let labelFadeZoomHi: Double = 0.55
+    static let labelFadeZoomLo: Double = 0.32
     /// 浮窗:鼠标移出后自动关闭延迟(s)
     static let floatWindowAutoCloseDelay: TimeInterval = 1.0
 

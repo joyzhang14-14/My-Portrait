@@ -24,12 +24,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var nodeRadius: [Float]
     private var edgesA: [Int32], edgesB: [Int32]
     private var linkStrength: [Float], linkBias: [Float], linkRest: [Float]
+    /// 180° 扇区约束对:leaf 必须待在 hub 背向主球的半圆(07-01 反馈)。
+    private var sectorLeaf: [Int32] = [], sectorHub: [Int32] = []
+    /// 非主球 hub 的下标(folder/分区):互相硬碰撞不重合(07-01 反馈)。
+    private var hubIndices: [Int32] = []
+    /// 全部末端球下标 + 各自所属 hub(主球=0):扇区间排斥用(07-01 反馈)。
+    private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
     /// 拖拽钉住:index → 目标位置(每次 drag move 更新;d3 的 fx/fy 语义)。
     /// 主球恒钉原点,不进这个表(单独处理)。
+    /// ⚠️ 由 dragLock(不是 simLock)保护:drag(to:) 在 120Hz 指针事件里跑,
+    /// 若抢 simLock 会被整个 tick(Debug 下数 ms)阻塞 → 拖拽卡顿。
+    /// 锁序纪律:dragLock 与 simLock 绝不嵌套,顺序获取。
     private var draggedIndex: Int? = nil
     private var draggedTo: SIMD2<Float> = .zero
+    private let dragLock = NSLock()
 
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
     private var qChild: [Int32] = []
@@ -66,6 +76,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeRadius = scene.nodes.map { Float($0.radius) }
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
+        (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
+        hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
+        (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
@@ -102,24 +115,29 @@ final class GraphPhysicsEngine: @unchecked Sendable {
 
     /// 开始拖某个球(index 0 主球由调用方挡掉)。
     func beginDrag(index: Int, at world: SIMD2<Float>) {
-        simLock.lock()
+        dragLock.lock()
         draggedIndex = index
         draggedTo = world
+        dragLock.unlock()
+        simLock.lock()
         alphaTarget = GraphConstants.dragAlphaTarget
         if alpha < GraphConstants.dragAlphaTarget { alpha = GraphConstants.dragAlphaTarget }
         simLock.unlock()
         wake()
     }
 
+    /// 120Hz 指针事件热路径:只碰 dragLock(µs 级),绝不等 tick。
     func drag(to world: SIMD2<Float>) {
-        simLock.lock()
+        dragLock.lock()
         draggedTo = world
-        simLock.unlock()
+        dragLock.unlock()
     }
 
     func endDrag() {
-        simLock.lock()
+        dragLock.lock()
         draggedIndex = nil
+        dragLock.unlock()
+        simLock.lock()
         alphaTarget = 0
         simLock.unlock()
     }
@@ -143,6 +161,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
         nodeRadius = scene.nodes.map { Float($0.radius) }
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
+        (sectorLeaf, sectorHub) = Self.sectorPairs(scene: scene)
+        hubIndices = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }.map { Int32($0.id) }
+        (leafIndices, leafOwnHub) = Self.leafArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -158,9 +179,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             cond.lock()
             if !shouldRun { cond.unlock(); return }
             simLock.lock()
-            let sleeping = alpha < GraphConstants.alphaMin && alphaTarget == 0
-                && draggedIndex == nil
+            let cooled = alpha < GraphConstants.alphaMin && alphaTarget == 0
             simLock.unlock()
+            dragLock.lock()
+            let sleeping = cooled && draggedIndex == nil
+            dragLock.unlock()
             let stateChanged = parkedFlag != sleeping
             parkedFlag = sleeping
             if sleeping && !stateChanged {
@@ -206,8 +229,38 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         buildTree()
         manyBodyPass()
         linkPass()
+        sectorPass()
+        sectorRepelPass()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
+    }
+
+    /// 180° 扇区软阻力(07-01 反馈):folder/分区的每个 leaf 应待在
+    /// 「hub 背向主球的半圆」里。越界(在朝主球一侧)时按越界深度施加
+    /// 沿外向的回正力 —— 是阻力不是硬墙,布局仍是有机的。
+    private func sectorPass() {
+        guard !sectorLeaf.isEmpty else { return }
+        // alpha 设下限:别的力冷却趋零后,扇区回正力仍温和存在 —— 否则
+        // 收敛尾声被斥力挤过界的球推不回来(实测 14/80 漏网)。
+        let a = max(alpha, 0.1)
+        let strength = GraphConstants.sectorStrength
+        pos.withUnsafeBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+        sectorLeaf.withUnsafeBufferPointer { L in
+        sectorHub.withUnsafeBufferPointer { H in
+            for i in 0..<L.count {
+                let hub = Int(H[i])
+                let hubPos = P[hub]
+                let d2 = simd_length_squared(hubPos)
+                guard d2 > 1 else { continue }          // hub 挤在原点,方向未定义
+                let outward = hubPos / d2.squareRoot()  // 主球(原点)→hub 的外向
+                let leaf = Int(L[i])
+                let proj = simd_dot(P[leaf] - hubPos, outward)
+                if proj < 0 {
+                    V[leaf] += outward * (-proj * strength * a)
+                }
+            }
+        }}}}
     }
 
     // MARK: - Barnes-Hut 四叉树(P0 spike 验证:vs O(n²) 暴力误差中位 0.79%)
@@ -400,8 +453,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         // 钉住:主球恒原点;被拖球跟指针(d3 fx/fy 语义)
         pos[0] = .zero
         vel[0] = .zero
-        if let di = draggedIndex, di > 0, di < n {
-            pos[di] = draggedTo
+        dragLock.lock()
+        let di = draggedIndex
+        let dt = draggedTo
+        dragLock.unlock()
+        if let di, di > 0, di < n {
+            pos[di] = dt
             vel[di] = .zero
         }
         // 主球碰撞硬约束:斥力是点电荷不认半径,低 weight 小球会在中心区
@@ -416,6 +473,27 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     if d < minD {
                         let dir = d > 1e-4 ? P[i] / d : SIMD2<Float>(1, 0)
                         P[i] = dir * minD
+                    }
+                }
+            }
+        }
+        // hub 间碰撞(07-01 反馈:folder/分区球互不重合)。每画布 hub ≤10,
+        // O(h²) 忽略不计;每 tick 一轮对半推开,数帧内收敛。
+        if hubIndices.count > 1 {
+            let pad = GraphConstants.mainCollisionPadding
+            pos.withUnsafeMutableBufferPointer { P in
+                for ii in 0..<(hubIndices.count - 1) {
+                    for jj in (ii + 1)..<hubIndices.count {
+                        let i = Int(hubIndices[ii]), j = Int(hubIndices[jj])
+                        let d = P[j] - P[i]
+                        let dist = simd_length(d)
+                        let minD = nodeRadius[i] + nodeRadius[j] + pad
+                        if dist < minD {
+                            let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                            let push = (minD - dist) * 0.5
+                            P[i] -= dir * push
+                            P[j] += dir * push
+                        }
                     }
                 }
             }
@@ -442,6 +520,59 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             lr.append(Float(e.restLength))
         }
         return (ea, eb, ls, lb, lr)
+    }
+
+    /// 扇区间排斥(07-01 反馈):每个末端球被**别家 hub** 近距线性推开
+    /// (自家 hub 不排斥,不然扇形被推散)。让相邻 hub 的扇形不互相渗透。
+    /// 叶×hub ≈ 万次量级 simd,忽略不计。alpha 下限同 sectorPass。
+    private func sectorRepelPass() {
+        guard !leafIndices.isEmpty, !hubIndices.isEmpty else { return }
+        let a = max(alpha, 0.1)
+        let strength = GraphConstants.sectorRepelStrength
+        let radius = GraphConstants.sectorRepelRadius
+        pos.withUnsafeBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+        leafIndices.withUnsafeBufferPointer { L in
+        leafOwnHub.withUnsafeBufferPointer { OWN in
+        hubIndices.withUnsafeBufferPointer { H in
+            for li in 0..<L.count {
+                let leaf = Int(L[li])
+                let own = OWN[li]
+                var f = SIMD2<Float>.zero
+                for hi in 0..<H.count {
+                    let hub = H[hi]
+                    if hub == own { continue }
+                    let d = P[leaf] - P[Int(hub)]
+                    let dist = simd_length(d)
+                    if dist < radius, dist > 1e-4 {
+                        f += (d / dist) * ((radius - dist) / radius * strength)
+                    }
+                }
+                V[leaf] += f * a
+            }
+        }}}}}
+    }
+
+    /// 叶 → 非主球 hub 的约束对(folder 的 event / 分区的 portrait 小球)。
+    /// 未分组 event 直连主球(b=0),没有扇区概念,不进这个表。
+    private static func sectorPairs(scene: GraphScene) -> ([Int32], [Int32]) {
+        var l: [Int32] = [], h: [Int32] = []
+        for e in scene.edges {
+            if e.b != 0, scene.nodes[e.b].kind.isHub, !scene.nodes[e.a].kind.isHub {
+                l.append(Int32(e.a)); h.append(Int32(e.b))
+            }
+        }
+        return (l, h)
+    }
+
+    /// 全部末端球 + 各自所属 hub(主球=0)。扇区间排斥用。
+    private static func leafArrays(scene: GraphScene) -> ([Int32], [Int32]) {
+        var l: [Int32] = [], h: [Int32] = []
+        for node in scene.nodes where !node.kind.isHub {
+            l.append(Int32(node.id))
+            h.append(Int32(max(node.hubIndex, 0)))
+        }
+        return (l, h)
     }
 
     private static func explosionPositions(n: Int, rng: inout SplitMix64) -> [SIMD2<Float>] {

@@ -32,6 +32,25 @@ struct GraphCanvasView: View {
     @State private var lastDragTranslation: CGSize = .zero
     @State private var lastMagnification: CGFloat = 1
 
+    /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
+    /// nodes 做 filter 是每帧 O(n) 分配(07-01 拖拽卡顿优化)。
+    private let hubNodes: [GraphNode]
+
+    init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
+         pulses: [GraphPulse], pulseStart: Date,
+         camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
+         onTapNode: @escaping (Int?) -> Void = { _ in }) {
+        self.scene = scene
+        self.engine = engine
+        self.paused = paused
+        self.pulses = pulses
+        self.pulseStart = pulseStart
+        self._camera = camera
+        self._hoveredId = hoveredId
+        self.onTapNode = onTapNode
+        self.hubNodes = scene.nodes.filter { $0.kind.isHub }
+    }
+
     var body: some View {
         GeometryReader { geo in
             let viewSize = geo.size
@@ -44,6 +63,8 @@ struct GraphCanvasView: View {
             .simultaneousGesture(magnifyGesture(viewSize: viewSize))
             .gesture(tapGesture(viewSize: viewSize))
             .onContinuousHover { phase in
+                // 拖拽中不做 hover 命中(无意义且每事件都是一次全量扫)。
+                guard dragMode == .idle else { return }
                 switch phase {
                 case .active(let p):
                     hoveredId = hitTest(screen: p, viewSize: viewSize)
@@ -54,13 +75,24 @@ struct GraphCanvasView: View {
         }
     }
 
-    /// 屏幕点 → 命中的节点。用当前快照建网格(O(n),µs 级,事件频率下无感)。
+    /// 屏幕点 → 命中的节点。**线性扫,零分配**:网格(GraphHitGrid)是
+    /// 「建一次查多次」的摊销结构,这里每个指针事件只查一次,建 Dictionary
+    /// 的分配/哈希反而是大头(Debug 未特化下拖拽卡顿的元凶之一)。
+    /// ≤5000 节点一圈 simd 距离检查是 µs 级。
     private func hitTest(screen: CGPoint, viewSize: CGSize) -> Int? {
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count else { return nil }
         let world = camera.screenToWorld(screen, viewSize: viewSize)
-        return GraphHitGrid(positions: snap, radii: scene.nodes.map(\.radius))
-            .hit(world: world)
+        var best: Int? = nil
+        var bestD = Float.greatestFiniteMagnitude
+        for i in snap.indices {
+            let d = simd_length(snap[i] - world)
+            if d <= Float(scene.nodes[i].radius) + 4, d < bestD {
+                bestD = d
+                best = i
+            }
+        }
+        return best
     }
 
     // MARK: - Canvas(闭包只做分发,绘制在 draw* helper 里)
@@ -74,7 +106,7 @@ struct GraphCanvasView: View {
             drawBalls(ctx, snap: snap, size: size, date: date)
             drawLabels(ctx, snap: snap, size: size)
         } symbols: {
-            ForEach(scene.nodes.filter { $0.kind.isHub }) { node in
+            ForEach(hubNodes) { node in
                 Text(node.title)
                     .font(.system(size: node.kind == .main ? 13 : 11, weight: .medium))
                     .foregroundStyle(Theme.textPrimary.opacity(0.9))
@@ -162,12 +194,6 @@ struct GraphCanvasView: View {
             let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
             dx /= len; dy /= len
             let nx = -dy, ny = dx
-            // 行进方向上的锥形宽度端点(fromNode 侧在前)
-            let wFrom = min(forward ? e.halfWidthA : e.halfWidthB,
-                            scene.nodes[p.fromNode].radius * zoom)
-            let wTo = min(forward ? e.halfWidthB : e.halfWidthA,
-                          scene.nodes[to].radius * zoom)
-            let wm = min(wFrom, wTo) * GraphConstants.waistRatio
             for k in 0..<GraphConstants.pulseTickCount {
                 // 三条杠沿行进方向错开 spacing,居中于脉冲位置
                 let off = (Double(k) - Double(GraphConstants.pulseTickCount - 1) / 2)
@@ -175,16 +201,36 @@ struct GraphCanvasView: View {
                 let tk = min(max(t + off / len, 0), 1)
                 let x = pa.x + (pb.x - pa.x) * tk
                 let y = pa.y + (pb.y - pa.y) * tk
-                // 二次贝塞尔宽度插值(与锥形轮廓同公式):局部半宽
-                let u = 1 - tk
-                let halfLen = max(u * u * wFrom + 2 * u * tk * wm + tk * tk * wTo,
-                                  GraphConstants.pulseTickMinHalfLen)
+                // 杠全长 = 连线**实际渲染粗细** × pulseTickLengthScale
+                //(07-01 二次反馈:不能用锥形概念宽度,线改细后严重超标)。
+                let halfLen = localHalfWidth(edge: e, forward: forward, t: tk,
+                                             fromNode: p.fromNode, toNode: to)
+                    * GraphConstants.pulseTickLengthScale
                 tickPath.move(to: CGPoint(x: x - nx * halfLen, y: y - ny * halfLen))
                 tickPath.addLine(to: CGPoint(x: x + nx * halfLen, y: y + ny * halfLen))
             }
         }
         ctx.stroke(tickPath, with: .color(.white.opacity(0.9)),
                    lineWidth: GraphConstants.pulseTickStrokeWidth)
+    }
+
+    /// 该处连线的**实际渲染半宽**:line 模式 = 线宽/2(常数);
+    /// taperedFill 模式 = 锥形轮廓的二次贝塞尔局部插值(微积分局部值,屏幕空间)。
+    private func localHalfWidth(edge e: GraphEdge, forward: Bool, t: Double,
+                                fromNode: Int, toNode: Int) -> Double {
+        switch GraphConstants.edgeStyle {
+        case .line:
+            return GraphConstants.lineEdgeWidth / 2
+        case .taperedFill:
+            let zoom = camera.zoom
+            let wFrom = min(forward ? e.halfWidthA : e.halfWidthB,
+                            scene.nodes[fromNode].radius * zoom)
+            let wTo = min(forward ? e.halfWidthB : e.halfWidthA,
+                          scene.nodes[toNode].radius * zoom)
+            let wm = min(wFrom, wTo) * GraphConstants.waistRatio
+            let u = 1 - t
+            return u * u * wFrom + 2 * u * t * wm + t * t * wTo
+        }
     }
 
     // MARK: - 球
@@ -213,15 +259,23 @@ struct GraphCanvasView: View {
 
     private func drawLabels(_ ctx: GraphicsContext, snap: [SIMD2<Float>], size: CGSize) {
         let zoom = camera.zoom
-        // hub 常驻标题(symbols 预光栅化)
-        for node in scene.nodes where node.kind.isHub {
-            if let sym = ctx.resolveSymbol(id: node.id) {
-                let c = camera.worldToScreen(snap[node.id], viewSize: size)
-                let y = c.y + node.radius * zoom + 12
-                if c.x < -100 || c.x > size.width + 100 || y < -30 || y > size.height + 30 {
-                    continue
+        // LOD 淡出(07-01 反馈):缩小到一定程度 hub/主球文字渐暗直至消失。
+        let fade = min(max((zoom - GraphConstants.labelFadeZoomLo)
+                           / (GraphConstants.labelFadeZoomHi - GraphConstants.labelFadeZoomLo),
+                           0), 1)
+        if fade > 0.01 {
+            var lctx = ctx
+            lctx.opacity = fade
+            // hub 常驻标题(symbols 预光栅化)
+            for node in hubNodes {
+                if let sym = lctx.resolveSymbol(id: node.id) {
+                    let c = camera.worldToScreen(snap[node.id], viewSize: size)
+                    let y = c.y + node.radius * zoom + 12
+                    if c.x < -100 || c.x > size.width + 100 || y < -30 || y > size.height + 30 {
+                        continue
+                    }
+                    lctx.draw(sym, at: CGPoint(x: c.x, y: y))
                 }
-                ctx.draw(sym, at: CGPoint(x: c.x, y: y))
             }
         }
         // 末端球 hover 标题(仅 1 个,inline resolve 无 batching 问题)
