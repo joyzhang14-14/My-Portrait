@@ -82,7 +82,8 @@ enum GraphSceneBuilder {
                                    restLength: GraphConstants.folderRingDistance,
                                    halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
                                    halfWidthB: GraphConstants.edgeEndWidth(
-                                       ballRadius: GraphConstants.mainRadius)))
+                                       ballRadius: GraphConstants.mainRadius),
+                                   springStrength: GraphConstants.hubSpringStrength))
         }
 
         // event 球:归组的连 folder(继承 folder 色),未归组连主球(灰)
@@ -101,8 +102,8 @@ enum GraphSceneBuilder {
                 near: GraphConstants.eventLeafDistanceNear,
                 far: GraphConstants.eventLeafDistanceFar)
             edges.append(GraphEdge(a: idx, b: hub, strength: strength, restLength: rest,
-                                   halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
-                                   halfWidthB: GraphConstants.edgeEndWidth(
+                                   halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: r),
+                                   halfWidthB: GraphConstants.leafEdgeEndWidth(
                                        ballRadius: nodes[hub].radius)))
         }
         return GraphScene(zone: .events, nodes: nodes, edges: edges)
@@ -130,7 +131,8 @@ enum GraphSceneBuilder {
                                    halfWidthA: GraphConstants.edgeEndWidth(
                                        ballRadius: GraphConstants.categoryRadius),
                                    halfWidthB: GraphConstants.edgeEndWidth(
-                                       ballRadius: GraphConstants.mainRadius)))
+                                       ballRadius: GraphConstants.mainRadius),
+                                   springStrength: GraphConstants.hubSpringStrength))
 
             let dir = Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
             for s in scanDir(dir, halfLifeDays: halfLifeDays) {
@@ -147,8 +149,8 @@ enum GraphSceneBuilder {
                     far: GraphConstants.portraitLeafDistanceFar)
                 edges.append(GraphEdge(a: idx, b: hubIdx, strength: max(capped, 1),
                                        restLength: rest,
-                                       halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
-                                       halfWidthB: GraphConstants.edgeEndWidth(
+                                       halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: r),
+                                       halfWidthB: GraphConstants.leafEdgeEndWidth(
                                            ballRadius: GraphConstants.categoryRadius)))
             }
         }
