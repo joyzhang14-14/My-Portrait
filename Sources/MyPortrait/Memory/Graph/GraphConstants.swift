@@ -99,11 +99,11 @@ enum GraphConstants {
     ///   把彼此边界侧清空(半边圆元凶;-6 时邻家 569 叶的聚合电荷仍
     ///   把 6 叶小家压进 121° 弧)
     static let leafBodyStrength: Float = -2
-    /// 家内角向匀布力(07-02 半边圆终修):稀疏家的球彼此够不着,碰撞
-    /// 力铺不匀 —— 同家叶绕自家 hub 两两角向排斥,间距 = 均分角时力
-    /// 归零(纯涌现)。只对 ≤maxCount 的家(大家靠碰撞,O(k²) 也吃不消)。
-    static let familySpreadStrength: Float = 0.15
-    static let familySpreadMaxCount: Int = 40
+    /// 家内角向匀布力 v2(07-02 密度偏半边反馈):排序后每叶向两侧角向
+    /// 邻居的**中点**回正(左右间隙相等时力归零)—— 局部弛豫链式传导,
+    /// 挤的一侧流向疏的一侧,叶群质心回到 hub。全家适用(v1 只推不拉
+    /// 且限 40 叶,大家云团仍偏半边:质心偏移实测 34%)。
+    static let familySpreadStrength: Float = 0.3
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
     static let bhTheta2: Float = 0.81
     /// 斥力最小距离²(防重叠点无穷大力)

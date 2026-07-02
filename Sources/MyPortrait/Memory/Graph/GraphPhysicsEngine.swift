@@ -676,48 +676,46 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return (ea, eb, ls, lb, lr)
     }
 
-    /// 家内角向匀布(07-02 半边圆终修):稀疏家(2..maxCount 叶)的球彼此
-    /// 够不着,碰撞力铺不匀,外部电荷一推整家堆半边 —— 同家叶绕自家
-    /// hub 两两角向排斥,力 ∝ max(0, 均分角/实际角距 − 1),均匀时归零。
-    /// Σk² 有上限(maxCount²×家数),忽略不计。alpha 下限同定位力纪律。
+    /// 家内角向匀布 v2(07-02 密度偏半边反馈):按当前极角排序,每叶向
+    /// 两侧邻居的角向**中点**回正 —— 左右间隙相等时力归零,局部弛豫
+    /// 链式传导,挤的一侧流向疏的一侧,质心自动回到 hub(纯涌现,无
+    /// 目标角)。全家适用,排序 O(Σk log k) ≈ 千级,忽略不计。
     private func familySpreadPass() {
         guard !familyRange.isEmpty else { return }
         let a = max(alpha, 0.1)
         let k = GraphConstants.familySpreadStrength
-        var theta = [Float](repeating: 0, count: Int(GraphConstants.familySpreadMaxCount))
         for fam in familyRange {
-            let hub = Int(fam.hub)
-            let hp = pos[hub]
             let count = fam.hi - fam.lo
-            let evenGap = 2 * Float.pi / Float(count)
-            for t in 0..<count {
-                let p = pos[Int(familyLeaf[fam.lo + t])] - hp
-                theta[t] = atan2(p.y, p.x)
+            guard count >= 3 else { continue }
+            let hp = pos[Int(fam.hub)]
+            var items: [(t: Float, leaf: Int32)] = []
+            items.reserveCapacity(count)
+            for x in fam.lo..<fam.hi {
+                let leaf = familyLeaf[x]
+                let p = pos[Int(leaf)] - hp
+                items.append((atan2(p.y, p.x), leaf))
             }
-            for i in 0..<(count - 1) {
-                let li = Int(familyLeaf[fam.lo + i])
-                for j in (i + 1)..<count {
-                    let lj = Int(familyLeaf[fam.lo + j])
-                    var d = theta[j] - theta[i]
-                    while d > .pi { d -= 2 * .pi }
-                    while d < -.pi { d += 2 * .pi }
-                    let ad = max(abs(d), 0.05)
-                    let mag = max(evenGap / ad - 1, 0)
-                    guard mag > 0 else { continue }
-                    let sign: Float = d >= 0 ? 1 : -1
-                    let pi2 = pos[li] - hp, pj2 = pos[lj] - hp
-                    let ri = simd_length(pi2), rj = simd_length(pj2)
-                    guard ri > 1, rj > 1 else { continue }
-                    let ti = SIMD2<Float>(-pi2.y, pi2.x) / ri
-                    let tj = SIMD2<Float>(-pj2.y, pj2.x) / rj
-                    vel[li] -= ti * (sign * mag * k * a * ri)
-                    vel[lj] += tj * (sign * mag * k * a * rj)
-                }
+            items.sort { $0.t < $1.t }
+            for i in 0..<count {
+                let tL = items[(i + count - 1) % count].t
+                let tC = items[i].t
+                let tR = items[(i + 1) % count].t
+                var gapL = tC - tL
+                if gapL < 0 { gapL += 2 * .pi }
+                var gapR = tR - tC
+                if gapR < 0 { gapR += 2 * .pi }
+                let delta = (gapR - gapL) * 0.5
+                let leaf = Int(items[i].leaf)
+                let p = pos[leaf] - hp
+                let r = simd_length(p)
+                guard r > 1 else { continue }
+                let tangent = SIMD2<Float>(-p.y, p.x) / r
+                vel[leaf] += tangent * (delta * r * k * a)
             }
         }
     }
 
-    /// 稀疏家分组(2..maxCount 叶):familyLeaf 连续段 + 每家 (hub, 区间)。
+    /// 家分组(≥3 叶):familyLeaf 连续段 + 每家 (hub, 区间)。
     private static func familyArrays(scene: GraphScene)
         -> ([Int32], [(hub: Int32, lo: Int, hi: Int)]) {
         var byHub: [Int32: [Int32]] = [:]
@@ -727,7 +725,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         var leaf: [Int32] = []
         var ranges: [(hub: Int32, lo: Int, hi: Int)] = []
         for (hub, leaves) in byHub.sorted(by: { $0.key < $1.key })
-        where leaves.count >= 2 && leaves.count <= GraphConstants.familySpreadMaxCount {
+        where leaves.count >= 3 {
             let lo = leaf.count
             leaf.append(contentsOf: leaves)
             ranges.append((hub: hub, lo: lo, hi: leaf.count))
