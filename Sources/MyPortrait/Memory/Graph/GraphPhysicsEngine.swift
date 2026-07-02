@@ -22,6 +22,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var pos: [SIMD2<Float>]
     private var vel: [SIMD2<Float>]
     private var nodeRadius: [Float]
+    /// 分角色斥力电荷(主球/hub/叶不同强度,07-02 半边圆确诊)。
+    private var nodeCharge: [Float]
+    /// 向心力开关(1=hub,0=叶/主球):向心是"每节点→原点"的弹簧,对叶
+    /// 施加会把整家压成朝主球的半月(07-02 半边圆的另一半根因)——
+    /// 叶由自家 hub 弹簧锚定,不需要全局向心。
+    private var nodeCenterScale: [Float]
     private var edgesA: [Int32], edgesB: [Int32]
     private var linkStrength: [Float], linkBias: [Float], linkRest: [Float]
     /// 非主球 hub 的下标(folder/分区)。
@@ -37,6 +43,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     ///(= 自家气泡半径 − 叶半径 − 缝;叶子绝不出自家隐形圆)。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
     private var leafMaxDist: [Float] = []
+    /// 家内角向匀布(07-02):按家分组的叶(仅 2..maxCount 的稀疏家)。
+    /// familyLeaf 连续存放,familyRange = (hub 节点下标, 起止)。
+    private var familyLeaf: [Int32] = []
+    private var familyRange: [(hub: Int32, lo: Int, hi: Int)] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
@@ -93,10 +103,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         pos = Self.explosionPositions(n: n, rng: &rng)
         vel = .init(repeating: .zero, count: n)
         nodeRadius = scene.nodes.map { Float($0.radius) }
+        nodeCharge = Self.chargeArray(scene: scene)
+        nodeCenterScale = Self.centerScaleArray(scene: scene)
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
+        (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
         // 目标落位/绽放出生已删 —— 布局不再有"成品位",只有平衡态。
 
@@ -104,6 +117,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         parkEvents = AsyncStream { continuation = $0 }
         parkContinuation = continuation
         allocateTree()   // 必须在全部存储属性就位后(方法调用要求 self 完整)
+        seedLeafAngles()
+        snapshot = pos
 
         let t = Thread { [weak self] in self?.loop() }
         t.name = "graph-physics"
@@ -171,10 +186,34 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         var rng = SplitMix64(seed: seed)
         pos = Self.explosionPositions(n: n, rng: &rng)
         vel = .init(repeating: .zero, count: n)
+        seedLeafAngles()
         alpha = 1
         publishSnapshot()
         simLock.unlock()
         wake()
+    }
+
+    /// 叶子出生角 = 黄金角均匀绕自家 hub(d3 phyllotaxis 同思路)。
+    /// 07-02 反馈:有的家只用半边圆 —— 角向扩散靠球间斥力,收敛前铺
+    /// 不满一圈;出生即均匀,物理只需保持。半径小起步(圈的 1/3),
+    /// 绽放感由弹簧给出。确定性:同数据同布局。
+    private func seedLeafAngles() {
+        guard !leafIndices.isEmpty else { return }
+        let golden: Float = 2.39996323
+        var counter: [Int32: Int] = [:]
+        for li in 0..<leafIndices.count {
+            let hub = leafOwnHub[li]
+            let j = counter[hub, default: 0]
+            counter[hub] = j + 1
+            let leaf = Int(leafIndices[li])
+            let hubIdx = Int(hub)
+            // 家族错相:不同家的 0 号叶别都朝同一方向
+            let a = golden * Float(j) + Float(hubIdx) * 0.7
+            let maxD = leafMaxDist[li]
+            let r = maxD > 0 ? max(maxD * 0.35, nodeRadius[hubIdx] + 6)
+                             : nodeRadius[hubIdx] + 12
+            pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
+        }
     }
 
     /// 数据轻刷新:节点集合没变(fingerprint 相等),只更新边参数
@@ -183,9 +222,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         simLock.lock()
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
         nodeRadius = scene.nodes.map { Float($0.radius) }
+        nodeCharge = Self.chargeArray(scene: scene)
+        nodeCenterScale = Self.centerScaleArray(scene: scene)
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
+        (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -260,6 +302,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
         linkPass()
         bubblePass()
+        familySpreadPass()
         if heavy { collidePass() }
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
@@ -376,13 +419,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             }
         }}}
 
-        // 自底向上聚合质量/质心/子树最大球半径(子节点 index 恒大于父,倒序扫)
-        let s = GraphConstants.manyBodyStrength
+        // 自底向上聚合电荷/质心/子树最大球半径(子节点 index 恒大于父,倒序扫)
         qChild.withUnsafeBufferPointer { ch in
         qMass.withUnsafeMutableBufferPointer { M in
         qCom.withUnsafeMutableBufferPointer { C in
         qMaxR.withUnsafeMutableBufferPointer { MR in
         nodeRadius.withUnsafeBufferPointer { R in
+        nodeCharge.withUnsafeBufferPointer { NC in
         pos.withUnsafeBufferPointer { P in
             for node in stride(from: qCount - 1, through: 0, by: -1) {
                 var m: Float = 0
@@ -399,8 +442,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     } else {
                         var pi = Int(-c - 2)
                         while pi >= 0 {
-                            m += s
-                            com += P[pi] * s
+                            let q = NC[pi]
+                            m += q
+                            com += P[pi] * q
                             mr = max(mr, R[pi])
                             pi = Int(nextPoint[pi])
                         }
@@ -410,15 +454,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 C[node] = m != 0 ? com / m : .zero
                 MR[node] = mr
             }
-        }}}}}}
+        }}}}}}}
     }
 
     private func manyBodyPass() {
         let a = alpha
         let theta2 = GraphConstants.bhTheta2
         let dMin2 = GraphConstants.bhDistanceMin2
-        let strength = GraphConstants.manyBodyStrength
         var stack = [Int32](repeating: 0, count: 256)
+        nodeCharge.withUnsafeBufferPointer { NC in
         pos.withUnsafeBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
         qChild.withUnsafeBufferPointer { ch in
@@ -453,7 +497,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                                 if pi != i {
                                     let dd = P[pi] - p
                                     let dl2 = max(simd_length_squared(dd), dMin2)
-                                    f += dd * (strength * a / dl2)
+                                    f += dd * (NC[pi] * a / dl2)
                                 }
                                 pi = Int(NP[pi])
                             }
@@ -462,7 +506,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
                 V[i] += f
             }
-        }}}}}}}}
+        }}}}}}}}}
     }
 
     private func linkPass() {
@@ -497,12 +541,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         let damping = GraphConstants.velocityDamping
         pos.withUnsafeMutableBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
+        nodeCenterScale.withUnsafeBufferPointer { CS in
             for i in 0..<n {
-                V[i] += (SIMD2<Float>.zero - P[i]) * (cs * a)
+                V[i] += (SIMD2<Float>.zero - P[i]) * (cs * a * CS[i])
                 V[i] *= damping
                 P[i] += V[i]
             }
-        }}
+        }}}
         // 钉住:主球恒原点;被拖球跟指针(d3 fx/fy 语义)
         pos[0] = .zero
         vel[0] = .zero
@@ -631,6 +676,65 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return (ea, eb, ls, lb, lr)
     }
 
+    /// 家内角向匀布(07-02 半边圆终修):稀疏家(2..maxCount 叶)的球彼此
+    /// 够不着,碰撞力铺不匀,外部电荷一推整家堆半边 —— 同家叶绕自家
+    /// hub 两两角向排斥,力 ∝ max(0, 均分角/实际角距 − 1),均匀时归零。
+    /// Σk² 有上限(maxCount²×家数),忽略不计。alpha 下限同定位力纪律。
+    private func familySpreadPass() {
+        guard !familyRange.isEmpty else { return }
+        let a = max(alpha, 0.1)
+        let k = GraphConstants.familySpreadStrength
+        var theta = [Float](repeating: 0, count: Int(GraphConstants.familySpreadMaxCount))
+        for fam in familyRange {
+            let hub = Int(fam.hub)
+            let hp = pos[hub]
+            let count = fam.hi - fam.lo
+            let evenGap = 2 * Float.pi / Float(count)
+            for t in 0..<count {
+                let p = pos[Int(familyLeaf[fam.lo + t])] - hp
+                theta[t] = atan2(p.y, p.x)
+            }
+            for i in 0..<(count - 1) {
+                let li = Int(familyLeaf[fam.lo + i])
+                for j in (i + 1)..<count {
+                    let lj = Int(familyLeaf[fam.lo + j])
+                    var d = theta[j] - theta[i]
+                    while d > .pi { d -= 2 * .pi }
+                    while d < -.pi { d += 2 * .pi }
+                    let ad = max(abs(d), 0.05)
+                    let mag = max(evenGap / ad - 1, 0)
+                    guard mag > 0 else { continue }
+                    let sign: Float = d >= 0 ? 1 : -1
+                    let pi2 = pos[li] - hp, pj2 = pos[lj] - hp
+                    let ri = simd_length(pi2), rj = simd_length(pj2)
+                    guard ri > 1, rj > 1 else { continue }
+                    let ti = SIMD2<Float>(-pi2.y, pi2.x) / ri
+                    let tj = SIMD2<Float>(-pj2.y, pj2.x) / rj
+                    vel[li] -= ti * (sign * mag * k * a * ri)
+                    vel[lj] += tj * (sign * mag * k * a * rj)
+                }
+            }
+        }
+    }
+
+    /// 稀疏家分组(2..maxCount 叶):familyLeaf 连续段 + 每家 (hub, 区间)。
+    private static func familyArrays(scene: GraphScene)
+        -> ([Int32], [(hub: Int32, lo: Int, hi: Int)]) {
+        var byHub: [Int32: [Int32]] = [:]
+        for node in scene.nodes where !node.kind.isHub && node.hubIndex > 0 {
+            byHub[Int32(node.hubIndex), default: []].append(Int32(node.id))
+        }
+        var leaf: [Int32] = []
+        var ranges: [(hub: Int32, lo: Int, hi: Int)] = []
+        for (hub, leaves) in byHub.sorted(by: { $0.key < $1.key })
+        where leaves.count >= 2 && leaves.count <= GraphConstants.familySpreadMaxCount {
+            let lo = leaf.count
+            leaf.append(contentsOf: leaves)
+            ranges.append((hub: hub, lo: lo, hi: leaf.count))
+        }
+        return (leaf, ranges)
+    }
+
     /// 半径感知碰撞力(d3 forceCollide 的零依赖移植,07-02 物理化的核心
     /// 新力):任意两球圆心距 < r_i+r_j+缝 时按重叠深度推开(速度域,
     /// 权重 = 对方半径² 占比,大球稳)。复用 manyBody 的四叉树 + qMaxR
@@ -704,6 +808,25 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }}}}}}}}}}
         }
+    }
+
+    /// 分角色斥力电荷:主球小(硬碰撞管不叠)、hub 中、叶小(圈内间距
+    /// 归碰撞力管)—— 07-02 确诊:主球/跨圆叶叶电荷太大把整家叶子压到
+    /// 背面半圆。
+    private static func chargeArray(scene: GraphScene) -> [Float] {
+        scene.nodes.map { node in
+            switch node.kind {
+            case .main: return GraphConstants.mainBodyStrength
+            case .folder, .category: return GraphConstants.manyBodyStrength
+            case .eventLeaf, .portraitLeaf: return GraphConstants.leafBodyStrength
+            }
+        }
+    }
+
+    /// 向心力开关:只有 hub 受向心(把孤岛气泡拉回主球方向);叶=0
+    ///(被向心会压成朝主球的半月),主球=0(钉死原点,无所谓)。
+    private static func centerScaleArray(scene: GraphScene) -> [Float] {
+        scene.nodes.map { $0.kind.isHub && $0.id != 0 ? 1 : 0 }
     }
 
     /// 非主球 hub 的物理参数(builder 赋值):气泡半径(≤0 = 无)/
