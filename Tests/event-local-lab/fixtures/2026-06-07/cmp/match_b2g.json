@@ -1,0 +1,1383 @@
+{
+ "b_to_g": [
+  {
+   "b_idx": 0,
+   "b_title": "Fix voice training crash and reset logic",
+   "b_size": 6,
+   "g_idx": 21,
+   "g_title": "Fixed voice training card blocked/error reset behavior",
+   "majority_frac": 0.83
+  },
+  {
+   "b_idx": 1,
+   "b_title": "Retrain speaker profiles and manage voiceprints",
+   "b_size": 4,
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 2,
+   "b_title": "Configure and test speech detection models",
+   "b_size": 6,
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 3,
+   "b_title": "Set up and deploy audio processing pipeline",
+   "b_size": 3,
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "majority_frac": 0.67
+  },
+  {
+   "b_idx": 4,
+   "b_title": "Implement error handling and UI feedback",
+   "b_size": 4,
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 5,
+   "b_title": "Analyze personal evolution modeling",
+   "b_size": 4,
+   "g_idx": 3,
+   "g_title": "Discussed modeling personal evolution over time",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 6,
+   "b_title": "Evaluate speech recognition models",
+   "b_size": 1,
+   "g_idx": null,
+   "g_title": null,
+   "majority_frac": 0.0
+  },
+  {
+   "b_idx": 7,
+   "b_title": "Test model phrase recall in Terminal",
+   "b_size": 1,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 8,
+   "b_title": "Transcribe and debug meeting audio",
+   "b_size": 4,
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 9,
+   "b_title": "Optimize UI and speaker identification",
+   "b_size": 3,
+   "g_idx": 37,
+   "g_title": "Optimized MyMeeting long-transcript rendering",
+   "majority_frac": 0.67
+  },
+  {
+   "b_idx": 10,
+   "b_title": "Develop and test recording templates",
+   "b_size": 11,
+   "g_idx": 9,
+   "g_title": "Built and tested MyMeeting recording templates",
+   "majority_frac": 0.82
+  },
+  {
+   "b_idx": 11,
+   "b_title": "Document feature porting and manage system workflows",
+   "b_size": 2,
+   "g_idx": 38,
+   "g_title": "Documented features to port from MyPortrait",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 12,
+   "b_title": "Capture and annotate meeting segments",
+   "b_size": 1,
+   "g_idx": 16,
+   "g_title": "Captured meeting screenshots with Snipaste",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 13,
+   "b_title": "Fix writing-capture message loss",
+   "b_size": 11,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 0.91
+  },
+  {
+   "b_idx": 14,
+   "b_title": "Investigate videoFps configuration and capture logic",
+   "b_size": 3,
+   "g_idx": 2,
+   "g_title": "Verified videoFps setting was unused",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 15,
+   "b_title": "Port and implement screenshot OCR in Swift",
+   "b_size": 18,
+   "g_idx": 6,
+   "g_title": "Ported screenshot OCR workflow to Swift",
+   "majority_frac": 0.28
+  },
+  {
+   "b_idx": 16,
+   "b_title": "Fix canvas routing and keystroke detection",
+   "b_size": 1,
+   "g_idx": 24,
+   "g_title": "Explored keystroke-plus-OCR canvas architecture in Claude",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 17,
+   "b_title": "Review and refactor prompt generation and model logic",
+   "b_size": 6,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 0.33
+  },
+  {
+   "b_idx": 18,
+   "b_title": "Debug AI OCR and text capture",
+   "b_size": 27,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 0.19
+  },
+  {
+   "b_idx": 19,
+   "b_title": "Debug MyMeeting hang",
+   "b_size": 3,
+   "g_idx": 36,
+   "g_title": "Sampled a MyMeeting hang during speaker ID",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 20,
+   "b_title": "Fix crash in MyMeeting main",
+   "b_size": 1,
+   "g_idx": 36,
+   "g_title": "Sampled a MyMeeting hang during speaker ID",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 21,
+   "b_title": "Set up PostHog analytics",
+   "b_size": 4,
+   "g_idx": 4,
+   "g_title": "Integrated PostHog analytics in MyMeeting",
+   "majority_frac": 0.75
+  },
+  {
+   "b_idx": 22,
+   "b_title": "Fix light mode divider visibility",
+   "b_size": 1,
+   "g_idx": 33,
+   "g_title": "Fixed light-mode divider visibility in My-Portrait",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 23,
+   "b_title": "Extract and clean sent messages from JSON",
+   "b_size": 1,
+   "g_idx": 34,
+   "g_title": "Researched multilingual writing capture and lost text recovery",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 24,
+   "b_title": "Debug transcription and recording settings",
+   "b_size": 1,
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 25,
+   "b_title": "Implement Balanced power mode and settings",
+   "b_size": 1,
+   "g_idx": 8,
+   "g_title": "Added Balanced power mode and auto indicator",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 26,
+   "b_title": "Simplify Scheduler configuration",
+   "b_size": 1,
+   "g_idx": 7,
+   "g_title": "Reworked scheduler and memory timing settings",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 27,
+   "b_title": "Enhance MemoriesView with state and UI",
+   "b_size": 1,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 28,
+   "b_title": "Fix build issues and refine Import page",
+   "b_size": 1,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 29,
+   "b_title": "Split scans and adjust UI for unscanned state",
+   "b_size": 1,
+   "g_idx": 17,
+   "g_title": "Configured provider connections and import settings",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 30,
+   "b_title": "Build and test My-Portrait with RECENTS feature",
+   "b_size": 9,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 31,
+   "b_title": "Refactor writing-capture to extract unified model",
+   "b_size": 1,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 32,
+   "b_title": "Implement right-click highlight in My Portrait",
+   "b_size": 13,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 0.31
+  },
+  {
+   "b_idx": 33,
+   "b_title": "Fix colored dots in MemoriesView",
+   "b_size": 2,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 34,
+   "b_title": "Add power-mode and Auto Live indicator",
+   "b_size": 7,
+   "g_idx": 8,
+   "g_title": "Added Balanced power mode and auto indicator",
+   "majority_frac": 0.86
+  },
+  {
+   "b_idx": 35,
+   "b_title": "Debug message extraction pipeline",
+   "b_size": 5,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 36,
+   "b_title": "Build alignment grid demo for Claude Code",
+   "b_size": 1,
+   "g_idx": 22,
+   "g_title": "Linked Codex and researched Claude Code options",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 37,
+   "b_title": "Multilingual Input Method Debugging",
+   "b_size": 7,
+   "g_idx": 34,
+   "g_title": "Researched multilingual writing capture and lost text recovery",
+   "majority_frac": 0.43
+  },
+  {
+   "b_idx": 38,
+   "b_title": "Audio Processing & Transcription Setup",
+   "b_size": 4,
+   "g_idx": 24,
+   "g_title": "Explored keystroke-plus-OCR canvas architecture in Claude",
+   "majority_frac": 0.25
+  },
+  {
+   "b_idx": 39,
+   "b_title": "Model Fine-Tuning & Data Collection",
+   "b_size": 6,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 40,
+   "b_title": "Memory & Event Processing Configuration",
+   "b_size": 3,
+   "g_idx": 20,
+   "g_title": "Refined portrait writing-style and memory distillation logic",
+   "majority_frac": 0.67
+  },
+  {
+   "b_idx": 41,
+   "b_title": "AI Model Testing & Validation",
+   "b_size": 3,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 0.33
+  },
+  {
+   "b_idx": 42,
+   "b_title": "Meeting Recording & Real-Time Transcription",
+   "b_size": 1,
+   "g_idx": 9,
+   "g_title": "Built and tested MyMeeting recording templates",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 43,
+   "b_title": "Porting Features to macOS App",
+   "b_size": 1,
+   "g_idx": 9,
+   "g_title": "Built and tested MyMeeting recording templates",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 44,
+   "b_title": "Debug audio chunk handling in My-Portrait",
+   "b_size": 7,
+   "g_idx": 18,
+   "g_title": "Debugged stuck pending audio chunks in transcription queue",
+   "majority_frac": 0.29
+  },
+  {
+   "b_idx": 45,
+   "b_title": "Integrate Screenpipe icon and model configs",
+   "b_size": 3,
+   "g_idx": 19,
+   "g_title": "Added Screenpipe branding assets to My-Portrait",
+   "majority_frac": 0.67
+  },
+  {
+   "b_idx": 46,
+   "b_title": "Fix VoiceTrainingCard UI and audio sampling",
+   "b_size": 1,
+   "g_idx": 21,
+   "g_title": "Fixed voice training card blocked/error reset behavior",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 47,
+   "b_title": "Fix meeting template alignment and model loading",
+   "b_size": 1,
+   "g_idx": 21,
+   "g_title": "Fixed voice training card blocked/error reset behavior",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 48,
+   "b_title": "Optimize performance and fix UI rendering",
+   "b_size": 1,
+   "g_idx": 37,
+   "g_title": "Optimized MyMeeting long-transcript rendering",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 49,
+   "b_title": "Test and validate permission bypasses",
+   "b_size": 24,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 0.75
+  },
+  {
+   "b_idx": 50,
+   "b_title": "Build and commit My-Portrait and My-Meeting",
+   "b_size": 5,
+   "g_idx": 17,
+   "g_title": "Configured provider connections and import settings",
+   "majority_frac": 0.6
+  },
+  {
+   "b_idx": 51,
+   "b_title": "Optimize transcription UI performance",
+   "b_size": 8,
+   "g_idx": 37,
+   "g_title": "Optimized MyMeeting long-transcript rendering",
+   "majority_frac": 0.62
+  },
+  {
+   "b_idx": 52,
+   "b_title": "Debug IME tail-loss in CJK input",
+   "b_size": 16,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 0.88
+  },
+  {
+   "b_idx": 53,
+   "b_title": "Integrate Shuangpin Simplified input method",
+   "b_size": 3,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 54,
+   "b_title": "Optimize canvas_fusion and keystroke processing",
+   "b_size": 5,
+   "g_idx": 24,
+   "g_title": "Explored keystroke-plus-OCR canvas architecture in Claude",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 55,
+   "b_title": "Refactor MeetingTemplate to RecordingTemplate",
+   "b_size": 2,
+   "g_idx": 9,
+   "g_title": "Built and tested MyMeeting recording templates",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 56,
+   "b_title": "Fix message handling in multi-event sends",
+   "b_size": 1,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 57,
+   "b_title": "Align My Meeting with My-Portrait and fix model loading",
+   "b_size": 1,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 58,
+   "b_title": "Improve RECENTS sidebar visibility and foldable UI",
+   "b_size": 2,
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 59,
+   "b_title": "Fix provider row clickability and model cache issue",
+   "b_size": 1,
+   "g_idx": 17,
+   "g_title": "Configured provider connections and import settings",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 60,
+   "b_title": "Improve auto-summarize and message handling",
+   "b_size": 1,
+   "g_idx": 17,
+   "g_title": "Configured provider connections and import settings",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 61,
+   "b_title": "Explore GitHub repos and manage code",
+   "b_size": 2,
+   "g_idx": 39,
+   "g_title": "Browsed the My-Portrait GitHub repository",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 62,
+   "b_title": "Research Claude and AI coding tools",
+   "b_size": 1,
+   "g_idx": 22,
+   "g_title": "Linked Codex and researched Claude Code options",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 63,
+   "b_title": "Test AI logic and manage study materials",
+   "b_size": 1,
+   "g_idx": 25,
+   "g_title": "Browsed AI tools and study materials in Safari",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 64,
+   "b_title": "Prepare college admissions and design assets",
+   "b_size": 1,
+   "g_idx": 25,
+   "g_title": "Browsed AI tools and study materials in Safari",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 65,
+   "b_title": "Log in to Claude and explore AI features",
+   "b_size": 1,
+   "g_idx": 25,
+   "g_title": "Browsed AI tools and study materials in Safari",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 66,
+   "b_title": "Research AI tools and academic resources",
+   "b_size": 2,
+   "g_idx": 22,
+   "g_title": "Linked Codex and researched Claude Code options",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 67,
+   "b_title": "Gaming and social chat in Discord",
+   "b_size": 1,
+   "g_idx": 40,
+   "g_title": "Chatted casually in a Discord server",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 68,
+   "b_title": "Code review and tool usage in WeChat",
+   "b_size": 2,
+   "g_idx": 13,
+   "g_title": "Messaged about selling household items on WeChat",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 69,
+   "b_title": "Game promotion and media sharing via WeChat",
+   "b_size": 3,
+   "g_idx": 28,
+   "g_title": "Browsed gaming and social content on WeChat",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 70,
+   "b_title": "Internship discussion and meeting review",
+   "b_size": 2,
+   "g_idx": 28,
+   "g_title": "Browsed gaming and social content on WeChat",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 71,
+   "b_title": "Collaborative development and personal discussion",
+   "b_size": 1,
+   "g_idx": 29,
+   "g_title": "Reviewed Discord conversations and call notes",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 72,
+   "b_title": "Researching My-Portrait OCR challenges",
+   "b_size": 1,
+   "g_idx": 14,
+   "g_title": "Played music while working",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 73,
+   "b_title": "Developing My-Portrait with code and playlist use",
+   "b_size": 3,
+   "g_idx": 14,
+   "g_title": "Played music while working",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 74,
+   "b_title": "Listening to My-Portrait playlist and debugging",
+   "b_size": 1,
+   "g_idx": 14,
+   "g_title": "Played music while working",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 75,
+   "b_title": "Configure Claude profile",
+   "b_size": 2,
+   "g_idx": 3,
+   "g_title": "Discussed modeling personal evolution over time",
+   "majority_frac": 0.5
+  },
+  {
+   "b_idx": 76,
+   "b_title": "Set up Claude Code authorization",
+   "b_size": 3,
+   "g_idx": 0,
+   "g_title": "Set up Claude Code OAuth in Safari",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 77,
+   "b_title": "Link ChatGPT to Codex and review privacy",
+   "b_size": 1,
+   "g_idx": 22,
+   "g_title": "Linked Codex and researched Claude Code options",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 78,
+   "b_title": "Monitor Claude.ai usage metrics",
+   "b_size": 2,
+   "g_idx": 26,
+   "g_title": "Checked Claude account usage and routine limits",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 79,
+   "b_title": "Revert boundary-send change and verify build",
+   "b_size": 1,
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 80,
+   "b_title": "AI model configuration and debugging",
+   "b_size": 9,
+   "g_idx": 17,
+   "g_title": "Configured provider connections and import settings",
+   "majority_frac": 0.44
+  },
+  {
+   "b_idx": 81,
+   "b_title": "OCR and keystroke stream integration",
+   "b_size": 4,
+   "g_idx": 24,
+   "g_title": "Explored keystroke-plus-OCR canvas architecture in Claude",
+   "majority_frac": 0.75
+  },
+  {
+   "b_idx": 82,
+   "b_title": "Text processing and template refinement",
+   "b_size": 3,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 0.67
+  },
+  {
+   "b_idx": 83,
+   "b_title": "Refine user input pipeline",
+   "b_size": 3,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 84,
+   "b_title": "Process canvas and session fusion",
+   "b_size": 1,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 85,
+   "b_title": "Configure headless Rime input method",
+   "b_size": 10,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 0.9
+  },
+  {
+   "b_idx": 86,
+   "b_title": "Integrate Rime with AI and custom dictionaries",
+   "b_size": 7,
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "majority_frac": 1.0
+  },
+  {
+   "b_idx": 87,
+   "b_title": "Submitted final exam lab assignment",
+   "b_size": 1,
+   "g_idx": 30,
+   "g_title": "Submitted a late school final exam assignment",
+   "majority_frac": 1.0
+  }
+ ],
+ "g_to_b": [
+  {
+   "g_idx": 0,
+   "g_title": "Set up Claude Code OAuth in Safari",
+   "g_size": 3,
+   "b_events": [
+    {
+     "b_idx": 76,
+     "b_title": "Set up Claude Code authorization",
+     "b_size": 3
+    }
+   ]
+  },
+  {
+   "g_idx": 2,
+   "g_title": "Verified videoFps setting was unused",
+   "g_size": 3,
+   "b_events": [
+    {
+     "b_idx": 14,
+     "b_title": "Investigate videoFps configuration and capture logic",
+     "b_size": 3
+    }
+   ]
+  },
+  {
+   "g_idx": 3,
+   "g_title": "Discussed modeling personal evolution over time",
+   "g_size": 6,
+   "b_events": [
+    {
+     "b_idx": 5,
+     "b_title": "Analyze personal evolution modeling",
+     "b_size": 4
+    },
+    {
+     "b_idx": 75,
+     "b_title": "Configure Claude profile",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 4,
+   "g_title": "Integrated PostHog analytics in MyMeeting",
+   "g_size": 3,
+   "b_events": [
+    {
+     "b_idx": 21,
+     "b_title": "Set up PostHog analytics",
+     "b_size": 4
+    }
+   ]
+  },
+  {
+   "g_idx": 6,
+   "g_title": "Ported screenshot OCR workflow to Swift",
+   "g_size": 13,
+   "b_events": [
+    {
+     "b_idx": 15,
+     "b_title": "Port and implement screenshot OCR in Swift",
+     "b_size": 18
+    }
+   ]
+  },
+  {
+   "g_idx": 7,
+   "g_title": "Reworked scheduler and memory timing settings",
+   "g_size": 3,
+   "b_events": [
+    {
+     "b_idx": 26,
+     "b_title": "Simplify Scheduler configuration",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 8,
+   "g_title": "Added Balanced power mode and auto indicator",
+   "g_size": 10,
+   "b_events": [
+    {
+     "b_idx": 25,
+     "b_title": "Implement Balanced power mode and settings",
+     "b_size": 1
+    },
+    {
+     "b_idx": 34,
+     "b_title": "Add power-mode and Auto Live indicator",
+     "b_size": 7
+    }
+   ]
+  },
+  {
+   "g_idx": 9,
+   "g_title": "Built and tested MyMeeting recording templates",
+   "g_size": 16,
+   "b_events": [
+    {
+     "b_idx": 10,
+     "b_title": "Develop and test recording templates",
+     "b_size": 11
+    },
+    {
+     "b_idx": 42,
+     "b_title": "Meeting Recording & Real-Time Transcription",
+     "b_size": 1
+    },
+    {
+     "b_idx": 43,
+     "b_title": "Porting Features to macOS App",
+     "b_size": 1
+    },
+    {
+     "b_idx": 55,
+     "b_title": "Refactor MeetingTemplate to RecordingTemplate",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 10,
+   "g_title": "Fixed writing-capture message boundary loss",
+   "g_size": 34,
+   "b_events": [
+    {
+     "b_idx": 13,
+     "b_title": "Fix writing-capture message loss",
+     "b_size": 11
+    },
+    {
+     "b_idx": 28,
+     "b_title": "Fix build issues and refine Import page",
+     "b_size": 1
+    },
+    {
+     "b_idx": 31,
+     "b_title": "Refactor writing-capture to extract unified model",
+     "b_size": 1
+    },
+    {
+     "b_idx": 35,
+     "b_title": "Debug message extraction pipeline",
+     "b_size": 5
+    },
+    {
+     "b_idx": 41,
+     "b_title": "AI Model Testing & Validation",
+     "b_size": 3
+    },
+    {
+     "b_idx": 56,
+     "b_title": "Fix message handling in multi-event sends",
+     "b_size": 1
+    },
+    {
+     "b_idx": 79,
+     "b_title": "Revert boundary-send change and verify build",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 11,
+   "g_title": "Researched IME-safe multilingual typing capture",
+   "g_size": 60,
+   "b_events": [
+    {
+     "b_idx": 7,
+     "b_title": "Test model phrase recall in Terminal",
+     "b_size": 1
+    },
+    {
+     "b_idx": 18,
+     "b_title": "Debug AI OCR and text capture",
+     "b_size": 27
+    },
+    {
+     "b_idx": 39,
+     "b_title": "Model Fine-Tuning & Data Collection",
+     "b_size": 6
+    },
+    {
+     "b_idx": 49,
+     "b_title": "Test and validate permission bypasses",
+     "b_size": 24
+    },
+    {
+     "b_idx": 52,
+     "b_title": "Debug IME tail-loss in CJK input",
+     "b_size": 16
+    },
+    {
+     "b_idx": 53,
+     "b_title": "Integrate Shuangpin Simplified input method",
+     "b_size": 3
+    },
+    {
+     "b_idx": 82,
+     "b_title": "Text processing and template refinement",
+     "b_size": 3
+    },
+    {
+     "b_idx": 83,
+     "b_title": "Refine user input pipeline",
+     "b_size": 3
+    },
+    {
+     "b_idx": 84,
+     "b_title": "Process canvas and session fusion",
+     "b_size": 1
+    },
+    {
+     "b_idx": 85,
+     "b_title": "Configure headless Rime input method",
+     "b_size": 10
+    },
+    {
+     "b_idx": 86,
+     "b_title": "Integrate Rime with AI and custom dictionaries",
+     "b_size": 7
+    }
+   ]
+  },
+  {
+   "g_idx": 12,
+   "g_title": "Added event folder menus and color management",
+   "g_size": 34,
+   "b_events": [
+    {
+     "b_idx": 17,
+     "b_title": "Review and refactor prompt generation and model logic",
+     "b_size": 6
+    },
+    {
+     "b_idx": 27,
+     "b_title": "Enhance MemoriesView with state and UI",
+     "b_size": 1
+    },
+    {
+     "b_idx": 30,
+     "b_title": "Build and test My-Portrait with RECENTS feature",
+     "b_size": 9
+    },
+    {
+     "b_idx": 32,
+     "b_title": "Implement right-click highlight in My Portrait",
+     "b_size": 13
+    },
+    {
+     "b_idx": 33,
+     "b_title": "Fix colored dots in MemoriesView",
+     "b_size": 2
+    },
+    {
+     "b_idx": 57,
+     "b_title": "Align My Meeting with My-Portrait and fix model loading",
+     "b_size": 1
+    },
+    {
+     "b_idx": 58,
+     "b_title": "Improve RECENTS sidebar visibility and foldable UI",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 13,
+   "g_title": "Messaged about selling household items on WeChat",
+   "g_size": 1,
+   "b_events": [
+    {
+     "b_idx": 68,
+     "b_title": "Code review and tool usage in WeChat",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 14,
+   "g_title": "Played music while working",
+   "g_size": 6,
+   "b_events": [
+    {
+     "b_idx": 72,
+     "b_title": "Researching My-Portrait OCR challenges",
+     "b_size": 1
+    },
+    {
+     "b_idx": 73,
+     "b_title": "Developing My-Portrait with code and playlist use",
+     "b_size": 3
+    },
+    {
+     "b_idx": 74,
+     "b_title": "Listening to My-Portrait playlist and debugging",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 16,
+   "g_title": "Captured meeting screenshots with Snipaste",
+   "g_size": 1,
+   "b_events": [
+    {
+     "b_idx": 12,
+     "b_title": "Capture and annotate meeting segments",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 17,
+   "g_title": "Configured provider connections and import settings",
+   "g_size": 22,
+   "b_events": [
+    {
+     "b_idx": 29,
+     "b_title": "Split scans and adjust UI for unscanned state",
+     "b_size": 1
+    },
+    {
+     "b_idx": 50,
+     "b_title": "Build and commit My-Portrait and My-Meeting",
+     "b_size": 5
+    },
+    {
+     "b_idx": 59,
+     "b_title": "Fix provider row clickability and model cache issue",
+     "b_size": 1
+    },
+    {
+     "b_idx": 60,
+     "b_title": "Improve auto-summarize and message handling",
+     "b_size": 1
+    },
+    {
+     "b_idx": 80,
+     "b_title": "AI model configuration and debugging",
+     "b_size": 9
+    }
+   ]
+  },
+  {
+   "g_idx": 18,
+   "g_title": "Debugged stuck pending audio chunks in transcription queue",
+   "g_size": 5,
+   "b_events": [
+    {
+     "b_idx": 44,
+     "b_title": "Debug audio chunk handling in My-Portrait",
+     "b_size": 7
+    }
+   ]
+  },
+  {
+   "g_idx": 19,
+   "g_title": "Added Screenpipe branding assets to My-Portrait",
+   "g_size": 3,
+   "b_events": [
+    {
+     "b_idx": 45,
+     "b_title": "Integrate Screenpipe icon and model configs",
+     "b_size": 3
+    }
+   ]
+  },
+  {
+   "g_idx": 20,
+   "g_title": "Refined portrait writing-style and memory distillation logic",
+   "g_size": 7,
+   "b_events": [
+    {
+     "b_idx": 40,
+     "b_title": "Memory & Event Processing Configuration",
+     "b_size": 3
+    }
+   ]
+  },
+  {
+   "g_idx": 21,
+   "g_title": "Fixed voice training card blocked/error reset behavior",
+   "g_size": 10,
+   "b_events": [
+    {
+     "b_idx": 0,
+     "b_title": "Fix voice training crash and reset logic",
+     "b_size": 6
+    },
+    {
+     "b_idx": 46,
+     "b_title": "Fix VoiceTrainingCard UI and audio sampling",
+     "b_size": 1
+    },
+    {
+     "b_idx": 47,
+     "b_title": "Fix meeting template alignment and model loading",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 22,
+   "g_title": "Linked Codex and researched Claude Code options",
+   "g_size": 4,
+   "b_events": [
+    {
+     "b_idx": 36,
+     "b_title": "Build alignment grid demo for Claude Code",
+     "b_size": 1
+    },
+    {
+     "b_idx": 62,
+     "b_title": "Research Claude and AI coding tools",
+     "b_size": 1
+    },
+    {
+     "b_idx": 66,
+     "b_title": "Research AI tools and academic resources",
+     "b_size": 2
+    },
+    {
+     "b_idx": 77,
+     "b_title": "Link ChatGPT to Codex and review privacy",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 24,
+   "g_title": "Explored keystroke-plus-OCR canvas architecture in Claude",
+   "g_size": 18,
+   "b_events": [
+    {
+     "b_idx": 16,
+     "b_title": "Fix canvas routing and keystroke detection",
+     "b_size": 1
+    },
+    {
+     "b_idx": 38,
+     "b_title": "Audio Processing & Transcription Setup",
+     "b_size": 4
+    },
+    {
+     "b_idx": 54,
+     "b_title": "Optimize canvas_fusion and keystroke processing",
+     "b_size": 5
+    },
+    {
+     "b_idx": 81,
+     "b_title": "OCR and keystroke stream integration",
+     "b_size": 4
+    }
+   ]
+  },
+  {
+   "g_idx": 25,
+   "g_title": "Browsed AI tools and study materials in Safari",
+   "g_size": 4,
+   "b_events": [
+    {
+     "b_idx": 63,
+     "b_title": "Test AI logic and manage study materials",
+     "b_size": 1
+    },
+    {
+     "b_idx": 64,
+     "b_title": "Prepare college admissions and design assets",
+     "b_size": 1
+    },
+    {
+     "b_idx": 65,
+     "b_title": "Log in to Claude and explore AI features",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 26,
+   "g_title": "Checked Claude account usage and routine limits",
+   "g_size": 2,
+   "b_events": [
+    {
+     "b_idx": 78,
+     "b_title": "Monitor Claude.ai usage metrics",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 28,
+   "g_title": "Browsed gaming and social content on WeChat",
+   "g_size": 3,
+   "b_events": [
+    {
+     "b_idx": 69,
+     "b_title": "Game promotion and media sharing via WeChat",
+     "b_size": 3
+    },
+    {
+     "b_idx": 70,
+     "b_title": "Internship discussion and meeting review",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 29,
+   "g_title": "Reviewed Discord conversations and call notes",
+   "g_size": 2,
+   "b_events": [
+    {
+     "b_idx": 71,
+     "b_title": "Collaborative development and personal discussion",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 30,
+   "g_title": "Submitted a late school final exam assignment",
+   "g_size": 1,
+   "b_events": [
+    {
+     "b_idx": 87,
+     "b_title": "Submitted final exam lab assignment",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 31,
+   "g_title": "Debugged MyMeeting transcription and speaker training",
+   "g_size": 17,
+   "b_events": [
+    {
+     "b_idx": 1,
+     "b_title": "Retrain speaker profiles and manage voiceprints",
+     "b_size": 4
+    },
+    {
+     "b_idx": 2,
+     "b_title": "Configure and test speech detection models",
+     "b_size": 6
+    },
+    {
+     "b_idx": 3,
+     "b_title": "Set up and deploy audio processing pipeline",
+     "b_size": 3
+    },
+    {
+     "b_idx": 4,
+     "b_title": "Implement error handling and UI feedback",
+     "b_size": 4
+    },
+    {
+     "b_idx": 8,
+     "b_title": "Transcribe and debug meeting audio",
+     "b_size": 4
+    },
+    {
+     "b_idx": 24,
+     "b_title": "Debug transcription and recording settings",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 33,
+   "g_title": "Fixed light-mode divider visibility in My-Portrait",
+   "g_size": 4,
+   "b_events": [
+    {
+     "b_idx": 22,
+     "b_title": "Fix light mode divider visibility",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 34,
+   "g_title": "Researched multilingual writing capture and lost text recovery",
+   "g_size": 9,
+   "b_events": [
+    {
+     "b_idx": 23,
+     "b_title": "Extract and clean sent messages from JSON",
+     "b_size": 1
+    },
+    {
+     "b_idx": 37,
+     "b_title": "Multilingual Input Method Debugging",
+     "b_size": 7
+    }
+   ]
+  },
+  {
+   "g_idx": 36,
+   "g_title": "Sampled a MyMeeting hang during speaker ID",
+   "g_size": 5,
+   "b_events": [
+    {
+     "b_idx": 19,
+     "b_title": "Debug MyMeeting hang",
+     "b_size": 3
+    },
+    {
+     "b_idx": 20,
+     "b_title": "Fix crash in MyMeeting main",
+     "b_size": 1
+    }
+   ]
+  },
+  {
+   "g_idx": 37,
+   "g_title": "Optimized MyMeeting long-transcript rendering",
+   "g_size": 8,
+   "b_events": [
+    {
+     "b_idx": 9,
+     "b_title": "Optimize UI and speaker identification",
+     "b_size": 3
+    },
+    {
+     "b_idx": 48,
+     "b_title": "Optimize performance and fix UI rendering",
+     "b_size": 1
+    },
+    {
+     "b_idx": 51,
+     "b_title": "Optimize transcription UI performance",
+     "b_size": 8
+    }
+   ]
+  },
+  {
+   "g_idx": 38,
+   "g_title": "Documented features to port from MyPortrait",
+   "g_size": 1,
+   "b_events": [
+    {
+     "b_idx": 11,
+     "b_title": "Document feature porting and manage system workflows",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 39,
+   "g_title": "Browsed the My-Portrait GitHub repository",
+   "g_size": 1,
+   "b_events": [
+    {
+     "b_idx": 61,
+     "b_title": "Explore GitHub repos and manage code",
+     "b_size": 2
+    }
+   ]
+  },
+  {
+   "g_idx": 40,
+   "g_title": "Chatted casually in a Discord server",
+   "g_size": 1,
+   "b_events": [
+    {
+     "b_idx": 67,
+     "b_title": "Gaming and social chat in Discord",
+     "b_size": 1
+    }
+   ]
+  }
+ ]
+}

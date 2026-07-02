@@ -1,0 +1,607 @@
+{
+  "summary": "事件管线本地化算法总览:5路取证+3视角设计+评委+对抗,产改进路线图",
+  "agentCount": 11,
+  "logs": [
+    "取证完成 5/5 路"
+  ],
+  "result": {
+    "forensics": [
+      {
+        "topic": "F1 覆盖丢失政策:29段丢失取证 + 确定性 skipped 兜底设计(模拟验证)",
+        "evidence": [
+          "丢失29段=[23,147,224,254,286,288,322,386,409,413,414,418,425,457,630,633,646,665,667,717,790,814,820,936,1008,1051,1054,1080,1095];gpt41 29/29全覆盖,其中28段挂进多段事件(挂入事件大小:60段×3、34段×8、22段×4、13段×3、…),仅1段单独成事件(s1080 'Deleted a Claude chat thread')→gpt的风格=attach优先、singleton兜底",
+          "丢失不是散发而是整桶塌陷:重跑确定性分桶(α0.7/τ0.30/cap30,复现24桶)后——桶11(10段)v2覆盖0/10、桶20(6段)覆盖0/6=两整桶蒸发(16/29);桶2(26段)丢12;桶21(5段)丢1(s254 Spotify)",
+          "代码根因在 v4_local_cluster.py L131-140:covered 把模型 'skipped' 列表算作已覆盖(L133),且 miss 兜底只救'既不在events也不在skipped'的id;整桶丢失走两条路都成立——L146 except 整桶吞掉(parse失败即全丢),或模型 events=[] + skipped=全部 时 miss=∅ 静默丢整桶;另外 covered 按过滤前原始输出算,事件因缺title/summary被丢弃(L144)时其session_ids也丢",
+          "29段性质分类(读doing逐一核):0段噪声。桶2的12段=既有任务线的短碎片(1-7分钟Terminal/My Portrait微段:s630/s820/s936=writing-capture重构线、s790=RECENTS折叠、s665/s667=OCR移植+MemoriesView、s425=Balanced power mode、s646=My-Meeting模板=另一App真活动);桶11的10段=混合真实小活动(s409/413/418=gpt原样成'Asked Claude assorted technical side questions'三连、s1051/s1054=模型缓存guard bug调试真任务线、s23个人演化讨论、s1080删聊天);桶20的6段=portrait.sqlite短查探(OCR移植×3/IME研究×2/provider配置×1);s254=背景听歌。27/29段 parts≤2",
+          "Tier1模拟(桶内有事件的13段,规则=60min时间门内取锚点wjaccard最高、≥0.12即挂;不足则近邻≤5min同app挂;s646走跨桶第二档):s630→ev31'Refactor writing-capture'(anchor0.43,gpt同主题✓)、s820→ev31(0.19✓)、s936→ev31(0.16✓)、s633→ev27'Enhance MemoriesView'(gpt=folder menus/color同族✓)、s646跨桶→ev10'Develop and test recording templates'(anchor0.16,gap0m,与gpt 'Built and tested MyMeeting recording templates'完全一致✓)、s425→ev25 Balanced power(=gpt✓)、s254→ev74 playlist(=gpt'Played music'✓)、s665→ev15 OCR移植(doing字面即OCR port✓)——13段里9-10段与gpt主题一致或更准,3-4段温和偏差(s717/s790/s1008挂进相邻真实开发事件而非gpt所选),0段垃圾",
+          "Tier2模拟(整桶失败的16段,确定性时间断裂切分gap>30min):桶11→5个段落[s23|s147+s224|s322|s409+413+418|s1051+1054+1080],其中s409/413/418恰好=gpt自己的完整事件;桶20→2个段落[286,288,386,414,457|1095];按gpt多数标签算段内一致12/16——这是retry失败后的最后兜底,主修复是except路径先retry一次",
+          "对照实锤C的时间团块间距(最小团块间隔≈0.46h),30min切分阈值与之相容"
+        ],
+        "conclusion": "v2丢29段的根因不是\"模型偶尔跳过短段\",而是三个代码层漏洞叠加:(1)skipped被算进covered、(2)桶LLM调用异常时整桶静默蒸发(16/29来自两个整桶)、(3)coverage按过滤前输出计算。29段全是真实活动零噪声(gpt 29/29覆盖、28段挂进任务线),所以政策方向必须是\"attach优先+singleton兜底\",绝不能当噪声过滤。确定性兜底完全可行:时间门+IDF锚点评分在13段上9-10段与gpt安置主题一致、0垃圾;整桶失败用retry+时间断裂切分封底。覆盖可由构造保证到337/337。",
+        "proposal": "改 v4_local_cluster.py 桶循环之后加一个纯确定性 rescue pass(锚点/IDF/wjaccard 全部复用 cluster_skeleton 现成函数,session时间取 lab.db parts 的 MIN(start_ms)..MAX(end_ms)):\n【0 根修】covered 只从\"最终保留的事件\"算,模型的 skipped 列表整个忽略(prompt里可保留skipped让模型舒服,代码当未分配处理);被 title/summary 过滤丢弃的事件其 session_ids 同样回到未分配池。\n【1 整桶失败】某桶保留事件数=0(异常或全skip)→ 先 retry 同一窄LLM调用一次(唯一的LLM点,本来就是管线里的同类调用);仍失败→确定性时间断裂切分:按start排序、间隔>30min切段,每段成 fallback 事件(标题=\"{多数app}: top-3 IDF锚点\",flag misc=true)。\n【2 孤儿逐段挂靠】(全确定性)按时间序处理每个未分配 sid:\n  C_in = 同桶事件中 gap(sid,E)≤60min 者;anchor(sid,E)=max_{m∈E} wjaccard(anchors_sid, anchors_m, idf)\n  a) C_in 最大 anchor≥0.12 → 挂 argmax;\n  b) 否则跨桶全事件同样时间门、bar 提到 ≥0.15 → 挂 argmax(救 s646 类\"本桶无家、别桶有正主\");\n  c) 否则 C_in 最近 gap≤5min 且同 app → 挂近邻;\n  d) 否则 singleton 事件(标题=确定性截取 doing 首个从句,misc=true,呈现层可折叠)。\ngap 定义=区间重叠为0、否则最近端点分钟差;mode_app=事件成员多数app。挂靠只加 session_id 不改事件文案(或攒批后对被扩事件做一次窄LLM摘要刷新,可选)。同一个 anchor+time 评分器可直接复用于任务B的 exactly-once 去重(dup sid 只留 argmax 事件)。",
+        "expected_gain": "覆盖 308/337 → 337/337(+29,由构造保证:每个未分配id必然 attach 或 singleton);事件数典型 90→92-94(retry成功时新增仅s1080类0-2个singleton),最坏 90→97(retry全失败时+7个misc兜底事件,均带misc标记可分层隐藏);垃圾事件0(13段Tier1模拟全部落在真实相邻事件,9-10/13与gpt主题一致);顺带消除\"异常吞整桶\"这类静默丢失(本例占16/29)。评分器复用可为dup 43→0铺路。",
+        "risks": "(1)阈值0.12/0.15/5min/60min只在这一天13段上标定,换天可能错挂——但错挂代价低(落到时间相邻的真实事件,与gpt自身选择同一失误类别),集成时用老pipeline对照基准便宜复验即可;(2)跨桶挂靠档理论上可能被通用锚点(my portrait/claude)缝合不相干段——IDF已压低通用锚点、bar 0.15+时间门双保险,但要防某天IDF分布漂移;(3)我复现的24桶与v2实际跑那次可能有微差(发现5个v2事件跨我的桶界,与\"桶间不相交\"记录矛盾,疑为fixes90修补或桶态漂移)——桶11/20零覆盖的结论稳健,但阈值移植时按当次真实桶态重验;(4)retry仍是随机的,极端日整桶连续失败会多出misc事件,上限每天约+7,可接受。"
+      },
+      {
+        "topic": "F2:dup=43 根治(确定性 exactly-once 裁决)+ 桶内切分护栏清单",
+        "evidence": [
+          "dup 结构实锤:43 个 session 各被双分配到恰好 2 个事件,共 14 个事件对;最大对 (E50 permission-bypasses, E53 IME tail-loss)×15,(E15 OCR移植, E17 prompt重构)×5,(E37 多语输入法, E39 微调数据)×5,(E50,E54 双拼)×3,(E87 Rime集成, E88 lattice.c编译)×3,其余对 ≤2(s72/s749/s733/s734/s851/s893/s1027/s756/s1058/s277/s1115/s1116)",
+          "5 个『纯壳』事件(成员 100% 是 dup):E33={733,734}、E42={756,1058}、E54={1190,1193,1198}、E75={1116}、E88={1169,1170,1172}。逐条读 doing 后人工判:多成员壳 10/11 次是正确归属(s733 的 doing 就是 E33 的 colored-dots commit 25427ae;s1169-1172 就是 E88 的 lattice.c+clang+topN_for),唯一例外是单例壳 E75(该死)。v5 两全版删 E88/E42 在内容上删反了(覆盖不变所以无害,但归属较差)",
+          "43 例逐条内容 gold(读 sessions.jsonl doing):33 强判例+9 弱判例(混合 session 如 s72=silero调参+AudioError错误处理双属性)+1 双不沾(s366 讲的是录音权限/power profile,两边都不该收)。(50,53) 对的 15 段 doing 全是 submitRaceBurst/IME tail/拼音 → 100% 属 E53;E50 是被 --dangerously-skip-permissions 命令行 flag 文本吸出来的假事件",
+          "三种候选规则模拟(42 可判例):首现优先 11/42(最差——LLM 先吐主干粗事件再吐细化事件,首现恰好选中垃圾吸附体);时间邻近(排他成员最小间隔)21/42;锚点重叠(与排他成员 mean wjaccard)27/42。附加基线:末现优先 31/42、小事件优先 30/42、排他成员嵌入 cos 30/42、事件文本锚点 31/42——单规则全部不够",
+          "组合规则(壳优先 → 锚点决定门 → 末现后备):稳健参数(比率≥1.5)36/42,调优参数(max≥0.06 且比率≥1.1)38/42=90%,其中 33 个强判例 33/33=100%;4 个 miss(s72/s707/s893/s1058)全是弱判例、内容双属性,归哪边都说得过去",
+          "应用后端到端:dup 43→0,覆盖 308/337 不变,事件 90→89(单例壳 E75 自动消亡);巨垃圾事件 E50 从 24 段缩到 5 段,影子事件 E17 6→2、E39 6→2、E38 4→2、E87 7→4、E32 13→11",
+          "E50 残余 5 段(s212,s239,s388,s431,s1189)时间上仍是 3 个团块:2.16-2.47h / 3.21-3.46h / 8.16h——呼应实锤C,时间断层强拆护栏必要",
+          "代码级漏洞定位(Tests/event-local-lab/v4_local_cluster.py):L132-133 把 skipped 直接算 covered → 29 段静默消失(实锤A,gpt41 全覆盖了这 29 段);L144 的 title/summary 校验发生在 L132 covered 统计之后 → 缺字段事件的成员既不进 miss 也不进事件,第二条静默丢失路径;L136 把 miss 全塞 evs[0](首事件),而首事件恰是最粗的垃圾吸附体;桶内双分配完全没有 exactly-once 强制(prompt 说了 EXACTLY ONCE 但代码只过滤桶外 id)",
+          "噪声锚点覆盖面(标题黑名单依据):sourcekit-lsp 出现在 36/337 段、caffeinate 24/337、claude 138/337、skip-permissions 变体 12/337;E50 的标题整个由命令行 flag 命名"
+        ],
+        "conclusion": "dup=43 可用纯确定性规则根治且裁决质量高:三种任务书候选规则单独都不行(首现优先 11/42 是最差选择、时间邻近 21/42、锚点重叠 27/42),但三层组合规则——①纯壳事件优先(多成员壳=更精确的子事件,赢;单例壳删除)②锚点决定门(与两边排他成员的 IDF-wJaccard,max≥0.06 且有差距才裁)③末现优先后备——达到 38/42=90% 与人工一致,强判例 100%,dup→0,覆盖不变,且顺带把 E50 巨垃圾事件从 24 段瘦到 5 段、消灭 1 个单例壳。剩余 4 个不一致全是内容双属性的 session,无唯一正确答案。桶内切分另有两条静默丢数据的代码路径(skipped 算 covered、校验晚于覆盖统计)是 29 段未覆盖的根因,与 exactly-once 一起构成 7 条护栏清单,全部可零额外 LLM 调用落地。",
+        "proposal": "改 v4_local_cluster.py 桶内循环(替换 L131-145),全确定性:\n\n【G1 exactly-once 裁决】(纯确定性,复用 cluster_skeleton 的 mine_anchors/compute_idf/wjaccard)\n```\nclaims[sid] = [按 LLM 输出序的事件下标]        # 桶内收集\nfor sid, (a, b) in 双分配:                    # 实测全是恰好 2 个\n    xa = [m for m in A.sids if m not in B.sids and m != sid]   # 排他成员\n    xb = 同理\n    # ①壳规则:一边无排他成员 = 另一边的纯子集\n    if not xb and xa: win = B if len(B.sids) > 1 else A        # 多成员壳赢(更精确子事件);单例壳死\n    elif not xa and xb: win = A if len(A.sids) > 1 else B\n    else:\n        sa = mean(wjaccard(anch[sid], anch[m], idf) for m in xa); sb = 同理\n        # ②锚点决定门:信号够强才用\n        if max(sa,sb) >= 0.06 and sa != sb and max/min >= 1.1(稳健档 1.5): win = argmax\n        else: win = 输出序靠后者                                  # ③末现后备\n    从败方删 sid;事件删空则丢弃该事件\n```\n【G2 skipped 禁消失】L133 不把 skipped 算 covered;skipped/miss 的 id → 桶内时间最近事件(间隔≤45min)并入,否则生成确定性单例事件 title=f\"{app}: {doing[:60]}\"(修 29 段未覆盖;纯确定性,无 LLM)\n【G3 顺序修正】先做事件字段校验/修补,再算 covered(堵 L132→L144 的静默丢成员路径;纯确定性)\n【G4 缺字段不弃成员】title 缺 → top-2 高 IDF 锚点+app 拼确定性标题;summary 缺 → 成员 doing 前 80 字拼接(纯确定性)\n【G5 标题样式校验】正则拒绝:含 ' — ' 分隔/\\d+x\\d+ 分辨率/纯 app 名/噪声 token(skip-permissions、caffeinate、sourcekit-lsp,用 df 表判 df>10% 的命令行词);违规 → 优先 G4 确定性 fallback,可选窄 LLM 单事件重命名(唯一 LLM 点,可省)\n【G6 时间断层强拆】事件成员按 MIN(start_ms) 排序,相邻 gap>45-60min 切段;段数≥2 且 size≥6 → 拆成子事件(同名+序号=纯确定性;每段重命名=可选窄 LLM)。E50 残余 5 段即拆成 3 个真团块\n【G7 保留现有 id 过滤】桶外/非数字 id 过滤(L142-143 已有),加计数日志\n\nmiss 回填改进:L136 别塞 evs[0],走 G2 的时间最近逻辑。G1/G2/G3/G4/G6拆分/G7 纯确定性零 LLM;G5/G6 的重命名是可选窄 LLM(单事件带证据,符合『LLM 只做窄活』教训)。",
+        "expected_gain": "dup 43→0(结构性根治,exactly-once 代码保证);裁决与人工一致 38/42=90%、强判例 33/33=100%(对比:首现优先只 11/42);G2 补回 29 段 → 覆盖 308→337(gpt41 已证明这 29 段可归事件);事件 90→89(E75 壳消亡),影子/垃圾事件实质瘦身:E50 24→5、E17 6→2、E39 6→2、E87 7→4;G6 再把 E50 残余拆成 3 个时间真团块(实锤C 的 5-6 团块拆分同机制覆盖);B³-P 对 gpt41 应上升(重复计费消除),整链零强制新增 LLM 调用。",
+        "risks": "①阈值过拟合:MIN=0.06/RATIO=1.1 在单日 42 例上调出(RATIO 从 1.5 降到 1.1 只为修 2 例 (15,17) 对),换日分布可能漂;稳健档 1.5 仍有 36/42,且壳规则(裁 11 例)与末现后备(裁 20 例、错 2)无参数,参数只影响锚点门的 11 例。②『末现优先』是对 2507 输出习惯的经验先验(先粗后细,5/14 对是纯子集壳),换模型/改 prompt 需重验此先验。③gold 本身是按 doing 内容的单人判读,9 个弱判例本质双属性,90% 是上限附近而非绝对真值。④G2 记全会把 loginwindow/短碎片并进事件或成单例(符合『暂缓清洗』方针,但事件数会涨);G6 拆分同样推高事件数,与 gpt41=41 的数量差距变大——已定案『更细但干净是特征』,分层呈现兜底。⑤壳规则与 v5 两全版的删壳方向相反(E88/E42 应该赢而非被删),采纳本方案需回滚 v5 那两处删除逻辑,覆盖无损但需重跑对照。"
+      },
+      {
+        "conclusion": "两个 mega 病因不同但同根:PERM(24段)是\"影子事件\"——19/24 成员同时挂在别的真事件里(15→IME tail-loss、3→双拼集成、1→canvas_fusion),exactly-once 去重后只剩 5 个孤儿;OCR(27段)是\"杂物抽屉\"——横跨 9 个时间窗、至少 7 条互不相干的真线,桶内胶水 83.2% 来自连接词锚点(claude/terminal session/sourcekit-lsp/my portrait/swift/caffeinate),真 OCR 锚点占比<5%,必须拆;其中 [330,338,346,349,354] 与既有\"Port screenshot OCR\"事件是同一条线被分桶劈开(s346 在 2.95h 干的事和 s336@2.93h/s360@3.01h 一模一样)。连接词锚点可用纯确定性规则识别:成员集的嵌入凝聚度 lift_cos=(mean_cos−当日背景)/(1−背景) 是最强判别特征——连接词全部 <0.22(claude --dangerously-skip-permissions=0.037、permissions bypass=0.091、claude=0.064),真判别锚点全部 >0.25(librime=0.362、submitraceburst=0.309、shuangpin=0.393、ime tail capture=0.635、pinyin input=0.388、ocr implementation=0.414),一天数据上自动抓出 51 硬+19 软连接词且零误杀真锚点。拆分上:时间团块切分要用\"夹层数\"(中间隔≥3个非成员session就切)而非纯时间 gap——OCR mega 成员以 15-30 分钟间隔链式相连,0.5h gap 切不开;切完用降权后 wjaccard≥0.05 缝回同线团块(submitRaceBurst 把 5.91h 和 6.70h 两块正确缝回,双拼块正确独立)。锚点为零的 1-2 段碎片(如 s104/s143/s943)确定性无法归属,这一步才需要窄 LLM。",
+        "evidence": [
+          "PERM mega 24段中19段是双分配影子: 15段同在'Debug IME tail-loss in CJK input'(397,411,416,422,516,937,966,977,988,1000,1014,1018,1079,1085,1091), 3段同在'Integrate Shuangpin'(1190,1193,1198), 1段同在'Optimize canvas_fusion'(277); 仅5个孤儿(212,239,388,431,1189)",
+          "PERM 胶水权重 top: submitraceburst 28.4%(因为15个IME成员) + typing capture 21.8% + my portrait 12.6%; 'permissions bypass'只占2.8% —— 事件标题被连接词带偏但胶水其实是IME线",
+          "OCR mega 27段胶水 83.2% 全是连接词: claude 30.5% + terminal session 15.1% + sourcekit-lsp 14.2% + my portrait 10.8% + swift 6.5% + macos app 3.3% + caffeinate 2.8%; 真OCR锚点(ocr logic 2.4%+ocr implementation 1.9%)<5%; 对照真线IME 16段事件: submitraceburst 一个判别锚点占48.6%",
+          "OCR mega 时间上碎成9个窗(0.46-0.75/2.64-3.10/4.23-4.25/4.55/4.82-4.99/5.28/5.73-5.77/5.95/6.14h), 内容至少7条真线: 写作记录数据修复(104,118,124,127,143)/音频采集CoreAudio tap(292,295)/screenshot OCR移植Swift(330,338,346,349,354)/power profiles(371,865)/folder menu(541,547)/git提交(636)/writing_style memory管线(728,738,760,763)/拼音残渣OCR(918,929,932)+3单段",
+          "分桶劈线实锤: s346(2.95h,'porting screenshot OCR to Swift')被关在OCR mega, 而干同一件事的 s336(2.93h)/s360(3.01h) 在'Port and implement screenshot OCR in Swift'事件(18段,含270,280,336,360,383,392), 时间完全交错",
+          "凝聚度实验(背景当日随机对 cos=0.539): 连接词 lift_cos 全<0.22 — claude --dangerously-skip-permissions 0.037/permissions bypass 0.091/claude 0.064/my portrait 0.108/terminal session 0.097/xcode 0.065/git 0.143/caffeinate 0.175/sourcekit-lsp 0.218; 真判别锚点全>0.25 — librime 0.362/submitraceburst 0.309/shuangpin simplified 0.393/ime tail capture 0.635/pinyin input 0.388/ocr implementation 0.414/audio training 0.255; 原始IDF区分不了这两类(permissions bypass idf 3.81 ≈ librime 3.57)",
+          "时间散布佐证: claude --dangerously-skip-permissions 5个成员散在5个时间块跨7.5h(tblk/n=1.0), librime 9段挤在1个时间块0.9h内; 但时间特征单独不够(qwen3-asr真锚点也散6块跨7.9h——这天它只是被顺嘴提及, lift_cos 0.157 正确判为软连接词)",
+          "规则自动产出: lift_cos<0.15→51个硬连接词(idf置0), 0.15≤lift<0.25且span≥3h→19个软连接词(idf×0.3), 全部人工核对无真锚点误杀; 用降权idf重跑生产分桶(α0.7/τ0.30/cap30): OCR27从 单桶×26 打散为 13/7/6/1, PERM24从 20/4 打散为 14/6/3/1",
+          "拆分实测: 纯时间gap 0.5h 对OCR mega失效(4.23-6.16h 13段链式相连,成员间gap 0.18-0.44h全<0.5,夹层全是别的事件的session); 换'夹层≥3个非成员就切'→PERM切9块缝回7子线、OCR切15块缝回13子线, 每条锚点自洽(如[728,738,760,763]锚点=chat_brevity.md/bilingual_register_split, [918,929,932]锚点=ocr logic/writingcaptureprompts.swift)",
+          "缝回阈值证据: [330..354]vs PORT事件 wjac2=0.0224(应合,最高值), [728..763]vs PORT=0.0015(不应合) → 跨事件缝回阈值0.02可分离; 但零锚点碎片([104]/[143]/[943]/[212,239]vs[277] wjac2全=0.0000)确定性缝不动, 且嵌入cos在这不判别([292,295]audio vs OCR块 0.694 > 应合的PORT对 0.678, 再证'嵌入质心不判别'定案)",
+          "PERM实锤C六个时间团块内容全部自洽验证通过: 2.16-2.70h=researcher跑批测试线/3.21-3.46h=IME尾丢修理(388,431两段音频支线混入)/3.76-4.11h=placeholder识别单段/5.91-6.29h+6.70-6.75h=submitRaceBurst同一条线(锚点缝回成功)/8.16-8.29h=双拼librime集成独立线"
+        ],
+        "expected_gain": "dup 38→0(exactly-once 根治,实锤B全部是同桶双分配);mega 2→0:PERM 24段解体(19段归还真事件+5孤儿重归属),OCR 27段拆成13条确定性子线(其中5段并回PORT事件18→23,修复劈线;4条≥3段真线直接成事件;~5个单段碎片走窄LLM归属);事件数 88→约93±3,最大事件从27段降到≤23段且全是真线;分桶层根治后未来每天自动生效——降权idf重跑当日分桶,OCR型杂物桶(26段)当场碎成13/7/6/1,mega不再形成;新增LLM调用量极小:每子线1次命名+约10-15次碎片归属二分,全部窄调用。",
+        "proposal": "三层改法,前两层纯确定性:【层1·分桶层根治(每天自动,纯确定性)】在 compute_idf 之后、算亲和之前加连接词检测: bg = mean_cos(当日随机4000对session嵌入); 对每个 df≥3 的锚点 a: M=含a的session集, lift_cos(a)=(mean_pairwise_cos(M)−bg)/(1−bg), span(a)=M时间跨度; if lift_cos<0.15: idf[a]=0 (硬连接词); elif lift_cos<0.25 and span≥3h: idf[a]*=0.3 (软连接词)。零新依赖,复用已有嵌入(step4产物)。【层2·mega拆分器(对 size>12 或时间窗>3 的事件,纯确定性)】(a) exactly-once 先行:双分配session按对事件其余成员的降权wjaccard均值高者留、低者删(PERM当场只剩5孤儿); (b) 夹层切分:成员按t0排序,相邻成员间若夹≥3个非成员session或gap>0.5h则切开→时间团块; (c) 锚点缝回:团块两两算降权wjaccard均值,≥0.05则并(贪心迭代)——submitRaceBurst类隔小时续线自动缝回; (d) 跨事件并线:子线与既有事件(时间窗有交叠的)降权wjaccard≥0.02则并入(修 [330..354]→PORT 劈线)。【层3·窄LLM(仅两处)】(i) 每条≥2段子线的命名+摘要(给成员doing,纯生成不做成员判断); (ii) 零锚点碎片(1-2段, wjac=0)归属:候选=时间±30min内的事件,逐候选带证据二分(引用doing原文),拿不准默认独立成段——按既往教训(逐对二分曾2/4误合)宁独立不误合。伪代码位置:层1插在 v4_local_cluster.py 第48行亲和矩阵前;层2做成独立后处理函数吃 v2 events json。",
+        "risks": "1) 阈值(lift_cos 0.15/0.25、缝回0.05、跨事件0.02、夹层3)只在 2026-06-07 一天337段上标定,虽然全部相对当日背景归一,仍需2-3天回放验证;边缘锚点会翻面(voiceprint training 0.227、wechat 0.247 落软连接词区,'permissions handling' 0.328 逃逸——df仅3危害有限)。2) spotify/wechat 被判为连接词后,背景型活动(听歌/聊天)失去锚点胶水,需要 app 级兜底桶接住,否则这类session碎片化伤覆盖。3) 'dangerously-skip-permissions'变体(df4,span1.3h)因时间集中逃过规则——本例无害(成员相邻),但permission家族拼写变体多,建议统计前先做字符串归一合并。4) 夹层切分会把真并行线(用户两窗口来回切)误切,锚点缝回只在有共享判别锚点时能修(submitRaceBurst修回了;kw稀疏的单段修不回→碎片归属LLM调用量上升)。5) 层3碎片归属二分沿用了曾误合2/4的机制,虽已加时间窗+证据引用+默认独立三重保险,仍是唯一非确定性环节,需按 sonnet 逐条核的老规矩抽查首周产出。6) 层2(d)跨事件并线阈值0.02较低,靠时间窗交叠门控防误合,遇到同小时干两件同子系统的事(如同时改两处OCR代码)可能误并,粒度损失但方向可接受(分层呈现可救)。",
+        "topic": "F3: mega事件拆分 + 连接词锚点自动降权(Test permission bypasses 24段 / Debug AI OCR 27段)"
+      },
+      {
+        "topic": "F4 双层输出(事件→线程)可行性:88 两全版 vs gpt41 映射取证 + 确定性线程层模拟",
+        "evidence": [
+          "映射(严格):41 个 gpt 事件里 1:1=6、干净 n:1=0、脏交叉=35。宽容版(允许 leak+miss ≤ max(1,15%×size)):~1:1=11、~n:1=6(共 17/41 干净)、脏=17、无多数本地事件=7。前提『大部分是干净 n:1』不成立",
+          "session 质量集中度:88 本地事件中 52 个 purity=1.0(完整嵌进单个 gpt 事件)、6 个 ≥0.8;session 级一致质量=238/342=69.6%(按 first-wins 去 dup 后 214/305=70.2%)。脏的 30% 集中在 ~8 个本地杂物抽屉事件:L18『Debug AI OCR and text capture』n=27 purity 0.19 横跨 11 个 gpt 事件、L15 n=17 pur 0.29、L32 n=13 pur 0.31、L80 n=9 pur 0.44、L44 n=7 pur 0.29、L37 n=7 pur 0.43、L51 n=8 pur 0.62、L49(即实锤C的24段巨事件)——正是 fact B/C 要修的那批",
+          "gpt 自己的粗层也是汤:err 质量 Top6 全是巨事件——gpt[11]『Researched IME-safe multilingual typing capture』60 段横跨 12 个桶/4 个时间团块/2.7-8.3h(err=42)、gpt[10] 34段/12桶(err=14)、gpt[12] 34段/8桶(err=23)、gpt[17] 22段/10桶(err=15)、gpt[24] 18段/8桶、gpt[6] 13段/5桶。这些是『叙事工作流』不是事件,确定性规则本就不该复刻(等价于已证失败的全局LLM合并)",
+          "线程层模拟(26 种规则网格,union-find 于 88 事件上,信号=同桶/时间毗邻gap/锚点wJaccard/质心cos):B³F1 对 gpt 全部停在 0.375-0.445 平台(88 裸基线=0.421)。最好=同桶+gap≤0.5h+cos≥0.85 → 71 线程 F1 0.445(噪声级增益,压缩率也差);强行压到 gpt 规模(24-43 线程,如同桶+gap≤0.75h→32线程)时干净重建的 gpt 事件从 16/41 塌到 2/41",
+          "时间信号单独用完全退化:这天多线并行交错,gap≤0.05h 纯时间链就把 88 事件连成 1 个连通分量;去掉同桶约束的变体 recall 可到 0.83 但 precision 塌到 0.24(50 段汤线程)。时间只能做桶内切分(实锤C),不能做桶间连接",
+          "桶层免费覆盖全量:重算确定性分桶(α0.7/τ0.30/cap30,复现 24 桶,sizes 29..1),83/88 事件完整嵌进单桶(5 个跨桶的全是上述杂物抽屉)。桶是 337/337 的划分——29 个 v2 漏掉的 session(实锤A)在桶层天然有归属;反向把这 29 段按同桶+gap≤0.75h 挂进现有线程只有 12 段能挂、且仅 3/12 与 gpt 归置一致 → 不要确定性硬挂进细层事件,洞A必须在桶内切分处修(禁 skipped)",
+          "gpt 也非全集:s415/s431/s826 在 v5 有、gpt 没有(gpt 覆盖 334/337)"
+        ],
+        "conclusion": "双层方向成立,但『线程层≈重建gpt41』这条路被数据否决:gpt41 不是 88 的干净粗化(严格干净只有 6/41,session 一致质量 70%),其 6 个巨事件横跨 5-12 个桶、本质是跨主题叙事汤,确定性规则复刻它等于重走已失败的全局合并。真正两全其美的形态是:细层=88 事件(保锚点、检索用,B³P 0.637),粗层=24 个确定性桶直接当线程(浏览用,规模≈生产28,覆盖 337/337 反超 gpt 的 334,dup 天然为 0 因为桶是划分)。30% 的层间脏交叉里大头是本地自己的 ~8 个杂物抽屉事件——修完 fact B(exactly-once)+ fact C(桶内时间拆分)后细层会自然向『每事件嵌单个 gpt 事件』收敛(现已 52/88 purity=1.0)。",
+        "proposal": "双层构建规则(全部确定性,LLM 只做命名窄活):\n【L1 细层=88事件,按既定 fact B/C 修】(1) exactly-once:桶内切分后代码强制每 id 恰一次,dup 38→0;(2) 禁 skipped:桶内没被模型分配的 id 确定性落到同桶时间最近的事件或自成单事件,覆盖 308→337;(3) 杂物抽屉拆分:对 size≥10 且成员时间团块(gap>20min)≥3 的事件,先按时间团块切开再喂桶内切分(实锤C规则,针对 L15/L18/L32/L49/L80 这批)。\n【L2 线程层=桶,零新聚类】伪代码:\n  buckets = complete_linkage(0.7*cos+0.3*wjaccard, τ0.30, cap30)  # 已有,确定性\n  for b in buckets:  # 24 次\n      thread[b].events = [e for e in L1 if majority_bucket(e)==b]  # 83/88 天然单桶\n      thread[b].title = LLM_2507(该桶事件的 title 列表 → ≤60字线程名)  # 唯一 LLM 步,窄:只命名,不许动成员\n      thread[b].span = [min_t0, max_t1]; thread[b].sessions = 桶全体(含被 L1 修复前 skipped 的)\n【可选 L2.5】想要 30-40 节点的 gpt 规模浏览粒度:桶内按事件区间 gap>0.75h 做时间连通分量再细分(24→32 线程);模拟证明这对 gpt 对齐无增益(F1 0.39-0.40),纯 UX 取舍,默认不开。\n【呈现】浏览走 线程(24)→事件(88)→session;检索命中细层事件锚点后向上挂线程名做上下文。禁止:跨桶合并线程(任何时间/锚点/cos 组合都被模拟证伪)。",
+        "expected_gain": "线程层覆盖 337/337(比细层 +29,比 gpt41 +3),浏览节点 88→24(≈生产28的粒度)且线程 dup=0(桶是划分);LLM 成本仅 24 次纯命名调用(vs 全局合并的双稳风险=0);细层修完 B/C 后:dup 38→0、覆盖 308→337、~8 个 purity 0.19-0.62 的杂物抽屉(约百余 membership,占层间脏交叉的大头)按时间团块拆成 2-5 个真线,层间干净嵌套率从 52/88 预计升到 ~75/88;检索保住 B³P 0.637 的细粒度锚点。",
+        "risks": "1) 桶=线程会把 gpt 视角下的一条长工作流(如 IME 60 段)拆成 2-3 个线程呈现——这是 cap30+τ0.30 的结构性结果,展示层可按『同日同名前缀』软链但别真合并;2) τ0.30/cap30 只在 2026-06-07 一天上调参,别的天桶数可能漂(固定化场景可接受,但上线前至少再验 2 天);3) 桶里有 1 个 singleton 桶+17 个挂不进任何线程的短碎片(Terminal/Claude 为主),线程层会有零星单事件线程,UI 需容忍或折叠为杂项;4) 29 段 skipped 的确定性回挂与 gpt 归置仅 3/12 一致——洞A必须在 L1 桶内切分处修(禁 skipped),不能靠 L2 兜底后确定性下放;5) 所有 F1 都以 gpt41 为参照系,而 gpt 自身巨事件是汤(12桶/60段),这些数字只做对齐参考、不做优化目标,防止后人拿 0.445 平台当『还差很远』重启全局合并。"
+      },
+      {
+        "conclusion": "时间项该进管线,且用**加法项**而非门控:aff = 0.85*(0.7*cos + 0.3*wjaccard) + 0.15*exp(-gap分钟/120),τ0.30/cap30 完全不动。这一项把\"合并门槛\"变成时间调制的:相邻 session 只需底层亲和 0.176 即可同桶,隔天(gap≈8h)的对需要 0.353——近处易聚、远处必须有强题材证据。实测它同时修好三个已实锤的架构病:①「permission bypasses」24段被完美按实锤C的6个时间团块拆开(blob对齐准确率 0.37→1.00),且双拼尾巴 s1189-1198 正确落进 librime 桶(它本来就是那条线);②产生 dup 的 25段/横跨6.35h 巨桶解体,15个双分配段散入4个时间对齐桶,同桶双分配失去土壤;③gpt41 事件跨桶碎片度 3.07→2.20(17个事件改善/仅1个恶化),桶内时间跨度 5.64h→2.02h。乘法门控与硬惩罚全面劣于加法(blob准最高只到0.93、岛屿更散),不采用。参数处在宽平台(T∈[60,180]min × w3∈[0.15,0.25] 全部 blob准≥0.85、多数=1.00),不是刀尖调参。",
+        "evidence": [
+          "基线复现精确:0.7*cos+0.3*wj, τ0.30 cap30 → 24桶,与现行管线一致;其 perm24 只落2个桶,blob对齐准确率0.37,gpt41碎片度3.07,完整事件19/41,pair F1 vs gpt41=0.22",
+          "基线病灶定位:桶12(25段)时间跨度1.94-8.29h,吞了 perm24 中的20段——正是 2507 在该桶同时产出「Debug IME tail-loss」和「Test permission bypasses」并双分配15段(397,411,416,422,516,937,966,977,988,1000,1014,1018,1079,1085,1091)的那个桶",
+          "最优配方 T120/w3=0.15/τ0.30:20桶,perm24 → 6个纯净桶严格对应实锤C的6个时间团块(blob0→桶3, blob1→桶9, blob2→桶12, blob3→桶15, blob4→桶17, blob5→桶16),blob对齐准确率1.00;双拼尾巴 s1189/1190/1193/1198 与全部14个 librime 段(s1102..s1182)同落桶16——时间+题材把它送回了真正的任务线",
+          "15个双分配段在新配方下散入4个桶(7/4/3/1),同桶双分配的结构性土壤消失(与 exactly-once 修复互补)",
+          "gpt41 碎片度 3.07→2.20(-28%),完整事件 19→22/41;17个 gpt41 事件跨桶数下降(如「Researched IME-safe multilingual typing capture」60段 12→9桶、「Fixed writing-capture message boundary loss」34段 12→8桶、「Explored keystroke-plus-OCR canvas」18段 8→4桶),仅1个恶化(「MyMeeting recording templates」16段 5→6桶)",
+          "岛屿集中度全面改善:librime 2桶→1桶(14/14同桶)、silero 2→1、spotify 6→3、powerprofile 2→1、recents 3→2、posthog 1→1、videofps 1→1;wechat 1→2 是时间正确的拆分(s358/432 上午 vs s1115/1180/1187 晚间,gpt41/v2 本来也分开记);8探针桶数总和 18→12",
+          "pair precision vs gpt41 共事件对 0.25→0.33:加时间项没有诱发'相邻但无关'的误合,complete-linkage(全对≥τ才合并)+cap30 挡住了;桶时间跨度段加权均值 5.64h→2.02h",
+          "次优候选 T90/w3=0.20/τ0.30:碎片度2.12(最佳)、pair F1 0.38(最佳)、0个 gpt41 事件恶化,但代价是把时间远隔的同题材岛拆开(posthog s559 离群、powerprofile/recents 各多1桶),完整事件20/41低于T120的22",
+          "机制否定项:乘法门控 exp(-max(0,gap-G)/T) 最好只到 blob准0.93/碎片2.37,硬惩罚 p∈{0.5,0.7} blob准0.87-0.89 且 G120/p0.5 尾巴不分离——只罚不奖拆不干净还伤岛屿,全面劣于加法",
+          "鲁棒性平台:T∈{45,60,90,120,180}×w3∈{0.10,0.15,0.20,0.25}×τ∈{0.30,0.35} 共40组,w3≥0.15 区几乎全部 blob准≥0.93(多数1.00)、碎片2.1-2.6;cap 20/25/30/35 敏感性小(碎片2.15-2.37);gap 中位数(非零)127.8min,与 T=120min 同量级",
+          "全程纯 numpy 确定性,单次聚类0.3s,未加载任何模型;实验代码 /private/tmp/claude-501/-Users-joyzhang14-Projects-My-Portrait/d1c59e94-92fd-435b-950b-5d321c2d5ea8/scratchpad/f5_time_affinity.py"
+        ],
+        "expected_gain": "perm24 巨事件在分桶层即按6个时间团块拆开(blob准 0.37→1.00,双拼尾自动归 librime 线),2507 不再有机会把24段聚成一个假事件;产生 dup38 主体的巨桶解体、15个双分配段分散4桶,叠加 exactly-once 后 dup→0 更稳;gpt41 事件跨桶碎片 -28%(3.07→2.20)、完整事件 +3(19→22/41)、pair F1 +0.09~0.16(0.22→0.31/0.38)、8岛屿桶数总和 18→12、桶时间跨度 5.64h→2.02h;计算成本 0(纯 numpy,一次矩阵加法),LLM 调用数不变(20桶 vs 24桶,桶均大小仍≤cap30)。",
+        "proposal": "改动只在 v4_local_cluster.py 的亲和构造处(STEP 5),100% 确定性,零新增 LLM 调用:\n1. 取时间区间(确定性):对每个 v4 session,t0=MIN(raw_sessions.start_ms of parts), t1=MAX(end_ms)——lab.db 里现成,生产侧 sessions 表同样有。\n2. gap 矩阵(确定性,numpy 一行):gap_min[i,j] = max(0, max(t0_i,t0_j) - min(t1_i,t1_j)) / 60000(区间重叠=0)。\n3. 新亲和(确定性):\n   TW, T_HALF = 0.15, 120.0  # 时间权重 / 衰减常数(分钟)\n   aff = (1-TW) * (0.7*cos + 0.3*wjaccard) + TW * np.exp(-gap_min / T_HALF)\n   等价三权重写法 w=(0.595*cos, 0.255*wj, 0.15*time)。τ=0.30、cap=30、complete_linkage 全部不动——即插即用。\n4. 下游不变:桶内切分/命名仍是 2507 的窄 LLM 活(每桶独立),但拿到的桶时间连贯(均值2.02h),提示词里无需新增时间说明也受益;若愿意可顺手在桶内 prompt 附每段的小时数(纯确定性字段)进一步压 skipped/双分配。\n5. 可选备档:若后续更看重\"gpt41 零恶化+更高 pair F1\"而接受隔时同题材岛被拆(posthog 4段拆1),换 T_HALF=90, TW=0.20,其余不动。",
+        "risks": "①单日调参:全部指标出自 2026-06-07 这337段,参数与评测同源;缓解=平台很宽(T 60-180/w3 0.15-0.25 都能用),但锁定前应在另1-2天(如已有对照的日子)复跑 baseline vs T120/w3=0.15 核对 blob/岛屿两类指标。②隔时复访的同一任务线会被拆成2桶(T90/w3=0.2 下 posthog s559 即例),桶间无合并机制则输出2个事件——推荐档 T120/w3=0.15 实测8岛屿只有 wechat 这一处拆分且属时间正确,但更长横跨(上午+晚上同一 bug)的日子可能出现;这与'更细但干净、分层呈现'方针一致,不算硬伤。③参照系 gpt41 自身非金标准(项目已有共识),碎片度/pair F1 只作相对比较用,与 metrics.json 既有 bcubed 口径一致。④桶数 24→20、最大桶28仍贴 cap30:cap 饱和桶被强拆的边界行为未变,但若未来加大 cap 需重验时间项权重。⑤实现时注意 gap 单位(分钟)与 T_HALF 同单位,且 t0/t1 必须按 parts 聚合(不是首个 part),否则衰减尺度整体错位。",
+        "topic": "F5 时间项亲和实验:在 0.7*cos+0.3*wjaccard 亲和上加时间通道的实测收益与即插即用配方"
+      }
+    ],
+    "judge": {
+      "rationale": "合并与互斥裁决(评判标准=覆盖≥334/零dup/无mega误标/粒度分层/稳定复现/全本地,按 影响×成本×风险 排序):\n\n【去重合并,22→20】\n1. D1.P4+D1.P5 合并为 R3「去重二连」:壳合并先行、exactly-once 逐段裁决殿后,共享同一把降权IDF-wJaccard评分尺和同一套42例gold回归,拆开实现反而重复。\n2. D1.P2+D3.P3 合并为 R6:连接词降权和背景模板兜底是因果配对——F3风险2明说降权夺走spotify/wechat的胶水后必须有app级兜底接住,两者必须同批上线,共用同一次过夜回放。\n3. D2.P1+D2.P3 合并为 R11:命名N选1的候选就是共识分区5次运行的免费副产品,分开做要额外补采。\n4. D3.P4 的 attach_log 落盘并进 R13 置信度落库(同一张审计表),先验启用独立为 R17。\n5. D1.P3 的 G4/G5(标题正则+确定性fallback)即 D2.P3 的\"硬否决\"层,已在 R2 内,R11 只做增量升级。\n6. D3.P1 是 D1.P2 的跨天结构性延伸:先当日 lift_cos(R6,立即生效),再跨天统计库(R14),判定规则合并为\"当日lift<0.15 或 近7天≥5天lift<0.15\"。\n\n【互斥裁决,四处】\nA. D1.P5 确定性exactly-once vs D2.P1 共识分区(dup根治的两条路):不真互斥,选\"先P5后P1\"——P5零GPU、42例gold已验90%、本周可上;P1是结构升级(+60-100min GPU/夜、改动大),上线后P5降级为断言后备而非删除(双保险)。反向顺序(先P1)会让本周dup仍为43。\nB. D1.P4 壳规则 vs v5两全版删壳逻辑:采纳壳规则,回滚v5那两处删除(E88/E42内容上该赢,v5删反了;E75单例壳该死)。覆盖无损,需重跑对照确认。\nC. 中间粒度层:D1.P8的L2.5(桶内时间细分,模拟证明对gpt对齐零增益 F1 0.39-0.40)vs D2.P6(共识矩阵双阈值,严格嵌套免对齐)——弃L2.5,选D2.P6,但它依赖R11,故T3且默认不开。\nD. 线程层规模:D1.P8 线程=24桶 vs D2.P5 47稳定核——冲突(浏览粒度差一倍)。默认桶=线程(24≈生产28粒度,零新聚类);α扰动稳定核仅当R5/R6多天验证暴露真实桶漂移才启用(其价值=对冲参数单日标定,而dup/lost已被实验证明与桶层脆弱性无关),启用时R7需重验,故降T3条件项。\n\n【分层逻辑】\nT0(今天,纯确定性免费赢):R1回归集是一切阈值改动的护栏且/tmp/cmp随时蒸发(已核实fixtures目录尚不存在);R2堵三条静默丢数据代码路(29段丢失里16段的根因),是覆盖修复的前置。\nT1(本周,一次过夜回放收官):R3(dup 43→0)+R4(覆盖308→337 by construction)+R5/R6(mega在分桶层不再形成,共用一次过夜GPU回放)+R7(双层粒度+fail-loud)+R8(数据飞轮越早越好,还给R1提供LLM步replay素材)。T1收官即达成对gpt-5.4的主指标:覆盖337>334、dup=0(gpt自身也有交叉)、perm24按6真团块拆开、24线程/88事件双层、断言防回归——\"贴合甚至超越\"的里程碑在此,而非T2。\nT2(结构性,治三类残余风险):方差(R11共识分区,同日重跑同分区)、幻觉(R10 grep接地)、单日标定漂移(R13定向抽查校准闭环+R14跨天统计+R15词典);R9兜漏网mega并可回刷61天历史;R16 carry-over是本地对云端唯一结构性不对称优势(gpt每天冷启动看不见\"此bug连修3天\"),产品级差异。\nT3(长期期权):全部低成本高不确定,依赖前置数据/验证结果,包括按既有决策继续推迟的微调(R20)。\n\n【免模型标注】20条中14条零模型(R1-R4/R7-R9/R13-R19),今天到本周的主干(R1-R4/R7/R8)全部不碰GPU;仅6条需GPU(R5/R6共用一次过夜回放、R10-R12在管线内增量、R20一次性训练),全部在过夜预算内。",
+      "roadmap": [
+        {
+          "rank": 1,
+          "name": "冻结日回归集+gold固化(D3.P6)",
+          "tier": "T0",
+          "what": "抢救易失数据:/tmp/cmp/*.json+sessions.jsonl+v4_emb.npy+lab.db当日摘录拷入 Tests/event-local-lab/fixtures/2026-06-07/(仿writing-capture-lab惯例);42例dup裁决+13例rescue归置+实锤C六团块+s868/s599禁合对+E75该删E88该留+s346应并回PORT+29段丢失清单编成gold.json;run_regression.py纯CPU断言(dup=0/覆盖337/blob对齐≥0.9/禁合对不合/24桶复现),fixture只增不改",
+          "gain": "五份取证的risks栏异口同声『阈值单日标定换天漂』——没有回归集每次调参都是无护栏重赌;已核实/tmp/cmp仍在/tmp下随时蒸发,42+13例人工gold是sonnet逐条核出的资产;是其余19条能安全迭代的前提",
+          "cost": "~1天(拷贝+gold编纂+断言脚本);每次回归<10s纯CPU",
+          "needs_gpu": false,
+          "depends_on": "无(最先做)"
+        },
+        {
+          "rank": 2,
+          "name": "桶内护栏重写(D1.P3=F1根修+F2 G2-G5/G7)",
+          "tier": "T0",
+          "what": "重写v4_local_cluster.py桶循环L131-145,顺序改为先修补校验再统计覆盖:skipped不算covered(模型skipped列表代码一律当未分配)、缺title/summary确定性修补不丢成员(app+top2锚点/doing拼接)、标题正则拦截(分辨率/纯app名/df>10%命令行词)、整桶失败(except或evs空)进orphan池不再静默吞、miss不再塞evs[0](垃圾吸附体)、桶外id过滤加计数日志",
+          "gain": "堵死全部静默丢数据路径:29段未覆盖里16段来自两整桶蒸发、另有『字段校验晚于覆盖统计』第二条暗路;产出显式orphan池供R4处置;E50型垃圾标题被拦",
+          "cost": "~40行,零LLM;对冻结日重放应产出orphans恰=29可验",
+          "needs_gpu": false,
+          "depends_on": "R1(回归护栏先立)"
+        },
+        {
+          "rank": 3,
+          "name": "确定性去重二连:壳合并+exactly-once(D1.P4+D1.P5合并)",
+          "tier": "T1",
+          "what": "同桶重叠事件对先跑壳规则(纯子集→多成员壳赢/单例壳删)+重叠系数≥0.5且排他凝聚≥0.05且时间毗邻→整体合并((37,39)型影子对;coh门必须查排他成员防(50,53)被15共享成员骗合);残余双分配三层裁决:壳→锚点决定门(max≥0.06且比率≥1.1,换日先用稳健档1.5)→末现后备;assert所有事件sids两两不相交。互斥处理:回滚v5两处删壳逻辑(E88/E42该赢,E75该亡)",
+          "gain": "dup 43→0结构根治;裁决38/42=90%对齐人工、33强判例100%(对比首现优先11/42);E50巨垃圾24→5段、E17/E39 6→2;影子对收敛为完整事件而非两个残壳",
+          "cost": "~70行;42例gold回归已备(R1里);零LLM",
+          "needs_gpu": false,
+          "depends_on": "R2(在护栏后跑)、R1(gold回归)"
+        },
+        {
+          "rank": 4,
+          "name": "确定性rescue覆盖兜底:attach优先+singleton(D1.P7)",
+          "tier": "T1",
+          "what": "桶循环后统一处理orphan池:按时间序,同桶时间门60min内锚点≥0.12挂argmax→跨桶bar提到0.15(救s646型)→5min同app近邻→singleton(doing首从句截取,misc标记UI可折叠);整桶失败先retry同一窄LLM调用1次(复用管线已加载模型),仍败按gap>30min时间断裂切分成fallback事件;assert覆盖==N",
+          "gain": "覆盖308→337 by construction,反超gpt41的334;丢失29段0噪声(gpt 29/29全覆盖),Tier1模拟13段里9-10段与gpt主题一致、0垃圾;事件数典型+2~4最坏+7(全带misc可分层隐藏)",
+          "cost": "~60行,阈值0.12/0.15/5min/60min已标定;retry极端日最多+7次桶级调用(管线内,非独立GPU任务)",
+          "needs_gpu": false,
+          "depends_on": "R2(orphan池)、R1"
+        },
+        {
+          "rank": 5,
+          "name": "时间加法项进亲和(D1.P1=F5)",
+          "tier": "T1",
+          "what": "v4_local_cluster.py STEP5亲和构造:aff=0.85*(0.7cos+0.3wjaccard)+0.15*exp(-gap_min/120),τ0.30/cap30/complete_linkage全不动;t0/t1必须按parts聚合(MIN start_ms..MAX end_ms),gap=区间端点分钟差重叠为0;必须加法项(乘法门控/硬惩罚已实验证劣);备档T90/TW0.20",
+          "gain": "perm24在分桶层即按实锤C六团块拆开(blob对齐0.37→1.00),双拼尾s1189-1198自动归librime线;产生dup38主体的25段巨桶解体(与R3互补:消灭土壤+兜底残余);gpt41碎片-28%、完整事件19→22/41、桶时间跨度5.64h→2.02h;参数宽平台非刀尖",
+          "cost": "~20行numpy+0.3s;桶层指标离线即验;端到端需一次过夜回放(与R6共用),另找1-2天数据核平台",
+          "needs_gpu": true,
+          "depends_on": "R1(回放后R3/R4阈值须在新桶态重验回归)"
+        },
+        {
+          "rank": 6,
+          "name": "连接词lift_cos降权+背景活动模板兜底(D1.P2+D3.P3合并)",
+          "tier": "T1",
+          "what": "compute_idf后:bg=当日4000随机对cos,df≥3锚点算lift_cos=(mean_pairwise−bg)/(1−bg);lift<0.15→idf=0(硬),[0.15,0.25)且span≥3h→×0.3(软);permission家族先字符串归一防变体逃逸;降权idf同时喂R3/R4/R9全部评分。配对上线app级模板pre-pass:app∈模板表且无lift>0.25判别锚点→直出模板事件(听歌/登录/日常聊天),gap≤45min归并,不进聚类不进LLM;模板表用61天生产标题slug复现≥10天的模式冷启动",
+          "gain": "OCR27杂物桶胶水83.2%是连接词(真锚点<5%),降权重跑当日26段桶碎成13/7/6/1——mega在分桶层不再形成(与R5双保险);51硬+19软自动抓取零误杀;背景段(s254型)覆盖by construction且省LLM调用;每天自动无人工停用词表",
+          "cost": "~30行numpy<1s+模板表0.5-1天;与R5共用同一次过夜回放",
+          "needs_gpu": true,
+          "depends_on": "R5(同批上线,时间项正好补位失胶背景段)"
+        },
+        {
+          "rank": 7,
+          "name": "线程层=桶+全链fail-loud断言(D1.P8)",
+          "tier": "T1",
+          "what": "线程=分桶产物(零新聚类零新阈值):thread.events=majority_bucket归属(83/88天然单桶)、sessions=桶全体(线程层天然337/337)、确定性标题必产(mode_app+top3锚点),2507每桶1次纯命名润色可选可推迟;禁止任何跨桶线程合并(26种时间/锚点/cos组合已被网格模拟证伪)。每日末尾断言:覆盖==N/事件sids两两不相交/标题非空过正则/max_size≤cap且时间团块≤3+orphan数retry数等计数日志,违反即fail-loud",
+          "gain": "浏览节点88→24(≈生产28粒度)、线程层覆盖337/337(+3超gpt)、线程dup=0(桶是划分);检索保住细层B³P 0.637锚点;回归事故从『跑对照才发现』变『当天断言报警』——F1/F2两次静默丢数据事后取证才发现的直接制度化",
+          "cost": "~50行(构建30+断言20);命名润色24次窄调用可整体推迟",
+          "needs_gpu": false,
+          "depends_on": "R3/R4(断言依赖其保证)"
+        },
+        {
+          "rank": 8,
+          "name": "LLM调用留存装饰器:数据飞轮只攒不训(D3.P7留存部分)",
+          "tier": "T1",
+          "what": "engine.py所有调用点(视觉逐帧/汇总/桶内切分/命名)包统一日志:输入/输出/模型/下游确定性裁决结果落jsonl;被exactly-once推翻的双分配、被标题校验拒绝的命名、被rescue救回的skipped=免费负例自动标注;留holdout天;微调本身按既有决策继续推迟",
+          "gain": "解『数据是真瓶颈』(现每天~360次调用用完即弃);顺带给R1回归集提供LLM步录制replay素材(以后改确定性代码可离线全链回归);30天≈万条原始对+数百条护栏纠错标注",
+          "cost": "~0.5天(装饰器+落盘);运行≈0,存储1-5MB/天",
+          "needs_gpu": false,
+          "depends_on": "无(越早越好,每天不留存就是每天扔数据)"
+        },
+        {
+          "rank": 9,
+          "name": "mega事件确定性拆分器兜底(D1.P6)",
+          "tier": "T2",
+          "what": "独立后处理吃事件json,对size>12或时间团块≥3的事件:成员按t0排序,夹层非成员≥3或gap>0.5h切分(纯gap切不开15-30min链式相连的OCR型)→团块两两降权wjaccard≥0.05贪心缝回(submitRaceBurst隔小时续线自动缝回)→与时间窗交叠既有事件≥0.02并线(修s346劈线,应合0.0224 vs不应合0.0015);零锚点碎片进orphan池绝不硬归属(嵌入cos在此不判别已两次证伪)",
+          "gain": "兜住R5/R6漏网+可回刷61天历史数据;OCR27拆13条锚点自洽子线、5段并回PORT(18→23);配合R7断言(max_size≤cap)构成『无mega by construction』的闭环",
+          "cost": "~80行;OCR27/PERM24两案例gold已核(R1里);阈值需2-3天回放复验",
+          "needs_gpu": false,
+          "depends_on": "R3(影子成员先归位)、R6(降权idf)、R1"
+        },
+        {
+          "rank": 10,
+          "name": "摘要grep接地闭环(D2.P4)",
+          "tier": "T2",
+          "what": "所有summary出口处确定性校验:用cluster_skeleton现成_FILE/_CAMEL/_SNAKE/_ERR正则抽技术token,逐一在成员doing∪kw∪去重OCR并集里grep(不区分大小写子串);验不上→违规清单注入prompt重生成≤2次;仍败→确定性拼接摘要;校验结果落库统计各prompt幻觉率",
+          "gain": "摘要幻觉锚点by construction归零——下游检索引用的每个文件名/函数名保证在证据里存在;『Invent nothing』从祈使句变机器强制(distill背错长id=weight 0空壳的同款教训,ocr3逐字验上模式的成功先例)",
+          "cost": "~60行纯正则;重生成在管线内+10-20次≈3-5min",
+          "needs_gpu": true,
+          "depends_on": "R2(确定性fallback已有)"
+        },
+        {
+          "rank": 11,
+          "name": "桶内切分N=5共识分区+命名N选1(D2.P1+D2.P3合并)",
+          "tier": "T2",
+          "what": "每桶同PROMPT跑5次(temp升到0.7破双稳吸引盆+卡片顺序扰动破位置偏置),co-association矩阵C[i,j]=同事件次数/共同被分配次数,复用complete_linkage(τ_co=0.6)→硬分区,exactly-once by construction、整桶蒸发概率p^5;命名从5次候选挑:正则硬否决(含连接词黑名单token)→IDF-grep打分argmax→确定性fallback。5次全未分配→交R4 rescue。R3降级为断言后备不删除",
+          "gain": "切分方差消除(同日重跑同分区,双稳消失)、dup/整桶蒸发结构性关闭(比R3更根本);连接词标题(E50类)结构性消失;免费产出逐成员置信度(供R12/R13);补充实验证明dup/lost病灶就在LLM切分步(dup段桶层摇摆率51%<全体68%)——算力该砸这里",
+          "cost": "~160行;+60-100min GPU/夜(24桶×4轮,过夜预算内);命名复用共识输出增量≈0",
+          "needs_gpu": true,
+          "depends_on": "R3/R4上线跑稳后;R8(留存对照);R1(gold回归门)"
+        },
+        {
+          "rank": 12,
+          "name": "分歧升级:K=5带证据多票二分(D2.P2)",
+          "tier": "T2",
+          "what": "一套裁决器两入口:共识边缘sid(co<0.6=模型真摇摆段)+零锚点碎片(R9承认确定性缝不动的1-2段):top-2候选事件构造完整证据prompt(doing原文+两侧成员doing+时间gap),5票temp0.7候选顺序两票对调;≥4/5才挂,3/2分裂走确定性后备(5min同app近邻否则独立)——宁独立不误合;票型作双属性标签落库",
+          "gain": "二分误合从单票2/4压到需连错4票(~p^4量级);~5-15个零锚点碎片获得有兜底的归属通道且垃圾事件不增;3/2票型=诚实的『两边都沾』证据,呈现层可双挂",
+          "cost": "~80行;每天15-30个×5票≈10-25min GPU",
+          "needs_gpu": true,
+          "depends_on": "R11(共识边缘信号)、R9(碎片来源)"
+        },
+        {
+          "rank": 13,
+          "name": "置信度落库+定向抽查闭环(D2.P7,含D3.P4的attach_log)",
+          "tier": "T2",
+          "what": "schema加字段:membership_conf(共识co均值)/naming_conf(评分margin)/grounded(grep结果)/票型/每条rescue与exactly-once裁决日志(sid,app,时段,锚点得分,胜方锚点);sonnet逐条核从全量改定向:co<0.6、3/2票、走过fallback的全查+高置信5%随机抽;抽查结论回填校准τ_co/票数门/grep违规率各阈值",
+          "gain": "验收成本降一个量级(首周~15-25条/天,覆盖几乎全部真风险点);阈值从单日拍脑袋变抽查回填校准闭环——直接回应F1/F2/F5共同的换天漂风险;顺带为R17攒先验数据;呈现层拿到诚实不确定性信号",
+          "cost": "~40行schema+清单脚本;0 GPU(全是已有中间量);attach_log部分R3/R4上线即可先落",
+          "needs_gpu": false,
+          "depends_on": "R11/R12(置信度来源;日志部分仅需R3/R4)"
+        },
+        {
+          "rank": 14,
+          "name": "跨天锚点统计库:30天滚动DF+持久连接词表(D3.P1)",
+          "tier": "T2",
+          "what": "anchor_stats.sqlite(anchor,day,df,lift_cos,span)每天管线step4后追加(复用当日嵌入零额外算力);compute_idf改混合idf=λ当日+(1-λ)30天滚动(λ随历史天数1→0.3);连接词判定升级为『当日lift<0.15 或 近7天≥5天lift<0.15』;61天~/.portrait/events/标题slug冷启动回填纯DF;窗口硬截30天、历史DF=0新词不惩罚、连接词表每周复核翻面即移出",
+          "gain": "claude/sourcekit-lsp/caffeinate这类天天在的环境词从『每天现算单日样本』变『跨天证据首帧生效』;边缘锚点翻面(voiceprint 0.227型)靠多天投票稳定;是本地对每日冷启动云端的不对称优势第一块基建",
+          "cost": "1-2天(一张表+compute_idf改10行+回填脚本);运行毫秒级纯CPU",
+          "needs_gpu": false,
+          "depends_on": "R6(升级其判定规则)"
+        },
+        {
+          "rank": 15,
+          "name": "个人项目/子系统词典(D3.P2)",
+          "tier": "T2",
+          "what": "project_lexicon表三路来源:git仓库文件树扫描+61天事件标题高频实体+R14库里跨天lift>0.25自动入典(librime/submitraceburst/canvas_fusion这批已实证判别力);用于三处:亲和命中同实体+0.10(小于时间项0.15不喧宾夺主)/桶内切分prompt附已知任务线先验/rescue评分词典锚点×1.5;60天未见退休、只加成不排斥、不引入must-link",
+          "gain": "s346型同任务线被τ边界劈开在分桶层直接修复(三段共享screenshot ocr/swift port实体);E50标题病第二道保险;rescue的3-4个温和偏差有望收敛——这些子系统词不是单日特有而是该用户固定项目群,天天有效",
+          "cost": "~1天(扫描脚本+三处接入)+人工半小时过50-100初始词条;运行0",
+          "needs_gpu": false,
+          "depends_on": "R14(共享统计库)"
+        },
+        {
+          "rank": 16,
+          "name": "跨天任务线carry-over软链(D3.P5)",
+          "tier": "T2",
+          "what": "线程层输出后:今日每个事件/线程锚点集与前1-3天事件算降权wjaccard,≥0.15且共享≥2个判别锚点(lift>0.25)且昨日事件未闭合(末2h仍有成员)→标continues_event_id+证据锚点;只链接绝不合并成员绝不改文案,不触碰『禁跨桶合并』(这是跨天元数据非同日聚类);呈现层串成任务线时间轴",
+          "gain": "『本地超云端』最直接一条:gpt-5.4每日冷启动永远给不出『此bug已连修3天』;distill层可按任务线而非按天组织记忆——产品级差异非指标差异;顺带缓解跨午夜UTC切日丢上下文老问题",
+          "cost": "~1天(读昨日JSON+wjaccard对比+加字段);毫秒级纯CPU;第2天即生效",
+          "needs_gpu": false,
+          "depends_on": "R6(判别锚点定义)、R7(事件输出层)"
+        },
+        {
+          "rank": 17,
+          "name": "app→归属先验启用(D3.P4)",
+          "tier": "T3",
+          "what": "当裁决落弱信号区(exactly-once锚点门max<0.06或比率<1.1;rescue的c/d档)时查历史先验P(归属锚点族|app,时段)替代『末现优先/5min近邻』盲后备;≥50条同(app,时段)样本才启用,拉普拉斯平滑+30天指数衰减,只tie-break绝不推翻锚点强信号,prior_used=true供抽查",
+          "gain": "该用户Terminal短碎片归属有强个人规律(丢失29段Terminal×19高度集中);38/42→潜在40/42(4个双属性弱判例的惯常归属);singleton兜底减少——跨天行为先验是云端拿不到的信号;成本近零的期权",
+          "cost": "~1天(查表20行,日志R13已落);启用前行为与现管线逐字节一致=风险最低",
+          "needs_gpu": false,
+          "depends_on": "R13攒≥2周裁决日志"
+        },
+        {
+          "rank": 18,
+          "name": "α扰动稳定核(D2.P5,条件启用)",
+          "tier": "T3",
+          "what": "α∈{0.60..0.80}×T_HALF∈{90,120,180}各跑一次complete_linkage(纯numpy每次<1s),桶层co-association,co≥0.8连通分量=稳定核(实测47团覆盖322/337);摇摆成员标fragile走R4 rescue,LLM只看稳定核。互斥处理:与线程=24桶的浏览规模冲突,仅当R5/R6跨天验证暴露真实桶漂移才启用(α轴实测最脆:仅7.7%桶对全配置一致 vs τ轴82.8%),启用时R7线程层需重验",
+          "gain": "桶组成对α/权重微漂免疫(直接回应F4风险②/F5风险①);LLM输入更纯(骑墙者不污染桶内切分);注意其定位=对冲跨天参数漂移,不治dup/lost(实验证明那与桶层脆弱性无关)",
+          "cost": "~70行(union-find+fragile标记),纯numpy<10s;rescue评分器与R4共用零新增",
+          "needs_gpu": false,
+          "depends_on": "R5/R6多天验证结果(发现桶漂移才上);启用需重验R7"
+        },
+        {
+          "rank": 19,
+          "name": "共识双粒度中间层(D2.P6)",
+          "tier": "T3",
+          "what": "同一co-association矩阵两阈值:τ_fine=0.8(≥4/5同事件→细层检索用)与τ_coarse=0.4(2-3/5→桶内粗段浏览用),dendrogram性质保证严格嵌套零对齐代码;三级呈现:线程24→粗段→事件;粗段命名走候选评分或1次窄调用。互斥处理:选它弃D1.P8的L2.5时间细分(模拟证明L2.5对gpt对齐零增益F1 0.39-0.40)",
+          "gain": "三级嵌套by construction;粒度旋钮从『改prompt重跑』变『调确定性阈值』,UX随时改不碰模型;绕开已判死的全局合并——用的是模型N次投票的粒度信号而非单次合并判断",
+          "cost": "~30行(同一linkage跑两阈值);粗段命名可选+20-40次×5s≈2-4min",
+          "needs_gpu": false,
+          "depends_on": "R11(共识矩阵)"
+        },
+        {
+          "rank": 20,
+          "name": "个人微调蒸馏(D3.P7下游,按既有决策继续推迟)",
+          "tier": "T3",
+          "what": "R8攒够数据后(两个月≈万条对+数百条护栏纠错标注)微调Qwen3-1.7B/4B替代2507做桶内切分——固定化任务上对该用户过拟合正是目的;留holdout天、微调后必须过R1回归集、每月滚动重训防旧模式固化",
+          "gain": "3.2h过夜批大幅压缩;切分质量向该用户真实分布收敛=固定性红利终极形态;与memory既有决策一致(数据是真瓶颈,先攒推迟训)",
+          "cost": "数据靠R8自然积累零额外成本;训练一次性GPU;评测门已由R1提供",
+          "needs_gpu": true,
+          "depends_on": "R8(数据量)、R1(评测门)、R11(切分任务形态定型后再蒸)"
+        }
+      ],
+      "summary_table_md": "| # | 名称 | Tier | 免模型 | 关键收益 | 依赖 |\n|---|------|------|--------|----------|------|\n| 1 | 冻结日回归集+gold固化 | T0 | ✅ | 抢救/tmp易失gold;一切调参的护栏 | — |\n| 2 | 桶内护栏重写(skipped/校验序/字段修补) | T0 | ✅ | 堵死静默丢数据(16/29根因);产出orphan池 | R1 |\n| 3 | 去重二连:壳合并+exactly-once | T1 | ✅ | dup 43→0;裁决90%/强判例100%;E50 24→5 | R2,R1 |\n| 4 | rescue兜底:attach优先+singleton | T1 | ✅ | 覆盖308→337 by construction(超gpt334) | R2,R1 |\n| 5 | 时间加法项进亲和 | T1 | 🔶回放 | perm24按6真团块拆开(blob 1.00);dup土壤解体 | R1 |\n| 6 | 连接词lift_cos降权+背景模板兜底 | T1 | 🔶回放 | 杂物桶根治,mega不再形成;背景段直出 | R5 |\n| 7 | 线程层=桶+fail-loud断言 | T1 | ✅ | 88→24浏览节点;线程层337/337;回归当天报警 | R3,R4 |\n| 8 | LLM调用留存装饰器(只攒不训) | T1 | ✅ | 解数据瓶颈;供回归replay;30天≈万条 | — |\n| 9 | mega拆分器兜底(夹层切分+缝回+并线) | T2 | ✅ | 兜漏网+回刷61天历史;OCR27→13真线 | R3,R6 |\n| 10 | 摘要grep接地闭环 | T2 | 🔶管线内 | 幻觉锚点by construction归零 | R2 |\n| 11 | N=5共识分区+命名N选1 | T2 | ❌+60-100min/夜 | 切分方差消失;dup/蒸发结构关闭;免费置信度 | R3,R4,R8 |\n| 12 | 分歧升级K=5多票二分 | T2 | ❌+10-25min | 误合2/4→p^4;零锚点碎片有兜底通道 | R11,R9 |\n| 13 | 置信度落库+定向抽查 | T2 | ✅ | 验收降一个量级;阈值校准闭环 | R11/R12 |\n| 14 | 跨天锚点统计库(30天滚动) | T2 | ✅ | 连接词跨天证据首帧生效;本地不对称优势基建 | R6 |\n| 15 | 个人项目词典 | T2 | ✅ | s346型劈线修复;标题病二道保险 | R14 |\n| 16 | 跨天任务线carry-over | T2 | ✅ | 『此bug连修3天』——云端结构性给不出 | R6,R7 |\n| 17 | app归属先验启用 | T3 | ✅ | 弱信号区个人化tie-break;近零成本期权 | R13×2周 |\n| 18 | α扰动稳定核(条件启用) | T3 | ✅ | 对冲跨天参数漂移;桶漂移实证后才上 | R5/R6多天验证 |\n| 19 | 共识双粒度中间层 | T3 | ✅ | 三级嵌套;粒度旋钮=确定性阈值 | R11 |\n| 20 | 个人微调蒸馏(继续推迟) | T3 | ❌训练 | 过夜批压缩;固定性红利终极形态 | R8,R1,R11 |\n\n**里程碑**:T0+T1 收官(仅需一次过夜回放)即达成对 gpt-5.4 主指标——覆盖337>334、dup=0、mega分桶层预防、24线程/88事件双层、断言防回归。T2 治方差/幻觉/单日标定三类稳健性风险,T3 全是低成本期权。20条中14条零模型,GPU需求全部在过夜预算内(R5/R6共用一次回放)。"
+    },
+    "attack": {
+      "attacks": [
+        {
+          "target": "R6 连接词lift_cos降权(硬杀 idf=0)——\"51硬+19软零误杀\"",
+          "objection": "离线复现(v4_emb.npy+cluster_skeleton 同款锚点/idf,bg=4000随机对cos=0.5415)后 hard-kill 区(lift<0.15)里躺着一排真判别技术锚点:mymeeting.swift(+0.057,df4)、appmodel.swift(+0.109)、extractsentmessages(+0.137,df9,写作采集主函数名)、analyticsservice.swift(+0.139,df8)、writing_records(+0.142)、portrait.sqlite(+0.148,df19,当前idf≈2.89的高权锚点)、discord(−0.173,真子系统)。\"零误杀\"不可复现(我测得54硬/31软)。根因:lift_cos 度量的是\"共享该锚点的 session 嵌入是否互相凝聚\",而已定案教训明说嵌入对开发工作不判别——一条干了一整天的真任务线(写作采集)各 session 的 doing 语境天然发散,其专属文件/函数锚点 pairwise cos 就是低,被当成连接词杀掉。这不是胶水,这是把最长真任务线的胶水杀了。另:bg 用 4000 随机对采样,不定 seed 时 bg 抖动会让 0.13-0.16 边界锚点(df=3-5 的一大片)逐次运行翻面,直接违反 R1 要保的确定性复现。",
+          "severity": "fatal",
+          "fix": "① _FILE/_CAMEL/_SNAKE 正则型技术锚点(结构上不可能是连接词)豁免硬杀,最多进软降权;硬杀只对自然语短语类锚点开放。② bg 采样固定 seed 或改全对均值(N=337 全对仅5.6万,毫秒级)。③ 上线门槛从\"当日抽查零误杀\"改为:kill 名单对 42 例 gold 重放,裁决翻盘=0 才放行。"
+        },
+        {
+          "target": "R1 冻结日回归集的断言设计(dup=0/覆盖337/blob≥0.9/24桶复现 同一套)",
+          "objection": "断言集自相矛盾,任何时间点都不可能全绿:\"24桶复现\"是现状(我复现=24桶✓),但 dup=0/覆盖337/blob≥0.9 是 R3/R4/R5 落地后的目标态(冻结日现状 dup=38、覆盖308、blob 0.37——metrics.json 实测);而同一个 T1 周 R5 落地后桶数变 20(我离线实测 24→20),\"24桶复现\"又立刻炸,fixture\"只增不改\"还禁止更新期望值。结果是这套\"一切调参的护栏\"从第一天起常红,团队被训练成无视红灯——比没有护栏更危险。",
+          "severity": "major",
+          "fix": "拆两套:①replay 回归=pin 住输入+每个 pipeline 版本各自的期望产物(期望值允许版本化更新,\"只增不改\"只约束 fixture 输入);②acceptance 门=dup=0/337/blob≥0.9 只对新版本跑、绿了才允许替换 champion。42例 gold 裁决属于①,与桶数断言解耦。"
+        },
+        {
+          "target": "R7 \"线程层=桶,88→24浏览节点≈生产28粒度\"+\"禁止任何跨桶线程合并\"",
+          "objection": "24≈28 是数字巧合不是粒度等价:生产28/gpt41 的单位是任务,桶不是。实测 gpt41 里 8 个 >3h 的真任务 7 个跨多桶——g10 写作采集消息丢失(34段/4.6h)横跨现桶12个/R5桶8个,g11(60段)12/9;桶级 pair-precision vs gpt41 仅 0.25(现)/0.335(R5),即线程内 2/3 的同桶对根本不是同一任务。R5 落地(同为T1)后桶=20 且语义变成时间块(桶均跨度2.05h),\"线程\"退化为\"下午2-4点干的事\";而\"禁跨桶合并\"的26组合证伪是在无时间项的旧亲和下做的,换了桶语义没重验。还和 R16 内讧:跨天能链\"此bug连修3天\",同一天上午修+晚上修同一个bug却是两条永不能合的线程。",
+          "severity": "major",
+          "fix": "①线程层如实改名\"工作块层\"(时间块本身对回忆有效,别冒充任务粒度);或②允许 R16 同款确定性跨桶软链(continues 元数据、绝不合并成员,不触犯合并禁令)把同日同任务的桶串成任务线;③R5 落地后把 26 组合证伪在新桶态重跑一遍再引用。"
+        },
+        {
+          "target": "T1 里程碑\"贴合甚至超越 gpt-5.4:覆盖337>334、dup=0(gpt自身也有交叉)\"",
+          "objection": "两根支柱一根是假前提一根是口径游戏。实测 /tmp/cmp/gpt41.json:41事件、覆盖334、dup=0——没有任何 session 出现在超过1个事件里,\"gpt自身也有交叉\"是编的,dup 维度最多打平。覆盖 337>334 是 by-construction 对 semantic 的不对等口径:R4 自己承认 rescue 里 3-4/13 主题不一致、singleton 挂 misc 可折叠,gpt 加一个 misc 兜底桶也能 337。真正能立住的超越点(粒度分层、时间块拆 mega、跨天任务线)反而没进主指标表述。",
+          "severity": "major",
+          "fix": "里程碑改写为可防御口径:覆盖 334 对齐 + 3 段 rescue(attach/singleton 单列计数,不混入语义覆盖);dup 0=0 打平;超越叙事落在 perm24 六团块拆解、双层粒度、R16 跨天连续性这些 gpt 结构性给不出的维度上。"
+        },
+        {
+          "target": "R3+R6 同一个 T1 批次上线的排期(\"降权idf同时喂R3/R4/R9全部评分\")",
+          "objection": "R3 的头牌证据\"裁决38/42=90%对齐、33强判例100%\"是在 pre-R6 idf 下标定的绝对阈值(锚点门 max≥0.06/比率1.1;R4 的 0.12/0.15 同理)。R6 的 kill 名单(我复现)包含 portrait.sqlite(df19,idf≈2.89)和 extractsentmessages(df9,idf≈3.57)这类当前高权锚点,清零后写作采集系(全天最大任务线,g10+g11=94段)的 wjaccard 整体重标度——42例 gold 裁决在部署组合下随时翻盘,而路线图把\"同一批上线、共用一次过夜回放\"当卖点,没有任何 R6 后重标定/重裁决步骤。90% 这个数字对最终上线形态没有效力。",
+          "severity": "major",
+          "fix": "①R3 首周用冻结 idf(不降权)上线,先落 dup=0;②R6 挂 flag,合入前用降权 idf 对 42 例 gold 离线重跑裁决,翻盘>2 例就把门从绝对阈值改成分位数/秩(rank-based),对 idf 重标度天然免疫;③R4 的 0.12/0.15 同批重验。"
+        },
+        {
+          "target": "R2 验收门\"对冻结日重放应产出 orphans 恰=29可验\"",
+          "objection": "与自己的改动清单矛盾。代码实锤(v4_local_cluster.py L131-145):L133 skipped 算 covered、L136 miss 塞 evs[0]、L144 title/summary 校验在覆盖统计之后丢成员——三条静默路确认存在,这部分诊断是对的。但 R2 同时删掉 miss→evs[0](路线图自己称之为\"垃圾吸附体\",断言该路径发生过):被吸附的 session 在 v2 的 308 覆盖里算\"已覆盖\",改掉后它们也进 orphan 池 → 重放 orphan ≥29 而非恰=29。这个 T0 验收门要么误报失败(阻塞后续一切),要么为了过门把 miss-attach 偷偷留着(掩盖真差异)。",
+          "severity": "minor",
+          "fix": "断言改为\"orphan 池 ⊇ 29段gold清单\"(集合包含,不是计数相等),miss-attach 释放的 session 单独计数落日志;L144 丢弃路径同样加计数断言,让三条路各自可审计。"
+        }
+      ],
+      "survives": "攻不动的结论(全部经我离线复现/数据核查后仍站立):① R5 时间加法项是全路线图最硬的一条——我用 lab.db 真实区间+v4_emb.npy 全力复现攻击失败:现管线24桶精确复现,加时间项后桶均跨度4.94h→2.05h、perm24 恰好按实锤C六团块落进6个不同桶(212/239/277→桶3,388-431→桶9,516→桶12,937-1018→桶15,1079-1091→桶17,双拼尾1189-1198→桶16,blob对齐1.00复现)、gpt整事件19→22、碎片85→49(-42%)、桶级precision 0.25→0.335,且零一例\\\"现完整→R5劈开\\\"回归,备档T90/W0.20同样20桶——宽平台属实。② R3 exactly-once 的结构主张数学上免疫攻击(桶间不相交+桶内恰一次⇒dup=0 by construction),影子对结构与数据吻合:E37∩E39=5/7,6、E50∩E53=15共享,实锤B的dup拓扑属实。③ 我最看好的交叉攻击\\\"R6降权杀死R4的rescue通道\\\"被数据否决:29段丢失session逐一核查,全部保有≥1个存活锚点(靠df<3稀有锚点,不过lift门),0段全灭——rescue通道对R6鲁棒。④ R1 的紧迫性前提为真:event-local-lab下确无fixtures目录,/tmp/cmp随时蒸发,抢救动作本身无可指摘(要改的只是断言分层)。⑤ R8 留存装饰器近乎无懈可击,唯一注записка:被90%准确规则推翻的\\\"负例\\\"天然含~10%错标,入训练集前须过R13抽查通道。总判:骨架(确定性去重+rescue+时间项+留存)成立,需要动刀的是R6的硬杀判据、R1的断言分层、R7/里程碑的表述诚实度、以及R3与R6的上线顺序解耦。"
+    },
+    "report": "# 事件管线本地化·算法总览与改进路线\n\n> 基准日:2026-06-07(337 段 session);对照物:云端 gpt-5.4 产出(41 事件,下称 gpt41)与生产老 pipeline(28 事件)。本报告综合五份取证(F1-F5)、20 条路线图与对抗评审结果;**被对抗方击落或降级的提案已如实修正标注**。\n\n---\n\n## 1. 管线现状总览\n\n当前本地管线(`Tests/event-local-lab/v4_local_cluster.py` + `cluster_skeleton.py`)分七步:\n\n| # | 步骤 | 做什么 | 确定性 / LLM | 已知弱点 |\n|---|------|--------|--------------|----------|\n| 1 | Session 构建 + doing 文本 | 视觉逐帧描述、session 汇总,产出每段\"在干什么\"的文字 | 窄 LLM(本地) | 每天 ~360 次调用结果用完即弃,数据飞轮缺失(微调数据是真瓶颈) |\n| 2 | 嵌入(embedding,把文本变成向量以便算相似度) | 每段 doing 算一个向量(v4_emb.npy) | 确定性 | 嵌入质心对开发工作**不判别**(已两次证伪:audio 块 vs OCR 块 cos 0.694 > 应合对 0.678),只能做辅助信号 |\n| 3 | 锚点挖掘 + IDF(逆文档频率,衡量一个词有多\"稀有\") | 从 doing 里抽文件名/函数名/短语当锚点,算权重 | 确定性 | **IDF 分不开连接词和真锚点**:`permissions bypass` idf 3.81 ≈ `librime` 3.57;OCR mega 的胶水 83.2% 是 claude/terminal/sourcekit-lsp 这类环境词 |\n| 4 | 分桶(complete-linkage 层次聚类,全对相似度 ≥ 阈值才合并) | 亲和 = 0.7·cos + 0.3·wJaccard(加权集合重叠),τ0.30/cap30 → 24 桶 | 确定性 | **没有时间通道**:1.94-8.29h 的 25 段巨桶把 perm24 的 20 段塞进一个桶,是 dup 的土壤;参数只在这一天标定 |\n| 5 | 桶内切分成事件 | 每桶一次窄 LLM(2507)把桶切成事件,给 title/summary,可标 skipped | LLM(窄) | **双稳/方差**:dup 43 全部产自同桶双分配(dup 段桶层摇摆率 51%);整桶失败输出 events=[];先粗后细的输出习惯让首事件成\"垃圾吸附体\"(E50);连接词标题(整个标题就是命令行 flag) |\n| 6 | 覆盖统计 + 过滤(L131-145) | 统计哪些 session 被覆盖,过滤缺字段事件 | 确定性(代码) | **三条静默丢数据路**:① skipped 直接算 covered;② 字段校验发生在覆盖统计之后,缺 title 的事件成员两头落空;③ except 吞整桶。另外 miss 一律塞 evs[0](恰是垃圾吸附体) |\n| 7 | 输出 + 评测 | 事件 JSON,对 gpt41 / 老 pipeline 算 B³(按成员算的聚类精度/召回)等 | 确定性 | 无 fail-loud 断言,回归全靠事后跑对照才发现(F1/F2 两次静默丢数据都是事后取证挖出来的) |\n\n---\n\n## 2. 与云端(gpt-5.4)的真实差距在哪\n\n一句话结论:**四项差距逐条取证后,病灶全部落在第 4/5/6 步的架构与代码层,没有一条需要\"更聪明的模型\"来修。**\n\n### 2.1 覆盖 308/337 vs 334/337(丢 29 段)\n\n- 丢的 29 段**零噪声**:gpt41 对这 29 段 29/29 全覆盖,其中 28 段挂进多段任务线事件、仅 1 段单独成事件(gpt 的风格 = attach 优先、singleton 兜底)。\n- 丢失不是模型\"偶尔跳过短段\",而是**整桶塌陷**:16/29 来自两个整桶蒸发(桶 11 覆盖 0/10、桶 20 覆盖 0/6)。\n- 代码根因三条(见上表第 6 步)。换句话说:模型该说的都说了,**是统计代码把答案扔了**。确定性 rescue 模拟(时间门 + IDF 锚点评分)13 段里 9-10 段与 gpt 安置主题一致、0 垃圾——覆盖可以由构造(by construction,代码结构上保证而非靠模型自觉)做到 337/337。\n\n### 2.2 dup=43(43 段各被双分配进恰好 2 个事件,共 14 个事件对)\n\n- prompt 里写了 EXACTLY ONCE,但**代码只过滤桶外 id,桶内双分配零强制**。\n- 纯确定性三层裁决(壳规则 → 锚点决定门 → 末现后备)与人工 gold 一致 38/42=90%,33 个强判例 100%;应用后 dup 43→0、巨垃圾事件 E50 从 24 段瘦到 5 段。**不需要动模型一根手指。**\n- (注:不同取证轮次有 43/38 两个计数口径,来自不同 run 的桶态微差;结构结论一致。)\n\n### 2.3 两个 mega 误标事件\n\n- **PERM(24 段)= 影子事件**:19/24 成员同时挂在别的真事件里,exactly-once 去重后只剩 5 个孤儿;标题被 `--dangerously-skip-permissions` 这个命令行 flag 文本带偏,真胶水其实是 IME 线(submitRaceBurst 占 28.4%)。\n- **OCR(27 段)= 杂物抽屉**:横跨 9 个时间窗、至少 7 条互不相干的真线,83.2% 胶水是连接词锚点,真 OCR 锚点 <5%;还把同一条 OCR 移植线劈成两半(s346 和 s336/s360 干的一模一样却分了家)。\n- 病根都在**分桶层**:没有时间项 + 连接词没降权。时间加法项实验(纯 numpy,一行矩阵加法)就把 perm24 按取证实锤的 6 个时间团块拆开,blob 对齐准确率 0.37→1.00。\n\n### 2.4 切分不稳\n\n- 同一桶重跑,LLM 输出在双稳吸引盆之间摇摆;dup 段的桶层摇摆率 51%。这是 LLM 方差问题,解法是结构性的(N=5 共识分区,取多次运行的交集共识),不是换大模型。\n\n### 2.5 反过来说:gpt41 也不是金标准\n\n- gpt41 覆盖 334<337(s415/s431/s826 它漏了本地有)。\n- gpt 的 6 个巨事件是\"叙事汤\":60 段横跨 12 个桶/2.7-8.3h;严格干净的 1:1 映射只有 6/41。这类跨主题叙事等价于**已被实验判死的全局 LLM 合并**,确定性规则本就不该复刻它。\n- 所以对 gpt41 的 F1 只做相对参考,不做优化目标。\n\n---\n\n## 3. 改进路线图(评委版,经对抗修正)\n\n20 条按 T0(今天)/T1(本周)/T2(结构性)/T3(长期期权)分层。**14/20 条零模型**;仅 6 条碰 GPU,全部在过夜预算内(R5/R6 共用一次回放)。\n\n### 对抗修正记录(先亮出来)\n\n对抗方攻击后,以下提案被降级或修正,已反映进下表:\n\n| 被攻击项 | 攻击结论 | 修正 |\n|---|---|---|\n| **R6 连接词硬杀**(严重度:fatal) | \"零误杀\"不可复现(复测 54 硬/31 软):`portrait.sqlite`、`extractsentmessages` 等**真判别技术锚点落在硬杀区**——lift_cos 度量的是嵌入凝聚度,而嵌入对开发工作不判别,长任务线的专属锚点天然发散会被误杀;bg 随机采样不定 seed 还破坏确定性复现 | ① 文件名/驼峰/下划线正则型技术锚点**豁免硬杀**(最多软降权),硬杀只对自然语短语开放;② bg 固定 seed 或改全对均值;③ 上线门槛改为:kill 名单对 42 例 gold 重放,裁决翻盘=0 才放行 |\n| **R1 回归断言设计**(major) | 一套断言自相矛盾:\"24 桶复现\"是现状、\"dup=0/覆盖337\"是目标态,R5 落地后桶数又变 20——护栏从第一天起常红,比没有更危险 | 拆两套:**replay 回归**(pin 输入 + 各版本期望产物,期望值可版本化更新)与 **acceptance 门**(dup=0/337/blob≥0.9 只对新版本跑,绿了才换 champion);\"只增不改\"只约束 fixture 输入 |\n| **R7 线程=桶\"≈生产28粒度\"**(major) | 24≈28 是数字巧合不是粒度等价:gpt41 里 8 个 >3h 真任务 7 个跨多桶,桶级 pair-precision 仅 0.25-0.335,即线程内 2/3 的同桶对不是同一任务;R5 落地后桶语义变\"时间块\";还和 R16 内讧(跨天能链、同日上午+晚上不能链) | ① 如实改名\"**工作块层**\"(时间块对回忆本身有效,不冒充任务粒度);② 允许 R16 同款**确定性跨桶软链**(continues 元数据,绝不合并成员);③ R5 落地后把\"26 组合证伪禁跨桶合并\"在新桶态重跑再引用 |\n| **T1 里程碑表述**(major) | \"gpt 自身也有交叉\"是**编的**——实测 gpt41 dup=0,该维度最多打平;\"337>334\"是 by-construction 对 semantic 的不对等口径(rescue 里 3-4/13 主题不一致) | 里程碑改写:覆盖 334 语义对齐 + rescue 段单列计数(不混入语义覆盖);dup 0=0 打平;**超越叙事落在 gpt 结构性给不出的维度**(mega 时间拆解、双层粒度、跨天连续性) |\n| **R3+R6 同批上线**(major) | R3 的\"90% 对齐\"是在 pre-R6 idf 下标定的**绝对阈值**;R6 清零 `portrait.sqlite` 等高权锚点后 wjaccard 整体重标度,42 例 gold 随时翻盘 | ① R3 首周用**冻结 idf** 上线,先落 dup=0;② R6 挂 flag,合入前对 42 例 gold 离线重跑,翻盘>2 例就把门改成分位数/秩(rank-based,对重标度免疫);③ R4 的 0.12/0.15 同批重验 |\n| **R2 验收门\"orphan 恰=29\"**(minor) | 与自己的改动矛盾:删掉 miss→evs[0] 后被吸附段也进 orphan 池,重放 orphan ≥29 而非 =29 | 断言改为\"orphan 池 **⊇** 29 段 gold 清单\"(集合包含),miss-attach 释放的段单独计数,三条静默路各自可审计 |\n\n对抗方**攻不动、复现后仍站立**的:R5 时间加法项(全路线图最硬,blob 1.00/碎片 -42% 全部复现,零一例\"现完整→被劈开\"回归)、R3 exactly-once 的结构主张(数学上 by construction)、R1 的紧迫性(fixtures 目录确实不存在,/tmp/cmp 随时蒸发)、R8 留存装饰器(唯一注脚:被规则推翻的\"负例\"天然含 ~10% 错标,入训练前须过抽查)。另外对抗方自己最看好的交叉攻击\"R6 降权杀死 R4 rescue 通道\"**被数据否决**:29 段逐一核查全部保有 ≥1 个存活稀有锚点,0 段全灭。\n\n### 路线图总表(修正后)\n\n| # | 名称 | Tier | 确定性/LLM/GPU | 预期量化收益 | 依赖 |\n|---|------|------|------|----------|------|\n| 1 | 冻结日回归集+gold 固化(**拆 replay/acceptance 两套**) | T0 | 纯确定性,零 GPU | 抢救易失 gold(42 例 dup 裁决+13 例 rescue+实锤团块);一切调参的护栏,回归 <10s | — |\n| 2 | 桶内护栏重写(skipped/校验序/字段修补;**断言改 ⊇29**) | T0 | 纯确定性,~40 行 | 堵死三条静默丢数据路(16/29 丢失的根因);产出显式 orphan 池 | R1 |\n| 3 | 去重二连:壳合并+exactly-once(**首周冻结 idf**) | T1 | 纯确定性,零 LLM | dup 43→0(结构根治);裁决 90%/强判例 100%;E50 24→5 段;回滚 v5 两处删壳 | R2,R1 |\n| 4 | rescue 兜底:attach 优先+singleton | T1 | 纯确定性(整桶失败 retry 1 次是管线内既有窄 LLM) | 覆盖 308→337 by construction;事件典型 +2~4 最坏 +7(全带 misc 可折叠) | R2,R1 |\n| 5 | 时间加法项进亲和:aff=0.85·(0.7cos+0.3wj)+0.15·exp(−gap/120min) | T1 | 纯 numpy 0.3s;端到端验证需一次过夜回放 | perm24 分桶层按 6 真团块拆开(blob 0.37→1.00);dup 土壤(25 段巨桶)解体;gpt 碎片 -28%;参数宽平台 | R1 |\n| 6 | 连接词 lift_cos 降权+背景模板兜底(**带豁免+gold 门,挂 flag**) | T1 | 确定性 <1s;与 R5 共用回放 | 杂物桶根治(26 段桶碎成 13/7/6/1),mega 分桶层不再形成;背景段(听歌)模板直出省 LLM | R5;gold 重放翻盘=0 |\n| 7 | **工作块层**=桶+全链 fail-loud 断言(**原\"线程层\"改名,加跨桶软链**) | T1 | 纯确定性;命名润色 24 次窄调用可推迟 | 浏览节点 88→24;工作块层覆盖 337/337、dup=0(桶是划分);回归从事后取证变当天报警 | R3,R4 |\n| 8 | LLM 调用留存装饰器(只攒不训) | T1 | 零 GPU,~0.5 天 | 解数据瓶颈:30 天 ≈ 万条对+数百条护栏纠错负例(**负例入训前须过 R13 抽查**);供回归 replay | — |\n| 9 | mega 拆分器兜底(夹层切分+锚点缝回+跨事件并线) | T2 | 纯确定性 ~80 行 | 兜 R5/R6 漏网+可回刷 61 天历史;OCR27→13 条锚点自洽子线,5 段并回 PORT 修劈线 | R3,R6,R1 |\n| 10 | 摘要 grep 接地闭环(技术 token 逐一在证据里验上) | T2 | 纯正则;重生成在管线内 +3-5min | 摘要幻觉锚点 by construction 归零(ocr3 逐字验上模式的成功先例) | R2 |\n| 11 | 桶内切分 N=5 共识分区+命名 N 选 1 | T2 | LLM,+60-100min GPU/夜 | 切分方差消失(同日重跑同分区);dup/整桶蒸发结构性关闭(比 R3 更根本,R3 降级为断言后备不删);免费产出置信度 | R3/R4 跑稳,R8,R1 |\n| 12 | 分歧升级:K=5 带证据多票二分 | T2 | LLM,+10-25min GPU | 二分误合从 2/4 压到需连错 4 票;零锚点碎片有兜底通道;宁独立不误合 | R11,R9 |\n| 13 | 置信度落库+定向抽查闭环 | T2 | 零 GPU | 验收成本降一个量级(~15-25 条/天覆盖几乎全部风险点);阈值从单日拍脑袋变抽查回填校准 | R11/R12(日志部分仅需 R3/R4) |\n| 14 | 跨天锚点统计库(30 天滚动 DF+持久连接词表) | T2 | 零 GPU,毫秒级 | 环境词跨天证据首帧生效;边缘锚点靠多天投票稳定;本地不对称优势第一块基建 | R6 |\n| 15 | 个人项目/子系统词典(git 树+61 天标题+跨天 lift 自动入典) | T2 | 零 GPU | s346 型同线被 τ 边界劈开直接修复;标题病二道保险;只加成不排斥 | R14 |\n| 16 | 跨天任务线 carry-over 软链(continues 元数据) | T2 | 零 GPU,第 2 天生效 | \"此 bug 连修 3 天\"——gpt 每日冷启动**结构性给不出**;顺带缓解 UTC 跨午夜切日 | R6,R7 |\n| 17 | app→归属先验(弱信号区 tie-break) | T3 | 零 GPU | 38/42→潜在 40/42;启用前与现管线逐字节一致=最低风险期权 | R13 攒 ≥2 周 |\n| 18 | α 扰动稳定核(**条件启用**) | T3 | 纯 numpy <10s | 对冲跨天参数漂移;注意它不治 dup/lost(实验证明与桶层脆弱性无关),桶漂移实证后才上 | R5/R6 多天验证 |\n| 19 | 共识双粒度中间层(同一矩阵两阈值,严格嵌套) | T3 | 零 GPU(弃已证零增益的 L2.5 时间细分) | 三级嵌套 by construction;粒度旋钮从\"改 prompt 重跑\"变\"调确定性阈值\" | R11 |\n| 20 | 个人微调蒸馏(按既有决策**继续推迟**) | T3 | 一次性训练 GPU | 过夜批压缩;对该用户过拟合正是目的;须过 R1 回归门 | R8,R1,R11 |\n\n**修正后的 T1 里程碑(可防御口径)**:语义覆盖 334 对齐 gpt + 29 段 rescue 单列计数(合计 337 by construction);dup 0 = 0 打平;mega 按 6 真团块在分桶层预防;24 工作块/88 事件双层;当天断言报警。**超越点不在这些数字上**,在第 4 节讲的结构维度上。\n\n---\n\n## 4. \"固定化任务本地超云端\"成立吗?\n\n**成立,但成立的方式和最初想的不一样——不是\"本地模型追平云端智商\",而是\"固定化让确定性骨架接管了智商题\"。**\n\n### 4.1 差距侧:云端领先的部分,全部可以用代码抹平\n\n三项落后(覆盖 -26、dup +43、2 个 mega)逐条取证后,没有一条的修复方案需要 LLM 变聪明:\n\n- 覆盖差距 = 统计代码扔答案(skipped 算 covered / 整桶蒸发),修复是 by construction 的 rescue,**代码结构上保证每段必有归属**——这是云端 prompt 工程给不出的保证(gpt 也只是\"恰好\"334,没有构造性下限);\n- dup = 缺一个 exactly-once 断言,确定性三层规则 90% 对齐人工、强判例 100%;\n- mega = 分桶层缺时间项——一行 numpy 矩阵加法,blob 对齐 0.37→1.00,是对抗方全力复现攻击都没打动的最硬结论。\n\n### 4.2 优势侧:固定化(固定用户、固定项目群、天天跑)提供云端结构性拿不到的信号\n\n- **跨天连续性(R16)**:gpt-5.4 每天冷启动,永远说不出\"此 bug 已连修 3 天\";本地有昨天的事件 JSON,毫秒级 wjaccard 就能链。这是产品级差异,不是指标差异。\n- **跨天统计库(R14)/个人词典(R15)/app 先验(R17)**:claude、sourcekit-lsp 这类环境词的连接词身份、librime/canvas_fusion 这类子系统词的判别力,都是\"这个用户天天如此\"的固定性红利,单日云端调用无从积累。\n- **数据飞轮(R8→R20)**:每天 ~360 次调用+确定性护栏的免费负例,最终支持对该用户过拟合的微调——固定化场景里过拟合是特性不是 bug。\n- **架构分工**:LLM 只做窄活(桶内切分、命名),覆盖/互斥/粒度全部由确定性代码承担。gpt41 的失败模式(60 段跨 12 桶的叙事汤)恰恰是把结构判断交给模型的结果。\n\n### 4.3 但要诚实修正口径(对抗方的功劳)\n\n- \"覆盖 337>334\" 是 by-construction 对 semantic 的不对等比较,gpt 加个 misc 兜底桶也能 337;\n- \"dup 上超越 gpt\"不成立,gpt 实测 dup=0,只能打平;\n- 所以正确表述是:**主指标追平 + 结构维度(时间拆解、双层粒度、跨天任务线、可审计置信度)超越**,而这些结构维度正是固定化场景独有的。\n\n---\n\n## 5. 诚实保留点\n\n1. **全部阈值单日标定**(2026-06-07 的 337 段):0.12/0.15/0.06/1.1/τ0.30/lift 0.15/0.25/缝回 0.05……参数与评测同源。缓解 = R1 回归集 + 另 1-2 天回放,但**回放还没做**。R5 的参数平台确实宽(T 60-180min × w 0.15-0.25 都能用),其余没这个待遇。\n2. **R6 的硬杀判据已被证伪一次**:\"51 硬+19 软零误杀\"不可复现(复测 54/31,且硬杀区躺着真技术锚点)。修正版(正则豁免 + 固定 seed + gold 门)方向合理但**尚未重跑验证**。\n3. **gold 本身是单人判读**:42 例里 9 个弱判例本质双属性,s366 双不沾;90% 已在上限附近,别把它当绝对真值。\n4. **gpt41 参照系是汤**:所有对 gpt 的 F1(0.375-0.445 平台)只做相对参考。防后人拿 0.445 当\"还差很远\"重启已判死的全局合并。\n5. **数字口径不完全统一**:dup 在不同取证轮次记为 43 或 38(桶态微差的不同 run);复现的 24 桶与 v2 实跑那次有微差(5 个事件跨桶界)。结构结论(整桶蒸发、影子对拓扑)在两个口径下都稳。\n6. **\"末现优先\"是对 2507 输出习惯的经验先验**(先粗后细),换模型或改 prompt 需重验;R11 共识分区落地后此先验退役。\n7. **rescue 不是零代价**:13 段模拟里 3-4 段温和偏差(挂进相邻真实事件而非 gpt 所选);极端日 retry 全失败最多 +7 个 misc 兜底事件/天,靠分层呈现兜底。\n8. **R8 的免费负例含 ~10% 错标**(被 90% 准确的规则推翻的那批),进训练集前必须过 R13 抽查通道——这是对抗方留下的唯一注脚,已采纳。\n9. **事件数会涨**:记全 + G6 拆分 + singleton 会把事件数从 90 推向 93-97,与 gpt41=41 的数量差距变大。已定案\"更细但干净是特征\",靠工作块层(24 节点)承担浏览粒度。\n\n---\n\n### 落地顺序备忘\n\n今天:R1(拆两套断言)→ R2(orphan ⊇29)。本周:R3(冻结 idf)→ R4 → R5+R6(挂 flag,共用一次过夜回放,R6 过 gold 门才合入)→ R7 + R8。一次过夜回放后即达修正版里程碑。T2/T3 按依赖链推进,R11 是下一个结构升级点(算力该砸在切分步——dup 段摇摆率 51% 的实证指着它)。\n\n关键代码位置:`Tests/event-local-lab/v4_local_cluster.py`(L131-145 桶循环 = R2/R3/R4 战场;STEP 5 亲和构造 = R5)、`Tests/event-local-lab/cluster_skeleton.py`(锚点/IDF/wjaccard 全部复用)、回归集落 `Tests/event-local-lab/fixtures/2026-06-07/`(尚不存在,R1 首件事)。"
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Forensics"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Design"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Judge"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 4,
+      "title": "Attack"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 5,
+      "title": "Synth"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "F1:coverage",
+      "phaseIndex": 1,
+      "phaseTitle": "Forensics",
+      "agentId": "aa81bafbf178bbbd8",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782970896129,
+      "queuedAt": 1782970896123,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "F1 覆盖丢失政策:29段丢失取证 + 确定性 skipped 兜底设计(模拟…",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971289430,
+      "tokens": 62582,
+      "toolCalls": 14,
+      "durationMs": 393301,
+      "resultPreview": "{\"topic\":\"F1 覆盖丢失政策:29段丢失取证 + 确定性 skipped 兜底设计(模拟验证)\",\"evidence\":[\"丢失29段=[23,147,224,254,286,288,322,386,409,413,414,418,425,457,630,633,646,665,667,717,790,814,820,936,1008,1051,1054,1080,1095];gpt41 29/29全覆盖,其中28段挂进多段事件(挂入事件大小:60段×3、34段×8、22段×4、13段×3、…),仅1段单独成事件(s1080 'Deleted a Claude chat thread')→gpt的风格=attach优先、singleton兜底\",\"丢失不是散发而是整桶塌陷:重跑确定性分桶(α0.7/τ0.30/cap30,复现24桶)后——桶11(10段)v2覆盖0/10、桶20…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "F2:dup",
+      "phaseIndex": 1,
+      "phaseTitle": "Forensics",
+      "agentId": "af2cdf9b9d753060b",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782970896130,
+      "queuedAt": 1782970896123,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "F2:dup=43 根治(确定性 exactly-once 裁决)+ 桶内切分护栏清单",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971434666,
+      "tokens": 84356,
+      "toolCalls": 13,
+      "durationMs": 538536,
+      "resultPreview": "{\"topic\":\"F2:dup=43 根治(确定性 exactly-once 裁决)+ 桶内切分护栏清单\",\"evidence\":[\"dup 结构实锤:43 个 session 各被双分配到恰好 2 个事件,共 14 个事件对;最大对 (E50 permission-bypasses, E53 IME tail-loss)×15,(E15 OCR移植, E17 prompt重构)×5,(E37 多语输入法, E39 微调数据)×5,(E50,E54 双拼)×3,(E87 Rime集成, E88 lattice.c编译)×3,其余对 ≤2(s72/s749/s733/s734/s851/s893/s1027/s756/s1058/s277/s1115/s1116)\",\"5 个『纯壳』事件(成员 100% 是 dup):E33={733,734}、E42={756,1058}、E54={11…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "F3:mega",
+      "phaseIndex": 1,
+      "phaseTitle": "Forensics",
+      "agentId": "a07e3c0c561b20963",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782970896130,
+      "queuedAt": 1782970896123,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "两个 mega 病因不同但同根:PERM(24段)是\"影子事件\"——19/24 成员…",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971473460,
+      "tokens": 71472,
+      "toolCalls": 20,
+      "durationMs": 577330,
+      "resultPreview": "{\"conclusion\":\"两个 mega 病因不同但同根:PERM(24段)是\\\"影子事件\\\"——19/24 成员同时挂在别的真事件里(15→IME tail-loss、3→双拼集成、1→canvas_fusion),exactly-once 去重后只剩 5 个孤儿;OCR(27段)是\\\"杂物抽屉\\\"——横跨 9 个时间窗、至少 7 条互不相干的真线,桶内胶水 83.2% 来自连接词锚点(claude/terminal session/sourcekit-lsp/my portrait/swift/caffeinate),真 OCR 锚点占比<5%,必须拆;其中 [330,338,346,349,354] 与既有\\\"Port screenshot OCR\\\"事件是同一条线被分桶劈开(s346 在 2.95h 干的事和 s336@2.93h/s360@3.01h 一模一样)。连接词锚点可…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "F4:hierarchy",
+      "phaseIndex": 1,
+      "phaseTitle": "Forensics",
+      "agentId": "aab4372431463db61",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782970896130,
+      "queuedAt": 1782970896123,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "F4 双层输出(事件→线程)可行性:88 两全版 vs gpt41 映射取证 + …",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971376045,
+      "tokens": 68672,
+      "toolCalls": 13,
+      "durationMs": 479915,
+      "resultPreview": "{\"topic\":\"F4 双层输出(事件→线程)可行性:88 两全版 vs gpt41 映射取证 + 确定性线程层模拟\",\"evidence\":[\"映射(严格):41 个 gpt 事件里 1:1=6、干净 n:1=0、脏交叉=35。宽容版(允许 leak+miss ≤ max(1,15%×size)):~1:1=11、~n:1=6(共 17/41 干净)、脏=17、无多数本地事件=7。前提『大部分是干净 n:1』不成立\",\"session 质量集中度:88 本地事件中 52 个 purity=1.0(完整嵌进单个 gpt 事件)、6 个 ≥0.8;session 级一致质量=238/342=69.6%(按 first-wins 去 dup 后 214/305=70.2%)。脏的 30% 集中在 ~8 个本地杂物抽屉事件:L18『Debug AI OCR and text capture』n…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "F5:time-exp",
+      "phaseIndex": 1,
+      "phaseTitle": "Forensics",
+      "agentId": "adb6fad140b74d0f4",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782970896130,
+      "queuedAt": 1782970896123,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "时间项该进管线,且用**加法项**而非门控:aff = 0.85*(0.7*cos +…",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971442368,
+      "tokens": 72050,
+      "toolCalls": 23,
+      "durationMs": 546238,
+      "resultPreview": "{\"conclusion\":\"时间项该进管线,且用**加法项**而非门控:aff = 0.85*(0.7*cos + 0.3*wjaccard) + 0.15*exp(-gap分钟/120),τ0.30/cap30 完全不动。这一项把\\\"合并门槛\\\"变成时间调制的:相邻 session 只需底层亲和 0.176 即可同桶,隔天(gap≈8h)的对需要 0.353——近处易聚、远处必须有强题材证据。实测它同时修好三个已实锤的架构病:①「permission bypasses」24段被完美按实锤C的6个时间团块拆开(blob对齐准确率 0.37→1.00),且双拼尾巴 s1189-1198 正确落进 librime 桶(它本来就是那条线);②产生 dup 的 25段/横跨6.35h 巨桶解体,15个双分配段散入4个时间对齐桶,同桶双分配失去土壤;③gpt41 事件跨桶碎片度 3.07→2.20…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "D1:determinism",
+      "phaseIndex": 2,
+      "phaseTitle": "Design",
+      "agentId": "af069a641666467b6",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971473473,
+      "queuedAt": 1782971473465,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "D1 确定性最大化 — 凡能用代码/规则/数学做的绝不给 LLM。LLM …",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971754566,
+      "tokens": 46906,
+      "toolCalls": 4,
+      "durationMs": 281092,
+      "resultPreview": "{\"lens\":\"D1 确定性最大化 — 凡能用代码/规则/数学做的绝不给 LLM。LLM 全管线只保留两处窄活:桶内切分(既有)与可选命名润色;覆盖 337/337、exactly-once、mega 拆分、线程层全部改为由确定性代码 by construction 保证,并用 fail-loud 断言防静默回归。八条提案按管线位次排列:分桶层(P1 时间加法项、P2 连接词锚点降权)→ 桶内护栏(P3)→ 事件后处理(P4 重叠合并、P5 exactly-once 裁决、P6 mega 拆分、P7 rescue 覆盖兜底)→ 输出层(P8 线程=桶+不变量断言)。P4-P7 共享同一把评分尺:降权 IDF-wJaccard(P2 产出的 idf)+ 时间门(gap=区间端点分钟差,重叠=0),一次实现四处复用。\",\"proposals\":[{\"name\":\"P1 时间加法项进亲和(分桶…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "D2:compute",
+      "phaseIndex": 2,
+      "phaseTitle": "Design",
+      "agentId": "ad29f8e3029dff224",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971473474,
+      "queuedAt": 1782971473465,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "D2 算力换可靠:本地算力免费且隐私,过夜预算宽裕(视觉步已 3.2h…",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971923112,
+      "tokens": 70928,
+      "toolCalls": 12,
+      "durationMs": 449638,
+      "resultPreview": "{\"lens\":\"D2 算力换可靠:本地算力免费且隐私,过夜预算宽裕(视觉步已 3.2h),而单次 LLM 判断已被实锤不稳(全局 re-partition 41~62 随采样飘、逐对二分 2/4 误合、桶内双分配 43 例、整桶 parse 失败即蒸发)。设计原则:LLM 永远不定稿——每个 LLM 判断点都改成「N 次采样 → 确定性归并(co-association 矩阵/多票门槛/评分器/grep 校验器)」,定稿权 100% 在确定性代码手里。本次新做补充实验(纯 numpy,0 GPU)给出两条新证据:①dup43/lost29 与分桶层参数脆弱性无关(dup 段摇摆率 51% < 全体 68%)→ 算力该砸在 LLM 切分步而非分桶;②α 权重是分桶最脆的轴(α 扰动下仅 7.7% 桶对全配置一致,τ/cap 扰动则 82.8%/63.8% 稳),co≥0.8 稳定核 47 …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "D3:fixedness",
+      "phaseIndex": 2,
+      "phaseTitle": "Design",
+      "agentId": "a9d4cbfca83d96b5e",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971473474,
+      "queuedAt": 1782971473465,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "D3 利用任务固定性:同一用户/机器/项目群天天跑,云端 gpt-5.4 …",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782971761628,
+      "tokens": 46144,
+      "toolCalls": 11,
+      "durationMs": 288154,
+      "resultPreview": "{\"lens\":\"D3 利用任务固定性:同一用户/机器/项目群天天跑,云端 gpt-5.4 每天冷启动、只能看当天 337 段,本地却可以跨天积累统计量、词典、先验、gold 案例——这是本地在固定化任务上结构性超越云端的唯一不对称优势。核查实据:lab.db 仅 1 天(2026-06-07),但 ~/.portrait/events/ 有 61 个日文件夹(2026-04-15 起,含逐日事件 MD 标题)、portrait.sqlite frames 覆盖 2026-05-04~07-02(20.5 万帧)——冷启动原料全部现成;cluster_skeleton.compute_idf 是纯单日 N=337 统计,跨天 DF 可直接替换。所有提案均为确定性积累(零训练、零新增强制 LLM 调用),与已定案的『LLM 只做窄活、全局判断交确定性代码』教训一致。\",\"proposals\"…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "judge",
+      "phaseIndex": 3,
+      "phaseTitle": "Judge",
+      "agentId": "acf92122f8c593516",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971923123,
+      "queuedAt": 1782971923113,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "合并与互斥裁决(评判标准=覆盖≥334/零dup/无mega误标/粒度分层/…",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782972311130,
+      "tokens": 71362,
+      "toolCalls": 2,
+      "durationMs": 388007,
+      "resultPreview": "{\"rationale\":\"合并与互斥裁决(评判标准=覆盖≥334/零dup/无mega误标/粒度分层/稳定复现/全本地,按 影响×成本×风险 排序):\\n\\n【去重合并,22→20】\\n1. D1.P4+D1.P5 合并为 R3「去重二连」:壳合并先行、exactly-once 逐段裁决殿后,共享同一把降权IDF-wJaccard评分尺和同一套42例gold回归,拆开实现反而重复。\\n2. D1.P2+D3.P3 合并为 R6:连接词降权和背景模板兜底是因果配对——F3风险2明说降权夺走spotify/wechat的胶水后必须有app级兜底接住,两者必须同批上线,共用同一次过夜回放。\\n3. D2.P1+D2.P3 合并为 R11:命名N选1的候选就是共识分区5次运行的免费副产品,分开做要额外补采。\\n4. D3.P4 的 attach_log 落盘并进 R13 置信度落库(同一张审计表…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "attack",
+      "phaseIndex": 4,
+      "phaseTitle": "Attack",
+      "agentId": "acd34a21ce4c44503",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782972311160,
+      "queuedAt": 1782972311149,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "攻不动的结论(全部经我离线复现/数据核查后仍站立):① R5 时间加…",
+      "promptPreview": "# 背景:My-Portrait 事件管线全本地化(隐私),目标=本地算力贴合甚至超越云端(gpt-5.4)效果。\n这是**固定化(非泛化)任务**:同一个用户、同一台机器、每天同一批 app 和项目,一天约 300-400 个 session。\n硬件 M5 24GB;可用本地模型:Qwen3-VL-8B-8bit(视觉)、Qwen3-14B-4bit(汇总)、Qwen3-30B-A3B-2507-4bit(文本,262K ctx,MoE 3.3B激活)、Qwen3-Embedding-4B。过夜批处理可接受。\n\n# 当前管线(2026-06-07 那天,337 session)\n1. 选帧(确定性): OCR相似度去重 thr0.7 + coef0.15 封顶12帧/session\n2. 视觉: Qwen3-VL-8B 逐帧看图出 items(append-only),619帧≈3.2h…",
+      "lastProgressAt": 1782972943982,
+      "tokens": 84037,
+      "toolCalls": 12,
+      "durationMs": 632822,
+      "resultPreview": "{\"attacks\":[{\"target\":\"R6 连接词lift_cos降权(硬杀 idf=0)——\\\"51硬+19软零误杀\\\"\",\"objection\":\"离线复现(v4_emb.npy+cluster_skeleton 同款锚点/idf,bg=4000随机对cos=0.5415)后 hard-kill 区(lift<0.15)里躺着一排真判别技术锚点:mymeeting.swift(+0.057,df4)、appmodel.swift(+0.109)、extractsentmessages(+0.137,df9,写作采集主函数名)、analyticsservice.swift(+0.139,df8)、writing_records(+0.142)、portrait.sqlite(+0.148,df19,当前idf≈2.89的高权锚点)、discord(−0.173,真子系统)。\\\"零…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "synth",
+      "phaseIndex": 5,
+      "phaseTitle": "Synth",
+      "agentId": "ac34aa0bd0fe7fe76",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782972943987,
+      "queuedAt": 1782972943986,
+      "attempt": 1,
+      "promptPreview": "把以下材料综合成一份给用户看的中文 markdown 报告《事件管线本地化·算法总览与改进路线》。结构:\n1. 管线现状总览表(每步:做什么/确定性还是LLM/已知弱点)\n2. 与云端(gpt-5.4)的真实差距在哪(用取证数字:覆盖308vs334、dup43、2个mega误标、切分不稳)——强调差距全是**架构层**而非模型智商\n3. 改进路线图(评委版,经对抗修正):T0/T1/T2/T3 分层,每条注明 确定性/窄LLM/要不要GPU、预期量化收益\n4. 对用户论点的回答:\"固定化任务本地超云端\"是否成立、靠什么成立(取证+设计里的证据)\n5. 诚实保留点\n对抗方攻击后被降级/修正的提案要如实反映。材料:\n取证=[{\"topic\":\"F1 覆盖丢失政策:29段丢失取证 + 确定性 skipped 兜底设计(模拟验证)\",\"evidence\":[\"丢失29段=[23,147,224,…",
+      "lastProgressAt": 1782973150304,
+      "tokens": 48994,
+      "toolCalls": 0,
+      "durationMs": 206316,
+      "resultPreview": "# 事件管线本地化·算法总览与改进路线\n\n> 基准日:2026-06-07(337 段 session);对照物:云端 gpt-5.4 产出(41 事件,下称 gpt41)与生产老 pipeline(28 事件)。本报告综合五份取证(F1-F5)、20 条路线图与对抗评审结果;**被对抗方击落或降级的提案已如实修正标注**。\n\n---\n\n## 1. 管线现状总览\n\n当前本地管线(`Tests/event-local-lab/v4_local_cluster.py` + `cluster_skeleton.py`)分七步:\n\n| # | 步骤 | 做什么 | 确定性 / LLM | 已知弱点 |\n|---|------|--------|--------------|----------|\n| 1 | Session 构建 + doing 文本 | 视觉逐帧描述、session 汇总,产出每…"
+    }
+  ],
+  "totalTokens": 727503,
+  "totalToolCalls": 124
+}

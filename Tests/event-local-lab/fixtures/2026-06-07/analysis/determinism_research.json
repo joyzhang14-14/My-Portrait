@@ -1,0 +1,593 @@
+{
+  "summary": "调研:路线图重确定性算法会不会导致局限性(文献+业界+内审+红队+真数据)",
+  "agentCount": 8,
+  "logs": [
+    "调研完成 5/5 路"
+  ],
+  "result": {
+    "research": [
+      {
+        "topic": "W1 文献调研:规则/确定性 vs 学习——Bitter Lesson 论争、神经符号混合实践共识、Snorkel 弱监督范式、阈值脆弱性对策",
+        "findings": [
+          "【Bitter Lesson 原论点】Sutton 2019:70年AI史上,利用算力的通用方法(搜索+学习)最终大幅胜过内置人类知识的方法;内置知识短期有益但会封顶并阻碍后续进展。但其论证前提是算力成本指数下降的长时程(longitudinal)叙事。",
+          "【关键反驳1:范围限定】Chakrabarti《The Bitter Lesson is Misunderstood》直接命中本项目场景:'在固定时间点、固定数据量下,Bitter Lesson 不做任何断言'('at a fixed point in time, for any fixed amount of data, the Bitter Lesson makes no claim')——它是历史长弧的预言,不是当下的作战计划;数据受限时('can't go to the right'),结构/架构是剩下的向上杠杆。本项目=固定用户/机器/任务+仅~246条真训练数据+本地固定算力,恰在'不适用区'。",
+          "【关键反驳2:总成本+结构无处不在】Brooks《A Better Lesson》:所有'无先验'成功案例其实都灌注了大量人类巧思(CNN 的平移不变性即人工先验);正确的教训是核算方案总成本,而非'算力永远赢'。beren.io 补充:判据是结构的'可扩展性'——不封顶渐近线的结构(不变量、对称性)是好结构,Bitter Lesson 警告的是封顶的窄内容规则。",
+          "【重要区分】文献共识把'确定性'分两种:①宽结构先验/不变量(不变性、组合性、校验约束)——公认必要且随规模仍有效;②窄的、内容特定的人工编码知识(黑名单、绝对阈值、领域词形正则)——这才是会封顶、会漂移的那类。审计路线图时应按此线切,而非按'是否确定性'切。",
+          "【神经符号/护栏实践共识】当代文献分工明确:确定性负责验证、不变量、状态约束、schema 校验、评测('compliance-by-construction'+确定性 verifier 提供形式保证);LLM/学习负责语义判断与提议(guardrails 论文明言:结构层防确定性违规,语义错误仍需判别层)。即业界公认:校验/不变量/评测该确定性,语义判断该学习——但学习的输出必须过确定性验证门。",
+          "【'LLM只做窄活'的文献背书】AlphaGeometry(Nature 2024)/FunSearch 的成功模式=LLM 窄提议(propose construct/program)+符号引擎确定性推演/评分,这是当前神经符号最著名的成功范式;Anthropic《Building Effective Agents》同向:定义清晰的任务用 workflow(预定义代码路径编排 LLM)而非自主 agent,'start simple, add complexity only when it delivers measurable value'。",
+          "【验证不对称性】Jason Wei 'asymmetry of verification / verifier's law':易验证的任务终将被 AI 解决——确定性验证器(grep 接地、lint、冻结回归集)不是学习的对立面,而是未来微调/RL 的前提资产(reward 即 verifier)。路线图 A/F 类是在为 T3 微调铺 reward 基建。",
+          "【Google Rules of ML #1】'Don't be afraid to launch a product without machine learning'+'若 ML 能给100%提升,启发式先拿到50%'+'没数据之前别上 ML'——业界最经典的工程教条,与'确定性先跑、攒数据、后微调'完全同构。",
+          "【Snorkel 弱监督范式】规则作为标注函数(LF)喂生成式 label model,由 LF 间的重叠/冲突自动学出各自准确率并去噪,再训练判别模型;判别模型'generalize beyond the signal expressed in our labeling functions'(泛化超出规则覆盖面);需求变化时改 LF 即可快速适应——规则作监督源优于规则作最终系统。",
+          "【与本路线图的同构性判定:部分同构,差一个关键件】路线'确定性裁决落库→攒数据→微调'与 Snorkel 的'规则→监督→学习器'大方向同构;但 Snorkel 的去噪依赖多个相互冲突的噪声源来估计各规则准确率,而单一确定性管线的裁决若被当 gold 落库,微调出的模型会精确继承规则盲区。伪标签文献(self-training confirmation bias)证实:在自家管线输出上训练会形成正反馈错误固化;标准缓解=置信度过滤+人工抽查回填修正+低置信/规则冲突样本重点采样——路线图 F 的'置信度落库+定向抽查回填'恰是文献标准解,但修正后的标签必须回写训练留存库。",
+          "【阈值脆弱性文献共识】绝对静态阈值在分布漂移下必然失灵;标准对策按强度递增:分位数/rank-based 阈值(按当日分布取百分位而非绝对值)、在线分位数估计、EVT(极值理论)自动阈值、KS 距离等轻量漂移检测器触发再标定。单日标定(且是重编码日)的绝对阈值(τ0.30、attach 0.06/0.12/0.15、gap 30-45min)正是文献点名的高危形态。",
+          "【champion-challenger/影子模式】MLOps 标准:挑战者参数/模型在影子模式跑同一份生产输入,产出只记录不生效,在冻结回归集+线上指标上与冠军对比后带回滚地推广。这是'调参不敢动'问题的标准解,与路线图的回归集+稳健档互补(回归集是前提,影子跑是缺的执行机制)。",
+          "【共识分区的文献地位】桶内 N=5 共识分区即 Evidence Accumulation Clustering(Fred & Jain 谱系)的 co-association 矩阵法,是聚类文献公认的对初始化/噪声敏感性的稳健化手段;O(n²) 代价在 n≈300-400/日的规模下可忽略。'花算力买稳定'在精神上反而符合 Bitter Lesson(用算力而非手工规则换性能)。"
+        ],
+        "implications_for_us": [
+          "【A类(不变量/接地/lint/回归集):文献强支持,不动】神经符号验证、compliance-by-construction、verifier's law 三路文献一致:exactly-once、分区断言、摘要 grep 接地、标题 lint、冻结回归集正是公认'该确定性'的环节,且是 T3 微调时的 reward/验收基建——这部分确定性越多越好,不构成局限。",
+          "【B类(语义判断硬编码常数):文献警告最集中的一类,但修法不是'扔给LLM'】τ0.30、attach 0.06/0.12/0.15、gap 30-45min 这些绝对常数是漂移文献点名的脆弱形态+Bitter Lesson 真正警告的'窄编码知识'。修正方向:①能改成当日分布分位数(rank-based)的先改——例如 τ 取当日亲和分布的某百分位;②0.7/0.3 权重与 +0.15 时间项本质是模型参数,数据攒够后应从留存的同事件对上拟合(一个 logistic 回归即可,不需要 MLX),而非永久手定;③改动一律走影子/challenger 跑同日数据+回归集比对再提升。",
+          "【C类(编码向锚点正则):按 Snorkel 框架重新定位为'标注函数',不当真理】_FILE/_CAMEL/_SNAKE/_ERR 是高精度低覆盖的 LF:编码日强、非编码日(浏览/写作/会议日)覆盖塌陷。对策:①下游不得假设锚点必存在(orphan 池已是正确兜底);②按日型统计各正则的日覆盖率,作为'该扩词表了'的触发信号;③本机 ~61 天生产事件目录可离线检验日型多样性,应把回归集从单日扩成日型分层(编码日/混合日/轻用日各若干)——这是单日标定风险的最直接补丁。",
+          "【D类(共识分区/多票二分):文献正名,保留】这就是 evidence accumulation 共识聚类,学界公认的稳健化技术;且属于'用算力换稳定'——与 Bitter Lesson 同向而非相悖。无需辩护,可在文档里直接引 EAC 文献定性。",
+          "【E类(攒数据→微调):被三路文献同时背书,是整个路线图最'正统'的一条,但补一个关键件】Google Rules of ML #1(启发式先行)、Snorkel(规则作监督源)、Chakrabarti(数据是真正的轴)全部支持'先确定性攒数据、后微调'。必须补:留存装饰器不能只存最终裁决,要额外存①置信度②规则间冲突/LLM与规则不一致的样本③人工抽查修正后的 gold 标记——否则微调出的模型继承管线盲区(伪标签确认偏差是实证风险,不是理论担忧)。低置信+冲突样本应作为抽查的优先采样池。",
+          "【F类(审计闭环):方向正确,缺两个执行件】①回归集目前 gold 全来自 6-07 一天,漂移文献判定这不足以守护换日分布——用 61 天生产目录做日型分层扩充;②加一个零成本漂移哨兵:每日落库亲和分数分布/事件数/orphan 率等统计,KS 距离超限即告警'今日分布偏离标定日',提示走稳健档——比等抽查发现坏结果早得多。",
+          "【已定案结论的文献核验:全部站得住】'LLM只做窄活'与 AlphaGeometry/FunSearch/Anthropic workflow 共识完全一致,不是本项目的偏见;'时间加法项/exactly-once/rescue 有硬取证'符合'先测量再加复杂度'教条。无需重开。",
+          "【总回答:'太多确定性会不会局限?'】文献的答案:局限性不来自确定性的'量',来自两点——①语义判断被冻成绝对常数(B类)且没有随数据再标定的机制;②确定性裁决被当 gold 喂回学习闭环而不去噪(E类风险)。路线图对这两点各有半个对策(稳健档/抽查回填),补齐分位数化、影子跑、冲突留存、日型分层回归集四件后,该架构在'固定域+小数据+本地算力'场景下是文献意义上的最优解形态。唯一的长期纪律:给每条 B/C 规则配可观测指标,当学习件(微调后的本地模型)在 challenger 位上稳定胜出某条规则时按规则退役——别让脚手架变成永久承重墙,这是对 Bitter Lesson 唯一需要保留的敬畏。"
+        ],
+        "sources": [
+          "http://www.incompleteideas.net/IncIdeas/BitterLesson.html (Sutton 原文)",
+          "https://en.wikipedia.org/wiki/Bitter_lesson",
+          "https://www.obviouslywrong.org/p/the-bitter-lesson-is-misunderstood (Chakrabarti: 固定时点/固定数据下不适用)",
+          "https://rodneybrooks.com/a-better-lesson/ (Brooks: 总成本+人类先验无处不在)",
+          "https://www.beren.io/2020-07-13-Reflections-On-The-Bitter-Lesson/ (结构可扩展性判据)",
+          "https://ai.stanford.edu/blog/weak-supervision/ (Stanford: 数据编程/弱监督范式)",
+          "https://link.springer.com/article/10.1007/s00778-019-00552-1 (Snorkel, VLDB Journal 2019)",
+          "https://developers.google.com/machine-learning/guides/rules-of-ml (Zinkevich: Rules of ML #1)",
+          "https://www.anthropic.com/research/building-effective-agents (workflow vs agent, start simple)",
+          "https://www.jasonwei.net/blog/asymmetry-of-verification-and-verifiers-law (验证不对称性)",
+          "https://www.nature.com/articles/s41586-023-06747-5 (AlphaGeometry, Nature)",
+          "https://deepmind.google/discover/blog/alphageometry-an-olympiad-level-ai-system-for-geometry/",
+          "https://arxiv.org/pdf/2307.02075 (伪标签确认偏差及缓解)",
+          "https://arxiv.org/html/2506.15831 (概念漂移下的自适应异常检测/阈值)",
+          "https://arxiv.org/pdf/2511.01391 (EVT 极值理论自动阈值,超越静态阈值)",
+          "https://www.emergentmind.com/topics/adaptive-data-driven-threshold (自适应数据驱动阈值综述)",
+          "https://www.calibreos.com/learn/mlsd-canary-deployment (shadow mode/canary/回滚)",
+          "https://docs.datarobot.com/en/docs/mlops/monitor/challengers.html (champion-challenger 机制)",
+          "https://link.springer.com/article/10.1007/s10994-013-5339-6 (Evidence Accumulation 共识聚类)",
+          "https://www.sciencedirect.com/science/article/abs/pii/S0031320319301281 (co-association 矩阵集成聚类)",
+          "https://arxiv.org/html/2604.01483v1 (Lean4 确定性护栏: compliance-by-construction vs 语义护栏分工)",
+          "https://arxiv.org/html/2606.16886v1 (神经符号软件验证: 确定性验证层+LLM迭代)"
+        ]
+      },
+      {
+        "topic": "W2 业界实践调研:生产系统如何混合确定性算法+模型(AIOps日志聚类/反欺诈规则生命周期/记忆系统架构/护栏封顶事故)",
+        "findings": [
+          "【AIOps-Drain 的成功面】Drain(2017,固定深度树在线日志聚类,纯确定性)至今仍是工业界分组最强的统计式解析器:ISSTA'24 大规模评测(Loghub-2.0,14 个数据集、平均每个 360 万行人工标注)中 Drain 的分组准确率 GA/FGA 平均最高。确定性算法做'分组/结构'这一层被证明是最持久、最抗漂移的。",
+          "【AIOps-Drain 的局限面】同一评测显示:所有解析器从 2k 样本基准换到生产规模数据后性能掉档且方差增大;Drain 分组虽强,但语义抽取(模板/变量正确切分)的 parsing accuracy 只有 ~0.470。即确定性方法的天花板不在'结构',而在'语义抽取'——正是你们分给 LLM 的那部分活。",
+          "【模板漂移的工业解法】不是抛弃确定性算法,而是外挂适配层:(1) Drain3(logpai 生产化 fork)=可配置 masking 正则(数字/IP/邮箱→通配符)+状态快照持久化+max_clusters LRU 淘汰(新模板自动顶替旧模板,模型跟随流漂移);(2) 学界新解 LILAC/AdaParser=LLM 生成模板+自适应缓存,只有 cache miss 才调 LLM。没有任何生产系统'每条日志都问 LLM'。",
+          "【小模型警示】LILAC 论文数据:没有历史日志数据时模板准确率掉 31.2%;换小参数开源 LLM 时性能显著下降(few-shot 能力不足以捕捉复杂模式)。小模型做窄活可行,但对'带历史锚/带示例'高度敏感。",
+          "【规则生命周期-决策标准】Google Rules of ML(Zinkevich,43条):Rule#1 简单启发式能把产品推出门,但'复杂启发式不可维护';Rule#3 '如果 ML 能给你 100% 提升,启发式能带你走 50%'——换模型的触发条件是启发式的复杂度/纠缠度,不是启发式本身好坏;Rule#7 迁移时把老启发式转成模型特征,别丢掉。",
+          "【规则腐烂标本事故】SpamAssassin FH_DATE_PAST_20XX:把'Date 头匹配 20[1-9][0-9]=来自未来=垃圾(+3.6分)'硬编码,2010-01-01 当天全球邮件误判爆发;官方修复是把正则改成 20[2-9][0-9]——又埋了 2020 年的雷。教训:每个写死的常数都携带一个隐含的'世界状态假设',假设过期时规则静默反噬,且爆发点远在标定日之后。",
+          "【规则生命周期-标准工序】现代反欺诈行业(Stripe Radar/Sardine/DataVisor/Grab)已把规则生命周期做成标准流程:上线前 backtesting(历史回放)→ shadow mode 至少一周(只记录不执行,对比线上行为 vs 历史预期,常迭代 2-3 版)→ 按规则粒度持续监控命中率/误伤率 → 定期评审 → 淘汰与模型信号重复的陈旧规则。行业共识:'发布不是终点';'规则通过回测仍可能在线上失败'。Stripe 的分工是模型出风险分、规则只做策略覆盖层(风险偏好),规则不做感知。",
+          "【记忆系统同行-Rewind】Rewind.ai 的 SQLite 主组织结构是 segment 表(app bundle id+窗口名+起止时间)——纯确定性 app/窗口切分;event 表只是叠加的元数据(标题/起止时间,多与日历关联)。没有证据显示用 ML/LLM 做事件边界。",
+          "【记忆系统同行-screenpipe】事件驱动采集(app 切换/点击/打字停顿/滚动触发截屏+AX 树,OCR 兜底),SQLite+FTS5 搜索,时间线=DVR 式回放。完全没有'聚成语义事件'这一层。",
+          "【记忆系统同行-mem0】另一极:抽取和合并决策全用 LLM——但注意其'窄活化'形态:外层是确定性三段流水线(extract→update→retrieve),每步 LLM 只做一个窄决策(候选事实 vs 已存记忆,四选一:add/update/delete/noop)。即使最 LLM 化的生产记忆系统,control flow 也是确定性的,LLM 只填窄槽。结论:你们的'session→语义事件'聚合层在公开同类产品里没人真正做到,你们的混合架构在业界谱系上恰好落在 Rewind(全确定性)和 mem0(确定性骨架+LLM窄活)之间。",
+          "【护栏封顶事故】Google Photos 'gorilla':2015 年误分类后用确定性黑名单封杀 gorilla/chimpanzee/monkey 标签;2023 年验证该'临时补丁'8 年后仍在——底层模型能力早已数代升级,但护栏永久封顶了该维度的产品能力。教训不是'别加护栏',而是:没有 sunset/复审机制、不可观测(不知道封杀了什么)的护栏,会把临时补丁变成永久天花板。",
+          "【Bitter Lesson 及其边界】Sutton:手工知识短期有效且令人满意,长期平台化甚至阻碍进步。但反方(Beren 等)指出:没有正确的隐含假设,泛化本身不可能;固定用户/固定机器/天天跑的任务是产品工程问题,Bitter Lesson 的时间尺度以模型换代为单位——对策不是少写规则,而是让每条规则在更强模型到来时可被替换/转成特征(Rule#7),即'确定性组件要写成可拆卸的'。NeurIPS'15《Hidden Technical Debt》反向补充:启发式够用的地方硬上 ML 同样是债。"
+        ],
+        "implications_for_us": [
+          "支持【A 结构保证/不变量】不动:最同构的生产系统(Drain 家族/Rewind/screenpipe/mem0 外层)全部用确定性做结构层和 control flow,且大规模评测证明确定性分组是最抗漂移的一层。exactly-once/rescue/分区断言/grep 接地这类 by-construction 不变量是业界共同底座,'太确定'的担忧不应指向 A 类。mem0 的例子还说明:连全 LLM 派的合并决策也是确定性流程包窄决策——和你们'LLM只做窄活'的定案互相印证。",
+          "真正的漂移雷区是【B 数字阈值】+【C 编码向正则】,业界对策是'装仪表'而非'删规则':(1) 按规则粒度(而非按天粒度)记录每条阈值/正则的命中率与翻案率,落库;(2) 新阈值先走 shadow mode(只记录不生效,跑 1-2 周和现行值对比)再切换;(3) 每条 B/C 规则登记'隐含假设'(如终端黑名单假设=我常年用这几个工具;τ0.30 假设=6-07 式重编码日的相似度分布),假设变了有报警。你们的 F 层(冻结回归集+置信度落库+抽查回填)已是同构做法,缺的正是规则粒度监控+影子切换这两件。",
+          "【C 锚点正则】是最像 SpamAssassin 事故的部位:_FILE/_CAMEL/_SNAKE/_ERR 全部编码向,换成写作日/会议日/纯浏览日会静默哑火(锚点召回崩但系统不报错)。可抄 Drain3 的做法:masking/锚点词表做成配置而非硬编码;立刻可做的检验=拿 ~/.portrait/events/ 下 61 天生产目录按日型分层,统计各日型的锚点抽取密度,给'抽取率异常低的日子'装报警(降级到纯 cos+时间项)而不是装死。这是本清单里唯一建议改设计而非只加监控的部位。",
+          "【B 类阈值】的换模型时机有了明确判据(Rule#1/#3):当 0.7cos+0.3wjaccard、+0.15 时间项、τ0.30、0.06/0.12/0.15 这组常数互相纠缠到'改一个要重调全部'时,就到了'复杂启发式不可维护'临界点,该换成一个学出来的亲和函数。这正好接 T3 微调:留存装饰器攒的数据可以同时标注 pair 亲和(不只喂生成任务),让亲和模型和生成模型共用一份数据积累——建议在留存 schema 里现在就把 pair 级信息存全。",
+          "支持并可加码【E 积累/学习型】:Drain3 的 LRU 漂移适应与 30 天滚动 IDF 同构;个人项目词典/app 先验就是 Rule#7 的'启发式转特征',是确定性组件里最不怕漂移的一类,也是未来喂给微调模型的现成特征。",
+          "给每个护栏加'封杀日志+复审日程'(Google Photos 教训):摘要 grep 接地拒掉的产出、标题 lint 拒掉的标题、终端黑名单吞掉的残渣,各留影子样本落库,定期(如每月)抽看一眼。护栏本身不封顶,不可观测+无复审的护栏才封顶。这条成本极低,建议直接进路线图。",
+          "对'太多确定性会不会局限'的直接回答:业界证据显示局限从不来自确定性的比例,而来自三个具体失效模式——(a) 常数的隐含世界假设无监控(SpamAssassin),(b) 护栏无复审无观测(Google Photos),(c) 启发式纠缠到不可维护还不换模型(Rules of ML #3)。你们清单里 A/D/F 类完全避开这三种模式;E 类天然自适应;需要动作的只有 B(规则粒度仪表+影子切换)和 C(词表配置化+日型覆盖检验)。单日标定风险是 (a) 的实例,现有对策方向正确但粒度不够细。",
+          "Bitter Lesson 的正确消化方式:不是现在减少确定性,而是保证每个确定性组件'可拆卸'——B 类阈值集中在配置、C 类词表外置、每条规则可单独关闭且有影子对照。这样当本地模型换代(Qwen4/微调完成)时,可以逐条用'模型信号 vs 规则'的对照数据决定退役哪条,复刻反欺诈行业'淘汰与模型信号重复的规则'的标准流程,而不是被迫整体重写。"
+        ],
+        "sources": [
+          "https://arxiv.org/pdf/2308.10828 (A Large-Scale Evaluation for Log Parsing Techniques: How Far Are We? ISSTA'24, Loghub-2.0)",
+          "https://arxiv.org/abs/2310.01796 (LILAC: Log Parsing using LLMs with Adaptive Parsing Cache)",
+          "https://github.com/logpai/Drain3 (Drain3: 生产化流式日志模板挖掘, masking+persistence+LRU)",
+          "https://martin.zinkevich.org/rules_of_ml/rules_of_ml.pdf (Google Rules of Machine Learning, Zinkevich)",
+          "https://www.roguelazer.com/blog/spamassassin-2010-bug/ 与 https://lwn.net/Articles/368396/ (SpamAssassin FH_DATE_PAST_20XX 规则腐烂事故)",
+          "https://stripe.com/guides/primer-on-machine-learning-for-fraud-protection 与 https://stripe.com/guides/radar-rules-101 (Stripe Radar: 模型出分+规则做策略覆盖)",
+          "https://www.sardine.ai/blog/fraud-rules 与 https://engineering.grab.com/automatic-rule-backtesting (规则生命周期: backtesting/shadow mode/退役)",
+          "https://petapixel.com/2023/05/22/googles-photos-app-is-still-unable-to-find-gorillas/ 与 https://www.theregister.com/2023/05/29/ai_in_brief/ (Google Photos gorilla 黑名单 8 年未复审)",
+          "https://github.com/pedramamini/RewindMCP (Rewind.ai SQLite schema: segment 表=app/窗口确定性切分)",
+          "https://docs.screenpi.pe/architecture 与 https://github.com/screenpipe/screenpipe (screenpipe 事件驱动采集架构, 无语义事件聚合层)",
+          "https://www.emergentmind.com/topics/mem0-system 与 https://docs.mem0.ai/core-concepts/memory-evaluation (mem0: 确定性三段流水线+LLM窄决策 add/update/delete/noop)",
+          "https://en.wikipedia.org/wiki/Bitter_lesson 与 https://www.beren.io/2020-07-13-Reflections-On-The-Bitter-Lesson/ (Bitter Lesson 及其边界)",
+          "https://papers.neurips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems.pdf (Hidden Technical Debt in ML Systems, NeurIPS'15)"
+        ]
+      },
+      {
+        "topic": "W3 确定性组件逐条审计:A-F 分类封顶风险/漂移敏感度/失效模式 + 特审C(编码向正则)与特审B(残渣黑名单)",
+        "findings": [
+          "【总判】\"太多确定性\"的封顶风险不在 A(不变量)/D(共识)/F(抽查机制)——这些是内容无关的结构保证;风险集中在两处:B 的**绝对数值**(τ0.30、attach 0.06/0.12/0.15、0.7/0.3 通道权重)和 F 的**单日 gold 门**。C(编码向正则)实测 fail-empty 不 fail-wrong,安全。",
+          "【实验1·锚点构成,6-07 全337段】锚点=视觉模型kw ∪ 正则token。非编码类app段(WeChat/Discord/Spotify等25段):kw 零缺失(0/25,均值6.2个/段),正则零产出 15/25(均值0.7);非编码段两两 wjaccard>0.01 在\"全锚点\"与\"仅kw\"下**完全一致**(101/300 vs 101/300)——特审C的前提\"非编码日锚点通道空转→wjaccard≈0\"不成立,kw 通道兜底,正则只是编码日的增益。",
+          "【实验2·垃圾桶复现】模拟锚点通道全死(α=1.0 纯嵌入,τ0.30 不动):24桶塌到14桶、4桶顶cap30、最大桶=Terminal21+Spotify5+Calendar1、序跨度312/337(横贯全天)=杂物抽屉再现;把 τ 按亲和分布重标到0.51后恢复41桶/仅1桶顶cap。**垃圾桶的真正来源是绝对τ,不是正则空转**——嵌入通道独挑时整体亲和分布上移,固定τ就把全天糊成mega。",
+          "【实验3·黑名单 vs 自动判定】skip-permissions 在6-07的 df=4(idf 4.32)——IDF 反而把它当**高判别锚点**;而真锚点 writingcaptureworker.swift df=13、portrait.sqlite df=19、submitraceburst df=13。结论:DF分位数门会**先杀真锚点后杀残渣**,单独不可用;lift_cos 已被对抗方证伪一次(硬杀区躺真锚点);黑名单 substring 匹配顺带抓住 OCR 变体(sly-skip-permissions / claude--dangerously-skip-permissions),precision≈100% 但 recall 冻结——明天换个 CLI 工具零覆盖。",
+          "【日型底数】61天生产事件目录扫描:57个有事件日中 9 天(16%)编码占比<30%(05-09/05-10/06-19/06-20/06-23/06-26/06-29/06-30/07-01,Discord/微信/学校/音乐为主)。非编码日不是假想敌;06-20 这类日在事件文本上正则只抓到样板token(event_title/portrait_facets 之类)。fixture 扩样本应从这9天里挑。",
+          "【A类裁决】exactly-once=保留(分区不变量必须硬),两处修正:①gold 里 9 个弱判例\"本质双属性\"(s366双不沾)说明强制单归属确有封顶→给真双属性加 secondary_refs 软链逃生门(复用R7\"只链接不合并\"机制,不破分区);②\"末现优先\"是对2507输出习惯的经验先验→降级为挂模型版本的软信号(路线图已注明R11后退役)。漂移敏感:锚点门=中(冻结idf已对冲),其余=低。失效=优雅(最坏错一个家,session仍可检索)。",
+          "【A类续】rescue/orphan池/分区断言/合并标脏重生成=全保留,封顶≈0、漂移低、失效全优雅(最坏=misc单例或多一次重生成)。摘要grep接地=保留但**严格限定验对象为技术token**(hash/文件名/数字/人名),允许规范化匹配(大小写/OCR孪生),fallback=删单个存疑锚点而非废整摘要——若验对象扩到自然语,会禁止合法的抽象表述(真封顶)。标题lint=禁flag词保留;\"动词开头\"降级为软规则(名词性事件\"周会/听歌\"合法,重命名N次不过即放行+标记)。",
+          "【B类裁决·核心风险区】时间项 0.15·exp(-gap/120)=保留(参数平台宽已验60-180min×0.15-0.25,加法项失效优雅,全表最硬);τ0.30=**改每日亲和分布分位数**(实验2直接证据,全表漂移敏感度最高、唯一硬断点);0.7/0.3权重=保留为先验+加每日通道归一(rank/z-score),锚点弱日自动让位嵌入+时间;attach 0.06/0.12/0.15=改rank-based(top-1近邻+margin),绝对值随idf重标随时翻盘(R3+R6冲突已实锤);gap 30-45min 切分=保留(人类节律,低漂移,可用当日gap分位数微调);mega size>12=改\"送检门\"非\"强拆门\"(真实存在>12段单任务,强拆是封顶)。",
+          "【B类·特审黑名单结论】三层定位:黑名单降级为 day-0 种子(precision高+OCR变体鲁棒,但永远追不上新工具);lift_cos 只软降权不硬杀(对抗修正版已如此,正则型锚点豁免);**维护性的真答案在E层 R14 跨天统计**——新CLI工具的签名是\"天天出现+日内时间弥散+跨多桶/app\"(实测 sourcekit-lsp 跨4app、caffeinate 跨2app),2-3天自动入持久连接词表。新残渣当天泄漏可接受:残渣进摘要是外观问题,优雅降级,gpt也只是靠大模型品味在过滤。",
+          "【C类·特审结论】优雅降级,非垃圾桶。①封顶风险:正则在非编码内容上 fail-empty(实验1),漏的不是\"更好的结果\"而是\"非编码域的锚点等价物\"(人名/课程号/订单号/歌名)——其中人名/数字 R9 已计划补;②漂移敏感:高(设计使然,域专用),但失败方向安全(空≠错);唯一小噪声源=稀有垃圾token(OCR残渣得高IDF造假边,twin-hash守卫只护hash类);③裁决:保留现有编码正则+R9结构化专名扩展(中文人名/百分比/带单位数字,顺带覆盖课程号订单号),**不要试图用正则覆盖自然语域**——kw通道已兜底,垃圾桶要在τ上修不在C上修。",
+          "【D类裁决】N=5共识分区/K=5多票二分=保留。漂移敏感=低(co-association机制与数据分布无关);失效=优雅(分歧→升级→宁独立)。唯一封顶=系统性偏碎:共识只留稳定结构,\"更好但不稳\"的划分被投掉——这是自觉的 precision>recall 取舍,碎片由工作块层+跨天carry-over承接。修正:被否决的少数票分区落库(接R8留存装饰器),是未来LLM复核与微调的现成素材,别丢。",
+          "【E类裁决】整体是**反封顶层**(B/C冻结参数的设计解药),全保留。但发现路线图内生张力(现文本未提):**R14 滚动DF会把\"连修3天的bug锚点\"统计成高DF环境词降权,而 R16 carry-over 恰恰依赖这些跨天复现锚点**。修法=给R14加\"日内集中度\"维度:跨天复现+每日集中单线=任务锚点(保权);跨天复现+日内时间弥散+跨多app=环境词(降权)。app→归属先验保持tie-break-only(路线图已如此,别升级成硬先验)。",
+          "【F类裁决】置信度落库+定向抽查=保留(反封顶,是阈值漂移的解药)。冻结回归集=机制保留,但**单日gold门是全路线图最大的制度性封顶**:\"42例gold翻盘=0才放行\"把 6-07 一天(重编码日)的标定固化成永久否决权——任何利好其他日型但翻个别6-07判例的改动被硬拦,且gold本身是单人判读、90%已近上限。修正:①fixture第一批就扩到≥3天(从9个非编码日挑1天+1混合日,~/.portrait 61天现成);②\"翻盘=0\"改\"翻盘需人工复核\"的软门。",
+          "【失效模式总图】全清单只有两处\"硬断\":绝对τ在锚点弱日产垃圾桶(实验2实证)、单日gold门错误否决(制度性)。其余全部优雅降级(misc池兜底/软降权/多一次重生成/桶偏碎可下游缝合)。且确定性组件失效**可见性优于LLM**:断言当天报警 vs LLM双稳静默摇摆(摇摆率51%靠事后取证才发现)——\"确定性太多\"的反面案例在本项目里不存在,存在的是\"绝对常数太多\"。"
+        ],
+        "implications_for_us": [
+          "支持路线图主体:A(不变量)/D(共识)/F(抽查)机制类 + R5时间项 + R9正则扩展全部站得住;\"LLM只做窄活\"不需要重开——审计没有发现任何一条需要把结构判断还给LLM。",
+          "修正R5/分桶骨架(优先级建议提前):τ0.30 改每日亲和分布分位数(或通道每日rank/z-score归一后再用固定τ),这是防非编码日垃圾桶的真正开关——实验2给了现成复现证据(纯嵌入τ0.30→14桶4顶cap全天糊死;τ重标0.51→41桶恢复)。此改动比R6更紧迫,因为它是唯一硬断点。",
+          "修正R3/R4:attach阈值 0.06/0.12/0.15 改 rank-based(top-1近邻+margin),让\"首周冻结idf\"从权宜之计变结构免疫——绝对wjaccard阈值在任何idf重标度下都会翻盘,这在R3+R6冲突里已实锤过一次。",
+          "修正R1(fixture):第一批就收≥3天而非只冻结6-07——从实测的9个非编码日(06-20/06-29等)挑1天+1混合日;gold翻盘门从\"=0绝对否决\"改\"翻盘需人工复核\"。否则单日标定通过acceptance门获得永久否决权,是制度性封顶。",
+          "修正R14/R16(新发现的内生冲突):跨天滚动DF必须加\"日内集中度\"维度,否则会把连修多天的任务线锚点(carry-over的命根子)误判成环境词降权——两条路线图条目现文本互相拆台。",
+          "修正R6/残渣治理定位:黑名单=day-0种子(条目标注手工/自动来源),lift_cos=仅软降权(已修正),长期主力=R14跨天自动进表;新残渣的验收标准写成\"新CLI工具出现后≤3天自动入连接词表\",当天泄漏接受(外观问题)。DF分位数法单独不可用已实证(会先杀writingcaptureworker.swift再杀skip-permissions)。",
+          "加两个逃生门(低成本):①真双属性session的 secondary_refs 软链(复用R7\"只链接不合并\"机制,不破exactly-once分区,消化gold里9个弱判例的封顶);②N=5共识被否决的少数票落库进R8留存(未来LLM复核/微调素材)。",
+          "反对一种看似顺手的修法:不要给C加自然语/通用正则去\"覆盖非编码日\"——实验1证明kw通道已兜底(非编码段wjaccard有无正则完全一致),垃圾桶来源在τ不在C;正则保持编码向+R9结构化专名(人名/带单位数字)即可,扩到自然语域只会引入fail-wrong噪声。",
+          "对用户核心疑问的直接回答:\"太多确定性会不会局限\"——会,但局限不来自\"确定性\"本身,来自\"绝对常数\"和\"单日标定的门\"。修法不是把活还给LLM,而是把B层常数分位数化/秩化+让E层(跨天统计/词典/抽查回填)按设计接管参数来源;A/D/F的确定性结构反而是失效可见性的保证,应原样保留。"
+        ],
+        "sources": [
+          "/tmp/cmp/metrics.json 及 /tmp/cmp/*(6-07 分析产物,v1_raw225 基线与island分布)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/cluster_skeleton.py(锚点/IDF/wjaccard/complete_linkage 实现,实验1/2在其上离线复算)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/anchors.py(OCR技术锚点正则+twin-hash守卫)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/v4_local_cluster.py(α0.7/τ0.30/cap30 生产参数与桶内LLM护栏 L131-145)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/v4_emb.npy + /Users/joyzhang14/Desktop/Obsidian/event pipeline local/视觉增量v4-2026-06-07.md(337段session数据,实验1/2/3输入)",
+          "~/.portrait/events/(61天生产事件目录只读扫描:日型分布+非编码日正则产出代理测试)",
+          "/Users/joyzhang14/Desktop/Obsidian/event pipeline local/总览-算法改进路线-定稿-2026-07-02.md(被审计路线图定稿)",
+          "/Users/joyzhang14/Desktop/Obsidian/event pipeline local/算法结构分析-取证与路线图-2026-07-02.md(R1-R20明细+对抗修正记录)"
+        ]
+      },
+      {
+        "topic": "W4 日型红队:7 日型 × 确定性全栈断点表 + 必须加日型自适应的组件(回答\"太多确定性会不会导致局限性\")",
+        "findings": [
+          "【总纲·先给结论】确定性不是一坨同质风险。按路线图 A/B/C/E 分类后,失效模式泾渭分明:A(结构不变量 exactly-once/rescue-by-construction/orphan池/complete-linkage 分桶数学)——跨全部 7 日型零日型依赖,永远安全;C(_FILE/_HASH/_VER/_CAMEL/_SNAKE 正则锚点)是格式向、对未见词汇天然泛化(新项目日实证:新 repo 的新文件名/新驼峰照抓不误),它在非代码日的失效是'静默失灵(返回空)'=安全退化不产垃圾;B(把语义判断硬编码成数字:lift_cos 连接词降权、时间衰减常数120min、mega size>12、残渣黑名单、chrome 剥离串表、'摘要必引技术锚点'的隐含假设)才是危险源——它们编码的是'06-07 这天长什么样',换到分布外日型会危险失效(错标/假事件/劈开真活动)。所以'太多确定性'的真命题是:把单日语义判断冻结成常数(B 类)才有局限,结构性确定性(A)和格式正则(C)没有。修法不是'少用确定性',是'把 B 类常数改成日型条件化/当日数据驱动,A 保持结构、C 允许静默'。",
+          "【日型①纯会议日 MyMeeting+日历无代码】时间项:会议是长连续块、会内 session tier1 已按≤5min 并、会间有 gap→时间项理想工作,SAFE。锚点:_FILE/_CAMEL/_SNAKE/_ERR 几乎全空(无代码符号),退化成 LLM kw+会议主题词,中文人名(何成/王昱)regex 0 命中→锚点通道极薄。lift_cos 危险:会议判别锚点本身就是自然语('valis'/'planning'/'讨论'),df 高→被当连接词降权=把会议仅有的判别信号杀掉,而 regex 豁免救不了它(会议锚点非代码型)→不同会议塌进一桶(跨会议误合)或退化靠嵌入(嵌入对'都在说话'挤 cos0.8)。分桶:薄锚点+非判别嵌入→少数大桶,靠时间项按会议间隙切,粗但基本对。切分:LLM 在桶内切主题,这是全日型里最不依赖确定性的一天。rescue:会议时间密→attach-by-time 成立,SAFE。兜底 mega 危险:一场 3h 真会议 size>12 触发 mega 拆分器,按时间团块把一个连贯会议劈成假子事件(pause 被当边界)。判定:结构安全但 B 类两处危险(连接词杀主题词 + mega 劈长会)。",
+          "【日型②游戏/娱乐日 游戏+视频+微信 session 短碎】时间项危险:短碎 session 快速切(游戏→视频→微信→游戏),小 gap 被 exp(-gap/120) 高额加权→把时间相邻但语义无关的活动粘成一坨(下午 blob 混游戏+聊天+视频)=假混合事件。锚点:零代码锚点,kw=游戏名/视频标题/中文聊天,regex 全空+中文漏抓→锚点死,affinity≈0.7cos。lift_cos:多为一次性高 IDF 标题(df=1 不粘),影响小或过切。分桶:靠嵌入,消费内容嵌入可能比 dev 分得开也可能全塌'休闲'→粗桶+时间团块。切分:短碎多→单 session 事件多,dup 低但碎噪声高。rescue:大量零锚点碎片,attach(需时间门60min 或锚点≥0.12)双失→落 singleton+misc=噪声但 SAFE(不假不错标只是碎)。chrome.py:游戏/视频 UI chrome 不匹配 dev 调的串表→chrome 泄漏进 digest 误导小模型。bg_media:无 dev 信号→音乐正确不被标背景(逻辑反而对)。判定:时间项 glue 交错活动=危险(假混合),mega 劈长游戏局=危险,其余退化成 misc 碎片=安全。",
+          "【日型③新项目启动日 全新 repo,项目词典/30天IDF/app先验全没见过】这天是好消息:确定性代码栈对'新'鲁棒。时间项与新旧无关,SAFE。锚点是最亮点:_FILE/_CAMEL/_SNAKE 格式向、不依赖词表,新 repo 的新文件名/新驼峰符号照抓→代码锚点通道 day-1 就工作,这正是 regex 相对'学习型组件'的结构优势。30天滚动IDF:新 token 无历史→拿默认高 IDF(=稀有=判别),方向正确。但持久连接词表是按旧项目环境词学的:新项目引入的新环境词(到处出现的新框架名)当天不在连接词表→高 IDF 当胶水→当天可能过合成 mega,靠多天滚动自愈(这正是 rolling 的目的),day-1 短暂过合并=半安全(瞬态)。app→归属先验:新 app 无先验→tie-break 回退中性=无助但不害(路线图它只是 T3 弱 tie-break)=优雅。个人项目词典:未见→查不中→回退 IDF+regex,因 regex 抓新符号故损伤有限=安全。lift_cos:若新项目名是自然词(如'Aurora')而非驼峰/文件→非 regex 型→可能被当连接词硬杀,丢掉项目身份锚点,边缘风险。判定:结构 CODE 栈(regex/时间/分桶)对新颖性鲁棒=令人安心的正面结论;学习型栈(30天IDF/词典/先验/carry-over)day-1 无信号但只要'只加成不排斥'就优雅退化——这条实证验证了路线图 R14/R15 的'只加成不排斥'设计约束(一旦它们变减法就危险)。主要残余风险=冷启动过合并 + 自然语项目名被连接词杀。",
+          "【日型④出差/旅行日 地图+订票+邮件 时间稀疏】时间项退化=核心断点:活动稀疏、session 间大 gap(赶路/等待),gap>120min→exp(-gap/120)≈0→时间项零胶水,全靠锚点+嵌入。旅行 session(地图/订票/邮件)几乎无共享锚点→wjaccard≈0→affinity≈0.7cos only,'看地图'vs'订酒店'vs'邮件'cos 低-中→大多低于 τ0.30→每 session 自成桶=全 singleton。时间衰减常数120min 是错调旋钮:它按'相关工作在 2h 内'的密集编码日调的,旅行日相关活动(早上查酒店、晚上订)隔数小时→时间项无法连=欠合并。锚点:地名/酒店/航班/邮件,regex 代码锚点空,地名(中英)基本 kw 依赖且稀疏。residue 黑名单:dev 残渣缺→no-op 无害;但新 chrome 类型(地图 UI/订票站 chrome)不被剥→泄漏。rescue:attach 需时间门60min 或锚点≥0.12,旅行 gap>60min 时间 attach 失、无锚点 attach 失→全落 singleton misc,大量 misc 事件。兜底:无 mega(啥都不聚)。判定:退化成全 singleton/misc=安全(不产假事件不错标)但低价值(无法把'一次出行规划'聚成连贯事件)。失效模式=安全但诚实的碎片化;错调点=时间衰减常数。",
+          "【日型⑤跨午夜夜猫子 UTC切日已知坑,时间项 gap 跨日】危险发生在聚类栈之前的开窗层(day_bounds_utc)。机器 TZ UTC-4→UTC 日界落在本地 20:00,一段连续深夜工作被硬切进两个 day-file,半个事件落 day N、半个落 day N+1,各自单独处理→同一任务变成两天的两个事件=跨天 dup,carry-over 也只软链不合并(用户看到一夜工作被拆两份)。时间项:同一 day-file 内若 gap 用 epoch 差算则正确;真正的坑是 day-file 拆分本身不是 gap 数学。锚点/lift/分桶/切分/rescue 在各半个 day-file 内正常运行但只作用于被截断的数据。carry-over(路线图 R16)是部分缓解(continues 元数据软链,并已被点名'顺带缓解 UTC 跨午夜切日')但不足(软链≠合并)。判定:危险在开窗层(聚类栈本身没问题),产生跨天人为拆分=半危险(拆而非错标)。必须在开窗层加本地TZ/活动gap日界,这是需要日型(时区)感知的组件。",
+          "【日型⑥app大更新日 UI改版,OCR chrome 变化,残渣黑名单失配】这天是硬编码字符串组件(chrome.py 串表 + 残渣黑名单 + dev信号 token)的最尖锐考验。chrome.py 剥离器:调的是特定菜单栏('File Edit View')/特定时钟格式/Spotify 特定默认标签。app 改版(新菜单布局/新工具栏文案/重设计的 Spotify 新默认标签)→正则漏剥新 chrome→chrome 泄漏进 digest→小模型被 chrome 带偏(正是剥离器当初要防的'interacting with Spotify'错标复现)=危险。残渣黑名单(skip-permissions/caffeinate/sourcekit-lsp):工具改 banner/换 LSP 名/出现新后台工具→黑名单漏→新残渣 token 流进锚点+摘要;若新残渣跨多 session 出现(像 caffeinate 那样)→当胶水→mega 杂物抽屉复活 + 残渣写进摘要(20/88 复发)=危险。时间项/分桶/rescue 不受 UI 改动影响=安全。锚点 regex:_FILE 等按扩展名匹配、对 app UI 改版鲁棒=安全(反而稳)。bg_media:has_dev_signal token 表硬编码(My-Portrait/caffeinate/Pass\\d),项目改名或新 dev token→bg 检测漏→音乐/dev 混标,次要。判定:危险在硬编码字符串层(chrome 剥离+残渣黑名单+dev信号 token)——这是全栈最不鲁棒的组件,纯字符串匹配零学习。失效=错标+mega 杂物抽屉复活。这是'串表必须数据驱动(从当天自身高频样板 token 学)而非冻结'最强论据;注意 R14 滚动 DF 学的是语义连接词不是 UI chrome,chrome 剥离另需 OCR 版式信号或当日高频样板检测。",
+          "【日型⑦中文纯写作日 无 code 锚点,_CAMEL/_SNAKE 空转】锚点:_FILE/_CAMEL/_SNAKE/_ERR 全空(无代码,中文无驼峰/下划线)→regex 锚点通道死,锚点仅剩 LLM kw;mine_anchors 的 len>1 过滤保留 2+字中文 kw,故中文 kw 能进锚点但正则挖的技术 token=0→判别全靠 LLM 中文 kw 质量。IDF/wjaccard 数学上照跑。lift_cos 危险:中文写作 kw 是自然语→非 regex 型→暴露给硬杀连接词降权,常见写作词(的/文章/写作/段落)高 df→降权;若全文一个主题,主题词到处出现→高 df→被连接词杀→丢判别锚点→写作 session 失去链接信号→过切或退回嵌入。时间项:写作时间密(长专注段)→时间项做大部分活,桶=时间块=一篇一桶,粗但 SAFE。分桶:死锚点下 affinity≈0.7cos+0.15time,单长文一桶,多文靠 cos 分,粗。切分:LLM 切中文 digest(14B/2507 会中文),质量在这。**anchors.py harvest 危险**:中文写作 harvest 返回 [](无 _FILE/_HASH/_SYMBOL)→摘要无技术锚点可 grep→摘要 grep 接地闭环(T2 #14)对中文写作变空转,中文人名(0/5 抓)也不接地→中文写作摘要可幻觉且无接地绊线=对摘要保真危险(聚类本身安全)。residue/chrome:写作 app(Obsidian/Notes/Docs)自有 chrome,dev 残渣缺,部分 chrome 泄漏。rescue/兜底:时间密→attach-by-time 成立,SAFE。判定:聚类结构安全退化(时间项扛,粗桶),但锚点依赖的质量保障(摘要 grep 接地、2507 prompt 强制'引具体技术锚点')变空转——prompt 要'引技术锚点'但一个都没有→要么 LLM 编造(无接地幻觉)要么产模糊摘要,接地闭环抓不住中文内容幻觉=质量半危险、结构安全。",
+          "【断点表汇总·哪些组件必须加日型自适应】按'安全退化 vs 危险失效'两族排序:(危险,必须改)1) lift_cos 连接词降权——非代码日(会议/写作/娱乐)的判别锚点本身是自然语,会被当连接词杀;regex 豁免救不了非代码日;需日型感知(当日锚点稀疏/非代码时禁用硬杀,只软降权)。2) chrome.py 串表 + 残渣黑名单 + dev信号 token——纯字符串、对 app 改版和非 dev 日脆;必须从当日高频样板 token 数据驱动检测,而非冻结串表(R14 只覆盖语义连接词,不覆盖 UI chrome)。3) 时间衰减常数120min + mega size>12——按密集编码日调:稀疏日(旅行)时间连不上退化成 singleton(安全但无用),长连贯活动(会议/单篇写作/单局游戏)被 mega size>12 假劈开(危险);mega 判定必须从'纯 size'改'锚点自洽度'(3h 会议是合法一事件,3h OCR 杂物抽屉不是,size 分不开)。4) UTC 日界——夜猫子/跨午夜被硬切,需本地 TZ 或活动 gap 日界(开窗层,聚类栈之前)。5) 摘要 grep 接地 + '必引技术锚点'要求——非代码日(中文写作/会议/娱乐)空转,需非代码接地路径(人名/地名/引语)或把该要求条件化。(安全退化,可不急改但需承认口径)6) 30天IDF/项目词典/app先验/carry-over——新项目 day-1 无信号,只要严格'只加成不排斥'就优雅退化;本分析验证路线图这条约束是对的(一旦变减法即危险)。总原则:结构性确定性(A:exactly-once/rescue/orphan/分桶数学)和格式正则(C:_FILE/_HASH/_VER)跨 7 日型无需自适应;需要日型自适应的全部落在 B 类(单日冻结的语义判断)+ 开窗层。",
+          "【复合失效·06-07 看不见的隐藏风险】一个红队必须点出的耦合:非代码日在移除代码锚点(C 静默)的同时,把判别重担压到嵌入+时间两条路上——而路线图已实证嵌入对'同子系统不同任务'不判别(全挤 cos0.7-0.9),时间项在稀疏日又零胶水/在交错日又乱粘。即当某日型抽掉代码锚点通道,它恰好也让剩下的两条通道(嵌入、时间)落到各自最弱区间。这是标定日 06-07(代码锚点丰富+session 密集)结构上看不见的复合退化:栈对非代码日的鲁棒性比 06-07 的表现所暗示的更差。结论对'太多确定性'的直接回答:局限不在'确定性数量',在'确定性的信号冗余度'——06-07 三通道(代码锚点/嵌入/时间)互为冗余所以稳;非代码日只剩两条弱通道且无冗余,任一 B 类常数错调就直接穿透到产出。补救=为非代码日型加第三条独立通道(如 app+window 归属先验、对话/人名专用锚点、时间块结构),恢复冗余,而不是加更多阈值。"
+        ],
+        "implications_for_us": [
+          "支持并强化路线图的核心判断,但要精确化口径:'差距全在架构不在智商'在 06-07 型代码日成立;但把它当'全日型通用'会误导——非代码日(会议/娱乐/中文写作)缺的正是代码锚点信号本身,那不是架构 bug 能补的,需要新的非代码信号通道。建议在'诚实保留点'里补一条:全部结论在代码密集日成立,非代码日型未验证,栈可能复合退化。",
+          "反对/修正 lift_cos 连接词降权(路线图 R7/#7)无条件上线:regex 豁免只护住代码型锚点,对会议/中文写作/娱乐日,判别锚点本身是自然语会被硬杀。建议给 lift_cos 加'当日锚点画像'前置门——当日代码锚点覆盖率低于阈值(如非代码日)时禁用硬杀只留软降权,否则会在非代码日杀掉唯一判别信号。这是现有 gold 门(42例06-07)测不出的失效(gold 全是代码日)。",
+          "验证并加固路线图 R14/R15 的'只加成不排斥'约束:新项目 day-1 的红队走查确认,学习型组件(30天IDF/项目词典/app先验/carry-over)只要是纯加法就优雅退化;一旦任何一条变成'没见过就扣分/排斥'就在新项目日危险失效。建议把'只加成不排斥'写成硬不变量(单测:喂全未见词典的合成新项目日,产出必须≥退化到纯 regex+时间基线,不得更差)。",
+          "新增路线图缺口:chrome.py 串表 + 残渣黑名单是全栈最脆组件(app 改版日错标 + mega 杂物抽屉复活),但当前 R14 滚动 DF 只学语义连接词、不覆盖 UI chrome。建议加一条'当日样板 token 检测'(同 app+相似位置高频重复的 OCR 片段=chrome,数据驱动剥离),替代冻结串表;并把 chrome 剥离效果纳入 acceptance 门(app 改版合成日)。",
+          "新增/前移优先级:UTC 日界(day_bounds_utc)对夜猫子/跨午夜是聚类栈之前的结构性拆分源,carry-over 软链只缓解不根治。建议把'本地 TZ 或活动 gap 日界'从'顺带缓解'升级为独立修复项(开窗层,聚类无关),否则夜猫子日的跨天 dup 是 rescue/exactly-once 都够不着的(它们在 day-file 内工作)。",
+          "修正 mega 判定(路线图 #16 mega 确定性拆分器):当前隐含 size>12=需拆,但红队显示长连贯活动(3h 会议/单篇长写作/单局游戏)会被假劈开。建议 mega 触发从'纯 size'改'size>阈值 AND 锚点自洽度低'(会议/写作虽大但主题自洽不该拆;OCR 杂物抽屉大且锚点发散才拆),否则拆分器在非代码日制造假子事件。",
+          "新增回归集缺口(路线图 R1):当前 fixtures 只有 06-07 一个代码日,所有 gold(42例 dup/13例 rescue)同源单日型。建议 fixtures 至少补一个非代码日(从生产 06-27/06-29 型混合日或纯会议/写作日选)做第二个 replay 锚,否则'换天分布漂移'的对策(回归集)本身也只覆盖代码日,测不出 B 类常数在非代码日的危险失效。"
+        ],
+        "sources": [
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/cluster_skeleton.py(锚点挖掘 _FILE/_CAMEL/_SNAKE/_ERR、compute_idf、wjaccard、complete_linkage τ/cap)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/v4_local_cluster.py(ALPHA0.7/TAU0.30/CAP30 分桶、桶内切分 prompt、global_merge、覆盖修复)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/anchors.py(harvest 技术锚点旁路 _FILE/_HASH/_IDNUM/_VER/_SYMBOL,中文/非代码返回空)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/chrome.py(硬编码 chrome 剥离串表 + 残渣/dev信号 token + bg_media)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/source.py(tier1_merge app+window+≤5min、day_bounds_utc、MAX_OCR_CHARS 2000)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/HANDOFF.md(v1/v2/v3 架构与已知问题)",
+          "/Users/joyzhang14/Desktop/Obsidian/event pipeline local/总览-算法改进路线-定稿-2026-07-02.md(路线图 A-F 组件与 T0-T3)",
+          "/Users/joyzhang14/Desktop/Obsidian/event pipeline local/算法结构分析-取证与路线图-2026-07-02.md(对抗修正记录 R1-R20)",
+          "内部分析:~/.portrait/events/ 61 天生产事件 type/tags 分布扫描(确认日型多样性:05-24/05-26 重编码日 vs 06-27/06-29 混合游戏/社交/杂事/轻代码日;全部 type=experience)"
+        ]
+      },
+      {
+        "topic": "W5 真数据日型分布检验:6-07 代表性量化 + 确定性栈在 57 天真实日型上的暴露面(本机只读)",
+        "findings": [
+          "数据面:~/.portrait/events/ 共 61 个日目录,2 个空(04-15/04-17),57 天有事件,共 960 个生产事件(全部 type=experience)。tag 有变体噪声(my portrait/my-portrait、claude code/claude-code),分类时已归一。",
+          "6-07 代表性:编码浓度(含编码类 tag 的事件占比)=0.86,在 57 天里排 53/57 = 93 分位;事件数 28 也排 51/57(91 分位)。全体分布:min 0.00 / p25 0.40 / 中位 0.55 / p75 0.69 / max 1.00。6-07 是'近极端重编码+大日'双重不代表。",
+          "日型多样性:8/57 天(14%)编码浓度<30%,19/57 天(33%)<50%。三个最极端非编码日:①2026-06-20(0.00,4事件):Discord 闲聊/约游戏/和何成约见面 + 245 帧 Spotify 听歌;②2026-06-26(0.00,2事件):Spotify J-pop + 'Verified I-94 paperwork for a DMV visit'(移民文书);③2026-05-10(0.10,10事件):AP Calculus BC 刷题马拉松(Goodnotes 289帧、Unit 7/8/9 复习、999 帧选择题事件)。用户是学生:5月=学期+AP季,6月中之后=暑假模式。",
+          "语料内部已有 regime change(漂移不是假设是事实):事件/日 5月均值 21.2 → 6/15-7/1 均值 7.1(中位 19→6);编码浓度中位 0.60→0.45。近两周的日型(少而长、游戏/社交/生活事务多)和标定日 6-07 所在的 5月-6月初完全两个世界。",
+          "锚点弹药测试(用 cluster_skeleton.py 的原版 _FILE/_CAMEL/_SNAKE/_ERR 正则跑成员帧 OCR full_text):失效是双模式,不是单纯'没弹药'。(a) 社交/生活日≈死通道:6-20 每事件仅 2-5 个 distinct 锚点且全是用户名/噪声('soLo','ff_kai'),245 帧 Spotify 事件只有 5 个;6-26 的 I-94 事件 13 帧 0 锚点。(b) 学习日=高量假锚点(毒弹药):5-10 单个刷题事件 _CAMEL 命中 2457 次、999 帧事件 1013 个 distinct'锚点',top token 全是手写/PDF 的 OCR 碎渣('learnMachine','pdfJoyprectice','sImalct','oRal'),且这些噪声 token 跨事件共享(进当日 top-25)→ 会制造无关学习事件间的假亲和。",
+          "IDF 对两类噪声行为相反:跨天背景噪声('text_overlay_demo','chapel_view_tour'——用户自己的文件名,出现在 6-07/6-20/6-26/6-30 多个不相关事件里)会被 30 天滚动 IDF 正确压掉;但'当日一次性 OCR 噪声'(如 5-10 的 'learnMachine')只在那一天出现 → IDF 反而判它稀有、加权抬高。IDF 单独救不了学习日。",
+          "_ERR 正则跨事件泄漏实测:'AudioError' 在 6-07 的哲学闲聊事件里命中 144 次(背景终端滚屏),同日修 bug 事件 210 次、6-30 评估事件 38 次——同一 ERR 锚点横跨语义完全不同的事件,是锚点 jaccard 误合的现成通道(云端 gpt-5.4 生产管线当时顶住没合)。",
+          "对照基线:6-07 自己的锚点又密又真(isAxBroken/edit_log/AnalyticsService.swift/extractSentMessages),即所有 C 类正则和 B 类权重是在锚点通道信噪比最好的一天上调出来的。",
+          "时间结构(帧钳制到事件所属本地日后):754 个多帧同日事件中,28.5% 内部含 >45min 断裂(低编码日 34.4% vs 高编码日 25.1%),20.2% 含 >120min 断裂,21.2% 跨度 >3h;事件跨度 p50=17min/p75=125min/p90=703min。逐 gap 看:低编码日事件内相邻帧 gap p99=37min vs 高编码日 8.7min——长断裂按 gap 计稀少,但按事件计砸中 1/4 到 1/3。即 gap>30-45min 硬切会切断约三成真实生产事件,且在非编码日切得更多、而那里恰是 rescue 亲和信号(cos+锚点)最弱处——复合暴露。120min 衰减项在 gap=120min 只剩 +0.055、6h 剩 ~0.007,作为 bonus 无害,但对碎片日的重访 attach 基本零贡献。",
+          "跨天:39.8% 的生产事件其 member_frame_ids 有帧落在本日之外(可能部分是老管线 occurrences/跨天合并的产物)——carry-over 是 2/5 事件量级的常态而非边角;任何按日封闭的分区断言/exactly-once 若不处理跨天,会在 40% 事件上系统性偏离生产参照。",
+          "mega 判定暴露面:非编码日的合法单主题事件天然巨大(999 帧刷题、378 帧游戏、245 帧 Spotify、206 帧游戏文件夹),size>12 若指成员规模,在学习/游戏日会碎尸合法巨型事件。",
+          "A 类结构组件(exactly-once/orphan 池/标脏重生成/标题 lint)本身与日型无关,本次审计没有发现日型暴露面;唯一例外是摘要 grep 接地——在假锚点日'验上'的可能是 OCR 垃圾,接地门本身需要锚点有效性前置。"
+        ],
+        "implications_for_us": [
+          "支持:A 类结构保证(exactly-once、orphan 池、分区断言、合并→标脏→重生成)与日型正交,57 天审计无暴露面,保留不动。回答主问题:'太多确定性'本身不是局限来源——局限集中在'在 93 分位编码日上标定的数字(B)'和'编码向正则(C)',确定性≠问题,单日标定的确定性数字才是。",
+          "反对(需修)C 类锚点正则的隐含假设:失效模式不是'非编码日没锚点'而是双模式——社交/生活日死通道(0-5 个/事件)+学习日毒通道(_CAMEL 被手写/PDF OCR 噪声打爆,2457 次/事件)。建议加锚点有效性门(如同一 token 需在 ≥2 帧稳定复现、或绑定来源 app 上下文),否则 wjaccard 在学习日是负信号。",
+          "修正 E 类 IDF 的能力边界:30 天 IDF 能杀跨天背景噪声(实测 'text_overlay_demo' 类),但对当日一次性 OCR 噪声反向加权('learnMachine' 类)。IDF 必须和帧内复现/app 来源联合过滤,不能单挑。",
+          "修正 B 类单日标定:0.7cos+0.3wjaccard、τ0.30、attach 0.06/0.12/0.15 全部标在锚点通道最强的一天;中位日(0.55)和 14% 的低编码日上 wjaccard 退化,有效亲和≈0.7cos 封顶,同一 τ 的实际行为已漂移。冻结回归集(42 dup+13 rescue 全出自 6-07)必须扩成 4 日型:学习日(5-10)、社交乐日(6-20)、生活事务日(6-26)、游戏混合日(6-30)。",
+          "修正时间切分与 rescue 的耦合:gap>30-45min 硬切实测切断 28.5% 生产事件(低编码日 34.4%),'切了再 rescue' 成立的前提是 rescue 在弱信号日也接得回——正是那些日锚点死/毒。建议 rescue 在低锚点日引入 app 连续性/browser_url 作 fallback 证据。",
+          "支持并提升 E 类 app→归属先验的优先级:非编码日 app_name/URL(Spotify/Discord/Goodnotes/Preview/CBP 网站)是最可判别且零成本的确定性信号,是锚点死亡日的天然补偿通道。",
+          "修正 mega size>12:需按日型/通道信噪比条件化——学习日 999 帧刷题、游戏日 378 帧是合法单事件,固定阈值会碎尸。",
+          "修正跨天处理的地位:39.8% 生产事件跨本地日界,carry-over(E)不是可选优化而是对齐生产参照的必要条件;按日封闭的分区断言需明确定义跨天语义,否则和参照系统在 40% 事件上不可比。",
+          "新增校准纪律:57 天语料内部已含一次 regime change(暑假:21.2→7.1 事件/日,编码浓度 0.60→0.45),F 类'置信度落库+抽查回填'应按周滚动重估而非一次标定;换天漂移已是既成事实,风险等级应从'已知风险'上调为'已观测'。"
+        ],
+        "sources": [
+          "~/.portrait/events/ (61 个日目录, 960 个事件 .md, 只读遍历)",
+          "~/.portrait/portrait.sqlite frames 表 (206K 帧, timestamp_ms + OCR full_text, 只读 mode=ro)",
+          "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab/cluster_skeleton.py (锚点正则原始定义 _FILE/_CAMEL/_SNAKE/_ERR)",
+          "分析脚本(scratchpad): parse_events.py / density.py / db_analysis.py / time_clip.py, 位于 /private/tmp/claude-501/-Users-joyzhang14-Projects-My-Portrait/d1c59e94-92fd-435b-950b-5d321c2d5ea8/scratchpad/"
+        ]
+      }
+    ],
+    "judge": {
+      "verdict": "会,但局限不来自\"确定性的量\",而来自三个具体形态——五路调研在此完全收敛:①把语义判断冻结成绝对常数(B类:τ0.30、attach 0.06/0.12/0.15、size>12、lift_cos硬杀),且全部标定在 2026-06-07 这个 93 分位极端重编码日上(W5:57 天中位编码浓度 0.55 vs 6-07 的 0.86,且语料内部已发生一次 regime change,漂移是已观测事实而非假设);②单日 gold 门(\"42 例翻盘=0 才放行\")给单一日型永久否决权,是制度性封顶;③确定性裁决不加去噪直接喂回微调闭环,会让模型精确继承规则盲区(伪标签确认偏差)。相反,结构性确定性(exactly-once、rescue by construction、orphan 池、分区断言、共识分区、grep 接地、回归机制)在 61 天真数据审计中零日型暴露面,且失效可见性远优于 LLM(断言当天报警 vs LLM 双稳 51% 摇摆率靠事后取证才发现),是业界公认的 compliance-by-construction 底座和未来微调的 reward 基建——这部分确定性越多越好。文献也划定了边界:Bitter Lesson 在\"固定时点+固定数据+固定域\"下不做任何断言,本项目(固定用户/机器/任务+~246 条真训练数据+本地算力)恰在其不适用区。修法不是把活还给 LLM(LLM 自由划分双稳/二分误合已实证,是教训不是偏见),而是:B 类常数分位数化/秩化、硬杀改软信号+日型前置门、词表从冻结改数据驱动、回归集按日型分层、留存带冲突标记——把\"绝对常数太多\"修掉,把\"确定性结构\"原样留住。",
+      "safe_determinism": [
+        "exactly-once 去重、分区断言、orphan 池、合并→标脏→重生成:内容无关的结构不变量,W5 对 57 天生产事件审计零日型暴露面;失效可见(断言当天报警)且优雅(最坏 misc 单例/多一次重生成);是神经符号文献公认的 compliance-by-construction 层。唯一微调:给真双属性 session 加 secondary_refs 软链逃生门(gold 里 9 个弱判例),不破分区。",
+        "覆盖 rescue(attach→singleton,by construction 337/337):结构保证,失效方向安全(接不回就落 misc,不假不错标);保留,只在弱锚点日补 fallback 证据(见 risky 表)。",
+        "时间加法项 +0.15*exp(-gap/120):参数平台宽已验(60-180min × 0.15-0.25),加法 bonus 失效优雅(gap=120min 只剩 +0.055),全表最硬的一条;有 perm24 硬取证,保留不动。",
+        "D 类共识分区/多票二分(N=5 co-association、K=5 带证据):即文献里的 Evidence Accumulation 共识聚类,机制与数据分布无关(漂移敏感度低),失效优雅(分歧→升级→宁独立);且'花算力买稳定'与 Bitter Lesson 同向而非相悖。唯一补丁:被否决的少数票分区落库进 R8 留存,是未来微调素材。",
+        "C 类编码向锚点正则(_FILE/_CAMEL/_SNAKE/_ERR)的'编码向'定位本身:格式向对未见词汇天然泛化(新项目 day-1 新文件名/新驼峰照抓,W4 实证),非编码内容上 fail-empty 不 fail-wrong,且 kw 通道已兜底(实验 1:非编码段 wjaccard 有无正则完全一致)。保持编码向 + R9 结构化专名扩展即可,不要试图用正则覆盖自然语域(会引入 fail-wrong)。学习日毒弹药问题在'有效性门'上修,不在删正则上修(见 risky 表)。",
+        "摘要 grep 接地 + 标题 lint(禁 flag 词):确定性验证器是 verifier's law 意义上的微调 reward 前提资产,不是学习的对立面;保留,但验对象严格限定技术 token、fallback 删单个存疑锚点而非废整摘要,'动词开头'降级软规则。",
+        "E 类积累/学习型(30 天滚动 IDF、项目词典、app→归属先验、carry-over):整体是 B/C 冻结参数的设计解药(反封顶层),Drain3 的 LRU 漂移适应与之同构;新项目 day-1 无信号但'只加成不排斥'约束下优雅退化——W4 红队验证了这条约束正确,建议升级为硬不变量(合成新项目日单测:产出不得差于纯 regex+时间基线)。",
+        "'LLM 只做窄活'的确定性 control flow:AlphaGeometry/FunSearch/Anthropic workflow/mem0(最 LLM 化的记忆系统其外层也是确定性三段流水线+四选一窄决策)四路背书;本项目 LLM 自由划分双稳/二分误合有实证,已定案不重开。",
+        "F 类审计机制本身(置信度落库+定向抽查回填、冻结回归集机制):是阈值漂移的解药和文献标准解(伪标签去噪);机制保留,单日 gold 的'内容'要扩(见 risky 表)。"
+      ],
+      "risky_determinism": [
+        {
+          "component": "τ0.30 绝对亲和阈值(分桶 complete-linkage)",
+          "risk": "全表唯一硬断点。实验 2 实证:锚点通道弱化时整体亲和分布上移,固定 τ 把全天糊成垃圾桶(24 桶塌 14 桶、4 桶顶 cap30、最大桶横贯全天);τ 重标 0.51 即恢复 41 桶。57 天里 33% 的日子编码浓度<50%,锚点通道退化是常态不是边角。",
+          "amendment": "改每日亲和分布分位数取 τ(rank-based),或通道每日 z-score 归一后再用固定 τ;走影子跑对照回归集后切换。成本低(离线可验,实验 2 已给复现脚手架),优先级应提前到 T0/T1,比 R6 紧迫。"
+        },
+        {
+          "component": "attach 阈值 0.06/0.12/0.15(绝对 wjaccard 值)",
+          "risk": "绝对值随 idf 重标随时翻盘(R3+R6 冲突已实锤过一次);'首周冻结 idf'只是权宜。",
+          "amendment": "改 rank-based:top-1 近邻+margin 判定,对 idf 重标度结构免疫。成本低,与 τ 改造同批做。"
+        },
+        {
+          "component": "lift_cos<0.15 连接词硬杀",
+          "risk": "非代码日(会议/中文写作/娱乐)的判别锚点本身就是自然语(会议主题词/写作主题词),高 df 会被当连接词杀掉当日唯一判别信号;regex 豁免只护代码型锚点救不了这些日子;现有 gold 全是代码日,测不出此失效。",
+          "amendment": "加'当日锚点画像'前置门:当日代码锚点覆盖率低于阈值时禁用硬杀、只留软降权。成本低(一个日型开关),W3 对抗修正已把方向定为'只软降权',此处再加日型条件即可。"
+        },
+        {
+          "component": "0.7cos+0.3wjaccard 固定通道权重",
+          "risk": "中位日(编码浓度 0.55)wjaccard 已退化,有效亲和≈0.7cos 封顶,同一 τ 的实际行为随之漂移;权重本质是模型参数却被永久手定。",
+          "amendment": "短期:保留为先验+每日通道 rank/z-score 归一(锚点弱日自动让位嵌入+时间);长期:从 R8 留存的同事件 pair 上拟合一个 logistic 回归(不需要 MLX)。成本中,留存 schema 需现在就存 pair 级信息。"
+        },
+        {
+          "component": "gap>30-45min 时间断裂硬切",
+          "risk": "W5 实测:28.5% 的多帧生产事件内部含 >45min 断裂(低编码日 34.4%),硬切会切断约三成真实事件;'切了再 rescue'的前提在弱信号日不成立——恰是那些日子锚点死/毒、rescue 接不回,复合暴露。",
+          "amendment": "切分机制保留(人类节律低漂移),但 rescue 在低锚点日加 app 连续性/browser_url 作 fallback attach 证据;gap 阈值可用当日 gap 分位数微调。成本中。"
+        },
+        {
+          "component": "mega 判定 size>12 强拆",
+          "risk": "999 帧刷题日、378 帧游戏局、3h 会议都是合法单主题事件,固定 size 强拆在非编码日制造假子事件(fail-wrong,非优雅降级)。",
+          "amendment": "从'强拆门'改'送检门':size>阈值 AND 锚点自洽度低才拆(锚点自洽的大事件放行);拆分决策可交 LLM 窄判。成本低。"
+        },
+        {
+          "component": "终端残渣黑名单(skip-permissions/caffeinate/sourcekit-lsp)",
+          "risk": "SpamAssassin 式规则腐烂:precision≈100% 但 recall 永久冻结,明天换个 CLI 工具零覆盖;DF 分位数法单独不可用已实证(会先杀 writingcaptureworker.swift 这类真锚点再杀残渣)。",
+          "amendment": "降级为 day-0 种子(条目标注手工/自动来源);长期主力=R14 跨天统计自动入表(残渣签名=跨天复现+日内时间弥散+跨多桶/app,实测 sourcekit-lsp 跨 4 app);验收标准写成'新 CLI 工具出现后≤3 天自动入连接词表',当天泄漏接受(外观问题,优雅降级)。成本中(R14 已在路线图,加维度即可)。"
+        },
+        {
+          "component": "chrome.py 剥离串表 + dev 信号 token(纯字符串冻结)",
+          "risk": "全栈最脆组件:app 改版/UI 更新日静默失灵→chrome 泄漏进 digest 误导小模型错标+mega 杂物抽屉复活;R14 滚动 DF 只学语义连接词,不覆盖 UI chrome,现路线图对此无解。",
+          "amendment": "改当日高频样板 token 检测(同 app+相似位置高频重复的 OCR 片段=chrome),数据驱动剥离替代冻结串表;app 改版合成日进 acceptance 门。成本中,是本次审计新增的路线图缺口。"
+        },
+        {
+          "component": "_CAMEL 等正则在学习/手写日的毒弹药 + IDF 反向加权",
+          "risk": "W5 实锤双模式失效:社交日死通道(2-5 锚点/事件)尚安全,但学习日 _CAMEL 被手写/PDF OCR 碎渣打爆(单事件命中 2457 次,'learnMachine'类噪声跨事件共享制造假亲和),且 30 天 IDF 对'当日一次性噪声'反向加权(判其稀有反而抬高)——wjaccard 在学习日是负信号。",
+          "amendment": "加锚点有效性门:token 需在 ≥2 帧稳定复现+绑定来源 app 上下文才计入;twin-hash 守卫从 hash 类扩到通用。成本低-中,IDF 不能单挑必须与帧内复现联合。"
+        },
+        {
+          "component": "UTC 日界开窗(day_bounds_utc)",
+          "risk": "聚类栈之前的结构性拆分源:机器 TZ UTC-4,日界落在本地 20:00,跨午夜工作被硬切成两天两事件;W5:39.8% 生产事件的成员帧跨本地日界,carry-over 软链只缓解不根治,rescue/exactly-once 都够不着(它们在 day-file 内工作)。",
+          "amendment": "开窗层改本地 TZ 或活动 gap 日界,从'R16 顺带缓解'升级为独立修复项;按日封闭的分区断言需明确定义跨天语义,否则与生产参照在 40% 事件上不可比。成本中。"
+        },
+        {
+          "component": "单日 gold 门('42 例翻盘=0 才放行')",
+          "risk": "制度性封顶,全路线图最大一处:把 93 分位极端重编码日的单人判读固化成永久否决权,任何利好其他日型但翻个别 6-07 判例的改动被硬拦;回归集本身也只覆盖代码日,测不出 B 类常数在非编码日的危险失效。",
+          "amendment": "fixture 第一批就扩到 ≥4 日型:6-07(重编码)+5-10(学习/刷题)+6-20(社交/音乐)+6-26 或 6-30(生活事务/游戏混合),数据在 ~/.portrait/events/ 现成;'翻盘=0'改'翻盘需人工复核'软门。成本低,收益是全表最高的制度修正。"
+        },
+        {
+          "component": "摘要 grep 接地的'必引技术锚点'隐含假设",
+          "risk": "中文写作/会议/娱乐日 harvest 返回空→接地闭环空转,prompt 强制引锚点但一个都没有→LLM 要么编造(无接地幻觉抓不住)要么产模糊摘要;学习日更糟:'验上'的可能是 OCR 垃圾。",
+          "amendment": "接地要求条件化:非代码日走 R9 结构化专名路径(人名/地名/数字/引语);接地门前置锚点有效性检查;fallback 保持'删单个存疑锚点'而非废整摘要。成本中。"
+        },
+        {
+          "component": "R14 滚动 DF 与 R16 carry-over 的内生冲突",
+          "risk": "路线图两条目互相拆台:连修 3 天的 bug 锚点会被跨天 DF 统计成高 DF 环境词降权,而 carry-over 恰恰依赖这些跨天复现锚点。",
+          "amendment": "R14 加'日内集中度'维度:跨天复现+每日集中单线=任务锚点(保权);跨天复现+日内弥散+跨多 app=环境词(降权)。成本低,一个统计维度。"
+        },
+        {
+          "component": "R8 留存装饰器只存最终裁决",
+          "risk": "伪标签确认偏差(文献实证非理论担忧):单一管线裁决当 gold 落库,T3 微调出的模型精确继承规则盲区,形成正反馈错误固化。",
+          "amendment": "留存 schema 现在就扩:①置信度②规则间/规则与 LLM 冲突标记③人工抽查修正后的 gold 标记④pair 级亲和信息⑤共识少数票;低置信+冲突样本作为抽查优先采样池,修正后标签必须回写留存库。成本低(schema 改动),但必须在攒数据开始前做,否则前期数据废一半。"
+        }
+      ],
+      "amendments": [
+        "T0/T1 优先级重排:τ0.30 分位数化/通道每日归一提前到最优先(唯一硬断点,实验 2 有现成复现证据),比 R6 残渣治理紧迫;attach 阈值 rank 化(top-1 近邻+margin)同批做。",
+        "R1 fixture 第一批就按日型分层收 ≥4 天(6-07 重编码 / 5-10 学习 / 6-20 社交音乐 / 6-26 或 6-30 生活游戏混合,~/.portrait/events/ 现成);gold 翻盘门从'=0 绝对否决'改'翻盘需人工复核'。",
+        "R7 lift_cos 加日型前置门:当日代码锚点覆盖率低时禁用硬杀只留软降权;regex 豁免保留但明确它救不了非代码日。",
+        "新增条目——锚点有效性门:token 计入锚点需 ≥2 帧稳定复现+绑定来源 app,防学习日 OCR 毒弹药与 IDF 反向加权(W5 新发现,现路线图无解)。",
+        "R6 黑名单定位改 day-0 种子;R14 加'日内集中度'维度(一并解 R14/R16 内生冲突);残渣验收标准='新 CLI 工具 ≤3 天自动入连接词表,当天泄漏接受'。",
+        "新增条目——chrome 剥离数据驱动化:当日高频样板 token 检测(同 app+相似位置高频重复=chrome)替代冻结串表;app 改版合成日纳入 acceptance 门(现路线图缺口)。",
+        "mega 判定从'size>12 强拆'改'size>阈值 AND 锚点自洽度低'的送检门。",
+        "新增条目——开窗层日界修复:本地 TZ 或活动 gap 日界,独立于聚类栈(39.8% 事件跨本地日界,carry-over 软链不根治);分区断言明确跨天语义。",
+        "R8 留存 schema 立即扩充:置信度+冲突标记+人工修正 gold+pair 级亲和+共识少数票落库;低置信/冲突样本作抽查优先池(在攒数据开始前完成,否则前期数据继承管线盲区)。",
+        "F 层新增零成本漂移哨兵:每日落库亲和分布/事件数/orphan 率/锚点密度统计,KS 距离超限告警'今日偏离标定日'并提示走稳健档;校准从一次标定改按周滚动重估(regime change 已观测:21.2→7.1 事件/日)。",
+        "新增护栏可观测性纪律:grep 接地/lint/黑名单拒掉的样本留影子落库+每月复审(Google Photos 八年黑名单教训);每条 B/C 规则登记隐含假设+命中率/翻案率仪表;新阈值一律影子跑 1-2 周对照后切换(champion-challenger)。",
+        "新增规则退役机制(接 T3):B 类阈值集中配置、C 类词表外置、每条规则可单独关闭且有影子对照;微调模型在 challenger 位稳定胜出某条规则时按条退役——保证脚手架可拆卸,不变永久承重墙。",
+        "A 类两处微修:真双属性 session 加 secondary_refs 软链(复用 R7 只链接不合并,消化 gold 9 个弱判例);'末现优先'降级为挂模型版本的软信号(R11 后退役,路线图已注明,落实之)。",
+        "文档诚实保留点补一条:'差距全在架构不在智商'及全部取证结论在代码密集日成立,非代码日型存在复合退化(代码锚点抽掉时,嵌入与时间通道恰好各落最弱区间),需为非代码日补独立判别通道(app+window 归属/人名专名/时间块结构)恢复信号冗余。"
+      ],
+      "principles": [
+        "按'结构 vs 内容'划线,不按'确定性 vs 模型'划线:内容无关的结构保证(不变量、分区、验证门、共识归并、control flow)默认确定性且越硬越好;内容特定的语义判断(阈值、词表、语义正则)默认会漂移,上线必须自带自适应机制或至少一块仪表。",
+        "常数必须有来源和刷新通道:任何写死的数字都携带一个'世界状态假设'(τ0.30 假设=6-07 式亲和分布),须登记该假设并优先写成分位数/rank 形式;绝对值只允许作 day-0 种子,长期参数来源交给 E 层(滚动统计/留存数据拟合),绝不允许'标定一次管永远'。",
+        "失效方向优先于失效概率:选方案时偏向 fail-empty/优雅降级(锚点空→kw 兜底、接不回→misc 池),警惕 fail-wrong(硬杀、强拆、错标);任何硬杀/强拆类操作必须配前置门或降级为软信号+送检。",
+        "LLM 只做窄活,窄活输出必须过确定性验证门;对称地,每个确定性护栏必须可观测(拒掉了什么留影子)、有复审日程、可拆卸(可单独关闭+影子对照)——不可观测且无 sunset 的护栏才封顶,护栏本身不封顶。",
+        "gold/回归集必须按分布分层(日型),单点标定的门只能是软门;任何新阈值/新规则先影子跑同一份生产输入、与现行值对照回归集后才切换,带回滚。",
+        "鲁棒性的真指标是信号冗余度而非单通道精度:任何日型下保证 ≥2 条独立判别通道(锚点/嵌入/时间/app 归属)同时在线;发现某日型只剩单通道时,正确动作是补一条独立通道,而不是给现有通道加更多阈值。"
+      ]
+    },
+    "attack": {
+      "attacks": [
+        {
+          "target": "safe_determinism 第1条:「A类 W5 对 57 天生产事件审计零日型暴露面」",
+          "objection": "证据膨胀。A 类组件(exactly-once 壳→锚点门→末现、rescue attach→singleton、orphan 池、分区断言)是新管线的组件,只在 lab.db 里跑过 2026-06-07 一天(任务背景明示 lab.db 只有 6-07);~/.portrait/events 的 57 天是老云端管线产物,根本不含这些代码路径。「57 天审计零暴露」实际上是「读了 57 天别人的输出+跑了 1 天自己的代码」——运行时不变量违规不可能在从未运行的日子上被观测到。裁决把 A 类安全性从『构造上论证+单日实证』包装成了『61 天实证』,这是它最强的安全主张,地基却最薄。",
+          "severity": "major",
+          "fix": "改口径:A 类的证据 = by-construction 论证 + 6-07 单日执行 + 57 天日型多样性(仅说明域内存在这些日型)。R1 fixture 扩日型后,A 类断言(分区完整性/exactly-once/orphan 守恒)必须在每个新日型上真跑一遍并落断言日志,才允许写『多日型零暴露』。"
+        },
+        {
+          "target": "risky_determinism τ0.30 修正案:「改每日亲和分布分位数取 τ(rank-based)」",
+          "objection": "修正案自带镜像失效,且与裁决自己的 mega 条目内在矛盾。分位数 τ 固定的是『切开的 pair 比例』而非结构:低基数日(真实事件只有 1-3 个,全天单主题)的亲和分布整体偏高、同事件 pair 占大头,按分位取 τ 必然把刀切进同事件 mass 里,凭空制造假切分——恰是 mega 条目里承认合法的『999 帧刷题日/378 帧游戏局』日型。而这种日子在当前 regime 是常态不是边角:实测 6-26 全天 2 事件、6-25 3 个、6-20/6-22/6-23 各 4 个(~/.portrait/events)。固定 τ0.30(v4_local_cluster.py:18 实锤存在)在这些日子反而是对的。裁决把分位数化当严格更优方案,成本标『低』,唯一护栏是影子跑。",
+          "severity": "major",
+          "fix": "改混合式:分位数 τ 夹在绝对上下限内(floor/ceiling 用 6-07 标定值±稳健带),外加退化日检测(当日亲和分布单峰偏高→提示全天单/少事件,跳过分位切)。fixture 验收必须包含 6-26 这类 2 事件日——它恰好已在提议的 fixture 集里,但裁决没说要用它专测分位 τ 的这个失效。"
+        },
+        {
+          "target": "risky_determinism attach 阈值修正案:「改 rank-based:top-1 近邻+margin 判定」",
+          "objection": "纯 rank 化删掉了绝对下限,而绝对下限正是 rescue 被裁决自己列为安全(safe_determinism 第2条:『接不回就落 misc,不假不错标』)的根据。真孤儿 session 的 top-1 近邻是垃圾时,margin(相对第二名的领先)在全噪声里照样能过——rank 对『和所有东西都不像』这件事天然盲。修正案原文只讲『对 idf 重标度结构免疫』,一个 floor 都没提,等于把 rescue 的失效方向从 fail-empty 悄悄翻成 fail-wrong,直接违反裁决自己的 principle #3(失效方向优先于失效概率)。",
+          "severity": "major",
+          "fix": "rank+margin 只在过绝对(或每日归一后)下限的候选里启用;floor 保留为不变量,rank 只解决 idf 重标下的排序稳定性。修正案文本必须显式写明这个两段结构。"
+        },
+        {
+          "target": "risky_determinism gap>45min 条目的证据:「28.5% 多帧生产事件内部含 >45min 断裂(低编码日 34.4%)」",
+          "objection": "两处不实。①差分不复现:我在同一批生产事件上重算(member_frame_ids join portrait.sqlite frames.timestamp_ms,只读),总体 353/912=38.7% 多帧事件含 >45min 内部断裂,但按 tag 分型后低编码日 38.6% vs 高编码日 38.8%——完全持平,『低编码日更糟→复合暴露』的叙事没有数据支撑(W5 若用帧级浓度分型或不同定义,至少说明该差分对定义脆弱)。②证据来源违反项目自己的定案:这些『真实事件』是老云端管线的合并产物,项目 memory 明文『库里不再当 gold standard』且已知 8 个 bug——>45min 内部断裂完全可能本身就是生产误合,拿它证明『硬切会切断三成真实事件』是把非 gold 当 ground truth。",
+          "severity": "major",
+          "fix": "该条 risk 的量化重做:从原始 frames/session 层用 app 连续性链或人工抽验样本重估『真事件内 >45min 断裂率』,分日型报告;复合暴露(弱信号日 rescue 接不回)单独实测而非推断。修正案本身(保留切分+弱锚点日补 fallback 证据)方向可留,但优先级和成本要按重估结果定。"
+        },
+        {
+          "target": "safe_determinism 第3条『时间加法项 +0.15 保留不动』× τ/权重修正案的组合",
+          "objection": "耦合被无视:+0.15*exp(-gap/120) 的量纲标定在 0.7cos+0.3wjaccard 的原始亲和刻度上;一旦按修正案对通道做每日 z-score/rank 归一、τ 改分位数,底座刻度变了,绝对值 0.15 的 bonus 在亲和分布窄的日子变主导、宽的日子变忽略不计——perm24 的硬取证(0.37→1.00)只在旧刻度上成立,不会自动迁移。裁决一边给时间项发『全表最硬,保留不动』的免检牌,一边重铸它脚下的刻度,逐常数打补丁、不看联动。",
+          "severity": "major",
+          "fix": "τ、通道权重、时间项作为一个标定单元整体迁移:归一化方案定稿后在冻结回归集上重验 perm24 类取证,时间项系数随新刻度重标(或时间项也随通道一起归一);禁止单常数各改各的分批上线。"
+        },
+        {
+          "target": "全部修正案的元层面:日型前置门/锚点有效性门/mega 送检门/KS 哨兵/gap 分位微调",
+          "objection": "裁决一边判 B 类『绝对常数太多』死刑,一边在修正案里新铸至少 5 个手定常数:『当日代码锚点覆盖率低于阈值』『token 需 ≥2 帧稳定复现』『锚点自洽度低』(全新指标,无定义)『KS 距离超限』『gap 分位数』——没有一个给出标定来源、登记假设或分位数化处理,全都违反裁决自己的 principle #2(常数必须有来源和刷新通道),且可标定数据还是同一批 6-07 偏重的语料。常数问题被上移一层而非解决,每个门的标定工作量也没计入『成本低』。特别是『≥2 帧稳定复现』:裁决自己引 W5 说社交日每事件仅 2-5 个锚点,聊天流滚屏下 token 跨帧复现率天然低,这个防学习日毒弹药的门很可能把稀疏日仅有的锚点清零——用一个日型的解药毒死另一个日型,裁决对此零分析。",
+          "severity": "major",
+          "fix": "每个新门在修正案里补三件套:标定数据来源(必须含非 6-07 日型)、分位数/rank 形式或明示为 day-0 种子、命中率仪表。『≥2 帧复现』门先在 6-20/6-26 这类稀疏日上做锚点存活率测试,存活率塌方就改成分日型条件启用(仅高帧密度日开)。"
+        },
+        {
+          "target": "risky_determinism mega 条目修正案:「拆分决策可交 LLM 窄判」",
+          "objection": "这不是窄活。mega 桶(>12 甚至几十个 session)是全天上下文最大、最异质的输入,恰是本项目本地 LLM 记录最差的地方:HANDOFF.md 实锤 v2 章节化 mega-chapter 雪球(10 个事件 ≥40 session、最大 139,根因 continue_last 雪球),v1 merge 兜底 O(n²) 烧 6823 调用/123 分钟。让 LLM 对整个 mega 桶做拆/不拆判断,输入规模上等于把已实证失败的『全局划分』换个名字请回来;且这是又一个新调用点+新不稳定源,与对抗问题③正中。裁决把这条成本标『低』。",
+          "severity": "major",
+          "fix": "触发端保持确定性(size>阈值 AND 自洽度低,自洽度需先定义并标定);裁决端不喂整桶,复用已背书的 D 类机制——从桶内采样 pair 证据做 K=5 带证据多票二分(『这两个成员是同一任务线吗』),分歧率高才拆。LLM 每次只看一对卡片,才配叫窄判。"
+        },
+        {
+          "target": "amendments 整体(14 条)的成本核算",
+          "objection": "逐条标『低/中』但从不求和,且系统性漏算经常性人力:gold『翻盘需人工复核』(把自动门改成每次改动的人工义务)、影子样本每月复审、校准按周滚动重估、每条 B/C 规则的命中率/翻案率仪表、抽查回填校准——这套加起来是给单人本地 app 配一个小型 MLOps 平台。项目现实是一个人+并行 Claude session 维护,memory 里『sonnet 逐条核』的教训恰恰证明人工核验是本项目最贵的资源。一次性工程成本或许都『低』,但经常性维护负担是修正后路线图未评估的最大执行风险:门建了没人看,比不建更危险(假安全感)。",
+          "severity": "major",
+          "fix": "给 14 条修正案加两列:一次性成本 vs 经常性人力(次/月)。经常性人力预算封顶(比如每月 2 小时),超出的降级为『告警聚合+季度批处理』;仪表只建看得过来的 3-5 个核心指标(orphan 率/翻案率/告警数),其余并入 R8 留存被动记录。"
+        },
+        {
+          "target": "amendments 第2条:「R1 fixture 扩 ≥4 日型,成本低」",
+          "objection": "两处低估。①新 regime 日子的事件数极薄:实测 6-20 仅 4 个事件、6-26 仅 2 个(~/.portrait/events),一天只能贡献个位数的 dup/rescue 判例,回归信号密度远低于 6-07 的 42+13,想要等效统计力需要收多得多的天数——而每天 gold 都要人工逐条判读(6-07 那批的成本有目共睹)。②静态 4 日集重复同一制度错误的粗粒度版:regime change 已实测发生一次(5 月 21.2 事件/日 → 6 月下旬 ~6-8,目录计数复现),冻结的 4 天集在下次 regime change 后同样过期,裁决的 principle #5 要求 gold 分层却没要求滚动。",
+          "severity": "minor",
+          "fix": "fixture 选日前先按事件数/日型清点候选日,薄日子按日型打包凑判例数(如 6-20+6-22+6-23 合为一个『社交日型包』);fixture 集带季度滚动条款,每次哨兵报 regime change 后补收当期日型一天。"
+        },
+        {
+          "target": "amendments 第10条:「零成本漂移哨兵,KS 超限告警『今日偏离标定日』」",
+          "objection": "按本机数据,『偏离标定日』是多数日常态而非异常:tag 口径编码浓度中位 0.40 vs 6-07 的 0.82(W5 自己口径 0.55 vs 0.86,同方向),68%(W5 口径 33%)的日子低于 0.5。以 6-07 为基线的 KS 告警会在大多数日子响,『提示走稳健档』变成事实默认档——告警疲劳且哨兵失去信息量;『零成本』也没算 KS 阈值本身的标定(又一个新常数,见元层面攻击)。",
+          "severity": "minor",
+          "fix": "哨兵基线从『单一标定日』改『分日型滚动基线』(先粗分编码/非编码两型即可),告警语义改『偏离本日型历史分布』;KS 阈值以告警频率反推标定(如目标 <2 次/周)。"
+        },
+        {
+          "target": "risky_determinism UTC 日界条目的量化:「39.8% 生产事件的成员帧跨本地日界」",
+          "objection": "数字复现(我测 39.6%)但语义错位:该指标数的是『事件含本地日期≠目录 UTC 日期的帧』,即所有触及本地 20:00-24:00 时段的晚间事件——其中大量事件完整落在单个 UTC 日内,只是日期标签错,并没有被切。真正的『拆分源』危害指标是活动横跨 UTC 午夜(本地 20:00)——我实测 27/59≈46% 的日界两侧 10 分钟内都有帧,危害确实存在甚至更普遍,但裁决引的数字量的是标签错位不是切分。",
+          "severity": "minor",
+          "fix": "该条 risk 拆成两个指标分别引用:①日期标签错位率 ~40%(影响展示/与生产对照可比性);②日界活跃横跨率 ~46%(真拆分危害,修开窗层的依据)。结论和优先级不变,证据链更正。"
+        },
+        {
+          "target": "amendments 第13条:「『末现优先』降级为挂模型版本的软信号」",
+          "objection": "末现是 exactly-once 三段(壳→锚点门→末现)的决胜腿:多桶同时过锚点门时靠它保证唯一归属。裁决一边把 exactly-once 列为最硬的 A 类结构不变量,一边把它的 tie-breaker 软化,却没指名替代的确定性决胜规则——软信号打平时归谁?不答这个问题,exactly-once 的『恰好一次』就从构造保证退化为概率性质,与 safe_determinism 第1条自相矛盾。",
+          "severity": "minor",
+          "fix": "软化前先指定新的确定性决胜链(如:软信号分→平局回退末现→再平回退 session id 序),并给 exactly-once 断言加『无 session 双归属』的运行时校验,证明软化后不变量仍成立再落地。"
+        }
+      ],
+      "survives": "裁决的骨架在数据核查后站得住:①核心裁线「结构 vs 内容」而非「确定性 vs 模型」——A 类结构保证的分析性论证、D 类共识归并、「LLM 只做窄活」的定案均未被攻破;②单日 gold 门是最大制度性风险的判断被实证加强:6-07 的极端性复现(tag 口径编码浓度 0.82 vs 全库中位 0.40,非编码日实为多数而非 33% 少数),regime change 复现(5 月 21.2 事件/日 → 6 月下旬 ~6-8,目录计数),且提议的 4 个 fixture 日型逐一查实(5-10 确为微积分刷题日、6-20 社交/音乐、6-26 生活事务、6-30 混合);③B 类绝对常数的风险定性成立:τ0.30/cap30 实锤在 v4_local_cluster.py:18,τ 分位数化的「方向」正确;④UTC 日界升级为独立修复项被加强(39.6% 标签错位复现+46% 日界活跃横跨新证);⑤R8 留存防伪标签偏差的 schema 扩充无懈可击且时间敏感性(攒数据前必须做)判断正确。被攻破的不是结论而是执行层:三个修正案自带未分析的镜像失效(纯 rank τ 在低基数日、纯 rank attach 删 floor、mega 交 LLM 整桶判),A 类安全证据被夸大为 57 天实证(实际只跑过 1 天),gap>45min 的差分叙事不复现且建立在非 gold 生产合并上,修正案自己新铸 ≥5 个未标定常数违反自订 principle #2,以及 14 条修正案的经常性人力成本从未求和。修正版应保留裁决全部方向性结论,替换上述执行细节:混合式(分位+绝对界)替代纯 rank、τ/权重/时间项作为耦合单元整体重标、mega 用 D 类采样对判替代整桶 LLM、证据口径全部改为可复现表述。"
+    },
+    "report": "# 确定性算法的局限性调研\n\n> 综合五路调研:W1 文献(Bitter Lesson 论争/神经符号/弱监督/阈值脆弱性)、W2 业界实践(AIOps/反欺诈/记忆系统/护栏事故)、W3 组件逐条审计、W4 七日型红队走查、W5 本机 61 天真数据检验;裁决已经过一轮对抗攻击校准,被攻破的执行细节在本报告中已替换,并逐条点名。\n\n---\n\n## 1. 直接回答:太多确定性会不会导致局限性\n\n**会,但局限不来自\"确定性的量\",而来自把\"判断\"错当\"保证\"来冻结。** 五路调研在此完全收敛:确定性组件要分两种——一种是**结构保证**(exactly-once 去重、分区断言、orphan 池兜底、共识归并、grep 接地验证、确定性 control flow),它们内容无关、跨日型正交、失效当天报警且优雅降级,业界与文献一致认定该硬且越硬越好,是未来微调的 reward(奖励信号)基建;另一种是**被冻成绝对常数的语义判断**(τ0.30 亲和阈值、attach 0.06/0.12/0.15、mega size>12 强拆、lift_cos 连接词硬杀、chrome/残渣冻结串表),它们全部标定在 2026-06-07 这个 93 分位极端重编码日上,而 57 天真数据显示中位日编码浓度只有 0.55、语料内部已实际发生一次 regime change(分布切换:暑假后事件/日从 21.2 掉到 7.1)——**漂移不是假设,是已观测事实**。局限的三个具体形态是:①语义常数单日标定且无再标定机制;②单日 gold 门(\"42 例翻盘=0 才放行\")给单一日型永久否决权,是制度性封顶;③确定性裁决不去噪直接喂回微调闭环,模型会精确继承规则盲区(伪标签确认偏差)。修法**不是把活还给 LLM**(LLM 自由划分的双稳 51% 摇摆率是本项目实证教训),而是:B 类常数分位数化但夹绝对界、硬杀改软信号+日型前置门、串表改数据驱动、回归集按日型分层、留存带冲突标记——**把\"绝对常数太多\"修掉,把\"确定性结构\"原样留住**。\n\n---\n\n## 2. 文献与业界怎么说(W1/W2)\n\n### 2.1 Bitter Lesson 在本项目场景不适用\n\n- Sutton 原论点(2019):利用算力的通用方法(搜索+学习)长期胜过内置人类知识,但其前提是算力成本指数下降的**长时程**叙事([原文](http://www.incompleteideas.net/IncIdeas/BitterLesson.html))。\n- 关键反驳直接命中本项目:Chakrabarti 指出\"在固定时间点、固定数据量下,Bitter Lesson 不做任何断言\"——数据受限时,结构是剩下的向上杠杆([obviouslywrong.org](https://www.obviouslywrong.org/p/the-bitter-lesson-is-misunderstood))。本项目=固定用户/机器/任务 + 仅 ~246 条真训练数据 + 本地固定算力,**恰在不适用区**。\n- Brooks 补充:所有\"无先验\"成功案例都灌注了人类巧思(CNN 的平移不变性即人工先验),正确教训是核算总成本([A Better Lesson](https://rodneybrooks.com/a-better-lesson/));beren.io 给出判据:不封顶的**宽结构先验**(不变量/对称性)是好结构,Bitter Lesson 警告的是会封顶的**窄内容规则**。\n- **文献共识的分界线**:确定性分①宽结构先验(不变量、校验约束)——公认必要;②窄的内容特定编码(黑名单、绝对阈值、领域正则)——才会封顶漂移。审计应按此线切,不按\"是否确定性\"切。\n\n### 2.2 神经符号分工与\"LLM 只做窄活\"的背书\n\n- 当代护栏文献分工明确:确定性负责验证/不变量/schema 校验(\"compliance-by-construction\",构造即合规),LLM 负责语义提议,但输出必须过确定性验证门([arXiv 2604.01483](https://arxiv.org/html/2604.01483v1))。\n- AlphaGeometry(Nature 2024)/FunSearch 的成功范式 = LLM 窄提议 + 符号引擎确定性推演([Nature](https://www.nature.com/articles/s41586-023-06747-5));Anthropic《Building Effective Agents》同向:定义清晰的任务用 workflow(预定义代码路径)而非自主 agent([链接](https://www.anthropic.com/research/building-effective-agents))。\n- Jason Wei \"验证不对称性\":确定性验证器(grep 接地/lint/冻结回归集)不是学习的对立面,而是未来微调/RL 的 reward 前提资产([verifier's law](https://www.jasonwei.net/blog/asymmetry-of-verification-and-verifiers-law))。\n\n### 2.3 \"规则先行、后学习\"的正统性与陷阱\n\n- Google Rules of ML #1:\"能给 100% 提升的 ML,启发式先拿到 50%;没数据之前别上 ML\"([Zinkevich](https://developers.google.com/machine-learning/guides/rules-of-ml))——与\"确定性先跑、攒数据、后微调\"完全同构。Rule #3 给出换模型判据:**启发式纠缠到不可维护**才换,不是启发式本身坏;Rule #7:迁移时把老启发式转成模型特征,别丢。\n- Snorkel 弱监督范式([Stanford](https://ai.stanford.edu/blog/weak-supervision/)):规则作标注函数(LF)喂学习器,判别模型能泛化超出规则覆盖面——**规则作监督源优于规则作最终系统**。但 Snorkel 靠多个相互冲突的噪声源去噪;单一管线的裁决若当 gold 落库,微调模型会精确继承规则盲区。伪标签文献([arXiv 2307.02075](https://arxiv.org/pdf/2307.02075))实证:自家管线输出上训练会正反馈固化错误;标准缓解=置信度过滤+人工抽查回填+冲突样本重点采样。\n- 阈值脆弱性共识:绝对静态阈值在漂移下必然失灵,标准对策按强度递增=分位数/rank 阈值 → 在线分位估计 → EVT(极值理论)自动阈值 → KS 距离(分布差异检验)漂移哨兵。**单日标定的绝对阈值(τ0.30、attach 三档、gap 30-45min)正是文献点名的高危形态。**\n- MLOps 标准执行机制:champion-challenger(冠军-挑战者)/shadow mode(影子模式:新参数跑同一份生产输入,只记录不生效,对照后带回滚地切换)——这是\"调参不敢动\"的标准解。\n\n### 2.4 业界标本:确定性怎么成功、怎么腐烂\n\n| 标本 | 教训 |\n|---|---|\n| **Drain**(纯确定性日志聚类,[ISSTA'24 评测](https://arxiv.org/pdf/2308.10828)) | 确定性做\"分组/结构\"最持久抗漂移(分组准确率至今最高);但语义抽取准确率仅 ~0.470——**天花板在语义不在结构**,恰是分给 LLM 的那部分活。漂移解法不是弃规则而是外挂适配层(Drain3 的 masking 配置化+LRU 淘汰)。没有任何生产系统\"每条日志都问 LLM\"。 |\n| **SpamAssassin FH_DATE_PAST_20XX**([事故](https://www.roguelazer.com/blog/spamassassin-2010-bug/)) | 写死的常数携带隐含\"世界状态假设\",假设过期时规则**静默反噬**,爆发点远在标定日之后(2010-01-01 全球误判);官方修复又埋了 2020 年的雷。 |\n| **Google Photos \"gorilla\" 黑名单**([8 年未复审](https://petapixel.com/2023/05/22/googles-photos-app-is-still-unable-to-find-gorillas/)) | 无 sunset(退役日程)、不可观测的护栏,会把临时补丁变永久天花板。**护栏本身不封顶,不可观测+无复审的护栏才封顶。** |\n| **Stripe Radar / 反欺诈行业**([规则生命周期](https://stripe.com/guides/radar-rules-101)) | 标准工序:backtesting(历史回放)→ shadow mode 至少一周 → 按规则粒度监控命中率/误伤率 → 定期评审 → 淘汰与模型信号重复的规则。\"规则通过回测仍可能在线上失败\"。 |\n| **记忆系统同行**(Rewind/screenpipe/mem0) | Rewind=纯确定性 app/窗口切分;screenpipe=无语义事件层;mem0=最 LLM 化,但外层仍是确定性三段流水线+四选一窄决策。**本项目的\"session→语义事件\"聚合层业界没人真正做过,混合架构恰落在 Rewind 与 mem0 之间**——连全 LLM 派的 control flow 也是确定性的。 |\n\n---\n\n## 3. 真数据检验:61 天日型分布上确定性栈的暴露面(W5)\n\n对 `~/.portrait/events/` 61 个日目录(57 天有事件、960 个生产事件)+ `portrait.sqlite` 206K 帧的只读审计:\n\n**6-07(标定日)是双重不代表的极端日。** 编码浓度 0.86,排 57 天的 93 分位;事件数 28 排 91 分位。全体分布:中位 0.55(p25=0.40, p75=0.69);33% 的日子编码浓度 <50%,14% <30%。对抗复核用 tag 口径得到更极端的结论(中位 0.40、68% 的日子 <0.5)——口径不同但方向一致:**\"偏离 6-07\"是多数日的常态,不是边角。**\n\n**语料内部已发生一次 regime change。** 5 月(学期+AP 季)均值 21.2 事件/日、编码浓度中位 0.60;6/15 后(暑假)7.1 事件/日、浓度 0.45。近两周的日型(少而长、游戏/社交/生活)和标定日所在时期是两个世界。对抗复核复现了这一点(6 月下旬 ~6-8 事件/日)。**换天漂移风险应从\"已知\"上调为\"已观测\"。**\n\n**锚点通道的失效是双模式,不是单纯\"没弹药\":**\n- 社交/生活日=**死通道**:6-20(Discord+Spotify 日)每事件仅 2-5 个 distinct 锚点且多为噪声;6-26 的 I-94 文书事件 13 帧 0 锚点;\n- 学习日=**毒通道**:5-10(AP 微积分刷题日)单事件 _CAMEL 命中 2457 次,999 帧事件产出 1013 个\"锚点\",全是手写/PDF 的 OCR 碎渣(\"learnMachine\"\"pdfJoyprectice\"),且跨事件共享→制造无关事件间的**假亲和**;\n- 30 天 IDF 救不了毒通道:它能压跨天背景噪声,但对\"当日一次性 OCR 噪声\"**反向加权**(判其稀有反而抬高);\n- _ERR 正则实测跨事件泄漏:\"AudioError\" 在 6-07 的哲学闲聊事件命中 144 次(背景终端滚屏)、修 bug 事件 210 次——同一锚点横跨语义完全不同的事件。\n\n**时间结构:** 多帧生产事件中约三成内部含 >45min 断裂,硬切暴露面真实存在。⚠️ 但有两点经对抗校准必须如实说明:①\"低编码日更糟(34.4% vs 25.1%)\"的**差分在对抗方复算下不复现**(复算得 38.6% vs 38.8%,持平)——该差分对分型口径脆弱,\"复合暴露\"叙事目前证据不足;②这些\"真实事件\"是**老云端管线的合并产物**,项目已定案\"库里不再当 gold standard\",>45min 断裂本身可能就是生产误合。**结论降级为:硬切暴露面存在且量级可观,但精确数字与日型差分待用 app 连续性链/人工抽验重估。**\n\n**跨日界(经对抗校准,拆成两个指标):**\n- 日期**标签错位率 ~40%**(事件含本地日期≠UTC 目录日期的帧;机器 TZ UTC-4,日界落在本地 20:00)——影响展示与生产对照可比性;\n- 日界**活跃横跨率 ~46%**(日界两侧 10 分钟内都有帧)——这才是真拆分危害,是修开窗层的依据。原裁决把前者当后者引用,结论不变、证据链更正。\n\n**mega 暴露面:** 非编码日的合法单主题事件天然巨大(999 帧刷题、378 帧游戏、245 帧 Spotify),size>12 固定阈值会碎尸合法事件。**低基数日是当前 regime 的常态**:实测 6-26 全天仅 2 个事件、6-25 3 个、6-20/6-22/6-23 各 4 个。\n\n**A 类结构组件在本次审计中未发现日型相关的失效面**——但见第 5 节对该证据口径的校正。\n\n---\n\n## 4. 日型红队断点表(W4 精华)\n\n| 日型 | 主要断点 | 失效方向 |\n|---|---|---|\n| ①纯会议日 | lift_cos 把会议主题词(自然语、高 df)当连接词杀掉,regex 豁免救不了;3h 真会议触发 mega size>12 被假劈 | **危险**(错合/假子事件) |\n| ②游戏/娱乐日 | 短碎 session 快速切换,时间项把语义无关活动粘成假混合事件;chrome 串表不匹配娱乐 UI→泄漏进 digest | **危险**(假混合)+ 碎片安全 |\n| ③新项目启动日 | **好消息**:格式向正则对新文件名/新驼峰照抓(day-1 即工作);学习型组件(IDF/词典/先验)无信号但\"只加成不排斥\"约束下优雅退化——该约束被验证正确,应升级为硬不变量 | 安全(瞬态过合并) |\n| ④出差/旅行日 | gap>120min→时间项零胶水,无共享锚点→全落 singleton/misc;120min 衰减常数按密集编码日错调 | 安全但低价值(诚实碎片化) |\n| ⑤跨午夜夜猫子 | 危险在**聚类栈之前的开窗层**:UTC 日界把一夜工作硬切两天两事件,carry-over 软链不根治,rescue/exactly-once 都够不着 | **半危险**(拆而非错标) |\n| ⑥app 大更新日 | **全栈最脆**:chrome 冻结串表+残渣黑名单+dev 信号 token 全是纯字符串,改版即静默失灵→chrome 泄漏误导小模型+mega 杂物抽屉复活 | **危险**(错标) |\n| ⑦中文纯写作日 | 聚类靠时间项扛(安全粗桶);但摘要 grep 接地空转——prompt 强制\"引技术锚点\"而一个都没有→LLM 编造或产模糊摘要,接地闭环抓不住中文幻觉 | 结构安全、**质量半危险** |\n\n**复合失效(红队最重要的发现):** 非代码日在抽掉代码锚点通道的同时,恰好让剩下两条通道落到各自最弱区间——嵌入对\"同子系统不同任务\"不判别(全挤 cos 0.7-0.9),时间项在稀疏日零胶水/交错日乱粘。6-07 之所以稳,是因为三通道(锚点/嵌入/时间)**互为冗余**;非代码日只剩两条弱通道且无冗余,任一 B 类常数错调直接穿透到产出。**鲁棒性的真指标是信号冗余度,不是单通道精度。** 补救=为非代码日型补第三条独立通道(app+window 归属先验、人名专名、时间块结构),而不是加更多阈值。\n\n---\n\n## 5. 裁决:该保留的 / 该修正的(经对抗校准)\n\n### 5.1 该保留的确定性(不动,或只微修)\n\n| 组件 | 理由 | 微修 |\n|---|---|---|\n| exactly-once/分区断言/orphan 池/标脏重生成 | 内容无关结构不变量,失效可见(断言当天报警)且优雅;compliance-by-construction 层 | 真双属性 session 加 secondary_refs 软链逃生门(gold 里 9 个弱判例),不破分区 |\n| rescue(attach→singleton,by construction) | 失效方向安全:接不回落 misc,不假不错标 | 弱锚点日补 fallback 证据(见 5.2) |\n| 时间加法项 +0.15·exp(-gap/120) | 参数平台宽已验,加法 bonus 失效优雅,有 perm24 硬取证 | ⚠️ 但**不能单独发免检牌**——见 5.2 耦合条目 |\n| D 类共识分区/多票二分(N=5/K=5) | 即 Evidence Accumulation 共识聚类([文献](https://link.springer.com/article/10.1007/s10994-013-5339-6)),机制与数据分布无关;\"花算力买稳定\"与 Bitter Lesson 同向 | 被否决的少数票落库进 R8 留存(微调素材) |\n| C 类正则的\"编码向\"定位 | 格式向对未见词汇天然泛化(新项目 day-1 照抓),非编码内容 fail-empty 不 fail-wrong,kw 通道已兜底(实验 1:非编码段 wjaccard 有无正则完全一致) | 保持编码向+R9 结构化专名;**不要**扩自然语域(会引入 fail-wrong);毒弹药在有效性门上修(见 5.2) |\n| 摘要 grep 接地+标题 lint | verifier's law 意义上的微调 reward 资产 | 验对象严格限定技术 token;fallback 删单个存疑锚点非废整摘要;\"动词开头\"降软规则 |\n| E 类学习型(滚动 IDF/词典/app 先验/carry-over) | B/C 冻结参数的设计解药(反封顶层),与 Drain3 LRU 同构 | \"只加成不排斥\"升级为硬不变量(合成新项目日单测:产出不得差于纯 regex+时间基线) |\n| \"LLM 只做窄活\"的确定性 control flow | 四路背书(AlphaGeometry/FunSearch/Anthropic/mem0);本项目 LLM 自由划分双稳有实证 | 定案不重开 |\n| F 类机制本身(置信度落库+抽查回填+回归机制) | 文献标准解 | gold **内容**要扩(见 5.2) |\n\n**⚠️ 证据口径校正(对抗方攻破,必须如实改口):** 原裁决称 A 类\"57 天审计零日型暴露面\"是**证据膨胀**——新管线只在 6-07 一天真跑过,57 天是老云端管线的产物,运行时不变量违规不可能在从未运行的日子上被观测到。正确口径:**A 类的证据 = by-construction 论证 + 6-07 单日执行 + 57 天日型多样性佐证(仅说明域内存在这些日型)**。fixture 扩日型后,A 类断言必须在每个新日型上真跑并落断言日志,才允许写\"多日型零暴露\"。\n\n### 5.2 该修正的确定性(逐条,修正方式为对抗校准后版本)\n\n| # | 组件 | 风险 | 修正方式(校准后) |\n|---|---|---|---|\n| 1 | **τ0.30 绝对亲和阈值** | 全表唯一硬断点。实验 2 实证:锚点通道弱化时亲和分布整体上移,固定 τ 把全天糊成垃圾桶(24 桶塌 14、4 桶顶 cap30、最大桶横贯全天);τ 重标 0.51 即恢复 41 桶 | **混合式,不是纯分位数**(原修正案被攻破:纯分位 τ 在低基数日——6-26 全天仅 2 事件——必然把刀切进同事件 mass,凭空制造假切分,固定 τ0.30 在这些日子反而是对的)。改:分位数 τ **夹在绝对上下限内**(floor/ceiling 用 6-07 标定值±稳健带)+ 退化日检测(当日亲和单峰偏高→跳过分位切);fixture 验收必须含 6-26 这类 2 事件日专测此镜像失效;影子跑后切换 |\n| 2 | **attach 0.06/0.12/0.15 绝对阈值** | 绝对值随 idf 重标随时翻盘(R3+R6 冲突已实锤) | **两段结构,不是纯 rank**(原修正案被攻破:纯 top-1+margin 对\"和所有东西都不像\"天然盲,会把 rescue 从 fail-empty 翻成 fail-wrong,违反自订原则)。改:**绝对(或每日归一后)下限保留为不变量**,过 floor 的候选内再用 rank+margin 解决 idf 重标下的排序稳定性 |\n| 3 | **τ/通道权重/时间项的耦合**(原裁决漏项,对抗方补) | +0.15 的量纲标定在原始亲和刻度上;通道归一/τ 分位化后刻度变了,perm24 取证不自动迁移——一边发免检牌一边重铸脚下刻度 | **三者作为一个标定单元整体迁移**:归一化方案定稿后在冻结回归集上重验 perm24 类取证,时间项系数随新刻度重标;禁止单常数各改各的分批上线 |\n| 4 | **lift_cos<0.15 连接词硬杀** | 非代码日的判别锚点本身是自然语(会议/写作主题词),高 df 被杀=杀掉当日唯一判别信号;现有 gold 全是代码日测不出 | 加\"当日锚点画像\"前置门:当日代码锚点覆盖率低时禁用硬杀、只留软降权。⚠️ 该门的阈值本身是新常数,须按 5.3 三件套标定 |\n| 5 | **0.7/0.3 固定通道权重** | 中位日 wjaccard 已退化,有效亲和≈0.7cos 封顶;本质是模型参数却永久手定 | 短期:保留为先验+每日通道 rank/z-score 归一(与 #3 同单元);长期:从 R8 留存的同事件 pair 拟合 logistic 回归(逻辑斯蒂回归,一个轻量统计模型,不需要 MLX);留存 schema 现在就存 pair 级信息 |\n| 6 | **gap>30-45min 硬切** | 硬切暴露面约三成事件(但精确数字与\"低编码日更糟\"差分**未经受住对抗复算**,且证据源是非 gold 老管线合并) | 切分机制保留(人类节律低漂移);**量化重做**:从原始 frames/session 层用 app 连续性链或人工抽验重估真断裂率、分日型报告后再定优先级;rescue 在低锚点日加 app 连续性/browser_url 作 fallback 证据 |\n| 7 | **mega size>12 强拆** | 999 帧刷题/378 帧游戏/3h 会议都是合法单事件,固定 size 强拆制造假子事件(fail-wrong) | 从\"强拆门\"改\"送检门\":size>阈值 **AND** 锚点自洽度低才拆。**裁决端不交 LLM 整桶判**(原修正案被攻破:mega 桶是全天最大最异质输入,整桶判等于把已实证失败的\"全局划分\"换名请回来,HANDOFF 有 mega-chapter 雪球实锤)——改为复用 D 类机制:桶内采样 pair 做 K=5 带证据二分(\"这两个成员是同一任务线吗\"),分歧率高才拆。\"锚点自洽度\"是新指标,须先定义并标定 |\n| 8 | **残渣黑名单**(skip-permissions 等) | SpamAssassin 式规则腐烂:precision≈100% 但 recall 冻结,新 CLI 工具零覆盖;DF 分位数法单独不可用已实证(先杀 writingcaptureworker.swift 再杀 skip-permissions) | 降级为 day-0 种子(标注手工/自动来源);长期主力=R14 跨天统计自动入表(残渣签名=跨天复现+日内弥散+跨多 app);验收=\"新工具 ≤3 天自动入表\",当天泄漏接受(外观问题,优雅降级) |\n| 9 | **chrome.py 冻结串表+dev 信号 token** | 全栈最脆:app 改版日静默失灵→chrome 泄漏误导小模型+mega 复活;R14 只学语义连接词不覆盖 UI chrome,**现路线图对此无解** | 改当日高频样板 token 检测(同 app+相似位置高频重复的 OCR 片段=chrome),数据驱动剥离;app 改版合成日进 acceptance 门 |\n| 10 | **学习日毒锚点+IDF 反向加权** | _CAMEL 被手写/PDF OCR 碎渣打爆(2457 次/事件),噪声跨事件共享造假亲和;IDF 对当日一次性噪声反而加权 | 加锚点有效性门(如 token ≥2 帧稳定复现+绑定来源 app)。⚠️ 对抗方警告:社交日每事件仅 2-5 个锚点,聊天滚屏下跨帧复现率天然低,**该门可能把稀疏日仅有的锚点清零(用一个日型的解药毒死另一个日型)**——先在 6-20/6-26 上做锚点存活率测试,塌方则改分日型条件启用(仅高帧密度日开) |\n| 11 | **UTC 日界开窗** | 真危害=日界活跃横跨率 ~46%(修正后的指标;~40% 是标签错位,另算),聚类栈之前的结构性拆分源,carry-over 软链不根治 | 开窗层改本地 TZ 或活动 gap 日界,从\"R16 顺带缓解\"升级为独立修复项;分区断言明确跨天语义 |\n| 12 | **单日 gold 门(\"翻盘=0 才放行\")** | **制度性封顶,全表最大**:93 分位极端日的单人判读获得永久否决权;回归集本身只覆盖代码日 | fixture 按日型分层扩收(见第 7 节第 2 条的校准版);\"翻盘=0\"改\"翻盘需人工复核\"软门 |\n| 13 | **\"摘要必引技术锚点\"隐含假设** | 中文写作/会议日 harvest 返回空→接地闭环空转→LLM 编造或产模糊摘要;学习日\"验上\"的可能是 OCR 垃圾 | 接地要求条件化:非代码日走 R9 结构化专名路径(人名/地名/数字/引语);接地门前置锚点有效性检查 |\n| 14 | **R14 滚动 DF × R16 carry-over 内生冲突** | 连修 3 天的 bug 锚点被跨天 DF 当环境词降权,而 carry-over 恰恰依赖它们——两条路线图条目互相拆台 | R14 加\"日内集中度\"维度:跨天复现+每日集中单线=任务锚点(保权);跨天复现+日内弥散+跨多 app=环境词(降权) |\n| 15 | **R8 留存只存最终裁决** | 伪标签确认偏差(文献实证):单管线裁决当 gold,微调模型精确继承规则盲区 | schema 立即扩:①置信度②规则间/规则与 LLM 冲突标记③人工修正 gold 标记④pair 级亲和⑤共识少数票;低置信+冲突样本作抽查优先池;**必须在攒数据开始前做**,否则前期数据废一半 |\n| 16 | **\"末现优先\" tie-breaker 软化**(原裁决的修正案本身被攻破) | 末现是 exactly-once 三段的决胜腿;软化而不指定替代决胜规则,\"恰好一次\"就从构造保证退化为概率性质,与 A 类定位自相矛盾 | 软化前先指定确定性决胜链(软信号分→平局回退末现→再平回退 session id 序),并加\"无 session 双归属\"运行时校验,证明不变量仍成立再落地 |\n\n### 5.3 点名:过度修正与修正不足\n\n**过度修正(原裁决开的药方本身有毒,已在上表替换):**\n1. **τ 纯分位数化**——镜像失效:低基数日(当前 regime 的常态)分位切必然假切分;已改混合式(分位+绝对界+退化日检测)。\n2. **attach 纯 rank 化**——删掉绝对 floor 等于把 rescue 从 fail-empty 翻成 fail-wrong,违反裁决自订的\"失效方向优先\"原则;已改两段结构。\n3. **mega 拆分\"交 LLM 窄判\"**——整桶判不是窄活,是已实证失败的全局划分借尸还魂;已改 D 类采样 pair 对判。\n4. **KS 哨兵以 6-07 为单一基线**——\"偏离标定日\"是多数日常态,告警会天天响、稳健档变事实默认档(告警疲劳);已改分日型滚动基线+按目标告警频率(如 <2 次/周)反推 KS 阈值。\n5. **元问题:修正案自己新铸 ≥5 个未标定常数**(\"锚点覆盖率阈值\"\"≥2 帧复现\"\"锚点自洽度\"\"KS 超限\"\"gap 分位\")——常数问题被上移一层而非解决,违反自订原则 #2。补丁:每个新门配三件套=标定数据来源(必须含非 6-07 日型)+分位/rank 形式或明示 day-0 种子+命中率仪表。\n\n**修正不足(原裁决没改够或没看到,已补):**\n1. **A 类安全证据夸大**——\"57 天零暴露\"实为\"1 天执行+57 天读别人输出\";口径已改,并要求新日型真跑落断言日志。\n2. **gap>45min 的差分叙事**——对抗复算不复现且证据源非 gold;量化降级待重估。\n3. **常数联动被无视**——τ/权重/时间项必须作为耦合标定单元整体迁移,原裁决给时间项发免检牌的同时重铸其刻度。\n4. **UTC 39.8% 语义错位**——量的是标签错位不是切分;真切分危害指标(~46% 横跨率)已补。\n5. **经常性人力成本从未求和**——14 条修正案逐条标\"低/中\"但加起来是给单人本地 app 配一个小型 MLOps 平台;人工复核/每月复审/按周重估/逐规则仪表全是经常性负担,而人工核验是本项目最贵的资源(\"sonnet 逐条核\"教训)。**门建了没人看,比不建更危险(假安全感)。** 补丁见第 7 节。\n6. **fixture 静态 4 日集**——薄日子(6-20 仅 4 事件、6-26 仅 2 事件)判例密度远低于 6-07 的 42+13,且冻结的 4 天集在下次 regime change 后同样过期——重复同一制度错误的粗粒度版。补丁:按日型打包凑判例数+季度滚动条款。\n\n---\n\n## 6. 沉淀的设计原则\n\n1. **按\"结构 vs 内容\"划线,不按\"确定性 vs 模型\"划线。** 内容无关的结构保证(不变量、分区、验证门、共识归并、control flow)默认确定性且越硬越好;内容特定的语义判断(阈值、词表、语义正则)默认会漂移,上线必须自带自适应机制或至少一块仪表。\n2. **常数必须有来源和刷新通道,且新门不许裸铸常数。** 任何写死的数字都携带一个\"世界状态假设\"(τ0.30 假设=6-07 式亲和分布),须登记该假设;绝对值只允许作 day-0 种子,长期参数来源交给 E 层。**任何新引入的门/阈值必须配三件套:标定数据来源(含非标定日型)、分位/rank 形式或明示 day-0 种子、命中率仪表**——否则只是把常数问题上移一层。\n3. **耦合的常数作为标定单元整体迁移。** 刻度变了(归一化/分位化),同刻度上的所有系数(时间项、权重)与其取证一起重验;禁止逐常数分批上线。\n4. **失效方向优先于失效概率。** 偏向 fail-empty/优雅降级(锚点空→kw 兜底、接不回→misc 池),警惕 fail-wrong(硬杀、强拆、错标);硬杀/强拆类操作必须配前置门或降为软信号+送检;**rank/相对判定永远保留一个绝对 floor 兜底**。\n5. **LLM 只做窄活(\"窄\"以单次输入的规模和异质度定义,不以调用名义定义),窄活输出必须过确定性验证门;对称地,每个确定性护栏必须可观测(拒掉了什么留影子)、有复审日程、可拆卸**(可单独关闭+影子对照)——不可观测且无 sunset 的护栏才封顶。\n6. **gold/回归集必须按分布(日型)分层且滚动,单点标定的门只能是软门;运行时证据只在真跑过的分布上主张。** 新阈值一律影子跑对照后带回滚切换。\n7. **鲁棒性的真指标是信号冗余度而非单通道精度。** 任何日型下保证 ≥2 条独立判别通道(锚点/嵌入/时间/app 归属)在线;发现某日型只剩单通道时,正确动作是补一条独立通道,不是给现有通道加阈值。\n8. **维护预算是一等约束。** 经常性人力(核验/复审/重估)封顶预算,超出的降级为告警聚合+批处理;仪表只建看得过来的核心几个。\n\n---\n\n## 7. 对 T0-T3 路线图的修正清单(经对抗校准的最终版)\n\n1. **T0/T1 优先级重排:τ 混合式改造最优先**(分位数夹绝对上下限+退化日检测,唯一硬断点,实验 2 有复现脚手架),比 R6 残渣治理紧迫;attach 两段结构(floor 不变量+rank/margin)同批;**τ/通道权重/时间项作为一个标定单元整体迁移**,新刻度上重验 perm24 类取证后才切换。\n2. **R1 fixture 按日型分层**:6-07(重编码)+学习日(5-10)+社交音乐(6-20)+生活/游戏混合(6-26 或 6-30);**薄日子按日型打包凑判例数**(如 6-20+6-22+6-23 合为\"社交日型包\");fixture 集带**季度滚动条款**(哨兵报 regime change 后补收当期日型);gold 翻盘门改\"翻盘需人工复核\"软门;**A 类断言在每个新日型上真跑落日志**,此后才可主张多日型安全。\n3. **R7 lift_cos 加日型前置门**(代码锚点覆盖率低→禁硬杀只软降权);门的阈值按原则 #2 三件套标定。\n4. **新增:锚点有效性门**(≥2 帧复现+来源 app 绑定),**先在 6-20/6-26 做稀疏日锚点存活率测试**,塌方则分日型条件启用;IDF 不单挑,必须与帧内复现联合。\n5. **R6 黑名单降 day-0 种子;R14 加\"日内集中度\"维度**(一并解 R14/R16 内生冲突);残渣验收=\"新 CLI 工具 ≤3 天自动入表\"。\n6. **新增:chrome 剥离数据驱动化**(当日高频样板 token 检测替代冻结串表);app 改版合成日进 acceptance 门。\n7. **mega 改送检门**:size>阈值 AND 锚点自洽度低(指标须先定义标定);拆分裁决用 D 类采样 pair 多票二分,**不喂 LLM 整桶**。\n8. **新增:开窗层日界修复**(本地 TZ 或活动 gap 日界),独立于聚类栈;引用指标更正为\"~46% 日界活跃横跨率\";分区断言明确跨天语义。\n9. **R8 留存 schema 立即扩充**(置信度+冲突标记+人工修正 gold+pair 级亲和+共识少数票),**在攒数据开始前完成**;低置信/冲突样本作抽查优先池,修正后标签回写留存库。\n10. **F 层漂移哨兵**:每日落库亲和分布/事件数/orphan 率/锚点密度;基线用**分日型滚动基线**(先粗分编码/非编码两型),告警语义=\"偏离本日型历史分布\",KS 阈值按目标告警频率(<2 次/周)标定;校准按周滚动重估。\n11. **护栏可观测性纪律**:grep 接地/lint/黑名单拒掉的样本留影子落库+定期复审;每条 B/C 规则登记隐含假设;新阈值影子跑 1-2 周对照后切换(champion-challenger)。\n12. **维护成本核算(新增,对抗方要求)**:全部修正案标注两列成本(一次性 vs 经常性人力·次/月);**经常性人力封顶预算(建议每月 ≤2 小时)**,超出的降级为告警聚合+季度批处理;仪表只建 3-5 个核心指标(orphan 率/翻案率/告警数),其余并入 R8 被动记录。\n13. **规则退役机制(接 T3)**:B 类阈值集中配置、C 类词表外置、每条规则可单独关闭+影子对照;微调模型在 challenger 位稳定胜出某条规则时按条退役——脚手架可拆卸,不变永久承重墙。\n14. **A 类两处微修**:secondary_refs 软链(消化 gold 9 个弱判例);\"末现优先\"软化**须先指定确定性决胜链**(软信号→平局回退末现→再平回退 session id 序)+\"无双归属\"运行时校验。\n15. **文档诚实保留点补两条**:①\"差距全在架构不在智商\"及全部取证结论在代码密集日成立,非代码日型存在复合退化(信号冗余度塌缩),需补独立判别通道;②gap>45min 的量化与日型差分基于非 gold 老管线产物,待重估——现有数字只做方向性引用。\n\n---\n\n**一句话总结:** 确定性不是问题——**单日标定的绝对常数、拿到永久否决权的单日 gold 门、不去噪回喂的裁决**才是。修正方向已经过一轮对抗:凡是\"把绝对常数换成纯相对判定\"的药方都自带镜像毒性(低基数日、无 floor、整桶 LLM),最终版一律取混合式;凡是安全主张,只在真跑过的分布上主张。结构保证原样留住,并且要更硬。"
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Judge"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Attack"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 4,
+      "title": "Synth"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "W1:literature",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "aecffdd16d944f4fd",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782974151661,
+      "queuedAt": 1782974151654,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "W1 文献调研:规则/确定性 vs 学习——Bitter Lesson 论争、神经符…",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782974473657,
+      "tokens": 45472,
+      "toolCalls": 20,
+      "durationMs": 321995,
+      "resultPreview": "{\"topic\":\"W1 文献调研:规则/确定性 vs 学习——Bitter Lesson 论争、神经符号混合实践共识、Snorkel 弱监督范式、阈值脆弱性对策\",\"findings\":[\"【Bitter Lesson 原论点】Sutton 2019:70年AI史上,利用算力的通用方法(搜索+学习)最终大幅胜过内置人类知识的方法;内置知识短期有益但会封顶并阻碍后续进展。但其论证前提是算力成本指数下降的长时程(longitudinal)叙事。\",\"【关键反驳1:范围限定】Chakrabarti《The Bitter Lesson is Misunderstood》直接命中本项目场景:'在固定时间点、固定数据量下,Bitter Lesson 不做任何断言'('at a fixed point in time, for any fixed amount of data, the Bitter …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "W2:industry",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "afbe816f4be6f2b74",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782974151662,
+      "queuedAt": 1782974151655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "W2 业界实践调研:生产系统如何混合确定性算法+模型(AIOps日志聚…",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782974425005,
+      "tokens": 40654,
+      "toolCalls": 15,
+      "durationMs": 273343,
+      "resultPreview": "{\"topic\":\"W2 业界实践调研:生产系统如何混合确定性算法+模型(AIOps日志聚类/反欺诈规则生命周期/记忆系统架构/护栏封顶事故)\",\"findings\":[\"【AIOps-Drain 的成功面】Drain(2017,固定深度树在线日志聚类,纯确定性)至今仍是工业界分组最强的统计式解析器:ISSTA'24 大规模评测(Loghub-2.0,14 个数据集、平均每个 360 万行人工标注)中 Drain 的分组准确率 GA/FGA 平均最高。确定性算法做'分组/结构'这一层被证明是最持久、最抗漂移的。\",\"【AIOps-Drain 的局限面】同一评测显示:所有解析器从 2k 样本基准换到生产规模数据后性能掉档且方差增大;Drain 分组虽强,但语义抽取(模板/变量正确切分)的 parsing accuracy 只有 ~0.470。即确定性方法的天花板不在'结构',而在'语义抽取'…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "W3:audit",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "ae9da7738a99d76f6",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782974151662,
+      "queuedAt": 1782974151655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "W3 确定性组件逐条审计:A-F 分类封顶风险/漂移敏感度/失效模式 …",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782974607861,
+      "tokens": 66927,
+      "toolCalls": 20,
+      "durationMs": 456199,
+      "resultPreview": "{\"topic\":\"W3 确定性组件逐条审计:A-F 分类封顶风险/漂移敏感度/失效模式 + 特审C(编码向正则)与特审B(残渣黑名单)\",\"findings\":[\"【总判】\\\"太多确定性\\\"的封顶风险不在 A(不变量)/D(共识)/F(抽查机制)——这些是内容无关的结构保证;风险集中在两处:B 的**绝对数值**(τ0.30、attach 0.06/0.12/0.15、0.7/0.3 通道权重)和 F 的**单日 gold 门**。C(编码向正则)实测 fail-empty 不 fail-wrong,安全。\",\"【实验1·锚点构成,6-07 全337段】锚点=视觉模型kw ∪ 正则token。非编码类app段(WeChat/Discord/Spotify等25段):kw 零缺失(0/25,均值6.2个/段),正则零产出 15/25(均值0.7);非编码段两两 wjaccard>0.01 …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "W4:redteam",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a00c369c496b3e90a",
+      "model": "claude-fable-5",
+      "fallbackModel": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1782974151662,
+      "queuedAt": 1782974151655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "W4 日型红队:7 日型 × 确定性全栈断点表 + 必须加日型自适应的…",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782974719688,
+      "tokens": 76288,
+      "toolCalls": 20,
+      "durationMs": 568026,
+      "resultPreview": "{\"topic\":\"W4 日型红队:7 日型 × 确定性全栈断点表 + 必须加日型自适应的组件(回答\\\"太多确定性会不会导致局限性\\\")\",\"findings\":[\"【总纲·先给结论】确定性不是一坨同质风险。按路线图 A/B/C/E 分类后,失效模式泾渭分明:A(结构不变量 exactly-once/rescue-by-construction/orphan池/complete-linkage 分桶数学)——跨全部 7 日型零日型依赖,永远安全;C(_FILE/_HASH/_VER/_CAMEL/_SNAKE 正则锚点)是格式向、对未见词汇天然泛化(新项目日实证:新 repo 的新文件名/新驼峰照抓不误),它在非代码日的失效是'静默失灵(返回空)'=安全退化不产垃圾;B(把语义判断硬编码成数字:lift_cos 连接词降权、时间衰减常数120min、mega size>12、残渣黑名单、c…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "W5:day-diversity",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a5cccebc78005f185",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782974151662,
+      "queuedAt": 1782974151655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "W5 真数据日型分布检验:6-07 代表性量化 + 确定性栈在 57 天真…",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782974619096,
+      "tokens": 60953,
+      "toolCalls": 21,
+      "durationMs": 467434,
+      "resultPreview": "{\"topic\":\"W5 真数据日型分布检验:6-07 代表性量化 + 确定性栈在 57 天真实日型上的暴露面(本机只读)\",\"findings\":[\"数据面:~/.portrait/events/ 共 61 个日目录,2 个空(04-15/04-17),57 天有事件,共 960 个生产事件(全部 type=experience)。tag 有变体噪声(my portrait/my-portrait、claude code/claude-code),分类时已归一。\",\"6-07 代表性:编码浓度(含编码类 tag 的事件占比)=0.86,在 57 天里排 53/57 = 93 分位;事件数 28 也排 51/57(91 分位)。全体分布:min 0.00 / p25 0.40 / 中位 0.55 / p75 0.69 / max 1.00。6-07 是'近极端重编码+大日'双重不代表。\",…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "judge",
+      "phaseIndex": 2,
+      "phaseTitle": "Judge",
+      "agentId": "ad0ff6cf8e8d41241",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782974719704,
+      "queuedAt": 1782974719693,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "会,但局限不来自\"确定性的量\",而来自三个具体形态——五路调研在…",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782974915543,
+      "tokens": 44147,
+      "toolCalls": 1,
+      "durationMs": 195838,
+      "resultPreview": "{\"verdict\":\"会,但局限不来自\\\"确定性的量\\\",而来自三个具体形态——五路调研在此完全收敛:①把语义判断冻结成绝对常数(B类:τ0.30、attach 0.06/0.12/0.15、size>12、lift_cos硬杀),且全部标定在 2026-06-07 这个 93 分位极端重编码日上(W5:57 天中位编码浓度 0.55 vs 6-07 的 0.86,且语料内部已发生一次 regime change,漂移是已观测事实而非假设);②单日 gold 门(\\\"42 例翻盘=0 才放行\\\")给单一日型永久否决权,是制度性封顶;③确定性裁决不加去噪直接喂回微调闭环,会让模型精确继承规则盲区(伪标签确认偏差)。相反,结构性确定性(exactly-once、rescue by construction、orphan 池、分区断言、共识分区、grep 接地、回归机制)在 61 天真数据审计…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "attack",
+      "phaseIndex": 3,
+      "phaseTitle": "Attack",
+      "agentId": "a3f020308883981d2",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782974915569,
+      "queuedAt": 1782974915558,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "裁决的骨架在数据核查后站得住:①核心裁线「结构 vs 内容」而非…",
+      "promptPreview": "# 问题:My-Portrait 事件管线本地化的改进路线图大量使用确定性算法,\"太多确定性会不会导致局限性?\"\n任务背景:个人 AI 记忆系统,把一天 ~300-400 个屏幕 session 聚成\"事件\"。固定化任务(同一用户/机器/项目群,天天跑),本地模型(Qwen3 系列),目标贴平/超越云端 gpt-5.4。\n\n# 路线图里确定性组件的完整清单(按性质预分类,审计时可推翻)\n【A 结构保证/不变量】exactly-once 去重(壳→锚点门→末现)、覆盖 rescue(attach→singleton,by construction 337/337)、orphan 池、分区断言、摘要 grep 接地(产出锚点必须在成员证据里验上)、合并→标脏→重生成、标题 lint(动词开头/禁flag词)\n【B 语义判断硬编码成数字】亲和权重 0.7cos+0.3wjaccard、时间项 +…",
+      "lastProgressAt": 1782975444187,
+      "tokens": 55216,
+      "toolCalls": 18,
+      "durationMs": 528618,
+      "resultPreview": "{\"attacks\":[{\"target\":\"safe_determinism 第1条:「A类 W5 对 57 天生产事件审计零日型暴露面」\",\"objection\":\"证据膨胀。A 类组件(exactly-once 壳→锚点门→末现、rescue attach→singleton、orphan 池、分区断言)是新管线的组件,只在 lab.db 里跑过 2026-06-07 一天(任务背景明示 lab.db 只有 6-07);~/.portrait/events 的 57 天是老云端管线产物,根本不含这些代码路径。「57 天审计零暴露」实际上是「读了 57 天别人的输出+跑了 1 天自己的代码」——运行时不变量违规不可能在从未运行的日子上被观测到。裁决把 A 类安全性从『构造上论证+单日实证』包装成了『61 天实证』,这是它最强的安全主张,地基却最薄。\",\"severity\":\"major…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "synth",
+      "phaseIndex": 4,
+      "phaseTitle": "Synth",
+      "agentId": "af5c1fdfd94c198ba",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782975444195,
+      "queuedAt": 1782975444193,
+      "attempt": 1,
+      "promptPreview": "把调研综合成给用户看的中文 markdown 报告《确定性算法的局限性调研》。结构:\n1. 直接回答:太多确定性会不会导致局限性(区分保证vs判断,一段话结论)\n2. 文献+业界怎么说(W1/W2 核心发现,带来源)\n3. 真数据检验:61 天日型分布上确定性栈的暴露面(W5 数字)\n4. 日型红队断点表(W4 精华)\n5. 裁决:该保留的确定性 / 该修正的确定性(逐条+修正方式,经对抗校准)\n6. 沉淀的设计原则\n7. 对 T0-T3 路线图的修正清单\n实事求是,过度修正和修正不足都要点名。材料:\n调研=[{\"topic\":\"W1 文献调研:规则/确定性 vs 学习——Bitter Lesson 论争、神经符号混合实践共识、Snorkel 弱监督范式、阈值脆弱性对策\",\"findings\":[\"【Bitter Lesson 原论点】Sutton 2019:70年AI史上,利用算力的通用…",
+      "lastProgressAt": 1782975706114,
+      "tokens": 55566,
+      "toolCalls": 0,
+      "durationMs": 261919,
+      "resultPreview": "# 确定性算法的局限性调研\n\n> 综合五路调研:W1 文献(Bitter Lesson 论争/神经符号/弱监督/阈值脆弱性)、W2 业界实践(AIOps/反欺诈/记忆系统/护栏事故)、W3 组件逐条审计、W4 七日型红队走查、W5 本机 61 天真数据检验;裁决已经过一轮对抗攻击校准,被攻破的执行细节在本报告中已替换,并逐条点名。\n\n---\n\n## 1. 直接回答:太多确定性会不会导致局限性\n\n**会,但局限不来自\"确定性的量\",而来自把\"判断\"错当\"保证\"来冻结。** 五路调研在此完全收敛:确定性组件要分两种——一种是**结构保证**(exactly-once 去重、分区断言、orphan 池兜底、共识归并、grep 接地验证、确定性 control flow),它们内容无关、跨日型正交、失效当天报警且优雅降级,业界与文献一致认定该硬且越硬越好,是未来微调的 reward(奖励信号)基建…"
+    }
+  ],
+  "totalTokens": 445223,
+  "totalToolCalls": 115
+}

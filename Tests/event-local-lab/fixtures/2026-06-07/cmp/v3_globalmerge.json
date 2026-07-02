@@ -1,0 +1,902 @@
+{
+ "desc": "v2 上做全局合并pass(2507一次性看全部,只并近重复)",
+ "metrics": {
+  "n_events": 41,
+  "coverage": "308/337",
+  "dup": 36,
+  "size_hist": [
+   33,
+   31,
+   31,
+   23,
+   18,
+   13,
+   13,
+   13,
+   12,
+   11,
+   11,
+   10,
+   10,
+   10,
+   9,
+   9,
+   8,
+   8,
+   7,
+   6,
+   6,
+   6,
+   6,
+   6,
+   5,
+   5,
+   4,
+   3,
+   2,
+   2,
+   2,
+   2,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1
+  ],
+  "singletons": 9,
+  "size_le2": 13,
+  "mega_ge20": 4,
+  "bcubed_vs_gpt41": {
+   "P": 0.456,
+   "R": 0.359,
+   "F1": 0.402
+  },
+  "island": {
+   "librime": {
+    "n_seg": 14,
+    "n_events": 2,
+    "top": [
+     [
+      "Process canvas fusion and integrate Rime",
+      13
+     ],
+     [
+      "Test permission bypasses and configure m",
+      1
+     ]
+    ]
+   },
+   "rime": {
+    "n_seg": 22,
+    "n_events": 4,
+    "top": [
+     [
+      "Process canvas fusion and integrate Rime",
+      15
+     ],
+     [
+      "Test permission bypasses and configure m",
+      4
+     ]
+    ]
+   },
+   "pinyin": {
+    "n_seg": 10,
+    "n_events": 2,
+    "top": [
+     [
+      "Test permission bypasses and configure m",
+      5
+     ],
+     [
+      "Process canvas fusion and integrate Rime",
+      5
+     ]
+    ]
+   },
+   "qwen3-asr": {
+    "n_seg": 8,
+    "n_events": 6,
+    "top": [
+     [
+      "Test permission bypasses and configure m",
+      3
+     ],
+     [
+      "Improve error handling and UI performanc",
+      1
+     ]
+    ]
+   },
+   "silero": {
+    "n_seg": 4,
+    "n_events": 3,
+    "top": [
+     [
+      "Test speech detection models",
+      2
+     ],
+     [
+      "Transcribe meeting audio and port featur",
+      1
+     ]
+    ]
+   },
+   "posthog": {
+    "n_seg": 4,
+    "n_events": 1,
+    "top": [
+     [
+      "Set up PostHog analytics and refine port",
+      4
+     ]
+    ]
+   },
+   "spotify": {
+    "n_seg": 11,
+    "n_events": 8,
+    "top": [
+     [
+      "Integrate Screenpipe icon and listen to ",
+      3
+     ],
+     [
+      "Optimize UI and speaker identification",
+      1
+     ]
+    ]
+   },
+   "playlist": {
+    "n_seg": 2,
+    "n_events": 1,
+    "top": [
+     [
+      "Integrate Screenpipe icon and listen to ",
+      2
+     ]
+    ]
+   },
+   "wechat": {
+    "n_seg": 5,
+    "n_events": 2,
+    "top": [
+     [
+      "Test AI logic and prepare for college",
+      3
+     ],
+     [
+      "Code review and refine text processing",
+      2
+     ]
+    ]
+   },
+   "powerprofile": {
+    "n_seg": 5,
+    "n_events": 2,
+    "top": [
+     [
+      "Fix light mode divider and power mode",
+      4
+     ],
+     [
+      "Implement Balanced power mode",
+      1
+     ]
+    ]
+   },
+   "balanced": {
+    "n_seg": 8,
+    "n_events": 4,
+    "top": [
+     [
+      "Fix light mode divider and power mode",
+      4
+     ],
+     [
+      "Debug multilingual input and IME tail-lo",
+      1
+     ]
+    ]
+   },
+   "recents": {
+    "n_seg": 7,
+    "n_events": 3,
+    "top": [
+     [
+      "Build RECENTS feature",
+      3
+     ],
+     [
+      "Fix light mode divider and power mode",
+      2
+     ]
+    ]
+   },
+   "snipaste": {
+    "n_seg": 1,
+    "n_events": 1,
+    "top": [
+     [
+      "Capture and process message pipeline",
+      1
+     ]
+    ]
+   },
+   "videofps": {
+    "n_seg": 3,
+    "n_events": 1,
+    "top": [
+     [
+      "Investigate videoFps and audio chunk han",
+      3
+     ]
+    ]
+   },
+   "discord": {
+    "n_seg": 9,
+    "n_events": 4,
+    "top": [
+     [
+      "Debug AI OCR and text capture",
+      3
+     ],
+     [
+      "Port OCR and implement UI highlights",
+      2
+     ]
+    ]
+   },
+   "canvas": {
+    "n_seg": 14,
+    "n_events": 8,
+    "top": [
+     [
+      "Fix canvas routing and keystroke process",
+      4
+     ],
+     [
+      "Debug AI OCR and text capture",
+      3
+     ]
+    ]
+   }
+  }
+ },
+ "events": [
+  {
+   "title": "Fix voice training crash and UI",
+   "summary": "The user debugged and fixed a crash in the voice training pipeline within My-Portrait and My-Meeting, resolving improper state retention during short recordings. They also fixed a UI bug in VoiceTrainingCard caused by residual error states and addressed audio sampling issues, ensuring proper state clearing on card appearance and correct model loading via ListModels return values.",
+   "size": 8,
+   "session_ids": [
+    91,
+    798,
+    801,
+    874,
+    878,
+    879,
+    912,
+    1127
+   ]
+  },
+  {
+   "title": "Retrain speaker profiles and model config",
+   "summary": "The user executed a full speaker retraining workflow using stored audio and fallback meeting recordings, prioritizing 'speaker-training-audio/<id>.f32' files. They planned to fine-tune a smaller local model using collected multilingual data, focusing on Japanese, German, and Arabic, and configured memory capture and processing workflows to run daily at 03:00.",
+   "size": 13,
+   "session_ids": [
+    61,
+    68,
+    86,
+    100,
+    128,
+    153,
+    289,
+    366,
+    435,
+    707,
+    756,
+    851,
+    1058
+   ]
+  },
+  {
+   "title": "Test speech detection models",
+   "summary": "The user configured and tested speech detection models including Silero VAD, FluidAudio VAD, and LSTM-based models, focusing on 'silero_vad.onnx' with parameters like 512 window and 160 step. They integrated and tested audio processing components in My Portrait, including ParakeetModelCatalog and Whisper models, while configuring real-time transcription with Qwen3-ASR.",
+   "size": 10,
+   "session_ids": [
+    6,
+    32,
+    42,
+    49,
+    57,
+    72,
+    275,
+    626,
+    893,
+    1027
+   ]
+  },
+  {
+   "title": "Deploy audio pipeline and build apps",
+   "summary": "The user completed the setup and deployment of an end-to-end audio processing pipeline for MyMeeting, including linking Git repos, running Xcode builds, and deploying changes. They executed multiple successful builds for 'My-Portrait' and 'My-Meeting' using 'xcodebuild' and 'swift build', committing changes with specific messages.",
+   "size": 11,
+   "session_ids": [
+    3,
+    94,
+    343,
+    453,
+    460,
+    940,
+    1041,
+    1060,
+    1190,
+    1193,
+    1198
+   ]
+  },
+  {
+   "title": "Improve error handling and UI performance",
+   "summary": "The user enhanced error handling in the audio processing stack by adding LocalizedError cases to the 'AudioError' enum for messages like 'noSpeechDetected' and 'sampleRateUnsupported'. They optimized UI performance in My Meeting by replacing ScrollView+LazyVStack with List and .listStyle(.plain) for virtualized rendering, resolving layout bottlenecks.",
+   "size": 13,
+   "session_ids": [
+    25,
+    72,
+    144,
+    149,
+    152,
+    180,
+    183,
+    187,
+    188,
+    192,
+    202,
+    770,
+    784
+   ]
+  },
+  {
+   "title": "Analyze personal evolution and test models",
+   "summary": "The user analyzed the challenges of modeling long-term personal evolution using longitudinal data, focusing on distinguishing 'snapshot' vs 'movie' approaches to identity reconstruction. They tested multiple AI models including gpt-5.5, gpt-5.4, gpt-5.4-mini, and Claude for text extraction and completion tasks, evaluating model performance and bypassing permissions.",
+   "size": 7,
+   "session_ids": [
+    16,
+    34,
+    35,
+    318,
+    851,
+    893,
+    1027
+   ]
+  },
+  {
+   "title": "Evaluate Qwen3-ASR and integrate models",
+   "summary": "The user assessed Qwen3-ASR, an upcoming open-source speech recognition model set for release in early 2026 under Apache 2.0, supporting 52 languages and dialects. They integrated it into the audio processing stack in My Portrait, configuring real-time transcription with 'qwen3-aer' as the model and adjusting settings like 'Auto language' and 'VAD rms'.",
+   "size": 1,
+   "session_ids": [
+    415
+   ]
+  },
+  {
+   "title": "Test phrase recall and real-time transcription",
+   "summary": "The user tested a language model's ability to learn and recall specific phrases like '你说得对' through repeated input in the Terminal. They configured My Meeting for real-time transcription, selecting 'qwen3-aer' as the model and adjusting settings like 'mic on' and 'VAD rms', testing system behavior under load.",
+   "size": 2,
+   "session_ids": [
+    598,
+    1133
+   ]
+  },
+  {
+   "title": "Transcribe meeting audio and port features",
+   "summary": "The user transcribed multiple meetings including 'Meeting 2026-06-06_18-20-10' and 'Personal ai meeting 1.m4a', comparing FluidAudio and ONNX Silero models with 80% success rate. They ported My-Portrait features into a macOS app using Terminal, testing meeting templates, audio input settings, and model configurations, referencing 'DROP1' and 'DROP2'.",
+   "size": 5,
+   "session_ids": [
+    17,
+    38,
+    176,
+    394,
+    458
+   ]
+  },
+  {
+   "title": "Optimize UI and speaker identification",
+   "summary": "The user optimized UI performance in My Meeting by switching from ScrollView+LazyVStack to List, fixing layout rendering issues, and improving speaker identification. They verified 102 key presses, tested frame-only workflows, and diagnosed why they were not triggering properly in the pipeline.",
+   "size": 3,
+   "session_ids": [
+    168,
+    172,
+    749
+   ]
+  },
+  {
+   "title": "Develop recording templates and align models",
+   "summary": "The user created and configured recording templates in My Meeting, including 'DROP 2' and 'Standup with A & B', specifying audio sources, engines like Parakeet, auto-detection, and model settings. They aligned 'My-Meeting' templates and UI with 'My-Portrait', resolving model loading issues by debugging 'ListModels' return values and checking 'phase' state in 'VoiceTrainer'.",
+   "size": 11,
+   "session_ids": [
+    214,
+    327,
+    494,
+    504,
+    563,
+    564,
+    641,
+    650,
+    673,
+    749,
+    1052
+   ]
+  },
+  {
+   "title": "Document porting and refactor writing-capture",
+   "summary": "The user documented speaker separation and transcription improvements in Obsidian 1.12.7, planning to port features from MyPortrait to MyMeeting. They committed a refactor to extract a unified model from six heuristic fields in WritingCapturePrompts.swift, rewriting the model into a unified 'field-state timeline' approach.",
+   "size": 8,
+   "session_ids": [
+    243,
+    308,
+    590,
+    593,
+    853,
+    868,
+    905,
+    908
+   ]
+  },
+  {
+   "title": "Capture and process message pipeline",
+   "summary": "The user captured and annotated screenshots using Snipaste for meetings like 'Meeting 2026-06-18-20-10' and 'The daily show segment', adjusting area selection and copying color values. They wrote Swift code in Terminal to decode a JSON edit log, filter out zero-width spaces, and trim whitespace, focusing on files like 'My-Portrait — writing-capture-researcher'.",
+   "size": 5,
+   "session_ids": [
+    140,
+    474,
+    916,
+    920,
+    934
+   ]
+  },
+  {
+   "title": "Fix writing-capture message loss",
+   "summary": "The user debugged and fixed message loss issues in the 'writing-capture' feature within 'WritingCaptureWorker.swift', resolving boundary-send problems and ensuring 'bestGroupText' was properly propagated. They reverted a problematic 'boundary-send' change, confirmed a clean build, and inspected database and model configurations in 'portrait.sqlite'.",
+   "size": 13,
+   "session_ids": [
+    146,
+    298,
+    372,
+    378,
+    525,
+    535,
+    550,
+    553,
+    556,
+    587,
+    652,
+    698,
+    702
+   ]
+  },
+  {
+   "title": "Investigate videoFps and audio chunk handling",
+   "summary": "The user analyzed the videoFps parameter in ConfigSchema.swift and found it was not used in capture or compression logic. They diagnosed and resolved an issue in My-Portrait where missing audio files caused 'pendingAudioChunks' to be silently skipped due to 'AssetPath.resolve' returning nil.",
+   "size": 10,
+   "session_ids": [
+    134,
+    135,
+    208,
+    287,
+    303,
+    305,
+    311,
+    476,
+    701,
+    720
+   ]
+  },
+  {
+   "title": "Port OCR and implement UI highlights",
+   "summary": "The user ported and implemented screenshot OCR functionality across My-Portrait and My-Meeting, focusing on files like MarkdownView.swift, RightClickHighlight.swift, and SettingsController.swift. They implemented a blue border highlight for selected items in My Portrait when right-clicking, using AppKit to detect right mouse clicks and draw.",
+   "size": 31,
+   "session_ids": [
+    79,
+    103,
+    112,
+    163,
+    270,
+    280,
+    336,
+    360,
+    383,
+    392,
+    545,
+    580,
+    588,
+    603,
+    610,
+    613,
+    658,
+    661,
+    671,
+    733,
+    734,
+    752,
+    753,
+    755,
+    826,
+    955,
+    961,
+    973,
+    1015,
+    1082,
+    1173
+   ]
+  },
+  {
+   "title": "Fix canvas routing and keystroke processing",
+   "summary": "The user debugged incorrect canvas routing and keystroke detection in My-Portrait, focusing on frame 132639 and Spotify misclassification. They refined the canvas_fusion system for handling keystroke data and on-screen text alignment, particularly for apps like Claude Desktop where AX failed to capture input.",
+   "size": 6,
+   "session_ids": [
+    170,
+    245,
+    251,
+    255,
+    264,
+    277
+   ]
+  },
+  {
+   "title": "Refactor prompt generation and model logic",
+   "summary": "The user worked on prompt generation in WritingCapturePrompts.swift, explored canvas_fusion and keystroke_text validation, and examined LLMModelInfo in SummaryProvider.swift. They committed a refactor to extract a unified model from six heuristic fields, improving consistency in message handling.",
+   "size": 6,
+   "session_ids": [
+    270,
+    357,
+    360,
+    383,
+    755,
+    826
+   ]
+  },
+  {
+   "title": "Debug AI OCR and text capture",
+   "summary": "The user debugged an AI-powered OCR system for text capture, focusing on preserving user-typed content and fixing erroneous translations. They refined the architecture of a document authorship tracking system using OCR and keystroke stream analysis, enforcing hard constraints on canvas fidelity and separation.",
+   "size": 31,
+   "session_ids": [
+    104,
+    118,
+    124,
+    127,
+    143,
+    274,
+    292,
+    295,
+    330,
+    338,
+    346,
+    349,
+    354,
+    371,
+    421,
+    541,
+    547,
+    636,
+    728,
+    738,
+    760,
+    763,
+    865,
+    892,
+    899,
+    903,
+    918,
+    929,
+    932,
+    943,
+    1007
+   ]
+  },
+  {
+   "title": "Debug MyMeeting hang and crash",
+   "summary": "The user debugged a hanging issue in the MyMeeting macOS application using Terminal, running 'sample MyMeeting -file ~/Desktop/mm-hang.txt' and analyzing thread stacks. They also debugged a SIGTERM crash in the MyMeeting Xcode project, examining the 'main' file and 'libsiftCore.dylib' library, with memory addresses 0x199ab4010 to 0x199ab4030 in Thread 1.",
+   "size": 4,
+   "session_ids": [
+    107,
+    110,
+    137,
+    165
+   ]
+  },
+  {
+   "title": "Set up PostHog analytics and refine portrait system",
+   "summary": "The user integrated PostHog analytics into the MyMeeting and My-Portrait apps using Xcode and Terminal, configuring the SDK with API key phc_... and server URL https://us.i.posthog.com. They refined the portrait system by distilling entries, refreshing personality data from OCR tags, and managing writing styles via markdown files like 'chat_brevity.md'.",
+   "size": 6,
+   "session_ids": [
+    231,
+    272,
+    320,
+    559,
+    756,
+    1058
+   ]
+  },
+  {
+   "title": "Fix light mode divider and power mode",
+   "summary": "The user committed changes to multiple Swift files in the My-Portrait project, replacing Color.white.opacity(x) with Color.primary.opacity(x) to ensure divider visibility in light mode. They added a power-mode option and an 'Auto Live indicator' to the My Portrait app, implementing dynamic UI updates via @Observable PowerProfileState.",
+   "size": 10,
+   "session_ids": [
+    111,
+    335,
+    365,
+    379,
+    434,
+    442,
+    449,
+    450,
+    911,
+    1119
+   ]
+  },
+  {
+   "title": "Debug recording and model settings",
+   "summary": "The user navigated the My-Meeting project directory, searched for 'struct Transcription' and 'var' in Swift files, and debugged issues related to audio recording, provider model, and auto-detection. They aligned 'My-Meeting' templates and UI with 'My-Portrait', resolving model loading issues by debugging 'ListModels' return values.",
+   "size": 1,
+   "session_ids": [
+    228
+   ]
+  },
+  {
+   "title": "Implement Balanced power mode",
+   "summary": "The user added a 'Balanced' manual power mode to My-Portrait, committing changes to SettingsModel.swift and PowerProfile.swift with a message detailing four modes: Auto, Performance, Balanced, and Power-Saving. They implemented dynamic UI updates via @Observable PowerProfileState and recomputePowerProfile.",
+   "size": 1,
+   "session_ids": [
+    428
+   ]
+  },
+  {
+   "title": "Simplify Scheduler configuration",
+   "summary": "The user reviewed MemorySettings.swift, examining functions like frequencyRow, timeRow, weekdayRow, and dayOfMonthRow to simplify the Scheduler configuration. They considered options for reducing complexity in the memory capture and processing workflows, focusing on daily runs at 03:00.",
+   "size": 1,
+   "session_ids": [
+    465
+   ]
+  },
+  {
+   "title": "Enhance MemoriesView and RECENTS sidebar",
+   "summary": "The user modified MemoriesView.swift to add state variables for search, context menus, and deletion confirmation. They enhanced the RECENTS sidebar in MyPortrait to remain visible when folded, ensuring the '新建' (New) button stays visible, and made changes to TimelineSidebar.swift.",
+   "size": 2,
+   "session_ids": [
+    513,
+    854
+   ]
+  },
+  {
+   "title": "Fix build issues and adjust Import UI",
+   "summary": "The user resolved build issues in My-Portrait, refined the Import page by splitting Code Codex scans into independent components, and adjusted UI to hide 'Last imported' and button. They split Code Codex scans into independent components and modified UI for unscanned states, hiding 'Last imported' and buttons while showing a 'No scans' message.",
+   "size": 2,
+   "session_ids": [
+    521,
+    562
+   ]
+  },
+  {
+   "title": "Build RECENTS feature",
+   "summary": "The user implemented and tested a foldable 'RECENTS' feature in 'TimelineSidebar.swift', ensuring it remains visible when collapsed. They ran 'swift build', committed changes, and verified the UI behavior under foldable state.",
+   "size": 9,
+   "session_ids": [
+    747,
+    785,
+    787,
+    823,
+    850,
+    861,
+    871,
+    914,
+    1026
+   ]
+  },
+  {
+   "title": "Build alignment grid demo",
+   "summary": "The user built and refined an alignment grid demo for Claude Code by Anthropic, modifying files like PanelGrid.tsx and AlignmentGrid.tsx. They addressed easing behavior, race conditions, and UI lag, ensuring smooth interaction in the demo environment.",
+   "size": 1,
+   "session_ids": [
+    844
+   ]
+  },
+  {
+   "title": "Debug multilingual input and IME tail-loss",
+   "summary": "The user debugged input method handling for multilingual support in My Portrait, focusing on Japanese, German, and Arabic, while avoiding input method switching. They fixed IME tail-loss during CJK input by adjusting the submitRaceBurst mechanism to poll every 200ms.",
+   "size": 23,
+   "session_ids": [
+    115,
+    122,
+    128,
+    156,
+    289,
+    366,
+    397,
+    411,
+    416,
+    422,
+    435,
+    516,
+    707,
+    937,
+    966,
+    977,
+    988,
+    1000,
+    1014,
+    1018,
+    1079,
+    1085,
+    1091
+   ]
+  },
+  {
+   "title": "Integrate Screenpipe icon and listen to playlist",
+   "summary": "The user added the Screenpipe icon to 'Assets.xcassets' by creating a 'Screenpipe.imageset' and updated model configurations for Codex, Gemini, and Notion. They listened to the 'My-Portrait' playlist by joyzhang14, which includes 235 songs and lasts 15h29m, playing tracks such as '愛如潮水' and '信仰' by Jeff Chang, while debugging a fix.",
+   "size": 6,
+   "session_ids": [
+    265,
+    782,
+    795,
+    805,
+    811,
+    1116
+   ]
+  },
+  {
+   "title": "Test permission bypasses and configure models",
+   "summary": "The user tested and validated permission bypass mechanisms using '--dangerously-skip-permissions' and '-usly-skip-permissions' flags across multiple tools including claude, writing-capture, and sourcekit-lsp. They configured and debugged AI model integrations across Terminal, loginwindow, and SF Symbols, focusing on API keys for Anthropic, OpenAI, Gemini, and Groq.",
+   "size": 33,
+   "session_ids": [
+    212,
+    239,
+    277,
+    388,
+    397,
+    411,
+    416,
+    422,
+    431,
+    516,
+    519,
+    625,
+    674,
+    693,
+    711,
+    724,
+    741,
+    764,
+    884,
+    937,
+    966,
+    977,
+    988,
+    1000,
+    1014,
+    1018,
+    1079,
+    1085,
+    1091,
+    1189,
+    1190,
+    1193,
+    1198
+   ]
+  },
+  {
+   "title": "Research AI tools and set up profiles",
+   "summary": "The user explored Claude Code and Anthropic's agentic coding system, visiting www.anthropic.com/product/claude-code and reviewing FAQs on safety and autonomy. They set up their Claude desktop app profile on macOS with an M5 chip, 24 GB RAM, arm64 architecture, and zsh shell, and completed the authorization flow via Safari.",
+   "size": 12,
+   "session_ids": [
+    247,
+    278,
+    283,
+    599,
+    768,
+    774,
+    848,
+    1020,
+    1024,
+    1125,
+    1153,
+    1184
+   ]
+  },
+  {
+   "title": "Test AI logic and prepare for college",
+   "summary": "The user tested logic features across ChatGPT, Claude, and Screenpipe using prompts like '修复图像白色边缘' and '测试逻辑功能'. They focused on college admissions by accessing '4-Page Study Guide v2', 'Physics Study Guide', and the term '大学申请', and engaged with gaming content on WeChat, discussing '绝区零 3.0' promotions and '第五人格' updates.",
+   "size": 9,
+   "session_ids": [
+    830,
+    1088,
+    1093,
+    1097,
+    1115,
+    1122,
+    1135,
+    1180,
+    1187
+   ]
+  },
+  {
+   "title": "Gaming and collaborative discussion",
+   "summary": "The user participated in a Discord conversation in the 头尖尖 server's #皇片 channel, discussing gaming content, sharing personal messages, and engaging with users including DOT Bave an. They held a Discord voice call with Blair, discussing an internship and avoiding disclosure, followed by reviewing a meeting summary titled '会议总结-Valis-2026-06-05.md'.",
+   "size": 1,
+   "session_ids": [
+    250
+   ]
+  },
+  {
+   "title": "Code review and refine text processing",
+   "summary": "The user worked on code files in WeChat, including 'cafeinate --dangerously-skip-permissions' and 'sourcekit-lsp', while reviewing color generation logic and meeting name formatting. They tested and refined a text completion system using tools like AxCleanUp and ultracode, addressing message truncation and Chinese character handling.",
+   "size": 6,
+   "session_ids": [
+    358,
+    387,
+    432,
+    1038,
+    1057,
+    1071
+   ]
+  },
+  {
+   "title": "Process canvas fusion and integrate Rime",
+   "summary": "The user executed document fusion and backlog processing in Obsidian 1.12.7, leveraging OCR modules, LLM embeddings, and compression for raw session and edit log handling. They configured and tested a headless Rime input method using Librime, focusing on a 91% baseline accuracy for the 'WuSong' model, and integrated it with AI providers like Claude and Groq.",
+   "size": 18,
+   "session_ids": [
+    969,
+    1099,
+    1102,
+    1105,
+    1108,
+    1111,
+    1136,
+    1144,
+    1145,
+    1149,
+    1160,
+    1169,
+    1170,
+    1172,
+    1175,
+    1179,
+    1182,
+    1196
+   ]
+  },
+  {
+   "title": "Submit final exam lab",
+   "summary": "The user submitted the 'FINAL EXAM MINI LAB' assignment via Google Chrome on June 4 at 4:02pm, late by five days past the May 29 deadline. The assignment, worth 100 points and intended for a course, was submitted after a 5-day delay.",
+   "size": 1,
+   "session_ids": [
+    1177
+   ]
+  },
+  {
+   "title": "Refactor MeetingTemplate to RecordingTemplate",
+   "summary": "The user refactored a duplicate struct named MeetingTemplate in the My Meeting project, renaming it to RecordingTemplate and updating related files including Models/MeetingTemplate.swift, Persistence/MeetingTemplateRepository.swift, and Summary/Templates/TemplateService.swift. Database migrations and table names were adjusted to recording_templates, with Git operations and code searches performed via Terminal.",
+   "size": 2,
+   "session_ids": [
+    238,
+    834
+   ]
+  },
+  {
+   "title": "Fix provider row clickability and model cache issue",
+   "summary": "The user fixed an issue in My Portrait where providerModelsCache was cleared unexpectedly during expansion in MyMeeting/Views/SettingsView.swift. They separated a merged guard condition to prevent clearing pre-loaded models, and made each AI provider row fully clickable including name, icon, and blank space, while keeping the switch functional only for enabling/disabling.",
+   "size": 1,
+   "session_ids": [
+    970
+   ]
+  },
+  {
+   "title": "Improve auto-summarize and message handling",
+   "summary": "The user worked on refining the auto-summarize feature in My Portrait, fixing bugs and noise in message handling such as tail truncation and cross-group resubmission. They tested provider and model dropdowns to ensure only connected and enabled services were listed, and evaluated whether to continue optimization or stop at manual noise rejection.",
+   "size": 1,
+   "session_ids": [
+    1064
+   ]
+  }
+ ]
+}

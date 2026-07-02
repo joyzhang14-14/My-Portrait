@@ -1,0 +1,522 @@
+{
+  "summary": "本地事件产出内容质量深挖:头对头/锚点计量/生产对照/上游归因/用户视角",
+  "agentCount": 7,
+  "logs": [
+    "质量审计完成 5/5 路"
+  ],
+  "result": {
+    "audits": [
+      {
+        "topic": "Q1 头对头:8 大线程摘要内容质量(本地88多条并集 vs gpt41单条,同吃 doing)",
+        "findings": [
+          "【G11 IME multilingual 60段←11本地】本地并集胜(大胜)。gpt独有锚点仅4个:'jiu s s'、'dian-店'(s397/414实锚)、CJK segmentation limits、OCR+击键实时对齐设计(s421)。本地独有20+:整条 librime/雾凇 工作流(17个session全在gpt自己的cluster里但摘要只字未提:WuSong 91%、/tmp/rime-test、lattice.c、rime_api.h、userdb)、Shuangpin+NSTextInputContext+kTISNotifySelectedKeyboardInputSourceChanged、U+FEFF/isSendClear/mergePrefixDrafts确定性边界算法、'你说得对'91%/100%召回实验、submitRaceBurst 200ms轮询+edit_log entry 47。但本地单条可读性差:B49(24段)整个事件被命名为'Test and validate permission bypasses'——实际内容是submitRaceBurst/CJK尾字捕获(s977/988/1000验证),--dangerously-skip-permissions只是终端残渣;且B49与B52成员重叠15段。",
+          "【G10 writing-capture boundary 34←7】本地并集胜(小胜)。gpt独有:用户原话引文'我是想做全环境覆盖的_'、'Write message..'占位符、ID 1154、baseline-skip启发式(均在s516/146/550 doing实锚)。本地独有:field-state timeline统一模型重写弧(B35,s851-908)、boundary-send回滚弧(B79,s702)、refactor commit 'unified model from 6 heuristic fields'(s868)、记录194、gpt-5.5/5.4/5.4-mini模型评测。gpt叙事'culminated in commit 6143423'是弧线截断——revert(702)和重写(851/853/868/905/908)全在它自己的session列表里却没写。",
+          "【G12 event folder menus 34←7】本地并集胜。gpt独有仅2:EventFolder model/store CRUD(s357)、commit 95ebe8c(s541,本地88条无一提及)。本地独有8+:RightClickHighlight.swift蓝框+AppKit右键检测、灰点根因=macOS menu styling+NSImage预渲染修复+commit 25427ae、TimelineSidebar RECENTS折叠+'新建'按钮可见性(s1119)、providerModelsCache预载。本地B17(prompt generation)是误挂到此线程的离题事件。",
+          "【G31 MyMeeting transcription 17←6】本地并集胜(大胜)。gpt独有仅2:'声音训练素材'、Calendar联动工作流。本地独有12+:speaker-training-audio/<id>.f32优先级、retrainFromMeetings/renameSpeakerProfile(s61)、upsert保ID+创建时间、Chinese ERes2NetV2、Energy(RMS)切分器、Qwen3-ASR中文+ScreenCaptureKit系统采音(s72)、AudioError error 6、80%成功率、'2: Fine'评分。注意本地照抄了上游garble 'Siler0.swift'(s32/38 doing原文如此)。",
+          "【G17 provider connections 22←5】本地并集胜(中胜)。gpt独有:'Auto Scan Everything From Imports'(s457)、avatar/icon呈现(s519);且gpt的'ElevenLabs'锚点来自s521/411——不在G17成员内,是gpt侧唯一一处跨簇引用。本地独有7+:providerModelsCache展开时被清+拆合并guard(s970)、provider行整行可点、tail truncation+cross-group resubmission(s1064)、'11 diagnostic issues in 2 files'(s674逐字实锚)、'Not scanned'/'Last imported'(s562)。本地照抄garble 'Sources/My Waddling'(s674 doing原文)。",
+          "【G6 screenshot OCR port 13;本地仅B15,1:1但只重叠5段】gpt胜(明显)。gpt独有5:IDs 2497-2501+confidence 0.98/0.97/0.95(s386)、/tmp Python字符串格式化语法错(s286)、config.toml/extract-sources.js(s392)、sqlite巡检。B15(18段)摘要在正题上specifics≈0——写的是MarkdownView/RightClickHighlight/SettingsComponents等混入成员的UI噪声。且s286/288/386在本地88中是孤儿(无任何事件收录),config.toml/python错在本地全集物理性缺席;2497-2501只靠一条Spotify事件(B72,s387)侧面幸存。",
+          "【G18 pending audio chunks 5;B44 1:1】gpt胜(中)。双方根因一致且都准(AssetPath.resolve返nil→静默跳过→永挂pending堵队列,s701/720逐字可验)。gpt多出:compactMap、chunk 3402、TranscriptionScheduler.swift(s717 git add)、wav同步问题+SQLite清recordings(s724)。本地仅多AssetPath.swift文件名一项。",
+          "【G21 voice training reset 10←3】gpt小胜。gpt独有4:SpeakersSettingsView.swift、micGranted、'blocked'态(s784)、版本1.0.113(s798)——诊断链更完整。本地独有:buffer format采样修复(s801)、ListModels/phase模型加载(B47)、reset-on-Start框架(s912)。本地B0把会议录音名'Meeting 2026-06-18-20-10'误写成'changes targeted files like...';B8把它抄成'2026-06-06_18-20-10'(日期变体)。",
+          "【总评】本地并集 5:3 胜(G11/G10/G12/G31/G17 全部大线程胜;G6/G18/G21 小线程/1:1 输)。规律清晰:cluster越大,gpt单条压缩丢的整条子工作流越多(librime 17段、revert弧、RECENTS弧全在其成员内却零提及);cluster小而干净时gpt锚点密度反超,本地大杂桶(B15 18段、B18 27段)摘要被噪声稀释成空话。单条可读性gpt全线胜:有叙事弧、引用户原话('我是想做全环境覆盖的_'),且100%过滤终端残渣(skip-permissions出现在132/337条doing里,gpt摘要0/41命中,本地20/88命中+1个事件以它命名)。",
+          "【锚点真伪】双向核对≈零编造:两边全部锚点都能grep到doing原文。仅3处归属瑕疵:本地B28把s562的'Not scanned'/'Last imported'细节写进只含s521的事件;gpt G17把s521的ElevenLabs写进不含该session的簇;本地B8日期变体'2026-06-06_18-20-10'。"
+        ],
+        "verdict": "本地并集在大线程锚点覆盖上≥gpt(5/8胜,大线程全胜,独有锚点2-6倍,gpt单条会整段丢掉自己簇内的完整子工作流);但单条可读性、叙事弧完整性、残渣过滤上<gpt(小线程3/8全输,20/88摘要混入skip-permissions残渣 vs gpt 0/41,还有误命名事件和garble照抄)。",
+        "quality_gaps": [
+          {
+            "gap": "终端命令残渣被提升为摘要内容甚至事件主题(--dangerously-skip-permissions/caffeinate/sourcekit-lsp),信噪比受损",
+            "example": "B49 'Test and validate permission bypasses'(24段)整个事件以flag命名,实际是submitRaceBurst/CJK尾字实验;残渣基率132/337条doing,本地摘要20/88命中、caffeinate 9处,gpt同源仅0/41",
+            "lost_at": "摘要生成(命名+选题;残渣源头是vision上游如实OCR终端,但gpt同吃doing能100%过滤,证明可在下游修)"
+          },
+          {
+            "gap": "大杂桶事件的摘要被混入成员稀释成无锚点空话,正题specifics归零",
+            "example": "B15(18段,'Port screenshot OCR')摘要写MarkdownView/RightClickHighlight等UI噪声,丢了2497-2501置信度、config.toml、/tmp python错;B18(27段)同病",
+            "lost_at": "分桶(成员污染)+摘要生成(对噪声做平均而非提主线)"
+          },
+          {
+            "gap": "上游OCR garble被逐字照抄进事件摘要,不做纠错",
+            "example": "'Sources/My Waddling'(s674)、'Siler0.swift'(s32/38)、'usly-skip-permissions-c'当文件名(s387→B72);gpt遇同样doing选择省略",
+            "lost_at": "vision上游/14B汇总产生,摘要生成未纠(gpt对照证明可下游规避)"
+          },
+          {
+            "gap": "跨事件锚点渗漏:摘要引用了不在自己成员集里的session细节",
+            "example": "B28(仅s521)摘要写了s562独有的'Not scanned'header/'Last imported'细节;(gpt也有1例:G17的ElevenLabs来自s521)",
+            "lost_at": "摘要生成(桶上下文泄漏)"
+          },
+          {
+            "gap": "用户原话/输入实例类锚点偏弱,摘要偏爱标识符不爱引语",
+            "example": "'我是想做全环境覆盖的_'(s516)、'jiu s s'/'dian-店'(s397/414)都在doing里,本地7+11条相关摘要无一引用,gpt两处都引了",
+            "lost_at": "摘要生成(风格取舍,非上游损耗——doing里都在)"
+          },
+          {
+            "gap": "锚点承载session成为孤儿导致内容物理缺席",
+            "example": "s286(python字符串格式化错)/s288/s386(IDs 2497-2501+confidence)不属于本地88任何事件,config.toml/语法错在本地全集检索不到",
+            "lost_at": "分桶(覆盖洞,内容后果落在本线程)"
+          }
+        ],
+        "attribution": "这一路(vs gpt41 同源对照)的差异 100% 产生在下游、与视觉8B/14B上游无关:双方同吃同一批 doing,双向锚点核验≈零编造,所有 gpt 有而本地没有的 specifics 都能在 doing 里找到(即本地是在摘要生成/命名/分桶阶段丢的,不是上游没看见);反之 gpt 单条压缩把自己簇内整条子工作流(librime 17段、boundary-revert弧、RECENTS弧)整段丢弃,是 gpt 下游的粒度代价。本地真正的下游短板有四:残渣过滤(20/88 vs 0/41)、大桶摘要稀释(B15/B18)、garble照抄不纠、跨桶细节渗漏——全部被 gpt 同源对照证明可在摘要生成层修复。唯一 vision上游/14B汇总来源的缺陷是 garble 本身(My Waddling/Siler0/usly-skip-permissions),两边共同继承,gpt 靠省略规避。结论:检索场景(并集)本地内容质量已达标且大线程反超参照;要补的是摘要器的选题/过滤/引语三件事,而非上游。"
+      },
+      {
+        "topic": "Q2 锚点计量:本地88 vs gpt41 摘要的锚点密度与忠实度(全量脚本化,含逐条裁决)",
+        "findings": [
+          "【总量表】本地88:锚点203个,密度2.31/摘要、6.85/千字,doing验真195/203=96.1%;gpt41:锚点122个,密度2.98/摘要、8.43/千字,doing验真118/122=96.7%。共享输入doing自身密度=5.64/千字(337段947锚点)——gpt对同一输入浓缩+49%,本地只+21%。脚本:scratchpad/anchor_audit.py+adjudicate.py",
+          "【分类型】本地:camel 95(验真95.8%)/file 54(92.6%)/num_unit 31(100%)/snake 20(100%)/hash 2(100%)/url 1;gpt:camel 70(97.1%)/file 26(96.2%)/num_unit 13(92.3%)/snake 7/url 2/hash 2/name 2(均100%)。本地摘要人名锚点=0——王昱在s432/s1115/s1180的doing里明确存在,对应local#68/69/70摘要全部丢弃,gpt#15/#28都保留了",
+          "【分桶(本地88)】1段(n=36):1.42/摘要、4.62/千字;2-5段(n=33):2.79、7.96;6+段(n=19):3.16、8.54。小事件确实更稀:每千字密度几乎减半,且1段桶4.62<输入doing的5.64——唯一比输入还稀的桶(摘要生成在小事件上净丢锚点);41%的本地事件是1段,拖低系统均值。gpt同趋势但浅(6.72→7.96/8.43)且每桶都赢本地",
+          "【裁决:双方纯编造=0】12个未验真锚点逐条查(部分匹配/全天337 doing/成员及全天OCR/成员digest),没有一个是凭空捏造——全部真实存在于当天数据某处。先例的hallucination=0再次成立,但失效模式换了名字:张冠李戴(真锚点挂错事件)",
+          "【本地最恶劣案例:事件对互换】local#3'audio processing pipeline'摘要写ScreenCaptureKit——它只在local#4成员s72的doing里;local#4'error handling and UI feedback'摘要写MemorySettingsView/MemoriesView——它们只在local#3成员s343的doing里。两事件锚点整体互换,强指向增量合并/重分配后摘要未重生成的污染。另有4处:ProviderKind(local#17,实际在s711/733等)、WritingCapturePrompts.swift(local#31单段事件,成员s868实际是WritingCaptureWorker.swift/WritingCaptureRecord)、AIModelsSettingsView.swift(local#79,实际在时间邻居s698/701)、ScreenCaptureKit同上。本地硬性张冠李戴=6/203=3.0%",
+          "【gpt的4个未验真全是轻案】①Audio/Recording/RecordingManager.swift(gpt#1)和1024px(gpt#19)是从时间邻居s280/s811的doing逐字搬运(聚类时看得见全量337段,跨事件上下文渗透),事实大概率属实但事件内无证据,硬性张冠李戴=2/122=1.6%;②OpenRouter/ElevenLabs(gpt#17)在成员doing里被压成'and others'但成员原始OCR里真有——gpt反而'蒙对'了事件内真相。裁决后事件内可证率:gpt 120/122=98.4% > 本地197/203=97.0%(本地含1个digest可证+1个改写)",
+          "【意外收获:上游损耗实证2例】(a)gpt#17成员OCR明确含OpenRouter/ElevenLabs,14B汇总成doing时压缩成'and others'——可枚举专名在OCR→doing阶段被压掉;(b)TimelineSidebar.swift在raw813的digest里有、在s811的doing里没有,local#45摘要却写对了——说明v5摘要读了digest,且doing比digest更损。这两例与本地vs gpt对比无关(两系统同吃doing),是纯上游14B汇总损耗的直接证据",
+          "【改写案例(非编造)】local#4的RetranscriptionService.swift:成员s72 doing只有'RetranscriptionService'(无扩展名),摘要自行补了.swift——合理改写,计入可证"
+        ],
+        "verdict": "忠实度本地≈gpt(原始验真96.1% vs 96.7%,编造双零),但密度全面<gpt(每千字-23%,每个大小桶都输),且裁决后本地张冠李戴3.0%比gpt 1.6%重、模式更恶劣(#3/#4事件摘要锚点互换 vs gpt仅邻居借用)。",
+        "quality_gaps": [
+          {
+            "gap": "锚点浓缩力弱:同一doing输入,本地摘要密度6.85/千字(浓缩+21%),gpt 8.43/千字(+49%),每摘要2.31 vs 2.98(-29%)",
+            "example": "全量计量203锚点/88摘要 vs 122锚点/41摘要;doing参照5.64/千字",
+            "lost_at": "摘要生成"
+          },
+          {
+            "gap": "1段小事件摘要比输入还稀,净丢锚点(-18%)",
+            "example": "36个1段事件密度4.62/千字<doing的5.64;6+段桶8.54正常浓缩",
+            "lost_at": "摘要生成"
+          },
+          {
+            "gap": "事件间摘要锚点互换/张冠李戴6处(3.0%),疑似增量合并重分配后摘要未重生成",
+            "example": "local#3写ScreenCaptureKit(在local#4成员s72),local#4写MemorySettingsView/MemoriesView(在local#3成员s343),整对互换;WritingCapturePrompts.swift(s868实为WritingCaptureWorker.swift)",
+            "lost_at": "分桶"
+          },
+          {
+            "gap": "人名专名系统性丢失:doing里有王昱(3段)/戴羽彤(1段),本地88摘要0处保留",
+            "example": "s432/s1115/s1180→local#68/69/70摘要全丢;gpt#15'Shared a Claude referral'和gpt#28都保留王昱且验真",
+            "lost_at": "摘要生成"
+          },
+          {
+            "gap": "可枚举专名在OCR→doing被压成泛指,digest信息也未全进doing(上游损耗,两系统同吃亏)",
+            "example": "OpenRouter/ElevenLabs在gpt#17成员OCR有、doing压成'and others';TimelineSidebar.swift在raw813 digest有、s811 doing无",
+            "lost_at": "14B汇总"
+          }
+        ],
+        "attribution": "本地88对gpt41的锚点差距是纯下游问题(两者同吃doing):一是14B事件摘要生成浓缩力弱(+21% vs +49%,小事件桶甚至净丢锚点、人名全丢),二是增量合并/重分配阶段摘要跨事件污染(#3/#4锚点互换等6处张冠李戴,3.0%)。忠实度本身不是问题——两系统纯编造均为0,所有未验真锚点都真实存在于当天数据。另拿到上游14B汇总损耗的独立实证(OCR/digest里的专名OpenRouter/ElevenLabs/TimelineSidebar未进doing),但该损耗两系统等价承担,不解释本地vs gpt之差;修复优先级:①合并后强制重生成事件摘要,②摘要prompt要求保留专名/人名/带单位数字,③小事件摘要别做泛化改写。"
+      },
+      {
+        "topic": "Q3 全链路内容质量对照:生产28(全量OCR上云+强模型) vs 本地88(两全版),10个信息量最大生产事件逐一对照+缺失事实归因",
+        "findings": [
+          "【1 zombie chunk】生产:chunk 3402→compactMap+AssetPath.resolve→nil→过滤→processQueueOnce拿空break→永不调transcribeOne→僵尸卡'1 clip in queue'、commit 970be0f、37个missing WAV无害分析。本地#44只有'AssetPath.resolve返nil→pendingAudioChunks被静默跳过→卡队列'半条链。归因:chunk 3402在成员s701 doing里有(摘要生成丢);compactMap在成员s720 doing里有(摘要生成丢);processQueueOnce/transcribeOne/970be0f/'1 clip in queue'只在raw OCR 700/720/729-733(14B汇总丢);'36 done wav无害'在s728 doing里有但s728被分进#18'Debug AI OCR'(分桶)。附:本地doing记'36 done'比生产'37 other across done chunks'更准——OCR原文=37总数=36 done+1 pending(3402),生产反而写错",
+          "【2 writing-capture误报+AxCleanup】生产:event 1155、1551字sessionStart基线、删756字只commit 18字、六条'消息'全是删AI原文、跳substring-of-baseline判据、AxCleanup丢22:00 Discord批次恢复20条。本地散在#13/#18/#37:1155在s128/s134 doing里有;1551/756/18三个数字只在raw OCR 126/131-134(14B汇总丢);判据在s134 doing退化成'从baseline过滤消息'且s134把release note误读成'meeting transcript'还被分进#44音频桶(14B误读+分桶);Discord恢复在s118/s124 doing有但丢了'20条/22:00/AxCleanup'三个锚点(14B汇总丢),OCR raw124原文完整'20 came back and I committed a fix so AxCleanup no longer silently drops'",
+          "【3 SIP/键击骨架架构讨论(生产第二大事件11.9K)】生产:SIP帮不上因为IME合成在用户态经IMKit/insertText:逐app投递、键击流当骨架+OCR缩到三职责(定位/CJK定字/确认落地)。本地#81'OCR and keystroke stream integration'覆盖了架构一半('OCR当校正层'来自s421 doing),但SIP论证全丢:raw OCR 585有完整论证,s414/s425 doing只剩碎渣('SIP不能饶过这个限制'混进git文本)且s414/s418/s425不属于任何事件(14B汇总丢+分桶丢弃);'三件事——定位、CJK定字、确认落地'在raw 417/420逐字存在,owner s418的doing完全跑题去说CFD/脑组织药测(14B汇总严重丢)",
+          "【4 My-Meeting六阶段重构(生产9.2K)】本地#10+#55合计覆盖不差:六阶段、模板数据层迁移、VAD/summary provider、MeetingTemplate→RecordingTemplate改名及三个文件+recording_templates表名(#55比生产还细)。缺:P3声源Off最高风险/P4独立窗口/P6 Connections页的阶段细节在raw 242完整、owner s239 doing完全没提(14B汇总丢),但s308 doing有'P1-P6+单声源管线'却被分进#11(分桶+摘要丢);TranscriptEngineSection/RecordingTemplateBar只在raw 253/255(14B汇总丢);generateSummary写死config改可覆盖只在raw 258(14B汇总丢)",
+          "【5 AudioError error 6(生产4.7K)】本地#2/#4/#8三个桶合计有修复面全部事实(noSpeechDetected/noAudioFile/LocalizedError/RetranscriptionService/Silero 512窗口64上下文/isRecoverable——后三个生产没有),还有#8的FluidAudio vs ONNX 80%成功率(生产没有)。缺的是因果链本身:'Silero重转那首歌→正确识别0段→RetranscriptionService把0段当致命→AudioError没实现LocalizedError才显示裸错误码'在raw 36/41逐字存在,doing只剩碎片(s57'为music调Energy RMS')(14B汇总丢链条);ERes2NetV2在成员s49 doing里有但#2摘要没写(摘要生成丢);故事被切进3个桶(分桶)",
+          "【6 cron历史按钮+light mode(生产3.9K)】light mode一半本地#22反超生产:有完整commit message'fix(theme-light): 分隔线不再硬编码白色'+Color.white.opacity→Color.primary.opacity(生产只写到'开始搜12处')。cron一半本地无事件:s79 doing有40b13e9 revert+按钮灵敏度+TimelineSidebar.swift却被分进#15'Port screenshot OCR'(分桶);根因链(只命中chevron+文字/maxWidth infinity+contentShape/删冗余Spacer)在raw 87/88、owner s86的doing全在说声纹训练完全没捕捉(14B汇总丢);commit d1b3385只在raw 89(14B汇总丢)",
+          "【7 provider下拉+模型缓存bug(生产3.1K)】bug1本地#59几乎无损耗:providerModelsCache被清的guard合并根因+拆guard修复+整行可点+SettingsView.swift路径全有。bug2(9个provider含未连接的groq/openrouter/ollama/gemini/custom→过滤到connected+enabled、TemplateEditorView/MeetingDetailView)事实全在doing(s741/s1057/s646/s1058)但散进#80/#82且s646无事件归属(分桶),#80只留下'filter disabled providers'一句",
+          "【8 sidebar header跳动+import卡片(生产3.2K)】根因'SidebarIconButton 24pt顶高header'在s747 doing里有,但s747被分进#30(RECENTS折叠),摘要没收(摘要生成丢);commit d598fez在s749/s752 doing里都有,却分别被分进#9/#10/#15三个错题桶(分桶)。趣味:生产和本地都把hash记成'd598fez'(git hash不可能含z,同一OCR误读),此处保真度打平;import卡片'Not scanned'拆分本地#28/#29有对应",
+          "【9 videoFps死设置(生产2.7K)】本地#14核心结论完整(ConfigSchema里没接线、滑块无效果、讨论删除)。缺:真实机制公式(MP4 fps=frameCount*1000/durationMs在CompactionWorker算、采集频率走power-profile minCaptureIntervalMs)只在raw 304,doing仅s303提到CompactionWorker一词(14B汇总丢公式);用户决策'删了吧'+三处删除方案(UI滑块+config字段+迁移,保留frame.videoFps)在raw 310、owner s308 doing跑题(14B汇总丢);'固定FPS旧架构残留'历史解释同丢",
+          "【10 数字永生哲学讨论(生产impact最高3.6)】本地#5锚点反超生产:Stanford-style reflection、Opus 4.8 High、20/25/30岁自我状态(生产都没有),snapshot vs movie核心区分双方都有。缺:Rewind AI失败框架在成员s16/s34 doing里都有('Rewind AI失败原因分析')但摘要没写(摘要生成丢);'narrative self vs real past self'在s16 doing逐字存在(摘要生成丢,且14B把OCR中文'叙事自我'翻译成narrative self——上游反而干得漂亮);stated vs revealed preferences在s23 doing有但s23不属于任何事件(分桶丢弃)",
+          "【横向规律】抽查的全部生产事实100%能在lab.db raw OCR里grep到——采集/OCR层零缺口,'采集就没有'一类为零。上游14B汇总丢失有清晰选择性:实体名(文件/组件/人名)保留率高,但系统性丢弃四类东西——commit hash(970be0f/d1b3385)、精确数字对(1551/756/18、20条/22:00)、多步因果链(processQueueOnce→break→transcribeOne、Silero 0段→致命错误链)、用户决策原话('删了吧')。分桶则把'一个故事'切碎:zombie链横跨#13/#44/#18,sidebar修复横跨#30/#9/#15,还整段丢弃含关键内容的session(s23/s414/s418/s425/s633/s646)"
+        ],
+        "verdict": "本地在'修复面事实+锚点密度'上≥生产(#59/#22/#55近无损甚至反超,还握有生产没有的80%成功率、Silero参数、36-vs-37更准),但在'因果链叙事完整性'上全面<生产——根因链、commit hash、精确数字、用户决策这四类粘合剂大半没到doing层,再被分桶切碎,导致没有一个本地事件能像生产zombie事件那样讲完一条根因故事。",
+        "quality_gaps": [
+          {
+            "gap": "多步因果链(根因→机制→症状)在session汇总层被压成单实体描述",
+            "example": "zombie链'compactMap过滤→processQueueOnce拿空break→永不调transcribeOne→卡1 clip in queue'在raw OCR 700/720逐字存在,s701/s720 doing只剩'resolve返nil被静默跳过';Silero'0段→RetranscriptionService当致命→缺LocalizedError'链在raw 36/41完整,doing只剩修复面碎片",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "commit hash系统性丢失(除非session恰好以commit为主题)",
+            "example": "970be0f(raw 718/729-733)、d1b3385(raw 89)在doing层全灭;d598fez(s749/s752)和6143423(#13)是幸存例,靠session本身就是commit动作",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "精确数字对/时间锚点丢失",
+            "example": "1551字基线/删756只commit 18(raw 126-134)、Discord'20条/22:00批次'(raw 115-124原文'20 came back')、'12处硬编码Divider'(raw 95)——doing层一个数字都没留",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "用户决策原话与结论性话语丢失",
+            "example": "videoFps的'删了吧'+三处删除方案+'接回固定fps反而是退步'(raw 307-313),owner s308的doing完全跑题;SIP完整论证(raw 585)在s414/s425 doing只剩乱码碎渣",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "vision选帧后14B把整段讨论汇总跑题,高信息帧内容整段蒸发",
+            "example": "s418(Claude, parts含raw 420)raw里有'OCR只做三件事——定位、CJK定字、确认落地'架构宣言,doing却在罗列CFD速度剖面/脑组织药测等杂项;s86 raw 88/90含cron按钮Spacer根因分析,doing全在说声纹训练",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "单一故事被切进2-4个主题错桶,事件层拼不回因果",
+            "example": "zombie: s698→#13(writing-capture)、s701/720→#44、s728(36 wav分析)→#18(AI OCR);sidebar修复s747→#30、s749→#9/#10、s752→#15;cron s79→#15(screenshot OCR)、s94→#3(音频管线)",
+            "lost_at": "分桶"
+          },
+          {
+            "gap": "含关键内容的session整个不入任何事件,内容随之消失",
+            "example": "s23(stated vs revealed preferences)、s414/s418/s425(SIP/IMKit/骨架架构讨论主体)、s646(TemplateEditorView)全都无事件归属——生产11.9K的SIP事件在本地因此没有对应物",
+            "lost_at": "分桶"
+          },
+          {
+            "gap": "事实已到成员doing、2507摘要却不选用",
+            "example": "chunk 3402在成员s701 doing里、#44摘要没写;Rewind AI失败+narrative self在成员s16/s34 doing里、#5摘要没写;SidebarIconButton 24pt根因在成员s747 doing里、#30摘要没写;ERes2NetV2在成员s49 doing里、#2摘要没写",
+            "lost_at": "摘要生成"
+          },
+          {
+            "gap": "14B对屏幕内容语义误读进入doing并误导分桶",
+            "example": "s134把event 1155的release note基线分析误读成'管理分析meeting transcript',连带被分进#44音频桶——错误在doing层制造后下游无法自愈",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "(反向)本地并非全面落后:修复面锚点常与生产打平或反超,且更准",
+            "example": "#59含guard根因+文件路径(生产同级);#22有完整commit message(生产只到'开始搜');本地'36 done wav'比生产'37 across done chunks'更符合OCR原文;#5/#8/#2握有Stanford-style reflection、80%成功率、Silero 512/64等生产没有的锚点",
+            "lost_at": "无损耗"
+          }
+        ],
+        "attribution": "全链路差距的核心证据链:采集/OCR层零缺口(10事件全部缺失事实100%可在lab.db raw OCR中grep到),故差距全部产生在OCR之后。主责在14B单session汇总(约占缺失事实的55-60%):它保留实体名却系统性丢弃四类粘合剂——commit hash、精确数字对、多步因果链、用户决策原话,偶发还整段跑题(s418/s86)或语义误读(s134把release note当meeting transcript);次责在分桶(约25%):把单一故事切进2-4个错桶(zombie跨#13/#44/#18)并整段丢弃关键session(s23/s414/s418/s425/s646),使SIP这种生产11.9K大事件在本地无对应物;末端2507摘要生成再丢约15-20%(3402/Rewind/24pt等已在成员doing里的事实不被选用)。生产线的优势不是'看到更多'而是'强模型直读全量OCR时因果链不过中间层、不被切碎'——本地要追上,优先修14B汇总的'保链条保数字保hash'问题,其次修分桶的故事完整性,摘要器问题最小。"
+      },
+      {
+        "topic": "Q4 上游损耗计量:doing(视觉8B+14B汇总) vs lab.db 原始OCR,14个分层抽样 session(2026-06-07)",
+        "findings": [
+          "总保真率:14个样本手工锚点对账,OCR侧可核锚点252个,doing保住119个≈47%。按app分层:Chrome作业页最高(s1177,9/16=56%且日期/分数全保:due May 29 11:59pm/submitted Jun 4 4:02pm late/100 points/URL courses/58112/assignments/250791 逐字保留);Claude长文对话最低(s418,正文锚点1/12≈8%)",
+          "丢失类型排行(按样本内计数):#1 第二窗格/尾部part整块丢(约35+锚点,最大头)——s72的part78(git revert 40b13e9→b2c22f1+'cronjob history按钮不灵敏')在doing里零痕迹;s57的part60(retrainSpeaker/enrollByRecording(seconds:30)+用户中文指令'把主动训练的原始音频也保存下来吧')全丢;s111的My-Meeting speaker-hang整窗格(ERes2NetV2/pyannote/FluidAudio already initialized/me-hang.txt)全丢;s418的part420(canvas重写A/B/C管道设计)全丢。全天147/337=44%的session是多part,暴露面大",
+          "#2 数字/版本/百分比(保留率~15%):s247丢光 1,201 commits/1.2.95/build 169/17 tags/8 stars 及全部commit message(AxCleanup fix、Qwen3-ASR feat等≥8条);s1097丢光用量面板 29%/92%/3% used、resets 4hr5min、plan ends in 5 days;s111丢 8 files/16 insertions/14 deletions",
+          "#3 commit hash:抽样内0/4(40b13e9,b2c22f1,9be23c6,8a5e39b);全天OCR共43个hash样式串,任一doing保住10个=23%",
+          "#4 中文人名:s1187微信联系人 王昱/张晔/贵华/何成/Alan刘浩然 0/5 保留(拉丁系 X99/Joy Zhang/Lucifer 反而保住),且把背景Claude碎片'logit('误当联系人'Logit'",
+          "#5 长路径/冷僻标识符:~/.mymeeting/speaker-training-audio/<id>.f32、vadRedemptionTimeMs、AudioDecoder.decode16kMono、PasteboardMonitor、canvas_fusion 基本全丢",
+          "反向增益(doing>OCR,视觉真赢的地方):s272 Xcode OCR仅168字符纯chrome,doing净增 PostHog/Foundation/Observation/Logger/AppConstants.bundleID 5个真代码锚点;s111 OCR乱码'fix(thene=light)分關線不高硬縮易白色'被doing修复为干净的'fix(theme-light): 分隔线不再硬编码白色, light 模式下可见';s358 微信 Lucifer/铁架$15/婴儿床$6 存储OCR里完全没有;s32 净增Silero VAD真参数(silero_vad.onnx/512/64/LSTM/v5);s94 正确滤掉'ah ah ah'×100与'元、权元'转录垃圾",
+          "乱码残留检查:337条doing自动扫描近零系统性乱码(命中全是WritingCapturePass2Agent类合法类名);仅拼写级滑丝:Siler0×2(s32,s38)、cafeinate×3(s124,s255,s358)、default.proraw×1(s247);但发现1例截断标识符伪补全:OCR'1f.assembleKeyst'被doing补成'tf.assembleKeyStrokeTours',真名是assembleKeystrokeText(WritingCapturePass2Agent.swift:113)——事件级零编造结论仍立,但锚点级存在'貌似合理的错误补全'",
+          "语义级误读2例:s57把UI选项菜单'1:Bad 2:Fine 3:Good'读成用户'final evaluation of 2: Fine';s23/s418/s1097把侧栏历史会话标题(XD Design背包/AMFI/LCEL)当成'本session讨论的话题'——chrome与内容混淆",
+          "基线本身有伤:593/1200条raw_sessions.ocr恰好2000字符=入库即截断,本计量是对'截断后OCR'的保真率;部分'视觉增益'实为OCR截断假象,真实全屏保真率会更低"
+        ],
+        "verdict": "本地上游在 GUI重/乱码CJK/垃圾过滤 上≥OCR基线(Xcode净增代码锚点、修复OCR中文乱码、滤转录垃圾),但在 多窗格尾部内容(整块丢)、数字/hash/版本(保留~15-23%)、中文人名(0/5)、长文对话正文(8%) 上显著<OCR,总锚点保真率仅~47%。",
+        "quality_gaps": [
+          {
+            "gap": "多part/多窗格session的尾部内容整块蒸发(最大损耗桶,44%的session多part)",
+            "example": "s72 part78: git revert 40b13e9→b2c22f1 + 'cronjob history按钮不灵敏' 在doing零痕迹;s57 part60 用户指令'把主动训练的原始音频也保存下来吧'全丢;s418 part420 canvas管道设计全丢",
+            "lost_at": "vision上游"
+          },
+          {
+            "gap": "数字/百分比/版本号/commit hash系统性蒸发(样本内hash 0/4,全天23%;数字保留~15%)",
+            "example": "s247丢 1,201 commits/1.2.95/build 169/8a5e39b 及全部commit message;s1097丢 29%/92% used、plan ends in 5 days",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "中文人名近乎全灭,拉丁名/文件名反而高保留",
+            "example": "s1187 王昱(太贵了)/张晔/贵华/何成/Alan刘浩然 0/5;School Calendar 25_26 v2.pdf/IMG_9095.HEIC 却保住",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "文本密集型对话正文被压到近零,chrome/侧栏反客为主",
+            "example": "s418 正文L3 CGEventTap/作者性预言机/PasteboardMonitor/canvas_fusion 1/12保留,侧栏旧会话标题却保8/17",
+            "lost_at": "14B汇总"
+          },
+          {
+            "gap": "截断标识符被貌似合理地伪补全+UI菜单误读为用户动作",
+            "example": "'1f.assembleKeyst'→'tf.assembleKeyStrokeTours'(真名assembleKeystrokeText);s57把'1:Bad 2:Fine 3:Good'菜单读成用户评了'2: Fine'",
+            "lost_at": "vision上游"
+          },
+          {
+            "gap": "对照基线自身截断,损耗被低估",
+            "example": "593/1200条raw_sessions.ocr恰=2000字符入库即截,真实全屏保真率<47%",
+            "lost_at": "无损耗"
+          }
+        ],
+        "attribution": "这一路损耗全在上游(doing生成之前),与事件层聚类/命名无关。结论分三刀:(1)最大头是\"整块丢\"不是\"逐点压\"——多part尾内容/第二窗格在选帧(26帧→4)与增量合并里被主导画面挤掉,属vision上游选帧+合并策略问题;单纯把OCR并集喂得更多救不了它,该改的是汇总配额(每个part/窗格强制至少产出一句)。(2)数字/hash/人名蒸发是14B汇总的摘要偏好(压向叙事、弃精确串),最便宜的修法是确定性regex锚点抽取器把hash/版本/人名直接旁路进kw,不动模型。(3)视觉路在GUI重与OCR乱码场景已实质反超OCR(Xcode 168字符chrome vs 5个真代码锚点、CJK乱码修复),所以\"换回OCR喂养\"是倒退;正确姿势是OCR并集只做补充校验(救2000字符截断外的长文本+抑制伪补全),视觉仍当主干。"
+      },
+      {
+        "topic": "Q5 用户视角+标题体检:本地88 vs gpt41 标题可用性计量 + 6场景检索演练(2026-06-07, 337 session)",
+        "findings": [
+          "【标题计量·本地88】动词开头74/88;名词堆非动词开头14条([37]-[42],[67]-[71],[80]-[82]);'X & Y'文件夹式硬伤5条(全在[38]-[42]连续段:'Audio Processing & Transcription Setup'/'Model Fine-Tuning & Data Collection'/'Memory & Event Processing Configuration'/'AI Model Testing & Validation'/'Meeting Recording & Real-Time Transcription');含糊标题(不看摘要认不出是哪件事)明确17条+边缘10条≈19-31%,典型:'Implement error handling and UI feedback'[4]/'Optimize performance and fix UI rendering'[48]/'AI model configuration and debugging'[80];另有近重复标题对造成挑选歧义([2]'Configure and test speech detection models' vs [6]'Evaluate speech recognition models' vs [41])",
+          "【标题计量·gpt41】41/41全部动词开头过去式;'&'堆0;含糊仅1条([5]'Asked Claude assorted technical side questions',且是诚实的杂项收纳)+1边缘([25]);标题面gpt41压倒性干净:含糊率~2-5% vs 本地~19-31%",
+          "【误标抽验·本地】抽10条:2条硬误标——[49]'Test and validate permission bypasses'(size24!成员实为LLM行为调试/CJK输入/Electron/本地部署等大杂烩,聚类抓住'--dangerously-skip-permissions'这个样板token当主题,标题读起来像在搞安全测试);[68]'Code review and tool usage in WeChat'(成员实为向Lucifer卖二手:金属架$15/婴儿床$6+给王昱发Claude referral链接,摘要却只留了背景窗口的sourcekit-lsp和23.13+97.43算术,人名社交内容全丢)——对个人记忆系统这是最伤的一类;另3条半误标([18]27-blob混入大量离题成员/[70]把s1115游戏内容并进'Internship discussion'/[11]'manage system workflows'是填充词)",
+          "【误标抽验·gpt41】抽9条:0条硬误标;3条大blob标题欠覆盖([12]'Added event folder menus'34个成员里含RECENTS侧栏/OCR移植等标题没提的活;[17]22成员异质;[24]部分);1条内容吞没:[14]'Played music while working'把s1145(当天Rime验证收官session,doing主体是'headless librime 91%全管线验证通过')当成听歌收编,导致该结论在gpt41全文不可达",
+          "【S1 IME丢字结论】本地:\\bIME\\b词边界检索→唯一命中[52]'Debug IME tail-loss in CJK input'(摘要给出submitRaceBurst改200ms轮询机制),且当天真正的收官结论(headless Librime+雾凇'WuSong'91%基线+全管线零代码改动验证通过)在[85]'Configure headless Rime input method'标题级可见——两跳可达。gpt41:命中[11](60-session巨块)但摘要只讲探索过程(jiu s s/dian-店/submitRaceBurst当'ideas'),Rime/librime/91%在gpt41全部41事件的标题+摘要中零出现(16个Rime session全被[11]吞没,收官session s1145还被塞进听歌事件)——结论不可达。本地明确胜",
+          "【S2 王昱聊了什么】本地:0/88标题+摘要提及王昱→不可达,只能绕路grep原始doing(doing原文3处有王昱:s432/s1115/s1180,含它们的本地事件[68][69]摘要全把人名丢了)。gpt41:一步命中2条——[15]'Shared a Claude referral and quick calculation'(给王昱发消息+分享referral链接https://claude.ai/referral/CGzNBuyoKQ)+[28](王昱发的游戏内容)。gpt41完胜;且因两系统吃同一批doing,证明丢失点纯在本地摘要选材",
+          "【S3 commit 6143423】本地:命中但分裂两处([13]'Fix writing-capture message loss'主事件+[56]单session碎片,后者还沿袭上游doing错误说成'My Meeting');答案可得(boundary-send/bestGroupText消息丢失修复)。gpt41:一步命中单条[10],上下文更完整(staged+committed+真实验证案例1150/1153/1154+原文'我是想做全环境覆盖的_')。gpt41微胜(单入口vs两条拼)",
+          "【S4 听了什么歌】本地:命中[73][74],答案质量高——具名4首(過火/老男孩/愛如潮水/信仰+Jeff Chang)+playlist元数据(235首/15h29m/DRANGRA封面在doing里),但s254(来迟/戴羽彤)整个session不在88事件覆盖内(本地覆盖308/gpt覆盖334,s254是本地覆盖洞),s387的'Empty old City'被埋进[72]OCR研究摘要且没提歌。gpt41:一步命中[14]且6个Spotify session全在,但摘要只报1首'Empty old City'——找得到事件答不全问题。内容本地胜(4首vs1首),单入口可查性gpt胜",
+          "【S5 PostHog配了什么】双方一步命中。本地[21]摘要更全:两个app(MyMeeting+My-Portrait)+API key phc_...+https://us.i.posthog.com+AnalyticsService.swift+AppConstants.bundleID+UserDefaults opt-out,4 session含s559(经查s559确为PostHog配置);gpt[4]只有MyMeeting+key+URL+bundleID,3 session。本地略胜",
+          "【S6 audio zombie chunk】'zombie'是用户记忆词,doing原文0次出现,退化为stuck/chunk检索。本地:'chunk'2命中,[44]'Debug audio chunk handling in My-Portrait'摘要给出根因(AssetPath.resolve返回nil→pendingAudioChunks被compactMap静默跳过→阻塞转录队列)。gpt41:[18]标题直击'stuck pending audio chunks in transcription queue'+根因+chunk 3402编号。'怎么修的'双方都只有诊断无修法(上游doing本身只记录到诊断)。gpt微胜(标题即用户记忆词)。另:本地[44]混入s134/s135两个无关成员(transcript分析/Finder整理)",
+          "【6场景记分】本地胜S1(结论可达性)/S4内容/S5;gpt41胜S2(本地唯一'不可达',最重)/S3微/S6微/S4单入口。本地摘要一旦命中,锚点密度普遍≥gpt41(API key/歌名/91%数字/opt-out细节),与先例'v2摘要评最高'一致——但这次是检索场景下的实证:标题层gpt41赢,摘要层本地赢"
+        ],
+        "verdict": "摘要内容密度本地≥gpt41(PostHog细节/4首歌名/Rime 91%结论均更全),但标题可用性本地明显<gpt41(含糊率~19-31% vs ~2-5%、5条'&'文件夹标题、2条硬误标含size-24垃圾桶,gpt41为0)——日常回看时gpt41是更好的目录,本地是更好的答案库。",
+        "quality_gaps": [
+          {
+            "gap": "社交内容/人名在摘要选材中系统性丢失,WeChat社交事件被总结成背景开发噪音",
+            "example": "本地[68]'Code review and tool usage in WeChat':doing原文有'向Lucifer卖金属架$15/婴儿床$6'和'给王昱发Claude referral链接',本地摘要只留sourcekit-lsp和23.13+97.43算术;王昱在全部88事件标题+摘要中零出现,gpt41同源输入保留成[15][28]两条",
+            "lost_at": "摘要生成"
+          },
+          {
+            "gap": "样板token被当聚类主题,产出size-24硬误标垃圾桶",
+            "example": "本地[49]'Test and validate permission bypasses':24个成员是LLM调试/CJK输入/Electron/本地部署大杂烩,共同点仅doing里都出现'--dangerously-skip-permissions'字样",
+            "lost_at": "分桶"
+          },
+          {
+            "gap": "'X & Y'名词堆文件夹式标题连续段+泛化含糊标题,不看摘要认不出事件",
+            "example": "[38]-[42]连续5条如'AI Model Testing & Validation'/'Memory & Event Processing Configuration';另17条明确含糊如[80]'AI model configuration and debugging'",
+            "lost_at": "2507切分命名"
+          },
+          {
+            "gap": "整session覆盖洞导致场景问题部分不可答",
+            "example": "s254(Spotify听'来迟'by戴羽彤)不在本地88任何事件里(覆盖308/337),gpt41有;'听了什么歌'本地因此漏1首",
+            "lost_at": "分桶"
+          },
+          {
+            "gap": "上游doing的app归属错误被单session碎片事件原样放大",
+            "example": "本地[56]摘要称commit 6143423修的是'My Meeting'(s525 doing原文即写错为My Meeting app,实为My-Portrait的WritingCaptureWorker);gpt[10]因聚合34个session被正确语境稀释",
+            "lost_at": "vision上游/14B汇总"
+          },
+          {
+            "gap": "(反向对照,gpt41的坑)60-session巨块吞没当天结论+错分导致结论不可达——本地在此无损耗",
+            "example": "gpt41全部41事件零提及Rime/librime/91%,收官session s1145被塞进'Played music while working';本地[85]标题级直给'Configure headless Rime input method'+摘要含91%验证通过",
+            "lost_at": "无损耗"
+          }
+        ],
+        "attribution": "这一路(用户视角可用性)的差距几乎全在本地下游,与上游无关:王昱/Lucifer/歌名/referral链接在doing原文里全有,gpt-5.4吃同一批doing做出0硬误标、~2%含糊率,证明8B视觉+14B汇总的上游产物完全足以支撑好标题——本地的损耗点一是分桶(样板token垃圾桶[49]、s254覆盖洞),二是命名([38]-[42]的'&'堆与17条泛化标题),三是摘要选材(社交内容让位于背景开发噪音,对个人记忆是最重的一刀)。反过来,摘要锚点密度是本地对gpt41的真实优势(PostHog opt-out/4首歌名/Rime 91%结论可达),且本地粒度策略让当天结论在标题级可检索,gpt41的60-blob反而把结论埋死。结论:修复优先级=摘要选材加'人名/社交必留'规则>分桶防样板token>命名去'&'堆;这三项都是本地下游可调项,不用动vision/14B上游。"
+      }
+    ],
+    "qjudge": {
+      "scoreboard_md": "| 质量维度 | 本地88(两全版) | gpt41(gpt-5.4同吃doing) | prod28(全量OCR上云) | 裁决 |\n|---|---|---|---|---|\n| 忠实度(纯编造) | 0编造;原始验真96.1%;但张冠李戴3.0%(含#3/#4摘要锚点整对互换,最恶劣) | 0编造;验真96.7%;张冠李戴1.6%(仅时间邻居借用) | 抽查0编造;但\"37 done wav\"反而比本地\"36 done\"错 | 三方≈平,gpt微净 |\n| 锚点并集覆盖(检索场景) | **胜**:203锚点;大线程独有锚点2-6倍(librime 17段全workflow、revert弧、RECENTS弧) | 122锚点;单条压缩整段丢自己簇内子工作流 | 强(粘合剂类事实多) | 本地>gpt;vs prod互有 |\n| 单摘要锚点密度 | 2.31/摘要、6.85/千字(对doing仅浓缩+21%);1段小事件净丢锚点(4.62<输入5.64) | **胜**:2.98/摘要、8.43/千字(+49%),每个大小桶都赢 | 未脚本计量(观感高) | gpt胜(Q2全量计量,证据最多;Q5\"命中后本地更密\"仅为选择性场景,不推翻) |\n| 因果链/叙事完整性 | **最弱**:无一事件讲完一条根因故事(zombie链只剩半条;SIP论证无对应物) | 中:有叙事弧+用户引语,但大簇截断弧线(6143423只写culminated不写revert) | **最强**:zombie全链+commit hash+精确数字+决策原话 | prod胜 |\n| 标题可用性 | **最弱**:含糊19-31%;5条'X & Y'堆;2硬误标(B49 size24垃圾桶、[68]WeChat误标) | **胜**:含糊~2-5%;0硬误标;41/41动词过去式 | 未直接计量(推定良) | gpt胜 |\n| 残渣过滤/信噪比 | 20/88摘要混skip-permissions残渣+1事件以flag命名(基率132/337) | **胜**:0/41,同源输入100%过滤 | 未见残渣 | 本地独输,且gpt证明可下游修 |\n| 人名/社交内容保留 | 王昱0/88(doing有3处)、Lucifer卖货$15/$6全丢 | **胜**:[15][28]两条保留且验真 | 未测 | 本地独输(纯摘要选材) |\n| 结论可检索性(粒度红利) | **胜**:Rime 91%收官在[85]标题级可达;PostHog opt-out/4首歌名答案最全 | Rime/librime/91%全文零出现,收官s1145被吞进听歌事件 | (结构指标另线) | 本地胜 |\n| 输入信息完整性(上游) | doing对raw OCR锚点保真~47%;但GUI重/乱码CJK/垃圾过滤反超OCR基线 | 同左(同源doing) | **胜**:直读全量OCR,10大事件缺失事实0采集缺口 | prod胜;本地=gpt |\n| 覆盖洞(内容物理缺席) | 308/337;s286/s386(config.toml/IDs 2497-2501)、s254(来迟)缺席 | 334/337 | 全量 | 本地输 |",
+      "local_wins": [
+        "大线程头对头5/8胜(G11/G10/G12/G31/G17全胜):并集独有锚点2-6倍。铁证=librime/雾凇17个session全在gpt自己cluster里,gpt摘要只字未提;WuSong 91%、/tmp/rime-test、lattice.c、U+FEFF边界算法全为本地独有",
+        "结论可达性碾压:headless Rime 91%验证收官在本地[85]标题级直给;gpt41全部41事件标题+摘要零提及Rime/91%,收官session s1145还被塞进'Played music while working'——本地粒度策略避免了60-blob吞没",
+        "检索命中后答案质量更高:PostHog事件含API key+opt-out+两个app(gpt只有一半);听歌答出4首具名(過火/老男孩/愛如潮水/信仰)vs gpt仅1首",
+        "vs 生产28修复面打平甚至反超:#59有guard根因+文件路径、#22有完整commit message(生产只到'开始搜')、#55比生产还细(recording_templates表名);且握有生产没有的80%成功率、Silero 512/64、Stanford-style reflection;'36 done wav'比生产'37'更符合OCR原文",
+        "上游视觉路对OCR基线实质反超(换回OCR喂养是倒退):Xcode168字符纯chrome净增5个真代码锚点;OCR乱码'fix(thene=light)分關線'被修复为正确commit message;正确滤掉'ah ah ah'×100转录垃圾;微信$15/$6内容OCR里根本没有",
+        "忠实度达标:88摘要203锚点纯编造=0(与gpt/prod同级),事件级hallucination=0先例再次成立"
+      ],
+      "local_losses": [
+        "标题可用性全面落后:含糊率19-31% vs gpt 2-5%;[38]-[42]连续5条'X & Y'文件夹式名词堆;B49(24段)整个事件被命名为'Test and validate permission bypasses'——实为CJK输入/submitRaceBurst实验,聚类抓了--dangerously-skip-permissions样板token当主题",
+        "终端残渣写进摘要:20/88命中skip-permissions+caffeinate 9处 vs gpt同源0/41——gpt对照证明纯下游可修",
+        "人名/社交内容系统性丢失(个人记忆系统最伤一刀):王昱在doing 3处、本地88标题+摘要0出现;[68]把'向Lucifer卖金属架$15/婴儿床$6+给王昱发referral'总结成sourcekit-lsp背景噪音;6场景中S2是本地唯一'不可达'",
+        "锚点浓缩力弱:每千字6.85 vs gpt 8.43(-23%),每个大小桶都输;36个1段事件密度4.62<输入doing的5.64,是唯一比输入还稀的桶(净丢锚点);本地摘要人名锚点=0",
+        "张冠李戴3.0%(gpt 1.6%)且模式更恶劣:local#3/#4两事件摘要锚点整对互换(ScreenCaptureKit↔MemorySettingsView),强指向增量合并后摘要未重生成",
+        "vs 生产的因果链粘合剂四类全丢:commit hash(970be0f/d1b3385 doing层全灭)、精确数字对(1551/756/18、20条/22:00)、多步根因链(processQueueOnce→break→transcribeOne)、用户决策原话('删了吧');再被分桶切碎(zombie跨#13/#44/#18)",
+        "上游doing保真仅~47%:多part尾部整块蒸发(s72 part78 revert、s57用户中文指令、s418 canvas设计,44% session多part);数字保留~15%、hash 23%、中文人名0/5、长文对话正文8%",
+        "大杂桶摘要稀释成空话:B15(18段'Port screenshot OCR')正题specifics≈0,全写混入的UI噪声;B18(27段)同病",
+        "garble照抄+伪补全:'Sources/My Waddling'/'Siler0.swift'逐字进摘要(gpt选择省略);'1f.assembleKeyst'被伪补全成错名(真名assembleKeystrokeText)",
+        "覆盖洞内容物理缺席:s286/s288/s386(python格式化错/IDs 2497-2501+confidence)、s254(来迟/戴羽彤)、s23/s414/s418/s425/s646(SIP架构讨论主体)不属于任何事件——生产11.9K的SIP大事件在本地无对应物"
+      ],
+      "attribution_table_md": "| 损耗类别 | 典型实例 | 归因阶段 | 可修性 |\n|---|---|---|---|\n| 多part/第二窗格整块蒸发(上游最大桶) | s72 part78(revert 40b13e9)、s57用户指令、s418 canvas设计零痕迹;44% session多part | vision选帧+增量合并 | 半确定性:每part/窗格强制汇总配额(策略改动,需重跑8B/14B验证) |\n| 数字/hash/版本/中文人名蒸发 | hash全天23%、数字~15%、s1187人名0/5、1551/756/18全灭 | 14B汇总(摘要偏好压向叙事弃精确串) | **确定性**:regex锚点旁路抽取器,OCR直进kw,不动模型 |\n| 多步因果链压成单实体 | zombie链raw逐字在、doing只剩'resolve返nil';Silero 0段→致命链 | 14B汇总(占vs prod缺失55-60%,主责) | 要动模型:prompt'保链条保hash保原话' |\n| 汇总跑题/语义误读 | s418 doing去说CFD、s86说声纹;s134把release note误读成meeting transcript并误导分桶 | 14B汇总 | 要动模型;OCR并集校验可兜底部分 |\n| 样板token垃圾桶 | B49(24段)以--dangerously-skip-permissions聚成'permission bypasses' | 分桶(嵌入特征被残渣污染) | **确定性**:终端残渣黑名单在嵌入前剥离 |\n| 故事切碎跨桶+孤儿session | zombie跨#13/#44/#18;s23/s414/s418/s425/s646无归属→SIP事件无对应物;s254歌缺席 | 分桶(占vs prod缺失~25%) | 半确定性:孤儿兜底归桶/单session事件;重分配参数 |\n| 合并后摘要未重生成→锚点互换 | local#3/#4整对互换等6处张冠李戴(3.0%) | 分桶/增量合并管线bug | **确定性触发逻辑**(合并→标脏→重生成;重生成本身跑模型) |\n| 摘要选材偏差(事实已到成员doing却不选) | 王昱0/88、chunk 3402、Rewind AI、ERes2NetV2、引语'我是想做全环境覆盖的_'全丢 | 2507摘要生成(占vs prod缺失15-20%;vs gpt差距主体) | 要动模型:prompt规则(人名/社交/引语必留);gpt同源对照证明可修到0硬丢 |\n| 残渣提升为摘要内容/事件命名 | 20/88 vs gpt 0/41;caffeinate 9处 | 2507摘要生成+分桶(源头vision如实OCR,但gpt证明可下游拦) | **确定性**黑名单+prompt双保险 |\n| 标题含糊/'&'名词堆 | [38]-[42]连续5条;17条泛化如'AI model configuration and debugging' | 2507切分命名 | 半确定性:lint校验(动词开头/禁&/禁flag词)+违规重命名 |\n| garble照抄/伪补全 | My Waddling/Siler0照抄;assembleKeyst补成错名 | 产生于vision/14B,2507未拦截 | 半确定性:摘要标识符与成员raw OCR diff,不匹配宁省略勿补全 |\n| 大杂桶摘要被噪声稀释 | B15(18段)正题specifics≈0、B18(27段) | 分桶污染+摘要对成员做平均 | 分桶纯度阈值(确定性)+prompt'提主线'(模型) |\n| OCR入库2000字符截断 | 593/1200条raw_sessions.ocr恰=2000字符 | lab.db采集入库(基线自伤,真实保真<47%) | **确定性**:去截断 |",
+      "fix_list": [
+        {
+          "fix": "14B汇总prompt改造:显式要求保留多步因果链/commit hash/精确数字对/用户决策原话,并对多part session按part设最低产出配额(每part至少1句,防第二窗格整块蒸发)",
+          "stage": "14B汇总",
+          "needs_gpu": true,
+          "expected_gain": "最大头:vs prod缺失事实的55-60%在此层;同时打上游保真47%的两个最大损耗桶(整块丢+粘合剂丢),是本地追prod因果链叙事的唯一主路"
+        },
+        {
+          "fix": "确定性regex锚点旁路抽取器:从raw OCR直接抽commit hash/版本号/百分比/带单位数字/中文人名写进session kw,不经14B",
+          "stage": "OCR→doing旁路(采集后处理)",
+          "needs_gpu": false,
+          "expected_gain": "零模型成本止血:hash保留23%→接近100%、数字~15%→大幅、中文人名0/5→可检索;与fix1互补(旁路保底+prompt保叙事)"
+        },
+        {
+          "fix": "增量合并/重分配后把受影响事件标脏并强制重生成摘要",
+          "stage": "分桶/增量合并管线",
+          "needs_gpu": true,
+          "expected_gain": "消灭3.0%张冠李戴中最恶劣的#3/#4锚点整对互换类失效(触发逻辑本身是确定性管线改动,重生成调2507)"
+        },
+        {
+          "fix": "2507摘要prompt三规则:人名/社交内容必留、保留用户原话引语、优先选用成员doing已有specifics(提主线不做成员平均)",
+          "stage": "2507摘要生成",
+          "needs_gpu": true,
+          "expected_gain": "S2(王昱)从唯一不可达→一步可达;密度-23%差距收窄;B15/B18大杂桶稀释缓解;gpt同源对照证明此层可修到0硬丢"
+        },
+        {
+          "fix": "终端残渣确定性黑名单(--dangerously-skip-permissions/caffeinate/sourcekit-lsp等样板token)在嵌入与摘要输入前剥离",
+          "stage": "分桶预处理+2507输入",
+          "needs_gpu": false,
+          "expected_gain": "残渣20/88→~0(gpt 0/41证明天花板);B49类size-24样板token垃圾桶不再成型,信噪比与命名同时受益"
+        },
+        {
+          "fix": "标题lint+重命名:强制动词开头、禁'X & Y'名词堆、禁flag/残渣词入题,lint违规自动触发一次重命名",
+          "stage": "2507切分命名",
+          "needs_gpu": true,
+          "expected_gain": "含糊率19-31%→gpt级~5%;补齐用户观感最大短板(gpt是更好目录/本地是更好答案库→两者兼得)"
+        },
+        {
+          "fix": "孤儿session兜底:29个无事件归属session强制最近邻归桶或产单session事件",
+          "stage": "分桶",
+          "needs_gpu": true,
+          "expected_gain": "消s254/s286/s386/s23/s414类内容物理缺席;SIP级大事件(生产11.9K)不再在本地无对应物;覆盖308→接近334"
+        },
+        {
+          "fix": "摘要标识符OCR校验:产出的文件名/标识符与成员raw OCR做diff,不匹配则删除或降级标注(宁省略勿补全)",
+          "stage": "2507后处理",
+          "needs_gpu": false,
+          "expected_gain": "消garble照抄(My Waddling/Siler0)与伪补全(assembleKeyst→错名);顺带拦一部分跨桶锚点渗漏"
+        },
+        {
+          "fix": "去除raw_sessions.ocr入库2000字符截断",
+          "stage": "采集入库",
+          "needs_gpu": false,
+          "expected_gain": "593/1200条基线不再失真(真实保真率可测);为长文对话正文(现保真8%)和OCR并集校验提供完整原料"
+        },
+        {
+          "fix": "大杂桶纯度检查:事件成员主题占比低于阈值时拆分或标'杂项',拆分后重摘要",
+          "stage": "分桶",
+          "needs_gpu": true,
+          "expected_gain": "B15/B18/B49类18-27段大杂桶不再把正题specifics稀释归零;成员重叠(B49/B52重叠15段)一并收敛"
+        }
+      ]
+    },
+    "report": "# 本地事件产出·内容质量分析\n\n对照对象:**本地88**(两全版:视觉8B选帧 + 14B session汇总 → 分桶 → 2507切分命名/摘要)、**gpt41**(gpt-5.4,同吃本地上游产出的 doing,只比下游)、**生产28**(全量OCR直接上云强模型,全链路参照)。数据日:2026-06-07,337 个 session。所有结论基于脚本化锚点计量 + 逐条人工裁决,锚点均双向 grep 验真。\n\n---\n\n## 1. 记分板\n\n| 质量维度 | 本地88 | gpt41(同吃doing) | 生产28(全量OCR上云) | 裁决 |\n|---|---|---|---|---|\n| 忠实度(纯编造) | 0 编造;验真 96.1%;张冠李戴 3.0%(含 #3/#4 摘要锚点整对互换,最恶劣) | 0 编造;验真 96.7%;张冠李戴 1.6%(仅时间邻居借用) | 抽查 0 编造;但 \"37 done wav\" 反而比本地 \"36 done\" 错 | 三方≈平,gpt 微净 |\n| 锚点并集覆盖(检索场景) | **胜**:203 锚点;大线程独有锚点 2-6 倍 | 122 锚点;单条压缩整段丢自己簇内子工作流 | 强(因果链类事实多) | 本地>gpt;vs 生产互有 |\n| 单摘要锚点密度 | 2.31/摘要、6.85/千字(对 doing 仅浓缩 +21%);1 段小事件净丢锚点 | **胜**:2.98/摘要、8.43/千字(+49%),每个桶都赢 | 未脚本计量(观感高) | gpt 胜 |\n| 因果链/叙事完整性 | **最弱**:无一事件讲完一条根因故事 | 中:有叙事弧+用户引语,但大簇截断弧线 | **最强**:全链+hash+精确数字+决策原话 | 生产胜 |\n| 标题可用性 | **最弱**:含糊 19-31%;5 条 \"X & Y\" 堆;2 硬误标 | **胜**:含糊 ~2-5%;0 硬误标 | 未直接计量(推定良) | gpt 胜 |\n| 残渣过滤/信噪比 | 20/88 摘要混入终端残渣,1 事件以 flag 命名 | **胜**:同源输入 0/41 | 未见残渣 | 本地独输 |\n| 人名/社交内容保留 | 王昱 0/88(doing 里有 3 处) | **胜**:2 条保留且验真 | 未测 | 本地独输 |\n| 结论可检索性(粒度红利) | **胜**:Rime 91% 收官标题级可达 | Rime/91% 全文零出现,收官 session 被吞进听歌事件 | (结构指标另线) | 本地胜 |\n| 输入信息完整性(上游) | doing 对 raw OCR 锚点保真 ~47% | 同左(同源) | **胜**:直读全量 OCR,零采集缺口 | 生产胜 |\n| 覆盖(session 物理收录) | 308/337,有内容缺席洞 | 334/337 | 全量 | 本地输 |\n\n一句话:**头对头 5:3 赢 gpt41 的并集覆盖,但单条质量(密度/标题/过滤)全面落后;对生产 28,修复面事实打平甚至反超,因果链叙事完败。**\n\n---\n\n## 2. 本地赢在哪\n\n1. **大线程头对头 5/8 胜(G11/G10/G12/G31/G17 全胜),并集独有锚点 2-6 倍。** 铁证:librime/雾凇的 17 个 session 全在 gpt 自己的 cluster 里,gpt 摘要却只字未提;WuSong 91%、/tmp/rime-test、lattice.c、U+FEFF 边界算法全是本地独有。gpt 单条压缩的代价是整段丢掉簇内完整子工作流(boundary-send 的 revert 弧、RECENTS 侧栏弧同样被丢)。\n\n2. **结论可达性碾压。** headless Rime 91% 验证收官在本地 [85] 标题级直给(\"Configure headless Rime input method\");gpt41 全部 41 个事件的标题+摘要里 Rime/librime/91% 零出现,收官 session s1145 还被塞进 \"Played music while working\"。本地的细粒度策略避免了 60-session 巨块吞没当天最重要的结论。\n\n3. **命中后答案质量更高。** PostHog 事件含 API key + opt-out + 两个 app(gpt 只有一半);听歌答出 4 首具名(過火/老男孩/愛如潮水/信仰)vs gpt 仅 1 首。\n\n4. **vs 生产 28,修复面打平甚至反超。** #59 有 guard 根因+文件路径(生产同级);#22 有完整 commit message(生产只写到\"开始搜\");#55 比生产还细(recording_templates 表名)。且握有生产没有的:80% 成功率、Silero 512/64 参数、Stanford-style reflection;\"36 done wav\" 比生产的 \"37\" 更符合 OCR 原文——生产反而写错。\n\n5. **上游视觉路对纯 OCR 基线实质反超,\"换回 OCR 喂养\"是倒退。** Xcode 只有 168 字符纯 chrome(界面装饰文字)时,视觉净增 5 个真代码锚点;OCR 乱码 \"fix(thene=light)分關線\" 被修复成正确 commit message;正确滤掉 \"ah ah ah\"×100 转录垃圾;微信 $15/$6 卖货内容 OCR 里根本没有,视觉看到了。\n\n6. **忠实度达标。** 88 条摘要 203 个锚点纯编造 = 0,与 gpt/生产同级;\"事件级 hallucination = 0\" 的先例再次成立。\n\n---\n\n## 3. 本地输在哪(逐条归因)\n\n每条标注:**归因阶段** = 管线哪一步丢的;**可修性** = 是否有确定性(不跑模型、结果可预期)修法。\n\n### 3.1 标题可用性全面落后 → 归因:2507切分命名 | 半确定性可修\n含糊率 19-31% vs gpt 2-5%;[38]-[42] 连续 5 条 \"X & Y\" 文件夹式名词堆(\"AI Model Testing & Validation\" 之类);B49(24 段)整个事件被命名为 \"Test and validate permission bypasses\"——实际内容是 CJK 输入/submitRaceBurst 实验。修法:标题 lint(规则校验)可确定性地**检出**违规,重命名本身仍需跑模型。\n\n### 3.2 终端残渣写进摘要 → 归因:2507摘要生成+分桶(源头是 vision 如实 OCR 了终端,但可下游拦) | **确定性可修**\n20/88 摘要命中 `--dangerously-skip-permissions`、caffeinate 9 处;gpt 同源输入 0/41——同吃 doing 能 100% 过滤,证明纯下游问题。黑名单剥离是确定性修法。\n\n### 3.3 人名/社交内容系统性丢失 → 归因:2507摘要生成 | 需动模型(prompt 规则),gpt 对照证明可修到 0\n个人记忆系统最伤的一刀。王昱在 doing 里 3 处,本地 88 事件标题+摘要 0 出现;[68] 把\"向 Lucifer 卖金属架 $15/婴儿床 $6 + 给王昱发 Claude referral 链接\"总结成 sourcekit-lsp 背景噪音。6 个检索场景里 \"王昱聊了什么\" 是本地唯一\"不可达\"。\n\n### 3.4 锚点浓缩力弱、小事件净丢 → 归因:2507摘要生成 | 需动模型\n每千字 6.85 vs gpt 8.43(-23%),每个桶都输;36 个 1 段事件密度 4.62 < 输入 doing 的 5.64——唯一比输入还稀的桶,摘要在小事件上是净减信息。\n\n### 3.5 张冠李戴 3.0%,含事件对锚点互换 → 归因:分桶/增量合并管线 bug | **触发逻辑确定性可修**\nlocal#3/#4 两个事件的摘要锚点整体互换(ScreenCaptureKit↔MemorySettingsView),强指向增量合并/重分配后摘要没重新生成。\"合并→标脏→重生成\"是确定性管线改动(重生成本身跑模型)。gpt 只有 1.6% 且全是轻案(时间邻居借用)。\n\n### 3.6 因果链四类\"粘合剂\"全丢(vs 生产的主差距) → 归因:14B汇总(主责,约 55-60%)+分桶切碎(约 25%)+摘要不选用(15-20%) | 需动模型为主\ncommit hash(970be0f/d1b3385 在 doing 层全灭,全天保留 23%)、精确数字对(1551 字基线/删 756 只 commit 18)、多步根因链(compactMap 过滤→processQueueOnce 拿空 break→永不调 transcribeOne→卡 \"1 clip in queue\",raw OCR 逐字在,doing 只剩半条)、用户决策原话(\"删了吧\")。再被分桶把一个故事切进 2-4 个错桶(zombie 链横跨 #13/#44/#18)。**其中 hash/数字/人名可用确定性 regex 旁路止血,不动模型**;链条和原话必须改 14B prompt。\n\n### 3.7 大杂桶摘要被稀释成空话 → 归因:分桶污染+摘要对成员做平均 | 半确定性\nB15(18 段,\"Port screenshot OCR\")正题 specifics≈0,全写混入成员的 UI 噪声,IDs 2497-2501/confidence/config.toml 全丢;B18(27 段)同病。纯度阈值检查是确定性的,拆分后重摘要跑模型。\n\n### 3.8 garble(OCR 错字)照抄+伪补全 → 归因:产生于 vision/14B,2507 未拦截 | 半确定性可修\n\"Sources/My Waddling\"、\"Siler0.swift\" 逐字进摘要(gpt 遇同样输入选择省略);\"1f.assembleKeyst\" 被伪补全成 \"tf.assembleKeyStrokeTours\"(真名 assembleKeystrokeText)。修法:摘要产出的标识符与成员 raw OCR 做 diff,不匹配宁省略勿补全——确定性后处理。\n\n### 3.9 覆盖洞:关键 session 不属于任何事件,内容物理缺席 → 归因:分桶 | 兜底逻辑确定性,归桶跑模型\ns286/s386(python 格式化错/IDs 2497-2501)、s254(听\"来迟\" by 戴羽彤)、s23/s414/s418/s425/s646(SIP 架构讨论主体)全部无事件归属——生产 11.9K 字的 SIP 大事件在本地因此**没有对应物**。\n\n### 3.10 跨事件锚点渗漏 → 归因:2507摘要生成(上下文泄漏) | 半确定性(同 3.8 的 diff 可拦一部分)\nB28(仅含 s521)摘要写了 s562 独有的 \"Not scanned\"/\"Last imported\" 细节。gpt 也有 1 例(ElevenLabs),但本地 6 处 vs gpt 2 处。\n\n---\n\n## 4. 上游保真率:doing vs 原始 OCR(14 个分层抽样)\n\n**总保真率 ~47%**:OCR 侧可核锚点 252 个,doing 保住 119 个。且基线自伤——593/1200 条 raw_sessions.ocr 恰好 2000 字符(入库即截断),真实全屏保真率**低于** 47%。\n\n分层结果:\n- **最大损耗桶是\"整块丢\"不是\"逐点压\"**:多 part/第二窗格尾部内容整块蒸发(约 35+ 锚点)。s72 的 git revert 40b13e9、s57 的用户中文指令\"把主动训练的原始音频也保存下来吧\"、s418 的 canvas 管道设计,doing 里零痕迹。全天 44% 的 session 是多 part,暴露面大。→ **vision 选帧+增量合并**的问题,喂更多 OCR 救不了,要改汇总配额。\n- **数字保留 ~15%、commit hash 23%(抽样内 0/4)、中文人名 0/5**(王昱/张晔/贵华/何成/Alan刘浩然 全灭,拉丁名反而保住)。→ **14B 汇总**的摘要偏好:压向叙事、弃精确串。\n- **长文对话正文最低 8%**(s418),侧栏旧会话标题反而保 8/17——chrome 反客为主。\n- 分场景差异大:Chrome 作业页 56%(日期/分数/URL 全保),GUI 重场景视觉反超 OCR。\n- 乱码近零、事件级编造为零,但存在**锚点级伪补全**(assembleKeyst→错名)和 2 例语义误读(UI 菜单 \"1:Bad 2:Fine 3:Good\" 被读成用户评了 \"2: Fine\")。\n\n**计量结论**:上游不是\"看不见\"(采集/OCR 层零缺口,生产 10 大事件的全部缺失事实 100% 可在 raw OCR 里 grep 到),而是 doing 生成时选择性丢弃;视觉路在 GUI/乱码/垃圾过滤上已实质反超 OCR,主干不该换,该补的是配额+确定性旁路。\n\n---\n\n## 5. 用户视角:哪份清单作为\"今天的记忆\"更好用\n\n**gpt41 是更好的目录,本地 88 是更好的答案库。**\n\n- **翻目录回看今天干了什么**:gpt41 明显好用。41 条标题全部动词过去式、0 硬误标、含糊率 ~2-5%;本地有 5 条 \"X & Y\" 文件夹式标题、17+ 条含糊标题、还有 \"Test and validate permission bypasses\" 这种读起来像在搞安全测试的误标垃圾桶。\n- **带着具体问题检索**:本地更好用,6 场景 3:3 但含金量偏本地——\"IME 丢字最后结论是什么\"只有本地能答(Rime 91% 标题级可达,gpt 全文零出现);\"听了什么歌\"本地答 4 首 vs gpt 1 首;PostHog 细节本地更全。\n- **本地的硬伤**:\"和王昱聊了什么\"在本地完全不可达(gpt 一步命中 2 条)——对个人记忆系统,社交内容丢失比技术锚点丢失更伤。\n- **两边共同的天花板**:都讲不出生产那样的完整根因故事(zombie chunk 全链、SIP 论证),这是上游 doing 层已经丢了,下游谁都拼不回来。\n\n---\n\n## 6. 修复清单(按预期收益排序)\n\n| # | 修复项 | 阶段 | 需GPU | 预期收益 |\n|---|---|---|---|---|\n| 1 | 14B 汇总 prompt 改造:显式保留多步因果链/commit hash/精确数字/用户决策原话;多 part session 按 part 设最低产出配额(每 part 至少 1 句) | 14B汇总 | 是 | 最大头:vs 生产缺失事实的 55-60% 在此层;同时打上游 47% 保真的两个最大损耗桶 |\n| 2 | 确定性 regex 锚点旁路:从 raw OCR 直接抽 hash/版本号/百分比/带单位数字/中文人名进 session kw,不经 14B | OCR→doing 旁路 | **否** | 零模型成本止血:hash 23%→接近100%、人名 0/5→可检索;与 #1 互补 |\n| 3 | 增量合并/重分配后把受影响事件标脏并强制重生成摘要 | 分桶管线 | 是(触发逻辑确定性) | 消灭 3.0% 张冠李戴里最恶劣的 #3/#4 锚点互换 |\n| 4 | 2507 摘要 prompt 三规则:人名/社交必留、保留用户原话引语、优先选用成员 doing 已有 specifics(提主线不做平均) | 摘要生成 | 是 | \"王昱\"从不可达→一步可达;密度 -23% 收窄;大杂桶稀释缓解;gpt 对照证明此层可修到 0 硬丢 |\n| 5 | 终端残渣确定性黑名单(skip-permissions/caffeinate/sourcekit-lsp 等)在嵌入与摘要输入前剥离 | 分桶预处理+摘要输入 | **否** | 残渣 20/88→~0(gpt 0/41 是天花板);B49 类样板 token 垃圾桶不再成型 |\n| 6 | 标题 lint+重命名:强制动词开头、禁 \"&\" 堆、禁 flag/残渣词入题 | 切分命名 | 是(lint 本身否) | 含糊率 19-31%→gpt 级 ~5%;补齐\"目录\"短板 |\n| 7 | 孤儿 session 兜底:无归属 session 最近邻归桶或产单 session 事件 | 分桶 | 是 | 消 s254/s286/s414 类物理缺席;SIP 级大事件不再无对应物;覆盖 308→接近 334 |\n| 8 | 摘要标识符 OCR 校验:产出的文件名/标识符与成员 raw OCR diff,不匹配则删除或降级(宁省略勿补全) | 摘要后处理 | **否** | 消 garble 照抄(My Waddling/Siler0)与伪补全;顺带拦跨桶渗漏 |\n| 9 | 去除 raw_sessions.ocr 入库 2000 字符截断 | 采集入库 | **否** | 基线不再失真;为长文正文(现 8%)和 OCR 并集校验提供完整原料 |\n| 10 | 大杂桶纯度检查:主题占比低于阈值时拆分或标\"杂项\",拆分后重摘要 | 分桶 | 是 | B15/B18/B49 类 18-27 段杂桶不再稀释正题;成员重叠(B49/B52 重叠 15 段)收敛 |\n\n**不用 GPU 的四项(#2/#5/#8/#9)可以先做**:纯确定性脚本改动,合计覆盖残渣、garble、hash/数字/人名蒸发、基线截断四类问题,不碰模型、收益可预期。\n\n---\n\n*方法说明:锚点 = 摘要中可 grep 验证的具体标识符(文件名/hash/数字/人名等);验真 = 能在成员 doing 原文找到;张冠李戴 = 锚点真实存在但挂错事件;doing = 14B 对单 session 的汇总文本,是分桶和摘要的共同输入。*"
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Audit"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Judge"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Synth"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "Q1:head2head",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a3b6a15176cf951b8",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971321285,
+      "queuedAt": 1782971321279,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Q1 头对头:8 大线程摘要内容质量(本地88多条并集 vs gpt41单条,…",
+      "promptPreview": "# 背景:My-Portrait 事件管线本地化,结构指标(覆盖/dup/粒度)已另行分析,你这条线只管**内容质量**。\n本地胜出版=两全版88事件。三方对比对象与归因逻辑(重要):\n- **gpt41**(gpt-5.4 聚类)**吃的是同一批本地 doing 摘要** → 本地88 vs gpt41 = 纯下游(聚类/命名/事件摘要)质量差\n- **prod28**(生产线:全量OCR上云+云端聚类,库中现状) → vs 本地 = 全链路差\n- **doing vs 库里原始 OCR**(lab.db raw_sessions.ocr 列有每段原始OCR全文) = 纯上游(视觉8B+14B汇总)损耗\n一天=2026-06-07,337 session。\n\n# 数据(全部只读)\n- /tmp/cmp/v5_bestofboth.json — 本地88事件 {events[title/s…",
+      "lastProgressAt": 1782971820678,
+      "tokens": 72302,
+      "toolCalls": 23,
+      "durationMs": 499393,
+      "resultPreview": "{\"topic\":\"Q1 头对头:8 大线程摘要内容质量(本地88多条并集 vs gpt41单条,同吃 doing)\",\"findings\":[\"【G11 IME multilingual 60段←11本地】本地并集胜(大胜)。gpt独有锚点仅4个:'jiu s s'、'dian-店'(s397/414实锚)、CJK segmentation limits、OCR+击键实时对齐设计(s421)。本地独有20+:整条 librime/雾凇 工作流(17个session全在gpt自己的cluster里但摘要只字未提:WuSong 91%、/tmp/rime-test、lattice.c、rime_api.h、userdb)、Shuangpin+NSTextInputContext+kTISNotifySelectedKeyboardInputSourceChanged、U+FEFF/isSen…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "Q2:anchors",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a88663ecf166969ee",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971321285,
+      "queuedAt": 1782971321279,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Q2 锚点计量:本地88 vs gpt41 摘要的锚点密度与忠实度(全量脚本…",
+      "promptPreview": "# 背景:My-Portrait 事件管线本地化,结构指标(覆盖/dup/粒度)已另行分析,你这条线只管**内容质量**。\n本地胜出版=两全版88事件。三方对比对象与归因逻辑(重要):\n- **gpt41**(gpt-5.4 聚类)**吃的是同一批本地 doing 摘要** → 本地88 vs gpt41 = 纯下游(聚类/命名/事件摘要)质量差\n- **prod28**(生产线:全量OCR上云+云端聚类,库中现状) → vs 本地 = 全链路差\n- **doing vs 库里原始 OCR**(lab.db raw_sessions.ocr 列有每段原始OCR全文) = 纯上游(视觉8B+14B汇总)损耗\n一天=2026-06-07,337 session。\n\n# 数据(全部只读)\n- /tmp/cmp/v5_bestofboth.json — 本地88事件 {events[title/s…",
+      "lastProgressAt": 1782971800066,
+      "tokens": 56529,
+      "toolCalls": 16,
+      "durationMs": 478781,
+      "resultPreview": "{\"topic\":\"Q2 锚点计量:本地88 vs gpt41 摘要的锚点密度与忠实度(全量脚本化,含逐条裁决)\",\"findings\":[\"【总量表】本地88:锚点203个,密度2.31/摘要、6.85/千字,doing验真195/203=96.1%;gpt41:锚点122个,密度2.98/摘要、8.43/千字,doing验真118/122=96.7%。共享输入doing自身密度=5.64/千字(337段947锚点)——gpt对同一输入浓缩+49%,本地只+21%。脚本:scratchpad/anchor_audit.py+adjudicate.py\",\"【分类型】本地:camel 95(验真95.8%)/file 54(92.6%)/num_unit 31(100%)/snake 20(100%)/hash 2(100%)/url 1;gpt:camel 70(97.1%)/file …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "Q3:vs-prod",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ac9345e3250a07811",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971321286,
+      "queuedAt": 1782971321279,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Q3 全链路内容质量对照:生产28(全量OCR上云+强模型) vs 本地88(…",
+      "promptPreview": "# 背景:My-Portrait 事件管线本地化,结构指标(覆盖/dup/粒度)已另行分析,你这条线只管**内容质量**。\n本地胜出版=两全版88事件。三方对比对象与归因逻辑(重要):\n- **gpt41**(gpt-5.4 聚类)**吃的是同一批本地 doing 摘要** → 本地88 vs gpt41 = 纯下游(聚类/命名/事件摘要)质量差\n- **prod28**(生产线:全量OCR上云+云端聚类,库中现状) → vs 本地 = 全链路差\n- **doing vs 库里原始 OCR**(lab.db raw_sessions.ocr 列有每段原始OCR全文) = 纯上游(视觉8B+14B汇总)损耗\n一天=2026-06-07,337 session。\n\n# 数据(全部只读)\n- /tmp/cmp/v5_bestofboth.json — 本地88事件 {events[title/s…",
+      "lastProgressAt": 1782971837292,
+      "tokens": 86521,
+      "toolCalls": 20,
+      "durationMs": 516006,
+      "resultPreview": "{\"topic\":\"Q3 全链路内容质量对照:生产28(全量OCR上云+强模型) vs 本地88(两全版),10个信息量最大生产事件逐一对照+缺失事实归因\",\"findings\":[\"【1 zombie chunk】生产:chunk 3402→compactMap+AssetPath.resolve→nil→过滤→processQueueOnce拿空break→永不调transcribeOne→僵尸卡'1 clip in queue'、commit 970be0f、37个missing WAV无害分析。本地#44只有'AssetPath.resolve返nil→pendingAudioChunks被静默跳过→卡队列'半条链。归因:chunk 3402在成员s701 doing里有(摘要生成丢);compactMap在成员s720 doing里有(摘要生成丢);processQueueOnc…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "Q4:upstream",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a046c3b0a865a7350",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971321286,
+      "queuedAt": 1782971321279,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Q4 上游损耗计量:doing(视觉8B+14B汇总) vs lab.db 原始OCR,14…",
+      "promptPreview": "# 背景:My-Portrait 事件管线本地化,结构指标(覆盖/dup/粒度)已另行分析,你这条线只管**内容质量**。\n本地胜出版=两全版88事件。三方对比对象与归因逻辑(重要):\n- **gpt41**(gpt-5.4 聚类)**吃的是同一批本地 doing 摘要** → 本地88 vs gpt41 = 纯下游(聚类/命名/事件摘要)质量差\n- **prod28**(生产线:全量OCR上云+云端聚类,库中现状) → vs 本地 = 全链路差\n- **doing vs 库里原始 OCR**(lab.db raw_sessions.ocr 列有每段原始OCR全文) = 纯上游(视觉8B+14B汇总)损耗\n一天=2026-06-07,337 session。\n\n# 数据(全部只读)\n- /tmp/cmp/v5_bestofboth.json — 本地88事件 {events[title/s…",
+      "lastProgressAt": 1782971751719,
+      "tokens": 79918,
+      "toolCalls": 29,
+      "durationMs": 430433,
+      "resultPreview": "{\"topic\":\"Q4 上游损耗计量:doing(视觉8B+14B汇总) vs lab.db 原始OCR,14个分层抽样 session(2026-06-07)\",\"findings\":[\"总保真率:14个样本手工锚点对账,OCR侧可核锚点252个,doing保住119个≈47%。按app分层:Chrome作业页最高(s1177,9/16=56%且日期/分数全保:due May 29 11:59pm/submitted Jun 4 4:02pm late/100 points/URL courses/58112/assignments/250791 逐字保留);Claude长文对话最低(s418,正文锚点1/12≈8%)\",\"丢失类型排行(按样本内计数):#1 第二窗格/尾部part整块丢(约35+锚点,最大头)——s72的part78(git revert 40b13e9→b2c22f…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "Q5:user-view",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a426c3ca33b8e2f90",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971321286,
+      "queuedAt": 1782971321279,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Q5 用户视角+标题体检:本地88 vs gpt41 标题可用性计量 + 6场景…",
+      "promptPreview": "# 背景:My-Portrait 事件管线本地化,结构指标(覆盖/dup/粒度)已另行分析,你这条线只管**内容质量**。\n本地胜出版=两全版88事件。三方对比对象与归因逻辑(重要):\n- **gpt41**(gpt-5.4 聚类)**吃的是同一批本地 doing 摘要** → 本地88 vs gpt41 = 纯下游(聚类/命名/事件摘要)质量差\n- **prod28**(生产线:全量OCR上云+云端聚类,库中现状) → vs 本地 = 全链路差\n- **doing vs 库里原始 OCR**(lab.db raw_sessions.ocr 列有每段原始OCR全文) = 纯上游(视觉8B+14B汇总)损耗\n一天=2026-06-07,337 session。\n\n# 数据(全部只读)\n- /tmp/cmp/v5_bestofboth.json — 本地88事件 {events[title/s…",
+      "lastProgressAt": 1782971781231,
+      "tokens": 63293,
+      "toolCalls": 22,
+      "durationMs": 459945,
+      "resultPreview": "{\"topic\":\"Q5 用户视角+标题体检:本地88 vs gpt41 标题可用性计量 + 6场景检索演练(2026-06-07, 337 session)\",\"findings\":[\"【标题计量·本地88】动词开头74/88;名词堆非动词开头14条([37]-[42],[67]-[71],[80]-[82]);'X & Y'文件夹式硬伤5条(全在[38]-[42]连续段:'Audio Processing & Transcription Setup'/'Model Fine-Tuning & Data Collection'/'Memory & Event Processing Configuration'/'AI Model Testing & Validation'/'Meeting Recording & Real-Time Transcription');含糊标题(不看摘要认不…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "q-judge",
+      "phaseIndex": 2,
+      "phaseTitle": "Judge",
+      "agentId": "aca1c056e2156e054",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782971837318,
+      "queuedAt": 1782971837301,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "| 质量维度 | 本地88(两全版) | gpt41(gpt-5.4同吃doing) | pro…",
+      "promptPreview": "# 背景:My-Portrait 事件管线本地化,结构指标(覆盖/dup/粒度)已另行分析,你这条线只管**内容质量**。\n本地胜出版=两全版88事件。三方对比对象与归因逻辑(重要):\n- **gpt41**(gpt-5.4 聚类)**吃的是同一批本地 doing 摘要** → 本地88 vs gpt41 = 纯下游(聚类/命名/事件摘要)质量差\n- **prod28**(生产线:全量OCR上云+云端聚类,库中现状) → vs 本地 = 全链路差\n- **doing vs 库里原始 OCR**(lab.db raw_sessions.ocr 列有每段原始OCR全文) = 纯上游(视觉8B+14B汇总)损耗\n一天=2026-06-07,337 session。\n\n# 数据(全部只读)\n- /tmp/cmp/v5_bestofboth.json — 本地88事件 {events[title/s…",
+      "lastProgressAt": 1782972072038,
+      "tokens": 36250,
+      "toolCalls": 1,
+      "durationMs": 234720,
+      "resultPreview": "{\"scoreboard_md\":\"| 质量维度 | 本地88(两全版) | gpt41(gpt-5.4同吃doing) | prod28(全量OCR上云) | 裁决 |\\n|---|---|---|---|---|\\n| 忠实度(纯编造) | 0编造;原始验真96.1%;但张冠李戴3.0%(含#3/#4摘要锚点整对互换,最恶劣) | 0编造;验真96.7%;张冠李戴1.6%(仅时间邻居借用) | 抽查0编造;但\\\"37 done wav\\\"反而比本地\\\"36 done\\\"错 | 三方≈平,gpt微净 |\\n| 锚点并集覆盖(检索场景) | **胜**:203锚点;大线程独有锚点2-6倍(librime 17段全workflow、revert弧、RECENTS弧) | 122锚点;单条压缩整段丢自己簇内子工作流 | 强(粘合剂类事实多) | 本地>gpt;vs prod互有 |\\n| 单摘…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "q-synth",
+      "phaseIndex": 3,
+      "phaseTitle": "Synth",
+      "agentId": "af94e150a685c738a",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1782972072045,
+      "queuedAt": 1782972072044,
+      "attempt": 1,
+      "promptPreview": "把质量分析综合成给用户看的中文 markdown 报告《本地事件产出·内容质量分析》。结构:\n1. 记分板(本地88 vs gpt41 vs 生产28)\n2. 本地赢在哪(带实例)\n3. 本地输在哪(带实例)——重点:每条损耗**归因到管线哪一步**、确定性可修否\n4. 上游保真率(doing vs 原始OCR)的计量结论\n5. 用户视角:两份清单作为\"今天的记忆\"哪份好用\n6. 修复清单(与质量相关,注明哪些不用GPU)\n实事求是,别吹。材料:\n审计=[{\"topic\":\"Q1 头对头:8 大线程摘要内容质量(本地88多条并集 vs gpt41单条,同吃 doing)\",\"findings\":[\"【G11 IME multilingual 60段←11本地】本地并集胜(大胜)。gpt独有锚点仅4个:'jiu s s'、'dian-店'(s397/414实锚)、CJK segmentati…",
+      "lastProgressAt": 1782972180015,
+      "tokens": 40625,
+      "toolCalls": 0,
+      "durationMs": 107970,
+      "resultPreview": "# 本地事件产出·内容质量分析\n\n对照对象:**本地88**(两全版:视觉8B选帧 + 14B session汇总 → 分桶 → 2507切分命名/摘要)、**gpt41**(gpt-5.4,同吃本地上游产出的 doing,只比下游)、**生产28**(全量OCR直接上云强模型,全链路参照)。数据日:2026-06-07,337 个 session。所有结论基于脚本化锚点计量 + 逐条人工裁决,锚点均双向 grep 验真。\n\n---\n\n## 1. 记分板\n\n| 质量维度 | 本地88 | gpt41(同吃doing) | 生产28(全量OCR上云) | 裁决 |\n|---|---|---|---|---|\n| 忠实度(纯编造) | 0 编造;验真 96.1%;张冠李戴 3.0%(含 #3/#4 摘要锚点整对互换,最恶劣) | 0 编造;验真 96.7%;张冠李戴 1.6%(仅时间邻居借用)…"
+    }
+  ],
+  "totalTokens": 435438,
+  "totalToolCalls": 111
+}

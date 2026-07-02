@@ -1,0 +1,1363 @@
+{
+ "v1_raw225": {
+  "desc": "首跑 τ0.35 无合并(过切基线)",
+  "metrics": {
+   "n_events": 225,
+   "coverage": "287/337",
+   "dup": 82,
+   "size_hist": [
+    24,
+    22,
+    17,
+    11,
+    11,
+    7,
+    7,
+    6,
+    6,
+    4,
+    4,
+    4,
+    4,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "singletons": 192,
+   "size_le2": 202,
+   "mega_ge20": 2,
+   "bcubed_vs_gpt41": {
+    "P": 0.838,
+    "R": 0.172,
+    "F1": 0.286
+   },
+   "island": {
+    "librime": {
+     "n_seg": 14,
+     "n_events": 14,
+     "top": [
+      [
+       "Configure Librime for Chinese typing",
+       1
+      ],
+      [
+       "Analyze Rime API structure",
+       1
+      ]
+     ]
+    },
+    "rime": {
+     "n_seg": 22,
+     "n_events": 19,
+     "top": [
+      [
+       "Test and validate permission bypasses",
+       3
+      ],
+      [
+       "Test LLM behavior and permission bypasse",
+       1
+      ]
+     ]
+    },
+    "pinyin": {
+     "n_seg": 10,
+     "n_events": 6,
+     "top": [
+      [
+       "Test and validate permission bypasses",
+       5
+      ],
+      [
+       "Debug input method configurations",
+       1
+      ]
+     ]
+    },
+    "qwen3-asr": {
+     "n_seg": 8,
+     "n_events": 6,
+     "top": [
+      [
+       "Test LLM behavior and permission bypasse",
+       1
+      ],
+      [
+       "Test real-time transcription with on-dev",
+       1
+      ]
+     ]
+    },
+    "silero": {
+     "n_seg": 4,
+     "n_events": 1,
+     "top": [
+      [
+       "Transcribe meeting audio",
+       1
+      ]
+     ]
+    },
+    "posthog": {
+     "n_seg": 4,
+     "n_events": 3,
+     "top": [
+      [
+       "Set up PostHog API key",
+       2
+      ],
+      [
+       "Integrate analytics tracking in Xcode",
+       1
+      ]
+     ]
+    },
+    "spotify": {
+     "n_seg": 11,
+     "n_events": 11,
+     "top": [
+      [
+       "Optimize UI performance for speaker ID",
+       1
+      ],
+      [
+       "Fix canvas routing and keystroke misclas",
+       1
+      ]
+     ]
+    },
+    "playlist": {
+     "n_seg": 2,
+     "n_events": 2,
+     "top": [
+      [
+       "Explore 'Public Playlist' and play '信仰'",
+       1
+      ],
+      [
+       "Play 'My-Portrait' playlist and run term",
+       1
+      ]
+     ]
+    },
+    "wechat": {
+     "n_seg": 5,
+     "n_events": 0,
+     "top": []
+    },
+    "powerprofile": {
+     "n_seg": 5,
+     "n_events": 3,
+     "top": [
+      [
+       "Fix permission issues with CLI tools",
+       3
+      ],
+      [
+       "Configure AI providers and transcription",
+       1
+      ]
+     ]
+    },
+    "balanced": {
+     "n_seg": 8,
+     "n_events": 6,
+     "top": [
+      [
+       "Fix permission issues with CLI tools",
+       3
+      ],
+      [
+       "Configure AI providers and transcription",
+       1
+      ]
+     ]
+    },
+    "recents": {
+     "n_seg": 7,
+     "n_events": 6,
+     "top": [
+      [
+       "Fix RECENTS sidebar visibility",
+       2
+      ],
+      [
+       "Fix divider visibility in light mode",
+       1
+      ]
+     ]
+    },
+    "snipaste": {
+     "n_seg": 1,
+     "n_events": 1,
+     "top": [
+      [
+       "Capture and annotate meeting screenshots",
+       1
+      ]
+     ]
+    },
+    "videofps": {
+     "n_seg": 3,
+     "n_events": 2,
+     "top": [
+      [
+       "Investigate videoFps configuration usage",
+       2
+      ],
+      [
+       "Remove video frame rate UI element",
+       1
+      ]
+     ]
+    },
+    "discord": {
+     "n_seg": 9,
+     "n_events": 3,
+     "top": [
+      [
+       "Configure system for continuous AI proce",
+       3
+      ],
+      [
+       "Debug send logic and optimize UI",
+       1
+      ]
+     ]
+    },
+    "canvas": {
+     "n_seg": 14,
+     "n_events": 11,
+     "top": [
+      [
+       "Test and validate permission bypasses",
+       4
+      ],
+      [
+       "Optimize UI performance for speaker ID",
+       1
+      ]
+     ]
+    }
+   }
+  }
+ },
+ "v2_fixes90": {
+  "desc": "+3修复 τ0.30+软化切分+嵌入质心join(只合9)",
+  "metrics": {
+   "n_events": 90,
+   "coverage": "308/337",
+   "dup": 43,
+   "size_hist": [
+    27,
+    24,
+    18,
+    16,
+    13,
+    11,
+    11,
+    10,
+    9,
+    9,
+    8,
+    7,
+    7,
+    7,
+    7,
+    6,
+    6,
+    6,
+    6,
+    5,
+    5,
+    5,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "singletons": 36,
+   "size_le2": 47,
+   "mega_ge20": 2,
+   "bcubed_vs_gpt41": {
+    "P": 0.652,
+    "R": 0.291,
+    "F1": 0.402
+   },
+   "island": {
+    "librime": {
+     "n_seg": 14,
+     "n_events": 4,
+     "top": [
+      [
+       "Configure headless Rime input method",
+       7
+      ],
+      [
+       "Integrate Rime with AI and custom dictio",
+       4
+      ]
+     ]
+    },
+    "rime": {
+     "n_seg": 22,
+     "n_events": 9,
+     "top": [
+      [
+       "Configure headless Rime input method",
+       8
+      ],
+      [
+       "Integrate Rime with AI and custom dictio",
+       4
+      ]
+     ]
+    },
+    "pinyin": {
+     "n_seg": 10,
+     "n_events": 3,
+     "top": [
+      [
+       "Debug IME tail-loss in CJK input",
+       5
+      ],
+      [
+       "Configure headless Rime input method",
+       3
+      ]
+     ]
+    },
+    "qwen3-asr": {
+     "n_seg": 8,
+     "n_events": 7,
+     "top": [
+      [
+       "Test and validate permission bypasses",
+       2
+      ],
+      [
+       "Implement error handling and UI feedback",
+       1
+      ]
+     ]
+    },
+    "silero": {
+     "n_seg": 4,
+     "n_events": 3,
+     "top": [
+      [
+       "Configure and test speech detection mode",
+       2
+      ],
+      [
+       "Transcribe and debug meeting audio",
+       1
+      ]
+     ]
+    },
+    "posthog": {
+     "n_seg": 4,
+     "n_events": 1,
+     "top": [
+      [
+       "Set up PostHog analytics",
+       4
+      ]
+     ]
+    },
+    "spotify": {
+     "n_seg": 11,
+     "n_events": 9,
+     "top": [
+      [
+       "Developing My-Portrait with code and pla",
+       2
+      ],
+      [
+       "Optimize UI and speaker identification",
+       1
+      ]
+     ]
+    },
+    "playlist": {
+     "n_seg": 2,
+     "n_events": 2,
+     "top": [
+      [
+       "Developing My-Portrait with code and pla",
+       1
+      ],
+      [
+       "Listening to My-Portrait playlist and de",
+       1
+      ]
+     ]
+    },
+    "wechat": {
+     "n_seg": 5,
+     "n_events": 3,
+     "top": [
+      [
+       "Code review and tool usage in WeChat",
+       2
+      ],
+      [
+       "Game promotion and media sharing via WeC",
+       2
+      ]
+     ]
+    },
+    "powerprofile": {
+     "n_seg": 5,
+     "n_events": 2,
+     "top": [
+      [
+       "Add power-mode and Auto Live indicator",
+       4
+      ],
+      [
+       "Implement Balanced power mode and settin",
+       1
+      ]
+     ]
+    },
+    "balanced": {
+     "n_seg": 8,
+     "n_events": 4,
+     "top": [
+      [
+       "Add power-mode and Auto Live indicator",
+       4
+      ],
+      [
+       "Model Fine-Tuning & Data Collection",
+       1
+      ]
+     ]
+    },
+    "recents": {
+     "n_seg": 7,
+     "n_events": 3,
+     "top": [
+      [
+       "Build and test My-Portrait with RECENTS ",
+       3
+      ],
+      [
+       "Improve RECENTS sidebar visibility and f",
+       2
+      ]
+     ]
+    },
+    "snipaste": {
+     "n_seg": 1,
+     "n_events": 1,
+     "top": [
+      [
+       "Capture and annotate meeting segments",
+       1
+      ]
+     ]
+    },
+    "videofps": {
+     "n_seg": 3,
+     "n_events": 1,
+     "top": [
+      [
+       "Investigate videoFps configuration and c",
+       3
+      ]
+     ]
+    },
+    "discord": {
+     "n_seg": 9,
+     "n_events": 6,
+     "top": [
+      [
+       "Debug AI OCR and text capture",
+       3
+      ],
+      [
+       "Implement right-click highlight in My Po",
+       1
+      ]
+     ]
+    },
+    "canvas": {
+     "n_seg": 14,
+     "n_events": 9,
+     "top": [
+      [
+       "Optimize canvas_fusion and keystroke pro",
+       3
+      ],
+      [
+       "OCR and keystroke stream integration",
+       3
+      ]
+     ]
+    }
+   }
+  }
+ },
+ "v3_globalmerge": {
+  "desc": "v2 上做全局合并pass(2507一次性看全部,只并近重复)",
+  "metrics": {
+   "n_events": 41,
+   "coverage": "308/337",
+   "dup": 36,
+   "size_hist": [
+    33,
+    31,
+    31,
+    23,
+    18,
+    13,
+    13,
+    13,
+    12,
+    11,
+    11,
+    10,
+    10,
+    10,
+    9,
+    9,
+    8,
+    8,
+    7,
+    6,
+    6,
+    6,
+    6,
+    6,
+    5,
+    5,
+    4,
+    3,
+    2,
+    2,
+    2,
+    2,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "singletons": 9,
+   "size_le2": 13,
+   "mega_ge20": 4,
+   "bcubed_vs_gpt41": {
+    "P": 0.456,
+    "R": 0.359,
+    "F1": 0.402
+   },
+   "island": {
+    "librime": {
+     "n_seg": 14,
+     "n_events": 2,
+     "top": [
+      [
+       "Process canvas fusion and integrate Rime",
+       13
+      ],
+      [
+       "Test permission bypasses and configure m",
+       1
+      ]
+     ]
+    },
+    "rime": {
+     "n_seg": 22,
+     "n_events": 4,
+     "top": [
+      [
+       "Process canvas fusion and integrate Rime",
+       15
+      ],
+      [
+       "Test permission bypasses and configure m",
+       4
+      ]
+     ]
+    },
+    "pinyin": {
+     "n_seg": 10,
+     "n_events": 2,
+     "top": [
+      [
+       "Test permission bypasses and configure m",
+       5
+      ],
+      [
+       "Process canvas fusion and integrate Rime",
+       5
+      ]
+     ]
+    },
+    "qwen3-asr": {
+     "n_seg": 8,
+     "n_events": 6,
+     "top": [
+      [
+       "Test permission bypasses and configure m",
+       3
+      ],
+      [
+       "Improve error handling and UI performanc",
+       1
+      ]
+     ]
+    },
+    "silero": {
+     "n_seg": 4,
+     "n_events": 3,
+     "top": [
+      [
+       "Test speech detection models",
+       2
+      ],
+      [
+       "Transcribe meeting audio and port featur",
+       1
+      ]
+     ]
+    },
+    "posthog": {
+     "n_seg": 4,
+     "n_events": 1,
+     "top": [
+      [
+       "Set up PostHog analytics and refine port",
+       4
+      ]
+     ]
+    },
+    "spotify": {
+     "n_seg": 11,
+     "n_events": 8,
+     "top": [
+      [
+       "Integrate Screenpipe icon and listen to ",
+       3
+      ],
+      [
+       "Optimize UI and speaker identification",
+       1
+      ]
+     ]
+    },
+    "playlist": {
+     "n_seg": 2,
+     "n_events": 1,
+     "top": [
+      [
+       "Integrate Screenpipe icon and listen to ",
+       2
+      ]
+     ]
+    },
+    "wechat": {
+     "n_seg": 5,
+     "n_events": 2,
+     "top": [
+      [
+       "Test AI logic and prepare for college",
+       3
+      ],
+      [
+       "Code review and refine text processing",
+       2
+      ]
+     ]
+    },
+    "powerprofile": {
+     "n_seg": 5,
+     "n_events": 2,
+     "top": [
+      [
+       "Fix light mode divider and power mode",
+       4
+      ],
+      [
+       "Implement Balanced power mode",
+       1
+      ]
+     ]
+    },
+    "balanced": {
+     "n_seg": 8,
+     "n_events": 4,
+     "top": [
+      [
+       "Fix light mode divider and power mode",
+       4
+      ],
+      [
+       "Debug multilingual input and IME tail-lo",
+       1
+      ]
+     ]
+    },
+    "recents": {
+     "n_seg": 7,
+     "n_events": 3,
+     "top": [
+      [
+       "Build RECENTS feature",
+       3
+      ],
+      [
+       "Fix light mode divider and power mode",
+       2
+      ]
+     ]
+    },
+    "snipaste": {
+     "n_seg": 1,
+     "n_events": 1,
+     "top": [
+      [
+       "Capture and process message pipeline",
+       1
+      ]
+     ]
+    },
+    "videofps": {
+     "n_seg": 3,
+     "n_events": 1,
+     "top": [
+      [
+       "Investigate videoFps and audio chunk han",
+       3
+      ]
+     ]
+    },
+    "discord": {
+     "n_seg": 9,
+     "n_events": 4,
+     "top": [
+      [
+       "Debug AI OCR and text capture",
+       3
+      ],
+      [
+       "Port OCR and implement UI highlights",
+       2
+      ]
+     ]
+    },
+    "canvas": {
+     "n_seg": 14,
+     "n_events": 8,
+     "top": [
+      [
+       "Fix canvas routing and keystroke process",
+       4
+      ],
+      [
+       "Debug AI OCR and text capture",
+       3
+      ]
+     ]
+    }
+   }
+  }
+ },
+ "v4_anchormerge86": {
+  "desc": "v2 上做锚点门控+2507逐对二分确认(零误合但召回低)",
+  "metrics": {
+   "n_events": 86,
+   "coverage": "308/337",
+   "dup": 38,
+   "size_hist": [
+    27,
+    24,
+    18,
+    16,
+    13,
+    11,
+    11,
+    10,
+    9,
+    9,
+    8,
+    7,
+    7,
+    7,
+    7,
+    6,
+    6,
+    6,
+    6,
+    5,
+    5,
+    5,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ],
+   "singletons": 33,
+   "size_le2": 43,
+   "mega_ge20": 2,
+   "bcubed_vs_gpt41": {
+    "P": 0.643,
+    "R": 0.294,
+    "F1": 0.404
+   },
+   "island": {
+    "librime": {
+     "n_seg": 14,
+     "n_events": 3,
+     "top": [
+      [
+       "Configure headless Rime input method",
+       7
+      ],
+      [
+       "Integrate Rime with AI and custom dictio",
+       6
+      ]
+     ]
+    },
+    "rime": {
+     "n_seg": 22,
+     "n_events": 8,
+     "top": [
+      [
+       "Configure headless Rime input method",
+       8
+      ],
+      [
+       "Integrate Rime with AI and custom dictio",
+       7
+      ]
+     ]
+    },
+    "pinyin": {
+     "n_seg": 10,
+     "n_events": 3,
+     "top": [
+      [
+       "Debug IME tail-loss in CJK input",
+       5
+      ],
+      [
+       "Configure headless Rime input method",
+       3
+      ]
+     ]
+    },
+    "qwen3-asr": {
+     "n_seg": 8,
+     "n_events": 7,
+     "top": [
+      [
+       "Test and validate permission bypasses",
+       2
+      ],
+      [
+       "Implement error handling and UI feedback",
+       1
+      ]
+     ]
+    },
+    "silero": {
+     "n_seg": 4,
+     "n_events": 3,
+     "top": [
+      [
+       "Configure and test speech detection mode",
+       2
+      ],
+      [
+       "Transcribe and debug meeting audio",
+       1
+      ]
+     ]
+    },
+    "posthog": {
+     "n_seg": 4,
+     "n_events": 1,
+     "top": [
+      [
+       "Set up PostHog analytics",
+       4
+      ]
+     ]
+    },
+    "spotify": {
+     "n_seg": 11,
+     "n_events": 9,
+     "top": [
+      [
+       "Developing My-Portrait with code and pla",
+       2
+      ],
+      [
+       "Optimize UI and speaker identification",
+       1
+      ]
+     ]
+    },
+    "playlist": {
+     "n_seg": 2,
+     "n_events": 2,
+     "top": [
+      [
+       "Developing My-Portrait with code and pla",
+       1
+      ],
+      [
+       "Listening to My-Portrait playlist and de",
+       1
+      ]
+     ]
+    },
+    "wechat": {
+     "n_seg": 5,
+     "n_events": 3,
+     "top": [
+      [
+       "Code review and tool usage in WeChat",
+       2
+      ],
+      [
+       "Game promotion and media sharing via WeC",
+       2
+      ]
+     ]
+    },
+    "powerprofile": {
+     "n_seg": 5,
+     "n_events": 2,
+     "top": [
+      [
+       "Add power-mode and Auto Live indicator",
+       4
+      ],
+      [
+       "Implement Balanced power mode and settin",
+       1
+      ]
+     ]
+    },
+    "balanced": {
+     "n_seg": 8,
+     "n_events": 4,
+     "top": [
+      [
+       "Add power-mode and Auto Live indicator",
+       4
+      ],
+      [
+       "Model Fine-Tuning & Data Collection",
+       1
+      ]
+     ]
+    },
+    "recents": {
+     "n_seg": 7,
+     "n_events": 3,
+     "top": [
+      [
+       "Build and test My-Portrait with RECENTS ",
+       3
+      ],
+      [
+       "Improve RECENTS sidebar visibility and f",
+       2
+      ]
+     ]
+    },
+    "snipaste": {
+     "n_seg": 1,
+     "n_events": 1,
+     "top": [
+      [
+       "Capture and annotate meeting segments",
+       1
+      ]
+     ]
+    },
+    "videofps": {
+     "n_seg": 3,
+     "n_events": 1,
+     "top": [
+      [
+       "Investigate videoFps configuration and c",
+       3
+      ]
+     ]
+    },
+    "discord": {
+     "n_seg": 9,
+     "n_events": 6,
+     "top": [
+      [
+       "Debug AI OCR and text capture",
+       3
+      ],
+      [
+       "Implement right-click highlight in My Po",
+       1
+      ]
+     ]
+    },
+    "canvas": {
+     "n_seg": 14,
+     "n_events": 9,
+     "top": [
+      [
+       "Optimize canvas_fusion and keystroke pro",
+       3
+      ],
+      [
+       "OCR and keystroke stream integration",
+       3
+      ]
+     ]
+    }
+   }
+  }
+ }
+}
