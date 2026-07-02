@@ -46,12 +46,13 @@ enum GraphConstants {
     /// 分区球(portrait 画布,统一大小;07-02 反馈再缩:27→22)
     static let categoryRadius: Double = 22
     /// folder 球 = f0 + kf·√count,clamp 到 [f0, folderRadiusMax]
-    static let folderRadiusBase: Double = 14
+    /// 07-02 反馈:上下限双降(14/36 → 10/28)
+    static let folderRadiusBase: Double = 10
     static let folderRadiusScale: Double = 1.4
-    static let folderRadiusMax: Double = 36
+    static let folderRadiusMax: Double = 28
     /// event 球 = e0 + ke·currentWeight,上限不超过最小 folder 球。
-    /// 07-02 反馈:末端球下限降低,上限不变(低 weight 更小更细腻)。
-    static let eventRadiusBase: Double = 2.5
+    /// 07-02 反馈:末端球下限两连降(4→2.5→1.5),上限不变。
+    static let eventRadiusBase: Double = 1.5
     static let eventRadiusScale: Double = 0.9
     static let eventRadiusMax: Double = 14
     /// portrait 小球 = p0 + kp·min(weight, 18);下限降,斜率补偿保上限
@@ -62,8 +63,8 @@ enum GraphConstants {
 
     /// 分区球 → 主球:常数
     static let categoryStrength: Double = 20
-    /// folder → 主球:自加权平均(Σw²/Σw)之外再加的基数
-    static let folderStrengthBase: Double = 10
+    /// folder → 主球:自加权平均(Σw²/Σw)之外再加的基数(07-02:10→5)
+    static let folderStrengthBase: Double = 5
     /// event → hub:occurrences.count 的截断上限
     static let eventStrengthMax: Double = 15
     /// portrait 小球 → 分区球:weight 线性截断上限(>18 全一样)
