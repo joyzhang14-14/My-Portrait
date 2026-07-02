@@ -290,6 +290,17 @@ struct GraphCanvasView: View {
                                 fromNode: Int, toNode: Int) -> Double {
         switch GraphConstants.edgeStyle {
         case .line:
+            // hub↔主球现在画的是单边锥形 —— 杠长实时取该处锥形宽度
+            //(07-02 反馈:不能写死细线宽);其余边仍是等粗细线。
+            if e.b == 0, scene.nodes[e.a].kind.isHub {
+                let zoom = camera.zoom
+                let mainW = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
+                let tipW = mainW * GraphConstants.waistRatio
+                let wFrom = fromNode == e.b ? mainW : tipW
+                let wTo = fromNode == e.b ? tipW : mainW
+                let u = 1 - t
+                return u * u * wFrom + 2 * u * t * tipW + t * t * wTo
+            }
             return GraphConstants.lineEdgeWidth / 2
         case .taperedFill:
             let zoom = camera.zoom
