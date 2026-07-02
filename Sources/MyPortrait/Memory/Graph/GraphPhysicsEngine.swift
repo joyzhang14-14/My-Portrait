@@ -45,6 +45,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var leafRestArr: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
+    /// tick 计数(拖拽降载:重力学隔 tick 跑)。
+    private var tickCount: UInt64 = 0
     /// 拖拽钉住:index → 目标位置(每次 drag move 更新;d3 的 fx/fy 语义)。
     /// 主球恒钉原点,不进这个表(单独处理)。
     /// ⚠️ 由 dragLock(不是 simLock)保护:drag(to:) 在 120Hz 指针事件里跑,
@@ -113,7 +115,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
 
         let t = Thread { [weak self] in self?.loop() }
         t.name = "graph-physics"
-        t.qualityOfService = .userInteractive
+        // .userInitiated(不是 .userInteractive):tick 重载(Debug 30Hz
+        // 饱和)时不许抢主线程的渲染/手势 —— 被拖球由渲染端钉指针,
+        // 物理慢半拍只影响邻居跟随,主线程掉帧才是"卡"(07-02 实测)。
+        t.qualityOfService = .userInitiated
         t.start()
     }
 
@@ -253,13 +258,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
 
     private func tick() {
         guard n > 0 else { alpha = 0; return }
-        buildTree()
-        manyBodyPass()
+        tickCount &+= 1
+        // 拖拽降载(07-02 实测:Debug 下满力学 tick 超预算一倍 → 30Hz
+        // 饱和,physics 线程抢核致主线程卡顿):拖拽中重力学(建树/斥力/
+        // 碰撞)隔 tick 跑,轻 tick 只跑弹簧/墙/约束 —— 邻居跟随本就是
+        // 惯性动画,视觉无差,CPU 近半。
+        let heavy = alphaTarget == 0 || tickCount % 2 == 0
+        if heavy {
+            buildTree()
+            manyBodyPass()
+        }
         linkPass()
         hubAngularPass()
         territoryPass()
         sectorRepelPass()
-        collidePass()
+        if heavy { collidePass() }
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
         // 早停快照已删(07-02 终稿):布局没有"成品位",冷却到 alphaMin

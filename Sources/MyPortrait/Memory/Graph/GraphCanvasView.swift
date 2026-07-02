@@ -64,7 +64,9 @@ struct GraphCanvasView: View {
         GeometryReader { geo in
             let viewSize = geo.size
             // 显式 SwiftUI. 前缀:项目自己有个叫 TimelineView 的时间线视图,撞名。
-            SwiftUI.TimelineView(.animation(minimumInterval: nil, paused: paused)) { tl in
+            // 帧率上限 60:物理本就 60Hz,ProMotion 120Hz 只是白画一倍
+            //(950 球全量重绘,Debug 下主线程被画满 → 拖拽卡,07-02 实测)。
+            SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 60, paused: paused)) { tl in
                 canvas(viewSize: viewSize, date: tl.date)
             }
             .contentShape(Rectangle())
