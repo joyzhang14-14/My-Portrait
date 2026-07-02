@@ -222,8 +222,10 @@ struct GraphCanvasView: View {
         // 橡皮筋是实体,宽度随缩放走(世界单位×zoom,07-02 反馈:锚屏幕
         // 像素的话缩得很小时连接处显得巨大);上限仍 = 球的屏幕半径。
         // 单边锥形(07-02 定稿):只有主球端(b)粗,连到对面球(a)最细。
+        // 拉伸变细(07-02:像橡皮筋被拉长):粗端不变,细端 ÷ 拉伸比。
         let wb = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
-        let wa = wb * GraphConstants.waistRatio
+        let stretch = max(Double(len) / zoom / max(e.restLength, 1), 1)
+        let wa = wb * GraphConstants.waistRatio / stretch
         let wm = wa
         let mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2
         var p = Path()
@@ -274,7 +276,8 @@ struct GraphCanvasView: View {
                 // 杠全长 = 连线**实际渲染粗细** × pulseTickLengthScale
                 //(07-01 二次反馈:不能用锥形概念宽度,线改细后严重超标)。
                 let halfLen = localHalfWidth(edge: e, forward: forward, t: tk,
-                                             fromNode: p.fromNode, toNode: to)
+                                             fromNode: p.fromNode, toNode: to,
+                                             screenLen: Double(len))
                     * GraphConstants.pulseTickLengthScale
                 tickPath.move(to: CGPoint(x: x - nx * halfLen, y: y - ny * halfLen))
                 tickPath.addLine(to: CGPoint(x: x + nx * halfLen, y: y + ny * halfLen))
@@ -287,7 +290,8 @@ struct GraphCanvasView: View {
     /// 该处连线的**实际渲染半宽**:line 模式 = 线宽/2(常数);
     /// taperedFill 模式 = 锥形轮廓的二次贝塞尔局部插值(微积分局部值,屏幕空间)。
     private func localHalfWidth(edge e: GraphEdge, forward: Bool, t: Double,
-                                fromNode: Int, toNode: Int) -> Double {
+                                fromNode: Int, toNode: Int,
+                                screenLen: Double) -> Double {
         switch GraphConstants.edgeStyle {
         case .line:
             // hub↔主球现在画的是单边锥形 —— 杠长实时取该处锥形宽度
@@ -295,7 +299,8 @@ struct GraphCanvasView: View {
             if e.b == 0, scene.nodes[e.a].kind.isHub {
                 let zoom = camera.zoom
                 let mainW = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
-                let tipW = mainW * GraphConstants.waistRatio
+                let stretch = max(Double(screenLen) / zoom / max(e.restLength, 1), 1)
+                let tipW = mainW * GraphConstants.waistRatio / stretch
                 let wFrom = fromNode == e.b ? mainW : tipW
                 let wTo = fromNode == e.b ? tipW : mainW
                 let u = 1 - t
