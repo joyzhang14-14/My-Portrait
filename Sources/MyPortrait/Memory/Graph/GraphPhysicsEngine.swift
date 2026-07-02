@@ -63,6 +63,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 锁序纪律:dragLock 与 simLock 绝不嵌套,顺序获取。
     private var draggedIndex: Int? = nil
     private var draggedTo: SIMD2<Float> = .zero
+    /// 挂号的 alphaTarget(dragLock 保护):beginDrag/endDrag 不再抢
+    /// simLock —— 收敛中 tick 握锁 20~40ms(Debug),主线程"抓球那一下"
+    /// 会顿一拍(07-02 实测);physics 线程下个循环自取自用。
+    private var pendingAlphaTarget: Float? = nil
     private let dragLock = NSLock()
 
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
@@ -158,16 +162,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return parkedFlag
     }
 
-    /// 开始拖某个球(index 0 主球由调用方挡掉)。
+    /// 开始拖某个球(index 0 主球由调用方挡掉)。只碰 dragLock,绝不等 tick。
     func beginDrag(index: Int, at world: SIMD2<Float>) {
         dragLock.lock()
         draggedIndex = index
         draggedTo = world
+        pendingAlphaTarget = GraphConstants.dragAlphaTarget
         dragLock.unlock()
-        simLock.lock()
-        alphaTarget = GraphConstants.dragAlphaTarget
-        if alpha < GraphConstants.dragAlphaTarget { alpha = GraphConstants.dragAlphaTarget }
-        simLock.unlock()
         wake()
     }
 
@@ -181,10 +182,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     func endDrag() {
         dragLock.lock()
         draggedIndex = nil
+        pendingAlphaTarget = 0
         dragLock.unlock()
-        simLock.lock()
-        alphaTarget = 0
-        simLock.unlock()
+        wake()   // 若恰在 park 边缘,确保有 tick 来消费挂号
     }
 
     /// 重新炸开(手动刷新且数据变了 / 换画布新数据)。
@@ -252,12 +252,19 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // cond.lock() 的方法(初版在这里嵌套 setParked 直接死锁)。
             cond.lock()
             if !shouldRun { cond.unlock(); return }
+            dragLock.lock()
+            let pending = pendingAlphaTarget
+            pendingAlphaTarget = nil
+            let dragging = draggedIndex != nil
+            dragLock.unlock()
             simLock.lock()
+            if let p = pending {
+                alphaTarget = p
+                if p > 0, alpha < p { alpha = p }
+            }
             let cooled = alpha < GraphConstants.alphaMin && alphaTarget == 0
             simLock.unlock()
-            dragLock.lock()
-            let sleeping = cooled && draggedIndex == nil
-            dragLock.unlock()
+            let sleeping = cooled && !dragging
             let stateChanged = parkedFlag != sleeping
             parkedFlag = sleeping
             if sleeping && !stateChanged {
