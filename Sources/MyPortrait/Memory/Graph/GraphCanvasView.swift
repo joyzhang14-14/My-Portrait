@@ -38,9 +38,11 @@ struct GraphCanvasView: View {
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
     /// nodes 做 filter 是每帧 O(n) 分配(07-01 拖拽卡顿优化)。
     private let hubNodes: [GraphNode]
-    /// 绘制顺序:半径降序 —— 大球先画、小球后画,末端小球永远不被挡
-    ///(07-02 反馈)。init 算一次。
-    private let ballOrder: [Int]
+    /// 同色批量填充组(init 一次,07-02 拖 Unclassified 卡顿优化):
+    /// 951 次逐球 fill(每次还新建 Color)是 Debug 主线程大头;气泡模型
+    /// 下同家同色、圆间不相交 → 每家并一条 Path 一次 fill(11 次替代
+    /// 951 次)。组内大球在前(半径降序,同色重叠无感,家内 hub 先画)。
+    private let colorGroups: [(color: Color, nodes: [Int])]
 
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
@@ -55,9 +57,21 @@ struct GraphCanvasView: View {
         self._hoveredId = hoveredId
         self.onTapNode = onTapNode
         self.hubNodes = scene.nodes.filter { $0.kind.isHub }
-        self.ballOrder = scene.nodes.indices.sorted {
+        let order = scene.nodes.indices.sorted {
             scene.nodes[$0].radius > scene.nodes[$1].radius
         }
+        var groupOf: [SIMD3<Double>: Int] = [:]
+        var groups: [(color: Color, nodes: [Int])] = []
+        for i in order {
+            let key = scene.nodes[i].colorRGB
+            if let g = groupOf[key] {
+                groups[g].nodes.append(i)
+            } else {
+                groupOf[key] = groups.count
+                groups.append((color: scene.nodes[i].color, nodes: [i]))
+            }
+        }
+        self.colorGroups = groups
     }
 
     var body: some View {
@@ -255,20 +269,31 @@ struct GraphCanvasView: View {
                            size: CGSize, date: Date) {
         let zoom = camera.zoom
         let now = date.timeIntervalSinceReferenceDate
-        for oi in ballOrder {
-            let node = scene.nodes[oi]
-            let c = camera.worldToScreen(snap[node.id], viewSize: size)
+        // 同色一条 Path 一次 fill(07-02 拖拽卡顿优化:替代 951 次逐球
+        // fill;气泡不相交 → 跨家遮挡不存在,组内同色重叠无感)
+        for group in colorGroups {
+            var path = Path()
+            for oi in group.nodes {
+                let node = scene.nodes[oi]
+                let c = camera.worldToScreen(snap[node.id], viewSize: size)
+                let r = node.radius * zoom
+                if c.x + r < 0 || c.x - r > size.width || c.y + r < 0 || c.y - r > size.height {
+                    continue
+                }
+                path.addEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+            }
+            if !path.isEmpty {
+                ctx.fill(path, with: .color(group.color))
+            }
+        }
+        // hover 白色闪烁(正弦脉动,持续 hover 持续闪 —— 需求 §5)
+        if let hid = hoveredId, hid >= 0, hid < scene.nodes.count {
+            let node = scene.nodes[hid]
+            let c = camera.worldToScreen(snap[hid], viewSize: size)
             let r = node.radius * zoom
-            if c.x + r < 0 || c.x - r > size.width || c.y + r < 0 || c.y - r > size.height {
-                continue
-            }
             let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
-            ctx.fill(Path(ellipseIn: rect), with: .color(node.color))
-            // hover 白色闪烁(正弦脉动,持续 hover 持续闪 —— 需求 §5)
-            if node.id == hoveredId {
-                let a = 0.35 + 0.35 * sin(now * GraphConstants.hoverBlinkHz * 2 * .pi)
-                ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
-            }
+            let a = 0.35 + 0.35 * sin(now * GraphConstants.hoverBlinkHz * 2 * .pi)
+            ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
         }
     }
 
