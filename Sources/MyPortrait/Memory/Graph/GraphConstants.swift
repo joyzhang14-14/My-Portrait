@@ -123,8 +123,8 @@ enum GraphConstants {
     /// 物理线程定步频率(60 = d3/Obsidian 的 rAF 同款;120 视觉无差但
     /// 背景 CPU 翻倍,07-01 拖拽卡顿优化降回 60)
     static let physicsHz: Double = 60
-    /// 开场炸开:初始位置挤在中心这个半径内
-    static let explosionRadius: Float = 30
+    /// 开场炸开:初始位置挤在中心这个半径内(07-02:30→12,绽放更猛)
+    static let explosionRadius: Float = 12
     /// 主球碰撞硬约束的额外间隙:任何球不得进入 主球半径+自身半径+此值
     ///(斥力是点电荷模型不认半径,没这条低 weight 小球会叠在主球上)
     static let mainCollisionPadding: Float = 4
