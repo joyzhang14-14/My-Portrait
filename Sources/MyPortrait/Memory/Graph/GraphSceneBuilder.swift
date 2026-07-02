@@ -199,9 +199,12 @@ enum GraphSceneBuilder {
             let centerDeg = cursor + wedge / 2
             cursor += wedge
             let r = hubRadius(spec)
-            // 完美圆 v2:hub 一律等距(07-02 用户反馈:距离不等很奇怪);
-            // 叶距按比例缩放,所有 fan 外缘仍落 outerRadius 圆。
-            let dist = max(hubDistance,
+            // 07-02 终稿:hub↔主球距离是唯一自由变量(用户定稿),
+            // = 外圆半径 − 该家最远叶距 → 各家 fan 外缘对齐同一圆;
+            // 叶距本身 = last_occurred 映射,不动。
+            let maxRest0 = spec.members.map(leafRest).max()
+                ?? (outerRadius - hubDistance)
+            let dist = max(outerRadius - maxRest0,
                            GraphConstants.mainRadius + r
                                + Double(GraphConstants.mainCollisionPadding) + 2)
 
@@ -219,43 +222,48 @@ enum GraphSceneBuilder {
                                        ballRadius: GraphConstants.mainRadius),
                                    springStrength: GraphConstants.hubSpringStrength))
 
-            // 无缝圆逐环装填(07-02 定稿):从外圆向内一环环 greedy 排位,
-            // 球不重叠、相邻扇区相接。旧 event 排外环、新排内环(保留时近语义)。
+            // 扇形装填(07-02 终稿):末端球**绕 folder/分区球**展开成扇形 ——
+            // hub 在扇形中心线上,叶子按 last_occurred 的 rest 当半径,
+            // 沿 ±fanHalf 弧 greedy 排位;同半径弧装满才外溢一层(+层距),
+            // 时近排序:近的贴 hub,旧的靠外。
             let centerRad = centerDeg * .pi / 180
-            let wedgeRad = wedge * .pi / 180
             let hubPos = SIMD2<Double>(cos(centerRad) * dist, sin(centerRad) * dist)
-            var ringR = outerRadius
-            var cursor = centerRad - wedgeRad / 2
-            let endA = centerRad + wedgeRad / 2
+            let meanRest = spec.members.isEmpty ? 1.0
+                : spec.members.map(leafRest).reduce(0, +) / Double(spec.members.count)
+            // 楔形(绕主球)换算到绕 hub 的张角,封顶 100°
+            let fanHalf = min(100.0 * .pi / 180,
+                              (wedge / 2 * .pi / 180) * (dist + meanRest) / max(meanRest, 1))
             let avgR = spec.members.isEmpty ? 6.0
                 : spec.members.map(leafRadius).reduce(0, +) / Double(spec.members.count)
-            let ringStep = avgR * 2 + GraphConstants.packRingGap
-            let minRingR = GraphConstants.mainRadius + 30
-            let ordered = spec.members.sorted { $0.daysAgo > $1.daysAgo }
+            let layerStep = avgR * 2 + GraphConstants.packRingGap
+            var arcR = 0.0
+            var cursor = -fanHalf
+            let ordered = spec.members.sorted {
+                (leafRest($0), $0.relPath) < (leafRest($1), $1.relPath)
+            }
             for m in ordered {
                 let idx = nodes.count
                 let lr = leafRadius(m)
-                let slotRad = (lr * 2 + GraphConstants.packSlotGap) / ringR
-                if cursor + slotRad > endA {
-                    // 本环装满 → 收进一环(楔形窄到一环一球时,球落楔形中线)
-                    if ringR - ringStep > minRingR { ringR -= ringStep }
-                    cursor = centerRad - wedgeRad / 2
+                arcR = max(arcR, leafRest(m))          // 半径 = rest(时近),只增不减
+                var slotRad = (lr * 2 + GraphConstants.packSlotGap) / arcR
+                if cursor + slotRad > fanHalf {        // 本弧装满 → 外溢一层
+                    arcR += layerStep
+                    cursor = -fanHalf
+                    slotRad = (lr * 2 + GraphConstants.packSlotGap) / arcR
                 }
-                let a = min(cursor + slotRad / 2, endA)
+                let psi = min(cursor + slotRad / 2, fanHalf)
                 cursor += slotRad
-                let target = SIMD2<Double>(cos(a) * ringR, sin(a) * ringR)
+                let dirA = centerRad + psi             // 绕 hub 的方向(外向为中线)
+                let target = SIMD2<Double>(hubPos.x + cos(dirA) * arcR,
+                                           hubPos.y + sin(dirA) * arcR)
                 var leafNode = GraphNode(id: idx, kind: leafKind(m), title: m.title,
                                          radius: lr, colorRGB: leafColor(spec, m),
                                          fileURL: m.url, hubIndex: hubIdx)
                 leafNode.targetPosition = SIMD2<Float>(Float(target.x), Float(target.y))
                 nodes.append(leafNode)
-                // rest = 目标位到 hub 目标位的几何距离(弹簧与落位一致,
-                // 叶距夹钳 rest×1.2 也随之成立)
-                let rest = ((target.x - hubPos.x) * (target.x - hubPos.x)
-                    + (target.y - hubPos.y) * (target.y - hubPos.y)).squareRoot()
                 edges.append(GraphEdge(a: idx, b: hubIdx,
                                        strength: leafStrength(m),
-                                       restLength: max(rest, 20),
+                                       restLength: arcR,
                                        halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }
