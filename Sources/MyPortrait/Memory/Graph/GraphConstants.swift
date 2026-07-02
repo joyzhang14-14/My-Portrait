@@ -127,9 +127,13 @@ enum GraphConstants {
     /// 0.8:要打得过全力碰撞力的外推(0.3 时 12% 叶被挤过界)。
     static let sectorStrength: Float = 0.8
     /// 花瓣内聚力:叶子向自家 hub 轴线的弱角向弹簧(领地内全程存在,
-    /// 不只在边界)。稀疏 folder 靠它收拢成瓣不散开;密集 folder 碰撞力
-    /// 占优照样铺满楔形 —— 花瓣形态的两种密度自适应。
-    static let sectorCenterStrength: Float = 0.08
+    /// 不只在边界)。07-02 反馈:随叶数**滑动**不是常数 —— 球少小 force
+    /// 成小瓣,球多大 force 拢成大瓣(碰撞外压 ∝ 人数,内聚要跟上)。
+    /// k = scale × √叶数,clamp [min, max]。max 别贪:0.3 时超大瓣被
+    /// 收拢压碎(289 对重叠),碰撞力顶不住。
+    static let petalCohesionScale: Float = 0.02
+    static let petalCohesionMin: Float = 0.03
+    static let petalCohesionMax: Float = 0.1
     /// 扇区间排斥:**只在边界起效**(07-02 三稿:排斥泡太大会造成扇区间
     /// 巨大空隙"护城河");半径只罩 hub 近旁,防别家叶贴脸。
     static let sectorRepelStrength: Float = 0.35

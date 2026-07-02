@@ -30,6 +30,9 @@ struct GraphCanvasView: View {
     private enum DragMode: Equatable { case idle, pan, node(Int) }
     @State private var dragMode: DragMode = .idle
     @State private var lastDragTranslation: CGSize = .zero
+    /// 被拖球的实时指针世界坐标:渲染直接用它画被拖球,不等物理 tick
+    ///(tick 重/Debug 慢时球才不掉帧 —— 07-02 拖拽卡顿反馈)。
+    @State private var dragWorld: SIMD2<Float>? = nil
     @State private var lastMagnification: CGFloat = 1
 
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
@@ -105,8 +108,13 @@ struct GraphCanvasView: View {
 
     private func canvas(viewSize: CGSize, date: Date) -> some View {
         Canvas { ctx, size in
-            let snap = engine.readSnapshot()
+            var snap = engine.readSnapshot()
             guard snap.count == scene.nodes.count else { return }
+            // 被拖球直接钉在实时指针位置(球/边/标签同源一致),
+            // 物理 tick 慢时拖拽也不掉帧
+            if case .node(let di) = dragMode, let w = dragWorld, di < snap.count {
+                snap[di] = w
+            }
             drawEdges(ctx, snap: snap, size: size)
             drawPulses(ctx, snap: snap, size: size, date: date)
             drawBalls(ctx, snap: snap, size: size, date: date)
@@ -320,7 +328,9 @@ struct GraphCanvasView: View {
                     lastDragTranslation = v.translation
                     camera.pan(byScreen: delta)
                 case .node:
-                    engine.drag(to: camera.screenToWorld(v.location, viewSize: viewSize))
+                    let w = camera.screenToWorld(v.location, viewSize: viewSize)
+                    dragWorld = w
+                    engine.drag(to: w)
                 case .idle:
                     break
                 }
@@ -328,6 +338,7 @@ struct GraphCanvasView: View {
             .onEnded { _ in
                 if case .node = dragMode { engine.endDrag() }
                 dragMode = .idle
+                dragWorld = nil
                 lastDragTranslation = .zero
             }
     }
