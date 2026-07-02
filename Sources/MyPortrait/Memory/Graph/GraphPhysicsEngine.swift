@@ -95,6 +95,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (leafIndices, leafOwnHub, leafRestArr) = Self.leafArrays(scene: scene)
         (angleHub, angleTarget) = Self.angleArrays(scene: scene)
         (targetIdx, targetPos) = Self.targetArrays(scene: scene)
+        // 07-02 定稿:打开即成型 —— 有落位目标的场景直接在成品位置出生,
+        // 物理开局休眠(炸开动画取消;拖拽 reheat 的晃动手感保留)。
+        if !targetIdx.isEmpty {
+            for i in 0..<targetIdx.count { pos[Int(targetIdx[i])] = targetPos[i] }
+            pos[0] = .zero
+            snapshot = pos
+            alpha = 0
+        }
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
