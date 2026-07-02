@@ -36,12 +36,10 @@ struct GraphNode: Identifiable, Sendable {
     let fileURL: URL?
     /// 所连接的 hub 的 index(主球为 -1)。
     let hubIndex: Int
-    /// 完美圆·物理化(07-02 终稿):hub 的楔形份额(度,按叶数占比)。
-    /// 仅非主球 hub 有值;一半 = hub 间角向碰撞的半宽 = 扇区墙的半角,
-    /// 扇区边界由碰撞平衡**涌现**,不预分配目标角。
-    var hubWedgeDegrees: Double? = nil
-    /// hub 等距硬钉半径(用户硬需求:folder/分区球全体等距主球)。
-    var hubPinRadius: Double? = nil
+    /// 气泡半径(07-02 气泡重构,用户定稿):该 hub 的全部叶子绕它 360°
+    /// 成圆,圆径由内容面积决定 —— 叶多圆大、叶少圆小。仅非主球 hub
+    /// 有值。物理保证:气泡间/气泡与主球绝不重叠,叶子不出自家圆。
+    var hubBubbleRadius: Double? = nil
 
     var color: Color {
         Color(red: colorRGB.x, green: colorRGB.y, blue: colorRGB.z)

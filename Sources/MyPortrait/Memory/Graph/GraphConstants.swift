@@ -68,29 +68,19 @@ enum GraphConstants {
     /// portrait 小球 → 分区球:weight 线性截断上限(>18 全一样)
     static let portraitStrengthMax: Double = 18
 
-    // MARK: 距离(弹簧自然长度,世界单位)
+    // MARK: 气泡(07-02 重构定稿:每 hub 的叶子绕它 360° 成圆)
 
-    /// 完美圆 v2(07-02 二稿):hub **等距**(用户:距离不等很奇怪),
-    /// 改为按比例缩放每家的叶距,让所有 fan 外缘仍落同一大圆:
-    /// rest' = rest × (outer − hubDist) / 该家最远 rest。
-    static let eventOuterRadius: Double = 320
-    static let portraitOuterRadius: Double = 240   // 07-02:分区球太远,外圆收小→等距公式值≈100
-    static let eventHubDistance: Double = 150
-    static let portraitHubDistance: Double = 150
-    /// hub 间角向碰撞刚度(07-02 物理化,取代目标角弹簧):相邻 hub 的角向
-    /// "圆盘"(半宽 = 楔形份额/2)重叠时切向推开,权重 ∝ 叶数 ——
-    /// 大 folder 自然挤开邻居,扇区宽 ∝ 内容**涌现**,碰撞平衡处即边界。
-    /// 2.0:需压过大 folder 叶群斥力的扭矩 —— 弱了缺口被压 <80%,
-    /// 且大 folder 两侧被叶群推出 ~150% 的空洞(无缝圆被破)。
-    static let hubAngularStrength: Float = 2.0
-    /// last_occurred → 距离 的对数映射端点(event 画布)
-    static let eventLeafDistanceNear: Double = 60
-    static let eventLeafDistanceFar: Double = 200
-    /// portrait 画布(分区内更紧凑)
-    static let portraitLeafDistanceNear: Double = 40
-    static let portraitLeafDistanceFar: Double = 140
-    /// 时间窗:超过这么多天全部趴在 Far 外圈
-    static let timeWindowDays: Double = 30
+    /// 气泡内叶子的装填密度:π·气泡半径² ≥ hub球面积 + Σ叶面积/此值。
+    /// 叶多圆大(1000 叶巨圆)、叶少圆小(10 叶小圆),完全由内容涌现。
+    static let bubbleFill: Double = 0.55
+    /// 气泡半径的额外呼吸边距(世界 pt)
+    static let bubblePadding: Double = 4
+    /// hub→主球弹簧 rest = 主球半径 + 气泡半径 + 此间隙(气泡贴主球排布)
+    static let bubbleGap: Double = 12
+    /// 气泡间软碰撞刚度(圆与圆绝不重叠的速度域推开;硬解算兜底)
+    static let bubbleCollideStrength: Float = 0.5
+    /// 线长档位:最新的叶贴 hub(此比例×最大线长),最旧顶到气泡边缘
+    static let bubbleRestFloor: Double = 0.25
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
@@ -122,25 +112,6 @@ enum GraphConstants {
     /// hub→主球弹簧刚度 override(d3 默认=1/度数,folder 度数几百 → 弹簧
     /// 太软被斥力推远;定为 1.0 让 folder/分区贴住等距环)
     static let hubSpringStrength: Double = 1.0
-    /// 领地墙力度(07-02 定稿:动态领地分割 —— 相邻 hub 极角间隙按份额
-    /// 加权定边界,叶子原点极角越界 → ×此系数×alpha 切向回正)。
-    /// 0.8:要打得过全力碰撞力的外推(0.3 时 12% 叶被挤过界)。
-    static let sectorStrength: Float = 0.8
-    /// 花瓣内聚力:叶子向自家 hub 轴线的弱角向弹簧(领地内全程存在,
-    /// 不只在边界)。07-02 反馈:随叶数**滑动**不是常数 —— 球少小 force
-    /// 成小瓣,球多大 force 拢成大瓣(碰撞外压 ∝ 人数,内聚要跟上)。
-    /// k = scale × √叶数,clamp [min, max]。max 别贪:0.3 时超大瓣被
-    /// 收拢压碎(289 对重叠),碰撞力顶不住。
-    static let petalCohesionScale: Float = 0.02
-    static let petalCohesionMin: Float = 0.03
-    static let petalCohesionMax: Float = 0.1
-    /// 扇区间排斥:**只在边界起效**(07-02 三稿:排斥泡太大会造成扇区间
-    /// 巨大空隙"护城河");半径只罩 hub 近旁,防别家叶贴脸。
-    static let sectorRepelStrength: Float = 0.35
-    static let sectorRepelRadius: Float = 80
-    /// 叶距硬上限:dist(leaf, hub) ≤ rest × 此系数 —— 完美圆的外缘保证
-    ///(否则各种持续力把叶子挤出 rest,fan 半径失控)。
-    static let leafMaxStretch: Float = 1.2
     /// 半径感知碰撞力(d3 forceCollide 同款,07-02 物理化):球与球按
     /// 半径之和互相推开 —— "每球清晰可见不重叠"的物理表达。
     /// 点电荷斥力(manyBody)不认半径,这条才是缺的核心力。
@@ -172,15 +143,6 @@ enum GraphConstants {
     static let labelFadeZoomLo: Double = 0.32
     /// 浮窗:鼠标移出后自动关闭延迟(s)
     static let floatWindowAutoCloseDelay: TimeInterval = 1.0
-
-    // MARK: last_occurred → 距离 映射(两画布共用公式)
-
-    /// D = near + (far−near) × ln(1 + min(d, window)) / ln(1 + window)
-    /// 对数:越近变化越平缓,相邻一两天肉眼不可辨(需求 §4.4)。
-    static func leafDistance(daysAgo: Double, near: Double, far: Double) -> Double {
-        let d = max(0, min(daysAgo, timeWindowDays))
-        return near + (far - near) * log(1 + d) / log(1 + timeWindowDays)
-    }
 
     // MARK: folder → 主球 连接强度(需求 §4.2)
 

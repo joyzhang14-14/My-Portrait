@@ -4,11 +4,11 @@ import Foundation
 /// 变成一张 GraphScene。纯读盘 + 纯函数,设计为在后台线程跑
 /// (调用方先在 MainActor 读好 ConfigStore 的参数传进来)。
 ///
-/// 完美圆·物理化(07-02 终稿,Handoff §二):builder 只产**参数**不产落位:
-///   1. hub 等距半径(公式:outer − 全局最深 day-rest,floor 到装箱/碰撞下限)
-///   2. 楔形份额 = 叶数占比(hub 间角向碰撞半宽 ×2,亦是扇区墙全角)
-///   3. 叶子弹簧 rest = 家内 last_occurred 排名铺 25%~100% 跨度(顶格=外圆)
-///   位置全部由力系统涌现(角向碰撞平衡处即扇区边界,外缘自然成圆)。
+/// 气泡布局(07-02 重构定稿):builder 只产**参数**不产落位:
+///   1. 气泡半径 = √(hub球² + Σ叶面积/装填密度) —— 叶多圆大,叶少圆小
+///   2. hub→主球线长 = 主球半径 + 气泡半径 + 缝(不重叠的**最小**调整)
+///   3. 叶子线长 = 排名+日期间隔压缩映射 × 气泡尺度(整家等比缩放)
+///   位置全部由力系统涌现(气泡碰撞定角度;圆间零重叠、叶不出圆)。
 enum GraphSceneBuilder {
 
     /// portrait 画布的 7 个分区(emotions 用户拍板不做)+ 各自颜色。
@@ -37,17 +37,6 @@ enum GraphSceneBuilder {
         case .events:   return buildEvents(halfLifeDays: halfLifeDays, userName: userName)
         case .portrait: return buildPortrait(halfLifeDays: halfLifeDays, userName: userName)
         }
-    }
-
-    // MARK: - 楔形份额分配
-
-    /// 纯按叶数占比分 360°(07-02 定稿:档位/保底/封顶全部删除 ——
-    /// 它们让份额和内容脱节,扇区间出缝隙,拼不成完整的圆)。
-    /// 空 folder 占 0°(hub 球本身仍由碰撞保证物理空间)。Σ=360。
-    static func allocateWedges(counts: [Int]) -> [Double] {
-        guard !counts.isEmpty else { return [] }
-        let total = max(counts.reduce(0, +), 1)
-        return counts.map { Double($0) / Double(total) * 360 }
     }
 
     // MARK: - Event 画布
@@ -101,8 +90,6 @@ enum GraphSceneBuilder {
         specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
 
         return assemble(userName: userName, specs: specs,
-                        outerRadius: GraphConstants.eventOuterRadius,
-                        hubDistance: GraphConstants.eventHubDistance,
                         hubRadius: { spec in
                             min(GraphConstants.folderRadiusBase
                                     + GraphConstants.folderRadiusScale
@@ -116,12 +103,6 @@ enum GraphSceneBuilder {
                             min(GraphConstants.eventRadiusBase
                                     + GraphConstants.eventRadiusScale * s.weight,
                                 GraphConstants.eventRadiusMax)
-                        },
-                        leafRest: { s in
-                            GraphConstants.leafDistance(
-                                daysAgo: s.daysAgo,
-                                near: GraphConstants.eventLeafDistanceNear,
-                                far: GraphConstants.eventLeafDistanceFar)
                         },
                         leafStrength: { s in
                             min(Double(s.occurrences), GraphConstants.eventStrengthMax)
@@ -144,8 +125,6 @@ enum GraphSceneBuilder {
         specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
 
         return assemble(userName: userName, specs: specs,
-                        outerRadius: GraphConstants.portraitOuterRadius,
-                        hubDistance: GraphConstants.portraitHubDistance,
                         hubRadius: { _ in GraphConstants.categoryRadius },
                         hubKind: { .category(name: $0.slug) },
                         leafKind: { s in
@@ -159,30 +138,21 @@ enum GraphSceneBuilder {
                                 + GraphConstants.portraitRadiusScale
                                     * min(s.weight, GraphConstants.portraitStrengthMax)
                         },
-                        leafRest: { s in
-                            GraphConstants.leafDistance(
-                                daysAgo: s.daysAgo,
-                                near: GraphConstants.portraitLeafDistanceNear,
-                                far: GraphConstants.portraitLeafDistanceFar)
-                        },
                         leafStrength: { s in
                             max(min(s.weight, GraphConstants.portraitStrengthMax), 1)
                         },
                         zone: .portrait)
     }
 
-    // MARK: - 组装(两画布共用:份额分配 + 半径补偿 + 建节点/边)
+    // MARK: - 组装(两画布共用:气泡半径 + 线长映射 + 建节点/边)
 
     private static func assemble(userName: String,
                                  specs: [HubSpec],
-                                 outerRadius: Double,
-                                 hubDistance: Double,
                                  hubRadius: (HubSpec) -> Double,
                                  hubKind: (HubSpec) -> GraphNodeKind,
                                  leafKind: (ScannedFile) -> GraphNodeKind,
                                  leafColor: (HubSpec, ScannedFile) -> SIMD3<Double>,
                                  leafRadius: (ScannedFile) -> Double,
-                                 leafRest: (ScannedFile) -> Double,
                                  leafStrength: (ScannedFile) -> Double,
                                  zone: GraphZone) -> GraphScene {
         var nodes: [GraphNode] = []
@@ -191,67 +161,49 @@ enum GraphSceneBuilder {
                                radius: GraphConstants.mainRadius,
                                colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
 
-        // 07-02 物理化终稿:builder 只给**参数**(等距半径/楔形份额/弹簧
-        // rest),不给落位 —— 位置全部由力系统涌现(Handoff §二)。
-        // hub 距主球全体相等(公式不变):
-        let hubRadii = specs.map(hubRadius)
-        let globalMaxRest = specs.flatMap { $0.members.map(leafRest) }.max()
-            ?? (outerRadius - hubDistance)
-        let packFloor = (hubRadii.map { $0 * 2 + 10 }.reduce(0, +)) / (2 * .pi)
-        let maxHubR = hubRadii.max() ?? 0
-        let dist = max(outerRadius - globalMaxRest,
-                       packFloor,
-                       GraphConstants.mainRadius + maxHubR
-                           + Double(GraphConstants.mainCollisionPadding) + 2)
-        let span = max(outerRadius - dist, 40)
-
-        // 楔形份额 = 叶数占比(hub 间角向碰撞的直径,扇区墙的全角)。
-        // ⚠️ 保底宽(hub 球角尺寸+缝)**不可压缩**,只等比压缩份额富余
-        //(过订会让角向碰撞永远解不开,小 hub 被挤到重叠 —— 同 07-02
-        // 两遍法的教训,搬到碰撞盘宽度上)。归一化目标留每家 2° 余量:
-        // Σ 不必精确 360(用户 07-02 拍板),扇形间**绝不重叠**是硬约束,
-        // 满订时叶群扭矩会把相邻盘压到互渗 ~15%,余量吸收它。
-        let shares = allocateWedges(counts: specs.map { $0.members.count })
-        let floors = specs.indices.map { k in
-            (2 * asin(min((hubRadii[k] + 3) / dist, 0.9))) * 180 / .pi + 2
-        }
-        let excesses = specs.indices.map { max(0, shares[$0] - floors[$0]) }
-        let avail = max(0, 360 - 2 * Double(specs.count) - floors.reduce(0, +))
-        let exSum = excesses.reduce(0, +)
-        let exScale = exSum > 0 ? min(1, avail / exSum) : 1
-        for (k, spec) in specs.enumerated() {
-            let r = hubRadii[k]
+        // 07-02 气泡重构(用户定稿):每个 hub 的叶子绕它 360° 成圆。
+        // 气泡半径由内容面积涌现(10 叶小圆,1000 叶巨圆);线长 =
+        // 日期映射 × 气泡尺度(叶少则全家线等比缩短);hub→主球弹簧
+        // rest = 主球半径 + 气泡半径 + 缝(气泡贴主球排布,角度由
+        // 气泡碰撞涌现);圆间零重叠、叶不出自家圆由物理保证。
+        for spec in specs {
+            let r = hubRadius(spec)
+            let maxLeafR = spec.members.map(leafRadius).max() ?? 0
+            // π·气泡半径² ≥ hub 球面积 + Σ叶面积/装填密度(π 约掉);
+            // 下限 = hub 球碰撞壳 + 两个最大叶径(圆再小也得装得下
+            // "贴着 hub 壳的一圈叶",否则硬碰撞会把叶顶出圈外)。
+            let leafArea = spec.members.reduce(0.0) {
+                let lr = leafRadius($1) + 1
+                return $0 + lr * lr
+            }
+            let bubbleR = max(
+                (r * r + leafArea / GraphConstants.bubbleFill).squareRoot()
+                    + GraphConstants.bubblePadding,
+                r + Double(GraphConstants.mainCollisionPadding) + 2 * maxLeafR + 3)
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
                                     radius: r, colorRGB: spec.colorRGB,
                                     fileURL: nil, hubIndex: 0)
-            hubNode.hubWedgeDegrees = floors[k] + excesses[k] * exScale
-            hubNode.hubPinRadius = dist
+            hubNode.hubBubbleRadius = bubbleR
             nodes.append(hubNode)
             let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
-            edges.append(GraphEdge(a: hubIdx, b: 0, strength: s, restLength: dist,
+            // rest 里含「最大叶径+pad」净空:圆的内缘叶不许被主球碰撞壳
+            // 顶出圈(engine 的硬约束同款净空)—— 仍是不重叠的最小调整。
+            edges.append(GraphEdge(a: hubIdx, b: 0, strength: s,
+                                   restLength: GraphConstants.mainRadius + bubbleR
+                                       + maxLeafR
+                                       + Double(GraphConstants.mainCollisionPadding)
+                                       + GraphConstants.bubbleGap,
                                    halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
                                    halfWidthB: GraphConstants.edgeEndWidth(
                                        ballRadius: GraphConstants.mainRadius),
                                    springStrength: GraphConstants.hubSpringStrength))
 
-            // 线长 = 排名 + 日期间隔压缩映射(07-02 用户定稿):家内按
-            // last_occurred 升序,相邻两条的线长差 = 1 + ln(1+日期差) 个
-            // 步进 —— 同日也分开 1 槽(可读);差 1 天 ≈1.7 槽、差 1 个月
-            // ≈4.5 槽:日期差大则变化被压缩,但绝不等同(纯排名=太过,
-            // 30 天硬窗=超窗全糊,两者都被否)。归一化铺 25%~100% 跨度,
-            // 最旧顶格 = span → 外缘成圆。
-            // 叶径自适应(取代固定 ×0.72):楔形环带面积装不下全部叶球时
-            // 按 √面积比全体等比缩球 —— 「清晰可见不重叠」先保证几何
-            // 可行,物理才有解;装得下则不缩。0.6 = 不规则装填经验密度。
-            let inner = dist + 0.25 * span
-            let areaAvail = (hubNode.hubWedgeDegrees! * .pi / 180) / 2
-                * (outerRadius * outerRadius - inner * inner) * 0.6
-            let areaNeed = spec.members.reduce(0.0) {
-                let lr = leafRadius($1) + 1
-                return $0 + .pi * lr * lr
-            }
-            let mega = min(1, max(0.4, (areaAvail / max(areaNeed, 1)).squareRoot()))
+            // 线长 = 排名 + 日期间隔压缩映射(07-02 定稿,保留)× 气泡尺度:
+            // 家内按 last_occurred 升序,相邻线长差 = 1 + ln(1+日期差) 槽
+            //(差 1 天可见,差 1 月更长但压缩,绝不相等);最新贴 hub
+            //(floor 比例),最旧顶到气泡边缘 —— 整家等比随气泡缩放。
+            let maxRest = max(bubbleR - maxLeafR - 2, r + 4)
             let ordered = spec.members.indices.sorted {
                 (spec.members[$0].daysAgo, spec.members[$0].relPath)
                     < (spec.members[$1].daysAgo, spec.members[$1].relPath)
@@ -265,11 +217,12 @@ enum GraphSceneBuilder {
                 cum.append(c)
             }
             let cMax = max(cum.last ?? 0, 1e-9)
+            let floorFrac = GraphConstants.bubbleRestFloor
             for (rank, mi) in ordered.enumerated() {
                 let m = spec.members[mi]
                 let idx = nodes.count
-                let lr = leafRadius(m) * mega
-                let rest = span * (0.25 + 0.75 * cum[rank] / cMax)
+                let lr = leafRadius(m)
+                let rest = maxRest * (floorFrac + (1 - floorFrac) * cum[rank] / cMax)
                 nodes.append(GraphNode(id: idx, kind: leafKind(m), title: m.title,
                                        radius: lr, colorRGB: leafColor(spec, m),
                                        fileURL: m.url, hubIndex: hubIdx))

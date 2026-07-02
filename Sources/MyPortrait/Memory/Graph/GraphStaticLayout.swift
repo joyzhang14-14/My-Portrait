@@ -16,9 +16,9 @@ enum GraphStaticLayout {
         var edgeOf: [Int: GraphEdge] = [:]
         for e in scene.edges { edgeOf[e.a] = e }
 
-        // hub 环(fallback 距离:完美圆算法的 outer − far,folderRing 已废)
+        // hub 环(fallback 距离:仅测试场景无边时用,常数即可)
         let hubs = scene.nodes.filter { $0.kind.isHub && $0.id != 0 }
-        let fallback = GraphConstants.eventOuterRadius - GraphConstants.eventLeafDistanceFar
+        let fallback = 120.0
         for (k, hub) in hubs.enumerated() {
             let angle = 2 * Double.pi * Double(k) / Double(max(hubs.count, 1)) - .pi / 2
             let r = edgeOf[hub.id]?.restLength ?? fallback
@@ -31,7 +31,7 @@ enum GraphStaticLayout {
             let j = leafCountOf[node.hubIndex, default: 0]
             leafCountOf[node.hubIndex] = j + 1
             let angle = goldenAngle * Double(j)
-            let r = edgeOf[node.id]?.restLength ?? GraphConstants.eventLeafDistanceFar
+            let r = edgeOf[node.id]?.restLength ?? 100
             let hubPos = pos[max(node.hubIndex, 0)]
             pos[node.id] = SIMD2<Float>(hubPos.x + Float(cos(angle) * r),
                                         hubPos.y + Float(sin(angle) * r))
