@@ -698,6 +698,26 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
+        // 拖拽硬清障(07-02:拖太快仍重叠 —— 速度域阻力每 tick 只解一份
+        // 深度,指针一 tick 压进几十 pt 追不上;且被拖球速度被钉清零,
+        // 碰撞给它的份额白给):被拖球周边**位置级**全量推开,拖多快都
+        // 不叠。O(n) 距离检查/tick,忽略不计。
+        if let di, di > 0, di < n {
+            let pd = pos[di]
+            let rd = nodeRadius[di]
+            let pad = GraphConstants.collidePadding
+            pos.withUnsafeMutableBufferPointer { P in
+                for j in 1..<n where j != di {
+                    let d = P[j] - pd
+                    let dist = simd_length(d)
+                    let minD = rd + nodeRadius[j] + pad
+                    if dist < minD {
+                        let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                        P[j] = pd + dir * minD
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - 静态助手
