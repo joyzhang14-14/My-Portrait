@@ -56,12 +56,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// familyLeaf(不参与匀布);碰撞按家隔离照常。
     private var beltIdx: [Int32] = [], beltHub: [Int32] = []
     private var beltRing: [Float] = [], beltAng: [Float] = []
-    /// 自家 hub 在 hubIndices 里的槽号(帧携带查 dPhi 用)。
+    /// 自家 hub 在 hubIndices 里的槽号(绑定期帧携带查 dPhi 用)。
     private var beltHubSlot: [Int32] = []
-    /// 帧携带参考(07-03):上 tick 各 hub 位置。收敛期 hub 绕主球大幅
-    /// 公转,弹簧拖不动整条带 —— 陨石带定义在 hub 的旋转参考系里,
-    /// 每 tick 随 hub 平移+公转刚体携带,弹簧只做小修正。
-    /// 空 = 下 tick 重建参考(explode/updateScene 后必须置空)。
+    /// 陨石绑定态(07-03 三稿用户定稿):生成(explode)时与隐形圈绑定
+    ///(帧携带,开场收敛 hub 公转不会甩掉整条带);用户**首次拖球后
+    /// 解绑**(本次打开内),只剩环带吸引 —— 可冲散、慢慢跟回。
+    private var beltBound = true
+    /// 帧携带参考:上 tick 各 hub 位置(空 = 下 tick 重建)。
     private var hubPrev: [SIMD2<Float>] = []
     private var beltTmpNow: [SIMD2<Float>] = []
     private var beltTmpC: [Float] = [], beltTmpS: [Float] = []
@@ -227,7 +228,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
-        hubPrev = []   // 帧携带参考失效,下 tick 重建
+        // 重新生成 → 陨石重新绑定隐形圈(07-03 三稿:生成期绑定,
+        // 用户拖动后解绑只剩吸引)
+        beltBound = true
+        hubPrev = []
         alpha = 1
         publishSnapshot()
         simLock.unlock()
@@ -307,6 +311,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 alphaTarget = p
                 if p > 0, alpha < p { alpha = p }
             }
+            // 用户拖球 → 陨石永久解绑(本次打开内;07-03 三稿单向闩)
+            if dragging { beltBound = false }
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
             // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
             // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
@@ -410,49 +416,69 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 不加(拖拽钉住覆盖速度,加了也白算,与叶弹簧同理无须豁免)。
     private func beltPass() {
         guard !beltIdx.isEmpty else { return }
-        let nh = hubIndices.count
-        // 帧携带参考初建/重建(explode/updateScene 后置空)
-        if hubPrev.count != nh {
-            hubPrev = (0..<nh).map { pos[Int(hubIndices[$0])] }
-            beltTmpNow = hubPrev
-            beltTmpC = .init(repeating: 1, count: nh)
-            beltTmpS = .init(repeating: 0, count: nh)
-            return
-        }
-        // 每 hub 本 tick 的位移 + 绕主球公转角(主球钉原点,极角差即公转)
-        for s in 0..<nh {
-            let hp = pos[Int(hubIndices[s])]
-            beltTmpNow[s] = hp
-            let d = atan2(hp.y, hp.x) - atan2(hubPrev[s].y, hubPrev[s].x)
-            beltTmpC[s] = cos(d); beltTmpS[s] = sin(d)
-        }
-        dragLock.lock(); let di = draggedIndex ?? -1; dragLock.unlock()
-        // 地板同 linkPass:力系统要么都醒要么都睡
+        // 地板同 linkPass:力系统要么都醒要么都睡。
         let k = GraphConstants.beltSpring * max(alpha, 0.1)
-        pos.withUnsafeMutableBufferPointer { P in
-        vel.withUnsafeMutableBufferPointer { V in
-            for bi in 0..<beltIdx.count {
-                let i = Int(beltIdx[bi])
-                let s = Int(beltHubSlot[bi])
-                let hp = beltTmpNow[s]
-                // ① 帧携带(07-03 抓虫):收敛期 hub 绕主球公转可达大半圈,
-                //   弹簧拖不动整条带 → 大批陨石滞留旧方位流散(169/599
-                //   实测)。带子随 hub 平移+公转刚体携带,永远背对主球;
-                //   拖 hub 时陨石带像行星环一样跟着走。被拖颗豁免。
-                if i != di {
+        if beltBound {
+            // 绑定期(07-03 三稿:生成时绑定,拖动后解绑):帧携带 ——
+            // 开场收敛 hub 绕主球公转可达大半圈,纯吸引拖不动整条带
+            //(169/599 流散实测)。带子随自家 hub 平移+公转刚体走位,
+            // 弹簧回模糊家位(散布角+径向模糊,不是整齐槽位)。
+            let nh = hubIndices.count
+            if hubPrev.count != nh {
+                hubPrev = (0..<nh).map { pos[Int(hubIndices[$0])] }
+                beltTmpNow = hubPrev
+                beltTmpC = .init(repeating: 1, count: nh)
+                beltTmpS = .init(repeating: 0, count: nh)
+                return
+            }
+            for s in 0..<nh {
+                let hp = pos[Int(hubIndices[s])]
+                beltTmpNow[s] = hp
+                let d = atan2(hp.y, hp.x) - atan2(hubPrev[s].y, hubPrev[s].x)
+                beltTmpC[s] = cos(d); beltTmpS[s] = sin(d)
+            }
+            pos.withUnsafeMutableBufferPointer { P in
+            vel.withUnsafeMutableBufferPointer { V in
+                for bi in 0..<beltIdx.count {
+                    let i = Int(beltIdx[bi])
+                    let s = Int(beltHubSlot[bi])
+                    let hp = beltTmpNow[s]
                     let rel0 = P[i] - hubPrev[s]
                     P[i] = hp + SIMD2<Float>(
                         rel0.x * beltTmpC[s] - rel0.y * beltTmpS[s],
                         rel0.x * beltTmpS[s] + rel0.y * beltTmpC[s])
+                    let homeAng = atan2(hp.y, hp.x) + beltAng[bi]
+                    let target = hp
+                        + SIMD2<Float>(cos(homeAng), sin(homeAng)) * beltRing[bi]
+                    V[i] += (target - P[i] - V[i]) * k
                 }
-                // ② 弹簧小修正到槽位点(帧携带后偏差只剩局部)
-                let slotAng = atan2(hp.y, hp.x) + beltAng[bi]
-                let target = hp
-                    + SIMD2<Float>(cos(slotAng), sin(slotAng)) * beltRing[bi]
-                V[i] += (target - P[i] - V[i]) * k
+            }}
+            for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
+            return
+        }
+        // 解绑后(用户拖过球):只被吸引 —— 两个弱力,稳态形状由吸引+
+        // 碰撞+硬排除涌现;拖拽冲散后慢慢跟回自家(新)位置。
+        hubPrev = []   // 参考作废(下次 explode 重绑时重建)
+        let bias = GraphConstants.beltAntiMainBias
+        pos.withUnsafeBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+            for bi in 0..<beltIdx.count {
+                let i = Int(beltIdx[bi]), hub = Int(beltHub[bi])
+                let hp = P[hub]
+                let rel = P[i] - hp
+                let curR = max(simd_length(rel), 1)
+                let radial = rel / curR
+                // ① 环带吸引:朝自家模糊家位半径回拉(无角向槽位)
+                V[i] += radial * ((beltRing[bi] - curR) * k)
+                // ② 弱背主球偏置:切向漂向「主球→hub 延长线」方向;
+                //   sin 形 → 背面零力自由散布,朝主球侧被慢慢推开
+                var dAng = atan2(rel.y, rel.x) - atan2(hp.y, hp.x)
+                while dAng > .pi { dAng -= 2 * .pi }
+                while dAng < -.pi { dAng += 2 * .pi }
+                let tangent = SIMD2<Float>(-radial.y, radial.x)
+                V[i] -= tangent * (sin(dAng) * k * beltRing[bi] * bias)
             }
         }}
-        for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
     }
 
     /// 气泡碰撞(07-02 气泡重构):每个 hub 携带一个隐形圆(半径=builder

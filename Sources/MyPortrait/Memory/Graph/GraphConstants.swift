@@ -97,19 +97,21 @@ enum GraphConstants {
     static let beltWeightMax: Double = 1.5
     static let beltTier1Max: Double = 1.0
     static let beltTier2Max: Double = 0.5
-    /// 气泡边缘 → 最内层第一排中心线的距离(世界 pt)
+    /// 气泡边缘 → 最内层基准半径的距离(世界 pt)
     static let beltGap: Double = 10
-    /// **层与层**的额外间隔(层内排与排的距离 = 槽宽,BeltLayout 排好;
-    /// 这条让 weight 分带肉眼可辨)
+    /// 层与层的基准半径间距(weight 分带的"重心"仍从内到外)
     static let beltRingSpacing: Double = 8
-    /// 弧带最大半宽(rad ≈110°):弧带以背主球方向为中心,不绕到朝主球
-    /// 侧;单排装不下 BeltLayout 自动往外加排(⚠️ 别指望碰撞力挤双排:
-    /// 2.5 倍超载实测喷泉式流散,弹簧槽位必须每球可达)
+    /// 出生散布角半宽(rad ≈110°,以背主球方向为中心)。稳态角向分布
+    /// 不受此硬限 —— 靠弱背主球偏置 + 碰撞挤开涌现,散一点是要求
     static let beltMaxHalfArc: Double = 1.92
-    /// 陨石回位弹簧刚度(velocity 域;×max(alpha,0.1) 同 linkPass 地板)
+    /// 环带吸引刚度(velocity 域;×max(alpha,0.1) 同 linkPass 地板)。
+    /// 07-03 二稿:这是吸引不是绑定 —— 拖拽可冲散,松手慢慢跟回
     static let beltSpring: Float = 0.06
-    /// 弧内槽位角抖动(±槽宽×此比例;路径哈希,确定性)
-    static let beltJitter: Double = 0.35
+    /// 径向模糊(±一半,路径哈希确定性):层界互相渗透,模糊感是要求
+    static let beltFuzz: Double = 12
+    /// 背主球偏置强度(切向,相对环带吸引的比例):太大会排成正弧,
+    /// 太小陨石绕到朝主球侧堆积
+    static let beltAntiMainBias: Float = 0.5
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
