@@ -693,7 +693,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     let bT = hubBubbleR[t] + 8
                     // 径向带门控:邻圆环带不与本家带重叠 → 挡不到,不裁
                     if dT + bT < bLo || dT - bT > bHi { continue }
-                    let w = asin(min(0.99, bT / dT))
+                    // 洞宽 = 挡板圆与**本家环中径**的真实相交角半宽(余弦
+                    // 定理)。⚠️ 八修:原 asin(bT/dT) 是原点切线角 = 影锥
+                    // 最宽处,气泡大时(bT/dT→1)爆到 ±80°,过挡 3x → 整家
+                    // 被推去另一侧,环偏离"主球-folder 连线正上方"越来越远
+                    let rB = dS0 + (hubBubbleR[sA] + beltFamReach[s]) * 0.5 + 5
+                    let cosT = (dT * dT + rB * rB - bT * bT) / (2 * dT * rB)
+                    if cosT >= 1 { continue }   // 环中径不与挡板相交
+                    let w = acos(max(cosT, -1))
                     var rel = atan2(pt.y, pt.x) - polar
                     while rel > .pi { rel -= 2 * .pi }
                     while rel < -.pi { rel += 2 * .pi }
