@@ -84,6 +84,11 @@ enum GraphConstants {
     static let bubbleGap: Double = 12
     /// 气泡间软碰撞刚度(圆与圆绝不重叠的速度域推开;硬解算兜底)
     static let bubbleCollideStrength: Float = 0.5
+    /// 拖拽家族帧携带比例(07-03 用户:"拖 folder/分区球时叶子全因加速度
+    /// 甩到后面,线要硬一点"):被拖 hub 的自家叶每 tick 直接带走 hub 位移
+    /// 的此比例,残余由弹簧回弹 —— 等效加硬 hub-叶连线;位置域携带无
+    /// 弹簧震荡,1=完全刚体,0=纯弹簧(老行为)。陨石不带(拖拽中自由态)
+    static let dragFamilyCarry: Float = 0.75
     /// 线长档位:最新的叶贴 hub(此比例×最大线长),最旧顶到气泡边缘
     static let bubbleRestFloor: Double = 0.25
     /// 线长抖动幅度(07-02 反馈:均匀排列之上加一点排列随机性,别太
