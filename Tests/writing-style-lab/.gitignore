@@ -1,0 +1,8 @@
+lab.db
+lab.db-shm
+lab.db-wal
+__pycache__/
+*.pyc
+reports/
+*.npy
+.DS_Store
