@@ -529,10 +529,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 predictBeltClip()
                 beltPredDirty = false
             }
-            // 陨石带反推:弧被邻家压住 → 切向轻推两家 hub 转开
+            // 陨石带反推:弧被邻家压住 → 切向轻推两家 hub 转开。
+            // 地板 0.5(不是 0.15!):冷透后力缩 15% 挪速掉出净位移窗
+            // 阈值,被 park 半路冻住("平移做一半就停"实测);也不敢恒定
+            // 全速 —— 多家缺口互相冲突时持续环流,after-drag park 42s。
+            // 高 alpha(加载/松手后 = 极限错位可见期)全速,冷却折半收尾
             beltSeparationForces(
                 beltTmpNow,
-                gain: GraphConstants.beltHubNudge * max(alpha, 0.15)
+                gain: GraphConstants.beltHubNudge * max(alpha, 0.5)
             ) { slot, dv in vel[Int(hubIndices[slot])] += dv }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
             pos.withUnsafeMutableBufferPointer { P in
@@ -784,7 +788,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 let deficit = needed - abs(rel)
                 guard deficit > 0 else { continue }
                 let sign: Float = rel != 0 ? (rel > 0 ? 1 : -1) : 1
-                let str = min(deficit, 0.4) * gain
+                // 缺口封顶 0.6rad:极限错位(如整家骑别家头上)顶速走,
+                // 接近分开自然减速 —— 快而不弹
+                let str = min(deficit, 0.6) * gain
                 let mS = hubMass[s], mT = hubMass[t]
                 let tot = max(mS + mT, 1)
                 apply(t, SIMD2<Float>(-sin(pol[t]), cos(pol[t]))
