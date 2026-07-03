@@ -142,6 +142,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 冻结正在飞的穿透球会把途中重叠一起定格(压力取证:12s 追逐期
     /// pen 恒 0,park 后 71 对叠着 —— 重叠全藏在免碰撞的穿透态里)。
     private var beltTransitAny = false
+    /// 家族帧携带参考:上 tick 各 hub 位置(空 = 下 tick 重建;explode/
+    /// updateScene 置空防 teleport 位移被当真位移携带)+ 节点位移缓冲。
+    private var famPrev: [SIMD2<Float>] = []
+    private var famDelta: [SIMD2<Float>] = []
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
     private var tickCount: UInt64 = 0
     /// 叶子出生角的整体相位(随种子变,07-02:随机种子每次开花不同)。
@@ -299,6 +303,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
+        famPrev = []       // teleport 位移不携带
         alpha = 1
         publishSnapshot()
         simLock.unlock()
@@ -360,6 +365,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         beltPredDirty = true
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         hubQuietRef = []   // 槽位数可能变,静动帧判定重建
+        famPrev = []   // 家族携带参考同理重建
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -1291,6 +1297,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
+        // 家族帧携带(07-03 全局化,用户:"连接线刚度被推动时会失效,
+        // 需要全局生效"):任何 hub 本 tick 的净位移 —— 拖/被推土机推开/
+        // 气泡碰撞挤走/回弹/反推力,不问来源 —— 都按 familyCarry 直接
+        // 带给自家圈内叶,残余由弹簧回弹。被拖 hub 走同一条路(原拖拽
+        // 特例已删,避免双重携带)。陨石不带(三态另有携带/弹簧机制)。
+        familyCarryPass()
         // 拖拽硬清障 v2(07-02:速度再快也不叠):
         //   ① 扫掠胶囊 —— 沿「上 tick 钉位 → 本 tick 钉位」线段全程清障,
         //     高速时一 tick 跳几十 pt,点清障会隧穿跳过中间的球;
@@ -1304,17 +1316,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let prev = dragPrevPos ?? pd
             let seg = pd - prev
             let segLen2 = simd_length_squared(seg)
-            // 家族帧携带(07-03 用户:"拖 folder/分区球叶子全甩到后面,
-            // 线要硬一点"):被拖的是 hub 时,自家叶每 tick 直接带走 hub
-            // 位移的 dragFamilyCarry,残余由弹簧回弹 —— 等效加硬 hub-叶
-            // 连线,位置域携带不会像加大弹簧刚度那样震荡。陨石不带
-            // (拖拽中陨石=自由态,用户定稿"边界=球个体、像水合拢")
-            if nodeFamily[di] == -1, segLen2 > 1e-8 {
-                let carry = seg * GraphConstants.dragFamilyCarry
-                for li in 0..<leafIndices.count where leafOwnHub[li] == Int32(di) {
-                    pos[Int(leafIndices[li])] += carry
-                }
-            }
             dragNbr.removeAll(keepingCapacity: true)
             pos.withUnsafeMutableBufferPointer { P in
                 for j in 1..<n where j != di {
@@ -1352,6 +1353,50 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             dragPrevPos = pd
         } else {
             dragPrevPos = nil
+        }
+    }
+
+    /// 家族帧携带(07-03 全局化):每个 hub 本 tick 的净位移 × familyCarry
+    /// 直接加到自家圈内叶位置上,弹簧只收拾剩下的 10% —— 连接线"刚度"
+    /// 对拖/推/回弹全部生效。位置域携带,无速度累积,松手无过冲。
+    /// 被拖的叶不带(拖拽钉住,带了下 tick 也被钉位覆盖,还会抖一下)。
+    private func familyCarryPass() {
+        let nh = hubIndices.count
+        guard nh > 0, !leafIndices.isEmpty else { return }
+        if famPrev.count != nh || famDelta.count != n {
+            famPrev = (0..<nh).map { pos[Int(hubIndices[$0])] }
+            famDelta = .init(repeating: .zero, count: n)
+            return
+        }
+        let c = GraphConstants.familyCarry
+        var any = false
+        for s in 0..<nh {
+            let h = Int(hubIndices[s])
+            let d = pos[h] - famPrev[s]
+            famPrev[s] = pos[h]
+            // 死区 0.2pt/tick:家级慢环流(~0.13pt/tick)不携带 —— 全量
+            // 携带会把家变成准刚体,环流失去叶内阻尼衰减不掉,净位移窗
+            // 永不静止,加载 park 13s→40.5s(实测回归);拖/推位移远大于
+            // 死区,刚性跟随不受影响
+            if simd_length_squared(d) > 0.04 {
+                famDelta[h] = d * c
+                any = true
+            } else {
+                famDelta[h] = .zero
+            }
+        }
+        // 生成期不携带(famPrev 照常刷新):开场没有"被推"——第一次拖球
+        // 才结束生成态;开场携带只有一个效果 = 叶跟紧后 hub 失去弹簧反拉
+        // 阻尼,环流振幅涨过静止阈值,加载 park 13s→39s(实测回归)
+        guard any, !beltForming else { return }
+        dragLock.lock()
+        let di = draggedIndex ?? -1
+        dragLock.unlock()
+        for li in 0..<leafIndices.count {
+            let i = Int(leafIndices[li])
+            if i == di { continue }
+            let d = famDelta[Int(leafOwnHub[li])]
+            if d != .zero { pos[i] += d }
         }
     }
 
