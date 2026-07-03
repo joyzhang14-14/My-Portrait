@@ -1,0 +1,2132 @@
+[
+ {
+  "type": "verdict",
+  "ref": "s32",
+  "ts": 1783054217.000192,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s49",
+  "ts": 1783054217.000318,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s49",
+  "ts": 1783054217.0004458,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s57",
+  "ts": 1783054217.0005188,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s57",
+  "ts": 1783054217.000591,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s61",
+  "ts": 1783054217.000654,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s61",
+  "ts": 1783054217.000711,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s68",
+  "ts": 1783054217.000803,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s68",
+  "ts": 1783054217.000855,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s68",
+  "ts": 1783054217.000909,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s72",
+  "ts": 1783054217.0009658,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s72",
+  "ts": 1783054217.001018,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s79",
+  "ts": 1783054217.001065,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s79",
+  "ts": 1783054217.001142,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s79",
+  "ts": 1783054217.0012329,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix audio error handling in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s86",
+  "ts": 1783054217.001306,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s86",
+  "ts": 1783054217.001365,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s86",
+  "ts": 1783054217.001406,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s91",
+  "ts": 1783054217.001465,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s91",
+  "ts": 1783054217.0015209,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s91",
+  "ts": 1783054217.0015628,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s94",
+  "ts": 1783054217.0016232,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s94",
+  "ts": 1783054217.001667,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s94",
+  "ts": 1783054217.001718,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s100",
+  "ts": 1783054217.0017889,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s100",
+  "ts": 1783054217.00184,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s100",
+  "ts": 1783054217.0018811,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s103",
+  "ts": 1783054217.001931,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s103",
+  "ts": 1783054217.001987,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s103",
+  "ts": 1783054217.0020502,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s104",
+  "ts": 1783054217.002111,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s104",
+  "ts": 1783054217.002163,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s104",
+  "ts": 1783054217.002253,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s111",
+  "ts": 1783054217.002322,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s111",
+  "ts": 1783054217.002361,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s111",
+  "ts": 1783054217.002421,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s115",
+  "ts": 1783054217.002537,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s115",
+  "ts": 1783054217.0026932,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s115",
+  "ts": 1783054217.00276,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s115",
+  "ts": 1783054217.0028422,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s118",
+  "ts": 1783054217.002975,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s118",
+  "ts": 1783054217.0030239,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s118",
+  "ts": 1783054217.0030751,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s118",
+  "ts": 1783054217.003197,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s124",
+  "ts": 1783054217.0032709,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s124",
+  "ts": 1783054217.00332,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s124",
+  "ts": 1783054217.003366,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Improve writing capture and text processing"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s124",
+  "ts": 1783054217.0034292,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s127",
+  "ts": 1783054217.00348,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s127",
+  "ts": 1783054217.0035179,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s127",
+  "ts": 1783054217.0035741,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Improve writing capture and text processing"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s127",
+  "ts": 1783054217.003654,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s140",
+  "ts": 1783054217.003725,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s140",
+  "ts": 1783054217.003765,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s140",
+  "ts": 1783054217.003832,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Improve writing capture and text processing"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s140",
+  "ts": 1783054217.003891,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s143",
+  "ts": 1783054217.003948,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Retrain speaker profiles and fix UI in MyMeeting",
+   "loser": "Fix audio error handling in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s143",
+  "ts": 1783054217.003995,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve writing capture and text processing",
+   "loser": "Retrain speaker profiles and fix UI in MyMeeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s143",
+  "ts": 1783054217.004044,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Improve writing capture and text processing"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s143",
+  "ts": 1783054217.0041118,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s6",
+  "ts": 1783054217.0041852,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize VAD and transcription models",
+   "loser": "Deploy and manage code with Git and tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s42",
+  "ts": 1783054217.004257,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Deploy and manage code with Git and tools",
+   "loser": "Optimize VAD and transcription models"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s180",
+  "ts": 1783054217.004391,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Debug UI freeze in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s180",
+  "ts": 1783054217.0044749,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s183",
+  "ts": 1783054217.004555,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Debug UI freeze in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s183",
+  "ts": 1783054217.0046499,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Fix placeholder text misclassification"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s187",
+  "ts": 1783054217.004792,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Debug UI freeze in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s187",
+  "ts": 1783054217.004935,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s188",
+  "ts": 1783054217.0050728,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Debug UI freeze in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s188",
+  "ts": 1783054217.0051148,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s192",
+  "ts": 1783054217.005209,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Debug UI freeze in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s192",
+  "ts": 1783054217.005287,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s202",
+  "ts": 1783054217.0053718,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Debug UI freeze in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s202",
+  "ts": 1783054217.005447,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix layout lag in My-Portrait",
+   "loser": "Fix placeholder text misclassification"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s146",
+  "ts": 1783054217.005541,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s147",
+  "ts": 1783054217.005595,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s152",
+  "ts": 1783054217.005704,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s153",
+  "ts": 1783054217.005762,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s156",
+  "ts": 1783054217.0058408,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s163",
+  "ts": 1783054217.00593,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix placeholder text misclassification",
+   "loser": "Fix layout lag in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s360",
+  "ts": 1783054217.00604,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Manage audio and memory settings in My-Portrait",
+   "loser": "Port OCR and fix UI in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s311",
+  "ts": 1783054217.006117,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug writing capture logic",
+   "loser": "Set up Claude Code and fix UI elements"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s239",
+  "ts": 1783054217.006198,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Configure transcription models and audio pipelines",
+   "loser": "Fix AX and OCR routing in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s245",
+  "ts": 1783054217.00626,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement speaker separation in My-Meeting",
+   "loser": "Fix AX and OCR routing in My-Portrait"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s254",
+  "ts": 1783054217.006345,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix AX and OCR routing in My-Portrait",
+   "loser": "Implement speaker separation in My-Meeting"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s308",
+  "ts": 1783054217.006405,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Set up Claude Code and fix UI elements",
+   "loser": "Refactor MeetingTemplate to RecordingTemplate"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s379",
+  "ts": 1783054217.006506,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s397",
+  "ts": 1783054217.006557,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s397",
+  "ts": 1783054217.006609,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s411",
+  "ts": 1783054217.006664,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s411",
+  "ts": 1783054217.006774,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s416",
+  "ts": 1783054217.0068212,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s416",
+  "ts": 1783054217.006866,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Manage permissions and system-level tools",
+   "loser": "Debug CJK input and text capture issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s422",
+  "ts": 1783054217.0069382,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s422",
+  "ts": 1783054217.007008,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s425",
+  "ts": 1783054217.0070999,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s425",
+  "ts": 1783054217.007206,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Debug CJK input and text capture issues",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s428",
+  "ts": 1783054217.007259,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Manage permissions and system-level tools",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s432",
+  "ts": 1783054217.007327,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Manage permissions and system-level tools",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s434",
+  "ts": 1783054217.0074,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Manage permissions and system-level tools",
+   "loser": "Implement power mode and Auto Live indicator"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s435",
+  "ts": 1783054217.00746,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Debug CJK input and text capture issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s435",
+  "ts": 1783054217.007521,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s442",
+  "ts": 1783054217.007568,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Debug CJK input and text capture issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s442",
+  "ts": 1783054217.007638,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s449",
+  "ts": 1783054217.007731,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Debug CJK input and text capture issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s449",
+  "ts": 1783054217.007831,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s450",
+  "ts": 1783054217.007896,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Debug CJK input and text capture issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s450",
+  "ts": 1783054217.007971,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement power mode and Auto Live indicator",
+   "loser": "Manage permissions and system-level tools"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s392",
+  "ts": 1783054217.008019,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s394",
+  "ts": 1783054217.008064,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s431",
+  "ts": 1783054217.008131,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s453",
+  "ts": 1783054217.008199,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s465",
+  "ts": 1783054217.008266,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s476",
+  "ts": 1783054217.0083258,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s494",
+  "ts": 1783054217.008385,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s504",
+  "ts": 1783054217.008451,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s513",
+  "ts": 1783054217.008527,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Develop meeting template and audio recording featu",
+   "loser": "Implement and debug OCR screenshot feature"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s587",
+  "ts": 1783054217.0086231,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s625",
+  "ts": 1783054217.008713,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s630",
+  "ts": 1783054217.008786,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s636",
+  "ts": 1783054217.008863,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s658",
+  "ts": 1783054217.008936,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s661",
+  "ts": 1783054217.0090182,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s665",
+  "ts": 1783054217.00909,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s665",
+  "ts": 1783054217.009139,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI rendering of colored dots in SwiftUI",
+   "loser": "Implement unified message extraction model"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s667",
+  "ts": 1783054217.009225,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s667",
+  "ts": 1783054217.0092852,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI rendering of colored dots in SwiftUI",
+   "loser": "Implement unified message extraction model"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s671",
+  "ts": 1783054217.0093539,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement unified message extraction model",
+   "loser": "Fix message extraction at event boundaries"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s734",
+  "ts": 1783054217.009403,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI rendering of colored dots in SwiftUI",
+   "loser": "Resolve audio chunk stuck in pending state"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s590",
+  "ts": 1783054217.009465,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Rewrite code and create regression test fixtures",
+   "loser": "Implement right-click highlight in SwiftUI"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s588",
+  "ts": 1783054217.009506,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Rewrite code and create regression test fixtures",
+   "loser": "Debug OCR and message boundary issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s728",
+  "ts": 1783054217.009537,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix database and connection issues",
+   "loser": "Debug OCR and message boundary issues"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s752",
+  "ts": 1783054217.0095942,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s753",
+  "ts": 1783054217.009645,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI layout jumps in sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s760",
+  "ts": 1783054217.009692,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s764",
+  "ts": 1783054217.009745,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s770",
+  "ts": 1783054217.0097952,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s785",
+  "ts": 1783054217.0098581,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI layout jumps in sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s787",
+  "ts": 1783054217.0099032,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s787",
+  "ts": 1783054217.00995,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s795",
+  "ts": 1783054217.01,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s795",
+  "ts": 1783054217.010081,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s798",
+  "ts": 1783054217.010147,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s798",
+  "ts": 1783054217.01021,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s801",
+  "ts": 1783054217.0102668,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s801",
+  "ts": 1783054217.010328,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s805",
+  "ts": 1783054217.010387,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s805",
+  "ts": 1783054217.0104582,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s805",
+  "ts": 1783054217.010496,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Integrate Screenpipe logo and fix model loading",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s811",
+  "ts": 1783054217.0105448,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s811",
+  "ts": 1783054217.0105999,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s811",
+  "ts": 1783054217.0106611,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Integrate Screenpipe logo and fix model loading",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s814",
+  "ts": 1783054217.0107079,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s814",
+  "ts": 1783054217.010761,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s814",
+  "ts": 1783054217.01086,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Integrate Screenpipe logo and fix model loading",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s820",
+  "ts": 1783054217.010976,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s820",
+  "ts": 1783054217.0110679,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s820",
+  "ts": 1783054217.0112581,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Integrate Screenpipe logo and fix model loading",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s820",
+  "ts": 1783054217.01131,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Refactor writing-capture pipeline and UI",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s823",
+  "ts": 1783054217.0113752,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI layout jumps in sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s823",
+  "ts": 1783054217.011441,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix UI layout jumps in sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s823",
+  "ts": 1783054217.011502,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Integrate Screenpipe logo and fix model loading",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s823",
+  "ts": 1783054217.0115578,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Refactor writing-capture pipeline and UI",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s834",
+  "ts": 1783054217.0116029,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Fix 'got 0s' audio recording error",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s834",
+  "ts": 1783054217.01168,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Port OCR screenshot feature to Swift",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s834",
+  "ts": 1783054217.011762,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Integrate Screenpipe logo and fix model loading",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s834",
+  "ts": 1783054217.011803,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Refactor writing-capture pipeline and UI",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s850",
+  "ts": 1783054217.011832,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s850",
+  "ts": 1783054217.0118852,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s850",
+  "ts": 1783054217.011922,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s850",
+  "ts": 1783054217.0119522,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s850",
+  "ts": 1783054217.012002,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Refactor writing-capture pipeline and UI"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s853",
+  "ts": 1783054217.012053,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s853",
+  "ts": 1783054217.012107,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s853",
+  "ts": 1783054217.0121632,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s853",
+  "ts": 1783054217.012201,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s853",
+  "ts": 1783054217.012254,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Refactor writing-capture pipeline and UI",
+   "loser": "Implement foldable RECENTS sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s861",
+  "ts": 1783054217.0122921,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s861",
+  "ts": 1783054217.012332,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s861",
+  "ts": 1783054217.012387,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s861",
+  "ts": 1783054217.012453,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s861",
+  "ts": 1783054217.012501,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Refactor writing-capture pipeline and UI"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s868",
+  "ts": 1783054217.012565,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s868",
+  "ts": 1783054217.012631,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s868",
+  "ts": 1783054217.012683,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s868",
+  "ts": 1783054217.012722,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s868",
+  "ts": 1783054217.012774,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Refactor writing-capture pipeline and UI"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s911",
+  "ts": 1783054217.01283,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s911",
+  "ts": 1783054217.012875,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s911",
+  "ts": 1783054217.012925,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s911",
+  "ts": 1783054217.0129762,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s911",
+  "ts": 1783054217.013025,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Refactor writing-capture pipeline and UI"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1026",
+  "ts": 1783054217.013076,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1026",
+  "ts": 1783054217.013123,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1026",
+  "ts": 1783054217.013178,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1026",
+  "ts": 1783054217.013237,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1026",
+  "ts": 1783054217.0132968,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Refactor writing-capture pipeline and UI"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1119",
+  "ts": 1783054217.013364,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix UI layout jumps in sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1119",
+  "ts": 1783054217.013418,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Fix 'got 0s' audio recording error"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1119",
+  "ts": 1783054217.01347,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Port OCR screenshot feature to Swift"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1119",
+  "ts": 1783054217.0135128,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement foldable RECENTS sidebar",
+   "loser": "Integrate Screenpipe logo and fix model loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1119",
+  "ts": 1783054217.0135539,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Refactor writing-capture pipeline and UI",
+   "loser": "Implement foldable RECENTS sidebar"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s826",
+  "ts": 1783054217.0136151,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve sidebar UI and folding behavior",
+   "loser": "Fix VoiceTrainer state and retry logic"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s826",
+  "ts": 1783054217.013665,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement OCR and UI improvements in macOS app",
+   "loser": "Improve sidebar UI and folding behavior"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s871",
+  "ts": 1783054217.013712,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement OCR and UI improvements in macOS app",
+   "loser": "Fix VoiceTrainer state and retry logic"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s874",
+  "ts": 1783054217.0137558,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement OCR and UI improvements in macOS app",
+   "loser": "Fix VoiceTrainer state and retry logic"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s878",
+  "ts": 1783054217.01383,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement OCR and UI improvements in macOS app",
+   "loser": "Fix VoiceTrainer state and retry logic"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s914",
+  "ts": 1783054217.01387,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Improve sidebar UI and folding behavior",
+   "loser": "Fix VoiceTrainer state and retry logic"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s844",
+  "ts": 1783054217.0139,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize alignment grid and command palette",
+   "loser": "Debug and fix model listing and provider loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s848",
+  "ts": 1783054217.0139341,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Optimize alignment grid and command palette",
+   "loser": "Debug and fix model listing and provider loading"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1190",
+  "ts": 1783054217.013969,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement input method detection and routing",
+   "loser": "Integrate Librime with small LLM for context-aware"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1193",
+  "ts": 1783054217.014027,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement input method detection and routing",
+   "loser": "Integrate Librime with small LLM for context-aware"
+  }
+ },
+ {
+  "type": "verdict",
+  "ref": "s1198",
+  "ts": 1783054217.0140731,
+  "kind": "overruled_by_exactly_once",
+  "detail": {
+   "winner": "Implement input method detection and routing",
+   "loser": "Integrate Librime with small LLM for context-aware"
+  }
+ }
+]
