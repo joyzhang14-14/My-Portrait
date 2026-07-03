@@ -579,11 +579,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         + beltRing[bi]
                     let target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
                     let delta = target - P[i] - V[i]
-                    // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3。
-                    // 松手态基础增益 ×2.2(07-03 精修:"松手后优先计算排
-                    // 位置"——回位干脆利落;生成态保持柔和绽放)
+                    // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
+                    //(松手态 ×2.2 排位增益已按用户要求回滚)
                     let dLen = simd_length(delta)
-                    let boost = min(1 + dLen / 150, 3) * (carrying ? 1 : 2.2)
+                    let boost = min(1 + dLen / 150, 3)
                     V[i] += delta * (k * boost)
                     // 穿透(十稿):回流途中(>24pt)对碰撞免疫,近终点实体化;
                     // 生成态不穿(绽放本来就要靠碰撞摊开)
