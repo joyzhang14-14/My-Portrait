@@ -50,10 +50,15 @@ enum GraphConstants {
     static let folderRadiusBase: Double = 10
     static let folderRadiusScale: Double = 1.4
     static let folderRadiusMax: Double = 28
-    /// event 球 = e0 + ke·currentWeight,上限不超过最小 folder 球。
-    /// 07-02 反馈:末端球下限两连降(4→2.5→1.5),上限不变。
-    static let eventRadiusBase: Double = 1.5
-    static let eventRadiusScale: Double = 0.9
+    /// event 球 = clamp(e0 + ke·currentWeight, min, max),上限不超过最小
+    /// folder 球。07-02 反馈:末端球下限两连降(4→2.5→1.5),上限不变。
+    /// 07-03 用户:"大部分球一样大,不好判断重要性" —— 实测 968 事件里
+    /// 气泡内(w≥1.5)89% 挤在 w=1.5~2.5,旧斜率 0.9 这段半径只差 0.9pt。
+    /// 斜率 0.9→1.7、基数 1.5→0.9 拉开主力段(面积差 1.7x→2.2x),
+    /// 下限 1.5 保底(最小陨石不比原来小,不会看不见/点不中)
+    static let eventRadiusBase: Double = 0.9
+    static let eventRadiusScale: Double = 1.7
+    static let eventRadiusMin: Double = 1.5
     static let eventRadiusMax: Double = 14
     /// portrait 小球 = p0 + kp·min(weight, 18);下限降,斜率补偿保上限
     static let portraitRadiusBase: Double = 2.5
