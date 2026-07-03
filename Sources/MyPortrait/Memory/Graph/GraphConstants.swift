@@ -197,9 +197,11 @@ enum GraphConstants {
     static let pulseTickStrokeWidth: Double = 1.2
     /// hover 白闪频率(Hz)
     static let hoverBlinkHz: Double = 2.2
-    /// hub/主球标签 LOD 淡出(07-01 反馈):zoom ≥ Hi 全显,≤ Lo 消失,间上线性
-    static let labelFadeZoomHi: Double = 0.55
-    static let labelFadeZoomLo: Double = 0.32
+    /// hub/主球标签 LOD 淡出:zoom ≥ Hi 全显,≤ Lo 消失,间上线性。
+    /// 07-03 精修:消失点做近(0.32→0.6)—— 稍微拉远字就该走,不用
+    /// 拉到很远才消失
+    static let labelFadeZoomHi: Double = 0.9
+    static let labelFadeZoomLo: Double = 0.6
     /// 浮窗:鼠标移出后自动关闭延迟(s)
     static let floatWindowAutoCloseDelay: TimeInterval = 1.0
 
