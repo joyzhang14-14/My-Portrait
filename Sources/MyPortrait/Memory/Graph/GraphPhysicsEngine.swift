@@ -1299,6 +1299,17 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let prev = dragPrevPos ?? pd
             let seg = pd - prev
             let segLen2 = simd_length_squared(seg)
+            // 家族帧携带(07-03 用户:"拖 folder/分区球叶子全甩到后面,
+            // 线要硬一点"):被拖的是 hub 时,自家叶每 tick 直接带走 hub
+            // 位移的 dragFamilyCarry,残余由弹簧回弹 —— 等效加硬 hub-叶
+            // 连线,位置域携带不会像加大弹簧刚度那样震荡。陨石不带
+            // (拖拽中陨石=自由态,用户定稿"边界=球个体、像水合拢")
+            if nodeFamily[di] == -1, segLen2 > 1e-8 {
+                let carry = seg * GraphConstants.dragFamilyCarry
+                for li in 0..<leafIndices.count where leafOwnHub[li] == Int32(di) {
+                    pos[Int(leafIndices[li])] += carry
+                }
+            }
             dragNbr.removeAll(keepingCapacity: true)
             pos.withUnsafeMutableBufferPointer { P in
                 for j in 1..<n where j != di {
