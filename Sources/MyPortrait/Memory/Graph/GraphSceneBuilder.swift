@@ -198,11 +198,11 @@ enum GraphSceneBuilder {
             let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
             // rest 里含「最大叶径+pad」净空:圆的内缘叶不许被主球碰撞壳
             // 顶出圈(engine 的硬约束同款净空)—— 仍是不重叠的最小调整。
+            let hubRest = GraphConstants.mainRadius + bubbleR + maxLeafR
+                + Double(GraphConstants.mainCollisionPadding)
+                + GraphConstants.bubbleGap
             edges.append(GraphEdge(a: hubIdx, b: 0, strength: s,
-                                   restLength: GraphConstants.mainRadius + bubbleR
-                                       + maxLeafR
-                                       + Double(GraphConstants.mainCollisionPadding)
-                                       + GraphConstants.bubbleGap,
+                                   restLength: hubRest,
                                    halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
                                    halfWidthB: GraphConstants.edgeEndWidth(
                                        ballRadius: GraphConstants.mainRadius),
@@ -275,7 +275,7 @@ enum GraphSceneBuilder {
                     radii: flat.map { leafRadius($0.m) },
                     hashA: flat.map { stableHash01($0.m.relPath + "#r") },
                     hashB: flat.map { stableHash01($0.m.relPath) },
-                    bubbleR: bubbleR)
+                    bubbleR: bubbleR, mainDist: hubRest)
                 for (k, f) in flat.enumerated() {
                     let idx = nodes.count
                     var node = GraphNode(id: idx, kind: leafKind(f.m), title: f.m.title,
