@@ -295,15 +295,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                              : nodeRadius[hubIdx] + 8
             pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
         }
-        // 陨石出生(07-03):出生角 = 各自槽位方向(hub 当前极角 + 槽位
-        // 偏移),半径 = 环偏移的 40%(九稿:隐形圆排除已删,生得太贴
-        // hub 会穿越整片叶群一路碰撞;40% 处起飞冲出去更顺)。
+        // 陨石出生 = 直接排到环位(07-03 精修:"优先计算排位置观感更好"):
+        // 主球极坐标目标公式同 beltPass —— 开场瞬间环就在成品半径上,
+        // 随 hub 方位收敛滑到位,不再从 hub 里喷出穿越叶群。
         for bi in 0..<beltIdx.count {
             let hubIdx = Int(beltHub[bi])
             let hp = pos[hubIdx]
-            let a = atan2(hp.y, hp.x) + beltAng[bi]
-            let r = max(nodeRadius[hubIdx] + 3, beltRing[bi] * 0.4)
-            pos[Int(beltIdx[bi])] = hp + SIMD2<Float>(cos(a), sin(a)) * r
+            let ang = atan2(hp.y, hp.x) + beltAng[bi]
+            let rr = simd_length(pos[Int(hubIndices[Int(beltAnchorSlot[bi])])])
+                + beltRing[bi]
+            pos[Int(beltIdx[bi])] = SIMD2<Float>(cos(ang), sin(ang)) * rr
         }
     }
 

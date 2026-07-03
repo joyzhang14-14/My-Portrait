@@ -70,6 +70,8 @@ struct GraphRootView: View {
     // 神经脉冲(hub 点击)
     @State private var pulses: [GraphPulse] = []
     @State private var pulseStart: Date = .distantPast
+    /// 当前所有在飞脉冲的最晚结束时刻(相对 pulseStart;叠加清理定时用)。
+    @State private var pulseEnd: TimeInterval = 0
     @State private var pulseGen = 0
 
     private var zone: GraphZone {
@@ -159,20 +161,32 @@ struct GraphRootView: View {
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count else { return }
         // 只有主球级联 2 跳(信号穿过 folder/分区抵达末端);
-        // 其它 hub 只传 1 跳到直接相连的球(07-01 反馈)。
-        let depth = scene.nodes[hub].kind == .main
-            ? GraphConstants.pulseMaxDepthMain
-            : GraphConstants.pulseMaxDepthOther
+        // 其它 hub 只传 1 跳到直接相连的球(07-01 反馈),且**不传主球**
+        //(07-03 精修:folder/分区点击只发给自家 event 球)。
+        let isMain = scene.nodes[hub].kind == .main
+        let depth = isMain ? GraphConstants.pulseMaxDepthMain
+                           : GraphConstants.pulseMaxDepthOther
         let (list, total) = GraphPulseScheduler.schedule(from: hub, scene: scene,
                                                          positions: snap,
-                                                         maxDepth: depth)
-        pulses = list
-        pulseStart = Date()
+                                                         maxDepth: depth,
+                                                         blocked: isMain ? [] : [0])
+        // 叠加不清除(07-03 精修:连点时上一发信号不许中途消失):新一批
+        // 脉冲按公共时间轴平移后**追加**;时间轴锚在最早一批的起点。
+        let now = Date()
+        if pulses.isEmpty { pulseStart = now; pulseEnd = 0 }
+        let base = now.timeIntervalSince(pulseStart)
+        pulses.append(contentsOf: list.map {
+            GraphPulse(edgeIndex: $0.edgeIndex, fromNode: $0.fromNode,
+                       start: base + $0.start, duration: $0.duration)
+        })
+        pulseEnd = max(pulseEnd, base + total)
         pulseGen += 1
         let gen = pulseGen
-        // 动画走完自动清空(清空后 renderPaused 恢复休眠判定)。
+        // 动画走完自动清空(按**全场最晚结束**定时,早批长级联不被
+        // 晚批短级联提前清掉;清空后 renderPaused 恢复休眠判定)。
+        let wait = pulseEnd - base + 0.2
         Task {
-            try? await Task.sleep(for: .seconds(total + 0.2))
+            try? await Task.sleep(for: .seconds(wait))
             if gen == pulseGen { pulses = [] }
         }
     }

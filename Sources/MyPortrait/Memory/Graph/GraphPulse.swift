@@ -17,11 +17,14 @@ enum GraphPulseScheduler {
     /// 从被点击的 hub 出发 BFS,级联最多 maxDepth 跳(visited 去重),
     /// 常速(speed pt/s)沿边传播:下一跳在上一跳到达时刻起跑。
     /// 返回脉冲表 + 整场动画总时长(清理定时用)。
+    /// - Parameter blocked: 信号不进入的节点(07-03 精修:folder/分区球
+    ///   点击只传给 event 球,不传主球 → 传 [0])。
     static func schedule(from origin: Int,
                          scene: GraphScene,
                          positions: [SIMD2<Float>],
                          speed: Double = GraphConstants.pulseSpeed,
-                         maxDepth: Int)
+                         maxDepth: Int,
+                         blocked: Set<Int> = [])
         -> (pulses: [GraphPulse], total: TimeInterval) {
         guard origin >= 0, origin < scene.nodes.count, speed > 0 else { return ([], 0) }
 
@@ -34,7 +37,7 @@ enum GraphPulseScheduler {
 
         var pulses: [GraphPulse] = []
         var total: TimeInterval = 0
-        var visited = Set<Int>([origin])
+        var visited = Set<Int>([origin]).union(blocked)
         // (节点, 信号到达该节点的时刻, 已走跳数)
         var frontier: [(node: Int, arrival: TimeInterval, depth: Int)] = [(origin, 0, 0)]
 

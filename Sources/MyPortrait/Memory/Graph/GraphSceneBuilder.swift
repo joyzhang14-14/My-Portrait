@@ -196,10 +196,20 @@ enum GraphSceneBuilder {
                 let lr = leafRadius($1) + 1
                 return $0 + lr * lr
             }
-            let bubbleR = max(
+            var bubbleR = max(
                 (r * r + leafArea / GraphConstants.bubbleFill).squareRoot()
                     + GraphConstants.bubblePadding,
                 r + Double(GraphConstants.mainCollisionPadding) + 2 * maxLeafR + 3)
+            // 少叶家(<10)日期远近分明(07-03 精修):下限气泡只装得下
+            // "贴 hub 壳的一圈",全部叶被碰撞顶到同半径,日期映射失效
+            // —— 给足径向纵深(每叶 ~5pt 档距),配合家内匀布 =
+            // 360° 均匀 + 日期半径分明
+            if (1..<10).contains(coreMembers.count) {
+                bubbleR = max(bubbleR,
+                              r + Double(GraphConstants.mainCollisionPadding)
+                                  + 2 * maxLeafR + 3
+                                  + Double(coreMembers.count) * 5)
+            }
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
                                     radius: r, colorRGB: spec.colorRGB,
