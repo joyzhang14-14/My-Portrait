@@ -177,6 +177,8 @@ enum GraphSceneBuilder {
         var megaOuter: Double = 0      // 大环外缘(绝对半径)
         // 大环全局层基线(十一稿:进大环的陨石全局遵循"小球去外圈")
         var megaTierBases: [Double]? = nil
+        // 大环家 hub 的节点下标(被吞并陨石的环半径锚定它的实时距离)
+        var megaHubIdx: Int? = nil
         for spec in specs {
             let r = hubRadius(spec)
             // 陨石带(07-03):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
@@ -284,13 +286,16 @@ enum GraphSceneBuilder {
                 // 之内 → 陨石改生成到大环半径(shift 平移径向偏移;弧
                 // 容量按大环半径算 → effMainDist,弧更平)
                 var effMainDist = hubRest
-                var shift = 0.0
+                var anchorHub: Int? = nil
                 var tierBases: [Double]? = nil
                 if let mb = megaBase,
                    hubRest + bubbleR + GraphConstants.beltGap + 40 < megaOuter {
                     effMainDist = mb - bubbleR
-                    shift = mb - (hubRest + bubbleR)
-                    // 被吞并 → 沿用大环全局层基线(小球去外圈全环统一)
+                    // 被吞并 → 环半径锚定大环家 hub 的实时距离(offset
+                    // 存大环帧,不再加死 shift —— 各家 hub 实际距离偏离
+                    // 自然长度的量不同,死 shift 在布局变动后会整段沉进
+                    // 大环内侧成分明内层弧),并沿用全局层基线
+                    anchorHub = megaHubIdx
                     tierBases = megaTierBases
                 }
                 let (offs, angs, tstarts) = BeltLayout.homes(
@@ -308,7 +313,8 @@ enum GraphSceneBuilder {
                                          fileURL: f.m.url, hubIndex: hubIdx)
                     node.beltTier = f.t
                     node.beltAngle = angs[k]
-                    node.beltRadialOffset = offs[k] + shift
+                    node.beltRadialOffset = offs[k]
+                    node.beltAnchorHubIndex = anchorHub
                     nodes.append(node)
                 }
                 // 首个有陨石的家(specs 降序 = event 数量第一)定下大环
@@ -317,6 +323,7 @@ enum GraphSceneBuilder {
                     megaBase = hubRest + bubbleR
                     megaOuter = hubRest + bubbleR + (offs.max() ?? 0) + 20
                     megaTierBases = tstarts
+                    megaHubIdx = hubIdx
                 }
             }
         }

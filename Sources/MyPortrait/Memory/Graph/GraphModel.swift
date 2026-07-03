@@ -49,9 +49,14 @@ struct GraphNode: Identifiable, Sendable {
     /// 出生散布角(相对「背主球方向」,rad;路径哈希,确定性)。
     /// 只用于绽放播种 —— 稳态角向分布由碰撞挤开涌现(模糊感)。
     var beltAngle: Double = 0
-    /// 环带吸引的目标半径偏移(相对自家气泡半径):层基准 + 径向模糊
+    /// 环带吸引的目标半径偏移(相对锚定家气泡远端):层基准 + 径向模糊
     /// 抖动 —— 层界互相渗透,"模模糊糊"是要求不是缺陷。
     var beltRadialOffset: Double = 0
+    /// 环半径的锚定 hub(十一稿修 bug):被大环吞并的陨石,半径锚定
+    /// **大环家 hub 的实时距离**(nil = 自家)。⚠️ 不能用建库时的 shift
+    /// 常数:各家 hub 实际距离偏离弹簧自然长度的量不同,布局变动后
+    /// 按自家距离+死 shift 会整段沉进大环内侧,出现分明内层弧。
+    var beltAnchorHubIndex: Int? = nil
 
     var color: Color {
         Color(red: colorRGB.x, green: colorRGB.y, blue: colorRGB.z)
