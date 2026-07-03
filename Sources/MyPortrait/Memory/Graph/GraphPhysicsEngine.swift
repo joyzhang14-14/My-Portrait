@@ -89,6 +89,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 与最大环偏移(径向带门控:邻圆径向够不着本家带就不裁弧)。
     private var beltFamW: [Float] = []
     private var beltFamReach: [Float] = []
+    /// 环半径锚定(十一稿修"分明内层弧"bug):每球/每家的锚定 hub 槽号
+    ///(被大环吞并 = 大环家槽号,半径跟它的实时距离走;否则 = 自家)。
+    private var beltAnchorSlot: [Int32] = []
+    private var beltFamAnchor: [Int32] = []
     /// 动态弧裁剪(07-03 四稿):每家的可用角区间 [lo, hi](相对背主球
     /// 方向)+ 家极角缓存 —— 被邻圆/主球挡住的一侧收缩,整片云往空侧
     /// 平移("一边碰到就延伸另一边")。每 tick 重算。
@@ -181,8 +185,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
-        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
-            = Self.beltArrays(scene: scene)
+        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach,
+         beltAnchorSlot, beltFamAnchor) = Self.beltArrays(scene: scene)
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
         nodeTransit = .init(repeating: false, count: n)
         // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
@@ -316,8 +320,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
-        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
-            = Self.beltArrays(scene: scene)
+        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach,
+         beltAnchorSlot, beltFamAnchor) = Self.beltArrays(scene: scene)
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []   // 帧携带参考失效,下 tick 重建
@@ -516,8 +520,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 let hp = beltTmpNow[s]
                 let polar = atan2(hp.y, hp.x)
                 beltTmpPol[s] = polar
-                let dS = simd_length(hp)
-                let bandLo = dS + hubBubbleR[s] - 6
+                // 本家带的径向范围按**锚定家**实时距离算(被吞并 = 大环家)
+                let sA = Int(beltFamAnchor[min(s, beltFamAnchor.count - 1)])
+                let dS = simd_length(beltTmpNow[sA])
+                let bandLo = dS + hubBubbleR[sA] - 6
                 let bandHi = dS + beltFamReach[s] + 20
                 var lo: Float = -2.98
                 var hi: Float = 2.98
@@ -546,7 +552,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 for bi in 0..<beltIdx.count {
                     let i = Int(beltIdx[bi])
                     let s = Int(beltHubSlot[bi])
-                    let hp = beltTmpNow[s]
                     // 帧携带(仅生成态):绕**主球**刚体公转(家位是主球
                     // 极坐标,随自家 hub 的方位角走;半径差由弹簧修正)
                     if carrying {
@@ -566,9 +571,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         a = lo + (a + fw) / (2 * fw) * (hi - lo)
                     }
                     let homeAng = beltTmpPol[s] + a
-                    // 目标 = 主球极坐标大圆上的点(半径 = hub距离 + 环偏移)
-                    // —— 大半径弧,曲率天然平
-                    let rr = simd_length(hp) + beltRing[bi]
+                    // 目标 = 主球极坐标大圆上的点。半径基于**锚定家**的
+                    // 实时距离(被大环吞并 = 大环家 —— 全环同一基准,布局
+                    // 变动不再出现整段沉进内侧的分明层;拖大环家整环跟走)
+                    let rr = simd_length(beltTmpNow[Int(beltAnchorSlot[bi])])
+                        + beltRing[bi]
                     let target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
                     let delta = target - P[i] - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
@@ -1269,9 +1276,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 陨石带四数组(07-03,同序对齐):节点下标 / 自家 hub / 环半径
     ///(= 自家气泡半径 + gap + 层号×层距)/ 槽位角(builder 排好)。
     private static func beltArrays(scene: GraphScene)
-        -> ([Int32], [Int32], [Float], [Float], [Int32], [Float], [Float]) {
+        -> ([Int32], [Int32], [Float], [Float], [Int32], [Float], [Float],
+            [Int32], [Int32]) {
         var i: [Int32] = [], h: [Int32] = [], r: [Float] = [], a: [Float] = []
-        var slot: [Int32] = []
+        var slot: [Int32] = [], anchorSlot: [Int32] = []
         // hubIndices 的枚举序(hubArrays 同款):hub 节点下标 → 槽号
         var slotOf: [Int: Int32] = [:]
         var s: Int32 = 0
@@ -1280,21 +1288,28 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
         var famW = [Float](repeating: 0.2, count: Int(s))
         var famReach = [Float](repeating: 0, count: Int(s))
+        var famAnchor = (0..<Int(s)).map { Int32($0) }
         for node in scene.nodes {
             guard node.beltTier != nil else { continue }
             let hub = max(node.hubIndex, 0)
+            // 锚定 hub(被大环吞并 = 大环家;否则自家):环半径 = 锚定家
+            // 的实时距离 + 锚定家气泡 + offset —— 不用死 shift
+            let anchor = node.beltAnchorHubIndex ?? hub
             i.append(Int32(node.id))
             h.append(Int32(hub))
             let sl = slotOf[hub] ?? 0
+            let asl = slotOf[anchor] ?? sl
             slot.append(sl)
-            let ring = Float((scene.nodes[hub].hubBubbleRadius ?? 0)
+            anchorSlot.append(asl)
+            let ring = Float((scene.nodes[anchor].hubBubbleRadius ?? 0)
                              + node.beltRadialOffset)
             r.append(ring)
             a.append(Float(node.beltAngle))
             famW[Int(sl)] = max(famW[Int(sl)], abs(Float(node.beltAngle)))
             famReach[Int(sl)] = max(famReach[Int(sl)], ring)
+            famAnchor[Int(sl)] = asl
         }
-        return (i, h, r, a, slot, famW, famReach)
+        return (i, h, r, a, slot, famW, famReach, anchorSlot, famAnchor)
     }
 
     /// 全部末端球 + 各自所属 hub(主球=0)+ 圈内硬上限
