@@ -166,13 +166,22 @@ enum GraphSceneBuilder {
         // 日期映射 × 气泡尺度(叶少则全家线等比缩短);hub→主球弹簧
         // rest = 主球半径 + 气泡半径 + 缝(气泡贴主球排布,角度由
         // 气泡碰撞涌现);圆间零重叠、叶不出自家圆由物理保证。
+        // 陨石带只在 Events 画布(07-03 用户定稿)。
+        let beltEnabled = zone == .events
         for spec in specs {
             let r = hubRadius(spec)
-            let maxLeafR = spec.members.map(leafRadius).max() ?? 0
+            // 陨石带(07-03):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
+            // 移到气泡外侧背主球方向的弧带;hub 球径/连接强度仍按全员算。
+            let beltMembers = beltEnabled
+                ? spec.members.filter { $0.weight < GraphConstants.beltWeightMax } : []
+            let coreMembers = beltEnabled
+                ? spec.members.filter { $0.weight >= GraphConstants.beltWeightMax }
+                : spec.members
+            let maxLeafR = coreMembers.map(leafRadius).max() ?? 0
             // π·气泡半径² ≥ hub 球面积 + Σ叶面积/装填密度(π 约掉);
             // 下限 = hub 球碰撞壳 + 两个最大叶径(圆再小也得装得下
             // "贴着 hub 壳的一圈叶",否则硬碰撞会把叶顶出圈外)。
-            let leafArea = spec.members.reduce(0.0) {
+            let leafArea = coreMembers.reduce(0.0) {
                 let lr = leafRadius($1) + 1
                 return $0 + lr * lr
             }
@@ -204,14 +213,14 @@ enum GraphSceneBuilder {
             //(差 1 天可见,差 1 月更长但压缩,绝不相等);最新贴 hub
             //(floor 比例),最旧顶到气泡边缘 —— 整家等比随气泡缩放。
             let maxRest = max(bubbleR - maxLeafR - 2, r + 4)
-            let ordered = spec.members.indices.sorted {
-                (spec.members[$0].daysAgo, spec.members[$0].relPath)
-                    < (spec.members[$1].daysAgo, spec.members[$1].relPath)
+            let ordered = coreMembers.indices.sorted {
+                (coreMembers[$0].daysAgo, coreMembers[$0].relPath)
+                    < (coreMembers[$1].daysAgo, coreMembers[$1].relPath)
             }
             var cum: [Double] = []
             var c = 0.0, prevDays = 0.0
             for (j, mi) in ordered.enumerated() {
-                let d = spec.members[mi].daysAgo
+                let d = coreMembers[mi].daysAgo
                 if j > 0 { c += 1 + log(1 + max(0, d - prevDays)) }
                 prevDays = d
                 cum.append(c)
@@ -219,7 +228,7 @@ enum GraphSceneBuilder {
             let cMax = max(cum.last ?? 0, 1e-9)
             let floorFrac = GraphConstants.bubbleRestFloor
             for (rank, mi) in ordered.enumerated() {
-                let m = spec.members[mi]
+                let m = coreMembers[mi]
                 let idx = nodes.count
                 let lr = leafRadius(m)
                 // 排列随机性(07-02 反馈):日期映射之上叠 ±jitter 的确定性
@@ -240,6 +249,41 @@ enum GraphSceneBuilder {
                                        restLength: rest,
                                        halfWidthA: GraphConstants.leafEdgeEndWidth(ballRadius: lr),
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
+            }
+
+            // 陨石带节点(07-03):三层圈按 weight 分档(最外=最低),每层
+            // 弧内槽位 = 均匀 + 路径哈希抖动(确定性);弧宽随内容长到上限,
+            // 超容量靠碰撞力挤成局部双排。无连接线(kind 仍是 eventLeaf,
+            // hover/浮窗/拖拽与普通球完全一致),颜色随自家 folder。
+            if !beltMembers.isEmpty {
+                var tiers: [[ScannedFile]] = [[], [], []]
+                for m in beltMembers {
+                    let t = m.weight < GraphConstants.beltTier2Max ? 2
+                          : m.weight < GraphConstants.beltTier1Max ? 1 : 0
+                    tiers[t].append(m)
+                }
+                // 层从内到外累进基线(BeltLayout 层内自动加排,排满往外长);
+                // 层与层之间额外隔 beltRingSpacing,肉眼可辨 weight 分带。
+                var cursor = GraphConstants.beltGap
+                for (t, tier) in tiers.enumerated() where !tier.isEmpty {
+                    let members = tier.sorted { $0.relPath < $1.relPath }
+                    let (offs, angs, next) = BeltLayout.slots(
+                        radii: members.map(leafRadius),
+                        jitters: members.map { stableHash01($0.relPath) - 0.5 },
+                        bubbleR: bubbleR, baseOffset: cursor)
+                    for (k, m) in members.enumerated() {
+                        let idx = nodes.count
+                        var node = GraphNode(id: idx, kind: leafKind(m), title: m.title,
+                                             radius: leafRadius(m),
+                                             colorRGB: leafColor(spec, m),
+                                             fileURL: m.url, hubIndex: hubIdx)
+                        node.beltTier = t
+                        node.beltAngle = angs[k]
+                        node.beltRadialOffset = offs[k]
+                        nodes.append(node)
+                    }
+                    cursor = next + GraphConstants.beltRingSpacing
+                }
             }
         }
         return GraphScene(zone: zone, nodes: nodes, edges: edges)

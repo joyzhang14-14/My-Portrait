@@ -89,6 +89,28 @@ enum GraphConstants {
     /// 数据每次打开布局一致(真随机会破坏会话缓存/可复现性)。
     static let bubbleRestJitter: Double = 0.12
 
+    // MARK: 陨石带(07-03 用户新需求:weight<1.5 的 event 不进气泡,
+    // 挂在自家气泡外侧、背主球方向的弧带上;三层圈,无连接线,颜色
+    // 随自家 folder;交互与普通 event 球完全一致。仅 Events 画布)
+
+    /// 进陨石带的 weight 上限;层界:[1,1.5)最内 / [0.5,1)中 / [0,0.5)最外
+    static let beltWeightMax: Double = 1.5
+    static let beltTier1Max: Double = 1.0
+    static let beltTier2Max: Double = 0.5
+    /// 气泡边缘 → 最内层第一排中心线的距离(世界 pt)
+    static let beltGap: Double = 10
+    /// **层与层**的额外间隔(层内排与排的距离 = 槽宽,BeltLayout 排好;
+    /// 这条让 weight 分带肉眼可辨)
+    static let beltRingSpacing: Double = 8
+    /// 弧带最大半宽(rad ≈110°):弧带以背主球方向为中心,不绕到朝主球
+    /// 侧;单排装不下 BeltLayout 自动往外加排(⚠️ 别指望碰撞力挤双排:
+    /// 2.5 倍超载实测喷泉式流散,弹簧槽位必须每球可达)
+    static let beltMaxHalfArc: Double = 1.92
+    /// 陨石回位弹簧刚度(velocity 域;×max(alpha,0.1) 同 linkPass 地板)
+    static let beltSpring: Float = 0.06
+    /// 弧内槽位角抖动(±槽宽×此比例;路径哈希,确定性)
+    static let beltJitter: Double = 0.35
+
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
     /// 斥力电荷(负=互斥),分角色(07-02 用户确诊:主球斥力+跨圆叶叶
