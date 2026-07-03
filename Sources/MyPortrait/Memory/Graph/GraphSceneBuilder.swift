@@ -262,24 +262,30 @@ enum GraphSceneBuilder {
                           : m.weight < GraphConstants.beltTier1Max ? 1 : 0
                     tiers[t].append(m)
                 }
-                // 每球一个"模糊家位"(07-03 二稿):层基准 + 径向模糊,
-                // 出生角全弧散布 —— 不是槽位,只是环带吸引的目标。
-                for (t, tier) in tiers.enumerated() where !tier.isEmpty {
+                // 扇形云家位(07-03 三稿):层内→外串接(高 weight 在前),
+                // 弧度先展开再往外延长 —— 小球自然落在外缘,分类是趋势
+                // 不是分带,无空隙。
+                var flat: [(m: ScannedFile, t: Int)] = []
+                for (t, tier) in tiers.enumerated() {
                     for m in tier.sorted(by: { $0.relPath < $1.relPath }) {
-                        let (off, ang) = BeltLayout.home(
-                            tier: t,
-                            hashA: stableHash01(m.relPath + "#r"),
-                            hashB: stableHash01(m.relPath))
-                        let idx = nodes.count
-                        var node = GraphNode(id: idx, kind: leafKind(m), title: m.title,
-                                             radius: leafRadius(m),
-                                             colorRGB: leafColor(spec, m),
-                                             fileURL: m.url, hubIndex: hubIdx)
-                        node.beltTier = t
-                        node.beltAngle = ang
-                        node.beltRadialOffset = off
-                        nodes.append(node)
+                        flat.append((m, t))
                     }
+                }
+                let (offs, angs) = BeltLayout.homes(
+                    radii: flat.map { leafRadius($0.m) },
+                    hashA: flat.map { stableHash01($0.m.relPath + "#r") },
+                    hashB: flat.map { stableHash01($0.m.relPath) },
+                    bubbleR: bubbleR)
+                for (k, f) in flat.enumerated() {
+                    let idx = nodes.count
+                    var node = GraphNode(id: idx, kind: leafKind(f.m), title: f.m.title,
+                                         radius: leafRadius(f.m),
+                                         colorRGB: leafColor(spec, f.m),
+                                         fileURL: f.m.url, hubIndex: hubIdx)
+                    node.beltTier = f.t
+                    node.beltAngle = angs[k]
+                    node.beltRadialOffset = offs[k]
+                    nodes.append(node)
                 }
             }
         }

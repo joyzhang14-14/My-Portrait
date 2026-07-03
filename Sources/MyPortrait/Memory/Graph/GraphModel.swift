@@ -75,21 +75,44 @@ struct GraphEdge: Sendable {
     var springStrength: Double? = nil
 }
 
-/// 陨石散布(07-03 二稿,builder 与独立自检共用的**纯函数**,保证零漂移):
-/// 每球一个"模糊家位"= 层基准半径 + 径向模糊 与 散布角 —— 不是槽位,
-/// 只是环带吸引的目标;稳态形状由吸引+碰撞+硬排除涌现(松散星尘感)。
+/// 陨石散布(07-03 三稿,builder 与独立自检共用的**纯函数**,保证零漂移):
+/// 输入一家全部陨石(按层内→外串接:高 weight 在前),输出每球"模糊家位"。
+/// 形状 = **扇形云**:弧度随数量先展开(长到 ±beltMaxHalfArc),装满一排
+/// 再往外延长 —— 陨石多的家(Unclassified)不再贴着隐形圈一圈壳(用户:
+/// 太刻意)。径向/角向大幅哈希模糊,排结构肉眼不可见;层间无空隙,
+/// 只留"小(低 weight)球偏外"的趋势。
 enum BeltLayout {
     /// - Parameters:
-    ///   - tier: 层号(0 内 /1 中 /2 外,基准半径 = beltGap + tier×层距)
+    ///   - radii: 全家陨石球半径(层内→外串接,高 weight 在前)
     ///   - hashA/hashB: 每球两个独立的 [0,1) 确定性哈希(路径加盐)
-    /// - Returns: (径向偏移相对气泡半径, 出生散布角相对背主球方向)
-    static func home(tier: Int, hashA: Double, hashB: Double)
-        -> (offset: Double, angle: Double) {
-        let offset = GraphConstants.beltGap
-            + Double(tier) * GraphConstants.beltRingSpacing
-            + (hashA - 0.5) * GraphConstants.beltFuzz
-        let angle = (hashB - 0.5) * 2 * GraphConstants.beltMaxHalfArc
-        return (offset, angle)
+    ///   - bubbleR: 自家气泡半径(决定每排弧容量)
+    /// - Returns: (径向偏移相对气泡半径, 家位角相对背主球方向) 同序
+    static func homes(radii: [Double], hashA: [Double], hashB: [Double],
+                      bubbleR: Double) -> (offsets: [Double], angles: [Double]) {
+        let n = radii.count
+        guard n > 0 else { return ([], []) }
+        let slotW = 2 * ((radii.max() ?? 1) + 1)
+        var offsets = [Double](repeating: 0, count: n)
+        var angles = [Double](repeating: 0, count: n)
+        var cursor = GraphConstants.beltGap
+        var k = 0
+        while k < n {
+            let ringR = bubbleR + cursor
+            let cap = max(1, Int(2 * GraphConstants.beltMaxHalfArc * ringR / slotW))
+            let rowCount = min(cap, n - k)
+            // 先展开:不足一排时弧宽 ∝ 数量(小家一小撮,不摊满全弧)
+            let halfArc = Double(rowCount) * slotW / (2 * ringR)
+            let slot = 2 * halfArc / Double(rowCount)
+            for j in 0..<rowCount {
+                // 模糊:径向 ±0.7 排距、角向 ±0.8 槽 —— 边缘不刻意
+                offsets[k] = cursor + (hashA[k] - 0.5) * slotW * 1.4
+                angles[k] = -halfArc + (Double(j) + 0.5) * slot
+                    + (hashB[k] - 0.5) * slot * 1.6
+                k += 1
+            }
+            cursor += slotW * 0.9   // 排距略挤,配合模糊更像云
+        }
+        return (offsets, angles)
     }
 }
 

@@ -97,18 +97,15 @@ enum GraphConstants {
     static let beltWeightMax: Double = 1.5
     static let beltTier1Max: Double = 1.0
     static let beltTier2Max: Double = 0.5
-    /// 气泡边缘 → 最内层基准半径的距离(世界 pt)
+    /// 气泡边缘 → 扇形云第一排基准的距离(世界 pt)
     static let beltGap: Double = 10
-    /// 层与层的基准半径间距(weight 分带的"重心"仍从内到外)
-    static let beltRingSpacing: Double = 8
-    /// 出生散布角半宽(rad ≈110°,以背主球方向为中心)。稳态角向分布
+    /// 扇形云弧半宽上限(rad ≈110°,以背主球方向为中心):弧度随数量
+    /// 先展开到此上限,再往外延长(BeltLayout.homes)。稳态角向分布
     /// 不受此硬限 —— 靠弱背主球偏置 + 碰撞挤开涌现,散一点是要求
     static let beltMaxHalfArc: Double = 1.92
     /// 环带吸引刚度(velocity 域;×max(alpha,0.1) 同 linkPass 地板)。
     /// 07-03 二稿:这是吸引不是绑定 —— 拖拽可冲散,松手慢慢跟回
     static let beltSpring: Float = 0.06
-    /// 径向模糊(±一半,路径哈希确定性):层界互相渗透,模糊感是要求
-    static let beltFuzz: Double = 12
     /// 背主球偏置强度(切向,相对环带吸引的比例):太大会排成正弧,
     /// 太小陨石绕到朝主球侧堆积
     static let beltAntiMainBias: Float = 0.5

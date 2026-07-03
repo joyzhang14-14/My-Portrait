@@ -860,9 +860,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 for bi in 0..<beltIdx.count {
                     let i = Int(beltIdx[bi])
                     if i == di { continue }
-                    // 2 轮:两气泡相切的夹缝里,推出 A 会压进 B(实测
-                    // 4/599 残余 2.9pt),第二轮扫掉。
-                    for _ in 0..<2 {
+                    // 3 轮:两气泡相切的夹缝里,推出 A 会压进 B(实测
+                    // 2 轮仍剩 1.6pt 残余),逐轮减半,3 轮压到肉眼零。
+                    for _ in 0..<3 {
                         for jj in 0..<hubIndices.count {
                             guard hubBubbleR[jj] > 0 else { continue }
                             let h = Int(hubIndices[jj])
