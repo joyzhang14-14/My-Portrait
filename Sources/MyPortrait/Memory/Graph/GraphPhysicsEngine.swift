@@ -675,7 +675,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 双几何挖洞(边际四修:幽灵以为被拖的大球会回老家,洞没挖在
             // 它实际停的位置 → 家位穿它+投影拉扯 = 聚集/抖动/乱飘):
             // 预测终局位置 与 实时位置 各挖一遍,谁挡都算挡。
-            for pass in 0..<2 {
+            // ⚠️ 生成期只用预测(六修):开场瞬间全员挤在原点,实时几何的
+            // 遮挡半宽个个 ≈82°,弧被切碎 → 整家压成一坨。
+            for pass in 0..<(beltForming ? 1 : 2) {
                 let polar = pass == 0 ? atan2(P[s].y, P[s].x) : polarLive
                 let dS0 = pass == 0 ? dS : dSLive
                 let bLo = dS0 + hubBubbleR[sA] - 6
