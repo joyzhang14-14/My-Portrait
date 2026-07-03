@@ -18,6 +18,32 @@ import re
 HAN = re.compile(r"[一-鿿]")
 LATIN = re.compile(r"[A-Za-z]")
 _CJK = r"一-鿿぀-ヿ가-힯"      # 汉字 + 假名 + 谚文
+_CJK_RE = re.compile(rf"[{_CJK}]")
+
+
+def _pangu_stats(t: str):
+    """扫一遍:CJK-run 与 ASCII字母数字-run 每次相接算一个过渡点(中间空格忽略但
+    记住有没有),返回 (过渡点总数, 其中带空格的数)。空格作分隔不作边界。"""
+    total = spaced = 0
+    prev = None          # 上一个非空有意义类:'C'(CJK) / 'A'(ascii alnum)
+    gap_space = False
+    for ch in t:
+        if ch.isspace():
+            gap_space = True
+            continue
+        if _CJK_RE.match(ch):
+            cls = "C"
+        elif ch.isascii() and ch.isalnum():
+            cls = "A"
+        else:
+            prev = None; gap_space = False; continue    # 标点等打断边界
+        if prev is not None and cls != prev:
+            total += 1
+            if gap_space:
+                spaced += 1
+        prev = cls
+        gap_space = False
+    return total, spaced
 
 
 # ---------------- 输入源 → 人类可读输入法 ----------------
@@ -139,15 +165,19 @@ def text_features(text: str) -> dict:
     ending = "none"
     if stripped:
         last = stripped[-1]
-        ending = {"。": "cjk_period", ".": "latin_period", "！": "cjk_bang",
-                  "!": "latin_bang", "？": "cjk_q", "?": "latin_q",
-                  "…": "ellipsis", "，": "comma", "~": "tilde",
-                  "、": "dun"}.get(last, "other")
+        punct = {"。": "cjk_period", ".": "latin_period", "！": "cjk_bang",
+                 "!": "latin_bang", "？": "cjk_q", "?": "latin_q",
+                 "…": "ellipsis", "，": "comma", "~": "tilde", "、": "dun"}
+        if last in punct:
+            ending = punct[last]
+        elif last.isalnum() or _CJK_RE.match(last):
+            ending = "none"          # 以词/字收尾 = 不加终止标点(聊天常见语用)
+        else:
+            ending = "other"         # 其他不常见标点/符号
 
-    # 盘古之白:CJK↔ASCII 词/数 边界,有多少插了空格
-    boundaries = re.findall(rf"([{_CJK}])([A-Za-z0-9])|([A-Za-z0-9])([{_CJK}])", t)
-    n_bound = len(boundaries)
-    spaced = len(re.findall(rf"[{_CJK}] +[A-Za-z0-9]|[A-Za-z0-9] +[{_CJK}]", t))
+    # 盘古之白:CJK↔ASCII 每个过渡点算一个边界(不管有没有空格),其中多少插了空格。
+    # 一次扫描,分母=全部过渡点(修复"总空时分母为0"的 bug)。
+    n_bound, spaced = _pangu_stats(t)
     pangu_ratio = round(spaced / n_bound, 2) if n_bound else None
 
     han = len(HAN.findall(t))
