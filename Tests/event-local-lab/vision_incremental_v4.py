@@ -47,14 +47,17 @@ _WORD = re.compile(r"[A-Za-z0-9_]+|[一-鿿]")
 P_ITEMS_FIRST = (
     'Screenshot from a macOS work session (foreground app: {app}). List the SPECIFIC '
     'things visible / that the user is doing: exact file names, libraries, people, numbers, '
-    'actions, topics. Ignore UI chrome (menu bars, clocks, sidebars). If a media app is '
-    'foreground but the real content is code/terminal/docs/chat, that work is the activity. '
-    'Reply ONLY JSON: {{"items":["<specific item>", ...]}}')
+    'actions, topics. Include short quoted user-typed text and person names VERBATIM in their '
+    'original script (any language). Ignore UI chrome (menu bars, clocks, sidebars). If a '
+    'media app is foreground but the real content is code/terminal/docs/chat, that work is '
+    'the activity. Reply ONLY JSON: {{"items":["<specific item>", ...]}}')
 P_ITEMS_NEXT = (
     'Specific items ALREADY recorded for THIS SAME session (do NOT repeat any):\n{items}\n\n'
     'A LATER screenshot from the same session (app: {app}). Output ONLY NEW specific items '
-    'visible now that are NOT already in the list above. Ignore UI chrome. If nothing is '
-    'genuinely new, return an empty list. Reply ONLY JSON: {{"items":["<new item>", ...]}}')
+    'visible now that are NOT already in the list above. Include short quoted user-typed text '
+    'and person names VERBATIM (any language); prefer recall — when unsure whether an item is '
+    'new or specific enough, include it. Ignore UI chrome. If nothing is genuinely new, return '
+    'an empty list. Reply ONLY JSON: {{"items":["<new item>", ...]}}')
 
 # 14B 汇总:items + 去重OCR → digest(对照纠错 + 补全 + 去乱码)
 P_MERGE = (
@@ -101,10 +104,12 @@ _UNIT_RX = re.compile(r"\b\d+(?:\.\d+)?(?:ms|min|px|fps|hz|kb|mb|gb)\b")
 
 
 def bypass_anchors(con_p, frame_ids, cap=8):
+    # GOLD_v2:裸百分比(80%类)是连接词隐患(79/337条kw中招),不进kw;
+    # 百分比的保留交给 P_MERGE2 的 doing 层(verbatim 规则),锚点层只要判别 token。
     freq, hashes = collections.Counter(), collections.Counter()
     for fid in frame_ids:
         ft = _frame_ocr(con_p, fid).lower()
-        for rx in (_PCT_RX, _VER_RX, _UNIT_RX):
+        for rx in (_VER_RX, _UNIT_RX):
             for t in set(rx.findall(ft)):
                 freq[t] += 1
         for h in set(_HASH_RX.findall(ft)):

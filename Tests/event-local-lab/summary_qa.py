@@ -175,9 +175,12 @@ Member sessions (time order):
 
 RULES:
 - "title": <=60 chars, verb-first, what the user was DOING. Never terminal flags, never "App — Window".
-- "summary": 2-4 sentences, third person. Cite ONLY concrete anchors that literally appear in the
+- "summary": 2-5 sentences, third person. Cite ONLY concrete anchors that literally appear in the
   digests (file/function names, commit hashes, numbers, error strings). Invent nothing.
 - MUST keep person names, quoted user text, and social/personal content if present in the digests.
+  Keep names in their ORIGINAL script — NEVER romanize Chinese names (何成 stays 何成, not He Cheng).
+- If there are 8+ member sessions, make sure EVERY distinct member topic is covered by at least
+  one clause — do not summarize only the dominant thread.
 - NEVER mention: --dangerously-skip-permissions, caffeinate, sourcekit-lsp (terminal noise).
 - "tags": 3-6 lowercase keywords.
 Answer ONLY: {{"title":"...","summary":"...","tags":[...]}}"""
@@ -262,7 +265,7 @@ def main():
     t0 = time.time()
     classify_daytype(sess)
     events = mega_review(events, by, idf, T)
-    events = exactly_once(events, by, idf)     # 重切的 LLM 输出同样会双分配,必须再过一遍
+    events = exactly_once(events, by, idf, llm_escalate=True)  # 重切输出同样双分配,必须再过
     events = singleton_attach(events, by, idf, T)
     stats = qa_pass(events, by, idf)
     anchor_arbiter_shadow(sess, idf)

@@ -137,7 +137,7 @@ def split_bucket(bi, bk, by, idf, T):
             retain.log_verdict(DAY, f"bucket{bi}", "bucket_retry", attempt=attempt, err=str(ex)[:200])
             msgs = msgs + [{"role": "user",
                             "content": "Output ONLY the JSON. No prose, no markdown fence."}]
-    evs = []
+    evs, pending = [], []                        # pending=有标题但 sids 解析失败的事件
     if obj:
         for e in (obj.get("events") or []):
             sids = []
@@ -145,6 +145,8 @@ def split_bucket(bi, bk, by, idf, T):
                 if str(x).isdigit() and int(x) in bset and int(x) not in sids:
                     sids.append(int(x))
             if not sids:
+                if (e.get("title") or "").strip():
+                    pending.append(e)            # GOLD_v2 bucket18 塌缩教训:模型切对了,别丢
                 continue
             title = (e.get("title") or "").strip()
             if not title or not lint_ok(title):
@@ -155,6 +157,28 @@ def split_bucket(bi, bk, by, idf, T):
                 or "; ".join(by[k]["doing"][:80] for k in sids[:3])
             evs.append({"title": title[:80], "summary": summary,
                         "tags": e.get("tags") or [], "session_ids": sids, "bucket": bi})
+    if pending:                                  # sids 解析失败 → 标题实词对未覆盖成员模糊重配
+        covered0 = {x for e in evs for x in e["session_ids"]}
+        claims = {}
+        for k in bk:
+            if k in covered0:
+                continue
+            scored = [(_title_hooks((p.get("title") or ""), by[k]["doing"]), pi)
+                      for pi, p in enumerate(pending)]
+            h, pi = max(scored)
+            if h >= 1:
+                claims.setdefault(pi, []).append(k)
+        for pi, sids in claims.items():
+            p = pending[pi]
+            title = p["title"].strip()
+            if not lint_ok(title):
+                title = det_title(sids, by, idf)
+            evs.append({"title": title[:80],
+                        "summary": (p.get("summary") or "").strip()
+                        or "; ".join(by[k]["doing"][:80] for k in sids[:3]),
+                        "tags": p.get("tags") or [], "session_ids": sids, "bucket": bi,
+                        "dirty": True})          # 模糊重配的成员集,摘要待刷新
+            retain.log_verdict(DAY, title[:60], "pending_title_reassign", n=len(sids))
     if not evs:                                  # retry 仍失败 → 确定性时间断裂切分
         retain.log_verdict(DAY, f"bucket{bi}", "bucket_fallback_split", size=len(bk))
         order = sorted(bk, key=lambda k: T[k][0])
@@ -172,10 +196,48 @@ def split_bucket(bi, bk, by, idf, T):
     return evs, [k for k in bk if k not in covered]
 
 
-# ---------------- exactly-once(F2,gold 38/42)----------------
+# ---------------- exactly-once(F2 gold 38/42;GOLD_v2 加不对称证据否决)----------------
 
-def exactly_once(events, by, idf):
-    """三层裁决:壳(纯子集,多成员壳赢/单例壳死)→锚点决定门→末现。空壳事件消亡。"""
+_TITLE_STOP = {"user", "with", "from", "that", "this", "into", "using", "implement",
+               "implementing", "improve", "improved", "update", "updated", "manage",
+               "managing", "multiple", "various", "settings", "portrait", "myportrait",
+               "system", "session", "sessions", "work", "working", "macos", "terminal"}
+
+
+def _title_hooks(title, doing):
+    """标题实词在 doing 的逐字命中数。GOLD_v2:36 条裁反全部=loser 命中而 winner 零钩子。
+    中文按二元组匹配(整段连读串几乎不可能逐字命中)。"""
+    t = title.lower()
+    words = [w for w in re.findall(r"[a-z]{4,}", t) if w not in _TITLE_STOP]
+    for run in re.findall(r"[一-鿿]{2,}", t):
+        words += [run[i:i + 2] for i in range(len(run) - 1)]
+    d = doing.lower()
+    return sum(1 for w in set(words) if w in d)
+
+
+def _eo_llm_vote(k, A, B, by):
+    """模糊区分歧升级(R12):K=3 带证据二分,多数票;平票回 B(末现)。"""
+    def side(e):
+        ms = [m for m in e["session_ids"] if m != k][:2]
+        return f"«{e['title']}»\n" + "\n".join(f"  - {by[m]['doing'][:150]}" for m in ms)
+    q = (f"Session S was claimed by BOTH events. Which one does it belong to "
+         f"(same specific task thread)?\nS: {by[k]['doing'][:260]}\n\n"
+         f"Event A: {side(A)}\n\nEvent B: {side(B)}\n\n"
+         f'Answer ONLY JSON: {{"belongs":"A" or "B"}}')
+    votes = 0
+    for _ in range(3):
+        try:
+            r = engine.parse_json(engine._generate(
+                [{"role": "user", "content": q}], max_tokens=16), "object").get("belongs")
+            votes += 1 if r == "A" else 0
+        except Exception:
+            pass
+    return votes >= 2
+
+
+def exactly_once(events, by, idf, llm_escalate=False):
+    """五层裁决:壳(纯子集,多成员壳赢/单例壳死)→不对称证据否决(GOLD_v2 标定 R5:
+    hl≥hw+2 或 hl>0∧hw=0)→锚点决定门→模糊区 LLM 升级(K=3,可选)→末现。空壳消亡。"""
     claims = {}
     for ei, e in enumerate(events):
         for k in e["session_ids"]:
@@ -186,18 +248,28 @@ def exactly_once(events, by, idf):
             A, B = events[a_i], events[b_i]
             xa = [m for m in A["session_ids"] if m != k and m not in B["session_ids"]]
             xb = [m for m in B["session_ids"] if m != k and m not in A["session_ids"]]
+            ha = _title_hooks(A["title"], by[k]["doing"])
+            hb = _title_hooks(B["title"], by[k]["doing"])
             if not xa and xb:                     # A 是 B 的纯子集壳
                 win = a_i if len(A["session_ids"]) > 1 else b_i
             elif not xb and xa:
                 win = b_i if len(B["session_ids"]) > 1 else a_i
             elif not xa and not xb:
                 win = b_i                         # 双壳:末现
+            elif hb >= ha + 2 or (hb > 0 and ha == 0):   # 不对称证据否决(R5)
+                win = b_i
+            elif ha >= hb + 2 or (ha > 0 and hb == 0):
+                win = a_i
             else:
                 sa = sum(wjaccard(by[k]["anchors"], by[m]["anchors"], idf) for m in xa) / len(xa)
                 sb = sum(wjaccard(by[k]["anchors"], by[m]["anchors"], idf) for m in xb) / len(xb)
                 if max(sa, sb) >= EO_MIN and sa != sb and \
                         (min(sa, sb) == 0 or max(sa, sb) / min(sa, sb) >= EO_RATIO):
                     win = a_i if sa > sb else b_i
+                elif llm_escalate:                # 模糊区:字面/锚点都不判 → K=3 带证据
+                    win = a_i if _eo_llm_vote(k, A, B, by) else b_i
+                    retain.log_verdict(DAY, f"s{k}", "eo_llm_escalate",
+                                       winner=events[win]["title"][:50])
                 else:
                     win = b_i                     # 末现后备(挂模型版本的软信号,R11 后退役)
             lose = a_i if win == b_i else b_i
@@ -287,7 +359,7 @@ def main(dry=False):
             print(f"  bucket{bi}/{len(buckets)} · {len(events)} events · "
                   f"orphans {len(orphans)} · {time.time()-t0:.0f}s")
     n0 = len(events)
-    events = exactly_once(events, by, idf)
+    events = exactly_once(events, by, idf, llm_escalate=True)
     events = rescue(orphans, events, by, idf, T)
     allc = [x for e in events for x in e["session_ids"]]
     assert len(allc) == len(set(allc)), "dup != 0"
