@@ -112,6 +112,11 @@ enum GraphConstants {
     /// 碰撞排开)—— 解绑态的任何回拉力都会在拖拽瞬间把全场陨石抽向
     /// hub 方位(实测"一动全聚中心"),别加回来
     static let beltSpring: Float = 0.06
+    /// 陨石带反推增益(07-03 用户定稿:"陨石层要能轻轻影响里面球的
+    /// 排布"):本家弧被邻家(弧/气泡影锥)角向压住时,给两边 hub 一对
+    /// 绕主球的切向轻推转开 —— My-Portrait 与 Unclassified 径向对齐时
+    /// 灰带骑橙泡头上/被裁两侧积压的根治。velocity 域,×max(alpha,0.15)
+    static let beltHubNudge: Float = 0.5
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 

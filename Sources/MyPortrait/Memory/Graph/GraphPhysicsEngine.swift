@@ -529,6 +529,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 predictBeltClip()
                 beltPredDirty = false
             }
+            // 陨石带反推:弧被邻家压住 → 切向轻推两家 hub 转开
+            beltSeparationForces(
+                beltTmpNow,
+                gain: GraphConstants.beltHubNudge * max(alpha, 0.15)
+            ) { slot, dv in vel[Int(hubIndices[slot])] += dv }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
             pos.withUnsafeMutableBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
@@ -625,6 +630,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         var V = [SIMD2<Float>](repeating: .zero, count: nh)
         let mainR = nodeRadius[0]
         for _ in 0..<400 {
+            // 同款陨石带分离力(增益换算:幽灵阻尼 0.6、只有 400 tick,
+            // 要在预算内转到位)—— 预判的终局必须与真实引擎一致
+            beltSeparationForces(P, gain: 3.0) { slot, dv in V[slot] += dv }
             for i in 0..<nh {
                 let d = max(simd_length(P[i]), 1)
                 V[i] += (P[i] / d) * ((hubRestLen[i] - d) * 0.12)
@@ -718,6 +726,72 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             }
             if segs.isEmpty { segs = [(-0.15, 0.15)] }   // 全堵:留最小窗
             beltPredSegs[s] = segs
+        }
+    }
+
+    /// 陨石带反推(07-03 用户定稿:"陨石层要能轻轻影响里面球的排布"):
+    /// 遍历 hub 槽对,若 a 家陨石弧被 b 角向压住 —— b 家的弧共享同一
+    /// 径向带(大环吞并后两家弧叠角),或 b 的气泡**影锥**盖住 a 的弧位
+    /// (径向对齐:锚定家气泡永远在环内侧,余弦挖洞算不出洞,灰带只能
+    /// 骑它头上)—— 就把两边 hub 沿各自切向对推转开,重家少动(450 叶
+    /// 别甩)。真实引擎与幽灵模拟**共用**,预判终局 = 真实收敛位,环仍
+    /// "一次变好"。gain = 每 rad 缺口注入的切向速度。
+    private func beltSeparationForces(_ P: [SIMD2<Float>], gain: Float,
+                                      apply: (Int, SIMD2<Float>) -> Void) {
+        let nh = hubIndices.count
+        guard nh > 1, gain > 0 else { return }
+        var pol = [Float](repeating: 0, count: nh)
+        var dst = [Float](repeating: 1, count: nh)
+        for s in 0..<nh {
+            pol[s] = atan2(P[s].y, P[s].x)
+            dst[s] = max(simd_length(P[s]), 1)
+        }
+        for s in 0..<(nh - 1) {
+            for t in (s + 1)..<nh {
+                var needed: Float = 0
+                for (a, b) in [(s, t), (t, s)] {   // a 的弧被 b 压
+                    guard beltFamReach[a] > 0 else { continue }
+                    let aA = Int(beltFamAnchor[a])
+                    let dA = dst[aA]
+                    let lo = dA + max(hubBubbleR[aA], 0) - 6
+                    let hi = dA + beltFamReach[a] + 20
+                    var obs: Float = 0
+                    // b 家自己的弧在同一径向带上 → 弧对弧
+                    if beltFamReach[b] > 0 {
+                        let bA = Int(beltFamAnchor[b])
+                        let dB = dst[bA]
+                        if dB + max(hubBubbleR[bA], 0) - 6 < hi,
+                           dB + beltFamReach[b] + 20 > lo {
+                            obs = min(beltFamW[b], 1.0)
+                        }
+                    }
+                    // b 的气泡影锥(从主球看的角半宽)够到 a 的带 →
+                    // a 的弧不该悬在 b 的圆正上方
+                    if hubBubbleR[b] > 0 {
+                        let bT = hubBubbleR[b] + 8
+                        if dst[b] + bT > lo {
+                            obs = max(obs, min(asin(min(bT / dst[b], 1)), 1.2))
+                        }
+                    }
+                    if obs > 0 {
+                        needed = max(needed, min(min(beltFamW[a], 1.0) + obs + 0.1, 2.2))
+                    }
+                }
+                guard needed > 0 else { continue }
+                var rel = pol[t] - pol[s]
+                while rel > .pi { rel -= 2 * .pi }
+                while rel < -.pi { rel += 2 * .pi }
+                let deficit = needed - abs(rel)
+                guard deficit > 0 else { continue }
+                let sign: Float = rel != 0 ? (rel > 0 ? 1 : -1) : 1
+                let str = min(deficit, 0.4) * gain
+                let mS = hubMass[s], mT = hubMass[t]
+                let tot = max(mS + mT, 1)
+                apply(t, SIMD2<Float>(-sin(pol[t]), cos(pol[t]))
+                    * (sign * str * 2 * mS / tot))
+                apply(s, SIMD2<Float>(-sin(pol[s]), cos(pol[s]))
+                    * (-sign * str * 2 * mT / tot))
+            }
         }
     }
 
