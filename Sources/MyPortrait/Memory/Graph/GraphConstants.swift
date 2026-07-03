@@ -23,9 +23,9 @@ enum GraphConstants {
     // MARK: 连接线(橡皮筋:两端粗中间细,taperedFill 模式用)
 
     /// 端点半宽 = 所连球的半径(用户 2026-07-01 定稿:神经末端粗度=球半径)。
-    /// hub↔主球的边上限(07-02 反馈:15 太粗,降 10);**末端球的边整条
-    /// 上限 7**(07-01 二次反馈:hub 连接保持现状,末端连接减细)。
-    static let edgeEndWidthMax: Double = 10
+    /// hub↔主球的边上限(07-02 反馈:15 太粗,降 10;07-03 再降 7);
+    /// **末端球的边整条上限 7**(07-01 二次反馈:末端连接减细)。
+    static let edgeEndWidthMax: Double = 7
     static let leafEdgeEndWidthMax: Double = 7
     /// 腰部半宽 = 两端较细一侧 × 此比例(用户要求「中间细的地方更细一点」)
     static let waistRatio: Double = 0.18
