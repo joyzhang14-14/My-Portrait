@@ -115,8 +115,12 @@ enum GraphConstants {
     /// 陨石带反推增益(07-03 用户定稿:"陨石层要能轻轻影响里面球的
     /// 排布"):本家弧被邻家(弧/气泡影锥)角向压住时,给两边 hub 一对
     /// 绕主球的切向轻推转开 —— My-Portrait 与 Unclassified 径向对齐时
-    /// 灰带骑橙泡头上/被裁两侧积压的根治。velocity 域,×max(alpha,0.15)
-    static let beltHubNudge: Float = 0.5
+    /// 灰带骑橙泡头上/被裁两侧积压的根治。velocity 域,×max(alpha,0.5)
+    /// —— 地板必须够高(0.15 实测冷透后挪速掉出净位移窗阈值被 park 半路
+    /// 冻住"平移做一半就停");也不敢不乘 alpha 恒定全速(多家缺口冲突时
+    /// 持续环流,after-drag park 42s)。1.2→2.5(07-03 用户:"极限情况
+    /// 的移动速度快一点"):速度∝缺口,极限错位顶速走,收尾自然减速
+    static let beltHubNudge: Float = 2.5
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
