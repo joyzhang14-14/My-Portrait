@@ -105,12 +105,11 @@ enum GraphConstants {
     /// (BeltLayout.homes)。真实可用弧由引擎**每 tick 动态裁剪**
     /// (邻圆/主球挡住的一侧收缩,整片云往空侧平移延伸)
     static let beltMaxHalfArc: Double = 3.0
-    /// 环带吸引刚度(velocity 域;×max(alpha,0.1) 同 linkPass 地板)。
-    /// 07-03 二稿:这是吸引不是绑定 —— 拖拽可冲散,松手慢慢跟回
+    /// 家位弹簧刚度(仅**绑定期**用;velocity 域,×max(alpha,0.1) 同
+    /// linkPass 地板)。07-03 六稿:解绑后**零引力**(纯碎石漂浮,只被
+    /// 碰撞排开)—— 解绑态的任何回拉力都会在拖拽瞬间把全场陨石抽向
+    /// hub 方位(实测"一动全聚中心"),别加回来
     static let beltSpring: Float = 0.06
-    /// 背主球偏置强度(切向,相对环带吸引的比例):太大会排成正弧,
-    /// 太小陨石绕到朝主球侧堆积
-    static let beltAntiMainBias: Float = 0.5
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
