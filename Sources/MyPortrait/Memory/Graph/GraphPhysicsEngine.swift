@@ -557,17 +557,32 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             a = lo + (a + fw) / (2 * fw) * (hi - lo)
                         }
                     } else if !segs.isEmpty {
-                        let L = segs.reduce(Float(0)) { $0 + ($1.1 - $1.0) }
-                        let span = min(2 * fw, L)
-                        // 并集内居中放置,顺序保持
-                        var u = (a + fw) / (2 * fw) * span + (L - span) / 2
-                        var ang = segs[segs.count - 1].1
-                        for (l, h) in segs {
-                            let len = h - l
-                            if u <= len { ang = l + u; break }
-                            u -= len
+                        // 多段"原地优先"(边际四修:整体居中重映射会平移没
+                        // 被挡的球,merge 球漂离自家上方):家位落在自由段
+                        // 内 → 一动不动;落在洞里 → 按洞内深度甩到洞两侧
+                        // 的自由空间(0.6×洞宽,顺序大致保持);出界 → 夹端
+                        var inFree = false
+                        for (l, h) in segs where a >= l && a <= h {
+                            inFree = true
+                            break
                         }
-                        a = ang
+                        if !inFree {
+                            var mapped = false
+                            for idx in 0..<segs.count - 1 {
+                                let hl = segs[idx].1, hh = segs[idx + 1].0
+                                if a > hl && a < hh {
+                                    let t = (a - hl) / (hh - hl)
+                                    let w = (hh - hl) * 0.6
+                                    a = t < 0.5 ? hl - t * w : hh + (1 - t) * w
+                                    a = min(max(a, segs[idx].0), segs[idx + 1].1)
+                                    mapped = true
+                                    break
+                                }
+                            }
+                            if !mapped {
+                                a = min(max(a, segs[0].0), segs[segs.count - 1].1)
+                            }
+                        }
                     }
                     let homeAng = beltTmpPol[s] + a
                     // 目标 = 主球极坐标大圆上的点。半径基于**锚定家**的
@@ -661,28 +676,38 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         for s in 0..<nh {
             let sA = Int(beltFamAnchor[min(s, max(beltFamAnchor.count - 1, 0))])
             let dS = simd_length(P[sA])
-            let bandLo = dS + hubBubbleR[sA] - 6
-            let bandHi = dS + beltFamReach[s] + 20
-            let polar = atan2(P[s].y, P[s].x)
+            let hpLive = pos[Int(hubIndices[s])]
+            let polarLive = atan2(hpLive.y, hpLive.x)
+            let dSLive = simd_length(pos[Int(hubIndices[sA])])
             var segs: [(Float, Float)] = [(-2.98, 2.98)]
-            for t in 0..<nh where t != s {
-                let dT = max(simd_length(P[t]), 1)
-                let bT = hubBubbleR[t] + 8
-                // 径向带门控:邻圆环带不与本家带重叠 → 挡不到,不裁
-                if dT + bT < bandLo || dT - bT > bandHi { continue }
-                let w = asin(min(0.99, bT / dT))
-                var rel = atan2(P[t].y, P[t].x) - polar
-                while rel > .pi { rel -= 2 * .pi }
-                while rel < -.pi { rel += 2 * .pi }
-                // 区间减法:从自由段里挖掉 [rel-w, rel+w]
-                var out: [(Float, Float)] = []
-                for (l, h) in segs {
-                    if rel + w <= l || rel - w >= h { out.append((l, h)); continue }
-                    if rel - w - l >= 0.1 { out.append((l, rel - w)) }
-                    if h - (rel + w) >= 0.1 { out.append((rel + w, h)) }
+            // 双几何挖洞(边际四修:幽灵以为被拖的大球会回老家,洞没挖在
+            // 它实际停的位置 → 家位穿它+投影拉扯 = 聚集/抖动/乱飘):
+            // 预测终局位置 与 实时位置 各挖一遍,谁挡都算挡。
+            for pass in 0..<2 {
+                let polar = pass == 0 ? atan2(P[s].y, P[s].x) : polarLive
+                let dS0 = pass == 0 ? dS : dSLive
+                let bLo = dS0 + hubBubbleR[sA] - 6
+                let bHi = dS0 + beltFamReach[s] + 20
+                for t in 0..<nh where t != s {
+                    let pt = pass == 0 ? P[t] : pos[Int(hubIndices[t])]
+                    let dT = max(simd_length(pt), 1)
+                    let bT = hubBubbleR[t] + 8
+                    // 径向带门控:邻圆环带不与本家带重叠 → 挡不到,不裁
+                    if dT + bT < bLo || dT - bT > bHi { continue }
+                    let w = asin(min(0.99, bT / dT))
+                    var rel = atan2(pt.y, pt.x) - polar
+                    while rel > .pi { rel -= 2 * .pi }
+                    while rel < -.pi { rel += 2 * .pi }
+                    // 区间减法:从自由段里挖掉 [rel-w, rel+w]
+                    var out: [(Float, Float)] = []
+                    for (l, h) in segs {
+                        if rel + w <= l || rel - w >= h { out.append((l, h)); continue }
+                        if rel - w - l >= 0.1 { out.append((l, rel - w)) }
+                        if h - (rel + w) >= 0.1 { out.append((rel + w, h)) }
+                    }
+                    segs = out
+                    if segs.isEmpty { break }
                 }
-                segs = out
-                if segs.isEmpty { break }
             }
             if segs.isEmpty { segs = [(-0.15, 0.15)] }   // 全堵:留最小窗
             beltPredSegs[s] = segs
