@@ -1021,10 +1021,31 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
-        // 陨石×隐形圆硬排除已删(07-03 九稿用户定稿:"三态陨石都不受
-        // 隐形圆力场影响")—— 它也是"陨石调远后卡半路回不去"的根源
-        //(回程被圆挡住卡鞍点)。陨石边界 = 球个体(与任何叶跨家常开
-        // 碰撞);家位本身生成在圈外,稳态不压圆。
+        // 陨石滑出隐形圆(07-03 终稿硬要求:"穿过了隐形圆要能滑动到不
+        // 穿过的地方")。与九稿"三态无圆力场"的调和:**拖拽期**边界仍 =
+        // 球个体(无圆力场)、**穿透回流中**不受阻(否则又卡半路);只有
+        // 非拖拽且已实体化的陨石,停在任何气泡里时以每 tick ≤2.5pt
+        // 缓速推出 —— 叠加回位弹簧的切向分量 = 贴着圆边"滑"到圈外,
+        // 不瞬移。O(陨石×hub)。
+        if !beltIdx.isEmpty, !hubIndices.isEmpty, di == nil {
+            pos.withUnsafeMutableBufferPointer { P in
+                for bi in 0..<beltIdx.count {
+                    let i = Int(beltIdx[bi])
+                    if nodeTransit[i] { continue }
+                    for jj in 0..<hubIndices.count {
+                        guard hubBubbleR[jj] > 0 else { continue }
+                        let h = Int(hubIndices[jj])
+                        let d = P[i] - P[h]
+                        let dist = simd_length(d)
+                        let minD = hubBubbleR[jj] + nodeRadius[i] + 1
+                        if dist < minD {
+                            let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                            P[i] += dir * min(minD - dist, 2.5)
+                        }
+                    }
+                }
+            }
+        }
         // 拖拽硬清障 v2(07-02:速度再快也不叠):
         //   ① 扫掠胶囊 —— 沿「上 tick 钉位 → 本 tick 钉位」线段全程清障,
         //     高速时一 tick 跳几十 pt,点清障会隧穿跳过中间的球;
