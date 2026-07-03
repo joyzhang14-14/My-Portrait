@@ -433,6 +433,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let t0 = DispatchTime.now().uptimeNanoseconds
             simLock.lock()
             tick()
+            // 高温期子步(07-03 用户"让图像更早归位"):alpha 还热的收敛
+            // 段每帧多跑一步 —— 同一部电影快放,动力学/终局布局/park 判定
+            // (阈值全按 tick 计,对子步透明)分毫不变,只是墙钟时间减半。
+            // 拖拽中不启用:交互热路径保持每帧一步的实时手感与 tick 预算
+            if !dragging, alpha > 0.02 { tick() }
             publishSnapshot()
             simLock.unlock()
             let spent = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9
