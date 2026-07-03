@@ -85,51 +85,65 @@ struct GraphEdge: Sendable {
 enum BeltLayout {
     /// - Parameters:
     ///   - radii: 全家陨石球半径(层内→外串接,高 weight 在前)
+    ///   - tiers: 每球层号(0 内 /1 中 /2 外,与 radii 同序)
     ///   - hashA/hashB: 每球两个独立的 [0,1) 确定性哈希(路径加盐)
     ///   - bubbleR: 自家气泡半径
     ///   - mainDist: hub→主球弹簧自然长度(≈ hub 到全图中心的距离)
+    ///   - tierBases: 十一稿(用户:"进大环的陨石都要遵循小球去外圈"):
+    ///     大环的**全局层基线**(每层的径向起点,大环家产出、被吞并家
+    ///     沿用)—— 全环统一"内=高 weight、外=低 weight",不再每家
+    ///     自成小内外。nil = 自家串接排(未吞并的家)。
     /// - Returns: (径向偏移「相对气泡远端 mainDist+bubbleR」,
-    ///            家位角「相对 hub 的主球极角」) 同序
-    static func homes(radii: [Double], hashA: [Double], hashB: [Double],
-                      bubbleR: Double, mainDist: Double)
-        -> (offsets: [Double], angles: [Double]) {
+    ///            家位角「相对 hub 的主球极角」, 各层实际起点) 同序
+    static func homes(radii: [Double], tiers: [Int],
+                      hashA: [Double], hashB: [Double],
+                      bubbleR: Double, mainDist: Double,
+                      tierBases: [Double]? = nil)
+        -> (offsets: [Double], angles: [Double], tierStarts: [Double]) {
         let n = radii.count
-        guard n > 0 else { return ([], []) }
+        guard n > 0 else { return ([], [], [0, 0, 0]) }
         let slotW = 2 * ((radii.max() ?? 1) + 1)
         // 气泡远端到全图中心的半径:弧容量按这个大半径算 → 平弧
         let baseR = mainDist + bubbleR
-        // 弧宽上限 ∝ 自家气泡的角 footprint(九稿 ×2.4→×3.4 更大胆):
-        // 大家平铺一大片;真实可用弧仍由引擎动态裁剪
+        // 弧宽上限 ∝ 自家气泡的角 footprint(九稿 ×3.4 大胆版)
         let ownHalf = asin(min(0.95, bubbleR / max(mainDist, bubbleR + 1)))
         let arcCap = min(GraphConstants.beltMaxHalfArc, ownHalf * 3.4 + 0.2)
+        // 家弧 = 最大层的单排需求(排不满的层照此弧稀疏铺满 —— 全层平
+        // 齐,零头不挤一小块)
+        var tierCount = [0, 0, 0]
+        for t in tiers { tierCount[min(max(t, 0), 2)] += 1 }
+        let maxTC = Double(tierCount.max() ?? 1)
+        let famArc = min(arcCap, maxTC * slotW
+                         / (2 * (baseR + GraphConstants.beltGap) * 0.75))
         var offsets = [Double](repeating: 0, count: n)
         var angles = [Double](repeating: 0, count: n)
+        var tierStarts = [Double](repeating: 0, count: 3)
         var cursor = GraphConstants.beltGap
-        var k = 0
-        // 首排(最宽排)定下全家弧宽,后排(含最后的零头排)沿用 —— 零头
-        // 按同宽稀疏铺满整层(九稿反馈:最外层只用一小块区域很突兀)
-        var famArc: Double? = nil
-        while k < n {
-            let ringR = baseR + cursor
-            // 每排装 75%(九稿"分层小一点":排更满 → 排更少 → 云更薄更平)
-            let cap = max(1, Int(2 * arcCap * ringR / slotW * 0.75))
-            let rowCount = min(cap, n - k)
-            // 先展开:首排不足时弧宽 ∝ 数量(小家一小撮),airy 系数同 75%
-            let halfArc = famArc
-                ?? min(arcCap, Double(rowCount) * slotW / (2 * ringR * 0.75))
-            if famArc == nil { famArc = halfArc }
-            let slot = 2 * halfArc / Double(rowCount)
-            for j in 0..<rowCount {
-                // 模糊:径向 ±0.7 排距、角向 ±0.8 槽 —— 边缘不刻意
-                offsets[k] = cursor + (hashA[k] - 0.5) * slotW * 1.4
-                angles[k] = -halfArc + (Double(j) + 0.5) * slot
-                    + (hashB[k] - 0.5) * slot * 1.6
-                k += 1
+        for t in 0..<3 {
+            if let bases = tierBases { cursor = max(cursor, bases[t]) }
+            tierStarts[t] = cursor
+            let idxs = (0..<n).filter { tiers[$0] == t }
+            guard !idxs.isEmpty else { continue }
+            var k = 0
+            while k < idxs.count {
+                let ringR = baseR + cursor
+                // 每排装 75%(九稿"分层小一点":排更满 → 层更薄更平)
+                let cap = max(1, Int(2 * famArc * ringR / slotW * 0.75))
+                let rowCount = min(cap, idxs.count - k)
+                let slot = 2 * famArc / Double(rowCount)
+                for j in 0..<rowCount {
+                    let g = idxs[k]
+                    // 模糊:径向 ±0.7 排距、角向 ±0.8 槽 —— 边缘不刻意
+                    offsets[g] = cursor + (hashA[g] - 0.5) * slotW * 1.4
+                    angles[g] = -famArc + (Double(j) + 0.5) * slot
+                        + (hashB[g] - 0.5) * slot * 1.6
+                    k += 1
+                }
+                // 排距恒定小步(九稿:递增排距的彗尾太厚,层压薄)
+                cursor += slotW * 0.75
             }
-            // 排距恒定小步(九稿:递增排距的彗尾太厚,层压薄)
-            cursor += slotW * 0.75
         }
-        return (offsets, angles)
+        return (offsets, angles, tierStarts)
     }
 }
 
