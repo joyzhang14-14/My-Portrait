@@ -266,15 +266,25 @@ def _norm(s):
 
 def do_run(model_id, tag, maxpix=MAXPIX):
     manifest = json.load(open(MANIFEST))
+    fp = os.path.join(OUTDIR, f"inc_v4_{tag}.json")
+    done = {}
+    if os.path.exists(fp):                        # 断点续跑(链被杀过三次的教训)
+        try:
+            done = {r["key"]: r for r in json.load(open(fp))["results"]}
+        except Exception:
+            done = {}
     from mlx_vlm import load, generate
     from mlx_vlm.prompt_utils import apply_chat_template
-    print(f"[run:{tag}] loading {model_id} (maxpix={maxpix}) · {len(manifest)} 会话 …")
+    print(f"[run:{tag}] loading {model_id} (maxpix={maxpix}) · {len(manifest)} 会话"
+          f"(已完成 {len(done)},续跑)…")
     model, processor = load(model_id)
     if hasattr(processor, "image_processor"):
         processor.image_processor.max_pixels = maxpix
 
-    results = []
+    results = list(done.values())
     for key, b in manifest.items():
+        if int(key) in done:
+            continue
         app = b["app"]; t0 = time.time()
         items, seen = [], set()
         for i, (k, jpg_name) in enumerate(b["frames"]):
@@ -289,10 +299,11 @@ def do_run(model_id, tag, maxpix=MAXPIX):
         results.append({"key": int(key), "app": app, "parts": b["parts"],
                         "total_frames": b["total_frames"], "kept_frames": b["kept_frames"],
                         "ocr": b["ocr"], "items": items, "doing": "", "kw": [], "lat_ms": lat})
+        json.dump({"model": model_id, "tag": tag, "results": results},
+                  open(fp, "w"), ensure_ascii=False, indent=2)   # 每会话checkpoint
         print(f"  ✓ s{key} [{app}] {b['kept_frames']}帧 {lat/1000:.0f}s · {len(items)}项")
     json.dump({"model": model_id, "tag": tag, "results": results},
-              open(os.path.join(OUTDIR, f"inc_v4_{tag}.json"), "w"),
-              ensure_ascii=False, indent=2)
+              open(fp, "w"), ensure_ascii=False, indent=2)
     print(f"[run:{tag}] → inc_v4_{tag}.json")
 
 
