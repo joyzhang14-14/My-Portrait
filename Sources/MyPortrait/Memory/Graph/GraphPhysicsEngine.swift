@@ -50,6 +50,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// familyLeaf 连续存放,familyRange = (hub 节点下标, 起止)。
     private var familyLeaf: [Int32] = []
     private var familyRange: [(hub: Int32, lo: Int, hi: Int)] = []
+    /// 陨石带(07-03):weight<1.5 的 event,挂自家气泡外侧背主球方向的
+    /// 弧带。四数组同序:节点下标 / 自家 hub / 环半径(气泡+gap+层距)/
+    /// 槽位角(相对背主球方向)。不进 leafIndices(不受圈内夹钳)、不进
+    /// familyLeaf(不参与匀布);碰撞按家隔离照常。
+    private var beltIdx: [Int32] = [], beltHub: [Int32] = []
+    private var beltRing: [Float] = [], beltAng: [Float] = []
+    /// 自家 hub 在 hubIndices 里的槽号(帧携带查 dPhi 用)。
+    private var beltHubSlot: [Int32] = []
+    /// 帧携带参考(07-03):上 tick 各 hub 位置。收敛期 hub 绕主球大幅
+    /// 公转,弹簧拖不动整条带 —— 陨石带定义在 hub 的旋转参考系里,
+    /// 每 tick 随 hub 平移+公转刚体携带,弹簧只做小修正。
+    /// 空 = 下 tick 重建参考(explode/updateScene 后必须置空)。
+    private var hubPrev: [SIMD2<Float>] = []
+    private var beltTmpNow: [SIMD2<Float>] = []
+    private var beltTmpC: [Float] = [], beltTmpS: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
     /// 静止判定(simLock 保护):alpha 是纯时间冷却,不看球到没到位 ——
@@ -137,6 +152,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
+        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot) = Self.beltArrays(scene: scene)
         // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
         // 目标落位/绽放出生已删 —— 布局不再有"成品位",只有平衡态。
 
@@ -211,6 +227,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
+        hubPrev = []   // 帧携带参考失效,下 tick 重建
         alpha = 1
         publishSnapshot()
         simLock.unlock()
@@ -239,6 +256,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                              : nodeRadius[hubIdx] + 8
             pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
         }
+        // 陨石贴自家 hub 出生(07-03),但出生角 = 各自槽位方向(hub 当前
+        // 极角 + 槽位偏移):绽放时直接朝环带方向喷出,不会生在朝主球侧
+        // 再绕大圈(错误侧鞍点是主要流散源)。
+        for bi in 0..<beltIdx.count {
+            let hubIdx = Int(beltHub[bi])
+            let hp = pos[hubIdx]
+            let a = atan2(hp.y, hp.x) + beltAng[bi]
+            pos[Int(beltIdx[bi])] = hp
+                + SIMD2<Float>(cos(a), sin(a)) * (nodeRadius[hubIdx] + 3)
+        }
     }
 
     /// 数据轻刷新:节点集合没变(fingerprint 相等),只更新边参数
@@ -254,6 +281,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
+        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot) = Self.beltArrays(scene: scene)
+        hubPrev = []   // 帧携带参考失效,下 tick 重建
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -340,6 +369,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             manyBodyPass()
         }
         linkPass()
+        beltPass()
         bubblePass()
         if heavy { familySpreadPass() }   // 匀布是慢整形力,拖拽中隔 tick 足够
         // 碰撞每 tick 跑(07-02:不重叠是最基本要求)—— 轻 tick 复用上个
@@ -372,6 +402,57 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
         // 早停快照已删(07-02 终稿):布局没有"成品位",冷却到 alphaMin
         // 自然 park —— 开场/收敛全程都是物理,本身即丝滑。
+    }
+
+    /// 陨石带回位弹簧(07-03):每颗陨石有确定性槽位 = 自家 hub 极角
+    /// (主球钉原点,hub 极角即背主球方向)+ 槽位角偏移、半径 = 环半径。
+    /// hub 移动/绕主球转时槽位实时跟着走 —— 弧带永远背对主球。被拖颗
+    /// 不加(拖拽钉住覆盖速度,加了也白算,与叶弹簧同理无须豁免)。
+    private func beltPass() {
+        guard !beltIdx.isEmpty else { return }
+        let nh = hubIndices.count
+        // 帧携带参考初建/重建(explode/updateScene 后置空)
+        if hubPrev.count != nh {
+            hubPrev = (0..<nh).map { pos[Int(hubIndices[$0])] }
+            beltTmpNow = hubPrev
+            beltTmpC = .init(repeating: 1, count: nh)
+            beltTmpS = .init(repeating: 0, count: nh)
+            return
+        }
+        // 每 hub 本 tick 的位移 + 绕主球公转角(主球钉原点,极角差即公转)
+        for s in 0..<nh {
+            let hp = pos[Int(hubIndices[s])]
+            beltTmpNow[s] = hp
+            let d = atan2(hp.y, hp.x) - atan2(hubPrev[s].y, hubPrev[s].x)
+            beltTmpC[s] = cos(d); beltTmpS[s] = sin(d)
+        }
+        dragLock.lock(); let di = draggedIndex ?? -1; dragLock.unlock()
+        // 地板同 linkPass:力系统要么都醒要么都睡
+        let k = GraphConstants.beltSpring * max(alpha, 0.1)
+        pos.withUnsafeMutableBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+            for bi in 0..<beltIdx.count {
+                let i = Int(beltIdx[bi])
+                let s = Int(beltHubSlot[bi])
+                let hp = beltTmpNow[s]
+                // ① 帧携带(07-03 抓虫):收敛期 hub 绕主球公转可达大半圈,
+                //   弹簧拖不动整条带 → 大批陨石滞留旧方位流散(169/599
+                //   实测)。带子随 hub 平移+公转刚体携带,永远背对主球;
+                //   拖 hub 时陨石带像行星环一样跟着走。被拖颗豁免。
+                if i != di {
+                    let rel0 = P[i] - hubPrev[s]
+                    P[i] = hp + SIMD2<Float>(
+                        rel0.x * beltTmpC[s] - rel0.y * beltTmpS[s],
+                        rel0.x * beltTmpS[s] + rel0.y * beltTmpC[s])
+                }
+                // ② 弹簧小修正到槽位点(帧携带后偏差只剩局部)
+                let slotAng = atan2(hp.y, hp.x) + beltAng[bi]
+                let target = hp
+                    + SIMD2<Float>(cos(slotAng), sin(slotAng)) * beltRing[bi]
+                V[i] += (target - P[i] - V[i]) * k
+            }
+        }}
+        for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
     }
 
     /// 气泡碰撞(07-02 气泡重构):每个 hub 携带一个隐形圆(半径=builder
@@ -744,6 +825,33 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
+        // 陨石不进任何隐形圈(07-03 用户定稿"确保不会进到别的隐形范围"):
+        // 对每个气泡(含自家)硬推出 —— 陨石带永远在圈外缘。放在气泡硬
+        // 解算之后(同圈内夹钳的顺序纪律:先夹后挪 hub 会白夹)。被拖颗
+        // 豁免(指针优先),松手由弹簧+此约束归位。O(陨石数×hub数)。
+        if !beltIdx.isEmpty, !hubIndices.isEmpty {
+            pos.withUnsafeMutableBufferPointer { P in
+                for bi in 0..<beltIdx.count {
+                    let i = Int(beltIdx[bi])
+                    if i == di { continue }
+                    // 2 轮:两气泡相切的夹缝里,推出 A 会压进 B(实测
+                    // 4/599 残余 2.9pt),第二轮扫掉。
+                    for _ in 0..<2 {
+                        for jj in 0..<hubIndices.count {
+                            guard hubBubbleR[jj] > 0 else { continue }
+                            let h = Int(hubIndices[jj])
+                            let d = P[i] - P[h]
+                            let dist = simd_length(d)
+                            let minD = hubBubbleR[jj] + nodeRadius[i] + 1
+                            if dist < minD {
+                                let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
+                                P[i] = P[h] + dir * minD
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // 拖拽硬清障 v2(07-02:速度再快也不叠):
         //   ① 扫掠胶囊 —— 沿「上 tick 钉位 → 本 tick 钉位」线段全程清障,
         //     高速时一 tick 跳几十 pt,点清障会隧穿跳过中间的球;
@@ -891,7 +999,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             restOf[Int32(e.a)] = Float(e.restLength)
         }
         var byHub: [Int32: [Int32]] = [:]
-        for node in scene.nodes where !node.kind.isHub && node.hubIndex > 0 {
+        // 陨石不参与匀布(07-03):弧带槽位由 beltPass 弹簧管
+        for node in scene.nodes
+        where !node.kind.isHub && node.hubIndex > 0 && node.beltTier == nil {
             byHub[Int32(node.hubIndex), default: []].append(Int32(node.id))
         }
         var leaf: [Int32] = []
@@ -1043,11 +1153,37 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return (idx, bubble, mass, clear)
     }
 
+    /// 陨石带四数组(07-03,同序对齐):节点下标 / 自家 hub / 环半径
+    ///(= 自家气泡半径 + gap + 层号×层距)/ 槽位角(builder 排好)。
+    private static func beltArrays(scene: GraphScene)
+        -> ([Int32], [Int32], [Float], [Float], [Int32]) {
+        var i: [Int32] = [], h: [Int32] = [], r: [Float] = [], a: [Float] = []
+        var slot: [Int32] = []
+        // hubIndices 的枚举序(hubArrays 同款):hub 节点下标 → 槽号
+        var slotOf: [Int: Int32] = [:]
+        var s: Int32 = 0
+        for node in scene.nodes where node.kind.isHub && node.id != 0 {
+            slotOf[node.id] = s; s += 1
+        }
+        for node in scene.nodes {
+            guard node.beltTier != nil else { continue }
+            let hub = max(node.hubIndex, 0)
+            i.append(Int32(node.id))
+            h.append(Int32(hub))
+            slot.append(slotOf[hub] ?? 0)
+            r.append(Float((scene.nodes[hub].hubBubbleRadius ?? 0)
+                           + node.beltRadialOffset))
+            a.append(Float(node.beltAngle))
+        }
+        return (i, h, r, a, slot)
+    }
+
     /// 全部末端球 + 各自所属 hub(主球=0)+ 圈内硬上限
     ///(= 自家气泡半径 − 叶半径 − 1;自家 hub 无气泡时 ≤0 = 不夹)。
+    /// 陨石不算(07-03):它们在圈外,圈内夹钳/叶-hub 硬碰撞都不适用。
     private static func leafArrays(scene: GraphScene) -> ([Int32], [Int32], [Float]) {
         var l: [Int32] = [], h: [Int32] = [], m: [Float] = []
-        for node in scene.nodes where !node.kind.isHub {
+        for node in scene.nodes where !node.kind.isHub && node.beltTier == nil {
             l.append(Int32(node.id))
             let hub = max(node.hubIndex, 0)
             h.append(Int32(hub))
