@@ -63,8 +63,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var beltHubSlot: [Int32] = []
     /// 陨石绑定态(07-03 三稿用户定稿):生成(explode)时与隐形圈绑定
     ///(帧携带,开场收敛 hub 公转不会甩掉整条带);用户**首次拖球后
-    /// 解绑**(本次打开内),只剩环带吸引 —— 可冲散、慢慢跟回。
+    /// 解绑**(本次打开内)。
     private var beltBound = true
+    /// 解绑瞬间定格的每颗陨石世界坐标原位(七稿:"回到最开始的位置")。
+    /// 定点弹簧无全局涌动 —— 家位随 hub 方位重算才是"一动全聚中心"
+    /// 的根源。explode 重绑时清空。
+    private var beltHome: [SIMD2<Float>] = []
     /// 帧携带参考:上 tick 各 hub 位置(空 = 下 tick 重建)。
     private var hubPrev: [SIMD2<Float>] = []
     private var beltTmpNow: [SIMD2<Float>] = []
@@ -243,8 +247,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
         // 重新生成 → 陨石重新绑定隐形圈(07-03 三稿:生成期绑定,
-        // 用户拖动后解绑只剩吸引)
+        // 用户拖动后解绑),原位快照作废
         beltBound = true
+        beltHome = []
         hubPrev = []
         alpha = 1
         publishSnapshot()
@@ -327,8 +332,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 alphaTarget = p
                 if p > 0, alpha < p { alpha = p }
             }
-            // 用户拖球 → 陨石永久解绑(本次打开内;07-03 三稿单向闩)
-            if dragging { beltBound = false }
+            // 用户拖球 → 陨石永久解绑(本次打开内;07-03 三稿单向闩)。
+            // 解绑瞬间定格每颗陨石的世界坐标原位(七稿"回到最开始的位置")
+            if dragging, beltBound {
+                beltBound = false
+                beltHome = beltIdx.map { pos[Int($0)] }
+            }
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
             // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
             // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
@@ -527,12 +536,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
             return
         }
-        // 解绑后(用户拖过球,07-03 六稿定稿):**零引力** —— 陨石只是
-        // 漂浮的碎石,被拖近时靠碰撞/清障排开(不重叠),不再有任何
-        // 回拉。⚠️ 五稿的"大圆吸引+方位偏置"在解绑瞬间会把全场陨石
-        // 抽向各自 hub 方位(用户实测"一动全聚中心"),已删。
-        // 硬约束(不进任何气泡/主球)与碰撞照常,拖 hub 时隐形圆推着走。
+        // 解绑后(07-03 七稿定稿,六稿零引力="一盘散沙"被否):每颗陨石
+        // 回**解绑瞬间定格的世界坐标原位** —— 定点弹簧零初始力、无全局
+        // 涌动(⚠️ 五稿"一动全聚中心"的根源是家位随 hub 方位实时重算,
+        // 别回头);拖近仍被碰撞/清障排开,松手流回原位。硬约束照常,
+        // 原位被挪来的气泡占住时停在圈边(硬排除赢)。
         hubPrev = []   // 参考作废(下次 explode 重绑时重建)
+        guard beltHome.count == beltIdx.count else { return }
+        let k = GraphConstants.beltSpring * max(alpha, 0.1)
+        pos.withUnsafeBufferPointer { P in
+        vel.withUnsafeMutableBufferPointer { V in
+            for bi in 0..<beltIdx.count {
+                let i = Int(beltIdx[bi])
+                V[i] += (beltHome[bi] - P[i] - V[i]) * k
+            }
+        }}
     }
 
     /// 气泡碰撞(07-02 气泡重构):每个 hub 携带一个隐形圆(半径=builder
