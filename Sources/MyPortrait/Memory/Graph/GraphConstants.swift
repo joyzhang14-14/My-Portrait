@@ -99,11 +99,12 @@ enum GraphConstants {
     static let beltTier2Max: Double = 0.5
     /// 气泡边缘 → 扇形云第一排基准的距离(世界 pt)
     static let beltGap: Double = 10
-    /// 扇形云弧半宽上限(rad ≈149°,以背主球方向为中心;07-03 四稿:
-    /// 1.92→2.6"展开更大胆"):弧度随数量先展开到此上限,再往外延长
+    /// 扇形云弧半宽上限(rad ≈172°,以背主球方向为中心;07-03 用户两次
+    /// 加码:1.92→2.6→3.0"弧线角度更大"——接近全圆,朝主球死角与邻圆
+    /// 由动态裁剪守住):弧度随数量先展开到此上限,再往外延长
     /// (BeltLayout.homes)。真实可用弧由引擎**每 tick 动态裁剪**
     /// (邻圆/主球挡住的一侧收缩,整片云往空侧平移延伸)
-    static let beltMaxHalfArc: Double = 2.6
+    static let beltMaxHalfArc: Double = 3.0
     /// 环带吸引刚度(velocity 域;×max(alpha,0.1) 同 linkPass 地板)。
     /// 07-03 二稿:这是吸引不是绑定 —— 拖拽可冲散,松手慢慢跟回
     static let beltSpring: Float = 0.06
