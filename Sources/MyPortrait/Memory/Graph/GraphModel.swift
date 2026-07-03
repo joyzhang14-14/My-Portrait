@@ -96,12 +96,18 @@ enum BeltLayout {
         var angles = [Double](repeating: 0, count: n)
         var cursor = GraphConstants.beltGap
         var k = 0
+        var row = 0
         while k < n {
             let ringR = bubbleR + cursor
-            let cap = max(1, Int(2 * GraphConstants.beltMaxHalfArc * ringR / slotW))
+            // 每排只装理论容量的 55%(07-03 四稿用户画线:装满才外溢 =
+            // 贴圈薄壳太怂;稀装让云往外深铺成宽新月)
+            let cap = max(1, Int(2 * GraphConstants.beltMaxHalfArc * ringR
+                                 / slotW * 0.55))
             let rowCount = min(cap, n - k)
-            // 先展开:不足一排时弧宽 ∝ 数量(小家一小撮,不摊满全弧)
-            let halfArc = Double(rowCount) * slotW / (2 * ringR)
+            // 先展开:不足一排时弧宽 ∝ 数量(小家一小撮,不摊满全弧),
+            // airy 系数同 55%(排内球距 ~1.8 槽)
+            let halfArc = min(GraphConstants.beltMaxHalfArc,
+                              Double(rowCount) * slotW / (2 * ringR * 0.55))
             let slot = 2 * halfArc / Double(rowCount)
             for j in 0..<rowCount {
                 // 模糊:径向 ±0.7 排距、角向 ±0.8 槽 —— 边缘不刻意
@@ -110,7 +116,9 @@ enum BeltLayout {
                     + (hashB[k] - 0.5) * slot * 1.6
                 k += 1
             }
-            cursor += slotW * 0.9   // 排距略挤,配合模糊更像云
+            // 排距随排数递增:外缘渐稀,收尾像彗尾不像切边
+            cursor += slotW * (0.9 + 0.35 * Double(row))
+            row += 1
         }
         return (offsets, angles)
     }
