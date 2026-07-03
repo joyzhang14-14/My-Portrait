@@ -685,6 +685,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 for t in 0..<nh where t != s {
                     let pt = pass == 0 ? P[t] : pos[Int(hubIndices[t])]
                     let dT = max(simd_length(pt), 1)
+                    // 实时挡板门控(七修:松手瞬间被拖拽推开的邻居还没归位,
+                    // 全算挡板会把弧切碎 → 全家压成大块):只有实际距离
+                    // 超出自然长度 60pt 的 hub(= 被留在远处回不去的,如
+                    // My-Portrait 停环带)才算实时挡板,瞬时位移不算
+                    if pass == 1, dT < hubRestLen[t] + 60 { continue }
                     let bT = hubBubbleR[t] + 8
                     // 径向带门控:邻圆环带不与本家带重叠 → 挡不到,不裁
                     if dT + bT < bLo || dT - bT > bHi { continue }
