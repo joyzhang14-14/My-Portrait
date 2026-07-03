@@ -95,11 +95,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     ///(被大环吞并 = 大环家槽号,半径跟它的实时距离走;否则 = 自家)。
     private var beltAnchorSlot: [Int32] = []
     private var beltFamAnchor: [Int32] = []
-    /// 动态弧裁剪的可用角区间 [lo, hi](相对自家主球极角)。
+    /// 动态弧裁剪的可用角**自由段并集**(相对自家主球极角,升序不重叠)。
     /// 07-03 提前排布定稿:不再每 tick 按实时位置算(hub 还在漂移时环
     /// 先定一次型、hub 到位后又变一次)—— 改用**幽灵模拟预判终局**
-    /// (predictBeltClip),开场/松手一次算死,环一次变好。
-    private var beltPredLo: [Float] = [], beltPredHi: [Float] = []
+    /// (predictBeltClip),开场/松手一次算死,环一次变好。边际二修:
+    /// 单一 [lo,hi] 对"卡在弧中间的挡板"会裁掉一整侧 → 改成挖洞后的
+    /// 分段并集,家位重映射到并集上,挡板两侧自然排开不堆积。
+    private var beltPredSegs: [[(Float, Float)]] = []
     private var beltPredDirty = true
     private var beltTmpPol: [Float] = []
     private var alpha: Float = 1
@@ -523,7 +525,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             }
             // 弧裁剪区间不再每 tick 按实时位置算 —— 幽灵模拟预判终局,
             // 开场/松手一次算死(07-03 提前排布:环不许"先定型再变一次")
-            if beltPredDirty || beltPredLo.count != nh {
+            if beltPredDirty || beltPredSegs.count != nh {
                 predictBeltClip()
                 beltPredDirty = false
             }
@@ -541,15 +543,31 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             p0.x * beltTmpC[s] - p0.y * beltTmpS[s],
                             p0.x * beltTmpS[s] + p0.y * beltTmpC[s])
                     }
-                    // 家位角装进可用区间:装得下 → 整体平移到最贴近自家
-                    // 方位处(被挡侧收缩,空侧延伸);装不下 → 线性压缩
-                    let lo = beltPredLo[s], hi = beltPredHi[s]
-                    let fw = beltFamW[s]
+                    // 家位角装进可用弧:单段 = 老规则(装得下整体平移到最
+                    // 贴近自家方位,装不下线性压缩);多段(挡板卡弧中间挖
+                    // 了洞)= 按比例顺序重映射到自由段并集,两侧排开不堆积
+                    let segs = beltPredSegs[s]
+                    let fw = max(beltFamW[s], 0.05)
                     var a = beltAng[bi]
-                    if 2 * fw <= hi - lo {
-                        a += min(max(0, lo + fw), hi - fw)
-                    } else {
-                        a = lo + (a + fw) / (2 * fw) * (hi - lo)
+                    if segs.count == 1 {
+                        let (lo, hi) = segs[0]
+                        if 2 * fw <= hi - lo {
+                            a += min(max(0, lo + fw), hi - fw)
+                        } else {
+                            a = lo + (a + fw) / (2 * fw) * (hi - lo)
+                        }
+                    } else if !segs.isEmpty {
+                        let L = segs.reduce(Float(0)) { $0 + ($1.1 - $1.0) }
+                        let span = min(2 * fw, L)
+                        // 并集内居中放置,顺序保持
+                        var u = (a + fw) / (2 * fw) * span + (L - span) / 2
+                        var ang = segs[segs.count - 1].1
+                        for (l, h) in segs {
+                            let len = h - l
+                            if u <= len { ang = l + u; break }
+                            u -= len
+                        }
+                        a = ang
                     }
                     let homeAng = beltTmpPol[s] + a
                     // 目标 = 主球极坐标大圆上的点。半径基于**锚定家**的
@@ -633,10 +651,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
-        // 终局几何 → 每家可用弧区间(公式同旧 per-tick 裁剪)
-        if beltPredLo.count != nh {
-            beltPredLo = .init(repeating: -2.98, count: nh)
-            beltPredHi = .init(repeating: 2.98, count: nh)
+        // 终局几何 → 每家可用弧**自由段并集**(07-03 边际bug二修:单一
+        // [lo,hi] 只会"裁两端",挡板卡在弧中间时一整侧被裁掉+投影到圆
+        // 边 = 两边堆积 —— 改区间减法:中间的挡板挖洞,家位重映射到
+        // 自由段并集,两侧自然排开)
+        if beltPredSegs.count != nh {
+            beltPredSegs = .init(repeating: [(-2.98, 2.98)], count: nh)
         }
         for s in 0..<nh {
             let sA = Int(beltFamAnchor[min(s, max(beltFamAnchor.count - 1, 0))])
@@ -644,8 +664,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let bandLo = dS + hubBubbleR[sA] - 6
             let bandHi = dS + beltFamReach[s] + 20
             let polar = atan2(P[s].y, P[s].x)
-            var lo: Float = -2.98
-            var hi: Float = 2.98
+            var segs: [(Float, Float)] = [(-2.98, 2.98)]
             for t in 0..<nh where t != s {
                 let dT = max(simd_length(P[t]), 1)
                 let bT = hubBubbleR[t] + 8
@@ -655,13 +674,18 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 var rel = atan2(P[t].y, P[t].x) - polar
                 while rel > .pi { rel -= 2 * .pi }
                 while rel < -.pi { rel += 2 * .pi }
-                if rel >= 0 { hi = min(hi, rel - w) } else { lo = max(lo, rel + w) }
+                // 区间减法:从自由段里挖掉 [rel-w, rel+w]
+                var out: [(Float, Float)] = []
+                for (l, h) in segs {
+                    if rel + w <= l || rel - w >= h { out.append((l, h)); continue }
+                    if rel - w - l >= 0.1 { out.append((l, rel - w)) }
+                    if h - (rel + w) >= 0.1 { out.append((rel + w, h)) }
+                }
+                segs = out
+                if segs.isEmpty { break }
             }
-            if hi < lo + 0.3 {   // 两侧全堵:留最小窗,硬排除兜底
-                let mid = (lo + hi) / 2
-                lo = mid - 0.15; hi = mid + 0.15
-            }
-            beltPredLo[s] = lo; beltPredHi[s] = hi
+            if segs.isEmpty { segs = [(-0.15, 0.15)] }   // 全堵:留最小窗
+            beltPredSegs[s] = segs
         }
     }
 
