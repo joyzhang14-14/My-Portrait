@@ -208,7 +208,7 @@ enum GraphSceneBuilder {
                 bubbleR = max(bubbleR,
                               r + Double(GraphConstants.mainCollisionPadding)
                                   + 2 * maxLeafR + 3
-                                  + Double(coreMembers.count) * 5)
+                                  + Double(coreMembers.count) * 6)
             }
             let hubIdx = nodes.count
             var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
