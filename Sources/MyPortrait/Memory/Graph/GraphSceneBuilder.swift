@@ -100,8 +100,9 @@ enum GraphSceneBuilder {
                         leafKind: { .eventLeaf(relPath: $0.relPath) },
                         leafColor: { spec, _ in spec.colorRGB },
                         leafRadius: { s in
-                            min(GraphConstants.eventRadiusBase
-                                    + GraphConstants.eventRadiusScale * s.weight,
+                            min(max(GraphConstants.eventRadiusBase
+                                        + GraphConstants.eventRadiusScale * s.weight,
+                                    GraphConstants.eventRadiusMin),
                                 GraphConstants.eventRadiusMax)
                         },
                         leafStrength: { s in
