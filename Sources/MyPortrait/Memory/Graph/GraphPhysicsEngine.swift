@@ -61,14 +61,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var nodeBelt: [Bool] = []
     /// 自家 hub 在 hubIndices 里的槽号(绑定期帧携带查 dPhi 用)。
     private var beltHubSlot: [Int32] = []
-    /// 陨石绑定态(07-03 三稿用户定稿):生成(explode)时与隐形圈绑定
-    ///(帧携带,开场收敛 hub 公转不会甩掉整条带);用户**首次拖球后
-    /// 解绑**(本次打开内)。
-    private var beltBound = true
-    /// 解绑瞬间定格的每颗陨石世界坐标原位(七稿:"回到最开始的位置")。
-    /// 定点弹簧无全局涌动 —— 家位随 hub 方位重算才是"一动全聚中心"
-    /// 的根源。explode 重绑时清空。
-    private var beltHome: [SIMD2<Float>] = []
+    /// 陨石三态(07-03 八稿用户定稿:"生成/拖着/松手后三种状态不同计算"):
+    /// ① 生成态(explode 起到首次拖球,beltForming=true):帧携带+槽位
+    ///   弹簧+动态裁剪 —— 开场收敛 hub 大幅公转,不携带整条带会被甩散;
+    /// ② 拖拽中(draggedIndex != nil):**完全自由** —— 隐形圆力场对
+    ///   陨石关闭,只剩球体本身的碰撞/清障排开(边界 = 球个体);
+    /// ③ 松手后(beltForming=false 且无拖拽):**实时槽位弹簧**(无携带)
+    ///   —— 家位按当前布局每 tick 重算,"去处"自动重新生成,被波及的
+    ///   全部 folder 跟着重算。
+    /// 此前的单向解绑闩/零引力/原位快照(五~七稿)均被此取代。
+    private var beltForming = true
     /// 帧携带参考:上 tick 各 hub 位置(空 = 下 tick 重建)。
     private var hubPrev: [SIMD2<Float>] = []
     private var beltTmpNow: [SIMD2<Float>] = []
@@ -246,10 +248,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
-        // 重新生成 → 陨石重新绑定隐形圈(07-03 三稿:生成期绑定,
-        // 用户拖动后解绑),原位快照作废
-        beltBound = true
-        beltHome = []
+        // 重新生成 → 陨石回生成态(帧携带成型,首次拖球后转实时槽位)
+        beltForming = true
         hubPrev = []
         alpha = 1
         publishSnapshot()
@@ -332,12 +332,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 alphaTarget = p
                 if p > 0, alpha < p { alpha = p }
             }
-            // 用户拖球 → 陨石永久解绑(本次打开内;07-03 三稿单向闩)。
-            // 解绑瞬间定格每颗陨石的世界坐标原位(七稿"回到最开始的位置")
-            if dragging, beltBound {
-                beltBound = false
-                beltHome = beltIdx.map { pos[Int($0)] }
-            }
+            // 用户首次拖球 → 生成态结束(单向闩,explode 重置):
+            // 之后进「拖拽中自由 / 松手后实时槽位」两态
+            if dragging { beltForming = false }
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
             // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
             // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
@@ -441,13 +438,23 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 不加(拖拽钉住覆盖速度,加了也白算,与叶弹簧同理无须豁免)。
     private func beltPass() {
         guard !beltIdx.isEmpty else { return }
-        if beltBound {
-            // 地板同 linkPass:力系统要么都醒要么都睡。
-            let k = GraphConstants.beltSpring * max(alpha, 0.1)
-            // 绑定期(07-03 三稿:生成时绑定,拖动后解绑):帧携带 ——
-            // 开场收敛 hub 绕主球公转可达大半圈,纯吸引拖不动整条带
-            //(169/599 流散实测)。带子随自家 hub 平移+公转刚体走位,
-            // 弹簧回模糊家位(散布角+径向模糊,不是整齐槽位)。
+        dragLock.lock()
+        let di = draggedIndex ?? -1
+        dragLock.unlock()
+        // ② 拖拽中(八稿):陨石**完全自由** —— 无任何力,隐形圆力场同步
+        //   关闭(centerAndIntegrate 的陨石圈排除同款门控),只剩球体
+        //   碰撞/扫掠清障排开(边界 = 球个体);携带参考作废。
+        if di >= 0 {
+            hubPrev = []
+            return
+        }
+        // ①③ 共用槽位机(家位按当前布局实时重算):
+        //   生成态额外帧携带(开场收敛 hub 绕主球公转大半圈,纯弹簧拖
+        //   不动整条带,169/599 流散实测);松手后**纯弹簧**(无携带)——
+        //   "去处"随新布局重新生成,被波及的全部 folder 跟着重算。
+        // 地板同 linkPass:力系统要么都醒要么都睡。
+        let k = GraphConstants.beltSpring * max(alpha, 0.1)
+        do {
             let nh = hubIndices.count
             if hubPrev.count != nh {
                 hubPrev = (0..<nh).map { pos[Int(hubIndices[$0])] }
@@ -498,18 +505,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
                 beltTmpLo[s] = lo; beltTmpHi[s] = hi
             }
-            dragLock.lock()
-            let di = draggedIndex ?? -1
-            dragLock.unlock()
+            let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
             pos.withUnsafeMutableBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
                 for bi in 0..<beltIdx.count {
                     let i = Int(beltIdx[bi])
                     let s = Int(beltHubSlot[bi])
                     let hp = beltTmpNow[s]
-                    // 帧携带:绕**主球**刚体公转(家位是主球极坐标,随
-                    // 自家 hub 的方位角走;半径差由弹簧修正)
-                    if i != di {
+                    // 帧携带(仅生成态):绕**主球**刚体公转(家位是主球
+                    // 极坐标,随自家 hub 的方位角走;半径差由弹簧修正)
+                    if carrying {
                         let p0 = P[i]
                         P[i] = SIMD2<Float>(
                             p0.x * beltTmpC[s] - p0.y * beltTmpS[s],
@@ -534,23 +539,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }}
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
-            return
         }
-        // 解绑后(07-03 七稿定稿,六稿零引力="一盘散沙"被否):每颗陨石
-        // 回**解绑瞬间定格的世界坐标原位** —— 定点弹簧零初始力、无全局
-        // 涌动(⚠️ 五稿"一动全聚中心"的根源是家位随 hub 方位实时重算,
-        // 别回头);拖近仍被碰撞/清障排开,松手流回原位。硬约束照常,
-        // 原位被挪来的气泡占住时停在圈边(硬排除赢)。
-        hubPrev = []   // 参考作废(下次 explode 重绑时重建)
-        guard beltHome.count == beltIdx.count else { return }
-        let k = GraphConstants.beltSpring * max(alpha, 0.1)
-        pos.withUnsafeBufferPointer { P in
-        vel.withUnsafeMutableBufferPointer { V in
-            for bi in 0..<beltIdx.count {
-                let i = Int(beltIdx[bi])
-                V[i] += (beltHome[bi] - P[i] - V[i]) * k
-            }
-        }}
     }
 
     /// 气泡碰撞(07-02 气泡重构):每个 hub 携带一个隐形圆(半径=builder
@@ -925,13 +914,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
         // 陨石不进任何隐形圈(07-03 用户定稿"确保不会进到别的隐形范围"):
         // 对每个气泡(含自家)硬推出 —— 陨石带永远在圈外缘。放在气泡硬
-        // 解算之后(同圈内夹钳的顺序纪律:先夹后挪 hub 会白夹)。被拖颗
-        // 豁免(指针优先),松手由弹簧+此约束归位。O(陨石数×hub数)。
-        if !beltIdx.isEmpty, !hubIndices.isEmpty {
+        // 解算之后(同圈内夹钳的顺序纪律:先夹后挪 hub 会白夹)。
+        // ⚠️ 八稿:**拖拽中整体关闭**(用户:"拖 folder 去撞陨石还有隐形
+        // 力场"——拖拽期边界 = 球个体,靠碰撞/清障排开);松手恢复,每轮
+        // 推出量封顶 4pt(缓释:拖拽期陷进圈的慢慢挤出,不瞬移)。
+        if !beltIdx.isEmpty, !hubIndices.isEmpty, di == nil {
             pos.withUnsafeMutableBufferPointer { P in
                 for bi in 0..<beltIdx.count {
                     let i = Int(beltIdx[bi])
-                    if i == di { continue }
                     // 3 轮:两气泡相切的夹缝里,推出 A 会压进 B(实测
                     // 2 轮仍剩 1.6pt 残余),逐轮减半,3 轮压到肉眼零。
                     for _ in 0..<3 {
@@ -943,7 +933,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             let minD = hubBubbleR[jj] + nodeRadius[i] + 1
                             if dist < minD {
                                 let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                                P[i] = P[h] + dir * minD
+                                P[i] += dir * min(minD - dist, 4)
                             }
                         }
                     }
@@ -1181,9 +1171,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                                 var pj = Int(-c - 2)
                                 while pj >= 0 {
                                     // 每对一次 + 常态同家隔离(拖拽期全局阻力);
-                                    // 陨石×陨石跨家常开(平弧云交界处会交叠)
+                                    // 陨石×任何叶跨家常开(八稿:拖拽期陨石的
+                                    // 边界 = 球个体,靠这条排开;平弧交界同理)
                                     if pj > i, FAM[pj] == fi || (!isolate && FAM[pj] >= 0)
-                                        || (BELT[i] && BELT[pj]) {
+                                        || ((BELT[i] || BELT[pj]) && FAM[pj] >= 0) {
                                         let rj = R[pj] + pad
                                         let rsum = ri + rj
                                         var d = pi - (P[pj] + V[pj])
