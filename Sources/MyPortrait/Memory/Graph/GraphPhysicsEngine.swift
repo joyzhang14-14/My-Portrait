@@ -103,6 +103,20 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 分段并集,家位重映射到并集上,挡板两侧自然排开不堆积。
     private var beltPredSegs: [[(Float, Float)]] = []
     private var beltPredDirty = true
+    /// 幽灵终局位置(动 hub 的挡板"计划位";beltPredDirty 边沿重算)。
+    private var beltPredPos: [SIMD2<Float>] = []
+    /// 静/动帧判定(每 0.5s 窗看净位移,迟滞 6/12pt):静 hub 的挡板用
+    /// 实时位置(真理),动 hub 用幽灵终局位置(计划)—— carveBeltSegs。
+    private var hubQuietRef: [SIMD2<Float>] = []
+    private var hubStatic: [Bool] = []
+    /// 判定窗基准 tick(对抗审查①:窗相位若挂死 tickCount%30,explode/
+    /// 重建后的截断窗会把开场飞行中的 hub 误标"静" —— 不满整窗禁翻转)。
+    private var hubQuietBase: UInt64 = 0
+    /// 家位仿射参数(每家每 tick 算一次:最佳段选择+平移/压缩+积压微调,
+    /// 球循环里只做 base+slope×槽位角)与黏滞记忆(上 tick 选中段的中心,
+    /// 防几何微动时两段得分打平 tick 间乒乓换段)。
+    private var beltFamBase: [Float] = [], beltFamSlope: [Float] = []
+    private var beltFamSel: [Float] = []
     private var beltTmpPol: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
@@ -119,6 +133,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var brake: Float = 1
     /// 冷透但未静止的连续 tick 数(病态运动兜底,超时强制 park)。
     private var restlessTicks: Int = 0
+    /// 本 tick 陨石×陨石最大穿深(collidePass 顺手记录):>1.5pt 时静止
+    /// 判定一票否决 —— 压力实测:拖后回流的陨石穿透落点重合,实体化时
+    /// 全场已静,缓停 1.6s 冻结前碰撞来不及顶开 = 71/360 对"花生"粘连;
+    /// 有残余穿深就不入睡,碰撞几 tick 顶开后再 park(restless 30s 兜底)。
+    private var beltPenMax: Float = 0
+    /// 本 tick 是否还有陨石在穿透飞行(dLen>24 免碰撞):有就不许 park ——
+    /// 冻结正在飞的穿透球会把途中重叠一起定格(压力取证:12s 追逐期
+    /// pen 恒 0,park 后 71 对叠着 —— 重叠全藏在免碰撞的穿透态里)。
+    private var beltTransitAny = false
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
     private var tickCount: UInt64 = 0
     /// 叶子出生角的整体相位(随种子变,07-02:随机种子每次开花不同)。
@@ -275,6 +298,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         beltPredDirty = true
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
+        hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
         alpha = 1
         publishSnapshot()
         simLock.unlock()
@@ -335,6 +359,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
         hubPrev = []   // 帧携带参考失效,下 tick 重建
+        hubQuietRef = []   // 槽位数可能变,静动帧判定重建
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
         wake()
@@ -366,8 +391,20 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
             } else if wasDragging {
-                // 松手边沿:预判新终局,弧区间一次算死(提前排布)
+                // 松手边沿:预判新终局(提前排布)
                 beltPredDirty = true
+                // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
+                // 推土机推开的邻居若还挂着拖前的 static 旗,松手后最长
+                // 0.5s 会拿"被推开的瞬时位置"当真挡板切碎弧 —— 位移超
+                // 迟滞阈的立即降级为"动"(用幽灵帧),并重开一个完整窗
+                if hubQuietRef.count == hubIndices.count {
+                    for s in 0..<hubQuietRef.count {
+                        let p = pos[Int(hubIndices[s])]
+                        if simd_length(p - hubQuietRef[s]) > 12 { hubStatic[s] = false }
+                        hubQuietRef[s] = p
+                    }
+                    hubQuietBase = tickCount
+                }
             }
             wasDragging = dragging
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
@@ -449,7 +486,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     m2 = max(m2, simd_length_squared(pos[i] - quietRef[i]))
                     if m2 >= t2 { break }
                 }
-                quietFlag = m2 < t2
+                // 陨石残余穿深/穿透飞行一票否决:有叠压不算静(碰撞顶开
+                // 再睡),还有球在穿透飞行也不算静(冻结会连途中重叠一起
+                // 定格);restless 30s 兜底防病态不眠
+                quietFlag = m2 < t2 && beltPenMax < 1.5 && !beltTransitAny
             } else {
                 quietFlag = false   // 场景刚换,等一个完整窗
             }
@@ -504,8 +544,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         //   生成态额外帧携带(开场收敛 hub 绕主球公转大半圈,纯弹簧拖
         //   不动整条带,169/599 流散实测);松手后**纯弹簧**(无携带)——
         //   "去处"随新布局重新生成,被波及的全部 folder 跟着重算。
-        // 地板同 linkPass:力系统要么都醒要么都睡。
-        let k = GraphConstants.beltSpring * max(alpha, 0.1)
+        // 地板 0.35(不是 linkPass 的 0.1,压力取证):反推力冷场持续
+        // 转 hub,目标 2~6pt/tick 走,弹簧 0.1 地板只追 0.45pt/tick ——
+        // 永远落后 >24pt = 永久穿透免碰撞,park 冻结时 71/360 对叠着
+        let k = GraphConstants.beltSpring * max(alpha, 0.35)
         do {
             let nh = hubIndices.count
             if hubPrev.count != nh {
@@ -523,9 +565,25 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltTmpC[s] = cos(d); beltTmpS[s] = sin(d)
                 beltTmpPol[s] = atan2(hp.y, hp.x)
             }
-            // 弧裁剪区间不再每 tick 按实时位置算 —— 幽灵模拟预判终局,
-            // 开场/松手一次算死(07-03 提前排布:环不许"先定型再变一次")
-            if beltPredDirty || beltPredSegs.count != nh {
+            // 静/动帧判定(0.5s 窗净位移,迟滞 6/12pt):动 hub 的挡板
+            // 用幽灵终局,停下的 hub 用实时位置(预判失准自动被纠正)。
+            // 窗基准 = 重建/上次判定的 tick,不满整窗禁翻转(对抗审查①:
+            // 挂死 tickCount%30 的话 explode 后截断窗会把飞行 hub 误标静)
+            if hubQuietRef.count != nh {
+                hubQuietRef = beltTmpNow
+                hubStatic = .init(repeating: false, count: nh)
+                hubQuietBase = tickCount
+            } else if tickCount &- hubQuietBase >= 30 {
+                for s in 0..<nh {
+                    let m = simd_length(beltTmpNow[s] - hubQuietRef[s])
+                    if hubStatic[s] { if m > 12 { hubStatic[s] = false } }
+                    else if m < 6 { hubStatic[s] = true }
+                    hubQuietRef[s] = beltTmpNow[s]
+                }
+                hubQuietBase = tickCount
+            }
+            // 幽灵终局(动 hub 挡板的"计划位"):explode/松手/刷新边沿重算
+            if beltPredDirty || beltPredPos.count != nh {
                 predictBeltClip()
                 beltPredDirty = false
             }
@@ -538,7 +596,53 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltTmpNow,
                 gain: GraphConstants.beltHubNudge * max(alpha, 0.5)
             ) { slot, dv in vel[Int(hubIndices[slot])] += dv }
+            // 每 tick 混合帧裁剪 + 每家一次的家位仿射参数
+            carveBeltSegs()
+            if beltFamBase.count != nh {
+                beltFamBase = .init(repeating: 0, count: nh)
+                beltFamSlope = .init(repeating: 1, count: nh)
+                beltFamSel = .init(repeating: 0, count: nh)
+            }
+            for s in 0..<nh {
+                let segs = beltPredSegs[s]
+                let fw = max(beltFamW[s], 0.05)
+                guard !segs.isEmpty else {
+                    beltFamBase[s] = 0; beltFamSlope[s] = 1; continue
+                }
+                // 整家选**一个最佳自由段**(边际五修用户法则:"同一个球
+                // 的陨石必须连贯"):容量够 2×家宽的段里选离自家方位(0)
+                // 最近的;黏滞加分防 tick 间乒乓换段
+                var best = segs[0]
+                if segs.count > 1 {
+                    var bestScore = -Float.greatestFiniteMagnitude
+                    for (l, h) in segs {
+                        let dist = l > 0 ? l : (h < 0 ? -h : 0)
+                        var score = min(h - l, 2 * fw) * 2 - dist
+                        if beltFamSel[s] >= l, beltFamSel[s] <= h { score += fw * 0.8 }
+                        if score > bestScore { bestScore = score; best = (l, h) }
+                    }
+                }
+                let (lo, hi) = best
+                beltFamSel[s] = (lo + hi) / 2
+                // 单段规则(与旧逐球代码等价的仿射形):装得下整体平移
+                // 贴自家方位;装不下线性压缩(密而不断)
+                var base: Float = 0
+                var slope: Float = 1
+                if 2 * fw <= hi - lo {
+                    base = min(max(0, lo + fw), hi - fw)
+                } else {
+                    base = (lo + hi) / 2
+                    slope = (hi - lo) / (2 * fw)
+                }
+                // 积压微调(07-03 用户拍板:"有积压就再往反方向转一点")
+                let lossR = max(0, fw - hi)
+                let lossL = max(0, fw + lo)
+                base += min(max((lossL - lossR) * 0.08, -0.12), 0.12)
+                beltFamBase[s] = base
+                beltFamSlope[s] = slope
+            }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
+            var transitAny = false
             pos.withUnsafeMutableBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
                 for bi in 0..<beltIdx.count {
@@ -552,40 +656,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             p0.x * beltTmpC[s] - p0.y * beltTmpS[s],
                             p0.x * beltTmpS[s] + p0.y * beltTmpC[s])
                     }
-                    // 家位角装进可用弧:单段 = 老规则(装得下整体平移到最
-                    // 贴近自家方位,装不下线性压缩);多段(挡板卡弧中间挖
-                    // 了洞)= 按比例顺序重映射到自由段并集,两侧排开不堆积
-                    let segs = beltPredSegs[s]
-                    let fw = max(beltFamW[s], 0.05)
-                    var a = beltAng[bi]
-                    if !segs.isEmpty {
-                        // 多段 → 整家选**一个最佳自由段**(边际五修,用户
-                        // 法则:"同一个球的陨石必须连贯"):容量够 2×家宽
-                        // 的段里选离自家方位(0)最近的,整家按单段规则放入
-                        //(贴自家方位平移;装不下线性压缩,密而不断)
-                        var best = segs[0]
-                        if segs.count > 1 {
-                            var bestScore = -Float.greatestFiniteMagnitude
-                            for (l, h) in segs {
-                                let dist = l > 0 ? l : (h < 0 ? -h : 0)
-                                let score = min(h - l, 2 * fw) * 2 - dist
-                                if score > bestScore { bestScore = score; best = (l, h) }
-                            }
-                        }
-                        let (lo, hi) = best
-                        if 2 * fw <= hi - lo {
-                            a += min(max(0, lo + fw), hi - fw)
-                        } else {
-                            a = lo + (a + fw) / (2 * fw) * (hi - lo)
-                        }
-                        // 积压微调(07-03 用户拍板:"有积压就再往反方向转
-                        // 一点"):判定 = 自然弧被裁掉的量,哪侧裁得多就往
-                        // 另一侧多转(∝裁量,封顶 0.12rad);轻微越入洞边
-                        // 由滑出/投影兜底
-                        let lossR = max(0, fw - hi)
-                        let lossL = max(0, fw + lo)
-                        a += min(max((lossL - lossR) * 0.08, -0.12), 0.12)
-                    }
+                    // 家位角装进可用弧:每家的选段/平移/压缩/积压微调已
+                    // 在球循环外算成仿射参数,这里只查表
+                    let a = beltFamBase[s] + beltFamSlope[s] * beltAng[bi]
                     let homeAng = beltTmpPol[s] + a
                     // 目标 = 主球极坐标大圆上的点。半径基于**锚定家**的
                     // 实时距离(被大环吞并 = 大环家 —— 全环同一基准,布局
@@ -616,16 +689,19 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     // 穿透(十稿):回流途中(>24pt)对碰撞免疫,近终点实体化;
                     // 生成态不穿(绽放本来就要靠碰撞摊开)
                     nodeTransit[i] = !carrying && dLen > 24
+                    if nodeTransit[i] { transitAny = true }
                 }
             }}
+            beltTransitAny = transitAny
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
         }
     }
 
     /// 幽灵模拟预判终局(07-03 提前排布,用户定稿:"预判最终隐形圆能到哪,
     /// 环一次变好不要变两次"):只模拟 hub 子系统(≤12 体:主球钉原点 +
-    /// hub 径向弹簧回 rest + hub 间点斥力 + 气泡硬解算),400 tick 微秒
-    /// 级同步跑完;用**终局几何**算每家的可用弧区间,存 beltPredLo/Hi。
+    /// hub 径向弹簧回 rest + hub 间点斥力 + 陨石带分离力 + 气泡硬解算),
+    /// 400 tick 微秒级同步跑完,存终局位置 beltPredPos —— 供 carveBeltSegs
+    /// 给"移动中"的 hub 当挡板计划位(弧裁剪本身改每 tick 混合帧做)。
     /// 开场(explode)/数据刷新/松手边沿置 dirty 重算。调用方须持 simLock。
     private func predictBeltClip() {
         let nh = hubIndices.count
@@ -671,62 +747,76 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
-        // 终局几何 → 每家可用弧**自由段并集**(07-03 边际bug二修:单一
-        // [lo,hi] 只会"裁两端",挡板卡在弧中间时一整侧被裁掉+投影到圆
-        // 边 = 两边堆积 —— 改区间减法:中间的挡板挖洞,家位重映射到
-        // 自由段并集,两侧自然排开)
+        // 只存终局位置 —— 弧裁剪移到 carveBeltSegs 每 tick 混合帧做
+        //(07-03"截断汇集"根治;双几何/滞留门控被静动帧判定取代)
+        beltPredPos = P
+    }
+
+    /// 每 tick 动态弧裁剪(07-03"截断汇集"根治,混合几何帧)。
+    /// 挡板位置按静动选帧:**静止(准静态)hub 用实时位置**(被拖走停住
+    /// 的/回不去的/已落位的 —— 真理),**移动中 hub 用幽灵终局位置**
+    /// (计划;开场全员疾飞 = 纯预判与老行为一致仍"一次变好",预判失准
+    /// 会在该 hub 停下时被实时位置自动纠正)。rel 一律相对**实时自家
+    /// 极角**:家位角是加在实时极角上的,这样洞在世界系里始终钉在挡板
+    /// (现在/将来)的真实方位 —— 老码 pass0 的洞相对幽灵极角、放置却
+    /// 加实时极角,反推力把 hub 转的角度一大,过渡期洞全体错位,弧撞上
+    /// 真挡板被逐球投影/滑出收拢 = "被力场截断,汇集在一起"。
+    /// 自家 hub 也算挡板(不再 t != s):吞并家被挤离环时自家气泡会吞掉
+    /// 自家弧位(环半径锚大环家,老码不裁自家洞 → 家位埋进自家圆全家
+    /// 收拢圆边);非吞并家几何上环恒在自家圆外(rr = 自距+圆R+gap),
+    /// 余弦 cosT≥1 自动免裁,包含无害。nh² 三角/tick ≤144 忽略不计。
+    private func carveBeltSegs() {
+        let nh = hubIndices.count
+        guard nh > 0 else { return }
         if beltPredSegs.count != nh {
             beltPredSegs = .init(repeating: [(-2.98, 2.98)], count: nh)
         }
+        let havePred = beltPredPos.count == nh
+        let haveStatic = hubStatic.count == nh
         for s in 0..<nh {
+            guard beltFamReach[s] > 0 else { continue }   // 无陨石家不用
             let sA = Int(beltFamAnchor[min(s, max(beltFamAnchor.count - 1, 0))])
-            let dS = simd_length(P[sA])
-            let hpLive = pos[Int(hubIndices[s])]
-            let polarLive = atan2(hpLive.y, hpLive.x)
-            let dSLive = simd_length(pos[Int(hubIndices[sA])])
+            let polar = beltTmpPol[s]   // 实时自家极角(与放置同帧)
+            // 锚定距离/环中径:锚在飞用终局(开场即按最终环几何排布),
+            // 锚停住用实时(与放置的实时环半径一致)
+            let pA = (!havePred || (haveStatic && hubStatic[sA]))
+                ? beltTmpNow[sA] : beltPredPos[sA]
+            let dS0 = simd_length(pA)
+            let bLo = dS0 + hubBubbleR[sA] - 6
+            let bHi = dS0 + beltFamReach[s] + 20
+            let rB = dS0 + (hubBubbleR[sA] + beltFamReach[s]) * 0.5 + 5
             var segs: [(Float, Float)] = [(-2.98, 2.98)]
-            // 双几何挖洞(边际四修:幽灵以为被拖的大球会回老家,洞没挖在
-            // 它实际停的位置 → 家位穿它+投影拉扯 = 聚集/抖动/乱飘):
-            // 预测终局位置 与 实时位置 各挖一遍,谁挡都算挡。
-            // ⚠️ 生成期只用预测(六修):开场瞬间全员挤在原点,实时几何的
-            // 遮挡半宽个个 ≈82°,弧被切碎 → 整家压成一坨。
-            for pass in 0..<(beltForming ? 1 : 2) {
-                let polar = pass == 0 ? atan2(P[s].y, P[s].x) : polarLive
-                let dS0 = pass == 0 ? dS : dSLive
-                let bLo = dS0 + hubBubbleR[sA] - 6
-                let bHi = dS0 + beltFamReach[s] + 20
-                for t in 0..<nh where t != s {
-                    let pt = pass == 0 ? P[t] : pos[Int(hubIndices[t])]
-                    let dT = max(simd_length(pt), 1)
-                    // 实时挡板门控(七修:松手瞬间被拖拽推开的邻居还没归位,
-                    // 全算挡板会把弧切碎 → 全家压成大块):只有实际距离
-                    // 超出自然长度 60pt 的 hub(= 被留在远处回不去的,如
-                    // My-Portrait 停环带)才算实时挡板,瞬时位移不算
-                    if pass == 1, dT < hubRestLen[t] + 60 { continue }
-                    let bT = hubBubbleR[t] + 8
-                    // 径向带门控:邻圆环带不与本家带重叠 → 挡不到,不裁
-                    if dT + bT < bLo || dT - bT > bHi { continue }
-                    // 洞宽 = 挡板圆与**本家环中径**的真实相交角半宽(余弦
-                    // 定理)。⚠️ 八修:原 asin(bT/dT) 是原点切线角 = 影锥
-                    // 最宽处,气泡大时(bT/dT→1)爆到 ±80°,过挡 3x → 整家
-                    // 被推去另一侧,环偏离"主球-folder 连线正上方"越来越远
-                    let rB = dS0 + (hubBubbleR[sA] + beltFamReach[s]) * 0.5 + 5
-                    let cosT = (dT * dT + rB * rB - bT * bT) / (2 * dT * rB)
-                    if cosT >= 1 { continue }   // 环中径不与挡板相交
-                    let w = acos(max(cosT, -1))
-                    var rel = atan2(pt.y, pt.x) - polar
-                    while rel > .pi { rel -= 2 * .pi }
-                    while rel < -.pi { rel += 2 * .pi }
-                    // 区间减法:从自由段里挖掉 [rel-w, rel+w]
-                    var out: [(Float, Float)] = []
-                    for (l, h) in segs {
-                        if rel + w <= l || rel - w >= h { out.append((l, h)); continue }
-                        if rel - w - l >= 0.1 { out.append((l, rel - w)) }
-                        if h - (rel + w) >= 0.1 { out.append((rel + w, h)) }
-                    }
-                    segs = out
-                    if segs.isEmpty { break }
+            for t in 0..<nh {
+                guard hubBubbleR[t] > 0 else { continue }
+                // 非吞并家(锚=自家)豁免自家挡板:环恒在自家圆外(三角
+                // 不等式,任何环点到自家心 ≥ 环偏移 > 圆R),但环中径
+                // 近似在 famReach−bubbleR<6 的小家会误裁出 rel=0 小洞,
+                // 整家持久偏移 ~0.25rad(对抗审查③)。吞并家保留自家
+                // 挡板 —— 那是"截断汇集"的根治点
+                if t == s, sA == s { continue }
+                let pt = (!havePred || (haveStatic && hubStatic[t]))
+                    ? beltTmpNow[t] : beltPredPos[t]
+                let dT = max(simd_length(pt), 1)
+                let bT = hubBubbleR[t] + 8
+                // 径向带门控:挡板圆够不着本家带 → 不裁
+                if dT + bT < bLo || dT - bT > bHi { continue }
+                // 洞宽 = 挡板圆与本家环中径的真实相交角半宽(余弦定理,
+                // 八修:asin 影锥角过挡 3x 会把整家推去另一侧)
+                let cosT = (dT * dT + rB * rB - bT * bT) / (2 * dT * rB)
+                if cosT >= 1 { continue }   // 环中径不与挡板相交
+                let w = acos(max(cosT, -1))
+                var rel = atan2(pt.y, pt.x) - polar
+                while rel > .pi { rel -= 2 * .pi }
+                while rel < -.pi { rel += 2 * .pi }
+                // 区间减法:从自由段里挖掉 [rel-w, rel+w]
+                var out: [(Float, Float)] = []
+                for (l, h) in segs {
+                    if rel + w <= l || rel - w >= h { out.append((l, h)); continue }
+                    if rel - w - l >= 0.1 { out.append((l, rel - w)) }
+                    if h - (rel + w) >= 0.1 { out.append((rel + w, h)) }
                 }
+                segs = out
+                if segs.isEmpty { break }
             }
             if segs.isEmpty { segs = [(-0.15, 0.15)] }   // 全堵:留最小窗
             beltPredSegs[s] = segs
@@ -1379,6 +1469,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         guard n > 1 else { return }
         let strength = GraphConstants.collideStrength
         let pad = GraphConstants.collidePadding
+        var beltPen: Float = 0   // 本 tick 陨石×陨石最大真实穿深(不含 pad)
         // 拖拽中(alphaTarget>0)降到 1 轮:布局本来就在被扰动,多轮解算
         // 白费 tick 预算 —— tick 慢会让被拖球掉帧(07-02 卡顿反馈)。
         let iters = alphaTarget > 0 ? 1 : GraphConstants.collideIterations
@@ -1448,6 +1539,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                                             let wj = rj * rj / (ri2 + rj * rj)
                                             V[i] += d * (push * wj)
                                             V[pj] -= d * (push * (1 - wj))
+                                            if BELT[i], BELT[pj] {
+                                                beltPen = max(beltPen, rsum - l - 2 * pad)
+                                            }
                                         }
                                     }
                                     pj = Int(NP[pj])
@@ -1458,6 +1552,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }}}}}}}}}}}}}
         }
+        beltPenMax = beltPen
     }
 
     /// 分角色斥力电荷:主球小(硬碰撞管不叠)、hub 中、叶小(圈内间距
