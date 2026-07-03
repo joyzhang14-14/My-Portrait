@@ -42,6 +42,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 气泡对主球的净空(= 家内最大叶径 + pad):圆的内缘叶不许被主球
     /// 碰撞壳顶出圈外。
     private var hubMainClear: [Float] = []
+    /// hub→主球弹簧自然长度(幽灵模拟预判终局用)。
+    private var hubRestLen: [Float] = []
     /// 全部末端球下标 + 各自所属 hub(主球=0)+ 各自的圈内硬上限
     ///(= 自家气泡半径 − 叶半径 − 缝;叶子绝不出自家隐形圆)。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
@@ -93,10 +95,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     ///(被大环吞并 = 大环家槽号,半径跟它的实时距离走;否则 = 自家)。
     private var beltAnchorSlot: [Int32] = []
     private var beltFamAnchor: [Int32] = []
-    /// 动态弧裁剪(07-03 四稿):每家的可用角区间 [lo, hi](相对背主球
-    /// 方向)+ 家极角缓存 —— 被邻圆/主球挡住的一侧收缩,整片云往空侧
-    /// 平移("一边碰到就延伸另一边")。每 tick 重算。
-    private var beltTmpLo: [Float] = [], beltTmpHi: [Float] = []
+    /// 动态弧裁剪的可用角区间 [lo, hi](相对自家主球极角)。
+    /// 07-03 提前排布定稿:不再每 tick 按实时位置算(hub 还在漂移时环
+    /// 先定一次型、hub 到位后又变一次)—— 改用**幽灵模拟预判终局**
+    /// (predictBeltClip),开场/松手一次算死,环一次变好。
+    private var beltPredLo: [Float] = [], beltPredHi: [Float] = []
+    private var beltPredDirty = true
     private var beltTmpPol: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
@@ -182,7 +186,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeFamily = Self.familyIdArray(scene: scene)
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
+        (hubIndices, hubBubbleR, hubMass, hubMainClear, hubRestLen) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach,
@@ -263,8 +267,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
-        // 重新生成 → 陨石回生成态(帧携带成型,首次拖球后转实时槽位)
+        // 重新生成 → 陨石回生成态(帧携带成型,首次拖球后转实时槽位),
+        // 弧区间按新种子重新预判终局
         beltForming = true
+        beltPredDirty = true
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         alpha = 1
@@ -318,13 +324,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeCenterScale = Self.centerScaleArray(scene: scene)
         nodeFamily = Self.familyIdArray(scene: scene)
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
+        (hubIndices, hubBubbleR, hubMass, hubMainClear, hubRestLen) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach,
          beltAnchorSlot, beltFamAnchor) = Self.beltArrays(scene: scene)
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
         nodeTransit = .init(repeating: false, count: n)
+        beltPredDirty = true
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
@@ -356,6 +363,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             if dragging {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
+            } else if wasDragging {
+                // 松手边沿:预判新终局,弧区间一次算死(提前排布)
+                beltPredDirty = true
             }
             wasDragging = dragging
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
@@ -501,8 +511,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltTmpNow = hubPrev
                 beltTmpC = .init(repeating: 1, count: nh)
                 beltTmpS = .init(repeating: 0, count: nh)
-                beltTmpLo = .init(repeating: 0, count: nh)
-                beltTmpHi = .init(repeating: 0, count: nh)
                 beltTmpPol = .init(repeating: 0, count: nh)
                 return
             }
@@ -511,41 +519,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltTmpNow[s] = hp
                 let d = atan2(hp.y, hp.x) - atan2(hubPrev[s].y, hubPrev[s].x)
                 beltTmpC[s] = cos(d); beltTmpS[s] = sin(d)
+                beltTmpPol[s] = atan2(hp.y, hp.x)
             }
-            // 动态弧裁剪(07-03 五稿:**主球极坐标**,用户画黄线"弧更平,
-            // 和隐形圆没太大关系"):每家可用**主球方位**区间 [lo, hi]
-            // (相对 hub 的主球极角),被"径向够得着本家带"的邻圆收缩一侧
-            // ——够不着的(更靠内/更靠外)不裁,平弧可以从它们外面扫过。
-            // nh² 次三角,≤121,忽略不计。
-            for s in 0..<nh {
-                let hp = beltTmpNow[s]
-                let polar = atan2(hp.y, hp.x)
-                beltTmpPol[s] = polar
-                // 本家带的径向范围按**锚定家**实时距离算(被吞并 = 大环家)
-                let sA = Int(beltFamAnchor[min(s, beltFamAnchor.count - 1)])
-                let dS = simd_length(beltTmpNow[sA])
-                let bandLo = dS + hubBubbleR[sA] - 6
-                let bandHi = dS + beltFamReach[s] + 20
-                var lo: Float = -2.98
-                var hi: Float = 2.98
-                for t in 0..<nh where t != s {
-                    let pt = beltTmpNow[t]
-                    let dT = max(simd_length(pt), 1)
-                    let bT = hubBubbleR[t] + 8
-                    // 径向带门控:邻圆的环带 [dT−bT, dT+bT] 不与本家带
-                    // 重叠 → 挡不到,不裁
-                    if dT + bT < bandLo || dT - bT > bandHi { continue }
-                    let w = asin(min(0.99, bT / dT))
-                    var rel = atan2(pt.y, pt.x) - polar
-                    while rel > .pi { rel -= 2 * .pi }
-                    while rel < -.pi { rel += 2 * .pi }
-                    if rel >= 0 { hi = min(hi, rel - w) } else { lo = max(lo, rel + w) }
-                }
-                if hi < lo + 0.3 {   // 两侧全堵:留最小窗,硬排除兜底
-                    let mid = (lo + hi) / 2
-                    lo = mid - 0.15; hi = mid + 0.15
-                }
-                beltTmpLo[s] = lo; beltTmpHi[s] = hi
+            // 弧裁剪区间不再每 tick 按实时位置算 —— 幽灵模拟预判终局,
+            // 开场/松手一次算死(07-03 提前排布:环不许"先定型再变一次")
+            if beltPredDirty || beltPredLo.count != nh {
+                predictBeltClip()
+                beltPredDirty = false
             }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
             pos.withUnsafeMutableBufferPointer { P in
@@ -563,7 +543,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     }
                     // 家位角装进可用区间:装得下 → 整体平移到最贴近自家
                     // 方位处(被挡侧收缩,空侧延伸);装不下 → 线性压缩
-                    let lo = beltTmpLo[s], hi = beltTmpHi[s]
+                    let lo = beltPredLo[s], hi = beltPredHi[s]
                     let fw = beltFamW[s]
                     var a = beltAng[bi]
                     if 2 * fw <= hi - lo {
@@ -590,6 +570,84 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }}
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
+        }
+    }
+
+    /// 幽灵模拟预判终局(07-03 提前排布,用户定稿:"预判最终隐形圆能到哪,
+    /// 环一次变好不要变两次"):只模拟 hub 子系统(≤12 体:主球钉原点 +
+    /// hub 径向弹簧回 rest + hub 间点斥力 + 气泡硬解算),400 tick 微秒
+    /// 级同步跑完;用**终局几何**算每家的可用弧区间,存 beltPredLo/Hi。
+    /// 开场(explode)/数据刷新/松手边沿置 dirty 重算。调用方须持 simLock。
+    private func predictBeltClip() {
+        let nh = hubIndices.count
+        guard nh > 0 else { return }
+        var P = (0..<nh).map { pos[Int(hubIndices[$0])] }
+        var V = [SIMD2<Float>](repeating: .zero, count: nh)
+        let mainR = nodeRadius[0]
+        for _ in 0..<400 {
+            for i in 0..<nh {
+                let d = max(simd_length(P[i]), 1)
+                V[i] += (P[i] / d) * ((hubRestLen[i] - d) * 0.12)
+                for j in 0..<nh where j != i {
+                    let dv = P[i] - P[j]
+                    let dd = max(simd_length_squared(dv), 25)
+                    V[i] += dv / dd * 8
+                }
+                V[i] *= 0.6
+                P[i] += V[i]
+            }
+            for _ in 0..<2 {
+                for i in 0..<nh {
+                    let d = simd_length(P[i])
+                    let minD = mainR + hubBubbleR[i] + hubMainClear[i]
+                    if d < minD {
+                        P[i] = (d > 1e-4 ? P[i] / d : SIMD2<Float>(1, 0)) * minD
+                    }
+                }
+                for i in 0..<max(nh - 1, 0) {
+                    for j in (i + 1)..<nh {
+                        let dv = P[j] - P[i]
+                        let dist = simd_length(dv)
+                        let minD = hubBubbleR[i] + hubBubbleR[j]
+                        if dist < minD {
+                            let dir = dist > 1e-4 ? dv / dist : SIMD2<Float>(1, 0)
+                            let push = (minD - dist) / 2
+                            P[i] -= dir * push
+                            P[j] += dir * push
+                        }
+                    }
+                }
+            }
+        }
+        // 终局几何 → 每家可用弧区间(公式同旧 per-tick 裁剪)
+        if beltPredLo.count != nh {
+            beltPredLo = .init(repeating: -2.98, count: nh)
+            beltPredHi = .init(repeating: 2.98, count: nh)
+        }
+        for s in 0..<nh {
+            let sA = Int(beltFamAnchor[min(s, max(beltFamAnchor.count - 1, 0))])
+            let dS = simd_length(P[sA])
+            let bandLo = dS + hubBubbleR[sA] - 6
+            let bandHi = dS + beltFamReach[s] + 20
+            let polar = atan2(P[s].y, P[s].x)
+            var lo: Float = -2.98
+            var hi: Float = 2.98
+            for t in 0..<nh where t != s {
+                let dT = max(simd_length(P[t]), 1)
+                let bT = hubBubbleR[t] + 8
+                // 径向带门控:邻圆环带不与本家带重叠 → 挡不到,不裁
+                if dT + bT < bandLo || dT - bT > bandHi { continue }
+                let w = asin(min(0.99, bT / dT))
+                var rel = atan2(P[t].y, P[t].x) - polar
+                while rel > .pi { rel -= 2 * .pi }
+                while rel < -.pi { rel += 2 * .pi }
+                if rel >= 0 { hi = min(hi, rel - w) } else { lo = max(lo, rel + w) }
+            }
+            if hi < lo + 0.3 {   // 两侧全堵:留最小窗,硬排除兜底
+                let mid = (lo + hi) / 2
+                lo = mid - 0.15; hi = mid + 0.15
+            }
+            beltPredLo[s] = lo; beltPredHi[s] = hi
         }
     }
 
@@ -1258,21 +1316,26 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 非主球 hub 的物理参数(builder 赋值):气泡半径(≤0 = 无)/
     /// 质量(叶数+1)/ 对主球净空(家内最大叶径+pad)。四数组同序对齐。
     private static func hubArrays(scene: GraphScene)
-        -> ([Int32], [Float], [Float], [Float]) {
+        -> ([Int32], [Float], [Float], [Float], [Float]) {
         var leafCount: [Int: Int] = [:]
         var maxLeafR: [Int: Float] = [:]
         for node in scene.nodes where !node.kind.isHub {
             leafCount[node.hubIndex, default: 0] += 1
             maxLeafR[node.hubIndex] = max(maxLeafR[node.hubIndex] ?? 0, Float(node.radius))
         }
+        // hub→主球弹簧自然长度(幽灵模拟预判终局用)
+        var restOf: [Int: Float] = [:]
+        for e in scene.edges where e.b == 0 { restOf[e.a] = Float(e.restLength) }
         var idx: [Int32] = [], bubble: [Float] = [], mass: [Float] = [], clear: [Float] = []
+        var rest: [Float] = []
         for node in scene.nodes where node.kind.isHub && node.id != 0 {
             idx.append(Int32(node.id))
             bubble.append(node.hubBubbleRadius.map(Float.init) ?? -1)
             mass.append(Float(leafCount[node.id] ?? 0) + 1)
             clear.append((maxLeafR[node.id] ?? 0) + GraphConstants.mainCollisionPadding)
+            rest.append(restOf[node.id] ?? 120)
         }
-        return (idx, bubble, mass, clear)
+        return (idx, bubble, mass, clear, rest)
     }
 
     /// 陨石带四数组(07-03,同序对齐):节点下标 / 自家 hub / 环半径
