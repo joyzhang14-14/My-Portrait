@@ -98,23 +98,26 @@ enum BeltLayout {
         let slotW = 2 * ((radii.max() ?? 1) + 1)
         // 气泡远端到全图中心的半径:弧容量按这个大半径算 → 平弧
         let baseR = mainDist + bubbleR
-        // 弧宽上限 ∝ 自家气泡的角 footprint(×2.4):大家平铺一大片,
-        // 小家不越权抢邻居的方位;真实可用弧仍由引擎动态裁剪
+        // 弧宽上限 ∝ 自家气泡的角 footprint(九稿 ×2.4→×3.4 更大胆):
+        // 大家平铺一大片;真实可用弧仍由引擎动态裁剪
         let ownHalf = asin(min(0.95, bubbleR / max(mainDist, bubbleR + 1)))
-        let arcCap = min(GraphConstants.beltMaxHalfArc, ownHalf * 2.4 + 0.1)
+        let arcCap = min(GraphConstants.beltMaxHalfArc, ownHalf * 3.4 + 0.2)
         var offsets = [Double](repeating: 0, count: n)
         var angles = [Double](repeating: 0, count: n)
         var cursor = GraphConstants.beltGap
         var k = 0
-        var row = 0
+        // 首排(最宽排)定下全家弧宽,后排(含最后的零头排)沿用 —— 零头
+        // 按同宽稀疏铺满整层(九稿反馈:最外层只用一小块区域很突兀)
+        var famArc: Double? = nil
         while k < n {
             let ringR = baseR + cursor
-            // 每排只装理论容量的 55%(装满才外溢 = 贴边薄壳;稀装深铺)
-            let cap = max(1, Int(2 * arcCap * ringR / slotW * 0.55))
+            // 每排装 75%(九稿"分层小一点":排更满 → 排更少 → 云更薄更平)
+            let cap = max(1, Int(2 * arcCap * ringR / slotW * 0.75))
             let rowCount = min(cap, n - k)
-            // 先展开:不足一排时弧宽 ∝ 数量,airy 系数同 55%
-            let halfArc = min(arcCap,
-                              Double(rowCount) * slotW / (2 * ringR * 0.55))
+            // 先展开:首排不足时弧宽 ∝ 数量(小家一小撮),airy 系数同 75%
+            let halfArc = famArc
+                ?? min(arcCap, Double(rowCount) * slotW / (2 * ringR * 0.75))
+            if famArc == nil { famArc = halfArc }
             let slot = 2 * halfArc / Double(rowCount)
             for j in 0..<rowCount {
                 // 模糊:径向 ±0.7 排距、角向 ±0.8 槽 —— 边缘不刻意
@@ -123,9 +126,8 @@ enum BeltLayout {
                     + (hashB[k] - 0.5) * slot * 1.6
                 k += 1
             }
-            // 排距随排数递增:外缘渐稀,收尾像彗尾不像切边
-            cursor += slotW * (0.9 + 0.35 * Double(row))
-            row += 1
+            // 排距恒定小步(九稿:递增排距的彗尾太厚,层压薄)
+            cursor += slotW * 0.75
         }
         return (offsets, angles)
     }

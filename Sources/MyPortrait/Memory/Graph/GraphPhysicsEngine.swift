@@ -70,7 +70,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     ///   —— 家位按当前布局每 tick 重算,"去处"自动重新生成,被波及的
     ///   全部 folder 跟着重算。
     /// 此前的单向解绑闩/零引力/原位快照(五~七稿)均被此取代。
+    /// 九稿补充:三态全程**无隐形圆力场**(卡半路回不去的根源是回程被
+    /// 圆挡住);拖拽中不再零力,回「拖拽开始瞬间」的原位快照(定点弹簧,
+    /// 拖过之处像水合拢,不是散沙)。
     private var beltForming = true
+    /// 拖拽开始瞬间的陨石原位快照(仅拖拽中用;每次 beginDrag 边沿重拍)。
+    private var beltDragHome: [SIMD2<Float>] = []
+    private var wasDragging = false
     /// 帧携带参考:上 tick 各 hub 位置(空 = 下 tick 重建)。
     private var hubPrev: [SIMD2<Float>] = []
     private var beltTmpNow: [SIMD2<Float>] = []
@@ -279,15 +285,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                              : nodeRadius[hubIdx] + 8
             pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
         }
-        // 陨石贴自家 hub 出生(07-03),但出生角 = 各自槽位方向(hub 当前
-        // 极角 + 槽位偏移):绽放时直接朝环带方向喷出,不会生在朝主球侧
-        // 再绕大圈(错误侧鞍点是主要流散源)。
+        // 陨石出生(07-03):出生角 = 各自槽位方向(hub 当前极角 + 槽位
+        // 偏移),半径 = 环偏移的 40%(九稿:隐形圆排除已删,生得太贴
+        // hub 会穿越整片叶群一路碰撞;40% 处起飞冲出去更顺)。
         for bi in 0..<beltIdx.count {
             let hubIdx = Int(beltHub[bi])
             let hp = pos[hubIdx]
             let a = atan2(hp.y, hp.x) + beltAng[bi]
-            pos[Int(beltIdx[bi])] = hp
-                + SIMD2<Float>(cos(a), sin(a)) * (nodeRadius[hubIdx] + 3)
+            let r = max(nodeRadius[hubIdx] + 3, beltRing[bi] * 0.4)
+            pos[Int(beltIdx[bi])] = hp + SIMD2<Float>(cos(a), sin(a)) * r
         }
     }
 
@@ -332,9 +338,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 alphaTarget = p
                 if p > 0, alpha < p { alpha = p }
             }
-            // 用户首次拖球 → 生成态结束(单向闩,explode 重置):
-            // 之后进「拖拽中自由 / 松手后实时槽位」两态
-            if dragging { beltForming = false }
+            // 用户首次拖球 → 生成态结束(单向闩,explode 重置)。
+            // 每次拖拽开始的边沿:快照全部陨石当前位置(拖拽期回这些
+            // 定点 —— 定点弹簧无全局涌动,拖过之处像水合拢)
+            if dragging {
+                beltForming = false
+                if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
+            }
+            wasDragging = dragging
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
             // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
             // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
@@ -441,11 +452,25 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         dragLock.lock()
         let di = draggedIndex ?? -1
         dragLock.unlock()
-        // ② 拖拽中(八稿):陨石**完全自由** —— 无任何力,隐形圆力场同步
-        //   关闭(centerAndIntegrate 的陨石圈排除同款门控),只剩球体
-        //   碰撞/扫掠清障排开(边界 = 球个体);携带参考作废。
+        // ② 拖拽中(九稿改版,八稿零力"散沙"被否):回**拖拽开始瞬间**的
+        //   原位快照 —— 定点弹簧零初始力、无全局涌动,被拖球推开的陨石
+        //   在它身后像水合拢;边界 = 球个体(隐形圆力场三态全关)。
         if di >= 0 {
             hubPrev = []
+            guard beltDragHome.count == beltIdx.count else { return }
+            let k = GraphConstants.beltSpring * max(alpha, 0.1)
+            pos.withUnsafeBufferPointer { P in
+            vel.withUnsafeMutableBufferPointer { V in
+                for bi in 0..<beltIdx.count {
+                    let i = Int(beltIdx[bi])
+                    if i == di { continue }
+                    let delta = beltDragHome[bi] - P[i] - V[i]
+                    // 距离增益(九稿:太远回不去卡半路):>150pt 开始加力,
+                    // 封顶 ×3 —— 远球加速度大,冲得回来
+                    let boost = min(1 + simd_length(delta) / 150, 3)
+                    V[i] += delta * (k * boost)
+                }
+            }}
             return
         }
         // ①③ 共用槽位机(家位按当前布局实时重算):
@@ -535,7 +560,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     // —— 大半径弧,曲率天然平
                     let rr = simd_length(hp) + beltRing[bi]
                     let target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
-                    V[i] += (target - P[i] - V[i]) * k
+                    let delta = target - P[i] - V[i]
+                    // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
+                    let boost = min(1 + simd_length(delta) / 150, 3)
+                    V[i] += delta * (k * boost)
                 }
             }}
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
@@ -912,34 +940,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
         }
-        // 陨石不进任何隐形圈(07-03 用户定稿"确保不会进到别的隐形范围"):
-        // 对每个气泡(含自家)硬推出 —— 陨石带永远在圈外缘。放在气泡硬
-        // 解算之后(同圈内夹钳的顺序纪律:先夹后挪 hub 会白夹)。
-        // ⚠️ 八稿:**拖拽中整体关闭**(用户:"拖 folder 去撞陨石还有隐形
-        // 力场"——拖拽期边界 = 球个体,靠碰撞/清障排开);松手恢复,每轮
-        // 推出量封顶 4pt(缓释:拖拽期陷进圈的慢慢挤出,不瞬移)。
-        if !beltIdx.isEmpty, !hubIndices.isEmpty, di == nil {
-            pos.withUnsafeMutableBufferPointer { P in
-                for bi in 0..<beltIdx.count {
-                    let i = Int(beltIdx[bi])
-                    // 3 轮:两气泡相切的夹缝里,推出 A 会压进 B(实测
-                    // 2 轮仍剩 1.6pt 残余),逐轮减半,3 轮压到肉眼零。
-                    for _ in 0..<3 {
-                        for jj in 0..<hubIndices.count {
-                            guard hubBubbleR[jj] > 0 else { continue }
-                            let h = Int(hubIndices[jj])
-                            let d = P[i] - P[h]
-                            let dist = simd_length(d)
-                            let minD = hubBubbleR[jj] + nodeRadius[i] + 1
-                            if dist < minD {
-                                let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                                P[i] += dir * min(minD - dist, 4)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // 陨石×隐形圆硬排除已删(07-03 九稿用户定稿:"三态陨石都不受
+        // 隐形圆力场影响")—— 它也是"陨石调远后卡半路回不去"的根源
+        //(回程被圆挡住卡鞍点)。陨石边界 = 球个体(与任何叶跨家常开
+        // 碰撞);家位本身生成在圈外,稳态不压圆。
         // 拖拽硬清障 v2(07-02:速度再快也不叠):
         //   ① 扫掠胶囊 —— 沿「上 tick 钉位 → 本 tick 钉位」线段全程清障,
         //     高速时一 tick 跳几十 pt,点清障会隧穿跳过中间的球;
