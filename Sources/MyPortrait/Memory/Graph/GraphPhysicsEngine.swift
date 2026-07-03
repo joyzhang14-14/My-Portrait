@@ -557,7 +557,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     // 变动不再出现整段沉进内侧的分明层;拖大环家整环跟走)
                     let rr = simd_length(beltTmpNow[Int(beltAnchorSlot[bi])])
                         + beltRing[bi]
-                    let target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
+                    var target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
+                    // 家位投影出**实时**气泡(07-03 边际bug:大球被拖到环带
+                    // 上回不去老家,预测没料到 → 家位埋在它圆里,回位弹簧
+                    //(带增益)与滑出限速打平,净位移≈0 被 park 冻在圆内。
+                    // 目标本身挪到圆外缘,弹簧和滑出不再打架)
+                    for jj in 0..<nh {
+                        guard hubBubbleR[jj] > 0 else { continue }
+                        let dv = target - beltTmpNow[jj]
+                        let dist = simd_length(dv)
+                        let minD = hubBubbleR[jj] + nodeRadius[i] + 2
+                        if dist < minD {
+                            let dir = dist > 1e-4 ? dv / dist : SIMD2<Float>(1, 0)
+                            target = beltTmpNow[jj] + dir * minD
+                        }
+                    }
                     let delta = target - P[i] - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
                     //(松手态 ×2.2 排位增益已按用户要求回滚)
