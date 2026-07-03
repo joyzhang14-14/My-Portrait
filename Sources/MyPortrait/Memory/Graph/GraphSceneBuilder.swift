@@ -262,27 +262,24 @@ enum GraphSceneBuilder {
                           : m.weight < GraphConstants.beltTier1Max ? 1 : 0
                     tiers[t].append(m)
                 }
-                // 层从内到外累进基线(BeltLayout 层内自动加排,排满往外长);
-                // 层与层之间额外隔 beltRingSpacing,肉眼可辨 weight 分带。
-                var cursor = GraphConstants.beltGap
+                // 每球一个"模糊家位"(07-03 二稿):层基准 + 径向模糊,
+                // 出生角全弧散布 —— 不是槽位,只是环带吸引的目标。
                 for (t, tier) in tiers.enumerated() where !tier.isEmpty {
-                    let members = tier.sorted { $0.relPath < $1.relPath }
-                    let (offs, angs, next) = BeltLayout.slots(
-                        radii: members.map(leafRadius),
-                        jitters: members.map { stableHash01($0.relPath) - 0.5 },
-                        bubbleR: bubbleR, baseOffset: cursor)
-                    for (k, m) in members.enumerated() {
+                    for m in tier.sorted(by: { $0.relPath < $1.relPath }) {
+                        let (off, ang) = BeltLayout.home(
+                            tier: t,
+                            hashA: stableHash01(m.relPath + "#r"),
+                            hashB: stableHash01(m.relPath))
                         let idx = nodes.count
                         var node = GraphNode(id: idx, kind: leafKind(m), title: m.title,
                                              radius: leafRadius(m),
                                              colorRGB: leafColor(spec, m),
                                              fileURL: m.url, hubIndex: hubIdx)
                         node.beltTier = t
-                        node.beltAngle = angs[k]
-                        node.beltRadialOffset = offs[k]
+                        node.beltAngle = ang
+                        node.beltRadialOffset = off
                         nodes.append(node)
                     }
-                    cursor = next + GraphConstants.beltRingSpacing
                 }
             }
         }
