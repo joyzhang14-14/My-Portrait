@@ -295,16 +295,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                              : nodeRadius[hubIdx] + 8
             pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
         }
-        // 陨石出生 = 直接排到环位(07-03 精修:"优先计算排位置观感更好"):
-        // 主球极坐标目标公式同 beltPass —— 开场瞬间环就在成品半径上,
-        // 随 hub 方位收敛滑到位,不再从 hub 里喷出穿越叶群。
+        // 陨石出生(07-03):出生角 = 各自槽位方向(hub 当前极角 + 槽位
+        // 偏移),半径 = 环偏移的 40%(生得太贴 hub 会穿越整片叶群一路
+        // 碰撞;40% 处起飞冲出去更顺)。开场保留喷出绽放效果(用户拍板,
+        // "先排位"只用于松手后)。
         for bi in 0..<beltIdx.count {
             let hubIdx = Int(beltHub[bi])
             let hp = pos[hubIdx]
-            let ang = atan2(hp.y, hp.x) + beltAng[bi]
-            let rr = simd_length(pos[Int(hubIndices[Int(beltAnchorSlot[bi])])])
-                + beltRing[bi]
-            pos[Int(beltIdx[bi])] = SIMD2<Float>(cos(ang), sin(ang)) * rr
+            let a = atan2(hp.y, hp.x) + beltAng[bi]
+            let r = max(nodeRadius[hubIdx] + 3, beltRing[bi] * 0.4)
+            pos[Int(beltIdx[bi])] = hp + SIMD2<Float>(cos(a), sin(a)) * r
         }
     }
 
@@ -579,9 +579,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         + beltRing[bi]
                     let target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
                     let delta = target - P[i] - V[i]
-                    // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
+                    // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3。
+                    // 松手态基础增益 ×2.2(07-03 精修:"松手后优先计算排
+                    // 位置"——回位干脆利落;生成态保持柔和绽放)
                     let dLen = simd_length(delta)
-                    let boost = min(1 + dLen / 150, 3)
+                    let boost = min(1 + dLen / 150, 3) * (carrying ? 1 : 2.2)
                     V[i] += delta * (k * boost)
                     // 穿透(十稿):回流途中(>24pt)对碰撞免疫,近终点实体化;
                     // 生成态不穿(绽放本来就要靠碰撞摊开)
