@@ -75,38 +75,45 @@ struct GraphEdge: Sendable {
     var springStrength: Double? = nil
 }
 
-/// 陨石散布(07-03 三稿,builder 与独立自检共用的**纯函数**,保证零漂移):
+/// 陨石散布(07-03 五稿,builder 与独立自检共用的**纯函数**,保证零漂移):
 /// 输入一家全部陨石(按层内→外串接:高 weight 在前),输出每球"模糊家位"。
-/// 形状 = **扇形云**:弧度随数量先展开(长到 ±beltMaxHalfArc),装满一排
-/// 再往外延长 —— 陨石多的家(Unclassified)不再贴着隐形圈一圈壳(用户:
-/// 太刻意)。径向/角向大幅哈希模糊,排结构肉眼不可见;层间无空隙,
-/// 只留"小(低 weight)球偏外"的趋势。
+/// ⚠️ 五稿坐标系换成**主球极坐标**(用户画黄线:"弧度更平,和隐形圆没
+/// 太大关系了"——绕自家气泡排的弧曲率太大,改绕全图中心排,半径大弧
+/// 自然平):家位 = (径向偏移相对气泡远端, 角度相对 hub 的主球极角)。
+/// 弧宽先随数量展开(上限 ∝ 自家气泡的角footprint),装满一排往外延长;
+/// 大幅哈希模糊,层间无空隙,小(低 weight)球偏外。
 enum BeltLayout {
     /// - Parameters:
     ///   - radii: 全家陨石球半径(层内→外串接,高 weight 在前)
     ///   - hashA/hashB: 每球两个独立的 [0,1) 确定性哈希(路径加盐)
-    ///   - bubbleR: 自家气泡半径(决定每排弧容量)
-    /// - Returns: (径向偏移相对气泡半径, 家位角相对背主球方向) 同序
+    ///   - bubbleR: 自家气泡半径
+    ///   - mainDist: hub→主球弹簧自然长度(≈ hub 到全图中心的距离)
+    /// - Returns: (径向偏移「相对气泡远端 mainDist+bubbleR」,
+    ///            家位角「相对 hub 的主球极角」) 同序
     static func homes(radii: [Double], hashA: [Double], hashB: [Double],
-                      bubbleR: Double) -> (offsets: [Double], angles: [Double]) {
+                      bubbleR: Double, mainDist: Double)
+        -> (offsets: [Double], angles: [Double]) {
         let n = radii.count
         guard n > 0 else { return ([], []) }
         let slotW = 2 * ((radii.max() ?? 1) + 1)
+        // 气泡远端到全图中心的半径:弧容量按这个大半径算 → 平弧
+        let baseR = mainDist + bubbleR
+        // 弧宽上限 ∝ 自家气泡的角 footprint(×2.4):大家平铺一大片,
+        // 小家不越权抢邻居的方位;真实可用弧仍由引擎动态裁剪
+        let ownHalf = asin(min(0.95, bubbleR / max(mainDist, bubbleR + 1)))
+        let arcCap = min(GraphConstants.beltMaxHalfArc, ownHalf * 2.4 + 0.1)
         var offsets = [Double](repeating: 0, count: n)
         var angles = [Double](repeating: 0, count: n)
         var cursor = GraphConstants.beltGap
         var k = 0
         var row = 0
         while k < n {
-            let ringR = bubbleR + cursor
-            // 每排只装理论容量的 55%(07-03 四稿用户画线:装满才外溢 =
-            // 贴圈薄壳太怂;稀装让云往外深铺成宽新月)
-            let cap = max(1, Int(2 * GraphConstants.beltMaxHalfArc * ringR
-                                 / slotW * 0.55))
+            let ringR = baseR + cursor
+            // 每排只装理论容量的 55%(装满才外溢 = 贴边薄壳;稀装深铺)
+            let cap = max(1, Int(2 * arcCap * ringR / slotW * 0.55))
             let rowCount = min(cap, n - k)
-            // 先展开:不足一排时弧宽 ∝ 数量(小家一小撮,不摊满全弧),
-            // airy 系数同 55%(排内球距 ~1.8 槽)
-            let halfArc = min(GraphConstants.beltMaxHalfArc,
+            // 先展开:不足一排时弧宽 ∝ 数量,airy 系数同 55%
+            let halfArc = min(arcCap,
                               Double(rowCount) * slotW / (2 * ringR * 0.55))
             let slot = 2 * halfArc / Double(rowCount)
             for j in 0..<rowCount {
