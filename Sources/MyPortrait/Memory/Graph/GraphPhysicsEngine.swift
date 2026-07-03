@@ -59,6 +59,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 全节点陨石标记(碰撞用):陨石×陨石**跨家也常开**碰撞 —— 平弧
     /// 云在家与家交界处会交叠,家隔离原则只管圈内叶(07-03 五稿)。
     private var nodeBelt: [Bool] = []
+    /// 穿透标记(十稿:"松手移动时会被别的球卡住"):回流中(离目标
+    /// >24pt)的陨石对碰撞免疫,可穿过任何球;接近终点恢复实体,落点
+    /// 重叠由碰撞解开。beltPass 每 tick 刷新;explode 清零。
+    private var nodeTransit: [Bool] = []
     /// 自家 hub 在 hubIndices 里的槽号(绑定期帧携带查 dPhi 用)。
     private var beltHubSlot: [Int32] = []
     /// 陨石三态(07-03 八稿用户定稿:"生成/拖着/松手后三种状态不同计算"):
@@ -180,6 +184,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
             = Self.beltArrays(scene: scene)
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
+        nodeTransit = .init(repeating: false, count: n)
         // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
         // 目标落位/绽放出生已删 —— 布局不再有"成品位",只有平衡态。
 
@@ -256,6 +261,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         seedLeafAngles()
         // 重新生成 → 陨石回生成态(帧携带成型,首次拖球后转实时槽位)
         beltForming = true
+        nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         alpha = 1
         publishSnapshot()
@@ -313,6 +319,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
             = Self.beltArrays(scene: scene)
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
+        nodeTransit = .init(repeating: false, count: n)
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         alpha = max(alpha, 0.1)   // 轻推一下,别炸开
         simLock.unlock()
@@ -467,8 +474,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     let delta = beltDragHome[bi] - P[i] - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 开始加力,
                     // 封顶 ×3 —— 远球加速度大,冲得回来
-                    let boost = min(1 + simd_length(delta) / 150, 3)
+                    let dLen = simd_length(delta)
+                    let boost = min(1 + dLen / 150, 3)
                     V[i] += delta * (k * boost)
+                    // 穿透(十稿):回流途中(>24pt)对碰撞免疫,近终点实体化
+                    nodeTransit[i] = dLen > 24
                 }
             }}
             return
@@ -562,8 +572,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     let target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
                     let delta = target - P[i] - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
-                    let boost = min(1 + simd_length(delta) / 150, 3)
+                    let dLen = simd_length(delta)
+                    let boost = min(1 + dLen / 150, 3)
                     V[i] += delta * (k * boost)
+                    // 穿透(十稿):回流途中(>24pt)对碰撞免疫,近终点实体化;
+                    // 生成态不穿(绽放本来就要靠碰撞摊开)
+                    nodeTransit[i] = !carrying && dLen > 24
                 }
             }}
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
@@ -1136,6 +1150,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             nodeRadius.withUnsafeBufferPointer { R in
             nodeFamily.withUnsafeBufferPointer { FAM in
             nodeBelt.withUnsafeBufferPointer { BELT in
+            nodeTransit.withUnsafeBufferPointer { TR in
             qChild.withUnsafeBufferPointer { ch in
             qMaxR.withUnsafeBufferPointer { MR in
             nextPoint.withUnsafeBufferPointer { NP in
@@ -1149,6 +1164,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 for i in 0..<n {
                     let fi = FAM[i]
                     guard fi >= 0 else { continue }   // 只有叶参与(hub 归气泡/硬约束管)
+                    if TR[i] { continue }             // 穿透中(回流陨石)不碰撞
                     let pi = P[i] + V[i]           // 预测位置(d3 语义)
                     let ri = R[i] + pad
                     let ri2 = ri * ri
@@ -1176,8 +1192,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                                 while pj >= 0 {
                                     // 每对一次 + 常态同家隔离(拖拽期全局阻力);
                                     // 陨石×任何叶跨家常开(八稿:拖拽期陨石的
-                                    // 边界 = 球个体,靠这条排开;平弧交界同理)
-                                    if pj > i, FAM[pj] == fi || (!isolate && FAM[pj] >= 0)
+                                    // 边界 = 球个体,靠这条排开;平弧交界同理);
+                                    // 穿透中(TR)不碰撞
+                                    if pj > i, !TR[pj], FAM[pj] == fi || (!isolate && FAM[pj] >= 0)
                                         || ((BELT[i] || BELT[pj]) && FAM[pj] >= 0) {
                                         let rj = R[pj] + pad
                                         let rsum = ri + rj
@@ -1201,7 +1218,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         }
                     }
                 }
-            }}}}}}}}}}}}
+            }}}}}}}}}}}}}
         }
     }
 

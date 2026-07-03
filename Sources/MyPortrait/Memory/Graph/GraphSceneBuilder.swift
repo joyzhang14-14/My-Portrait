@@ -168,6 +168,13 @@ enum GraphSceneBuilder {
         // 气泡碰撞涌现);圆间零重叠、叶不出自家圆由物理保证。
         // 陨石带只在 Events 画布(07-03 用户定稿)。
         let beltEnabled = zone == .events
+        // 大环吞并(07-03 十稿用户定稿):event 数量第一的家(specs 降序
+        // 首个有陨石的)的陨石环若**包含**了别家的环(别家环外缘 < 大环
+        // 外缘),被包含家的陨石直接生成到大环半径上(各自方位、颜色
+        // 不变)—— 消灭大环里面的小环碎片;不进别家隐形圆由引擎动态
+        // 裁剪保证。
+        var megaBase: Double? = nil    // 大环基准(绝对半径 = rest+bubbleR)
+        var megaOuter: Double = 0      // 大环外缘(绝对半径)
         for spec in specs {
             let r = hubRadius(spec)
             // 陨石带(07-03):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
@@ -271,11 +278,21 @@ enum GraphSceneBuilder {
                         flat.append((m, t))
                     }
                 }
+                // 吞并判定(十稿):本家环外缘(粗估 +40 深)落在大环外缘
+                // 之内 → 陨石改生成到大环半径(shift 平移径向偏移;弧
+                // 容量按大环半径算 → effMainDist,弧更平)
+                var effMainDist = hubRest
+                var shift = 0.0
+                if let mb = megaBase,
+                   hubRest + bubbleR + GraphConstants.beltGap + 40 < megaOuter {
+                    effMainDist = mb - bubbleR
+                    shift = mb - (hubRest + bubbleR)
+                }
                 let (offs, angs) = BeltLayout.homes(
                     radii: flat.map { leafRadius($0.m) },
                     hashA: flat.map { stableHash01($0.m.relPath + "#r") },
                     hashB: flat.map { stableHash01($0.m.relPath) },
-                    bubbleR: bubbleR, mainDist: hubRest)
+                    bubbleR: bubbleR, mainDist: effMainDist)
                 for (k, f) in flat.enumerated() {
                     let idx = nodes.count
                     var node = GraphNode(id: idx, kind: leafKind(f.m), title: f.m.title,
@@ -284,8 +301,13 @@ enum GraphSceneBuilder {
                                          fileURL: f.m.url, hubIndex: hubIdx)
                     node.beltTier = f.t
                     node.beltAngle = angs[k]
-                    node.beltRadialOffset = offs[k]
+                    node.beltRadialOffset = offs[k] + shift
                     nodes.append(node)
+                }
+                // 首个有陨石的家(specs 降序 = event 数量第一)定下大环
+                if megaBase == nil {
+                    megaBase = hubRest + bubbleR
+                    megaOuter = hubRest + bubbleR + (offs.max() ?? 0) + 20
                 }
             }
         }
