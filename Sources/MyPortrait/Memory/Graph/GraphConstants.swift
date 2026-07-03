@@ -54,10 +54,12 @@ enum GraphConstants {
     /// folder 球。07-02 反馈:末端球下限两连降(4→2.5→1.5),上限不变。
     /// 07-03 用户:"大部分球一样大,不好判断重要性" —— 实测 968 事件里
     /// 气泡内(w≥1.5)89% 挤在 w=1.5~2.5,旧斜率 0.9 这段半径只差 0.9pt。
-    /// 斜率 0.9→1.7、基数 1.5→0.9 拉开主力段(面积差 1.7x→2.2x),
-    /// 下限 1.5 保底(最小陨石不比原来小,不会看不见/点不中)
-    static let eventRadiusBase: Double = 0.9
-    static let eventRadiusScale: Double = 1.7
+    /// 斜率 0.9→1.7→**2.4**、基数 1.5→0.9→**0.2**(用户两次加码"更分明"):
+    /// 主力段 w=1.5~2.5 半径 3.8→6.2,面积差 1.7x→2.2x→2.7x,相邻半档
+    /// 差 1.2pt;w≥5.75 封顶。下限 1.5 保底(最小陨石不比原来小,不会
+    /// 看不见/点不中;w<0.55 的陨石齐底,层次由陨石带三层圈表达)
+    static let eventRadiusBase: Double = 0.2
+    static let eventRadiusScale: Double = 2.4
     static let eventRadiusMin: Double = 1.5
     static let eventRadiusMax: Double = 14
     /// portrait 小球 = p0 + kp·min(weight, 18);下限降,斜率补偿保上限
