@@ -432,9 +432,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 不加(拖拽钉住覆盖速度,加了也白算,与叶弹簧同理无须豁免)。
     private func beltPass() {
         guard !beltIdx.isEmpty else { return }
-        // 地板同 linkPass:力系统要么都醒要么都睡。
-        let k = GraphConstants.beltSpring * max(alpha, 0.1)
         if beltBound {
+            // 地板同 linkPass:力系统要么都醒要么都睡。
+            let k = GraphConstants.beltSpring * max(alpha, 0.1)
             // 绑定期(07-03 三稿:生成时绑定,拖动后解绑):帧携带 ——
             // 开场收敛 hub 绕主球公转可达大半圈,纯吸引拖不动整条带
             //(169/599 流散实测)。带子随自家 hub 平移+公转刚体走位,
@@ -527,29 +527,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
             return
         }
-        // 解绑后(用户拖过球):只被吸引 —— 两个弱力,稳态形状由吸引+
-        // 碰撞+硬排除涌现;拖拽冲散后慢慢跟回自家(新)位置。
-        // 五稿:同样换主球极坐标(朝大圆回拉),弧保持平。
+        // 解绑后(用户拖过球,07-03 六稿定稿):**零引力** —— 陨石只是
+        // 漂浮的碎石,被拖近时靠碰撞/清障排开(不重叠),不再有任何
+        // 回拉。⚠️ 五稿的"大圆吸引+方位偏置"在解绑瞬间会把全场陨石
+        // 抽向各自 hub 方位(用户实测"一动全聚中心"),已删。
+        // 硬约束(不进任何气泡/主球)与碰撞照常,拖 hub 时隐形圆推着走。
         hubPrev = []   // 参考作废(下次 explode 重绑时重建)
-        let bias = GraphConstants.beltAntiMainBias
-        pos.withUnsafeBufferPointer { P in
-        vel.withUnsafeMutableBufferPointer { V in
-            for bi in 0..<beltIdx.count {
-                let i = Int(beltIdx[bi]), hub = Int(beltHub[bi])
-                let hp = P[hub]
-                let rr = max(simd_length(P[i]), 1)
-                let radial = P[i] / rr
-                // ① 大圆吸引:朝「自家 hub 距离 + 环偏移」的主球大圆回拉
-                V[i] += radial * ((simd_length(hp) + beltRing[bi] - rr) * k)
-                // ② 弱方位偏置:切向漂向自家 hub 的方位;sin 形 → 正后方
-                //   零力自由散布,漂远的被慢慢领回来
-                var dAng = atan2(P[i].y, P[i].x) - atan2(hp.y, hp.x)
-                while dAng > .pi { dAng -= 2 * .pi }
-                while dAng < -.pi { dAng += 2 * .pi }
-                let tangent = SIMD2<Float>(-radial.y, radial.x)
-                V[i] -= tangent * (sin(dAng) * k * rr * 0.5 * bias)
-            }
-        }}
     }
 
     /// 气泡碰撞(07-02 气泡重构):每个 hub 携带一个隐形圆(半径=builder
