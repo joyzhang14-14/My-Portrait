@@ -557,31 +557,23 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             a = lo + (a + fw) / (2 * fw) * (hi - lo)
                         }
                     } else if !segs.isEmpty {
-                        // 多段"原地优先"(边际四修:整体居中重映射会平移没
-                        // 被挡的球,merge 球漂离自家上方):家位落在自由段
-                        // 内 → 一动不动;落在洞里 → 按洞内深度甩到洞两侧
-                        // 的自由空间(0.6×洞宽,顺序大致保持);出界 → 夹端
-                        var inFree = false
-                        for (l, h) in segs where a >= l && a <= h {
-                            inFree = true
-                            break
+                        // 多段 → 整家选**一个最佳自由段**(边际五修,用户
+                        // 法则:"同一个球的陨石必须连贯"——洞两侧分摊会把
+                        // 一家拆成 2~3 段):容量够 2×家宽的段里选离自家
+                        // 方位(0)最近的,整家按单段规则放入(贴自家方位
+                        // 平移;装不下线性压缩,密而不断)
+                        var best = segs[0]
+                        var bestScore = -Float.greatestFiniteMagnitude
+                        for (l, h) in segs {
+                            let dist = l > 0 ? l : (h < 0 ? -h : 0)
+                            let score = min(h - l, 2 * fw) * 2 - dist
+                            if score > bestScore { bestScore = score; best = (l, h) }
                         }
-                        if !inFree {
-                            var mapped = false
-                            for idx in 0..<segs.count - 1 {
-                                let hl = segs[idx].1, hh = segs[idx + 1].0
-                                if a > hl && a < hh {
-                                    let t = (a - hl) / (hh - hl)
-                                    let w = (hh - hl) * 0.6
-                                    a = t < 0.5 ? hl - t * w : hh + (1 - t) * w
-                                    a = min(max(a, segs[idx].0), segs[idx + 1].1)
-                                    mapped = true
-                                    break
-                                }
-                            }
-                            if !mapped {
-                                a = min(max(a, segs[0].0), segs[segs.count - 1].1)
-                            }
+                        let (lo, hi) = best
+                        if 2 * fw <= hi - lo {
+                            a += min(max(0, lo + fw), hi - fw)
+                        } else {
+                            a = lo + (a + fw) / (2 * fw) * (hi - lo)
                         }
                     }
                     let homeAng = beltTmpPol[s] + a
