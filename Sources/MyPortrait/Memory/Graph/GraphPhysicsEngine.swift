@@ -549,25 +549,19 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     let segs = beltPredSegs[s]
                     let fw = max(beltFamW[s], 0.05)
                     var a = beltAng[bi]
-                    if segs.count == 1 {
-                        let (lo, hi) = segs[0]
-                        if 2 * fw <= hi - lo {
-                            a += min(max(0, lo + fw), hi - fw)
-                        } else {
-                            a = lo + (a + fw) / (2 * fw) * (hi - lo)
-                        }
-                    } else if !segs.isEmpty {
+                    if !segs.isEmpty {
                         // 多段 → 整家选**一个最佳自由段**(边际五修,用户
-                        // 法则:"同一个球的陨石必须连贯"——洞两侧分摊会把
-                        // 一家拆成 2~3 段):容量够 2×家宽的段里选离自家
-                        // 方位(0)最近的,整家按单段规则放入(贴自家方位
-                        // 平移;装不下线性压缩,密而不断)
+                        // 法则:"同一个球的陨石必须连贯"):容量够 2×家宽
+                        // 的段里选离自家方位(0)最近的,整家按单段规则放入
+                        //(贴自家方位平移;装不下线性压缩,密而不断)
                         var best = segs[0]
-                        var bestScore = -Float.greatestFiniteMagnitude
-                        for (l, h) in segs {
-                            let dist = l > 0 ? l : (h < 0 ? -h : 0)
-                            let score = min(h - l, 2 * fw) * 2 - dist
-                            if score > bestScore { bestScore = score; best = (l, h) }
+                        if segs.count > 1 {
+                            var bestScore = -Float.greatestFiniteMagnitude
+                            for (l, h) in segs {
+                                let dist = l > 0 ? l : (h < 0 ? -h : 0)
+                                let score = min(h - l, 2 * fw) * 2 - dist
+                                if score > bestScore { bestScore = score; best = (l, h) }
+                            }
                         }
                         let (lo, hi) = best
                         if 2 * fw <= hi - lo {
@@ -575,6 +569,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         } else {
                             a = lo + (a + fw) / (2 * fw) * (hi - lo)
                         }
+                        // 积压微调(07-03 用户拍板:"有积压就再往反方向转
+                        // 一点"):判定 = 自然弧被裁掉的量,哪侧裁得多就往
+                        // 另一侧多转(∝裁量,封顶 0.12rad);轻微越入洞边
+                        // 由滑出/投影兜底
+                        let lossR = max(0, fw - hi)
+                        let lossL = max(0, fw + lo)
+                        a += min(max((lossL - lossR) * 0.08, -0.12), 0.12)
                     }
                     let homeAng = beltTmpPol[s] + a
                     // 目标 = 主球极坐标大圆上的点。半径基于**锚定家**的
