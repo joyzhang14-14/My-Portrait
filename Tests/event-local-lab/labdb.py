@@ -71,6 +71,23 @@ CREATE TABLE IF NOT EXISTS chapters(
 );
 CREATE INDEX IF NOT EXISTS idx_chapters_day ON chapters(day, seq);
 
+-- 视觉层留存:每 session 视觉模型(Qwen3-VL-8B)看图产出的 items,durable 供其他 pipeline 复用。
+-- 键=day+session_key(v4 merged-session 的锚点 part id);幂等 upsert。items 是原始视觉产物,
+-- 不含下游 14B 的 doing/kw(那些在 视觉增量v4b-<day>.md)。
+CREATE TABLE IF NOT EXISTS vision_items(
+  day           TEXT NOT NULL,
+  session_key   INTEGER NOT NULL,
+  parts         TEXT NOT NULL DEFAULT '[]',   -- json [raw_sessions.id]
+  app           TEXT,
+  model         TEXT,
+  total_frames  INTEGER,
+  kept_frames   INTEGER,
+  items         TEXT NOT NULL DEFAULT '[]',   -- json [str] 视觉逐帧 append-only 产物
+  created_ms    INTEGER,
+  PRIMARY KEY(day, session_key)
+);
+CREATE INDEX IF NOT EXISTS idx_vision_day ON vision_items(day);
+
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -185,6 +202,26 @@ def fail_session(con, sess_id, err):
     with con:
         con.execute("UPDATE raw_sessions SET error=?, updated_at_ms=? WHERE id=?",
                     (str(err)[:500], now_ms(), sess_id))
+
+
+def save_vision_items(con, day, key, parts, app, model, total_frames, kept_frames, items):
+    """视觉产物 durable 落库(幂等 upsert)。供其他 pipeline 复用,不再赌 /tmp。"""
+    with con:
+        con.execute(
+            "INSERT OR REPLACE INTO vision_items(day,session_key,parts,app,model,"
+            "total_frames,kept_frames,items,created_ms) VALUES(?,?,?,?,?,?,?,?,?)",
+            (day, int(key), json.dumps(parts), app, model, total_frames, kept_frames,
+             json.dumps(items, ensure_ascii=False), now_ms()))
+
+
+def vision_items_for_day(con, day):
+    """{session_key: {parts, app, model, items, ...}} —— 复用入口。"""
+    out = {}
+    for r in con.execute("SELECT * FROM vision_items WHERE day=?", (day,)):
+        out[r["session_key"]] = {"parts": json.loads(r["parts"]), "app": r["app"],
+                                 "model": r["model"], "total_frames": r["total_frames"],
+                                 "kept_frames": r["kept_frames"], "items": json.loads(r["items"])}
+    return out
 
 
 def log_call(con, day, purpose, session_id, prompt_chars, output, ok, latency_ms):

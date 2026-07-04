@@ -281,6 +281,7 @@ def do_run(model_id, tag, maxpix=MAXPIX):
     if hasattr(processor, "image_processor"):
         processor.image_processor.max_pixels = maxpix
 
+    con = labdb.connect()                         # 视觉产物 durable 落库(供复用)
     results = list(done.values())
     for key, b in manifest.items():
         if int(key) in done:
@@ -301,6 +302,8 @@ def do_run(model_id, tag, maxpix=MAXPIX):
                         "ocr": b["ocr"], "items": items, "doing": "", "kw": [], "lat_ms": lat})
         json.dump({"model": model_id, "tag": tag, "results": results},
                   open(fp, "w"), ensure_ascii=False, indent=2)   # 每会话checkpoint
+        labdb.save_vision_items(con, DAY, int(key), b["parts"], app, model_id,
+                                b["total_frames"], b["kept_frames"], items)
         print(f"  ✓ s{key} [{app}] {b['kept_frames']}帧 {lat/1000:.0f}s · {len(items)}项")
     json.dump({"model": model_id, "tag": tag, "results": results},
               open(fp, "w"), ensure_ascii=False, indent=2)
