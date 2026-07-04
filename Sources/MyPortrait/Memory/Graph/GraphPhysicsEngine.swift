@@ -117,6 +117,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 防几何微动时两段得分打平 tick 间乒乓换段)。
     private var beltFamBase: [Float] = [], beltFamSlope: [Float] = []
     private var beltFamSel: [Float] = []
+    /// 抬环让位:每家(被吞并卫星)拥挤时抬升的环半径(有硬上限)。
+    private var beltFamRise: [Float] = []
     private var beltTmpPol: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
@@ -652,6 +654,30 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltFamBase[s] = base
                 beltFamSlope[s] = slope
             }
+            // 抬环让位(07-04 用户方案:merge 与正上方都要,挤了就略微抬环
+            // 径向让开 host,涵盖两个;有硬上限不抬太多)。只对被吞并卫星、
+            // 且弧确实逼近 host 气泡时抬;远离 host 的家 clearance 大→抬 0。
+            if beltFamRise.count != nh { beltFamRise = .init(repeating: 0, count: nh) }
+            for s in 0..<nh {
+                let sA = Int(beltFamAnchor[s])
+                guard beltFamReach[s] > 0, sA != s, hubBubbleR[sA] > 0 else {
+                    beltFamRise[s] = 0; continue
+                }
+                let hp = beltTmpNow[sA]
+                let dH = simd_length(hp), bH = hubBubbleR[sA]
+                guard dH > 1 else { beltFamRise[s] = 0; continue }
+                // 弧上离 host 方向最近的角(0 = 弧盖住 host 正上方)
+                var rel = atan2(hp.y, hp.x) - beltTmpPol[s]
+                while rel > .pi { rel -= 2 * .pi }
+                while rel < -.pi { rel += 2 * .pi }
+                let thNear = max(0, abs(rel) - beltFamW[s])
+                let rrInner = dH + bH + Float(GraphConstants.beltGap)
+                let d = (dH * dH + rrInner * rrInner
+                         - 2 * dH * rrInner * cos(thNear)).squareRoot()
+                let clearance = d - bH   // 内层陨石到 host 气泡边的径向间隙
+                beltFamRise[s] = min(max(0, GraphConstants.beltRideGap - clearance),
+                                     GraphConstants.beltRiseCap)
+            }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
             var transitAny = false
             pos.withUnsafeMutableBufferPointer { P in
@@ -675,7 +701,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     // 实时距离(被大环吞并 = 大环家 —— 全环同一基准,布局
                     // 变动不再出现整段沉进内侧的分明层;拖大环家整环跟走)
                     let rr = simd_length(beltTmpNow[Int(beltAnchorSlot[bi])])
-                        + beltRing[bi]
+                        + beltRing[bi] + beltFamRise[s]
                     var target = SIMD2<Float>(cos(homeAng), sin(homeAng)) * rr
                     // 家位投影出**实时**气泡(07-03 边际bug:大球被拖到环带
                     // 上回不去老家,预测没料到 → 家位埋在它圆里,回位弹簧
@@ -824,11 +850,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     // 骑其角向正上方;影锥把弧沿环滑开(**动弧不动 hub** =
                     // 用户定的 merge>正上方)。仅限内侧外家(不全局),避开
                     // 八修的 asin 全局 3x 过挖。self-anchored 家仍靠反推转 hub。
-                    if sA != s, t != s, dT < rB {
-                        w = min(asin(min(bT / dT, 1)), 1.2)
-                    } else {
-                        continue   // 环中径不与挡板相交
-                    }
+                    // 抬环让位(07-04 用户方案):host bubble 余弦挖不出洞时
+                    // 不再角向滑弧偏离正上方,改由 beltFamRise 抬升环半径径向
+                    // 让开(弧保持正上方,merge 与正上方都要)。此处不裁。
+                    continue
                 } else {
                     w = acos(max(cosT, -1))
                 }
