@@ -839,23 +839,25 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 if dT + bT < bLo || dT - bT > bHi { continue }
                 // 洞宽 = 挡板圆与本家环中径的真实相交角半宽(余弦定理,
                 // 八修:asin 影锥角过挡 3x 会把整家推去另一侧)
-                let cosT = (dT * dT + rB * rB - bT * bT) / (2 * dT * rB)
+                // mid rB 圆够不着障碍(cosRB≥1)分两种(07-04 用户"提前避开
+                // 别钉边",ultracode 复现定稿):① host(t==sA):抬环让位
+                //(§一点八.9),不裁,弧保持正上方靠 beltFamRise 径向躲;② 别的
+                // 大外家 bubble(如 My-Portrait,只擦到 belt 外层/内层,mid 摸
+                // 不到)—— rB 漏裁 → 外层陨石最后被逐球投影钉到它边上("贴外围"
+                // 密排),改在障碍触及的带边 rEff=clamp(dT,内缘,外缘) 完整挖洞,
+                // 弧在裁剪阶段提前绕开。cosRB<1(rB 摸得到)= in-band 障碍,原样
+                // 用 rB —— 混合复现证实无条件 rEff 会对 in-band 障碍过裁 6~10°
+                // 偶把整家推过主球正面,故只在 rB 漏裁时才退 rEff。
+                let cosRB = (dT * dT + rB * rB - bT * bT) / (2 * dT * rB)
                 let w: Float
-                if cosT >= 1 {
-                    // 影锥挖洞(07-03 Work-Valis merge-favored 让弧,ultracode
-                    // 对抗复现定稿):余弦算不出洞的挡板 —— 唯 merged satellite
-                    //(sA != s)对**径向在环内侧**的外家 bubble(host 及任何
-                    // dT<rB 的圆,非自家 t != s)用影锥半宽 asin(bT/dT) 挖洞。
-                    // host bubble 永在环内侧,余弦挖不出洞(cosT≥1),灰弧只能
-                    // 骑其角向正上方;影锥把弧沿环滑开(**动弧不动 hub** =
-                    // 用户定的 merge>正上方)。仅限内侧外家(不全局),避开
-                    // 八修的 asin 全局 3x 过挖。self-anchored 家仍靠反推转 hub。
-                    // 抬环让位(07-04 用户方案):host bubble 余弦挖不出洞时
-                    // 不再角向滑弧偏离正上方,改由 beltFamRise 抬升环半径径向
-                    // 让开(弧保持正上方,merge 与正上方都要)。此处不裁。
-                    continue
+                if cosRB >= 1 {
+                    if t == sA { continue }
+                    let rEff = min(max(dT, bLo), bHi)
+                    let cosE = (dT * dT + rEff * rEff - bT * bT) / (2 * dT * rEff)
+                    if cosE >= 1 { continue }   // rEff 也够不着 = 真没挡,不裁
+                    w = acos(max(cosE, -1))
                 } else {
-                    w = acos(max(cosT, -1))
+                    w = acos(max(cosRB, -1))
                 }
                 var rel = atan2(pt.y, pt.x) - polar
                 while rel > .pi { rel -= 2 * .pi }
