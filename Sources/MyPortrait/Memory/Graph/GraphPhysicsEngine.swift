@@ -851,6 +851,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             pol[s] = atan2(P[s].y, P[s].x)
             dst[s] = max(simd_length(P[s]), 1)
         }
+        // 需求全局归一(07-03 Work-Valis 漂进环根治):多家 famW 封顶 1.0
+        // 后两两需求 ~2.1rad,5~6 个 belt 家链起来 10+rad > 2π —— 几何上
+        // **永不可满足**,切向力永续互搅,最轻的家被邻居角向夹住只剩径向
+        // 一条路,漂出去停进环带(harness 实测 hub 停在 rest+100pt)。
+        // 把各家弧半宽预算按"全场装得下一圈"缩放 → 需求可满足 → 力归零
+        var sumW: Float = 0
+        for s in 0..<nh where beltFamReach[s] > 0 { sumW += min(beltFamW[s], 1.0) }
+        let famScale = sumW > 0 ? min(1, (Float.pi - 0.4) / sumW) : 1
         for s in 0..<(nh - 1) {
             for t in (s + 1)..<nh {
                 var needed: Float = 0
@@ -867,7 +875,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         let dB = dst[bA]
                         if dB + max(hubBubbleR[bA], 0) - 6 < hi,
                            dB + beltFamReach[b] + 20 > lo {
-                            obs = min(beltFamW[b], 1.0)
+                            obs = min(beltFamW[b], 1.0) * famScale
                         }
                     }
                     // b 的气泡影锥(从主球看的角半宽)够到 a 的带 →
@@ -879,7 +887,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         }
                     }
                     if obs > 0 {
-                        needed = max(needed, min(min(beltFamW[a], 1.0) + obs + 0.1, 2.2))
+                        needed = max(needed,
+                                     min(min(beltFamW[a], 1.0) * famScale + obs + 0.1, 2.2))
                     }
                 }
                 guard needed > 0 else { continue }
