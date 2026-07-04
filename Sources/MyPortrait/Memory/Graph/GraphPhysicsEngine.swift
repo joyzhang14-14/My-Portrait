@@ -864,6 +864,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 var needed: Float = 0
                 for (a, b) in [(s, t), (t, s)] {   // a 的弧被 b 压
                     guard beltFamReach[a] > 0 else { continue }
+                    // merge 优先于"保持正上方"(07-03 用户定稿:两者冲突
+                    // 程序偏向 merge):被吞并进大环的家不再为自家弧位
+                    // 推 hub —— 弧被压就沿环让位(裁剪/选段),球不动。
+                    // 归一化后仍偶发漂移(Work-Valis),力源头在此掐断;
+                    // 只有以自己为锚的家保留反推(独立环,让位无处可让)
+                    guard Int(beltFamAnchor[a]) == a else { continue }
                     let aA = Int(beltFamAnchor[a])
                     let dA = dst[aA]
                     let lo = dA + max(hubBubbleR[aA], 0) - 6
