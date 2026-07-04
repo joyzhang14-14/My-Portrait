@@ -814,8 +814,24 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 洞宽 = 挡板圆与本家环中径的真实相交角半宽(余弦定理,
                 // 八修:asin 影锥角过挡 3x 会把整家推去另一侧)
                 let cosT = (dT * dT + rB * rB - bT * bT) / (2 * dT * rB)
-                if cosT >= 1 { continue }   // 环中径不与挡板相交
-                let w = acos(max(cosT, -1))
+                let w: Float
+                if cosT >= 1 {
+                    // 影锥挖洞(07-03 Work-Valis merge-favored 让弧,ultracode
+                    // 对抗复现定稿):余弦算不出洞的挡板 —— 唯 merged satellite
+                    //(sA != s)对**径向在环内侧**的外家 bubble(host 及任何
+                    // dT<rB 的圆,非自家 t != s)用影锥半宽 asin(bT/dT) 挖洞。
+                    // host bubble 永在环内侧,余弦挖不出洞(cosT≥1),灰弧只能
+                    // 骑其角向正上方;影锥把弧沿环滑开(**动弧不动 hub** =
+                    // 用户定的 merge>正上方)。仅限内侧外家(不全局),避开
+                    // 八修的 asin 全局 3x 过挖。self-anchored 家仍靠反推转 hub。
+                    if sA != s, t != s, dT < rB {
+                        w = min(asin(min(bT / dT, 1)), 1.2)
+                    } else {
+                        continue   // 环中径不与挡板相交
+                    }
+                } else {
+                    w = acos(max(cosT, -1))
+                }
                 var rel = atan2(pt.y, pt.x) - polar
                 while rel > .pi { rel -= 2 * .pi }
                 while rel < -.pi { rel += 2 * .pi }
@@ -909,10 +925,20 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 let str = min(deficit, 0.6) * gain
                 let mS = hubMass[s], mT = hubMass[t]
                 let tot = max(mS + mT, 1)
-                apply(t, SIMD2<Float>(-sin(pol[t]), cos(pol[t]))
-                    * (sign * str * 2 * mS / tot))
-                apply(s, SIMD2<Float>(-sin(pol[s]), cos(pol[s]))
-                    * (-sign * str * 2 * mT / tot))
+                // 逐 hub 施力门(07-03 Work-Valis 漂移根治,诊断定稿,严格优于
+                // 跳整对):**只推 self-anchored hub**。merged satellite 无论作
+                // s 还是 t 都不被切向推 → hub 不漂离正上方(补全 L872 的意图,
+                // 那里只 gate 了需求不算,施力却无条件推两边 → 轻卫星作"障碍"
+                // 时吃满 2·mS/tot≈2 的推力漂进环)。跳整对会连 self-anchored
+                // 受害家的旋转开口一起丢;逐 hub 门只赦免卫星,保留受害家转开。
+                if beltFamAnchor[t] == Int32(t) {
+                    apply(t, SIMD2<Float>(-sin(pol[t]), cos(pol[t]))
+                        * (sign * str * 2 * mS / tot))
+                }
+                if beltFamAnchor[s] == Int32(s) {
+                    apply(s, SIMD2<Float>(-sin(pol[s]), cos(pol[s]))
+                        * (-sign * str * 2 * mT / tot))
+                }
             }
         }
     }
