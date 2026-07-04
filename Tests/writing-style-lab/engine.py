@@ -30,12 +30,30 @@ def load(model_id: str = DEFAULT_MODEL):
     global _model, _tokenizer, _model_id
     if _model is not None and _model_id == model_id:
         return
+    # 先释放旧模型再加载新的 —— 否则 `a, b = load()` 右侧先求值,峰值 = 旧+新
+    # (14B+30B ≈ 24GB 会撑爆)。切模型做 A/B 时必须先卸。
+    unload()
     from mlx_lm import load as _load
     print(f"[engine] loading {model_id} …")
     t0 = time.time()
     _model, _tokenizer = _load(model_id)
     _model_id = model_id
     print(f"[engine] loaded in {time.time()-t0:.1f}s")
+
+
+def unload():
+    """卸掉当前模型 + 清 MLX 显存缓存,把峰值内存降到一个模型。"""
+    global _model, _tokenizer, _model_id
+    _model = None
+    _tokenizer = None
+    _model_id = None
+    import gc
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+    except Exception:
+        pass
 
 
 def current_model():
