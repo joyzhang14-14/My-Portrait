@@ -115,6 +115,13 @@ enum GraphConstants {
     static let beltTier2Max: Double = 0.5
     /// 气泡边缘 → 扇形云第一排基准的距离(世界 pt)
     static let beltGap: Double = 10
+    /// 抬环让位(07-04 用户方案:"merge 与正上方都要,挤了就略微提高环
+    /// 半径涵盖两个,但要有度不能抬太多"):被吞并的家若弧逼近 host 气泡,
+    /// 不再角向滑弧偏离正上方,改把整条环径向抬高——弧保持正上方,靠
+    /// 半径差躲开 host。beltRideGap = 内层陨石到 host 气泡边的目标间隙;
+    /// beltRiseCap = 抬升硬上限(度)。
+    static let beltRideGap: Float = 30
+    static let beltRiseCap: Float = 40
     /// 扇形云弧半宽上限(rad ≈172°,以背主球方向为中心;07-03 用户两次
     /// 加码:1.92→2.6→3.0"弧线角度更大"——接近全圆,朝主球死角与邻圆
     /// 由动态裁剪守住):弧度随数量先展开到此上限,再往外延长
