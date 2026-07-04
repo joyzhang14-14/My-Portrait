@@ -160,16 +160,58 @@ def repair(s: str) -> str:
     return "".join(out)
 
 
+def _insert_missing_commas(s: str) -> str:
+    """补数组/对象里"相邻两个字符串之间缺的逗号" —— 实测小模型(4B/14B)在
+    evidence 数组里常写成 `"a"\\n"b"` 漏逗号,`repair` 的尾逗号逻辑补不了。
+    合法 JSON 里两个字符串字面量之间**必有** `,` 或 `:`,所以"一个字符串刚闭合、
+    下一个有意义字符又是 `"`"这种相邻只出现在缺逗号的坏情况 → 安全插入 `,`。
+    (漏冒号 `"k" "v"` 这种极少见 case 会被插成 `,`,但结果仍非法会继续 fallthrough,不造成误伤。)"""
+    out = []
+    in_str = esc = False
+    prev_closed_quote = False
+    for ch in s:
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+                prev_closed_quote = True
+            continue
+        if ch.isspace():
+            out.append(ch)
+            continue
+        if ch == '"':
+            if prev_closed_quote:
+                out.append(",")
+            in_str = True
+            prev_closed_quote = False
+            out.append(ch)
+            continue
+        prev_closed_quote = False
+        out.append(ch)
+    return "".join(out)
+
+
 def parse_json(raw: str, expect: str = "object"):
     s = _strip_fence(raw)
     o, c = ("{", "}") if expect == "object" else ("[", "]")
     frag = _extract_balanced(s, o, c)
     if frag is None:
         raise ValueError("no JSON in output")
-    try:
-        return json.loads(frag)
-    except json.JSONDecodeError:
-        return json.loads(repair(frag))
+    # 依次尝试:原样 → 补缺逗号(必须在 repair 之前,否则 repair 的裸引号前瞻
+    # 会把相邻两个字符串误并成一个)→ repair(裸换行/引号/尾逗号)→ 两者叠加。
+    for fix in (lambda x: x,
+                _insert_missing_commas,
+                repair,
+                lambda x: _insert_missing_commas(repair(x))):
+        try:
+            return json.loads(fix(frag))
+        except json.JSONDecodeError:
+            continue
+    return json.loads(repair(frag))   # 最后一次抛原始错误给调用方
 
 
 # ---------------- 统一调用入口 ----------------

@@ -95,10 +95,21 @@ def test_aggregate():
     _check("聚合含 ime_inferred", "ime_inferred" in agg)
 
 
+def test_engine_json():
+    import engine as E
+    # 缺逗号的 evidence 数组(实测 4B/14B 崩样式)→ 应补成两个元素
+    bad = '{"present":true,"evidence":[\n "a: 1"\n "b: 2"\n],"confidence":"high"}'
+    o = E.parse_json(bad, "object")
+    _check("缺逗号数组补成 2 元素", o["evidence"] == ["a: 1", "b: 2"])
+    _check("正常JSON不误伤", E.parse_json('{"a":"b","c":["d","e"]}')["c"] == ["d", "e"])
+    _check("尾逗号能修", E.parse_json('{"a":"b","c":["d",],}')["c"] == ["d"])
+    _check("key:value不被插逗号", E.parse_json('{"k":"v"}') == {"k": "v"})
+
+
 def main():
     for fn in [test_ime_human, test_ks_pinyin_inferred, test_ks_english_inferred,
                test_ks_input_source_and_switch, test_text_features,
-               test_editlog, test_aggregate]:
+               test_editlog, test_aggregate, test_engine_json]:
         print(f"\n[{fn.__name__}]")
         fn()
     print("\n全部通过 ✅")

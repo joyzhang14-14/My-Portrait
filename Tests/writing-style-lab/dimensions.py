@@ -43,18 +43,33 @@ DIMENSIONS = [
         "needs_ks": False,
         "feature_keys": ["rhetorical_hint", "final_particles"],
         "system": _sys("""
-You analyze ONE aspect of the user's writing in ONE app/context: SENTENCE / MESSAGE
-STRUCTURE (句法形状). Look ONLY at word order and clause shape, not tone or content.
-Detect any consistent structural habit among:
-  - 倒装 inversion:「走吧我们」「冷死了今天」(谓语/状语提前)
-  - 反问 rhetorical question:「这不明摆着吗」「有啥用」
-  - 追加式 additive/append:短句一条接一条地补
-  - 后置补说 afterthought:「我去了，昨天」句末补成分
-  - 宾语前置 object fronting:「这个我知道」「作业我写完了」
-  - 连动结构 serial-verb:「去买菜做饭」「拿去用」
-The feature line gives light hints (rhetorical_hint / final_particles). Confirm from the
-actual text; a hint alone is NOT evidence. Only emit present=true for a pattern that
-RECURS across the messages, and quote the specific sentences.
+You detect ONE aspect of the user's writing in ONE app/context: habitual SENTENCE /
+MESSAGE STRUCTURE — word order and clause shape only, NOT tone, NOT topic.
+
+Detect a RECURRING structural habit. PREFER a SPECIFIC category over the generic
+"additive" whenever a specific one genuinely recurs. Categories (with anchor examples;
+detect the analogous word-order habit in ANY language, examples are just anchors):
+  - inversion (predicate/adverbial fronted before subject)
+  - object-fronting / topic-comment (object or topic placed first)
+  - serial-verb (two+ verbs chained without connective)
+  - rhetorical question (a question used to assert, not to ask)
+  - afterthought / post-posed supplement (a piece tacked on AFTER the main clause)
+  - additive burst (short independent clauses appended one after another) — the FALLBACK
+
+The feature line gives weak hints (rhetorical_hint / final_particles); confirm from the
+actual text — a hint alone is NOT evidence. Only present=true if the pattern RECURS across
+messages; quote the specific sentences. If several habits appear, pick the most DISTINCTIVE
+one (a specific category beats the generic "additive"). Label in the user's own language.
+
+FEW-SHOT (map the form, not the topic):
+① 「这个我知道」「作业我写完了」「那个我早删了」
+   → {"present":true,"label":"宾语前置","pattern":"habitually fronts the object/topic before the subject-verb","evidence":["这个我知道","作业我写完了"],"confidence":"high"}
+② 「走吧我们」「先睡了我」「冷死了今天」
+   → {"present":true,"label":"倒装","pattern":"puts predicate/adverbial before the subject","evidence":["走吧我们","冷死了今天"],"confidence":"high"}
+③ 「去买菜做饭」「拿去用」「起来看看」
+   → {"present":true,"label":"连动结构","pattern":"chains multiple verbs in one clause without connectives","evidence":["去买菜做饭","起来看看"],"confidence":"medium"}
+④ 「逆天」「取长补短啊」「说实话」「那你问Claude啊」 (no special word order, just short clauses in a row)
+   → {"present":true,"label":"追加式短句","pattern":"appends short independent clauses one after another; no marked word order","evidence":["逆天","那你问Claude啊"],"confidence":"medium"}
 """),
     },
     # ② 语气 / 情感基调 —— 内容判断。实测(tone_fewshot_ab)8B 会把调侃误判成
@@ -63,28 +78,29 @@ RECURS across the messages, and quote the specific sentences.
         "key": "tone", "name": "语气", "tier": "mid",
         "needs_ks": False, "feature_keys": [],
         "system": _sys("""
-You analyze ONE aspect of the user's writing in ONE app/context: TONE / AFFECT (语气·态度)
-— the emotional/attitudinal lean, NOT the topic and NOT sentence structure.
+You detect ONE aspect of the user's writing in ONE app/context: TONE / AFFECT — the
+emotional/attitudinal lean, NOT the topic and NOT sentence structure.
 
-⚠️ 核心铁律:**话题 ≠ 语气**。内容是技术/严肃话题,**不代表**语气就是"客观中立"。
-判语气只看**口吻标记**:
-  - 网络俚语 / 夸张词(逆天、笑死、绝了、离谱、yyds)→ 轻松/调侃
-  - 语气词、口语尾巴(啊、呗、嘛、哈、啦)→ 随意/亲近
-  - 短促吐槽、自嘲、玩笑、反问 → 轻松调侃 / 戏谑
-  - 平实完整句 + 求解/分析措辞、无俚语无情绪 → 认真 / 理性
-  - 冷嘲、"意料之中"式无奈 → 愤世嫉俗
-不要因为"在聊技术"就默认判"中立/客观"—— 那几乎总是漏判。真正中立要**通篇无任何
-口吻标记**才成立。
+⚠️ CORE RULE: TOPIC ≠ TONE. A technical or serious TOPIC does NOT make the TONE
+"neutral/objective". Judge tone ONLY from register markers:
+  - net-slang / hyperbole (逆天, 笑死, 绝了, yyds, "insane", "dead") → playful / teasing
+  - sentence-final particles & colloquial tails (啊, 呗, 嘛, 哈, "lol", "lmao") → casual / warm
+  - short jabs, self-deprecation, jokes, rhetorical questions → playful / bantering
+  - plain full sentences + problem-solving / analytical wording, no slang, no emotion → earnest / rational
+  - dry sneer, "of course it broke" resignation → cynical
+Do NOT default to "neutral/objective" just because the topic is technical — that is almost
+always a MISS. "Neutral" is only valid when the WHOLE batch has zero register markers.
 
-轴(选最贴的):愤世嫉俗↔真诚 · 轻松调侃↔严肃 · 攻击直冲↔温和委婉 · 冷淡疏离↔亲近热情。
+Axes (pick the closest): cynical↔earnest · playful↔serious · aggressive↔gentle · cold↔warm.
+Label in the user's own language.
 
-FEW-SHOT(照这个映射来判):
-① 消息:「逆天」「笑死 这也行」「那你问Claude啊」「取长补短啊」
-   → {"present":true,"label":"轻松调侃","pattern":"用网络俚语和短促吐槽表达,语气随意带戏谑,即便在聊技术","evidence":["逆天","笑死 这也行","那你问Claude啊"],"confidence":"high"}
-② 消息:「这个 pipeline 用了 4 层 LLM 过滤,你觉得有什么可以优化的?」「AX 抓输入有时效性问题」
-   → {"present":true,"label":"认真求解","pattern":"聚焦问题、措辞平实、主动求评估,无俚语无情绪","evidence":["你觉得有什么可以优化的?","AX 抓输入有时效性问题"],"confidence":"high"}
-③ 消息:「又崩了,意料之中」「能用就行,别指望它」
-   → {"present":true,"label":"愤世嫉俗","pattern":"以无奈/看淡的口吻吐槽,预期悲观","evidence":["又崩了,意料之中","别指望它"],"confidence":"medium"}
+FEW-SHOT (map register markers, ignore the topic):
+① 「逆天」「笑死 这也行」「那你问Claude啊」「取长补短啊」
+   → {"present":true,"label":"轻松调侃","pattern":"casual net-slang and short jabs, teasing register even when discussing tech","evidence":["逆天","笑死 这也行","那你问Claude啊"],"confidence":"high"}
+② 「这个 pipeline 用了 4 层 LLM 过滤,你觉得有什么可以优化的?」「AX 抓输入有时效性问题」
+   → {"present":true,"label":"认真求解","pattern":"focused, plain wording, actively seeks evaluation; no slang, no emotion","evidence":["你觉得有什么可以优化的?","AX 抓输入有时效性问题"],"confidence":"high"}
+③ 「又崩了,意料之中」「能用就行,别指望它」
+   → {"present":true,"label":"愤世嫉俗","pattern":"resigned, look-down tone; pessimistic expectations","evidence":["又崩了,意料之中","别指望它"],"confidence":"medium"}
 """),
     },
     # ③ 输入习惯 —— 确定性算完,LLM 只命名,给 4B
