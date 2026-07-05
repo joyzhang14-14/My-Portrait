@@ -269,6 +269,9 @@ def main():
     events = singleton_attach(events, by, idf, T)
     stats = qa_pass(events, by, idf)
     anchor_arbiter_shadow(sess, idf)
+    import labdb
+    from session_context import enrich_events   # 确定性附加 app/who/where + app/人名进 tags
+    enrich_events(events, labdb.connect(), DAY)
     allc = [x for e in events for x in e["session_ids"]]
     assert len(allc) == len(set(allc)), "dup != 0"
     assert len(set(allc)) == len(sess), f"覆盖 {len(set(allc))}/{len(sess)}"

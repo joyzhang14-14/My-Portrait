@@ -50,7 +50,12 @@ P_ITEMS_FIRST = (
     'actions, topics. Include short quoted user-typed text and person names VERBATIM in their '
     'original script (any language). Ignore UI chrome (menu bars, clocks, sidebars). If a '
     'media app is foreground but the real content is code/terminal/docs/chat, that work is '
-    'the activity. Reply ONLY JSON: {{"items":["<specific item>", ...]}}')
+    'the activity.\n'
+    'ALSO capture context when present: if a chat/social/mail app, WHO the user is talking '
+    'with (contact or group name, e.g. "chatting with 何成") and which server/channel; if a '
+    'map or a physical place/venue/address is shown, WHERE. State what app is being used and '
+    'what is being done in it.\n'
+    'Reply ONLY JSON: {{"items":["<specific item>", ...]}}')
 P_ITEMS_NEXT = (
     'Specific items ALREADY recorded for THIS SAME session (do NOT repeat any):\n{items}\n\n'
     'A LATER screenshot from the same session (app: {app}). Output ONLY NEW specific items '
