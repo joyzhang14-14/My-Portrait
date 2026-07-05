@@ -119,6 +119,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var beltFamSel: [Float] = []
     /// 抬环让位:每家(被吞并卫星)拥挤时抬升的环半径(有硬上限)。
     private var beltFamRise: [Float] = []
+    /// 每家**实际渲染**弧半宽(07-05 大环空档):= max|beltFamBase+slope·beltAng|。
+    /// beltFamW 是设计弧(=max|beltAngle|),被 carve/仿射压缩后实际陨石只占更
+    /// 窄一段;beltSep 反推若用设计弧+气泡影锥会把没陨石的空扇区当障碍屏障,
+    /// 把别的 folder 球从大环空档推走。改用实际弧,空扇区放行。
+    private var beltFamActualW: [Float] = []
     private var beltTmpPol: [Float] = []
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
@@ -654,6 +659,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltFamBase[s] = base
                 beltFamSlope[s] = slope
             }
+            // 实际渲染弧半宽(07-05 大环空档):遍历陨石取 |base+slope·beltAng|
+            // 的 max(每家)—— 反推屏障据此只认真有陨石的子扇区。
+            if beltFamActualW.count != nh { beltFamActualW = .init(repeating: 0, count: nh) }
+            for i in 0..<nh { beltFamActualW[i] = 0 }
+            for bi in 0..<beltIdx.count {
+                let s = Int(beltHubSlot[bi])
+                let ang = abs(beltFamBase[s] + beltFamSlope[s] * beltAng[bi])
+                if ang > beltFamActualW[s] { beltFamActualW[s] = ang }
+            }
             // 抬环让位(07-04 用户方案:merge 与正上方都要,挤了就略微抬环
             // 径向让开 host,涵盖两个;有硬上限不抬太多)。只对被吞并卫星、
             // 且弧确实逼近 host 气泡时抬;远离 host 的家 clearance 大→抬 0。
@@ -917,6 +931,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     let dA = dst[aA]
                     let lo = dA + max(hubBubbleR[aA], 0) - 6
                     let hi = dA + beltFamReach[a] + 20
+                    // 弧宽一律用**实际渲染弧**(07-05 大环空档):只有真有陨石
+                    // 的子扇区才算圆环,carve/压缩后的空扇区放行,别把 folder
+                    // 球从空档推走。大家(host/边缘家)实际弧≈设计弧,不受影响。
+                    let awa = beltFamActualW.count == nh ? beltFamActualW[a] : beltFamW[a]
+                    let awb = beltFamActualW.count == nh ? beltFamActualW[b] : beltFamW[b]
                     var obs: Float = 0
                     // b 家自己的弧在同一径向带上 → 弧对弧
                     if beltFamReach[b] > 0 {
@@ -924,20 +943,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         let dB = dst[bA]
                         if dB + max(hubBubbleR[bA], 0) - 6 < hi,
                            dB + beltFamReach[b] + 20 > lo {
-                            obs = min(beltFamW[b], 1.0) * famScale
+                            obs = min(awb, 1.0) * famScale
                         }
                     }
-                    // b 的气泡影锥(从主球看的角半宽)够到 a 的带 →
-                    // a 的弧不该悬在 b 的圆正上方
+                    // b 的气泡影锥(从主球看的角半宽)够到 a 的带 → a 的弧不该
+                    // 悬在 b 的圆正上方。影锥**封顶到 b 的实际弧**:空扇区不占位
+                    //(气泡的物理重叠由 bubblePass 另管,不靠这个反推力)。
                     if hubBubbleR[b] > 0 {
                         let bT = hubBubbleR[b] + 8
                         if dst[b] + bT > lo {
-                            obs = max(obs, min(asin(min(bT / dst[b], 1)), 1.2))
+                            obs = max(obs, min(min(asin(min(bT / dst[b], 1)), 1.2),
+                                               min(awb, 1.0) * famScale))
                         }
                     }
                     if obs > 0 {
                         needed = max(needed,
-                                     min(min(beltFamW[a], 1.0) * famScale + obs + 0.1, 2.2))
+                                     min(min(awa, 1.0) * famScale + obs + 0.1, 2.2))
                     }
                 }
                 guard needed > 0 else { continue }
