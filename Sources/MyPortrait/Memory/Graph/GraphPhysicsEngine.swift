@@ -845,6 +845,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 整家持久偏移 ~0.25rad(对抗审查③)。吞并家保留自家
                 // 挡板 —— 那是"截断汇集"的根治点
                 if t == s, sA == s { continue }
+                // 同环不冲突(07-05 用户判断:卫星与宿主是同一个环):
+                // self-anchored 宿主的弧,不被**自己的 merged 卫星**气泡挖洞
+                // —— 卫星拖到宿主头上时不该在宿主弧中间打洞塌成一团。
+                if sA == s, t != s, Int(beltFamAnchor[t]) == s { continue }
                 let pt = (!havePred || (haveStatic && hubStatic[t]))
                     ? beltTmpNow[t] : beltPredPos[t]
                 let dT = max(simd_length(pt), 1)
@@ -918,6 +922,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         let famScale = sumW > 0 ? min(1, (Float.pi - 0.4) / sumW) : 1
         for s in 0..<(nh - 1) {
             for t in (s + 1)..<nh {
+                // 同环不互斥(07-05 用户判断:蓝球灰球环冲突=被当两个环):
+                // 锚定同一宿主的两家在同一条大环上,不该被反推力当"两个要
+                // 分开的环"互推 —— 否则卫星拖到宿主头上会把宿主 hub 推得
+                // 乱转、带跟着塌。只有真正不同的环(锚不同)才分开。
+                if beltFamAnchor[s] == beltFamAnchor[t] { continue }
                 var needed: Float = 0
                 for (a, b) in [(s, t), (t, s)] {   // a 的弧被 b 压
                     guard beltFamReach[a] > 0 else { continue }
