@@ -37,7 +37,7 @@ MAXPIX = 1_600_000
 MIN_INTERRUPT_FRAMES = 3
 THR_SIM = 0.7
 COEF = 0.15
-FLOOR, CEIL = 1, 12
+FLOOR, CEIL = 1, 16   # 12→16:gold取证选帧太稀致整段看错(T0)
 # 6000(原1500):14B是32K上下文,1500字符是质量线实测"粘合剂丢失"三个口子之一
 # (质量分析 7-02:因果链/hash/数字/原话 55-60% 丢在汇总层)
 OCR_UNION_CAP = 6000
@@ -98,7 +98,10 @@ P_MERGE2 = (
     '- Use the OCR to CORRECT garbled names / files / identifiers in the vision items, and '
     'to ADD exact specifics the vision missed.\n'
     '- Ignore OCR chrome / garbage; invent nothing not supported by the items or OCR.\n'
-    'Reply ONLY JSON: {{"doing":"<2-5 sentences>"}}')
+    '- ALSO extract when present: "who" = chat/social contact or group names (original script), '
+    '"where" = physical place/venue/site/portal shown, "social" = personal/social content or '
+    'short quoted user text. Empty if none.\n'
+    'Reply ONLY JSON: {{"doing":"<2-5 sentences>","who":[],"where":"","social":""}}')
 
 # R9 确定性锚点旁路:hash/百分比/版本/带单位数字直读帧OCR进kw,不经14B
 # (质量线实测:hash保留23%/数字~15% → 旁路≈100%;≥2帧复现门=学习日OCR碎渣免疫,hash免复现)
@@ -340,11 +343,17 @@ def do_finalize(tag, model_id=MERGE_MODEL, pv=2):
             mt = 480
         m1 = [{"role": "system", "content": "You output one JSON object only."},
               {"role": "user", "content": content}]
+        obj_m = None
         try:
-            doing = engine.parse_json(engine._generate(m1, max_tokens=mt), "object").get("doing", "")
+            obj_m = engine.parse_json(engine._generate(m1, max_tokens=mt), "object")
+            doing = obj_m.get("doing", "")
         except Exception:
             doing = ""
         r["doing"] = doing or "; ".join(r["items"])
+        if pv != 1:
+            r["who"] = [str(x) for x in (obj_m.get("who") or [])][:6] if isinstance(obj_m, dict) else []
+            r["where"] = str(obj_m.get("where", ""))[:80] if isinstance(obj_m, dict) else ""
+            r["social"] = str(obj_m.get("social", ""))[:200] if isinstance(obj_m, dict) else ""
         # ② 标签:从 doing 精选 + R9 旁路锚点直入(不经模型)
         m2 = [{"role": "system", "content": "You output concise tags as one JSON object."},
               {"role": "user", "content": P_TAGS.format(doing=r["doing"])}]
@@ -381,7 +390,14 @@ def do_report():
             if not r:
                 continue
             L += [f"**[{tag}]** ({r['lat_ms']/1000:.0f}s · {len(r['items'])}项)",
-                  f"- doing: {r['doing']}", f"- kw: {', '.join(r['kw'])}", ""]
+                  f"- doing: {r['doing']}", f"- kw: {', '.join(r['kw'])}"]
+            if r.get("who"):
+                L.append(f"- who: {', '.join(r['who'])}")
+            if r.get("where"):
+                L.append(f"- where: {r['where']}")
+            if r.get("social"):
+                L.append(f"- social: {r['social']}")
+            L.append("")
     out = os.path.join(OBS, f"视觉增量v4{SUFFIX}-{DAY}.md")
     open(out, "w").write("\n".join(L) + "\n")
     print(f"[report] → {out}  (帧图在 {FRAMES_DIR})")

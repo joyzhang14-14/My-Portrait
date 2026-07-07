@@ -151,6 +151,102 @@ Answer ONLY JSON: {{"belongs": true or false}}"""}], 16, sid=k)
 
 # ---------------- STAGE 4 摘要 QA:grep 接地 + 品味复核 + 重生成 ----------------
 
+# ---- T0 verbatim 硬校验:引语/commit hash 必须 exact-match 上游,否则剥离(宁剥不留错) ----
+_QUOTE_RX = re.compile(r"[「‘“']([^」’”']{2,40})[」’”']")
+
+
+def strip_unverifiable(e, by):
+    corpus = " ".join(by[k]["doing"] + " " + " ".join(by[k]["kw"])
+                      for k in e["session_ids"]).lower()
+    s = e["summary"]; stripped = []
+    for h in set(_HASH.findall(s.lower())):
+        if h not in corpus:
+            s = re.sub(re.escape(h), "", s, flags=re.I); stripped.append(f"hash:{h}")
+    for m in list(_QUOTE_RX.finditer(s)):
+        if m.group(1).lower() not in corpus:
+            s = s.replace(m.group(0), ""); stripped.append(f"quote:{m.group(1)[:20]}")
+    if stripped:
+        e["summary"] = re.sub(r"\s{2,}", " ", s).strip()
+        retain.log_verdict(DAY, e["title"][:60], "verbatim_stripped", items=stripped[:8])
+    return len(stripped)
+
+
+# ---- T0 全局 merge pass:全部事件一次看全,3次共识提合并对,co-association≥2/3 才合 ----
+def global_merge_pass(events, by, idf, T, votes=3):
+    def span(e):
+        ts = [T[k] for k in e["session_ids"] if k in T]
+        return (min(t[0] for t in ts), max(t[1] for t in ts)) if ts else (0, 0)
+    cards = "\n".join(
+        f"[{i}] «{e['title']}» — {e['summary'][:140]}" for i, e in enumerate(events))
+    q = (f"Below are {len(events)} candidate events from ONE day. Some belong to the SAME "
+         f"task thread (same bug/feature/investigation continuing across hours) and were "
+         f"over-split. Propose merge groups. BE CONSERVATIVE: only merge events that are "
+         f"clearly the same specific thread; different features/topics stay separate.\n"
+         f"{cards}\n"
+         f'Answer ONLY JSON: {{"groups":[[i,j,...],...]}} (indices; singletons omitted)')
+    pair_votes = collections.Counter()
+    for v in range(votes):
+        obj = _gen("global_merge", [{"role": "user", "content": q}], 800, attempt=v)
+        for g in ((obj or {}).get("groups") or []):
+            ids = sorted({int(x) for x in g if str(x).isdigit() and 0 <= int(x) < len(events)})
+            for a in range(len(ids)):
+                for b in range(a + 1, len(ids)):
+                    pair_votes[(ids[a], ids[b])] += 1
+    thr = (votes + 1) // 2 + (votes % 2 == 0)          # 3票→≥2
+    par = list(range(len(events)))
+    def find(x):
+        while par[x] != x:
+            par[x] = par[par[x]]; x = par[x]
+        return x
+    merged_pairs = 0
+    for (a, b), c in pair_votes.items():
+        if c >= 2 and find(a) != find(b):
+            par[find(a)] = find(b); merged_pairs += 1
+    groups = collections.defaultdict(list)
+    for i in range(len(events)):
+        groups[find(i)].append(i)
+    out = []
+    for mem in groups.values():
+        if len(mem) == 1:
+            out.append(events[mem[0]]); continue
+        mem.sort(key=lambda i: -len(events[i]["session_ids"]))
+        surv = dict(events[mem[0]])
+        sids = sorted({s for i in mem for s in events[i]["session_ids"]})
+        surv["session_ids"] = sids; surv["dirty"] = True   # 合并后摘要必须重生成
+        out.append(surv)
+        retain.log_verdict(DAY, surv["title"][:60], "global_merged",
+                           n_from=len(mem), titles=[events[i]["title"][:40] for i in mem[1:]])
+    print(f"[global_merge] {len(events)}→{len(out)} 事件(共识合并 {merged_pairs} 对)")
+    return out
+
+
+# ---- T0 impact 打分步(0-5,rubric+gold few-shot,先理由后分) ----
+_IMPACT_RUBRIC = """Score this event's IMPACT for a personal memory system, 0-5:
+5=identity-shaping or the day's core work (major feature/rewrite, key decision)
+4=important development (significant bug root-caused & fixed, architecture design)
+3=regular development work  2=minor task/config/short investigation
+1=casual browsing/entertainment/quick chat  0=background noise
+Examples: "重写写作采集提取为统一field-state timeline"(42 sessions, commit 00b07be)=5;
+"Fixed light mode divider color"(3 sessions)=3; "Played music on Spotify"=1;
+"Notification Center glance"=0.
+Event: «{title}» ({n} sessions) — {summary}
+Answer ONLY JSON: {{"reason":"<one sentence>","impact":<0-5>}}"""
+
+
+def impact_pass(events):
+    for e in events:
+        obj = _gen("impact", [{"role": "user", "content": _IMPACT_RUBRIC.format(
+            title=e["title"], n=len(e["session_ids"]), summary=e["summary"][:400])}],
+            120, event=e["title"][:40])
+        try:
+            e["impact"] = max(0, min(5, int((obj or {}).get("impact", 2))))
+            e["impact_reason"] = str((obj or {}).get("reason", ""))[:200]
+        except Exception:
+            e["impact"] = 2
+    dist = collections.Counter(e["impact"] for e in events)
+    print(f"[impact] 分布 {dict(sorted(dist.items(), reverse=True))}")
+
+
 def harvest(text):
     toks = set()
     for rx in (_FILE, _CAMEL, _SNAKE, _ERR, _HASH):
@@ -267,7 +363,12 @@ def main():
     events = mega_review(events, by, idf, T)
     events = exactly_once(events, by, idf, llm_escalate=True)  # 重切输出同样双分配,必须再过
     events = singleton_attach(events, by, idf, T)
-    stats = qa_pass(events, by, idf)
+    events = global_merge_pass(events, by, idf, T)   # T0:全局一次看全,共识合并(治碎片化)
+    stats = qa_pass(events, by, idf)                 # 合并后 dirty 在此重生成
+    nstrip = sum(strip_unverifiable(e, by) for e in events)   # T0:引语/hash 硬校验剥离
+    if nstrip:
+        print(f"[verbatim] 剥离未验证引语/hash {nstrip} 处")
+    impact_pass(events)                              # T0:impact 0-5 打分
     anchor_arbiter_shadow(sess, idf)
     import labdb
     from session_context import enrich_events   # 确定性附加 app/who/where + app/人名进 tags
