@@ -720,8 +720,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                         + GraphConstants.ringPredMargin
                 }
             }
-            ringC += (ringTargetC - ringC) * GraphConstants.ringCenterLerp
-            ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
+            // 环**硬切**(07-08 用户"动的时候一步到位":环是隐形的,lerp
+            // 平滑毫无意义 —— lerp 期间陨石目标跟着环每帧漂移;平滑感
+            // 由陨石的极坐标弹簧提供,目标必须从锁定那刻就是最终值)
+            ringC = ringTargetC
+            ringRad = ringTargetRad
             let rc = ringC
             // 极角/角增量绕**环心**;帧携带 = 绕环心刚体公转,按自家 hub
             // 相对环心的角增量
@@ -736,15 +739,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 时交点始终钉在射线上 —— 弧方向不再随环心晃,只有径向
                 // 微调,环心切换/平滑的视觉跳动被结构性消掉。主球钉原点,
                 // 环罩住主球(原点在环内)⇒ 判别式恒正、正根恒存在。
-                // ⚠️ 射线端点用**混合帧**(与 carve 挡板同哲学;07-08 用户
-                // 实测"拖动 folder 后陨石来回调整去贴合":实时位置会让弧
-                // 追着 folder 的飘移路径滑 —— 实测松手后弧滑 19°/7s,每帧
-                // 目标都在挪。hub 静用实时[真理],在飞用影子终局[计划]:
-                // 松手瞬间弧直接钉终局方向,陨石直飞最终弧位不改道,
-                // folder 自己慢慢飘过去;hub 到位翻静时实时≈终局,无跳)
-                let f = (hubStatic.count == nh && hubStatic[s])
-                    || beltPredPos.count != nh
-                    ? beltTmpNow[s] : beltPredPos[s]
+                // ⚠️ 射线端点一律锁 beltPredPos(07-08 用户"动的时候一步
+                // 到位":实时位置会让弧追着 folder 飘移滑 19°/7s;先改
+                // 混合帧后仍剩翻静慢爬期 3.5° 慢漂 —— 干脆全锁影子终局,
+                // spawn 占位=当刻实时、ready 后=终局,下次交互才刷新。
+                // 弧从锁定那刻起纹丝不动,陨石直飞;终态弧位与真实停位
+                // 差 ~3.5° 用户接受[丝滑>精确])
+                let f = beltPredPos.count == nh
+                    ? beltPredPos[s] : beltTmpNow[s]
                 let fl = simd_length(f)
                 let u = fl > 1e-4 ? f / fl : SIMD2<Float>(1, 0)
                 let b = simd_dot(u, rc)
@@ -799,6 +801,18 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltFamSlope[s] = slope
             }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
+            // 待命(07-08 用户"可接受延迟,动则一步到位"):松手后影子
+            // 结果未到(2~4 帧)陨石零力原地待命 —— 不朝占位目标起跑,
+            // 等终局锁定后一次性直飞,全程不改道。开场(生成态)不待命
+            // (爆炸绽放照旧)。穿透标记清掉(待命=实体,参与碰撞)
+            if !carrying && !shadowDone {
+                for bi in 0..<beltIdx.count {
+                    nodeTransit[Int(beltIdx[bi])] = false
+                }
+                beltTransitAny = false
+                for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
+                return
+            }
             var transitAny = false
             pos.withUnsafeMutableBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
@@ -934,19 +948,20 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         // done 判据 = hub 全静(只消费 hub;等全场停会陪 599 颗慢陨石
         // 耗几千步)/冷透+缓停完/步数封顶
         let hubIdx = hubIndices
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let nhh = hubIdx.count
             var steps = 0
             while steps < GraphConstants.shadowTickCap {
                 sh.tick()
                 steps += 1
-                // 跑到影子**真 park**(冷透+缓停滑完)再交卷:hub 全静后
-                // 还会慢爬 10~25pt,异步后多跑几百步零成本 —— 终局含
-                // 爬行终点 ≈ 真实停位,ready 调环后停稳校验几乎必然
-                // 死区内零动 = 全程只一次可见变化(用户:"不管什么情况
-                // 都一次到位")。影子陨石冻结 ⇒ 其 quietFlag 不被陨石
-                // 阻塞,能正常 park;cap 兜底
-                if sh.alpha < GraphConstants.alphaMin && sh.brake == 0 {
+                // 交卷判据 = 冷透+静止(quietFlag;07-08 用户"影子再快
+                // 一点,延迟变小":等 brake 缓停滑完要多耗 100~200 步,
+                // 而那段位移被 brake 缩到几 pt —— 提前交卷,终局差被
+                // 死区 35pt 缓冲吸收)。含爬行终点 ≈ 真实停位,ready
+                // 锁定后停稳校验几乎必然零动。影子陨石冻结 ⇒ quietFlag
+                // 不被陨石阻塞;brake==0/cap 兜底
+                if sh.alpha < GraphConstants.alphaMin
+                    && (sh.quietFlag || sh.brake == 0) {
                     break
                 }
             }
@@ -1113,7 +1128,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             beltPredSegs = .init(repeating: [(-2.98, 2.98)], count: nh)
         }
         let havePred = beltPredPos.count == nh
-        let haveStatic = hubStatic.count == nh
         let rc = ringC
         let gapF = Float(GraphConstants.beltGap)
         for s in 0..<nh {
@@ -1134,8 +1148,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     bT = nodeRadius[0] + 8
                 } else {
                     guard hubBubbleR[t] > 0 else { continue }
-                    pt = (!havePred || (haveStatic && hubStatic[t]))
-                        ? beltTmpNow[t] : beltPredPos[t]
+                    // 一律锁影子终局(07-08"一步到位":静 hub 用实时会随
+                    // 慢爬微调 segs → base 波动;锁定后 carve 输入恒定 →
+                    // 弧稳定。真实停位与终局差>缓冲时由投影/滑出硬保证兜底
+                    pt = havePred ? beltPredPos[t] : beltTmpNow[t]
                     bT = hubBubbleR[t] + 8
                 }
                 let relP = pt - rc
