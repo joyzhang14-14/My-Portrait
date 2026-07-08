@@ -31,7 +31,9 @@ OUTDIR = f"/tmp/vision_v4{SUFFIX}_{DAY}"
 FRAMES_DIR = f"/tmp/vision_frames_v4{SUFFIX}_{DAY}"
 OBS = "/Users/joyzhang14/Desktop/Obsidian/event pipeline local"
 MANIFEST = os.path.join(OUTDIR, "v4_manifest.json")
-DEFAULT_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
+# 16GB硬约束(7-08选型):8bit实测9.9GB爆预算;6bit逐字池A/B=8bit(18%=18%),
+# 4bit/9B一模两用都在OCR保真悬崖(14%)——6bit是16GB上唯一不折腾的档。
+DEFAULT_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-6bit"
 MERGE_MODEL = SMALL_TAG_MODEL                     # 汇总+标签都用 14B
 MAXPIX = 1_600_000
 MIN_INTERRUPT_FRAMES = 3

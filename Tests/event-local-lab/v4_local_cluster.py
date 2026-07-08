@@ -29,7 +29,9 @@ import engine
 import retain
 
 DAY = "2026-06-07"
-MODEL = "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
+# 16GB硬约束(7-08选型):2507-4bit实测17.2GB出局;9B全链A/B F1 0.388≈2507的
+# 0.397(体积1/3,24min跑完),verbatim略逊(hash 2 vs 7)靠REGEN prompt调回。
+MODEL = "mlx-community/Qwen3.5-9B-MLX-4bit"
 LAB = "/Users/joyzhang14/Projects/My-Portrait/Tests/event-local-lab"
 EMB = f"{LAB}/fixtures/{DAY}/v4_emb.npy"
 TIMES = f"{LAB}/fixtures/{DAY}/sessions_time.json"
