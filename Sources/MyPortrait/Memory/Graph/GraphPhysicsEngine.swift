@@ -74,9 +74,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 不再被 allStatic 迟滞抖动在 predRingCenter↔MEC 之间反复横跳。
     /// explode/updateScene(ringDirty)复位。
     private var ringSettled = false
-    /// 环半径定稿目标(首次停稳时按真实 MEC 一次性算定,补幽灵欠估;
-    /// 之后 ringRad 平滑长到此值即锁死 —— 一次调整,不再每 tick 重评估)。
+    /// 环定稿目标(半径+圆心,首次停稳时一次性算定;之后 ringRad/ringC
+    /// 平滑收敛到此即锁死 —— 每次调整最多一跳,不再每 tick 重评估)。
     private var ringTargetRad: Float = 0
+    private var ringTargetC: SIMD2<Float> = .zero
     /// 全节点陨石标记(碰撞用):陨石×陨石**跨家也常开**碰撞 —— 平弧
     /// 云在家与家交界处会交叠,家隔离原则只管圈内叶(07-03 五稿)。
     private var nodeBelt: [Bool] = []
@@ -631,58 +632,55 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 predictBeltClip()
                 beltPredDirty = false
             }
-            // 环心(单环重构):生成期(hub 还在飞)直接用幽灵终局环心
-            // (一次变好);hub 全员停稳后 —— 含从没拖过的开场收敛尾声
-            // —— 每 tick 平滑追当前布局的最小包围圆圆心(lerp 防抖;
-            // 预测环心偏差在这里被一次性平滑纠正,实测可差 ~100pt)。
-            // 拖到罩不住时它仍 = 当前最小包围圆圆心(minimax 最优),
-            // 罩不住的球暂时露在环外,靠滑出/穿透/碰撞兜底
+            // 环结算 = **整环定稿制**(用户三令:环最多跳一次。前两版死区
+            // 只管半径,环心仍每 tick 从幽灵预测 lerp 追真实 MEC —— 预测环心
+            // 结构性算不准(12 体幽灵只能聚合电荷近似叶云,实测可差 ~100pt),
+            // 这段平移就是"第二跳"。根治 = 不追求预测更准,而是让预测误差
+            // 不变成可见跳变):幽灵只管首次成型;停稳定稿时以**当前环**测
+            // 覆盖 —— 罩得住且不太松 → 环心半径**都**一动不动(零跳);
+            // 罩不住/太松才一次性调到真实 MEC(一跳)。定稿后目标锁死,
+            // 只 lerp 收敛;松手过渡期(未定稿)环整体冻结,不追布局中间态。
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
-            // `alpha >= alphaMin` 闸(对抗验证补漏):park 可经 restless 30s
-            // 兜底触发(病态持续环流下 quietFlag 恒假、hub 全速转、allStatic
-            // 从没为真)。缺此闸则冷透仍走 IF 分支 → ringSettled 永不 latch →
-            // 环冻在幽灵欠估值、正上方 bug 复现到下次 explode。加闸后冷透必
-            // 落到 else 用真实 MEC 兜底定稿(见下 :651 的 alpha<alphaMin 条件)。
-            if beltForming && !ringSettled && !allStatic
-                && alpha >= GraphConstants.alphaMin {
-                // 生成期未定稿:环心用幽灵终局(belt 一开始就在最终方位,不
-                // 随 explode 乱漂);半径用 ringDirty 时的冻结值。等布局首次
-                // 全员停稳(或冷透兜底),下面 else 一次性定稿并 latch。
-                ringC = predRingCenter
-            } else {
-                // 已定稿 / 首次停稳 / 松手后:环心平滑追当前 MEC 圆心。
-                let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
-                let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
-                ringC += (c - ringC) * GraphConstants.ringCenterLerp
-                // 首次全员停稳 → **一次性定稿**半径:幽灵用聚合电荷近似叶云
-                // 会**低估**支配大 folder(569 叶 Unclassified)把 hub 顶出的
-                // 真实距离 → 冻死半径罩不住 → 巨泡探进环带 → 自家 rel=0 自挖
-                // 正上方 → 整家偏。定稿目标 = 真实 MEC + 同式余量(补欠估),
-                // latch 后不再每 tick 重评估 —— 消除 allStatic 迟滞抖动导致
-                // 环在 predRingCenter↔MEC / 半径反复横跳(用户:环只跳一次)。
-                // 定稿触发:全员停稳(常态),**或**冷透兜底(alpha<alphaMin,
-                // restless 强制 park 前用真实 MEC 定稿 —— 那时布局或未全收敛,
-                // 但严格优于幽灵聚合电荷近似,消除永不定稿的漏网)。
-                if !ringSettled
-                    && (allStatic || alpha < GraphConstants.alphaMin) {
-                    // 定稿带**死区**(用户定稿:开场余量自带容错空间,治
-                    // "极限情况跳两次"):当前半径在 [罩得住, 不太松] 区间
-                    // 内 → 一动不动(幽灵误差 −2~+19 整段落死区内=常态
-                    // 零跳);低于下限(罩不住,拖大了)才长、高于上限
-                    // (太松,拖回了)才缩 —— 各一次 lerp 平滑
-                    let base = encR + Float(GraphConstants.beltGap)
-                    if ringRad < base + 5
-                        || ringRad > base + GraphConstants.ringPredMargin
+            if !ringSettled {
+                if beltForming && !allStatic
+                    && alpha >= GraphConstants.alphaMin {
+                    // 生成期:环几何 = 幽灵终局,冻结(一次成型不乱漂)。
+                    // alpha 闸(对抗验证补漏):restless 强制 park 前冷透,
+                    // 必须落到下面定稿,否则永不 latch 环冻在欠估值
+                    ringC = predRingCenter
+                    ringTargetC = ringC
+                } else if allStatic || alpha < GraphConstants.alphaMin {
+                    // 首次停稳(或冷透兜底)一次性定稿:死区判据 = 以当前
+                    // 环心测的覆盖需求 coverNeed(含主球),幽灵误差
+                    // −2~+19pt 整段落死区内 = 常态零跳
+                    let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
+                    var coverNeed: Float = 0
+                    for i in 0..<cs.count {
+                        coverNeed = max(coverNeed,
+                                        simd_length(cs[i] - ringC) + rs[i])
+                    }
+                    if coverNeed > ringRad - 5
+                        || ringRad - coverNeed > GraphConstants.ringPredMargin
                             + GraphConstants.ringSlack {
-                        ringTargetRad = base + GraphConstants.ringPredMargin
+                        // 罩不住(拖大了/预测欠估过甚)或太松(拖回了):
+                        // 一次性调到真实最小包围圆 + 标准余量
+                        let (c, encR) = Self.minEnclosingCircle(
+                            centers: cs, radii: rs)
+                        ringTargetC = c
+                        ringTargetRad = encR + Float(GraphConstants.beltGap)
+                            + GraphConstants.ringPredMargin
                     } else {
+                        ringTargetC = ringC   // 死区:整环零跳
                         ringTargetRad = ringRad
                     }
                     ringSettled = true
                 }
-                // 平滑长到定稿值(收敛即停);ringTargetRad 在 ringDirty 时
-                // = ringRad,故未定稿前不动;拖动中 beltPass 早退不触及,
-                // "拖动半径不变"仍成立。
+                // 松手后未停稳的过渡期:环整体冻结(弧方向由射线交点随
+                // hub 实时走,环本身不动 —— 等停稳一次性判)
+            } else {
+                // 已定稿:只向锁死的目标 lerp 收敛(拖动中 beltPass 早退
+                // 不触及,"拖动整环不变"仍成立)
+                ringC += (ringTargetC - ringC) * GraphConstants.ringCenterLerp
                 ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
             }
             let rc = ringC
@@ -939,8 +937,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         if ringDirty {
             ringRad = encR + Float(GraphConstants.beltGap)
                 + GraphConstants.ringPredMargin
-            ringTargetRad = ringRad   // 未定稿前定稿目标=冻结值 → 半径不漂
+            ringTargetRad = ringRad   // 未定稿前定稿目标=冻结值 → 环不漂
             ringC = c
+            ringTargetC = c
             ringDirty = false
         }
     }
