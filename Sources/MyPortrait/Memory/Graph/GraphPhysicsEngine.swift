@@ -665,12 +665,19 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 但严格优于幽灵聚合电荷近似,消除永不定稿的漏网)。
                 if !ringSettled
                     && (allStatic || alpha < GraphConstants.alphaMin) {
-                    // 目标 = 当前布局的最小罩住圆(用户原始规格:"以最小的
-                    // 环形陨石球包含全部")。可长可缩:拖大了长上去罩住,
-                    // 拖回来缩回最小 —— 都经 lerp 平滑,每次调整只跳一次
-                    ringTargetRad = encR
-                        + Float(GraphConstants.beltGap)
-                        + GraphConstants.ringPredMargin
+                    // 定稿带**死区**(用户定稿:开场余量自带容错空间,治
+                    // "极限情况跳两次"):当前半径在 [罩得住, 不太松] 区间
+                    // 内 → 一动不动(幽灵误差 −2~+19 整段落死区内=常态
+                    // 零跳);低于下限(罩不住,拖大了)才长、高于上限
+                    // (太松,拖回了)才缩 —— 各一次 lerp 平滑
+                    let base = encR + Float(GraphConstants.beltGap)
+                    if ringRad < base + 5
+                        || ringRad > base + GraphConstants.ringPredMargin
+                            + GraphConstants.ringSlack {
+                        ringTargetRad = base + GraphConstants.ringPredMargin
+                    } else {
+                        ringTargetRad = ringRad
+                    }
                     ringSettled = true
                 }
                 // 平滑长到定稿值(收敛即停);ringTargetRad 在 ringDirty 时
@@ -679,14 +686,27 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
             }
             let rc = ringC
-            // 极角/角增量一律绕**环心**(参考系从主球换成环心):
-            // 帧携带 = 绕环心刚体公转,按自家 hub 相对环心的角增量
+            // 极角/角增量绕**环心**;帧携带 = 绕环心刚体公转,按自家 hub
+            // 相对环心的角增量
             for s in 0..<nh {
                 let rel = beltTmpNow[s] - rc
                 let relPrev = hubPrev[s] - rc
                 let d = atan2(rel.y, rel.x) - atan2(relPrev.y, relPrev.x)
                 beltTmpC[s] = cos(d); beltTmpS[s] = sin(d)
-                beltTmpPol[s] = atan2(rel.y, rel.x)
+                // 家方位 = **主球→folder 射线与环的交点**(用户定稿:弧、
+                // folder 球、主球三点一线才是"正上方";此前用 folder 相对
+                // 环心的极角,环心被巨泡拉偏后两者不一致)。附带:环心漂移
+                // 时交点始终钉在射线上 —— 弧方向不再随环心晃,只有径向
+                // 微调,环心切换/平滑的视觉跳动被结构性消掉。主球钉原点,
+                // 环罩住主球(原点在环内)⇒ 判别式恒正、正根恒存在
+                let f = beltTmpNow[s]
+                let fl = simd_length(f)
+                let u = fl > 1e-4 ? f / fl : SIMD2<Float>(1, 0)
+                let b = simd_dot(u, rc)
+                let disc = max(b * b - simd_length_squared(rc)
+                    + ringRad * ringRad, 0)
+                let p = u * (b + sqrt(disc)) - rc
+                beltTmpPol[s] = atan2(p.y, p.x)
             }
             // 每 tick 混合帧裁剪 + 每家一次的家位仿射参数
             carveBeltSegs()
