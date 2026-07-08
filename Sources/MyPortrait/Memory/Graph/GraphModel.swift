@@ -139,6 +139,11 @@ enum BeltLayout {
                     offsets[g] = cursor + (hashA[g] - 0.5) * slotW * 2.2
                     angles[g] = -famArc + (Double(j) + 0.5) * slot
                         + (hashB[g] - 0.5) * slot * 2.4
+                    // 抖动半幅 1.2×slot 在稀疏排(rowCount 少 → slot 巨大)
+                    // 会把外层单球甩出家弧、极端到环对侧,拖偏角质心 →
+                    // 弧"不在正上方"。钳回自家弧 footprint:家内仍充分分散,
+                    // 只是不越界(顺带 famW=max|beltAngle| 不再被离群点撑大)
+                    angles[g] = max(-famArc, min(famArc, angles[g]))
                     k += 1
                 }
                 // 排距恒定小步(九稿:递增排距的彗尾太厚,层压薄)
