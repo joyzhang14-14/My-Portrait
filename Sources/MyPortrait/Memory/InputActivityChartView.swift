@@ -101,8 +101,9 @@ struct MinuteBuckets: Sendable {
     static let empty = MinuteBuckets(apps: [], counts: [], totals: [],
                                      maxTotal: 0, firstMinute: 0, lastMinute: 0)
 
-    /// 平滑窗口半径(分钟)。窗口 = 2r+1,边界处自动收缩。
-    private static let smoothRadius = 4
+    /// 平滑窗口半径(分钟)。窗口 = 2r+1,边界处自动收缩。轻度即可 —— 视觉
+    /// 圆滑交给渲染层的 Catmull-Rom,这里只压噪声、不削峰。
+    private static let smoothRadius = 2
 
     /// 纯函数,后台线程跑。keystroke 已按 ts 升序,但不依赖顺序。
     static func aggregate(_ ks: [KeystrokeEntry], dayStartMs: Int64) -> MinuteBuckets {
@@ -220,7 +221,8 @@ private struct InputActivityCanvas: View {
         ctx.stroke(p, with: .color(gridColor), lineWidth: 0.6)
     }
 
-    /// 逐 app 从底往上堆叠:每层 = 上界(累计+本层)回到下界(累计),闭合填 AppColor。
+    /// 逐 app 从底往上堆叠:每层 = 上界(累计+本层)Catmull-Rom 平滑上去,再沿
+    /// 下界(累计)平滑回来,闭合填 AppColor。上下界共享点集+同一插值公式,层间无缝。
     private func drawStackedArea(_ ctx: GraphicsContext, plot: CGRect) {
         let lo = buckets.firstMinute, hi = buckets.lastMinute
         var cumulative = Array(repeating: 0.0, count: 1440)
@@ -228,14 +230,14 @@ private struct InputActivityCanvas: View {
             var upper = Array(repeating: 0.0, count: 1440)
             for m in lo...hi { upper[m] = cumulative[m] + buckets.counts[m][ai] }
 
+            let upperPts = (lo...hi).map { CGPoint(x: x($0, plot), y: y(upper[$0], plot)) }
+            let lowerPts = (lo...hi).map { CGPoint(x: x($0, plot), y: y(cumulative[$0], plot)) }
+
             var path = Path()
-            path.move(to: CGPoint(x: x(lo, plot), y: y(upper[lo], plot)))
-            for m in (lo + 1)...hi {
-                path.addLine(to: CGPoint(x: x(m, plot), y: y(upper[m], plot)))
-            }
-            for m in stride(from: hi, through: lo, by: -1) {
-                path.addLine(to: CGPoint(x: x(m, plot), y: y(cumulative[m], plot)))
-            }
+            path.move(to: upperPts[0])
+            addCatmullRom(&path, upperPts)
+            path.addLine(to: lowerPts[lowerPts.count - 1])
+            addCatmullRom(&path, Array(lowerPts.reversed()))
             path.closeSubpath()
 
             let color = AppColor.color(for: InputCaptureView.appLabel(bundle))
@@ -245,15 +247,29 @@ private struct InputActivityCanvas: View {
         }
     }
 
-    /// 单色曲线 = 每分钟总量顶部轮廓。
+    /// 单色曲线 = 每分钟总量顶部轮廓(Catmull-Rom 平滑)。
     private func drawTotalCurve(_ ctx: GraphicsContext, plot: CGRect) {
         let lo = buckets.firstMinute, hi = buckets.lastMinute
+        let pts = (lo...hi).map { CGPoint(x: x($0, plot), y: y(buckets.totals[$0], plot)) }
         var path = Path()
-        path.move(to: CGPoint(x: x(lo, plot), y: y(buckets.totals[lo], plot)))
-        for m in (lo + 1)...hi {
-            path.addLine(to: CGPoint(x: x(m, plot), y: y(buckets.totals[m], plot)))
-        }
+        path.move(to: pts[0])
+        addCatmullRom(&path, pts)
         ctx.stroke(path, with: .color(curveColor), lineWidth: 1.4)
+    }
+
+    /// 沿点序列追加 Catmull-Rom 平滑曲线段(path 须已 move 到 pts[0])。
+    /// 标准 1/6 张力,把折线转成穿过每个点的圆滑贝塞尔 —— 峰变钟形。
+    private func addCatmullRom(_ path: inout Path, _ pts: [CGPoint]) {
+        guard pts.count > 1 else { return }
+        for i in 0..<(pts.count - 1) {
+            let p0 = pts[max(0, i - 1)]
+            let p1 = pts[i]
+            let p2 = pts[i + 1]
+            let p3 = pts[min(pts.count - 1, i + 2)]
+            let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6)
+            let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6)
+            path.addCurve(to: p2, control1: c1, control2: c2)
+        }
     }
 
     /// 底部时间标签(整点刻度)+ 左侧峰值数字。
