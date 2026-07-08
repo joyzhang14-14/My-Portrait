@@ -171,64 +171,122 @@ def strip_unverifiable(e, by):
     return len(stripped)
 
 
-# ---- T0 全局 merge pass:全部事件一次看全,3次共识提合并对,co-association≥2/3 才合 ----
+# ---- T0 全局 merge pass v8:确定性亲和度提案 + LLM 全票窄验证 + 增量单链 ----
+# v7d 实锤(gold 对照,零 GPU 重放实验):LLM 自由提案 127 个≥2票对里只有 19 对真同线
+# (15%),单链 union-find 把错对链成 56 成员嵌合体(B³ P 0.589→0.310,负优化)。
+# 反转架构:提案=确定性(0.7*质心cos+0.3*锚点wj,互kNN k=8,aff≥0.45),LLM 只答
+# 二分"同一任务线?",3/3 全票才合(误收率立方),第一票 no 早停省调用;已连通跳过。
+# 失败模式安全:验证者保守只会少合(留在原分区附近),不会造嵌合体。
+MERGE_LO, MERGE_KNN = 0.45, 8
+
+
 def global_merge_pass(events, by, idf, T, votes=3):
-    def span(e):
-        ts = [T[k] for k in e["session_ids"] if k in T]
-        return (min(t[0] for t in ts), max(t[1] for t in ts)) if ts else (0, 0)
-    cards = "\n".join(
-        f"[{i}] «{e['title']}» — {e['summary'][:140]}" for i, e in enumerate(events))
-    q = (f"Below are {len(events)} candidate events from ONE day. Some belong to the SAME "
-         f"task thread (same bug/feature/investigation continuing across hours) and were "
-         f"over-split. Propose merge groups. BE CONSERVATIVE: only merge events that are "
-         f"clearly the same specific thread; different features/topics stay separate.\n"
-         f"{cards}\n"
-         f'Answer ONLY JSON: {{"groups":[[i,j,...],...]}} (indices; singletons omitted)')
-    pair_votes = collections.Counter()
-    for v in range(votes):
-        obj = _gen("global_merge", [{"role": "user", "content": q}], 800, attempt=v)
-        for g in ((obj or {}).get("groups") or []):
-            ids = sorted({int(x) for x in g if str(x).isdigit() and 0 <= int(x) < len(events)})
-            for a in range(len(ids)):
-                for b in range(a + 1, len(ids)):
-                    pair_votes[(ids[a], ids[b])] += 1
-    thr = (votes + 1) // 2 + (votes % 2 == 0)          # 3票→≥2
-    # 护栏:社交/聊天主导的事件禁并入编码事件(v7d实锤:s432王昱referral被并进right-click
-    # 编码事件,重生成把人名洗掉)。异质合并一律否决,宁分不误合。
+    import numpy as np
+    import v4_local_cluster as _vc
+    E = np.load(_vc.EMB)
+    E = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-9)
+    row = {k: i for i, k in enumerate(by)}          # by 保持 load_sessions 插入序
+    n = len(events)
+
+    def ev_anch(e):
+        a = collections.Counter()
+        for k in e["session_ids"]:
+            for t in by[k]["anchors"]:
+                a[t] += 1
+        return a
+
+    def ev_cent(e):
+        v = E[[row[k] for k in e["session_ids"] if k in row]].mean(axis=0)
+        return v / (np.linalg.norm(v) + 1e-9)
+
+    EA = [ev_anch(e) for e in events]
+    EC = [ev_cent(e) for e in events]
     _CHAT = {"微信", "wechat", "discord", "messages", "信息", "mail", "telegram"}
+
     def _chatty(e):
         apps = collections.Counter(by[k]["app"].lower() for k in e["session_ids"] if k in by)
         top = apps.most_common(1)
         return bool(top) and top[0][0] in _CHAT
-    par = list(range(len(events)))
+
+    A = np.zeros((n, n))
+    for i in range(n):
+        for j in range(i + 1, n):
+            A[i, j] = A[j, i] = (0.7 * float((EC[i] * EC[j]).sum())
+                                 + 0.3 * wjaccard(EA[i], EA[j], idf))
+    knn = [set(np.argsort(-A[i])[:MERGE_KNN]) for i in range(n)]
+    cand = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if A[i, j] >= MERGE_LO and (j in knn[i] or i in knn[j]):
+                if _chatty(events[i]) != _chatty(events[j]):
+                    retain.log_verdict(DAY, events[i]["title"][:50],
+                                       "merge_vetoed_chat_dev", other=events[j]["title"][:50])
+                    continue
+                cand.append((float(A[i, j]), i, j))
+    cand.sort(reverse=True)
+
+    def card(e, other):
+        g = gap_min(ev_span(e, T), ev_span(other, T))
+        ms = e["session_ids"][:2]
+        mem = "\n".join(f"  - {by[k]['doing'][:150]}" for k in ms)
+        return f"«{e['title']}» — {e['summary'][:180]}\n{mem}", g
+
+    par = list(range(n))
+
     def find(x):
         while par[x] != x:
-            par[x] = par[par[x]]; x = par[x]
+            par[x] = par[par[x]]
+            x = par[x]
         return x
-    merged_pairs = vetoed = 0
-    for (a, b), c in pair_votes.items():
-        if c >= 2 and find(a) != find(b):
-            if _chatty(events[a]) != _chatty(events[b]):
-                vetoed += 1
-                retain.log_verdict(DAY, events[min(a, b)]["title"][:50],
-                                   "merge_vetoed_chat_dev", other=events[max(a, b)]["title"][:50])
-                continue
-            par[find(a)] = find(b); merged_pairs += 1
+
+    asked = merged = calls = 0
+    for a_, i, j in cand:
+        if find(i) == find(j):
+            continue
+        ca, gp = card(events[i], events[j])
+        cb, _ = card(events[j], events[i])
+        shared = sorted(set(EA[i]) & set(EA[j]), key=lambda t: -idf.get(t, 0))[:5]
+        q = (f"Are A and B the SAME task thread (one specific bug/feature/investigation "
+             f"continuing across time)? Different features, topics or apps = no. Unsure = no.\n"
+             f"A: {ca}\nB: {cb}\n"
+             f"Time gap: {gp:.0f} min. Shared anchors: {', '.join(shared) or '(none)'}\n"
+             f'Answer ONLY JSON: {{"same": true or false}}')
+        asked += 1
+        yes = 0
+        for v in range(votes):
+            calls += 1
+            obj = _gen("merge_verify", [{"role": "user", "content": q}], 16,
+                       pair=f"{i}-{j}", attempt=v)
+            if obj is not None and obj.get("same") is True:
+                yes += 1
+            else:
+                break                                   # 早停:一票 no 即拒
+        if yes == votes:                                # 全票才合
+            par[find(i)] = find(j)
+            merged += 1
+            retain.log_verdict(DAY, events[i]["title"][:50], "merge_verified",
+                               other=events[j]["title"][:50], aff=round(a_, 3))
+        else:
+            retain.log_verdict(DAY, events[i]["title"][:50], "merge_rejected",
+                               other=events[j]["title"][:50], votes=yes, aff=round(a_, 3))
     groups = collections.defaultdict(list)
-    for i in range(len(events)):
+    for i in range(n):
         groups[find(i)].append(i)
     out = []
     for mem in groups.values():
         if len(mem) == 1:
-            out.append(events[mem[0]]); continue
+            out.append(events[mem[0]])
+            continue
         mem.sort(key=lambda i: -len(events[i]["session_ids"]))
         surv = dict(events[mem[0]])
         sids = sorted({s for i in mem for s in events[i]["session_ids"]})
-        surv["session_ids"] = sids; surv["dirty"] = True   # 合并后摘要必须重生成
+        surv["session_ids"] = sids
+        surv["dirty"] = True                            # 合并后摘要必须重生成
         out.append(surv)
         retain.log_verdict(DAY, surv["title"][:60], "global_merged",
                            n_from=len(mem), titles=[events[i]["title"][:40] for i in mem[1:]])
-    print(f"[global_merge] {len(events)}→{len(out)} 事件(共识合并 {merged_pairs} 对,否决异质 {vetoed})")
+    print(f"[global_merge] {len(events)}→{len(out)} 事件(候选 {len(cand)} 对,"
+          f"问 {asked} 对/{calls} 调用,验证通过 {merged})")
     return out
 
 
@@ -246,7 +304,13 @@ Event: «{title}» ({n} sessions) — {summary}
 Answer ONLY JSON: {{"reason":"<one sentence>","impact":<0-5>}}"""
 
 
-def impact_pass(events):
+# gold 6-07 的 impact 形状(31事件 {5:2,4:5,3:12,2:8,1:3,0:1})→ 累计占比封顶。
+# v7d 实锤:rubric 文字压不住 2507 打分通胀({5:12,4:13});配额只封顶不抬底
+# (impact=min(原始分,配额档)),安静日 LLM 全给低分时分布不受配额影响。
+_IMPACT_QUOTA = [(5, 2 / 31), (4, 7 / 31), (3, 19 / 31), (2, 27 / 31), (1, 30 / 31), (0, 1.0)]
+
+
+def impact_pass(events, T):
     for e in events:
         obj = _gen("impact", [{"role": "user", "content": _IMPACT_RUBRIC.format(
             title=e["title"], n=len(e["session_ids"]), summary=e["summary"][:400])}],
@@ -256,8 +320,24 @@ def impact_pass(events):
             e["impact_reason"] = str((obj or {}).get("reason", ""))[:200]
         except Exception:
             e["impact"] = 2
+    raw = collections.Counter(e["impact"] for e in events)
+    # 排序键:原始分 > 成员数 > 时长(LLM 平局多,确定性信号决胜)
+    def dur(e):
+        s = ev_span(e, T)
+        return s[1] - s[0]
+    order = sorted(range(len(events)),
+                   key=lambda i: (-events[i]["impact"],
+                                  -len(events[i]["session_ids"]), -dur(events[i])))
+    for rank, i in enumerate(order):
+        frac = (rank + 1) / len(events)
+        tier = next(t for t, cap in _IMPACT_QUOTA if frac <= cap)
+        if tier < events[i]["impact"]:
+            retain.log_verdict(DAY, events[i]["title"][:60], "impact_capped",
+                               raw=events[i]["impact"], capped=tier)
+            events[i]["impact"] = tier
     dist = collections.Counter(e["impact"] for e in events)
-    print(f"[impact] 分布 {dict(sorted(dist.items(), reverse=True))}")
+    print(f"[impact] 原始 {dict(sorted(raw.items(), reverse=True))} → "
+          f"封顶 {dict(sorted(dist.items(), reverse=True))}")
 
 
 def harvest(text):
@@ -381,7 +461,7 @@ def main():
     nstrip = sum(strip_unverifiable(e, by) for e in events)   # T0:引语/hash 硬校验剥离
     if nstrip:
         print(f"[verbatim] 剥离未验证引语/hash {nstrip} 处")
-    impact_pass(events)                              # T0:impact 0-5 打分
+    impact_pass(events, T)                           # T0:impact 0-5 打分+配额封顶
     anchor_arbiter_shadow(sess, idf)
     import labdb
     from session_context import enrich_events   # 确定性附加 app/who/where + app/人名进 tags
