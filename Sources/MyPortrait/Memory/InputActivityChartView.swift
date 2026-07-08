@@ -94,12 +94,14 @@ struct MinuteBuckets: Sendable {
     /// totals[minute] = 平滑后该分钟所有 app 击键总数(= 堆叠顶 = 单色曲线)。
     let totals: [Double]
     let maxTotal: Double
+    /// 有打字的分钟(raw 击键 >0)的每分钟击键数中位数 —— y 轴中间那格。
+    let median: Double
     /// 有活动的分钟范围(x 轴左右端)。无数据时 0/0。
     let firstMinute: Int
     let lastMinute: Int
 
     static let empty = MinuteBuckets(apps: [], counts: [], totals: [],
-                                     maxTotal: 0, firstMinute: 0, lastMinute: 0)
+                                     maxTotal: 0, median: 0, firstMinute: 0, lastMinute: 0)
 
     /// 平滑窗口半径(分钟)。窗口 = 2r+1,边界处自动收缩。轻度即可 —— 视觉
     /// 圆滑交给渲染层的 Catmull-Rom,这里只压噪声、不削峰。
@@ -139,8 +141,19 @@ struct MinuteBuckets: Sendable {
         let totals = movingAverage(rawTot, radius: smoothRadius)
         let maxTotal = (first...last).map { totals[$0] }.max() ?? 0
 
+        // 中位数:只取有打字的分钟(raw>0)的原始每分钟击键数 —— 空白分钟不计入。
+        let active = (first...last).map { rawTot[$0] }.filter { $0 > 0 }.sorted()
+        let median: Double = {
+            guard !active.isEmpty else { return 0 }
+            let n = active.count
+            return n.isMultiple(of: 2)
+                ? Double(active[n / 2 - 1] + active[n / 2]) / 2
+                : Double(active[n / 2])
+        }()
+
         return MinuteBuckets(apps: apps, counts: counts, totals: totals,
-                             maxTotal: maxTotal, firstMinute: first, lastMinute: last)
+                             maxTotal: maxTotal, median: median,
+                             firstMinute: first, lastMinute: last)
     }
 
     /// 前缀和 O(n) 滑动平均。边界窗口收缩(不补零,免得两端被压低)。
@@ -216,8 +229,8 @@ private struct InputActivityCanvas: View {
             p.move(to: CGPoint(x: px, y: plot.minY))
             p.addLine(to: CGPoint(x: px, y: plot.maxY))
         }
-        // 顶(最高)+ 中(最高一半)两条横向网格线,对齐 y 轴刻度。
-        for gy in [plot.minY, plot.midY] {
+        // 顶(最高)+ 中位数高度两条横向网格线,对齐 y 轴刻度。
+        for gy in [plot.minY, y(buckets.median, plot)] {
             p.move(to: CGPoint(x: plot.minX, y: gy))
             p.addLine(to: CGPoint(x: plot.maxX, y: gy))
         }
@@ -289,11 +302,10 @@ private struct InputActivityCanvas: View {
                 .foregroundStyle(labelColor)
             ctx.draw(text, at: CGPoint(x: x(h * 60, plot), y: plot.maxY + 12))
         }
-        // y 轴 3 刻度:最高(顶)/ 一半(中)/ 0(底),右对齐贴在绘图区左侧。
-        let maxV = Int(buckets.maxTotal.rounded())
+        // y 轴 3 刻度:最高(顶)/ 中位数(其真实高度)/ 0(底),右对齐贴绘图区左侧。
         let yTicks: [(CGFloat, Int)] = [
-            (plot.minY, maxV),
-            (plot.midY, Int((buckets.maxTotal / 2).rounded())),
+            (plot.minY, Int(buckets.maxTotal.rounded())),
+            (y(buckets.median, plot), Int(buckets.median.rounded())),
             (plot.maxY, 0),
         ]
         for (py, value) in yTicks {
