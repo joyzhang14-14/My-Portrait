@@ -2,12 +2,13 @@ import SwiftUI
 
 /// Memory 区 "Input" scope 的**图谱形态**(canvas 模式)。
 ///
-/// 一天一张面积图:x 轴 = 当天本地时间 00:00–24:00,y 轴 = 每分钟总击键数
-/// (含退格,不减)。曲线下方阴影按 app 堆叠分色(和 timeline 一致的 `AppColor`)。
+/// 一天一张面积图:x 轴 = 当天**第一次打字到最后一次打字**的时段(动态,不固定
+/// 24h),y 轴 = 每分钟总击键数(含退格,不减)。曲线下方阴影按 app 堆叠分色
+/// (和 timeline 一致的 `AppColor`);数据做移动平均平滑,曲线更顺。
 /// 顶部日期切换栏复用 timeline 的 `TimelineControlsBar`(日历弹窗切天)。
 ///
 /// 数据源:`keystroke_log`(raw 每次击键),按本地某天 [00:00, +24h) 查
-/// `WritingCaptureStore.keystrokesInRange`,后台聚合成 1440 个分钟桶。
+/// `WritingCaptureStore.keystrokesInRange`,后台聚合成 1440 个分钟桶后取活动段。
 @MainActor
 struct InputActivityChartView: View {
     @State private var selectedDay: Date = Date()
@@ -83,16 +84,25 @@ struct InputActivityChartView: View {
 // MARK: - 聚合结果
 
 /// 一天 1440 分钟的击键分桶。堆叠面积图 + 总量曲线都从这里读。
+/// counts/totals 已做移动平均平滑(Double);x 轴只画 [firstMinute, lastMinute]
+/// 这段有活动的时段(当天第一次打字到最后一次打字)。
 struct MinuteBuckets: Sendable {
     /// 堆叠顺序的 app bundle_id(总量小的在底,大的在上 —— 大块在顶更好读)。
     let apps: [String]
-    /// counts[minute(0..1439)][appIndex] = 该分钟该 app 击键数。
-    let counts: [[Int]]
-    /// totals[minute] = 该分钟所有 app 击键总数(= 堆叠顶 = 单色曲线)。
-    let totals: [Int]
-    let maxTotal: Int
+    /// counts[minute(0..1439)][appIndex] = 平滑后的该分钟该 app 击键数。
+    let counts: [[Double]]
+    /// totals[minute] = 平滑后该分钟所有 app 击键总数(= 堆叠顶 = 单色曲线)。
+    let totals: [Double]
+    let maxTotal: Double
+    /// 有活动的分钟范围(x 轴左右端)。无数据时 0/0。
+    let firstMinute: Int
+    let lastMinute: Int
 
-    static let empty = MinuteBuckets(apps: [], counts: [], totals: [], maxTotal: 0)
+    static let empty = MinuteBuckets(apps: [], counts: [], totals: [],
+                                     maxTotal: 0, firstMinute: 0, lastMinute: 0)
+
+    /// 平滑窗口半径(分钟)。窗口 = 2r+1,边界处自动收缩。
+    private static let smoothRadius = 4
 
     /// 纯函数,后台线程跑。keystroke 已按 ts 升序,但不依赖顺序。
     static func aggregate(_ ks: [KeystrokeEntry], dayStartMs: Int64) -> MinuteBuckets {
@@ -104,17 +114,45 @@ struct MinuteBuckets: Sendable {
         let apps = appTotals.sorted { $0.value < $1.value }.map { $0.key }
         let appIndex = Dictionary(uniqueKeysWithValues: apps.enumerated().map { ($1, $0) })
 
-        // 2) 逐击键落分钟桶。
-        var counts = Array(repeating: Array(repeating: 0, count: apps.count), count: 1440)
-        var totals = Array(repeating: 0, count: 1440)
+        // 2) 逐击键落分钟桶(原始整数)。
+        var raw = Array(repeating: Array(repeating: 0, count: apps.count), count: 1440)
+        var rawTot = Array(repeating: 0, count: 1440)
         for k in ks {
             let m = Int((k.tsMs - dayStartMs) / 60_000)
             guard m >= 0, m < 1440, let ai = appIndex[k.bundleId] else { continue }
-            counts[m][ai] += 1
-            totals[m] += 1
+            raw[m][ai] += 1
+            rawTot[m] += 1
         }
+
+        // 3) 活动范围 = 第一次/最后一次打字的分钟。
+        guard let first = rawTot.firstIndex(where: { $0 > 0 }),
+              let last = rawTot.lastIndex(where: { $0 > 0 }) else { return .empty }
+
+        // 4) 移动平均平滑(每 app 列 + 总量;线性运算,各层平滑后仍精确堆叠成总量)。
+        var counts = Array(repeating: Array(repeating: 0.0, count: apps.count), count: 1440)
+        for ai in apps.indices {
+            let col = (0..<1440).map { raw[$0][ai] }
+            let sm = movingAverage(col, radius: smoothRadius)
+            for m in 0..<1440 { counts[m][ai] = sm[m] }
+        }
+        let totals = movingAverage(rawTot, radius: smoothRadius)
+        let maxTotal = (first...last).map { totals[$0] }.max() ?? 0
+
         return MinuteBuckets(apps: apps, counts: counts, totals: totals,
-                             maxTotal: totals.max() ?? 0)
+                             maxTotal: maxTotal, firstMinute: first, lastMinute: last)
+    }
+
+    /// 前缀和 O(n) 滑动平均。边界窗口收缩(不补零,免得两端被压低)。
+    private static func movingAverage(_ a: [Int], radius r: Int) -> [Double] {
+        let n = a.count
+        var prefix = Array(repeating: 0, count: n + 1)
+        for i in 0..<n { prefix[i + 1] = prefix[i] + a[i] }
+        var out = Array(repeating: 0.0, count: n)
+        for i in 0..<n {
+            let lo = max(0, i - r), hi = min(n - 1, i + r)
+            out[i] = Double(prefix[hi + 1] - prefix[lo]) / Double(hi - lo + 1)
+        }
+        return out
     }
 }
 
@@ -141,11 +179,14 @@ private struct InputActivityCanvas: View {
         CGRect(x: 40, y: 6, width: max(1, size.width - 48), height: max(1, size.height - 26))
     }
 
-    private func x(_ minute: Double, _ plot: CGRect) -> CGFloat {
-        plot.minX + CGFloat(minute / 1440.0) * plot.width
+    // x 轴范围 = 活动时段 [firstMinute, lastMinute],至少 1 分钟宽避免除零。
+    private var span: Double { max(1.0, Double(buckets.lastMinute - buckets.firstMinute)) }
+
+    private func x(_ minute: Int, _ plot: CGRect) -> CGFloat {
+        plot.minX + CGFloat((Double(minute - buckets.firstMinute)) / span) * plot.width
     }
     private func y(_ value: Double, _ plot: CGRect) -> CGFloat {
-        let maxV = max(1.0, Double(buckets.maxTotal))
+        let maxV = max(1.0, buckets.maxTotal)
         return plot.maxY - CGFloat(value / maxV) * plot.height
     }
 
@@ -156,11 +197,21 @@ private struct InputActivityCanvas: View {
         colorScheme == .light ? Color.black.opacity(0.65) : Color.white.opacity(0.80)
     }
 
-    /// 每 3 小时一条竖线 + y 轴顶/中横线。
+    /// 落在活动范围内的整点小时刻度(跨度小用 1h,大用 2/3h,避免拥挤)。
+    private var hourTicks: [Int] {
+        let firstH = (buckets.firstMinute + 59) / 60   // ceil
+        let lastH = buckets.lastMinute / 60            // floor
+        guard lastH >= firstH else { return [] }
+        let spanH = lastH - firstH
+        let step = spanH <= 6 ? 1 : (spanH <= 14 ? 2 : 3)
+        return stride(from: firstH, through: lastH, by: step).map { $0 }
+    }
+
+    /// 每整点刻度一条竖线 + y 轴顶横线。
     private func drawGrid(_ ctx: GraphicsContext, plot: CGRect) {
         var p = Path()
-        for h in stride(from: 0, through: 24, by: 3) {
-            let px = x(Double(h) * 60, plot)
+        for h in hourTicks {
+            let px = x(h * 60, plot)
             p.move(to: CGPoint(x: px, y: plot.minY))
             p.addLine(to: CGPoint(x: px, y: plot.maxY))
         }
@@ -171,18 +222,19 @@ private struct InputActivityCanvas: View {
 
     /// 逐 app 从底往上堆叠:每层 = 上界(累计+本层)回到下界(累计),闭合填 AppColor。
     private func drawStackedArea(_ ctx: GraphicsContext, plot: CGRect) {
-        var cumulative = Array(repeating: 0, count: 1440)
+        let lo = buckets.firstMinute, hi = buckets.lastMinute
+        var cumulative = Array(repeating: 0.0, count: 1440)
         for (ai, bundle) in buckets.apps.enumerated() {
-            var upper = Array(repeating: 0, count: 1440)
-            for m in 0..<1440 { upper[m] = cumulative[m] + buckets.counts[m][ai] }
+            var upper = Array(repeating: 0.0, count: 1440)
+            for m in lo...hi { upper[m] = cumulative[m] + buckets.counts[m][ai] }
 
             var path = Path()
-            path.move(to: CGPoint(x: x(0, plot), y: y(Double(upper[0]), plot)))
-            for m in 1..<1440 {
-                path.addLine(to: CGPoint(x: x(Double(m), plot), y: y(Double(upper[m]), plot)))
+            path.move(to: CGPoint(x: x(lo, plot), y: y(upper[lo], plot)))
+            for m in (lo + 1)...hi {
+                path.addLine(to: CGPoint(x: x(m, plot), y: y(upper[m], plot)))
             }
-            for m in stride(from: 1439, through: 0, by: -1) {
-                path.addLine(to: CGPoint(x: x(Double(m), plot), y: y(Double(cumulative[m]), plot)))
+            for m in stride(from: hi, through: lo, by: -1) {
+                path.addLine(to: CGPoint(x: x(m, plot), y: y(cumulative[m], plot)))
             }
             path.closeSubpath()
 
@@ -195,25 +247,26 @@ private struct InputActivityCanvas: View {
 
     /// 单色曲线 = 每分钟总量顶部轮廓。
     private func drawTotalCurve(_ ctx: GraphicsContext, plot: CGRect) {
+        let lo = buckets.firstMinute, hi = buckets.lastMinute
         var path = Path()
-        path.move(to: CGPoint(x: x(0, plot), y: y(Double(buckets.totals[0]), plot)))
-        for m in 1..<1440 {
-            path.addLine(to: CGPoint(x: x(Double(m), plot), y: y(Double(buckets.totals[m]), plot)))
+        path.move(to: CGPoint(x: x(lo, plot), y: y(buckets.totals[lo], plot)))
+        for m in (lo + 1)...hi {
+            path.addLine(to: CGPoint(x: x(m, plot), y: y(buckets.totals[m], plot)))
         }
         ctx.stroke(path, with: .color(curveColor), lineWidth: 1.4)
     }
 
-    /// 底部时间标签(0/6/12/18/24 时)+ 左侧峰值数字。
+    /// 底部时间标签(整点刻度)+ 左侧峰值数字。
     private func drawAxis(_ ctx: GraphicsContext, plot: CGRect, size: CGSize) {
         let labelColor = colorScheme == .light ? Color.black.opacity(0.45) : Color.white.opacity(0.45)
-        for h in stride(from: 0, through: 24, by: 6) {
+        for h in hourTicks {
             let text = Text(String(format: "%02d:00", h))
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(labelColor)
-            ctx.draw(text, at: CGPoint(x: x(Double(h) * 60, plot), y: plot.maxY + 12))
+            ctx.draw(text, at: CGPoint(x: x(h * 60, plot), y: plot.maxY + 12))
         }
         // y 轴峰值(顶部)。
-        let peak = Text("\(buckets.maxTotal)")
+        let peak = Text("\(Int(buckets.maxTotal.rounded()))")
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(labelColor)
         ctx.draw(peak, at: CGPoint(x: plot.minX - 6, y: plot.minY + 4), anchor: .trailing)
