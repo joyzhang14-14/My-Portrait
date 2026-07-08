@@ -485,7 +485,9 @@ final class MemoryScheduler {
         // 否则 SleepHelperClient 内部静默 no-op。
         // ⚠️ 只在**合盖**时才持有 —— 开盖瞬间(clamshell 事件触发本函数)立即松手,
         // 不让 disablesleep 留在开盖状态(开盖本就有 IOPMAssertion 兜空闲睡眠)。
-        SleepHelperClient.shared.setKeepAwake(want && PowerMonitor.isLidClosed)
+        let lidWant = want && PowerMonitor.isLidClosed
+            && ConfigStore.shared.current.general.keepAwakeLidClosed
+        SleepHelperClient.shared.setKeepAwake(lidWant, owner: "memory")
     }
 
     private func registerNetworkMonitor() {

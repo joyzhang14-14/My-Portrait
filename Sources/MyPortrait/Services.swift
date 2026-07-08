@@ -388,7 +388,7 @@ final class Services {
         pushIgnoreRules()
         observeIgnoreRules()
         observePreferredInputDevice()
-        observeTranscribeOnACOnly()
+        observeTranscriptionPowerMode()
 
         // OCR accuracy booster(Settings → Screen Capture):按物理像素抓帧。
         pushOCRBooster()
@@ -558,23 +558,23 @@ final class Services {
         }
     }
 
-    /// 监听 "Only transcribe while plugged in"(transcribeOnACOnly)变化,变了立刻让
-    /// 转录调度器重评一轮 —— 否则用户拨开关后要等最多 60s 的兜底 poll 才生效 + Status
-    /// 才刷新("Paused on battery" ↔ 转录)。withObservationTracking 一次性,onChange 递归重注册。
-    private func observeTranscribeOnACOnly() {
+    /// 监听转录电源档位(transcriptionPowerMode)变化,变了立刻让转录调度器重评一轮
+    /// —— 否则用户改档后要等最多 60s 的兜底 poll 才生效 + Status 才刷新
+    ///("Paused on battery" ↔ 转录)。withObservationTracking 一次性,onChange 递归重注册。
+    private func observeTranscriptionPowerMode() {
         let store = ConfigStore.shared
         // 同 observePreferredInputDevice:追踪粒度是整个 current,diff 真值
         // 再 reevaluate,免得任意设置变更都白跑一轮队列处理。
-        let seen = store.current.capture.audio.transcribeOnACOnly
+        let seen = store.current.capture.audio.transcriptionPowerMode
         withObservationTracking {
-            _ = store.capture.audio.transcribeOnACOnly
+            _ = store.capture.audio.transcriptionPowerMode
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                if ConfigStore.shared.current.capture.audio.transcribeOnACOnly != seen {
+                if ConfigStore.shared.current.capture.audio.transcriptionPowerMode != seen {
                     await self.transcriber.reevaluate()
                 }
-                self.observeTranscribeOnACOnly()
+                self.observeTranscriptionPowerMode()
             }
         }
     }

@@ -411,16 +411,19 @@ struct AudioCaptureSettingsView: View {
                         selectedLanguageChips
                     }
                         SettingsDivider()
-                        SettingsRow("Only transcribe while plugged in",
-                                    description: "Audio still records on battery, but transcribing waits until you're plugged in.",
+                        SettingsRow("When to transcribe",
+                                    description: "Audio always records; only transcribing waits. \"Plugged in & lid closed\" keeps running with the lid shut via a background helper — otherwise closing the lid pauses it.",
                                     icon: "powerplug") {
-                            Toggle("", isOn: config.binding(\.capture.audio.transcribeOnACOnly)).labelsHidden().toggleStyle(.switch)
-                        }
-                        SettingsDivider()
-                        SettingsRow("Keep Mac awake while transcribing",
-                                    description: "While plugged in, it keeps the Mac awake until the transcription backlog finishes instead of letting it sleep. Closing the lid still puts it to sleep.",
-                                    icon: "zzz") {
-                            Toggle("", isOn: config.binding(\.capture.audio.keepAwakeWhileTranscribing)).labelsHidden().toggleStyle(.switch)
+                            Picker("", selection: config.binding(\.capture.audio.transcriptionPowerMode)) {
+                                Text("Always").tag(TranscriptionPowerMode.always)
+                                Text("Only while plugged in").tag(TranscriptionPowerMode.pluggedIn)
+                                Text("Only while plugged in & lid closed").tag(TranscriptionPowerMode.pluggedInLidClosed)
+                            }
+                            .pickerStyle(.menu).labelsHidden().frame(width: 240)
+                            .onChange(of: config.current.capture.audio.transcriptionPowerMode) { _, _ in
+                                // 三档都可能靠 helper 合盖运行 → 改档即幂等注册(未批准则引导系统设置)。
+                                SleepHelperClient.shared.enable()
+                            }
                         }
                     }
                 }
