@@ -171,16 +171,24 @@ def strip_unverifiable(e, by):
     return len(stripped)
 
 
-# ---- T0 全局 merge pass v8:确定性亲和度提案 + LLM 全票窄验证 + 增量单链 ----
-# v7d 实锤(gold 对照,零 GPU 重放实验):LLM 自由提案 127 个≥2票对里只有 19 对真同线
-# (15%),单链 union-find 把错对链成 56 成员嵌合体(B³ P 0.589→0.310,负优化)。
-# 反转架构:提案=确定性(0.7*质心cos+0.3*锚点wj,互kNN k=8,aff≥0.45),LLM 只答
-# 二分"同一任务线?",3/3 全票才合(误收率立方),第一票 no 早停省调用;已连通跳过。
-# 失败模式安全:验证者保守只会少合(留在原分区附近),不会造嵌合体。
-MERGE_LO, MERGE_KNN = 0.45, 8
+# ---- T0 全局 merge pass v9:纯确定性平均连接凝聚(零 LLM) ----
+# 演进史(gold 对照,全部零 GPU 留存重放实验,7-07):
+#  v8a LLM自由提案+单链union-find:127个≥2票对仅19真(15%),链成56成员嵌合体,
+#      B³ P 0.589→0.310 负优化;
+#  v8b 确定性kNN提案+LLM二分3/3全票验证:temp0.2下三票完美相关(K=3投票失效,
+#      142拒里141个首票no),通过71对里52错(误收73%),F1 0.277 更差;拒掉的也有
+#      21%是好对=LLM的yes/no对"同项目不同任务线vs同任务线"零判别力。
+#  → 结论:成对merge判断超出2507能力,是T2 merge-judge adapter的活(213对gold
+#    标注判例已在留存,kind=merge_verified/merge_rejected,即其训练评测集)。
+#  v9 纯确定性:事件级 aff=0.7*质心cos+0.3*锚点wj,平均连接凝聚 τ0.55,合并后
+#     规模cap60(gold最大事件54;无cap时τ0.55会糊出168成员巨簇,F1 0.441是R
+#     通胀假象),chat/dev异质否决。6-07:88→52事件,F1 0.395(现产线0.326,
+#     merge前0.332),嵌合体0,最大簇59。神谕上限0.547,差距在88分区纯度+merge
+#     判断,均为T2蒸馏目标。
+MERGE_ALPHA, MERGE_TAU, MERGE_CAP = 0.7, 0.55, 60
 
 
-def global_merge_pass(events, by, idf, T, votes=3):
+def global_merge_pass(events, by, idf, T):
     import numpy as np
     import v4_local_cluster as _vc
     E = np.load(_vc.EMB)
@@ -211,69 +219,31 @@ def global_merge_pass(events, by, idf, T, votes=3):
     A = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
-            A[i, j] = A[j, i] = (0.7 * float((EC[i] * EC[j]).sum())
-                                 + 0.3 * wjaccard(EA[i], EA[j], idf))
-    knn = [set(np.argsort(-A[i])[:MERGE_KNN]) for i in range(n)]
-    cand = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            if A[i, j] >= MERGE_LO and (j in knn[i] or i in knn[j]):
-                if _chatty(events[i]) != _chatty(events[j]):
-                    retain.log_verdict(DAY, events[i]["title"][:50],
-                                       "merge_vetoed_chat_dev", other=events[j]["title"][:50])
-                    continue
-                cand.append((float(A[i, j]), i, j))
-    cand.sort(reverse=True)
-
-    def card(e, other):
-        g = gap_min(ev_span(e, T), ev_span(other, T))
-        ms = e["session_ids"][:2]
-        mem = "\n".join(f"  - {by[k]['doing'][:150]}" for k in ms)
-        return f"«{e['title']}» — {e['summary'][:180]}\n{mem}", g
-
-    par = list(range(n))
-
-    def find(x):
-        while par[x] != x:
-            par[x] = par[par[x]]
-            x = par[x]
-        return x
-
-    asked = merged = calls = 0
-    for a_, i, j in cand:
-        if find(i) == find(j):
-            continue
-        ca, gp = card(events[i], events[j])
-        cb, _ = card(events[j], events[i])
-        shared = sorted(set(EA[i]) & set(EA[j]), key=lambda t: -idf.get(t, 0))[:5]
-        q = (f"Are A and B the SAME task thread (one specific bug/feature/investigation "
-             f"continuing across time)? Different features, topics or apps = no. Unsure = no.\n"
-             f"A: {ca}\nB: {cb}\n"
-             f"Time gap: {gp:.0f} min. Shared anchors: {', '.join(shared) or '(none)'}\n"
-             f'Answer ONLY JSON: {{"same": true or false}}')
-        asked += 1
-        yes = 0
-        for v in range(votes):
-            calls += 1
-            obj = _gen("merge_verify", [{"role": "user", "content": q}], 16,
-                       pair=f"{i}-{j}", attempt=v)
-            if obj is not None and obj.get("same") is True:
-                yes += 1
-            else:
-                break                                   # 早停:一票 no 即拒
-        if yes == votes:                                # 全票才合
-            par[find(i)] = find(j)
-            merged += 1
-            retain.log_verdict(DAY, events[i]["title"][:50], "merge_verified",
-                               other=events[j]["title"][:50], aff=round(a_, 3))
-        else:
-            retain.log_verdict(DAY, events[i]["title"][:50], "merge_rejected",
-                               other=events[j]["title"][:50], votes=yes, aff=round(a_, 3))
-    groups = collections.defaultdict(list)
-    for i in range(n):
-        groups[find(i)].append(i)
+            A[i, j] = A[j, i] = (MERGE_ALPHA * float((EC[i] * EC[j]).sum())
+                                 + (1 - MERGE_ALPHA) * wjaccard(EA[i], EA[j], idf))
+    comp = [[i] for i in range(n)]
+    csz = [len(e["session_ids"]) for e in events]
+    ch = [_chatty(e) for e in events]
+    while True:
+        best = None
+        for i in range(len(comp)):
+            for j in range(i + 1, len(comp)):
+                if ch[comp[i][0]] != ch[comp[j][0]]:
+                    continue                            # chat/dev 异质否决
+                if csz[i] + csz[j] > MERGE_CAP:
+                    continue                            # 规模护栏:禁产巨簇
+                vals = [A[x][y] for x in comp[i] for y in comp[j]]
+                d = sum(vals) / len(vals)               # 平均连接(单链=嵌合体放大器)
+                if d >= MERGE_TAU and (best is None or d > best[0]):
+                    best = (d, i, j)
+        if not best:
+            break
+        _, i, j = best
+        comp[i] += comp[j]
+        csz[i] += csz[j]
+        del comp[j], csz[j]
     out = []
-    for mem in groups.values():
+    for mem in comp:
         if len(mem) == 1:
             out.append(events[mem[0]])
             continue
@@ -285,8 +255,8 @@ def global_merge_pass(events, by, idf, T, votes=3):
         out.append(surv)
         retain.log_verdict(DAY, surv["title"][:60], "global_merged",
                            n_from=len(mem), titles=[events[i]["title"][:40] for i in mem[1:]])
-    print(f"[global_merge] {len(events)}→{len(out)} 事件(候选 {len(cand)} 对,"
-          f"问 {asked} 对/{calls} 调用,验证通过 {merged})")
+    print(f"[global_merge] {len(events)}→{len(out)} 事件(确定性平均连接 "
+          f"τ{MERGE_TAU}/cap{MERGE_CAP},零LLM)")
     return out
 
 
