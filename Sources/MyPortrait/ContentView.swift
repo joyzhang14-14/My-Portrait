@@ -194,7 +194,12 @@ struct ContentView: View {
             // canvas 模式只覆盖 events/portrait;personalInfo/input 没有图谱
             // 形态,即便 mode==canvas 也走列表(侧栏点击它们时会把 mode 拨回 text)。
             if memoryViewMode == .canvas, MemoryViewMode.supportsCanvas(memoryScope) {
-                GraphRootView(scope: $memoryScope)
+                // input 的图谱形态是打字活动面积图,不走力导向 GraphRootView。
+                if memoryScope == .input {
+                    InputActivityChartView()
+                } else {
+                    GraphRootView(scope: $memoryScope)
+                }
             } else {
                 MemoriesView(scope: $memoryScope,
                              onEditEntity: { url in

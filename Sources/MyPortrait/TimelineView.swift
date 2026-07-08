@@ -228,7 +228,9 @@ struct TimelineView: View {
 //     etc.)
 //   - system font (SF Pro) on the date — monospaced was too "code-editor"
 
-private struct TimelineControlsBar: View {
+// `internal`(去 private):Input 图谱(InputActivityChartView)复用这套
+// 「和 timeline 一致的日期切换栏 + 日历弹窗」,不重复实现。
+struct TimelineControlsBar: View {
     @Binding var currentDate: Date
     let onRefresh: () -> Void
     @State private var calendarOpen = false
@@ -294,7 +296,7 @@ private struct TimelineControlsBar: View {
 // MARK: - Calendar Popover
 // =============================================================================
 
-private struct CalendarPopover: View {
+struct CalendarPopover: View {
     @Binding var selected: Date
     @Binding var isPresented: Bool
     @State private var anchor: Date = Date()
@@ -387,7 +389,7 @@ private struct CalendarPopover: View {
     }
 }
 
-private struct DayCell: View {
+struct DayCell: View {
     let date: Date
     let inMonth: Bool
     let isSelected: Bool
