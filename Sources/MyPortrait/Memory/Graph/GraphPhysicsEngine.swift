@@ -202,6 +202,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 此刻松手"克隆预算;松手位置与最近预算克隆位够近 → 结果现成,
     /// 零延迟直飞。以下三个只在物理线程读写(无锁)。
     private var shadowClonePosPending: SIMD2<Float>? = nil
+    /// 锁定时刻(消费影子结果那 tick):之后 45 tick 内槽位弹簧 ×2.5
+    /// —— 弹簧零速起步头 200ms 位移只有百分之几,肉眼像"没动"被感知
+    /// 为延迟;起飞窗口加力让第一帧就有可见移动(生成态不加,绽放
+    /// 节奏不变;窗口后回常规增益,极坐标弹簧自带 ease-out 收尾)
+    private var beltLockTick: UInt64 = 0
     private var dragSpawnPos = SIMD2<Float>(.infinity, .infinity)
     private var lastShadowSpawnTick: UInt64 = 0
     private var lastDragPos: SIMD2<Float> = .zero
@@ -469,7 +474,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 预算过,最近预算的克隆位与松手位置够近(<40pt)→ 结果
                 // 现成/在途,不重建(零/极低延迟);否则照常重建(3~8 tick)
                 if let cp = shadowClonePosPending,
-                   simd_length(cp - lastDragPos) < 40 {
+                   simd_length(cp - lastDragPos) < 60 {
                     // 命中:结果 ready 则下 tick 即消费;在途则等它几 tick
                 } else {
                     beltPredDirty = true
@@ -613,8 +618,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 已现成 = 零延迟
             lastDragPos = pos[di]
             if di != 0, nodeFamily[di] < 0,
-               simd_length(pos[di] - dragSpawnPos) > 40,
-               tickCount &- lastShadowSpawnTick >= 20 {
+               simd_length(pos[di] - dragSpawnPos) > 30,
+               tickCount &- lastShadowSpawnTick >= 10 {
                 spawnShadow(releasedSim: di)
                 dragSpawnPos = pos[di]
                 lastShadowSpawnTick = tickCount
@@ -645,7 +650,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         // 地板 0.35(不是 linkPass 的 0.1,压力取证):反推力冷场持续
         // 转 hub,目标 2~6pt/tick 走,弹簧 0.1 地板只追 0.45pt/tick ——
         // 永远落后 >24pt = 永久穿透免碰撞,park 冻结时 71/360 对叠着
-        let k = GraphConstants.beltSpring * max(alpha, 0.35)
+        var k = GraphConstants.beltSpring * max(alpha, 0.35)
+        if !beltForming, tickCount &- beltLockTick < 45 {
+            k *= 2.5   // 起飞窗口(见 beltLockTick 注释)
+        }
         do {
             let nh = hubIndices.count
             if hubPrev.count != nh {
@@ -723,6 +731,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                                 + GraphConstants.ringPredMargin
                         }
                         shadowDone = true
+                        beltLockTick = tickCount
                     }
                 }
             }
