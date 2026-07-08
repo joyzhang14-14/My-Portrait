@@ -211,6 +211,11 @@ private struct InputActivityCanvas: View {
         colorScheme == .light ? Color.black.opacity(0.65) : Color.white.opacity(0.80)
     }
 
+    /// 中位数离 0 或离最高值差不到 2 时就不显示(挤在一起没意义)。
+    private var showMedian: Bool {
+        buckets.median >= 2 && (buckets.maxTotal - buckets.median) >= 2
+    }
+
     /// 落在活动范围内的整点小时刻度(跨度小用 1h,大用 2/3h,避免拥挤)。
     private var hourTicks: [Int] {
         let firstH = (buckets.firstMinute + 59) / 60   // ceil
@@ -229,8 +234,10 @@ private struct InputActivityCanvas: View {
             p.move(to: CGPoint(x: px, y: plot.minY))
             p.addLine(to: CGPoint(x: px, y: plot.maxY))
         }
-        // 顶(最高)+ 中位数高度两条横向网格线,对齐 y 轴刻度。
-        for gy in [plot.minY, y(buckets.median, plot)] {
+        // 顶(最高)+(可选)中位数高度横向网格线,对齐 y 轴刻度。
+        var gridYs = [plot.minY]
+        if showMedian { gridYs.append(y(buckets.median, plot)) }
+        for gy in gridYs {
             p.move(to: CGPoint(x: plot.minX, y: gy))
             p.addLine(to: CGPoint(x: plot.maxX, y: gy))
         }
@@ -302,12 +309,12 @@ private struct InputActivityCanvas: View {
                 .foregroundStyle(labelColor)
             ctx.draw(text, at: CGPoint(x: x(h * 60, plot), y: plot.maxY + 12))
         }
-        // y 轴 3 刻度:最高(顶)/ 中位数(其真实高度)/ 0(底),右对齐贴绘图区左侧。
-        let yTicks: [(CGFloat, Int)] = [
-            (plot.minY, Int(buckets.maxTotal.rounded())),
-            (y(buckets.median, plot), Int(buckets.median.rounded())),
-            (plot.maxY, 0),
-        ]
+        // y 轴刻度:最高(顶)/(可选)中位数(其真实高度)/ 0(底),右对齐贴绘图区左侧。
+        var yTicks: [(CGFloat, Int)] = [(plot.minY, Int(buckets.maxTotal.rounded()))]
+        if showMedian {
+            yTicks.append((y(buckets.median, plot), Int(buckets.median.rounded())))
+        }
+        yTicks.append((plot.maxY, 0))
         for (py, value) in yTicks {
             let text = Text("\(value)")
                 .font(.system(size: 9, design: .monospaced))
