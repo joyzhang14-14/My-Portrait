@@ -42,8 +42,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 气泡对主球的净空(= 家内最大叶径 + pad):圆的内缘叶不许被主球
     /// 碰撞壳顶出圈外。
     private var hubMainClear: [Float] = []
-    /// hub→主球弹簧自然长度(幽灵模拟预判终局用)。
-    private var hubRestLen: [Float] = []
     /// 全部末端球下标 + 各自所属 hub(主球=0)+ 各自的圈内硬上限
     ///(= 自家气泡半径 − 叶半径 − 缝;叶子绝不出自家隐形圆)。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
@@ -60,15 +58,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 碰撞按家隔离照常。
     private var beltIdx: [Int32] = [], beltHub: [Int32] = []
     private var beltRing: [Float] = [], beltAng: [Float] = []
-    /// 陨石环几何(单环重构):环半径 = 幽灵终局最小包围圆半径 + beltGap,
+    /// 陨石环几何(单环重构):环半径 = 影子终局最小包围圆半径 + beltGap,
     /// **一次算死**(explode/updateScene 置 ringDirty 重算;拖动不变)。
-    /// 环心 = 每 tick 平滑追当前布局最小包围圆圆心(lerp 防抖);生成期
-    /// (beltForming)直接用幽灵终局环心 —— 环一次变好。
+    /// 环心 = 每 tick 平滑追目标环心(lerp 防抖);开场直接钉影子
+    /// warmup 后的终局几何 —— 环一次变好。
     private var ringRad: Float = 0
     private var ringDirty = true
     private var ringC: SIMD2<Float> = .zero
-    /// 幽灵终局的环心(predictBeltClip 产出;生成期直接采用)。
-    private var predRingCenter: SIMD2<Float> = .zero
     /// 环目标(半径+圆心):预测时定死,之后由**持续监督**维护不变量
     /// "目标环始终罩住当前布局(余量∈[10, margin+slack])"——covered
     /// 零动(死区迟滞防振荡),越界(嵌入/太松)才调一次。⚠️ 不能只
@@ -113,13 +109,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var beltFamReach: [Float] = []
     /// 动态弧裁剪的可用角**自由段并集**(相对自家主球极角,升序不重叠)。
     /// 07-03 提前排布定稿:不再每 tick 按实时位置算(hub 还在漂移时环
-    /// 先定一次型、hub 到位后又变一次)—— 改用**幽灵模拟预判终局**
-    /// (predictBeltClip),开场/松手一次算死,环一次变好。边际二修:
+    /// 先定一次型、hub 到位后又变一次)—— 改用**影子引擎预演终局**,
+    /// 开场/松手一次算死,环一次变好。边际二修:
     /// 单一 [lo,hi] 对"卡在弧中间的挡板"会裁掉一整侧 → 改成挖洞后的
     /// 分段并集,家位重映射到并集上,挡板两侧自然排开不堆积。
     private var beltPredSegs: [[(Float, Float)]] = []
+    /// 影子需重建标记(07-08 影子引擎:explode/数据刷新/松手边沿置位)。
     private var beltPredDirty = true
-    /// 幽灵终局位置(动 hub 的挡板"计划位";beltPredDirty 边沿重算)。
+    /// 影子**当前** hub 位置(每真实 tick 从影子刷新;快进领先真实
+    /// 布局,影子收敛后 = 终局)—— 动 hub 的挡板"计划位"。
     private var beltPredPos: [SIMD2<Float>] = []
     /// 静/动帧判定(每 0.5s 窗看净位移,迟滞 6/12pt):静 hub 的挡板用
     /// 实时位置(真理),动 hub 用幽灵终局位置(计划)—— carveBeltSegs。
@@ -182,6 +180,26 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var pendingAlphaTarget: Float? = nil
     private let dragLock = NSLock()
 
+    // MARK: - 影子引擎(07-08 用户定稿:"预判 folder 球最终会飘到哪,
+    // 环提前到此位置,而不是跟着实时调整")
+
+    /// 同一 GraphScene 构造的第二个完整引擎实例:克隆主引擎当刻
+    /// pos/vel/alpha 后全力系快放 —— 同物理+同初始态 ⇒ 影子终局 =
+    /// 真实终局(取代旧 12 体幽灵近似:只模拟 hub、叶云聚合电荷,
+    /// 结构性算不准,环心可差 ~100pt)。只在主引擎物理线程 simLock 内
+    /// 同步 tick(无并发);拖拽开始废弃,explode/updateScene/松手边沿
+    /// 重建。影子自己不起后台线程、不再造影子(isShadow gate 防递归)。
+    private var shadow: GraphPhysicsEngine?
+    /// 影子累计快进步数 + 收敛冻结标记(冷透+缓停滑完,或步数封顶
+    /// → done,不再 tick;此后 beltPredPos 恒为终局)。
+    private var shadowTicks = 0
+    private var shadowDone = false
+    /// 影子身份:true = 本实例是影子(init 不起线程,beltPass 走实时
+    /// 挡板分支)。
+    private let isShadow: Bool
+    /// 场景留存(重建影子用;updateScene 同步换新)。
+    private var sceneRef: GraphScene
+
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
     private var qChild: [Int32] = []
     private var qMass: [Float] = []
@@ -219,7 +237,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     // MARK: - 初始化
 
     /// - Parameter seed: 炸开初始位置的随机种子(定值 → 同数据同布局可复现)。
-    init(scene: GraphScene, seed: UInt64 = 7) {
+    /// - Parameter isShadow: true = 影子实例(不起后台线程,不再造影子;
+    ///   只被主引擎在物理线程里同步 tick 做终局预演)。
+    init(scene: GraphScene, seed: UInt64 = 7, isShadow: Bool = false) {
+        self.isShadow = isShadow
+        sceneRef = scene
         n = scene.nodes.count
         var rng = SplitMix64(seed: seed)
         pos = Self.explosionPositions(n: n, rng: &rng)
@@ -231,7 +253,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeFamily = Self.familyIdArray(scene: scene)
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (hubIndices, hubBubbleR, hubMass, hubMainClear, hubRestLen) = Self.hubArrays(scene: scene)
+        (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
@@ -248,6 +270,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         seedLeafAngles()
         snapshot = pos
 
+        // 影子不起线程:它只被主引擎在物理线程里同步 tick(快放预演)
+        guard !isShadow else { return }
         let t = Thread { [weak self] in self?.loop() }
         t.name = "graph-physics"
         // .userInitiated(不是 .userInteractive):tick 重载(Debug 30Hz
@@ -324,10 +348,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         vel = .init(repeating: .zero, count: n)
         seedLeafAngles()
         // 重新生成 → 陨石回生成态(帧携带成型,首次拖球后转实时槽位),
-        // 弧区间按新种子重新预判终局;环半径/环心一并重算(一次算死)
+        // 影子按新种子重建预演终局;环半径/环心一并重算(一次算死)
         beltForming = true
         beltPredDirty = true
         ringDirty = true
+        shadow = nil
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
@@ -379,12 +404,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     func updateScene(_ scene: GraphScene) {
         simLock.lock()
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
+        sceneRef = scene   // 影子重建用最新场景
         nodeRadius = scene.nodes.map { Float($0.radius) }
         nodeCharge = Self.chargeArray(scene: scene)
         nodeCenterScale = Self.centerScaleArray(scene: scene)
         nodeFamily = Self.familyIdArray(scene: scene)
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
-        (hubIndices, hubBubbleR, hubMass, hubMainClear, hubRestLen) = Self.hubArrays(scene: scene)
+        (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
@@ -392,7 +418,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
-        ringDirty = true   // 数据变了 → 环半径按新幽灵终局重算
+        shadow = nil       // 旧影子作废(下 tick 按新场景重建)
+        ringDirty = true   // 数据变了 → 环半径按新影子终局重算
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         hubQuietRef = []   // 槽位数可能变,静动帧判定重建
         famPrev = []   // 家族携带参考同理重建
@@ -427,8 +454,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
             } else if wasDragging {
-                // 松手边沿:预判新终局(提前排布 + **提前定环** ——
-                // predictBeltClip 会立即按幽灵终局定环目标,环与 folder
+                // 松手边沿:重建影子预演新终局(提前排布 + **提前定环**
+                // —— beltPass 会立即按影子终局定环目标,环与 folder
                 // 回位动画同步 lerp,不等停稳;死区内目标不动=零跳)
                 beltPredDirty = true
                 // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
@@ -564,6 +591,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         //   在它身后像水合拢;边界 = 球个体(隐形圆力场三态全关)。
         if di >= 0 {
             hubPrev = []
+            shadow = nil   // 拖拽开始:废弃影子(拖拽中不建不跑,松手边沿重建)
             guard beltDragHome.count == beltIdx.count else { return }
             let k = GraphConstants.beltSpring * max(alpha, 0.1)
             pos.withUnsafeBufferPointer { P in
@@ -619,24 +647,52 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 }
                 hubQuietBase = tickCount
             }
-            // 幽灵终局(动 hub 挡板的"计划位"+ 终局环心/环半径):
-            // explode/松手/刷新边沿重算
-            if beltPredDirty || beltPredPos.count != nh {
-                predictBeltClip()
-                beltPredDirty = false
+            // 影子快放(07-08,取代 12 体幽灵 predictBeltClip):
+            // beltPredDirty = 影子需重建(explode/刷新/松手边沿)。影子
+            // 克隆当刻状态全力快放,每真实 tick 再快进几步 —— 挡板计划
+            // 位/环目标直接读影子当前几何(领先真实,done 后=终局)。
+            // 影子实例自身不再造影子(防递归):它就是终局演算,挡板
+            // 计划位直接用实时位置(等价全静帧)。
+            if isShadow {
+                // 影子瘦身:陨石已冻结(不进树不碰撞),环/carve/槽位弹簧
+                // 全无消费方 —— 静动判定(上面,done 判据要读 hubStatic)
+                // 维护完就收工。影子只为一件事:hub 终局。
+                return
+            } else {
+                // done 后影子已释放(shadow=nil 但 beltPredPos 定格终局),
+                // 不能凭 shadow==nil 重建(会无限重建死循环)
+                if beltPredDirty || (shadow == nil && !shadowDone)
+                    || beltPredPos.count != nh {
+                    shadowDone = false
+                    rebuildShadow()
+                    beltPredDirty = false
+                } else {
+                    advanceShadow()   // 快进 + 刷新挡板计划位 + 开场钉环
+                }
             }
             // 环结算 = **提前定环 + 停稳校验**(用户定稿:"提前算出会移动
-            // 到哪,只调整一次")。环目标在预测时就已定死:开场/刷新 =
-            // predictBeltClip 里直接钉幽灵终局(一次成型);松手 = 同函数
-            // 立即按幽灵终局定目标 → 环与 folder 回位动画**同步** lerp 过去,
-            // 不等停稳。这里只剩:①停稳(或冷透兜底,防 restless 强制 park
-            // 永不校验)时**覆盖校验**一次 —— 幽灵 12 体近似结构性算不准
-            // (叶云聚合电荷,环心可差 ~100pt),死区(ringCovered)吸收
-            // 常态误差=零动,罩不住/太松才补调一次(预测失灵的兜底);
-            // ②恒向锁死目标 lerp。拖动中 beltPass 早退,"拖动整环不变"。
+            // 到哪,只调整一次")。开场/刷新 = rebuildShadow 里直接钉影子
+            // warmup 后的终局(一次成型);飞行期 = 影子**收敛后**按其终局
+            // 几何走同一死区逻辑 —— 环提前到终局位等 folder 慢慢跟上,
+            // 环与回位动画**同步** lerp,不等停稳。⚠️ 必须等 shadowDone:
+            // 影子还在快放途中几何未定,跟着它逐帧调会连跳(far-drag 实测
+            // 23 tick 内长/缩各一次)。停稳(或冷透兜底,防 restless 强制
+            // park 永不校验)后交还**实时位置**的覆盖校验(正确性兜底,
+            // 保留):死区(ringCovered)吸收常态误差=零动,罩不住/太松
+            // 才补调一次。两支互斥防两套圆集打架。拖动中 beltPass 早退,
+            // "拖动整环不变"。
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
             if allStatic || alpha < GraphConstants.alphaMin {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
+                if !ringCovered(cs, rs) {
+                    let (c, encR) = Self.minEnclosingCircle(
+                        centers: cs, radii: rs)
+                    ringTargetC = c
+                    ringTargetRad = encR + Float(GraphConstants.beltGap)
+                        + GraphConstants.ringPredMargin
+                }
+            } else if !isShadow, shadowDone, beltPredPos.count == nh {
+                let (cs, rs) = enclosureCircles(hubAt: { beltPredPos[$0] })
                 if !ringCovered(cs, rs) {
                     let (c, encR) = Self.minEnclosingCircle(
                         centers: cs, radii: rs)
@@ -791,130 +847,101 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         }
     }
 
-    /// 幽灵模拟预判终局(07-03 提前排布,用户定稿:"预判最终隐形圆能到哪,
-    /// 环一次变好不要变两次"):只模拟 hub 子系统(≤12 体,主球钉原点),
-    /// 400 tick 微秒级同步跑完,存终局位置 beltPredPos —— 供 carveBeltSegs
-    /// 给"移动中"的 hub 当挡板计划位(弧裁剪本身改每 tick 混合帧做)。
-    /// 单环重构起改**忠实力学**(旧版 0.12 恒定弹簧 + 恒定 8 点斥力,
-    /// 预测比真实布局紧 ~80pt,环罩不住实测):按真实引擎同款力律 ——
-    /// ① hub 间斥力用**聚合电荷**(hub 电荷 + 全家叶/陨石电荷之和,大家
-    ///   的叶云才是把邻居推远的主力)× alpha 冷却时间表;
-    /// ② 径向弹簧带 d3 度数偏置(hub 端只吃 db/(da+db),569 叶的 hub
-    ///   弹簧近乎为零 —— 旧版强弹簧把 hub 拉回 rest,真实根本拉不回);
-    /// ③ 气泡软碰撞(质量加权)+ 硬解算 3 轮 + 向心,均与真实同参。
-    /// 终局几何顺带给出**终局环心**(生成期直接采用)与环半径(仅
-    /// ringDirty 时更新 —— 环半径一次算死,拖动/松手重预判不改它)。
-    /// 开场(explode)/数据刷新/松手边沿置 dirty 重算。调用方须持 simLock。
-    private func predictBeltClip() {
+    /// 重建影子(07-08 影子引擎):同场景新建完整引擎实例,克隆主引擎
+    /// 当刻状态,再一次性 warmup 快放 —— 同物理+同初始态 ⇒ 影子终局 =
+    /// 真实终局("预判最终隐形圆能到哪"彻底准,取代 12 体幽灵近似)。
+    /// 克隆完整性:tick 轨迹由 pos/vel/alpha(target 恒 0,克隆点都在
+    /// 松手/开场边沿)/beltForming/nodeTransit/环几何完全决定;
+    /// hubPrev/famPrev/quietRef/hubQuietRef 等携带与静止参考让影子自建
+    /// (各自有首帧防护,只差一个 tick 的携带,可忽略);brake/quietFlag
+    /// 不拷(克隆点都在 reheat 边沿,下 tick 必回 1/false)。tick 路径
+    /// 无 Date/random(随机只在 init/explode 播种)⇒ 确定性快放。
+    /// 开场(ringDirty)顺带把环直接钉在影子 warmup 后的终局几何上
+    /// (一次成型,无过渡)。调用方须持 simLock,只在物理线程调。
+    private func rebuildShadow() {
+        // nh=0 时影子无任何消费方(钉环/carve/beltPredPos 全空转),
+        // 别白烧 warmup(对抗审查:防御缺一行)
+        guard !isShadow, !hubIndices.isEmpty else { return }
+        let sh = GraphPhysicsEngine(scene: sceneRef, isShadow: true)
+        sh.pos = pos
+        sh.vel = vel
+        sh.alpha = alpha
+        sh.alphaTarget = 0
+        sh.beltForming = beltForming
+        sh.nodeTransit = nodeTransit
+        sh.ringC = ringC; sh.ringRad = ringRad
+        sh.ringTargetC = ringTargetC; sh.ringTargetRad = ringTargetRad
+        sh.ringDirty = ringDirty
+        // 选段黏滞记忆也克隆(对抗审查:影子从 0 起步时黏滞加分缺失,
+        // 两段得分接近的家可能选中与主引擎不同的弧段 —— 离散分叉)
+        sh.beltFamSel = beltFamSel
+        sh.beltFamBase = beltFamBase
+        sh.beltFamSlope = beltFamSlope
+        shadow = sh
+        shadowTicks = 0
+        shadowDone = false
+        // warmup **分帧**跑(见 GraphConstants.shadowWarmupPerFrame:
+        // 一次性同步 300 步在 Debug 下卡物理线程数百 ms 且挂主线程
+        // reload)—— 本 tick 先跑一份,其余由后续每 tick 的
+        // advanceShadow 继续;开场钉环在累计够 warmup 时做(约 8 帧后,
+        // 藏在绽放/回位动画里)
+        advanceShadow()
+    }
+
+    /// 影子快进:每真实 tick 让影子多跑固定步数(warmup 阶段 40、之后
+    /// 8 —— **固定步数不设墙钟**,对抗审查:墙钟截断会把 wall-clock
+    /// 注入布局演化,同 seed 不可复现;固定 = 影子进度是 tick 纯函数)。
+    /// 收敛(冷透+缓停滑完 = 主引擎 park 同款判据)或累计封顶 → done:
+    /// 快照终局进 beltPredPos 后**释放影子实例**(数百 KB;消费方本就
+    /// 只读 beltPredPos,行为零变化)。开场(ringDirty)在累计够 warmup
+    /// 或 done 时一次性钉环。调用方须持 simLock;影子的锁无竞争(仅本
+    /// 线程碰它),tick 不发布快照/park 事件 —— 无任何全局副作用。
+    private func advanceShadow() {
+        guard let sh = shadow, !shadowDone else { return }
+        let steps = shadowTicks < GraphConstants.shadowWarmupTicks
+            ? GraphConstants.shadowWarmupPerFrame
+            : GraphConstants.shadowTicksPerFrame
+        let nhh = hubIndices.count
+        for _ in 0..<steps {
+            sh.tick()
+            shadowTicks += 1
+            // done = 影子 **hub 全静**(我们只消费 hub 位置;原判据等全场
+            // 冷透+缓停会陪 599 颗慢陨石耗到几千步 —— "松手后几秒巨卡"
+            // 的大头。hub 通常 200~300 步就静,负载窗口缩到亚秒);
+            // 冷透+缓停完(病态 hub 慢环流不静时的自然终点)/步数封顶兜底
+            let hubsStill = sh.hubStatic.count == nhh
+                && !sh.hubStatic.contains(false)
+            if hubsStill
+                || (sh.alpha < GraphConstants.alphaMin && sh.brake == 0)
+                || shadowTicks >= GraphConstants.shadowTickCap {
+                shadowDone = true
+                break
+            }
+        }
+        // 影子几何 → 挡板计划位(done 时定格终局并释放实例)
         let nh = hubIndices.count
-        guard nh > 0 else { return }
-        var P = (0..<nh).map { pos[Int(hubIndices[$0])] }
-        var V = [SIMD2<Float>](repeating: .zero, count: nh)
-        let mainR = nodeRadius[0]
-        // 聚合电荷(见①):hubMass = 全家节点数 + 1
-        let charge = (0..<nh).map {
-            -GraphConstants.manyBodyStrength
-                + -GraphConstants.leafBodyStrength * (hubMass[$0] - 1)
+        if beltPredPos.count != nh {
+            beltPredPos = .init(repeating: .zero, count: nh)
         }
-        let mainCharge = -GraphConstants.mainBodyStrength
-        // 弹簧偏置(见②):db/(da+db),da/db = hub/主球在真边表里的度数
-        var degree = [Int32](repeating: 0, count: n)
-        for e in 0..<edgesA.count { degree[Int(edgesA[e])] += 1; degree[Int(edgesB[e])] += 1 }
-        let springW = (0..<nh).map { s -> Float in
-            let da = Float(max(degree[Int(hubIndices[s])], 1))
-            let db = Float(max(degree[0], 1))
-            return db / (da + db)
-        }
-        // alpha 时间表:开场 = 全热(1);松手/刷新 = dragAlphaTarget 起
-        //(真实 reheat 只到 0.3,全热会高估重排幅度)
-        var a: Float = beltForming ? 1 : GraphConstants.dragAlphaTarget
-        let softK = GraphConstants.bubbleCollideStrength
-        for _ in 0..<400 {
-            for i in 0..<nh {
-                let d = max(simd_length(P[i]), 1)
-                V[i] += P[i] / (d * d) * (mainCharge * a)
-                V[i] += (P[i] / d)
-                    * ((hubRestLen[i] - d) * max(a, 0.1) * springW[i])
-                V[i] += -P[i] * (GraphConstants.centerStrength * a)
-                for j in 0..<nh where j != i {
-                    let dv = P[i] - P[j]
-                    let dd = max(simd_length_squared(dv), 25)
-                    V[i] += dv / dd * (charge[j] * a)
-                }
-            }
-            // 气泡软碰撞(bubblePass 同款,质量加权,不乘 alpha)
-            for i in 0..<nh {
-                guard hubBubbleR[i] > 0 else { continue }
-                let d = simd_length(P[i])
-                let minD = mainR + hubBubbleR[i] + hubMainClear[i]
-                if d < minD, d > 1e-4 { V[i] += P[i] / d * ((minD - d) * softK) }
-                for j in (i + 1)..<nh {
-                    guard hubBubbleR[j] > 0 else { continue }
-                    var dv = P[j] - P[i]
-                    var dist = simd_length(dv)
-                    if dist < 1e-4 { dv = SIMD2<Float>(1e-3, 0); dist = 1e-3 }
-                    let need = hubBubbleR[i] + hubBubbleR[j] + 2
-                    if dist < need {
-                        let push = (need - dist) / dist * softK
-                        let wi = hubMass[j] / (hubMass[i] + hubMass[j])
-                        V[i] -= dv * (push * wi)
-                        V[j] += dv * (push * (1 - wi))
-                    }
-                }
-            }
-            for i in 0..<nh {
-                V[i] *= GraphConstants.velocityDamping
-                P[i] += V[i]
-            }
-            for _ in 0..<3 {
-                for i in 0..<nh {
-                    let d = simd_length(P[i])
-                    let minD = mainR + hubBubbleR[i] + hubMainClear[i]
-                    if d < minD {
-                        P[i] = (d > 1e-4 ? P[i] / d : SIMD2<Float>(1, 0)) * minD
-                    }
-                }
-                for i in 0..<max(nh - 1, 0) {
-                    for j in (i + 1)..<nh {
-                        let dv = P[j] - P[i]
-                        let dist = simd_length(dv)
-                        let minD = hubBubbleR[i] + hubBubbleR[j]
-                        if dist < minD {
-                            let dir = dist > 1e-4 ? dv / dist : SIMD2<Float>(1, 0)
-                            let push = (minD - dist) / 2
-                            P[i] -= dir * push
-                            P[j] += dir * push
-                        }
-                    }
-                }
-            }
-            a += (0 - a) * GraphConstants.alphaDecay
-        }
-        // 只存终局位置 —— 弧裁剪移到 carveBeltSegs 每 tick 混合帧做
-        //(07-03"截断汇集"根治;双几何/滞留门控被静动帧判定取代)
-        beltPredPos = P
-        // 终局几何 → 最小包围圆 → **提前定环**(用户定稿:"提前算出会
-        // 移动到哪,只调整一次")
-        let (cs, rs) = enclosureCircles(hubAt: { P[$0] })
-        let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
-        predRingCenter = c
+        for s in 0..<nh { beltPredPos[s] = sh.pos[Int(hubIndices[s])] }
+        // 开场(ringDirty):warmup 分帧期环**每帧直接跟影子当前几何**
+        // (硬 set 无过渡 —— 爆炸头几帧全场乱飞,环怎么动都不可见;
+        // 若让陨石绕未初始化的旧环跑 8 帧,错误目标会扰动布局演化,
+        // 实测多出一次停稳补调),warmup 够了顺势钉死 = 一次成型
         if ringDirty {
-            // 开场/数据刷新:环直接钉幽灵终局(一次成型,无过渡)
+            let (cs, rs) = enclosureCircles(hubAt: { sh.pos[Int(hubIndices[$0])] })
+            let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
             ringRad = encR + Float(GraphConstants.beltGap)
                 + GraphConstants.ringPredMargin
             ringTargetRad = ringRad
             ringC = c
             ringTargetC = c
-            ringDirty = false
-        } else if !ringCovered(cs, rs) {
-            // 松手重预测:环目标**立即**按幽灵终局定死 —— 环与 folder
-            // 回位动画同步 lerp 过去,不等停稳(等停稳再调=布局停了环
-            // 补一跳,观感"跳两次")。死区内(当前环罩住幽灵终局且不
-            // 太松)目标不动=零跳;停稳后仅覆盖校验兜底
-            ringTargetC = c
-            ringTargetRad = encR + Float(GraphConstants.beltGap)
-                + GraphConstants.ringPredMargin
+            // 钉死必须等 shadowDone(300 步 warmup 几何离终局还差十几 pt,
+            // 提前钉会在 done 后多付一次调整;done ≈ 500 步 ≈ 0.2s,仍在
+            // 爆炸掩护内)
+            if shadowDone { ringDirty = false }
         }
+        if shadowDone { shadow = nil }
     }
 
     /// 环覆盖死区判断(提前定环与停稳校验共用):以**目标环**测圆集,
@@ -1055,8 +1082,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 裁,余弦定理算相交角挖洞 —— 稳态环罩住一切时没有圆碰得到带,
     /// 不裁 = 干净整圆;只有被拖出/罩不住的圆才裁那个扇区。
     /// 挡板位置按静动选帧(保留):**静止(准静态)hub 用实时位置**,
-    /// **移动中 hub 用幽灵终局位置**(计划;开场全员疾飞 = 纯预判仍
-    /// "一次变好",预判失准会在该 hub 停下时被实时位置自动纠正)。
+    /// **移动中 hub 用影子当前位置**(快进领先 = 计划位;开场全员疾飞
+    /// = 纯预判仍"一次变好",预判失准会在该 hub 停下时被实时位置自动
+    /// 纠正)。
     /// rel 一律相对**实时自家绕环心极角**(与放置同帧)。自家气泡照样
     /// 算挡板:被拖出环外时自家弧位被自家圆吞掉,挖洞让弧绕开。
     /// nh² 三角/tick ≤144 忽略不计。
@@ -1201,6 +1229,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         qChild.withUnsafeMutableBufferPointer { ch in
         qWidth.withUnsafeMutableBufferPointer { wid in
             for pi in 0..<n {
+                // 影子瘦身(07-08"松手后巨卡"):陨石(599/962)对 hub 终局
+                // 影响微乎其微,却占 BH/碰撞大头 —— 影子里不进树(manyBody
+                // /collide 都走树,一刀两断),单 tick 成本 −60%
+                if isShadow && nodeBelt[pi] { continue }
                 let p = P[pi]
                 var node = 0
                 var center = rootCenter
@@ -1779,6 +1811,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 for i in 0..<n {
                     let fi = FAM[i]
                     guard fi >= 0 else { continue }   // 只有叶参与(hub 归气泡/硬约束管)
+                    if isShadow && BELT[i] { continue }   // 影子瘦身:陨石冻结不碰撞
                     if TR[i] { continue }             // 穿透中(回流陨石)不碰撞
                     let pi = P[i] + V[i]           // 预测位置(d3 语义)
                     let ri = R[i] + pad
@@ -1868,26 +1901,21 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 非主球 hub 的物理参数(builder 赋值):气泡半径(≤0 = 无)/
     /// 质量(叶数+1)/ 对主球净空(家内最大叶径+pad)。四数组同序对齐。
     private static func hubArrays(scene: GraphScene)
-        -> ([Int32], [Float], [Float], [Float], [Float]) {
+        -> ([Int32], [Float], [Float], [Float]) {
         var leafCount: [Int: Int] = [:]
         var maxLeafR: [Int: Float] = [:]
         for node in scene.nodes where !node.kind.isHub {
             leafCount[node.hubIndex, default: 0] += 1
             maxLeafR[node.hubIndex] = max(maxLeafR[node.hubIndex] ?? 0, Float(node.radius))
         }
-        // hub→主球弹簧自然长度(幽灵模拟预判终局用)
-        var restOf: [Int: Float] = [:]
-        for e in scene.edges where e.b == 0 { restOf[e.a] = Float(e.restLength) }
         var idx: [Int32] = [], bubble: [Float] = [], mass: [Float] = [], clear: [Float] = []
-        var rest: [Float] = []
         for node in scene.nodes where node.kind.isHub && node.id != 0 {
             idx.append(Int32(node.id))
             bubble.append(node.hubBubbleRadius.map(Float.init) ?? -1)
             mass.append(Float(leafCount[node.id] ?? 0) + 1)
             clear.append((maxLeafR[node.id] ?? 0) + GraphConstants.mainCollisionPadding)
-            rest.append(restOf[node.id] ?? 120)
         }
-        return (idx, bubble, mass, clear, rest)
+        return (idx, bubble, mass, clear)
     }
 
     /// 陨石带四数组(单环重构,同序对齐):节点下标 / 自家 hub / 径向
