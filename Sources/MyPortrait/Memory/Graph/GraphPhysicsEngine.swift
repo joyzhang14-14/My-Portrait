@@ -677,8 +677,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     shadowLock.unlock()
                     if ok, res.count == nh {
                         beltPredPos = res
+                        let (cs, rs) = enclosureCircles(hubAt: { res[$0] })
                         if ringDirty {
-                            let (cs, rs) = enclosureCircles(hubAt: { res[$0] })
+                            // 开场:正式钉死(爆炸掩护,不可见)
                             let (c, encR) = Self.minEnclosingCircle(
                                 centers: cs, radii: rs)
                             ringRad = encR + Float(GraphConstants.beltGap)
@@ -687,6 +688,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             ringC = c
                             ringTargetC = c
                             ringDirty = false
+                        } else if !ringCovered(cs, rs) {
+                            // 松手:ready 即按影子终局(≈真实停位)一次
+                            // 调环 —— 陨石从当前位置直飞最终位置不改道;
+                            // 死区内零动。停稳校验退回纯兜底
+                            let (c, encR) = Self.minEnclosingCircle(
+                                centers: cs, radii: rs)
+                            ringTargetC = c
+                            ringTargetRad = encR
+                                + Float(GraphConstants.beltGap)
+                                + GraphConstants.ringPredMargin
                         }
                         shadowDone = true
                     }
@@ -922,10 +933,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             while steps < GraphConstants.shadowTickCap {
                 sh.tick()
                 steps += 1
-                let hubsStill = sh.hubStatic.count == nhh
-                    && !sh.hubStatic.contains(false)
-                if hubsStill
-                    || (sh.alpha < GraphConstants.alphaMin && sh.brake == 0) {
+                // 跑到影子**真 park**(冷透+缓停滑完)再交卷:hub 全静后
+                // 还会慢爬 10~25pt,异步后多跑几百步零成本 —— 终局含
+                // 爬行终点 ≈ 真实停位,ready 调环后停稳校验几乎必然
+                // 死区内零动 = 全程只一次可见变化(用户:"不管什么情况
+                // 都一次到位")。影子陨石冻结 ⇒ 其 quietFlag 不被陨石
+                // 阻塞,能正常 park;cap 兜底
+                if sh.alpha < GraphConstants.alphaMin && sh.brake == 0 {
                     break
                 }
             }
