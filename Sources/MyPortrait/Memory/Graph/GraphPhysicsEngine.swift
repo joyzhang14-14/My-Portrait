@@ -431,6 +431,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             } else if wasDragging {
                 // 松手边沿:预判新终局(提前排布)
                 beltPredDirty = true
+                // 环重新武装定稿(实机回归修复:latch 定稿后半径永冻,拖动
+                // 把布局拉大 → 环心跟走但半径罩不住 → 环带被气泡大面积
+                // 裁剪 → 全场家弧挤进仅剩的自由窗=混色一团)。拖动中半径
+                // 仍冻结不跳;松手布局重新停稳后**重新定稿一次**(可长可
+                // 缩回最小罩住圆,lerp 平滑)——"只跳一次"= 每次调整一次
+                ringSettled = false
                 // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
                 // 推土机推开的邻居若还挂着拖前的 static 旗,松手后最长
                 // 0.5s 会拿"被推开的瞬时位置"当真挡板切碎弧 —— 位移超
@@ -659,9 +665,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 但严格优于幽灵聚合电荷近似,消除永不定稿的漏网)。
                 if !ringSettled
                     && (allStatic || alpha < GraphConstants.alphaMin) {
-                    ringTargetRad = max(ringRad, encR
+                    // 目标 = 当前布局的最小罩住圆(用户原始规格:"以最小的
+                    // 环形陨石球包含全部")。可长可缩:拖大了长上去罩住,
+                    // 拖回来缩回最小 —— 都经 lerp 平滑,每次调整只跳一次
+                    ringTargetRad = encR
                         + Float(GraphConstants.beltGap)
-                        + GraphConstants.ringPredMargin)
+                        + GraphConstants.ringPredMargin
                     ringSettled = true
                 }
                 // 平滑长到定稿值(收敛即停);ringTargetRad 在 ringDirty 时
