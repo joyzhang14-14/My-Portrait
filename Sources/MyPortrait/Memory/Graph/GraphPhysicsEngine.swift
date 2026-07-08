@@ -722,7 +722,28 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                             target = beltTmpNow[jj] + dir * minD
                         }
                     }
-                    let delta = target - P[i] - V[i]
+                    // 极坐标弹簧(用户定稿:先到半径、再旋转,两个动作一起
+                    // 做):把"到目标"的位移拆成**径向**(到对应环半径)+
+                    // **切向**(绕环心旋转到对应角),两分量同时施力 —— 陨石沿
+                    // 弧螺旋到位,不再切弦穿过环内部("直接换位"不好看)。
+                    // 增量小步 + 每 tick 按新位置重算方向 = 天然沿弧,无需大
+                    // 角度精确公式。参考系 = 环心 rc。
+                    let relC = P[i] - rc
+                    let rCur = simd_length(relC)
+                    let relT = target - rc
+                    let disp: SIMD2<Float>
+                    if rCur > 1e-3 {
+                        let radialDir = relC / rCur
+                        let tangDir = SIMD2<Float>(-radialDir.y, radialDir.x)
+                        var dth = atan2(relT.y, relT.x) - atan2(relC.y, relC.x)
+                        while dth > .pi { dth -= 2 * .pi }
+                        while dth < -.pi { dth += 2 * .pi }
+                        disp = radialDir * (simd_length(relT) - rCur)
+                             + tangDir * (rCur * dth)
+                    } else {
+                        disp = relT   // 退化:恰在环心(几乎不可能),回退笛卡尔
+                    }
+                    let delta = disp - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
                     //(松手态 ×2.2 排位增益已按用户要求回滚)
                     let dLen = simd_length(delta)
