@@ -119,14 +119,16 @@ enum GraphConstants {
     /// 环心平滑跟随系数(每 tick 向当前最小包围圆圆心 lerp 的比例,
     /// 0.08~0.12 防抖;生成期直接用幽灵终局环心,不走平滑)。
     static let ringCenterLerp: Float = 0.1
-    /// 环半径余量(开场幽灵预测与松手定稿共用同式):幽灵误差实测
-    /// −2~+19pt(5 seed)—— 用户定稿"半径一开始就加一个数值,自带容错
-    /// 空间",25 把误差整段吸进下面的死区 → 常态定稿零调整。
-    static let ringPredMargin: Float = 25
-    /// 定稿死区上富余:当前半径在 [encR+gap+5, encR+gap+margin+此值]
-    /// 区间内就**一动不动**(容错空间,治"极限情况跳两次");低于下限
-    /// (罩不住)才长、高于上限(太松)才缩,各一次 lerp 平滑。
-    static let ringSlack: Float = 45
+    /// 环半径余量(定环/监督调整共用目标)= **死区中央**:死区 =
+    /// [encR+gap+10, encR+gap+margin+slack] = 余量 [10, 80],目标 45 落
+    /// 正中 → 调整后两侧各 35pt 缓冲。为什么必须居中:allStatic 后 hub
+    /// 还慢爬 10~25pt(实测),目标离下限太近(25/15 只差 10)会爬穿再
+    /// 触发 = 连跳(far-drag 实测 3~4 次);45/[10,80] 实测 converged/
+    /// after-drag/drag-back 全零调整,far-drag(极限 2× 拖)≤2 次。
+    static let ringPredMargin: Float = 45
+    /// 监督死区上富余(上限 = margin+此值 = 80):covered 区间内环一动
+    /// 不动;罩不住(余量<10,嵌入)才长、太松(>80)才缩,各一次 lerp。
+    static let ringSlack: Float = 35
     /// 扇形云弧半宽上限(rad ≈172°,以背主球方向为中心;07-03 用户两次
     /// 加码:1.92→2.6→3.0"弧线角度更大"——接近全圆,朝主球死角与邻圆
     /// 由动态裁剪守住):弧度随数量先展开到此上限,再往外延长

@@ -69,13 +69,12 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var ringC: SIMD2<Float> = .zero
     /// 幽灵终局的环心(predictBeltClip 产出;生成期直接采用)。
     private var predRingCenter: SIMD2<Float> = .zero
-    /// 环结算 latch(用户:"环别跳来跳去,只跳一次"):布局首次全员停稳
-    /// 后置真,从此环心恒平滑追 MEC、半径恒平滑到 ringTargetRad ——
-    /// 不再被 allStatic 迟滞抖动在 predRingCenter↔MEC 之间反复横跳。
-    /// explode/updateScene(ringDirty)复位。
-    private var ringSettled = false
-    /// 环定稿目标(半径+圆心,首次停稳时一次性算定;之后 ringRad/ringC
-    /// 平滑收敛到此即锁死 —— 每次调整最多一跳,不再每 tick 重评估)。
+    /// 环目标(半径+圆心):预测时定死,之后由**持续监督**维护不变量
+    /// "目标环始终罩住当前布局(余量∈[10, margin+slack])"——covered
+    /// 零动(死区迟滞防振荡),越界(嵌入/太松)才调一次。⚠️ 不能只
+    /// 校验一次就 latch:allStatic(每窗<6pt)≠停止,校验后 hub 还会
+    /// 慢爬 10~25pt(实测),一次性 latch 会把"folder 嵌进陨石带"定格
+    /// 成永久 bug(用户实机实证)。
     private var ringTargetRad: Float = 0
     private var ringTargetC: SIMD2<Float> = .zero
     /// 全节点陨石标记(碰撞用):陨石×陨石**跨家也常开**碰撞 —— 平弧
@@ -329,7 +328,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         ringDirty = true
-        ringSettled = false   // 环重新定稿:等新布局首次停稳再 latch
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
@@ -395,7 +393,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
         ringDirty = true   // 数据变了 → 环半径按新幽灵终局重算
-        ringSettled = false   // 环重新定稿:等新布局首次停稳再 latch
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         hubQuietRef = []   // 槽位数可能变,静动帧判定重建
         famPrev = []   // 家族携带参考同理重建
@@ -434,8 +431,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // predictBeltClip 会立即按幽灵终局定环目标,环与 folder
                 // 回位动画同步 lerp,不等停稳;死区内目标不动=零跳)
                 beltPredDirty = true
-                // 重新武装停稳覆盖校验(常态死区内零动;幽灵失灵才补调)
-                ringSettled = false
                 // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
                 // 推土机推开的邻居若还挂着拖前的 static 旗,松手后最长
                 // 0.5s 会拿"被推开的瞬时位置"当真挡板切碎弧 —— 位移超
@@ -640,7 +635,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 常态误差=零动,罩不住/太松才补调一次(预测失灵的兜底);
             // ②恒向锁死目标 lerp。拖动中 beltPass 早退,"拖动整环不变"。
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
-            if !ringSettled && (allStatic || alpha < GraphConstants.alphaMin) {
+            if allStatic || alpha < GraphConstants.alphaMin {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
                 if !ringCovered(cs, rs) {
                     let (c, encR) = Self.minEnclosingCircle(
@@ -649,7 +644,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     ringTargetRad = encR + Float(GraphConstants.beltGap)
                         + GraphConstants.ringPredMargin
                 }
-                ringSettled = true
             }
             ringC += (ringTargetC - ringC) * GraphConstants.ringCenterLerp
             ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
@@ -937,7 +931,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         for i in 0..<cs.count {
             need = max(need, simd_length(cs[i] - ringTargetC) + rs[i])
         }
-        return need <= ringTargetRad - 15
+        return need <= ringTargetRad - 10
             && ringTargetRad - need <= GraphConstants.ringPredMargin
                 + GraphConstants.ringSlack
     }
