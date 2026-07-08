@@ -626,8 +626,23 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 ringC = predRingCenter
             } else {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
-                let (c, _) = Self.minEnclosingCircle(centers: cs, radii: rs)
+                let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
                 ringC += (c - ringC) * GraphConstants.ringCenterLerp
+                // 环半径自适应补偿(用户定稿):幽灵用聚合电荷近似叶云,会
+                // **低估**支配大 folder(如 569 叶 Unclassified)把 hub 顶出
+                // 的真实距离 → 冻死的 ringRad 罩不住 → 巨泡边缘探进环带 →
+                // carveBeltSegs 在自家 rel=0 自挖正上方 → 整家偏 0.5~0.9rad。
+                // 静止时让 ringRad **只增不减**追真实 MEC(目标与 predictBeltClip
+                // 同式,= 补上幽灵欠估),保证环始终罩住所有气泡 → 永不自挖 →
+                // 永远正上方。仅 allStatic(避免松手回弹的瞬态大 encR 永久撑大
+                // 环);拖动中 beltPass 早退不触及,"拖动半径不变"仍成立。
+                if allStatic {
+                    let need = encR + Float(GraphConstants.beltGap)
+                        + GraphConstants.ringPredMargin
+                    if need > ringRad {
+                        ringRad += (need - ringRad) * GraphConstants.ringCenterLerp
+                    }
+                }
             }
             let rc = ringC
             // 极角/角增量一律绕**环心**(参考系从主球换成环心):
