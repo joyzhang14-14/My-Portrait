@@ -169,17 +169,13 @@ enum GraphSceneBuilder {
         // 气泡碰撞涌现);圆间零重叠、叶不出自家圆由物理保证。
         // 陨石带只在 Events 画布(07-03 用户定稿)。
         let beltEnabled = zone == .events
-        // 大环吞并(07-03 十稿用户定稿):event 数量第一的家(specs 降序
-        // 首个有陨石的)的陨石环若**包含**了别家的环(别家环外缘 < 大环
-        // 外缘),被包含家的陨石直接生成到大环半径上(各自方位、颜色
-        // 不变)—— 消灭大环里面的小环碎片;不进别家隐形圆由引擎动态
-        // 裁剪保证。
-        var megaBase: Double? = nil    // 大环基准(绝对半径 = rest+bubbleR)
-        var megaOuter: Double = 0      // 大环外缘(绝对半径)
-        // 大环全局层基线(十一稿:进大环的陨石全局遵循"小球去外圈")
-        var megaTierBases: [Double]? = nil
-        // 大环家 hub 的节点下标(被吞并陨石的环半径锚定它的实时距离)
-        var megaHubIdx: Int? = nil
+        // 单环重构:全场唯一一个陨石环,**所有 belt 家共享全局层基线**
+        // (每层径向起点由最大 belt 家 = specs 降序首个有陨石的家产出,
+        // 传给所有家;首家传 nil 与传自家基线数学等价 —— cursor 单调
+        // ≥ bases)。环半径/环心由引擎按最小包围圆一次算死,builder 只
+        // 产参数:beltRadialOffset = 距环基准的偏移,beltAngle = 家内
+        // 槽位角(相对自家 hub 绕环心的极角)。
+        var globalTierBases: [Double]? = nil
         for spec in specs {
             let r = hubRadius(spec)
             // 陨石带(07-03):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
@@ -293,29 +289,15 @@ enum GraphSceneBuilder {
                         flat.append((m, t))
                     }
                 }
-                // 吞并判定(十稿):本家环外缘(粗估 +40 深)落在大环外缘
-                // 之内 → 陨石改生成到大环半径(shift 平移径向偏移;弧
-                // 容量按大环半径算 → effMainDist,弧更平)
-                var effMainDist = hubRest
-                var anchorHub: Int? = nil
-                var tierBases: [Double]? = nil
-                if let mb = megaBase,
-                   hubRest + bubbleR + GraphConstants.beltGap + 40 < megaOuter {
-                    effMainDist = mb - bubbleR
-                    // 被吞并 → 环半径锚定大环家 hub 的实时距离(offset
-                    // 存大环帧,不再加死 shift —— 各家 hub 实际距离偏离
-                    // 自然长度的量不同,死 shift 在布局变动后会整段沉进
-                    // 大环内侧成分明内层弧),并沿用全局层基线
-                    anchorHub = megaHubIdx
-                    tierBases = megaTierBases
-                }
+                // 全局层基线无条件共享(单环重构):首家(最大 belt 家)
+                // 产出 tierStarts,所有家(含它自己)沿用
                 let (offs, angs, tstarts) = BeltLayout.homes(
                     radii: flat.map { leafRadius($0.m) },
                     tiers: flat.map { $0.t },
                     hashA: flat.map { stableHash01($0.m.relPath + "#r") },
                     hashB: flat.map { stableHash01($0.m.relPath) },
-                    bubbleR: bubbleR, mainDist: effMainDist,
-                    tierBases: tierBases)
+                    bubbleR: bubbleR, mainDist: hubRest,
+                    tierBases: globalTierBases)
                 for (k, f) in flat.enumerated() {
                     let idx = nodes.count
                     var node = GraphNode(id: idx, kind: leafKind(f.m), title: f.m.title,
@@ -325,17 +307,9 @@ enum GraphSceneBuilder {
                     node.beltTier = f.t
                     node.beltAngle = angs[k]
                     node.beltRadialOffset = offs[k]
-                    node.beltAnchorHubIndex = anchorHub
                     nodes.append(node)
                 }
-                // 首个有陨石的家(specs 降序 = event 数量第一)定下大环
-                // 及其全局层基线
-                if megaBase == nil {
-                    megaBase = hubRest + bubbleR
-                    megaOuter = hubRest + bubbleR + (offs.max() ?? 0) + 20
-                    megaTierBases = tstarts
-                    megaHubIdx = hubIdx
-                }
+                if globalTierBases == nil { globalTierBases = tstarts }
             }
         }
         return GraphScene(zone: zone, nodes: nodes, edges: edges)
