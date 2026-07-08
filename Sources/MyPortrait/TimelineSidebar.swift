@@ -399,8 +399,8 @@ struct TimelineSidebar: View {
     private var memoryScopeSection: some View {
         sectionCard {
             if memoryViewMode == .canvas {
-                // canvas 模式只列三项(用户 2026-07-01 定稿):
-                // Personal Info(点击自动回 text)/ Portrait(整图)/ Events。
+                // canvas 模式列:Personal Info(点击自动回 text)/ Portrait(整图)
+                // / Events / Input(打字活动面积图)。
                 scopeHeader("GRAPH")
                 VStack(spacing: 2) {
                     scopeRow(.personalInfo)
@@ -412,6 +412,7 @@ struct TimelineSidebar: View {
                         }
                     }
                     scopeRow(.events)
+                    scopeRow(.input)
                 }
             } else {
                 scopeHeader("PROFILE")

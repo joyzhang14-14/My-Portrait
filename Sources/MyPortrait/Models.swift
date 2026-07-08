@@ -50,11 +50,12 @@ enum MemoryScope: Hashable, Identifiable {
 enum MemoryViewMode: String, Hashable {
     case text, canvas
 
-    /// personalInfo / input 没有 canvas 形态 —— canvas 模式下点它们自动回 text。
+    /// personalInfo 没有 canvas 形态 —— canvas 模式下点它自动回 text。
+    /// input 的 canvas 形态 = 打字活动面积图(InputActivityChartView)。
     static func supportsCanvas(_ scope: MemoryScope) -> Bool {
         switch scope {
-        case .events, .portrait:      return true
-        case .personalInfo, .input:   return false
+        case .events, .portrait, .input:  return true
+        case .personalInfo:               return false
         }
     }
 }
