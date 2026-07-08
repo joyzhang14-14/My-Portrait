@@ -216,8 +216,11 @@ private struct InputActivityCanvas: View {
             p.move(to: CGPoint(x: px, y: plot.minY))
             p.addLine(to: CGPoint(x: px, y: plot.maxY))
         }
-        p.move(to: CGPoint(x: plot.minX, y: plot.minY))
-        p.addLine(to: CGPoint(x: plot.maxX, y: plot.minY))
+        // 顶(最高)+ 中(最高一半)两条横向网格线,对齐 y 轴刻度。
+        for gy in [plot.minY, plot.midY] {
+            p.move(to: CGPoint(x: plot.minX, y: gy))
+            p.addLine(to: CGPoint(x: plot.maxX, y: gy))
+        }
         ctx.stroke(p, with: .color(gridColor), lineWidth: 0.6)
     }
 
@@ -286,10 +289,18 @@ private struct InputActivityCanvas: View {
                 .foregroundStyle(labelColor)
             ctx.draw(text, at: CGPoint(x: x(h * 60, plot), y: plot.maxY + 12))
         }
-        // y 轴峰值(顶部)。
-        let peak = Text("\(Int(buckets.maxTotal.rounded()))")
-            .font(.system(size: 9, design: .monospaced))
-            .foregroundStyle(labelColor)
-        ctx.draw(peak, at: CGPoint(x: plot.minX - 6, y: plot.minY + 4), anchor: .trailing)
+        // y 轴 3 刻度:最高(顶)/ 一半(中)/ 0(底),右对齐贴在绘图区左侧。
+        let maxV = Int(buckets.maxTotal.rounded())
+        let yTicks: [(CGFloat, Int)] = [
+            (plot.minY, maxV),
+            (plot.midY, Int((buckets.maxTotal / 2).rounded())),
+            (plot.maxY, 0),
+        ]
+        for (py, value) in yTicks {
+            let text = Text("\(value)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(labelColor)
+            ctx.draw(text, at: CGPoint(x: plot.minX - 6, y: py), anchor: .trailing)
+        }
     }
 }
