@@ -198,6 +198,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private let shadowLock = NSLock()
     private var shadowReady = false
     private var shadowResult: [SIMD2<Float>] = []
+    /// 拖拽预热(07-08 用户"延迟优化到极致"):拖拽中每隔一段按"假设
+    /// 此刻松手"克隆预算;松手位置与最近预算克隆位够近 → 结果现成,
+    /// 零延迟直飞。以下三个只在物理线程读写(无锁)。
+    private var shadowClonePosPending: SIMD2<Float>? = nil
+    private var dragSpawnPos = SIMD2<Float>(.infinity, .infinity)
+    private var lastShadowSpawnTick: UInt64 = 0
+    private var lastDragPos: SIMD2<Float> = .zero
     /// 影子身份:true = 本实例是影子(init 不起线程,beltPass 走实时
     /// 挡板分支)。
     private let isShadow: Bool
@@ -458,10 +465,15 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
             } else if wasDragging {
-                // 松手边沿:重建影子预演新终局(提前排布 + **提前定环**
-                // —— beltPass 会立即按影子终局定环目标,环与 folder
-                // 回位动画同步 lerp,不等停稳;死区内目标不动=零跳)
-                beltPredDirty = true
+                // 松手边沿:预热命中判定 —— 拖拽中已按"假设此刻松手"
+                // 预算过,最近预算的克隆位与松手位置够近(<40pt)→ 结果
+                // 现成/在途,不重建(零/极低延迟);否则照常重建(3~8 tick)
+                if let cp = shadowClonePosPending,
+                   simd_length(cp - lastDragPos) < 40 {
+                    // 命中:结果 ready 则下 tick 即消费;在途则等它几 tick
+                } else {
+                    beltPredDirty = true
+                }
                 // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
                 // 推土机推开的邻居若还挂着拖前的 static 旗,松手后最长
                 // 0.5s 会拿"被推开的瞬时位置"当真挡板切碎弧 —— 位移超
@@ -595,7 +607,18 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         //   在它身后像水合拢;边界 = 球个体(隐形圆力场三态全关)。
         if di >= 0 {
             hubPrev = []
-            shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 拖拽开始:废弃影子任务
+            // 拖拽预热:拖的是 hub 且离上次预算克隆位 >40pt(节流 ≥20
+            // tick)→ 按"假设此刻松手"克隆预算(spawnShadow 内含 gen
+            // 递增,自动废弃上一发)。拖到新位置停顿 ≥0.3s,松手时结果
+            // 已现成 = 零延迟
+            lastDragPos = pos[di]
+            if di != 0, nodeFamily[di] < 0,
+               simd_length(pos[di] - dragSpawnPos) > 40,
+               tickCount &- lastShadowSpawnTick >= 20 {
+                spawnShadow(releasedSim: di)
+                dragSpawnPos = pos[di]
+                lastShadowSpawnTick = tickCount
+            }
             guard beltDragHome.count == beltIdx.count else { return }
             let k = GraphConstants.beltSpring * max(alpha, 0.1)
             pos.withUnsafeBufferPointer { P in
@@ -899,12 +922,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 无 Date/random(随机只在 init/explode 播种)⇒ 确定性快放。
     /// 开场(ringDirty)顺带把环直接钉在影子 warmup 后的终局几何上
     /// (一次成型,无过渡)。调用方须持 simLock,只在物理线程调。
-    private func spawnShadow() {
+    private func spawnShadow(releasedSim: Int = -1) {
         // nh=0 时影子无任何消费方(钉环/carve/beltPredPos 全空转)
         guard !isShadow, !hubIndices.isEmpty else { return }
         let sh = GraphPhysicsEngine(scene: sceneRef, isShadow: true)
         sh.pos = pos
         sh.vel = vel
+        if releasedSim >= 0 {
+            sh.vel[releasedSim] = .zero   // 预热:模拟"此刻静置松手"
+        }
+        shadowClonePosPending = releasedSim >= 0 ? pos[releasedSim] : nil
         sh.alpha = alpha
         sh.alphaTarget = 0
         sh.beltForming = beltForming
