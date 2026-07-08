@@ -48,12 +48,35 @@ struct InputActivityChartView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            // 图只占可用高度的 1/3,靠上;下方留空。
+            // 图只占可用高度的 1/3,靠上;下方接图例,再留空。
             GeometryReader { geo in
-                InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
-                    .frame(height: geo.size.height / 3)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 20)
+                VStack(alignment: .leading, spacing: 14) {
+                    InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
+                        .frame(height: geo.size.height / 3)
+                    legend
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+            }
+        }
+    }
+
+    /// 图例:每个 app 一个色块 + 名称,和堆叠层同一套 AppColor;按活跃度从高到低
+    /// (buckets.apps 是升序,reversed 即降序),自适应换行。
+    private var legend: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 12, alignment: .leading)],
+                  alignment: .leading, spacing: 8) {
+            ForEach(buckets.apps.reversed(), id: \.self) { bundle in
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(AppColor.color(for: InputCaptureView.appLabel(bundle)))
+                        .frame(width: 10, height: 10)
+                    Text(InputCaptureView.appLabel(bundle))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
     }
