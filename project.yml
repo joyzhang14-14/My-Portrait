@@ -15,6 +15,14 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: true
 
+# 工程级:所有配置只编当前机器架构。Release 默认编 universal 双架构,
+# 而 SwiftPM 依赖包(Qwen3Speech 等)不继承 target 级 ARCHS=arm64,
+# x86_64 切片会因 Float16 不可用整包编译失败(app 已放弃 Intel,见
+# target settings 的 ARCHS 注释;Debug 默认本就 YES,行为不变)。
+settings:
+  base:
+    ONLY_ACTIVE_ARCH: YES
+
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift.git
