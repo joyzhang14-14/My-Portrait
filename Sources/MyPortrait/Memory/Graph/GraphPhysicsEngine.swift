@@ -69,6 +69,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var ringC: SIMD2<Float> = .zero
     /// 幽灵终局的环心(predictBeltClip 产出;生成期直接采用)。
     private var predRingCenter: SIMD2<Float> = .zero
+    /// 环结算 latch(用户:"环别跳来跳去,只跳一次"):布局首次全员停稳
+    /// 后置真,从此环心恒平滑追 MEC、半径恒平滑到 ringTargetRad ——
+    /// 不再被 allStatic 迟滞抖动在 predRingCenter↔MEC 之间反复横跳。
+    /// explode/updateScene(ringDirty)复位。
+    private var ringSettled = false
+    /// 环半径定稿目标(首次停稳时按真实 MEC 一次性算定,补幽灵欠估;
+    /// 之后 ringRad 平滑长到此值即锁死 —— 一次调整,不再每 tick 重评估)。
+    private var ringTargetRad: Float = 0
     /// 全节点陨石标记(碰撞用):陨石×陨石**跨家也常开**碰撞 —— 平弧
     /// 云在家与家交界处会交叠,家隔离原则只管圈内叶(07-03 五稿)。
     private var nodeBelt: [Bool] = []
@@ -320,6 +328,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         ringDirty = true
+        ringSettled = false   // 环重新定稿:等新布局首次停稳再 latch
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
@@ -385,6 +394,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
         ringDirty = true   // 数据变了 → 环半径按新幽灵终局重算
+        ringSettled = false   // 环重新定稿:等新布局首次停稳再 latch
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         hubQuietRef = []   // 槽位数可能变,静动帧判定重建
         famPrev = []   // 家族携带参考同理重建
@@ -622,27 +632,32 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 拖到罩不住时它仍 = 当前最小包围圆圆心(minimax 最优),
             // 罩不住的球暂时露在环外,靠滑出/穿透/碰撞兜底
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
-            if beltForming && !allStatic {
+            if beltForming && !ringSettled && !allStatic {
+                // 生成期未定稿:环心用幽灵终局(belt 一开始就在最终方位,不
+                // 随 explode 乱漂);半径用 ringDirty 时的冻结值。等布局首次
+                // 全员停稳,下面 else 一次性定稿并 latch。
                 ringC = predRingCenter
             } else {
+                // 已定稿 / 首次停稳 / 松手后:环心平滑追当前 MEC 圆心。
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
                 let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
                 ringC += (c - ringC) * GraphConstants.ringCenterLerp
-                // 环半径自适应补偿(用户定稿):幽灵用聚合电荷近似叶云,会
-                // **低估**支配大 folder(如 569 叶 Unclassified)把 hub 顶出
-                // 的真实距离 → 冻死的 ringRad 罩不住 → 巨泡边缘探进环带 →
-                // carveBeltSegs 在自家 rel=0 自挖正上方 → 整家偏 0.5~0.9rad。
-                // 静止时让 ringRad **只增不减**追真实 MEC(目标与 predictBeltClip
-                // 同式,= 补上幽灵欠估),保证环始终罩住所有气泡 → 永不自挖 →
-                // 永远正上方。仅 allStatic(避免松手回弹的瞬态大 encR 永久撑大
-                // 环);拖动中 beltPass 早退不触及,"拖动半径不变"仍成立。
-                if allStatic {
-                    let need = encR + Float(GraphConstants.beltGap)
-                        + GraphConstants.ringPredMargin
-                    if need > ringRad {
-                        ringRad += (need - ringRad) * GraphConstants.ringCenterLerp
-                    }
+                // 首次全员停稳 → **一次性定稿**半径:幽灵用聚合电荷近似叶云
+                // 会**低估**支配大 folder(569 叶 Unclassified)把 hub 顶出的
+                // 真实距离 → 冻死半径罩不住 → 巨泡探进环带 → 自家 rel=0 自挖
+                // 正上方 → 整家偏。定稿目标 = 真实 MEC + 同式余量(补欠估),
+                // latch 后不再每 tick 重评估 —— 消除 allStatic 迟滞抖动导致
+                // 环在 predRingCenter↔MEC / 半径反复横跳(用户:环只跳一次)。
+                if !ringSettled && allStatic {
+                    ringTargetRad = max(ringRad, encR
+                        + Float(GraphConstants.beltGap)
+                        + GraphConstants.ringPredMargin)
+                    ringSettled = true
                 }
+                // 平滑长到定稿值(收敛即停);ringTargetRad 在 ringDirty 时
+                // = ringRad,故未定稿前不动;拖动中 beltPass 早退不触及,
+                // "拖动半径不变"仍成立。
+                ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
             }
             let rc = ringC
             // 极角/角增量一律绕**环心**(参考系从主球换成环心):
@@ -885,6 +900,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         if ringDirty {
             ringRad = encR + Float(GraphConstants.beltGap)
                 + GraphConstants.ringPredMargin
+            ringTargetRad = ringRad   // 未定稿前定稿目标=冻结值 → 半径不漂
             ringC = c
             ringDirty = false
         }
