@@ -29,6 +29,9 @@ final class SleepHelperClient {
     private var connection: NSXPCConnection?
     /// 当前是否已让 helper 持 disablesleep=1。
     private var holding = false
+    /// 各 owner 独立持有("memory" 记忆管线 / "transcription" 转录):任一要开就
+    /// disablesleep=1,全空才复位。仿 [[KeepAwakeAssertion]].owners,免得一方关误放另一方。
+    private var owners: Set<String> = []
 
     private init() {}
 
@@ -77,15 +80,18 @@ final class SleepHelperClient {
 
     // MARK: - keep-awake(MemoryScheduler.refreshKeepAwake 驱动)
 
-    /// 有任务在跑 + 插电 → `true` 让机器合盖也清醒;全停 → `false` 复位。
-    /// 仅当用户开了开关且 helper 已批准(.enabled)才真正动作,否则静默 no-op。
-    func setKeepAwake(_ enabled: Bool) {
-        guard ConfigStore.shared.current.general.keepAwakeLidClosed,
-              service.status == .enabled else {
-            if !enabled { teardownConnection(resetFirst: false) }   // 没开/没批准:别占着 helper
+    /// 某 owner 有任务在跑 + 插电合盖 → `true` 让机器合盖也清醒;该 owner 停 →
+    /// `false`。任一 owner 要开就 disablesleep=1,全空才复位。
+    /// 「合盖保持运行」开关是否开由**调用方**判断(见 MemoryScheduler.refreshKeepAwake /
+    /// TranscriptionScheduler);这里只 guard helper 已批准(.enabled),否则静默 no-op。
+    func setKeepAwake(_ enabled: Bool, owner: String) {
+        if enabled { owners.insert(owner) } else { owners.remove(owner) }
+        let want = !owners.isEmpty
+        guard service.status == .enabled else {
+            if !want { teardownConnection(resetFirst: false) }   // 没批准:别占着 helper
             return
         }
-        if enabled {
+        if want {
             guard let proxy = proxy() else { return }
             holding = true
             proxy.setKeepAwake(true) { [weak self] ok, diag in

@@ -556,6 +556,14 @@ struct RecordingConfig: Codable, Equatable {
     }
 }
 
+/// 转录电源门槛(逐档收紧)。always=除电池合盖(机器本就睡)都跑;
+/// pluggedIn=需插电(默认);pluggedInLidClosed=只在插电+合盖跑。
+enum TranscriptionPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case always
+    case pluggedIn          = "plugged_in"
+    case pluggedInLidClosed = "plugged_in_lid_closed"
+}
+
 struct AudioConfig: Codable, Equatable {
     var enabled:                 Bool     = true
     var engine:                  String   = "whisper"
@@ -586,12 +594,12 @@ struct AudioConfig: Codable, Equatable {
     var pauseAudioCategories:    [String] = []
     /// DEPRECATED → 迁移到 pauseAudioCategories(music)。只为解码老 config 保留。
     var pauseOnMusicApp:         Bool     = false
-    /// 只在 AC 供电时转录(省电池;音频照常录,插电后补转)。关 → 不管电源都转。
+    /// DEPRECATED → 迁移到 transcriptionPowerMode(true→pluggedIn / false→always)。
+    /// 只为解码老 config 保留(同 pauseOnMusicApp 先例;synthesized encode 需 stored prop)。
     var transcribeOnACOnly:      Bool     = true
-    /// 转录有积压且在 AC 供电时,阻止系统空闲睡眠,把积压全速跑完再放行睡眠
-    /// (只挡空闲睡眠;合盖走独立路径这条断言挡不住,但合盖后任务仍会在
-    /// DarkWake 窗口里继续推进,只是变慢)。默认关。
-    var keepAwakeWhileTranscribing: Bool  = false
+    /// 转录电源门槛(见 TranscriptionPowerMode)。各档隐含防睡:插电开盖→
+    /// IOPMAssertion 挡空闲睡眠;插电合盖→SleepHelper(pmset)保持运行。默认插电。
+    var transcriptionPowerMode:  TranscriptionPowerMode = .pluggedIn
     var customVocabulary:        [String] = []
     /// 用户**锁定**的输入设备 UID (CoreAudio kAudioDevicePropertyDeviceUID)。
     /// 空 = 跟随系统默认(插耳机会跟着切,macOS 标准行为)。
@@ -624,8 +632,8 @@ struct AudioConfig: Codable, Equatable {
         case pauseAudioApps          = "pause_audio_apps"
         case pauseAudioCategories    = "pause_audio_categories"
         case pauseOnMusicApp         = "pause_on_music_app"
-        case transcribeOnACOnly      = "transcribe_on_ac_only"
-        case keepAwakeWhileTranscribing = "keep_awake_while_transcribing"
+        case transcribeOnACOnly      = "transcribe_on_ac_only"       // 仅迁移用
+        case transcriptionPowerMode  = "transcription_power_mode"
         case customVocabulary        = "custom_vocabulary"
         case preferredInputDeviceUID = "preferred_input_device_uid"
     }
@@ -656,8 +664,12 @@ struct AudioConfig: Codable, Equatable {
             pauseAudioCategories = ["public.app-category.music"]
             pauseOnMusicApp = false
         }
+        // 老开关迁移:老 transcribeOnACOnly=true → pluggedIn(默认档),=false → always。
+        // keep_awake_while_transcribing 合并进各档隐含防睡,舍弃。新 key 缺省时用迁移值。
         transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
-        keepAwakeWhileTranscribing = c.dflt(Bool.self, .keepAwakeWhileTranscribing, keepAwakeWhileTranscribing)
+        let migrated: TranscriptionPowerMode = transcribeOnACOnly ? .pluggedIn : .always
+        transcriptionPowerMode = TranscriptionPowerMode(rawValue:
+            c.dflt(String.self, .transcriptionPowerMode, migrated.rawValue)) ?? migrated
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
         preferredInputDeviceUID = c.dflt(String.self,  .preferredInputDeviceUID, preferredInputDeviceUID)
     }

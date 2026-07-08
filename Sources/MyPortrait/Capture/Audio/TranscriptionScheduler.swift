@@ -162,8 +162,11 @@ actor TranscriptionScheduler {
             whisper.unload()
             qwen.unload()
         }
-        // 任务取消后不会再有 processQueueOnce 来 refresh —— 这里显式放行睡眠。
-        Task { @MainActor in KeepAwakeAssertion.shared.refresh(false) }
+        // 任务取消后不会再有 processQueueOnce 来 refresh —— 这里显式放行睡眠(两 owner)。
+        Task { @MainActor in
+            KeepAwakeAssertion.shared.set(false, owner: "transcription")
+            SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
+        }
         logger.info("TranscriptionScheduler stopped")
     }
 
@@ -205,7 +208,7 @@ actor TranscriptionScheduler {
     // MARK: - B. Transcribe
 
     /// 立刻重评一轮(读最新设置 + 决定转/停/更新 "Paused on battery")。给 Services 在
-    /// transcribeOnACOnly 等设置变化时调 —— 否则用户拨开关后要等最多 60s 的兜底 poll 才生效。
+    /// transcriptionPowerMode 等设置变化时调 —— 否则用户改档后要等最多 60s 的兜底 poll 才生效。
     func reevaluate() async {
         await processQueueOnce()
     }
@@ -230,11 +233,19 @@ actor TranscriptionScheduler {
         isDraining = true
         defer { isDraining = false }
 
-        // AC-only 开关:开(默认)→ 只在充电时转录(省电池);关 → 不管电源都转。
-        // 防休眠开关:开 → 有积压且在 AC 时阻止系统空闲睡眠,把积压跑完再放行睡眠。
-        let (acOnly, keepAwake) = await MainActor.run {
-            let a = ConfigStore.shared.current.capture.audio
-            return (a.transcribeOnACOnly, a.keepAwakeWhileTranscribing)
+        // 转录电源档位:决定「转 / 停」+ 隐含防睡方式(开盖 IOPMAssertion / 合盖 helper)。
+        let mode = await MainActor.run {
+            ConfigStore.shared.current.capture.audio.transcriptionPowerMode
+        }
+        // 当前电源状态下该不该跑(实时读 PowerMonitor —— 合盖 / 掉电会实时变):
+        // always=除「电池+合盖」(机器本就睡)都跑;pluggedIn=需插电;
+        // pluggedInLidClosed=需插电+合盖。
+        func powerShouldRun() -> Bool {
+            switch mode {
+            case .always:             return PowerMonitor.isOnAC || !PowerMonitor.isLidClosed
+            case .pluggedIn:          return PowerMonitor.isOnAC
+            case .pluggedInLidClosed: return PowerMonitor.isOnAC && PowerMonitor.isLidClosed
+            }
         }
 
         // 无进展保护:某个 chunk 因 DB 写失败(如磁盘满)一直标不掉 pending 时,tight
@@ -262,18 +273,20 @@ actor TranscriptionScheduler {
                 qwen.unload()
                 await MainActor.run {
                     IntentionalPauseState.shared.audioTranscriptionPaused = true
-                    KeepAwakeAssertion.shared.refresh(false)
+                    KeepAwakeAssertion.shared.set(false, owner: "transcription")
+                    SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
                 }
                 return
             }
-            // 电池 + AC-only → 不转录:释放模型 + 放行睡眠 + 标记 intentional pause
-            //(让 StallDetector 知道 pending 堆积是故意的,不报 backlog)。
-            if acOnly && !PowerMonitor.isOnAC {
+            // 电源档位不满足(电池 / 开盖但要求合盖等)→ 不转录:释放模型 + 放行睡眠 +
+            // 标记 intentional pause(让 StallDetector 知道 pending 堆积是故意的,不报 backlog)。
+            if !powerShouldRun() {
                 whisper.unload()
                 qwen.unload()
                 await MainActor.run {
                     IntentionalPauseState.shared.audioTranscriptionPaused = true
-                    KeepAwakeAssertion.shared.refresh(false)
+                    KeepAwakeAssertion.shared.set(false, owner: "transcription")
+                    SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
                 }
                 return
             }
@@ -302,21 +315,30 @@ actor TranscriptionScheduler {
             }
             lastFrontId = frontId
 
-            // 有积压 + 在 AC + 开关开 → 阻止空闲睡眠,让机器把积压跑完再睡。
-            await MainActor.run { KeepAwakeAssertion.shared.refresh(keepAwake && PowerMonitor.isOnAC) }
+            // 有积压 → 按电源状态防睡:插电开盖用 IOPMAssertion 挡空闲睡眠,
+            // 插电合盖用 SleepHelper(pmset)保持运行(两 owner 各自独立)。
+            await MainActor.run {
+                let ac = PowerMonitor.isOnAC, lid = PowerMonitor.isLidClosed
+                KeepAwakeAssertion.shared.set(ac && !lid, owner: "transcription")
+                SleepHelperClient.shared.setKeepAwake(ac && lid, owner: "transcription")
+            }
 
             for chunk in chunks {
                 if Task.isCancelled { break }
-                // 中途变电池(仅 AC-only)→ 停批;回 while 顶命中电池分支收尾。
-                if acOnly && !PowerMonitor.isOnAC { break }
+                // 中途电源状态变得不满足档位(掉电 / 开盖)→ 停批;回 while 顶
+                // 命中 !powerShouldRun 分支收尾(释放防睡 + 标 pause)。
+                if !powerShouldRun() { break }
                 await transcribeOne(chunk: chunk)
             }
         }
 
-        // 退出 drain(清空 / 取消 / 出错 / 无进展)→ 释放模型 + 放行系统睡眠。
+        // 退出 drain(清空 / 取消 / 出错 / 无进展)→ 释放模型 + 放行系统睡眠(两 owner)。
         whisper.unload()
         qwen.unload()
-        await MainActor.run { KeepAwakeAssertion.shared.refresh(false) }
+        await MainActor.run {
+            KeepAwakeAssertion.shared.set(false, owner: "transcription")
+            SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
+        }
     }
 
     /// 转录设置快照（引擎 + 语言 + 词汇 + 云引擎凭据）。
