@@ -77,11 +77,13 @@ final class KeystrokeCharLogger {
         // 只记这一个原始信号,判别"拉丁是英文字面还是拼音"的逻辑全在实验线,不进 Swift。
         let inputSource = inputSourceCache.current
 
-        // 黑名单短路 —— 命中就不进队列了
+        // 黑名单:不记**内容**(char / modifiers / inputSource 全清空),但仍写一行
+        // 只留计数所需字段(bundle_id / ts / is_backspace)。这样 Input 图谱按行计数
+        // 就能显示黑名单 app 的打字量,而不暴露打了什么。写作采集 worker 读击键时按
+        // bundle_id 排除同一份黑名单(WritingCaptureWorker),这些无内容行不会进 Pass2。
         blacklistLock.lock()
-        let drop = blacklist.contains(app)
+        let redact = blacklist.contains(app)
         blacklistLock.unlock()
-        if drop { return }
 
         // 派到后台写 DB —— callback 立刻返回
         let store = self.store
@@ -92,10 +94,10 @@ final class KeystrokeCharLogger {
                     id: nil,
                     tsMs: nowMs,
                     bundleId: app,
-                    char: chars.isEmpty ? nil : chars,
+                    char: redact ? nil : (chars.isEmpty ? nil : chars),
                     isBackspace: isBackspace ? 1 : 0,
-                    modifiers: modifiers,
-                    inputSource: inputSource
+                    modifiers: redact ? 0 : modifiers,
+                    inputSource: redact ? nil : inputSource
                 )
                 try store.insert(&entry)
             } catch {
