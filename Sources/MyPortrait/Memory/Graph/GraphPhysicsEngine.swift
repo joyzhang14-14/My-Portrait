@@ -430,13 +430,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
             } else if wasDragging {
-                // 松手边沿:预判新终局(提前排布)
+                // 松手边沿:预判新终局(提前排布 + **提前定环** ——
+                // predictBeltClip 会立即按幽灵终局定环目标,环与 folder
+                // 回位动画同步 lerp,不等停稳;死区内目标不动=零跳)
                 beltPredDirty = true
-                // 环重新武装定稿(实机回归修复:latch 定稿后半径永冻,拖动
-                // 把布局拉大 → 环心跟走但半径罩不住 → 环带被气泡大面积
-                // 裁剪 → 全场家弧挤进仅剩的自由窗=混色一团)。拖动中半径
-                // 仍冻结不跳;松手布局重新停稳后**重新定稿一次**(可长可
-                // 缩回最小罩住圆,lerp 平滑)——"只跳一次"= 每次调整一次
+                // 重新武装停稳覆盖校验(常态死区内零动;幽灵失灵才补调)
                 ringSettled = false
                 // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
                 // 推土机推开的邻居若还挂着拖前的 static 旗,松手后最长
@@ -632,57 +630,29 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 predictBeltClip()
                 beltPredDirty = false
             }
-            // 环结算 = **整环定稿制**(用户三令:环最多跳一次。前两版死区
-            // 只管半径,环心仍每 tick 从幽灵预测 lerp 追真实 MEC —— 预测环心
-            // 结构性算不准(12 体幽灵只能聚合电荷近似叶云,实测可差 ~100pt),
-            // 这段平移就是"第二跳"。根治 = 不追求预测更准,而是让预测误差
-            // 不变成可见跳变):幽灵只管首次成型;停稳定稿时以**当前环**测
-            // 覆盖 —— 罩得住且不太松 → 环心半径**都**一动不动(零跳);
-            // 罩不住/太松才一次性调到真实 MEC(一跳)。定稿后目标锁死,
-            // 只 lerp 收敛;松手过渡期(未定稿)环整体冻结,不追布局中间态。
+            // 环结算 = **提前定环 + 停稳校验**(用户定稿:"提前算出会移动
+            // 到哪,只调整一次")。环目标在预测时就已定死:开场/刷新 =
+            // predictBeltClip 里直接钉幽灵终局(一次成型);松手 = 同函数
+            // 立即按幽灵终局定目标 → 环与 folder 回位动画**同步** lerp 过去,
+            // 不等停稳。这里只剩:①停稳(或冷透兜底,防 restless 强制 park
+            // 永不校验)时**覆盖校验**一次 —— 幽灵 12 体近似结构性算不准
+            // (叶云聚合电荷,环心可差 ~100pt),死区(ringCovered)吸收
+            // 常态误差=零动,罩不住/太松才补调一次(预测失灵的兜底);
+            // ②恒向锁死目标 lerp。拖动中 beltPass 早退,"拖动整环不变"。
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
-            if !ringSettled {
-                if beltForming && !allStatic
-                    && alpha >= GraphConstants.alphaMin {
-                    // 生成期:环几何 = 幽灵终局,冻结(一次成型不乱漂)。
-                    // alpha 闸(对抗验证补漏):restless 强制 park 前冷透,
-                    // 必须落到下面定稿,否则永不 latch 环冻在欠估值
-                    ringC = predRingCenter
-                    ringTargetC = ringC
-                } else if allStatic || alpha < GraphConstants.alphaMin {
-                    // 首次停稳(或冷透兜底)一次性定稿:死区判据 = 以当前
-                    // 环心测的覆盖需求 coverNeed(含主球),幽灵误差
-                    // −2~+19pt 整段落死区内 = 常态零跳
-                    let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
-                    var coverNeed: Float = 0
-                    for i in 0..<cs.count {
-                        coverNeed = max(coverNeed,
-                                        simd_length(cs[i] - ringC) + rs[i])
-                    }
-                    if coverNeed > ringRad - 5
-                        || ringRad - coverNeed > GraphConstants.ringPredMargin
-                            + GraphConstants.ringSlack {
-                        // 罩不住(拖大了/预测欠估过甚)或太松(拖回了):
-                        // 一次性调到真实最小包围圆 + 标准余量
-                        let (c, encR) = Self.minEnclosingCircle(
-                            centers: cs, radii: rs)
-                        ringTargetC = c
-                        ringTargetRad = encR + Float(GraphConstants.beltGap)
-                            + GraphConstants.ringPredMargin
-                    } else {
-                        ringTargetC = ringC   // 死区:整环零跳
-                        ringTargetRad = ringRad
-                    }
-                    ringSettled = true
+            if !ringSettled && (allStatic || alpha < GraphConstants.alphaMin) {
+                let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
+                if !ringCovered(cs, rs) {
+                    let (c, encR) = Self.minEnclosingCircle(
+                        centers: cs, radii: rs)
+                    ringTargetC = c
+                    ringTargetRad = encR + Float(GraphConstants.beltGap)
+                        + GraphConstants.ringPredMargin
                 }
-                // 松手后未停稳的过渡期:环整体冻结(弧方向由射线交点随
-                // hub 实时走,环本身不动 —— 等停稳一次性判)
-            } else {
-                // 已定稿:只向锁死的目标 lerp 收敛(拖动中 beltPass 早退
-                // 不触及,"拖动整环不变"仍成立)
-                ringC += (ringTargetC - ringC) * GraphConstants.ringCenterLerp
-                ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
+                ringSettled = true
             }
+            ringC += (ringTargetC - ringC) * GraphConstants.ringCenterLerp
+            ringRad += (ringTargetRad - ringRad) * GraphConstants.ringCenterLerp
             let rc = ringC
             // 极角/角增量绕**环心**;帧携带 = 绕环心刚体公转,按自家 hub
             // 相对环心的角增量
@@ -929,19 +899,47 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         // 只存终局位置 —— 弧裁剪移到 carveBeltSegs 每 tick 混合帧做
         //(07-03"截断汇集"根治;双几何/滞留门控被静动帧判定取代)
         beltPredPos = P
-        // 终局几何 → 最小包围圆:环心(生成期直接用)+ 环半径(一次算死,
-        // 只在 ringDirty —— explode/updateScene —— 时更新;拖动不变)
+        // 终局几何 → 最小包围圆 → **提前定环**(用户定稿:"提前算出会
+        // 移动到哪,只调整一次")
         let (cs, rs) = enclosureCircles(hubAt: { P[$0] })
         let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
         predRingCenter = c
         if ringDirty {
+            // 开场/数据刷新:环直接钉幽灵终局(一次成型,无过渡)
             ringRad = encR + Float(GraphConstants.beltGap)
                 + GraphConstants.ringPredMargin
-            ringTargetRad = ringRad   // 未定稿前定稿目标=冻结值 → 环不漂
+            ringTargetRad = ringRad
             ringC = c
             ringTargetC = c
             ringDirty = false
+        } else if !ringCovered(cs, rs) {
+            // 松手重预测:环目标**立即**按幽灵终局定死 —— 环与 folder
+            // 回位动画同步 lerp 过去,不等停稳(等停稳再调=布局停了环
+            // 补一跳,观感"跳两次")。死区内(当前环罩住幽灵终局且不
+            // 太松)目标不动=零跳;停稳后仅覆盖校验兜底
+            ringTargetC = c
+            ringTargetRad = encR + Float(GraphConstants.beltGap)
+                + GraphConstants.ringPredMargin
         }
+    }
+
+    /// 环覆盖死区判断(提前定环与停稳校验共用):以**目标环**测圆集,
+    /// 罩得住(≥15pt 余)且不太松(富余 ≤ margin+slack)→ true 环不动;
+    /// false = 调用方一次性调到该圆集的最小包围圆。调用方须持 simLock。
+    /// ⚠️ 下限必须与 carve 触发线拉开实缓冲:挡板够到环带的条件是余量
+    /// <4pt(bLo=ringRad+4、bT=bubbleR+8),下限取 5 时只隔 1pt —— 校验
+    /// 以薄余量判"罩得住"零动后,hub 慢爬 1~2pt 即越线触发最大家自挖,
+    /// 弧偏 90°+(after-drag F0 实测 −1.64rad)。15 = 慢爬幅度 + lerp
+    /// 未收敛瞬态的实缓冲;开场幽灵误差 −2~+19 → 余量 16~37 仍全落
+    /// 死区 = 零跳行为不变。
+    private func ringCovered(_ cs: [SIMD2<Float>], _ rs: [Float]) -> Bool {
+        var need: Float = 0
+        for i in 0..<cs.count {
+            need = max(need, simd_length(cs[i] - ringTargetC) + rs[i])
+        }
+        return need <= ringTargetRad - 15
+            && ringTargetRad - need <= GraphConstants.ringPredMargin
+                + GraphConstants.ringSlack
     }
 
     /// 环的包围对象集合:主球圆(原点,mainRadius)+ 全部 folder 隐形圆
