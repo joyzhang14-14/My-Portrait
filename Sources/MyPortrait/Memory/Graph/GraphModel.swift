@@ -120,6 +120,7 @@ enum BeltLayout {
         var angles = [Double](repeating: 0, count: n)
         var tierStarts = [Double](repeating: 0, count: 3)
         var cursor = GraphConstants.beltGap
+        var placed = 0   // 已放置陨石数(端部渐隐按此比例算径向深度)
         for t in 0..<3 {
             if let bases = tierBases { cursor = max(cursor, bases[t]) }
             tierStarts[t] = cursor
@@ -128,26 +129,34 @@ enum BeltLayout {
             var k = 0
             while k < idxs.count {
                 let ringR = baseR + cursor
-                // 每排装 65%(单环重构"更分散更随机":0.75→0.65 排更稀)
-                let cap = max(1, Int(2 * famArc * ringR / slotW * 0.65))
+                // 端部渐隐(用户:Unclassified 弧两端别直线硬截,要慢慢没、
+                // 越来越贴最里层):本排弧半宽随径向深度递减 → 内排宽、外
+                // 排窄 = 透镜/彗尾,端部只有内排延伸、外排先消失
+                let depth = Double(placed) / Double(n)
+                let rowArc = famArc
+                    * (1 - GraphConstants.beltEndTaper * depth * depth)
+                // 每排装 50%(单环"更分散"指厚度:排更稀 → 排数更多 →
+                // 带更厚;0.75→0.65→0.5)
+                let cap = max(1, Int(2 * rowArc * ringR / slotW * 0.5))
                 let rowCount = min(cap, idxs.count - k)
-                let slot = 2 * famArc / Double(rowCount)
+                let slot = 2 * rowArc / Double(rowCount)
                 for j in 0..<rowCount {
                     let g = idxs[k]
                     // 模糊(单环重构加码:径向 ±1.1 排距、角向 ±1.2 槽,
                     // 确定性哈希驱动,不是真随机)—— 边缘不刻意
                     offsets[g] = cursor + (hashA[g] - 0.5) * slotW * 2.2
-                    angles[g] = -famArc + (Double(j) + 0.5) * slot
+                    angles[g] = -rowArc + (Double(j) + 0.5) * slot
                         + (hashB[g] - 0.5) * slot * 2.4
                     // 抖动半幅 1.2×slot 在稀疏排(rowCount 少 → slot 巨大)
-                    // 会把外层单球甩出家弧、极端到环对侧,拖偏角质心 →
-                    // 弧"不在正上方"。钳回自家弧 footprint:家内仍充分分散,
+                    // 会把外层单球甩出本排弧、极端到环对侧,拖偏角质心 →
+                    // 弧"不在正上方"。钳回本排弧 footprint:排内仍充分分散,
                     // 只是不越界(顺带 famW=max|beltAngle| 不再被离群点撑大)
-                    angles[g] = max(-famArc, min(famArc, angles[g]))
+                    angles[g] = max(-rowArc, min(rowArc, angles[g]))
                     k += 1
+                    placed += 1
                 }
-                // 排距恒定小步(九稿:递增排距的彗尾太厚,层压薄)
-                cursor += slotW * 0.75
+                // 排距(单环"更分散"指厚度:beltRowGap 加大 = 带更厚)
+                cursor += slotW * GraphConstants.beltRowGap
             }
         }
         return (offsets, angles, tierStarts)
