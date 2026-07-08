@@ -735,8 +735,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 环心的极角,环心被巨泡拉偏后两者不一致)。附带:环心漂移
                 // 时交点始终钉在射线上 —— 弧方向不再随环心晃,只有径向
                 // 微调,环心切换/平滑的视觉跳动被结构性消掉。主球钉原点,
-                // 环罩住主球(原点在环内)⇒ 判别式恒正、正根恒存在
-                let f = beltTmpNow[s]
+                // 环罩住主球(原点在环内)⇒ 判别式恒正、正根恒存在。
+                // ⚠️ 射线端点用**混合帧**(与 carve 挡板同哲学;07-08 用户
+                // 实测"拖动 folder 后陨石来回调整去贴合":实时位置会让弧
+                // 追着 folder 的飘移路径滑 —— 实测松手后弧滑 19°/7s,每帧
+                // 目标都在挪。hub 静用实时[真理],在飞用影子终局[计划]:
+                // 松手瞬间弧直接钉终局方向,陨石直飞最终弧位不改道,
+                // folder 自己慢慢飘过去;hub 到位翻静时实时≈终局,无跳)
+                let f = (hubStatic.count == nh && hubStatic[s])
+                    || beltPredPos.count != nh
+                    ? beltTmpNow[s] : beltPredPos[s]
                 let fl = simd_length(f)
                 let u = fl > 1e-4 ? f / fl : SIMD2<Float>(1, 0)
                 let b = simd_dot(u, rc)
@@ -901,11 +909,10 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         shadowReady = false
         shadowLock.unlock()
         shadowDone = false
-        // 挡板占位:ready 前用当刻实时位置(几十 ms 窗口),防 count
-        // 不匹配每 tick 重复派发
-        if beltPredPos.count != hubIndices.count {
-            beltPredPos = hubIndices.map { pos[Int($0)] }
-        }
+        // 挡板/弧方位占位:ready 前用**当刻实时位置**(几帧窗口)。
+        // 无条件刷新 —— 不能留拖拽前的旧终局,混合帧的弧方位会朝旧
+        // 方向飞一两帧(实测首帧毛刺 pol 偏 2+rad)
+        beltPredPos = hubIndices.map { pos[Int($0)] }
         // 开场(ringDirty):先同步跑一小段钉**临时环**(陨石绕未初始化
         // 旧环跑几帧会扰动布局,实测多付一次补调;几十步几 ms 藏在爆炸
         // 里),正式钉死等任务算完(消费处)
