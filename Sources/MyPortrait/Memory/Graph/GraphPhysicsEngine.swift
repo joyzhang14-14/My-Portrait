@@ -632,10 +632,16 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 拖到罩不住时它仍 = 当前最小包围圆圆心(minimax 最优),
             // 罩不住的球暂时露在环外,靠滑出/穿透/碰撞兜底
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
-            if beltForming && !ringSettled && !allStatic {
+            // `alpha >= alphaMin` 闸(对抗验证补漏):park 可经 restless 30s
+            // 兜底触发(病态持续环流下 quietFlag 恒假、hub 全速转、allStatic
+            // 从没为真)。缺此闸则冷透仍走 IF 分支 → ringSettled 永不 latch →
+            // 环冻在幽灵欠估值、正上方 bug 复现到下次 explode。加闸后冷透必
+            // 落到 else 用真实 MEC 兜底定稿(见下 :651 的 alpha<alphaMin 条件)。
+            if beltForming && !ringSettled && !allStatic
+                && alpha >= GraphConstants.alphaMin {
                 // 生成期未定稿:环心用幽灵终局(belt 一开始就在最终方位,不
                 // 随 explode 乱漂);半径用 ringDirty 时的冻结值。等布局首次
-                // 全员停稳,下面 else 一次性定稿并 latch。
+                // 全员停稳(或冷透兜底),下面 else 一次性定稿并 latch。
                 ringC = predRingCenter
             } else {
                 // 已定稿 / 首次停稳 / 松手后:环心平滑追当前 MEC 圆心。
@@ -648,7 +654,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 正上方 → 整家偏。定稿目标 = 真实 MEC + 同式余量(补欠估),
                 // latch 后不再每 tick 重评估 —— 消除 allStatic 迟滞抖动导致
                 // 环在 predRingCenter↔MEC / 半径反复横跳(用户:环只跳一次)。
-                if !ringSettled && allStatic {
+                // 定稿触发:全员停稳(常态),**或**冷透兜底(alpha<alphaMin,
+                // restless 强制 park 前用真实 MEC 定稿 —— 那时布局或未全收敛,
+                // 但严格优于幽灵聚合电荷近似,消除永不定稿的漏网)。
+                if !ringSettled
+                    && (allStatic || alpha < GraphConstants.alphaMin) {
                     ringTargetRad = max(ringRad, encR
                         + Float(GraphConstants.beltGap)
                         + GraphConstants.ringPredMargin)
