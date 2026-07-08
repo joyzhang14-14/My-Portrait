@@ -49,14 +49,10 @@ struct GraphNode: Identifiable, Sendable {
     /// 出生散布角(相对「背主球方向」,rad;路径哈希,确定性)。
     /// 只用于绽放播种 —— 稳态角向分布由碰撞挤开涌现(模糊感)。
     var beltAngle: Double = 0
-    /// 环带吸引的目标半径偏移(相对锚定家气泡远端):层基准 + 径向模糊
-    /// 抖动 —— 层界互相渗透,"模模糊糊"是要求不是缺陷。
+    /// 环带吸引的目标半径偏移(单环重构:相对**全场唯一陨石环**的基准
+    /// 半径 ringR):层基准 + 径向模糊抖动 —— 层界互相渗透,"模模糊糊"
+    /// 是要求不是缺陷。
     var beltRadialOffset: Double = 0
-    /// 环半径的锚定 hub(十一稿修 bug):被大环吞并的陨石,半径锚定
-    /// **大环家 hub 的实时距离**(nil = 自家)。⚠️ 不能用建库时的 shift
-    /// 常数:各家 hub 实际距离偏离弹簧自然长度的量不同,布局变动后
-    /// 按自家距离+死 shift 会整段沉进大环内侧,出现分明内层弧。
-    var beltAnchorHubIndex: Int? = nil
 
     var color: Color {
         Color(red: colorRGB.x, green: colorRGB.y, blue: colorRGB.z)
@@ -94,12 +90,12 @@ enum BeltLayout {
     ///   - hashA/hashB: 每球两个独立的 [0,1) 确定性哈希(路径加盐)
     ///   - bubbleR: 自家气泡半径
     ///   - mainDist: hub→主球弹簧自然长度(≈ hub 到全图中心的距离)
-    ///   - tierBases: 十一稿(用户:"进大环的陨石都要遵循小球去外圈"):
-    ///     大环的**全局层基线**(每层的径向起点,大环家产出、被吞并家
-    ///     沿用)—— 全环统一"内=高 weight、外=低 weight",不再每家
-    ///     自成小内外。nil = 自家串接排(未吞并的家)。
-    /// - Returns: (径向偏移「相对气泡远端 mainDist+bubbleR」,
-    ///            家位角「相对 hub 的主球极角」, 各层实际起点) 同序
+    ///   - tierBases: 全局层基线(单环重构:**所有 belt 家共享**,由最大
+    ///     belt 家先算出 tierStarts 传给所有家)—— 全环统一"内=高
+    ///     weight、外=低 weight",不再每家自成小内外。nil = 自家串接排
+    ///     (只在产出基线的首家用,数学上与传自家基线等价)。
+    /// - Returns: (径向偏移「相对环基准 ringR,引擎侧一次算死」,
+    ///            家位角「相对 hub 绕环心的极角」, 各层实际起点) 同序
     static func homes(radii: [Double], tiers: [Int],
                       hashA: [Double], hashB: [Double],
                       bubbleR: Double, mainDist: Double,
@@ -114,12 +110,12 @@ enum BeltLayout {
         let ownHalf = asin(min(0.95, bubbleR / max(mainDist, bubbleR + 1)))
         let arcCap = min(GraphConstants.beltMaxHalfArc, ownHalf * 3.4 + 0.2)
         // 家弧 = 最大层的单排需求(排不满的层照此弧稀疏铺满 —— 全层平
-        // 齐,零头不挤一小块)
+        // 齐,零头不挤一小块)。装填 0.65(单环重构"更分散":排更稀)
         var tierCount = [0, 0, 0]
         for t in tiers { tierCount[min(max(t, 0), 2)] += 1 }
         let maxTC = Double(tierCount.max() ?? 1)
         let famArc = min(arcCap, maxTC * slotW
-                         / (2 * (baseR + GraphConstants.beltGap) * 0.75))
+                         / (2 * (baseR + GraphConstants.beltGap) * 0.65))
         var offsets = [Double](repeating: 0, count: n)
         var angles = [Double](repeating: 0, count: n)
         var tierStarts = [Double](repeating: 0, count: 3)
@@ -132,16 +128,17 @@ enum BeltLayout {
             var k = 0
             while k < idxs.count {
                 let ringR = baseR + cursor
-                // 每排装 75%(九稿"分层小一点":排更满 → 层更薄更平)
-                let cap = max(1, Int(2 * famArc * ringR / slotW * 0.75))
+                // 每排装 65%(单环重构"更分散更随机":0.75→0.65 排更稀)
+                let cap = max(1, Int(2 * famArc * ringR / slotW * 0.65))
                 let rowCount = min(cap, idxs.count - k)
                 let slot = 2 * famArc / Double(rowCount)
                 for j in 0..<rowCount {
                     let g = idxs[k]
-                    // 模糊:径向 ±0.7 排距、角向 ±0.8 槽 —— 边缘不刻意
-                    offsets[g] = cursor + (hashA[g] - 0.5) * slotW * 1.4
+                    // 模糊(单环重构加码:径向 ±1.1 排距、角向 ±1.2 槽,
+                    // 确定性哈希驱动,不是真随机)—— 边缘不刻意
+                    offsets[g] = cursor + (hashA[g] - 0.5) * slotW * 2.2
                     angles[g] = -famArc + (Double(j) + 0.5) * slot
-                        + (hashB[g] - 0.5) * slot * 1.6
+                        + (hashB[g] - 0.5) * slot * 2.4
                     k += 1
                 }
                 // 排距恒定小步(九稿:递增排距的彗尾太厚,层压薄)

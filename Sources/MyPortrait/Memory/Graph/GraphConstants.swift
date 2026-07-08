@@ -113,15 +113,16 @@ enum GraphConstants {
     static let beltWeightMax: Double = 1.5
     static let beltTier1Max: Double = 1.0
     static let beltTier2Max: Double = 0.5
-    /// 气泡边缘 → 扇形云第一排基准的距离(世界 pt)
+    /// 环基准间隙(单环重构):环半径 = 罩住{主球 + 全部气泡}的最小
+    /// 包围圆半径 + 此值;同时是层基线的第一排起点(BeltLayout cursor)。
     static let beltGap: Double = 10
-    /// 抬环让位(07-04 用户方案:"merge 与正上方都要,挤了就略微提高环
-    /// 半径涵盖两个,但要有度不能抬太多"):被吞并的家若弧逼近 host 气泡,
-    /// 不再角向滑弧偏离正上方,改把整条环径向抬高——弧保持正上方,靠
-    /// 半径差躲开 host。beltRideGap = 内层陨石到 host 气泡边的目标间隙;
-    /// beltRiseCap = 抬升硬上限(度)。
-    static let beltRideGap: Float = 30
-    static let beltRiseCap: Float = 40
+    /// 环心平滑跟随系数(每 tick 向当前最小包围圆圆心 lerp 的比例,
+    /// 0.08~0.12 防抖;生成期直接用幽灵终局环心,不走平滑)。
+    static let ringCenterLerp: Float = 0.1
+    /// 环半径的幽灵预测误差余量:真实布局是"冻结的瞬态"(park 在弹簧
+    /// 收完之前),比幽灵终局松 −2~+19pt(5 seed 实测)—— 补上这截,
+    /// 保证稳态环罩住全部气泡(罩不住会常态裁弧)。
+    static let ringPredMargin: Float = 15
     /// 扇形云弧半宽上限(rad ≈172°,以背主球方向为中心;07-03 用户两次
     /// 加码:1.92→2.6→3.0"弧线角度更大"——接近全圆,朝主球死角与邻圆
     /// 由动态裁剪守住):弧度随数量先展开到此上限,再往外延长
@@ -133,15 +134,6 @@ enum GraphConstants {
     /// 碰撞排开)—— 解绑态的任何回拉力都会在拖拽瞬间把全场陨石抽向
     /// hub 方位(实测"一动全聚中心"),别加回来
     static let beltSpring: Float = 0.06
-    /// 陨石带反推增益(07-03 用户定稿:"陨石层要能轻轻影响里面球的
-    /// 排布"):本家弧被邻家(弧/气泡影锥)角向压住时,给两边 hub 一对
-    /// 绕主球的切向轻推转开 —— My-Portrait 与 Unclassified 径向对齐时
-    /// 灰带骑橙泡头上/被裁两侧积压的根治。velocity 域,×max(alpha,0.5)
-    /// —— 地板必须够高(0.15 实测冷透后挪速掉出净位移窗阈值被 park 半路
-    /// 冻住"平移做一半就停");也不敢不乘 alpha 恒定全速(多家缺口冲突时
-    /// 持续环流,after-drag park 42s)。1.2→2.5(07-03 用户:"极限情况
-    /// 的移动速度快一点"):速度∝缺口,极限错位顶速走,收尾自然减速
-    static let beltHubNudge: Float = 2.5
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
