@@ -129,6 +129,14 @@ enum GraphConstants {
     /// (BeltLayout.homes)。真实可用弧由引擎**每 tick 动态裁剪**
     /// (邻圆/主球挡住的一侧收缩,整片云往空侧平移延伸)
     static let beltMaxHalfArc: Double = 3.0
+    /// 陨石带径向排距(每排外移 slotW×此值;单环"更分散"指厚度 = 排摊
+    /// 得更开、带更厚)。原 0.75,加大即更厚
+    static let beltRowGap: Double = 1.3
+    /// 端部渐隐强度(用户:Unclassified 弧两端别直线硬截,要慢慢没、越来
+    /// 越贴内层):每排弧半宽 = famArc×(1−此值×depth²),depth=该家已放置
+    /// 比例(0 内→1 外)→ 内排宽、外排窄 = 透镜/彗尾,端部只剩最里层延伸。
+    /// 0=矩形硬截,越大越尖
+    static let beltEndTaper: Double = 0.45
     /// 家位弹簧刚度(仅**绑定期**用;velocity 域,×max(alpha,0.1) 同
     /// linkPass 地板)。07-03 六稿:解绑后**零引力**(纯碎石漂浮,只被
     /// 碰撞排开)—— 解绑态的任何回拉力都会在拖拽瞬间把全场陨石抽向
