@@ -47,9 +47,13 @@ struct InputActivityChartView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
+            // 图只占可用高度的 1/3,靠上;下方留空。
+            GeometryReader { geo in
+                InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
+                    .frame(height: geo.size.height / 3)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+            }
         }
     }
 
