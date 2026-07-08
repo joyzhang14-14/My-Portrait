@@ -235,9 +235,9 @@ private struct InputActivityCanvas: View {
 
             var path = Path()
             path.move(to: upperPts[0])
-            addCatmullRom(&path, upperPts)
+            addCatmullRom(&path, upperPts, plot: plot)
             path.addLine(to: lowerPts[lowerPts.count - 1])
-            addCatmullRom(&path, Array(lowerPts.reversed()))
+            addCatmullRom(&path, Array(lowerPts.reversed()), plot: plot)
             path.closeSubpath()
 
             let color = AppColor.color(for: InputCaptureView.appLabel(bundle))
@@ -253,21 +253,26 @@ private struct InputActivityCanvas: View {
         let pts = (lo...hi).map { CGPoint(x: x($0, plot), y: y(buckets.totals[$0], plot)) }
         var path = Path()
         path.move(to: pts[0])
-        addCatmullRom(&path, pts)
+        addCatmullRom(&path, pts, plot: plot)
         ctx.stroke(path, with: .color(curveColor), lineWidth: 1.4)
     }
 
     /// 沿点序列追加 Catmull-Rom 平滑曲线段(path 须已 move 到 pts[0])。
     /// 标准 1/6 张力,把折线转成穿过每个点的圆滑贝塞尔 —— 峰变钟形。
-    private func addCatmullRom(_ path: inout Path, _ pts: [CGPoint]) {
+    /// 控制点 y 夹在 [plot.minY, plot.maxY]:贝塞尔落在控制点凸包内,端点又是
+    /// 真实数据点,故曲线**绝不跌破基线**(谷底 overshoot)也不冲出顶部。
+    private func addCatmullRom(_ path: inout Path, _ pts: [CGPoint], plot: CGRect) {
         guard pts.count > 1 else { return }
+        func clampY(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: p.x, y: min(max(p.y, plot.minY), plot.maxY))
+        }
         for i in 0..<(pts.count - 1) {
             let p0 = pts[max(0, i - 1)]
             let p1 = pts[i]
             let p2 = pts[i + 1]
             let p3 = pts[min(pts.count - 1, i + 2)]
-            let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6)
-            let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6)
+            let c1 = clampY(CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6))
+            let c2 = clampY(CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6))
             path.addCurve(to: p2, control1: c1, control2: c2)
         }
     }
