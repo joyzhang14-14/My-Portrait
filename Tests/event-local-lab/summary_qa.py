@@ -193,14 +193,26 @@ def global_merge_pass(events, by, idf, T, votes=3):
                 for b in range(a + 1, len(ids)):
                     pair_votes[(ids[a], ids[b])] += 1
     thr = (votes + 1) // 2 + (votes % 2 == 0)          # 3票→≥2
+    # 护栏:社交/聊天主导的事件禁并入编码事件(v7d实锤:s432王昱referral被并进right-click
+    # 编码事件,重生成把人名洗掉)。异质合并一律否决,宁分不误合。
+    _CHAT = {"微信", "wechat", "discord", "messages", "信息", "mail", "telegram"}
+    def _chatty(e):
+        apps = collections.Counter(by[k]["app"].lower() for k in e["session_ids"] if k in by)
+        top = apps.most_common(1)
+        return bool(top) and top[0][0] in _CHAT
     par = list(range(len(events)))
     def find(x):
         while par[x] != x:
             par[x] = par[par[x]]; x = par[x]
         return x
-    merged_pairs = 0
+    merged_pairs = vetoed = 0
     for (a, b), c in pair_votes.items():
         if c >= 2 and find(a) != find(b):
+            if _chatty(events[a]) != _chatty(events[b]):
+                vetoed += 1
+                retain.log_verdict(DAY, events[min(a, b)]["title"][:50],
+                                   "merge_vetoed_chat_dev", other=events[max(a, b)]["title"][:50])
+                continue
             par[find(a)] = find(b); merged_pairs += 1
     groups = collections.defaultdict(list)
     for i in range(len(events)):
@@ -216,16 +228,17 @@ def global_merge_pass(events, by, idf, T, votes=3):
         out.append(surv)
         retain.log_verdict(DAY, surv["title"][:60], "global_merged",
                            n_from=len(mem), titles=[events[i]["title"][:40] for i in mem[1:]])
-    print(f"[global_merge] {len(events)}→{len(out)} 事件(共识合并 {merged_pairs} 对)")
+    print(f"[global_merge] {len(events)}→{len(out)} 事件(共识合并 {merged_pairs} 对,否决异质 {vetoed})")
     return out
 
 
 # ---- T0 impact 打分步(0-5,rubric+gold few-shot,先理由后分) ----
 _IMPACT_RUBRIC = """Score this event's IMPACT for a personal memory system, 0-5:
-5=identity-shaping or the day's core work (major feature/rewrite, key decision)
-4=important development (significant bug root-caused & fixed, architecture design)
-3=regular development work  2=minor task/config/short investigation
-1=casual browsing/entertainment/quick chat  0=background noise
+5=identity-shaping or THE day's core work — a typical day has only 1-2 of these
+4=important development (significant bug root-caused & fixed, architecture design) — a few per day
+3=regular development work (DEFAULT for most dev tasks: a fix, a feature tweak, an investigation)
+2=minor task/config/short investigation  1=casual browsing/entertainment/quick chat  0=background noise
+BE STRICT: most events are 2-3. Reserve 4-5 for work that dominated hours or changed the project.
 Examples: "重写写作采集提取为统一field-state timeline"(42 sessions, commit 00b07be)=5;
 "Fixed light mode divider color"(3 sessions)=3; "Played music on Spotify"=1;
 "Notification Center glance"=0.
