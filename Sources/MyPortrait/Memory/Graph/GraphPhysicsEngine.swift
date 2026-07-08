@@ -186,14 +186,18 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 同一 GraphScene 构造的第二个完整引擎实例:克隆主引擎当刻
     /// pos/vel/alpha 后全力系快放 —— 同物理+同初始态 ⇒ 影子终局 =
     /// 真实终局(取代旧 12 体幽灵近似:只模拟 hub、叶云聚合电荷,
-    /// 结构性算不准,环心可差 ~100pt)。只在主引擎物理线程 simLock 内
-    /// 同步 tick(无并发);拖拽开始废弃,explode/updateScene/松手边沿
-    /// 重建。影子自己不起后台线程、不再造影子(isShadow gate 防递归)。
-    private var shadow: GraphPhysicsEngine?
-    /// 影子累计快进步数 + 收敛冻结标记(冷透+缓停滑完,或步数封顶
-    /// → done,不再 tick;此后 beltPredPos 恒为终局)。
-    private var shadowTicks = 0
+    /// 结构性算不准,环心可差 ~100pt)。**异步**(07-08 用户实机"还是
+    /// 卡顿,tick 再快一点":分帧快进每帧仍挤占物理 tick 预算 —— 改
+    /// 把影子丢到低优先级后台队列**全速一口气**跑到 hub 全静,物理
+    /// 线程零额外负载;克隆在物理线程做,实例移交后只被任务线程碰,
+    /// 结果经 shadowLock 交接)。拖拽开始/explode/updateScene 用
+    /// shadowGen 递增废弃在跑任务的结果。
+    private var shadowGen: UInt64 = 0
     private var shadowDone = false
+    /// 任务→物理线程的结果交接(shadowLock 保护)。
+    private let shadowLock = NSLock()
+    private var shadowReady = false
+    private var shadowResult: [SIMD2<Float>] = []
     /// 影子身份:true = 本实例是影子(init 不起线程,beltPass 走实时
     /// 挡板分支)。
     private let isShadow: Bool
@@ -352,7 +356,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         ringDirty = true
-        shadow = nil
+        shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 废弃在跑影子任务
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
         hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
@@ -418,7 +422,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
-        shadow = nil       // 旧影子作废(下 tick 按新场景重建)
+        shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 旧影子任务作废
         ringDirty = true   // 数据变了 → 环半径按新影子终局重算
         hubPrev = []   // 帧携带参考失效,下 tick 重建
         hubQuietRef = []   // 槽位数可能变,静动帧判定重建
@@ -591,7 +595,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         //   在它身后像水合拢;边界 = 球个体(隐形圆力场三态全关)。
         if di >= 0 {
             hubPrev = []
-            shadow = nil   // 拖拽开始:废弃影子(拖拽中不建不跑,松手边沿重建)
+            shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 拖拽开始:废弃影子任务
             guard beltDragHome.count == beltIdx.count else { return }
             let k = GraphConstants.beltSpring * max(alpha, 0.1)
             pos.withUnsafeBufferPointer { P in
@@ -659,40 +663,44 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 // 维护完就收工。影子只为一件事:hub 终局。
                 return
             } else {
-                // done 后影子已释放(shadow=nil 但 beltPredPos 定格终局),
-                // 不能凭 shadow==nil 重建(会无限重建死循环)
-                if beltPredDirty || (shadow == nil && !shadowDone)
-                    || beltPredPos.count != nh {
-                    shadowDone = false
-                    rebuildShadow()
+                // 异步影子:dirty(explode/刷新/松手)→ 克隆+丢后台全速跑;
+                // 结果 ready → 消费一次(挡板终局 + 开场正式钉环)→ done,
+                // beltPredPos 定格终局
+                if beltPredDirty || beltPredPos.count != nh {
+                    spawnShadow()
                     beltPredDirty = false
-                } else {
-                    advanceShadow()   // 快进 + 刷新挡板计划位 + 开场钉环
+                } else if !shadowDone {
+                    shadowLock.lock()
+                    let ok = shadowReady
+                    let res = shadowResult
+                    if ok { shadowReady = false }
+                    shadowLock.unlock()
+                    if ok, res.count == nh {
+                        beltPredPos = res
+                        if ringDirty {
+                            let (cs, rs) = enclosureCircles(hubAt: { res[$0] })
+                            let (c, encR) = Self.minEnclosingCircle(
+                                centers: cs, radii: rs)
+                            ringRad = encR + Float(GraphConstants.beltGap)
+                                + GraphConstants.ringPredMargin
+                            ringTargetRad = ringRad
+                            ringC = c
+                            ringTargetC = c
+                            ringDirty = false
+                        }
+                        shadowDone = true
+                    }
                 }
             }
-            // 环结算 = **提前定环 + 停稳校验**(用户定稿:"提前算出会移动
-            // 到哪,只调整一次")。开场/刷新 = rebuildShadow 里直接钉影子
-            // warmup 后的终局(一次成型);飞行期 = 影子**收敛后**按其终局
-            // 几何走同一死区逻辑 —— 环提前到终局位等 folder 慢慢跟上,
-            // 环与回位动画**同步** lerp,不等停稳。⚠️ 必须等 shadowDone:
-            // 影子还在快放途中几何未定,跟着它逐帧调会连跳(far-drag 实测
-            // 23 tick 内长/缩各一次)。停稳(或冷透兜底,防 restless 强制
-            // park 永不校验)后交还**实时位置**的覆盖校验(正确性兜底,
-            // 保留):死区(ringCovered)吸收常态误差=零动,罩不住/太松
-            // 才补调一次。两支互斥防两套圆集打架。拖动中 beltPass 早退,
-            // "拖动整环不变"。
+            // 环结算(07-08 用户定稿"等停再变"):环的可见变化只剩
+            // **停稳校验**这一处(布局停稳/冷透兜底时按实时圆集走
+            // ringCovered 死区,covered 零动、越界调一次)—— 松手后环
+            // 纹丝不动,folder 飘到位停稳后才平滑调一次。影子只喂 carve
+            // 挡板计划位与开场钉环(开场在爆炸掩护里,不可见)。拖动中
+            // beltPass 早退,"拖动整环不变"。
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
             if allStatic || alpha < GraphConstants.alphaMin {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
-                if !ringCovered(cs, rs) {
-                    let (c, encR) = Self.minEnclosingCircle(
-                        centers: cs, radii: rs)
-                    ringTargetC = c
-                    ringTargetRad = encR + Float(GraphConstants.beltGap)
-                        + GraphConstants.ringPredMargin
-                }
-            } else if !isShadow, shadowDone, beltPredPos.count == nh {
-                let (cs, rs) = enclosureCircles(hubAt: { beltPredPos[$0] })
                 if !ringCovered(cs, rs) {
                     let (c, encR) = Self.minEnclosingCircle(
                         centers: cs, radii: rs)
@@ -858,9 +866,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 无 Date/random(随机只在 init/explode 播种)⇒ 确定性快放。
     /// 开场(ringDirty)顺带把环直接钉在影子 warmup 后的终局几何上
     /// (一次成型,无过渡)。调用方须持 simLock,只在物理线程调。
-    private func rebuildShadow() {
-        // nh=0 时影子无任何消费方(钉环/carve/beltPredPos 全空转),
-        // 别白烧 warmup(对抗审查:防御缺一行)
+    private func spawnShadow() {
+        // nh=0 时影子无任何消费方(钉环/carve/beltPredPos 全空转)
         guard !isShadow, !hubIndices.isEmpty else { return }
         let sh = GraphPhysicsEngine(scene: sceneRef, isShadow: true)
         sh.pos = pos
@@ -877,58 +884,22 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         sh.beltFamSel = beltFamSel
         sh.beltFamBase = beltFamBase
         sh.beltFamSlope = beltFamSlope
-        shadow = sh
-        shadowTicks = 0
+        shadowLock.lock()
+        shadowGen &+= 1
+        let myGen = shadowGen
+        shadowReady = false
+        shadowLock.unlock()
         shadowDone = false
-        // warmup **分帧**跑(见 GraphConstants.shadowWarmupPerFrame:
-        // 一次性同步 300 步在 Debug 下卡物理线程数百 ms 且挂主线程
-        // reload)—— 本 tick 先跑一份,其余由后续每 tick 的
-        // advanceShadow 继续;开场钉环在累计够 warmup 时做(约 8 帧后,
-        // 藏在绽放/回位动画里)
-        advanceShadow()
-    }
-
-    /// 影子快进:每真实 tick 让影子多跑固定步数(warmup 阶段 40、之后
-    /// 8 —— **固定步数不设墙钟**,对抗审查:墙钟截断会把 wall-clock
-    /// 注入布局演化,同 seed 不可复现;固定 = 影子进度是 tick 纯函数)。
-    /// 收敛(冷透+缓停滑完 = 主引擎 park 同款判据)或累计封顶 → done:
-    /// 快照终局进 beltPredPos 后**释放影子实例**(数百 KB;消费方本就
-    /// 只读 beltPredPos,行为零变化)。开场(ringDirty)在累计够 warmup
-    /// 或 done 时一次性钉环。调用方须持 simLock;影子的锁无竞争(仅本
-    /// 线程碰它),tick 不发布快照/park 事件 —— 无任何全局副作用。
-    private func advanceShadow() {
-        guard let sh = shadow, !shadowDone else { return }
-        let steps = shadowTicks < GraphConstants.shadowWarmupTicks
-            ? GraphConstants.shadowWarmupPerFrame
-            : GraphConstants.shadowTicksPerFrame
-        let nhh = hubIndices.count
-        for _ in 0..<steps {
-            sh.tick()
-            shadowTicks += 1
-            // done = 影子 **hub 全静**(我们只消费 hub 位置;原判据等全场
-            // 冷透+缓停会陪 599 颗慢陨石耗到几千步 —— "松手后几秒巨卡"
-            // 的大头。hub 通常 200~300 步就静,负载窗口缩到亚秒);
-            // 冷透+缓停完(病态 hub 慢环流不静时的自然终点)/步数封顶兜底
-            let hubsStill = sh.hubStatic.count == nhh
-                && !sh.hubStatic.contains(false)
-            if hubsStill
-                || (sh.alpha < GraphConstants.alphaMin && sh.brake == 0)
-                || shadowTicks >= GraphConstants.shadowTickCap {
-                shadowDone = true
-                break
-            }
+        // 挡板占位:ready 前用当刻实时位置(几十 ms 窗口),防 count
+        // 不匹配每 tick 重复派发
+        if beltPredPos.count != hubIndices.count {
+            beltPredPos = hubIndices.map { pos[Int($0)] }
         }
-        // 影子几何 → 挡板计划位(done 时定格终局并释放实例)
-        let nh = hubIndices.count
-        if beltPredPos.count != nh {
-            beltPredPos = .init(repeating: .zero, count: nh)
-        }
-        for s in 0..<nh { beltPredPos[s] = sh.pos[Int(hubIndices[s])] }
-        // 开场(ringDirty):warmup 分帧期环**每帧直接跟影子当前几何**
-        // (硬 set 无过渡 —— 爆炸头几帧全场乱飞,环怎么动都不可见;
-        // 若让陨石绕未初始化的旧环跑 8 帧,错误目标会扰动布局演化,
-        // 实测多出一次停稳补调),warmup 够了顺势钉死 = 一次成型
+        // 开场(ringDirty):先同步跑一小段钉**临时环**(陨石绕未初始化
+        // 旧环跑几帧会扰动布局,实测多付一次补调;几十步几 ms 藏在爆炸
+        // 里),正式钉死等任务算完(消费处)
         if ringDirty {
+            for _ in 0..<GraphConstants.shadowPrePinTicks { sh.tick() }
             let (cs, rs) = enclosureCircles(hubAt: { sh.pos[Int(hubIndices[$0])] })
             let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
             ringRad = encR + Float(GraphConstants.beltGap)
@@ -936,12 +907,38 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             ringTargetRad = ringRad
             ringC = c
             ringTargetC = c
-            // 钉死必须等 shadowDone(300 步 warmup 几何离终局还差十几 pt,
-            // 提前钉会在 done 后多付一次调整;done ≈ 500 步 ≈ 0.2s,仍在
-            // 爆炸掩护内)
-            if shadowDone { ringDirty = false }
         }
-        if shadowDone { shadow = nil }
+        // 后台**全速一口气**跑到 hub 全静(07-08 用户实机"还是卡顿,
+        // 隐形图 tick 再快一点":分帧快进每帧仍挤占物理 tick 预算 ——
+        // 挪出物理线程零挤占;92~600 步 × ~0.2ms 后台几十 ms 完成)。
+        // 实例移交任务线程独占(GCD 派发自带内存屏障),结果经
+        // shadowLock 交接;gen 不匹配 = 已被废弃(拖拽/新场景),丢弃。
+        // done 判据 = hub 全静(只消费 hub;等全场停会陪 599 颗慢陨石
+        // 耗几千步)/冷透+缓停完/步数封顶
+        let hubIdx = hubIndices
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let nhh = hubIdx.count
+            var steps = 0
+            while steps < GraphConstants.shadowTickCap {
+                sh.tick()
+                steps += 1
+                let hubsStill = sh.hubStatic.count == nhh
+                    && !sh.hubStatic.contains(false)
+                if hubsStill
+                    || (sh.alpha < GraphConstants.alphaMin && sh.brake == 0) {
+                    break
+                }
+            }
+            guard let eng = self else { return }
+            var result = [SIMD2<Float>](repeating: .zero, count: nhh)
+            for s in 0..<nhh { result[s] = sh.pos[Int(hubIdx[s])] }
+            eng.shadowLock.lock()
+            if eng.shadowGen == myGen {
+                eng.shadowResult = result
+                eng.shadowReady = true
+            }
+            eng.shadowLock.unlock()
+        }
     }
 
     /// 环覆盖死区判断(提前定环与停稳校验共用):以**目标环**测圆集,

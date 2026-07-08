@@ -151,34 +151,12 @@ enum GraphConstants {
 
     // MARK: 影子引擎(07-08 用户定稿:预判 folder 终局,环提前就位)
 
-    /// 影子 warmup 步数:累计快放到此数即认为几何已近终局,开场
-    /// (ringDirty)在此刻一次性钉环。⚠️ warmup **分帧跑**(对抗审查
-    /// major:一次性同步 300 步在 Debug 无 -O 下可卡物理线程 200~700ms
-    /// 并把撞上 simLock 的主线程 reload 挂住),按下面 PerFrame 分摊
-    /// ~8 帧完成,开场藏在绽放里、松手藏在回位动画里。
-    static let shadowWarmupTicks: Int = 300
-    /// warmup 阶段每个真实 tick 快进的步数(影子已瘦身:陨石冻结不进树
-    /// 不碰撞,单步成本 −60%)。Debug 无 -O 单步贵数倍 → 减半档,防
-    /// "开场/松手后几秒巨卡"(实机反馈);代价只是环就位晚零点几秒
-    static var shadowWarmupPerFrame: Int {
-        #if DEBUG
-        return 20
-        #else
-        return 40
-        #endif
-    }
-    /// warmup 后每个真实 tick 继续快进的步数(到 hub 全静/封顶 → done
-    /// 冻结)。⚠️ 固定步数不设墙钟预算(对抗审查:墙钟截断会把
-    /// wall-clock 注入布局演化,同 seed 不可复现;固定步数 = 影子进度
-    /// 是 tick 的纯函数)
-    static var shadowTicksPerFrame: Int {
-        #if DEBUG
-        return 4
-        #else
-        return 8
-        #endif
-    }
-    /// 影子累计步数封顶(病态不收敛兜底 → done 冻结,不再烧 CPU)
+    /// 开场临时钉环前影子同步快进的步数(spawnShadow 在物理线程小跑
+    /// 一段给环一个合理初值,防陨石绕未初始化旧环跑扰动布局;几十步
+    /// 几 ms,藏在爆炸里。影子主体在**后台队列全速**跑,物理线程零
+    /// 挤占 —— 07-08 实机"分帧快进仍卡顿"终解)
+    static let shadowPrePinTicks: Int = 40
+    /// 影子累计步数封顶(病态不收敛兜底 → 交结果收工,不再烧 CPU)
     static let shadowTickCap: Int = 3000
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
