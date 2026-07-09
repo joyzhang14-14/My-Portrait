@@ -154,6 +154,20 @@ enum GraphConstants {
     /// 影子累计步数封顶(病态不收敛兜底 → 交结果收工,不再烧 CPU)
     static let shadowTickCap: Int = 3000
 
+    // MARK: 开局揭幕(07-08 用户:陨石开局先聚中心再展开不美观 —— 等
+    // 找到位置后再显示,透明度一点一点拉高;只适用于开局 init/explode,
+    // 拖动松手不藏。隐藏期 hover/点击/拖起全部无效)
+
+    /// 到位判定:全部陨石离锁定目标的**最大**距离 < 此值,且 hub 全静
+    ///(hubStatic),视为"找到位置"开始淡入
+    static let beltRevealArriveDist: Float = 15
+    /// 淡入步长(每 tick 加,60Hz 下 ≈0.8s 拉满)
+    static let beltRevealStep: Float = 0.02
+    /// 兜底超时(tick 计):armed 后超过此数无条件开始淡入 —— 影子卡死/
+    /// 到位判定失效也**绝不永久隐身**(07-08 回滚版事故教训:全局 gate
+    /// 无兜底 = 永久空白+无交互)
+    static let beltRevealTimeoutTicks: UInt64 = 600
+
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
     /// 斥力电荷(负=互斥),分角色(07-02 用户确诊:主球斥力+跨圆叶叶

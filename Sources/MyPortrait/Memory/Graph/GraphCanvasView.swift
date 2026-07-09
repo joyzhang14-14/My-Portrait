@@ -58,6 +58,10 @@ struct GraphCanvasView: View {
     /// 下同家同色、圆间不相交 → 每家并一条 Path 一次 fill(11 次替代
     /// 951 次)。组内大球在前(半径降序,同色重叠无感,家内 hub 先画)。
     private let colorGroups: [(color: Color, nodes: [Int])]
+    /// 环形陨石单独分组(07-08 开局揭幕:开局隐藏期整批乘 beltReveal
+    /// 透明度,找到位置后一点一点拉高;**只藏陨石**,别的球在 colorGroups
+    /// 照常画)。同样同色批量。
+    private let beltGroups: [(color: Color, nodes: [Int])]
 
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
@@ -77,9 +81,19 @@ struct GraphCanvasView: View {
         }
         var groupOf: [SIMD3<Double>: Int] = [:]
         var groups: [(color: Color, nodes: [Int])] = []
+        var beltGroupOf: [SIMD3<Double>: Int] = [:]
+        var beltGs: [(color: Color, nodes: [Int])] = []
         for i in order {
             let key = scene.nodes[i].colorRGB
-            if let g = groupOf[key] {
+            if scene.nodes[i].beltTier != nil {
+                // 陨石拆出独立组(开局揭幕要整批变透明度)
+                if let g = beltGroupOf[key] {
+                    beltGs[g].nodes.append(i)
+                } else {
+                    beltGroupOf[key] = beltGs.count
+                    beltGs.append((color: scene.nodes[i].color, nodes: [i]))
+                }
+            } else if let g = groupOf[key] {
                 groups[g].nodes.append(i)
             } else {
                 groupOf[key] = groups.count
@@ -87,6 +101,7 @@ struct GraphCanvasView: View {
             }
         }
         self.colorGroups = groups
+        self.beltGroups = beltGs
     }
 
     var body: some View {
@@ -122,10 +137,14 @@ struct GraphCanvasView: View {
     private func hitTest(screen: CGPoint, viewSize: CGSize) -> Int? {
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count else { return nil }
+        // 开局揭幕隐藏/淡入期陨石不可命中(用户定稿:隐藏时鼠标放上面
+        // 也不显示什么,一切等展开后再有)。只挡陨石,其它球照常
+        let beltHittable = engine.beltRevealAlpha >= 1
         let world = camera.screenToWorld(screen, viewSize: viewSize)
         var best: Int? = nil
         var bestD = Float.greatestFiniteMagnitude
         for i in snap.indices {
+            if !beltHittable, scene.nodes[i].beltTier != nil { continue }
             let d = simd_length(snap[i] - world)
             if d <= Float(scene.nodes[i].radius) + 4, d < bestD {
                 bestD = d
@@ -358,6 +377,29 @@ struct GraphCanvasView: View {
             }
             if !path.isEmpty {
                 ctx.fill(path, with: .color(group.color))
+            }
+        }
+        // 环形陨石(07-08 开局揭幕):开局隐藏期整批乘揭幕透明度,找到
+        // 位置后一点一点拉高;常态 =1 与其它球画法完全一致。只藏陨石,
+        // 上面的 colorGroups(主球/folder/叶)不受影响
+        let reveal = engine.beltRevealAlpha
+        if reveal > 0.005 {
+            var bctx = ctx
+            bctx.opacity = Double(reveal)
+            for group in beltGroups {
+                var path = Path()
+                for oi in group.nodes {
+                    let node = scene.nodes[oi]
+                    let c = camera.worldToScreen(snap[node.id], viewSize: size)
+                    let r = node.radius * zoom
+                    if c.x + r < 0 || c.x - r > size.width || c.y + r < 0 || c.y - r > size.height {
+                        continue
+                    }
+                    path.addEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+                }
+                if !path.isEmpty {
+                    bctx.fill(path, with: .color(group.color))
+                }
             }
         }
         // hover 白色闪烁(正弦脉动,持续 hover 持续闪 —— 需求 §5)
