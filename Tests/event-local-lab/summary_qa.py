@@ -289,7 +289,7 @@ def impact_pass(events, T):
             256, event=e["title"][:40])   # 120 时 9B 有 11/51 条 reason 词中截断
         try:
             e["impact"] = max(0, min(5, int((obj or {}).get("impact", 2))))
-            e["impact_reason"] = str((obj or {}).get("reason", ""))[:200]
+            e["impact_reason"] = str((obj or {}).get("reason", ""))[:320]  # 200切片曾腰斩9B长reason
         except Exception:
             e["impact"] = 2
     raw = collections.Counter(e["impact"] for e in events)
