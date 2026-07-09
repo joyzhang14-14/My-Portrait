@@ -193,43 +193,40 @@ struct GraphRootView: View {
         return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
     }
 
-    /// 取景到隐形环。animated=false(开局固定):用预加载环一次性对准,
-    /// 固定不动(预加载环 = 界面显示前算好的最终环,首帧即正确);
-    /// animated=true(松手缓移):每帧向引擎实时环 lerp,跟到物理定稳。
+    /// 取景到隐形环。两态共用"lerp 跟随引擎实时环、跟到物理定稳"的收敛
+    /// 循环 —— **终点都是引擎真实环 = 精确居中**(预加载只是影子预测,
+    /// 个别种子偏 30~60px,不能当终点)。区别只在起点:
+    /// - animated=false(开局):先同步把相机放到**预加载环**(首帧即大致
+    ///   就位,切回不闪),再缓缓收敛到真实环。这段漂移落在陨石隐藏 + hub
+    ///   绽放的开局期,被绽放掩盖;贝壳淡入时相机已稳定在精确中心。
+    /// - animated=true(松手):不重置起点(停在松手处),缓移到真实环。
     /// 任一时刻只有一个取景任务(新触发废弃旧的);引擎换代/手动操作中止。
     private func frameCameraToRing(animated: Bool) {
         cameraTask?.cancel()
         let gen = engineGen
-        if !animated {
-            cameraTracking = false
-            // 同步先对准(viewSize 就绪时首帧即正确,切回瞬间无旧相机残影)。
-            if let cam = openCamera(viewSize) { camera = cam; return }
-            // viewSize 未就绪 → 轮询到位再设一次(开局固定,预加载环不变,
-            // 设一次即可)。3s 仍无(portrait/异常)→ 放弃,保持默认视角。
-            cameraTask = Task { @MainActor in
-                for i in 0..<600 {
-                    if Task.isCancelled || gen != engineGen { return }
-                    if let cam = openCamera(viewSize) { camera = cam; return }
-                    if i > 180 { return }
-                    try? await Task.sleep(for: .milliseconds(16))
-                }
-            }
-            return
-        }
+        // 开局:同步先用预加载环放好首帧(viewSize 就绪时;否则循环里兜底)。
+        if !animated, let cam = openCamera(viewSize) { camera = cam }
         cameraTracking = true
         cameraTask = Task { @MainActor in
             defer { cameraTracking = false }
             let k = GraphConstants.cameraTrackLerp
-            for _ in 0..<900 {   // ~15s 上限兜底(含物理沉降 + 缓移)
+            for i in 0..<900 {   // ~15s 上限兜底(含物理沉降 + 缓移)
                 if Task.isCancelled || gen != engineGen { return }
-                guard let engine, let tgt = liveCamera(viewSize) else { return }
+                // 目标 = 引擎实时环(精确居中);开局头 ~50ms 引擎环未钉好时
+                // 用预加载环兜底(免这几帧无目标 → 停在旧相机闪一下)。
+                let tgt = liveCamera(viewSize) ?? (animated ? nil : openCamera(viewSize))
+                guard let engine, let tgt else {
+                    if animated { return }         // 松手却无环:异常,退出
+                    if i > 180 { return }          // 开局 3s 无环(portrait)→ 放弃
+                    try? await Task.sleep(for: .milliseconds(16)); continue
+                }
                 camera.center += (tgt.center - camera.center) * Float(k)
                 camera.zoom += (tgt.zoom - camera.zoom) * k
                 // ⚠️ 收敛必须**等物理休眠**:松手瞬间环还是拖动前的旧值
                 //(设计"拖动整环不变"),相机一读就对齐旧环 → 若此刻退出,
                 // 几十毫秒后环重算成新值时已无任务跟随 = "没调整"。改为跟着
                 // 环走到物理定稳(isParked)且相机贴合才收官,保证每次松手
-                // 都真正跟到最终环。
+                // 都真正跟到最终环;开局同理,跟到真实环 = 精确居中。
                 if engine.isParked,
                    simd_length(tgt.center - camera.center) < 0.5,
                    abs(tgt.zoom - camera.zoom) < 0.001 {
