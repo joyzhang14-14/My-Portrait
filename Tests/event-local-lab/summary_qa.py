@@ -451,29 +451,34 @@ def violations(e, by):
     return ungrounded, residue
 
 
-REGEN = """Rewrite the title and summary of ONE event from its member session digests.
+# 7-09 审计:全英文 Git-commit 式短标题信息量比 gold 中文叙事句差一个量级,且用户
+# 中文工作;中文决策原话≈0 是与 gold 最系统的忠实度差距。改中文叙事+强制逐字引语
+# (strip_unverifiable 的引语 exact-match 校验兜底防编造)。
+REGEN = """用成员会话摘要重写这一个事件的标题和总结。用户是中文使用者,这是他的个人记忆系统。
 
-Member sessions (time order):
+成员会话(时间序):
 {doings}
 
-RULES:
-- "title": <=60 chars, verb-first, what the user was DOING. Never terminal flags, never "App — Window".
-- "summary": 2-5 sentences, third person. Cite ONLY concrete anchors that literally appear in the
-  digests (file/function names, commit hashes, numbers, error strings). Invent nothing.
-- MUST keep person names, quoted user text, and social/personal content if present in the digests.
-  Keep names in their ORIGINAL script — NEVER romanize Chinese names (何成 stays 何成, not He Cheng).
-- If there are 8+ member sessions, make sure EVERY distinct member topic is covered by at least
-  one clause — do not summarize only the dominant thread.
-- NEVER mention: --dangerously-skip-permissions, caffeinate, sourcekit-lsp (terminal noise).
-- "tags": 3-6 lowercase keywords.
-Answer ONLY: {{"title":"...","summary":"...","tags":[...]}}"""
+规则:
+- "title": 中文叙事句,≤40字,格式=项目/场景+关键动作(例:「打磨My-Portrait侧栏UI:右键菜单+蓝框高亮」
+  「排查写作采集IME尾巴丢字并验证librime」)。技术名词/文件名/App名保留原文不翻译。禁终端旗标、禁"App — Window"。
+- "summary": 2-5句中文,第三人称。只引用摘要里逐字出现的锚点(文件/函数名、commit hash、数字、报错原文),
+  技术 token 保持原文。禁止编造。
+- 摘要里若有用户说的话/拍板决策,必须用「」逐字引用原句,一字不改。
+- 人名保持原文(何成就是何成,绝不罗马化);人物/社交/生活内容必须保留。
+- 成员≥8段时,每个不同话题至少一个分句覆盖,不许只写主线。
+- 绝不提: --dangerously-skip-permissions、caffeinate、sourcekit-lsp(终端噪声)。
+- "tags": 3-6个小写关键词(技术词保英文)。
+只回答: {{"title":"...","summary":"...","tags":[...]}}"""
 
 
 def qa_pass(events, by, idf):
     stats = collections.Counter()
     for e in events:
         ung, res = violations(e, by)
-        need = bool(e.get("dirty") or e.get("misc") or ung or res)
+        # 7-09 中文化:v6 层标题是英文,非中文标题也触发重生成(REGEN 已出中文叙事句)
+        need = bool(e.get("dirty") or e.get("misc") or ung or res
+                    or not re.search(r"[一-鿿]", e["title"]))
         stats["viol_before"] += len(ung) + len(res)
         if not need:
             continue
