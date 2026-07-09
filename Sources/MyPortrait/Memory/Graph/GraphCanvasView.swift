@@ -53,6 +53,13 @@ struct GraphCanvasView: View {
         var leafBallR: Float = 0
     }
     @State private var dragWorldBox = DragWorldBox()
+    /// 光标屏幕位(07-09 用户"鼠标不 hover 在球上就不该闪"):hover 只在
+    /// 鼠标**移动**时判定,但球自己会动(拖后归位/物理沉降),球从静止
+    /// 光标下挪走后判定不更新 → 在新位置继续闪。存光标位,每帧用它对
+    /// **当前**球位重新命中,球挪出光标即不闪。引用盒:onContinuousHover
+    /// 写它不额外触发重绘(hoveredId 的更新已负责触发)。
+    private final class HoverBox { var screen: CGPoint? = nil }
+    @State private var hoverBox = HoverBox()
     @State private var lastMagnification: CGFloat = 1
 
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
@@ -131,8 +138,10 @@ struct GraphCanvasView: View {
                 guard dragMode == .idle else { return }
                 switch phase {
                 case .active(let p):
+                    hoverBox.screen = p   // 每帧重判用(球会自己动)
                     hoveredId = hitTest(screen: p, viewSize: viewSize)
                 case .ended:
+                    hoverBox.screen = nil
                     hoveredId = nil
                 }
             }
@@ -144,7 +153,11 @@ struct GraphCanvasView: View {
     /// 的分配/哈希反而是大头(Debug 未特化下拖拽卡顿的元凶之一)。
     /// ≤5000 节点一圈 simd 距离检查是 µs 级。
     private func hitTest(screen: CGPoint, viewSize: CGSize) -> Int? {
-        let snap = engine.readSnapshot()
+        hitTest(screen: screen, snap: engine.readSnapshot(), viewSize: viewSize)
+    }
+
+    /// 同上但对**给定 snap**命中(每帧重判 hover 用当前渲染 snap,免再取一次)。
+    private func hitTest(screen: CGPoint, snap: [SIMD2<Float>], viewSize: CGSize) -> Int? {
         guard snap.count == scene.nodes.count else { return nil }
         // 开局揭幕隐藏/淡入期陨石不可命中(用户定稿:隐藏时鼠标放上面
         // 也不显示什么,一切等展开后再有)。只挡陨石,其它球照常
@@ -185,6 +198,13 @@ struct GraphCanvasView: View {
                         snap[j] = w + (dist > 1 ? d / dist : SIMD2<Float>(1, 0)) * minD
                     }
                 }
+            }
+            // 每帧按当前光标位重判 hover(球会自己动;球挪出光标即不闪,
+            // 挪进即闪)。与 hoveredId 不同才异步同步(off 渲染路径,避免
+            // "更新态在视图更新中";flash/label 下一帧即跟上,肉眼无差)。
+            if dragMode == .idle, let hs = hoverBox.screen {
+                let live = hitTest(screen: hs, snap: snap, viewSize: size)
+                if live != hoveredId { DispatchQueue.main.async { hoveredId = live } }
             }
             drawEdges(ctx, snap: snap, size: size)
             drawPulses(ctx, snap: snap, size: size, date: date)
@@ -480,6 +500,7 @@ struct GraphCanvasView: View {
                     // 球就在归位后的老位置持续闪。拖拽/平移都不算悬停,清掉;
                     // 松手后移动鼠标重新命中才恢复。
                     hoveredId = nil
+                    hoverBox.screen = nil
                     // 起点定模式:球(非主球)= 拖球;空白/主球 = 平移。
                     // 主球钉死原点(大脑不动),拖它等于拖整个世界 → 归平移。
                     if let idx = hitTest(screen: v.startLocation, viewSize: viewSize), idx > 0 {
