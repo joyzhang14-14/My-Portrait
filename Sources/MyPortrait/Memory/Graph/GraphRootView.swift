@@ -75,6 +75,15 @@ struct GraphRootView: View {
     @State private var pulseEnd: TimeInterval = 0
     @State private var pulseGen = 0
 
+    // 视角取景(07-09):开局固定取景、松手后缓移取景,都对准隐形环
+    // 的环心+半径。cameraTask = 当前在跑的取景任务(固定/缓移复用一个
+    // 槽,新触发废弃旧的);cameraTracking = 缓移进行中(驱动 renderPaused
+    // 保持 TimelineView 活着直到相机到位)。viewSize = 内容区尺寸(取景
+    // 算缩放要用),onChange 捕获。
+    @State private var viewSize: CGSize = .zero
+    @State private var cameraTask: Task<Void, Never>? = nil
+    @State private var cameraTracking = false
+
     private var zone: GraphZone {
         if case .portrait = scope { return .portrait }
         return .events
@@ -83,7 +92,7 @@ struct GraphRootView: View {
     /// 逐帧重绘只在需要时开:物理在动 / hover 白闪中 / 脉冲在跑。
     /// 全静止 → TimelineView 暂停,重绘只由相机等状态变化触发(CPU≈0)。
     private var renderPaused: Bool {
-        physicsParked && hoveredId == nil && pulses.isEmpty
+        physicsParked && hoveredId == nil && pulses.isEmpty && !cameraTracking
     }
 
     var body: some View {
@@ -97,7 +106,9 @@ struct GraphRootView: View {
                                     pulseStart: pulseStart,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
-                                    onTapNode: handleTap)
+                                    onTapNode: handleTap,
+                                    onNodeDragEnded: { frameCameraToRing(animated: true) },
+                                    onCameraInterrupt: cancelCameraTracking)
                         .background(Color.black.opacity(0.001))   // 空白处也接手势
 
                     // 浮窗:锚在球旁,物理在动时跟着球走(同一时钟)。
@@ -117,6 +128,8 @@ struct GraphRootView: View {
                 }
                 hud
             }
+            // 内容区尺寸(取景算缩放要用);initial 捕获首帧,之后随窗变。
+            .onChange(of: geo.size, initial: true) { _, s in viewSize = s }
         }
         .background(SidebarBackdrop().ignoresSafeArea())
         // 主窗口是 chromeless + isMovableByWindowBackground=true(全局设计),
@@ -138,7 +151,70 @@ struct GraphRootView: View {
         }
         .onDisappear {
             GraphSession.shared.entries[zone]?.camera = camera
+            cancelCameraTracking()
         }
+    }
+
+    // MARK: - 视角取景(07-09:相机跟隐形环)
+
+    /// 按隐形环的环心+半径算出一个"环占视口约 cameraFrameFill"的相机
+    /// (center=环心,zoom=让环基准直径填到视口较短边的目标比例)。
+    /// 环未就位(ringR≈0,如 portrait 无环 / 开局尚未钉环)或尺寸未知
+    /// 时返回 nil。
+    private func ringCamera(_ vs: CGSize) -> GraphCamera? {
+        guard let engine else { return nil }
+        let rr = engine.ringR
+        guard rr > 1, vs.width > 1, vs.height > 1 else { return nil }
+        let minDim = min(vs.width, vs.height)
+        let z = Double(minDim) * GraphConstants.cameraFrameFill / (2 * Double(rr))
+        var cam = GraphCamera()
+        cam.center = engine.ringCenter
+        cam.zoom = min(max(z, GraphCamera.zoomRange.lowerBound),
+                       GraphCamera.zoomRange.upperBound)
+        return cam
+    }
+
+    /// 取景到隐形环。animated=false(开局固定):环一就位即一次性对准
+    /// (环钉在影子预测终局,固定不动);animated=true(松手缓移):每帧
+    /// 向当前环取景 lerp,环随物理沉降、相机跟着缓移到位。任一时刻只有
+    /// 一个取景任务(新触发废弃旧的);引擎换代或用户手动操作即中止。
+    private func frameCameraToRing(animated: Bool) {
+        cameraTask?.cancel()
+        let gen = engineGen
+        if !animated {
+            cameraTracking = false
+            cameraTask = Task { @MainActor in
+                // 轮询等环钉好 + viewSize 就绪(开局 ~50ms;兜底 10s)
+                for _ in 0..<600 {
+                    if Task.isCancelled || gen != engineGen { return }
+                    if let cam = ringCamera(viewSize) { camera = cam; return }
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+            }
+            return
+        }
+        cameraTracking = true
+        cameraTask = Task { @MainActor in
+            defer { cameraTracking = false }
+            let k = GraphConstants.cameraTrackLerp
+            for _ in 0..<360 {   // ~6s 上限兜底
+                if Task.isCancelled || gen != engineGen { return }
+                guard let tgt = ringCamera(viewSize) else { return }
+                camera.center += (tgt.center - camera.center) * Float(k)
+                camera.zoom += (tgt.zoom - camera.zoom) * k
+                if simd_length(tgt.center - camera.center) < 0.5,
+                   abs(tgt.zoom - camera.zoom) < 0.001 {
+                    camera = tgt; return
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    /// 用户手动平移/缩放 / 起拖 → 中止自动取景,交还控制权。
+    private func cancelCameraTracking() {
+        cameraTask?.cancel()
+        cameraTracking = false
     }
 
     // MARK: - 交互路由
@@ -307,6 +383,12 @@ struct GraphRootView: View {
         hoveredId = nil
         if floatNodeId.map({ $0 >= scene.nodes.count }) == true { floatNodeId = nil }
         loading = false
+        // 跨画布跳转会自设 camera 对准目标球,此时不抢镜(须在 resolve
+        // 前捕获 —— resolve 内部会清空 pending)。
+        let hadJump = pendingFloatEventRel != nil
         resolvePendingEventJump()   // 跨画布跳转:落到目标 event 球 + 开浮窗
+        // 开局固定取景:环一钉好即对准(portrait 无环则轮询超时无操作,
+        // 保持默认视角)。
+        if !hadJump { frameCameraToRing(animated: false) }
     }
 }

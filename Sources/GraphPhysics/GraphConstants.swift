@@ -185,6 +185,16 @@ public enum GraphConstants {
     /// 无兜底 = 永久空白+无交互)
     public static let beltRevealTimeoutTicks: UInt64 = 600
 
+    // MARK: 视角取景(07-09 用户:开局/松手视角跟隐形环走,占比适中)
+
+    /// 取景占比:隐形环**基准直径**占视口较短边的比例。0.72 → 环占约
+    /// 七成,四周留呼吸边(外圈陨石在基准环外还有径向偏移,故不取满);
+    /// 越大越贴边,越小越缩。开局固定、松手缓移都以此为目标。
+    public static let cameraFrameFill: Double = 0.72
+    /// 松手后相机缓移每帧 lerp 系数(中心+缩放同步);越小越慢越顺。
+    /// 60Hz 下 0.08 ≈ 0.5s 收敛九成 —— "缓慢调整到指定位置"。
+    public static let cameraTrackLerp: Double = 0.08
+
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
     /// 斥力电荷(负=互斥),分角色(07-02 用户确诊:主球斥力+跨圆叶叶
