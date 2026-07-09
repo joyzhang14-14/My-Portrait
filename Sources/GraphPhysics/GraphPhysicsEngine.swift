@@ -954,8 +954,19 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                         var dth = atan2(relT.y, relT.x) - atan2(relC.y, relC.x)
                         while dth > .pi { dth -= 2 * .pi }
                         while dth < -.pi { dth += 2 * .pi }
-                        disp = radialDir * (simd_length(relT) - rCur)
-                             + tangDir * (rCur * dth)
+                        var dr = simd_length(relT) - rCur
+                        var arc = rCur * dth
+                        // 缓滑胡萝卜(07-08 用户"幅度有点大":只在成型后的
+                        // 调整移动限距 —— 远目标只追近端假目标,匀速贴弧
+                        // 缓滑;顺带距离增益 boost 因 dLen 被封顶自动≈1,
+                        // 起飞窗口 ×2.5 仍在但速度有界,快起步不大甩)
+                        if !carrying {
+                            let ac = GraphConstants.beltGlideArcCap
+                            let rc2 = GraphConstants.beltGlideRadialCap
+                            arc = max(-ac, min(ac, arc))
+                            dr = max(-rc2, min(rc2, dr))
+                        }
+                        disp = radialDir * dr + tangDir * arc
                     } else {
                         disp = relT   // 退化:恰在环心(几乎不可能),回退笛卡尔
                     }
