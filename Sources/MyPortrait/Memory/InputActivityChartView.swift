@@ -454,7 +454,7 @@ private struct InputRecordCard: View {
 
     // MARK: 收起态
 
-    /// app 色条 + app 名 + start 时间 + 旋转 chevron。展开态点这行收起。
+    /// app 色条 + app 名 + (截断徽标) + start 时间 + 旋转 chevron。展开态点这行收起。
     private var headerRow: some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 1.5)
@@ -463,11 +463,13 @@ private struct InputRecordCard: View {
             Text(appLabel)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
+            Spacer()
+            // 徽标标在时间左边:超 3 行没显示全才有,特别长=article / 短一点=paragraph。
+            if !expanded, isTruncated { lengthBadge }
             Text(Self.hmFmt.string(from: Date(
                 timeIntervalSince1970: TimeInterval(record.startTs) / 1000)))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
-            Spacer()
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -505,7 +507,6 @@ private struct InputRecordCard: View {
                         Color.clear.preference(key: ShownTextHeightKey.self,
                                                value: g.size.height)
                     })
-                if isTruncated { articleBadge }
             }
             .onPreferenceChange(FullTextHeightKey.self) { fullTextHeight = $0 }
             .onPreferenceChange(ShownTextHeightKey.self) { shownTextHeight = $0 }
@@ -523,12 +524,16 @@ private struct InputRecordCard: View {
             })
     }
 
-    /// 内容超 3 行没显示全 → 标这个,比暗淡的「…」显眼。用 app 色系。
-    private var articleBadge: some View {
+    /// 按长度分档:全文高 > 3 行高的 3 倍(≈9 行以上)= 特别长 = article;
+    /// 只是超过 3 行没显示全(短一点)= paragraph。
+    private var isArticle: Bool { fullTextHeight > shownTextHeight * 3 }
+
+    /// 截断徽标,比暗淡的「…」显眼。用 app 色系;article / paragraph 分档。
+    private var lengthBadge: some View {
         HStack(spacing: 4) {
-            Image(systemName: "text.alignleft")
+            Image(systemName: isArticle ? "text.justify" : "paragraph")
                 .font(.system(size: 8, weight: .semibold))
-            Text("article")
+            Text(isArticle ? "article" : "paragraph")
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
         }
         .foregroundStyle(accent)
