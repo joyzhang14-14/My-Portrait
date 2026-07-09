@@ -474,6 +474,12 @@ struct GraphCanvasView: View {
                 }
                 if dragMode == .idle {
                     dragWorldBox.startLoc = v.startLocation
+                    // 起拖即清 hover(07-09 用户"拖球松手后球还在原地闪白光"):
+                    // 拖拽期 onContinuousHover 冻结(下面 guard),hoveredId 若不
+                    // 清会一直指着起拖前那颗球 —— 松手后鼠标不动无事件重判,那颗
+                    // 球就在归位后的老位置持续闪。拖拽/平移都不算悬停,清掉;
+                    // 松手后移动鼠标重新命中才恢复。
+                    hoveredId = nil
                     // 起点定模式:球(非主球)= 拖球;空白/主球 = 平移。
                     // 主球钉死原点(大脑不动),拖它等于拖整个世界 → 归平移。
                     if let idx = hitTest(screen: v.startLocation, viewSize: viewSize), idx > 0 {
