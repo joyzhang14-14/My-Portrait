@@ -91,6 +91,18 @@ public enum GraphConstants {
     public static let bubbleGap: Double = 12
     /// 气泡间软碰撞刚度(圆与圆绝不重叠的速度域推开;硬解算兜底)
     public static let bubbleCollideStrength: Float = 0.5
+    /// 缓分限速(07-08 用户:"两个隐形球重叠,松手会直接弹开 —— 改成
+    /// 松手后慢慢移开"):成型后(!beltForming)且重叠 > DeepOverlap 时,
+    /// 速度域推挤的重叠项封顶(×k 后 = 每 tick 速度增量上限)+ 位置硬
+    /// 解算每轮纠正封顶(×3 轮 = 每 tick 位置纠正上限)→ 深重叠慢慢
+    /// 滑开。⚠️ 浅重叠(≤DeepOverlap)必须走原全量解算:弹簧压入 vs
+    /// 硬解算推出的常态接触平衡若被限速,会变成每 tick ~1.5pt 永动微振,
+    /// 永远静不下来 → 只能等 restless 30s 兜底 park(实测全拖拽场景
+    /// 5.7~18s 齐变 39.5s)。深重叠只可能来自拖拽(常态物理圆不互穿),
+    /// 生成期(beltForming)不限 —— 开局炸开的大重叠必须快解算
+    public static let bubbleEaseVelCap: Float = 2
+    public static let bubbleEasePosCap: Float = 0.5
+    public static let bubbleEaseDeepOverlap: Float = 10
     /// 家族帧携带比例(07-03 用户:"拖 folder/分区球时叶子全因加速度
     /// 甩到后面,线要硬一点"→"被推动时会失效,需要全局生效"):**任何**
     /// hub 每 tick 的净位移(拖/被推/回弹/反推力,不问来源)按此比例直接
