@@ -675,6 +675,24 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// Input 图谱面板:时间窗内**全部 app** 的 writing_records,start_ts 升序
+    /// (跟面积图 x 轴同向,晨→夜)。窗口按本地日算,调用方传好边界。
+    func writingRecordsInRange(startMs: Int64, endMs: Int64) throws -> [WritingRecordViewRow] {
+        try dbPool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, start_ts, end_ts, app, url, location, text, edit_log, confidence,
+                           context_summary, source, kind, worker_run_id, created_at
+                    FROM writing_records
+                    WHERE start_ts >= :s AND start_ts < :e
+                    ORDER BY start_ts ASC
+                    """,
+                arguments: ["s": startMs, "e": endMs]
+            ).map { Self.rowToView($0) }
+        }
+    }
+
     /// InputCaptureView 左列:writing_records 按 (app, url) 聚合。
     /// COALESCE(url, '') —— 跟 TypingAppSummary.url 语义一致(空 = 非浏览器)。
     func writingRecordAppSummaries() throws -> [WritingCaptureAppSummary] {

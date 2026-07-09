@@ -7,12 +7,19 @@ import SwiftUI
 /// (和 timeline 一致的 `AppColor`);数据做移动平均平滑,曲线更顺。
 /// 顶部日期切换栏复用 timeline 的 `TimelineControlsBar`(日历弹窗切天)。
 ///
+/// 图例下方接当天 writing_records 卡片流:收起态只显 app 名 / start 时间 /
+/// 内容预览,点开下拉显示全文 + 元数据 + 编辑记录。
+///
 /// 数据源:`keystroke_log`(raw 每次击键),按本地某天 [00:00, +24h) 查
-/// `WritingCaptureStore.keystrokesInRange`,后台聚合成 1440 个分钟桶后取活动段。
+/// `WritingCaptureStore.keystrokesInRange`,后台聚合成 1440 个分钟桶后取活动段;
+/// records 走 `writingRecordsInRange` 同窗口。
 @MainActor
 struct InputActivityChartView: View {
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
+    @State private var records: [WritingRecordViewRow] = []
+    /// 展开的 record id 集合(可多开)。切天清空。
+    @State private var expandedIds: Set<Int64> = []
     @State private var loading = false
     /// 代际 token —— 快速切天时慢查询晚归不能盖掉新一天的结果。
     @State private var reloadGen = 0
@@ -32,12 +39,15 @@ struct InputActivityChartView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(SidebarBackdrop().ignoresSafeArea())
-        .task(id: selectedDay) { await reload() }
+        .task(id: selectedDay) {
+            expandedIds = []
+            await reload()
+        }
     }
 
     @ViewBuilder
     private var chartArea: some View {
-        if buckets.maxTotal == 0 {
+        if buckets.maxTotal == 0 && records.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "keyboard")
                     .font(.system(size: 30, weight: .light))
@@ -48,16 +58,53 @@ struct InputActivityChartView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            // 图只占可用高度的 1/3,靠上;下方接图例,再留空。
+            // 图占面板高度的 1/3;图例 + records 卡片流接在下方,整页滚动。
             GeometryReader { geo in
-                VStack(alignment: .leading, spacing: 14) {
-                    InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
-                        .frame(height: geo.size.height / 3)
-                    legend
-                    Spacer(minLength: 0)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if buckets.maxTotal > 0 {
+                            InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
+                                .frame(height: geo.size.height / 3)
+                            legend
+                        }
+                        recordsSection
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
+            }
+        }
+    }
+
+    // MARK: - Records 卡片流
+
+    @ViewBuilder
+    private var recordsSection: some View {
+        Text("RECORDS · \(records.count)")
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.top, 10)
+
+        if records.isEmpty {
+            Text("No writing records this day")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+        } else {
+            LazyVStack(spacing: 8) {
+                ForEach(records) { rec in
+                    InputRecordCard(record: rec,
+                                    expanded: expandedIds.contains(rec.id)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                            if expandedIds.contains(rec.id) {
+                                expandedIds.remove(rec.id)
+                            } else {
+                                expandedIds.insert(rec.id)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -92,14 +139,18 @@ struct InputActivityChartView: View {
         let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
         let endMs = startMs + 86_400_000
 
-        let result = await Task.detached(priority: .userInitiated) { () -> MinuteBuckets in
+        let result = await Task.detached(priority: .userInitiated) {
+            () -> (MinuteBuckets, [WritingRecordViewRow]) in
             let ks = (try? store.keystrokesInRange(
                 startMs: startMs, endMs: endMs, excludeBundleIds: [])) ?? []
-            return MinuteBuckets.aggregate(ks, dayStartMs: startMs)
+            let recs = (try? store.writingRecordsInRange(
+                startMs: startMs, endMs: endMs)) ?? []
+            return (MinuteBuckets.aggregate(ks, dayStartMs: startMs), recs)
         }.value
 
         guard gen == reloadGen else { return }   // 期间切到别的天 → 丢弃
-        buckets = result
+        buckets = result.0
+        records = result.1
         loading = false
     }
 }
@@ -345,4 +396,201 @@ private struct InputActivityCanvas: View {
             ctx.draw(text, at: CGPoint(x: plot.minX - 6, y: py), anchor: .trailing)
         }
     }
+}
+
+// MARK: - Record 卡片
+
+/// 一条 writing_record 的可展开卡片。
+/// 收起:app 色条 + app 名 + start 时间 + 内容预览(2 行)。
+/// 点开:内容展全(可选中)+ 元数据(显示全)+ 编辑记录,spring 下拉展开。
+private struct InputRecordCard: View {
+    let record: WritingRecordViewRow
+    let expanded: Bool
+    let onToggle: () -> Void
+    @State private var hovering = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var appLabel: String { InputCaptureView.appLabel(record.app) }
+    private var accent: Color { AppColor.color(for: appLabel) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            headerRow
+            contentText
+            if expanded {
+                details
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(cardFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(expanded ? 0.14 : 0.08),
+                                lineWidth: 0.8)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onHover { hovering = $0 }
+        // 收起态整卡可点;展开态只有 header 可点(正文要留给文本选中)。
+        .onTapGesture { if !expanded { onToggle() } }
+    }
+
+    private var cardFill: Color {
+        let base: Double = expanded ? 0.055 : (hovering ? 0.048 : 0.032)
+        return colorScheme == .light
+            ? Color.black.opacity(base)
+            : Color.white.opacity(base + 0.015)
+    }
+
+    // MARK: 收起态
+
+    /// app 色条 + app 名 + start 时间 + 旋转 chevron。展开态点这行收起。
+    private var headerRow: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(accent)
+                .frame(width: 3, height: 14)
+            Text(appLabel)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+            Text(Self.hmFmt.string(from: Date(
+                timeIntervalSince1970: TimeInterval(record.startTs) / 1000)))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+        }
+        .padding(.bottom, 6)
+        .contentShape(Rectangle())
+        .onTapGesture { onToggle() }
+    }
+
+    /// 内容:收起 2 行预览,展开显全 + 可选中。
+    @ViewBuilder
+    private var contentText: some View {
+        let empty = record.text.isEmpty
+        let text = Text(empty ? "(empty content)" : record.text)
+            .font(.system(size: 12))
+            .foregroundStyle(empty ? Color.secondary : Color.primary.opacity(0.88))
+            .lineLimit(expanded ? nil : 2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        if expanded {
+            text.textSelection(.enabled)
+        } else {
+            text
+        }
+    }
+
+    // MARK: 展开态
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider().background(Color.primary.opacity(0.08))
+                .padding(.top, 8)
+
+            // 元数据:显示全。有值才列,不占空行。
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(metadataRows, id: \.0) { row in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(row.0)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 80, alignment: .leading)
+                        Text(row.1)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+
+            let entries = Self.decodeEditLog(record.editLog)
+            if !entries.isEmpty {
+                Text("EDIT LOG · \(entries.count)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(entries.enumerated()), id: \.offset) { _, e in
+                        editEntryRow(e)
+                    }
+                }
+            }
+        }
+    }
+
+    private var metadataRows: [(String, String)] {
+        var rows: [(String, String)] = []
+        rows.append(("start", InputCaptureView.timeString(record.startTs)))
+        rows.append(("end", InputCaptureView.timeString(record.endTs)))
+        rows.append(("source", record.source))
+        rows.append(("kind", record.kind))
+        rows.append(("confidence", String(format: "%.2f", record.confidence)))
+        rows.append(("chars", "\(record.text.count)"))
+        if let u = record.url, !u.isEmpty { rows.append(("url", u)) }
+        if let loc = record.location, !loc.isEmpty { rows.append(("location", loc)) }
+        if let cs = record.contextSummary, !cs.isEmpty { rows.append(("context", cs)) }
+        return rows
+    }
+
+    /// 单条编辑记录:[kind tag] text … 时刻。tag 按操作类型分色。
+    private func editEntryRow(_ e: EditEntry) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(e.kind)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(Self.tagColor(e.kind))
+                .cornerRadius(3)
+            Text(e.text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Text(Self.hmsFmt.string(from: Date(
+                timeIntervalSince1970: TimeInterval(e.ts) / 1000)))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private static func tagColor(_ kind: String) -> Color {
+        switch kind {
+        case "delete":        return Color.red.opacity(0.20)
+        case "paste", "cut":  return Color.orange.opacity(0.20)
+        case "undo", "redo":  return Color.secondary.opacity(0.15)
+        default:              return Color.green.opacity(0.20)
+        }
+    }
+
+    private static func decodeEditLog(_ json: String) -> [EditEntry] {
+        guard let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([EditEntry].self, from: data)) ?? []
+    }
+
+    nonisolated(unsafe) private static let hmFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    nonisolated(unsafe) private static let hmsFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
 }
