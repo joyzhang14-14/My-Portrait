@@ -120,9 +120,6 @@ struct GraphCanvasView: View {
     /// 的分配/哈希反而是大头(Debug 未特化下拖拽卡顿的元凶之一)。
     /// ≤5000 节点一圈 simd 距离检查是 µs 级。
     private func hitTest(screen: CGPoint, viewSize: CGSize) -> Int? {
-        // 开局揭幕未完成:不响应任何 hover/点击/拖拽(用户定稿:隐藏
-        // 期鼠标放上去也不显示什么,一切等展开后再有)
-        guard engine.revealProgress >= 1 else { return nil }
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count else { return nil }
         let world = camera.screenToWorld(screen, viewSize: viewSize)
@@ -142,12 +139,6 @@ struct GraphCanvasView: View {
 
     private func canvas(viewSize: CGSize, date: Date) -> some View {
         Canvas { ctx, size in
-            // 开局揭幕(07-08 用户定稿):找到位置前全隐(什么都不画),
-            // 就位后整体透明度一点点拉高;<1 期间命中检测同样关闭
-            let reveal = engine.revealProgress
-            guard reveal > 0 else { return }
-            var ctx = ctx
-            ctx.opacity = Double(reveal)
             var snap = engine.readSnapshot()
             guard snap.count == scene.nodes.count else { return }
             // 被拖球直接钉在实时指针位置(球/边/标签同源一致),

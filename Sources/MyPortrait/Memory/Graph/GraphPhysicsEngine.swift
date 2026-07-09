@@ -215,12 +215,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private let isShadow: Bool
     /// 场景留存(重建影子用;updateScene 同步换新)。
     private var sceneRef: GraphScene
-    /// 开局揭幕进度(07-08 用户:开局聚集再展开不美观,等找到位置后
-    /// 再显示、透明度一点点拉高):explode 置 0(全隐,渲染/命中全关,
-    /// 物理在子步段 8× 快放);布局就位(park 判定成立)后每帧 +1/36
-    /// 淡入,显完才允许真 park。只挂 explode —— 拖拽/数据刷新不隐藏。
-    private var revealP: Float = 1
-    private var revealShared: Float = 1   // snapLock 保护的渲染副本
 
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
     private var qChild: [Int32] = []
@@ -320,13 +314,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         return snapshot
     }
 
-    /// 渲染每帧读:开局揭幕进度(0=全隐,(0,1)=淡入,1=正常。
-    /// <1 时渲染整体降透明、命中检测返回空)。
-    var revealProgress: Float {
-        snapLock.lock(); defer { snapLock.unlock() }
-        return revealShared
-    }
-
     var isParked: Bool {
         cond.lock(); defer { cond.unlock() }
         return parkedFlag
@@ -381,7 +368,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         ringDirty = true
-        revealP = 0   // 开局揭幕:隐藏快放,就位后淡入
         shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 废弃在跑影子任务
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []
@@ -513,13 +499,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let coldNow = alpha < GraphConstants.alphaMin && alphaTarget == 0
             let quiet = brake == 0   // 缓停滑完(速度已到 0)才真正入睡
             if coldNow && !quiet { restlessTicks += 1 } else { restlessTicks = 0 }
-            var cooled = coldNow && (quiet || restlessTicks > GraphConstants.parkRestlessCap)
-            // 开局揭幕:布局就位(cooled)但还没显完 → 推进淡入(~0.6s),
-            // 显完才真 park(淡入由 loop 驱动,park 后 tick 停无法推进)
-            if cooled, revealP < 1 {
-                revealP = min(1, revealP + 1.0 / 36)
-                cooled = false
-            }
+            let cooled = coldNow && (quiet || restlessTicks > GraphConstants.parkRestlessCap)
             simLock.unlock()
             let sleeping = cooled && !dragging
             let stateChanged = parkedFlag != sleeping
@@ -543,12 +523,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             // 段每帧多跑一步 —— 同一部电影快放,动力学/终局布局/park 判定
             // (阈值全按 tick 计,对子步透明)分毫不变,只是墙钟时间减半。
             // 拖拽中不启用:交互热路径保持每帧一步的实时手感与 tick 预算
-            if !dragging {
-                if revealP == 0 {
-                    // 开局隐藏期:反正看不见,8× 快放尽快就位(揭幕更早)
-                    for _ in 0..<7 { tick() }
-                } else if alpha > 0.02 { tick() }
-            }
+            if !dragging, alpha > 0.02 { tick() }
             publishSnapshot()
             simLock.unlock()
             let spent = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9
@@ -567,7 +542,6 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private func publishSnapshot() {
         snapLock.lock()
         snapshot = pos
-        revealShared = revealP
         snapLock.unlock()
     }
 
