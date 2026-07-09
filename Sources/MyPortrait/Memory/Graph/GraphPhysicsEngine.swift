@@ -216,6 +216,24 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 场景留存(重建影子用;updateScene 同步换新)。
     private var sceneRef: GraphScene
 
+    // MARK: - 开局揭幕(07-08 用户:陨石开局先聚中心再展开不美观 ——
+    // 等找到位置后再显示,透明度一点一点拉高;**只适用于开局**)
+
+    /// 陨石渲染透明度乘子 0…1(simLock 保护)。init/explode(开局的
+    /// 两条路:数据变了走新引擎 init、指纹没变走 updateScene+explode)
+    /// 置 0 布防;拖动松手**不碰**(只适用于开局)。无陨石/影子实例
+    /// 恒 1(⚠️ 影子必须 1:park/淡入逻辑对影子无意义,置 0 会让
+    /// beltPass 顶部的兜底分支空转)。
+    private var beltReveal: Float = 1
+    /// 淡入已启动闩(单向;到位判定或超时兜底置 true)。启动后每 tick
+    /// 无条件推进 —— 中途拖拽/影子重建都不撤销,绝不倒退回隐身。
+    private var beltRevealGo = false
+    /// 布防时刻(tick 计,超时兜底基准)。
+    private var beltRevealArm: UInt64 = 0
+    /// 渲染侧副本(snapLock 保护,publishSnapshot 同步;渲染每帧读它,
+    /// 不碰 simLock —— Debug 一个 tick 7ms,读 simLock 会卡渲染)。
+    private var beltRevealSnap: Float = 1
+
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
     private var qChild: [Int32] = []
     private var qMass: [Float] = []
@@ -278,6 +296,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         nodeTransit = .init(repeating: false, count: n)
         // 07-02 终稿:开场 = 物理收敛(从中心炸开,力系统自然摊成圆)。
         // 目标落位/绽放出生已删 —— 布局不再有"成品位",只有平衡态。
+        // 开局揭幕布防(新引擎 init = 开局路径之一;另一条 explode)。
+        // 只藏陨石,主球/folder/叶照常炸开。无陨石(portrait 图)/影子
+        // 恒 1,否则 beltPass 顶部兜底走不到,park 门永堵
+        beltReveal = (isShadow || beltIdx.isEmpty) ? 1 : 0
+        beltRevealSnap = beltReveal
+        beltRevealGo = false
+        beltRevealArm = 0
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
@@ -312,6 +337,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     func readSnapshot() -> [SIMD2<Float>] {
         snapLock.lock(); defer { snapLock.unlock() }
         return snapshot
+    }
+
+    /// 渲染/命中每帧读:陨石揭幕透明度 0…1(开局隐藏期 <1;=1 常态)。
+    /// 只等 snapLock,与 readSnapshot 同源同拍。
+    var beltRevealAlpha: Float {
+        snapLock.lock(); defer { snapLock.unlock() }
+        return beltRevealSnap
     }
 
     var isParked: Bool {
@@ -374,6 +406,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         hubQuietRef = []   // 静动帧判定重置(全员从"动"起步 = 纯预判)
         famPrev = []       // teleport 位移不携带
         alpha = 1
+        // 开局揭幕布防(explode = 开局路径之二:刷新按钮/切回画布走
+        // updateScene+explode)。拖动松手不经过这里 → 不藏
+        beltReveal = beltIdx.isEmpty ? 1 : 0
+        beltRevealGo = false
+        beltRevealArm = tickCount
         publishSnapshot()
         simLock.unlock()
         wake()
@@ -499,7 +536,11 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             let coldNow = alpha < GraphConstants.alphaMin && alphaTarget == 0
             let quiet = brake == 0   // 缓停滑完(速度已到 0)才真正入睡
             if coldNow && !quiet { restlessTicks += 1 } else { restlessTicks = 0 }
+            // 揭幕没完成不许睡(07-08 教训:park 后 tick 停摆+渲染暂停,
+            // 淡入会冻在半路 = 永久隐身/半透明)。超时兜底保证 beltReveal
+            // 必达 1,此门最多多醒几秒,不会永堵
             let cooled = coldNow && (quiet || restlessTicks > GraphConstants.parkRestlessCap)
+                && beltReveal >= 1
             simLock.unlock()
             let sleeping = cooled && !dragging
             let stateChanged = parkedFlag != sleeping
@@ -542,6 +583,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private func publishSnapshot() {
         snapLock.lock()
         snapshot = pos
+        beltRevealSnap = beltReveal
         snapLock.unlock()
     }
 
@@ -604,6 +646,17 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     /// 不加(拖拽钉住覆盖速度,加了也白算,与叶弹簧同理无须豁免)。
     private func beltPass() {
         guard !beltIdx.isEmpty else { return }
+        // 开局揭幕推进(放最顶:拖拽/待命/影子各分支早退都不能拦它)。
+        // Go 后每 tick 无条件拉高;未 Go 超时无条件兜底启动(影子卡死/
+        // 到位判定失效也绝不永久隐身)。正常启动在陨石主循环的到位判定
+        if beltReveal < 1, !isShadow {
+            if beltRevealGo {
+                beltReveal = min(beltReveal + GraphConstants.beltRevealStep, 1)
+            } else if tickCount &- beltRevealArm
+                        > GraphConstants.beltRevealTimeoutTicks {
+                beltRevealGo = true
+            }
+        }
         dragLock.lock()
         let di = draggedIndex ?? -1
         dragLock.unlock()
@@ -848,6 +901,9 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 return
             }
             var transitAny = false
+            // 揭幕到位测量(只在隐藏期):全部陨石离目标的最大极坐标距离
+            let measureArrive = beltReveal < 1 && !beltRevealGo
+            var arriveMax: Float = 0
             pos.withUnsafeMutableBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
                 for bi in 0..<beltIdx.count {
@@ -905,6 +961,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                     } else {
                         disp = relT   // 退化:恰在环心(几乎不可能),回退笛卡尔
                     }
+                    if measureArrive { arriveMax = max(arriveMax, simd_length(disp)) }
                     let delta = disp - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
                     //(松手态 ×2.2 排位增益已按用户要求回滚)
@@ -919,6 +976,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
             }}
             beltTransitAny = transitAny
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
+            // 到位判定("找到位置"):全部陨石贴到锁定目标 && hub 全静
+            //(hub 还在飘时携带会继续搬陨石,提前揭幕会看到整带滑动)。
+            // 单向闩,启动后顶部逻辑每 tick 拉高;测不到位由超时兜底
+            if measureArrive, allStatic,
+               arriveMax < GraphConstants.beltRevealArriveDist {
+                beltRevealGo = true
+            }
         }
     }
 
