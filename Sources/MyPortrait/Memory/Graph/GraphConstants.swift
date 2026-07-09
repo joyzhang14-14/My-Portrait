@@ -151,11 +151,6 @@ enum GraphConstants {
 
     // MARK: 影子引擎(07-08 用户定稿:预判 folder 终局,环提前就位)
 
-    /// 开场临时钉环前影子同步快进的步数(spawnShadow 在物理线程小跑
-    /// 一段给环一个合理初值,防陨石绕未初始化旧环跑扰动布局;几十步
-    /// 几 ms,藏在爆炸里。影子主体在**后台队列全速**跑,物理线程零
-    /// 挤占 —— 07-08 实机"分帧快进仍卡顿"终解)
-    static let shadowPrePinTicks: Int = 40
     /// 影子累计步数封顶(病态不收敛兜底 → 交结果收工,不再烧 CPU)
     static let shadowTickCap: Int = 3000
 

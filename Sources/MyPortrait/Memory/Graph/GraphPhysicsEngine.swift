@@ -833,11 +833,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
                 beltFamSlope[s] = slope
             }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
-            // 待命(07-08 用户"可接受延迟,动则一步到位"):松手后影子
-            // 结果未到(2~4 帧)陨石零力原地待命 —— 不朝占位目标起跑,
-            // 等终局锁定后一次性直飞,全程不改道。开场(生成态)不待命
-            // (爆炸绽放照旧)。穿透标记清掉(待命=实体,参与碰撞)
-            if !carrying && !shadowDone {
+            // 待命(07-08 用户"可接受延迟,动则一步到位"+"出场跳两次"):
+            // 影子结果未到时陨石零力待命 —— 不朝占位/临时目标起跑,等
+            // 终局锁定后一次性直飞/绽放,全程不改道。**开场也待命**
+            // (原先临时环+ready 正式环 = 环钉两次 → 陨石先朝临时弧位
+            // 飞再改道 = 两跳;待命后头几帧只被爆炸力推散,一跳成型)。
+            // 穿透标记清掉(待命=实体,参与碰撞)
+            if !shadowDone {
                 for bi in 0..<beltIdx.count {
                     nodeTransit[Int(beltIdx[bi])] = false
                 }
@@ -963,19 +965,8 @@ final class GraphPhysicsEngine: @unchecked Sendable {
         // 无条件刷新 —— 不能留拖拽前的旧终局,混合帧的弧方位会朝旧
         // 方向飞一两帧(实测首帧毛刺 pol 偏 2+rad)
         beltPredPos = hubIndices.map { pos[Int($0)] }
-        // 开场(ringDirty):先同步跑一小段钉**临时环**(陨石绕未初始化
-        // 旧环跑几帧会扰动布局,实测多付一次补调;几十步几 ms 藏在爆炸
-        // 里),正式钉死等任务算完(消费处)
-        if ringDirty {
-            for _ in 0..<GraphConstants.shadowPrePinTicks { sh.tick() }
-            let (cs, rs) = enclosureCircles(hubAt: { sh.pos[Int(hubIndices[$0])] })
-            let (c, encR) = Self.minEnclosingCircle(centers: cs, radii: rs)
-            ringRad = encR + Float(GraphConstants.beltGap)
-                + GraphConstants.ringPredMargin
-            ringTargetRad = ringRad
-            ringC = c
-            ringTargetC = c
-        }
+        // (临时环已删 —— 开场陨石待命到 ready,环只在消费处钉一次
+        // = 一跳成型;同时省掉开场同步小跑的物理线程停顿)
         // 后台**全速一口气**跑到 hub 全静(07-08 用户实机"还是卡顿,
         // 隐形图 tick 再快一点":分帧快进每帧仍挤占物理 tick 预算 ——
         // 挪出物理线程零挤占;92~600 步 × ~0.2ms 后台几十 ms 完成)。
