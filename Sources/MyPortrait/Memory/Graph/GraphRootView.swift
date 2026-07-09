@@ -282,6 +282,9 @@ struct GraphRootView: View {
     private func handleTap(_ id: Int?) {
         guard let id, id < scene.nodes.count else {
             floatNodeId = nil
+            // 点空白 → 视角缓移回开场总览(当前隐形环全景);07-09 用户。
+            // animated 分支跟随引擎实时环、park 收敛;portrait 无环则空转返回。
+            frameCameraToRing(animated: true)
             return
         }
         if scene.nodes[id].kind.isHub {
