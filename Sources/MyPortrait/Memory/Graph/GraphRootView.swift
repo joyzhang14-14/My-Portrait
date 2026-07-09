@@ -184,14 +184,27 @@ struct GraphRootView: View {
         if let pr = preloadedRing {
             return frameFor(vs, center: pr.center, radius: pr.radius)
         }
-        guard let engine, engine.ringR > 1 else { return nil }
-        return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
+        return overviewCamera(vs)
     }
 
-    /// 松手缓移目标:引擎**实时**环(拖动后环已重算,预加载环已过时)。
-    private func liveCamera(_ vs: CGSize) -> GraphCamera? {
-        guard let engine, engine.ringR > 1 else { return nil }
-        return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
+    /// 总览取景(松手/点空白/开场兜底):events 用引擎**实时**隐形环;
+    /// portrait 等**无环**画布用全部节点的包围圆(中心=节点质心,半径=
+    /// 罩住全部节点)—— 保证 portrait 也能框住全景。
+    private func overviewCamera(_ vs: CGSize) -> GraphCamera? {
+        guard let engine else { return nil }
+        if engine.ringR > 1 {
+            return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
+        }
+        let snap = engine.readSnapshot()
+        guard snap.count == scene.nodes.count, !snap.isEmpty else { return nil }
+        var c = SIMD2<Float>.zero
+        for p in snap { c += p }
+        c /= Float(snap.count)
+        var r: Float = 0
+        for i in snap.indices {
+            r = max(r, simd_length(snap[i] - c) + Float(scene.nodes[i].radius))
+        }
+        return frameFor(vs, center: c, radius: r)
     }
 
     /// 取景到隐形环。两态共用"lerp 跟随引擎实时环、跟到物理定稳"的收敛
@@ -213,9 +226,10 @@ struct GraphRootView: View {
             let k = GraphConstants.cameraTrackLerp
             for i in 0..<900 {   // ~15s 上限兜底(含物理沉降 + 缓移)
                 if Task.isCancelled || gen != engineGen { return }
-                // 目标 = 引擎实时环(精确居中);开局头 ~50ms 引擎环未钉好时
-                // 用预加载环兜底(免这几帧无目标 → 停在旧相机闪一下)。
-                let tgt = liveCamera(viewSize) ?? (animated ? nil : openCamera(viewSize))
+                // 目标 = 实时总览(events 隐形环精确居中 / portrait 全部节点
+                // 包围圆);开局头 ~50ms 引擎环未钉好时用预加载环兜底
+                // (免这几帧无目标 → 停在旧相机闪一下)。
+                let tgt = overviewCamera(viewSize) ?? (animated ? nil : openCamera(viewSize))
                 guard let engine, let tgt else {
                     if animated { return }         // 松手却无环:异常,退出
                     if i > 180 { return }          // 开局 3s 无环(portrait)→ 放弃
