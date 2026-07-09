@@ -164,11 +164,12 @@ struct GraphRootView: View {
 
     /// 由环心+半径算取景相机:center=环心,zoom=让环基准直径占视口较短边
     /// cameraFrameFill。半径≈0 / 尺寸未知返回 nil。
-    private func frameFor(_ vs: CGSize, center: SIMD2<Float>, radius: Float)
+    private func frameFor(_ vs: CGSize, center: SIMD2<Float>, radius: Float,
+                          fill: Double = GraphConstants.cameraFrameFill)
         -> GraphCamera? {
         guard radius > 1, vs.width > 1, vs.height > 1 else { return nil }
         let minDim = min(vs.width, vs.height)
-        let z = Double(minDim) * GraphConstants.cameraFrameFill / (2 * Double(radius))
+        let z = Double(minDim) * fill / (2 * Double(radius))
         var cam = GraphCamera()
         cam.center = center
         cam.zoom = min(max(z, GraphCamera.zoomRange.lowerBound),
@@ -243,9 +244,41 @@ struct GraphRootView: View {
         cameraTracking = false
     }
 
+    /// 点 folder 球聚焦(07-09 用户):相机缓移到该 folder 的隐形圆(气泡)
+    /// 视图 —— center=气泡心(= hub 位),zoom=气泡直径占视口 cameraFolderFill。
+    /// tap 与 drag 由手势系统天然区分(DragGesture 有 2pt 阈值,纯点击不触发)。
+    private func frameCameraToFolder(_ hub: Int) {
+        guard let engine, hub < scene.nodes.count,
+              let br = scene.nodes[hub].hubBubbleRadius, br > 0 else { return }
+        cameraTask?.cancel()
+        cameraTracking = true
+        let gen = engineGen
+        let radius = Float(br)
+        cameraTask = Task { @MainActor in
+            defer { cameraTracking = false }
+            let k = GraphConstants.cameraTrackLerp
+            for _ in 0..<300 {   // ~5s 上限兜底
+                if Task.isCancelled || gen != engineGen { return }
+                let snap = engine.readSnapshot()
+                guard hub < snap.count,
+                      let tgt = frameFor(viewSize, center: snap[hub], radius: radius,
+                                         fill: GraphConstants.cameraFolderFill)
+                else { return }
+                camera.center += (tgt.center - camera.center) * Float(k)
+                camera.zoom += (tgt.zoom - camera.zoom) * k
+                if simd_length(tgt.center - camera.center) < 0.5,
+                   abs(tgt.zoom - camera.zoom) < 0.0005 {
+                    camera = tgt; return
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
     // MARK: - 交互路由
 
     /// 点空白 = 关浮窗;点末端球 = 开浮窗;点 hub = 神经脉冲(无浮窗,需求 §5)。
+    /// 点 folder 球(有隐形圆的 hub,非主球)额外聚焦该 folder 视图(07-09)。
     private func handleTap(_ id: Int?) {
         guard let id, id < scene.nodes.count else {
             floatNodeId = nil
@@ -254,6 +287,7 @@ struct GraphRootView: View {
         if scene.nodes[id].kind.isHub {
             floatNodeId = nil
             triggerPulse(from: id)
+            if scene.nodes[id].hubBubbleRadius != nil { frameCameraToFolder(id) }
         } else {
             floatNodeId = id
         }
