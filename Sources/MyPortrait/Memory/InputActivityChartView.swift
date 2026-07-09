@@ -463,13 +463,14 @@ private struct InputRecordCard: View {
             Text(appLabel)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
-            Spacer()
-            // 徽标标在时间左边:超 3 行没显示全才有,特别长=article / 短一点=paragraph。
-            if !expanded, isTruncated { lengthBadge }
             Text(Self.hmFmt.string(from: Date(
                 timeIntervalSince1970: TimeInterval(record.startTs) / 1000)))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
+            // app、时间、标签依次靠左排。徽标超 3 行没显示全才有:
+            // 特别长=article / 短一点=paragraph。
+            if !expanded, isTruncated { lengthBadge }
+            Spacer()
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
