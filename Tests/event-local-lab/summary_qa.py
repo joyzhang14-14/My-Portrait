@@ -169,6 +169,15 @@ def strip_unverifiable(e, by):
     # hash 语境里的 3-6 位十进制一律剥(真 hash 是 7+ 位含字母 hex,不会误伤)。
     for m in list(re.finditer(r"hash(?:es)?[^.\n]{0,24}?\b(\d{3,6})\b", s, re.I)):
         s = s.replace(m.group(1), ""); stripped.append(f"fakehash:{m.group(1)}")
+    # 中文化翻译失真防线(实锤'$6m'→'600万美元'):金额的数字部分必须逐字在
+    # 上游出现(前后非数字防 1600 误配),否则整个金额表述剥掉。宁剥不留错。
+    for m in list(re.finditer(
+            r"(?:[$¥€]\s?\d+(?:\.\d+)?\s?[mkMK万]?|\d+(?:\.\d+)?\s*(?:万|百万|亿)?\s*(?:美元|美金|人民币|元|刀))",
+            s)):
+        tok = m.group(0)
+        num = re.search(r"\d+(?:\.\d+)?", tok).group(0)
+        if not re.search(rf"(?<![\d.]){re.escape(num)}(?![\d])", corpus):
+            s = s.replace(tok, ""); stripped.append(f"money:{tok[:15]}")
     if stripped:
         e["summary"] = re.sub(r"\s{2,}", " ", s).strip()
         retain.log_verdict(DAY, e["title"][:60], "verbatim_stripped", items=stripped[:8])
