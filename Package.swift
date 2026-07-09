@@ -27,10 +27,18 @@ let package = Package(
             path: "Sources/MyPortraitObjC",
             publicHeadersPath: "include"
         ),
+        // 图谱物理热路径独立模块 —— 存在的唯一理由:Xcode Debug 构建里
+        // 单独开 -O(见 project.yml 的 GraphPhysics target;-Onone 单 tick
+        // 慢 35 倍,影子引擎 1.6~2.5s)。SwiftPM 侧只是编译校验,不加 flags。
+        .target(
+            name: "GraphPhysics",
+            path: "Sources/GraphPhysics"
+        ),
         .executableTarget(
             name: "MyPortrait",
             dependencies: [
                 "MyPortraitObjC",
+                "GraphPhysics",
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "WhisperKit", package: "WhisperKit"),
                 .product(name: "MLX", package: "mlx-swift"),

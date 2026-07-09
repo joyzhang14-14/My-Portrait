@@ -14,7 +14,7 @@ import simd
 ///   - park 状态变化通过 AsyncStream 发给 SwiftUI(暂停/恢复 TimelineView)
 ///
 /// Sendable:@unchecked —— 所有可变状态都在上述两把锁之内,逐条核对过。
-final class GraphPhysicsEngine: @unchecked Sendable {
+public final class GraphPhysicsEngine: @unchecked Sendable {
 
     // MARK: - 状态(simLock 保护)
 
@@ -266,14 +266,14 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     private var parkedFlag = false
     private var parkContinuation: AsyncStream<Bool>.Continuation?
     /// park 状态流(true = 已休眠)。视图订阅它来暂停/恢复 TimelineView。
-    let parkEvents: AsyncStream<Bool>
+    public let parkEvents: AsyncStream<Bool>
 
     // MARK: - 初始化
 
     /// - Parameter seed: 炸开初始位置的随机种子(定值 → 同数据同布局可复现)。
     /// - Parameter isShadow: true = 影子实例(不起后台线程,不再造影子;
     ///   只被主引擎在物理线程里同步 tick 做终局预演)。
-    init(scene: GraphScene, seed: UInt64 = 7, isShadow: Bool = false) {
+    public init(scene: GraphScene, seed: UInt64 = 7, isShadow: Bool = false) {
         self.isShadow = isShadow
         sceneRef = scene
         n = scene.nodes.count
@@ -323,7 +323,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 停线程(被替换 / 会话清理时调)。幂等。
-    func shutdown() {
+    public func shutdown() {
         cond.lock()
         shouldRun = false
         cond.signal()
@@ -334,36 +334,36 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     // MARK: - 对外操作(任意线程;内部拿锁)
 
     /// 渲染每帧读:最新位置快照。只等 snapLock(µs 级),不等 tick。
-    func readSnapshot() -> [SIMD2<Float>] {
+    public func readSnapshot() -> [SIMD2<Float>] {
         snapLock.lock(); defer { snapLock.unlock() }
         return snapshot
     }
 
     /// 渲染/命中每帧读:陨石揭幕透明度 0…1(开局隐藏期 <1;=1 常态)。
     /// 只等 snapLock,与 readSnapshot 同源同拍。
-    var beltRevealAlpha: Float {
+    public var beltRevealAlpha: Float {
         snapLock.lock(); defer { snapLock.unlock() }
         return beltRevealSnap
     }
 
-    var isParked: Bool {
+    public var isParked: Bool {
         cond.lock(); defer { cond.unlock() }
         return parkedFlag
     }
 
     /// 调试只读(harness 画环/断言用):当前环心 / 环半径(无 belt 时
     /// ringR = 0)。
-    var ringCenter: SIMD2<Float> {
+    public var ringCenter: SIMD2<Float> {
         simLock.lock(); defer { simLock.unlock() }
         return ringC
     }
-    var ringR: Float {
+    public var ringR: Float {
         simLock.lock(); defer { simLock.unlock() }
         return ringRad
     }
 
     /// 开始拖某个球(index 0 主球由调用方挡掉)。只碰 dragLock,绝不等 tick。
-    func beginDrag(index: Int, at world: SIMD2<Float>) {
+    public func beginDrag(index: Int, at world: SIMD2<Float>) {
         dragLock.lock()
         draggedIndex = index
         draggedTo = world
@@ -373,13 +373,13 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 120Hz 指针事件热路径:只碰 dragLock(µs 级),绝不等 tick。
-    func drag(to world: SIMD2<Float>) {
+    public func drag(to world: SIMD2<Float>) {
         dragLock.lock()
         draggedTo = world
         dragLock.unlock()
     }
 
-    func endDrag() {
+    public func endDrag() {
         dragLock.lock()
         draggedIndex = nil
         pendingAlphaTarget = 0
@@ -388,7 +388,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 重新炸开(手动刷新且数据变了 / 换画布新数据)。
-    func explode(seed: UInt64 = 7) {
+    public func explode(seed: UInt64 = 7) {
         simLock.lock()
         var rng = SplitMix64(seed: seed)
         pos = Self.explosionPositions(n: n, rng: &rng)
@@ -454,7 +454,7 @@ final class GraphPhysicsEngine: @unchecked Sendable {
 
     /// 数据轻刷新:节点集合没变(fingerprint 相等),只更新边参数
     /// (rest 每天随 last_occurred 漂移)。**保留位置**,微加热让布局适应。
-    func updateScene(_ scene: GraphScene) {
+    public func updateScene(_ scene: GraphScene) {
         simLock.lock()
         guard scene.nodes.count == n else { simLock.unlock(); return }   // 防御:调用方保证
         sceneRef = scene   // 影子重建用最新场景

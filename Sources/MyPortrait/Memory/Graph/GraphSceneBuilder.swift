@@ -1,3 +1,4 @@
+import GraphPhysics
 import Foundation
 
 /// 把磁盘上的 memory 数据(events/*.md + _folders/*.json + portrait/<cat>/*.md)

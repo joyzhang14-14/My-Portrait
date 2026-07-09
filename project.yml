@@ -47,6 +47,26 @@ packages:
     from: 2.6.0
 
 targets:
+  # ── 图谱物理热路径(GraphPhysicsEngine + GraphModel + GraphConstants)──
+  # 拆独立静态库的唯一理由:**Debug 也开 -O**。app target 的 Debug 是
+  # -Onone,物理单 tick 慢 35 倍(7ms vs 0.2ms)、影子引擎 1.6~2.5s,
+  # 开局/松手肉眼可见延迟(07-08 用户拍板拆模块)。代价:物理模块内
+  # 断点/逐行调试不可用(优化后变量被折叠),要调试物理临时把
+  # SWIFT_OPTIMIZATION_LEVEL 改回 -Onone 重新 xcodegen。
+  GraphPhysics:
+    type: library.static
+    platform: macOS
+    sources:
+      - Sources/GraphPhysics
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        ARCHS: arm64
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        SWIFT_COMPILATION_MODE: wholemodule
+        # -O 与 -enable-testing 混用会告警;物理模块不需要 @testable
+        ENABLE_TESTABILITY: "NO"
+
   MyPortrait:
     type: application
     platform: macOS
@@ -68,6 +88,8 @@ targets:
             destination: wrapper
             subpath: Contents/Library/LaunchDaemons
     dependencies:
+      # 图谱物理静态库(Debug 也 -O,见上)。静态链接,无需 embed/签名。
+      - target: GraphPhysics
       - package: GRDB
         product: GRDB
       - package: WhisperKit
