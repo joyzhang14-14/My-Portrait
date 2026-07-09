@@ -34,7 +34,10 @@ MANIFEST = os.path.join(OUTDIR, "v4_manifest.json")
 # 16GB硬约束(7-08选型):8bit实测9.9GB爆预算;6bit逐字池A/B=8bit(18%=18%),
 # 4bit/9B一模两用都在OCR保真悬崖(14%)——6bit是16GB上唯一不折腾的档。
 DEFAULT_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-6bit"
-MERGE_MODEL = SMALL_TAG_MODEL                     # 汇总+标签都用 14B
+# 7-08 A/B(同items同P_MERGE2只换模型):生活锚点9B 12 vs 14B 7(s432的
+# 120.56/已转账14B丢9B保),粘合剂62% vs 65%打平,kw hash全捞——14B退役,
+# 汇总+标签统一9B(栈里少一个8.3GB模型)。
+MERGE_MODEL = "mlx-community/Qwen3.5-9B-MLX-4bit"
 MAXPIX = 1_600_000
 MIN_INTERRUPT_FRAMES = 3
 THR_SIM = 0.7
