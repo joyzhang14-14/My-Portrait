@@ -271,7 +271,9 @@ Examples: "重写写作采集提取为统一field-state timeline"(42 sessions, c
 "Fixed light mode divider color"(3 sessions)=3; "Played music on Spotify"=1;
 "Notification Center glance"=0.
 Event: «{title}» ({n} sessions) — {summary}
-Answer ONLY JSON: {{"reason":"<one sentence>","impact":<0-5>}}"""
+"reason" must cite THIS event's concrete content (what was done/found), not its importance.
+FORBIDDEN in reason: critical, significant, "This event represents", restating the rubric.
+Answer ONLY JSON: {{"reason":"<one specific sentence>","impact":<0-5>}}"""
 
 
 # gold 6-07 的 impact 形状(31事件 {5:2,4:5,3:12,2:8,1:3,0:1})→ 累计占比封顶。
@@ -284,7 +286,7 @@ def impact_pass(events, T):
     for e in events:
         obj = _gen("impact", [{"role": "user", "content": _IMPACT_RUBRIC.format(
             title=e["title"], n=len(e["session_ids"]), summary=e["summary"][:400])}],
-            120, event=e["title"][:40])
+            256, event=e["title"][:40])   # 120 时 9B 有 11/51 条 reason 词中截断
         try:
             e["impact"] = max(0, min(5, int((obj or {}).get("impact", 2))))
             e["impact_reason"] = str((obj or {}).get("reason", ""))[:200]
