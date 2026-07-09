@@ -400,6 +400,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         ringDirty = true
+        // 清旧环(07-09 出场偏差修):切走再切回复用引擎走这条路,若不清,
+        // ringRad/ringC 仍是**上次布局**的值(尤其上次把环拖大过)——相机
+        // 开局取景一读就按旧环定帧 = 偏差,本轮重新钉环后又没跟上。归零 →
+        // 相机取景轮询会等到本轮影子重新钉环(ringDirty 消费处)才定帧。
+        // 揭幕期陨石隐藏 + 等待态不动,归零窗口不可见。
+        ringRad = 0; ringC = .zero
+        ringTargetRad = 0; ringTargetC = .zero
         shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 废弃在跑影子任务
         nodeTransit = .init(repeating: false, count: n)
         hubPrev = []

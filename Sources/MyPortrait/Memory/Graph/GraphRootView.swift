@@ -184,10 +184,20 @@ struct GraphRootView: View {
         if !animated {
             cameraTracking = false
             cameraTask = Task { @MainActor in
-                // 轮询等环钉好 + viewSize 就绪(开局 ~50ms;兜底 10s)
-                for _ in 0..<600 {
+                for i in 0..<600 {
                     if Task.isCancelled || gen != engineGen { return }
-                    if let cam = ringCamera(viewSize) { camera = cam; return }
+                    guard let engine else { return }
+                    guard let cam = ringCamera(viewSize) else {
+                        // 环还没钉好(开局 ~50ms)。3s 仍无环 = portrait 无环
+                        // /异常 → 放弃,保持默认视角。
+                        if i > 180 { return }
+                        try? await Task.sleep(for: .milliseconds(16)); continue
+                    }
+                    // 开局固定取景:一次性对准,并**钉住到揭幕完成**——沉降期
+                    // 环若微调、或首帧读到的是刚钉环,每帧硬对齐,吸收掉任何
+                    // 二次跳变(否则设一次就退,会在开局期间闪一下再偏)。
+                    camera = cam
+                    if engine.beltRevealAlpha >= 1 { return }   // 揭幕满=定稳
                     try? await Task.sleep(for: .milliseconds(16))
                 }
             }
