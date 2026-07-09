@@ -158,6 +158,14 @@ public enum GraphConstants {
     // 找到位置后再显示,透明度一点一点拉高;只适用于开局 init/explode,
     // 拖动松手不藏。隐藏期 hover/点击/拖起全部无效)
 
+    /// 缓滑胡萝卜(07-08 用户"陨石动画幅度有点大,缓和一点;只用圆心/
+    /// 半径/θ 的形式动"):目标太远时,槽位弹簧本 tick 只追"沿弧 ≤ArcCap、
+    /// 径向 ≤RadialCap"的近端假目标 → 匀速贴弧缓滑,不再朝远目标大甩。
+    /// 只作用于成型后(!beltForming)的调整移动,开局绽放不限(揭幕前
+    /// 不可见)。⚠️ 必须 >24(穿透免碰撞阈值):压到以下,长途回流全程
+    /// 带碰撞,会像 07-03 九稿一样卡半路
+    public static let beltGlideArcCap: Float = 40
+    public static let beltGlideRadialCap: Float = 30
     /// 淡入步长(每 tick 加,60Hz 下 ≈0.8s 拉满)
     public static let beltRevealStep: Float = 0.02
     /// 兜底超时(tick 计):armed 后超过此数无条件开始淡入 —— 影子卡死/
