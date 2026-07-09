@@ -158,9 +158,6 @@ public enum GraphConstants {
     // 找到位置后再显示,透明度一点一点拉高;只适用于开局 init/explode,
     // 拖动松手不藏。隐藏期 hover/点击/拖起全部无效)
 
-    /// 到位判定:全部陨石离锁定目标的**最大**距离 < 此值,且 hub 全静
-    ///(hubStatic),视为"找到位置"开始淡入
-    public static let beltRevealArriveDist: Float = 15
     /// 淡入步长(每 tick 加,60Hz 下 ≈0.8s 拉满)
     public static let beltRevealStep: Float = 0.02
     /// 兜底超时(tick 计):armed 后超过此数无条件开始淡入 —— 影子卡死/

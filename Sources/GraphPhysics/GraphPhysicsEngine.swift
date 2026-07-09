@@ -901,9 +901,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 return
             }
             var transitAny = false
-            // 揭幕到位测量(只在隐藏期):全部陨石离目标的最大极坐标距离
             let measureArrive = beltReveal < 1 && !beltRevealGo
-            var arriveMax: Float = 0
             pos.withUnsafeMutableBufferPointer { P in
             vel.withUnsafeMutableBufferPointer { V in
                 for bi in 0..<beltIdx.count {
@@ -961,7 +959,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     } else {
                         disp = relT   // 退化:恰在环心(几乎不可能),回退笛卡尔
                     }
-                    if measureArrive { arriveMax = max(arriveMax, simd_length(disp)) }
                     let delta = disp - V[i]
                     // 距离增益(九稿:太远回不去卡半路):>150pt 加力,封顶 ×3
                     //(松手态 ×2.2 排位增益已按用户要求回滚)
@@ -976,11 +973,16 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             }}
             beltTransitAny = transitAny
             for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
-            // 到位判定("找到位置"):全部陨石贴到锁定目标 && hub 全静
-            //(hub 还在飘时携带会继续搬陨石,提前揭幕会看到整带滑动)。
-            // 单向闩,启动后顶部逻辑每 tick 拉高;测不到位由超时兜底
+            // 到位判定("找到位置")= 布局整体定型:hub 全静 && 冷透 &&
+            // 净位移窗静止(quietFlag 自带穿透飞行/残余叠压一票否决,陨石
+            // 还在飞不会误揭)—— 即"即将 park"的前置条件,结构性保证两条
+            // 开局路(init/explode)对称且必然触发。⚠️ 别改回"离目标距离
+            // <阈值"判(07-08 首版 15pt 翻车:599 颗挤弧的碰撞平衡位随
+            // 种子离几何槽位 12~23pt,阈值内外纯看运气 → 同机开局/刷新
+            // 一快一慢;实测 22.4pt 永冻在阈值外只能等超时兜底 9s+)。
+            // 单向闩,启动后顶部逻辑每 tick 拉高
             if measureArrive, allStatic,
-               arriveMax < GraphConstants.beltRevealArriveDist {
+               alpha < GraphConstants.alphaMin, quietFlag {
                 beltRevealGo = true
             }
         }
