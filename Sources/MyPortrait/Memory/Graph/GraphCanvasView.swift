@@ -1,3 +1,4 @@
+import GraphPhysics
 import SwiftUI
 import simd
 
