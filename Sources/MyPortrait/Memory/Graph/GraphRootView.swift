@@ -197,12 +197,18 @@ struct GraphRootView: View {
         cameraTask = Task { @MainActor in
             defer { cameraTracking = false }
             let k = GraphConstants.cameraTrackLerp
-            for _ in 0..<360 {   // ~6s 上限兜底
+            for _ in 0..<900 {   // ~15s 上限兜底(含物理沉降 + 缓移)
                 if Task.isCancelled || gen != engineGen { return }
-                guard let tgt = ringCamera(viewSize) else { return }
+                guard let engine, let tgt = ringCamera(viewSize) else { return }
                 camera.center += (tgt.center - camera.center) * Float(k)
                 camera.zoom += (tgt.zoom - camera.zoom) * k
-                if simd_length(tgt.center - camera.center) < 0.5,
+                // ⚠️ 收敛必须**等物理休眠**:松手瞬间环还是拖动前的旧值
+                //(设计"拖动整环不变"),相机一读就对齐旧环 → 若此刻退出,
+                // 几十毫秒后环重算成新值时已无任务跟随 = "没调整"。改为跟着
+                // 环走到物理定稳(isParked)且相机贴合才收官,保证每次松手
+                // 都真正跟到最终环。
+                if engine.isParked,
+                   simd_length(tgt.center - camera.center) < 0.5,
                    abs(tgt.zoom - camera.zoom) < 0.001 {
                     camera = tgt; return
                 }
