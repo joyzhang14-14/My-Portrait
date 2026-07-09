@@ -250,6 +250,8 @@ struct TimelineControlsBar: View {
                 }
             } label: {
                 Image(systemName: "chevron.left")
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())   // 整个矩形可点,不只图标字形
             }
             .buttonStyle(.bouncyIcon)
 
@@ -269,6 +271,8 @@ struct TimelineControlsBar: View {
                    d <= Date() { currentDate = d }
             } label: {
                 Image(systemName: "chevron.right")
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.bouncyIcon)
             .disabled(!canGoForward)
@@ -278,6 +282,8 @@ struct TimelineControlsBar: View {
                 onRefresh()
             } label: {
                 Image(systemName: "arrow.clockwise")
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.bouncyIcon)
 
@@ -316,6 +322,7 @@ struct CalendarPopover: View {
                     Image(systemName: "chevron.left").font(.system(size: 11))
                         .frame(width: 26, height: 26)
                         .background(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.18), lineWidth: 1))
+                        .contentShape(Rectangle())
                 }.buttonStyle(.bouncyIcon)
                 Spacer()
                 Text(monthTitle(anchor)).font(.system(size: 13, weight: .semibold))
@@ -324,6 +331,7 @@ struct CalendarPopover: View {
                     Image(systemName: "chevron.right").font(.system(size: 11))
                         .frame(width: 26, height: 26)
                         .background(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.18), lineWidth: 1))
+                        .contentShape(Rectangle())
                 }.buttonStyle(.bouncyIcon)
             }
 
@@ -420,6 +428,7 @@ struct DayCell: View {
                     ? AnyView(RoundedRectangle(cornerRadius: 5).fill(selectedFill))
                     : AnyView(Color.clear)
                 )
+                .contentShape(Rectangle())   // 整格可点,不只数字字形
         }
         .buttonStyle(.bouncyIcon)
         .disabled(isFuture)
