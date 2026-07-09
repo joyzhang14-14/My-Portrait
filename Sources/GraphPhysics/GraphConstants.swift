@@ -178,6 +178,14 @@ public enum GraphConstants {
     /// 带碰撞,会像 07-03 九稿一样卡半路
     public static let beltGlideArcCap: Float = 40
     public static let beltGlideRadialCap: Float = 30
+    /// 松手缓入(07-09 用户"松手后球闪回老位置"):刚松手的球头
+    /// releaseEaseTicks 内每 tick 归位速度封顶 releaseEaseMaxVel pt —— 从
+    /// 拖放点柔和滑回 rest,不再弹簧一帧猛拽(实测第 0 帧就弹 46pt)。
+    /// 窗口给足让远拖也走完缓入(球近 rest 时速度自然 <cap,cap 空转)。
+    /// 调大 MaxVel = 归位更快;调大 Ticks = 缓入覆盖更远的拖拽。
+    /// (高温期每帧跑 2 个子步,可见每帧位移 = 2×MaxVel;6 → 每帧 ~12pt)
+    public static let releaseEaseMaxVel: Float = 6
+    public static let releaseEaseTicks: UInt64 = 120
     /// 淡入步长(每 tick 加,60Hz 下 ≈0.8s 拉满)
     public static let beltRevealStep: Float = 0.02
     /// 兜底超时(tick 计):armed 后超过此数无条件开始淡入 —— 影子卡死/
