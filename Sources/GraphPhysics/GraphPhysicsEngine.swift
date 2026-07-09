@@ -1318,7 +1318,20 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 let d = simd_length(p)
                 let minD = mainR + hubBubbleR[ii] + hubMainClear[ii]
                 if d < minD, d > 1e-4 {
-                    vel[i] += p / d * ((minD - d) * k)
+                    // 缓分限速(07-08"松手慢慢移开"):成型后**深**重叠(只可能
+                    // 来自拖拽)的推出速度封顶,不再按重叠深度全量踹开;
+                    // 浅重叠走原全量(常态接触平衡,限了会永动微振静不下来)
+                    var ov = minD - d
+                    if !beltForming, ov > GraphConstants.bubbleEaseDeepOverlap {
+                        ov = GraphConstants.bubbleEaseVelCap
+                        // 杀闭合速度:弹簧(冷却地板 0.1 恒在)把 hub 压向
+                        // 主球的分量若不消,~20pt/tick 碾过封顶推出,分离
+                        // 卡死在半路(实测 112pt 定格等 restless 兜底)
+                        let u = p / d
+                        let closing = simd_dot(vel[i], u)
+                        if closing < 0 { vel[i] -= u * closing }
+                    }
+                    vel[i] += p / d * (ov * k)
                 }
             }
             // 圆 vs 圆(重的动得少)
@@ -1331,8 +1344,21 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 if dist < 1e-4 { dv = SIMD2<Float>(1e-3, 0); dist = 1e-3 }
                 let need = hubBubbleR[ii] + hubBubbleR[jj] + 2
                 if dist < need {
-                    let push = (need - dist) / dist * k
+                    // 缓分限速(同上):深重叠封顶,浅重叠全量
+                    var ov = need - dist
                     let wi = hubMass[jj] / (hubMass[ii] + hubMass[jj])
+                    if !beltForming, ov > GraphConstants.bubbleEaseDeepOverlap {
+                        ov = GraphConstants.bubbleEaseVelCap
+                        // 杀闭合相对速度(按质量权重分摊):否则弹簧压入
+                        // 碾过封顶推出,分离半路卡死(见圆-主球分支注释)
+                        let u = dv / dist
+                        let rv = simd_dot(vel[j] - vel[i], u)
+                        if rv < 0 {
+                            vel[i] += u * (rv * wi)
+                            vel[j] -= u * (rv * (1 - wi))
+                        }
+                    }
+                    let push = ov / dist * k
                     vel[i] -= dv * (push * wi)
                     vel[j] += dv * (push * (1 - wi))
                 }
@@ -1595,7 +1621,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     let minD = mainR + hubBubbleR[ii] + hubMainClear[ii]
                     if d < minD {
                         let dir = d > 1e-4 ? P[i] / d : SIMD2<Float>(1, 0)
-                        P[i] = dir * minD
+                        // 缓分限速(07-08"松手慢慢移开"):成型后深重叠每轮
+                        // 纠正封顶,浅重叠全量(见常量注释:限浅会永动微振)
+                        var step = minD - d
+                        if !beltForming, step > GraphConstants.bubbleEaseDeepOverlap {
+                            step = GraphConstants.bubbleEasePosCap
+                        }
+                        P[i] = dir * (d + step)
                     }
                 }
                 for ii in 0..<max(hubIndices.count - 1, 0) {
@@ -1611,7 +1643,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                         let minD = hubBubbleR[ii] + hubBubbleR[jj]
                         if dist < minD {
                             let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                            let push = (minD - dist) * 0.5
+                            // 缓分限速(同上):深重叠每轮纠正封顶慢慢滑开,
+                            // 浅重叠全量对称推开
+                            var push = (minD - dist) * 0.5
+                            if !beltForming,
+                               minD - dist > GraphConstants.bubbleEaseDeepOverlap {
+                                push = GraphConstants.bubbleEasePosCap
+                            }
                             P[i] -= dir * push
                             P[j] += dir * push
                         }
