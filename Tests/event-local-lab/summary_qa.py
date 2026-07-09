@@ -224,6 +224,34 @@ def _ev_proj(e, lab):
     return top[0][0] if top and top[0][1] >= 3 else ""
 
 
+_CHAT_APPS = {"微信", "wechat", "discord", "messages", "信息", "mail", "telegram"}
+
+
+def eject_chat_from_dev(events, by):
+    """成员级 chat/dev 贯彻(v10):dev 主导事件里的 chat-app 会话弹出成单帧,
+    交给 absorb 归回社交事件。实锤:s432(微信,gold G26)被埋进 62 人 Terminal
+    事件,转账 120.56 从摘要蒸发。宁分不误合。"""
+    ejected = []
+    for e in events:
+        apps = collections.Counter(by[k]["app"].lower() for k in e["session_ids"] if k in by)
+        top = apps.most_common(1)
+        if not top or top[0][0] in _CHAT_APPS:
+            continue                              # chat 主导事件不动
+        chat_ks = [k for k in e["session_ids"] if by[k]["app"].lower() in _CHAT_APPS]
+        if not chat_ks or len(chat_ks) == len(e["session_ids"]):
+            continue
+        for k in chat_ks:
+            e["session_ids"].remove(k)
+            e["dirty"] = True
+            ejected.append({"title": by[k]["doing"][:60], "summary": by[k]["doing"][:300],
+                            "tags": [], "session_ids": [k], "dirty": True})
+            retain.log_verdict(DAY, f"s{k}", "chat_ejected_from_dev",
+                               host=e["title"][:50])
+    if ejected:
+        print(f"[eject] chat会话弹出dev事件 {len(ejected)} 个")
+    return [e for e in events if e["session_ids"]] + ejected
+
+
 def absorb_singletons(events, by, T, lab):
     """审计修复:n=1 单帧事件吸收进时间最近的同app同项目事件(两轮,防链式漂移)。"""
     _CHAT = {"微信", "wechat", "discord", "messages", "信息", "mail", "telegram"}
@@ -349,6 +377,7 @@ def global_merge_pass(events, by, idf, T):
                            n_from=len(mem), titles=[events[i]["title"][:40] for i in mem[1:]])
     print(f"[global_merge] {len(events)}→{len(out)} 事件(确定性平均连接 "
           f"τ{MERGE_TAU}/cap{MERGE_CAP},项目否决 {vetoed_proj},零LLM)")
+    out = eject_chat_from_dev(out, by)
     out = absorb_singletons(out, by, T, lab)
     return out
 
