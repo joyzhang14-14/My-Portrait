@@ -83,6 +83,11 @@ struct GraphRootView: View {
     @State private var viewSize: CGSize = .zero
     @State private var cameraTask: Task<Void, Never>? = nil
     @State private var cameraTracking = false
+    /// 预加载环(07-09 用户"随机种子预加载:打开界面前就知道该去哪"):
+    /// reload 在显示前 headless 跑出本轮随机种子的最终隐形环,开局固定
+    /// 取景直接用它 —— 保留随机布局的变化又不闪(免掉切回时环心乱跳)。
+    /// nil = portrait 无环 / 尚未加载。松手缓移不用它(用引擎实时环)。
+    @State private var preloadedRing: (center: SIMD2<Float>, radius: Float)? = nil
 
     private var zone: GraphZone {
         if case .portrait = scope { return .portrait }
@@ -157,56 +162,55 @@ struct GraphRootView: View {
 
     // MARK: - 视角取景(07-09:相机跟隐形环)
 
-    /// 按隐形环的环心+半径算出一个"环占视口约 cameraFrameFill"的相机
-    /// (center=环心,zoom=让环基准直径填到视口较短边的目标比例)。
-    /// 环未就位(ringR≈0,如 portrait 无环 / 开局尚未钉环)或尺寸未知
-    /// 时返回 nil。
-    private func ringCamera(_ vs: CGSize) -> GraphCamera? {
-        guard let engine else { return nil }
-        let rr = engine.ringR
-        guard rr > 1, vs.width > 1, vs.height > 1 else { return nil }
+    /// 由环心+半径算取景相机:center=环心,zoom=让环基准直径占视口较短边
+    /// cameraFrameFill。半径≈0 / 尺寸未知返回 nil。
+    private func frameFor(_ vs: CGSize, center: SIMD2<Float>, radius: Float)
+        -> GraphCamera? {
+        guard radius > 1, vs.width > 1, vs.height > 1 else { return nil }
         let minDim = min(vs.width, vs.height)
-        let z = Double(minDim) * GraphConstants.cameraFrameFill / (2 * Double(rr))
+        let z = Double(minDim) * GraphConstants.cameraFrameFill / (2 * Double(radius))
         var cam = GraphCamera()
-        cam.center = engine.ringCenter
+        cam.center = center
         cam.zoom = min(max(z, GraphCamera.zoomRange.lowerBound),
                        GraphCamera.zoomRange.upperBound)
         return cam
     }
 
-    /// 取景到隐形环。animated=false(开局固定):环一就位即一次性对准
-    /// (环钉在影子预测终局,固定不动);animated=true(松手缓移):每帧
-    /// 向当前环取景 lerp,环随物理沉降、相机跟着缓移到位。任一时刻只有
-    /// 一个取景任务(新触发废弃旧的);引擎换代或用户手动操作即中止。
+    /// 开局取景目标:**优先预加载环**(界面显示前算好,即时可用,免等引擎
+    /// ~50ms 钉环,且切回时不读旧环 → 不闪);portrait 无预加载时回退引擎
+    /// 实时环。
+    private func openCamera(_ vs: CGSize) -> GraphCamera? {
+        if let pr = preloadedRing {
+            return frameFor(vs, center: pr.center, radius: pr.radius)
+        }
+        guard let engine, engine.ringR > 1 else { return nil }
+        return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
+    }
+
+    /// 松手缓移目标:引擎**实时**环(拖动后环已重算,预加载环已过时)。
+    private func liveCamera(_ vs: CGSize) -> GraphCamera? {
+        guard let engine, engine.ringR > 1 else { return nil }
+        return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
+    }
+
+    /// 取景到隐形环。animated=false(开局固定):用预加载环一次性对准,
+    /// 固定不动(预加载环 = 界面显示前算好的最终环,首帧即正确);
+    /// animated=true(松手缓移):每帧向引擎实时环 lerp,跟到物理定稳。
+    /// 任一时刻只有一个取景任务(新触发废弃旧的);引擎换代/手动操作中止。
     private func frameCameraToRing(animated: Bool) {
         cameraTask?.cancel()
         let gen = engineGen
         if !animated {
             cameraTracking = false
+            // 同步先对准(viewSize 就绪时首帧即正确,切回瞬间无旧相机残影)。
+            if let cam = openCamera(viewSize) { camera = cam; return }
+            // viewSize 未就绪 → 轮询到位再设一次(开局固定,预加载环不变,
+            // 设一次即可)。3s 仍无(portrait/异常)→ 放弃,保持默认视角。
             cameraTask = Task { @MainActor in
                 for i in 0..<600 {
                     if Task.isCancelled || gen != engineGen { return }
-                    guard let engine else { return }
-                    guard let cam = ringCamera(viewSize) else {
-                        // 环还没钉好(开局 ~50ms)。3s 仍无环 = portrait 无环
-                        // /异常 → 放弃,保持默认视角。
-                        if i > 180 { return }
-                        try? await Task.sleep(for: .milliseconds(16)); continue
-                    }
-                    // 开局固定取景:一次性对准,并**钉住到揭幕完成**——沉降期
-                    // 环若微调、或首帧读到的是刚钉环,每帧硬对齐,吸收掉任何
-                    // 二次跳变(否则设一次就退,会在开局期间闪一下再偏)。
-                    // 死区:目标与当前相机足够接近(init/explode ~16px 残差、
-                    // 窗口微变)就不动,免掉切回时的细微跳变;差得远(默认
-                    // 视角首帧 / 拖大过环)才对准。
-                    let zoomRatio = cam.zoom / max(camera.zoom, 1e-6)
-                    let centerPx = simd_length(cam.center - camera.center)
-                        * Float(camera.zoom)
-                    if abs(zoomRatio - 1) > GraphConstants.cameraFrameDeadZoom
-                        || centerPx > GraphConstants.cameraFrameDeadPx {
-                        camera = cam
-                    }
-                    if engine.beltRevealAlpha >= 1 { return }   // 揭幕满=定稳
+                    if let cam = openCamera(viewSize) { camera = cam; return }
+                    if i > 180 { return }
                     try? await Task.sleep(for: .milliseconds(16))
                 }
             }
@@ -218,7 +222,7 @@ struct GraphRootView: View {
             let k = GraphConstants.cameraTrackLerp
             for _ in 0..<900 {   // ~15s 上限兜底(含物理沉降 + 缓移)
                 if Task.isCancelled || gen != engineGen { return }
-                guard let engine, let tgt = ringCamera(viewSize) else { return }
+                guard let engine, let tgt = liveCamera(viewSize) else { return }
                 camera.center += (tgt.center - camera.center) * Float(k)
                 camera.zoom += (tgt.zoom - camera.zoom) * k
                 // ⚠️ 收敛必须**等物理休眠**:松手瞬间环还是拖动前的旧值
@@ -380,14 +384,23 @@ struct GraphRootView: View {
         }.value
         guard gen == loadGen else { return }   // 期间切了 zone → 丢弃
 
+        // 随机种子(07-09 用户"随机种子预加载"):保留每次打开布局有变化;
+        // 界面显示前先 headless 跑出该种子的最终隐形环,相机开局即按此
+        // 取景 —— 变化 + 不闪。同一 seed 喂给 preload 与真正的引擎,布局
+        // 一致(preloadRing == 引擎最终环的影子预测)。
+        let seed = UInt64.random(in: .min ... .max)
+        let ring = await Task.detached(priority: .userInitiated) {
+            GraphPhysicsEngine.preloadRing(scene: built, seed: seed)
+        }.value
+        guard gen == loadGen else { return }   // preload 期间切了 zone → 丢弃
+        preloadedRing = ring
+
         let fp = GraphSession.fingerprint(of: built)
         if let cached = GraphSession.shared.entries[z], cached.fingerprint == fp {
             // 数据没变:复用引擎,刷边参数后**重放展开动画**(07-02 用户
             // 定稿:每次打开都要展开效果;确定性物理 → 每次收敛到同一布局)
             cached.engine.updateScene(built)
-            // 固定种子(07-09 出场闪烁修):同数据每次收敛到同一布局,
-            // 切回时环心不再乱跳。见 GraphConstants.layoutSeed。
-            cached.engine.explode(seed: GraphConstants.layoutSeed)
+            cached.engine.explode(seed: seed)
             GraphSession.shared.entries[z]?.scene = built
             scene = built
             if engine !== cached.engine {
@@ -398,8 +411,7 @@ struct GraphRootView: View {
         } else {
             // 数据变了 / 首次:新引擎,开场炸开(init 即高温挤中心态)
             GraphSession.shared.entries[z]?.engine.shutdown()
-            let fresh = GraphPhysicsEngine(scene: built,
-                                           seed: GraphConstants.layoutSeed)
+            let fresh = GraphPhysicsEngine(scene: built, seed: seed)
             GraphSession.shared.entries[z] = .init(scene: built, engine: fresh,
                                                    fingerprint: fp, camera: GraphCamera())
             scene = built

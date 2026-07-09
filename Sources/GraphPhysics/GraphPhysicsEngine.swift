@@ -1220,6 +1220,34 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         return (SIMD2<Float>(Float(bestC.x), Float(bestC.y)), Float(bestR))
     }
 
+    /// 预加载隐形环(07-09 用户"随机种子预加载:打开界面前就知道该去哪"):
+    /// 给定种子,起一个**不带线程、不发影子**的 headless 影子实例,自身
+    /// 全速 tick 到收敛,按主引擎 explode 后钉环的**同一公式**算出隐形环
+    /// (encR + beltGap + ringPredMargin)。reload 在后台 Task 里显示界面
+    /// 前调用(几十 ms),相机开局即按此取景 —— 保留随机布局的变化,又
+    /// 因"提前知道终局"不闪。
+    ///
+    /// 一致性:isShadow init 的初态(explosionPositions(seed) + seedPhase +
+    /// seedLeafAngles)与主引擎 explode(seed) 完全相同,确定性 tick ⇒ 收敛
+    /// 到同一 hub 布局 ⇒ 同一 MEC ⇒ 预加载环 == 可见引擎最终钉的环。
+    /// 无 belt(portrait)返回 nil(无环可框)。收敛判据同 spawnShadow。
+    public static func preloadRing(scene: GraphScene, seed: UInt64)
+        -> (center: SIMD2<Float>, radius: Float)? {
+        guard scene.nodes.contains(where: { $0.beltTier != nil }) else { return nil }
+        let sh = GraphPhysicsEngine(scene: scene, seed: seed, isShadow: true)
+        guard !sh.hubIndices.isEmpty else { return nil }
+        var steps = 0
+        while steps < GraphConstants.shadowTickCap {
+            sh.tick(); steps += 1
+            if sh.alpha < GraphConstants.alphaMin && (sh.quietFlag || sh.brake == 0) {
+                break
+            }
+        }
+        let (cs, rs) = sh.enclosureCircles(hubAt: { sh.pos[Int(sh.hubIndices[$0])] })
+        let (c, encR) = minEnclosingCircle(centers: cs, radii: rs)
+        return (c, encR + Float(GraphConstants.beltGap) + GraphConstants.ringPredMargin)
+    }
+
     /// 每 tick 动态弧裁剪(单环重构:参考系 = 环心)。每家占环上一段弧,
     /// 弧中心 = 自家 hub 绕环心的实时极角;挡板 = **真正与环带相交**的圆
     /// (全部气泡 + 主球圆):|dist(挡板心,环心) − 环带中径| 落在带内才
