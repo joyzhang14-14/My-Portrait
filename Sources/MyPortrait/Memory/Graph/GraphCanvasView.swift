@@ -26,6 +26,10 @@ struct GraphCanvasView: View {
     @Binding var hoveredId: Int?
     /// 点到球(nil = 点空白)。root 据此开浮窗(leaf)或触发脉冲(hub)。
     var onTapNode: (Int?) -> Void = { _ in }
+    /// 拖球松手(07-09):root 据此启动"相机缓移取景到隐形环"。
+    var onNodeDragEnded: () -> Void = {}
+    /// 用户手动动相机(平移/缩放)或起拖:中止自动取景,交还控制权。
+    var onCameraInterrupt: () -> Void = {}
 
     /// 一次拖拽手势的模式:起点落在球上=拖球,否则=平移相机。
     private enum DragMode: Equatable { case idle, pan, node(Int) }
@@ -67,7 +71,9 @@ struct GraphCanvasView: View {
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
-         onTapNode: @escaping (Int?) -> Void = { _ in }) {
+         onTapNode: @escaping (Int?) -> Void = { _ in },
+         onNodeDragEnded: @escaping () -> Void = {},
+         onCameraInterrupt: @escaping () -> Void = {}) {
         self.scene = scene
         self.engine = engine
         self.paused = paused
@@ -76,6 +82,8 @@ struct GraphCanvasView: View {
         self._camera = camera
         self._hoveredId = hoveredId
         self.onTapNode = onTapNode
+        self.onNodeDragEnded = onNodeDragEnded
+        self.onCameraInterrupt = onCameraInterrupt
         self.hubNodes = scene.nodes.filter { $0.kind.isHub }
         let order = scene.nodes.indices.sorted {
             scene.nodes[$0].radius > scene.nodes[$1].radius
@@ -470,6 +478,7 @@ struct GraphCanvasView: View {
                     // 主球钉死原点(大脑不动),拖它等于拖整个世界 → 归平移。
                     if let idx = hitTest(screen: v.startLocation, viewSize: viewSize), idx > 0 {
                         dragMode = .node(idx)
+                        onCameraInterrupt()   // 起拖:中止残留的自动取景
                         let node = scene.nodes[idx]
                         // 拖拽碰撞箱=球本身(07-08 用户"想玩拖动时蓝球穿插在
                         // 灰球丛中"):hub 拖拽禁区也降为球级(原为主球+隐形圆
@@ -482,6 +491,7 @@ struct GraphCanvasView: View {
                                          at: camera.screenToWorld(v.location, viewSize: viewSize))
                     } else {
                         dragMode = .pan
+                        onCameraInterrupt()   // 手动平移:交还相机控制权
                     }
                 }
                 switch dragMode {
@@ -521,7 +531,10 @@ struct GraphCanvasView: View {
                 }
             }
             .onEnded { _ in
-                if case .node = dragMode { engine.endDrag() }
+                if case .node = dragMode {
+                    engine.endDrag()
+                    onNodeDragEnded()   // 松手:相机缓移取景到(重算后的)隐形环
+                }
                 dragMode = .idle
                 dragWorldBox.world = nil
                 dragWorldBox.minDist = 0
@@ -534,6 +547,7 @@ struct GraphCanvasView: View {
     private func magnifyGesture(viewSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { v in
+                onCameraInterrupt()   // 手动缩放:交还相机控制权
                 let factor = v.magnification / lastMagnification
                 lastMagnification = v.magnification
                 camera.zoom(by: factor, anchor: v.startLocation, viewSize: viewSize)
