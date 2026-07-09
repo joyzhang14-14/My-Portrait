@@ -408,10 +408,15 @@ private struct InputRecordCard: View {
     let expanded: Bool
     let onToggle: () -> Void
     @State private var hovering = false
+    /// 收起态内容测量:全文高 / 3 行显示高。全文更高 = 被截断,标 article 徽标。
+    @State private var fullTextHeight: CGFloat = 0
+    @State private var shownTextHeight: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
 
     private var appLabel: String { InputCaptureView.appLabel(record.app) }
     private var accent: Color { AppColor.color(for: appLabel) }
+    /// 3 行装不下(有隐藏内容)→ true。留 1pt 容差避免亚像素误判。
+    private var isTruncated: Bool { fullTextHeight > shownTextHeight + 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -473,21 +478,63 @@ private struct InputRecordCard: View {
         .onTapGesture { onToggle() }
     }
 
-    /// 内容:收起 2 行预览,展开显全 + 可选中。
+    /// 内容:收起 3 行预览(截断标 article 徽标),展开显全 + 可选中。
     @ViewBuilder
     private var contentText: some View {
         let empty = record.text.isEmpty
-        let text = Text(empty ? "(empty content)" : record.text)
+        let display = empty ? "(empty content)" : record.text
+        let base = Text(display)
             .font(.system(size: 12))
             .foregroundStyle(empty ? Color.secondary : Color.primary.opacity(0.88))
-            .lineLimit(expanded ? nil : 2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
         if expanded {
-            text.textSelection(.enabled)
+            base
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            text
+            VStack(alignment: .leading, spacing: 5) {
+                base
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // 隐藏全文副本量高(fixedSize 忽略 3 行约束,给出真实全高)。
+                    .background(fullTextProbe(display))
+                    // 可见 3 行的实际高。
+                    .overlay(GeometryReader { g in
+                        Color.clear.preference(key: ShownTextHeightKey.self,
+                                               value: g.size.height)
+                    })
+                if isTruncated { articleBadge }
+            }
+            .onPreferenceChange(FullTextHeightKey.self) { fullTextHeight = $0 }
+            .onPreferenceChange(ShownTextHeightKey.self) { shownTextHeight = $0 }
         }
+    }
+
+    /// 不限行数的隐藏副本 —— 只为量出全文完整高度,不参与卡片布局、不渲染。
+    private func fullTextProbe(_ s: String) -> some View {
+        Text(s)
+            .font(.system(size: 12))
+            .fixedSize(horizontal: false, vertical: true)
+            .hidden()
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FullTextHeightKey.self, value: g.size.height)
+            })
+    }
+
+    /// 内容超 3 行没显示全 → 标这个,比暗淡的「…」显眼。用 app 色系。
+    private var articleBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "text.alignleft")
+                .font(.system(size: 8, weight: .semibold))
+            Text("article")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+        }
+        .foregroundStyle(accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(accent.opacity(0.14)))
     }
 
     // MARK: 展开态
@@ -593,4 +640,22 @@ private struct InputRecordCard: View {
         f.dateFormat = "HH:mm:ss"
         return f
     }()
+}
+
+// MARK: - 内容截断测量 PreferenceKey
+
+/// 全文(不限行)完整高度。
+private struct FullTextHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// 收起态实际显示(3 行)高度。
+private struct ShownTextHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }
