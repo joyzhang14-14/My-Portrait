@@ -109,6 +109,9 @@ struct TimelineView: View {
                 .opacity(state.frames.isEmpty ? 0 : 1)
                 .clipped()
         }
+        // 钉在面板顶部:无 frame 的天内容比面板矮,否则 mainPane 的默认居中会把
+        // 整个 VStack(含日期栏)往下推 ~50px;有 frame 的天图片撑满,本就顶对齐。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black)
         // Timeline 主区域故意永远黑底(展示屏幕录像,黑底凸显画面)。
         // 强制 dark colorScheme 让里面的 TimelineControlsBar / BrowserURLBar /
