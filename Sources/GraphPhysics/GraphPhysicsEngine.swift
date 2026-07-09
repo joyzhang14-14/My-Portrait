@@ -174,6 +174,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 被拖球上一 tick 的钉位(扫掠清障用,防高速隧穿)+ 邻域缓冲。
     private var dragPrevPos: SIMD2<Float>? = nil
     private var dragNbr: [Int32] = []
+    /// 松手缓入(07-09 用户"松手后球闪回老位置"):刚松手的球头若干
+    /// tick 限速,免弹簧一帧把它猛拽回 rest(实测第 0 帧就弹 46pt)——
+    /// 从拖放点柔和滑回。物理线程在松手边沿置位;拖住球的上一 tick 索引
+    /// (松手边沿 draggedIndex 已 nil,取不到)。
+    private var releasedIdx: Int = -1
+    private var releaseTick: UInt64 = 0
+    private var dragIdxPrev: Int = -1
     /// 挂号的 alphaTarget(dragLock 保护):beginDrag/endDrag 不再抢
     /// simLock —— 收敛中 tick 握锁 20~40ms(Debug),主线程"抓球那一下"
     /// 会顿一拍(07-02 实测);physics 线程下个循环自取自用。
@@ -500,7 +507,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             dragLock.lock()
             let pending = pendingAlphaTarget
             pendingAlphaTarget = nil
-            let dragging = draggedIndex != nil
+            let dragIdxNow = draggedIndex ?? -1
+            let dragging = dragIdxNow >= 0
             dragLock.unlock()
             simLock.lock()
             if let p = pending {
@@ -514,6 +522,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
             } else if wasDragging {
+                // 松手缓入布防:记下刚松手的球(dragIdxPrev,此刻 draggedIndex
+                // 已 nil),头 releaseEaseTicks 内限速归位(见 centerAndIntegrate)。
+                if dragIdxPrev > 0 { releasedIdx = dragIdxPrev; releaseTick = tickCount }
                 // 松手边沿:预热命中判定 —— 拖拽中已按"假设此刻松手"
                 // 预算过,最近预算的克隆位与松手位置够近(<40pt)→ 结果
                 // 现成/在途,不重建(零/极低延迟);否则照常重建(3~8 tick)
@@ -537,6 +548,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 }
             }
             wasDragging = dragging
+            dragIdxPrev = dragIdxNow   // 供下一 tick 的松手边沿取"刚松手的球"
+            // 拖拽开始即取消上一发松手缓入(同球再拖不该被限速)
+            if dragging { releasedIdx = -1 }
             // park = 冷透 && 真静止(最大移动量低于阈值)。alpha 冷却是纯
             // 时间表(松手 ~4s 必冷透),球从远处回弹走不完就会被冻在半路;
             // 静止判定兜底:病态微抖超时(≈30s)强制休眠,防 CPU 烧死。
@@ -1604,12 +1618,20 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         let cs = GraphConstants.centerStrength
         let damping = GraphConstants.velocityDamping
         let bk = brake
+        // 松手缓入(07-09):刚松手的球在窗口内限速,弹簧不许一帧猛拽回
+        let easeIdx = (tickCount &- releaseTick < GraphConstants.releaseEaseTicks)
+            ? releasedIdx : -1
+        let easeCap = GraphConstants.releaseEaseMaxVel
         pos.withUnsafeMutableBufferPointer { P in
         vel.withUnsafeMutableBufferPointer { V in
         nodeCenterScale.withUnsafeBufferPointer { CS in
             for i in 0..<n {
                 V[i] += (SIMD2<Float>.zero - P[i]) * (cs * a * CS[i])
                 V[i] *= damping
+                if i == easeIdx {
+                    let sp = simd_length(V[i])
+                    if sp > easeCap { V[i] *= easeCap / sp }   // 归位速度封顶
+                }
                 P[i] += V[i] * bk   // bk = 缓停比例(常态 1,入睡前滑向 0)
             }
         }}}
