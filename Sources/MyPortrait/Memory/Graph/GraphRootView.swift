@@ -196,7 +196,16 @@ struct GraphRootView: View {
                     // 开局固定取景:一次性对准,并**钉住到揭幕完成**——沉降期
                     // 环若微调、或首帧读到的是刚钉环,每帧硬对齐,吸收掉任何
                     // 二次跳变(否则设一次就退,会在开局期间闪一下再偏)。
-                    camera = cam
+                    // 死区:目标与当前相机足够接近(init/explode ~16px 残差、
+                    // 窗口微变)就不动,免掉切回时的细微跳变;差得远(默认
+                    // 视角首帧 / 拖大过环)才对准。
+                    let zoomRatio = cam.zoom / max(camera.zoom, 1e-6)
+                    let centerPx = simd_length(cam.center - camera.center)
+                        * Float(camera.zoom)
+                    if abs(zoomRatio - 1) > GraphConstants.cameraFrameDeadZoom
+                        || centerPx > GraphConstants.cameraFrameDeadPx {
+                        camera = cam
+                    }
                     if engine.beltRevealAlpha >= 1 { return }   // 揭幕满=定稳
                     try? await Task.sleep(for: .milliseconds(16))
                 }
@@ -376,7 +385,9 @@ struct GraphRootView: View {
             // 数据没变:复用引擎,刷边参数后**重放展开动画**(07-02 用户
             // 定稿:每次打开都要展开效果;确定性物理 → 每次收敛到同一布局)
             cached.engine.updateScene(built)
-            cached.engine.explode(seed: UInt64.random(in: .min ... .max))
+            // 固定种子(07-09 出场闪烁修):同数据每次收敛到同一布局,
+            // 切回时环心不再乱跳。见 GraphConstants.layoutSeed。
+            cached.engine.explode(seed: GraphConstants.layoutSeed)
             GraphSession.shared.entries[z]?.scene = built
             scene = built
             if engine !== cached.engine {
@@ -388,7 +399,7 @@ struct GraphRootView: View {
             // 数据变了 / 首次:新引擎,开场炸开(init 即高温挤中心态)
             GraphSession.shared.entries[z]?.engine.shutdown()
             let fresh = GraphPhysicsEngine(scene: built,
-                                           seed: UInt64.random(in: .min ... .max))
+                                           seed: GraphConstants.layoutSeed)
             GraphSession.shared.entries[z] = .init(scene: built, engine: fresh,
                                                    fingerprint: fp, camera: GraphCamera())
             scene = built

@@ -194,6 +194,18 @@ public enum GraphConstants {
     /// 松手后相机缓移每帧 lerp 系数(中心+缩放同步);越小越慢越顺。
     /// 60Hz 下 0.08 ≈ 0.5s 收敛九成 —— "缓慢调整到指定位置"。
     public static let cameraTrackLerp: Double = 0.08
+    /// 布局种子(07-09 出场闪烁修):**固定**,不再随机。随机种子下
+    /// folder 球每次收敛到**不同旋转排布** → 包围圆环心指向不同方向
+    /// (实测种子间抖动 250pt / 屏幕 ~230px) → 切回时相机取景整体跳位
+    /// = "闪一下"。固定种子 = 同数据每次收敛到**同一布局**(施工文档
+    /// 07-02 本意"确定性物理→每次同一布局";随机是与本意矛盾的潜伏
+    /// bug)→ 环心稳定 → 取景稳定。init/explode 共用,reload 传入。
+    public static let layoutSeed: UInt64 = 42
+    /// 开局固定取景死区:目标取景与当前相机的屏幕位移 < 此 px 且缩放
+    /// 比在 ±此% 内,就不动 —— 吸收 init 与 explode 的 ~16px 一次性残差
+    /// 及窗口微变,免掉切回时的细微跳变。
+    public static let cameraFrameDeadPx: Float = 30
+    public static let cameraFrameDeadZoom: Double = 0.06
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
