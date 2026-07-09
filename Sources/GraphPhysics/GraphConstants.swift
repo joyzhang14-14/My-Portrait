@@ -191,6 +191,10 @@ public enum GraphConstants {
     /// 七成,四周留呼吸边(外圈陨石在基准环外还有径向偏移,故不取满);
     /// 越大越贴边,越小越缩。开局固定、松手缓移都以此为目标。
     public static let cameraFrameFill: Double = 0.72
+    /// 点 folder 球聚焦该 folder 视图(07-09 用户):以隐形圆(气泡)心为
+    /// 画布中心、气泡直径占视口较短边此比例。比环取景大(0.82,无外圈
+    /// 陨石要留边,气泡叶群贴满更聚焦);越大越贴边。
+    public static let cameraFolderFill: Double = 0.82
     /// 松手后相机缓移每帧 lerp 系数(中心+缩放同步);越小越慢越顺。
     /// 60Hz 下 0.08 ≈ 0.5s 收敛九成 —— "缓慢调整到指定位置"。
     public static let cameraTrackLerp: Double = 0.08
