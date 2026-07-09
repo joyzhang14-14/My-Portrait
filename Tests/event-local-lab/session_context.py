@@ -99,6 +99,30 @@ def app_profile(session_keys, key2row):
             "subjects": dedup(subs)[:6], "with": dedup(whos)[:6], "where": dedup(wheres)[:4]}
 
 
+def _md_who_where():
+    """审计修复(7-09):汇总层结构化 who/where 一直落在报告 MD 里(- who:/- where: 行),
+    enrich 从没吃过 → 事件 context.with 5/65。从 CS.MD 解析,按事件聚合。自己(home
+    用户名)从 who 里排除。"""
+    import os
+    import cluster_skeleton as CS
+    me = os.path.basename(os.path.expanduser("~")).lower()
+    out = {}
+    try:
+        md = open(CS.MD).read()
+    except Exception:
+        return out
+    for m in re.finditer(r"\n## s(\d+) · .*?(?=\n## s|\Z)", md, re.S):
+        seg, k = m.group(0), int(m.group(1))
+        who_m = re.search(r"^- who: (.+)$", seg, re.M)
+        where_m = re.search(r"^- where: (.+)$", seg, re.M)
+        who = [w.strip() for w in who_m.group(1).split(",")
+               if w.strip() and me not in w.strip().lower()] if who_m else []
+        where = re.sub(r"[\[\]']", "", where_m.group(1)).strip() if where_m else ""
+        if who or where:
+            out[k] = (who, where)
+    return out
+
+
 def enrich_events(events, con, day):
     """in-place:给每个事件加 apps/context,并把 app名+人名 确定性并进 tags。"""
     import json as _json
@@ -106,10 +130,27 @@ def enrich_events(events, con, day):
               for r in con.execute("SELECT session_key, items FROM vision_items WHERE day=?", (day,))}
     key2row = {r["id"]: {"app": r["app"], "window": r["window"], "items": vitems.get(r["id"], [])}
                for r in con.execute("SELECT id, app, window FROM raw_sessions WHERE day=?", (day,))}
+    md_ww = _md_who_where()
     for e in events:
         prof = app_profile(e["session_ids"], key2row)
         e["apps"] = prof["foreground"]
         e["context"] = {"subjects": prof["subjects"], "with": prof["with"], "where": prof["where"]}
+        # 并入汇总层 who/where(频次排序,with 上限 6;where 取成员首个非空)
+        wc = collections.Counter()
+        for k in e["session_ids"]:
+            for w in md_ww.get(k, ([], ""))[0]:
+                wc[w] += 1
+        merged = list(e["context"]["with"])
+        for w, _ in wc.most_common():
+            if w not in merged:
+                merged.append(w)
+        e["context"]["with"] = merged[:6]
+        if not e["context"]["where"]:
+            for k in e["session_ids"]:
+                ww = md_ww.get(k, ([], ""))[1]
+                if ww:
+                    e["context"]["where"] = ww[:80]
+                    break
         # 确定性并进 tags:主 app(≥2 段或唯一 app)+ 全部"跟谁"
         tags = list(e.get("tags") or [])
         low = {t.lower() for t in tags}

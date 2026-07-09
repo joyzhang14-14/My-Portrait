@@ -165,6 +165,10 @@ def strip_unverifiable(e, by):
     for m in list(_QUOTE_RX.finditer(s)):
         if m.group(1).lower() not in corpus:
             s = s.replace(m.group(0), ""); stripped.append(f"quote:{m.group(1)[:20]}")
+    # 审计修复:纯数字被当 commit hash 写进摘要(实锤'1054'=session id)。
+    # hash 语境里的 3-6 位十进制一律剥(真 hash 是 7+ 位含字母 hex,不会误伤)。
+    for m in list(re.finditer(r"hash(?:es)?[^.\n]{0,24}?\b(\d{3,6})\b", s, re.I)):
+        s = s.replace(m.group(1), ""); stripped.append(f"fakehash:{m.group(1)}")
     if stripped:
         e["summary"] = re.sub(r"\s{2,}", " ", s).strip()
         retain.log_verdict(DAY, e["title"][:60], "verbatim_stripped", items=stripped[:8])
@@ -186,6 +190,78 @@ def strip_unverifiable(e, by):
 #     merge前0.332),嵌合体0,最大簇59。神谕上限0.547,差距在88分区纯度+merge
 #     判断,均为T2蒸馏目标。
 MERGE_ALPHA, MERGE_TAU, MERGE_CAP = 0.7, 0.55, 60
+# v10(7-09审计四修其二):项目硬边界+单帧碎片吸收。
+# 审计实锤:3个purity 0.27巨型抽屉唯一共性=同Terminal界面,跨project糊死;
+# 65事件里34个n=1单帧(gold把它们收进复合事件)。项目标签=window首段归一化
+# (My-Portrait 198/My-Meeting 104,数据驱动非硬编码),两侧都有标签且不同→禁合;
+# 吸收=n=1事件并入时间最近的同app同项目事件(gap≤45min),宁不吸不误吸。
+ABSORB_GAP = 45.0
+
+
+def _proj_labels(by):
+    """session→项目标签:window 首段(' — '前)归一化小写字母数字。空=无信号。"""
+    import labdb
+    con = labdb.connect()
+    part_win = dict(con.execute(
+        "SELECT id, COALESCE(window,'') FROM raw_sessions WHERE day = :d", {"d": DAY}))
+    lab = {}
+    for k, s in by.items():
+        c = collections.Counter()
+        for p in s["parts"]:
+            seg = part_win.get(p, "").split(" — ")[0]
+            seg = re.sub(r"[^a-z0-9]", "", seg.lower())
+            if seg:
+                c[seg] += 1
+        lab[k] = c.most_common(1)[0][0] if c else ""
+    return lab
+
+
+def _ev_proj(e, lab):
+    """事件项目标签:成员众数,支持数≥3 才算有标签(弱信号不投票)。"""
+    c = collections.Counter(lab.get(k, "") for k in e["session_ids"])
+    c.pop("", None)
+    top = c.most_common(1)
+    return top[0][0] if top and top[0][1] >= 3 else ""
+
+
+def absorb_singletons(events, by, T, lab):
+    """审计修复:n=1 单帧事件吸收进时间最近的同app同项目事件(两轮,防链式漂移)。"""
+    _CHAT = {"微信", "wechat", "discord", "messages", "信息", "mail", "telegram"}
+    def app_of(e):
+        return collections.Counter(
+            by[k]["app"] for k in e["session_ids"] if k in by).most_common(1)[0][0]
+    absorbed = 0
+    for _ in range(2):
+        singles = [e for e in events if len(e["session_ids"]) == 1]
+        for e in singles:
+            if len(e["session_ids"]) != 1:
+                continue                      # 已被别人吸进成员(当了宿主),不再按单帧处理
+            k = e["session_ids"][0]
+            cands = []
+            for o in events:
+                if o is e or not o["session_ids"]:
+                    continue
+                if app_of(o) != by[k]["app"]:
+                    continue
+                pe, po = lab.get(k, ""), _ev_proj(o, lab)
+                if pe and po and pe != po:
+                    continue                      # 项目硬边界同样约束吸收
+                g = gap_min(T[k], ev_span(o, T))
+                if g <= ABSORB_GAP:
+                    cands.append((g, len(o["session_ids"]), o))
+            if not cands:
+                continue
+            _, _, host = min(cands, key=lambda x: (x[0], -x[1]))
+            host["session_ids"].append(k)
+            host["dirty"] = True
+            e["session_ids"] = []
+            absorbed += 1
+            retain.log_verdict(DAY, f"s{k}", "singleton_absorbed",
+                               host=host["title"][:50])
+        events = [e for e in events if e["session_ids"]]
+    if absorbed:
+        print(f"[absorb] 单帧吸收 {absorbed} 个 → {len(events)} 事件")
+    return events
 
 
 def global_merge_pass(events, by, idf, T):
@@ -221,9 +297,21 @@ def global_merge_pass(events, by, idf, T):
         for j in range(i + 1, n):
             A[i, j] = A[j, i] = (MERGE_ALPHA * float((EC[i] * EC[j]).sum())
                                  + (1 - MERGE_ALPHA) * wjaccard(EA[i], EA[j], idf))
+    lab = _proj_labels(by)
     comp = [[i] for i in range(n)]
     csz = [len(e["session_ids"]) for e in events]
     ch = [_chatty(e) for e in events]
+
+    def comp_proj(c):
+        cnt = collections.Counter()
+        for i in c:
+            for k in events[i]["session_ids"]:
+                if lab.get(k):
+                    cnt[lab[k]] += 1
+        top = cnt.most_common(1)
+        return top[0][0] if top and top[0][1] >= 3 else ""
+
+    vetoed_proj = 0
     while True:
         best = None
         for i in range(len(comp)):
@@ -232,6 +320,10 @@ def global_merge_pass(events, by, idf, T):
                     continue                            # chat/dev 异质否决
                 if csz[i] + csz[j] > MERGE_CAP:
                     continue                            # 规模护栏:禁产巨簇
+                pi, pj = comp_proj(comp[i]), comp_proj(comp[j])
+                if pi and pj and pi != pj:
+                    vetoed_proj += 1                    # 项目硬边界(治跨project抽屉)
+                    continue
                 vals = [A[x][y] for x in comp[i] for y in comp[j]]
                 d = sum(vals) / len(vals)               # 平均连接(单链=嵌合体放大器)
                 if d >= MERGE_TAU and (best is None or d > best[0]):
@@ -256,7 +348,8 @@ def global_merge_pass(events, by, idf, T):
         retain.log_verdict(DAY, surv["title"][:60], "global_merged",
                            n_from=len(mem), titles=[events[i]["title"][:40] for i in mem[1:]])
     print(f"[global_merge] {len(events)}→{len(out)} 事件(确定性平均连接 "
-          f"τ{MERGE_TAU}/cap{MERGE_CAP},零LLM)")
+          f"τ{MERGE_TAU}/cap{MERGE_CAP},项目否决 {vetoed_proj},零LLM)")
+    out = absorb_singletons(out, by, T, lab)
     return out
 
 
