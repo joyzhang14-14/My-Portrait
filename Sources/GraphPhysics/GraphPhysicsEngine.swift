@@ -1297,32 +1297,33 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         for ii in 0..<h {
             guard hubBubbleR[ii] > 0 else { continue }
             let i = Int(hubIndices[ii])
+            // 拖拽中被拖 hub 碰撞箱=球本身(07-08 用户:"想玩拖动时蓝球
+            // 穿插在灰球丛中"):隐形圆对它全关(不推别家、不被推、不挡
+            // 主球),球级碰撞(forceCollide+扫掠胶囊)让它在别家叶丛里
+            // 排开穿行;松手 di 消失即恢复圆级,重叠由硬解算平滑分开
             // 圆 vs 主球(主球钉死,只推 hub)
-            let p = pos[i]
-            let d = simd_length(p)
-            let minD = mainR + hubBubbleR[ii] + hubMainClear[ii]
-            if d < minD, d > 1e-4 {
-                vel[i] += p / d * ((minD - d) * k)
+            if i != di {
+                let p = pos[i]
+                let d = simd_length(p)
+                let minD = mainR + hubBubbleR[ii] + hubMainClear[ii]
+                if d < minD, d > 1e-4 {
+                    vel[i] += p / d * ((minD - d) * k)
+                }
             }
             // 圆 vs 圆(重的动得少)
             for jj in (ii + 1)..<h {
                 guard hubBubbleR[jj] > 0 else { continue }
                 let j = Int(hubIndices[jj])
+                if i == di || j == di { continue }
                 var dv = pos[j] - pos[i]
                 var dist = simd_length(dv)
                 if dist < 1e-4 { dv = SIMD2<Float>(1e-3, 0); dist = 1e-3 }
                 let need = hubBubbleR[ii] + hubBubbleR[jj] + 2
                 if dist < need {
                     let push = (need - dist) / dist * k
-                    if i == di {
-                        vel[j] += dv * push
-                    } else if j == di {
-                        vel[i] -= dv * push
-                    } else {
-                        let wi = hubMass[jj] / (hubMass[ii] + hubMass[jj])
-                        vel[i] -= dv * (push * wi)
-                        vel[j] += dv * (push * (1 - wi))
-                    }
+                    let wi = hubMass[jj] / (hubMass[ii] + hubMass[jj])
+                    vel[i] -= dv * (push * wi)
+                    vel[j] += dv * (push * (1 - wi))
                 }
             }
         }
@@ -1578,6 +1579,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 for ii in 0..<hubIndices.count {
                     guard hubBubbleR[ii] > 0 else { continue }
                     let i = Int(hubIndices[ii])
+                    if i == di { continue }   // 拖拽碰撞箱=球本身:主球侧有球级硬约束兜底
                     let d = simd_length(P[i])
                     let minD = mainR + hubBubbleR[ii] + hubMainClear[ii]
                     if d < minD {
@@ -1590,22 +1592,17 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     for jj in (ii + 1)..<hubIndices.count {
                         guard hubBubbleR[jj] > 0 else { continue }
                         let i = Int(hubIndices[ii]), j = Int(hubIndices[jj])
+                        // 拖拽碰撞箱=球本身(07-08):被拖 hub 的圆不解算 ——
+                        // 推土机改球级穿行;松手恢复,重叠对称推开
+                        if i == di || j == di { continue }
                         let d = P[j] - P[i]
                         let dist = simd_length(d)
                         let minD = hubBubbleR[ii] + hubBubbleR[jj]
                         if dist < minD {
                             let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
-                            // 推土机(07-02 不重叠底线):被拖气泡不动,把对方
-                            // 全量推开 —— 圆永不相交,家隔离的叶才不会叠别家
-                            if i == di {
-                                P[j] += dir * (minD - dist)
-                            } else if j == di {
-                                P[i] -= dir * (minD - dist)
-                            } else {
-                                let push = (minD - dist) * 0.5
-                                P[i] -= dir * push
-                                P[j] += dir * push
-                            }
+                            let push = (minD - dist) * 0.5
+                            P[i] -= dir * push
+                            P[j] += dir * push
                         }
                     }
                 }

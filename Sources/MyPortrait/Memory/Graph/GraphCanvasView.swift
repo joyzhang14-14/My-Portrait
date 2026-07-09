@@ -471,18 +471,13 @@ struct GraphCanvasView: View {
                     if let idx = hitTest(screen: v.startLocation, viewSize: viewSize), idx > 0 {
                         dragMode = .node(idx)
                         let node = scene.nodes[idx]
-                        if let br = node.hubBubbleRadius {
-                            var maxLeafR = 0.0
-                            for n in scene.nodes where !n.kind.isHub && n.hubIndex == idx {
-                                maxLeafR = max(maxLeafR, n.radius)
-                            }
-                            dragWorldBox.minDist = Float(GraphConstants.mainRadius + br + maxLeafR)
-                                + GraphConstants.mainCollisionPadding
-                        } else {
-                            dragWorldBox.minDist = Float(GraphConstants.mainRadius + node.radius)
-                                + GraphConstants.mainCollisionPadding
-                            dragWorldBox.leafBallR = Float(node.radius)
-                        }
+                        // 拖拽碰撞箱=球本身(07-08 用户"想玩拖动时蓝球穿插在
+                        // 灰球丛中"):hub 拖拽禁区也降为球级(原为主球+隐形圆
+                        // +最大叶径)—— 引擎侧被拖 hub 的隐形圆同步全关,
+                        // 指针能带球钻进别家叶丛;禁区只剩主球和别家 hub 球本体
+                        dragWorldBox.minDist = Float(GraphConstants.mainRadius + node.radius)
+                            + GraphConstants.mainCollisionPadding
+                        dragWorldBox.leafBallR = Float(node.radius)
                         engine.beginDrag(index: idx,
                                          at: camera.screenToWorld(v.location, viewSize: viewSize))
                     } else {
@@ -495,13 +490,14 @@ struct GraphCanvasView: View {
                                        height: v.translation.height - lastDragTranslation.height)
                     lastDragTranslation = v.translation
                     camera.pan(byScreen: delta)
-                case .node:
+                case .node(let dragIdx):
                     var w = camera.screenToWorld(v.location, viewSize: viewSize)
-                    // 叶拖拽:先夹出全部 folder/分区球(≤11 次距离检查/事件)
+                    // 拖拽(叶/hub 同):先夹出全部别家 folder/分区**球本体**
+                    //(≤11 次距离检查/事件;跳过被拖球自己,否则自夹)
                     let ballR = dragWorldBox.leafBallR
                     if ballR > 0 {
                         let snap = engine.readSnapshot()
-                        for h in hubNodes where h.id != 0 && h.id < snap.count {
+                        for h in hubNodes where h.id != 0 && h.id != dragIdx && h.id < snap.count {
                             let c = snap[h.id]
                             let minD = Float(h.radius) + ballR
                                 + GraphConstants.mainCollisionPadding
