@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// 点选窗口半宽(分钟):以点击点为中心 ±此值,总窗口 = 2× = 4 小时。
-/// 高亮带 / 表头 / records 过滤三者共用此常量,避免各处漂移不一致。
-private let inputWindowRadiusMin = 120
+/// 一次峰值丛选择的结果:click = 点击点(画蓝线),[lo, hi] = 算出的丛窗口
+/// (高亮带 + records 过滤共用)。由 `MinuteBuckets.burstWindow(around:)` 产出。
+private struct InputSelection: Equatable {
+    let click: Int
+    let lo: Int
+    let hi: Int
+}
 
 /// Memory 区 "Input" scope 的**图谱形态**(canvas 模式)。
 ///
@@ -24,9 +28,9 @@ struct InputActivityChartView: View {
     @State private var records: [WritingRecordViewRow] = []
     /// 展开的 record id 集合(可多开)。切天清空。
     @State private var expandedIds: Set<Int64> = []
-    /// 点击选中的分钟(窗口中心)。nil = 未选、显示全天。选中后:图上画蓝线+
-    /// ±2h 高亮带,下方 records 过滤成这四小时。点图表空白处取消。
-    @State private var selectedMinute: Int? = nil
+    /// 点选的峰值丛。nil = 未选、显示全天。选中后:蓝线标点击点 + 丛高亮带,
+    /// records 过滤成该丛时段。点图表空白处取消。
+    @State private var selection: InputSelection? = nil
     @State private var loading = false
     /// 代际 token —— 快速切天时慢查询晚归不能盖掉新一天的结果。
     @State private var reloadGen = 0
@@ -48,25 +52,22 @@ struct InputActivityChartView: View {
         .background(SidebarBackdrop().ignoresSafeArea())
         .task(id: selectedDay) {
             expandedIds = []
-            selectedMinute = nil
+            selection = nil
             await reload()
         }
     }
 
-    // MARK: - 选中窗口(±2h)派生
+    // MARK: - 选中峰值丛派生
 
     /// 本地当天 00:00 的 ms —— 分钟↔时间戳换算基准(与 reload 同源)。
     private var dayStartMs: Int64 {
         Int64(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970 * 1000)
     }
 
-    /// 选中窗口的分钟范围 [lo, hi]:中心 ±2h,但**夹到图表活动区间**
-    /// [firstMinute, lastMinute] —— 靠边不足 2h 那侧顶到边、另一侧保留 2h。
-    /// 高亮带 / 表头 / records 过滤三者同源,永远一致。未选 = nil。
+    /// 选中丛的分钟范围 [lo, hi]。高亮带 / 表头 / records 过滤三者同源。未选 = nil。
     private var windowMinutes: (lo: Int, hi: Int)? {
-        guard let c = selectedMinute else { return nil }
-        return (max(buckets.firstMinute, c - inputWindowRadiusMin),
-                min(buckets.lastMinute, c + inputWindowRadiusMin))
+        guard let s = selection else { return nil }
+        return (s.lo, s.hi)
     }
 
     /// 上面窗口换算成 [start, end) 毫秒。
@@ -108,10 +109,11 @@ struct InputActivityChartView: View {
                         if buckets.maxTotal > 0 {
                             InputActivityCanvas(buckets: buckets,
                                                 colorScheme: colorScheme,
-                                                selectedMinute: selectedMinute,
+                                                selection: selection,
                                                 onSelect: { m in
+                                                    let w = buckets.burstWindow(around: m)
                                                     withAnimation(.easeOut(duration: 0.15)) {
-                                                        selectedMinute = m
+                                                        selection = InputSelection(click: m, lo: w.lo, hi: w.hi)
                                                     }
                                                 })
                                 .frame(height: geo.size.height / 3)
@@ -136,8 +138,8 @@ struct InputActivityChartView: View {
                     // 手势是子视图,优先级更高,不会误触发)。
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if selectedMinute != nil {
-                            withAnimation(.easeOut(duration: 0.15)) { selectedMinute = nil }
+                        if selection != nil {
+                            withAnimation(.easeOut(duration: 0.15)) { selection = nil }
                         }
                     }
                 }
@@ -149,10 +151,10 @@ struct InputActivityChartView: View {
 
     @ViewBuilder
     private var recordsSection: some View {
-        // 选中四小时:表头显 "09:30–13:30 · N";否则 "RECORDS · N"。
+        // 选中丛:表头显 "09:30–10:14 · 1842 keys · N";否则 "RECORDS · N"。
         Group {
             if let w = windowMinutes {
-                Text("\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(visibleRecords.count)")
+                Text("\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(buckets.keystrokes(in: w.lo, w.hi)) keys · \(visibleRecords.count)")
                     .foregroundStyle(.blue)
             } else {
                 Text("RECORDS · \(records.count)")
@@ -164,9 +166,9 @@ struct InputActivityChartView: View {
         .padding(.top, 10)
 
         if visibleRecords.isEmpty {
-            Text(selectedMinute == nil
+            Text(selection == nil
                  ? "No writing records this day"
-                 : "No writing records in this hour")
+                 : "No writing records in this burst")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         } else {
@@ -245,6 +247,9 @@ struct MinuteBuckets: Sendable {
     let counts: [[Double]]
     /// totals[minute] = 平滑后该分钟所有 app 击键总数(= 堆叠顶 = 单色曲线)。
     let totals: [Double]
+    /// rawTotals[minute] = **平滑前**的原始每分钟击键数(长度 1440)。
+    /// 峰值丛检测 / keystroke 计数只能用 raw,不能用平滑值。
+    let rawTotals: [Int]
     let maxTotal: Double
     /// 有打字的分钟(raw 击键 >0)的每分钟击键数中位数 —— y 轴中间那格。
     let median: Double
@@ -252,8 +257,85 @@ struct MinuteBuckets: Sendable {
     let firstMinute: Int
     let lastMinute: Int
 
-    static let empty = MinuteBuckets(apps: [], counts: [], totals: [],
+    static let empty = MinuteBuckets(apps: [], counts: [], totals: [], rawTotals: [],
                                      maxTotal: 0, median: 0, firstMinute: 0, lastMinute: 0)
+
+    // MARK: 峰值丛选择旋钮(代码里可调)
+
+    /// 每分钟击键 ≥ 此值才算"活跃"(否则视为安静/停顿)。
+    static let activeFloor = 2
+    /// 连续安静 ≥ 此分钟数 → 峰值丛收边(敲字中间短停顿不劈开)。
+    static let gapMinutes = 5
+    /// 单次选中的击键上限 —— 从点击点按密度扩到此量就停,防一口气选一大丛。
+    static let keystrokeCap = 2000
+    /// 点击落在小空隙时,吸附到 ±此分钟内最近的活跃分钟。
+    static let snapRadius = 5
+
+    /// 点选峰值丛:① snap 到最近活跃分钟 ② 用 gap 定住整丛 [L,R] ③ 从 click
+    /// 按密度向两边扩、到 keystroke 上限停(不越出 [L,R])。返回选中窗口 [lo,hi]。
+    /// 纯函数。rawTotals 空 / 越界时退化为单点。
+    func burstWindow(around click: Int) -> (lo: Int, hi: Int) {
+        guard !rawTotals.isEmpty, lastMinute >= firstMinute else { return (click, click) }
+        let firstM = firstMinute, lastM = lastMinute
+
+        // ① snap:点击点不活跃 → 找 ±snapRadius 内最近的活跃分钟。
+        var c = min(max(click, firstM), lastM)
+        if rawTotals[c] < Self.activeFloor {
+            snap: for d in 1...Self.snapRadius {
+                for cand in [c - d, c + d] where cand >= firstM && cand <= lastM {
+                    if rawTotals[cand] >= Self.activeFloor { c = cand; break snap }
+                }
+            }
+        }
+
+        // ② 自然丛 [L,R]:向两边跨小停顿,连续安静 ≥ gapMinutes 收边。
+        var L = c, R = c
+        var gap = 0
+        var i = c - 1
+        while i >= firstM {
+            if rawTotals[i] >= Self.activeFloor { L = i; gap = 0 }
+            else { gap += 1; if gap >= Self.gapMinutes { break } }
+            i -= 1
+        }
+        gap = 0; i = c + 1
+        while i <= lastM {
+            if rawTotals[i] >= Self.activeFloor { R = i; gap = 0 }
+            else { gap += 1; if gap >= Self.gapMinutes { break } }
+            i += 1
+        }
+
+        // ③ 从 c 按密度扩到 cap:每步取两侧邻居中"更密且加得下"的那个;
+        //    0 值(桥接内部小空隙)不吃预算,一律并入;两侧都放不下就停。
+        var lo = c, hi = c
+        var total = rawTotals[c]
+        while lo > L || hi < R {
+            let leftVal = lo > L ? rawTotals[lo - 1] : -1
+            let rightVal = hi < R ? rawTotals[hi + 1] : -1
+            // 更密的先试;放不下再试另一侧;都放不下就停。
+            let denserIsLeft = leftVal >= rightVal
+            let firstV = denserIsLeft ? leftVal : rightVal
+            let secondV = denserIsLeft ? rightVal : leftVal
+            if firstV >= 0 && total + firstV <= Self.keystrokeCap {
+                if denserIsLeft { lo -= 1 } else { hi += 1 }
+                total += firstV
+            } else if secondV >= 0 && total + secondV <= Self.keystrokeCap {
+                if denserIsLeft { hi += 1 } else { lo -= 1 }
+                total += secondV
+            } else { break }
+        }
+
+        // 修边:去掉两端桥接进来的安静分钟,带子不含空隙尾巴。
+        while lo < hi && rawTotals[lo] < Self.activeFloor { lo += 1 }
+        while hi > lo && rawTotals[hi] < Self.activeFloor { hi -= 1 }
+        return (lo, hi)
+    }
+
+    /// [lo, hi] 区间的原始击键总数(表头显示 / 触顶判断)。
+    func keystrokes(in lo: Int, _ hi: Int) -> Int {
+        guard !rawTotals.isEmpty, lo <= hi,
+              lo >= 0, hi < rawTotals.count else { return 0 }
+        return rawTotals[lo...hi].reduce(0, +)
+    }
 
     /// 平滑窗口半径(分钟)。窗口 = 2r+1,边界处自动收缩。轻度即可 —— 视觉
     /// 圆滑交给渲染层的 Catmull-Rom,这里只压噪声、不削峰。
@@ -303,7 +385,7 @@ struct MinuteBuckets: Sendable {
                 : Double(active[n / 2])
         }()
 
-        return MinuteBuckets(apps: apps, counts: counts, totals: totals,
+        return MinuteBuckets(apps: apps, counts: counts, totals: totals, rawTotals: rawTot,
                              maxTotal: maxTotal, median: median,
                              firstMinute: first, lastMinute: last)
     }
@@ -329,8 +411,8 @@ struct MinuteBuckets: Sendable {
 private struct InputActivityCanvas: View {
     let buckets: MinuteBuckets
     let colorScheme: ColorScheme
-    /// 选中的分钟(窗口中心);nil = 不画选中层。
-    let selectedMinute: Int?
+    /// 选中的峰值丛(蓝线 = click,高亮带 = [lo,hi]);nil = 不画选中层。
+    let selection: InputSelection?
     /// 点击图表 → 回传命中的分钟(已夹到活动范围)。
     let onSelect: (Int) -> Void
 
@@ -341,7 +423,7 @@ private struct InputActivityCanvas: View {
                 drawGrid(ctx, plot: plot)
                 drawStackedArea(ctx, plot: plot)
                 drawTotalCurve(ctx, plot: plot)
-                drawSelection(ctx, plot: plot)   // 蓝线 + ±2h 高亮带,压在面积上
+                drawSelection(ctx, plot: plot)   // 蓝线 + 峰值丛高亮带,压在面积上
                 drawAxis(ctx, plot: plot, size: size)
             }
             .contentShape(Rectangle())
@@ -360,16 +442,14 @@ private struct InputActivityCanvas: View {
         return min(max(m, buckets.firstMinute), buckets.lastMinute)
     }
 
-    /// 蓝线标点击点 + ±2h 高亮带(贯穿全图高度),带边界夹取。
+    /// 峰值丛高亮带(贯穿全图高度)+ 蓝线标点击点。带边界已在算法里夹好。
     private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
-        guard let center = selectedMinute else { return }
-        let lo = max(buckets.firstMinute, center - inputWindowRadiusMin)
-        let hi = min(buckets.lastMinute, center + inputWindowRadiusMin)
-        let xl = x(lo, plot), xr = x(hi, plot)
+        guard let s = selection else { return }
+        let xl = x(s.lo, plot), xr = x(s.hi, plot)
         let band = Path(CGRect(x: xl, y: plot.minY, width: max(0, xr - xl), height: plot.height))
         ctx.fill(band, with: .color(.blue.opacity(0.13)))
 
-        let cx = x(center, plot)
+        let cx = x(s.click, plot)
         var line = Path()
         line.move(to: CGPoint(x: cx, y: plot.minY))
         line.addLine(to: CGPoint(x: cx, y: plot.maxY))
