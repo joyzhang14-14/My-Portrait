@@ -23,6 +23,15 @@ final class ChatController {
     /// Currently displayed conversation id. `nil` means "no conv yet" — a
     /// new one is created lazily on the first `send`.
     private(set) var currentConvId: UUID? = nil
+    private(set) var isLoadingConversation: Bool = false
+    /// Only persist after this conversation's disk history has finished
+    /// loading. Otherwise switching away mid-load would replace it with `[]`.
+    private var loadedConversationId: UUID? = nil
+    private var conversationLoadTask: Task<Void, Never>? = nil
+    /// Finished turns and draft actions persist immediately. Keep track of the
+    /// small window where live/in-flight edits still exist only in memory so a
+    /// normal history-to-history switch does not rewrite a huge unchanged chat.
+    private var hasUnpersistedMessages: Bool = false
 
     /// 当前会话用的 agent。可能是 PiAgent(BYOK / OAuth provider)或
     /// ClaudeCodeAgent(Claude Code CLI 子进程)。统一靠 ChatAgent 协议。
@@ -111,6 +120,7 @@ final class ChatController {
         let removed = messages[uIdx...].map { $0.id }
         removed.forEach { contextChipsByMessage.removeValue(forKey: $0) }
         messages.removeSubrange(uIdx...)
+        hasUnpersistedMessages = true
 
         // Tearing down the agent forces a fresh conversation on Pi's side —
         // otherwise Pi has its own memory of the dropped turn.
@@ -129,6 +139,7 @@ final class ChatController {
         let removed = messages[uIdx...].map { $0.id }
         removed.forEach { contextChipsByMessage.removeValue(forKey: $0) }
         messages.removeSubrange(uIdx...)
+        hasUnpersistedMessages = true
 
         agent?.stop()
         agent = nil
@@ -156,17 +167,25 @@ final class ChatController {
     /// Drop the live Pi agent and load `convId`'s messages from disk.
     /// Use `nil` to clear the view (e.g. when "New chat" is pressed).
     func switchTo(_ convId: UUID?) {
+        switchTo(convId, preloadedMessages: nil)
+    }
+
+    private func switchTo(_ convId: UUID?, preloadedMessages: [ChatMessage]?) {
         // **切走前先 persist 当前 conv 的内存消息** —— 否则 streaming 中
         // 切对话:agent 被 stop 不会再触发 agentEnd → persist() 永远不调 →
         // 用户消息 + 部分 assistant 回复只在内存里 → 下面被 loadMessages
         // 的 B 覆盖 → 切回来从磁盘读发现啥都没有。
         // 先 flushPending 把已 buffer 的 delta 落入 messages,再 persist。
-        flushPending()
-        // 同 abort():persist 前强制收尾在飞的 tool/thinking block。下面
-        // agent 被 stop 后不会再有 toolEnd/agentEnd 来收尾,不关的话
-        // isRunning=true 被序列化落库 → 切回来永远显示 Running… 转圈。
-        closeRunningPartsOnCurrentAssistant()
-        persist()
+        if hasUnpersistedMessages {
+            flushPending()
+            // 同 abort():persist 前强制收尾在飞的 tool/thinking block。下面
+            // agent 被 stop 后不会再有 toolEnd/agentEnd 来收尾,不关的话
+            // isRunning=true 被序列化落库 → 切回来永远显示 Running… 转圈。
+            closeRunningPartsOnCurrentAssistant()
+            persist()
+        }
+        conversationLoadTask?.cancel()
+        conversationLoadTask = nil
 
         agent?.stop()
         agent = nil
@@ -184,7 +203,26 @@ final class ChatController {
         // 每个对话独立计数,新对话允许再次扫一次相关条目。
         relatedScanFiredThisConv = false
         if let convId {
-            messages = store.loadMessages(for: convId)
+            if let preloadedMessages {
+                messages = preloadedMessages
+                loadedConversationId = convId
+                isLoadingConversation = false
+                hasUnpersistedMessages = false
+            } else {
+                messages = []
+                loadedConversationId = nil
+                isLoadingConversation = true
+                conversationLoadTask = Task { [weak self] in
+                    guard let self else { return }
+                    let loaded = await self.store.loadMessagesInBackground(for: convId)
+                    guard !Task.isCancelled, self.currentConvId == convId else { return }
+                    self.messages = loaded
+                    self.loadedConversationId = convId
+                    self.isLoadingConversation = false
+                    self.hasUnpersistedMessages = false
+                    self.conversationLoadTask = nil
+                }
+            }
             // 🔒 Capture-on-switch:切到一个还没 lock 的 conv(老 conv 或
             // 锁状态下没机会改的),立刻把当前全局快照写进它的 lock,这样
             // 后面切走改全局 → 切回时 picker 仍然显示这个 conv 当时的值。
@@ -200,6 +238,9 @@ final class ChatController {
             }
         } else {
             messages = []
+            loadedConversationId = nil
+            isLoadingConversation = false
+            hasUnpersistedMessages = false
         }
     }
 
@@ -208,7 +249,7 @@ final class ChatController {
     @discardableResult
     func newConversation() -> UUID {
         let conv = store.createConversation()
-        switchTo(conv.id)
+        switchTo(conv.id, preloadedMessages: [])
         return conv.id
     }
 
@@ -230,7 +271,7 @@ final class ChatController {
         // assistantMessageID 重指到新 placeholder,上一轮在流的 delta 全写进新
         // 气泡;② sendPrompt 杀旧进程,旧进程迟到的 agentEnd 把新一轮误判为
         // 已结束 → 新回复的 delta 全被丢弃,气泡永远空白。
-        guard !isStreaming else { return }
+        guard !isStreaming, !isLoadingConversation else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -277,6 +318,7 @@ final class ChatController {
                     msg.parts = [.text(id: UUID(), value: trimmed)]
                 }
                 self.messages.append(msg)
+                self.hasUnpersistedMessages = true
                 self.contextChipsByMessage[msg.id] = chips
                 self.attachmentsByMessage[msg.id] = attachments
                 self.pendingCitations = context.citations
@@ -337,7 +379,7 @@ final class ChatController {
         let conv = store.createConversation()
         let slug = originalURL.deletingPathExtension().lastPathComponent
         store.renameConversation(conv.id, to: "Edit: \(slug)")
-        switchTo(conv.id)
+        switchTo(conv.id, preloadedMessages: [])
         // switchTo 清掉了 pendingEditOriginalURL,所以这里重设。下一次 send()
         // 会消费它,自动走 sendEditRequest 路线。
         pendingEditOriginalURL = originalURL
@@ -374,6 +416,7 @@ final class ChatController {
         var msg = ChatMessage(role: .user, text: trimmed, time: Date())
         msg.parts = [.text(id: UUID(), value: trimmed)]
         messages.append(msg)
+        hasUnpersistedMessages = true
         lastError = nil
 
         if pendingTitleFromFirstMessage, let convId = currentConvId {
@@ -473,6 +516,7 @@ final class ChatController {
             // Prepare an empty assistant bubble we'll stream parts into.
             let placeholder = ChatMessage(role: .assistant, text: "", parts: [], time: Date())
             messages.append(placeholder)
+            hasUnpersistedMessages = true
             assistantMessageID = placeholder.id
             activeTextPartID = nil
             // Attach any citations seeded by the last `send(chips:)` call so
@@ -661,15 +705,10 @@ final class ChatController {
     /// doesn't show 0 when there's clearly traffic.
     func tokenTotal(for convId: UUID) -> Int {
         if let u = tokenUsageByConv[convId] { return u.input + u.output }
-        let chars = messages.reduce(0) { $0 + $1.text.count + $1.parts.reduce(0) { acc, p in
-            switch p {
-            case .text(_, let v):    return acc + v.count
-            case .tool(let b):       return acc + b.command.count + b.output.count
-            case .thinking(let b):   return acc + b.text.count
-            case .error(let b):      return acc + b.message.count
-            case .editDraft(let b):  return acc + b.request.count + b.beforeBody.count + b.afterBody.count
-            }
-        } }
+        // `message.text` is the visible transcript. Do not walk hidden tool
+        // output here: it can be megabytes and this method runs on every view
+        // update while a historical conversation is open.
+        let chars = messages.reduce(0) { $0 + $1.text.count }
         return chars / 4   // ~4 chars per token
     }
 
@@ -1057,14 +1096,29 @@ final class ChatController {
     /// streaming)时,从磁盘重读 → UI 像普通 chat 一样逐段刷出 thinking / bash。
     /// 自己在 streaming 的话绝不动 messages,免得踩自己的 live 状态。
     func liveReloadIfViewing(_ convId: UUID) {
-        guard currentConvId == convId, !isStreaming, agent == nil else { return }
-        messages = store.loadMessages(for: convId)
+        guard currentConvId == convId, !isStreaming, agent == nil,
+              !hasUnpersistedMessages else { return }
+        conversationLoadTask?.cancel()
+        conversationLoadTask = Task { [weak self] in
+            guard let self else { return }
+            let loaded = await self.store.loadMessagesInBackground(for: convId)
+            guard !Task.isCancelled,
+                  self.currentConvId == convId,
+                  !self.isStreaming,
+                  self.agent == nil else { return }
+            self.messages = loaded
+            self.loadedConversationId = convId
+            self.isLoadingConversation = false
+            self.hasUnpersistedMessages = false
+            self.conversationLoadTask = nil
+        }
     }
 
     /// Flush the current message list to disk under `currentConvId`.
     private func persist() {
-        guard let convId = currentConvId else { return }
+        guard let convId = currentConvId, loadedConversationId == convId else { return }
         store.saveMessages(messages, for: convId)
+        hasUnpersistedMessages = false
     }
 
     /// Build a short human-readable summary of a tool's args. For bash that's
@@ -1086,4 +1140,3 @@ final class ChatController {
         return ""
     }
 }
-

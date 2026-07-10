@@ -71,7 +71,10 @@ struct HomeView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 0)
             }
-            if chat.messages.isEmpty {
+            if chat.isLoadingConversation {
+                ProgressView("Loading conversation…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if chat.messages.isEmpty {
                 ScrollView { greetingContent }
             } else {
                 ChatTranscript(
@@ -279,7 +282,7 @@ struct HomeView: View {
     private func send() {
         // 流式回复进行中 Enter 不发送(也**不清空输入框**,用户打的字留着,
         // 等流式结束再发)。ChatController.send 里还有一层同样的 guard 兜底。
-        guard !chat.isStreaming else { return }
+        guard !chat.isStreaming, !chat.isLoadingConversation else { return }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return }
         let chipsToSend = contextChips
@@ -672,7 +675,7 @@ private struct AssistantBody: View {
             if parts.isEmpty && !fallbackText.isEmpty {
                 MarkdownView(source: fallbackText)
             }
-            if ConfigStore.shared.display.compactToolBlocks {
+            if ConfigStore.shared.display.compactToolBlocks || shouldForceCompactProcessBlocks {
                 // 把连续的过程块(thinking/tool/error/editDraft)折叠成一个汇总栏,
                 // 最终文本(.text)正常显示。collapsed 时不渲染内部块 → 历史消息更快。
                 ForEach(compactSegments) { seg in
@@ -692,6 +695,18 @@ private struct AssistantBody: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: parts.count)
+    }
+
+    /// Protect historical conversations with unusually large hidden process
+    /// payloads even when the user has disabled compact tool blocks.
+    private var shouldForceCompactProcessBlocks: Bool {
+        if parts.count > 24 { return true }
+        var outputBytes = 0
+        for case .tool(let block) in parts {
+            outputBytes += block.output.utf8.count
+            if outputBytes > 64 * 1_024 { return true }
+        }
+        return false
     }
 
     /// 把 parts 切成 segments:连续的非文本块归入一个 group,文本块独立 ——
@@ -754,7 +769,7 @@ private struct CompactSegment: Identifiable {
 
 /// 把一条回复里连续的「过程块」(thinking + tool + error + editDraft)折叠成一个
 /// 汇总栏。collapsed 时只渲染统计 header(read/ran/failed),**不渲染内部块** ——
-/// 历史消息因此不必一次性渲染几十张 card,前端流畅很多;展开后才 lazy 加载具体块。
+/// 历史消息因此不必一次性渲染几十张 card,前端流畅很多;展开后才创建具体块视图。
 /// 流式生成中(有 running 块)默认展开看实时进度,完成后自动折叠。
 private struct CompactStepsBar: View {
     let blocks: [ContentPart]
