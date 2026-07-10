@@ -1148,7 +1148,8 @@ struct MemoriesView: View {
 enum FolderPalette {
     struct Swatch { let name: String; let hex: String }
 
-    /// 右键 Change color 菜单里列的预设色。hex 跟下面默认 tint 同系。
+    /// 随机分配/默认色的预设池(07-10 起 UI 不再展示——选色一律走光谱;
+    /// 仅供 assignHex 随机固化与 defaultHex 兜底取色)。
     static let swatches: [Swatch] = [
         Swatch(name: "Blue",    hex: "#5C8DE8"),
         Swatch(name: "Green",   hex: "#76BD80"),
@@ -1197,22 +1198,6 @@ enum FolderPalette {
             green: Double((v >> 8) & 0xFF) / 255,
             blue:  Double(v & 0xFF) / 255
         )
-    }
-
-    /// 给菜单项用的彩色圆点。**预渲染成真彩 NSImage** —— SwiftUI `Menu` 里
-    /// `Label(systemImage:)` 的 SF Symbol 会被系统当 template 统一染成文字色
-    /// (全灰),`.foregroundStyle` 被吞。画一张 isTemplate=false 的实心圆图,
-    /// `Image(nsImage:)` 才能在菜单里显示对应颜色。
-    static func dotImage(hex: String, diameter: CGFloat = 11) -> NSImage {
-        let ns = nsColor(fromHex: hex) ?? .systemGray
-        let size = NSSize(width: diameter, height: diameter)
-        let img = NSImage(size: size)
-        img.lockFocus()
-        ns.setFill()
-        NSBezierPath(ovalIn: NSRect(origin: .zero, size: size)).fill()
-        img.unlockFocus()
-        img.isTemplate = false   // 关键:别被菜单当 template 重染
-        return img
     }
 
     static func nsColor(fromHex hex: String) -> NSColor? {
@@ -1347,18 +1332,10 @@ private struct FolderDisclosureRow: View {
             .contextHighlight(cornerRadius: 8) {
                 Button("Rename…") { renameDraft = title; renaming = true }
                 Menu("Change color") {
-                    ForEach(FolderPalette.swatches, id: \.hex) { sw in
-                        Button { onSetColor(sw.hex) } label: {
-                            // 彩色圆点(预渲染 NSImage,菜单里才不被染成灰)+ 颜色名。
-                            Image(nsImage: FolderPalette.dotImage(hex: sw.hex))
-                            Text(sw.name)
-                        }
-                    }
-                    Divider()
-                    // 光谱取色(07-10 用户"9 个预设不够,要 spectrum"):系统
+                    // 光谱取色(07-10 用户定稿"不要 9 色,直接 spectrum"):系统
                     // NSColorPanel。持续回调防抖 0.25s 再落盘 —— onSetColor
                     // 会整列表 reload,拖光谱逐 tick 提交会打爆。
-                    Button("Custom (spectrum)…") {
+                    Button("Spectrum…") {
                         ColorPanelBridge.shared.present(initialHex: colorHex) { hex in
                             colorCommitTask?.cancel()
                             colorCommitTask = Task { @MainActor in
@@ -1367,6 +1344,7 @@ private struct FolderDisclosureRow: View {
                             }
                         }
                     }
+                    Divider()
                     Button("Default") { onSetColor(nil) }
                 }
                 Divider()
@@ -1595,34 +1573,23 @@ private struct NewFolderSheet: View {
                 Text("Color (optional)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
-                // 9 个预设色 swatch。不选 = nil = 按 name hash 出的默认色
-                //(跟 FolderPalette.defaultTint 一致,同名每次同色)。已选状态
-                // 再点一次同色 = 撤回回默认色。
-                FlowLayout(spacing: 8) {
-                    ForEach(FolderPalette.swatches, id: \.hex) { sw in
-                        if let c = FolderPalette.color(fromHex: sw.hex) {
-                            swatchDot(label: sw.name, color: c,
-                                      selected: hex == sw.hex) {
-                                hex = (hex == sw.hex) ? nil : sw.hex
-                            }
-                        }
-                    }
-                }
-                // 光谱取色(07-10 用户"9 个预设不够,要 spectrum"):原生
-                // ColorPicker,点色块即开系统取色板(光谱/色轮/滑杆)。
-                ColorPicker(selection: Binding(
-                    get: { hex.flatMap { FolderPalette.color(fromHex: $0) } ?? .gray },
-                    set: { hex = FolderPalette.hex(from: NSColor($0)) }
-                ), supportsOpacity: false) {
-                    Text("Custom (spectrum)")
-                        .font(.system(size: 11))
+                // 内嵌光谱(07-10 用户定稿"不要 9 色,直接 spectrum 嵌入"):
+                // 点/拖即选;不选 = 创建时随机固化一色。
+                SpectrumPicker(hex: $hex)
+                HStack(spacing: 8) {
+                    Text(hex == nil
+                         ? "No color picked — a random palette color is assigned and kept."
+                         : "Selected \(hex ?? "")")
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                    if hex != nil {
+                        Button("Clear") { hex = nil }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Text(hex == nil
-                     ? "No color picked — a random palette color is assigned and kept."
-                     : "Tap the selected swatch again to clear.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
             }
 
             HStack {
@@ -1639,25 +1606,64 @@ private struct NewFolderSheet: View {
         .frame(width: 380)
         .onAppear { nameFocused = true }
     }
+}
 
-    /// 一个圆点 swatch。selected 时加一圈 accent ring。
-    @ViewBuilder
-    private func swatchDot(label: String, color: Color, selected: Bool,
-                           action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(color)
-                    .frame(width: 22, height: 22)
-                if selected {
-                    Circle()
-                        .strokeBorder(Theme.accent, lineWidth: 2)
-                        .frame(width: 28, height: 28)
+/// 内嵌光谱取色(07-10 用户定稿"不要 9 色,直接 spectrum 嵌入"):x=色相,
+/// y=上半掺白(亮)→中线纯色→下半掺黑(暗),同 NSColorPanel Spectrum 页
+/// 观感。点/拖即选,写 "#RRGGBB" 进 binding。
+private struct SpectrumPicker: View {
+    @Binding var hex: String?
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            ZStack(alignment: .topLeading) {
+                LinearGradient(colors: (0...12).map {
+                    Color(hue: Double($0) / 12, saturation: 1, brightness: 1)
+                }, startPoint: .leading, endPoint: .trailing)
+                LinearGradient(stops: [
+                    .init(color: .white, location: 0),
+                    .init(color: .white.opacity(0), location: 0.5),
+                    .init(color: .black.opacity(0), location: 0.5),
+                    .init(color: .black, location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+                if let pos = indicator(in: size) {
+                    ZStack {
+                        Circle().stroke(.black.opacity(0.6), lineWidth: 3)
+                        Circle().stroke(.white, lineWidth: 1.5)
+                    }
+                    .frame(width: 14, height: 14)
+                    .position(pos)
                 }
             }
-            .frame(width: 30, height: 30)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0).onChanged { v in
+                    pick(at: v.location, in: size)
+                }
+            )
         }
-        .buttonStyle(.plain)
-        .help(label)
+        .frame(height: 110)
+    }
+
+    private func pick(at p: CGPoint, in size: CGSize) {
+        guard size.width > 1, size.height > 1 else { return }
+        let fx = min(max(p.x / size.width, 0), 1)
+        let fy = min(max(p.y / size.height, 0), 1)
+        let sat = fy <= 0.5 ? fy * 2 : 1
+        let bri = fy <= 0.5 ? 1 : 1 - (fy - 0.5) * 2
+        let c = NSColor(hue: fx, saturation: sat, brightness: bri, alpha: 1)
+        hex = FolderPalette.hex(from: c)
+    }
+
+    /// 当前 hex 在光谱上的指示点(反解 HSB;光谱表不了的组合取最近似位置)。
+    private func indicator(in size: CGSize) -> CGPoint? {
+        guard let hx = hex, let ns = FolderPalette.nsColor(fromHex: hx),
+              let c = ns.usingColorSpace(.deviceRGB) else { return nil }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        let fy = b > 0.99 ? s / 2 : 0.5 + (1 - b) / 2
+        return CGPoint(x: h * size.width, y: fy * size.height)
     }
 }
