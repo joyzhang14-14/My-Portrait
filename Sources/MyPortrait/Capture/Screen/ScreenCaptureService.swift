@@ -6,14 +6,12 @@ import os.log
 
 /// ScreenCaptureKit 包装。负责单帧截图。
 ///
-/// **@MainActor 是有意为之**：macOS 26 (Tahoe) 上 SCK 内部的 XPC decoder 有
-/// "bad range / dispatch_assert_queue" 已知问题（用户日志：
-/// `NSXPCDecoder validateAllowedClass` warning 后接 EXC_BREAKPOINT in
-/// libdispatch）。把 SCK 调用统一钉在 main thread 是 Apple 自己 sample 的惯例
-/// 写法（ScreenCaptureKitSample 等），能稳定绕开这条路径。
+/// **@MainActor 是有意为之**：macOS 26 (Tahoe) 上 SCK 截图调用放到任意后台
+/// executor 曾触发 XPC decoder 的 "bad range / dispatch_assert_queue" 崩溃，
+/// 所以 `SCScreenshotManager.captureImage` 仍固定在主线程。
 ///
-/// 性能：SCK 重活在 replayd 进程外做，我们这边只是 await 一个 XPC 请求；
-/// 不会真阻塞 main thread 几十毫秒，UI 不会卡。
+/// 例外：`SCShareableContent` 窗口枚举实测偶发同步卡住主线程 7–8 秒。它单独
+/// 放进 detached task；枚举慢时只延迟这一帧，不再冻结 UI。
 @MainActor
 final class ScreenCaptureService {
 
@@ -184,30 +182,39 @@ final class ScreenCaptureService {
     /// 每帧重新枚举：主显示器 + 当前所有屏上窗口。masking 要逐窗口判定排除，
     /// 窗口位置 / 开关每帧都在变，不能缓存。
     private func fetchDisplayAndWindows() async throws -> (SCDisplay, [SCWindow]) {
-        let content: SCShareableContent
-        do {
-            content = try await SCShareableContent.excludingDesktopWindows(
-                false,
-                onScreenWindowsOnly: true
-            )
-        } catch {
-            if Self.isPermissionDenied(error) {
-                throw CaptureError.screenRecordingPermissionDenied
+        let monitorId = config.monitorId
+        let startedNs = DispatchTime.now().uptimeNanoseconds
+        let result = try await Task.detached(priority: .userInitiated) {
+            let content: SCShareableContent
+            do {
+                content = try await SCShareableContent.excludingDesktopWindows(
+                    false,
+                    onScreenWindowsOnly: true
+                )
+            } catch {
+                if Self.isPermissionDenied(error) {
+                    throw CaptureError.screenRecordingPermissionDenied
+                }
+                throw error
             }
-            throw error
-        }
 
-        let mainID = CGMainDisplayID()
-        guard let display = content.displays.first(where: { $0.displayID == mainID })
-            ?? content.displays.first
-        else {
-            throw CaptureError.displayNotFound(monitorId: config.monitorId)
+            let mainID = CGMainDisplayID()
+            guard let display = content.displays.first(where: { $0.displayID == mainID })
+                ?? content.displays.first
+            else {
+                throw CaptureError.displayNotFound(monitorId: monitorId)
+            }
+            return ShareableContentSnapshot(display: display, windows: content.windows)
+        }.value
+        let elapsedMs = (DispatchTime.now().uptimeNanoseconds - startedNs) / 1_000_000
+        if elapsedMs >= 250 {
+            logger.warning("SCShareableContent enumeration slow: \(elapsedMs, privacy: .public)ms")
         }
-        return (display, content.windows)
+        return (result.display, result.windows)
     }
 
     /// ScreenCaptureKit 报权限错误时，NSError code 是 -3801（kSCStreamErrorUserDeclined）。
-    private static func isPermissionDenied(_ error: Error) -> Bool {
+    nonisolated private static func isPermissionDenied(_ error: Error) -> Bool {
         let ns = error as NSError
         if ns.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" && ns.code == -3801 {
             return true
@@ -215,4 +222,11 @@ final class ScreenCaptureService {
         let desc = ns.localizedDescription.lowercased()
         return desc.contains("permission") || desc.contains("not authorized") || desc.contains("declined")
     }
+}
+
+/// ScreenCaptureKit 的 Objective-C model 没有 Sendable 标注，但枚举完成后这些
+/// handle 只读；包装后从后台任务交回 MainActor 使用。
+private struct ShareableContentSnapshot: @unchecked Sendable {
+    let display: SCDisplay
+    let windows: [SCWindow]
 }
