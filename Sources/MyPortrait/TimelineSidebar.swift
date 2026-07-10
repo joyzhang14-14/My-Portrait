@@ -399,11 +399,15 @@ struct TimelineSidebar: View {
     private var memoryScopeSection: some View {
         sectionCard {
             if memoryViewMode == .canvas {
-                // canvas 模式列:Personal Info(点击自动回 text)/ Portrait(整图)
-                // / Events / Input(打字活动面积图)。
-                scopeHeader("GRAPH")
+                // canvas 模式列:PROFILE 小分区(Personal Info,跟 text 模式对齐)
+                // + GRAPH(Portrait 整图 / Events / Input 打字活动面积图)。
+                scopeHeader("PROFILE")
                 VStack(spacing: 2) {
                     scopeRow(.personalInfo)
+                }
+                Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
+                scopeHeader("GRAPH")
+                VStack(spacing: 2) {
                     scopeRowCustom(isOn: isPortraitScope,
                                    icon: "person.fill",
                                    title: "Portrait") {
