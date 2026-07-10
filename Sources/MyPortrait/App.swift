@@ -543,6 +543,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             lifecycleLog.error("Storage.ensureExists failed: \(error.localizedDescription, privacy: .public)")
         }
+        // 必须在窗口和后台服务之前落运行标记。若本次之后被 SIGKILL / OOM，
+        // 下次启动能看到上次没有走 applicationWillTerminate。
+        RunTerminationTracker.shared.start()
 
         // showDockIcon=false → .accessory(无 Dock 图标);否则 .regular。
         // 启动就读 config,避免「先显示 Dock 再被 ConfigApplier 隐藏」的闪烁。
@@ -693,6 +696,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             typingObserver?.stop()
             return
         }
+        // 放在所有清理之前：即便后面的停止流程超时，正常 Quit 也不会被误报成
+        // 系统强杀。SIGKILL / OOM 不会进入这个回调，状态会保持 running。
+        RunTerminationTracker.shared.markCleanExit()
         // 把还在 250ms debounce 窗口里的待写配置同步刷盘 —— 否则退出前最后
         // 一刻的设置改动(刚拨的开关)落不了盘,下次启动静默丢失。
         ConfigStore.shared.flushPendingWrite()
