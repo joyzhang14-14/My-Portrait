@@ -1331,21 +1331,18 @@ private struct FolderDisclosureRow: View {
             // 右键菜单:改名 / 改颜色(预设色板)/ 删除。右键时蓝框框住标题行。
             .contextHighlight(cornerRadius: 8) {
                 Button("Rename…") { renameDraft = title; renaming = true }
-                Menu("Change color") {
-                    // 光谱取色(07-10 用户定稿"不要 9 色,直接 spectrum"):系统
-                    // NSColorPanel。持续回调防抖 0.25s 再落盘 —— onSetColor
-                    // 会整列表 reload,拖光谱逐 tick 提交会打爆。
-                    Button("Spectrum…") {
-                        ColorPanelBridge.shared.present(initialHex: colorHex) { hex in
-                            colorCommitTask?.cancel()
-                            colorCommitTask = Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(250))
-                                if !Task.isCancelled { onSetColor(hex) }
-                            }
+                // 光谱取色(07-10 用户定稿:点开直接 spectrum,无子菜单;
+                // Default 项已删——创建时就随机固化了颜色,无"默认"可回)。
+                // 系统 NSColorPanel 持续回调防抖 0.25s 再落盘 —— onSetColor
+                // 会整列表 reload,拖光谱逐 tick 提交会打爆。
+                Button("Change color…") {
+                    ColorPanelBridge.shared.present(initialHex: colorHex) { hex in
+                        colorCommitTask?.cancel()
+                        colorCommitTask = Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(250))
+                            if !Task.isCancelled { onSetColor(hex) }
                         }
                     }
-                    Divider()
-                    Button("Default") { onSetColor(nil) }
                 }
                 Divider()
                 Button("Delete folder", role: .destructive) { confirmingDelete = true }
