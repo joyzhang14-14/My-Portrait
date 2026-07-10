@@ -193,6 +193,23 @@ actor FocusProbe {
         let bundleId = app.bundleIdentifier
         let pid = app.processIdentifier
 
+        // 前台就是 My Portrait 自己时绝不能在主线程同步遍历自己的 AX tree：
+        // AX 请求最终也要由本进程主线程响应，会形成自等待。Changelog 这类大树
+        // 实测把 UI 卡住 15.8s。自身截图没有隐私/URL 判定需求，axText 留 nil 后
+        // OCRService 会正常走 Vision，不影响采集。
+        if pid == getpid() {
+            cached = FocusInfo(
+                appName: name,
+                bundleId: bundleId,
+                windowTitle: nil,
+                browserUrl: nil,
+                axText: nil,
+                axIdentifier: nil,
+                isFocused: true
+            )
+            return
+        }
+
         var windowTitle: String?
         var browserUrl: String?
         var axText: String?
