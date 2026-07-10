@@ -46,14 +46,12 @@ struct CaptureHealthView: View {
         }
     }
 
-    /// 公开包引导到 GitHub；私下包使用系统分享面板（邮件/AirDrop 等）。
+    /// 私下 bug 上报的操作指引:三步——文件已在 Finder 点亮 → 打开邮件 → 拖进附件发送。
     private func uploadGuideSheet(url: URL) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Image(systemName: "ladybug.fill").foregroundStyle(.orange)
-                Text(exportedBundleMode == .publicReport
-                     ? "Public diagnostic bundle ready"
-                     : "Private support bundle ready")
+                Image(systemName: "lock.shield.fill").foregroundStyle(.orange)
+                Text("Diagnostic file ready")
                     .font(.system(size: 15, weight: .semibold))
             }
             Text("Saved to your Downloads folder:\n\(url.lastPathComponent)")
@@ -62,19 +60,13 @@ struct CaptureHealthView: View {
 
             Divider()
 
-            if exportedBundleMode == .publicReport {
-                Text("Safe for a public GitHub issue: free-form logs, full configuration, captured content, and secrets are excluded.")
-                    .font(.system(size: 12))
-                    .fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 7) {
-                    uploadStep(1, "Open GitHub Issues below and create a bug report.")
-                    uploadStep(2, "Describe what happened and how to trigger it.")
-                    uploadStep(3, "Drag this zip from Downloads into the issue.")
-                }
-            } else {
-                Text("This bundle includes sanitized error messages and detailed timestamps. Review it before sharing, then send it only through a private channel. Its contents are capped to stay practical for common email attachment limits.")
-                    .font(.system(size: 12))
-                    .fixedSize(horizontal: false, vertical: true)
+            Text("Almost done — just three steps:")
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 7) {
+                uploadStep(1, "The file is highlighted in Finder (a window just opened). Keep it visible.")
+                uploadStep(2, "Click “Open email” below — a message to the developer opens, already addressed.")
+                uploadStep(3, "Drag the highlighted file into that email, then hit Send. Done!")
             }
 
             Divider()
@@ -84,19 +76,10 @@ struct CaptureHealthView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
                 .buttonStyle(.bordered).controlSize(.small)
-                if exportedBundleMode == .publicReport {
-                    Button("Open GitHub Issues") {
-                        if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
-                            NSWorkspace.shared.open(issue)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
-                } else {
-                    ShareLink(item: url) {
-                        Label("Share privately…", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Open email") {
+                    openBugReportEmail(attaching: url)
                 }
+                .buttonStyle(.borderedProminent).controlSize(.small)
                 Spacer()
                 Button("Done") { showUploadGuide = false }
                     .buttonStyle(.bordered).controlSize(.small)
@@ -120,19 +103,9 @@ struct CaptureHealthView: View {
     /// 公开 issue 和私下支持分别使用不同的脱敏强度与发送路径。
     private var diagnosticCard: some View {
         SettingsCard(title: "Bug report",
-                     footnote: "Both options exclude captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
-            SettingsRow("Report bug to GitHub issue",
-                        description: "Best if you can describe the bug clearly and know how to trigger it. Makes a safe file to attach to a public GitHub issue.",
-                        icon: "ladybug") {
-                Button(diagBundleBusy ? "Working…" : "Export") {
-                    runDiagnosticExport(mode: .publicReport)
-                }
-                .buttonStyle(.bordered).controlSize(.small)
-                .disabled(diagBundleBusy)
-            }
-            SettingsDivider()
+                     footnote: "This excludes captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
             SettingsRow("Send data to developer privately",
-                        description: "Not sure what caused the bug, or don't feel like writing it up? This packs detailed logs and opens an email to the developer — just hit send.",
+                        description: "Not sure what caused the bug, or don't feel like writing it up? This packs detailed logs and helps you email them to the developer.",
                         icon: "lock.shield") {
                 Button(diagBundleBusy ? "Working…" : "Send") {
                     runDiagnosticExport(mode: .privateSupport)
@@ -159,12 +132,9 @@ struct CaptureHealthView: View {
                 diagBundleStatus = "Saved: \(url.path)"
                 exportedBundleURL = url
                 exportedBundleMode = mode
-                if mode == .privateSupport {
-                    // 私下包:直接把 zip 在 Finder 里点亮 + 打开写邮件窗口(To 预填开发者)。
-                    openBugReportEmail(attaching: url)
-                } else {
-                    showUploadGuide = true
-                }
+                // zip 先在 Finder 里点亮,方便待会拖进邮件;再弹步骤指引窗口。
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+                showUploadGuide = true
             } catch {
                 diagBundleStatus = "Export failed: \(error.localizedDescription)"
             }
@@ -172,12 +142,9 @@ struct CaptureHealthView: View {
         }
     }
 
-    /// 私下 bug 上报:先在 Finder 点亮 zip(方便用户拖进邮件当附件),
-    /// 再打开系统默认邮件客户端的写信窗口,To 预填开发者邮箱、主题 / 正文预填好。
-    /// mailto 规范不支持附件,所以正文里附上文件路径 + 提示拖拽。
+    /// 打开系统默认邮件客户端的写信窗口,To 预填开发者邮箱、主题 / 正文预填好。
+    /// mailto 规范不支持附件,所以正文里附上文件路径 + 提示拖拽(zip 已在 Finder 点亮)。
     private func openBugReportEmail(attaching url: URL) {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-
         let body = """
         Hi, I ran into a bug in My Portrait.
 
