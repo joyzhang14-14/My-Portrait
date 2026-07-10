@@ -301,8 +301,6 @@ public enum GraphConstants {
     /// 拉到很远才消失
     public static let labelFadeZoomHi: Double = 0.9
     public static let labelFadeZoomLo: Double = 0.6
-    /// 浮窗:鼠标移出后自动关闭延迟(s)
-    public static let floatWindowAutoCloseDelay: TimeInterval = 1.0
 
     // MARK: folder → 主球 连接强度(需求 §4.2)
 
