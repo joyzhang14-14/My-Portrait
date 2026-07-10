@@ -366,12 +366,11 @@ private struct ChatTranscript: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // LazyVStack:历史 bubble 不再全部常驻(长会话首开/滚动时只建
-                // 可见部分)。配合 ChatBubble 的手写 Equatable + .equatable(),
-                // 流式期间每个 delta tick 只有正在长的那条重跑 body,历史消息
-                // 全部相等性短路 —— 之前闭包参数让 SwiftUI 无法自动短路,每个
-                // tick 整条历史(几十条 markdown)全量重渲染。
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // 不用 LazyVStack：它在快速滚动时会反复回收/重建超高 Markdown
+                // bubble，macOS 26 上会陷入尺寸计算循环并持续涨内存。VStack
+                // 配合 ChatBubble.equatable() 和 Markdown 缓存，流式更新仍只
+                // 重建真正变化的消息。
+                VStack(alignment: .leading, spacing: 18) {
                     let visible = displayMessages
                     ForEach(Array(visible.enumerated()), id: \.element.id) { idx, msg in
                         // The streaming assistant bubble is always the last
