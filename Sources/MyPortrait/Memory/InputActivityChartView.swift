@@ -76,6 +76,9 @@ struct InputActivityChartView: View {
             chartArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // 整个面板都不拿来拖窗口(空白区的命中视图 = 此层,mouseDownCanMoveWindow
+        // = false)。交互控件本就非可拖窗,不受影响;拖窗仍可用标题栏。
+        .background(WindowDragBlocker())
         .background(SidebarBackdrop().ignoresSafeArea())
         .task(id: selectedDay) {
             expandedIds = []
@@ -922,8 +925,9 @@ private struct InputRecordCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onHover { hovering = $0 }
-        // 收起态整卡可点;展开态只有 header 可点(正文要留给文本选中)。
-        .onTapGesture { if !expanded { onToggle() } }
+        // 整卡可点收放(含展开态正文区)。文字选中是"按住拖动",tap 手势不会在
+        // 拖动时触发 → 点击=收回、拖动=选字,两者不冲突。
+        .onTapGesture { onToggle() }
     }
 
     private var cardFill: Color {
