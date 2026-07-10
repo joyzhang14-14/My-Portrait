@@ -121,11 +121,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home
         }
-        // 图谱浮窗 wr chip → 切回 text 模式的 Input 并定位该 record(需求 §5.1)。
+        // 图谱浮窗 wr chip → 切到 canvas 模式的 Input(打字活动面积图)并定位该
+        // record(07-10 用户:input 界面已搬到 canvas 区,跳转去那)。
         .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
             guard let id = notif.object as? Int64 else { return }
             selection = .memories
-            memoryViewMode = .text
+            memoryViewMode = .canvas
             memoryScope = .input
             memoryInputJump = id
         }
@@ -196,7 +197,7 @@ struct ContentView: View {
             if memoryViewMode == .canvas, MemoryViewMode.supportsCanvas(memoryScope) {
                 // input 的图谱形态是打字活动面积图,不走力导向 GraphRootView。
                 if memoryScope == .input {
-                    InputActivityChartView()
+                    InputActivityChartView(jumpToRecordId: $memoryInputJump)
                 } else {
                     GraphRootView(scope: $memoryScope)
                 }

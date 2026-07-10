@@ -36,6 +36,16 @@ private struct InputSelection: Equatable {
 /// records 走 `writingRecordsInRange` 同窗口。
 @MainActor
 struct InputActivityChartView: View {
+    /// writing-style wr chip 跳转目标(ContentView 传入)。非 nil 时:切到该
+    /// record 所在天 → 滚动到并高亮/展开那张卡片。消费后置回 nil。
+    var jumpToRecordId: Binding<Int64?>? = nil
+    /// 待定位的 record id —— 换天要等 reload 完成才能滚,先挂在这。
+    @State private var pendingJumpId: Int64? = nil
+    /// 当前高亮的 record(定位后 ~2s 淡出)。
+    @State private var highlightedId: Int64? = nil
+    /// 滚动目标 + nonce(同 id 重复定位也要触发 ScrollViewReader.onChange)。
+    @State private var scrollTargetId: Int64? = nil
+    @State private var scrollNonce = 0
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
     @State private var records: [WritingRecordViewRow] = []
@@ -69,6 +79,52 @@ struct InputActivityChartView: View {
             expandedIds = []
             selection = nil
             await reload()
+        }
+        .task { await handleJump() }                       // 首次进入即带跳转
+        .onChange(of: jumpToRecordId?.wrappedValue) { _, v in
+            if v != nil { Task { await handleJump() } }    // 已在此界面再点别的 chip
+        }
+    }
+
+    // MARK: - wr chip 跳转定位
+
+    /// 查该 record 所在天 → 切天(或同天直接定位)。消费 binding 防重触发。
+    @MainActor
+    private func handleJump() async {
+        guard let target = jumpToRecordId?.wrappedValue, let store else { return }
+        jumpToRecordId?.wrappedValue = nil
+        let ts = await Task.detached(priority: .userInitiated) {
+            store.writingRecordStartTs(id: target)
+        }.value
+        guard let ts else { return }   // record 不存在(可能已删)→ 放弃
+        let day = Date(timeIntervalSince1970: TimeInterval(ts) / 1000)
+        pendingJumpId = target
+        if Calendar.current.isDate(day, inSameDayAs: selectedDay) {
+            performPendingJump()       // 同一天:records 已加载,直接定位
+        } else {
+            selectedDay = day          // 换天:触发 .task(id:selectedDay) → reload 末尾定位
+        }
+    }
+
+    /// records 就绪后:清选中窗口(保证目标在全天列表可见)→ 展开 + 高亮 +
+    /// 滚动到目标。目标不在当前 records(天没对上/reload 未完)则不动,留待
+    /// 下一次 reload 末尾重试(pendingJumpId 不清)。
+    @MainActor
+    private func performPendingJump() {
+        guard let pid = pendingJumpId,
+              records.contains(where: { $0.id == pid }) else { return }
+        pendingJumpId = nil
+        selection = nil
+        dragPreview = nil
+        expandedIds.insert(pid)
+        highlightedId = pid
+        scrollTargetId = pid
+        scrollNonce += 1
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if highlightedId == pid {
+                withAnimation(.easeOut(duration: 0.4)) { highlightedId = nil }
+            }
         }
     }
 
@@ -185,14 +241,26 @@ struct InputActivityChartView: View {
                     }
 
                     // records 独立滚动区(图不动、只这里滚)。
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            recordsSection
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 8) {
+                                recordsSection
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.bottom, 24)
                         }
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(.bottom, 24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // wr chip 定位:nonce 变即滚到目标(小延迟等 LazyVStack 落地目标行)。
+                        .onChange(of: scrollNonce) { _, _ in
+                            guard let target = scrollTargetId else { return }
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(60))
+                                withAnimation(.easeInOut(duration: 0.4)) {
+                                    proxy.scrollTo(target, anchor: .center)
+                                }
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
@@ -244,6 +312,13 @@ struct InputActivityChartView: View {
                             }
                         }
                     }
+                    .id(rec.id)   // ScrollViewReader 定位锚点
+                    .overlay(     // wr chip 跳转命中的卡片高亮描边(~2s 淡出)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Theme.accent,
+                                          lineWidth: highlightedId == rec.id ? 2 : 0)
+                            .animation(.easeInOut(duration: 0.3), value: highlightedId)
+                    )
                 }
             }
         }
@@ -296,6 +371,7 @@ struct InputActivityChartView: View {
         buckets = result.0
         records = result.1
         loading = false
+        if pendingJumpId != nil { performPendingJump() }   // 换天 reload 完成 → 定位
     }
 }
 

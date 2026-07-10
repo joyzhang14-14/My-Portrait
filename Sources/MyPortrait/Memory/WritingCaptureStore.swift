@@ -755,6 +755,16 @@ struct WritingCaptureStore: Sendable {
         } ?? nil
     }
 
+    /// 按 record id 反查它的 start_ts(毫秒)—— canvas input 图跳转定位用
+    /// (先据此切到该 record 所在那天)。record 不存在返回 nil。
+    func writingRecordStartTs(id: Int64) -> Int64? {
+        try? dbPool.read { db in
+            try Int64.fetchOne(
+                db, sql: "SELECT start_ts FROM writing_records WHERE id = :id",
+                arguments: ["id": id])
+        } ?? nil
+    }
+
     /// 批量取 record 文本预览(chip label 用)。ids 是 Int64,直接内联安全(无注入)。
     func writingRecordPreviews(ids: [Int64]) -> [Int64: String] {
         guard !ids.isEmpty else { return [:] }
