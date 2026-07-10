@@ -24,6 +24,7 @@ struct CaptureHealthView: View {
     @State private var diagBundleBusy = false
     @State private var diagBundleStatus: String = ""
     @State private var exportedBundleURL: URL?
+    @State private var exportedBundleMode: DiagnosticBundleMode = .publicReport
     @State private var showUploadGuide = false
 
     var body: some View {
@@ -45,12 +46,15 @@ struct CaptureHealthView: View {
         }
     }
 
-    /// 导出诊断包后弹的引导:包路径 + 打开 GitHub Issues + 3 步简易教程。
+    /// 公开包引导到 GitHub；私下包使用系统分享面板（邮件/AirDrop 等）。
     private func uploadGuideSheet(url: URL) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: "ladybug.fill").foregroundStyle(.orange)
-                Text("Diagnostic bundle ready").font(.system(size: 15, weight: .semibold))
+                Text(exportedBundleMode == .publicReport
+                     ? "Public diagnostic bundle ready"
+                     : "Private support bundle ready")
+                    .font(.system(size: 15, weight: .semibold))
             }
             Text("Saved to your Downloads folder:\n\(url.lastPathComponent)")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -58,12 +62,19 @@ struct CaptureHealthView: View {
 
             Divider()
 
-            Text("Send it for a bug report — 3 steps:")
-                .font(.system(size: 12, weight: .medium))
-            VStack(alignment: .leading, spacing: 7) {
-                uploadStep(1, "Click \u{201C}Open GitHub Issues\u{201D} below — it opens a new issue in your browser.")
-                uploadStep(2, "Write one line: what happened, and how to trigger it.")
-                uploadStep(3, "Drag this zip from Downloads into the issue, then submit.")
+            if exportedBundleMode == .publicReport {
+                Text("Safe for a public GitHub issue: free-form logs, full configuration, captured content, and secrets are excluded.")
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 7) {
+                    uploadStep(1, "Open GitHub Issues below and create a bug report.")
+                    uploadStep(2, "Describe what happened and how to trigger it.")
+                    uploadStep(3, "Drag this zip from Downloads into the issue.")
+                }
+            } else {
+                Text("This bundle includes sanitized error messages and detailed timestamps. Review it before sharing, then send it only through a private channel. Its contents are capped to stay practical for common email attachment limits.")
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -73,12 +84,19 @@ struct CaptureHealthView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
                 .buttonStyle(.bordered).controlSize(.small)
-                Button("Open GitHub Issues") {
-                    if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
-                        NSWorkspace.shared.open(issue)
+                if exportedBundleMode == .publicReport {
+                    Button("Open GitHub Issues") {
+                        if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
+                            NSWorkspace.shared.open(issue)
+                        }
                     }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                } else {
+                    ShareLink(item: url) {
+                        Label("Share privately…", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
                 }
-                .buttonStyle(.borderedProminent).controlSize(.small)
                 Spacer()
                 Button("Done") { showUploadGuide = false }
                     .buttonStyle(.bordered).controlSize(.small)
@@ -99,15 +117,25 @@ struct CaptureHealthView: View {
         }
     }
 
-    /// 一键导出诊断 zip。无 PII,纯结构 + 日志 + 状态。
+    /// 公开 issue 和私下支持分别使用不同的脱敏强度与发送路径。
     private var diagnosticCard: some View {
         SettingsCard(title: "Diagnostic export",
-                     footnote: "Saves a diagnostics file to your Downloads for bug reports. It includes only technical status and logs, none of your captured content.") {
-            SettingsRow("Export diagnostic bundle",
-                        description: "Use this when reporting a bug. Open the zip to review before sharing.",
+                     footnote: "Both exports exclude captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
+            SettingsRow("Public bug report",
+                        description: "Strict allowlist with no free-form log messages or full configuration. Safe for a public GitHub issue.",
                         icon: "ladybug") {
                 Button(diagBundleBusy ? "Working…" : "Export") {
-                    runDiagnosticExport()
+                    runDiagnosticExport(mode: .publicReport)
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(diagBundleBusy)
+            }
+            SettingsDivider()
+            SettingsRow("Private support bundle",
+                        description: "More detail, including sanitized errors and timestamps. Share privately by Mail, AirDrop, or another trusted channel.",
+                        icon: "lock.shield") {
+                Button(diagBundleBusy ? "Working…" : "Export") {
+                    runDiagnosticExport(mode: .privateSupport)
                 }
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(diagBundleBusy)
@@ -122,15 +150,16 @@ struct CaptureHealthView: View {
         }
     }
 
-    private func runDiagnosticExport() {
+    private func runDiagnosticExport(mode: DiagnosticBundleMode) {
         diagBundleBusy = true
         diagBundleStatus = "Collecting…"
         Task { @MainActor in
             do {
-                let url = try await DiagnosticBundle.build()
+                let url = try await DiagnosticBundle.build(mode: mode)
                 diagBundleStatus = "Saved: \(url.path)"
                 exportedBundleURL = url
-                showUploadGuide = true   // 弹引导窗口:去 GitHub Issues 上传 + 教程
+                exportedBundleMode = mode
+                showUploadGuide = true
             } catch {
                 diagBundleStatus = "Export failed: \(error.localizedDescription)"
             }
