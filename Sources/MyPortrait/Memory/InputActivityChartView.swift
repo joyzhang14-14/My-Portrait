@@ -103,13 +103,22 @@ struct InputActivityChartView: View {
                                                 })
                                 .frame(height: geo.size.height / 3)
                             legend
+                        } else {
+                            // 有 records 但无击键图(纯粘贴/OCR 来源那天):说明为何没图,
+                            // 也点不了选窗口(没有时间轴可点)。
+                            Text("No keystroke activity to chart on this day")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 4)
                         }
                         recordsSection
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
                     .padding(.bottom, 24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // minHeight 撑满视口:否则内容矮时 contentShape 只覆盖内容高度,
+                    // 卡片流下方那截真空白点不到、清不掉选中。topLeading 防内容居中。
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
                     // 点图表/卡片以外的空白处 → 取消选中回全天(canvas 与卡片的
                     // 手势是子视图,优先级更高,不会误触发)。
                     .contentShape(Rectangle())
