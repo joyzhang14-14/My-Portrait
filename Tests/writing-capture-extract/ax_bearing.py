@@ -173,6 +173,28 @@ def _doc_url(con, bundle, t0, t1):
     return ''
 
 
+# 占位符片段(与 extract_compare_v2.PLH 同源同值——那边 import 自跑对照太重,这里内联;改动须两处同步)
+_PH_SNIPPETS = ('Write a message', 'Type / for commands', 'Describe a task or ask a question')
+
+
+def _ax_owned(con, sp):
+    """A 闸(2026-07-10 用户裁定):B 段完全落在同 bundle「end_value 有实质非占位内容」的 AX 事件内
+    (±AX_PAD_MS 容差)= AX 在该事件活跃、只是事件头 commit 丢失 → 该段归 AX 路,不进 canvas。
+    治两件事:①头部碎片重复入册(现在是专业d/怎么能让他——AX 已有全文,canvas 又解一遍还带简拼错字)
+    ②密码框击键绕过掩码闸(loginwindow『3』/Safari『admin』——AX end_value 是掩码=实质 → 一起关死)。
+    占位符 end_value(Write a message…)= AX 真没收到内容 → 留 canvas(『继续』类真救回)。
+    ⚠️ 只对 B 桶:essay 时代 Safari 事件 end_value 含真文(ev679),C 桶过闸会误杀长文档。
+    容差不对称(2026-07-10 全量实测 52 候选):头侧 AX_PAD_MS(事件创建滞后实测 0~2.5s,该吞的
+    47 段全靠头容差);尾侧 0(该吞的尾悬出全=0;尾悬出的 2 段是 AX 没收到的真内容,必须放行)。"""
+    for (ev,) in con.execute(
+            "SELECT end_value FROM typing_events WHERE bundle_id=:b AND started_at<=:a AND ended_at>=:c",
+            {"b": sp['bundle'], "a": sp['t0'] + AX_PAD_MS, "c": sp['t1']}):
+        s = strip_zw(ev)
+        if s and not any(p in s for p in _PH_SNIPPETS):
+            return True
+    return False
+
+
 def canvas_spans(con, t0, t1):
     """承载率版判别(替代老 integrated_run.discriminate 的 URL白名单+整session+200键门槛):
     把逐段 0承载(canvas)按 bundle+时间相邻聚成会话,按击键数分 B/C 桶,附文档 URL。
@@ -197,6 +219,9 @@ def canvas_spans(con, t0, t1):
     # 出会话,价值判断全交下游(口3/质量门),与 AX 路同一出口。
     for sp in spans:
         sp['bucket'] = 'C' if sp['nkeys'] > BUCKET_KEYS else 'B'
+    # A 闸:B 段落在有实质 end_value 的 AX 事件内 = AX 已收(头 commit 丢失所致),不进 canvas
+    spans = [sp for sp in spans if sp['bucket'] != 'B' or not _ax_owned(con, sp)]
+    for sp in spans:
         sp['url'] = _doc_url(con, sp['bundle'], sp['t0'], sp['t1'])
     return spans
 

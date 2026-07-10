@@ -1032,6 +1032,14 @@ decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗
 - **⚠️ 跑批基建教训(下次长跑照抄)**:session 的前台/后台任务会被**不定期整树 SIGKILL**(高发于 14B 加载时,非 OOM、非用户,原因不明)——`nohup setsid` 也逃不掉;**唯一稳的=`launchctl submit` 交给 launchd**(注意 launchd PATH 无 homebrew,必须钉死 `/opt/homebrew/bin/python3`,否则 Xcode 3.9 缺 numpy 秒败;跑完 `launchctl remove`)。恢复设计=每 3 天一组一个 md、启动时扫已有 md 的 `## 日期` 只跑缺的天;decode=0 天(无模型)先跑先入库。孤儿子进程(父被杀)能存活,可接力。
 - **未提交批次现状**:rebuild.py+faithful_v2.py(6-30/7-02/7-07 三批)就是本次所审版本,**等用户审核通过后 commit**。
 
+### ✅ 2026-07-10(续)用户审核首发现 → A 闸落地 + 17 天重跑
+
+- **用户审出「现在是专业d」(05-24 #16 canvas_B)**,追根:AX 事件头 commit 丢失 → 头几键判 0 承载 → canvas_B 把 AX 已入册消息头再解一遍(简拼错字:这样→专业/它→他/有点东西→邮电大学);且 canvas 段直通拼接不过掩码闸 → **loginwindow 密码键「3」、Safari「admin」曾泄入成品(P0,compare_gold 的 P0 探针是清单制、没覆盖这面)**。
+- **A 闸(用户选定方案 A)**:`ax_bearing._ax_owned` — B 段完全落在同 bundle「end_value 实质非占位」事件内 → 归 AX 丢。**容差不对称(用户质疑 3s 触发实测)**:头 3s(事件创建滞后 0~2.5s)/**尾 0**(尾悬出=AX 没收到的真内容必须放行,如微信 dag1zhey1d…)。占位符 end_value(`Write a message…` 等 `_PH_SNIPPETS`,与 extract_compare_v2.PLH 同源,改须两处同步)→ 留 canvas(「继续」类救回)。**只对 B 桶**(essay 时代 Safari 事件 end_value 含真文,C 过闸会误杀)。
+- **验证**:47 杀全安全(风险 3 条逐一对 AX 产出核实;"codex 被杀"是用户正在打字的快照伪影,真闸不吞)/3 救回保留/C 22→22/僵尸长事件(27 个>2h,最长 Xcode 131h)窗内 0 实误吞。
+- **17 天 fusion 变化(169→137 段)已真实 pipeline 重跑**,审核 md 重组装(成品 1289→1277,07-10 顺带收进当天新数据);gold 仍 43✓1🟡1✗(=基线等价;🟡=B14 探针对 05-24 Notes 草稿内嵌行误报,06-05 原案核实仍在未定区)。审核 md 加 §2.5/§4.5。
+- ⚠️ 已知残余(数据边界,未修):头悬出 >3s 的头碎片重复仍有 ~2 条(ni1fenxi1yixi 4.8s/w1qu1qiangjie1 7s)逃过 A 闸留在成品——扩容差会引误吞,裁定不动。
+
 ## 待做(优先级)
 
 0. **⚠️ 干净重跑确认整批**:`REVIEW_MODE=det PORTRAIT_LIBRIME_DECODE=1` 重跑 6 天 gold,确认 **44✓ 不回归** → 提交整批。整批 = 6-30 的 ①②③④⑥⑦(submit≥1/is_image_only/SLASH·KC开关/PASTE_MAX/同日去重) + 7-02 的 A/B(input_source 补齐/14B 条件加载/单字孤儿判别)。**预期新增**:gold 天孤儿进未定区(`线`ev1556@6-5;`t·t`ev1061·1062@6-3 因 #3 去重倒置**只会出 1 个 `t`**——这是 bug 不是回归,#3 修好才双双出),成品不变。⚠️ 本批已含 2026-07-07 三修(修1等长窗/修2 \_retyped floor/修4 口3 t1 排序),重跑时留意口3 段 diff(理论上只更对)。观察批(单字/￼)可挑 `5/25,6/01,6/05,6/10,6/18,6/27,6/29`。SLASH 待前端。
