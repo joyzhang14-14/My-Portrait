@@ -14,6 +14,15 @@ struct AIModelsSettingsView: View {
     @State private var isPollingLocalModels = false
     /// 正在下载的转录模型 name(点 Download 触发)。
     @State private var downloading: Set<String> = []
+    /// 待确认卸载的模型 —— 点 Uninstall 先弹确认框,确认了才真删。
+    @State private var pendingUninstall: PendingUninstall? = nil
+
+    /// 一次待确认的卸载:显示名 + 真正执行删除的闭包。
+    private struct PendingUninstall: Identifiable {
+        let id = UUID()
+        let label: String
+        let perform: () -> Void
+    }
 
     var body: some View {
         SettingsPage("Downloads",
@@ -42,18 +51,86 @@ struct AIModelsSettingsView: View {
                     SettingsDivider()
                 }
                 localModelRow("Voice segmentation", detail: "pyannote segmentation-3.0 (~6 MB)",
-                              ready: SpeakerModelStore.isOnDisk(.segmentation))
+                              ready: SpeakerModelStore.isOnDisk(.segmentation), model: .segmentation)
                 SettingsDivider()
                 localModelRow("Voice activity", detail: "Silero VAD (~2 MB)",
-                              ready: SpeakerModelStore.isOnDisk(.vadSilero))
+                              ready: SpeakerModelStore.isOnDisk(.vadSilero), model: .vadSilero)
             }
             .id(localModelTick)   // 强制重渲染,反映新的 isOnDisk 结果
+        }
+        .confirmationDialog(
+            pendingUninstall.map { "Uninstall \($0.label)?" } ?? "",
+            isPresented: Binding(
+                get: { pendingUninstall != nil },
+                set: { if !$0 { pendingUninstall = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let p = pendingUninstall {
+                Button("Uninstall", role: .destructive) {
+                    p.perform()
+                    pendingUninstall = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingUninstall = nil }
+        } message: {
+            Text("This deletes the model from disk. You can download it again later.")
+        }
+    }
+
+    // MARK: - Uninstall(点 Uninstall → 弹确认框 → 确认才真删)
+
+    private func uninstallWhisperModel(_ name: String) {
+        let label = WhisperKitWrapper.allTranscriptionModels.first { $0.name == name }?.label ?? name
+        pendingUninstall = PendingUninstall(label: label) {
+            WhisperKitWrapper.deleteFromDisk(modelName: name)
+            localModelTick &+= 1
+        }
+    }
+
+    private func uninstallQwenModel(_ name: String) {
+        let label = Qwen3ASRWrapper.allQwenModels.first { $0.name == name }?.label ?? name
+        pendingUninstall = PendingUninstall(label: label) {
+            Qwen3ASRWrapper.deleteFromDisk(modelId: name)
+            localModelTick &+= 1
+        }
+    }
+
+    private func uninstallSpeakerModel(_ model: SpeakerModel) {
+        pendingUninstall = PendingUninstall(label: speakerModelLabel(model)) {
+            Task { @MainActor in
+                await SpeakerModelStore.shared.deleteFromDisk(model)
+                localModelTick &+= 1
+            }
+        }
+    }
+
+    /// 说话人 / VAD / segmentation 模型的显示名(确认框标题用)。
+    private func speakerModelLabel(_ model: SpeakerModel) -> String {
+        if model == .segmentation { return "Voice segmentation" }
+        if model == .vadSilero { return "Voice activity" }
+        return SpeakerModel.embeddingOptions.first { $0.model == model }?.label ?? "speaker model"
+    }
+
+    // MARK: - Ready + Uninstall
+
+    /// Ready 绿字 + 右边一个 Uninstall 按钮(点了删磁盘,轮询会把状态转回可下载)。
+    private func readyWithUninstall(_ onUninstall: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Text("Ready")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.green.opacity(0.85))
+            Button("Uninstall", action: onUninstall)
+                .font(.system(size: 11, weight: .medium))
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.red.opacity(0.85))
         }
     }
 
     // MARK: - Local model row
 
-    private func localModelRow(_ title: String, detail: String, ready: Bool) -> some View {
+    private func localModelRow(_ title: String, detail: String,
+                               ready: Bool, model: SpeakerModel) -> some View {
         HStack(spacing: 12) {
             Image(systemName: ready ? "checkmark.circle.fill" : "arrow.down.circle")
                 .font(.system(size: 14))
@@ -68,11 +145,13 @@ struct AIModelsSettingsView: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             Spacer(minLength: 8)
-            Text(ready ? "Ready" : "Downloading…")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(ready
-                                 ? Color.green.opacity(0.85)
-                                 : Color.orange.opacity(0.85))
+            if ready {
+                readyWithUninstall { uninstallSpeakerModel(model) }
+            } else {
+                Text("Downloading…")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.orange.opacity(0.85))
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .onAppear { startLocalModelPolling() }
@@ -98,7 +177,7 @@ struct AIModelsSettingsView: View {
             }
             Spacer(minLength: 8)
             if ready {
-                Text("Ready").font(.system(size: 11, weight: .medium)).foregroundStyle(Color.green.opacity(0.85))
+                readyWithUninstall { uninstallSpeakerModel(m.model) }
             } else if isDownloading {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -142,9 +221,7 @@ struct AIModelsSettingsView: View {
             }
             Spacer(minLength: 8)
             if ready {
-                Text("Ready")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.green.opacity(0.85))
+                readyWithUninstall { uninstallWhisperModel(m.name) }
             } else if isDownloading {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -192,9 +269,7 @@ struct AIModelsSettingsView: View {
             }
             Spacer(minLength: 8)
             if ready {
-                Text("Ready")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.green.opacity(0.85))
+                readyWithUninstall { uninstallQwenModel(m.name) }
             } else if isDownloading {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)

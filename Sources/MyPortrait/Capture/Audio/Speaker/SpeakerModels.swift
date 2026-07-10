@@ -77,6 +77,14 @@ actor SpeakerModelStore {
         return FileManager.default.fileExists(atPath: path)
     }
 
+    /// 从磁盘删除某个说话人模型文件 —— Downloads 页 Uninstall 按钮用。
+    /// 同时清内存缓存,下次 path(for:) 重新走下载。
+    func deleteFromDisk(_ model: SpeakerModel) {
+        let dest = Storage.modelsDir.appendingPathComponent(model.filename)
+        try? FileManager.default.removeItem(at: dest)
+        cached[model.filename] = nil
+    }
+
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "speaker-models")
     /// 内存缓存：filename → 已确认存在的本地路径。
     private var cached: [String: URL] = [:]
