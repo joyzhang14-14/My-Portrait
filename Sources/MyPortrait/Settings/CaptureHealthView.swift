@@ -60,6 +60,10 @@ struct CaptureHealthView: View {
 
             Divider()
 
+            disclaimer
+
+            Divider()
+
             Text("Almost done — just three steps:")
                 .font(.system(size: 12))
                 .fixedSize(horizontal: false, vertical: true)
@@ -96,6 +100,22 @@ struct CaptureHealthView: View {
                 .foregroundStyle(.secondary)
             Text(text)
                 .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 免责说明:告诉用户这个文件里有什么、绝不包含什么,发之前可自查。
+    private var disclaimer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("What's in this file")
+                .font(.system(size: 12, weight: .semibold))
+            Text("It holds technical diagnostics only: app / system info, capture health, queue and table counts, recent errors, crash and hang reports, and the last 24 h of app logs.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("It never includes your screenshots, audio, typing, transcripts, chats, memory files, API keys, or personal profile. Paths, emails, IPs and IDs are automatically masked. You can open the zip and check every file before sending.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
