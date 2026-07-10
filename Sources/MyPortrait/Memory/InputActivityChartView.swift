@@ -106,16 +106,24 @@ struct InputActivityChartView: View {
         }
     }
 
-    /// records 就绪后:清选中窗口(保证目标在全天列表可见)→ 展开 + 高亮 +
-    /// 滚动到目标。目标不在当前 records(天没对上/reload 未完)则不动,留待
-    /// 下一次 reload 末尾重试(pendingJumpId 不清)。
+    /// records 就绪后:**把目标 record 的时间段设为图表选中窗口**(等同手动
+    /// 框选那段;07-10 用户定稿"目标段设为画布中心")—— records 列表随选中
+    /// 过滤到该窗口,目标卡片直接在台前,不再依赖全天长列表的 LazyVStack
+    /// 滚动(懒加载下 scrollTo 不可靠,实测滚不到)。再展开 + 高亮。
+    /// 目标不在当前 records(天没对上/reload 未完)则不动,留待下一次 reload
+    /// 末尾重试(pendingJumpId 不清)。
     @MainActor
     private func performPendingJump() {
         guard let pid = pendingJumpId,
-              records.contains(where: { $0.id == pid }) else { return }
+              let rec = records.first(where: { $0.id == pid }) else { return }
         pendingJumpId = nil
-        selection = nil
         dragPreview = nil
+        // 目标段 → 分钟窗口(与图表 [lo,hi] 含端点语义一致),夹回当天。
+        let lo = min(max(Int((rec.startTs - dayStartMs) / 60_000), 0), 1439)
+        let hi = min(max(Int((rec.endTs - dayStartMs) / 60_000), lo), 1439)
+        withAnimation(.easeOut(duration: 0.15)) {
+            selection = InputSelection(lo: lo, hi: hi, click: nil)
+        }
         expandedIds.insert(pid)
         highlightedId = pid
         scrollTargetId = pid
