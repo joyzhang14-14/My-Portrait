@@ -849,15 +849,17 @@ private struct InputRecordCard: View {
     let expanded: Bool
     let onToggle: () -> Void
     @State private var hovering = false
-    /// 收起态内容测量:全文高 / 3 行显示高。全文更高 = 被截断,标 article 徽标。
-    @State private var fullTextHeight: CGFloat = 0
-    @State private var shownTextHeight: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
 
     private var appLabel: String { InputCaptureView.appLabel(record.app) }
     private var accent: Color { AppColor.color(for: appLabel) }
-    /// 3 行装不下(有隐藏内容)→ true。留 1pt 容差避免亚像素误判。
-    private var isTruncated: Bool { fullTextHeight > shownTextHeight + 1 }
+    /// 不再用 GeometryReader + PreferenceKey 反向写 @State 判断截断：它会让
+    /// LazyVStack 在部分 Release 构建里反复重新布局。这里用稳定的内容特征判断，
+    /// 偶尔多显示一个徽标也比主线程进入 AttributeGraph 布局循环安全。
+    private var logicalLineCount: Int {
+        record.text.split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+    private var isTruncated: Bool { logicalLineCount > 3 || record.text.count > 180 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -937,38 +939,15 @@ private struct InputRecordCard: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            VStack(alignment: .leading, spacing: 5) {
-                base
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    // 隐藏全文副本量高(fixedSize 忽略 3 行约束,给出真实全高)。
-                    .background(fullTextProbe(display))
-                    // 可见 3 行的实际高。
-                    .overlay(GeometryReader { g in
-                        Color.clear.preference(key: ShownTextHeightKey.self,
-                                               value: g.size.height)
-                    })
-            }
-            .onPreferenceChange(FullTextHeightKey.self) { fullTextHeight = $0 }
-            .onPreferenceChange(ShownTextHeightKey.self) { shownTextHeight = $0 }
+            base
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// 不限行数的隐藏副本 —— 只为量出全文完整高度,不参与卡片布局、不渲染。
-    private func fullTextProbe(_ s: String) -> some View {
-        Text(s)
-            .font(.system(size: 12))
-            .fixedSize(horizontal: false, vertical: true)
-            .hidden()
-            .background(GeometryReader { g in
-                Color.clear.preference(key: FullTextHeightKey.self, value: g.size.height)
-            })
-    }
-
-    /// 按长度分档:全文高 > 3 行高的 3 倍(≈9 行以上)= 特别长 = article;
-    /// 只是超过 3 行没显示全(短一点)= paragraph。
-    private var isArticle: Bool { fullTextHeight > shownTextHeight * 3 }
+    /// 按稳定内容特征分档，不参与布局测量。
+    private var isArticle: Bool { logicalLineCount > 9 || record.text.count > 600 }
 
     /// 截断徽标,比暗淡的「…」显眼。用 app 色系;article / paragraph 分档。
     private var lengthBadge: some View {
@@ -1087,22 +1066,4 @@ private struct InputRecordCard: View {
         f.dateFormat = "HH:mm:ss"
         return f
     }()
-}
-
-// MARK: - 内容截断测量 PreferenceKey
-
-/// 全文(不限行)完整高度。
-private struct FullTextHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// 收起态实际显示(3 行)高度。
-private struct ShownTextHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
 }
