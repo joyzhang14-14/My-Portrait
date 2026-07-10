@@ -214,6 +214,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var shadowDone = false
     /// 任务→物理线程的结果交接(shadowLock 保护)。
     private let shadowLock = NSLock()
+    /// 同一主引擎最多只跑一个影子任务。旧实现只用 generation 丢弃旧
+    /// 结果，却不会停止旧任务；连续拖动会同时堆出多个满速预计算。
+    private var shadowInFlight = false
     private var shadowReady = false
     private var shadowResult: [SIMD2<Float>] = []
     /// 拖拽预热(07-08 用户"延迟优化到极致"):拖拽中每隔一段按"假设
@@ -346,6 +349,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         shouldRun = false
         cond.signal()
         cond.unlock()
+        shadowLock.lock()
+        shadowGen &+= 1   // 让仍在 warmup 的影子任务尽快退出
+        shadowLock.unlock()
         parkContinuation?.finish()
     }
 
@@ -773,9 +779,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             if di != 0, nodeFamily[di] < 0,
                simd_length(pos[di] - dragSpawnPos) > 30,
                tickCount &- lastShadowSpawnTick >= 10 {
-                spawnShadow(releasedSim: di)
-                dragSpawnPos = pos[di]
-                lastShadowSpawnTick = tickCount
+                if spawnShadow(releasedSim: di) {
+                    dragSpawnPos = pos[di]
+                    lastShadowSpawnTick = tickCount
+                }
             }
             guard beltDragHome.count == beltIdx.count else { return }
             let k = GraphConstants.beltSpring * max(alpha, 0.1)
@@ -851,8 +858,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 // 结果 ready → 消费一次(挡板终局 + 开场正式钉环)→ done,
                 // beltPredPos 定格终局
                 if beltPredDirty || beltPredPos.count != nh {
-                    spawnShadow()
-                    beltPredDirty = false
+                    if spawnShadow() { beltPredDirty = false }
                 } else if !shadowDone {
                     shadowLock.lock()
                     let ok = shadowReady
@@ -1110,9 +1116,28 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 无 Date/random(随机只在 init/explode 播种)⇒ 确定性快放。
     /// 开场(ringDirty)顺带把环直接钉在影子 warmup 后的终局几何上
     /// (一次成型,无过渡)。调用方须持 simLock,只在物理线程调。
-    private func spawnShadow(releasedSim: Int = -1) {
+    @discardableResult
+    private func spawnShadow(releasedSim: Int = -1) -> Bool {
         // nh=0 时影子无任何消费方(钉环/carve/beltPredPos 全空转)
-        guard !isShadow, !hubIndices.isEmpty else { return }
+        guard !isShadow, !hubIndices.isEmpty else { return false }
+        shadowLock.lock()
+        if shadowInFlight {
+            // 废弃正在跑的旧位置；任务会在 warmup 循环里看到 generation
+            // 变化并尽快退出。调用方保留 dirty/距离条件，下一 tick 只补算
+            // 最新状态，不为中间每个鼠标位置各开一个并发任务。
+            shadowGen &+= 1
+            shadowReady = false
+            shadowLock.unlock()
+            shadowDone = false
+            return false
+        }
+        shadowInFlight = true
+        shadowGen &+= 1
+        let myGen = shadowGen
+        shadowReady = false
+        shadowLock.unlock()
+        shadowDone = false
+
         let sh = GraphPhysicsEngine(scene: sceneRef, isShadow: true)
         sh.pos = pos
         sh.vel = vel
@@ -1132,12 +1157,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         sh.beltFamSel = beltFamSel
         sh.beltFamBase = beltFamBase
         sh.beltFamSlope = beltFamSlope
-        shadowLock.lock()
-        shadowGen &+= 1
-        let myGen = shadowGen
-        shadowReady = false
-        shadowLock.unlock()
-        shadowDone = false
         // 挡板/弧方位占位:ready 前用**当刻实时位置**(几帧窗口)。
         // 无条件刷新 —— 不能留拖拽前的旧终局,混合帧的弧方位会朝旧
         // 方向飞一两帧(实测首帧毛刺 pol 偏 2+rad)
@@ -1153,9 +1172,18 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 耗几千步)/冷透+缓停完/步数封顶
         let hubIdx = hubIndices
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let eng = self else { return }
             let nhh = hubIdx.count
             var steps = 0
             while steps < GraphConstants.shadowTickCap {
+                // 新位置已排队时尽快取消旧 warmup。只每 16 tick 查一次锁，
+                // 避免给正常影子热循环增加可感知开销。
+                if steps & 15 == 0 {
+                    eng.shadowLock.lock()
+                    let current = eng.shadowGen == myGen
+                    eng.shadowLock.unlock()
+                    if !current { break }
+                }
                 sh.tick()
                 steps += 1
                 // 交卷判据 = 冷透+静止(quietFlag;07-08 用户"影子再快
@@ -1169,7 +1197,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     break
                 }
             }
-            guard let eng = self else { return }
             var result = [SIMD2<Float>](repeating: .zero, count: nhh)
             for s in 0..<nhh { result[s] = sh.pos[Int(hubIdx[s])] }
             eng.shadowLock.lock()
@@ -1177,8 +1204,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 eng.shadowResult = result
                 eng.shadowReady = true
             }
+            eng.shadowInFlight = false
             eng.shadowLock.unlock()
         }
+        return true
     }
 
     /// 环覆盖死区判断(提前定环与停稳校验共用):以**目标环**测圆集,
