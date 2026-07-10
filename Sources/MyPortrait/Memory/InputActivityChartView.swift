@@ -43,6 +43,9 @@ struct InputActivityChartView: View {
     @State private var pendingJumpId: Int64? = nil
     /// 当前高亮的 record(定位后 ~2s 淡出)。
     @State private var highlightedId: Int64? = nil
+    /// wr chip 跳转的独占展示:非 nil 时 records 列表**只显示这一条**
+    /// (07-10 用户定稿"只展示那一张")。用户任何选中操作/切天即清除恢复。
+    @State private var focusId: Int64? = nil
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
     @State private var records: [WritingRecordViewRow] = []
@@ -121,6 +124,7 @@ struct InputActivityChartView: View {
         withAnimation(.easeOut(duration: 0.15)) {
             selection = InputSelection(lo: lo, hi: hi, click: nil)
         }
+        focusId = pid          // 列表独占显示这一条(图上仍高亮其时间段)
         expandedIds.insert(pid)
         highlightedId = pid
         Task { @MainActor in
@@ -157,8 +161,12 @@ struct InputActivityChartView: View {
                 dayStartMs + Int64(w.hi + 1) * 60_000)
     }
 
-    /// records 联动:选中时只留与窗口时间重叠的,否则全天。
+    /// records 联动:wr chip 跳转独占期只显示目标那一条;否则选中时只留与
+    /// 窗口时间重叠的,再否则全天。
     private var visibleRecords: [WritingRecordViewRow] {
+        if let f = focusId, let rec = records.first(where: { $0.id == f }) {
+            return [rec]
+        }
         guard let w = windowMs else { return records }
         return records.filter { $0.startTs < w.end && $0.endTs > w.start }
     }
@@ -205,6 +213,7 @@ struct InputActivityChartView: View {
                                             dragPreview: dragPreview,
                                             onTapSelect: { m in
                                                 dragPreview = nil
+                                                focusId = nil   // 用户自己选 → 退出跳转独占
                                                 withAnimation(.easeOut(duration: 0.15)) {
                                                     if let w = buckets.burstWindow(around: m) {
                                                         // ±snapRange 内有 session → 吸附整段。
@@ -222,6 +231,7 @@ struct InputActivityChartView: View {
                                             },
                                             onDragEnd: { lo, hi in
                                                 dragPreview = nil
+                                                focusId = nil   // 同上
                                                 withAnimation(.easeOut(duration: 0.15)) {
                                                     // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
                                                     selection = InputSelection(lo: lo, hi: hi, click: nil)
@@ -247,8 +257,8 @@ struct InputActivityChartView: View {
                     // ⚠️ wr chip 定位**不再程序滚动**:程序 scrollTo 与用户手动滑动
                     // 抢同一个 ScrollView,用户在自动滚时插一手 → ScrollView 卡死滚
                     // 不动。改为——每次 redirect 都是全新进入本界面(ScrollView 天然
-                    // 从顶部起),叠加选中窗口把列表过滤到目标那一段(通常就一张卡),
-                    // 目标本就在最上;不需要也不做任何程序滚动,零冲突。
+                    // 从顶部起)+ focusId 独占让列表**只显示目标那一张卡**;
+                    // 不需要也不做任何程序滚动,零冲突。
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
                             recordsSection
@@ -264,8 +274,10 @@ struct InputActivityChartView: View {
                 // 点图表/卡片以外的空白处 → 取消选中(canvas 与卡片的手势是子视图,优先)。
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if selection != nil || dragPreview != nil {
-                        withAnimation(.easeOut(duration: 0.15)) { selection = nil; dragPreview = nil }
+                    if selection != nil || dragPreview != nil || focusId != nil {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            selection = nil; dragPreview = nil; focusId = nil
+                        }
                     }
                 }
             }
@@ -348,6 +360,7 @@ struct InputActivityChartView: View {
         // (同日点刷新时 .task(id:) 不触发,靠这里兜底。)
         selection = nil
         dragPreview = nil
+        focusId = nil   // 跳转独占同清(跳转路径由 reload 末尾 performPendingJump 重设)
         // 本地当天 [00:00, +24h) —— x 轴天然是本地时间,不用管 DB 的 UTC 切日。
         let dayStart = Calendar.current.startOfDay(for: selectedDay)
         let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
