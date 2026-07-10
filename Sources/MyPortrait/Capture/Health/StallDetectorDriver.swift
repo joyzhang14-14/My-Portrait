@@ -108,6 +108,15 @@ final class StallDetectorDriver {
         }
         lastResourceSample = (Date(), resources.cpuSeconds)
         DiagLog.event("resource.sample", ctx: resourceContext)
+        RunTerminationTracker.shared.recordHeartbeat(
+            physicalFootprintBytes: resources.physicalFootprintBytes,
+            residentBytes: resources.residentBytes,
+            virtualBytes: resources.virtualBytes,
+            cpuPercent: resourceContext["cpu_percent"] as? Double,
+            pendingAudio: pendingAudio.count,
+            captureAttempts: visionSnap.captureAttempts,
+            framesPersisted: visionSnap.framesPersisted,
+            appVisible: !appOccluded)
 
         // 3) 判定。
         let fresh = StallDetector.shared.evaluate(
@@ -200,6 +209,143 @@ private struct ProcessResourceSnapshot {
             virtualBytes: basicResult == KERN_SUCCESS ? basic.virtual_size : 0,
             cpuSeconds: cpuSeconds
         )
+    }
+}
+
+/// `SIGKILL` / OOM 时进程没有机会写“我被杀了”。因此运行中持续覆盖一份很小的
+/// 状态文件，正常退出时改成 clean_exit；下次启动若仍是 running，就把上次最后
+/// 一份资源快照写进历史。这里只能证明“没有走正常退出”，不能单凭它断言原因。
+@MainActor
+final class RunTerminationTracker {
+    static let shared = RunTerminationTracker()
+
+    static var stateFileURL: URL {
+        Storage.dailyLogsDir.appendingPathComponent("run-state.json")
+    }
+    static var historyFileURL: URL {
+        Storage.dailyLogsDir.appendingPathComponent("unexpected-terminations.jsonl")
+    }
+
+    private var currentState: [String: Any] = [:]
+    private var started = false
+
+    private init() {}
+
+    func start() {
+        guard !started else { return }
+        started = true
+        let previous = readState()
+        if previous?["status"] as? String == "running" {
+            recordUnexpectedPreviousRun(previous ?? [:])
+        }
+
+        let info = Bundle.main.infoDictionary ?? [:]
+        let resources = ProcessResourceSnapshot.capture()
+        currentState = [
+            "status": "running",
+            "started_at": Self.iso(Date()),
+            "heartbeat_at": Self.iso(Date()),
+            "pid": getpid(),
+            "app_version": info["CFBundleShortVersionString"] ?? "?",
+            "app_build": info["CFBundleVersion"] ?? "?",
+            "physical_footprint_bytes": resources.physicalFootprintBytes,
+            "resident_bytes": resources.residentBytes,
+            "virtual_bytes": resources.virtualBytes,
+        ]
+        writeState()
+        DiagLog.event("process.run.started")
+    }
+
+    func recordHeartbeat(
+        physicalFootprintBytes: UInt64,
+        residentBytes: UInt64,
+        virtualBytes: UInt64,
+        cpuPercent: Double?,
+        pendingAudio: Int,
+        captureAttempts: UInt64,
+        framesPersisted: UInt64,
+        appVisible: Bool
+    ) {
+        guard started else { return }
+        currentState["heartbeat_at"] = Self.iso(Date())
+        currentState["physical_footprint_bytes"] = physicalFootprintBytes
+        currentState["resident_bytes"] = residentBytes
+        currentState["virtual_bytes"] = virtualBytes
+        currentState["pending_audio"] = pendingAudio
+        currentState["capture_attempts"] = captureAttempts
+        currentState["frames_persisted"] = framesPersisted
+        currentState["app_visible"] = appVisible
+        if let cpuPercent { currentState["cpu_percent"] = cpuPercent }
+        writeState()
+    }
+
+    func markCleanExit() {
+        guard started else { return }
+        currentState["status"] = "clean_exit"
+        currentState["ended_at"] = Self.iso(Date())
+        currentState["exit_reason"] = "application_will_terminate"
+        writeState()
+        DiagLog.event("process.run.clean_exit")
+    }
+
+    private func recordUnexpectedPreviousRun(_ previous: [String: Any]) {
+        let keys = [
+            "started_at", "heartbeat_at", "pid", "app_version", "app_build",
+            "physical_footprint_bytes", "resident_bytes", "virtual_bytes",
+            "cpu_percent", "pending_audio", "capture_attempts", "frames_persisted",
+            "app_visible",
+        ]
+        var event: [String: Any] = [
+            "type": "previous_run_missing_clean_exit",
+            "detected_at": Self.iso(Date()),
+        ]
+        for key in keys {
+            if let value = previous[key] { event["last_\(key)"] = value }
+        }
+        appendHistory(event)
+        DiagLog.warn("process.previous_run_unexpected", ctx: [
+            "last_physical_footprint_bytes": previous["physical_footprint_bytes"] ?? 0,
+            "last_resident_bytes": previous["resident_bytes"] ?? 0,
+            "last_pending_audio": previous["pending_audio"] ?? 0,
+        ])
+    }
+
+    private func readState() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: Self.stateFileURL) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private func writeState() {
+        guard JSONSerialization.isValidJSONObject(currentState),
+              let data = try? JSONSerialization.data(
+                withJSONObject: currentState, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? FileManager.default.createDirectory(
+            at: Self.stateFileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try? data.write(to: Self.stateFileURL, options: .atomic)
+    }
+
+    private func appendHistory(_ event: [String: Any]) {
+        guard let json = try? JSONSerialization.data(withJSONObject: event) else { return }
+        let fm = FileManager.default
+        let url = Self.historyFileURL
+        try? fm.createDirectory(at: url.deletingLastPathComponent(),
+                                withIntermediateDirectories: true)
+        var data = (try? Data(contentsOf: url)) ?? Data()
+        data.append(json)
+        data.append(0x0A)
+        if data.count > 512_000 {
+            data = Data(data.suffix(384_000))
+            if let newline = data.firstIndex(of: 0x0A) {
+                data.removeSubrange(data.startIndex...newline)
+            }
+        }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func iso(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 }
 
