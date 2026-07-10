@@ -141,8 +141,8 @@ struct MemorySettingsView: View {
                     writingStyleRunNowSection
                     writingStyleReviewSection
                 case .changelog:
-                    changelogSection
                     attentionSection
+                    changelogSection
                 }
 
                 footer
