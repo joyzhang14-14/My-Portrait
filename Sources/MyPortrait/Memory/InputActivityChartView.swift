@@ -20,6 +20,9 @@ struct InputActivityChartView: View {
     @State private var records: [WritingRecordViewRow] = []
     /// 展开的 record id 集合(可多开)。切天清空。
     @State private var expandedIds: Set<Int64> = []
+    /// 点击选中的分钟(窗口中心)。nil = 未选、显示全天。选中后:图上画蓝线+
+    /// ±30min 高亮带,下方 records 过滤成这一小时。点图表空白处取消。
+    @State private var selectedMinute: Int? = nil
     @State private var loading = false
     /// 代际 token —— 快速切天时慢查询晚归不能盖掉新一天的结果。
     @State private var reloadGen = 0
@@ -41,8 +44,35 @@ struct InputActivityChartView: View {
         .background(SidebarBackdrop().ignoresSafeArea())
         .task(id: selectedDay) {
             expandedIds = []
+            selectedMinute = nil
             await reload()
         }
+    }
+
+    // MARK: - 选中窗口(±30min)派生
+
+    /// 本地当天 00:00 的 ms —— 分钟↔时间戳换算基准(与 reload 同源)。
+    private var dayStartMs: Int64 {
+        Int64(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970 * 1000)
+    }
+
+    /// 选中窗口的 [start, end) 毫秒;未选 = nil。中心 ±30min。
+    private var windowMs: (start: Int64, end: Int64)? {
+        guard let c = selectedMinute else { return nil }
+        return (dayStartMs + Int64(c - 30) * 60_000,
+                dayStartMs + Int64(c + 30) * 60_000)
+    }
+
+    /// records 联动:选中时只留与窗口 [±30min] 时间重叠的,否则全天。
+    private var visibleRecords: [WritingRecordViewRow] {
+        guard let w = windowMs else { return records }
+        return records.filter { $0.startTs < w.end && $0.endTs > w.start }
+    }
+
+    /// 分钟(当天分钟数)→ "HH:mm",越界夹到 00:00 / 23:59。
+    private static func hm(_ minute: Int) -> String {
+        let m = min(max(minute, 0), 1439)
+        return String(format: "%02d:%02d", m / 60, m % 60)
     }
 
     @ViewBuilder
@@ -63,7 +93,14 @@ struct InputActivityChartView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if buckets.maxTotal > 0 {
-                            InputActivityCanvas(buckets: buckets, colorScheme: colorScheme)
+                            InputActivityCanvas(buckets: buckets,
+                                                colorScheme: colorScheme,
+                                                selectedMinute: selectedMinute,
+                                                onSelect: { m in
+                                                    withAnimation(.easeOut(duration: 0.15)) {
+                                                        selectedMinute = m
+                                                    }
+                                                })
                                 .frame(height: geo.size.height / 3)
                             legend
                         }
@@ -72,6 +109,15 @@ struct InputActivityChartView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
                     .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // 点图表/卡片以外的空白处 → 取消选中回全天(canvas 与卡片的
+                    // 手势是子视图,优先级更高,不会误触发)。
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if selectedMinute != nil {
+                            withAnimation(.easeOut(duration: 0.15)) { selectedMinute = nil }
+                        }
+                    }
                 }
             }
         }
@@ -81,19 +127,29 @@ struct InputActivityChartView: View {
 
     @ViewBuilder
     private var recordsSection: some View {
-        Text("RECORDS · \(records.count)")
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            .tracking(0.8)
-            .foregroundStyle(Theme.textTertiary)
-            .padding(.top, 10)
+        // 选中一小时:表头显 "10:30–11:30 · N";否则 "RECORDS · N"。
+        Group {
+            if let c = selectedMinute {
+                Text("\(Self.hm(c - 30))–\(Self.hm(c + 30)) · \(visibleRecords.count)")
+                    .foregroundStyle(.blue)
+            } else {
+                Text("RECORDS · \(records.count)")
+                    .foregroundStyle(Theme.textTertiary)
+            }
+        }
+        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+        .tracking(0.8)
+        .padding(.top, 10)
 
-        if records.isEmpty {
-            Text("No writing records this day")
+        if visibleRecords.isEmpty {
+            Text(selectedMinute == nil
+                 ? "No writing records this day"
+                 : "No writing records in this hour")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         } else {
             LazyVStack(spacing: 8) {
-                ForEach(records) { rec in
+                ForEach(visibleRecords) { rec in
                     InputRecordCard(record: rec,
                                     expanded: expandedIds.contains(rec.id)) {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
@@ -251,15 +307,51 @@ struct MinuteBuckets: Sendable {
 private struct InputActivityCanvas: View {
     let buckets: MinuteBuckets
     let colorScheme: ColorScheme
+    /// 选中的分钟(窗口中心);nil = 不画选中层。
+    let selectedMinute: Int?
+    /// 点击图表 → 回传命中的分钟(已夹到活动范围)。
+    let onSelect: (Int) -> Void
 
     var body: some View {
-        Canvas { ctx, size in
-            let plot = plotRect(size)
-            drawGrid(ctx, plot: plot)
-            drawStackedArea(ctx, plot: plot)
-            drawTotalCurve(ctx, plot: plot)
-            drawAxis(ctx, plot: plot, size: size)
+        GeometryReader { geo in
+            Canvas { ctx, size in
+                let plot = plotRect(size)
+                drawGrid(ctx, plot: plot)
+                drawStackedArea(ctx, plot: plot)
+                drawTotalCurve(ctx, plot: plot)
+                drawSelection(ctx, plot: plot)   // 蓝线 + ±30min 高亮带,压在面积上
+                drawAxis(ctx, plot: plot, size: size)
+            }
+            .contentShape(Rectangle())
+            // 空间点击:拿命中 x → 分钟。SpatialTap 是离散手势,不劫持 ScrollView 滚动。
+            .gesture(SpatialTapGesture().onEnded { value in
+                onSelect(minuteAt(value.location.x, size: geo.size))
+            })
         }
+    }
+
+    /// 屏幕 x → 当天分钟数(反查 plot 映射),夹到活动范围内。
+    private func minuteAt(_ px: CGFloat, size: CGSize) -> Int {
+        let plot = plotRect(size)
+        let frac = (px - plot.minX) / max(1, plot.width)
+        let m = buckets.firstMinute + Int((Double(frac) * span).rounded())
+        return min(max(m, buckets.firstMinute), buckets.lastMinute)
+    }
+
+    /// 蓝线标点击点 + ±30min 高亮带(贯穿全图高度),带边界夹取。
+    private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
+        guard let center = selectedMinute else { return }
+        let lo = max(buckets.firstMinute, center - 30)
+        let hi = min(buckets.lastMinute, center + 30)
+        let xl = x(lo, plot), xr = x(hi, plot)
+        let band = Path(CGRect(x: xl, y: plot.minY, width: max(0, xr - xl), height: plot.height))
+        ctx.fill(band, with: .color(.blue.opacity(0.13)))
+
+        let cx = x(center, plot)
+        var line = Path()
+        line.move(to: CGPoint(x: cx, y: plot.minY))
+        line.addLine(to: CGPoint(x: cx, y: plot.maxY))
+        ctx.stroke(line, with: .color(.blue.opacity(0.9)), lineWidth: 1.5)
     }
 
     // 左留 y 轴数字,底留时间标签。
