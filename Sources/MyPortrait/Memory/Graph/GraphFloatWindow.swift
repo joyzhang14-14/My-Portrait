@@ -12,6 +12,10 @@ extension Notification.Name {
 /// 关闭:右上 × / 鼠标移出浮窗 1s 后自动关(移回取消计时)。
 struct GraphFloatWindow: View {
     let node: GraphNode
+    /// "移出 1s 自动关"开关:窗口自己在动(球没停/相机在动)时由调用方置
+    /// false —— 窗口从静止光标底下滑走同样触发 onHover exit,不代表用户
+    /// 想关(07-10 跳转落地期浮窗被误杀)。移入取消计时不受此开关影响。
+    let autoCloseEnabled: Bool
     let onClose: () -> Void
     /// portrait 浮窗的 event chip → 跳 Event 图谱并打开该 event 的浮窗。
     let onJumpToEvent: (String) -> Void
@@ -75,12 +79,13 @@ struct GraphFloatWindow: View {
         .frame(maxHeight: 440)
         .fixedSize(horizontal: false, vertical: true)
         .glassCard()
-        // 移出 1s 自动关;移回取消(需求 §5.1)。
+        // 移出 1s 自动关;移回取消(需求 §5.1)。窗口在动时 exit 不武装
+        //(见 autoCloseEnabled 注释)。
         .onHover { inside in
             if inside {
                 closeTask?.cancel()
                 closeTask = nil
-            } else {
+            } else if autoCloseEnabled {
                 closeTask = Task {
                     try? await Task.sleep(
                         for: .seconds(GraphConstants.floatWindowAutoCloseDelay))

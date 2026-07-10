@@ -94,10 +94,12 @@ struct GraphRootView: View {
         return .events
     }
 
-    /// 逐帧重绘只在需要时开:物理在动 / hover 白闪中 / 脉冲在跑。
+    /// 逐帧重绘只在需要时开:物理在动 / hover 白闪中 / 脉冲在跑 /
+    /// 浮窗开着(其球持续白闪提示,07-10)。
     /// 全静止 → TimelineView 暂停,重绘只由相机等状态变化触发(CPU≈0)。
     private var renderPaused: Bool {
         physicsParked && hoveredId == nil && pulses.isEmpty && !cameraTracking
+            && floatNodeId == nil
     }
 
     var body: some View {
@@ -111,6 +113,7 @@ struct GraphRootView: View {
                                     pulseStart: pulseStart,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
+                                    cardNodeId: floatNodeId,
                                     onTapNode: handleTap,
                                     onNodeDragEnded: { frameCameraToRing(animated: true) },
                                     onCameraInterrupt: cancelCameraTracking)
@@ -122,6 +125,10 @@ struct GraphRootView: View {
                                                         paused: renderPaused)) { _ in
                             GraphFloatWindow(
                                 node: scene.nodes[fid],
+                                // 窗口自己在动(球没停/相机在动)时禁用"移出自动关":
+                                // 窗口从静止光标底下滑走也会触发 onHover exit,跳转
+                                // 落地期浮窗跟球飞会被误杀(07-10"卡片显示一小会挂掉")
+                                autoCloseEnabled: physicsParked && !cameraTracking,
                                 onClose: { floatNodeId = nil },
                                 onJumpToEvent: jumpToEvent)
                             .position(floatPosition(for: fid, engine: engine,
