@@ -64,6 +64,12 @@ struct GraphRootView: View {
 
     // 浮窗(末端球点击)
     @State private var floatNodeId: Int? = nil
+    /// 浮窗渐显(07-10 用户"视角变完后渐进出现,不要太慢"):开卡片先隐,
+    /// 等相机取景收官(cameraTracking 落 false)再 0.22s 淡入;取景等物理
+    /// 沉降太久时 2.5s 兜底先显示。⚠️ 在**设置 floatNodeId 的入口**同步置
+    /// false(onChange 在渲染后才跑,只靠它换球时会闪一帧上个状态)。
+    @State private var floatRevealed = false
+    @State private var floatRevealTask: Task<Void, Never>? = nil
     /// 跨画布跳转目标:portrait 浮窗点 event chip → 切 events 画布后按 relPath
     /// 定位到该球(reload 末尾消费)。
     @State private var pendingFloatEventRel: String? = nil
@@ -127,6 +133,9 @@ struct GraphRootView: View {
                                 node: scene.nodes[fid],
                                 onClose: { floatNodeId = nil },
                                 onJumpToEvent: jumpToEvent)
+                            // 渐显:取景收官前隐着(也不接事件),之后 0.22s 淡入。
+                            .opacity(floatRevealed ? 1 : 0)
+                            .allowsHitTesting(floatRevealed)
                             .position(floatPosition(for: fid, engine: engine,
                                                     viewSize: geo.size))
                         }
@@ -156,6 +165,20 @@ struct GraphRootView: View {
             GraphSession.shared.entries[oldZone]?.camera = camera
             floatNodeId = nil
             pulses = []
+        }
+        // 浮窗渐显调度:开卡片后轮询取景状态,收官即淡入(见 floatRevealed 注释)。
+        .onChange(of: floatNodeId) { _, v in
+            floatRevealTask?.cancel()
+            guard v != nil else { floatRevealed = false; return }
+            floatRevealTask = Task { @MainActor in
+                for _ in 0..<150 {   // ~2.5s 兜底:取景等物理沉降太久就先显示
+                    if Task.isCancelled { return }
+                    if !cameraTracking { break }
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.22)) { floatRevealed = true }
+            }
         }
         .onDisappear {
             GraphSession.shared.entries[zone]?.camera = camera
@@ -362,6 +385,10 @@ struct GraphRootView: View {
             triggerPulse(from: id)
             if scene.nodes[id].hubBubbleRadius != nil { frameCameraToFolder(id) }
         } else {
+            // 渐显:先隐,取景收官后淡入(同帧生效)。⚠️ 只在**换球**时置隐:
+            // 重复点同一球 floatNodeId 值不变 → onChange 不触发 → 没人再把
+            // 它淡回来,会永久隐身。
+            if floatNodeId != id { floatRevealed = false }
             floatNodeId = id
             // event 区点小球 → 与信息面板绑定的取景(07-10 用户):相机聚焦
             // 该球,zoom = 所在家气泡占视口 cameraFolderFill —— 与 folder
@@ -423,6 +450,7 @@ struct GraphRootView: View {
             if case .eventLeaf(let r) = $0.kind { return r == rel }
             return false
         }) else { return }
+        if floatNodeId != idx { floatRevealed = false }   // 渐显(同上,换球才置隐)
         floatNodeId = idx
         frameCameraToEventBall(idx)
     }
