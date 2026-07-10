@@ -198,6 +198,10 @@ public enum GraphConstants {
     /// 松手后相机缓移每帧 lerp 系数(中心+缩放同步);越小越慢越顺。
     /// 60Hz 下 0.08 ≈ 0.5s 收敛九成 —— "缓慢调整到指定位置"。
     public static let cameraTrackLerp: Double = 0.08
+    /// 点击聚焦(folder/空白)平滑动画帧数(~60fps):目标点走直线到屏幕
+    /// 中心 + 缩放几何插值 + ease-in-out,消除"先缩后平移"的拉回感。
+    /// 越大越慢越顺。
+    public static let cameraFocusFrames: Int = 36
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 

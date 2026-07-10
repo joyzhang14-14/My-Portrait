@@ -264,28 +264,44 @@ struct GraphRootView: View {
     private func frameCameraToFolder(_ hub: Int) {
         guard let engine, hub < scene.nodes.count,
               let br = scene.nodes[hub].hubBubbleRadius, br > 0 else { return }
+        let snap = engine.readSnapshot()
+        guard hub < snap.count,
+              let tgt = frameFor(viewSize, center: snap[hub], radius: Float(br),
+                                 fill: GraphConstants.cameraFolderFill) else { return }
+        animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
+    }
+
+    /// 平滑聚焦到固定目标 (center, zoom)。**目标点走直线到屏幕中心** +
+    /// **缩放走几何(对数)插值** + ease-in-out —— 消除各自线性插值时"先在
+    /// 旧中心放大把目标推出去、中心再追上来"的拉回感(尤其点小 folder
+    /// 大幅缩放)。目标固定(点击时图已 park),t 基定时动画。
+    private func animateCamera(toCenter c1: SIMD2<Float>, toZoom z1raw: Double) {
         cameraTask?.cancel()
-        cameraTracking = true
+        let z1 = min(max(z1raw, GraphCamera.zoomRange.lowerBound),
+                     GraphCamera.zoomRange.upperBound)
+        let c0 = camera.center, z0 = camera.zoom
+        guard z0 > 1e-6 else { camera.center = c1; camera.zoom = z1; return }
+        // 目标点 c1 的初始屏幕偏移(相对视口中心)= (c1−c0)·z0
+        let ox = (Double(c1.x) - Double(c0.x)) * z0
+        let oy = (Double(c1.y) - Double(c0.y)) * z0
         let gen = engineGen
-        let radius = Float(br)
+        let n = max(GraphConstants.cameraFocusFrames, 1)
+        cameraTracking = true
         cameraTask = Task { @MainActor in
             defer { cameraTracking = false }
-            let k = GraphConstants.cameraTrackLerp
-            for _ in 0..<300 {   // ~5s 上限兜底
+            for i in 0...n {
                 if Task.isCancelled || gen != engineGen { return }
-                let snap = engine.readSnapshot()
-                guard hub < snap.count,
-                      let tgt = frameFor(viewSize, center: snap[hub], radius: radius,
-                                         fill: GraphConstants.cameraFolderFill)
-                else { return }
-                camera.center += (tgt.center - camera.center) * Float(k)
-                camera.zoom += (tgt.zoom - camera.zoom) * k
-                if simd_length(tgt.center - camera.center) < 0.5,
-                   abs(tgt.zoom - camera.zoom) < 0.0005 {
-                    camera = tgt; return
-                }
+                let u = Double(i) / Double(n)
+                let t = u * u * (3 - 2 * u)          // smoothstep 缓入缓出
+                let z = z0 * pow(z1 / z0, t)         // 几何缩放
+                // 目标点屏幕偏移直线缩到 0 → 它在屏上直线移到中心
+                let cx = Double(c1.x) - ox * (1 - t) / z
+                let cy = Double(c1.y) - oy * (1 - t) / z
+                camera.center = SIMD2<Float>(Float(cx), Float(cy))
+                camera.zoom = z
                 try? await Task.sleep(for: .milliseconds(16))
             }
+            camera.center = c1; camera.zoom = z1
         }
     }
 
@@ -296,9 +312,11 @@ struct GraphRootView: View {
     private func handleTap(_ id: Int?) {
         guard let id, id < scene.nodes.count else {
             floatNodeId = nil
-            // 点空白 → 视角缓移回开场总览(当前隐形环全景);07-09 用户。
-            // animated 分支跟随引擎实时环、park 收敛;portrait 无环则空转返回。
-            frameCameraToRing(animated: true)
+            // 点空白 → 平滑移回开场总览(当前隐形环/全节点包围圆);07-09 用户。
+            // 与 folder 聚焦同一套平滑动画(直线到中心+几何缩放),消拉回。
+            if let tgt = overviewCamera(viewSize) {
+                animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
+            }
             return
         }
         if scene.nodes[id].kind.isHub {
