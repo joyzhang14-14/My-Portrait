@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// 点选窗口半宽(分钟):以点击点为中心 ±此值,总窗口 = 2× = 4 小时。
+/// 高亮带 / 表头 / records 过滤三者共用此常量,避免各处漂移不一致。
+private let inputWindowRadiusMin = 120
+
 /// Memory 区 "Input" scope 的**图谱形态**(canvas 模式)。
 ///
 /// 一天一张面积图:x 轴 = 当天**第一次打字到最后一次打字**的时段(动态,不固定
@@ -21,7 +25,7 @@ struct InputActivityChartView: View {
     /// 展开的 record id 集合(可多开)。切天清空。
     @State private var expandedIds: Set<Int64> = []
     /// 点击选中的分钟(窗口中心)。nil = 未选、显示全天。选中后:图上画蓝线+
-    /// ±30min 高亮带,下方 records 过滤成这一小时。点图表空白处取消。
+    /// ±2h 高亮带,下方 records 过滤成这四小时。点图表空白处取消。
     @State private var selectedMinute: Int? = nil
     @State private var loading = false
     /// 代际 token —— 快速切天时慢查询晚归不能盖掉新一天的结果。
@@ -49,19 +53,20 @@ struct InputActivityChartView: View {
         }
     }
 
-    // MARK: - 选中窗口(±30min)派生
+    // MARK: - 选中窗口(±2h)派生
 
     /// 本地当天 00:00 的 ms —— 分钟↔时间戳换算基准(与 reload 同源)。
     private var dayStartMs: Int64 {
         Int64(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970 * 1000)
     }
 
-    /// 选中窗口的分钟范围 [lo, hi]:中心 ±30min,但**夹到图表活动区间**
-    /// [firstMinute, lastMinute] —— 靠边不足 30min 那侧顶到边、另一侧保留 30min。
+    /// 选中窗口的分钟范围 [lo, hi]:中心 ±2h,但**夹到图表活动区间**
+    /// [firstMinute, lastMinute] —— 靠边不足 2h 那侧顶到边、另一侧保留 2h。
     /// 高亮带 / 表头 / records 过滤三者同源,永远一致。未选 = nil。
     private var windowMinutes: (lo: Int, hi: Int)? {
         guard let c = selectedMinute else { return nil }
-        return (max(buckets.firstMinute, c - 30), min(buckets.lastMinute, c + 30))
+        return (max(buckets.firstMinute, c - inputWindowRadiusMin),
+                min(buckets.lastMinute, c + inputWindowRadiusMin))
     }
 
     /// 上面窗口换算成 [start, end) 毫秒。
@@ -144,7 +149,7 @@ struct InputActivityChartView: View {
 
     @ViewBuilder
     private var recordsSection: some View {
-        // 选中一小时:表头显 "10:30–11:30 · N";否则 "RECORDS · N"。
+        // 选中四小时:表头显 "09:30–13:30 · N";否则 "RECORDS · N"。
         Group {
             if let w = windowMinutes {
                 Text("\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(visibleRecords.count)")
@@ -336,7 +341,7 @@ private struct InputActivityCanvas: View {
                 drawGrid(ctx, plot: plot)
                 drawStackedArea(ctx, plot: plot)
                 drawTotalCurve(ctx, plot: plot)
-                drawSelection(ctx, plot: plot)   // 蓝线 + ±30min 高亮带,压在面积上
+                drawSelection(ctx, plot: plot)   // 蓝线 + ±2h 高亮带,压在面积上
                 drawAxis(ctx, plot: plot, size: size)
             }
             .contentShape(Rectangle())
@@ -355,11 +360,11 @@ private struct InputActivityCanvas: View {
         return min(max(m, buckets.firstMinute), buckets.lastMinute)
     }
 
-    /// 蓝线标点击点 + ±30min 高亮带(贯穿全图高度),带边界夹取。
+    /// 蓝线标点击点 + ±2h 高亮带(贯穿全图高度),带边界夹取。
     private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
         guard let center = selectedMinute else { return }
-        let lo = max(buckets.firstMinute, center - 30)
-        let hi = min(buckets.lastMinute, center + 30)
+        let lo = max(buckets.firstMinute, center - inputWindowRadiusMin)
+        let hi = min(buckets.lastMinute, center + inputWindowRadiusMin)
         let xl = x(lo, plot), xr = x(hi, plot)
         let band = Path(CGRect(x: xl, y: plot.minY, width: max(0, xr - xl), height: plot.height))
         ctx.fill(band, with: .color(.blue.opacity(0.13)))
