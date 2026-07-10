@@ -250,12 +250,19 @@ struct InputActivityChartView: View {
                             .padding(.bottom, 24)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // wr chip 定位:nonce 变即滚到目标(小延迟等 LazyVStack 落地目标行)。
+                        // wr chip 定位滚动。换天后 records 刚落地 + LazyVStack 懒加载:
+                        // 目标行还没 realize 时 scrollTo 静默失败(卡片能展开是因为后来
+                        // 才被 realize)。所以多次重试——先隔几帧无动画 scrollTo 逐步
+                        // realize 并粗定位(沿途把目标行拉进渲染),最后一次动画居中。
                         .onChange(of: scrollNonce) { _, _ in
                             guard let target = scrollTargetId else { return }
                             Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(60))
-                                withAnimation(.easeInOut(duration: 0.4)) {
+                                for ms in [120, 220, 360] {
+                                    try? await Task.sleep(for: .milliseconds(ms))
+                                    proxy.scrollTo(target, anchor: .center)
+                                }
+                                try? await Task.sleep(for: .milliseconds(80))
+                                withAnimation(.easeInOut(duration: 0.35)) {
                                     proxy.scrollTo(target, anchor: .center)
                                 }
                             }
