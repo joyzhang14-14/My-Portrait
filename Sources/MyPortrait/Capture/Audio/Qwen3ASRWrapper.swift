@@ -57,6 +57,16 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
         return FileManager.default.fileExists(atPath: dir.appendingPathComponent("model.safetensors").path)
     }
 
+    /// 从磁盘删除某个 Qwen 模型目录 —— Downloads 页 Uninstall 按钮用。
+    /// 删的是 `.../qwen3-speech/models/<org>/<repo>/` 整个目录。
+    nonisolated static func deleteFromDisk(modelId: String) {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        else { return }
+        var dir = caches.appendingPathComponent("qwen3-speech/models")
+        for part in modelId.split(separator: "/") { dir.appendPathComponent(String(part)) }
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     /// 释放已加载的模型，回收内存（~3.3 GB）。下次 transcribe 自动重新加载。
     func unload() {
         guard model != nil else { return }

@@ -57,6 +57,16 @@ final class WhisperKitWrapper: @unchecked Sendable {
         return entries.contains { $0.hasSuffix(".mlmodelc") }
     }
 
+    /// 从磁盘删除某个 Whisper 模型目录 —— Downloads 页 Uninstall 按钮用。
+    /// 删的是 `.../whisperkit-coreml/<modelName>/` 整个目录。
+    nonisolated static func deleteFromDisk(modelName: String) {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return }
+        let dir = docs.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+            .appendingPathComponent(modelName)
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     /// 启动时调,把模型下到磁盘并释放内存。下次真转录 ensurePipe 会从磁盘
     /// cache 秒加载,不再触发下载。新用户首启不会卡 150MB 下载在第一段
     /// 录音时。失败 swallow,真用到再走 ensurePipe 重试。
