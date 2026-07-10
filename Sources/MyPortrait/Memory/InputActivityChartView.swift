@@ -262,19 +262,15 @@ struct InputActivityChartView: View {
                         // (标题+正文)对齐视口顶,正文在最前;展开态正文下面接的
                         // edit_log(逐条 commit/delete 编辑历史)沉到下面/视口外,
                         // 否则按卡片中心滚会正好停在一堆 commit/delete 上看不到正文。
-                        // 多次重试:选中过滤后列表已短、目标基本都已 realize,重试只是
-                        // 兜底(懒加载偶发未 realize 时 scrollTo 静默失败)。
+                        // ⚠️ **单次** scrollTo,不重试:短时间连滚多次(尤其末尾套
+                        // withAnimation)会把 ScrollView 卡死之后滚不动。原来的多次
+                        // 重试是为长列表懒加载兜底,但现在已改选中窗口过滤=列表短、
+                        // 目标必已 realize,单次即可。
                         .onChange(of: scrollNonce) { _, _ in
                             guard let target = scrollTargetId else { return }
                             Task { @MainActor in
-                                for ms in [120, 220, 360] {
-                                    try? await Task.sleep(for: .milliseconds(ms))
-                                    proxy.scrollTo(target, anchor: .top)
-                                }
-                                try? await Task.sleep(for: .milliseconds(80))
-                                withAnimation(.easeInOut(duration: 0.35)) {
-                                    proxy.scrollTo(target, anchor: .top)
-                                }
+                                try? await Task.sleep(for: .milliseconds(150))
+                                proxy.scrollTo(target, anchor: .top)
                             }
                         }
                     }
