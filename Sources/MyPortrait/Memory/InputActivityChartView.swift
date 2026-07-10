@@ -56,14 +56,22 @@ struct InputActivityChartView: View {
         Int64(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970 * 1000)
     }
 
-    /// 选中窗口的 [start, end) 毫秒;未选 = nil。中心 ±30min。
-    private var windowMs: (start: Int64, end: Int64)? {
+    /// 选中窗口的分钟范围 [lo, hi]:中心 ±30min,但**夹到图表活动区间**
+    /// [firstMinute, lastMinute] —— 靠边不足 30min 那侧顶到边、另一侧保留 30min。
+    /// 高亮带 / 表头 / records 过滤三者同源,永远一致。未选 = nil。
+    private var windowMinutes: (lo: Int, hi: Int)? {
         guard let c = selectedMinute else { return nil }
-        return (dayStartMs + Int64(c - 30) * 60_000,
-                dayStartMs + Int64(c + 30) * 60_000)
+        return (max(buckets.firstMinute, c - 30), min(buckets.lastMinute, c + 30))
     }
 
-    /// records 联动:选中时只留与窗口 [±30min] 时间重叠的,否则全天。
+    /// 上面窗口换算成 [start, end) 毫秒。
+    private var windowMs: (start: Int64, end: Int64)? {
+        guard let w = windowMinutes else { return nil }
+        return (dayStartMs + Int64(w.lo) * 60_000,
+                dayStartMs + Int64(w.hi) * 60_000)
+    }
+
+    /// records 联动:选中时只留与窗口时间重叠的,否则全天。
     private var visibleRecords: [WritingRecordViewRow] {
         guard let w = windowMs else { return records }
         return records.filter { $0.startTs < w.end && $0.endTs > w.start }
@@ -138,8 +146,8 @@ struct InputActivityChartView: View {
     private var recordsSection: some View {
         // 选中一小时:表头显 "10:30–11:30 · N";否则 "RECORDS · N"。
         Group {
-            if let c = selectedMinute {
-                Text("\(Self.hm(c - 30))–\(Self.hm(c + 30)) · \(visibleRecords.count)")
+            if let w = windowMinutes {
+                Text("\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(visibleRecords.count)")
                     .foregroundStyle(.blue)
             } else {
                 Text("RECORDS · \(records.count)")
