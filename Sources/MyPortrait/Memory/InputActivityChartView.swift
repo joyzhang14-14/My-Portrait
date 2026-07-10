@@ -215,10 +215,13 @@ struct InputActivityChartView: View {
                                                 dragPreview = nil
                                                 focusId = nil   // 用户自己选 → 退出跳转独占
                                                 withAnimation(.easeOut(duration: 0.15)) {
+                                                    // 蓝线永远画在**用户点击处**(click: m),吸附只决定带子范围。
+                                                    // 不用吸附点:①线跳走不跟手;②点同一 session 附近不同空白,
+                                                    // 吸附结果相同 → selection 相等 → 无任何重绘,"点了没反应"。
                                                     if let w = buckets.burstWindow(around: m) {
                                                         // ±snapRange 内有 session → 吸附整段。
                                                         selection = InputSelection(lo: w.lo, hi: w.hi,
-                                                                                   click: w.anchor, capped: w.capped)
+                                                                                   click: m, capped: w.capped)
                                                     } else {
                                                         // 附近确实空 → ±3h 兜底盒,盒边碰到的 session 补全不拦腰切。
                                                         let w = buckets.fallbackWindow(around: m)
@@ -427,9 +430,10 @@ struct MinuteBuckets: Sendable {
     static let fallbackRadius = 180
 
     /// 点选峰值丛:① snap 到 **±snapRange 内最近的活跃分钟**(点空白吸到附近 session;
-    /// 超范围返回 nil,调用方走 ±3h 兜底)② 用 gap 定住整丛 [L,R] ③ 从 anchor 按密度
-    /// 向两边扩、到 keystroke 上限停(不越出 [L,R])。返回 [lo,hi] + anchor(蓝线落点)。
-    func burstWindow(around click: Int) -> (lo: Int, hi: Int, capped: Bool, anchor: Int)? {
+    /// 超范围返回 nil,调用方走 ±3h 兜底)② 用 gap 定住整丛 [L,R] ③ 从吸附点按密度
+    /// 向两边扩、到 keystroke 上限停(不越出 [L,R])。返回 [lo,hi]。
+    /// 蓝线由调用方画在**用户点击处**,不在吸附点 —— 吸附只决定带子范围。
+    func burstWindow(around click: Int) -> (lo: Int, hi: Int, capped: Bool)? {
         guard !rawTotals.isEmpty, lastMinute >= firstMinute else { return nil }
         let firstM = firstMinute, lastM = lastMinute
 
@@ -479,9 +483,7 @@ struct MinuteBuckets: Sendable {
         // 视觉外扩:盖住平滑曲线的裙边(见 visualPad),否则曲线尾巴总探出带外。
         lo = max(firstM, lo - Self.visualPad)
         hi = min(lastM, hi + Self.visualPad)
-        // anchor(蓝线落点)夹进最终窗口,免得吸附后 c 落在被修掉的边缘外。
-        let anchor = min(max(c, lo), hi)
-        return (lo, hi, capped, anchor)
+        return (lo, hi, capped)
     }
 
     /// 从 seed(须为活跃分钟)向两侧按 gap 容忍扫出所属 session 的完整边界 [L,R]。
@@ -673,7 +675,8 @@ private struct InputActivityCanvas: View {
         return min(max(m, buckets.firstMinute), buckets.lastMinute)
     }
 
-    /// 高亮带(贯穿全图高度)+ 蓝线:点击选中在 anchor 画一条;
+    /// 高亮带(贯穿全图高度)+ 蓝线:点击选中在**用户点击处**画一条(吸附时
+    /// 可在带外,标明"你点的这里、选中的是旁边那段");
     /// 拖拽框选(click=nil)在左右两边界各画一条。拖拽预览优先。
     private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
         // 拖拽预览优先;否则画已提交选中。
