@@ -109,10 +109,13 @@ struct TimelineView: View {
                 .opacity(state.frames.isEmpty ? 0 : 1)
                 .clipped()
         }
-        // 钉在面板顶部:无 frame 的天内容比面板矮,否则 mainPane 的默认居中会把
-        // 整个 VStack(含日期栏)往下推 ~50px;有 frame 的天图片撑满,本就顶对齐。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black)
+        // 内容顶到窗口顶(标题栏透明,padding(.top,40) 就是给红绿灯留的那条)。
+        // 不忽略的话内容从安全区(~30pt)以下开始,40pt 排在它下面 → 日期栏比
+        // 设计位置低一截。之前有 frame 的天"看着正常"其实是 scaledToFill 图
+        // 溢出布局把整列顶上去 30pt 的巧合(见 FramePreview 注释),两处一起修。
+        .ignoresSafeArea(.container, edges: .top)
         // Timeline 主区域故意永远黑底(展示屏幕录像,黑底凸显画面)。
         // 强制 dark colorScheme 让里面的 TimelineControlsBar / BrowserURLBar /
         // FramePreview 等控件无论系统是 light 还是 dark,都用浅色字渲染 ——
@@ -477,19 +480,25 @@ private struct FramePreview: View {
                     // loaders entirely so we don't churn on failure retry.
                     NoMediaPlaceholder()
                 } else if let path = frame.snapshotPath {
-                    AsyncDiskThumbnail(path: path, targetPixelSize: 1800)
+                    // Color.clear 严格取槽位尺寸,图 overlay 上去再裁 ——
+                    // 直接放 scaledToFill 的图会**上报超过槽位的布局高度**
+                    // (clipped 只裁画面不裁布局),把整列顶出面板:日期栏被
+                    // 顶进标题栏 ~30pt,空数据天没图不溢出,栏就"沉下去"。
+                    Color.clear
+                        .overlay(AsyncDiskThumbnail(path: path, targetPixelSize: 1800))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
                 } else if let vpath = frame.videoPath {
                     // 99%+ of frames live here — compacted into an MP4 chunk
-                    AsyncMP4FrameThumbnail(
-                        videoPath: vpath,
-                        offsetMs: frame.videoOffsetMs,
-                        fps: frame.videoFps,
-                        targetPixelSize: 1800
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    Color.clear
+                        .overlay(AsyncMP4FrameThumbnail(
+                            videoPath: vpath,
+                            offsetMs: frame.videoOffsetMs,
+                            fps: frame.videoFps,
+                            targetPixelSize: 1800
+                        ))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
