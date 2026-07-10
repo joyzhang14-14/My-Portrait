@@ -188,6 +188,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 被拖球上一 tick 的钉位(扫掠清障用,防高速隧穿)+ 邻域缓冲。
     private var dragPrevPos: SIMD2<Float>? = nil
     private var dragNbr: [Int32] = []
+    /// 拖拽清障的 x 轴扫线缓存。密集球群若直接对 dragNbr 全做两两检查，
+    /// 一次接触会从 O(k) 突然涨到 O(k²)，物理线程来不及按 60Hz 交快照。
+    /// 按 x 排序后只检查圆的 x 投影可能相交的邻居，碰撞规则不变。
+    private var dragSweep: [(index: Int32, x: Float)] = []
     /// 挂号的 alphaTarget(dragLock 保护):beginDrag/endDrag 不再抢
     /// simLock —— 收敛中 tick 握锁 20~40ms(Debug),主线程"抓球那一下"
     /// 会顿一拍(07-02 实测);physics 线程下个循环自取自用。
@@ -1906,13 +1910,24 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     if dist < minD {
                         let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
                         P[j] = c + dir * minD
+                        // 位置已经推出扫掠路径，同时清掉再次撞入的法向速度。
+                        // 否则下一 tick 弹簧/旧速度会把球送回接触面，形成抖动。
+                        let closing = simd_dot(vel[j], dir)
+                        if closing < 0 { vel[j] -= dir * closing }
                     }
                     if dist < minD + 24 { dragNbr.append(Int32(j)) }
                 }
+                let maxR = nodeRadius.max() ?? 0
                 for _ in 0..<2 {
-                    for a in 0..<max(dragNbr.count, 1) - 1 {
-                        for b in (a + 1)..<dragNbr.count {
-                            let i = Int(dragNbr[a]), j = Int(dragNbr[b])
+                    dragSweep.removeAll(keepingCapacity: true)
+                    for i in dragNbr { dragSweep.append((i, P[Int(i)].x)) }
+                    dragSweep.sort { $0.x < $1.x }
+                    for a in 0..<max(dragSweep.count - 1, 0) {
+                        let i = Int(dragSweep[a].index)
+                        let reachX = nodeRadius[i] + maxR + pad
+                        for b in (a + 1)..<dragSweep.count {
+                            if dragSweep[b].x - dragSweep[a].x >= reachX { break }
+                            let j = Int(dragSweep[b].index)
                             let d = P[j] - P[i]
                             let dist = simd_length(d)
                             let minD = nodeRadius[i] + nodeRadius[j] + pad
@@ -1921,6 +1936,16 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                                 let push = (minD - dist) * 0.5
                                 P[i] -= dir * push
                                 P[j] += dir * push
+                                // PBD（位置约束求解）后把相向速度归零，避免
+                                // 弹簧与位置投影在接触面两侧来回打架。
+                                let rv = simd_dot(vel[j] - vel[i], dir)
+                                if rv < 0 {
+                                    let ri2 = nodeRadius[i] * nodeRadius[i]
+                                    let rj2 = nodeRadius[j] * nodeRadius[j]
+                                    let wi = rj2 / max(ri2 + rj2, 1e-6)
+                                    vel[i] += dir * (rv * wi)
+                                    vel[j] -= dir * (rv * (1 - wi))
+                                }
                             }
                         }
                     }
