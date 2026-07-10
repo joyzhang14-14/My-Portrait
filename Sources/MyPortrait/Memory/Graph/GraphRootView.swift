@@ -271,34 +271,69 @@ struct GraphRootView: View {
         animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
     }
 
-    /// 平滑聚焦到固定目标 (center, zoom)。**目标点走直线到屏幕中心** +
-    /// **缩放走几何(对数)插值** + ease-in-out —— 消除各自线性插值时"先在
-    /// 旧中心放大把目标推出去、中心再追上来"的拉回感(尤其点小 folder
-    /// 大幅缩放)。目标固定(点击时图已 park),t 基定时动画。
+    /// 平滑聚焦到固定目标 (center, zoom)。**van Wijk & Nuij 2004「平滑高效的
+    /// 缩放与平移」**:沿 c0→c1 世界直线,中心与缩放联合参数化,使观感匀速且
+    /// **任意方向/缩放比都无过冲**。取代原「目标点屏幕直线 + 几何缩放」——
+    /// 那个方案 zoom-in 平滑,但 zoom-out 缩放比 >e(≈2.7)时世界中心会先冲过头
+    /// 再拉回(远处小 folder 回总览实测过冲 728~1493pt = 用户报的"强拉回")。
+    /// w = 世界可视宽度 = minDim/zoom;rho=1.4(缩放/平移权衡,原论文最优值)。
+    /// 目标固定(点击时图已 park),t 基定时动画,帧数不变(时长与原一致)。
     private func animateCamera(toCenter c1: SIMD2<Float>, toZoom z1raw: Double) {
         cameraTask?.cancel()
         let z1 = min(max(z1raw, GraphCamera.zoomRange.lowerBound),
                      GraphCamera.zoomRange.upperBound)
         let c0 = camera.center, z0 = camera.zoom
         guard z0 > 1e-6 else { camera.center = c1; camera.zoom = z1; return }
-        // 目标点 c1 的初始屏幕偏移(相对视口中心)= (c1−c0)·z0
-        let ox = (Double(c1.x) - Double(c0.x)) * z0
-        let oy = (Double(c1.y) - Double(c0.y)) * z0
-        let gen = engineGen
+        let minDim = Double(min(viewSize.width, viewSize.height))
+        guard minDim > 1 else { camera.center = c1; camera.zoom = z1; return }
+        let w0 = minDim / z0, w1 = minDim / z1   // 世界可视宽度
+        let dir = c1 - c0
+        let u1 = Double(simd_length(dir))         // 中心间世界距离
         let n = max(GraphConstants.cameraFocusFrames, 1)
+        let gen = engineGen
         cameraTracking = true
         cameraTask = Task { @MainActor in
             defer { cameraTracking = false }
+            // 中心几乎重合(纯缩放,如已在总览心处点空白):指数插值缩放,
+            // 避开 van Wijk 的 1/u1 除零。
+            if u1 < 1e-4 {
+                for i in 0...n {
+                    if Task.isCancelled || gen != engineGen { return }
+                    let u = Double(i) / Double(n)
+                    let t = u * u * (3 - 2 * u)
+                    camera.center = c1
+                    camera.zoom = minDim / (w0 * pow(w1 / w0, t))
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+                camera.center = c1; camera.zoom = z1; return
+            }
+            // 表达式拆成显式 Double 中间量(否则 Swift 类型检查器超时)
+            let rho: Double = 1.4
+            let rho2: Double = rho * rho
+            let rho4: Double = rho2 * rho2
+            let dw: Double = w1 * w1 - w0 * w0
+            let uu2: Double = u1 * u1
+            let b0: Double = (dw + rho4 * uu2) / (2 * w0 * rho2 * u1)
+            let b1: Double = (dw - rho4 * uu2) / (2 * w1 * rho2 * u1)
+            let r0: Double = log(-b0 + (b0 * b0 + 1).squareRoot())
+            let r1: Double = log(-b1 + (b1 * b1 + 1).squareRoot())
+            let bigS: Double = (r1 - r0) / rho        // 变换空间总弧长
+            let coshR0: Double = cosh(r0)
+            let sinhR0: Double = sinh(r0)
+            let unit = dir / Float(u1)                // c0→c1 单位方向
             for i in 0...n {
                 if Task.isCancelled || gen != engineGen { return }
                 let u = Double(i) / Double(n)
-                let t = u * u * (3 - 2 * u)          // smoothstep 缓入缓出
-                let z = z0 * pow(z1 / z0, t)         // 几何缩放
-                // 目标点屏幕偏移直线缩到 0 → 它在屏上直线移到中心
-                let cx = Double(c1.x) - ox * (1 - t) / z
-                let cy = Double(c1.y) - oy * (1 - t) / z
-                camera.center = SIMD2<Float>(Float(cx), Float(cy))
-                camera.zoom = z
+                let t: Double = u * u * (3 - 2 * u)   // 对弧长参数再加缓入缓出
+                let s: Double = t * bigS
+                let denomW: Double = cosh(rho * s + r0)
+                let w: Double = w0 * coshR0 / denomW
+                // 沿直线走过的世界距离(s=0 → 0,s=S → u1)
+                let uuA: Double = (w0 / rho2) * coshR0 * tanh(rho * s + r0)
+                let uuB: Double = (w0 / rho2) * sinhR0
+                let uu: Double = uuA - uuB
+                camera.center = c0 + unit * Float(uu)
+                camera.zoom = minDim / w
                 try? await Task.sleep(for: .milliseconds(16))
             }
             camera.center = c1; camera.zoom = z1
