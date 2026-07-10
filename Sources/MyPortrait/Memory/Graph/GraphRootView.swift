@@ -125,10 +125,6 @@ struct GraphRootView: View {
                                                         paused: renderPaused)) { _ in
                             GraphFloatWindow(
                                 node: scene.nodes[fid],
-                                // 窗口自己在动(球没停/相机在动)时禁用"移出自动关":
-                                // 窗口从静止光标底下滑走也会触发 onHover exit,跳转
-                                // 落地期浮窗跟球飞会被误杀(07-10"卡片显示一小会挂掉")
-                                autoCloseEnabled: physicsParked && !cameraTracking,
                                 onClose: { floatNodeId = nil },
                                 onJumpToEvent: jumpToEvent)
                             .position(floatPosition(for: fid, engine: engine,
@@ -367,6 +363,10 @@ struct GraphRootView: View {
             if scene.nodes[id].hubBubbleRadius != nil { frameCameraToFolder(id) }
         } else {
             floatNodeId = id
+            // event 区点小球 → 与信息面板绑定的取景(07-10 用户):相机聚焦
+            // 该球,zoom = 所在家气泡占视口 cameraFolderFill —— 与 folder
+            // 聚焦同一缩放级,folder 视角转小球视角时只平移不变焦,不跳。
+            if zone == .events { frameCameraToEventBall(id) }
         }
     }
 
