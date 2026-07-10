@@ -380,7 +380,9 @@ private struct ChatTranscript: View {
                         ChatBubble(
                             message: msg,
                             isStreaming: isLastAssistant && isThinking,
-                            animatesEntrance: idx == visible.count - 1,
+                            // 历史对话加载时不能把整条超高回复做入场动画：
+                            // LazyVStack 会在动画中反复估高，形成布局死循环。
+                            animatesEntrance: isThinking && idx == visible.count - 1,
                             chips: chipsLookup?(msg.id) ?? [],
                             attachments: attachmentsLookup?(msg.id) ?? [],
                             citations: citationsLookup?(msg.id) ?? [],
@@ -401,15 +403,17 @@ private struct ChatTranscript: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 26)
             }
-            // LazyVStack 下切到长会话时,目标 bubble 尚未实例化,scrollTo 只能
-            // 按估算高度滚,变高行(markdown)常落不准 —— defaultScrollAnchor
-            // 让初始定位由 ScrollView 自己钉在底部,不依赖估算。
-            .defaultScrollAnchor(.bottom)
             .onChange(of: messages.count) {
-                if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                guard let last = messages.last else { return }
+                // 等 LazyVStack 完成本轮挂载再滚。不要动画，也不要全局 bottom
+                // anchor；两者都会让超高历史 bubble 反复参与尺寸估算。
+                Task { @MainActor in
+                    await Task.yield()
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
             }
             .onChange(of: isThinking) {
-                if isThinking { withAnimation { proxy.scrollTo("thinking", anchor: .bottom) } }
+                if isThinking { proxy.scrollTo("thinking", anchor: .bottom) }
             }
         }
     }
