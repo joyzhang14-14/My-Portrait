@@ -2,6 +2,13 @@ import Foundation
 import SQLite3
 import Observation
 
+/// `ChatMessage` predates Swift concurrency annotations. The array is built
+/// entirely on the background task, then handed to MainActor without sharing
+/// mutable storage between the two.
+private struct BackgroundChatMessages: @unchecked Sendable {
+    let value: [ChatMessage]
+}
+
 /// Persistent store for conversations and their messages.
 ///
 /// Schema:
@@ -166,6 +173,35 @@ final class ChatStore {
 
     func loadMessages(for convId: UUID) -> [ChatMessage] {
         guard let db else { return [] }
+        return Self.loadMessages(from: db, for: convId)
+    }
+
+    /// History payloads can contain megabytes of hidden tool output even when
+    /// the visible conversation has only a few short messages. Read and decode
+    /// them on a dedicated read-only connection so opening a conversation never
+    /// blocks MainActor (and therefore the whole app UI).
+    func loadMessagesInBackground(for convId: UUID) async -> [ChatMessage] {
+        let dbPath = AIPaths.chatDB.path
+        let loaded = await Task.detached(priority: .userInitiated) {
+            BackgroundChatMessages(value: Self.loadMessages(at: dbPath, for: convId))
+        }.value
+        return loaded.value
+    }
+
+    nonisolated private static func loadMessages(at dbPath: String, for convId: UUID) -> [ChatMessage] {
+        var handle: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(dbPath, &handle, flags, nil) == SQLITE_OK,
+              let handle else {
+            if let handle { sqlite3_close(handle) }
+            return []
+        }
+        defer { sqlite3_close(handle) }
+        sqlite3_busy_timeout(handle, 5_000)
+        return loadMessages(from: handle, for: convId)
+    }
+
+    nonisolated private static func loadMessages(from db: OpaquePointer, for convId: UUID) -> [ChatMessage] {
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         let sql = "SELECT id, role, text, parts_json, time FROM messages WHERE conv_id=? ORDER BY time ASC"
@@ -173,6 +209,7 @@ final class ChatStore {
         sqlite3_bind_text(stmt, 1, convId.uuidString, -1, Self.SQLITE_TRANSIENT)
 
         var out: [ChatMessage] = []
+        let decoder = JSONDecoder()
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard
                 let idCStr   = sqlite3_column_text(stmt, 0),
@@ -185,7 +222,7 @@ final class ChatStore {
             if let pj = sqlite3_column_text(stmt, 3) {
                 let json = String(cString: pj)
                 if let data = json.data(using: .utf8),
-                   let decoded = try? JSONDecoder().decode([ContentPart].self, from: data) {
+                   let decoded = try? decoder.decode([ContentPart].self, from: data) {
                     parts = decoded
                 }
             }
