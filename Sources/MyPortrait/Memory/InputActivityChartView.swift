@@ -424,10 +424,10 @@ struct MinuteBuckets: Sendable {
     /// 防极端大 session 一口气全选。绝大多数 session 都在此值内会整段选中。
     static let keystrokeCap = 10000
     /// 吸附范围(分钟):点击点 ±此值内有活跃分钟 → 吸附到那个 session;
-    /// 超出(附近确实空)→ 调用方走 ±fallbackRadius 兜底。
+    /// 超出(附近确实空)→ 调用方走 fallbackWindow 兜底。
     static let snapRange = 60
-    /// 死区兜底半宽(分钟):附近无 session 时,圈点击点 ±此值(±3h)。
-    static let fallbackRadius = 180
+    /// 死区兜底半宽**下限**(分钟)。实际半宽随当天跨度伸缩,见 fallbackWindow。
+    static let fallbackRadiusMin = 30
 
     /// 点选峰值丛:① snap 到 **±snapRange 内最近的活跃分钟**(点空白吸到附近 session;
     /// 超范围返回 nil,调用方走 ±3h 兜底)② 用 gap 定住整丛 [L,R] ③ 从吸附点按密度
@@ -506,13 +506,18 @@ struct MinuteBuckets: Sendable {
         return (L, R)
     }
 
-    /// 死区兜底窗口:点击点 ±fallbackRadius 盒子,再把被盒边**切到一半**的 session
+    /// 死区兜底窗口:点击点 ± 动态半宽的盒子,再把被盒边**切到一半**的 session
     /// 补全(盒内有活跃分钟时,左右各自延伸到其 session 完整边界)——绝不拦腰切
     /// session(实测:兜底盒切在上午 session 中间是"漏边角"的主要来源之一)。
+    ///
+    /// 半宽 = 当天跨度/8(盒宽 = 图面 1/4,任何一天视觉占比恒定)。固定 ±3h 在
+    /// 短跨度日会一盒包住大半图面;跨度/8 在全 24h 日恰为 180min(与旧值等价),
+    /// 短日自动收窄。下限 fallbackRadiusMin。
     func fallbackWindow(around click: Int) -> (lo: Int, hi: Int) {
         let c = min(max(click, firstMinute), lastMinute)
-        var lo = max(firstMinute, c - Self.fallbackRadius)
-        var hi = min(lastMinute, c + Self.fallbackRadius)
+        let radius = max(Self.fallbackRadiusMin, (lastMinute - firstMinute) / 8)
+        var lo = max(firstMinute, c - radius)
+        var hi = min(lastMinute, c + radius)
         // 盒内最左活跃分钟所属 session 的左边界 ≤ 盒左边 → 延伸补全;右侧同理。
         if let a = (lo...hi).first(where: { rawTotals[$0] >= Self.activeFloor }) {
             lo = min(lo, sessionBounds(from: a).L)
