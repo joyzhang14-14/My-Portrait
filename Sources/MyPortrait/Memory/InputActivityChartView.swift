@@ -43,9 +43,6 @@ struct InputActivityChartView: View {
     @State private var pendingJumpId: Int64? = nil
     /// 当前高亮的 record(定位后 ~2s 淡出)。
     @State private var highlightedId: Int64? = nil
-    /// 滚动目标 + nonce(同 id 重复定位也要触发 ScrollViewReader.onChange)。
-    @State private var scrollTargetId: Int64? = nil
-    @State private var scrollNonce = 0
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
     @State private var records: [WritingRecordViewRow] = []
@@ -126,8 +123,6 @@ struct InputActivityChartView: View {
         }
         expandedIds.insert(pid)
         highlightedId = pid
-        scrollTargetId = pid
-        scrollNonce += 1
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             if highlightedId == pid {
@@ -249,31 +244,19 @@ struct InputActivityChartView: View {
                     }
 
                     // records 独立滚动区(图不动、只这里滚)。
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 8) {
-                                recordsSection
-                            }
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.bottom, 24)
+                    // ⚠️ wr chip 定位**不再程序滚动**:程序 scrollTo 与用户手动滑动
+                    // 抢同一个 ScrollView,用户在自动滚时插一手 → ScrollView 卡死滚
+                    // 不动。改为——每次 redirect 都是全新进入本界面(ScrollView 天然
+                    // 从顶部起),叠加选中窗口把列表过滤到目标那一段(通常就一张卡),
+                    // 目标本就在最上;不需要也不做任何程序滚动,零冲突。
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            recordsSection
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // wr chip 定位滚动。锚点用 **.top 不是 .center**:卡片顶部
-                        // (标题+正文)对齐视口顶,正文在最前;展开态正文下面接的
-                        // edit_log(逐条 commit/delete 编辑历史)沉到下面/视口外,
-                        // 否则按卡片中心滚会正好停在一堆 commit/delete 上看不到正文。
-                        // ⚠️ **单次** scrollTo,不重试:短时间连滚多次(尤其末尾套
-                        // withAnimation)会把 ScrollView 卡死之后滚不动。原来的多次
-                        // 重试是为长列表懒加载兜底,但现在已改选中窗口过滤=列表短、
-                        // 目标必已 realize,单次即可。
-                        .onChange(of: scrollNonce) { _, _ in
-                            guard let target = scrollTargetId else { return }
-                            Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(150))
-                                proxy.scrollTo(target, anchor: .top)
-                            }
-                        }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.bottom, 24)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
@@ -325,7 +308,6 @@ struct InputActivityChartView: View {
                             }
                         }
                     }
-                    .id(rec.id)   // ScrollViewReader 定位锚点
                     .overlay(     // wr chip 跳转命中的卡片高亮描边(~2s 淡出)
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(Theme.accent,
