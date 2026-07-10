@@ -119,10 +119,10 @@ struct CaptureHealthView: View {
 
     /// 公开 issue 和私下支持分别使用不同的脱敏强度与发送路径。
     private var diagnosticCard: some View {
-        SettingsCard(title: "Diagnostic export",
-                     footnote: "Both exports exclude captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
-            SettingsRow("Public bug report",
-                        description: "Strict allowlist with no free-form log messages or full configuration. Safe for a public GitHub issue.",
+        SettingsCard(title: "Bug report",
+                     footnote: "Both options exclude captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
+            SettingsRow("Report bug to GitHub issue",
+                        description: "Best if you can describe the bug clearly and know how to trigger it. Makes a safe file to attach to a public GitHub issue.",
                         icon: "ladybug") {
                 Button(diagBundleBusy ? "Working…" : "Export") {
                     runDiagnosticExport(mode: .publicReport)
@@ -131,10 +131,10 @@ struct CaptureHealthView: View {
                 .disabled(diagBundleBusy)
             }
             SettingsDivider()
-            SettingsRow("Private support bundle",
-                        description: "More detail, including sanitized errors and timestamps. Share privately by Mail, AirDrop, or another trusted channel.",
+            SettingsRow("Send data to developer privately",
+                        description: "Not sure what caused the bug, or don't feel like writing it up? This packs detailed logs and opens an email to the developer — just hit send.",
                         icon: "lock.shield") {
-                Button(diagBundleBusy ? "Working…" : "Export") {
+                Button(diagBundleBusy ? "Working…" : "Send") {
                     runDiagnosticExport(mode: .privateSupport)
                 }
                 .buttonStyle(.bordered).controlSize(.small)
@@ -159,11 +159,44 @@ struct CaptureHealthView: View {
                 diagBundleStatus = "Saved: \(url.path)"
                 exportedBundleURL = url
                 exportedBundleMode = mode
-                showUploadGuide = true
+                if mode == .privateSupport {
+                    // 私下包:直接把 zip 在 Finder 里点亮 + 打开写邮件窗口(To 预填开发者)。
+                    openBugReportEmail(attaching: url)
+                } else {
+                    showUploadGuide = true
+                }
             } catch {
                 diagBundleStatus = "Export failed: \(error.localizedDescription)"
             }
             diagBundleBusy = false
+        }
+    }
+
+    /// 私下 bug 上报:先在 Finder 点亮 zip(方便用户拖进邮件当附件),
+    /// 再打开系统默认邮件客户端的写信窗口,To 预填开发者邮箱、主题 / 正文预填好。
+    /// mailto 规范不支持附件,所以正文里附上文件路径 + 提示拖拽。
+    private func openBugReportEmail(attaching url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+
+        let body = """
+        Hi, I ran into a bug in My Portrait.
+
+        (Feel free to add anything you remember here — or just leave it blank.)
+
+        A diagnostic file has been created at:
+        \(url.path)
+
+        Please drag that file into this email as an attachment before sending. Thanks!
+        """
+        var comps = URLComponents()
+        comps.scheme = "mailto"
+        comps.path = "joyzhang144@gmail.com"
+        comps.queryItems = [
+            URLQueryItem(name: "subject", value: "My Portrait bug report"),
+            URLQueryItem(name: "body", value: body),
+        ]
+        if let mailURL = comps.url {
+            NSWorkspace.shared.open(mailURL)
         }
     }
 
