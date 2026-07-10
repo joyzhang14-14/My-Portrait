@@ -6,6 +6,8 @@ private struct InputSelection: Equatable {
     let lo: Int
     let hi: Int
     let click: Int?
+    /// 点击自动选丛时是否撞到 keystrokeCap 被截断(拖拽框选恒 false)。
+    var capped: Bool = false
 }
 
 /// Memory 区 "Input" scope 的**图谱形态**(canvas 模式)。
@@ -91,6 +93,18 @@ struct InputActivityChartView: View {
         return records.filter { $0.startTs < w.end && $0.endTs > w.start }
     }
 
+    /// 表头文字。拖拽中(dragPreview 非空)**不显 records 数**——列表还是旧提交
+    /// 选区,数目和实时时间/keys 不同源会误导;松手提交后才出现。点击选丛撞 cap
+    /// 截断时标 "capped",解释为何比拖拽/整段小。
+    private func headerLabel(_ w: (lo: Int, hi: Int)) -> String {
+        var s = "\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(buckets.keystrokes(in: w.lo, w.hi)) keys"
+        if dragPreview == nil {
+            if selection?.capped == true { s += " · capped" }
+            s += " · \(visibleRecords.count)"
+        }
+        return s
+    }
+
     /// 分钟(当天分钟数)→ "HH:mm",越界夹到 00:00 / 23:59。
     private static func hm(_ minute: Int) -> String {
         let m = min(max(minute, 0), 1439)
@@ -125,7 +139,8 @@ struct InputActivityChartView: View {
                                                     // 点在死区(附近无丛)→ 忽略,保留当前选中。
                                                     guard let w = buckets.burstWindow(around: m) else { return }
                                                     withAnimation(.easeOut(duration: 0.15)) {
-                                                        selection = InputSelection(lo: w.lo, hi: w.hi, click: m)
+                                                        selection = InputSelection(lo: w.lo, hi: w.hi,
+                                                                                   click: m, capped: w.capped)
                                                     }
                                                 },
                                                 onDragChange: { lo, hi in
@@ -137,6 +152,10 @@ struct InputActivityChartView: View {
                                                         // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
                                                         selection = InputSelection(lo: lo, hi: hi, click: nil)
                                                     }
+                                                },
+                                                onDragCancel: {
+                                                    // 竖向为主的拖拽(想滚页)→ 不改选中,只清途中预览。
+                                                    dragPreview = nil
                                                 })
                                 .frame(height: geo.size.height / 3)
                             legend
@@ -176,8 +195,7 @@ struct InputActivityChartView: View {
         // 选中/拖拽中:表头显 "09:30–13:04 · 8421 keys · N";否则 "RECORDS · N"。
         Group {
             if let w = displayWindow {
-                Text("\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(buckets.keystrokes(in: w.lo, w.hi)) keys · \(visibleRecords.count)")
-                    .foregroundStyle(.blue)
+                Text(headerLabel(w)).foregroundStyle(.blue)
             } else {
                 Text("RECORDS · \(records.count)")
                     .foregroundStyle(Theme.textTertiary)
@@ -302,7 +320,7 @@ struct MinuteBuckets: Sendable {
     /// 点选峰值丛:① snap 到最近活跃分钟 ② 用 gap 定住整丛 [L,R] ③ 从 click
     /// 按密度向两边扩、到 keystroke 上限停(不越出 [L,R])。返回选中窗口 [lo,hi]。
     /// 纯函数。点在深空隙/孤立单键(附近无活跃分钟)→ 无可选丛,返回 nil。
-    func burstWindow(around click: Int) -> (lo: Int, hi: Int)? {
+    func burstWindow(around click: Int) -> (lo: Int, hi: Int, capped: Bool)? {
         guard !rawTotals.isEmpty, lastMinute >= firstMinute else { return nil }
         let firstM = firstMinute, lastM = lastMinute
 
@@ -339,6 +357,7 @@ struct MinuteBuckets: Sendable {
         //    0 值(桥接内部小空隙)不吃预算,一律并入;两侧都放不下就停。
         var lo = c, hi = c
         var total = rawTotals[c]
+        var capped = false   // 因预算(而非到达丛边界)停下 = 截断
         while lo > L || hi < R {
             let leftVal = lo > L ? rawTotals[lo - 1] : -1
             let rightVal = hi < R ? rawTotals[hi + 1] : -1
@@ -352,13 +371,17 @@ struct MinuteBuckets: Sendable {
             } else if secondV >= 0 && total + secondV <= Self.keystrokeCap {
                 if denserIsLeft { hi += 1 } else { lo -= 1 }
                 total += secondV
-            } else { break }
+            } else {
+                // 循环条件保证至少一侧可扩,却都放不下 → 是被 cap 卡住的。
+                capped = true
+                break
+            }
         }
 
         // 修边:去掉两端桥接进来的安静分钟,带子不含空隙尾巴。
         while lo < hi && rawTotals[lo] < Self.activeFloor { lo += 1 }
         while hi > lo && rawTotals[hi] < Self.activeFloor { hi -= 1 }
-        return (lo, hi)
+        return (lo, hi, capped)
     }
 
     /// [lo, hi] 区间的原始击键总数(表头显示 / 触顶判断)。
@@ -446,12 +469,14 @@ private struct InputActivityCanvas: View {
     let selection: InputSelection?
     /// 拖拽中的实时预览窗口(优先画,只画带不画线);nil = 不在拖拽。
     let dragPreview: (lo: Int, hi: Int)?
-    /// 轻点(位移 < 阈值)→ 命中分钟,走点击自动选丛。
+    /// 轻点(总位移 < 阈值)→ 命中分钟,走点击自动选丛。
     let onTapSelect: (Int) -> Void
-    /// 拖拽中(位移 ≥ 阈值)→ 实时回传框选范围 [lo,hi]。
+    /// 横向拖拽中 → 实时回传框选范围 [lo,hi]。
     let onDragChange: (Int, Int) -> Void
-    /// 拖拽松手 → 提交框选范围。
+    /// 横向拖拽松手 → 提交框选范围。
     let onDragEnd: (Int, Int) -> Void
+    /// 竖向为主的拖拽(想滚页)→ 不选、只清预览。
+    let onDragCancel: () -> Void
 
     /// 判定"点击 vs 拖拽"的位移阈值(pt)。
     private let dragSlop: CGFloat = 6
@@ -472,18 +497,23 @@ private struct InputActivityCanvas: View {
             .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
-                        guard abs(v.translation.width) >= dragSlop else { return }
+                        let dx = abs(v.translation.width), dy = abs(v.translation.height)
+                        // 只在**横向占优**的拖拽时预览框选;竖向为主(想滚页)不预览。
+                        guard dx >= dragSlop, dx > dy else { return }
                         let a = minuteAt(v.startLocation.x, size: geo.size)
                         let b = minuteAt(v.location.x, size: geo.size)
                         onDragChange(min(a, b), max(a, b))
                     }
                     .onEnded { v in
-                        if abs(v.translation.width) < dragSlop {
-                            onTapSelect(minuteAt(v.startLocation.x, size: geo.size))
-                        } else {
+                        let dx = abs(v.translation.width), dy = abs(v.translation.height)
+                        if hypot(dx, dy) < dragSlop {
+                            onTapSelect(minuteAt(v.startLocation.x, size: geo.size))   // 轻点 → 选丛
+                        } else if dx > dy {
                             let a = minuteAt(v.startLocation.x, size: geo.size)
                             let b = minuteAt(v.location.x, size: geo.size)
-                            onDragEnd(min(a, b), max(a, b))
+                            onDragEnd(min(a, b), max(a, b))                            // 横拖 → 框选
+                        } else {
+                            onDragCancel()   // 竖向为主 → 不改选中(避免误改),清预览
                         }
                     }
             )
