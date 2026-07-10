@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// 一次峰值丛选择的结果:click = 点击点(画蓝线),[lo, hi] = 算出的丛窗口
-/// (高亮带 + records 过滤共用)。由 `MinuteBuckets.burstWindow(around:)` 产出。
+/// 一次选中的结果:[lo, hi] = 选中的分钟窗口(高亮带 + records 过滤共用)。
+/// click = 点击点(画蓝线);拖拽框选无点击点 → nil,只画带不画线。
 private struct InputSelection: Equatable {
-    let click: Int
     let lo: Int
     let hi: Int
+    let click: Int?
 }
 
 /// Memory 区 "Input" scope 的**图谱形态**(canvas 模式)。
@@ -28,9 +28,11 @@ struct InputActivityChartView: View {
     @State private var records: [WritingRecordViewRow] = []
     /// 展开的 record id 集合(可多开)。切天清空。
     @State private var expandedIds: Set<Int64> = []
-    /// 点选的峰值丛。nil = 未选、显示全天。选中后:蓝线标点击点 + 丛高亮带,
-    /// records 过滤成该丛时段。点图表空白处取消。
+    /// 已提交的选中(点击自动丛 or 拖拽框选)。nil = 未选、显示全天。
+    /// 点图表空白处取消。
     @State private var selection: InputSelection? = nil
+    /// 拖拽框选进行中的实时预览窗口(只驱动高亮带,不动 records,松手才提交)。
+    @State private var dragPreview: (lo: Int, hi: Int)? = nil
     @State private var loading = false
     /// 代际 token —— 快速切天时慢查询晚归不能盖掉新一天的结果。
     @State private var reloadGen = 0
@@ -57,17 +59,22 @@ struct InputActivityChartView: View {
         }
     }
 
-    // MARK: - 选中峰值丛派生
+    // MARK: - 选中窗口派生
 
     /// 本地当天 00:00 的 ms —— 分钟↔时间戳换算基准(与 reload 同源)。
     private var dayStartMs: Int64 {
         Int64(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970 * 1000)
     }
 
-    /// 选中丛的分钟范围 [lo, hi]。高亮带 / 表头 / records 过滤三者同源。未选 = nil。
+    /// records 过滤用的**已提交**窗口(拖拽中不动 records,只看提交值)。
     private var windowMinutes: (lo: Int, hi: Int)? {
         guard let s = selection else { return nil }
         return (s.lo, s.hi)
+    }
+
+    /// 表头显示用窗口:拖拽中优先显示实时预览,否则已提交选中。
+    private var displayWindow: (lo: Int, hi: Int)? {
+        dragPreview ?? windowMinutes
     }
 
     /// 上面窗口换算成 [start, end) 毫秒。hi 是**含端点**的分钟(keystrokes 用
@@ -111,11 +118,22 @@ struct InputActivityChartView: View {
                             InputActivityCanvas(buckets: buckets,
                                                 colorScheme: colorScheme,
                                                 selection: selection,
-                                                onSelect: { m in
+                                                dragPreview: dragPreview,
+                                                onTapSelect: { m in
                                                     // 点在死区(附近无丛)→ 忽略,保留当前选中。
                                                     guard let w = buckets.burstWindow(around: m) else { return }
                                                     withAnimation(.easeOut(duration: 0.15)) {
-                                                        selection = InputSelection(click: m, lo: w.lo, hi: w.hi)
+                                                        selection = InputSelection(lo: w.lo, hi: w.hi, click: m)
+                                                    }
+                                                },
+                                                onDragChange: { lo, hi in
+                                                    dragPreview = (lo, hi)   // 实时预览,不动 records
+                                                },
+                                                onDragEnd: { lo, hi in
+                                                    dragPreview = nil
+                                                    withAnimation(.easeOut(duration: 0.15)) {
+                                                        // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
+                                                        selection = InputSelection(lo: lo, hi: hi, click: nil)
                                                     }
                                                 })
                                 .frame(height: geo.size.height / 3)
@@ -140,8 +158,8 @@ struct InputActivityChartView: View {
                     // 手势是子视图,优先级更高,不会误触发)。
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if selection != nil {
-                            withAnimation(.easeOut(duration: 0.15)) { selection = nil }
+                        if selection != nil || dragPreview != nil {
+                            withAnimation(.easeOut(duration: 0.15)) { selection = nil; dragPreview = nil }
                         }
                     }
                 }
@@ -153,9 +171,9 @@ struct InputActivityChartView: View {
 
     @ViewBuilder
     private var recordsSection: some View {
-        // 选中丛:表头显 "09:30–10:14 · 1842 keys · N";否则 "RECORDS · N"。
+        // 选中/拖拽中:表头显 "09:30–13:04 · 8421 keys · N";否则 "RECORDS · N"。
         Group {
-            if let w = windowMinutes {
+            if let w = displayWindow {
                 Text("\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(buckets.keystrokes(in: w.lo, w.hi)) keys · \(visibleRecords.count)")
                     .foregroundStyle(.blue)
             } else {
@@ -170,7 +188,7 @@ struct InputActivityChartView: View {
         if visibleRecords.isEmpty {
             Text(selection == nil
                  ? "No writing records this day"
-                 : "No writing records in this burst")
+                 : "No writing records in this selection")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         } else {
@@ -219,6 +237,7 @@ struct InputActivityChartView: View {
         // 刷新/切天一律清选中:旧 lo/hi 是按旧数据算的,套新 buckets 会显示陈旧丛。
         // (同日点刷新时 .task(id:) 不触发,靠这里兜底。)
         selection = nil
+        dragPreview = nil
         // 本地当天 [00:00, +24h) —— x 轴天然是本地时间,不用管 DB 的 UTC 切日。
         let dayStart = Calendar.current.startOfDay(for: selectedDay)
         let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
@@ -269,10 +288,12 @@ struct MinuteBuckets: Sendable {
 
     /// 每分钟击键 ≥ 此值才算"活跃"(否则视为安静/停顿)。
     static let activeFloor = 2
-    /// 连续安静 ≥ 此分钟数 → 峰值丛收边(敲字中间短停顿不劈开)。
-    static let gapMinutes = 5
-    /// 单次选中的击键上限 —— 从点击点按密度扩到此量就停,防一口气选一大丛。
-    static let keystrokeCap = 2000
+    /// 连续安静 ≥ 此分钟数 → session 收边。取 30min:把靠得近的子峰合成一个
+    /// 活动段(整片一起选),只有真正的长时间安静(午休/换事)才断开。
+    static let gapMinutes = 30
+    /// 点击自动选中的击键上限(安全值)—— 从点击点按密度扩到此量就停,
+    /// 防极端大 session 一口气全选。绝大多数 session 都在此值内会整段选中。
+    static let keystrokeCap = 10000
     /// 点击落在小空隙时,吸附到 ±此分钟内最近的活跃分钟。
     static let snapRadius = 5
 
@@ -419,10 +440,19 @@ struct MinuteBuckets: Sendable {
 private struct InputActivityCanvas: View {
     let buckets: MinuteBuckets
     let colorScheme: ColorScheme
-    /// 选中的峰值丛(蓝线 = click,高亮带 = [lo,hi]);nil = 不画选中层。
+    /// 已提交选中(蓝线 = click,高亮带 = [lo,hi]);nil = 无。
     let selection: InputSelection?
-    /// 点击图表 → 回传命中的分钟(已夹到活动范围)。
-    let onSelect: (Int) -> Void
+    /// 拖拽中的实时预览窗口(优先画,只画带不画线);nil = 不在拖拽。
+    let dragPreview: (lo: Int, hi: Int)?
+    /// 轻点(位移 < 阈值)→ 命中分钟,走点击自动选丛。
+    let onTapSelect: (Int) -> Void
+    /// 拖拽中(位移 ≥ 阈值)→ 实时回传框选范围 [lo,hi]。
+    let onDragChange: (Int, Int) -> Void
+    /// 拖拽松手 → 提交框选范围。
+    let onDragEnd: (Int, Int) -> Void
+
+    /// 判定"点击 vs 拖拽"的位移阈值(pt)。
+    private let dragSlop: CGFloat = 6
 
     var body: some View {
         GeometryReader { geo in
@@ -431,14 +461,30 @@ private struct InputActivityCanvas: View {
                 drawGrid(ctx, plot: plot)
                 drawStackedArea(ctx, plot: plot)
                 drawTotalCurve(ctx, plot: plot)
-                drawSelection(ctx, plot: plot)   // 蓝线 + 峰值丛高亮带,压在面积上
+                drawSelection(ctx, plot: plot)   // 高亮带 + 蓝线,压在面积上
                 drawAxis(ctx, plot: plot, size: size)
             }
             .contentShape(Rectangle())
-            // 空间点击:拿命中 x → 分钟。SpatialTap 是离散手势,不劫持 ScrollView 滚动。
-            .gesture(SpatialTapGesture().onEnded { value in
-                onSelect(minuteAt(value.location.x, size: geo.size))
-            })
+            // 一个手势兼顾轻点与拖拽:minimumDistance:0 立即起手;松手时按位移判定。
+            // highPriority 让"图上拖拽"胜过 ScrollView 竖滚(图只占 1/3,竖滚从下方 records 起)。
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        guard abs(v.translation.width) >= dragSlop else { return }
+                        let a = minuteAt(v.startLocation.x, size: geo.size)
+                        let b = minuteAt(v.location.x, size: geo.size)
+                        onDragChange(min(a, b), max(a, b))
+                    }
+                    .onEnded { v in
+                        if abs(v.translation.width) < dragSlop {
+                            onTapSelect(minuteAt(v.startLocation.x, size: geo.size))
+                        } else {
+                            let a = minuteAt(v.startLocation.x, size: geo.size)
+                            let b = minuteAt(v.location.x, size: geo.size)
+                            onDragEnd(min(a, b), max(a, b))
+                        }
+                    }
+            )
         }
     }
 
@@ -450,19 +496,26 @@ private struct InputActivityCanvas: View {
         return min(max(m, buckets.firstMinute), buckets.lastMinute)
     }
 
-    /// 峰值丛高亮带(贯穿全图高度)+ 蓝线标点击点。带边界已在算法里夹好。
+    /// 高亮带(贯穿全图高度)+ 蓝线(仅点击选中有)。拖拽预览优先,只画带。
     private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
-        guard let s = selection else { return }
-        // hi 含端点:带子画到 x(hi+1) 才覆盖 hi 整分钟宽度,单分钟丛也可见;右端夹到 plot。
-        let xl = x(s.lo, plot), xr = min(x(s.hi + 1, plot), plot.maxX)
+        // 拖拽预览优先;否则画已提交选中。
+        let lo: Int, hi: Int, click: Int?
+        if let d = dragPreview { lo = d.lo; hi = d.hi; click = nil }
+        else if let s = selection { lo = s.lo; hi = s.hi; click = s.click }
+        else { return }
+
+        // hi 含端点:带子画到 x(hi+1) 才覆盖 hi 整分钟宽度,单分钟也可见;右端夹到 plot。
+        let xl = x(lo, plot), xr = min(x(hi + 1, plot), plot.maxX)
         let band = Path(CGRect(x: xl, y: plot.minY, width: max(0, xr - xl), height: plot.height))
         ctx.fill(band, with: .color(.blue.opacity(0.13)))
 
-        let cx = x(s.click, plot)
-        var line = Path()
-        line.move(to: CGPoint(x: cx, y: plot.minY))
-        line.addLine(to: CGPoint(x: cx, y: plot.maxY))
-        ctx.stroke(line, with: .color(.blue.opacity(0.9)), lineWidth: 1.5)
+        if let c = click {
+            let cx = x(c, plot)
+            var line = Path()
+            line.move(to: CGPoint(x: cx, y: plot.minY))
+            line.addLine(to: CGPoint(x: cx, y: plot.maxY))
+            ctx.stroke(line, with: .color(.blue.opacity(0.9)), lineWidth: 1.5)
+        }
     }
 
     // 左留 y 轴数字,底留时间标签。
