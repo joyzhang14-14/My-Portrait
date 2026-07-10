@@ -152,10 +152,9 @@ struct InputActivityChartView: View {
                                                         selection = InputSelection(lo: w.lo, hi: w.hi,
                                                                                    click: w.anchor, capped: w.capped)
                                                     } else {
-                                                        // 附近确实空 → 圈点击点 ±3h 兜底。
-                                                        let lo = max(buckets.firstMinute, m - MinuteBuckets.fallbackRadius)
-                                                        let hi = min(buckets.lastMinute, m + MinuteBuckets.fallbackRadius)
-                                                        selection = InputSelection(lo: lo, hi: hi, click: m)
+                                                        // 附近确实空 → ±3h 兜底盒,盒边碰到的 session 补全不拦腰切。
+                                                        let w = buckets.fallbackWindow(around: m)
+                                                        selection = InputSelection(lo: w.lo, hi: w.hi, click: m)
                                                     }
                                                 }
                                             },
@@ -330,9 +329,10 @@ struct MinuteBuckets: Sendable {
     /// 每分钟击键 ≥ 此值才算"活跃"。取 1:连微弱边缘(每分钟 1 键)也算进 session,
     /// 不再被当噪声剔掉,选中不漏边边角。只有完全 0 击键的分钟才是"安静"。
     static let activeFloor = 1
-    /// 连续安静 ≥ 此分钟数 → session 收边。取 45min:把靠得近的子峰合成一个
-    /// 活动段(整片一起选),只有真正的长时间安静(午休/换事)才断开。调大 = 选更大片。
-    static let gapMinutes = 45
+    /// 连续安静 ≥ 此分钟数 → session 收边。取 90min:实测(2026-07-10 扫库)相邻
+    /// bump 间距 45~90min 的很多,视觉上是同一坨,gap=45 会把它们划开 → 点一边
+    /// 漏另一边的"边角"。只有真正的长时间安静(>1.5h)才断开。调大 = 选更大片。
+    static let gapMinutes = 90
     /// 点击自动选中的击键上限(安全值)—— 从点击点按密度扩到此量就停,
     /// 防极端大 session 一口气全选。绝大多数 session 都在此值内会整段选中。
     static let keystrokeCap = 10000
@@ -362,20 +362,7 @@ struct MinuteBuckets: Sendable {
         guard rawTotals[c] >= Self.activeFloor else { return nil }
 
         // ② 自然丛 [L,R]:向两边跨小停顿,连续安静 ≥ gapMinutes 收边。
-        var L = c, R = c
-        var gap = 0
-        var i = c - 1
-        while i >= firstM {
-            if rawTotals[i] >= Self.activeFloor { L = i; gap = 0 }
-            else { gap += 1; if gap >= Self.gapMinutes { break } }
-            i -= 1
-        }
-        gap = 0; i = c + 1
-        while i <= lastM {
-            if rawTotals[i] >= Self.activeFloor { R = i; gap = 0 }
-            else { gap += 1; if gap >= Self.gapMinutes { break } }
-            i += 1
-        }
+        let (L, R) = sessionBounds(from: c)
 
         // ③ 从 c 按密度扩到 cap:每步取两侧邻居中"更密且加得下"的那个;
         //    0 值(桥接内部小空隙)不吃预算,一律并入;两侧都放不下就停。
@@ -408,6 +395,43 @@ struct MinuteBuckets: Sendable {
         // anchor(蓝线落点)夹进最终窗口,免得吸附后 c 落在被修掉的边缘外。
         let anchor = min(max(c, lo), hi)
         return (lo, hi, capped, anchor)
+    }
+
+    /// 从 seed(须为活跃分钟)向两侧按 gap 容忍扫出所属 session 的完整边界 [L,R]。
+    /// burstWindow 定丛 / fallbackWindow 补全被切 session 共用。
+    func sessionBounds(from seed: Int) -> (L: Int, R: Int) {
+        var L = seed, R = seed
+        var gap = 0
+        var i = seed - 1
+        while i >= firstMinute {
+            if rawTotals[i] >= Self.activeFloor { L = i; gap = 0 }
+            else { gap += 1; if gap >= Self.gapMinutes { break } }
+            i -= 1
+        }
+        gap = 0; i = seed + 1
+        while i <= lastMinute {
+            if rawTotals[i] >= Self.activeFloor { R = i; gap = 0 }
+            else { gap += 1; if gap >= Self.gapMinutes { break } }
+            i += 1
+        }
+        return (L, R)
+    }
+
+    /// 死区兜底窗口:点击点 ±fallbackRadius 盒子,再把被盒边**切到一半**的 session
+    /// 补全(盒内有活跃分钟时,左右各自延伸到其 session 完整边界)——绝不拦腰切
+    /// session(实测:兜底盒切在上午 session 中间是"漏边角"的主要来源之一)。
+    func fallbackWindow(around click: Int) -> (lo: Int, hi: Int) {
+        let c = min(max(click, firstMinute), lastMinute)
+        var lo = max(firstMinute, c - Self.fallbackRadius)
+        var hi = min(lastMinute, c + Self.fallbackRadius)
+        // 盒内最左活跃分钟所属 session 的左边界 ≤ 盒左边 → 延伸补全;右侧同理。
+        if let a = (lo...hi).first(where: { rawTotals[$0] >= Self.activeFloor }) {
+            lo = min(lo, sessionBounds(from: a).L)
+        }
+        if let b = (lo...hi).last(where: { rawTotals[$0] >= Self.activeFloor }) {
+            hi = max(hi, sessionBounds(from: b).R)
+        }
+        return (lo, hi)
     }
 
     /// [lo, hi] 区间的原始击键总数(表头显示 / 触顶判断)。
