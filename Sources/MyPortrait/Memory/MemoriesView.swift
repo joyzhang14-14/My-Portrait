@@ -946,9 +946,13 @@ struct MemoriesView: View {
             slug = "\(slug)-\(n)"
         }
         do {
+            // 没手选色 → 创建时随机固化一色(07-10:随机色生成后永不变;
+            // 不再留 nil 走"每次启动漂移"的默认色)。
+            let used = Set(EventFolderStore.loadAll().compactMap(\.colorHex))
             let f = EventFolder(slug: slug, name: name, description: "",
                                 events: [], createdAtMs: now, updatedAtMs: now,
-                                colorHex: creatingFolderHex)
+                                colorHex: creatingFolderHex
+                                    ?? FolderPalette.assignHex(used: used))
             try EventFolderStore.save(f)
             await reload()
             actionStatus = "Created folder: \(name)"
@@ -975,8 +979,11 @@ struct MemoriesView: View {
         do {
             // 先从旧 folder 摘掉,再建新 folder 放进去。
             try EventFolderStore.removeEventEverywhere(rel)
+            // 创建时随机固化一色(07-10,同 createEmptyFolder)。
+            let used = Set(EventFolderStore.loadAll().compactMap(\.colorHex))
             let f = EventFolder(slug: slug, name: name, description: "",
-                                events: [rel], createdAtMs: now, updatedAtMs: now)
+                                events: [rel], createdAtMs: now, updatedAtMs: now,
+                                colorHex: FolderPalette.assignHex(used: used))
             try EventFolderStore.save(f)
             await reload()
             actionStatus = "Moved to new folder: \(name)"
@@ -1154,10 +1161,30 @@ enum FolderPalette {
         Swatch(name: "Gray",    hex: "#9AA0A6"),
     ]
 
-    /// 默认色:按 folder name hash 稳定取一个预设色(同名每次同色)。
+    /// 默认色兜底(只给还没固化颜色的瞬间用,创建/迁移都会写死 colorHex):
+    /// djb2 稳定 hash 取预设色。⚠️ 不能用 Swift hashValue —— 每次启动随机化
+    /// 种子,"同名每次同色"只在同一次启动内成立,跨启动漂移(07-10 修:
+    /// 没设色的 folder 每次启动换色的历史遗留根因)。
     static func defaultTint(for title: String) -> Color {
-        let idx = abs(title.hashValue) % swatches.count
-        return color(fromHex: swatches[idx].hex) ?? .blue
+        color(fromHex: defaultHex(for: title)) ?? .blue
+    }
+
+    /// djb2 稳定默认色 hex(text 与 canvas 两侧共用同一算法,观感一致)。
+    static func defaultHex(for title: String) -> String {
+        var h: UInt32 = 5381
+        for b in title.utf8 { h = (h &* 33) &+ UInt32(b) }
+        return swatches[Int(h % UInt32(swatches.count))].hex
+    }
+
+    /// 创建时随机分配(07-10 用户定稿"随机色生成之后就不会变"):从预设池
+    /// 随机取一个,结果由调用方写进 colorHex 落盘、此后永不变。
+    /// - 池子排除 Gray(灰 = 未分组/Unclassified 的观感,避免新 folder 与
+    ///   之撞脸;用户手选 Gray 不受限)。
+    /// - 优先选当前没被任何 folder 占用的色(治"颜色冲突"),全被占则纯随机。
+    static func assignHex(used: Set<String>) -> String {
+        let pool = swatches.filter { $0.name != "Gray" }.map(\.hex)
+        let free = pool.filter { !used.contains($0) }
+        return (free.isEmpty ? pool : free).randomElement() ?? swatches[0].hex
     }
 
     /// "#RRGGBB" → Color。失败返回 nil。

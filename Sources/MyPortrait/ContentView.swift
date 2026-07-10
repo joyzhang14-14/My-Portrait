@@ -111,6 +111,10 @@ struct ContentView: View {
             }
             ScheduleRunner.shared.start()
 
+            // 存量 folder 颜色一次性固化(07-10:没设色的 folder 此前每次
+            // 启动换色,详见 EventFolderStore.migrateAssignColors)。幂等。
+            EventFolderStore.migrateAssignColors()
+
             // 点 cron job 通知卡片 → 切 conv + 主窗口拉到前台。
             NotificationCenterService.shared.onCronJobTap = { convId in
                 chat.switchTo(convId)
