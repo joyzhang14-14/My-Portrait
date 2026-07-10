@@ -70,11 +70,12 @@ struct InputActivityChartView: View {
         return (s.lo, s.hi)
     }
 
-    /// 上面窗口换算成 [start, end) 毫秒。
+    /// 上面窗口换算成 [start, end) 毫秒。hi 是**含端点**的分钟(keystrokes 用
+    /// rawTotals[lo...hi] 闭区间),所以排他终点要 +1 分钟,否则漏掉整个 hi 分钟。
     private var windowMs: (start: Int64, end: Int64)? {
         guard let w = windowMinutes else { return nil }
         return (dayStartMs + Int64(w.lo) * 60_000,
-                dayStartMs + Int64(w.hi) * 60_000)
+                dayStartMs + Int64(w.hi + 1) * 60_000)
     }
 
     /// records 联动:选中时只留与窗口时间重叠的,否则全天。
@@ -111,7 +112,8 @@ struct InputActivityChartView: View {
                                                 colorScheme: colorScheme,
                                                 selection: selection,
                                                 onSelect: { m in
-                                                    let w = buckets.burstWindow(around: m)
+                                                    // 点在死区(附近无丛)→ 忽略,保留当前选中。
+                                                    guard let w = buckets.burstWindow(around: m) else { return }
                                                     withAnimation(.easeOut(duration: 0.15)) {
                                                         selection = InputSelection(click: m, lo: w.lo, hi: w.hi)
                                                     }
@@ -214,6 +216,9 @@ struct InputActivityChartView: View {
         reloadGen += 1
         let gen = reloadGen
         loading = true
+        // 刷新/切天一律清选中:旧 lo/hi 是按旧数据算的,套新 buckets 会显示陈旧丛。
+        // (同日点刷新时 .task(id:) 不触发,靠这里兜底。)
+        selection = nil
         // 本地当天 [00:00, +24h) —— x 轴天然是本地时间,不用管 DB 的 UTC 切日。
         let dayStart = Calendar.current.startOfDay(for: selectedDay)
         let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
@@ -273,9 +278,9 @@ struct MinuteBuckets: Sendable {
 
     /// 点选峰值丛:① snap 到最近活跃分钟 ② 用 gap 定住整丛 [L,R] ③ 从 click
     /// 按密度向两边扩、到 keystroke 上限停(不越出 [L,R])。返回选中窗口 [lo,hi]。
-    /// 纯函数。rawTotals 空 / 越界时退化为单点。
-    func burstWindow(around click: Int) -> (lo: Int, hi: Int) {
-        guard !rawTotals.isEmpty, lastMinute >= firstMinute else { return (click, click) }
+    /// 纯函数。点在深空隙/孤立单键(附近无活跃分钟)→ 无可选丛,返回 nil。
+    func burstWindow(around click: Int) -> (lo: Int, hi: Int)? {
+        guard !rawTotals.isEmpty, lastMinute >= firstMinute else { return nil }
         let firstM = firstMinute, lastM = lastMinute
 
         // ① snap:点击点不活跃 → 找 ±snapRadius 内最近的活跃分钟。
@@ -287,6 +292,9 @@ struct MinuteBuckets: Sendable {
                 }
             }
         }
+        // snap 仍落在非活跃分钟 → 点在没有峰值丛的死区,不选。
+        // (这也根治了 lo==hi 时 trim 前提 lo<hi 不成立、退化点修不掉的问题。)
+        guard rawTotals[c] >= Self.activeFloor else { return nil }
 
         // ② 自然丛 [L,R]:向两边跨小停顿,连续安静 ≥ gapMinutes 收边。
         var L = c, R = c
@@ -445,7 +453,8 @@ private struct InputActivityCanvas: View {
     /// 峰值丛高亮带(贯穿全图高度)+ 蓝线标点击点。带边界已在算法里夹好。
     private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
         guard let s = selection else { return }
-        let xl = x(s.lo, plot), xr = x(s.hi, plot)
+        // hi 含端点:带子画到 x(hi+1) 才覆盖 hi 整分钟宽度,单分钟丛也可见;右端夹到 plot。
+        let xl = x(s.lo, plot), xr = min(x(s.hi + 1, plot), plot.maxX)
         let band = Path(CGRect(x: xl, y: plot.minY, width: max(0, xr - xl), height: plot.height))
         ctx.fill(band, with: .color(.blue.opacity(0.13)))
 
