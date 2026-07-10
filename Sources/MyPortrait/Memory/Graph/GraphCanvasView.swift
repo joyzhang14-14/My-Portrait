@@ -24,6 +24,9 @@ struct GraphCanvasView: View {
     let pulseStart: Date
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
+    /// 开着浮窗卡片的球(nil = 无):与 hover 同款白闪持续提示(07-10 用户
+    /// "有显示卡片的球也需要持续闪光")。
+    let cardNodeId: Int?
     /// 点到球(nil = 点空白)。root 据此开浮窗(leaf)或触发脉冲(hub)。
     var onTapNode: (Int?) -> Void = { _ in }
     /// 拖球松手(07-09):root 据此启动"相机缓移取景到隐形环"。
@@ -78,6 +81,7 @@ struct GraphCanvasView: View {
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
+         cardNodeId: Int? = nil,
          onTapNode: @escaping (Int?) -> Void = { _ in },
          onNodeDragEnded: @escaping () -> Void = {},
          onCameraInterrupt: @escaping () -> Void = {}) {
@@ -88,6 +92,7 @@ struct GraphCanvasView: View {
         self.pulseStart = pulseStart
         self._camera = camera
         self._hoveredId = hoveredId
+        self.cardNodeId = cardNodeId
         self.onTapNode = onTapNode
         self.onNodeDragEnded = onNodeDragEnded
         self.onCameraInterrupt = onCameraInterrupt
@@ -431,10 +436,15 @@ struct GraphCanvasView: View {
                 }
             }
         }
-        // hover 白色闪烁(正弦脉动,持续 hover 持续闪 —— 需求 §5)
-        if let hid = hoveredId, hid >= 0, hid < scene.nodes.count {
-            let node = scene.nodes[hid]
-            let c = camera.worldToScreen(snap[hid], viewSize: size)
+        // 白色闪烁(正弦脉动):hover 中的球(需求 §5)+ 开着浮窗卡片的球
+        // (07-10 用户"有显示卡片的球也需要持续闪光提示")。两者可能是
+        // 不同的球 → 各闪各的;同一颗只画一次。
+        var blinkIds: [Int] = []
+        if let hid = hoveredId { blinkIds.append(hid) }
+        if let cid = cardNodeId, cid != hoveredId { blinkIds.append(cid) }
+        for bid in blinkIds where bid >= 0 && bid < scene.nodes.count {
+            let node = scene.nodes[bid]
+            let c = camera.worldToScreen(snap[bid], viewSize: size)
             let r = node.radius * zoom
             let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
             let a = 0.35 + 0.35 * sin(now * GraphConstants.hoverBlinkHz * 2 * .pi)
