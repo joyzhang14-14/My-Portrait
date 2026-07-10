@@ -390,10 +390,11 @@ struct GraphRootView: View {
             // 它淡回来,会永久隐身。
             if floatNodeId != id { floatRevealed = false }
             floatNodeId = id
-            // event 区点小球 → 与信息面板绑定的取景(07-10 用户):相机聚焦
-            // 该球,zoom = 所在家气泡占视口 cameraFolderFill —— 与 folder
-            // 聚焦同一缩放级,folder 视角转小球视角时只平移不变焦,不跳。
-            if zone == .events { frameCameraToEventBall(id) }
+            // 点小球 → 与信息面板绑定的取景(07-10 用户,event/portrait 两区
+            // 同款):相机聚焦该球,zoom = 所在家气泡占视口 cameraFolderFill
+            // —— 与 folder 聚焦同一缩放级,folder 视角转小球视角时只平移不
+            // 变焦,不跳。
+            frameCameraToEventBall(id)
         }
     }
 
