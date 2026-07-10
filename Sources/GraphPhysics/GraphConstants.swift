@@ -123,6 +123,11 @@ public enum GraphConstants {
 
     /// 进陨石带的 weight 上限;层界:[1,1.5)最内 / [0.5,1)中 / [0,0.5)最外
     public static let beltWeightMax: Double = 1.5
+    /// folder 存活门(07-10 用户):气泡内核心球(weight≥beltWeightMax)
+    /// 不足此数的 folder 不上画布,其全部 event(核心+陨石)并入
+    /// Unclassified 继续显示。weight 衰减成陨石后核心数自然减少,
+    /// 衰减殆尽的 folder 就消失。
+    public static let folderMinCoreEvents: Int = 3
     public static let beltTier1Max: Double = 1.0
     public static let beltTier2Max: Double = 0.5
     /// 环基准间隙(单环重构):环半径 = 罩住{主球 + 全部气泡}的最小

@@ -78,13 +78,31 @@ enum GraphSceneBuilder {
             else { unclassifiedMembers.append(s) }
         }
 
-        // hub 列表(真 folder 含空的 + 虚拟 Unclassified),叶数降序定圆弧顺序
-        var specs: [HubSpec] = folders.map {
-            HubSpec(slug: $0.slug, name: $0.name,
-                    colorRGB: rgbFromHex($0.colorHex ?? defaultFolderHex(name: $0.name)),
-                    members: membersOf[$0.slug] ?? [])
+        // hub 列表(真 folder + 虚拟 Unclassified),叶数降序定圆弧顺序。
+        // folder 存活门(07-10 用户定稿):气泡内核心球(weight≥beltWeightMax,
+        // 有连线)不足 folderMinCoreEvents(3)个的 folder 不上画布 —— weight
+        // 衰减成陨石后核心数自然减少,衰减殆尽的 folder 消失;其全部剩余
+        // event(核心+陨石)并入 Unclassified(灰)继续显示,数据不动。
+        // 空 folder 同规则消失(原先空 folder 也上画布,已被此门取代)。
+        var specs: [HubSpec] = []
+        for f in folders {
+            let members = membersOf[f.slug] ?? []
+            let coreCount = members.filter {
+                $0.weight >= GraphConstants.beltWeightMax
+            }.count
+            if coreCount >= GraphConstants.folderMinCoreEvents {
+                specs.append(HubSpec(
+                    slug: f.slug, name: f.name,
+                    colorRGB: rgbFromHex(f.colorHex ?? defaultFolderHex(name: f.name)),
+                    members: members))
+            } else {
+                unclassifiedMembers.append(contentsOf: members)
+            }
         }
         if !unclassifiedMembers.isEmpty {
+            // 并入落选 folder 成员后重排:成员顺序进节点指纹,顺序不稳
+            // 会话缓存永远 miss(同顶部 scanned 排序的理由)。
+            unclassifiedMembers.sort { $0.relPath < $1.relPath }
             specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
                                  colorRGB: ungroupedGray, members: unclassifiedMembers))
         }
