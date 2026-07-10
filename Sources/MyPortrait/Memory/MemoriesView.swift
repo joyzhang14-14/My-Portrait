@@ -1215,7 +1215,7 @@ enum FolderPalette {
         return img
     }
 
-    private static func nsColor(fromHex hex: String) -> NSColor? {
+    static func nsColor(fromHex hex: String) -> NSColor? {
         var s = hex.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
@@ -1225,6 +1225,41 @@ enum FolderPalette {
             blue:    CGFloat(v & 0xFF) / 255,
             alpha: 1
         )
+    }
+
+    /// NSColor → "#RRGGBB"(sRGB;光谱取色回读用)。转不了 sRGB 返回 nil。
+    static func hex(from color: NSColor) -> String? {
+        guard let c = color.usingColorSpace(.sRGB) else { return nil }
+        return String(format: "#%02X%02X%02X",
+                      Int(round(c.redComponent * 255)),
+                      Int(round(c.greenComponent * 255)),
+                      Int(round(c.blueComponent * 255)))
+    }
+}
+
+/// 系统取色板(NSColorPanel:光谱/色轮/滑杆,即"炫彩调色盘")桥接:
+/// 右键 Custom… 打开,持续回传 hex(07-10 用户"9 个预设不够,要 spectrum")。
+/// 单例复用共享面板;换 folder 重开时旧回调被顶掉(target/action 覆盖)。
+/// @MainActor:NSColorPanel 主线程隔离,action 回调也由 AppKit 在主线程发。
+@MainActor
+final class ColorPanelBridge: NSObject {
+    static let shared = ColorPanelBridge()
+    private var onPick: ((String) -> Void)?
+
+    func present(initialHex: String?, onPick: @escaping (String) -> Void) {
+        self.onPick = onPick
+        let panel = NSColorPanel.shared
+        panel.showsAlpha = false
+        if let hex = initialHex, let c = FolderPalette.nsColor(fromHex: hex) {
+            panel.color = c
+        }
+        panel.setTarget(self)
+        panel.setAction(#selector(colorChanged(_:)))
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func colorChanged(_ sender: NSColorPanel) {
+        if let hex = FolderPalette.hex(from: sender.color) { onPick?(hex) }
     }
 }
 
@@ -1250,6 +1285,8 @@ private struct FolderDisclosureRow: View {
     @State private var confirmingDelete: Bool = false
     @State private var renaming: Bool = false
     @State private var renameDraft: String = ""
+    /// 光谱取色的防抖提交(NSColorPanel 拖动持续回调,0.25s 静默才落盘)。
+    @State private var colorCommitTask: Task<Void, Never>? = nil
 
     private var tint: Color {
         // 用户设过颜色 → 用它;否则按 name hash 出默认色("第一次随机")。
@@ -1318,7 +1355,19 @@ private struct FolderDisclosureRow: View {
                         }
                     }
                     Divider()
-                    Button("Default (random)") { onSetColor(nil) }
+                    // 光谱取色(07-10 用户"9 个预设不够,要 spectrum"):系统
+                    // NSColorPanel。持续回调防抖 0.25s 再落盘 —— onSetColor
+                    // 会整列表 reload,拖光谱逐 tick 提交会打爆。
+                    Button("Custom (spectrum)…") {
+                        ColorPanelBridge.shared.present(initialHex: colorHex) { hex in
+                            colorCommitTask?.cancel()
+                            colorCommitTask = Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(250))
+                                if !Task.isCancelled { onSetColor(hex) }
+                            }
+                        }
+                    }
+                    Button("Default") { onSetColor(nil) }
                 }
                 Divider()
                 Button("Delete folder", role: .destructive) { confirmingDelete = true }
@@ -1559,9 +1608,19 @@ private struct NewFolderSheet: View {
                         }
                     }
                 }
+                // 光谱取色(07-10 用户"9 个预设不够,要 spectrum"):原生
+                // ColorPicker,点色块即开系统取色板(光谱/色轮/滑杆)。
+                ColorPicker(selection: Binding(
+                    get: { hex.flatMap { FolderPalette.color(fromHex: $0) } ?? .gray },
+                    set: { hex = FolderPalette.hex(from: NSColor($0)) }
+                ), supportsOpacity: false) {
+                    Text("Custom (spectrum)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
                 Text(hex == nil
-                     ? "No color picked — folder uses a color generated from its name."
-                     : "Tap the selected color again to clear.")
+                     ? "No color picked — a random palette color is assigned and kept."
+                     : "Tap the selected swatch again to clear.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
