@@ -178,12 +178,21 @@ def canvas_spans(con, t0, t1):
     把逐段 0承载(canvas)按 bundle+时间相邻聚成会话,按击键数分 B/C 桶,附文档 URL。
     零硬编码:是不是 canvas 完全由承载率决定;URL 只在确定是 canvas 后用来定位 OCR 帧。"""
     spans = []
-    for s in (r for r in analyze(con, t0, t1) if not r['bearing'] and not skip_canvas(r['bundle'])):
-        if spans and spans[-1]['bundle'] == s['bundle'] and s['t0'] - spans[-1]['t1'] < BURST_GAP_MS:
+    barrier = {}   # bundle -> 自该 app 上一段 canvas 会话后是否夹了承载(AX)子段
+    for s in analyze(con, t0, t1):
+        b = s['bundle']
+        if s['bearing']:
+            barrier[b] = True          # 承载段夹在中间:不能跨它黏合。否则黏合窗 t1 覆盖到承载区,
+            continue                    # decode_span 整窗取键会把 AX 已记的内容再解一遍 → 跨路双记
+        if skip_canvas(b):
+            continue
+        if (spans and spans[-1]['bundle'] == b and not barrier.get(b)
+                and s['t0'] - spans[-1]['t1'] < BURST_GAP_MS):
             sp = spans[-1]
             sp['t1'] = s['t1']; sp['nkeys'] += s['nkeys']; sp['typed'] += s['typed']
         else:
             spans.append(dict(s))
+        barrier[b] = False             # 起/接一段 canvas 后,间隔从这段重新起算
     # 承载率层不做任何内容过滤(纯最大保留,用户裁定):噪声(「，」/空键/finder 导航)照样
     # 出会话,价值判断全交下游(口3/质量门),与 AX 路同一出口。
     for sp in spans:
