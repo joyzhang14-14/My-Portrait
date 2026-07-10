@@ -147,6 +147,20 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var brake: Float = 1
     /// 冷透但未静止的连续 tick 数(病态运动兜底,超时强制 park)。
     private var restlessTicks: Int = 0
+    // ===== 松手后冷尾巴「残余缩放快放」(≤4×,到位前收 1×) =====
+    // 把高温子步(高温期每帧多跑 tick)延进冷尾巴,额外 tick 数随「被拖那一团
+    // (hub+自家叶+自家陨石弧)残余运动量」缩放:动得多→额外≤3(总≤4×),
+    // 临近静止→收回 0(总 1×)自然减速。多跑 tick 是纯墙钟加速(tick() 与帧无关
+    // 且确定性)→ tick 总序列不变 → 终局逐位一致;belt 每 tick 各自 clamp,单 tick
+    // 滑距 ≤cap 不破。严格「只松手后」靠这个 episode 闩(不靠 alpha/quiet):
+    // 唯一置位=loop 松手边沿;清除四出口=①团 quiet ②新拖 ③explode ④restless。
+    private var releaseSettleEpisode = false
+    /// 被拖 hub 的节点下标(beginDrag 记,松手边沿仍可读;-1 = 无)。
+    private var releaseHubIndex: Int32 = -1
+    /// 被拖那一团的成员节点(hub+自家核心叶+自家陨石弧),松手边沿重建一次。
+    private var settleTeamIdx: [Int32] = []
+    /// 团成员在本 mandatory tick 之前的位置(测本 tick 残余速度,缩放 k 用)。
+    private var settleTeamPrev: [SIMD2<Float>] = []
     /// 本 tick 陨石×陨石最大穿深(collidePass 顺手记录):>1.5pt 时静止
     /// 判定一票否决 —— 压力实测:拖后回流的陨石穿透落点重合,实体化时
     /// 全场已静,缓停 1.6s 冻结前碰撞来不及顶开 = 71/360 对"花生"粘连;
@@ -368,6 +382,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         draggedIndex = index
         draggedTo = world
         pendingAlphaTarget = GraphConstants.dragAlphaTarget
+        // 记住这次拖的是哪个 hub(松手边沿 draggedIndex 已 nil,靠它重建
+        // 「被拖那一团」)。每次拖开始覆盖,松手时即最近一次。
+        releaseHubIndex = Int32(index)
         dragLock.unlock()
         wake()
     }
@@ -400,6 +417,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         ringDirty = true
+        releaseSettleEpisode = false   // 出口③:重炸开清 latch(开局路径永不快放)
         // 清旧环(07-09 出场偏差修):切走再切回复用引擎走这条路,若不清,
         // ringRad/ringC 仍是**上次布局**的值(尤其上次把环拖大过)——相机
         // 开局取景一读就按旧环定帧 = 偏差,本轮重新钉环后又没跟上。归零 →
@@ -513,7 +531,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             if dragging {
                 beltForming = false
                 if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
+                releaseSettleEpisode = false   // 出口②:新拖开始,清 latch
             } else if wasDragging {
+                // 真松手边沿 —— 快放 episode 的唯一置位点(结构上保证「只作用
+                // 松手后」:开局 explode 不经此边沿)。锁定被拖那一团成员,供
+                // 冷尾巴残余测量。
+                releaseSettleEpisode = true
+                buildSettleTeam()
                 // 松手边沿:预热命中判定 —— 拖拽中已按"假设此刻松手"
                 // 预算过,最近预算的克隆位与松手位置够近(<40pt)→ 结果
                 // 现成/在途,不重建(零/极低延迟);否则照常重建(3~8 tick)
@@ -566,12 +590,41 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
 
             let t0 = DispatchTime.now().uptimeNanoseconds
             simLock.lock()
+            // 进冷尾巴快放前,快照被拖团位置,用「本 mandatory tick 的位移」当
+            // 残余速度(比 30tick 净位移窗更跟手;单 tick = 未被快放放大 → 无
+            // 正反馈,稳定)。
+            let settleFF = !dragging && releaseSettleEpisode && alpha <= 0.02
+            if settleFF, settleTeamPrev.count == settleTeamIdx.count {
+                for j in 0..<settleTeamIdx.count {
+                    settleTeamPrev[j] = pos[Int(settleTeamIdx[j])]
+                }
+            }
             tick()
             // 高温期子步(07-03 用户"让图像更早归位"):alpha 还热的收敛
             // 段每帧多跑一步 —— 同一部电影快放,动力学/终局布局/park 判定
             // (阈值全按 tick 计,对子步透明)分毫不变,只是墙钟时间减半。
             // 拖拽中不启用:交互热路径保持每帧一步的实时手感与 tick 预算
             if !dragging, alpha > 0.02 { tick() }
+            // 冷尾巴(alpha≤0.02)残余缩放快放。与上面高温子步用 alpha 阈值互斥
+            // (热段>0.02 走高温子步,冷段≤0.02 走这里,无重叠无双跑,alpha 跨
+            // 0.02 干净交接)。仅松手 episode 内、团未静时生效。
+            if quietFlag {
+                // 出口①:团准静止 → 回落 1×,让 alpha 倒计时 + brake 缓停自然
+                // ease-out(保留柔和收尾)。
+                releaseSettleEpisode = false
+            } else if settleFF {
+                var resid: Float = 0
+                for j in 0..<settleTeamIdx.count {
+                    let d = simd_length(pos[Int(settleTeamIdx[j])] - settleTeamPrev[j])
+                    if d > resid { resid = d }
+                }
+                for _ in 0..<extraSettleTicks(residualPerTick: resid) { tick() }
+            }
+            // 出口④:病态环流(团永不 quiet)跑满 restless 兜底 → 停快放,交给
+            // restless 强制 park,把最坏抬升 CPU + 加速抖动限制在 30s 内。
+            if restlessTicks > GraphConstants.parkRestlessCap {
+                releaseSettleEpisode = false
+            }
             publishSnapshot()
             simLock.unlock()
             let spent = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9
@@ -595,6 +648,31 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     // MARK: - 一次 tick(调用方须持有 simLock)
+
+    // 松手边沿锁定「被拖那一团」成员(hub+自家核心叶+自家陨石弧),并快照
+    // 当前位。调用方须持 simLock。releaseHubIndex 若不是 hub(或 -1),团退化
+    // 为空 → 残余恒 0 → 额外 tick 恒 0(不加速),安全降级。
+    private func buildSettleTeam() {
+        settleTeamIdx.removeAll(keepingCapacity: true)
+        guard releaseHubIndex >= 0 else { settleTeamPrev = []; return }
+        settleTeamIdx.append(releaseHubIndex)
+        for li in 0..<leafIndices.count where leafOwnHub[li] == releaseHubIndex {
+            settleTeamIdx.append(leafIndices[li])
+        }
+        for bi in 0..<beltIdx.count where beltHub[bi] == releaseHubIndex {
+            settleTeamIdx.append(beltIdx[bi])
+        }
+        settleTeamPrev = settleTeamIdx.map { pos[Int($0)] }
+    }
+
+    /// 按被拖团「本 mandatory tick 的残余速度」算额外快放 tick 数(0…3,叠加
+    /// 那一个 mandatory tick = 总 1…4×)。冷尾巴 belt 匀速滑 ~1.4pt/tick →
+    /// 顶格 3;临近静止(残余 < ~0.45pt/tick,接近 parkNetMove/窗)→ 收回 0
+    /// 自然减速(ease-out)。0.3pt/tick 死区起步,每 0.3 提一档。
+    private func extraSettleTicks(residualPerTick r: Float) -> Int {
+        let k = Int((r - 0.3) / 0.3)
+        return max(0, min(3, k))
+    }
 
     private func tick() {
         guard n > 0 else { alpha = 0; return }
