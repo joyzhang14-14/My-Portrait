@@ -1663,6 +1663,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                             step = GraphConstants.bubbleEasePosCap
                         }
                         P[i] = dir * (d + step)
+                        // 速度调和(PBD 语义):位置投影后清掉沿法线的闭合分量,
+                        // 否则 link/bubble 泵进的速度下 tick 原样积分回重叠,
+                        // 与硬投影构成位置域极限环(拖拽贴边整家持续抖的根因)。
+                        let cv = simd_dot(vel[i], dir)
+                        if cv < 0 { vel[i] -= dir * cv }
                     }
                 }
                 for ii in 0..<max(hubIndices.count - 1, 0) {
@@ -1687,6 +1692,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                             }
                             P[i] -= dir * push
                             P[j] += dir * push
+                            // 速度调和(同上):清两 hub 沿法线的相对闭合速度,
+                            // 各摊一半;不碰切向,滑开路径不受影响。
+                            let rv = simd_dot(vel[j] - vel[i], dir)
+                            if rv < 0 {
+                                vel[i] += dir * (rv * 0.5)
+                                vel[j] -= dir * (rv * 0.5)
+                            }
                         }
                     }
                 }
@@ -1708,6 +1720,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     if dist < minD {
                         let dir = dist > 1e-4 ? d / dist : SIMD2<Float>(1, 0)
                         P[leaf] = P[hub] + dir * minD
+                        // 速度调和(同上):清叶朝 hub 的闭合速度分量,
+                        // link 弹簧灌进的向心速度不再每 tick 扎回重叠重演。
+                        let cv = simd_dot(vel[leaf], dir)
+                        if cv < 0 { vel[leaf] -= dir * cv }
                     }
                 }
             }
@@ -1720,7 +1736,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 净空,圆径下限装得下 hub 壳 + 一圈叶。被拖球豁免。
         if !leafIndices.isEmpty {
             pos.withUnsafeMutableBufferPointer { P in
-            vel.withUnsafeMutableBufferPointer { V in
                 for li in 0..<leafIndices.count {
                     let leaf = Int(leafIndices[li])
                     if leaf == di { continue }
@@ -1733,18 +1748,16 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     let d = P[leaf] - P[hub]
                     let dist = simd_length(d)
                     if dist > maxD, dist > 1e-4 {
-                        let u = d / dist
-                        P[leaf] = P[hub] + u * maxD
-                        // 杀向外径向速度(07-09 抖动修):圈内夹钳只改位置不
-                        // 清速度 → 被全局碰撞(拖拽期跨家生效)推出圈的速度
-                        // 残留,下 tick 再撞夹钳,推出/夹回成极限环 = 两气泡
-                        // 贴边时边界叶群抖。清掉向外分量断环(与 bubblePass
-                        // 杀闭合速度同法);向内分量(自然回位)保留
-                        let vr = simd_dot(V[leaf], u)
-                        if vr > 0 { V[leaf] -= u * vr }
+                        // 夹钳是纯位置约束,**不动速度**(07-09 回滚"杀向外
+                        // 径向速度"):贴边抖动的极限环在位置域硬投影与积分
+                        // 之间,不经此处速度路径;实测每 tick 对整家边界叶做
+                        // 不对称动量删除反而把气泡网推进更深的楔死构型,
+                        // 5/6 配置加重抖动。速度残留由 collidePass/bubblePass
+                        // 自身的速度语义处理,夹钳只负责"叶不出自家圆"。
+                        P[leaf] = P[hub] + d / dist * maxD
                     }
                 }
-            }}
+            }
         }
         // 陨石滑出隐形圆(07-03 终稿硬要求:"穿过了隐形圆要能滑动到不
         // 穿过的地方")。与九稿"三态无圆力场"的调和:**拖拽期**边界仍 =
