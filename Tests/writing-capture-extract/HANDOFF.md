@@ -943,9 +943,98 @@ decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗
 
 真 paste = edit_log 有 `kind='paste'`;ax 吸附/存量 = 无 paste 且击键≈0 但文本很长。本轮那 35 条实测**全是真 paste**(有 paste kind),非吸附。
 
+## 🔬 2026-07-02 单字孤儿 residue 判别 + 视觉核查(working tree 未提交,接 6-30 批)
+
+用户从「怕漏字 bug 还有别的」出发,多轮验证(我通读 + 3 审计 agent + 视觉 workflow)。以下改动全在 working tree,和 6-30 那批一起等 gold 干净跑后提交。
+
+### A. 两个非孤儿改动(顺带落地)
+
+- **input_source 补齐 `double_return_literal`**(`faithful_v2:133`):从「只认双 return」升级为两路(与 `eng_literals_of` 同口径):① 双 return(历史 NULL);② input_source=keylayout(新采集英文键盘字面,单回车也认)。**gold 区间 input_source 全 NULL(41779击键0非空)→ 证明性零回归**,新采集最早非空 2026-06-13 15:56。
+- **14B 条件加载**(`faithful_v2:203`):`NEED_MODEL = R.DECODE_LIBRIME or REVIEW_MODE!='det'`。**decode=0 且 det(AX 新采集主路)→ 跳过加载 14B,AX 路零 LLM 推理、不占 GPU**。唯一 LLM 入口 `disambig` 被 `DECODE_LIBRIME` 门控(`decode_run` 早退),`referee` 在 det 死。decode=1/llm 照旧加载 → 对 gold 复查(decode=1)**no-op**。
+- **文档整改**:账本恢复绑 decode=1(靠 `reconstruct_message` 解拼音,decode=0 下 100% 空转),从「AX 主链(decode=0)」文档移到「librime(decode=1)」文档 §6.5,decode=0 文档只留指针。
+
+### B. 单字孤儿 residue 判别(核心,用户设计)
+
+- **delete `len<2` 审计**:先以为是 submit≥1 的孪生 bug(网页发送清空单字被丢),**实测全库 0 条真 send_clear 单字发送(线/t 都无回车)→ 不是 bug**,「没回车=没确认=residue」用户裁定。
+- **但用户裁定「残渣不丢改标记」→ 建判别器**。判据演进(每步都验过):当天字符 match(靠巧合,会误杀真单字消息)→ 事件有产出(漏拼音编辑残渣)→ **定义B:本事件有 commit 打字 或 产出 = 编辑时产生的/成品补丁 → 丢;啥都没产出(纯删一个已存在字符)= 孤儿 → 留**。
+- **落地**:`rebuild.event_sends_with_ts` 收 `lone_cands`(单字符 delete,排 `￼` 图片占位符),函数末 `if not out and not X.cv(cs): out.extend(lone→is_send=False)`;`faithful_v2` out_f 用 `lone_char` 给单字草稿标 `~residue` → 未定区。
+- **全库漏斗**:1559 单字 delete → 汉字 283/拉丁标点数字 1276 → 排￼ + 定义B → **只留 12 孤儿**(能你/线/、/X/@/w///t/t/1/4),摊 26 天 ≈ 每 2 天 1 条。
+
+### C. 视觉核查方法 + 结论(可复用!)
+
+- **抽帧看图法(零 GPU,不走 OCR/MLX)**:`frames.snapshot_path`(JPG 直存)或 `video_chunk_id + offset_ms`(`ffmpeg -ss offset/1000 -i <chunk.file_path> -frames:v 1`);**Claude 原生 `Read` 直接看 JPG**。抽帧脚本 + manifest 在 scratchpad;workflow=`orphan-residue-vision`(每孤儿一 agent 读帧+edit_log 视觉判定)。
+- **结论**:12 孤儿**没有一个是真单字消息**——编辑片段(线=ChatGPT 打反馈长句前的残字/能你=Gemini 打「你能…」中途)、UI 交互(、=重命名对话框/@=Discord 提及触发/w+/=Discord 斜杠命令/4=MyMeeting 会议改名)、切窗误敲(1=想按终端 CLI 菜单第1项焦点落错窗/X=截图取色时误触)、无帧(t/t 微信,前后5min 无帧)。
+- **净收获:证明 AX 路没在丢真实消息**——能穿过所有闸的孤儿全是噪声,真消息一个没漏(ev336「我问你的是…」等纠错事件的最终句都在库存档里,7/8 逐字命中)。
+- **⚖️ 用户终裁:仍全留,标 ~residue 进未定区,不丢任何一个消息**(明知是噪声,按"审核而非丢弃"+最大保留,当纯安全余量)。**别再提撤回**。
+
+### D. literal_tail 的 `≥2 位数字` 别改 `≥1`(实证:用户用数字键选字)
+
+- 用户问「能不能把 `literal_tail`(`faithful_v2:54`)的 `len(s)>=2` 放宽到 `>=1`,单数字尾也补」。**实测否决**。
+- `literal_tail` **不被 DECODE_LIBRIME 门控**(无条件跑,读击键补字面数字尾;不是账本那种 decode=1 脚手架)。它管的窄口子=末尾竞速丢的字面数字尾(ev1081「全球排32」),AX 修复没覆盖这个,post-6-27 仍偶发。
+- 逐 send 模拟:`≥2` 补 4 条全是真字面(`12345/32/20/300`);`≥1` 会**新增 10 条,全是误补**(9 个`1`+1 个`2`,全 Discord)。
+- **根因(击键流铁证)**:**用户输入法用数字键选候选**——`tashuo1 / xiaohuoj1 / suanshi2 / bubing3 / sha4` 每个拼音音节后跟个数字选字。所以发送竞速抓到的**末尾单数字≈选字数字,不是字面**;补它=给消息尾巴硬贴个错数字=**错字**(铁律最坏类)。真字面单数字尾(如"排第5")在全数据 0 例(用户打"5"永远是选字键)。
+- **结论**:`≥2` 恰好卡在"连续≥2位不可能是选字"这条线上,贴着用户输入法行为校准,**保持不动**。少数"多留反而更差"的点之一。
+
+## 🛡️ 2026-07-07 两轮对抗漏洞审计 + 三修(working tree 未提交)
+
+用户「总觉得有问题说不上来」→ 开 multi-lens workflow(`pipeline-vuln-audit`,6 镜头独立找洞→语义去重→对抗验证;后用 resume 零成本捞回全 30 条原始发现,第二轮 12 条逐条对抗验证)。**方法本身可复用**:镜头=错字入册/时序时窗/去重折叠/隐私/不变量/新批次交互;每条发现派一个"专职推翻它"的验证者,逐行读上下文找漏看的护栏+只读查库找实证,分 CONFIRMED(逻辑走通+有实证)/PLAUSIBLE(逻辑通缺实证)/REFUTED。**用户标准:全本地化,隐私不管,只看稳定性+漏东西+错字(内容保真)**。
+
+### 总病根(用户那个"说不上来"的感觉)
+
+**修复不对称 + 去重/折叠层只比"文本像不像",不比"时间近不近/谁是发送"**。发送检测主链经三轮审计很扎实;漏在去重/折叠的"幸存者选择"。
+
+### ✅ 已修 3 条(用户批准 1/2/4)
+
+- **修1 `dedup_truncated` 等长条款加 5min 窗**(`rebuild:448`,`EQLEN_WIN_MS=300_000`):等长+cover≥0.9+时序靠后胜原作用于**全天无窗**,已真实误杀:ev389`pro模型prompt v2-stage1`被9.4min后的`stage2`当编辑快照杀(两条不同查询)、ev949/948两个不同文件名。修=加时间窗(vos/vcd 1.5min窗内该杀 / stage1↔2 9.4min窗外救回)。`records` 升 4 元组带 ts;调用侧 `faithful_v2:469` 传 `t1 or t0`。⚠️ IMG_9843/9844 秒级近邻(0.1min)窗救不了=内容维度,挂账未动。合成4断言过(窗内杀/窗外留/prefix照旧/真发送永不丢)。
+- **修2 `_retyped` 加击键下界 floor**(`faithful_v2:68`,`seen` 升 `文本→(evid,t1)`):-1000ms 回扫把原消息末秒真键算给紧贴(gap≈0)的 re-render 副本→副本被判"真重发"双份入册。实证 `买个mac`(ev2929→2930)/`www`(ev3031→3032)。修=窗起点钳到首见记录 t1 之后。翻正双双正确判副本;抽查175对隔开(>5s)真重发对**零回归**。
+- **修4 口3 排序 t0→t1**(`faithful_v2:632`):`recs_sorted`/`timeline` 原按 t0(开始打字),交错发送时 prev 锚锚到"尚未上屏"的消息;展示层同族 bug 已按 t1 修(bovhltmkf),口3 内部跟齐。6天6次发生但自锚都兜住,账本路自锚失败时会丢真消息。
+
+### ⏳ 用户「再看一下」未裁定(按优先级)
+
+- **#3 高·CONFIRMED 同日去重 draft/send 幸存者倒置**(`faithful_v2:482`):真发送窗内只有回车→`_retyped`恒False→被当采集副本丢,更早的 ~draft 幸存(该丢的活/真发送死)。实证4对,当下文本靠帧证据没丢(条件性漏:帧缺失时整条掉未定区)。**修向=加 is_send 优先(真发送胜 draft)。⚠️连带:待做0 的 `t·t` 验收预期在 #3 未修前是错的**。
+- **🟡 结构确认·零实证(修便宜)**:det 对证器无 commit 前缀保护(`:764`,decode=1,错字族,f83a6b4 只修口3)/ `pick_frames` 兜底帧无时间下界(`ocr3:120`,10h/10天旧帧,错字)/ complete_tail 前条锚缺防截短(`ocr3:158`)/ 存量剥离静默清短真发送(`rebuild:401`)/ 渐进折叠拼音前缀跨消息误折(`:551`)。
+- **🟢 低(零实证+低频+损失轻)**:canvas LLM 零校验写权(`--llm`默认关)/ 幻影降级不限element / `_retyped`×粘贴政策 / 升格60s绕过 / literal_tail部分重叠 / 账本UTC切日·消费闸杀重发(decode=1专属)。
+
+## ✅ 2026-07-10 最终审核大跑【已完成】(结果见文末新节;本节保留原计划存档)
+
+## 🎯 2026-07-09 下一步:生产接入前【最终审核大跑】(原计划,已执行完)
+
+**用户指令(极为重要,原话精神)**:把**所有有记录的天**用**真实生产 pipeline**跑一遍 → 生成一份 **md 审核文档**;审核没问题就**接入生产**。**铁律:必须用真实 pipeline、真实数据,零人工干预/作弊/任何影响真实全自动化生产环境的操作。** 追加:**「之前跑过的、没有 canvas 的天不用重跑」**。
+
+### 已坐实的生产组合(真实流程,别用别的)
+
+- **两路并行、同一出口**:`canvas_route.py <days> --llm`(用 `ax_bearing.canvas_spans` 切 0 承载=canvas,bucket B 走 `canvas_librime` 解码)→ 写 `eval/canvas_route_fusion.json` → `faithful_v2.py` 读 `PORTRAIT_CANVAS=<该json>`,AX 路(typing_events)+ append canvas 段。faithful_v2 参数:`PORTRAIT_DAYS`/`PORTRAIT_CANVAS`/`PORTRAIT_OUT`/`REVIEW_MODE=det`(必带)/`PORTRAIT_LIBRIME_DECODE`。
+- **按天 decode**:**<2026-06-25 用 `PORTRAIT_LIBRIME_DECODE=1`(旧采集需 librime 解)、≥6/25 用 =0(新采集 AX 直接给汉字)**。env 是整跑一个值 → **必须拆两批跑**(pre-6/25 一批 decode=1、post 一批 decode=0)。
+- ⚠️ **`faithful_pipeline.py` 是红鲱鱼**(旧模型尺寸实验,硬编码4天),别用。`integrated_run.py` 是**老 discriminate**,已被 ax_bearing/canvas_route 取代,别用。
+
+### ⛔ 开跑前必须先坐实的 3 件事(错一个审核就作废)
+
+1. **faithful_v2 的 AX 路会不会重复处理 canvas 会话**(与 canvas_route 双记)?—— 读代码确认两路真的不相交(canvas=0承载,理论上 typing_events 没内容,但要验 faithful_v2 有没有排除机制/会不会产半截 AX 垃圾)。
+2. **canvas bucket C(长文档,`nkeys>120`)能不能真跑?** HANDOFF 记 C 是「留占位待 GPU / canvas_merge」。若只有 B 能跑,「canvas 计算接上」不完整——先确认 canvas_merge 是否 production-ready,否则要向用户说明只能 B。
+3. **天清单**:`SELECT date range FROM keystroke_log` 全部有记录的天;每天用 `ax_bearing.canvas_spans` 扫**有没有 canvas 会话**;**排掉「之前已跑过(gold 6天等)且当天无 canvas」的天**。产出:{要跑的天 → 有无canvas → decode值}。
+
+### 执行计划(坐实上面 3 点后)
+
+1. 分两批 decode 各自:先 `canvas_route.py <该批天> --llm` 出 fusion(需 GPU 空,确认 event-local-lab 没在抢);再 `REVIEW_MODE=det PORTRAIT_LIBRIME_DECODE=<0/1> PORTRAIT_DAYS=<...> PORTRAIT_CANVAS=<fusion> PORTRAIT_OUT=<...> python3 faithful_v2.py`。后台跑 + `caffeinate -is` + **绝对路径 redirect**(cwd 漂移会 EXIT=1)。
+2. 合并两批产出 + 未定区 + 口3 段 → 一份审核 md(按天、标 ax/canvas 来源、标 decode)。
+3. **当前未提交批次**(rebuild.py+faithful_v2.py:6-30/7-02/7-07 三批)已 gold 44✓ 零回归验过,这次大跑就带着这批跑(就是要审的版本)。
+
+### 现成可复用
+
+- gold 6 天(5-27/28/29,6-3/4/5)刚跑过=`eval/audit3fix_gold.md`(decode=1,44✓,**已含三修**),这 6 天若无 canvas 可直接复用不重跑。canvas 源 `eval/canvas_merged_src.json` 存在。
+
+### ✅ 执行结果(2026-07-10,全部完成)
+
+- **产出**:`~/Desktop/Obsidian/生产接入前审核大跑-2026-07-10.md`(46 天全量,成品 1289 条,按天标 ax/canvas*B/canvas_C 来源+decode,待用户审)。逐天原始 md=`eval/accept_day*_.md`+`eval/accept*grp*_.md`(46 天全覆盖)。
+- **3 个前置问题的答案**:①AX/canvas 双记=真 bug(canvas_spans 跨承载黏合,6-10 微信实证)→ **已修+commit 3244c5e**(bearing barrier,全 46 天双记窗 1→0,仅 6-10 一天 span 变);②bucket C 原本没接线(canvas_route 只收 pending)→ **泛化 canvas_merge(reconstruct 函数化,essay 参数 CLI 保持逐字回归)+新 canvas_c_run.py(按 docid 聚合跨天 C span,一文档一次重建)+commit 79d7dc0**;③46 天全有记录,**gold 6 天全有 canvas → 一天都不能跳**(用户"没 canvas 可跳过"的前提实测不成立)。
+- **canvas 结果**:B 168 段(--llm);C 仅 2 文档有 url——gold essay(05-28/29 跨天,627帧→2821字,**回归 98%/99% 逐字与泛化前一致**)+ 06-28 Chrome 文档(17帧太少→0字,如实未采);**4 个无锚点 C span 丢弃**(无 url 定位不了帧:06-28×2/06-29 1627键/07-03 微信)——结构性边界,审核 md §2 如实列出。
+- **gold 对照(compare_gold 对审核 md 全量)**:**43✓ 1🟡 1✗ = 与基线等价零回归**。✗=A10(老);🟡=B14 探针误报(05-24 真 Notes 草稿内嵌行「123」,探针设计范围外;**已核实 06-05 原案独立 123/My-Meeting 仍在未定区**)。
+- **⚠️ 跑批基建教训(下次长跑照抄)**:session 的前台/后台任务会被**不定期整树 SIGKILL**(高发于 14B 加载时,非 OOM、非用户,原因不明)——`nohup setsid` 也逃不掉;**唯一稳的=`launchctl submit` 交给 launchd**(注意 launchd PATH 无 homebrew,必须钉死 `/opt/homebrew/bin/python3`,否则 Xcode 3.9 缺 numpy 秒败;跑完 `launchctl remove`)。恢复设计=每 3 天一组一个 md、启动时扫已有 md 的 `## 日期` 只跑缺的天;decode=0 天(无模型)先跑先入库。孤儿子进程(父被杀)能存活,可接力。
+- **未提交批次现状**:rebuild.py+faithful_v2.py(6-30/7-02/7-07 三批)就是本次所审版本,**等用户审核通过后 commit**。
+
 ## 待做(优先级)
 
-0. **⚠️ 干净重跑确认 ①②**:`KC_GATE=1`(默认)+ submit≥1 + is_image_only 重跑 gold,确认 44✓ 不回归 → 再提交 ①②③④。观察批(单字/￼)可挑 `5/25,6/01,6/05,6/10,6/18,6/27,6/29`。SLASH 待前端。
+0. **⚠️ 干净重跑确认整批**:`REVIEW_MODE=det PORTRAIT_LIBRIME_DECODE=1` 重跑 6 天 gold,确认 **44✓ 不回归** → 提交整批。整批 = 6-30 的 ①②③④⑥⑦(submit≥1/is_image_only/SLASH·KC开关/PASTE_MAX/同日去重) + 7-02 的 A/B(input_source 补齐/14B 条件加载/单字孤儿判别)。**预期新增**:gold 天孤儿进未定区(`线`ev1556@6-5;`t·t`ev1061·1062@6-3 因 #3 去重倒置**只会出 1 个 `t`**——这是 bug 不是回归,#3 修好才双双出),成品不变。⚠️ 本批已含 2026-07-07 三修(修1等长窗/修2 \_retyped floor/修4 口3 t1 排序),重跑时留意口3 段 diff(理论上只更对)。观察批(单字/￼)可挑 `5/25,6/01,6/05,6/10,6/18,6/27,6/29`。SLASH 待前端。
 
 1. **全量重跑验证校对模式**(本 session 已启动,看 /tmp/faithful_run4.log)→ 第三轮对照报告(对照修复标注版,产出按 `修复对照报告.md` 格式追加)
 2. **H 类路由集成**:race 尾巴(CR后孤儿段)挂前一条记录进口3——原型能修,faithful 路由 gate 接不住
