@@ -423,11 +423,45 @@ struct GraphRootView: View {
             if case .eventLeaf(let r) = $0.kind { return r == rel }
             return false
         }) else { return }
-        if let engine {
-            let snap = engine.readSnapshot()
-            if idx < snap.count { camera.center = snap[idx] }
-        }
         floatNodeId = idx
+        frameCameraToEventBall(idx)
+    }
+
+    /// 跳转落地取景(07-10 用户"redirect 后以这个球为中心拉大"):相机 lerp
+    /// 跟随**目标球实时位置**(跨画布跳转时引擎刚炸开,球还要飞几秒,一次
+    /// 定死会对准过期位置),zoom = 该球所在家的气泡直径占视口
+    /// cameraFolderFill(家上下文可见、球居中)。跟到物理定稳且贴合才收官;
+    /// 手动平移/缩放/起拖照常中止(同一 cameraTask 单槽)。
+    private func frameCameraToEventBall(_ idx: Int) {
+        cameraTask?.cancel()
+        let gen = engineGen
+        cameraTracking = true
+        cameraTask = Task { @MainActor in
+            defer { cameraTracking = false }
+            let k = GraphConstants.cameraTrackLerp
+            for _ in 0..<900 {   // ~15s 上限兜底(含物理沉降)
+                if Task.isCancelled || gen != engineGen { return }
+                guard let engine, idx < scene.nodes.count else { return }
+                let snap = engine.readSnapshot()
+                guard idx < snap.count else { return }
+                let hub = scene.nodes[idx].hubIndex
+                let br = (hub >= 0 && hub < scene.nodes.count
+                          ? scene.nodes[hub].hubBubbleRadius : nil) ?? 160
+                guard let tgt = frameFor(viewSize, center: snap[idx],
+                                         radius: Float(br),
+                                         fill: GraphConstants.cameraFolderFill)
+                else { return }
+                camera.center += (tgt.center - camera.center) * Float(k)
+                camera.zoom += (tgt.zoom - camera.zoom) * k
+                if engine.isParked,
+                   simd_length(tgt.center - camera.center) < 0.5,
+                   abs(tgt.zoom - camera.zoom) < 0.001 {
+                    camera = tgt
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
     }
 
     /// 浮窗中心位置:球右侧偏移,clamp 进视口。
