@@ -120,6 +120,8 @@ struct InputActivityChartView: View {
                                                 selection: selection,
                                                 dragPreview: dragPreview,
                                                 onTapSelect: { m in
+                                                    // 拖过阈值又拖回按 tap 松手:清掉途中残留的预览带。
+                                                    dragPreview = nil
                                                     // 点在死区(附近无丛)→ 忽略,保留当前选中。
                                                     guard let w = buckets.burstWindow(around: m) else { return }
                                                     withAnimation(.easeOut(duration: 0.15)) {
