@@ -43,6 +43,8 @@ enum DiagnosticBundle {
         copyDiagnosticLogs(mode: mode, to: workDir)
         copyCrashReports(mode: mode, to: workDir)
         copyHangSamples(mode: mode, to: workDir)
+        copyRunTerminationRecords(mode: mode, to: workDir)
+        try? writeJetsamSummary(to: workDir.appendingPathComponent("jetsam-summary.json"))
 
         // 3) zip 到 Downloads(用户原话:放在 download 里)
         let downloads = try downloadsURL()
@@ -72,6 +74,7 @@ enum DiagnosticBundle {
       - capture health, queue sizes, row counts and pipeline status
       - structured diagnostic events and recent automatic hang samples
       - recent crash reports, with local paths and identifiers redacted
+      - clean/unexpected exit state and My Portrait-only memory-kill summaries
 
     EXCLUDED BY THE EXPORTER:
       - any .md file (events, portrait, personality)
@@ -98,6 +101,7 @@ enum DiagnosticBundle {
             "redactions": [
                 "home directory", "email addresses", "URLs and IP addresses",
                 "UUIDs", "device identifiers", "free-form context values",
+                "other process names from public memory-kill summaries",
             ],
             "private_mode_note": mode == .privateSupport
                 ? "Contains sanitized free-form error messages and detailed pipeline timestamps. Share privately."
@@ -309,6 +313,144 @@ enum DiagnosticBundle {
                 maxBytes: mode == .publicReport ? 750_000 : 1_000_000,
                 limit: mode == .publicReport ? 400 : 1_000)
         }
+    }
+
+    /// 上次是否走过正常退出 + 最后一份资源心跳。字段全部由 app 自己生成，
+    /// 不含自由文本；公开包额外去掉无排障价值的 PID。
+    private static func copyRunTerminationRecords(
+        mode: DiagnosticBundleMode, to workDir: URL
+    ) {
+        let fm = FileManager.default
+        let dstDir = workDir.appendingPathComponent("process-lifecycle", isDirectory: true)
+        let sources = [RunTerminationTracker.stateFileURL,
+                       RunTerminationTracker.historyFileURL]
+        guard sources.contains(where: { fm.fileExists(atPath: $0.path) }) else { return }
+        try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+
+        if let data = try? Data(contentsOf: RunTerminationTracker.stateFileURL),
+           var state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            if mode == .publicReport { state.removeValue(forKey: "pid") }
+            try? writeJSON(state, to: dstDir.appendingPathComponent("current-run-state.json"))
+        }
+
+        guard let history = readTail(
+            RunTerminationTracker.historyFileURL, maxBytes: 512_000) else { return }
+        let lines = history.split(separator: "\n").suffix(50).compactMap { line -> String? in
+            guard let data = line.data(using: .utf8),
+                  var event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            else { return nil }
+            if mode == .publicReport { event.removeValue(forKey: "last_pid") }
+            guard let clean = try? JSONSerialization.data(withJSONObject: event),
+                  let string = String(data: clean, encoding: .utf8) else { return nil }
+            return string
+        }
+        writeText(lines.joined(separator: "\n") + "\n",
+                  to: dstDir.appendingPathComponent("unexpected-terminations.jsonl"))
+    }
+
+    /// Jetsam 报告会列出当时系统中的所有进程，不能原样放进公开包。这里递归查找
+    /// 直接标识为 My Portrait 的进程节点，只导出该节点中的技术字段。
+    private static func writeJetsamSummary(to url: URL) throws {
+        let fm = FileManager.default
+        let reportsDir = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/DiagnosticReports", isDirectory: true)
+        guard let items = try? fm.contentsOfDirectory(
+            at: reportsDir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]) else { return }
+        let jetsam = items.filter {
+            $0.lastPathComponent.hasPrefix("JetsamEvent") && $0.pathExtension == "ips"
+        }.sorted {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return a > b
+        }.prefix(10)
+
+        var summaries: [[String: Any]] = []
+        for report in jetsam {
+            let size = (try? report.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            guard size <= 20_000_000, let data = try? Data(contentsOf: report) else { continue }
+            var matches: [[String: Any]] = []
+            for root in parseIPSObjects(data) {
+                collectMyPortraitJetsamNodes(root, into: &matches)
+            }
+            guard !matches.isEmpty else { continue }
+            let modified = (try? report.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+            summaries.append([
+                "report_modified_at": modified.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+                "my_portrait_processes": Array(matches.prefix(5)),
+            ])
+        }
+        guard !summaries.isEmpty else { return }
+        try writeJSON(["reports": summaries], to: url)
+    }
+
+    private static func parseIPSObjects(_ data: Data) -> [Any] {
+        if let whole = try? JSONSerialization.jsonObject(with: data) { return [whole] }
+        guard let newline = data.firstIndex(of: 0x0A) else { return [] }
+        let parts = [Data(data[..<newline]), Data(data[data.index(after: newline)...])]
+        var roots = parts.compactMap { try? JSONSerialization.jsonObject(with: $0) }
+        if roots.isEmpty {
+            roots = String(decoding: data, as: UTF8.self).split(separator: "\n")
+                .compactMap { line in
+                    guard let lineData = line.data(using: .utf8) else { return nil }
+                    return try? JSONSerialization.jsonObject(with: lineData)
+                }
+        }
+        return roots
+    }
+
+    private static func collectMyPortraitJetsamNodes(
+        _ value: Any, into matches: inout [[String: Any]]
+    ) {
+        if let dict = value as? [String: Any] {
+            if isMyPortraitProcessNode(dict) {
+                matches.append(sanitizeJetsamProcessNode(dict))
+                return
+            }
+            for child in dict.values {
+                collectMyPortraitJetsamNodes(child, into: &matches)
+            }
+        } else if let array = value as? [Any] {
+            for child in array { collectMyPortraitJetsamNodes(child, into: &matches) }
+        }
+    }
+
+    private static func isMyPortraitProcessNode(_ dict: [String: Any]) -> Bool {
+        let identityKeys: Set<String> = [
+            "name", "proc", "procname", "processname", "process", "bundleid",
+            "bundleidentifier", "bundle", "path",
+        ]
+        for (key, value) in dict {
+            let normalizedKey = key.lowercased().filter { $0.isLetter }
+            guard identityKeys.contains(normalizedKey), let string = value as? String else { continue }
+            let normalizedValue = string.lowercased()
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "-", with: "")
+            if normalizedValue.contains("myportrait") { return true }
+        }
+        return false
+    }
+
+    private static func sanitizeJetsamProcessNode(_ dict: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for (key, value) in dict {
+            let lower = key.lowercased()
+            if value is Bool || value is NSNumber {
+                out[key] = value
+            } else if let string = value as? String,
+                      ["name", "proc", "process", "bundle", "reason", "state",
+                       "status", "role"].contains(where: { lower.contains($0) }) {
+                out[key] = redactText(string, limit: 200)
+            } else if let nested = value as? [String: Any] {
+                let numeric = nested.filter { $0.value is Bool || $0.value is NSNumber }
+                if !numeric.isEmpty { out[key] = numeric }
+            }
+        }
+        return out
     }
 
     /// 健康度日志:直接 copy ~/.portrait/logs/health.log。
