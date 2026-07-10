@@ -593,7 +593,18 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 进冷尾巴快放前,快照被拖团位置,用「本 mandatory tick 的位移」当
             // 残余速度(比 30tick 净位移窗更跟手;单 tick = 未被快放放大 → 无
             // 正反馈,稳定)。
-            let settleFF = !dragging && releaseSettleEpisode && alpha <= 0.02
+            // ⚠️ `shadowDone` 门(07-10 修陨石最终位置偏移):快放每墙钟帧多跑
+            // tick,不改单 tick 动力学,但会让「异步影子后台线程就绪那一帧」主引擎
+            // 的 tickCount 更靠后 → 影子被消费/beltLockTick 后移 → 传导到冷透时
+            // 环 latch 路径 B(用实时 hub 算 MEC、!ringCovered 才重钉)的覆盖门
+            // 翻转 → 环心跳到尚未归位的实时 hub → 陨石弧整带锚点偏移(实测影子
+            // 迟到时达 81pt)。加 shadowDone 门:陨石弧最终目标(影子已消费/环已
+            // 锁定)之前按基线 tick 节奏跑,影子消费落在与基线相同 tickCount、路径
+            // A/B 先后与覆盖判定不变;shadowDone 后路径 A 不再执行、路径 B 用实时
+            // hub 是 tick-确定的,快放只压缩「陨石飞向已固定目标」的行程 → 最终位置
+            // 逐位回到基线。代价=锁定前那几帧退回基线节奏(可忽略,belt 长行程全在
+            // shadowDone 之后;实测生产典型早就绪时归位帧数零损失)。
+            let settleFF = !dragging && releaseSettleEpisode && alpha <= 0.02 && shadowDone
             if settleFF, settleTeamPrev.count == settleTeamIdx.count {
                 for j in 0..<settleTeamIdx.count {
                     settleTeamPrev[j] = pos[Int(settleTeamIdx[j])]
