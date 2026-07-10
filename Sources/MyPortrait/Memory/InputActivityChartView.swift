@@ -1,4 +1,15 @@
 import SwiftUI
+import AppKit
+
+/// 盖在图后的透明 AppKit 层:让「在图上按下拖动」不被当成拖动窗口
+/// (窗口 isMovableByWindowBackground 时,SwiftUI 内容默认可拖窗 → 整窗漂移)。
+private struct WindowDragBlocker: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { BlockerView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+    private final class BlockerView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
+}
 
 /// 一次选中的结果:[lo, hi] = 选中的分钟窗口(高亮带 + records 过滤共用)。
 /// click = 点击点(画蓝线);拖拽框选无点击点 → nil,只画带不画线。
@@ -124,64 +135,73 @@ struct InputActivityChartView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            // 图占面板高度的 1/3;图例 + records 卡片流接在下方,整页滚动。
+            // 图 + 图例**固定在顶部**(不进 ScrollView):在图上拖动就不会带动内容/
+            // 窗口漂移;records 卡片流在下方独立滚动。图占面板高度的 1/3。
             GeometryReader { geo in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if buckets.maxTotal > 0 {
-                            InputActivityCanvas(buckets: buckets,
-                                                colorScheme: colorScheme,
-                                                selection: selection,
-                                                dragPreview: dragPreview,
-                                                onTapSelect: { m in
-                                                    // 拖过阈值又拖回按 tap 松手:清掉途中残留的预览带。
-                                                    dragPreview = nil
-                                                    // 点在死区(附近无丛)→ 忽略,保留当前选中。
-                                                    guard let w = buckets.burstWindow(around: m) else { return }
-                                                    withAnimation(.easeOut(duration: 0.15)) {
+                VStack(alignment: .leading, spacing: 14) {
+                    if buckets.maxTotal > 0 {
+                        InputActivityCanvas(buckets: buckets,
+                                            colorScheme: colorScheme,
+                                            selection: selection,
+                                            dragPreview: dragPreview,
+                                            onTapSelect: { m in
+                                                dragPreview = nil
+                                                withAnimation(.easeOut(duration: 0.15)) {
+                                                    if let w = buckets.burstWindow(around: m) {
                                                         selection = InputSelection(lo: w.lo, hi: w.hi,
                                                                                    click: m, capped: w.capped)
+                                                    } else {
+                                                        // 死区兜底:圈点击点 ±3h(夹到活动区间)。
+                                                        let lo = max(buckets.firstMinute, m - MinuteBuckets.fallbackRadius)
+                                                        let hi = min(buckets.lastMinute, m + MinuteBuckets.fallbackRadius)
+                                                        selection = InputSelection(lo: lo, hi: hi, click: m)
                                                     }
-                                                },
-                                                onDragChange: { lo, hi in
-                                                    dragPreview = (lo, hi)   // 实时预览,不动 records
-                                                },
-                                                onDragEnd: { lo, hi in
-                                                    dragPreview = nil
-                                                    withAnimation(.easeOut(duration: 0.15)) {
-                                                        // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
-                                                        selection = InputSelection(lo: lo, hi: hi, click: nil)
-                                                    }
-                                                },
-                                                onDragCancel: {
-                                                    // 竖向为主的拖拽(想滚页)→ 不改选中,只清途中预览。
-                                                    dragPreview = nil
-                                                })
-                                .frame(height: geo.size.height / 3)
-                            legend
-                        } else {
-                            // 有 records 但无击键图(纯粘贴/OCR 来源那天):说明为何没图,
-                            // 也点不了选窗口(没有时间轴可点)。
-                            Text("No keystroke activity to chart on this day")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 4)
-                        }
-                        recordsSection
+                                                }
+                                            },
+                                            onDragChange: { lo, hi in
+                                                dragPreview = (lo, hi)   // 实时预览,不动 records
+                                            },
+                                            onDragEnd: { lo, hi in
+                                                dragPreview = nil
+                                                withAnimation(.easeOut(duration: 0.15)) {
+                                                    // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
+                                                    selection = InputSelection(lo: lo, hi: hi, click: nil)
+                                                }
+                                            },
+                                            onDragCancel: {
+                                                // 竖向为主的拖拽(想滚页)→ 不改选中,只清途中预览。
+                                                dragPreview = nil
+                                            })
+                            .frame(height: geo.size.height / 3)
+                            .background(WindowDragBlocker())   // 禁止图上拖动带动窗口
+                        legend
+                    } else {
+                        // 有 records 但无击键图(纯粘贴/OCR 来源那天):说明为何没图,
+                        // 也点不了选窗口(没有时间轴可点)。
+                        Text("No keystroke activity to chart on this day")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 4)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 20)
-                    .padding(.bottom, 24)
-                    // minHeight 撑满视口:否则内容矮时 contentShape 只覆盖内容高度,
-                    // 卡片流下方那截真空白点不到、清不掉选中。topLeading 防内容居中。
-                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
-                    // 点图表/卡片以外的空白处 → 取消选中回全天(canvas 与卡片的
-                    // 手势是子视图,优先级更高,不会误触发)。
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if selection != nil || dragPreview != nil {
-                            withAnimation(.easeOut(duration: 0.15)) { selection = nil; dragPreview = nil }
+
+                    // records 独立滚动区(图不动、只这里滚)。
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            recordsSection
                         }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.bottom, 24)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // 点图表/卡片以外的空白处 → 取消选中(canvas 与卡片的手势是子视图,优先)。
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if selection != nil || dragPreview != nil {
+                        withAnimation(.easeOut(duration: 0.15)) { selection = nil; dragPreview = nil }
                     }
                 }
             }
@@ -308,14 +328,16 @@ struct MinuteBuckets: Sendable {
 
     /// 每分钟击键 ≥ 此值才算"活跃"(否则视为安静/停顿)。
     static let activeFloor = 2
-    /// 连续安静 ≥ 此分钟数 → session 收边。取 30min:把靠得近的子峰合成一个
-    /// 活动段(整片一起选),只有真正的长时间安静(午休/换事)才断开。
-    static let gapMinutes = 30
+    /// 连续安静 ≥ 此分钟数 → session 收边。取 45min:把靠得近的子峰合成一个
+    /// 活动段(整片一起选),只有真正的长时间安静(午休/换事)才断开。调大 = 选更大片。
+    static let gapMinutes = 45
     /// 点击自动选中的击键上限(安全值)—— 从点击点按密度扩到此量就停,
     /// 防极端大 session 一口气全选。绝大多数 session 都在此值内会整段选中。
     static let keystrokeCap = 10000
     /// 点击落在小空隙时,吸附到 ±此分钟内最近的活跃分钟。
     static let snapRadius = 5
+    /// 死区兜底半宽(分钟):点在附近无活跃分钟的空白 → 圈点击点 ±此值(±3h)。
+    static let fallbackRadius = 180
 
     /// 点选峰值丛:① snap 到最近活跃分钟 ② 用 gap 定住整丛 [L,R] ③ 从 click
     /// 按密度向两边扩、到 keystroke 上限停(不越出 [L,R])。返回选中窗口 [lo,hi]。
