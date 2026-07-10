@@ -1720,6 +1720,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 净空,圆径下限装得下 hub 壳 + 一圈叶。被拖球豁免。
         if !leafIndices.isEmpty {
             pos.withUnsafeMutableBufferPointer { P in
+            vel.withUnsafeMutableBufferPointer { V in
                 for li in 0..<leafIndices.count {
                     let leaf = Int(leafIndices[li])
                     if leaf == di { continue }
@@ -1732,10 +1733,18 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     let d = P[leaf] - P[hub]
                     let dist = simd_length(d)
                     if dist > maxD, dist > 1e-4 {
-                        P[leaf] = P[hub] + d / dist * maxD
+                        let u = d / dist
+                        P[leaf] = P[hub] + u * maxD
+                        // 杀向外径向速度(07-09 抖动修):圈内夹钳只改位置不
+                        // 清速度 → 被全局碰撞(拖拽期跨家生效)推出圈的速度
+                        // 残留,下 tick 再撞夹钳,推出/夹回成极限环 = 两气泡
+                        // 贴边时边界叶群抖。清掉向外分量断环(与 bubblePass
+                        // 杀闭合速度同法);向内分量(自然回位)保留
+                        let vr = simd_dot(V[leaf], u)
+                        if vr > 0 { V[leaf] -= u * vr }
                     }
                 }
-            }
+            }}
         }
         // 陨石滑出隐形圆(07-03 终稿硬要求:"穿过了隐形圆要能滑动到不
         // 穿过的地方")。与九稿"三态无圆力场"的调和:**拖拽期**边界仍 =
