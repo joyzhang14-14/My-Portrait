@@ -475,6 +475,9 @@ struct MinuteBuckets: Sendable {
         // 修边:去掉两端桥接进来的安静分钟(0 击键),带子不含空隙尾巴。
         while lo < hi && rawTotals[lo] < Self.activeFloor { lo += 1 }
         while hi > lo && rawTotals[hi] < Self.activeFloor { hi -= 1 }
+        // 视觉外扩:盖住平滑曲线的裙边(见 visualPad),否则曲线尾巴总探出带外。
+        lo = max(firstM, lo - Self.visualPad)
+        hi = min(lastM, hi + Self.visualPad)
         // anchor(蓝线落点)夹进最终窗口,免得吸附后 c 落在被修掉的边缘外。
         let anchor = min(max(c, lo), hi)
         return (lo, hi, capped, anchor)
@@ -514,7 +517,9 @@ struct MinuteBuckets: Sendable {
         if let b = (lo...hi).last(where: { rawTotals[$0] >= Self.activeFloor }) {
             hi = max(hi, sessionBounds(from: b).R)
         }
-        return (lo, hi)
+        // 视觉外扩,同 burstWindow(见 visualPad)。
+        return (max(firstMinute, lo - Self.visualPad),
+                min(lastMinute, hi + Self.visualPad))
     }
 
     /// [lo, hi] 区间的原始击键总数(表头显示 / 触顶判断)。
@@ -527,6 +532,12 @@ struct MinuteBuckets: Sendable {
     /// 平滑窗口半径(分钟)。窗口 = 2r+1,边界处自动收缩。轻度即可 —— 视觉
     /// 圆滑交给渲染层的 Catmull-Rom,这里只压噪声、不削峰。
     private static let smoothRadius = 2
+
+    /// 选中窗口视觉外扩(分钟)。曲线画的是**平滑值**(±smoothRadius)+ 样条圆角,
+    /// 比 raw 活动边缘多探出 ~3min;带子贴 raw 边收,曲线尾巴就总露在带外
+    /// ("总是差一捏捏",2026-06-04 实测:raw 末键 02:11,平滑曲线到 02:13 才归零)。
+    /// 提交窗口两端各外扩此值盖住裙边;外扩分钟 raw=0,keys 计数不变。
+    static let visualPad = smoothRadius + 1
 
     /// 纯函数,后台线程跑。keystroke 已按 ts 升序,但不依赖顺序。
     static func aggregate(_ ks: [KeystrokeEntry], dayStartMs: Int64) -> MinuteBuckets {
