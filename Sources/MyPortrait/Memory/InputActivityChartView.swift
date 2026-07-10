@@ -51,6 +51,8 @@ struct InputActivityChartView: View {
     @State private var records: [WritingRecordViewRow] = []
     /// 展开的 record id 集合(可多开)。切天清空。
     @State private var expandedIds: Set<Int64> = []
+    /// 待确认删除的 record id(非 nil → 弹确认框)。
+    @State private var confirmingDeleteId: Int64? = nil
     /// 已提交的选中(点击自动丛 or 拖拽框选)。nil = 未选、显示全天。
     /// 点图表空白处取消。
     @State private var selection: InputSelection? = nil
@@ -313,16 +315,19 @@ struct InputActivityChartView: View {
         } else {
             LazyVStack(spacing: 8) {
                 ForEach(visibleRecords) { rec in
-                    InputRecordCard(record: rec,
-                                    expanded: expandedIds.contains(rec.id)) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                            if expandedIds.contains(rec.id) {
-                                expandedIds.remove(rec.id)
-                            } else {
-                                expandedIds.insert(rec.id)
+                    InputRecordCard(
+                        record: rec,
+                        expanded: expandedIds.contains(rec.id),
+                        onToggle: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                if expandedIds.contains(rec.id) {
+                                    expandedIds.remove(rec.id)
+                                } else {
+                                    expandedIds.insert(rec.id)
+                                }
                             }
-                        }
-                    }
+                        },
+                        onDelete: { confirmingDeleteId = rec.id })
                     .overlay(     // wr chip 跳转命中的卡片高亮描边(~2s 淡出)
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(Theme.accent,
@@ -331,7 +336,30 @@ struct InputActivityChartView: View {
                     )
                 }
             }
+            .confirmationDialog("Delete this writing record?",
+                                isPresented: Binding(get: { confirmingDeleteId != nil },
+                                                     set: { if !$0 { confirmingDeleteId = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if let id = confirmingDeleteId { Task { await deleteRecord(id) } }
+                }
+                Button("Cancel", role: .cancel) { confirmingDeleteId = nil }
+            } message: {
+                Text("This permanently removes this one record.")
+            }
         }
+    }
+
+    /// 删一条 writing_record → 从内存列表移除(不整表 reload,省得列表跳)。
+    @MainActor
+    private func deleteRecord(_ id: Int64) async {
+        confirmingDeleteId = nil
+        guard let store else { return }
+        await Task.detached(priority: .userInitiated) {
+            try? store.deleteWritingRecord(id: id)
+        }.value
+        records.removeAll { $0.id == id }
+        expandedIds.remove(id)
     }
 
     /// 图例:每个 app 一个色块 + 名称,和堆叠层同一套 AppColor;按活跃度从高到低
@@ -856,7 +884,9 @@ private struct InputRecordCard: View {
     let record: WritingRecordViewRow
     let expanded: Bool
     let onToggle: () -> Void
+    let onDelete: () -> Void
     @State private var hovering = false
+    @State private var deleteHover = false
     @Environment(\.colorScheme) private var colorScheme
 
     private var appLabel: String { InputCaptureView.appLabel(record.app) }
@@ -922,6 +952,16 @@ private struct InputRecordCard: View {
             // 特别长=article / 短一点=paragraph。
             if !expanded, isTruncated { lengthBadge }
             Spacer()
+            // 删除:复用 text 区的 trash 图标,hover 变红。放展开箭头左边。
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(deleteHover ? Color.red : Color.secondary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { deleteHover = $0 }
+            .help("Delete this record")
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
