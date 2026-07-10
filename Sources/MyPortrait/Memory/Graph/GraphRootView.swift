@@ -66,7 +66,7 @@ struct GraphRootView: View {
     @State private var floatNodeId: Int? = nil
     /// 浮窗渐显(07-10 用户"视角变完后渐进出现,不要太慢"):开卡片先隐,
     /// 等相机取景收官(cameraTracking 落 false)再 0.22s 淡入;取景等物理
-    /// 沉降太久时 2.5s 兜底先显示。⚠️ 在**设置 floatNodeId 的入口**同步置
+    /// 沉降太久时 1.5s 兜底先显示。⚠️ 在**设置 floatNodeId 的入口**同步置
     /// false(onChange 在渲染后才跑,只靠它换球时会闪一帧上个状态)。
     @State private var floatRevealed = false
     @State private var floatRevealTask: Task<Void, Never>? = nil
@@ -171,7 +171,7 @@ struct GraphRootView: View {
             floatRevealTask?.cancel()
             guard v != nil else { floatRevealed = false; return }
             floatRevealTask = Task { @MainActor in
-                for _ in 0..<150 {   // ~2.5s 兜底:取景等物理沉降太久就先显示
+                for _ in 0..<94 {   // ~1.5s 兜底:取景等物理沉降太久就先显示
                     if Task.isCancelled { return }
                     if !cameraTracking { break }
                     try? await Task.sleep(for: .milliseconds(16))
@@ -393,8 +393,8 @@ struct GraphRootView: View {
             // 点小球 → 与信息面板绑定的取景(07-10 用户,event/portrait 两区
             // 同款):相机聚焦该球,zoom = 所在家气泡占视口 cameraFolderFill
             // —— 与 folder 聚焦同一缩放级,folder 视角转小球视角时只平移不
-            // 变焦,不跳。
-            frameCameraToEventBall(id)
+            // 变焦,不跳。图已静止 → van Wijk(见 frameCameraToLeaf,治拉回)。
+            frameCameraToLeaf(id)
         }
     }
 
@@ -491,6 +491,23 @@ struct GraphRootView: View {
                 try? await Task.sleep(for: .milliseconds(16))
             }
         }
+    }
+
+    /// 点小球取景(07-10 用户):图已静止,球不动 → 用 **animateCamera(van Wijk)**
+    /// 到固定目标,而非 frameCameraToEventBall 的 lerp 跟随 —— lerp 跟随在大
+    /// 放大比(总览级 → 单球家气泡级)下,目标球屏幕位置会先冲离中心再回来
+    /// = "很强的视角拉回"(用户报);van Wijk 单调无过冲。目标同 EventBall:
+    /// center = 球位,zoom = 所在家气泡占视口 cameraFolderFill。
+    private func frameCameraToLeaf(_ idx: Int) {
+        guard let engine, idx < scene.nodes.count else { return }
+        let snap = engine.readSnapshot()
+        guard idx < snap.count else { return }
+        let hub = scene.nodes[idx].hubIndex
+        let br = (hub >= 0 && hub < scene.nodes.count
+                  ? scene.nodes[hub].hubBubbleRadius : nil) ?? 160
+        guard let tgt = frameFor(viewSize, center: snap[idx], radius: Float(br),
+                                 fill: GraphConstants.cameraFolderFill) else { return }
+        animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
     }
 
     /// 浮窗中心位置:球右侧偏移,clamp 进视口。
