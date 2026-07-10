@@ -9,8 +9,8 @@ struct MemoryViewModeToggle: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            segment(.text, icon: "list.bullet", label: "text")
             segment(.canvas, icon: "atom", label: "canvas")
+            segment(.text, icon: "list.bullet", label: "text")
         }
     }
 

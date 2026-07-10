@@ -120,6 +120,11 @@ struct TimelineSidebar: View {
             HStack(spacing: Theme.Space.xs) {
                 ForEach([SidebarSection.timeline, .home, .memories, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
+                        // 每次点开 Memory 都落到 canvas 的 Events(用户 07-10 定稿)。
+                        if item == .memories {
+                            memoryViewMode = .canvas
+                            memoryScope = .events
+                        }
                         selection = item
                     }
                 }
