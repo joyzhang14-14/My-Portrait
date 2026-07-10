@@ -231,6 +231,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var dragSpawnPos = SIMD2<Float>(.infinity, .infinity)
     private var lastShadowSpawnTick: UInt64 = 0
     private var lastDragPos: SIMD2<Float> = .zero
+    /// 被拖球每 tick 位移的 EMA(松手边沿"静置"判定用;-1 = 拖拽首 tick
+    /// 哨兵,首个差值基于上次拖拽的残留 lastDragPos,无意义须跳过)。
+    private var dragMoveEma: Float = -1
     /// 影子身份:true = 本实例是影子(init 不起线程,beltPass 走实时
     /// 挡板分支)。
     private let isShadow: Bool
@@ -540,7 +543,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 定点 —— 定点弹簧无全局涌动,拖过之处像水合拢)
             if dragging {
                 beltForming = false
-                if !wasDragging { beltDragHome = beltIdx.map { pos[Int($0)] } }
+                if !wasDragging {
+                    beltDragHome = beltIdx.map { pos[Int($0)] }
+                    dragMoveEma = -1   // 新拖开始:静置 EMA 回哨兵(首 tick 跳过)
+                }
                 releaseSettleEpisode = false   // 出口②:新拖开始,清 latch
             } else if wasDragging {
                 // 真松手边沿 —— 快放 episode 的唯一置位点(结构上保证「只作用
@@ -549,14 +555,28 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 releaseSettleEpisode = true
                 buildSettleTeam()
                 // 松手边沿:预热命中判定 —— 拖拽中已按"假设此刻松手"
-                // 预算过,最近预算的克隆位与松手位置够近(<40pt)→ 结果
-                // 现成/在途,不重建(零/极低延迟);否则照常重建(3~8 tick)
+                // 预算过,最近预算的克隆位与松手位置够近(<60pt)**且松手前
+                // 已基本静置**(07-11 弧偏根治:预热克隆按 vel=0 预算,快拖中
+                // 松手带速度、真实终局与克隆预算分叉可达 ~200pt,消费它 =
+                // 被拖家弧方位锁错 40~94°[bisect 实测,根缺陷早于串行化,
+                // 串行化的忙拒杀在飞+下tick重生让"刚出炉克隆"更常假命中 →
+                // 频发]。静置时克隆假设成立,命中零延迟照旧;在动就 MISS
+                // 重算,代价仅 3~8 tick)→ 结果现成/在途,不重建;否则重建
                 if let cp = shadowClonePosPending,
-                   simd_length(cp - lastDragPos) < 60 {
+                   simd_length(cp - lastDragPos) < 60,
+                   dragMoveEma >= 0, dragMoveEma < 1.5 {
                     // 命中:结果 ready 则下 tick 即消费;在途则等它几 tick
                 } else {
                     beltPredDirty = true
                 }
+                // 克隆位一次性使用(07-11):本次松手评完 HIT/MISS 即作废。
+                // 命中后的正常消费走 shadowReady 通道,与 clonePending 无关;
+                // 不清则残留位跨拖存活 —— 下一次不触发预热的拖拽(叶拖/
+                // 短挪 <30pt)松手若恰落在旧克隆位 60pt 内,会假命中一个早已
+                // 消费/不存在的任务 → dirty 不置位、布局变了永不重算,
+                // beltPredPos/弧方位/环锁死过期终局(bisect S10 实测错位
+                // 定格;延续 d88eb3e「复用失效必须重算」的本意)。
+                shadowClonePosPending = nil
                 // 静动判定同步刷新(对抗审查②):拖拽期判定冻结,被拖拽
                 // 推土机推开的邻居若还挂着拖前的 static 旗,松手后最长
                 // 0.5s 会拿"被推开的瞬时位置"当真挡板切碎弧 —— 位移超
@@ -680,7 +700,12 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         for li in 0..<leafIndices.count where leafOwnHub[li] == releaseHubIndex {
             settleTeamIdx.append(leafIndices[li])
         }
-        for bi in 0..<beltIdx.count where beltHub[bi] == releaseHubIndex {
+        // 陨石**全员**入团,不只自家(07-11 回归慢补洞,bisect S4/S9 实测):
+        // 残余若只量被拖家,第二次交互(拖叶/挪别家 hub)的松手团不含上一次
+        // 还在回流的陨石 → 残余≈0 → 快放不开 → 回流退回 1× 慢爬 17s。
+        // 静止陨石位移进不了 extraSettleTicks 的 0.3pt/tick 死区,不拖累
+        // ease-out;快放本身动力学中性,多测不改落点。
+        for bi in 0..<beltIdx.count {
             settleTeamIdx.append(beltIdx[bi])
         }
         settleTeamPrev = settleTeamIdx.map { pos[Int($0)] }
@@ -775,6 +800,15 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // tick)→ 按"假设此刻松手"克隆预算(spawnShadow 内含 gen
             // 递增,自动废弃上一发)。拖到新位置停顿 ≥0.3s,松手时结果
             // 已现成 = 零延迟
+            // 静置 EMA(07-11 弧偏根治):趁 lastDragPos 还是上 tick 值先算
+            // 本 tick 位移增量;拖拽首 tick(哨兵 -1)跳过 —— 残留的
+            // lastDragPos 属于上次拖拽,差值无意义。
+            if dragMoveEma < 0 {
+                dragMoveEma = 0
+            } else {
+                dragMoveEma = dragMoveEma * 0.6
+                    + simd_length(pos[di] - lastDragPos) * 0.4
+            }
             lastDragPos = pos[di]
             if di != 0, nodeFamily[di] < 0,
                simd_length(pos[di] - dragSpawnPos) > 30,
@@ -1120,6 +1154,14 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private func spawnShadow(releasedSim: Int = -1) -> Bool {
         // nh=0 时影子无任何消费方(钉环/carve/beltPredPos 全空转)
         guard !isShadow, !hubIndices.isEmpty else { return false }
+        // 挡板/弧方位占位:ready 前用**当刻实时位置**(几帧窗口)。
+        // 无条件刷新 —— 不能留拖拽前的旧终局,混合帧的弧方位会朝旧
+        // 方向飞一两帧(实测首帧毛刺 pol 偏 2+rad)。
+        // ⚠️ 放在忙拒 return 之前(07-11):恢复"每次 spawn 调用必刷占位"
+        // 不变量 —— 串行化后忙拒分支若不刷,拖拽中 beltPredPos 会滞留
+        // 上次 spawn 的旧位置(实测 ~70pt)一帧,carve/弧方位混合帧吃到
+        // 过期占位。成功路径同 tick 同值,语义不变。
+        beltPredPos = hubIndices.map { pos[Int($0)] }
         shadowLock.lock()
         if shadowInFlight {
             // 废弃正在跑的旧位置；任务会在 warmup 循环里看到 generation
@@ -1158,10 +1200,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         sh.beltFamSel = beltFamSel
         sh.beltFamBase = beltFamBase
         sh.beltFamSlope = beltFamSlope
-        // 挡板/弧方位占位:ready 前用**当刻实时位置**(几帧窗口)。
-        // 无条件刷新 —— 不能留拖拽前的旧终局,混合帧的弧方位会朝旧
-        // 方向飞一两帧(实测首帧毛刺 pol 偏 2+rad)
-        beltPredPos = hubIndices.map { pos[Int($0)] }
+        // (占位刷新已上移到函数顶部忙拒 return 之前,见那里的注释。)
         // (临时环已删 —— 开场陨石待命到 ready,环只在消费处钉一次
         // = 一跳成型;同时省掉开场同步小跑的物理线程停顿)
         // 后台**全速一口气**跑到 hub 全静(07-08 用户实机"还是卡顿,
