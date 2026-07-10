@@ -258,20 +258,22 @@ struct InputActivityChartView: View {
                             .padding(.bottom, 24)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // wr chip 定位滚动。换天后 records 刚落地 + LazyVStack 懒加载:
-                        // 目标行还没 realize 时 scrollTo 静默失败(卡片能展开是因为后来
-                        // 才被 realize)。所以多次重试——先隔几帧无动画 scrollTo 逐步
-                        // realize 并粗定位(沿途把目标行拉进渲染),最后一次动画居中。
+                        // wr chip 定位滚动。锚点用 **.top 不是 .center**:卡片顶部
+                        // (标题+正文)对齐视口顶,正文在最前;展开态正文下面接的
+                        // edit_log(逐条 commit/delete 编辑历史)沉到下面/视口外,
+                        // 否则按卡片中心滚会正好停在一堆 commit/delete 上看不到正文。
+                        // 多次重试:选中过滤后列表已短、目标基本都已 realize,重试只是
+                        // 兜底(懒加载偶发未 realize 时 scrollTo 静默失败)。
                         .onChange(of: scrollNonce) { _, _ in
                             guard let target = scrollTargetId else { return }
                             Task { @MainActor in
                                 for ms in [120, 220, 360] {
                                     try? await Task.sleep(for: .milliseconds(ms))
-                                    proxy.scrollTo(target, anchor: .center)
+                                    proxy.scrollTo(target, anchor: .top)
                                 }
                                 try? await Task.sleep(for: .milliseconds(80))
                                 withAnimation(.easeInOut(duration: 0.35)) {
-                                    proxy.scrollTo(target, anchor: .center)
+                                    proxy.scrollTo(target, anchor: .top)
                                 }
                             }
                         }
