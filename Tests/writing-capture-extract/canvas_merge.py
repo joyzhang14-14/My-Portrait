@@ -44,15 +44,18 @@ def normx(s):
     s = (s or '').replace('（', '(').replace('）', ')').replace('“', '"').replace('”', '"').replace('’', "'")
     return re.sub(r'[^a-z0-9一-鿿]', '', s.lower())
 
-def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00', max_snaps=24):
-    T0 = int(datetime.datetime.strptime(t0s, '%Y-%m-%d %H:%M').timestamp() * 1000)
-    T1 = int(datetime.datetime.strptime(t1s, '%Y-%m-%d %H:%M').timestamp() * 1000)
+def reconstruct(con, url_like, bundle_like, T0, T1, model=None, tok=None, max_snaps=24):
+    """泛化版 canvas C 档重建:任意文档(url_like 定位帧)、任意 app(bundle_like 定位击键)、
+    任意时间窗(T0/T1 毫秒)。model/tok 传入则复用(驱动一次加载、多文档共用),否则本地加载。
+    返回 {'final_text','body_pretrim','timeline','frames'};不写文件(交调用方)。
+    ⚠️ 各启发式常数(max_snaps/末25%终读池/半窗容差)是 gold essay 拟合值,泛化到别的文档未验证。"""
     rows = con.execute(
         "SELECT timestamp_ms, ocr_words_json FROM frames WHERE browser_url LIKE :u "
         "AND timestamp_ms BETWEEN :a AND :b AND ocr_words_json IS NOT NULL ORDER BY timestamp_ms",
         {"u": f"%{url_like}%", "a": T0, "b": T1}).fetchall()
-    ks = con.execute("SELECT char, is_backspace, modifiers FROM keystroke_log WHERE bundle_id LIKE '%Safari%' "
-                     "AND ts_ms BETWEEN :a AND :b ORDER BY ts_ms", {"a": T0, "b": T1}).fetchall()
+    ks = con.execute("SELECT char, is_backspace, modifiers FROM keystroke_log WHERE bundle_id LIKE :bl "
+                     "AND ts_ms BETWEEN :a AND :b ORDER BY ts_ms",
+                     {"bl": f"%{bundle_like}%", "a": T0, "b": T1}).fetchall()
     buf = []
     for c, bs, md in ks:
         if (md & 7) != 0: continue
@@ -96,7 +99,9 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
     print(f"代表快照 {len(snaps)} 张 | 行池 {len(line_pool)} 行", file=sys.stderr)
     # 层级归并(v2c):组内6张一次性拼→组块再拼一次。每层输出有界,无滚动膨胀/截断。
     from mlx_lm import load as _load, generate as _gen
-    m14, tok14 = _load("mlx-community/Qwen3-14B-4bit")
+    if model is None:
+        model, tok = _load("mlx-community/Qwen3-14B-4bit")
+    m14, tok14 = model, tok
     allsnap = normx(' '.join(t for _, t in snaps))
     def merge_once(parts, label):
         if len(parts) == 1:
@@ -314,11 +319,19 @@ def main(url_like='1DY0bEhGGZB', t0s='2026-05-28 18:00', t1s='2026-05-29 02:00',
     # 每条自带 ts,展示侧需要时间视图时自行排序
     print(f"timeline:成品句 commit {sum(1 for e in timeline if e[1]=='commit')} "
           f"+ delete {sum(1 for e in timeline if e[1]=='delete')}", file=sys.stderr)
-    json.dump({'final_text': body, 'body_pretrim': body_pretrim, 'timeline': timeline,
-               'frames': len(rows), 'chrome_lines': 0},
-              open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
     print(f"拼接完成 字数 {len(body)}")
-    return body
+    return {'final_text': body, 'body_pretrim': body_pretrim, 'timeline': timeline,
+            'frames': len(rows), 'chrome_lines': 0}
+
+
+def main():
+    """CLI 回归入口:原 gold essay 参数原封不动(泛化前后此路径逐字一致,当回归基准)。"""
+    T0 = int(datetime.datetime.strptime('2026-05-28 18:00', '%Y-%m-%d %H:%M').timestamp() * 1000)
+    T1 = int(datetime.datetime.strptime('2026-05-29 02:00', '%Y-%m-%d %H:%M').timestamp() * 1000)
+    r = reconstruct(con, '1DY0bEhGGZB', 'Safari', T0, T1)
+    json.dump(r, open('eval/canvas_v2.json', 'w'), ensure_ascii=False)
+    return r['final_text']
+
 
 if __name__ == '__main__':
     main()
