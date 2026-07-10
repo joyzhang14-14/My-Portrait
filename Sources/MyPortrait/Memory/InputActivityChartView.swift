@@ -148,10 +148,11 @@ struct InputActivityChartView: View {
                                                 dragPreview = nil
                                                 withAnimation(.easeOut(duration: 0.15)) {
                                                     if let w = buckets.burstWindow(around: m) {
+                                                        // ±snapRange 内有 session → 吸附整段。
                                                         selection = InputSelection(lo: w.lo, hi: w.hi,
-                                                                                   click: m, capped: w.capped)
+                                                                                   click: w.anchor, capped: w.capped)
                                                     } else {
-                                                        // 死区兜底:圈点击点 ±3h(夹到活动区间)。
+                                                        // 附近确实空 → 圈点击点 ±3h 兜底。
                                                         let lo = max(buckets.firstMinute, m - MinuteBuckets.fallbackRadius)
                                                         let hi = min(buckets.lastMinute, m + MinuteBuckets.fallbackRadius)
                                                         selection = InputSelection(lo: lo, hi: hi, click: m)
@@ -326,37 +327,38 @@ struct MinuteBuckets: Sendable {
 
     // MARK: 峰值丛选择旋钮(代码里可调)
 
-    /// 每分钟击键 ≥ 此值才算"活跃"(否则视为安静/停顿)。
-    static let activeFloor = 2
+    /// 每分钟击键 ≥ 此值才算"活跃"。取 1:连微弱边缘(每分钟 1 键)也算进 session,
+    /// 不再被当噪声剔掉,选中不漏边边角。只有完全 0 击键的分钟才是"安静"。
+    static let activeFloor = 1
     /// 连续安静 ≥ 此分钟数 → session 收边。取 45min:把靠得近的子峰合成一个
     /// 活动段(整片一起选),只有真正的长时间安静(午休/换事)才断开。调大 = 选更大片。
     static let gapMinutes = 45
     /// 点击自动选中的击键上限(安全值)—— 从点击点按密度扩到此量就停,
     /// 防极端大 session 一口气全选。绝大多数 session 都在此值内会整段选中。
     static let keystrokeCap = 10000
-    /// 点击落在小空隙时,吸附到 ±此分钟内最近的活跃分钟。
-    static let snapRadius = 5
-    /// 死区兜底半宽(分钟):点在附近无活跃分钟的空白 → 圈点击点 ±此值(±3h)。
+    /// 吸附范围(分钟):点击点 ±此值内有活跃分钟 → 吸附到那个 session;
+    /// 超出(附近确实空)→ 调用方走 ±fallbackRadius 兜底。
+    static let snapRange = 60
+    /// 死区兜底半宽(分钟):附近无 session 时,圈点击点 ±此值(±3h)。
     static let fallbackRadius = 180
 
-    /// 点选峰值丛:① snap 到最近活跃分钟 ② 用 gap 定住整丛 [L,R] ③ 从 click
-    /// 按密度向两边扩、到 keystroke 上限停(不越出 [L,R])。返回选中窗口 [lo,hi]。
-    /// 纯函数。点在深空隙/孤立单键(附近无活跃分钟)→ 无可选丛,返回 nil。
-    func burstWindow(around click: Int) -> (lo: Int, hi: Int, capped: Bool)? {
+    /// 点选峰值丛:① snap 到 **±snapRange 内最近的活跃分钟**(点空白吸到附近 session;
+    /// 超范围返回 nil,调用方走 ±3h 兜底)② 用 gap 定住整丛 [L,R] ③ 从 anchor 按密度
+    /// 向两边扩、到 keystroke 上限停(不越出 [L,R])。返回 [lo,hi] + anchor(蓝线落点)。
+    func burstWindow(around click: Int) -> (lo: Int, hi: Int, capped: Bool, anchor: Int)? {
         guard !rawTotals.isEmpty, lastMinute >= firstMinute else { return nil }
         let firstM = firstMinute, lastM = lastMinute
 
-        // ① snap:点击点不活跃 → 找 ±snapRadius 内最近的活跃分钟。
+        // ① snap:点击点不活跃 → ±snapRange 内向两侧找**最近**的活跃分钟。
         var c = min(max(click, firstM), lastM)
         if rawTotals[c] < Self.activeFloor {
-            snap: for d in 1...Self.snapRadius {
+            snap: for d in 1...Self.snapRange {
                 for cand in [c - d, c + d] where cand >= firstM && cand <= lastM {
                     if rawTotals[cand] >= Self.activeFloor { c = cand; break snap }
                 }
             }
         }
-        // snap 仍落在非活跃分钟 → 点在没有峰值丛的死区,不选。
-        // (这也根治了 lo==hi 时 trim 前提 lo<hi 不成立、退化点修不掉的问题。)
+        // 范围内没有活跃分钟(附近确实空)→ 返回 nil,调用方兜底 ±3h。
         guard rawTotals[c] >= Self.activeFloor else { return nil }
 
         // ② 自然丛 [L,R]:向两边跨小停顿,连续安静 ≥ gapMinutes 收边。
@@ -400,10 +402,12 @@ struct MinuteBuckets: Sendable {
             }
         }
 
-        // 修边:去掉两端桥接进来的安静分钟,带子不含空隙尾巴。
+        // 修边:去掉两端桥接进来的安静分钟(0 击键),带子不含空隙尾巴。
         while lo < hi && rawTotals[lo] < Self.activeFloor { lo += 1 }
         while hi > lo && rawTotals[hi] < Self.activeFloor { hi -= 1 }
-        return (lo, hi, capped)
+        // anchor(蓝线落点)夹进最终窗口,免得吸附后 c 落在被修掉的边缘外。
+        let anchor = min(max(c, lo), hi)
+        return (lo, hi, capped, anchor)
     }
 
     /// [lo, hi] 区间的原始击键总数(表头显示 / 触顶判断)。
@@ -550,7 +554,8 @@ private struct InputActivityCanvas: View {
         return min(max(m, buckets.firstMinute), buckets.lastMinute)
     }
 
-    /// 高亮带(贯穿全图高度)+ 蓝线(仅点击选中有)。拖拽预览优先,只画带。
+    /// 高亮带(贯穿全图高度)+ 蓝线:点击选中在 anchor 画一条;
+    /// 拖拽框选(click=nil)在左右两边界各画一条。拖拽预览优先。
     private func drawSelection(_ ctx: GraphicsContext, plot: CGRect) {
         // 拖拽预览优先;否则画已提交选中。
         let lo: Int, hi: Int, click: Int?
@@ -564,12 +569,19 @@ private struct InputActivityCanvas: View {
         ctx.fill(band, with: .color(.blue.opacity(0.13)))
 
         if let c = click {
-            let cx = x(c, plot)
-            var line = Path()
-            line.move(to: CGPoint(x: cx, y: plot.minY))
-            line.addLine(to: CGPoint(x: cx, y: plot.maxY))
-            ctx.stroke(line, with: .color(.blue.opacity(0.9)), lineWidth: 1.5)
+            drawVLine(ctx, x(c, plot), plot)          // 点击选中:标点击点
+        } else {
+            drawVLine(ctx, xl, plot)                  // 框选:左右两边界各一条
+            drawVLine(ctx, xr, plot)
         }
+    }
+
+    /// 一条贯穿全图高度的蓝竖线。
+    private func drawVLine(_ ctx: GraphicsContext, _ px: CGFloat, _ plot: CGRect) {
+        var line = Path()
+        line.move(to: CGPoint(x: px, y: plot.minY))
+        line.addLine(to: CGPoint(x: px, y: plot.maxY))
+        ctx.stroke(line, with: .color(.blue.opacity(0.9)), lineWidth: 1.5)
     }
 
     // 左留 y 轴数字,底留时间标签。
