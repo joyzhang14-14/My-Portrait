@@ -1127,6 +1127,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 最新状态，不为中间每个鼠标位置各开一个并发任务。
             shadowGen &+= 1
             shadowReady = false
+            shadowClonePosPending = nil   // 旧克隆已失效，松手时必须重算
             shadowLock.unlock()
             shadowDone = false
             return false
