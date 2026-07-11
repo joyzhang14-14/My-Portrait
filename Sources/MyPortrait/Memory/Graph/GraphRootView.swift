@@ -94,6 +94,8 @@ struct GraphRootView: View {
     /// 取景直接用它 —— 保留随机布局的变化又不闪(免掉切回时环心乱跳)。
     /// nil = portrait 无环 / 尚未加载。松手缓移不用它(用引擎实时环)。
     @State private var preloadedRing: (center: SIMD2<Float>, radius: Float)? = nil
+    /// 主球自定义照片(07-11 用户):从磁盘加载,Settings 改了发通知即重载。
+    @State private var mainBallImage: NSImage? = nil
 
     private var zone: GraphZone {
         if case .portrait = scope { return .portrait }
@@ -120,6 +122,7 @@ struct GraphRootView: View {
                                     camera: $camera,
                                     hoveredId: $hoveredId,
                                     cardNodeId: floatNodeId,
+                                    mainBallImage: mainBallImage,
                                     onTapNode: handleTap,
                                     onNodeDragEnded: {
                                         // 拖球松手 = 回总览:先关卡片(07-11 用户
@@ -160,6 +163,11 @@ struct GraphRootView: View {
         // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
         .background(WindowDragBlocker())
         .task(id: zone) { await reload() }
+        // 主球照片:进入即加载;Settings 上传/移除发通知 → 立即重载(07-11)。
+        .task { await loadMainBallImage() }
+        .onReceive(NotificationCenter.default.publisher(for: .mainBallPhotoChanged)) { _ in
+            Task { await loadMainBallImage() }
+        }
         // park 事件 → 记录物理休眠态。engineGen 变化(引擎替换)重订阅。
         .task(id: engineGen) {
             guard let engine else { return }
@@ -565,6 +573,16 @@ struct GraphRootView: View {
     // MARK: - 加载 / 引擎生命周期
 
     @MainActor
+    /// 主球照片:后台读盘解码(大图别卡主线程),回主线程赋值。文件不在=nil。
+    private func loadMainBallImage() async {
+        guard MainBallPhoto.exists else { mainBallImage = nil; return }
+        let p = MainBallPhoto.url.path
+        let img = await Task.detached(priority: .userInitiated) {
+            NSImage(contentsOfFile: p)
+        }.value
+        mainBallImage = img
+    }
+
     private func reload() async {
         loadGen += 1
         let gen = loadGen
