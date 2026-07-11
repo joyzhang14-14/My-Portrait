@@ -69,6 +69,13 @@ P_ITEMS_NEXT = (
     'new or specific enough, include it. Ignore UI chrome. If nothing is genuinely new, return '
     'an empty list. Reply ONLY JSON: {{"items":["<new item>", ...]}}')
 
+# --ocr-inject:逐帧 OCR 注入视觉层(原生分辨率转写交给 OCR,视觉管布局/归属)
+P_OCR_BLOCK = (
+    '\n\nExact on-screen text from OCR at native resolution (may include background windows; '
+    'use it to spell every identifier/name/number VERBATIM instead of reading pixels):\n'
+    '"""{ocr}"""')
+OCR_FRAME_CAP = 4000
+
 # 14B 汇总:items + 去重OCR → digest(对照纠错 + 补全 + 去乱码)
 P_MERGE = (
     'Summarize ONE macOS work session (foreground app: {app}) into 2-3 sentences.\n\n'
@@ -277,7 +284,41 @@ def _norm(s):
     return re.sub(r"\s+", " ", str(s)).strip().lower()
 
 
-def do_run(model_id, tag, maxpix=MAXPIX):
+# ---------------- --ocr-inject 支撑(默认关,A/B 用) ----------------
+
+def _anchor_norm(s):
+    import unicodedata
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(s))).lower()
+
+
+def _session_fids(con, b):
+    """manifest 帧序号 k → 生产库 frame id(经 parts 的 frame_ids 重建)。"""
+    fids = []
+    for pid in b["parts"]:
+        r = con.execute("SELECT frame_ids FROM raw_sessions WHERE id=?", (pid,)).fetchone()
+        fids += json.loads(r[0])
+    return fids
+
+
+_VERBATIM = re.compile(r"[A-Za-z0-9_./-]{8,}|\d{4,}|[「\"']([^「\"']{6,})[」\"']")
+
+
+def verify_items(items, corpus_n):
+    """锚点后验:含长技术token/长数字/长引语,且在 OCR 语料里找不到 → 丢。
+    (strip_unverifiable 思路平移;非逐字类观察项不受影响。)"""
+    kept, dropped = [], []
+    for it in items:
+        bad = False
+        for m in _VERBATIM.finditer(str(it)):
+            tok = m.group(1) or m.group(0)
+            if _anchor_norm(tok) not in corpus_n:
+                bad = True
+                break
+        (dropped if bad else kept).append(it)
+    return kept, dropped
+
+
+def do_run(model_id, tag, maxpix=MAXPIX, ocr_inject=False):
     manifest = json.load(open(MANIFEST))
     fp = os.path.join(OUTDIR, f"inc_v4_{tag}.json")
     done = {}
@@ -295,20 +336,35 @@ def do_run(model_id, tag, maxpix=MAXPIX):
         processor.image_processor.max_pixels = maxpix
 
     con = labdb.connect()                         # 视觉产物 durable 落库(供复用)
+    con_p = None
+    if ocr_inject:
+        con_p = sqlite3.connect(f"file:{source.PORTRAIT_DB}?mode=ro", uri=True)
     results = list(done.values())
     for key, b in manifest.items():
         if int(key) in done:
             continue
         app = b["app"]; t0 = time.time()
+        fids = _session_fids(con, b) if ocr_inject else []
+        corpus_n = ""
         items, seen = [], set()
         for i, (k, jpg_name) in enumerate(b["frames"]):
             jpg = os.path.join(FRAMES_DIR, jpg_name)
             p = (P_ITEMS_FIRST.format(app=app) if i == 0
                  else P_ITEMS_NEXT.format(app=app, items="\n".join(f"- {x}" for x in items)))
+            if ocr_inject:
+                ft = _frame_ocr(con_p, fids[k]) if k < len(fids) else ""
+                p += P_OCR_BLOCK.format(ocr=ft[:OCR_FRAME_CAP])
+                corpus_n += _anchor_norm(ft)
             for it in _vask(model, processor, apply_chat_template, generate, p, jpg):
                 kk = _norm(it)
                 if kk and kk not in seen:
                     seen.add(kk); items.append(str(it).strip())
+        if ocr_inject and corpus_n:
+            corpus_n += _anchor_norm(app + " " + b.get("ocr_union", ""))
+            items, drp = verify_items(items, corpus_n)
+            if drp:
+                print(f"    [verify] s{key} 删无出处 {len(drp)} 项: "
+                      + " | ".join(str(x)[:40] for x in drp[:3]))
         lat = int((time.time() - t0) * 1000)
         results.append({"key": int(key), "app": app, "parts": b["parts"],
                         "total_frames": b["total_frames"], "kept_frames": b["kept_frames"],
@@ -418,6 +474,8 @@ def main():
     ap.add_argument("--pv", type=int, default=2, help="汇总prompt版本(1旧/2新)")
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--maxpix", type=int, default=MAXPIX)
+    ap.add_argument("--ocr-inject", action="store_true",
+                    help="逐帧OCR注入视觉prompt+输出锚点后验删除(v1.1口径,默认关不动基线)")
     args = ap.parse_args()
     if args.extract:
         do_extract(args.all)
@@ -426,7 +484,7 @@ def main():
     elif args.report:
         do_report()
     else:
-        do_run(args.model, args.tag, args.maxpix)
+        do_run(args.model, args.tag, args.maxpix, ocr_inject=args.ocr_inject)
 
 
 if __name__ == "__main__":
