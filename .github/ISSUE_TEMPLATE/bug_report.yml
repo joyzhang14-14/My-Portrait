@@ -1,19 +1,16 @@
 name: Bug report
-description: Report a crash or bug — please attach a diagnostic bundle
+description: Report a crash or bug
 title: "[Bug] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting! The single most helpful thing you can attach is a
-        **diagnostic bundle**:
+        Thanks for reporting! Please describe what went wrong and, if you can, how to
+        reproduce it.
 
-        **My Portrait → Settings → Health → "Export diagnostic bundle"**, then drag the
-        downloaded `.zip` into the **Diagnostic bundle** box below.
-
-        It contains only technical logs, status, and (if any) crash reports — **none of
-        your captured screen/audio content**. You can open the zip and inspect it first.
+        If you'd rather send detailed logs privately instead of writing it up, use
+        **My Portrait → Settings → Health → "Send data to developer privately"**.
   - type: textarea
     id: what-happened
     attributes:
@@ -22,14 +19,6 @@ body:
       placeholder: "e.g. The app crashed when I quickly toggled Audio Capture on and off."
     validations:
       required: true
-  - type: textarea
-    id: diagnostic-bundle
-    attributes:
-      label: Diagnostic bundle
-      description: Drag the exported `.zip` here (Settings → Health → Export diagnostic bundle).
-      placeholder: "Drop the .zip file here."
-    validations:
-      required: false
   - type: input
     id: app-version
     attributes:
