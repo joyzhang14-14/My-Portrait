@@ -89,6 +89,9 @@ struct GraphRootView: View {
     @State private var viewSize: CGSize = .zero
     @State private var cameraTask: Task<Void, Never>? = nil
     @State private var cameraTracking = false
+    /// 相机任务代际:旧任务被取消后可能正从 sleep 返回,只允许最新任务
+    /// 收尾/落终点,避免连续点球时旧任务插回旧视角造成一帧卡跳。
+    @State private var cameraRunID: UInt64 = 0
     /// 预加载环(07-09 用户"随机种子预加载:打开界面前就知道该去哪"):
     /// reload 在显示前 headless 跑出本轮随机种子的最终隐形环,开局固定
     /// 取景直接用它 —— 保留随机布局的变化又不闪(免掉切回时环心乱跳)。
@@ -140,8 +143,10 @@ struct GraphRootView: View {
                                                         paused: renderPaused)) { _ in
                             GraphFloatWindow(
                                 node: scene.nodes[fid],
+                                loadWhenVisible: zone != .portrait || floatRevealed,
                                 onClose: { floatNodeId = nil },
                                 onJumpToEvent: jumpToEvent)
+                            .id(zone == .portrait ? fid : -1)
                             // 渐显:取景收官前隐着(也不接事件),之后 0.22s 淡入。
                             .opacity(floatRevealed ? 1 : 0)
                             .allowsHitTesting(floatRevealed)
@@ -258,15 +263,17 @@ struct GraphRootView: View {
     /// 任一时刻只有一个取景任务(新触发废弃旧的);引擎换代/手动操作中止。
     private func frameCameraToRing(animated: Bool) {
         cameraTask?.cancel()
+        cameraRunID &+= 1
+        let runID = cameraRunID
         let gen = engineGen
         // 开局:同步先用预加载环放好首帧(viewSize 就绪时;否则循环里兜底)。
         if !animated, let cam = openCamera(viewSize) { camera = cam }
         cameraTracking = true
         cameraTask = Task { @MainActor in
-            defer { cameraTracking = false }
+            defer { if runID == cameraRunID { cameraTracking = false } }
             let k = GraphConstants.cameraTrackLerp
             for i in 0..<900 {   // ~15s 上限兜底(含物理沉降 + 缓移)
-                if Task.isCancelled || gen != engineGen { return }
+                if Task.isCancelled || gen != engineGen || runID != cameraRunID { return }
                 // 目标 = 实时总览(events 隐形环精确居中 / portrait 全部节点
                 // 包围圆);开局头 ~50ms 引擎环未钉好时用预加载环兜底
                 // (免这几帧无目标 → 停在旧相机闪一下)。
@@ -296,6 +303,7 @@ struct GraphRootView: View {
     /// 用户手动平移/缩放 / 起拖 → 中止自动取景,交还控制权。
     private func cancelCameraTracking() {
         cameraTask?.cancel()
+        cameraRunID &+= 1
         cameraTracking = false
     }
 
@@ -321,12 +329,18 @@ struct GraphRootView: View {
     /// 目标固定(点击时图已 park),t 基定时动画,帧数不变(时长与原一致)。
     private func animateCamera(toCenter c1: SIMD2<Float>, toZoom z1raw: Double) {
         cameraTask?.cancel()
+        cameraRunID &+= 1
+        let runID = cameraRunID
         let z1 = min(max(z1raw, GraphCamera.zoomRange.lowerBound),
                      GraphCamera.zoomRange.upperBound)
         let c0 = camera.center, z0 = camera.zoom
-        guard z0 > 1e-6 else { camera.center = c1; camera.zoom = z1; return }
+        guard z0 > 1e-6 else {
+            cameraTracking = false; camera.center = c1; camera.zoom = z1; return
+        }
         let minDim = Double(min(viewSize.width, viewSize.height))
-        guard minDim > 1 else { camera.center = c1; camera.zoom = z1; return }
+        guard minDim > 1 else {
+            cameraTracking = false; camera.center = c1; camera.zoom = z1; return
+        }
         let w0 = minDim / z0, w1 = minDim / z1   // 世界可视宽度
         let dir = c1 - c0
         let u1 = Double(simd_length(dir))         // 中心间世界距离
@@ -334,18 +348,33 @@ struct GraphRootView: View {
         let gen = engineGen
         cameraTracking = true
         cameraTask = Task { @MainActor in
-            defer { cameraTracking = false }
+            defer { if runID == cameraRunID { cameraTracking = false } }
             // 中心几乎重合(纯缩放,如已在总览心处点空白):指数插值缩放,
             // 避开 van Wijk 的 1/u1 除零。
             if u1 < 1e-4 {
                 for i in 0...n {
-                    if Task.isCancelled || gen != engineGen { return }
+                    if Task.isCancelled || gen != engineGen || runID != cameraRunID { return }
                     let u = Double(i) / Double(n)
                     let t = u * u * (3 - 2 * u)
                     camera.center = c1
                     camera.zoom = minDim / (w0 * pow(w1 / w0, t))
                     try? await Task.sleep(for: .milliseconds(16))
                 }
+                camera.center = c1; camera.zoom = z1; return
+            }
+            // 同一气泡里的小球目标倍率相同。van Wijk 路径仍会为了平移
+            // 先缩远再放回,周围球看起来像绕着 folder 转,连续换球也更重。
+            // 倍率近似不变时直接平移,保持现有时长和缓入缓出。
+            if zone == .portrait, abs(log(z1 / z0)) < 0.03 {
+                for i in 0...n {
+                    if Task.isCancelled || gen != engineGen || runID != cameraRunID { return }
+                    let u = Double(i) / Double(n)
+                    let t = u * u * (3 - 2 * u)
+                    camera.center = c0 + dir * Float(t)
+                    camera.zoom = z0 * pow(z1 / z0, t)
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+                guard !Task.isCancelled, gen == engineGen, runID == cameraRunID else { return }
                 camera.center = c1; camera.zoom = z1; return
             }
             // 表达式拆成显式 Double 中间量(否则 Swift 类型检查器超时)
@@ -363,7 +392,7 @@ struct GraphRootView: View {
             let sinhR0: Double = sinh(r0)
             let unit = dir / Float(u1)                // c0→c1 单位方向
             for i in 0...n {
-                if Task.isCancelled || gen != engineGen { return }
+                if Task.isCancelled || gen != engineGen || runID != cameraRunID { return }
                 let u = Double(i) / Double(n)
                 let t: Double = u * u * (3 - 2 * u)   // 对弧长参数再加缓入缓出
                 let s: Double = t * bigS
@@ -377,6 +406,7 @@ struct GraphRootView: View {
                 camera.zoom = minDim / w
                 try? await Task.sleep(for: .milliseconds(16))
             }
+            guard !Task.isCancelled, gen == engineGen, runID == cameraRunID else { return }
             camera.center = c1; camera.zoom = z1
         }
     }
@@ -478,13 +508,15 @@ struct GraphRootView: View {
     /// 手动平移/缩放/起拖照常中止(同一 cameraTask 单槽)。
     private func frameCameraToEventBall(_ idx: Int) {
         cameraTask?.cancel()
+        cameraRunID &+= 1
+        let runID = cameraRunID
         let gen = engineGen
         cameraTracking = true
         cameraTask = Task { @MainActor in
-            defer { cameraTracking = false }
+            defer { if runID == cameraRunID { cameraTracking = false } }
             let k = GraphConstants.cameraTrackLerp
             for _ in 0..<900 {   // ~15s 上限兜底(含物理沉降)
-                if Task.isCancelled || gen != engineGen { return }
+                if Task.isCancelled || gen != engineGen || runID != cameraRunID { return }
                 guard let engine, idx < scene.nodes.count else { return }
                 let snap = engine.readSnapshot()
                 guard idx < snap.count else { return }

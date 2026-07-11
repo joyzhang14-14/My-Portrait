@@ -14,6 +14,9 @@ extension Notification.Name {
 /// 关卡片与回视角一步完成)。
 struct GraphFloatWindow: View {
     let node: GraphNode
+    /// 相机收官前不构建长正文,避免 Portrait 大段 markdown 排版与换球动画
+    /// 抢同一帧主线程。外层仍保留透明占位,浮窗到位后再加载渐显。
+    let loadWhenVisible: Bool
     let onClose: () -> Void
     /// portrait 浮窗的 event chip → 跳 Event 图谱并打开该 event 的浮窗。
     let onJumpToEvent: (String) -> Void
@@ -46,7 +49,9 @@ struct GraphFloatWindow: View {
                 .help("Close")
             }
 
-            if let file {
+            if !loadWhenVisible {
+                Color.clear.frame(height: 40)
+            } else if let file {
                 metaRows(file)
                 Divider().background(Color.primary.opacity(0.1))
                 ScrollView {
@@ -78,7 +83,10 @@ struct GraphFloatWindow: View {
         .frame(maxHeight: 440)
         .fixedSize(horizontal: false, vertical: true)
         .glassCard()
-        .task(id: node.id) { await load() }
+        .task(id: "\(node.id):\(loadWhenVisible)") {
+            guard loadWhenVisible else { return }
+            await load()
+        }
     }
 
     // MARK: - 元数据行(英文文案)
