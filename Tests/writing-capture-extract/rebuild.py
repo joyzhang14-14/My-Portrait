@@ -519,13 +519,25 @@ def dedup_truncated(records, cover_fn):
 def keys_in_window(con, bundle, t0, t1, pad_start=2000, pad_end=300):
     # 发送的击键到回车(发送 ts)为止 → 尾 pad 小,免漏进下条消息
     rows = con.execute(
-        "SELECT ts_ms,char,is_backspace,modifiers FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? ORDER BY ts_ms",
+        "SELECT ts_ms,char,is_backspace,modifiers,input_source FROM keystroke_log "
+        "WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? ORDER BY ts_ms",
         (bundle, (t0 or 0) - pad_start, (t1 or 0) + pad_end)).fetchall()
     o = ""
-    for ts, c, bs, md in rows:
+    for ts, c, bs, md, src in rows:
         if (md & 7) != 0: continue
         if bs: o += "<BS>"; continue
-        if c: o += "<CR>" if c in ("\n", "\r") else c
+        if not c: continue
+        # 输入法开着时,跟在**拼音**后的空格 = 选第一个候选(等价按 1),不是空格字符 → 归一成 '1',
+        # 下游 parse_picks/apply_bs 的选字数字机器直接就对(上屏语义见 apply_bs)。三道闸缺一不可:
+        #  ①input_source 背书是输入法(自 2026-06-13 才有值:inputmethod.*=输入法 / keylayout.*=键盘布局;
+        #    此前 None 一律不转 —— 英文每个词后都跟空格,盲转会吞英文)
+        #  ②前面那串必须真是拼音(commit_syls 认;不然「claude 」会被当成选字,连词间空格一起吃掉)
+        #  ③全小写(拼音缓冲是小写;大写多是英文/专名字面,如「Z 」)
+        if c == ' ' and src and 'inputmethod' in src and o[-1:].isalpha():
+            run = re.search(r'[A-Za-z]+$', o).group()         # 结尾连续字母串 = 待上屏缓冲
+            if run.islower() and commit_syls(run) is not None:
+                o += "1"; continue
+        o += "<CR>" if c in ("\n", "\r") else c
     return o
 
 def guard(cap, model_out, allowed_han, eng):
