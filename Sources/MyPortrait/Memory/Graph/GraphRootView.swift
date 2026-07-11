@@ -121,7 +121,13 @@ struct GraphRootView: View {
                                     hoveredId: $hoveredId,
                                     cardNodeId: floatNodeId,
                                     onTapNode: handleTap,
-                                    onNodeDragEnded: { frameCameraToRing(animated: true) },
+                                    onNodeDragEnded: {
+                                        // 拖球松手 = 回总览:先关卡片(07-11 用户
+                                        // "切回主视图过程中和完成后都不许有卡片";
+                                        // 点空白回总览那条本就关,这条曾漏)。
+                                        floatNodeId = nil
+                                        frameCameraToRing(animated: true)
+                                    },
                                     onCameraInterrupt: cancelCameraTracking)
                         .background(Color.black.opacity(0.001))   // 空白处也接手势
 
