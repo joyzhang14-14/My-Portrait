@@ -1040,6 +1040,51 @@ decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗
 - **17 天 fusion 变化(169→137 段)已真实 pipeline 重跑**,审核 md 重组装(成品 1289→1277,07-10 顺带收进当天新数据);gold 仍 43✓1🟡1✗(=基线等价;🟡=B14 探针对 05-24 Notes 草稿内嵌行误报,06-05 原案核实仍在未定区)。审核 md 加 §2.5/§4.5。
 - ⚠️ 已知残余(数据边界,未修):头悬出 >3s 的头碎片重复仍有 ~2 条(ni1fenxi1yixi 4.8s/w1qu1qiangjie1 7s)逃过 A 闸留在成品——扩容差会引误吞,裁定不动。
 
+### 🔧 2026-07-10(续2)审核期攒批修复(全离线验证,未提交,等用户过目后一次性重跑+commit)
+
+**用户立规**:①每次动 GPU 前停下等指令(逐次批准,无跨轮 standing 授权);②bug 攒着修完一起跑一轮。
+
+1. **占位符白名单 ×2**:`Enter a shell command`(用户发现,`!` 切 shell 模式的 UI 占位符被记成 commit)+ `Or reply directly`(sonnet 审计发现,回复框占位符)→ `extract_compare_v2.PLH` + `ax_bearing._PH_SNIPPETS`(两处同步约定)。
+2. **注入闸(通用版 KNOWN_PH)**:`X.injected_texts`=≥8字符 commit 击键对账(锚窗=上一个 ts 严格更早条目→ts+2s,<字符数×0.25 判注入);四防误伤=①AX批量同戳跳锚②键盘黑洞fail-open③长按重复特判④emoji shortcode 豁免(`PORTRAIT_EMOJI_EXEMPT` 开关默认开,选择器=选择型输入法;合成最坏实证鼠标emoji发送会整条丢)。消费=rebuild delete过滤+endValue出口。**⚠️isMark 扩展实证有害已回撤**(注入非清框信号,当 marker 造 6 个假发送)。全库 diff=10 事件纯杀(URL自动补全草稿/网页标题/自指'---')。
+3. **竞速尾巴归并**(每天还能pei ni liao t案):B门控账本分支,AX 竞速版(汉前缀+拉丁残尾≥2字母)与账本全版 `_py_prefix` 简拼对齐 → 账本过渲染确证才顶替(racing_kill 前瞻)。seq_in 接不住(单元 'pei' vs 散字母)。结构性 decode=1 专属(账本不活它不跑)。竞速 6/25 前 47 个/后 ~1 个(采集修复根治)。
+4. **canvas 过 Pass4**(用户裁定):faithful canvas 并入前过 URL/邮箱/掩码闸(riqujoyzhang14@gmail.com 案=canvas 直通旁路邮箱禁令);审计行内容恒遮蔽。模拟:恰好只灭 2 条邮箱,essay 等 135 段零伤。
+5. **删除证据折叠**(我有一个app目前案,用户质问"程序明明知道我删了"):~draft=P+S,后续记录以 P 开头(P≥4)且 S 的删除在 edit_log **单条 delete 原文有案** → 折叠(编辑历史硬证据补长度启发式的洞:共享前缀 9<10 差 1 字)。真数据谓词✓/负控✓。
+6. **canvas_B ax_verify**(十七块政策案,用户裁定"用现有 AX 验证 keystroke"):span 击键与附近 AX 事件文本(commit/delete/submit/end_value,含 delete!)拼音空间**全对齐**(`_keys_walk_text` DP,简拼=单元非空前缀)→ AX 文本顶替 librime 猜(真值>猜);对不齐保留 librime(微信 dag1zhey1d 案真内容不丢)。fusion source 标 `canvas_B+axv`。
+7. **⚠️A闸扩展(edit_log 实质内容=AX 有内容)实证净有害已回滚**:误吞 3 个正确 canvas 救回(继续等,AX 路 cover 闸本来就漏它们)+ 07-03 微信真内容('ok' 也算实质)+ 主目标 ev3338 脱靶(delete 时刻才建的事件,时间包含罩不住)。正确方向=内容对应,已由 6(ax_verify)按用户裁定实现。
+8. **起zh 用户裁定不动**:6/25 前专属(账本有正解但渲染确证未过);汇总器 §6 已知问题标注更正版本。「我有一个app目前」#4=submit 后框未清继续编辑的真输入态(无第二次 submit),用户未裁折叠,#2 由 5 治。
+9. sonnet 审计 workflow 结论:40 发现→6 确认(上述来源)/32 推翻;galgame/www 审计三连=如实记录 3 份被丢副本(2923/2924 采集层双事件),非 bug。
+
+### ✅ 2026-07-11 一体化重构【已完成,离线验证通过,待 GPU 跑】
+
+**改动(6 处 faithful_v2 + 2 处库,均未提交,py_compile+离线冒烟全过)**:
+
+1. **canvas 内联**:`faithful_v2` import `canvas_route/canvas_librime/ax_bearing`;Phase1 后、`del m14` 前调 `CR.build_canvas(con, DAYS, wrap_llm(m14,tok14))` 得 `CV_INLINE`(结构同 fusion json),output 段直接用它——**去掉 PORTRAIT_CANVAS/fusion 中间文件依赖**(env 仍留作 gold 固定 essay 源覆盖)。canvas 与 AX **共享同一 14B**(`CL.wrap_llm` 包已加载 m/tok,不重复 load)。
+2. **`canvas_route.build_canvas(con,days,llm)`**(新函数,从 main 抽出):B(route_day)+C(collect_c+reconstruct)→ 返回 `(fusion, creport, cnoanchor)`;main 仍可单跑(写 json)。`canvas_librime.wrap_llm(m,tok)`(新)= make_llm 拆出的包装,make_llm 现调它。
+3. **按天 decode**(替代分两批 env):`decode_for(day)= day<'2026-06-25'`(`PORTRAIT_LIBRIME_DECODE` 显式则全局强制);day loop 顶 `R.DECODE_LIBRIME=decode_for(day)`。**单进程按天切 == 分两批各自 env 逐字等价**(每天独立)。
+4. **`PORTRAIT_DAYS=all`** → 库中全部有击键天(47 天:05-24..07-11)。
+5. **分块可恢复**(reaper 防丢):每天 Phase1 结果落 `eval/v2cache/<day>.json`,重启跳已算天;canvas 落 `eval/v2cache/_canvas.json`。`PORTRAIT_FRESH=1` 忽略缓存。`NEED_MODEL` 精细化=有未缓存 decode 天/llm 或 (内联 canvas 未缓存且有 canvas) 才 load,恢复跑不白加载。
+6. **v2 审核 md 头**重写(组成/总量/canvas明细),per-day 成品段逻辑不变。
+
+**跑法(一条命令)**:`REVIEW_MODE=det PORTRAIT_DAYS=all PORTRAIT_OUT=~/Desktop/Obsidian/生产接入前审核大跑-v2-2026-07-11.md python3 faithful_v2.py`(经 launchd 防 reaper,单 .py 进程)。gold 复跑仍带 `PORTRAIT_CANVAS=eval/canvas_merged_src.json PORTRAIT_LIBRIME_DECODE=1 PORTRAIT_DAYS=<6天>` 覆盖。
+**产出对 7-10 等价**:per-day 成品段渲染逻辑零改;CV=内联 build_canvas==canvas_route.py --llm 的 fusion(同 route_day+C 驱动);按天 decode==两批。唯一差异=14B 固有 run-to-run 方差 + md 头。
+**离线验证(零 GPU)**:`scratchpad/verify_refactor.py` — wrap_llm/build_canvas 在 ✓;canvas_spans 全 47 天 B173/C26 ✓;build_canvas(纯B天,llm=None)结构{source,text,app}+无C+无load ✓;缓存 tuple→list round-trip 8字段可解包 ✓。
+**⏭️ 待 GPU(停等用户逐次批准)**:跑 → v2 md → sonnet 审核 workflow 出报告 → compare_gold 复验(预期 43✓1🟡1✗)→ 整批 commit。
+
+**⛔ 停批背景**:所有跑批已停(launchd `com.joyzhang.portrait.pipeline` removed,进程 pkill)。**run_all.sh/canvas_regen.sh/supervisor.sh 编排层弃用**——已被本次主程序内联取代(不要 .sh 编排;launchd 仅作单 .py 进程的 reaper 防护)。
+
+**用户最终意图(逐次澄清后)**:把 **`faithful_v2.py` 改成一体化主程序**——一条 `.py` 命令(不是 .sh)内部做完:承载率判别 → 承载段走 AX 重建、0承载段走 canvas(B/C 解码,ax_verify)→ 统一 Pass4/出口 → 产 v2 md;**不落 fusion 中间文件、不分 canvas_route/canvas_c_run/faithful 三脚本**。Python 实验线 ≠ 生产(生产是 Swift 另一套),所以放手改 Python 无接生产顾虑。
+
+- **重构不改产出**:同判别/同 B/C 解码/同闸,只是编排从"三脚本+fusion"→"主程序内部分流"。canvas 逻辑现成(canvas_route.route_day 的 B + main 的 C 驱动,都已整合进 canvas_route.py,可直接搬进 faithml_v2 或 import 调用)。
+- **⏭️ compact 后做**:①把 canvas 判别+B+C 搬进/接入 faithful_v2 主链(承载段→现有 AX 路;0承载段→canvas_route 的 B/C 逻辑),统一出口,去掉 PORTRAIT_CANVAS/fusion 依赖 ②一条 `python3 faithful_v2.py`(带 REVIEW_MODE=det/按天decode/PORTRAIT_OUT=v2md)跑完全部 ③仍需 launchd 防 reaper(执行层,不是编排层——单 .py 进程,分块/可恢复可选)④跑完 v2 md → sonnet 审核 workflow 出报告 → gold 复验。
+- **本批未提交改动(重构+审核后一起 commit)**:见下方 🔧 2026-07-10 续2 段 + canvas 一体化(canvas_route/canvas_librime/canvas_c_run)。哨兵 9/9、对抗审查 2 真 bug 已修、离线全验过。
+
+**原三要求仍在**:①一体化一条命令 ②v2 md `~/Desktop/Obsidian/生产接入前审核大跑-v2-2026-07-11.md` **不覆盖** 7-10 原档(assemble_review.py 已改此路径)③跑完 workflow 审核标异常出报告。
+
+- **canvas 一体化整合(已改,未提交)**:`canvas_route.py` 现是**单入口做 B+C**——`make_llm` 暴露 `.model/.tok`(canvas_librime),main 里 B 跑完接 C 驱动(`CC.collect_c`+`CM.reconstruct` 共享同一 14B model,不重复加载)。`canvas_c_run.py` 降为库(collect_c 被复用,不单跑)。
+- **顶层一体化 `scratchpad/run_all.sh`**(launchd `com.joyzhang.portrait.pipeline`,**正在跑**):① `canvas_route.py $DAYS --llm`(B+C)→ fusion,成功 touch `eval/.canvas_ok` ② `run_faithful.py`(全量分块,扫 accept md 可恢复)③ `assemble_review.py` → **v2 md `~/Desktop/Obsidian/生产接入前审核大跑-v2-2026-07-11.md`**。进度看 `scratchpad/pipe.log`(标记 `CANVAS_OK`/`FAITHFUL_OK`/`PIPELINE_DONE`/`GAVEUP`);Monitor task=bzrvxp65o。reaper 自愈=launchd 重启 run_all.sh(canvas 有 .canvas_ok 跳过,faithful 扫 md 续)。
+- **⏭️ PIPELINE_DONE 后要做**:①确认 v2 md 生成 ②**开 sonnet 审核 workflow**(逐块找异常→DB 对抗核实,复用 wosx55hkl 那个模式:8 块 find→verify)标异常点**给用户报告** ③`compare_gold.py <v2md>` 复验 ④`launchctl remove com.joyzhang.portrait.pipeline` + 停 Monitor。
+- **本批未提交改动(审核过后一起 commit)**:`extract_compare_v2/rebuild/ax_bearing/faithful_v2/canvas_librime/canvas_route`(本 session 攒批:占位符白名单×2/注入闸+emoji开关/竞速归并+摘除修/canvasPass4+邮箱开关`PORTRAIT_EMAIL_FILTER`/删除证据折叠/ax_verify/canvas一体化)+ 更早的 6-30/7-02/7-07 三批。哨兵 9/9、对抗审查 2 真 bug 已修。
+
 ## 待做(优先级)
 
 0. **⚠️ 干净重跑确认整批**:`REVIEW_MODE=det PORTRAIT_LIBRIME_DECODE=1` 重跑 6 天 gold,确认 **44✓ 不回归** → 提交整批。整批 = 6-30 的 ①②③④⑥⑦(submit≥1/is_image_only/SLASH·KC开关/PASTE_MAX/同日去重) + 7-02 的 A/B(input_source 补齐/14B 条件加载/单字孤儿判别)。**预期新增**:gold 天孤儿进未定区(`线`ev1556@6-5;`t·t`ev1061·1062@6-3 因 #3 去重倒置**只会出 1 个 `t`**——这是 bug 不是回归,#3 修好才双双出),成品不变。⚠️ 本批已含 2026-07-07 三修(修1等长窗/修2 \_retyped floor/修4 口3 t1 排序),重跑时留意口3 段 diff(理论上只更对)。观察批(单字/￼)可挑 `5/25,6/01,6/05,6/10,6/18,6/27,6/29`。SLASH 待前端。

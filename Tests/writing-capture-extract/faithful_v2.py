@@ -14,12 +14,44 @@ import rebuild as R
 import extract_compare_v2 as X
 import mlx_constrained as MC
 import ocr3 as C3
+import ax_bearing as AXB          # 承载率判别(canvas_spans);一体化 canvas 判别用
+import canvas_librime as CL       # canvas B 解码 + wrap_llm(共享主程序已加载的 14B)
+import canvas_route as CR         # 一体化 canvas 构建(build_canvas:B+C 内联,不落 fusion 文件)
 from enzh_double_return import double_return_eng, encode_keys   # 双 return 中文IME打英文判别(gmail案)
 from mlx_lm import load, generate
 
 con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
-# DAYS 可由环境变量 PORTRAIT_DAYS 覆盖(逗号分隔),默认原四天;集成跑别天用
-DAYS = os.environ.get('PORTRAIT_DAYS', '2026-05-27,2026-05-28,2026-05-29,2026-06-05').split(',')
+# DAYS:PORTRAIT_DAYS 覆盖(逗号分隔);='all' → 库中全部有击键记录的天(UTC);默认原四天
+_days_env = os.environ.get('PORTRAIT_DAYS')
+if _days_env == 'all':
+    DAYS = [r[0] for r in con.execute(
+        "SELECT DISTINCT strftime('%Y-%m-%d', ts_ms/1000, 'unixepoch') FROM keystroke_log ORDER BY 1")]
+elif _days_env:
+    DAYS = _days_env.split(',')
+else:
+    DAYS = ['2026-05-27', '2026-05-28', '2026-05-29', '2026-06-05']
+# 按天 decode(2026-07-11 一体化,替代「分两批各带一个 env」):<CUTOFF 旧采集需 librime 解拼音,
+# ≥CUTOFF 新采集 AX 直给汉字。PORTRAIT_LIBRIME_DECODE 显式设置=全局强制(gold 复跑);未设=按天自动。
+# 每天独立处理 → 单进程按天切 decode 与「分两批各自 env」逐字等价(每天拿到相同 decode 值)。
+DECODE_CUTOFF = '2026-06-25'
+_DECODE_ENV = os.environ.get('PORTRAIT_LIBRIME_DECODE')
+def decode_for(day):
+    if _DECODE_ENV is not None: return _DECODE_ENV == '1'
+    return day < DECODE_CUTOFF
+EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
+CACHE = os.path.join(EVAL, 'v2cache')   # 分块可恢复(reaper 防丢):每天 Phase1 落盘,重启跳已算天
+FRESH = os.environ.get('PORTRAIT_FRESH') == '1'   # 忽略缓存全重算
+def _daycache_path(day): return os.path.join(CACHE, day + '.json')
+def _daycache_read(day):
+    p = _daycache_path(day)
+    if FRESH or not os.path.exists(p): return None
+    try:
+        d = json.load(open(p)); return d['RAW'], d['DROP'], d['C3FIX'], d['PENDING']
+    except Exception: return None
+def _daycache_write(day, raw, drop, c3fix, pending):
+    os.makedirs(CACHE, exist_ok=True); p = _daycache_path(day)
+    json.dump({'RAW': raw, 'DROP': drop, 'C3FIX': c3fix, 'PENDING': pending},
+              open(p + '.tmp', 'w'), ensure_ascii=False); os.replace(p + '.tmp', p)
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
 def cv(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip()
 
@@ -59,6 +91,23 @@ MASK_CHARS = set('•●○◦∙⋅・⬤⚫⚪🞄＊*※⁕▪▫■□◼◻
 def is_mask(t, n=4):
     c = cv(t).replace(' ', '')
     return len(c) >= n and all(ch in MASK_CHARS or '\ue000' <= ch <= '\uf8ff' for ch in c)
+def is_image_only(t):
+    """独立图占位符:文本只由 U+FFFC(cmd+v 粘贴 / 点选的图、贴纸)组成、无文字内容 → 排除。
+    用户裁定 2026-06-29:**只动独立图**——不剥真消息里的 \ufffc 前缀(ev647 \ufffc\ufffc全自动化…照旧)、
+    也不碰 @提及(AX 拿不到 @名字,先不管)。"""
+    c = re.sub(r'\s', '', cv(t))
+    return bool(c) and set(c) == {'\ufffc'}
+def _retyped(b, t0, t1, txt, floor=0):
+    """本条时间窗内有没有用户「自己敲的键」(≥字数)= 是不是又打了一遍。**只管击键**——
+    「同事件 submit+endValue」共享同一批击键、这里也会返 True,靠**调用处 `evid` 不等**才拦掉;
+    真重发 = 不同事件 且 _retyped;采集副本(无键 re-render)n≈0,丢。用户裁定 2026-06-30。
+    floor=首见记录的 t1(2026-07-07 审计修):re-render 副本紧贴原发送(gap≈0),-1000ms 回扫会把
+    **原消息末秒的真击键**算到副本头上(买个mac/www 双份入册实证)——重打的键必须晚于首见记录结束,
+    窗口起点钳到 floor 之后;真重发(隔秒/分钟再打)键都在自己窗内,不受影响。"""
+    n = con.execute("SELECT COUNT(*) FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
+                    "AND is_backspace=0 AND char IS NOT NULL AND (modifiers&7)=0",
+                    {"b": b, "a": max((t0 or 0) - 1000, (floor or 0) + 1), "c": (t1 or 0) + 500}).fetchone()[0]
+    return n >= max(1, len(cv(txt)))   # ≥1键/字:单字重打(「?」1键)也算真重发;采集副本 n≈0 拦掉
 
 # ---- helpers ----
 def sess_events(ids):
@@ -121,14 +170,29 @@ def double_return_literal(bundle, t0, t1, residue_text):
     字母 + return(把组合区上屏成字面)+ return(发送)= 双 return;第一个回车只上屏不发送。
     残渣记录的击键窗里若有「拉丁 run + <CR><CR>」且该英文词(去空格小写)== 残渣字母 →
     **直接用击键字面替换**(零 LLM,击键 g-m-a-i-l 就是字面)。只命中 ~residue 且精确匹配
-    双 return 的记录 → 天然「不影响其他结果」(纯拼音用选字数字/空格,无双回车,零误抓已验)。"""
+    双 return 的记录 → 天然「不影响其他结果」(纯拼音用选字数字/空格,无双回车,零误抓已验)。
+    两路(与 eng_literals_of 同口径):① 双 return(历史 input_source=NULL,靠双回车指纹);
+    ② input_source(新采集):拉丁 run 全在 keylayout(英文键盘)= 字面,单回车也认。
+    历史数据 input_source=NULL → 路②的 all(keylayout) 恒 False,只走路①,零回归。"""
     letters = re.sub(r'[^a-z]', '', (residue_text or '').lower())
     if len(letters) < 2: return None
-    rows = con.execute("SELECT char, is_backspace FROM keystroke_log WHERE bundle_id=:b "
+    rows = con.execute("SELECT char, is_backspace, input_source FROM keystroke_log WHERE bundle_id=:b "
                        "AND ts_ms BETWEEN :a AND :c AND (modifiers&7)=0 ORDER BY ts_ms",
                        {"b": bundle, "a": (t0 or 0) - 2000, "c": (t1 or 0) + 2000}).fetchall()
-    for w in double_return_eng(encode_keys(rows)):
+    for w in double_return_eng(encode_keys([(c, bs) for c, bs, _ in rows])):  # 路①双 return
         if w.lower() == letters: return w
+    buf = []  # 路②:input_source=keylayout 的拉丁 run(单回车也认),run 内全 keylayout 才算字面
+    for c, bs, isrc in rows:
+        if bs:
+            if buf: buf.pop()
+        elif c and c.isalpha():
+            buf.append((c, bool(isrc and isrc.startswith('com.apple.keylayout'))))
+        else:
+            if buf and all(kl for _, kl in buf) and ''.join(x for x, _ in buf).lower() == letters:
+                return ''.join(x for x, _ in buf)
+            buf = []
+    if buf and all(kl for _, kl in buf) and ''.join(x for x, _ in buf).lower() == letters:
+        return ''.join(x for x, _ in buf)
     return None
 
 def eng_literals_of(bundle, t0, t1):
@@ -170,8 +234,29 @@ def kind_of(t): return "long_form" if len(t) >= 140 else "short_form"
 def rec_md(n, src, kind, app, text): return f"**{n}.** `[{src}/{kind}]` 📍 `{app}`\n\n> " + text.replace("\n", "\n> ") + "\n"
 
 # ===== Phase 1: 重建(14b disambig) =====
-print("=== Phase1: 加载 14b 做 IME 重建 ===", flush=True)
-m14, tok14 = load("mlx-community/Qwen3-14B-4bit")
+# 14B 消费者:AX 路 disambig(仅 decode 天经 decode_run 调)+ referee(仅 REVIEW_MODE!=det)+
+# 一体化 canvas(B 的 OCR 纠错 + C 的 canvas_merge)。三者都不需要 → 跳过加载省 8G 显存,不抢 GPU。
+# 精细化:已缓存的天不需模型;canvas 有固定源(PORTRAIT_CANVAS)或已缓存也不需 → 恢复跑不白加载。
+CANVAS_SRC = os.environ.get('PORTRAIT_CANVAS')       # 显式=用固定源(gold 复跑固定 essay);未设=内联一体化构建
+CANVAS_INLINE = not CANVAS_SRC
+REVIEW_MODE_ENV = os.environ.get('REVIEW_MODE', 'det')
+_CANVAS_CACHE = os.path.join(CACHE, '_canvas.json')
+def _has_canvas():
+    for day in DAYS:
+        (t0,) = con.execute("SELECT strftime('%s', :d)*1000", {"d": day}).fetchone()
+        (t1,) = con.execute("SELECT strftime('%s', :d, '+1 day')*1000", {"d": day}).fetchone()
+        if AXB.canvas_spans(con, int(t0), int(t1)): return True
+    return False
+_pending_days = DAYS if FRESH else [d for d in DAYS if not os.path.exists(_daycache_path(d))]
+_canvas_cached = (not FRESH) and (bool(CANVAS_SRC) or os.path.exists(_CANVAS_CACHE))
+NEED_MODEL = (bool(_pending_days) and (any(decode_for(d) for d in _pending_days) or REVIEW_MODE_ENV != 'det')) \
+    or (CANVAS_INLINE and not _canvas_cached and _has_canvas())
+if NEED_MODEL:
+    print("=== Phase1: 加载 14b(AX 重建 + 一体化 canvas 共享同一模型)===", flush=True)
+    m14, tok14 = load("mlx-community/Qwen3-14B-4bit")
+else:
+    print("=== Phase1: 无 decode 天/无 canvas 需模型 且 REVIEW_MODE=det → 跳过加载 14b ===", flush=True)
+    m14 = tok14 = None
 def disambig(p):
     if p.get('mode') != 'disambig': return None
     top = p['top']; alt = [w for w in p['words'] if w != top]
@@ -291,7 +376,14 @@ LEDGER_MODE = os.environ.get('LEDGER_MODE', 'narrow')  # 2026-06-12 用户裁定
 # narrow=窄射程(双回车包夹+选字数字+无脏退格+秒发≤10s)+入册唯一通道渲染确证,确证不过进丢弃审计不刷未定区;
 # off=2026-06-10 A裁定(全量账本~50%垃圾已废除);gated/raw 留档可切。
 # 击键只做 AX 修复辅助;gated/raw 代码留档可切
+SLASH_GATE = os.environ.get('PORTRAIT_SLASH_GATE', '1') == '1'  # 斜杠命令过滤(全局开关,2026-06-30:app无关,前端可关)
+KC_GATE = os.environ.get('PORTRAIT_KC_GATE', '1') == '1'        # 组级击键gate(kc比例判粘贴);关=改用直接 paste 信号(粘贴政策)判粘贴
 for day in DAYS:
+    cached = _daycache_read(day)
+    if cached is not None:
+        RAW[day], DROP[day], C3FIX[day], PENDING[day] = cached
+        print(f"  {day}: 缓存命中,跳过 Phase1({len(RAW[day])} 条)", flush=True); continue
+    R.DECODE_LIBRIME = decode_for(day)   # 按天切 decode(旧采集 librime 解拼音 / 新采集 AX 直给汉字)
     dayrecs = []; drops = []; c3fix = []
     # 自家分组(2026-06-12:staged 表被外部清空,遗留依赖被迫了断——本来就是移植前必做项):
     # 同 bundle + 时间链(下一事件 started_at 距上一事件 ended_at ≤10min 连桶)。
@@ -398,7 +490,7 @@ for day in DAYS:
                     elif li.get('reason') == 'residue' and li.get('han'): mt = li['han']
                 if mt: PROOF[(ev['id'], fx)] = mt   # 机器选的尾(TOP/14B 都算)→ 待校对
         total = sum(len(t) for _, t, *_ in grp)
-        if total > 20 and kc < total // 4:                          # 组级击键 gate
+        if KC_GATE and total > 20 and kc < total // 4:              # 组级击键 gate(KC_GATE 关=改用直接 paste 信号)
             # 逐条复检(XPC案,2026-06-12:自家分组并桶后大粘贴拖累手打小消息整桶连坐)——
             # gate 触发只定性"桶内有非手打",去留逐条判:条文本对桶 commit 流 cover≥0.5(手打)留。
             kept_g = []
@@ -418,34 +510,43 @@ for day in DAYS:
             grp = kept_g
             if not grp: continue
         kst = ks_full.replace("<CR>", "").replace("<BS>", "").strip()
-        if kst.startswith("/"):                                     # slash gate
+        if SLASH_GATE and kst.startswith("/"):                      # slash gate(全局开关)
             for a, t, s, evid, t0, t1, b in grp:
                 drops.append(("slash gate", a, t, evid, t0, t1, "组击键以/开头(命令输入)"))
             continue
         for app, t, s, evid, t0, t1, b in grp: dayrecs.append((app, t, s, kc, evid, t0, t1, b))
     # dedup_truncated(类4/5a)+ is_residue + 占位符 + 精确去重 —— 每道闸的丢弃都记审计
-    drecs = R.dedup_truncated([(t, s, a) for a, t, s, *_ in dayrecs], X.cover)
-    keepset = set((t, s, a) for t, s, a in drecs)
-    out, seen = [], set()
+    # 传发送时刻 ts 进 dedup:等长条款限 5min 窗(2026-07-07 审计修,stage1/stage2 误杀案)
+    drecs = R.dedup_truncated([(t, s, a, (t1 or t0 or 0)) for a, t, s, kc, evid, t0, t1, b in dayrecs], X.cover)
+    keepset = set((t, s, a) for t, s, a, _ts in drecs)
+    out, seen = [], {}   # seen: 文本 → (首条 evid, 首条 t1)(判真重发 vs 采集副本;t1 给 _retyped 当击键下界)
     for app, t, s, kc, evid, t0, t1, b in dayrecs:
         if (t, s, app) not in keepset:
             drops.append(("dedup_truncated", app, t, evid, t0, t1, "截断态草稿,内容被更长记录覆盖"))
         elif X.is_ph(t):
             drops.append(("占位符", app, t, evid, t0, t1, "known 占位符"))
+        elif is_image_only(t):
+            drops.append(("独立图", app, "(图片/贴纸)", evid, t0, t1, "独立图占位符 U+FFFC,无文字内容"))
         elif is_mask(t):
             # 用户裁定 2026-06-12:≥4掩码字符 → 数据层直接丢(loginwindow实测PUA U+F79A)。
             # 宽枚举掩码集+PUA范围;不用"无字母汉字"一刀切(会误杀(> -)颜文字;假名/谚文/
             # 阿拉伯文也不能当符号——语言判据一律用Unicode属性,不限死码点)
             drops.append(("密码掩码", app, "(内容已过滤)", evid, t0, t1, "掩码字符≥4(密码框)"))
-        elif is_slash_command(t):
+        elif SLASH_GATE and is_slash_command(t):
             drops.append(("slash命令", app, t, evid, t0, t1, "斜杠命令/补全UI(非消息)"))
-        elif t in seen:
-            drops.append(("去重", app, t, evid, t0, t1, "同日重复文本"))
+        elif t in seen and not (evid != seen[t][0] and _retyped(b, t0, t1, t, floor=seen[t][1])):
+            # 同文本:同事件副本(submit+endValue)或无新击键的 re-render → 丢;
+            # 不同事件且用户又敲了一遍 → 真重发,落到 else 保留(最大保留)。
+            # floor=首见 t1:副本窗不回扫进原消息的击键(买个mac/www 双份案,2026-07-07)
+            drops.append(("去重", app, t, evid, t0, t1, "同事件/无重打的采集副本"))
         else:
             # 残渣不丢改标记(用户裁定 2026-06-11:ok/okay/oki 是语气表达,先标记入册);
             # 顺带清旧账 L1:残渣保留后自动进口3,有 OCR 找回真身的机会(记得案当年死在丢弃)
-            seen.add(t)
-            src = "ax_cleaned" + ("" if s else "~draft") + ("~residue" if is_residue(t) else "")
+            seen[t] = (evid, t1)
+            # 单字草稿 = delete 孤儿残渣(rebuild 已按事件内结构判别,只有本事件无 commit/产出的孤儿才到这里)
+            # → 标 ~residue 进未定区;is_send=True 的单字发送(6/额/哈)不标,是真消息。
+            lone_char = (not s) and len(cv(t)) == 1
+            src = "ax_cleaned" + ("" if s else "~draft") + ("~residue" if (is_residue(t) or lone_char) else "")
             out.append((app, t, kc, evid, t0, t1, src, b))
     # 残渣副本去重(jeff chang 案,2026-06-11):~residue 的字母串与 ±10s 同bundle 邻条的
     # 拼音平铺全等(多音字按词库全集回溯)→ 过期预上屏快照,真身胜,丢给审计。
@@ -497,6 +598,34 @@ for day in DAYS:
                 if fin is not None:
                     drops.append(("中间态草稿", a_, t_, evid_, t0_, t1_,
                                   f"与后续真发送共享前缀(中段被改写):{cv(fin[1])[:30]}")); continue
+            # 删除证据折叠(2026-07-10 用户指认「我有一个app目前,是专门记录」案:ev876 明明记着
+            # delete'，是专门记录',却因共享前缀 9<10 差 1 字不折——编辑历史是硬证据,长度只是启发式):
+            # 草稿 D=P+S,后续非草稿记录以 P 开头(P≥4),S 的删除在两者之间的 edit_log 里**原文有案**
+            # (单条 delete 文本包含 norm(S),不拼碎片防散字符巧合)→ 同一次写作的中间态,折叠。
+            fin2 = None
+            for r2 in out:
+                if r2 is rec or r2[7] != b_ or '~draft' in r2[6]: continue
+                rt = (r2[5] or r2[4] or 0)
+                if not ((t1_ or t0_ or 0) - 1000 <= rt <= (t1_ or t0_ or 0) + 15 * 60 * 1000): continue
+                rn = norm_t(r2[1])
+                k = 0
+                while k < min(len(tn0), len(rn)) and tn0[k] == rn[k]: k += 1
+                if k < 4 or k >= len(tn0): continue   # 前缀太短没意义;D 是纯前缀归 dedup_truncated 管
+                S = tn0[k:]
+                if len(S) < 2: continue
+                for (elog2,) in con.execute(
+                        "SELECT edit_log FROM typing_events WHERE bundle_id=:b AND started_at>=:a AND started_at<=:c",
+                        {"b": b_, "a": (t0_ or t1_ or 0) - 1000, "c": rt + 1000}):
+                    try: arr2 = json.loads(elog2 or '[]')
+                    except Exception: continue
+                    # 收紧:删除文本 norm **以 S 结尾**(删的就是 A 相对 B 多出的尾),非 S 作中间子串
+                    # (防两条真独立近消息共享前缀+A尾恰是某无关删除的中段子串→误折;宁缺毋错)
+                    if any(x.get('kind') == 'delete' and norm_t(x.get('text') or '').endswith(S) for x in arr2):
+                        fin2 = r2; break
+                if fin2 is not None: break
+            if fin2 is not None:
+                drops.append(("中间态草稿", a_, t_, evid_, t0_, t1_,
+                              f"删除证据折叠(S的删除edit_log有案):{cv(fin2[1])[:30]}")); continue
         # 渐进 IME 草稿态折叠(2026-06-29:6/26 Safari 表单逐字打「这样的对吗?」漏的那族):
         # 上面的块只折叠进**真发送**;未发送草稿的逐字进度态(zhe y/这样d/这样的dui ma/这样的对吗?)
         # 全是 ~draft,无真发送可锚 → 这里折叠进**更完整的同 bundle 草稿**。跨拼音↔汉字态用 _py_prefix
@@ -570,14 +699,17 @@ for day in DAYS:
             # ('之类的'/'还可以'=3✓);不足=半截碎片,静默掉(渲染确证过了也不入,宁缺勿碎)
             if LEDGER_MODE == 'narrow' and sum(1 for ch in ft if not ch.isascii()) < 3:
                 continue
-            seen.add(ft)
+            seen[ft] = (None, None)
             if LEDGER_MODE != 'off':
                 out.append((a, ft, len(s), None, st0, st1, "keystroke_recovered", b))
     # ===== Phase1.5 口3:重建不确定的(残渣未清)drop 到此 =====
     # 此时全天消息已就位 → 有**下文**了(两遍式的时序红利)。
     # ① 确定性:OCR 锚定 + 击键 <CR> 段验证(零幻觉);② 还没修上 → 14B 双向语境重试(前文+后文)。
-    recs_sorted = sorted(out, key=lambda r: (r[4] or r[5] or 0))
-    timeline = [(r[4] or r[5], r[1]) for r in recs_sorted]
+    # 按发送时刻 t1 排(2026-07-07 审计修,原按 t0=开始打字):交错发送(A 先开打后发、B 后开打先发)
+    # 时 t0 序会让 prev 锚锚到「发送晚于本条、尚未上屏」的消息 → 前条锚 OCR 找不存在的文本;
+    # 展示层同族 bug 已按 t1 修过(bovhltmkf),口3 内部跟齐。timeline 语境时间同步换 t1。
+    recs_sorted = sorted(out, key=lambda r: (r[5] or r[4] or 0))
+    timeline = [(r[5] or r[4], r[1]) for r in recs_sorted]
     out2 = []
     for i, rec in enumerate(recs_sorted):
         a, t, kc2, evid, t0, t1, src, b = rec
@@ -630,8 +762,12 @@ for day in DAYS:
     # 2 轮不过 → 未定区(文档展示,不入成品,绝不静默丢)。
     # 不对称:keystroke_recovered 须 PASS 才入册(B门控,治22条重复污染);ax 路 REJECT 才动(默认信 AX+击键)。
     pend = []; out3 = []
+    racing_kill = set()   # 竞速尾巴归并:被账本全版顶替的 AX 截断版下标(每天还能pei ni liao t 案)
     for i, rec in enumerate(out2):
         a, t, kc2, evid, t0, t1, src_, b = rec
+        if i in racing_kill:
+            drops.append(("竞速归并", a, t, evid, t0, t1, "AX末尾回车竞速截断,同消息账本全版已入册"))
+            continue
         u = None
         if evid:
             ur = con.execute("SELECT url FROM typing_events WHERE id=:i", {"i": evid}).fetchone()
@@ -654,6 +790,20 @@ for day in DAYS:
                 else:
                     pend.append((a, t, src_, evid, t0, "账本副本(拼音空间重复)", cv(dup)[:80]))
                 continue
+            # 竞速尾巴归并(每天还能pei ni liao t 案,2026-07-10 用户指认):AX 末尾回车竞速把 IME
+            # 未转完的组合区记成文本(汉字前缀+拉丁残尾),账本从击键恢复出全熟版——同一条消息两副本。
+            # seq_in 接不住(汉字单元 'pei' 对散字母 p,e,i 集合不相交),用 _py_prefix 字母级行走。
+            # 签名收窄防误伤:非账本近邻(±10s 同 bundle)必须**带拉丁残尾(≥2字母)**才进射程
+            # (「你好/你好吗」真实连发无拉丁尾,不碰);方向=账本全版过下方渲染确证才顶替(铁律:
+            # 账本入册唯一通道);确证不过 → 竞速版原样留(残渣可见 > 丢)。
+            rtwin = None
+            for j, r2 in enumerate(out2):
+                if r2 is rec or r2[6].startswith("keystroke_recovered") or r2[7] != b: continue
+                if abs((r2[5] or r2[4] or 0) - (t1 or t0 or 0)) > 10000: continue
+                mtail = re.search(r'[A-Za-z][A-Za-z ]*$', cv(r2[1]))
+                if not mtail or len(re.sub(r'[^A-Za-z]', '', mtail.group())) < 2: continue
+                if _py_prefix(r2[1], t):
+                    rtwin = j; break
             prev = (next((r3[1] for r3 in reversed(out3) if r3[7] == b), None)
                     or next((out2[j][1] for j in range(i - 1, -1, -1) if out2[j][7] == b), None))
             seg = C3.keys_segment(b, t1 or t0 or 0)
@@ -664,6 +814,14 @@ for day in DAYS:
                 if tn0 and len(tn0) >= 2 and tn0 in norm_t(sn):
                     hit = True; break
             if hit:
+                if rtwin is not None:
+                    if rtwin > i:
+                        racing_kill.add(rtwin)   # 竞速版还没处理到 → 前瞻跳过(排序后账本常在前)
+                    else:
+                        xr = out2[rtwin]         # 竞速版已入 out3 → 按 evid+t0+bundle 摘(**非文本**:
+                        # AX 竞速残版=汉前缀+拉丁尾=residue,常走口3/det 改字,out3 里文本已变,文本相等会失配漏摘→重复)
+                        out3[:] = [r3 for r3 in out3 if not (r3[3] == xr[3] and r3[4] == xr[4] and r3[7] == xr[7])]
+                        drops.append(("竞速归并", xr[0], xr[1], xr[3], xr[4], xr[5], "AX末尾回车竞速截断,同消息账本全版已入册"))
                 out3.append(rec)
             elif LEDGER_MODE == 'narrow':
                 drops.append(("账本-未确证", a, t, None, t0, t1, "渲染确证未过(窄账本:不入未定区)"))
@@ -756,10 +914,30 @@ for day in DAYS:
         clean_snip = re.sub(r'\s+', ' ', used_snip or '').replace('`', chr(180))[:120]   # 文档转义(审查修)
         pend.append((a, t, src_, evid, t0, (('OCR示:' + hint) if hint else v), clean_snip))
     RAW[day] = out3; DROP[day] = drops; C3FIX[day] = list(c3fix); PENDING[day] = pend
+    _daycache_write(day, out3, drops, list(c3fix), pend)   # 落盘,reaper 杀了重启跳过本天
     print(f"  {day}: {len(out3)} 条(审核未定 {len(pend)};14b disambig 累计 {R.DISAMBIG_CALLS[0]})", flush=True)
-EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eval")   # 数据进项目,不用 /tmp
 os.makedirs(EVAL, exist_ok=True)
 json.dump(RAW, open(os.path.join(EVAL, "v2_rebuilt.json"), "w"), ensure_ascii=False)
+# ===== Phase 1.6:一体化 canvas(B/C 内联,共享上面已加载的 14B,不落 fusion 中间文件)=====
+# 承载率判别 canvas_spans → B 短档 librime+OCR纠错+ax_verify;C 长档 canvas_merge。CV_INLINE 结构
+# 同 canvas_route_fusion.json;显式 PORTRAIT_CANVAS(gold 用固定 essay 源)→ 不内联,下方 output 读固定源。
+creport, cnoanchor = [], []
+if CANVAS_INLINE:
+    if not FRESH and os.path.exists(_CANVAS_CACHE):
+        _cc = json.load(open(_CANVAS_CACHE))
+        CV_INLINE = _cc['CV']; creport = _cc['creport']; cnoanchor = _cc['cnoanchor']
+        print("canvas: 缓存命中,跳过重建", flush=True)
+    else:
+        _llm = CL.wrap_llm(m14, tok14) if m14 is not None else None   # 共享主程序 14B,不重复加载
+        CV_INLINE, creport, cnoanchor = CR.build_canvas(con, DAYS, _llm)
+        os.makedirs(CACHE, exist_ok=True)
+        json.dump({'CV': CV_INLINE, 'creport': creport, 'cnoanchor': cnoanchor},
+                  open(_CANVAS_CACHE + '.tmp', 'w'), ensure_ascii=False); os.replace(_CANVAS_CACHE + '.tmp', _CANVAS_CACHE)
+    _nb = sum(1 for v in CV_INLINE.values() for x in v if x['source'].startswith('canvas_B'))
+    _ncc = sum(1 for v in CV_INLINE.values() for x in v if x['source'] == 'canvas_C')
+    print(f"canvas 一体化 · B {_nb} 段 · C {_ncc} 篇 · 无锚点 C {len(cnoanchor)}", flush=True)
+else:
+    CV_INLINE = {}
 del m14, tok14; gc.collect()
 print(f"Phase1 完成,14b disambig 共调用 {R.DISAMBIG_CALLS[0]} 次", flush=True)
 
@@ -771,11 +949,12 @@ PW_MASK = re.compile(r'[•●○◦＊*]{6}')
 # 该丢的是'整条就是URL'的地址栏草稿,链接作为正文一部分保留)
 URL_FULL = re.compile(r'(https?://\S+|localhost:\d\S*|[\w.-]+\.(com|org|net|io|ai|dev|cn|me|co|app|us|edu)(/\S*)?)', re.I)
 EMAIL_PAT = re.compile(r'\S+@\S+\.\w+')   # 邮箱=PII,任意位置即扔(用户裁定;zzhang@…k12.nc.us)
+EMAIL_FILTER = os.environ.get('PORTRAIT_EMAIL_FILTER', '1') == '1'   # 邮箱过滤开关(2026-07-11 用户:前端可关)
 def pass4_fixed(recs):
     kept, dropped = [], []
     for r in recs:
         t = (r[1] or '').strip()
-        if t.lower().endswith('.com') or URL_FULL.fullmatch(t) or EMAIL_PAT.search(t):
+        if t.lower().endswith('.com') or URL_FULL.fullmatch(t) or (EMAIL_FILTER and EMAIL_PAT.search(t)):
             dropped.append((r, "网址/邮箱")); continue
         if PW_MASK.search(t):
             dropped.append((r, "密码(连续≥6掩码符号)")); continue
@@ -791,21 +970,54 @@ for day in DAYS:
 import datetime
 def fmt_ts(ms):
     return datetime.datetime.fromtimestamp(ms / 1000).strftime('%m-%d %H:%M:%S') if ms else '?'
-# canvas 源可配:PORTRAIT_CANVAS 指本地判别+canvas_merge 产出(集成路),默认云端预存
-_CANVAS_SRC = os.environ.get('PORTRAIT_CANVAS', os.path.join(EVAL, "canvas_cloud.json"))
-CV = json.load(open(_CANVAS_SRC)) if os.path.exists(_CANVAS_SRC) else {}
-nd = ["# 新 pipeline·成品(阶段0 集成:librime + 14b disambig 重建)\n",
-      "**全本地 IME 重建**:event_sends_with_ts(回车检测真发送)+ rebuild(librime 确定性打底 + 14b 同音消歧 + 残渣/击键调和)",
-      "+ 组级击键 gate + slash gate + **dedup_truncated**(类4/5a 去截断态)+ is_residue + **8b Pass4**。Canvas=云端。\n",
-      "⚠️ 已知小瑕疵(待修):的/得(睡得 vs 睡的)、librime 词库无的 slang(卖个惨)、H/I 截断尾巴、canvas 跨app尾巴。\n",
-      f"天数:{', '.join(DAYS)}\n", "---\n"]
+# canvas 源(2026-07-11 一体化):默认用上方内联构建的 CV_INLINE(不落 fusion 中间文件);
+# PORTRAIT_CANVAS 显式指定固定源(gold 复跑固定 essay)则读之。
+if CANVAS_SRC and os.path.exists(CANVAS_SRC):
+    CV = json.load(open(CANVAS_SRC))
+else:
+    CV = CV_INLINE
+_totp = sum(len(FINAL[d]) for d in DAYS)
+_cbn = sum(1 for v in CV.values() for x in v if x['source'].startswith('canvas_B'))
+_ccn = sum(1 for v in CV.values() for x in v if x['source'] == 'canvas_C')
+nd = ["# 生产接入前 · 最终审核大跑 v2(一体化 pipeline · 全量真实数据)\n",
+      "> **一体化主程序** `faithful_v2.py`(一条命令跑完):承载率判别 → 承载段 AX 重建"
+      "(typing_events+keystroke_log) + 0承载段 canvas(B librime+OCR纠错+ax_verify / C canvas_merge)"
+      " → 统一 Pass4 → 本文档。canvas 内联构建(不落 fusion 中间文件),与 AX 路共享同一 14B。零人工干预。\n",
+      "## 组成(真实生产流程)\n",
+      "- **AX 路**:`event_sends_with_ts`(回车检测真发送)+ rebuild(librime 确定性打底 + 14b 同音消歧 + "
+      "残渣/击键调和)+ 组级击键 gate + slash gate + dedup_truncated + is_residue + 注入闸/竞速归并/删除证据折叠。",
+      "- **canvas 路**:`ax_bearing.canvas_spans` 承载率切 0承载会话 → B 短档(≤120键)librime 解码 + 14B OCR "
+      "纠错 + ax_verify;C 长档(>120键)canvas_merge 按文档 OCR 层级归并。A 闸剔 AX 已收的头碎片。",
+      "- **按天 decode**:<2026-06-25 librime 解拼音(旧采集)、≥6/25 AX 直给汉字(新采集);单进程按天自动切。",
+      "- **Pass4**:只滤 网址/邮箱(`PORTRAIT_EMAIL_FILTER` 可关)+ 密码掩码;canvas 段同过 Pass4(整段=PII 才丢)。\n",
+      f"## 总量:成品 **{_totp}** 条(canvas_B {_cbn} + canvas_C {_ccn} + AX 其余)· 天数 {len(DAYS)}"
+      f"({DAYS[0]}..{DAYS[-1]})\n"]
+if creport or cnoanchor:
+    nd.append("## canvas 明细\n")
+    for a, did, app, nf, nc in creport:
+        nd.append(f"- `[C {a}]` {app} · `{did[:16]}` · {nf}帧 → {nc}字")
+    for n in cnoanchor:
+        nd.append(f"- `[C-DROP]` {n.get('day', '?')} {n['app']} · {n.get('nkeys', 0)}键 · {n['reason']}")
+nd.append("\n---\n")
 for day in DAYS:
     # 按发送时刻(t1=回车那刻)排序,匹配 Discord/IM 时间线——用户对着 app 按时间逐条核对。
     # 修前按 t0(开始打字)排:边打边想的长消息会顶到前面错位(ev461「那比如说你就很重要」
     # 打字 12:28:58、发送 12:31:24,中间先发了「那你真出生」「重要是相对的」,t0 排把它顶到第2位)。
     # 纯展示层重排,不影响重建/去重/口3。canvas(整篇 essay 重建)非聊天流,仍附末尾。
     day_final = sorted(FINAL[day], key=lambda r: (r[5] or r[4] or 0))
-    out = [(rec[6], rec[1], rec[0]) for rec in day_final] + [(r["source"], r["text"], r["app"]) for r in CV.get(day, [])]
+    # canvas 段过 Pass4 同款闸(2026-07-10 用户裁定「canvas也进pass4」:riqujoyzhang14@gmail.com
+    # 案——canvas 直通拼接曾旁路邮箱/掩码/URL 禁令;拼接污染不拆,成品级有问题整条丢)。
+    cvday = []
+    for r in CV.get(day, []):
+        t_ = (r["text"] or '').strip()
+        # canvas(2026-07-11 用户裁定):**整段就是**邮箱/URL=PII → 丢;邮箱+其他内容(长文正文引用)→ 保留
+        # (与 AX 路"任意位置即扔"分叉:canvas 是拼接长文,一个邮箱不该连坐整篇 essay)。fullmatch 语义。
+        if URL_FULL.fullmatch(t_) or (EMAIL_FILTER and EMAIL_PAT.fullmatch(t_)):
+            DISCARDED[day].append(((r["app"], r["text"], None, None, None, None, r["source"], None), "纯网址/邮箱(canvas)")); continue
+        if PW_MASK.search(t_) or is_mask(t_):
+            DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "密码掩码(canvas)")); continue
+        cvday.append(r)
+    out = [(rec[6], rec[1], rec[0]) for rec in day_final] + [(r["source"], r["text"], r["app"]) for r in cvday]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
     # 口3 修正审计:改了什么、怎么改的(OCR锚定/双向语境)
