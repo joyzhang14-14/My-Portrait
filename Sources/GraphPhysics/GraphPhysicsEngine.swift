@@ -727,13 +727,16 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         settleTeamPrev = settleTeamIdx.map { pos[Int($0)] }
     }
 
-    /// 按被拖团「本 mandatory tick 的残余速度」算额外快放 tick 数(0…3,叠加
-    /// 那一个 mandatory tick = 总 1…4×)。冷尾巴 belt 匀速滑 ~1.4pt/tick →
-    /// 顶格 3;临近静止(残余 < ~0.45pt/tick,接近 parkNetMove/窗)→ 收回 0
-    /// 自然减速(ease-out)。0.3pt/tick 死区起步,每 0.3 提一档。
+    /// 按被拖团「本 mandatory tick 的残余速度」算额外快放 tick 数(0…4,叠加
+    /// 那一个 mandatory tick = 总 1…5×)。冷尾巴 belt 匀速滑 ~1.4pt/tick;
+    /// 临近静止(残余 < ~0.45pt/tick,接近 parkNetMove/窗)→ 收回 0 自然减速
+    /// (ease-out)。0.3pt/tick 死区起步,每 0.3 提一档。
+    /// 上限 4(总 5×,07-11 用户"激进一点、多加一段档"):残余 ≥1.5pt/tick
+    /// (移动最快=距离最远的陨石)再多快放一档。上限只影响长尾归位速度,
+    /// 快放动力学中性不改落点。
     private func extraSettleTicks(residualPerTick r: Float) -> Int {
         let k = Int((r - 0.3) / 0.3)
-        return max(0, min(3, k))
+        return max(0, min(4, k))
     }
 
     private func tick() {
