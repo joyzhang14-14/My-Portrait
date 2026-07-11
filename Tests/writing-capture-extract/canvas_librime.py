@@ -264,6 +264,27 @@ def make_llm(model='mlx-community/Qwen3-14B-4bit'):
     return wrap_llm(m, tok)
 
 
+def _ocr_grounded(out, ev, min_bad=3):
+    """口3 精神(2026-07-11 用户提议):14B 输出的字必须真在 OCR 证据里出现过——防它凭空造字幻觉。
+    normalize+小写后,一个字若与左邻或右邻组成的 2-gram 出现在 OCR 里就算 grounded;**连续 ≥min_bad
+    个字都不 grounded** → 判幻觉未 grounded(破人体热爱体重:7 字全不在 OCR「Portrait中的」里 → 拒)。
+    单字同音错字(来/了)run=1 拦不住(留给确定性版/Stage2);无 OCR 证据 → 不由本闸判(返 True)。"""
+    evt = re.sub(r'\s', '', ''.join(ev or [])).lower()
+    o = re.sub(r'\s', '', (out or '')).lower()
+    if not evt or len(o) < min_bad:
+        return True
+    run = 0
+    for i in range(len(o)):
+        g = (i > 0 and o[i - 1:i + 1] in evt) or (i + 1 < len(o) and o[i:i + 2] in evt)
+        if g:
+            run = 0
+        else:
+            run += 1
+            if run >= min_bad:
+                return False
+    return True
+
+
 def ocr_correct_llm(con, sp, librime_text, llm=None):
     """LLM 判别 canvas 短输入的最终干净内容:给 librime 候选 + OCR 锚定行,本地 LLM 输出最终内容
     (用 OCR 纠同音错字、去掉中途打了又删/界面噪声)。
@@ -310,6 +331,12 @@ def ocr_correct_llm(con, sp, librime_text, llm=None):
     letters = _walk_letters(R.keys_in_window(con, sp['bundle'], sp['t0'], sp['t1']))
     if letters and not _keys_cover_text(letters, out):
         print(f"  [B ocr↯] {sp['bundle'].rsplit('.',1)[-1]} 拒非击键支持的OCR还原 {out[:30]!r}")
+        return librime_text
+    # OCR-grounding 闸(2026-07-11 用户提议,口3 精神):14B 输出的字必须真在 OCR 证据里出现过,
+    # 拦它凭空造字(破人体热爱体重的:OCR 里根本没有 → 拒,退回 librime 的正解 Portrait中的)。
+    # 与击键闸互补:击键闸拦「你没打的屏幕文本」,本闸拦「14B 编的、OCR 里没有的字」。
+    if not _ocr_grounded(out, ev):
+        print(f"  [B ocr⚠] {sp['bundle'].rsplit('.',1)[-1]} 拒 OCR 里没有的凭空还原 {out[:30]!r}")
         return librime_text
     return out
 
