@@ -222,6 +222,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var shadowInFlight = false
     private var shadowReady = false
     private var shadowResult: [SIMD2<Float>] = []
+    /// ready 结果对应的拖拽克隆位(非预热任务为 nil)。
+    /// 与 shadowResult 同由 shadowLock 保护,不与在途任务的位置混用。
+    private var shadowReadyClonePos: SIMD2<Float>? = nil
     /// 拖拽预热(07-08 用户"延迟优化到极致"):拖拽中每隔一段按"假设
     /// 此刻松手"克隆预算;松手位置与最近预算克隆位够近 → 结果现成,
     /// 零延迟直飞。以下三个只在物理线程读写(无锁)。
@@ -576,11 +579,27 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 // 串行化的忙拒杀在飞+下tick重生让"刚出炉克隆"更常假命中 →
                 // 频发]。静置时克隆假设成立,命中零延迟照旧;在动就 MISS
                 // 重算,代价仅 3~8 tick)→ 结果现成/在途,不重建;否则重建
-                if let cp = shadowClonePosPending,
-                   simd_length(cp - lastDragPos) < 60,
-                   dragMoveEma >= 0, dragMoveEma < 1.5 {
-                    // 命中:结果 ready 则下 tick 即消费;在途则等它几 tick
-                } else {
+                let releaseIsStill = dragMoveEma >= 0 && dragMoveEma < 1.5
+                shadowLock.lock()
+                let readyHit = releaseIsStill && shadowReady
+                    && shadowReadyClonePos.map {
+                        simd_length($0 - lastDragPos) < 60
+                    } == true
+                let pendingHit = releaseIsStill && !readyHit && shadowInFlight
+                    && shadowClonePosPending.map {
+                        simd_length($0 - lastDragPos) < 60
+                    } == true
+                if pendingHit {
+                    // 旧 ready 与当前在途克隆不是同一位置;丢旧结果,
+                    // 等已命中松手位置的在途结果交卷。
+                    shadowReady = false
+                    shadowReadyClonePos = nil
+                } else if readyHit, shadowInFlight {
+                    // 最近完成结果已够近,直接用;废弃更新但还在跑的任务。
+                    shadowGen &+= 1
+                }
+                shadowLock.unlock()
+                if !readyHit && !pendingHit {
                     beltPredDirty = true
                 }
                 // 克隆位一次性使用(07-11):本次松手评完 HIT/MISS 即作废。
@@ -663,7 +682,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 冷尾巴(alpha≤0.02)残余缩放快放。与上面高温子步用 alpha 阈值互斥
             // (热段>0.02 走高温子步,冷段≤0.02 走这里,无重叠无双跑,alpha 跨
             // 0.02 干净交接)。仅松手 episode 内、团未静时生效。
-            if quietFlag {
+            if quietFlag && shadowDone {
                 // 出口①:团准静止 → 回落 1×,让 alpha 倒计时 + brake 缓停自然
                 // ease-out(保留柔和收尾)。
                 releaseSettleEpisode = false
@@ -916,7 +935,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     shadowLock.lock()
                     let ok = shadowReady
                     let res = shadowResult
-                    if ok { shadowReady = false }
+                    if ok {
+                        shadowReady = false
+                        shadowReadyClonePos = nil
+                    }
                     shadowLock.unlock()
                     if ok, res.count == nh {
                         beltPredPos = res
@@ -943,6 +965,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                                 + GraphConstants.ringPredMargin
                         }
                         shadowDone = true
+                        // 等影子时的旧静止结论已失效:新目标刚交付,
+                        // 不清会在同一帧提前结束远距离快放 episode。
+                        quietFlag = false
                         beltLockTick = tickCount
                     }
                 }
@@ -962,6 +987,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                !beltRayCorrectedToActual {
                 beltPredPos = beltTmpNow
                 beltRayCorrectedToActual = true
+                // 校正刚改变陨石目标,旧静止窗不能结束快放。
+                quietFlag = false
             }
             if allStatic || alpha < GraphConstants.alphaMin {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
@@ -1191,11 +1218,19 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltPredPos = hubIndices.map { pos[Int($0)] }
         shadowLock.lock()
         if shadowInFlight {
+            if releasedSim >= 0 {
+                // 拖拽预热不再杀掉正在收尾的上一发。让它先交一份
+                // 可用结果,下一 tick 再补算最新位置;持续拖动时缓存
+                // 不再被反复取消到永远为空。
+                shadowLock.unlock()
+                return false
+            }
             // 废弃正在跑的旧位置；任务会在 warmup 循环里看到 generation
             // 变化并尽快退出。调用方保留 dirty/距离条件，下一 tick 只补算
             // 最新状态，不为中间每个鼠标位置各开一个并发任务。
             shadowGen &+= 1
             shadowReady = false
+            shadowReadyClonePos = nil
             shadowClonePosPending = nil   // 旧克隆已失效，松手时必须重算
             shadowLock.unlock()
             shadowDone = false
@@ -1204,7 +1239,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         shadowInFlight = true
         shadowGen &+= 1
         let myGen = shadowGen
-        shadowReady = false
+        if releasedSim < 0 {
+            shadowReady = false
+            shadowReadyClonePos = nil
+        }
         shadowLock.unlock()
         shadowDone = false
 
@@ -1214,7 +1252,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         if releasedSim >= 0 {
             sh.vel[releasedSim] = .zero   // 预热:模拟"此刻静置松手"
         }
-        shadowClonePosPending = releasedSim >= 0 ? pos[releasedSim] : nil
+        let clonePos: SIMD2<Float>? = releasedSim >= 0 ? pos[releasedSim] : nil
+        shadowClonePosPending = clonePos
         sh.alpha = alpha
         sh.alphaTarget = 0
         sh.beltForming = beltForming
@@ -1255,11 +1294,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 }
                 sh.tick()
                 steps += 1
-                // 交卷判据 = 冷透+缓停完。quietFlag 只表示准静止,
-                // 之后 brake 阶段 hub 仍会移动;必须跑到 0 才能把影子终点
-                // 当作真实的主球→folder 射线端点。影子陨石已冻结,
-                // 不会因等全场陨石而拖长;shadowTickCap 仍是病态兜底。
-                if sh.alpha < GraphConstants.alphaMin && sh.brake == 0 {
+                // 拖拽预热为了「松手即有」在准静止即交付;其几度残差
+                // 由主引擎的真实稳定窗一次校正。开局/松手 MISS 的正式
+                // 任务仍等 brake == 0,保持完整终点精度。
+                let settled = releasedSim >= 0 ? sh.quietFlag : sh.brake == 0
+                if sh.alpha < GraphConstants.alphaMin && settled {
                     break
                 }
             }
@@ -1269,6 +1308,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             if eng.shadowGen == myGen {
                 eng.shadowResult = result
                 eng.shadowReady = true
+                eng.shadowReadyClonePos = clonePos
             }
             eng.shadowInFlight = false
             eng.shadowLock.unlock()
