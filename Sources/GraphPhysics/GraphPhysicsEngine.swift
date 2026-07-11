@@ -116,6 +116,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var beltPredSegs: [[(Float, Float)]] = []
     /// 影子需重建标记(07-08 影子引擎:explode/数据刷新/松手边沿置位)。
     private var beltPredDirty = true
+    /// 松手后影子终点已用首个真实 hub 稳定窗校正过。
+    /// 只校正一次,避免陨石弧每 tick 追着 folder 慢爬漂移。
+    private var beltRayCorrectedToActual = false
     /// 影子**当前** hub 位置(每真实 tick 从影子刷新;快进领先真实
     /// 布局,影子收敛后 = 终局)—— 动 hub 的挡板"计划位"。
     private var beltPredPos: [SIMD2<Float>] = []
@@ -437,6 +440,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 影子按新种子重建预演终局;环半径/环心一并重算(一次算死)
         beltForming = true
         beltPredDirty = true
+        beltRayCorrectedToActual = false
         ringDirty = true
         releaseSettleEpisode = false   // 出口③:重炸开清 latch(开局路径永不快放)
         // 清旧环(07-09 出场偏差修):切走再切回复用引擎走这条路,若不清,
@@ -517,6 +521,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         nodeBelt = scene.nodes.map { $0.beltTier != nil }
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
+        beltRayCorrectedToActual = false
         shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 旧影子任务作废
         ringDirty = true   // 数据变了 → 环半径按新影子终局重算
         hubPrev = []   // 帧携带参考失效,下 tick 重建
@@ -561,6 +566,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 // 松手后」:开局 explode 不经此边沿)。锁定被拖那一团成员,供
                 // 冷尾巴残余测量。
                 releaseSettleEpisode = true
+                beltRayCorrectedToActual = false
                 buildSettleTeam()
                 // 松手边沿:预热命中判定 —— 拖拽中已按"假设此刻松手"
                 // 预算过,最近预算的克隆位与松手位置够近(<60pt)**且松手前
@@ -945,6 +951,16 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 挡板计划位与开场钉环(开场在爆炸掩护里,不可见)。拖动中
             // beltPass 早退,"拖动整环不变"。
             let allStatic = hubStatic.count == nh && !hubStatic.contains(false)
+            // 影子为了性能冻结陨石,而真实场景的陨石会经叶子碰撞
+            // 间接改变 hub 终点;少数布局的射线因此可偏 ~15°。hub
+            // 首次进入稳定窗时用真实位置校正一次,之后仍锁定,
+            // 在压低终态偏角的同时不恢复「每 tick 追 folder 慢滑」。
+            if !beltForming, shadowDone, allStatic,
+               !beltRayCorrectedToActual {
+                beltPredPos = beltTmpNow
+                beltRayCorrectedToActual = true
+                beltLockTick = tickCount
+            }
             if allStatic || alpha < GraphConstants.alphaMin {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
                 if !ringCovered(cs, rs) {
