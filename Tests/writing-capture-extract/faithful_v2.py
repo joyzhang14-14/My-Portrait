@@ -954,6 +954,7 @@ EMAIL_FILTER = os.environ.get('PORTRAIT_EMAIL_FILTER', '1') == '1'   # 邮箱过
 # (数字/空格/-/()/+ 组成 且 ≥10 位真数字——手机号10-11位;≥10 排掉8位日期 2026-07-11 误杀)。
 # 含文字的正文里带个号码不连坐(与 URL/邮箱 canvas 同口径,最大保留)。
 PHONE_FULL = re.compile(r'[\d\s\-()+]{7,}')
+PHONE_FILTER = os.environ.get('PORTRAIT_PHONE_FILTER', '1') == '1'   # 号码过滤开关(2026-07-11 用户:前端可关)
 def is_phone(t):
     t = (t or '').strip()
     return bool(PHONE_FULL.fullmatch(t)) and len(re.sub(r'\D', '', t)) >= 10
@@ -963,8 +964,8 @@ def pass4_fixed(recs):
         t = (r[1] or '').strip()
         if t.lower().endswith('.com') or URL_FULL.fullmatch(t) or (EMAIL_FILTER and EMAIL_PAT.search(t)):
             dropped.append((r, "网址/邮箱")); continue
-        if is_phone(t):
-            dropped.append((r, "号码(整段≥7位数字,PII)")); continue
+        if PHONE_FILTER and is_phone(t):
+            dropped.append((r, "号码(整段≥10位数字,PII)")); continue
         if PW_MASK.search(t):
             dropped.append((r, "密码(连续≥6掩码符号)")); continue
         kept.append(r)
@@ -1034,7 +1035,7 @@ for day in DAYS:
         # (与 AX 路"任意位置即扔"分叉:canvas 是拼接长文,一个邮箱不该连坐整篇 essay)。fullmatch 语义。
         if URL_FULL.fullmatch(t_) or (EMAIL_FILTER and EMAIL_PAT.fullmatch(t_)):
             DISCARDED[day].append(((r["app"], r["text"], None, None, None, None, r["source"], None), "纯网址/邮箱(canvas)")); continue
-        if is_phone(t_):   # 号码 PII(Fix C):整段就是号码 → 丢(canvas 表单字段也采到)
+        if PHONE_FILTER and is_phone(t_):   # 号码 PII(Fix C):整段就是号码 → 丢(canvas 表单字段也采到)
             DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "号码PII(canvas)")); continue
         if PW_MASK.search(t_) or is_mask(t_):
             DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "密码掩码(canvas)")); continue

@@ -120,10 +120,11 @@ def _keys_walk_text(keys_letters, text):
 
 def _keys_cover_text(keys_letters, text):
     """text 的拼音能否作为**子序列**在 keys_letters 里按序找到(键可跳过多余字母=打了又删的内容)。
-    用于 gate ocr_correct 的 14B 输出——同音纠错(拼音一致)和删字(键多于文)都放行,但凭空替换成
-    击键不支持的屏幕文字(网页/AI/通知)拒。**每个汉字必须消费其某单元的全拼**(不用简拼声母!简拼
-    单字母匹配会让错字幻觉借声母蒙混:portraitzhongde 能蒙混"破人体热爱体重的" po-r-t-r-ai-t-zhong-de)。
-    ASCII 字母逐字符,标点/表外跳过。记忆化 DP。"""
+    用于 gate ocr_correct 的 14B 输出——**兜底闸**,只拦最离谱的:采屏幕上不相关文字(网页/系统通知/
+    AI回复)——这些要么含击键里没有的英文单词(english 逐字符对不上),要么比击键长太多(每字至少 1 声母
+    字母,凑不够)。同音纠错/删字/**简拼**(2026-07-11 用户裁定:用户会用简拼,声母前缀放行)都过。
+    同长度同声母的错字(破人体热爱体重的)靠 ocr_correct 的 prompt 约束(通顺+击键为准)拦,不靠这里。
+    每个汉字消费某单元全拼或非空前缀(简拼),ASCII 逐字符,标点/表外跳过。记忆化 DP。"""
     cu = R.SCH.char_units()
     tl = [c for c in (text or '').lower() if not c.isspace()]
     n, m = len(keys_letters), len(tl)
@@ -142,9 +143,11 @@ def _keys_cover_text(keys_letters, text):
             else:
                 r = walk(i, j + 1)         # 标点跳过(文侧)
         elif ch in cu:
-            for k in range(i, n):         # 跳过多余键找该字全拼的起点
+            for k in range(i, n):         # 跳过多余键找该字拼音起点(简拼:全拼或非空前缀)
                 for u in cu[ch]:
-                    if keys_letters[k:k + len(u)] == u and walk(k + len(u), j + 1): r = True; break
+                    for L in range(len(u), 0, -1):
+                        if keys_letters[k:k + L] == u[:L] and walk(k + L, j + 1): r = True; break
+                    if r: break
                 if r: break
         else:
             r = walk(i, j + 1)
@@ -264,6 +267,8 @@ def make_llm(model='mlx-community/Qwen3-14B-4bit'):
 def ocr_correct_llm(con, sp, librime_text, llm=None):
     """LLM 判别 canvas 短输入的最终干净内容:给 librime 候选 + OCR 锚定行,本地 LLM 输出最终内容
     (用 OCR 纠同音错字、去掉中途打了又删/界面噪声)。
+    2026-07-11 审核 Fix B(用户裁定):prompt 三约束(以击键为准不采屏幕、英文原样保留、通顺否则回退)
+    治采屏幕文本/错字;`_keys_cover_text` 兜底拦最离谱的(含击键外英文/比击键长太多)。
     llm=None(默认,GPU 占用/不跑模型)或无 OCR 证据 → 回退 librime(残渣/错字可见,宁缺毋错)。"""
     lib = re.sub(r'\s', '', librime_text)
     if not lib:
@@ -275,12 +280,23 @@ def ocr_correct_llm(con, sp, librime_text, llm=None):
         return librime_text
     ev_lines = '\n'.join(f"- {e}" for e in ev)
     prompt = (
-        "从 OCR 文字行里还原用户在文档里写的那**一句**最终内容,合成成一句、不要照抄列表。\n"
-        "OCR 以屏幕为准(汉字优先于击键候选);丢掉界面行(菜单/标签页/按钮)和打了又删的字。\n\n"
-        "示例:\n"
+        "任务:根据**击键候选**还原用户**这几个击键**打的那一句最终内容。OCR 只用来**纠正同音错字**\n"
+        "(把击键候选里猜错的同音字换成屏幕上的正确字),不是让你照抄屏幕。\n"
+        "硬规矩:\n"
+        "1. 以**击键候选**为准——只还原用户自己打的字;屏幕上用户没打的内容(网页正文/系统通知/别人的话/\n"
+        "   AI 回复/菜单按钮/标签页)一律**不要**算进来。\n"
+        "2. 明显是英文单词/专有名词的,**原样保留英文**,不要转成拼音或汉字。\n"
+        "3. 输出必须是**通顺、说得通**的一句话;若击键候选是残缺拼音、拼不出通顺句子,就**原样返回击键候选**,\n"
+        "   不要硬编一个不通顺/看不懂的句子。\n"
+        "只输出这一句最终内容,别的都不要。\n\n"
+        "示例1(同音纠错):\n"
         "击键候选:wo de app zhong yu zuo hao le\n"
         "OCR行:\n- 我的app终于做好了\n- 文件 编辑 视图\n- 分享\n"
         "输出:我的app终于做好了\n\n"
+        "示例2(屏幕全是网页/别人的文字,用户只打了几个字母 → 只保留用户打的,不采网页):\n"
+        "击键候选:desmos\n"
+        "OCR行:\n- Desmos | Beautiful free math\n- Graphing Calculator\n- 一款免费的数学工具\n"
+        "输出:desmos\n\n"
         "现在:\n"
         f"击键候选(同音字常错,可能含已删的字):{librime_text}\n"
         f"OCR行:\n{ev_lines}\n"
@@ -288,9 +304,9 @@ def ocr_correct_llm(con, sp, librime_text, llm=None):
     out = llm(prompt)
     if not out:
         return librime_text
-    # 收敛(2026-07-11 审核 Fix B):14B 输出必须能被本 span 击键**子序列走通**(_keys_cover_text:
-    # 同音纠错/删字放行,但把用户几个击键凭空替换成不相关屏幕文字=网页简介/AI回复/系统通知→拒,
-    # 回退 librime)。根治审核确认的「canvas_B 采非手打屏幕文本」(Desmos/魔/Google通知/ChatGPT串)。
+    # 兜底闸(2026-07-11 Fix B):prompt 之外再拦最离谱的——14B 输出必须能被本 span 击键**简拼子序列**
+    # 走通(_keys_cover_text)。同音/删字/简拼放行;含击键里没有的英文单词(Graphing)或比击键长太多的
+    # 屏幕文本(网页/通知/AI串)拒→回退 librime。同长度同声母错字靠上面 prompt 约束(通顺)拦,不靠这里。
     letters = _walk_letters(R.keys_in_window(con, sp['bundle'], sp['t0'], sp['t1']))
     if letters and not _keys_cover_text(letters, out):
         print(f"  [B ocr↯] {sp['bundle'].rsplit('.',1)[-1]} 拒非击键支持的OCR还原 {out[:30]!r}")
