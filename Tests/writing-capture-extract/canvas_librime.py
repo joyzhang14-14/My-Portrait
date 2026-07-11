@@ -18,6 +18,21 @@ import ax_bearing as B       # 复用 canvas_spans(承载率判别)
 import canvas_local as CL    # 复用 frame_lines(OCR 词→行)
 
 
+def _strip_eng_prefix(buf):
+    """buf 大写开头(英文信号,纯拼音必小写)→ 剥最长英文词前缀(rime 词典认的:cands 首位=自身)当字面,
+    返回 (english_literal, 剩余待解拼音)。没找到 → ('', buf)。**只在 buf[0] 大写时调**——防 song/long
+    这类小写拼音(也是英文词)被误剥。治 #3:Portraitzhong(选字逼判拼音)→ Portrait + zhong→中。"""
+    for L in range(len(buf), 2, -1):              # 最长英文词前缀,≥3 字母
+        p = buf[:L].lower()
+        try:
+            cs = R.cands(p, 2)
+        except Exception:
+            cs = []
+        if cs and cs[0] == p:                     # rime 候选首位=自身 → 是英文词
+            return buf[:L], buf[L:]
+    return '', buf
+
+
 def _decode_segment(seg):
     """seg=char 列表(已消化退格)→ 文本。逐 run 装配:拼音→librime TOP;英文→字面(保大小写);
     标点/空格/字面数字→原样保留(reconstruct 那条会丢标点+丢纯英文,故 bucket B 自己装)。"""
@@ -28,8 +43,17 @@ def _decode_segment(seg):
             return
         kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
         if kind == 'chinese':
-            han, _ = R.decode_run(buf, model_fn=None)
-            out.append(han or buf)                # 解不出 → 留拼音残渣(宁缺毋错)
+            # 英文/拼音粘连修(2026-07-11,#3 Portrait中的):选字数字逼整串判拼音,但大写开头=英文
+            # 专有名词污染(librime 硬切 Portraitzhong→破人体…)→ 剥英文词前缀当字面,剩余解拼音。
+            pre, rest = (_strip_eng_prefix(buf) if buf[:1].isupper() else ('', buf))
+            if pre:
+                out.append(pre)
+                if rest:
+                    han, _ = R.decode_run(rest, model_fn=None)
+                    out.append(han or rest)
+            else:
+                han, _ = R.decode_run(buf, model_fn=None)
+                out.append(han or buf)            # 解不出 → 留拼音残渣(宁缺毋错)
         else:
             out.append(buf)                       # english/incomplete → 字面(The/ok 保原样)
         buf = ""
