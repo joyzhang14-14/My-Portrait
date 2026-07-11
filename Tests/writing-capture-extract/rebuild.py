@@ -49,11 +49,55 @@ def lattice(py):
 
 # ---- 击键解析(assembleKeystrokeText 格式:字母/数字/标点 + <CR> + <BS>)----
 def _toks(ks): return re.findall(r'<CR>|<BS>|.', ks or '')
+def commit_syls(letters):
+    """已上屏单元的音节切分(音节数 = 上屏汉字数,退格删字要用它)。按部署词库音节表贪心切分
+    (ime_schema,零硬编码,换方案跟着词库走)。**必须进程内**:走 librime 会每个新串 spawn 一次
+    子进程重载词库,生产跑直接拖垮。
+
+    简拼要认(zhongy=zhong+y=重要2字 / bangw=bang+w=帮我2字):允许**至多 1 个残缺单元且只能在末尾**
+    (= 简拼尾声母)。英文/乱码天然出局:sonnet→so|n|ne|t(残缺2个)、event→e|v|en|t、ubia→u|…(残缺
+    在**开头**)。非拼音 → None,调用方走旧逐字弹,别动英文。"""
+    if not letters: return None
+    segs, i, n, inc = [], 0, len(letters), 0
+    while i < n:
+        for L in range(min(6, n - i), 0, -1):
+            if SCH.is_complete_unit(letters[i:i + L]):
+                segs.append(letters[i:i + L]); i += L; break
+        else:
+            if inc or segs == [] or i != n - 1:   # 残缺只许 1 个,且必须是末尾那个(简拼尾)
+                return None
+            segs.append(letters[i]); i += 1; inc = 1
+    return segs or None
+
 def apply_bs(toks):
+    """消化退格 —— 按输入法「提交(上屏)」语义,不是裸字符弹栈(2026-07-11 用户裁定的打字行为)。
+
+    规则:拼音串后面跟**选字数字**,就说明前面那串**已被输入法变成屏幕上的汉字**,原始字母就此
+    退出解码缓冲;此后一个退格删的是**屏幕上的一个字**,既不是一个字母也不是那个数字:
+      · 单音节 na1      → 上屏 1 字(那)  → 整个单元删掉
+        (旧码只弹数字,残留 na 与下一个 na 粘成 nana → librime「娜娜」= ev461 叠字+同音错)
+      · 多音节 dabao1   → 上屏 2 字(打包)→ 只砍末音节,剩下的仍是已上屏文字(→ da1 = 打)
+      · 英文/残渣 sonnet1 → 不是拼音上屏,数字是字面 → 保持旧逐字弹(否则英文词会被整个吞掉)
+
+    ⚠️**空格/回车也是提交信号,但这里不敢用**:击键流(<6/25 无 input_source)分不出中英文模式,
+    而英文每个词后面都跟空格,且 but/say/am 这类短英文词恰好能当简拼解析(bu+t / sa+y)——把
+    「英文词+空格」当上屏会把英文整个吞掉(实测 ev690 英文文章的 which 被吃)。有 input_source
+    (≥6/13)判定中文输入法时才能开空格信号。<CR> 的提交语义(尾巴)同理,归 keystroke 主导重构。"""
     out = []
     for t in toks:
         if t == '<BS>':
-            if out: out.pop()
+            if out and out[-1].isdigit() and len(out) >= 2 and out[-2].isalpha():
+                j = len(out) - 2
+                while j >= 0 and out[j].isalpha(): j -= 1
+                syls = commit_syls(''.join(out[j + 1:len(out) - 1]))
+                if syls is None:
+                    out.pop()                          # 英文/残渣:数字/空格是字面 → 照旧弹一个
+                elif len(syls) == 1:
+                    del out[j + 1:]                    # 上屏 1 个字 → 整单元删掉
+                else:
+                    del out[j + 1:]                    # 上屏多个字 → 只删末字
+                    out.extend(''.join(syls[:-1])); out.append('1')   # 其余仍是已上屏文字(默认首选)
+            elif out: out.pop()
         else: out.append(t)
     return out
 def split_cr(ks):

@@ -39,6 +39,17 @@ chk("gmail(无选字)", [(p, i, c) for p, i, c in R.parse_picks(list('gmail'))],
 print("=== 退格/分段 ===")
 chk("ge<BS>mail→gmail", R.split_cr('ge<BS>mail<CR>'), [list('gmail')])
 chk("两条消息按CR切", len(R.split_cr('sha1<CR>meikandong1<CR>')), 2)
+# 退格感知(ev461):单音节 na1<BS>na1 = 打「那」→删→重打,只剩单字 na(非 nana→娜娜叠字)
+chk("na1<BS>na1→na(不叠字)", [(p, i) for p, i, c in R.parse_picks(R.split_cr('na1<BS>na1<CR>')[0])], [('na', 0)])
+chk("hao1na1<BS>→只删na(留hao)", [(p, i) for p, i, c in R.parse_picks(R.split_cr('hao1na1<BS><CR>')[0])], [('hao', 0)])
+# 多音节上屏多个字:退格只删**末字**(dabao1=打包 → 删「包」剩 da1=打),不是整删也不是只弹数字
+chk("dabao1<BS>→da(打包删包剩打)", [(p, i) for p, i, c in R.parse_picks(R.split_cr('dabao1<BS><CR>')[0])], [('da', 0)])
+chk("nihao1<BS>→ni(你好删好)", [(p, i) for p, i, c in R.parse_picks(R.split_cr('nihao1<BS><CR>')[0])], [('ni', 0)])
+# 简拼也算数:zhongy=zhong+y=重要(2字),退格删「要」剩「重」
+chk("简拼zhongy1<BS>→zhong", [(p, i) for p, i, c in R.parse_picks(R.split_cr('zhongy1<BS><CR>')[0])], [('zhong', 0)])
+# ⚠️英文/残渣不是拼音上屏:数字是字面,保持旧逐字弹,否则英文词会被整个吞掉
+chk("英文sonnet1<BS>不整删", [(p, i) for p, i, c in R.parse_picks(R.split_cr('sonnet1<BS><CR>')[0])], [('sonnet', None)])
+chk("乱码ubia1<BS>不整删", [(p, i) for p, i, c in R.parse_picks(R.split_cr('ubia1<BS><CR>')[0])], [('ubia', None)])
 
 print("=== 防幻觉 guard ===")
 # J:模型把 gmail 幻觉成"购买了",但"购买了"不在任何候选/原文 → 回退
