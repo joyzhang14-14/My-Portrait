@@ -950,12 +950,21 @@ PW_MASK = re.compile(r'[•●○◦＊*]{6}')
 URL_FULL = re.compile(r'(https?://\S+|localhost:\d\S*|[\w.-]+\.(com|org|net|io|ai|dev|cn|me|co|app|us|edu)(/\S*)?)', re.I)
 EMAIL_PAT = re.compile(r'\S+@\S+\.\w+')   # 邮箱=PII,任意位置即扔(用户裁定;zzhang@…k12.nc.us)
 EMAIL_FILTER = os.environ.get('PORTRAIT_EMAIL_FILTER', '1') == '1'   # 邮箱过滤开关(2026-07-11 用户:前端可关)
+# 手机号/号码闸(2026-07-11 审核 Fix C,13910653410 案=WiFi登录表单被采):**整段就是号码**才丢
+# (数字/空格/-/()/+ 组成 且 ≥10 位真数字——手机号10-11位;≥10 排掉8位日期 2026-07-11 误杀)。
+# 含文字的正文里带个号码不连坐(与 URL/邮箱 canvas 同口径,最大保留)。
+PHONE_FULL = re.compile(r'[\d\s\-()+]{7,}')
+def is_phone(t):
+    t = (t or '').strip()
+    return bool(PHONE_FULL.fullmatch(t)) and len(re.sub(r'\D', '', t)) >= 10
 def pass4_fixed(recs):
     kept, dropped = [], []
     for r in recs:
         t = (r[1] or '').strip()
         if t.lower().endswith('.com') or URL_FULL.fullmatch(t) or (EMAIL_FILTER and EMAIL_PAT.search(t)):
             dropped.append((r, "网址/邮箱")); continue
+        if is_phone(t):
+            dropped.append((r, "号码(整段≥7位数字,PII)")); continue
         if PW_MASK.search(t):
             dropped.append((r, "密码(连续≥6掩码符号)")); continue
         kept.append(r)
@@ -999,6 +1008,17 @@ if creport or cnoanchor:
     for n in cnoanchor:
         nd.append(f"- `[C-DROP]` {n.get('day', '?')} {n['app']} · {n.get('nkeys', 0)}键 · {n['reason']}")
 nd.append("\n---\n")
+def _canvas_frag(t):
+    """canvas_B 碎片判别(2026-07-11 审核 Fix A):canvas_B 无「发送」背书,单字/短碎片/纯符号极可能是
+    解码残渣。AX 路对残渣会打 ~residue→未定区,canvas_B 产出**旁路了此闸**直接进成品(审核确认的
+    魔/测/w/spot/==/。。等大批碎片)。→ 判碎片,路由未定区(残渣可见>丢)。canvas_C essay 长文不走此判。"""
+    c = cv(t).strip()
+    if len(c) <= 1: return True                                     # 单字/单符号
+    if is_residue(t): return True                                   # AX 同款(ascii≤4 / ascii run / 中文≤2+尾渣)
+    if not re.search(r'[一-鿿]|[a-zA-Z]{2,}', c): return True        # 纯符号/纯数字碎片(== / 。。 / 11 / -)
+    han = sum(1 for ch in c if '一' <= ch <= '鿿')
+    if han == 0 and len(re.sub(r'[^a-zA-Z]', '', c)) <= 4: return True   # 短纯英文碎片(spot/sour/mymy/alen)
+    return False
 for day in DAYS:
     # 按发送时刻(t1=回车那刻)排序,匹配 Discord/IM 时间线——用户对着 app 按时间逐条核对。
     # 修前按 t0(开始打字)排:边打边想的长消息会顶到前面错位(ev461「那比如说你就很重要」
@@ -1014,8 +1034,14 @@ for day in DAYS:
         # (与 AX 路"任意位置即扔"分叉:canvas 是拼接长文,一个邮箱不该连坐整篇 essay)。fullmatch 语义。
         if URL_FULL.fullmatch(t_) or (EMAIL_FILTER and EMAIL_PAT.fullmatch(t_)):
             DISCARDED[day].append(((r["app"], r["text"], None, None, None, None, r["source"], None), "纯网址/邮箱(canvas)")); continue
+        if is_phone(t_):   # 号码 PII(Fix C):整段就是号码 → 丢(canvas 表单字段也采到)
+            DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "号码PII(canvas)")); continue
         if PW_MASK.search(t_) or is_mask(t_):
             DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "密码掩码(canvas)")); continue
+        # canvas_B 碎片/残渣 → 未定区(Fix A:补 AX 路 ~residue→未定区 的旁路;canvas_C essay 不判碎片)
+        if r["source"].startswith("canvas_B") and _canvas_frag(t_):
+            PENDING.setdefault(day, []).append((r["app"], r["text"], r["source"], None, None, "canvas_B碎片/残渣(无发送背书)", ""))
+            continue
         cvday.append(r)
     out = [(rec[6], rec[1], rec[0]) for rec in day_final] + [(r["source"], r["text"], r["app"]) for r in cvday]
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")

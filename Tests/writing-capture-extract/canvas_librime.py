@@ -118,6 +118,40 @@ def _keys_walk_text(keys_letters, text):
     return walk(0, 0)
 
 
+def _keys_cover_text(keys_letters, text):
+    """text 的拼音能否作为**子序列**在 keys_letters 里按序找到(键可跳过多余字母=打了又删的内容)。
+    用于 gate ocr_correct 的 14B 输出——同音纠错(拼音一致)和删字(键多于文)都放行,但凭空替换成
+    击键不支持的屏幕文字(网页/AI/通知)拒。**每个汉字必须消费其某单元的全拼**(不用简拼声母!简拼
+    单字母匹配会让错字幻觉借声母蒙混:portraitzhongde 能蒙混"破人体热爱体重的" po-r-t-r-ai-t-zhong-de)。
+    ASCII 字母逐字符,标点/表外跳过。记忆化 DP。"""
+    cu = R.SCH.char_units()
+    tl = [c for c in (text or '').lower() if not c.isspace()]
+    n, m = len(keys_letters), len(tl)
+    if not m: return True
+    if not n: return False
+    memo = {}
+    def walk(i, j):                       # i=键位(可从此往后跳),j=文位
+        if j == m: return True
+        key = (i, j)
+        if key in memo: return memo[key]
+        ch = tl[j]; r = False
+        if ch.isascii():
+            if ch.isalpha():
+                for k in range(i, n):     # 允许跳过多余键(删掉的内容)
+                    if keys_letters[k] == ch and walk(k + 1, j + 1): r = True; break
+            else:
+                r = walk(i, j + 1)         # 标点跳过(文侧)
+        elif ch in cu:
+            for k in range(i, n):         # 跳过多余键找该字全拼的起点
+                for u in cu[ch]:
+                    if keys_letters[k:k + len(u)] == u and walk(k + len(u), j + 1): r = True; break
+                if r: break
+        else:
+            r = walk(i, j + 1)
+        memo[key] = r; return r
+    return walk(0, 0)
+
+
 def ax_verify(con, sp, decoded):
     """AX 验证 keystroke(2026-07-10 用户裁定,十七块政策案):canvas_B 的 librime 解码是猜,
     但附近 AX 事件里常躺着输入法的**真实产出**(如 ev3338 的 delete'这种情况正常吗?在选课界面',
@@ -252,7 +286,16 @@ def ocr_correct_llm(con, sp, librime_text, llm=None):
         f"OCR行:\n{ev_lines}\n"
         "输出:")
     out = llm(prompt)
-    return out or librime_text
+    if not out:
+        return librime_text
+    # 收敛(2026-07-11 审核 Fix B):14B 输出必须能被本 span 击键**子序列走通**(_keys_cover_text:
+    # 同音纠错/删字放行,但把用户几个击键凭空替换成不相关屏幕文字=网页简介/AI回复/系统通知→拒,
+    # 回退 librime)。根治审核确认的「canvas_B 采非手打屏幕文本」(Desmos/魔/Google通知/ChatGPT串)。
+    letters = _walk_letters(R.keys_in_window(con, sp['bundle'], sp['t0'], sp['t1']))
+    if letters and not _keys_cover_text(letters, out):
+        print(f"  [B ocr↯] {sp['bundle'].rsplit('.',1)[-1]} 拒非击键支持的OCR还原 {out[:30]!r}")
+        return librime_text
+    return out
 
 
 def _hhmm(ts): return time.strftime('%H:%M:%S', time.gmtime(ts / 1000 - 4 * 3600))
