@@ -120,10 +120,21 @@ struct CaptureHealthView: View {
         }
     }
 
-    /// 公开 issue 和私下支持分别使用不同的脱敏强度与发送路径。
+    /// 两条上报路径:自己去 GitHub 提 issue(纯跳转),或私下打包发邮件给开发者。
     private var diagnosticCard: some View {
         SettingsCard(title: "Bug report",
-                     footnote: "This excludes captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
+                     footnote: "The private option excludes captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
+            SettingsRow("Report on GitHub",
+                        description: "Best if you can describe the bug clearly and know how to trigger it. Opens GitHub so you can file a public issue yourself — nothing is sent automatically.",
+                        icon: "ladybug") {
+                Button("Open") {
+                    if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
+                        NSWorkspace.shared.open(issue)
+                    }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+            }
+            SettingsDivider()
             SettingsRow("Send data to developer privately",
                         description: "Not sure what caused the bug, or don't feel like writing it up? This packs detailed logs and helps you email them to the developer.",
                         icon: "lock.shield") {
