@@ -18,7 +18,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     enum App: String, Hashable, CaseIterable {
         // 显示顺序 = case 顺序(rawValue 仍是各自名字,改序不影响持久化的
         // 选中 id)。General 在 Display 上、Connections 在 AI models 上。
-        case general, display, canvas, connections, downloads, notifications, health
+        case general, display, connections, downloads, notifications, health
     }
     enum Capture: String, Hashable, CaseIterable {
         case screen, audio, typing
@@ -53,7 +53,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     var label: String {
         switch self {
         case .app(.display):           return "Display"
-        case .app(.canvas):            return "Canvas"
         case .app(.general):           return "General"
         case .app(.downloads):          return "Downloads"
         case .app(.connections):       return "Connections"
@@ -75,7 +74,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     var icon: String {
         switch self {
         case .app(.display):           return "display"
-        case .app(.canvas):            return "circle.hexagongrid"
         case .app(.general):           return "gearshape"
         case .app(.downloads):         return "arrow.down.circle"
         case .app(.connections):       return "powerplug"

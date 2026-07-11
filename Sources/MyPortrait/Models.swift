@@ -10,6 +10,9 @@ enum MemoryScope: Hashable, Identifiable {
     case events
     case input
     case portrait(category: String)
+    /// canvas 侧栏 GRAPH 下的设置入口(07-11 用户):主内容区显示画布设置
+    /// (主球照片等),不是图谱形态。
+    case canvasSettings
 
     var id: String {
         switch self {
@@ -17,6 +20,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .events:              return "__events__"
         case .input:               return "__input__"
         case .portrait(let c):     return "portrait:\(c)"
+        case .canvasSettings:      return "__canvas_settings__"
         }
     }
     var displayName: String {
@@ -25,6 +29,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .events:              return "Events"
         case .input:               return "Input"
         case .portrait(let c):     return c.replacingOccurrences(of: "_", with: " ").capitalized
+        case .canvasSettings:      return "Settings"
         }
     }
     var systemImage: String {
@@ -32,6 +37,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .personalInfo:             return "person.text.rectangle.fill"
         case .events:                   return "clock.arrow.circlepath"
         case .input:                    return "keyboard"
+        case .canvasSettings:           return "slider.horizontal.3"
         case .portrait("personality"):  return "person.fill"
         case .portrait("social"):       return "person.3.fill"
         case .portrait("background"):   return "books.vertical.fill"
@@ -55,7 +61,9 @@ enum MemoryViewMode: String, Hashable {
     static func supportsCanvas(_ scope: MemoryScope) -> Bool {
         switch scope {
         case .events, .portrait, .input:  return true
-        case .personalInfo:               return false
+        // canvasSettings 由 ContentView 显式路由到设置视图(先于这里判断),
+        // 值本身不影响;返 false 保持"非图谱"语义。
+        case .personalInfo, .canvasSettings: return false
         }
     }
 }

@@ -9,7 +9,6 @@ struct SettingsPane: View {
         Group {
             switch subsection ?? .app(.display) {
             case .app(.display):       DisplaySettingsView()
-            case .app(.canvas):        CanvasSettingsView()
             case .app(.general):       GeneralSettingsView()
             case .app(.downloads):     AIModelsSettingsView()
             case .app(.connections):   ConnectionsView()
@@ -111,7 +110,6 @@ struct SettingsScene: View {
     @ViewBuilder private var detail: some View {
         switch subsection {
         case .app(.display):       DisplaySettingsView()
-        case .app(.canvas):        CanvasSettingsView()
         case .app(.general):       GeneralSettingsView()
         case .app(.downloads):     AIModelsSettingsView()
         case .app(.connections):

@@ -60,14 +60,20 @@ enum MainBallPhoto {
 
 struct CanvasSettingsView: View {
     var body: some View {
-        SettingsPage("Canvas",
-                     subtitle: "Personalize the Memory graph view") {
-            SettingsCard(title: "Main ball") {
-                MainBallPhotoSlot()
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+        // 无页面大标题(07-11 用户:侧栏入口内联,不要标题),只列卡片。
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                SettingsCard(title: "Main ball") {
+                    MainBallPhotoSlot()
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
             }
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(SidebarBackdrop().ignoresSafeArea())
     }
 }
 
@@ -111,12 +117,8 @@ private struct MainBallPhotoSlot: View {
             if let img = preview {
                 Image(nsImage: img).resizable().scaledToFill()
             } else {
-                ZStack {
-                    Circle().fill(Color(red: 0.3, green: 0.6, blue: 1).opacity(0.85))
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.white.opacity(0.9))
-                }
+                // default:纯蓝(仿主球),不加图标(07-11 用户)。
+                Circle().fill(Color(red: 0.3, green: 0.6, blue: 1).opacity(0.85))
             }
         }
         .frame(width: 64, height: 64)
