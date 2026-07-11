@@ -9,7 +9,7 @@ import simd
 /// 线程模型:
 ///   - 独立后台线程定步 tick(GraphConstants.physicsHz)
 ///   - `simLock` 保护 sim 全部可变状态(tick / 拖拽 / reheat / 场景更新)
-///   - `snapLock` 只保护位置快照 —— 渲染读快照**永不**等待整个 tick
+///   - `snapLock` 保护渲染快照 —— 渲染读快照**永不**等待整个 tick
 ///   - alpha 冷透且无 alphaTarget → 线程 park(CPU→0),交互 signal 唤醒
 ///   - park 状态变化通过 AsyncStream 发给 SwiftUI(暂停/恢复 TimelineView)
 ///
@@ -281,6 +281,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     // MARK: - 快照(snapLock 保护)
 
     private var snapshot: [SIMD2<Float>]
+    private var ringCenterSnapshot: SIMD2<Float> = .zero
+    private var ringRadiusSnapshot: Float = 0
     private let snapLock = NSLock()
 
     // MARK: - 线程控制
@@ -378,15 +380,21 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         return parkedFlag
     }
 
-    /// 调试只读(harness 画环/断言用):当前环心 / 环半径(无 belt 时
-    /// ringR = 0)。
+    /// 相机/渲染读:同一发布帧的环心+半径。只等 snapLock,
+    /// 不等物理线程持有的 simLock。无 belt 时 radius = 0。
+    public func readRingSnapshot() -> (center: SIMD2<Float>, radius: Float) {
+        snapLock.lock(); defer { snapLock.unlock() }
+        return (ringCenterSnapshot, ringRadiusSnapshot)
+    }
+
+    /// 调试只读(harness 画环/断言用)。
     public var ringCenter: SIMD2<Float> {
-        simLock.lock(); defer { simLock.unlock() }
-        return ringC
+        snapLock.lock(); defer { snapLock.unlock() }
+        return ringCenterSnapshot
     }
     public var ringR: Float {
-        simLock.lock(); defer { simLock.unlock() }
-        return ringRad
+        snapLock.lock(); defer { snapLock.unlock() }
+        return ringRadiusSnapshot
     }
 
     /// 开始拖某个球(index 0 主球由调用方挡掉)。只碰 dragLock,绝不等 tick。
@@ -685,6 +693,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         snapLock.lock()
         snapshot = pos
         beltRevealSnap = beltReveal
+        ringCenterSnapshot = ringC
+        ringRadiusSnapshot = ringRad
         snapLock.unlock()
     }
 
