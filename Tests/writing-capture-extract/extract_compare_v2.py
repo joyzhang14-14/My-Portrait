@@ -3,7 +3,7 @@
 事件内发送 = commit 背书的 delete,紧挨标记:空事件→空白/零宽;非空事件→占位符
 (本事件内既注入(paste/commit)又被 delete、≥6字、含真字符)。这样 claudefordesktop
 的 OCR合成/Canvas/可以改OCR 等真发送回来,Spiffy(挨\xa0非占位符)仍排除。"""
-import sqlite3, os, json, difflib, re
+import sqlite3, os, json, difflib, re, bisect
 
 con = sqlite3.connect(os.path.expanduser("~/.portrait/portrait.sqlite"))
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
@@ -14,6 +14,44 @@ def cover(v, cs): return sum(b.size for b in difflib.SequenceMatcher(None, v, cs
 def related(a, b): return sim(a, b) >= 0.5 or a.startswith(b) or b.startswith(a)
 def cstream(arr): return ''.join(cv(e.get('text', '') or '') for e in arr if e.get('kind') == 'commit')
 
+EMOJI_EXEMPT = os.environ.get('PORTRAIT_EMOJI_EXEMPT', '1') == '1'   # 表情shortcode豁免注入闸(前端可关)
+
+def injected_texts(arr, bundle, s, e):
+    """机器注入 commit 判定(2026-07-10 用户裁定「Enter a shell command」案,KNOWN_PH 白名单的通用版):
+    AX 的 commit 只是「框里多了这段文字」,程序改框(UI 占位符轮换/自动补全)也被记成 commit。
+    判据=击键对账:≥8 字符的 commit,其锚窗内内容击键 < 字符数×0.25(4 倍简拼余量)→ 无击键背书=注入。
+    防误伤(2026-07-10 全库 235 朴素命中解剖出的四家族):
+    ① AX 批量同戳(想象中的完全不一样案,delete+commit 同毫秒压扁窗口)→ 锚=上一个 ts 严格更早的条目;
+    ② 键盘传感器黑洞(CGEventTap 失活)→ 事件窗击键全空而 commit ≥3 条 → fail-open 全放行(宁漏勿杀);
+    ③ 长按重复(ooo…×39 只记 1 次键)→ 单字符重复文本+窗内有该字符击键=背书;
+    ④ 自动补全 URL 判注入是本闸预期行为(只记手打铁律;autofill 非手打)。"""
+    ks = con.execute(
+        "SELECT ts_ms, char FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? "
+        "AND is_backspace=0 AND (modifiers&7)=0 AND char IS NOT NULL "
+        "AND char NOT IN (char(13),char(10),char(9)) ORDER BY ts_ms",
+        (bundle, (s or 0)-60000, (e or 0)+2000)).fetchall()
+    kts = [t for t, _ in ks]
+    cands = [(i, x) for i, x in enumerate(arr) if x.get('kind') == 'commit' and x.get('ts')]
+    if not ks and len(cands) >= 3:
+        return set()                                     # ② 黑洞 fail-open
+    inj = set()
+    for i, x in cands:
+        t = cv(x.get('text', '') or ''); ts = x['ts']
+        if len(t) < 8: continue
+        # 表情 shortcode 豁免(2026-07-10 用户质询+合成最坏实证:鼠标点选 :emoji_34: 零击键,
+        # 发送清空 delete 命中 inj 会整条丢):选择器=选择型输入法(同 IME 选字,一次选择产出整串),
+        # 用户驱动内容非 UI 噪声。形态=Discord/Slack 通用 :name: 语法,内容形状规则非语言知识。
+        # EMOJI_EXEMPT 开关(用户指令:留给前端),默认开;关=shortcode 也过击键对账(零击键即判注入)。
+        if EMOJI_EXEMPT and re.fullmatch(r':[A-Za-z0-9_+-]+:', t): continue
+        prev = max((y.get('ts') for y in arr[:i] if y.get('ts') and y['ts'] < ts), default=None)  # ① 跳同戳
+        a = prev if prev is not None and prev > ts - 60000 else ts - 60000
+        lo = bisect.bisect_left(kts, a); hi = bisect.bisect_right(kts, ts + 2000)
+        if len(set(t)) == 1 and any(ch == t[0] for _, ch in ks[lo:hi]):
+            continue                                     # ③ 长按重复
+        if hi - lo < max(1, len(t) * 0.25):
+            inj.add(t)
+    return inj
+
 def loadev(ids):
     out = []
     for e in ids:
@@ -23,8 +61,10 @@ def loadev(ids):
         rets = [x[0] for x in con.execute(
             "SELECT ts_ms FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? AND char IN (?, ?)",
             (r[4], r[5]-2000, r[6]+2000, "\n", "\r")).fetchall()]
-        out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=json.loads(r[3]), bundle=r[4],
-                        returns=rets, started_at=r[5], ended_at=r[6], text=r[7] or ''))
+        arr = json.loads(r[3])
+        out.append(dict(id=r[0], ss=r[1] or '', endv=r[2] or '', arr=arr, bundle=r[4],
+                        returns=rets, started_at=r[5], ended_at=r[6], text=r[7] or '',
+                        inj=injected_texts(arr, r[4], r[5], r[6])))
     return out
 
 # ---- 旧版(占位符集合 ≥3) ----
@@ -153,7 +193,7 @@ def latin_tail(m):  # 末尾生拼音残渣(A组#8会处理),不算回归
     while v and v[-1] in ' ' or (v and v[-1].isascii() and v[-1].isalpha()): v = v[:-1]
     return len(m) - len(v)
 def is_residue(m): return len(m) <= 4 or latin_tail(m) >= 2
-PLH = ['Write a message', 'Type / for commands', 'Describe a task or ask a question']
+PLH = ['Write a message', 'Type / for commands', 'Describe a task or ask a question', 'Enter a shell command', 'Or reply directly']
 def is_ph(m): return any(p in m for p in PLH)
 
 DAYS = ['2026-05-27', '2026-05-28', '2026-05-29', '2026-06-05']

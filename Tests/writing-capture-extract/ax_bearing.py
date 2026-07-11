@@ -174,7 +174,7 @@ def _doc_url(con, bundle, t0, t1):
 
 
 # 占位符片段(与 extract_compare_v2.PLH 同源同值——那边 import 自跑对照太重,这里内联;改动须两处同步)
-_PH_SNIPPETS = ('Write a message', 'Type / for commands', 'Describe a task or ask a question')
+_PH_SNIPPETS = ('Write a message', 'Type / for commands', 'Describe a task or ask a question', 'Enter a shell command', 'Or reply directly')
 
 
 def _ax_owned(con, sp):
@@ -185,7 +185,12 @@ def _ax_owned(con, sp):
     占位符 end_value(Write a message…)= AX 真没收到内容 → 留 canvas(『继续』类真救回)。
     ⚠️ 只对 B 桶:essay 时代 Safari 事件 end_value 含真文(ev679),C 桶过闸会误杀长文档。
     容差不对称(2026-07-10 全量实测 52 候选):头侧 AX_PAD_MS(事件创建滞后实测 0~2.5s,该吞的
-    47 段全靠头容差);尾侧 0(该吞的尾悬出全=0;尾悬出的 2 段是 AX 没收到的真内容,必须放行)。"""
+    47 段全靠头容差);尾侧 0(该吞的尾悬出全=0;尾悬出的 2 段是 AX 没收到的真内容,必须放行)。
+    ⚠️ 证据面只认 end_value(2026-07-10 实证:扩展到「edit_log 实质 commit/delete」净有害——
+    误吞 3 个正确 canvas 救回(继续/jiuss1agent/OCR1hechen,事件有 delete/commit 但 AX 路 cover 闸
+    本来就漏它们)+ 误吞 07-03 微信真内容(AX 只有'ok'也算实质);而主目标 ev3338(delete 时刻才
+    建的事件,时间containment罩不住)反而脱靶。正确方向=内容对应(拼音空间 span keys↔事件文本),
+    与 send_clear 放宽联动,待设计,别再用纯时间 containment 扩证据面)。"""
     for (ev,) in con.execute(
             "SELECT end_value FROM typing_events WHERE bundle_id=:b AND started_at<=:a AND ended_at>=:c",
             {"b": sp['bundle'], "a": sp['t0'] + AX_PAD_MS, "c": sp['t1']}):

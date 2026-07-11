@@ -15,7 +15,7 @@ def has_han(s): return bool(HAN.search(s or ''))
 _RIME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rime")
 CANDS = os.path.join(_RIME, "cands"); LATTICE = os.path.join(_RIME, "lattice")
 # 粘贴政策(用户裁定 2026-06-10):消息内单段已知粘贴 ≤ 此值且非纯粘贴 → 整条留;用户可调。
-PASTE_MAX = 30
+PASTE_MAX = int(os.environ.get('PORTRAIT_PASTE_MAX', '30'))   # 短粘贴保留上限(旋钮,前端可调;>此的粘贴段剥/丢)
 # librime 解码接线开关(2026-06-27 用户裁定):采集层摇读修复后 AX 直接给汉字,
 # librime「拼音→汉字」猜字(decode_run)成了误判隐患(猜错=错字,铁律里最坏类别)。
 # 默认**关**:不解码,留拼音残渣 → 现有逃生门把它路由给口3 OCR(屏幕真值,比猜可靠)。
@@ -340,6 +340,11 @@ def event_sends_with_ts(ev, X, group_cs=None):
     arr = ev['arr']; cs = X.cstream(arr); ph = X.phMarkers(arr); returns = ev.get('returns', ())
     # #44/#45:已知占位符(KNOWN_PH)即使是 commit 注入(非 paste)也认作占位符标记/过滤——
     # phMarkers 只认 paste(防普通词误判),known 列表是白名单,commit 注入也安全。
+    # inj(2026-07-10 用户裁定):无击键背书的注入 commit(X.injected_texts,loadev 算好)。
+    # ⚠️ 只做**内容过滤**(delete 文本/endValue 草稿),**不当 isMark 标记**——占位符轮换=清框信号
+    # 可当 marker;但自动补全/重渲染注入不是清框信号,当 marker 会给旁邻 delete 发假「发送」通行证
+    # (全库 diff 实证:ev1132 多出 note book 假发送/lin k·ke y·booking 垃圾升格,已回撤)。
+    inj = ev.get('inj', ())
     def isMark(j):
         if j < 0 or j >= len(arr): return False
         raw = arr[j].get('text', '') or ''
@@ -347,6 +352,7 @@ def event_sends_with_ts(ev, X, group_cs=None):
     def sent(ts):
         return ts is not None and any(ts - 1800 <= rt <= ts + 200 for rt in returns)
     out = []
+    lone_cands = []   # 单字汉字 delete 候选,函数末按「本事件有无别的产出」判孤儿 vs 成品补丁
     prev_ts = ev.get('started_at') or 0
     # 粘贴政策(用户裁定,零LLM):消息含已知 paste 段时——单段 ≤PASTE_MAX(30,可调)且
     # 粘贴占比 <100% → 整条留(跳过 cover 闸,粘贴术语如 'ElevenLabs Scribe v2 Realtime' 29字∈合法);
@@ -374,7 +380,7 @@ def event_sends_with_ts(ev, X, group_cs=None):
     for i, e in enumerate(arr):
         k = e.get('kind'); t = X.cv(e.get('text', '') or ''); ts = e.get('ts')
         if ts is None: continue
-        if k == 'submit' and len(t) >= 2:
+        if k == 'submit' and len(t) >= 1:   # 单字 submit 也算真发送(6/？/额/哈 等都是有效输入,2026-06-29 用户裁定先全 pass 观察)
             # 存量框剥离(作文反馈案 ev692/694/699,2026-06-12 用户裁定:粘贴>30 消除,只留手打需求):
             # submit 全文=存量大文本(早先粘贴/前轮延续,无本事件击键背书)+手打增量(AX text)。
             # 全文对击键 cover<0.5(非本事件手打)而增量 cover≥0.4(简拼宽容)→ 只记增量。
@@ -403,7 +409,13 @@ def event_sends_with_ts(ev, X, group_cs=None):
                     stripped_hit[0] = True   # endv草稿同步废弃(见函数尾)
             out.append((t, prev_ts, ts, True)); prev_ts = ts
         elif k == 'delete':
-            if len(t) < 2 or t in ph or t in X.RUNPH or X.is_ph(t): continue
+            # 单字 delete 分档(2026-07-02 用户设计,事件内结构判别,定义B):
+            #   所有单字符(汉字/英文/标点/数字)先收候选,￼ 图片占位符除外;
+            #   函数末按「本事件有无 commit 打字/产出」定夺:有=编辑时产生的/成品补丁→弃字丢;无=孤儿留。
+            if not t or t in ph or t in X.RUNPH or X.is_ph(t) or t in inj: continue
+            if len(t) < 2:
+                if t != '￼': lone_cands.append((t, prev_ts, ts))   # ￼=图片占位符,非文字残渣
+                continue
             # 发送清空(ChatGPT等网页:打字时AX没建任何typing_event,只在发送清空记一个光杆delete,
             # text=完整消息+\n,end_value空)。delete原文以\n结尾(发送含回车)+附近击键有回车(sent)+
             # 框已清空 → 真发送,即便无占位符标记/无commit背书也认(2026-06-16 ChatGPT ev734案);
@@ -425,28 +437,39 @@ def event_sends_with_ts(ev, X, group_cs=None):
     # ——存量是本不该记的粘贴问题文本,增量已剥离入册,留着必成重复,废弃
     if stripped_hit[0]:
         return out
-    if endv and not X.emptyZW(ev['endv']) and not X.is_ph(endv):   # 占位符 endValue(含拼接如"…他说")整条不出
+    if endv and not X.emptyZW(ev['endv']) and not X.is_ph(endv) and endv not in inj and endv not in ph:   # 占位符/注入/纯粘贴 endValue 整条不出(ph=事件内 paste 标记:占位符轮换或纯粘贴草稿,只记手打)
         out.append((endv, prev_ts, ev.get('ended_at') or prev_ts, False))
+    # 单字 delete 事件内结构判别(2026-07-02 用户设计,定义B):本事件有产出(out 非空)或有 commit
+    # 打字活动(cs 非空)= 编辑时产生的/成品补丁 → 单字是弃字,丢;两者皆无(纯删一个已存在字符)→
+    # 孤儿 residue,留 is_send=False,下游标 ~residue 进未定区。
+    if not out and not X.cv(cs):
+        out.extend((lt, lp, lts, False) for lt, lp, lts in lone_cands)
     return out
 
+EQLEN_WIN_MS = 300_000   # 等长条款时间窗 5min(2026-07-07 审计修):同 ctx_window 语境断点——
+# 隔了一个语境断点的等长文本是两条真输入,不是同一次编辑的快照。
+# 实证:vos/vcd 1.5min(该杀,窗内)/ stage1↔stage2 9.4min(误杀,ev389 'pro模型prompt v2-stage1'
+# 被 stage2 当编辑快照杀掉——两条不同查询,加窗救回)。⚠️ 秒级等长近邻(IMG_9843/9844 文件名)时间窗救不了,内容维度另议。
 def dedup_truncated(records, cover_fn):
     """类4/5a:丢掉「endValue 截断态(is_send=False)且内容大部分被某更长记录覆盖」的草稿快照。
-    records=[(text, is_send, app)]。cover_fn(a,b)=a 的内容被 b 覆盖的比例(LCS)。真发送(is_send=True)永不丢。"""
+    records=[(text, is_send, app, ts)]。cover_fn(a,b)=a 的内容被 b 覆盖的比例(LCS)。真发送(is_send=True)永不丢。"""
     keep = []
-    for i, (ta, sa, aa) in enumerate(records):
+    for i, (ta, sa, aa, tsa) in enumerate(records):
         if not sa and len(ta) >= 2:                       # 截断态草稿才考虑丢
             cta = cv(ta)
             covered = False
-            for j, (tb, sb, ab) in enumerate(records):
+            for j, (tb, sb, ab, tsb) in enumerate(records):
                 if i == j or ab != aa: continue
                 ctb = cv(tb)
                 if len(ctb) > len(cta) and (ctb.startswith(cta) or cover_fn(cta, ctb) >= 0.8):
                     covered = True; break             # cta 是 ctb 的早期/截断态
-                # 等长编辑修正快照(vos↔vcd 互换案):同长高覆盖,时序靠后者=用户最终输入,前者丢
-                if j > i and len(ctb) == len(cta) and ctb != cta and cover_fn(cta, ctb) >= 0.9:
+                # 等长编辑修正快照(vos↔vcd 互换案):同长高覆盖,时序靠后者=用户最终输入,前者丢。
+                # 限 EQLEN_WIN_MS 内(同一次编辑的快照必然时间相邻;窗外=两条真输入,都留)
+                if (j > i and len(ctb) == len(cta) and ctb != cta and cover_fn(cta, ctb) >= 0.9
+                        and abs((tsb or 0) - (tsa or 0)) <= EQLEN_WIN_MS):
                     covered = True; break
             if covered: continue
-        keep.append((ta, sa, aa))
+        keep.append((ta, sa, aa, tsa))
     return keep
 
 def keys_in_window(con, bundle, t0, t1, pad_start=2000, pad_end=300):
