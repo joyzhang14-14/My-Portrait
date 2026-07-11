@@ -962,7 +962,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                !beltRayCorrectedToActual {
                 beltPredPos = beltTmpNow
                 beltRayCorrectedToActual = true
-                beltLockTick = tickCount
             }
             if allStatic || alpha < GraphConstants.alphaMin {
                 let (cs, rs) = enclosureCircles(hubAt: { beltTmpNow[$0] })
