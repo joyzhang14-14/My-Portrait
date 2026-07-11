@@ -189,6 +189,15 @@ private struct MeteorSpeedSlider: View {
     private static let cases = MeteorSpeed.allCases
     private static let maxIdx = cases.count - 1
 
+    /// 单个档位标签(当前档高亮)。
+    private func tick(_ s: MeteorSpeed) -> some View {
+        Text(s.label)
+            .font(.system(size: 10))
+            .foregroundStyle(s == selection ? Theme.accent
+                                            : Theme.textPrimary.opacity(0.40))
+            .fixedSize()
+    }
+
     /// 枚举 ↔ Double 桥接:step=1 让滑块吸附到 5 个整点。
     private var sliderValue: Binding<Double> {
         Binding(
@@ -204,19 +213,22 @@ private struct MeteorSpeedSlider: View {
         VStack(alignment: .leading, spacing: 6) {
             Slider(value: sliderValue, in: 0...Double(Self.maxIdx), step: 1)
                 .tint(Theme.accent)
-            // 5 档标签:各自 center 落在滑块停点分数 i/4 上(inset≈拨钮半宽,
-            // 让首尾档对齐两端极限停位)。当前档高亮。
+            // 5 档标签。中间三档 center 精确钉在滑块停点分数 i/4 上;首尾两档
+            // 若也钉 center 会有一半甩出卡片(停点几乎贴轨道端),故改**贴容器
+            // 边缘对齐**(左档左对齐/右档右对齐),不越界且仍读作对准两端。
             GeometryReader { geo in
                 let w = geo.size.width
                 let inset: CGFloat = 7
+                let track = w - 2 * inset
                 ForEach(Array(Self.cases.enumerated()), id: \.offset) { idx, s in
-                    Text(s.label)
-                        .font(.system(size: 10))
-                        .foregroundStyle(s == selection ? Theme.accent
-                                                        : Theme.textPrimary.opacity(0.40))
-                        .fixedSize()
-                        .position(x: inset + (w - 2 * inset) * CGFloat(idx) / CGFloat(Self.maxIdx),
-                                  y: 7)
+                    if idx == 0 {
+                        tick(s).frame(width: w, height: 14, alignment: .leading)
+                    } else if idx == Self.maxIdx {
+                        tick(s).frame(width: w, height: 14, alignment: .trailing)
+                    } else {
+                        tick(s).position(x: inset + track * CGFloat(idx) / CGFloat(Self.maxIdx),
+                                         y: 7)
+                    }
                 }
             }
             .frame(height: 14)
