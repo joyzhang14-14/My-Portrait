@@ -1077,8 +1077,8 @@ struct MemoriesView: View {
         switch scope {
         case .events:
             root = Storage.eventsDir
-        case .input, .personalInfo:
-            // .input 走 InputCaptureView,.personalInfo 走 PersonalInfoView —— 都没文件可扫。
+        case .input, .personalInfo, .canvasSettings:
+            // .input/.personalInfo/.canvasSettings 都没文件可扫(各走专属视图)。
             return []
         case .portrait(let cat):
             root = Storage.portraitDir.appendingPathComponent(cat, isDirectory: true)
@@ -1481,8 +1481,8 @@ private struct EmptyHint: View {
             return "No events yet.\nClick ↓ to backfill from the timeline."
         case .input:
             return "Input capture is not set up yet."
-        case .personalInfo:
-            // 不会走到 —— .personalInfo 路由直接进 PersonalInfoView,不走 list 列。
+        case .personalInfo, .canvasSettings:
+            // 不会走到 —— 各走专属视图,不走 list 列。
             return ""
         case .portrait:
             return "No portrait entries in this category yet."

@@ -423,6 +423,11 @@ struct TimelineSidebar: View {
                     scopeRow(.events)
                     scopeRow(.input)
                 }
+                // 无标题分区:canvas 设置入口(07-11 用户)。
+                Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
+                VStack(spacing: 2) {
+                    scopeRow(.canvasSettings)
+                }
             } else {
                 scopeHeader("PROFILE")
                 VStack(spacing: 2) {

@@ -198,7 +198,10 @@ struct ContentView: View {
         case .memories:
             // canvas 模式只覆盖 events/portrait;personalInfo/input 没有图谱
             // 形态,即便 mode==canvas 也走列表(侧栏点击它们时会把 mode 拨回 text)。
-            if memoryViewMode == .canvas, MemoryViewMode.supportsCanvas(memoryScope) {
+            if memoryViewMode == .canvas, memoryScope == .canvasSettings {
+                // canvas 侧栏 GRAPH 下的设置入口(07-11 用户):画布设置(主球照片)。
+                CanvasSettingsView()
+            } else if memoryViewMode == .canvas, MemoryViewMode.supportsCanvas(memoryScope) {
                 // input 的图谱形态是打字活动面积图,不走力导向 GraphRootView。
                 if memoryScope == .input {
                     InputActivityChartView(jumpToRecordId: $memoryInputJump)
