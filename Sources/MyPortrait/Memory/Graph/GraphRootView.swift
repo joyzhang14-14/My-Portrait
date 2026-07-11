@@ -224,8 +224,9 @@ struct GraphRootView: View {
     /// 罩住全部节点)—— 保证 portrait 也能框住全景。
     private func overviewCamera(_ vs: CGSize) -> GraphCamera? {
         guard let engine else { return nil }
-        if engine.ringR > 1 {
-            return frameFor(vs, center: engine.ringCenter, radius: engine.ringR)
+        let ring = engine.readRingSnapshot()
+        if ring.radius > 1 {
+            return frameFor(vs, center: ring.center, radius: ring.radius)
         }
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count, !snap.isEmpty else { return nil }
