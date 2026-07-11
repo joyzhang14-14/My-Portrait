@@ -371,11 +371,11 @@ enum MeteorSpeed: String, Codable, CaseIterable, Identifiable, Equatable {
     }
     var label: String {
         switch self {
-        case .verySlow: return "极慢"
-        case .slow:     return "慢"
-        case .medium:   return "中等"
-        case .fast:     return "快"
-        case .veryFast: return "极快"
+        case .verySlow: return "Very Slow"
+        case .slow:     return "Slow"
+        case .medium:   return "Medium"
+        case .fast:     return "Fast"
+        case .veryFast: return "Very Fast"
         }
     }
 }
