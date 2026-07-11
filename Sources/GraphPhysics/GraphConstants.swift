@@ -289,8 +289,9 @@ public enum GraphConstants {
     public static let pulseMaxDepthMain: Int = 2
     public static let pulseMaxDepthOther: Int = 1
     /// 脉冲形态 = ||| 三条垂直于连线的细白杠,沿行进方向间隔(屏幕 pt)
+    /// 07-11 用户:三杠间距收紧一点 5→3.5
     public static let pulseTickCount: Int = 3
-    public static let pulseTickSpacing: Double = 5
+    public static let pulseTickSpacing: Double = 3.5
     /// 杠长 = 连线的**实际渲染粗细**×此倍数。07-02 反馈定稿:=1,
     /// 杠长与线宽完全贴合(此前 ×3 仍被指出"没有完美贴合")
     public static let pulseTickLengthScale: Double = 1
