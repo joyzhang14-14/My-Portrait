@@ -178,57 +178,48 @@ private struct MainBallPhotoSlot: View {
     }
 }
 
-/// 陨石滑动速度选择器(07-11 用户:5 档、无数值、Apple 风)。速度是"大小量"
-/// → 用带刻度 Slider(仿 macOS 系统设置 Tracking/Scrolling speed:龟/兔图标夹
-/// 滑块 + 底部 5 档中文刻度高亮当前档),不用 segmented。默认中等=当前手感。
+/// 陨石滑动速度选择器(07-11 用户:5 档、无数值、Apple 风,英文标签)。
+/// 速度是"大小量" → 用带刻度 Slider(仿 macOS 系统设置 Tracking speed),
+/// 5 档标签用 GeometryReader **精确定位到滑块的 5 个停点分数**(等宽列会把
+/// 字中心放在 1/10…9/10,与停点 0…1 天生错位;去掉两端图标消除轨道内缩)。
+/// 高亮当前档。默认中等=当前手感。
 private struct MeteorSpeedSlider: View {
     @Binding var selection: MeteorSpeed
 
     private static let cases = MeteorSpeed.allCases
+    private static let maxIdx = cases.count - 1
 
     /// 枚举 ↔ Double 桥接:step=1 让滑块吸附到 5 个整点。
     private var sliderValue: Binding<Double> {
         Binding(
             get: { Double(Self.cases.firstIndex(of: selection) ?? 2) },
             set: { v in
-                let i = min(max(Int(v.rounded()), 0), Self.cases.count - 1)
+                let i = min(max(Int(v.rounded()), 0), Self.maxIdx)
                 selection = Self.cases[i]
             }
         )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Speed")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                Spacer()
-                Text(selection.label)               // 当前档名替代数字
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
-            }
-            HStack(spacing: 8) {
-                Image(systemName: "tortoise.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
-                Slider(value: sliderValue, in: 0...Double(Self.cases.count - 1), step: 1)
-                    .tint(Theme.accent)
-                Image(systemName: "hare.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
-            }
-            // 5 档文字刻度均分,高亮当前档 → 无数字也知道停在哪
-            HStack(spacing: 0) {
-                ForEach(Self.cases) { s in
+        VStack(alignment: .leading, spacing: 6) {
+            Slider(value: sliderValue, in: 0...Double(Self.maxIdx), step: 1)
+                .tint(Theme.accent)
+            // 5 档标签:各自 center 落在滑块停点分数 i/4 上(inset≈拨钮半宽,
+            // 让首尾档对齐两端极限停位)。当前档高亮。
+            GeometryReader { geo in
+                let w = geo.size.width
+                let inset: CGFloat = 7
+                ForEach(Array(Self.cases.enumerated()), id: \.offset) { idx, s in
                     Text(s.label)
                         .font(.system(size: 10))
                         .foregroundStyle(s == selection ? Theme.accent
                                                         : Theme.textPrimary.opacity(0.40))
-                        .frame(maxWidth: .infinity)
+                        .fixedSize()
+                        .position(x: inset + (w - 2 * inset) * CGFloat(idx) / CGFloat(Self.maxIdx),
+                                  y: 7)
                 }
             }
-            .padding(.horizontal, 18)               // 对齐轨道,避开两端图标宽度
+            .frame(height: 14)
         }
     }
 }
