@@ -264,6 +264,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 不碰 simLock —— Debug 一个 tick 7ms,读 simLock 会卡渲染)。
     private var beltRevealSnap: Float = 1
 
+    /// 陨石滑动速度倍率(app 侧从 config 推入;1=当前"中等")。同时乘进两个
+    /// **可见**杠杆:①松手归位的 glide cap(beltPass,越大滑得越快)②开局
+    /// 从暗处点亮的淡入 ramp(beltRevealStep,越大点得越快)。不碰 beltSpring/
+    /// 速度增益,保 park/穿透不变量。setMeteorSpeedScale 已 clamp[0.65,2.5]。
+    /// simLock 保护(读在 tick 持锁,写在 setter 持锁)。
+    private var meteorSpeedScale: Float = 1
+
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
     private var qChild: [Int32] = []
     private var qMass: [Float] = []
@@ -372,6 +379,12 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     public func readSnapshot() -> [SIMD2<Float>] {
         snapLock.lock(); defer { snapLock.unlock() }
         return snapshot
+    }
+
+    /// 陨石滑动速度倍率(app 从 config 推入)。下限 0.65 守 glide cap 的 24pt
+    /// 穿透阈值(低于会长途卡半路),上限 2.5 防大甩。下 tick 自动生效,不重建。
+    public func setMeteorSpeedScale(_ s: Float) {
+        simLock.lock(); meteorSpeedScale = max(0.65, min(2.5, s)); simLock.unlock()
     }
 
     /// 渲染/命中每帧读:陨石揭幕透明度 0…1(开局隐藏期 <1;=1 常态)。
@@ -820,7 +833,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 到位判定失效也绝不永久隐身)。正常启动在陨石主循环的到位判定
         if beltReveal < 1, !isShadow {
             if beltRevealGo {
-                beltReveal = min(beltReveal + GraphConstants.beltRevealStep, 1)
+                // 开局点亮滑速旋钮:淡入步进乘 meteorSpeedScale(开局绽放的运动
+                // 在隐身态完成,用户看见的"从暗处点亮"其实是这段淡入,故调它)。
+                beltReveal = min(beltReveal + GraphConstants.beltRevealStep * meteorSpeedScale, 1)
             } else if tickCount &- beltRevealArm
                         > GraphConstants.beltRevealTimeoutTicks {
                 beltRevealGo = true
@@ -1155,8 +1170,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                         // 缓滑;顺带距离增益 boost 因 dLen 被封顶自动≈1,
                         // 起飞窗口 ×2.5 仍在但速度有界,快起步不大甩)
                         if !carrying {
-                            let ac = GraphConstants.beltGlideArcCap
-                            let rc2 = GraphConstants.beltGlideRadialCap
+                            // 归位滑速旋钮:cap 乘 meteorSpeedScale(大=每 tick 目标
+                            // 位移更大=滑得更快)。cruise 实速≈0.038·cap,近端 ease-out
+                            // 不受影响 → park/收尾不变。
+                            let ac = GraphConstants.beltGlideArcCap * meteorSpeedScale
+                            let rc2 = GraphConstants.beltGlideRadialCap * meteorSpeedScale
                             arc = max(-ac, min(ac, arc))
                             dr = max(-rc2, min(rc2, dr))
                         }
