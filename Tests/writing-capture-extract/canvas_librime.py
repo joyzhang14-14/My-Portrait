@@ -17,6 +17,11 @@ import rebuild as R          # 复用 reconstruct/keys_in_window,不改 rebuild.
 import ax_bearing as B       # 复用 canvas_spans(承载率判别)
 import canvas_local as CL    # 复用 frame_lines(OCR 词→行)
 
+# 英文前缀剥离(#3 Portrait中的)开关(2026-07-11 用户裁定):默认关——#3 类「英文专有名词+拼音粘连」
+# 是**旧采集(<6/25)专属**现象(实测新采集无真事件,只 codex 终端 G/OOM 非消息),而剥离是启发式有误剥
+# 风险(Songzhong)。故只对旧数据开:route_day 按 day<6/25 置 True,新采集干净路不跑,消除风险。
+_ENG_STRIP = False
+
 
 def _strip_eng_prefix(buf):
     """buf 大写开头(英文信号,纯拼音必小写)→ 剥最长英文词前缀(rime 词典认的:cands 首位=自身)当字面,
@@ -45,7 +50,7 @@ def _decode_segment(seg):
         if kind == 'chinese':
             # 英文/拼音粘连修(2026-07-11,#3 Portrait中的):选字数字逼整串判拼音,但大写开头=英文
             # 专有名词污染(librime 硬切 Portraitzhong→破人体…)→ 剥英文词前缀当字面,剩余解拼音。
-            pre, rest = (_strip_eng_prefix(buf) if buf[:1].isupper() else ('', buf))
+            pre, rest = (_strip_eng_prefix(buf) if (_ENG_STRIP and buf[:1].isupper()) else ('', buf))
             if pre:
                 out.append(pre)
                 if rest:

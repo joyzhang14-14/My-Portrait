@@ -17,12 +17,14 @@ import canvas_c_run as CC   # C 档聚合(collect_c);2026-07-11 整合成单入�
 import canvas_merge as CM
 
 EVAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'eval')
+ENG_STRIP_CUTOFF = '2026-06-25'   # 采集层改版日:此前旧采集才有「英文+拼音粘连」#3 类事件(用户裁定,同 faithful decode 分界)
 
 
 def route_day(con, day, llm=None):
     """一天的 canvas 会话路由。返回 (b_records 给 fusion, c_pending 待 GPU)。"""
     (t0,) = con.execute("SELECT strftime('%s', :d) * 1000", {"d": day}).fetchone()
     (t1,) = con.execute("SELECT strftime('%s', :d, '+1 day') * 1000", {"d": day}).fetchone()
+    CL._ENG_STRIP = day < ENG_STRIP_CUTOFF   # 英文前缀剥离只对旧采集(<6/25)开,新采集干净路不跑(消误剥风险)
     b_recs, c_pending = [], []
     for sp in B.canvas_spans(con, t0, t1):
         app = sp['bundle'].rsplit('.', 1)[-1]
