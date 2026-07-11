@@ -1072,6 +1072,15 @@ decode-on 世界,否则假回归)+ 标准 6 天 + canvas_merged_src。唯一 ✗
 
 **⛔ 停批背景**:所有跑批已停(launchd `com.joyzhang.portrait.pipeline` removed,进程 pkill)。**run_all.sh/canvas_regen.sh/supervisor.sh 编排层弃用**——已被本次主程序内联取代(不要 .sh 编排;launchd 仅作单 .py 进程的 reaper 防护)。
 
+### ✅ 2026-07-11 续:一体化跑完 + sonnet 审核 + canvas_B 修复(6/9 异常修好)
+
+一体化重构已跑完 v2 全量(46天,md=`~/Desktop/Obsidian/生产接入前审核大跑-v2-2026-07-11.md`,gold 43✓)→ 开 sonnet 审核 workflow(7块find→DB对抗核实,候选73/确认9)→ **问题几乎全在 canvas_B**,当日 6 笔提交修好 6/9(详见 memory [[project_v2_audit_canvas_b_findings]] + 报告 §六):
+
+- Fix A 碎片闸(`faithful_v2._canvas_frag`→未定区,成品143→73)/ Fix B 收敛 ocr_correct(`_keys_cover_text` **简拼**子序列,用户裁定简拼放宽+prompt约束)/ OCR-grounding(`_ocr_grounded` 口3精神,防凭空造字)/ 英文前缀剥离(`decode_span._strip_eng_prefix` 大写守卫,治 #3 Portrait中的)/ 号码闸(`is_phone`,`PORTRAIT_PHONE_FILTER` 开关)。
+- commit:三修+简拼prompt+OCR-grounding+英文strip(canvas_librime/faithful_v2,path-limited,均已提交)。GPU 复跑复用 AX 缓存(`eval/v2cache/`)只重建 canvas。gold 全程 43✓ 零回归。
+- **⚠️ 跑批教训**:并行 session(Sources/GraphPhysics graph物理)同仓库高频 commit/amend,`git add` 会被对方 `git commit` 卷走 → 一律 `git commit -F msg -- <文件>`(path-limited,不预 stage)。
+- **⏭️ 用户定的下一步**:Stage 2 拆 canvas_B 的 14B,改纯确定性 OCR-verify(口3式:击键走通 OCR 帧行→用它;零幻觉/零GPU)。canvas_C essay 仍 14B。剩余 3 异常=#2字段硬拼/#5 AX HeCheng/#9单字来了。
+
 **用户最终意图(逐次澄清后)**:把 **`faithful_v2.py` 改成一体化主程序**——一条 `.py` 命令(不是 .sh)内部做完:承载率判别 → 承载段走 AX 重建、0承载段走 canvas(B/C 解码,ax_verify)→ 统一 Pass4/出口 → 产 v2 md;**不落 fusion 中间文件、不分 canvas_route/canvas_c_run/faithful 三脚本**。Python 实验线 ≠ 生产(生产是 Swift 另一套),所以放手改 Python 无接生产顾虑。
 
 - **重构不改产出**:同判别/同 B/C 解码/同闸,只是编排从"三脚本+fusion"→"主程序内部分流"。canvas 逻辑现成(canvas_route.route_day 的 B + main 的 C 驱动,都已整合进 canvas_route.py,可直接搬进 faithml_v2 或 import 调用)。
