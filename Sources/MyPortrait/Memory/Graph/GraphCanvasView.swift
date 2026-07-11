@@ -27,6 +27,8 @@ struct GraphCanvasView: View {
     /// 开着浮窗卡片的球(nil = 无):与 hover 同款白闪持续提示(07-10 用户
     /// "有显示卡片的球也需要持续闪光")。
     let cardNodeId: Int?
+    /// 主球自定义照片(已圆形裁剪,07-11 用户):非 nil 时叠画在主球上。
+    let mainBallImage: NSImage?
     /// 点到球(nil = 点空白)。root 据此开浮窗(leaf)或触发脉冲(hub)。
     var onTapNode: (Int?) -> Void = { _ in }
     /// 拖球松手(07-09):root 据此启动"相机缓移取景到隐形环"。
@@ -82,6 +84,7 @@ struct GraphCanvasView: View {
          pulses: [GraphPulse], pulseStart: Date,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
          cardNodeId: Int? = nil,
+         mainBallImage: NSImage? = nil,
          onTapNode: @escaping (Int?) -> Void = { _ in },
          onNodeDragEnded: @escaping () -> Void = {},
          onCameraInterrupt: @escaping () -> Void = {}) {
@@ -93,6 +96,7 @@ struct GraphCanvasView: View {
         self._camera = camera
         self._hoveredId = hoveredId
         self.cardNodeId = cardNodeId
+        self.mainBallImage = mainBallImage
         self.onTapNode = onTapNode
         self.onNodeDragEnded = onNodeDragEnded
         self.onCameraInterrupt = onCameraInterrupt
@@ -411,6 +415,16 @@ struct GraphCanvasView: View {
             }
             if !path.isEmpty {
                 ctx.fill(path, with: .color(group.color))
+            }
+        }
+        // 主球自定义照片(07-11 用户):圆形裁好的图叠在蓝球上(node 0)。
+        // 图已圆形(圆外透明),画进方形球区天然成圆;蓝球留作边/兜底。
+        if let img = mainBallImage, !scene.nodes.isEmpty {
+            let c = camera.worldToScreen(snap[0], viewSize: size)
+            let r = scene.nodes[0].radius * zoom
+            if c.x + r >= 0, c.x - r <= size.width, c.y + r >= 0, c.y - r <= size.height {
+                ctx.draw(Image(nsImage: img),
+                         in: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
             }
         }
         // 环形陨石(07-08 开局揭幕):开局隐藏期整批乘揭幕透明度,找到
