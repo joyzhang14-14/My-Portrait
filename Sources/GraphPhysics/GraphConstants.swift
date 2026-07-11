@@ -282,8 +282,9 @@ public enum GraphConstants {
 
     // MARK: 交互动画
 
-    /// 神经脉冲沿边传播速度(世界 pt/s;07-02 三次反馈:700 仍偏快,再降)
-    public static let pulseSpeed: Double = 450
+    /// 神经脉冲沿边传播速度(世界 pt/s;07-02 三次反馈:700 仍偏快,再降;
+    /// 07-11 用户:再降低一倍,冲击波更慢 450→225)
+    public static let pulseSpeed: Double = 225
     /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
     public static let pulseMaxDepthMain: Int = 2
     public static let pulseMaxDepthOther: Int = 1
