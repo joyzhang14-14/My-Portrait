@@ -159,6 +159,7 @@ public enum BeltLayout {
                 let cap = max(1, Int(2 * rowArc * ringR / slotW * 0.5))
                 let rowCount = min(cap, idxs.count - k)
                 let slot = 2 * rowArc / Double(rowCount)
+                let rowStart = k
                 for j in 0..<rowCount {
                     let g = idxs[k]
                     // 模糊(单环重构加码:径向 ±1.1 排距、角向 ±1.2 槽,
@@ -173,6 +174,22 @@ public enum BeltLayout {
                     angles[g] = max(-rowArc, min(rowArc, angles[g]))
                     k += 1
                     placed += 1
+                }
+                // 射线基准虽是主球→folder,但独立抽样的角向抖动
+                // 会让稀疏排整体偏到一侧(实机约 15°)。每排随机完后
+                // 减去本排均值,再等比缩回 rowArc:保留排内相对间距/
+                // 随机感和外排收窄的彗尾形,但视觉中心严格回到射线。
+                let rowIDs = idxs[rowStart..<k]
+                let mean = rowIDs.reduce(0.0) { $0 + angles[$1] }
+                    / Double(rowCount)
+                var maxAbs = 0.0
+                for g in rowIDs {
+                    angles[g] -= mean
+                    maxAbs = max(maxAbs, abs(angles[g]))
+                }
+                if maxAbs > rowArc {
+                    let scale = rowArc / maxAbs
+                    for g in rowIDs { angles[g] *= scale }
                 }
                 // 排距(单环"更分散"指厚度:beltRowGap 加大 = 带更厚)
                 cursor += slotW * GraphConstants.beltRowGap
