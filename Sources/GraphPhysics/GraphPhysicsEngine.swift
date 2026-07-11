@@ -964,12 +964,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 // 时交点始终钉在射线上 —— 弧方向不再随环心晃,只有径向
                 // 微调,环心切换/平滑的视觉跳动被结构性消掉。主球钉原点,
                 // 环罩住主球(原点在环内)⇒ 判别式恒正、正根恒存在。
-                // ⚠️ 射线端点一律锁 beltPredPos(07-08 用户"动的时候一步
-                // 到位":实时位置会让弧追着 folder 飘移滑 19°/7s;先改
-                // 混合帧后仍剩翻静慢爬期 3.5° 慢漂 —— 干脆全锁影子终局,
-                // spawn 占位=当刻实时、ready 后=终局,下次交互才刷新。
-                // 弧从锁定那刻起纹丝不动,陨石直飞;终态弧位与真实停位
-                // 差 ~3.5° 用户接受[丝滑>精确])
+                // 射线端点锁 beltPredPos:实时位置会让弧追着
+                // folder 飘移慢滑;ready 结果必须等影子 brake == 0,
+                // 用完整缓停终点锁定真正的主球→folder 射线。这样
+                // 弧从锁定那刻起纹丝不动,同时不再保留准静止时
+                // 提前交卷带来的终态偏角。
                 let f = beltPredPos.count == nh
                     ? beltPredPos[s] : beltTmpNow[s]
                 let fl = simd_length(f)
@@ -1208,8 +1207,10 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 挪出物理线程零挤占;92~600 步 × ~0.2ms 后台几十 ms 完成)。
         // 实例移交任务线程独占(GCD 派发自带内存屏障),结果经
         // shadowLock 交接;gen 不匹配 = 已被废弃(拖拽/新场景),丢弃。
-        // done 判据 = hub 全静(只消费 hub;等全场停会陪 599 颗慢陨石
-        // 耗几千步)/冷透+缓停完/步数封顶
+        // done 判据 = hub 冷透+缓停完(只消费 hub;等全场停会
+        // 陪 599 颗慢陨石耗几千步)/步数封顶。不在 quietFlag
+        // 首次命中时提前交卷:那时 hub 还有缓停位移,会让锁定的
+        // 主球→folder 射线与真实终点产生小偏角。
         let hubIdx = hubIndices
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let eng = self else { return }
@@ -1226,14 +1227,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 }
                 sh.tick()
                 steps += 1
-                // 交卷判据 = 冷透+静止(quietFlag;07-08 用户"影子再快
-                // 一点,延迟变小":等 brake 缓停滑完要多耗 100~200 步,
-                // 而那段位移被 brake 缩到几 pt —— 提前交卷,终局差被
-                // 死区 35pt 缓冲吸收)。含爬行终点 ≈ 真实停位,ready
-                // 锁定后停稳校验几乎必然零动。影子陨石冻结 ⇒ quietFlag
-                // 不被陨石阻塞;brake==0/cap 兜底
-                if sh.alpha < GraphConstants.alphaMin
-                    && (sh.quietFlag || sh.brake == 0) {
+                // 交卷判据 = 冷透+缓停完。quietFlag 只表示准静止,
+                // 之后 brake 阶段 hub 仍会移动;必须跑到 0 才能把影子终点
+                // 当作真实的主球→folder 射线端点。影子陨石已冻结,
+                // 不会因等全场陨石而拖长;shadowTickCap 仍是病态兜底。
+                if sh.alpha < GraphConstants.alphaMin && sh.brake == 0 {
                     break
                 }
             }
@@ -1401,7 +1399,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         var steps = 0
         while steps < GraphConstants.shadowTickCap {
             sh.tick(); steps += 1
-            if sh.alpha < GraphConstants.alphaMin && (sh.quietFlag || sh.brake == 0) {
+            if sh.alpha < GraphConstants.alphaMin && sh.brake == 0 {
                 break
             }
         }
