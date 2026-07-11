@@ -353,6 +353,33 @@ struct SchedulerSettings: Codable, Equatable {
 
 // MARK: - Display
 
+/// event 环形陨石的滑动速度档位(07-11 用户:5 档 Apple 风,不显示数值)。
+/// 控制两处**可见**动画:①拖动松手后陨石归位滑速 ②开局从暗处点亮的速度。
+/// medium=当前手感;scale 推给 GraphPhysicsEngine.setMeteorSpeedScale。
+enum MeteorSpeed: String, Codable, CaseIterable, Identifiable, Equatable {
+    case verySlow, slow, medium, fast, veryFast
+    var id: String { rawValue }
+    /// 引擎速度倍率。medium=1.0=现状;极慢受 glide cap 的 24pt 穿透阈值约束到 0.70。
+    var scale: Float {
+        switch self {
+        case .verySlow: return 0.70
+        case .slow:     return 0.85
+        case .medium:   return 1.00
+        case .fast:     return 1.50
+        case .veryFast: return 2.20
+        }
+    }
+    var label: String {
+        switch self {
+        case .verySlow: return "极慢"
+        case .slow:     return "慢"
+        case .medium:   return "中等"
+        case .fast:     return "快"
+        case .veryFast: return "极快"
+        }
+    }
+}
+
 struct DisplayConfig: Codable, Equatable {
     var theme:                   String = "system"
     var hideModelReasoning:      Bool   = false
@@ -371,6 +398,8 @@ struct DisplayConfig: Codable, Equatable {
     /// Memories 列表排序规则:weight(默认)/ created / last_occurred。
     /// 文件夹分组内的 event 也跟随。值取自 MemorySortOrder.rawValue。
     var memorySortOrder:         String = "weight"
+    /// event 环形陨石滑动速度(归位 + 开局点亮)。默认中等=当前手感。
+    var graphMeteorSpeed:        MeteorSpeed = .medium
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -383,6 +412,7 @@ struct DisplayConfig: Codable, Equatable {
         case showInMenuBar            = "show_in_menu_bar"
         case showDockIcon             = "show_dock_icon"
         case memorySortOrder          = "memory_sort_order"
+        case graphMeteorSpeed         = "graph_meteor_speed"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -396,6 +426,7 @@ struct DisplayConfig: Codable, Equatable {
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
         showDockIcon            = c.dflt(Bool.self,   .showDockIcon, showDockIcon)
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
+        graphMeteorSpeed        = c.dflt(MeteorSpeed.self, .graphMeteorSpeed, graphMeteorSpeed)
     }
 }
 

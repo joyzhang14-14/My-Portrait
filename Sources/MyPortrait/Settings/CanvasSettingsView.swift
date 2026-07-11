@@ -67,12 +67,19 @@ enum MainBallPhoto {
 }
 
 struct CanvasSettingsView: View {
+    @State private var config = ConfigStore.shared
+
     var body: some View {
         // 无页面大标题(07-11 用户:侧栏入口内联,不要标题),只列卡片。
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 SettingsCard(title: "Main ball") {
                     MainBallPhotoSlot()
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+                SettingsCard(title: "Meteor speed") {
+                    MeteorSpeedSlider(selection: config.binding(\.display.graphMeteorSpeed))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
@@ -168,6 +175,61 @@ private struct MainBallPhotoSlot: View {
         guard let imgSrc = CGImageSourceCreateWithURL(src as CFURL, nil),
               let cg = CGImageSourceCreateImageAtIndex(imgSrc, 0, nil) else { return }
         cropTarget = CropTarget(image: cg)
+    }
+}
+
+/// 陨石滑动速度选择器(07-11 用户:5 档、无数值、Apple 风)。速度是"大小量"
+/// → 用带刻度 Slider(仿 macOS 系统设置 Tracking/Scrolling speed:龟/兔图标夹
+/// 滑块 + 底部 5 档中文刻度高亮当前档),不用 segmented。默认中等=当前手感。
+private struct MeteorSpeedSlider: View {
+    @Binding var selection: MeteorSpeed
+
+    private static let cases = MeteorSpeed.allCases
+
+    /// 枚举 ↔ Double 桥接:step=1 让滑块吸附到 5 个整点。
+    private var sliderValue: Binding<Double> {
+        Binding(
+            get: { Double(Self.cases.firstIndex(of: selection) ?? 2) },
+            set: { v in
+                let i = min(max(Int(v.rounded()), 0), Self.cases.count - 1)
+                selection = Self.cases[i]
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Speed")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                Spacer()
+                Text(selection.label)               // 当前档名替代数字
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "tortoise.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
+                Slider(value: sliderValue, in: 0...Double(Self.cases.count - 1), step: 1)
+                    .tint(Theme.accent)
+                Image(systemName: "hare.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
+            }
+            // 5 档文字刻度均分,高亮当前档 → 无数字也知道停在哪
+            HStack(spacing: 0) {
+                ForEach(Self.cases) { s in
+                    Text(s.label)
+                        .font(.system(size: 10))
+                        .foregroundStyle(s == selection ? Theme.accent
+                                                        : Theme.textPrimary.opacity(0.40))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 18)               // 对齐轨道,避开两端图标宽度
+        }
     }
 }
 
