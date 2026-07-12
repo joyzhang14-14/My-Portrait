@@ -122,10 +122,9 @@ struct CaptureHealthView: View {
 
     /// 两条上报路径:自己去 GitHub 提 issue(纯跳转),或私下打包发邮件给开发者。
     private var diagnosticCard: some View {
-        SettingsCard(title: "Bug report",
-                     footnote: "The private option excludes captured images, audio, typing, transcriptions, chats, memory files, and secrets. You can inspect the zip before sharing.") {
+        SettingsCard(title: "Bug report") {
             SettingsRow("Report on GitHub",
-                        description: "Best if you can describe the bug clearly and know how to trigger it. Opens GitHub so you can file a public issue yourself — nothing is sent automatically.",
+                        description: "Best if you can describe the bug clearly and know how to trigger it. Opens GitHub so you can file a public issue yourself.",
                         icon: "ladybug") {
                 Button("Open") {
                     if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
