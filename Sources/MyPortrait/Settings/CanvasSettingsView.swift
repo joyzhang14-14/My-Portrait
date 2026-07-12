@@ -211,6 +211,14 @@ private struct MeteorSpeedSlider: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            Text("Meteor ring speed")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
+            Text("How fast the meteors orbiting a folder ball glide back into place after you drag the ball, and how fast they light up when the graph opens.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 4)
             Slider(value: sliderValue, in: 0...Double(Self.maxIdx), step: 1)
                 .tint(Theme.accent)
             // 5 档标签。中间三档 center 精确钉在滑块停点分数 i/4 上;首尾两档
