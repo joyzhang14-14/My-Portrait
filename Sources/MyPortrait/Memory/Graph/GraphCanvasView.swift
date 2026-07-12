@@ -22,6 +22,9 @@ struct GraphCanvasView: View {
     /// 神经脉冲时间表(hub 点击时一次算好)+ 起跑时刻。空 = 无脉冲。
     let pulses: [GraphPulse]
     let pulseStart: Date
+    /// 抵达点亮的淡出时长(秒)。已按用户的脉冲速度档位缩放,GraphRootView 传入
+    /// —— 它的脉冲清空定时也用同一个值,清早了闪光会被切断。
+    let pulseFlashSec: Double
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
     /// 开着浮窗卡片的球(nil = 无):与 hover 同款白闪持续提示(07-10 用户
@@ -82,6 +85,7 @@ struct GraphCanvasView: View {
 
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
+         pulseFlashSec: Double = GraphConstants.pulseArriveFlashSec,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
          cardNodeId: Int? = nil,
          mainBallImage: NSImage? = nil,
@@ -93,6 +97,7 @@ struct GraphCanvasView: View {
         self.paused = paused
         self.pulses = pulses
         self.pulseStart = pulseStart
+        self.pulseFlashSec = pulseFlashSec
         self._camera = camera
         self._hoveredId = hoveredId
         self.cardNodeId = cardNodeId
@@ -473,12 +478,11 @@ struct GraphCanvasView: View {
             var flash: [Int: Double] = [:]
             for p in pulses {
                 let age = elapsed - (p.start + p.duration)
-                guard age >= 0, age <= GraphConstants.pulseArriveFlashSec else { continue }
+                guard age >= 0, age <= pulseFlashSec else { continue }
                 let e = scene.edges[p.edgeIndex]
                 let to = (e.a == p.fromNode) ? e.b : e.a
                 guard to >= 0, to < scene.nodes.count else { continue }
-                let a = GraphConstants.pulseArriveFlashPeak
-                      * (1 - age / GraphConstants.pulseArriveFlashSec)
+                let a = GraphConstants.pulseArriveFlashPeak * (1 - age / pulseFlashSec)
                 if a > (flash[to] ?? 0) { flash[to] = a }
             }
             for (bid, a) in flash {

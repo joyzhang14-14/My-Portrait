@@ -99,6 +99,17 @@ struct GraphRootView: View {
     @State private var preloadedRing: (center: SIMD2<Float>, radius: Float)? = nil
     /// 主球自定义照片(07-11 用户):从磁盘加载,Settings 改了发通知即重载。
     @State private var mainBallImage: NSImage? = nil
+    /// 观察 config:脉冲速度档位改了要即时反映到渲染(闪光时长)与下次点击。
+    @State private var config = ConfigStore.shared
+
+    /// 神经脉冲速度倍率(config;1=中等=现状,>1 更快)。
+    private var pulseScale: Double {
+        config.current.display.graphPulseSpeed.pulseScale
+    }
+    /// 抵达点亮的淡出时长(随脉冲档位缩放:快档闪得更干脆)。
+    private var pulseFlashSec: Double {
+        GraphConstants.pulseArriveFlashSec / pulseScale
+    }
 
     private var zone: GraphZone {
         if case .portrait = scope { return .portrait }
@@ -122,6 +133,7 @@ struct GraphRootView: View {
                                     paused: renderPaused,
                                     pulses: pulses,
                                     pulseStart: pulseStart,
+                                    pulseFlashSec: pulseFlashSec,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
                                     cardNodeId: floatNodeId,
@@ -495,8 +507,10 @@ struct GraphRootView: View {
         // folder/分区球:速度自适应(07-11 用户设计)= 该球连线的**平均长度**
         // / pulseHubTravelSeconds → 脉冲恰好用那么久走完一条平均边,不论
         // folder 大小观感一致。主球仍用常量(它 2 跳级联,自适应会让总时长翻倍)。
-        let speed = isMain ? GraphConstants.pulseSpeed
-                           : hubPulseSpeed(from: hub, snap: snap, blocked: blocked)
+        // 两者都再乘用户的脉冲档位倍率(pulseScale,>1 更快)。
+        let speed = (isMain ? GraphConstants.pulseSpeed
+                            : hubPulseSpeed(from: hub, snap: snap, blocked: blocked))
+                    * pulseScale
         let (list, total) = GraphPulseScheduler.schedule(from: hub, scene: scene,
                                                          positions: snap,
                                                          speed: speed,
@@ -518,7 +532,7 @@ struct GraphRootView: View {
         // 晚批短级联提前清掉;清空后 renderPaused 恢复休眠判定)。
         // ⚠️ 必须再等抵达闪光淡完:pulses 一空,renderPaused 立刻停重绘、
         // drawBalls 也读不到抵达时刻 → 末端球的闪光会被拦腰切断(07-11)。
-        let wait = pulseEnd - base + GraphConstants.pulseArriveFlashSec + 0.2
+        let wait = pulseEnd - base + pulseFlashSec + 0.2
         Task {
             try? await Task.sleep(for: .seconds(wait))
             if gen == pulseGen { pulses = [] }
@@ -713,7 +727,8 @@ struct GraphRootView: View {
         }
         // 陨石滑动速度旋钮(07-11 用户):把 config 档位推给引擎(归位 glide +
         // 开局点亮速度)。两分支合流,新建/复用引擎都覆盖;下 tick 生效不重建。
-        engine?.setAnimationSpeedScale(ConfigStore.shared.current.display.graphAnimationSpeed.scale)
+        engine?.setAnimationSpeedScale(
+            ConfigStore.shared.current.display.graphAnimationSpeed.animationScale)
         hoveredId = nil
         if floatNodeId.map({ $0 >= scene.nodes.count }) == true { floatNodeId = nil }
         loading = false

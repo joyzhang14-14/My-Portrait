@@ -79,7 +79,18 @@ struct CanvasSettingsView: View {
                         .padding(.vertical, 10)
                 }
                 SettingsCard(title: "Animation speed") {
-                    GraphAnimationSpeedSlider(selection: config.binding(\.display.graphAnimationSpeed))
+                    SpeedLevelSlider(
+                        title: "Graph animation speed",
+                        caption: "How fast the graph plays its opening animation — the balls spreading out and the meteors lighting up — and how fast the meteor ring glides back into place after you drag a folder ball.",
+                        selection: config.binding(\.display.graphAnimationSpeed))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+                SettingsCard(title: "Pulse speed") {
+                    SpeedLevelSlider(
+                        title: "Neural pulse speed",
+                        caption: "How fast the pulse travels along the links when you click a ball, and how quickly each ball it reaches flashes on.",
+                        selection: config.binding(\.display.graphPulseSpeed))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
@@ -178,19 +189,22 @@ private struct MainBallPhotoSlot: View {
     }
 }
 
-/// 图谱动画速度选择器(07-11 用户:5 档、无数值、Apple 风,英文标签)。
+/// 5 档速度选择器(07-11 用户:5 档、无数值、Apple 风,英文标签)。图谱动画
+/// 与神经脉冲两个设置共用(各自传 title/caption,绑各自的 config 字段)。
 /// 速度是"大小量" → 用带刻度 Slider(仿 macOS 系统设置 Tracking speed),
 /// 5 档标签用 GeometryReader **精确定位到滑块的 5 个停点分数**(等宽列会把
 /// 字中心放在 1/10…9/10,与停点 0…1 天生错位;去掉两端图标消除轨道内缩)。
 /// 高亮当前档。默认中等=当前手感。
-private struct GraphAnimationSpeedSlider: View {
-    @Binding var selection: GraphAnimationSpeed
+private struct SpeedLevelSlider: View {
+    let title: String
+    let caption: String
+    @Binding var selection: SpeedLevel
 
-    private static let cases = GraphAnimationSpeed.allCases
+    private static let cases = SpeedLevel.allCases
     private static let maxIdx = cases.count - 1
 
     /// 单个档位标签(当前档高亮)。
-    private func tick(_ s: GraphAnimationSpeed) -> some View {
+    private func tick(_ s: SpeedLevel) -> some View {
         Text(s.label)
             .font(.system(size: 10))
             .foregroundStyle(s == selection ? Theme.accent
@@ -211,10 +225,10 @@ private struct GraphAnimationSpeedSlider: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Graph animation speed")
+            Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.textPrimary.opacity(0.92))
-            Text("How fast the graph plays its opening animation — the balls spreading out and the meteors lighting up — and how fast the meteor ring glides back into place after you drag a folder ball.")
+            Text(caption)
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
