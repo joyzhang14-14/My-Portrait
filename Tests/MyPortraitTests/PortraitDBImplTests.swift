@@ -125,7 +125,7 @@ final class PortraitDBImplTests: XCTestCase {
         _ = try await db.insertFrame(newRecord)
 
         let cutoff = (oldMs + newMs) / 2
-        let stats = try await db.applyRetention(mode: .mediaOnly, beforeMs: cutoff)
+        let stats = try await db.applyRetention(mode: .mediaOnly, beforeMs: cutoff, audioChunkIds: [])
         XCTAssertEqual(stats.framesAffected, 1)            // 旧帧的 snapshot_path 被 NULL
         XCTAssertEqual(stats.videoChunksDeleted, 0)        // 没 video chunks
         XCTAssertEqual(stats.audioChunksDeleted, 0)        // mediaOnly 不动 audio rows

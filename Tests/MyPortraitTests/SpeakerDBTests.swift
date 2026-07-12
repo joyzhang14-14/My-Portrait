@@ -6,6 +6,7 @@ import XCTest
 final class SpeakerDBTests: XCTestCase {
 
     private var tempPaths: [String] = []
+    private let model = "test_campplus"
 
     override func tearDown() async throws {
         let fm = FileManager.default
@@ -40,44 +41,57 @@ final class SpeakerDBTests: XCTestCase {
     func testEnrollAndMatchSpeaker() async throws {
         let db = try makeDB()
         let a = vector(cosineToE0: 1.0)
-        let id = try await db.enrollSpeaker(embedding: a)
+        let id = try await db.enrollSpeaker(embedding: a, model: model)
         XCTAssertGreaterThan(id, 0)
 
         // 同向量 → 匹配上自己。
-        let matched = try await db.matchSpeaker(embedding: a)
-        XCTAssertEqual(matched, id)
+        let matched = try await db.matchSpeaker(embedding: a, model: model)
+        guard case .matched(let matchedID) = matched else {
+            return XCTFail("同向量应命中已注册说话人")
+        }
+        XCTAssertEqual(matchedID, id)
 
         // 正交向量（余弦 0）→ 不匹配。
-        let none = try await db.matchSpeaker(embedding: vector(cosineToE0: 0))
-        XCTAssertNil(none)
+        let none = try await db.matchSpeaker(embedding: vector(cosineToE0: 0), model: model)
+        guard case .none = none else {
+            return XCTFail("正交向量不应匹配说话人")
+        }
     }
 
     func testMatchSpeakerThreshold() async throws {
         let db = try makeDB()
-        let id = try await db.enrollSpeaker(embedding: vector(cosineToE0: 1.0))
+        let id = try await db.enrollSpeaker(embedding: vector(cosineToE0: 1.0), model: model)
 
         // 余弦 0.5 > 阈值 0.45 → 匹配。
-        let near = try await db.matchSpeaker(embedding: vector(cosineToE0: 0.5))
-        XCTAssertEqual(near, id)
+        let near = try await db.matchSpeaker(embedding: vector(cosineToE0: 0.5), model: model)
+        guard case .matched(let matchedID) = near else {
+            return XCTFail("高于阈值的向量应匹配")
+        }
+        XCTAssertEqual(matchedID, id)
         // 余弦 0.3 < 阈值 0.45 → 不匹配。
-        let far = try await db.matchSpeaker(embedding: vector(cosineToE0: 0.3))
-        XCTAssertNil(far)
+        let far = try await db.matchSpeaker(embedding: vector(cosineToE0: 0.3), model: model)
+        guard case .none = far else {
+            return XCTFail("低于阈值的向量不应匹配")
+        }
     }
 
     func testAddEmbeddingKeepsSpeakerMatchable() async throws {
         let db = try makeDB()
         let a = vector(cosineToE0: 1.0)
-        let id = try await db.enrollSpeaker(embedding: a)
+        let id = try await db.enrollSpeaker(embedding: a, model: model)
         try await db.addEmbeddingToSpeaker(speakerId: id, embedding: a)
         try await db.addEmbeddingToSpeaker(speakerId: id, embedding: vector(cosineToE0: 0.9))
         // 追加样本后仍能匹配回同一说话人。
-        let matched = try await db.matchSpeaker(embedding: a)
-        XCTAssertEqual(matched, id)
+        let matched = try await db.matchSpeaker(embedding: a, model: model)
+        guard case .matched(let matchedID) = matched else {
+            return XCTFail("追加样本后应仍能匹配")
+        }
+        XCTAssertEqual(matchedID, id)
     }
 
     func testNameSpeakerIfUnnamedDoesNotThrow() async throws {
         let db = try makeDB()
-        let id = try await db.enrollSpeaker(embedding: vector(cosineToE0: 1.0))
+        let id = try await db.enrollSpeaker(embedding: vector(cosineToE0: 1.0), model: model)
         // 只验证不抛错（读回名字的接口在 TimelineDB，单测够不到）。
         try await db.nameSpeakerIfUnnamed(speakerId: id, name: "Alice")
         try await db.nameSpeakerIfUnnamed(speakerId: id, name: "Bob")
