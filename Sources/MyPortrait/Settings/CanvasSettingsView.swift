@@ -78,7 +78,7 @@ struct CanvasSettingsView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
-                SettingsCard(title: "Meteor speed") {
+                SettingsCard(title: "Animation speed") {
                     MeteorSpeedSlider(selection: config.binding(\.display.graphMeteorSpeed))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -211,10 +211,10 @@ private struct MeteorSpeedSlider: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Meteor ring speed")
+            Text("Graph animation speed")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.textPrimary.opacity(0.92))
-            Text("How fast the meteors orbiting a folder ball glide back into place after you drag the ball, and how fast they light up when the graph opens.")
+            Text("How fast the graph plays its opening animation — the balls spreading out and the meteors lighting up — and how fast the meteor ring glides back into place after you drag a folder ball.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
