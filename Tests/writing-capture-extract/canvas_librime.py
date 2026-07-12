@@ -74,11 +74,35 @@ def _decode_segment(seg):
     return ''.join(out)
 
 
+US_RATIO = 0.8   # 逾此比例的击键来自纯键盘布局 → 判英文打字,不解码
+
+def _ime_active(con, bundle, t0, t1):
+    """这段 canvas 会话是不是**在输入法下**打的 —— 决定要不要过 librime。
+
+    ⚠️`keylayout.*` = 纯键盘布局(英文直接上屏,压根没有拼音这回事),硬送 librime 会把英文
+    拆成声母+韵母解成汉字:实测 `com`→「聪明」(邮箱 xxx@gmail.com 被解坏)、`the`→「他和」、
+    `de`→「的」。canvas 路原先无条件强开 decode,这些全中招。
+    `input_source` 自 2026-06-13 才有值;此前全 None → 无从判断,**维持原行为(解码)**,
+    不拿新闸去改旧数据的结论。"""
+    rows = con.execute(
+        "SELECT input_source, COUNT(*) FROM keystroke_log "
+        "WHERE bundle_id = :b AND ts_ms BETWEEN :a AND :c GROUP BY input_source",
+        {"b": bundle, "a": t0, "c": t1}).fetchall()
+    d = {(s or ''): n for s, n in rows}
+    tot = sum(d.values())
+    if not tot:
+        return True
+    us = sum(n for s, n in d.items() if 'keylayout' in s)
+    return (us / tot) <= US_RATIO
+
+
 def decode_span(con, bundle, t0, t1):
-    """一个短 canvas 会话的击键 → librime 确定性重建(TOP,不跑模型)。"""
+    """一个短 canvas 会话的击键 → librime 确定性重建(TOP,不跑模型)。
+    输入法关着(纯英文键盘)则不解码,字面照抄 —— DECODE_LIBRIME=False 时 decode_run 返回 None,
+    _decode_segment 的 `han or buf` 自然落到字面。"""
     kw = R.keys_in_window(con, bundle, t0, t1)
     prev = R.DECODE_LIBRIME
-    R.DECODE_LIBRIME = True   # bucket B 这条路开 decode;AX 路保持关
+    R.DECODE_LIBRIME = _ime_active(con, bundle, t0, t1)   # 英文键盘 → 不猜字
     try:
         lines = [_decode_segment(seg) for seg in R.split_cr(kw)]
     finally:
