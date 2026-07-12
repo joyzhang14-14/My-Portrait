@@ -3,18 +3,37 @@ import OSLog
 import AppKit
 import Darwin
 
-enum DiagnosticBundleMode: String {
+enum DiagnosticBundleMode: String, Sendable {
     case publicReport = "public"
     case privateSupport = "private-support"
 }
 
 /// 导出两类诊断包到 Downloads：适合公开 issue 的严格脱敏包，或信息更完整的
 /// 私下支持包。两者都不读取采集内容、聊天、记忆文件或 SecretStore。
-@MainActor
 enum DiagnosticBundle {
 
     /// Build the bundle. 返回写好的 zip 的 URL。失败抛错由 UI 弹 alert。
+    @MainActor
     static func build(mode: DiagnosticBundleMode = .publicReport) async throws -> URL {
+        // ConfigStore 属于 MainActor；先只取一份已脱敏/白名单化的数据快照，
+        // 后面的日志扫描、目录遍历和 zip 全放后台，避免导出时冻结整个窗口。
+        let (configName, configData) = try configSnapshot(for: mode)
+        let stallsData = try stallsSnapshot(for: mode)
+        let healthLogURL = HealthMonitor.logFileURL
+        let terminationURLs = (RunTerminationTracker.stateFileURL,
+                               RunTerminationTracker.historyFileURL)
+        return try await Task.detached(priority: .userInitiated) {
+            try buildOffMain(mode: mode, configName: configName, configData: configData,
+                             stallsData: stallsData, healthLogURL: healthLogURL,
+                             terminationURLs: terminationURLs)
+        }.value
+    }
+
+    private static func buildOffMain(
+        mode: DiagnosticBundleMode, configName: String, configData: Data,
+        stallsData: Data, healthLogURL: URL,
+        terminationURLs: (state: URL, history: URL)
+    ) throws -> URL {
         let isoFmt = ISO8601DateFormatter()
         isoFmt.formatOptions = [.withInternetDateTime, .withColonSeparatorInTime]
         let ts = isoFmt.string(from: Date()).replacingOccurrences(of: ":", with: "-")
@@ -30,20 +49,17 @@ enum DiagnosticBundle {
         writeText(readme(for: mode), to: workDir.appendingPathComponent("README.txt"))
         try? writePrivacyManifest(mode: mode, to: workDir.appendingPathComponent("privacy.json"))
         try? writeSystemInfo(to: workDir.appendingPathComponent("system.json"))
-        if mode == .publicReport {
-            try? writePublicConfigSummary(to: workDir.appendingPathComponent("config-summary.json"))
-        } else {
-            try? writeRedactedConfig(to: workDir.appendingPathComponent("config-redacted.json"))
-        }
-        try? copyHealthLog(mode: mode, to: workDir.appendingPathComponent("health.log"))
-        try? writeStalls(mode: mode, to: workDir.appendingPathComponent("stalls.json"))
+        try? configData.write(to: workDir.appendingPathComponent(configName), options: .atomic)
+        try? copyHealthLog(mode: mode, from: healthLogURL,
+                           to: workDir.appendingPathComponent("health.log"))
+        try? stallsData.write(to: workDir.appendingPathComponent("stalls.json"), options: .atomic)
         try? writeProcessingLog(mode: mode, to: workDir.appendingPathComponent("processing_log.json"))
         try? writeDbStats(mode: mode, to: workDir.appendingPathComponent("db_stats.json"))
         try? writeOSLog24h(mode: mode, to: workDir)
         copyDiagnosticLogs(mode: mode, to: workDir)
         copyCrashReports(mode: mode, to: workDir)
         copyHangSamples(mode: mode, to: workDir)
-        copyRunTerminationRecords(mode: mode, to: workDir)
+        copyRunTerminationRecords(mode: mode, urls: terminationURLs, to: workDir)
         try? writeJetsamSummary(to: workDir.appendingPathComponent("jetsam-summary.json"))
 
         // 3) zip 到 Downloads(用户原话:放在 download 里)
@@ -136,40 +152,68 @@ enum DiagnosticBundle {
         try writeJSON(dict, to: url)
     }
 
-    /// 公开包只导出排障需要的显式白名单，不序列化整个配置对象。
-    private static func writePublicConfigSummary(to url: URL) throws {
+    /// ConfigStore 只在 MainActor 读取；返回值已经完成白名单/脱敏，可安全交给后台写盘。
+    @MainActor
+    private static func configSnapshot(for mode: DiagnosticBundleMode) throws -> (String, Data) {
         let cfg = ConfigStore.shared.current
-        let payload: [String: Any] = [
-            "schema_version": cfg.schemaVersion,
-            "screen_capture": [
-                "enabled": cfg.capture.screen.enabled,
-                "ocr_accuracy_booster": cfg.capture.screen.ocrAccuracyBooster,
-            ],
-            "audio_capture": [
-                "enabled": cfg.capture.audio.enabled,
-                "engine": cfg.capture.audio.engine,
-                "capture_system_audio": cfg.capture.audio.captureSystemAudio,
-                "speaker_id_enabled": cfg.capture.audio.speakerIdEnabled,
-                "filter_music": cfg.capture.audio.filterMusic,
-                "transcription_power_mode": cfg.capture.audio.transcriptionPowerMode.rawValue,
-            ],
-            "typing_capture": [
-                "enabled": cfg.capture.typingCaptureEnabled,
-                "record_paste_events": cfg.capture.typingRecordPasteEvents,
-            ],
-            "system_power_mode": cfg.capture.system.powerMode,
-            "ai_preset_count": cfg.aiModels.presets.count,
-        ]
-        try writeJSON(payload, to: url)
+        let object: Any
+        let name: String
+        if mode == .publicReport {
+            name = "config-summary.json"
+            object = [
+                "schema_version": cfg.schemaVersion,
+                "screen_capture": [
+                    "enabled": cfg.capture.screen.enabled,
+                    "ocr_accuracy_booster": cfg.capture.screen.ocrAccuracyBooster,
+                ],
+                "audio_capture": [
+                    "enabled": cfg.capture.audio.enabled,
+                    "engine": cfg.capture.audio.engine,
+                    "capture_system_audio": cfg.capture.audio.captureSystemAudio,
+                    "speaker_id_enabled": cfg.capture.audio.speakerIdEnabled,
+                    "filter_music": cfg.capture.audio.filterMusic,
+                    "transcription_power_mode": cfg.capture.audio.transcriptionPowerMode.rawValue,
+                ],
+                "typing_capture": [
+                    "enabled": cfg.capture.typingCaptureEnabled,
+                    "record_paste_events": cfg.capture.typingRecordPasteEvents,
+                ],
+                "system_power_mode": cfg.capture.system.powerMode,
+                "ai_preset_count": cfg.aiModels.presets.count,
+            ] as [String: Any]
+        } else {
+            name = "config-redacted.json"
+            let raw = try JSONSerialization.jsonObject(with: JSONEncoder().encode(cfg))
+            object = redactConfigObject(raw)
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        return (name, data)
     }
 
-    /// 脱敏后的 config.toml: 把任何看似 secret / personal 的字段替换成占位符。
-    /// 保留结构 + 数值/枚举字段(decay / budget / scheduler 时刻这些没隐私)。
-    private static func writeRedactedConfig(to url: URL) throws {
-        let cfg = ConfigStore.shared.current
-        let enc = JSONEncoder()
-        let raw = try JSONSerialization.jsonObject(with: enc.encode(cfg))
-        try writeJSON(redactConfigObject(raw), to: url)
+    @MainActor
+    private static func stallsSnapshot(for mode: DiagnosticBundleMode) throws -> Data {
+        let recent = StallDetector.shared.recent
+        let pause = IntentionalPauseState.shared
+        let payload: [String: Any] = [
+            "generated_at": ISO8601DateFormatter().string(from: Date()),
+            "pause_state": [
+                "drm_active": pause.drmActive,
+                "screen_asleep": pause.screenAsleep,
+                "capture_disabled": pause.captureDisabled,
+                "audio_transcription_paused": pause.audioTranscriptionPaused,
+            ],
+            "recent_verdicts": recent.map { v -> [String: Any] in
+                [
+                    "kind": v.kind.rawValue,
+                    "reason": redactText(v.reason, limit: mode == .publicReport ? 160 : 1_000),
+                    "cause": redactText(v.cause ?? "", limit: mode == .publicReport ? 160 : 1_000),
+                    "detected_at": ISO8601DateFormatter().string(from: v.detectedAt),
+                ]
+            },
+        ]
+        return try JSONSerialization.data(
+            withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
     }
 
     private static func redactConfigObject(_ value: Any, key: String = "") -> Any {
@@ -318,23 +362,22 @@ enum DiagnosticBundle {
     /// 上次是否走过正常退出 + 最后一份资源心跳。字段全部由 app 自己生成，
     /// 不含自由文本；公开包额外去掉无排障价值的 PID。
     private static func copyRunTerminationRecords(
-        mode: DiagnosticBundleMode, to workDir: URL
+        mode: DiagnosticBundleMode, urls: (state: URL, history: URL), to workDir: URL
     ) {
         let fm = FileManager.default
         let dstDir = workDir.appendingPathComponent("process-lifecycle", isDirectory: true)
-        let sources = [RunTerminationTracker.stateFileURL,
-                       RunTerminationTracker.historyFileURL]
+        let sources = [urls.state, urls.history]
         guard sources.contains(where: { fm.fileExists(atPath: $0.path) }) else { return }
         try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
 
-        if let data = try? Data(contentsOf: RunTerminationTracker.stateFileURL),
+        if let data = try? Data(contentsOf: urls.state),
            var state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             if mode == .publicReport { state.removeValue(forKey: "pid") }
             try? writeJSON(state, to: dstDir.appendingPathComponent("current-run-state.json"))
         }
 
         guard let history = readTail(
-            RunTerminationTracker.historyFileURL, maxBytes: 512_000) else { return }
+            urls.history, maxBytes: 512_000) else { return }
         let lines = history.split(separator: "\n").suffix(50).compactMap { line -> String? in
             guard let data = line.data(using: .utf8),
                   var event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -454,8 +497,9 @@ enum DiagnosticBundle {
     }
 
     /// 健康度日志:直接 copy ~/.portrait/logs/health.log。
-    private static func copyHealthLog(mode: DiagnosticBundleMode, to url: URL) throws {
-        let src = HealthMonitor.logFileURL
+    private static func copyHealthLog(
+        mode: DiagnosticBundleMode, from src: URL, to url: URL
+    ) throws {
         guard FileManager.default.fileExists(atPath: src.path) else {
             writeText("(no health.log yet)", to: url)
             return
@@ -469,30 +513,6 @@ enum DiagnosticBundle {
         } else {
             copySanitizedText(from: src, to: url, maxBytes: 1_000_000, limit: 1_000)
         }
-    }
-
-    /// StallDetector.recent — 最近 50 条 verdict + 当前 IntentionalPauseState。
-    private static func writeStalls(mode: DiagnosticBundleMode, to url: URL) throws {
-        let recent = StallDetector.shared.recent
-        let pause = IntentionalPauseState.shared
-        let payload: [String: Any] = [
-            "generated_at": ISO8601DateFormatter().string(from: Date()),
-            "pause_state": [
-                "drm_active": pause.drmActive,
-                "screen_asleep": pause.screenAsleep,
-                "capture_disabled": pause.captureDisabled,
-                "audio_transcription_paused": pause.audioTranscriptionPaused,
-            ],
-            "recent_verdicts": recent.map { v -> [String: Any] in
-                [
-                    "kind":        v.kind.rawValue,
-                    "reason":      redactText(v.reason, limit: mode == .publicReport ? 160 : 1_000),
-                    "cause":       redactText(v.cause ?? "", limit: mode == .publicReport ? 160 : 1_000),
-                    "detected_at": ISO8601DateFormatter().string(from: v.detectedAt),
-                ]
-            },
-        ]
-        try writeJSON(payload, to: url)
     }
 
     /// processing_log 全表 — 无 PII,只有 status / 时戳 / retry。
