@@ -392,6 +392,7 @@ struct GraphRootView: View {
                     camera.zoom = minDim / (w0 * pow(w1 / w0, t))
                     try? await Task.sleep(for: .milliseconds(16))
                 }
+                guard !Task.isCancelled, gen == engineGen, runID == cameraRunID else { return }
                 camera.center = c1; camera.zoom = z1
                 onDone?(); return
             }
