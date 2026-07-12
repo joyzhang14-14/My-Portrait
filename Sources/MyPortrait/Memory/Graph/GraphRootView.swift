@@ -357,6 +357,17 @@ struct GraphRootView: View {
             cameraTracking = false; camera.center = c1; camera.zoom = z1
             onDone?(); return
         }
+        // 已在目标机位(重复点同一个 hub;图已 park → 目标逐次相同)→ 镜头无事
+        // 可做,别跑那 36 帧(~0.6s)**空动画**。否则:①每次重复点击都要白等
+        // 一段才发脉冲 ②在这段空动画里再点一次,新的 animateCamera 会 cancel
+        // 掉上一个 task,上一发挂在 onDone 上的脉冲**被直接吞掉** —— 合起来就
+        // 表现为"冲击波走完才能触发下一发"(07-11 用户报的 bug)。
+        // 立即完成 → 连点即连发,新脉冲叠加到在飞的那批上(triggerPulse 本就叠加)。
+        if simd_length(c1 - c0) < 0.5, abs(log(z1 / z0)) < 0.005 {
+            cameraTracking = false
+            camera.center = c1; camera.zoom = z1
+            onDone?(); return
+        }
         let minDim = Double(min(viewSize.width, viewSize.height))
         guard minDim > 1 else {
             cameraTracking = false; camera.center = c1; camera.zoom = z1
