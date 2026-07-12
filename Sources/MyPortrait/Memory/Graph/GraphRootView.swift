@@ -666,7 +666,7 @@ struct GraphRootView: View {
         }
         // 陨石滑动速度旋钮(07-11 用户):把 config 档位推给引擎(归位 glide +
         // 开局点亮速度)。两分支合流,新建/复用引擎都覆盖;下 tick 生效不重建。
-        engine?.setMeteorSpeedScale(ConfigStore.shared.current.display.graphMeteorSpeed.scale)
+        engine?.setAnimationSpeedScale(ConfigStore.shared.current.display.graphAnimationSpeed.scale)
         hoveredId = nil
         if floatNodeId.map({ $0 >= scene.nodes.count }) == true { floatNodeId = nil }
         loading = false

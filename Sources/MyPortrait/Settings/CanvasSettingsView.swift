@@ -79,7 +79,7 @@ struct CanvasSettingsView: View {
                         .padding(.vertical, 10)
                 }
                 SettingsCard(title: "Animation speed") {
-                    MeteorSpeedSlider(selection: config.binding(\.display.graphMeteorSpeed))
+                    GraphAnimationSpeedSlider(selection: config.binding(\.display.graphAnimationSpeed))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
@@ -178,19 +178,19 @@ private struct MainBallPhotoSlot: View {
     }
 }
 
-/// 陨石滑动速度选择器(07-11 用户:5 档、无数值、Apple 风,英文标签)。
+/// 图谱动画速度选择器(07-11 用户:5 档、无数值、Apple 风,英文标签)。
 /// 速度是"大小量" → 用带刻度 Slider(仿 macOS 系统设置 Tracking speed),
 /// 5 档标签用 GeometryReader **精确定位到滑块的 5 个停点分数**(等宽列会把
 /// 字中心放在 1/10…9/10,与停点 0…1 天生错位;去掉两端图标消除轨道内缩)。
 /// 高亮当前档。默认中等=当前手感。
-private struct MeteorSpeedSlider: View {
-    @Binding var selection: MeteorSpeed
+private struct GraphAnimationSpeedSlider: View {
+    @Binding var selection: GraphAnimationSpeed
 
-    private static let cases = MeteorSpeed.allCases
+    private static let cases = GraphAnimationSpeed.allCases
     private static let maxIdx = cases.count - 1
 
     /// 单个档位标签(当前档高亮)。
-    private func tick(_ s: MeteorSpeed) -> some View {
+    private func tick(_ s: GraphAnimationSpeed) -> some View {
         Text(s.label)
             .font(.system(size: 10))
             .foregroundStyle(s == selection ? Theme.accent

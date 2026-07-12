@@ -353,10 +353,12 @@ struct SchedulerSettings: Codable, Equatable {
 
 // MARK: - Display
 
-/// event 环形陨石的滑动速度档位(07-11 用户:5 档 Apple 风,不显示数值)。
-/// 控制两处**可见**动画:①拖动松手后陨石归位滑速 ②开局从暗处点亮的速度。
-/// medium=当前手感;scale 推给 GraphPhysicsEngine.setMeteorSpeedScale。
-enum MeteorSpeed: String, Codable, CaseIterable, Identifiable, Equatable {
+/// 图谱动画速度档位(07-11 用户:5 档 Apple 风,不显示数值)。控制两处:
+/// ①**开局整图动画**(所有球绽放 + 陨石点亮)—— 缩放隐身沉降期的 tick/帧
+/// ②**拖球松手后陨石环归位滑速** —— 缩放 glide cap(这处只作用于陨石)。
+/// ⚠️ 作用域不对称:开局是整图,归位只有陨石。旧名 meteorSpeed 已弃(误导)。
+/// medium=当前手感;scale 推给 GraphPhysicsEngine.setAnimationSpeedScale。
+enum GraphAnimationSpeed: String, Codable, CaseIterable, Identifiable, Equatable {
     case verySlow, slow, medium, fast, veryFast
     var id: String { rawValue }
     /// 引擎速度倍率。medium=1.0=现状;极慢受 glide cap 的 24pt 穿透阈值约束到 0.70。
@@ -399,7 +401,7 @@ struct DisplayConfig: Codable, Equatable {
     /// 文件夹分组内的 event 也跟随。值取自 MemorySortOrder.rawValue。
     var memorySortOrder:         String = "weight"
     /// event 环形陨石滑动速度(归位 + 开局点亮)。默认中等=当前手感。
-    var graphMeteorSpeed:        MeteorSpeed = .medium
+    var graphAnimationSpeed:        GraphAnimationSpeed = .medium
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -412,7 +414,7 @@ struct DisplayConfig: Codable, Equatable {
         case showInMenuBar            = "show_in_menu_bar"
         case showDockIcon             = "show_dock_icon"
         case memorySortOrder          = "memory_sort_order"
-        case graphMeteorSpeed         = "graph_meteor_speed"
+        case graphAnimationSpeed         = "graph_animation_speed"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -426,7 +428,7 @@ struct DisplayConfig: Codable, Equatable {
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
         showDockIcon            = c.dflt(Bool.self,   .showDockIcon, showDockIcon)
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
-        graphMeteorSpeed        = c.dflt(MeteorSpeed.self, .graphMeteorSpeed, graphMeteorSpeed)
+        graphAnimationSpeed        = c.dflt(GraphAnimationSpeed.self, .graphAnimationSpeed, graphAnimationSpeed)
     }
 }
 
