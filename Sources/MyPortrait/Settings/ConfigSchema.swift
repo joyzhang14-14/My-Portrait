@@ -353,16 +353,20 @@ struct SchedulerSettings: Codable, Equatable {
 
 // MARK: - Display
 
-/// 图谱动画速度档位(07-11 用户:5 档 Apple 风,不显示数值)。控制两处:
-/// ①**开局整图动画**(所有球绽放 + 陨石点亮)—— 缩放隐身沉降期的 tick/帧
-/// ②**拖球松手后陨石环归位滑速** —— 缩放 glide cap(这处只作用于陨石)。
-/// ⚠️ 作用域不对称:开局是整图,归位只有陨石。旧名 meteorSpeed 已弃(误导)。
-/// medium=当前手感;scale 推给 GraphPhysicsEngine.setAnimationSpeedScale。
-enum GraphAnimationSpeed: String, Codable, CaseIterable, Identifiable, Equatable {
+/// 通用的 5 档速度等级(07-11 用户:Apple 风,不显示数值)。图谱里有两个独立
+/// 设置复用它,各取各的倍率映射(medium=1.0=各自的现状手感):
+///  - `display.graphAnimationSpeed` → `animationScale`(物理动画)
+///  - `display.graphPulseSpeed`     → `pulseScale`(神经脉冲,纯渲染)
+enum SpeedLevel: String, Codable, CaseIterable, Identifiable, Equatable {
     case verySlow, slow, medium, fast, veryFast
     var id: String { rawValue }
-    /// 引擎速度倍率。medium=1.0=现状;极慢受 glide cap 的 24pt 穿透阈值约束到 0.70。
-    var scale: Float {
+
+    /// 图谱**物理动画**倍率 → GraphPhysicsEngine.setAnimationSpeedScale。
+    /// 控制①开局整图动画(所有球绽放+陨石点亮,缩放隐身沉降期 tick/帧)
+    /// ②拖球松手后陨石环归位滑速(缩放 glide cap,这处只作用于陨石)。
+    /// ⚠️ 作用域不对称:开局是整图,归位只有陨石。
+    /// 极慢只到 0.70 —— 再低会跌破 glide cap 的 24pt 穿透阈值(长途卡半路)。
+    var animationScale: Float {
         switch self {
         case .verySlow: return 0.70
         case .slow:     return 0.85
@@ -371,6 +375,20 @@ enum GraphAnimationSpeed: String, Codable, CaseIterable, Identifiable, Equatable
         case .veryFast: return 2.20
         }
     }
+
+    /// **神经脉冲**倍率(点 hub 的冲击波 + 抵达点亮)。纯渲染,无物理约束 →
+    /// 档距可以比 animationScale 拉得更开。>1 = 更快:主球 pulseSpeed ×它,
+    /// folder 行程 pulseHubTravelSeconds ÷它,抵达闪光 pulseArriveFlashSec ÷它。
+    var pulseScale: Double {
+        switch self {
+        case .verySlow: return 0.45
+        case .slow:     return 0.70
+        case .medium:   return 1.00
+        case .fast:     return 1.60
+        case .veryFast: return 2.50
+        }
+    }
+
     var label: String {
         switch self {
         case .verySlow: return "Very Slow"
@@ -400,8 +418,10 @@ struct DisplayConfig: Codable, Equatable {
     /// Memories 列表排序规则:weight(默认)/ created / last_occurred。
     /// 文件夹分组内的 event 也跟随。值取自 MemorySortOrder.rawValue。
     var memorySortOrder:         String = "weight"
-    /// event 环形陨石滑动速度(归位 + 开局点亮)。默认中等=当前手感。
-    var graphAnimationSpeed:        GraphAnimationSpeed = .medium
+    /// 图谱物理动画速度(开局整图绽放 + 陨石归位)。默认中等=当前手感。
+    var graphAnimationSpeed:     SpeedLevel = .medium
+    /// 神经脉冲速度(点 hub 的冲击波 + 抵达点亮)。默认中等=当前手感。
+    var graphPulseSpeed:         SpeedLevel = .medium
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -414,7 +434,8 @@ struct DisplayConfig: Codable, Equatable {
         case showInMenuBar            = "show_in_menu_bar"
         case showDockIcon             = "show_dock_icon"
         case memorySortOrder          = "memory_sort_order"
-        case graphAnimationSpeed         = "graph_animation_speed"
+        case graphAnimationSpeed      = "graph_animation_speed"
+        case graphPulseSpeed          = "graph_pulse_speed"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -428,7 +449,8 @@ struct DisplayConfig: Codable, Equatable {
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
         showDockIcon            = c.dflt(Bool.self,   .showDockIcon, showDockIcon)
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
-        graphAnimationSpeed        = c.dflt(GraphAnimationSpeed.self, .graphAnimationSpeed, graphAnimationSpeed)
+        graphAnimationSpeed     = c.dflt(SpeedLevel.self, .graphAnimationSpeed, graphAnimationSpeed)
+        graphPulseSpeed         = c.dflt(SpeedLevel.self, .graphPulseSpeed, graphPulseSpeed)
     }
 }
 
