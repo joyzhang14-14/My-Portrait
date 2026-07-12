@@ -69,6 +69,7 @@ final class KeystrokeCharLogger {
         if flags.contains(.maskAlternate) { modifiers |= 0x02 }   // Option / Alt
         if flags.contains(.maskControl)   { modifiers |= 0x04 }
         if flags.contains(.maskShift)     { modifiers |= 0x08 }
+        let modifierBits = modifiers
         // `frontmostApplication` 实测在后台线程读 cached 值稳定(KeystrokeProbe 已验证)。
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -96,7 +97,7 @@ final class KeystrokeCharLogger {
                     bundleId: app,
                     char: redact ? nil : (chars.isEmpty ? nil : chars),
                     isBackspace: isBackspace ? 1 : 0,
-                    modifiers: redact ? 0 : modifiers,
+                    modifiers: redact ? 0 : modifierBits,
                     inputSource: redact ? nil : inputSource
                 )
                 try store.insert(&entry)
