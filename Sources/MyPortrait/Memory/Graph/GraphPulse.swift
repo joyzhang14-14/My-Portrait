@@ -41,9 +41,11 @@ enum GraphPulseScheduler {
         var visited = Set<Int>([origin]).union(blocked)
         // (节点, 信号到达该节点的时刻, 已走跳数)
         var frontier: [(node: Int, arrival: TimeInterval, depth: Int)] = [(origin, 0, 0)]
+        var head = 0
 
-        while let (node, arrival, depth) = frontier.first {
-            frontier.removeFirst()
+        while head < frontier.count {
+            let (node, arrival, depth) = frontier[head]
+            head += 1
             guard depth < maxDepth else { continue }
             for (edgeIndex, other) in adjacency[node] where !visited.contains(other) {
                 visited.insert(other)
