@@ -270,6 +270,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 速度增益,保 park/穿透不变量。setMeteorSpeedScale 已 clamp[0.65,2.5]。
     /// simLock 保护(读在 tick 持锁,写在 setter 持锁)。
     private var meteorSpeedScale: Float = 1
+    /// 开局隐身期墙钟快放的**分数 tick 累加器**(余数留到下帧,慢档能少于
+    /// 1 tick/帧)。init/explode 布防时清零。
+    private var revealFFAccum: Float = 0
 
     // 四叉树扁平数组(容量随 n 分配,tick 内复用)
     private var qChild: [Int32] = []
@@ -342,6 +345,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltRevealSnap = beltReveal
         beltRevealGo = false
         beltRevealArm = 0
+        revealFFAccum = 0
 
         var continuation: AsyncStream<Bool>.Continuation?
         parkEvents = AsyncStream { continuation = $0 }
@@ -477,6 +481,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltReveal = beltIdx.isEmpty ? 1 : 0
         beltRevealGo = false
         beltRevealArm = tickCount
+        revealFFAccum = 0
         publishSnapshot()
         simLock.unlock()
         wake()
@@ -686,12 +691,26 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     settleTeamPrev[j] = pos[Int(settleTeamIdx[j])]
                 }
             }
-            tick()
-            // 高温期子步(07-03 用户"让图像更早归位"):alpha 还热的收敛
-            // 段每帧多跑一步 —— 同一部电影快放,动力学/终局布局/park 判定
-            // (阈值全按 tick 计,对子步透明)分毫不变,只是墙钟时间减半。
-            // 拖拽中不启用:交互热路径保持每帧一步的实时手感与 tick 预算
-            if !dragging, alpha > 0.02 { tick() }
+            // 本帧基线 tick 数 = 1 mandatory + 高温期子步(07-03 用户"让图像更早
+            // 归位":alpha 还热的收敛段每帧多跑一步 —— 同一部电影快放,动力学/终局
+            // 布局/park 判定(阈值全按 tick 计,对子步透明)分毫不变,只是墙钟减半。
+            // 拖拽中不启用:交互热路径保持每帧一步的实时手感与 tick 预算)。
+            let baseTicks = (!dragging && alpha > 0.02) ? 2 : 1
+            // 开局隐身期墙钟快放/减速(07-11 用户"点亮速度没变化"):陨石"多久才
+            // 冒出来"由**整图沉降到静止冷透**(揭幕门)决定,这整段是隐身的 ——
+            // 只缩放淡入 step 改不动它(实测无感)。故按 meteorSpeedScale 缩放本帧
+            // tick 数:同一串确定性 tick,动力学/终局布局逐位不变,只压缩(或拉长)
+            // 墙钟。分数余量进累加器,慢档可少于 1 tick/帧。
+            // 门只开在**淡入开始前**(!beltRevealGo):淡入段由 beltRevealStep 单独
+            // 缩放,不叠这里,避免双重计。无陨石图(beltReveal 恒 1)/影子/拖拽不进。
+            let revealFF = !dragging && !isShadow && beltReveal < 1 && !beltRevealGo
+            var runTicks = baseTicks
+            if revealFF {
+                revealFFAccum += Float(baseTicks) * meteorSpeedScale
+                runTicks = Int(revealFFAccum)     // 向下取整,余数留到下帧
+                revealFFAccum -= Float(runTicks)
+            }
+            for _ in 0..<runTicks { tick() }
             // 冷尾巴(alpha≤0.02)残余缩放快放。与上面高温子步用 alpha 阈值互斥
             // (热段>0.02 走高温子步,冷段≤0.02 走这里,无重叠无双跑,alpha 跨
             // 0.02 干净交接)。仅松手 episode 内、团未静时生效。
