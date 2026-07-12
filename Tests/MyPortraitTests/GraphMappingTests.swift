@@ -1,17 +1,18 @@
 import XCTest
 import simd
+import GraphPhysics
 @testable import MyPortrait
 
-/// 需求 §4 数据映射公式的单测(强度/距离/线宽/命中网格)。
+/// 图谱数据映射公式的单测(强度/线宽/命中网格)。
 final class GraphMappingTests: XCTestCase {
 
-    // MARK: folder → 主球 连接强度:Σw²/Σw + 10(自加权平均)
+    // MARK: folder → 主球 连接强度:Σw²/Σw + 5(自加权平均)
 
     func testFolderStrengthSelfWeighted() {
-        // 均匀权重退化为普通平均:w=[2,2] → 4+... Σw²/Σw = 8/4 = 2 → 12
-        XCTAssertEqual(GraphConstants.folderStrength(memberWeights: [2, 2]), 12, accuracy: 1e-9)
-        // 高 weight 话语权大:[1,1,1,9] 普通均值 3,自加权 = 84/12 = 7 → 17
-        XCTAssertEqual(GraphConstants.folderStrength(memberWeights: [1, 1, 1, 9]), 17, accuracy: 1e-9)
+        // 均匀权重退化为普通平均:w=[2,2] → Σw²/Σw = 8/4 = 2 → 7
+        XCTAssertEqual(GraphConstants.folderStrength(memberWeights: [2, 2]), 7, accuracy: 1e-9)
+        // 高 weight 话语权大:[1,1,1,9] 普通均值 3,自加权 = 84/12 = 7 → 12
+        XCTAssertEqual(GraphConstants.folderStrength(memberWeights: [1, 1, 1, 9]), 12, accuracy: 1e-9)
     }
 
     func testFolderStrengthEmptyIsBase() {
@@ -22,44 +23,14 @@ final class GraphMappingTests: XCTestCase {
                        GraphConstants.folderStrengthBase, accuracy: 1e-9)
     }
 
-    // MARK: last_occurred → 距离:对数,30 天封顶
-
-    func testLeafDistanceEndpoints() {
-        let near = GraphConstants.eventLeafDistanceNear
-        let far = GraphConstants.eventLeafDistanceFar
-        // 0 天 = 最近端
-        XCTAssertEqual(GraphConstants.leafDistance(daysAgo: 0, near: near, far: far),
-                       near, accuracy: 1e-9)
-        // 30 天 = 最远端;>30 天不再变
-        XCTAssertEqual(GraphConstants.leafDistance(daysAgo: 30, near: near, far: far),
-                       far, accuracy: 1e-9)
-        XCTAssertEqual(GraphConstants.leafDistance(daysAgo: 365, near: near, far: far),
-                       far, accuracy: 1e-9)
-    }
-
-    /// 对数平缓:第 1→2 天的增量远小于线性均摊(差一天不明显,用户要求)。
-    func testLeafDistanceLogGentle() {
-        let near = GraphConstants.eventLeafDistanceNear
-        let far = GraphConstants.eventLeafDistanceFar
-        let d1 = GraphConstants.leafDistance(daysAgo: 1, near: near, far: far)
-        let d2 = GraphConstants.leafDistance(daysAgo: 2, near: near, far: far)
-        let d29 = GraphConstants.leafDistance(daysAgo: 29, near: near, far: far)
-        let d30 = GraphConstants.leafDistance(daysAgo: 30, near: near, far: far)
-        // 单调递增
-        XCTAssertLessThan(d1, d2)
-        XCTAssertLessThan(d29, d30)
-        // 尾端(29→30 天)的日增量应远小于头部(1→2 天):对数曲线越走越平
-        XCTAssertLessThan(d30 - d29, d2 - d1)
-    }
-
-    // MARK: 端点线宽 = 球半径,上限 15(2026-07-01 用户定稿)
+    // MARK: 端点线宽 = 球半径,上限 7
 
     func testEdgeEndWidthFollowsRadiusCapped() {
         XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 6), 6, accuracy: 1e-9)
-        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 14.9), 14.9, accuracy: 1e-9)
-        // 主球 44 / 分区球 30 → 全部截断到 15
-        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 30), 15, accuracy: 1e-9)
-        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 44), 15, accuracy: 1e-9)
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 14.9), 7, accuracy: 1e-9)
+        // 主球 44 / 分区球 30 → 全部截断到 7
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 30), 7, accuracy: 1e-9)
+        XCTAssertEqual(GraphConstants.edgeEndWidth(ballRadius: 44), 7, accuracy: 1e-9)
     }
 
     // MARK: 命中网格

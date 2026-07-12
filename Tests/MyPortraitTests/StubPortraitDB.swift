@@ -63,6 +63,10 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.pendingAudioChunks")
     }
 
+    func audioBacklogStats() async throws -> (pendingCount: Int, oldestRecordedAtMs: Int64?) {
+        throw reporter.notImplemented("StubPortraitDB.audioBacklogStats")
+    }
+
     func resetInProgressAudioChunks() async throws -> Int {
         throw reporter.notImplemented("StubPortraitDB.resetInProgressAudioChunks")
     }
@@ -87,11 +91,11 @@ final class StubPortraitDB: PortraitDB, Sendable {
         throw reporter.notImplemented("StubPortraitDB.audioChunkTimeRangeMs")
     }
 
-    func matchSpeaker(embedding: [Float]) async throws -> Int64? {
+    func matchSpeaker(embedding: [Float], model: String) async throws -> SpeakerMatch {
         throw reporter.notImplemented("StubPortraitDB.matchSpeaker")
     }
 
-    func enrollSpeaker(embedding: [Float]) async throws -> Int64 {
+    func enrollSpeaker(embedding: [Float], model: String) async throws -> Int64 {
         throw reporter.notImplemented("StubPortraitDB.enrollSpeaker")
     }
 

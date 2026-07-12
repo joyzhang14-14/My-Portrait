@@ -70,7 +70,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MyPortraitTests",
-            dependencies: ["MyPortrait"],
+            dependencies: ["MyPortrait", "GraphPhysics"],
             path: "Tests/MyPortraitTests"
         ),
     ]

@@ -44,17 +44,18 @@ final class WritingCaptureStep0Tests: XCTestCase {
 
     // MARK: - OCR dedupe
 
-    func testOcrDedupeIdentical() {
-        // 相邻两帧文本一模一样 → 合并成一帧,end_ts 延后
+    func testOcrDedupePreservesTwoEndpoints() {
+        // 子段只有两帧时强制保留首尾，即使文本相同。
         let frames = [
             WritingCaptureRawOcr(id: 1, tsMs: 1000, app: "obs", url: nil, text: "Hello world this is text"),
             WritingCaptureRawOcr(id: 2, tsMs: 2000, app: "obs", url: nil, text: "Hello world this is text")
         ]
         let deduped = WritingCaptureStep0.jaccardDedupe(frames)
-        XCTAssertEqual(deduped.count, 1)
-        XCTAssertEqual(deduped[0].frameId, 1)       // 保留第一帧 id
+        XCTAssertEqual(deduped.count, 2)
+        XCTAssertEqual(deduped[0].frameId, 1)
         XCTAssertEqual(deduped[0].startTs, 1000)
-        XCTAssertEqual(deduped[0].endTs, 2000)       // 延到第二帧的 ts
+        XCTAssertEqual(deduped[1].frameId, 2)
+        XCTAssertEqual(deduped[1].startTs, 2000)
     }
 
     func testOcrDedupeDifferent() {
@@ -67,21 +68,24 @@ final class WritingCaptureStep0Tests: XCTestCase {
         XCTAssertEqual(deduped.count, 2)
     }
 
-    func testOcrDedupeChainedSimilarity() {
-        // 三帧逐步相似 / 不相似:1-2 相似合,3 不相似断开
+    func testOcrDedupeMergesSimilarMiddleFrames() {
+        // 首尾强制保留，两个相同的中间帧合并。
         let frames = [
             WritingCaptureRawOcr(id: 1, tsMs: 1000, app: "a", url: nil,
-                text: "alpha beta gamma delta epsilon zeta eta theta iota kappa"),
+                text: "first endpoint"),
             WritingCaptureRawOcr(id: 2, tsMs: 2000, app: "a", url: nil,
                 text: "alpha beta gamma delta epsilon zeta eta theta iota kappa"),
             WritingCaptureRawOcr(id: 3, tsMs: 3000, app: "a", url: nil,
-                text: "completely new content with nothing matching at all")
+                text: "alpha beta gamma delta epsilon zeta eta theta iota kappa"),
+            WritingCaptureRawOcr(id: 4, tsMs: 4000, app: "a", url: nil,
+                text: "last endpoint")
         ]
         let deduped = WritingCaptureStep0.jaccardDedupe(frames)
-        XCTAssertEqual(deduped.count, 2)
+        XCTAssertEqual(deduped.count, 3)
         XCTAssertEqual(deduped[0].startTs, 1000)
-        XCTAssertEqual(deduped[0].endTs, 2000)
-        XCTAssertEqual(deduped[1].startTs, 3000)
+        XCTAssertEqual(deduped[1].startTs, 2000)
+        XCTAssertEqual(deduped[1].endTs, 3000)
+        XCTAssertEqual(deduped[2].startTs, 4000)
     }
 
     // MARK: - throwaway / max content chars

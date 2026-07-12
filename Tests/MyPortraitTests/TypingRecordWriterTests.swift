@@ -97,9 +97,14 @@ final class TypingRecordWriterTests: XCTestCase {
         XCTAssertFalse(TypingRecordWriter.looksLikeSubmitClear(
             message: "yin w", newValue: "因", sessionStart: ""))
 
-        // 长消息 + 断崖下降 → 是(覆盖 placeholder 短的情况)
-        XCTAssertTrue(TypingRecordWriter.looksLikeSubmitClear(
+        // 长消息但仍剩 10 字符 → 不是(避免 IME 落字误判)
+        XCTAssertFalse(TypingRecordWriter.looksLikeSubmitClear(
             message: String(repeating: "a", count: 50), newValue: "Send a msg",
+            sessionStart: ""))
+
+        // 长消息发出后只剩极少残渣 → 是
+        XCTAssertTrue(TypingRecordWriter.looksLikeSubmitClear(
+            message: String(repeating: "a", count: 50), newValue: "\n",
             sessionStart: ""))
 
         // 短消息 + 没清空 → 不是(避免短消息误判)
