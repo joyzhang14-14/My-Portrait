@@ -288,8 +288,13 @@ public enum GraphConstants {
     public static let pulseSpeed: Double = 225
     /// folder/分区球脉冲的**行程时间**(秒):速度 = 该球连线平均长度 / 此值,
     /// 使脉冲恰好用这么久走完一条平均长度的边 —— 不论 folder 大小、连线长短,
-    /// 点亮自家球的观感时长一致(07-11 用户设计)。
-    public static let pulseHubTravelSeconds: Double = 1.5
+    /// 点亮自家球的观感时长一致(07-11 用户设计;1.5 偏慢 → 1)。
+    public static let pulseHubTravelSeconds: Double = 1
+    /// 脉冲抵达末端球 → 点亮闪一下(07-11 用户)。白光峰值不透明度 + 淡出时长
+    /// (秒,线性衰减到 0)。⚠️ 改大时长要同步 GraphRootView 的脉冲清空定时
+    /// (清早了闪光会被切断:pulses 空 → 不再重绘且 drawBalls 读不到抵达时刻)。
+    public static let pulseArriveFlashPeak: Double = 0.85
+    public static let pulseArriveFlashSec: Double = 0.45
     /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
     public static let pulseMaxDepthMain: Int = 2
     public static let pulseMaxDepthOther: Int = 1
