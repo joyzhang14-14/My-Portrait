@@ -283,8 +283,13 @@ public enum GraphConstants {
     // MARK: 交互动画
 
     /// 神经脉冲沿边传播速度(世界 pt/s;07-02 三次反馈:700 仍偏快,再降;
-    /// 07-11 用户:再降低一倍,冲击波更慢 450→225)
+    /// 07-11 用户:再降低一倍,冲击波更慢 450→225)。**主球**用它(2 跳级联);
+    /// folder/分区球改自适应,见 pulseHubTravelSeconds。
     public static let pulseSpeed: Double = 225
+    /// folder/分区球脉冲的**行程时间**(秒):速度 = 该球连线平均长度 / 此值,
+    /// 使脉冲恰好用这么久走完一条平均长度的边 —— 不论 folder 大小、连线长短,
+    /// 点亮自家球的观感时长一致(07-11 用户设计)。
+    public static let pulseHubTravelSeconds: Double = 1.5
     /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
     public static let pulseMaxDepthMain: Int = 2
     public static let pulseMaxDepthOther: Int = 1

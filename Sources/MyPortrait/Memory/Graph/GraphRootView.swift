@@ -310,14 +310,17 @@ struct GraphRootView: View {
     /// 点 folder 球聚焦(07-09 用户):相机缓移到该 folder 的隐形圆(气泡)
     /// 视图 —— center=气泡心(= hub 位),zoom=气泡直径占视口 cameraFolderFill。
     /// tap 与 drag 由手势系统天然区分(DragGesture 有 2pt 阈值,纯点击不触发)。
-    private func frameCameraToFolder(_ hub: Int) {
+    /// - Parameter onDone: 取景走完回调。早返(无引擎/无隐形圆/算不出取景)=
+    ///   相机根本没动 → 立即回调,别把脉冲吞掉。
+    private func frameCameraToFolder(_ hub: Int, onDone: (() -> Void)? = nil) {
         guard let engine, hub < scene.nodes.count,
-              let br = scene.nodes[hub].hubBubbleRadius, br > 0 else { return }
+              let br = scene.nodes[hub].hubBubbleRadius, br > 0 else { onDone?(); return }
         let snap = engine.readSnapshot()
         guard hub < snap.count,
               let tgt = frameFor(viewSize, center: snap[hub], radius: Float(br),
-                                 fill: GraphConstants.cameraFolderFill) else { return }
-        animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
+                                 fill: GraphConstants.cameraFolderFill)
+        else { onDone?(); return }
+        animateCamera(toCenter: tgt.center, toZoom: tgt.zoom, onDone: onDone)
     }
 
     /// 平滑聚焦到固定目标 (center, zoom)。**van Wijk & Nuij 2004「平滑高效的
@@ -327,7 +330,11 @@ struct GraphRootView: View {
     /// 再拉回(远处小 folder 回总览实测过冲 728~1493pt = 用户报的"强拉回")。
     /// w = 世界可视宽度 = minDim/zoom;rho=1.4(缩放/平移权衡,原论文最优值)。
     /// 目标固定(点击时图已 park),t 基定时动画,帧数不变(时长与原一致)。
-    private func animateCamera(toCenter c1: SIMD2<Float>, toZoom z1raw: Double) {
+    /// - Parameter onDone: 取景**真正走完**才回调(07-11 用户:点 hub 转完视角
+    ///   再发脉冲)。被取消 / 被新交互顶替 / 引擎换代 → **不回调**(那一发作废)。
+    ///   退化早返(无缩放基准)= 相机瞬时到位,立即回调。
+    private func animateCamera(toCenter c1: SIMD2<Float>, toZoom z1raw: Double,
+                               onDone: (() -> Void)? = nil) {
         cameraTask?.cancel()
         cameraRunID &+= 1
         let runID = cameraRunID
@@ -335,11 +342,13 @@ struct GraphRootView: View {
                      GraphCamera.zoomRange.upperBound)
         let c0 = camera.center, z0 = camera.zoom
         guard z0 > 1e-6 else {
-            cameraTracking = false; camera.center = c1; camera.zoom = z1; return
+            cameraTracking = false; camera.center = c1; camera.zoom = z1
+            onDone?(); return
         }
         let minDim = Double(min(viewSize.width, viewSize.height))
         guard minDim > 1 else {
-            cameraTracking = false; camera.center = c1; camera.zoom = z1; return
+            cameraTracking = false; camera.center = c1; camera.zoom = z1
+            onDone?(); return
         }
         let w0 = minDim / z0, w1 = minDim / z1   // 世界可视宽度
         let dir = c1 - c0
@@ -360,7 +369,8 @@ struct GraphRootView: View {
                     camera.zoom = minDim / (w0 * pow(w1 / w0, t))
                     try? await Task.sleep(for: .milliseconds(16))
                 }
-                camera.center = c1; camera.zoom = z1; return
+                camera.center = c1; camera.zoom = z1
+                onDone?(); return
             }
             // 同一气泡里的小球目标倍率相同。van Wijk 路径仍会为了平移
             // 先缩远再放回,周围球看起来像绕着 folder 转,连续换球也更重。
@@ -375,7 +385,8 @@ struct GraphRootView: View {
                     try? await Task.sleep(for: .milliseconds(16))
                 }
                 guard !Task.isCancelled, gen == engineGen, runID == cameraRunID else { return }
-                camera.center = c1; camera.zoom = z1; return
+                camera.center = c1; camera.zoom = z1
+                onDone?(); return
             }
             // 表达式拆成显式 Double 中间量(否则 Swift 类型检查器超时)
             let rho: Double = 1.4
@@ -408,6 +419,7 @@ struct GraphRootView: View {
             }
             guard !Task.isCancelled, gen == engineGen, runID == cameraRunID else { return }
             camera.center = c1; camera.zoom = z1
+            onDone?()
         }
     }
 
@@ -427,8 +439,14 @@ struct GraphRootView: View {
         }
         if scene.nodes[id].kind.isHub {
             floatNodeId = nil
-            triggerPulse(from: id)
-            if scene.nodes[id].hubBubbleRadius != nil { frameCameraToFolder(id) }
+            // 07-11 用户:点 folder/分区球先转视角,**取景转完再发脉冲**(原来
+            // 是立刻发,脉冲在镜头飞行中跑完,看不清)。主球没有取景变换 →
+            // 立即发。取景中途被新交互打断 → onDone 不回调,那一发作废。
+            if scene.nodes[id].hubBubbleRadius != nil {
+                frameCameraToFolder(id) { triggerPulse(from: id) }
+            } else {
+                triggerPulse(from: id)
+            }
         } else {
             // 渐显:先隐,取景收官后淡入(同帧生效)。⚠️ 只在**换球**时置隐:
             // 重复点同一球 floatNodeId 值不变 → onChange 不触发 → 没人再把
@@ -443,6 +461,26 @@ struct GraphRootView: View {
         }
     }
 
+    /// folder/分区球的脉冲速度 = 该球连线的平均长度 / 1.5s(07-11 用户设计)。
+    /// ⚠️ 只统计**脉冲真正会走的边**(排除 blocked 的主球那条):主球那条边又长
+    /// 又不发光,算进均值会把它抬高 —— 叶子少的小 folder 抬得最狠(3 叶时均值
+    /// 近 2×)→ 脉冲快一倍,恰好破坏"每个 folder 都 1.5s"的一致性。
+    /// 取不到边(理论上不会)→ 回落常量。
+    private func hubPulseSpeed(from hub: Int, snap: [SIMD2<Float>],
+                               blocked: Set<Int>) -> Double {
+        var sum = 0.0
+        var cnt = 0
+        for e in scene.edges {
+            let other: Int
+            if e.a == hub { other = e.b } else if e.b == hub { other = e.a } else { continue }
+            guard !blocked.contains(other), other < snap.count else { continue }
+            sum += Double(simd_length(snap[other] - snap[hub]))
+            cnt += 1
+        }
+        guard cnt > 0, sum > 0 else { return GraphConstants.pulseSpeed }
+        return (sum / Double(cnt)) / GraphConstants.pulseHubTravelSeconds
+    }
+
     private func triggerPulse(from hub: Int) {
         guard let engine else { return }
         let snap = engine.readSnapshot()
@@ -453,10 +491,17 @@ struct GraphRootView: View {
         let isMain = scene.nodes[hub].kind == .main
         let depth = isMain ? GraphConstants.pulseMaxDepthMain
                            : GraphConstants.pulseMaxDepthOther
+        let blocked: Set<Int> = isMain ? [] : [0]
+        // folder/分区球:速度自适应(07-11 用户设计)= 该球连线的**平均长度**
+        // / pulseHubTravelSeconds(1.5s)→ 脉冲恰好 1.5s 走完一条平均边,不论
+        // folder 大小观感一致。主球仍用常量(它 2 跳级联,自适应会让总时长翻倍)。
+        let speed = isMain ? GraphConstants.pulseSpeed
+                           : hubPulseSpeed(from: hub, snap: snap, blocked: blocked)
         let (list, total) = GraphPulseScheduler.schedule(from: hub, scene: scene,
                                                          positions: snap,
+                                                         speed: speed,
                                                          maxDepth: depth,
-                                                         blocked: isMain ? [] : [0])
+                                                         blocked: blocked)
         // 叠加不清除(07-03 精修:连点时上一发信号不许中途消失):新一批
         // 脉冲按公共时间轴平移后**追加**;时间轴锚在最早一批的起点。
         let now = Date()
