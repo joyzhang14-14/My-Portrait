@@ -464,9 +464,10 @@ struct GraphCanvasView: View {
             let a = 0.35 + 0.35 * sin(now * GraphConstants.hoverBlinkHz * 2 * .pi)
             ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
         }
-        // 脉冲抵达 → 末端球点亮闪一下(07-11 用户)。抵达时刻 = start+duration,
-        // 之后 pulseArriveFlashSec 内白光线性淡出。只闪**末端球**(hub 是中转,
-        // 主球 2 跳时 folder 只是过路,不闪)。同一球被多发命中取最亮的那发。
+        // 脉冲抵达 → 被击中的球点亮闪一下(07-11 用户)。抵达时刻 = start+duration,
+        // 之后 pulseArriveFlashSec 内白光线性淡出。**沿途每一跳都闪**(含 folder/
+        // 分区 hub):主球 2 跳级联时 folder 先亮、脉冲再从它散向自家 event 球逐个
+        // 亮起 = 连锁激活的观感(用户要的"壮观")。同一球被多发命中取最亮的那发。
         if !pulses.isEmpty {
             let elapsed = date.timeIntervalSince(pulseStart)
             var flash: [Int: Double] = [:]
@@ -475,7 +476,7 @@ struct GraphCanvasView: View {
                 guard age >= 0, age <= GraphConstants.pulseArriveFlashSec else { continue }
                 let e = scene.edges[p.edgeIndex]
                 let to = (e.a == p.fromNode) ? e.b : e.a
-                guard to >= 0, to < scene.nodes.count, !scene.nodes[to].kind.isHub else { continue }
+                guard to >= 0, to < scene.nodes.count else { continue }
                 let a = GraphConstants.pulseArriveFlashPeak
                       * (1 - age / GraphConstants.pulseArriveFlashSec)
                 if a > (flash[to] ?? 0) { flash[to] = a }
