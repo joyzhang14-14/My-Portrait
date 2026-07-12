@@ -493,7 +493,7 @@ struct GraphRootView: View {
                            : GraphConstants.pulseMaxDepthOther
         let blocked: Set<Int> = isMain ? [] : [0]
         // folder/分区球:速度自适应(07-11 用户设计)= 该球连线的**平均长度**
-        // / pulseHubTravelSeconds(1.5s)→ 脉冲恰好 1.5s 走完一条平均边,不论
+        // / pulseHubTravelSeconds → 脉冲恰好用那么久走完一条平均边,不论
         // folder 大小观感一致。主球仍用常量(它 2 跳级联,自适应会让总时长翻倍)。
         let speed = isMain ? GraphConstants.pulseSpeed
                            : hubPulseSpeed(from: hub, snap: snap, blocked: blocked)
@@ -516,7 +516,9 @@ struct GraphRootView: View {
         let gen = pulseGen
         // 动画走完自动清空(按**全场最晚结束**定时,早批长级联不被
         // 晚批短级联提前清掉;清空后 renderPaused 恢复休眠判定)。
-        let wait = pulseEnd - base + 0.2
+        // ⚠️ 必须再等抵达闪光淡完:pulses 一空,renderPaused 立刻停重绘、
+        // drawBalls 也读不到抵达时刻 → 末端球的闪光会被拦腰切断(07-11)。
+        let wait = pulseEnd - base + GraphConstants.pulseArriveFlashSec + 0.2
         Task {
             try? await Task.sleep(for: .seconds(wait))
             if gen == pulseGen { pulses = [] }
