@@ -57,6 +57,12 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=1600)
     ap.add_argument("--redo-bad", action="store_true")   # 只重跑降级会话
     ap.add_argument("--dry-prompts")   # 只导题面到此 json、不加载模型(训推口径自检用)
+    ap.add_argument("--model", default=MODEL)            # A/B:可指向原版底座做对照
+    ap.add_argument("--model-tag", default=MODEL_TAG)    # 血统戳
+    ap.add_argument("--keys")                            # 只跑这些 key(逗号分隔),抽样 A/B 用
+    # vision_items 按 (day,session_key) 唯一 —— 对照组落库会覆盖生产 digest(可复用资产)。
+    # 故 base 对照必须 --no-db:只写 <out>.jsonl,断点续跑也认它。
+    ap.add_argument("--no-db", action="store_true")
     args = ap.parse_args()
 
     manifest = json.load(open(f"/tmp/vision_v4{args.suffix}_{args.day}/v4_manifest.json"))
@@ -64,22 +70,31 @@ def main():
     con_p = sqlite3.connect(f"file:{source.PORTRAIT_DB}?mode=ro", uri=True)
     con_l = labdb.connect()
 
+    only = set(args.keys.split(",")) if args.keys else None
+    jl_path = args.out + ".jsonl"      # 两跑各自的完整 digest 记录(评测直接吃这个)
     dry = {} if args.dry_prompts else None
     if dry is None:
-        have = labdb.vision_digests_for_day(con_l, args.day, model=MODEL_TAG)
-        done = {k for k, d in have.items()
-                if not (args.redo_bad and not d.get("json_ok"))}   # --redo-bad:降级的重跑
-        todo = [k for k in manifest if int(k) not in done]
-        print(f"[v12] {args.day}: {len(manifest)} 会话(已完成 {len(done)},待跑 {len(todo)})", flush=True)
+        if args.no_db:                 # 对照组:断点续跑认自己的 jsonl
+            done = set()
+            if os.path.exists(jl_path):
+                done = {int(json.loads(l)["key"]) for l in open(jl_path, encoding="utf-8")}
+        else:
+            have = labdb.vision_digests_for_day(con_l, args.day, model=args.model_tag)
+            done = {k for k, d in have.items()
+                    if not (args.redo_bad and not d.get("json_ok"))}   # --redo-bad:降级的重跑
+        todo = [k for k in manifest if int(k) not in done and (only is None or k in only)]
+        print(f"[v12] {args.day} · {args.model_tag}: {len(manifest)} 会话"
+              f"(已完成 {len(done)},待跑 {len(todo)})", flush=True)
         from mlx_vlm import load, generate
         from mlx_vlm.prompt_utils import apply_chat_template
-        model, processor = load(MODEL)
+        model, processor = load(args.model)
         if hasattr(processor, "image_processor"):
             processor.image_processor.max_pixels = args.max_pixels
     else:
-        todo = list(manifest)
+        todo = [k for k in manifest if only is None or k in only]
 
     out = open(args.out, "a", encoding="utf-8")
+    jl = open(jl_path, "a", encoding="utf-8")
     t0 = time.time()
     n_bad = n_empty = 0
     for i, key in enumerate(todo):
@@ -171,9 +186,16 @@ def main():
                   "social": str(a.get("social") or "").strip()[:300],
                   "specifics_raw_n": len(a.get("specifics") or []),
                   "json_ok": ok_json}
-        labdb.save_vision_digest(con_l, args.day, int(key), b["parts"], b["app"], MODEL_TAG,
-                                 b["total_frames"], b["kept_frames"], digest)
-        # ② MD:下游 event 管线的私有视图(load_sessions 只认 doing/kw)
+        if not args.no_db:
+            labdb.save_vision_digest(con_l, args.day, int(key), b["parts"], b["app"],
+                                     args.model_tag, b["total_frames"], b["kept_frames"], digest)
+        # ② JSONL:两跑各自的完整记录 + 评测所需的诊断维度(OCR 长度/帧数)
+        jl.write(json.dumps({"key": int(key), "app": b["app"], "model": args.model_tag,
+                             "ocr_len": len(ocr_block), "n_frames": len(b["frames"]),
+                             "raw_len": len(txt), "digest": digest},
+                            ensure_ascii=False) + "\n")
+        jl.flush()
+        # ③ MD:下游 event 管线的私有视图(load_sessions 只认 doing/kw)
         out.write(f"\n## s{key} · {b['app']} · parts={b['parts']}\n")
         out.write(f"- doing: {doing}\n")
         out.write(f"- kw: {', '.join(kws)}\n")
@@ -183,6 +205,7 @@ def main():
             print(f"  {i+1}/{len(todo)} · {el/(i+1):.0f}s/会话 · 剩 {(len(todo)-i-1)*el/(i+1)/60:.0f}min "
                   f"· 坏JSON {n_bad} 空重试 {n_empty}", flush=True)
     out.close()
+    jl.close()
     if dry is not None:
         json.dump(dry, open(args.dry_prompts, "w"), ensure_ascii=False)
         print(f"[dry] {len(dry)} 条题面 → {args.dry_prompts}", flush=True)
