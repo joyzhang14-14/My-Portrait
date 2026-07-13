@@ -950,6 +950,16 @@ PW_MASK = re.compile(r'[•●○◦＊*]{6}')
 URL_FULL = re.compile(r'(https?://\S+|localhost:\d\S*|[\w.-]+\.(com|org|net|io|ai|dev|cn|me|co|app|us|edu)(/\S*)?)', re.I)
 EMAIL_PAT = re.compile(r'\S+@\S+\.\w+')   # 邮箱=PII,任意位置即扔(用户裁定;zzhang@…k12.nc.us)
 EMAIL_FILTER = os.environ.get('PORTRAIT_EMAIL_FILTER', '1') == '1'   # 邮箱过滤开关(2026-07-11 用户:前端可关)
+
+
+def _pii_only(s):
+    """「整段就是邮箱/网址」判据(canvas 路)。抠掉邮箱/网址/空白后**没剩下实质内容** → 整段是 PII。
+    ⚠️别退回 fullmatch:它只认"整串恰好等于**一个**邮箱",多个邮箱粘一起、带换行、或尾巴挂个孤字
+    就认不出(实测 3 邮箱 + 误触的 's' 挤成一条 → 学校邮箱泄漏进成品)。留 ≤2 字的阈值是给这类
+    孤字碎片的;夹带邮箱的长文 essay 抠完仍有大段正文,照常保留(7-11 裁定:一个邮箱不连坐整篇)。"""
+    # ⚠️邮箱必须**先**抠:反过来 URL_FULL 会先吃掉邮箱里的 gmail.com,剩个 xxx@ 就不再是邮箱了。
+    rest = URL_FULL.sub(' ', EMAIL_PAT.sub(' ', s or ''))
+    return len(re.sub(r'\s', '', rest)) <= 2
 # 手机号/号码闸(2026-07-11 审核 Fix C,13910653410 案=WiFi登录表单被采):**整段就是号码**才丢
 # (数字/空格/-/()/+ 组成 且 ≥10 位真数字——手机号10-11位;≥10 排掉8位日期 2026-07-11 误杀)。
 # 含文字的正文里带个号码不连坐(与 URL/邮箱 canvas 同口径,最大保留)。
@@ -1032,9 +1042,17 @@ for day in DAYS:
     for r in CV.get(day, []):
         t_ = (r["text"] or '').strip()
         # canvas(2026-07-11 用户裁定):**整段就是**邮箱/URL=PII → 丢;邮箱+其他内容(长文正文引用)→ 保留
-        # (与 AX 路"任意位置即扔"分叉:canvas 是拼接长文,一个邮箱不该连坐整篇 essay)。fullmatch 语义。
-        if URL_FULL.fullmatch(t_) or (EMAIL_FILTER and EMAIL_PAT.fullmatch(t_)):
-            DISCARDED[day].append(((r["app"], r["text"], None, None, None, None, r["source"], None), "纯网址/邮箱(canvas)")); continue
+        # (与 AX 路"任意位置即扔"分叉:canvas 是拼接长文,一个邮箱不该连坐整篇 essay)。
+        # ⚠️判据不能用 fullmatch —— 太死板,只认"整串恰好等于**一个**邮箱"。实测 06-29 Chrome 一条
+        # = 3 个邮箱粘一起 + 换行 + 一个误触的孤字 's'(回车后 9s 敲的,被 span 边界扫进来),
+        # fullmatch 认不出 → 学校邮箱 zzhang@…k12.nc.us 泄漏进成品(gold P0 ✗)。
+        # 改成按**本意**判:抠掉邮箱/网址/空白后还剩不剩实质内容 —— 不剩 = 整段就是 PII → 丢
+        # (那个孤字 's' 跟着整条一起丢,2026-07-13 用户裁定「算了,那把这个 s 丢掉吧」);
+        # 夹带一个邮箱的长文 essay 抠完仍有大段正文 → 照常保留,7-11 裁定不动。
+        if EMAIL_FILTER and _pii_only(t_):
+            DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "纯网址/邮箱(canvas)")); continue
+        if URL_FULL.fullmatch(t_):
+            DISCARDED[day].append(((r["app"], r["text"], None, None, None, None, r["source"], None), "纯网址(canvas)")); continue
         if PHONE_FILTER and is_phone(t_):   # 号码 PII(Fix C):整段就是号码 → 丢(canvas 表单字段也采到)
             DISCARDED[day].append(((r["app"], "(内容已过滤)", None, None, None, None, r["source"], None), "号码PII(canvas)")); continue
         if PW_MASK.search(t_) or is_mask(t_):
