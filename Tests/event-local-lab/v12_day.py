@@ -46,6 +46,24 @@ def clean_window(w):
     return re.sub(r"\s{2,}", " ", SPIN.sub("", w or "")).strip()[:WIN_CAP]
 
 
+DEV_APPS = {"Terminal", "iTerm2", "Xcode", "Code", "Cursor", "My Portrait", "My Meeting",
+            "MyPortrait"}
+
+
+def app_field(app, win, ocr_block):
+    """--attr-hint:给「前台 app 不是真实工作对象」的会话补一句确定性注释。
+
+    6-05 实测:非开发前台 + 窗口标题空 + 画面有开发信号 三条同时成立时,归属错误率
+    57%,而不满足的对照组只有 5%(11 倍富集)。三条全部线上可确定性复现。
+
+    注释形状刻意模仿教师当年的写法(训练集 51% 的 app 字段就是「名字 + 补充分句」),
+    所以落在训练分布内 —— 区别是这次的内容由函数算出,不是人工解读。
+    """
+    if app not in DEV_APPS and not win and chrome.has_dev_signal(ocr_block):
+        return f"{app}(前台但无窗口,画面实际是终端/代码内容,真实工作对象在背景)"
+    return app
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", default="2026-06-07")
@@ -63,6 +81,7 @@ def main():
     # vision_items 按 (day,session_key) 唯一 —— 对照组落库会覆盖生产 digest(可复用资产)。
     # 故 base 对照必须 --no-db:只写 <out>.jsonl,断点续跑也认它。
     ap.add_argument("--no-db", action="store_true")
+    ap.add_argument("--attr-hint", action="store_true")  # 归属提示(确定性),默认关 —— 实验中
     args = ap.parse_args()
 
     manifest = json.load(open(f"/tmp/vision_v4{args.suffix}_{args.day}/v4_manifest.json"))
@@ -128,10 +147,12 @@ def main():
             alloc[j] += add
             left -= add
         ocr_block = "\n".join(f"[帧{j+1}] {t[:alloc[j]]}" for j, t in enumerate(texts))
-        # ⚠️ app 用裸名(raw_sessions.app)。训练题头 51% 的 app 掺了教师解读(如「Spotify(前台但
-        # 仅播放音乐未操作);真实工作对象是…」)——那是线上拿不到的东西,注入即作弊。裸名在训练
-        # 分布里占 49%,不是 OOD。此 skew 只能靠 v1.3 重训根治。
-        q = (f"分析这段 macOS 屏幕会话的截图。已知(系统API):前台 app = {b['app']}"
+        # ⚠️ 默认 app 用裸名(raw_sessions.app)。训练题头 51% 的 app 掺了教师解读(如「Spotify(前台
+        # 但仅播放音乐未操作);真实工作对象是…」)——那是线上拿不到的东西,注入即作弊。代价是模型
+        # 失去归属拐杖:6-05 实测归属错误 11%(前台微信却写「在微信里开 Claude Code」)。
+        # --attr-hint 用确定性检测重建这个提示(见 app_field 注释)。
+        app = app_field(b["app"], win, ocr_block) if args.attr_hint else b["app"]
+        q = (f"分析这段 macOS 屏幕会话的截图。已知(系统API):前台 app = {app}"
              f";窗口标题 = {win or '(空)'}。\n"
              f"已知(OCR全文,按帧,含背景窗文字):\n<<<\n{ocr_block}\n>>>\n{SCHEMA}\n{RULES}")
         corpus = norm(ocr_block + b["app"])
