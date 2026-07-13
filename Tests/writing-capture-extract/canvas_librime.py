@@ -43,11 +43,11 @@ def _decode_segment(seg):
     标点/空格/字面数字→原样保留(reconstruct 那条会丢标点+丢纯英文,故 bucket B 自己装)。
     seg 里的 token 若是 _K(带 .ime),**英文键盘敲的 run 一律字面,不送 librime 猜字**。"""
     out, buf, buf_ime = [], "", True
-    def flush(pick=None):
+    def flush(pick=None, literal=False):
         nonlocal buf, buf_ime
         if not buf:
             return
-        if not buf_ime:                           # 纯键盘布局敲的 = 英文直接上屏,没有拼音这回事
+        if literal or not buf_ime:                # 纯键盘布局敲的 = 英文直接上屏,没有拼音这回事
             out.append(buf); buf = ""; buf_ime = True
             return                                # (不这么拦:com→聪明 把邮箱解坏,the→他和)
         kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
@@ -70,7 +70,11 @@ def _decode_segment(seg):
         ime = getattr(ch, 'ime', True)            # 非 _K(如 apply_bs 截断音节时补的字符)→ 当输入法
         if ch.isalpha():
             if buf and ime != buf_ime:
-                flush()                           # 中途切了输入法 = 一个 run 收尾(中英夹杂靠这个分开)
+                # 中途切了输入法 = 一个 run 收尾(中英夹杂靠这个分开)。⚠️**按字面出,不解码**:
+                # 这个 buf 没有任何提交信号(不是被选字数字/标点收尾的),用户是打到一半切走的
+                # —— 中文输入法里的预编辑没提交就切输入法 = 它从来没上屏成汉字。实测你打 "sinos"
+                # 前两键 s,i 还在中文法下、随后切英文,硬解会得到「死nos」;"east" 得到「饿ast」。
+                flush(literal=True)
             if not buf:
                 buf_ime = ime
             buf += ch
@@ -106,9 +110,16 @@ def _keys_with_mode(con, bundle, t0, t1, pad_start=2000, pad_end=300):
     out = []
     for c, bs, md, src in rows:
         if (md & 7) != 0: continue
-        ime = not (src and 'keylayout' in src)
+        ime = bool(src and 'inputmethod' in src) or not src   # None(旧数据)→当输入法
+        if src and 'keylayout' in src: ime = False
         if bs: out.append(_K('<BS>', ime)); continue
         if not c: continue
+        # 输入法开着时,跟在**拼音**后的空格 = 选第一个候选(等价按 1) —— 与 rebuild.keys_in_window
+        # 同一套三道闸(见那边注释:input_source 背书 + 前面真是拼音 + 全小写),canvas 路对齐。
+        if c == ' ' and src and 'inputmethod' in src and out and out[-1].isalpha():
+            run = re.search(r'[A-Za-z]+$', ''.join(out)).group()
+            if run.islower() and R.commit_syls(run) is not None:
+                out.append(_K('1', True)); continue
         out.append(_K('<CR>' if c in ('\n', '\r') else c, ime))
     return out
 
