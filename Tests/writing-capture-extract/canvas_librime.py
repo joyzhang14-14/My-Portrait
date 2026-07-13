@@ -40,12 +40,16 @@ def _strip_eng_prefix(buf):
 
 def _decode_segment(seg):
     """seg=char 列表(已消化退格)→ 文本。逐 run 装配:拼音→librime TOP;英文→字面(保大小写);
-    标点/空格/字面数字→原样保留(reconstruct 那条会丢标点+丢纯英文,故 bucket B 自己装)。"""
-    out, buf = [], ""
+    标点/空格/字面数字→原样保留(reconstruct 那条会丢标点+丢纯英文,故 bucket B 自己装)。
+    seg 里的 token 若是 _K(带 .ime),**英文键盘敲的 run 一律字面,不送 librime 猜字**。"""
+    out, buf, buf_ime = [], "", True
     def flush(pick=None):
-        nonlocal buf
+        nonlocal buf, buf_ime
         if not buf:
             return
+        if not buf_ime:                           # 纯键盘布局敲的 = 英文直接上屏,没有拼音这回事
+            out.append(buf); buf = ""; buf_ime = True
+            return                                # (不这么拦:com→聪明 把邮箱解坏,the→他和)
         kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
         if kind == 'chinese':
             # 英文/拼音粘连修(2026-07-11,#3 Portrait中的):选字数字逼整串判拼音,但大写开头=英文
@@ -61,9 +65,14 @@ def _decode_segment(seg):
                 out.append(han or buf)            # 解不出 → 留拼音残渣(宁缺毋错)
         else:
             out.append(buf)                       # english/incomplete → 字面(The/ok 保原样)
-        buf = ""
+        buf = ""; buf_ime = True
     for ch in seg:
+        ime = getattr(ch, 'ime', True)            # 非 _K(如 apply_bs 截断音节时补的字符)→ 当输入法
         if ch.isalpha():
+            if buf and ime != buf_ime:
+                flush()                           # 中途切了输入法 = 一个 run 收尾(中英夹杂靠这个分开)
+            if not buf:
+                buf_ime = ime
             buf += ch
         elif ch.isdigit() and buf and 1 <= int(ch) <= 9:
             flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏
@@ -74,37 +83,54 @@ def _decode_segment(seg):
     return ''.join(out)
 
 
-US_RATIO = 0.8   # 逾此比例的击键来自纯键盘布局 → 判英文打字,不解码
+class _K(str):
+    """带输入法模式的字符 token。**str 子类** → apply_bs/split_cr/parse_picks 全部无感沿用。"""
+    __slots__ = ('ime',)
+    def __new__(cls, s, ime=True):
+        o = str.__new__(cls, s); o.ime = ime; return o
 
-def _ime_active(con, bundle, t0, t1):
-    """这段 canvas 会话是不是**在输入法下**打的 —— 决定要不要过 librime。
 
-    ⚠️`keylayout.*` = 纯键盘布局(英文直接上屏,压根没有拼音这回事),硬送 librime 会把英文
-    拆成声母+韵母解成汉字:实测 `com`→「聪明」(邮箱 xxx@gmail.com 被解坏)、`the`→「他和」、
+def _keys_with_mode(con, bundle, t0, t1, pad_start=2000, pad_end=300):
+    """同 rebuild.keys_in_window,但**每个键记住它是不是在输入法下敲的**。
+
+    ⚠️`keylayout.*` = 纯键盘布局(英文直接上屏,压根没有"拼音"这回事)。硬送 librime 会把英文
+    拆成声母+韵母解成汉字:`com`→「聪明」(邮箱 xxx@gmail.com 整个解坏)、`the`→「他和」、
     `de`→「的」。canvas 路原先无条件强开 decode,这些全中招。
-    `input_source` 自 2026-06-13 才有值;此前全 None → 无从判断,**维持原行为(解码)**,
-    不拿新闸去改旧数据的结论。"""
+    **必须逐键判,不能按 span 算比例**:同一段里常常中英夹杂(实测 06-29 Chrome 一段=20 键英文
+    邮箱 + 7 键中文,占比 0.74 过不了任何合理阈值,整段放行后邮箱照样被解坏)。
+    `input_source` 自 2026-06-13 才有值;此前全 None → 当输入法(**维持原行为**,不拿新闸改旧结论)。"""
     rows = con.execute(
-        "SELECT input_source, COUNT(*) FROM keystroke_log "
-        "WHERE bundle_id = :b AND ts_ms BETWEEN :a AND :c GROUP BY input_source",
-        {"b": bundle, "a": t0, "c": t1}).fetchall()
-    d = {(s or ''): n for s, n in rows}
-    tot = sum(d.values())
-    if not tot:
-        return True
-    us = sum(n for s, n in d.items() if 'keylayout' in s)
-    return (us / tot) <= US_RATIO
+        "SELECT char,is_backspace,modifiers,input_source FROM keystroke_log "
+        "WHERE bundle_id = :b AND ts_ms BETWEEN :a AND :c ORDER BY ts_ms",
+        {"b": bundle, "a": (t0 or 0) - pad_start, "c": (t1 or 0) + pad_end}).fetchall()
+    out = []
+    for c, bs, md, src in rows:
+        if (md & 7) != 0: continue
+        ime = not (src and 'keylayout' in src)
+        if bs: out.append(_K('<BS>', ime)); continue
+        if not c: continue
+        out.append(_K('<CR>' if c in ('\n', '\r') else c, ime))
+    return out
+
+
+def _split_cr_toks(toks):
+    """同 rebuild.split_cr,但吃 token 列表(保住 _K 的 .ime),不吃字符串。"""
+    segs, cur = [], []
+    for t in R.apply_bs(toks):
+        if t == '<CR>': segs.append(cur); cur = []
+        else: cur.append(t)
+    if cur: segs.append(cur)
+    return segs
 
 
 def decode_span(con, bundle, t0, t1):
     """一个短 canvas 会话的击键 → librime 确定性重建(TOP,不跑模型)。
-    输入法关着(纯英文键盘)则不解码,字面照抄 —— DECODE_LIBRIME=False 时 decode_run 返回 None,
-    _decode_segment 的 `han or buf` 自然落到字面。"""
-    kw = R.keys_in_window(con, bundle, t0, t1)
+    英文键盘敲的 run 不猜字(见 _decode_segment 的 buf_ime),逐键判。"""
+    toks = _keys_with_mode(con, bundle, t0, t1)
     prev = R.DECODE_LIBRIME
-    R.DECODE_LIBRIME = _ime_active(con, bundle, t0, t1)   # 英文键盘 → 不猜字
+    R.DECODE_LIBRIME = True   # bucket B 开 decode;是否真解由每个 run 的 .ime 决定
     try:
-        lines = [_decode_segment(seg) for seg in R.split_cr(kw)]
+        lines = [_decode_segment(seg) for seg in _split_cr_toks(toks)]
     finally:
         R.DECODE_LIBRIME = prev
     return '\n'.join(l for l in lines if l)
