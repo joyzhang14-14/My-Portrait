@@ -13,6 +13,8 @@ model tier → 实际模型(可被 run.py --model 全局覆盖成一个):
 TIER_MODELS = {
     "small": "mlx-community/Qwen3-4B-4bit",
     "mid":   "mlx-community/Qwen3-8B-4bit",
+    # ⚠️ big 已被 A/B 实测淘汰(14B:3/6 崩 JSON、5-18s 最慢、message_structure 漏判),
+    # 现在**没有任何维度用 big**。保留只为 --model 显式对照。16GB 部署只用 small/mid。
     "big":   "mlx-community/Qwen3-14B-4bit",
 }
 
@@ -37,9 +39,10 @@ def _sys(body: str) -> str:
 
 
 DIMENSIONS = [
-    # ① 消息结构 —— 中文语序判断,给 14B
+    # ① 消息结构 —— 中文语序判断。实测(verify_v2)8B 加 few-shot 后能认出
+    # 倒装/宾语前置/连动;而 14B 恰在本维度漏判(present=false)→ 用 mid(8B)。
     {
-        "key": "message_structure", "name": "消息结构", "tier": "big",
+        "key": "message_structure", "name": "消息结构", "tier": "mid",
         "needs_ks": False,
         "feature_keys": ["rhetorical_hint", "final_particles"],
         "system": _sys("""
