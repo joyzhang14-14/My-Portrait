@@ -21,6 +21,7 @@ import canvas_local as CL    # 复用 frame_lines(OCR 词→行)
 # 是**旧采集(<6/25)专属**现象(实测新采集无真事件,只 codex 终端 G/OOM 非消息),而剥离是启发式有误剥
 # 风险(Songzhong)。故只对旧数据开:route_day 按 day<6/25 置 True,新采集干净路不跑,消除风险。
 _ENG_STRIP = False
+OCR_ANCHOR = os.environ.get('PORTRAIT_OCR_ANCHOR', '1') == '1'   # 漏斗第一层(见 ocr_anchor.py)
 
 
 def _strip_eng_prefix(buf):
@@ -164,13 +165,17 @@ def _split_cr_toks(toks):
 
 
 def decode_span(con, bundle, t0, t1):
-    """一个短 canvas 会话的击键 → librime 确定性重建(TOP,不跑模型)。
+    """一个短 canvas 会话的击键 → 文本。
+    **漏斗第一层 = OCR 锚定**(拍到的真值);锚不到才落回 librime 解码(第二层,猜)。
+    canvas 是 0 承载(没有 AX 汉字,只有击键),librime 猜错就没救 —— 锚定在这条路上是纯增益。
     英文键盘敲的 run 不猜字(见 _decode_segment 的 buf_ime),逐键判。"""
+    import ocr_anchor as OA
     toks = _keys_with_mode(con, bundle, t0, t1)
     prev = R.DECODE_LIBRIME
     R.DECODE_LIBRIME = True   # bucket B 开 decode;是否真解由每个 run 的 .ime + 衔接语义决定
     try:
-        lines = [_decode_segment(seg, cr_ime) for seg, cr_ime in _split_cr_toks(toks)]
+        lines = [(OCR_ANCHOR and OA.resolve(con, bundle, t0, t1, seg)) or _decode_segment(seg, cr_ime)
+                 for seg, cr_ime in _split_cr_toks(toks)]
     finally:
         R.DECODE_LIBRIME = prev
     return '\n'.join(l for l in lines if l)

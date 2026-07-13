@@ -39,6 +39,8 @@ def event_tokens(seg):
             toks.extend(('lit', c) for c in buf)      # 英文词 → 字面(gmail/api 屏幕上就是这样)
         buf = ""
     for ch in seg:
+        if ch in ('<CR>', '<BS>'):
+            flush(); continue                          # 标记 token(canvas 把「输入法吃掉的回车」留在段内)
         if ch.isalpha():
             buf += ch
         elif ch.isdigit() and buf:

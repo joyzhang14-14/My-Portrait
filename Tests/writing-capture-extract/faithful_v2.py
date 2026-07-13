@@ -17,6 +17,11 @@ import ocr3 as C3
 import ax_bearing as AXB          # 承载率判别(canvas_spans);一体化 canvas 判别用
 import canvas_librime as CL       # canvas B 解码 + wrap_llm(共享主程序已加载的 14B)
 import canvas_route as CR         # 一体化 canvas 构建(build_canvas:B+C 内联,不落 fusion 文件)
+import ocr_anchor as OA           # 漏斗第一层:击键锚定 OCR(拍到的真值 > librime 的猜)
+
+# 漏斗第一层开关(2026-07-13 用户设计的反转:OCR 当真值,librime 降为第二层兜短碎片)
+OCR_ANCHOR = os.environ.get('PORTRAIT_OCR_ANCHOR', '1') == '1'
+ANCHORED = set()                  # 被 OCR 锚定改写过的 event id(审计:成品里标 +ocr)
 from enzh_double_return import double_return_eng, encode_keys   # 双 return 中文IME打英文判别(gmail案)
 from mlx_lm import load, generate
 
@@ -478,6 +483,17 @@ for day in DAYS:
             # 上下文 = 时间邻域(组内已重建的前几条,条间 gap>5min 截断),不再用旧 staged 全天
             ctx = f"app:{app}\n之前的消息:\n" + ctx_window([(g[4], g[1]) for g in grp], t0 or 0)
             fixed, rinfo = R.reconstruct_message(text, kw, context=ctx, model_fn=disambig, eng_literals=engl)
+            # ===== 漏斗第一层:OCR 锚定(2026-07-13 用户设计)=====
+            # OCR 拍到的是**屏幕上真实显示的字**(不是猜的);上面这条 reconstruct 里的 librime 是**猜**的
+            # (候选序跟用户的苹果输入法本来就不一样,干净集 203 条只解对 30%)。锚定命中就用它;
+            # 锚不到(实测 86%)→ 保持 reconstruct 的结果 = 用户说的"第二层,专门漏这类短数据"。
+            # 只在「击键窗口=单段完整消息」时锚(与 ocr_anchor 验证集同条件,0 误锚/0 捞取的保证才成立)。
+            if OCR_ANCHOR:
+                _sg = [s for s in R.split_cr(kw) if any(c.isalnum() for c in s)]
+                if len(_sg) == 1:
+                    _a = OA.resolve(con, ev['bundle'], t0, t1, _sg[0])
+                    if _a and cv(_a) and cv(_a) != cv(fixed):
+                        fixed = _a; ANCHORED.add(ev['id'])
             # 审计要求:event id + 时间窗 + bundle 随 record 全程传递(Pass4 丢弃标时间;击键账本对账)
             if cv(fixed):
                 fx = cv(fixed)
@@ -547,6 +563,7 @@ for day in DAYS:
             # → 标 ~residue 进未定区;is_send=True 的单字发送(6/额/哈)不标,是真消息。
             lone_char = (not s) and len(cv(t)) == 1
             src = "ax_cleaned" + ("" if s else "~draft") + ("~residue" if (is_residue(t) or lone_char) else "")
+            if evid in ANCHORED: src += "+ocr"     # 漏斗第一层改写过 → 成品里标出来,可审计
             out.append((app, t, kc, evid, t0, t1, src, b))
     # 残渣副本去重(jeff chang 案,2026-06-11):~residue 的字母串与 ±10s 同bundle 邻条的
     # 拼音平铺全等(多音字按词库全集回溯)→ 过期预上屏快照,真身胜,丢给审计。
