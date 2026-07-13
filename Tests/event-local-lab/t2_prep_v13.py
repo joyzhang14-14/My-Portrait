@@ -68,6 +68,7 @@ def main():
             day, key = m.group(1), m.group(2)
             ocr = q.split("<<<\n", 1)[1].split("\n>>>", 1)[0]
             head_old = q.split("\n已知(OCR", 1)[0]
+            schema_rules = q.split("\n>>>\n", 1)[1]     # SCHEMA + 规则行(三变体轮换,原样留用)
             win = head_old.split(";窗口标题 = ", 1)[1].rstrip("。")
             win = "" if win == "(空)" else win
             row = con.execute("SELECT app FROM raw_sessions WHERE id=?", (int(key),)).fetchone()
@@ -84,7 +85,7 @@ def main():
                 "day": day, "key": key, "split": split,
                 "app_bare": bare,
                 "app_teacher": head_old.split("前台 app = ", 1)[1].split(";窗口标题", 1)[0],
-                "head_old": head_old, "head_new": head_new,
+                "head_old": head_old, "head_new": head_new, "schema_rules": schema_rules,
                 "images": r["images"], "image_first": r["images"][0],
                 "ocr": ocr, "answer": ans,
                 "teacher_specifics_raw": [str(x) for x in (g.get("specifics") or [])],
