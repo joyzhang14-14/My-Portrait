@@ -204,6 +204,37 @@ def fail_session(con, sess_id, err):
                     (str(err)[:500], now_ms(), sess_id))
 
 
+def _ensure_digest_col(con):
+    cols = [r[1] for r in con.execute("PRAGMA table_info(vision_items)")]
+    if "digest" not in cols:          # v1.2 结构化 digest(activity/who/context/specifics/social)
+        with con:
+            con.execute("ALTER TABLE vision_items ADD COLUMN digest TEXT")
+
+
+def save_vision_digest(con, day, key, parts, app, model, total_frames, kept_frames, digest):
+    """v1.2 会话级结构化 digest 落库(可复用资产:event / writing-style / personality 都吃这张表)。"""
+    _ensure_digest_col(con)
+    with con:
+        con.execute(
+            "INSERT INTO vision_items(day,session_key,parts,app,model,total_frames,"
+            "kept_frames,items,digest,created_ms) VALUES(?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(day,session_key) DO UPDATE SET model=excluded.model,"
+            "digest=excluded.digest,created_ms=excluded.created_ms",
+            (day, int(key), json.dumps(parts), app, model, total_frames, kept_frames,
+             "[]", json.dumps(digest, ensure_ascii=False), now_ms()))
+
+
+def vision_digests_for_day(con, day, model=None):
+    """{session_key: digest dict} —— 复用入口(不限 event)。"""
+    _ensure_digest_col(con)
+    sql = "SELECT session_key, digest FROM vision_items WHERE day=:d AND digest IS NOT NULL"
+    args = {"d": day}
+    if model:
+        sql += " AND model=:m"
+        args["m"] = model
+    return {r[0]: json.loads(r[1]) for r in con.execute(sql, args)}
+
+
 def save_vision_items(con, day, key, parts, app, model, total_frames, kept_frames, items):
     """视觉产物 durable 落库(幂等 upsert)。供其他 pipeline 复用,不再赌 /tmp。"""
     with con:
