@@ -38,17 +38,26 @@ def _strip_eng_prefix(buf):
     return '', buf
 
 
-def _decode_segment(seg):
+def _decode_segment(seg, cr_ime=None):
     """seg=char 列表(已消化退格)→ 文本。逐 run 装配:拼音→librime TOP;英文→字面(保大小写);
     标点/空格/字面数字→原样保留(reconstruct 那条会丢标点+丢纯英文,故 bucket B 自己装)。
-    seg 里的 token 若是 _K(带 .ime),**英文键盘敲的 run 一律字面,不送 librime 猜字**。"""
-    out, buf, buf_ime = [], "", True
+
+    **衔接语义(2026-07-13 用户裁定)** —— 一串在中文输入法下敲出、还没上屏的拼音,看它后面紧接着是啥:
+      · 直接切成英文键盘 → 预编辑没提交就切走了 → **按英文走(字面)**
+      · **回车**(且回车也在中文输入法下) → 中文输入法里回车 = **把生拼音原样上屏**
+        (所以要按两次才发得出去 = 双回车)→ **按英文走(字面)**;`cr_ime` 传的就是这个
+      · 字母+空格(都在中文输入法下) → 空格 = 选第一个候选 = **真上屏成汉字** → 走中文解码
+        (空格→'1' 的归一在 _keys_with_mode 做);此后换什么输入法都不影响
+
+    `.ime` 是**三态**:True=输入法 / False=纯键盘布局 / None=旧数据(<2026-06-13 无 input_source)。
+    **None 一律维持原行为(解码)**,不拿新规则去改旧数据的结论(否则动 gold)。"""
+    out, buf, buf_ime = [], "", None
     def flush(pick=None, literal=False):
         nonlocal buf, buf_ime
         if not buf:
             return
-        if literal or not buf_ime:                # 纯键盘布局敲的 = 英文直接上屏,没有拼音这回事
-            out.append(buf); buf = ""; buf_ime = True
+        if literal or buf_ime is False:           # 纯键盘布局敲的 = 英文直接上屏,没有拼音这回事
+            out.append(buf); buf = ""; buf_ime = None
             return                                # (不这么拦:com→聪明 把邮箱解坏,the→他和)
         kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
         if kind == 'chinese':
@@ -65,32 +74,41 @@ def _decode_segment(seg):
                 out.append(han or buf)            # 解不出 → 留拼音残渣(宁缺毋错)
         else:
             out.append(buf)                       # english/incomplete → 字面(The/ok 保原样)
-        buf = ""; buf_ime = True
+        buf = ""; buf_ime = None
     for ch in seg:
-        ime = getattr(ch, 'ime', True)            # 非 _K(如 apply_bs 截断音节时补的字符)→ 当输入法
+        ime = getattr(ch, 'ime', None)            # 非 _K(如 apply_bs 截断音节时补的字符)→ 未知
         if ch.isalpha():
-            if buf and ime != buf_ime:
+            if buf and ime is not None and buf_ime is not None and ime != buf_ime:
                 # 中途切了输入法 = 一个 run 收尾(中英夹杂靠这个分开)。⚠️**按字面出,不解码**:
-                # 这个 buf 没有任何提交信号(不是被选字数字/标点收尾的),用户是打到一半切走的
+                # 这个 buf 没有任何提交信号(不是被选字数字/空格收尾的),用户是打到一半切走的
                 # —— 中文输入法里的预编辑没提交就切输入法 = 它从来没上屏成汉字。实测你打 "sinos"
                 # 前两键 s,i 还在中文法下、随后切英文,硬解会得到「死nos」;"east" 得到「饿ast」。
                 flush(literal=True)
             if not buf:
                 buf_ime = ime
             buf += ch
-        elif ch.isdigit() and buf and 1 <= int(ch) <= 9:
+        elif ch == '<CR>':
+            # 走到这里的 <CR> = **输入法吃掉的那次回车**(_split_cr_toks 没拿它断行):它在提交
+            # 预编辑的生拼音,不产生换行 —— 这就是"双回车"里被吃掉的第一下。
+            flush(literal=True)
+        elif ch.isdigit() and buf and 1 <= int(ch) <= 9 and buf_ime is not False:
             flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏
         elif ch.isprintable():
+            # ⚠️英文键盘下数字就是**字面数字**,不是选字索引(上面那条 buf_ime is not False 拦着)。
+            # 不拦:邮箱 joyzhang14@... 的「1」会被当成"选第1个候选"吃掉 → joyzhang4@...
             flush(); out.append(ch)               # 标点/空格/字面数字:先收尾,再原样保留(逗号!)
         # else:控制键(ESC/US 等)= 非文字,丢(同 real_key correctness)
-    flush()
+    # 段末:被**回车**收尾且这一串没提交过 → 生拼音原样上屏(双回车),按字面。
+    # 旧数据(cr_ime=None)不套这条,维持原行为(解码),否则动 gold。
+    flush(literal=(cr_ime is True) or (cr_ime is False and buf_ime is not False))
     return ''.join(out)
 
 
 class _K(str):
-    """带输入法模式的字符 token。**str 子类** → apply_bs/split_cr/parse_picks 全部无感沿用。"""
+    """带输入法模式的字符 token。**str 子类** → apply_bs/split_cr/parse_picks 全部无感沿用。
+    `.ime` 三态:True=输入法 / False=纯键盘布局 / None=旧数据无 input_source(维持原行为)。"""
     __slots__ = ('ime',)
-    def __new__(cls, s, ime=True):
+    def __new__(cls, s, ime=None):
         o = str.__new__(cls, s); o.ime = ime; return o
 
 
@@ -110,13 +128,12 @@ def _keys_with_mode(con, bundle, t0, t1, pad_start=2000, pad_end=300):
     out = []
     for c, bs, md, src in rows:
         if (md & 7) != 0: continue
-        ime = bool(src and 'inputmethod' in src) or not src   # None(旧数据)→当输入法
-        if src and 'keylayout' in src: ime = False
+        ime = None if not src else ('inputmethod' in src)      # 三态,旧数据 None
         if bs: out.append(_K('<BS>', ime)); continue
         if not c: continue
         # 输入法开着时,跟在**拼音**后的空格 = 选第一个候选(等价按 1) —— 与 rebuild.keys_in_window
         # 同一套三道闸(见那边注释:input_source 背书 + 前面真是拼音 + 全小写),canvas 路对齐。
-        if c == ' ' and src and 'inputmethod' in src and out and out[-1].isalpha():
+        if c == ' ' and ime is True and out and out[-1].isalpha():
             run = re.search(r'[A-Za-z]+$', ''.join(out)).group()
             if run.islower() and R.commit_syls(run) is not None:
                 out.append(_K('1', True)); continue
@@ -125,12 +142,24 @@ def _keys_with_mode(con, bundle, t0, t1, pad_start=2000, pad_end=300):
 
 
 def _split_cr_toks(toks):
-    """同 rebuild.split_cr,但吃 token 列表(保住 _K 的 .ime),不吃字符串。"""
+    """同 rebuild.split_cr,但吃 token 列表(保住 _K 的 .ime)。返回 [(seg, cr_ime)]:
+    cr_ime = 收尾那个回车是在什么输入法下敲的(段末无回车 → None)。
+
+    ⚠️**输入法吃掉的那次回车不断行**:中文输入法里预编辑还挂着时按回车,回车被输入法吃掉去
+    提交生拼音,**不产生换行**(这就是"双回车"——得再按一次才真的发出去)。这种 <CR> 留在段内,
+    由 _decode_segment 当"按字面收尾"处理。不这么做:邮箱小号 riqujoyzhang14@… 会被断成
+    「riqu」+「joyzhang14@…」两行。"""
     segs, cur = [], []
     for t in R.apply_bs(toks):
-        if t == '<CR>': segs.append(cur); cur = []
-        else: cur.append(t)
-    if cur: segs.append(cur)
+        if t == '<CR>':
+            eaten = (getattr(t, 'ime', None) is True and cur and cur[-1].isalpha()
+                     and getattr(cur[-1], 'ime', None) is True)     # 挂着中文预编辑 → 被输入法吃掉
+            if eaten:
+                cur.append(t); continue
+            segs.append((cur, getattr(t, 'ime', None))); cur = []
+        else:
+            cur.append(t)
+    if cur: segs.append((cur, None))
     return segs
 
 
@@ -139,9 +168,9 @@ def decode_span(con, bundle, t0, t1):
     英文键盘敲的 run 不猜字(见 _decode_segment 的 buf_ime),逐键判。"""
     toks = _keys_with_mode(con, bundle, t0, t1)
     prev = R.DECODE_LIBRIME
-    R.DECODE_LIBRIME = True   # bucket B 开 decode;是否真解由每个 run 的 .ime 决定
+    R.DECODE_LIBRIME = True   # bucket B 开 decode;是否真解由每个 run 的 .ime + 衔接语义决定
     try:
-        lines = [_decode_segment(seg) for seg in _split_cr_toks(toks)]
+        lines = [_decode_segment(seg, cr_ime) for seg, cr_ime in _split_cr_toks(toks)]
     finally:
         R.DECODE_LIBRIME = prev
     return '\n'.join(l for l in lines if l)
