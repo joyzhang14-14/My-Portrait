@@ -194,7 +194,10 @@ def main():
             if k and k in corpus and k not in seenk:
                 seenk.add(k)
                 kws.append(str(s).strip()[:60])
-        kws_verified = list(kws)          # 只含过了 OCR 校验的 specifics
+        # cap 必须在这里(训练答案 max 就是 12;吐 35 个是解码失控,尾巴全是桌面碎渣)。
+        # 曾经漏了 cap → MD 视图有 12 上限,而落库的可复用 digest 无上限,
+        # writing-style / personality 吃到的是没截断的那份。
+        kws_verified = kws[:SPEC_CAP]     # 只含过了 OCR 校验的 specifics
         for w in (a.get("who") or []):
             if str(w).strip():
                 kws.append(str(w).strip()[:30])
