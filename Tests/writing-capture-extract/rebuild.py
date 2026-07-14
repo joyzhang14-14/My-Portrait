@@ -397,44 +397,24 @@ def paste_pressed(X, ev):
         {"b": ev['bundle'], "a": st - PASTE_KEY_PAD,
          "c": (ev.get('ended_at') or st) + 500}).fetchone() is not None
 
-TRIM_MIN_LINE = 5        # 裁剪时能当"有背书"留下的最短行(见 commit_backed)
-TRIM_COVER = 0.8         # 裁剪时的行级背书门槛(整条已证不可信,单行标准要高)
+TRIM_MIN_LINE = 5        # 能当"有背书"的最短行:2~4 字的行在几百字 commit 流里 LCS 必然撞上('> ok'/'join')
+TRIM_COVER = 0.8         # 行级背书门槛:事件已有粘贴证据,单行必须实打实对得上才算背书
 
 def commit_backed(X, t, cs):
-    """闸C:逐行 commit 背书裁剪。**只对已经判定"整条没背书"的记录开火**(调用处先过 handtyped)。
-    逐行(而不是整条丢)是因为真实场景是**混的**:ev342 = 936 字符 yt-dlp 终端输出 + 用户手打的
-    「这是给我下载到哪」—— 整条判只能一起丢或一起留,逐行才能把手打那句留下来。
-
-    ⚠️两条防线,缺一个就会**从垃圾里造出新垃圾**(全库实测):
-    ① **短行不算背书**(<TRIM_MIN_LINE):cover 是 LCS,2~4 个字的行在几百字的 commit 流里
-       几乎必然撞上 —— Obsidian 里浏览的 2925 字审计报告被裁成 `'> ok'`、天文复习资料被裁成
-       `'行星'`,这些碎片今天是被下游整条丢掉的,裁剪反而把它们"抢救"成了新记录。
-    ② **门槛 0.8 不是 0.5**:整条已经证明不可信,单行必须实打实对得上才留
-       (ev342 的「这是给我下载到哪」对 commit 流「这是给我xia下载到n哪」是 1.0)。"""
-    keep = [ln for ln in t.split('\n')
-            if len(cv(ln)) >= TRIM_MIN_LINE and X.cover(cv(ln), cs) >= TRIM_COVER]
+    """闸C(用户裁定 2026-07-15:**严格 30 闸,一切以击键为主**,不做任何内容/形态硬编码):
+    逐行对账 ——
+      · 行有击键背书(cover≥TRIM_COVER 且 ≥TRIM_MIN_LINE 字)→ 留
+      · 没背书的行 = 粘贴段 → 走粘贴政策 30 闸:≤PASTE_MAX 留(短粘贴合法,ElevenLabs 案同款),
+        >PASTE_MAX 裁(ev342 的 yt-dlp 行 43~116 字全超,「先用apify找到爆款视频…」23 字留)
+      · 全篇**一行背书都没有** = 纯粘贴 → 整条不留(纯粘贴不留的政策原话;也防浏览文档的
+        海量短行冒充"短粘贴"涌入 —— 文档记录里用户一行都没打过)
+    逐行(而不是整条判)是因为真实场景是混的:ev342 = 936 字符终端输出 + 手打的「这是给我下载到哪」。"""
+    lines = t.split('\n')
+    backed = [len(cv(ln)) >= TRIM_MIN_LINE and X.cover(cv(ln), cs) >= TRIM_COVER for ln in lines]
+    if not any(backed):
+        return ''
+    keep = [ln for ln, bk in zip(lines, backed) if bk or 0 < len(cv(ln)) <= PASTE_MAX]
     return '\n'.join(keep).strip()
-
-def handtyped(X, ev, t, cs, t0, t1, group_letters=None):
-    """这条记录有没有击键背书。两条证据任一即可(和 faithful_v2 的组级 KC_GATE 同款判据):
-    ① 内容能被 commit 流解释(cover ≥0.5);
-    ② **短记录**(≤120 字)的击键字母下界闸:网页(ChatGPT/Gemini/ollama)打字时 AX 一个 commit
-       都不记,汉字只存在于击键流的拼音里,cover 恒为 0 —— 只能靠"敲的字母数 ≥ 需要的字数"背书
-       (header 案 ev664 立的规矩)。
-    ⚠️字母数必须按**组**算,不能按单事件:endValue 是**跨事件累积**的框内快照 —— ev3557
-    「空洞骑士怎么躲避？」的 endValue 落在最后一个事件上,但「空洞骑士怎么」的击键在本组**更早的
-    事件**里,只数本事件窗口 letters=11 < need=14,真手打被误杀。group_cs 已经是组级,字母也得是。
-    ⚠️字母下界闸**只给短记录**:它只证明"敲了足够多的键",不证明"这些键产出了这段文字"。ev598
-    用户 6.6 分钟敲了 1575 键、大半条是真手打,但掺了 4 次 ⌘V —— 长文放行等于把粘贴段一起放行。"""
-    ct = cv(t)
-    if X.cover(ct, cs) >= 0.5:
-        return True
-    if len(ct) > 120:
-        return False
-    if group_letters is None:
-        group_letters = len(re.sub(r'[^a-zA-Z]', '', keys_in_window(X.con, ev['bundle'], t0, t1)))
-    need = sum(1 for ch in ct if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', ct))
-    return group_letters >= need
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
 def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
@@ -499,9 +479,17 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
             # 一条 paste 记录、内容跟 endValue 一模一样、击键流全空,照样进了成品。
             if pastes and sum(len(p) for p in pastes if p in ct) >= len(ct):
                 continue
-            if handtyped(X, ev, t, cs_use, a, b, group_letters):
-                o.append((t, a, b, s)); continue      # 有背书 → 原样(绝大多数)
-            nt = commit_backed(X, t, cs_use)          # 没背书 → 逐行裁,只留实打实对得上的行
+            # 字母下界闸(header 案 ev664 同款,只给 ≤120 字短记录):网页(ChatGPT/Gemini/ollama)
+            # 打字时 AX 一个 commit 都不记,cover 恒 0,只能靠"组内敲的字母 ≥ 需要的字数"背书。
+            # ⚠️按**组**数不按单事件:endValue 跨事件累积,「空洞骑士怎么」的击键在本组更早的事件里
+            # (ev3557 实证,单事件窗口 11<14 误杀)。只证明"敲够了键",不证明产出,所以长文不豁免。
+            if len(ct) <= 120:
+                gl = group_letters if group_letters is not None else \
+                    len(re.sub(r'[^a-zA-Z]', '', keys_in_window(X.con, ev['bundle'], a, b)))
+                need = sum(1 for ch in ct if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', ct))
+                if gl >= need:
+                    o.append((t, a, b, s)); continue
+            nt = commit_backed(X, t, cs_use)          # 逐行:背书留/粘贴段走30闸/零背书整条不留
             if nt: o.append((nt, a, b, s))
         return o
     for i, e in enumerate(arr):
