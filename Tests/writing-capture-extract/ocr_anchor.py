@@ -102,11 +102,21 @@ def anchor(toks, ocr):
     return None
 
 
+MIN_PY = 3           # 至少这么多拼音音节才让锚定开火(见 resolve)
+
 def resolve(con, bundle, t0, t1, seg, pad_before=3000, pad_after=15000):
     """一条消息:击键段 + 窗口 OCR → 屏幕上真实的那句话(或 None → 交第二层 librime 解码)。"""
     toks = event_tokens(seg)
-    if not toks or not any(k == 'py' for k, _ in toks):
-        return None                                     # 纯字面(全英文/纯数字)没必要走这条,AX/字面已够
+    if not toks:
+        return None
+    npy = sum(1 for k, _ in toks if k == 'py')
+    if npy < MIN_PY:
+        # ⚠️短锚定不可信:1~2 个音节**信息量不足**,屏幕上很容易撞到别的字。
+        # 实证 ev599:击键 `shima1` → [shi, ma],既能匹配「什么」也能匹配「是吗」
+        # (「是」读 shi、「吗」读 ma;「什」也有 shi 读音、「么」也有 ma 读音)—— 锚定只能挑
+        # OCR 里先出现的那个,可能挑错。v5 全量里 ≤2 字的改写占 41%,全是这类风险。
+        # 宁缺毋错:短的一律交第二层 librime(用户 2026-07-13 裁定)。
+        return None
     rows = con.execute(
         "SELECT full_text FROM frames WHERE timestamp_ms BETWEEN :a AND :b AND full_text IS NOT NULL "
         "ORDER BY timestamp_ms", {"a": (t0 or 0) - pad_before, "b": (t1 or t0 or 0) + pad_after}).fetchall()
