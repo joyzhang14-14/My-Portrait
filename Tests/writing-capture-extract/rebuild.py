@@ -375,13 +375,75 @@ def _allowed(runs, cap):
             for w in cands(py, 8): a |= set(ch for ch in w if HAN.match(ch))
     return a
 
+# ===== 粘贴旁路三道闸(2026-07-15,v6 审核坐实 47 条粘贴违规)=====
+# 教训:**别再试图「检测粘贴」**(右键粘/拖拽/自动补全/程序输出,路子堵不完)。
+# 只问一件事:**这些字有没有击键背书**(用户铁律:只记 commit 背书的内容)。
+# 闸A(下面 paste_pressed)= 发现「这个事件里发生过粘贴」→ 给闸C 上膛;
+# 闸B(extract_compare_v2.injected_texts/cstream)= 把粘贴伪装成的 commit 从背书流里剔掉;
+# 闸C(下面 commit_backed)= 成品逐行必须能被 commit 流解释,解释不了的行裁掉。
+PASTE_GATE = os.environ.get('PORTRAIT_PASTE_GATE', '1') == '1'   # 前端开关
+PASTE_KEY_PAD = 2000     # ⌘V 回扫窗(ms):ev342 的 ⌘V 在 started_at 前 109ms
+
+def paste_pressed(X, ev):
+    """闸A:窗口内有没有**物理 ⌘V**(modifiers 0x01=Command,已核 KeystrokeCharLogger.swift:68)。
+    ⚠️为什么不能只信 edit_log 的 kind='paste':edit_log 只记事件**开始之后**的 diff,⌘V 在
+    started_at 之前按下,粘进来的内容就成了事件的「初始状态」,一条 paste 记录都没有
+    (ev342:⌘V 早 109ms,936 字符 yt-dlp 终端输出零 paste 记录,靠 end_value 整段进了成品)。
+    击键流是这种情况下唯一的铁证。"""
+    st = ev.get('started_at') or 0
+    return X.con.execute(
+        "SELECT 1 FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
+        "AND char='v' AND (modifiers&1)=1 LIMIT 1",
+        {"b": ev['bundle'], "a": st - PASTE_KEY_PAD,
+         "c": (ev.get('ended_at') or st) + 500}).fetchone() is not None
+
+TRIM_MIN_LINE = 5        # 裁剪时能当"有背书"留下的最短行(见 commit_backed)
+TRIM_COVER = 0.8         # 裁剪时的行级背书门槛(整条已证不可信,单行标准要高)
+
+def commit_backed(X, t, cs):
+    """闸C:逐行 commit 背书裁剪。**只对已经判定"整条没背书"的记录开火**(调用处先过 handtyped)。
+    逐行(而不是整条丢)是因为真实场景是**混的**:ev342 = 936 字符 yt-dlp 终端输出 + 用户手打的
+    「这是给我下载到哪」—— 整条判只能一起丢或一起留,逐行才能把手打那句留下来。
+
+    ⚠️两条防线,缺一个就会**从垃圾里造出新垃圾**(全库实测):
+    ① **短行不算背书**(<TRIM_MIN_LINE):cover 是 LCS,2~4 个字的行在几百字的 commit 流里
+       几乎必然撞上 —— Obsidian 里浏览的 2925 字审计报告被裁成 `'> ok'`、天文复习资料被裁成
+       `'行星'`,这些碎片今天是被下游整条丢掉的,裁剪反而把它们"抢救"成了新记录。
+    ② **门槛 0.8 不是 0.5**:整条已经证明不可信,单行必须实打实对得上才留
+       (ev342 的「这是给我下载到哪」对 commit 流「这是给我xia下载到n哪」是 1.0)。"""
+    keep = [ln for ln in t.split('\n')
+            if len(cv(ln)) >= TRIM_MIN_LINE and X.cover(cv(ln), cs) >= TRIM_COVER]
+    return '\n'.join(keep).strip()
+
+def handtyped(X, ev, t, cs, t0, t1, group_letters=None):
+    """这条记录有没有击键背书。两条证据任一即可(和 faithful_v2 的组级 KC_GATE 同款判据):
+    ① 内容能被 commit 流解释(cover ≥0.5);
+    ② **短记录**(≤120 字)的击键字母下界闸:网页(ChatGPT/Gemini/ollama)打字时 AX 一个 commit
+       都不记,汉字只存在于击键流的拼音里,cover 恒为 0 —— 只能靠"敲的字母数 ≥ 需要的字数"背书
+       (header 案 ev664 立的规矩)。
+    ⚠️字母数必须按**组**算,不能按单事件:endValue 是**跨事件累积**的框内快照 —— ev3557
+    「空洞骑士怎么躲避？」的 endValue 落在最后一个事件上,但「空洞骑士怎么」的击键在本组**更早的
+    事件**里,只数本事件窗口 letters=11 < need=14,真手打被误杀。group_cs 已经是组级,字母也得是。
+    ⚠️字母下界闸**只给短记录**:它只证明"敲了足够多的键",不证明"这些键产出了这段文字"。ev598
+    用户 6.6 分钟敲了 1575 键、大半条是真手打,但掺了 4 次 ⌘V —— 长文放行等于把粘贴段一起放行。"""
+    ct = cv(t)
+    if X.cover(ct, cs) >= 0.5:
+        return True
+    if len(ct) > 120:
+        return False
+    if group_letters is None:
+        group_letters = len(re.sub(r'[^a-zA-Z]', '', keys_in_window(X.con, ev['bundle'], t0, t1)))
+    need = sum(1 for ch in ct if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', ct))
+    return group_letters >= need
+
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
-def event_sends_with_ts(ev, X, group_cs=None):
+def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
     """返回 [(text, ks_start_ts, ks_end_ts, is_send)]:真 within-event 发送(占位符/空框夹+回车背书)
     + submit + 末尾未发送 endValue。X = extract_compare_v2 模块(借 cstream/phMarkers/emptyBox/cover/RUNPH)。
     group_cs:组级 commit 流(#40 用户裁定:发送清空快照当成品)——跨事件长文(中段插入/补尾在后续事件,
     Blueprint 案)的快照对单事件 commit 流只盖 ~35%,被手打闸误杀;组级取证 0.66 过。粘贴不进 commit 流,防 autofill 本意不变。"""
-    arr = ev['arr']; cs = X.cstream(arr); ph = X.phMarkers(arr); returns = ev.get('returns', ())
+    arr = ev['arr']; ph = X.phMarkers(arr); returns = ev.get('returns', ())
+    cs = X.cstream(arr, ev.get('inj'))   # 闸B:粘贴伪装的 commit 不进背书流
     # #44/#45:已知占位符(KNOWN_PH)即使是 commit 注入(非 paste)也认作占位符标记/过滤——
     # phMarkers 只认 paste(防普通词误判),known 列表是白名单,commit 注入也安全。
     # inj(2026-07-10 用户裁定):无击键背书的注入 commit(X.injected_texts,loadev 算好)。
@@ -421,6 +483,27 @@ def event_sends_with_ts(ev, X, group_cs=None):
         return None
     txc = X.cv(ev.get('text') or '')
     stripped_hit = [False]
+    # 闸A 上膛:本事件有粘贴痕迹(物理 ⌘V / edit_log paste 段 / 巨块注入 commit)→ 出口过闸C 裁剪。
+    # **只在有粘贴证据时开火**:没证据的事件维持原行为,不动跨事件长文(#40 Blueprint 案的 endValue
+    # 快照对组流只盖 ~35%,无差别上闸C 会把真手打长文裁碎)。
+    armed = PASTE_GATE and bool(pastes or inj or paste_pressed(X, ev))
+    def gate(recs):
+        if not armed:
+            return recs
+        cs_use = group_cs or cs
+        o = []
+        for t, a, b, s in recs:
+            ct = X.cv(t)
+            # 纯粘贴不留(粘贴政策 2026-06-10):已知 paste 段就把整条盖满了 —— endValue 分支原本
+            # 没走这道判(只有 delete 分支走),ev3421「我有一个app目前」的 edit_log 里明明白白
+            # 一条 paste 记录、内容跟 endValue 一模一样、击键流全空,照样进了成品。
+            if pastes and sum(len(p) for p in pastes if p in ct) >= len(ct):
+                continue
+            if handtyped(X, ev, t, cs_use, a, b, group_letters):
+                o.append((t, a, b, s)); continue      # 有背书 → 原样(绝大多数)
+            nt = commit_backed(X, t, cs_use)          # 没背书 → 逐行裁,只留实打实对得上的行
+            if nt: o.append((nt, a, b, s))
+        return o
     for i, e in enumerate(arr):
         k = e.get('kind'); t = X.cv(e.get('text', '') or ''); ts = e.get('ts')
         if ts is None: continue
@@ -480,7 +563,7 @@ def event_sends_with_ts(ev, X, group_cs=None):
     # 剥离命中的事件:endv草稿='存量+已入册真身'合成残影(这个我怎么写比较好案,2026-06-12)
     # ——存量是本不该记的粘贴问题文本,增量已剥离入册,留着必成重复,废弃
     if stripped_hit[0]:
-        return out
+        return gate(out)
     if endv and not X.emptyZW(ev['endv']) and not X.is_ph(endv) and endv not in inj and endv not in ph:   # 占位符/注入/纯粘贴 endValue 整条不出(ph=事件内 paste 标记:占位符轮换或纯粘贴草稿,只记手打)
         out.append((endv, prev_ts, ev.get('ended_at') or prev_ts, False))
     # 单字 delete 事件内结构判别(2026-07-02 用户设计,定义B):本事件有产出(out 非空)或有 commit
@@ -488,7 +571,7 @@ def event_sends_with_ts(ev, X, group_cs=None):
     # 孤儿 residue,留 is_send=False,下游标 ~residue 进未定区。
     if not out and not X.cv(cs):
         out.extend((lt, lp, lts, False) for lt, lp, lts in lone_cands)
-    return out
+    return gate(out)
 
 EQLEN_WIN_MS = 300_000   # 等长条款时间窗 5min(2026-07-07 审计修):同 ctx_window 语境断点——
 # 隔了一个语境断点的等长文本是两条真输入,不是同一次编辑的快照。

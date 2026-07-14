@@ -126,6 +126,17 @@ def group_kc(ids):
     for st, et, b in sess_events(ids):
         n += con.execute("SELECT COUNT(*) FROM keystroke_log WHERE bundle_id=? AND ts_ms BETWEEN ? AND ? AND (modifiers&7)=0", (b, st-10000, et+10000)).fetchone()[0]
     return n
+def assemble_keys_full(ids):
+    """组内全部击键(不截断)。assemble_keys 为了喂模型截到 700 字,闸C 数字母不能用截断版。"""
+    o = []
+    for e in ids:
+        r = con.execute("SELECT bundle_id,started_at,ended_at FROM typing_events WHERE id=?", (e,)).fetchone()
+        if not r: continue
+        o += [c for (c,) in con.execute(
+            "SELECT char FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
+            "AND is_backspace=0 AND char IS NOT NULL AND (modifiers&7)=0",
+            {"b": r[0], "a": (r[1] or 0) - 2000, "c": (r[2] or r[1] or 0) + 2000})]
+    return ''.join(o)
 def assemble_keys(ids):
     rows = []
     for e in ids:
@@ -410,10 +421,15 @@ for day in DAYS:
         evs = X.loadev(ids)
         if not evs: continue
         kc = group_kc(ids); ks_full = assemble_keys(ids)
-        grp_cs = ''.join(X.cstream(e['arr']) for e in evs)   # 组级commit流:发送清空快照跨事件手打取证(#40)
+        # 组级commit流:发送清空快照跨事件手打取证(#40)。inj=闸B:粘贴伪装的 commit 不进背书流
+        # (否则 ev598 那条 82 字符粘贴块会给同段粘贴文本的 cover 背书,闸C/组级gate 全被骗过)
+        grp_cs = ''.join(X.cstream(e['arr'], e['inj']) for e in evs)
+        # 组级击键字母数(闸C 的字母下界闸要用):endValue 跨事件累积,单事件窗口数不全(见 R.handtyped)
+        grp_letters = len(re.sub(r'[^a-zA-Z]', '', assemble_keys_full(ids)))
         sends_raw = []
         for ev in evs:
-            for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs):
+            for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs,
+                                                               group_letters=grp_letters):
                 sends_raw.append([ev, text, t0, t1, is_send])
         # 回车背书升格(ev1174 jeff chang案,用户证实网页Gemini真发送):endValue短草稿(≤20字,L7射程)
         # 条件A:事件收尾紧跟裸回车(晚于末笔编辑150ms+;IME确认回车必伴随commit,天然排除)。

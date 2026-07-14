@@ -12,9 +12,16 @@ def emptyZW(s): return all((c.isspace() or ord(c) in ZW) for c in (s or ''))
 def sim(a, b): return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() if a and b else 0.0
 def cover(v, cs): return sum(b.size for b in difflib.SequenceMatcher(None, v, cs, autojunk=False).get_matching_blocks())/len(v) if v and cs else 0.0
 def related(a, b): return sim(a, b) >= 0.5 or a.startswith(b) or b.startswith(a)
-def cstream(arr): return ''.join(cv(e.get('text', '') or '') for e in arr if e.get('kind') == 'commit')
+def cstream(arr, inj=None):
+    """commit 流(手打取证的基准)。**inj 给了就把「粘贴伪装成的 commit」剔出去**(闸B,2026-07-15):
+    不剔的话 cover() 会拿粘贴内容给粘贴内容自己背书 —— 「只认 commit」的闸形同虚设(ev598 实证:
+    82 字符粘贴块混在 commit 流里,把同一段粘贴文本的 cover 抬起来)。inj=None 时行为不变(旧调用点)。"""
+    return ''.join(cv(e.get('text', '') or '') for e in arr
+                   if e.get('kind') == 'commit'
+                   and not (inj and cv(e.get('text', '') or '') in inj))
 
 EMOJI_EXEMPT = os.environ.get('PORTRAIT_EMOJI_EXEMPT', '1') == '1'   # 表情shortcode豁免注入闸(前端可关)
+BIG_COMMIT = int(os.environ.get('PORTRAIT_PASTE_MAX', '30'))         # 同 rebuild.PASTE_MAX(闸B 阈值)
 
 def injected_texts(arr, bundle, s, e):
     """机器注入 commit 判定(2026-07-10 用户裁定「Enter a shell command」案,KNOWN_PH 白名单的通用版):
@@ -36,7 +43,14 @@ def injected_texts(arr, bundle, s, e):
         return set()                                     # ② 黑洞 fail-open
     inj = set()
     for i, x in cands:
-        t = cv(x.get('text', '') or ''); ts = x['ts']
+        raw = x.get('text', '') or ''
+        t = cv(raw); ts = x['ts']
+        # 闸B 结构判据(2026-07-15,ev598):**>BIG_COMMIT 且含换行的原子块 = 粘贴伪装成 commit**。
+        # IME 上屏粒度实测 1~11 字符(ev598 的 131 条 commit 里 128 条在此区间);一条 82 字符、
+        # 内嵌 \n 的多行块在 ⌘V 后 461ms 原子上屏,输入法不可能这么 commit。
+        # 为什么下面的击键对账够不着它:锚窗兜底 60s,用户连续打字时窗内轻松 >len×0.25 键,反给粘贴背了书。
+        if len(t) > BIG_COMMIT and '\n' in raw:
+            inj.add(t); continue
         if len(t) < 8: continue
         # 表情 shortcode 豁免(2026-07-10 用户质询+合成最坏实证:鼠标点选 :emoji_34: 零击键,
         # 发送清空 delete 命中 inj 会整条丢):选择器=选择型输入法(同 IME 选字,一次选择产出整串),
