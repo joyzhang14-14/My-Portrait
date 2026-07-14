@@ -58,7 +58,7 @@ def clean_who(who):
         if WHO_AI.search(raw) or WHO_NONPERSON_MARK.search(raw):
             continue
         core = HEDGE_PAREN.sub('', raw).strip()       # 剥 hedge 括号,保名字本体
-        base = re.split(r'[（(]', core, 1)[0].strip() # 判身份用裸名
+        base = re.split(r'[（(]', core, maxsplit=1)[0].strip()  # 判身份用裸名
         if not core or base.casefold() in WHO_SELF or base in WHO_NONPERSON_EXACT:
             continue
         core = core[:40]
@@ -110,9 +110,12 @@ def main():
         if not act:
             st['答案空(丢弃)'] += 1
             continue
-        # ---- D4: 教师原始锚点池 → 逐字校验 → 去垃圾 → 去重 → cap
+        # ---- D4: 锚点池 = v1.2 已校正锚点(优先,保密度) + 教师原始池(补充,自然停止)
+        # ⚠️ 只用原始池是坑(实测):v1.1 用 147 个 sonnet agent 校正过的近失锚点
+        # 全在 v1.2 答案里,原始池没有 —— 只吃原始池会让中位 9→4、零锚点 46→122,
+        # 教模型"少写锚点",亲手毁掉 v1.2 最大的优势。
         corpus = norm(w['ocr'] + w['head_new'])
-        pool = w.get('teacher_specifics_raw') or ans0.get('specifics') or []
+        pool = list(ans0.get('specifics') or []) + list(w.get('teacher_specifics_raw') or [])
         specs, seen = [], set()
         for x in pool:
             t = str(x).strip()[:60]
@@ -187,23 +190,31 @@ def main():
     print(f"闸门② 题头泄题: {leak} (须为0)")
     if leak:
         fails.append('泄题')
-    # ③ ==12 撞墙率
-    sc = collections.Counter(len(json.loads(r['answer'])['specifics']) for r in tr
-                             if '已知(OCR' in r['question'])
-    real = sum(sc.values())
-    wall = sc[SPEC_CAP] / max(1, real)
-    print(f"闸门③ 锚点==12 撞墙率: {sc[SPEC_CAP]}/{real} = {wall*100:.1f}% (目标<20%,v1.2=36.5%)")
-    if wall >= 0.20:
+    # ③ 锚点分布:撞墙率要降,但密度绝不许掉(v1.2 的核心优势=锚点中位 9/零锚点 8.6%;
+    #    只吃教师原始池会把中位打到 4、零锚点 23% —— 撞墙率的"改善"是锚点饥饿的假象)
+    ns = sorted(len(json.loads(r['answer'])['specifics']) for r in tr
+                if '已知(OCR' in r['question'])
+    real = len(ns)
+    wall = ns.count(SPEC_CAP) / max(1, real)
+    zero = ns.count(0) / max(1, real)
+    med = ns[real // 2] if ns else 0
+    print(f"闸门③ 锚点: ==12 撞墙 {wall*100:.1f}% (须<v1.2 的 36.5%) / "
+          f"中位 {med} (须≥8) / 零锚点 {zero*100:.1f}% (须≤10%)")
+    if wall >= 0.365:
         fails.append('撞墙率')
-    # ④ 终版锚点垃圾率(用同一把分类器复检,应≈0)
+    if med < 8:
+        fails.append('锚点密度')
+    if zero > 0.10:
+        fails.append('零锚点')
+    # ④ 终版锚点垃圾率(同一把分类器复检;app 从题头取,与组装口径一致)
     junk = tot = 0
     for r in tr:
         if '已知(OCR' not in r['question']:
             continue
-        a = json.loads(r['answer'])
-        for s in a['specifics']:
+        app = r['question'].split('前台 app = ', 1)[1].split(';窗口标题', 1)[0]
+        for s in json.loads(r['answer'])['specifics']:
             tot += 1
-            if classify(s, None)[0]:
+            if classify(s, app)[0]:
                 junk += 1
     print(f"闸门④ 终版锚点垃圾率: {junk}/{tot} = {junk/max(1,tot)*100:.2f}% (须≤0.6%)")
     if junk / max(1, tot) > 0.006:
