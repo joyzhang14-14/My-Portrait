@@ -346,6 +346,11 @@ actor CaptureCoordinator {
             ocrResult = nil
         }
 
+        // 8b. 在屏窗口清单(v42):CGWindowList 同步调用,实测亚毫秒级,off-main +
+        //     200ms 防抖闸后,不影响帧率。给下游一个可确定性回放的归属拐杖 ——
+        //     "前台 app 是微信但屏上只有终端窗口"这类事实,截图/OCR 都还原不了。
+        let windowsJson = Self.snapshotWindowsJson()
+
         // 9. 入库。
         let record = FrameRecord(
             timestampMs: Int64(now.timeIntervalSince1970 * 1000),
@@ -355,7 +360,8 @@ actor CaptureCoordinator {
             focused: recordFocus.isFocused,
             deviceName: config.monitorId,
             snapshotPath: url.path,
-            captureTrigger: trigger.rawValue
+            captureTrigger: trigger.rawValue,
+            windowsJson: windowsJson
         )
 
         let frameId: Int64
@@ -393,6 +399,37 @@ actor CaptureCoordinator {
 
         // 不 await writeTask —— 主路径不等磁盘 IO 完成。
         _ = writeTask
+    }
+
+    /// 在屏窗口清单 → JSON(v42)。只取 layer 0(普通窗口层)+ 可见 alpha,
+    /// 保持 CGWindowList 的前→后 z 序;字段读取口径同 IncognitoGate。
+    /// 不用 SCShareableContent:那是到 replayd 的全量 XPC 往返(20-100ms,
+    /// 且实测偶发同步卡 7-8 秒),CGWindowList 是亚毫秒本地调用。
+    nonisolated private static func snapshotWindowsJson() -> String? {
+        let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let infos = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
+        var wins: [[String: Any]] = []
+        for w in infos {
+            let layer = (w[kCGWindowLayer as String] as? Int) ?? 0
+            let alpha = (w[kCGWindowAlpha as String] as? Double) ?? 1
+            guard layer == 0, alpha > 0.01 else { continue }
+            var entry: [String: Any] = ["layer": layer]
+            if let bd = w[kCGWindowBounds as String] as? [String: Any],
+               let r = CGRect(dictionaryRepresentation: bd as CFDictionary) {
+                entry["x"] = Int(r.origin.x); entry["y"] = Int(r.origin.y)
+                entry["w"] = Int(r.width); entry["h"] = Int(r.height)
+            }
+            if let owner = w[kCGWindowOwnerName as String] as? String { entry["owner"] = owner }
+            if let title = w[kCGWindowName as String] as? String, !title.isEmpty {
+                entry["title"] = String(title.prefix(120))
+            }
+            wins.append(entry)
+        }
+        guard !wins.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: wins)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
 

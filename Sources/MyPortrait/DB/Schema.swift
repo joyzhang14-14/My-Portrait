@@ -986,6 +986,20 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v42 — frames.windows_json(每帧的 CGWindowList 在屏窗口清单)
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 归属拐杖:前台 app 经常不是画面主体(菜单栏归属者是微信,屏上全是终端),
+        // 下游视觉管线因此归属错误。每帧存一份前→后 z 序的可见窗口清单
+        // [{layer,x,y,w,h,owner,title}],让"这帧到底可见哪些窗口"成为可确定性
+        // 回放的 OS API 事实。非 FTS 列,不动 frames_fts 触发器;旧行 NULL。
+        m.registerMigration("v42_frames_windows_json") { db in
+            try db.alter(table: "frames") { t in
+                t.add(column: "windows_json", .text)
+            }
+        }
+
         return m
     }
 }
