@@ -5,7 +5,9 @@
 
 四个缺陷(诊断见 handoff §32):
   D1 题头泄题:51% 样本的「已知(系统API):前台 app」是教师改写的解读,线上拿不到
-              → 确定性重建(裸 app 名 + 三重条件注释)。本脚本做。
+              → 确定性重建为【裸 app 名,零提示】(用户 2026-07-14 拍板;
+              --attr-hint 注释被对抗核查否掉:判别力实测仅 1.67x,且陷阱会话里
+              多数前台 app 本来就是真工作对象,注入即是往题面塞经常为假的前提)。
   D2 归属错误:16% 答案写「用户在<非开发app>里…跑 Claude Code」→ 标记,交 LLM。
   D3 social 污染:非空 social 里 30% 是天气/日历/桌面 → 标记,交 LLM。
   D4 锚点硬 cap:36% 答案正好 12 个 specifics(截断堆积,模型学不到"何时停")
@@ -16,10 +18,6 @@ import json
 import os
 import re
 import sqlite3
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import chrome  # noqa: E402
 
 LAB_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lab.db")
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -28,17 +26,6 @@ DEV_APPS = {"Terminal", "iTerm2", "Xcode", "Code", "Cursor", "My Portrait", "My 
 NOISE = re.compile(r"天气|降水|风速|°C|℃|日历|桌面|文件夹|电量|菜单栏|图标|壁纸|Dock|widget")
 DEVTXT = re.compile(r"Claude Code|终端|Terminal|命令行|claude --")
 IMG = re.compile(r"(\d{4}-\d{2}-\d{2})_s(\d+)_")
-
-
-def app_field(app, win, ocr):
-    """D1:裸 app 名 + 确定性注释。三条判据全部线上可复现。
-
-    6-05 实测:命中三重条件的会话归属错误率 57%,对照组 5%(11 倍富集)。
-    注释形状模仿教师写法(名字 + 补充分句),落在训练分布内。
-    """
-    if app not in DEV_APPS and not win and chrome.has_dev_signal(ocr):
-        return f"{app}(前台但无窗口,画面实际是终端/代码内容,真实工作对象在背景)"
-    return app
 
 
 def main():
@@ -73,9 +60,9 @@ def main():
             win = "" if win == "(空)" else win
             row = con.execute("SELECT app FROM raw_sessions WHERE id=?", (int(key),)).fetchone()
             bare = row[0] if row else ""
-            # D1:确定性新题头
+            # D1:确定性新题头 —— 裸 app 名,零提示(与 v12_day.py 默认口径逐字一致)
             head_new = (f"分析这段 macOS 屏幕会话的截图。已知(系统API):前台 app = "
-                        f"{app_field(bare, win, ocr)};窗口标题 = {win or '(空)'}。")
+                        f"{bare};窗口标题 = {win or '(空)'}。")
             ans = json.loads(r["answer"])
             act = ans.get("activity") or ""
             soc = str(ans.get("social") or "").strip()

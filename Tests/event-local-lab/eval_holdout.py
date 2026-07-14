@@ -18,6 +18,33 @@ BUCKETS = [(0, 1000, "0-1k"), (1000, 3000, "1-3k"), (3000, 6000, "3-6k"),
            (6000, 9000, "6-9k"), (9000, 10**9, "9k+")]
 HEDGE = re.compile(r"无法(?:逐字)?辨认|字样过小|分辨率不足|难以看清|看不清楚|不易分辨|不可辨")
 
+# ⚠️ who 只判非空是个已被实锤的假信号:6-05 A/B 里 base「21.7% vs 11.7% 领先」
+# 全是 base 把 Claude/AI助手/用户自己当人塞进 who 造出来的(按「含至少一个真人」
+# 两边 13/120 打平)。必须拆成 who_person / who_noise 两列。
+WHO_NOISE = re.compile(r'^(claude|chatgpt|copilot|gemini)\b|subagent|子代理|ai ?助手'
+                       r'|ai ?编程助手|cli ?助手|助手$', re.I)
+WHO_SELF = {'joyzhang14', 'joy', 'joy zhang', 'zhuoyi', 'zhuoyi zhang', '用户', 'user', '我'}
+WHO_APP = {'finder', 'terminal', 'safari', 'xcode', 'spotify', 'obsidian', 'mail',
+           'sourcetree', 'wechat', '微信', 'discord', 'goodnotes', '无'}
+
+
+def who_split(who):
+    """返回 (真人条数, 噪声条数)。裸名判身份(括号注释剥掉)。"""
+    person = noise = 0
+    for x in who or []:
+        raw = str(x).strip()
+        if not raw:
+            continue
+        base = re.split(r'[（(]', raw, 1)[0].strip()
+        if WHO_NOISE.search(raw) or base.casefold() in WHO_SELF or base.casefold() in WHO_APP:
+            noise += 1
+        else:
+            person += 1
+    return person, noise
+
+
+SOCIAL_NEG = re.compile(r'^(无|没有|未见|未发现|不涉及|非社交)')
+
 
 def norm(s):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(s))).lower()
@@ -61,8 +88,10 @@ def metrics(rows):
             "n_spec": len(specs),                       # 已过 OCR 逐字校验
             "n_spec_raw": int(d.get("specifics_raw_n") or 0),
             "verif": (len(specs) / d["specifics_raw_n"]) if d.get("specifics_raw_n") else None,
-            "has_who": bool(d.get("who")),
-            "has_social": bool(str(d.get("social") or "").strip()),
+            "who_person": who_split(d.get("who"))[0] > 0,
+            "who_noise": who_split(d.get("who"))[1] > 0,
+            "has_social": (bool(str(d.get("social") or "").strip())
+                           and not SOCIAL_NEG.match(str(d.get("social") or "").strip())),
             "has_ctx": bool(str(d.get("context_in_app") or "").strip()),
             "act_len": len(act),
             "hedge": bool(HEDGE.search(act)),
@@ -86,7 +115,8 @@ def agg(ms, keys=None):
         "空壳%": round(f("shell"), 1),
         "锚点中位": spec[len(spec) // 2] if spec else 0,
         "锚点可验证%": round(sum(vs) / len(vs) * 100, 1) if vs else 0.0,
-        "who%": round(f("has_who"), 1),
+        "who人%": round(f("who_person"), 1),
+        "who噪%": round(f("who_noise"), 1),
         "social%": round(f("has_social"), 1),
         "ctx%": round(f("has_ctx"), 1),
         "hedge%": round(f("hedge"), 1),
@@ -110,8 +140,8 @@ def main():
     args = ap.parse_args()
 
     A = metrics(load(args.a))
-    COLS = ["n", "JSON合法%", "空壳%", "锚点中位", "锚点可验证%", "who%", "social%",
-            "hedge%", "复读%", "跑飞%"]
+    COLS = ["n", "JSON合法%", "空壳%", "锚点中位", "锚点可验证%", "who人%", "who噪%",
+            "social%", "hedge%", "复读%", "跑飞%"]
 
     print(f"=== v1.2 留出日全量({len(A)} 会话)===")
     table("总体", [("v1.2", agg(A))], COLS)
