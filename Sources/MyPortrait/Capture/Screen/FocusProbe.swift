@@ -415,6 +415,21 @@ actor FocusProbe {
         if DispatchTime.now().uptimeNanoseconds > deadlineNs { return }
         elemCount += 1
 
+        // role 在函数顶部读一次,菜单早退和 AXWebArea depth 重置共用 —— 净 AX 往返不增。
+        var roleRef: CFTypeRef?
+        let role: String? =
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success
+                ? roleRef as? String : nil
+
+        // 菜单树整棵跳过:菜单展开时 kAXFocusedWindow 会返回 AXMenu 元素,
+        // 不跳就把整份系统菜单(About This Mac/Force Quit/…)当"屏幕文本"抄进
+        // axText,下游 digest 被灌进上百条菜单项(6-05 s3212 实锤 134 条)。
+        // 菜单项文字对记忆管线零价值 —— 它不是用户产出的内容。
+        if let role, role == "AXMenuBar" || role == "AXMenu"
+            || role == "AXMenuItem" || role == "AXMenuBarItem" || role == "AXMenuButton" {
+            return
+        }
+
         // 顺序尝试：AXValue → AXTitle → AXDescription。一个元素只取一份，
         // 不双计 title+value（title 通常是 value 的标签）。
         for attr in ["AXValue", kAXTitleAttribute as String, "AXDescription"] {
@@ -434,14 +449,7 @@ actor FocusProbe {
         // 否则 VS Code / Discord / Slack 的 web 视图在 depth=1 就被截断,
         // 拿不到终端 / 聊天内容。安全网仍是 axMaxElements + axWalkBudgetNs。
         // 借鉴 upstream screenpipe commit 2b06b643d。
-        let recurseDepth: Int = {
-            var roleRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
-               let role = roleRef as? String, role == "AXWebArea" {
-                return 0
-            }
-            return depth + 1
-        }()
+        let recurseDepth: Int = (role == "AXWebArea") ? 0 : depth + 1
 
         // 递归 children。
         var childrenRef: CFTypeRef?

@@ -174,11 +174,13 @@ struct FrameRecord: Sendable {
     let deviceName: String       // monitor id，P1 = "main"
     let snapshotPath: String     // JPG 绝对路径
     let captureTrigger: String   // P1 = "timer"
+    let windowsJson: String?     // CGWindowList 在屏窗口清单(前→后 z 序),v42 起
 
     init(
         timestampMs: Int64, appName: String, windowName: String?,
         browserUrl: String?, focused: Bool, deviceName: String,
-        snapshotPath: String, captureTrigger: String
+        snapshotPath: String, captureTrigger: String,
+        windowsJson: String? = nil
     ) {
         self.timestampMs = timestampMs
         self.appName = appName
@@ -188,6 +190,7 @@ struct FrameRecord: Sendable {
         self.deviceName = deviceName
         self.snapshotPath = snapshotPath
         self.captureTrigger = captureTrigger
+        self.windowsJson = windowsJson
     }
 }
 

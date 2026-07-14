@@ -22,6 +22,7 @@ struct FrameRow: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var ocrConfidence: Double?
     var textSource: String?
     var createdAtMs: Int64
+    var windowsJson: String?
 
     static let databaseTableName = "frames"
 
