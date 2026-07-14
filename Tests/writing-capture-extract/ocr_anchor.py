@@ -55,6 +55,15 @@ def event_tokens(seg):
     return toks or None
 
 
+_CC = {}
+def _cand_chars(syl):
+    """该音节在 librime 里的**单字候选集** = 用户的输入法对这个音节能打出来的字。
+    OCR 认出的字不在这里 → 一定是 OCR 认错(繁简/形近),不是用户打的。"""
+    if syl not in _CC:
+        _CC[syl] = {c for c in R.cands(syl, 60) if len(c) == 1 and HAN.match(c)}
+    return _CC[syl]
+
+
 def _match(ch, tok):
     """汉字 ch 的读音能不能对上 token。**完整音节优先:精确匹配**;只有残缺单元(简拼声母)才前缀匹配。
 
@@ -68,7 +77,12 @@ def _match(ch, tok):
     if not u:
         return False
     if len(v) >= 2 and SCH.is_complete_unit(v):
-        return v in u                                   # 完整音节(≥2 字母)→ **精确**
+        # 完整音节(≥2 字母)→ **精确**,且该字必须在 librime 对这个音节的**候选列表**里。
+        # ⚠️候选表是「用户的输入法能不能打出这个字」的唯一权威:OCR 会认错字(实测把简体「测」
+        # 认成繁体「測」,读音一样,只靠读音表拦不住),而繁体不在简体方案的候选里 → 挡掉。
+        # 光靠 ime_schema.is_output_char 不行:雾凇词库繁简都收,两个都判 True。
+        return v in u and ch in _cand_chars(v)
+    # 简拼(单字母)候选表意义不大(cands('y') 出的是词不是全部 y 声母字),仍走读音前缀。
     # 单字母一律当简拼声母走前缀:`m` 虽然在词库里是个完整单元(读「呒」),但实际几乎全是简拼
     # (xiam = 下面 的 m)。若对它精确匹配 → 0 个汉字命中,整条锚不到。
     return any(r.startswith(v) for r in u)
