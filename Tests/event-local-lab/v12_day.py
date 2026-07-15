@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chrome  # noqa: E402
 import labdb  # noqa: E402
 import source  # noqa: E402
+from spec_junk import classify as junk_classify  # noqa: E402  存根锚点用同一把垃圾尺
 from t2_data_v12 import dedup_lines  # noqa: E402  训推共用同一份 OCR 去重(防 skew)
 
 MODEL = os.path.expanduser("~/Models/EventSessionVision-1.2-6bit-mlx")
@@ -48,6 +49,38 @@ def clean_window(w):
 
 DEV_APPS = {"Terminal", "iTerm2", "Xcode", "Code", "Cursor", "My Portrait", "My Meeting",
             "MyPortrait"}
+
+# ---- 过渡碎片存根(2026-07-15 用户定案:内容感知 stub) ----
+# 切屏瞬间会自成一个秒级微会话(6-05 实测占全天 24%,v1.3 的 6 个纯归属错误全落在这),
+# 对垃圾输入模型只会编故事。判定:时长≤10s + 只留1帧 + 与前后邻居 app 都不同。
+# ⚠️ 但聊天/邮件类一瞥是 personality 的命根子(与王昱的微信/与何成的 Discord 通话都
+# 发生在几秒里,6-05 实测 83 个碎片里 24 个带真 who/social)—— 这类照跑视觉,
+# 归属错误留给 v1.4 windows_json 治。其余碎片走确定性存根:不跑模型=零幻觉零跑飞。
+FRAG_MAX_SEC = 10
+CHAT_APPS = {"微信", "WeChat", "Discord", "Messages", "iMessage", "Mail", "QQ", "Telegram"}
+
+
+def stub_keys_of(manifest, con_l):
+    """返回该走确定性存根的 key 集合。纯确定性,可重放。"""
+    rows = []
+    for key, b in manifest.items():
+        ph = ",".join("?" * len(b["parts"]))
+        r = con_l.execute(f"SELECT MIN(start_ms), MAX(end_ms) FROM raw_sessions "
+                          f"WHERE id IN ({ph})", b["parts"]).fetchone()
+        s, e = (r[0], r[1]) if r and r[0] else (0, 0)
+        rows.append((s, e, key, b["app"], b["kept_frames"]))
+    rows.sort()
+    stubs = {}
+    for i, (s, e, key, app, kf) in enumerate(rows):
+        dur = (e - s) / 1000
+        prev_app = rows[i - 1][3] if i > 0 else None
+        next_app = rows[i + 1][3] if i < len(rows) - 1 else None
+        if not (dur <= FRAG_MAX_SEC and kf == 1 and app not in (prev_app, next_app)):
+            continue
+        if app in CHAT_APPS:               # 内容感知:聊天/邮件一瞥照跑视觉
+            continue
+        stubs[key] = dur
+    return stubs
 
 
 def app_field(app, win, ocr_block):
@@ -82,12 +115,16 @@ def main():
     # 故 base 对照必须 --no-db:只写 <out>.jsonl,断点续跑也认它。
     ap.add_argument("--no-db", action="store_true")
     ap.add_argument("--attr-hint", action="store_true")  # 归属提示(确定性),默认关 —— 实验中
+    ap.add_argument("--no-stub-fragments", action="store_true")  # 关掉过渡碎片存根(A/B 用)
     args = ap.parse_args()
 
     manifest = json.load(open(f"/tmp/vision_v4{args.suffix}_{args.day}/v4_manifest.json"))
     frames_dir = f"/tmp/vision_frames_v4{args.suffix}_{args.day}"
     con_p = sqlite3.connect(f"file:{source.PORTRAIT_DB}?mode=ro", uri=True)
     con_l = labdb.connect()
+    stubs = {} if args.no_stub_fragments else stub_keys_of(manifest, con_l)
+    if stubs:
+        print(f"[stub] {len(stubs)}/{len(manifest)} 过渡碎片走确定性存根(不跑模型)", flush=True)
 
     only = set(args.keys.split(",")) if args.keys else None
     jl_path = args.out + ".jsonl"      # 两跑各自的完整 digest 记录(评测直接吃这个)
@@ -157,7 +194,37 @@ def main():
              f"已知(OCR全文,按帧,含背景窗文字):\n<<<\n{ocr_block}\n>>>\n{SCHEMA}\n{RULES}")
         corpus = norm(ocr_block + b["app"])
         if dry is not None:
-            dry[key] = q
+            if key not in stubs:              # 存根没有题面,不进训推对拍
+                dry[key] = q
+            continue
+
+        if key in stubs:                      # 过渡碎片:确定性存根,不进模型(零幻觉零跑飞)
+            lines_, seen_ = [], set()
+            for ln in ocr_block.split("\n"):
+                t = re.sub(r"^\[帧\d+\] ", "", ln).strip()[:60]
+                k2 = norm(t)
+                if len(t) < 6 or k2 in seen_ or junk_classify(t, b["app"])[0]:
+                    continue
+                seen_.add(k2)
+                lines_.append(t)
+            # ⚠️ stub 是运行时元数据不是模型产出,永远不得进教师/训练数据(靠 stub 标记筛)
+            digest = {"activity": f"在 {b['app']} 短暂停留约 {stubs[key]:.0f} 秒(过渡片段,未做视觉分析)",
+                      "who": [], "context_in_app": win,
+                      "specifics": lines_[:8], "social": "",
+                      "specifics_raw_n": len(lines_), "json_ok": True, "stub": True}
+            if not args.no_db:
+                labdb.save_vision_digest(con_l, args.day, int(key), b["parts"], b["app"],
+                                         args.model_tag, b["total_frames"], b["kept_frames"],
+                                         digest)
+            jl.write(json.dumps({"key": int(key), "app": b["app"], "model": args.model_tag,
+                                 "ocr_len": len(ocr_block), "n_frames": len(b["frames"]),
+                                 "raw_len": 0, "stub": True, "digest": digest},
+                                ensure_ascii=False) + "\n")
+            jl.flush()
+            out.write(f"\n## s{key} · {b['app']} · parts={b['parts']}\n")
+            out.write(f"- doing: {digest['activity']}\n")
+            out.write(f"- kw: {', '.join(digest['specifics'])}\n")
+            out.flush()
             continue
 
         jpg = os.path.join(frames_dir, b["frames"][0][1])   # 生产口径:单图

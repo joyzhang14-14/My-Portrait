@@ -10,6 +10,7 @@ A/B 只在共同的抽样 key 上做配对比较(base 只跑了 120 条)。
 import argparse
 import collections
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -65,9 +66,15 @@ def repeats(t, n=12):
 
 def load(p):
     rows = {}
+    n_stub = 0
     for l in open(p, encoding="utf-8"):
         r = json.loads(l)
+        if r.get("stub"):           # 确定性存根不是模型产出,不计入模型指标
+            n_stub += 1
+            continue
         rows[r["key"]] = r          # 后写覆盖先写(--redo-bad 重跑的以最新为准)
+    if n_stub:
+        print(f"  ({os.path.basename(p)}: 排除 {n_stub} 条过渡碎片存根)")
     return rows
 
 
