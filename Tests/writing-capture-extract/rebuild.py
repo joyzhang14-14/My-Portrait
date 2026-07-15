@@ -382,50 +382,45 @@ def _allowed(runs, cap):
 # 闸B(extract_compare_v2.injected_texts/cstream)= 把粘贴伪装成的 commit 从背书流里剔掉;
 # 闸C(下面 commit_backed)= 成品逐行必须能被 commit 流解释,解释不了的行裁掉。
 PASTE_GATE = os.environ.get('PORTRAIT_PASTE_GATE', '1') == '1'   # 前端开关
-PASTE_KEY_PAD = 2000     # ⌘V 回扫窗(ms):ev342 的 ⌘V 在 started_at 前 109ms
-
 def paste_pressed(X, ev):
-    """闸A:窗口内有没有**物理 ⌘V**(modifiers 0x01=Command,已核 KeystrokeCharLogger.swift:68)。
+    """闸A:有没有**物理 ⌘V**(modifiers 0x01=Command,已核 KeystrokeCharLogger.swift:68)。
     ⚠️为什么不能只信 edit_log 的 kind='paste':edit_log 只记事件**开始之后**的 diff,⌘V 在
     started_at 之前按下,粘进来的内容就成了事件的「初始状态」,一条 paste 记录都没有
     (ev342:⌘V 早 109ms,936 字符 yt-dlp 终端输出零 paste 记录,靠 end_value 整段进了成品)。
-    击键流是这种情况下唯一的铁证。"""
+    击键流是这种情况下唯一的铁证。
+
+    回扫窗 = **上一个同 app 事件结束 → 本事件结束,无限时长**(用户裁定 2026-07-16):
+    两个事件之间不管隔多久按的 ⌘V,粘进来的内容都只会落在本事件的初始状态里(自动合并进本
+    事件),归因唯一、不会算错到别的事件头上。第一版固定 2 秒窗是按 ev342(早 109ms)标定的,
+    v8 审核实测 ⌘V 早 3~33 秒的粘贴全漏(x.com 链接/多伦多地址案)。"""
     st = ev.get('started_at') or 0
+    prev = X.con.execute(
+        "SELECT MAX(ended_at) FROM typing_events WHERE bundle_id=:b AND ended_at < :st",
+        {"b": ev['bundle'], "st": st}).fetchone()[0]
     return X.con.execute(
         "SELECT 1 FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
         "AND char='v' AND (modifiers&1)=1 LIMIT 1",
-        {"b": ev['bundle'], "a": st - PASTE_KEY_PAD,
+        {"b": ev['bundle'], "a": (prev + 1) if prev is not None else 0,
          "c": (ev.get('ended_at') or st) + 500}).fetchone() is not None
 
 TRIM_MIN_LINE = 5        # 强背书回落档:2~4 字的行在几百字 commit 流里 LCS 必然撞上('> ok'/'join')
 TRIM_COVER = 0.8         # 强背书回落档的行级 cover 门槛(只在字母对账不过时启用,见 commit_backed)
 
-def commit_backed(X, t, cs):
-    """闸C(用户裁定 2026-07-15:**严格 30 闸,一切以击键为主**,不做任何内容/形态硬编码):
+def _line_backing(X, t, cs):
+    """闸C 的行级对账基础:[(行, 去空格长度, 未背书字符数)],空行的未背书 = None。
+    **未背书字符数 = 行长×(1-块cover)** —— 存量框剥离 `unhand` 公式(submit 分支既有先例)的行级版。
 
-    行规则只有一条 —— **未背书字符数 = 行长×(1-cover) ≤ PASTE_MAX 留,超了裁**。
-    这是存量框剥离 `unhand` 公式(submit 分支既有先例)的行级版,也是 30 闸的完整形态:
-      · 全手打的行:未背书≈0 → 留(v7 实测教训:真打的长行 IME 反复改写,LCS cover 只有 0.79,
-        拿 cover 阈值切会误裁 —— A6 Blueprint「通道」行 66字×0.21=14 未背书,该留)
-      · 短行(≤30):cover 再低未背书也 ≤30 → 自动留(「先用apify找到爆款视频」23 字)
-      · 掺粘贴的长行:ev598 localhost 行 193字×0.42=81 → 裁;yt-dlp 行 43~116 字全裁
-
-    **多数背书守卫(粘贴政策"非纯粘贴"条款的行级版,零新常数)**:留下来的行里,未背书量
-    超过背书量 → 整条以粘贴为主 = 纯粘贴不留的射程(v7 实测:回看旧成品 md 的记录只有
-    「- 内容不全」5 字是打的,文档短行每行都 ≤30 全过线,`https://…` 泄漏进成品打穿 P0)
-    → 回落到只留强背书行(cover≥TRIM_COVER 且 ≥TRIM_MIN_LINE 字)。"""
+    块cover:**双方去空格**后只数**连续匹配块**(纯 ASCII 块 ≥3 字符,含汉字块 ≥2 字符,单字符不算)。
+    两个都是实测教训:
+    · 裸 LCS 单字符散点作弊:`[Instagram] Setting up session` 的字母散落在组内拼音流
+      (zheshigeiwo…)里,碎配凑出 cover≈0.4 → 43×0.6=26 混过 30 闸(ev342)。块门槛按字符集
+      分档:IME 上屏粒度就是 1~2 个汉字,真打的中文天然是 2 字块;汉字字表大,2 字块撞库
+      概率远低于 ASCII —— 连续性就是"真打过"的指纹。
+    · 不去空格,`Pipeline A - 1, A - 2` 这种空格隔开的单字符永远成不了块(通道行实证:
+      带空格块 cover 只有 0.65 误裁;去空格后真打序列连成长块,0.93,未背书 6)。
+    实测边距:通道行(真打)未背书 6 ≪ 30 ≪ yt 行 38 / ev598 泄漏行 62·88(全粘贴)。"""
     cs_ns = re.sub(r'\s', '', cs or '')
     def _cov(a):
-        """行级 cover,**双方去空格**后只数**连续匹配块**(纯 ASCII 块 ≥3 字符,含汉字块 ≥2 字符,
-        单字符不算)。两个都是实测教训:
-        · 裸 LCS 单字符散点作弊:`[Instagram] Setting up session` 的字母散落在组内拼音流
-          (zheshigeiwo…)里,碎配凑出 cover≈0.4 → 43×0.6=26 混过 30 闸(ev342)。块门槛按字符集
-          分档:IME 上屏粒度就是 1~2 个汉字,真打的中文天然是 2 字块;汉字字表大,2 字块撞库
-          概率远低于 ASCII —— 连续性就是"真打过"的指纹。
-        · 不去空格,`Pipeline A - 1, A - 2` 这种空格隔开的单字符永远成不了块(通道行实证:
-          带空格块 cover 只有 0.65 误裁;去空格后真打序列连成长块,0.93,未背书 6)。
-        实测边距:通道行(真打)未背书 6 ≪ 30 ≪ yt 行 38 / ev598 泄漏行 62·88(全粘贴)。"""
-        a = re.sub(r'\s', '', a)
         if not a or not cs_ns:
             return 0.0
         tot = 0
@@ -434,16 +429,41 @@ def commit_backed(X, t, cs):
             if b.size >= 3 or (b.size == 2 and HAN.search(seg)):
                 tot += b.size
         return tot / len(a)
-    def unb(ln):
+    out = []
+    for ln in t.split('\n'):
         c = re.sub(r'\s', '', cv(ln))
-        return len(c) * (1 - _cov(c)) if c else None
-    keep = [ln for ln in t.split('\n') if unb(ln) is not None and unb(ln) <= PASTE_MAX]
-    backed_m = sum(len(cv(ln)) - unb(ln) for ln in keep)
-    unbacked_m = sum(unb(ln) for ln in keep)
+        out.append((ln, len(c), len(c) * (1 - _cov(c)) if c else None))
+    return out
+
+def paste_minor(X, t, cs):
+    """规则「粘贴少数派整条留」(用户裁定 2026-07-16):**粘贴的字符数 < 全文除粘贴外的字符数
+    → 整条原样保留,不裁**。粘贴量用未背书字符数估(闸A 上膛的事件里,没击键背书的就是粘的)。
+    这是粘贴政策「非纯粘贴」条款的记录级完整形态:你自己的话为主、捎带一点引用/链接的消息,
+    引用是内容的一部分,裁了反而残(v8 审核误裁 3 条全是这种:ev598 阶段5 段 190 字手打陪着
+    行尾 40 字 URL 连坐 / ev888 全手打但 AX commit 缺页)。文档浏览(粘贴占绝对多数)不受益。"""
+    rows = [(n, u) for _, n, u in _line_backing(X, t, cs) if u is not None]
+    unbacked = sum(u for _, u in rows)
+    return unbacked < sum(n for n, _ in rows) - unbacked
+
+def commit_backed(X, t, cs):
+    """闸C(用户裁定 2026-07-15:**严格 30 闸,一切以击键为主**,不做任何内容/形态硬编码)。
+    只对**粘贴占多数**的记录开火(少数派在 gate 里被 paste_minor 整条放行,到不了这儿):
+
+    行规则只有一条 —— **未背书字符数 ≤ PASTE_MAX 留,超了裁**(见 _line_backing):
+      · 全手打的行:未背书≈0 → 留(IME 反复改写 LCS 只有 0.79 也不怕,通道行案)
+      · 短行(≤30):cover 再低未背书也 ≤30 → 自动留(「先用apify找到爆款视频」23 字)
+      · 掺粘贴的长行:ev598 localhost 行 193字×0.42=81 → 裁;yt-dlp 行 43~116 字全裁
+
+    **多数背书守卫(零新常数)**:留下来的行里未背书量仍超背书量 → 纯粘贴射程(回看旧成品 md
+    的记录只有「- 内容不全」5 字是打的,文档短行每行 ≤30 全过线,`https://…` 打穿 P0 的教训)
+    → 回落到只留强背书行(块cover≥TRIM_COVER 且去空格 ≥TRIM_MIN_LINE 字)。"""
+    rows = [(ln, n, u) for ln, n, u in _line_backing(X, t, cs) if u is not None and u <= PASTE_MAX]
+    backed_m = sum(n - u for _, n, u in rows)
+    unbacked_m = sum(u for _, _, u in rows)
     if unbacked_m > backed_m:
-        keep = [ln for ln in keep
-                if len(cv(ln)) >= TRIM_MIN_LINE and _cov(cv(ln)) >= TRIM_COVER]
-    return '\n'.join(keep).strip()
+        rows = [(ln, n, u) for ln, n, u in rows
+                if n >= TRIM_MIN_LINE and (1 - u / n) >= TRIM_COVER]
+    return '\n'.join(ln for ln, _, _ in rows).strip()
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
 def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
@@ -519,7 +539,11 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
                 need = sum(1 for ch in ct if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', ct))
                 if gl >= need:
                     o.append((t, a, b, s)); continue
-            nt = commit_backed(X, t, cs_use)          # 逐行 30 闸 + 多数背书守卫(见函数注释)
+            # 规则「粘贴少数派整条留」(用户裁定 2026-07-16,见 paste_minor):手打为主的消息
+            # 里捎带的引用/链接是内容的一部分,整条原样留,不进逐行裁剪。
+            if paste_minor(X, t, cs_use):
+                o.append((t, a, b, s)); continue
+            nt = commit_backed(X, t, cs_use)          # 粘贴占多数 → 逐行 30 闸 + 多数背书守卫
             if nt: o.append((nt, a, b, s))
         return o
     for i, e in enumerate(arr):
