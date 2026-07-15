@@ -884,8 +884,7 @@ private extension FrameRow {
             ocrWordsJson: nil,
             ocrConfidence: nil,
             textSource: nil,
-            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
-            windowsJson: record.windowsJson
+            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000)
         )
     }
 
@@ -907,8 +906,7 @@ private extension FrameRow {
             ocrWordsJson: ocr?.wordsJson,
             ocrConfidence: ocr?.confidence,
             textSource: ocr?.textSource,
-            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
-            windowsJson: record.windowsJson
+            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000)
         )
     }
 }
