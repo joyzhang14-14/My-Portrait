@@ -17,6 +17,11 @@ PORTRAIT_DB = os.path.expanduser("~/.portrait/portrait.sqlite")
 EVENTS_DIR = os.path.expanduser("~/.portrait/events")
 
 GAP_MS = 5 * 60 * 1000
+# 中间噪音容忍(2026-07-15 用户定案,补上 Tier1Merger 设计文档 §6.4 写了但从未实现的行为):
+# 切屏一瞥(≤3 帧且首尾 ≤15 秒)夹在同一 key 的流中间 → 噪音帧整段丢弃,session 不切。
+# 时间闸必须有:帧是事件驱动的,静止画面出帧稀,3 帧可能横跨几分钟真活动。
+NOISE_MAX_FRAMES = 3
+NOISE_MAX_SPAN_MS = 15 * 1000
 MIN_OCR_CHARS = 60
 # 12000(原2000,云端是 600):质量线 7-02 实测 593/1200 条恰=2000 —— 截断自伤
 # (长对话正文保真仅 8%,且污染保真率基线测量)。本地 token 免费,放开到 12000
@@ -45,6 +50,37 @@ def read_frames(day: str):
         ).fetchall()
     finally:
         con.close()
+
+
+def drop_transition_noise(frames):
+    """切屏一瞥剔除(在 tier1_merge 之前跑)。
+
+    判定:一段连续同 key 帧,≤NOISE_MAX_FRAMES 帧、首尾 ≤NOISE_MAX_SPAN_MS,
+    夹在**同一 key** 的流中间(前后 key 相同),且自身 app 与前后 app 不同
+    → 整段丢弃(不进任何 session;用户 2026-07-15 定案:一瞥不统计,只记大事件)。
+    丢弃后前后两段自然被 tier1_merge 接回一个 session(gap 含一瞥时长,受 ≤5min 闸约束)。
+
+    保守边界:同 app 的窗口标题闪变不算噪音(标题变=内容变,丢了伤真活动);
+    A→b→C(前后不同流)不算夹心,不丢 —— 那类残余碎片由 v12_day 的存根层接住。
+    """
+    key = lambda f: (f["app_name"], f["window_name"] or "")
+    out, i, n = [], 0, len(frames)
+    while i < n:
+        j = i
+        while j < n and key(frames[j]) == key(frames[i]):
+            j += 1
+        run = frames[i:j]
+        span = run[-1]["timestamp_ms"] - run[0]["timestamp_ms"]
+        prev_key = key(out[-1]) if out else None
+        next_key = key(frames[j]) if j < n else None
+        if (len(run) <= NOISE_MAX_FRAMES and span <= NOISE_MAX_SPAN_MS
+                and prev_key is not None and prev_key == next_key
+                and run[0]["app_name"] != out[-1]["app_name"]):
+            i = j          # 夹在同一条流中间的异 app 一瞥 → 丢弃
+            continue
+        out.extend(run)
+        i = j
+    return out
 
 
 def tier1_merge(frames):
@@ -100,7 +136,7 @@ def finish_session(s):
 
 
 def load_day_sessions(day: str):
-    return [finish_session(s) for s in tier1_merge(read_frames(day))]
+    return [finish_session(s) for s in tier1_merge(drop_transition_noise(read_frames(day)))]
 
 
 # ---------------- 历史事件(join 候选) ----------------
