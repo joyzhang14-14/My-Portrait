@@ -51,13 +51,16 @@ def _decode_segment(seg, cr_ime=None):
         (空格→'1' 的归一在 _keys_with_mode 做);此后换什么输入法都不影响
 
     `.ime` 是**三态**:True=输入法 / False=纯键盘布局 / None=旧数据(<2026-06-13 无 input_source)。
-    **None 一律维持原行为(解码)**,不拿新规则去改旧数据的结论(否则动 gold)。"""
+    **None 不送 librime,留字面/残渣**(用户裁定 2026-07-16,推翻此前「维持原行为(解码)」):
+    v8 审核坐实 6 条击键失配全是旧数据英文被 librime 硬解(data→打他/the→他和,writingSample2
+    案),错字不可见是铁律里最坏的类别;残渣可见,口3 OCR 还能修。只有 input_source 背书
+    「这串确实是输入法敲的」(=True)才允许猜字。"""
     out, buf, buf_ime = [], "", None
     def flush(pick=None, literal=False):
         nonlocal buf, buf_ime
         if not buf:
             return
-        if literal or buf_ime is False:           # 纯键盘布局敲的 = 英文直接上屏,没有拼音这回事
+        if literal or buf_ime is not True:        # 非输入法背书(纯键盘布局/旧数据无来源)= 不猜,字面上屏
             out.append(buf); buf = ""; buf_ime = None
             return                                # (不这么拦:com→聪明 把邮箱解坏,the→他和)
         kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
@@ -92,22 +95,22 @@ def _decode_segment(seg, cr_ime=None):
             # 走到这里的 <CR> = **输入法吃掉的那次回车**(_split_cr_toks 没拿它断行):它在提交
             # 预编辑的生拼音,不产生换行 —— 这就是"双回车"里被吃掉的第一下。
             flush(literal=True)
-        elif ch.isdigit() and buf and 1 <= int(ch) <= 9 and buf_ime is not False:
-            flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏
+        elif ch.isdigit() and buf and 1 <= int(ch) <= 9 and buf_ime is True:
+            flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏(须输入法背书,同 flush 闸)
         elif ch.isprintable():
-            # ⚠️英文键盘下数字就是**字面数字**,不是选字索引(上面那条 buf_ime is not False 拦着)。
+            # ⚠️英文键盘/旧数据下数字就是**字面数字**,不是选字索引(上面那条 buf_ime is True 拦着)。
             # 不拦:邮箱 joyzhang14@... 的「1」会被当成"选第1个候选"吃掉 → joyzhang4@...
             flush(); out.append(ch)               # 标点/空格/字面数字:先收尾,再原样保留(逗号!)
         # else:控制键(ESC/US 等)= 非文字,丢(同 real_key correctness)
     # 段末:被**回车**收尾且这一串没提交过 → 生拼音原样上屏(双回车),按字面。
-    # 旧数据(cr_ime=None)不套这条,维持原行为(解码),否则动 gold。
+    # 旧数据(buf_ime=None)在 flush 内部就走字面,cr_ime 只对新数据有意义。
     flush(literal=(cr_ime is True) or (cr_ime is False and buf_ime is not False))
     return ''.join(out)
 
 
 class _K(str):
     """带输入法模式的字符 token。**str 子类** → apply_bs/split_cr/parse_picks 全部无感沿用。
-    `.ime` 三态:True=输入法 / False=纯键盘布局 / None=旧数据无 input_source(维持原行为)。"""
+    `.ime` 三态:True=输入法 / False=纯键盘布局 / None=旧数据无 input_source(不猜字,出字面)。"""
     __slots__ = ('ime',)
     def __new__(cls, s, ime=None):
         o = str.__new__(cls, s); o.ime = ime; return o
@@ -121,7 +124,8 @@ def _keys_with_mode(con, bundle, t0, t1, pad_start=2000, pad_end=300):
     `de`→「的」。canvas 路原先无条件强开 decode,这些全中招。
     **必须逐键判,不能按 span 算比例**:同一段里常常中英夹杂(实测 06-29 Chrome 一段=20 键英文
     邮箱 + 7 键中文,占比 0.74 过不了任何合理阈值,整段放行后邮箱照样被解坏)。
-    `input_source` 自 2026-06-13 才有值;此前全 None → 当输入法(**维持原行为**,不拿新闸改旧结论)。"""
+    `input_source` 自 2026-06-13 才有值;此前全 None → **不送 librime,留字面/残渣**
+    (用户裁定 2026-07-16:v8 审核 6 条失配全是旧数据英文被硬解,data→打他;错字不可见 > 残渣可见)。"""
     rows = con.execute(
         "SELECT char,is_backspace,modifiers,input_source FROM keystroke_log "
         "WHERE bundle_id = :b AND ts_ms BETWEEN :a AND :c ORDER BY ts_ms",
@@ -150,8 +154,15 @@ def _split_cr_toks(toks):
     提交生拼音,**不产生换行**(这就是"双回车"——得再按一次才真的发出去)。这种 <CR> 留在段内,
     由 _decode_segment 当"按字面收尾"处理。不这么做:邮箱小号 riqujoyzhang14@… 会被断成
     「riqu」+「joyzhang14@…」两行。"""
-    segs, cur = [], []
+    segs, cur, last_ime = [], [], None
     for t in R.apply_bs(toks):
+        # apply_bs 消化退格时重插的字符是裸 str(没有 .ime)→ **继承前邻 token 的输入法状态**:
+        # 重插的音节来自被退格咬掉的那串键,和它前邻同一时刻同一输入法。不继承的话,新数据的
+        # 退格修复段会以 buf_ime=None 起头,被「None 不猜字」闸(2026-07-16)误当旧数据出残渣。
+        if not hasattr(t, 'ime'):
+            t = _K(t, last_ime)
+        else:
+            last_ime = t.ime
         if t == '<CR>':
             eaten = (getattr(t, 'ime', None) is True and cur and cur[-1].isalpha()
                      and getattr(cur[-1], 'ime', None) is True)     # 挂着中文预编辑 → 被输入法吃掉
