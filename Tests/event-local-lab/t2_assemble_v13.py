@@ -82,6 +82,7 @@ def main():
     ap.add_argument("--work", default="/tmp/work_v13.json")
     ap.add_argument("--imgfix", default="/tmp/v13_imgfix_decisions.json",
                     help="帧2独有句裁决(极窄LLM产出);缺文件则拒绝出包")
+    ap.add_argument("--wash", help="v1.3.1 手术编辑 json(noiseEdits/socEdits/recEdits)")
     ap.add_argument("--outdir", required=True)
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
@@ -89,6 +90,17 @@ def main():
     W = json.load(open(args.work))
     fix = {d['id']: set(d['delete_indices'])
            for d in json.load(open(args.imgfix))['decisions']}
+    # v1.3.1 手术编辑(--wash):结构化编辑,确定性应用。
+    #   noise: {id: {delete_substrings:[], drop_specifics:[]}}(只删,子串须逐字命中)
+    #   social: {id: social_new}(字段级)
+    #   recon: {id: {sentence, pos}}(一句和解表述,mismatch=true 才有)
+    wash = {'noise': {}, 'social': {}, 'recon': {}}
+    if args.wash:
+        E = json.load(open(args.wash))
+        wash['noise'] = {x['id']: x for x in E.get('noiseEdits', [])}
+        wash['social'] = {x['id']: x['social_new'] for x in E.get('socEdits', [])
+                          if x.get('verdict') != '不动'}
+        wash['recon'] = {x['id']: x for x in E.get('recEdits', []) if x.get('mismatch')}
 
     st = collections.Counter()
     out = {"train": [], "valid": []}
@@ -106,6 +118,24 @@ def main():
         if n_hedge:
             act = HEDGE_PAREN.sub('', act)
             st['hedge括号剥除'] += n_hedge
+        # ---- v1.3.1 噪音刀:只删逐字命中的子串(imgfix 之后应用,找不到=静默跳过并计数)
+        ne = wash['noise'].get(sid)
+        if ne:
+            for sub in ne.get('delete_substrings', []):
+                if sub and sub in act:
+                    act = act.replace(sub, '', 1)
+                    st['噪音子串删除'] += 1
+                elif sub:
+                    st['噪音子串未命中(跳过)'] += 1
+            act = re.sub(r'\s{2,}', ' ', act)
+        # ---- v1.3.1 和解刀:插入一句(start/end)
+        re_ = wash['recon'].get(sid)
+        if re_ and (re_.get('sentence') or '').strip():
+            s_ = re_['sentence'].strip()
+            if not s_.endswith(('。', '.', ';', ';')):
+                s_ += '。'
+            act = (s_ + act) if re_.get('pos') == 'start' else (act.rstrip() + s_)
+            st['和解句插入'] += 1
         act = act.strip()
         if not act:
             st['答案空(丢弃)'] += 1
@@ -116,6 +146,12 @@ def main():
         # 教模型"少写锚点",亲手毁掉 v1.2 最大的优势。
         corpus = norm(w['ocr'] + w['head_new'])
         pool = list(ans0.get('specifics') or []) + list(w.get('teacher_specifics_raw') or [])
+        # v1.3.1 噪音刀:剔除被点名的 specifics(按 norm 匹配)
+        if ne and ne.get('drop_specifics'):
+            drop = {norm(x) for x in ne['drop_specifics']}
+            before = len(pool)
+            pool = [x for x in pool if norm(str(x).strip()[:60]) not in drop]
+            st['锚点点名剔除'] += before - len(pool)
         specs, seen = [], set()
         for x in pool:
             t = str(x).strip()[:60]
@@ -132,11 +168,12 @@ def main():
             seen.add(k)
             specs.append(t)
         specs = specs[:SPEC_CAP]
+        soc_src = wash['social'].get(sid, ans0.get('social'))   # v1.3.1:重裁值优先
         ans = {"activity": act,
                "who": clean_who(ans0.get('who')),
                "context_in_app": str(ans0.get('context_in_app') or '').strip(),
                "specifics": specs,
-               "social": clean_social(ans0.get('social'))}
+               "social": clean_social(soc_src)}
         q = (w['head_new'] + "\n已知(OCR全文,按帧,含背景窗文字):\n<<<\n"
              + w['ocr'] + "\n>>>\n" + w['schema_rules'])
         row = {"question": q, "answer": json.dumps(ans, ensure_ascii=False),
@@ -251,6 +288,16 @@ def main():
     print(f"\nwho 正例: train {wt} / valid {wv} (valid 须≥5) | social 非空: {st_soc}")
     if wv < 5:
         fails.append('who分层')
+    if args.wash:
+        # ⑧ social 真实正例 ≥ v1.2 基线 156(v1.3 死因=削正例质量密度,这道闸防重演)
+        NOISE_G = re.compile(r'天气|降水|风速|°C|℃|日历|桌面|壁纸|Dock|widget|No Events Today')
+        real_soc = sum(1 for s_ in out.values() for r in s_ if '已知(OCR' in r['question']
+                       and (v := json.loads(r['answer'])['social']) and not NOISE_G.search(v))
+        print(f"闸门⑧ social 真实正例: {real_soc} (须≥156,v1.2 基线)")
+        if real_soc < 156:
+            fails.append('social正例')
+        print(f"闸门⑨ 和解句插入: {st['和解句插入']} 条 / 噪音删除 {st['噪音子串删除']} 处"
+              f"(未命中跳过 {st['噪音子串未命中(跳过)']})")
     print(f"\ntrain {len(out['train'])} / valid {len(out['valid'])}")
     if fails:
         print(f"\n❌ 闸门不过: {fails} —— 不出包,别拿去训练")
