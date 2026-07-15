@@ -71,9 +71,13 @@ def clean_who(who):
 
 def clean_social(s):
     s = str(s or '').strip()
-    # 否定式开头 = 教模型"没有也要填一句" → 归一化成空串(70 条)
+    # 否定式开头:剥掉前导否定分句,保留其后的真内容(「无直接社交互动;但侧栏
+    # 透露…」后半是真信号);纯否定 → 空串。一刀清空会误杀复裁恢复的正例。
     if re.match(r'^(无|没有|未见|未发现|不涉及|非社交)', s):
-        return ''
+        parts = re.split(r'[;;。]', s, maxsplit=1)
+        rest = parts[1].strip() if len(parts) > 1 else ''
+        rest = re.sub(r'^(但|不过|然而|仅|只是)', '', rest).strip()
+        s = rest if len(rest) >= 8 else ''
     return HEDGE_PAREN.sub('', s).strip()
 
 
@@ -105,6 +109,7 @@ def main():
     st = collections.Counter()
     out = {"train": [], "valid": []}
     who_pos = {"train": [], "valid": []}
+    soc_have = set()          # 组装时直接记 sid(head_new 不唯一,禁止事后反查)
     for w in W['work']:
         sid = f"{w['day']}_s{w['key']}"
         ans0 = w['answer']
@@ -181,6 +186,8 @@ def main():
         out[w['split']].append(row)
         if ans['who']:
             who_pos[w['split']].append((sid, len(out[w['split']]) - 1))
+        if ans['social']:
+            soc_have.add(sid)
         st[f"采用_{w['split']}"] += 1
 
     # who 分层:valid 里 who 正例 ≥5,否则 who 崩了看不见(train38/valid1 的地雷)
@@ -289,12 +296,17 @@ def main():
     if wv < 5:
         fails.append('who分层')
     if args.wash:
-        # ⑧ social 真实正例 ≥ v1.2 基线 156(v1.3 死因=削正例质量密度,这道闸防重演)
-        NOISE_G = re.compile(r'天气|降水|风速|°C|℃|日历|桌面|壁纸|Dock|widget|No Events Today')
-        real_soc = sum(1 for s_ in out.values() for r in s_ if '已知(OCR' in r['question']
-                       and (v := json.loads(r['answer'])['social']) and not NOISE_G.search(v))
-        print(f"闸门⑧ social 真实正例: {real_soc} (须≥156,v1.2 基线)")
-        if real_soc < 156:
+        # ⑧ 教师裁定的非空 social 必须存活(防 v1.3 削正例保守化重演)。
+        # 不用正则代理计数(前两版闸门都被代理口径坑了:156 基线灌水/桌面字样误杀)。
+        # 精确口径:socEdits 里教师终态非空的 id,逐个核包内是否仍非空;容忍 ≤3
+        # (答案空丢弃的样本)。
+        want = {x['id'] for x in json.load(open(args.wash)).get('socEdits', [])
+                if x.get('verdict') != '不动' and (x.get('social_new') or '').strip()}
+        lost = want - soc_have
+        print(f"闸门⑧ 教师裁定非空 social 存活: {len(want & soc_have)}/{len(want)} "
+              f"(丢 {len(lost)},容忍≤3) | 包内 social 非空总数 {len(soc_have)}")
+        if len(lost) > 3:
+            print(f"   丢失: {sorted(lost)[:10]}")
             fails.append('social正例')
         print(f"闸门⑨ 和解句插入: {st['和解句插入']} 条 / 噪音删除 {st['噪音子串删除']} 处"
               f"(未命中跳过 {st['噪音子串未命中(跳过)']})")
