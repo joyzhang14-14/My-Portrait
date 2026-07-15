@@ -4,7 +4,7 @@
 librime 候选 + 击键选字数字 = 确定性主力;MLX 仅在歧义(同音)时于候选集内消歧;
 防幻觉硬 guard:英文不送 librime;模型新增的中文必须能追溯到 librime 候选,否则回滚。
 设计依据见 Tests/writing-capture-extract/RESEARCH-ime-fix.md(R2/R4)。"""
-import subprocess, re, os
+import subprocess, re, os, difflib
 
 ZW = {0x200B, 0x200C, 0x200D, 0xFEFF}
 def cv(s): return ''.join(c for c in (s or '') if ord(c) not in ZW).strip()
@@ -397,23 +397,52 @@ def paste_pressed(X, ev):
         {"b": ev['bundle'], "a": st - PASTE_KEY_PAD,
          "c": (ev.get('ended_at') or st) + 500}).fetchone() is not None
 
-TRIM_MIN_LINE = 5        # 能当"有背书"的最短行:2~4 字的行在几百字 commit 流里 LCS 必然撞上('> ok'/'join')
-TRIM_COVER = 0.8         # 行级背书门槛:事件已有粘贴证据,单行必须实打实对得上才算背书
+TRIM_MIN_LINE = 5        # 强背书回落档:2~4 字的行在几百字 commit 流里 LCS 必然撞上('> ok'/'join')
+TRIM_COVER = 0.8         # 强背书回落档的行级 cover 门槛(只在字母对账不过时启用,见 commit_backed)
 
 def commit_backed(X, t, cs):
     """闸C(用户裁定 2026-07-15:**严格 30 闸,一切以击键为主**,不做任何内容/形态硬编码):
-    逐行对账 ——
-      · 行有击键背书(cover≥TRIM_COVER 且 ≥TRIM_MIN_LINE 字)→ 留
-      · 没背书的行 = 粘贴段 → 走粘贴政策 30 闸:≤PASTE_MAX 留(短粘贴合法,ElevenLabs 案同款),
-        >PASTE_MAX 裁(ev342 的 yt-dlp 行 43~116 字全超,「先用apify找到爆款视频…」23 字留)
-      · 全篇**一行背书都没有** = 纯粘贴 → 整条不留(纯粘贴不留的政策原话;也防浏览文档的
-        海量短行冒充"短粘贴"涌入 —— 文档记录里用户一行都没打过)
-    逐行(而不是整条判)是因为真实场景是混的:ev342 = 936 字符终端输出 + 手打的「这是给我下载到哪」。"""
-    lines = t.split('\n')
-    backed = [len(cv(ln)) >= TRIM_MIN_LINE and X.cover(cv(ln), cs) >= TRIM_COVER for ln in lines]
-    if not any(backed):
-        return ''
-    keep = [ln for ln, bk in zip(lines, backed) if bk or 0 < len(cv(ln)) <= PASTE_MAX]
+
+    行规则只有一条 —— **未背书字符数 = 行长×(1-cover) ≤ PASTE_MAX 留,超了裁**。
+    这是存量框剥离 `unhand` 公式(submit 分支既有先例)的行级版,也是 30 闸的完整形态:
+      · 全手打的行:未背书≈0 → 留(v7 实测教训:真打的长行 IME 反复改写,LCS cover 只有 0.79,
+        拿 cover 阈值切会误裁 —— A6 Blueprint「通道」行 66字×0.21=14 未背书,该留)
+      · 短行(≤30):cover 再低未背书也 ≤30 → 自动留(「先用apify找到爆款视频」23 字)
+      · 掺粘贴的长行:ev598 localhost 行 193字×0.42=81 → 裁;yt-dlp 行 43~116 字全裁
+
+    **多数背书守卫(粘贴政策"非纯粘贴"条款的行级版,零新常数)**:留下来的行里,未背书量
+    超过背书量 → 整条以粘贴为主 = 纯粘贴不留的射程(v7 实测:回看旧成品 md 的记录只有
+    「- 内容不全」5 字是打的,文档短行每行都 ≤30 全过线,`https://…` 泄漏进成品打穿 P0)
+    → 回落到只留强背书行(cover≥TRIM_COVER 且 ≥TRIM_MIN_LINE 字)。"""
+    cs_ns = re.sub(r'\s', '', cs or '')
+    def _cov(a):
+        """行级 cover,**双方去空格**后只数**连续匹配块**(纯 ASCII 块 ≥3 字符,含汉字块 ≥2 字符,
+        单字符不算)。两个都是实测教训:
+        · 裸 LCS 单字符散点作弊:`[Instagram] Setting up session` 的字母散落在组内拼音流
+          (zheshigeiwo…)里,碎配凑出 cover≈0.4 → 43×0.6=26 混过 30 闸(ev342)。块门槛按字符集
+          分档:IME 上屏粒度就是 1~2 个汉字,真打的中文天然是 2 字块;汉字字表大,2 字块撞库
+          概率远低于 ASCII —— 连续性就是"真打过"的指纹。
+        · 不去空格,`Pipeline A - 1, A - 2` 这种空格隔开的单字符永远成不了块(通道行实证:
+          带空格块 cover 只有 0.65 误裁;去空格后真打序列连成长块,0.93,未背书 6)。
+        实测边距:通道行(真打)未背书 6 ≪ 30 ≪ yt 行 38 / ev598 泄漏行 62·88(全粘贴)。"""
+        a = re.sub(r'\s', '', a)
+        if not a or not cs_ns:
+            return 0.0
+        tot = 0
+        for b in difflib.SequenceMatcher(None, a, cs_ns, autojunk=False).get_matching_blocks():
+            seg = a[b.a:b.a + b.size]
+            if b.size >= 3 or (b.size == 2 and HAN.search(seg)):
+                tot += b.size
+        return tot / len(a)
+    def unb(ln):
+        c = re.sub(r'\s', '', cv(ln))
+        return len(c) * (1 - _cov(c)) if c else None
+    keep = [ln for ln in t.split('\n') if unb(ln) is not None and unb(ln) <= PASTE_MAX]
+    backed_m = sum(len(cv(ln)) - unb(ln) for ln in keep)
+    unbacked_m = sum(unb(ln) for ln in keep)
+    if unbacked_m > backed_m:
+        keep = [ln for ln in keep
+                if len(cv(ln)) >= TRIM_MIN_LINE and _cov(cv(ln)) >= TRIM_COVER]
     return '\n'.join(keep).strip()
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
@@ -471,6 +500,9 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
         if not armed:
             return recs
         cs_use = group_cs or cs
+        gl = group_letters if group_letters is not None else \
+            len(re.sub(r'[^a-zA-Z]', '', keys_in_window(
+                X.con, ev['bundle'], ev.get('started_at'), ev.get('ended_at'))))
         o = []
         for t, a, b, s in recs:
             ct = X.cv(t)
@@ -484,12 +516,10 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
             # ⚠️按**组**数不按单事件:endValue 跨事件累积,「空洞骑士怎么」的击键在本组更早的事件里
             # (ev3557 实证,单事件窗口 11<14 误杀)。只证明"敲够了键",不证明产出,所以长文不豁免。
             if len(ct) <= 120:
-                gl = group_letters if group_letters is not None else \
-                    len(re.sub(r'[^a-zA-Z]', '', keys_in_window(X.con, ev['bundle'], a, b)))
                 need = sum(1 for ch in ct if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', ct))
                 if gl >= need:
                     o.append((t, a, b, s)); continue
-            nt = commit_backed(X, t, cs_use)          # 逐行:背书留/粘贴段走30闸/零背书整条不留
+            nt = commit_backed(X, t, cs_use)          # 逐行 30 闸 + 多数背书守卫(见函数注释)
             if nt: o.append((nt, a, b, s))
         return o
     for i, e in enumerate(arr):
