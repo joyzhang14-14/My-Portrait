@@ -259,6 +259,8 @@ def main():
         for s in (a.get("specifics") or []):
             k = norm(s)
             if k and k in corpus and k not in seenk:
+                if junk_classify(str(s).strip()[:60], b["app"])[0]:
+                    continue                     # 输出闸:垃圾锚点(菜单/chrome/桌面碎渣)不落库
                 seenk.add(k)
                 kws.append(str(s).strip()[:60])
         # cap 必须在这里(训练答案 max 就是 12;吐 35 个是解码失控,尾巴全是桌面碎渣)。
