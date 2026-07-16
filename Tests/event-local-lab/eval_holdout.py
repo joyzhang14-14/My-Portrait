@@ -100,6 +100,7 @@ def metrics(rows):
             "has_social": (bool(str(d.get("social") or "").strip())
                            and not SOCIAL_NEG.match(str(d.get("social") or "").strip())),
             "has_ctx": bool(str(d.get("context_in_app") or "").strip()),
+            "has_bg": bool(str(d.get("background") or "").strip()),
             "act_len": len(act),
             "hedge": bool(HEDGE.search(act)),
             "repeat": repeats(act),
@@ -125,6 +126,7 @@ def agg(ms, keys=None):
         "who人%": round(f("who_person"), 1),
         "who噪%": round(f("who_noise"), 1),
         "social%": round(f("has_social"), 1),
+        "bg%": round(f("has_bg"), 1),
         "ctx%": round(f("has_ctx"), 1),
         "hedge%": round(f("hedge"), 1),
         "复读%": round(f("repeat"), 1),
@@ -148,7 +150,7 @@ def main():
 
     A = metrics(load(args.a))
     COLS = ["n", "JSON合法%", "空壳%", "锚点中位", "锚点可验证%", "who人%", "who噪%",
-            "social%", "hedge%", "复读%", "跑飞%"]
+            "social%", "bg%", "hedge%", "复读%", "跑飞%"]
 
     print(f"=== v1.2 留出日全量({len(A)} 会话)===")
     table("总体", [("v1.2", agg(A))], COLS)
