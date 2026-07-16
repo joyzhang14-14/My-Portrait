@@ -30,6 +30,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spec_junk import classify  # noqa: E402  一把尺子:lab.db补救/训练包/输出闸共用
 
 SPEC_CAP = 12
+
+# ---- v2.0: SCHEMA 升级(background 字段)。训练题面与 v12_day.SCHEMA 必须逐字一致 ----
+SCHEMA_V1 = ('输出 JSON:\n{"activity":"2-4句中文连贯叙述用户在做什么(技术token保原文)",'
+             '"who":["交互的人,排除用户自己"],"context_in_app":"app内位置:哪个对话/频道/页面/文档(别复述app名)",'
+             '"specifics":["逐字锚点:文件名/hash/报错/金额/引语"],"social":"社交生活内容一句话或空"}')
+SCHEMA_V2 = ('输出 JSON:\n{"activity":"2-4句中文连贯叙述用户在做什么(技术token保原文)",'
+             '"who":["交互的人,排除用户自己"],"context_in_app":"app内位置:哪个对话/频道/页面/文档(别复述app名)",'
+             '"specifics":["逐字锚点:文件名/hash/报错/金额/引语"],'
+             '"social":"用户主动的社交/个人生活互动一句话或空",'
+             '"background":"环境中正在进行但非当前操作的内容(后台音乐/挂着的通话/背景窗口任务)一句话或空"}')
+
 SENT_SPLIT = re.compile(r'(?<=[。;；!！?？])')   # 与 t2_img_skew_v13.py 同一把刀
 # hedge 括号短语:纯删除,不留模板(v1.1 死于 882 次逐字 hedge)
 HEDGE_PAREN = re.compile(r'[（(][^（）()]*(?:过小|无法辨认|无法逐字辨认|未逐字录得)[^（）()]*[）)]')
@@ -105,6 +116,8 @@ def main():
         wash['social'] = {x['id']: x['social_new'] for x in E.get('socEdits', [])
                           if x.get('verdict') != '不动'}
         wash['recon'] = {x['id']: x for x in E.get('recEdits', []) if x.get('mismatch')}
+        wash['bg'] = {x['id']: (x.get('background') or '').strip()
+                      for x in E.get('bgEdits', [])}
 
     st = collections.Counter()
     out = {"train": [], "valid": []}
@@ -178,9 +191,14 @@ def main():
                "who": clean_who(ans0.get('who')),
                "context_in_app": str(ans0.get('context_in_app') or '').strip(),
                "specifics": specs,
-               "social": clean_social(soc_src)}
+               "social": clean_social(soc_src),
+               "background": HEDGE_PAREN.sub('', wash['bg'].get(sid, '')).strip()[:300]}
+        sr = w['schema_rules']
+        if wash['bg']:                       # v2.0:题面 SCHEMA 同步升级(找不到旧串=硬失败)
+            assert SCHEMA_V1 in sr, f"SCHEMA_V1 不在题面: {sid}"
+            sr = sr.replace(SCHEMA_V1, SCHEMA_V2)
         q = (w['head_new'] + "\n已知(OCR全文,按帧,含背景窗文字):\n<<<\n"
-             + w['ocr'] + "\n>>>\n" + w['schema_rules'])
+             + w['ocr'] + "\n>>>\n" + sr)
         row = {"question": q, "answer": json.dumps(ans, ensure_ascii=False),
                "images": w['images'][:1]}                       # D2: 单图
         out[w['split']].append(row)
@@ -310,6 +328,10 @@ def main():
             fails.append('social正例')
         print(f"闸门⑨ 和解句插入: {st['和解句插入']} 条 / 噪音删除 {st['噪音子串删除']} 处"
               f"(未命中跳过 {st['噪音子串未命中(跳过)']})")
+        if wash['bg']:
+            nbg = sum(1 for s_ in out.values() for r in s_ if '已知(OCR' in r['question']
+                      and json.loads(r['answer']).get('background'))
+            print(f"闸门⑩ background 非空: {nbg} 条(标注给了多少收多少,审核把关真实性)")
     print(f"\ntrain {len(out['train'])} / valid {len(out['valid'])}")
     if fails:
         print(f"\n❌ 闸门不过: {fails} —— 不出包,别拿去训练")
