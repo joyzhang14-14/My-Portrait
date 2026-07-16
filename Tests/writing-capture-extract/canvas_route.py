@@ -35,7 +35,9 @@ def route_day(con, day, llm=None):
             src = 'canvas_B+axv' if text2 != text else 'canvas_B'
             text = text2
             if text.strip():   # 纯空白不产成品(correctness);有内容哪怕一个「，」都留(用户裁定)
-                b_recs.append({'source': src, 'text': text, 'app': app})
+                # bundle/t0/t1:成品时间字段用(2026-07-17 用户指定,击键真值分 session)
+                b_recs.append({'source': src, 'text': text, 'app': app,
+                               'bundle': sp['bundle'], 't0': sp['t0'], 't1': sp['t1']})
         else:   # C 长文 → canvas_merge(要 GPU),本文件不跑
             c_pending.append({**sp, 'app': app})
     return b_recs, c_pending
@@ -63,7 +65,10 @@ def build_canvas(con, days, llm=None):
         r = CM.reconstruct(con, did, e['bundle'], fmin, fmax, model=cmodel, tok=ctok)
         assigned = max(sp[0] for sp in e['spans'])
         if r['final_text'].strip():
-            fusion.setdefault(assigned, []).append({'source': 'canvas_C', 'text': r['final_text'], 'app': e['bundle']})
+            fusion.setdefault(assigned, []).append({'source': 'canvas_C', 'text': r['final_text'], 'app': e['bundle'],
+                                                    'bundle': e.get('bundle_full'),
+                                                    't0': min(sp[1] for sp in e['spans']),
+                                                    't1': max(sp[2] for sp in e['spans'])})
             creport.append((assigned, did, e['bundle'], r['frames'], len(r['final_text'])))
     return fusion, creport, cnoanchor
 

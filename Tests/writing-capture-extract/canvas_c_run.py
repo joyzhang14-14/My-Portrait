@@ -45,7 +45,7 @@ def collect_c(con, days):
             if not did:
                 noanchor.append({'day': d, 'app': short, 'nkeys': sp['nkeys'], 'reason': '无url,无法定位帧'})
                 continue
-            e = docs.setdefault(did, {'bundle': short, 'spans': []})
+            e = docs.setdefault(did, {'bundle': short, 'bundle_full': sp['bundle'], 'spans': []})
             e['spans'].append((d, sp['t0'], sp['t1']))
     return docs, noanchor
 

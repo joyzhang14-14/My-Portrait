@@ -1137,7 +1137,8 @@ for day in DAYS:
             if _spans[_c][0] and _spans[_p][1] and _spans[_c][0] <= _spans[_p][1]:
                 _spans[_c][0] = min(_spans[_p][1] + 1, _spans[_c][1] or _spans[_p][1] + 1)
     out = ([(rec[6], rec[1], rec[0], _spans[_i]) for _i, rec in enumerate(day_final)]
-           + [(r["source"], r["text"], r["app"], None) for r in cvday])
+           + [(r["source"], r["text"], r["app"],
+               ks_span(r.get("bundle"), r.get("t0"), r.get("t1"))) for r in cvday])
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
     for i, (src, text, app, sp) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text, sp))
     # 口3 修正审计:改了什么、怎么改的(OCR锚定/双向语境)
