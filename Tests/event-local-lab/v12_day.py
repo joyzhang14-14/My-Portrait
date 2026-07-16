@@ -118,6 +118,9 @@ def main():
     ap.add_argument("--no-db", action="store_true")
     ap.add_argument("--attr-hint", action="store_true")  # 归属提示(确定性),默认关 —— 实验中
     ap.add_argument("--no-stub-fragments", action="store_true")  # 关掉过渡碎片存根(A/B 用)
+    # 内核panic防护(2026-07-16 IOGPUFamily驱动崩溃,pid=本脚本):每N个会话退出进程,
+    # supervisor拉起续跑 —— 每块全新GPU进程,打断驱动内存状态的长时累积。0=不分块。
+    ap.add_argument("--chunk", type=int, default=0)
     args = ap.parse_args()
 
     manifest = json.load(open(f"/tmp/vision_v4{args.suffix}_{args.day}/v4_manifest.json"))
@@ -296,6 +299,9 @@ def main():
         out.write(f"- doing: {doing}\n")
         out.write(f"- kw: {', '.join(kws)}\n")
         out.flush()
+        if args.chunk and (i + 1) >= args.chunk:
+            print(f"[chunk] 本进程已跑 {i+1} 条,退出让 supervisor 拉起新进程", flush=True)
+            break
         if (i + 1) % 20 == 0:
             el = time.time() - t0
             print(f"  {i+1}/{len(todo)} · {el/(i+1):.0f}s/会话 · 剩 {(len(todo)-i-1)*el/(i+1)/60:.0f}min "
