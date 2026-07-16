@@ -247,7 +247,25 @@ def is_slash_command(t):
         len(cv(s)) <= 30 or 'more' in s or '\n' in (t or '') or 'url' in s.lower())
 
 def kind_of(t): return "long_form" if len(t) >= 140 else "short_form"
-def rec_md(n, src, kind, app, text): return f"**{n}.** `[{src}/{kind}]` 📍 `{app}`\n\n> " + text.replace("\n", "\n> ") + "\n"
+
+def ks_span(bundle, t0, t1):
+    """记录的 start_ts/end_ts(用户 2026-07-17 指定:**用击键的时间分**,对齐库中字段)。
+    typing_event 的 t0/t1 是 AX diff 时刻(渲染/事件切分的时间,不是手的时间)——真正的
+    session 边界是**击键真值**:窗口内第一击 = start_ts,最后一击 = end_ts。
+    窗口沿用 keys_in_window 同款 pad(前 2s 后 300ms),保证"算时间的键"和"重建文本的键"是同一批。"""
+    if not bundle or not (t0 or t1):
+        return (None, None)
+    r = con.execute(
+        "SELECT MIN(ts_ms), MAX(ts_ms) FROM keystroke_log WHERE bundle_id=:b "
+        "AND ts_ms BETWEEN :a AND :c AND (modifiers&7)=0",
+        {"b": bundle, "a": (t0 or 0) - 2000, "c": (t1 or t0 or 0) + 300}).fetchone()
+    return (r[0], r[1]) if r and r[0] else (t0, t1)
+
+def rec_md(n, src, kind, app, text, span=None):
+    hdr = f"**{n}.** `[{src}/{kind}]` 📍 `{app}`"
+    if span and span[0]:
+        hdr += f" · `⌨ {fmt_ts(span[0])} → {fmt_ts(span[1])}`"
+    return hdr + "\n\n> " + text.replace("\n", "\n> ") + "\n"
 
 # ===== Phase 1: 重建(14b disambig) =====
 # 14B 消费者:AX 路 disambig(仅 decode 天经 decode_run 调)+ referee(仅 REVIEW_MODE!=det)+
@@ -1105,9 +1123,23 @@ for day in DAYS:
             PENDING.setdefault(day, []).append((r["app"], r["text"], r["source"], None, None, "canvas_B碎片/残渣(无发送背书)", ""))
             continue
         cvday.append(r)
-    out = [(rec[6], rec[1], rec[0]) for rec in day_final] + [(r["source"], r["text"], r["app"]) for r in cvday]
+    # 时间字段(2026-07-17 用户指定,对齐库中 start_ts/end_ts):AX 行有 (t0,t1,bundle) → 击键真值;
+    # canvas 行缓存里没有时间(source/text/app 三元),暂无字段。
+    # 同 app 钳位:ks_span 的前 2s pad 会把**上一条消息的尾键**借过来当自己的 start(实测「没睡」
+    # 07→10s、下一条 08→19s 互相咬)—— 同 bundle 按 end 排,下一条 start 钳到上一条 end 之后。
+    _spans = [list(ks_span(rec[7], rec[4], rec[5])) for rec in day_final]
+    _byb = {}
+    for _i, rec in enumerate(day_final):
+        if rec[7] and _spans[_i][0]: _byb.setdefault(rec[7], []).append(_i)
+    for _idxs in _byb.values():
+        _idxs.sort(key=lambda i: _spans[i][1] or 0)
+        for _p, _c in zip(_idxs, _idxs[1:]):
+            if _spans[_c][0] and _spans[_p][1] and _spans[_c][0] <= _spans[_p][1]:
+                _spans[_c][0] = min(_spans[_p][1] + 1, _spans[_c][1] or _spans[_p][1] + 1)
+    out = ([(rec[6], rec[1], rec[0], _spans[_i]) for _i, rec in enumerate(day_final)]
+           + [(r["source"], r["text"], r["app"], None) for r in cvday])
     nd.append(f"## {day}\n"); nd.append(f"### 🆕 新 pipeline·成品（{len(out)}）\n")
-    for i, (src, text, app) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text))
+    for i, (src, text, app, sp) in enumerate(out, 1): nd.append(rec_md(i, src, kind_of(text), app, text, sp))
     # 口3 修正审计:改了什么、怎么改的(OCR锚定/双向语境)
     cf = C3FIX.get(day, [])
     nd.append(f"\n### 🔧 口3 修正（{len(cf)}）\n")
