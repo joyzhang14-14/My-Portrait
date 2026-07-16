@@ -60,9 +60,13 @@ def _decode_segment(seg, cr_ime=None):
         nonlocal buf, buf_ime
         if not buf:
             return
-        if literal or buf_ime is not True:        # 非输入法背书(纯键盘布局/旧数据无来源)= 不猜,字面上屏
+        if literal or (buf_ime is not True and pick is None):
+            # 非输入法背书 = 不猜,字面上屏(不这么拦:com→聪明 把邮箱解坏,the→他和)。
+            # **带 pick 例外**(用户 2026-07-17 指正):选字数字本身就是 IME 铁证(上屏语义:
+            # 数字=真上屏),旧数据(ime=None)带 pick 的 run 照解 —— 这正是「按天 decode=1」
+            # 本该修掉的残渣(ni1fenxi1yixia1→你分析一下);英文失配案(data/the)没有 pick,拦住。
             out.append(buf); buf = ""; buf_ime = None
-            return                                # (不这么拦:com→聪明 把邮箱解坏,the→他和)
+            return
         kind, _ = R.classify(buf, pick)           # cands/lattice 内部自带 .lower(),buf 可留原大小写
         if kind == 'chinese':
             # 英文/拼音粘连修(2026-07-11,#3 Portrait中的):选字数字逼整串判拼音,但大写开头=英文
@@ -79,7 +83,7 @@ def _decode_segment(seg, cr_ime=None):
         else:
             out.append(buf)                       # english/incomplete → 字面(The/ok 保原样)
         buf = ""; buf_ime = None
-    for ch in seg:
+    for _ci, ch in enumerate(seg):
         ime = getattr(ch, 'ime', None)            # 非 _K(如 apply_bs 截断音节时补的字符)→ 未知
         if ch.isalpha():
             if buf and ime is not None and buf_ime is not None and ime != buf_ime:
@@ -95,10 +99,19 @@ def _decode_segment(seg, cr_ime=None):
             # 走到这里的 <CR> = **输入法吃掉的那次回车**(_split_cr_toks 没拿它断行):它在提交
             # 预编辑的生拼音,不产生换行 —— 这就是"双回车"里被吃掉的第一下。
             flush(literal=True)
-        elif ch.isdigit() and buf and 1 <= int(ch) <= 9 and buf_ime is True:
-            flush(int(ch) - 1)                    # 选字数字 = 拼音收尾上屏(须输入法背书,同 flush 闸)
+        elif (ch.isdigit() and buf and 1 <= int(ch) <= 9 and buf_ime is not False
+              # 旧数据(None)加一条结构判据:**pick 后面紧跟另一个数字 = 数字串(joyzhang14 的 14),
+              # 不是选字** —— 真选字是单个数字后接字母/标点/收尾。不加:joyzhang14 → 奇偶院长4
+              # (当年 gold P0 点名的邮箱毁灭案原样复活,单元测试实锤)。新数据(True)不受此限,
+              # input_source 已背书。
+              and not (buf_ime is None and _ci + 1 < len(seg) and seg[_ci + 1].isdigit())):
+            # 选字数字 = 拼音收尾上屏。ime=None(旧数据)也放行(用户 2026-07-17 指正:旧数据残渣
+            # 本有「按天 decode=1」修复逻辑,被 #4 一刀切拦掉了)——**选字数字本身就是"这串是
+            # 输入法打的"的铁证**(上屏语义:数字=真上屏),不需要 input_source 背书;v10 残渣
+            # 清一色带 1(ni1fenxi1yixia1/haiky1),英文失配案(data/the)清一色没有。
+            flush(int(ch) - 1)
         elif ch.isprintable():
-            # ⚠️英文键盘/旧数据下数字就是**字面数字**,不是选字索引(上面那条 buf_ime is True 拦着)。
+            # ⚠️英文键盘下数字就是**字面数字**,不是选字索引(上面那条 is not False 拦着)。
             # 不拦:邮箱 joyzhang14@... 的「1」会被当成"选第1个候选"吃掉 → joyzhang4@...
             flush(); out.append(ch)               # 标点/空格/字面数字:先收尾,再原样保留(逗号!)
         # else:控制键(ESC/US 等)= 非文字,丢(同 real_key correctness)
