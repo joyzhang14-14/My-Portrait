@@ -446,10 +446,15 @@ for day in DAYS:
         grp_cs = ''.join(X.cstream(e['arr'], e['inj']) for e in evs)
         # 组级击键字母数(闸C 的字母下界闸要用):endValue 跨事件累积,单事件窗口数不全(见 R.handtyped)
         grp_letters = len(re.sub(r'[^a-zA-Z]', '', assemble_keys_full(ids)))
+        # 组级上膛(ev621 案,见 rebuild 注释):组内任一事件有粘贴证据 → 整组过闸C
+        grp_armed = any(e['inj'] or R.paste_pressed(X, e)
+                        or any(x.get('kind') == 'paste' and len(cv(x.get('text') or '')) >= 2 for x in e['arr'])
+                        for e in evs)
         sends_raw = []
         for ev in evs:
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs,
-                                                               group_letters=grp_letters):
+                                                               group_letters=grp_letters,
+                                                               group_armed=grp_armed):
                 sends_raw.append([ev, text, t0, t1, is_send])
         # 回车背书升格(ev1174 jeff chang案,用户证实网页Gemini真发送):endValue短草稿(≤20字,L7射程)
         # 条件A:事件收尾紧跟裸回车(晚于末笔编辑150ms+;IME确认回车必伴随commit,天然排除)。

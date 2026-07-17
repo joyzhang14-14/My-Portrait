@@ -466,7 +466,7 @@ def commit_backed(X, t, cs):
     return '\n'.join(ln for ln, _, _ in rows).strip()
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
-def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
+def event_sends_with_ts(ev, X, group_cs=None, group_letters=None, group_armed=None):
     """返回 [(text, ks_start_ts, ks_end_ts, is_send)]:真 within-event 发送(占位符/空框夹+回车背书)
     + submit + 末尾未发送 endValue。X = extract_compare_v2 模块(借 cstream/phMarkers/emptyBox/cover/RUNPH)。
     group_cs:组级 commit 流(#40 用户裁定:发送清空快照当成品)——跨事件长文(中段插入/补尾在后续事件,
@@ -515,7 +515,10 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None):
     # 闸A 上膛:本事件有粘贴痕迹(物理 ⌘V / edit_log paste 段 / 巨块注入 commit)→ 出口过闸C 裁剪。
     # **只在有粘贴证据时开火**:没证据的事件维持原行为,不动跨事件长文(#40 Blueprint 案的 endValue
     # 快照对组流只盖 ~35%,无差别上闸C 会把真手打长文裁碎)。
-    armed = PASTE_GATE and bool(pastes or inj or paste_pressed(X, ev))
+    # 上膛按**组**算(2026-07-17 用户抓的 ev621 案:1 秒事件带 1724 字 endValue):粘贴证据留在
+    # 编辑链早先的事件里(ev619 有 28 条 paste),后续短事件**继承内容不继承证据**,单事件上膛
+    # 够不着 —— 同组任何事件有证据,整组产出都过闸C。误裁安全由三规则兜底(粘贴少数派整条留)。
+    armed = PASTE_GATE and (bool(group_armed) or bool(pastes or inj or paste_pressed(X, ev)))
     def gate(recs):
         if not armed:
             return recs
