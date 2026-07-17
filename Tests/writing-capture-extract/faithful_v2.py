@@ -1138,12 +1138,15 @@ def _py_cover(a, b):
     return (sum(bls) / len(pa), (max(bls) if bls else 0) / len(pa))
 
 def _dup_score(text, src):
-    """同一次打字的两条记录留谁:非残渣 > 汉字多 > 路由(AX>keystroke>canvas) > 更长。"""
+    """同一次打字的两条记录留谁:汉字多 > 内容长 > 路由(AX>keystroke>canvas)。
+    ⚠️第一版有个"非残渣"旗(汉字=0 且字母≥4 当残渣)——**英文长文全中招**:整篇 canvas_C
+    essay(0 汉字)被判残渣,3 字母的 ax 残渣 `Sin` 反而算"非残渣",3 个字母赢了 2800 字,
+    essay 从 v9.2 起整篇丢失(用户抓的)。汉字数+长度天然覆盖残渣 vs 汉字的场景
+    (「我去抢劫」4 汉字 > 「w1qu1qiangjie1」0 汉字),不需要那面旗。"""
     c = cv(text)
     han = sum(1 for ch in c if '一' <= ch <= '鿿')
-    letters = len(re.sub(r'[^a-zA-Z]', '', c))
     route = 2 if not src.startswith('canvas') and 'keystroke' not in src else (1 if 'keystroke' in src else 0)
-    return (0 if (han == 0 and letters >= 4) else 1, han, route, len(c))
+    return (han, len(c), route)
 
 # 全量候选(跨天:essay 案 canvas_C 归 05-29、其 canvas_B 影子在 05-28)
 _cands = []
