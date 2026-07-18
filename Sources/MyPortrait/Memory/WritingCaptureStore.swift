@@ -755,7 +755,7 @@ struct WritingCaptureStore: Sendable {
         } ?? nil
     }
 
-    /// 按 record id 反查它的 start_ts(毫秒)—— canvas input 图跳转定位用
+    /// 按 record id 反查它的 start_ts(毫秒)—— Neural Graph 的 Input 图跳转定位用
     /// (先据此切到该 record 所在那天)。record 不存在返回 nil。
     func writingRecordStartTs(id: Int64) -> Int64? {
         try? dbPool.read { db in

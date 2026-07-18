@@ -21,7 +21,7 @@ private struct InputSelection: Equatable {
     var capped: Bool = false
 }
 
-/// Memory 区 "Input" scope 的**图谱形态**(canvas 模式)。
+/// Memory 区 "Input" scope 的**图谱形态**(Neural Graph 模式)。
 ///
 /// 一天一张面积图:x 轴 = 当天**第一次打字到最后一次打字**的时段(动态,不固定
 /// 24h),y 轴 = 每分钟总击键数(含退格,不减)。曲线下方阴影按 app 堆叠分色

@@ -77,7 +77,7 @@ struct TimelineSidebar: View {
                         cronJobHistorySection
                         recentsSection
                     } else if selection == .memories {
-                        // text/canvas 模式切换钮:独立小卡,放 scope 卡上方(需求 §3.1)。
+                        // text/Neural Graph 模式切换钮:独立小卡,放 scope 卡上方。
                         // 卡比 sectionCard 更瘦(padding 6 vs 12,07-01 反馈),钮本身不变。
                         memoryViewModeCard
                         memoryScopeSection
@@ -120,9 +120,9 @@ struct TimelineSidebar: View {
             HStack(spacing: Theme.Space.xs) {
                 ForEach([SidebarSection.timeline, .home, .memories, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
-                        // 每次点开 Memory 都落到 canvas 的 Events(用户 07-10 定稿)。
+                        // 每次点开 Memory 都落到 Neural Graph 的 Events。
                         if item == .memories {
-                            memoryViewMode = .canvas
+                            memoryViewMode = .neuralGraph
                             memoryScope = .events
                         }
                         selection = item
@@ -381,7 +381,7 @@ struct TimelineSidebar: View {
         return filtered
     }
 
-    /// text/canvas 切换钮的瘦身卡:同 sectionCard 的 fill/stroke,padding 减半
+    /// text/Neural Graph 切换钮的瘦身卡:同 sectionCard 的 fill/stroke,padding 减半
     ///(07-01 反馈:卡缩小,钮不变)。
     private var memoryViewModeCard: some View {
         let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
@@ -403,8 +403,8 @@ struct TimelineSidebar: View {
 
     private var memoryScopeSection: some View {
         sectionCard {
-            if memoryViewMode == .canvas {
-                // canvas 模式列:PROFILE 小分区(Personal Info,跟 text 模式对齐)
+            if memoryViewMode == .neuralGraph {
+                // Neural Graph 模式列:PROFILE 小分区(Personal Info,跟 text 模式对齐)
                 // + GRAPH(Portrait 整图 / Events / Input 打字活动面积图)。
                 scopeHeader("PROFILE")
                 VStack(spacing: 2) {
@@ -423,10 +423,10 @@ struct TimelineSidebar: View {
                     scopeRow(.events)
                     scopeRow(.input)
                 }
-                // 无标题分区:canvas 设置入口(07-11 用户)。
+                // 无标题分区:Neural Graph 设置入口。
                 Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
                 VStack(spacing: 2) {
-                    scopeRow(.canvasSettings)
+                    scopeRow(.neuralGraphSettings)
                 }
             } else {
                 scopeHeader("PROFILE")
@@ -466,13 +466,13 @@ struct TimelineSidebar: View {
     private func scopeRow(_ s: MemoryScope) -> some View {
         scopeRowCustom(isOn: memoryScope == s, icon: s.systemImage, title: s.displayName) {
             memoryScope = s
-            // canvas 模式下点 Personal Info **不**切回 text(用户 2026-07-01
-            // 定稿):toggle 保持 canvas,主面板由 ContentView 按「该 scope 无
+            // Neural Graph 模式下点 Personal Info **不**切回 text:
+            // toggle 保持 Neural Graph,主面板由 ContentView 按「该 scope 无
             // 图谱形态」自动落到表单;再点 Portrait/Events 直接回图谱。
         }
     }
 
-    /// scope 行的通用外观(canvas 模式的聚合 "Portrait" 行复用)。
+    /// scope 行的通用外观(Neural Graph 模式的聚合 "Portrait" 行复用)。
     private func scopeRowCustom(isOn: Bool, icon: String, title: String,
                                 action: @escaping () -> Void) -> some View {
         Button(action: action) {

@@ -3,13 +3,13 @@ import AppKit
 import UniformTypeIdentifiers
 
 extension Notification.Name {
-    /// 主球照片被上传/移除 → canvas 立即重载贴图(GraphRootView 监听)。
+    /// 主球照片被上传/移除 → Neural Graph 立即重载贴图(GraphRootView 监听)。
     static let mainBallPhotoChanged = Notification.Name("MyPortrait.MainBallPhotoChanged")
 }
 
 /// 主球照片的落盘位置 + 圆形裁剪工具(07-11 用户:自定义主球照片,
 /// 上传后程序裁成圆形贴主球)。不进 config schema —— 文件在=已设,
-/// 上传/移除即时生效(发通知让 canvas 重载,不重启 app)。
+/// 上传/移除即时生效(发通知让 Neural Graph 重载,不重启 app)。
 enum MainBallPhoto {
     /// ~/.portrait/customize/main-ball.png(与 App customize 的 icon 同目录)。
     static var url: URL {
@@ -66,7 +66,7 @@ enum MainBallPhoto {
     }
 }
 
-struct CanvasSettingsView: View {
+struct NeuralGraphSettingsView: View {
     @State private var config = ConfigStore.shared
 
     var body: some View {
@@ -80,7 +80,7 @@ struct CanvasSettingsView: View {
                 }
                 SettingsCard(title: "Animation speed") {
                     SpeedLevelSlider(
-                        title: "Graph animation speed",
+                        title: "Neural Graph animation speed",
                         caption: "How fast the graph plays its opening animation — the balls spreading out and the meteors lighting up — and how fast the meteor ring glides back into place after you drag a folder ball.",
                         selection: config.binding(\.display.graphAnimationSpeed))
                         .padding(.horizontal, 14)

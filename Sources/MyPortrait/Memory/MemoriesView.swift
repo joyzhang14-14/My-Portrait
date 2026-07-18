@@ -1077,8 +1077,8 @@ struct MemoriesView: View {
         switch scope {
         case .events:
             root = Storage.eventsDir
-        case .input, .personalInfo, .canvasSettings:
-            // .input/.personalInfo/.canvasSettings 都没文件可扫(各走专属视图)。
+        case .input, .personalInfo, .neuralGraphSettings:
+            // 这些 scope 都没文件可扫(各走专属视图)。
             return []
         case .portrait(let cat):
             root = Storage.portraitDir.appendingPathComponent(cat, isDirectory: true)
@@ -1170,7 +1170,7 @@ enum FolderPalette {
         color(fromHex: defaultHex(for: title)) ?? .blue
     }
 
-    /// djb2 稳定默认色 hex(text 与 canvas 两侧共用同一算法,观感一致)。
+    /// djb2 稳定默认色 hex(text 与 Neural Graph 两侧共用同一算法,观感一致)。
     static func defaultHex(for title: String) -> String {
         var h: UInt32 = 5381
         for b in title.utf8 { h = (h &* 33) &+ UInt32(b) }
@@ -1481,7 +1481,7 @@ private struct EmptyHint: View {
             return "No events yet.\nClick ↓ to backfill from the timeline."
         case .input:
             return "Input capture is not set up yet."
-        case .personalInfo, .canvasSettings:
+        case .personalInfo, .neuralGraphSettings:
             // 不会走到 —— 各走专属视图,不走 list 列。
             return ""
         case .portrait:

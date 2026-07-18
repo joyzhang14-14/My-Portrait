@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var chat = ChatController()
     @State private var chatStore = ChatStore.shared
     @State private var memoryScope: MemoryScope = .events
-    /// Memories 区 text/canvas 查看模式(切换钮在侧栏,内容在 mainPane)。
+    /// Memories 区 text/Neural Graph 查看模式(切换钮在侧栏,内容在 mainPane)。
     @State private var memoryViewMode: MemoryViewMode = .text
     /// 图谱浮窗 wr chip 跳转注入:切回 text/Input 后要定位的 record id。
     @State private var memoryInputJump: Int64? = nil
@@ -125,12 +125,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home
         }
-        // 图谱浮窗 wr chip → 切到 canvas 模式的 Input(打字活动面积图)并定位该
-        // record(07-10 用户:input 界面已搬到 canvas 区,跳转去那)。
+        // 图谱浮窗 wr chip → 切到 Neural Graph 模式的 Input(打字活动面积图)
+        // 并定位该 record。
         .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
             guard let id = notif.object as? Int64 else { return }
             selection = .memories
-            memoryViewMode = .canvas
+            memoryViewMode = .neuralGraph
             memoryScope = .input
             memoryInputJump = id
         }
@@ -196,12 +196,12 @@ struct ContentView: View {
         case .timeline:      TimelineView(state: timeline)
         case .cronJobs:         CronJobsView(selection: $cronJobSelection)
         case .memories:
-            // canvas 模式只覆盖 events/portrait;personalInfo/input 没有图谱
-            // 形态,即便 mode==canvas 也走列表(侧栏点击它们时会把 mode 拨回 text)。
-            if memoryViewMode == .canvas, memoryScope == .canvasSettings {
-                // canvas 侧栏 GRAPH 下的设置入口(07-11 用户):画布设置(主球照片)。
-                CanvasSettingsView()
-            } else if memoryViewMode == .canvas, MemoryViewMode.supportsCanvas(memoryScope) {
+            // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
+            if memoryViewMode == .neuralGraph, memoryScope == .neuralGraphSettings {
+                // Neural Graph 侧栏 GRAPH 下的设置入口(主球照片等)。
+                NeuralGraphSettingsView()
+            } else if memoryViewMode == .neuralGraph,
+                      MemoryViewMode.supportsNeuralGraph(memoryScope) {
                 // input 的图谱形态是打字活动面积图,不走力导向 GraphRootView。
                 if memoryScope == .input {
                     InputActivityChartView(jumpToRecordId: $memoryInputJump)
@@ -220,4 +220,3 @@ struct ContentView: View {
         }
     }
 }
-

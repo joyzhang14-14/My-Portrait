@@ -10,9 +10,9 @@ enum MemoryScope: Hashable, Identifiable {
     case events
     case input
     case portrait(category: String)
-    /// canvas 侧栏 GRAPH 下的设置入口(07-11 用户):主内容区显示画布设置
+    /// Neural Graph 侧栏 GRAPH 下的设置入口(07-11 用户):主内容区显示图谱设置
     /// (主球照片等),不是图谱形态。
-    case canvasSettings
+    case neuralGraphSettings
 
     var id: String {
         switch self {
@@ -20,7 +20,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .events:              return "__events__"
         case .input:               return "__input__"
         case .portrait(let c):     return "portrait:\(c)"
-        case .canvasSettings:      return "__canvas_settings__"
+        case .neuralGraphSettings: return "__neural_graph_settings__"
         }
     }
     var displayName: String {
@@ -29,7 +29,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .events:              return "Events"
         case .input:               return "Input"
         case .portrait(let c):     return c.replacingOccurrences(of: "_", with: " ").capitalized
-        case .canvasSettings:      return "Settings"
+        case .neuralGraphSettings: return "Settings"
         }
     }
     var systemImage: String {
@@ -37,7 +37,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .personalInfo:             return "person.text.rectangle.fill"
         case .events:                   return "clock.arrow.circlepath"
         case .input:                    return "keyboard"
-        case .canvasSettings:           return "slider.horizontal.3"
+        case .neuralGraphSettings:      return "slider.horizontal.3"
         case .portrait("personality"):  return "person.fill"
         case .portrait("social"):       return "person.3.fill"
         case .portrait("background"):   return "books.vertical.fill"
@@ -51,19 +51,19 @@ enum MemoryScope: Hashable, Identifiable {
     }
 }
 
-/// Memories 区的查看模式:text = 列表视图(现状),canvas = 图谱视图。
+/// Memories 区的查看模式:text = 列表视图,neuralGraph = Neural Graph 图谱视图。
 /// 状态与 memoryScope 一样住在 ContentView,侧栏(切换钮)与主面板共享。
 enum MemoryViewMode: String, Hashable {
-    case text, canvas
+    case text, neuralGraph
 
-    /// personalInfo 没有 canvas 形态 —— canvas 模式下点它自动回 text。
-    /// input 的 canvas 形态 = 打字活动面积图(InputActivityChartView)。
-    static func supportsCanvas(_ scope: MemoryScope) -> Bool {
+    /// personalInfo 没有 Neural Graph 形态。
+    /// input 的 Neural Graph 形态 = 打字活动面积图(InputActivityChartView)。
+    static func supportsNeuralGraph(_ scope: MemoryScope) -> Bool {
         switch scope {
         case .events, .portrait, .input:  return true
-        // canvasSettings 由 ContentView 显式路由到设置视图(先于这里判断),
+        // neuralGraphSettings 由 ContentView 显式路由到设置视图(先于这里判断),
         // 值本身不影响;返 false 保持"非图谱"语义。
-        case .personalInfo, .canvasSettings: return false
+        case .personalInfo, .neuralGraphSettings: return false
         }
     }
 }

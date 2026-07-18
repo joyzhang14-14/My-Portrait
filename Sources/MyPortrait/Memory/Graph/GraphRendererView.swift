@@ -2,7 +2,8 @@ import GraphPhysics
 import SwiftUI
 import simd
 
-/// 图谱画布:TimelineView 驱动的 Canvas 全量重绘(边→脉冲→球→hub 标签)。
+/// Neural Graph 渲染器:TimelineView 驱动的 Canvas 全量重绘
+/// (边→脉冲→球→hub 标签)。
 /// 位置每帧从物理引擎的双缓冲快照读取;全静止时 TimelineView 暂停
 /// (paused),重绘只由相机/hover 等状态变化触发 → CPU≈0。
 ///
@@ -14,7 +15,7 @@ import simd
 /// `ctx.resolve(Text)`(那样 5000 节点下掉 13% 帧)。
 /// ⚠️ Canvas 闭包必须保持精简(只调 draw* helper)—— 内联全部绘制代码会
 /// 让 Swift 类型检查超时(编译错 "unable to type-check in reasonable time")。
-struct GraphCanvasView: View {
+struct GraphRendererView: View {
     let scene: GraphScene
     let engine: GraphPhysicsEngine
     /// 物理休眠且无进行中动画 → true,暂停 TimelineView 的逐帧重绘。
