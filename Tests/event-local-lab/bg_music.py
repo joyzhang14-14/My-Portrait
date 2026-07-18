@@ -268,21 +268,33 @@ def is_player(app, engine):
     return r
 
 
+def _vote2(prompts, pat, engine):
+    """双措辞共识:两个措辞变体都判 true 才 true(温度0下同题必同答,换措辞=独立票;
+    共识制提精度——回归判决里 false 保留是短板,误杀已达标)。"""
+    for pr in prompts:
+        try:
+            if not re.search(pat, _gen(pr, engine), re.I):
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def is_bg_task(clause, engine):
     """二元判别①:这句是不是「正在进行中的后台窗口/任务」?
     ⚠️不带 activity 参照——实测参照会把判别带偏(「文件夹不是当前操作」被推成
     「所以是后台任务」,忘了"必须正在进行中"的前提);单独判时三类样例全对。"""
-    prompt = (f"待判片段:\n「{clause}」\n\n"
-              f"问:这个片段描述的是不是「打开着的后台窗口或后台任务」"
-              f"(背景里挂着的另一个窗口/会话/设置页/标签页,显示着具体内容或在干活)?\n"
-              f"以下情况都回 false:桌面摆设(壁纸/桌面图标/日历挂件/天气/Dock/菜单栏"
-              f"日期,不是窗口);音乐播放或歌词内容;无法判断。\n"
-              f'只输出 JSON:{{"bg_task": true或false}}')
-    try:
-        out = _gen(prompt, engine)
-        return bool(re.search(r'"?bg_task"?\s*[:=]?\s*true', out, re.I))
-    except Exception:
-        return False
+    p1 = (f"待判片段:\n「{clause}」\n\n"
+          f"问:这个片段描述的是不是「打开着的后台窗口或后台任务」"
+          f"(背景里挂着的另一个窗口/会话/设置页/标签页,显示着具体内容或在干活)?\n"
+          f"以下情况都回 false:桌面摆设(壁纸/桌面图标/日历挂件/天气/Dock/菜单栏"
+          f"日期,不是窗口);音乐播放或歌词内容;无法判断。\n"
+          f'只输出 JSON:{{"bg_task": true或false}}')
+    p2 = (f"屏幕环境描述:「{clause}」\n\n"
+          f"判断:这说的是一个**背景里开着的窗口/正在进行的后台任务**吗?"
+          f"如果只是桌面陈设(图标/挂件/日历/天气/Dock)、音乐或歌词、或者你拿不准,"
+          f'答 false。只输出 JSON:{{"bg_task": true或false}}')
+    return _vote2([p1, p2], r'"?bg_task"?\s*[:=]?\s*true', engine)
 
 
 def is_foreground(clause, activity, engine):
@@ -352,10 +364,22 @@ def window_bg_gate(model_bg, activity, inv, ocr, engine):
         in_inv = any(a in nc for a in inv_norm)
         if not anchored and not in_inv:
             continue
+        # 引号内容强制锚定(引号是结构信号):引文在 OCR/窗口标题里找不到 → 整句丢
+        quoted = re.findall(r"[「『\"“]([^」』\"”]{2,30})[」』\"”]", clause)
+        if quoted and any(_norm_key(q) not in corpus for q in quoted if len(_norm_key(q)) >= 3):
+            continue
         if is_bg_task(clause, engine):
             # 整句是后台任务 → 整句保留,不絮碎(逗号下钻会把连贯长句切成
             # 无主语碎片逐片误杀——s432 微信场景就是这么丢的)
             if is_foreground(clause, activity, engine):      # s86 类:前台操作本身
+                # 前台复合句抢救:里面可能连坐着真背景从句(回归判决残余误杀根因)
+                if re.search(r"[,，]", clause):
+                    subs = [s2.strip(" ,，、") for s2 in re.split(r"[,，]", clause)]
+                    subs = [s2 for s2 in subs if len(s2) >= 6
+                            and is_bg_task(s2, engine)
+                            and not is_foreground(s2, activity, engine)]
+                    if subs:
+                        keep.append(",".join(subs))
                 continue
             keep.append(clause)
         elif re.search(r"[,，]", clause):
