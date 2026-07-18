@@ -486,7 +486,10 @@ def commit_backed(X, t, cs):
     rows = [(ln, n, u) for ln, n, u in kept_lines if cv(ln)]
     backed_m = sum(max(0, n - u) for _, n, u in rows)
     unbacked_m = sum(min(n, u) for _, _, u in rows)
-    if unbacked_m > backed_m:
+    # 守卫只打「纯粘贴」(粘贴政策原文:非纯粘贴+单段≤30=留):背书率≥0.25 说明确有手打正文,
+    # ≤30 短段是合法搭车(ElevenLabs 26字粘贴+12字手打,v12 实测被旧条件 unbacked>backed 误杀
+    # 致 A20/B11 双✗);背书率<0.25 = 基本没打字(bar moving 0/浏览文档~0.1)→ 只留强背书行。
+    if unbacked_m > backed_m and backed_m < 0.25 * (backed_m + unbacked_m):
         rows = [(ln, n, u) for ln, n, u in rows
                 if n >= TRIM_MIN_LINE and (1 - u / n) >= TRIM_COVER]
     return '\n'.join(ln for ln, _, _ in rows).strip()
