@@ -817,7 +817,7 @@ struct VoiceTrainingCard: View {
                 Text("Speaker name")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textPrimary.opacity(0.70))
-                TextField("e.g. Louis", text: $trainingName)
+                TextField("", text: $trainingName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .padding(.horizontal, 10).padding(.vertical, 6)
