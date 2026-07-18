@@ -1,16 +1,19 @@
-"""background 字段的确定性构造闸(音乐提取 + 背景窗口核真)。2026-07-17 用户定案。
+"""background 字段的确定性构造闸 v2.2(音乐提取 + 背景窗口子句级核真)。
 
-三连败定论后 bg 字段的免训练落法:判断挪出模型、进代码。两条通道:
-【音乐】①触发(确定性):播放器指纹/菜单栏挂件/Lossless 锚点;②候选逐字来自 OCR;
-  ③裁定:唯一候选直取,多候选小模型选择题(MLX Qwen3.5-9B-4bit,只回编号)。歌词丢弃。
-【背景窗口】模型零-shot 的 bg 描述只当提名,三道确定性闸核真(2026-07-17 用户拍板):
-  闸A 静态桌面噪音黑名单;闸B 关系核真——提到的 app 必须真出现在窗口清单里
-  (frames 表每帧都记 app_name/window_name,会话前后聚合即窗口清单,与 app 端
-  ACTIVE APPS 面板同源同法),且不能只是会话自身前台;闸C 实体锚定——内容词
-  逐字率过线才收。三闸全过才保留,否则清空。
+铁律(用户 2026-07-18):**禁止硬编码任何判断**。代码只做结构性检查
+(verbatim 锚定/n-gram 重合/格式模式/窗口清单查证);内容判断(是不是歌名、
+是不是静态摆设、是不是播放器)一律交小模型做**判别题/选择题**——模型只回
+编号或分类字母,无生成自由度,结构上不可能编造。
 
-用法: python bg_music.py --day 2026-06-05 --suffix b [--jsonl /tmp/xxx.jsonl] [--llm]
-  默认干跑打印;--jsonl 指定时闸语义写回:触发/核真的覆写,其余清空。
+v2.1→v2.2 修法(独立核查判决,验收报告 2026-07-17):
+  ①整条清除 → **子句级过滤**:静态摆设子句删、可核实后台子句留;
+  ②bg 与 activity 高 n-gram 重合 → 前台复述,确定性删(s86 类);
+  ③音乐候选带证据来源,列表行候选必须过模型裁定,禁直采(s265 类);
+  ④截断改句边界(s343 类);
+  ⑤拆掉全部内容词表(STATIC/UI/播放器字典)→ 模型判别。
+
+用法: python bg_music.py --day 2026-06-05 --suffix b [--jsonl X.jsonl] [--llm]
+  默认干跑打印;--jsonl 指定时闸语义写回:过闸的覆写,其余清空。
 """
 import argparse
 import json
@@ -47,43 +50,46 @@ def session_ocr(con_p, fids):
             texts.append(row[0])
     return "\n".join(texts)
 
-# ① 播放器指纹(任一命中即触发,一级=屏幕真显示播放态,可提歌名)
-FINGER = re.compile(r"\d{1,2}:\d{2}\s*/\s*\d{1,2}:\d{2}|Now Playing|正在播放|单曲循环|随机播放"
-                    r"|Shuffle|[▶⏸⏭⏮♫♪]")
-# ①b 二级触发:播放器菜单栏签名(播放器是前台归属项但歌名不在屏上)→ 降级产出不带歌名。
-#    6-05 实测 Spotify 会话 OCR 只有菜单栏行,谁都提不出屏上没有的歌名,这是诚实上限。
-MENUBAR = {
-    "Spotify": re.compile(r"Spotify\b.{0,120}\bPlayback\b.{0,40}\bWindow\b"),
-    "Music": re.compile(r"\bMusic\s+File\s+Edit\s+Song\b"),
-}
-# UI 词(候选黑名单)
-UI = re.compile(r"播放|暂停|循环|随机|歌词|列表|队列|音量|Play|Pause|Next|Previous|Shuffle|Repeat"
-                r"|Queue|Volume|Lyrics|Search|Home|Library|Premium|分钟|小时|次播放", re.I)
-# 「曲名 - 歌手」/「曲名 — 歌手」格式
-DASH = re.compile(r"^([^-—·|/]{1,40})\s*[-—·]\s*([^-—·|/]{1,30})$")
-BOOK = re.compile(r"《([^》]{1,40})》")
-# ①a 零级触发:菜单栏 Now-Playing 挂件 —— 菜单栏末项 Help 之后紧跟「曲名 - 歌手」段
-#    (6-07 s1175 实测形态:"Shell Edit View Window Help 一点 - Muyoi SUNDAY, JUN 14")
-#    捕获段到第一个桌面挂件 chrome 词(星期/电量%/No Events)为止,再过 DASH 格式闸。
+
+# ── 结构性模式(格式指纹,非内容判断)────────────────────────────
+# 播放态指纹:进度时间戳对 / 播放控件符号
+FINGER = re.compile(r"\d{1,2}:\d{2}\s*/\s*\d{1,2}:\d{2}|[▶⏸⏭⏮♫♪]")
+# 菜单栏结构:行首 app 名 + 菜单词序(任意 app,不设白名单)
+MENUBAR_ANY = re.compile(r"([A-Z][\w .&-]{1,24}?)\s+(?:File|Shell)\s+Edit\b")
+# 菜单栏 Now-Playing 挂件:菜单栏末项 Help 之后紧跟的段(到桌面挂件 chrome 词为止)
 NOWBAR = re.compile(r"Window\s+Help\s+(.{2,60}?)\s*(?:SUNDAY|MONDAY|TUESDAY|WEDNESDAY"
                     r"|THURSDAY|FRIDAY|SATURDAY|No Events|\d{1,3}%|$)")
-# 文件名/路径样式(窗口标题 "MyMeeting - AnalyticsService.swift" 不是歌名)
-FILEISH = re.compile(r"\.[A-Za-z]{1,6}\b|[/\\~]")
-# ①c Lossless 锚点:Spotify 只给**正在播的曲目**挂 Lossless 徽标,徽标左侧就是曲名段
-#    (6-05 s2770 实测:"…24 MAISONdes，花... （10 years after Ver. 知利子（CV.早見沙織） Lossless K 5:47")
-#    左边界脏(黏着播放列表行):先按省略号切最后一段,再剥行首的列表行号。
+# 「曲名 - 歌手」格式
+DASH = re.compile(r"^([^-—·|/]{1,40})\s*[-—·]\s*([^-—·|/]{1,30})$")
+BOOK = re.compile(r"《([^》]{1,40})》")
+# Spotify 正在播条徽标(徽标只挂当前曲目,结构性锚点)
 LOSSLESS = re.compile(r"([^\n]{4,60}?)\s*Lossless\b")
-# 播放列表表头/行号渣(黏在 Lossless 段左边):逐 token 剥,遇到第一个"像内容"的词停
-JUNK_TOK = re.compile(r"^(?:[\W_]+|\d{1,4}|[A-Za-z]|[A-Za-z]\d{1,2}|[a-z]{2}|[一-鿿]\d"
-                      r"|Title|Add|Mix|Name|details)$")
+# 文件名/路径样式(结构)
+FILEISH = re.compile(r"\.[A-Za-z]{1,6}\b|[/\\~]")
+# 纯符号/裸数字/单字母 token(结构渣)
+JUNK_TOK = re.compile(r"^(?:[\W_]+|\d{1,4}|[A-Za-z]|[A-Za-z]\d{1,2}|[a-z]{2}|[一-鿿]\d)$")
+
+
+def _norm_key(s):
+    """归一:只留字母数字/CJK/假名,casefold。"""
+    return re.sub(r"[^0-9A-Za-z一-鿿ぁ-ヿ]+", "", s).casefold()
+
+
+def good_cand(seg):
+    """「曲名 - 歌手」结构闸:DASH 格式 + 非文件名 + 分隔符不是 ASCII 词内连字符。"""
+    if not DASH.match(seg) or FILEISH.search(seg):
+        return False
+    if re.search(r"[A-Za-z0-9][-—·][A-Za-z0-9]", seg) and not re.search(r"\s[-—·]\s", seg):
+        return False
+    return True
 
 
 def _detrash(seg):
+    """剥播放列表行号/表头渣:取最后一个裸行号之后,再剥左侧结构渣 token。"""
     toks = seg.split()
-    # 播放列表行号/表头永远夹在左侧 chrome 和歌名之间:取最后一个裸行号/表头 token 之后
     last = -1
     for i, t in enumerate(toks):
-        if re.fullmatch(r"\d{1,3}|#|Title|Dismiss", t):
+        if re.fullmatch(r"\d{1,3}|#", t):
             last = i
     if last >= 0:
         toks = toks[last + 1:]
@@ -99,165 +105,99 @@ def lossless_cands(lines):
         if not m:
             continue
         seg = _detrash(re.split(r"\.{3}|…", m.group(1))[-1].strip(" •·|<>="))
-        if 4 <= len(seg) <= 60 and not UI.search(seg) and not FILEISH.search(seg):
+        if 4 <= len(seg) <= 60 and not FILEISH.search(seg):
             out.append(seg)
+        # 段内有时间戳时,最后一个时间戳之后的尾段**另出一个候选**(不替换全段——
+        # 两种排版都存在:「老男孩 5:00 信仰→徽标」尾段是正在播的;
+        # 「愛如潮水 4:33 Credits→徽标」尾段是面板词。哪个对交模型选。)
+        parts_t = re.split(r"\d{1,2}:\d{2}", seg)
+        tail = parts_t[-1].strip(" •·|<>=,,、.。") if len(parts_t) > 1 else ""
+        if 4 <= len(tail) <= 60 and not FILEISH.search(tail):
+            out.append(tail)
     return out
-
-
-def good_cand(seg):
-    """「曲名 - 歌手」结构闸:DASH 格式 + 非文件名 + 分隔符不是 ASCII 词内连字符。"""
-    if not DASH.match(seg) or FILEISH.search(seg) or UI.search(seg):
-        return False
-    if re.search(r"[A-Za-z0-9][-—·][A-Za-z0-9]", seg) and not re.search(r"\s[-—·]\s", seg):
-        return False   # My-Meetin 这种词内连字符,且全串无带空格的真分隔符 → 不是歌名
-    return True
-
-
-def _norm_key(s):
-    """近重复候选归一(OCR 同段多帧微差):只留字母数字/CJK,casefold。"""
-    return re.sub(r"[^0-9A-Za-z一-鿿ぁ-ヿ]+", "", s).casefold()
-
-
-def dedupe(cands):
-    """同 norm 键的变体只留最优代表(优先 DASH 格式,再取最短)。
-    键互为包含且长度差≤4 也算同组(「三 一点 - Muyoi」的前缀渣会改变键)。"""
-    groups = {}
-    for c in cands:
-        k = _norm_key(c)
-        hit = next((g for g in groups if (k in g or g in k) and abs(len(k) - len(g)) <= 4), None)
-        groups.setdefault(hit or k, []).append(c)
-    out = []
-    for g in groups.values():
-        g.sort(key=lambda c: (0 if good_cand(c) else 1, len(c)))
-        out.append(g[0])
-    return out
-
-
-def polish(p):
-    """pick 出口清洗:时间戳/箭头右侧全砍(队列黏连渣),再剥一遍左侧渣 token。
-    圆括号不能当切点:歌名里合法出现(「11 （with Hooleeger）- 隊長」)。"""
-    cut = re.split(r"\d{1,2}:\d{2}|[>＞•｜⑦\[\]［］]", p)[0].strip()
-    if cut:
-        p = cut
-    toks = p.split()
-    # 左剥只碰符号/单字母/CJK黏字母渣,**不碰数字**——行号渣候选层已剥,
-    # 到这里的数字是歌名的一部分(「11 （with Hooleeger）- 隊長」)
-    while len(toks) > 1 and re.fullmatch(r"[\W_]+|[A-Za-z]|[一-鿿][A-Za-z]{1,2}", toks[0]):
-        toks.pop(0)
-    return " ".join(toks)
-
-
-def menubar_player(ocr):
-    """二级触发:返回命中的播放器名(如 'Spotify'),没有则 None。"""
-    for name, pat in MENUBAR.items():
-        if pat.search(ocr):
-            return name
-    return None
-
-
-# ── 背景窗口核真闸 ──────────────────────────────────────────────
-# 闸A:静态桌面噪音(用户点名要杀的类)
-STATIC_NOISE = re.compile(r"桌面|日历|文件夹|图标|挂件|小组件|壁纸|Dock|菜单栏|天气|电量"
-                          r"|通知|提醒|截图|屏保|Bedtime|Reminder")
-# 锚定提取时排除的关系/方位虚词(模型描述背景关系用的词,不算内容证据)
-REL_CJK = {"背景窗口", "标签页", "背景里", "屏幕右侧", "屏幕左侧", "屏幕底部", "屏幕右上",
-           "另一个", "显示多个", "正在进行", "内容涉及", "以及一个", "还有一个"}
-
-
-def session_span(con_p, fids):
-    """会话时间范围(ms):首末帧时间戳。"""
-    if not fids:
-        return None
-    qs = ",".join("?" * len(fids))
-    r = con_p.execute(f"SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM frames "
-                      f"WHERE id IN ({qs})", fids).fetchone()
-    return r if r and r[0] else None
-
-
-def win_inventory(con_p, t0, t1, look_ms=900_000):
-    """窗口清单:会话前 15 分钟到会话结束的 (app, window_name) 集合。
-    与 app 端 ACTIVE APPS 面板同源同法(frames 表聚合,PortraitDBImpl.activeAppsAround)。"""
-    return con_p.execute(
-        "SELECT DISTINCT app_name, COALESCE(window_name,'') FROM frames "
-        "WHERE timestamp_ms BETWEEN ? AND ? AND app_name IS NOT NULL AND app_name != ''",
-        (t0 - look_ms, t1)).fetchall()
-
-
-def window_bg_gate(model_bg, sess_app, inv, ocr):
-    """模型零-shot bg 只当提名,三道闸核真;全过返回裁剪后的 bg,否则 None。"""
-    t = str(model_bg or "").strip()
-    if len(t) < 8 or STATIC_NOISE.search(t):                     # 闸A
-        return None
-    nt = _norm_key(t)
-    sa = _norm_key(sess_app or "")
-    mentioned = {a for a, _ in inv if len(_norm_key(a)) >= 3 and _norm_key(a) in nt}
-    others = {a for a in mentioned if _norm_key(a) != sa}
-    # 同 app 多窗口/标签页(「另一个 Terminal 窗口」「Safari 后台标签页」):
-    # 关系词在场即交给闸C 拿实体说话;纯他述而清单查无此 app 才拒。
-    if not others and not (mentioned and re.search(r"另一|背景|后台|标签页", t)):
-        return None                                              # 闸B 关系核真
-    # 闸C 实体锚定:只认硬实体(ASCII 词≥4 / 引号内原文)。模型的中文叙述
-    # ("背景窗口是…")不算锚点——那是它自己的话,不是屏上的字。
-    # 语料 = 全帧 OCR + 窗口标题(frames.window_name 是系统级真值,
-    # sourcekit-lsp 这类实体常在标题里而不在 OCR 里)。
-    anchors = set(re.findall(r"[A-Za-z][\w.-]{3,}", t))
-    anchors |= {q for q in re.findall(r"[「『\"“]([^」』\"”]{2,30})[」』\"”]", t)}
-    anchors = {a for a in anchors if len(a) >= 3}
-    if len(anchors) < 2:
-        return None
-    corpus = _norm_key(ocr + "\n" + "\n".join(f"{a} {w}" for a, w in inv))
-    hit = sum(1 for a in anchors if _norm_key(a) in corpus)
-    if hit / len(anchors) < 0.6:
-        return None
-    return t[:200]
 
 
 def candidates(ocr):
-    """返回 (触发?, [候选行])。候选逐字来自 OCR 行。"""
+    """返回 (触发?, [(来源, 候选)])。候选逐字来自 OCR。
+    来源标注(修法③):nowbar=挂件结构无歧义;lossless/near=可能黏列表邻曲,
+    必须过模型裁定,禁直采。"""
     lines = [l.strip() for l in re.split(r"[⏎\n]", ocr) if l.strip()]
     cands, seen = [], set()
-    # 零级:菜单栏 Now-Playing 挂件(结构最确定,直接出候选)
+
+    def add(src, seg):
+        if seg and seg not in seen:
+            seen.add(seg)
+            cands.append((src, seg))
+
     for l in lines:
         for m in NOWBAR.finditer(l):
             seg = m.group(1).strip(" •·|·*-—")
-            if good_cand(seg) and seg not in seen:
-                seen.add(seg)
-                cands.append(seg)
-    # Lossless 锚点(Spotify 正在播条,不要求 DASH 格式)
+            if good_cand(seg):
+                add("nowbar", seg)
     for seg in lossless_cands(lines):
-        if seg not in seen:
-            seen.add(seg)
-            cands.append(seg)
+        add("lossless", seg)
     hit = [i for i, l in enumerate(lines) if FINGER.search(l)]
-    if not hit:
-        return bool(cands), cands
     near = set()
     for i in hit:
         near.update(range(max(0, i - 3), min(len(lines), i + 4)))
     for i in sorted(near):
         l = lines[i]
-        if UI.search(l) or FINGER.search(l):
-            # 指纹行自身可能内嵌「曲名 - 歌手 3:39/3:49」:剥掉时间戳后再试
-            l2 = re.sub(r"\d{1,2}:\d{2}\s*/\s*\d{1,2}:\d{2}", "", l).strip()
-            if not l2 or UI.search(l2):
+        if FINGER.search(l):
+            l = re.sub(r"\d{1,2}:\d{2}\s*/\s*\d{1,2}:\d{2}", "", l).strip()
+            if not l:
                 continue
-            l = l2
         for m in BOOK.finditer(l):
-            c = m.group(1).strip()
-            if c and c not in seen:
-                seen.add(c)
-                cands.append(c)
-        if good_cand(l) and l not in seen and 4 <= len(l) <= 60:
-            seen.add(l)
-            cands.append(l)
-    return True, cands[:6]
+            add("near", m.group(1).strip())
+        if good_cand(l) and 4 <= len(l) <= 60:
+            add("near", l)
+    trig = bool(hit) or bool(cands)
+    return trig, cands[:6]
 
 
+def dedupe(cands):
+    """同 norm 键(含互为包含、长度差≤4)的变体只留最优代表;来源取更强的
+    (nowbar > lossless > near)。"""
+    RANK = {"nowbar": 0, "lossless": 1, "near": 2}
+    groups = {}
+    for src, c in cands:
+        k = _norm_key(c)
+        hit = next((g for g in groups if (k in g or g in k) and abs(len(k) - len(g)) <= 4), None)
+        groups.setdefault(hit or k, []).append((src, c))
+    out = []
+    for g in groups.values():
+        g.sort(key=lambda sc: (RANK[sc[0]], 0 if good_cand(sc[1]) else 1, len(sc[1])))
+        out.append(g[0])
+    out.sort(key=lambda sc: len(sc[1]))   # 短而净的排前面呈现给裁定模型
+    return out
+
+
+def plausible_song(p):
+    """pick 出口结构合理性(非内容词表):句读断片和孤立英文单词不可能是可核实歌名。"""
+    if re.search(r"[.。!?]\s", p):                      # 内含句读+空格 = 句子断片
+        return False
+    toks = p.split()
+    if len(toks) == 1 and re.fullmatch(r"[A-Za-z]+", p):  # 单个裸英文词无从核实
+        return False
+    return True
+
+
+def polish(p):
+    """pick 出口清洗(纯结构):时间戳/箭头右切,左剥符号渣(不碰数字/圆括号——
+    都砍伤过真歌名)。"""
+    pieces = [x.strip() for x in re.split(r"\d{1,2}:\d{2}|[>＞•｜⑦\[\]［］]", p)]
+    # 首段优先;首段空(渣在开头,如「［Image #8］ Marigold…」)则取最长段
+    p = pieces[0] if len(pieces[0]) >= 4 else (max(pieces, key=len) or p)
+    toks = p.split()
+    while len(toks) > 1 and re.fullmatch(r"[\W_]+|[A-Za-z]|[一-鿿][A-Za-z]{1,2}", toks[0]):
+        toks.pop(0)
+    return " ".join(toks)
+
+
+# ── 小模型判别(MLX 生产栈;ollama 调试)─────────────────────────
 _MLX = {}
 
 
 def _mlx_gen(prompt):
-    """生产栈文本模型(Qwen3.5-9B-MLX-4bit,与 v4 汇总层同款)做裁定,贴近生产。"""
     if not _MLX:
         from mlx_lm import load
         _MLX["m"], _MLX["t"] = load("mlx-community/Qwen3.5-9B-MLX-4bit")
@@ -275,53 +215,191 @@ def _ollama_gen(prompt):
     req = urllib.request.Request(
         "http://localhost:11434/api/generate",
         json.dumps({"model": "qwen3:4b", "prompt": prompt, "stream": False,
-                    "think": False,   # qwen3 思考模式与 format 强制打架(4b 直接空响应),关掉弃权才正常
-                    "format": {"type": "object", "properties": {"pick": {"type": "integer"}},
-                               "required": ["pick"]},
+                    "think": False,
                     "options": {"num_ctx": 2048, "temperature": 0}}).encode(),
         {"Content-Type": "application/json"})
     return json.loads(urllib.request.urlopen(req, timeout=60).read())["response"]
 
 
-def llm_pick(cands, ctx, engine="mlx"):
-    """小模型选择题:只准回候选编号。失败/不可用/弃权 → None(保守)。"""
-    # 「都不是」列成显式选项:小模型对 -1 这种带外弃权几乎不选,列进去才会选
-    opts = "\n".join(f"{i}. {c}" for i, c in enumerate(cands))
-    opts += f"\n{len(cands)}. 都不是(以上是文件名/界面文字/项目名,没有歌曲名)"
-    # 全帧 OCR 很长,截候选出现处的邻域当上下文(而不是开头 600 字)
-    i = ctx.find(cands[0])
-    if i >= 0:
-        ctx = ctx[max(0, i - 250):i + 350]
-    prompt = (f"屏幕OCR片段:\n{ctx[:600]}\n\n候选:\n{opts}\n\n"
-              f"哪个候选是正在播放的歌曲名(或 曲名-歌手)?文件名/界面文字/菜单项/代码项目名都不算。"
+def _gen(prompt, engine):
+    return _mlx_gen(prompt) if engine == "mlx" else _ollama_gen(prompt)
+
+
+def llm_pick(cands, ocr, engine="mlx"):
+    """选择题:哪个候选是**正在播放**的歌?列表邻曲不算(修法③写进题面)。
+    弃权列为显式选项。失败/弃权 → None(保守)。"""
+    opts = "\n".join(f"{i}. [{src}] {c}" for i, (src, c) in enumerate(cands))
+    opts += f"\n{len(cands)}. 都不是/无法确定"
+    wins = []
+    for pat in (LOSSLESS, FINGER):
+        m = pat.search(ocr)
+        if m:
+            wins.append(ocr[max(0, m.start() - 250):m.start() + 350])
+    ctx = "\n---\n".join(wins) if wins else ocr[:600]
+    prompt = (f"屏幕OCR片段(含播放证据处):\n{ctx}\n\n候选(带提取来源):\n{opts}\n\n"
+              f"哪个候选是**当前正在播放**的歌曲名(或 曲名-歌手)?判断依据:紧邻播放证据"
+              f"(进度条/Lossless徽标/Credits面板/菜单栏Now-Playing挂件);来源标注"
+              f"[nowbar]=菜单栏挂件、[lossless]=紧邻徽标,是强证据;播放列表/队列里的邻曲、"
+              f"文件名、界面文字、项目名都不算。没把握就选最后一项。"
               f'只输出 JSON:{{"pick": 编号}}')
     try:
-        out = _mlx_gen(prompt) if engine == "mlx" else _ollama_gen(prompt)
+        out = _gen(prompt, engine)
         m = re.search(r'"?pick"?\s*[:=]?\s*(-?\d+)', out) or re.search(r"-?\d+", out)
         p = int(m.group(1)) if m else -1
-        return cands[p] if 0 <= p < len(cands) else None
+        return cands[p][1] if 0 <= p < len(cands) else None
     except Exception:
         return None
+
+
+_PLAYER_CACHE = {}
+
+
+def is_player(app, engine):
+    """判别题:app 是不是音乐/媒体播放器(拆掉硬编码播放器字典)。"""
+    if app in _PLAYER_CACHE:
+        return _PLAYER_CACHE[app]
+    try:
+        out = _gen(f'「{app}」是音乐或媒体播放器 app 吗?只输出 JSON:{{"yes": true或false}}',
+                   engine)
+        r = bool(re.search(r'"?yes"?\s*[:=]?\s*true', out, re.I))
+    except Exception:
+        r = False
+    _PLAYER_CACHE[app] = r
+    return r
+
+
+def is_bg_task(clause, engine):
+    """二元判别①:这句是不是「正在进行中的后台窗口/任务」?
+    ⚠️不带 activity 参照——实测参照会把判别带偏(「文件夹不是当前操作」被推成
+    「所以是后台任务」,忘了"必须正在进行中"的前提);单独判时三类样例全对。"""
+    prompt = (f"待判片段:\n「{clause}」\n\n"
+              f"问:这个片段描述的是不是「打开着的后台窗口或后台任务」"
+              f"(背景里挂着的另一个窗口/会话/设置页/标签页,显示着具体内容或在干活)?\n"
+              f"以下情况都回 false:桌面摆设(壁纸/桌面图标/日历挂件/天气/Dock/菜单栏"
+              f"日期,不是窗口);音乐播放或歌词内容;无法判断。\n"
+              f'只输出 JSON:{{"bg_task": true或false}}')
+    try:
+        out = _gen(prompt, engine)
+        return bool(re.search(r'"?bg_task"?\s*[:=]?\s*true', out, re.I))
+    except Exception:
+        return False
+
+
+def is_foreground(clause, activity, engine):
+    """二元判别②(s86 类):片段描述的是不是**用户当前正在前台操作的那个窗口本身**。
+    不问"内容重不重"——v1.2 常把背景也抄进 activity,verbatim 重复不等于前台复述。"""
+    if not activity:
+        return False
+    prompt = (f"甲(用户当前操作):「{activity[:200]}」\n乙(待判片段):「{clause}」\n\n"
+              f"问:乙描述的窗口/任务,是不是用户当前正在前台操作的那一个本身?"
+              f"(是=乙就是甲正在驱动的那个窗口;否=乙是同屏环境里另外挂着的窗口/任务)\n"
+              f'只输出 JSON:{{"fg": true或false}}')
+    try:
+        out = _gen(prompt, engine)
+        return bool(re.search(r'"?fg"?\s*[:=]?\s*true', out, re.I))
+    except Exception:
+        return False
+
+
+# ── 背景窗口子句级核真 ────────────────────────────────────────
+def session_span(con_p, fids):
+    if not fids:
+        return None
+    qs = ",".join("?" * len(fids))
+    r = con_p.execute(f"SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM frames "
+                      f"WHERE id IN ({qs})", fids).fetchone()
+    return r if r and r[0] else None
+
+
+def win_inventory(con_p, t0, t1, look_ms=900_000):
+    """窗口清单:会话前 15 分钟到结束的 (app, window_name)。
+    与 app 端 ACTIVE APPS 面板同源同法(frames 聚合,activeAppsAround)。"""
+    return con_p.execute(
+        "SELECT DISTINCT app_name, COALESCE(window_name,'') FROM frames "
+        "WHERE timestamp_ms BETWEEN ? AND ? AND app_name IS NOT NULL AND app_name != ''",
+        (t0 - look_ms, t1)).fetchall()
+
+
+def _overlap(clause, activity, n=8):
+    """结构性前台复述检测:子句归一化 n-gram 在 activity 里的包含率(修法②)。"""
+    a, b = _norm_key(clause), _norm_key(activity)
+    grams = [a[i:i + n] for i in range(0, max(0, len(a) - n), 2)]
+    if not grams:
+        return 0.0
+    return sum(1 for g in grams if g in b) / len(grams)
+
+
+def window_bg_gate(model_bg, activity, inv, ocr, engine):
+    """子句级核真(修法①):逐子句过 结构闸(锚定/清单/复述) + 模型判别(B 类才留)。"""
+    t = str(model_bg or "").strip()
+    if len(t) < 8:
+        return None
+    corpus = _norm_key(ocr + "\n" + "\n".join(f"{a} {w}" for a, w in inv))
+    inv_norm = {_norm_key(a) for a, _ in inv if len(_norm_key(a)) >= 3}
+    keep = []
+    for clause in re.split(r"[;；。]\s*", t):
+        clause = clause.strip(" ,，、")
+        if len(clause) < 8:
+            continue
+
+        # 结构闸:硬实体锚定(ASCII 词/引号原文;模型中文叙述不算锚点)
+        anchors = set(re.findall(r"[A-Za-z][\w.-]{3,}", clause))
+        anchors |= set(re.findall(r"[「『\"“]([^」』\"”]{2,30})[」』\"”]", clause))
+        anchors = {a for a in anchors if len(a) >= 3}
+        anchored = anchors and sum(1 for a in anchors if _norm_key(a) in corpus) / len(anchors) >= 0.6
+        # 或:子句提到的 app 在窗口清单里(关系可查证)
+        nc = _norm_key(clause)
+        in_inv = any(a in nc for a in inv_norm)
+        if not anchored and not in_inv:
+            continue
+        if is_bg_task(clause, engine):
+            # 整句是后台任务 → 整句保留,不絮碎(逗号下钻会把连贯长句切成
+            # 无主语碎片逐片误杀——s432 微信场景就是这么丢的)
+            if is_foreground(clause, activity, engine):      # s86 类:前台操作本身
+                continue
+            keep.append(clause)
+        elif re.search(r"[,，]", clause):
+            # 整句不是 → 逗号级**抢救**:混合句里埋着的真后台部分
+            # (「桌面日历…,背景窗口挂着X」——判决点名的误杀主因)
+            subs = []
+            for s2 in re.split(r"[,，]", clause):
+                s2 = s2.strip(" ,，、")
+                if len(s2) < 6:
+                    continue
+                if is_bg_task(s2, engine):
+                    subs.append(s2)
+            if subs and not is_foreground(",".join(subs), activity, engine):
+                keep.append(",".join(subs))
+    if not keep:
+        return None
+    out = ";".join(keep)
+    if len(out) > 200:                                 # 修法④:句边界截断,不腰斩词
+        cut = out[:200]
+        out = cut[:max(cut.rfind(";"), cut.rfind(","), cut.rfind(","))] or cut
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", required=True)
     ap.add_argument("--suffix", default="b")
-    ap.add_argument("--jsonl", help="把音乐 bg 写回此 jsonl(原 bg 为空才写)")
-    ap.add_argument("--llm", action="store_true", help="多候选时用小模型选择(默认只采唯一候选)")
+    ap.add_argument("--jsonl", help="闸语义写回:过闸的覆写,其余清空")
+    ap.add_argument("--llm", action="store_true", help="启用小模型判别/选择(不开则只出 nowbar 直采)")
     ap.add_argument("--engine", default="mlx", choices=["mlx", "ollama"],
-                    help="裁定引擎:mlx=生产栈 Qwen3.5-9B-4bit(默认);ollama=qwen3:4b(调试)")
+                    help="判别引擎:mlx=生产栈 Qwen3.5-9B-4bit(默认);ollama=qwen3:4b(调试)")
     args = ap.parse_args()
 
     man = json.load(open(f"/tmp/vision_v4{args.suffix}_{args.day}/v4_manifest.json"))
     con_l = labdb.connect()
     con_p = sqlite3.connect(f"file:{source.PORTRAIT_DB}?mode=ro", uri=True)
     rows = bg_by_key = None
+    act_by_key = {}
     if args.jsonl:
         rows = [json.loads(l) for l in open(args.jsonl, encoding="utf-8")]
         bg_by_key = {str(r["key"]): (r["digest"].get("background") or "")
                      for r in rows if not r.get("stub")}
+        act_by_key = {str(r["key"]): str(r["digest"].get("activity") or "")
+                      for r in rows if not r.get("stub")}
     out = {}
     n_trig = n_menu = n_win = 0
     for k, b in man.items():
@@ -329,49 +407,50 @@ def main():
         ocr = session_ocr(con_p, fids)
         trig, cands = candidates(ocr)
         music = None
-        if trig:
+        if trig and cands:
             n_trig += 1
-            cands = dedupe(cands)
+            cands = dedupe(cands)[:6]
             pick = None
-            if len(cands) == 1:
-                pick = cands[0]
-            elif len(cands) > 1 and args.llm:
-                pick = llm_pick(cands, ocr, args.engine)
-            if pick and pick in ocr:              # verbatim 铁闸(polish 只取其子串,不破闸)
+            if len(cands) == 1 and cands[0][0] == "nowbar":
+                pick = cands[0][1]                    # 挂件结构无歧义,唯一时直采
+            elif args.llm:
+                pick = llm_pick(cands, ocr, args.engine)   # 其余一律模型裁定(修法③)
+            if pick and pick in ocr:                  # verbatim 铁闸
                 pick = polish(pick)
+                if not plausible_song(pick):
+                    pick = None
+            else:
+                pick = None
+            if pick:
                 music = f"后台正在播放:{pick}"
-                print(f"  s{k} [{b.get('app')}] ♪ {pick}"
-                      + (f"  (候选{len(cands)})" if len(cands) > 1 else ""))
+                print(f"  s{k} [{b.get('app')}] ♪ {pick}  (候选{len(cands)})")
             elif cands:
-                print(f"  s{k} [{b.get('app')}] 一级触发但未裁定,候选: {cands}")
-        if music is None:
-            # 二级:菜单栏归属但歌名没裁定 → 降级产出(诚实上限,不猜歌名)。
-            # 有候选=播放态确凿(进度条/正在播条真在屏上),只是歌名认不出;无候选=只知在前台。
-            player = menubar_player(ocr)
+                print(f"  s{k} [{b.get('app')}] 触发未裁定,候选: {[c for _, c in cands]}")
+        if music is None and args.llm:
+            # 降级:菜单栏结构捕获任意 app,是不是播放器交模型判别(拆白名单)
+            mapps = {m.group(1).strip() for m in MENUBAR_ANY.finditer(ocr)}
+            player = next((a for a in mapps if is_player(a, args.engine)), None)
             if player:
                 n_menu += 1
                 music = (f"{player} 在播放(歌名未能辨认)" if trig and cands
                          else f"{player} 在前台运行(屏幕未显示歌名)")
-                print(f"  s{k} [{b.get('app')}] ▸ 菜单栏降级:{player}"
-                      + ("(有候选未裁定)" if trig and cands else ""))
-        # 背景窗口通道:模型零-shot bg 提名 → 三闸核真
+                print(f"  s{k} [{b.get('app')}] ▸ 菜单栏降级:{player}")
         wbg = None
-        if bg_by_key and bg_by_key.get(k):
+        if bg_by_key and bg_by_key.get(k) and args.llm:
             span = session_span(con_p, fids)
             if span:
                 inv = win_inventory(con_p, span[0], span[1])
-                wbg = window_bg_gate(bg_by_key[k], b.get("app"), inv, ocr)
+                wbg = window_bg_gate(bg_by_key[k], act_by_key.get(k, ""), inv, ocr,
+                                     args.engine)
                 if wbg:
                     n_win += 1
-                    print(f"  s{k} [{b.get('app')}] ▣ 背景窗口核真: {wbg[:80]}")
+                    print(f"  s{k} [{b.get('app')}] ▣ 背景窗口(子句级): {wbg[:80]}")
         parts = [p for p in (music, wbg) if p]
         if parts:
             out[k] = ";".join(parts)
-    print(f"[bg_music] {args.day}: 一级触发 {n_trig} / 菜单栏降级 {n_menu} / 窗口核真 {n_win}"
+    print(f"[bg_music] {args.day}: 音乐触发 {n_trig} / 菜单栏降级 {n_menu} / 窗口核真 {n_win}"
           f" / 共 {len(man)},裁定 {len(out)}")
     if args.jsonl:
-        # bg 闸语义:bg 只能来自确定性通道(音乐提取/窗口核真)。触发的覆写,
-        # 没过闸的清空(v1.2 没训过 bg 却会零-shot 发挥,大头是桌面静态噪音)。
         n_w = n_wipe = 0
         for r in rows:
             k = str(r["key"])
@@ -386,7 +465,7 @@ def main():
         with open(args.jsonl, "w", encoding="utf-8") as f:
             for r in rows:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        print(f"写回 {n_w} 条,清掉未触发的模型 bg {n_wipe} 条 → {args.jsonl}")
+        print(f"写回 {n_w} 条,清掉未过闸的模型 bg {n_wipe} 条 → {args.jsonl}")
 
 
 main()
