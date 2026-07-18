@@ -27,7 +27,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", required=True)
     ap.add_argument("--suffix", default="b")
-    ap.add_argument("--per-day", type=int, default=110)
+    ap.add_argument("--per-day", type=int, default=150)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -36,20 +36,63 @@ def main():
     con_p = sqlite3.connect(f"file:{source.PORTRAIT_DB}?mode=ro", uri=True)
     frames_dir = f"/tmp/vision_frames_v4{args.suffix}_{args.day}"
 
-    # 分层:app × OCR 长度桶,层内按 key 序等距取(确定性)
+    # 采样=定向特殊情况+领域多样性+比例分层(用户 2026-07-18:挑不同领域+特殊情况,
+    # 强泛化)。选择器全是结构信号(采样用途,非内容判断)。
+    import re as _re
+    MB = _re.compile(r"([A-Z][\w .&-]{1,24}?)\s+(?:File|Shell)\s+Edit\b")
+    MUS = _re.compile(r"\d{1,2}:\d{2}\s*/\s*\d{1,2}:\d{2}|Lossless|[▶⏸♫♪]")
+
     def bucket(n):
         return 0 if n < 1000 else 1 if n < 3000 else 2 if n < 6000 else 3
 
+    app_freq = collections.Counter(b.get("app") for b in man.values())
+    picked, why = [], {}
+
+    def take(k, tag):
+        if k not in why:
+            why[k] = tag
+            picked.append(k)
+
+    for k, b in sorted(man.items(), key=lambda kv: int(kv[0])):
+        ocr = b.get("ocr_union") or ""
+        mb_apps = {m.group(1).strip() for m in MB.finditer(ocr)}
+        app = str(b.get("app") or "")
+        if mb_apps and app and all(app.lower() not in a.lower() and a.lower() not in app.lower()
+                                   for a in mb_apps):
+            take(k, "trap_attr")        # 归属陷阱:菜单栏 app 与归属不一致
+        if MUS.search(ocr):
+            take(k, "music")            # 音乐证据在屏(bg 触发条件化的正例源)
+        if app_freq[b.get("app")] <= 3:
+            take(k, "rare_app")         # 稀有 app=领域多样性
+        if len(ocr) < 800:
+            take(k, "thin_ocr")         # 超薄 OCR(跑飞高危区)
+        if (b.get("total_frames") or 0) >= 15:
+            take(k, "long_sess")        # 长会话(多帧时间线)
+    # 各特殊类封顶,防单类淹没
+    cap = max(8, args.per_day // 6)
+    cnt = collections.Counter()
+    kept = []
+    for k in picked:
+        if cnt[why[k]] < cap:
+            cnt[why[k]] += 1
+            kept.append(k)
+    picked = kept
+    # 剩余配额:比例分层补齐
     strata = collections.defaultdict(list)
     for k, b in sorted(man.items(), key=lambda kv: int(kv[0])):
+        if k in why:
+            continue
         strata[(b.get("app"), bucket(len(b.get("ocr_union") or "")))].append(k)
-    total = sum(len(v) for v in strata.values())
-    picked = []
+    remain = max(0, args.per_day - len(picked))
+    total = sum(len(v) for v in strata.values()) or 1
     for s, ks in sorted(strata.items()):
-        quota = max(1, round(args.per_day * len(ks) / total))
+        quota = max(1, round(remain * len(ks) / total))
         step = max(1, len(ks) // quota)
-        picked += ks[::step][:quota]
+        for k in ks[::step][:quota]:
+            take(k, "strata")
+    picked = picked + [k for k in why if why[k] == "strata"]
     picked = picked[:args.per_day]
+    print("[t3prep] 采样构成:", dict(collections.Counter(why[k] for k in picked)))
 
     os.makedirs(args.out, exist_ok=True)
     for k in picked:
