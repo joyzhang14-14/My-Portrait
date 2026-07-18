@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Memories 区 text ⇄ canvas 模式切换钮(需求 §3.1)。
+/// Memories 区 text ⇄ Neural Graph 模式切换钮。
 /// 自绘:两段各为「图标 + 文字」,选中段被一个圆角长方形框住,
 /// 切换时用 spring 动画滑到另一段(matchedGeometryEffect)。
 struct MemoryViewModeToggle: View {
@@ -9,7 +9,7 @@ struct MemoryViewModeToggle: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            segment(.canvas, icon: "atom", label: "canvas")
+            segment(.neuralGraph, icon: "atom", label: "neural graph")
             segment(.text, icon: "list.bullet", label: "text")
         }
     }

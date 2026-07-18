@@ -128,7 +128,7 @@ struct GraphRootView: View {
         GeometryReader { geo in
             ZStack(alignment: .topTrailing) {
                 if let engine {
-                    GraphCanvasView(scene: scene,
+                    GraphRendererView(scene: scene,
                                     engine: engine,
                                     paused: renderPaused,
                                     pulses: pulses,
