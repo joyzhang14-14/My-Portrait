@@ -1,13 +1,16 @@
-"""background 音乐字段的确定性提取(+可选小模型辅助判断)。2026-07-17 用户定案。
+"""background 字段的确定性构造闸(音乐提取 + 背景窗口核真)。2026-07-17 用户定案。
 
-三连败定论后 bg 字段的免训练落法:判断挪出模型、进代码。
-  ①触发(确定性):OCR 命中播放器指纹(进度时间戳/Now Playing/播放控件)才处理,否则 bg 留空。
-  ②候选(确定性):指纹行邻近的「曲名 - 歌手」格式行 / 《曲名》/ 短独立行,全部逐字来自 OCR。
-  ③裁定:唯一候选直接采;多候选时小模型做**选择题**(qwen3:4b via ollama,只准回
-    候选编号或 none)—— 模型无生成自由度,结构上不可能编造歌名。歌词原文丢弃(用户定案)。
+三连败定论后 bg 字段的免训练落法:判断挪出模型、进代码。两条通道:
+【音乐】①触发(确定性):播放器指纹/菜单栏挂件/Lossless 锚点;②候选逐字来自 OCR;
+  ③裁定:唯一候选直取,多候选小模型选择题(MLX Qwen3.5-9B-4bit,只回编号)。歌词丢弃。
+【背景窗口】模型零-shot 的 bg 描述只当提名,三道确定性闸核真(2026-07-17 用户拍板):
+  闸A 静态桌面噪音黑名单;闸B 关系核真——提到的 app 必须真出现在窗口清单里
+  (frames 表每帧都记 app_name/window_name,会话前后聚合即窗口清单,与 app 端
+  ACTIVE APPS 面板同源同法),且不能只是会话自身前台;闸C 实体锚定——内容词
+  逐字率过线才收。三闸全过才保留,否则清空。
 
 用法: python bg_music.py --day 2026-06-05 --suffix b [--jsonl /tmp/xxx.jsonl] [--llm]
-  默认干跑打印;--jsonl 指定时把 bg 写回该文件对应行(仅音乐类,原 bg 为空才写)。
+  默认干跑打印;--jsonl 指定时闸语义写回:触发/核真的覆写,其余清空。
 """
 import argparse
 import json
@@ -22,16 +25,20 @@ import labdb  # noqa: E402
 import source  # noqa: E402
 
 
-def session_ocr(con_l, con_p, b):
-    """读会话**全帧** OCR(parts→frame_ids→frames.full_text)。
-    不继承 v12_day 的选帧预算:确定性扫描不吃上下文,证据帧被选帧丢掉会漏歌
-    (6-05 s2770 的正在播条就在被丢的帧里)。"""
+def session_fids(con_l, b):
+    """会话全部帧 id(parts→raw_sessions.frame_ids)。"""
     fids = []
     for pid in b["parts"]:
         r = con_l.execute("SELECT frame_ids FROM raw_sessions WHERE id=:id",
                           {"id": pid}).fetchone()
         if r:
             fids += json.loads(r[0])
+    return fids
+
+
+def session_ocr(con_p, fids):
+    """读会话**全帧** OCR。不继承 v12_day 的选帧预算:确定性扫描不吃上下文,
+    证据帧被选帧丢掉会漏歌(6-05 s2770 的正在播条就在被丢的帧里)。"""
     texts = []
     for fid in fids:
         row = con_p.execute("SELECT COALESCE(full_text,'') FROM frames WHERE id=:id",
@@ -148,6 +155,63 @@ def menubar_player(ocr):
     return None
 
 
+# ── 背景窗口核真闸 ──────────────────────────────────────────────
+# 闸A:静态桌面噪音(用户点名要杀的类)
+STATIC_NOISE = re.compile(r"桌面|日历|文件夹|图标|挂件|小组件|壁纸|Dock|菜单栏|天气|电量"
+                          r"|通知|提醒|截图|屏保|Bedtime|Reminder")
+# 锚定提取时排除的关系/方位虚词(模型描述背景关系用的词,不算内容证据)
+REL_CJK = {"背景窗口", "标签页", "背景里", "屏幕右侧", "屏幕左侧", "屏幕底部", "屏幕右上",
+           "另一个", "显示多个", "正在进行", "内容涉及", "以及一个", "还有一个"}
+
+
+def session_span(con_p, fids):
+    """会话时间范围(ms):首末帧时间戳。"""
+    if not fids:
+        return None
+    qs = ",".join("?" * len(fids))
+    r = con_p.execute(f"SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM frames "
+                      f"WHERE id IN ({qs})", fids).fetchone()
+    return r if r and r[0] else None
+
+
+def win_inventory(con_p, t0, t1, look_ms=900_000):
+    """窗口清单:会话前 15 分钟到会话结束的 (app, window_name) 集合。
+    与 app 端 ACTIVE APPS 面板同源同法(frames 表聚合,PortraitDBImpl.activeAppsAround)。"""
+    return con_p.execute(
+        "SELECT DISTINCT app_name, COALESCE(window_name,'') FROM frames "
+        "WHERE timestamp_ms BETWEEN ? AND ? AND app_name IS NOT NULL AND app_name != ''",
+        (t0 - look_ms, t1)).fetchall()
+
+
+def window_bg_gate(model_bg, sess_app, inv, ocr):
+    """模型零-shot bg 只当提名,三道闸核真;全过返回裁剪后的 bg,否则 None。"""
+    t = str(model_bg or "").strip()
+    if len(t) < 8 or STATIC_NOISE.search(t):                     # 闸A
+        return None
+    nt = _norm_key(t)
+    sa = _norm_key(sess_app or "")
+    mentioned = {a for a, _ in inv if len(_norm_key(a)) >= 3 and _norm_key(a) in nt}
+    others = {a for a in mentioned if _norm_key(a) != sa}
+    # 同 app 多窗口/标签页(「另一个 Terminal 窗口」「Safari 后台标签页」):
+    # 关系词在场即交给闸C 拿实体说话;纯他述而清单查无此 app 才拒。
+    if not others and not (mentioned and re.search(r"另一|背景|后台|标签页", t)):
+        return None                                              # 闸B 关系核真
+    # 闸C 实体锚定:只认硬实体(ASCII 词≥4 / 引号内原文)。模型的中文叙述
+    # ("背景窗口是…")不算锚点——那是它自己的话,不是屏上的字。
+    # 语料 = 全帧 OCR + 窗口标题(frames.window_name 是系统级真值,
+    # sourcekit-lsp 这类实体常在标题里而不在 OCR 里)。
+    anchors = set(re.findall(r"[A-Za-z][\w.-]{3,}", t))
+    anchors |= {q for q in re.findall(r"[「『\"“]([^」』\"”]{2,30})[」』\"”]", t)}
+    anchors = {a for a in anchors if len(a) >= 3}
+    if len(anchors) < 2:
+        return None
+    corpus = _norm_key(ocr + "\n" + "\n".join(f"{a} {w}" for a, w in inv))
+    hit = sum(1 for a in anchors if _norm_key(a) in corpus)
+    if hit / len(anchors) < 0.6:
+        return None
+    return t[:200]
+
+
 def candidates(ocr):
     """返回 (触发?, [候选行])。候选逐字来自 OCR 行。"""
     lines = [l.strip() for l in re.split(r"[⏎\n]", ocr) if l.strip()]
@@ -253,12 +317,18 @@ def main():
     man = json.load(open(f"/tmp/vision_v4{args.suffix}_{args.day}/v4_manifest.json"))
     con_l = labdb.connect()
     con_p = sqlite3.connect(f"file:{source.PORTRAIT_DB}?mode=ro", uri=True)
+    rows = bg_by_key = None
+    if args.jsonl:
+        rows = [json.loads(l) for l in open(args.jsonl, encoding="utf-8")]
+        bg_by_key = {str(r["key"]): (r["digest"].get("background") or "")
+                     for r in rows if not r.get("stub")}
     out = {}
-    n_trig = 0
-    n_menu = 0
+    n_trig = n_menu = n_win = 0
     for k, b in man.items():
-        ocr = session_ocr(con_l, con_p, b)
+        fids = session_fids(con_l, b)
+        ocr = session_ocr(con_p, fids)
         trig, cands = candidates(ocr)
+        music = None
         if trig:
             n_trig += 1
             cands = dedupe(cands)
@@ -269,26 +339,39 @@ def main():
                 pick = llm_pick(cands, ocr, args.engine)
             if pick and pick in ocr:              # verbatim 铁闸(polish 只取其子串,不破闸)
                 pick = polish(pick)
-                out[k] = f"后台正在播放:{pick}"
+                music = f"后台正在播放:{pick}"
                 print(f"  s{k} [{b.get('app')}] ♪ {pick}"
                       + (f"  (候选{len(cands)})" if len(cands) > 1 else ""))
-                continue
             elif cands:
                 print(f"  s{k} [{b.get('app')}] 一级触发但未裁定,候选: {cands}")
-        # 二级:菜单栏归属但歌名没裁定 → 降级产出(诚实上限,不猜歌名)。
-        # 有候选=播放态确凿(进度条/正在播条真在屏上),只是歌名认不出;无候选=只知在前台。
-        player = menubar_player(ocr)
-        if player:
-            n_menu += 1
-            out[k] = (f"{player} 在播放(歌名未能辨认)" if trig and cands
-                      else f"{player} 在前台运行(屏幕未显示歌名)")
-            print(f"  s{k} [{b.get('app')}] ▸ 菜单栏降级:{player}"
-                  + ("(有候选未裁定)" if trig and cands else ""))
-    print(f"[bg_music] {args.day}: 一级触发 {n_trig} / 菜单栏降级 {n_menu} / 共 {len(man)},裁定 {len(out)}")
+        if music is None:
+            # 二级:菜单栏归属但歌名没裁定 → 降级产出(诚实上限,不猜歌名)。
+            # 有候选=播放态确凿(进度条/正在播条真在屏上),只是歌名认不出;无候选=只知在前台。
+            player = menubar_player(ocr)
+            if player:
+                n_menu += 1
+                music = (f"{player} 在播放(歌名未能辨认)" if trig and cands
+                         else f"{player} 在前台运行(屏幕未显示歌名)")
+                print(f"  s{k} [{b.get('app')}] ▸ 菜单栏降级:{player}"
+                      + ("(有候选未裁定)" if trig and cands else ""))
+        # 背景窗口通道:模型零-shot bg 提名 → 三闸核真
+        wbg = None
+        if bg_by_key and bg_by_key.get(k):
+            span = session_span(con_p, fids)
+            if span:
+                inv = win_inventory(con_p, span[0], span[1])
+                wbg = window_bg_gate(bg_by_key[k], b.get("app"), inv, ocr)
+                if wbg:
+                    n_win += 1
+                    print(f"  s{k} [{b.get('app')}] ▣ 背景窗口核真: {wbg[:80]}")
+        parts = [p for p in (music, wbg) if p]
+        if parts:
+            out[k] = ";".join(parts)
+    print(f"[bg_music] {args.day}: 一级触发 {n_trig} / 菜单栏降级 {n_menu} / 窗口核真 {n_win}"
+          f" / 共 {len(man)},裁定 {len(out)}")
     if args.jsonl:
-        # bg 闸语义:bg 只能来自确定性通道。触发的覆写(模型零-shot 填的噪音让位),
-        # 没触发的清空(v1.2 没训过 bg 却会自己发挥,填的全是桌面日历/文件夹静态噪音)。
-        rows = [json.loads(l) for l in open(args.jsonl, encoding="utf-8")]
+        # bg 闸语义:bg 只能来自确定性通道(音乐提取/窗口核真)。触发的覆写,
+        # 没过闸的清空(v1.2 没训过 bg 却会零-shot 发挥,大头是桌面静态噪音)。
         n_w = n_wipe = 0
         for r in rows:
             k = str(r["key"])
