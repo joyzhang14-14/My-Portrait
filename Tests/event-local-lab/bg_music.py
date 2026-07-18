@@ -372,10 +372,11 @@ def window_bg_gate(model_bg, activity, inv, ocr, engine):
                 keep.append(",".join(subs))
     if not keep:
         return None
-    out = ";".join(keep)
-    if len(out) > 200:                                 # 修法④:句边界截断,不腰斩词
-        cut = out[:200]
-        out = cut[:max(cut.rfind(";"), cut.rfind(","), cut.rfind(","))] or cut
+    out = keep[0][:250]
+    for c in keep[1:]:                    # 超长时整句丢弃,绝不词中硬断(判决点名)
+        if len(out) + len(c) + 1 > 200:
+            break
+        out += ";" + c
     return out
 
 
@@ -422,7 +423,8 @@ def main():
             else:
                 pick = None
             if pick:
-                music = f"后台正在播放:{pick}"
+                fg_player = args.llm and is_player(str(b.get("app") or ""), args.engine)
+                music = (f"正在播放:{pick}" if fg_player else f"后台正在播放:{pick}")
                 print(f"  s{k} [{b.get('app')}] ♪ {pick}  (候选{len(cands)})")
             elif cands:
                 print(f"  s{k} [{b.get('app')}] 触发未裁定,候选: {[c for _, c in cands]}")
