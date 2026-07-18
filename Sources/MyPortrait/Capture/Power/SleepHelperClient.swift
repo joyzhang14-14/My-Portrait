@@ -37,6 +37,13 @@ final class SleepHelperClient {
 
     var status: SMAppService.Status { service.status }
 
+    /// 已注册**且**被用户在系统设置里批准 —— 这是「合盖保持运行是否生效」的**唯一真相**
+    /// (不再有 config 开关;onboarding 那行的状态灯读这个)。
+    var isApproved: Bool { service.status == .enabled }
+
+    /// 跳系统设置 ▸ 登录项与扩展(用户批准 / 撤销的地方)。
+    func openSystemSettings() { SMAppService.openSystemSettingsLoginItems() }
+
     // MARK: - 注册 / 注销(General 设置开关驱动)
 
     /// 开关打开:注册 daemon。首次 status 变 .requiresApproval → 跳系统设置引导批准
@@ -65,11 +72,12 @@ final class SleepHelperClient {
     /// app 启动时调一次的**自愈**:开关开着就 `register()` 刷新注册,让 rebuild 后
     /// 变化的 cdhash 重新进 SMAppService 的 LWCR —— 否则自签名每次重编都让注册陈旧、
     /// launchd 拒启 helper(EX_CONFIG / spawn failed)、"开关开着却悄悄失效"。
-    /// 无副作用:① 开关没开 → 直接返回,不注册;② **不弹系统设置**(首次批准仍由
-    /// enable() 负责);③ **不 unregister**(只 register,幂等;稳定 build 上 no-op,
-    /// 已批准的不需重新批准)。
+    /// 无副作用:① **没注册过的用户直接返回**,不偷偷把 root daemon 注册进去(替代了
+    /// 老的 config 开关闸门 —— 现在唯一真相就是注册/批准状态本身);② **不弹系统设置**
+    /// (首次批准由 onboarding 里的 enable() 负责);③ **不 unregister**(只 register,
+    /// 幂等;稳定 build 上 no-op,已批准的不需重新批准)。
     func syncRegistration() {
-        guard ConfigStore.shared.current.general.keepAwakeLidClosed else { return }
+        guard service.status != .notRegistered else { return }
         do {
             try service.register()
             log.info("launch sync register OK, status=\(self.statusName, privacy: .public)")
