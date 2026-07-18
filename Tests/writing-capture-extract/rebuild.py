@@ -403,6 +403,18 @@ def paste_pressed(X, ev):
         {"b": ev['bundle'], "a": (prev + 1) if prev is not None else 0,
          "c": (ev.get('ended_at') or st) + 500}).fetchone() is not None
 
+def _words_in_keys(X, ev, words, t0, t1):
+    """包含性判据:文本里的 ascii 词(≥4 字母)必须出现在记录附近的键流里(同 bundle,
+    前扩 10min 盖住组内更早事件的键)。缺一半以上 → 这些字不是这批键打的。"""
+    rows = X.con.execute(
+        "SELECT char FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
+        "AND is_backspace=0 AND char IS NOT NULL AND (modifiers&7)=0",
+        {"b": ev['bundle'], "a": (t0 or ev.get('started_at') or 0) - 600_000,
+         "c": (t1 or ev.get('ended_at') or 0) + 2000}).fetchall()
+    kw = ''.join(c for (c,) in rows).lower()
+    miss = sum(1 for w in words if w.lower() not in kw)
+    return miss <= len(words) // 2
+
 TRIM_MIN_LINE = 5        # 强背书回落档:2~4 字的行在几百字 commit 流里 LCS 必然撞上('> ok'/'join')
 TRIM_COVER = 0.8         # 强背书回落档的行级 cover 门槛(只在字母对账不过时启用,见 commit_backed)
 
@@ -447,7 +459,7 @@ def paste_minor(X, t, cs):
 
 def commit_backed(X, t, cs):
     """闸C(用户裁定 2026-07-15:**严格 30 闸,一切以击键为主**,不做任何内容/形态硬编码)。
-    只对**粘贴占多数**的记录开火(少数派在 gate 里被 paste_minor 整条放行,到不了这儿):
+    (2026-07-17 用户收紧后 paste_minor 整条放行已撤,armed 记录一律走这里的段级手术):
 
     行规则只有一条 —— **未背书字符数 ≤ PASTE_MAX 留,超了裁**(见 _line_backing):
       · 全手打的行:未背书≈0 → 留(IME 反复改写 LCS 只有 0.79 也不怕,通道行案)
@@ -457,13 +469,63 @@ def commit_backed(X, t, cs):
     **多数背书守卫(零新常数)**:留下来的行里未背书量仍超背书量 → 纯粘贴射程(回看旧成品 md
     的记录只有「- 内容不全」5 字是打的,文档短行每行 ≤30 全过线,`https://…` 打穿 P0 的教训)
     → 回落到只留强背书行(块cover≥TRIM_COVER 且去空格 ≥TRIM_MIN_LINE 字)。"""
-    rows = [(ln, n, u) for ln, n, u in _line_backing(X, t, cs) if u is not None and u <= PASTE_MAX]
-    backed_m = sum(n - u for _, n, u in rows)
-    unbacked_m = sum(u for _, _, u in rows)
+    # 行内段级手术(用户裁定 2026-07-17:**超 30 的粘贴段裁,≤30 的留**——即便跟着手打正文):
+    # 无背书的**连续段** >PASTE_MAX 从行里抠掉,手打部分和 ≤30 的短段保留。段级比整行连坐准:
+    # ev598 阶段5 行(150 字手打+行尾 40 字 URL)只抠 URL 不再连坐;ev888 AX 缺页行的散碎
+    # 未背书块(各 ≤30)不受伤。
+    kept_lines = []
+    for ln, n, u in _line_backing(X, t, cs):
+        if u is None:
+            continue
+        if u <= PASTE_MAX:
+            kept_lines.append((ln, n, u)); continue
+        if n and (1 - u / n) < 0.25:
+            continue    # 背书率<1/4 的行 = 基本不是这批键打的(yt 行 ~0.1,靠 3 字符偶然岛
+                        # 把长无背书段切碎混过手术的路堵死);真打的 AX 缺页行 ≥0.3 不受伤
+        kept_lines.append((_cut_spans(X, ln, cs), n, u))
+    rows = [(ln, n, u) for ln, n, u in kept_lines if cv(ln)]
+    backed_m = sum(max(0, n - u) for _, n, u in rows)
+    unbacked_m = sum(min(n, u) for _, _, u in rows)
     if unbacked_m > backed_m:
         rows = [(ln, n, u) for ln, n, u in rows
                 if n >= TRIM_MIN_LINE and (1 - u / n) >= TRIM_COVER]
     return '\n'.join(ln for ln, _, _ in rows).strip()
+
+def _cut_spans(X, ln, cs):
+    """把行里 >PASTE_MAX 的**无背书连续段**抠掉(去空格块对齐后映射回原文)。
+    空白字符跟随邻居:两侧都被抠 → 一起抠。"""
+    import difflib as _dl
+    cs_ns = re.sub(r'\s', '', cs or '')
+    orig = list(ln)
+    idx = [i for i, ch in enumerate(orig) if not ch.isspace()]
+    a = ''.join(orig[i] for i in idx)
+    if not a or not cs_ns:
+        return '' if len(a) > PASTE_MAX else ln
+    covered = [False] * len(a)
+    for b in _dl.SequenceMatcher(None, a, cs_ns, autojunk=False).get_matching_blocks():
+        seg = a[b.a:b.a + b.size]
+        if b.size >= 3 or (b.size == 2 and HAN.search(seg)):
+            for k in range(b.a, b.a + b.size): covered[k] = True
+    drop = set()
+    i = 0
+    while i < len(a):
+        if covered[i]:
+            i += 1; continue
+        j = i
+        while j < len(a) and not covered[j]: j += 1
+        if j - i > PASTE_MAX:
+            for k in range(i, j): drop.add(idx[k])
+        i = j
+    out = []
+    for i, ch in enumerate(orig):
+        if ch.isspace():
+            out.append((i, ch))                       # 空白先留,下面按邻居清
+        elif i not in drop:
+            out.append((i, ch))
+    keep_pos = {i for i, ch in out if not ch.isspace()}
+    res = ''.join(ch for i, ch in out
+                  if not ch.isspace() or any(p in keep_pos for p in (i - 1, i + 1)))
+    return res.strip()
 
 # ---- ts 感知:每条**真发送** + 它的击键时间窗(用 withinSends 同款判据,排除 IME 改写删除)----
 def event_sends_with_ts(ev, X, group_cs=None, group_letters=None, group_armed=None):
@@ -540,13 +602,15 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None, group_armed=No
             # (ev3557 实证,单事件窗口 11<14 误杀)。只证明"敲够了键",不证明产出,所以长文不豁免。
             if len(ct) <= 120:
                 need = sum(1 for ch in ct if not ch.isascii()) + len(re.sub(r'[^a-zA-Z]', '', ct))
-                if gl >= need:
+                # 包含性判据(用户 2026-07-17:「输入中肯定包含 my portrait」):光数字母不够——
+                # 纯粘贴短句落在打字繁忙的组里,组字母预算照样够(bar moving 案)。文本里 ≥4 字母的
+                # ascii 词必须真的出现在组键流里,缺一半以上 = 这些字不是这组键打的,不豁免。
+                words = set(re.findall(r'[a-zA-Z]{4,}', ct))
+                if gl >= need and (not words or _words_in_keys(X, ev, words, a, b)):
                     o.append((t, a, b, s)); continue
-            # 规则「粘贴少数派整条留」(用户裁定 2026-07-16,见 paste_minor):手打为主的消息
-            # 里捎带的引用/链接是内容的一部分,整条原样留,不进逐行裁剪。
-            if paste_minor(X, t, cs_use):
-                o.append((t, a, b, s)); continue
-            nt = commit_backed(X, t, cs_use)          # 粘贴占多数 → 逐行 30 闸 + 多数背书守卫
+            # (2026-07-17 用户收紧:「超 30 的很多啊,小于 30 倒是可以留」——粘贴少数派整条放行
+            # 被撤销,>30 无背书段即便跟手打正文也要裁;改由 commit_backed 行内段级手术执行。)
+            nt = commit_backed(X, t, cs_use)          # 逐行:段级 30 闸手术 + 多数背书守卫
             if nt: o.append((nt, a, b, s))
         return o
     for i, e in enumerate(arr):
