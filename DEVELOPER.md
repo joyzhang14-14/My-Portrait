@@ -135,9 +135,23 @@ The most important section. These are hard-won; preserve the detail.
 ### Database & FTS
 
 **GRDB `arguments:` must be a dict, never an array literal**
+
+```swift
+// ❌ Can trigger an intermittent runtime loop
+try Row.fetchAll(db, sql: "... WHERE a = ? AND b = ?", arguments: [v1, v2])
+
+// ✅ Use named placeholders and a dictionary
+try Row.fetchAll(
+    db,
+    sql: "... WHERE a = :a AND b = :b",
+    arguments: ["a": v1, "b": v2]
+)
+```
+
 - *Symptom:* The app randomly freezes/hangs. A GRDB reader thread pins 100% CPU stuck in `StatementArguments.append(contentsOf:)` → `Array.append` → `swift::_getWitnessTable` → `<deduplicated_symbol>`; the main thread then stalls on SwiftUI updates and the whole app appears dead. Only catchable via Activity Monitor → Sample.
 - *Why:* An array literal like `[v1, v2]` is implicitly bridged to `[any DatabaseValueConvertible]`. The Swift runtime intermittently infinite-loops in `_getWitnessTable` resolving protocol conformance for that existential array — a known libswiftCore edge case, unrelated to GRDB.
-- *Rule:* Always pass `arguments:` as a dict with named placeholders (`arguments: ["a": v1]`), never a positional array literal. Explicitly cast `Int` → `Int64` (dict form has no implicit conversion: `["limit": Int64(limit)]`). For dynamic variadic `IN` clauses that must keep an array, wrap it as `StatementArguments(args)` (a different API path), not a literal. If the app ever "mysteriously freezes", suspect a leftover array-literal `arguments:` site first.
+- *Rule:* Always pass `arguments:` as a dict with named placeholders (`arguments: ["a": v1]`), never a positional array literal. Explicitly cast `Int` → `Int64` (dict form has no implicit conversion: `["limit": Int64(limit)]`). For dynamic variadic `IN` clauses that must keep an array, wrap it as `StatementArguments(args)` (a different API path), not a literal.
+- *History:* The project previously fixed 48 occurrences in one sweep. New database code must not reintroduce this pattern. If the app ever "mysteriously freezes", suspect a leftover array-literal `arguments:` site first.
 
 **System SQLite has FTS5 but no ICU / no LOAD_EXTENSION — use the Foundation custom tokenizer**
 - *Symptom:* Relying on an ICU FTS5 tokenizer or loading a SQLite extension fails on macOS's bundled sqlite3.
