@@ -315,8 +315,8 @@ private struct PermissionsStep: View {
                 // 并跳系统设置让用户批准一次;批准后上面的轮询把状态灯刷成 Granted。
                 permRow(
                     icon: "bolt.fill",
-                    title: "Keep awake with lid closed",
-                    why: "Optional. On AC power, lets transcription and memory jobs keep running with the lid shut. Approve once in System Settings ▸ Login Items & Extensions.",
+                    title: "Register background activity helper",
+                    why: "Lets pipelines keep running while your Mac sits idle or the lid is shut. Approve once in System Settings ▸ Login Items & Extensions.",
                     status: helperApproved ? .granted : .denied,
                     action: { SleepHelperClient.shared.enable() },
                     openSettings: { SleepHelperClient.shared.openSystemSettings() }
