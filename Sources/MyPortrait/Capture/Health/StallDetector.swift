@@ -32,6 +32,10 @@ final class StallDetector {
     private let stallThresholdMs: Int64 = 60 * 1000
     /// 上游叫 warmup —— 启动 120s 内一切判定先 skip,允许冷启动一段时间。
     private let warmupMs: Int64 = 120 * 1000
+    /// 唤醒后 SCK 重建设备/显示器、首帧写库都需要时间。更关键的是 Driver 的
+    /// 30s sleep 常在开盖瞬间补跑：此时 lastAttempt 已刷新、lastDbWrite 仍停在
+    /// 睡前，若不先重置 baseline 会把一次中断帧误报成 DB stall。
+    private let wakeGraceSec: TimeInterval = 60
     /// pending 队列大于这个数 + 最老 chunk 比 freshness 还老 → 真 backlog。
     /// freshness 取 audio chunk 段长(默认 ~30s)的若干倍,这里固定 20min
     /// 给重型场景留余量。
@@ -57,7 +61,7 @@ final class StallDetector {
     /// 在增长 = 转译只是慢、没卡,不报 backlog(后台慢慢追是设计,不是故障)。
     private var prevTranscribedCount: Int?
 
-    private init() {}
+    init() {}
 
     /// 输入当前所有信号 → 返回 *本轮* 新触发的 verdict(不含被节流的)。
     /// Driver 拿这个返回值决定是否 post 通知 / 写 log。
@@ -86,7 +90,10 @@ final class StallDetector {
 
         // —— 故意 pause 一律不报(锁屏 / DRM / 用户关 toggle / 屏幕睡眠)。
         // permission 那条已经早 return 前评估过 —— 它本来就和 pause 互斥意义。
-        guard !pause.anyPaused else {
+        let wakingUp = pause.lastScreenWakeAt.map {
+            now.timeIntervalSince($0) >= 0 && now.timeIntervalSince($0) < wakeGraceSec
+        } ?? false
+        guard !pause.anyPaused, !wakingUp else {
             prevVision = vision
             prevPendingCount = pendingAudio.count
             prevTranscribedCount = Int(audio.chunksTranscribed)

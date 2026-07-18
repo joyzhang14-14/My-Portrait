@@ -22,6 +22,20 @@ final class IntentionalPauseState {
     /// screensDidSleep 翻 true,didWake / screensDidWake 翻 false。
     var screenAsleep: Bool = false
 
+    /// 最近一次屏幕/系统唤醒。StallDetector 用它给 SCK + DB 一小段恢复窗口，
+    /// 避免把睡眠期间自然变旧的 lastDbWriteMs 与刚恢复的新 attempt 拼成
+    /// visionDbWrite 假警报。
+    private(set) var lastScreenWakeAt: Date? = nil
+
+    func markScreenAsleep() {
+        screenAsleep = true
+    }
+
+    func markScreenAwake(at now: Date = Date()) {
+        screenAsleep = false
+        lastScreenWakeAt = now
+    }
+
     /// ConfigStore.capture.enabled == false 时翻 true。CaptureSettings 那条
     /// Combine sink 顺手推一下。
     var captureDisabled: Bool = false

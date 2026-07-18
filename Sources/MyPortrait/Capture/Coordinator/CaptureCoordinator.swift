@@ -219,11 +219,11 @@ actor CaptureCoordinator {
     private func handleSleepWake(_ event: SleepWakeEvent) async {
         switch event {
         case .willSleep:
-            await MainActor.run { IntentionalPauseState.shared.screenAsleep = true }
+            await MainActor.run { IntentionalPauseState.shared.markScreenAsleep() }
             await screen.invalidateStream()
             comparer.reset()
         case .didWake:
-            await MainActor.run { IntentionalPauseState.shared.screenAsleep = false }
+            await MainActor.run { IntentionalPauseState.shared.markScreenAwake() }
             // 睡前/睡后差异巨大，强制下一帧保留。
             comparer.reset()
             // SCStream 已 invalidate，下次 trigger 来时会懒重建。
