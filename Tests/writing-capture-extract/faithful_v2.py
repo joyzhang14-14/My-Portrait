@@ -446,12 +446,17 @@ for day in DAYS:
         grp_cs = ''.join(X.cstream(e['arr'], e['inj']) for e in evs)
         # 组级击键字母数(闸C 的字母下界闸要用):endValue 跨事件累积,单事件窗口数不全(见 R.handtyped)
         grp_letters = len(re.sub(r'[^a-zA-Z]', '', assemble_keys_full(ids)))
-        # 组级上膛(ev621 案,见 rebuild 注释):组内任一事件有粘贴证据 → 整组过闸C
-        grp_armed = any(e['inj'] or R.paste_pressed(X, e)
-                        or any(x.get('kind') == 'paste' and len(cv(x.get('text') or '')) >= 2 for x in e['arr'])
-                        for e in evs)
+        # 组级上膛(ev621 案,见 rebuild 注释):组内任一事件有粘贴证据 → 整组过闸C。
+        # **证据只向前传**(B11 案,2026-07-18):晚于本事件结束才发生的粘贴,不可能进本事件
+        # 已发出的内容 —— ev639 的 ⌘V(比 ev637 的 submit 晚 2 分钟,粘的是下一条消息的料)
+        # 曾倒灌 arm 了 ev637,把 VALIS 行当无背书粘贴段误裁。ev621 案证据在早先事件,不受影响。
+        evid_ts = [(e.get('started_at') or 0) for e in evs
+                   if e['inj'] or R.paste_pressed(X, e)
+                   or any(x.get('kind') == 'paste' and len(cv(x.get('text') or '')) >= 2 for x in e['arr'])]
         sends_raw = []
         for ev in evs:
+            grp_armed = any(st <= (ev.get('ended_at') or ev.get('started_at') or 0)
+                            for st in evid_ts)
             for text, t0, t1, is_send in R.event_sends_with_ts(ev, X, group_cs=grp_cs,
                                                                group_letters=grp_letters,
                                                                group_armed=grp_armed):

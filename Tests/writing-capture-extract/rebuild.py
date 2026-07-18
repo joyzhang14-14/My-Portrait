@@ -418,12 +418,64 @@ def _words_in_keys(X, ev, words, t0, t1):
 TRIM_MIN_LINE = 5        # 强背书回落档:2~4 字的行在几百字 commit 流里 LCS 必然撞上('> ok'/'join')
 TRIM_COVER = 0.8         # 强背书回落档的行级 cover 门槛(只在字母对账不过时启用,见 commit_backed)
 
-def _line_backing(X, t, cs):
-    """闸C 的行级对账基础:[(行, 去空格长度, 未背书字符数)],空行的未背书 = None。
-    **未背书字符数 = 行长×(1-块cover)** —— 存量框剥离 `unhand` 公式(submit 分支既有先例)的行级版。
+def _key_letters(X, ev, t0, t1):
+    """原始键流字母串(闸C 第二背书源,2026-07-18):同 bundle、_words_in_keys 同款窗口
+    (前扩 10min 盖组内更早事件),只取无修饰键的 ascii 字母小写。拼音+英文都在里面;
+    选字数字/退格天然被滤掉,所以真打的一个词在这串里是**连续**的。"""
+    rows = X.con.execute(
+        "SELECT char FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
+        "AND is_backspace=0 AND char IS NOT NULL AND (modifiers&7)=0",
+        {"b": ev['bundle'], "a": (t0 or ev.get('started_at') or 0) - 600_000,
+         "c": (t1 or ev.get('ended_at') or 0) + 2000}).fetchall()
+    return ''.join(c.lower() for (c,) in rows
+                   if c and len(c) == 1 and c.isascii() and c.isalpha())
 
-    块cover:**双方去空格**后只数**连续匹配块**(纯 ASCII 块 ≥3 字符,含汉字块 ≥2 字符,单字符不算)。
-    两个都是实测教训:
+def _backed_mask(a, cs_ns, kl=''):
+    """去空格行 `a` 的逐字符背书掩码,**两路任一背书即认**(2026-07-18,治 AX 缺页家族
+    ev888/B11/A20 —— commit 流不是击键的完备投影,AX 会漏记真打的 commit):
+    · 路一 commit 流:连续匹配块(纯 ASCII ≥3,含汉字 ≥2,单字符不算 —— 连续性是"真打过"
+      的指纹,ev342 散点作弊教训)。
+    · 路二 原始键流拼音空间:行文本转拼音(汉字取 char_units 最小读音,_py_space 同款;
+      ascii 字母原样),对键流字母串做 ≥3 连续块匹配;**汉字要整个读音全被盖住才算背书**
+      (半个读音 = 撞库,不算)。粘贴内容没进过键盘,在键流里必然对不上。"""
+    covered = [False] * len(a)
+    if cs_ns:
+        for b in difflib.SequenceMatcher(None, a, cs_ns, autojunk=False).get_matching_blocks():
+            seg = a[b.a:b.a + b.size]
+            if b.size >= 3 or (b.size == 2 and HAN.search(seg)):
+                for k in range(b.a, b.a + b.size):
+                    covered[k] = True
+    if kl:
+        cu = SCH.char_units()
+        py, owner = [], []
+        for i, ch in enumerate(a):
+            if ch.isascii() and ch.isalpha():
+                py.append(ch.lower()); owner.append(i)
+            elif '一' <= ch <= '鿿':
+                u = cu.get(ch)
+                if u:
+                    r = min(u)
+                    py.extend(r); owner.extend([i] * len(r))
+        ps = ''.join(py)
+        if ps:
+            pcov = [False] * len(ps)
+            for b in difflib.SequenceMatcher(None, ps, kl, autojunk=False).get_matching_blocks():
+                if b.size >= 3:
+                    for k in range(b.a, b.a + b.size):
+                        pcov[k] = True
+            full = {}
+            for k, i in enumerate(owner):
+                full[i] = full.get(i, True) and pcov[k]
+            for i, ok in full.items():
+                if ok:
+                    covered[i] = True
+    return covered
+
+def _line_backing(X, t, cs, kl=''):
+    """闸C 的行级对账基础:[(行, 去空格长度, 未背书字符数)],空行的未背书 = None。
+    **未背书字符数 = 掩码里没被盖住的字符数**(_backed_mask,commit 流 ∪ 键流拼音空间)。
+
+    块cover 规则与教训(路一,详见 _backed_mask):
     · 裸 LCS 单字符散点作弊:`[Instagram] Setting up session` 的字母散落在组内拼音流
       (zheshigeiwo…)里,碎配凑出 cover≈0.4 → 43×0.6=26 混过 30 闸(ev342)。块门槛按字符集
       分档:IME 上屏粒度就是 1~2 个汉字,真打的中文天然是 2 字块;汉字字表大,2 字块撞库
@@ -432,19 +484,13 @@ def _line_backing(X, t, cs):
       带空格块 cover 只有 0.65 误裁;去空格后真打序列连成长块,0.93,未背书 6)。
     实测边距:通道行(真打)未背书 6 ≪ 30 ≪ yt 行 38 / ev598 泄漏行 62·88(全粘贴)。"""
     cs_ns = re.sub(r'\s', '', cs or '')
-    def _cov(a):
-        if not a or not cs_ns:
-            return 0.0
-        tot = 0
-        for b in difflib.SequenceMatcher(None, a, cs_ns, autojunk=False).get_matching_blocks():
-            seg = a[b.a:b.a + b.size]
-            if b.size >= 3 or (b.size == 2 and HAN.search(seg)):
-                tot += b.size
-        return tot / len(a)
     out = []
     for ln in t.split('\n'):
         c = re.sub(r'\s', '', cv(ln))
-        out.append((ln, len(c), len(c) * (1 - _cov(c)) if c else None))
+        if not c:
+            out.append((ln, 0, None)); continue
+        m = _backed_mask(c, cs_ns, kl)
+        out.append((ln, len(c), sum(1 for x in m if not x)))
     return out
 
 def paste_minor(X, t, cs):
@@ -457,7 +503,7 @@ def paste_minor(X, t, cs):
     unbacked = sum(u for _, u in rows)
     return unbacked < sum(n for n, _ in rows) - unbacked
 
-def commit_backed(X, t, cs):
+def commit_backed(X, t, cs, kl=''):
     """闸C(用户裁定 2026-07-15:**严格 30 闸,一切以击键为主**,不做任何内容/形态硬编码)。
     (2026-07-17 用户收紧后 paste_minor 整条放行已撤,armed 记录一律走这里的段级手术):
 
@@ -474,7 +520,7 @@ def commit_backed(X, t, cs):
     # ev598 阶段5 行(150 字手打+行尾 40 字 URL)只抠 URL 不再连坐;ev888 AX 缺页行的散碎
     # 未背书块(各 ≤30)不受伤。
     kept_lines = []
-    for ln, n, u in _line_backing(X, t, cs):
+    for ln, n, u in _line_backing(X, t, cs, kl):
         if u is None:
             continue
         if u <= PASTE_MAX:
@@ -482,7 +528,7 @@ def commit_backed(X, t, cs):
         if n and (1 - u / n) < 0.25:
             continue    # 背书率<1/4 的行 = 基本不是这批键打的(yt 行 ~0.1,靠 3 字符偶然岛
                         # 把长无背书段切碎混过手术的路堵死);真打的 AX 缺页行 ≥0.3 不受伤
-        kept_lines.append((_cut_spans(X, ln, cs), n, u))
+        kept_lines.append((_cut_spans(X, ln, cs, kl), n, u))
     rows = [(ln, n, u) for ln, n, u in kept_lines if cv(ln)]
     backed_m = sum(max(0, n - u) for _, n, u in rows)
     unbacked_m = sum(min(n, u) for _, _, u in rows)
@@ -494,21 +540,16 @@ def commit_backed(X, t, cs):
                 if n >= TRIM_MIN_LINE and (1 - u / n) >= TRIM_COVER]
     return '\n'.join(ln for ln, _, _ in rows).strip()
 
-def _cut_spans(X, ln, cs):
-    """把行里 >PASTE_MAX 的**无背书连续段**抠掉(去空格块对齐后映射回原文)。
+def _cut_spans(X, ln, cs, kl=''):
+    """把行里 >PASTE_MAX 的**无背书连续段**抠掉(_backed_mask 两路对齐后映射回原文)。
     空白字符跟随邻居:两侧都被抠 → 一起抠。"""
-    import difflib as _dl
     cs_ns = re.sub(r'\s', '', cs or '')
     orig = list(ln)
     idx = [i for i, ch in enumerate(orig) if not ch.isspace()]
     a = ''.join(orig[i] for i in idx)
-    if not a or not cs_ns:
+    if not a or (not cs_ns and not kl):
         return '' if len(a) > PASTE_MAX else ln
-    covered = [False] * len(a)
-    for b in _dl.SequenceMatcher(None, a, cs_ns, autojunk=False).get_matching_blocks():
-        seg = a[b.a:b.a + b.size]
-        if b.size >= 3 or (b.size == 2 and HAN.search(seg)):
-            for k in range(b.a, b.a + b.size): covered[k] = True
+    covered = _backed_mask(a, cs_ns, kl)
     drop = set()
     i = 0
     while i < len(a):
@@ -613,7 +654,9 @@ def event_sends_with_ts(ev, X, group_cs=None, group_letters=None, group_armed=No
                     o.append((t, a, b, s)); continue
             # (2026-07-17 用户收紧:「超 30 的很多啊,小于 30 倒是可以留」——粘贴少数派整条放行
             # 被撤销,>30 无背书段即便跟手打正文也要裁;改由 commit_backed 行内段级手术执行。)
-            nt = commit_backed(X, t, cs_use)          # 逐行:段级 30 闸手术 + 多数背书守卫
+            # 键流拼音空间背书(2026-07-18):commit 流之外的第二背书源,治 AX 缺页
+            # (B11「我没在env里面」打了但 AX 没记 commit / A20 零AX痕迹路由 commit 流空)
+            nt = commit_backed(X, t, cs_use, _key_letters(X, ev, a, b))   # 逐行:段级 30 闸手术 + 多数背书守卫
             if nt: o.append((nt, a, b, s))
         return o
     for i, e in enumerate(arr):
