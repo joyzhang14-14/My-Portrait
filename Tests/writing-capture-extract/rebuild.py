@@ -403,6 +403,20 @@ def paste_pressed(X, ev):
         {"b": ev['bundle'], "a": (prev + 1) if prev is not None else 0,
          "c": (ev.get('ended_at') or st) + 500}).fetchone() is not None
 
+def paste_pressed_ts(X, ev):
+    """paste_pressed 的取时刻版:同窗口内**最早 ⌘V 的 ts**(没有则 None)。组级上膛的方向
+    判定必须用真实粘贴时刻,不能拿事件头凑数(ev635 案:24min 长事件 started_at=22:15,
+    它的 ⌘V 在 22:39,按事件头算会把中间 22:38 发出的 B11 误上膛)。"""
+    st = ev.get('started_at') or 0
+    prev = X.con.execute(
+        "SELECT MAX(ended_at) FROM typing_events WHERE bundle_id=:b AND ended_at < :st",
+        {"b": ev['bundle'], "st": st}).fetchone()[0]
+    return X.con.execute(
+        "SELECT MIN(ts_ms) FROM keystroke_log WHERE bundle_id=:b AND ts_ms BETWEEN :a AND :c "
+        "AND char='v' AND (modifiers&1)=1",
+        {"b": ev['bundle'], "a": (prev + 1) if prev is not None else 0,
+         "c": (ev.get('ended_at') or st) + 500}).fetchone()[0]
+
 def _words_in_keys(X, ev, words, t0, t1):
     """包含性判据:文本里的 ascii 词(≥4 字母)必须出现在记录附近的键流里(同 bundle,
     前扩 10min 盖住组内更早事件的键)。缺一半以上 → 这些字不是这批键打的。"""

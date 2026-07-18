@@ -450,9 +450,23 @@ for day in DAYS:
         # **证据只向前传**(B11 案,2026-07-18):晚于本事件结束才发生的粘贴,不可能进本事件
         # 已发出的内容 —— ev639 的 ⌘V(比 ev637 的 submit 晚 2 分钟,粘的是下一条消息的料)
         # 曾倒灌 arm 了 ev637,把 VALIS 行当无背书粘贴段误裁。ev621 案证据在早先事件,不受影响。
-        evid_ts = [(e.get('started_at') or 0) for e in evs
-                   if e['inj'] or R.paste_pressed(X, e)
-                   or any(x.get('kind') == 'paste' and len(cv(x.get('text') or '')) >= 2 for x in e['arr'])]
+        # 二修(同日,ev635 案):①证据打**真实时间戳**(paste/inj 条目的 ts、⌘V 的键时刻),
+        # 不能拿事件头凑数 —— 24min 长事件 started_at 远早于它的 ⌘V,按事件头算方向形同虚设;
+        # ②占位符轮换(Type / for commands 一族,isMark 同款白名单)是机器动作,不算粘贴证据。
+        def _is_ph_txt(t_):
+            return X.emptyBox(t_) or cv(t_) in X.RUNPH or X.is_ph(cv(t_))
+        evid_ts = []
+        for e in evs:
+            for x in e['arr']:
+                t_ = x.get('text') or ''
+                if not t_ or _is_ph_txt(t_):
+                    continue
+                if ((x.get('kind') == 'paste' and len(cv(t_)) >= 2)
+                        or (x.get('kind') == 'commit' and cv(t_) in e['inj'])):
+                    evid_ts.append(x.get('ts') or e.get('started_at') or 0)
+            pv = R.paste_pressed_ts(X, e)
+            if pv is not None:
+                evid_ts.append(pv)
         sends_raw = []
         for ev in evs:
             grp_armed = any(st <= (ev.get('ended_at') or ev.get('started_at') or 0)
