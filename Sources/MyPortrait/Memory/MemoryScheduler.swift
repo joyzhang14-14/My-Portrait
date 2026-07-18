@@ -481,12 +481,11 @@ final class MemoryScheduler {
         // IOPMAssertion:开盖空闲也要防打盹,不加合盖门槛。
         KeepAwakeAssertion.shared.set(want, owner: "memory")
         // pmset turbo:让机器**合盖**也完全清醒(IOPMAssertion 挡不住 clamshell)。
-        // 只有用户开了 General ▸「合盖时保持运行」且 helper 已批准时才真正生效,
-        // 否则 SleepHelperClient 内部静默 no-op。
+        // 只有用户在 onboarding 里启用过、且 helper 已被系统批准(.enabled)时才真正
+        // 生效,否则 SleepHelperClient 内部静默 no-op(唯一真相=批准状态,无 config 闸)。
         // ⚠️ 只在**合盖**时才持有 —— 开盖瞬间(clamshell 事件触发本函数)立即松手,
         // 不让 disablesleep 留在开盖状态(开盖本就有 IOPMAssertion 兜空闲睡眠)。
         let lidWant = want && PowerMonitor.isLidClosed
-            && ConfigStore.shared.current.general.keepAwakeLidClosed
         SleepHelperClient.shared.setKeepAwake(lidWant, owner: "memory")
     }
 

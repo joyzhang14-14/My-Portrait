@@ -64,20 +64,6 @@ struct GeneralSettingsView: View {
                 CronJobStore.shared.applyHistoryLimit()
             }
 
-            // 合盖时保持运行 —— 开 → 注册特权 root helper(SMAppService)并引导用户去
-            // 系统设置批准;关 → 复位 disablesleep + 注销。详见 SleepHelperClient。
-            SettingsCard(title: "Power") {
-                SettingsRow("Keep awake with lid closed",
-                            description: "On AC power, keep background jobs running even with the lid shut. Needs a one-time approval in System Settings ▸ Login Items & Extensions.",
-                            icon: "bolt.fill") {
-                    Toggle("", isOn: config.binding(\.general.keepAwakeLidClosed)).labelsHidden().toggleStyle(.switch)
-                }
-            }
-            .onChange(of: config.current.general.keepAwakeLidClosed) { _, on in
-                if on { SleepHelperClient.shared.enable() }
-                else  { SleepHelperClient.shared.disable() }
-            }
-
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。

@@ -472,10 +472,6 @@ struct GeneralConfig: Codable, Equatable {
     /// Import 页打开时是否自动扫描所有来源(screenpipe / Claude Code / Codex)。
     /// 关 → Import 页每个来源显示「未扫描」+ Scan 按钮,点了才扫。默认开(保持现状)。
     var autoScanImports:     Bool = true
-    /// 「合盖时保持运行」—— 开 → 注册特权 root helper(SMAppService),插电+有后台
-    /// 任务在跑时即使合盖也用 `pmset disablesleep` 让机器完全清醒跑完。需用户在
-    /// 系统设置 ▸ 登录项与扩展 里批准一次。默认关(不打扰、不注册 root daemon)。
-    var keepAwakeLidClosed:  Bool = false
     init() {}
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
@@ -483,7 +479,6 @@ struct GeneralConfig: Codable, Equatable {
         case onboardingCompleted  = "onboarding_completed"
         case cronJobHistoryLimit  = "cron_job_history_limit"
         case autoScanImports      = "auto_scan_imports"
-        case keepAwakeLidClosed   = "keep_awake_lid_closed"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -493,7 +488,6 @@ struct GeneralConfig: Codable, Equatable {
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
         cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
         autoScanImports     = c.dflt(Bool.self, .autoScanImports, autoScanImports)
-        keepAwakeLidClosed  = c.dflt(Bool.self, .keepAwakeLidClosed, keepAwakeLidClosed)
     }
 }
 

@@ -253,9 +253,14 @@ private struct PermissionsStep: View {
 
     @StateObject private var monitor = PermissionMonitor()
 
+    /// 「合盖时保持运行」的 root helper 是否已被系统批准(SMAppService)。**不是 TCC
+    /// 权限**,PermissionMonitor 管不到,下面 .task 自己轮询。
+    @State private var helperApproved = false
+
     enum PermStatus { case granted, denied, unknown }
 
-    /// 4 项都 granted 才算"全过"。任何一项 .denied / .unknown 都阻塞 Next。
+    /// 4 项 **TCC** 都 granted 才算"全过"。任何一项 .denied / .unknown 都阻塞 Next。
+    /// ⚠️ 合盖 helper **不计入** —— 它是可选增强(不是采集层),没批准也不该拦着用户 Next。
     private var computedAllGranted: Bool {
         mapAppKit(monitor.screenRecording) == .granted &&
         mapAppKit(monitor.accessibility) == .granted &&
@@ -305,6 +310,17 @@ private struct PermissionsStep: View {
                     action: nil,
                     openSettings: { monitor.openSettings(for: .fullDisk) }
                 )
+                // 合盖时保持运行 —— 不是 TCC 权限,是 SMAppService 后台项(特权 root
+                // daemon,靠 pmset disablesleep 挡 clamshell 睡眠)。Allow → register()
+                // 并跳系统设置让用户批准一次;批准后上面的轮询把状态灯刷成 Granted。
+                permRow(
+                    icon: "bolt.fill",
+                    title: "Keep awake with lid closed",
+                    why: "Optional. On AC power, lets transcription and memory jobs keep running with the lid shut. Approve once in System Settings ▸ Login Items & Extensions.",
+                    status: helperApproved ? .granted : .denied,
+                    action: { SleepHelperClient.shared.enable() },
+                    openSettings: { SleepHelperClient.shared.openSystemSettings() }
+                )
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 24)
@@ -323,6 +339,15 @@ private struct PermissionsStep: View {
         // computedAllGranted 跟着变 → 这里 onChange 把新值写回 binding。
         .onChange(of: computedAllGranted) { _, new in
             allGranted = new
+        }
+        // helper 是 SMAppService 后台项,不在 PermissionMonitor 的 TCC 轮询里 ——
+        // 这里按同样的 3s 节奏自己查,用户在系统设置里批准完状态灯自动变绿。
+        // .task 随视图消失自动取消,不用手动 stop。
+        .task {
+            while !Task.isCancelled {
+                helperApproved = SleepHelperClient.shared.isApproved
+                try? await Task.sleep(for: .seconds(3))
+            }
         }
     }
 
