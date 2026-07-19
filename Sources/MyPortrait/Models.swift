@@ -10,6 +10,8 @@ enum MemoryScope: Hashable, Identifiable {
     case events
     case input
     case portrait(category: String)
+    /// Text 侧栏底部的设置入口（排序方式等），不是记忆内容 scope。
+    case textSettings
     /// Neural Graph 侧栏 GRAPH 下的设置入口(07-11 用户):主内容区显示图谱设置
     /// (主球照片等),不是图谱形态。
     case neuralGraphSettings
@@ -20,6 +22,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .events:              return "__events__"
         case .input:               return "__input__"
         case .portrait(let c):     return "portrait:\(c)"
+        case .textSettings:        return "__text_settings__"
         case .neuralGraphSettings: return "__neural_graph_settings__"
         }
     }
@@ -29,6 +32,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .events:              return "Events"
         case .input:               return "Input"
         case .portrait(let c):     return c.replacingOccurrences(of: "_", with: " ").capitalized
+        case .textSettings:        return "Settings"
         case .neuralGraphSettings: return "Settings"
         }
     }
@@ -37,6 +41,7 @@ enum MemoryScope: Hashable, Identifiable {
         case .personalInfo:             return "person.text.rectangle.fill"
         case .events:                   return "clock.arrow.circlepath"
         case .input:                    return "keyboard"
+        case .textSettings:             return "slider.horizontal.3"
         case .neuralGraphSettings:      return "slider.horizontal.3"
         case .portrait("personality"):  return "person.fill"
         case .portrait("social"):       return "person.3.fill"
@@ -61,9 +66,8 @@ enum MemoryViewMode: String, Hashable {
     static func supportsNeuralGraph(_ scope: MemoryScope) -> Bool {
         switch scope {
         case .events, .portrait, .input:  return true
-        // neuralGraphSettings 由 ContentView 显式路由到设置视图(先于这里判断),
-        // 值本身不影响;返 false 保持"非图谱"语义。
-        case .personalInfo, .neuralGraphSettings: return false
+        // 两种 settings scope 由 ContentView 显式路由到各自设置视图。
+        case .personalInfo, .textSettings, .neuralGraphSettings: return false
         }
     }
 }

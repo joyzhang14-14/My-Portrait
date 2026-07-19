@@ -197,7 +197,9 @@ struct ContentView: View {
         case .cronJobs:         CronJobsView(selection: $cronJobSelection)
         case .memories:
             // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
-            if memoryViewMode == .neuralGraph, memoryScope == .neuralGraphSettings {
+            if memoryViewMode == .text, memoryScope == .textSettings {
+                MemoryTextSettingsView()
+            } else if memoryViewMode == .neuralGraph, memoryScope == .neuralGraphSettings {
                 // Neural Graph 侧栏 GRAPH 下的设置入口(主球照片等)。
                 NeuralGraphSettingsView()
             } else if memoryViewMode == .neuralGraph,

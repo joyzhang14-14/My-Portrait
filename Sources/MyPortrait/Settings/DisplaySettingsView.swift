@@ -51,17 +51,6 @@ struct DisplaySettingsView: View {
                 }
             }
 
-            SettingsCard(title: "Memory") {
-                SettingsRow("Memory sort order",
-                            description: "How entries in Memories are ordered — and the events inside each folder. Weight ranks by importance; Created and Last occurrence sort newest first.",
-                            icon: "arrow.up.arrow.down") {
-                    Picker("", selection: config.binding(\.display.memorySortOrder)) {
-                        ForEach(MemorySortOrder.allCases) { o in Text(o.label).tag(o.rawValue) }
-                    }
-                    .pickerStyle(.menu).labelsHidden().frame(width: 150)
-                }
-            }
-
             SettingsCard(title: "Chat") {
                 SettingsRow("Compact tool blocks",
                             description: "Collapse a reply's thinking + tool steps into one expandable summary bar. Faster to load.",

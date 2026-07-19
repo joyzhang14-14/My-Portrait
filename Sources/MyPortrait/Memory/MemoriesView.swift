@@ -22,7 +22,7 @@ struct MemoriesView: View {
     /// nil = 无外部跳转,走内部 pendingInputRecordId(writing-style chip 路径)。
     var externalInputJump: Binding<Int64?>? = nil
 
-    /// Display 的 Memory sort order 改动要即时反映到列表 —— 持有 store 让
+    /// Text settings 的 Memory sort order 改动要即时反映到列表 —— 持有 store 让
     /// @Observable 依赖追踪生效(body 里读 memorySortOrder 建立观察)。
     @State private var config = ConfigStore.shared
 
@@ -114,7 +114,7 @@ struct MemoriesView: View {
             .task(id: selected) {
                 await loadDerivedRefs()
             }
-            // 改 Display 的 Memory sort order → 就地重排已加载的列表(纯内存,
+            // 改 Text settings 的 Memory sort order → 就地重排已加载的列表(纯内存,
             // 不重新读盘),主列表与 folder 分组同时刷新。
             .onChange(of: config.current.display.memorySortOrder) {
                 Task { await resort() }
@@ -122,7 +122,7 @@ struct MemoriesView: View {
         }
     }
 
-    /// 从 Display 设置读当前排序规则(非法值兜底 weight)。MainActor 上下文。
+    /// 从 Text 设置读当前排序规则(非法值兜底 weight)。MainActor 上下文。
     @MainActor
     private var currentSortOrder: MemorySortOrder {
         MemorySortOrder(rawValue: config.current.display.memorySortOrder) ?? .weight
@@ -396,7 +396,7 @@ struct MemoriesView: View {
         let allFolders = EventFolderStore.loadAll()
         let folderGroups: [FolderGroup] = allFolders
             .map { f -> FolderGroup in
-                // 内部事件跟随 Display 的 Memory sort order(weight / created /
+                // 内部事件跟随 Text settings 的 Memory sort order(weight / created /
                 // last occurrence),与主列表口径一致。folder.events 的原序
                 // (LLM 输出顺序)信息量低,按设置排更符合直觉。
                 let entries = Self.sortedByConfig(f.events.compactMap { byPath[$0] }, order: order)
@@ -1077,7 +1077,7 @@ struct MemoriesView: View {
         switch scope {
         case .events:
             root = Storage.eventsDir
-        case .input, .personalInfo, .neuralGraphSettings:
+        case .input, .personalInfo, .textSettings, .neuralGraphSettings:
             // 这些 scope 都没文件可扫(各走专属视图)。
             return []
         case .portrait(let cat):
@@ -1481,7 +1481,7 @@ private struct EmptyHint: View {
             return "No events yet.\nClick ↓ to backfill from the timeline."
         case .input:
             return "Input capture is not set up yet."
-        case .personalInfo, .neuralGraphSettings:
+        case .personalInfo, .textSettings, .neuralGraphSettings:
             // 不会走到 —— 各走专属视图,不走 list 列。
             return ""
         case .portrait:

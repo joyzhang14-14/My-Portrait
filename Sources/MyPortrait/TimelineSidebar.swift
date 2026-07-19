@@ -387,6 +387,13 @@ struct TimelineSidebar: View {
         let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
         let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
         return MemoryViewModeToggle(mode: $memoryViewMode)
+            .onChange(of: memoryViewMode) {
+                if memoryViewMode == .text, memoryScope == .neuralGraphSettings {
+                    memoryScope = .textSettings
+                } else if memoryViewMode == .neuralGraph, memoryScope == .textSettings {
+                    memoryScope = .neuralGraphSettings
+                }
+            }
             .padding(6)
             .frame(maxWidth: .infinity)
             .background(
@@ -445,6 +452,11 @@ struct TimelineSidebar: View {
                 VStack(spacing: 2) {
                     scopeRow(.events)
                     scopeRow(.input)
+                }
+                // 无标题分区:Text 设置入口。
+                Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
+                VStack(spacing: 2) {
+                    scopeRow(.textSettings)
                 }
             }
         }
