@@ -1,6 +1,6 @@
 import XCTest
 import simd
-import GraphPhysics
+@testable import GraphPhysics
 @testable import MyPortrait
 
 /// 图谱数据映射公式的单测(强度/线宽/命中网格)。
@@ -75,5 +75,63 @@ final class GraphMappingTests: XCTestCase {
         XCTAssertEqual(p1[0], .zero)
         XCTAssertEqual(Double(simd_length(p1[1])), 300, accuracy: 0.5)
         XCTAssertEqual(Double(simd_length(p1[2] - p1[1])), 100, accuracy: 0.5)
+    }
+
+    // MARK: Portrait 叶圈整体自转阻尼
+
+    func testFamilyRotationDampingRemovesOnlyCoherentSpin() {
+        let positions: [SIMD2<Float>] = [
+            SIMD2(10, 20),
+            SIMD2(110, 20), SIMD2(10, 120), SIMD2(-90, 20), SIMD2(10, -80),
+        ]
+        let hubVelocity = SIMD2<Float>(2, -1)
+        let radial: [Float] = [0.3, -0.2, 0.4, -0.1]
+        var velocities = [hubVelocity]
+        for (index, position) in positions.dropFirst().enumerated() {
+            let r = position - positions[0]
+            let unit = r / simd_length(r)
+            let rotation = SIMD2<Float>(-r.y, r.x) * 0.08
+            velocities.append(hubVelocity + rotation + unit * radial[index])
+        }
+        let radialBefore = zip(positions.dropFirst(), velocities.dropFirst()).map {
+            let r = $0.0 - positions[0]
+            return simd_dot($0.1 - hubVelocity, r / simd_length(r))
+        }
+
+        GraphPhysicsEngine.dampCoherentFamilyRotation(
+            positions: positions, velocities: &velocities,
+            leaves: [1, 2, 3, 4], ranges: [(hub: 0, lo: 0, hi: 4)],
+            strength: 1
+        )
+
+        var angular: Float = 0
+        var inertia: Float = 0
+        for i in 1..<positions.count {
+            let r = positions[i] - positions[0]
+            let relativeVelocity = velocities[i] - hubVelocity
+            angular += r.x * relativeVelocity.y - r.y * relativeVelocity.x
+            inertia += simd_length_squared(r)
+            XCTAssertEqual(simd_dot(relativeVelocity, r / simd_length(r)),
+                           radialBefore[i - 1], accuracy: 1e-5)
+        }
+        XCTAssertEqual(angular / inertia, 0, accuracy: 1e-6)
+        XCTAssertEqual(velocities[0], hubVelocity)
+    }
+
+    func testFamilyRotationDampingIsGradual() {
+        let positions: [SIMD2<Float>] = [
+            .zero, SIMD2(100, 0), SIMD2(0, 100), SIMD2(-100, 0),
+        ]
+        var velocities: [SIMD2<Float>] = [
+            .zero, SIMD2(0, 10), SIMD2(-10, 0), SIMD2(0, -10),
+        ]
+        GraphPhysicsEngine.dampCoherentFamilyRotation(
+            positions: positions, velocities: &velocities,
+            leaves: [1, 2, 3], ranges: [(hub: 0, lo: 0, hi: 3)],
+            strength: 0.25
+        )
+        XCTAssertEqual(velocities[1].y, 7.5, accuracy: 1e-5)
+        XCTAssertEqual(velocities[2].x, -7.5, accuracy: 1e-5)
+        XCTAssertEqual(velocities[3].y, -7.5, accuracy: 1e-5)
     }
 }

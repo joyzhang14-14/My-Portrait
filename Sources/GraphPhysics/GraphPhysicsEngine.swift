@@ -812,6 +812,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 碰撞每 tick 跑(07-02:不重叠是最基本要求)—— 轻 tick 复用上个
         // tick 的树(位置只差一步,剪枝留了 pad 余量),省掉建树大头。
         collidePass()
+        dampPortraitFamilyRotation()
         centerAndIntegrate()
         alpha += (alphaTarget - alpha) * GraphConstants.alphaDecay
         // 静止判定净位移窗:每 parkQuietWindow tick 与参考位置比一次。
@@ -2255,6 +2256,57 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 // 回正砍没(7 叶家转 90° 需 300+ tick,park 前转不完,189° 缺口实测)
                 let push = max(min(delta + mode1, 0.1), -0.1)
                 vel[leaf] += tangent * (push * r * k * a)
+            }
+        }
+    }
+
+    /// Portrait 冷却尾段只消掉每圈共同绕 hub 转动的分量，保留叶子之间
+    /// 的相对调整。强度随 alpha 渐进升高，避免开始收尾时突然刹停。
+    private func dampPortraitFamilyRotation() {
+        let start = GraphConstants.portraitRotationDampingStartAlpha
+        guard sceneRef.zone == .portrait, alphaTarget == 0,
+              alpha < start, !familyRange.isEmpty else { return }
+        let span = max(start - GraphConstants.alphaMin, Float.ulpOfOne)
+        let strength = min(max((start - alpha) / span, 0), 1)
+        Self.dampCoherentFamilyRotation(positions: pos, velocities: &vel,
+                                        leaves: familyLeaf, ranges: familyRange,
+                                        strength: strength)
+    }
+
+    /// 将每个叶圈速度投影中的共同角速度移除 strength 比例。
+    /// internal 仅供数学层单测验证；生产调用由上面的 Portrait 条件收口。
+    static func dampCoherentFamilyRotation(
+        positions: [SIMD2<Float>],
+        velocities: inout [SIMD2<Float>],
+        leaves: [Int32],
+        ranges: [(hub: Int32, lo: Int, hi: Int)],
+        strength: Float
+    ) {
+        let amount = min(max(strength, 0), 1)
+        guard amount > 0, positions.count == velocities.count else { return }
+        for range in ranges where range.hi - range.lo >= 3 {
+            let hub = Int(range.hub)
+            guard positions.indices.contains(hub),
+                  range.lo >= 0, range.hi <= leaves.count else { continue }
+            let hp = positions[hub]
+            let hv = velocities[hub]
+            var angular: Float = 0
+            var inertia: Float = 0
+            for x in range.lo..<range.hi {
+                let leaf = Int(leaves[x])
+                guard positions.indices.contains(leaf) else { continue }
+                let r = positions[leaf] - hp
+                let relativeVelocity = velocities[leaf] - hv
+                angular += r.x * relativeVelocity.y - r.y * relativeVelocity.x
+                inertia += simd_length_squared(r)
+            }
+            guard inertia > Float.ulpOfOne else { continue }
+            let omega = angular / inertia * amount
+            for x in range.lo..<range.hi {
+                let leaf = Int(leaves[x])
+                guard positions.indices.contains(leaf) else { continue }
+                let r = positions[leaf] - hp
+                velocities[leaf] -= SIMD2<Float>(-r.y, r.x) * omega
             }
         }
     }

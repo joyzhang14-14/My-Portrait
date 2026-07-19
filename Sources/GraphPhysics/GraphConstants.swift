@@ -233,6 +233,9 @@ public enum GraphConstants {
     /// 冷却:每 tick alpha += (target − alpha) × decay;< alphaMin 且 target=0 → 休眠
     public static let alphaDecay: Float = 0.0228
     public static let alphaMin: Float = 0.001
+    /// Portrait 叶群进入冷却尾段后，渐进消除绕自家 hub 的整体自转。
+    /// 只去掉全组共同角速度；叶间匀布、碰撞和径向运动不受影响。
+    public static let portraitRotationDampingStartAlpha: Float = 0.02
     /// 速度阻尼(每 tick 乘;= 1 − d3 默认 velocityDecay 0.4)
     public static let velocityDamping: Float = 0.6
     /// 向心力强度(把孤岛拉回原点方向)
