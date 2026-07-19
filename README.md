@@ -21,6 +21,7 @@
 - **Knows what you wrote** — separates words you really typed from pasted text and half-finished drafts, down to the keystroke.
 - **Builds a portrait** — raw activity is distilled into events, then into an evolving picture of your interests, habits, personality and writing style.
 - **Walk your Neural Graph** — your memories as a living map, with you at the center, instead of a list of files.
+- **Scroll back through your day** — a timeline of everything captured, moment by moment, so you can return to the one you were looking for.
 - **Search it all** — full-text across everything you've seen, said, and written.
 - **Yours, locally** — all data sits under `~/.portrait/` on this Mac (SQLite + plain files). No account, no server, nothing to sign up for.
 
@@ -85,13 +86,11 @@ This project stays focused on one thing: the memory system.
 
 ## Acknowledgements
 
-My Portrait's screen capture draws on the approach worked out by **[screenpipe](https://github.com/mediar-ai/screenpipe)** — how to record a screen around the clock without getting in the way. Thanks to mediar-ai for figuring that part out in the open.
-
-Everything past that point goes its own way, because the two projects want different things. screenpipe is a general context layer for developers to build products on. My Portrait is one finished, opinionated thing: a memory system that turns your days into a portrait of you. If the general layer is what you're after, go use screenpipe.
+My Portrait's screen capture, audio capture, and timeline all draw on the approach worked out by **[screenpipe](https://github.com/mediar-ai/screenpipe)** — how to record continuously in the background without getting in the way, and how to turn a day of raw activity into something you can scroll back through. Thanks to mediar-ai for working that out in the open, and go take a look at what they're building.
 
 ## Credits
 
-- **[screenpipe](https://github.com/mediar-ai/screenpipe)** — screen capture approach.
+- **[screenpipe](https://github.com/mediar-ai/screenpipe)** — screen capture, audio capture, and timeline approach.
 - **[WhisperKit](https://github.com/argmaxinc/WhisperKit)** · **[Qwen3-ASR](https://github.com/ivan-digital/qwen3-asr-swift)** · **[mlx-swift](https://github.com/ml-explore/mlx-swift)** · **[GRDB](https://github.com/groue/GRDB.swift)** — on-device AI on macOS, made practical.
 
 ---
