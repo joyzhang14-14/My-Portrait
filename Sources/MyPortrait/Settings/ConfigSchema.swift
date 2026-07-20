@@ -308,9 +308,8 @@ struct SchedulerConfig: Codable, Equatable {
 struct SchedulerSettings: Codable, Equatable {
     var event:          SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    /// EventClassifier:event 之后 / distill 之前的项目分组(_folders/*.json)。
-    /// 默认 daily 跟 event 同节奏 —— event 跑完就有新事件等着分组,等到下一
-    /// 个 portrait/personality 触发再 distill 完整,链条对齐。
+    /// 旧版 EventClassifier 的独立时间配置，仅为兼容已有 config.json 解码保留；
+    /// 当前分类固定在 event job 收尾执行，不再读取这个时间。
     var classify:       SchedulerConfig = .init(frequency: .daily,  timeOfDay: "03:30",
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var portrait:       SchedulerConfig = .init(frequency: .weekly, timeOfDay: "04:00",

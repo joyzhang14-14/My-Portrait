@@ -2,9 +2,9 @@ import Foundation
 
 /// `mp-folders` CLI — chat AI 整理 event folder 的工具面。
 ///
-/// 替代 EventClassifier(自动分 folder)的下线 —— folder 不再自动跑 LLM,
-/// 改由 chat AI 按用户对话需求,通过这个 CLI 手动 create / add / remove /
-/// rename / delete。语义跟 EventFolderStore 一致(每个 folder 是一个
+/// 自动 EventClassifier 之外的手动工具面：chat AI 可按用户对话需求，通过
+/// 这个 CLI create / add / remove / rename / delete。语义跟
+/// EventFolderStore 一致(每个 folder 是一个
 /// `~/.portrait/events/_folders/<slug>.json`,只持 metadata,不动 .md 本体)。
 ///
 /// 子命令:

@@ -82,9 +82,8 @@ final class MemoryScheduler {
     /// distill 锚行的 date 值。anchor 是 distill 这个 processor 的锁身份，与
     /// 运行频率无关。定义 / 语义见 `ProcessingLogStore.distillAnchorDate`。
     private let distillAnchor = ProcessingLogStore.distillAnchorDate
-    // classify(EventClassifier 自动分 folder)已下线 —— 改成 chat AI 通过
-    // mp-folders 按用户对话需求手动整理。anchor case 在 ProcessingLog 里保留
-    // (DB 历史值 + 崩溃恢复仍需识别老 inProgress),不再有 scheduler hook。
+    /// classify 锚行的 date 值。分类是 event job 的固定收尾步骤，不再单独调度。
+    private let classifyAnchor = ProcessingLogStore.classifyAnchorDate
     // personality 不用 anchor —— 它是 per-day 流水线(每天的 events 各自有
     // 各自的 personality_status 列),进度直接落在日期行里。
 
@@ -98,11 +97,10 @@ final class MemoryScheduler {
         return 10 * 60 * 1000
     }()
 
-    /// 四把分离的锁。View 侧 @Observable 跟踪它们,Run 按钮根据 canRunXxx
+    /// 三把分离的锁。View 侧 @Observable 跟踪它们,Run 按钮根据 canRunXxx
     /// 实时灰掉 + tooltip 说理由。
     private(set) var eventRunning = false
-    // classifyRunning 已下线(EventClassifier 砍掉了)。canRunEvent 不再需要
-    // classify 锁。
+    // folder classify 现在是 event job 内部步骤，共用 eventRunning。
     private(set) var distillRunning = false
     private(set) var personalityRunning = false
 
@@ -257,11 +255,13 @@ final class MemoryScheduler {
     /// 给 UI 用的"真有 stage 在跑" probe —— 读 DB,不信 in-memory eventRunning
     /// (如果 runStep 内 await 死 hang,defer 不跑 → in-memory flag 永远 stale)。
     /// 任一 row 的指定 stages 是 in_progress → true。
-    /// - event/impact 共属 "event processing" pipeline,任一 in_progress 都算
+    /// - event/impact/classify 共属 "event processing" pipeline,任一 in_progress 都算
     /// - distill 单独
     /// - personality 单独
     nonisolated func hasInProgressRowForEvent() -> Bool {
-        store.allRows().contains { $0.event == .inProgress || $0.impact == .inProgress }
+        store.allRows().contains {
+            $0.event == .inProgress || $0.impact == .inProgress || $0.classify == .inProgress
+        }
     }
     nonisolated func hasInProgressRowForDistill() -> Bool {
         store.allRows().contains { $0.distill == .inProgress }
@@ -291,8 +291,8 @@ final class MemoryScheduler {
 
     // UserDefaults 键：记录两个 job 上次跑的本地日，避免一天内重复触发。
     private let kLastEvent          = "scheduler.lastEventRun"
-    // kLastClassify 已下线(EventClassifier 砍掉)。老 UserDefaults key 保留
-    // 不读 = 静默忽略。
+    /// 恢复固定分类流水线时只触发一次全量补跑（也让旧的低权重事件进分类）。
+    private let kClassifierPipelineV2 = "scheduler.classifierPipelineV2"
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
     private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
@@ -310,6 +310,7 @@ final class MemoryScheduler {
         loadLastFailures()   // 必须在 recoverStaleLocks 之前 — recover 写 kind 时
                              // 会读老值(避免覆盖更早的 user-required kind)
         recoverStaleLocks()
+        migrateClassifierPipelineIfNeeded()
         discardOrphanStagingSnapshots()
         startCatchUpTriggers()
         registerSleepWakeHooks()
@@ -331,6 +332,17 @@ final class MemoryScheduler {
         unregisterLidPowerHooks()
         pathMonitor?.cancel()
         pathMonitor = nil
+    }
+
+    /// 旧版自动分类曾被下线，已有用户的 anchor 可能停在 complete。升级后只把
+    /// 它翻回 pending 一次，确保此前被 weight 门槛过滤的事件也会补进新流程。
+    private func migrateClassifierPipelineIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: kClassifierPipelineV2) else { return }
+        _ = store.ensureRow(for: classifyAnchor)
+        if store.setStatus(date: classifyAnchor, stage: .classify, status: .pending) {
+            defaults.set(true, forKey: kClassifierPipelineV2)
+        }
     }
 
     // MARK: - Sleep/Wake + Network hooks
@@ -555,7 +567,8 @@ final class MemoryScheduler {
         // 跑过一次后某天 failed/budget_deferred,backoff 到点也要能当天重试,
         // 否则 UI 显示 "~10 min" 实际要等到次日,Reset 按钮也形同虚设。
         let eventToday   = lastRunDay(kLastEvent) != localDayString(now)
-        let eventCatchUp = s.event.frequency == .daily && eventJobHasWork()
+        let eventCatchUp = s.event.frequency == .daily
+            && (eventJobHasWork() || classifierJobHasWork())
         let eventRetry   = s.event.frequency != .off && eventNeedsRetry()
         let eventScheduled = eventToday
             && (Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp)
@@ -582,8 +595,7 @@ final class MemoryScheduler {
             try? await Task.sleep(nanoseconds: 10 * 1_000_000_000)
         }
 
-        // classify(自动 EventClassifier 分 folder)已下线 —— chat AI 通过
-        // mp-folders 手动整理。tick 不再有 classify 分支。
+        // folder classify 已并入上面的 event job，固定在 event / impact 后执行。
 
         // ===== Tier 2 =====
         // **portraitToday 只挡 daily-scheduled trigger,不挡 retry** ——
@@ -754,7 +766,19 @@ final class MemoryScheduler {
         return (store.row(for: distillAnchor)?.distill ?? .idle).needsWork
     }
 
-    // classifierJobHasWork / scanAllEventPaths 已下线(EventClassifier 砍掉)。
+    /// folder 分类是否需要执行。只认 anchor 状态，不按“仍有未分类事件”反复
+    /// 扫盘：LLM（大语言模型）有意留下的模糊事件应等下次 event 完成后再看。
+    private func classifierJobHasWork() -> Bool {
+        _ = store.ensureRow(for: classifyAnchor)
+        guard let row = store.row(for: classifyAnchor), row.classify.needsWork else {
+            return false
+        }
+        return backoffReady(
+            status: row.classify,
+            retryCount: row.retryCount,
+            updatedAtMs: row.updatedAtMs
+        )
+    }
 
     /// personality job 现在有没有活干（per-day 待处理列表非空）。
     func personalityJobHasWork() -> Bool {
@@ -776,12 +800,13 @@ final class MemoryScheduler {
         defer { eventProgress = StepProgress() }
 
         let days = pendingDays(cap: dayCap)
-        guard !days.isEmpty else {
-            schedLog.info("event job: no pending days")
+        let classifierWasPending = trigger == .scheduler && classifierJobHasWork()
+        guard !days.isEmpty || classifierWasPending else {
+            schedLog.info("event job: no pending days or folder classification")
             store.appendPipelineRun(trigger: trigger.rawValue, pipeline: "Event processing", outcome: "no-work", reason: nil)
             return .noWork
         }
-        print("[Scheduler] event job — \(days.count) day(s) to process")
+        print("[Scheduler] event job — \(days.count) day(s) to process\(classifierWasPending ? " + folder classification" : "")")
         DiagLog.event("scheduler.event.start", ctx: [
             "days":  days.map { ProcessingLogStore.dayString($0) },
             "count": days.count,
@@ -872,31 +897,71 @@ final class MemoryScheduler {
         // pending / markRan 都不该跑)。
         guard pauseGen == pauseGeneration else { return .busy }
 
-        // weight pass：跟 rebalance 一样，整个 event 处理跑完只跑一次
-        // （逐天的 Backfill.run 传了 skipWeightPass）。pause 中止时跟
-        // rebalance 一起被上面的 guard 跳过；个别天失败不影响它跑。
-        eventProgress = StepProgress(fraction: 0.98, stage: "Recomputing weights")
-        await Backfill.weightPass()
+        if !days.isEmpty {
+            // weight pass：跟 rebalance 一样，整个 event 处理跑完只跑一次
+            // （逐天的 Backfill.run 传了 skipWeightPass）。pause 中止时跟
+            // rebalance 一起被上面的 guard 跳过；个别天失败不影响它跑。
+            eventProgress = StepProgress(fraction: 0.98, stage: "Recomputing weights")
+            await Backfill.weightPass()
 
-        // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
-        // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
-        eventProgress = StepProgress(fraction: 0.99, stage: "Rebalancing")
-        _ = MemoryBudget_applyToDisk()
+            // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按天跑 N 次，
+            // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
+            eventProgress = StepProgress(fraction: 0.99, stage: "Rebalancing")
+            _ = MemoryBudget_applyToDisk()
 
-        // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
-        // (老 classify anchor 不再 mark pending —— EventClassifier 已下线。)
-        _ = store.ensureRow(for: distillAnchor)
-        store.setStatus(date: distillAnchor, stage: .distill, status: .pending)
+            // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
+            _ = store.ensureRow(for: distillAnchor)
+            store.setStatus(date: distillAnchor, stage: .distill, status: .pending)
 
-        // 同时把这些天的 personality_status 标 pending —— 事件变了,
-        // 那天的 personality 也得重跑(per-day,跟 distill 不一样)。
-        for day in days {
-            let ds = ProcessingLogStore.dayString(day)
-            let row = store.row(for: ds)
-            // 仅 event+impact 都 complete 的天才有意义跑 personality。
-            if row?.event == .complete, row?.impact == .complete {
-                store.setStatus(date: ds, stage: .personality, status: .pending)
+            // 同时把这些天的 personality_status 标 pending —— 事件变了,
+            // 那天的 personality 也得重跑(per-day,跟 distill 不一样)。
+            for day in days {
+                let ds = ProcessingLogStore.dayString(day)
+                let row = store.row(for: ds)
+                // 仅 event+impact 都 complete 的天才有意义跑 personality。
+                if row?.event == .complete, row?.impact == .complete {
+                    store.setStatus(date: ds, stage: .personality, status: .pending)
+                }
             }
+
+            // 至少有一天完整产出后，folder 分类进入 pending。手动 Run now 有
+            // 审核/撤销，因此只标记；定时 event job 会在下面立即执行。
+            let producedEvents = days.contains { day in
+                let row = store.row(for: ProcessingLogStore.dayString(day))
+                return row?.event == .complete && row?.impact == .complete
+            }
+            if producedEvents {
+                _ = store.ensureRow(for: classifyAnchor)
+                store.setStatus(date: classifyAnchor, stage: .classify, status: .pending)
+            }
+        }
+
+        var classifierAttempted = false
+        if trigger == .scheduler, classifierJobHasWork() {
+            classifierAttempted = true
+            eventProgress = StepProgress(fraction: 0.995, stage: "Organizing event folders")
+            DiagLog.event("scheduler.classify.start")
+            await runStep(
+                date: classifyAnchor,
+                stage: .classify,
+                processor: "classify",
+                rollbackDay: nil
+            ) {
+                let cfg = ConfigStore.shared.current.scheduler.event
+                let result = try await EventClassifier(
+                    provider: cfg.resolvedProvider,
+                    model: cfg.resolvedModelLight
+                ).classify()
+                DiagLog.event("scheduler.classify.end", ctx: [
+                    "total": result.totalUnclassified,
+                    "classified": result.classifiedInThisRun,
+                    "new": result.newFoldersCreated,
+                    "updated": result.existingFoldersUpdated,
+                    "leftover": result.stillUngrouped,
+                ])
+                return .success
+            }
+            guard pauseGen == pauseGeneration else { return .busy }
         }
 
         let dayStrings = days.map { ProcessingLogStore.dayString($0) }
@@ -905,16 +970,15 @@ final class MemoryScheduler {
         if !consumeStopRequest(PipelineOwner.event) {
             postPipelineOutcomeAlert(
                 pipeline: "Event processing",
-                dates: dayStrings,
-                successSummary: "Processed \(days.count) day\(days.count == 1 ? "" : "s")",
+                dates: dayStrings + (classifierAttempted ? [classifyAnchor] : []),
+                successSummary: days.isEmpty
+                    ? "Organized event folders"
+                    : "Processed \(days.count) day\(days.count == 1 ? "" : "s")",
                 trigger: trigger
             )
         }
         return outcome
     }
-
-    // classify job(自动 EventClassifier 跑 LLM 分 folder)已整段下线 ——
-    // 改成 chat AI 通过 mp-folders 手动按用户对话需求整理。
 
     // MARK: - portrait job：distill
 
@@ -1509,13 +1573,13 @@ final class MemoryScheduler {
     }
 
     /// 把 ProcessingStage 翻成它写 staging snapshot 时用的 MemoryStaging.Kind。
-    /// raw 不走 staging(直接读 timeline);classify 已下线但 enum 还在。
+    /// raw 直接读 timeline；classify 是定时 event job 的自动收尾，不走手动审核。
     private static func stagingKind(for stage: ProcessingStage) -> MemoryStaging.Kind? {
         switch stage {
         case .raw:         return nil
         case .event:       return .events
         case .impact:      return .events
-        case .classify:    return .classify
+        case .classify:    return nil
         case .distill:     return .portrait
         case .personality: return .personality
         }
@@ -1678,6 +1742,19 @@ final class MemoryScheduler {
                     }
                 default: continue
                 }
+            }
+        }
+        if let row = store.row(for: classifyAnchor) {
+            switch row.classify {
+            case .failed, .budgetDeferred, .deadLetter:
+                if backoffReady(
+                    status: row.classify,
+                    retryCount: row.retryCount,
+                    updatedAtMs: row.updatedAtMs
+                ) {
+                    return true
+                }
+            default: break
             }
         }
         return false

@@ -260,9 +260,8 @@ struct MyPortraitApp: App {
         if args.contains("--wipe-personality-concepts") {
             WipePersonalityCLI.run()
         }
-        // EventClassifier 自动分 folder 已下线 —— chat AI 通过 mp-folders
-        // 按用户对话需求手动整理。--classify-dry-run / --classify-run dispatch
-        // 也跟着删了。
+        // EventClassifier 由 MemoryScheduler 固定接在 event job 后执行；
+        // 不再暴露独立的 --classify-dry-run / --classify-run dispatch。
         // `--import-default-cron-jobs` seeds the two built-in cronJobs into
         // CronJobStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-cron-jobs") {

@@ -74,8 +74,7 @@ struct MemorySettingsView: View {
     @State private var stagingRefreshTask: Task<Void, Never>? = nil
     @State private var previewChange: MemoryStaging.StagedChange? = nil
 
-    // EventClassifier 已下线 —— folder 整理改由 chat AI 通过 mp-folders 按用户
-    // 对话需求触发,UI 这里不再挂"Run classifier"按钮。
+    // EventClassifier 已并入每天的 event job，不再单独提供 Run 按钮。
 
     // Writing capture 的 UI 已搬到 Settings → Typing Capture
     // (WritingPipelineSection,本文件底部)—— 数据源是 typing capture。

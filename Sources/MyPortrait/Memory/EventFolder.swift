@@ -8,7 +8,7 @@ import Foundation
 /// weight / staging 逻辑零改动。
 ///
 /// 设计约束(用户原话):
-/// - **3+ 个相似 event 才开 folder**(EventClassifier 内部保证,Store 不强制)
+/// - **6+ 个相似 event 才开 folder**(EventClassifier 内部保证,Store 不强制)
 /// - 一个 event 只能属一个 folder(简化模型;cross-cutting 主题继续靠 tags)
 /// - **项目/大事件级别**的粒度:"My-Portrait" ✅ "audio" ❌
 struct EventFolder: Codable, Sendable, Identifiable, Equatable {
