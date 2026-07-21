@@ -67,49 +67,58 @@ struct TimelineView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            TimelineControlsBar(
-                currentDate: Binding(
-                    get: { state.selectedDay },
-                    set: { state.selectedDay = $0 }
-                ),
-                onRefresh: { reload() }
-            )
-            // 40pt reserves the strip where the traffic lights float (the
-            // title bar is transparent and content extends behind it).
-            .padding(.top, 40)
-            .padding(.bottom, 10)
-
-            // Browser URL bar — fixed-height slot so the screenshot below NEVER
-            // moves vertically when switching between frames with / without URLs.
-            let hasURL = !(currentFrame?.browserUrl?.isEmpty ?? true)
-            BrowserURLBar(url: currentFrame?.browserUrl ?? "")
-                .opacity(hasURL ? 1 : 0)
-                .frame(height: 34)              // locked height — no layout shift
-                .padding(.horizontal, 80)
-                .padding(.bottom, 10)
-
-            Divider().background(Color.primary.opacity(0.06))
-
-            ZStack {
-                if state.frames.isEmpty {
-                    EmptyState(loading: state.loading, hasDB: services != nil)
-                } else {
-                    FramePreview(frame: state.frames[min(state.focusIndex, state.frames.count - 1)])
+        // 07-21 全出血布局:原来是「日期栏 / URL 栏 / 画面 / 时间轴」上下叠盘子,
+        // 上下两条 bar 各占一段实体高度,跟画面割裂。现在画面区+时间轴铺满整个
+        // 面板,日期栏和 URL 栏改成**浮在画面上**的顶层浮层 —— 画面上下都放大,
+        // 时间轴柱子直接从窗口底边长出来(TimelineSlider 里清 Dock 的 Spacer
+        // 一并去掉)。
+        ZStack(alignment: .top) {
+            // ── 底层:画面(顶到面板最上沿)+ 帧信息行 + 时间轴(贴底边)──
+            VStack(spacing: 0) {
+                ZStack {
+                    if state.frames.isEmpty {
+                        EmptyState(loading: state.loading, hasDB: services != nil)
+                    } else {
+                        FramePreview(frame: state.frames[min(state.focusIndex, state.frames.count - 1)])
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()  // crop the now-filled image so it doesn't bleed sideways
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()  // crop the now-filled image so it doesn't bleed sideways
 
-            // Slider always reserves 220pt so the screenshot area above doesn't
-            // expand/contract during loading transitions. Just hidden when
-            // there are no frames to render.
-            TimelineSlider(state: state)
-                .frame(height: 220)
-                .opacity(state.frames.isEmpty ? 0 : 1)
-                .clipped()
+                // Slider reserves fixed height so the screenshot area above
+                // doesn't expand/contract during loading transitions. Just
+                // hidden when there are no frames to render.
+                TimelineSlider(state: state)
+                    .frame(height: 140)
+                    .opacity(state.frames.isEmpty ? 0 : 1)
+                    .clipped()
+            }
+
+            // ── 浮层:日期栏 + URL 栏,叠在画面上方 ──
+            VStack(spacing: 10) {
+                TimelineControlsBar(
+                    currentDate: Binding(
+                        get: { state.selectedDay },
+                        set: { state.selectedDay = $0 }
+                    ),
+                    onRefresh: { reload() }
+                )
+
+                // Browser URL bar — fixed-height slot so the layout NEVER
+                // shifts when switching between frames with / without URLs.
+                let hasURL = !(currentFrame?.browserUrl?.isEmpty ?? true)
+                BrowserURLBar(url: currentFrame?.browserUrl ?? "")
+                    .opacity(hasURL ? 1 : 0)
+                    .frame(height: 34)              // locked height — no layout shift
+                    .padding(.horizontal, 80)
+                    // 隐身时别挡画面上的鼠标事件(浮层空槽仍在原位占着)。
+                    .allowsHitTesting(hasURL)
+            }
+            // 原来 padding(.top, 40) 是给红绿灯留的整条带;红绿灯其实浮在左侧
+            // 侧栏上方,主面板这边只需少量留白 → 日期栏上移("日历往上移动一点")。
+            .padding(.top, 12)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 07-21:原本是写死的 `Color.black` + 强制 `.environment(\.colorScheme,
         // .dark)`(理由"展示屏幕录像,黑底凸显画面")。但用户切 light 后整个
         // Timeline 仍是黑的,跟侧栏割裂。现在改成跟侧栏同一个 SidebarBackdrop
@@ -640,7 +649,9 @@ private struct TimelineSlider: View {
                     .padding(.horizontal, 400)
                     .frame(height: 140, alignment: .bottom)
                 }
-                .frame(height: 155)
+                // 140 = 跟内容同高,柱子底边即滚动区底边 —— 全出血布局里
+                // 滚动区贴面板底,柱子就直接从窗口底边长出来。
+                .frame(height: 140)
                 .background(
                     LinearGradient(
                         colors: [Theme.hover, Color.clear],   // 动态:light 黑 5% / dark 白 6%
@@ -666,8 +677,8 @@ private struct TimelineSlider: View {
                     }
                 }
             }
-
-            Spacer(minLength: 0)   // empty space below — clears the macOS dock
+            // (07-21 去掉了原来垫在下面清 Dock 的 Spacer —— 全出血布局要求
+            // 柱子从窗口底边长出来。)
         }
     }
 }
