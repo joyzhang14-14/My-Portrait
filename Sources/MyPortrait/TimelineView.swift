@@ -76,9 +76,6 @@ struct TimelineView: View {
         //     方向一起等比变大,吃掉原顶部栏让出的空间
         //   - 时间轴柱子直接从窗口底边长出来(TimelineSlider 已去掉清 Dock
         //     的 Spacer,高度 220→140)
-        // ⚠️ 日历(日期栏)不能再往上塞:macOS 26 对伸进标题栏条的内容会压
-        // 一层系统玻璃 chrome,SwiftUI 内容画不到它上面 —— 上一版 padding
-        // .top 12 就是"日历被 bar 盖住"的根因。30pt 让开那条带。
         VStack(spacing: 0) {
             TimelineControlsBar(
                 currentDate: Binding(
@@ -87,7 +84,9 @@ struct TimelineView: View {
                 ),
                 onRefresh: { reload() }
             )
-            .padding(.top, 30)
+            // 内容本身被标题栏安全区(~28pt)垫着起步,12pt 只是控件到安全区
+            // 的留白 —— 日历实际离窗口顶 ~40pt("日历往上移动一点")。
+            .padding(.top, 12)
             .padding(.bottom, 6)
 
             // Browser URL bar — fixed-height slot so the screenshot below NEVER
@@ -127,17 +126,15 @@ struct TimelineView: View {
         // 已一并改成动态色:NoMediaPlaceholder / 截图描边 / 时间轴渐变 /
         // 当前刻度辉光 / URL 药丸。TimelineControlsBar 与 CalendarPopover 本就
         // 全用 Theme.* 动态色,拆掉强制 dark 后自动跟随反转(白底黑字)。
-        // ⚠️ 必须带 `.ignoresSafeArea()`(跟 TimelineSidebar 的写法一致)——
-        // 少了它 backdrop 只铺到标题栏安全区以下,顶部 ~26pt 露出
-        // window.backgroundColor 的纯黑,dark 下就是"只有 timeline 有一条
-        // 黑 bar"的回归根因(其他 pane 背景写法都对,所以只有这里出现)。
+        // ⚠️ backdrop 必须带 `.ignoresSafeArea()`(跟 TimelineSidebar 一致),
+        // 且外层**不能再挂 `.clipped()`** —— 顶部 bar 的真正根因就是原来那个
+        // "belt + suspenders" 的 .clipped():背景往标题栏安全区伸出去的那截
+        // 会被它剪回来,露出 window.backgroundColor(dark 纯黑 → 黑 bar;
+        // light 奶白 → 早前那条"顶部漏光"),同一 bug 两副面孔。侧栏没有
+        // .clipped() 所以从来正常。内部 preview / slider 各自已有 .clipped(),
+        // 面板不会真溢出,外层这道保险其实没在保任何东西。
         .background(SidebarBackdrop().ignoresSafeArea())
-        // 内容顶到窗口顶(标题栏透明,padding(.top,40) 就是给红绿灯留的那条)。
-        // 不忽略的话内容从安全区(~30pt)以下开始,40pt 排在它下面 → 日期栏比
-        // 设计位置低一截。之前有 frame 的天"看着正常"其实是 scaledToFill 图
-        // 溢出布局把整列顶上去 30pt 的巧合(见 FramePreview 注释),两处一起修。
         .ignoresSafeArea(.container, edges: .top)
-        .clipped()                       // belt + suspenders — pane never overflows
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
             guard !state.frames.isEmpty else { return }
@@ -499,12 +496,15 @@ private struct FramePreview: View {
                     // 直接放 scaledToFill 的图会**上报超过槽位的布局高度**
                     // (clipped 只裁画面不裁布局),把整列顶出面板:日期栏被
                     // 顶进标题栏 ~30pt,空数据天没图不溢出,栏就"沉下去"。
+                    // 07-21:去掉 RoundedRectangle 圆角裁切 —— 8pt 圆角会把
+                    // 截图四个角的真实像素物理切掉(用户:"边角有截断"),
+                    // 截图必须逐像素完整。描边 overlay 是槽位尺寸不是图的
+                    // 尺寸,图不满槽时悬空,一并去掉。
                     Color.clear
                         .overlay(AsyncDiskThumbnail(path: path, targetPixelSize: 1800))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke, lineWidth: 1))
                 } else if let vpath = frame.videoPath {
                     // 99%+ of frames live here — compacted into an MP4 chunk
+                    // 同上:不裁圆角、不描边,像素完整。
                     Color.clear
                         .overlay(AsyncMP4FrameThumbnail(
                             videoPath: vpath,
@@ -512,8 +512,6 @@ private struct FramePreview: View {
                             fps: frame.videoFps,
                             targetPixelSize: 1800
                         ))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke, lineWidth: 1))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
