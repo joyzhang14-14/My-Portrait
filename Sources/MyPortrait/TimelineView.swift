@@ -501,7 +501,10 @@ private struct FramePreview: View {
                     // 截图必须逐像素完整。描边 overlay 是槽位尺寸不是图的
                     // 尺寸,图不满槽时悬空,一并去掉。
                     Color.clear
-                        .overlay(AsyncDiskThumbnail(path: path, targetPixelSize: 1800))
+                        // contentMode .fit:组件默认 .fill 会把比例差的那几个
+                        // px 溢出交给外层 clipped 裁掉(左右各截几像素)。
+                        .overlay(AsyncDiskThumbnail(path: path, targetPixelSize: 1800,
+                                                    contentMode: .fit))
                 } else if let vpath = frame.videoPath {
                     // 99%+ of frames live here — compacted into an MP4 chunk
                     // 同上:不裁圆角、不描边,像素完整。
@@ -510,7 +513,8 @@ private struct FramePreview: View {
                             videoPath: vpath,
                             offsetMs: frame.videoOffsetMs,
                             fps: frame.videoFps,
-                            targetPixelSize: 1800
+                            targetPixelSize: 1800,
+                            contentMode: .fit    // 同上,像素完整不裁
                         ))
                 }
             }
