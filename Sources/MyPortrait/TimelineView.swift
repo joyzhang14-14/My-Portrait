@@ -67,58 +67,57 @@ struct TimelineView: View {
     }
 
     var body: some View {
-        // 07-21 全出血布局:原来是「日期栏 / URL 栏 / 画面 / 时间轴」上下叠盘子,
-        // 上下两条 bar 各占一段实体高度,跟画面割裂。现在画面区+时间轴铺满整个
-        // 面板,日期栏和 URL 栏改成**浮在画面上**的顶层浮层 —— 画面上下都放大,
-        // 时间轴柱子直接从窗口底边长出来(TimelineSlider 里清 Dock 的 Spacer
-        // 一并去掉)。
-        ZStack(alignment: .top) {
-            // ── 底层:画面(顶到面板最上沿)+ 帧信息行 + 时间轴(贴底边)──
-            VStack(spacing: 0) {
-                ZStack {
-                    if state.frames.isEmpty {
-                        EmptyState(loading: state.loading, hasDB: services != nil)
-                    } else {
-                        FramePreview(frame: state.frames[min(state.focusIndex, state.frames.count - 1)])
-                    }
+        // 07-21 v2:回到单列流式布局(上一版试过日期栏浮在画面上,被否 ——
+        // 截图必须**完美展示、零遮挡**,scaledToFit 等比放大)。"两个 bar"的
+        // 观感靠这些消除,而不是靠叠层:
+        //   - 分隔线已删、日期栏无独立底色,直接浮在连续的 SidebarBackdrop 上
+        //     → 顶部不再是一条"bar",只是背景上几颗控件
+        //   - 画面槽位横向 padding 60→16(见 FramePreview),截图在宽高两个
+        //     方向一起等比变大,吃掉原顶部栏让出的空间
+        //   - 时间轴柱子直接从窗口底边长出来(TimelineSlider 已去掉清 Dock
+        //     的 Spacer,高度 220→140)
+        // ⚠️ 日历(日期栏)不能再往上塞:macOS 26 对伸进标题栏条的内容会压
+        // 一层系统玻璃 chrome,SwiftUI 内容画不到它上面 —— 上一版 padding
+        // .top 12 就是"日历被 bar 盖住"的根因。30pt 让开那条带。
+        VStack(spacing: 0) {
+            TimelineControlsBar(
+                currentDate: Binding(
+                    get: { state.selectedDay },
+                    set: { state.selectedDay = $0 }
+                ),
+                onRefresh: { reload() }
+            )
+            .padding(.top, 30)
+            .padding(.bottom, 6)
+
+            // Browser URL bar — fixed-height slot so the screenshot below NEVER
+            // moves vertically when switching between frames with / without URLs.
+            let hasURL = !(currentFrame?.browserUrl?.isEmpty ?? true)
+            BrowserURLBar(url: currentFrame?.browserUrl ?? "")
+                .opacity(hasURL ? 1 : 0)
+                .frame(height: 34)              // locked height — no layout shift
+                .padding(.horizontal, 80)
+                .padding(.bottom, 6)
+
+            ZStack {
+                if state.frames.isEmpty {
+                    EmptyState(loading: state.loading, hasDB: services != nil)
+                } else {
+                    FramePreview(frame: state.frames[min(state.focusIndex, state.frames.count - 1)])
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()  // crop the now-filled image so it doesn't bleed sideways
-
-                // Slider reserves fixed height so the screenshot area above
-                // doesn't expand/contract during loading transitions. Just
-                // hidden when there are no frames to render.
-                TimelineSlider(state: state)
-                    .frame(height: 140)
-                    .opacity(state.frames.isEmpty ? 0 : 1)
-                    .clipped()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()  // crop the now-filled image so it doesn't bleed sideways
 
-            // ── 浮层:日期栏 + URL 栏,叠在画面上方 ──
-            VStack(spacing: 10) {
-                TimelineControlsBar(
-                    currentDate: Binding(
-                        get: { state.selectedDay },
-                        set: { state.selectedDay = $0 }
-                    ),
-                    onRefresh: { reload() }
-                )
-
-                // Browser URL bar — fixed-height slot so the layout NEVER
-                // shifts when switching between frames with / without URLs.
-                let hasURL = !(currentFrame?.browserUrl?.isEmpty ?? true)
-                BrowserURLBar(url: currentFrame?.browserUrl ?? "")
-                    .opacity(hasURL ? 1 : 0)
-                    .frame(height: 34)              // locked height — no layout shift
-                    .padding(.horizontal, 80)
-                    // 隐身时别挡画面上的鼠标事件(浮层空槽仍在原位占着)。
-                    .allowsHitTesting(hasURL)
-            }
-            // 原来 padding(.top, 40) 是给红绿灯留的整条带;红绿灯其实浮在左侧
-            // 侧栏上方,主面板这边只需少量留白 → 日期栏上移("日历往上移动一点")。
-            .padding(.top, 12)
+            // Slider reserves fixed height so the screenshot area above doesn't
+            // expand/contract during loading transitions. Just hidden when
+            // there are no frames to render.
+            TimelineSlider(state: state)
+                .frame(height: 140)
+                .opacity(state.frames.isEmpty ? 0 : 1)
+                .clipped()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // 07-21:原本是写死的 `Color.black` + 强制 `.environment(\.colorScheme,
         // .dark)`(理由"展示屏幕录像,黑底凸显画面")。但用户切 light 后整个
         // Timeline 仍是黑的,跟侧栏割裂。现在改成跟侧栏同一个 SidebarBackdrop
@@ -128,7 +127,11 @@ struct TimelineView: View {
         // 已一并改成动态色:NoMediaPlaceholder / 截图描边 / 时间轴渐变 /
         // 当前刻度辉光 / URL 药丸。TimelineControlsBar 与 CalendarPopover 本就
         // 全用 Theme.* 动态色,拆掉强制 dark 后自动跟随反转(白底黑字)。
-        .background(SidebarBackdrop())
+        // ⚠️ 必须带 `.ignoresSafeArea()`(跟 TimelineSidebar 的写法一致)——
+        // 少了它 backdrop 只铺到标题栏安全区以下,顶部 ~26pt 露出
+        // window.backgroundColor 的纯黑,dark 下就是"只有 timeline 有一条
+        // 黑 bar"的回归根因(其他 pane 背景写法都对,所以只有这里出现)。
+        .background(SidebarBackdrop().ignoresSafeArea())
         // 内容顶到窗口顶(标题栏透明,padding(.top,40) 就是给红绿灯留的那条)。
         // 不忽略的话内容从安全区(~30pt)以下开始,40pt 排在它下面 → 日期栏比
         // 设计位置低一截。之前有 frame 的天"看着正常"其实是 scaledToFill 图
@@ -514,7 +517,9 @@ private struct FramePreview: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 60)        // reduced — preview is smaller
+            // 07-21:60→16。scaledToFit 的图基本都是被宽度卡住的,横向留白
+            // 收窄后图在宽、高两个方向一起等比变大("截图等比例增大")。
+            .padding(.horizontal, 16)
             .padding(.top, 6)
 
             // ── Frame info row — 1.5× original size ──
