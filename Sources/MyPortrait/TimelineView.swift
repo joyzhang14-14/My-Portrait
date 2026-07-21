@@ -84,9 +84,9 @@ struct TimelineView: View {
                 ),
                 onRefresh: { reload() }
             )
-            // 内容本身被标题栏安全区(~28pt)垫着起步,12pt 只是控件到安全区
-            // 的留白 —— 日历实际离窗口顶 ~40pt("日历往上移动一点")。
-            .padding(.top, 12)
+            // 内容本身被标题栏安全区(~28pt)垫着起步,17pt 只是控件到安全区
+            // 的留白(07-21 用户微调:12 再往下 5px)。
+            .padding(.top, 17)
             .padding(.bottom, 6)
 
             // Browser URL bar — fixed-height slot so the screenshot below NEVER
@@ -484,7 +484,12 @@ private struct NoMediaPlaceholder: View {
 private struct FramePreview: View {
     let frame: TimelineFrame
     var body: some View {
-        VStack(spacing: 6) {
+        // spacing 10 = 截图底边到信息行的距离;信息行 .padding(.bottom, 10)
+        // = 信息行到时间轴(彩色条区)的距离 —— 两个间距相等(07-21 用户定稿)。
+        // 截图在槽内**贴底**(.overlay(alignment: .bottom)):scaledToFit 居中
+        // 的话槽位有富余时死空间对半分到上下,"截图到信息行"的距离会随窗口
+        // 比例浮动,贴底后这个距离恒等于 spacing,上面的富余全归日期栏下方。
+        VStack(spacing: 10) {
             ZStack {
                 if !frame.hasViewableMedia {
                     // Recorded but no on-disk pixels (capture didn't write
@@ -503,25 +508,29 @@ private struct FramePreview: View {
                     Color.clear
                         // contentMode .fit:组件默认 .fill 会把比例差的那几个
                         // px 溢出交给外层 clipped 裁掉(左右各截几像素)。
-                        .overlay(AsyncDiskThumbnail(path: path, targetPixelSize: 1800,
-                                                    contentMode: .fit))
+                        .overlay(alignment: .bottom) {
+                            AsyncDiskThumbnail(path: path, targetPixelSize: 1800,
+                                               contentMode: .fit)
+                        }
                 } else if let vpath = frame.videoPath {
                     // 99%+ of frames live here — compacted into an MP4 chunk
                     // 同上:不裁圆角、不描边,像素完整。
                     Color.clear
-                        .overlay(AsyncMP4FrameThumbnail(
-                            videoPath: vpath,
-                            offsetMs: frame.videoOffsetMs,
-                            fps: frame.videoFps,
-                            targetPixelSize: 1800,
-                            contentMode: .fit    // 同上,像素完整不裁
-                        ))
+                        .overlay(alignment: .bottom) {
+                            AsyncMP4FrameThumbnail(
+                                videoPath: vpath,
+                                offsetMs: frame.videoOffsetMs,
+                                fps: frame.videoFps,
+                                targetPixelSize: 1800,
+                                contentMode: .fit    // 同上,像素完整不裁
+                            )
+                        }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 07-21:60→16。scaledToFit 的图基本都是被宽度卡住的,横向留白
-            // 收窄后图在宽、高两个方向一起等比变大("截图等比例增大")。
-            .padding(.horizontal, 16)
+            // 07-21:60→16→8。scaledToFit 的图基本都是被宽度卡住的,横向留白
+            // 收窄后图在宽、高两个方向一起等比变大("截图等比例增大/再放大一点")。
+            .padding(.horizontal, 8)
             .padding(.top, 6)
 
             // ── Frame info row — 1.5× original size ──
@@ -540,7 +549,8 @@ private struct FramePreview: View {
                     .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(Theme.textPrimary.opacity(0.65))
             }
-            .padding(.horizontal, 18).padding(.bottom, 8)
+            // bottom 10 = 到时间轴的距离,跟上面 spacing 10(截图到信息行)相等。
+            .padding(.horizontal, 18).padding(.bottom, 10)
         }
     }
     private var timeFmt: DateFormatter {
