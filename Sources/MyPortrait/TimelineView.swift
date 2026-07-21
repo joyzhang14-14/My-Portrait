@@ -110,18 +110,21 @@ struct TimelineView: View {
                 .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.black)
+        // 07-21:原本是写死的 `Color.black` + 强制 `.environment(\.colorScheme,
+        // .dark)`(理由"展示屏幕录像,黑底凸显画面")。但用户切 light 后整个
+        // Timeline 仍是黑的,跟侧栏割裂。现在改成跟侧栏同一个 SidebarBackdrop
+        // (light 奶白→浅薰衣草 / dark 近黑+紫 glow),两侧观感统一。
+        //
+        // ⚠️ 强制 dark 一去掉,里面所有「假设背景是黑的」的写死白色都会失效,
+        // 已一并改成动态色:NoMediaPlaceholder / 截图描边 / 时间轴渐变 /
+        // 当前刻度辉光 / URL 药丸。TimelineControlsBar 与 CalendarPopover 本就
+        // 全用 Theme.* 动态色,拆掉强制 dark 后自动跟随反转(白底黑字)。
+        .background(SidebarBackdrop())
         // 内容顶到窗口顶(标题栏透明,padding(.top,40) 就是给红绿灯留的那条)。
         // 不忽略的话内容从安全区(~30pt)以下开始,40pt 排在它下面 → 日期栏比
         // 设计位置低一截。之前有 frame 的天"看着正常"其实是 scaledToFill 图
         // 溢出布局把整列顶上去 30pt 的巧合(见 FramePreview 注释),两处一起修。
         .ignoresSafeArea(.container, edges: .top)
-        // Timeline 主区域故意永远黑底(展示屏幕录像,黑底凸显画面)。
-        // 强制 dark colorScheme 让里面的 TimelineControlsBar / BrowserURLBar /
-        // FramePreview 等控件无论系统是 light 还是 dark,都用浅色字渲染 ——
-        // 否则 light 模式下系统给深色 label color,深字打在黑底上整个工具栏
-        // 隐身。
-        .environment(\.colorScheme, .dark)
         .clipped()                       // belt + suspenders — pane never overflows
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
@@ -452,10 +455,10 @@ private struct NoMediaPlaceholder: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
+                .fill(Theme.hover)                    // 动态灰阶,light/dark 都看得见
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        .stroke(Theme.stroke, lineWidth: 1)
                 )
             VStack(spacing: 8) {
                 Image(systemName: "eye.slash")
@@ -487,7 +490,7 @@ private struct FramePreview: View {
                     Color.clear
                         .overlay(AsyncDiskThumbnail(path: path, targetPixelSize: 1800))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke, lineWidth: 1))
                 } else if let vpath = frame.videoPath {
                     // 99%+ of frames live here — compacted into an MP4 chunk
                     Color.clear
@@ -498,7 +501,7 @@ private struct FramePreview: View {
                             targetPixelSize: 1800
                         ))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.stroke, lineWidth: 1))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -640,7 +643,7 @@ private struct TimelineSlider: View {
                 .frame(height: 155)
                 .background(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.08), Color.clear],
+                        colors: [Theme.hover, Color.clear],   // 动态:light 黑 5% / dark 白 6%
                         startPoint: .bottom, endPoint: .top
                     )
                 )
@@ -702,7 +705,9 @@ private struct FrameColumn: View {
             .fill(TimelineBarColor.barColor(for: frame.appName))
             .frame(width: 12, height: barH)
             .scaleEffect(isCurrent ? 1.12 : 1.0, anchor: .bottom)
-            .shadow(color: isCurrent ? .white.opacity(0.6) : .clear, radius: 5)
+            // 当前刻度的辉光。Color.primary 会反转(light 黑 / dark 白)——
+            // dark 下是白色光晕,light 下变成深色投影,两边都能把当前柱衬出来。
+            .shadow(color: isCurrent ? Color.primary.opacity(0.6) : .clear, radius: 5)
             .animation(.easeOut(duration: 0.15), value: isCurrent)
         }
         .frame(width: 12, height: 140)   // a bit taller to fit 32pt icon
@@ -784,10 +789,12 @@ private struct BrowserURLBar: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.black.opacity(0.6))
+                // textBackgroundColor 是"输入框底"语义色,正好是地址栏该有的:
+                // dark 近黑(跟原来 black 0.6 观感一致)、light 白。
+                .fill(Color(nsColor: .textBackgroundColor).opacity(0.6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        .stroke(Theme.stroke, lineWidth: 1)
                 )
         )
     }
