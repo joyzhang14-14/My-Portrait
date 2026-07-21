@@ -1148,8 +1148,9 @@ struct MemoriesView: View {
 enum FolderPalette {
     struct Swatch { let name: String; let hex: String }
 
-    /// 随机分配/默认色的预设池(07-10 起 UI 不再展示——选色一律走光谱;
-    /// 仅供 assignHex 随机固化与 defaultHex 兜底取色)。
+    /// 预设色板(07-10 起 UI 不再展示——选色一律走光谱;07-21 起 assignHex
+    /// 也改走色环,这里只剩 defaultHex 兜底取色用。色环的饱和度/亮度常数
+    /// 取自这 9 个的均值,所以它仍是整套配色的观感基准)。
     static let swatches: [Swatch] = [
         Swatch(name: "Blue",    hex: "#5C8DE8"),
         Swatch(name: "Green",   hex: "#76BD80"),
@@ -1177,15 +1178,92 @@ enum FolderPalette {
         return swatches[Int(h % UInt32(swatches.count))].hex
     }
 
-    /// 创建时随机分配(07-10 用户定稿"随机色生成之后就不会变"):从预设池
-    /// 随机取一个,结果由调用方写进 colorHex 落盘、此后永不变。
-    /// - 池子排除 Gray(灰 = 未分组/Unclassified 的观感,避免新 folder 与
-    ///   之撞脸;用户手选 Gray 不受限)。
-    /// - 优先选当前没被任何 folder 占用的色(治"颜色冲突"),全被占则纯随机。
+    /// 色环候选的固定饱和度 / 亮度 —— 取现有 9 个预设 swatch 的均值,
+    /// 让扫出来的新色跟手调色板是同一家族。起始色相 219° = Blue 预设的色相,
+    /// 于是 used 为空时第一个 folder 仍是蓝色(跟改前观感一致)。
+    private static let ringHue0 = 219.0
+    private static let ringSat = 0.54
+    private static let ringBri = 0.86
+    private static let ringSteps = 72          // 每 5° 一个候选
+
+    /// 创建时固化一色(07-10 用户定稿"随机色生成之后就不会变"):结果由调用方
+    /// 写进 colorHex 落盘、此后永不变。
+    ///
+    /// 算法(07-21 改):**色环候选 + OKLab 最大化最小距离**(max-min,
+    /// 又叫最远点采样 farthest-point sampling)。对每个候选算它到**所有**已用色
+    /// 的距离取最小值,再选这个最小值最大的候选 —— 即"离最近的邻居也尽量远"。
+    ///
+    /// 三条旧实现的撞色根因(全治):
+    /// - 池子只有 8 色 → 第 9 个 folder 必然精确重复。现在色环 72 色。
+    /// - `used` 走 hex 字符串精确比对 → 用户光谱手选的 #5C8DE9 跟预设
+    ///   #5C8DE8 肉眼同色却算"没占用"。现在按感知距离比,手选色照样避让。
+    /// - 从空闲色里 `randomElement()`,完全没有距离概念 → 已有 Blue 还可能
+    ///   发 Teal(小圆点上分不出)。现在确定性地挑最远的。
+    ///
+    /// 距离用 OKLab(感知均匀色彩空间)而不是 RGB:RGB 欧氏距离跟人眼差很远
+    /// (人眼对绿最敏感、蓝最迟钝,RGB 一视同仁)。这里用平方距离省掉开方,
+    /// 单调性一样、比大小结果不变。
     static func assignHex(used: Set<String>) -> String {
-        let pool = swatches.filter { $0.name != "Gray" }.map(\.hex)
-        let free = pool.filter { !used.contains($0) }
-        return (free.isEmpty ? pool : free).randomElement() ?? swatches[0].hex
+        let usedLab = used.compactMap { oklab(fromHex: $0) }
+        var best = ringHex(index: 0)
+        guard !usedLab.isEmpty else { return best }   // 全并列 → 取起始色(Blue)
+        var bestScore = -1.0
+        for i in 0..<ringSteps {
+            let cand = ringHex(index: i)
+            guard let c = oklab(fromHex: cand) else { continue }
+            var nearest = Double.greatestFiniteMagnitude
+            for u in usedLab {
+                let d = (c.0 - u.0) * (c.0 - u.0)
+                      + (c.1 - u.1) * (c.1 - u.1)
+                      + (c.2 - u.2) * (c.2 - u.2)
+                if d < nearest { nearest = d }
+            }
+            if nearest > bestScore { bestScore = nearest; best = cand }
+        }
+        return best
+    }
+
+    /// 色环第 i 个候选的 hex。自己算 HSB→sRGB(不走 NSColor 的 HSB 构造器 ——
+    /// 那个建在 calibrated RGB 空间,再转 sRGB 会有偏移,候选点就不均匀了)。
+    private static func ringHex(index i: Int) -> String {
+        let h = (ringHue0 + Double(i) * (360.0 / Double(ringSteps)))
+            .truncatingRemainder(dividingBy: 360)
+        let c = ringBri * ringSat
+        let x = c * (1 - abs((h / 60).truncatingRemainder(dividingBy: 2) - 1))
+        let m = ringBri - c
+        let rgb: (Double, Double, Double)
+        switch Int(h / 60) % 6 {
+        case 0:  rgb = (c, x, 0)
+        case 1:  rgb = (x, c, 0)
+        case 2:  rgb = (0, c, x)
+        case 3:  rgb = (0, x, c)
+        case 4:  rgb = (x, 0, c)
+        default: rgb = (c, 0, x)
+        }
+        return String(format: "#%02X%02X%02X",
+                      Int(round((rgb.0 + m) * 255)),
+                      Int(round((rgb.1 + m) * 255)),
+                      Int(round((rgb.2 + m) * 255)))
+    }
+
+    /// "#RRGGBB" → OKLab (L, a, b)。Björn Ottosson 2020 的闭式变换:
+    /// sRGB 去 gamma → LMS 锥体响应 → 立方根 → 线性组合。失败返回 nil。
+    static func oklab(fromHex hex: String) -> (Double, Double, Double)? {
+        var s = hex.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        func lin(_ c: Double) -> Double {
+            c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        let r = lin(Double((v >> 16) & 0xFF) / 255)
+        let g = lin(Double((v >> 8) & 0xFF) / 255)
+        let b = lin(Double(v & 0xFF) / 255)
+        let l_ = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        let m_ = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        let s_ = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+        return (0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+                1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+                0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_)
     }
 
     /// "#RRGGBB" → Color。失败返回 nil。
