@@ -81,13 +81,6 @@ private struct GraphContextClickProbe: NSViewRepresentable {
 
             let menu = NSMenu()
             menu.delegate = self
-            let count = NSMenuItem(
-                title: "Connected nodes: \(item.connectedCount)",
-                action: nil,
-                keyEquivalent: ""
-            )
-            count.isEnabled = false
-            menu.addItem(count)
             let total = NSMenuItem(
                 title: "Total nodes: \(item.totalCount)",
                 action: nil,
@@ -95,6 +88,13 @@ private struct GraphContextClickProbe: NSViewRepresentable {
             )
             total.isEnabled = false
             menu.addItem(total)
+            let count = NSMenuItem(
+                title: "Connected nodes: \(item.connectedCount)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            count.isEnabled = false
+            menu.addItem(count)
             menu.addItem(.separator())
             if item.canRename {
                 menu.addItem(actionItem(
