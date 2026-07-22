@@ -31,6 +31,35 @@ enum PortraitGraphStyleStore {
     }
 }
 
+/// Unclassified 是虚拟 folder，没有 `_folders/<slug>.json`。颜色单独保存，
+/// 只影响 Neural Graph 显示，不改 event 归类。
+enum EventGraphStyleStore {
+    private static var url: URL {
+        Storage.eventsDir.appendingPathComponent("_neural_graph.json")
+    }
+
+    private struct Payload: Codable {
+        var unclassifiedColor: String?
+    }
+
+    static func loadUnclassifiedColor() -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data)
+        else { return nil }
+        return payload.unclassifiedColor
+    }
+
+    static func setUnclassifiedColor(_ hex: String) throws {
+        try FileManager.default.createDirectory(
+            at: Storage.eventsDir, withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(Payload(unclassifiedColor: hex))
+            .write(to: url, options: .atomic)
+    }
+}
+
 /// 把磁盘上的 memory 数据(events/*.md + _folders/*.json + portrait/<cat>/*.md)
 /// 变成一张 GraphScene。纯读盘 + 纯函数,设计为在后台线程跑
 /// (调用方先在 MainActor 读好 ConfigStore 的参数传进来)。
@@ -95,6 +124,8 @@ enum GraphSceneBuilder {
         let scanned = scanDir(Storage.eventsDir, halfLifeDays: halfLifeDays)
             .sorted { $0.relPath < $1.relPath }
         let folders = EventFolderStore.loadAll().sorted { $0.slug < $1.slug }
+        let unclassifiedColor = EventGraphStyleStore.loadUnclassifiedColor()
+            .map { rgbFromHex($0) } ?? ungroupedGray
 
         // relPath → folder slug(一个 event 只归一个 folder;数据层保证不重叠)
         var folderOf: [String: String] = [:]
@@ -134,7 +165,8 @@ enum GraphSceneBuilder {
             // 会话缓存永远 miss(同顶部 scanned 排序的理由)。
             unclassifiedMembers.sort { $0.relPath < $1.relPath }
             specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
-                                 colorRGB: ungroupedGray, members: unclassifiedMembers))
+                                 colorRGB: unclassifiedColor,
+                                 members: unclassifiedMembers))
         }
         specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
 

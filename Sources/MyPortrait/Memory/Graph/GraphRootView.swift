@@ -76,7 +76,7 @@ struct GraphRootView: View {
     }
 
     private struct RecolorTarget: Identifiable {
-        enum Kind { case folder(String), category(String) }
+        enum Kind { case folder(String), category(String), unclassified }
         let id: String
         let title: String
         let kind: Kind
@@ -535,6 +535,9 @@ struct GraphRootView: View {
         let kind: RecolorTarget.Kind
         let targetID: String
         switch node.kind {
+        case .folder(let slug) where slug == GraphSceneBuilder.unclassifiedSlug:
+            kind = .unclassified
+            targetID = "unclassified"
         case .folder(let slug) where slug != GraphSceneBuilder.unclassifiedSlug:
             kind = .folder(slug)
             targetID = "folder:" + slug
@@ -589,6 +592,8 @@ struct GraphRootView: View {
                     try EventFolderStore.setColor(slug: slug, hex: hex)
                 case .category(let name):
                     try PortraitGraphStyleStore.setColor(hex, for: name)
+                case .unclassified:
+                    try EventGraphStyleStore.setUnclassifiedColor(hex)
                 }
                 await reload()
             } catch {

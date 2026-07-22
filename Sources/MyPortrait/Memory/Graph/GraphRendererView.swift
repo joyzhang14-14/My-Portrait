@@ -337,12 +337,13 @@ struct GraphRendererView: View {
         guard let id = hitTest(screen: point, viewSize: viewSize),
               id < scene.nodes.count else { return nil }
         switch scene.nodes[id].kind {
-        case .folder(let slug) where slug != GraphSceneBuilder.unclassifiedSlug:
+        case .folder(let slug):
+            let editable = slug != GraphSceneBuilder.unclassifiedSlug
             return GraphNodeContextMenu(
                 nodeId: id,
                 connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
-                canRename: true,
-                canDelete: true
+                canRename: editable,
+                canDelete: editable
             )
         case .category:
             return GraphNodeContextMenu(
