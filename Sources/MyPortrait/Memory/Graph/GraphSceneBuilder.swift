@@ -1,6 +1,36 @@
 import GraphPhysics
 import Foundation
 
+/// Portrait 分区在 Neural Graph 里的显示颜色。只保存显示偏好，不改分区目录
+/// 或记忆文件，避免影响固定的本地 pipeline。
+enum PortraitGraphStyleStore {
+    private static var url: URL {
+        Storage.portraitDir.appendingPathComponent("_neural_graph.json")
+    }
+
+    private struct Payload: Codable {
+        var colors: [String: String] = [:]
+    }
+
+    static func loadColors() -> [String: String] {
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data)
+        else { return [:] }
+        return payload.colors
+    }
+
+    static func setColor(_ hex: String, for category: String) throws {
+        var payload = Payload(colors: loadColors())
+        payload.colors[category] = hex
+        try FileManager.default.createDirectory(
+            at: Storage.portraitDir, withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(payload).write(to: url, options: .atomic)
+    }
+}
+
 /// 把磁盘上的 memory 数据(events/*.md + _folders/*.json + portrait/<cat>/*.md)
 /// 变成一张 GraphScene。纯读盘 + 纯函数,设计为在后台线程跑
 /// (调用方先在 MainActor 读好 ConfigStore 的参数传进来)。
@@ -133,6 +163,7 @@ enum GraphSceneBuilder {
     // MARK: - Portrait 画布
 
     private static func buildPortrait(halfLifeDays: Double, userName: String) -> GraphScene {
+        let savedColors = PortraitGraphStyleStore.loadColors()
         var specs: [HubSpec] = portraitCategories.map { (name, hex) in
             let dir = Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
             // 排序保证指纹稳定(同 buildEvents 的 07-02 缓存 bug 修复)。
@@ -140,7 +171,7 @@ enum GraphSceneBuilder {
                 .sorted { $0.relPath < $1.relPath }
             return HubSpec(slug: name,
                            name: name.replacingOccurrences(of: "_", with: " "),
-                           colorRGB: rgbFromHex(hex), members: members)
+                           colorRGB: rgbFromHex(savedColors[name] ?? hex), members: members)
         }
         specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
 

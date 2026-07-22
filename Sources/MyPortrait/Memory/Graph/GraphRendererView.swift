@@ -2,6 +2,79 @@ import GraphPhysics
 import SwiftUI
 import simd
 
+private struct GraphNodeContextMenu {
+    let nodeId: Int
+    let connectedCount: Int
+    let canRename: Bool
+    let canDelete: Bool
+}
+
+private final class GraphContextMenuBox {
+    var item: GraphNodeContextMenu?
+}
+
+/// Canvas 没有逐节点 View。透明探针只负责在系统弹出 SwiftUI 右键菜单前，
+/// 记录点击坐标对应的球；不吞事件，原来的左键、拖拽和缩放保持不变。
+private struct GraphContextClickProbe: NSViewRepresentable {
+    let onContext: (CGPoint) -> Void
+    let onDismiss: () -> Void
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.onContext = onContext
+        view.onDismiss = onDismiss
+        return view
+    }
+
+    func updateNSView(_ nsView: ProbeView, context: Context) {
+        nsView.onContext = onContext
+        nsView.onDismiss = onDismiss
+    }
+
+    final class ProbeView: NSView {
+        var onContext: ((CGPoint) -> Void)?
+        var onDismiss: (() -> Void)?
+        private var monitor: Any?
+
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { teardown(); return }
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.rightMouseDown, .leftMouseDown]
+            ) { [weak self] event in
+                guard let self, let window = self.window, event.window == window else {
+                    return event
+                }
+                let isContext = event.type == .rightMouseDown
+                    || (event.type == .leftMouseDown
+                        && event.modifierFlags.contains(.control))
+                let point = self.convert(event.locationInWindow, from: nil)
+                if isContext, self.bounds.contains(point) {
+                    self.onContext?(point)
+                } else {
+                    self.onDismiss?()
+                }
+                return event
+            }
+        }
+
+        private func teardown() {
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            onDismiss?()
+        }
+
+        deinit {
+            MainActor.assumeIsolated {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+            }
+        }
+    }
+}
+
 /// Neural Graph 渲染器:TimelineView 驱动的 Canvas 全量重绘
 /// (边→脉冲→球→hub 标签)。
 /// 位置每帧从物理引擎的双缓冲快照读取;全静止时 TimelineView 暂停
@@ -28,6 +101,8 @@ struct GraphRendererView: View {
     let pulseFlashSec: Double
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
+    /// 右键菜单当前作用的 folder / portrait 分区球。非 nil 时画蓝色选中圈。
+    let contextNodeId: Int?
     /// 开着浮窗卡片的球(nil = 无):与 hover 同款白闪持续提示(07-10 用户
     /// "有显示卡片的球也需要持续闪光")。
     let cardNodeId: Int?
@@ -39,6 +114,11 @@ struct GraphRendererView: View {
     var onNodeDragEnded: () -> Void = {}
     /// 用户手动动相机(平移/缩放)或起拖:中止自动取景,交还控制权。
     var onCameraInterrupt: () -> Void = {}
+    var onContextSelect: (Int) -> Void = { _ in }
+    var onContextDismiss: () -> Void = {}
+    var onContextRename: (Int) -> Void = { _ in }
+    var onContextRecolor: (Int) -> Void = { _ in }
+    var onContextDelete: (Int) -> Void = { _ in }
 
     /// 一次拖拽手势的模式:起点落在球上=拖球,否则=平移相机。
     private enum DragMode: Equatable { case idle, pan, node(Int) }
@@ -70,6 +150,7 @@ struct GraphRendererView: View {
     private final class HoverBox { var screen: CGPoint? = nil }
     @State private var hoverBox = HoverBox()
     @State private var lastMagnification: CGFloat = 1
+    @State private var contextMenuBox = GraphContextMenuBox()
 
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
     /// nodes 做 filter 是每帧 O(n) 分配(07-01 拖拽卡顿优化)。
@@ -88,11 +169,17 @@ struct GraphRendererView: View {
          pulses: [GraphPulse], pulseStart: Date,
          pulseFlashSec: Double = GraphConstants.pulseArriveFlashSec,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
+         contextNodeId: Int? = nil,
          cardNodeId: Int? = nil,
          mainBallImage: NSImage? = nil,
          onTapNode: @escaping (Int?) -> Void = { _ in },
          onNodeDragEnded: @escaping () -> Void = {},
-         onCameraInterrupt: @escaping () -> Void = {}) {
+         onCameraInterrupt: @escaping () -> Void = {},
+         onContextSelect: @escaping (Int) -> Void = { _ in },
+         onContextDismiss: @escaping () -> Void = {},
+         onContextRename: @escaping (Int) -> Void = { _ in },
+         onContextRecolor: @escaping (Int) -> Void = { _ in },
+         onContextDelete: @escaping (Int) -> Void = { _ in }) {
         self.scene = scene
         self.engine = engine
         self.paused = paused
@@ -101,11 +188,17 @@ struct GraphRendererView: View {
         self.pulseFlashSec = pulseFlashSec
         self._camera = camera
         self._hoveredId = hoveredId
+        self.contextNodeId = contextNodeId
         self.cardNodeId = cardNodeId
         self.mainBallImage = mainBallImage
         self.onTapNode = onTapNode
         self.onNodeDragEnded = onNodeDragEnded
         self.onCameraInterrupt = onCameraInterrupt
+        self.onContextSelect = onContextSelect
+        self.onContextDismiss = onContextDismiss
+        self.onContextRename = onContextRename
+        self.onContextRecolor = onContextRecolor
+        self.onContextDelete = onContextDelete
         self.hubNodes = scene.nodes.filter { $0.kind.isHub }
         let order = scene.nodes.indices.sorted {
             scene.nodes[$0].radius > scene.nodes[$1].radius
@@ -148,6 +241,13 @@ struct GraphRendererView: View {
             .gesture(dragGesture(viewSize: viewSize))
             .simultaneousGesture(magnifyGesture(viewSize: viewSize))
             .gesture(tapGesture(viewSize: viewSize))
+            .background(
+                GraphContextClickProbe(
+                    onContext: { beginContextMenu(at: $0, viewSize: viewSize) },
+                    onDismiss: dismissContextMenu
+                )
+            )
+            .contextMenu { contextMenuItems }
             .onContinuousHover { phase in
                 // 拖拽中不做 hover 命中(无意义且每事件都是一次全量扫)。
                 guard dragMode == .idle else { return }
@@ -158,6 +258,55 @@ struct GraphRendererView: View {
                 case .ended:
                     hoverBox.screen = nil
                     hoveredId = nil
+                }
+            }
+        }
+    }
+
+    private func beginContextMenu(at point: CGPoint, viewSize: CGSize) {
+        guard let id = hitTest(screen: point, viewSize: viewSize),
+              id < scene.nodes.count else { dismissContextMenu(); return }
+        let item: GraphNodeContextMenu
+        switch scene.nodes[id].kind {
+        case .folder(let slug) where slug != GraphSceneBuilder.unclassifiedSlug:
+            item = GraphNodeContextMenu(
+                nodeId: id,
+                connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
+                canRename: true,
+                canDelete: true
+            )
+        case .category:
+            item = GraphNodeContextMenu(
+                nodeId: id,
+                connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
+                canRename: false,
+                canDelete: false
+            )
+        default:
+            dismissContextMenu()
+            return
+        }
+        contextMenuBox.item = item
+        onContextSelect(id)
+    }
+
+    private func dismissContextMenu() {
+        contextMenuBox.item = nil
+        onContextDismiss()
+    }
+
+    @ViewBuilder private var contextMenuItems: some View {
+        if let item = contextMenuBox.item {
+            Text("Connected nodes: \(item.connectedCount)")
+            Divider()
+            if item.canRename {
+                Button("Rename…") { onContextRename(item.nodeId) }
+            }
+            Button("Change color…") { onContextRecolor(item.nodeId) }
+            if item.canDelete {
+                Divider()
+                Button("Delete folder", role: .destructive) {
+                    onContextDelete(item.nodeId)
                 }
             }
         }
@@ -492,6 +641,13 @@ struct GraphRendererView: View {
                 let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
                 ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
             }
+        }
+        // 右键选中圈锚定屏幕像素，不随缩放变粗；与 text 区蓝色选中框同义。
+        if let id = contextNodeId, id >= 0, id < scene.nodes.count {
+            let c = camera.worldToScreen(snap[id], viewSize: size)
+            let r = scene.nodes[id].radius * zoom + 5
+            let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
+            ctx.stroke(Path(ellipseIn: rect), with: .color(Theme.accent), lineWidth: 2.5)
         }
     }
 

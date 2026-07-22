@@ -58,9 +58,29 @@ struct GraphRootView: View {
     @State private var physicsParked = false
     @State private var camera = GraphCamera()
     @State private var hoveredId: Int? = nil
+    /// 右键菜单当前作用的 folder / portrait 分区球；渲染器据此画蓝圈。
+    @State private var contextNodeId: Int? = nil
     @State private var loading = false
     /// 加载代际 token:快速切 zone 时丢弃过期结果(同 MemoriesView.reload 模式)。
     @State private var loadGen = 0
+    @State private var renameFolder: FolderMenuTarget? = nil
+    @State private var renameDraft = ""
+    @State private var recolorTarget: RecolorTarget? = nil
+    @State private var recolorDraft: String? = nil
+    @State private var deleteFolder: FolderMenuTarget? = nil
+    @State private var graphActionError: String? = nil
+
+    private struct FolderMenuTarget: Identifiable {
+        let id: String
+        let title: String
+    }
+
+    private struct RecolorTarget: Identifiable {
+        enum Kind { case folder(String), category(String) }
+        let id: String
+        let title: String
+        let kind: Kind
+    }
 
     // 浮窗(末端球点击)
     @State private var floatNodeId: Int? = nil
@@ -136,6 +156,7 @@ struct GraphRootView: View {
                                     pulseFlashSec: pulseFlashSec,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
+                                    contextNodeId: contextNodeId,
                                     cardNodeId: floatNodeId,
                                     mainBallImage: mainBallImage,
                                     onTapNode: handleTap,
@@ -146,7 +167,12 @@ struct GraphRootView: View {
                                         floatNodeId = nil
                                         frameCameraToRing(animated: true)
                                     },
-                                    onCameraInterrupt: cancelCameraTracking)
+                                    onCameraInterrupt: cancelCameraTracking,
+                                    onContextSelect: handleContextSelect,
+                                    onContextDismiss: { contextNodeId = nil },
+                                    onContextRename: beginFolderRename,
+                                    onContextRecolor: beginRecolor,
+                                    onContextDelete: beginFolderDelete)
                         .background(Color.black.opacity(0.001))   // 空白处也接手势
 
                     // 浮窗:锚在球旁,物理在动时跟着球走(同一时钟)。
@@ -214,6 +240,43 @@ struct GraphRootView: View {
         .onDisappear {
             GraphSession.shared.entries[zone]?.camera = camera
             cancelCameraTracking()
+        }
+        .alert("Rename folder", isPresented: Binding(
+            get: { renameFolder != nil },
+            set: { if !$0 { renameFolder = nil } }
+        )) {
+            TextField("Folder name", text: $renameDraft)
+            Button("Save") { commitFolderRename() }
+            Button("Cancel", role: .cancel) { renameFolder = nil }
+        }
+        .confirmationDialog(
+            deleteFolder.map { "Delete folder “\($0.title)”?" } ?? "Delete folder?",
+            isPresented: Binding(
+                get: { deleteFolder != nil },
+                set: { if !$0 { deleteFolder = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete folder", role: .destructive) { commitFolderDelete() }
+            Button("Cancel", role: .cancel) { deleteFolder = nil }
+        } message: {
+            Text("Removes the grouping only. The connected events are kept and move back to ungrouped.")
+        }
+        .sheet(item: $recolorTarget) { target in
+            GraphRecolorSheet(
+                title: target.title,
+                hex: $recolorDraft,
+                onCancel: { recolorTarget = nil },
+                onSave: { commitRecolor(target) }
+            )
+        }
+        .alert("Couldn't update Neural Graph", isPresented: Binding(
+            get: { graphActionError != nil },
+            set: { if !$0 { graphActionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { graphActionError = nil }
+        } message: {
+            Text(graphActionError ?? "Unknown error")
         }
     }
 
@@ -448,6 +511,105 @@ struct GraphRootView: View {
     }
 
     // MARK: - 交互路由
+
+    private func handleContextSelect(_ id: Int) {
+        guard id < scene.nodes.count else { return }
+        contextNodeId = id
+        floatNodeId = nil
+        frameCameraToFolder(id)
+    }
+
+    private func beginFolderRename(_ id: Int) {
+        guard id < scene.nodes.count,
+              case .folder(let slug) = scene.nodes[id].kind,
+              slug != GraphSceneBuilder.unclassifiedSlug else { return }
+        renameFolder = FolderMenuTarget(
+            id: slug,
+            title: scene.nodes[id].title
+        )
+        renameDraft = scene.nodes[id].title
+    }
+
+    private func beginRecolor(_ id: Int) {
+        guard id < scene.nodes.count else { return }
+        let node = scene.nodes[id]
+        let kind: RecolorTarget.Kind
+        let targetID: String
+        switch node.kind {
+        case .folder(let slug) where slug != GraphSceneBuilder.unclassifiedSlug:
+            kind = .folder(slug)
+            targetID = "folder:" + slug
+        case .category(let name):
+            kind = .category(name)
+            targetID = "category:" + name
+        default:
+            return
+        }
+        recolorDraft = String(
+            format: "#%02X%02X%02X",
+            Int(round(node.colorRGB.x * 255)),
+            Int(round(node.colorRGB.y * 255)),
+            Int(round(node.colorRGB.z * 255))
+        )
+        recolorTarget = RecolorTarget(id: targetID, title: node.title, kind: kind)
+    }
+
+    private func beginFolderDelete(_ id: Int) {
+        guard id < scene.nodes.count,
+              case .folder(let slug) = scene.nodes[id].kind,
+              slug != GraphSceneBuilder.unclassifiedSlug else { return }
+        deleteFolder = FolderMenuTarget(
+            id: slug,
+            title: scene.nodes[id].title
+        )
+    }
+
+    private func commitFolderRename() {
+        guard let target = renameFolder else { return }
+        let name = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        renameFolder = nil
+        guard name != target.title else { return }
+        Task { @MainActor in
+            do {
+                try EventFolderStore.rename(slug: target.id, to: name)
+                await reload()
+            } catch {
+                graphActionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func commitRecolor(_ target: RecolorTarget) {
+        guard let hex = recolorDraft else { return }
+        recolorTarget = nil
+        Task { @MainActor in
+            do {
+                switch target.kind {
+                case .folder(let slug):
+                    try EventFolderStore.setColor(slug: slug, hex: hex)
+                case .category(let name):
+                    try PortraitGraphStyleStore.setColor(hex, for: name)
+                }
+                await reload()
+            } catch {
+                graphActionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func commitFolderDelete() {
+        guard let target = deleteFolder else { return }
+        deleteFolder = nil
+        Task { @MainActor in
+            do {
+                try EventFolderStore.delete(slug: target.id)
+                await reload()
+            } catch {
+                graphActionError = error.localizedDescription
+            }
+        }
+    }
 
     /// 点空白 = 关浮窗;点末端球 = 开浮窗;点 hub = 神经脉冲(无浮窗,需求 §5)。
     /// 点 folder 球(有隐形圆的 hub,非主球)额外聚焦该 folder 视图(07-09)。
@@ -751,5 +913,44 @@ struct GraphRootView: View {
         // 开局固定取景:环一钉好即对准(portrait 无环则轮询超时无操作,
         // 保持默认视角)。
         if !hadJump { frameCameraToRing(animated: false) }
+    }
+}
+
+private struct GraphRecolorSheet: View {
+    let title: String
+    @Binding var hex: String?
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    private var color: Binding<Color> {
+        Binding(
+            get: { hex.flatMap(FolderPalette.color(fromHex:)) ?? .blue },
+            set: { value in
+                if let converted = FolderPalette.hex(from: NSColor(value)) {
+                    hex = converted
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Change color")
+                .font(.system(size: 16, weight: .semibold))
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            ColorPicker("Color", selection: color, supportsOpacity: false)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: onSave)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
     }
 }
