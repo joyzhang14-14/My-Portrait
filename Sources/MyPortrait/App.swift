@@ -365,6 +365,11 @@ struct MyPortraitApp: App {
         if args.contains("--reocr-google-docs-today-mp4") {
             ReOcrCLI.runGoogleDocsTodayMP4()
         }
+        // 一次性清理:库中全部 loginwindow(锁屏)帧 + 纯锁屏 MP4(配套
+        // capture.screen.pauseWhenLocked —— 新帧不再产生,存量清一次)。
+        if let idx = args.firstIndex(of: "--purge-loginwindow"), idx + 1 < args.count {
+            PurgeLoginWindowCLI.run(quarantineDir: args[idx + 1])
+        }
         if args.contains("--writing-capture-backlog-approve") {
             WritingCaptureCLI.approveBacklog()
         }
