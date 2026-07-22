@@ -28,9 +28,11 @@ actor CaptureCoordinator {
     private let ocrCache: OCRCache
     private let ocr: OCRService
     private let drm: DRMGate
-    private let incognito = IncognitoGate()
-    /// ConfigStore.privacy.ignoreIncognito 的快照。Services 在变化时推。
-    private var ignoreIncognito: Bool = true
+    // (07-21 拆掉 IncognitoGate 接线:无痕跳帧开关删除、永久关闭。)
+    /// 锁屏 / login window 时跳帧。Services 在 config 变化时推。
+    private var pauseWhenLocked: Bool = true
+    /// 亮度最低时跳帧。Services 在 config 变化时推。
+    private var pauseAtMinBrightness: Bool = true
     private let ignore: IgnoreGate
     private let events: EventSources
     private let drmWatcher: DRMWatcher
@@ -91,10 +93,7 @@ actor CaptureCoordinator {
         ignore.setIgnoredUrlPatterns(patterns)
     }
 
-    /// Services 在 ConfigStore.privacy.maskIgnoredApps 变化时调。
-    nonisolated func setMaskingEnabled(_ enabled: Bool) {
-        ignore.setMaskingEnabled(enabled)
-    }
+    // (07-21 删 setMaskingEnabled:遮挡永远开,IgnoreGate 默认 true 不再改。)
 
     /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时调。
     /// drm 是共享的 class 实例(coordinator 与 drmWatcher 同一个),一次更新两边生效。
@@ -102,15 +101,10 @@ actor CaptureCoordinator {
         drm.setPauseList(apps: apps, urls: urls)
     }
 
-    /// Services 在 ConfigStore.privacy.ignoreIncognito 变化时调。
-    func setIgnoreIncognito(_ on: Bool) {
-        ignoreIncognito = on
-    }
-
-    /// Services 在 ConfigStore.capture.screen.ocrAccuracyBooster 变化时调。
-    /// 转给 ScreenCaptureService(@MainActor),下一帧即生效。
-    func setOCRBooster(_ on: Bool) async {
-        await screen.setOCRBooster(on)
+    /// Services 在 ConfigStore.capture.screen 的两个跳帧开关变化时调。
+    func setCaptureGates(pauseWhenLocked locked: Bool, pauseAtMinBrightness dim: Bool) {
+        pauseWhenLocked = locked
+        pauseAtMinBrightness = dim
     }
 
     /// Services 在功耗档位变化时调(电源/低电量/热状态/用户改 powerMode)。
@@ -291,10 +285,18 @@ actor CaptureCoordinator {
             return
         }
 
-        // 2b. 无痕浏览窗口 → 整帧跳过(不截图/OCR/入库)。三层检测见 IncognitoGate。
-        //     记 intentionalSkip:这帧是**故意**不写库,别让 StallDetector 把它算进
-        //     silent_loss,误报 "Capturing screen but DB writes have stopped"。
-        if await incognito.isPrivate(focusInfo, enabled: ignoreIncognito) {
+        // 2b. 锁屏 / login window → 整帧跳过(用户不在电脑前,拍到的只有锁屏
+        //     壁纸)。记 intentionalSkip:这帧是**故意**不写库,别让 StallDetector
+        //     把它算进 silent_loss,误报 "Capturing screen but DB writes have
+        //     stopped"。(07-21 新 gate;原来这里是 incognito gate,已删。)
+        if pauseWhenLocked, ScreenLockMonitor.queryLocked() {
+            await VisionMetrics.shared.recordIntentionalSkip()
+            return
+        }
+
+        // 2c. 屏幕亮度调到最低(滑块 0)→ 整帧跳过(屏幕黑着,用户没在看)。
+        //     读不到亮度(外接不可控显示器等)fail-open 不跳,照常采集。
+        if pauseAtMinBrightness, DisplayBrightness.isAtMinimum() {
             await VisionMetrics.shared.recordIntentionalSkip()
             return
         }

@@ -644,20 +644,8 @@ struct ScreenCaptureSettingsView: View {
     /// 原 PrivacyView 整组 cards 搬来。Screen Capture 同一物理通道,
     /// 用户体感"屏幕能看到的内容怎么过滤"也属于 capture 配置范畴。
     @ViewBuilder private var privacySection: some View {
-        SettingsCard(title: "Capture rules") {
-            SettingsRow("Ignore incognito windows",
-                        description: "Skip private browsing sessions automatically.",
-                        icon: "eye.slash") {
-                Toggle("", isOn: config.binding(\.privacy.ignoreIncognito)).labelsHidden().toggleStyle(.switch)
-            }
-            SettingsDivider()
-            SettingsRow("Mask ignored windows",
-                        description: "Windows on the lists below are hidden from the screenshot. The screenshot is still taken; those windows just go transparent.",
-                        icon: "rectangle.dashed") {
-                Toggle("", isOn: config.binding(\.privacy.maskIgnoredApps)).labelsHidden().toggleStyle(.switch)
-            }
-        }
-
+        // (07-21 删掉 "Capture rules" 卡:incognito 跳帧永久关(要屏蔽的内容
+        //  走下面两张名单)、mask 永远开(行为说明写进两张名单的脚注)。)
         SettingsCard(
             title: "Ignored apps",
             footnote: "Windows from these apps are blanked out of the screenshot, but the screenshot itself is still taken. Matching ignores case and checks the app name or window title."
@@ -674,7 +662,7 @@ struct ScreenCaptureSettingsView: View {
 
         SettingsCard(
             title: "Ignored URLs",
-            footnote: "Substring match. e.g. \"chase.com\" filters every page on chase.com."
+            footnote: "Matching pages are blanked out of the screenshot, but the screenshot itself is still taken. Substring match. e.g. \"chase.com\" filters every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Hostnames or substrings…")
@@ -740,10 +728,17 @@ struct ScreenCaptureSettingsView: View {
                     Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
-                SettingsRow("OCR accuracy booster",
-                            description: "Capture at full Retina resolution so on-screen text is read more accurately. Uses more GPU and battery; stored snapshots stay capped at the usual width.",
-                            icon: "text.viewfinder") {
-                    Toggle("", isOn: config.binding(\.capture.screen.ocrAccuracyBooster)).labelsHidden().toggleStyle(.switch)
+                // (07-21 删 OCR accuracy booster 行:全分辨率抓帧永远开。)
+                SettingsRow("Pause at the lock screen",
+                            description: "Skip captures while the Mac is at the lock screen or login window — those frames would only show the lock-screen wallpaper.",
+                            icon: "lock.display") {
+                    Toggle("", isOn: config.binding(\.capture.screen.pauseWhenLocked)).labelsHidden().toggleStyle(.switch)
+                }
+                SettingsDivider()
+                SettingsRow("Pause at minimum brightness",
+                            description: "Skip captures while the screen brightness is turned all the way down — the screen is dark, so nothing is being looked at.",
+                            icon: "sun.min") {
+                    Toggle("", isOn: config.binding(\.capture.screen.pauseAtMinBrightness)).labelsHidden().toggleStyle(.switch)
                 }
             }
         }

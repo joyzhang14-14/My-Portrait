@@ -370,7 +370,6 @@ final class ConfigStore {
         if let v = ud.string(forKey: "Settings.usageRange") { c.usage.range = v }
 
         // — Privacy
-        c.privacy.ignoreIncognito        = bool(ud, "Settings.ignoreIncognito",        default: c.privacy.ignoreIncognito)
         c.privacy.recordAudioWhileLocked = bool(ud, "Settings.recordAudioWhileLocked", default: c.privacy.recordAudioWhileLocked)
         c.privacy.ignoredApps            = stringArray(ud, "Settings.ignoredApps")
         c.privacy.ignoredUrls            = stringArray(ud, "Settings.ignoredURLs")

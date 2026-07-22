@@ -390,9 +390,9 @@ final class Services {
         observePreferredInputDevice()
         observeTranscriptionPowerMode()
 
-        // OCR accuracy booster(Settings → Screen Capture):按物理像素抓帧。
-        pushOCRBooster()
-        observeOCRBooster()
+        // 屏幕采集跳帧开关(Settings → Screen Capture):锁屏 / 最低亮度停采。
+        pushCaptureGates()
+        observeCaptureGates()
 
         // 屏幕采集功耗档位(Settings → Screen Capture → Power mode)。三个触发源:
         //   ① powerWatcher.states:插拔电源 / 电量变化(IOKit 事件)
@@ -483,9 +483,8 @@ final class Services {
         let p = ConfigStore.shared.privacy
         coordinator.setIgnoredApps(Set(p.ignoredApps))
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
-        coordinator.setMaskingEnabled(p.maskIgnoredApps)
+        // (07-21:masking 永远开、incognito 跳帧永久关,两条接线已删。)
         coordinator.setPauseCaptureList(apps: p.pauseCaptureApps, urls: p.pauseCaptureUrls)
-        Task { await coordinator.setIgnoreIncognito(p.ignoreIncognito) }
     }
 
     /// 监听 ConfigStore.privacy 的 ignore 字段（vim 改 TOML / UI 编辑都走它），
@@ -495,8 +494,6 @@ final class Services {
         withObservationTracking {
             _ = store.privacy.ignoredApps
             _ = store.privacy.ignoredUrls
-            _ = store.privacy.maskIgnoredApps
-            _ = store.privacy.ignoreIncognito
             _ = store.privacy.pauseCaptureApps
             _ = store.privacy.pauseCaptureUrls
         } onChange: { [weak self] in
@@ -508,29 +505,35 @@ final class Services {
         }
     }
 
-    /// 把 ConfigStore.capture.screen.ocrAccuracyBooster 推给 coordinator。
-    private func pushOCRBooster() {
-        let on = ConfigStore.shared.current.capture.screen.ocrAccuracyBooster
-        Task { await coordinator.setOCRBooster(on) }
+    /// 把 ConfigStore.capture.screen 的两个跳帧开关(锁屏/最低亮度)推给
+    /// coordinator。(07-21:原 pushOCRBooster 改造 —— booster 开关删除永远开。)
+    private func pushCaptureGates() {
+        let s = ConfigStore.shared.current.capture.screen
+        let locked = s.pauseWhenLocked
+        let dim = s.pauseAtMinBrightness
+        Task { await coordinator.setCaptureGates(pauseWhenLocked: locked,
+                                                 pauseAtMinBrightness: dim) }
     }
 
-    /// 监听 ocrAccuracyBooster(vim 改 TOML / UI 编辑都走它),变化时重推。
+    /// 监听两个跳帧开关(vim 改 TOML / UI 编辑都走它),变化时重推。
     /// withObservationTracking 一次性,onChange 里递归重注册。@Observable 追踪
     /// 粒度是整个 current,任意无关设置变更都会进 onChange —— 同
     /// observeTypingCapture,快照 seen 真值 diff,变了才推。
-    private func observeOCRBooster() {
+    private func observeCaptureGates() {
         let store = ConfigStore.shared
-        let seen = store.current.capture.screen.ocrAccuracyBooster
+        let seen = (store.current.capture.screen.pauseWhenLocked,
+                    store.current.capture.screen.pauseAtMinBrightness)
         withObservationTracking {
-            _ = store.capture.screen.ocrAccuracyBooster
+            _ = store.capture.screen.pauseWhenLocked
+            _ = store.capture.screen.pauseAtMinBrightness
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                let now = ConfigStore.shared.capture.screen.ocrAccuracyBooster
-                if now != seen {
-                    self.pushOCRBooster()
+                let s = ConfigStore.shared.capture.screen
+                if (s.pauseWhenLocked, s.pauseAtMinBrightness) != seen {
+                    self.pushCaptureGates()
                 }
-                self.observeOCRBooster()   // 重订阅时重新快照 seen
+                self.observeCaptureGates()   // 重订阅时重新快照 seen
             }
         }
     }

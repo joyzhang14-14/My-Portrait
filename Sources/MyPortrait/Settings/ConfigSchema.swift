@@ -725,19 +725,24 @@ struct AudioConfig: Codable, Equatable {
 
 struct ScreenConfig: Codable, Equatable {
     var enabled:         Bool   = true
-    /// 按物理像素(Retina 2x)抓帧,OCR 吃满分辨率 —— 默认关(抓 1x point 分辨率)。
-    /// 只影响 OCR 输入;存盘 JPG 仍被 jpegMaxWidth cap,体积基本不变。
-    var ocrAccuracyBooster: Bool = false
+    // (07-21 删 ocr_accuracy_booster 开关:全分辨率抓帧永远开,不再可配。)
+    /// 锁屏 / login window 时跳帧(用户不在电脑前,拍到的只有锁屏壁纸)。
+    /// 检测复用 CGSSessionScreenIsLocked,锁屏与 login window 同一信号。
+    var pauseWhenLocked: Bool = true
+    /// 屏幕亮度调到最低(滑块 0)时跳帧(屏幕黑着,用户没在看)。
+    var pauseAtMinBrightness: Bool = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
-        case ocrAccuracyBooster = "ocr_accuracy_booster"
+        case pauseWhenLocked      = "pause_when_locked"
+        case pauseAtMinBrightness = "pause_at_min_brightness"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        enabled         = c.dflt(Bool.self,   .enabled, enabled)
-        ocrAccuracyBooster = c.dflt(Bool.self, .ocrAccuracyBooster, ocrAccuracyBooster)
+        enabled              = c.dflt(Bool.self, .enabled, enabled)
+        pauseWhenLocked      = c.dflt(Bool.self, .pauseWhenLocked, pauseWhenLocked)
+        pauseAtMinBrightness = c.dflt(Bool.self, .pauseAtMinBrightness, pauseAtMinBrightness)
     }
 }
 
@@ -803,7 +808,8 @@ struct UsageConfig: Codable, Equatable {
 // MARK: - Privacy
 
 struct PrivacyConfig: Codable, Equatable {
-    var ignoreIncognito:        Bool     = true
+    // (07-21 删 ignore_incognito 开关:无痕跳帧永久关闭 —— 需要屏蔽的内容走
+    //  ignoredApps/ignoredUrls;IncognitoGate 代码保留但不再接线。)
     var recordAudioWhileLocked: Bool     = false
     /// Default blacklist applied to every new install.
     ///
@@ -827,10 +833,8 @@ struct PrivacyConfig: Codable, Equatable {
     /// DEPRECATED —— 与 ignoredUrls 在 IgnoreGate 里行为完全相同(都按窗口标题
     /// 子串遮挡)。只为解码老 config 保留:decode 时把条目并进 ignoredUrls 后清空。
     var ignoredWindowTitles:    [String] = []
-    /// When true, windows matching ignoredApps / ignoredUrls are
-    /// excluded from the ScreenCaptureKit buffer (transparent in the frame).
-    /// The frame itself is always captured.
-    var maskIgnoredApps:        Bool     = true
+    // (07-21 删 mask_ignored_apps 开关:遮挡永远开 —— ignoredApps/ignoredUrls
+    //  命中的窗口固定从 SCK buffer 排除(帧照拍、窗口透明),不再可配。)
     /// 屏幕采集「暂停名单」。焦点落在这些 app(名字子串)或 URL(子串)上时,
     /// **暂停整条屏幕采集**(DRMGate)。区别于 ignoredApps(只把窗口遮成透明,
     /// 帧照拍):受保护视频(Netflix 等)在录屏时会被系统黑掉,不停整条 SCStream
@@ -854,12 +858,10 @@ struct PrivacyConfig: Codable, Equatable {
 
     init() {}
     enum CodingKeys: String, CodingKey {
-        case ignoreIncognito         = "ignore_incognito"
         case recordAudioWhileLocked  = "record_audio_while_locked"
         case ignoredApps             = "ignored_apps"
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
-        case maskIgnoredApps         = "mask_ignored_apps"
         case pauseCaptureApps        = "pause_capture_apps"
         case pauseCaptureUrls        = "pause_capture_urls"
         case typingBlacklistEntries   = "typing_blacklist_entries"
@@ -867,7 +869,6 @@ struct PrivacyConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        ignoreIncognito        = c.dflt(Bool.self,     .ignoreIncognito, ignoreIncognito)
         recordAudioWhileLocked = c.dflt(Bool.self,     .recordAudioWhileLocked, recordAudioWhileLocked)
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
@@ -878,7 +879,6 @@ struct PrivacyConfig: Codable, Equatable {
             for t in ignoredWindowTitles where !ignoredUrls.contains(t) { ignoredUrls.append(t) }
             ignoredWindowTitles = []
         }
-        maskIgnoredApps        = c.dflt(Bool.self,     .maskIgnoredApps, maskIgnoredApps)
         pauseCaptureApps       = c.dflt([String].self, .pauseCaptureApps, pauseCaptureApps)
         pauseCaptureUrls       = c.dflt([String].self, .pauseCaptureUrls, pauseCaptureUrls)
         typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, typingBlacklistEntries)

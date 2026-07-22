@@ -164,7 +164,8 @@ enum DiagnosticBundle {
                 "schema_version": cfg.schemaVersion,
                 "screen_capture": [
                     "enabled": cfg.capture.screen.enabled,
-                    "ocr_accuracy_booster": cfg.capture.screen.ocrAccuracyBooster,
+                    "pause_when_locked": cfg.capture.screen.pauseWhenLocked,
+                    "pause_at_min_brightness": cfg.capture.screen.pauseAtMinBrightness,
                 ],
                 "audio_capture": [
                     "enabled": cfg.capture.audio.enabled,

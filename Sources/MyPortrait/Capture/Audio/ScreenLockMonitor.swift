@@ -46,9 +46,11 @@ final class ScreenLockMonitor: ObservableObject {
         observers.removeAll()
     }
 
-    /// 启动时同步查一次当前锁屏状态。CGSession 字典里的
-    /// `CGSSessionScreenIsLocked` == 1 表示已锁屏。
-    private static func queryLocked() -> Bool {
+    /// 同步查当前锁屏状态。CGSession 字典里的 `CGSSessionScreenIsLocked` == 1
+    /// 表示已锁屏(锁屏与 login window 同一信号)。本类启动时用;
+    /// CaptureCoordinator 的 pauseWhenLocked gate 也逐帧调(nonisolated,
+    /// CGSessionCopyCurrentDictionary 线程安全)。
+    nonisolated static func queryLocked() -> Bool {
         guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
         return (dict["CGSSessionScreenIsLocked"] as? Int) == 1
     }
