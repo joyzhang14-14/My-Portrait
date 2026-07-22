@@ -708,9 +708,12 @@ struct GraphRendererView: View {
         // 右键选中圈锚定屏幕像素，不随缩放变粗；与 text 区蓝色选中框同义。
         if let id = contextNodeId, id >= 0, id < scene.nodes.count {
             let c = camera.worldToScreen(snap[id], viewSize: size)
-            let r = scene.nodes[id].radius * zoom + 5
+            let lineWidth = 2.5
+            // 描边内缘刚好贴住球面，不再额外留 5px 空隙。
+            let r = scene.nodes[id].radius * zoom + lineWidth / 2
             let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
-            ctx.stroke(Path(ellipseIn: rect), with: .color(Theme.accent), lineWidth: 2.5)
+            ctx.stroke(Path(ellipseIn: rect), with: .color(Theme.accent),
+                       lineWidth: lineWidth)
         }
     }
 
