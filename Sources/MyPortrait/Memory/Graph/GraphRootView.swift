@@ -516,7 +516,6 @@ struct GraphRootView: View {
         guard id < scene.nodes.count else { return }
         contextNodeId = id
         floatNodeId = nil
-        frameCameraToFolder(id)
     }
 
     private func beginFolderRename(_ id: Int) {
