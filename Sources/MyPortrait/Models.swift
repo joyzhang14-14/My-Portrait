@@ -329,7 +329,10 @@ enum IntegrationRegistry {
         .init(id: "deepseek",           name: "DeepSeek",        bundleId: nil,                                     letter: "D",  assetName: "DeepSeek", accent: Color(red: 0.27, green: 0.49, blue: 0.94),  signInMethod: .apiKey,       category: .ai),
 
         // Local model runners
-        .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", assetName: "Ollama", assetFullBleed: true, accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
+        // fullBleed=false(07-22):asset 是透明底白身羊驼,fullBleed 直接贴卡片
+        // → light 主题白羊驼贴白卡隐身。false 走"固定白底圆角块 + logo"分支,
+        // 深色描边羊驼在两种主题下都一样(固定图标,不随 scheme 变)。
+        .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", assetName: "Ollama", assetFullBleed: false, accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
 
         // Productivity
         .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  assetName: "Obsidian", assetFullBleed: true, accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
