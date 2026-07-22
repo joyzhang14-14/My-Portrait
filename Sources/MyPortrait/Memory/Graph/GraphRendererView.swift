@@ -9,32 +9,45 @@ private struct GraphNodeContextMenu {
     let canDelete: Bool
 }
 
-private final class GraphContextMenuBox {
-    var item: GraphNodeContextMenu?
-}
-
-/// Canvas 没有逐节点 View。透明探针只负责在系统弹出 SwiftUI 右键菜单前，
-/// 记录点击坐标对应的球；不吞事件，原来的左键、拖拽和缩放保持不变。
+/// Canvas 没有逐节点 View。透明探针先按右键坐标找到球，再直接弹出
+/// 对应的原生菜单；左键、拖拽和缩放保持不变。
 private struct GraphContextClickProbe: NSViewRepresentable {
-    let onContext: (CGPoint) -> Void
+    let contextItemAt: (CGPoint) -> GraphNodeContextMenu?
+    let onSelect: (Int) -> Void
     let onDismiss: () -> Void
+    let onRename: (Int) -> Void
+    let onRecolor: (Int) -> Void
+    let onDelete: (Int) -> Void
 
     func makeNSView(context: Context) -> ProbeView {
         let view = ProbeView()
-        view.onContext = onContext
-        view.onDismiss = onDismiss
+        update(view)
         return view
     }
 
     func updateNSView(_ nsView: ProbeView, context: Context) {
-        nsView.onContext = onContext
-        nsView.onDismiss = onDismiss
+        update(nsView)
     }
 
-    final class ProbeView: NSView {
-        var onContext: ((CGPoint) -> Void)?
+    private func update(_ view: ProbeView) {
+        view.contextItemAt = contextItemAt
+        view.onSelect = onSelect
+        view.onDismiss = onDismiss
+        view.onRename = onRename
+        view.onRecolor = onRecolor
+        view.onDelete = onDelete
+    }
+
+    final class ProbeView: NSView, NSMenuDelegate {
+        var contextItemAt: ((CGPoint) -> GraphNodeContextMenu?)?
+        var onSelect: ((Int) -> Void)?
         var onDismiss: (() -> Void)?
+        var onRename: ((Int) -> Void)?
+        var onRecolor: ((Int) -> Void)?
+        var onDelete: ((Int) -> Void)?
         private var monitor: Any?
+        private var activeItem: GraphNodeContextMenu?
+        private var activeMenu: NSMenu?
 
         override var isFlipped: Bool { true }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -53,17 +66,71 @@ private struct GraphContextClickProbe: NSViewRepresentable {
                     || (event.type == .leftMouseDown
                         && event.modifierFlags.contains(.control))
                 let point = self.convert(event.locationInWindow, from: nil)
-                if isContext, self.bounds.contains(point) {
-                    self.onContext?(point)
-                } else {
-                    self.onDismiss?()
+                if isContext, self.bounds.contains(point),
+                   let item = self.contextItemAt?(point) {
+                    self.presentMenu(for: item, event: event)
+                    return nil
                 }
+                self.onDismiss?()
                 return event
             }
         }
 
+        private func presentMenu(for item: GraphNodeContextMenu, event: NSEvent) {
+            activeItem = item
+            onSelect?(item.nodeId)
+
+            let menu = NSMenu()
+            menu.delegate = self
+            let count = NSMenuItem(
+                title: "Connected nodes: \(item.connectedCount)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            count.isEnabled = false
+            menu.addItem(count)
+            menu.addItem(.separator())
+            if item.canRename {
+                menu.addItem(actionItem("Rename…", #selector(renameNode)))
+            }
+            menu.addItem(actionItem("Change color…", #selector(recolorNode)))
+            if item.canDelete {
+                menu.addItem(.separator())
+                menu.addItem(actionItem("Delete folder", #selector(deleteNode)))
+            }
+            activeMenu = menu
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
+
+        private func actionItem(_ title: String, _ action: Selector) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            return item
+        }
+
+        @objc private func renameNode() {
+            if let id = activeItem?.nodeId { onRename?(id) }
+        }
+
+        @objc private func recolorNode() {
+            if let id = activeItem?.nodeId { onRecolor?(id) }
+        }
+
+        @objc private func deleteNode() {
+            if let id = activeItem?.nodeId { onDelete?(id) }
+        }
+
+        func menuDidClose(_ menu: NSMenu) {
+            activeMenu = nil
+            activeItem = nil
+            onDismiss?()
+        }
+
         private func teardown() {
             if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            activeMenu?.cancelTracking()
+            activeMenu = nil
+            activeItem = nil
             onDismiss?()
         }
 
@@ -150,7 +217,6 @@ struct GraphRendererView: View {
     private final class HoverBox { var screen: CGPoint? = nil }
     @State private var hoverBox = HoverBox()
     @State private var lastMagnification: CGFloat = 1
-    @State private var contextMenuBox = GraphContextMenuBox()
 
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
     /// nodes 做 filter 是每帧 O(n) 分配(07-01 拖拽卡顿优化)。
@@ -243,11 +309,14 @@ struct GraphRendererView: View {
             .gesture(tapGesture(viewSize: viewSize))
             .background(
                 GraphContextClickProbe(
-                    onContext: { beginContextMenu(at: $0, viewSize: viewSize) },
-                    onDismiss: dismissContextMenu
+                    contextItemAt: { contextMenuItem(at: $0, viewSize: viewSize) },
+                    onSelect: onContextSelect,
+                    onDismiss: onContextDismiss,
+                    onRename: onContextRename,
+                    onRecolor: onContextRecolor,
+                    onDelete: onContextDelete
                 )
             )
-            .contextMenu { contextMenuItems }
             .onContinuousHover { phase in
                 // 拖拽中不做 hover 命中(无意义且每事件都是一次全量扫)。
                 guard dragMode == .idle else { return }
@@ -263,52 +332,27 @@ struct GraphRendererView: View {
         }
     }
 
-    private func beginContextMenu(at point: CGPoint, viewSize: CGSize) {
+    private func contextMenuItem(at point: CGPoint, viewSize: CGSize)
+        -> GraphNodeContextMenu? {
         guard let id = hitTest(screen: point, viewSize: viewSize),
-              id < scene.nodes.count else { dismissContextMenu(); return }
-        let item: GraphNodeContextMenu
+              id < scene.nodes.count else { return nil }
         switch scene.nodes[id].kind {
         case .folder(let slug) where slug != GraphSceneBuilder.unclassifiedSlug:
-            item = GraphNodeContextMenu(
+            return GraphNodeContextMenu(
                 nodeId: id,
                 connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
                 canRename: true,
                 canDelete: true
             )
         case .category:
-            item = GraphNodeContextMenu(
+            return GraphNodeContextMenu(
                 nodeId: id,
                 connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
                 canRename: false,
                 canDelete: false
             )
         default:
-            dismissContextMenu()
-            return
-        }
-        contextMenuBox.item = item
-        onContextSelect(id)
-    }
-
-    private func dismissContextMenu() {
-        contextMenuBox.item = nil
-        onContextDismiss()
-    }
-
-    @ViewBuilder private var contextMenuItems: some View {
-        if let item = contextMenuBox.item {
-            Text("Connected nodes: \(item.connectedCount)")
-            Divider()
-            if item.canRename {
-                Button("Rename…") { onContextRename(item.nodeId) }
-            }
-            Button("Change color…") { onContextRecolor(item.nodeId) }
-            if item.canDelete {
-                Divider()
-                Button("Delete folder", role: .destructive) {
-                    onContextDelete(item.nodeId)
-                }
-            }
+            return nil
         }
     }
 
