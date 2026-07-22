@@ -5,6 +5,7 @@ import simd
 private struct GraphNodeContextMenu {
     let nodeId: Int
     let connectedCount: Int
+    let totalCount: Int
     let canRename: Bool
     let canDelete: Bool
 }
@@ -46,7 +47,6 @@ private struct GraphContextClickProbe: NSViewRepresentable {
         var onRecolor: ((Int) -> Void)?
         var onDelete: ((Int) -> Void)?
         private var monitor: Any?
-        private var activeItem: GraphNodeContextMenu?
         private var activeMenu: NSMenu?
 
         override var isFlipped: Bool { true }
@@ -77,7 +77,6 @@ private struct GraphContextClickProbe: NSViewRepresentable {
         }
 
         private func presentMenu(for item: GraphNodeContextMenu, event: NSEvent) {
-            activeItem = item
             onSelect?(item.nodeId)
 
             let menu = NSMenu()
@@ -89,40 +88,54 @@ private struct GraphContextClickProbe: NSViewRepresentable {
             )
             count.isEnabled = false
             menu.addItem(count)
+            let total = NSMenuItem(
+                title: "Total nodes: \(item.totalCount)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            total.isEnabled = false
+            menu.addItem(total)
             menu.addItem(.separator())
             if item.canRename {
-                menu.addItem(actionItem("Rename…", #selector(renameNode)))
+                menu.addItem(actionItem(
+                    "Rename…", #selector(renameNode(_:)), nodeId: item.nodeId
+                ))
             }
-            menu.addItem(actionItem("Change color…", #selector(recolorNode)))
+            menu.addItem(actionItem(
+                "Change color…", #selector(recolorNode(_:)), nodeId: item.nodeId
+            ))
             if item.canDelete {
                 menu.addItem(.separator())
-                menu.addItem(actionItem("Delete folder", #selector(deleteNode)))
+                menu.addItem(actionItem(
+                    "Delete folder", #selector(deleteNode(_:)), nodeId: item.nodeId
+                ))
             }
             activeMenu = menu
             NSMenu.popUpContextMenu(menu, with: event, for: self)
         }
 
-        private func actionItem(_ title: String, _ action: Selector) -> NSMenuItem {
+        private func actionItem(_ title: String, _ action: Selector,
+                                nodeId: Int) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
+            item.tag = nodeId
             return item
         }
 
-        @objc private func renameNode() {
-            if let id = activeItem?.nodeId { onRename?(id) }
+        @objc private func renameNode(_ sender: NSMenuItem) {
+            onRename?(sender.tag)
         }
 
-        @objc private func recolorNode() {
-            if let id = activeItem?.nodeId { onRecolor?(id) }
+        @objc private func recolorNode(_ sender: NSMenuItem) {
+            onRecolor?(sender.tag)
         }
 
-        @objc private func deleteNode() {
-            if let id = activeItem?.nodeId { onDelete?(id) }
+        @objc private func deleteNode(_ sender: NSMenuItem) {
+            onDelete?(sender.tag)
         }
 
         func menuDidClose(_ menu: NSMenu) {
             activeMenu = nil
-            activeItem = nil
             onDismiss?()
         }
 
@@ -130,7 +143,6 @@ private struct GraphContextClickProbe: NSViewRepresentable {
             if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
             activeMenu?.cancelTracking()
             activeMenu = nil
-            activeItem = nil
             onDismiss?()
         }
 
@@ -336,19 +348,25 @@ struct GraphRendererView: View {
         -> GraphNodeContextMenu? {
         guard let id = hitTest(screen: point, viewSize: viewSize),
               id < scene.nodes.count else { return nil }
+        // GraphEdge 约定 a=内容球、b=folder/分区球。只数 b == id 的边，
+        // 不把 folder 通往主球的那条边算进内容 node。
+        let connectedCount = scene.edges.lazy.filter { $0.b == id }.count
+        let totalCount = scene.nodes.lazy.filter { $0.hubIndex == id }.count
         switch scene.nodes[id].kind {
         case .folder(let slug):
             let editable = slug != GraphSceneBuilder.unclassifiedSlug
             return GraphNodeContextMenu(
                 nodeId: id,
-                connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
+                connectedCount: connectedCount,
+                totalCount: totalCount,
                 canRename: editable,
                 canDelete: editable
             )
         case .category:
             return GraphNodeContextMenu(
                 nodeId: id,
-                connectedCount: scene.nodes.lazy.filter { $0.hubIndex == id }.count,
+                connectedCount: connectedCount,
+                totalCount: totalCount,
                 canRename: false,
                 canDelete: false
             )
