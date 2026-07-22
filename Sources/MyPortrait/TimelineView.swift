@@ -652,13 +652,20 @@ private struct TimelineSlider: View {
                     // diff 量从数千降到数十,内存也跟着降。
                     // 列宽固定(FrameColumn 锁 12pt),lazy 能正确算 content 宽度;
                     // ScrollViewReader.scrollTo 对未渲染 id 仍可定位。
-                    LazyHStack(alignment: .bottom, spacing: 6) {
+                    //
+                    // 07-22 点击判定铺满空隙:原来 spacing 6 的缝是死区(点了
+                    // 没反应)。改 spacing 0 + 每列左右 padding 3 —— 视觉上柱宽
+                    // 12、缝 6 一个像素都没变,但 contentShape 把 18pt 整列
+                    // (含透明的图标槽/Spacer 区)都变成可点区,列与列无缝衔接。
+                    LazyHStack(alignment: .bottom, spacing: 0) {
                         ForEach(state.frames.indices, id: \.self) { idx in
                             FrameColumn(
                                 frame: state.frames[idx],
                                 isCurrent: idx == state.focusIndex,
                                 isAppStart: idx == 0 || state.frames[idx].appName != state.frames[idx - 1].appName
                             )
+                            .padding(.horizontal, 3)      // 吃掉原 spacing 6 的左右各半
+                            .contentShape(Rectangle())    // 整列矩形可点,不只柱子字形
                             .id(state.frames[idx].id)
                             .onTapGesture { state.focusIndex = idx }
                         }
