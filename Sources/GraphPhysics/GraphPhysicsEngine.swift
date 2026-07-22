@@ -119,9 +119,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 松手后影子终点已用首个真实 hub 稳定窗校正过。
     /// 只校正一次,避免陨石弧每 tick 追着 folder 慢爬漂移。
     private var beltRayCorrectedToActual = false
-    /// 松手后的起飞门：先把陨石钉在松手位置，等首个真实 hub 稳定窗
-    /// 完成射线校准，再统一放行，避免可见归位途中改变目标。
-    private var beltLaunchPending = false
     /// 影子**当前** hub 位置(每真实 tick 从影子刷新;快进领先真实
     /// 布局,影子收敛后 = 终局)—— 动 hub 的挡板"计划位"。
     private var beltPredPos: [SIMD2<Float>] = []
@@ -467,7 +464,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltForming = true
         beltPredDirty = true
         beltRayCorrectedToActual = false
-        beltLaunchPending = false
         ringDirty = true
         releaseSettleEpisode = false   // 出口③:重炸开清 latch(开局路径永不快放)
         // 清旧环(07-09 出场偏差修):切走再切回复用引擎走这条路,若不清,
@@ -550,7 +546,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         nodeTransit = .init(repeating: false, count: n)
         beltPredDirty = true
         beltRayCorrectedToActual = false
-        beltLaunchPending = false
         shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()   // 旧影子任务作废
         ringDirty = true   // 数据变了 → 环半径按新影子终局重算
         hubPrev = []   // 帧携带参考失效,下 tick 重建
@@ -588,7 +583,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 if !wasDragging {
                     beltDragHome = beltIdx.map { pos[Int($0)] }
                     dragMoveEma = -1   // 新拖开始:静置 EMA 回哨兵(首 tick 跳过)
-                    beltLaunchPending = false
                 }
                 releaseSettleEpisode = false   // 出口②:新拖开始,清 latch
             } else if wasDragging {
@@ -597,7 +591,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 // 冷尾巴残余测量。
                 releaseSettleEpisode = true
                 beltRayCorrectedToActual = false
-                beltLaunchPending = true
                 buildSettleTeam()
                 // 松手边沿:预热命中判定 —— 拖拽中已按"假设此刻松手"
                 // 预算过,最近预算的克隆位与松手位置够近(<60pt)**且松手前
@@ -1028,11 +1021,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 间接改变 hub 终点;少数布局的射线因此可偏 ~15°。hub
             // 首次进入稳定窗时用真实位置校正一次,之后仍锁定,
             // 在压低终态偏角的同时不恢复「每 tick 追 folder 慢滑」。
-            // alpha 冷透是病态布局的兜底，避免某个 hub 永远达不到稳定窗时
-            // 起飞门永久关闭。
-            let launchCalibrationReady = allStatic
-                || alpha < GraphConstants.alphaMin
-            if !beltForming, shadowDone, launchCalibrationReady,
+            if !beltForming, shadowDone, allStatic,
                !beltRayCorrectedToActual {
                 beltPredPos = beltTmpNow
                 beltRayCorrectedToActual = true
@@ -1055,24 +1044,6 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             ringC = ringTargetC
             ringRad = ringTargetRad
             let rc = ringC
-            // 校准前完全钉住陨石：many-body/link 在本 tick 早些时候写入的
-            // 速度清零，transit 让后续 collide/气泡滑出不再推它。校准完成
-            // 后只在这里放行一次，并从此刻重开起飞加力窗口。
-            if !beltForming, beltLaunchPending {
-                if beltRayCorrectedToActual {
-                    beltLaunchPending = false
-                    beltLockTick = tickCount
-                } else {
-                    for bi in 0..<beltIdx.count {
-                        let i = Int(beltIdx[bi])
-                        vel[i] = .zero
-                        nodeTransit[i] = true
-                    }
-                    beltTransitAny = true
-                    for s in 0..<nh { hubPrev[s] = beltTmpNow[s] }
-                    return
-                }
-            }
             // 极角/角增量绕**环心**;帧携带 = 绕环心刚体公转,按自家 hub
             // 相对环心的角增量
             for s in 0..<nh {
