@@ -569,7 +569,12 @@ final class MemoryScheduler {
         let eventToday   = lastRunDay(kLastEvent) != localDayString(now)
         let eventCatchUp = s.event.frequency == .daily
             && (eventJobHasWork() || classifierJobHasWork())
-        let eventRetry   = s.event.frequency != .off && eventNeedsRetry()
+        // eventNeedsRetry() 只认 failed/budget_deferred,而 "Retry now"(resetDay)
+        // 把阶段翻成 **pending** —— 落在判据之外。于是当天已跑过时,按钮点下去
+        // 到次日才动,正是上面注释想避免的"形同虚设"。把 pending 的活也算进
+        // retry 分支:有没跑完的天(且过了 backoff)就跑,不受"今天跑过"限制。
+        let eventRetry   = s.event.frequency != .off
+            && (eventNeedsRetry() || eventJobHasWork() || classifierJobHasWork())
         let eventScheduled = eventToday
             && (Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp)
         if eventScheduled || eventRetry {
@@ -604,7 +609,9 @@ final class MemoryScheduler {
         // → portraitToday=false → 不再触发 → attention 行 9 小时都在显示。
         let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
         let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
-        let portraitRetry   = s.portrait.frequency != .off && portraitNeedsRetry()
+        // 同 eventRetry:resetDay 翻出的 pending 也要能当天重跑。
+        let portraitRetry   = s.portrait.frequency != .off
+            && (portraitNeedsRetry() || portraitJobHasWork())
         let portraitScheduled = portraitToday
             && (Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp)
         if portraitScheduled || portraitRetry {
@@ -614,7 +621,8 @@ final class MemoryScheduler {
 
         let personalityToday   = lastRunDay(kLastPersonality) != localDayString(now)
         let personalityCatchUp = s.personality.frequency == .daily && personalityJobHasWork()
-        let personalityRetry   = s.personality.frequency != .off && personalityNeedsRetry()
+        let personalityRetry   = s.personality.frequency != .off
+            && (personalityNeedsRetry() || personalityJobHasWork())
         let personalityScheduled = personalityToday
             && (Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp)
         if personalityScheduled || personalityRetry {
@@ -1626,25 +1634,10 @@ final class MemoryScheduler {
         print("[Scheduler] reject-reset \(date) stages=\(stages.map(\.rawValue)) → pending")
     }
 
-    /// "我接受现状,不再跑" —— 用户 Dismiss attention 行时调。把 failed /
-    /// budget_deferred / dead_letter 阶段标 complete + 清 last failure kind,
-    /// 从 attention 列表永久消失。跟 resetDay 区分:
-    ///   - resetDay → 阶段回 pending,下次 tick 重试(用户:再试一次)
-    ///   - dismissDay → 阶段标 complete,scheduler 不再碰它(用户:不在乎了)
-    func dismissDay(_ date: String) {
-        guard let row = store.row(for: date) else { return }
-        for stage in ProcessingStage.allCases {
-            switch row.status(of: stage) {
-            case .failed, .deadLetter, .budgetDeferred:
-                store.setStatus(date: date, stage: stage, status: .complete)
-                clearFailure(date: date, stage: stage)
-            default:
-                break
-            }
-        }
-        store.releaseLock(date: date)
-        print("[Scheduler] dismiss \(date) → complete, kind cleared")
-    }
+    // dismissDay 已删除 —— 它把失败阶段直接标 complete,那天从此永不重跑。
+    // 2026-07-25:OAuth refresh 连炸 4 天,attention 行只有 Dismiss 一个按钮,
+    // 点完 5 天数据被静默丢弃。现在 attention 行只有 "Retry now"(resetDay),
+    // 没有"放弃这一天"这个选项 —— 每天都必须跑到。别加回来。
 
     /// 需要用户关注的日：任一阶段处于 failed / dead_letter / budget_deferred。
     /// nonisolated:纯 DB 读 + 数据变换,不碰 MainActor 状态,可在后台调用

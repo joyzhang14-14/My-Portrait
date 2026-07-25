@@ -902,7 +902,7 @@ struct MemorySettingsView: View {
 
     private var attentionSection: some View {
         // scheduler.attentionVersion 是 @Observable 计数 —— runStep success /
-        // failed / recoverPausedJobs / dismissDay 等都会 bump 它。下面 .task(id:)
+        // failed / recoverPausedJobs / resetDay 等都会 bump 它。下面 .task(id:)
         // 监听这个版本号,变化时自动 reload(),retry 成功后 attention 行不再
         // 卡死,自动消失。
         let version = MemoryScheduler.shared.attentionVersion
@@ -977,14 +977,7 @@ struct MemorySettingsView: View {
                     }
                 }
                 Spacer()
-                Button("Dismiss") {
-                    MemoryScheduler.shared.dismissDay(item.date)
-                    reload()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Mark complete — stop retrying this day")
-                Button("Problem solved") {
+                Button("Retry now") {
                     MemoryScheduler.shared.resetDay(item.date)
                     reload()
                 }
@@ -1028,17 +1021,17 @@ struct MemorySettingsView: View {
                 Text("retry \(item.retryCount)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                Button("Dismiss") {
-                    MemoryScheduler.shared.dismissDay(item.date)
+                Button("Retry now") {
+                    MemoryScheduler.shared.resetDay(item.date)
                     reload()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Mark complete — stop retrying this day")
+                .help("Reset to pending — scheduler will retry on next tick")
             }
             .padding(.vertical, 2)
         } else {
-            // ─── Fallback:没 kind 信息(进程刚重启 / DB 老行)→ 老样式 + Reset ───
+            // ─── Fallback:没 kind 信息(进程刚重启 / DB 老行)→ 老样式 + Retry ───
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 12, weight: .medium))
@@ -1050,14 +1043,7 @@ struct MemorySettingsView: View {
                 Text("retry \(item.retryCount)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                Button("Dismiss") {
-                    MemoryScheduler.shared.dismissDay(item.date)
-                    reload()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Mark complete — stop retrying this day")
-                Button("Reset") {
+                Button("Retry now") {
                     MemoryScheduler.shared.resetDay(item.date)
                     reload()
                 }
