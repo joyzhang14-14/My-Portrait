@@ -241,27 +241,13 @@ targets:
         #   · 关掉 Debug 基础注入 → 去掉 get-task-allow(可调试的 root,同样不授权)
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: "NO"
 
-  MyPortraitTests:
-    type: bundle.unit-test
-    platform: macOS
-    sources:
-      - Tests/MyPortraitTests
-    dependencies:
-      - target: MyPortrait
-    settings:
-      base:
-        SWIFT_VERSION: "6.0"
-        GENERATE_INFOPLIST_FILE: "YES"
+  # MyPortraitTests target 已摘除 —— Tests/ 整个不进仓库(见 .gitignore),
+  # 留着 sources 指向一个不存在的目录会让 xcodegen / build 直接失败。
 
 schemes:
   MyPortrait:
     build:
       targets:
         MyPortrait: all
-        MyPortraitTests: [test]
     run:
       config: Debug
-    test:
-      config: Debug
-      targets:
-        - MyPortraitTests

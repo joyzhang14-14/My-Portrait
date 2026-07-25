@@ -68,10 +68,8 @@ let package = Package(
             name: "PortraitSleepHelper",
             path: "Sources/PortraitSleepHelper"
         ),
-        .testTarget(
-            name: "MyPortraitTests",
-            dependencies: ["MyPortrait", "GraphPhysics"],
-            path: "Tests/MyPortraitTests"
-        ),
+        // Tests/ 整个不进仓库(见 .gitignore) —— 里面的 lab 目录是拿真实采集
+        // 数据做的 gold/fixture,属于隐私数据。testTarget 一并摘掉,否则 clone
+        // 下来找不到 Tests/MyPortraitTests 会直接 build 失败。
     ]
 )
