@@ -47,3 +47,13 @@ INTEL.md
 # 项目 CLAUDE.md 留本地,不上传 GitHub
 /CLAUDE.md
 /AGENTS.md
+
+# ⚠️ 本地实验室 —— 一律不上传。
+# 这些目录里是真实采集数据(屏幕 OCR 原文、击键、session、canvas 文本)做的
+# gold / fixture,属于隐私数据。2026-07-25 发现它们已经被推到**公开**仓库,
+# 且其中一份 OCR 里含一个真实的 Discord bot token(采集时正好在屏幕上)。
+# Tests/MyPortraitTests 是纯代码单测(Package.swift 的 testTarget),照常提交。
+Tests/event-local-lab/
+Tests/writing-capture-local-lab/
+Tests/writing-capture-extract/
+Tests/writing-style-lab/
