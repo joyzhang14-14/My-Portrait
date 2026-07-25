@@ -32,6 +32,8 @@ final class SleepHelperClient {
     /// 各 owner 独立持有("memory" 记忆管线 / "transcription" 转录):任一要开就
     /// disablesleep=1,全空才复位。仿 [[KeepAwakeAssertion]].owners,免得一方关误放另一方。
     private var owners: Set<String> = []
+    /// 注册自愈一次启动只做一次(见 repairRegistration)。
+    private var didRepairRegistration = false
 
     private init() {}
 
@@ -84,6 +86,34 @@ final class SleepHelperClient {
         } catch {
             log.info("launch sync register threw code=\((error as NSError).code, privacy: .public), status=\(self.statusName, privacy: .public)")
         }
+    }
+
+    /// 注册与 launchd 脱钩时的自愈。
+    ///
+    /// 症状(2026-07-25 实查):BTM 里 daemon 一切正常 —— disposition
+    /// `[enabled, allowed, notified]`、bundle URL 存在、`Contents/MacOS/
+    /// PortraitSleepHelper` 也在;但 launchd 那条 job 攥着一个**早已失效的
+    /// BTM uuid**,`copy_bundle_path` 永远解析不出 bundle → 每 10s spawn 一次
+    /// 拿 EX_CONFIG(78),累计空转 26000+ 次,helper 从注册那天起一次都没起来过。
+    ///
+    /// 这个状态下 `service.status` 仍报 `.enabled`,`setKeepAwake` 的 guard 一路
+    /// 放行,整条合盖保活链**全程静默失效** —— 没有任何地方会报错。
+    ///
+    /// `syncRegistration()` 救不了:对已 `.enabled` 的记录 `register()` 是 no-op,
+    /// 不会重新绑定 job。只有先 `unregister()` 撤掉孤儿 job、再 `register()`
+    /// 重新提交才能接上。
+    ///
+    /// ⚠️ 代价:重新注册后 daemon 回到 `.requiresApproval`,需用户在系统设置里
+    /// 再批准一次。所以只在**确实连不上**时做,且一次启动只做一次。
+    private func repairRegistration() {
+        guard !didRepairRegistration, service.status == .enabled else { return }
+        didRepairRegistration = true
+        log.error("helper 报 .enabled 却连不上 → 注册与 launchd 脱钩,重新注册")
+        do { try service.unregister(); log.notice("repair unregister OK") }
+        catch { log.error("repair unregister failed: \(error.localizedDescription, privacy: .public)") }
+        do { try service.register(); log.notice("repair register OK") }
+        catch { log.notice("repair register threw code=\((error as NSError).code, privacy: .public)") }
+        log.notice("repair done, status=\(self.statusName, privacy: .public) —— 若为 requiresApproval 需用户重新批准")
     }
 
     // MARK: - keep-awake(MemoryScheduler.refreshKeepAwake 驱动)
@@ -158,6 +188,9 @@ final class SleepHelperClient {
             Task { @MainActor in
                 self?.log.error("XPC error: \(error.localizedDescription, privacy: .public)")
                 self?.connection = nil; self?.holding = false
+                // 消息投不出去 = launchd 起不来 helper。这是"注册脱钩"唯一能被
+                // 观测到的信号(status 仍报 .enabled),借它触发一次自愈。
+                self?.repairRegistration()
             }
         } as? PortraitSleepHelperProtocol
     }
