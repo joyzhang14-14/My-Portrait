@@ -104,7 +104,11 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
         guard PiInstaller.isInstalled else { throw SpawnError.missingPi }
 
         self.provider = provider
-        self.model = model ?? provider.defaultModel
+        let selectedModel = model ?? provider.defaultModel
+        // Perplexity 已移除 sonar-reasoning；兼容旧会话和旧 preset。
+        self.model = provider == .perplexity && selectedModel == "sonar-reasoning"
+            ? "sonar-reasoning-pro"
+            : selectedModel
         self.apiKeyRefOverride = apiKeyRefOverride
         self.extraEnv = extraEnv
         self.sessionPath = sessionPath
@@ -454,4 +458,3 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
     }
 
 }
-

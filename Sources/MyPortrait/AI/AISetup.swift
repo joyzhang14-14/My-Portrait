@@ -55,7 +55,10 @@ final class AISetup {
         // Pi (depends on Bun)
         if !PiInstaller.isInstalled {
             state = .installingPi
-            do { try await PiInstaller.install() }
+            do {
+                try await PiInstaller.install()
+                try PiInstaller.writeModelsJSON(providers: configuredProviders())
+            }
             catch {
                 state = .error(error.localizedDescription)
                 return

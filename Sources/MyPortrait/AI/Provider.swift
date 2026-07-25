@@ -38,8 +38,8 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Pi 0.60+ `--provider` CLI value。Pi 0.60 起 provider 是内置 catalog
-    /// (`@mariozechner/pi-ai/dist/models.generated.js`),老的 models.json
+    /// Pi 0.82 `--provider` CLI value。provider 来自 Pi 的内置 catalog,
+    /// 老的 models.json
     /// 自定义命名(openai-chatgpt / anthropic-byok 等)已经废弃。
     /// claudeCode 不走 Pi,返回空串占位。
     var piName: String {
@@ -47,10 +47,10 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .chatgpt:        return "openai-codex"  // ChatGPT Plus/Pro OAuth
         case .openaiBYOK:     return "openai"        // 纯 OpenAI API key
         case .anthropic:      return "anthropic"
-        case .ollama:         return "ollama"        // ⚠️ Pi 0.60 不内置,需 models.json 自定义
+        case .ollama:         return "ollama"        // Pi 不内置,需 models.json 自定义
         case .gemini:         return "google"        // Pi 把 GEMINI_API_KEY 映射到 google
-        case .perplexity:     return "perplexity"    // ⚠️ Pi 0.60 不内置
-        case .deepseek:       return "deepseek"      // ⚠️ Pi 0.60 不内置
+        case .perplexity:     return "perplexity"    // Pi 不内置,需 models.json 自定义
+        case .deepseek:       return "deepseek"
         case .claudeCode:     return ""              // 不走 Pi
         }
     }
@@ -63,14 +63,14 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
     /// offline. User can still type custom strings via the "other…" field.
     var availableModels: [String] {
         switch self {
-        case .chatgpt:    return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
-        case .openaiBYOK: return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
-        case .anthropic:  return ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
+        case .chatgpt:    return ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
+        case .openaiBYOK: return ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
+        case .anthropic:  return ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
         // 不写死 —— 读用户本地 Ollama 实际安装的模型(OllamaModelStore.refresh()
         // 拉 /api/tags 填充)。还没拉过 / Ollama 没跑 → 空数组。
         case .ollama:     return OllamaModelStore.cachedModels
-        case .gemini:     return ["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
-        case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning", "sonar-deep-research"]
+        case .gemini:     return ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+        case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"]
         case .deepseek:   return ["deepseek-v4-pro", "deepseek-v4-flash"]
         // claude CLI 接受 alias(sonnet/opus/haiku 自动取最新)或完整 model id。
         case .claudeCode: return ["sonnet", "opus", "haiku"]

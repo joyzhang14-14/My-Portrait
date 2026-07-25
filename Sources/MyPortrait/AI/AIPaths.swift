@@ -12,7 +12,7 @@ enum AIPaths {
     static var bunDir: URL    { supportDir.appendingPathComponent("bun", isDirectory: true) }
     static var bunBinary: URL { bunDir.appendingPathComponent("bin/bun") }
     static var piDir: URL     { supportDir.appendingPathComponent("pi-agent", isDirectory: true) }
-    static var piCliJS: URL   { piDir.appendingPathComponent("node_modules/@mariozechner/pi-coding-agent/dist/cli.js") }
+    static var piCliJS: URL   { piDir.appendingPathComponent("node_modules/@earendil-works/pi-coding-agent/dist/cli.js") }
     static var piModelsJSON: URL { piDir.appendingPathComponent("models.json") }
 
     /// AI agent 用的 CLI 工具目录(注入到 spawned subprocess 的 PATH 里)。

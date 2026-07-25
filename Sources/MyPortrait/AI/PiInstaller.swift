@@ -1,12 +1,12 @@
 import Foundation
 
-/// Installs the `@mariozechner/pi-coding-agent` npm package via Bun and writes
+/// Installs the `@earendil-works/pi-coding-agent` npm package via Bun and writes
 /// Pi's `models.json` provider config under `~/.pi/agent/` (Pi's hard-coded
 /// config dir — same as Orphies uses).
 enum PiInstaller {
 
-    /// Pin the same Pi version Orphies ships.
-    static let packageSpec = "@mariozechner/pi-coding-agent@0.60.0"
+    /// Pin the version whose built-in catalog contains the models offered by the app.
+    static let packageSpec = "@earendil-works/pi-coding-agent@0.82.0"
 
     enum InstallError: LocalizedError {
         case bunMissing
@@ -25,7 +25,7 @@ enum PiInstaller {
         FileManager.default.fileExists(atPath: AIPaths.piCliJS.path)
     }
 
-    /// Install (or upgrade to the pinned version) and write models.json.
+    /// Install (or upgrade to the pinned version).
     static func install() async throws {
         guard BunInstaller.isInstalled else { throw InstallError.bunMissing }
         try AIPaths.ensureExists()
@@ -35,18 +35,15 @@ enum PiInstaller {
         try await bunAdd(in: AIPaths.piDir, spec: packageSpec)
 
         guard isInstalled else { throw InstallError.cliMissing }
-
-        try writeModelsJSON(providers: [.chatgpt])
     }
 
-    /// Pi 0.60 起内置 catalog 覆盖 openai-codex / openai / anthropic / google
-    /// 等主流 provider —— 这些**不需要** models.json。这个方法现在只为
-    /// **非内置** provider(ollama / perplexity / deepseek)写自定义 entry,schema 走
-    /// Pi 0.60 的 ModelsConfigSchema:
+    /// Pi 0.82 内置 catalog 覆盖大部分 provider。这个方法只为非内置的
+    /// Ollama / Perplexity 写完整 entry,并给 Anthropic 补上尚未内置的 Opus 5。
+    /// schema 走 Pi 0.82 的 ModelsConfigSchema:
     ///   { providers: { <name>: { baseUrl, api, apiKey, models: [...] } } }
-    /// apiKey 值是个 env var 名(resolveConfigValue 会拿 process.env 去解析),
+    /// apiKey 用 `$ENV_VAR` 格式(resolveConfigValue 会拿 process.env 去解析),
     /// 实际值由 PiAgent.start 时通过 env 注入。
-    /// 没传或全是内置 provider → models.json 删掉(避免老残留污染)。
+    /// 没传或不含需要扩展的 provider → models.json 删掉(避免老残留污染)。
     static func writeModelsJSON(providers: [Provider]) throws {
         let custom = providers.filter { needsCustomEntry($0) }
         let configDir = piGlobalConfigDir()
@@ -69,11 +66,11 @@ enum PiInstaller {
         try data.write(to: path, options: .atomic)
     }
 
-    /// 内置 provider 不需要 models.json(Pi 0.60 自带 catalog)。
+    /// Anthropic 是内置 provider,但当前 catalog 尚缺 Opus 5,所以需要 merge entry。
     private static func needsCustomEntry(_ p: Provider) -> Bool {
         switch p {
-        case .ollama, .perplexity, .deepseek: return true
-        default:                    return false
+        case .anthropic, .ollama, .perplexity: return true
+        default:                               return false
         }
     }
 
@@ -87,17 +84,41 @@ enum PiInstaller {
             .appendingPathComponent("agent", isDirectory: true)
     }
 
-    /// 给一个自定义(非 Pi 0.60 内置)provider 拼 models.json entry。
-    /// schema:Pi 0.60 ModelsConfigSchema(model-registry.js)
+    /// 给自定义 provider 拼 models.json entry。
+    /// schema:Pi 0.82 ModelsConfigSchema(model-registry.js)
     ///   { baseUrl, api, apiKey, models: [{ id, input, cost, maxTokens, ... }] }
-    /// apiKey 字段写的是 env var 名 —— resolveConfigValue 会 process.env
+    /// apiKey 字段写 `$ENV_VAR` —— resolveConfigValue 会 process.env
     /// 去拿真值,真值由 PiAgent.start 时通过 env 注入(perplexity 走
     /// PERPLEXITY_API_KEY)。ollama 不验 key,写个 placeholder。
     private static func providerEntry(for p: Provider) -> [String: Any] {
+        if p == .anthropic {
+            return [
+                "models": [[
+                    "id": "claude-opus-5",
+                    "name": "Claude Opus 5",
+                    "reasoning": true,
+                    "input": ["text", "image"],
+                    "cost": [
+                        "input": 5,
+                        "output": 25,
+                        "cacheRead": 0.5,
+                        "cacheWrite": 6.25
+                    ],
+                    "contextWindow": 1_000_000,
+                    "maxTokens": 128_000,
+                    "thinkingLevelMap": ["xhigh": "xhigh", "max": "max"],
+                    "compat": [
+                        "forceAdaptiveThinking": true,
+                        "supportsStrictTools": true
+                    ]
+                ]]
+            ]
+        }
+
         let apiKeyField: String = {
             switch p {
             case .ollama:     return "ollama"   // Ollama 不验,占位即可
-            default:          return p.apiKeyEnv.isEmpty ? "" : p.apiKeyEnv
+            default:          return p.apiKeyEnv.isEmpty ? "" : "$\(p.apiKeyEnv)"
             }
         }()
         let modelDefs: [[String: Any]] = p.availableModels.map { model in
