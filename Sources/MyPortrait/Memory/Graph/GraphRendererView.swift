@@ -534,7 +534,7 @@ struct GraphRendererView: View {
         max(pa.y, pb.y) < -50 || min(pa.y, pb.y) > size.height + 50
     }
 
-    // MARK: - 神经脉冲:||| 三条垂直细白杠沿线飞(07-01 反馈定稿)
+    // MARK: - 神经脉冲:||| 三条垂直对比色细杠沿线飞(07-01 反馈定稿)
 
     /// 每条杠长度 = 该处连线的**概念粗细**(锥形宽度函数的微积分局部值,
     /// 即使边画成细线,信号也带出神经形状)。全部杠合一条 Path 一次 stroke。
@@ -573,7 +573,8 @@ struct GraphRendererView: View {
                 tickPath.addLine(to: CGPoint(x: x + nx * halfLen, y: y + ny * halfLen))
             }
         }
-        ctx.stroke(tickPath, with: .color(.white.opacity(0.9)),
+        let pulseColor = colorScheme == .light ? Color.black : Color.white
+        ctx.stroke(tickPath, with: .color(pulseColor.opacity(0.9)),
                    lineWidth: GraphConstants.pulseTickStrokeWidth)
     }
 
