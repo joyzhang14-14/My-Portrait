@@ -12,6 +12,19 @@
         -->
 
         <item>
+            <title>1.3.14</title>
+            <pubDate>Sat, 25 Jul 2026 14:50:09 +0000</pubDate>
+            <sparkle:version>176</sparkle:version>
+            <sparkle:shortVersionString>1.3.14</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>Features</h3><ul><li><strong>Folders sort themselves</strong> — new events are filed into folders right after the daily run, instead of piling up unsorted.</li><li><strong>Distinct folder colors</strong> — colors are now picked far apart around the wheel, so no two folders look alike.</li><li><strong>Retry a stalled day on the spot</strong> — a day that failed now offers <strong>Retry now</strong>, and it re-runs right away instead of waiting until tomorrow. The old Dismiss button, which quietly marked the day complete and discarded it for good, is gone.</li><li><strong>Right-click a hub in the Neural Graph</strong> — act on it right where it is.</li><li><strong>Sort order for Memories</strong> — rank by weight, created, or last occurrence, from the Memories sidebar.</li><li><strong>Quieter capture</strong> — capture pauses on its own when the screen is locked or the display is dimmed all the way down. Three manual switches are gone.</li><li><strong>Newer AI models</strong> — Claude Opus 5, Sonnet 5, GPT-5.6 and Gemini 3.6 are now selectable in Connections.</li></ul><h3>Bug fixes</h3><ul><li><strong>Background work with the lid closed never actually ran.</strong> The privileged helper had been failing to launch since the day you approved it — silently, because the app kept reporting it as enabled. It now notices and repairs its own registration.</li><li><strong>Failures now say why.</strong> When a daily run fails, the real reason is recorded instead of a generic message.</li><li><strong>Neural Graph</strong> — pulses and node flashes follow your theme; the selected node's ring sits tighter; the total node count comes first; actions and counts are back; the context menu opens on the first click and stays where you put it; the portrait family stopped spinning forever.</li><li><strong>Timeline runs edge to edge</strong> — the day fills the window, with the date bar floating above the bars instead of stealing a strip from them.</li><li><strong>Timeline polish</strong> — the panel follows light and dark; screenshots no longer clip at the top or the sides; the colored bars stay clickable in the gaps between columns.</li><li><strong>Connections</strong> — the Ollama icon no longer vanishes in dark mode.</li><li><strong>No more false "capture stalled" warnings</strong> right after your Mac wakes up.</li></ul>]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.14/MyPortrait_1.3.14_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="1dxkLfn8H0WkBvdMQLcuEEC16tPQUbcBLMyRw7MmNW4SkKScpGg37BvWIqvpLYKyKqI7Ln8eRsZnhC/CJWTOAA==" length="27379976" />
+        </item>
+
+        <item>
             <title>1.3</title>
             <pubDate>Sun, 12 Jul 2026 05:46:22 +0000</pubDate>
             <sparkle:version>175</sparkle:version>
