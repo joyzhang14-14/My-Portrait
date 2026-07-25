@@ -41,17 +41,19 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
     enum SpawnError: LocalizedError {
         case missingBun
         case missingPi
-        /// Provider 凭证缺失(OAuth 未登录 / API key 没贴)。associated value
-        /// 是 provider 的展示名,确保错误文案里出现的是真正用的那个 provider,
-        /// 而不是 ChatGPT/Codex 一刀切。
-        case missingToken(provider: String)
+        /// Provider 凭证缺失(OAuth 未登录 / API key 没贴)。`provider` 是展示名,
+        /// 确保错误文案里出现的是真正用的那个 provider,而不是 ChatGPT/Codex
+        /// 一刀切。`reason` 是底层原因(如 refresh 401),nil = 确实没配。
+        case missingToken(provider: String, reason: String?)
         case launchFailed(String)
         var errorDescription: String? {
             switch self {
             case .missingBun:        return "Bun runtime is not installed."
             case .missingPi:         return "Pi agent is not installed."
-            case .missingToken(let p):
-                return "\(p) credential missing — set it up in Connections."
+            case .missingToken(let p, let reason):
+                let base = "\(p) credential missing — set it up in Connections."
+                guard let reason, !reason.isEmpty else { return base }
+                return "\(base) (\(reason))"
             case .launchFailed(let m): return "Failed to start Pi: \(m)"
             }
         }
@@ -141,7 +143,16 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             } else {
                 credential = try await ProviderAuth.resolveEnvValue(for: provider)
             }
-        } catch { throw SpawnError.missingToken(provider: provider.displayName) }
+        } catch {
+            // 这里以前把**所有**错误(401 refresh 失败 / 网络超时)都压成
+            // "credential missing",凭证明明在、只是刷不动时文案完全误导,
+            // 且真实原因彻底丢失。带上原因。
+            DiagLog.warn("piagent.credential_failed", ctx: [
+                "provider": provider.piName, "error": error.localizedDescription,
+            ])
+            throw SpawnError.missingToken(provider: provider.displayName,
+                                          reason: error.localizedDescription)
+        }
 
         // Codex 走 auth.json,需要拿到完整的 OAuth tokens(access + refresh
         // + expires),不止 access token。从 ChatGPTOAuth 重新读一遍。

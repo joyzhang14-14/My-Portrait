@@ -175,7 +175,7 @@ enum ProviderAuth {
             guard let key = provider.secretKey,
                   let data = SecretStore.shared.get(key),
                   let s = String(data: data, encoding: .utf8), !s.isEmpty else {
-                throw PiAgent.SpawnError.missingToken(provider: provider.displayName)
+                throw PiAgent.SpawnError.missingToken(provider: provider.displayName, reason: nil)
             }
             return s
         }

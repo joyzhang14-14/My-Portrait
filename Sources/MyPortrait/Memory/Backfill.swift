@@ -119,6 +119,7 @@ enum Backfill {
                existing.contains(where: { $0.hasSuffix(".md") }) {
                 progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "skipped (already processed)"))
                 print("Day \(isoDay(day)): skipped — events/ already populated")
+                DiagLog.event("backfill.day.skipped", ctx: ["day": isoDay(day), "reason": "events dir already populated"])
                 continue
             }
 
@@ -127,6 +128,7 @@ enum Backfill {
             totals.rawFrameCount += frames.count
             if frames.isEmpty {
                 progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "no frames"))
+                DiagLog.event("backfill.day.skipped", ctx: ["day": isoDay(day), "reason": "no frames"])
                 continue
             }
 
@@ -164,6 +166,10 @@ enum Backfill {
             }
             let dropped = sessions.count - enriched.count
             print("Day \(isoDay(day)): \(sessions.count) sessions, \(enriched.count) enriched (OCR ≥ 60), \(dropped) dropped")
+            DiagLog.event("backfill.day.sessions", ctx: [
+                "day": isoDay(day), "frames": frames.count,
+                "sessions": sessions.count, "enriched": enriched.count, "dropped": dropped,
+            ])
             if enriched.isEmpty { continue }
 
             // Active-events catalogue from the in-memory cache.
@@ -201,6 +207,12 @@ enum Backfill {
             } catch {
                 totals.llmFailedDays += 1
                 print("Day \(isoDay(day)): LLM clustering FAILED — \(error.localizedDescription) — nothing written")
+                // 真实原因只 print 到 stdout 的话,scheduler 只会记一条笼统的
+                // "event step reported failure",事后完全无从排查(2026-07 那次
+                // OAuth refresh 401 连炸 5 天就是这么被埋掉的)。
+                DiagLog.warn("backfill.day.llm_failed", ctx: [
+                    "day": isoDay(day), "error": error.localizedDescription,
+                ])
                 progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM failed: \(error.localizedDescription)"))
                 continue
             }
