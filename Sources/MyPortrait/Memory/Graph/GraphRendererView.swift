@@ -161,13 +161,15 @@ private struct GraphContextClickProbe: NSViewRepresentable {
 ///
 /// 手势:
 ///   - 拖空白/主球 = 相机平移;拖末端球/hub = 拖球(物理 reheat,邻居跟着晃)
-///   - 捏合 = 锚点缩放;hover = 白色闪烁;点击 = onTapNode(浮窗/脉冲)
+///   - 捏合 = 锚点缩放;hover = 对比色闪烁;点击 = onTapNode(浮窗/脉冲)
 ///
 /// P0 实测铁律:hub 标签走 `Canvas(symbols:)` 预光栅化,**禁止**逐帧
 /// `ctx.resolve(Text)`(那样 5000 节点下掉 13% 帧)。
 /// ⚠️ Canvas 闭包必须保持精简(只调 draw* helper)—— 内联全部绘制代码会
 /// 让 Swift 类型检查超时(编译错 "unable to type-check in reasonable time")。
 struct GraphRendererView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let scene: GraphScene
     let engine: GraphPhysicsEngine
     /// 物理休眠且无进行中动画 → true,暂停 TimelineView 的逐帧重绘。
@@ -182,7 +184,7 @@ struct GraphRendererView: View {
     @Binding var hoveredId: Int?
     /// 右键菜单当前作用的 folder / portrait 分区球。非 nil 时画蓝色选中圈。
     let contextNodeId: Int?
-    /// 开着浮窗卡片的球(nil = 无):与 hover 同款白闪持续提示(07-10 用户
+    /// 开着浮窗卡片的球(nil = 无):与 hover 同款闪烁持续提示(07-10 用户
     /// "有显示卡片的球也需要持续闪光")。
     let cardNodeId: Int?
     /// 主球自定义照片(已圆形裁剪,07-11 用户):非 nil 时叠画在主球上。
@@ -618,6 +620,7 @@ struct GraphRendererView: View {
                            size: CGSize, date: Date) {
         let zoom = camera.zoom
         let now = date.timeIntervalSinceReferenceDate
+        let flashColor = colorScheme == .light ? Color.black : Color.white
         // 同色一条 Path 一次 fill(07-02 拖拽卡顿优化:替代 951 次逐球
         // fill;气泡不相交 → 跨家遮挡不存在,组内同色重叠无感)
         for group in colorGroups {
@@ -668,7 +671,8 @@ struct GraphRendererView: View {
                 }
             }
         }
-        // 白色闪烁(正弦脉动):hover 中的球(需求 §5)+ 开着浮窗卡片的球
+        // 对比色闪烁(正弦脉动):浅色闪黑、深色闪白。hover 中的球
+        // (需求 §5)+ 开着浮窗卡片的球
         // (07-10 用户"有显示卡片的球也需要持续闪光提示")。两者可能是
         // 不同的球 → 各闪各的;同一颗只画一次。
         var blinkIds: [Int] = []
@@ -680,10 +684,10 @@ struct GraphRendererView: View {
             let r = node.radius * zoom
             let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
             let a = 0.35 + 0.35 * sin(now * GraphConstants.hoverBlinkHz * 2 * .pi)
-            ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
+            ctx.fill(Path(ellipseIn: rect), with: .color(flashColor.opacity(a)))
         }
         // 脉冲抵达 → 被击中的球点亮闪一下(07-11 用户)。抵达时刻 = start+duration,
-        // 之后 pulseArriveFlashSec 内白光线性淡出。**沿途每一跳都闪**(含 folder/
+        // 之后 pulseArriveFlashSec 内对比色线性淡出。**沿途每一跳都闪**(含 folder/
         // 分区 hub):主球 2 跳级联时 folder 先亮、脉冲再从它散向自家 event 球逐个
         // 亮起 = 连锁激活的观感(用户要的"壮观")。同一球被多发命中取最亮的那发。
         if !pulses.isEmpty {
@@ -702,7 +706,7 @@ struct GraphRendererView: View {
                 let c = camera.worldToScreen(snap[bid], viewSize: size)
                 let r = scene.nodes[bid].radius * zoom
                 let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
-                ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(a)))
+                ctx.fill(Path(ellipseIn: rect), with: .color(flashColor.opacity(a)))
             }
         }
         // 右键选中圈锚定屏幕像素，不随缩放变粗；与 text 区蓝色选中框同义。
