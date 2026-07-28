@@ -46,10 +46,11 @@ flowchart TB
   MT --> PS
   MT --> TE
 
-  DB --> G["Neural Graph"]
+  DB --> G(("Neural Graph"))
 
   style CAP fill:#f9731626,stroke:#f97316,stroke-width:2px
   style ANA fill:#3b82f626,stroke:#3b82f6,stroke-width:2px
+  style G fill:#a855f733,stroke:#a855f7,stroke-width:3px
 ```
 
 ## The Neural Graph
