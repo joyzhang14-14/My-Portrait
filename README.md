@@ -27,26 +27,17 @@
 
 ## The Neural Graph
 
-You sit at the center. The areas of your life grow into their own clusters around you, and individual memories gather where they belong. Selecting, dragging and switching views are all physical — the graph settles rather than snaps.
+Over time, My Portrait builds a memory and a portrait that belong only to you, out of what it sees and the algorithms built into it.
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src=".github/media/lighting-up-a-memory.gif" alt="Lighting up a memory" width="100%" /><br/>
-      <sub><b>Lighting up a memory</b> — select one and its connections come alive.</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src=".github/media/portrait-to-personality.gif" alt="Switching from Portrait to Personality" width="100%" /><br/>
-      <sub><b>Portrait → Personality</b> — the same memories, seen through a different lens.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <img src=".github/media/drag-and-settle.gif" alt="Drag a folder, let go, and everything settles back" width="70%" /><br/>
-      <sub><b>Drag a folder and let go</b> — the whole system finds its way home.</sub>
-    </td>
-  </tr>
-</table>
+<div align="center">
+  <img src=".github/media/memory-graph.png" alt="Memory graph after three months" width="100%" /><br/>
+  <sub>Memory graph, after My Portrait had been running on my Mac for 3 months.</sub>
+</div>
+
+<div align="center">
+  <img src=".github/media/portrait-graph.png" alt="Portrait graph after three months" width="100%" /><br/>
+  <sub>Portrait graph, after 3 months of running.</sub>
+</div>
 
 ## Install
 
