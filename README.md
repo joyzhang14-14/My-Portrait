@@ -20,16 +20,17 @@
 flowchart TB
   A1["Screen"] --> B1["OCR"]
   A2["Mic + system audio"] --> B2["Transcribe + diarize"]
-  A3["Keystrokes"] --> B3["What you really typed"]
+  A3["Keystrokes / AX"]
 
   B1 --> DB[("~/.portrait<br/>SQLite + files")]
   B2 --> DB
-  B3 --> DB
+  A3 --> DB
 
   DB --> E["Events"]
   E --> P["Portrait"]
   E --> PS["Personality"]
-  DB --> WS["Writing style"]
+  DB --> TE["Typing event"]
+  TE --> WS["Writing style"]
 
   P --> G["Neural Graph"]
   PS --> G
