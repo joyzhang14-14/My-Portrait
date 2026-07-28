@@ -18,28 +18,35 @@
 
 ```mermaid
 flowchart TB
-  A1["Screenshots"] --> B1["OCR"]
-  A2["Mic + system audio"] --> B2["Transcribe + diarize"]
-  A3["Keystrokes / AX"]
-  A1 --> TL["Timeline"]
+  subgraph CAP["Capture system"]
+    A1["Screenshots"] --> B1["OCR"]
+    A2["Mic + system audio"] --> B2["Transcribe + diarize"]
+    A3["Keystrokes / AX"]
+    A1 --> TL["Timeline"]
 
-  TL --> MT[("~/.portrait<br/>Metadata")]
-  B1 --> MT
-  B2 --> MT
-  A3 --> MT
+    TL --> MT[("~/.portrait<br/>Capture DB")]
+    B1 --> MT
+    B2 --> MT
+    A3 --> MT
+  end
 
-  MT --> E["Events"]
-  E --> P["Portrait:<br/>Experience, social, etc."]
-  E --> PS["Personality"]
+  subgraph ANA["Analysis system"]
+    E["Events"] --> P["Portrait:<br/>Experiences, social, etc."]
+    E --> PS["Personality"]
+    TE["Typing event"] --> WS["Writing style"]
+
+    E --> DB[("~/.portrait<br/>Memory DB")]
+    TE --> DB
+    P --> DB
+    PS --> DB
+    WS --> DB
+  end
+
+  MT --> E
   MT --> PS
-  MT --> TE["Typing event"]
-  TE --> WS["Writing style"]
+  MT --> TE
 
-  E --> DB[("~/.portrait<br/>SQLite + files")]
-  TE --> DB
-  P --> DB
-  PS --> DB
-  WS --> DB
+  DB --> G["Neural Graph"]
 ```
 
 ## The Neural Graph
@@ -74,17 +81,17 @@ Over time, My Portrait builds a memory graph and a portrait graph that belong on
 
 > **Requires an Apple silicon Mac with 16 GB of memory, on macOS 15 or later.** Updates ship automatically via [Sparkle](https://sparkle-project.org).
 
-
 ## Where it's going
 
-**Capture system is already fully local.** Screen OCR, audio transcription and speaker diarization all run on your Mac and always have. Keystrokes/AX (what you have typed) never leave it either.
+**The capture system is already fully local.** Screen OCR, audio transcription and speaker diarization all run on your Mac and always have. Keystrokes / AX (macOS accessibility APIs — what you actually typed) never leave it either.
 
 **The understanding layers are not, yet.** Turning raw data into events, working out what you actually wrote, distilling the portrait, learning personality and writing style — these currently call out to a cloud LLM with your own API key. That is the one thing left to fix.
 
-We are currently working on the screenshot vision understanding and the local typing event calculation.
+Right now we're working on local screenshot understanding, and on computing typing events on-device.
 
 ## Our Goal
-The goal is the whole system with **no cloud API at all**, the data **Never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
+
+The goal is the whole system with **no cloud API at all** — your data **never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
 
 - local models sized to fit 16 GB alongside everything else that's running;
 - telling apart what was merely _on screen_ from what you were actually _doing_;
@@ -92,7 +99,7 @@ The goal is the whole system with **no cloud API at all**, the data **Never** le
 
 ## Acknowledgements
 
-My Portrait's screen capture, audio capture, and timeline all draw on the approach worked out by **[screenpipe](https://github.com/mediar-ai/screenpipe)** — how to record continuously in the background without getting in the way, and how to turn a day of raw activity into something you can scroll back through. I really appreciate Louis for working that out in the open, and go take a look at what they're building.
+My Portrait's screen capture, audio capture, and timeline all draw on the approach worked out by **[screenpipe](https://github.com/mediar-ai/screenpipe)** — how to record continuously in the background without getting in the way, and how to turn a day of raw activity into something you can scroll back through. Huge thanks to Louis Beaumont and the mediar-ai team for working that out in the open — go take a look at what they're building.
 
 ## Credits
 
