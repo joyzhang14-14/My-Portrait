@@ -1,26 +1,31 @@
 import Foundation
+import GraphPhysics
 
 /// 项目维度的 event 分组流水线。**只动 `events/_folders/*.json`**,
 /// 不动任何 .md 文件,所以 distill / archive / weight / staging 都无感。
 ///
 /// 跑法:
-///   1. 收集"未分组" events(在 events/*/*.md 但不在任何 folder.events 里)
+///   1. 收集"未分组" events(在 events/*/*.md 但不在任何 folder.events 里),
+///      **只取核心事件**(currentWeight ≥ beltWeightMax) —— 陨石级的碎事件
+///      不喂 LLM,省 token 且不让它们凑数开 folder(07-28 用户)
 ///   2. 喂给 LLM:[已有 folders] + [未分组 events title+summary+tags]
-///   3. LLM 返回: 已有 folder 的 append、新 folder 的 create(≥ 6 个事件才创建)、
-///      其余留 ungrouped(下次跑可能凑够)
+///   3. LLM 返回: 已有 folder 的 append、新 folder 的 create(≥ folderMinCoreEvents
+///      个核心事件才创建)、其余留 ungrouped(下次跑可能凑够)
 ///   4. 程序化 patch `_folders/*.json`
 ///
 /// **跑在 event job 之后、distill 之前**:有新事件就分,分完 distill。
 @MainActor
 final class EventClassifier {
     /// dry-run CLI 等地方需要的默认值。生产 classifier 一律用 init 时传入。
-    static let defaultMinNewFolderEvents = 6
+    static let defaultMinNewFolderEvents = GraphConstants.folderMinCoreEvents
 
     /// 单批喂给 LLM 的未分组 event 上限。批太大 LLM 容易漏 / JSON 截断。
     /// 剩下的下一轮调度自然消化。
     let batchCap: Int
     /// LLM 创建新 folder 的最小事件数。少于这个数留 ungrouped,等下次凑齐。
-    /// 固定规则:同一项目至少 6 个事件才创建新 folder。
+    /// 候选已在 scanAllEvents 里滤成核心事件(weight ≥ beltWeightMax),所以
+    /// 这个数就是"至少 N 个 1.5 权重以上的事件才开 folder"(07-28 用户),
+    /// 与 Graph / Text 两处的存活门共用 GraphConstants.folderMinCoreEvents。
     let minEventsForNewFolder: Int
 
     private let provider: Provider
@@ -30,7 +35,7 @@ final class EventClassifier {
     init(provider: Provider = .chatgpt,
          model: String = "gpt-5.4",
          batchCap: Int = 80,
-         minEventsForNewFolder: Int = 6,
+         minEventsForNewFolder: Int = GraphConstants.folderMinCoreEvents,
          perCallTimeout: TimeInterval = 180) {
         self.provider = provider
         self.model = model
@@ -323,6 +328,11 @@ final class EventClassifier {
         let fm = FileManager.default
         let root = Storage.eventsDir
         guard let dayDirs = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
+        // 只喂核心事件(07-28 用户):陨石级(weight < beltWeightMax)的碎事件
+        // 不进 LLM —— 省 token,也堵住"一堆碎事件凑够数开 folder"。口径与
+        // Graph / Text 两处的 currentWeight 完全一致(同一个 EMA 懒衰减)。
+        let ema = WeightEMA(
+            halfLifeDays: Double(ConfigStore.shared.current.memory.weightHalfLifeDays))
         var out: [EventSummary] = []
         for day in dayDirs where !day.hasPrefix("_") {
             let dayURL = root.appendingPathComponent(day, isDirectory: true)
@@ -330,6 +340,9 @@ final class EventClassifier {
             for name in files where name.hasSuffix(".md") {
                 let url = dayURL.appendingPathComponent(name)
                 guard let file = try? PortraitFileIO.read(from: url) else { continue }
+                let cw = ema.currentWeight(stored: file.weight,
+                                           daysSinceModified: file.daysSinceModified())
+                guard cw >= GraphConstants.beltWeightMax else { continue }
                 // body 头几十字符兜底,极少数老文件 eventTitle/eventSummary 为空。
                 let fallback = String(file.body.prefix(120))
                     .trimmingCharacters(in: .whitespacesAndNewlines)
