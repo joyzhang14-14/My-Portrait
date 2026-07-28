@@ -22,9 +22,9 @@ struct ImportSettingsView: View {
     @State private var config = ConfigStore.shared
 
     @State private var scan: ScreenpipeImporter.ScanResult? = nil
-    /// 初始值绑开关:自动模式 → true(直接进扫描态);手动模式 → false(初始「未扫描」,
-    /// 不闪一下 Scanning…)。
-    @State private var scanning: Bool = ConfigStore.shared.general.autoScanImports
+    /// 固定手动模式(07-28 用户删掉 auto-scan 开关):初始「未扫描」,
+    /// 不闪一下 Scanning…,等用户点 Scan。
+    @State private var scanning: Bool = false
     @State private var running: Bool = false
     @State private var statusLines: [String] = []
     @State private var lastReport: ScreenpipeImporter.Report? = nil
@@ -57,14 +57,6 @@ struct ImportSettingsView: View {
             "Import",
             subtitle: "Bring historical data from other capture tools into My Portrait."
         ) {
-            SettingsCard {
-                SettingsRow("Auto-scan everything from imports",
-                            description: "Scan all import sources (screenpipe, Claude Code, Codex) automatically when you open this page. Off → each source waits until you press its Scan button.",
-                            icon: "arrow.triangle.2.circlepath") {
-                    Toggle("", isOn: config.binding(\.general.autoScanImports)).labelsHidden().toggleStyle(.switch)
-                }
-            }
-
             SettingsCard(
                 title: "Import from screenpipe",
                 footnote: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording. Your current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
@@ -134,19 +126,8 @@ struct ImportSettingsView: View {
                 )
             }
         }
-        .task {
-            // 手动模式(General → Imports → Auto-scan off):不自动扫,每个来源显示
-            // 「未扫描」+ Scan 按钮,用户点了才扫。
-            guard ConfigStore.shared.general.autoScanImports else {
-                scanning = false
-                return
-            }
-            // 三个来源同时扫,互不等待。
-            async let sp: Void = rescan()
-            async let cc: Void = rescanClaudeCode()
-            async let cx: Void = rescanCodex()
-            _ = await (sp, cc, cx)
-        }
+        // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
+        // 「未扫描」+ Scan 按钮,用户点了才扫(原 auto-scan 开关已删)。
     }
 
     // MARK: CLI 导入 UI(Claude Code / Codex 各一张卡片,共用此 block)

@@ -468,16 +468,15 @@ struct GeneralConfig: Codable, Equatable {
     /// 0 = no limit(runs.json 会无限增长,慎选)。
     /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
     var cronJobHistoryLimit: Int = 20
-    /// Import 页打开时是否自动扫描所有来源(screenpipe / Claude Code / Codex)。
-    /// 关 → Import 页每个来源显示「未扫描」+ Scan 按钮,点了才扫。默认开(保持现状)。
-    var autoScanImports:     Bool = true
+    // auto_scan_imports 已下线(07-28 用户):Import 页固定手动模式 ——
+    // 每个来源显示「未扫描」+ Scan 按钮,点了才扫。旧 config.toml 里
+    // 残留的这个键会被忽略(dflt 解码只认 CodingKeys 里列出的键)。
     init() {}
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
         case autoDownloadUpdates  = "auto_download_updates"
         case onboardingCompleted  = "onboarding_completed"
         case cronJobHistoryLimit  = "cron_job_history_limit"
-        case autoScanImports      = "auto_scan_imports"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -486,7 +485,6 @@ struct GeneralConfig: Codable, Equatable {
         autoDownloadUpdates = c.dflt(Bool.self, .autoDownloadUpdates, autoDownloadUpdates)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
         cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
-        autoScanImports     = c.dflt(Bool.self, .autoScanImports, autoScanImports)
     }
 }
 
