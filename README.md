@@ -35,7 +35,7 @@ flowchart TB
     E --> PS["Personality"]
     TE["Typing event"] --> WS["Writing style"]
 
-    E --> DB[("~/.portrait<br/>Memory DB")]
+    E --> DB[("~/.portrait<br/>SQLite + markdown files")]
     TE --> DB
     P --> DB
     PS --> DB
