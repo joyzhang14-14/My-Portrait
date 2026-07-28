@@ -17,52 +17,24 @@
 ## How it works
 
 ```mermaid
-flowchart LR
-  subgraph CAP["Capture · always on"]
-    direction TB
-    A1["Screen"]
-    A2["Mic + system audio"]
-    A3["Keystrokes"]
-  end
+flowchart TB
+  A1["Screen"] --> B1["OCR"]
+  A2["Mic + system audio"] --> B2["Transcribe + diarize"]
+  A3["Keystrokes"] --> B3["What you really typed"]
 
-  subgraph PRE["On device"]
-    direction TB
-    B1["OCR"]
-    B2["Transcribe + diarize"]
-    B3["What you really typed"]
-  end
+  B1 --> DB[("~/.portrait<br/>SQLite + files")]
+  B2 --> DB
+  B3 --> DB
 
-  DB[("~/.portrait<br/>SQLite + files")]
+  DB --> E["Events"]
+  E --> P["Portrait"]
+  E --> PS["Personality"]
+  DB --> WS["Writing style"]
 
-  subgraph DIST["Distilled daily"]
-    direction TB
-    C1["Events"]
-    C2["Portrait"]
-    C3["Personality"]
-    C4["Writing style"]
-  end
-
-  subgraph OUT["You"]
-    direction TB
-    D1["Neural Graph"]
-    D2["Timeline"]
-    D3["Search"]
-  end
-
-  A1 --> B1 --> DB
-  A2 --> B2 --> DB
-  A3 --> B3 --> DB
-
-  DB --> C1
-  C1 --> C2
-  C1 --> C3
-  DB --> C4
-
-  C2 --> D1
-  C3 --> D1
-  C4 --> D1
-  DB --> D2
-  DB --> D3
+  P --> G["Neural Graph"]
+  PS --> G
+  WS --> G
+  DB --> TL["Timeline + Search"]
 ```
 
 ## The Neural Graph
