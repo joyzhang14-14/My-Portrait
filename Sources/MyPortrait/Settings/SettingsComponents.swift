@@ -156,9 +156,6 @@ struct SettingsPage<Content: View>: View {
                 HStack(alignment: .top) {
                     SettingsPageTitle(title: title, subtitle: subtitle)
                     Spacer()
-                    ConfigToolbar(config: config,
-                                  pageTitle: title,
-                                  onResetCurrentPage: onResetCurrentPage)
                 }
                 .padding(.bottom, 4)
 
@@ -180,24 +177,12 @@ struct SettingsPage<Content: View>: View {
     }
 }
 
-/// "Reveal config.toml" 按钮。Reset 按钮已下线 —— 用户反馈"会清空所有
-/// 数据"且 per-page reset 改造之后仍有歧义/复发,直接砍掉这个暴力入口。
-/// 想恢复默认改 config.toml 即可(整文件删了下次启动也会回默认)。
-private struct ConfigToolbar: View {
-    let config: ConfigStore
-    let pageTitle: String
-    /// 保留参数,callers 不用一起改;实际不再渲染 Reset 按钮。
-    let onResetCurrentPage: (() -> Void)?
-    var body: some View {
-        Button {
-            config.openPortraitDir()
-        } label: {
-            Label("Open ~/.portrait", systemImage: "arrow.up.right.square")
-                .font(.system(size: 11, weight: .medium))
-        }
-        .help("Open the ~/.portrait data folder in Finder")
-    }
-}
+// ConfigToolbar(每页右上角的 "Open ~/.portrait" 按钮)已下线 —— 07-28
+// 用户反馈"每个 setting 界面都挂一个,不好看"。入口没丢:Storage 页
+// Data directory 卡片的 Open 按钮 + 状态栏菜单的 "Open ~/.portrait/"
+// 都走同一个 ConfigStore.openPortraitDir()。
+// (更早一轮里这个 toolbar 上的 Reset 按钮就已经砍掉了,理由是
+//  "会清空所有数据"歧义;想恢复默认直接改/删 config.toml。)
 
 /// Inline orange banner for TOML parse errors. Click "Reload" to re-read
 /// after fixing the file in vim.

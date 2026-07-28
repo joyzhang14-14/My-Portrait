@@ -32,8 +32,11 @@ struct StorageSettingsView: View {
                     icon: "folder"
                 ) {
                     HStack(spacing: 6) {
-                        Button("Change") { pickDir() }
+                        // 07-28:原 "Change" 换成 "Open" —— 接管被删掉的
+                        // 每页右上角 "Open ~/.portrait" 按钮的入口。
+                        Button("Open") { config.openPortraitDir() }
                             .font(.system(size: 12, weight: .medium))
+                            .help("Open the data folder in Finder")
                         if !config.current.storage.dataDirectory.isEmpty {
                             Button("Reset") { config.mutate { $0.storage.dataDirectory = "" } }
                                 .font(.system(size: 11))
@@ -261,6 +264,9 @@ struct StorageSettingsView: View {
         scanning = false
     }
 
+    /// ⚠️ 07-28 起**没有调用方** —— Data directory 卡片的 "Change" 按钮换成
+    /// 了 "Open"。改数据目录目前只能编辑 config.toml 的 storage.data_directory。
+    /// 保留实现:想把 "Change" 加回来(或挪到别处)接上这个函数即可。
     private func pickDir() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
