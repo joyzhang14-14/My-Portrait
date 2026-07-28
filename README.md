@@ -14,16 +14,56 @@
 
 ---
 
-## What it does
+## How it works
 
-- **Captures your day** — screen (OCR), microphone + system audio, and what you actually type, continuously and silently in the background.
-- **Transcribes on-device** — Whisper or Qwen3-ASR with speaker diarization. No audio ever leaves your Mac.
-- **Knows what you wrote** — separates words you really typed from pasted text and half-finished drafts, down to the keystroke.
-- **Builds a portrait** — raw activity is distilled into events, then into an evolving picture of your interests, habits, personality and writing style.
-- **Walk your Neural Graph** — your memories as a living map, with you at the center, instead of a list of files.
-- **Scroll back through your day** — a timeline of everything captured, moment by moment, so you can return to the one you were looking for.
-- **Search it all** — full-text across everything you've seen, said, and written.
-- **Yours, locally** — all data sits under `~/.portrait/` on this Mac (SQLite + plain files). No account, no server, nothing to sign up for.
+```mermaid
+flowchart LR
+  subgraph CAP["Capture · always on"]
+    direction TB
+    A1["Screen"]
+    A2["Mic + system audio"]
+    A3["Keystrokes"]
+  end
+
+  subgraph PRE["On device"]
+    direction TB
+    B1["OCR"]
+    B2["Transcribe + diarize"]
+    B3["What you really typed"]
+  end
+
+  DB[("~/.portrait<br/>SQLite + files")]
+
+  subgraph DIST["Distilled daily"]
+    direction TB
+    C1["Events"]
+    C2["Portrait"]
+    C3["Personality"]
+    C4["Writing style"]
+  end
+
+  subgraph OUT["You"]
+    direction TB
+    D1["Neural Graph"]
+    D2["Timeline"]
+    D3["Search"]
+  end
+
+  A1 --> B1 --> DB
+  A2 --> B2 --> DB
+  A3 --> B3 --> DB
+
+  DB --> C1
+  C1 --> C2
+  C1 --> C3
+  DB --> C4
+
+  C2 --> D1
+  C3 --> D1
+  C4 --> D1
+  DB --> D2
+  DB --> D3
+```
 
 ## The Neural Graph
 
