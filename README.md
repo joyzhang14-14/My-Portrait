@@ -18,33 +18,37 @@
 
 ```mermaid
 flowchart TB
-  A1["Screen"] --> B1["OCR"]
+  A1["Screenshots"] --> B1["OCR"]
   A2["Mic + system audio"] --> B2["Transcribe + diarize"]
   A3["Keystrokes / AX"]
+  A1 --> TL["Timeline"]
 
-  B1 --> DB[("~/.portrait<br/>SQLite + files")]
-  B2 --> DB
-  A3 --> DB
+  TL --> MT[("~/.portrait<br/>Metadata")]
+  B1 --> MT
+  B2 --> MT
+  A3 --> MT
 
-  DB --> E["Events"]
-  E --> P["Portrait"]
+  MT --> E["Events"]
+  E --> P["Portrait:<br/>Experience, social, etc."]
   E --> PS["Personality"]
-  DB --> TE["Typing event"]
+  MT --> PS
+  MT --> TE["Typing event"]
   TE --> WS["Writing style"]
 
-  P --> G["Neural Graph"]
-  PS --> G
-  WS --> G
-  DB --> TL["Timeline + Search"]
+  E --> DB[("~/.portrait<br/>SQLite + files")]
+  TE --> DB
+  P --> DB
+  PS --> DB
+  WS --> DB
 ```
 
 ## The Neural Graph
 
-Over time, My Portrait builds a memory and a portrait that belong only to you, out of what it sees and the algorithms built into it.
+Over time, My Portrait builds a memory graph and a portrait graph that belong only to you, out of what it sees and the algorithms built into it.
 
 <div align="center">
   <img src=".github/media/memory-graph.png" alt="Memory graph after three months" width="100%" /><br/>
-  <sub>Memory graph, after My Portrait had been running on my Mac for 3 months.</sub>
+  <sub>Memory graph, after My Portrait had been running for 3 months.</sub>
 </div>
 
 <div align="center">
@@ -70,27 +74,25 @@ Over time, My Portrait builds a memory and a portrait that belong only to you, o
 
 > **Requires an Apple silicon Mac with 16 GB of memory, on macOS 15 or later.** Updates ship automatically via [Sparkle](https://sparkle-project.org).
 
-## Configuration
-
-Tune everything in the app's Settings, or edit `~/.portrait/config.toml` directly — the two stay in sync. All your data lives under `~/.portrait/`.
 
 ## Where it's going
 
-**Capture is already fully local.** Screen OCR, audio transcription and speaker diarization all run on your Mac and always have. Raw keystrokes never leave it either.
+**Capture system is already fully local.** Screen OCR, audio transcription and speaker diarization all run on your Mac and always have. Keystrokes/AX (what you have typed) never leave it either.
 
-**The understanding layers are not, yet.** Turning a day into events, working out what you actually wrote, distilling the portrait, learning personality and writing style — these currently call out to a cloud LLM with your own API key. That is the one thing left to fix.
+**The understanding layers are not, yet.** Turning raw data into events, working out what you actually wrote, distilling the portrait, learning personality and writing style — these currently call out to a cloud LLM with your own API key. That is the one thing left to fix.
 
-The goal is a memory system with **no cloud API at all**: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
+We are currently working on the screenshot vision understanding and the local typing event calculation.
+
+## Our Goal
+The goal is the whole system with **no cloud API at all**, the data **Never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
 
 - local models sized to fit 16 GB alongside everything else that's running;
 - telling apart what was merely _on screen_ from what you were actually _doing_;
 - keeping memories anchored to real evidence instead of inventing the missing parts.
 
-This project stays focused on one thing: the memory system.
-
 ## Acknowledgements
 
-My Portrait's screen capture, audio capture, and timeline all draw on the approach worked out by **[screenpipe](https://github.com/mediar-ai/screenpipe)** — how to record continuously in the background without getting in the way, and how to turn a day of raw activity into something you can scroll back through. Thanks to mediar-ai for working that out in the open, and go take a look at what they're building.
+My Portrait's screen capture, audio capture, and timeline all draw on the approach worked out by **[screenpipe](https://github.com/mediar-ai/screenpipe)** — how to record continuously in the background without getting in the way, and how to turn a day of raw activity into something you can scroll back through. I really appreciate Louis for working that out in the open, and go take a look at what they're building.
 
 ## Credits
 
