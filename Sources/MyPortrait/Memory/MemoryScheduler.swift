@@ -681,6 +681,13 @@ final class MemoryScheduler {
     /// 已经有 pending_review / processing → backlog 内部自带 guard 跳过,不会
     /// 重复跑。
     func runWritingCaptureJob() async {
+        // 07-30:这套 pass 处理停用(见 WritingCaptureWorker.passProcessingEnabled)。
+        // 在这里就返回 —— 不然每个 tick 都会走到 runBacklog 抛错的 catch 分支,
+        // 弹一次失败通知 + 记一条 failure,纯噪音。
+        guard WritingCaptureWorker.passProcessingEnabled else {
+            schedLog.info("writingCapture tick: pass processing disabled — skip")
+            return
+        }
         guard let worker = WritingCaptureWorker.shared else {
             schedLog.warning("writingCapture tick: worker not initialized — skip")
             return

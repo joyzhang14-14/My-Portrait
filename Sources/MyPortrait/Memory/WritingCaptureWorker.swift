@@ -95,6 +95,7 @@ final class WritingCaptureWorker {
     /// 跑某一天。
     /// 失败时:writing_capture_runs.status = failed,raw 不删,下次重跑。
     func runDay(date: String) async throws -> WritingCaptureDayRunSummary {
+        guard Self.passProcessingEnabled else { throw BacklogError.passProcessingDisabled }
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
 
@@ -292,6 +293,7 @@ final class WritingCaptureWorker {
         case pendingReviewExists(records: Int)
         case alreadyProcessing
         case pass3GroupsFailed(count: Int, sample: String)
+        case passProcessingDisabled
         var errorDescription: String? {
             switch self {
             case .pendingReviewExists(let n):
@@ -302,9 +304,23 @@ final class WritingCaptureWorker {
             case .pass3GroupsFailed(let n, let sample):
                 return "\(n) Pass 3 group(s) failed: \(sample). " +
                        "Run aborted so no data window is skipped — try again."
+            case .passProcessingDisabled:
+                return "Typing capture processing is being rebuilt — this pipeline " +
+                       "is switched off. Typing is still being recorded."
             }
         }
     }
+
+    /// 07-30 用户:typing capture 从零重写了,**这一整套 pass 处理停用** ——
+    /// Step 0 切分 / 路由 / edit_log 过滤 / staged 写入全部不再跑。
+    ///
+    /// 停的只是「处理」。**采集入库照跑** —— TypingObserver → `typing_events`
+    /// 那条路完全没动,新逻辑要拿的原始数据一直在攒。
+    ///
+    /// 三个入口(MemoryScheduler 的 writingCapture job、Settings 里的 Run
+    /// 按钮、WritingCaptureCLI)都经过 runBacklog / runDay,所以门放在这两个
+    /// 方法开头一处就够。新逻辑接进来时把这里改回 true(或整个 gate 删掉)。
+    static let passProcessingEnabled = false
 
     /// backlog 现在有没有活 —— cursor 之后有没有未处理的 typing_event。
     /// UI 拿来灰 Run 按钮。
@@ -316,6 +332,7 @@ final class WritingCaptureWorker {
     }
 
     func runBacklog(includeAxText: Bool = true) async throws -> WritingCaptureDayRunSummary {
+        guard Self.passProcessingEnabled else { throw BacklogError.passProcessingDisabled }
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
         let ui = WritingCaptureUIState.shared

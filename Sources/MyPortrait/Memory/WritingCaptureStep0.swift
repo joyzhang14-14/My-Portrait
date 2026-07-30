@@ -19,8 +19,9 @@ struct WritingCaptureStep0 {
     /// keystroke → "用户真敲了什么" 串(跳过 modifier-only / shortcut,backspace
     /// 拼 `<BS>`,Return 拼 `<CR>` 给切分判断用)。**纯确定性,不碰 LLM**。
     ///
-    /// 原本挂在 `WritingCapturePass2Agent` 上;07-30 断云端时那个文件整个删掉,
-    /// 但这个 helper 还在确定性 AX 路上活着(Worker 的组级击键 gate),提到这里。
+    /// 原本挂在 `WritingCapturePass2Agent` 上。07-30 断云端后那个文件成了没人
+    /// 调用的死代码(留着当参考),但这个 helper 还在确定性 AX 路上活着
+    /// (Worker 的组级击键 gate),所以复制到这里,不再跨文件依赖它。
     static func assembleKeystrokeText(_ keys: [KeystrokeEntry]) -> String {
         var out = ""
         for k in keys.sorted(by: { $0.tsMs < $1.tsMs }) {
