@@ -9,13 +9,15 @@
 /// 纯数据 / 纯函数，不感知 AX、不感知 DB。
 struct TypingPrivacyFilter {
 
-    /// hardcode 的默认黑名单 —— 密码管理器 / 钥匙串。
+    /// hardcode 的默认黑名单 —— 密码管理器 / 钥匙串 / 登录窗。
     private static let hardcodedBlacklist: Set<String> = [
         "com.1password.1password",      // 1Password 8
         "com.agilebits.onepassword",    // 1Password 7
         "com.bitwarden.desktop",        // Bitwarden
         "org.keepassxc.keepassxc",      // KeePassXC
         "com.apple.keychainaccess",     // Keychain Access
+        // 登录窗 / 锁屏 —— 这里打的字就是开机密码本身。
+        "com.apple.loginwindow",        // Login Window
         // 07-30 用户:移除 com.joyzhang.myportrait(自采集)—— 新的 typing
         // capture 要采自己 app 里打的字。
     ]
