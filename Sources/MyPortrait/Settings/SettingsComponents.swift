@@ -441,8 +441,16 @@ struct TypingAppPicker: View {
     /// 永远生效、不可移除的条目（如硬编码黑名单）—— 灰显、带锁、无 × 。
     var locked: [String] = []
 
+    /// bundle id 最后一段是无意义通用词的 app —— 直接给名字。
+    /// (07-30:`com.bitwarden.desktop` 显示成 "desktop",在黑名单列表里
+    ///  看着像个没用的条目,差点被当垃圾从密码管理器黑名单里删掉。)
+    static let displayNames: [String: String] = [
+        "com.bitwarden.desktop": "Bitwarden",
+    ]
+
     /// bundle id → 友好名（com.tencent.xinWeChat → xinWeChat）。
     static func label(_ bundleId: String) -> String {
+        if let name = displayNames[bundleId] { return name }
         let last = bundleId.split(separator: ".").last.map(String.init)
         return (last?.isEmpty == false ? last : nil) ?? bundleId
     }
@@ -834,9 +842,9 @@ struct TypingBlacklistEntryPicker: View {
     /// 永远生效、不可移除的整 app 条目(hardcoded password manager 等)。
     var locked: [String] = []
 
+    /// 跟 TypingAppPicker 同一套显示名(含 Bitwarden 那类特例),不重复维护。
     static func label(_ bundleId: String) -> String {
-        let last = bundleId.split(separator: ".").last.map(String.init)
-        return (last?.isEmpty == false ? last : nil) ?? bundleId
+        TypingAppPicker.label(bundleId)
     }
 
     private var boxBackground: some View {
