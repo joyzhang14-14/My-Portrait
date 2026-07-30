@@ -16,7 +16,8 @@ struct TypingPrivacyFilter {
         "com.bitwarden.desktop",        // Bitwarden
         "org.keepassxc.keepassxc",      // KeePassXC
         "com.apple.keychainaccess",     // Keychain Access
-        "com.joyzhang.myportrait",      // 自己 —— 循环采集自己没意义
+        // 07-30 用户:移除 com.joyzhang.myportrait(自采集)—— 新的 typing
+        // capture 要采自己 app 里打的字。
     ]
 
     /// 终端类 app 的 bundle id。**算法限制**，非用户隐私选择 —— 终端的

@@ -295,6 +295,8 @@ final class MemoryScheduler {
     private let kClassifierPipelineV2 = "scheduler.classifierPipelineV2"
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
+    /// 07-30 起没有写入方(写作采集的定时触发已拿掉),只留着不动 UserDefaults
+    /// 里的旧值 —— 新逻辑要是重新挂定时,沿用这个 key 就能接上原来的进度。
     private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
     private let kLastWritingStyle    = "scheduler.lastWritingStyleRun"
 
@@ -583,14 +585,10 @@ final class MemoryScheduler {
             tier1Ran = true
         }
 
-        // 写作采集:自动只是「把 staged 准备好」,等用户在 Pending review
-        // 里 Approve/Reject,不直接 commit 到 writing_records。Tier 1(上游)。
-        if Self.shouldTriggerNow(config: s.writingCapture, now: now),
-           lastRunDay(kLastWritingCapture) != localDayString(now) {
-            setLastRun(kLastWritingCapture, now)
-            await runWritingCaptureJob()
-            tier1Ran = true
-        }
+        // 07-30:写作采集的定时触发**整个拿掉**。typing capture 从零重写,新逻辑
+        // 不跑模型,也就不需要「挑个夜里定时批处理」这套 —— 定时器存在的理由
+        // (攒一天、半夜烧 token)没有了。runWritingCaptureJob() 保留但已无
+        // 调用方,新逻辑要定时的话在这里重新挂。
 
         // 有 Tier-1 跑过 → **本 tick 接着跑 Tier-2**(不等下一个 tick),只在
         // 中间留 10s 缓冲:让 event rebalance 的盘上写入 / DB 落定,Tier-2 读到
@@ -681,10 +679,10 @@ final class MemoryScheduler {
     /// 已经有 pending_review / processing → backlog 内部自带 guard 跳过,不会
     /// 重复跑。
     func runWritingCaptureJob() async {
-        // 07-30:这套 pass 处理停用(见 WritingCaptureWorker.passProcessingEnabled)。
+        // 07-30:这套 pass 处理停用(见 WritingCaptureWorker.typingRebuildV1Enabled)。
         // 在这里就返回 —— 不然每个 tick 都会走到 runBacklog 抛错的 catch 分支,
         // 弹一次失败通知 + 记一条 failure,纯噪音。
-        guard WritingCaptureWorker.passProcessingEnabled else {
+        guard WritingCaptureWorker.typingRebuildV1Enabled else {
             schedLog.info("writingCapture tick: pass processing disabled — skip")
             return
         }

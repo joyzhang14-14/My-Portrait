@@ -1734,32 +1734,18 @@ struct WritingPipelineSection: View {
     // Running / status / summary / task 全走 UIState.shared,view 切走再
     // 回来 Stop 按钮仍可点,状态不丢。
     @ObservedObject private var writingCaptureUI = WritingCaptureUIState.shared
-    @State private var writingCaptureConfirm: Bool = false
     @State private var writingCapturePending: [WritingCaptureRun] = []
     @State private var writingCapturePreviewDate: String? = nil
     @State private var writingCaptureExpanded: Set<String> = []
     @State private var writingCaptureExpandedRecords: [String: [StagedRecordRow]] = [:]
     @State private var writingCaptureExpandedError: [String: String] = [:]
-    @State private var hasWritingCaptureWork: Bool = true
 
+    // 07-30:Auto-run 开关 + Run now 整张卡片删掉 —— typing capture 从零重写,
+    // 旧 pipeline 已停用(WritingCaptureWorker.typingRebuildV1Enabled),定时
+    // 触发也从 scheduler 拿掉了。**Pending review 保留** —— 库里已有的 staged
+    // 记录还得让用户 Approve / Reject 掉。
     var body: some View {
         Group {
-            SettingsCard(
-                title: "Writing capture",
-                footnote: "Finds what you typed and stages it for review. Auto-run lets the scheduler pick it up; Run now triggers it immediately."
-            ) {
-                VStack(spacing: 12) {
-                    autoRunRow(
-                        title: "Auto-run writing capture",
-                        desc: "Finds the writing you did and prepares it for review. Automatic runs only prepare it — you still approve or reject it below.",
-                        kp: \.scheduler.writingCapture)
-                    Divider()
-                    writingCaptureBlock
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-
             // Pending review(跑步中不显示 —— 跟 memory pipeline 同口径)。
             let hasWritingCapture = (!writingCapturePending.isEmpty || writingCaptureUI.lastSummary != nil)
                 && !writingCaptureUI.isRunning
@@ -1787,128 +1773,13 @@ struct WritingPipelineSection: View {
         .sheet(item: $writingCapturePreviewDate.mappedToIdentifiable) { wrapped in
             WritingCapturePreview(date: wrapped.id)
         }
-        .alert("Run writing capture?", isPresented: $writingCaptureConfirm) {
-            Button("Run", role: .none) {
-                writingCaptureUI.task = Task { @MainActor in await runWritingCapture() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Process all your writing since the last approved batch. This uses AI and the results are staged for you to review.")
-        }
     }
 
     // MARK: 组件
 
-    /// auto-run 开关行(对应 scheduler 的 frequency on/off,跟 Memory 页
-    /// schedulerBlock 同语义:UI 只暴露 on/off,老 toml 字段保持兼容)。
-    private func autoRunRow(
-        title: String, desc: String,
-        kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
-    ) -> some View {
-        let freq = cfg.binding(kp.appending(path: \.frequency))
-        let autoRun = Binding<Bool>(
-            get: { freq.wrappedValue != .off },
-            set: { freq.wrappedValue = $0 ? .daily : .off }
-        )
-        return HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(desc)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-            Toggle("", isOn: autoRun)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .help(autoRun.wrappedValue
-                    ? "Scheduler runs this pipeline automatically (15-min tick + backoff for retries)."
-                    : "Manual only — runs only when you trigger it from Run now.")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    // 07-30:autoRunRow / runningIndicator / writingCaptureBlock /
+    // stopWritingCapture 四个成员随 Run now 卡片一起删掉 —— 没有调用方了。
 
-    /// spinner + 阶段文案 + Stop(writing 链路暂无单元级进度信号,维持
-    /// indeterminate;单独重设计时再换真进度条)。
-    @ViewBuilder
-    private func runningIndicator(_ stage: String, onStop: @escaping () -> Void) -> some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            Text(stage.isEmpty ? "Running…" : stage)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Button("Stop", action: onStop)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.red)
-        }
-        .padding(.top, 6)
-    }
-
-    // MARK: Writing capture
-
-    @ViewBuilder
-    private var writingCaptureBlock: some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Process writing capture")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Processes the writing you've done since the last approved batch and stages it for review.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                let wcHasPending = writingCapturePending.contains {
-                    $0.dateUtc == WritingCaptureWorker.backlogDateKey
-                }
-                let wcDisabledReason: String? = {
-                    if WritingCaptureWorker.shared == nil { return "Writing capture worker is not available." }
-                    if writingCaptureUI.isRunning { return "Writing capture is already running." }
-                    if wcHasPending { return "Pending review — Approve / Reject first." }
-                    if !hasWritingCaptureWork { return "No new typing events since the last approved cursor." }
-                    return nil
-                }()
-                Button(writingCaptureUI.isRunning ? "Running…" : "Run") {
-                    writingCaptureConfirm = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(wcDisabledReason != nil)
-                .help(wcDisabledReason ?? "Run writing capture backlog now.")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if writingCaptureUI.isRunning {
-                runningIndicator(writingCaptureUI.stage, onStop: { stopWritingCapture() })
-            }
-            if !writingCaptureUI.statusMessage.isEmpty {
-                Text(writingCaptureUI.statusMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
-            }
-        }
-    }
-
-    /// 停 writing capture:杀 LLM + cancel task + 标僵尸 run failed + 清运行态。
-    private func stopWritingCapture() {
-        let n = PiAgentRegistry.shared.stopGroup(PipelineOwner.writingCapture)
-        writingCaptureUI.task?.cancel()
-        writingCaptureUI.task = nil
-        writingCaptureUI.isRunning = false
-        // 把 DB 里卡在 processing 的 run 标 failed —— 否则下次 runBacklog 会报
-        // "Backlog run already in progress" 拒绝。
-        let zombies = (try? WritingCaptureWorker.shared?.store
-            .markStuckProcessingAsFailed(message: "manually stopped by user")) ?? 0
-        writingCaptureUI.statusMessage = "Stopped — killed \(n) LLM process(es), marked \(zombies) run(s) as failed."
-        refreshWritingCapture()
-    }
 
     @ViewBuilder
     private var writingCaptureResultBlock: some View {
@@ -1969,10 +1840,8 @@ struct WritingPipelineSection: View {
             let backlogOnly = pending.filter {
                 $0.dateUtc == WritingCaptureWorker.backlogDateKey
             }
-            let hasWork = await worker.backlogHasWork()
             await MainActor.run {
                 writingCapturePending = backlogOnly
-                hasWritingCaptureWork = hasWork
             }
         }
     }
@@ -2090,41 +1959,8 @@ struct WritingPipelineSection: View {
         }
     }
 
-    private func runWritingCapture() async {
-        guard let worker = WritingCaptureWorker.shared else {
-            writingCaptureUI.statusMessage = "Worker not initialized (Services not started yet?)."
-            return
-        }
-        writingCaptureUI.isRunning = true
-        writingCaptureUI.statusMessage = ""
-        defer {
-            writingCaptureUI.isRunning = false
-            writingCaptureUI.stage = ""
-        }
-        do {
-            let s = try await worker.runBacklog()
-            writingCaptureUI.lastSummary = s
-            switch s.status {
-            case .approved:
-                writingCaptureUI.statusMessage = "No new data since last cursor — nothing staged."
-                recordWritingRun("Writing capture", "no-work")
-            case .pendingReview:
-                writingCaptureUI.statusMessage =
-                    "Done. \(s.recordsCount) record(s) / \(s.discardedCount) discarded — pending review below."
-                recordWritingRun("Writing capture", "success")
-            case .failed:
-                writingCaptureUI.statusMessage = "Failed: \(s.errorMessage ?? "(unknown)")"
-                recordWritingRun("Writing capture", "failure", reason: s.errorMessage)
-            default:
-                writingCaptureUI.statusMessage = "Status: \(s.status.rawValue)"
-                recordWritingRun("Writing capture", "success")
-            }
-        } catch {
-            writingCaptureUI.statusMessage = "Run failed: \(error.localizedDescription)"
-            recordWritingRun("Writing capture", "failure", reason: error.localizedDescription)
-        }
-        refreshWritingCapture()
-    }
+    // 07-30:runWritingCapture() 随 Run now 按钮一起删 —— 唯一调用方是
+    // 那个确认弹窗。旧 pipeline 已停用,不再有「手动触发一次」这回事。
 
 }
 

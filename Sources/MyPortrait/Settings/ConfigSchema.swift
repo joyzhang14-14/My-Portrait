@@ -77,7 +77,7 @@ struct MyPortraitConfig: Codable, Equatable {
         let oldProvider = (try? mem.decode(String.self, forKey: .providerId)) ?? ""
         guard !oldProvider.isEmpty else { return }
         let pipelines: [WritableKeyPath<SchedulerSettings, SchedulerConfig>] = [
-            \.event, \.portrait, \.personality, \.writingCapture, \.writingStyle,
+            \.event, \.portrait, \.personality, \.writingStyle,
         ]
         guard pipelines.allSatisfy({ scheduler[keyPath: $0].providerId.isEmpty }) else { return }
         let oldModel = (try? mem.decode(String.self, forKey: .model)) ?? ""
@@ -316,11 +316,10 @@ struct SchedulerSettings: Codable, Equatable {
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    /// 写作采集 worker(Step 0 + Pass 1 + Pass 3 + Pass 4)。默认 off 因为它需要用户
-    /// 在 Pending review 里手动 Approve,完全无人值守不合适。用户开了之后
-    /// 自动跑只是「先把 staged 准备好」,等用户审核。
-    var writingCapture: SchedulerConfig = .init(frequency: .off,    timeOfDay: "03:30",
-                                                dayOfWeek: 0, dayOfMonth: 1)
+    // 07-30:writingCapture 整块从 scheduler 配置里摘掉 —— typing capture 从零
+    // 重写,新逻辑不跑模型,既不需要 provider/model 也不需要定时批处理。
+    // 旧 config.toml 里残留的 [scheduler.writing_capture] 会被忽略
+    //(dflt 解码只认 CodingKeys 里列出的键)。
     /// writing_style 提炼链路。auto 模式 → 直接落 portrait/writing_style/,不审。
     /// 默认 off。
     var writingStyle:    SchedulerConfig = .init(frequency: .off,    timeOfDay: "04:30",
@@ -328,7 +327,6 @@ struct SchedulerSettings: Codable, Equatable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case event, classify, portrait, personality
-        case writingCapture = "writing_capture"
         case writingStyle    = "writing_style"
     }
     /// 旧 key:1.2.x 之前这条链路叫 speech_style,老 config.toml 仍写
@@ -342,7 +340,6 @@ struct SchedulerSettings: Codable, Equatable {
         classify       = c.dflt(SchedulerConfig.self, .classify,       classify)
         portrait       = c.dflt(SchedulerConfig.self, .portrait,       portrait)
         personality    = c.dflt(SchedulerConfig.self, .personality,    personality)
-        writingCapture = c.dflt(SchedulerConfig.self, .writingCapture, writingCapture)
         // 读不到新 writing_style key 时回退旧 speech_style key,设置不丢
         let legacy = try? decoder.container(keyedBy: LegacyKeys.self)
         writingStyle   = c.dflt(SchedulerConfig.self, .writingStyle,

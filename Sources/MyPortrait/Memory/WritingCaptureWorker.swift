@@ -95,7 +95,7 @@ final class WritingCaptureWorker {
     /// 跑某一天。
     /// 失败时:writing_capture_runs.status = failed,raw 不删,下次重跑。
     func runDay(date: String) async throws -> WritingCaptureDayRunSummary {
-        guard Self.passProcessingEnabled else { throw BacklogError.passProcessingDisabled }
+        guard Self.typingRebuildV1Enabled else { throw BacklogError.typingRebuildV1Disabled }
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
 
@@ -293,7 +293,7 @@ final class WritingCaptureWorker {
         case pendingReviewExists(records: Int)
         case alreadyProcessing
         case pass3GroupsFailed(count: Int, sample: String)
-        case passProcessingDisabled
+        case typingRebuildV1Disabled
         var errorDescription: String? {
             switch self {
             case .pendingReviewExists(let n):
@@ -304,7 +304,7 @@ final class WritingCaptureWorker {
             case .pass3GroupsFailed(let n, let sample):
                 return "\(n) Pass 3 group(s) failed: \(sample). " +
                        "Run aborted so no data window is skipped — try again."
-            case .passProcessingDisabled:
+            case .typingRebuildV1Disabled:
                 return "Typing capture processing is being rebuilt — this pipeline " +
                        "is switched off. Typing is still being recorded."
             }
@@ -320,7 +320,7 @@ final class WritingCaptureWorker {
     /// 三个入口(MemoryScheduler 的 writingCapture job、Settings 里的 Run
     /// 按钮、WritingCaptureCLI)都经过 runBacklog / runDay,所以门放在这两个
     /// 方法开头一处就够。新逻辑接进来时把这里改回 true(或整个 gate 删掉)。
-    static let passProcessingEnabled = false
+    static let typingRebuildV1Enabled = false
 
     /// backlog 现在有没有活 —— cursor 之后有没有未处理的 typing_event。
     /// UI 拿来灰 Run 按钮。
@@ -332,7 +332,7 @@ final class WritingCaptureWorker {
     }
 
     func runBacklog(includeAxText: Bool = true) async throws -> WritingCaptureDayRunSummary {
-        guard Self.passProcessingEnabled else { throw BacklogError.passProcessingDisabled }
+        guard Self.typingRebuildV1Enabled else { throw BacklogError.typingRebuildV1Disabled }
         let runId = UUID().uuidString
         let startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
         let ui = WritingCaptureUIState.shared

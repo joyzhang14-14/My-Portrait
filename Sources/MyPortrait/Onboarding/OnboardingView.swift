@@ -706,11 +706,12 @@ private struct MemoryProviderStep: View {
     }
 
     /// provider 配置已 per-pipeline(SchedulerConfig)。onboarding 只让用户选一次,
-    /// **同一个选择 seed 进全部 5 个 pipeline**(event/portrait/personality/
-    /// writingCapture/writingStyle);用户之后可在 Settings 里给每个 pipeline 单独改。
+    /// **同一个选择 seed 进全部 4 个 pipeline**(event/portrait/personality/
+    /// writingStyle);用户之后可在 Settings 里给每个 pipeline 单独改。
+    /// 07-30:writingCapture 从这里移除 —— 它不跑模型了,没有 provider 可 seed。
     private static let pipelineKPs: [WritableKeyPath<MyPortraitConfig, SchedulerConfig>] = [
         \.scheduler.event, \.scheduler.portrait, \.scheduler.personality,
-        \.scheduler.writingCapture, \.scheduler.writingStyle,
+        \.scheduler.writingStyle,
     ]
 
     @ViewBuilder
@@ -861,10 +862,8 @@ private struct SchedulerStep: View {
                     title: "Personality refresh",
                     desc: "Aggregates events + portraits + OCR into personality tags.",
                     config: \.scheduler.personality)
-                schedulerCard(
-                    title: "Writing capture",
-                    desc: "Stages writing records from your typing for review. Approval is always manual.",
-                    config: \.scheduler.writingCapture)
+                // 07-30:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
+                // 已停用重写,且新逻辑不跑模型,没有「定时批处理」这回事。
                 schedulerCard(
                     title: "Writing style",
                     desc: "Distills how you write (formality, language mix, recurring phrases) into the Writing Style portrait.",
