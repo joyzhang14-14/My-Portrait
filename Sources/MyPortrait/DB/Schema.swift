@@ -986,6 +986,88 @@ enum DBSchema {
             }
         }
 
+        // ═══════════════════════════════════════════════════════════
+        // v42 — mouse_log:全局鼠标按下/松开日志(光标位置与选区)
+        // ═══════════════════════════════════════════════════════════
+        //
+        // 为什么需要:canvas 路(自绘界面,AX 读不到正文)靠回放击键流重建正文,
+        // 而**鼠标点击此前零采集** —— 用户点一下把光标挪到句子中间再打字,重建器
+        // 完全不知道,只能按打字先后顺序拼在尾巴上。实验线实测:44 天里含方向键的
+        // 记录 3 条全部输出错序,其中 1 条还跨 session 删掉了别的记录打的字;而
+        // 方向键只是「光标动了」的可见冰山,鼠标点击是水下那部分,一直不可知。
+        //
+        // 记什么:
+        //   kind        left_down / left_up / right_down
+        //   bundle_id   点击**发生前**的 frontmost app(与 keystroke_log 同口径)
+        //   target_pid  CGEvent 自带的 eventTargetUnixProcessID —— 窗口服务器算好的
+        //   target_bundle_id  「这一下会投递给谁」。⚠️必须有这个:tap 挂在
+        //               .headInsertEventTap,拿到事件时**点击还没生效**,所以
+        //               frontmost 是点击**之前**的窗口 —— 而「点一下把别的窗口切到
+        //               前面」恰恰是最需要认对的场景,只看 frontmost 必然标错。
+        //               两者不同 = 这一下点击切换了 app,本身就是有用信号。
+        //               (不走枚举窗口找「点在哪个窗口里」:CGWindowListCopyWindowInfo
+        //                要分配全屏窗口数组,而 CGEventTap 有超时、回调慢会被 macOS
+        //                停掉 —— 那正是 5/22-5/23 keystroke_log 大段空洞的真因。
+        //                也不记窗口标题:它要 Screen Recording 权限,且浏览器标题随
+        //                页面变、不是稳定身份,更不是 URL。)
+        //   x / y       CGEvent.location,**全局显示坐标系原始像素**(左上原点)
+        //   screen_w/h  当时主显示器像素尺寸 —— OCR 的 ocr_words_json 里 bbox 是
+        //               归一化 0..1,没有这个尺寸就无法把点击坐标对到「点在哪个词
+        //               上」,而 frames 表不存画面尺寸,事后不可恢复。
+        //   click_count 1=单击 2=双击(选中一个词)3=三击(选中一行)——
+        //               双击后打字是**替换那个词**而不是插入,语义完全不同
+        //   modifiers   与 keystroke_log 同一套 packed bit;shift+click = 扩展选区
+        //
+        // left_up 也记:按下与松开坐标不同 = 拖拽选区(而不是移动光标),两者下游
+        // 后果相反(替换 vs 插入)。只记 down/up 两行,不记高频的 dragged 事件。
+        //
+        // 采集层只记原始信号:不判「这一下点在哪个词上」、不判「是否移动了插入点」、
+        // 也不判「这一下是切换文档还是挪光标」。所有判别都在实验线(同 input_source
+        // 那条的分工)。判别方式用户 2026-07-30 已裁定:**数据驱动** —— 点击前后
+        // 两帧的 browser_url 不同 = 切换,相同 = 挪光标;不用「点在窗口顶部标签栏
+        // 区域」这类坐标启发式(不同浏览器/全屏/分屏都会变,且是变相硬编码)。
+        //
+        // 这条通道要解的实际问题:v21 全量里最大的 drop 桶就是
+        // `canvas_url_ambiguous` 396 键(Safari 321 / Chrome 75),理由清一色
+        // 「击键同时重叠 2 个精确 URL」—— 在 Google Docs 打完切到 Sheets 再打,
+        // 管线知道 t1 是 Docs、t2 是 Sheets,却**不知道切换发生在中间哪一刻**,
+        // 夹在中间的键两个 URL 都能匹配,只能整条丢。
+        // 切标签页本身就是一次点击 → mouse_log 提供**边界**,frames 提供**身份**,
+        // 两者缺一不可(所以这里坚决不记 URL:它不是 URL 的来源,记了就是重复
+        // 且可能矛盾的真值)。键盘切页(Cmd+Tab / Cmd+数字)没有点击,但那本来
+        // 就是击键,keystroke_log.modifiers 已经记着,是另一路边界候选。
+        //
+        // ⚠️**没有 url**:与 keystroke_log 同一个已知妥协(行级没有 URL,只能按
+        // bundle_id 屏蔽,URL 靠后处理从同期 focused 帧按时间反推)。拿 URL 要 AX
+        // 查窗口,而 AX 调用不能在 tap 回调线程做(阻塞;项目里 AXSerialQueue 就是
+        // 为此存在)。用户 2026-07 已对同类问题裁定过:「不给 keystroke_log 增加
+        // element_hash,现有时间戳足够作为后处理关联证据」。
+        // 点击比击键多了坐标,而 frames 存着词级 bbox —— 「点在哪个词上」可以从
+        // 帧那边join 出来,不需要采集侧补 URL。
+        //
+        // 隐私:黑名单 app 只清 x/y(坐标才是内容),仍写行以便按行计数;
+        // frontmost 与 target 任一命中黑名单就清。与 keystroke_log 的做法一致。
+        m.registerMigration("v42_mouse_log") { db in
+            try db.create(table: "mouse_log") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("ts_ms", .integer).notNull()
+                t.column("bundle_id", .text).notNull()
+                t.column("kind", .text).notNull()
+                t.column("target_pid", .integer)        // 事件投递目标(0/未知时 NULL)
+                t.column("target_bundle_id", .text)     // 由 target_pid 解析,失败为 NULL
+                t.column("x", .double)                 // 黑名单 app 为 NULL
+                t.column("y", .double)
+                t.column("screen_w", .integer)
+                t.column("screen_h", .integer)
+                t.column("click_count", .integer).notNull().defaults(to: 1)
+                t.column("modifiers", .integer).notNull().defaults(to: 0)
+            }
+            try db.execute(sql:
+                "CREATE INDEX idx_mouse_log_ts ON mouse_log(ts_ms)")
+            try db.execute(sql:
+                "CREATE INDEX idx_mouse_log_app ON mouse_log(bundle_id, ts_ms)")
+        }
+
         return m
     }
 }

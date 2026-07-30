@@ -50,6 +50,7 @@ final class TypingObserver {
     /// L3 字符 logger —— 挂在 KeystrokeLedger 同条 CGEventTap callback。
     /// 生产模式注入(写 keystroke_log),dev/observe 模式 nil。
     private let keystrokeCharLogger: KeystrokeCharLogger?
+    private let mouseClickLogger: MouseClickLogger?
 
     /// 旧 `--typing-observe-m3` dev flag 的消费口（v14 已不喂 L2，仅编译兼容）。
     var onFoldEvent: (([IMEFoldEvent]) -> Void)?
@@ -87,6 +88,12 @@ final class TypingObserver {
         self.modeLabel = modeLabel
         self.writer = TypingRecordWriter(store: store, ledger: ledger, pasteboard: pasteboardMonitor)
         self.keystrokeCharLogger = keystrokeStore.map { KeystrokeCharLogger(store: $0) }
+        // 鼠标 logger 跟击键 logger 同生命周期、同 dbPool —— 都是「原始输入采集」。
+        // 从 keystrokeStore 派生而不是新加一个构造参数:避免出现「击键在记、鼠标
+        // 没记」的错配(下游要把点击按时间插进击键序列里,缺一半就没意义)。
+        self.mouseClickLogger = keystrokeStore.map {
+            MouseClickLogger(store: MouseEventStore(dbPool: $0.dbPool))
+        }
     }
 
     func start() {
@@ -105,6 +112,13 @@ final class TypingObserver {
             let union = Set(hardcoded).union(appLevel)
             charLogger.updateBlacklist(union)
             ledger.charLogger = charLogger
+
+            // 鼠标 logger 同一份黑名单(mouse_log 行级同样没有 URL,只能按
+            // bundle_id 屏蔽)。同样必须在 ledger.start() 之前挂上。
+            if let mouseLogger = mouseClickLogger {
+                mouseLogger.updateBlacklist(union)
+                ledger.mouseLogger = mouseLogger
+            }
         }
 
         // 回车摇读:回车一按,延迟几 ms 抢读焦点字段现值喂回 writer —— 救 IME 末尾

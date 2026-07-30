@@ -74,6 +74,13 @@ final class KeystrokeLedger {
     /// 生产路径由 TypingObserver 注入;dev/observe 模式不带。
     var charLogger: KeystrokeCharLogger?
 
+    /// 可选鼠标 logger —— 挂上后,鼠标按下/松开也同步派一份。跟 charLogger 同款:
+    /// 生产路径 start() 前注入一次,之后只读,无锁。
+    /// 挂在这条 tap(而不是 InputWatcher)是因为 InputWatcher 走
+    /// `NSEvent.addGlobalMonitorForEvents`,需要 **Input Monitoring** 权限,
+    /// 而该权限已从 onboarding 移除 —— 挂那边会静默地一条都记不到。
+    var mouseLogger: MouseClickLogger?
+
     /// 可选回车回调 —— 回车 keyDown 时同步触发一次,给 TypingObserver 做「摇读」
     /// (回车一按抢读焦点字段现值,救 IME 末尾落字)。跟 charLogger 同款:生产路径
     /// start() 前注入一次,之后只读,无锁。
@@ -94,9 +101,15 @@ final class KeystrokeLedger {
             return
         }
 
-        // keyDown + tap-disabled 事件(后者收不进 mask 也会 fire,但显式加上更稳)
+        // keyDown + 鼠标按下/松开 + tap-disabled 事件
+        //(tap-disabled 收不进 mask 也会 fire,但显式加上更稳)
+        // 鼠标只收 down/up 三种,**不收 dragged** —— 拖拽期间 dragged 是高频事件,
+        // 而按下/松开两行已经够还原「点击移光标」和「拖拽选区」的区别。
         let mask: CGEventMask =
               (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.leftMouseDown.rawValue)
+            | (1 << CGEventType.leftMouseUp.rawValue)
+            | (1 << CGEventType.rightMouseDown.rawValue)
             | (1 << CGEventType.tapDisabledByTimeout.rawValue)
             | (1 << CGEventType.tapDisabledByUserInput.rawValue)
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
@@ -403,6 +416,15 @@ private func keystrokeLedgerTapCallback(
         if let userInfo {
             let ledger = Unmanaged<KeystrokeLedger>.fromOpaque(userInfo).takeUnretainedValue()
             ledger.reenableTap(reason: type)
+        }
+        return Unmanaged.passUnretained(event)
+    }
+    // 鼠标 down/up —— 只落库,**绝不碰 ledger**:点击不是打字,记进 ring buffer 会
+    // 污染 hasKeystroke(v14 typing observer 靠它判「这段有没有人在打字」)。
+    if MouseClickLogger.kind(for: type) != nil {
+        if let userInfo {
+            let ledger = Unmanaged<KeystrokeLedger>.fromOpaque(userInfo).takeUnretainedValue()
+            ledger.mouseLogger?.ingest(event: event, type: type)
         }
         return Unmanaged.passUnretained(event)
     }
