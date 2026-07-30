@@ -51,31 +51,11 @@ final class WritingCaptureWorker {
     static var shared: WritingCaptureWorker?
 
     let store: WritingCaptureStore
-    /// pass1/pass3 在每次 runDay 重新构造 —— 这样用户在 Settings 改 provider
-    /// 后下一次跑就用新的(写作采集用 LIGHT 模型档,跟 cluster 一档)。
-    /// init 传入的 override 仍然优先(测试用)。
-    private let pass1Override: WritingCapturePass1Agent?
-    private let pass3Override: WritingCapturePass3Agent?
 
-    init(
-        store: WritingCaptureStore,
-        pass1: WritingCapturePass1Agent? = nil,
-        pass3: WritingCapturePass3Agent? = nil
-    ) {
+    /// 07-30:pass1Override / pass3Override 两个注入点随云端 agent 一起删掉
+    /// (两个调用方 Services / WritingCaptureCLI 都只传 store,从没用过 override)。
+    init(store: WritingCaptureStore) {
         self.store = store
-        self.pass1Override = pass1
-        self.pass3Override = pass3
-    }
-
-    private var pass1: WritingCapturePass1Agent {
-        if let o = pass1Override { return o }
-        let cfg = ConfigStore.shared.current.scheduler.writingCapture
-        return WritingCapturePass1Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
-    }
-    private var pass3: WritingCapturePass3Agent {
-        if let o = pass3Override { return o }
-        let cfg = ConfigStore.shared.current.scheduler.writingCapture
-        return WritingCapturePass3Agent(provider: cfg.resolvedProvider, model: cfg.resolvedModelLight)
     }
 
     /// 跑所有「未处理的天」。返回每天的执行摘要。
@@ -192,72 +172,27 @@ final class WritingCaptureWorker {
             )
         }
 
-        // 3. Pass 1 —— 整天 OCR 抽 context timeline
-        // 单帧 cap 决策 per session:AX 数 *10 < typing event 数 时,该 session
-        // OCR 不截字(AX 对该 session 几乎没拿到数据,OCR 是唯一来源)。
-        let pass1OcrFrames = step0.rawSessions.flatMap { s -> [WritingCaptureOcrFrame] in
-            let unlimited = s.axFrameCount * 10 < s.typingEvents.count
-            let cap = unlimited ? Int.max : WritingCapturePass1Agent.pass1OcrTextMaxChars
-            return s.ocrFrames.map { f in
-                guard f.text.count > cap else { return f }
-                return WritingCaptureOcrFrame(
-                    frameId: f.frameId,
-                    startTs: f.startTs, endTs: f.endTs,
-                    app: f.app, url: f.url, windowTitle: f.windowTitle,
-                    text: String(f.text.prefix(cap))
-                )
-            }
-        }.sorted(by: { $0.startTs < $1.startTs })
-        // Pass 1 也喂 raw.typing + raw.keys 当 cross-signal,帮 LLM 区分
-        // "用户在打字" vs "用户在看东西"
-        let probePrompt = WritingCapturePass1Agent.buildPrompt(
-            ocrFrames: pass1OcrFrames,
-            typingEvents: raw.typing,
-            keystrokes: raw.keys
-        )
-        try? probePrompt.write(
-            toFile: "/tmp/writing-capture-pass1-prompt.txt",
-            atomically: false, encoding: .utf8)
-        workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars, dumped /tmp/writing-capture-pass1-prompt.txt")
-        let pass1Out = try await pass1.run(
-            ocrFrames: pass1OcrFrames,
-            typingEvents: raw.typing,
-            keystrokes: raw.keys
-        )
-        workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
+        // 3. Pass 1(整天 OCR → context timeline)**已断**。
+        // 07-30 用户要求:写作采集这条云端路整个下线,给新的本地化 pass1-4
+        // 腾位置(新逻辑不需要模型)。context timeline 暂时空 —— 下游只拿它
+        // 给 record 填 contextSummary,本来就允许 nil。
+        let contextTimeline: [WritingCaptureContextSegment] = []
 
-        let pass3Cfg = ConfigStore.shared.current.scheduler.writingCapture
-        let pass3Provider = pass3Cfg.resolvedProvider
-        let pass3Model = pass3Cfg.resolvedModelLight
-
-        // Pass 2(LLM):精准切 session(LLM 判 return 还是时间边界)+ 路由(ax/ocr)。
-        // 不丢 event。chat app 真内容在 AX → ax 路;真 canvas(AX 乱码/空)→ ocr 路。
-        let refinedSessions = await Self.applyPass2(
-            step0.rawSessions, concurrency: 5,
-            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
+        // Pass 2 = 确定性路由(AX 有料 → ax 路 / AX 失灵 → ocr 路),从来不碰
+        // LLM,原样保留。
+        let refinedSessions = await Self.applyPass2(step0.rawSessions, concurrency: 5)
         workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
 
         // 4. 按 (app, url) 分组(不真合,LLM 在组内决定怎么分 record)
         let groups = Self.groupRawSessionsByApp(refinedSessions)
         workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
 
-        // 5. **每组一个 subagent 并发跑 Pass 3**(默认 sonnet)。
-        // 失败 group 单独标错,不阻塞其他 group。最多 5 并发,防止 Anthropic
-        // 限流 + 本机 CPU 打爆。每个并发任务都创建一个全新的 Pass3Agent,
-        // 不复用(每 agent 有 subprocess 状态)。
-        let userLanguages = ConfigStore.shared.current.personalInfo.languages
-        let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
-            try store.fetchRecentUserRejections()
-        }.value) ?? []
+        // 5. 每组一次组处理。AX 路是确定性的(保留);canvas 路原本靠云端
+        // OCR 重建,已断 → 该组产 0 条(见 runPass3Concurrently 注释)。
         let pass3Results = await Self.runPass3Concurrently(
-            contextTimeline: pass1Out.timeline,
+            contextTimeline: contextTimeline,
             groups: groups,
-            concurrency: 5,
-            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass3Provider, model: pass3Model) },
-            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
-            makeCleanup: { @MainActor in WritingCaptureAxCleanupAgent(provider: pass3Provider, model: pass3Model) },
-            userLanguages: userLanguages,
-            userRejections: userRejections
+            concurrency: 5
         )
 
         // 6. 收集 Pass 3 输出(按 group 索引保留分组),给 Pass 4 用
@@ -299,56 +234,25 @@ final class WritingCaptureWorker {
         let editLogDropped = editLogFilter.dropped
         workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
 
-        // 6b. Pass 4 —— keystroke 支撑度过滤(每组一次,跟 Pass 3 同 provider/model)
-        let pass4Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
-            recs.enumerated().map { (ri, rec) in
-                WritingCapturePass4Builders.buildInput(recordId: "g\(gi)_r\(ri)", record: rec, keys: raw.keys)
-            }
-        }
-        let pass4Results = await WritingCapturePass4Builders.runConcurrently(
-            inputsByGroupIdx: pass4Inputs,
-            concurrency: 5,
-            userRejections: userRejections,
-            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass3Provider, model: pass3Model) }
-        )
-        var allRecords: [WritingCaptureRecord] = []
-        var allDiscarded: [WritingCaptureDiscarded] = editLogDropped
-        var pass4RawResponses: [String] = []
-        var pass4FailedGroups = 0
-        for (gi, recs) in recordsByGroupIdx.enumerated() {
-            switch pass4Results[gi] {
-            case .success(let out):
-                pass4RawResponses.append(out.rawResponse)
-                for (ri, rec) in recs.enumerated() {
-                    let id = "g\(gi)_r\(ri)"
-                    if out.kept.contains(id) { allRecords.append(rec) }
-                }
-                for d in out.discarded {
-                    allDiscarded.append(WritingCaptureDiscarded(
-                        reason: "pass4: \(d.reason)",
-                        sessionIds: [],
-                        preview: d.preview
-                    ))
-                }
-            case .failure(let err):
-                pass4FailedGroups += 1
-                workerLog.warning("pass4 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
-                allRecords.append(contentsOf: recs)
-            }
-        }
-        workerLog.info("pass4 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass4FailedGroups) failed groups")
+        // 6b. Pass 4(keystroke 支撑度判别器)**已断** —— 原本是云端 LLM 判
+        // "这条是不是真手打"。断掉后**全留**,等价于原来 Pass 4 失败时的
+        // fail-open 分支。判别工作交给新的本地化 pass4。
+        let allRecords: [WritingCaptureRecord] = recordsByGroupIdx.flatMap { $0 }
+        let allDiscarded: [WritingCaptureDiscarded] = editLogDropped
+        workerLog.info("pass4 skipped (cloud path cut): \(allRecords.count) kept, \(allDiscarded.count) discarded")
 
         // 7. 落 staged + discarded
-        let promptId = Self.promptIdHash(
-            pass1: pass1Out.prompt, pass3: firstPrompt ?? ""
-        )
+        // promptId 原本是「哪版 prompt 产出的」指纹;云端断了没有 prompt,
+        // 先喂空串(下游只当不透明字符串存)。本地 pass1-4 接进来后可以换成
+        // 它自己的版本号。
+        let promptId = Self.promptIdHash(pass1: "", pass3: "")
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.insertStaged(
                 date: date,
                 runId: runId,
                 promptId: promptId,
                 records: allRecords,
-                rawPass1Output: pass1Out.rawResponse,
+                rawPass1Output: "",
                 rawPass3Output: rawResponses.joined(separator: "\n---\n")
             )
             try store.insertStagedDiscarded(
@@ -552,58 +456,22 @@ final class WritingCaptureWorker {
         let frameMax = perSessionFrames.max() ?? 0
         let frameDist = perSessionFrames.sorted(by: >).prefix(5).map(String.init).joined(separator: ",")
         workerLog.info("ocr/session: sum=\(frameSum, privacy: .public) max=\(frameMax, privacy: .public) top5=[\(frameDist, privacy: .public)] sessions=\(step0.rawSessions.count, privacy: .public)")
-        let probePrompt = WritingCapturePass1Agent.buildPrompt(
-            ocrFrames: allOcrFrames,
-            typingEvents: raw.typing,
-            keystrokes: raw.keys
-        )
-        try? probePrompt.write(
-            toFile: "/tmp/writing-capture-pass1-prompt.txt",
-            atomically: false, encoding: .utf8)
-        workerLog.info("pass1 prompt: \(probePrompt.count, privacy: .public) chars")
-        ui.stage = "Pass 1"
-        ui.statusMessage = "Pass 1: extracting context timeline (\(allOcrFrames.count) OCR frames)…"
-        let pass1Out = try await pass1.run(
-            ocrFrames: allOcrFrames,
-            typingEvents: raw.typing,
-            keystrokes: raw.keys
-        )
-        workerLog.info("pass1: \(pass1Out.timeline.count) context segments")
+        // Pass 1(整天 OCR → context timeline)**已断**,见 runDay 里同款注释。
+        let contextTimeline: [WritingCaptureContextSegment] = []
 
-        let pass3Cfg = ConfigStore.shared.current.scheduler.writingCapture
-        let pass3Provider = pass3Cfg.resolvedProvider
-        let pass3Model = pass3Cfg.resolvedModelLight
-
-        // 3.5 Pass 2 —— 路由(AX vs OCR)+ 切割 + AX 真伪。判断活,轻量模型。
-        // Pass 2(LLM):精准切 session(LLM 判 return 还是时间边界)+ 路由(ax/ocr),
-        // 不丢 event。chat app 真内容在 AX → ax;真 canvas(AX 乱码/空)→ ocr。
+        // 3.5 Pass 2 —— 确定性路由(AX 有料 → ax / AX 失灵 → ocr),不碰 LLM。
         ui.stage = "Pass 2"
         ui.statusMessage = "Pass 2: segment + route \(step0.rawSessions.count) sessions…"
-        let refinedSessions = await Self.applyPass2(
-            step0.rawSessions, concurrency: 5,
-            makePass2: { @MainActor in WritingCapturePass2Agent(provider: pass3Provider, model: pass3Model) })
+        let refinedSessions = await Self.applyPass2(step0.rawSessions, concurrency: 5)
         workerLog.info("pass2: \(step0.rawSessions.count) sessions → \(refinedSessions.count) units")
 
-        // 4. group + 5. Pass 3 并发
+        // 4. group + 5. 组处理并发(AX 路确定性;canvas 路已断,产 0 条)
         let groups = Self.groupRawSessionsByApp(refinedSessions)
         ui.stage = "Pass 3"
         ui.statusMessage = "Pass 3: \(groups.count) (app, url) groups — running concurrently (max 5)…"
         workerLog.info("grouped by app+url: \(refinedSessions.count) sessions → \(groups.count) groups")
-        let userLanguages = ConfigStore.shared.current.personalInfo.languages
-        let userRejections = (try? await Task.detached(priority: .userInitiated) { [store] in
-            try store.fetchRecentUserRejections()
-        }.value) ?? []
-        if !userRejections.isEmpty {
-            workerLog.info("user_rejections: \(userRejections.count) examples fed to Pass 3")
-        }
         let pass3Results = await Self.runPass3Concurrently(
-            contextTimeline: pass1Out.timeline, groups: groups, concurrency: 5,
-            makePass3: { @MainActor in WritingCapturePass3Agent(provider: pass3Provider, model: pass3Model) },
-            makeCanvas: { @MainActor in WritingCaptureCanvasAgent(provider: pass3Provider, model: pass3Model) },
-            makeCleanup: { @MainActor in WritingCaptureAxCleanupAgent(provider: pass3Provider, model: pass3Model) },
-            includeAxText: includeAxText,
-            userLanguages: userLanguages,
-            userRejections: userRejections
+            contextTimeline: contextTimeline, groups: groups, concurrency: 5
         )
 
         // 6. 收集 Pass 3 输出(按 group 索引保留)
@@ -643,54 +511,20 @@ final class WritingCaptureWorker {
         let editLogDropped = editLogFilter.dropped
         workerLog.info("editlog filter: dropped \(editLogDropped.count) non-authored records")
 
-        // 6b. Pass 4
-        ui.stage = "Pass 4"
-        ui.statusMessage = "Pass 4: validating \(pass3Total) candidate record(s)…"
-        let pass4Inputs = recordsByGroupIdx.enumerated().map { (gi, recs) in
-            recs.enumerated().map { (ri, rec) in
-                WritingCapturePass4Builders.buildInput(recordId: "g\(gi)_r\(ri)", record: rec, keys: raw.keys)
-            }
-        }
-        let pass4Results = await WritingCapturePass4Builders.runConcurrently(
-            inputsByGroupIdx: pass4Inputs,
-            concurrency: 5,
-            userRejections: userRejections,
-            makePass4: { @MainActor in WritingCapturePass4Agent(provider: pass3Provider, model: pass3Model) }
-        )
-        var allRecords: [WritingCaptureRecord] = []
-        var allDiscarded: [WritingCaptureDiscarded] = editLogDropped
-        var pass4FailedGroups = 0
-        for (gi, recs) in recordsByGroupIdx.enumerated() {
-            switch pass4Results[gi] {
-            case .success(let out):
-                for (ri, rec) in recs.enumerated() {
-                    let id = "g\(gi)_r\(ri)"
-                    if out.kept.contains(id) { allRecords.append(rec) }
-                }
-                for d in out.discarded {
-                    allDiscarded.append(WritingCaptureDiscarded(
-                        reason: "pass4: \(d.reason)",
-                        sessionIds: [],
-                        preview: d.preview
-                    ))
-                }
-            case .failure(let err):
-                pass4FailedGroups += 1
-                workerLog.warning("pass4 group failed: \(String(describing: err), privacy: .public) — keeping all records for this group")
-                allRecords.append(contentsOf: recs)
-            }
-        }
-        workerLog.info("pass4 fanout: \(allRecords.count) kept, \(allDiscarded.count) discarded, \(pass4FailedGroups) failed groups")
+        // 6b. Pass 4(判别器)**已断** —— 全留,等价于原来的 fail-open 分支。
+        let allRecords: [WritingCaptureRecord] = recordsByGroupIdx.flatMap { $0 }
+        let allDiscarded: [WritingCaptureDiscarded] = editLogDropped
+        workerLog.info("pass4 skipped (cloud path cut): \(allRecords.count) kept, \(allDiscarded.count) discarded")
         ui.stage = "saving"
         ui.statusMessage = "Saving \(allRecords.count) record(s), \(allDiscarded.count) discarded…"
 
         // 7. stage
-        let promptId = Self.promptIdHash(pass1: pass1Out.prompt, pass3: firstPrompt ?? "")
+        let promptId = Self.promptIdHash(pass1: "", pass3: "")
         try await Task.detached(priority: .userInitiated) { [store] in
             try store.insertStaged(
                 date: date, runId: runId, promptId: promptId,
                 records: allRecords,
-                rawPass1Output: pass1Out.rawResponse,
+                rawPass1Output: "",
                 rawPass3Output: rawResponses.joined(separator: "\n---\n")
             )
             try store.insertStagedDiscarded(date: date, runId: runId, discarded: allDiscarded)
@@ -793,8 +627,7 @@ final class WritingCaptureWorker {
     /// 并发限 `concurrency`。LLM 失败 fallback:该 session 原样保留。
     static func applyPass2(
         _ sessions: [WritingCaptureRawSession],
-        concurrency: Int,
-        makePass2: @escaping @MainActor @Sendable () -> WritingCapturePass2Agent
+        concurrency: Int
     ) async -> [WritingCaptureRawSession] {
         // Pass 2 = 确定性路由(根据 AX,不用 LLM、不硬编码 app):
         //   AX 有料(session 有 typing_events)→ ax 路 → 走确定性构造
@@ -936,7 +769,7 @@ final class WritingCaptureWorker {
         return out
     }
 
-    /// 把一个 session 标成走 AX 路径(route="ax" → dispatch 去 Pass3Agent)。
+    /// 把一个 session 标成走 AX 路径(route="ax" → 走确定性 AX 组处理)。
     /// 整 session 原样保留(typingEvents/keystrokes/ocrFrames 都给 Pass 3),
     /// 只清 chromeTokens(canvas hint)并定 route=ax。Pass 2 路由用。
     nonisolated static func ensureAxRoute(
@@ -1025,7 +858,7 @@ final class WritingCaptureWorker {
     /// 并发跑多 group 的 Pass 3 —— 默认 sonnet subagent 一组一个。
     /// 限流 `concurrency` 道闸,防止瞬间 spawn 30 个 claude 子进程。
     enum Pass3GroupResult {
-        case success(WritingCapturePass3Agent.Output)
+        case success(WritingCaptureGroupOutput)
         case failure(Error)
     }
     /// AX 路确定性记录构造:**一个 unit-session(Pass 2 LLM 切的一条消息)= 一条
@@ -1034,7 +867,7 @@ final class WritingCaptureWorker {
     nonisolated static func buildAxRecordsDeterministic(
         group g: WritingCaptureGroup,
         contextTimeline: [WritingCaptureContextSegment]
-    ) -> WritingCapturePass3Agent.Output {
+    ) -> WritingCaptureGroupOutput {
         var records: [WritingCaptureRecord] = []
         for s in g.sessions {
             let evs = s.typingEvents.filter { $0.id != nil }
@@ -1055,7 +888,7 @@ final class WritingCaptureWorker {
                 referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
                 referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
         }
-        return WritingCapturePass3Agent.Output(
+        return WritingCaptureGroupOutput(
             prompt: "(deterministic ax record set)", rawResponse: "(deterministic)",
             records: records, discarded: [])
     }
@@ -1383,66 +1216,33 @@ final class WritingCaptureWorker {
         return ((0.80 + 0.19 * ratio) * 100).rounded() / 100
     }
 
-    // DEBUG dump:把 AX-cleanup 这一步的**真实输入**(已被 unifiedExtract 确定性切好的
-    // 单条消息 + 击键)和**真实输出**(补完拼音残留的文本)落盘成 JSON,每组一个文件。
-    // 只在 `~/.portrait/llm_dump.on` 存在时才写 —— 平时不开、零开销。给本地小模型在
-    // 「真实切好的输入」上做公平复测用(scratch 测试用 DB 反推拿不到这个切好的输入)。
-    nonisolated static func dumpAxCleanupIfEnabled(
-        app: String, url: String,
-        items: [WritingCaptureAxCleanupAgent.Item],
-        fixes: [String: WritingCaptureAxCleanupAgent.Fix]
-    ) {
-        let home = NSHomeDirectory()
-        guard FileManager.default.fileExists(atPath: home + "/.portrait/llm_dump.on"),
-              !items.isEmpty else { return }
-        let dir = home + "/.portrait/llm_dump"
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let payload: [String: Any] = [
-            "pass": "ax_cleanup", "app": app, "url": url,
-            "items": items.map { ["id": $0.id, "text": $0.text, "keystroke": $0.keystroke] },
-            "fixes": fixes.reduce(into: [String: [String: Any]]()) {
-                $0[$1.key] = ["text": $1.value.text, "confidence": $1.value.confidence]
-            },
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
-        else { return }
-        let stamp = Int(Date().timeIntervalSince1970 * 1000)
-        let name = "ax_\(stamp)_\(UUID().uuidString.prefix(8)).json"
-        try? data.write(to: URL(fileURLWithPath: dir + "/" + name))
-    }
+    // ⚠️ 07-30 删掉了 `dumpAxCleanupIfEnabled` —— 它把 AX-cleanup 的真实输入
+    // (unifiedExtract 切好的单条消息 + 击键)和云端输出 dump 成 JSON 到
+    // `~/.portrait/llm_dump/`(靠 `~/.portrait/llm_dump.on` 开关),原本是给本地
+    // 小模型做公平复测用的。它的入参类型是云端 agent 的 Item / Fix,随 agent
+    // 一起没了。**本地化 pass 如果还需要这个 dump,要按新类型重写一份。**
 
     static func runPass3Concurrently(
         contextTimeline: [WritingCaptureContextSegment],
         groups: [WritingCaptureGroup],
-        concurrency: Int,
-        makePass3: @escaping @MainActor @Sendable () -> WritingCapturePass3Agent,
-        makeCanvas: @escaping @MainActor @Sendable () -> WritingCaptureCanvasAgent,
-        makeCleanup: @escaping @MainActor @Sendable () -> WritingCaptureAxCleanupAgent,
-        includeAxText: Bool = true,
-        userLanguages: [String] = [],
-        userRejections: [UserRejectionRow] = []
+        concurrency: Int
     ) async -> [Pass3GroupResult] {
-        // 单组执行:canvas 组(有 chromeTokens 的 AX 稀疏文档)走 window 切分
-        // fanout;普通组走 Pass 3 单调用。LLM 偶发 socket 断/超时常见,失败退避
-        // 重试最多 3 次(吸收瞬时错误);重试还失败才算 group failure。
-        // run 级占位符:所有待处理事件扫一遍算一次,各组共享(单组事件少时也能认出占位符)。
+        // 单组执行。07-30 断云端后:
+        //   canvas 组(AX 失灵的自绘编辑器,内容只在屏幕 OCR)—— 原本靠云端
+        //     window fanout 重建,**已断,产 0 条**。这是这次断路唯一真正丢
+        //     能力的地方(AX 路和 Pass 4 都有确定性兜底,canvas 没有)。
+        //     新的本地化 canvas 逻辑接这里。
+        //   AX 组 —— record 集本来就是确定性构造的,原样保留;原先跟在后面的
+        //     AxCleanup(云端补 dian→店)已断,直接用确定性原文 + 默认 conf。
+        // run 级占位符:所有待处理事件扫一遍算一次,各组共享。
         let placeholders = Self.collectPlaceholders(groups)
-        @Sendable func runOnce(_ g: WritingCaptureGroup) async throws -> WritingCapturePass3Agent.Output {
+        @Sendable func runOnce(_ g: WritingCaptureGroup) async throws -> WritingCaptureGroupOutput {
             let isCanvas = g.sessions.contains { $0.route == "ocr" }
             if isCanvas {
-                let merged = Self.mergeCanvasSessions(g.sessions)
-                let ctx = contextTimeline.first {
-                    $0.app == g.app && $0.startTs <= merged.endTs && $0.endTs >= merged.startTs
-                }?.summary
-                let agent = await makeCanvas()
-                return try await agent.run(
-                    groupApp: g.app, groupUrl: g.url, session: merged, contextSummary: ctx)
+                return WritingCaptureGroupOutput(
+                    prompt: "", rawResponse: "", records: [], discarded: [])
             } else {
-                // AX 路:record 集确定性(一 unit-session = 一条,反映 Pass 2 的
-                // return/time 切分)+ 专职 LLM **只补 AX 小瑕疵**(dian→店)。补齐按
-                // record id 精确回填;LLM 漏某条/失败 → 保留确定性原文,绝不增删。
                 var records: [WritingCaptureRecord] = []
-                var items: [WritingCaptureAxCleanupAgent.Item] = []
                 for s in g.sessions {
                     let evs = s.typingEvents.filter { $0.id != nil }
                         .sorted { $0.startedAt < $1.startedAt }
@@ -1461,7 +1261,7 @@ final class WritingCaptureWorker {
                     let kc = grpKeys.filter { ($0.modifiers & 0x07) == 0 }.count
                     let totalLen = messages.reduce(0) { $0 + $1.count }
                     if totalLen > 20 && kc < totalLen / 4 { continue }
-                    let ks = await WritingCapturePass2Agent.assembleKeystrokeText(grpKeys)
+                    let ks = await WritingCaptureStep0.assembleKeystrokeText(grpKeys)
                     // slash 命令(/play 等):keystroke 起头 "/" → 整组丢(chat app 通用约定)。
                     let ksTrim = ks.replacingOccurrences(of: "<CR>", with: "")
                         .replacingOccurrences(of: "<BS>", with: "")
@@ -1471,8 +1271,8 @@ final class WritingCaptureWorker {
                         $0.app == g.app && $0.startTs <= endTs && $0.endTs >= startTs
                     }?.summary
                     for text in messages {
-                        // conf 默认 0.9;下面 AxCleanup(LLM)给真实判定覆盖。漏/失败 → 0.9。
-                        let rid = "r\(records.count)"
+                        // conf 固定 0.9 —— 原本由 AxCleanup(云端)给真实判定覆盖,
+                        // 已断。本地化 pass 接进来后由它给。
                         records.append(WritingCaptureRecord(
                             text: text, editLog: [],
                             kind: text.count >= 140 ? "long_form" : "short_form",
@@ -1480,26 +1280,9 @@ final class WritingCaptureWorker {
                             app: g.app, url: g.url, startTs: startTs, endTs: endTs,
                             referenceTypingEventIds: evs.compactMap { $0.id }, referenceFrameIds: [],
                             referenceKeystrokeRange: WritingCaptureRecord.KeystrokeRange(start: nil, end: nil)))
-                        items.append(WritingCaptureAxCleanupAgent.Item(id: rid, text: text, keystroke: ks))
                     }
                 }
-                let fixes = await makeCleanup().run(items: items)
-                Self.dumpAxCleanupIfEnabled(app: g.app, url: g.url ?? "", items: items, fixes: fixes)
-                let cleaned = records.enumerated().map { i, rec -> WritingCaptureRecord in
-                    // LLM(补齐 agent)给的 text + confidence 覆盖默认值;漏/失败/给空 → 原文+默认。
-                    // 给空守卫:小模型清不动带 IME 残渣的碎片(如「你得抓住mei」)时会返回空,
-                    // 没这道守卫就把确定性原文覆盖成空、整条静默丢失(对齐 mergeAxCleanup 的 nonEmpty)。
-                    guard let fix = fixes["r\(i)"],
-                          !fix.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    else { return rec }
-                    return WritingCaptureRecord(
-                        text: fix.text, editLog: rec.editLog, kind: rec.kind, source: rec.source,
-                        confidence: fix.confidence, contextSummary: rec.contextSummary,
-                        app: rec.app, url: rec.url, startTs: rec.startTs, endTs: rec.endTs,
-                        referenceTypingEventIds: rec.referenceTypingEventIds,
-                        referenceFrameIds: rec.referenceFrameIds,
-                        referenceKeystrokeRange: rec.referenceKeystrokeRange)
-                }
+                let cleaned = records
                 // recomposition 去重:用户反复用拼音合成同一条(jiu s s / jiu shi /
                 // jiu shi shuo,边打边删),within 各抓一条、AxCleanup 又都补成同一个汉字
                 // (就是说)→ 同组重复。按**清洗后文本**去重(同 runOnce 内),把这些
@@ -1532,7 +1315,7 @@ final class WritingCaptureWorker {
                 // Step0 按 app 切成两条)的草稿增长在这并回去。
                 let merged = Self.mergePrefixDrafts(
                     survivors, rawTyping: g.sessions.flatMap { $0.typingEvents })
-                return WritingCapturePass3Agent.Output(
+                return WritingCaptureGroupOutput(
                     prompt: "(ax cleanup)", rawResponse: "", records: merged, discarded: [])
             }
         }

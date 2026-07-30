@@ -16,6 +16,24 @@ import Foundation
 /// 详见 `canvas-editor-capture-design-final.md` §3.3 Step 0。
 struct WritingCaptureStep0 {
 
+    /// keystroke → "用户真敲了什么" 串(跳过 modifier-only / shortcut,backspace
+    /// 拼 `<BS>`,Return 拼 `<CR>` 给切分判断用)。**纯确定性,不碰 LLM**。
+    ///
+    /// 原本挂在 `WritingCapturePass2Agent` 上;07-30 断云端时那个文件整个删掉,
+    /// 但这个 helper 还在确定性 AX 路上活着(Worker 的组级击键 gate),提到这里。
+    static func assembleKeystrokeText(_ keys: [KeystrokeEntry]) -> String {
+        var out = ""
+        for k in keys.sorted(by: { $0.tsMs < $1.tsMs }) {
+            let m = k.modifiers
+            if (m & 0x01) != 0 || (m & 0x02) != 0 || (m & 0x04) != 0 { continue }
+            if k.isBackspace != 0 { out += "<BS>"; continue }
+            if let c = k.char, !c.isEmpty {
+                out += (c == "\n" || c == "\r") ? "<CR>" : c
+            }
+        }
+        return String(out.prefix(2000))
+    }
+
     // MARK: - 参数
 
     /// 键盘 idle 超过这个时长就切 session
