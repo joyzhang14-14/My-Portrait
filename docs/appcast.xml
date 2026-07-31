@@ -12,6 +12,19 @@
         -->
 
         <item>
+            <title>1.3.20</title>
+            <pubDate>Fri, 31 Jul 2026 18:47:13 +0000</pubDate>
+            <sparkle:version>177</sparkle:version>
+            <sparkle:shortVersionString>1.3.20</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<p>Typing rebuild is on hold until 1.4 — the old cloud-based rebuild had too many bugs to be usable, so it's been pulled out for now. Capture itself keeps running: every keystroke is still recorded. Once 1.4 lands, everything captured in the meantime gets rebuilt into finished writing records.</p><h3>Features</h3><ul><li><strong>Mouse capture</strong> — My Portrait now records mouse clicks alongside your keystrokes. Where you clicked is what tells the rebuilder where your cursor was, so text you typed into the middle of a sentence lands where it belongs instead of at the end.</li><li><strong>Steadier memory folders</strong> — a folder now needs five solid events to hold together. Thin ones dissolve back into Unclassified instead of lingering as noise.</li><li><strong>The login window is never read</strong> — typing at the macOS login and lock screen is now excluded, alongside password managers.</li></ul><h3>Bug fixes</h3><ul><li>Bitwarden showed up as <code>desktop</code> in the typing blacklist, looking like a stray entry — it now shows its real name.</li><li>Every Settings page carried its own <strong>Open ~/.portrait</strong> button. Removed — the Storage page's Data directory card opens it instead.</li><li>The Import page's auto-scan switch is gone. Each source now waits until you press its Scan button, so opening the page never kicks off work you didn't ask for.</li></ul>]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.20/MyPortrait_1.3.20_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="7NyO5kA3itVju1KPDHuRFLVuM6SnX29BPW48WK6wp1rSjQjBhzxyBf1/946qE4aDlEdMS5EITSzh2RdhHS6DCw==" length="27322830" />
+        </item>
+
+        <item>
             <title>1.3.14</title>
             <pubDate>Sat, 25 Jul 2026 14:50:09 +0000</pubDate>
             <sparkle:version>176</sparkle:version>
