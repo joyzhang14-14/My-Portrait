@@ -17,6 +17,15 @@ struct EditEntry: Codable, Equatable, Sendable {
     var ts: Int64
     var kind: String
     var text: String
+    /// 值来源标注(可选,2026-07-31 加,老数据无此键):
+    ///   - "race"         = 回车摇读当场读到的落定值(新鲜观测)
+    ///   - "pending"      = 最后一次 value-change(未过 debounce,较新)
+    ///   - "snapshot"     = 上一拍快照(**可能陈旧** —— 清空 diff 的旧值恒是它,
+    ///                      不存在当场重读分支,见 TypingRecordWriter.fireDebounce)
+    ///   - "ax-selection" = ⌘X 时抢读的 AXSelectedText(被剪原文)
+    /// 缺省 = 常规 sandwich diff 路径。下游闸凭它判断「这个值是 AX 当场
+    /// 观测的还是缓存」,不用再靠时间推理去猜(#53 陈旧快照教训)。
+    var src: String? = nil
 }
 
 /// 一条打字记录 —— 一个 (app, element) 的一段输入 session（v14 event-log schema）。

@@ -85,6 +85,9 @@ final class KeystrokeLedger {
     /// (回车一按抢读焦点字段现值,救 IME 末尾落字)。跟 charLogger 同款:生产路径
     /// start() 前注入一次,之后只读,无锁。
     var onSubmitKey: (() -> Void)?
+    /// ⌘X 一按就回调 —— TypingObserver 抢读 AXSelectedText 落 cut 原文
+    /// (被剪文本只在 app 处理 ⌘X 前存在;输了竞速回退 snapshot diff 老路)。
+    var onCutKey: (() -> Void)?
 
     // MARK: - 生命周期
 
@@ -454,6 +457,7 @@ private func keystrokeLedgerTapCallback(
         ledger.recordPaste()
     } else if isCut {
         ledger.recordCut()
+        ledger.onCutKey?()
     } else if isCopy {
         ledger.recordCopy()
     } else if isRedo {

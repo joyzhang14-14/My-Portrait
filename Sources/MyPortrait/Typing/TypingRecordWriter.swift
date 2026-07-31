@@ -52,6 +52,11 @@ final class TypingRecordWriter {
         /// 程序注入、插件改值 等场景。`isOversizedDelta` 判定。
         var windowOversizedDelta = false
 
+        /// ⌘X 抢读(noteCutSelection)最近一次落的 cut 原文与时刻 ——
+        /// fireDebounce 的 hadCut 分支据此去重,不给同一次剪切记两条 cut。
+        var proactiveCutText: String? = nil
+        var proactiveCutMs: Int64 = 0
+
         var debounceTimer: Timer?
         var flushTimer: Timer?
         var pendingChanges = false
@@ -154,7 +159,8 @@ final class TypingRecordWriter {
             if !msg.isEmpty, msg != rec.sessionStart,
                Self.looksLikeSubmitClear(
                    message: msg, newValue: newValue, sessionStart: rec.sessionStart) {
-                handleSubmit(key: key, rec: rec, message: msg, clearedValue: newValue)
+                handleSubmit(key: key, rec: rec, message: msg, clearedValue: newValue,
+                             origin: rec.pendingValue != nil ? "pending" : "snapshot")
                 return
             }
             // 否则(回车按了但 value 没像被清空) —— 换行 / IME commit / 误触。
@@ -232,7 +238,12 @@ final class TypingRecordWriter {
             // value 真的回滚了不要忘了对应的 delete/add,LLM 凭 kind 判,这里不
             // 重复记
         } else if hadCut {
-            if !deleted.isEmpty {
+            // ⌘X 抢读已当场落过同文本的 cut(src="ax-selection")→ 不重复记;
+            // 抢读输了或文本对不上,才由 diff 兜底。
+            let proactiveDup = !deleted.isEmpty
+                && rec.proactiveCutText == deleted
+                && nowMs - rec.proactiveCutMs <= 2_000
+            if !deleted.isEmpty, !proactiveDup {
                 rec.editLog.append(EditEntry(ts: nowMs, kind: "cut", text: deleted))
             }
             if !added.isEmpty {
@@ -300,16 +311,37 @@ final class TypingRecordWriter {
         let fromRace = (message?.isEmpty == false) ? message : nil
         let msg = fromRace ?? rec.pendingValue ?? rec.lastValueSnapshot
         guard !msg.isEmpty, msg != rec.sessionStart else { return }
-        handleSubmit(key: key, rec: rec, message: msg, clearedValue: "")
+        let origin = fromRace != nil
+            ? "race"
+            : (rec.pendingValue != nil ? "pending" : "snapshot")
+        handleSubmit(key: key, rec: rec, message: msg, clearedValue: "", origin: origin)
+    }
+
+    /// ⌘X 抢读到的选区原文 → 当场落 kind=cut(src="ax-selection")。
+    /// 赢下与目标 app 处理 ⌘X 的竞速才读得到;输了这里不落,回退
+    /// fireDebounce 的 snapshot diff 老路(#54 实测老路覆盖率仅 4/30)。
+    func noteCutSelection(key: ElementKey, text: String) {
+        guard let rec = state[key] else { return }
+        let now = Self.nowMs()
+        rec.editLog.append(
+            EditEntry(ts: now, kind: "cut", text: text, src: "ax-selection"))
+        rec.proactiveCutText = text
+        rec.proactiveCutMs = now
+        rec.pendingChanges = true
+        scheduleFlush(rec, key: key)
     }
 
     private func handleSubmit(key: ElementKey, rec: InProgressRecord,
-                              message: String, clearedValue: String) {
+                              message: String, clearedValue: String,
+                              origin: String) {
         rec.debounceTimer?.invalidate()
         rec.debounceTimer = nil
         rec.lastValueSnapshot = message
-        // submit 条目记**整条发出的消息**。
-        rec.editLog.append(EditEntry(ts: Self.nowMs(), kind: "submit", text: message))
+        // submit 条目记**整条发出的消息**;src 标注 message 的取值来源
+        // (race=摇读当场读到 / pending=最后一次 value-change / snapshot=
+        // 上一拍缓存,可能陈旧)——下游闸不用再靠时间推理猜新鲜度。
+        rec.editLog.append(
+            EditEntry(ts: Self.nowMs(), kind: "submit", text: message, src: origin))
         rec.pendingChanges = true
         onDevLog?("submit bundle=\(rec.bundleId) \(message.count) chars")
         flushAndContinue(key, newSessionStart: clearedValue)

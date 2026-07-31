@@ -131,6 +131,16 @@ final class TypingObserver {
             }
         }
 
+        // ⌘X 抢读选区:被剪原文只在目标 app 处理 ⌘X 之前存在。value diff 老路
+        // 的 cut 覆盖率只有 4/30(#54 实测),赢一次竞速就多一条精确 cut 背书;
+        // 输了 selection 已空,这里不落,自动回退老路,两层互补。
+        ledger.onCutKey = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.running else { return }
+                await self.captureCutSelection()
+            }
+        }
+
         do {
             try ledger.start()
         } catch {
@@ -499,13 +509,31 @@ final class TypingObserver {
 
     // MARK: - 回车摇读(IME 末尾落字救援,实验性)
 
-    /// 摇读的多档延迟(从回车起算的**累计 ms**):**每 5ms 一读、一直读到 200ms**。
+    /// 摇读的多档延迟(从回车起算的**累计 ms**):基础窗**每 5ms 一读、读到 200ms**。
     /// Electron app(claudefordesktop)的 AX 在 IME 落字时传播很慢(实测落字后 500ms
     /// AX 还停在拼音),短延迟根本抢不到落定的汉字 —— 所以密集扫到 200ms,赌这窗口里
-    /// AX 总会冒出落定值。读到空(字段清空)立即停;同值不重复喂、但继续读(落定值一
-    /// 出现就喂,占位符只喂一次触发发送,不 spam)。研究参照:macism 称 CJK race 完全
-    /// 稳定要 ~150ms。
+    /// AX 总会冒出落定值。同值不重复喂、但继续读(落定值一出现就喂,占位符只喂一次
+    /// 触发发送,不 spam)。研究参照:macism 称 CJK race 完全稳定要 ~150ms。
     private static let submitRaceDelaysMs: [UInt64] = Array(stride(from: 5, through: 200, by: 5))
+
+    /// 延长窗(2026-07-31 用户方案):读到「IME 中间态」(含汉字+ASCII 拼音尾巴)
+    /// 就把摇读延长到 1000ms 硬上限,步长放宽到 20ms 控开销(最多再读 40 次)。
+    /// 依据:Electron 的 AX 树滞后但**保序**(ev3598 实证「敌人」到了「是谁」也会
+    /// 到,只是更晚),多等就能等到落定值。停止条件同步改:**读到空不再立即收口**——
+    /// 空可能正是发送清空,而落定值还没传播过来(handoff §24.6 的结构性赛跑,
+    /// 6/25 修复救不了的那 5 条全是这个时序)。
+    private static let submitRaceExtendDelaysMs: [UInt64] = Array(stride(from: 220, through: 1_000, by: 20))
+
+    /// IME 中间态:含 CJK 汉字,且去掉尾部空白/零宽后以 ASCII 字母收尾(拼音尾巴)。
+    /// 纯英文不算 —— 英文句尾天然是字母,拿去延长会白等 800ms。
+    nonisolated private static func looksLikeImeIntermediate(_ value: String) -> Bool {
+        let trimmed = value.replacingOccurrences(of: "\u{feff}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let tail = trimmed.unicodeScalars.last, tail.isASCII,
+              (65...90).contains(tail.value) || (97...122).contains(tail.value)
+        else { return false }
+        return trimmed.unicodeScalars.contains { $0.properties.isIdeographic }
+    }
 
     /// 回车一按,按上面多档延迟连读焦点字段现值喂回 writer —— 趁「发送清空/跳页」前
     /// 把 IME 末尾落定的字截下来。复用 processValueChange 同款安全读(secure 跳过、
@@ -523,7 +551,13 @@ final class TypingObserver {
         var slept: UInt64 = 0
         var lastFed: String? = nil
         var lastNonEmpty: String? = nil   // 清空前摇读到的最后非空落定值(救发送黑洞+IME末尾丢字)
-        for target in Self.submitRaceDelaysMs {
+        var sawCleared = false
+        var extended = false
+        var schedule = Self.submitRaceDelaysMs
+        var index = 0
+        while index < schedule.count {
+            let target = schedule[index]
+            index += 1
             try? await Task.sleep(nanoseconds: (target - slept) * 1_000_000)
             slept = target
             guard running, let att2 = attachment, let focused2 = att2.focusedElement,
@@ -540,15 +574,68 @@ final class TypingObserver {
             let cleared = value.replacingOccurrences(of: "\u{feff}", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if cleared {
-                // 框清空 = 这次回车真发送了。把清空前摇读到的最完整落定值主动落 submit
-                // (绕过 AX value-change coalesce + debounce;摇读没抢到则 writer 内回退快照)
+                sawCleared = true
+                // 手里最好的值还是 IME 中间态 → 不立即收口:AX 保序,落定值会
+                // 晚于清空传播过来,延长窗里继续读(读到落定值或硬上限)。
+                let unresolved = lastNonEmpty.map(Self.looksLikeImeIntermediate) ?? false
+                if unresolved, !extended {
+                    extended = true
+                    schedule += Self.submitRaceExtendDelaysMs
+                }
+                if unresolved, index < schedule.count { continue }
+                // 已落定 / 到硬上限:框清空 = 这次回车真发送了。把摇读到的最完整
+                // 落定值主动落 submit(绕过 AX value-change coalesce + debounce;
+                // 摇读没抢到则 writer 内回退快照)
                 writer.submitFromRace(key: key, message: lastNonEmpty)
                 return
             }
             lastNonEmpty = value
+            // 基础窗读完框还没清、值仍是中间态:同样延长 —— 慢 Electron 里
+            // 落定值与清空都可能 200ms 后才冒出来。
+            if !extended, index >= schedule.count, Self.looksLikeImeIntermediate(value) {
+                extended = true
+                schedule += Self.submitRaceExtendDelaysMs
+            }
             if value == lastFed { continue }  // 同值不重复喂,但继续读(等落定值/清空冒出来)
             writer.noteValueChange(key: key, newValue: value)
             lastFed = value
         }
+        // 延长窗耗尽:见过清空就必须收口(消息别丢,哪怕带拼音尾巴——下游
+        // ime_tail 闸会兜);从没见过清空 = 可能根本没发送,与旧行为一致不动。
+        if sawCleared, running, let att2 = attachment, let focused2 = att2.focusedElement,
+           CFHash(focused2) == CFHash(focused) {
+            let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
+            writer.submitFromRace(key: key, message: lastNonEmpty)
+        }
+    }
+
+    // MARK: - ⌘X 抢读选区(cut 原文背书)
+
+    /// ⌘X 一按,抢读焦点控件的 AXSelectedText 当场落 kind=cut ——
+    /// 被剪原文只在目标 app 处理 ⌘X 前存在;我们从 tap(headInsert,事件先到)
+    /// 异步跳回主线程再读,Electron 的 AX 更新慢、大概率仍读得到;native app
+    /// 可能输掉竞速读到空 → 不落,回退 fireDebounce 的 snapshot diff 老路。
+    /// 复用 processValueChange 同款安全读(secure 跳过、重核同一 element)。
+    @MainActor
+    private func captureCutSelection() async {
+        guard running, let att = attachment, let focused = att.focusedElement else { return }
+        let focBox = SendableBox(v: focused)
+        let role: String? = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(focBox.v, kAXRoleAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil)
+        }
+        if TypingPrivacyFilter.isSecureRole(role) { return }
+        let selected: String? = await axCall {
+            var ref: CFTypeRef?
+            let e = AXUIElementCopyAttributeValue(
+                focBox.v, kAXSelectedTextAttribute as CFString, &ref)
+            return (e == .success ? (ref as? String) : nil)
+        }
+        guard running, let att2 = attachment, let focused2 = att2.focusedElement,
+              CFHash(focused2) == CFHash(focused),
+              let selected, !selected.isEmpty else { return }
+        let key = ElementKey(pid: att2.pid, elementHash: Int(bitPattern: CFHash(focused2)))
+        writer.noteCutSelection(key: key, text: selected)
     }
 }
