@@ -165,8 +165,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         followItem.state = preferred.isEmpty ? .on : .off
         submenu.addItem(followItem)
 
-        if !devices.isEmpty { submenu.addItem(.separator()) }
-
+        // Follow system default 与具体设备**同一区**,中间不加分隔线 ——
+        // 它们是同一组单选项,分开会读成两件事。
         for d in devices {
             // 名称 + 在录的设备右边加 "● recording" 视觉提示
             let title: String = (d.id == activeUID && !activeUID.isEmpty)
@@ -210,14 +210,15 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         } else {
             micPart = "locked, disconnected"
         }
-        // 输入源摘要挂在子菜单顶部当灰色说明 —— 父项标题留给"开着没/为什么没开"。
+        // 灰字摘要 = 下面那组单选项的小标题,紧贴在它们上方
+        // (顺序:Enabled / ── / 摘要 / follow + 设备 / ── / system audio)。
+        // 父项标题留给"开着没 / 为什么没开"。
         let summary = systemAudioOn
             ? "\(micPart) + system audio"
             : micPart
         let summaryItem = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
         summaryItem.isEnabled = false
-        submenu.insertItem(summaryItem, at: 0)
-        submenu.insertItem(.separator(), at: 1)
+        submenu.insertItem(summaryItem, at: 2)   // 0=Enabled, 1=分隔线
         inputDeviceMenuItem.submenu = submenu
     }
 
