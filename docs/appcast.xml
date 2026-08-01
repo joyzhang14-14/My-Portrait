@@ -12,6 +12,19 @@
         -->
 
         <item>
+            <title>1.3.25</title>
+            <pubDate>Sat, 01 Aug 2026 16:03:59 +0000</pubDate>
+            <sparkle:version>178</sparkle:version>
+            <sparkle:shortVersionString>1.3.25</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>Features</h3><ul><li><strong>The menu bar icon is now a live privacy light</strong> — three neural nodes, one each for screen, audio and typing. A node lights up only while that channel is recording the app you&apos;re in right now, and goes dark the instant you switch into an app on its ignore list, capture pauses, the channel is switched off, or its permission is missing. Hover the icon to see the reason for each one. (The old option to replace the menu bar icon with your own image is gone — a static picture would cover the lights completely. The Dock icon is still yours to change.)</li><li><strong>Check it for yourself in Settings &rarr; Display</strong> — a live copy of the icon, plus a line per channel spelling out exactly why it is lit or dark at this moment. Leave the window open beside you and watch the nodes go dark as you switch apps.</li><li><strong>Audio is one menu now</strong> — the capture toggle, your current input, the device list and system audio are a single submenu instead of two separate rows.</li><li><strong>Sharper typing capture</strong> — &#8984;X cuts are read before the text disappears, more of what you type at the tail end of an IME word is kept, and every edit entry now records where its value came from and when it was seen.</li></ul><h3>Bug fixes</h3><ul><li><strong>A leaner menu bar menu</strong> — Open My Portrait moved to the top; the version line and Open ~/.portrait are gone. The data folder is still one click away in Settings &rarr; Storage.</li></ul>]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.25/MyPortrait_1.3.25_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="0o+im8lqxLcjKV2mtY4rwesIv5V8W4mEnsYA7FposB3S8aRedEsJHnxCUbVaWLUM61iiLV2uPas9J+jvc6CNBw==" length="27384353" />
+        </item>
+
+        <item>
             <title>1.3.20</title>
             <pubDate>Fri, 31 Jul 2026 18:47:13 +0000</pubDate>
             <sparkle:version>177</sparkle:version>
