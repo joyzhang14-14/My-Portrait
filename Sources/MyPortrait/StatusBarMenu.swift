@@ -7,10 +7,10 @@ import Foundation
 /// 显示内容：
 ///   - 图标：基于当前状态变化（录制中 / 关闭 / Dev Mode）
 ///   - 菜单项：
+///     * Open My Portrait(置顶,唯一高频动作)
 ///     * 屏幕采集 toggle
-///     * 麦克风 toggle
+///     * 音频采集(子菜单:Enabled + 输入源 + system audio)
 ///     * 打字采集 toggle
-///     * 打开 ~/.portrait/ 文件夹
 ///     * Dev Mode 警告（仅 stub 命中时）
 ///     * 退出
 ///
@@ -149,6 +149,12 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
         let submenu = NSMenu()
 
+        // 开关放子菜单第一条。⚠️ NSMenuItem 同时只能属于一个菜单,而这个子菜单
+        // 每次展开都重建 —— 必须先从上一个子菜单摘掉,否则 AppKit 抛异常。
+        audioToggle.menu?.removeItem(audioToggle)
+        submenu.addItem(audioToggle)
+        submenu.addItem(.separator())
+
         // Follow system default 项 —— 空 UID 时打勾。
         let followItem = NSMenuItem(
             title: "Follow system default",
@@ -204,10 +210,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         } else {
             micPart = "locked, disconnected"
         }
+        // 输入源摘要挂在子菜单顶部当灰色说明 —— 父项标题留给"开着没/为什么没开"。
         let summary = systemAudioOn
-            ? "Input  (\(micPart) + system audio)"
-            : "Input  (\(micPart))"
-        inputDeviceMenuItem.title = summary
+            ? "\(micPart) + system audio"
+            : micPart
+        let summaryItem = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
+        summaryItem.isEnabled = false
+        submenu.insertItem(summaryItem, at: 0)
+        submenu.insertItem(.separator(), at: 1)
         inputDeviceMenuItem.submenu = submenu
     }
 
@@ -239,7 +249,9 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         menu.addItem(screenToggle)
-        menu.addItem(audioToggle)
+        // Audio 合成一项 —— 点开子菜单里第一条是开关,下面是输入源。
+        // 不做"左键开关 / 右键子菜单":NSMenu 的菜单项收不到右键事件,
+        // 要实现只能给这一项挂自定义 NSView 自绘高亮,不值当。
         menu.addItem(inputDeviceMenuItem)   // → submenu(每次 menuNeedsUpdate 重建)
         menu.addItem(typingToggle)
         menu.addItem(.separator())
@@ -318,7 +330,9 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             active: screenRecordingActive,
             permission: permissions.screenRecording
         )
-        audioToggle.title = Self.toggleTitle(
+        // 子菜单里那条固定叫 Enabled;"为什么没在录"的说明挂到父项上。
+        audioToggle.title = "Enabled"
+        inputDeviceMenuItem.title = Self.toggleTitle(
             base: "Audio Capture",
             wanted: audioCaptureWanted,
             active: audioRecordingActive,
