@@ -310,8 +310,10 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             //
             // **isTemplate = false 是关键**:图是彩色的,设 true 会被系统压成
             // 黑白剪影,三盏灯就全一个颜色、彻底失去意义。
+            // ⚠️ 这里**只读**灯的当前状态,绝不触发它重算 —— 下面订阅了它的
+            // 变化通知,回头调 refreshIcon,重算就成自激死循环(08-01 炸过,
+            // 主线程 100% CPU、UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
             let lamps = CaptureLampState.shared
-            lamps.refresh()          // DRM / 睡眠没有 Combine 出口,刷新时现算
             if let img = NSImage(named: lamps.assetName) {
                 img.size = NSSize(width: 18 * img.size.width / max(img.size.height, 1),
                                   height: 18)

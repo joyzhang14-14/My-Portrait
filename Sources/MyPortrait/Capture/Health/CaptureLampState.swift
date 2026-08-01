@@ -25,7 +25,11 @@ final class CaptureLampState: ObservableObject {
     static let shared = CaptureLampState()
 
     /// 一盏灯:亮 / 灭 + 灭的原因(tooltip 用)。
-    struct Lamp {
+    ///
+    /// ⚠️ **必须 Equatable** —— `@Published` 每次赋值都发 objectWillChange,
+    /// 不管值变没变。订阅方(StatusBarMenu)收到又会回头刷新,不做变化检测就是
+    /// 一个无条件死循环,主线程 100% CPU、UI 冻死(08-01 真炸过一次)。
+    struct Lamp: Equatable {
         var on: Bool
         /// 灭的原因;亮着时为 nil。
         var reason: String?
@@ -63,6 +67,7 @@ final class CaptureLampState: ObservableObject {
             }
         }
         recompute()
+        startPolling()
     }
 
     /// 外部信号源接线。Services 起来之后调一次 —— MusicPlaybackMonitor 是
@@ -75,15 +80,30 @@ final class CaptureLampState: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] _ in Task { @MainActor in self?.recompute() } }
             .store(in: &cancellables)
-        permissions?.objectWillChange
-            .sink { [weak self] _ in Task { @MainActor in self?.recompute() } }
+        // 订阅三个值发布器,**不是** objectWillChange —— 后者在值改变**之前**触发,
+        // 那一刻读到的还是旧权限,灯会慢一拍。
+        if let p = permissions {
+            Publishers.CombineLatest3(
+                p.$screenRecording, p.$microphone, p.$accessibility
+            )
+            .sink { [weak self] _, _, _ in Task { @MainActor in self?.recompute() } }
             .store(in: &cancellables)
+        }
         recompute()
     }
 
-    /// DRM / 睡眠等由 CaptureCoordinator 推到 IntentionalPauseState 的状态,
-    /// 没有 Combine 出口 —— 由持有方(StatusBarMenu 的定时刷新)调这个。
-    func refresh() { recompute() }
+    /// DRM / 睡眠 / 配置改动没有 Combine 出口(都是 CaptureCoordinator 直接写
+    /// `IntentionalPauseState` 的普通属性),只能轮询。2s 一次,recompute 本身
+    /// 只读内存 + 几个子串比较,可忽略;有变化才发通知。
+    ///
+    /// ⚠️ **绝不要反过来让 StatusBarMenu 在 refreshIcon 里调 recompute** ——
+    /// 它订阅了本类的变化,那样就是自激死循环(08-01 炸过)。
+    private func startPolling() {
+        Timer.publish(every: 2, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.recompute() } }
+            .store(in: &cancellables)
+    }
 
     // MARK: - 计算
 
@@ -111,7 +131,7 @@ final class CaptureLampState: ObservableObject {
         } else if let hit = Self.ignoredAppHit(appName: appName, cfg: cfg) {
             s = Lamp(on: false, reason: "\(appName) is in Ignored apps (“\(hit)”) — its window is cut out of the frame")
         }
-        screen = s
+        if screen != s { screen = s }        // 只在真变了才发通知,见 Lamp 的告警
 
         // ---- 音频(黄) ----
         var a = Lamp(on: true, reason: nil)
@@ -122,7 +142,7 @@ final class CaptureLampState: ObservableObject {
         } else if musicMonitor?.musicDetected == true {
             a = Lamp(on: false, reason: "paused — an app on your pause list is playing audio")
         }
-        audio = a
+        if audio != a { audio = a }
 
         // ---- 打字(蓝) ----
         var t = Lamp(on: true, reason: nil)
@@ -133,7 +153,7 @@ final class CaptureLampState: ObservableObject {
         } else if !bundleId.isEmpty, TypingPrivacyFilter.isBlacklisted(bundleId: bundleId) {
             t = Lamp(on: false, reason: "\(appName) is on the typing blacklist — nothing is read here")
         }
-        typing = t
+        if typing != t { typing = t }
     }
 
     /// 前台 app 名是否命中 ignoredApps —— 跟 `IgnoreGate` 同口径:**小写子串**匹配。
