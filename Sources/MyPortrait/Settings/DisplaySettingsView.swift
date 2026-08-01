@@ -11,8 +11,6 @@ struct DisplaySettingsView: View {
 
             AppCustomizeCard()
 
-            MenuBarLampCard()
-
             SettingsCard(title: "Appearance") {
                 SettingsRow("Theme",
                             description: "Match the system or force light / dark.",
@@ -52,6 +50,8 @@ struct DisplaySettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+
+            MenuBarLampCard()
 
             SettingsCard(title: "Chat") {
                 SettingsRow("Compact tool blocks",
@@ -481,7 +481,9 @@ private struct MenuBarLampCard: View {
                                   typing: lamps.typing.on)
                             .padding(16)
                     }
-                    .frame(width: 116, height: 128)
+                    // 正方形底片。图标本身略高于宽(aspect 1.148),Canvas 里按
+                    // min(w, h/aspect) 等比适配 —— 塞进方框只会左右留白,不变形。
+                    .frame(width: 128, height: 128)
 
                     VStack(alignment: .leading, spacing: 9) {
                         legendRow("Screen",  LampGlyph.screenColor, lamps.screen)
