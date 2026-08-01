@@ -404,7 +404,7 @@ struct DisplayConfig: Codable, Equatable {
     var compactToolBlocks:       Bool   = true
     var appName:                 String = "My Portrait"
     var customDockIcon:          String = ""
-    var customTrayIcon:          String = ""
+    // 08-01 删 customTrayIcon:菜单栏图标改成三盏实时采集灯,不再可替换。
     var showInMenuBar:           Bool   = true
     /// 是否显示 Dock 图标。false → activation policy .accessory:app 照常后台跑,
     /// 窗口照常能用,只是不出现在 Dock / Cmd-Tab / 顶部 app 菜单栏。默认 true。
@@ -426,7 +426,6 @@ struct DisplayConfig: Codable, Equatable {
         case compactToolBlocks        = "compact_tool_blocks"
         case appName                  = "app_name"
         case customDockIcon           = "custom_dock_icon"
-        case customTrayIcon           = "custom_tray_icon"
         case showInMenuBar            = "show_in_menu_bar"
         case showDockIcon             = "show_dock_icon"
         case memorySortOrder          = "memory_sort_order"
@@ -441,7 +440,6 @@ struct DisplayConfig: Codable, Equatable {
         compactToolBlocks       = c.dflt(Bool.self,   .compactToolBlocks, compactToolBlocks)
         appName                 = c.dflt(String.self, .appName, appName)
         customDockIcon          = c.dflt(String.self, .customDockIcon, customDockIcon)
-        customTrayIcon          = c.dflt(String.self, .customTrayIcon, customTrayIcon)
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
         showDockIcon            = c.dflt(Bool.self,   .showDockIcon, showDockIcon)
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)

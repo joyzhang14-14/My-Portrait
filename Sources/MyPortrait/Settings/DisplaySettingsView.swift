@@ -92,7 +92,6 @@ private struct AppCustomizeCard: View {
     // Staged local edits — committed to ConfigStore only on Save.
     @State private var appName: String = ""
     @State private var dockIconPath: String = ""
-    @State private var trayIconPath: String = ""
     @State private var loaded = false
 
     private let maxNameLength = 32
@@ -101,7 +100,6 @@ private struct AppCustomizeCard: View {
         let d = config.current.display
         return appName != d.appName
             || dockIconPath != d.customDockIcon
-            || trayIconPath != d.customTrayIcon
     }
 
     var body: some View {
@@ -163,12 +161,9 @@ private struct AppCustomizeCard: View {
                     fileName: "dock.png"
                 )
 
-                IconSlot(
-                    title: "Menu bar icon",
-                    subtitle: "Used by the status item next to the clock.",
-                    path: $trayIconPath,
-                    fileName: "tray.png"
-                )
+                // 08-01:菜单栏图标自定义槽位删掉 —— 图标现在是三盏实时采集灯
+                // (紫屏幕/黄音频/蓝打字),换成一张静态图会把灯整个盖掉,
+                // 那盏"用来自证没在记"的灯就失效了。
 
                 Divider().background(Color.primary.opacity(0.08))
 
@@ -208,7 +203,6 @@ private struct AppCustomizeCard: View {
             let d = config.current.display
             appName       = d.appName
             dockIconPath  = d.customDockIcon
-            trayIconPath  = d.customTrayIcon
             loaded = true
         }
     }
@@ -224,7 +218,6 @@ private struct AppCustomizeCard: View {
         config.mutate {
             $0.display.appName       = appName
             $0.display.customDockIcon  = dockIconPath
-            $0.display.customTrayIcon  = trayIconPath
         }
         Task { @MainActor in
             await config.saveNowAndWait()

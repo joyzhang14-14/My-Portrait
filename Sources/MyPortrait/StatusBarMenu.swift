@@ -25,11 +25,6 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     private let menu: NSMenu
     private var cancellables: Set<AnyCancellable> = []
 
-    /// Path to a user-supplied tray icon (Settings → Display → Tray icon).
-    /// When non-empty, `refreshIcon` skips the state-driven SF Symbol and
-    /// uses this image instead.
-    private var customIconPath: String = ""
-
     // 菜单项缓存（要在状态变化时更新它们的 state / title）。
     private let screenToggle: NSMenuItem
     private let audioToggle: NSMenuItem
@@ -280,12 +275,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         statusItem.isVisible = visible
     }
 
-    /// Apply a user-supplied PNG / icon path (Settings → Display → Tray icon).
-    /// Empty string reverts to the state-driven SF Symbol.
-    func setCustomIconPath(_ path: String) {
-        customIconPath = path
-        refreshIcon()
-    }
+    // 08-01:setCustomIconPath / customIconPath 删掉 —— 菜单栏图标现在是三盏
+    // 实时采集灯,不再允许换成静态图(换了灯就没了,这个入口在 Display 页也已删)。
 
     private func refreshIcon() {
         let unhealthy = HealthMonitor.shared.unhealthy
@@ -293,18 +284,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         // 切成红色惊叹号 —— 用户不喜欢那个刺眼图标。健康状态仍由下面的 tooltip
         // 表达(hover 才看到,不打扰)。
         statusItem.button?.contentTintColor = nil
-        // User-supplied icon takes precedence.
-        if !customIconPath.isEmpty,
-           let img = NSImage(contentsOfFile: customIconPath) {
-            img.size = NSSize(width: 18, height: 18)
-            // **isTemplate = false** 关键 —— template 模式系统把图当 alpha
-            // mask 用文字色绘制(黑/白),用户上传的彩色 PNG 会被压成剪影。
-            // 跟默认 character icon 同款处理,彩图原样渲染。仿 My-Orphies
-            // customize.rs:222 "Force template OFF so colours render"。
-            img.isTemplate = false
-            statusItem.button?.image = img
-        } else {
-            // 默认菜单栏图标 = **三盏实时采集灯**(紫屏幕 / 黄音频 / 蓝打字)。
+        do {
+            // 菜单栏图标 = **三盏实时采集灯**(紫屏幕 / 黄音频 / 蓝打字)。
             // 灯亮 ⇔ 这一路此刻真的在记当前这个 app;前台切到 Ignored app、
             // 撞上暂停、功能关掉或没权限 → 对应的灯灭。判定见 CaptureLampState。
             //

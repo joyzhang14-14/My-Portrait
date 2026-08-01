@@ -338,7 +338,6 @@ final class ConfigStore {
         c.display.hideModelReasoning      = bool(ud, "Settings.hideModelReasoning",    default: c.display.hideModelReasoning)
         if let v = ud.string(forKey: "Settings.appName")                { c.display.appName = v }
         if let v = ud.string(forKey: "Settings.customDockIcon")         { c.display.customDockIcon = v }
-        if let v = ud.string(forKey: "Settings.customTrayIcon")         { c.display.customTrayIcon = v }
         c.display.showInMenuBar           = bool(ud, "Settings.showInMenuBar",         default: c.display.showInMenuBar)
 
         // — General

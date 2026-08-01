@@ -28,7 +28,6 @@ final class ConfigApplier {
     private static let unapplied = "<<UNAPPLIED>>"
     private var lastTheme: String = ConfigApplier.unapplied
     private var lastDockIcon: String = ConfigApplier.unapplied
-    private var lastTrayIcon: String = ConfigApplier.unapplied
     private var lastShowInMenuBar: Bool? = nil
     private var lastShowDockIcon: Bool? = nil
     private var lastAppName: String = ConfigApplier.unapplied
@@ -56,7 +55,6 @@ final class ConfigApplier {
             // READ every field we care about so the closure re-fires.
             _ = ConfigStore.shared.display.theme
             _ = ConfigStore.shared.display.customDockIcon
-            _ = ConfigStore.shared.display.customTrayIcon
             _ = ConfigStore.shared.display.showInMenuBar
             _ = ConfigStore.shared.display.showDockIcon
             _ = ConfigStore.shared.display.appName
@@ -119,12 +117,6 @@ final class ConfigApplier {
                     }
                 }
             }
-        }
-
-        // Tray icon — user-supplied PNG path replaces the SF Symbol.
-        if display.customTrayIcon != lastTrayIcon {
-            lastTrayIcon = display.customTrayIcon
-            statusBar?.setCustomIconPath(display.customTrayIcon)
         }
 
         // Status-bar visibility
