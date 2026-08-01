@@ -46,6 +46,14 @@ final class CaptureLampState: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var frontmostApp: NSRunningApplication?
+    /// 前台浏览器当前标签页的 URL(非浏览器 = nil)。屏幕的 `ignoredUrls` 和打字的
+    /// URL 级黑名单都按它判 —— 只看 bundle id 会漏掉"同一个浏览器,这个站屏蔽、
+    /// 那个站不屏蔽"的情况。
+    ///
+    /// ⚠️ 不能读 `FocusProbe.snapshot().browserUrl`:那个缓存只在**切 app** 时刷新,
+    /// **换标签页不刷**。从屏蔽站切到普通站时它还停在旧 URL → 灯说没记、实际在记,
+    /// 正是最危险的那个方向。所以这里自己做一次窄读(只取 URL,不走 AX 全树)。
+    private var browserUrl: String?
     /// 两个信号源都是 Services 持有的实例(不是单例),起来之后 attach 进来。
     /// **没 attach 之前权限当未授** —— 三灯全灭。宁可该亮时灭。
     private weak var permissions: PermissionMonitor?
@@ -64,10 +72,41 @@ final class CaptureLampState: ObservableObject {
             MainActor.assumeIsolated {
                 self?.frontmostApp = NSWorkspace.shared.frontmostApplication
                 self?.recompute()
+                self?.refreshBrowserURL()
             }
         }
         recompute()
         startPolling()
+    }
+
+    /// 窄读前台浏览器的当前 URL —— **只取 URL**,不做 FocusProbe 那种 AX 全树遍历。
+    ///
+    /// AX 调用一律走 `AXSerialQueue`(全 app 唯一那条串行队列):AX 的 C API 并发
+    /// 调用会让框架内部状态打架,历史上炸出过主线程死锁和后台队列崩溃。
+    /// 读完跳回 MainActor,URL 变了才重算。
+    private func refreshBrowserURL() {
+        let app = frontmostApp
+        guard let pid = app?.processIdentifier,
+              let bid = app?.bundleIdentifier,
+              FocusProbe.browserBundleIds.contains(bid)
+        else {
+            if browserUrl != nil { browserUrl = nil; recompute() }
+            return
+        }
+        AXSerialQueue.shared.async { [weak self] in
+            let appEl = AXUIElementCreateApplication(pid)
+            var winRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                appEl, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
+                CFGetTypeID(winRef) == AXUIElementGetTypeID()
+            else { return }
+            let url = FocusProbe.extractBrowserURL(focusedWindow: winRef as! AXUIElement)
+            Task { @MainActor in
+                guard let self, self.browserUrl != url else { return }
+                self.browserUrl = url
+                self.recompute()
+            }
+        }
     }
 
     /// 外部信号源接线。Services 起来之后调一次 —— MusicPlaybackMonitor 是
@@ -101,7 +140,14 @@ final class CaptureLampState: ObservableObject {
     private func startPolling() {
         Timer.publish(every: 2, on: .main, in: .common)
             .autoconnect()
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.recompute() } }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.recompute()
+                    // 换标签页不发任何系统通知,只能靠这个 tick 兜 —— 所以浏览器里
+                    // 切到/切离屏蔽站,灯最多滞后一个 tick。
+                    self?.refreshBrowserURL()
+                }
+            }
             .store(in: &cancellables)
     }
 
@@ -130,6 +176,12 @@ final class CaptureLampState: ObservableObject {
             s = Lamp(on: false, reason: "paused — protected or paused-list content in front")
         } else if let hit = Self.ignoredAppHit(appName: appName, cfg: cfg) {
             s = Lamp(on: false, reason: "\(appName) is in Ignored apps (“\(hit)”) — its window is cut out of the frame")
+        } else if let url = browserUrl,
+                  let hit = cfg.privacy.ignoredUrls.first(where: {
+                      !$0.isEmpty && url.lowercased().contains($0.lowercased())
+                  }) {
+            // IgnoreGate 把 ignoredUrls 当"URL / 窗口标题子串"用,这里同口径。
+            s = Lamp(on: false, reason: "this page matches Ignored URLs (“\(hit)”) — the window is cut out of the frame")
         }
         if screen != s { screen = s }        // 只在真变了才发通知,见 Lamp 的告警
 
@@ -159,6 +211,11 @@ final class CaptureLampState: ObservableObject {
             case .blacklisted:
                 t = Lamp(on: false, reason: "\(appName) is on the typing blacklist — nothing is read here")
             }
+        } else if !bundleId.isEmpty, let url = browserUrl,
+                  TypingPrivacyFilter.isBlacklisted(bundleId: bundleId, url: url) {
+            // 打字还有一道 **URL 级**闸(TypingRecordWriter.persist 落库时判)。
+            // 只按 bundle id 判会漏掉"这个浏览器里,这个站屏蔽、那个站不屏蔽"。
+            t = Lamp(on: false, reason: "this page is on the typing blacklist — nothing is saved here")
         }
         if typing != t { typing = t }
     }
