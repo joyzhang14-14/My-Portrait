@@ -280,13 +280,17 @@ final class TypingObserver {
         let bundleId = app.bundleIdentifier ?? "unknown"
         let appName = app.localizedName
 
-        if TypingPrivacyFilter.isBlacklisted(bundleId: bundleId) {
+        // 判据集中在 TypingPrivacyFilter.exclusionReason —— 菜单栏采集灯读的是
+        // 同一个函数,两边不许各写一份(见那边注释里的事故)。
+        switch TypingPrivacyFilter.exclusionReason(bundleId: bundleId) {
+        case .blacklisted:
             print("[TypingObserver] skipped — blacklisted app bundle=\(bundleId)")
             return
-        }
-        if TypingPrivacyFilter.isTerminalApp(bundleId: bundleId) {
+        case .terminal:
             print("[TypingObserver] terminal app, observer idle bundle=\(bundleId)")
             return
+        case nil:
+            break
         }
 
         // AXObserverCreate 在 AXSerialQueue 上跑（不卡主线程）。

@@ -150,8 +150,15 @@ final class CaptureLampState: ObservableObject {
             t = Lamp(on: false, reason: "typing capture is off")
         } else if !granted(\.accessibility) {
             t = Lamp(on: false, reason: "no accessibility permission")
-        } else if !bundleId.isEmpty, TypingPrivacyFilter.isBlacklisted(bundleId: bundleId) {
-            t = Lamp(on: false, reason: "\(appName) is on the typing blacklist — nothing is read here")
+        } else if !bundleId.isEmpty,
+                  let why = TypingPrivacyFilter.exclusionReason(bundleId: bundleId) {
+            // 判据跟 TypingObserver.attach 共用同一个函数,不重写一份。
+            switch why {
+            case .terminal:
+                t = Lamp(on: false, reason: "\(appName) is a terminal — typing is never read here")
+            case .blacklisted:
+                t = Lamp(on: false, reason: "\(appName) is on the typing blacklist — nothing is read here")
+            }
         }
         if typing != t { typing = t }
     }

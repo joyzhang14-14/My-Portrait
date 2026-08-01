@@ -97,4 +97,24 @@ struct TypingPrivacyFilter {
     static func isTerminalApp(bundleId: String) -> Bool {
         terminalBundleIds.contains(bundleId)
     }
+
+    /// 这个 app 为什么不采打字 —— nil = 会采。
+    ///
+    /// **`TypingObserver.attach` 的完整判据就是这个函数**,菜单栏采集灯也读它。
+    /// 两边各写一份必然走偏:08-01 灯只查了黑名单、漏了终端那道闸,结果在终端
+    /// 里打字蓝灯还亮着 —— 对一盏"用来自证没在记"的灯,这是最严重的错。
+    /// 以后再加屏蔽条件,**只改这里**。
+    @MainActor
+    static func exclusionReason(bundleId: String) -> ExclusionReason? {
+        if isTerminalApp(bundleId: bundleId) { return .terminal }
+        if isBlacklisted(bundleId: bundleId) { return .blacklisted }
+        return nil
+    }
+
+    enum ExclusionReason {
+        /// 终端:输入区和输出区共享同一个 AX 元素,分不开,整段不订阅。
+        case terminal
+        /// 硬编码黑名单(密码管理器 / 钥匙串 / 登录窗)或用户自己加的条目。
+        case blacklisted
+    }
 }
