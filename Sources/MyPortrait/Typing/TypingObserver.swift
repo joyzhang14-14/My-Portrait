@@ -535,6 +535,26 @@ final class TypingObserver {
         return trimmed.unicodeScalars.contains { $0.properties.isIdeographic }
     }
 
+    /// 稳定前缀 = 去掉尾部空白/零宽和尾部 ASCII 拼音段后剩下的部分。
+    /// 延长窗的「补全一致性」判据:AX 迟到的落定值必是清空前值的**延续**
+    /// (稳定前缀不变,拼音尾巴换成汉字,如 …敌人sh → …敌人是谁);
+    /// 用户开始打的**下一条**消息(如 'n')不满足这个关系 —— 据此区分,
+    /// 防止把下一条的半截当成上一条的发送内容落 submit。
+    nonisolated private static func stablePrefix(of value: String) -> String {
+        var scalars = Array(value.unicodeScalars)
+        while let last = scalars.last,
+              last.value == 0xFEFF || Character(last).isWhitespace {
+            scalars.removeLast()
+        }
+        while let last = scalars.last, last.isASCII,
+              (65...90).contains(last.value) || (97...122).contains(last.value) {
+            scalars.removeLast()
+        }
+        var view = String.UnicodeScalarView()
+        for scalar in scalars { view.append(scalar) }
+        return String(view)
+    }
+
     /// 回车一按,按上面多档延迟连读焦点字段现值喂回 writer —— 趁「发送清空/跳页」前
     /// 把 IME 末尾落定的字截下来。复用 processValueChange 同款安全读(secure 跳过、
     /// 每读重核仍是同一 element)。读到空 → 停(已清空,别喂占位符)。
@@ -588,6 +608,23 @@ final class TypingObserver {
                 // 摇读没抢到则 writer 内回退快照)
                 writer.submitFromRace(key: key, message: lastNonEmpty)
                 return
+            }
+            if extended, let previous = lastNonEmpty {
+                // 延长窗里的非空值必须是上一个值的延续(补全一致性)。
+                // 不是 → 世界已翻页:用户在打下一条。见过清空就先用翻页前
+                // 的值给上一条收口,再把新值喂给正常输入路(顺序不能反,
+                // submit 会轮换 session,新值要落进新 session);没见过清空
+                // 则只喂新值退出,交回正常检测路。
+                let stable = Self.stablePrefix(of: previous)
+                if !stable.isEmpty, !value.hasPrefix(stable) {
+                    if sawCleared {
+                        writer.submitFromRace(key: key, message: previous)
+                    }
+                    if value != lastFed {
+                        writer.noteValueChange(key: key, newValue: value)
+                    }
+                    return
+                }
             }
             lastNonEmpty = value
             // 基础窗读完框还没清、值仍是中间态:同样延长 —— 慢 Electron 里
