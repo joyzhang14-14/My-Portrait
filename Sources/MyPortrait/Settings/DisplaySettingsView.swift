@@ -550,7 +550,12 @@ private struct LampGlyph: View {
         // 实时状态",但不至于在设置页里晃眼。
         // ⚠️ 必须写 SwiftUI. 限定名 —— 本工程自己有个 TimelineView(时间线页面),
         // 不限定的话解析到那个,报「TimelineState 没有成员 animation」。
-        SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30)) { tl in
+        //
+        // ⚠️ 用 .periodic 而不是 .animation:.animation 绑显示链路,**App 不在
+        // 前台时会暂停**。而这张卡最重要的用法恰恰是「窗口摆在旁边,切到别的
+        // app,盯着看灯灭」—— 一点回 App 前台就变成 My Portrait 了,看到的就
+        // 不是你想验证的那个 app。.periodic 走墙钟,后台照跑。
+        SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
             Canvas { ctx, size in
                 let t = tl.date.timeIntervalSinceReferenceDate
                 let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 2.6)   // 0…1
