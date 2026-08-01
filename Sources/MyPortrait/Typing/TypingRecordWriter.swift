@@ -36,12 +36,17 @@ final class TypingRecordWriter {
         let url: String
         /// 该 element 最近一次 AX 完整 value。
         var lastValueSnapshot: String
+        /// lastValueSnapshot 的内容真正被 AX 观测到的时刻(UTC ms)——
+        /// 快照会滞后,条目落库时刻 ≠ 值的观测时刻,edit_log 的 seen_ts 用它。
+        var lastValueSnapshotSeenMs: Int64
         var lastValueChangeTs: TimeInterval
         /// 逐 debounce 窗口的编辑流水。
         var editLog: [EditEntry]
 
         /// debounce 窗口内最近一次 AX value。
         var pendingValue: String?
+        /// pendingValue 的到达时刻(UTC ms)。
+        var pendingValueSeenMs: Int64 = 0
         var windowHadBurst = false
         var windowHadPaste = false
         var windowHadCut = false
@@ -70,6 +75,7 @@ final class TypingRecordWriter {
             self.sessionStart = sessionStart
             self.url = url
             self.lastValueSnapshot = sessionStart
+            self.lastValueSnapshotSeenMs = nowMs   // baseline 是 focus 时当场读的
             self.lastValueChangeTs = CACurrentMediaTime()
             self.editLog = []
         }
@@ -160,7 +166,10 @@ final class TypingRecordWriter {
                Self.looksLikeSubmitClear(
                    message: msg, newValue: newValue, sessionStart: rec.sessionStart) {
                 handleSubmit(key: key, rec: rec, message: msg, clearedValue: newValue,
-                             origin: rec.pendingValue != nil ? "pending" : "snapshot")
+                             origin: rec.pendingValue != nil ? "pending" : "snapshot",
+                             seenMs: rec.pendingValue != nil
+                                 ? rec.pendingValueSeenMs
+                                 : rec.lastValueSnapshotSeenMs)
                 return
             }
             // 否则(回车按了但 value 没像被清空) —— 换行 / IME commit / 误触。
@@ -191,6 +200,7 @@ final class TypingRecordWriter {
 
         rec.lastValueChangeTs = now
         rec.pendingValue = newValue
+        rec.pendingValueSeenMs = Self.nowMs()
         rec.debounceTimer?.invalidate()
         rec.debounceTimer = Timer.scheduledTimer(
             withTimeInterval: Double(cfg.typingDebounceMs) / 1000.0, repeats: false
@@ -206,6 +216,10 @@ final class TypingRecordWriter {
         rec.debounceTimer = nil
         rec.pendingValue = nil
         let prev = rec.lastValueSnapshot
+        // 观测时刻:被删文本来自上一拍快照(prevSeenMs),新增文本来自
+        // 本拍 pending(pendingSeenMs)。条目 ts 是落库时刻,别混用。
+        let prevSeenMs = rec.lastValueSnapshotSeenMs
+        let pendingSeenMs = rec.pendingValueSeenMs
         guard prev != pending else { return }
 
         let hadPaste = rec.windowHadPaste
@@ -223,6 +237,7 @@ final class TypingRecordWriter {
         rec.windowHadKeystroke = false
         rec.windowOversizedDelta = false
         rec.lastValueSnapshot = pending
+        rec.lastValueSnapshotSeenMs = pendingSeenMs
 
         let (_, deleted, added, _) = TextDiff.sandwich(prev: prev, new: pending)
         let nowMs = Self.nowMs()
@@ -244,11 +259,12 @@ final class TypingRecordWriter {
                 && rec.proactiveCutText == deleted
                 && nowMs - rec.proactiveCutMs <= 2_000
             if !deleted.isEmpty, !proactiveDup {
-                rec.editLog.append(EditEntry(ts: nowMs, kind: "cut", text: deleted))
+                rec.editLog.append(
+                    EditEntry(ts: nowMs, kind: "cut", text: deleted, seenTs: prevSeenMs))
             }
             if !added.isEmpty {
                 // cut 通常只删,但保险万一同窗口又有输入
-                rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: added))
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: added, seenTs: pendingSeenMs))
             }
         } else if hadPaste || pasteboardMatch {
             // paste(⌘V / 剪贴板匹配)
@@ -261,35 +277,37 @@ final class TypingRecordWriter {
                     ? "paste"
                     : (added.count <= pasteShortThreshold ? "commit" : "paste")
                 if recordPasteEvents || kind == "commit" {
-                    rec.editLog.append(EditEntry(ts: nowMs, kind: kind, text: pasteText))
+                    rec.editLog.append(
+                        EditEntry(ts: nowMs, kind: kind, text: pasteText, seenTs: pendingSeenMs))
                 } else {
                     blacklist[key, default: [:]][added] = CACurrentMediaTime()
                     onDevLog?("paste→blacklist bundle=\(rec.bundleId) \(added.count) chars")
                 }
             }
             if !deleted.isEmpty {
-                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted, seenTs: prevSeenMs))
             }
         } else if hadBurst || hadOver || hadNoKey {
             // 非用户输入(程序注入 / autosave / oversized)—— 进黑名单或标 paste
             if !added.isEmpty {
                 if recordPasteEvents {
-                    rec.editLog.append(EditEntry(ts: nowMs, kind: "paste", text: added))
+                    rec.editLog.append(
+                        EditEntry(ts: nowMs, kind: "paste", text: added, seenTs: pendingSeenMs))
                 } else {
                     blacklist[key, default: [:]][added] = CACurrentMediaTime()
                     onDevLog?("noise→blacklist bundle=\(rec.bundleId) \(added.count) chars")
                 }
             }
             if recordPasteEvents, !deleted.isEmpty {
-                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted, seenTs: prevSeenMs))
             }
         } else {
             // 正常打字
             if !deleted.isEmpty {
-                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted))
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "delete", text: deleted, seenTs: prevSeenMs))
             }
             if !added.isEmpty {
-                rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: added))
+                rec.editLog.append(EditEntry(ts: nowMs, kind: "commit", text: added, seenTs: pendingSeenMs))
             }
         }
         rec.lastEventMs = nowMs
@@ -314,7 +332,16 @@ final class TypingRecordWriter {
         let origin = fromRace != nil
             ? "race"
             : (rec.pendingValue != nil ? "pending" : "snapshot")
-        handleSubmit(key: key, rec: rec, message: msg, clearedValue: "", origin: origin)
+        let seenMs: Int64
+        if fromRace != nil {
+            seenMs = Self.nowMs()   // 摇读几 ms 前当场读到
+        } else if rec.pendingValue != nil {
+            seenMs = rec.pendingValueSeenMs
+        } else {
+            seenMs = rec.lastValueSnapshotSeenMs
+        }
+        handleSubmit(key: key, rec: rec, message: msg, clearedValue: "",
+                     origin: origin, seenMs: seenMs)
     }
 
     /// ⌘X 抢读到的选区原文 → 当场落 kind=cut(src="ax-selection")。
@@ -324,7 +351,8 @@ final class TypingRecordWriter {
         guard let rec = state[key] else { return }
         let now = Self.nowMs()
         rec.editLog.append(
-            EditEntry(ts: now, kind: "cut", text: text, src: "ax-selection"))
+            EditEntry(ts: now, kind: "cut", text: text,
+                      src: "ax-selection", seenTs: now))
         rec.proactiveCutText = text
         rec.proactiveCutMs = now
         rec.pendingChanges = true
@@ -333,15 +361,18 @@ final class TypingRecordWriter {
 
     private func handleSubmit(key: ElementKey, rec: InProgressRecord,
                               message: String, clearedValue: String,
-                              origin: String) {
+                              origin: String, seenMs: Int64) {
         rec.debounceTimer?.invalidate()
         rec.debounceTimer = nil
         rec.lastValueSnapshot = message
+        rec.lastValueSnapshotSeenMs = seenMs
         // submit 条目记**整条发出的消息**;src 标注 message 的取值来源
         // (race=摇读当场读到 / pending=最后一次 value-change / snapshot=
-        // 上一拍缓存,可能陈旧)——下游闸不用再靠时间推理猜新鲜度。
+        // 上一拍缓存,可能陈旧),seen_ts 是该值真正被 AX 观测到的时刻
+        // ——下游闸拿它与击键时间戳直接比先后,不再靠推理猜新鲜度。
         rec.editLog.append(
-            EditEntry(ts: Self.nowMs(), kind: "submit", text: message, src: origin))
+            EditEntry(ts: Self.nowMs(), kind: "submit", text: message,
+                      src: origin, seenTs: seenMs))
         rec.pendingChanges = true
         onDevLog?("submit bundle=\(rec.bundleId) \(message.count) chars")
         flushAndContinue(key, newSessionStart: clearedValue)
