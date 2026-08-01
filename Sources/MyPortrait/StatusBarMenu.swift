@@ -102,6 +102,13 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             .removeDuplicates()
             .sink { [weak self] _ in self?.refreshIcon() }
             .store(in: &cancellables)
+
+        // 三盏采集灯任一变化 → 换图标。**前台 app 切换走的就是这条** ——
+        // 切到 Ignored app 时紫灯要立刻灭,晚一秒都是在骗用户。
+        CaptureLampState.shared.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshIcon() }
+            .store(in: &cancellables)
     }
 
     // MARK: - 真实录音状态（= 意图开关 && 没暂停 && 权限已授）
@@ -296,28 +303,31 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             // customize.rs:222 "Force template OFF so colours render"。
             img.isTemplate = false
             statusItem.button?.image = img
-        } else if let character = NSImage(named: "MenuBarIcon") {
-            // 默认菜单栏图标：项目角色立绘。
-            // **isTemplate = false 是关键**：角色图是彩色的，设 true 会被系统
-            // 压成黑白剪影。彩图直接原样渲染。
-            character.size = NSSize(width: 18, height: 18)
-            character.isTemplate = false
-            statusItem.button?.image = character
+        } else {
+            // 默认菜单栏图标 = **三盏实时采集灯**(紫屏幕 / 黄音频 / 蓝打字)。
+            // 灯亮 ⇔ 这一路此刻真的在记当前这个 app;前台切到 Ignored app、
+            // 撞上暂停、功能关掉或没权限 → 对应的灯灭。判定见 CaptureLampState。
+            //
+            // **isTemplate = false 是关键**:图是彩色的,设 true 会被系统压成
+            // 黑白剪影,三盏灯就全一个颜色、彻底失去意义。
+            let lamps = CaptureLampState.shared
+            lamps.refresh()          // DRM / 睡眠没有 Combine 出口,刷新时现算
+            if let img = NSImage(named: lamps.assetName) {
+                img.size = NSSize(width: 18 * img.size.width / max(img.size.height, 1),
+                                  height: 18)
+                img.isTemplate = false
+                statusItem.button?.image = img
+            }
         }
-        // 采集状态不再压进图标本身（角色图是固定的），改由 tooltip 表达。
 
         let toolTip: String
         if unhealthy {
             let faulty = HealthMonitor.shared.faults.keys.sorted().joined(separator: ", ")
             toolTip = "⚠ Capture issue: \(faulty)\n(see ~/.portrait/logs/health.log)"
-        } else if screenRecordingActive || audioRecordingActive || typingCaptureActive {
-            var parts: [String] = []
-            if screenRecordingActive { parts.append("Screen") }
-            if audioRecordingActive { parts.append("Audio") }
-            if typingCaptureActive { parts.append("Typing") }
-            toolTip = "Capture: \(parts.joined(separator: " + "))"
         } else {
-            toolTip = "Capture off"
+            // 逐盏说明"亮/灭,灭是因为什么" —— 这盏灯是给不放心的用户自查用的,
+            // 光有颜色不够,必须能 hover 看到理由。
+            toolTip = CaptureLampState.shared.tooltip
         }
         statusItem.button?.toolTip = toolTip
     }
