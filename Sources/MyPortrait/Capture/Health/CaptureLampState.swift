@@ -45,7 +45,11 @@ final class CaptureLampState: ObservableObject {
     }
 
     private var cancellables = Set<AnyCancellable>()
-    private var frontmostApp: NSRunningApplication?
+    /// 前台 app 的三个标量(名字 / bundle id / pid)。**不存 NSRunningApplication**
+    /// —— 它不是 Sendable,跨隔离域传会报 data race;而且只用得到这三样。
+    private var frontName = ""
+    private var frontBundleId = ""
+    private var frontPid: pid_t = 0
     /// 前台浏览器当前标签页的 URL(非浏览器 = nil)。屏幕的 `ignoredUrls` 和打字的
     /// URL 级黑名单都按它判 —— 只看 bundle id 会漏掉"同一个浏览器,这个站屏蔽、
     /// 那个站不屏蔽"的情况。
@@ -60,23 +64,41 @@ final class CaptureLampState: ObservableObject {
     private weak var musicMonitor: MusicPlaybackMonitor?
 
     private init() {
-        frontmostApp = NSWorkspace.shared.frontmostApplication
+        adoptFrontmost(NSWorkspace.shared.frontmostApplication)
         // 前台 app 一变就重算 —— 这是"切到 1Password 灯就灭"的触发点。
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in
-            // 不从 notification.userInfo 取 app —— Notification 不是 Sendable,
-            // 跨隔离域传会报 data race。队列已是 .main,直接问系统当前前台是谁,
-            // 结果一样(通知刚投递时 frontmostApplication 已更新)。
+        ) { [weak self] note in
+            // ⚠️ **必须用通知里带的那个 app**,不能回头查
+            // `NSWorkspace.shared.frontmostApplication` —— 通知投递的那一刻
+            // 那个系统属性**还没 settle**,查到的常常是上一个 app。症状:切到
+            // 微信,灯还停在 Terminal 的状态,得再切第三个 app 才更新,而且
+            // 时灵时不灵(08-01 实测)。
+            // 先把三个标量取出来再进 MainActor —— Notification / NSRunningApplication
+            // 都不是 Sendable,整个传进去编译器会报 data race。
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let name = app?.localizedName ?? ""
+            let bid = app?.bundleIdentifier ?? ""
+            let pid = app?.processIdentifier ?? 0
             MainActor.assumeIsolated {
-                self?.frontmostApp = NSWorkspace.shared.frontmostApplication
-                self?.recompute()
-                self?.refreshBrowserURL()
+                guard let self else { return }
+                self.frontName = name
+                self.frontBundleId = bid
+                self.frontPid = pid
+                self.recompute()
+                self.refreshBrowserURL()
             }
         }
         recompute()
         startPolling()
+    }
+
+    /// 把 NSRunningApplication 拆成三个标量存下来。
+    private func adoptFrontmost(_ app: NSRunningApplication?) {
+        frontName = app?.localizedName ?? ""
+        frontBundleId = app?.bundleIdentifier ?? ""
+        frontPid = app?.processIdentifier ?? 0
     }
 
     /// 窄读前台浏览器的当前 URL —— **只取 URL**,不做 FocusProbe 那种 AX 全树遍历。
@@ -85,10 +107,9 @@ final class CaptureLampState: ObservableObject {
     /// 调用会让框架内部状态打架,历史上炸出过主线程死锁和后台队列崩溃。
     /// 读完跳回 MainActor,URL 变了才重算。
     private func refreshBrowserURL() {
-        let app = frontmostApp
-        guard let pid = app?.processIdentifier,
-              let bid = app?.bundleIdentifier,
-              FocusProbe.browserBundleIds.contains(bid)
+        let pid = frontPid
+        let bid = frontBundleId
+        guard pid > 0, FocusProbe.browserBundleIds.contains(bid)
         else {
             if browserUrl != nil { browserUrl = nil; recompute() }
             return
@@ -142,10 +163,14 @@ final class CaptureLampState: ObservableObject {
             .autoconnect()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.recompute()
+                    guard let self else { return }
+                    // **自愈**:重读一次前台 app。通知那条路万一漏了/读早了,
+                    // 这里最多 2s 就纠正回来(此刻系统属性一定已 settle)。
+                    self.adoptFrontmost(NSWorkspace.shared.frontmostApplication)
+                    self.recompute()
                     // 换标签页不发任何系统通知,只能靠这个 tick 兜 —— 所以浏览器里
                     // 切到/切离屏蔽站,灯最多滞后一个 tick。
-                    self?.refreshBrowserURL()
+                    self.refreshBrowserURL()
                 }
             }
             .store(in: &cancellables)
@@ -160,9 +185,8 @@ final class CaptureLampState: ObservableObject {
         func granted(_ kp: KeyPath<PermissionMonitor, PermissionMonitor.Status>) -> Bool {
             permissions?[keyPath: kp].isGranted ?? false
         }
-        let app = frontmostApp
-        let appName = app?.localizedName ?? ""
-        let bundleId = app?.bundleIdentifier ?? ""
+        let appName = frontName
+        let bundleId = frontBundleId
 
         // ---- 屏幕(紫) ----
         var s = Lamp(on: true, reason: nil)
