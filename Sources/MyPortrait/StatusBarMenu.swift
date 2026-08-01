@@ -227,6 +227,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // MARK: - 菜单构造
 
     private func buildMenu() {
+        // Open My Portrait 放最上面 —— 这是这个菜单里唯一高频的动作。
+        let openWindow = NSMenuItem(
+            title: "Open My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
+        )
+        openWindow.target = self
+        menu.addItem(openWindow)
+        menu.addItem(.separator())
+
         menu.addItem(statusHeader)
         menu.addItem(.separator())
 
@@ -236,26 +244,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(typingToggle)
         menu.addItem(.separator())
 
-        // 版本号行 —— 灰色 disabled item,用户看一眼就知道当前装的是哪版。
-        // 从 Info.plist 读 CFBundleShortVersionString(marketing version)。
-        let versionString = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let versionItem = NSMenuItem(title: "Version \(versionString)", action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
-        menu.addItem(versionItem)
-        menu.addItem(.separator())
-
-        let openWindow = NSMenuItem(
-            title: "Open My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
-        )
-        openWindow.target = self
-        menu.addItem(openWindow)
-
-        let openDir = NSMenuItem(
-            title: "Open ~/.portrait/", action: #selector(openPortraitDir), keyEquivalent: ""
-        )
-        openDir.target = self
-        menu.addItem(openDir)
-        menu.addItem(.separator())
+        // 08-01:版本号行和 "Open ~/.portrait/" 都删了(没人用)。
+        // 数据目录的入口仍在 Settings → Storage 的 Data directory 卡片上。
 
         menu.addItem(devModeBanner)
         menu.addItem(.separator())
@@ -396,11 +386,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         (NSApp.delegate as? AppDelegate)?.showMainWindow()
     }
 
-    @objc private func openPortraitDir() {
-        // 复用 ConfigStore 的单一实现(MemorySettingsView footer 按钮也用它),
-        // 避免两处各写一份 NSWorkspace.open(Storage.rootURL)。
-        ConfigStore.shared.openPortraitDir()
-    }
+    // 08-01:openPortraitDir 随菜单项一起删 —— 已无调用方。
+    // ConfigStore.openPortraitDir() 本体还在,Storage 页那个 Open 按钮在用。
 
     @objc private func quit() {
         NSApp.terminate(nil)
