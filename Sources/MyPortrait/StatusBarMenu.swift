@@ -210,15 +210,17 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         } else {
             micPart = "locked, disconnected"
         }
-        // 灰字摘要 = 下面那组单选项的小标题,紧贴在它们上方
-        // (顺序:Enabled / ── / 摘要 / follow + 设备 / ── / system audio)。
+        // 四个分区:Enabled / 灰字摘要 / 主音频(follow + 设备) / system audio。
+        // 摘要自成一区,不贴着下面的单选项 —— 它是"当前在录什么"的陈述,
+        // 不是那组的标题,贴着容易被读成可点的选项。
         // 父项标题留给"开着没 / 为什么没开"。
         let summary = systemAudioOn
             ? "\(micPart) + system audio"
             : micPart
         let summaryItem = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
         summaryItem.isEnabled = false
-        submenu.insertItem(summaryItem, at: 2)   // 0=Enabled, 1=分隔线
+        submenu.insertItem(summaryItem, at: 2)          // 0=Enabled, 1=分隔线
+        submenu.insertItem(.separator(), at: 3)         // 摘要自成一区
         inputDeviceMenuItem.submenu = submenu
     }
 
