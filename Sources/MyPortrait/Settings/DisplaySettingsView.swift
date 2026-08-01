@@ -458,8 +458,6 @@ private struct IconSlot: View {
 /// 数据源。所以这张卡同时是"这图标什么意思"和"我现在到底在被记什么"的自查面板:
 /// 用户切到 1Password 再回来看这一页,能看到灯确实灭过。
 private struct MenuBarLampCard: View {
-    @ObservedObject private var lamps = CaptureLampState.shared
-
     var body: some View {
         SettingsCard(title: "Menu bar icon") {
             VStack(alignment: .leading, spacing: 14) {
@@ -468,29 +466,40 @@ private struct MenuBarLampCard: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.62))
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(alignment: .center, spacing: 22) {
-                    // 深色底片 —— 模拟菜单栏,白色描边才读得出来。
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.black.opacity(0.55))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.white.opacity(0.10), lineWidth: 1))
-                        LampGlyph(screen: lamps.screen.on,
-                                  audio: lamps.audio.on,
-                                  typing: lamps.typing.on)
-                            .padding(16)
-                    }
-                    // 正方形底片。图标本身略高于宽(aspect 1.148),Canvas 里按
-                    // min(w, h/aspect) 等比适配 —— 塞进方框只会左右留白,不变形。
-                    .frame(width: 128, height: 128)
+                // ⚠️ **拉取式,不是 @ObservedObject 推送式**。
+                // 这张卡最关键的用法是「窗口摆旁边,切到别的 app 盯着看灯灭」——
+                // 而 App 不在前台时,SwiftUI 会把后台窗口的 objectWillChange
+                // 合并/延后到窗口重新激活,卡片就冻在切走那一刻(实测:切到微信、
+                // Spotify 之后仍显示 "Terminal is a terminal")。
+                // 墙钟 TimelineView 每 tick 重新求值 body,直接读单例当前值,
+                // 绕开推送这一层。
+                SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
+                    let lamps = CaptureLampState.shared
+                    HStack(alignment: .center, spacing: 22) {
+                        // 深色底片 —— 模拟菜单栏,白色描边才读得出来。
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.black.opacity(0.55))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                            LampGlyph(screen: lamps.screen.on,
+                                      audio: lamps.audio.on,
+                                      typing: lamps.typing.on,
+                                      now: tl.date)
+                                .padding(16)
+                        }
+                        // 正方形底片。图标本身略高于宽(aspect 1.148),Canvas 里按
+                        // min(w, h/aspect) 等比适配 —— 塞进方框只会左右留白,不变形。
+                        .frame(width: 128, height: 128)
 
-                    VStack(alignment: .leading, spacing: 9) {
-                        legendRow("Screen",  LampGlyph.screenColor, lamps.screen)
-                        legendRow("Audio",   LampGlyph.audioColor,  lamps.audio)
-                        legendRow("Typing",  LampGlyph.typingColor, lamps.typing)
+                        VStack(alignment: .leading, spacing: 9) {
+                            legendRow("Screen",  LampGlyph.screenColor, lamps.screen)
+                            legendRow("Audio",   LampGlyph.audioColor,  lamps.audio)
+                            legendRow("Typing",  LampGlyph.typingColor, lamps.typing)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
                 }
 
                 // 中心橙点那句说明先不写 —— 它之后要挂功能,现在讲不清楚。
@@ -526,6 +535,9 @@ private struct LampGlyph: View {
     var screen: Bool
     var audio: Bool
     var typing: Bool
+    /// 呼吸相位由外层墙钟 TimelineView 传进来 —— 自己再套一个 TimelineView
+    /// 会多一条动画时钟,而且外层已经保证了后台也在 tick。
+    var now: Date
 
     static let screenColor = Color(red: 142/255, green: 26/255,  blue: 245/255)
     static let audioColor  = Color(red: 255/255, green: 255/255, blue: 85/255)
@@ -550,16 +562,9 @@ private struct LampGlyph: View {
     var body: some View {
         // 亮着的灯做极缓的呼吸(2.6s 一轮),幅度很小 —— 让人一眼看出"这是活的
         // 实时状态",但不至于在设置页里晃眼。
-        // ⚠️ 必须写 SwiftUI. 限定名 —— 本工程自己有个 TimelineView(时间线页面),
-        // 不限定的话解析到那个,报「TimelineState 没有成员 animation」。
-        //
-        // ⚠️ 用 .periodic 而不是 .animation:.animation 绑显示链路,**App 不在
-        // 前台时会暂停**。而这张卡最重要的用法恰恰是「窗口摆在旁边,切到别的
-        // app,盯着看灯灭」—— 一点回 App 前台就变成 My Portrait 了,看到的就
-        // 不是你想验证的那个 app。.periodic 走墙钟,后台照跑。
-        SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
+        Group {
             Canvas { ctx, size in
-                let t = tl.date.timeIntervalSinceReferenceDate
+                let t = now.timeIntervalSinceReferenceDate
                 let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 2.6)   // 0…1
                 // 等比放进给定尺寸,居中
                 let scale = min(size.width, size.height / Self.aspect)
