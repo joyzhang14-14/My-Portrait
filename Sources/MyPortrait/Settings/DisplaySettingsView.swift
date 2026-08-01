@@ -11,6 +11,8 @@ struct DisplaySettingsView: View {
 
             AppCustomizeCard()
 
+            MenuBarLampCard()
+
             SettingsCard(title: "Appearance") {
                 SettingsRow("Theme",
                             description: "Match the system or force light / dark.",
@@ -113,7 +115,7 @@ private struct AppCustomizeCard: View {
                         Text("App customize")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary.opacity(0.96))
-                        Text("Personalize the in-app display name and the Dock + menu bar icons.")
+                        Text("Personalize the in-app display name and the Dock icon.")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textPrimary.opacity(0.55))
                             .fixedSize(horizontal: false, vertical: true)
@@ -445,5 +447,159 @@ private struct IconSlot: View {
         ) else { return false }
         CGImageDestinationAddImage(dst, cg, nil)
         return CGImageDestinationFinalize(dst)
+    }
+}
+
+// MARK: - 菜单栏图标说明卡
+
+/// 用 Canvas 按**真实图标几何**画出来的三盏采集灯 + 逐盏实时状态。
+///
+/// 不是一张说明图 —— 它读的是 `CaptureLampState.shared`,跟菜单栏那个图标同一个
+/// 数据源。所以这张卡同时是"这图标什么意思"和"我现在到底在被记什么"的自查面板:
+/// 用户切到 1Password 再回来看这一页,能看到灯确实灭过。
+private struct MenuBarLampCard: View {
+    @ObservedObject private var lamps = CaptureLampState.shared
+
+    var body: some View {
+        SettingsCard(title: "Menu bar icon") {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Three lamps, one per capture channel. A lamp is lit **only** while that channel is actually recording the app you're in right now — it goes dark the moment the feature is off, the permission is missing, capture is paused, or the app (or page) is on that channel's ignore list.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .center, spacing: 22) {
+                    // 深色底片 —— 模拟菜单栏,白色描边才读得出来。
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.black.opacity(0.55))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                        LampGlyph(screen: lamps.screen.on,
+                                  audio: lamps.audio.on,
+                                  typing: lamps.typing.on)
+                            .padding(16)
+                    }
+                    .frame(width: 116, height: 128)
+
+                    VStack(alignment: .leading, spacing: 9) {
+                        legendRow("Screen",  LampGlyph.screenColor, lamps.screen)
+                        legendRow("Audio",   LampGlyph.audioColor,  lamps.audio)
+                        legendRow("Typing",  LampGlyph.typingColor, lamps.typing)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Text("The centre dot is you — it never goes out.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.40))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+        }
+    }
+
+    @ViewBuilder
+    private func legendRow(_ name: String, _ color: Color,
+                           _ lamp: CaptureLampState.Lamp) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Circle()
+                .fill(lamp.on ? color : Color.clear)
+                .overlay(Circle().stroke(color.opacity(lamp.on ? 0 : 0.45), lineWidth: 1.5))
+                .frame(width: 11, height: 11)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 12, weight: .medium))
+                Text(lamp.on ? "recording this app" : (lamp.reason ?? "off"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textPrimary.opacity(lamp.on ? 0.55 : 0.42))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// 菜单栏图标本体,Canvas 直接画 —— 几何是从原始手绘模板量出来的,归一化到
+/// 单位框(宽为基准),所以任意尺寸都不会变形。
+private struct LampGlyph: View {
+    var screen: Bool
+    var audio: Bool
+    var typing: Bool
+
+    static let screenColor = Color(red: 142/255, green: 26/255,  blue: 245/255)
+    static let audioColor  = Color(red: 255/255, green: 255/255, blue: 85/255)
+    static let typingColor = Color(red: 52/255,  green: 120/255, blue: 245/255)
+    static let hubColor    = Color(red: 232/255, green: 159/255, blue: 67/255)
+
+    /// 归一化几何(除以内容框宽 916):圆心 x/y、外径、描边粗细。
+    private static let aspect: CGFloat = 1052.0 / 916.0
+    private static let hub = CGPoint(x: 0.2336, y: 0.6524)
+    private static let rHub: CGFloat = 0.2285
+    private static let rDot: CGFloat = 0.1587
+    private static let stroke: CGFloat = 0.0699
+    private static let dots: [(CGPoint, KeyPath<LampGlyph, Bool>, Color)] = [
+        (CGPoint(x: 0.4773, y: 0.1425), \.screen, screenColor),
+        (CGPoint(x: 0.8362, y: 0.4905), \.audio,  audioColor),
+        (CGPoint(x: 0.7153, y: 0.8605), \.typing, typingColor),
+    ]
+
+    var body: some View {
+        // 亮着的灯做极缓的呼吸(2.6s 一轮),幅度很小 —— 让人一眼看出"这是活的
+        // 实时状态",但不至于在设置页里晃眼。
+        // ⚠️ 必须写 SwiftUI. 限定名 —— 本工程自己有个 TimelineView(时间线页面),
+        // 不限定的话解析到那个,报「TimelineState 没有成员 animation」。
+        SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30)) { tl in
+            Canvas { ctx, size in
+                let t = tl.date.timeIntervalSinceReferenceDate
+                let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 2.6)   // 0…1
+                // 等比放进给定尺寸,居中
+                let scale = min(size.width, size.height / Self.aspect)
+                let ox = (size.width - scale) / 2
+                let oy = (size.height - scale * Self.aspect) / 2
+                func P(_ p: CGPoint) -> CGPoint {
+                    CGPoint(x: ox + p.x * scale, y: oy + p.y * scale)
+                }
+                func R(_ r: CGFloat) -> CGFloat { r * scale }
+                func disc(_ c: CGPoint, _ r: CGFloat) -> Path {
+                    Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+                }
+
+                let hubC = P(Self.hub)
+                let sw = R(Self.stroke)
+
+                // 1) 连线 + 各球外圆,统一白色描边(菜单栏用的就是白线版)
+                for (p, _, _) in Self.dots {
+                    var line = Path()
+                    line.move(to: hubC)
+                    line.addLine(to: P(p))
+                    ctx.stroke(line, with: .color(.white),
+                               style: StrokeStyle(lineWidth: sw, lineCap: .round))
+                }
+                ctx.fill(disc(hubC, R(Self.rHub)), with: .color(.white))
+                for (p, _, _) in Self.dots {
+                    ctx.fill(disc(P(p), R(Self.rDot)), with: .color(.white))
+                }
+
+                // 2) 内圆:中心恒亮橙;三盏灯亮=本色(带辉光)、灭=挖空成底色
+                ctx.fill(disc(hubC, R(Self.rHub - Self.stroke)), with: .color(Self.hubColor))
+                for (p, kp, color) in Self.dots {
+                    let c = P(p)
+                    let ri = R(Self.rDot - Self.stroke)
+                    if self[keyPath: kp] {
+                        // 辉光:同色大圆低透明度垫在下面,呼吸时轻微涨缩
+                        let glow = ri * (2.0 + 0.35 * breathe)
+                        ctx.fill(disc(c, glow), with: .color(color.opacity(0.16 + 0.08 * breathe)))
+                        ctx.fill(disc(c, ri), with: .color(color))
+                    } else {
+                        // 灭 = 真的挖空(跟真实图标一致:露出菜单栏底色)
+                        ctx.blendMode = .destinationOut
+                        ctx.fill(disc(c, ri), with: .color(.black))
+                        ctx.blendMode = .normal
+                    }
+                }
+            }
+        }
+        .drawingGroup()      // 挖空需要独立图层,否则 destinationOut 会吃掉卡片背景
     }
 }
