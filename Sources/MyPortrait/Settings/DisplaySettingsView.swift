@@ -463,7 +463,7 @@ private struct MenuBarLampCard: View {
     var body: some View {
         SettingsCard(title: "Menu bar icon") {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Three lamps, one per capture channel. A lamp is lit **only** while that channel is actually recording the app you're in right now — it goes dark the moment the feature is off, the permission is missing, capture is paused, or the app (or page) is on that channel's ignore list.")
+                Text("Three neural nodes, one per capture channel. A node lights up only while that channel is recording the app you're in right now. It goes dark the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list.")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.62))
                     .fixedSize(horizontal: false, vertical: true)
@@ -491,9 +491,7 @@ private struct MenuBarLampCard: View {
                     Spacer(minLength: 0)
                 }
 
-                Text("The centre dot is you — it never goes out.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.40))
+                // 中心橙点那句说明先不写 —— 它之后要挂功能,现在讲不清楚。
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -511,7 +509,7 @@ private struct MenuBarLampCard: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.system(size: 12, weight: .medium))
-                Text(lamp.on ? "recording this app" : (lamp.reason ?? "off"))
+                Text(lamp.on ? "lit — recording this app" : (lamp.reason ?? "off"))
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.textPrimary.opacity(lamp.on ? 0.55 : 0.42))
                     .fixedSize(horizontal: false, vertical: true)
@@ -532,16 +530,19 @@ private struct LampGlyph: View {
     static let typingColor = Color(red: 52/255,  green: 120/255, blue: 245/255)
     static let hubColor    = Color(red: 232/255, green: 159/255, blue: 67/255)
 
-    /// 归一化几何(除以内容框宽 916):圆心 x/y、外径、描边粗细。
-    private static let aspect: CGFloat = 1052.0 / 916.0
-    private static let hub = CGPoint(x: 0.2336, y: 0.6524)
-    private static let rHub: CGFloat = 0.2285
-    private static let rDot: CGFloat = 0.1587
-    private static let stroke: CGFloat = 0.0699
+    /// 归一化几何 —— **x 和 y 都除以内容框宽 916**(等比!)。
+    /// ⚠️ 一开始 y 除的是高度 1052、x 除的是宽度,非等比 → 整个图被竖向压扁、
+    /// 顶部那颗球被推到 y<0 裁掉了(看起来就是"图标偏上、上面被盖住一块")。
+    /// y 的取值范围因此是 0…aspect,不是 0…1。
+    private static let aspect: CGFloat = 1052.0 / 916.0     // 1.148472
+    private static let hub = CGPoint(x: 0.233624, y: 0.749236)
+    private static let rHub: CGFloat = 0.228493
+    private static let rDot: CGFloat = 0.158734
+    private static let stroke: CGFloat = 0.069869
     private static let dots: [(CGPoint, KeyPath<LampGlyph, Bool>, Color)] = [
-        (CGPoint(x: 0.4773, y: 0.1425), \.screen, screenColor),
-        (CGPoint(x: 0.8362, y: 0.4905), \.audio,  audioColor),
-        (CGPoint(x: 0.7153, y: 0.8605), \.typing, typingColor),
+        (CGPoint(x: 0.477293, y: 0.163646), \.screen, screenColor),
+        (CGPoint(x: 0.836135, y: 0.563319), \.audio,  audioColor),
+        (CGPoint(x: 0.715284, y: 0.988210), \.typing, typingColor),
     ]
 
     var body: some View {
