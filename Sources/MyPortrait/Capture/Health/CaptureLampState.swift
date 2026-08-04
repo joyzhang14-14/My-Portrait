@@ -191,55 +191,55 @@ final class CaptureLampState: ObservableObject {
         // ---- 屏幕(紫) ----
         var s = Lamp(on: true, reason: nil)
         if !cfg.capture.screen.enabled {
-            s = Lamp(on: false, reason: "screen capture is off")
+            s = Lamp(on: false, reason: "Screen capture is switched off.")
         } else if !granted(\.screenRecording) {
-            s = Lamp(on: false, reason: "no screen-recording permission")
+            s = Lamp(on: false, reason: "No screen-recording permission — nothing can be captured.")
         } else if pause.screenAsleep {
-            s = Lamp(on: false, reason: "display is asleep")
+            s = Lamp(on: false, reason: "The display is asleep — nothing to capture.")
         } else if pause.drmActive {
-            s = Lamp(on: false, reason: "paused — protected or paused-list content in front")
+            s = Lamp(on: false, reason: "Paused — protected video is playing on screen.")
         } else if let hit = Self.ignoredAppHit(appName: appName, cfg: cfg) {
-            s = Lamp(on: false, reason: "\(appName) is in Ignored apps (“\(hit)”) — its window is cut out of the frame")
+            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored apps list — this window is blanked out of every screenshot.")
         } else if let url = browserUrl,
                   let hit = cfg.privacy.ignoredUrls.first(where: {
                       !$0.isEmpty && url.lowercased().contains($0.lowercased())
                   }) {
             // IgnoreGate 把 ignoredUrls 当"URL / 窗口标题子串"用,这里同口径。
-            s = Lamp(on: false, reason: "this page matches Ignored URLs (“\(hit)”) — the window is cut out of the frame")
+            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored URLs list — this window is blanked out of every screenshot.")
         }
         if screen != s { screen = s }        // 只在真变了才发通知,见 Lamp 的告警
 
         // ---- 音频(黄) ----
         var a = Lamp(on: true, reason: nil)
         if !cfg.capture.audio.enabled {
-            a = Lamp(on: false, reason: "audio capture is off")
+            a = Lamp(on: false, reason: "Audio capture is switched off.")
         } else if !granted(\.microphone) {
-            a = Lamp(on: false, reason: "no microphone permission")
+            a = Lamp(on: false, reason: "No microphone permission — nothing can be recorded.")
         } else if musicMonitor?.musicDetected == true {
-            a = Lamp(on: false, reason: "paused — an app on your pause list is playing audio")
+            a = Lamp(on: false, reason: "Paused — an app on your pause list is playing sound.")
         }
         if audio != a { audio = a }
 
         // ---- 打字(蓝) ----
         var t = Lamp(on: true, reason: nil)
         if !cfg.capture.typingCaptureEnabled {
-            t = Lamp(on: false, reason: "typing capture is off")
+            t = Lamp(on: false, reason: "Typing capture is switched off.")
         } else if !granted(\.accessibility) {
-            t = Lamp(on: false, reason: "no accessibility permission")
+            t = Lamp(on: false, reason: "No accessibility permission — keystrokes can't be read.")
         } else if !bundleId.isEmpty,
                   let why = TypingPrivacyFilter.exclusionReason(bundleId: bundleId) {
             // 判据跟 TypingObserver.attach 共用同一个函数,不重写一份。
             switch why {
             case .terminal:
-                t = Lamp(on: false, reason: "\(appName) is a terminal — typing is never read here")
+                t = Lamp(on: false, reason: "\(appName) is a terminal — typing is never read in terminals.")
             case .blacklisted:
-                t = Lamp(on: false, reason: "\(appName) is on the typing blacklist — nothing is read here")
+                t = Lamp(on: false, reason: "\(appName) is on your typing blacklist — nothing you type here is saved.")
             }
         } else if !bundleId.isEmpty, let url = browserUrl,
                   TypingPrivacyFilter.isBlacklisted(bundleId: bundleId, url: url) {
             // 打字还有一道 **URL 级**闸(TypingRecordWriter.persist 落库时判)。
             // 只按 bundle id 判会漏掉"这个浏览器里,这个站屏蔽、那个站不屏蔽"。
-            t = Lamp(on: false, reason: "this page is on the typing blacklist — nothing is saved here")
+            t = Lamp(on: false, reason: "This page is on your typing blacklist — nothing you type here is saved.")
         }
         if typing != t { typing = t }
     }
@@ -254,8 +254,11 @@ final class CaptureLampState: ObservableObject {
 
     /// 三行说明,菜单栏 tooltip 用。
     var tooltip: String {
+        // reason 现在本身就是完整句子(带大写开头 + 句号),不再往前面
+        // 拼 "off —",否则读出来是 "off — Screen capture is switched off."
         func line(_ dot: String, _ name: String, _ l: Lamp) -> String {
-            l.on ? "\(dot) \(name): recording" : "○ \(name): off — \(l.reason ?? "")"
+            l.on ? "\(dot) \(name): recording this app"
+                 : "○ \(name): \(l.reason ?? "off")"
         }
         return [
             line("●", "Screen", screen),

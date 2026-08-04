@@ -470,7 +470,7 @@ private struct MenuBarLampCard: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.system(size: 12, weight: .medium))
-                Text(lamp.on ? "lit — recording this app" : (lamp.reason ?? "off"))
+                Text(lamp.on ? "Recording this app right now." : (lamp.reason ?? "Off."))
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.textPrimary.opacity(lamp.on ? 0.55 : 0.42))
                     .fixedSize(horizontal: false, vertical: true)
