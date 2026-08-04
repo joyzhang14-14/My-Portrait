@@ -81,7 +81,8 @@ struct SettingsRow<Trailing: View>: View {
                     .frame(width: 22)
             }
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
+                // spacing 0 —— ⓘ 自带 6pt padding 撑点击范围,再加间距就散了。
+                HStack(spacing: 0) {
                     Text(title)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textPrimary.opacity(0.92))
@@ -103,32 +104,21 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// 标题旁的 ⓘ,鼠标悬停弹出说明浮窗。
-///
-/// 离开时延迟 180ms 才收 —— 光标扫过图标边缘会连打几次 onHover,
-/// 立刻收会导致浮窗闪烁;延迟内再次进入就把关闭任务取消掉。
+/// 标题旁的 ⓘ,点击弹出说明浮窗(再点一次 / 点别处收起)。
+/// 图标本身 11pt,外面垫 6pt padding 把可点范围撑到 ~23pt。
 struct SettingsInfoBadge: View {
     let text: String
     @State private var hovering = false
     @State private var shown = false
-    @State private var dismiss: Task<Void, Never>?
 
     var body: some View {
         Image(systemName: "info.circle")
             .font(.system(size: 11))
-            .foregroundStyle(Theme.textPrimary.opacity(hovering ? 0.85 : 0.38))
-            .onHover { inside in
-                hovering = inside
-                dismiss?.cancel()
-                if inside {
-                    shown = true
-                } else {
-                    dismiss = Task {
-                        try? await Task.sleep(for: .milliseconds(180))
-                        if !Task.isCancelled { shown = false }
-                    }
-                }
-            }
+            .foregroundStyle(Theme.textPrimary.opacity(shown ? 0.9 : (hovering ? 0.75 : 0.38)))
+            .padding(6)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture { shown.toggle() }
             .popover(isPresented: $shown, arrowEdge: .bottom) {
                 Text(text)
                     .font(.system(size: 11.5))
@@ -163,7 +153,7 @@ struct SettingsSectionHeader: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             Text(title)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary.opacity(0.90))

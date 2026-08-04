@@ -16,6 +16,8 @@ struct AIModelsSettingsView: View {
     @State private var downloading: Set<String> = []
     /// 待确认卸载的模型 —— 点 Uninstall 先弹确认框,确认了才真删。
     @State private var pendingUninstall: PendingUninstall? = nil
+    /// 已展开的分区标题。默认全收起,只看蓝色 Installed n/m。
+    @State private var expanded: Set<String> = []
 
     /// 一次待确认的卸载:显示名 + 真正执行删除的闭包。
     private struct PendingUninstall: Identifiable {
@@ -38,7 +40,8 @@ struct AIModelsSettingsView: View {
                 // Whisper / Qwen3-ASR 转录模型 —— 跟 Audio Capture 的 model
                 // picker 同一份目录。没装的这里点 Download 下载,装好后才能在
                 // picker 里选。Qwen 一律手动下(不随 app 启动自动下)。
-                SettingsCard(title: "Transcription") {
+                modelSection("Transcription",
+                             installed: transcriptionInstalled, total: transcriptionTotal) {
                     ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { _, m in
                         transcriptionModelRow(m)
                         SettingsDivider()
@@ -50,24 +53,30 @@ struct AIModelsSettingsView: View {
                 }
 
                 // 声纹模型 —— 这里只管下载,选用哪个在 Audio Capture。
-                SettingsCard(title: "Speaker recognition") {
+                modelSection("Speaker recognition",
+                             installed: speakerInstalled, total: SpeakerModel.embeddingOptions.count) {
                     ForEach(Array(SpeakerModel.embeddingOptions.enumerated()), id: \.offset) { idx, m in
                         speakerDownloadRow(m)
                         if idx < SpeakerModel.embeddingOptions.count - 1 { SettingsDivider() }
                     }
                 }
 
-                SettingsCard(title: "Voice segmentation") {
+                modelSection("Voice segmentation",
+                             installed: SpeakerModelStore.isOnDisk(.segmentation) ? 1 : 0, total: 1) {
                     localModelRow("pyannote segmentation-3.0", detail: "~6 MB",
                                   ready: SpeakerModelStore.isOnDisk(.segmentation), model: .segmentation)
                 }
 
-                SettingsCard(title: "Voice activity detection") {
+                modelSection("Voice activity detection",
+                             installed: SpeakerModelStore.isOnDisk(.vadSilero) ? 1 : 0, total: 1) {
                     localModelRow("Silero VAD", detail: "~2 MB",
                                   ready: SpeakerModelStore.isOnDisk(.vadSilero), model: .vadSilero)
                 }
             }
             .id(localModelTick)   // 强制重渲染,反映新的 isOnDisk 结果
+            // 分区默认收起时一行 row 都不渲染,原来挂在 row 上的 onAppear
+            // 起不来 —— 轮询改挂在容器上,收起状态下 Installed n/m 也会刷新。
+            .onAppear { startLocalModelPolling() }
         }
         .confirmationDialog(
             pendingUninstall.map { "Uninstall \($0.label)?" } ?? "",
@@ -87,6 +96,58 @@ struct AIModelsSettingsView: View {
         } message: {
             Text("This deletes the model from disk. You can download it again later.")
         }
+    }
+
+    // MARK: - 可折叠分区(标题行 + 蓝色 Installed n/m,点标题展开)
+
+    /// 一个模型分区。收起时只留标题行,展开才渲染卡片。
+    @ViewBuilder
+    private func modelSection<Content: View>(_ title: String,
+                                             installed: Int, total: Int,
+                                             @ViewBuilder content: @escaping () -> Content) -> some View {
+        let open = expanded.contains(title)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
+                Text("Installed \(installed)/\(total)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.accent)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 12)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    if open { expanded.remove(title) } else { expanded.insert(title) }
+                }
+            }
+            if open {
+                SettingsCard { content() }
+            }
+        }
+    }
+
+    /// 已装的转录模型数(Whisper + Qwen 合起来算一个分区)。
+    private var transcriptionInstalled: Int {
+        WhisperKitWrapper.allTranscriptionModels.filter { WhisperKitWrapper.isOnDisk(modelName: $0.name) }.count
+            + Qwen3ASRWrapper.allQwenModels.filter { Qwen3ASRWrapper.isOnDisk(modelId: $0.name) }.count
+    }
+
+    private var transcriptionTotal: Int {
+        WhisperKitWrapper.allTranscriptionModels.count + Qwen3ASRWrapper.allQwenModels.count
+    }
+
+    private var speakerInstalled: Int {
+        SpeakerModel.embeddingOptions.filter { SpeakerModelStore.isOnDisk($0.model) }.count
     }
 
     // MARK: - Uninstall(点 Uninstall → 弹确认框 → 确认才真删)
