@@ -99,7 +99,7 @@ struct NeuralGraphSettingsView: View {
                                 description: "Show only the balls — no connecting lines, and no pulse trail when you click one. Clicking still lights the balls up one after another, so the chain reaction stays.",
                                 icon: "circle.dotted") {
                         Toggle("", isOn: config.binding(\.display.graphHideLinks))
-                            .labelsHidden()
+                            .labelsHidden().toggleStyle(.switch)
                     }
                 }
             }
