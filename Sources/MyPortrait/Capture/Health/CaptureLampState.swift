@@ -227,14 +227,11 @@ final class CaptureLampState: ObservableObject {
         } else if !granted(\.accessibility) {
             t = Lamp(on: false, reason: "No accessibility permission — keystrokes can't be read.")
         } else if !bundleId.isEmpty,
-                  let why = TypingPrivacyFilter.exclusionReason(bundleId: bundleId) {
+                  TypingPrivacyFilter.exclusionReason(bundleId: bundleId) != nil {
             // 判据跟 TypingObserver.attach 共用同一个函数,不重写一份。
-            switch why {
-            case .terminal:
-                t = Lamp(on: false, reason: "\(appName) is a terminal — typing is never read in terminals.")
-            case .blacklisted:
-                t = Lamp(on: false, reason: "\(appName) is on your typing blacklist — nothing you type here is saved.")
-            }
+            // 终端不单独报一句 —— 它本来就在 defaultBlacklist 里(设置页
+            // 灰显那截),对用户就是"黑名单里的 app",没必要区分两种说法。
+            t = Lamp(on: false, reason: "\(appName) is on your typing blacklist — nothing you type here is saved.")
         } else if !bundleId.isEmpty, let url = browserUrl,
                   TypingPrivacyFilter.isBlacklisted(bundleId: bundleId, url: url) {
             // 打字还有一道 **URL 级**闸(TypingRecordWriter.persist 落库时判)。
