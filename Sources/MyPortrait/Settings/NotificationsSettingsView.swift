@@ -11,7 +11,6 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(title: "App") {
                 SettingsRow("New version available",
-                            description: "Show a banner when a new version of My Portrait is available.",
                             icon: "bell.badge") {
                     Toggle("", isOn: config.binding(\.notifications.appUpdates)).labelsHidden().toggleStyle(.switch)
                 }
@@ -19,7 +18,6 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(title: "Cron Jobs") {
                 SettingsRow("Cron job run notifications",
-                            description: "Show a system banner when an installed cronJob finishes a run.",
                             icon: "antenna.radiowaves.left.and.right") {
                     Toggle("", isOn: config.binding(\.notifications.cronJobAlerts)).labelsHidden().toggleStyle(.switch)
                 }
@@ -27,13 +25,11 @@ struct NotificationsSettingsView: View {
 
             SettingsCard(title: "Memory pipelines") {
                 SettingsRow("Pipeline progress",
-                            description: "Informational banners — no action needed:\n  ⚙️  Run finished — what was processed (event processing, portrait distillation, personality refresh, writing capture, speech style)\n  🔁  Resumed after interruption — app was closed mid-run, restarting on next tick",
                             icon: "gearshape.2") {
                     Toggle("", isOn: config.binding(\.notifications.schedulerAlerts)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Pipeline errors",
-                            description: "Failure banners — may need your attention:\n  🛑  Needs attention — action required (quota exhausted, auth revoked, model gone, DB corrupt, context overflow)\n  🔁  Auto-recovering — transient failure (network blip, rate limit, schema parse), scheduler will retry on its own\n  ⚠️  Run failed — what was processed has problems",
                             icon: "exclamationmark.triangle") {
                     Toggle("", isOn: config.binding(\.notifications.pipelineErrorAlerts)).labelsHidden().toggleStyle(.switch)
                 }
@@ -43,7 +39,6 @@ struct NotificationsSettingsView: View {
                 title: "Diagnostics"
             ) {
                 SettingsRow("Capture stalls",
-                            description: "Alert when audio or screen capture stops unexpectedly.",
                             icon: "exclamationmark.triangle") {
                     Toggle("", isOn: config.binding(\.notifications.captureStalls)).labelsHidden().toggleStyle(.switch)
                 }
