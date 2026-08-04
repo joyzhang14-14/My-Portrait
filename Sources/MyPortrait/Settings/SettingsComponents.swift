@@ -57,14 +57,18 @@ struct SettingsCard<Content: View>: View {
 struct SettingsRow<Trailing: View>: View {
     let title: String
     let description: String?
+    /// 收进标题右侧 ⓘ 的说明文字,鼠标悬停才显示。用于篇幅长、
+    /// 平时不需要占版面的解释。
+    let info: String?
     let icon: String?
     var indent: CGFloat = 0
     @ViewBuilder var trailing: () -> Trailing
 
-    init(_ title: String, description: String? = nil, icon: String? = nil,
-         indent: CGFloat = 0,
+    init(_ title: String, description: String? = nil, info: String? = nil,
+         icon: String? = nil, indent: CGFloat = 0,
          @ViewBuilder trailing: @escaping () -> Trailing) {
-        self.title = title; self.description = description; self.icon = icon
+        self.title = title; self.description = description; self.info = info
+        self.icon = icon
         self.indent = indent; self.trailing = trailing
     }
 
@@ -77,9 +81,12 @@ struct SettingsRow<Trailing: View>: View {
                     .frame(width: 22)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                HStack(spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                    if let info { SettingsInfoBadge(text: info) }
+                }
                 if let description {
                     Text(description)
                         .font(.system(size: 11))
@@ -93,6 +100,43 @@ struct SettingsRow<Trailing: View>: View {
         .padding(.leading, 14 + indent)
         .padding(.trailing, 14)
         .padding(.vertical, 10)
+    }
+}
+
+/// 标题旁的 ⓘ,鼠标悬停弹出说明浮窗。
+///
+/// 离开时延迟 180ms 才收 —— 光标扫过图标边缘会连打几次 onHover,
+/// 立刻收会导致浮窗闪烁;延迟内再次进入就把关闭任务取消掉。
+struct SettingsInfoBadge: View {
+    let text: String
+    @State private var hovering = false
+    @State private var shown = false
+    @State private var dismiss: Task<Void, Never>?
+
+    var body: some View {
+        Image(systemName: "info.circle")
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.textPrimary.opacity(hovering ? 0.85 : 0.38))
+            .onHover { inside in
+                hovering = inside
+                dismiss?.cancel()
+                if inside {
+                    shown = true
+                } else {
+                    dismiss = Task {
+                        try? await Task.sleep(for: .milliseconds(180))
+                        if !Task.isCancelled { shown = false }
+                    }
+                }
+            }
+            .popover(isPresented: $shown, arrowEdge: .bottom) {
+                Text(text)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 300, alignment: .leading)
+                    .padding(12)
+            }
     }
 }
 
