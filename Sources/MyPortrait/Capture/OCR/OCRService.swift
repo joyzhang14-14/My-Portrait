@@ -35,13 +35,28 @@ struct OCRService: Sendable {
     }
 
     /// 对一张图做 OCR / 或直接用 AX text。
-    /// `focus` 用来构造缓存 key（appName::windowTitle）和决定是否走 AX 快路。
+    /// `focus` 只用来构造缓存 key（appName::windowTitle）。
     ///
     /// 决策流程：
-    ///   1. 查缓存（不管 AX 还是 OCR 命中都返回）
-    ///   2. AX text 非空 && app 非终端 → 直接用 AX text（words=[]，bbox 缺失但
-    ///      内容更准 + 省 ~50ms Vision 开销）
-    ///   3. 否则走 Vision OCR（终端 / 无 AX 内容 / 无 AX 权限）
+    ///   1. 查缓存
+    ///   2. 一律走 Vision OCR
+    ///
+    /// ⚠️ **AX 快路已于 2026-08-04 移除**（用户裁定：不信 AX、不硬编码 app 名单）。
+    /// 原设计是「AX text ≥20 字 && 非终端 && 非浏览器 → 直接用 AX，省 ~50ms Vision」，
+    /// 假设「编辑器/原生聊天 app 的 AX 是 canvas 内容，比 OCR 准」。**实测该假设在多数
+    /// app 上不成立** —— 同 app 下 AX 文本长度 ÷ OCR 文本长度：
+    ///     Obsidian 0.06x · 微信 0.06x · Spotify 0.04x · Discord 0.03x ·
+    ///     Xcode 0.10x · Finder 0.22x · Preview 0.20x · Sourcetree 0.04x
+    /// AX 只给控件名（`navigator`/`debug bar`/`editor area`），正文一个字读不到；
+    /// 开图核实：Preview 的 PDF 正文全丢、Xcode 的代码全丢、Obsidian 只有标题重复两遍，
+    /// 更有帧的 AX 读到了**屏幕外窗口**的内容（图文不同源）。
+    /// AX 赢的只有 My Portrait 1.76x / Activity Monitor 2.73x —— 恰是内容价值最低的两类。
+    ///
+    /// 存量影响（2026-08-04 全量统计）：ax 帧 54,899（占 19%）；生产 event 1,001 个
+    /// 有源帧的里，重度污染（源帧全是劣质 AX）8 个、中度 139 个。
+    ///
+    /// 注：`focus.axText` 仍照常采集，只是不再顶掉 Vision；写作采集的 AX 主力通道走
+    /// `Typing/TypingObserver`（自己监听 kAXValueChangedNotification），与本路径无关。
     func recognize(image: CGImage, focus: FocusInfo) async throws -> OCRResult {
         // 1. 缓存查询。
         let appTitle = "\(focus.appName)::\(focus.windowTitle ?? "")"
@@ -54,31 +69,10 @@ struct OCRService: Sendable {
             return cached
         }
 
-        // 2. AX text 快路（非终端 + 非浏览器 + 文本足够丰富）。
-        //    编辑器/原生聊天 app:AX 是 canvas 内容,比 OCR 准且快。
-        //    浏览器(Safari/Chrome/...):AX 文本是 tab bar / 工具栏 chrome,
-        //    Google Docs / Notion / canvas 编辑器的正文 AX 一片空白,这时 AX
-        //    返回的 200 多字 chrome 会把 Vision OCR 顶掉,正文永远抓不到。
-        //    所以浏览器一律强制 Vision OCR。
-        if let axText = focus.axText,
-           axText.count >= Self.axMinChars,
-           let bundleId = focus.bundleId,
-           !FocusProbe.terminalBundleIds.contains(bundleId),
-           !FocusProbe.browserBundleIds.contains(bundleId)
-        {
-            let result = OCRResult(
-                fullText: axText,
-                words: [],            // AX 不提供 bbox；timeline 词级高亮在 AX 帧上失效
-                avgConfidence: 1.0
-            )
-            cache.put(key: key, value: result)
-            return result
-        }
-
-        // 3. 灰度（失败回退到原图）。
+        // 2. 灰度（失败回退到原图）。
         let imageToOCR = Self.toGrayscale(image) ?? image
 
-        // 4. 在全局并发队列跑同步 Vision。
+        // 3. 在全局并发队列跑同步 Vision。
         let result = try await Self.performOCR(
             on: imageToOCR, config: config
         )
@@ -86,10 +80,6 @@ struct OCRService: Sendable {
         cache.put(key: key, value: result)
         return result
     }
-
-    /// AX text 走快路所需的最小字符数。少于这个就退回 Vision —
-    /// 防止 AX 偶尔只返回一两字 placeholder 时丢掉真正的屏幕内容。
-    private static let axMinChars: Int = 20
 
     // MARK: - 私有
 

@@ -238,11 +238,15 @@ struct TimelineDB: Sendable {
 
         for chunk in chunks {
             let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+            // 2026-08-04:老帧的 full_text 可能是 AX 控件树(v43 之前 OCRService 的
+            // AX 快路留下的,54,899 帧),`ocr_backfill_text` 是事后 Vision 补跑的
+            // 真实屏幕文字 —— 有补跑就优先用它。写侧只追加不覆盖,详见 Schema v43。
             let sql = """
-                SELECT full_text
+                SELECT COALESCE(ocr_backfill_text, full_text) AS t
                 FROM frames
                 WHERE id IN (\(placeholders))
-                  AND full_text IS NOT NULL AND length(full_text) > 4
+                  AND COALESCE(ocr_backfill_text, full_text) IS NOT NULL
+                  AND length(COALESCE(ocr_backfill_text, full_text)) > 4
                 """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
@@ -286,14 +290,16 @@ struct TimelineDB: Sendable {
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_close(db) }
 
-        // 拼 N 个 LOWER(full_text) LIKE ? 用 OR 串。SQLite ASCII LIKE 自带
+        // 拼 N 个 LOWER(...) LIKE ? 用 OR 串。SQLite ASCII LIKE 自带
         // 不敏感,但 LOWER 兜底中英混排里的大小写;中文走 substring 字面匹配。
-        let likes = Array(repeating: "LOWER(full_text) LIKE ?", count: keywords.count)
-            .joined(separator: " OR ")
+        // 文本源同 ocrText():补跑过的老帧优先用 ocr_backfill_text(见 Schema v43)。
+        let likes = Array(repeating: "LOWER(COALESCE(ocr_backfill_text, full_text)) LIKE ?",
+                          count: keywords.count).joined(separator: " OR ")
         let sql = """
             SELECT COUNT(DISTINCT id) FROM frames
             WHERE timestamp_ms >= ? AND timestamp_ms < ?
-              AND full_text IS NOT NULL AND length(full_text) > 4
+              AND COALESCE(ocr_backfill_text, full_text) IS NOT NULL
+              AND length(COALESCE(ocr_backfill_text, full_text)) > 4
               AND (\(likes))
             """
         var stmt: OpaquePointer?

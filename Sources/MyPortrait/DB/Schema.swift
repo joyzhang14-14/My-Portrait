@@ -1068,6 +1068,24 @@ enum DBSchema {
                 "CREATE INDEX idx_mouse_log_app ON mouse_log(bundle_id, ts_ms)")
         }
 
+        // 老帧 OCR 补跑列(2026-08-04)。
+        //
+        // 背景:2026-08-04 之前 OCRService 有 AX 快路 —— 非终端非浏览器 app 若 AX
+        // 文本 ≥20 字就直接当 full_text,跳过 Vision。实测该假设在多数 app 上不成立
+        // (同 app AX 长度 ÷ OCR 长度:Obsidian 0.06x/微信 0.06x/Xcode 0.10x/
+        // Preview 0.20x),AX 只给控件名,正文读不到。快路已移除,但**存量 54,899 帧
+        // 的 full_text 还是 AX 文本**,而 TimelineDB.ocrText() 不看 text_source、
+        // 一律当 OCR 喂给 event 生成。
+        //
+        // ⚠️ **只追加不覆盖**:`full_text`/`text_source`/`ocr_words_json` 一字不动 ——
+        // WritingCaptureStore 依赖 text_source=='ax' 的语义(WritingCaptureChromeFilter
+        // .applyIfOcr 只对 ocr 帧过滤 chrome;WritingCaptureTypes 统计 ax 帧数),
+        // 覆盖会改变写作采集行为。补跑结果写这两列,读侧用 COALESCE 优先。
+        m.registerMigration("v43_frames_ocr_backfill") { db in
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN ocr_backfill_text TEXT")
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN ocr_backfill_words TEXT")
+        }
+
         return m
     }
 }

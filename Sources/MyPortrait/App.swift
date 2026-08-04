@@ -365,6 +365,17 @@ struct MyPortraitApp: App {
         if args.contains("--reocr-google-docs-today-mp4") {
             ReOcrCLI.runGoogleDocsTodayMP4()
         }
+        // 存量 backfill:AX 快路遗留的 ax 帧 + 无文字帧重跑 Vision,只写
+        // ocr_backfill_text/words 两列(Schema v43),不动 full_text/text_source。
+        if args.contains("--ocr-backfill") {
+            let limit = args.firstIndex(of: "--limit").flatMap { i -> Int? in
+                i + 1 < args.count ? Int(args[i + 1]) : nil
+            }
+            let day = args.firstIndex(of: "--day").flatMap { i -> String? in
+                i + 1 < args.count ? args[i + 1] : nil
+            }
+            OcrBackfillCLI.run(limit: limit, day: day)
+        }
         // 一次性清理:库中全部 loginwindow(锁屏)帧 + 纯锁屏 MP4(配套
         // capture.screen.pauseWhenLocked —— 新帧不再产生,存量清一次)。
         if let idx = args.firstIndex(of: "--purge-loginwindow"), idx + 1 < args.count {
