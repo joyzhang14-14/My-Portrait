@@ -6,14 +6,12 @@ struct DisplaySettingsView: View {
 
     var body: some View {
         SettingsPage("Display",
-                     subtitle: "Theme, window behaviour, and personalization",
                      onResetCurrentPage: { config.mutate { $0.display = .init() } }) {
 
             AppCustomizeCard()
 
             SettingsCard(title: "Appearance") {
                 SettingsRow("Theme",
-                            description: "Match the system or force light / dark.",
                             icon: "paintpalette") {
                     Picker("", selection: config.binding(\.display.theme)) {
                         ForEach(AppTheme.allCases) { t in Text(t.label).tag(t.rawValue) }
@@ -22,14 +20,12 @@ struct DisplaySettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Show in menu bar",
-                            description: "Adds a menu bar icon so you can switch Screen, Audio, and Typing capture on or off without opening the main window.",
                             icon: "menubar.rectangle") {
                     Toggle("", isOn: config.binding(\.display.showInMenuBar))
                         .labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Show Dock icon",
-                            description: "Keep My Portrait in the Dock. Turn off to run without a Dock icon (it also leaves Cmd-Tab and the top menu bar).",
                             icon: "dock.rectangle") {
                     Toggle("", isOn: config.binding(\.display.showDockIcon))
                         .labelsHidden().toggleStyle(.switch)
@@ -55,14 +51,12 @@ struct DisplaySettingsView: View {
 
             SettingsCard(title: "Chat") {
                 SettingsRow("Compact tool blocks",
-                            description: "Collapse a reply's thinking + tool steps into one expandable summary bar. Faster to load.",
                             icon: "rectangle.compress.vertical") {
                     Toggle("", isOn: config.binding(\.display.compactToolBlocks))
                         .labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Hide thinking blocks",
-                            description: "Don't show the model's reasoning trace in the transcript.",
                             icon: "brain") {
                     Toggle("", isOn: config.binding(\.display.hideModelReasoning))
                         .labelsHidden().toggleStyle(.switch)
@@ -92,16 +86,11 @@ private struct AppCustomizeCard: View {
     @State private var expanded: Bool = false
 
     // Staged local edits — committed to ConfigStore only on Save.
-    @State private var appName: String = ""
     @State private var dockIconPath: String = ""
     @State private var loaded = false
 
-    private let maxNameLength = 32
-
     private var hasUnsavedChanges: Bool {
-        let d = config.current.display
-        return appName != d.appName
-            || dockIconPath != d.customDockIcon
+        dockIconPath != config.current.display.customDockIcon
     }
 
     var body: some View {
@@ -111,15 +100,9 @@ private struct AppCustomizeCard: View {
                 withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("App customize")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary.opacity(0.96))
-                        Text("Personalize the in-app display name and the Dock icon.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text("App customize")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.96))
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
@@ -131,34 +114,8 @@ private struct AppCustomizeCard: View {
             .buttonStyle(.plain)
 
             if expanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("APP NAME (MAX \(maxNameLength) CHARS)")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .tracking(0.8)
-                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
-                    TextField("My Portrait", text: Binding(
-                        get: { appName },
-                        set: { appName = String($0.prefix(maxNameLength)) }
-                    ))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.white.opacity(0.04))
-                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
-                    )
-                    Text("macOS controls the name shown in the menu bar (next to the Apple logo). Changing it here updates the dock title + windows.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Divider().background(Color.primary.opacity(0.08))
-
                 IconSlot(
                     title: "Dock icon",
-                    subtitle: "Shown in the Dock and the cmd-Tab switcher.",
                     path: $dockIconPath,
                     fileName: "dock.png"
                 )
@@ -170,7 +127,7 @@ private struct AppCustomizeCard: View {
                 Divider().background(Color.primary.opacity(0.08))
 
                 HStack(spacing: 10) {
-                    Text("Saving restarts My Portrait so the new name + icons take effect.")
+                    Text("Saving restarts My Portrait so the new icon takes effect.")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.textPrimary.opacity(hasUnsavedChanges ? 0.55 : 0.30))
                         .fixedSize(horizontal: false, vertical: true)
@@ -202,9 +159,7 @@ private struct AppCustomizeCard: View {
         )
         .onAppear {
             guard !loaded else { return }
-            let d = config.current.display
-            appName       = d.appName
-            dockIconPath  = d.customDockIcon
+            dockIconPath = config.current.display.customDockIcon
             loaded = true
         }
     }
@@ -218,8 +173,7 @@ private struct AppCustomizeCard: View {
     /// 看到老值,"重启后又变回去"。
     private func saveAndRestart() {
         config.mutate {
-            $0.display.appName       = appName
-            $0.display.customDockIcon  = dockIconPath
+            $0.display.customDockIcon = dockIconPath
         }
         Task { @MainActor in
             await config.saveNowAndWait()
@@ -255,7 +209,6 @@ private struct AppCustomizeCard: View {
 
 private struct IconSlot: View {
     let title: String
-    let subtitle: String
     @Binding var path: String
     /// On-disk file name to use when copying the picked image into our
     /// support dir (e.g. "dock.png" / "tray.png").
@@ -270,9 +223,6 @@ private struct IconSlot: View {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 HStack(spacing: 6) {
                     Button(action: pickFile) {
                         Label(path.isEmpty ? "Upload" : "Replace",
@@ -461,11 +411,6 @@ private struct MenuBarLampCard: View {
     var body: some View {
         SettingsCard(title: "Menu bar icon") {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Three neural nodes, one per capture channel. A node lights up only while that channel is recording the app you're in right now. It goes dark the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.62))
-                    .fixedSize(horizontal: false, vertical: true)
-
                 // ⚠️ **拉取式,不是 @ObservedObject 推送式**。
                 // 这张卡最关键的用法是「窗口摆旁边,切到别的 app 盯着看灯灭」——
                 // 而 App 不在前台时,SwiftUI 会把后台窗口的 objectWillChange
