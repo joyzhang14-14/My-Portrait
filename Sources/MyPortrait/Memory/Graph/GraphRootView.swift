@@ -154,6 +154,7 @@ struct GraphRootView: View {
                                     pulses: pulses,
                                     pulseStart: pulseStart,
                                     pulseFlashSec: pulseFlashSec,
+                                    hideLinks: config.current.display.graphHideLinks,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
                                     contextNodeId: contextNodeId,

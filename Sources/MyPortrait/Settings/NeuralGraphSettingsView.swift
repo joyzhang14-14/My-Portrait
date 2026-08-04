@@ -94,6 +94,14 @@ struct NeuralGraphSettingsView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
+                SettingsCard(title: "Appearance") {
+                    SettingsRow("Hide links and pulses",
+                                description: "Show only the balls — no connecting lines, and no pulse trail when you click one. Clicking still lights the balls up one after another, so the chain reaction stays.",
+                                icon: "circle.dotted") {
+                        Toggle("", isOn: config.binding(\.display.graphHideLinks))
+                            .labelsHidden()
+                    }
+                }
             }
             .padding(24)
             .frame(maxWidth: 760, alignment: .leading)

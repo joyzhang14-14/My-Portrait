@@ -180,6 +180,9 @@ struct GraphRendererView: View {
     /// 抵达点亮的淡出时长(秒)。已按用户的脉冲速度档位缩放,GraphRootView 传入
     /// —— 它的脉冲清空定时也用同一个值,清早了闪光会被切断。
     let pulseFlashSec: Double
+    /// 极简观感(07-11 用户):隐藏全部连接线 + 脉冲白杠。**纯展示** —— 脉冲照常
+    /// 级联、球仍按原时序逐个点亮(连锁激活保留),只是传播过程不可见。
+    let hideLinks: Bool
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
     /// 右键菜单当前作用的 folder / portrait 分区球。非 nil 时画蓝色选中圈。
@@ -248,6 +251,7 @@ struct GraphRendererView: View {
     init(scene: GraphScene, engine: GraphPhysicsEngine, paused: Bool,
          pulses: [GraphPulse], pulseStart: Date,
          pulseFlashSec: Double = GraphConstants.pulseArriveFlashSec,
+         hideLinks: Bool = false,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
          contextNodeId: Int? = nil,
          cardNodeId: Int? = nil,
@@ -266,6 +270,7 @@ struct GraphRendererView: View {
         self.pulses = pulses
         self.pulseStart = pulseStart
         self.pulseFlashSec = pulseFlashSec
+        self.hideLinks = hideLinks
         self._camera = camera
         self._hoveredId = hoveredId
         self.contextNodeId = contextNodeId
@@ -453,6 +458,7 @@ struct GraphRendererView: View {
     // MARK: - 边
 
     private func drawEdges(_ ctx: GraphicsContext, snap: [SIMD2<Float>], size: CGSize) {
+        guard !hideLinks else { return }   // 极简观感:不画连接线(07-11 用户)
         switch GraphConstants.edgeStyle {
         case .line:
             // 纯线模式(2026-07-01 反馈:锥形卡顿且效果不明显,先用等宽细线)。
@@ -540,6 +546,9 @@ struct GraphRendererView: View {
     /// 即使边画成细线,信号也带出神经形状)。全部杠合一条 Path 一次 stroke。
     private func drawPulses(_ ctx: GraphicsContext, snap: [SIMD2<Float>],
                             size: CGSize, date: Date) {
+        // 极简观感:不画白杠(07-11 用户)。⚠️ 只跳过**这段传播动画** ——
+        // pulses 数组照常填充,drawBalls 里的抵达点亮仍逐球按原时序触发。
+        guard !hideLinks else { return }
         guard !pulses.isEmpty else { return }
         let zoom = camera.zoom
         let elapsed = date.timeIntervalSince(pulseStart)

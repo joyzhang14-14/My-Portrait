@@ -418,6 +418,9 @@ struct DisplayConfig: Codable, Equatable {
     var graphAnimationSpeed:     SpeedLevel = .medium
     /// 神经脉冲速度(点 hub 的冲击波 + 抵达点亮)。默认中等=当前手感。
     var graphPulseSpeed:         SpeedLevel = .medium
+    /// 极简观感(07-11 用户):隐藏全部连接线 + 脉冲白杠。**纯前端**——脉冲照常
+    /// 级联,球仍按原时序逐个亮起(连锁激活保留),只是传播过程不可见。
+    var graphHideLinks:          Bool = false
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -431,6 +434,7 @@ struct DisplayConfig: Codable, Equatable {
         case memorySortOrder          = "memory_sort_order"
         case graphAnimationSpeed      = "graph_animation_speed"
         case graphPulseSpeed          = "graph_pulse_speed"
+        case graphHideLinks           = "graph_hide_links"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -445,6 +449,7 @@ struct DisplayConfig: Codable, Equatable {
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
         graphAnimationSpeed     = c.dflt(SpeedLevel.self, .graphAnimationSpeed, graphAnimationSpeed)
         graphPulseSpeed         = c.dflt(SpeedLevel.self, .graphPulseSpeed, graphPulseSpeed)
+        graphHideLinks          = c.dflt(Bool.self, .graphHideLinks, graphHideLinks)
     }
 }
 
