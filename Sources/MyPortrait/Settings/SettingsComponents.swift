@@ -152,6 +152,27 @@ struct SettingsDivider: View {
     }
 }
 
+/// 大区标题 —— 一个页面里若干张 SettingsCard 的上级分组,比 SettingsCard
+/// 自己的小标题重一级。可挂 ⓘ。
+struct SettingsSectionHeader: View {
+    let title: String
+    var info: String? = nil
+
+    init(_ title: String, info: String? = nil) {
+        self.title = title; self.info = info
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary.opacity(0.90))
+            if let info { SettingsInfoBadge(text: info) }
+        }
+        .padding(.leading, 2)
+    }
+}
+
 /// Sticky-feeling section title used at the top of each main pane.
 struct SettingsPageTitle: View {
     let title: String

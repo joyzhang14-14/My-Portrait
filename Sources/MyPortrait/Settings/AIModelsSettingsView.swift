@@ -26,35 +26,46 @@ struct AIModelsSettingsView: View {
 
     var body: some View {
         SettingsPage("Downloads",
-                     subtitle: "On-device models that power your capture pipeline.",
+                     subtitle: "Local models that keep your data safe.",
                      onResetCurrentPage: { config.mutate { $0.aiModels = .init() } }) {
 
-            SettingsCard(
-                title: "Audio transcript models",
-                footnote: "These power voice features. Some download automatically; others have a Download button. Each stays disabled until it shows Ready."
-            ) {
-                // Whisper 转录模型 —— 跟 Audio Capture 的 model picker 同一份目录。
-                // 没装的这里点 Download 下载,装好后才能在 picker 里选。
-                ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { _, m in
-                    transcriptionModelRow(m)
-                    SettingsDivider()
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsSectionHeader(
+                    "Audio capture models",
+                    info: "These power voice features. Some download automatically; others have a Download button. Each stays disabled until it shows Ready."
+                )
+
+                // Whisper / Qwen3-ASR 转录模型 —— 跟 Audio Capture 的 model
+                // picker 同一份目录。没装的这里点 Download 下载,装好后才能在
+                // picker 里选。Qwen 一律手动下(不随 app 启动自动下)。
+                SettingsCard(title: "Transcription") {
+                    ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { _, m in
+                        transcriptionModelRow(m)
+                        SettingsDivider()
+                    }
+                    ForEach(Array(Qwen3ASRWrapper.allQwenModels.enumerated()), id: \.offset) { idx, m in
+                        qwenModelRow(m)
+                        if idx < Qwen3ASRWrapper.allQwenModels.count - 1 { SettingsDivider() }
+                    }
                 }
-                // Qwen3-ASR 模型 —— 走手动下载（不随 app 启动自动下）。下好后才能在
-                // Audio Capture 里选 Qwen 引擎 + 对应 model。
-                ForEach(Array(Qwen3ASRWrapper.allQwenModels.enumerated()), id: \.offset) { _, m in
-                    qwenModelRow(m)
-                    SettingsDivider()
+
+                // 声纹模型 —— 这里只管下载,选用哪个在 Audio Capture。
+                SettingsCard(title: "Speaker recognition") {
+                    ForEach(Array(SpeakerModel.embeddingOptions.enumerated()), id: \.offset) { idx, m in
+                        speakerDownloadRow(m)
+                        if idx < SpeakerModel.embeddingOptions.count - 1 { SettingsDivider() }
+                    }
                 }
-                // Speaker identification models — download here, choose which to use in Audio Capture.
-                ForEach(Array(SpeakerModel.embeddingOptions.enumerated()), id: \.offset) { _, m in
-                    speakerDownloadRow(m)
-                    SettingsDivider()
+
+                SettingsCard(title: "Voice segmentation") {
+                    localModelRow("pyannote segmentation-3.0", detail: "~6 MB",
+                                  ready: SpeakerModelStore.isOnDisk(.segmentation), model: .segmentation)
                 }
-                localModelRow("Voice segmentation", detail: "pyannote segmentation-3.0 (~6 MB)",
-                              ready: SpeakerModelStore.isOnDisk(.segmentation), model: .segmentation)
-                SettingsDivider()
-                localModelRow("Voice activity", detail: "Silero VAD (~2 MB)",
-                              ready: SpeakerModelStore.isOnDisk(.vadSilero), model: .vadSilero)
+
+                SettingsCard(title: "Voice activity detection") {
+                    localModelRow("Silero VAD", detail: "~2 MB",
+                                  ready: SpeakerModelStore.isOnDisk(.vadSilero), model: .vadSilero)
+                }
             }
             .id(localModelTick)   // 强制重渲染,反映新的 isOnDisk 结果
         }
@@ -212,10 +223,10 @@ struct AIModelsSettingsView: View {
                 .foregroundStyle(ready ? Color.green.opacity(0.85) : Color.orange.opacity(0.85))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Transcription")
+                Text(m.label)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                Text("\(m.label) (\(m.size))")
+                Text(m.size)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
@@ -260,10 +271,10 @@ struct AIModelsSettingsView: View {
                 .foregroundStyle(ready ? Color.green.opacity(0.85) : Color.orange.opacity(0.85))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Transcription (Qwen)")
+                Text(m.label)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                Text("\(m.label) (\(m.size))")
+                Text(m.size)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
