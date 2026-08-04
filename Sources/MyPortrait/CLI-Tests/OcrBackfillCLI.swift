@@ -49,6 +49,8 @@ enum OcrBackfillCLI {
         let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
+        // app 在前台跑时会持有写锁;等而不是立刻失败(默认 busyMode 是 .immediateError)。
+        config.busyMode = .timeout(30)
         let dbPool = try DatabasePool(path: dbPath, configuration: config)
         // CLI 不经过 PortraitDBImpl.init,schema 可能还停在旧版本(v43 的补跑列
         // 是本次新增)。migrator 幂等,已迁移过就是空操作。
@@ -80,22 +82,45 @@ enum OcrBackfillCLI {
         }
         print("[ocr-backfill] todo \(todos.count) frame(s)")
 
-        var done = 0
-        for (i, t) in todos.enumerated() {
-            guard let image = try? await loadImage(t, root: root) else { continue }
-            guard let (text, words) = try? await ocr(image: image) else { continue }
-            try await dbPool.write { db in
-                try db.execute(sql: """
-                    UPDATE frames
-                       SET ocr_backfill_text = :t, ocr_backfill_words = :w
-                     WHERE id = :id
-                    """, arguments: ["t": text, "w": words, "id": t.id])
-            }
-            done += 1
-            if (i + 1) % 200 == 0 {
-                print("[ocr-backfill] \(i + 1)/\(todos.count) updated=\(done)")
+        var done = 0, failed = 0
+        var batch: [(Int64, String, String)] = []
+
+        func flush() async {
+            guard !batch.isEmpty else { return }
+            let rows = batch
+            batch.removeAll()
+            do {
+                try await dbPool.write { db in
+                    for (id, text, words) in rows {
+                        try db.execute(sql: """
+                            UPDATE frames
+                               SET ocr_backfill_text = :t, ocr_backfill_words = :w
+                             WHERE id = :id
+                            """, arguments: ["t": text, "w": words, "id": id])
+                    }
+                }
+                done += rows.count
+            } catch {
+                // app 正在写库时可能仍抢不到锁 —— 跳过这批,下次跑会重新捞到
+                // (WHERE ocr_backfill_text IS NULL 天然幂等)。
+                failed += rows.count
+                fputs("[ocr-backfill] batch failed (\(rows.count)): "
+                      + "\(error.localizedDescription)\n", stderr)
             }
         }
+
+        for (i, t) in todos.enumerated() {
+            if let image = try? await loadImage(t, root: root),
+               let (text, words) = try? await ocr(image: image) {
+                batch.append((t.id, text, words))
+            }
+            if batch.count >= 50 { await flush() }
+            if (i + 1) % 500 == 0 {
+                print("[ocr-backfill] \(i + 1)/\(todos.count) updated=\(done) failed=\(failed)")
+            }
+        }
+        await flush()
+        if failed > 0 { print("[ocr-backfill] \(failed) frame(s) skipped (locked) — 重跑即可") }
         return done
     }
 
