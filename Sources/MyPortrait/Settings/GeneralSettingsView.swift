@@ -6,12 +6,12 @@ struct GeneralSettingsView: View {
     @State private var configStoreGen = ConfigStore.shared
 
     var body: some View {
-        SettingsPage("General", subtitle: "Startup and updates",
+        SettingsPage("General",
                      onResetCurrentPage: { config.mutate { $0.general = .init() } }) {
 
             SettingsCard(title: "Startup") {
                 SettingsRow("Auto-start",
-                            description: "Open My Portrait automatically when you log in.",
+                            info: "Open My Portrait automatically when you log in.",
                             icon: "power") {
                     Toggle("", isOn: config.binding(\.general.launchAtLogin)).labelsHidden().toggleStyle(.switch)
                 }
@@ -19,19 +19,16 @@ struct GeneralSettingsView: View {
 
             SettingsCard(title: "Updates") {
                 SettingsRow("Current version",
-                            description: "Build currently installed. \"Check now\" below queries GitHub appcast for newer builds.",
                             icon: "info.circle") {
                     VersionChip(text: Self.currentVersionString)
                 }
                 SettingsDivider()
                 SettingsRow("Auto-update app",
-                            description: "Download and install app updates automatically.",
                             icon: "arrow.down.app") {
                     Toggle("", isOn: config.binding(\.general.autoDownloadUpdates)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Check for updates now",
-                            description: "Force Sparkle to query the GitHub appcast immediately.",
                             icon: "arrow.clockwise.circle") {
                     Button("Check now") { UpdaterService.shared.checkForUpdates() }
                         .font(.system(size: 12, weight: .medium))
@@ -46,7 +43,7 @@ struct GeneralSettingsView: View {
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
             SettingsCard(title: "Cron Jobs") {
                 SettingsRow("History per cron job",
-                            description: "How many recent runs to keep for each cron job.",
+                            info: "How many recent runs to keep for each cron job.",
                             icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
                     Picker("", selection: config.binding(\.general.cronJobHistoryLimit)) {
                         Text("5").tag(5)
@@ -69,7 +66,7 @@ struct GeneralSettingsView: View {
              // 只是临时显示一次 sheet。
             SettingsCard(title: "Onboarding") {
                 SettingsRow("Replay onboarding",
-                            description: "Opens the setup steps again — handy for granting a permission you skipped or switching your AI provider.",
+                            info: "Opens the setup steps again — handy for granting a permission you skipped or switching your AI provider.",
                             icon: "sparkles") {
                     Button("Show") {
                         // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。
