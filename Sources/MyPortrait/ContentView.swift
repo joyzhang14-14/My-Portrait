@@ -1,5 +1,41 @@
 import SwiftUI
 import AppKit
+import Observation
+
+/// 跟踪系统当前是不是 dark。
+///
+/// theme = "system" 时**必须**给 SwiftUI 一个具体的 ColorScheme。传 nil
+/// 的语义是"随窗口的 effectiveAppearance 走",但 NSHostingView 只在窗口
+/// 重新激活(切到别的 app 再切回来)时才回头重读那个值 —— 于是
+/// 「Light → System」当场毫无反应,而 AppKit 那层已经切成 dark 了,
+/// 侧栏和主区的接缝处就露出一条窗口底色的黑线。
+@MainActor
+@Observable
+final class SystemAppearanceMonitor {
+    static let shared = SystemAppearanceMonitor()
+
+    private(set) var isDark: Bool
+
+    /// KVO 观察 NSApp.effectiveAppearance:theme=system 时 NSApp.appearance
+    /// 是 nil,effectiveAppearance 就等于系统外观,系统一变它就变。
+    @ObservationIgnored private var kvo: NSKeyValueObservation?
+
+    private init() {
+        isDark = Self.readIsDark()
+        kvo = NSApp?.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let now = Self.readIsDark()
+                if now != self.isDark { self.isDark = now }
+            }
+        }
+    }
+
+    private static func readIsDark() -> Bool {
+        guard let app = NSApp else { return false }
+        return app.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+}
 
 struct ContentView: View {
     @State private var selection: SidebarSection? = .timeline
@@ -18,6 +54,8 @@ struct ContentView: View {
     /// false → ContentView 起来后立刻弹 onboarding sheet 挡主 UI;
     /// onFinish 把 flag 置 true → sheet 自动关。
     @State private var configStore = ConfigStore.shared
+    /// theme = "system" 时用它把系统外观解析成具体的 light/dark。
+    @State private var systemAppearance = SystemAppearanceMonitor.shared
 
     var body: some View {
         // 首启:onboardingCompleted == false → 主 view 完全不渲染,只显示
@@ -61,7 +99,8 @@ struct ContentView: View {
         // view tree 不会自动 reload colorScheme,所有 Theme.textPrimary
         // / Color(nsColor:) 等 dynamic 颜色不变。这里读 config.display.theme
         // 直接告诉 SwiftUI 切。"system" → nil 跟 macOS 走。
-        .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme))
+        .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme,
+                                                   systemIsDark: systemAppearance.isDark))
         .onAppear {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
@@ -143,11 +182,13 @@ struct ContentView: View {
 
     /// 把 config.display.theme 字符串("system" / "light" / "dark")映射到
      /// SwiftUI 的 preferredColorScheme。"system" → nil(跟 macOS 走)。
-    private static func preferredScheme(_ raw: String) -> ColorScheme? {
+    /// **system 也返回具体值,不返回 nil** —— 见 SystemAppearanceMonitor 顶部
+    /// 注释:nil 会让切回 system 时 view tree 不刷新。
+    private static func preferredScheme(_ raw: String, systemIsDark: Bool) -> ColorScheme? {
         switch raw {
         case "light": return .light
         case "dark":  return .dark
-        default:      return nil
+        default:      return systemIsDark ? .dark : .light
         }
     }
 
