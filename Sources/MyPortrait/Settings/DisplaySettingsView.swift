@@ -427,9 +427,12 @@ private struct MenuBarLampCard: View {
                     let lamps = CaptureLampState.shared
                     HStack(alignment: .center, spacing: 22) {
                         // 深色底片 —— 模拟菜单栏,白色描边才读得出来。
+                        // **不透明实色**:原来是 black.opacity(0.55),light 主题
+                        // 下卡片底色透上来变成灰片,底片跟着 scheme 变。菜单栏
+                        // 永远是那个深色,这里也钉死。
                         ZStack {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.black.opacity(0.55))
+                                .fill(Color(red: 0.11, green: 0.11, blue: 0.12))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                                         .stroke(Color.white.opacity(0.10), lineWidth: 1))
@@ -437,7 +440,7 @@ private struct MenuBarLampCard: View {
                                       audio: lamps.audio.on,
                                       typing: lamps.typing.on,
                                       now: tl.date)
-                                .padding(16)
+                                .padding(10)
                         }
                         // 正方形底片。图标本身略高于宽(aspect 1.148),Canvas 里按
                         // min(w, h/aspect) 等比适配 —— 塞进方框只会左右留白,不变形。
@@ -516,10 +519,19 @@ private struct LampGlyph: View {
             Canvas { ctx, size in
                 let t = now.timeIntervalSinceReferenceDate
                 let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 2.6)   // 0…1
-                // 等比放进给定尺寸,居中
-                let scale = min(size.width, size.height / Self.aspect)
-                let ox = (size.width - scale) / 2
-                let oy = (size.height - scale * Self.aspect) / 2
+                // 等比放进给定尺寸,居中。
+                //
+                // ⚠️ **四周留 margin**:Canvas 会把画到 bounds 外的东西剪掉,
+                // 而亮灯的辉光半径能到 (rDot-stroke)*2.35 ≈ 0.209,三颗球都
+                // 贴着归一化框的边(y 最大 0.988、x 最大 0.836),辉光必然超出
+                // → 灯边上出现一道直的截断。把绘制区按 1+2*margin 缩一圈,
+                // 辉光就全落在画布里。
+                let margin: CGFloat = 0.07
+                let boxW = 1 + 2 * margin
+                let boxH = Self.aspect + 2 * margin
+                let scale = min(size.width / boxW, size.height / boxH)
+                let ox = (size.width - boxW * scale) / 2 + margin * scale
+                let oy = (size.height - boxH * scale) / 2 + margin * scale
                 func P(_ p: CGPoint) -> CGPoint {
                     CGPoint(x: ox + p.x * scale, y: oy + p.y * scale)
                 }
