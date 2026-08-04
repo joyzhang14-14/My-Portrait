@@ -6,11 +6,10 @@ struct NotificationsSettingsView: View {
 
     var body: some View {
         SettingsPage("Notifications",
-                     subtitle: "Control which alerts My Portrait sends you",
                      onResetCurrentPage: { config.mutate { $0.notifications = .init() } }) {
 
             SettingsCard(title: "App") {
-                SettingsRow("New version available",
+                SettingsRow("New version available & update",
                             icon: "bell.badge") {
                     Toggle("", isOn: config.binding(\.notifications.appUpdates)).labelsHidden().toggleStyle(.switch)
                 }
