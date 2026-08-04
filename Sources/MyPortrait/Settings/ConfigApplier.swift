@@ -76,10 +76,22 @@ final class ConfigApplier {
         // Theme
         if display.theme != lastTheme {
             lastTheme = display.theme
-            switch display.theme {
-            case "light": NSApp.appearance = NSAppearance(named: .aqua)
-            case "dark":  NSApp.appearance = NSAppearance(named: .darkAqua)
-            default:      NSApp.appearance = nil    // follow system
+            let forced: NSAppearance? = switch display.theme {
+            case "light": NSAppearance(named: .aqua)
+            case "dark":  NSAppearance(named: .darkAqua)
+            default:      nil                        // follow system
+            }
+            NSApp.appearance = forced
+            // ⚠️ **必须连 window.appearance 一起写**。SwiftUI 的
+            // `.preferredColorScheme` 落地成 NSWindow.appearance,而 window 级
+            // 覆盖优先于 NSApp 级。preference 回到 nil(follow system)时
+            // SwiftUI 不会把 window.appearance 清掉 —— 窗口就永远卡在上一次
+            // 强制的 light/dark 上(Light → System 看着完全没反应就是这个)。
+            //
+            // async 到下一轮 runloop:让这次写排在 SwiftUI 自己那趟 update
+            // 之后,否则会被它当场覆盖回去。
+            DispatchQueue.main.async {
+                for w in NSApp.windows { w.appearance = forced }
             }
         }
 
