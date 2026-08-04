@@ -5,23 +5,29 @@ import SwiftUI
 struct SettingsCard<Content: View>: View {
     let title: String?
     let footnote: String?
+    /// 挂在卡片标题右侧的 ⓘ 说明,点击弹浮窗。
+    let info: String?
     @ViewBuilder var content: () -> Content
 
-    init(title: String? = nil, footnote: String? = nil,
+    init(title: String? = nil, footnote: String? = nil, info: String? = nil,
          @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.footnote = footnote
+        self.info = info
         self.content = content
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let title {
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
-                    .padding(.leading, 14)
+                HStack(spacing: 0) {
+                    Text(title.uppercased())
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
+                    if let info { SettingsInfoBadge(text: info) }
+                }
+                .padding(.leading, 14)
             }
             VStack(spacing: 0) {
                 content()

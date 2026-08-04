@@ -50,13 +50,15 @@ struct DisplaySettingsView: View {
             MenuBarLampCard()
 
             SettingsCard(title: "Chat") {
-                SettingsRow("Compact tool blocks",
+                SettingsRow("Compact tool call blocks",
+                            info: "Collapse a reply's thinking + tool steps into one expandable summary bar. Faster to load.",
                             icon: "rectangle.compress.vertical") {
                     Toggle("", isOn: config.binding(\.display.compactToolBlocks))
                         .labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Hide thinking blocks",
+                            info: "Don't show the model's reasoning trace in the transcript.",
                             icon: "brain") {
                     Toggle("", isOn: config.binding(\.display.hideModelReasoning))
                         .labelsHidden().toggleStyle(.switch)
@@ -409,7 +411,10 @@ private struct IconSlot: View {
 /// 用户切到 1Password 再回来看这一页,能看到灯确实灭过。
 private struct MenuBarLampCard: View {
     var body: some View {
-        SettingsCard(title: "Menu bar icon") {
+        SettingsCard(
+            title: "Menu bar icon",
+            info: "Three neural nodes, one per capture channel. A node lights up only while that channel is recording the app you're in right now. It goes dark the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list."
+        ) {
             VStack(alignment: .leading, spacing: 14) {
                 // ⚠️ **拉取式,不是 @ObservedObject 推送式**。
                 // 这张卡最关键的用法是「窗口摆旁边,切到别的 app 盯着看灯灭」——
