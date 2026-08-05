@@ -117,13 +117,17 @@ struct MemorySettingsView: View {
                 case .eventsProcessor:
                     autoRunSection(nil, config: \.scheduler.event)
                     providerSection(\.scheduler.event)
-                    runNowSectionFor(
-                        .eventProcessing,
-                        title: "Process events now",
-                        info: "Runs this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
-                            + ManualTrigger.eventProcessing.desc
-                            + "\n\nEach run handles at most 7 unprocessed days, oldest first."
-                    )
+                    // 自动处理开着时不显示手动卡 —— 两者同时存在是矛盾的:
+                    // 调度器本来就会在有活时自己跑,手动再点一次只会撞锁。
+                    if cfg.current.scheduler.event.frequency == .off {
+                        runNowSectionFor(
+                            .eventProcessing,
+                            title: "Process events now",
+                            info: "Runs this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                                + ManualTrigger.eventProcessing.desc
+                                + "\n\nEach run handles at most 7 unprocessed days, oldest first."
+                        )
+                    }
                     reviewSectionFor(.eventProcessing)
                 case .portraitsDistiller:
                     autoRunSection("Distills events into long-term portrait entries.",
