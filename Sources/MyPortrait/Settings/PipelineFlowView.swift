@@ -406,3 +406,177 @@ extension PipelineFlow {
         height: 500
     )
 }
+
+// MARK: - Portraits Distiller
+
+extension PipelineFlow {
+
+    /// Portraits Distiller。**顺序对应 `PortraitDistiller.distillImpl`**
+    /// (入口 refreshDistillCategories → 按 category 分组 → 逐 category LLM
+    /// 往返 → 收尾 `Archiver.run`)。
+    static let portraitsDistiller = PipelineFlow(
+        nodes: [
+            Node(
+                id: "events",
+                title: "Every event you have",
+                kind: .source,
+                chip: "events/",
+                detail: "Not one day — the whole tree. The distiller reads every event that isn't archived yet, which is why a portrait entry can be backed by things that happened months apart.\n\nEvents come from the Events Processor; days that failed there have their events removed, so only clean days ever reach here.",
+                pos: CGPoint(x: 0.5, y: 0.083)
+            ),
+            Node(
+                id: "group",
+                title: "Sort into categories",
+                kind: .deterministic,
+                detail: "No AI. Two passes over the disk:\n\n• Every event is filed under the portrait categories it belongs to — social, background, experiences, interests, skills, emotions.\n\n• Existing portrait entries are re-weighted first, so an entry that nothing touched this round still decays with time instead of sitting frozen.\n\nCategories with no events and no existing entries are skipped entirely — no tokens spent on nothing.",
+                pos: CGPoint(x: 0.5, y: 0.389)
+            ),
+            Node(
+                id: "distill",
+                title: "Distill each category",
+                kind: .llm,
+                chip: "main model",
+                detail: "One round trip per category. The model sees that category's events plus the entries already written, and answers with create / update / no change for each one.\n\nThis is the step that turns \"here are 40 things that happened\" into \"this is a person who…\". Results land as Markdown under portrait/<category>/.\n\nPersonality and writing style are deliberately left out — they have their own pipelines and would be overwritten here.",
+                pos: CGPoint(x: 0.5, y: 0.639)
+            ),
+            Node(
+                id: "archive",
+                title: "Archive faded entries",
+                kind: .deterministic,
+                detail: "No AI. A sweep over the portrait tree right after it was updated: any entry whose weight has dropped below the archive threshold and that hasn't been touched for long enough is moved to the archive.\n\nNothing is deleted — archived entries stay on disk and stop showing up in your portrait. Pinned entries are never archived. Both limits live in Settings → Memory.",
+                pos: CGPoint(x: 0.5, y: 0.889)
+            ),
+        ],
+        edges: [
+            Edge(from: "events", to: "group",
+                 label: "Marked pending whenever new events land"),
+            Edge(from: "group", to: "distill"),
+            Edge(from: "distill", to: "archive"),
+        ],
+        height: 360
+    )
+}
+
+// MARK: - Personality Refresher
+
+extension PipelineFlow {
+
+    /// Personality Refresher。**顺序对应 `PersonalityRefresh.refreshImpl`**
+    /// (snapshot → OCR 验证 → cluster → merge → apply)。跟 distiller 不同,
+    /// 这条是**按天**跑的,一次最多 7 天。
+    static let personalityRefresher = PipelineFlow(
+        nodes: [
+            Node(
+                id: "day",
+                title: "One processed day",
+                kind: .source,
+                chip: "events/<day>",
+                detail: "Personality is rebuilt day by day, oldest pending day first, up to 7 days per run. Each day is handled independently — a day that fails is retried later without holding up the rest.",
+                pos: CGPoint(x: 0.5, y: 0.055)
+            ),
+            Node(
+                id: "snapshot",
+                title: "Read the day for traits",
+                kind: .llm,
+                chip: "main model",
+                detail: "The heaviest step. The model reads that day's important events and proposes personality tags — each one carrying the events it came from, plus a handful of keywords that should be visible on your screen if the trait is real.\n\nThose keywords are what the next step checks against.",
+                pos: CGPoint(x: 0.5, y: 0.257)
+            ),
+            Node(
+                id: "ocr",
+                title: "Check it against your screen",
+                kind: .deterministic,
+                detail: "No AI, and the strictest gate in the whole system. For every proposed trait, the day's screenshots are searched for its keywords. Fewer than 15 matching frames — roughly 45 seconds of screen time — and the trait is thrown away.\n\nThis exists because a language model asked \"what is this person like?\" will always find something to say. Requiring the evidence to be visible on screen is what keeps personality from drifting into flattering fiction.",
+                pos: CGPoint(x: 0.5, y: 0.422)
+            ),
+            Node(
+                id: "cluster",
+                title: "Group similar traits",
+                kind: .llm,
+                chip: "light model",
+                detail: "Survivors get grouped by meaning, so \"careful about details\", \"double-checks work\" and \"perfectionist\" become one thing instead of three.\n\nUses the light model on purpose — the decision is narrow and a smaller model is more decisive at it.",
+                pos: CGPoint(x: 0.5, y: 0.587)
+            ),
+            Node(
+                id: "merge",
+                title: "Merge into what's known",
+                kind: .llm,
+                chip: "main model",
+                detail: "Each group is compared against the personality concepts you already have: is this the same trait showing up again (reinforce it), a sharper version of it (rewrite), or genuinely new (create)?\n\nThis is why personality accumulates instead of being replaced every day.",
+                pos: CGPoint(x: 0.5, y: 0.752)
+            ),
+            Node(
+                id: "apply",
+                title: "Write concepts",
+                kind: .deterministic,
+                detail: "No AI. The merge decisions are applied to portrait/personality/ — new concepts created, existing ones updated with the day's evidence appended, and the day is marked done.",
+                pos: CGPoint(x: 0.5, y: 0.917)
+            ),
+        ],
+        edges: [
+            Edge(from: "day", to: "snapshot",
+                 label: "Only events that actually mattered · weight > 3"),
+            Edge(from: "snapshot", to: "ocr"),
+            Edge(from: "ocr", to: "cluster"),
+            Edge(from: "cluster", to: "merge"),
+            Edge(from: "merge", to: "apply"),
+        ],
+        height: 545
+    )
+}
+
+// MARK: - Writing Style Distiller
+
+extension PipelineFlow {
+
+    /// Writing Style Distiller。**顺序对应 `WritingStyleDistiller.runCoreImpl`**
+    /// (weights → dependency gate → 取一批 records → LLM → applyDrafts)。
+    ///
+    /// 这条不走 events —— 上游是 typing capture 的 `writing_records`。
+    ///
+    /// `@MainActor`:批量上限直接引 `WritingStyleDistiller.defaultBatchCap`
+    /// (它在 @MainActor 类上),省得在文案里再抄一遍数字抄到走样。
+    @MainActor
+    static let writingStyleDistiller = PipelineFlow(
+        nodes: [
+            Node(
+                id: "records",
+                title: "Things you actually wrote",
+                kind: .source,
+                chip: "writing_records",
+                detail: "Not events, and not everything you typed — the pieces of writing that Typing Capture reconstructed and kept: the message, the email, the commit note, along with what you were doing at the time.\n\nEach piece is consumed exactly once. Nothing here is invented; if you didn't type it, it isn't in this pipeline.",
+                pos: CGPoint(x: 0.5, y: 0.083)
+            ),
+            Node(
+                id: "batch",
+                title: "Take a batch",
+                kind: .deterministic,
+                chip: "up to \(WritingStyleDistiller.defaultBatchCap) per run",
+                detail: "No AI. Pulls the oldest unprocessed pieces, up to the batch cap, and reads the style entries you already have so the model can update them instead of writing near-duplicates.\n\nExisting entries are re-weighted at the same time, so styles you've stopped using fade even on runs that change nothing.",
+                pos: CGPoint(x: 0.5, y: 0.389)
+            ),
+            Node(
+                id: "llm",
+                title: "Distill style facets",
+                kind: .llm,
+                chip: "light model",
+                detail: "The model reads the batch next to your existing entries and answers with drafts — a new facet, or an update to one that exists. Facets are things like tone, sentence rhythm, how you open and close a message, how you edit yourself.\n\nRuns on the light model: the input is short text and the judgement is narrow.",
+                pos: CGPoint(x: 0.5, y: 0.639)
+            ),
+            Node(
+                id: "apply",
+                title: "Save + mark processed",
+                kind: .deterministic,
+                detail: "No AI. Drafts are written under portrait/writing_style/, weights are refreshed across the tree, and the whole batch is marked processed — including pieces the model chose not to use, so they don't come back next run.\n\nAutomatic runs save straight away. A manual run stages the drafts instead and waits for you to approve them; while a run is waiting, nothing else starts.",
+                pos: CGPoint(x: 0.5, y: 0.889)
+            ),
+        ],
+        edges: [
+            Edge(from: "records", to: "batch",
+                 label: "Only runs when there's new writing to read"),
+            Edge(from: "batch", to: "llm"),
+            Edge(from: "llm", to: "apply"),
+        ],
+        height: 360
+    )
+}

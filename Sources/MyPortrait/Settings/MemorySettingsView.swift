@@ -155,6 +155,7 @@ struct MemorySettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.portrait)
+                    pipelineFlowSection(.portraitsDistiller)
                     reviewSectionFor(.distill)
                 case .personalityRefresher:
                     autoRunSection(
@@ -168,12 +169,14 @@ struct MemorySettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.personality)
+                    pipelineFlowSection(.personalityRefresher)
                     reviewSectionFor(.personality)
                 case .writingStyleDistiller:
                     // writing style 不走 ManualTrigger(有自己的 staged-draft
                     // 审核流),所以手动那一块仍是独立卡,只跟着自动开关显隐。
                     autoRunSection(nil, config: \.scheduler.writingStyle)
                     providerSection(\.scheduler.writingStyle)
+                    pipelineFlowSection(.writingStyleDistiller)
                     if cfg.current.scheduler.writingStyle.frequency == .off {
                         writingStyleRunNowSection
                     }
