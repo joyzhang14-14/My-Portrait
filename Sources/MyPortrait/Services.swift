@@ -487,7 +487,11 @@ final class Services {
         coordinator.setIgnoredApps(Set(p.ignoredApps))
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
         // (07-21:masking 永远开、incognito 跳帧永久关,两条接线已删。)
-        coordinator.setPauseCaptureList(apps: p.pauseCaptureApps, urls: p.pauseCaptureUrls)
+        // 总开关关掉 = 推空名单,DRMGate 就永远不命中。名单本身不动,
+        // 用户重新打开开关时原样恢复。
+        coordinator.setPauseCaptureList(
+            apps: p.pauseForProtectedVideo ? p.pauseCaptureApps : [],
+            urls: p.pauseForProtectedVideo ? p.pauseCaptureUrls : [])
     }
 
     /// 监听 ConfigStore.privacy 的 ignore 字段（vim 改 TOML / UI 编辑都走它），
@@ -497,6 +501,7 @@ final class Services {
         withObservationTracking {
             _ = store.privacy.ignoredApps
             _ = store.privacy.ignoredUrls
+            _ = store.privacy.pauseForProtectedVideo
             _ = store.privacy.pauseCaptureApps
             _ = store.privacy.pauseCaptureUrls
         } onChange: { [weak self] in

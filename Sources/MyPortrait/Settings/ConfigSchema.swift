@@ -838,6 +838,9 @@ struct PrivacyConfig: Codable, Equatable {
     /// 帧照拍):受保护视频(Netflix 等)在录屏时会被系统黑掉,不停整条 SCStream
     /// 会把用户自己正在看的播放也搞黑屏,所以停整条流。默认预填主流流媒体 app /
     /// 站点,用户可在 Settings → Screen Capture → Pause capture 增删。
+    /// 这条闸的总开关。关掉 = 两张名单都不生效(Services 推空列表给
+    /// coordinator),名单本身留着不清空。
+    var pauseForProtectedVideo: Bool = true
     var pauseCaptureApps:       [String] = [
         "Netflix", "Disney+", "Hulu", "Prime Video", "Apple TV",
         "Peacock", "Paramount+", "HBO Max", "Crunchyroll", "DAZN",
@@ -860,6 +863,7 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredApps             = "ignored_apps"
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
+        case pauseForProtectedVideo  = "pause_for_protected_video"
         case pauseCaptureApps        = "pause_capture_apps"
         case pauseCaptureUrls        = "pause_capture_urls"
         case typingBlacklistEntries   = "typing_blacklist_entries"
@@ -877,6 +881,7 @@ struct PrivacyConfig: Codable, Equatable {
             for t in ignoredWindowTitles where !ignoredUrls.contains(t) { ignoredUrls.append(t) }
             ignoredWindowTitles = []
         }
+        pauseForProtectedVideo = c.dflt(Bool.self,     .pauseForProtectedVideo, pauseForProtectedVideo)
         pauseCaptureApps       = c.dflt([String].self, .pauseCaptureApps, pauseCaptureApps)
         pauseCaptureUrls       = c.dflt([String].self, .pauseCaptureUrls, pauseCaptureUrls)
         typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, typingBlacklistEntries)

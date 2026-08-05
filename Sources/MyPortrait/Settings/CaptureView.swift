@@ -674,26 +674,66 @@ struct ScreenCaptureSettingsView: View {
             }
         }
 
-        SettingsCard(
-            title: "Pause capture for protected video",
-            footnote: "When a listed app or site is active, screen capture stops completely instead of just masking. This keeps DRM playback like Netflix or Disney+ from going black in your screenshots. Apps match by name and sites by URL, both ignoring case. Common services are filled in already, and you can edit the list."
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Apps — pick from installed apps…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                PauseCaptureAppPicker(apps: config.binding(\.privacy.pauseCaptureApps))
-                    .padding(.horizontal, 14).padding(.bottom, 10)
-                SettingsDivider()
-                Text("Sites — hostnames or substrings…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TagListEditor(tags: config.binding(\.privacy.pauseCaptureUrls), placeholder: "e.g. netflix.com, hbomax.com")
-                    .padding(.horizontal, 14).padding(.bottom, 12)
+    }
+
+    /// 「受保护视频暂停采集」行 —— 页面上只有一个开关,说明和两张名单
+    /// 全收进标题旁的 ⓘ 浮窗,在浮窗里直接增删。
+    ///
+    /// 手写而不是用 SettingsRow:SettingsRow 的 `info:` 只吃字符串,这里要
+    /// 塞可交互控件。版式常数跟 SettingsRow 保持一致(leading/trailing 14、
+    /// vertical 10、图标 14pt/宽 22、标题 13pt)。
+    private var protectedVideoRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "play.rectangle")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textPrimary.opacity(0.75))
+                .frame(width: 22)
+            HStack(spacing: 0) {
+                Text("Pause capture for protected video")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                SettingsInfoPopover { protectedVideoPopover }
             }
+            Spacer(minLength: 12)
+            Toggle("", isOn: config.binding(\.privacy.pauseForProtectedVideo))
+                .labelsHidden().toggleStyle(.switch)
         }
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// ⓘ 浮窗内容:说明 + Apps 名单 + Sites 名单。名单条目多的时候整块可滚。
+    private var protectedVideoPopover: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("When a listed app or site is in front, screen capture stops completely instead of just masking that window. This keeps DRM playback like Netflix or Disney+ from turning your screenshots black. Apps match by name, sites by URL — both ignore case.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().opacity(0.5)
+
+                popoverLabel("Apps")
+                PauseCaptureAppPicker(apps: config.binding(\.privacy.pauseCaptureApps))
+
+                Divider().opacity(0.5)
+
+                popoverLabel("Sites")
+                TagListEditor(tags: config.binding(\.privacy.pauseCaptureUrls),
+                              placeholder: "e.g. netflix.com, hbomax.com")
+            }
+            .padding(14)
+            .frame(width: 420, alignment: .leading)
+        }
+        .frame(maxHeight: 460)
+    }
+
+    private func popoverLabel(_ s: String) -> some View {
+        Text(s.uppercased())
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(Theme.textPrimary.opacity(0.45))
     }
 
     /// Off-main scan of `frames.app_name` for the ignored-apps dropdown.
@@ -740,6 +780,9 @@ struct ScreenCaptureSettingsView: View {
                             icon: "sun.min") {
                     Toggle("", isOn: config.binding(\.capture.screen.pauseAtMinBrightness)).labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                // 第三条 "Pause …" —— 跟上面两条同一类,并到同一张卡里。
+                protectedVideoRow
             }
         }
     }

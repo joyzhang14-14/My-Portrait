@@ -110,10 +110,11 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// 标题旁的 ⓘ,点击弹出说明浮窗(再点一次 / 点别处收起)。
+/// 标题旁的 ⓘ,点击弹出浮窗(再点一次 / 点别处收起)。浮窗内容任意 ——
+/// 可以只是一段说明,也可以放真正能操作的控件。
 /// 图标本身 11pt,外面垫 6pt padding 把可点范围撑到 ~23pt。
-struct SettingsInfoBadge: View {
-    let text: String
+struct SettingsInfoPopover<Content: View>: View {
+    @ViewBuilder var content: () -> Content
     @State private var hovering = false
     @State private var shown = false
 
@@ -125,14 +126,23 @@ struct SettingsInfoBadge: View {
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             .onTapGesture { shown.toggle() }
-            .popover(isPresented: $shown, arrowEdge: .bottom) {
-                Text(text)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 300, alignment: .leading)
-                    .padding(12)
-            }
+            .popover(isPresented: $shown, arrowEdge: .bottom) { content() }
+    }
+}
+
+/// 纯文字版 ⓘ —— 绝大多数地方用这个。
+struct SettingsInfoBadge: View {
+    let text: String
+
+    var body: some View {
+        SettingsInfoPopover {
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 300, alignment: .leading)
+                .padding(12)
+        }
     }
 }
 
