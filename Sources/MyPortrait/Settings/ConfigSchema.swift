@@ -729,11 +729,16 @@ struct ScreenConfig: Codable, Equatable {
     var pauseWhenLocked: Bool = true
     /// 屏幕亮度调到最低(滑块 0)时跳帧(屏幕黑着,用户没在看)。
     var pauseAtMinBrightness: Bool = true
+    /// 桌面壁纸从截图里排除(那块渲染成黑)。原来是靠 privacy.ignoredApps 里
+    /// 预置一条 "Wallpaper" 实现的,现在独立成开关 —— ignoredApps 的语义已
+    /// 改成"整帧跳过",壁纸再挂在那条名单上就说不通了。
+    var transparentWallpaper: Bool = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
         case pauseWhenLocked      = "pause_when_locked"
         case pauseAtMinBrightness = "pause_at_min_brightness"
+        case transparentWallpaper = "transparent_wallpaper"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -741,6 +746,7 @@ struct ScreenConfig: Codable, Equatable {
         enabled              = c.dflt(Bool.self, .enabled, enabled)
         pauseWhenLocked      = c.dflt(Bool.self, .pauseWhenLocked, pauseWhenLocked)
         pauseAtMinBrightness = c.dflt(Bool.self, .pauseAtMinBrightness, pauseAtMinBrightness)
+        transparentWallpaper = c.dflt(Bool.self, .transparentWallpaper, transparentWallpaper)
     }
 }
 
@@ -823,9 +829,11 @@ struct PrivacyConfig: Codable, Equatable {
     ///
     /// New users get these out-of-the-box;they can add / remove from
     /// Settings → Privacy → Ignored apps.
+    /// 命中的 app 在**最前台**时整帧不拍;只在后台露一角时那个窗口遮成黑。
+    /// ("Wallpaper" 已移出 —— 壁纸走 capture.screen.transparent_wallpaper 开关。)
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
-        "My Portrait", "Wallpaper", "Trash",
+        "My Portrait", "Trash",
     ]
     var ignoredUrls:            [String] = []
     /// DEPRECATED —— 与 ignoredUrls 在 IgnoreGate 里行为完全相同(都按窗口标题
@@ -862,6 +870,10 @@ struct PrivacyConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         recordAudioWhileLocked = c.dflt(Bool.self,     .recordAudioWhileLocked, recordAudioWhileLocked)
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
+        // 迁移:老 config 里预置的 "Wallpaper" 摘掉 —— 壁纸已独立成
+        // capture.screen.transparent_wallpaper 开关。留着的话开关关了壁纸
+        // 照样被遮,开关就成了摆设。
+        ignoredApps.removeAll { $0.lowercased() == "wallpaper" }
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         // DEPRECATED 迁移:ignoredWindowTitles 与 ignoredUrls 行为相同(IgnoreGate

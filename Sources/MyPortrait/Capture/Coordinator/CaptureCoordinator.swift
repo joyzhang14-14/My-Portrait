@@ -93,6 +93,11 @@ actor CaptureCoordinator {
         ignore.setIgnoredUrlPatterns(patterns)
     }
 
+    /// Services 在 ConfigStore.capture.screen.transparentWallpaper 变化时调。
+    nonisolated func setWallpaperTransparent(_ on: Bool) {
+        ignore.setWallpaperTransparent(on)
+    }
+
     // (07-21 删 setMaskingEnabled:遮挡永远开,IgnoreGate 默认 true 不再改。)
 
     /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时调。
@@ -301,8 +306,16 @@ actor CaptureCoordinator {
             return
         }
 
-        // 3. 抓帧。用户 ignore 列表不再跳整帧——命中的窗口由 ScreenCaptureService
-        //    在 SCK content filter 里排除（content masking，帧照拍、窗口透明）。
+        // 2d. 前台 app / 当前页面命中用户 ignore 名单 → **整帧跳过**。
+        //     "你正在用它" = 什么都不记。它只是在后台露一角的情况走不到这里,
+        //     由 ScreenCaptureService 把那个窗口遮成黑(帧照拍)。
+        if ignore.shouldSkipFrame(appName: focusInfo.appName, browserUrl: focusInfo.browserUrl) {
+            await VisionMetrics.shared.recordIntentionalSkip()
+            return
+        }
+
+        // 3. 抓帧。后台露一角的 ignore 窗口由 ScreenCaptureService 在 SCK
+        //    content filter 里排除（content masking，帧照拍、窗口渲染成黑）。
         let image = try await screen.captureMainDisplay()
 
         // 5. 去重。

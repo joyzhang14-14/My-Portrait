@@ -86,14 +86,15 @@ final class ScreenCaptureService {
             do {
                 let display: SCDisplay
                 let excluded: [SCWindow]
-                if ignore.hasUserRules {
-                    // 有遮罩规则 → 每帧重新枚举(实时性是隐私语义,见
-                    // cachedDisplay 注释),顺手刷新显示器缓存。
+                if ignore.needsWindowEnumeration {
+                    // 有遮罩规则(用户名单 or 壁纸开关)→ 每帧重新枚举
+                    // (实时性是隐私语义,见 cachedDisplay 注释),顺手刷新显示器缓存。
                     let (d, windows) = try await fetchDisplayAndWindows()
                     display = d
                     cachedDisplay = d
                     // Content masking：命中 ignore 规则的窗口排除出捕获 buffer
-                    // （帧照拍，那些窗口在帧里变透明）。
+                    // （帧照拍，那些窗口在帧里变透明）。前台命中的情况轮不到
+                    // 这里 —— coordinator 已经整帧跳过了。
                     excluded = windows.filter {
                         ignore.shouldMaskWindow(
                             appName: $0.owningApplication?.applicationName ?? "",

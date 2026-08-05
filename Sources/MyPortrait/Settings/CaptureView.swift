@@ -650,7 +650,7 @@ struct ScreenCaptureSettingsView: View {
         //  走下面两张名单)、mask 永远开(行为说明写进两张名单的脚注)。)
         SettingsCard(
             title: "Ignored apps",
-            footnote: "Windows from these apps are blanked out of the screenshot, but the screenshot itself is still taken. Matching ignores case and checks the app name or window title."
+            footnote: "While one of these apps is in front, no screenshot is taken at all. If it's only sitting in the background, the screenshot is still taken and that window comes out black. Matching ignores case and checks the app name or window title."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Pick from captured apps or the system / privacy list…")
@@ -664,7 +664,7 @@ struct ScreenCaptureSettingsView: View {
 
         SettingsCard(
             title: "Ignored URLs",
-            footnote: "Matching pages are blanked out of the screenshot, but the screenshot itself is still taken. Substring match. e.g. \"chase.com\" filters every page on chase.com."
+            footnote: "While you're on a matching page, no screenshot is taken at all. A matching window sitting in the background comes out black instead. Substring match. e.g. \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Hostnames or substrings…")
@@ -806,6 +806,13 @@ struct ScreenCaptureSettingsView: View {
                 SettingsDivider()
                 // 第三条 "Pause …" —— 跟上面两条同一类,并到同一张卡里。
                 protectedVideoRow
+                SettingsDivider()
+                SettingsRow("Transparent wallpaper",
+                            info: "Leaves your desktop background out of the screenshot — that area comes out black. Only affects the wallpaper; everything else on screen is captured as usual.",
+                            icon: "photo") {
+                    Toggle("", isOn: config.binding(\.capture.screen.transparentWallpaper))
+                        .labelsHidden().toggleStyle(.switch)
+                }
             }
         }
     }

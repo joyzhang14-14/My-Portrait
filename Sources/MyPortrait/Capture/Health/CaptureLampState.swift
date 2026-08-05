@@ -17,9 +17,10 @@ import Foundation
 /// | 音频(黄) | `capture.audio.enabled`  | 麦克风 | —— 音频不认 app | 暂停名单 app 正在出声(`MusicPlaybackMonitor`) |
 /// | 打字(蓝) | `capture.typingCaptureEnabled` | 辅助功能 | `TypingPrivacyFilter`:bundle id 黑名单 | —— |
 ///
-/// ⚠️ 屏幕那一路要留意语义:`IgnoreGate` 命中是把**该窗口**从帧里抠成透明,
-/// 帧本身照拍(桌面/其它窗口仍在)。所以紫灯灭 = "你当前这个 app 没被记录",
-/// **不等于**"屏幕采集停了"。tooltip 里如实写清楚,别让用户读成后者。
+/// ⚠️ 屏幕那一路的语义:名单命中的 app **在前台**时整帧不拍(紫灯灭);
+/// 它只在后台露一角时帧照拍、那个窗口渲染成黑(紫灯照亮 —— 你当前用的
+/// 这个 app 确实在被记)。判据与 `IgnoreGate.shouldSkipFrame` 必须一致,
+/// 两边各写一份必然走偏。
 @MainActor
 final class CaptureLampState: ObservableObject {
     static let shared = CaptureLampState()
@@ -199,13 +200,13 @@ final class CaptureLampState: ObservableObject {
         } else if pause.drmActive {
             s = Lamp(on: false, reason: "Paused — protected video is playing on screen.")
         } else if let hit = Self.ignoredAppHit(appName: appName, cfg: cfg) {
-            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored apps list — this window is blanked out of every screenshot.")
+            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored apps list — no screenshot is taken while it's in front.")
         } else if let url = browserUrl,
                   let hit = cfg.privacy.ignoredUrls.first(where: {
                       !$0.isEmpty && url.lowercased().contains($0.lowercased())
                   }) {
-            // IgnoreGate 把 ignoredUrls 当"URL / 窗口标题子串"用,这里同口径。
-            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored URLs list — this window is blanked out of every screenshot.")
+            // 跟 IgnoreGate.shouldSkipFrame 同口径:前台 app 名 + 当前页面 URL。
+            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored URLs list — no screenshot is taken while you're on it.")
         }
         if screen != s { screen = s }        // 只在真变了才发通知,见 Lamp 的告警
 
