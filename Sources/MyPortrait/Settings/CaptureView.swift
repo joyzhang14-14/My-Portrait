@@ -212,7 +212,7 @@ struct AudioCaptureSettingsView: View {
     }
 
     var body: some View {
-        SettingsPage("Audio Capture", subtitle: "Microphone + transcription",
+        SettingsPage("Audio Capture",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
             audioSection
         }
@@ -224,7 +224,6 @@ struct AudioCaptureSettingsView: View {
         Group {
             SettingsCard(title: "Audio Capture") {
                 SettingsRow("Audio Capture",
-                            description: "Capture from your microphone(s).",
                             icon: "mic") {
                     Toggle("", isOn: config.binding(\.capture.audio.enabled)).labelsHidden().toggleStyle(.switch)
                 }
@@ -232,7 +231,6 @@ struct AudioCaptureSettingsView: View {
                     SettingsDivider()
                     // 锁屏录音是采集行为(决定要不要继续抓音频),不是转译选项。
                     SettingsRow("Record audio while screen is locked",
-                                description: "Keep listening even when your Mac is locked.",
                                 icon: "lock.shield") {
                         Toggle("", isOn: config.binding(\.privacy.recordAudioWhileLocked)).labelsHidden().toggleStyle(.switch)
                     }
@@ -247,7 +245,6 @@ struct AudioCaptureSettingsView: View {
                 SettingsCard(title: "Transcription") {
                     // 转译总开关 —— 关掉就把 engine 设成 disabled,下面引擎/模型/语言全隐藏。
                     SettingsRow("Transcription",
-                                description: "Turn speech-to-text on or off.",
                                 icon: "waveform") {
                         Toggle("", isOn: Binding(
                             get: { engine != AudioEngine.disabled.rawValue },
@@ -269,7 +266,6 @@ struct AudioCaptureSettingsView: View {
                     if engine == AudioEngine.whisper.rawValue {
                         SettingsDivider()
                         SettingsRow("Whisper model",
-                                    description: "Download models in AI models. Uninstalled models can't be selected here.",
                                     icon: "cpu") {
                             Menu {
                                 ForEach(WhisperKitWrapper.allTranscriptionModels, id: \.name) { m in
@@ -297,7 +293,6 @@ struct AudioCaptureSettingsView: View {
                     if engine == AudioEngine.qwen.rawValue {
                         SettingsDivider()
                         SettingsRow("Qwen model",
-                                    description: "Download models in AI models. Uninstalled models can't be selected here.",
                                     icon: "cpu") {
                             Menu {
                                 ForEach(Qwen3ASRWrapper.allQwenModels, id: \.name) { m in
@@ -325,7 +320,6 @@ struct AudioCaptureSettingsView: View {
                     if engine == AudioEngine.deepgram.rawValue {
                         SettingsDivider()
                         SettingsRow("Deepgram API key",
-                                    description: "Required for cloud transcription.",
                                     icon: "key") {
                             SecureField("paste key…", text: config.secretBinding(refKeyPath: \.capture.audio.deepgramApiKeyRef, defaultRef: "deepgram_key"))
                                 .textFieldStyle(.plain)
@@ -342,7 +336,6 @@ struct AudioCaptureSettingsView: View {
                     if engine == AudioEngine.custom.rawValue {
                         SettingsDivider()
                         SettingsRow("Endpoint",
-                                    description: "OpenAI-compatible transcription server (mlx-audio, llama.cpp, vLLM…). Audio leaves this Mac.",
                                     icon: "network") {
                             TextField("http://127.0.0.1:8080", text: config.binding(\.capture.audio.customEndpoint))
                                 .textFieldStyle(.plain)
@@ -356,7 +349,7 @@ struct AudioCaptureSettingsView: View {
                                 .frame(width: 220)
                         }
                         SettingsDivider()
-                        SettingsRow("Model", description: "Model ID sent to the endpoint.", icon: "cpu") {
+                        SettingsRow("Model", icon: "cpu") {
                             TextField("whisper-1", text: config.binding(\.capture.audio.customModel))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
@@ -369,7 +362,7 @@ struct AudioCaptureSettingsView: View {
                                 .frame(width: 220)
                         }
                         SettingsDivider()
-                        SettingsRow("API key", description: "Optional — leave blank for local servers.", icon: "key") {
+                        SettingsRow("API key", icon: "key") {
                             SecureField("paste key…", text: config.secretBinding(refKeyPath: \.capture.audio.customApiKeyRef, defaultRef: "custom_transcribe_key"))
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 12, design: .monospaced))
@@ -384,7 +377,7 @@ struct AudioCaptureSettingsView: View {
                     }
                     SettingsDivider()
                     SettingsRow("Languages",
-                                description: "Pick the languages you speak. One is used as a hint; pick several or none to auto-detect.",
+                                info: "Pick the languages you speak. One is used as a hint; pick several or none to auto-detect.",
                                 icon: "character.bubble") {
                         Menu {
                             ForEach(Self.languageOptions(for: engine)) { lang in
@@ -412,7 +405,7 @@ struct AudioCaptureSettingsView: View {
                     }
                         SettingsDivider()
                         SettingsRow("When to transcribe",
-                                    description: "Audio always records; only transcribing waits. \"Plugged in & lid closed\" keeps running with the lid shut via a background helper — otherwise closing the lid pauses it.",
+                                    info: "Audio always records; only transcribing waits. \"Plugged in & lid closed\" keeps running with the lid shut via a background helper — otherwise closing the lid pauses it.",
                                     icon: "powerplug") {
                             Picker("", selection: config.binding(\.capture.audio.transcriptionPowerMode)) {
                                 Text("Always").tag(TranscriptionPowerMode.always)
@@ -432,13 +425,13 @@ struct AudioCaptureSettingsView: View {
             // 采集关着也能先配好过滤 / 暂停规则,等开采集即生效)。
             SettingsCard(title: "Filtering & pausing") {
                 SettingsRow("Filter music",
-                            description: "Skips audio that's mostly music, so song lyrics don't end up in your transcripts.",
+                            info: "Skips audio that's mostly music, so song lyrics don't end up in your transcripts.",
                             icon: "music.note.list") {
                     Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Pause capture for these apps / categories",
-                            description: "Stops recording whenever an app on this list is playing audio. It's more thorough than filtering music and takes priority. Pick specific apps or categories, or leave it empty to never pause.",
+                            info: "Stops recording whenever an app on this list is playing audio. It's more thorough than filtering music and takes priority. Pick specific apps or categories, or leave it empty to never pause.",
                             icon: "pause.circle") { EmptyView() }
                 VStack(alignment: .leading) {
                     PauseAudioListPicker(
@@ -452,10 +445,7 @@ struct AudioCaptureSettingsView: View {
              // Deepgram 让它认对专有名词),逻辑上属 Transcription。只在转译
              // 开着时才有意义显示。
             if engine != AudioEngine.disabled.rawValue {
-                SettingsCard(
-                    title: "Custom vocabulary",
-                    footnote: "Boost recognition of names, jargon, and brand terms."
-                ) {
+                SettingsCard(title: "Custom vocabulary") {
                     VStack(alignment: .leading) {
                         TagListEditor(tags: config.binding(\.capture.audio.customVocabulary), placeholder: "term · optional replacement")
                             .padding(.horizontal, 14).padding(.vertical, 12)
@@ -469,7 +459,7 @@ struct AudioCaptureSettingsView: View {
             // (success/failure/cancel)还原回原值,跟之前的设计一致。
             SettingsCard(title: "Speakers (Voice ID)") {
                 SettingsRow("Enable speaker identification",
-                            description: "Detect and cluster distinct voices.",
+                            info: "Detect and cluster distinct voices.",
                             icon: "person.wave.2") {
                     Toggle("", isOn: config.binding(\.capture.audio.speakerIdEnabled)).labelsHidden().toggleStyle(.switch)
                 }
@@ -477,7 +467,7 @@ struct AudioCaptureSettingsView: View {
                 if config.current.capture.audio.speakerIdEnabled {
                 SettingsDivider()
                 SettingsRow("Speaker model",
-                            description: "Chinese models are far more accurate for Chinese speakers. Download in AI models. Switching invalidates existing voice profiles — retrain speakers after changing.",
+                            info: "Chinese models are far more accurate for Chinese speakers. Download in AI models. Switching invalidates existing voice profiles — retrain speakers after changing.",
                             icon: "cpu") {
                     Menu {
                         ForEach(SpeakerModel.embeddingOptions) { m in
@@ -528,14 +518,8 @@ struct AudioCaptureSettingsView: View {
         let preferredDisconnected = !preferred.isEmpty
             && !devices.contains(where: { $0.id == preferred })
 
-        SettingsCard(
-            title: "Input",
-            footnote: preferred.isEmpty
-                ? "Follow system default — macOS will switch the mic when you plug in headphones, AirPods, etc. System audio is a parallel loopback track."
-                : "Locked to your chosen device. Headphone/AirPods plug-in won't change the mic. Disconnect → temporary fallback to system default until the device returns. System audio is a parallel loopback track."
-        ) {
+        SettingsCard(title: "Input") {
             SettingsRow("Microphone",
-                        description: "Pick which mic My Portrait records from.",
                         icon: "mic.circle") {
                 // 用原生 Picker —— macOS Menu 不认 Image.opacity,所以
                 // 之前自己画 checkmark 会导致每个选项都显示打勾(Issue #11)。
@@ -556,9 +540,6 @@ struct AudioCaptureSettingsView: View {
             // 实时状态行 —— 真在录显示绿点 pulse + device 名,没录灰显示。
             SettingsDivider()
             SettingsRow("Currently recording from",
-                        description: activeDevice?.transport == .bluetooth
-                            ? "Bluetooth — slightly higher latency (~200ms jitter); we buffer to compensate."
-                            : nil,
                         icon: activeDevice?.transport.icon ?? "waveform") {
                 HStack(spacing: 6) {
                     Circle()
@@ -584,7 +565,6 @@ struct AudioCaptureSettingsView: View {
             // 跟 mic 放一张卡里:用户视角"都是声音从哪进来"。
             SettingsDivider()
             SettingsRow("Also capture system audio",
-                        description: "What you hear (loopback) — meeting partner's voice, video, music.",
                         icon: "speaker.wave.2") {
                 Toggle("", isOn: config.binding(\.capture.audio.captureSystemAudio))
                     .labelsHidden().toggleStyle(.switch)
