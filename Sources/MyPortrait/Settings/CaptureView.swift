@@ -632,7 +632,8 @@ struct ScreenCaptureSettingsView: View {
                              $0.capture.system = .init()
                          }
                      }) {
-            // 总开关那张卡排最上面。
+            // 总开关那张卡排最上面(2026-08-05 从 "Capture setting" 里剥出来单列)。
+            screenToggleCard
             screenSection
             powerModeCard
             privacySection
@@ -776,23 +777,28 @@ struct ScreenCaptureSettingsView: View {
         }
     }
 
+    /// 采集总开关单独一张卡,排在页面最上面(与下面的「什么时候暂停」区分开)。
+    private var screenToggleCard: some View {
+        SettingsCard {
+            SettingsRow("Screen Capture",
+                        description: "Capture periodic snapshots of your screen.",
+                        icon: "display") {
+                Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
+            }
+        }
+    }
+
     private var screenSection: some View {
         Group {
             SettingsCard(title: "Capture setting") {
-                SettingsRow("Screen Capture",
-                            description: "Capture periodic snapshots of your screen.",
-                            icon: "display") {
-                    Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
-                }
-                SettingsDivider()
                 // (07-21 删 OCR accuracy booster 行:全分辨率抓帧永远开。)
-                SettingsRow("Pause at the lock screen",
+                SettingsRow("Pause capture at the lock screen",
                             description: "Skip captures while the Mac is at the lock screen or login window — those frames would only show the lock-screen wallpaper.",
                             icon: "lock.display") {
                     Toggle("", isOn: config.binding(\.capture.screen.pauseWhenLocked)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
-                SettingsRow("Pause at minimum brightness",
+                SettingsRow("Pause capture at minimum brightness",
                             description: "Skip captures while the screen brightness is turned all the way down — the screen is dark, so nothing is being looked at.",
                             icon: "sun.min") {
                     Toggle("", isOn: config.binding(\.capture.screen.pauseAtMinBrightness)).labelsHidden().toggleStyle(.switch)
