@@ -134,6 +134,28 @@ struct PipelineFlowView: View {
             path.move(to: p0)
             path.addLine(to: tip)
             facing = .right
+        } else if let label, !label.isEmpty, abs(ax - bx) < 0.5 {
+            // 竖直 + 有条件小字 → **字嵌在箭头中间**:线断开一截,文字压在
+            // 断口上居中。measure 出真实文字高度再决定断多宽,不写死。
+            let p0 = CGPoint(x: ax, y: ay + halfH)
+            tip = CGPoint(x: bx, y: by - halfH)
+            let resolved = ctx.resolve(
+                Text(label)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+            )
+            let ts = resolved.measure(in: CGSize(width: Self.nodeW + 40, height: 60))
+            let midY = (p0.y + tip.y) / 2
+            let gap = ts.height / 2 + 4
+            var seg = Path()
+            seg.move(to: p0)
+            seg.addLine(to: CGPoint(x: p0.x, y: midY - gap))
+            seg.move(to: CGPoint(x: p0.x, y: midY + gap))
+            seg.addLine(to: tip)
+            ctx.stroke(seg, with: .color(color), style: style)
+            ctx.draw(resolved, at: CGPoint(x: ax, y: midY), anchor: .center)
+            drawHead(ctx: ctx, tip: tip, facing: .down, color: color)
+            return
         } else {
             let p0 = CGPoint(x: ax, y: ay + halfH)
             tip = CGPoint(x: bx, y: by - halfH)
@@ -145,6 +167,11 @@ struct PipelineFlowView: View {
         }
         ctx.stroke(path, with: .color(color), style: style)
 
+        drawHead(ctx: ctx, tip: tip, facing: facing, color: color)
+    }
+
+    private func drawHead(ctx: GraphicsContext, tip: CGPoint,
+                          facing: Facing, color: Color) {
         var head = Path()
         switch facing {
         case .down:
@@ -158,19 +185,6 @@ struct PipelineFlowView: View {
         }
         ctx.stroke(head, with: .color(color),
                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
-
-        // 连线上的条件小字 —— 贴在线右侧。像 "day is over" 这种**闸门条件**
-        // 用它,不值得单独占一个节点(节点是"步骤",不是"条件")。
-        if let label, !label.isEmpty {
-            let mid = CGPoint(x: (ax + bx) / 2, y: (ay + halfH + by - halfH) / 2)
-            ctx.draw(
-                Text(label)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.45)),
-                at: CGPoint(x: mid.x + 9, y: mid.y),
-                anchor: .leading
-            )
-        }
     }
 
     private enum Facing { case down, right }
@@ -332,7 +346,7 @@ extension PipelineFlow {
                 kind: .source,
                 chip: "~/.portrait",
                 detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing events. This is the only input — nothing is invented later.",
-                pos: CGPoint(x: 0.5, y: 0.06)
+                pos: CGPoint(x: 0.5, y: 0.05)
             ),
             Node(
                 id: "event",
@@ -340,7 +354,7 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "main model",
                 detail: "Reads the whole day's timeline and clusters it into discrete events — one file per event under events/<day>/. This is where a scroll of raw activity turns into \"what actually happened\".\n\nA day is only picked up once it's actually over — UTC midnight plus a 10-minute grace period, so transcripts and OCR that are still finishing up land in time. Days that aren't ready are skipped and retried on the next tick (every 15 minutes).",
-                pos: CGPoint(x: 0.5, y: 0.25)
+                pos: CGPoint(x: 0.5, y: 0.27)
             ),
             Node(
                 id: "impact",
@@ -348,7 +362,7 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "main model",
                 detail: "Every event gets an impact score — how much this mattered to you. That score is what later decides which events survive in your memory and how big they show up in the Neural Graph.",
-                pos: CGPoint(x: 0.5, y: 0.44)
+                pos: CGPoint(x: 0.5, y: 0.45)
             ),
             Node(
                 id: "weight",
@@ -363,31 +377,32 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "light model",
                 detail: "Sorts events into project folders (events/_folders/*.json) — \"My Portrait\", \"UCI application\", and so on. Uses the light model because the decision is narrow: does this event belong in an existing folder, or does it need a new one?\n\nThis is the last step of the run.",
-                pos: CGPoint(x: 0.5, y: 0.82)
+                pos: CGPoint(x: 0.5, y: 0.81)
             ),
             Node(
                 id: "distill",
                 title: "Portraits Distiller",
                 kind: .downstream,
                 detail: "Once events land, the portrait distiller is marked pending — it turns events into long-term portrait entries (experiences, social, and so on) on its own schedule.",
-                pos: CGPoint(x: 0.27, y: 0.965)
+                pos: CGPoint(x: 0.27, y: 0.95)
             ),
             Node(
                 id: "personality",
                 title: "Personality Refresher",
                 kind: .downstream,
                 detail: "Each processed day is also marked pending for the personality refresher, which re-derives your personality tags from that day's events, the rest of the portrait, and OCR.",
-                pos: CGPoint(x: 0.73, y: 0.965)
+                pos: CGPoint(x: 0.73, y: 0.95)
             ),
         ],
         edges: [
-            Edge(from: "capture", to: "event", label: "once the day is over · UTC + 10 min"),
+            Edge(from: "capture", to: "event",
+                 label: "Wrap data up once the day is over · 12 AM UTC"),
             Edge(from: "event", to: "impact"),
             Edge(from: "impact", to: "weight"),
             Edge(from: "weight", to: "classify"),
             Edge(from: "classify", to: "distill", kind: .trigger),
             Edge(from: "classify", to: "personality", kind: .trigger),
         ],
-        height: 470
+        height: 500
     )
 }
