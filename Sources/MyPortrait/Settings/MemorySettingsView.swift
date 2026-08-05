@@ -124,20 +124,20 @@ struct MemorySettingsView: View {
 
                 switch tab {
                 case .eventsProcessor:
-                    autoRunSection(nil, config: \.scheduler.event)
-                    providerSection(\.scheduler.event)
-                    pipelineFlowSection(.eventsProcessor)
-                    // 自动处理开着时不显示手动卡 —— 两者同时存在是矛盾的:
-                    // 调度器本来就会在有活时自己跑,手动再点一次只会撞锁。
-                    if cfg.current.scheduler.event.frequency == .off {
-                        runNowSectionFor(
-                            .eventProcessing,
+                    // 手动运行并进同一张卡 —— 自动开关关掉时才伸出来。
+                    autoRunSection(
+                        nil,
+                        config: \.scheduler.event,
+                        manual: (
+                            trigger: .eventProcessing,
                             title: "Process events now",
-                            info: "Runs this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                            info: "Runs the whole pipeline now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
                                 + ManualTrigger.eventProcessing.desc
                                 + "\n\nEach run handles at most 7 unprocessed days, oldest first."
                         )
-                    }
+                    )
+                    providerSection(\.scheduler.event)
+                    pipelineFlowSection(.eventsProcessor)
                     reviewSectionFor(.eventProcessing)
                 case .portraitsDistiller:
                     autoRunSection("Distills events into long-term portrait entries.",
@@ -512,16 +512,19 @@ struct MemorySettingsView: View {
     /// 固定,catchUp + backoff 自动接管 retry。
     /// `desc` 传 nil = 不显示卡片灰字说明,同时也不显示 Auto/Manual 那行状态灰字
     /// (整张卡只剩标题 + 开关)。
+    /// `manual` 传了的话:自动开关**关掉时**,同一张卡下面伸出一行手动运行。
+    /// 两者本来就是互斥的一件事(自动跑 / 自己点),没必要拆两张卡。
     private func autoRunSection(
         _ desc: String?,
-        config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
+        config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>,
+        manual: (trigger: ManualTrigger, title: String, info: String)? = nil
     ) -> some View {
         let freq = cfg.binding(kp.appending(path: \.frequency))
         let autoRun = Binding<Bool>(
             get: { freq.wrappedValue != .off },
             set: { freq.wrappedValue = $0 ? .daily : .off }
         )
-        // desc == nil:整张卡只剩「标题 + 开关」一行。
+        // desc == nil:标题行直接带开关,不再单起一行。
         return section(
             title: "Automatic processing",
             blurb: desc,
@@ -543,6 +546,28 @@ struct MemorySettingsView: View {
                     Toggle("", isOn: autoRun)
                         .labelsHidden()
                         .toggleStyle(.switch)
+                }
+            }
+            if let m = manual, !autoRun.wrappedValue {
+                Divider().opacity(0.35)
+                HStack(spacing: 0) {
+                    Text(m.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                    SettingsInfoBadge(text: m.info)
+                    Spacer(minLength: 12)
+                    triggerButton(m.trigger)
+                }
+                if triggerActuallyRunning(m.trigger) {
+                    progressIndicator(triggerProgress(m.trigger),
+                                      onStop: { stopTrigger(m.trigger) })
+                }
+                if !actionStatus.isEmpty {
+                    Text(actionStatus)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
