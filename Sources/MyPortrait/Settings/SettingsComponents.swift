@@ -404,7 +404,7 @@ struct FlowLayout: Layout {
 }
 
 /// Ignored-apps picker. Mirrors screenpipe's `MultiSelect` with two dropdowns:
-///   - "Select app to ignore" — app names seen in captured frames
+///   - "Select app" — app names seen in captured frames
 ///   - "System / privacy"     — curated system-level entries that never show
 ///     up as a focused app (wallpaper, Dock, Control Center, …)
 /// Either dropdown toggles membership; selected entries render as removable
@@ -434,7 +434,7 @@ struct IgnoredAppPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                dropdown(title: "Select app to ignore", icon: "plus.circle.fill",
+                dropdown(title: "Select app", icon: "plus.circle.fill",
                          options: discovered, emptyHint: "No captured apps yet")
                 dropdown(title: "System / privacy", icon: "macwindow",
                          options: Self.systemEntries, emptyHint: "")

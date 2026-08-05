@@ -2,7 +2,9 @@
 ///
 ///   1. **App 黑名单**（按 bundle id）：密码管理器 / 机密类 app 整体不订阅 AX。
 ///      hardcode 一组默认值 ∪ 用户在 config 里加的
-///      `privacy.typing_blacklist_entries`。
+///      `privacy.typing_blacklist_apps`。
+///   1b. **URL 黑名单**（`privacy.typing_blacklist_urls`，小写子串，不分 app）：
+///      命中的页面上打的字不落库。跟屏幕采集的 ignoredUrls 同一套语义。
 ///   2. **secure field 检测**：focused 元素 role == `AXSecureTextField`
 ///      （密码输入框）—— 不快照、不 diff。
 ///
@@ -49,39 +51,37 @@ struct TypingPrivacyFilter {
     static let defaultBlacklist: [String] =
         hardcodedBlacklist.sorted() + terminalBundleIds.sorted()
 
-    /// bundle id 是否整 app 屏蔽 —— 用户在 entries 里加了一条 urlPrefix 留空
-    /// 的就算。给 TypingObserver.attach 用(没 URL 信息,只能判 app 级)。
-    /// 读 ConfigStore.shared(@MainActor 隔离),故方法标 @MainActor。
+    /// bundle id 是否整 app 屏蔽。给 TypingObserver.attach 用(没 URL 信息,
+    /// 只能判 app 级)。读 ConfigStore.shared(@MainActor 隔离),故标 @MainActor。
     @MainActor
     static func isBlacklisted(bundleId: String) -> Bool {
         if hardcodedBlacklist.contains(bundleId) { return true }
-        return ConfigStore.shared.privacy.typingBlacklistEntries.contains {
-            $0.bundleId == bundleId && $0.urlPrefix.isEmpty
-        }
+        return ConfigStore.shared.privacy.typingBlacklistApps.contains(bundleId)
     }
 
-    /// (bundle, url) 是否命中黑名单 —— 整 app 屏蔽,或 URL 以某条 entry 的
-    /// urlPrefix 开头。给 TypingRecordWriter.persist 用(已知具体 URL)。
+    /// (bundle, url) 是否命中黑名单 —— 整 app 屏蔽,或 URL 命中 URL 名单里的
+    /// 任一**小写子串**(不分 app,跟屏幕采集 ignoredUrls 同口径)。
+    /// 给 TypingRecordWriter.persist 用(已知具体 URL)。
     @MainActor
     static func isBlacklisted(bundleId: String, url: String) -> Bool {
-        if hardcodedBlacklist.contains(bundleId) { return true }
-        return ConfigStore.shared.privacy.typingBlacklistEntries.contains {
-            guard $0.bundleId == bundleId else { return false }
-            return $0.urlPrefix.isEmpty || url.hasPrefix($0.urlPrefix)
+        if isBlacklisted(bundleId: bundleId) { return true }
+        let u = url.lowercased()
+        guard !u.isEmpty else { return false }
+        return ConfigStore.shared.privacy.typingBlacklistUrls.contains {
+            !$0.isEmpty && u.contains($0.lowercased())
         }
     }
 
-    /// 给后台批读用 —— 把 entries snapshot 一份成 Set,在 dbPool 线程上比对
+    /// 给后台批读用 —— 把两张名单 snapshot 一份,在 dbPool 线程上比对
     /// `(bundle_id, url)`。nonisolated,可以脱离 MainActor 用。
     static func matches(
-        entries: [TypingBlacklistEntry], hardcoded: Set<String>,
+        apps: Set<String>, urls: [String], hardcoded: Set<String>,
         bundleId: String, url: String
     ) -> Bool {
-        if hardcoded.contains(bundleId) { return true }
-        return entries.contains { e in
-            guard e.bundleId == bundleId else { return false }
-            return e.urlPrefix.isEmpty || url.hasPrefix(e.urlPrefix)
-        }
+        if hardcoded.contains(bundleId) || apps.contains(bundleId) { return true }
+        let u = url.lowercased()
+        guard !u.isEmpty else { return false }
+        return urls.contains { !$0.isEmpty && u.contains($0.lowercased()) }
     }
 
     /// hardcoded 黑名单 snapshot —— `matches(...)` 用。

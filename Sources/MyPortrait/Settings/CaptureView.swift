@@ -806,11 +806,9 @@ struct TypingCaptureSettingsView: View {
     @Environment(\.services) private var services
     /// 用户打过字的 app（bundle id）—— 给两个 app 选择器的下拉用。
     @State private var discovered: [String] = []
-    /// 发现到的 (bundle_id, url) 对子,给 URL-prefix picker 列候选用。
-    @State private var discoveredSummaries: [(bundleId: String, url: String)] = []
 
     var body: some View {
-        SettingsPage("Typing Rebuild", subtitle: "Rebuild text input and edit history",
+        SettingsPage("Typing Rebuild",
                      onResetCurrentPage: {
                          config.mutate {
                              let def = RecordingConfig()
@@ -834,37 +832,37 @@ struct TypingCaptureSettingsView: View {
         }
         .task {
             discovered = await Self.loadDiscovered(services?.typingStore)
-            discoveredSummaries = await Self.loadDiscoveredSummaries(services?.typingStore)
         }
     }
 
-    /// 后台扫 typing_events 的 (bundle_id, url) 对子。
-    private static func loadDiscoveredSummaries(_ store: TypingEventStore?)
-        async -> [(bundleId: String, url: String)]
-    {
-        guard let store else { return [] }
-        return await Task.detached {
-            (try? store.appSummaries())?.map { (bundleId: $0.bundleId, url: $0.url) } ?? []
-        }.value
-    }
-
-    /// 黑名单 entries —— 整 app 或 (app, urlPrefix) 屏蔽打字。
+    /// 打字黑名单 —— app 名单 + URL 名单两块,版式跟 Screen Capture 的
+    /// 「Ignored apps & URLs」一致。
     private var blacklistSection: some View {
         SettingsCard(
             title: "Typing blacklist",
-            footnote: "Password managers and terminals are always excluded. Pick an app to block all of it, or a URL to block only pages under that address."
+            info: "Nothing you type in these apps — or on pages matching these URLs — is ever saved.\n\nPassword managers and terminals are always excluded and can't be removed. URLs match as substrings and ignore case, so \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Pick an app (and optionally a URL prefix)…")
+                Text("Apps — pick from apps you've typed in…")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TypingBlacklistEntryPicker(
-                    entries: config.binding(\.privacy.typingBlacklistEntries),
-                    summaries: discoveredSummaries,
+                TypingAppPicker(
+                    apps: config.binding(\.privacy.typingBlacklistApps),
+                    discovered: discovered,
                     locked: TypingPrivacyFilter.defaultBlacklist
                 )
                 .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+            SettingsDivider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("URLs — hostnames or substrings…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                TagListEditor(tags: config.binding(\.privacy.typingBlacklistUrls),
+                              placeholder: "e.g. wellsfargo.com, mail.")
+                    .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }
     }
@@ -884,7 +882,7 @@ struct TypingCaptureSettingsView: View {
     private var typingSection: some View {
         SettingsCard(title: "Typing Capture") {
             SettingsRow("Typing Capture",
-                        description: "Reads what you finish typing into input fields to learn your writing style. Everything stays on this Mac and is never uploaded, and password fields are never read.",
+                        info: "Records three things so your text and edit history can be rebuilt:\n\n⌨️  Keystrokes — which keys you press and when\n🖱  Clicks — where you click, so edits land in the right place\n📄  Accessibility text — what an input field contains after you finish typing in it\n\nEverything stays on this Mac and is never uploaded. Password fields are never read.",
                         icon: "keyboard") {
                 Toggle("", isOn: config.binding(\.capture.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)
             }

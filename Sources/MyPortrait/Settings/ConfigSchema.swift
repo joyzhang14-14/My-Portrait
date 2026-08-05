@@ -850,10 +850,14 @@ struct PrivacyConfig: Codable, Equatable {
     /// 不可配 —— 关掉时 Services 推空列表给 coordinator。
     /// (原 pause_capture_apps / pause_capture_urls 两个数组字段已下线。)
     var pauseForProtectedVideo: Bool = true
-    /// 黑名单 entries —— 每条要么 (bundle_id) 整 app 屏蔽,要么 (bundle_id,
-    /// urlPrefix) 屏蔽该 app 下匹配 URL 前缀的页面。前缀比对 case-sensitive,
-    /// urlPrefix 留空字符串 = 整个 app(等价老 bundle 列表)。
+    /// 打字黑名单 —— app 级(bundle id 精确匹配)和 URL 级(小写子串)两张
+    /// 独立名单,跟上面 ignoredApps / ignoredUrls 同一套语义。
     /// 与 TypingPrivacyFilter 的 hardcoded 默认黑名单取并集。
+    var typingBlacklistApps: [String] = []
+    var typingBlacklistUrls: [String] = []
+    /// DEPRECATED —— 老的 (bundle_id, url_prefix) 成对模型(URL 只能绑在某个
+    /// app 下、且是 case-sensitive 前缀)。只为解码老 config 保留:decode 时
+    /// 拆进上面两张名单后清空。
     var typingBlacklistEntries: [TypingBlacklistEntry] = []
 
     init() {}
@@ -863,6 +867,8 @@ struct PrivacyConfig: Codable, Equatable {
         case ignoredUrls             = "ignored_urls"
         case ignoredWindowTitles     = "ignored_window_titles"
         case pauseForProtectedVideo  = "pause_for_protected_video"
+        case typingBlacklistApps      = "typing_blacklist_apps"
+        case typingBlacklistUrls      = "typing_blacklist_urls"
         case typingBlacklistEntries   = "typing_blacklist_entries"
     }
     init(from decoder: Decoder) throws {
@@ -883,7 +889,23 @@ struct PrivacyConfig: Codable, Equatable {
             ignoredWindowTitles = []
         }
         pauseForProtectedVideo = c.dflt(Bool.self,     .pauseForProtectedVideo, pauseForProtectedVideo)
-        typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, typingBlacklistEntries)
+        typingBlacklistApps      = c.dflt([String].self, .typingBlacklistApps, typingBlacklistApps)
+        typingBlacklistUrls      = c.dflt([String].self, .typingBlacklistUrls, typingBlacklistUrls)
+        // DEPRECATED 迁移:老 entries 拆成两张名单 —— urlPrefix 空的是整 app
+        // 屏蔽进 apps,非空的把前缀当子串进 urls。拆完清空,字段废弃。
+        typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, [])
+        if !typingBlacklistEntries.isEmpty {
+            for e in typingBlacklistEntries {
+                if e.urlPrefix.isEmpty {
+                    if !e.bundleId.isEmpty, !typingBlacklistApps.contains(e.bundleId) {
+                        typingBlacklistApps.append(e.bundleId)
+                    }
+                } else if !typingBlacklistUrls.contains(e.urlPrefix) {
+                    typingBlacklistUrls.append(e.urlPrefix)
+                }
+            }
+            typingBlacklistEntries = []
+        }
     }
 }
 
