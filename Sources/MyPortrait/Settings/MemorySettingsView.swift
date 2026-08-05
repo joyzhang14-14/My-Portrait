@@ -126,6 +126,7 @@ struct MemorySettingsView: View {
                 case .eventsProcessor:
                     autoRunSection(nil, config: \.scheduler.event)
                     providerSection(\.scheduler.event)
+                    pipelineFlowSection(.eventsProcessor)
                     // 自动处理开着时不显示手动卡 —— 两者同时存在是矛盾的:
                     // 调度器本来就会在有活时自己跑,手动再点一次只会撞锁。
                     if cfg.current.scheduler.event.frequency == .off {
@@ -878,6 +879,19 @@ struct MemorySettingsView: View {
                     reviewBlock(t.kind, t.title, changes)
                 }
             }
+        }
+    }
+
+    /// 这条 pipeline 的流程图卡。图本身是数据驱动的(PipelineFlow),
+    /// 以后每条 pipeline 各写一份常量丢进来即可。
+    private func pipelineFlowSection(_ flow: PipelineFlow) -> some View {
+        section(
+            title: "How it works",
+            info: "Every step this pipeline runs, in order. Click any box to see what it does.\n\nSolid lines carry data. Dashed lines only mark the next pipeline as pending — no data moves along them."
+        ) {
+            PipelineFlowView(flow: flow)
+            PipelineFlowLegend()
+                .padding(.top, 2)
         }
     }
 
