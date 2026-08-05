@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import os.log
@@ -261,6 +262,24 @@ actor CaptureCoordinator {
         // P5: DRM 命中 → 整个流水线暂停，SCStream 已 invalidate。
         // 强制 force=true 也照样停（手动 captureOnce 在 DRM 期间会静默返回）。
         if drmActive {
+            return
+        }
+
+        // P5b: 前台 app 命中 ignore 名单 → **在任何采集动作之前**退出。
+        // 切到 1Password 本身会发 .appSwitch 把这条流水线拉起来;名单里的
+        // app 应该连碰都不碰,不该先记 attempt、读焦点、再到下面才跳掉。
+        //
+        // 这里只读 NSWorkspace 的前台 app 名(纯系统属性,不走 AX、不读窗口
+        // 标题和 URL)。**不记 intentionalSkip** —— 此刻还没记 attempt,
+        // 记了会让 silent_loss 算成负数。
+        //
+        // 切 app 那一瞬间这个系统属性可能还没 settle(读到的是上一个 app),
+        // 所以下面 2d 用 FocusProbe 再判一次 —— 那次才是保证,这里只是
+        // 尽早止损。
+        let frontAppName = await MainActor.run {
+            NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+        }
+        if ignore.shouldSkipFrame(appName: frontAppName, browserUrl: nil) {
             return
         }
 
