@@ -813,7 +813,7 @@ struct TypingCaptureSettingsView: View {
     @State private var discovered: [String] = []
 
     var body: some View {
-        SettingsPage("Typing Rebuild",
+        SettingsPage("Typing Capture & Rebuild",
                      onResetCurrentPage: {
                          config.mutate {
                              let def = RecordingConfig()
