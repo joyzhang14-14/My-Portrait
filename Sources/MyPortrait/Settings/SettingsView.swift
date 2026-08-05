@@ -159,6 +159,16 @@ struct SettingsSidebarRow: View {
                 Text(subsection.label)
                     .font(.system(size: 13, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
+                    // 红点贴在**文字**右上角(不是整行矩形的角)。overlay 不占
+                    // 布局,offset 把它推到文字外面,所以不会顶宽这一行。
+                    .overlay(alignment: .topTrailing) {
+                        if showsUnidentifiedDot {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                                .offset(x: 8, y: -1)
+                        }
+                    }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
@@ -169,15 +179,6 @@ struct SettingsSidebarRow: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
                         .strokeBorder(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
             )
-            .overlay(alignment: .topTrailing) {
-                if showsUnidentifiedDot {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 6, height: 6)
-                        .padding(.top, 6)
-                        .padding(.trailing, 8)
-                }
-            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.bouncyIcon)
