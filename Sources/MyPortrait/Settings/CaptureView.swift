@@ -212,7 +212,7 @@ struct AudioCaptureSettingsView: View {
     }
 
     var body: some View {
-        SettingsPage("Audio Capture",
+        SettingsPage("Audio Capture & Transcript",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
             audioSection
         }
