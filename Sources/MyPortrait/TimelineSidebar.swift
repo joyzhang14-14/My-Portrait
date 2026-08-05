@@ -722,6 +722,8 @@ struct TimelineSidebar: View {
                 }
             }
         }
+        // 侧栏一露面就算一次未命名簇数量,决定 Audio Capture 那行点不点红点。
+        .task { UnidentifiedSpeakerBadge.shared.refresh() }
     }
 
     // MARK: customize helper

@@ -103,6 +103,8 @@ struct SettingsScene: View {
             }
             Spacer()
         }
+        // 侧栏一露面就算一次未命名簇数量,决定 Audio Capture 那行点不点红点。
+        .task { UnidentifiedSpeakerBadge.shared.refresh() }
     }
 
     // MARK: - Detail
@@ -142,6 +144,11 @@ struct SettingsSidebarRow: View {
     let isActive: Bool
     let onTap: () -> Void
     @State private var hover = false
+    /// Audio Capture 那一行:还有没命名的声音簇时右上角点一个小红点。
+    @State private var speakerBadge = UnidentifiedSpeakerBadge.shared
+    private var showsUnidentifiedDot: Bool {
+        subsection == .capture(.audio) && speakerBadge.count > 0
+    }
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
@@ -162,6 +169,15 @@ struct SettingsSidebarRow: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
                         .strokeBorder(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
             )
+            .overlay(alignment: .topTrailing) {
+                if showsUnidentifiedDot {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 6)
+                        .padding(.trailing, 8)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.bouncyIcon)

@@ -97,8 +97,10 @@ struct SpeakersSettingsView: View {
             toolbar
 
             // ② diarization 自动识别 + 你命名、但没训练过的簇 —— 可随意管理。
-            SectionLabel("DETECTED SPEAKERS")
+            // 空的时候整块隐藏 —— 原来靠副标题当空状态提示,副标题去掉后
+            // 只剩一个光秃秃的标题。
             if !namedClusters.isEmpty {
+                SectionLabel("DETECTED SPEAKERS")
                 VStack(spacing: 6) {
                     ForEach(namedClusters) { r in
                         IdentifiedRow(row: r, trained: false,
@@ -189,7 +191,11 @@ struct SpeakersSettingsView: View {
         let model = config.current.capture.audio.speakerEmbeddingModel
         Task.detached(priority: .userInitiated) {
             let loaded = SpeakerLoader.loadAll(forModel: model)
-            await MainActor.run { rows = loaded }
+            await MainActor.run {
+                rows = loaded
+                // 侧栏小红点跟着走 —— 这里已经把全量读出来了,省一次查询。
+                UnidentifiedSpeakerBadge.shared.update(from: loaded)
+            }
         }
     }
 
@@ -1044,6 +1050,45 @@ private struct SpeakerRow: Identifiable, Hashable {
     /// 用户真跑过 voice training 的标记。nil = 仅 diarization / 仅 rename。
     /// SpeakersView "identified" 计数只数 trainedAt != nil 的。
     let trainedAt: Date?
+}
+
+/// 设置侧栏 Audio Capture 那一行右上角小红点的数据源:当前声纹模型下
+/// **还没命名**的声音簇数(> 0 就点亮)。
+///
+/// 说话人识别关掉时恒为 0 —— 那时 Speakers 整块都不显示,点了红点也没地方去。
+@MainActor
+@Observable
+final class UnidentifiedSpeakerBadge {
+    static let shared = UnidentifiedSpeakerBadge()
+
+    private(set) var count: Int = 0
+    @ObservationIgnored private var inFlight = false
+
+    private init() {}
+
+    /// 打开设置侧栏时调。查询是同步 sqlite JOIN + GROUP BY,必须离开主线程。
+    func refresh() {
+        guard !inFlight else { return }
+        let cfg = ConfigStore.shared.current.capture.audio
+        guard cfg.speakerIdEnabled else { count = 0; return }
+        inFlight = true
+        let model = cfg.speakerEmbeddingModel
+        Task.detached(priority: .utility) {
+            let n = SpeakerLoader.loadAll(forModel: model)
+                .filter { ($0.name ?? "").isEmpty }.count
+            await MainActor.run {
+                self.count = n
+                self.inFlight = false
+            }
+        }
+    }
+
+    /// Speakers 页 reload 完直接把结果同步过来,省一次重复查询。
+    fileprivate func update(from rows: [SpeakerRow]) {
+        count = ConfigStore.shared.current.capture.audio.speakerIdEnabled
+            ? rows.filter { ($0.name ?? "").isEmpty }.count
+            : 0
+    }
 }
 
 private enum SpeakerLoader {
