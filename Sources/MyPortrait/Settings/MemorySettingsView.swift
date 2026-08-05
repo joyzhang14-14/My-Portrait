@@ -505,20 +505,29 @@ struct MemorySettingsView: View {
             get: { freq.wrappedValue != .off },
             set: { freq.wrappedValue = $0 ? .daily : .off }
         )
-        return section(title: "Automatic processing", blurb: desc) {
-            HStack(alignment: .top, spacing: 12) {
-                if desc != nil {
+        // desc == nil:整张卡只剩「标题 + 开关」一行。
+        return section(
+            title: "Automatic processing",
+            blurb: desc,
+            titleTrailing: {
+                if desc == nil {
+                    Toggle("", isOn: autoRun).labelsHidden().toggleStyle(.switch)
+                }
+            }
+        ) {
+            if desc != nil {
+                HStack(alignment: .top, spacing: 12) {
                     Text(autoRun.wrappedValue
                         ? "Auto — the scheduler runs this when there's pending work and retries failures with backoff."
                         : "Manual only — runs only when you click Run now below.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 12)
+                    Toggle("", isOn: autoRun)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
                 }
-                Spacer(minLength: 12)
-                Toggle("", isOn: autoRun)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
             }
         }
     }
@@ -536,14 +545,22 @@ struct MemorySettingsView: View {
     private func runNowSectionFor(_ t: ManualTrigger,
                                   title: String = "Run now",
                                   info: String? = nil) -> some View {
+        // info != nil:Run 按钮直接摆在卡片标题行,里面不再重复一遍 trigger 名。
         section(
             title: title,
             blurb: info == nil
                 ? "Run this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first."
                 : nil,
-            info: info
+            info: info,
+            titleTrailing: {
+                if info != nil { triggerButton(t) }
+            }
         ) {
-            triggerRow(t, showDesc: info == nil)
+            if info == nil {
+                triggerRow(t)
+            } else if triggerActuallyRunning(t) {
+                progressIndicator(triggerProgress(t), onStop: { stopTrigger(t) })
+            }
             if !actionStatus.isEmpty {
                 Text(actionStatus)
                     .font(.system(size: 11, design: .monospaced))
@@ -580,7 +597,8 @@ struct MemorySettingsView: View {
         }
     }
 
-    private func triggerRow(_ t: ManualTrigger, showDesc: Bool = true) -> some View {
+    /// 本 trigger 现在是不是真在跑。
+    private func triggerActuallyRunning(_ t: ManualTrigger) -> Bool {
         // 自己是不是正在跑(本 View 自己的并发 token 集合 = runningTriggers)。
         let selfRunning = runningTriggers.contains(t)
         // scheduler 后台 catch-up 触发的 run 不经过本 View click → 不在
@@ -607,8 +625,59 @@ struct MemorySettingsView: View {
             }
         }()
         let schedulerSelfRunning = memFlag && dbInProgress
-        let actuallyRunning = selfRunning || schedulerSelfRunning
-        return VStack(alignment: .leading, spacing: 0) {
+        return selfRunning || schedulerSelfRunning
+    }
+
+    /// 单独的 Run 按钮 —— 既能摆在卡片标题行上,也能在 triggerRow 里用。
+    private func triggerButton(_ t: ManualTrigger) -> some View {
+        let actuallyRunning = triggerActuallyRunning(t)
+        // 读缓存,不在 body 里做 fileExists 同步 IO。
+        let pending: Bool = {
+            switch t {
+            case .eventProcessing: return pendingEvents
+            case .distill:         return pendingPortrait
+            case .personality:     return pendingPersonality
+            }
+        }()
+        let schedulerReason = schedulerBlockReason(for: t)
+        // 有没有活要干 —— 全 complete / dead_letter 时按钮该灰,避免误点。
+        let hasWork: Bool = {
+            switch t {
+            case .eventProcessing: return hasEventWork
+            case .distill:         return hasDistillWork
+            case .personality:     return hasPersonalityWork
+            }
+        }()
+        let noWorkReason: String? = {
+            switch t {
+            case .eventProcessing: return "All processed days are already complete — nothing to run."
+            case .distill:         return "Portrait is already up to date — nothing to distill."
+            case .personality:     return "Personality is already up to date — nothing to refresh."
+            }
+        }()
+        let disabledReason: String? = {
+            if actuallyRunning { return "\(t.title) is already running." }
+            if pending     { return "Pending review — Approve / Reject first." }
+            if let r = schedulerReason { return r }
+            if !hasWork    { return noWorkReason }
+            return nil
+        }()
+        let label: String = {
+            if actuallyRunning { return "Running…" }
+            if pending     { return "Pending review" }
+            return "Run"
+        }()
+        return Button(label) {
+            confirmTrigger = t
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(disabledReason != nil)
+        .help(disabledReason ?? "Trigger \(t.title) now.")
+    }
+
+    private func triggerRow(_ t: ManualTrigger, showDesc: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(t.title).font(.system(size: 13, weight: .semibold))
@@ -620,52 +689,10 @@ struct MemorySettingsView: View {
                     }
                 }
                 Spacer(minLength: 12)
-                // 读缓存,不在 body 里做 fileExists 同步 IO。
-                let pending: Bool = {
-                    switch t {
-                    case .eventProcessing: return pendingEvents
-                    case .distill:         return pendingPortrait
-                    case .personality:     return pendingPersonality
-                    }
-                }()
-                let schedulerReason = schedulerBlockReason(for: t)
-                // 有没有活要干 —— 全 complete / dead_letter 时按钮该灰,避免误点。
-                let hasWork: Bool = {
-                    switch t {
-                    case .eventProcessing: return hasEventWork
-                    case .distill:         return hasDistillWork
-                    case .personality:     return hasPersonalityWork
-                    }
-                }()
-                let noWorkReason: String? = {
-                    switch t {
-                    case .eventProcessing: return "All processed days are already complete — nothing to run."
-                    case .distill:         return "Portrait is already up to date — nothing to distill."
-                    case .personality:     return "Personality is already up to date — nothing to refresh."
-                    }
-                }()
-                let disabledReason: String? = {
-                    if actuallyRunning { return "\(t.title) is already running." }
-                    if pending     { return "Pending review — Approve / Reject first." }
-                    if let r = schedulerReason { return r }
-                    if !hasWork    { return noWorkReason }
-                    return nil
-                }()
-                let label: String = {
-                    if actuallyRunning { return "Running…" }
-                    if pending     { return "Pending review" }
-                    return "Run"
-                }()
-                Button(label) {
-                    confirmTrigger = t
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(disabledReason != nil)
-                .help(disabledReason ?? "Trigger \(t.title) now.")
+                triggerButton(t)
             }
             // 每条 trigger 自己的 inline 运行指示(实时进度条 + Stop)。
-            if actuallyRunning {
+            if triggerActuallyRunning(t) {
                 progressIndicator(triggerProgress(t), onStop: { stopTrigger(t) })
             }
         }
@@ -1467,15 +1494,22 @@ struct MemorySettingsView: View {
 
     @ViewBuilder
     /// `blurb` 传 nil = 不显示灰字说明;`info` 传文案 = 标题右边挂 ⓘ,点开看。
-    private func section<C: View>(title: String,
-                                  blurb: String? = nil,
-                                  info: String? = nil,
-                                  @ViewBuilder body: () -> C) -> some View {
+    /// `titleTrailing` = 摆在标题行最右边的控件(开关 / Run 按钮)。卡片里
+    /// 只有一个控件时用它,别让标题独占一行、控件再单起一行。
+    private func section<C: View, T: View>(
+        title: String,
+        blurb: String? = nil,
+        info: String? = nil,
+        @ViewBuilder titleTrailing: () -> T = { EmptyView() },
+        @ViewBuilder body: () -> C
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 0) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
                 if let info { SettingsInfoBadge(text: info) }
+                Spacer(minLength: 12)
+                titleTrailing()
             }
             if let blurb {
                 Text(blurb)
@@ -1483,10 +1517,10 @@ struct MemorySettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            VStack(spacing: 8) {
-                body()
-            }
-            .padding(.top, 4)
+            // body 直接摊进外层 VStack,**不再套一层 VStack(spacing:8) + padding**
+            // —— 套一层的话,body 为空(卡片只有标题 + 一个控件)时那层空容器
+            // 仍占一份 spacing,卡片底下多出一截死白。
+            body()
         }
         .padding(16)
         .background(
