@@ -615,7 +615,6 @@ struct ScreenCaptureSettingsView: View {
             // 总开关那张卡排最上面(2026-08-05 从 "Capture setting" 里剥出来单列)。
             screenToggleCard
             screenSection
-            powerModeCard
             privacySection
         }
         .task {
@@ -738,30 +737,30 @@ struct ScreenCaptureSettingsView: View {
         }.value
     }
 
-    private var powerModeCard: some View {
+    /// 采集频率档位 —— Capture setting 卡里的一行(不再单独占一张卡)。
+    @ViewBuilder private var captureFrequencyRow: some View {
         let current = PowerMode(rawValue: config.current.capture.system.powerMode) ?? .auto
-        return SettingsCard(
-            title: "Capture frequency",
-            info: "Trades screen-capture detail for battery life based on the profile you pick.\n\nAuto — adjusts based on battery state\nPerformance — full quality, ignores battery\nBalanced — balanced detail and battery\nBattery saver — maximum power saving"
+        SettingsRow(
+            "Capture frequency mode",
+            info: "Trades screen-capture detail for battery life based on the profile you pick.\n\nAuto — adjusts based on battery state\nPerformance — full quality, ignores battery\nBalanced — balanced detail and battery\nBattery saver — maximum power saving",
+            icon: current.icon
         ) {
-            SettingsRow("Mode", icon: current.icon) {
-                Picker("", selection: config.binding(\.capture.system.powerMode)) {
-                    ForEach(PowerMode.allCases) { m in
-                        Text(m.label).tag(m.rawValue)
-                    }
+            Picker("", selection: config.binding(\.capture.system.powerMode)) {
+                ForEach(PowerMode.allCases) { m in
+                    Text(m.label).tag(m.rawValue)
                 }
-                .pickerStyle(.menu).labelsHidden().frame(width: 170)
             }
-            // Auto 自己不是一个档位,是"按电池状态挑一档" —— 挑中哪一档
-            // 只有运行时才知道,所以选 Auto 时把当前实际生效的那档摊出来。
-            if current == .auto, !powerState.activeProfileName.isEmpty {
-                Text("Currently running \(powerState.activeProfileName)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
-            }
+            .pickerStyle(.menu).labelsHidden().frame(width: 170)
+        }
+        // Auto 自己不是一个档位,是"按电池状态挑一档" —— 挑中哪一档只有
+        // 运行时才知道,所以选 Auto 时把当前实际生效的那档摊出来。
+        if current == .auto, !powerState.activeProfileName.isEmpty {
+            Text("Currently running \(powerState.activeProfileName)")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 48)
+                .padding(.bottom, 10)
         }
     }
 
@@ -778,6 +777,8 @@ struct ScreenCaptureSettingsView: View {
     private var screenSection: some View {
         Group {
             SettingsCard(title: "Capture setting") {
+                captureFrequencyRow
+                SettingsDivider()
                 // (07-21 删 OCR accuracy booster 行:全分辨率抓帧永远开。)
                 SettingsRow("Pause capture at the lock screen",
                             info: "Skip captures while the Mac is at the lock screen or login window — those frames would only show the lock-screen wallpaper.",
