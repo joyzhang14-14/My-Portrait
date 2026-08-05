@@ -51,6 +51,15 @@ struct MemorySettingsView: View {
     @State private var eventsChanges: [MemoryStaging.StagedChange] = []
     @State private var portraitChanges: [MemoryStaging.StagedChange] = []
     @State private var personalityChanges: [MemoryStaging.StagedChange] = []
+    /// staged 事件按 folder 分组展示用 —— 待审核时读的是 **live 树**里的
+    /// folder(归类这一步已经跑完、跟事件一起等审批),所以看到的就是批准后
+    /// 会落库的样子。
+    @State private var stagedFolders: [EventFolder] = []
+    /// 展开的 folder slug。默认全收起。
+    @State private var expandedStagedFolders: Set<String> = []
+    /// folder 里**非本次产出**的老事件标题(relativePath → title)。展开某个
+    /// folder 时才后台读那一个 folder 的文件,不一上来扫全树。
+    @State private var stagedFolderTitles: [String: String] = [:]
     /// 三个 job 当前有没有活要干。每次 reload / run / approve / reject 后
     /// 刷新,不每帧扫 DB(扫 timeline + processing_log 有成本)。
     @State private var hasEventWork: Bool = true
@@ -239,12 +248,14 @@ struct MemorySettingsView: View {
         stagingRefreshTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
-            let (e, p, s) = await Task.detached(priority: .userInitiated) {
+            let (e, p, s, folders) = await Task.detached(priority: .userInitiated) {
                 (MemoryStaging.changes(.events),
                  MemoryStaging.changes(.portrait),
-                 MemoryStaging.changes(.personality))
+                 MemoryStaging.changes(.personality),
+                 EventFolderStore.loadAll())
             }.value
             guard !Task.isCancelled else { return }
+            stagedFolders = folders
             eventsChanges = e
             portraitChanges = p
             personalityChanges = s
@@ -850,12 +861,248 @@ struct MemorySettingsView: View {
             }
         }()
         if pending && !running {
-            section(
-                title: "Pending review",
-                blurb: "Results from a run are staged, not saved yet. Click an item to preview. Approve keeps it; Reject discards it."
-            ) {
-                reviewBlock(t.kind, t.title, changes)
+            if t == .eventProcessing {
+                // 事件这一路按 folder 分组展示 —— 归类是 pipeline 的最后一步,
+                // 审批的就是"这些新事件会落到哪些 folder 里"。
+                section(
+                    title: "Pending review",
+                    info: "Nothing is saved yet. Events are grouped by the folder the pipeline put them in — open a folder to see which events are new. Approve writes everything (events + folders) to your memory; Reject throws the whole run away."
+                ) {
+                    eventsFolderReviewBlock(changes)
+                }
+            } else {
+                section(
+                    title: "Pending review",
+                    blurb: "Results from a run are staged, not saved yet. Click an item to preview. Approve keeps it; Reject discards it."
+                ) {
+                    reviewBlock(t.kind, t.title, changes)
+                }
             }
+        }
+    }
+
+    // MARK: - 事件待审核:按 folder 分组
+
+    /// 一个 folder 在本次 run 里的收成。
+    private struct StagedFolderGroup: Identifiable {
+        let folder: EventFolder
+        /// 本次 run 动过的、落在这个 folder 里的事件(新建 + 改动)。
+        let runChanges: [MemoryStaging.StagedChange]
+        /// 这个 folder 里**没被本次 run 动过**的老事件 relativePath,新的在前。
+        let existing: [String]
+        var id: String { folder.slug }
+        var newCount: Int { runChanges.filter(\.isNew).count }
+    }
+
+    /// 展开时最多列几条 —— folder 里几百条老事件全铺出来没意义。
+    private static let stagedFolderRowCap = 40
+
+    private func stagedFolderGroups(_ changes: [MemoryStaging.StagedChange])
+        -> (groups: [StagedFolderGroup], ungrouped: [MemoryStaging.StagedChange])
+    {
+        let byPath = Dictionary(changes.map { ($0.relativePath, $0) },
+                                uniquingKeysWith: { a, _ in a })
+        var groups: [StagedFolderGroup] = []
+        var claimed = Set<String>()
+        for f in stagedFolders {
+            // folder.events 是按加入顺序追加的 → 倒序 = 最新在前。
+            let ordered = Array(f.events.reversed())
+            let runChanges = ordered.compactMap { byPath[$0] }
+            guard !runChanges.isEmpty else { continue }   // 本次没动到的 folder 不列
+            runChanges.forEach { claimed.insert($0.relativePath) }
+            groups.append(StagedFolderGroup(
+                folder: f,
+                runChanges: runChanges,
+                existing: ordered.filter { byPath[$0] == nil }
+            ))
+        }
+        // 新事件多的 folder 排前面,其次按名字稳定排序。
+        groups.sort {
+            $0.newCount != $1.newCount ? $0.newCount > $1.newCount
+                                       : $0.folder.name < $1.folder.name
+        }
+        return (groups, changes.filter { !claimed.contains($0.relativePath) })
+    }
+
+    private func eventsFolderReviewBlock(_ changes: [MemoryStaging.StagedChange]) -> some View {
+        let (groups, ungrouped) = stagedFolderGroups(changes)
+        let newN = changes.filter(\.isNew).count
+        let modN = changes.count - newN
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(changes.isEmpty
+                         ? "No content changes — only mechanical weight recomputation."
+                         : "\(newN) new event\(newN == 1 ? "" : "s")"
+                            + (modN > 0 ? ", \(modN) changed" : "")
+                            + " · \(groups.count) folder\(groups.count == 1 ? "" : "s")")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Button("Reject") { rejectStaging(.events) }
+                    .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                Button("Approve") { approveStaging(.events) }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+            }
+            ForEach(groups) { g in stagedFolderRow(g) }
+            if !ungrouped.isEmpty { stagedUngroupedRow(ungrouped) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 一个 folder 的可展开行。
+    @ViewBuilder
+    private func stagedFolderRow(_ g: StagedFolderGroup) -> some View {
+        let open = expandedStagedFolders.contains(g.folder.slug)
+        let tint = g.folder.colorHex.flatMap { FolderPalette.color(fromHex: $0) }
+            ?? FolderPalette.defaultTint(for: g.folder.name)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Circle().fill(tint).frame(width: 9, height: 9)
+                Text(g.folder.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                if g.newCount > 0 {
+                    Text("+\(g.newCount)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.green)
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.green.opacity(0.14)))
+                }
+                Spacer(minLength: 8)
+                Text("\(g.folder.count) event\(g.folder.count == 1 ? "" : "s")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    if open { expandedStagedFolders.remove(g.folder.slug) }
+                    else { expandedStagedFolders.insert(g.folder.slug) }
+                }
+                if !open { loadStagedTitles(for: g.existing) }
+            }
+            if open {
+                VStack(alignment: .leading, spacing: 0) {
+                    // 本次产出的排最前面,带 NEW / CHANGED 徽标、可点开预览。
+                    ForEach(g.runChanges) { ch in stagedEventRow(change: ch) }
+                    ForEach(g.existing.prefix(Self.stagedFolderRowCap), id: \.self) { path in
+                        stagedEventRow(existingPath: path)
+                    }
+                    if g.existing.count > Self.stagedFolderRowCap {
+                        Text("+\(g.existing.count - Self.stagedFolderRowCap) more already in this folder")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 26).padding(.vertical, 3)
+                    }
+                }
+                .padding(.leading, 6)
+            }
+        }
+    }
+
+    /// 归类没兜住的事件(LLM 判断不属于任何 folder)。
+    @ViewBuilder
+    private func stagedUngroupedRow(_ changes: [MemoryStaging.StagedChange]) -> some View {
+        let open = expandedStagedFolders.contains("_ungrouped")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Circle()
+                    .stroke(Color.secondary.opacity(0.5), lineWidth: 1)
+                    .frame(width: 9, height: 9)
+                Text("Not in a folder")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text("\(changes.count)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    if open { expandedStagedFolders.remove("_ungrouped") }
+                    else { expandedStagedFolders.insert("_ungrouped") }
+                }
+            }
+            if open {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(changes) { ch in stagedEventRow(change: ch) }
+                }
+                .padding(.leading, 6)
+            }
+        }
+    }
+
+    /// 本次 run 产出/改动的事件行 —— 可点开预览 diff。
+    private func stagedEventRow(change ch: MemoryStaging.StagedChange) -> some View {
+        Button { previewChange = ch } label: {
+            HStack(spacing: 8) {
+                Text(ch.isNew ? "NEW" : "CHANGED")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(ch.isNew ? Color.green : Color.orange)
+                    .frame(width: 58, alignment: .leading)
+                Text(ch.displayTitle)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 3)
+            .padding(.leading, 20)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// folder 里的老事件行 —— 只给上下文,没有 diff 可看,不可点。
+    private func stagedEventRow(existingPath path: String) -> some View {
+        HStack(spacing: 8) {
+            Text("")
+                .frame(width: 58, alignment: .leading)
+            Text(stagedFolderTitles[path] ?? Self.fileStem(path))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+        }
+        .padding(.vertical, 3)
+        .padding(.leading, 20)
+    }
+
+    nonisolated private static func fileStem(_ relativePath: String) -> String {
+        (relativePath as NSString).lastPathComponent
+            .replacingOccurrences(of: ".md", with: "")
+    }
+
+    /// 后台补读老事件的标题。只读展开的那个 folder 的前 N 条,读过的不重读。
+    private func loadStagedTitles(for paths: [String]) {
+        let missing = Array(paths.prefix(Self.stagedFolderRowCap))
+            .filter { stagedFolderTitles[$0] == nil }
+        guard !missing.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            var found: [String: String] = [:]
+            for rel in missing {
+                let url = Storage.eventsDir.appendingPathComponent(rel)
+                guard let file = try? PortraitFileIO.read(from: url) else { continue }
+                let t = file.eventTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                found[rel] = t.isEmpty ? Self.fileStem(rel) : t
+            }
+            let result = found
+            await MainActor.run { stagedFolderTitles.merge(result) { _, new in new } }
         }
     }
 
