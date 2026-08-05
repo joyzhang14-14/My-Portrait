@@ -83,8 +83,7 @@ struct SpeakersSettingsView: View {
 
             // ① 你训练的声纹 —— 资产,置顶。删除走二次确认(IdentifiedRow.trained)。
             if !trainedVoices.isEmpty {
-                SectionLabel("YOUR TRAINED VOICES",
-                             subtitle: "Voice recordings used to recognize you in transcripts. You'll be asked before any is removed.")
+                SectionLabel("YOUR TRAINED VOICES")
                 VStack(spacing: 6) {
                     ForEach(trainedVoices) { r in
                         IdentifiedRow(row: r, trained: true,
@@ -98,10 +97,7 @@ struct SpeakersSettingsView: View {
             toolbar
 
             // ② diarization 自动识别 + 你命名、但没训练过的簇 —— 可随意管理。
-            SectionLabel("DETECTED SPEAKERS",
-                         subtitle: namedClusters.isEmpty
-                            ? "Auto-detected voices you've named will show up here."
-                            : "\(namedClusters.count) named cluster\(namedClusters.count == 1 ? "" : "s") from auto-detection.")
+            SectionLabel("DETECTED SPEAKERS")
             if !namedClusters.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(namedClusters) { r in
@@ -117,7 +113,7 @@ struct SpeakersSettingsView: View {
             if !unidentified.isEmpty {
                 AttentionBanner(count: unidentified.count)
                 SectionLabel("UNIDENTIFIED CLUSTERS",
-                             subtitle: "Name these voice clusters so they're linked across recordings.")
+                             info: "Name these voice clusters so they're linked across recordings.")
                 VStack(spacing: 8) {
                     ForEach(unidentified) { r in
                         UnidentifiedCard(row: r,
@@ -322,9 +318,6 @@ private struct ProgressHeader: View {
                     Text(namedCount == 1 ? "1 speaker named" : "\(namedCount) speakers named")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.textPrimary.opacity(0.75))
-                    Text("Trained speakers are searchable as \(token: "@speaker:<name>") in chat.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                 }
                 Spacer()
             }
@@ -350,10 +343,6 @@ private struct AttentionBanner: View {
                 Text("\(count) unidentified \(count == 1 ? "cluster" : "clusters")")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                Text("Give each a name below so they're linked across recordings.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.60))
-                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
@@ -369,19 +358,18 @@ private struct AttentionBanner: View {
 
 private struct SectionLabel: View {
     let title: String
-    let subtitle: String
-    init(_ title: String, subtitle: String) {
-        self.title = title; self.subtitle = subtitle
+    /// 有值就在标题右边挂一个 ⓘ,点开看说明。原来的 subtitle 灰字已去掉。
+    var info: String? = nil
+    init(_ title: String, info: String? = nil) {
+        self.title = title; self.info = info
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 0) {
             Text(title)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(0.8)
                 .foregroundStyle(Theme.textPrimary.opacity(0.50))
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textPrimary.opacity(0.45))
+            if let info { SettingsInfoBadge(text: info) }
         }
         .padding(.top, 8)
         .padding(.bottom, 2)
@@ -807,11 +795,8 @@ struct VoiceTrainingCard: View {
                 Text("Voice Training")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                SettingsInfoBadge(text: "Read a short passage aloud for ~30 seconds. My Portrait will briefly turn on your microphone for the training session and turn it back off when it's done.")
             }
-            Text("Read a short passage aloud for ~30 seconds. My Portrait will briefly turn on your microphone for the training session and turn it back off when it's done.")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
                 Text("Speaker name")
