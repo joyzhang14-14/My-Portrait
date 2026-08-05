@@ -632,8 +632,9 @@ struct ScreenCaptureSettingsView: View {
                              $0.capture.system = .init()
                          }
                      }) {
-            powerModeCard
+            // 总开关那张卡排最上面。
             screenSection
+            powerModeCard
             privacySection
         }
         .task {
@@ -703,11 +704,12 @@ struct ScreenCaptureSettingsView: View {
         .padding(.vertical, 10)
     }
 
-    /// ⓘ 浮窗内容:说明 + Apps 名单 + Sites 名单。名单条目多的时候整块可滚。
+    /// ⓘ 浮窗内容:说明 + 两张**只读**名单。名单写死在 DRMGate,这里直接读
+    /// 那一份(单一事实来源,不会跟采集侧走偏)。
     private var protectedVideoPopover: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("When a listed app or site is in front, screen capture stops completely instead of just masking that window. This keeps DRM playback like Netflix or Disney+ from turning your screenshots black. Apps match by name, sites by URL — both ignore case.")
+                Text("When one of these apps or sites is in front, screen capture stops completely instead of just masking that window. This keeps DRM playback like Netflix or Disney+ from turning your screenshots black. Apps match by name, sites by URL — both ignore case. The list is fixed.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
@@ -715,16 +717,15 @@ struct ScreenCaptureSettingsView: View {
                 Divider().opacity(0.5)
 
                 popoverLabel("Apps")
-                PauseCaptureAppPicker(apps: config.binding(\.privacy.pauseCaptureApps))
+                readonlyTags(DRMGate.pausedApps, mono: false)
 
                 Divider().opacity(0.5)
 
                 popoverLabel("Sites")
-                TagListEditor(tags: config.binding(\.privacy.pauseCaptureUrls),
-                              placeholder: "e.g. netflix.com, hbomax.com")
+                readonlyTags(DRMGate.pausedUrls, mono: true)
             }
             .padding(14)
-            .frame(width: 420, alignment: .leading)
+            .frame(width: 380, alignment: .leading)
         }
         .frame(maxHeight: 460)
     }
@@ -734,6 +735,22 @@ struct ScreenCaptureSettingsView: View {
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
             .tracking(0.8)
             .foregroundStyle(Theme.textPrimary.opacity(0.45))
+    }
+
+    /// 只读小药丸 —— 跟 TagListEditor 的 pill 同一套观感,但没有 × 按钮。
+    private func readonlyTags(_ items: [String], mono: Bool) -> some View {
+        FlowLayout(spacing: 6) {
+            ForEach(items, id: \.self) { s in
+                Text(s)
+                    .font(.system(size: 11, design: mono ? .monospaced : .default))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.80))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(Color.primary.opacity(0.07))
+                            .overlay(Capsule().stroke(Color.primary.opacity(0.12), lineWidth: 0.7))
+                    )
+            }
+        }
     }
 
     /// Off-main scan of `frames.app_name` for the ignored-apps dropdown.
@@ -761,7 +778,7 @@ struct ScreenCaptureSettingsView: View {
 
     private var screenSection: some View {
         Group {
-            SettingsCard(title: "Screen Capture") {
+            SettingsCard(title: "Capture setting") {
                 SettingsRow("Screen Capture",
                             description: "Capture periodic snapshots of your screen.",
                             icon: "display") {
