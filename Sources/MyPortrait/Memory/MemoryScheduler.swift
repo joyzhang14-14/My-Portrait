@@ -940,8 +940,9 @@ final class MemoryScheduler {
                 }
             }
 
-            // 至少有一天完整产出后，folder 分类进入 pending。手动 Run now 有
-            // 审核/撤销，因此只标记；定时 event job 会在下面立即执行。
+            // 至少有一天完整产出后，folder 分类进入 pending，下面立即执行
+            // （手动和定时都跑 —— 手动 "Process events now" 就是跑整条
+            //  pipeline，不该把收尾这一步留给下一次定时 tick）。
             let producedEvents = days.contains { day in
                 let row = store.row(for: ProcessingLogStore.dayString(day))
                 return row?.event == .complete && row?.impact == .complete
@@ -952,8 +953,11 @@ final class MemoryScheduler {
             }
         }
 
+        // folder 分类收尾。**手动触发也跑** —— classify 的 stagingKind 是 nil
+        // (不进审核流),而它写的 `events/_folders/` 就在 events 快照树里面,
+        // 用户 Reject 掉这次 run 时 folder 会跟着一起还原,不会留下悬空引用。
         var classifierAttempted = false
-        if trigger == .scheduler, classifierJobHasWork() {
+        if classifierJobHasWork() {
             classifierAttempted = true
             eventProgress = StepProgress(fraction: 0.995, stage: "Organizing event folders")
             DiagLog.event("scheduler.classify.start")
