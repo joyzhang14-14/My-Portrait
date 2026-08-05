@@ -1,23 +1,21 @@
 import Foundation
 import os
 
-/// 用户配置的"屏蔽"闸门。**两套判据,别混**：
+/// 用户配置的"屏蔽"闸门：决定哪些**窗口**要从截图里抹掉。
 ///
-///   1. `shouldSkipFrame` —— 名单里的 app / 页面在**最前台**(你正在用它)
-///      → 这一帧根本不拍。
-///   2. `shouldMaskWindow` —— 名单里的窗口只是在**后台**露一角 → 帧照拍,
-///      那个窗口从 SCK 捕获 buffer 里排除(渲染成黑)。
+/// ⚠️ **命中永远不跳整帧,只抠掉那个窗口。** 帧就是时间轴本身 —— timeline、
+/// 音频、打字三路都按帧的时间戳对齐,少一帧等于时间轴上凭空少一段。所以
+/// 屏蔽固定是:帧照拍、命中的窗口从 SCK 捕获 buffer 里排除(那块渲染成
+/// 不透明黑)。(08-05 试过"前台命中就跳整帧",因为上面这条耦合关系回退。)
 ///
-/// 也就是:「你正在用它」什么都不记,「它只是开着」只把它那块黑掉。
-/// 桌面壁纸不在这套语义里 —— 它走独立开关 `setWallpaperTransparent`,
-/// 只影响遮挡,永远不会让整帧跳过。
+/// 桌面壁纸走独立开关 `setWallpaperTransparent`,与用户名单无关。
 ///
-/// 与 DRMGate 的区别：DRMGate 是硬编码列表 + 系统级硬规则，命中 → 停整条
-/// 流水线 + invalidate SCStream(受保护视频不停流会黑屏);IgnoreGate 只是
-/// 不拍这一帧,流不动。
+/// 与 DRMGate 的区别：DRMGate 是硬编码列表 + 系统级硬规则,命中 → 停整条
+/// 流水线 + invalidate SCStream —— 那是没办法,受保护视频不停流会让用户
+/// 自己正在看的播放黑屏。IgnoreGate 没有这个约束,所以不停。
 ///
-/// 逐窗口那部分仿 My-Orphies `screenpipe-screen/.../
-/// capture_screenshot_by_window.rs` 的 `WindowFilters::is_valid`。
+/// 仿 My-Orphies `screenpipe-screen/.../capture_screenshot_by_window.rs`
+/// 的 `WindowFilters::is_valid`：逐窗口判定,不通过的窗口排除出捕获。
 final class IgnoreGate: @unchecked Sendable {
 
     /// 永远排除的系统进程（锁屏等）。仿 screenpipe `BUILTIN_IGNORED`。
@@ -84,29 +82,7 @@ final class IgnoreGate: @unchecked Sendable {
             || snap.urlSubstrings.contains { !$0.isEmpty }
     }
 
-    /// **整帧判据**:当前前台内容是否命中用户名单 → `true` = 这一帧不拍。
-    ///
-    /// 只看前台 app 名和当前页面 URL,**跟 CaptureLampState 的紫灯完全同口径**
-    /// —— 两边各写一份判据必然走偏,而对一盏"用来自证没在记"的灯,
-    /// 走偏就是最严重的错。
-    func shouldSkipFrame(appName: String, browserUrl: String?) -> Bool {
-        let snap = state.withLock { $0 }
-        let app = appName.lowercased()
-        if !app.isEmpty {
-            for term in snap.appsLower where !term.isEmpty && app.contains(term) {
-                return true
-            }
-        }
-        if let url = browserUrl?.lowercased(), !url.isEmpty {
-            for sub in snap.urlSubstrings where !sub.isEmpty && url.contains(sub) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// **逐窗口判据**:这个窗口要不要从捕获 buffer 里排除(渲染成黑)。
-    /// 走到这里说明前台没命中(命中的话整帧已经跳了),处理的是后台露一角的窗口。
+    /// 一个窗口是否应该从截图里抹掉(帧照拍,这块渲染成黑)：
     ///   - builtin 系统进程永远抹
     ///   - 壁纸窗口:看 `wallpaperTransparent` 开关,与用户名单无关
     ///   - masking 关 → 用户规则不再抹

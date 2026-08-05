@@ -1,4 +1,3 @@
-import AppKit
 import CoreGraphics
 import Foundation
 import os.log
@@ -278,28 +277,6 @@ actor CaptureCoordinator {
         // dedup 才能算对。
         await VisionMetrics.shared.recordAttempt()
 
-        // P5b: 前台 app 命中 ignore 名单 → 在读焦点、抓帧**之前**退出。
-        // 切到 1Password 本身会发 .appSwitch 把这条流水线拉起来;名单里的
-        // app 不该被碰 —— 这里只读 NSWorkspace 的前台 app 名(纯系统属性,
-        // 不走 AX、不读窗口标题和 URL),够判断就够了。
-        //
-        // ⚠️ **必须排在 recordAttempt 之后、且记 intentionalSkip**。
-        // 早于 recordAttempt 就退出的话,人一直待在 ignored app 里
-        // `lastAttemptMs` 就永远不更新,StallDetector 60s 后判 visionFrozenCapture
-        // 弹"Screen capture appears frozen";而记了 attempt 不记 skip,
-        // silent_loss 会一路涨,换成 visionDbWrite 假警报。两头都得对上。
-        //
-        // 切 app 那一瞬间这个系统属性可能还没 settle(读到的是上一个 app),
-        // 所以下面 2d 用 FocusProbe 再判一次 —— 那次才是保证,这里只是
-        // 尽早止损。
-        let frontAppName = await MainActor.run {
-            NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
-        }
-        if ignore.shouldSkipFrame(appName: frontAppName, browserUrl: nil) {
-            await VisionMetrics.shared.recordIntentionalSkip()
-            return
-        }
-
         // 1. 焦点信息（actor，O(1) 读缓存）。
         let focusInfo = await focus.snapshot()
 
@@ -329,16 +306,10 @@ actor CaptureCoordinator {
             return
         }
 
-        // 2d. 前台 app / 当前页面命中用户 ignore 名单 → **整帧跳过**。
-        //     "你正在用它" = 什么都不记。它只是在后台露一角的情况走不到这里,
-        //     由 ScreenCaptureService 把那个窗口遮成黑(帧照拍)。
-        if ignore.shouldSkipFrame(appName: focusInfo.appName, browserUrl: focusInfo.browserUrl) {
-            await VisionMetrics.shared.recordIntentionalSkip()
-            return
-        }
-
-        // 3. 抓帧。后台露一角的 ignore 窗口由 ScreenCaptureService 在 SCK
-        //    content filter 里排除（content masking，帧照拍、窗口渲染成黑）。
+        // 3. 抓帧。**用户 ignore 名单不跳整帧** —— 帧就是时间轴本身,跟音频 /
+        //    打字两路按时间对齐,少一帧就是时间轴上少一段。命中的窗口由
+        //    ScreenCaptureService 在 SCK content filter 里排除(content
+        //    masking:帧照拍,那个窗口在帧里被抠掉)。
         let image = try await screen.captureMainDisplay()
 
         // 5. 去重。

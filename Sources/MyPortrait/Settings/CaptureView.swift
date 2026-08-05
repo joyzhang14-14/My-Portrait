@@ -629,10 +629,10 @@ struct ScreenCaptureSettingsView: View {
         // (07-21 删掉 "Capture rules" 卡:incognito 跳帧永久关(要屏蔽的内容
         //  走下面两张名单)、mask 永远开(行为说明写进两张名单的脚注)。)
         SettingsCard(
-            // App 名单和 URL 名单行为完全一样(前台不拍 / 后台遮黑),合成
-            // 一张卡,中间用分割线分区。
+            // App 名单和 URL 名单行为完全一样(窗口抠掉、帧照拍),合成一张卡,
+            // 中间用分割线分区。
             title: "Ignored apps & URLs",
-            info: "While one of these apps — or a page matching one of these URLs — is in front, no screenshot is taken at all. If it's only sitting in the background, the screenshot is still taken and that window comes out black.\n\nMatching ignores case. Apps match on the app name or window title; URLs match as substrings, so \"chase.com\" covers every page on chase.com."
+            info: "The screenshot is still taken — the matching window is just cut out of it and comes out black. Everything else on screen is captured as usual.\n\nWhy not skip the whole frame? Frames are the timeline. Your recordings and typing history are lined up against them, so a missing frame is a missing stretch of your day, not just a missing picture.\n\nMatching ignores case. Apps match on the app name or window title; URLs match as substrings, so \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Apps — pick from captured apps or the system / privacy list…")
