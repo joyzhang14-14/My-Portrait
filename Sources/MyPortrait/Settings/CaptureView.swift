@@ -649,25 +649,22 @@ struct ScreenCaptureSettingsView: View {
         // (07-21 删掉 "Capture rules" 卡:incognito 跳帧永久关(要屏蔽的内容
         //  走下面两张名单)、mask 永远开(行为说明写进两张名单的脚注)。)
         SettingsCard(
-            title: "Ignored apps",
-            footnote: "While one of these apps is in front, no screenshot is taken at all. If it's only sitting in the background, the screenshot is still taken and that window comes out black. Matching ignores case and checks the app name or window title."
+            // App 名单和 URL 名单行为完全一样(前台不拍 / 后台遮黑),合成
+            // 一张卡,中间用分割线分区。
+            title: "Ignored apps & URLs",
+            info: "While one of these apps — or a page matching one of these URLs — is in front, no screenshot is taken at all. If it's only sitting in the background, the screenshot is still taken and that window comes out black.\n\nMatching ignores case. Apps match on the app name or window title; URLs match as substrings, so \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Pick from captured apps or the system / privacy list…")
+                Text("Apps — pick from captured apps or the system / privacy list…")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps), discovered: discoveredApps)
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
-        }
-
-        SettingsCard(
-            title: "Ignored URLs",
-            footnote: "While you're on a matching page, no screenshot is taken at all. A matching window sitting in the background comes out black instead. Substring match. e.g. \"chase.com\" covers every page on chase.com."
-        ) {
+            SettingsDivider()
             VStack(alignment: .leading, spacing: 0) {
-                Text("Hostnames or substrings…")
+                Text("URLs — hostnames or substrings…")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
