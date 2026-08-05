@@ -172,14 +172,15 @@ struct MemorySettingsView: View {
                     pipelineFlowSection(.personalityRefresher)
                     reviewSectionFor(.personality)
                 case .writingStyleDistiller:
-                    // writing style 不走 ManualTrigger(有自己的 staged-draft
-                    // 审核流),所以手动那一块仍是独立卡,只跟着自动开关显隐。
-                    autoRunSection(nil, config: \.scheduler.writingStyle)
+                    // writing style 不走 ManualTrigger(自己一套禁用判据 + 运行
+                    // 态),所以手动那一行是自己写的,但卡片形态跟另外三条一样:
+                    // 并进 Automatic processing,自动开关关掉时才伸出来。
+                    autoRunSection(nil, config: \.scheduler.writingStyle,
+                                   hasManual: true) {
+                        writingStyleManualRow
+                    }
                     providerSection(\.scheduler.writingStyle)
                     pipelineFlowSection(.writingStyleDistiller)
-                    if cfg.current.scheduler.writingStyle.frequency == .off {
-                        writingStyleRunNowSection
-                    }
                     writingStyleReviewSection
                 case .changelog:
                     attentionSection
@@ -543,6 +544,41 @@ struct MemorySettingsView: View {
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>,
         manual: (trigger: ManualTrigger, title: String, info: String)? = nil
     ) -> some View {
+        autoRunSection(desc, config: kp, hasManual: manual != nil) {
+            if let m = manual {
+                HStack(spacing: 0) {
+                    Text(m.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                    SettingsInfoBadge(text: m.info)
+                    Spacer(minLength: 12)
+                    triggerButton(m.trigger)
+                }
+                if triggerActuallyRunning(m.trigger) {
+                    progressIndicator(triggerProgress(m.trigger),
+                                      onStop: { stopTrigger(m.trigger) })
+                }
+                if !actionStatus.isEmpty {
+                    Text(actionStatus)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    /// 上面那个的底座 —— 手动那一块换成任意内容。writing style 用它:它不走
+    /// ManualTrigger(自己一套禁用判据 + 运行态),但卡片形态要跟另外三条一样。
+    /// `hasManual` 决定画不画分隔线 —— 内容是 ViewBuilder,这里没法反过来
+    /// 问它"你是不是空的"。
+    private func autoRunSection<M: View>(
+        _ desc: String?,
+        config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>,
+        hasManual: Bool,
+        @ViewBuilder manual: () -> M
+    ) -> some View {
         let freq = cfg.binding(kp.appending(path: \.frequency))
         let autoRun = Binding<Bool>(
             get: { freq.wrappedValue != .off },
@@ -572,27 +608,9 @@ struct MemorySettingsView: View {
                         .toggleStyle(.switch)
                 }
             }
-            if let m = manual, !autoRun.wrappedValue {
+            if hasManual, !autoRun.wrappedValue {
                 Divider().opacity(0.35)
-                HStack(spacing: 0) {
-                    Text(m.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                    SettingsInfoBadge(text: m.info)
-                    Spacer(minLength: 12)
-                    triggerButton(m.trigger)
-                }
-                if triggerActuallyRunning(m.trigger) {
-                    progressIndicator(triggerProgress(m.trigger),
-                                      onStop: { stopTrigger(m.trigger) })
-                }
-                if !actionStatus.isEmpty {
-                    Text(actionStatus)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                manual()
             }
         }
     }
@@ -637,14 +655,44 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// Writing Style Distiller 页的「Run now」卡 —— writing style 不走 ManualTrigger
-    /// (有自己的 staged-draft 审核流),sheets/alert 挂在这张卡上。
-    private var writingStyleRunNowSection: some View {
-        section(
-            title: "Distill writing style now",
-            info: "Runs writing style distillation now instead of waiting for the schedule. It uses AI, and manual runs stage drafts for you to review before anything is saved."
-        ) {
-            writingStyleBlock
+    /// Writing Style Distiller 的手动运行行 —— 跟另外三条的手动行同形
+    /// (标题 + ⓘ + 右侧 Run 按钮),塞进 Automatic processing 卡里。
+    /// writing style 不走 ManualTrigger,禁用判据和运行态都是自己这一套。
+    @ViewBuilder
+    private var writingStyleManualRow: some View {
+        let hasPending = !writingStylePending.isEmpty
+        let disabledReason: String? = {
+            if WritingStyleDistiller.shared == nil { return "Writing style distiller is not available." }
+            if writingStyleUI.isRunning { return "Writing style is already running." }
+            if hasPending { return "Pending review — Approve / Reject first." }
+            if writingStyleUnprocessed == 0 {
+                return "Nothing to distill — run writing capture first to produce writing_records."
+            }
+            return nil
+        }()
+        HStack(spacing: 0) {
+            Text("Distill writing style now")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
+            SettingsInfoBadge(text: "Runs writing style distillation now instead of waiting for the schedule. It uses AI, and manual runs stage drafts for you to review before anything is saved.\n\nLearns tone, voice and editing habits from writing you've already approved — up to \(WritingStyleDistiller.defaultBatchCap) pieces per run. \(writingStyleUnprocessed) still to process.")
+            Spacer(minLength: 12)
+            Button(writingStyleUI.isRunning ? "Running…" : "Run") {
+                writingStyleConfirm = true
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(disabledReason != nil)
+            .help(disabledReason ?? "Run writing style distillation (manual mode, staged for review).")
+        }
+        if writingStyleUI.isRunning {
+            writingStyleRunningIndicator(writingStyleUI.stage, onStop: { stopWritingStyle() })
+        }
+        if !writingStyleUI.statusMessage.isEmpty {
+            Text(writingStyleUI.statusMessage)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1563,56 +1611,6 @@ struct MemorySettingsView: View {
     }()
 
     // MARK: - Writing style(portrait 侧,typing 的下游;消费 approved writing)
-
-    /// writing_style 提炼链路的 inline 子区块。manual 模式 = staged + pending
-    /// review;auto 模式由 scheduler 自动跑,直接落 portrait/writing_style/。
-    /// alert / sheet 由 runNowSection 顶端挂。跟其它 triggerRow 同形。
-    @ViewBuilder
-    private var writingStyleBlock: some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Distill writing style")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Learns your writing style (tone, voice, editing habits) from approved writing. Up to \(WritingStyleDistiller.defaultBatchCap) pieces per run · \(writingStyleUnprocessed) still to process. Manual runs stage drafts; automatic runs save directly.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                let ssHasPending = !writingStylePending.isEmpty
-                let ssDisabledReason: String? = {
-                    if WritingStyleDistiller.shared == nil { return "Writing style distiller is not available." }
-                    if writingStyleUI.isRunning { return "Writing style is already running." }
-                    if ssHasPending { return "Pending review — Approve / Reject first." }
-                    if writingStyleUnprocessed == 0 {
-                        return "Nothing to distill — run writing capture first to produce writing_records."
-                    }
-                    return nil
-                }()
-                Button(writingStyleUI.isRunning ? "Running…" : "Run") {
-                    writingStyleConfirm = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(ssDisabledReason != nil)
-                .help(ssDisabledReason ?? "Run writing style distillation (manual mode, staged for review).")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if writingStyleUI.isRunning {
-                writingStyleRunningIndicator(writingStyleUI.stage, onStop: { stopWritingStyle() })
-            }
-            if !writingStyleUI.statusMessage.isEmpty {
-                Text(writingStyleUI.statusMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
-            }
-        }
-    }
 
     /// spinner + 阶段文案 + Stop(writing style 暂无单元级进度信号,维持
     /// indeterminate;有信号后换 progressIndicator)。
