@@ -374,7 +374,9 @@ struct MyPortraitApp: App {
             let day = args.firstIndex(of: "--day").flatMap { i -> String? in
                 i + 1 < args.count ? args[i + 1] : nil
             }
-            OcrBackfillCLI.run(limit: limit, day: day)
+            // --force:连已写过 ocr_backfill_text 的行也重跑(2026-08-05 抽帧
+            // 差一帧的 bug 修好后,存量 79,433 行需要覆盖重写)。
+            OcrBackfillCLI.run(limit: limit, day: day, force: args.contains("--force"))
         }
         // 一次性清理:库中全部 loginwindow(锁屏)帧 + 纯锁屏 MP4(配套
         // capture.screen.pauseWhenLocked —— 新帧不再产生,存量清一次)。

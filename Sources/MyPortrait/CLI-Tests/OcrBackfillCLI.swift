@@ -24,10 +24,10 @@ import Vision
 /// 用法:`swift run MyPortrait --ocr-backfill [--limit N] [--day YYYY-MM-DD]`
 enum OcrBackfillCLI {
 
-    static func run(limit: Int?, day: String?) {
+    static func run(limit: Int?, day: String?, force: Bool = false) {
         Task {
             do {
-                let n = try await backfill(limit: limit, day: day)
+                let n = try await backfill(limit: limit, day: day, force: force)
                 print("[ocr-backfill] done. updated \(n) frame(s)")
                 exit(0)
             } catch {
@@ -45,7 +45,7 @@ enum OcrBackfillCLI {
         let offsetMs: Int64
     }
 
-    private static func backfill(limit: Int?, day: String?) async throws -> Int {
+    private static func backfill(limit: Int?, day: String?, force: Bool) async throws -> Int {
         let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
@@ -70,7 +70,7 @@ enum OcrBackfillCLI {
                        COALESCE(f.offset_ms, 0) AS off
                 FROM frames f
                 LEFT JOIN video_chunks vc ON f.video_chunk_id = vc.id
-                WHERE f.ocr_backfill_text IS NULL
+                WHERE \(force ? "1=1" : "f.ocr_backfill_text IS NULL")
                   AND (f.text_source IS NULL OR f.text_source <> 'ocr')
                   AND (f.snapshot_path IS NOT NULL OR vc.file_path IS NOT NULL)
                   \(dayClause)
@@ -151,7 +151,20 @@ enum OcrBackfillCLI {
         gen.appliesPreferredTrackTransform = true
         gen.requestedTimeToleranceBefore = .zero
         gen.requestedTimeToleranceAfter = .zero
-        let time = CMTime(value: CMTimeValue(max(0, t.offsetMs)), timescale: 1000)
+        // ⚠️ 2026-08-05 修:原版直接请求 `CMTime(value: offsetMs, timescale: 1000)`,
+        // **取到的是上一帧**。frames.offset_ms 是整毫秒,而 MP4 封装的时间基是 600 ——
+        // HEVCEncoder 写的 43138ms 落盘后成了 25883/600 = 43138.333ms。零容差是
+        // "返回该时刻**正在显示**的那一帧",43.138 < 43.138333 落在前一帧的显示
+        // 区间里,于是拿到前一帧的画面。实测封装舍入偏差 ±0.667ms,34.7% 的帧
+        // PTS > offset_ms(全都会踩中);app 切换处对照:补跑帧 29.2% 的文字属于
+        // 上一帧,而原生 OCR 帧只有 10.1%。
+        // 修法是**请求时刻 +1ms**,不是加容差 —— 容差只允许生成器换个时刻偷懒,
+        // 不会让它去找"最近的帧",实测 ±2ms 容差照样返回上一帧。+1ms 覆盖了
+        // ±0.833ms 的舍入,又远小于最小帧间隔(约 700ms),不会越到下一帧。
+        // 三向实测:PTS 舍入变大 38.748→43.138 ✓ / 舍入变小仍取原帧 ✓ / 首帧 ✓。
+        // (ImageLoader 用 preferredTimescale: 600 与封装同基,恰好躲开了这个坑;
+        //  ReOcrCLI 给了 ±500ms 容差,靠"就近"侥幸躲过。)
+        let time = CMTime(value: CMTimeValue(max(0, t.offsetMs) + 1), timescale: 1000)
         return try? await gen.image(at: time).image
     }
 
