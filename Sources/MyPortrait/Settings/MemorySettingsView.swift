@@ -890,7 +890,7 @@ struct MemorySettingsView: View {
             info: "Every step this pipeline runs, in order. Click any box to see what it does.\n\nSolid lines carry data. Dashed lines only mark the next pipeline as pending — no data moves along them."
         ) {
             PipelineFlowView(flow: flow)
-            PipelineFlowLegend()
+            PipelineFlowLegend(flow: flow)
                 .padding(.top, 2)
         }
     }

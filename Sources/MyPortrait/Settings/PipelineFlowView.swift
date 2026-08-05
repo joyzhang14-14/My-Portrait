@@ -28,6 +28,9 @@ struct PipelineFlow {
     enum EdgeKind {
         /// 数据流:上一步的产物是下一步的输入。实线 + 箭头。
         case data
+        /// 换行:上一行的末尾接下一行的开头。走直角折线(下 → 横 → 下),
+        /// 直接连的话是一条横穿整张图的长斜线,谁也看不懂。
+        case wrap
         /// 触发关系:不传数据,只是把下游标成待跑。虚线 + 箭头。
         case trigger
     }
@@ -67,7 +70,7 @@ struct PipelineFlowView: View {
     let flow: PipelineFlow
 
     /// 节点盒子尺寸 —— 固定,不随内容伸缩(布局是手排的,伸缩会把连线错开)。
-    private static let nodeW: CGFloat = 196
+    private static let nodeW: CGFloat = 176
     private static let nodeH: CGFloat = 46
 
     @State private var openNode: String? = nil
@@ -95,39 +98,68 @@ struct PipelineFlowView: View {
 
     // MARK: 边
 
-    /// 上一个节点的底边中点 → 下一个节点的顶边中点。同一列走直线,跨列走
-    /// 三次贝塞尔(控制点垂直拉开),避免斜穿过别的节点。
+    /// 三种走线:
+    ///   - 同一行相邻 → 左边框中点到右边框中点,直线(横向流)
+    ///   - 换行 → 从末节点底边下去,横向折回,再下到首节点顶边(直角 + 圆角)
+    ///   - 其余(下一行分叉)→ 底边到顶边,三次贝塞尔
     private func drawEdge(ctx: GraphicsContext, size: CGSize,
                           from a: PipelineFlow.Node, to b: PipelineFlow.Node,
                           kind: PipelineFlow.EdgeKind) {
-        let p0 = CGPoint(x: a.pos.x * size.width,
-                         y: a.pos.y * size.height + Self.nodeH / 2)
-        let p1 = CGPoint(x: b.pos.x * size.width,
-                         y: b.pos.y * size.height - Self.nodeH / 2)
+        let ax = a.pos.x * size.width, ay = a.pos.y * size.height
+        let bx = b.pos.x * size.width, by = b.pos.y * size.height
+        let halfW = Self.nodeW / 2, halfH = Self.nodeH / 2
+        let color = Color.primary.opacity(kind == .trigger ? 0.18 : 0.28)
+        let style: StrokeStyle = kind == .trigger
+            ? StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [4, 4])
+            : StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
+
         var path = Path()
-        path.move(to: p0)
-        if abs(p0.x - p1.x) < 0.5 {
-            path.addLine(to: p1)
+        var tip = CGPoint.zero          // 箭头尖
+        var facing = Facing.down
+
+        if kind == .wrap {
+            // 下 → 横 → 下。折点落在两行正中间。
+            let midY = (ay + halfH + by - halfH) / 2
+            let p0 = CGPoint(x: ax, y: ay + halfH)
+            tip = CGPoint(x: bx, y: by - halfH)
+            path.move(to: p0)
+            path.addLine(to: CGPoint(x: ax, y: midY))
+            path.addLine(to: CGPoint(x: bx, y: midY))
+            path.addLine(to: tip)
+        } else if abs(ay - by) < 0.5 {
+            // 同一行 → 横着连。
+            let p0 = CGPoint(x: ax + halfW, y: ay)
+            tip = CGPoint(x: bx - halfW, y: by)
+            path.move(to: p0)
+            path.addLine(to: tip)
+            facing = .right
         } else {
-            let dy = (p1.y - p0.y) * 0.55
-            path.addCurve(to: p1,
+            let p0 = CGPoint(x: ax, y: ay + halfH)
+            tip = CGPoint(x: bx, y: by - halfH)
+            let dy = (tip.y - p0.y) * 0.55
+            path.move(to: p0)
+            path.addCurve(to: tip,
                           control1: CGPoint(x: p0.x, y: p0.y + dy),
-                          control2: CGPoint(x: p1.x, y: p1.y - dy))
+                          control2: CGPoint(x: tip.x, y: tip.y - dy))
         }
-        let color = Color.primary.opacity(kind == .data ? 0.28 : 0.18)
-        let style: StrokeStyle = kind == .data
-            ? StrokeStyle(lineWidth: 1.4, lineCap: .round)
-            : StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [4, 4])
         ctx.stroke(path, with: .color(color), style: style)
 
-        // 箭头 —— 贴在终点上方,朝下。
         var head = Path()
-        head.move(to: CGPoint(x: p1.x - 4, y: p1.y - 5))
-        head.addLine(to: CGPoint(x: p1.x, y: p1.y))
-        head.addLine(to: CGPoint(x: p1.x + 4, y: p1.y - 5))
+        switch facing {
+        case .down:
+            head.move(to: CGPoint(x: tip.x - 4, y: tip.y - 5))
+            head.addLine(to: tip)
+            head.addLine(to: CGPoint(x: tip.x + 4, y: tip.y - 5))
+        case .right:
+            head.move(to: CGPoint(x: tip.x - 5, y: tip.y - 4))
+            head.addLine(to: tip)
+            head.addLine(to: CGPoint(x: tip.x - 5, y: tip.y + 4))
+        }
         ctx.stroke(head, with: .color(color),
                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
     }
+
+    private enum Facing { case down, right }
 
     // MARK: 节点
 
@@ -198,54 +230,71 @@ struct PipelineFlowView: View {
         }
     }
 
-    private struct NodeStyle {
+    struct NodeStyle {
         let icon: String
         let tint: Color
         let dashed: Bool
         /// 浮窗里那行小字,告诉用户这一步的性质。
         let label: String
+        /// 图例里的短名。
+        let short: String
     }
 
-    private static func style(for kind: PipelineFlow.NodeKind) -> NodeStyle {
+    static func style(for kind: PipelineFlow.NodeKind) -> NodeStyle {
         switch kind {
         case .source:
             return NodeStyle(icon: "externaldrive", tint: Color(red: 0.95, green: 0.55, blue: 0.20),
-                             dashed: false, label: "CAPTURED DATA")
+                             dashed: false, label: "CAPTURED DATA", short: "Captured data")
         case .deterministic:
             return NodeStyle(icon: "function", tint: Color.secondary,
-                             dashed: true, label: "DETERMINISTIC · NO AI")
+                             dashed: true, label: "DETERMINISTIC · NO AI", short: "Deterministic")
         case .llm:
             return NodeStyle(icon: "sparkles", tint: Theme.accent,
-                             dashed: false, label: "AI STEP")
+                             dashed: false, label: "AI STEP", short: "AI step")
         case .gate:
             return NodeStyle(icon: "hand.raised", tint: Color(red: 0.98, green: 0.62, blue: 0.19),
-                             dashed: false, label: "WAITS FOR YOU")
+                             dashed: false, label: "WAITS FOR YOU", short: "Waits for you")
         case .downstream:
             return NodeStyle(icon: "arrow.turn.down.right",
                              tint: Color(red: 0.66, green: 0.45, blue: 0.95),
-                             dashed: false, label: "ANOTHER PIPELINE")
+                             dashed: false, label: "ANOTHER PIPELINE", short: "Another pipeline")
         }
     }
 }
 
 // MARK: - 图例
 
-/// 图例条 —— 四种节点性质各一个小样,放流程图下方。
+/// 图例条 —— **只列这张图里真出现过的节点性质**,顺序固定。
+/// 不然换一条 pipeline 时图例会讲一堆图上根本没有的东西。
 struct PipelineFlowLegend: View {
+    let flow: PipelineFlow
+
+    private static let order: [PipelineFlow.NodeKind] =
+        [.source, .llm, .deterministic, .gate, .downstream]
+
     var body: some View {
+        let present = Self.order.filter { k in
+            flow.nodes.contains { sameKind($0.kind, k) }
+        }
         HStack(spacing: 14) {
-            item("sparkles", Theme.accent, "AI step")
-            item("function", .secondary, "Deterministic")
-            item("hand.raised", Color(red: 0.98, green: 0.62, blue: 0.19), "Waits for you")
-            item("arrow.turn.down.right", Color(red: 0.66, green: 0.45, blue: 0.95), "Another pipeline")
+            ForEach(Array(present.enumerated()), id: \.offset) { _, k in
+                let s = PipelineFlowView.style(for: k)
+                HStack(spacing: 4) {
+                    Image(systemName: s.icon).font(.system(size: 9)).foregroundStyle(s.tint)
+                    Text(s.short).font(.system(size: 10))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                }
+            }
             Spacer(minLength: 0)
         }
     }
 
-    private func item(_ icon: String, _ tint: Color, _ text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 9)).foregroundStyle(tint)
-            Text(text).font(.system(size: 10)).foregroundStyle(Theme.textPrimary.opacity(0.55))
+    /// NodeKind 没有 Equatable(以后可能挂 associated value),手写比对。
+    private func sameKind(_ a: PipelineFlow.NodeKind, _ b: PipelineFlow.NodeKind) -> Bool {
+        switch (a, b) {
+        case (.source, .source), (.deterministic, .deterministic), (.llm, .llm),
+             (.gate, .gate), (.downstream, .downstream): return true
+        default: return false
         }
     }
 }
@@ -256,6 +305,9 @@ extension PipelineFlow {
 
     /// Events Processor。**顺序与 `MemoryScheduler.runEventJob` 一一对应** ——
     /// 改调度器的步骤时这里也要跟着改,别让图跟代码走偏。
+    ///
+    /// 排版:两行各 3 个,左→右读,行尾用 `.wrap` 折回下一行行首;最后一行是
+    /// 被触发的另外两条 pipeline。
     static let eventsProcessor = PipelineFlow(
         nodes: [
             Node(
@@ -264,14 +316,15 @@ extension PipelineFlow {
                 kind: .source,
                 chip: "~/.portrait",
                 detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing events. This is the only input — nothing is invented later.",
-                pos: CGPoint(x: 0.5, y: 0.05)
+                pos: CGPoint(x: 0.17, y: 0.14)
             ),
             Node(
                 id: "raw",
-                title: "Wait for the day to settle",
+                title: "Day is over",
                 kind: .deterministic,
-                detail: "A day is only processed once it's over (UTC midnight) plus a 10-minute grace period, so late transcripts and OCR still land in time. Days that aren't ready yet are simply skipped and retried on the next tick.",
-                pos: CGPoint(x: 0.5, y: 0.18)
+                chip: "UTC + 10 min",
+                detail: "A day is only picked up once it's actually over — UTC midnight plus a 10-minute grace period, so transcripts and OCR that are still finishing up land in time.\n\nDays that aren't ready yet are skipped and retried on the next tick (every 15 minutes).",
+                pos: CGPoint(x: 0.5, y: 0.14)
             ),
             Node(
                 id: "event",
@@ -279,22 +332,22 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "main model",
                 detail: "Reads the whole day's timeline and clusters it into discrete events — one file per event under events/<day>/. This is where a scroll of raw activity turns into \"what actually happened\".",
-                pos: CGPoint(x: 0.5, y: 0.31)
+                pos: CGPoint(x: 0.83, y: 0.14)
             ),
             Node(
                 id: "impact",
                 title: "Score impact",
                 kind: .llm,
                 chip: "main model",
-                detail: "Every event gets an impact score — how much this mattered to you. The score is what later decides which events survive in your memory and how big they show up in the Neural Graph.",
-                pos: CGPoint(x: 0.5, y: 0.44)
+                detail: "Every event gets an impact score — how much this mattered to you. That score is what later decides which events survive in your memory and how big they show up in the Neural Graph.",
+                pos: CGPoint(x: 0.17, y: 0.52)
             ),
             Node(
                 id: "weight",
                 title: "Weights + daily budget",
                 kind: .deterministic,
                 detail: "Two pure algorithms, no AI:\n\n• Weights — every event decays over time (exponential half-life), recomputed across the whole tree.\n\n• Daily budget — a busy day can't flood your memory. If a day's total impact exceeds the cap it's scaled back down; quiet days are left alone. Peak events above the protection threshold are never scaled.",
-                pos: CGPoint(x: 0.5, y: 0.57)
+                pos: CGPoint(x: 0.5, y: 0.52)
             ),
             Node(
                 id: "classify",
@@ -302,40 +355,32 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "light model",
                 detail: "Sorts events into project folders (events/_folders/*.json) — \"My Portrait\", \"UCI application\", and so on. Uses the light model because the decision is narrow: does this event belong in an existing folder, or does it need a new one?\n\nThis is the last step of the run.",
-                pos: CGPoint(x: 0.5, y: 0.70)
-            ),
-            Node(
-                id: "review",
-                title: "Staged for review",
-                kind: .gate,
-                detail: "Nothing above is committed yet. The whole run — events, scores, folders — sits in a snapshot until you Approve or Reject it.\n\nReject restores the snapshot over the live tree, so folders roll back together with the events they grouped.",
-                pos: CGPoint(x: 0.5, y: 0.83)
+                pos: CGPoint(x: 0.83, y: 0.52)
             ),
             Node(
                 id: "distill",
                 title: "Portraits Distiller",
                 kind: .downstream,
                 detail: "Once events land, the portrait distiller is marked pending — it turns events into long-term portrait entries (experiences, social, and so on) on its own schedule.",
-                pos: CGPoint(x: 0.26, y: 0.96)
+                pos: CGPoint(x: 0.3, y: 0.9)
             ),
             Node(
                 id: "personality",
                 title: "Personality Refresher",
                 kind: .downstream,
                 detail: "Each processed day is also marked pending for the personality refresher, which re-derives your personality tags from that day's events, the rest of the portrait, and OCR.",
-                pos: CGPoint(x: 0.74, y: 0.96)
+                pos: CGPoint(x: 0.7, y: 0.9)
             ),
         ],
         edges: [
             Edge(from: "capture", to: "raw"),
             Edge(from: "raw", to: "event"),
-            Edge(from: "event", to: "impact"),
+            Edge(from: "event", to: "impact", kind: .wrap),
             Edge(from: "impact", to: "weight"),
             Edge(from: "weight", to: "classify"),
-            Edge(from: "classify", to: "review"),
-            Edge(from: "review", to: "distill", kind: .trigger),
-            Edge(from: "review", to: "personality", kind: .trigger),
+            Edge(from: "classify", to: "distill", kind: .trigger),
+            Edge(from: "classify", to: "personality", kind: .trigger),
         ],
-        height: 560
+        height: 300
     )
 }
