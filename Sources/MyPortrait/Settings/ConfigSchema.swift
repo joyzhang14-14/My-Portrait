@@ -183,9 +183,11 @@ struct MemoryConfig: Codable, Equatable {
     // every N days since the file's last modification. Larger = stickier.
     var weightHalfLifeDays:    Int    = 180
 
-    // Scheduler — max unprocessed days handled per event-processing run
-    // (manual or automatic). Oldest first.
-    var eventDayCap:           Int    = 7
+    // (2026-08-05 删 event_day_cap:「每轮最多处理几个未处理日」不再可配,
+    //  硬编码 7 天,常量在 MemoryScheduler.dayCap。**可能之后会改回可配** ——
+    //  真要恢复的话:这里加回字段 + CodingKeys + decode 一行,
+    //  MemoryScheduler.dayCap 改回读 config,Events Processor 页把
+    //  eventDayCapSection 那张卡加回来。)
 
     // LLM provider/model 已**移到 per-pipeline**(SchedulerConfig.providerId/
     // model/modelLight,各 pipeline 独立),memory 这层不再持有全局 provider。
@@ -202,7 +204,6 @@ struct MemoryConfig: Codable, Equatable {
         case archiveMinDaysIdle   = "archive_min_days_idle"
         case distillEvidenceThreshold = "distill_evidence_threshold"
         case weightHalfLifeDays   = "weight_half_life_days"
-        case eventDayCap          = "event_day_cap"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -217,7 +218,6 @@ struct MemoryConfig: Codable, Equatable {
         archiveMinDaysIdle   = c.dflt(Int.self,    .archiveMinDaysIdle,   archiveMinDaysIdle)
         distillEvidenceThreshold = c.dflt(Int.self, .distillEvidenceThreshold, distillEvidenceThreshold)
         weightHalfLifeDays   = c.dflt(Int.self,    .weightHalfLifeDays,   weightHalfLifeDays)
-        eventDayCap          = c.dflt(Int.self,    .eventDayCap,          eventDayCap)
     }
 }
 

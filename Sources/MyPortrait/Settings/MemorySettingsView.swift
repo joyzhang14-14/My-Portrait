@@ -115,11 +115,15 @@ struct MemorySettingsView: View {
 
                 switch tab {
                 case .eventsProcessor:
-                    autoRunSection("Clusters captured activity into events and scores their impact.",
-                                   config: \.scheduler.event)
+                    autoRunSection(nil, config: \.scheduler.event)
                     providerSection(\.scheduler.event)
-                    runNowSectionFor(.eventProcessing)
-                    eventDayCapSection
+                    runNowSectionFor(
+                        .eventProcessing,
+                        title: "Process events now",
+                        info: "Runs this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                            + ManualTrigger.eventProcessing.desc
+                            + "\n\nEach run handles at most 7 unprocessed days, oldest first."
+                    )
                     reviewSectionFor(.eventProcessing)
                 case .portraitsDistiller:
                     autoRunSection("Distills events into long-term portrait entries.",
@@ -143,8 +147,9 @@ struct MemorySettingsView: View {
                     attentionSection
                     changelogSection
                 }
-
-                footer
+                // (2026-08-05 删页脚:config.toml 路径 + Reveal in Finder。
+                //  入口没丢 —— Storage 页 Data directory 卡片的 Open 按钮和
+                //  状态栏菜单的 "Open ~/.portrait/" 都走同一个动作。)
             }
             .padding(.horizontal, 28)
             .padding(.top, 30)
@@ -463,10 +468,11 @@ struct MemorySettingsView: View {
         SettingsPageTitle(title: tab.rawValue, subtitle: headerBlurb)
     }
 
-    private var headerBlurb: String {
+    /// nil = 这一页不要副标题。
+    private var headerBlurb: String? {
         switch tab {
         case .eventsProcessor:
-            return "Turns raw activity into scored events. Pick its AI, run it now, and review staged output."
+            return nil
         case .portraitsDistiller:
             return "Distills events into long-term portrait entries. Pick its AI, run it now, and review staged output."
         case .personalityRefresher:
@@ -476,25 +482,6 @@ struct MemorySettingsView: View {
         case .changelog:
             return "Portrait body changes made by the distiller, newest first — plus days that need attention."
         }
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-            Text(cfg.fileURL.path)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            Spacer()
-            Button("Reveal in Finder") {
-                cfg.revealInFinder()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-        .padding(.top, 8)
     }
 
     // MARK: - Sections
@@ -507,8 +494,10 @@ struct MemorySettingsView: View {
     /// schedulerSection 里,现在拆成每页一个。老字段(timeOfDay/dayOfWeek/
     /// dayOfMonth)留着不动 —— toml 向后兼容,UI 只暴露 on/off。tick 周期 15min
     /// 固定,catchUp + backoff 自动接管 retry。
+    /// `desc` 传 nil = 不显示卡片灰字说明,同时也不显示 Auto/Manual 那行状态灰字
+    /// (整张卡只剩标题 + 开关)。
     private func autoRunSection(
-        _ desc: String,
+        _ desc: String?,
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
     ) -> some View {
         let freq = cfg.binding(kp.appending(path: \.frequency))
@@ -518,12 +507,14 @@ struct MemorySettingsView: View {
         )
         return section(title: "Automatic processing", blurb: desc) {
             HStack(alignment: .top, spacing: 12) {
-                Text(autoRun.wrappedValue
-                    ? "Auto — the scheduler runs this when there's pending work and retries failures with backoff."
-                    : "Manual only — runs only when you click Run now below.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if desc != nil {
+                    Text(autoRun.wrappedValue
+                        ? "Auto — the scheduler runs this when there's pending work and retries failures with backoff."
+                        : "Manual only — runs only when you click Run now below.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 12)
                 Toggle("", isOn: autoRun)
                     .labelsHidden()
@@ -532,17 +523,8 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// 每次最多处理多少天(event 和 personality 共用)。放 Events Processor 页。
-    private var eventDayCapSection: some View {
-        section(
-            title: "Processing limit",
-            blurb: "Caps how many unprocessed days a single run handles (event and personality). Oldest first."
-        ) {
-            intRow("Max days processed per run",
-                   value: cfg.binding(\.memory.eventDayCap),
-                   range: 1...30)
-        }
-    }
+    // (2026-08-05 删 eventDayCapSection:「每轮最多处理几天」不再可配,
+    //  硬编码 7 —— 见 MemoryScheduler.dayCap。)
 
     // MARK: - Memory pipeline 的 manualRunSection(原有)
 
@@ -550,12 +532,18 @@ struct MemorySettingsView: View {
     /// distillation(portrait 侧,typing 的下游),divider 分组。
     /// (writing capture 已搬到 Settings → Typing Capture。)
     /// 单 pipeline 的「Run now」卡(memory 三个 trigger 之一)。
-    private func runNowSectionFor(_ t: ManualTrigger) -> some View {
+    /// 传了 `info` = 说明收进标题旁的 ⓘ,卡片和行里都不再有灰字。
+    private func runNowSectionFor(_ t: ManualTrigger,
+                                  title: String = "Run now",
+                                  info: String? = nil) -> some View {
         section(
-            title: "Run now",
-            blurb: "Run this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first."
+            title: title,
+            blurb: info == nil
+                ? "Run this step now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first."
+                : nil,
+            info: info
         ) {
-            triggerRow(t)
+            triggerRow(t, showDesc: info == nil)
             if !actionStatus.isEmpty {
                 Text(actionStatus)
                     .font(.system(size: 11, design: .monospaced))
@@ -592,7 +580,7 @@ struct MemorySettingsView: View {
         }
     }
 
-    private func triggerRow(_ t: ManualTrigger) -> some View {
+    private func triggerRow(_ t: ManualTrigger, showDesc: Bool = true) -> some View {
         // 自己是不是正在跑(本 View 自己的并发 token 集合 = runningTriggers)。
         let selfRunning = runningTriggers.contains(t)
         // scheduler 后台 catch-up 触发的 run 不经过本 View click → 不在
@@ -624,10 +612,12 @@ struct MemorySettingsView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(t.title).font(.system(size: 13, weight: .semibold))
-                    Text(t.desc)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if showDesc {
+                        Text(t.desc)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 12)
                 // 读缓存,不在 body 里做 fileExists 同步 IO。
@@ -1094,7 +1084,7 @@ struct MemorySettingsView: View {
     ) -> some View {
         section(
             title: "AI provider",
-            blurb: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
+            info: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
         ) {
             PipelineProviderPicker(pipeline: kp)
         }
@@ -1476,16 +1466,23 @@ struct MemorySettingsView: View {
     // MARK: - Components
 
     @ViewBuilder
+    /// `blurb` 传 nil = 不显示灰字说明;`info` 传文案 = 标题右边挂 ⓘ,点开看。
     private func section<C: View>(title: String,
-                                  blurb: String,
+                                  blurb: String? = nil,
+                                  info: String? = nil,
                                   @ViewBuilder body: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 15, weight: .semibold))
-            Text(blurb)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                if let info { SettingsInfoBadge(text: info) }
+            }
+            if let blurb {
+                Text(blurb)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             VStack(spacing: 8) {
                 body()
             }

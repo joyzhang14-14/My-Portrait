@@ -69,9 +69,12 @@ final class MemoryScheduler {
 
     private let store = ProcessingLogStore()
 
-    /// 每次触发处理的数据日上限。
-    /// 每次 event-processing 跑最多处理几个未处理日 —— 由 Settings 配置。
-    private var dayCap: Int { ConfigStore.shared.current.memory.eventDayCap }
+    /// 每次 event-processing 跑最多处理几个未处理日(最老的先跑)。
+    ///
+    /// 2026-08-05:原来是 config `memory.event_day_cap` + Settings 里一个滑块,
+    /// 现在硬编码 7 天,字段和那张卡都删了。**可能之后会改回可配** ——
+    /// 恢复方式见 ConfigSchema 里 event_day_cap 那条注释。
+    private let dayCap: Int = 7
     // maxRetries 已下线 —— 用户方向是"永不放弃"。失败永远会自动重试,但用
     // long-backoff 控制频率,避免一直挂的 LLM 烧 token。见 backoffMs(retry:)。
     // dead_letter case 仍保留(老 DB 行兼容),但不再产生 + needsWork=true。
