@@ -82,7 +82,8 @@ struct PipelineFlowView: View {
                 Canvas { ctx, size in
                     for e in flow.edges {
                         guard let a = flow.node(e.from), let b = flow.node(e.to) else { continue }
-                        drawEdge(ctx: ctx, size: size, from: a, to: b, kind: e.kind)
+                        drawEdge(ctx: ctx, size: size, from: a, to: b,
+                                 kind: e.kind, label: e.label)
                     }
                 }
                 ForEach(flow.nodes) { n in
@@ -104,7 +105,7 @@ struct PipelineFlowView: View {
     ///   - 其余(下一行分叉)→ 底边到顶边,三次贝塞尔
     private func drawEdge(ctx: GraphicsContext, size: CGSize,
                           from a: PipelineFlow.Node, to b: PipelineFlow.Node,
-                          kind: PipelineFlow.EdgeKind) {
+                          kind: PipelineFlow.EdgeKind, label: String?) {
         let ax = a.pos.x * size.width, ay = a.pos.y * size.height
         let bx = b.pos.x * size.width, by = b.pos.y * size.height
         let halfW = Self.nodeW / 2, halfH = Self.nodeH / 2
@@ -157,6 +158,19 @@ struct PipelineFlowView: View {
         }
         ctx.stroke(head, with: .color(color),
                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
+
+        // 连线上的条件小字 —— 贴在线右侧。像 "day is over" 这种**闸门条件**
+        // 用它,不值得单独占一个节点(节点是"步骤",不是"条件")。
+        if let label, !label.isEmpty {
+            let mid = CGPoint(x: (ax + bx) / 2, y: (ay + halfH + by - halfH) / 2)
+            ctx.draw(
+                Text(label)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.45)),
+                at: CGPoint(x: mid.x + 9, y: mid.y),
+                anchor: .leading
+            )
+        }
     }
 
     private enum Facing { case down, right }
@@ -306,8 +320,10 @@ extension PipelineFlow {
     /// Events Processor。**顺序与 `MemoryScheduler.runEventJob` 一一对应** ——
     /// 改调度器的步骤时这里也要跟着改,别让图跟代码走偏。
     ///
-    /// 排版:两行各 3 个,左→右读,行尾用 `.wrap` 折回下一行行首;最后一行是
-    /// 被触发的另外两条 pipeline。
+    /// 排版:竖排主干,最后一行分叉到被触发的另外两条 pipeline。
+    ///
+    /// "等这一天过完" 是**闸门条件**不是步骤,所以做成第一条连线上的一行小字,
+    /// 不占节点 —— 节点只留真正会产出东西的步骤。
     static let eventsProcessor = PipelineFlow(
         nodes: [
             Node(
@@ -316,23 +332,15 @@ extension PipelineFlow {
                 kind: .source,
                 chip: "~/.portrait",
                 detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing events. This is the only input — nothing is invented later.",
-                pos: CGPoint(x: 0.17, y: 0.14)
-            ),
-            Node(
-                id: "raw",
-                title: "Day is over",
-                kind: .deterministic,
-                chip: "UTC + 10 min",
-                detail: "A day is only picked up once it's actually over — UTC midnight plus a 10-minute grace period, so transcripts and OCR that are still finishing up land in time.\n\nDays that aren't ready yet are skipped and retried on the next tick (every 15 minutes).",
-                pos: CGPoint(x: 0.5, y: 0.14)
+                pos: CGPoint(x: 0.5, y: 0.06)
             ),
             Node(
                 id: "event",
                 title: "Build events",
                 kind: .llm,
                 chip: "main model",
-                detail: "Reads the whole day's timeline and clusters it into discrete events — one file per event under events/<day>/. This is where a scroll of raw activity turns into \"what actually happened\".",
-                pos: CGPoint(x: 0.83, y: 0.14)
+                detail: "Reads the whole day's timeline and clusters it into discrete events — one file per event under events/<day>/. This is where a scroll of raw activity turns into \"what actually happened\".\n\nA day is only picked up once it's actually over — UTC midnight plus a 10-minute grace period, so transcripts and OCR that are still finishing up land in time. Days that aren't ready are skipped and retried on the next tick (every 15 minutes).",
+                pos: CGPoint(x: 0.5, y: 0.25)
             ),
             Node(
                 id: "impact",
@@ -340,14 +348,14 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "main model",
                 detail: "Every event gets an impact score — how much this mattered to you. That score is what later decides which events survive in your memory and how big they show up in the Neural Graph.",
-                pos: CGPoint(x: 0.17, y: 0.52)
+                pos: CGPoint(x: 0.5, y: 0.44)
             ),
             Node(
                 id: "weight",
                 title: "Weights + daily budget",
                 kind: .deterministic,
                 detail: "Two pure algorithms, no AI:\n\n• Weights — every event decays over time (exponential half-life), recomputed across the whole tree.\n\n• Daily budget — a busy day can't flood your memory. If a day's total impact exceeds the cap it's scaled back down; quiet days are left alone. Peak events above the protection threshold are never scaled.",
-                pos: CGPoint(x: 0.5, y: 0.52)
+                pos: CGPoint(x: 0.5, y: 0.63)
             ),
             Node(
                 id: "classify",
@@ -355,32 +363,31 @@ extension PipelineFlow {
                 kind: .llm,
                 chip: "light model",
                 detail: "Sorts events into project folders (events/_folders/*.json) — \"My Portrait\", \"UCI application\", and so on. Uses the light model because the decision is narrow: does this event belong in an existing folder, or does it need a new one?\n\nThis is the last step of the run.",
-                pos: CGPoint(x: 0.83, y: 0.52)
+                pos: CGPoint(x: 0.5, y: 0.82)
             ),
             Node(
                 id: "distill",
                 title: "Portraits Distiller",
                 kind: .downstream,
                 detail: "Once events land, the portrait distiller is marked pending — it turns events into long-term portrait entries (experiences, social, and so on) on its own schedule.",
-                pos: CGPoint(x: 0.3, y: 0.9)
+                pos: CGPoint(x: 0.27, y: 0.965)
             ),
             Node(
                 id: "personality",
                 title: "Personality Refresher",
                 kind: .downstream,
                 detail: "Each processed day is also marked pending for the personality refresher, which re-derives your personality tags from that day's events, the rest of the portrait, and OCR.",
-                pos: CGPoint(x: 0.7, y: 0.9)
+                pos: CGPoint(x: 0.73, y: 0.965)
             ),
         ],
         edges: [
-            Edge(from: "capture", to: "raw"),
-            Edge(from: "raw", to: "event"),
-            Edge(from: "event", to: "impact", kind: .wrap),
+            Edge(from: "capture", to: "event", label: "once the day is over · UTC + 10 min"),
+            Edge(from: "event", to: "impact"),
             Edge(from: "impact", to: "weight"),
             Edge(from: "weight", to: "classify"),
             Edge(from: "classify", to: "distill", kind: .trigger),
             Edge(from: "classify", to: "personality", kind: .trigger),
         ],
-        height: 300
+        height: 470
     )
 }
