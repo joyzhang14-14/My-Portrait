@@ -57,6 +57,31 @@ struct MyPortraitConfig: Codable, Equatable {
         chat          = c.dflt(ChatConfig.self, .chat, chat)
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
         migrateLegacyMemoryProvider(from: c)
+        migrateWallpaperToggle(from: c)
+    }
+
+    /// 一次性迁移(08-05 回退):`[capture.screen] transparent_wallpaper` 那个
+    /// 独立开关已经下线 —— 壁纸重新回到 `privacy.ignored_apps` 名单里
+    /// (ignoredApps 的语义改回"抠窗口、帧照拍"之后,壁纸挂在上面完全说得通)。
+    ///
+    /// 中间那版把 "Wallpaper" 从名单里摘掉过,直接删代码的话老 config 里
+    /// 壁纸就再也不遮了 —— 静默行为丢失。所以这里按旧开关的值补回来:
+    /// 开着 → 补回名单;用户明确关过 → 不补。读完不回写旧 key,下次保存
+    /// 自动从文件消失。
+    private mutating func migrateWallpaperToggle(
+        from c: KeyedDecodingContainer<CodingKeys>
+    ) {
+        enum CaptureKeys: String, CodingKey { case screen }
+        enum ScreenKeys: String, CodingKey {
+            case transparentWallpaper = "transparent_wallpaper"
+        }
+        guard let cap = try? c.nestedContainer(keyedBy: CaptureKeys.self, forKey: .capture),
+              let scr = try? cap.nestedContainer(keyedBy: ScreenKeys.self, forKey: .screen),
+              let wasOn = try? scr.decode(Bool.self, forKey: .transparentWallpaper),
+              wasOn,
+              !privacy.ignoredApps.contains(where: { $0.lowercased() == "wallpaper" })
+        else { return }
+        privacy.ignoredApps.append("Wallpaper")
     }
 
     /// 一次性迁移:per-pipeline 化之前,provider 存在全局 `[memory] provider_id`
@@ -729,16 +754,13 @@ struct ScreenConfig: Codable, Equatable {
     var pauseWhenLocked: Bool = true
     /// 屏幕亮度调到最低(滑块 0)时跳帧(屏幕黑着,用户没在看)。
     var pauseAtMinBrightness: Bool = true
-    /// 桌面壁纸从截图里排除(那块渲染成黑)。原来是靠 privacy.ignoredApps 里
-    /// 预置一条 "Wallpaper" 实现的,现在独立成开关 —— ignoredApps 的语义已
-    /// 改成"整帧跳过",壁纸再挂在那条名单上就说不通了。
-    var transparentWallpaper: Bool = true
+    // (08-05 删 transparent_wallpaper 开关:壁纸回到 privacy.ignored_apps
+    //  名单里那条 "Wallpaper",跟其它被遮的窗口同一套机制。)
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
         case pauseWhenLocked      = "pause_when_locked"
         case pauseAtMinBrightness = "pause_at_min_brightness"
-        case transparentWallpaper = "transparent_wallpaper"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -746,7 +768,6 @@ struct ScreenConfig: Codable, Equatable {
         enabled              = c.dflt(Bool.self, .enabled, enabled)
         pauseWhenLocked      = c.dflt(Bool.self, .pauseWhenLocked, pauseWhenLocked)
         pauseAtMinBrightness = c.dflt(Bool.self, .pauseAtMinBrightness, pauseAtMinBrightness)
-        transparentWallpaper = c.dflt(Bool.self, .transparentWallpaper, transparentWallpaper)
     }
 }
 
@@ -829,11 +850,10 @@ struct PrivacyConfig: Codable, Equatable {
     ///
     /// New users get these out-of-the-box;they can add / remove from
     /// Settings → Privacy → Ignored apps.
-    /// 命中的 app 在**最前台**时整帧不拍;只在后台露一角时那个窗口遮成黑。
-    /// ("Wallpaper" 已移出 —— 壁纸走 capture.screen.transparent_wallpaper 开关。)
+    /// 命中的窗口从帧里抠掉(渲染成黑),**帧照拍** —— 见 IgnoreGate 顶部注释。
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
-        "My Portrait", "Trash",
+        "My Portrait", "Wallpaper", "Trash",
     ]
     var ignoredUrls:            [String] = []
     /// DEPRECATED —— 与 ignoredUrls 在 IgnoreGate 里行为完全相同(都按窗口标题
@@ -876,10 +896,6 @@ struct PrivacyConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         recordAudioWhileLocked = c.dflt(Bool.self,     .recordAudioWhileLocked, recordAudioWhileLocked)
         ignoredApps            = c.dflt([String].self, .ignoredApps, ignoredApps)
-        // 迁移:老 config 里预置的 "Wallpaper" 摘掉 —— 壁纸已独立成
-        // capture.screen.transparent_wallpaper 开关。留着的话开关关了壁纸
-        // 照样被遮,开关就成了摆设。
-        ignoredApps.removeAll { $0.lowercased() == "wallpaper" }
         ignoredUrls            = c.dflt([String].self, .ignoredUrls, ignoredUrls)
         ignoredWindowTitles    = c.dflt([String].self, .ignoredWindowTitles, ignoredWindowTitles)
         // DEPRECATED 迁移:ignoredWindowTitles 与 ignoredUrls 行为相同(IgnoreGate

@@ -93,11 +93,6 @@ actor CaptureCoordinator {
         ignore.setIgnoredUrlPatterns(patterns)
     }
 
-    /// Services 在 ConfigStore.capture.screen.transparentWallpaper 变化时调。
-    nonisolated func setWallpaperTransparent(_ on: Bool) {
-        ignore.setWallpaperTransparent(on)
-    }
-
     // (07-21 删 setMaskingEnabled:遮挡永远开,IgnoreGate 默认 true 不再改。)
 
     /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时调。

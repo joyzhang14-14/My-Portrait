@@ -8,7 +8,8 @@ import os
 /// 屏蔽固定是:帧照拍、命中的窗口从 SCK 捕获 buffer 里排除(那块渲染成
 /// 不透明黑)。(08-05 试过"前台命中就跳整帧",因为上面这条耦合关系回退。)
 ///
-/// 桌面壁纸走独立开关 `setWallpaperTransparent`,与用户名单无关。
+/// 桌面壁纸也走这条路 —— `ignoredApps` 默认预置一条 "Wallpaper",壁纸窗口
+/// 的标题形如 "Wallpaper-<UUID>",子串即命中。
 ///
 /// 与 DRMGate 的区别：DRMGate 是硬编码列表 + 系统级硬规则,命中 → 停整条
 /// 流水线 + invalidate SCStream —— 那是没办法,受保护视频不停流会让用户
@@ -21,15 +22,10 @@ final class IgnoreGate: @unchecked Sendable {
     /// 永远排除的系统进程（锁屏等）。仿 screenpipe `BUILTIN_IGNORED`。
     private static let builtinIgnored: Set<String> = ["loginwindow", "logonui"]
 
-    /// 壁纸窗口的识别关键字。壁纸窗口的 app 名 / 标题都含它
-    /// （标题形如 "Wallpaper-<UUID>"）。
-    private static let wallpaperTerm = "wallpaper"
-
     private struct State {
         var appsLower: Set<String> = []           // 小写,子串匹配（app 名 / 标题）
         var urlSubstrings: [String] = []          // 小写,URL / 标题子串(也收并进来的旧 ignoredWindowTitles)
         var maskingEnabled: Bool = true
-        var wallpaperTransparent: Bool = true
     }
 
     private let state = OSAllocatedUnfairLock<State>(initialState: State())
@@ -62,21 +58,14 @@ final class IgnoreGate: @unchecked Sendable {
         state.withLock { $0.maskingEnabled = enabled }
     }
 
-    /// 桌面壁纸是否从截图里排除(那块渲染成黑)。独立开关,与 ignoredApps 无关。
-    func setWallpaperTransparent(_ on: Bool) {
-        state.withLock { $0.wallpaperTransparent = on }
-    }
-
-    /// 这一帧要不要做全量窗口枚举。枚举是到 replayd 的 XPC,抓帧热路径上
-    /// 最大的单项开销 —— 结果用不上就别做。
-    ///
-    /// 用户遮罩规则 **或** 壁纸开关任一成立都得枚举。
-    /// builtin(loginwindow)不算:它只在锁屏/登录界面在屏,为它每帧枚举
-    /// 不值得 —— 代价是无规则用户的锁屏帧不再抹 loginwindow(锁屏画面本身
-    /// 无敏感内容,密码框是圆点)。
-    var needsWindowEnumeration: Bool {
+    /// 当前是否存在任何**用户配置的**遮罩规则。ScreenCaptureService 用它决定
+    /// 要不要每帧做全量窗口枚举(到 replayd 的 XPC,抓帧热路径最大单项开销):
+    /// 没规则 → 枚举出来的窗口列表完全用不上,跳过。
+    /// builtin(loginwindow)不算规则:它只在锁屏/登录界面在屏,为它每帧
+    /// 枚举不值得 —— 代价是无规则用户的锁屏帧不再抹 loginwindow(锁屏画面
+    /// 本身无敏感内容,密码框是圆点)。
+    var hasUserRules: Bool {
         let snap = state.withLock { $0 }
-        if snap.wallpaperTransparent { return true }
         guard snap.maskingEnabled else { return false }
         return snap.appsLower.contains { !$0.isEmpty }
             || snap.urlSubstrings.contains { !$0.isEmpty }
@@ -84,22 +73,18 @@ final class IgnoreGate: @unchecked Sendable {
 
     /// 一个窗口是否应该从截图里抹掉(帧照拍,这块渲染成黑)：
     ///   - builtin 系统进程永远抹
-    ///   - 壁纸窗口:看 `wallpaperTransparent` 开关,与用户名单无关
-    ///   - masking 关 → 用户规则不再抹
+    ///   - masking 关 → 永不抹
     ///   - ignoredApps 子串命中窗口 app 名**或**标题 → 抹
+    ///     (壁纸窗口标题是 "Wallpaper-<UUID>","wallpaper" 子串即命中它本身)
     ///   - 窗口标题子串命中 ignoredUrls → 抹
     func shouldMaskWindow(appName: String, title: String?) -> Bool {
         let app = appName.lowercased()
         if Self.builtinIgnored.contains(app) { return true }
 
         let snap = state.withLock { $0 }
-        let t = (title ?? "").lowercased()
-
-        if snap.wallpaperTransparent,
-           app.contains(Self.wallpaperTerm) || t.contains(Self.wallpaperTerm) {
-            return true
-        }
         guard snap.maskingEnabled else { return false }
+
+        let t = (title ?? "").lowercased()
 
         // ignoredApps：子串匹配窗口 app 名 OR 标题（screenpipe is_valid 同款）。
         for term in snap.appsLower where !term.isEmpty {

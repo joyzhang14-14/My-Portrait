@@ -782,13 +782,6 @@ struct ScreenCaptureSettingsView: View {
                 SettingsDivider()
                 // 第三条 "Pause …" —— 跟上面两条同一类,并到同一张卡里。
                 protectedVideoRow
-                SettingsDivider()
-                SettingsRow("Transparent wallpaper",
-                            info: "Leaves your desktop background out of the screenshot — that area comes out black. Only affects the wallpaper; everything else on screen is captured as usual.",
-                            icon: "photo") {
-                    Toggle("", isOn: config.binding(\.capture.screen.transparentWallpaper))
-                        .labelsHidden().toggleStyle(.switch)
-                }
             }
         }
     }
