@@ -739,17 +739,28 @@ struct ScreenCaptureSettingsView: View {
     }
 
     private var powerModeCard: some View {
-        SettingsCard(
-            title: "Power mode",
+        let current = PowerMode(rawValue: config.current.capture.system.powerMode) ?? .auto
+        return SettingsCard(
+            title: "Capture frequency",
             info: "Trades screen-capture detail for battery life based on the profile you pick.\n\nAuto — adjusts based on battery state\nPerformance — full quality, ignores battery\nBalanced — balanced detail and battery\nBattery saver — maximum power saving"
         ) {
-            ForEach(PowerMode.allCases) { mode in
-                PowerModeRow(mode: mode,
-                             isActive: config.current.capture.system.powerMode == mode.rawValue,
-                             autoActiveLabel: mode == .auto ? powerState.activeProfileName : nil) {
-                    config.mutate { $0.capture.system.powerMode = mode.rawValue }
+            SettingsRow("Mode", icon: current.icon) {
+                Picker("", selection: config.binding(\.capture.system.powerMode)) {
+                    ForEach(PowerMode.allCases) { m in
+                        Text(m.label).tag(m.rawValue)
+                    }
                 }
-                if mode != PowerMode.allCases.last { SettingsDivider() }
+                .pickerStyle(.menu).labelsHidden().frame(width: 170)
+            }
+            // Auto 自己不是一个档位,是"按电池状态挑一档" —— 挑中哪一档
+            // 只有运行时才知道,所以选 Auto 时把当前实际生效的那档摊出来。
+            if current == .auto, !powerState.activeProfileName.isEmpty {
+                Text("Currently running \(powerState.activeProfileName)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
             }
         }
     }
@@ -883,57 +894,5 @@ struct TypingCaptureSettingsView: View {
     }
 }
 
-// MARK: - Power mode row (one per mode)
-
-private struct PowerModeRow: View {
-    let mode: PowerMode
-    let isActive: Bool
-    var autoActiveLabel: String? = nil
-    let onTap: () -> Void
-    @State private var hover = false
-
-    /// Auto 行显示当前实际解析出的档位:"Auto — Balanced";其余行用 mode.label。
-    private var displayLabel: String {
-        if mode == .auto, let active = autoActiveLabel, !active.isEmpty {
-            return "Auto — \(active)"
-        }
-        return mode.label
-    }
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isActive
-                              ? AnyShapeStyle(LinearGradient(
-                                    colors: [Color.purple.opacity(0.45), Color.blue.opacity(0.30)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing))
-                              : AnyShapeStyle(Color.primary.opacity(0.06)))
-                    Image(systemName: mode.icon)
-                        .font(.system(size: 14, weight: .medium))
-                        // active 时背景是彩色 gradient,白色图标在 light/dark 都看得清;
-                        // 非 active 时背景透明,用 textPrimary 跟 colorScheme 切。
-                        .foregroundStyle(isActive ? Color.white.opacity(0.95) : Theme.textPrimary.opacity(0.75))
-                }
-                .frame(width: 30, height: 30)
-                // 每档的一句说明搬进卡片标题的 ⓘ 了(四档并成一段)。
-                Text(displayLabel)
-                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                Spacer()
-                if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.purple.opacity(0.90))
-                }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(
-                Color.white.opacity(isActive ? 0.04 : (hover ? 0.03 : 0))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.bouncyIcon)
-        .onHover { hover = $0 }
-    }
-}
+// (08-05 删 PowerModeRow:Capture frequency 改成下拉菜单后,
+//  那个四行卡片式选择器没有调用方了。)
