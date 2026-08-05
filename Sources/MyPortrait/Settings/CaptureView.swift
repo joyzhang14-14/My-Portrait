@@ -625,7 +625,7 @@ struct ScreenCaptureSettingsView: View {
     @State private var discoveredApps: [String] = []
 
     var body: some View {
-        SettingsPage("Screen Capture", subtitle: "Screenshots + OCR + Privacy",
+        SettingsPage("Screen Capture",
                      onResetCurrentPage: {
                          config.mutate {
                              $0.capture.screen = .init()
@@ -761,7 +761,7 @@ struct ScreenCaptureSettingsView: View {
     private var powerModeCard: some View {
         SettingsCard(
             title: "Power mode",
-            footnote: "Trades screen-capture detail for battery life based on the profile you pick."
+            info: "Trades screen-capture detail for battery life based on the profile you pick.\n\nAuto — adjusts based on battery state\nPerformance — full quality, ignores battery\nBalanced — balanced detail and battery\nBattery saver — maximum power saving"
         ) {
             ForEach(PowerMode.allCases) { mode in
                 PowerModeRow(mode: mode,
@@ -778,7 +778,6 @@ struct ScreenCaptureSettingsView: View {
     private var screenToggleCard: some View {
         SettingsCard {
             SettingsRow("Screen Capture",
-                        description: "Capture periodic snapshots of your screen.",
                         icon: "display") {
                 Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
             }
@@ -790,13 +789,13 @@ struct ScreenCaptureSettingsView: View {
             SettingsCard(title: "Capture setting") {
                 // (07-21 删 OCR accuracy booster 行:全分辨率抓帧永远开。)
                 SettingsRow("Pause capture at the lock screen",
-                            description: "Skip captures while the Mac is at the lock screen or login window — those frames would only show the lock-screen wallpaper.",
+                            info: "Skip captures while the Mac is at the lock screen or login window — those frames would only show the lock-screen wallpaper.",
                             icon: "lock.display") {
                     Toggle("", isOn: config.binding(\.capture.screen.pauseWhenLocked)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Pause capture at minimum brightness",
-                            description: "Skip captures while the screen brightness is turned all the way down — the screen is dark, so nothing is being looked at.",
+                            info: "Skip captures while the screen brightness is turned all the way down — the screen is dark, so nothing is being looked at.",
                             icon: "sun.min") {
                     Toggle("", isOn: config.binding(\.capture.screen.pauseAtMinBrightness)).labelsHidden().toggleStyle(.switch)
                 }
@@ -946,14 +945,10 @@ private struct PowerModeRow: View {
                         .foregroundStyle(isActive ? Color.white.opacity(0.95) : Theme.textPrimary.opacity(0.75))
                 }
                 .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(displayLabel)
-                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                    Text(mode.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                }
+                // 每档的一句说明搬进卡片标题的 ⓘ 了(四档并成一段)。
+                Text(displayLabel)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 Spacer()
                 if isActive {
                     Image(systemName: "checkmark.circle.fill")
