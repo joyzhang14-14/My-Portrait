@@ -115,6 +115,10 @@ struct MemorySettingsView: View {
     let tab: Tab
 
     var body: some View {
+        writingStyleModals(pageBody)
+    }
+
+    private var pageBody: some View {
         ScrollView {
             // VStack spacing / 外层 padding 跟 SettingsPage 完全对齐
             // (spacing 20 / top 30 / bottom 40)—— 原来钉死 24 / 44 / 28 跟
@@ -140,22 +144,39 @@ struct MemorySettingsView: View {
                     pipelineFlowSection(.eventsProcessor)
                     reviewSectionFor(.eventProcessing)
                 case .portraitsDistiller:
-                    autoRunSection("Distills events into long-term portrait entries.",
-                                   config: \.scheduler.portrait)
+                    autoRunSection(
+                        nil,
+                        config: \.scheduler.portrait,
+                        manual: (
+                            trigger: .distill,
+                            title: "Distill portrait now",
+                            info: "Runs the distiller now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                                + ManualTrigger.distill.desc
+                        )
+                    )
                     providerSection(\.scheduler.portrait)
-                    runNowSectionFor(.distill)
                     reviewSectionFor(.distill)
                 case .personalityRefresher:
-                    autoRunSection("Aggregates events, other portrait sections, and OCR into personality tags.",
-                                   config: \.scheduler.personality)
+                    autoRunSection(
+                        nil,
+                        config: \.scheduler.personality,
+                        manual: (
+                            trigger: .personality,
+                            title: "Refresh personality now",
+                            info: "Runs the refresher now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                                + ManualTrigger.personality.desc
+                        )
+                    )
                     providerSection(\.scheduler.personality)
-                    runNowSectionFor(.personality)
                     reviewSectionFor(.personality)
                 case .writingStyleDistiller:
-                    autoRunSection("Learns your writing style (tone, voice, editing habits) from approved writing. Automatic runs save directly; manual runs stage drafts for review.",
-                                   config: \.scheduler.writingStyle)
+                    // writing style 不走 ManualTrigger(有自己的 staged-draft
+                    // 审核流),所以手动那一块仍是独立卡,只跟着自动开关显隐。
+                    autoRunSection(nil, config: \.scheduler.writingStyle)
                     providerSection(\.scheduler.writingStyle)
-                    writingStyleRunNowSection
+                    if cfg.current.scheduler.writingStyle.frequency == .off {
+                        writingStyleRunNowSection
+                    }
                     writingStyleReviewSection
                 case .changelog:
                     attentionSection
@@ -490,11 +511,11 @@ struct MemorySettingsView: View {
         case .eventsProcessor:
             return nil
         case .portraitsDistiller:
-            return "Distills events into long-term portrait entries. Pick its AI, run it now, and review staged output."
+            return nil
         case .personalityRefresher:
-            return "Refreshes personality tags from events, portraits, and OCR. Pick its AI, run it now, and review."
+            return nil
         case .writingStyleDistiller:
-            return "Learns your writing style from approved writing. Pick its AI, run it now, and review drafts."
+            return nil
         case .changelog:
             return "Portrait body changes made by the distiller, newest first — plus days that need attention."
         }
@@ -617,25 +638,32 @@ struct MemorySettingsView: View {
     /// (有自己的 staged-draft 审核流),sheets/alert 挂在这张卡上。
     private var writingStyleRunNowSection: some View {
         section(
-            title: "Run now",
-            blurb: "Run writing style distillation now. It uses AI, and manual runs stage drafts for review."
+            title: "Distill writing style now",
+            info: "Runs writing style distillation now instead of waiting for the schedule. It uses AI, and manual runs stage drafts for you to review before anything is saved."
         ) {
             writingStyleBlock
         }
-        .sheet(item: $writingStylePreviewRun.mappedToIdentifiable) { wrapped in
-            WritingStylePreview(runId: wrapped.id)
-        }
-        .sheet(item: $writingStylePreviewDraft) { draft in
-            WritingStyleDraftDetail(draft: draft)
-        }
-        .alert("Run writing style distillation?", isPresented: $writingStyleConfirm) {
-            Button("Run", role: .none) {
-                writingStyleUI.task = Task { @MainActor in await runWritingStyleManual() }
+    }
+
+    /// writing style 的三个模态(两个预览 sheet + 运行确认 alert)。
+    /// **挂在整页外层,不挂在 Run now 卡上** —— 那张卡现在会随自动开关消失,
+    /// 挂在它上面的话开关一开,待审核区里点草稿就弹不出预览了。
+    private func writingStyleModals<C: View>(_ content: C) -> some View {
+        content
+            .sheet(item: $writingStylePreviewRun.mappedToIdentifiable) { wrapped in
+                WritingStylePreview(runId: wrapped.id)
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed pieces of your writing with AI. Drafts are staged for you to review.")
-        }
+            .sheet(item: $writingStylePreviewDraft) { draft in
+                WritingStyleDraftDetail(draft: draft)
+            }
+            .alert("Run writing style distillation?", isPresented: $writingStyleConfirm) {
+                Button("Run", role: .none) {
+                    writingStyleUI.task = Task { @MainActor in await runWritingStyleManual() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Analyze up to \(WritingStyleDistiller.defaultBatchCap) unprocessed pieces of your writing with AI. Drafts are staged for you to review.")
+            }
     }
 
     /// 本 trigger 现在是不是真在跑。
