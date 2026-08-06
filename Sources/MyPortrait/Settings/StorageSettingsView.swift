@@ -66,30 +66,30 @@ struct StorageSettingsView: View {
                 StatTile(label: "Free",  value: bytes(stats.freeBytes),  icon: "externaldrive",     accent: .green)
             }
 
-            // 两张卡对齐 README 那张架构图的两个 subgraph:采集系统 /
-            // 分析系统。⚠️ portrait.sqlite 归 **Capture** —— README 里它的
-            // 名字就叫 "Capture DB"(frames / OCR / audio 都是采集层写的),
-            // 别因为它"不是媒体文件"就挪去分析那边。
+            // 三张卡把 app 占的空间**全部**记完:采集下来的 / 分析出来的 /
+            // app 自己要用的。前两张对齐 README 架构图的 CAP / ANA subgraph。
+            // ⚠️ portrait.sqlite 归 **Capture** —— README 里它的名字就叫
+            // "Capture DB"(frames / OCR / audio 都是采集层写的),别因为它
+            // "不是媒体文件"就挪去分析那边。
             SettingsCard(
                 title: "Capture data",
                 info: "Everything recorded off your Mac: the screen, what was said, and what you typed — plus the searchable index built from them.\n\nThis is raw material. It's almost all of your disk usage, and it's what the retention window above trims."
             ) {
-                breakdownRows(stats.captureRows, total: stats.captureTotalBytes)
+                breakdownRows(stats.captureRows)
             }
 
             SettingsCard(
                 title: "Analysis data",
-                info: "What the memory pipelines distilled out of all that raw material — your events and your portrait, written as plain Markdown files you can open and read.\n\nTiny next to the capture side, and the only part that can't be recovered by recording again."
+                info: "What turns raw recordings into memory: the on-device models that read your audio, and the events and portrait the pipelines distilled out of everything.\n\nThe written-out memory is tiny — and it's the only part that can't be recovered by recording again."
             ) {
-                breakdownRows(stats.analysisRows, total: nil)
+                breakdownRows(stats.analysisRows)
             }
 
-            SettingsCard(title: "App logs") {
-                SettingsRow("Logs", icon: "doc.text") {
-                    Text(bytes(stats.logBytes))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                }
+            SettingsCard(
+                title: "App data",
+                info: "My Portrait itself and what it needs to run — the app bundle, the AI runtime it downloaded on first launch, and its logs.\n\nNone of this is your data; all of it comes back by reinstalling."
+            ) {
+                breakdownRows(stats.appRows)
             }
 
             autoDeleteCard
@@ -116,22 +116,15 @@ struct StorageSettingsView: View {
 
     /// 明细表:每行一个尺寸,`total` 非 nil 时末尾多一行加粗合计。
     @ViewBuilder
-    private func breakdownRows(_ rows: [StorageRow], total: Int64?) -> some View {
+    private func breakdownRows(_ rows: [StorageRow]) -> some View {
         ForEach(rows) { row in
             SettingsRow(row.label, info: row.info, icon: row.icon) {
                 Text(bytes(row.size))
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Theme.textPrimary.opacity(0.85))
             }
-            if row.id != rows.last?.id || total != nil {
+            if row.id != rows.last?.id {
                 SettingsDivider()
-            }
-        }
-        if let total {
-            SettingsRow("Total", icon: "rectangle.stack") {
-                Text(bytes(total))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
             }
         }
     }
@@ -216,8 +209,11 @@ struct StorageSettingsView: View {
         }
     }
 
+    /// 0 就显示 "0 B",**不显示 "—"** —— 刚清理过的 Cache 是真的 0,用破折号
+    /// 会让人以为是"读不出来"。(ByteCountFormatter 给 0 会返回 "Zero KB",
+    /// 也不要。)
     private func bytes(_ n: Int64) -> String {
-        if n <= 0 { return "—" }
+        if n <= 0 { return "0 B" }
         let f = ByteCountFormatter(); f.allowedUnits = [.useAll]; f.countStyle = .file
         return f.string(fromByteCount: n)
     }
@@ -242,28 +238,28 @@ private struct StorageStats {
     var freeBytes: Int64
     /// 采集系统的产物(README 那张图的 CAP subgraph)。
     var captureRows: [StorageRow]
-    var captureTotalBytes: Int64
-    /// 分析系统的产物(ANA subgraph)。
+    /// 分析系统:本地模型 + 蒸馏出来的记忆文件(ANA subgraph)。
     var analysisRows: [StorageRow]
-    var logBytes: Int64
+    /// app 自己:本体 + 下载来的 AI 运行时 + 日志。都不是用户数据。
+    var appRows: [StorageRow]
     var months: Double
 
     static let empty = StorageStats(
         dataBytes: 0, cacheBytes: 0, freeBytes: 0,
-        captureRows: [], captureTotalBytes: 0, analysisRows: [], logBytes: 0,
+        captureRows: [], analysisRows: [], appRows: [],
         months: 0
     )
 
     /// Walks the data directory and adds up sizes. Best-effort:
     /// missing dirs just contribute 0.
     ///
-    /// 子目录名对齐本项目的真实落盘布局(曾照搬参考项目的 `data/`、
-    /// `cache/`、`cronJobs/`,全都不存在 → 字段恒为 0 显示 "—")。
+    /// 三张卡(capture / analysis / app)的目标是把 app 占的空间记全,但
+    /// **没有兜底行** —— chat.sqlite、voice_training、agent_sessions、
+    /// attachments、cron_jobs 这些(合计十几 MB)不计入任何一行,几行加起来
+    /// 不等于 Data 磁贴。要闭合就再加一行 Other。
     ///
-    /// 2026-08-05:明细改成按 README 的两层分(capture / analysis),
-    /// **兜底的 Other 行没了** —— chat.sqlite、voice_training、
-    /// agent_sessions、attachments、cron_jobs 这些(合计十几 MB)不再计入
-    /// 任何一行,几行加起来不再等于 Data 磁贴。要重新闭合就把 Other 加回来。
+    /// 另外 App 那行量的是 `Bundle.main`,**在 `~/.portrait` 之外** ——
+    /// 所以 app 行的和也不可能被 Data 磁贴(只扫数据目录)覆盖。
     nonisolated static func scan(at path: String) -> StorageStats {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: path)
@@ -290,30 +286,44 @@ private struct StorageStats {
         let monthly = max(Int64(1_000_000_000), max(mediaBytes, dataBytes) / 12)
         let months = Double(free) / Double(monthly)
 
+        // 记忆层四个目录合成一行 —— 单拎出来每个都是几百 KB,占四行只是噪音。
+        let memoryBytes = directorySize(root.appendingPathComponent("events"))
+                        + directorySize(root.appendingPathComponent("portrait"))
+                        + directorySize(root.appendingPathComponent("journal"))
+                        + directorySize(root.appendingPathComponent("personality_daily"))
+        // app 本体在 ~/.portrait 之外(/Applications 之类),单独量。
+        let bundleBytes = directorySize(Bundle.main.bundleURL)
+        // 首次启动下载的 AI 运行时:Bun + pi-agent 包 + 注入 PATH 的小 wrapper。
+        let runtimeBytes = directorySize(root.appendingPathComponent("bun"))
+                         + directorySize(root.appendingPathComponent("pi-agent"))
+                         + directorySize(root.appendingPathComponent("bin"))
+
         return StorageStats(
             dataBytes: dataBytes, cacheBytes: 0, freeBytes: free,
             captureRows: [
-                StorageRow(label: "Screenshots", size: frameBytes, icon: "photo.on.rectangle"),
-                StorageRow(label: "Video", size: videoBytes, icon: "film"),
+                StorageRow(label: "Screenshots + Video", size: frameBytes + videoBytes,
+                           icon: "photo.on.rectangle"),
                 StorageRow(label: "Audio", size: audioBytes, icon: "waveform"),
                 StorageRow(
                     label: "Metadata", size: dbBytes, icon: "cylinder",
                     info: "Everything the app knows *about* your captures, rather than the captures themselves: the text read off your screen, transcripts of what was said, your typing, and where each word sat on screen.\n\nThis is what makes your timeline searchable — it's why you can find a moment by typing a phrase you saw months ago. It usually outgrows the screenshots and recordings it describes."),
             ],
-            captureTotalBytes: mediaBytes + dbBytes,
             analysisRows: [
-                StorageRow(label: "Events", size: directorySize(root.appendingPathComponent("events")),
-                           icon: "calendar.badge.clock"),
-                StorageRow(label: "Portrait", size: directorySize(root.appendingPathComponent("portrait")),
-                           icon: "person.text.rectangle"),
-                StorageRow(label: "Personality snapshots",
-                           size: directorySize(root.appendingPathComponent("personality_daily")),
-                           icon: "brain.head.profile"),
-                StorageRow(label: "Journal", size: directorySize(root.appendingPathComponent("journal")),
-                           icon: "list.bullet.rectangle",
-                           info: "An append-only record of what the memory pipelines did — merges, archives, weight passes. Kept so a decision you disagree with can be traced back."),
+                StorageRow(
+                    label: "Local models", size: directorySize(root.appendingPathComponent("models")),
+                    icon: "cpu",
+                    info: "On-device models that run on your Mac and never send anything out: speaker recognition, voice activity detection, speech segmentation.\n\nManaged in Settings → Downloads. Deleting them here isn't possible on purpose — they'd have to be downloaded again."),
+                StorageRow(
+                    label: "Events, portrait + journal", size: memoryBytes, icon: "brain",
+                    info: "Your memory, written out: one file per event, the distilled portrait entries, daily personality snapshots, and an append-only journal of what the pipelines decided.\n\nAll plain Markdown you can open and read. Tiny — and the only part that can't be recovered by recording again."),
             ],
-            logBytes: logBytes,
+            appRows: [
+                StorageRow(label: "App", size: bundleBytes, icon: "macwindow",
+                           info: "My Portrait itself — wherever you dragged it to, usually /Applications."),
+                StorageRow(label: "AI runtime", size: runtimeBytes, icon: "shippingbox",
+                           info: "Bun and the agent package, downloaded on first launch so the chat and the memory pipelines can run. Reinstalled automatically if missing."),
+                StorageRow(label: "Logs", size: logBytes, icon: "doc.text"),
+            ],
             months: months
         )
     }
