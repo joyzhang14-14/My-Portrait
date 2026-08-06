@@ -88,10 +88,7 @@ struct StorageSettingsView: View {
                 breakdownRows(stats.analysisRows)
             }
 
-            SettingsCard(
-                title: "App data",
-                info: "My Portrait itself and its logs. Neither is your data — both come back by reinstalling."
-            ) {
+            SettingsCard(title: "App data") {
                 breakdownRows(stats.appRows)
             }
 
