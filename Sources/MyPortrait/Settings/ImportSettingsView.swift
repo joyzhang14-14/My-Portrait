@@ -90,8 +90,8 @@ struct ImportSettingsView: View {
             SettingsCard(title: "Import from CLI AI tools") {
                 cliSourceBlock(
                     icon: "ClaudeCode",
-                    title: "Claude Code",
-                    info: "Brings in the prompts you typed into Claude Code and counts them toward your writing.\n\nOnly your own messages are imported — never the assistant's replies. Importing again won't create duplicates.",
+                    title: "Claude Code CLI",
+                    info: "Brings in the prompts you typed into Claude Code CLI and counts them toward your writing.\n\nOnly your own messages are imported — never the assistant's replies. Importing again won't create duplicates.",
                     sessions: ccSessions,
                     count: ccCount,
                     lastTs: ccLastTs,

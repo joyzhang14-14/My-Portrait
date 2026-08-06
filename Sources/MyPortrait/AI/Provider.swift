@@ -157,7 +157,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .gemini:     return "Gemini"
         case .perplexity: return "Perplexity"
         case .deepseek:   return "DeepSeek"
-        case .claudeCode: return "Claude Code"
+        case .claudeCode: return "Claude Code CLI"
         }
     }
 }
