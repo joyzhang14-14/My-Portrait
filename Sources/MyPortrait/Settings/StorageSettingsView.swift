@@ -149,7 +149,9 @@ struct StorageSettingsView: View {
                 AutoDeleteModeRow(
                     mode: mode,
                     isActive: config.current.storage.autoDeleteMode == mode.rawValue,
-                    recommended: mode == .mediaOnly
+                    recommendedReason: mode == .mediaOnly
+                        ? "Video and audio are almost all of the disk usage, and they're the part you're least likely to go back to. Dropping them keeps the OCR text and transcripts — so your timeline stays searchable and the memory pipelines still have something to read.\n\nEverything deletes those too: past the retention window, that day is simply gone."
+                        : nil
                 ) { config.mutate { $0.storage.autoDeleteMode = mode.rawValue } }
             }
         }
@@ -485,10 +487,49 @@ private struct DeleteButton: View {
 
 // MARK: - Auto-delete mode row
 
+/// RECOMMENDED 角标 —— 点开讲为什么推荐(ⓘ 那一套,只是换了个外形)。
+///
+/// **自己是个 Button,不是 onTapGesture**:它嵌在整行那个 Button 的 label
+/// 里,内层 Button 会把这一下点击吃掉,不会顺手把模式给切了。
+private struct RecommendedBadge: View {
+    let reason: String
+    @State private var shown = false
+    @State private var hover = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Text("RECOMMENDED")
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .tracking(0.6)
+                .foregroundStyle(Color.green.opacity(hover || shown ? 1.0 : 0.90))
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(
+                    Capsule()
+                        .fill(Color.green.opacity(hover || shown ? 0.12 : 0))
+                        .overlay(Capsule().stroke(
+                            Color.green.opacity(hover || shown ? 0.80 : 0.45), lineWidth: 0.8))
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help("Why this one?")
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            Text(reason)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+                .frame(width: 300, alignment: .leading)
+        }
+    }
+}
+
 private struct AutoDeleteModeRow: View {
     let mode: AutoDeleteMode
     let isActive: Bool
-    let recommended: Bool
+    /// nil = 这行不是推荐项。非 nil = 显示 RECOMMENDED 角标,点开就是这段理由。
+    let recommendedReason: String?
     let onTap: () -> Void
     @State private var hover = false
     var body: some View {
@@ -512,13 +553,8 @@ private struct AutoDeleteModeRow: View {
                     Text(mode.label)
                         .font(.system(size: 13, weight: isActive ? .semibold : .regular))
                         .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                    if recommended {
-                        Text("RECOMMENDED")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .tracking(0.6)
-                            .foregroundStyle(Color.green.opacity(0.90))
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Capsule().stroke(Color.green.opacity(0.45), lineWidth: 0.8))
+                    if let reason = recommendedReason {
+                        RecommendedBadge(reason: reason)
                     }
                 }
                 Spacer()
