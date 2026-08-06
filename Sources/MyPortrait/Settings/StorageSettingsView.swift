@@ -61,9 +61,12 @@ struct StorageSettingsView: View {
             }
 
             HStack(spacing: 14) {
-                StatTile(label: "Data",  value: bytes(stats.dataBytes),  icon: "cylinder.split.1x2", accent: .purple)
-                StatTile(label: "Cache", value: bytes(stats.cacheBytes), icon: "folder",            accent: .cyan)
-                StatTile(label: "Free",  value: bytes(stats.freeBytes),  icon: "externaldrive",     accent: .green)
+                StatTile(label: "Data",  value: bytes(stats.dataBytes),  icon: "cylinder.split.1x2",
+                         accent: .purple, loading: !stats.loaded)
+                StatTile(label: "Cache", value: bytes(stats.cacheBytes), icon: "folder",
+                         accent: .cyan,   loading: !stats.loaded)
+                StatTile(label: "Free",  value: bytes(stats.freeBytes),  icon: "externaldrive",
+                         accent: .green,  loading: !stats.loaded)
             }
 
             // 三张卡把 app 占的空间**全部**记完:采集下来的 / 分析出来的 /
@@ -80,14 +83,14 @@ struct StorageSettingsView: View {
 
             SettingsCard(
                 title: "Analysis data",
-                info: "What turns raw recordings into memory: the on-device models that read your audio, and the events and portrait the pipelines distilled out of everything.\n\nThe written-out memory is tiny — and it's the only part that can't be recovered by recording again."
+                info: "Everything that turns raw recordings into memory: the on-device models that read your audio, the runtime that executes the pipelines, and the events and portrait they produced.\n\nThe written-out memory is tiny — and it's the only part that can't be recovered by recording again."
             ) {
                 breakdownRows(stats.analysisRows)
             }
 
             SettingsCard(
                 title: "App data",
-                info: "My Portrait itself and what it needs to run — the app bundle, the AI runtime it downloaded on first launch, and its logs.\n\nNone of this is your data; all of it comes back by reinstalling."
+                info: "My Portrait itself and its logs. Neither is your data — both come back by reinstalling."
             ) {
                 breakdownRows(stats.appRows)
             }
@@ -119,9 +122,13 @@ struct StorageSettingsView: View {
     private func breakdownRows(_ rows: [StorageRow]) -> some View {
         ForEach(rows) { row in
             SettingsRow(row.label, info: row.info, icon: row.icon) {
-                Text(bytes(row.size))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                if stats.loaded {
+                    Text(bytes(row.size))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                } else {
+                    ProgressView().controlSize(.small)
+                }
             }
             if row.id != rows.last?.id {
                 SettingsDivider()
@@ -230,25 +237,67 @@ private struct StorageRow: Identifiable {
     var id: String { label }
 }
 
+/// 各分项的字节数。**跟行的"形状"(标题 / 图标 / ⓘ)分开存** —— 没扫完时
+/// 全填 0 就能构出一张一模一样的表,前端照常渲染,只在数字位置转圈。
+private struct StorageSizes {
+    var screenVideo: Int64 = 0
+    var audio: Int64 = 0
+    var metadata: Int64 = 0
+    var localModels: Int64 = 0
+    var memory: Int64 = 0
+    var bundle: Int64 = 0
+    var runtime: Int64 = 0
+    var logs: Int64 = 0
+}
+
 private struct StorageStats {
-    var dataBytes: Int64
+    var dataBytes: Int64 = 0
     /// ⚠️ `scan()` 填不了这个 —— 判定孤儿附件要读对话的 session 文件(异步 +
     /// 上主 actor)。由 `refresh()` 在 scan 之后用 `CacheHousekeeper` 补上。
-    var cacheBytes: Int64
-    var freeBytes: Int64
-    /// 采集系统的产物(README 那张图的 CAP subgraph)。
-    var captureRows: [StorageRow]
-    /// 分析系统:本地模型 + 蒸馏出来的记忆文件(ANA subgraph)。
-    var analysisRows: [StorageRow]
-    /// app 自己:本体 + 下载来的 AI 运行时 + 日志。都不是用户数据。
-    var appRows: [StorageRow]
-    var months: Double
+    var cacheBytes: Int64 = 0
+    var freeBytes: Int64 = 0
+    var sizes = StorageSizes()
+    var months: Double = 0
+    /// false = 还没扫完。**行照样全部渲染**,只是数字位置换成转圈 ——
+    /// 空数组会让三张卡在首屏塌成空壳,页面看着像坏了。
+    var loaded = false
 
-    static let empty = StorageStats(
-        dataBytes: 0, cacheBytes: 0, freeBytes: 0,
-        captureRows: [], analysisRows: [], appRows: [],
-        months: 0
-    )
+    /// 采集系统的产物(README 那张图的 CAP subgraph)。
+    var captureRows: [StorageRow] {
+        [
+            StorageRow(label: "Screenshots + Video", size: sizes.screenVideo,
+                       icon: "photo.on.rectangle"),
+            StorageRow(label: "Audio", size: sizes.audio, icon: "waveform"),
+            StorageRow(
+                label: "Metadata", size: sizes.metadata, icon: "cylinder",
+                info: "Everything the app knows *about* your captures, rather than the captures themselves: the text read off your screen, transcripts of what was said, your typing, and where each word sat on screen.\n\nThis is what makes your timeline searchable — it's why you can find a moment by typing a phrase you saw months ago. It usually outgrows the screenshots and recordings it describes."),
+        ]
+    }
+
+    /// 分析系统:本地模型 + 蒸馏出来的记忆文件(ANA subgraph)。
+    var analysisRows: [StorageRow] {
+        [
+            StorageRow(
+                label: "Local models", size: sizes.localModels, icon: "cpu",
+                info: "Every model you've downloaded in Settings → Downloads — transcription, speaker recognition, voice activity detection, speech segmentation. They run entirely on your Mac and never send anything out.\n\nOften the second-largest thing here after your recordings: a single transcription model can be several GB. Uninstall the ones you don't use from the Downloads page."),
+            StorageRow(label: "AI runtime", size: sizes.runtime, icon: "shippingbox",
+                       info: "Bun and the agent package, downloaded on first launch. This is what actually runs the memory pipelines and the chat — without it nothing gets analysed.\n\nReinstalled automatically if it goes missing."),
+            StorageRow(
+                label: "Events, portrait + journal", size: sizes.memory, icon: "brain",
+                info: "Your memory, written out: one file per event, the distilled portrait entries, daily personality snapshots, and an append-only journal of what the pipelines decided.\n\nAll plain Markdown you can open and read. Tiny — and the only part that can't be recovered by recording again."),
+        ]
+    }
+
+    /// app 自己:本体 + 日志。都不是用户数据。
+    var appRows: [StorageRow] {
+        [
+            StorageRow(label: "App", size: sizes.bundle, icon: "macwindow",
+                       info: "My Portrait itself — wherever you dragged it to, usually /Applications."),
+            StorageRow(label: "Logs", size: sizes.logs, icon: "doc.text"),
+        ]
+    }
+
+    static let empty = StorageStats()
 
     /// Walks the data directory and adds up sizes. Best-effort:
     /// missing dirs just contribute 0.
@@ -300,30 +349,18 @@ private struct StorageStats {
 
         return StorageStats(
             dataBytes: dataBytes, cacheBytes: 0, freeBytes: free,
-            captureRows: [
-                StorageRow(label: "Screenshots + Video", size: frameBytes + videoBytes,
-                           icon: "photo.on.rectangle"),
-                StorageRow(label: "Audio", size: audioBytes, icon: "waveform"),
-                StorageRow(
-                    label: "Metadata", size: dbBytes, icon: "cylinder",
-                    info: "Everything the app knows *about* your captures, rather than the captures themselves: the text read off your screen, transcripts of what was said, your typing, and where each word sat on screen.\n\nThis is what makes your timeline searchable — it's why you can find a moment by typing a phrase you saw months ago. It usually outgrows the screenshots and recordings it describes."),
-            ],
-            analysisRows: [
-                StorageRow(
-                    label: "Local models", size: localModelBytes(root: root), icon: "cpu",
-                    info: "Every model you've downloaded in Settings → Downloads — transcription, speaker recognition, voice activity detection, speech segmentation. They run entirely on your Mac and never send anything out.\n\nOften the second-largest thing here after your recordings: a single transcription model can be several GB. Uninstall the ones you don't use from the Downloads page."),
-                StorageRow(
-                    label: "Events, portrait + journal", size: memoryBytes, icon: "brain",
-                    info: "Your memory, written out: one file per event, the distilled portrait entries, daily personality snapshots, and an append-only journal of what the pipelines decided.\n\nAll plain Markdown you can open and read. Tiny — and the only part that can't be recovered by recording again."),
-            ],
-            appRows: [
-                StorageRow(label: "App", size: bundleBytes, icon: "macwindow",
-                           info: "My Portrait itself — wherever you dragged it to, usually /Applications."),
-                StorageRow(label: "AI runtime", size: runtimeBytes, icon: "shippingbox",
-                           info: "Bun and the agent package, downloaded on first launch so the chat and the memory pipelines can run. Reinstalled automatically if missing."),
-                StorageRow(label: "Logs", size: logBytes, icon: "doc.text"),
-            ],
-            months: months
+            sizes: StorageSizes(
+                screenVideo: frameBytes + videoBytes,
+                audio: audioBytes,
+                metadata: dbBytes,
+                localModels: localModelBytes(root: root),
+                memory: memoryBytes,
+                bundle: bundleBytes,
+                runtime: runtimeBytes,
+                logs: logBytes
+            ),
+            months: months,
+            loaded: true
         )
     }
 
@@ -364,17 +401,25 @@ private struct SummaryRow: View {
     let stats: StorageStats
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(headline)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+            HStack(spacing: 8) {
+                if stats.loaded {
+                    Text(headline)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                } else {
+                    ProgressView().controlSize(.small)
+                    Text("Measuring…")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                }
                 Spacer()
             }
-            ProgressView(value: fillFraction)
+            .frame(height: 18, alignment: .leading)
+            ProgressView(value: stats.loaded ? fillFraction : 0)
                 .progressViewStyle(.linear)
                 .tint(Color.purple)
                 .frame(maxWidth: .infinity)
-            Text(monthsRemaining)
+            Text(stats.loaded ? monthsRemaining : " ")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textPrimary.opacity(0.55))
         }
@@ -401,6 +446,7 @@ private struct SummaryRow: View {
 
 private struct StatTile: View {
     let label: String; let value: String; let icon: String; let accent: Color
+    var loading: Bool = false
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
@@ -411,9 +457,16 @@ private struct StatTile: View {
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.7)
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                Text(value)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.96))
+                // 转圈和数字都占一行的高度,加载完不会让磁贴跳一下。
+                if loading {
+                    ProgressView().controlSize(.small)
+                        .frame(height: 20, alignment: .leading)
+                } else {
+                    Text(value)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.96))
+                        .frame(height: 20, alignment: .leading)
+                }
             }
             Spacer()
         }

@@ -88,12 +88,17 @@ struct SettingsRow<Trailing: View>: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 // spacing 0 —— ⓘ 自带 6pt padding 撑点击范围,再加间距就散了。
+                //
+                // minHeight 23 = ⓘ 的实际高度(11pt 图标 + 上下各 6pt)。**不给
+                // 的话带 ⓘ 的行比不带的高 7pt**,同一张卡里几条高矮不齐。
+                // 钉在这里而不是各页自己垫,免得下次加行又忘。
                 HStack(spacing: 0) {
                     Text(title)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textPrimary.opacity(0.92))
                     if let info { SettingsInfoBadge(text: info) }
                 }
+                .frame(minHeight: 23)
                 if let description {
                     Text(description)
                         .font(.system(size: 11))
