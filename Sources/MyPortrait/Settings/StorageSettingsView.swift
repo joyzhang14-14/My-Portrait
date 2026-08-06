@@ -24,11 +24,11 @@ struct StorageSettingsView: View {
                      onResetCurrentPage: { config.mutate { $0.storage = .init() } }) {
 
             SettingsCard(title: "Local disk storage") {
+                // 描述只报当前路径 —— 目录已经不让在 UI 里改了(Change 按钮
+                // 07-28 换成 Open),原来那句"改目录会重新开始录"没有对应操作。
                 SettingsRow(
                     "Data directory",
-                    description: config.current.storage.dataDirectory.isEmpty
-                        ? "~/.portrait (default) · changing directory starts fresh recordings"
-                        : resolvedDataDir,
+                    description: resolvedDataDir,
                     icon: "folder"
                 ) {
                     HStack(spacing: 6) {
@@ -137,7 +137,7 @@ struct StorageSettingsView: View {
             title: "Auto-delete old data"
         ) {
             SettingsRow("Retention window",
-                        description: "Data older than this is eligible for auto-delete.",
+                        info: "How far back captured data is kept. Anything older becomes eligible for auto-delete — what actually gets deleted depends on the mode you pick below.\n\nKeep forever means nothing is ever deleted automatically; you can still delete data by hand.",
                         icon: "calendar.badge.clock") {
                 Picker("", selection: config.binding(\.storage.retentionDays)) {
                     ForEach(RetentionDays.allCases) { r in Text(r.label).tag(r.rawValue) }
@@ -158,7 +158,7 @@ struct StorageSettingsView: View {
     private var waitForTranscriptionCard: some View {
         SettingsCard {
             SettingsRow("Wait for transcription",
-                        description: "Keep un-transcribed audio past the retention window until its text is saved.",
+                        info: "Audio that hasn't been transcribed yet is kept past the retention window until its text is saved.\n\nWithout this, a backlog of un-transcribed recordings can age out and be deleted before they're ever turned into text — the audio is gone and so is what was said in it.",
                         icon: "text.bubble") {
                 Toggle("", isOn: config.binding(\.storage.waitForTranscription)).labelsHidden().toggleStyle(.switch)
             }
@@ -506,24 +506,20 @@ private struct AutoDeleteModeRow: View {
                         .foregroundStyle(isActive ? Color.white.opacity(0.95) : Theme.textPrimary.opacity(0.75))
                 }
                 .frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(mode.label)
-                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                            .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                        if recommended {
-                            Text("RECOMMENDED")
-                                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .tracking(0.6)
-                                .foregroundStyle(Color.green.opacity(0.90))
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(Capsule().stroke(Color.green.opacity(0.45), lineWidth: 0.8))
-                        }
+                // 灰字 subtitle 删了(2026-08-05)。AutoDeleteMode.subtitle 还在,
+                // 想加回来直接放这儿。
+                HStack(spacing: 6) {
+                    Text(mode.label)
+                        .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                    if recommended {
+                        Text("RECOMMENDED")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .tracking(0.6)
+                            .foregroundStyle(Color.green.opacity(0.90))
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Capsule().stroke(Color.green.opacity(0.45), lineWidth: 0.8))
                     }
-                    Text(mode.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 if isActive {
