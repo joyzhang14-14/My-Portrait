@@ -376,7 +376,12 @@ struct MyPortraitApp: App {
             }
             // --force:连已写过 ocr_backfill_text 的行也重跑(2026-08-05 抽帧
             // 差一帧的 bug 修好后,存量 79,433 行需要覆盖重写)。
-            OcrBackfillCLI.run(limit: limit, day: day, force: args.contains("--force"))
+            // --min-id:断点续跑(长跑批会被 session SIGKILL,见 CLI 注释)。
+            let minId = args.firstIndex(of: "--min-id").flatMap { i -> Int64? in
+                i + 1 < args.count ? Int64(args[i + 1]) : nil
+            }
+            OcrBackfillCLI.run(limit: limit, day: day,
+                               force: args.contains("--force"), minId: minId)
         }
         // 一次性清理:库中全部 loginwindow(锁屏)帧 + 纯锁屏 MP4(配套
         // capture.screen.pauseWhenLocked —— 新帧不再产生,存量清一次)。

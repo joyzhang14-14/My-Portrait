@@ -24,10 +24,15 @@ import Vision
 /// 用法:`swift run MyPortrait --ocr-backfill [--limit N] [--day YYYY-MM-DD]`
 enum OcrBackfillCLI {
 
-    static func run(limit: Int?, day: String?, force: Bool = false) {
+    /// `minId` = 从这个 frame id 起跑(含)。**长跑批必备的断点续跑**:本机的
+    /// session 会不定期 SIGKILL 长跑进程(2026-08-05 全量重跑在 85.8% 处被杀,
+    /// 已完成的 68,000 帧因为按 50 帧一提交并未丢失,但 `--force` 的 WHERE 1=1
+    /// 会让重启从头再来 13.5 小时)。每批提交后打印 `next-min-id`,被杀了就用
+    /// 它接着跑。
+    static func run(limit: Int?, day: String?, force: Bool = false, minId: Int64? = nil) {
         Task {
             do {
-                let n = try await backfill(limit: limit, day: day, force: force)
+                let n = try await backfill(limit: limit, day: day, force: force, minId: minId)
                 print("[ocr-backfill] done. updated \(n) frame(s)")
                 exit(0)
             } catch {
@@ -45,7 +50,8 @@ enum OcrBackfillCLI {
         let offsetMs: Int64
     }
 
-    private static func backfill(limit: Int?, day: String?, force: Bool) async throws -> Int {
+    private static func backfill(limit: Int?, day: String?, force: Bool,
+                                 minId: Int64?) async throws -> Int {
         let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
@@ -73,6 +79,7 @@ enum OcrBackfillCLI {
                 WHERE \(force ? "1=1" : "f.ocr_backfill_text IS NULL")
                   AND (f.text_source IS NULL OR f.text_source <> 'ocr')
                   AND (f.snapshot_path IS NOT NULL OR vc.file_path IS NOT NULL)
+                  \(minId.map { "AND f.id >= \($0)" } ?? "")
                   \(dayClause)
                 ORDER BY f.id
                 \(limitClause)
@@ -100,6 +107,12 @@ enum OcrBackfillCLI {
                     }
                 }
                 done += rows.count
+                // 断点:这一批已落库,被 SIGKILL 就从下一个 id 接着跑。
+                // stdout 立刻 flush —— 管道里接 tail 之类会缓冲,被杀时全丢。
+                if let last = rows.last?.0 {
+                    print("[ocr-backfill] committed → next-min-id \(last + 1)")
+                    fflush(stdout)
+                }
             } catch {
                 // app 正在写库时可能仍抢不到锁 —— 跳过这批,下次跑会重新捞到
                 // (WHERE ocr_backfill_text IS NULL 天然幂等)。
