@@ -53,6 +53,10 @@ actor RetentionWorker {
 
     /// 立即跑一轮（调试 / 手动按钮 / 测试用）。
     func runOnce() async {
+        // 自动回收先跑,**不看 auto-delete 模式** —— 它清的是 bun 包缓存和
+        // 没人再引用的附件,是垃圾不是用户数据,用户选 Off 也照清。
+        await CacheHousekeeper.run()
+
         let (days, mode, waitForTranscription) = readSettings()
         guard let cutoffDays = days, mode != .off else {
             // forever 或 off → 不动数据
