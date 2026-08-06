@@ -53,13 +53,10 @@ struct ImportSettingsView: View {
     @State private var codexProgress: CLIImportProgress? = nil
 
     var body: some View {
-        SettingsPage(
-            "Import",
-            subtitle: "Bring historical data from other capture tools into My Portrait."
-        ) {
+        SettingsPage("Import") {
             SettingsCard(
                 title: "Import from screenpipe",
-                footnote: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording. Your current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
+                info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
             ) {
                 if scanning {
                     scanningRow
@@ -88,13 +85,13 @@ struct ImportSettingsView: View {
                 }
             }
 
-            SettingsCard(
-                title: "Import from Claude Code",
-                footnote: "Brings in the prompts you typed into Claude Code and counts them toward your writing. Only your own messages are imported, and importing again won't create duplicates."
-            ) {
+            // 两个 CLI 来源并成一张卡 —— 它们做的是同一件事(把你打给
+            // coding agent 的 prompt 收进写作),各自的说明进各自那行的 ⓘ。
+            SettingsCard(title: "Import from CLI AI tools") {
                 cliSourceBlock(
                     icon: "ClaudeCode",
                     title: "Claude Code",
+                    info: "Brings in the prompts you typed into Claude Code and counts them toward your writing.\n\nOnly your own messages are imported — never the assistant's replies. Importing again won't create duplicates.",
                     sessions: ccSessions,
                     count: ccCount,
                     lastTs: ccLastTs,
@@ -105,15 +102,11 @@ struct ImportSettingsView: View {
                     rescanAction: { await rescanClaudeCode() },
                     importAction: { await runImport(app: "claude-code") }
                 )
-            }
-
-            SettingsCard(
-                title: "Import from Codex CLI",
-                footnote: "Brings in the prompts you typed into Codex CLI and counts them toward your writing. Importing again won't create duplicates."
-            ) {
+                SettingsDivider()
                 cliSourceBlock(
                     icon: "Codex",
                     title: "Codex CLI",
+                    info: "Brings in the prompts you typed into Codex CLI and counts them toward your writing.\n\nOnly your own messages are imported. Importing again won't create duplicates.",
                     sessions: codexSessions,
                     count: codexCount,
                     lastTs: codexLastTs,
@@ -136,6 +129,7 @@ struct ImportSettingsView: View {
     private func cliSourceBlock(
         icon: String,
         title: String,
+        info: String,
         sessions: Int?,
         count: Int?,
         lastTs: Int64?,
@@ -159,8 +153,13 @@ struct ImportSettingsView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 18, height: 18)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                // spacing 0 —— ⓘ 自带 6pt padding 撑点击范围,外面再留 8 就散了
+                // (同 SettingsRow 的做法)。
+                HStack(spacing: 0) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                    SettingsInfoBadge(text: info)
+                }
                 Spacer()
                 Button(count == nil ? "Scan" : "Re-scan") { Task { await rescanAction() } }
                     .buttonStyle(.bordered)
