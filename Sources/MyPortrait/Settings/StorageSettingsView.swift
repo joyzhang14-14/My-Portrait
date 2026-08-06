@@ -69,42 +69,29 @@ struct StorageSettingsView: View {
                 StatTile(label: "Free",  value: bytes(stats.freeBytes),  icon: "externaldrive",     accent: .green)
             }
 
-            SettingsCard(title: "Media files") {
-                SettingsRow("Audio", icon: "waveform") {
-                    Text(bytes(stats.audioBytes))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                }
-                SettingsDivider()
-                SettingsRow("Video", icon: "film") {
-                    Text(bytes(stats.videoBytes))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                }
-                SettingsDivider()
-                SettingsRow("Screenshots", icon: "photo.on.rectangle") {
-                    Text(bytes(stats.framesBytes))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                }
-                SettingsDivider()
-                SettingsRow("Total", icon: "rectangle.stack") {
-                    Text(bytes(stats.mediaTotalBytes))
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                }
+            // 两张卡对齐 README 那张架构图的两个 subgraph:采集系统 /
+            // 分析系统。⚠️ portrait.sqlite 归 **Capture** —— README 里它的
+            // 名字就叫 "Capture DB"(frames / OCR / audio 都是采集层写的),
+            // 别因为它"不是媒体文件"就挪去分析那边。
+            SettingsCard(
+                title: "Capture data",
+                info: "Everything recorded off your Mac: the screen, what was said, and what you typed — plus the searchable index built from them.\n\nThis is raw material. It's almost all of your disk usage, and it's what the retention window above trims."
+            ) {
+                breakdownRows(stats.captureRows, total: stats.captureTotalBytes)
             }
 
-            SettingsCard(title: "Other files") {
-                ForEach(stats.otherBreakdown, id: \.label) { row in
-                    SettingsRow(row.label, info: row.info, icon: row.icon) {
-                        Text(bytes(row.size))
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                    }
-                    if row.label != stats.otherBreakdown.last?.label {
-                        SettingsDivider()
-                    }
+            SettingsCard(
+                title: "Analysis data",
+                info: "What the memory pipelines distilled out of all that raw material — your events and your portrait, written as plain Markdown files you can open and read.\n\nTiny next to the capture side, and the only part that can't be recovered by recording again."
+            ) {
+                breakdownRows(stats.analysisRows, total: nil)
+            }
+
+            SettingsCard(title: "App logs") {
+                SettingsRow("Logs", icon: "doc.text") {
+                    Text(bytes(stats.logBytes))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 }
             }
 
@@ -129,6 +116,28 @@ struct StorageSettingsView: View {
         }
         .task {
             if lastScannedAt == nil { await refresh() }
+        }
+    }
+
+    /// 明细表:每行一个尺寸,`total` 非 nil 时末尾多一行加粗合计。
+    @ViewBuilder
+    private func breakdownRows(_ rows: [StorageRow], total: Int64?) -> some View {
+        ForEach(rows) { row in
+            SettingsRow(row.label, info: row.info, icon: row.icon) {
+                Text(bytes(row.size))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
+            }
+            if row.id != rows.last?.id || total != nil {
+                SettingsDivider()
+            }
+        }
+        if let total {
+            SettingsRow("Total", icon: "rectangle.stack") {
+                Text(bytes(total))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+            }
         }
     }
 
@@ -303,21 +312,31 @@ struct StorageSettingsView: View {
 
 // MARK: - Stats
 
+/// 明细表里的一行。
+private struct StorageRow: Identifiable {
+    let label: String
+    let size: Int64
+    let icon: String
+    var info: String? = nil
+    var id: String { label }
+}
+
 private struct StorageStats {
     var dataBytes: Int64
     var cacheBytes: Int64
     var freeBytes: Int64
-    var audioBytes: Int64
-    var videoBytes: Int64
-    var framesBytes: Int64
-    var mediaTotalBytes: Int64
-    var otherBreakdown: [(label: String, size: Int64, icon: String, info: String?)]
+    /// 采集系统的产物(README 那张图的 CAP subgraph)。
+    var captureRows: [StorageRow]
+    var captureTotalBytes: Int64
+    /// 分析系统的产物(ANA subgraph)。
+    var analysisRows: [StorageRow]
+    var logBytes: Int64
     var months: Double
 
     static let empty = StorageStats(
         dataBytes: 0, cacheBytes: 0, freeBytes: 0,
-        audioBytes: 0, videoBytes: 0, framesBytes: 0, mediaTotalBytes: 0,
-        otherBreakdown: [], months: 0
+        captureRows: [], captureTotalBytes: 0, analysisRows: [], logBytes: 0,
+        months: 0
     )
 
     /// Walks the data directory and adds up sizes. Best-effort:
@@ -326,10 +345,10 @@ private struct StorageStats {
     /// 子目录名对齐本项目的真实落盘布局(曾照搬参考项目的 `data/`、
     /// `cache/`、`cronJobs/`,全都不存在 → 字段恒为 0 显示 "—")。
     ///
-    /// 2026-08-05:`otherBreakdown` 从 Database/Logs/Cron Jobs/Other 改成
-    /// Metadata/Memory files/Logs。**兜底的 Other 行没了** —— chat.sqlite、
-    /// voice_training、agent_sessions 这些(合计十几 MB)不再计入任何一行,
-    /// 几行加起来不再等于总量。要它重新闭合就把 Other 加回来。
+    /// 2026-08-05:明细改成按 README 的两层分(capture / analysis),
+    /// **兜底的 Other 行没了** —— chat.sqlite、voice_training、
+    /// agent_sessions、attachments、cron_jobs 这些(合计十几 MB)不再计入
+    /// 任何一行,几行加起来不再等于 Data 磁贴。要重新闭合就把 Other 加回来。
     nonisolated static func scan(at path: String) -> StorageStats {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: path)
@@ -351,12 +370,6 @@ private struct StorageStats {
                        + fileSize(root.appendingPathComponent("portrait.sqlite-wal"))
                        + fileSize(root.appendingPathComponent("portrait.sqlite-shm"))
         let logBytes   = directorySize(root.appendingPathComponent("logs"))
-        // 记忆层 = 蒸馏出来的画像 + 事件 + 它们的流水账。四个目录都很小,
-        // 但它们是**唯一不可再生**的那部分 —— 单列一行让用户看得见。
-        let memoryBytes = directorySize(root.appendingPathComponent("portrait"))
-                        + directorySize(root.appendingPathComponent("events"))
-                        + directorySize(root.appendingPathComponent("journal"))
-                        + directorySize(root.appendingPathComponent("personality_daily"))
 
         var free: Int64 = 0
         if let attrs = try? fm.attributesOfFileSystem(forPath: root.path),
@@ -370,15 +383,28 @@ private struct StorageStats {
 
         return StorageStats(
             dataBytes: dataBytes, cacheBytes: cacheBytes, freeBytes: free,
-            audioBytes: audioBytes, videoBytes: videoBytes, framesBytes: frameBytes,
-            mediaTotalBytes: mediaBytes,
-            otherBreakdown: [
-                (label: "Metadata", size: dbBytes, icon: "cylinder",
-                 info: "Everything the app knows *about* your captures, rather than the captures themselves: the text read off your screen, transcripts of what was said, your typing, and where each word sat on screen.\n\nThis is what makes your timeline searchable — it's why you can find a moment by typing a phrase you saw months ago. It usually outgrows the screenshots and recordings it describes."),
-                (label: "Memory files", size: memoryBytes, icon: "brain",
-                 info: "Your events and your portrait — what the memory pipelines distilled out of everything above, written as plain Markdown files you can open and read.\n\nTiny compared to the rest, and the one part that can't be regenerated by re-recording."),
-                (label: "Logs", size: logBytes, icon: "doc.text", info: nil),
+            captureRows: [
+                StorageRow(label: "Screenshots", size: frameBytes, icon: "photo.on.rectangle"),
+                StorageRow(label: "Video", size: videoBytes, icon: "film"),
+                StorageRow(label: "Audio", size: audioBytes, icon: "waveform"),
+                StorageRow(
+                    label: "Metadata", size: dbBytes, icon: "cylinder",
+                    info: "Everything the app knows *about* your captures, rather than the captures themselves: the text read off your screen, transcripts of what was said, your typing, and where each word sat on screen.\n\nThis is what makes your timeline searchable — it's why you can find a moment by typing a phrase you saw months ago. It usually outgrows the screenshots and recordings it describes."),
             ],
+            captureTotalBytes: mediaBytes + dbBytes,
+            analysisRows: [
+                StorageRow(label: "Events", size: directorySize(root.appendingPathComponent("events")),
+                           icon: "calendar.badge.clock"),
+                StorageRow(label: "Portrait", size: directorySize(root.appendingPathComponent("portrait")),
+                           icon: "person.text.rectangle"),
+                StorageRow(label: "Personality snapshots",
+                           size: directorySize(root.appendingPathComponent("personality_daily")),
+                           icon: "brain.head.profile"),
+                StorageRow(label: "Journal", size: directorySize(root.appendingPathComponent("journal")),
+                           icon: "list.bullet.rectangle",
+                           info: "An append-only record of what the memory pipelines did — merges, archives, weight passes. Kept so a decision you disagree with can be traced back."),
+            ],
+            logBytes: logBytes,
             months: months
         )
     }
