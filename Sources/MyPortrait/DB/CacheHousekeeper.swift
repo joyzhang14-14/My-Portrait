@@ -33,10 +33,40 @@ enum CacheHousekeeper {
     private static let maxSessionFileBytes: Int = 64 * 1024 * 1024
 
     /// 跑一轮。挂在 RetentionWorker 的 24h 节拍上,**不受 auto-delete 模式
-    /// 影响** —— 这里清的不是用户数据,是垃圾,用户选 Off 也照清。
+    /// 影响** —— 这里清的不是用户数据,是垃圾,用户选哪档都照清。
     static func run() async {
-        sweepBunInstallCache()
-        await sweepOrphanAttachments()
+        let t = await reclaimable()
+        let fm = FileManager.default
+        if !t.bunCache.isEmpty {
+            let freed = t.bunCache.reduce(0) { $0 + size(of: $1) }
+            for u in t.bunCache { try? fm.removeItem(at: u) }
+            log.notice("bun cache: freed \(freed / 1_048_576) MB")
+        }
+        if !t.orphanAttachments.isEmpty {
+            let freed = t.orphanAttachments.reduce(0) { $0 + size(of: $1) }
+            for u in t.orphanAttachments { try? fm.removeItem(at: u) }
+            log.notice("attachments: removed \(t.orphanAttachments.count) orphan(s), freed \(freed / 1_048_576) MB")
+        }
+    }
+
+    /// Settings → Storage 的 Cache 磁贴读这个。**和 `run()` 走同一份判据** ——
+    /// 磁贴上的数字就是"现在点一下会腾出多少",两边不可能对不上。
+    static func reclaimableBytes() async -> Int64 {
+        await reclaimable().all.reduce(0) { $0 + size(of: $1) }
+    }
+
+    /// 此刻可以安全删掉的东西。**只列不删**,`run()` 和磁贴共用。
+    struct Reclaimable {
+        var bunCache: [URL] = []
+        var orphanAttachments: [URL] = []
+        var all: [URL] { bunCache + orphanAttachments }
+    }
+
+    static func reclaimable() async -> Reclaimable {
+        var r = Reclaimable()
+        r.bunCache = bunInstallCacheTargets()
+        r.orphanAttachments = await orphanAttachmentTargets()
+        return r
     }
 
     // MARK: - 1. bun 的 npm 下载缓存
@@ -44,31 +74,26 @@ enum CacheHousekeeper {
     /// `BUN_INSTALL` 指到 `~/.portrait/bun`,所以 bun 的包缓存落在
     /// `bun/install/cache`。它只在装 / 升级包时用得上,`pi-agent` 装好之后
     /// 就是纯粹的历史包袱。
-    private static func sweepBunInstallCache() {
+    private static func bunInstallCacheTargets() -> [URL] {
         let fm = FileManager.default
         let cache = AIPaths.bunDir.appendingPathComponent("install/cache", isDirectory: true)
-        guard fm.fileExists(atPath: cache.path) else { return }
+        guard fm.fileExists(atPath: cache.path) else { return [] }
 
         // 两样都装好了 = 缓存已经完成它的使命。任何一样没装好都别动 ——
         // 接下来很可能就要装,留着能省一次下载。
         guard BunInstaller.isInstalled, PiInstaller.isInstalled else {
             log.info("bun cache: install not complete — skip")
-            return
+            return []
         }
         // 正在 bun install 的话缓存目录会被持续写入。刚动过就让开,
         // 下一轮再说(这比给两个 installer 加运行标记省事,也更难出错:
         // 崩溃留下的 stale 标记不会让回收永久失效)。
         if let m = modifiedAt(cache), Date().timeIntervalSince(m) < bunCacheQuietSeconds {
             log.info("bun cache: touched recently — skip")
-            return
+            return []
         }
-
-        let before = directorySize(cache)
         // 删内容不删目录本身 —— bun 自己会重建,但少一次目录创建少一个出错点。
-        guard let children = try? fm.contentsOfDirectory(at: cache,
-                                                        includingPropertiesForKeys: nil) else { return }
-        for u in children { try? fm.removeItem(at: u) }
-        log.notice("bun cache: freed \(before / 1_048_576) MB")
+        return (try? fm.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? []
     }
 
     // MARK: - 2. attachments 孤儿回收
@@ -82,20 +107,20 @@ enum CacheHousekeeper {
     ///
     /// **只查活对话自己的那一个文件,不扫目录。** Claude Code 的
     /// `~/.claude/projects` 在开发机上能有 8 GB / 两万多个 jsonl,全扫是灾难。
-    private static func sweepOrphanAttachments() async {
+    private static func orphanAttachmentTargets() async -> [URL] {
         let fm = FileManager.default
         let dir = AIPaths.supportDir.appendingPathComponent("attachments", isDirectory: true)
         guard fm.fileExists(atPath: dir.path),
               let files = try? fm.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: [.contentModificationDateKey])
-        else { return }
+        else { return [] }
 
         let cutoff = Date().addingTimeInterval(-attachmentMinAgeDays * 86400)
         let candidates = files.filter { u in
             guard let m = modifiedAt(u) else { return false }   // 读不到日期 → 不碰
             return m < cutoff
         }
-        guard !candidates.isEmpty else { return }
+        guard !candidates.isEmpty else { return [] }
 
         // 活对话的 session 文件清单。conv 被删时 pi 的 jsonl 会跟着删,
         // 所以"对话没了"天然等于"它的附件成了孤儿"。
@@ -120,7 +145,7 @@ enum CacheHousekeeper {
                 // 有文件但读不出来 → 我们不知道它引用了什么。**整轮放弃**,
                 // 一个都不删。宁可这次白跑,不可猜。
                 log.notice("attachments: session unreadable — abort this pass")
-                return
+                return []
             }
             for u in candidates {
                 let stem = u.deletingPathExtension().lastPathComponent
@@ -130,17 +155,8 @@ enum CacheHousekeeper {
             }
         }
 
-        var freed: Int64 = 0
-        var n = 0
-        for u in candidates {
-            let stem = u.deletingPathExtension().lastPathComponent
-            guard !referenced.contains(stem) else { continue }
-            freed += fileSize(u)
-            try? fm.removeItem(at: u)
-            n += 1
-        }
-        if n > 0 {
-            log.notice("attachments: removed \(n) orphan(s), freed \(freed / 1_048_576) MB")
+        return candidates.filter {
+            !referenced.contains($0.deletingPathExtension().lastPathComponent)
         }
     }
 
@@ -171,6 +187,13 @@ enum CacheHousekeeper {
 
     private static func modifiedAt(_ url: URL) -> Date? {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    /// 文件就是文件大小,目录就递归求和 —— bun 缓存的每个 target 是目录,
+    /// 附件的每个 target 是文件,两边共用一个入口。
+    private static func size(of url: URL) -> Int64 {
+        let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        return isDir ? directorySize(url) : fileSize(url)
     }
 
     private static func fileSize(_ url: URL) -> Int64 {

@@ -11,9 +11,6 @@ struct StorageSettingsView: View {
     @State private var scanning = false
     @State private var lastScannedAt: Date? = nil
 
-    @State private var clearingCache = false
-    @State private var scanResults: ScanResults? = nil
-
     private var resolvedDataDir: String {
         if !config.current.storage.dataDirectory.isEmpty { return config.current.storage.dataDirectory }
         return NSString("~/.portrait").expandingTildeInPath
@@ -99,8 +96,6 @@ struct StorageSettingsView: View {
 
             waitForTranscriptionCard
 
-            clearCacheCard
-
             SettingsCard(
                 title: "Delete recent data",
                 footnote: "Permanently deletes everything captured in the chosen time range. This can't be undone."
@@ -146,7 +141,7 @@ struct StorageSettingsView: View {
             title: "Auto-delete old data"
         ) {
             SettingsRow("Retention window",
-                        info: "How far back captured data is kept. Anything older becomes eligible for auto-delete — what actually gets deleted depends on the mode you pick below.\n\nKeep forever means nothing is ever deleted automatically; you can still delete data by hand.",
+                        info: "How far back captured data is kept. Anything older becomes eligible for auto-delete — what actually gets deleted depends on the mode you pick below.\n\nKeep forever means none of your captured data ever ages out. Rebuildable files are still cleaned up either way; that isn't governed by this window.",
                         icon: "calendar.badge.clock") {
                 Picker("", selection: config.binding(\.storage.retentionDays)) {
                     ForEach(RetentionDays.allCases) { r in Text(r.label).tag(r.rawValue) }
@@ -176,100 +171,18 @@ struct StorageSettingsView: View {
         }
     }
 
-    private var clearCacheCard: some View {
-        SettingsCard {
-            SettingsRow("Clear cache",
-                        description: "Remove temporary files left by chat attachments and the AI runtime.",
-                        icon: "trash") {
-                Button(scanResults == nil ? "Scan" : "Re-scan") {
-                    scanCache()
-                }
-                .font(.system(size: 12, weight: .medium))
-            }
-            if let r = scanResults {
-                SettingsDivider()
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(r.entries, id: \.path) { entry in
-                        HStack {
-                            Image(systemName: "doc")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                            Text(entry.displayPath)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.78))
-                                .lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Text(entry.sizeLabel)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                        }
-                    }
-                    HStack {
-                        Spacer()
-                        Button("Delete all", role: .destructive) { runClearCache() }
-                            .font(.system(size: 12, weight: .medium))
-                            .disabled(clearingCache)
-                    }
-                    .padding(.top, 6)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 10)
-            }
-        }
-    }
-
-    // MARK: - Cache scan & clear (real filesystem)
-
-    private struct ScanResults {
-        struct Entry { let path: String; let displayPath: String; let bytes: Int64; let sizeLabel: String; let isDir: Bool }
-        let entries: [Entry]
-    }
-
-    /// Scan the known cache locations. Misses (file/dir doesn't exist) still
-    /// show with "—" so the user knows we looked.
-    private func scanCache() {
-        let targets: [(path: String, isDir: Bool)] = [
-            (AIPaths.supportDir.appendingPathComponent("attachments").path,         true),
-            (AIPaths.supportDir.appendingPathComponent("bun/install/cache").path,   true),
-        ]
-        let home = NSHomeDirectory()
-        let entries: [ScanResults.Entry] = targets.map { t in
-            let bytes = CacheScanner.size(at: t.path, isDir: t.isDir)
-            let display = t.path.hasPrefix(home) ? "~" + t.path.dropFirst(home.count) : t.path
-            return .init(
-                path: t.path,
-                displayPath: String(display),
-                bytes: bytes,
-                sizeLabel: CacheScanner.format(bytes),
-                isDir: t.isDir
-            )
-        }
-        scanResults = ScanResults(entries: entries)
-    }
-
-    /// Delete every scanned target. Files are removed outright; directories
-    /// are emptied but kept (so PiAgent / BunInstaller can still write into
-    /// them without recreating the dir).
-    private func runClearCache() {
-        guard let r = scanResults else { return }
-        clearingCache = true
-        Task {
-            await Task.detached(priority: .userInitiated) {
-                for e in r.entries { CacheScanner.purge(path: e.path, isDir: e.isDir) }
-            }.value
-            clearingCache = false
-            scanCache()      // refresh, every row should now read 0 B / —
-        }
-    }
-
     // MARK: - Scanner
 
     @MainActor
     private func refresh() async {
         scanning = true
         let target = resolvedDataDir
-        let computed = await Task.detached(priority: .userInitiated) {
+        var computed = await Task.detached(priority: .userInitiated) {
             StorageStats.scan(at: target)
         }.value
+        // Cache 磁贴 = **回收器此刻真会删掉的那些东西**,不是"看着像缓存的目录"。
+        // 走 CacheHousekeeper 同一份判据,磁贴上的数字和自动回收永远对得上。
+        computed.cacheBytes = await CacheHousekeeper.reclaimableBytes()
         stats = computed
         lastScannedAt = Date()
         scanning = false
@@ -323,6 +236,8 @@ private struct StorageRow: Identifiable {
 
 private struct StorageStats {
     var dataBytes: Int64
+    /// ⚠️ `scan()` 填不了这个 —— 判定孤儿附件要读对话的 session 文件(异步 +
+    /// 上主 actor)。由 `refresh()` 在 scan 之后用 `CacheHousekeeper` 补上。
     var cacheBytes: Int64
     var freeBytes: Int64
     /// 采集系统的产物(README 那张图的 CAP subgraph)。
@@ -353,12 +268,6 @@ private struct StorageStats {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: path)
         let dataBytes  = directorySize(root)
-        // Cache = 可再生内容(删了能重新下载,不是用户数据):
-        // 内嵌运行时 + agent 包 + 本地模型 + 工具二进制。
-        let cacheBytes = directorySize(root.appendingPathComponent("bun"))
-                       + directorySize(root.appendingPathComponent("pi-agent"))
-                       + directorySize(root.appendingPathComponent("models"))
-                       + directorySize(root.appendingPathComponent("bin"))
         // 音频 = 转录后留存的 wav + 待转录队列。
         let audioBytes = directorySize(root.appendingPathComponent("raw_data/audio"))
                        + directorySize(root.appendingPathComponent("audio_queue"))
@@ -382,7 +291,7 @@ private struct StorageStats {
         let months = Double(free) / Double(monthly)
 
         return StorageStats(
-            dataBytes: dataBytes, cacheBytes: cacheBytes, freeBytes: free,
+            dataBytes: dataBytes, cacheBytes: 0, freeBytes: free,
             captureRows: [
                 StorageRow(label: "Screenshots", size: frameBytes, icon: "photo.on.rectangle"),
                 StorageRow(label: "Video", size: videoBytes, icon: "film"),

@@ -218,26 +218,29 @@ enum RetentionDays: String, CaseIterable, Identifiable {
     }
 }
 
+/// 自动删除的三档。**`off` 不再是"什么都不做"** —— 缓存回收
+/// (`CacheHousekeeper`)不受这个开关管,任何一档都照跑,所以最低档如实叫
+/// "Clean cache only"。case 名保留 `off`(改名要动 config 迁移),只改文案。
 enum AutoDeleteMode: String, CaseIterable, Identifiable {
     case off, mediaOnly, everything
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .off:        return "Off"
-        case .mediaOnly:  return "Video + audio only"
+        case .off:        return "Clean cache only"
+        case .mediaOnly:  return "Timeline frames + audio + cache"
         case .everything: return "Everything (including OCR text + DB)"
         }
     }
     var subtitle: String {
         switch self {
-        case .off:        return "Nothing gets deleted automatically."
+        case .off:        return "None of your data is ever deleted — only files the app can rebuild by itself."
         case .mediaOnly:  return "Recommended. Drops the heavy MP4s + audio chunks; keeps OCR text + transcripts so the timeline stays searchable."
         case .everything: return "Aggressive. Wipes everything older than the retention window."
         }
     }
     var icon: String {
         switch self {
-        case .off:        return "pause.circle"
+        case .off:        return "trash.slash"
         case .mediaOnly:  return "film"
         case .everything: return "trash"
         }
