@@ -120,7 +120,18 @@ struct ConnectionsView: View {
         )
     }
 
-    /// 到期时刻 → tile 上那行小字。nil = 不显示(没登录 / 那份 token 没带
+    /// tile 左上角那枚角标要显示的字。
+    private func expiryBadge(for id: String) -> String? {
+        switch id {
+        case "chatgpt":     return Self.expiryNote(codexExpiry)
+        // Claude Code 的有效期是上次 Detect 时读进 UserDefaults 的缓存 ——
+        // 这里**不碰钥匙串**,不然一进页面就弹授权框。
+        case "claude-code": return Self.expiryNote(ClaudeCodeSignIn.cachedExpiry)
+        default:            return nil
+        }
+    }
+
+    /// 到期时刻 → 角标文字。nil = 不显示(没登录 / 那份 token 没带
     /// expires_at)。**过期不报错**,只标 "Expired" —— 下次调用会自动 refresh,
     /// 真正要用户动手的只有 refresh 也失败那一步。
     private static func expiryNote(_ date: Date?) -> String? {
@@ -145,7 +156,7 @@ struct ConnectionsView: View {
                     integration: tile,
                     isConnected: appState.isConnected(tile.id),
                     isSelected: selectedId == tile.id,
-                    note: tile.id == "chatgpt" ? Self.expiryNote(codexExpiry) : nil
+                    expiry: expiryBadge(for: tile.id)
                 ) {
                     withAnimation(.easeOut(duration: 0.15)) {
                         selectedId = (selectedId == tile.id) ? nil : tile.id
@@ -330,6 +341,7 @@ struct ConnectionsView: View {
             ChatGPTOAuth.logout()
             codexExpiry = nil          // tile 上那行剩余时间立刻消失
         }
+        if integration.id == "claude-code" { ClaudeCodeSignIn.clear() }
         if let p = Provider.from(integrationId: integration.id),
            let key = p.secretKey {
             SecretStore.shared.delete(key)
@@ -593,6 +605,10 @@ struct ConnectionsView: View {
                 do {
                     _ = try await ClaudeCodeAgent.probeConnection()
                     appState.toggleConnect(integration)
+                    // 探测成功后顺手读一次登录有效期。**只在这里读** ——
+                    // 它会弹钥匙串授权框,必须紧跟用户点的 Detect 这个动作。
+                    // 用户点"不允许"就拿不到,tile 上不显示天数,不影响连接。
+                    ClaudeCodeSignIn.refreshFromKeychain()
                 } catch {
                     loginError = error.localizedDescription
                 }
@@ -706,8 +722,9 @@ private struct IntegrationTile: View {
     let integration: Integration
     let isConnected: Bool
     let isSelected: Bool
-    /// 名字底下那行小字(目前只有 Codex 的登录剩余时间)。nil = 不占位。
-    var note: String? = nil
+    /// 登录剩余时间。**画在左上角的 overlay 里,不进布局流** —— 放进
+    /// VStack 会把所有 tile 撑高一行,只有两个 tile 有这个值。
+    var expiry: String? = nil
     let onTap: () -> Void
     @State private var hover = false
 
@@ -715,21 +732,11 @@ private struct IntegrationTile: View {
         Button(action: onTap) {
             VStack(spacing: 8) {
                 IntegrationIcon(integration: integration, size: 32)
-                VStack(spacing: 1) {
-                    Text(integration.name)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.9))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                    if let note {
-                        Text(note)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(note == "Expired"
-                                             ? Color.orange.opacity(0.9)
-                                             : Theme.textPrimary.opacity(0.45))
-                            .lineLimit(1)
-                    }
-                }
+                Text(integration.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.9))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -751,6 +758,17 @@ private struct IntegrationTile: View {
                     Circle().fill(Color.green)
                         .frame(width: 7, height: 7)
                         .padding(7)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let expiry {
+                    Text(expiry)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(expiry == "Expired"
+                                         ? Color.orange.opacity(0.95)
+                                         : Theme.textPrimary.opacity(0.42))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
                 }
             }
         }

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import os.log
 
 /// Claude Code CLI 子进程包装,跟 PiAgent 同接口(都实现 ChatAgent),
@@ -610,6 +611,36 @@ final class ClaudeCodeAgent: @unchecked Sendable, ChatAgent {
             case .noReply:         return "Claude Code exited without a reply. Try `claude --print hi` in Terminal to debug."
             }
         }
+    }
+
+    // MARK: - 登录有效期
+
+    /// Claude Code CLI 把登录态存在**它自己的**钥匙串条目里
+    /// (generic password,service = "Claude Code-credentials"),里面
+    /// `claudeAiOauth.refreshTokenExpiresAt` 才是"什么时候必须重新
+    /// `claude login`"—— access token 只有几小时,它自己会续。
+    ///
+    /// ⚠️ **只在用户点 Detect 时调,绝不在页面加载时顺手读。** 读别的 app
+    /// 写的钥匙串条目,系统第一次会弹授权框("MyPortrait 想访问钥匙串…")。
+    /// 那个框必须紧跟着一个明确的用户动作,否则就是一进设置页就无故弹窗。
+    ///
+    /// 结果由调用方存进 UserDefaults 给 UI 复用,不重复读钥匙串。
+    nonisolated static func readSignInExpiry() -> Date? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = obj["claudeAiOauth"] as? [String: Any],
+              let ms = oauth["refreshTokenExpiresAt"] as? Double,
+              ms > 0
+        else { return nil }
+        return Date(timeIntervalSince1970: ms / 1000)
     }
 
     /// 真连通性测试:spawn claude + 发 "hi" + 等回复。
