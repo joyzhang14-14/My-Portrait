@@ -28,9 +28,7 @@ struct CaptureHealthView: View {
     @State private var showUploadGuide = false
 
     var body: some View {
-        SettingsPage("Health",
-                     subtitle: "Live metrics for the capture engine. Auto-refreshes while this page is open.",
-                     onResetCurrentPage: nil) {
+        SettingsPage("Health", onResetCurrentPage: nil) {
 
             statusCard
             visionCard

@@ -521,7 +521,7 @@ struct MemorySettingsView: View {
         case .writingStyleDistiller:
             return nil
         case .changelog:
-            return "Portrait body changes made by the distiller, newest first — plus days that need attention."
+            return nil
         }
     }
 

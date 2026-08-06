@@ -20,7 +20,7 @@ struct StorageSettingsView: View {
     }
 
     var body: some View {
-        SettingsPage("Storage", subtitle: "Where captured data lives on disk",
+        SettingsPage("Storage",
                      onResetCurrentPage: { config.mutate { $0.storage = .init() } }) {
 
             SettingsCard(title: "Local disk storage") {
