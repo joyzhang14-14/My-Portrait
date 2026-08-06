@@ -1294,7 +1294,7 @@ struct MemorySettingsView: View {
         let version = MemoryScheduler.shared.attentionVersion
         return section(
             title: "Needs attention",
-            blurb: "Days that failed, hit a budget limit, or gave up after repeated tries. Reset moves a day back to pending so the next run tries it again."
+            info: "Days that failed, hit a budget limit, or gave up after repeated tries.\n\nReset moves a day back to pending so the next run tries it again."
         ) {
             if attention.isEmpty {
                 HStack(spacing: 8) {
@@ -1548,7 +1548,7 @@ struct MemorySettingsView: View {
     private var changelogSection: some View {
         section(
             title: "Pipeline run history",
-            blurb: "The last 50 memory-pipeline runs — Run now and scheduled, newest first."
+            info: "The last 50 memory-pipeline runs — both manual and scheduled, newest first."
         ) {
             if changelog.isEmpty {
                 Text("No pipeline runs recorded yet.")
