@@ -47,23 +47,30 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
     /// 模型实例。首次 transcribe 懒加载。`nonisolated(unsafe)` —— 见"并发契约"。
     nonisolated(unsafe) private var model: Qwen3ASRModel?
 
+    /// 所有 Qwen 模型的根目录:`~/Library/Caches/qwen3-speech/models/`。
+    /// **别在别处再拼一遍这个路径** —— Settings → Storage 量体积也读这里。
+    nonisolated static var modelsRootDir: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("qwen3-speech/models")
+    }
+
+    private nonisolated static func modelDir(_ modelId: String) -> URL? {
+        guard var dir = modelsRootDir else { return nil }
+        for part in modelId.split(separator: "/") { dir.appendPathComponent(String(part)) }
+        return dir
+    }
+
     /// 某个模型 variant 的权重在不在磁盘 —— 给 Settings / AI models 页状态用。
     /// 缓存路径：`~/Library/Caches/qwen3-speech/models/<org>/<repo>/model.safetensors`。
     nonisolated static func isOnDisk(modelId: String) -> Bool {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-        else { return false }
-        var dir = caches.appendingPathComponent("qwen3-speech/models")
-        for part in modelId.split(separator: "/") { dir.appendPathComponent(String(part)) }
+        guard let dir = modelDir(modelId) else { return false }
         return FileManager.default.fileExists(atPath: dir.appendingPathComponent("model.safetensors").path)
     }
 
     /// 从磁盘删除某个 Qwen 模型目录 —— Downloads 页 Uninstall 按钮用。
     /// 删的是 `.../qwen3-speech/models/<org>/<repo>/` 整个目录。
     nonisolated static func deleteFromDisk(modelId: String) {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-        else { return }
-        var dir = caches.appendingPathComponent("qwen3-speech/models")
-        for part in modelId.split(separator: "/") { dir.appendPathComponent(String(part)) }
+        guard let dir = modelDir(modelId) else { return }
         try? FileManager.default.removeItem(at: dir)
     }
 

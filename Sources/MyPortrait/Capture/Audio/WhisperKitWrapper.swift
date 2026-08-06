@@ -47,12 +47,17 @@ final class WhisperKitWrapper: @unchecked Sendable {
     /// 模型是否在磁盘上 —— 给 Settings 状态面板用。WhisperKit cache 默认在
     /// `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/<modelName>/`
     /// 下,目录里有 mlmodelc bundle 就算 ready。
+    /// 所有 Whisper 模型的根目录。**别在别处再拼一遍这个路径** ——
+    /// Settings → Storage 量体积也读这里。
+    nonisolated static var modelsRootDir: URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+    }
+
     nonisolated static func isOnDisk(modelName: String = "openai_whisper-base") -> Bool {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        guard let docs else { return false }
-        let dir = docs.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent(modelName)
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return false }
+        guard let dir = modelsRootDir?.appendingPathComponent(modelName),
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+        else { return false }
         // 至少要有 *.mlmodelc 才算下完(只有 config.json 之类是没下完)。
         return entries.contains { $0.hasSuffix(".mlmodelc") }
     }
@@ -60,10 +65,7 @@ final class WhisperKitWrapper: @unchecked Sendable {
     /// 从磁盘删除某个 Whisper 模型目录 —— Downloads 页 Uninstall 按钮用。
     /// 删的是 `.../whisperkit-coreml/<modelName>/` 整个目录。
     nonisolated static func deleteFromDisk(modelName: String) {
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        else { return }
-        let dir = docs.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent(modelName)
+        guard let dir = modelsRootDir?.appendingPathComponent(modelName) else { return }
         try? FileManager.default.removeItem(at: dir)
     }
 

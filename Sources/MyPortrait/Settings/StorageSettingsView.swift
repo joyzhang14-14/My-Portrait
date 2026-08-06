@@ -310,9 +310,8 @@ private struct StorageStats {
             ],
             analysisRows: [
                 StorageRow(
-                    label: "Local models", size: directorySize(root.appendingPathComponent("models")),
-                    icon: "cpu",
-                    info: "On-device models that run on your Mac and never send anything out: speaker recognition, voice activity detection, speech segmentation.\n\nManaged in Settings → Downloads. Deleting them here isn't possible on purpose — they'd have to be downloaded again."),
+                    label: "Local models", size: localModelBytes(root: root), icon: "cpu",
+                    info: "Every model you've downloaded in Settings → Downloads — transcription, speaker recognition, voice activity detection, speech segmentation. They run entirely on your Mac and never send anything out.\n\nOften the second-largest thing here after your recordings: a single transcription model can be several GB. Uninstall the ones you don't use from the Downloads page."),
                 StorageRow(
                     label: "Events, portrait + journal", size: memoryBytes, icon: "brain",
                     info: "Your memory, written out: one file per event, the distilled portrait entries, daily personality snapshots, and an append-only journal of what the pipelines decided.\n\nAll plain Markdown you can open and read. Tiny — and the only part that can't be recovered by recording again."),
@@ -326,6 +325,18 @@ private struct StorageStats {
             ],
             months: months
         )
+    }
+
+    /// Downloads 页管的模型**散在三个地方**,少算哪个 Local models 就是错的:
+    ///   - `~/.portrait/models/`          说话人识别 / VAD / 语音分割
+    ///   - WhisperKit                     `~/Documents/huggingface/…`(它自己定的)
+    ///   - Qwen3-ASR                      `~/Library/Caches/qwen3-speech/models/`
+    /// 后两个路径由各自的 wrapper 提供,这里不重拼 —— 它们改了这里跟着改。
+    nonisolated private static func localModelBytes(root: URL) -> Int64 {
+        var total = directorySize(root.appendingPathComponent("models"))
+        if let d = WhisperKitWrapper.modelsRootDir { total += directorySize(d) }
+        if let d = Qwen3ASRWrapper.modelsRootDir   { total += directorySize(d) }
+        return total
     }
 
     nonisolated private static func directorySize(_ url: URL) -> Int64 {
