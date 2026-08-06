@@ -52,6 +52,16 @@ enum ChatGPTOAuth {
         SecretStore.shared.getJSON(secretKey, as: Tokens.self) != nil
     }
 
+    /// 当前 access token 的到期时刻。**只读,不触发 refresh** —— 给 Settings →
+    /// Connections 显示剩余时间用,不能因为看一眼就去转 refresh_token
+    /// (OpenAI 的 refresh_token 是一次性轮转的,并发换会互相作废)。
+    /// nil = 没登录,或那份 token 里没带 expires_at。
+    static func accessTokenExpiry() -> Date? {
+        guard let t = SecretStore.shared.getJSON(secretKey, as: Tokens.self),
+              let exp = t.expiresAt else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
     /// Return a valid access token, refreshing if needed. Throws if not logged in.
     static func validToken() async throws -> String {
         try await RefreshGate.shared.validTokens().accessToken

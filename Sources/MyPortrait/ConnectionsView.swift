@@ -31,6 +31,9 @@ struct ConnectionsView: View {
     @State private var smtpTestTo: String = ""
     // Currently-selected Obsidian vault path, mirrored from SecretStore.
     @State private var obsidianVaultPath: String? = ObsidianConfig.vaultPath
+    /// Codex 登录还剩多久到期。**只在 tile 出现 / 登录登出时算一次** ——
+    /// 读 SecretStore 要解密,不能每帧 body 里现查。
+    @State private var codexExpiry: Date? = nil
 
     /// 走 categoryFilter 限定后的全集。filteredTiles / selectedIntegration 都
     /// 基于这个,确保 onboarding 里点不出非 AI 的 tile。
@@ -86,6 +89,16 @@ struct ConnectionsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(SidebarBackdrop().ignoresSafeArea())
+        .task { refreshCodexExpiry() }
+        // 登录 / 登出后 tile 上的剩余时间要跟着变。connecting 从"某个 id"回到
+        // nil 就是一次连接动作收尾,借它当信号,不用给 AppState 加观察点。
+        .onChange(of: connecting) { _, now in
+            if now == nil { refreshCodexExpiry() }
+        }
+    }
+
+    private func refreshCodexExpiry() {
+        codexExpiry = ChatGPTOAuth.accessTokenExpiry()
     }
 
     // search
@@ -107,6 +120,20 @@ struct ConnectionsView: View {
         )
     }
 
+    /// 到期时刻 → tile 上那行小字。nil = 不显示(没登录 / 那份 token 没带
+    /// expires_at)。**过期不报错**,只标 "Expired" —— 下次调用会自动 refresh,
+    /// 真正要用户动手的只有 refresh 也失败那一步。
+    private static func expiryNote(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        let secs = date.timeIntervalSinceNow
+        if secs <= 0 { return "Expired" }
+        let days = Int(secs / 86400)
+        if days >= 1 { return "\(days)d left" }
+        let hours = Int(secs / 3600)
+        if hours >= 1 { return "\(hours)h left" }
+        return "\(max(1, Int(secs / 60)))m left"
+    }
+
     // grid
     private var grid: some View {
         let cols = [GridItem(.flexible(), spacing: 8),
@@ -117,7 +144,8 @@ struct ConnectionsView: View {
                 IntegrationTile(
                     integration: tile,
                     isConnected: appState.isConnected(tile.id),
-                    isSelected: selectedId == tile.id
+                    isSelected: selectedId == tile.id,
+                    note: tile.id == "chatgpt" ? Self.expiryNote(codexExpiry) : nil
                 ) {
                     withAnimation(.easeOut(duration: 0.15)) {
                         selectedId = (selectedId == tile.id) ? nil : tile.id
@@ -298,7 +326,10 @@ struct ConnectionsView: View {
 
     /// Wipe the credential on disconnect so the next connect starts clean.
     private func disconnect(_ integration: Integration) {
-        if integration.id == "chatgpt" { ChatGPTOAuth.logout() }
+        if integration.id == "chatgpt" {
+            ChatGPTOAuth.logout()
+            codexExpiry = nil          // tile 上那行剩余时间立刻消失
+        }
         if let p = Provider.from(integrationId: integration.id),
            let key = p.secretKey {
             SecretStore.shared.delete(key)
@@ -675,6 +706,8 @@ private struct IntegrationTile: View {
     let integration: Integration
     let isConnected: Bool
     let isSelected: Bool
+    /// 名字底下那行小字(目前只有 Codex 的登录剩余时间)。nil = 不占位。
+    var note: String? = nil
     let onTap: () -> Void
     @State private var hover = false
 
@@ -682,11 +715,21 @@ private struct IntegrationTile: View {
         Button(action: onTap) {
             VStack(spacing: 8) {
                 IntegrationIcon(integration: integration, size: 32)
-                Text(integration.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.9))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                VStack(spacing: 1) {
+                    Text(integration.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    if let note {
+                        Text(note)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(note == "Expired"
+                                             ? Color.orange.opacity(0.9)
+                                             : Theme.textPrimary.opacity(0.45))
+                            .lineLimit(1)
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
