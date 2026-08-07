@@ -74,6 +74,20 @@ enum ChatGPTOAuth {
         try await RefreshGate.shared.validTokens()
     }
 
+    /// **提前**换一份新 token(不等它真过期)。给"快到期了"的巡检用:
+    /// access token 只有 10 天,续上就什么事都没有,续不上才是真的要重新登录。
+    ///
+    /// 走跟 `validTokens()` 同一个单飞闸 —— refresh_token 是一次性轮转的,
+    /// 绕过闸门自己发一枪会把正在跑的 agent 手里那份作废。
+    ///
+    /// ⚠️ 别拿它当定时任务每天无脑跑:每续一次就轮转一次 refresh_token,
+    /// 万一在"服务器发了新的"和"我们存下来"之间进程被杀,登录态就丢了。
+    /// 只在真的快到期时调。
+    @discardableResult
+    static func forceRefresh() async throws -> Tokens {
+        try await RefreshGate.shared.forceRefresh()
+    }
+
     /// refresh 单飞闸 —— 同一时刻全进程只发一次 refresh POST + 串行写回。
     /// 防止多个 cron job(或单 agent 双重取 token)并发 refresh 同一个 refresh_token:
     /// OpenAI 轮转 refresh_token(旧的一次性失效),并发会让一方拿到的 token 作废 →
@@ -87,6 +101,18 @@ enum ChatGPTOAuth {
                 throw OAuthError.notLoggedIn
             }
             if !tokens.isExpired { return tokens }
+            return try await refreshLocked(tokens)
+        }
+
+        /// 不看 isExpired,直接换。其余(单飞、合流)跟 validTokens 完全一致。
+        func forceRefresh() async throws -> Tokens {
+            guard let tokens = SecretStore.shared.getJSON(ChatGPTOAuth.secretKey, as: Tokens.self) else {
+                throw OAuthError.notLoggedIn
+            }
+            return try await refreshLocked(tokens)
+        }
+
+        private func refreshLocked(_ tokens: Tokens) async throws -> Tokens {
             // 已有 refresh 在飞 → 合流等它(它会写回 fresh token),不再发第二枪。
             if let inFlight { return try await inFlight.value }
             let task = Task { try await ChatGPTOAuth.refresh(tokens.refreshToken) }

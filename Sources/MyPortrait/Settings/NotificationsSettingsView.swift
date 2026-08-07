@@ -67,7 +67,7 @@ struct NotificationsSettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("Sign-in expiring",
-                            info: "🔑  Warns you when a connected AI account is within \(CredentialExpiryWatcher.warnWithinDays) days of expiring, so you can reconnect before anything breaks.\n\nChecked once a day. When a sign-in lapses, every pipeline running on that provider stops until you reconnect it.",
+                            info: "🔑  Warns you when a connected AI account needs signing in again.\n\nChecked once a day. Sign-ins that can be renewed automatically are renewed silently — you only hear about it when renewal fails and it genuinely needs you. When a sign-in lapses, every pipeline running on that provider stops until you reconnect it.",
                             icon: "key") {
                     Toggle("", isOn: config.binding(\.notifications.credentialExpiryAlerts)).labelsHidden().toggleStyle(.switch)
                 }

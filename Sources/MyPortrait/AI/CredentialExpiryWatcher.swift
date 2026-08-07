@@ -27,9 +27,33 @@ enum CredentialExpiryWatcher {
 
         await ClaudeCodeSignIn.refreshInBackground()
 
-        // Codex 的到期时间在 SecretStore 里,读它不弹任何框,也不触发 refresh。
-        warnIfExpiringSoon(provider: "Codex", expiry: ChatGPTOAuth.accessTokenExpiry())
+        await checkCodex()
+        // Claude Code 的 refreshTokenExpiresAt 到了就是到了,我们续不了 ——
+        // 只能提醒用户去跑 `claude login`。
         warnIfExpiringSoon(provider: "Claude Code CLI", expiry: ClaudeCodeSignIn.cachedExpiry)
+    }
+
+    /// Codex 跟 Claude Code 不是一回事:它那个到期时间是 **access token** 的
+    /// (OpenAI 给 10 天),而 refresh_token 只要还在用就一直有效 —— 换句话说
+    /// 快到期**不代表**用户要做什么,我们自己续上就行。
+    ///
+    /// 所以顺序是「先试着续,续不上才报警」:
+    ///   - 续成功 → 到期时间跳回 10 天后,一声不吭
+    ///   - 续失败 → 这才是真的 refresh_token 也不行了,必须重新登录
+    /// 直接按 access token 剩余天数报警会天天误报"快过期了"而其实啥事没有。
+    private static func checkCodex() async {
+        guard let expiry = ChatGPTOAuth.accessTokenExpiry() else { return }
+        guard expiry.timeIntervalSinceNow <= Double(warnWithinDays) * 86400 else { return }
+        do {
+            try await ChatGPTOAuth.forceRefresh()
+        } catch {
+            // 续不上 = 用户真得重新连一次。这里不看剩几天(可能已经过期),
+            // 直接按当前到期时间报,过期就是 0 天。
+            let days = max(0, Int(ChatGPTOAuth.accessTokenExpiry()?
+                .timeIntervalSinceNow ?? 0) / 86400)
+            NotificationCenterService.shared.post(
+                .credentialExpiring(provider: "Codex", daysLeft: days))
+        }
     }
 
     /// 已经过期的**不提醒** —— 那时候用户早就在别处撞到报错了,再补一张
