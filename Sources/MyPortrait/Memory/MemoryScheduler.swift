@@ -534,6 +534,12 @@ final class MemoryScheduler {
         tickRunning = true
         defer { tickRunning = false }
         lastTickAt = Date()   // 标记本次 tick 起跑;周期 catch-up 据此节流(见 periodicCatchUp)
+
+        // 凭据有效期每天刷一次(本地 0 点后的第一个 tick)。**放在下面那个
+        // staging guard 之前** —— 它跟 memory pipeline 无关,不该因为有待审核
+        // 的结果就跟着停摆。内部自己按本地日期去重,每 tick 调是安全的。
+        await ClaudeCodeSignIn.refreshDailyIfNeeded()
+
         // 有手动触发的结果在等审核 / AI 编辑 draft 在等审 → 暂停定时调度,
         // 避免 distill / personality 跑完覆盖了用户没拍板的改动。
         guard !MemoryStaging.hasPending(.events),
