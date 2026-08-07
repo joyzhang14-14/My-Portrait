@@ -35,6 +35,9 @@ final class NotificationCenterService {
         /// `pipelineInterruptionAlerts` 控制,跟 .pipelineAutoRecovering 分开 ——
         /// 频繁关电脑的用户可能想静音它但保留其它 scheduler 通知。
         case pipelineInterruptionRestarted(pipeline: String)
+        /// 连接的 AI 账号快到期(剩 ≤2 天)。到期后那条 provider 上的 pipeline
+        /// 会整条停摆,所以这条默认开着。点一下跳 Settings → Connections。
+        case credentialExpiring(provider: String, daysLeft: Int)
         /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
         /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
         /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
@@ -134,6 +137,15 @@ final class NotificationCenterService {
             }
             title = "🔁 \(pipeline) resumed after interruption"
             body = "App was closed mid-run — pipeline will restart from scratch on next tick."
+
+        case let .credentialExpiring(provider, daysLeft):
+            guard n.credentialExpiryAlerts else {
+                log.notice("post skipped: credentialExpiryAlerts is OFF"); return
+            }
+            title = "🔑 \(provider) sign-in expires soon"
+            body = daysLeft <= 0
+                ? "It expires today. Reconnect it in Settings → Connections, or the pipelines using it will stop."
+                : "\(daysLeft) day\(daysLeft == 1 ? "" : "s") left. Reconnect it in Settings → Connections before it lapses."
         }
 
         let notif = InAppNotification(

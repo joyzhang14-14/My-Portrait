@@ -798,6 +798,10 @@ struct NotificationsConfig: Codable, Equatable {
     /// ctx overflow)+ 🔁 transient 自动重试(network / 429 / schema)。
     /// 重要,默认 ON。用户可单独关掉 progress 但保留 error,反之亦可。
     var pipelineErrorAlerts:    Bool     = true
+    /// 连接的 AI 账号快到期时提醒(剩 2 天内)。每天本地 0 点后查一次,
+    /// 同一个 provider 同一次到期只提醒一次。默认 ON —— 到期了 pipeline
+    /// 会整条停摆,这是少数"不提醒就一定出事"的情况。
+    var credentialExpiryAlerts: Bool     = true
     init() {}
     enum CodingKeys: String, CodingKey {
         case appUpdates             = "app_updates"
@@ -805,6 +809,7 @@ struct NotificationsConfig: Codable, Equatable {
         case captureStalls          = "capture_stalls"
         case schedulerAlerts        = "scheduler_alerts"
         case pipelineErrorAlerts    = "pipeline_error_alerts"
+        case credentialExpiryAlerts = "credential_expiry_alerts"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -814,6 +819,7 @@ struct NotificationsConfig: Codable, Equatable {
         captureStalls          = c.dflt(Bool.self,     .captureStalls, captureStalls)
         schedulerAlerts        = c.dflt(Bool.self,     .schedulerAlerts, schedulerAlerts)
         pipelineErrorAlerts    = c.dflt(Bool.self,     .pipelineErrorAlerts, pipelineErrorAlerts)
+        credentialExpiryAlerts = c.dflt(Bool.self,     .credentialExpiryAlerts, credentialExpiryAlerts)
     }
 }
 

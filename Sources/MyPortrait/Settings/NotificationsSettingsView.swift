@@ -65,6 +65,12 @@ struct NotificationsSettingsView: View {
                             icon: "exclamationmark.triangle") {
                     Toggle("", isOn: config.binding(\.notifications.captureStalls)).labelsHidden().toggleStyle(.switch)
                 }
+                SettingsDivider()
+                SettingsRow("Sign-in expiring",
+                            info: "🔑  Warns you when a connected AI account is within \(CredentialExpiryWatcher.warnWithinDays) days of expiring, so you can reconnect before anything breaks.\n\nChecked once a day. When a sign-in lapses, every pipeline running on that provider stops until you reconnect it.",
+                            icon: "key") {
+                    Toggle("", isOn: config.binding(\.notifications.credentialExpiryAlerts)).labelsHidden().toggleStyle(.switch)
+                }
             }
         }
     }
