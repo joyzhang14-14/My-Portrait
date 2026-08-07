@@ -31,9 +31,6 @@ struct ConnectionsView: View {
     @State private var smtpTestTo: String = ""
     // Currently-selected Obsidian vault path, mirrored from SecretStore.
     @State private var obsidianVaultPath: String? = ObsidianConfig.vaultPath
-    /// Codex 登录还剩多久到期。**只在 tile 出现 / 登录登出时算一次** ——
-    /// 读 SecretStore 要解密,不能每帧 body 里现查。
-    @State private var codexExpiry: Date? = nil
 
     /// 走 categoryFilter 限定后的全集。filteredTiles / selectedIntegration 都
     /// 基于这个,确保 onboarding 里点不出非 AI 的 tile。
@@ -89,16 +86,6 @@ struct ConnectionsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(SidebarBackdrop().ignoresSafeArea())
-        .task { refreshCodexExpiry() }
-        // 登录 / 登出后 tile 上的剩余时间要跟着变。connecting 从"某个 id"回到
-        // nil 就是一次连接动作收尾,借它当信号,不用给 AppState 加观察点。
-        .onChange(of: connecting) { _, now in
-            if now == nil { refreshCodexExpiry() }
-        }
-    }
-
-    private func refreshCodexExpiry() {
-        codexExpiry = ChatGPTOAuth.accessTokenExpiry()
     }
 
     // search
@@ -121,14 +108,17 @@ struct ConnectionsView: View {
     }
 
     /// tile 左上角那枚角标要显示的字。
+    ///
+    /// **只有 Claude Code 有。** Codex 那边没得显示:OpenAI 的 refresh_token
+    /// 是不透明串,不公布有效期;唯一能读到的 access token 有效期(10 天)是
+    /// 内部轮转周期,到点我们自己续,用户看了做不了任何事,摆出来只会跟旁边
+    /// Claude Code 那个"28 天后必须重新登录"混淆。
+    /// Codex 到底还能不能用,靠 `CredentialExpiryWatcher` 每天续一次来探。
     private func expiryBadge(for id: String) -> String? {
-        switch id {
-        case "chatgpt":     return Self.expiryNote(codexExpiry)
-        // Claude Code 的有效期是上次 Detect 时读进 UserDefaults 的缓存 ——
-        // 这里**不碰钥匙串**,不然一进页面就弹授权框。
-        case "claude-code": return Self.expiryNote(ClaudeCodeSignIn.cachedExpiry)
-        default:            return nil
-        }
+        // 有效期是上次 Detect 时读进 UserDefaults 的缓存 —— 这里**不碰钥匙串**,
+        // 不然一进页面就弹授权框。
+        guard id == "claude-code" else { return nil }
+        return Self.expiryNote(ClaudeCodeSignIn.cachedExpiry)
     }
 
     /// 到期时刻 → 角标文字。nil = 不显示(没登录 / 那份 token 没带
@@ -337,10 +327,7 @@ struct ConnectionsView: View {
 
     /// Wipe the credential on disconnect so the next connect starts clean.
     private func disconnect(_ integration: Integration) {
-        if integration.id == "chatgpt" {
-            ChatGPTOAuth.logout()
-            codexExpiry = nil          // tile 上那行剩余时间立刻消失
-        }
+        if integration.id == "chatgpt" { ChatGPTOAuth.logout() }
         if integration.id == "claude-code" { ClaudeCodeSignIn.clear() }
         if let p = Provider.from(integrationId: integration.id),
            let key = p.secretKey {
