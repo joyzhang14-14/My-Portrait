@@ -8,9 +8,11 @@ struct MemoryTextSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                SettingsCard(title: "Memory") {
+                // 卡片不带标题 —— 卡里就一行,标题("Memory")和那行自己的名字
+                // ("Memory sort order")重复,同 Neural Graph 设置页。
+                SettingsCard {
                     SettingsRow("Memory sort order",
-                                description: "How entries in Memories are ordered — and the events inside each folder. Weight ranks by importance; Created and Last occurrence sort newest first.",
+                                info: "How entries in Memories are ordered — and the events inside each folder.\n\nWeight ranks by importance; Created and Last occurrence sort newest first.",
                                 icon: "arrow.up.arrow.down") {
                         Picker("", selection: config.binding(\.display.memorySortOrder)) {
                             ForEach(MemorySortOrder.allCases) { order in
