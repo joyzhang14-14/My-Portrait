@@ -196,11 +196,11 @@ struct ConnectionsView: View {
                         .foregroundStyle(Theme.textPrimary.opacity(0.5))
                 }
                 if appState.isConnected(integration.id) {
-                    // CONNECTED 之前钉死 .white.opacity(0.6),light 模式下浅紫底
-                    // 上完全看不见。改用 Theme.textSecondary 跟 colorScheme 切。
-                    // ACTIVE 仍用绿色(语义色,跨主题都看得清)。
-                    StatusPill(text: appState.activeAIId == integration.id ? "ACTIVE" : "CONNECTED",
-                               color: appState.activeAIId == integration.id ? .green : Theme.textSecondary)
+                    // 统一一个 CONNECTED 绿标。原来还分 ACTIVE(= 当前选中的
+                    // AI)和 CONNECTED 两种,但同一个位置两种词两种颜色,看着
+                    // 像连接状态有强弱之分 —— 其实"哪个 AI 在用"是另一件事,
+                    // 有 provider picker 管,不该混进连接状态里。
+                    StatusPill(text: "CONNECTED", color: .green)
                 }
                 Spacer()
                 Button { selectedId = nil } label: {
