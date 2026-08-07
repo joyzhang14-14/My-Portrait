@@ -10,6 +10,12 @@ import SwiftUI
 struct PipelineProviderPicker: View {
     /// 指向这条 pipeline 的 SchedulerConfig(如 `\.scheduler.event`)。
     let pipeline: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
+    /// 这条 pipeline 是不是真的用到两档模型。
+    ///
+    /// event(EventClassifier)和 personality(cluster)会另调轻模型;
+    /// **portrait 和 writing style 从头到尾只用一个** —— 给它们摆两个下拉,
+    /// 其中一个设了完全没人读,是在骗用户。false = 只显示一个 "Model"。
+    var usesLightModel: Bool = true
 
     @Environment(AppState.self) private var appState
     @State private var cfg = ConfigStore.shared
@@ -66,19 +72,21 @@ struct PipelineProviderPicker: View {
                 // 没配置 model(="")时 picker 留空白(不放占位项);pipeline 侧
                 // resolvedModel 把空串映射到 provider.defaultModel。
                 if selectedProvider != nil {
-                    row("Main model (heavy tasks)") {
+                    row(usesLightModel ? "Main model (heavy tasks)" : "Model") {
                         Picker("", selection: cfg.binding(pipeline.appending(path: \.model))) {
                             ForEach(models, id: \.self) { m in Text(m).tag(m) }
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    row("Light model (clustering / light tasks)") {
-                        Picker("", selection: cfg.binding(pipeline.appending(path: \.modelLight))) {
-                            ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                    if usesLightModel {
+                        row("Light model (clustering / light tasks)") {
+                            Picker("", selection: cfg.binding(pipeline.appending(path: \.modelLight))) {
+                                ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }

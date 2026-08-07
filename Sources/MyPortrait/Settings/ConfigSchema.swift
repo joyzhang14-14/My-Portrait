@@ -58,6 +58,24 @@ struct MyPortraitConfig: Codable, Equatable {
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
         migrateLegacyMemoryProvider(from: c)
         migrateWallpaperToggle(from: c)
+        migrateSingleModelPipelines()
+    }
+
+    /// 一次性迁移(08-06):portrait / writing style 这两条 pipeline 全程只有
+    /// 一个 LLM 调用,Settings 里那两个 "Light model" 下拉从来没人读。
+    ///
+    /// ⚠️ **writing style 读的一直是 light 那档**(`resolvedModelLight`),
+    /// 现在改成读 `model`。直接改代码的话,设过 light 的用户会被**悄悄换成**
+    /// main 那档模型(可能贵得多)。所以这里把他实际在跑的那档搬进 model。
+    ///
+    /// portrait 本来读的就是 `model`,只需要把没用的 model_light 清掉。
+    /// 清空后 toml 里那行下次保存自动消失。
+    private mutating func migrateSingleModelPipelines() {
+        if !scheduler.writingStyle.modelLight.isEmpty {
+            scheduler.writingStyle.model = scheduler.writingStyle.modelLight
+            scheduler.writingStyle.modelLight = ""
+        }
+        scheduler.portrait.modelLight = ""
     }
 
     /// 一次性迁移(08-05 回退):`[capture.screen] transparent_wallpaper` 那个

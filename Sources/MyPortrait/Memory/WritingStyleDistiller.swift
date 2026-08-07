@@ -60,9 +60,13 @@ final class WritingStyleDistiller {
             self.agentProvider = p
         } else {
             self.agentProvider = {
+                // 这条 pipeline **只有这一个 LLM 调用**,所以直接用 model,
+                // 不再走 modelLight —— Settings 那边也只给一个下拉了。
+                // (老 config 里设过的 model_light 由 migrateSingleModelPipelines
+                //  搬进 model,用户实际在跑的那档不会被换掉。)
                 let cfg = ConfigStore.shared.current.scheduler.writingStyle
                 return WritingStyleAgent(provider: cfg.resolvedProvider,
-                                        model: cfg.resolvedModelLight)
+                                        model: cfg.resolvedModel)
             }
         }
     }

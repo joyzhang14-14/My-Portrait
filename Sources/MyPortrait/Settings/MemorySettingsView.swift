@@ -154,7 +154,7 @@ struct MemorySettingsView: View {
                                 + ManualTrigger.distill.desc
                         )
                     )
-                    providerSection(\.scheduler.portrait)
+                    providerSection(\.scheduler.portrait, usesLightModel: false)
                     pipelineFlowSection(.portraitsDistiller)
                     reviewSectionFor(.distill)
                 case .personalityRefresher:
@@ -179,7 +179,7 @@ struct MemorySettingsView: View {
                                    hasManual: true) {
                         writingStyleManualRow
                     }
-                    providerSection(\.scheduler.writingStyle)
+                    providerSection(\.scheduler.writingStyle, usesLightModel: false)
                     pipelineFlowSection(.writingStyleDistiller)
                     writingStyleReviewSection
                 case .changelog:
@@ -1475,14 +1475,18 @@ struct MemorySettingsView: View {
 
     /// 单个 pipeline 的 AI provider 卡。内容走共享的 `PipelineProviderPicker`
     /// (Typing Capture 页的 writing capture provider 也复用同一个)。
+    /// `usesLightModel` = 这条 pipeline 真的会另调一档轻模型。event 的
+    /// folder 分类、personality 的聚类会;portrait / writing style 不会,
+    /// 给它们摆第二个下拉纯属误导。
     private func providerSection(
-        _ kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
+        _ kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>,
+        usesLightModel: Bool = true
     ) -> some View {
         section(
             title: "AI provider",
             info: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
         ) {
-            PipelineProviderPicker(pipeline: kp)
+            PipelineProviderPicker(pipeline: kp, usesLightModel: usesLightModel)
         }
     }
 
