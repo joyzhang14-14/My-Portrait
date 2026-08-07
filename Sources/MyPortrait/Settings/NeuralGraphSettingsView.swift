@@ -73,30 +73,32 @@ struct NeuralGraphSettingsView: View {
         // 无页面大标题(07-11 用户:侧栏入口内联,不要标题),只列卡片。
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                SettingsCard(title: "Main ball") {
+                // 卡片一律不带标题 —— 每张卡里就一个控件,标题和控件自己的
+                // 名字在说同一件事("Pulse speed" vs "Neural pulse speed")。
+                SettingsCard {
                     MainBallPhotoSlot()
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
-                SettingsCard(title: "Animation speed") {
+                SettingsCard {
                     SpeedLevelSlider(
                         title: "Neural Graph animation speed",
-                        caption: "How fast the graph plays its opening animation — the balls spreading out and the meteors lighting up — and how fast the meteor ring glides back into place after you drag a folder ball.",
+                        info: "How fast the graph plays its opening animation — the balls spreading out and the meteors lighting up — and how fast the meteor ring glides back into place after you drag a folder ball.",
                         selection: config.binding(\.display.graphAnimationSpeed))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
-                SettingsCard(title: "Pulse speed") {
+                SettingsCard {
                     SpeedLevelSlider(
                         title: "Neural pulse speed",
-                        caption: "How fast the pulse travels along the links when you click a ball, and how quickly each ball it reaches flashes on.",
+                        info: "How fast the pulse travels along the links when you click a ball, and how quickly each ball it reaches flashes on.",
                         selection: config.binding(\.display.graphPulseSpeed))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                 }
-                SettingsCard(title: "Appearance") {
+                SettingsCard {
                     SettingsRow("Hide links and pulses",
-                                description: "Show only the balls — no connecting lines, and no pulse trail when you click one. Clicking still lights the balls up one after another, so the chain reaction stays.",
+                                info: "Show only the balls — no connecting lines, and no pulse trail when you click one.\n\nClicking still lights the balls up one after another, so the chain reaction stays.",
                                 icon: "circle.dotted") {
                         Toggle("", isOn: config.binding(\.display.graphHideLinks))
                             .labelsHidden().toggleStyle(.switch)
@@ -121,13 +123,12 @@ private struct MainBallPhotoSlot: View {
         HStack(spacing: 14) {
             preview64
             VStack(alignment: .leading, spacing: 4) {
-                Text("Main ball photo")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                Text("Upload a photo — it's cropped to a circle and shown on the center ball of the graph.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 0) {
+                    Text("Main ball photo")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                    SettingsInfoBadge(text: "Upload a photo — it's cropped to a circle and shown on the center ball of the graph.")
+                }
                 HStack(spacing: 6) {
                     Button(action: pick) {
                         Label(preview == nil ? "Upload" : "Replace", systemImage: "arrow.up.doc")
@@ -205,7 +206,8 @@ private struct MainBallPhotoSlot: View {
 /// 高亮当前档。默认中等=当前手感。
 private struct SpeedLevelSlider: View {
     let title: String
-    let caption: String
+    /// 说明收进标题右边的 ⓘ,不再占一段灰字。
+    let info: String
     @Binding var selection: SpeedLevel
 
     private static let cases = SpeedLevel.allCases
@@ -233,14 +235,14 @@ private struct SpeedLevelSlider: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.textPrimary.opacity(0.92))
-            Text(caption)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 4)
+            // spacing 0 —— ⓘ 自带 6pt padding 撑点击范围(同 SettingsRow)。
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                SettingsInfoBadge(text: info)
+            }
+            .padding(.bottom, 4)
             Slider(value: sliderValue, in: 0...Double(Self.maxIdx), step: 1)
                 .tint(Theme.accent)
             // 5 档标签。中间三档 center 精确钉在滑块停点分数 i/4 上;首尾两档
