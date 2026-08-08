@@ -704,7 +704,10 @@ struct ConnectionsView: View {
         switch i.signInMethod {
         case .oauth: return "Sign in with \(i.name)"
         case .apiKey: return "Add API key"
-        case .localApp: return "Detect \(i.name)"
+        // claude-code 那条真发一句话探连通(见 connectLocalApp),装了没登录
+        // 也会失败 —— 所以说"检测登录状态"比"检测 Claude Code CLI"准确。
+        // Ollama / Obsidian 只探装没装,维持原文案。
+        case .localApp: return i.id == "claude-code" ? "Detect login status" : "Detect \(i.name)"
         case .systemAccess: return "Grant access"
         case .smtp: return "Save SMTP settings"
         }
